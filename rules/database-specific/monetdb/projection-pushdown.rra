@@ -1,0 +1,105 @@
+---
+id: monetdb-projection-pushdown
+name: MonetDB Columnar Projection Pushdown
+category: database-specific/monetdb
+databases: [monetdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, monetdb, projection, pushdown, columnar, column-pruning]
+complexity: O(1)
+benefit_range: [0.2, 0.8]
+---
+
+# MonetDB Columnar Projection Pushdown
+
+## Description
+
+In MonetDB's decomposed storage model (DSM), each column is stored
+independently.  Projection pushdown ensures that only the columns
+actually needed by the query are loaded.  This is a natural advantage
+of columnar stores but requires the optimizer to determine the minimum
+column set early in query planning.
+
+**When to apply**: A query references fewer columns than the table
+contains.
+
+**Why it works**: In DSM, each column is a separate BAT.  Skipping
+unused columns eliminates their I/O entirely.  For a 100-column table
+where the query uses 3 columns, this saves 97% of data transfer.
+
+**Database version**: MonetDB 5+ (fundamental to DSM architecture)
+
+## Relational Algebra
+
+```algebra
+-- Before: load all columns
+pi[a, b](scan(table[a, b, c, d, e, ..., z]))
+
+-- After: load only needed columns
+pi[a, b](scan-columns(table, [a, b]))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("monetdb-projection-pushdown";
+    "(project ?cols (scan ?table))" =>
+    "(scan-columns ?table ?cols)"
+    if is_database("monetdb")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    query_cols: &[Column],
+    table: &Table,
+) -> bool {
+    query_cols.len() < table.column_count()
+}
+```
+
+**Restrictions:**
+- Already inherent in MonetDB's DSM; this rule makes it explicit
+  in the algebraic plan
+- Virtual columns or computed expressions still require base columns
+- SELECT * loads all columns (avoid in analytical queries)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    total_columns: usize,
+    used_columns: usize,
+    rows: f64,
+    avg_col_width: f64,
+) -> f64 {
+    let skipped = (total_columns - used_columns) as f64;
+    skipped * rows * avg_col_width * 0.001
+}
+```
+
+**Typical benefit**: For wide tables, 5-50x I/O reduction.
+
+## Test Cases
+
+```sql
+-- Positive: narrow query on wide table
+SELECT name, salary FROM employees;
+-- Only loads name and salary BATs (2 of ~20 columns)
+```
+
+```sql
+-- Negative: SELECT * on wide table
+SELECT * FROM employees;
+-- All columns loaded; no pruning benefit
+```
+
+## References
+
+Copeland, G. and Khoshafian, S. "A Decomposition Storage Model"
+(SIGMOD 1985)
+MonetDB: DSM architecture documentation

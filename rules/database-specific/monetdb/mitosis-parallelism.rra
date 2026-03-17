@@ -1,0 +1,120 @@
+---
+id: monetdb-mitosis-parallelism
+name: MonetDB Mitosis Parallel Execution
+category: database-specific/monetdb
+databases: [monetdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, monetdb, mitosis, parallel, multi-core, partition]
+complexity: O(n/p)
+benefit_range: [0.3, 0.8]
+---
+
+# MonetDB Mitosis Parallel Execution
+
+## Description
+
+The mitosis optimizer splits large BAT operations across multiple CPU
+cores by range-partitioning the input columns.  Each partition is
+processed independently, and results are merged.  This is MonetDB's
+primary strategy for intra-query parallelism.
+
+**When to apply**: A BAT operation processes more rows than the
+mitosis threshold and multiple CPU cores are available.
+
+**Why it works**: Column-at-a-time processing is embarrassingly
+parallel for operations like selection, projection, and aggregation.
+Each core processes a contiguous range of the column, exploiting
+hardware prefetching and avoiding cache conflicts.
+
+**Database version**: MonetDB 11.19+
+
+## Relational Algebra
+
+```algebra
+-- Before: single-threaded scan
+sigma[price > 100](products.price)
+
+-- After: parallel mitosis (4 cores)
+merge(
+    sigma[price > 100](products.price[0..N/4]),
+    sigma[price > 100](products.price[N/4..N/2]),
+    sigma[price > 100](products.price[N/2..3N/4]),
+    sigma[price > 100](products.price[3N/4..N])
+)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("monetdb-mitosis";
+    "(filter ?pred (scan ?col))" =>
+    "(merge-results
+        (par-filter ?pred (scan-range ?col 0 ?quarter))
+        (par-filter ?pred (scan-range ?col ?quarter ?half))
+        (par-filter ?pred (scan-range ?col ?half ?three_q))
+        (par-filter ?pred (scan-range ?col ?three_q ?end)))"
+    if is_database("monetdb")
+    if exceeds_mitosis_threshold("?col")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    bat: &Bat,
+    num_cores: usize,
+) -> bool {
+    bat.count() > 1_000_000
+    && num_cores > 1
+    && bat.operation_is_partitionable()
+}
+```
+
+**Restrictions:**
+- Overhead of partitioning and merging makes it unprofitable for
+  small BATs (<1M rows)
+- Not all operations are partitionable (e.g., some aggregations
+  require global state)
+- Thread count controlled by `gdk_nr_threads` setting
+- Merge phase can become a bottleneck for high fan-out operations
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    rows: f64,
+    cores: f64,
+    overhead_per_partition: f64,
+) -> f64 {
+    let sequential = rows * 0.001;
+    let parallel = rows * 0.001 / cores
+        + cores * overhead_per_partition;
+    sequential - parallel
+}
+```
+
+**Typical benefit**: Near-linear speedup (3-7x on 8 cores) for
+scan-heavy analytical queries.
+
+## Test Cases
+
+```sql
+-- Positive: large aggregation
+SELECT region, SUM(amount) FROM sales GROUP BY region;
+-- Mitosis splits scan+filter across cores, merges partial aggregates
+```
+
+```sql
+-- Negative: small table
+SELECT * FROM config WHERE key = 'timeout';
+-- Below mitosis threshold; single-threaded execution
+```
+
+## References
+
+MonetDB: "Recycling in MonetDB" (mitosis optimizer description)
+Source: monetdb5/optimizer/opt_mitosis.c
