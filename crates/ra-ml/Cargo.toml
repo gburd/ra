@@ -1,0 +1,27 @@
+[package]
+name = "ra-ml"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "ML-based cardinality estimation for the RA query optimizer"
+
+[dependencies]
+ra-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+criterion = { workspace = true }
+
+[lints]
+workspace = true
+
+[[bench]]
+name = "cardinality"
+harness = false
