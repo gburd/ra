@@ -1,0 +1,22 @@
+{
+  "name": "ra-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "lint": "oxlint src/",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "preact": "10.25.4",
+    "preact-router": "4.1.2"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "2.9.3",
+    "typescript": "5.7.3",
+    "vite": "6.1.0"
+  }
+}
