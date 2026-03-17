@@ -1,0 +1,95 @@
+---
+id: clustered-index-selection
+name: Clustered Index Selection
+category: physical/index-selection
+databases: [mysql, mssql, oracle]
+execution_models: [volcano]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [index, clustered, primary-key]
+complexity: "O(log n)"
+benefit_range: [0.5, 0.9]
+---
+
+# Clustered Index Selection
+
+## Description
+
+Uses clustered index (data stored in index order) for range scans and ordered access.
+
+**When to apply**: Range queries or ORDER BY on clustered index key.
+
+**Why it works**: Data physically ordered; range scan is sequential I/O; no separate table lookup.
+
+## Relational Algebra
+
+```algebra
+sort[key](filter[key BETWEEN v1 AND v2](scan[T]))
+  -> clustered_index_scan[I_clustered](key BETWEEN v1 AND v2)
+  where is_clustered(I) && matches(key)
+```
+
+## Implementation
+
+```rust
+rw!("use-clustered-index";
+    "(sort ?key (filter ?pred (scan ?table)))" =>
+    "(clustered-index-scan ?clustered_idx ?pred)"
+    if is_clustered_index("?table", "?clustered_idx") &&
+       matches_key("?pred", "?key")
+),
+```
+
+## Cost Model
+
+```rust
+fn cost(range_pages: u64) -> f64 {
+    // Sequential I/O on clustered pages
+    range_pages as f64 * 1.0 // No random lookups
+}
+
+fn benefit_vs_secondary_index(range_pages: u64, matching_rows: u64) -> f64 {
+    let secondary = range_pages as f64 + matching_rows as f64; // Index + lookups
+    let clustered = range_pages as f64; // Just sequential scan
+    (secondary - clustered) / secondary
+}
+```
+
+**Typical benefit**: 50-90% for range scans vs secondary index
+
+## Test Cases
+
+### Positive: Range scan on primary key
+
+```sql
+SELECT * FROM orders
+WHERE order_id BETWEEN 1000 AND 2000
+ORDER BY order_id;
+
+-- Clustered on order_id: sequential scan, already sorted
+```
+
+### Positive: Date range on clustered column
+
+```sql
+SELECT * FROM events
+WHERE event_date >= '2025-01-01'
+ORDER BY event_date;
+
+-- Table clustered by event_date: efficient range scan
+```
+
+### Negative: Query on non-clustered column
+
+```sql
+SELECT * FROM orders WHERE customer_id = 12345;
+
+-- customer_id not clustered: use secondary index instead
+```
+
+## References
+
+- MySQL: InnoDB clustered indexes
+- SQL Server: Clustered index structure
+- Oracle: Index-organized tables (IOT)

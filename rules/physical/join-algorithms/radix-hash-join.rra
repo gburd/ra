@@ -1,0 +1,116 @@
+---
+id: radix-hash-join
+name: Radix Hash Join
+category: physical/join-algorithms
+databases: [duckdb, clickhouse, umbra]
+execution_models: [vectorized]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [join, hash, radix, cache-conscious]
+complexity: "O(n + m)"
+benefit_range: [0.2, 0.5]
+---
+
+# Radix Hash Join
+
+## Description
+
+Multi-pass partitioning using radix bits to create cache-sized partitions for efficient hash joins.
+
+**When to apply**: Large hash joins in modern CPUs with vector instructions.
+
+**Why it works**: Partitions fit in CPU cache; vectorized operations; eliminates TLB misses.
+
+## Relational Algebra
+
+```algebra
+join[R.key = S.key](R, S)
+  -> partition_pass_1:
+       radix_partition(R, bits=8) -> R1...R256
+       radix_partition(S, bits=8) -> S1...S256
+     partition_pass_2 (if needed):
+       for each partition: further partition to cache size
+     join_phase:
+       for each partition pair (Ri, Si):
+         vectorized_hash_join(Ri, Si)
+```
+
+## Implementation
+
+```rust
+rw!("use-radix-hash-join";
+    "(join (= ?left_key ?right_key) ?left ?right)" =>
+    "(radix-hash-join ?left_key ?right_key ?left ?right)"
+    if supports_vectorization() && large_join("?left", "?right")
+),
+```
+
+## Cost Model
+
+```rust
+fn cost(left_size: u64, right_size: u64, cache_size: u64) -> f64 {
+    let total_size = left_size + right_size;
+    let passes = ((total_size as f64 / cache_size as f64).log2() / 8.0).ceil();
+
+    // Each pass: read + write both inputs
+    let partition_cost = passes * 2.0 * total_size as f64;
+
+    // Final join: sequential scan of partitions
+    let join_cost = total_size as f64;
+
+    partition_cost + join_cost
+}
+```
+
+**Typical benefit**: 20-50% vs standard hash join on modern CPUs
+
+## Test Cases
+
+### Positive: Large join on modern CPU
+
+```sql
+SELECT * FROM events e
+JOIN sessions s ON e.session_id = s.id;
+
+-- 100M events, 10M sessions
+-- Radix partitioning creates 256 cache-sized partitions
+-- Vectorized processing per partition
+```
+
+### Positive: SIMD-friendly workload
+
+```sql
+SELECT * FROM measurements m
+JOIN sensors s ON m.sensor_id = s.id;
+
+-- Numeric keys ideal for vectorization
+-- Cache-conscious partitioning improves throughput
+```
+
+### Negative: Small joins
+
+```sql
+SELECT * FROM users u
+JOIN preferences p ON u.id = p.user_id
+WHERE u.id < 1000;
+
+-- Small result: partitioning overhead not worth it
+```
+
+### Negative: Variable-length keys
+
+```sql
+SELECT * FROM documents d
+JOIN authors a ON d.author_name = a.name;
+
+-- String keys: radix partitioning less effective
+-- Standard hash join better
+```
+
+## References
+
+- DuckDB: Parallel radix hash join implementation
+- "Main-Memory Hash Joins on Multi-Core CPUs" (Blanas et al., 2011)
+- Umbra: Hardware-conscious join algorithms
+- ClickHouse: Cache-aware hash join

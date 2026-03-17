@@ -1,0 +1,122 @@
+---
+id: broadcast-hash-join
+name: Broadcast Hash Join
+category: physical/join-algorithms
+databases: [spark, clickhouse, presto, trino]
+execution_models: [distributed]
+hardware: [cpu, network]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [join, hash, broadcast, distributed]
+complexity: "O(n + m)"
+benefit_range: [0.6, 0.9]
+---
+
+# Broadcast Hash Join
+
+## Description
+
+Broadcasts small table to all nodes, builds local hash table, probes with large table partitions.
+
+**When to apply**: Distributed join where one table is small enough to fit in memory on each node.
+
+**Why it works**: Avoids shuffling large table; each node independently joins its partition with broadcasted table.
+
+## Relational Algebra
+
+```algebra
+join[R.key = S.key](large_table(R), small_table(S))
+  -> broadcast_phase:
+       replicate S to all N nodes
+     local_join_phase:
+       for each node:
+         build_hash_table(S)
+         for each partition Pi of R:
+           probe_hash_table(Pi, S)
+```
+
+## Implementation
+
+```rust
+rw!("use-broadcast-hash-join";
+    "(join (= ?large_key ?small_key) ?large ?small)" =>
+    "(broadcast-hash-join ?large_key ?small_key ?large ?small)"
+    if is_distributed() && fits_in_memory("?small") && is_large("?large")
+),
+```
+
+## Cost Model
+
+```rust
+fn cost(large_size: u64, small_size: u64, num_nodes: u64, network_bw: f64) -> f64 {
+    // Broadcast small table to N nodes
+    let broadcast = (small_size as f64 * num_nodes as f64) / network_bw;
+
+    // Local hash join on each node
+    let local_join = (large_size as f64 + small_size as f64) / num_nodes as f64;
+
+    broadcast + local_join
+}
+
+fn benefit_over_shuffle_join(large: u64, small: u64, nodes: u64, bw: f64) -> f64 {
+    let shuffle = ((large + small) as f64) / bw; // Shuffle both
+    let broadcast_cost = cost(large, small, nodes, bw);
+    (shuffle - broadcast_cost) / shuffle
+}
+```
+
+**Typical benefit**: 60-90% vs shuffle join for small dimension tables
+
+## Test Cases
+
+### Positive: Large fact table with small dimension
+
+```sql
+SELECT * FROM sales s
+JOIN stores st ON s.store_id = st.id
+WHERE s.date >= '2025-01-01';
+
+-- Sales: 1TB partitioned across 100 nodes
+-- Stores: 10MB (10K stores)
+-- Broadcast stores to all nodes, join locally
+```
+
+### Positive: Star schema with multiple small dimensions
+
+```sql
+SELECT * FROM orders o
+JOIN customers c ON o.customer_id = c.id
+JOIN products p ON o.product_id = p.id;
+
+-- Orders: large (partitioned)
+-- Customers: 100MB, Products: 50MB
+-- Broadcast both dimension tables
+```
+
+### Negative: Both tables large
+
+```sql
+SELECT * FROM events e
+JOIN sessions s ON e.session_id = s.id;
+
+-- Events: 500GB, Sessions: 200GB
+-- Neither fits in memory: use shuffle hash join
+```
+
+### Negative: Skewed small table access
+
+```sql
+SELECT * FROM transactions t
+JOIN merchant_details m ON t.merchant_id = m.id
+WHERE m.country = 'US';
+
+-- Only need US merchants: broadcast full table wasteful
+-- Use filtered broadcast or shuffle
+```
+
+## References
+
+- Spark: Broadcast hash join for star schemas
+- Presto/Trino: Automatic broadcast join selection
+- ClickHouse: Distributed broadcast join
+- "Processing Analytical Queries over Encrypted Data" (Arasu et al., 2013)

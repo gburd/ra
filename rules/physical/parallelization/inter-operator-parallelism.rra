@@ -1,0 +1,59 @@
+---
+id: inter-operator-parallelism
+name: Inter-Operator Parallelism
+category: physical/parallelization
+databases: [postgresql, duckdb]
+execution_models: [push-based]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [parallelization, inter-operator, pipeline]
+complexity: "O(n)"
+benefit_range: [0.3, 0.6]
+---
+
+# Inter-Operator Parallelism
+
+## Description
+
+Executes different operators in parallel in pipeline fashion; producer-consumer parallelism.
+
+**When to apply**: Long operator pipelines with available threads.
+
+**Why it works**: Operators run concurrently; reduces latency; overlaps computation.
+
+## Relational Algebra
+
+```algebra
+operator3(operator2(operator1(data)))
+  -> concurrent_pipeline:
+       operator1 produces → operator2 processes → operator3 consumes
+```
+
+## Implementation
+
+```rust
+rw!("inter-op-parallel";
+    "(pipeline ?op1 ?op2 ?op3)" =>
+    "(parallel-pipeline
+       (thread ?op1)
+       (thread ?op2)
+       (thread ?op3))"
+    if can_pipeline("?op1", "?op2", "?op3")
+),
+```
+
+## Cost Model
+
+```rust
+fn latency_reduction(ops: usize) -> f64 {
+    1.0 / ops as f64 // Pipelined latency
+}
+```
+
+**Typical benefit**: 30-60% latency reduction
+
+## References
+
+- PostgreSQL: Parallel query execution
+- DuckDB: Pipeline parallelism

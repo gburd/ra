@@ -1,0 +1,114 @@
+---
+id: shuffle-hash-join
+name: Shuffle Hash Join
+category: physical/join-algorithms
+databases: [spark, clickhouse]
+execution_models: [distributed]
+hardware: [cpu, network]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [join, hash, shuffle, distributed]
+complexity: "O(n + m)"
+benefit_range: [0.3, 0.6]
+---
+
+# Shuffle Hash Join
+
+## Description
+
+Partitions both tables by join key across cluster, then performs local hash joins on co-located partitions.
+
+**When to apply**: Distributed join where both tables are large and neither fits in memory.
+
+**Why it works**: Co-locates matching keys on same nodes; enables parallel local joins without broadcasts.
+
+## Relational Algebra
+
+```algebra
+join[R.key = S.key](R, S)
+  -> shuffle_phase:
+       partition R by hash(key) across N nodes -> R1...RN
+       partition S by hash(key) across N nodes -> S1...SN
+     local_join_phase:
+       for each node i:
+         hash_join(Ri, Si)
+```
+
+## Implementation
+
+```rust
+rw!("use-shuffle-hash-join";
+    "(join (= ?left_key ?right_key) ?left ?right)" =>
+    "(shuffle-hash-join ?left_key ?right_key ?left ?right)"
+    if is_distributed() && both_large("?left", "?right")
+),
+```
+
+## Cost Model
+
+```rust
+fn cost(left_size: u64, right_size: u64, num_nodes: u64, network_bw: f64) -> f64 {
+    // Shuffle both tables across network
+    let shuffle_left = left_size as f64 / network_bw;
+    let shuffle_right = right_size as f64 / network_bw;
+
+    // Local hash join per node
+    let join_per_node = (left_size as f64 + right_size as f64) / num_nodes as f64;
+
+    shuffle_left + shuffle_right + join_per_node
+}
+```
+
+**Typical benefit**: 30-60% vs centralized join; enables parallelism
+
+## Test Cases
+
+### Positive: Large-to-large equijoin
+
+```sql
+SELECT * FROM events e
+JOIN sessions s ON e.session_id = s.id;
+
+-- Events: 1TB partitioned
+-- Sessions: 500GB partitioned
+-- Shuffle both on session_id, join locally
+```
+
+### Positive: Multi-way join with large tables
+
+```sql
+SELECT * FROM orders o
+JOIN order_items oi ON o.id = oi.order_id
+JOIN shipments s ON o.id = s.order_id;
+
+-- All tables large: shuffle each on join keys
+-- Parallel execution across cluster
+```
+
+### Negative: Small table in join
+
+```sql
+SELECT * FROM sales s
+JOIN products p ON s.product_id = p.id;
+
+-- Sales: 1TB, Products: 10MB
+-- Use broadcast join instead (cheaper)
+```
+
+### Negative: Highly skewed keys
+
+```sql
+SELECT * FROM clicks c
+JOIN pages p ON c.page_id = p.id;
+
+-- 90% of clicks on homepage
+-- Shuffle creates data skew: one node overloaded
+-- Use skew-aware shuffle or broadcast
+```
+
+## References
+
+- Spark: Shuffle hash join (SortMergeJoin default)
+- Flink: Hash-based redistribution join
+- ClickHouse: Distributed shuffle for large joins
+- "MapReduce: Simplified Data Processing on Large Clusters" (Dean & Ghemawat, 2004)

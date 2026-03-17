@@ -1,0 +1,80 @@
+---
+id: partial-index-selection
+name: Partial Index Selection
+category: physical/index-selection
+databases: [postgresql, sqlite]
+execution_models: [volcano, vectorized]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [index, partial, filtered]
+complexity: "O(log n)"
+benefit_range: [0.5, 0.8]
+---
+
+# Partial Index Selection
+
+## Description
+
+Selects partial (filtered) index that matches query WHERE clause; smaller, faster index for specific queries.
+
+**When to apply**: Query predicates match partial index filter condition.
+
+**Why it works**: Partial index smaller than full index; faster to scan; lower maintenance cost.
+
+## Relational Algebra
+
+```algebra
+filter[matching_condition](scan[T])
+  -> partial_index_scan[I WHERE condition](matching_condition)
+  where subsumes(I.condition, matching_condition)
+```
+
+## Implementation
+
+```rust
+rw!("select-partial-index";
+    "(filter ?pred (scan ?table))" =>
+    "(index-scan ?partial_index ?pred)"
+    if has_partial_index("?table", "?partial_index") &&
+       matches_condition("?partial_index", "?pred")
+),
+```
+
+## Cost Model
+
+```rust
+fn cost(partial_size: u64, full_size: u64, selectivity: f64) -> f64 {
+    let reduction = partial_size as f64 / full_size as f64;
+    (partial_size as f64 * selectivity) * reduction
+}
+```
+
+**Typical benefit**: 50-80% vs full index when condition matches
+
+## Test Cases
+
+### Positive: Query matches partial index condition
+
+```sql
+CREATE INDEX idx_active_users ON users(email) WHERE active = true;
+
+SELECT * FROM users WHERE active = true AND email LIKE '%@company.com';
+
+-- Partial index used: only indexes active users
+```
+
+### Negative: Query doesn't match condition
+
+```sql
+CREATE INDEX idx_active_users ON users(email) WHERE active = true;
+
+SELECT * FROM users WHERE active = false AND email LIKE '%@company.com';
+
+-- Cannot use partial index: condition mismatch
+```
+
+## References
+
+- PostgreSQL: Partial indexes documentation
+- SQLite: Partial indexes

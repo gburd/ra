@@ -1,0 +1,91 @@
+---
+id: incremental-view-maintenance
+name: Incremental View Maintenance
+category: physical/materialization
+databases: [postgresql, oracle, materialize]
+execution_models: [push-based, differential]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [materialization, incremental, view-maintenance]
+complexity: "O(delta)"
+benefit_range: [0.6, 0.9]
+---
+
+# Incremental View Maintenance
+
+## Description
+
+Updates materialized view incrementally using only changed data (delta) instead of full recomputation.
+
+**When to apply**: Materialized views with frequent small updates to base tables.
+
+**Why it works**: Processes only changes (inserts/updates/deletes); avoids full view recomputation.
+
+## Relational Algebra
+
+```algebra
+matview = f(base_table)
+
+On base_table change delta:
+  matview_new = matview + f(delta) - f(deleted)
+
+Instead of:
+  matview_new = f(base_table_new)  // Full recomputation
+```
+
+## Implementation
+
+```rust
+rw!("incremental-view-update";
+    "(refresh-matview ?view ?base_table)" =>
+    "(apply-delta ?view
+      (compute-delta ?base_table.changes))"
+    if supports_incremental("?view")
+),
+```
+
+## Cost Model
+
+```rust
+fn cost_incremental(delta_size: u64, view_size: u64) -> f64 {
+    delta_size as f64 * 10.0 + view_size as f64 * 0.1
+}
+
+fn cost_full(base_table_size: u64) -> f64 {
+    base_table_size as f64 * 100.0
+}
+
+fn benefit(delta: u64, base: u64) -> f64 {
+    let full = cost_full(base);
+    let incr = cost_incremental(delta, base);
+    (full - incr) / full
+}
+```
+
+**Typical benefit**: 60-90% when delta << base table
+
+## Test Cases
+
+### Positive: Small updates to large table
+
+```sql
+CREATE MATERIALIZED VIEW daily_totals AS
+SELECT date, SUM(amount) FROM sales GROUP BY date;
+
+-- 1000 new sales inserted: incremental update processes 1000 rows
+-- vs full refresh: recompute all 100M sales
+```
+
+### Negative: Massive batch updates
+
+```sql
+-- Daily batch: replace 50% of base table
+-- Incremental more expensive than full refresh
+```
+
+## References
+
+- PostgreSQL: REFRESH MATERIALIZED VIEW CONCURRENTLY
+- Oracle: Incremental refresh with materialized view logs
+- Materialize: Differential dataflow for incremental computation

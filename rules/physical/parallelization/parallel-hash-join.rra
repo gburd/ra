@@ -1,0 +1,75 @@
+---
+id: parallel-hash-join
+name: Parallel Hash Join
+category: physical/parallelization
+databases: [postgresql, duckdb, clickhouse]
+execution_models: [vectorized, push-based]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [parallelization, join, hash]
+complexity: "O((n+m)/p)"
+benefit_range: [0.6, 0.9]
+---
+
+# Parallel Hash Join
+
+## Description
+
+Partitions both inputs, builds hash tables in parallel, probes in parallel.
+
+**When to apply**: Large hash joins with multiple CPU cores.
+
+**Why it works**: Build and probe phases parallelized; near-linear speedup.
+
+## Relational Algebra
+
+```algebra
+join[R.key = S.key](R, S)
+  -> parallel_gather(
+       for each worker w:
+         hash_join(R_partition_w, S_partition_w)
+     )
+```
+
+## Implementation
+
+```rust
+rw!("parallelize-hash-join";
+    "(join ?cond ?left ?right)" =>
+    "(parallel-gather
+       (map-workers ?w
+         (hash-join ?cond
+           (partition-data ?left ?w)
+           (partition-data ?right ?w))))"
+    if is_large("?left") || is_large("?right")
+),
+```
+
+## Cost Model
+
+```rust
+fn cost(left: u64, right: u64, workers: usize) -> f64 {
+    let partition = (left + right) as f64 / workers as f64;
+    let join_per_worker = partition * 1.5;
+    partition + join_per_worker
+}
+```
+
+**Typical benefit**: 60-90% with 8+ cores
+
+## Test Cases
+
+### Positive: Large-large join
+
+```sql
+SELECT * FROM large_table1 t1
+JOIN large_table2 t2 ON t1.id = t2.id;
+
+-- Partition both, parallel hash join on each partition
+```
+
+## References
+
+- PostgreSQL: Parallel hash join
+- DuckDB: Parallel radix partitioning
