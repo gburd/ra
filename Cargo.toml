@@ -6,8 +6,15 @@ members = [
     "crates/ra-compiler",
     "crates/ra-engine",
     "crates/ra-codegen",
+    "crates/ra-dialect",
     "crates/ra-cli",
     "crates/ra-web",
+    "crates/ra-wasm",
+    "crates/ra-isolation",
+    "crates/ra-adaptive",
+    "crates/ra-synthesis",
+    "crates/ra-discovery",
+    "crates/ra-ml",
 ]
 
 [workspace.package]
@@ -67,6 +74,12 @@ ra-parser = { path = "crates/ra-parser" }
 ra-compiler = { path = "crates/ra-compiler" }
 ra-engine = { path = "crates/ra-engine" }
 ra-codegen = { path = "crates/ra-codegen" }
+ra-dialect = { path = "crates/ra-dialect" }
+ra-wasm = { path = "crates/ra-wasm" }
+ra-isolation = { path = "crates/ra-isolation" }
+ra-synthesis = { path = "crates/ra-synthesis" }
+ra-discovery = { path = "crates/ra-discovery" }
+ra-ml = { path = "crates/ra-ml" }
 
 [profile.release]
 lto = "thin"
