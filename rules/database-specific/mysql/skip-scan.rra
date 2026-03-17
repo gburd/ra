@@ -1,0 +1,121 @@
+---
+id: mysql-skip-scan
+name: MySQL Skip Scan Range Access
+category: database-specific/mysql
+databases: [mysql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, mysql, skip-scan, index, range, non-prefix]
+complexity: O(n)
+benefit_range: [0.2, 0.7]
+---
+
+# MySQL Skip Scan Range Access
+
+## Description
+
+Skip Scan allows MySQL to use a composite index even when the query
+does not filter on the leading column(s).  The optimizer generates
+implicit equality conditions for each distinct value of the skipped
+prefix columns, effectively transforming one range scan into multiple
+sub-range scans.
+
+**When to apply**: A composite index (a, b) exists, the query filters
+on column `b` but not `a`, and column `a` has low cardinality.
+
+**Why it works**: Instead of scanning the entire index, MySQL scans
+only the sub-ranges where `a` takes each of its distinct values.  If
+`a` has 5 distinct values, only 5 sub-ranges are scanned.
+
+**Database version**: MySQL 8.0.13+
+
+## Relational Algebra
+
+```algebra
+-- Before: full table scan (no prefix filter)
+sigma[b > 100](scan(T))
+
+-- After: skip scan on index (a, b)
+union(
+    range_scan(T, idx_ab, a=val1, b>100),
+    range_scan(T, idx_ab, a=val2, b>100),
+    ...
+    range_scan(T, idx_ab, a=valN, b>100)
+)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mysql-skip-scan";
+    "(filter ?pred (scan ?table))" =>
+    "(skip-scan ?table ?pred)"
+    if is_database("mysql")
+    if applicable_for_skip_scan("?table", "?pred")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    table: &Table,
+    predicate: &Predicate,
+) -> bool {
+    table.indexes().iter().any(|idx| {
+        let skip_cols = idx.prefix_not_in(predicate);
+        let used_cols = idx.suffix_in(predicate);
+        !skip_cols.is_empty()
+        && !used_cols.is_empty()
+        && skip_cols.iter().all(|c| c.ndv() < 100)
+    })
+}
+```
+
+**Restrictions:**
+- Only beneficial when skipped prefix columns have low cardinality
+- Cannot skip more than one prefix column group efficiently
+- `optimizer_switch='skip_scan=on'`
+- May be slower than full scan if prefix cardinality is high
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    table_rows: f64,
+    prefix_ndv: f64,
+    range_selectivity: f64,
+) -> f64 {
+    let scan_cost = table_rows * 0.01;
+    let skip_cost = prefix_ndv * table_rows * range_selectivity
+        * 0.01 / prefix_ndv;
+    scan_cost - skip_cost
+}
+```
+
+**Typical benefit**: 2-10x when prefix NDV is low (e.g., gender,
+status, region).
+
+## Test Cases
+
+```sql
+-- Positive: low-cardinality prefix
+CREATE INDEX idx_gender_age ON people(gender, age);
+SELECT * FROM people WHERE age > 30;
+-- Skip scan: scan age>30 for gender='M', then gender='F'
+```
+
+```sql
+-- Negative: high-cardinality prefix
+CREATE INDEX idx_userid_ts ON events(user_id, timestamp);
+SELECT * FROM events WHERE timestamp > '2024-01-01';
+-- user_id has millions of values; skip scan too expensive
+```
+
+## References
+
+MySQL: "Range Optimization" (Skip Scan) in MySQL 8.0 Reference Manual
+MySQL: `optimizer_switch` flag `skip_scan=on`
+Source: sql/opt_range.cc, `get_best_skip_scan()`

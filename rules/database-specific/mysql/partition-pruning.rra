@@ -1,0 +1,105 @@
+---
+id: mysql-partition-pruning
+name: MySQL Partition Pruning
+category: database-specific/mysql
+databases: [mysql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, mysql, partition, pruning, elimination]
+complexity: O(1)
+benefit_range: [0.3, 0.9]
+---
+
+# MySQL Partition Pruning
+
+## Description
+
+MySQL eliminates partitions that cannot contain matching rows based
+on WHERE conditions and the partition definition.  For RANGE, LIST,
+HASH, and KEY partitioning, the optimizer determines which partitions
+to scan and skips the rest entirely.
+
+**When to apply**: A partitioned table has WHERE conditions on the
+partition key column(s).
+
+**Why it works**: Each skipped partition avoids scanning its entire
+data set.  For a table with 100 partitions where only 1 matches,
+pruning reduces I/O by ~99%.
+
+**Database version**: MySQL 5.1+
+
+## Relational Algebra
+
+```algebra
+-- Before: scan all partitions
+sigma[year = 2024](scan(sales[p2022, p2023, p2024, p2025]))
+
+-- After: scan only matching partition
+sigma[year = 2024](scan(sales[p2024]))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mysql-partition-pruning";
+    "(filter ?pred (partition-scan ?table ?all_parts))" =>
+    "(filter ?pred (partition-scan ?table ?matched_parts))"
+    if is_database("mysql")
+    if can_prune_partitions("?pred", "?table")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    table: &Table,
+    predicate: &Predicate,
+) -> bool {
+    table.is_partitioned()
+    && predicate.references(table.partition_key())
+    && predicate.is_equality_or_range()
+}
+```
+
+**Restrictions:**
+- Only prunes on partition key columns
+- Expressions on partition key (e.g., `YEAR(date_col)`) prevent
+  pruning unless the partition uses the same expression
+- Subpartition pruning also applies when conditions match subpartition
+  keys
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    total_partitions: f64,
+    pruned_partitions: f64,
+    rows_per_partition: f64,
+) -> f64 {
+    pruned_partitions * rows_per_partition * 0.01
+}
+```
+
+**Typical benefit**: Linear with number of pruned partitions.
+
+## Test Cases
+
+```sql
+-- Positive: RANGE partitioning with equality
+SELECT * FROM sales WHERE sale_year = 2024;
+-- Only partition p2024 scanned
+```
+
+```sql
+-- Negative: function on partition key
+SELECT * FROM sales WHERE YEAR(sale_date) = 2024;
+-- Cannot prune if partition key is sale_date, not YEAR(sale_date)
+```
+
+## References
+
+MySQL: "Partition Pruning" in MySQL Reference Manual
+Source: sql/partition_info.cc, `prune_partitions()`

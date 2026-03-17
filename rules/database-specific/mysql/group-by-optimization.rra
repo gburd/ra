@@ -1,0 +1,140 @@
+---
+id: mysql-group-by-optimization
+name: MySQL GROUP BY Index Optimization
+category: database-specific/mysql
+databases: [mysql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, mysql, group-by, index, loose-scan, tight-scan]
+complexity: O(n)
+benefit_range: [0.2, 0.7]
+---
+
+# MySQL GROUP BY Index Optimization
+
+## Description
+
+MySQL can satisfy GROUP BY without sorting by using an index that
+matches the grouping columns.  Two access methods apply: Loose Index
+Scan reads only the first (or last) entry per group directly from the
+index; Tight Index Scan reads all index entries but avoids a separate
+sort step since the index is already ordered.
+
+**When to apply**: The GROUP BY columns are a prefix of an available
+index, and the query uses MIN, MAX, COUNT, or no aggregate.
+
+**Why it works**: Loose Index Scan skips entire groups in the B-tree,
+reading O(groups) entries instead of O(rows).  Tight Index Scan
+avoids the filesort by reading in index order.
+
+**Database version**: MySQL 5.0+ (Loose), MySQL 5.1+ (Tight)
+
+## Relational Algebra
+
+```algebra
+-- Before: scan + sort + group
+gamma[dept_id; MIN(salary)](
+    sort[dept_id](scan(employees)))
+
+-- After: loose index scan (no sort needed)
+gamma[dept_id; MIN(salary)](
+    loose_index_scan[idx_dept_sal](employees))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mysql-group-by-loose-scan";
+    "(aggregate ?group_cols ?agg_funcs
+        (sort ?group_cols (scan ?table)))" =>
+    "(aggregate ?group_cols ?agg_funcs
+        (loose-index-scan ?table ?group_cols))"
+    if is_database("mysql")
+    if has_prefix_index("?table", "?group_cols")
+    if agg_supports_loose_scan("?agg_funcs")
+),
+
+rw!("mysql-group-by-tight-scan";
+    "(aggregate ?group_cols ?agg_funcs
+        (sort ?group_cols (scan ?table)))" =>
+    "(aggregate ?group_cols ?agg_funcs
+        (index-scan ?table ?group_cols))"
+    if is_database("mysql")
+    if has_prefix_index("?table", "?group_cols")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    group_cols: &[Column],
+    agg_funcs: &[AggFunc],
+    table: &Table,
+    scan_type: ScanType,
+) -> bool {
+    let has_idx = table.has_prefix_index(group_cols);
+    match scan_type {
+        ScanType::Loose => {
+            has_idx
+            && agg_funcs.iter().all(|f| {
+                matches!(f, AggFunc::Min(_) | AggFunc::Max(_)
+                    | AggFunc::Count(_))
+            })
+        }
+        ScanType::Tight => has_idx,
+    }
+}
+```
+
+**Restrictions:**
+- Loose Index Scan only supports MIN, MAX, COUNT, COUNT(DISTINCT),
+  SUM(DISTINCT), AVG(DISTINCT)
+- GROUP BY columns must be a leftmost prefix of the index
+- Cannot use Loose Index Scan with HAVING clauses that reference
+  non-aggregated columns
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    total_rows: f64,
+    num_groups: f64,
+    scan_type: ScanType,
+) -> f64 {
+    let sort_cost = total_rows * (total_rows.log2()) * 0.001;
+    match scan_type {
+        ScanType::Loose => {
+            let loose_cost = num_groups * 0.005;
+            sort_cost + (total_rows * 0.005) - loose_cost
+        }
+        ScanType::Tight => sort_cost,
+    }
+}
+```
+
+**Typical benefit**: Loose scan 10-100x for high-cardinality groups.
+Tight scan saves sort cost (20-50% improvement).
+
+## Test Cases
+
+```sql
+-- Positive: loose index scan for MIN/MAX
+CREATE INDEX idx_dept_sal ON employees(dept_id, salary);
+SELECT dept_id, MIN(salary) FROM employees GROUP BY dept_id;
+-- Loose scan: jump to first salary per dept_id in index
+```
+
+```sql
+-- Negative: GROUP BY not an index prefix
+SELECT city, COUNT(*) FROM employees GROUP BY city;
+-- No index starting with city; filesort required
+```
+
+## References
+
+MySQL: "GROUP BY Optimization" in MySQL Reference Manual
+MySQL: EXPLAIN shows "Using index for group-by" for Loose Index Scan
+Source: sql/opt_range.cc, `get_best_group_min_max()`

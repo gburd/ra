@@ -1,0 +1,117 @@
+---
+id: mysql-subquery-materialization
+name: MySQL Subquery Materialization
+category: database-specific/mysql
+databases: [mysql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, mysql, subquery, materialization, semi-join]
+complexity: O(n+m)
+benefit_range: [0.3, 0.8]
+---
+
+# MySQL Subquery Materialization
+
+## Description
+
+Materializes IN/EXISTS subqueries into temporary tables to avoid
+repeated execution.  The subquery is evaluated once, its results are
+stored in a memory-resident hash table (or on-disk temp table if too
+large), and the outer query probes this table instead of re-executing
+the subquery for each outer row.
+
+**When to apply**: An IN or EXISTS subquery is uncorrelated or its
+correlation can be removed by the semi-join transformation.
+
+**Why it works**: Converting per-row subquery execution (O(n*m)) into
+a single materialization (O(m)) plus hash probes (O(n)) reduces total
+cost to O(n+m).
+
+**Database version**: MySQL 5.6+ (semi-join materialization)
+
+## Relational Algebra
+
+```algebra
+-- Before: correlated IN subquery
+sigma[o.id IN (SELECT order_id FROM returns)](orders)
+
+-- After: materialized lookup
+orders semi-join[hash] (materialize(pi[order_id](returns)))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mysql-subquery-materialization";
+    "(filter (in ?col (subquery ?sub_rel))
+        ?outer_rel)" =>
+    "(semi-join-hash ?col
+        ?outer_rel
+        (materialize ?sub_rel))"
+    if is_database("mysql")
+    if is_materializable("?sub_rel")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(subquery: &Subquery) -> bool {
+    (subquery.is_in() || subquery.is_exists())
+    && !subquery.has_outer_reference_beyond_immediate()
+    && !subquery.returns_more_than(
+        tmp_table_size_limit()
+    )
+}
+```
+
+**Restrictions:**
+- Subquery must return a deterministic result set
+- Cannot materialize if subquery references stored functions with
+  side effects
+- `tmp_table_size` and `max_heap_table_size` limit in-memory temp
+  table size
+- Falls back to on-disk temp table for large results
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    outer_rows: f64,
+    subquery_rows: f64,
+    subquery_cost_per_exec: f64,
+) -> f64 {
+    let repeated_cost =
+        outer_rows * subquery_cost_per_exec;
+    let mat_cost = subquery_cost_per_exec
+        + outer_rows * 0.001; // hash probe cost
+    repeated_cost - mat_cost
+}
+```
+
+**Typical benefit**: 100-10000x for uncorrelated subqueries with
+many outer rows.
+
+## Test Cases
+
+```sql
+-- Positive: uncorrelated IN subquery
+SELECT * FROM orders
+WHERE customer_id IN (SELECT id FROM vip_customers);
+-- Materialized: vip_customers hashed, orders probed
+```
+
+```sql
+-- Negative: correlated subquery with side effects
+SELECT * FROM t1
+WHERE x IN (SELECT f(t1.y) FROM t2);
+-- Cannot materialize: references outer table in function
+```
+
+## References
+
+MySQL: "Optimizing Subqueries with Materialization" in Reference Manual
+MySQL: `optimizer_switch` flag `materialization=on`
+Source: sql/sql_select.cc, `JOIN::optimize_semijoin_nests()`

@@ -1,0 +1,111 @@
+---
+id: mysql-join-elimination
+name: MySQL Join Elimination
+category: database-specific/mysql
+databases: [mysql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, mysql, join, elimination, unused, foreign-key]
+complexity: O(1)
+benefit_range: [0.2, 0.6]
+---
+
+# MySQL Join Elimination
+
+## Description
+
+MySQL eliminates joins to tables whose columns are not referenced in
+the SELECT, WHERE, GROUP BY, HAVING, or ORDER BY clauses, provided
+the join is guaranteed to produce exactly one row per outer row (i.e.,
+the join is on a unique key and the relationship is non-nullable or
+the join is LEFT JOIN).
+
+**When to apply**: A joined table contributes no columns to the query
+output, and the join relationship is guaranteed to be 1:1 or the
+table can be proved irrelevant to the result.
+
+**Why it works**: Removing a joined table eliminates its access cost
+(index lookup or scan) and reduces join cardinality estimation
+complexity.
+
+**Database version**: MySQL 8.0+ (limited support in 5.7)
+
+## Relational Algebra
+
+```algebra
+-- Before: unnecessary join
+pi[o.id, o.total](
+    orders o LEFT JOIN customers c ON o.cust_id = c.id)
+
+-- After: join eliminated
+pi[o.id, o.total](orders o)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mysql-join-elimination";
+    "(project ?cols
+        (left-join ?pred ?left ?right))" =>
+    "(project ?cols ?left)"
+    if is_database("mysql")
+    if cols_not_from("?cols", "?right")
+    if join_is_on_unique_key("?pred", "?right")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    join: &Join,
+    output_cols: &[Column],
+    right: &Table,
+) -> bool {
+    !output_cols.iter().any(|c| c.table() == right.name())
+    && join.is_on_unique_key_of(right)
+    && (join.is_left_join() || join.is_inner_with_fk())
+}
+```
+
+**Restrictions:**
+- Inner join elimination requires foreign key guaranteeing match
+- LEFT JOIN elimination only when right table columns unused
+- Cannot eliminate if WHERE references the right table
+- Cannot eliminate if join has side effects (triggers)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    right_table_rows: f64,
+    join_lookups: f64,
+) -> f64 {
+    join_lookups * 0.01 // cost of eliminated lookups
+}
+```
+
+**Typical benefit**: Eliminates one table access per outer row.
+
+## Test Cases
+
+```sql
+-- Positive: LEFT JOIN with unused table
+SELECT o.id, o.total
+FROM orders o LEFT JOIN customers c ON o.cust_id = c.id;
+-- customers not referenced in output; join eliminated
+```
+
+```sql
+-- Negative: right table column used
+SELECT o.id, c.name
+FROM orders o LEFT JOIN customers c ON o.cust_id = c.id;
+-- c.name needed; join cannot be eliminated
+```
+
+## References
+
+MySQL: "Outer Join Simplification" in MySQL Reference Manual
+Source: sql/sql_optimizer.cc, `simplify_joins()`

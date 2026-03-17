@@ -1,0 +1,148 @@
+---
+id: mysql-eq-range-index
+name: MySQL Equality Range Index Access
+category: database-specific/mysql
+databases: [mysql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, mysql, index, range, ref, eq-ref, access-method]
+complexity: O(log n)
+benefit_range: [0.3, 0.9]
+---
+
+# MySQL Equality Range Index Access
+
+## Description
+
+MySQL's optimizer chooses among several index access methods based on
+the predicate type: `const` (primary key = literal), `eq_ref` (unique
+key join), `ref` (non-unique key equality), `range` (inequality or
+IN list), and `index` (full index scan).  The optimizer estimates the
+cost of each method and selects the cheapest.
+
+**When to apply**: A WHERE or JOIN condition references indexed
+columns with equality or range predicates.
+
+**Why it works**: Each access method prunes the search space
+differently.  `eq_ref` reads one row per join; `ref` reads a
+contiguous range; `range` reads multiple ranges.  All are cheaper
+than full table scan for selective predicates.
+
+**Database version**: MySQL 5.0+
+
+## Relational Algebra
+
+```algebra
+-- const access: PK = literal
+sigma[id = 42](scan(users))  -->  point_lookup(users, id=42)
+
+-- eq_ref: unique key join
+orders join[o.user_id = u.id] users  -->  orders eq_ref users
+
+-- range: inequality
+sigma[price BETWEEN 10 AND 50](scan(products))
+    -->  range_scan(products, idx_price, [10, 50])
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mysql-const-access";
+    "(filter (= ?pk ?literal) (scan ?table))" =>
+    "(point-lookup ?table ?pk ?literal)"
+    if is_database("mysql")
+    if is_primary_key("?table", "?pk")
+    if is_constant("?literal")
+),
+
+rw!("mysql-range-access";
+    "(filter (between ?col ?lo ?hi) (scan ?table))" =>
+    "(range-scan ?table ?col ?lo ?hi)"
+    if is_database("mysql")
+    if has_index("?table", "?col")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    access: AccessMethod,
+    table: &Table,
+    predicate: &Predicate,
+) -> bool {
+    match access {
+        AccessMethod::Const => {
+            table.primary_key_matches(predicate)
+            && predicate.is_constant_equality()
+        }
+        AccessMethod::EqRef => {
+            table.unique_key_matches(predicate)
+        }
+        AccessMethod::Ref => {
+            table.has_index_on(predicate.columns())
+            && predicate.is_equality()
+        }
+        AccessMethod::Range => {
+            table.has_index_on(predicate.columns())
+            && predicate.is_range()
+        }
+    }
+}
+```
+
+**Restrictions:**
+- `eq_ref` requires the full unique key to be constrained
+- `ref` works with non-unique indexes or partial unique key matches
+- `range` access with many ranges (large IN list) may be slower
+  than full scan
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    table_rows: f64,
+    access: AccessMethod,
+    estimated_matches: f64,
+) -> f64 {
+    let scan_cost = table_rows * 0.01;
+    let access_cost = match access {
+        AccessMethod::Const => 0.01,
+        AccessMethod::EqRef => 0.01,
+        AccessMethod::Ref => estimated_matches * 0.01,
+        AccessMethod::Range => estimated_matches * 0.01 + 0.1,
+    };
+    scan_cost - access_cost
+}
+```
+
+**Typical benefit**: 100-10000x for point lookups. 10-100x for
+selective range scans.
+
+## Test Cases
+
+```sql
+-- Positive: const access on PK
+SELECT * FROM users WHERE id = 42;
+-- Single row lookup via primary key
+```
+
+```sql
+-- Positive: range access
+SELECT * FROM products WHERE price BETWEEN 10 AND 50;
+-- Range scan on idx_price
+```
+
+```sql
+-- Negative: no index, full scan
+SELECT * FROM logs WHERE message = 'error';
+-- No index on message; full table scan
+```
+
+## References
+
+MySQL: "Optimizing SELECT Statements" in MySQL Reference Manual
+MySQL: EXPLAIN `type` column: const, eq_ref, ref, range, index, ALL
+Source: sql/sql_optimizer.cc

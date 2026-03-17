@@ -1,0 +1,102 @@
+---
+id: mysql-invisible-index
+name: MySQL Invisible Index
+category: database-specific/mysql
+databases: [mysql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, mysql, invisible-index, index, optimizer-hint]
+complexity: O(1)
+benefit_range: [0.0, 0.3]
+---
+
+# MySQL Invisible Index
+
+## Description
+
+MySQL 8.0 supports invisible indexes that the optimizer ignores by
+default.  DBAs can mark an index as invisible to test the impact of
+dropping it without actually removing it.  The optimizer skips
+invisible indexes during plan selection unless the session variable
+`use_invisible_indexes` is enabled.
+
+**When to apply**: An index is marked INVISIBLE and the optimizer
+should not consider it for access paths.
+
+**Why it works**: Allows non-disruptive testing of index removal.
+If performance degrades, the index can be made visible again
+instantly without rebuilding it.
+
+**Database version**: MySQL 8.0+
+
+## Relational Algebra
+
+```algebra
+-- Before: optimizer considers all indexes
+scan(table, available_indexes=[idx_a, idx_b_invisible])
+
+-- After: invisible index excluded
+scan(table, available_indexes=[idx_a])
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mysql-exclude-invisible-index";
+    "(index-scan ?table ?invisible_idx ?pred)" =>
+    "(scan ?table)"
+    if is_database("mysql")
+    if is_invisible_index("?invisible_idx")
+    if not_force_index("?invisible_idx")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(index: &Index) -> bool {
+    index.is_invisible()
+    && !session_var("use_invisible_indexes")
+}
+```
+
+**Restrictions:**
+- Primary key cannot be made invisible
+- `ALTER TABLE ... ALTER INDEX ... INVISIBLE` toggles visibility
+- Session-level override with `SET optimizer_switch = 'use_invisible_indexes=on'`
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    _table_rows: f64,
+) -> f64 {
+    0.0 // No direct performance benefit; testing utility
+}
+```
+
+**Typical benefit**: Operational safety for index management, not
+direct query performance.
+
+## Test Cases
+
+```sql
+-- Positive: invisible index ignored
+ALTER TABLE orders ALTER INDEX idx_status INVISIBLE;
+SELECT * FROM orders WHERE status = 'pending';
+-- idx_status not considered; may use full scan
+```
+
+```sql
+-- Negative: index made visible again
+ALTER TABLE orders ALTER INDEX idx_status VISIBLE;
+SELECT * FROM orders WHERE status = 'pending';
+-- idx_status used normally
+```
+
+## References
+
+MySQL: "Invisible Indexes" in MySQL 8.0 Reference Manual
+Source: sql/sql_optimizer.cc, index visibility check

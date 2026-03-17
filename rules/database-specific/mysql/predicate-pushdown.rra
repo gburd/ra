@@ -1,0 +1,111 @@
+---
+id: mysql-predicate-pushdown
+name: MySQL Predicate Pushdown to Storage Engine
+category: database-specific/mysql
+databases: [mysql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, mysql, predicate, pushdown, storage-engine, innodb]
+complexity: O(1)
+benefit_range: [0.2, 0.6]
+---
+
+# MySQL Predicate Pushdown to Storage Engine
+
+## Description
+
+MySQL's optimizer pushes WHERE conditions down to the storage engine
+(InnoDB, NDB) to reduce the number of rows sent to the SQL layer.
+This goes beyond ICP: the storage engine evaluates conditions during
+the table scan or index scan before constructing full row tuples.
+
+**When to apply**: A WHERE condition can be evaluated by the storage
+engine using available data (index entries, in-memory buffers) without
+requiring SQL-layer functions.
+
+**Why it works**: Each row returned from the storage engine to the SQL
+layer incurs copying and type conversion overhead.  Filtering at the
+engine level reduces this traffic.
+
+**Database version**: MySQL 5.7+ (engine condition pushdown for NDB),
+MySQL 8.0+ (improved for InnoDB)
+
+## Relational Algebra
+
+```algebra
+-- Before: storage returns all rows, SQL filters
+sigma[age > 30](engine_scan(users))
+
+-- After: engine evaluates condition during scan
+engine_scan(users, pushed_cond=[age > 30])
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mysql-engine-condition-pushdown";
+    "(filter ?pred (scan ?table))" =>
+    "(engine-pushdown-scan ?table ?pred)"
+    if is_database("mysql")
+    if engine_supports_pushdown("?table")
+    if is_pushable_predicate("?pred")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    table: &Table,
+    predicate: &Predicate,
+) -> bool {
+    table.engine_supports_condition_pushdown()
+    && predicate.is_simple_comparison()
+    && !predicate.uses_sql_functions()
+}
+```
+
+**Restrictions:**
+- NDB Cluster supports full condition pushdown including joins
+- InnoDB pushdown is limited to simple comparisons
+- Stored functions, user-defined functions, and subqueries cannot
+  be pushed down
+- JSON path expressions may or may not be pushable depending on
+  engine version
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    total_rows: f64,
+    selectivity: f64,
+) -> f64 {
+    let rows_filtered = total_rows * (1.0 - selectivity);
+    rows_filtered * 0.005 // per-row SQL layer processing saved
+}
+```
+
+**Typical benefit**: 10-30% reduction in query time for selective
+conditions.
+
+## Test Cases
+
+```sql
+-- Positive: simple comparison pushed to InnoDB
+SELECT * FROM users WHERE age > 30 AND status = 'active';
+-- Both conditions pushed to storage engine scan
+```
+
+```sql
+-- Negative: user function in predicate
+SELECT * FROM users WHERE my_udf(name) = 'normalized';
+-- Cannot push UDF to storage engine
+```
+
+## References
+
+MySQL: "Engine Condition Pushdown Optimization" in Reference Manual
+MySQL: NDB Cluster "Condition Pushdown" documentation
+Source: sql/handler.cc, `handler::pushed_cond()`
