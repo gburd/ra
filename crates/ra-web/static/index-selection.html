@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Index Selection - RA Optimizer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        header h1 {
+            font-size: 2em;
+            margin-bottom: 10px;
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .control-group {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+        }
+
+        .control-group label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #333;
+        }
+
+        .control-group input[type="range"] {
+            width: 100%;
+            margin: 10px 0;
+        }
+
+        .control-group select {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 1em;
+        }
+
+        .value-display {
+            font-size: 1.2em;
+            color: #667eea;
+            font-weight: bold;
+        }
+
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 1.1em;
+            border-radius: 8px;
+            cursor: pointer;
+            width: 100%;
+            font-weight: 600;
+            transition: transform 0.2s;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+        }
+
+        .results {
+            margin-top: 30px;
+            display: none;
+        }
+
+        .results.visible {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+        }
+
+        .decision-card {
+            background: linear-gradient(135deg, #27ae60 0%, #229954 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 12px;
+        }
+
+        .decision-card h2 {
+            font-size: 2em;
+            margin-bottom: 15px;
+        }
+
+        .decision-card .reason {
+            font-size: 1.1em;
+            line-height: 1.6;
+            opacity: 0.95;
+        }
+
+        .metrics {
+            background: #f8f9fa;
+            padding: 25px;
+            border-radius: 8px;
+        }
+
+        .metrics h3 {
+            color: #333;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 3px solid #667eea;
+        }
+
+        .metric-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 15px;
+            background: white;
+            margin-bottom: 10px;
+            border-radius: 6px;
+        }
+
+        .metric-row .label {
+            font-weight: 600;
+            color: #666;
+        }
+
+        .metric-row .value {
+            color: #333;
+            font-weight: bold;
+        }
+
+        .comparison {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 15px;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .loading.visible {
+            display: block;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        @media (max-width: 768px) {
+            .results.visible {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Index Selection</h1>
+            <p>Compare index scan vs full table scan based on selectivity</p>
+        </header>
+
+        <div class="content">
+            <div class="controls">
+                <div class="control-group">
+                    <label for="tableSize">Table Size (rows):</label>
+                    <input type="range" id="tableSize" min="1000" max="100000000" step="1000" value="10000000">
+                    <div class="value-display" id="tableSizeValue">10,000,000</div>
+                </div>
+
+                <div class="control-group">
+                    <label for="selectivity">Query Selectivity:</label>
+                    <input type="range" id="selectivity" min="0.0001" max="1.0" step="0.0001" value="0.01">
+                    <div class="value-display" id="selectivityValue">1.0%</div>
+                </div>
+
+                <div class="control-group">
+                    <label for="indexType">Index Type:</label>
+                    <select id="indexType">
+                        <option value="btree" selected>B-Tree</option>
+                        <option value="hash">Hash</option>
+                        <option value="covering">Covering Index</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <label for="clustering">Index Clustering Factor:</label>
+                    <input type="range" id="clustering" min="0" max="1" step="0.01" value="0.5">
+                    <div class="value-display" id="clusteringValue">50%</div>
+                </div>
+            </div>
+
+            <button id="analyzeBtn">Analyze Index Selection</button>
+
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <p>Analyzing...</p>
+            </div>
+
+            <div class="results" id="results">
+                <div class="decision-card">
+                    <h2 id="decision">Index Scan</h2>
+                    <div class="reason" id="reasoning">-</div>
+                </div>
+
+                <div class="metrics">
+                    <h3>Cost Analysis</h3>
+
+                    <div class="metric-row">
+                        <span class="label">Selected Rows:</span>
+                        <span class="value" id="selectedRows">-</span>
+                    </div>
+
+                    <div class="metric-row">
+                        <span class="label">Index Scan Cost:</span>
+                        <span class="value" id="indexCost">-</span>
+                    </div>
+
+                    <div class="metric-row">
+                        <span class="label">Table Scan Cost:</span>
+                        <span class="value" id="tableCost">-</span>
+                    </div>
+
+                    <div class="metric-row">
+                        <span class="label">Cost Savings:</span>
+                        <span class="value" id="savings">-</span>
+                    </div>
+
+                    <div class="comparison">
+                        <strong>Note:</strong> <span id="note">-</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const tableSizeSlider = document.getElementById('tableSize');
+        const selectivitySlider = document.getElementById('selectivity');
+        const indexTypeSelect = document.getElementById('indexType');
+        const clusteringSlider = document.getElementById('clustering');
+        const analyzeBtn = document.getElementById('analyzeBtn');
+        const loading = document.getElementById('loading');
+        const results = document.getElementById('results');
+
+        function formatNumber(num) {
+            return num.toLocaleString('en-US');
+        }
+
+        tableSizeSlider.addEventListener('input', () => {
+            document.getElementById('tableSizeValue').textContent = formatNumber(parseInt(tableSizeSlider.value));
+        });
+
+        selectivitySlider.addEventListener('input', () => {
+            const pct = (parseFloat(selectivitySlider.value) * 100).toFixed(2);
+            document.getElementById('selectivityValue').textContent = pct + '%';
+        });
+
+        clusteringSlider.addEventListener('input', () => {
+            const pct = (parseFloat(clusteringSlider.value) * 100).toFixed(0);
+            document.getElementById('clusteringValue').textContent = pct + '%';
+        });
+
+        analyzeBtn.addEventListener('click', async () => {
+            loading.classList.add('visible');
+            results.classList.remove('visible');
+
+            const tableSize = parseInt(tableSizeSlider.value);
+            const selectivity = parseFloat(selectivitySlider.value);
+            const clustering = parseFloat(clusteringSlider.value);
+            const selectedRows = Math.floor(tableSize * selectivity);
+
+            // Mock calculation (would call /api/demos/index-selection in production)
+            const indexCost = selectedRows * (1 + (1 - clustering)) * 2;
+            const tableCost = tableSize;
+            const useIndex = indexCost < tableCost;
+            const savings = useIndex ? ((tableCost - indexCost) / tableCost * 100).toFixed(1) : 0;
+
+            setTimeout(() => {
+                loading.classList.remove('visible');
+                results.classList.add('visible');
+
+                document.getElementById('decision').textContent = useIndex ? 'Use Index Scan' : 'Use Full Table Scan';
+
+                let reasoning = '';
+                if (useIndex) {
+                    reasoning = `Low selectivity (${(selectivity * 100).toFixed(2)}%) makes index scan more efficient. `;
+                    if (clustering > 0.7) {
+                        reasoning += 'High clustering factor reduces random I/O.';
+                    } else if (clustering < 0.3) {
+                        reasoning += 'Low clustering increases random I/O but still worthwhile.';
+                    }
+                } else {
+                    reasoning = `High selectivity (${(selectivity * 100).toFixed(2)}%) means scanning most of the table anyway. `;
+                    reasoning += 'Full table scan with sequential I/O is more efficient.';
+                }
+                document.getElementById('reasoning').textContent = reasoning;
+
+                document.getElementById('selectedRows').textContent = formatNumber(selectedRows);
+                document.getElementById('indexCost').textContent = indexCost.toFixed(0);
+                document.getElementById('tableCost').textContent = tableCost.toFixed(0);
+                document.getElementById('savings').textContent = useIndex ? savings + '%' : 'N/A';
+
+                let note = '';
+                if (indexTypeSelect.value === 'covering') {
+                    note = 'Covering index avoids table lookups entirely, improving performance.';
+                } else if (indexTypeSelect.value === 'hash') {
+                    note = 'Hash index only supports equality queries, not range scans.';
+                } else {
+                    note = 'B-Tree index supports both equality and range queries.';
+                }
+                document.getElementById('note').textContent = note;
+
+            }, 500);
+        });
+
+        document.getElementById('tableSizeValue').textContent = formatNumber(parseInt(tableSizeSlider.value));
+        document.getElementById('selectivityValue').textContent = (parseFloat(selectivitySlider.value) * 100).toFixed(2) + '%';
+        document.getElementById('clusteringValue').textContent = (parseFloat(clusteringSlider.value) * 100).toFixed(0) + '%';
+    </script>
+</body>
+</html>

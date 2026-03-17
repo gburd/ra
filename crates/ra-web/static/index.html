@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RA Optimizer Demonstrations</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            color: white;
+            margin-bottom: 40px;
+        }
+
+        header h1 {
+            font-size: 3em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        header p {
+            font-size: 1.3em;
+            opacity: 0.9;
+        }
+
+        .demo-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 25px;
+        }
+
+        .demo-card {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            transition: transform 0.3s, box-shadow 0.3s;
+            cursor: pointer;
+            text-decoration: none;
+            color: inherit;
+            display: block;
+        }
+
+        .demo-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.3);
+        }
+
+        .demo-card .category {
+            display: inline-block;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: 600;
+            margin-bottom: 15px;
+        }
+
+        .demo-card h2 {
+            font-size: 1.5em;
+            margin-bottom: 15px;
+            color: #333;
+        }
+
+        .demo-card p {
+            color: #666;
+            line-height: 1.6;
+        }
+
+        footer {
+            text-align: center;
+            color: white;
+            margin-top: 60px;
+            padding: 20px;
+            opacity: 0.8;
+        }
+
+        @media (max-width: 768px) {
+            header h1 {
+                font-size: 2em;
+            }
+
+            header p {
+                font-size: 1em;
+            }
+
+            .demo-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>RA Optimizer Demonstrations</h1>
+            <p>Interactive visualizations of query optimization concepts</p>
+        </header>
+
+        <div class="demo-grid" id="demoGrid">
+            <div class="loading" style="grid-column: 1 / -1; text-align: center; color: white; padding: 40px;">
+                <p>Loading demonstrations...</p>
+            </div>
+        </div>
+
+        <footer>
+            <p>RA Query Optimizer - Built with Rust + egg + differential-dataflow</p>
+        </footer>
+    </div>
+
+    <script>
+        const demoMappings = {
+            'staleness-impact': 'staleness-impact.html',
+            'hardware-plan': 'hardware-plan.html',
+            'join-algorithm': 'join-algorithm.html',
+            'aggregation-strategy': 'aggregation-strategy.html',
+            'index-selection': 'index-selection.html',
+            'subquery-unnesting': 'subquery-unnesting.html',
+            'parallel-query': 'parallel-query.html',
+            'gpu-offloading': 'gpu-offloading.html',
+            'distributed-query': 'distributed-query.html',
+            'cost-calibration': 'cost-calibration.html'
+        };
+
+        async function loadDemos() {
+            try {
+                const response = await fetch('/api/demos');
+                const data = await response.json();
+
+                const grid = document.getElementById('demoGrid');
+                grid.innerHTML = '';
+
+                data.demos.forEach(demo => {
+                    const card = document.createElement('a');
+                    card.className = 'demo-card';
+                    card.href = demoMappings[demo.id] || '#';
+
+                    card.innerHTML = `
+                        <span class="category">${demo.category}</span>
+                        <h2>${demo.title}</h2>
+                        <p>${demo.description}</p>
+                    `;
+
+                    grid.appendChild(card);
+                });
+            } catch (error) {
+                const grid = document.getElementById('demoGrid');
+                grid.innerHTML = `
+                    <div style="grid-column: 1 / -1; text-align: center; color: white; padding: 40px;">
+                        <h2>Error loading demonstrations</h2>
+                        <p>${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+
+        loadDemos();
+    </script>
+</body>
+</html>

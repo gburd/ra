@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hardware-Specific Plans - RA Optimizer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        header h1 {
+            font-size: 2em;
+            margin-bottom: 10px;
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .control-group {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+        }
+
+        .control-group label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #333;
+        }
+
+        .control-group select,
+        .control-group input[type="range"] {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 1em;
+        }
+
+        .value-display {
+            font-size: 1.2em;
+            color: #667eea;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 1.1em;
+            border-radius: 8px;
+            cursor: pointer;
+            width: 100%;
+            font-weight: 600;
+            transition: transform 0.2s;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+        }
+
+        .results {
+            margin-top: 30px;
+            display: none;
+        }
+
+        .results.visible {
+            display: block;
+        }
+
+        .device-card {
+            background: linear-gradient(135deg, #27ae60 0%, #229954 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 12px;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+
+        .device-card h2 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .device-card .speedup {
+            font-size: 1.5em;
+            margin-bottom: 20px;
+            opacity: 0.9;
+        }
+
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .metric-card {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .metric-card .label {
+            font-size: 0.9em;
+            color: #666;
+            margin-bottom: 10px;
+        }
+
+        .metric-card .value {
+            font-size: 1.8em;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .placements {
+            background: #f8f9fa;
+            padding: 25px;
+            border-radius: 8px;
+        }
+
+        .placements h3 {
+            color: #333;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 3px solid #667eea;
+        }
+
+        .placement-item {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            border-left: 4px solid #667eea;
+        }
+
+        .placement-item .operator {
+            font-size: 1.3em;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        .placement-item .device {
+            display: inline-block;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+
+        .placement-item .reason {
+            color: #666;
+            font-style: italic;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .loading.visible {
+            display: block;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Hardware-Specific Query Plans</h1>
+            <p>See how GPU/FPGA availability changes operator placement</p>
+        </header>
+
+        <div class="content">
+            <div class="controls">
+                <div class="control-group">
+                    <label for="workload">Workload Type:</label>
+                    <select id="workload">
+                        <option value="scan">Table Scan</option>
+                        <option value="join" selected>Hash Join</option>
+                        <option value="aggregation">Aggregation</option>
+                        <option value="filter">Filter</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <label for="dataSize">Data Size (MB):</label>
+                    <input type="range" id="dataSize" min="1" max="10000" step="10" value="1000">
+                    <div class="value-display" id="dataSizeValue">1,000 MB</div>
+                </div>
+
+                <div class="control-group">
+                    <label for="hardwareProfile">Hardware Profile:</label>
+                    <select id="hardwareProfile">
+                        <option value="cpu_only">CPU Only</option>
+                        <option value="gpu_server" selected>GPU Server</option>
+                        <option value="fpga_appliance">FPGA Appliance</option>
+                    </select>
+                </div>
+            </div>
+
+            <button id="analyzeBtn">Analyze Hardware Plan</button>
+
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <p>Analyzing...</p>
+            </div>
+
+            <div class="results" id="results">
+                <div class="device-card">
+                    <h2 id="selectedDevice">GPU</h2>
+                    <div class="speedup" id="speedup">8x faster than CPU</div>
+                    <p id="explanation">-</p>
+                </div>
+
+                <div class="metrics">
+                    <div class="metric-card">
+                        <div class="label">Estimated Time</div>
+                        <div class="value" id="time">-</div>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="label">Memory Required</div>
+                        <div class="value" id="memory">-</div>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="label">Speedup Factor</div>
+                        <div class="value" id="speedupValue">-</div>
+                    </div>
+                </div>
+
+                <div class="placements">
+                    <h3>Operator Placement</h3>
+                    <div id="placementsList"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const workloadSelect = document.getElementById('workload');
+        const dataSizeSlider = document.getElementById('dataSize');
+        const hardwareProfileSelect = document.getElementById('hardwareProfile');
+        const analyzeBtn = document.getElementById('analyzeBtn');
+        const loading = document.getElementById('loading');
+        const results = document.getElementById('results');
+
+        function formatNumber(num) {
+            return num.toLocaleString('en-US');
+        }
+
+        function formatBytes(bytes) {
+            const mb = bytes / (1024 * 1024);
+            if (mb >= 1) {
+                return mb.toFixed(1) + ' MB';
+            }
+            const kb = bytes / 1024;
+            return kb.toFixed(1) + ' KB';
+        }
+
+        dataSizeSlider.addEventListener('input', () => {
+            document.getElementById('dataSizeValue').textContent =
+                formatNumber(parseInt(dataSizeSlider.value)) + ' MB';
+        });
+
+        analyzeBtn.addEventListener('click', async () => {
+            loading.classList.add('visible');
+            results.classList.remove('visible');
+
+            const data = {
+                workload: workloadSelect.value,
+                data_size_bytes: parseInt(dataSizeSlider.value) * 1024 * 1024,
+                hardware_profile: hardwareProfileSelect.value
+            };
+
+            try {
+                const response = await fetch('/api/demos/hardware-plan', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+
+                loading.classList.remove('visible');
+                results.classList.add('visible');
+
+                document.getElementById('selectedDevice').textContent = result.selected_device;
+                document.getElementById('speedup').textContent =
+                    `${result.speedup.toFixed(1)}x faster than CPU`;
+                document.getElementById('explanation').textContent = result.explanation;
+                document.getElementById('time').textContent = result.estimated_time_ms + ' ms';
+                document.getElementById('memory').textContent = formatBytes(result.memory_required);
+                document.getElementById('speedupValue').textContent = result.speedup.toFixed(1) + 'x';
+
+                const placementsList = document.getElementById('placementsList');
+                placementsList.innerHTML = '';
+
+                result.operator_placement.forEach(placement => {
+                    const item = document.createElement('div');
+                    item.className = 'placement-item';
+                    item.innerHTML = `
+                        <div class="operator">${placement.operator}</div>
+                        <div class="device">${placement.device}</div>
+                        <div class="reason">${placement.reason}</div>
+                    `;
+                    placementsList.appendChild(item);
+                });
+
+            } catch (error) {
+                loading.classList.remove('visible');
+                alert('Error: ' + error.message);
+            }
+        });
+
+        document.getElementById('dataSizeValue').textContent =
+            formatNumber(parseInt(dataSizeSlider.value)) + ' MB';
+    </script>
+</body>
+</html>

@@ -11,6 +11,7 @@ mod rate_limit;
 mod websocket;
 
 use ra_synthesis::synthesizer::{SynthesisRequest, Synthesizer};
+use rocket::fs::{FileServer, relative};
 use rocket::serde::json::Json;
 use rocket::{get, launch, options, post, routes};
 use serde::Serialize;
@@ -20,8 +21,8 @@ use cors::Cors;
 use rate_limit::RateLimiter;
 
 #[get("/")]
-fn index() -> &'static str {
-    "Relational Algebra Web Explorer API v0.1.0"
+fn index() -> rocket::response::Redirect {
+    rocket::response::Redirect::to("/static/index.html")
 }
 
 #[get("/health")]
@@ -118,6 +119,7 @@ fn build_rocket() -> rocket::Rocket<rocket::Build> {
                 websocket::isolation_ws,
             ],
         )
+        .mount("/static", FileServer::from(relative!("static")))
 }
 
 #[launch]
@@ -471,6 +473,7 @@ mod tests {
                     websocket::isolation_ws,
                 ],
             )
+            .mount("/static", FileServer::from(relative!("static")))
     }
 
     #[test]

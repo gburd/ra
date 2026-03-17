@@ -8,12 +8,14 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+ra-core = { workspace = true }
 serde = { workspace = true }
 serde_yaml = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 pulldown-cmark = { workspace = true }
 anyhow = { workspace = true }
+sqlparser = { workspace = true }
 
 [lints]
 workspace = true

@@ -2,7 +2,7 @@
 id: RULE-ID-HERE
 name: Human-Readable Rule Name
 category: database-specific/DATABASE-NAME
-databases: [DATABASE-NAME]
+databases: [postgresql]
 version: 1.0.0
 authors: ["Your Name"]
 tags: [database-specific, DATABASE-NAME]

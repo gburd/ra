@@ -28,6 +28,7 @@
 pub mod adapter;
 pub mod duckdb;
 pub mod errors;
+pub mod optimizer;
 pub mod pool;
 pub mod sqlite;
 pub mod storage;
@@ -37,5 +38,6 @@ pub use adapter::{
     ColumnInfo, ConnectionConfig, DatabaseAdapter, DatabaseEngine, QueryResult, Value,
 };
 pub use errors::WasmDbError;
+pub use optimizer::{WasmOptimizer, OptimizationResult, OptimizerConfig};
 pub use pool::{ConnectionPool, PoolConfig, PooledConnection};
 pub use storage::StorageBackend;

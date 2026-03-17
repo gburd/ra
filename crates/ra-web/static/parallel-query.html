@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Parallel Query Execution - RA Optimizer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        header h1 {
+            font-size: 2em;
+            margin-bottom: 10px;
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .control-group {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+        }
+
+        .control-group label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #333;
+        }
+
+        .control-group input[type="range"] {
+            width: 100%;
+            margin: 10px 0;
+        }
+
+        .value-display {
+            font-size: 1.2em;
+            color: #667eea;
+            font-weight: bold;
+        }
+
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 1.1em;
+            border-radius: 8px;
+            cursor: pointer;
+            width: 100%;
+            font-weight: 600;
+            transition: transform 0.2s;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+        }
+
+        .results {
+            margin-top: 30px;
+            display: none;
+        }
+
+        .results.visible {
+            display: block;
+        }
+
+        .parallelism-card {
+            background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+            color: white;
+            padding: 40px;
+            border-radius: 12px;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .parallelism-card .workers {
+            font-size: 4em;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+
+        .parallelism-card .label {
+            font-size: 1.5em;
+            opacity: 0.9;
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .metric-card {
+            background: #f8f9fa;
+            padding: 25px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .metric-card .label {
+            font-size: 0.9em;
+            color: #666;
+            margin-bottom: 10px;
+        }
+
+        .metric-card .value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .metric-card.highlight .value {
+            color: #27ae60;
+        }
+
+        .reasoning {
+            background: #f8f9fa;
+            padding: 25px;
+            border-radius: 8px;
+        }
+
+        .reasoning h3 {
+            color: #333;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 3px solid #667eea;
+        }
+
+        .reasoning p {
+            color: #666;
+            line-height: 1.6;
+            font-size: 1.05em;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .loading.visible {
+            display: block;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Parallel Query Execution</h1>
+            <p>Determine optimal parallelism level based on data size and complexity</p>
+        </header>
+
+        <div class="content">
+            <div class="controls">
+                <div class="control-group">
+                    <label for="dataSize">Data Size (MB):</label>
+                    <input type="range" id="dataSize" min="10" max="100000" step="10" value="10000">
+                    <div class="value-display" id="dataSizeValue">10,000 MB</div>
+                </div>
+
+                <div class="control-group">
+                    <label for="complexity">Query Complexity:</label>
+                    <input type="range" id="complexity" min="1" max="10" step="1" value="5">
+                    <div class="value-display" id="complexityValue">5 (Medium)</div>
+                </div>
+
+                <div class="control-group">
+                    <label for="cpuCores">Available CPU Cores:</label>
+                    <input type="range" id="cpuCores" min="1" max="128" step="1" value="16">
+                    <div class="value-display" id="cpuCoresValue">16</div>
+                </div>
+
+                <div class="control-group">
+                    <label for="parallelismCost">Parallelism Overhead:</label>
+                    <input type="range" id="parallelismCost" min="0" max="50" step="1" value="10">
+                    <div class="value-display" id="parallelismCostValue">10%</div>
+                </div>
+            </div>
+
+            <button id="analyzeBtn">Analyze Parallelism</button>
+
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <p>Analyzing...</p>
+            </div>
+
+            <div class="results" id="results">
+                <div class="parallelism-card">
+                    <div class="workers" id="workers">8</div>
+                    <div class="label">Parallel Workers</div>
+                </div>
+
+                <div class="metrics-grid">
+                    <div class="metric-card">
+                        <div class="label">Serial Time</div>
+                        <div class="value" id="serialTime">-</div>
+                    </div>
+
+                    <div class="metric-card highlight">
+                        <div class="label">Parallel Time</div>
+                        <div class="value" id="parallelTime">-</div>
+                    </div>
+
+                    <div class="metric-card highlight">
+                        <div class="label">Speedup</div>
+                        <div class="value" id="speedup">-</div>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="label">Efficiency</div>
+                        <div class="value" id="efficiency">-</div>
+                    </div>
+                </div>
+
+                <div class="reasoning">
+                    <h3>Reasoning</h3>
+                    <p id="reasoningText">-</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const dataSizeSlider = document.getElementById('dataSize');
+        const complexitySlider = document.getElementById('complexity');
+        const cpuCoresSlider = document.getElementById('cpuCores');
+        const parallelismCostSlider = document.getElementById('parallelismCost');
+        const analyzeBtn = document.getElementById('analyzeBtn');
+        const loading = document.getElementById('loading');
+        const results = document.getElementById('results');
+
+        function formatNumber(num) {
+            return num.toLocaleString('en-US');
+        }
+
+        function getComplexityLabel(level) {
+            if (level <= 2) return level + ' (Low)';
+            if (level <= 5) return level + ' (Medium)';
+            if (level <= 8) return level + ' (High)';
+            return level + ' (Very High)';
+        }
+
+        dataSizeSlider.addEventListener('input', () => {
+            document.getElementById('dataSizeValue').textContent = formatNumber(parseInt(dataSizeSlider.value)) + ' MB';
+        });
+
+        complexitySlider.addEventListener('input', () => {
+            document.getElementById('complexityValue').textContent = getComplexityLabel(parseInt(complexitySlider.value));
+        });
+
+        cpuCoresSlider.addEventListener('input', () => {
+            document.getElementById('cpuCoresValue').textContent = cpuCoresSlider.value;
+        });
+
+        parallelismCostSlider.addEventListener('input', () => {
+            document.getElementById('parallelismCostValue').textContent = parallelismCostSlider.value + '%';
+        });
+
+        analyzeBtn.addEventListener('click', async () => {
+            loading.classList.add('visible');
+            results.classList.remove('visible');
+
+            const dataSize = parseInt(dataSizeSlider.value);
+            const complexity = parseInt(complexitySlider.value);
+            const cpuCores = parseInt(cpuCoresSlider.value);
+            const overhead = parseFloat(parallelismCostSlider.value) / 100;
+
+            // Mock calculation
+            const baseTime = dataSize * complexity / 100;
+            const optimalWorkers = Math.min(
+                cpuCores,
+                Math.max(1, Math.floor(dataSize / 1000) * Math.min(complexity, 4))
+            );
+
+            const parallelTime = (baseTime / optimalWorkers) * (1 + overhead * optimalWorkers / 10);
+            const speedup = baseTime / parallelTime;
+            const efficiency = (speedup / optimalWorkers * 100);
+
+            setTimeout(() => {
+                loading.classList.remove('visible');
+                results.classList.add('visible');
+
+                document.getElementById('workers').textContent = optimalWorkers;
+                document.getElementById('serialTime').textContent = baseTime.toFixed(0) + ' ms';
+                document.getElementById('parallelTime').textContent = parallelTime.toFixed(0) + ' ms';
+                document.getElementById('speedup').textContent = speedup.toFixed(1) + 'x';
+                document.getElementById('efficiency').textContent = efficiency.toFixed(0) + '%';
+
+                let reasoning = `With ${formatNumber(dataSize)} MB of data and complexity level ${complexity}, `;
+                reasoning += `using ${optimalWorkers} parallel workers provides optimal performance. `;
+
+                if (efficiency > 80) {
+                    reasoning += 'High efficiency indicates good parallel scaling with minimal overhead.';
+                } else if (efficiency > 50) {
+                    reasoning += 'Moderate efficiency suggests some coordination overhead but still worthwhile.';
+                } else {
+                    reasoning += 'Lower efficiency indicates diminishing returns from parallelism due to overhead.';
+                }
+
+                if (optimalWorkers >= cpuCores) {
+                    reasoning += ` Using all ${cpuCores} available cores.`;
+                } else {
+                    reasoning += ` Limited to ${optimalWorkers} workers to avoid excessive coordination overhead.`;
+                }
+
+                document.getElementById('reasoningText').textContent = reasoning;
+
+            }, 500);
+        });
+
+        document.getElementById('dataSizeValue').textContent = formatNumber(parseInt(dataSizeSlider.value)) + ' MB';
+        document.getElementById('complexityValue').textContent = getComplexityLabel(parseInt(complexitySlider.value));
+        document.getElementById('cpuCoresValue').textContent = cpuCoresSlider.value;
+        document.getElementById('parallelismCostValue').textContent = parallelismCostSlider.value + '%';
+    </script>
+</body>
+</html>

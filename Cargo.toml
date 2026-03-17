@@ -17,6 +17,7 @@ members = [
     "crates/ra-ml",
     "crates/ra-hardware",
     "crates/ra-multimodel",
+    "crates/ra-stats",
 ]
 
 [workspace.package]
@@ -86,6 +87,7 @@ ra-discovery = { path = "crates/ra-discovery" }
 ra-ml = { path = "crates/ra-ml" }
 ra-hardware = { path = "crates/ra-hardware" }
 ra-multimodel = { path = "crates/ra-multimodel" }
+ra-stats = { path = "crates/ra-stats" }
 
 [profile.release]
 lto = "thin"

@@ -11,8 +11,10 @@
 pub mod extractor;
 pub mod lexer;
 pub mod parser;
+pub mod sql_to_relexpr;
 pub mod validator;
 
 pub use extractor::*;
 pub use parser::*;
+pub use sql_to_relexpr::*;
 pub use validator::*;
