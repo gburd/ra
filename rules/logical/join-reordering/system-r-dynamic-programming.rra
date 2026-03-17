@@ -1,0 +1,271 @@
+---
+id: system-r-dynamic-programming
+name: System R Dynamic Programming Join Ordering
+category: logical/join-reordering
+databases: [postgresql, mysql, duckdb, sqlite, clickhouse, cockroachdb, mssql, oracle]
+execution_models: [volcano]
+version: "1.0.0"
+authors: ["Selinger et al., IBM System R"]
+tags: [join-reordering, dynamic-programming, cost-based, classic]
+complexity: "O(n * 2^n)"
+benefit_range: [0.1, 10.0]
+---
+
+# System R Dynamic Programming Join Ordering
+
+## Description
+
+Finds the optimal join order for multi-way joins using dynamic programming,
+as pioneered in IBM's System R. The algorithm builds optimal plans bottom-up,
+considering all possible join orders while pruning suboptimal subplans using
+the principle of optimality.
+
+**When to apply**: Multi-way inner join queries (3+ relations) where finding
+the optimal join order significantly impacts query performance. Most applicable
+when join selectivities vary widely between different orderings.
+
+**Why it works**: Different join orders can vary in cost by orders of magnitude
+(e.g., 10x to 1000x). System R's dynamic programming explores all join orders
+in O(n * 2^n) time, guaranteeing optimality while avoiding the O(n!) cost of
+exhaustive enumeration through memoization.
+
+## Relational Algebra
+
+```algebra
+Given relations {R1, R2, ..., Rn} with join predicates:
+
+For each subset S ⊆ {R1, ..., Rn}, |S| = k:
+  For each partition (S1, S2) of S where |S1| < k:
+    cost = cost(S1) + cost(S2) + cost(S1 ⋈ S2)
+    if cost < best_cost(S):
+      best_plan(S) = S1 ⋈ S2
+      best_cost(S) = cost
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+use std::collections::HashMap;
+
+// This is a meta-rule that generates optimal plans
+// Not a simple rewrite - requires cost-based search
+
+struct SystemROptimizer {
+    memo: HashMap<BitSet, (f64, Plan)>,
+}
+
+impl SystemROptimizer {
+    fn find_best_plan(&mut self, relations: &[Relation]) -> Plan {
+        let n = relations.len();
+
+        // Base case: single relations
+        for (i, rel) in relations.iter().enumerate() {
+            let set = BitSet::singleton(i);
+            let cost = self.estimate_scan_cost(rel);
+            self.memo.insert(set, (cost, Plan::Scan(rel.clone())));
+        }
+
+        // Build up from size 2 to n
+        for size in 2..=n {
+            for subset in all_subsets_of_size(n, size) {
+                self.find_best_join(subset, relations);
+            }
+        }
+
+        let full_set = BitSet::full(n);
+        self.memo.get(&full_set).unwrap().1.clone()
+    }
+
+    fn find_best_join(&mut self, subset: BitSet, rels: &[Relation]) {
+        let mut best_cost = f64::INFINITY;
+        let mut best_plan = None;
+
+        // Try all partitions of subset into (left, right)
+        for left in subset.proper_subsets() {
+            let right = subset.difference(left);
+
+            if !self.has_join_predicate(left, right, rels) {
+                continue; // Avoid Cartesian products
+            }
+
+            let (left_cost, left_plan) = self.memo.get(&left).unwrap();
+            let (right_cost, right_plan) = self.memo.get(&right).unwrap();
+
+            let join_cost = self.estimate_join_cost(
+                left_plan, right_plan, rels
+            );
+            let total_cost = left_cost + right_cost + join_cost;
+
+            if total_cost < best_cost {
+                best_cost = total_cost;
+                best_plan = Some(Plan::Join(
+                    Box::new(left_plan.clone()),
+                    Box::new(right_plan.clone())
+                ));
+            }
+        }
+
+        self.memo.insert(subset, (best_cost, best_plan.unwrap()));
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    hw: &HardwareProfile,
+) -> bool {
+    // Only for multi-way joins
+    stats.n_relations >= 3
+        // Reasonable size for DP (< 20 relations typically)
+        && stats.n_relations <= 20
+        // All inner joins (System R doesn't handle outer joins)
+        && stats.all_inner_joins
+        // Cost estimation must be available
+        && stats.has_cardinality_estimates
+}
+```
+
+**Restrictions:**
+- Only applicable to inner joins (outer joins break optimality principle)
+- Requires accurate cardinality estimates for cost-based decisions
+- Exponential in number of relations (practical limit ~15-20 relations)
+- Does not generate bushy trees in original System R (left-deep only)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let n = stats.n_relations as f64;
+
+    // Benefit depends on variation in join selectivities
+    // If all joins equally selective, order doesn't matter much
+    let selectivity_variance = stats.join_selectivity_variance;
+
+    // Worst case vs. best case join order
+    // Can vary from 10x to 1000x in real queries
+    let worst_to_best_ratio = if selectivity_variance > 0.5 {
+        100.0 // High variance: 100x improvement possible
+    } else if selectivity_variance > 0.2 {
+        10.0  // Medium variance: 10x improvement
+    } else {
+        2.0   // Low variance: 2x improvement
+    };
+
+    // Convert to benefit percentage
+    // benefit = (worst - best) / worst
+    (worst_to_best_ratio - 1.0) / worst_to_best_ratio
+}
+```
+
+**Assumptions:**
+- Join cost is sum of: left cost + right cost + join processing cost
+- Join processing cost ∝ |left| * |right| * selectivity
+- Optimal substructure: best plan for S uses best plans for subsets
+- No interesting orders (extensions like Volcano consider sort orders)
+
+**Typical benefit**: 2x-100x depending on query characteristics.
+
+## Test Cases
+
+### Positive: Classic star join
+
+```sql
+-- TPC-H Query 5 variant
+SELECT *
+FROM customer c,
+     orders o,
+     lineitem l,
+     nation n,
+     region r
+WHERE c.custkey = o.custkey
+  AND o.orderkey = l.orderkey
+  AND c.nationkey = n.nationkey
+  AND n.regionkey = r.regionkey
+  AND r.name = 'ASIA';
+
+-- Bad order: customer ⋈ orders (large), then ⋈ lineitem (huge)
+-- Good order: region σ ⋈ nation (tiny), then ⋈ customer ⋈ orders ⋈ lineitem
+-- DP finds optimal order considering cardinalities
+```
+
+### Positive: Chain join with varying selectivities
+
+```sql
+-- A ⋈ B ⋈ C ⋈ D where selectivities vary
+SELECT *
+FROM t1, t2, t3, t4
+WHERE t1.id = t2.t1_id  -- selectivity 0.1
+  AND t2.id = t3.t2_id  -- selectivity 0.5
+  AND t3.id = t4.t3_id; -- selectivity 0.01
+
+-- Optimal: (t1 ⋈ t2) gives small intermediate (10% of t1)
+--          Join with t3 next (50% selectivity)
+--          Finally t4 (1% selectivity on already-reduced set)
+```
+
+### Negative: Single join (no reordering needed)
+
+```sql
+-- Only 2 relations
+SELECT * FROM orders o
+JOIN customers c ON o.customer_id = c.id;
+
+-- No reordering benefit - only one possible order
+```
+
+### Positive: TPC-H Q8 (8-way join)
+
+```sql
+-- Complex multi-way join from TPC-H
+SELECT o_year,
+       SUM(CASE WHEN nation = 'BRAZIL' THEN volume ELSE 0 END) / SUM(volume) AS mkt_share
+FROM (
+  SELECT EXTRACT(year FROM o.orderdate) AS o_year,
+         l.extendedprice * (1 - l.discount) AS volume,
+         n2.name AS nation
+  FROM part p, supplier s, lineitem l, orders o, customer c, nation n1, nation n2, region r
+  WHERE p.partkey = l.partkey
+    AND s.suppkey = l.suppkey
+    AND l.orderkey = o.orderkey
+    AND o.custkey = c.custkey
+    AND c.nationkey = n1.nationkey
+    AND n1.regionkey = r.regionkey
+    AND r.name = 'AMERICA'
+    AND s.nationkey = n2.nationkey
+    AND p.type = 'ECONOMY ANODIZED STEEL'
+    AND o.orderdate BETWEEN '1995-01-01' AND '1996-12-31'
+) AS all_nations
+GROUP BY o_year
+ORDER BY o_year;
+
+-- 8-way join: DP finds order starting with selective filters
+```
+
+## References
+
+**Original paper:**
+- Selinger, P. Griffiths, et al., "Access Path Selection in a Relational Database Management System", ACM SIGMOD 1979
+  - DOI: 10.1145/582095.582099
+  - THE foundational paper on cost-based query optimization
+  - Introduced: dynamic programming for join ordering, cost estimation, selectivity estimation
+
+**Follow-up work:**
+- Ono & Lohman, "Measuring the Complexity of Join Enumeration in Query Optimization", VLDB 1990
+  - Analysis of System R algorithm complexity
+- Moerkotte & Neumann, "Dynamic Programming Strikes Back", ACM SIGMOD 2008
+  - DOI: 10.1145/1376616.1376672
+  - Modern improvements: DPHyp algorithm for bushy trees
+- Lohman, "Is Query Optimization a Solved Problem?", VLDB Workshop 2014
+  - Historical perspective on System R's impact
+
+**Implementation in databases:**
+- PostgreSQL: `src/backend/optimizer/path/joinrels.c` - DP join ordering
+- MySQL: `sql/sql_optimizer.cc` - Greedy approximation of System R
+- Most commercial databases (Oracle, SQL Server, DB2) use variants of System R DP

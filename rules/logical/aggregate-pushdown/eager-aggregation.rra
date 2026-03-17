@@ -1,0 +1,235 @@
+---
+id: eager-aggregation
+name: Eager Aggregation (Yan & Larson)
+category: logical/aggregate-pushdown
+databases: [mssql, postgresql]
+execution_models: [volcano, vectorized]
+version: "1.0.0"
+authors: ["Yan & Larson, Microsoft Research"]
+tags: [aggregation, pushdown, early-aggregation, classic]
+complexity: "O(n)"
+benefit_range: [0.4, 10.0]
+---
+
+# Eager Aggregation
+
+## Description
+
+Pushes aggregation operations below joins when possible, performing partial
+aggregation before the join to reduce cardinality. This is particularly
+effective when the join increases cardinality (one-to-many relationships),
+as eager aggregation on the "many" side reduces rows before joining.
+
+**When to apply**: Queries with aggregation after joins, especially when:
+- Join is one-to-many and aggregation groups by the "one" side key
+- Pre-aggregation reduces cardinality significantly
+- Join condition includes the GROUP BY columns
+
+**Why it works**: Joins often increase cardinality (e.g., customer → orders
+is 1:N). If we aggregate orders by customer_id before joining with customers,
+we join N orders per customer down to 1 summary row per customer, dramatically
+reducing join cost.
+
+## Relational Algebra
+
+```algebra
+Traditional (lazy aggregation):
+γ_{c.id, SUM(o.total)}((Customer ⋈ Order))
+
+Eager aggregation:
+γ_{c.id, SUM(agg_total)}(Customer ⋈ γ_{customer_id, SUM(total) as agg_total}(Order))
+
+Where the inner aggregation reduces Order cardinality before the join.
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("eager-aggregation-push-below-join";
+    "(aggregate ?groups ?aggs
+       (join ?type ?pred ?left ?right))" =>
+    "(aggregate (outer-groups ?groups)
+                (finalize-aggs ?aggs)
+       (join ?type ?pred
+         ?left
+         (aggregate (inner-groups ?groups ?pred)
+                    (partial-aggs ?aggs)
+                    ?right)))"
+    if can-push-aggregate-below-join("?groups", "?aggs", "?pred", "?right")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> bool {
+    // Aggregation appears after join
+    stats.has_aggregate_after_join
+        // GROUP BY columns include join key from one side
+        && stats.group_by_includes_join_key
+        // Pre-aggregation reduces cardinality
+        && stats.pre_aggregate_reduction_factor > 2.0
+        // Aggregate functions are decomposable (SUM, COUNT, MIN, MAX work; MEDIAN doesn't)
+        && stats.aggregates_are_decomposable
+}
+```
+
+**Restrictions:**
+- GROUP BY must include the join key (to allow pre-aggregation)
+- Aggregate functions must be decomposable:
+  - SUM: decomposable (partial sums can be summed)
+  - COUNT: decomposable (partial counts can be summed)
+  - AVG: decomposable (track SUM and COUNT separately)
+  - MIN/MAX: decomposable (min of mins, max of maxes)
+  - MEDIAN, PERCENTILE: NOT decomposable (need full data)
+- Join type should be INNER or LEFT (RIGHT/FULL require careful handling)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let right_rows = stats.right_cardinality as f64;
+    let left_rows = stats.left_cardinality as f64;
+    let pre_agg_groups = stats.pre_aggregate_groups as f64;
+    let join_selectivity = stats.join_selectivity;
+
+    // Cost without eager aggregation (lazy):
+    // - Join: left_rows * right_rows (hash join build + probe)
+    // - Aggregate after join: (left_rows * right_rows * join_selectivity)
+    let lazy_join_cost = (left_rows * 1.5) + (right_rows * 1.0);
+    let lazy_agg_cost = (left_rows * right_rows * join_selectivity) * 1.5;
+    let lazy_total = lazy_join_cost + lazy_agg_cost;
+
+    // Cost with eager aggregation:
+    // - Pre-aggregate right: right_rows * 1.5 → pre_agg_groups rows
+    // - Join: left_rows * pre_agg_groups (much smaller!)
+    // - Final aggregate: (left_rows * pre_agg_groups * join_selectivity) * 1.5
+    let eager_pre_agg = right_rows * 1.5;
+    let eager_join_cost = (left_rows * 1.5) + (pre_agg_groups * 1.0);
+    let eager_final_agg = (left_rows * pre_agg_groups * join_selectivity) * 1.5;
+    let eager_total = eager_pre_agg + eager_join_cost + eager_final_agg;
+
+    // Benefit calculation
+    if lazy_total > eager_total {
+        (lazy_total - eager_total) / lazy_total
+    } else {
+        0.0
+    }
+}
+```
+
+**Assumptions:**
+- Hash aggregation cost: ~1.5x input cardinality
+- Join cost (hash): build on smaller side (1.5x), probe larger (1.0x)
+- Pre-aggregation significantly reduces right-side cardinality
+- Decomposable aggregates have negligible extra cost for two-phase aggregation
+
+**Typical benefit**: 40% to 10x for high fan-out joins with aggregation.
+
+## Test Cases
+
+### Positive: Customer order totals (1:N join)
+
+```sql
+-- Aggregate orders by customer after joining
+SELECT c.id, c.name, SUM(o.total) as total_purchases
+FROM customers c
+JOIN orders o ON c.id = o.customer_id
+GROUP BY c.id, c.name;
+
+-- Lazy aggregation:
+-- - Join customers (10K) with orders (1M) → 1M rows
+-- - Aggregate 1M rows → 10K groups
+
+-- Eager aggregation:
+-- - Pre-aggregate orders by customer_id: 1M rows → 10K groups (one per customer)
+-- - Join customers (10K) with aggregated orders (10K) → 10K rows
+-- - Final aggregate: 10K rows → 10K groups
+-- Speedup: ~100x less join work!
+```
+
+### Positive: Department salary totals
+
+```sql
+-- Average salary by department
+SELECT d.dept_name, AVG(e.salary) as avg_salary
+FROM departments d
+JOIN employees e ON d.dept_id = e.dept_id
+GROUP BY d.dept_id, d.dept_name;
+
+-- Eager: Pre-aggregate employees by dept_id (SUM and COUNT)
+-- Then join with departments (small table)
+```
+
+### Negative: GROUP BY doesn't include join key
+
+```sql
+-- Grouping by different column
+SELECT c.country, SUM(o.total)
+FROM customers c
+JOIN orders o ON c.id = o.customer_id
+GROUP BY c.country;
+
+-- Cannot pre-aggregate orders by country (orders don't have country)
+-- Must join first, then aggregate
+```
+
+### Negative: Non-decomposable aggregate
+
+```sql
+-- MEDIAN requires full dataset
+SELECT c.id, MEDIAN(o.total)
+FROM customers c
+JOIN orders o ON c.id = o.customer_id
+GROUP BY c.id;
+
+-- Cannot compute median in two phases
+-- MEDIAN(partial_medians) ≠ MEDIAN(all_values)
+```
+
+### Positive: TPC-H Query 5
+
+```sql
+-- Simplified TPC-H Q5
+SELECT n.name, SUM(l.extendedprice * (1 - l.discount)) as revenue
+FROM customer c, orders o, lineitem l, nation n
+WHERE c.custkey = o.custkey
+  AND o.orderkey = l.orderkey
+  AND c.nationkey = n.nationkey
+GROUP BY n.name;
+
+-- Eager: Pre-aggregate lineitem by orderkey before joining with orders
+-- Then pre-aggregate by custkey before joining with customer
+-- Chain of eager aggregations significantly reduces intermediate results
+```
+
+## References
+
+**Original paper:**
+- Yan, W.P., Larson, P.-Å., "Eager Aggregation and Lazy Aggregation", VLDB 1995
+  - The foundational paper on eager vs. lazy aggregation
+  - Analysis of when to push aggregation below joins
+  - Cost models for two-phase aggregation
+
+**Related work:**
+- Chaudhuri, S., Shim, K., "Including Group-By in Query Optimization", VLDB 1994
+  - Aggregate placement in query plans
+  - Interaction with join ordering
+
+- Galindo-Legaria, C., Joshi, M., "Orthogonal Optimization of Subqueries and Aggregation", ACM SIGMOD 2001
+  - DOI: 10.1145/375663.375746
+  - Modern treatment of aggregate optimization
+
+**Implementation in databases:**
+- Microsoft SQL Server: Full eager aggregation optimization (Yan & Larson implemented it)
+- PostgreSQL: Partial aggregation pushdown (`src/backend/optimizer/plan/planner.c`)
+- Apache Spark: Partial aggregation before shuffle
+- Presto/Trino: Partial aggregation and local aggregation before exchange
