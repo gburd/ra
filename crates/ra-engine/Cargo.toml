@@ -18,7 +18,12 @@ timely = { workspace = true }
 differential-dataflow = { workspace = true }
 
 [dev-dependencies]
+criterion = { workspace = true }
 proptest = { workspace = true }
+
+[[bench]]
+name = "optimizer"
+harness = false
 
 [lints]
 workspace = true
