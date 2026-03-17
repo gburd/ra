@@ -1,0 +1,66 @@
+---
+id: mongodb-geospatial-index
+name: MongoDB Geospatial Index Optimization
+category: database-specific/mongodb
+databases: [mongodb]
+execution_models: [pipeline]
+version: "1.0.0"
+authors: ["MongoDB Inc."]
+tags: [geospatial, 2dsphere, geonear, location]
+complexity: "O(log n)"
+benefit_range: [0.7, 50.0]
+---
+
+# MongoDB Geospatial Index Optimization
+
+## Description
+
+Uses 2dsphere or 2d geospatial indexes for location-based queries ($geoNear,
+$geoWithin, $near) instead of scanning all documents and computing distances.
+Geospatial indexes dramatically speed up proximity and containment queries.
+
+**When to apply**: Queries with $near, $geoWithin, $geoIntersects on GeoJSON
+or legacy coordinate pairs. 2dsphere index enables efficient spatial operations.
+
+**Why it works**: Geospatial indexes use S2 geometry (spherical) or R-tree
+structures to index locations, enabling logarithmic-time proximity searches
+vs. linear full collection scans with distance calculations.
+
+## Test Cases
+
+### Positive: $near with 2dsphere index
+
+```javascript
+// Index: {location: "2dsphere"}
+db.places.find({
+  location: {
+    $near: {
+      $geometry: {type: "Point", coordinates: [-73.97, 40.77]},
+      $maxDistance: 5000  // 5km
+    }
+  }
+})
+// Uses index to find nearby points, O(log n)
+```
+
+### Positive: $geoWithin polygon
+
+```javascript
+// Index: {location: "2dsphere"}
+db.places.find({
+  location: {
+    $geoWithin: {
+      $geometry: {
+        type: "Polygon",
+        coordinates: [[[...polygon coordinates...]]]
+      }
+    }
+  }
+})
+```
+
+## References
+
+**Documentation:**
+- MongoDB Manual: "Geospatial Queries"
+- https://docs.mongodb.com/manual/geospatial-queries/

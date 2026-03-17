@@ -1,0 +1,202 @@
+---
+id: mongodb-index-intersection
+name: MongoDB Index Intersection
+category: database-specific/mongodb
+databases: [mongodb]
+execution_models: [pipeline]
+version: "1.0.0"
+authors: ["MongoDB Inc."]
+tags: [index, intersection, multi-index, optimization]
+complexity: "O(n log n)"
+benefit_range: [0.4, 3.0]
+---
+
+# MongoDB Index Intersection
+
+## Description
+
+Uses multiple indexes simultaneously for queries with AND conditions, intersecting
+the results from each index scan. When no single compound index covers all
+predicates, MongoDB can use multiple single-field indexes and intersect their
+results, which can be faster than a full collection scan.
+
+**When to apply**: Queries with multiple AND predicates where separate indexes
+exist on individual fields but no compound index covers all fields. Index
+intersection combines multiple index scans to satisfy the query.
+
+**Why it works**: If predicate A has selectivity 10% (index on A) and predicate
+B has selectivity 20% (index on B), intersecting gives 2% result (A AND B).
+This can be faster than scanning 100% of documents, even with the intersection
+overhead.
+
+## Relational Algebra
+
+```algebra
+σ_{p1 ∧ p2}(R) with Index(p1) and Index(p2)
+
+Without intersection:
+SeqScan(R) → filter p1 AND p2
+
+With intersection:
+IndexScan(I1, p1) ∩ IndexScan(I2, p2) → fetch matched documents
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mongodb-index-intersection";
+    "(filter (and ?pred1 ?pred2) (scan ?collection))" =>
+    "(fetch-docs
+       (intersect
+         (index-scan (find-index ?pred1 ?collection) ?pred1)
+         (index-scan (find-index ?pred2 ?collection) ?pred2)))"
+    if has-separate-indexes("?pred1", "?pred2", "?collection")
+       && intersection-is-beneficial("?pred1", "?pred2")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> bool {
+    // Must have separate indexes on predicates
+    stats.has_multiple_usable_indexes
+        // No compound index covering all predicates
+        && !stats.has_covering_compound_index
+        // Combined selectivity should be low enough
+        && (stats.pred1_selectivity * stats.pred2_selectivity) < 0.1
+        // Each index should be selective
+        && stats.pred1_selectivity < 0.5
+        && stats.pred2_selectivity < 0.5
+}
+```
+
+**Restrictions:**
+- Only works with AND predicates (not OR)
+- Requires multiple single-field or compatible indexes
+- Intersection overhead must be less than full scan cost
+- Most beneficial when combined selectivity is low (<10%)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let total_docs = stats.collection_size as f64;
+    let sel1 = stats.pred1_selectivity;
+    let sel2 = stats.pred2_selectivity;
+    let combined_sel = sel1 * sel2;
+
+    // Cost of collection scan
+    let scan_cost = total_docs * 0.000001; // 1μs per doc
+
+    // Cost of index intersection
+    let index1_scan = total_docs * sel1 * 0.000005; // 5μs per index entry
+    let index2_scan = total_docs * sel2 * 0.000005;
+    let intersection = (total_docs * sel1).min(total_docs * sel2) * 0.000001;
+    let doc_fetch = total_docs * combined_sel * 0.00001; // 10μs per fetch
+    let intersection_cost = index1_scan + index2_scan + intersection + doc_fetch;
+
+    if scan_cost > intersection_cost {
+        (scan_cost - intersection_cost) / scan_cost
+    } else {
+        0.0
+    }
+}
+```
+
+**Assumptions:**
+- Collection scan: 1μs per document
+- Index scan: 5μs per index entry
+- Intersection: 1μs per comparison
+- Document fetch: 10μs per document (random I/O)
+- Beneficial when combined selectivity < 10%
+
+**Typical benefit**: 40% to 3x for moderately selective multi-predicate queries.
+
+## Test Cases
+
+### Positive: Two selective indexes
+
+```javascript
+// Indexes: {age: 1}, {city: 1}
+db.users.find({
+  age: {$gte: 21, $lte: 25},  // 10% selectivity
+  city: "Seattle"              // 5% selectivity
+})
+
+// Index intersection:
+// 1. Scan {age: 1} index → 10% of users
+// 2. Scan {city: 1} index → 5% of users
+// 3. Intersect → 0.5% of users (age AND city)
+// 4. Fetch those documents
+// explain() shows: "stage": "AND_SORTED"
+```
+
+### Positive: Better than any single index
+
+```javascript
+// Indexes: {status: 1}, {priority: 1}
+db.tickets.find({
+  status: "open",      // 30% selectivity
+  priority: "high"     // 20% selectivity
+})
+
+// Options:
+// 1. Use status index: scan 30%, filter priority → 6%
+// 2. Use priority index: scan 20%, filter status → 6%
+// 3. Intersection: scan both, intersect → 6% (similar final result)
+// Intersection may win if indexes fit in cache
+```
+
+### Negative: One index very selective (no intersection)
+
+```javascript
+// Indexes: {email: 1}, {country: 1}
+db.users.find({
+  email: "user@example.com",  // 0.0001% selectivity (unique)
+  country: "US"               // 50% selectivity
+})
+
+// Just use email index (extremely selective)
+// No need for intersection - email alone narrows to 1 document
+// explain() shows: single index scan on {email: 1}
+```
+
+### Negative: High combined selectivity (scan better)
+
+```javascript
+// Indexes: {active: 1}, {verified: 1}
+db.users.find({
+  active: true,    // 80% selectivity
+  verified: true   // 90% selectivity
+})
+
+// Combined: 72% selectivity (80% * 90%)
+// Index intersection would scan 80% + 90% + intersect + fetch 72%
+// Collection scan 100% is simpler and comparable
+```
+
+## References
+
+**Implementation:**
+- MongoDB source: `src/mongo/db/query/planner_ixselect.cpp`
+- Index intersection: `QueryPlanner::planFromCache()`
+- AND_SORTED and AND_HASH stages
+
+**Documentation:**
+- MongoDB Manual: "Index Intersection"
+  - https://docs.mongodb.com/manual/core/index-intersection/
+- Index selection heuristics
+- Performance considerations
+
+**Related papers:**
+- Graefe, G., Kuno, H., "Modern B-Tree Techniques", 2011
+  - Multi-index access methods

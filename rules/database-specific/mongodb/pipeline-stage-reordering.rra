@@ -1,0 +1,242 @@
+---
+id: mongodb-pipeline-stage-reordering
+name: MongoDB Aggregation Pipeline Stage Reordering
+category: database-specific/mongodb
+databases: [mongodb]
+execution_models: [pipeline]
+version: "1.0.0"
+authors: ["MongoDB Inc."]
+tags: [aggregation, pipeline, reordering, optimization]
+complexity: "O(n)"
+benefit_range: [0.3, 5.0]
+---
+
+# MongoDB Aggregation Pipeline Stage Reordering
+
+## Description
+
+Reorders stages in MongoDB's aggregation pipeline to push selective operations
+($match, $limit) earlier in the pipeline, reducing the number of documents
+flowing through expensive stages like $lookup, $unwind, or $group. This is
+MongoDB's equivalent of predicate pushdown in relational systems.
+
+**When to apply**: Aggregation pipelines where $match or $limit stages appear
+after expensive operations. The optimizer can move these filtering stages earlier
+to reduce intermediate result size.
+
+**Why it works**: MongoDB's aggregation pipeline processes documents stage by
+stage. If a $match filters 90% of documents but appears after a $lookup join,
+the join processes 10x more documents than necessary. Reordering $match before
+$lookup reduces join cardinality dramatically.
+
+## Relational Algebra
+
+```algebra
+MongoDB pipeline stages map to relational operators:
+$match → σ (selection/filter)
+$project → π (projection)
+$lookup → ⋈ (join)
+$group → γ (aggregation)
+$unwind → unnest
+$limit → LIMIT
+
+Reordering:
+[$lookup, $match] → [$match_pushed, $lookup, $match_remaining]
+[$group, $limit] → [$limit_pushed, $group, $limit]
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mongodb-match-before-lookup";
+    "(pipeline (list
+       (lookup ?from ?localField ?foreignField ?as)
+       (match ?pred)))" =>
+    "(pipeline (list
+       (match (extract-local-pred ?pred ?localField))
+       (lookup ?from ?localField ?foreignField ?as)
+       (match (extract-foreign-pred ?pred ?as))))"
+    if can-split-match-predicate("?pred", "?localField", "?as")
+),
+
+rw!("mongodb-match-before-unwind";
+    "(pipeline (list
+       (unwind ?path)
+       (match ?pred)))" =>
+    "(pipeline (list
+       (match (extract-pre-unwind-pred ?pred ?path))
+       (unwind ?path)
+       (match (extract-post-unwind-pred ?pred ?path))))"
+    if can-push-match-before-unwind("?pred", "?path")
+),
+
+rw!("mongodb-limit-before-sort";
+    "(pipeline (list
+       (sort ?spec)
+       (limit ?n)))" =>
+    "(pipeline (list
+       (sort (with-limit ?spec ?n))
+       (limit ?n)))"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> bool {
+    // Must have stages that can be reordered
+    stats.has_reorderable_pipeline_stages
+        // $match should be selective
+        && stats.match_selectivity < 0.5
+        // Expensive stages present (lookup, group, unwind)
+        && stats.has_expensive_pipeline_stages
+}
+```
+
+**Restrictions:**
+- Cannot reorder stages that depend on previous stage results
+- $match on array fields cannot always move before $unwind
+- $group dependencies must be preserved
+- $lookup local field predicates can push, but foreign field predicates cannot
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let input_docs = stats.input_document_count as f64;
+    let match_selectivity = stats.match_selectivity;
+    let filtered_docs = input_docs * match_selectivity;
+    let expensive_stage_cost_per_doc = stats.expensive_stage_cost;
+
+    // Cost without reordering: all docs through expensive stage
+    let without_reorder = input_docs * expensive_stage_cost_per_doc;
+
+    // Cost with reordering: only filtered docs through expensive stage
+    let with_reorder = (input_docs * 0.000001) // match cost
+        + (filtered_docs * expensive_stage_cost_per_doc);
+
+    if without_reorder > with_reorder {
+        (without_reorder - with_reorder) / without_reorder
+    } else {
+        0.0
+    }
+}
+```
+
+**Assumptions:**
+- $match cost: ~1μs per document
+- $lookup cost: ~1ms per document (depends on index)
+- $group cost: ~10μs per document
+- $unwind cost: ~5μs per document per array element
+
+**Typical benefit**: 30% to 5x for selective $match before expensive stages.
+
+## Test Cases
+
+### Positive: $match before $lookup
+
+```javascript
+// Original pipeline (inefficient)
+db.orders.aggregate([
+  {$lookup: {
+    from: "customers",
+    localField: "customer_id",
+    foreignField: "_id",
+    as: "customer"
+  }},
+  {$match: {
+    "customer.region": "US",
+    "total": {$gt: 1000}
+  }}
+])
+
+// After reordering:
+// 1. Push {total: {$gt: 1000}} before $lookup (local field)
+// 2. Keep {"customer.region": "US"} after $lookup (foreign field)
+db.orders.aggregate([
+  {$match: {total: {$gt: 1000}}},  // Pushed earlier
+  {$lookup: {
+    from: "customers",
+    localField: "customer_id",
+    foreignField: "_id",
+    as: "customer"
+  }},
+  {$match: {"customer.region": "US"}}  // Kept after
+])
+```
+
+### Positive: $limit with $sort optimization
+
+```javascript
+// Original (sorts all documents)
+db.products.aggregate([
+  {$sort: {price: -1}},
+  {$limit: 10}
+])
+
+// After optimization (top-K algorithm)
+db.products.aggregate([
+  {$sort: {price: -1, limit: 10}},  // Optimized sort with limit
+  {$limit: 10}
+])
+// MongoDB uses heap-based top-K instead of full sort
+```
+
+### Positive: $match before $unwind
+
+```javascript
+// Original (unwinds all, then filters)
+db.orders.aggregate([
+  {$unwind: "$items"},
+  {$match: {
+    "order_date": {$gte: ISODate("2024-01-01")},
+    "items.quantity": {$gt: 5}
+  }}
+])
+
+// After reordering:
+db.orders.aggregate([
+  {$match: {order_date: {$gte: ISODate("2024-01-01")}}},  // Before unwind
+  {$unwind: "$items"},
+  {$match: {"items.quantity": {$gt: 5}}}  // After unwind
+])
+```
+
+### Negative: Cannot reorder dependent stages
+
+```javascript
+// $match depends on $addFields result
+db.collection.aggregate([
+  {$addFields: {total_with_tax: {$multiply: ["$total", 1.08]}}},
+  {$match: {total_with_tax: {$gt: 1000}}}
+])
+
+// Cannot push $match before $addFields - depends on computed field
+```
+
+## References
+
+**Implementation:**
+- MongoDB source: `src/mongo/db/pipeline/pipeline_optimization.cpp`
+- Stage reordering: `Pipeline::optimizePipeline()`
+- $match pushdown: `DocumentSourceMatch::pushBefore()`
+
+**Documentation:**
+- MongoDB Manual: "Aggregation Pipeline Optimization"
+  - https://docs.mongodb.com/manual/core/aggregation-pipeline-optimization/
+- $match before $lookup optimization
+- $sort + $limit combination (top-K)
+- $match before $unwind
+
+**Related papers:**
+- Hellerstein, J.M., et al., "Architecture of a Database System", 2007
+  - Chapter on query optimization applies to document stores
+- MongoDB architecture: Document-oriented query processing
