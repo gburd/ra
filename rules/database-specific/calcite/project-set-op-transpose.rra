@@ -1,0 +1,117 @@
+---
+id: calcite-project-set-op-transpose
+name: Calcite ProjectSetOpTransposeRule
+category: database-specific/calcite
+databases: [calcite]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, calcite, project, set-op, pushdown]
+complexity: O(n)
+benefit_range: [0.1, 0.5]
+---
+
+# Calcite ProjectSetOpTransposeRule
+
+## Description
+
+Pushes a projection below a set operation (UNION, INTERSECT,
+EXCEPT) by applying the same projection to each input branch.
+This narrows the rows flowing through the set operation, reducing
+memory and I/O.
+
+**When to apply**: A `LogicalProject` sits above a `SetOp` and
+the projection does not introduce expressions that require the
+full output of the set operation.
+
+**Why it works**: Narrower rows reduce the cost of hashing or
+sorting required for duplicate elimination in UNION DISTINCT,
+INTERSECT, or EXCEPT.
+
+**Calcite class**: `org.apache.calcite.rel.rules.ProjectSetOpTransposeRule`
+
+## Relational Algebra
+
+```algebra
+-- Before: projection above union
+pi[a, b](R UNION ALL S)
+
+-- After: projection pushed to each branch
+pi[a, b](R) UNION ALL pi[a, b](S)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-project-set-op-transpose";
+    "(project ?exprs (union-all ?left ?right))" =>
+    "(union-all (project ?exprs ?left) (project ?exprs ?right))"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    project_exprs: &[Expr],
+    set_op_schema: &[Column],
+) -> bool {
+    // All projected expressions must be expressible
+    // in terms of each branch's schema
+    let refs = project_exprs.iter()
+        .flat_map(|e| e.referenced_columns())
+        .collect::<Vec<_>>();
+    refs.iter().all(|c| set_op_schema.contains(c))
+}
+```
+
+**Restrictions:**
+- Cannot push if project introduces windowed aggregates
+  that depend on the combined result
+- For DISTINCT set ops, projection must not remove columns
+  used in duplicate detection unless the projection is applied
+  after the set operation completes
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    total_rows: f64,
+    original_width: usize,
+    projected_width: usize,
+) -> f64 {
+    if original_width == 0 {
+        return 0.0;
+    }
+    let width_ratio = projected_width as f64
+        / original_width as f64;
+    total_rows * (1.0 - width_ratio) * 0.01
+}
+```
+
+**Typical benefit**: 10-50% from narrower intermediate results.
+
+## Test Cases
+
+```sql
+-- Positive: push projection into UNION ALL
+SELECT name FROM (
+    SELECT id, name, sal FROM emp
+    UNION ALL
+    SELECT id, name, sal FROM contractor
+) t;
+-- Project on name pushed into both branches
+```
+
+```sql
+-- Negative: expression depends on combined result
+SELECT ROW_NUMBER() OVER () FROM (
+    SELECT id FROM a UNION ALL SELECT id FROM b
+) t;
+-- Window function cannot be pushed below UNION
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/ProjectSetOpTransposeRule.java

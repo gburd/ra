@@ -1,0 +1,119 @@
+---
+id: calcite-filter-set-op-transpose
+name: Calcite FilterSetOpTransposeRule
+category: database-specific/calcite
+databases: [calcite]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, calcite, filter, set-op, pushdown]
+complexity: O(n)
+benefit_range: [0.2, 0.8]
+---
+
+# Calcite FilterSetOpTransposeRule
+
+## Description
+
+Pushes a filter below a set operation (UNION, INTERSECT, EXCEPT)
+by replicating the filter on each input branch. Since all branches
+of a set operation produce the same schema, a filter above can be
+applied independently to each branch.
+
+**When to apply**: A `LogicalFilter` sits above a `LogicalUnion`,
+`LogicalIntersect`, or `LogicalMinus`.
+
+**Why it works**: Filtering each branch before the set operation
+reduces the number of rows that flow into the potentially expensive
+duplicate-elimination or difference computation.
+
+**Calcite class**: `org.apache.calcite.rel.rules.FilterSetOpTransposeRule`
+
+## Relational Algebra
+
+```algebra
+-- Before: filter above union
+sigma[p](R UNION ALL S)
+
+-- After: filter pushed to each branch
+sigma[p](R) UNION ALL sigma[p](S)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-filter-set-op-transpose-union";
+    "(filter ?pred (union-all ?left ?right))" =>
+    "(union-all (filter ?pred ?left) (filter ?pred ?right))"
+),
+
+rw!("calcite-filter-set-op-transpose-intersect";
+    "(filter ?pred (intersect ?left ?right))" =>
+    "(intersect (filter ?pred ?left) (filter ?pred ?right))"
+),
+
+rw!("calcite-filter-set-op-transpose-except";
+    "(filter ?pred (except ?left ?right))" =>
+    "(except (filter ?pred ?left) (filter ?pred ?right))"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    predicate: &Expr,
+    set_op_schema: &[Column],
+) -> bool {
+    // Filter must reference only columns in the set op schema
+    let pred_cols = predicate.referenced_columns();
+    pred_cols.iter().all(|c| set_op_schema.contains(c))
+}
+```
+
+**Restrictions:**
+- Predicate must be expressible in terms of all branches' schemas
+- For EXCEPT, pushing to the right branch is always safe but
+  may not help performance (right side still fully materialized
+  in some implementations)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    left_rows: f64,
+    right_rows: f64,
+    selectivity: f64,
+) -> f64 {
+    let before = left_rows + right_rows;
+    let after = (left_rows + right_rows) * selectivity;
+    (before - after) / before
+}
+```
+
+**Typical benefit**: 20-80% depending on filter selectivity.
+
+## Test Cases
+
+```sql
+-- Positive: push filter into both UNION branches
+SELECT * FROM (
+    SELECT id, name FROM customers
+    UNION ALL
+    SELECT id, name FROM suppliers
+) t WHERE t.id > 100;
+-- Filter id > 100 pushed into both branches
+```
+
+```sql
+-- Positive: push filter into INTERSECT
+SELECT * FROM (
+    SELECT id FROM orders INTERSECT SELECT id FROM returns
+) t WHERE t.id < 1000;
+-- Filter pushed to both inputs
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/FilterSetOpTransposeRule.java

@@ -1,0 +1,131 @@
+---
+id: calcite-aggregate-union-transpose
+name: Calcite AggregateUnionTransposeRule
+category: database-specific/calcite
+databases: [calcite]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, calcite, aggregate, union, pushdown]
+complexity: O(n)
+benefit_range: [0.1, 0.7]
+---
+
+# Calcite AggregateUnionTransposeRule
+
+## Description
+
+Pushes an aggregate below a UNION ALL by placing partial
+aggregates on each branch and a final aggregate on top. This
+is the union-side equivalent of eager aggregation: each branch
+pre-aggregates, reducing the rows that the UNION must combine.
+
+**When to apply**: An aggregate sits above a UNION ALL and the
+aggregate functions are decomposable (SUM, COUNT, MIN, MAX).
+
+**Why it works**: Pre-aggregating each branch reduces the number
+of rows flowing into the UNION, and the final aggregate merges
+the partial results. This is especially effective when each
+branch has high duplication in the group-by columns.
+
+**Calcite class**: `org.apache.calcite.rel.rules.AggregateUnionTransposeRule`
+
+## Relational Algebra
+
+```algebra
+-- Before: aggregate above union
+gamma[g; SUM(x)](R UNION ALL S)
+
+-- After: two-phase aggregation
+gamma[g; SUM(partial_sum)](
+    gamma[g; SUM(x) AS partial_sum](R)
+    UNION ALL
+    gamma[g; SUM(x) AS partial_sum](S)
+)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-aggregate-union-transpose";
+    "(aggregate ?group ?aggs (union-all ?left ?right))" =>
+    "(aggregate ?group (merge-aggs ?aggs)
+        (union-all
+            (aggregate ?group ?aggs ?left)
+            (aggregate ?group ?aggs ?right)))"
+    if aggs_are_decomposable("?aggs")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    agg_calls: &[AggregateCall],
+) -> bool {
+    agg_calls.iter().all(|call| {
+        matches!(
+            call.func,
+            AggFunc::Sum
+            | AggFunc::Count
+            | AggFunc::Min
+            | AggFunc::Max
+        )
+    })
+}
+```
+
+**Restrictions:**
+- AVG must be decomposed into SUM/COUNT first
+- DISTINCT aggregates require additional handling
+- The merge function differs per aggregate:
+  SUM->SUM, COUNT->SUM, MIN->MIN, MAX->MAX
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    left_rows: f64,
+    right_rows: f64,
+    left_groups: f64,
+    right_groups: f64,
+) -> f64 {
+    let before = left_rows + right_rows;
+    let after = left_groups + right_groups;
+    if before > 0.0 {
+        (before - after) / before
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 10-70% when branches have significant
+row reduction from pre-aggregation.
+
+## Test Cases
+
+```sql
+-- Positive: push SUM below UNION ALL
+SELECT dept, SUM(sal) FROM (
+    SELECT dept, sal FROM emp_2023
+    UNION ALL
+    SELECT dept, sal FROM emp_2024
+) t GROUP BY dept;
+-- Pre-aggregate each year, then merge sums
+```
+
+```sql
+-- Negative: AVG not directly decomposable
+SELECT dept, AVG(sal) FROM (
+    SELECT dept, sal FROM emp_2023
+    UNION ALL
+    SELECT dept, sal FROM emp_2024
+) t GROUP BY dept;
+-- Must decompose AVG into SUM/COUNT first
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/AggregateUnionTransposeRule.java
