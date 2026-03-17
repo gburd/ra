@@ -1,0 +1,162 @@
+---
+id: outer-join-to-inner
+name: Outer Join to Inner Join Simplification
+category: logical/join-reordering
+databases: [postgresql, mysql, duckdb, sqlite, oracle, mssql]
+standard: "sql:1992"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [join, outer, inner, simplification, core]
+---
+
+# Outer Join to Inner Join Simplification
+
+## Description
+
+Converts a LEFT/RIGHT/FULL OUTER JOIN to an INNER JOIN when a subsequent
+filter rejects NULL rows from the nullable side. If a WHERE clause tests a
+column from the nullable side with a predicate that evaluates to FALSE on
+NULL (e.g., `col = value`, `col > 0`), then the outer join's extra NULL
+rows are eliminated and the join can safely be converted to INNER.
+
+**When to apply**: An outer join is followed by a filter on the nullable
+side that is null-rejecting (evaluates to FALSE or UNKNOWN on NULL input).
+
+**Why it works**: The outer join produces NULL-padded rows for non-matching
+tuples. If the filter rejects NULLs, those rows are discarded, making the
+outer join equivalent to an inner join.
+
+## Relational Algebra
+
+```algebra
+sigma[p](R left_join[c] S) -> sigma[p](R join[c] S)
+  where p is null-rejecting on attrs(S)
+
+sigma[p](R right_join[c] S) -> sigma[p](R join[c] S)
+  where p is null-rejecting on attrs(R)
+
+sigma[p](R full_join[c] S) -> sigma[p](R join[c] S)
+  where p is null-rejecting on attrs(R) and attrs(S)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("left-join-to-inner";
+    "(filter ?pred (join left ?cond ?left ?right))" =>
+    "(filter ?pred (join inner ?cond ?left ?right))"
+    if is_null_rejecting("?pred", "?right")
+),
+
+rw!("right-join-to-inner";
+    "(filter ?pred (join right ?cond ?left ?right))" =>
+    "(filter ?pred (join inner ?cond ?left ?right))"
+    if is_null_rejecting("?pred", "?left")
+),
+
+rw!("full-join-to-inner";
+    "(filter ?pred (join full ?cond ?left ?right))" =>
+    "(filter ?pred (join inner ?cond ?left ?right))"
+    if is_null_rejecting_both("?pred", "?left", "?right")
+),
+```
+
+## Preconditions
+
+```rust
+fn is_null_rejecting(pred: &Expr, nullable_side: &Relation) -> bool {
+    // A predicate is null-rejecting if it returns FALSE or
+    // UNKNOWN when all columns from the nullable side are NULL.
+    //
+    // Examples of null-rejecting predicates:
+    //   col = 'value'  (NULL = 'value' => UNKNOWN => rejected)
+    //   col > 0        (NULL > 0 => UNKNOWN => rejected)
+    //   col IS NOT NULL (obvious)
+    //
+    // NOT null-rejecting:
+    //   col IS NULL     (accepts NULLs)
+    //   COALESCE(col, 0) > 0  (handles NULLs explicitly)
+    let null_cols = nullable_side.output_columns();
+    pred.evaluate_with_nulls(&null_cols) == EvalResult::FalseOrNull
+}
+```
+
+**Restrictions:**
+- The filter predicate must be null-rejecting on the nullable side
+- `IS NULL` predicates are NOT null-rejecting
+- `COALESCE`/`IFNULL` can mask NULLs and prevent conversion
+- Must check all referenced columns from the nullable side
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    left_card: f64,
+    right_card: f64,
+    match_ratio: f64,
+) -> f64 {
+    // Inner joins are cheaper: no NULL-padding, more join algorithms
+    // available, and enables further optimizations (commutativity,
+    // associativity, filter pushdown to both sides).
+    let outer_cost = left_card * right_card;
+    let inner_cost = left_card * right_card * match_ratio;
+    (outer_cost - inner_cost) / outer_cost
+}
+```
+
+**Typical benefit**: 0.1-0.5 from the join itself, but the real win is
+unlocking further optimizations (join reordering, filter pushdown to both
+sides) that are blocked by outer joins.
+
+## Test Cases
+
+```sql
+-- Positive: null-rejecting predicate on right side
+-- Before
+SELECT * FROM orders o
+LEFT JOIN customers c ON o.customer_id = c.id
+WHERE c.country = 'US';
+
+-- After (LEFT JOIN -> INNER JOIN because c.country = 'US' rejects NULLs)
+SELECT * FROM orders o
+JOIN customers c ON o.customer_id = c.id
+WHERE c.country = 'US';
+```
+
+```sql
+-- Positive: IS NOT NULL is null-rejecting
+-- Before
+SELECT * FROM orders o
+LEFT JOIN shipments s ON o.id = s.order_id
+WHERE s.tracking_number IS NOT NULL;
+
+-- After
+SELECT * FROM orders o
+JOIN shipments s ON o.id = s.order_id
+WHERE s.tracking_number IS NOT NULL;
+```
+
+```sql
+-- Negative: IS NULL is not null-rejecting
+SELECT * FROM orders o
+LEFT JOIN shipments s ON o.id = s.order_id
+WHERE s.tracking_number IS NULL;
+-- Must stay LEFT JOIN: we want rows where there IS no shipment
+```
+
+```sql
+-- Negative: COALESCE masks NULLs
+SELECT * FROM orders o
+LEFT JOIN discounts d ON o.id = d.order_id
+WHERE COALESCE(d.amount, 0) > 0;
+-- COALESCE handles NULLs, so NULLs from d are not rejected
+```
+
+## References
+
+PostgreSQL: src/backend/optimizer/plan/analyzejoins.c - reduce_outer_joins()
+MySQL: sql/sql_optimizer.cc - simplify_joins()
+DuckDB: src/optimizer/remove_unused_columns.cpp
+Galindo-Legaria & Rosenthal "Outerjoin Simplification and Reordering" (TODS 1997)

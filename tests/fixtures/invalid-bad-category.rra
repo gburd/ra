@@ -1,0 +1,13 @@
+---
+id: bad-category-rule
+name: Bad Category Rule
+category: nonexistent/made-up-category
+---
+
+# Bad Category Rule
+
+## Description
+
+This rule has a category path that does not match any valid category.
+It should fail validation because `nonexistent/made-up-category` is not
+in the allowed category list.

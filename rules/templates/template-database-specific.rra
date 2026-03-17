@@ -1,0 +1,116 @@
+---
+id: RULE-ID-HERE
+name: Human-Readable Rule Name
+category: database-specific/DATABASE-NAME
+databases: [DATABASE-NAME]
+version: 1.0.0
+authors: ["Your Name"]
+tags: [database-specific, DATABASE-NAME]
+complexity: O(1)
+benefit_range: [0.1, 0.9]
+---
+
+# Rule Name (DATABASE-NAME specific)
+
+## Description
+
+Describe the database-specific optimization. Explain what makes this
+transformation unique to this database engine.
+
+**When to apply**: Conditions specific to this database's optimizer or
+storage engine.
+
+**Why it works**: How this exploits database-specific features (storage
+format, index types, execution engine, etc.)
+
+**Database version**: Minimum version where this applies (e.g., PostgreSQL 14+).
+
+## Relational Algebra
+
+```algebra
+LHS_EXPRESSION -> RHS_EXPRESSION
+  where DATABASE_SPECIFIC_CONDITION
+```
+
+Where:
+- Define any database-specific operators or extensions
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("RULE-ID-HERE";
+    "(PATTERN)" =>
+    "(REPLACEMENT)"
+    if is_database("DATABASE-NAME")
+    if GUARD_CONDITION
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    engine: &DatabaseEngine,
+    version: &Version,
+) -> bool {
+    // Check database type and version
+    engine.name() == "DATABASE-NAME"
+        && version >= Version::new(MAJOR, MINOR, 0)
+}
+```
+
+**Restrictions:**
+- Only applies to DATABASE-NAME
+- Minimum version: X.Y
+- Requires specific features or extensions to be enabled
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    engine_config: &EngineConfig,
+) -> f64 {
+    // Model using database-specific cost factors
+    0.5
+}
+```
+
+**Assumptions:**
+- Database-specific storage characteristics
+- Index availability and type
+
+**Typical benefit**: X-Y% cost reduction on this database
+
+## Test Cases
+
+### Positive Case 1: Database Feature Available
+
+```sql
+-- Input (on DATABASE-NAME)
+SELECT ...;
+
+-- Expected output (uses database-specific optimization)
+SELECT ...;
+```
+
+### Negative Case 1: Different Database
+
+```sql
+-- Input (on a different database - rule should NOT apply)
+SELECT ...;
+
+-- Output (unchanged)
+SELECT ...;
+```
+
+## References
+
+**Source code:**
+- DATABASE-NAME: `path/to/relevant/source`
+  - Git: URL
+
+**Documentation:**
+- Official docs: URL

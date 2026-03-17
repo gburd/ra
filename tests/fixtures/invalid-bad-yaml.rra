@@ -1,0 +1,12 @@
+---
+id: bad-yaml-rule
+name: Bad YAML Rule
+category: [this is not valid: yaml: {{{{
+databases: [postgresql
+---
+
+# Bad YAML Rule
+
+## Description
+
+This rule has malformed YAML frontmatter and should fail parsing.

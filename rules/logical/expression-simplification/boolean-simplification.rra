@@ -1,0 +1,157 @@
+---
+id: boolean-simplification
+name: Boolean Expression Simplification
+category: logical/expression-simplification
+databases: [postgresql, mysql, duckdb, sqlite, oracle, mssql]
+standard: "sql:1992"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [expression, boolean, simplification, core]
+---
+
+# Boolean Expression Simplification
+
+## Description
+
+Simplifies boolean expressions using standard logical identities:
+identity, annihilation, idempotence, and double negation. These rewrites
+reduce predicate complexity and may eliminate entire filter operators.
+
+**When to apply**: A boolean expression contains redundant terms, tautologies,
+contradictions, or double negations.
+
+**Why it works**: Logical equivalences preserve truth values while reducing
+expression complexity. Simpler predicates evaluate faster and enable further
+optimizations.
+
+## Relational Algebra
+
+```algebra
+sigma[p AND TRUE](R) -> sigma[p](R)
+sigma[p OR FALSE](R) -> sigma[p](R)
+sigma[p AND FALSE](R) -> empty_relation
+sigma[p OR TRUE](R) -> R
+sigma[NOT NOT p](R) -> sigma[p](R)
+sigma[p AND p](R) -> sigma[p](R)
+sigma[p OR p](R) -> sigma[p](R)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Identity laws
+rw!("and-true"; "(and ?p true)" => "?p"),
+rw!("true-and"; "(and true ?p)" => "?p"),
+rw!("or-false"; "(or ?p false)" => "?p"),
+rw!("false-or"; "(or false ?p)" => "?p"),
+
+// Annihilation laws
+rw!("and-false"; "(and ?p false)" => "false"),
+rw!("false-and"; "(and false ?p)" => "false"),
+rw!("or-true"; "(or ?p true)" => "true"),
+rw!("true-or"; "(or true ?p)" => "true"),
+
+// Idempotence
+rw!("and-idempotent"; "(and ?p ?p)" => "?p"),
+rw!("or-idempotent"; "(or ?p ?p)" => "?p"),
+
+// Double negation
+rw!("double-negation"; "(not (not ?p))" => "?p"),
+
+// Complement
+rw!("and-complement"; "(and ?p (not ?p))" => "false"),
+rw!("or-complement"; "(or ?p (not ?p))" => "true"),
+
+// Filter elimination
+rw!("filter-true"; "(filter true ?input)" => "?input"),
+rw!("filter-false"; "(filter false ?input)" => "empty"),
+```
+
+## Preconditions
+
+```rust
+fn applicable() -> bool {
+    // Always applicable: these are pure logical identities
+    true
+}
+```
+
+**Restrictions:**
+- SQL uses three-valued logic (TRUE, FALSE, UNKNOWN/NULL). The rules
+  above are sound for TRUE and FALSE but NOT for UNKNOWN:
+  `NULL AND TRUE = NULL` (not TRUE), so identity rules must check for
+  literal TRUE/FALSE, not just truthy/falsy.
+- De Morgan's laws are not included here (they transform but don't simplify).
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    input_card: f64,
+    terms_eliminated: usize,
+) -> f64 {
+    let per_row_saving =
+        terms_eliminated as f64 * BOOL_EVAL_COST;
+    per_row_saving * input_card
+}
+```
+
+**Typical benefit**: Small per-row, but filter-false can eliminate entire
+sub-trees, and filter-true can remove a filter operator entirely.
+
+## Test Cases
+
+```sql
+-- Positive: AND TRUE elimination
+-- Before
+SELECT * FROM t WHERE x > 5 AND TRUE;
+-- After
+SELECT * FROM t WHERE x > 5;
+```
+
+```sql
+-- Positive: OR FALSE elimination
+-- Before
+SELECT * FROM t WHERE x > 5 OR FALSE;
+-- After
+SELECT * FROM t WHERE x > 5;
+```
+
+```sql
+-- Positive: contradiction elimination
+-- Before
+SELECT * FROM t WHERE x > 5 AND FALSE;
+-- After: empty result (no rows)
+```
+
+```sql
+-- Positive: tautology elimination
+-- Before
+SELECT * FROM t WHERE x > 5 OR TRUE;
+-- After
+SELECT * FROM t;
+```
+
+```sql
+-- Positive: double negation
+-- Before
+SELECT * FROM t WHERE NOT NOT (x > 5);
+-- After
+SELECT * FROM t WHERE x > 5;
+```
+
+```sql
+-- Negative: NULL requires three-valued logic
+SELECT * FROM t WHERE x IS NULL AND TRUE;
+-- x IS NULL AND TRUE = x IS NULL (correct, TRUE identity holds)
+-- But: x AND TRUE where x might be NULL => NULL (not TRUE)
+```
+
+## References
+
+PostgreSQL: src/backend/optimizer/util/clauses.c - simplify_boolean_equality()
+MySQL: sql/sql_optimizer.cc - remove_eq_conds()
+DuckDB: src/optimizer/expression_rewriter.cpp
+Enderton "A Mathematical Introduction to Logic" Chapter 1

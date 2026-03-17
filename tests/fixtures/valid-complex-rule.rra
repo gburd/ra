@@ -1,0 +1,161 @@
+---
+id: join-commutativity
+name: Join Commutativity
+category: logical/join-reordering
+databases: [postgresql, mysql, duckdb, sqlite, oracle, mssql]
+standard: sql:1992
+execution_models: [volcano, vectorized, push-based]
+version: 1.0.0
+authors: ["RA Contributors", "Database Research Team"]
+tags: [optimization, join, reordering, fundamental]
+complexity: O(1)
+benefit_range: [0.0, 0.8]
+---
+
+# Join Commutativity
+
+## Description
+
+Swaps the left and right inputs of an inner join. This is a fundamental
+algebraic property: A JOIN B is equivalent to B JOIN A for inner joins.
+
+**When to apply**: During join enumeration to explore alternative join
+orderings. The optimizer uses this with associativity to find the
+cheapest join order.
+
+**Why it works**: Inner join is commutative by definition in relational
+algebra. The result set is identical regardless of input order.
+
+## Relational Algebra
+
+```algebra
+R ⋈[c] S -> S ⋈[c'] R
+  where c' = c with operands swapped
+```
+
+Where:
+- ⋈[c] is inner join with condition c
+- R, S are relations
+- c' is the join condition with left/right references swapped
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("join-commutativity";
+    "(join inner ?cond ?left ?right)" =>
+    "(join inner (swap-refs ?cond) ?right ?left)"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(join_type: JoinType) -> bool {
+    matches!(join_type, JoinType::Inner | JoinType::Cross)
+}
+```
+
+**Restrictions:**
+- Only applies to INNER and CROSS joins
+- Does NOT apply to LEFT, RIGHT, FULL OUTER, SEMI, or ANTI joins
+- Join condition column references must be remapped
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    left_stats: &Statistics,
+    right_stats: &Statistics,
+    join_algorithm: JoinAlgorithm,
+) -> f64 {
+    match join_algorithm {
+        // For hash join, smaller table as build side is better
+        JoinAlgorithm::Hash => {
+            if left_stats.cardinality > right_stats.cardinality {
+                let ratio = right_stats.cardinality as f64
+                    / left_stats.cardinality as f64;
+                1.0 - ratio
+            } else {
+                0.0
+            }
+        }
+        // For nested loop, smaller outer is better
+        JoinAlgorithm::NestedLoop => {
+            if left_stats.cardinality > right_stats.cardinality {
+                0.5
+            } else {
+                0.0
+            }
+        }
+        _ => 0.0,
+    }
+}
+```
+
+**Assumptions:**
+- Hash join benefits from smaller build side (right input)
+- Nested loop benefits from smaller outer (left input)
+- Merge join is symmetric, no benefit from commutation alone
+
+**Typical benefit**: 0-80% depending on cardinality asymmetry
+
+## Test Cases
+
+### Positive Case 1: Swap for Better Hash Join
+
+```sql
+-- Input (large table as build side)
+SELECT * FROM large_table l
+JOIN small_table s ON l.id = s.large_id;
+
+-- Expected output (small table as build side)
+SELECT * FROM small_table s
+JOIN large_table l ON s.large_id = l.id;
+```
+
+### Positive Case 2: Cross Join
+
+```sql
+-- Input
+SELECT * FROM A CROSS JOIN B;
+
+-- Expected output (equivalent)
+SELECT * FROM B CROSS JOIN A;
+```
+
+### Negative Case 1: Left Outer Join
+
+```sql
+-- Input (should NOT apply - LEFT JOIN is not commutative)
+SELECT * FROM orders o
+LEFT JOIN returns r ON o.id = r.order_id;
+
+-- Output (unchanged)
+SELECT * FROM orders o
+LEFT JOIN returns r ON o.id = r.order_id;
+```
+
+## References
+
+**Implementation in databases:**
+- PostgreSQL: `src/backend/optimizer/path/joinrels.c:make_join_rel()`
+  - Git: https://github.com/postgres/postgres/blob/master/src/backend/optimizer/path/joinrels.c
+- DuckDB: `src/optimizer/join_order/join_order_optimizer.cpp`
+  - Git: https://github.com/duckdb/duckdb/blob/main/src/optimizer/join_order/join_order_optimizer.cpp
+
+**Academic papers:**
+- Selinger, P. G., et al. "Access Path Selection in a Relational Database
+  Management System." SIGMOD 1979.
+  https://dl.acm.org/doi/10.1145/582095.582099
+
+**Textbooks:**
+- Garcia-Molina et al., "Database Systems: The Complete Book", Section 16.2
+- Ramakrishnan & Gehrke, "Database Management Systems", Chapter 15
+
+## History
+
+- **v1.0.0** (2026-03-17): Initial implementation
+  - Covers INNER and CROSS joins
+  - Cost model for hash join and nested loop

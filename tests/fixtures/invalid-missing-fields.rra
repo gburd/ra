@@ -1,0 +1,11 @@
+---
+name: Missing ID Field Rule
+category: logical/predicate-pushdown
+---
+
+# Missing ID Field Rule
+
+## Description
+
+This rule is intentionally missing the required `id` field in frontmatter.
+It should fail validation.

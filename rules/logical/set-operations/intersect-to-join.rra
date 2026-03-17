@@ -1,0 +1,147 @@
+---
+id: intersect-to-join
+name: Intersect to Semi-Join Conversion
+category: logical/set-operations
+databases: [postgresql, mysql, duckdb, oracle, mssql]
+standard: "sql:1992"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [intersect, semi-join, set-operations, conversion, core]
+---
+
+# Intersect to Semi-Join Conversion
+
+## Description
+
+Converts an INTERSECT operation into a semi-join, which can then leverage
+join algorithms (hash semi-join, merge semi-join) that are typically more
+efficient than sort-based set intersection. The semi-join returns rows from
+the left input that have a matching row in the right input on all columns.
+
+**When to apply**: An INTERSECT (or INTERSECT ALL) operator where one input
+is significantly smaller or has an available index.
+
+**Why it works**: `R INTERSECT S` returns rows that appear in both R and S.
+This is equivalent to a semi-join on all columns:
+`R semi_join[R.* = S.*] S`. Semi-joins can use hash tables, avoiding the
+need to sort both inputs.
+
+## Relational Algebra
+
+```algebra
+R intersect S -> R semi_join[R.* = S.*] S
+  where schema(R) = schema(S)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("intersect-to-semijoin";
+    "(intersect ?left ?right)" =>
+    "(distinct (semijoin (all_cols_eq ?left ?right) ?left ?right))"
+),
+
+// INTERSECT ALL variant (preserves duplicates from left side
+// up to the count in right side)
+rw!("intersect-all-to-semijoin";
+    "(intersect_all ?left ?right)" =>
+    "(semijoin_counted (all_cols_eq ?left ?right) ?left ?right)"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    left: &Relation,
+    right: &Relation,
+) -> bool {
+    // Both inputs must have the same schema (guaranteed by SQL INTERSECT)
+    left.output_schema() == right.output_schema()
+    // At least one input should be amenable to hash/merge join
+    // (otherwise sort-based intersect may be equally good)
+}
+```
+
+**Restrictions:**
+- Schemas must be union-compatible (guaranteed by INTERSECT syntax)
+- INTERSECT removes duplicates; the semi-join must be followed by DISTINCT
+- INTERSECT ALL preserves duplicate counts (more complex to implement)
+- NULL handling: SQL INTERSECT treats NULLs as equal for grouping purposes,
+  so the semi-join must use IS NOT DISTINCT FROM, not =
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    left_card: f64,
+    right_card: f64,
+) -> f64 {
+    // Sort-based intersect: O(n log n + m log m) for sorting
+    let sort_cost =
+        left_card * left_card.log2()
+        + right_card * right_card.log2();
+    // Hash semi-join: O(m) build + O(n) probe
+    let hash_cost = right_card + left_card;
+    if sort_cost > hash_cost {
+        (sort_cost - hash_cost) / sort_cost
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 0.2-0.7 when one input is much smaller (good hash
+build side). Sort-based may win when both inputs are pre-sorted.
+
+## Test Cases
+
+```sql
+-- Positive: basic intersect to semi-join
+-- Before
+SELECT id, name FROM employees
+INTERSECT
+SELECT id, name FROM managers;
+
+-- After (semantically equivalent)
+SELECT DISTINCT e.id, e.name
+FROM employees e
+WHERE EXISTS (
+    SELECT 1 FROM managers m
+    WHERE e.id = m.id AND e.name IS NOT DISTINCT FROM m.name
+);
+```
+
+```sql
+-- Positive: intersect with different cardinalities
+-- Before
+SELECT product_id FROM huge_order_items  -- 10M rows
+INTERSECT
+SELECT product_id FROM active_products;  -- 1K rows
+
+-- After (hash semi-join builds on small active_products)
+SELECT DISTINCT oi.product_id
+FROM huge_order_items oi
+WHERE EXISTS (
+    SELECT 1 FROM active_products ap
+    WHERE oi.product_id = ap.product_id
+);
+```
+
+```sql
+-- Negative: both inputs pre-sorted on intersect columns
+-- When both inputs come from index scans in order,
+-- merge-based intersect may be cheaper than hashing
+SELECT id FROM sorted_table_a
+INTERSECT
+SELECT id FROM sorted_table_b;
+```
+
+## References
+
+PostgreSQL: src/backend/optimizer/plan/subselect.c
+DuckDB: src/execution/operator/set/physical_intersect.cpp
+MySQL: sql/sql_union.cc - st_query_block::optimize()
+Garcia-Molina et al. "Database Systems: The Complete Book" Section 16.5

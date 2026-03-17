@@ -1,0 +1,146 @@
+---
+id: null-propagation
+name: NULL Propagation Simplification
+category: logical/expression-simplification
+databases: [postgresql, mysql, duckdb, sqlite, oracle, mssql]
+standard: "sql:1992"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [expression, null, simplification, core]
+---
+
+# NULL Propagation Simplification
+
+## Description
+
+Simplifies expressions involving NULL literals by propagating NULL through
+arithmetic and comparison operators according to SQL three-valued logic.
+Most operators return NULL when any operand is NULL, so sub-expressions
+containing NULL literals can be replaced with NULL directly.
+
+**When to apply**: An expression contains a NULL literal operand in a
+context where NULL propagates (arithmetic, comparisons, most functions).
+
+**Why it works**: SQL defines that `NULL op x = NULL` for most operators.
+Replacing the entire expression with NULL eliminates unnecessary evaluation.
+
+## Relational Algebra
+
+```algebra
+sigma[NULL = e](R) -> sigma[NULL](R) -> empty_relation
+sigma[NULL AND p](R) -> sigma[NULL](R) -> empty_relation
+sigma[e IS NULL](R) -> sigma[e IS NULL](R)  (no change, IS NULL is special)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Arithmetic with NULL
+rw!("null-add-right"; "(+ null ?e)" => "null"),
+rw!("null-add-left"; "(+ ?e null)" => "null"),
+rw!("null-mul-right"; "(* null ?e)" => "null"),
+rw!("null-mul-left"; "(* ?e null)" => "null"),
+rw!("null-sub-right"; "(- null ?e)" => "null"),
+rw!("null-sub-left"; "(- ?e null)" => "null"),
+
+// Comparisons with NULL
+rw!("null-eq-right"; "(= null ?e)" => "null"),
+rw!("null-eq-left"; "(= ?e null)" => "null"),
+rw!("null-lt-right"; "(< null ?e)" => "null"),
+rw!("null-lt-left"; "(< ?e null)" => "null"),
+rw!("null-gt-right"; "(> null ?e)" => "null"),
+rw!("null-gt-left"; "(> ?e null)" => "null"),
+
+// Boolean with NULL
+rw!("null-and-false"; "(and null false)" => "false"),
+rw!("false-and-null"; "(and false null)" => "false"),
+// Note: (and null true) = null, NOT false
+
+// Filter on NULL predicate eliminates all rows
+rw!("filter-null"; "(filter null ?input)" => "empty"),
+```
+
+## Preconditions
+
+```rust
+fn applicable(expr: &Expr) -> bool {
+    // One operand must be a literal NULL, and the operator must
+    // propagate NULLs (most do, except IS NULL, IS NOT NULL,
+    // COALESCE, NULLIF).
+    expr.has_null_literal()
+        && expr.operator_propagates_null()
+}
+```
+
+**Restrictions:**
+- `IS NULL` and `IS NOT NULL` do NOT propagate NULL (they test for it)
+- `COALESCE(NULL, x)` returns `x`, not NULL
+- `CASE WHEN ... THEN ... END` may or may not propagate NULL
+- `AND` with FALSE: `FALSE AND NULL = FALSE` (short-circuit)
+- `OR` with TRUE: `TRUE OR NULL = TRUE` (short-circuit)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    input_card: f64,
+    null_exprs: usize,
+) -> f64 {
+    // Replacing expressions with NULL constants saves evaluation.
+    // filter-null can eliminate entire sub-trees.
+    let per_row_saving = null_exprs as f64 * EXPR_EVAL_COST;
+    per_row_saving * input_card
+}
+```
+
+**Typical benefit**: Variable. The main value is in filter-null, which can
+eliminate entire branches of a query plan.
+
+## Test Cases
+
+```sql
+-- Positive: comparison with NULL literal
+-- Before
+SELECT * FROM t WHERE x = NULL;
+-- After (x = NULL is always NULL/UNKNOWN, no rows pass)
+-- Empty result (should use IS NULL instead)
+```
+
+```sql
+-- Positive: arithmetic with NULL
+-- Before
+SELECT x + NULL FROM t;
+-- After
+SELECT NULL FROM t;
+```
+
+```sql
+-- Positive: AND short-circuit with FALSE
+-- Before
+SELECT * FROM t WHERE FALSE AND NULL;
+-- After
+SELECT * FROM t WHERE FALSE;
+-- (which then becomes empty result)
+```
+
+```sql
+-- Negative: IS NULL does not propagate
+SELECT * FROM t WHERE x IS NULL;
+-- Unchanged: IS NULL tests for NULL, does not propagate it
+```
+
+```sql
+-- Negative: COALESCE handles NULL
+SELECT COALESCE(NULL, 42) FROM t;
+-- Result is 42, not NULL (COALESCE does not propagate NULL)
+```
+
+## References
+
+PostgreSQL: src/backend/optimizer/util/clauses.c - simplify_boolean_equality()
+DuckDB: src/optimizer/expression_rewriter.cpp
+MySQL: sql/item_cmpfunc.cc - Item_func_isnull
+ISO/IEC 9075:1992 Section 8.12 (NULL handling in search conditions)
+Date, C. J. "SQL and Relational Theory" Chapter 4 (The Null Controversy)

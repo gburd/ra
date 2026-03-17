@@ -1,0 +1,43 @@
+---
+id: filter-pushdown-basic
+name: Basic Filter Pushdown
+category: logical/predicate-pushdown
+---
+
+# Basic Filter Pushdown
+
+## Description
+
+Pushes a selection predicate below a projection when the predicate
+references only columns retained by the projection.
+
+## Relational Algebra
+
+```algebra
+σ[p](π[A](R)) -> π[A](σ[p](R))
+  where attrs(p) ⊆ A
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("filter-pushdown-basic";
+    "(filter ?pred (project ?cols ?rel))" =>
+    "(project ?cols (filter ?pred ?rel))"
+    if pred_attrs_subset_of(?pred, ?cols)
+),
+```
+
+## Test Cases
+
+### Positive Case 1: Simple pushdown
+
+```sql
+-- Input
+SELECT name FROM employees WHERE age > 30;
+
+-- Expected: filter pushed below projection
+-- Plan: Project[name](Filter[age > 30](Scan(employees)))
+```

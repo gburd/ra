@@ -1,0 +1,106 @@
+version = "1.0.0"
+total_rules = 20
+last_updated = "2026-03-17"
+
+[categories.logical]
+description = "Logical transformations that preserve query semantics"
+
+[categories.logical.predicate-pushdown]
+description = "Push selection predicates closer to data sources"
+rules = [
+    "filter-through-join",
+    "filter-through-project",
+    "filter-through-union",
+    "filter-into-join-condition",
+    "filter-merge",
+]
+
+[categories.logical.join-reordering]
+description = "Reorder joins for optimal execution"
+rules = [
+    "join-associativity",
+    "join-commutativity",
+    "left-deep-to-bushy",
+    "cartesian-to-join",
+    "outer-join-to-inner",
+]
+
+[categories.logical.join-elimination]
+description = "Eliminate redundant joins"
+rules = []
+
+[categories.logical.subquery-unnesting]
+description = "Convert subqueries to joins"
+rules = []
+
+[categories.logical.projection-pushdown]
+description = "Push projections to reduce data movement"
+rules = [
+    "project-merge",
+    "project-through-join",
+    "column-pruning",
+]
+
+[categories.logical.aggregate-pushdown]
+description = "Push aggregations for early reduction"
+rules = []
+
+[categories.logical.expression-simplification]
+description = "Simplify expressions and constants"
+rules = [
+    "constant-folding",
+    "boolean-simplification",
+    "arithmetic-simplification",
+    "null-propagation",
+    "common-subexpression-elimination",
+]
+
+[categories.logical.limit-pushdown]
+description = "Push limits to reduce processing"
+rules = []
+
+[categories.logical.set-operations]
+description = "Optimize UNION, INTERSECT, EXCEPT"
+rules = [
+    "union-merge",
+    "intersect-to-join",
+]
+
+[categories.physical]
+description = "Physical optimizations for execution"
+
+[categories.physical.join-algorithms]
+description = "Choose optimal join algorithms"
+rules = []
+
+[categories.physical.index-selection]
+description = "Select appropriate indexes"
+rules = []
+
+[categories.physical.aggregation-strategies]
+description = "Choose aggregation strategies"
+rules = []
+
+[categories.physical.parallelization]
+description = "Parallel execution strategies"
+rules = []
+
+[categories.physical.materialization]
+description = "Materialization strategies"
+rules = []
+
+[categories.database-specific]
+description = "Database-specific optimizations"
+rules = []
+
+[categories.execution-models]
+description = "Execution model specific optimizations"
+rules = []
+
+[categories.cost-models]
+description = "Cost estimation rules"
+rules = []
+
+[categories.experimental]
+description = "Research and experimental rules"
+rules = []
