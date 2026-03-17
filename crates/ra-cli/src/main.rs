@@ -1,16 +1,21 @@
 //! Command-line interface for the relational algebra rule system.
 #![allow(clippy::print_stderr)]
 
+mod display;
+
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use colored::Colorize;
 
+use ra_engine::Optimizer;
 use ra_parser::{
-    ParseError, RuleFile, parse_metadata, parse_rule_file,
+    ParseError, RuleFile, parse_metadata, parse_rule_file, sql_to_relexpr,
     validate_metadata_all,
 };
+
+use display::format_plan_tree;
 
 // ── CLI definition ──────────────────────────────────────────
 
@@ -59,10 +64,21 @@ enum Commands {
         #[arg(short, long)]
         dir: Option<String>,
     },
-    /// Optimize a SQL query (stub).
+    /// Explain a SQL query's relational algebra plan.
+    Explain {
+        /// SQL query to explain.
+        query: String,
+        /// Hardware profile for cost estimation (edge, mobile, laptop, desktop, server, gpu-server, auto).
+        #[arg(long, default_value = "auto")]
+        hardware_profile: String,
+    },
+    /// Optimize a SQL query using rewrite rules.
     Optimize {
         /// SQL query to optimize.
         query: String,
+        /// Hardware profile for cost estimation (edge, mobile, laptop, desktop, server, gpu-server, auto).
+        #[arg(long, default_value = "auto")]
+        hardware_profile: String,
     },
 }
 
@@ -99,8 +115,11 @@ fn main() -> Result<()> {
             let dir = dir.as_deref().unwrap_or("rules");
             cmd_show(&rule_id, dir)
         }
-        Commands::Optimize { query } => {
-            cmd_optimize(&query, cli.quiet)
+        Commands::Explain { query, hardware_profile } => {
+            cmd_explain(&query, &hardware_profile, cli.verbose, cli.quiet)
+        }
+        Commands::Optimize { query, hardware_profile } => {
+            cmd_optimize(&query, &hardware_profile, cli.verbose, cli.quiet)
         }
     }
 }
@@ -438,23 +457,92 @@ fn cmd_show(rule_id: &str, dir: &str) -> Result<()> {
     Ok(())
 }
 
+// ── explain ─────────────────────────────────────────────────
+
+fn cmd_explain(query: &str, hardware_profile_name: &str, verbose: bool, quiet: bool) -> Result<()> {
+    let plan = sql_to_relexpr(query)
+        .with_context(|| format!("failed to parse SQL: {query}"))?;
+
+    let hardware = load_hardware_profile(hardware_profile_name)?;
+
+    if !quiet {
+        print_header("Query Plan Explanation");
+        eprintln!("  {}: {query}", "SQL".bold());
+
+        if verbose {
+            eprintln!("  {}: {} ({} cores, {} MB L3 cache, {}-bit SIMD)",
+                "Hardware".bold(),
+                hardware.name,
+                hardware.cpu_cores,
+                hardware.l3_cache_bytes / (1024 * 1024),
+                hardware.simd_width_bits
+            );
+        }
+
+        eprintln!();
+        eprintln!("{}", "Plan:".bold());
+        eprintln!("{}", format_plan_tree(&plan));
+    }
+
+    Ok(())
+}
+
 // ── optimize ────────────────────────────────────────────────
 
-#[allow(clippy::unnecessary_wraps)] // stub: will use Result when engine is wired up
-fn cmd_optimize(query: &str, quiet: bool) -> Result<()> {
+fn cmd_optimize(query: &str, hardware_profile_name: &str, verbose: bool, quiet: bool) -> Result<()> {
+    let plan = sql_to_relexpr(query)
+        .with_context(|| format!("failed to parse SQL: {query}"))?;
+
+    let hardware = load_hardware_profile(hardware_profile_name)?;
+
+    let mut optimizer = Optimizer::new();
+    optimizer.set_hardware_profile(hardware.clone());
+
+    let optimized = optimizer
+        .optimize(&plan)
+        .with_context(|| format!("failed to optimize query: {query}"))?;
+
     if !quiet {
-        print_header("Query Optimization (stub)");
-        eprintln!("  {}: {query}", "Input".bold());
+        print_header("Query Optimization");
+        eprintln!("  {}: {query}", "SQL".bold());
+
+        if verbose {
+            eprintln!("  {}: {} ({} cores, {} MB L3 cache, {}-bit SIMD)",
+                "Hardware".bold(),
+                hardware.name,
+                hardware.cpu_cores,
+                hardware.l3_cache_bytes / (1024 * 1024),
+                hardware.simd_width_bits
+            );
+        }
+
         eprintln!();
-        eprintln!(
-            "{}",
-            "(optimization engine not yet implemented)".dimmed()
-        );
+
+        eprintln!("{}", "Original Plan:".bold());
+        eprintln!("{}", format_plan_tree(&plan));
+        eprintln!();
+
+        eprintln!("{}", "Optimized Plan:".bold());
+        eprintln!("{}", format_plan_tree(&optimized));
     }
+
     Ok(())
 }
 
 // ── Helpers ─────────────────────────────────────────────────
+
+/// Load a hardware profile by name.
+fn load_hardware_profile(name: &str) -> Result<ra_hardware::HardwareProfile> {
+    let profile = match name.to_lowercase().as_str() {
+        "auto" => ra_hardware::detect_hardware(),
+        "cpu-only" => ra_hardware::HardwareProfile::cpu_only(),
+        "gpu-server" => ra_hardware::HardwareProfile::gpu_server(),
+        "fpga" => ra_hardware::HardwareProfile::fpga_appliance(),
+        _ => bail!("unknown hardware profile: {name}. Valid options: auto, cpu-only, gpu-server, fpga"),
+    };
+
+    Ok(profile)
+}
 
 /// Collect all `.rra` files under a path (file or directory).
 fn collect_rra_files(path: &str) -> Result<Vec<PathBuf>> {
