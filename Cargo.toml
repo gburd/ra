@@ -15,6 +15,8 @@ members = [
     "crates/ra-synthesis",
     "crates/ra-discovery",
     "crates/ra-ml",
+    "crates/ra-hardware",
+    "crates/ra-multimodel",
 ]
 
 [workspace.package]
@@ -77,9 +79,12 @@ ra-codegen = { path = "crates/ra-codegen" }
 ra-dialect = { path = "crates/ra-dialect" }
 ra-wasm = { path = "crates/ra-wasm" }
 ra-isolation = { path = "crates/ra-isolation" }
+ra-adaptive = { path = "crates/ra-adaptive" }
 ra-synthesis = { path = "crates/ra-synthesis" }
 ra-discovery = { path = "crates/ra-discovery" }
 ra-ml = { path = "crates/ra-ml" }
+ra-hardware = { path = "crates/ra-hardware" }
+ra-multimodel = { path = "crates/ra-multimodel" }
 
 [profile.release]
 lto = "thin"

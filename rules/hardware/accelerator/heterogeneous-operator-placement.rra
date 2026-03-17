@@ -1,0 +1,214 @@
+---
+id: heterogeneous-operator-placement
+name: Heterogeneous Operator Placement
+category: hardware/accelerator
+databases: [heavydb, pg-strom]
+execution_models: [vectorized, push-based]
+hardware: [cpu, gpu, fpga]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [heterogeneous, placement, cpu, gpu, fpga, co-processing]
+complexity: "plan-level"
+benefit_range: [0.2, 0.85]
+---
+
+# Heterogeneous Operator Placement
+
+## Description
+
+Assigns each operator in a query plan to the processing unit
+(CPU, GPU, or FPGA) that minimizes total execution cost, including
+data transfer overhead. This is a global optimization that considers
+the entire plan rather than deciding operator-by-operator.
+
+**When to apply**: Multiple hardware targets are available (CPU + GPU,
+CPU + FPGA, or CPU + GPU + FPGA). The optimizer partitions the plan
+into segments, each assigned to the best-suited device.
+
+**Why it works**: Different operators favor different hardware. Scans
+and filters benefit from GPU bandwidth; hash joins with small build
+sides suit FPGAs; complex UDFs stay on CPU. A globally optimal
+placement considers transfer costs between segments and picks the
+assignment that minimizes end-to-end latency.
+
+## Relational Algebra
+
+```algebra
+plan(op1, op2, ..., opN)
+  -> placed_plan(
+       (op1, device1), (op2, device2), ..., (opN, deviceN),
+       transfers
+     )
+  where sum(cost(opi, devicei) + transfer_cost(i, i+1))
+        is minimized
+```
+
+## Implementation
+
+```rust
+fn place_operators(
+    plan: &RelExpr,
+    hw: &HardwareProfile,
+    stats: &dyn StatisticsProvider,
+) -> PlacedPlan {
+    let operators = flatten_plan(plan);
+    let devices = &[Device::Cpu, Device::Gpu, Device::Fpga];
+
+    // Dynamic programming: for each operator, compute minimum
+    // cost placement considering all possible device assignments
+    // for preceding operators.
+    let n = operators.len();
+    let mut dp = vec![
+        vec![(f64::INFINITY, Device::Cpu); devices.len()];
+        n
+    ];
+
+    // Base case: first operator
+    for (d, device) in devices.iter().enumerate() {
+        dp[0][d] = (
+            operator_cost(&operators[0], *device, hw, stats),
+            *device,
+        );
+    }
+
+    // Fill DP table
+    for i in 1..n {
+        for (d, device) in devices.iter().enumerate() {
+            let op_cost =
+                operator_cost(&operators[i], *device, hw, stats);
+            let mut best = f64::INFINITY;
+            let mut best_prev = Device::Cpu;
+
+            for (pd, prev_device) in devices.iter().enumerate() {
+                let prev_cost = dp[i - 1][pd].0;
+                let xfer = transfer_cost(
+                    *prev_device,
+                    *device,
+                    &operators[i - 1],
+                    hw,
+                );
+                let total = prev_cost + xfer + op_cost;
+                if total < best {
+                    best = total;
+                    best_prev = *prev_device;
+                }
+            }
+            dp[i][d] = (best, best_prev);
+        }
+    }
+
+    // Backtrack to find optimal placement
+    reconstruct_placement(&dp, &operators)
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(hw: &HardwareProfile) -> bool {
+    let device_count = [
+        hw.cpu_available,
+        hw.gpu_available,
+        hw.fpga_available,
+    ]
+    .iter()
+    .filter(|&&x| x)
+    .count();
+
+    // Only useful when multiple device types are available
+    device_count >= 2
+}
+```
+
+**Restrictions:**
+- Requires cost models for each operator on each device
+- Transfer costs must be modeled accurately
+- Some operators are not implementable on certain devices
+- Dynamic recompilation may be needed for FPGA operators
+
+## Cost Model
+
+```rust
+fn operator_cost(
+    op: &RelExpr,
+    device: Device,
+    hw: &HardwareProfile,
+    stats: &dyn StatisticsProvider,
+) -> f64 {
+    match (op, device) {
+        (RelExpr::Scan { .. }, Device::Gpu) => {
+            gpu_scan_cost(op, hw, stats)
+        }
+        (RelExpr::Filter { .. }, Device::Fpga) => {
+            fpga_filter_cost(op, hw, stats)
+        }
+        (RelExpr::Join { .. }, Device::Gpu) => {
+            gpu_join_cost(op, hw, stats)
+        }
+        (RelExpr::Aggregate { .. }, Device::Gpu) => {
+            gpu_agg_cost(op, hw, stats)
+        }
+        (_, Device::Cpu) => {
+            cpu_cost(op, hw, stats)
+        }
+        // Operator not supported on this device
+        _ => f64::INFINITY,
+    }
+}
+
+fn transfer_cost(
+    from: Device,
+    to: Device,
+    op: &RelExpr,
+    hw: &HardwareProfile,
+) -> f64 {
+    if from == to {
+        return 0.0;
+    }
+    let output_bytes = estimate_output_bytes(op);
+    output_bytes as f64 / (hw.pcie_bandwidth_gbps * 1e9)
+}
+```
+
+**Typical benefit**: 20-50% total query time reduction compared to
+single-device execution.
+
+## Test Cases
+
+### Positive: Mixed GPU/CPU plan
+
+```sql
+-- Optimal: FPGA filter -> GPU join -> GPU aggregation -> CPU sort
+SELECT r.r_name, SUM(l.l_extendedprice)
+FROM lineitem l
+JOIN region r ON l.l_regionkey = r.r_regionkey
+WHERE l.l_shipdate > '1995-01-01'
+GROUP BY r.r_name
+ORDER BY SUM(l.l_extendedprice) DESC;
+
+-- Plan:
+--   CpuSort(
+--     GpuAggregate(
+--       GpuHashJoin(build=region,
+--         probe=FpgaStreamFilter(lineitem, pred=shipdate))))
+```
+
+### Negative: Single device available
+
+```sql
+-- Only CPU available, no placement optimization
+SELECT * FROM orders WHERE o_totalprice > 1000;
+
+-- Plan: Filter(orders, pred=o_totalprice > 1000) on CPU
+```
+
+## References
+
+**Implementation in databases:**
+- HeavyDB: Heterogeneous execution across CPU and GPU
+- PG-Strom: Automatic GPU/CPU operator selection
+
+**Academic papers:**
+- Bress et al., "Automatic Selection of Processing Units for Coprocessing in Databases", ADBIS 2012
+- Karnagel et al., "Adaptive Work Placement for Query Processing on Heterogeneous Computing Resources", VLDB 2017
+- Chrysogelos et al., "Heterogeneous CPU+GPU Query Processing", DaMoN 2019

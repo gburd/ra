@@ -1,0 +1,182 @@
+---
+id: gpu-predicate-evaluation
+name: GPU SIMT Predicate Evaluation
+category: hardware/gpu
+databases: [heavydb, blazingsql, pg-strom, sqream]
+execution_models: [vectorized]
+hardware: [gpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [gpu, filter, predicate, simt, selection]
+complexity: "O(n/p)"
+benefit_range: [0.4, 0.95]
+---
+
+# GPU SIMT Predicate Evaluation
+
+## Description
+
+Offloads complex predicate evaluation (WHERE clause filtering) to the
+GPU. Each GPU thread evaluates the predicate for one tuple, producing
+a selection bitmap. This is combined with scan operations for maximum
+throughput. Particularly beneficial for compound predicates with
+arithmetic, BETWEEN, IN-list, and LIKE operations.
+
+**When to apply**: The selection predicate is computationally expensive
+(compound expressions, arithmetic, range checks) and the input is
+large. Simple equality predicates on indexed columns may not benefit.
+
+**Why it works**: GPU SIMT (Single Instruction, Multiple Threads)
+execution evaluates the same predicate across thousands of tuples
+simultaneously. Even with warp divergence from OR/AND branches, the
+throughput exceeds CPU SIMD for expressions that involve more than
+trivial comparisons.
+
+## Relational Algebra
+
+```algebra
+sigma[p](R) -> gpu_filter[p](R)
+  where |R| > threshold
+    AND complexity(p) > simple_comparison
+    AND columns(p) are gpu_resident OR transfer_amortized
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("gpu-predicate-evaluation";
+    "(filter ?pred ?input)" =>
+    "(gpu_filter ?pred ?input)"
+    if input_exceeds_threshold("?input")
+    if predicate_benefits_from_gpu("?pred")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    pred: &Expr,
+    hw: &HardwareProfile,
+) -> bool {
+    let pred_complexity = estimate_predicate_cost(pred);
+    let input_bytes =
+        stats.row_count as u64 * stats.avg_row_size;
+
+    // Complex predicates benefit more from GPU parallelism
+    pred_complexity > PredicateCost::Simple
+        && stats.row_count > 50_000.0
+        && (input_bytes <= hw.gpu_memory_bytes
+            || hw.chunked_transfer_enabled)
+}
+
+fn estimate_predicate_cost(pred: &Expr) -> PredicateCost {
+    match pred {
+        Expr::BinOp {
+            op: BinOp::And | BinOp::Or,
+            left,
+            right,
+            ..
+        } => {
+            let l = estimate_predicate_cost(left);
+            let r = estimate_predicate_cost(right);
+            l.max(r).increment()
+        }
+        Expr::BinOp { .. } => PredicateCost::Simple,
+        Expr::Function { name, .. }
+            if name == "LIKE" || name == "REGEXP" =>
+        {
+            PredicateCost::Expensive
+        }
+        _ => PredicateCost::Simple,
+    }
+}
+```
+
+**Restrictions:**
+- UDF predicates cannot run on GPU unless compiled for GPU
+- LIKE with leading wildcards causes warp divergence
+- Predicates referencing LOB columns may not be transferable
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    pred_complexity: u32,
+    hw: &HardwareProfile,
+) -> f64 {
+    let n = stats.row_count;
+    let data_bytes = n as u64 * stats.avg_row_size;
+
+    // CPU: sequential predicate evaluation
+    let cpu_ns_per_row = 10.0 * pred_complexity as f64;
+    let cpu_ns = n * cpu_ns_per_row;
+
+    // GPU: transfer + parallel evaluation
+    let transfer_ns = data_bytes as f64
+        / (hw.pcie_bandwidth_gbps * 1e9) * 1e9;
+    let gpu_ns_per_row =
+        10.0 * pred_complexity as f64 / hw.gpu_sm_count as f64;
+    let gpu_eval_ns = n * gpu_ns_per_row;
+    let gpu_ns = transfer_ns + gpu_eval_ns;
+
+    if cpu_ns > gpu_ns {
+        (cpu_ns - gpu_ns) / cpu_ns
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 10x-100x for complex compound predicates on
+large tables. Less benefit for simple single-column comparisons.
+
+## Test Cases
+
+### Positive: Complex compound predicate
+
+```sql
+-- lineitem: 600M rows, compound WHERE
+SELECT * FROM lineitem
+WHERE l_shipdate BETWEEN '1995-01-01' AND '1996-12-31'
+  AND l_discount BETWEEN 0.05 AND 0.07
+  AND l_quantity < 24;
+
+-- Expected: GPU predicate evaluation (TPC-H Q6 style)
+-- Plan: GpuFilter(pred=compound, input=lineitem)
+```
+
+### Positive: LIKE pattern matching
+
+```sql
+-- customer: 15M rows, pattern match
+SELECT * FROM customer
+WHERE c_comment LIKE '%special%requests%';
+
+-- Expected: GPU string matching (parallel per-row)
+-- Plan: GpuFilter(pred=LIKE, input=customer)
+```
+
+### Negative: Simple indexed lookup
+
+```sql
+SELECT * FROM orders WHERE o_orderkey = 12345;
+
+-- Expected: Index scan on CPU (point lookup)
+-- Plan: IndexScan(orders, key=o_orderkey=12345)
+```
+
+## References
+
+**Implementation in databases:**
+- HeavyDB: `QueryEngine/IRCodegen.cpp` - LLVM IR for GPU predicates
+- PG-Strom: `src/codegen.c` - Expression compilation to GPU
+- SQream: GPU predicate evaluation engine
+
+**Academic papers:**
+- Bress et al., "GPU-Accelerated Database Systems: Survey", TODS 2014
+- Yuan et al., "GPU-Accelerated Predicate Evaluation on Column Stores", HPDC 2013

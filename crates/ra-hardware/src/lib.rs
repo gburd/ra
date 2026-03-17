@@ -1,0 +1,25 @@
+//! Hardware-aware cost models and operator placement.
+//!
+//! This crate extends the core cost model with hardware profiles for
+//! GPU, FPGA, and SIMD-aware query optimization. It provides:
+//!
+//! - [`HardwareProfile`] describing available accelerators and their
+//!   performance characteristics.
+//! - [`Device`] enumeration for operator placement decisions.
+//! - [`HardwareCostModel`] that compares CPU vs device execution cost
+//!   including data transfer overhead.
+//! - Cost estimation functions for GPU scans, joins, aggregations,
+//!   and FPGA streaming operators.
+
+#![warn(missing_docs)]
+#![warn(clippy::pedantic)]
+#![allow(clippy::module_name_repetitions)]
+#![allow(clippy::similar_names)]
+
+pub mod cost;
+pub mod device;
+pub mod profile;
+
+pub use cost::HardwareCostModel;
+pub use device::Device;
+pub use profile::HardwareProfile;

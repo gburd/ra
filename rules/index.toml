@@ -1,5 +1,5 @@
 version = "1.0.0"
-total_rules = 20
+total_rules = 127
 last_updated = "2026-03-17"
 
 [categories.logical]
@@ -100,6 +100,126 @@ rules = []
 [categories.cost-models]
 description = "Cost estimation rules"
 rules = []
+
+[categories.hardware]
+description = "Hardware-specific acceleration rules (GPU, FPGA, SIMD, NUMA)"
+
+[categories.hardware.gpu]
+description = "GPU-accelerated operators using CUDA/OpenCL"
+rules = [
+    "gpu-parallel-scan",
+    "gpu-hash-join",
+    "gpu-aggregation",
+    "gpu-sort",
+    "gpu-predicate-evaluation",
+    "gpu-string-operations",
+    "gpu-window-function",
+    "gpu-distinct-aggregation",
+]
+
+[categories.hardware.fpga]
+description = "FPGA streaming and near-storage acceleration"
+rules = [
+    "fpga-stream-filter",
+    "fpga-compression-scan",
+    "fpga-hash-join",
+    "fpga-regex-filter",
+]
+
+[categories.hardware.accelerator]
+description = "CPU-level hardware optimizations (SIMD, NUMA, cache)"
+rules = [
+    "heterogeneous-operator-placement",
+    "simd-vectorized-scan",
+    "numa-aware-partitioning",
+    "prefetch-aware-join",
+    "cache-conscious-partitioning",
+]
+
+[categories.hardware.data-placement]
+description = "Host-device data transfer and memory management"
+rules = [
+    "host-to-device-transfer",
+    "device-memory-caching",
+    "columnar-conversion",
+    "unified-memory-management",
+]
+
+[categories.distributed]
+description = "Distributed query optimization rules for multi-node execution"
+
+[categories.distributed.exchange-placement]
+description = "Exchange operator insertion, merging, and removal"
+rules = [
+    "insert-exchange",
+    "merge-adjacent-exchanges",
+    "remove-redundant-exchange",
+    "choose-exchange-type",
+]
+
+[categories.distributed.data-movement]
+description = "Minimize data movement across the network"
+rules = [
+    "push-filter-below-exchange",
+    "push-project-below-exchange",
+    "push-limit-below-exchange",
+    "minimize-network-transfer",
+    "union-all-pushdown",
+]
+
+[categories.distributed.distributed-joins]
+description = "Distributed join strategies (broadcast, shuffle, co-located)"
+rules = [
+    "broadcast-join",
+    "shuffle-join",
+    "colocated-join",
+    "lookup-join",
+    "semi-join-reduction",
+    "skew-aware-join",
+    "asymmetric-repartition-join",
+]
+
+[categories.distributed.partial-aggregation]
+description = "Two/three-phase aggregation for distributed execution"
+rules = [
+    "two-phase-aggregation",
+    "three-phase-distinct-agg",
+    "push-partial-agg-below-exchange",
+]
+
+[categories.distributed.partition-pruning]
+description = "Eliminate irrelevant partitions from distributed scans"
+rules = [
+    "static-partition-pruning",
+    "dynamic-partition-pruning",
+    "partition-wise-join",
+]
+
+[categories.distributed.distributed-sort]
+description = "Distributed sorting and top-N strategies"
+rules = [
+    "merge-sort-gather",
+    "distributed-topn",
+    "distributed-window-function",
+]
+
+[categories.distributed.colocation]
+description = "Data co-location and exchange elimination strategies"
+rules = [
+    "reference-table-colocation",
+    "partition-key-colocation",
+    "reference-table-join",
+    "colocation-aware-placement",
+    "multi-join-colocation",
+]
+
+[categories.distributed.stage-planning]
+description = "Query stage decomposition and pipeline planning"
+rules = [
+    "stage-decomposition",
+    "pipeline-stages",
+    "minimize-stage-count",
+]
 
 [categories.experimental]
 description = "Research and experimental rules"

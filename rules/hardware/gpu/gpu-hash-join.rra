@@ -1,0 +1,180 @@
+---
+id: gpu-hash-join
+name: GPU Hash Join
+category: hardware/gpu
+databases: [heavydb, blazingsql, pg-strom]
+execution_models: [vectorized]
+hardware: [gpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [gpu, join, hash-join, parallel]
+complexity: "O((n+m)/p)"
+benefit_range: [0.2, 0.9]
+---
+
+# GPU Hash Join
+
+## Description
+
+Replaces a CPU hash join with a GPU-accelerated hash join when the
+build side fits in GPU memory and the probe side is large enough to
+benefit from parallel probing. GPU hash joins exploit massive thread
+parallelism to build hash tables cooperatively and probe them with
+thousands of concurrent threads.
+
+**When to apply**: The build side fits in GPU memory and the probe
+side exceeds the crossover threshold. The join must be an equi-join
+(hash-based).
+
+**Why it works**: GPU hash table construction uses parallel insertion
+with cuckoo hashing or linear probing. Probing is embarrassingly
+parallel -- each thread handles one tuple. With thousands of
+concurrent probes, the GPU saturates memory bandwidth far beyond
+what a CPU can achieve.
+
+## Relational Algebra
+
+```algebra
+R join[equi(R.a = S.b)] S -> gpu_hash_join[equi(R.a = S.b)](R, S)
+  where size(build_side) <= gpu_memory
+    AND |probe_side| > threshold
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("gpu-hash-join";
+    "(join inner (eq ?la ?ra) ?left ?right)" =>
+    "(gpu_hash_join (eq ?la ?ra) ?left ?right)"
+    if build_side_fits_gpu("?left", "?right")
+    if probe_side_large_enough("?left", "?right")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    left_stats: &Statistics,
+    right_stats: &Statistics,
+    hw: &HardwareProfile,
+) -> bool {
+    let (build, probe) = if left_stats.row_count
+        <= right_stats.row_count
+    {
+        (left_stats, right_stats)
+    } else {
+        (right_stats, left_stats)
+    };
+
+    let build_bytes =
+        build.row_count as u64 * build.avg_row_size;
+    let hash_table_bytes = build_bytes * 2; // ~2x for hash overhead
+
+    hash_table_bytes <= hw.gpu_memory_bytes
+        && probe.row_count > 100_000.0
+}
+```
+
+**Restrictions:**
+- Must be an equi-join (hash-based joins only)
+- Build side hash table must fit in GPU memory
+- Key types must be hashable on GPU (integers, fixed-length strings)
+- OUTER joins require additional bitmap tracking on GPU
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    build_stats: &Statistics,
+    probe_stats: &Statistics,
+    hw: &HardwareProfile,
+) -> f64 {
+    let build_bytes =
+        build_stats.row_count as u64 * build_stats.avg_row_size;
+    let probe_bytes =
+        probe_stats.row_count as u64 * probe_stats.avg_row_size;
+
+    // CPU hash join: build O(n) + probe O(m)
+    let cpu_build_ns =
+        build_stats.row_count * 100.0; // ~100ns per insert
+    let cpu_probe_ns =
+        probe_stats.row_count * 50.0; // ~50ns per probe
+    let cpu_total = cpu_build_ns + cpu_probe_ns;
+
+    // GPU: transfer + parallel build + parallel probe
+    let transfer_ns = (build_bytes + probe_bytes) as f64
+        / hw.pcie_bandwidth_gbps * 1.0;
+    let gpu_build_ns =
+        build_stats.row_count * 100.0 / hw.gpu_sm_count as f64;
+    let gpu_probe_ns =
+        probe_stats.row_count * 50.0 / hw.gpu_sm_count as f64;
+    let gpu_total = transfer_ns + gpu_build_ns + gpu_probe_ns;
+
+    if cpu_total > gpu_total {
+        (cpu_total - gpu_total) / cpu_total
+    } else {
+        0.0
+    }
+}
+```
+
+**Assumptions:**
+- Hash table uses 2x memory overhead (load factor ~0.5)
+- GPU uses cuckoo hashing or open addressing with linear probing
+- Build phase parallelized across SMs with atomic insertions
+- Probe phase is embarrassingly parallel (one tuple per thread)
+
+**Typical benefit**: 3x-10x for joins with build side < GPU memory and
+probe side > 1M rows.
+
+## Test Cases
+
+### Positive: Large equi-join with asymmetric inputs
+
+```sql
+-- lineitem: 600M rows; customer: 15M rows (build side)
+-- Customer hash table: ~1.8 GB (fits in GPU)
+SELECT l.*, c.name
+FROM lineitem l
+JOIN customer c ON l.custkey = c.custkey;
+
+-- Expected: GPU hash join, customer as build side
+-- Plan: GpuHashJoin(build=customer, probe=lineitem, key=custkey)
+```
+
+### Negative: Both sides too large for GPU memory
+
+```sql
+-- lineitem: 600M rows; orders: 150M rows
+-- Smaller side hash table: ~18 GB (exceeds 16GB GPU)
+SELECT *
+FROM lineitem l
+JOIN orders o ON l.orderkey = o.orderkey;
+
+-- Expected: CPU hash join (or partitioned GPU join)
+-- Plan: HashJoin(build=orders, probe=lineitem, key=orderkey)
+```
+
+### Negative: Small tables not worth GPU overhead
+
+```sql
+SELECT * FROM nation n JOIN region r ON n.regionkey = r.regionkey;
+
+-- Expected: CPU nested loop or hash join
+-- Plan: HashJoin(build=region, probe=nation, key=regionkey)
+```
+
+## References
+
+**Implementation in databases:**
+- HeavyDB: `QueryEngine/JoinHashTable/` - GPU hash table implementation
+- PG-Strom: `src/gpujoin.c` - GPU join operator
+- BlazingSQL: cuDF-based hash join
+
+**Academic papers:**
+- He et al., "Relational Joins on Graphics Processors", SIGMOD 2008
+- Kaldewey et al., "GPU join processing revisited", DaMoN 2012
+- Rui et al., "Multi-GPU hash join", IEEE TKDE 2021

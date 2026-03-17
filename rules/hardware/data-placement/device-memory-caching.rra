@@ -1,0 +1,160 @@
+---
+id: device-memory-caching
+name: Device Memory Caching and Reuse
+category: hardware/data-placement
+databases: [heavydb, blazingsql, sqream]
+execution_models: [vectorized]
+hardware: [gpu, fpga]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [caching, gpu-memory, reuse, hot-data, pinning]
+complexity: "plan-level"
+benefit_range: [0.3, 0.95]
+---
+
+# Device Memory Caching and Reuse
+
+## Description
+
+Keeps frequently accessed tables or columns resident in device memory
+across queries, eliminating repeated PCIe transfers for hot data.
+When a table is referenced by multiple queries or join operations,
+the data stays pinned in GPU/FPGA memory and is reused.
+
+**When to apply**: A table or column is accessed repeatedly (hot data)
+and fits in device memory. The optimizer identifies reuse
+opportunities across operators within a query and across queries in
+a workload.
+
+**Why it works**: PCIe transfer is often the dominant cost for
+GPU-accelerated queries. By caching frequently accessed data in
+device memory, subsequent accesses avoid the transfer entirely.
+For interactive analytics workloads where the same fact table is
+queried with different filters, this eliminates the transfer cost
+from all but the first query.
+
+## Relational Algebra
+
+```algebra
+// Within a query: share device-resident data across operators
+gpu_op1(transfer_to_gpu(R)) ... gpu_op2(transfer_to_gpu(R))
+  -> let dev_R = transfer_to_gpu(R) in
+     gpu_op1(dev_R) ... gpu_op2(dev_R)
+
+// Across queries: pin hot data on device
+transfer_to_gpu(R) -> device_cached(R)
+  where R is hot AND size(R) <= available_device_memory
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("device-memory-reuse";
+    "(gpu_op1 (transfer_to_gpu ?table))
+     (gpu_op2 (transfer_to_gpu ?table))" =>
+    "(let (dev_table (transfer_to_gpu ?table))
+       (gpu_op1 dev_table)
+       (gpu_op2 dev_table))"
+    if same_table("?table")
+),
+
+rw!("device-cache-hot-table";
+    "(transfer_to_gpu ?table)" =>
+    "(device_cached ?table)"
+    if table_is_hot("?table")
+    if fits_device_memory("?table")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    table: &str,
+    stats: &Statistics,
+    hw: &HardwareProfile,
+    workload: &WorkloadStats,
+) -> bool {
+    let table_bytes =
+        stats.row_count as u64 * stats.avg_row_size;
+    let access_frequency = workload.access_count(table);
+
+    table_bytes <= hw.available_device_memory_bytes()
+        && access_frequency > 2
+}
+```
+
+**Restrictions:**
+- Device memory is limited; eviction policy needed for cache pressure
+- Table updates require cache invalidation
+- Memory fragmentation can reduce effective capacity
+- Must track data freshness for mutable tables
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    access_count: u32,
+    hw: &HardwareProfile,
+) -> f64 {
+    let table_bytes =
+        stats.row_count as u64 * stats.avg_row_size;
+    let transfer_time_ns = table_bytes as f64
+        / (hw.pcie_bandwidth_gbps * 1e9) * 1e9;
+
+    // Without caching: transfer every access
+    let cost_uncached =
+        transfer_time_ns * access_count as f64;
+    // With caching: transfer once
+    let cost_cached = transfer_time_ns;
+
+    (cost_uncached - cost_cached) / cost_uncached
+}
+```
+
+**Typical benefit**: (N-1)/N cost reduction for N accesses.
+For 10 queries on same table, 90% transfer cost eliminated.
+
+## Test Cases
+
+### Positive: Hot fact table in analytical workload
+
+```sql
+-- Dashboard workload: 20 queries/minute on lineitem
+-- lineitem: 72 GB, fits in A100 80GB GPU memory
+-- First query transfers; subsequent queries reuse
+
+-- Query 1: transfers lineitem to GPU, caches it
+SELECT l_returnflag, SUM(l_quantity)
+FROM lineitem GROUP BY l_returnflag;
+
+-- Query 2: reuses cached lineitem (no transfer)
+SELECT l_shipmode, COUNT(*)
+FROM lineitem WHERE l_shipdate > '1998-01-01'
+GROUP BY l_shipmode;
+```
+
+### Negative: Table too large for device memory
+
+```sql
+-- web_events: 500 GB, exceeds GPU memory
+-- Cannot cache entirely; must use chunked processing
+SELECT event_type, COUNT(*) FROM web_events
+GROUP BY event_type;
+
+-- Plan: ChunkedGpuAggregate (stream chunks through GPU)
+```
+
+## References
+
+**Implementation in databases:**
+- HeavyDB: GPU memory buffer pool with LRU eviction
+- SQream: GPU memory management for cached columns
+- BlazingSQL: cuDF-based GPU memory caching
+
+**Academic papers:**
+- Breyer et al., "Towards GPU Accelerated Data Stream Processing", GvDB 2009
+- Paul et al., "GPU-Aware Memory Management for Database Caching", VLDB 2020

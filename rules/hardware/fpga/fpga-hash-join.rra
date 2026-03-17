@@ -1,0 +1,152 @@
+---
+id: fpga-hash-join
+name: FPGA Pipelined Hash Join
+category: hardware/fpga
+databases: [xilinx-alveo, intel-pac]
+execution_models: [push-based]
+hardware: [fpga]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [fpga, join, hash-join, pipeline, streaming]
+complexity: "O(n+m) pipelined"
+benefit_range: [0.2, 0.75]
+---
+
+# FPGA Pipelined Hash Join
+
+## Description
+
+Implements a fully pipelined hash join on the FPGA where the build
+side is loaded into FPGA BRAM/URAM and probe tuples stream through
+the join pipeline at one tuple per clock cycle. The FPGA constructs
+the hash table in on-chip memory during the build phase, then
+processes probe tuples at line rate.
+
+**When to apply**: The build side is small enough to fit in FPGA
+on-chip memory (BRAM/URAM, typically 10-100 MB) and the probe side
+is large. The join key must be fixed-width.
+
+**Why it works**: FPGA on-chip memory (BRAM) has single-cycle latency,
+enabling hash table lookups without cache misses. The fully pipelined
+design processes one probe tuple per clock cycle, achieving
+deterministic throughput regardless of data distribution.
+
+## Relational Algebra
+
+```algebra
+R join[equi(R.a = S.b)] S -> fpga_hash_join[equi(R.a = S.b)](R, S)
+  where size(build_side) <= fpga_bram_capacity
+    AND key_type is fixed_width
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("fpga-hash-join";
+    "(join inner (eq ?la ?ra) ?left ?right)" =>
+    "(fpga_hash_join (eq ?la ?ra) ?left ?right)"
+    if build_side_fits_fpga_bram("?left", "?right")
+    if join_key_fixed_width("?la", "?ra")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    left_stats: &Statistics,
+    right_stats: &Statistics,
+    hw: &HardwareProfile,
+) -> bool {
+    let (build, _probe) = if left_stats.row_count
+        <= right_stats.row_count
+    {
+        (left_stats, right_stats)
+    } else {
+        (right_stats, left_stats)
+    };
+
+    let build_bytes =
+        build.row_count as u64 * build.avg_row_size;
+    // Hash table overhead ~2x for open addressing
+    let hash_table_bytes = build_bytes * 2;
+
+    hash_table_bytes <= hw.fpga_bram_bytes
+}
+```
+
+**Restrictions:**
+- Build side must fit in FPGA on-chip memory (BRAM/URAM)
+- Join key must be fixed-width (integer, date, fixed char)
+- Collision handling is limited (cuckoo hashing with max probes)
+- OUTER joins require additional logic (increases LUT usage)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    build_stats: &Statistics,
+    probe_stats: &Statistics,
+    hw: &HardwareProfile,
+) -> f64 {
+    let probe_rows = probe_stats.row_count;
+
+    // CPU hash join: ~50-100ns per probe with cache misses
+    let cpu_probe_ns = probe_rows * 75.0;
+
+    // FPGA: one probe per clock cycle (no cache misses)
+    let fpga_clock_ns =
+        1.0 / hw.fpga_clock_mhz as f64 * 1e3;
+    let fpga_probe_ns = probe_rows * fpga_clock_ns;
+
+    if cpu_probe_ns > fpga_probe_ns {
+        (cpu_probe_ns - fpga_probe_ns) / cpu_probe_ns
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 2x-5x for joins with small build side and
+large probe side. Main advantage is deterministic latency and
+freeing CPU for other work.
+
+## Test Cases
+
+### Positive: Small dimension table join
+
+```sql
+-- region: 5 rows (160 bytes), fits in BRAM
+-- lineitem: 600M rows (large probe side)
+SELECT l.*, r.r_name
+FROM lineitem l
+JOIN region r ON l.l_regionkey = r.r_regionkey;
+
+-- Expected: FPGA hash join with region in BRAM
+-- Plan: FpgaHashJoin(build=region, probe=lineitem, key=regionkey)
+```
+
+### Negative: Build side too large for BRAM
+
+```sql
+-- customer: 15M rows, ~1.8GB
+-- Does not fit in FPGA BRAM (typically ~36-100 MB)
+SELECT * FROM orders o
+JOIN customer c ON o.o_custkey = c.c_custkey;
+
+-- Expected: CPU or GPU hash join
+-- Plan: HashJoin(build=customer, probe=orders, key=custkey)
+```
+
+## References
+
+**Implementation in databases:**
+- Xilinx Vitis Database Library: Hash join IP
+- Intel FPGA SQL acceleration reference
+
+**Academic papers:**
+- Halstead et al., "Accelerating Join Operation for Relational Databases with FPGAs", FCCM 2013
+- Casper and Olukotun, "Hardware Acceleration of Database Operations", FPGA 2014
+- Sidler et al., "doppioDB: A Hardware Accelerated Database", SIGMOD 2017

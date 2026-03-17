@@ -1,0 +1,164 @@
+---
+id: gpu-sort
+name: GPU Parallel Sort
+category: hardware/gpu
+databases: [heavydb, blazingsql, sqream]
+execution_models: [vectorized]
+hardware: [gpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [gpu, sort, parallel, radix-sort, merge-sort]
+complexity: "O(n log n / p)"
+benefit_range: [0.2, 0.85]
+---
+
+# GPU Parallel Sort
+
+## Description
+
+Offloads sorting to the GPU using parallel radix sort (for integer/
+fixed-width keys) or parallel merge sort (for variable-width keys).
+GPU sorting achieves high throughput for large datasets by exploiting
+memory bandwidth and massive parallelism.
+
+**When to apply**: The input exceeds the crossover size and the sort
+key type is GPU-sortable. Radix sort on GPU is preferred for integer
+keys; bitonic or merge sort for general comparisons.
+
+**Why it works**: GPU radix sort processes multiple bits per pass in
+parallel across thousands of threads. For 32-bit integer keys, only
+4 passes of 8 bits each are needed. Each pass is a parallel prefix
+scan operation that GPUs handle efficiently. The resulting throughput
+is 2-10x higher than CPU sort for large inputs.
+
+## Relational Algebra
+
+```algebra
+tau[k](R) -> gpu_sort[k](R)
+  where |R| > crossover_threshold
+    AND type(k) is gpu_sortable
+    AND size(R) <= gpu_memory
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("gpu-sort";
+    "(sort ?keys ?input)" =>
+    "(gpu_sort ?keys ?input)"
+    if input_large_enough("?input")
+    if keys_gpu_sortable("?keys")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    sort_keys: &[SortKey],
+    hw: &HardwareProfile,
+) -> bool {
+    let sortable = sort_keys.iter().all(|k| {
+        matches!(
+            k.data_type,
+            DataType::Int32
+                | DataType::Int64
+                | DataType::Float32
+                | DataType::Float64
+                | DataType::Date
+                | DataType::Timestamp
+        )
+    });
+
+    let data_bytes =
+        stats.row_count as u64 * stats.avg_row_size;
+    // GPU sort needs ~2x memory (input + output buffer)
+    let required_bytes = data_bytes * 2;
+
+    sortable
+        && stats.row_count > 500_000.0
+        && required_bytes <= hw.gpu_memory_bytes
+}
+```
+
+**Restrictions:**
+- Sort key must be a fixed-width, GPU-sortable type
+- Data plus output buffer must fit in GPU memory
+- Variable-length string sorting has reduced GPU benefit
+- Multi-key sorts require composite key encoding
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    hw: &HardwareProfile,
+) -> f64 {
+    let n = stats.row_count;
+    let data_bytes = n as u64 * stats.avg_row_size;
+
+    // CPU sort: O(n log n) comparisons
+    let cpu_ns = n * n.log2() * 15.0; // ~15ns per compare-swap
+
+    // GPU: transfer + radix sort passes
+    let transfer_ns = data_bytes as f64
+        / (hw.pcie_bandwidth_gbps * 1e9) * 1e9 * 2.0; // round trip
+    let passes = 4.0; // 4 passes for 32-bit keys
+    let gpu_sort_ns =
+        n * passes * 5.0 / hw.gpu_sm_count as f64;
+    let gpu_ns = transfer_ns + gpu_sort_ns;
+
+    if cpu_ns > gpu_ns {
+        (cpu_ns - gpu_ns) / cpu_ns
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 2x-10x for integer-key sorts on > 1M rows.
+
+## Test Cases
+
+### Positive: Large integer-key sort
+
+```sql
+-- orders: 150M rows, sort by integer key
+SELECT * FROM orders ORDER BY o_orderdate;
+
+-- Expected: GPU radix sort
+-- Plan: GpuSort(key=o_orderdate, input=orders)
+```
+
+### Negative: Small dataset
+
+```sql
+SELECT * FROM regions ORDER BY r_name;
+
+-- Expected: CPU sort
+-- Plan: Sort(key=r_name, input=regions)
+```
+
+### Negative: Variable-length string key
+
+```sql
+-- Large table but string sort key
+SELECT * FROM customer ORDER BY c_comment;
+
+-- Expected: CPU sort (string keys have poor GPU radix sort performance)
+-- Plan: Sort(key=c_comment, input=customer)
+```
+
+## References
+
+**Implementation in databases:**
+- HeavyDB: Uses Thrust library for GPU sorting
+- CUB library: `cub::DeviceRadixSort` for GPU radix sort
+- ModernGPU: GPU merge sort implementation
+
+**Academic papers:**
+- Satish et al., "Designing Efficient Sorting Algorithms for Manycore GPUs", IPDPS 2009
+- Merrill and Grimshaw, "High Performance and Scalable Radix Sorting on GPU", 2011
