@@ -7,25 +7,33 @@ This document describes the architecture of the Relational Algebra Rule System.
 The system consists of several layers:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        Applications                          │
-│            (CLI, Web Explorer, Library API)                  │
-└────────────────────┬────────────────────────────────────────┘
-                     ↓
-┌─────────────────────────────────────────────────────────────┐
-│                   Optimization Engine                        │
-│     (E-graphs, Equality Saturation, Cost-based Extraction)   │
-└────────────────────┬────────────────────────────────────────┘
-                     ↓
-┌─────────────────────────────────────────────────────────────┐
-│                   Rule Repository                            │
-│          (Parser, Compiler, Registry, Index)                 │
-└────────────────────┬────────────────────────────────────────┘
-                     ↓
-┌─────────────────────────────────────────────────────────────┐
-│                      Core Types                              │
-│    (RelExpr, Expression, Rule, Cost, Statistics)             │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                         Applications                             │
+│          CLI (ra-cli)  ·  Web (ra-web)  ·  WASM (ra-wasm)       │
+└────────────────┬────────────────┬────────────────┬──────────────┘
+                 ↓                ↓                ↓
+┌────────────────────┐  ┌──────────────────┐  ┌────────────────┐
+│ Optimization Engine│  │  Code Generation │  │  SQL Dialect    │
+│    (ra-engine)     │  │   (ra-codegen)   │  │  (ra-dialect)   │
+│  E-graph + egg     │  │ Cranelift + WASM │  │  Translation    │
+└────────┬───────────┘  └──────────────────┘  └────────────────┘
+         ↓
+┌──────────────────────────────────────────────────────────────┐
+│                    Rule Repository                             │
+│       Parser (ra-parser)  ·  Compiler (ra-compiler)           │
+│  100+ rules: logical · physical · hardware · distributed      │
+└────────┬──────────────────────────────────────────────────────┘
+         ↓
+┌──────────────────────────────────────────────────────────────┐
+│                      Core Types (ra-core)                      │
+│     RelExpr · Expression · Rule · Cost · Statistics            │
+└───────┬────────────┬────────────┬────────────┬───────────────┘
+        ↓            ↓            ↓            ↓
+┌────────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐
+│ ra-hardware│ │  ra-ml   │ │ra-adaptive│ │ ra-isolation │
+│ GPU/FPGA   │ │ ML cost  │ │ Runtime  │ │  Isolation   │
+│ cost model │ │ estimator│ │ reopt    │ │  testing     │
+└────────────┘ └──────────┘ └──────────┘ └──────────────┘
 ```
 
 ## Components
@@ -280,13 +288,65 @@ The system is designed to be extensible:
 3. **Custom Backends**: Implement code generation for new targets
 4. **Custom Statistics**: Extend statistics types
 
+### ra-hardware
+
+Hardware-aware cost models and operator placement:
+
+- **device.rs**: Device enum (CPU, GPU, FPGA) and transfer path modeling
+- **profile.rs**: HardwareProfile describing system capabilities with
+  preset profiles for GPU servers (A100), FPGA appliances (Alveo), and
+  CPU-only systems
+- **cost.rs**: HardwareCostModel implementing CostModel trait, estimating
+  execution cost on each device including PCIe transfer overhead
+
+See [hardware-acceleration.md](hardware-acceleration.md) for details on
+the 21 hardware-specific optimization rules covering GPU scans/joins/
+aggregations, FPGA streaming filters, SIMD vectorization, and NUMA-aware
+partitioning.
+
+### ra-adaptive
+
+Runtime reoptimization and adaptive execution:
+
+- **runtime_stats.rs**: Runtime statistics collection
+- **triggers.rs**: Reoptimization trigger conditions
+- **plan_switch.rs**: Mid-execution plan switching
+- **executor.rs**: Adaptive query executor
+- **checkpoint.rs**: Checkpoint/restart for plan transitions
+
+### ra-ml
+
+ML-based cardinality estimation:
+
+- **features.rs**: Feature extraction from query plans
+- **nn.rs**: Neural network model for cardinality prediction
+- **estimator.rs**: ML-enhanced cost estimator
+- **training.rs**: Online model training from execution feedback
+
+### ra-synthesis
+
+Query synthesis from natural language:
+
+- **intent.rs**: Intent parser for natural language queries
+- **generator.rs**: Query generator from parsed intent to RelExpr
+- **validator.rs**: Query validation
+- **render.rs**: SQL rendering from RelExpr
+
+### ra-discovery
+
+Automatic rule discovery from execution logs:
+
+- **log.rs**: Execution log parsing
+- **fingerprint.rs**: Query fingerprinting
+- **mining.rs**: Pattern mining from log data
+- **synthesis.rs**: Rule synthesis from discovered patterns
+- **validation.rs**: Discovered rule validation
+
 ## Future Enhancements
 
-- **Adaptive Optimization**: Learn from execution feedback
-- **Distributed Optimization**: Rules for distributed databases
-- **Hardware-Specific Rules**: GPU, FPGA optimizations
-- **Multi-Model Support**: Graph, document databases
-- **Neural Cost Models**: ML-based cost estimation
+- **CXL Memory**: Rules for CXL-attached memory pooling
+- **Disaggregated Storage**: Rules for compute-storage separation
+- **Learned Indexes**: ML-based index structure selection
 
 ## References
 
