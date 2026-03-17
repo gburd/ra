@@ -1,0 +1,228 @@
+---
+id: join-union-transpose
+name: Join Union Transpose
+category: database-specific/calcite
+databases: [calcite, postgresql]
+execution_models: [volcano, vectorized]
+version: "1.0.0"
+authors: ["Apache Calcite Contributors"]
+tags: [join, union, distribute, optimization]
+complexity: "O(1)"
+benefit_range: [0.15, 0.40]
+---
+
+# Join Union Transpose
+
+## Description
+
+Distributes a join over a UNION on one side, transforming one join with
+a union input into multiple smaller joins whose results are then unioned.
+This enables partition-wise joins, parallelization, and can leverage
+partition pruning.
+
+**When to apply**: A join has a UNION (or UNION ALL) as one input. The
+join can be distributed across the union branches, creating separate joins
+that are then combined via union.
+
+**Why it works**: Join distributes over union: (R ∪ S) ⋈ T = (R ⋈ T) ∪ (S ⋈ T).
+This transformation can enable partition-wise processing, better parallelization,
+and allows each branch to use specialized indexes or partition pruning.
+
+## Relational Algebra
+
+```algebra
+(R1 ∪ R2) ⋈ S -> (R1 ⋈ S) ∪ (R2 ⋈ S)
+
+S ⋈ (R1 ∪ R2) -> (S ⋈ R1) ∪ (S ⋈ R2)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("join-union-transpose-left";
+    "(join ?type ?pred
+       (union ?all (list ?r1 ?r2))
+       ?right)" =>
+    "(union ?all (list
+       (join ?type ?pred ?r1 ?right)
+       (join ?type ?pred ?r2 ?right)))"
+    if should-distribute-join("?type", "?r1", "?r2")
+),
+
+rw!("join-union-transpose-right";
+    "(join ?type ?pred
+       ?left
+       (union ?all (list ?r1 ?r2)))" =>
+    "(union ?all (list
+       (join ?type ?pred ?left ?r1)
+       (join ?type ?pred ?left ?r2)))"
+    if should-distribute-join("?type", "?r1", "?r2")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    hw: &HardwareProfile,
+) -> bool {
+    // Must be INNER join or LEFT/RIGHT join (carefully)
+    matches!(stats.join_type, JoinType::Inner | JoinType::Left | JoinType::Right)
+        // Union branches should be partitioned data
+        && stats.union_branches_are_partitions
+        // Parallelization benefit should be significant
+        && hw.parallel_workers > 1
+        // Total cost should justify duplication
+        && stats.right_side_cardinality * stats.join_selectivity
+           < stats.left_union_total_cardinality
+}
+```
+
+**Restrictions:**
+- Carefully handle OUTER joins (LEFT/RIGHT join distribution has different semantics)
+- Not beneficial if right side is much larger than union branches
+- May increase total work if union branches are large and join is not selective
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    hw: &HardwareProfile,
+) -> f64 {
+    let n_branches = stats.n_union_branches as f64;
+    let right_rows = stats.right_cardinality as f64;
+    let total_left_rows: f64 = stats.union_branch_sizes.iter().sum();
+
+    // Cost of single join with union:
+    // - Build hash table on right: right_rows * 1.5
+    // - Probe from left: total_left_rows * 1.0
+    let single_join_cost = (right_rows * 1.5) + total_left_rows;
+
+    // Cost of distributed joins:
+    // - Build hash table n_branches times: n_branches * right_rows * 1.5
+    // - Probe from each branch: total_left_rows * 1.0
+    // - Union results: negligible
+    let distributed_cost = (n_branches * right_rows * 1.5) + total_left_rows;
+
+    // Benefit comes from parallelization
+    let parallel_speedup = hw.parallel_workers.min(n_branches as i32) as f64;
+    let parallel_distributed_cost = distributed_cost / parallel_speedup;
+
+    // Also benefit from partition pruning if applicable
+    let pruning_benefit = if stats.can_prune_partitions {
+        0.3 // 30% of branches can be eliminated
+    } else {
+        0.0
+    };
+
+    if single_join_cost > parallel_distributed_cost {
+        ((single_join_cost - parallel_distributed_cost) / single_join_cost)
+            + pruning_benefit
+    } else {
+        0.0
+    }
+}
+```
+
+**Assumptions:**
+- Hash join build cost: 1.5x right side cardinality
+- Probe cost: 1.0x left side cardinality
+- Parallel execution can process branches independently
+- Partition pruning eliminates some branches entirely
+
+**Typical benefit**: 15-40% with good parallelization and partition pruning.
+
+## Test Cases
+
+### Positive: Partition-wise join
+
+```sql
+-- Join with partitioned table (union of partitions)
+SELECT o.*, c.name
+FROM (
+  SELECT * FROM orders_2023
+  UNION ALL
+  SELECT * FROM orders_2024
+) o
+JOIN customers c ON o.customer_id = c.id;
+
+-- Transform to:
+-- (SELECT o.*, c.name FROM orders_2023 o JOIN customers c ON o.customer_id = c.id)
+-- UNION ALL
+-- (SELECT o.*, c.name FROM orders_2024 o JOIN customers c ON o.customer_id = c.id)
+
+-- Enables parallel execution of two smaller joins
+```
+
+### Positive: With partition pruning
+
+```sql
+-- Partition pruning eliminates one branch
+SELECT *
+FROM (
+  SELECT * FROM sales_us
+  UNION ALL
+  SELECT * FROM sales_eu
+) s
+JOIN products p ON s.product_id = p.id
+WHERE s.region = 'US'; -- Prunes sales_eu branch
+
+-- After distribution, sales_eu branch is eliminated entirely
+```
+
+### Negative: Large right side
+
+```sql
+-- Right side (huge_table) is 1TB, left branches are 1GB each
+SELECT *
+FROM (
+  SELECT * FROM small_table_1
+  UNION ALL
+  SELECT * FROM small_table_2
+  UNION ALL
+  SELECT * FROM small_table_3
+) s
+JOIN huge_table h ON s.id = h.small_id;
+
+-- Building hash table 3 times on huge_table is prohibitive
+-- Better to keep single join
+```
+
+### Positive: UNION ALL with many branches
+
+```sql
+-- Many small partitions
+SELECT *
+FROM (
+  SELECT * FROM logs_2024_01
+  UNION ALL
+  SELECT * FROM logs_2024_02
+  UNION ALL
+  ... 12 monthly partitions
+) logs
+JOIN users u ON logs.user_id = u.id;
+
+-- Distribute join across 12 branches for parallel execution
+```
+
+## References
+
+**Implementation in databases:**
+- Apache Calcite: `JoinUnionTransposeRule.java`
+- PostgreSQL: Partition-wise join (optimizer/plan/joinpath.c)
+- Oracle: Partition-wise operations
+- SQL Server: Parallel partition-wise joins
+
+**Academic papers:**
+- Graefe, "Encapsulation of Parallelism in the Volcano Query Processing System", ACM SIGMOD 1990
+  - DOI: 10.1145/93597.98720
+  - Parallel query execution and partition-wise operations
+- Graefe, "The Cascades Framework for Query Optimization", IEEE Data Engineering 1995
+  - DOI: 10.1109/69.469815
+  - Transformation rules including join-union distribution
+- DeWitt et al., "Practical Skew Handling in Parallel Joins", VLDB 1992
+  - Partition-wise join strategies

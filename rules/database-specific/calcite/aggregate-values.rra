@@ -1,0 +1,199 @@
+---
+id: aggregate-values
+name: Aggregate Values
+category: database-specific/calcite
+databases: [calcite, postgresql]
+execution_models: [volcano]
+version: "1.0.0"
+authors: ["Apache Calcite Contributors"]
+tags: [aggregate, values, constant-folding, optimization]
+complexity: "O(n)"
+benefit_range: [0.7, 1.0]
+---
+
+# Aggregate Values
+
+## Description
+
+Evaluates aggregate functions over VALUES clauses at compile time, replacing
+the aggregate operation with a constant result. This transforms runtime
+aggregation into compile-time constant folding.
+
+**When to apply**: An aggregate operation (GROUP BY, SUM, COUNT, etc.) operates
+on a VALUES clause containing only constant literals. All results can be
+pre-computed during query planning.
+
+**Why it works**: Aggregating over constant values is deterministic and can
+be fully evaluated at compile time. This eliminates the aggregate operator
+entirely, replacing it with a simple VALUES clause containing the result.
+
+## Relational Algebra
+
+```algebra
+γ_{g, AGG(c)}(VALUES(t1, t2, ...)) where ti are constants ->
+  VALUES(eval_aggregate(g, AGG(c), [t1, t2, ...]))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("aggregate-values";
+    "(aggregate ?groups ?aggs (values ?tuples))" =>
+    "(values (eval-aggregate ?groups ?aggs ?tuples))"
+    if can-eval-aggregate("?groups", "?aggs", "?tuples")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> bool {
+    // Must operate on VALUES with constants
+    stats.input_is_values_with_constants
+        // Aggregate functions must be deterministic
+        && stats.aggregates_are_deterministic
+        // Small enough to evaluate at compile time
+        && stats.values_tuple_count < 10000
+}
+```
+
+**Restrictions:**
+- VALUES clause must contain only constant literals
+- Aggregate functions must be deterministic (no RAND(), NOW(), etc.)
+- No UDFs or complex expressions that cannot be evaluated at compile time
+- Result set must be reasonable size (< 10K rows typically)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    // Aggregation over constants is pure overhead
+    // Compile-time evaluation eliminates all runtime cost
+
+    let n_tuples = stats.values_tuple_count as f64;
+    let n_groups = stats.group_count as f64;
+
+    // Runtime aggregate cost:
+    // - Hash table construction: n_groups * 100ns
+    // - Aggregation: n_tuples * 50ns
+    let runtime_cost = (n_groups * 0.0000001) + (n_tuples * 0.00000005);
+
+    // Compile-time cost is one-time and amortized
+    // Runtime cost is eliminated entirely
+    let benefit = 1.0; // 100% elimination of runtime work
+
+    benefit.min(1.0)
+}
+```
+
+**Assumptions:**
+- Compile-time evaluation is essentially free (one-time cost)
+- All runtime aggregate overhead is eliminated
+- Result is stored as constant VALUES in plan
+
+**Typical benefit**: 70-100% - complete elimination of runtime aggregation.
+
+## Test Cases
+
+### Positive: Simple COUNT over VALUES
+
+```sql
+-- Count constant rows
+SELECT COUNT(*)
+FROM (VALUES (1), (2), (3), (4), (5)) AS t(x);
+
+-- Before:
+-- Aggregate[COUNT(*)]
+--   Values((1), (2), (3), (4), (5))
+
+-- After aggregate-values:
+-- Values((5))
+```
+
+### Positive: GROUP BY with aggregates
+
+```sql
+-- Group and sum constants
+SELECT category, SUM(amount)
+FROM (VALUES
+  ('A', 10),
+  ('B', 20),
+  ('A', 15),
+  ('B', 25)
+) AS t(category, amount)
+GROUP BY category;
+
+-- After aggregate-values:
+-- Values(('A', 25), ('B', 45))
+```
+
+### Positive: Multiple aggregate functions
+
+```sql
+-- Multiple aggregates over constants
+SELECT
+  COUNT(*) as cnt,
+  SUM(val) as total,
+  AVG(val) as avg,
+  MIN(val) as min_val,
+  MAX(val) as max_val
+FROM (VALUES (10), (20), (30), (40)) AS t(val);
+
+-- After aggregate-values:
+-- Values((4, 100, 25.0, 10, 40))
+```
+
+### Negative: Non-deterministic aggregate
+
+```sql
+-- ARRAY_AGG order is non-deterministic without ORDER BY
+SELECT ARRAY_AGG(val)
+FROM (VALUES (1), (2), (3)) AS t(val);
+
+-- May not be safe to pre-compute if order matters
+-- (though with ORDER BY it could be)
+```
+
+### Positive: HAVING clause evaluation
+
+```sql
+-- GROUP BY with HAVING
+SELECT category, SUM(amount) as total
+FROM (VALUES
+  ('A', 10),
+  ('B', 5),
+  ('A', 15)
+) AS t(category, amount)
+GROUP BY category
+HAVING SUM(amount) > 10;
+
+-- After aggregate-values:
+-- Values(('A', 25))
+-- 'B' row filtered out by HAVING
+```
+
+## References
+
+**Implementation in databases:**
+- Apache Calcite: `AggregateValuesRule.java`
+- PostgreSQL: eval_const_expressions with aggregates (clauses.c)
+- MySQL: Constant aggregation folding
+
+**Academic papers:**
+- Graefe, "The Cascades Framework for Query Optimization", IEEE Data Engineering 1995
+  - DOI: 10.1109/69.469815
+  - Expression evaluation and constant folding strategies
+- Chaudhuri, "An Overview of Query Optimization in Relational Systems", ACM PODS 1998
+  - DOI: 10.1145/275487.275492
+  - Constant propagation and pre-computation
+- Hellerstein et al., "Optimization Techniques for Queries with Expensive Methods", ACM TODS 1998
+  - DOI: 10.1145/292991.292995
+  - Early evaluation and constant folding
