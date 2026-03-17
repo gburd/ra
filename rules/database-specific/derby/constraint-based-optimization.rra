@@ -1,0 +1,116 @@
+---
+id: derby-constraint-based-optimization
+name: Apache Derby Constraint-Based Query Optimization
+category: database-specific/derby
+databases: [derby]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, derby, constraint, check, not-null, optimization]
+complexity: O(1)
+benefit_range: [0.1, 0.4]
+---
+
+# Apache Derby Constraint-Based Query Optimization
+
+## Description
+
+Derby uses table constraints (NOT NULL, CHECK, FOREIGN KEY, UNIQUE)
+to simplify and optimize queries.  For example, if a column has a
+NOT NULL constraint, `WHERE col IS NOT NULL` is trivially true and
+can be eliminated.  CHECK constraints can prove predicates are always
+true or always false.
+
+**When to apply**: A WHERE predicate is redundant with a table
+constraint (e.g., checking NOT NULL on a NOT NULL column, or checking
+a range that is guaranteed by a CHECK constraint).
+
+**Why it works**: Eliminating redundant predicates simplifies the
+query plan and may unlock further optimizations (e.g., removing a
+no-op filter node).
+
+**Database version**: Apache Derby 10.1+
+
+## Relational Algebra
+
+```algebra
+-- Before: redundant IS NOT NULL check
+sigma[email IS NOT NULL](scan(users))
+-- email has NOT NULL constraint
+
+-- After: predicate eliminated
+scan(users)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("derby-eliminate-redundant-not-null";
+    "(filter (is-not-null ?col) (scan ?table))" =>
+    "(scan ?table)"
+    if is_database("derby")
+    if column_has_not_null("?table", "?col")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    predicate: &Predicate,
+    table: &Table,
+) -> bool {
+    match predicate {
+        Predicate::IsNotNull(col) => {
+            table.column(col).has_not_null_constraint()
+        }
+        Predicate::Range(col, lo, hi) => {
+            table.check_constraints().iter().any(|c| {
+                c.implies_range(col, lo, hi)
+            })
+        }
+        _ => false,
+    }
+}
+```
+
+**Restrictions:**
+- Only works with declared constraints (not inferred properties)
+- CHECK constraints must be simple enough for the optimizer to reason
+  about
+- Foreign key constraints can prove join will find matches (useful
+  for join elimination)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    _rows: f64,
+) -> f64 {
+    0.0 // Simplification; may enable other optimizations
+}
+```
+
+**Typical benefit**: Minimal direct benefit; enables further
+simplification.
+
+## Test Cases
+
+```sql
+-- Positive: NOT NULL column checked for NULL
+SELECT * FROM users WHERE email IS NOT NULL;
+-- email is NOT NULL; predicate eliminated
+```
+
+```sql
+-- Negative: nullable column
+SELECT * FROM users WHERE phone IS NOT NULL;
+-- phone is nullable; predicate kept
+```
+
+## References
+
+Apache Derby: Optimizer documentation
+Source: org.apache.derby.impl.sql.compile.PredicateList,
+  `eliminateRedundantPredicates()`

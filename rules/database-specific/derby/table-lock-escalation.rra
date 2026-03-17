@@ -1,0 +1,109 @@
+---
+id: derby-table-lock-escalation
+name: Apache Derby Table Lock Escalation
+category: database-specific/derby
+databases: [derby]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, derby, locking, escalation, table-lock, row-lock]
+complexity: O(1)
+benefit_range: [0.1, 0.4]
+---
+
+# Apache Derby Table Lock Escalation
+
+## Description
+
+Derby automatically escalates from row-level locks to a table-level
+lock when the number of row locks held by a transaction exceeds a
+threshold.  The optimizer also considers using a table-level lock
+from the start when a full table scan is planned, avoiding the
+overhead of acquiring and releasing individual row locks.
+
+**When to apply**: A query will access a large fraction of the table's
+rows (full scan or unselective index scan).
+
+**Why it works**: Row-level locks have per-lock memory and CPU
+overhead.  For a full table scan touching millions of rows, acquiring
+and releasing millions of row locks is more expensive than a single
+table lock.
+
+**Database version**: Apache Derby 10.1+
+
+## Relational Algebra
+
+```algebra
+-- Before: row-level locks on full scan
+scan(table, lock=ROW)  -- millions of lock acquire/release
+
+-- After: table-level lock
+scan(table, lock=TABLE)  -- single lock acquire/release
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("derby-table-lock-for-scan";
+    "(scan ?table)" =>
+    "(table-lock-scan ?table)"
+    if is_database("derby")
+    if is_full_scan("?table")
+    if lock_escalation_beneficial("?table")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    scan: &Scan,
+    table: &Table,
+) -> bool {
+    scan.is_full_table_scan()
+    && table.estimated_rows() > lock_escalation_threshold()
+}
+```
+
+**Restrictions:**
+- Table locks reduce concurrency (block other writers)
+- `derby.language.escalateToTableLock` property controls threshold
+- Inappropriate for OLTP workloads with high concurrency
+- Read-only transactions can use table IS (intent share) locks safely
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    rows: f64,
+    per_lock_cost: f64,
+) -> f64 {
+    let row_lock_cost = rows * per_lock_cost;
+    let table_lock_cost = per_lock_cost;
+    row_lock_cost - table_lock_cost
+}
+```
+
+**Typical benefit**: 5-20% for large scans due to reduced lock
+management overhead.
+
+## Test Cases
+
+```sql
+-- Positive: full table scan on large table
+SELECT COUNT(*) FROM large_table;
+-- Table lock used instead of millions of row locks
+```
+
+```sql
+-- Negative: selective point lookup
+SELECT * FROM users WHERE id = 42;
+-- Single row; row lock is cheaper
+```
+
+## References
+
+Apache Derby: Tuning Guide, "Locking"
+Source: org.apache.derby.impl.store.access.conglomerate,
+  lock escalation logic

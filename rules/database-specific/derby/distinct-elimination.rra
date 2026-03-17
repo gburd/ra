@@ -1,0 +1,99 @@
+---
+id: derby-distinct-elimination
+name: Apache Derby DISTINCT Elimination
+category: database-specific/derby
+databases: [derby]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, derby, distinct, elimination, unique, dedup]
+complexity: O(1)
+benefit_range: [0.1, 0.5]
+---
+
+# Apache Derby DISTINCT Elimination
+
+## Description
+
+Derby eliminates the DISTINCT operation when it can prove the result
+set is already unique.  This occurs when the SELECT list contains all
+columns of a unique index or primary key, guaranteeing no duplicate
+rows.
+
+**When to apply**: The SELECT list includes a complete unique key of
+every table in the FROM clause.
+
+**Why it works**: DISTINCT requires sorting or hashing to detect
+duplicates, which is O(n log n) or O(n) with O(n) memory.
+Eliminating it when provably unnecessary saves this cost.
+
+**Database version**: Apache Derby 10.1+
+
+## Relational Algebra
+
+```algebra
+-- Before: unnecessary DISTINCT
+delta(pi[id, name](scan(users)))
+
+-- After: DISTINCT removed (id is PK)
+pi[id, name](scan(users))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("derby-distinct-elimination";
+    "(distinct (project ?cols ?rel))" =>
+    "(project ?cols ?rel)"
+    if is_database("derby")
+    if output_is_unique("?cols", "?rel")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    columns: &[Column],
+    relation: &Relation,
+) -> bool {
+    relation.unique_keys().iter().any(|uk| {
+        uk.columns().iter().all(|c| columns.contains(c))
+    })
+}
+```
+
+**Restrictions:**
+- Must include all columns of at least one unique key
+- Expressions in the SELECT list may prevent detection
+- Multi-table joins require unique keys from all tables
+
+## Cost Model
+
+```rust
+fn estimated_benefit(total_rows: f64) -> f64 {
+    total_rows * total_rows.log2() * 0.001
+}
+```
+
+**Typical benefit**: Eliminates sort/hash dedup overhead.
+
+## Test Cases
+
+```sql
+-- Positive: PK in SELECT
+SELECT DISTINCT id, name FROM users;
+-- id is PK; DISTINCT eliminated
+```
+
+```sql
+-- Negative: non-unique columns
+SELECT DISTINCT city FROM users;
+-- Cannot prove uniqueness; DISTINCT kept
+```
+
+## References
+
+Apache Derby: Optimizer documentation
+Source: org.apache.derby.impl.sql.compile.DistinctNode

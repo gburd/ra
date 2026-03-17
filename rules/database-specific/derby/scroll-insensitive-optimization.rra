@@ -1,0 +1,104 @@
+---
+id: derby-scroll-insensitive-optimization
+name: Apache Derby Scroll-Insensitive Result Set Optimization
+category: database-specific/derby
+databases: [derby]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, derby, cursor, scroll, result-set, materialization]
+complexity: O(n)
+benefit_range: [0.1, 0.3]
+---
+
+# Apache Derby Scroll-Insensitive Result Set Optimization
+
+## Description
+
+Derby optimizes scroll-insensitive result sets by materializing
+results into a temporary backing store only when the cursor is
+actually scrolled backward.  For forward-only traversal of a
+scroll-insensitive cursor, Derby avoids the materialization overhead.
+
+**When to apply**: A scroll-insensitive result set is used but the
+application only accesses rows in forward order.
+
+**Why it works**: Materializing the entire result set is O(n) in
+memory.  If the cursor is never scrolled backward, this
+materialization is wasted.  Derby lazily materializes only when
+backward scroll is detected.
+
+**Database version**: Apache Derby 10.1+
+
+## Relational Algebra
+
+```algebra
+-- Before: eager materialization
+materialize(query_result) -> cursor
+
+-- After: lazy materialization
+lazy_materialize(query_result) -> cursor
+-- Only materializes on backward scroll
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("derby-lazy-scroll-materialize";
+    "(materialize-for-scroll ?result)" =>
+    "(lazy-materialize-for-scroll ?result)"
+    if is_database("derby")
+    if is_scroll_insensitive("?result")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(cursor: &Cursor) -> bool {
+    cursor.is_scroll_insensitive()
+}
+```
+
+**Restrictions:**
+- Once backward scroll occurs, the entire result up to that point
+  must be materialized
+- Memory usage depends on actual scroll pattern
+- Scroll-sensitive cursors have different optimization
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    result_rows: f64,
+    backward_probability: f64,
+) -> f64 {
+    let eager_cost = result_rows * 0.005;
+    let lazy_cost = result_rows * backward_probability * 0.005;
+    eager_cost - lazy_cost
+}
+```
+
+**Typical benefit**: Eliminates materialization overhead for
+forward-only access patterns.
+
+## Test Cases
+
+```sql
+-- Positive: forward-only traversal
+-- JDBC: createStatement(TYPE_SCROLL_INSENSITIVE, ...)
+-- Application iterates rs.next() only
+-- No materialization needed
+```
+
+```sql
+-- Negative: backward scroll
+-- Application calls rs.previous() or rs.absolute()
+-- Full materialization triggered
+```
+
+## References
+
+Apache Derby: JDBC Reference, "Scroll-Insensitive Result Sets"
+Source: org.apache.derby.impl.sql.execute.ScrollInsensitiveResultSet

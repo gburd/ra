@@ -1,0 +1,103 @@
+---
+id: derby-group-by-optimization
+name: Apache Derby GROUP BY Sort Elimination
+category: database-specific/derby
+databases: [derby]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, derby, group-by, sort, elimination, index]
+complexity: O(n)
+benefit_range: [0.2, 0.6]
+---
+
+# Apache Derby GROUP BY Sort Elimination
+
+## Description
+
+Derby eliminates the sort step required for GROUP BY when an index
+provides rows in the grouping order.  The optimizer checks if an
+available index on the grouping columns can serve as the input order
+for the aggregation operator.
+
+**When to apply**: The GROUP BY columns match a prefix of an available
+index.
+
+**Why it works**: Sorting for GROUP BY is O(n log n).  An ordered
+index scan provides the same ordering at O(n) with no extra memory.
+Aggregation on pre-sorted data only needs to detect group boundaries.
+
+**Database version**: Apache Derby 10.1+
+
+## Relational Algebra
+
+```algebra
+-- Before: scan + sort + group
+gamma[dept; COUNT(*)](sort[dept](scan(employees)))
+
+-- After: index scan + group (no sort)
+gamma[dept; COUNT(*)](index_scan[idx_dept](employees))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("derby-group-by-sort-elimination";
+    "(aggregate ?group_cols ?aggs
+        (sort ?group_cols (scan ?table)))" =>
+    "(aggregate ?group_cols ?aggs
+        (index-scan ?table ?group_cols))"
+    if is_database("derby")
+    if has_prefix_index("?table", "?group_cols")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    group_cols: &[Column],
+    table: &Table,
+) -> bool {
+    table.indexes().iter().any(|idx| {
+        idx.is_prefix_of(group_cols)
+    })
+}
+```
+
+**Restrictions:**
+- Group columns must be a prefix of the index
+- If the index scan is much more expensive than table scan (e.g.,
+  index is very large), the optimizer may still prefer sort
+
+## Cost Model
+
+```rust
+fn estimated_benefit(total_rows: f64) -> f64 {
+    total_rows * total_rows.log2() * 0.001
+}
+```
+
+**Typical benefit**: Eliminates sort for GROUP BY; saves memory
+and CPU.
+
+## Test Cases
+
+```sql
+-- Positive: GROUP BY matches index prefix
+CREATE INDEX idx_dept ON employees(dept_id);
+SELECT dept_id, AVG(salary) FROM employees GROUP BY dept_id;
+-- Index scan in dept_id order; no sort needed
+```
+
+```sql
+-- Negative: GROUP BY on non-indexed column
+SELECT city, COUNT(*) FROM employees GROUP BY city;
+-- No index on city; sort required
+```
+
+## References
+
+Apache Derby: Tuning Guide, "Avoiding Sorts"
+Source: org.apache.derby.impl.sql.compile.GroupByList
