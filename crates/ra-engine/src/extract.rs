@@ -16,11 +16,21 @@ use crate::egraph::{EGraphError, RelLang};
 
 /// Cost function for plan extraction from the e-graph.
 ///
-/// Assigns a numeric cost to each node type. Scans have a base
-/// cost, joins are the most expensive operator, and filters and
-/// projections are cheap.
-#[derive(Debug, Default)]
-pub struct RelCostFn;
+/// Assigns a numeric cost to each node type based on hardware characteristics.
+/// Costs are adjusted based on CPU speed, cache size, storage bandwidth,
+/// and available SIMD instructions.
+#[derive(Debug)]
+pub struct RelCostFn {
+    hardware: ra_hardware::HardwareProfile,
+}
+
+impl RelCostFn {
+    /// Create a new cost function with the given hardware profile.
+    #[must_use]
+    pub fn new(hardware: ra_hardware::HardwareProfile) -> Self {
+        Self { hardware }
+    }
+}
 
 impl egg::CostFunction<RelLang> for RelCostFn {
     type Cost = f64;
@@ -31,15 +41,39 @@ impl egg::CostFunction<RelLang> for RelCostFn {
     {
         let base_cost = match enode {
             RelLang::Scan([table_id]) => {
-                return costs(*table_id) + 100.0;
+                // Scan cost depends on storage bandwidth
+                // Higher bandwidth = lower cost
+                let storage_factor = 100.0 / self.hardware.storage_bandwidth_gbps;
+                return costs(*table_id) + (100.0 * storage_factor);
             }
             RelLang::ScanAlias([table_id, alias_id]) => {
-                return costs(*table_id) + costs(*alias_id) + 100.0;
+                let storage_factor = 100.0 / self.hardware.storage_bandwidth_gbps;
+                return costs(*table_id) + costs(*alias_id) + (100.0 * storage_factor);
             }
-            RelLang::Filter(_) | RelLang::Project(_) => 1.0,
-            RelLang::Join(_) => 500.0,
-            RelLang::Aggregate(_) => 200.0,
-            RelLang::Sort(_) => 150.0,
+            RelLang::Filter(_) | RelLang::Project(_) => {
+                // Filter/project cost depends on SIMD width
+                // Wider SIMD = lower per-row cost
+                let simd_factor = 256.0 / f64::from(self.hardware.simd_width_bits);
+                1.0 * simd_factor
+            }
+            RelLang::Join(_) => {
+                // Join cost depends on cache size and memory bandwidth
+                // Larger cache = better hash table performance
+                let cache_mb = self.hardware.l3_cache_bytes as f64 / (1024.0 * 1024.0);
+                let cache_factor = 16.0 / cache_mb; // Normalize to 16 MB baseline
+                500.0 * cache_factor
+            }
+            RelLang::Aggregate(_) => {
+                // Aggregate cost depends on cache and parallelism
+                let cache_mb = self.hardware.l3_cache_bytes as f64 / (1024.0 * 1024.0);
+                let cache_factor = 16.0 / cache_mb;
+                200.0 * cache_factor
+            }
+            RelLang::Sort(_) => {
+                // Sort cost depends on CPU cores (parallel sort)
+                let parallelism_factor = 8.0 / f64::from(self.hardware.cpu_cores);
+                150.0 * parallelism_factor.max(0.5) // Don't over-penalize many-core systems
+            }
             RelLang::Limit(_) => 0.5,
             RelLang::Union(_) | RelLang::Intersect(_) | RelLang::Except(_) => 50.0,
             _ => 0.1,
@@ -53,9 +87,9 @@ impl egg::CostFunction<RelLang> for RelCostFn {
 
 /// Extract the lowest-cost plan from the e-graph.
 ///
+/// Uses the provided hardware profile to compute hardware-aware costs.
 /// The `_table_stats` parameter is reserved for future use by a
-/// statistics-aware cost model. Currently the extractor uses a
-/// fixed cost per operator type.
+/// statistics-aware cost model.
 ///
 /// # Errors
 ///
@@ -65,8 +99,9 @@ pub fn extract_best<S: BuildHasher>(
     egraph: &egg::EGraph<RelLang, RelAnalysis>,
     root: Id,
     _table_stats: &HashMap<String, Statistics, S>,
+    hardware: &ra_hardware::HardwareProfile,
 ) -> Result<RelExpr, EGraphError> {
-    let cost_fn = RelCostFn;
+    let cost_fn = RelCostFn::new(hardware.clone());
     let extractor = egg::Extractor::new(egraph, cost_fn);
     let (_, best_expr) = extractor.find_best(root);
     rec_expr_to_rel_expr(&best_expr)

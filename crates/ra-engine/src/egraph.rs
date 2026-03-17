@@ -143,6 +143,7 @@ impl Default for OptimizerConfig {
 pub struct Optimizer {
     config: OptimizerConfig,
     table_stats: HashMap<String, ra_core::statistics::Statistics>,
+    hardware_profile: Option<ra_hardware::HardwareProfile>,
 }
 
 impl Optimizer {
@@ -152,6 +153,7 @@ impl Optimizer {
         Self {
             config: OptimizerConfig::default(),
             table_stats: HashMap::new(),
+            hardware_profile: None,
         }
     }
 
@@ -161,7 +163,21 @@ impl Optimizer {
         Self {
             config,
             table_stats: HashMap::new(),
+            hardware_profile: None,
         }
+    }
+
+    /// Set the hardware profile for cost-based optimization.
+    pub fn set_hardware_profile(&mut self, profile: ra_hardware::HardwareProfile) {
+        self.hardware_profile = Some(profile);
+    }
+
+    /// Get the current hardware profile, or auto-detect if not set.
+    #[must_use]
+    pub fn hardware_profile(&self) -> ra_hardware::HardwareProfile {
+        self.hardware_profile
+            .clone()
+            .unwrap_or_else(ra_hardware::detect_hardware)
     }
 
     /// Register table statistics for cost estimation.
@@ -192,7 +208,8 @@ impl Optimizer {
             .run(&all_rules());
 
         let root = runner.roots[0];
-        let result = extract_best(&runner.egraph, root, &self.table_stats)?;
+        let hardware = self.hardware_profile();
+        let result = extract_best(&runner.egraph, root, &self.table_stats, &hardware)?;
         Ok(result)
     }
 
@@ -215,7 +232,8 @@ impl Optimizer {
             .run(&all_rules());
 
         let root = runner.roots[0];
-        let result = extract_best(&runner.egraph, root, &self.table_stats)?;
+        let hardware = self.hardware_profile();
+        let result = extract_best(&runner.egraph, root, &self.table_stats, &hardware)?;
         Ok((result, runner.egraph))
     }
 }

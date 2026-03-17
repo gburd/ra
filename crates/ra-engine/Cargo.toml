@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 ra-core = { workspace = true }
+ra-hardware = { workspace = true }
 egg = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

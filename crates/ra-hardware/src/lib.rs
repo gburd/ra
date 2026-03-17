@@ -20,6 +20,7 @@
 
 pub mod cost;
 pub mod cpu;
+pub mod detection;
 pub mod device;
 pub mod gpu;
 pub mod memory;
@@ -29,6 +30,7 @@ pub mod storage;
 
 pub use cost::HardwareCostModel;
 pub use cpu::{CacheHierarchy, CpuArchitecture, CpuModel, SimdCapability};
+pub use detection::detect_hardware;
 pub use device::Device;
 pub use gpu::{GpuArchitecture, GpuMemoryType, GpuModel, GpuVendor, TransferCharacteristics};
 pub use memory::{MemoryConfig, MemoryType, NumaTopology};
