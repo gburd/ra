@@ -406,7 +406,8 @@ proptest! {
         let root = runner.roots[0];
         let stats: HashMap<String, ra_core::statistics::Statistics> =
             HashMap::new();
-        let result = extract_best(&runner.egraph, root, &stats);
+        let hardware = ra_hardware::HardwareProfile::cpu_only();
+        let result = extract_best(&runner.egraph, root, &stats, &hardware);
         prop_assert!(
             result.is_ok(),
             "extract_best should succeed: {:?}",
@@ -434,7 +435,8 @@ proptest! {
         let root = runner.roots[0];
         let stats: HashMap<String, ra_core::statistics::Statistics> =
             HashMap::new();
-        let result = extract_best(&runner.egraph, root, &stats);
+        let hardware = ra_hardware::HardwareProfile::cpu_only();
+        let result = extract_best(&runner.egraph, root, &stats, &hardware);
         prop_assert!(
             result.is_ok(),
             "extract after saturation should succeed: {:?}",
