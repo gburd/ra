@@ -1,0 +1,127 @@
+---
+id: postgresql-hash-to-sort-aggregate
+name: PostgreSQL Hash Aggregate to Sort Aggregate
+category: database-specific/postgresql
+databases: [postgresql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, postgresql, aggregation, sort, hash, memory]
+complexity: O(n log n)
+benefit_range: [0.1, 0.5]
+---
+
+# PostgreSQL Hash Aggregate to Sort Aggregate
+
+## Description
+
+PostgreSQL chooses between hash aggregation and sort-based (group)
+aggregation based on estimated group count and work_mem.  When the
+hash table for the estimated number of groups would exceed
+work_mem, PostgreSQL switches to sort-based aggregation which can
+spill to disk gracefully.  Starting in PostgreSQL 13, hash
+aggregation can also spill to disk, but sort-based aggregation
+remains preferred when the input is already sorted on the grouping
+columns.
+
+**When to apply**: The estimated hash table size exceeds work_mem,
+or the input is already sorted on the grouping columns (from an
+index scan or preceding sort).
+
+**Why it works**: Sort-based aggregation processes groups
+sequentially and uses O(1) memory per group.  When the input is
+pre-sorted, the aggregation is a simple streaming operation with
+zero additional sort cost.
+
+**Database version**: PostgreSQL 7.4+ (hash agg), 13+ (disk spill)
+
+## Relational Algebra
+
+```algebra
+-- Before: hash aggregation exceeding memory
+hash_gamma[department; SUM(salary)](employees)
+  where |groups| * row_size > work_mem
+
+-- After: sort + streaming aggregation
+sort_gamma[department; SUM(salary)](
+    sort[department](employees))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("postgresql-hash-to-sort-aggregate";
+    "(hash-aggregate ?group_cols ?agg_exprs ?input)" =>
+    "(sort-aggregate ?group_cols ?agg_exprs
+        (sort ?group_cols ?input))"
+    if is_database("postgresql")
+    if hash_exceeds_work_mem("?group_cols", "?input")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    estimated_groups: usize,
+    avg_group_size: usize,
+    work_mem: usize,
+    input_sorted: bool,
+) -> bool {
+    let hash_size = estimated_groups * avg_group_size;
+    hash_size > work_mem || input_sorted
+}
+```
+
+**Restrictions:**
+- PostgreSQL 13+ hash aggregation can spill, reducing the
+  advantage of this switch
+- Sort-based aggregation is always preferred when input is
+  pre-sorted
+- Controlled by `enable_hashagg` parameter
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    rows: f64,
+    groups: f64,
+    work_mem: f64,
+    input_already_sorted: bool,
+) -> f64 {
+    if input_already_sorted {
+        // Streaming aggregation is free after sort
+        groups * 0.01
+    } else {
+        let sort_cost = rows * rows.log2() * 0.00001;
+        let hash_spill_cost = groups * 0.001;
+        hash_spill_cost - sort_cost
+    }
+}
+```
+
+**Typical benefit**: 10-30% faster when input is pre-sorted;
+variable benefit for spill scenarios.
+
+## Test Cases
+
+```sql
+-- Positive: pre-sorted input from index
+CREATE INDEX idx_dept ON employees(department);
+SELECT department, SUM(salary) FROM employees
+GROUP BY department;
+-- Sort-aggregate using index order
+```
+
+```sql
+-- Negative: small number of groups, fits in memory
+SELECT status, COUNT(*) FROM orders GROUP BY status;
+-- Hash aggregate is faster for small group counts
+```
+
+## References
+
+PostgreSQL: Documentation, "Aggregate Nodes"
+PostgreSQL: src/backend/executor/nodeAgg.c
+PostgreSQL: GUC parameter enable_hashagg, work_mem
