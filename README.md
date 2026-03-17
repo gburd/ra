@@ -76,6 +76,25 @@ cargo run --bin ra-cli -- list
 cargo run --bin ra-cli -- test rules/logical/predicate-pushdown/filter-through-join.rra
 ```
 
+### Web Explorer
+
+Run the interactive web explorer locally:
+
+```bash
+# Docker (simplest)
+./scripts/docker-run.sh
+
+# Docker Compose (better for development)
+./scripts/docker-compose-up.sh
+
+# Deploy to Fly.io cloud
+./scripts/deploy-fly.sh
+```
+
+Then open http://localhost:8000 for local, or https://ra-explorer.fly.dev for cloud.
+
+See [Deployment Guide](docs/deployment.md) for full details on Docker, Kubernetes, cloud providers, and production deployment.
+
 ## Project Structure
 
 ```
