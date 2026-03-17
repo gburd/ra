@@ -1,0 +1,111 @@
+---
+id: three-phase-aggregation
+name: Three-Phase Aggregation
+category: physical/aggregation-strategies
+databases: [postgresql, mysql, duckdb, sqlite, clickhouse, cockroachdb, mssql, oracle]
+execution_models: [volcano, vectorized]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [aggregation, parallel, numa]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# Three-Phase Aggregation
+
+## Metadata
+- **Rule ID**: `three-phase-aggregation`
+- **Category**: Physical / Aggregation Strategies
+- **Complexity**: O(n) with maximum parallelism
+- **Introduced**: MPP databases (2000s)
+- **Prerequisites**: Massively parallel architecture
+- **Alternatives**: two-phase-aggregation
+
+## Description
+
+Three-phase aggregation adds a redistribution phase between partial and final aggregation, optimizing for MPP (Massively Parallel Processing) architectures with many nodes.
+
+**Phases:**
+1. **Local partial**: Aggregate on each node
+2. **Redistribute**: Shuffle by group key across nodes
+3. **Final**: Complete aggregation on redistributed data
+
+**When to use:**
+- MPP architecture (100+ nodes)
+- High group cardinality with skew
+- Network bandwidth > disk bandwidth
+
+## Relational Algebra
+
+```
+γ_{g; AGG(v)}(R)
+→ γ_{g; FINAL(p2)}(
+    Redistribute(
+      γ_{g; PARTIAL(v)}(R),
+      g
+    )
+  )
+```
+
+## Implementation
+
+```rust
+pub struct ThreePhaseAggregation {
+    input: Box<dyn Operator>,
+    phase: Phase,
+}
+
+enum Phase {
+    LocalPartial,
+    Redistribute,
+    Final,
+}
+```
+
+## Cost Model
+
+```rust
+pub fn cost_three_phase_aggregation(
+    input_card: u64,
+    group_card: u64,
+    node_count: usize,
+    network_bandwidth: f64,
+) -> Cost {
+    let partial_per_node = input_card / node_count as u64;
+    let partial_cost = Cost::cpu(partial_per_node * 10);
+
+    let shuffle_bytes = group_card * 64; // Partial aggregates
+    let network_cost = Cost::network(shuffle_bytes as f64 / network_bandwidth);
+
+    let final_per_node = group_card / node_count as u64;
+    let final_cost = Cost::cpu(final_per_node * 10);
+
+    partial_cost + network_cost + final_cost
+}
+```
+
+## Test Cases
+
+### Test 1: MPP with 100 nodes
+```sql
+-- Input: 1B rows on 100 nodes (10M each)
+-- Groups: 10M distinct products
+
+SELECT product, SUM(amount)
+FROM distributed_sales
+GROUP BY product;
+
+-- Phase 1: Each node aggregates 10M rows → ~100K groups
+-- Phase 2: Redistribute 10M groups across 100 nodes
+-- Phase 3: Each node finalizes ~100K groups
+```
+
+## References
+
+1. **Teradata**: Three-phase aggregation in MPP architecture
+2. **Vertica**: Hash segmentation with multi-phase aggregation
+3. **Greenplum**: MPP query execution
+
+## Tags
+`physical`, `aggregation`, `three-phase`, `mpp`, `distributed`
