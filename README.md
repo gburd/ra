@@ -35,6 +35,8 @@ maintainable, formally verified framework.
   switching
 - **Multiple Backends** -- JIT compilation (Cranelift), WASM, and
   bytecode interpretation
+- **Formal Verification** -- TLA+ specifications proving termination,
+  cost monotonicity, and semantic equivalence
 
 ## Quick Start
 
@@ -159,6 +161,8 @@ sigma[p](R join[c] S) -> (sigma[p](R)) join[c] S
 - [Dialect Translation](docs/dialect-translation.md) -- SQL cross-database translation
 - [Isolation Testing](docs/isolation-testing.md) -- Transaction isolation verification
 - [WASM Databases](docs/wasm-databases.md) -- Browser-based database execution
+- [Formal Verification](docs/formal-verification.md) -- TLA+ specifications and verification approach
+- [TLA+ Specifications](tla/README.md) -- Mathematical proofs of correctness properties
 
 ### Examples
 
@@ -186,6 +190,9 @@ cargo bench
 
 # Validate all rules
 cargo run --bin ra-cli -- validate rules/
+
+# Run TLA+ formal verification
+./scripts/run-tla.sh
 
 # Generate API documentation
 cargo doc --no-deps --all-features --open
