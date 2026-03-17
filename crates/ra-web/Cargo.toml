@@ -19,6 +19,8 @@ ra-engine = { workspace = true }
 ra-dialect = { workspace = true }
 ra-isolation = { workspace = true }
 ra-synthesis = { workspace = true }
+ra-stats = { workspace = true }
+ra-hardware = { workspace = true }
 rocket = { workspace = true }
 rocket_ws = { workspace = true }
 tokio = { workspace = true }

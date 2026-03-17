@@ -84,6 +84,9 @@ fn build_rocket() -> rocket::Rocket<rocket::Build> {
             std::time::Duration::from_secs(60),
         ))
         .manage(ShareStore::new())
+        .manage(api::demos::DemoState::new(std::sync::Mutex::new(
+            api::demos::DemoStore::new(),
+        )))
         .mount(
             "/",
             routes![
@@ -101,6 +104,17 @@ fn build_rocket() -> rocket::Rocket<rocket::Build> {
                 api::rules::list_rules,
                 api::share::create_share,
                 api::share::get_share,
+                api::demos::list_demos,
+                api::demos::demo_staleness_impact,
+                api::demos::demo_hardware_plan,
+                api::demos::demo_join_algorithm,
+                api::demos::demo_aggregation_strategy,
+                api::demos2::demo_index_selection,
+                api::demos2::demo_subquery_unnesting,
+                api::demos2::demo_parallel_query,
+                api::demos2::demo_gpu_offloading,
+                api::demos2::demo_distributed_query,
+                api::demos2::demo_cost_calibration,
                 websocket::isolation_ws,
             ],
         )
@@ -423,6 +437,9 @@ mod tests {
                 std::time::Duration::from_secs(60),
             ))
             .manage(ShareStore::new())
+            .manage(api::demos::DemoState::new(std::sync::Mutex::new(
+                api::demos::DemoStore::new(),
+            )))
             .mount(
                 "/",
                 routes![
@@ -440,6 +457,17 @@ mod tests {
                     api::rules::list_rules,
                     api::share::create_share,
                     api::share::get_share,
+                    api::demos::list_demos,
+                    api::demos::demo_staleness_impact,
+                    api::demos::demo_hardware_plan,
+                    api::demos::demo_join_algorithm,
+                    api::demos::demo_aggregation_strategy,
+                    api::demos2::demo_index_selection,
+                    api::demos2::demo_subquery_unnesting,
+                    api::demos2::demo_parallel_query,
+                    api::demos2::demo_gpu_offloading,
+                    api::demos2::demo_distributed_query,
+                    api::demos2::demo_cost_calibration,
                     websocket::isolation_ws,
                 ],
             )
