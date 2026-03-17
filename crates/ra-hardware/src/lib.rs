@@ -10,6 +10,8 @@
 //!   including data transfer overhead.
 //! - Cost estimation functions for GPU scans, joins, aggregations,
 //!   and FPGA streaming operators.
+//! - Detailed hardware models for CPU, memory, storage, and GPU components.
+//! - 20+ predefined hardware profiles for various workloads.
 
 #![warn(missing_docs)]
 #![warn(clippy::pedantic)]
@@ -17,9 +19,21 @@
 #![allow(clippy::similar_names)]
 
 pub mod cost;
+pub mod cpu;
 pub mod device;
+pub mod gpu;
+pub mod memory;
 pub mod profile;
+pub mod profiles;
+pub mod storage;
 
 pub use cost::HardwareCostModel;
+pub use cpu::{CacheHierarchy, CpuArchitecture, CpuModel, SimdCapability};
 pub use device::Device;
+pub use gpu::{GpuArchitecture, GpuMemoryType, GpuModel, GpuVendor, TransferCharacteristics};
+pub use memory::{MemoryConfig, MemoryType, NumaTopology};
 pub use profile::HardwareProfile;
+pub use profiles::CompleteHardwareProfile;
+pub use storage::{
+    CloudStorageTier, PcieGen, SpindleSpeed, StorageDevice, StorageTechnology,
+};
