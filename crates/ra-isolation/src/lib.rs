@@ -20,6 +20,8 @@
 //!   levels.
 //! - [`markers`] - Synchronization markers for coordinating steps.
 //! - [`events`] - Event recording for test output and diagnostics.
+//! - [`wasm_bridge`] - Bridge adapters for connecting WASM database
+//!   backends (`SQLite`, `DuckDB`) to the isolation testing framework.
 
 #![warn(missing_docs)]
 
@@ -32,6 +34,7 @@ pub mod scheduler;
 pub mod session;
 pub mod snapshot;
 pub mod spec_parser;
+pub mod wasm_bridge;
 
 pub use adapter::DatabaseAdapter;
 pub use events::{TestEvent, TestEventLog};
