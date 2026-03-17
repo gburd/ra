@@ -1,0 +1,138 @@
+---
+id: datafusion-limit-pushdown
+name: DataFusion Limit Pushdown
+category: database-specific/datafusion
+databases: [datafusion]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, datafusion, limit, pushdown, topn]
+complexity: O(n)
+benefit_range: [0.3, 0.9]
+---
+
+# DataFusion Limit Pushdown
+
+## Description
+
+Pushes LIMIT operators down through the plan tree to reduce the number
+of rows processed at each stage.  DataFusion's `LimitPushdown` pass
+can push limits through projections, unions, and into sort operators
+(converting Sort + Limit into a TopN physical operator).
+
+**When to apply**: A LIMIT sits above operators that can benefit from
+early row-count capping (sorts, unions, projections).
+
+**Why it works**: Arrow RecordBatches are processed in fixed-size
+chunks.  Pushing limits down means fewer batches are materialized,
+sorted, and shuffled.  TopN avoids full sort by maintaining a heap
+of only K elements.
+
+**Database version**: DataFusion 20.0+
+
+## Relational Algebra
+
+```algebra
+-- Limit through projection
+limit[n](pi[cols](R)) -> pi[cols](limit[n](R))
+
+-- Limit into sort (TopN)
+limit[n](sort[keys](R)) -> topn[n, keys](R)
+
+-- Limit through union
+limit[n](R union-all S) -> limit[n](limit[n](R) union-all limit[n](S))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("datafusion-limit-pushdown-through-project";
+    "(limit ?n (project ?cols ?input))" =>
+    "(project ?cols (limit ?n ?input))"
+    if is_database("datafusion")
+),
+
+rw!("datafusion-limit-into-sort";
+    "(limit ?n (sort ?keys ?input))" =>
+    "(topn ?n ?keys ?input)"
+    if is_database("datafusion")
+),
+
+rw!("datafusion-limit-pushdown-through-union";
+    "(limit ?n (union-all ?left ?right))" =>
+    "(limit ?n (union-all (limit ?n ?left) (limit ?n ?right)))"
+    if is_database("datafusion")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(limit: usize, child: &LogicalPlan) -> bool {
+    match child {
+        LogicalPlan::Projection { .. } => true,
+        LogicalPlan::Sort { .. } => true,
+        LogicalPlan::Union { .. } => true,
+        _ => false,
+    }
+}
+```
+
+**Restrictions:**
+- Cannot push limit below filter (changes semantics)
+- Cannot push limit below aggregate (changes result)
+- Offset must be preserved correctly during pushdown
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    limit_n: usize,
+    total_rows: f64,
+    is_sort: bool,
+) -> f64 {
+    if is_sort {
+        // Full sort O(n log n) vs TopN O(n log k)
+        let full_sort = total_rows * total_rows.log2();
+        let topn = total_rows * (limit_n as f64).log2();
+        full_sort - topn
+    } else {
+        // Rows eliminated early
+        (total_rows - limit_n as f64).max(0.0)
+    }
+}
+```
+
+**Typical benefit**: For `LIMIT 10` on 1M rows with ORDER BY,
+TopN uses O(1M * log(10)) instead of O(1M * log(1M)) -- roughly
+5x faster.
+
+## Test Cases
+
+```sql
+-- Positive: LIMIT with ORDER BY becomes TopN
+SELECT * FROM events ORDER BY created_at DESC LIMIT 10;
+-- Physical plan: TopN(10, created_at DESC) instead of Sort + Limit
+```
+
+```sql
+-- Positive: LIMIT pushed through UNION ALL
+SELECT * FROM (
+    SELECT * FROM events_2024
+    UNION ALL
+    SELECT * FROM events_2025
+) LIMIT 100;
+-- Each branch gets LIMIT 100
+```
+
+```sql
+-- Negative: LIMIT above aggregate
+SELECT COUNT(*) FROM events LIMIT 1;
+-- Cannot push LIMIT below COUNT(*)
+```
+
+## References
+
+DataFusion: datafusion/optimizer/src/push_down_limit.rs
+DataFusion: datafusion/physical-plan/src/topn.rs

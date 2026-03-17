@@ -1,0 +1,125 @@
+---
+id: datafusion-pipeline-breaking-optimization
+name: DataFusion Pipeline Breaking Optimization
+category: database-specific/datafusion
+databases: [datafusion]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, datafusion, pipeline, execution, physical, memory]
+complexity: O(n)
+benefit_range: [0.1, 0.4]
+---
+
+# DataFusion Pipeline Breaking Optimization
+
+## Description
+
+Minimizes pipeline breaks in the physical plan by reordering operators
+and choosing implementations that maintain streaming execution.
+DataFusion processes data in a pipeline of Arrow RecordBatches; some
+operators (hash aggregate, sort, hash join build side) break the
+pipeline by requiring all input before producing output.
+
+**When to apply**: The physical plan contains operators that could be
+replaced with streaming alternatives, or pipeline-breaking operators
+can be reordered to minimize the data buffered.
+
+**Why it works**: Streaming operators process one RecordBatch at a
+time with bounded memory.  Pipeline breaks require buffering all
+input data, increasing memory usage and latency to first result.
+Choosing streaming alternatives when possible reduces peak memory.
+
+**Database version**: DataFusion 28.0+
+
+## Relational Algebra
+
+```algebra
+-- Prefer streaming aggregate when possible
+gamma[GROUP BY g; SUM(a)](sort[g](R))
+  -> streaming-aggregate[g; SUM(a)](sort[g](R))
+  -- Uses pre-sorted input, streams output
+
+-- Prefer sort-merge join over hash join when inputs sorted
+hash-join[a.k = b.k](sort[a.k](A), sort[b.k](B))
+  -> sort-merge-join[a.k = b.k](sort[a.k](A), sort[b.k](B))
+  -- Sort-merge streams; hash-join buffers build side
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("datafusion-streaming-aggregate";
+    "(hash-aggregate ?groups ?aggs (sort ?keys ?input))" =>
+    "(streaming-aggregate ?groups ?aggs (sort ?keys ?input))"
+    if is_database("datafusion")
+    if sort_satisfies_group_by("?keys", "?groups")
+),
+
+rw!("datafusion-streaming-join";
+    "(hash-join ?type ?cond (sort ?lk ?left) (sort ?rk ?right))" =>
+    "(sort-merge-join ?type ?cond (sort ?lk ?left) (sort ?rk ?right))"
+    if is_database("datafusion")
+    if sort_satisfies_join_key("?lk", "?rk", "?cond")
+),
+```
+
+## Preconditions
+
+```rust
+fn can_stream_aggregate(
+    input_ordering: &[SortExpr],
+    group_by: &[Expr],
+) -> bool {
+    // Input must be sorted by group-by columns
+    group_by.iter().all(|g| {
+        input_ordering.iter().any(|s| s.expr == *g)
+    })
+}
+```
+
+**Restrictions:**
+- Streaming aggregate requires input sorted by group-by columns
+- Not all aggregate functions support streaming (e.g., MEDIAN)
+- Hash aggregate is faster for unsorted input with low cardinality
+
+## Cost Model
+
+```rust
+fn streaming_benefit(
+    rows: f64,
+    row_bytes: f64,
+    pipeline_depth: usize,
+) -> f64 {
+    // Memory saved by not buffering all input
+    let memory_saved = rows * row_bytes;
+    // Latency improvement: first result without waiting
+    let latency_factor = pipeline_depth as f64 * 0.1;
+    memory_saved * 0.001 + latency_factor
+}
+```
+
+**Typical benefit**: For 1M-row aggregation, streaming aggregate uses
+O(groups) memory instead of O(rows), often 100x less.
+
+## Test Cases
+
+```sql
+-- Positive: sorted input enables streaming aggregate
+SELECT department, SUM(salary) FROM employees
+ORDER BY department;
+-- If pre-sorted by department, uses streaming aggregate
+```
+
+```sql
+-- Negative: unsorted input requires hash aggregate
+SELECT department, SUM(salary) FROM employees;
+-- No pre-existing sort order; hash aggregate is optimal
+```
+
+## References
+
+DataFusion: datafusion/physical-optimizer/src/pipeline_checker.rs
+DataFusion: datafusion/physical-plan/src/aggregates/row_hash.rs
+DataFusion: datafusion/physical-optimizer/src/enforce_sorting/mod.rs

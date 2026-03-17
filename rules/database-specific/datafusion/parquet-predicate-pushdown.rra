@@ -1,0 +1,126 @@
+---
+id: datafusion-parquet-predicate-pushdown
+name: DataFusion Parquet Predicate Pushdown
+category: database-specific/datafusion
+databases: [datafusion]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, datafusion, parquet, predicate, pushdown, row-group]
+complexity: O(n)
+benefit_range: [0.5, 0.99]
+---
+
+# DataFusion Parquet Predicate Pushdown
+
+## Description
+
+Pushes filter predicates into the Parquet reader to skip entire row
+groups and pages based on column statistics stored in Parquet metadata.
+DataFusion evaluates predicates against min/max statistics at the row
+group level and optionally at the page level using column indexes.
+
+**When to apply**: A filter references columns stored in Parquet files
+that have row group statistics (min, max, null count).
+
+**Why it works**: Parquet stores per-row-group and per-page statistics.
+By evaluating the predicate against these statistics, DataFusion can
+skip reading and decompressing entire row groups (typically 128MB each)
+without touching the actual data.
+
+**Database version**: DataFusion 20.0+
+
+## Relational Algebra
+
+```algebra
+-- Before: scan all, then filter
+sigma[a > 100](scan(T, parquet))
+
+-- After: predicate pushed to Parquet reader
+scan(T, parquet, row_group_filter=[a > 100])
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("datafusion-parquet-row-group-pruning";
+    "(filter ?pred (scan-parquet ?table ?file))" =>
+    "(scan-parquet-with-pruning ?table ?file ?pred)"
+    if is_database("datafusion")
+    if predicate_uses_statistics_columns("?pred", "?table")
+),
+
+rw!("datafusion-parquet-page-index-pruning";
+    "(filter ?pred (scan-parquet ?table ?file))" =>
+    "(scan-parquet-with-page-index ?table ?file ?pred)"
+    if is_database("datafusion")
+    if has_page_index("?table", "?file")
+    if predicate_uses_statistics_columns("?pred", "?table")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    pred: &Expr,
+    parquet_metadata: &ParquetMetaData,
+) -> bool {
+    let pred_cols = pred.column_refs();
+    pred_cols.iter().any(|col| {
+        parquet_metadata
+            .row_groups()
+            .iter()
+            .any(|rg| rg.column(col).has_statistics())
+    })
+}
+```
+
+**Restrictions:**
+- Only comparison predicates (=, <, >, <=, >=, BETWEEN) can be evaluated
+  against min/max statistics
+- Complex expressions (LIKE, functions) cannot use row group pruning
+- Statistics must be present in the Parquet metadata
+- Bloom filters provide additional pruning for equality predicates
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    total_row_groups: usize,
+    pruned_row_groups: usize,
+    avg_row_group_bytes: f64,
+) -> f64 {
+    pruned_row_groups as f64 * avg_row_group_bytes
+}
+```
+
+**Typical benefit**: For time-series data with a date filter, can skip
+90%+ of row groups, reducing I/O from gigabytes to megabytes.
+
+## Test Cases
+
+```sql
+-- Positive: range predicate on sorted column
+SELECT * FROM events WHERE event_date > '2025-01-01';
+-- Skips row groups where max(event_date) <= '2025-01-01'
+```
+
+```sql
+-- Positive: equality with bloom filter
+SELECT * FROM events WHERE event_id = 'abc-123';
+-- Bloom filter eliminates row groups that cannot contain the value
+```
+
+```sql
+-- Negative: LIKE predicate
+SELECT * FROM events WHERE name LIKE '%foo%';
+-- Cannot evaluate substring match against min/max statistics
+```
+
+## References
+
+DataFusion: datafusion/core/src/datasource/physical_plan/parquet/row_groups.rs
+DataFusion: datafusion/core/src/datasource/physical_plan/parquet/page_filter.rs
+Apache Parquet: https://parquet.apache.org/documentation/latest/#column-index

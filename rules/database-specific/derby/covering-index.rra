@@ -1,0 +1,107 @@
+---
+id: derby-covering-index
+name: Apache Derby Covering Index Scan
+category: database-specific/derby
+databases: [derby]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, derby, covering-index, index-only, scan]
+complexity: O(n)
+benefit_range: [0.2, 0.6]
+---
+
+# Apache Derby Covering Index Scan
+
+## Description
+
+When all columns required by a query are present in an index, Derby
+performs an index-only scan without accessing the base table heap.
+This avoids random I/O to the heap pages and reduces the total number
+of pages read.
+
+**When to apply**: All columns in SELECT, WHERE, JOIN, and ORDER BY
+are present in a single index.
+
+**Why it works**: Index pages are smaller and more densely packed than
+heap pages.  Avoiding the heap lookup for each qualifying row
+eliminates one random I/O per row.
+
+**Database version**: Apache Derby 10.1+
+
+## Relational Algebra
+
+```algebra
+-- Before: index scan + heap fetch
+pi[name](sigma[dept = 5](
+    index_scan(emp, idx_dept) -> heap_fetch(emp)))
+
+-- After: index-only scan
+pi[name](sigma[dept = 5](
+    index_only_scan(emp, idx_dept_name)))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("derby-covering-index";
+    "(project ?cols (filter ?pred (scan ?table)))" =>
+    "(project ?cols (filter ?pred
+        (index-only-scan ?table ?cols ?pred)))"
+    if is_database("derby")
+    if index_covers("?table", "?cols", "?pred")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    table: &Table,
+    all_cols: &[Column],
+) -> bool {
+    table.indexes().iter().any(|idx| {
+        all_cols.iter().all(|c| idx.columns().contains(c))
+    })
+}
+```
+
+**Restrictions:**
+- BLOB/CLOB columns are not stored in indexes
+- The covering index must include all referenced columns including
+  those in ORDER BY and GROUP BY
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    qualifying_rows: f64,
+    heap_page_cost: f64,
+) -> f64 {
+    qualifying_rows * heap_page_cost
+}
+```
+
+**Typical benefit**: 2-5x for queries on wide tables with narrow
+covering indexes.
+
+## Test Cases
+
+```sql
+-- Positive: covering index
+CREATE INDEX idx_dept_name ON employees(dept_id, name);
+SELECT name FROM employees WHERE dept_id = 5;
+-- Index-only scan on idx_dept_name
+```
+
+```sql
+-- Negative: needs column not in index
+SELECT name, salary FROM employees WHERE dept_id = 5;
+-- salary not in index; heap fetch required
+```
+
+## References
+
+Apache Derby: "Index and Constraint Design" in Tuning Guide
+Source: org.apache.derby.impl.sql.compile.FromBaseTable

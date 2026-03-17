@@ -1,0 +1,121 @@
+---
+id: mssql-in-memory-oltp
+name: SQL Server In-Memory OLTP (Hekaton) Optimization
+category: database-specific/mssql
+databases: [mssql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, mssql, in-memory, hekaton, natively-compiled, oltp]
+complexity: O(n)
+benefit_range: [0.3, 0.9]
+---
+
+# SQL Server In-Memory OLTP (Hekaton) Optimization
+
+## Description
+
+Routes queries on memory-optimized tables through SQL Server's
+In-Memory OLTP engine (Hekaton), which uses latch-free data structures,
+native compilation, and optimistic multi-version concurrency control.
+Natively compiled stored procedures eliminate the SQL interpretation
+overhead entirely.
+
+**When to apply**: A query accesses memory-optimized tables (created
+with MEMORY_OPTIMIZED = ON) and can benefit from latch-free access
+and native compilation.
+
+**Why it works**: Traditional SQL Server uses latches (lightweight
+locks) to protect B-tree page access.  Memory-optimized tables use
+lock-free hash and range indexes with MVCC, eliminating latch
+contention that limits OLTP throughput on hot pages.
+
+**Database version**: SQL Server 2014+
+
+## Relational Algebra
+
+```algebra
+-- Before: traditional B-tree access with latches
+latch-acquire -> page-read -> row-locate -> latch-release
+
+-- After: in-memory latch-free access
+hash-index-probe(memory_optimized_table, key)
+  -- No latches, no page structure, direct pointer chase
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mssql-in-memory-table-access";
+    "(filter ?pred (scan ?table))" =>
+    "(filter ?pred (memory-optimized-scan ?table))"
+    if is_database("mssql")
+    if is_memory_optimized("?table")
+),
+
+rw!("mssql-native-compiled-proc";
+    "(call-proc ?proc ?params)" =>
+    "(native-call-proc ?proc ?params)"
+    if is_database("mssql")
+    if is_natively_compiled("?proc")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(table: &Table) -> bool {
+    table.is_memory_optimized()
+}
+```
+
+**Restrictions:**
+- Memory-optimized tables have different index types (hash, range)
+- Not all T-SQL features supported in natively compiled modules
+- Memory-optimized tables require sufficient server memory
+- Schema changes to memory-optimized tables are limited
+- MVCC garbage collection adds background CPU overhead
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    operations_per_sec: f64,
+    latch_wait_fraction: f64,
+) -> f64 {
+    // Eliminate latch waits and interpretation overhead
+    let latch_saved = operations_per_sec * latch_wait_fraction * 0.001;
+    let interp_saved = operations_per_sec * 0.0001; // native comp
+    latch_saved + interp_saved
+}
+```
+
+**Typical benefit**: 5-30x throughput improvement for high-concurrency
+OLTP workloads (insert/update/delete intensive).
+
+## Test Cases
+
+```sql
+-- Positive: memory-optimized table with hash index
+CREATE TABLE orders_hot (
+    id INT NOT NULL PRIMARY KEY NONCLUSTERED HASH
+        WITH (BUCKET_COUNT = 1000000),
+    customer_id INT NOT NULL,
+    amount DECIMAL(10,2)
+) WITH (MEMORY_OPTIMIZED = ON);
+SELECT * FROM orders_hot WHERE id = @id;
+-- Latch-free hash index probe, native execution
+```
+
+```sql
+-- Negative: disk-based table
+SELECT * FROM orders_disk WHERE id = @id;
+-- Traditional B-tree with latch-based access
+```
+
+## References
+
+SQL Server: In-Memory OLTP (In-Memory Optimization)
+SQL Server: Natively Compiled Stored Procedures
+SQL Server: sys.dm_db_xtp_table_memory_stats

@@ -1,0 +1,145 @@
+---
+id: datafusion-window-function-optimization
+name: DataFusion Window Function Optimization
+category: database-specific/datafusion
+databases: [datafusion]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, datafusion, window, partition, bounded, physical]
+complexity: O(n log n)
+benefit_range: [0.1, 0.5]
+---
+
+# DataFusion Window Function Optimization
+
+## Description
+
+Optimizes window function execution by merging window operators that
+share the same PARTITION BY and ORDER BY clauses, and by selecting
+bounded execution modes when the window frame allows it.  DataFusion
+groups compatible window expressions into a single operator to share
+the sort and partitioning work.
+
+**When to apply**: Multiple window functions in the same query share
+PARTITION BY / ORDER BY clauses, or a window frame is bounded (ROWS
+BETWEEN N PRECEDING AND M FOLLOWING).
+
+**Why it works**: Each window operator requires sorting the input by
+PARTITION BY + ORDER BY keys.  Merging compatible windows avoids
+redundant sorts.  Bounded frames enable sliding-window evaluation
+that processes each row in O(1) amortized time instead of O(window_size).
+
+**Database version**: DataFusion 28.0+
+
+## Relational Algebra
+
+```algebra
+-- Before: separate window operators with same partition/order
+window[PARTITION BY p ORDER BY o; f1=SUM(a)](
+  window[PARTITION BY p ORDER BY o; f2=AVG(b)](R))
+
+-- After: merged window operator
+window[PARTITION BY p ORDER BY o; f1=SUM(a), f2=AVG(b)](R)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("datafusion-merge-compatible-windows";
+    "(window ?part_order ?expr1
+        (window ?part_order ?expr2 ?input))" =>
+    "(window ?part_order (merge-window-exprs ?expr1 ?expr2) ?input)"
+    if is_database("datafusion")
+),
+
+rw!("datafusion-bounded-window-mode";
+    "(window ?spec (unbounded-window-fn ?fn ?col) ?input)" =>
+    "(window ?spec (bounded-window-fn ?fn ?col) ?input)"
+    if is_database("datafusion")
+    if frame_is_bounded("?spec")
+),
+```
+
+## Preconditions
+
+```rust
+fn can_merge_windows(
+    w1: &WindowOperator,
+    w2: &WindowOperator,
+) -> bool {
+    w1.partition_by == w2.partition_by
+    && w1.order_by == w2.order_by
+}
+
+fn can_use_bounded_mode(frame: &WindowFrame) -> bool {
+    matches!(
+        frame,
+        WindowFrame::Rows {
+            start: Bound::Preceding(Some(_)),
+            end: Bound::Following(Some(_)),
+        }
+    )
+}
+```
+
+**Restrictions:**
+- Window functions with different PARTITION BY cannot be merged
+- Different ORDER BY within the same PARTITION BY cannot be merged
+- Unbounded frames (RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+  require full partition buffering
+
+## Cost Model
+
+```rust
+fn merge_benefit(
+    rows: f64,
+    sort_keys: usize,
+    windows_merged: usize,
+) -> f64 {
+    // Avoid (windows_merged - 1) sort operations
+    let sort_saved =
+        (windows_merged - 1) as f64 * rows * rows.log2()
+        * sort_keys as f64 * 0.01;
+    sort_saved
+}
+```
+
+**Typical benefit**: Merging 3 window functions with the same
+PARTITION BY / ORDER BY eliminates 2 redundant sorts on the data.
+
+## Test Cases
+
+```sql
+-- Positive: merge compatible window functions
+SELECT
+    SUM(amount) OVER (PARTITION BY dept ORDER BY hire_date),
+    AVG(salary) OVER (PARTITION BY dept ORDER BY hire_date),
+    ROW_NUMBER() OVER (PARTITION BY dept ORDER BY hire_date)
+FROM employees;
+-- All three share partition/order -> single window operator
+```
+
+```sql
+-- Positive: bounded frame uses sliding window
+SELECT
+    SUM(amount) OVER (ORDER BY ts ROWS BETWEEN 5 PRECEDING AND CURRENT ROW)
+FROM events;
+-- Sliding window of size 6, O(1) per row
+```
+
+```sql
+-- Negative: different partition keys
+SELECT
+    SUM(x) OVER (PARTITION BY a),
+    SUM(y) OVER (PARTITION BY b)
+FROM t;
+-- Cannot merge: different partition columns
+```
+
+## References
+
+DataFusion: datafusion/physical-optimizer/src/combine_partial_final_agg.rs
+DataFusion: datafusion/physical-plan/src/windows/mod.rs
+DataFusion: datafusion/physical-plan/src/windows/bounded_window_agg_exec.rs

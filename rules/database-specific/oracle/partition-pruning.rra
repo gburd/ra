@@ -1,0 +1,135 @@
+---
+id: oracle-partition-pruning
+name: Oracle Partition Pruning
+category: database-specific/oracle
+databases: [oracle]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, oracle, partition, pruning, range, list, hash]
+complexity: O(1)
+benefit_range: [0.5, 0.99]
+---
+
+# Oracle Partition Pruning
+
+## Description
+
+Eliminates irrelevant partitions from table scans based on query
+predicates.  Oracle's optimizer analyzes filter conditions against
+partition key definitions to identify which partitions and
+subpartitions can contain matching rows, and scans only those.
+
+**When to apply**: A query filters on the partition key column(s)
+of a partitioned table.
+
+**Why it works**: Oracle stores each partition as a separate physical
+segment with its own data blocks and local indexes.  Skipping entire
+partitions avoids reading their segments from disk and eliminates
+them from all subsequent processing.
+
+**Database version**: Oracle 8i+ (basic), 11g+ (advanced)
+
+## Relational Algebra
+
+```algebra
+-- Before: full table scan
+sigma[order_date BETWEEN '2025-01-01' AND '2025-03-31'](
+    scan(orders_partitioned))
+
+-- After: partition pruning
+sigma[order_date BETWEEN '2025-01-01' AND '2025-03-31'](
+    scan(orders_partitioned, partitions=[Q1_2025]))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("oracle-static-partition-pruning";
+    "(filter ?pred (scan ?table))" =>
+    "(filter ?pred (scan-partitions ?table
+        (prune-partitions ?table ?pred)))"
+    if is_database("oracle")
+    if is_partitioned("?table")
+    if predicate_on_partition_key("?pred", "?table")
+),
+
+rw!("oracle-dynamic-partition-pruning";
+    "(join ?type ?cond ?left
+        (filter ?pred (scan ?partitioned_table)))" =>
+    "(join ?type ?cond ?left
+        (filter ?pred (scan-partitions ?partitioned_table
+            (dynamic-prune ?partitioned_table ?left ?cond))))"
+    if is_database("oracle")
+    if is_partitioned("?partitioned_table")
+    if join_key_is_partition_key("?cond", "?partitioned_table")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    pred: &Expr,
+    table: &PartitionedTable,
+) -> bool {
+    let partition_keys = table.partition_keys();
+    pred.column_refs().iter().any(|c| partition_keys.contains(c))
+    && match table.partition_type() {
+        PartitionType::Range => pred.is_range_predicate(),
+        PartitionType::List => pred.is_equality_or_in(),
+        PartitionType::Hash => pred.is_equality(),
+    }
+}
+```
+
+**Restrictions:**
+- Hash partitioning only prunes on equality predicates
+- Range partitioning prunes on range, equality, and IN predicates
+- Functions on partition key may prevent pruning (unless function-based)
+- Composite partition keys require predicates on the leading key
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    total_partitions: usize,
+    pruned_partitions: usize,
+    partition_size_bytes: f64,
+) -> f64 {
+    pruned_partitions as f64 * partition_size_bytes
+}
+```
+
+**Typical benefit**: For a table with 365 daily partitions where the
+query filters on a single month, prunes ~97% of data.
+
+## Test Cases
+
+```sql
+-- Positive: range partition pruning
+SELECT * FROM sales
+PARTITION BY RANGE (sale_date)
+WHERE sale_date = DATE '2025-03-15';
+-- Only partition containing 2025-03-15 is scanned
+```
+
+```sql
+-- Positive: dynamic partition pruning via join
+SELECT * FROM orders o
+JOIN date_dim d ON o.order_date = d.date_val
+WHERE d.quarter = 'Q1-2025';
+-- Partitions of orders dynamically pruned based on date_dim filter
+```
+
+```sql
+-- Negative: function on partition key prevents pruning
+SELECT * FROM sales WHERE TRUNC(sale_date) = DATE '2025-03-15';
+-- TRUNC prevents static pruning (unless function-based partitioning)
+```
+
+## References
+
+Oracle: Oracle Database VLDB and Partitioning Guide, "Partition Pruning"
+Oracle: EXPLAIN PLAN Pstart/Pstop columns

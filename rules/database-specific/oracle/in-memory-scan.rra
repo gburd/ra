@@ -1,0 +1,116 @@
+---
+id: oracle-in-memory-scan
+name: Oracle In-Memory Column Store Scan
+category: database-specific/oracle
+databases: [oracle]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, oracle, in-memory, columnar, IMCS, scan]
+complexity: O(n)
+benefit_range: [0.3, 0.9]
+---
+
+# Oracle In-Memory Column Store Scan
+
+## Description
+
+Routes table scans through Oracle's In-Memory Column Store (IMCS)
+when the table is populated in the IM column store.  IMCS stores data
+in a compressed columnar format in the SGA, enabling SIMD-accelerated
+scans and joins.
+
+**When to apply**: A table or partition is marked INMEMORY and has
+been populated into the IM column store.
+
+**Why it works**: Traditional Oracle scans read row-major data blocks
+from the buffer cache.  IMCS stores data in columnar format with
+dictionary encoding and SIMD scan support, achieving 10-100x scan
+throughput for analytical queries that touch few columns.
+
+**Database version**: Oracle 12cR1+ (Database In-Memory option)
+
+## Relational Algebra
+
+```algebra
+-- Before: buffer cache scan (row-major)
+sigma[region = 'US'](scan(sales, buffer_cache))
+
+-- After: in-memory columnar scan
+sigma[region = 'US'](scan(sales, in_memory_column_store))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("oracle-in-memory-scan";
+    "(filter ?pred (scan ?table))" =>
+    "(filter ?pred (in-memory-scan ?table))"
+    if is_database("oracle")
+    if is_inmemory_populated("?table")
+    if benefits_from_columnar("?pred")
+),
+
+rw!("oracle-in-memory-join";
+    "(hash-join ?type ?cond ?left ?right)" =>
+    "(in-memory-join ?type ?cond ?left ?right)"
+    if is_database("oracle")
+    if both_inmemory("?left", "?right")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(table: &Table) -> bool {
+    table.has_attribute("INMEMORY")
+    && table.inmemory_population_status() == "COMPLETED"
+}
+```
+
+**Restrictions:**
+- Requires Oracle Database In-Memory option license
+- Table must be marked INMEMORY and populated in SGA
+- IM column store has finite SGA memory; large tables may be
+  partially populated (INMEMORY PRIORITY controls population order)
+- DML triggers re-population of affected In-Memory Compression Units
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    rows: f64,
+    columns_scanned: usize,
+    total_columns: usize,
+) -> f64 {
+    let buffer_cache_cost = rows * total_columns as f64 * 0.01;
+    let imcs_cost =
+        rows * columns_scanned as f64 * 0.001; // SIMD + compression
+    buffer_cache_cost - imcs_cost
+}
+```
+
+**Typical benefit**: For analytical queries on a 100-column table
+reading 3 columns, IMCS is 10-30x faster than buffer cache scans.
+
+## Test Cases
+
+```sql
+-- Positive: INMEMORY table with analytical scan
+ALTER TABLE sales INMEMORY;
+SELECT region, SUM(amount) FROM sales GROUP BY region;
+-- IM column store scan on region and amount columns only
+```
+
+```sql
+-- Negative: table not in memory
+SELECT * FROM large_archive WHERE id = 100;
+-- Not INMEMORY; uses standard buffer cache + index
+```
+
+## References
+
+Oracle: Oracle Database In-Memory Guide
+Oracle: V$IM_SEGMENTS for population status
+Oracle: INMEMORY_SIZE init parameter

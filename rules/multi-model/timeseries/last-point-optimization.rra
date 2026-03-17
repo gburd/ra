@@ -1,0 +1,114 @@
+---
+id: last-point-optimization
+name: Last Point Query Optimization
+category: multi-model/timeseries
+databases: [influxdb, timescaledb, questdb]
+standard: "flux:2"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [timeseries, last-point, latest, optimization]
+---
+
+# Last Point Query Optimization
+
+## Description
+
+Optimizes "last point" queries that retrieve the most recent value for
+each series/entity. Instead of scanning all data and sorting by time,
+the engine uses a specialized index or scan strategy that reads only
+the latest chunk in reverse order, stopping after one row per series.
+
+**When to apply**: A query groups by a series identifier and selects
+the row with the maximum timestamp per group, or uses `DISTINCT ON`
+with `ORDER BY time DESC`.
+
+**Why it works**: Time-series data is stored in time-ordered chunks.
+The most recent value for each series is in the latest chunk(s).
+Scanning only the most recent chunk in reverse order and deduplicating
+by series avoids reading historical data entirely.
+
+## Relational Algebra
+
+```algebra
+gamma[series_id, max(ts), last(value)](scan(table))
+  -> last_point_scan(table, series_id)
+  -- Scans latest chunk per series using reverse index
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("last-point-optimization";
+    "(aggregate (list (col ?series)) \
+       (list (agg-expr (max (col ?ts)) all nil)) \
+       (ts-scan ?table))" =>
+    "(ts-last-point ?table ?series ?ts)"
+    if is_time_column("?table", "?ts")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    table: &str,
+    series_col: &str,
+    time_col: &str,
+    schema: &TimeSeriesSchema,
+) -> bool {
+    schema.is_hypertable(table)
+    && schema.time_column(table) == Some(time_col)
+    && schema.has_series_index(table, series_col)
+}
+```
+
+**Restrictions:**
+- Time column must be the hypertable's partitioning dimension
+- Series column should have an index for efficient deduplication
+- Only works for "latest value" queries, not arbitrary window functions
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    total_rows: f64,
+    num_series: f64,
+) -> f64 {
+    let full_scan_cost = total_rows;
+    let last_point_cost = num_series;
+    (full_scan_cost - last_point_cost) / full_scan_cost
+}
+```
+
+**Typical benefit**: 0.99+ for large tables with many time points per series.
+
+## Test Cases
+
+```sql
+-- Positive: last value per sensor
+SELECT DISTINCT ON (sensor_id)
+       sensor_id, time, temperature
+FROM sensor_data
+ORDER BY sensor_id, time DESC;
+-- Uses last-point scan: reads only latest row per sensor
+
+-- Positive: InfluxDB equivalent
+from(bucket: "sensors")
+  |> range(start: -1h)
+  |> last()
+-- Optimized to read only latest point per series
+
+-- Negative: not a last-point pattern
+SELECT sensor_id, avg(temperature)
+FROM sensor_data
+GROUP BY sensor_id;
+-- Full scan needed; avg requires all data
+```
+
+## References
+
+TimescaleDB: src/nodes/skip_scan.c - SkipScan plan
+InfluxDB: tsdb/engine/tsm1/engine.go - last() optimization
+Kulkarni et al. "Optimizing Time Series Queries in TimescaleDB" (CIDR 2021)

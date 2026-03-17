@@ -61,6 +61,7 @@ colored = "2.1"
 
 # Web
 rocket = { version = "0.5", features = ["json"] }
+rocket_ws = "0.1"
 tokio = { version = "1", features = ["full"] }
 
 # Testing

@@ -1,5 +1,5 @@
 version = "1.0.0"
-total_rules = 127
+total_rules = 263
 last_updated = "2026-03-17"
 
 [categories.logical]
@@ -91,7 +91,101 @@ rules = []
 
 [categories.database-specific]
 description = "Database-specific optimizations"
-rules = []
+
+[categories.database-specific.datafusion]
+description = "Apache DataFusion Arrow-native query engine optimizations"
+rules = [
+    "datafusion-filter-pushdown-through-join",
+    "datafusion-projection-pushdown",
+    "datafusion-type-coercion",
+    "datafusion-common-subexpr-elimination",
+    "datafusion-scalar-subquery-to-join",
+    "datafusion-limit-pushdown",
+    "datafusion-aggregate-statistics",
+    "datafusion-join-reordering",
+    "datafusion-parquet-predicate-pushdown",
+    "datafusion-hash-join-selection",
+    "datafusion-repartition-insertion",
+    "datafusion-eliminate-unnecessary-sort",
+    "datafusion-simplify-expressions",
+    "datafusion-propagate-empty-relation",
+    "datafusion-single-distinct-to-groupby",
+    "datafusion-decorrelate-subquery",
+    "datafusion-window-function-optimization",
+    "datafusion-replace-distinct-aggregate",
+    "datafusion-unnest-rewrite",
+    "datafusion-pipeline-breaking-optimization",
+]
+
+[categories.database-specific.materialize]
+description = "Materialize streaming SQL / differential dataflow optimizations"
+rules = [
+    "materialize-temporal-filter-pushdown",
+    "materialize-demand-projection",
+    "materialize-join-implementation",
+    "materialize-reduce-elision",
+    "materialize-nonnull-requirements",
+    "materialize-fusion",
+    "materialize-arrangement-sharing",
+    "materialize-reduce-reduction",
+    "materialize-threshold-elision",
+    "materialize-let-motion",
+    "materialize-canonicalize-mfp",
+    "materialize-topk-monotonic",
+    "materialize-literal-lifting",
+    "materialize-predicate-pushdown-through-join",
+    "materialize-column-knowledge",
+]
+
+[categories.database-specific.oracle]
+description = "Oracle Database cost-based optimizer transformations"
+rules = [
+    "oracle-star-transformation",
+    "oracle-bloom-filter-join",
+    "oracle-result-cache",
+    "oracle-partition-pruning",
+    "oracle-or-expansion",
+    "oracle-subquery-unnesting",
+    "oracle-join-predicate-pushdown",
+    "oracle-view-merging",
+    "oracle-index-fast-full-scan",
+    "oracle-materialized-view-rewrite",
+    "oracle-parallel-execution",
+    "oracle-adaptive-plans",
+    "oracle-hash-group-by",
+    "oracle-table-expansion",
+    "oracle-predicate-move-around",
+    "oracle-in-memory-scan",
+    "oracle-join-elimination",
+    "oracle-connect-by-optimization",
+    "oracle-batch-table-access",
+    "oracle-group-by-placement",
+]
+
+[categories.database-specific.mssql]
+description = "Microsoft SQL Server optimizer and execution engine optimizations"
+rules = [
+    "mssql-columnstore-scan",
+    "mssql-adaptive-join",
+    "mssql-batch-mode-execution",
+    "mssql-parameter-sniffing",
+    "mssql-indexed-view-matching",
+    "mssql-batch-mode-on-rowstore",
+    "mssql-partition-elimination",
+    "mssql-spool-optimization",
+    "mssql-memory-grant-feedback",
+    "mssql-predicate-pushdown-computed",
+    "mssql-hash-match-aggregate",
+    "mssql-query-store-forced-plan",
+    "mssql-star-join-optimization",
+    "mssql-key-lookup-elimination",
+    "mssql-window-aggregate-pushdown",
+    "mssql-seek-predicate-optimization",
+    "mssql-subquery-to-apply",
+    "mssql-interleaved-execution",
+    "mssql-in-memory-oltp",
+    "mssql-trivial-plan",
+]
 
 [categories.execution-models]
 description = "Execution model specific optimizations"
@@ -219,6 +313,54 @@ rules = [
     "stage-decomposition",
     "pipeline-stages",
     "minimize-stage-count",
+]
+
+[categories.multi-model]
+description = "Multi-model optimization rules for graph, document, and time-series databases"
+
+[categories.multi-model.graph]
+description = "Graph database traversal and pattern matching optimizations"
+rules = [
+    "join-to-traversal",
+    "bidirectional-search",
+    "path-materialization",
+    "vertex-centric-index",
+    "expand-into",
+    "label-scan-pushdown",
+    "pattern-decomposition",
+    "degree-aware-join-ordering",
+    "predicate-pushdown-through-traversal",
+    "subgraph-isomorphism-pruning",
+]
+
+[categories.multi-model.document]
+description = "Document database query and pipeline optimizations"
+rules = [
+    "nested-predicate-pushdown",
+    "projection-to-covered-query",
+    "array-unwind-pushdown",
+    "schema-inference-pushdown",
+    "lookup-to-embedded",
+    "compound-index-selection",
+    "pipeline-coalescence",
+    "shard-key-targeted-query",
+    "group-push-accumulator",
+    "change-stream-filter-pushdown",
+]
+
+[categories.multi-model.timeseries]
+description = "Time-series database scan, aggregation, and pruning optimizations"
+rules = [
+    "time-range-pruning",
+    "downsampling-pushdown",
+    "last-point-optimization",
+    "gap-fill-pushdown",
+    "retention-policy-pruning",
+    "window-function-pushdown",
+    "segment-merge-elimination",
+    "tag-index-scan",
+    "aligned-aggregation-merge",
+    "delta-encoding-scan",
 ]
 
 [categories.experimental]

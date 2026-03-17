@@ -1,0 +1,109 @@
+---
+id: downsampling-pushdown
+name: Downsampling Pushdown
+category: multi-model/timeseries
+databases: [influxdb, timescaledb, questdb, clickhouse]
+standard: "flux:2"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [timeseries, downsampling, aggregation, pushdown, rollup]
+---
+
+# Downsampling Pushdown
+
+## Description
+
+Pushes time-bucketed aggregation (downsampling) into the storage layer
+when pre-computed rollups or continuous aggregates exist at the
+requested granularity. Instead of reading raw data and aggregating at
+query time, the engine reads from a pre-aggregated materialized view.
+
+**When to apply**: A query aggregates data into time buckets (e.g.,
+`time_bucket('1 hour', ts)`), and a continuous aggregate or rollup
+table exists at the same or finer granularity.
+
+**Why it works**: Pre-computed aggregates store one row per bucket
+instead of potentially millions of raw rows per bucket. Reading from
+the aggregate reduces I/O by orders of magnitude and eliminates
+aggregation CPU cost.
+
+## Relational Algebra
+
+```algebra
+gamma[time_bucket(interval, ts), agg(value)](scan(raw_table))
+  -> scan(continuous_aggregate)
+  where continuous_aggregate has matching interval and agg
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("downsampling-pushdown";
+    "(aggregate (list (func time_bucket ?interval ?ts)) \
+       ?aggs \
+       (ts-scan ?table))" =>
+    "(ts-cagg-scan ?table ?interval ?aggs)"
+    if has_continuous_aggregate("?table", "?interval")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    table: &str,
+    interval: &str,
+    agg_funcs: &[AggFunc],
+    catalog: &CaggCatalog,
+) -> bool {
+    catalog.has_matching_cagg(table, interval, agg_funcs)
+    && !catalog.is_stale(table, interval)
+}
+```
+
+**Restrictions:**
+- Continuous aggregate must cover the requested aggregate functions
+- Requested interval must be a multiple of the aggregate's bucket size
+- Stale or unrefreshed aggregates may return outdated data
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    raw_rows: f64,
+    bucket_count: f64,
+) -> f64 {
+    let raw_cost = raw_rows;
+    let cagg_cost = bucket_count;
+    (raw_cost - cagg_cost) / raw_cost
+}
+```
+
+**Typical benefit**: 0.95-0.999 for hourly rollups over years of per-second data.
+
+## Test Cases
+
+```sql
+-- Positive: hourly aggregate matches continuous aggregate
+SELECT time_bucket('1 hour', time) AS hour,
+       avg(temperature), max(temperature)
+FROM sensor_data
+WHERE time >= '2025-01-01' AND time < '2025-02-01'
+GROUP BY hour;
+-- Reads from continuous aggregate instead of raw data
+
+-- Negative: requested interval has no matching aggregate
+SELECT time_bucket('7 minutes', time) AS bucket,
+       avg(temperature)
+FROM sensor_data
+GROUP BY bucket;
+-- No 7-minute aggregate exists; must scan raw data
+```
+
+## References
+
+TimescaleDB: src/continuous_agg.c - cagg_watermark()
+InfluxDB: docs.influxdata.com/influxdb/v2.0/process-data/downsample-data
+Pelkonen et al. "Gorilla: A Fast, Scalable, In-Memory Time Series Database" (VLDB 2015)

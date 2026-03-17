@@ -1,0 +1,157 @@
+---
+id: pipeline-stages
+name: Pipeline Stage Execution
+category: distributed/stage-planning
+databases: [presto, trino, spark, greenplum]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, stage, pipeline, streaming, latency]
+complexity: O(n)
+benefit_range: [0.1, 0.5]
+---
+
+# Pipeline Stage Execution
+
+## Description
+
+When stages form a linear chain, enables pipelining so that downstream
+stages begin consuming data as soon as the upstream stage starts
+producing output, rather than waiting for full materialization. This
+reduces end-to-end latency and memory usage.
+
+**When to apply**: Two or more stages are connected by streaming
+exchanges (the downstream operator can process partial input).
+
+**Why it works**: Without pipelining, each stage fully materializes its
+output before the next stage begins. With pipelining, the first row
+produced by Stage N is immediately available to Stage N+1. For streaming
+operators (filter, project, hash-join probe), this overlaps computation
+across stages.
+
+## Relational Algebra
+
+```algebra
+-- Without pipelining (blocking):
+Stage_N+1(materialize(Stage_N(R)))
+
+-- With pipelining (streaming):
+Stage_N+1(stream(Stage_N(R)))
+  where Stage_N+1 does not require full input
+```
+
+## Implementation
+
+```rust
+// Pipeline analysis determines which exchange boundaries allow
+// streaming vs require materialization.
+
+fn can_pipeline(
+    upstream: &Stage,
+    downstream: &Stage,
+    exchange: &Exchange,
+) -> bool {
+    match exchange.exchange_type {
+        // Gather: can stream if downstream is streaming
+        ExchangeType::Gather => downstream.root_is_streaming(),
+        // Hash partition: output is streaming per partition
+        ExchangeType::HashPartition(_) => true,
+        // Broadcast: requires full materialization of small side
+        ExchangeType::Broadcast => false,
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    downstream_root: &Operator,
+    exchange_type: &ExchangeType,
+) -> bool {
+    // Downstream must accept streaming input
+    let streaming = matches!(
+        downstream_root,
+        Operator::Filter(_)
+        | Operator::Project(_)
+        | Operator::HashJoinProbe(_)
+        | Operator::StreamingAggregate(_)
+    );
+    // Exchange must support streaming
+    let exchange_streaming = !matches!(
+        exchange_type,
+        ExchangeType::Broadcast
+    );
+    streaming && exchange_streaming
+}
+```
+
+**Pipeline breakers** (operators requiring full input):
+- Sort (needs all rows for comparison)
+- Hash join build side (needs complete hash table)
+- Broadcast exchange (needs complete copy)
+- Window functions with PARTITION BY (needs full partition)
+
+**Pipeline-able operators:**
+- Filter, Project (stateless)
+- Hash join probe side (hash table already built)
+- Streaming/sorted aggregation
+- Limit, Top-N (can stop early)
+
+## Cost Model
+
+```rust
+fn pipeline_benefit(
+    upstream_time: f64,
+    downstream_time: f64,
+    overlap_fraction: f64,
+) -> f64 {
+    // Without pipelining: sequential
+    let sequential = upstream_time + downstream_time;
+    // With pipelining: overlapped
+    let pipelined = upstream_time.max(downstream_time)
+        + (1.0 - overlap_fraction)
+        * upstream_time.min(downstream_time);
+    sequential - pipelined
+}
+```
+
+**Typical benefit**: 10-50% latency reduction for multi-stage queries.
+Most impactful when stages have similar execution times.
+
+## Test Cases
+
+```sql
+-- Positive: filter after shuffle can be pipelined
+-- Stage 1: Scan(orders) -> Exchange[hash(customer_id)]
+-- Stage 2: Filter(amount > 100) -> Project(id, amount)
+
+-- Pipelined: Stage 2 starts filtering as soon as Stage 1
+-- produces shuffled rows. No materialization between stages.
+```
+
+```sql
+-- Positive: join probe pipelined with upstream
+-- Stage 1: Scan(orders) -> Exchange[hash(customer_id)]
+-- Stage 2: HashJoinProbe(orders, customers_hash_table)
+-- The probe side streams from Stage 1 into the join.
+```
+
+```sql
+-- Negative: sort requires full materialization
+-- Stage 1: Scan(events) -> Exchange[hash(user_id)]
+-- Stage 2: Sort(timestamp) -> ...
+-- Sort cannot begin until all input rows arrive
+```
+
+```sql
+-- Negative: broadcast exchange is a pipeline breaker
+-- Stage 1: Scan(dim_table) -> Exchange[broadcast]
+-- Stage 2: HashJoinBuild(dim_table)
+-- Must fully broadcast before join build can complete
+```
+
+## References
+
+Presto/Trino: presto-main/src/main/java/com/facebook/presto/execution/SqlStageExecution.java
+Graefe, "Volcano - An Extensible and Parallel Query Evaluation System" (IEEE TKDE 1994)
+Neumann, "Efficiently Compiling Efficient Query Plans for Modern Hardware" (VLDB 2011)

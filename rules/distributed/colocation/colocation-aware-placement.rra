@@ -1,0 +1,156 @@
+---
+id: colocation-aware-placement
+name: Co-location Aware Table Placement
+category: distributed/colocation
+databases: [citus, cockroachdb, greenplum, spark]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, colocation, placement, affinity, partition]
+complexity: O(n)
+benefit_range: [0.3, 0.9]
+---
+
+# Co-location Aware Table Placement
+
+## Description
+
+Advises on table distribution strategies to maximize co-located joins.
+When tables that are frequently joined together are hash-partitioned on
+their join key with the same partition count, all joins between them
+become local (no shuffle needed). This is a design-time optimization
+that the query planner can enforce or recommend.
+
+**When to apply**: During schema design or when the optimizer detects
+that frequently-joined tables could be co-located by changing their
+distribution key.
+
+**Why it works**: Co-located tables guarantee that matching rows are on
+the same node, eliminating all network shuffle for joins between them.
+For workloads dominated by joins between a small set of related tables,
+this eliminates the largest cost component.
+
+## Relational Algebra
+
+```algebra
+-- Current: tables have incompatible distributions
+Join[c](R hash(a), S hash(b))  -- requires shuffle
+
+-- After co-location:
+Join[c](R hash(join_key), S hash(join_key))  -- local join
+```
+
+## Implementation
+
+```rust
+// Co-location is a schema-level decision, not a query rewrite.
+// The optimizer can recommend co-location based on workload analysis.
+
+fn recommend_colocation(
+    workload: &[Query],
+    tables: &[TableRef],
+) -> Vec<ColocationGroup> {
+    // Build join frequency graph
+    let join_graph = build_join_graph(workload);
+
+    // Find connected components of frequently-joined tables
+    let components = join_graph.connected_components();
+
+    components.iter().map(|comp| {
+        // For each component, find the optimal distribution key
+        let dist_key = find_common_join_key(comp);
+        ColocationGroup {
+            tables: comp.tables.clone(),
+            distribution_key: dist_key,
+            partition_count: optimal_partition_count(comp),
+        }
+    }).collect()
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    table_a: &TableRef,
+    table_b: &TableRef,
+    join_key: &JoinKey,
+) -> bool {
+    // Tables must support hash distribution on the join key
+    table_a.column_exists(&join_key.left)
+        && table_b.column_exists(&join_key.right)
+    // Join key types must be hash-compatible
+    && join_key.left.data_type().hash_compatible(
+        &join_key.right.data_type()
+    )
+}
+```
+
+**Restrictions:**
+- Tables can only be co-located on one set of keys (cannot optimize for
+  all possible join patterns simultaneously)
+- Changing distribution key requires data redistribution (expensive DDL)
+- Partition count must be identical for co-located tables
+- In Citus, co-location is explicit via `colocate_with` parameter
+- In CockroachDB, co-location is achieved through interleaved tables
+  or locality-optimized search
+
+## Cost Model
+
+```rust
+fn colocation_benefit(
+    join_frequency: f64,
+    avg_shuffle_cost: f64,
+    redistribution_cost: f64,
+) -> f64 {
+    // Amortized benefit = shuffle savings per query * queries
+    // minus one-time redistribution cost
+    let per_query_saving = avg_shuffle_cost;
+    let break_even_queries =
+        redistribution_cost / per_query_saving;
+    // Return net benefit over expected query count
+    join_frequency * per_query_saving - redistribution_cost
+}
+```
+
+**Typical benefit**: For tables joined in 80% of queries, co-location
+eliminates the most expensive operation (shuffle) in every one of those
+queries.
+
+## Test Cases
+
+```sql
+-- Positive: Citus co-located tables
+-- SELECT create_distributed_table('orders', 'customer_id');
+-- SELECT create_distributed_table('order_items', 'customer_id',
+--     colocate_with => 'orders');
+
+SELECT o.*, i.product_id
+FROM orders o JOIN order_items i
+  ON o.id = i.order_id AND o.customer_id = i.customer_id;
+-- Co-located: local join on each node
+```
+
+```sql
+-- Positive: CockroachDB zone-based co-location
+-- ALTER TABLE orders CONFIGURE ZONE USING
+--   constraints = '[+region=us-east]';
+-- ALTER TABLE customers CONFIGURE ZONE USING
+--   constraints = '[+region=us-east]';
+-- Tables in same zone minimize cross-zone traffic
+```
+
+```sql
+-- Negative: conflicting join patterns
+-- orders JOIN customers ON customer_id (want dist on customer_id)
+-- orders JOIN products ON product_id (want dist on product_id)
+-- Cannot co-locate for both patterns simultaneously
+-- Must choose based on query frequency
+```
+
+## References
+
+Citus: src/backend/distributed/planner/multi_physical_planner.c - IsColocatedJoin()
+CockroachDB: Architecture docs - "Data distribution and replication"
+Greenplum: src/backend/cdb/cdbhash.c - distribution key selection
+Curino et al., "Schism: a Workload-Driven Approach to Database Replication and Partitioning" (VLDB 2010)
+Pavlo et al., "Skew-Aware Automatic Database Partitioning in Shared-Nothing, Parallel OLTP Systems" (SIGMOD 2012)

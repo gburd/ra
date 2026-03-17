@@ -1,0 +1,128 @@
+---
+id: merge-sort-gather
+name: Merge-Sort Gather for Distributed Order
+category: distributed/distributed-sort
+databases: [presto, trino, spark, greenplum, cockroachdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, sort, merge, gather, order-preserving]
+complexity: O(n log p)
+benefit_range: [0.1, 0.5]
+---
+
+# Merge-Sort Gather for Distributed Order
+
+## Description
+
+When the final result requires global ordering and each node's local data
+is already sorted (or can be locally sorted), the gather operation uses a
+merge-sort strategy instead of concatenation followed by a full sort. A
+priority queue merges P sorted streams (one per node) in O(N log P) time.
+
+**When to apply**: A sort is required above a gather exchange and local
+data can be sorted on each node before transmission.
+
+**Why it works**: Sorting N rows on one node is O(N log N). Merge-sorting
+P pre-sorted streams of N/P rows each is O(N log P). When P << N, this
+is significantly cheaper. Additionally, each node only needs to sort its
+local partition of N/P rows.
+
+## Relational Algebra
+
+```algebra
+-- Naive: sort after gather
+Sort[k](Exchange[gather](R))
+  -> Sort[k](concat(R_1, R_2, ..., R_P))   -- O(N log N)
+
+-- Optimized: local sort + merge-sort gather
+MergeSortGather[k](Sort_local[k](R))         -- O(N log P)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("sort-gather-to-merge-sort";
+    "(sort ?keys (exchange gather ?child))" =>
+    "(merge_sort_gather ?keys (sort ?keys ?child))"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(num_nodes: u32) -> bool {
+    // Merge-sort gather is beneficial when multiple nodes contribute
+    num_nodes > 1
+}
+```
+
+**Restrictions:**
+- Requires sort-preserving network transfer (streaming, not buffered)
+- Coordinator must have enough memory for a P-element priority queue
+  (one entry per source node)
+- If the child is already sorted (e.g., index scan), the local sort
+  is a no-op and only the merge is needed
+
+## Cost Model
+
+```rust
+fn merge_sort_gather_cost(
+    total_rows: f64,
+    num_nodes: u32,
+    row_bytes: f64,
+) -> f64 {
+    let rows_per_node = total_rows / num_nodes as f64;
+    // Local sort cost per node
+    let local_sort =
+        rows_per_node * (rows_per_node).ln() * 50e-9;
+    // Merge cost at coordinator
+    let merge =
+        total_rows * (num_nodes as f64).ln() * 20e-9;
+    local_sort + merge
+}
+
+fn vs_global_sort_cost(total_rows: f64) -> f64 {
+    total_rows * (total_rows).ln() * 50e-9
+}
+```
+
+**Typical benefit**: For 100 nodes and 1B rows, merge-sort is
+O(1B * log(100)) = O(1B * 7) vs full sort O(1B * log(1B)) = O(1B * 30).
+
+## Test Cases
+
+```sql
+-- Positive: ORDER BY on distributed table
+SELECT * FROM events ORDER BY created_at;
+
+-- Plan:
+-- MergeSortGather(created_at ASC)
+--   Sort(created_at ASC)            -- local sort per node
+--     Scan(events)
+```
+
+```sql
+-- Positive: child already sorted via index
+-- events has a clustered index on created_at
+SELECT * FROM events ORDER BY created_at;
+
+-- Plan:
+-- MergeSortGather(created_at ASC)
+--   IndexScan(events, created_at)   -- already sorted, no local sort
+```
+
+```sql
+-- Negative: single node, no merge needed
+-- Data is on one node only
+SELECT * FROM events ORDER BY created_at;
+-- Just a local sort, no gather needed
+```
+
+## References
+
+Presto/Trino: presto-main/src/main/java/com/facebook/presto/operator/MergeSortedPages.java
+Spark SQL: sql/core/src/main/scala/org/apache/spark/sql/execution/exchange/ShuffleExchangeExec.scala
+Greenplum: src/backend/executor/nodeMotion.c - merge receive
+Knuth, "The Art of Computer Programming, Vol. 3: Sorting and Searching" - merge-sort analysis

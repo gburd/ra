@@ -1,0 +1,113 @@
+---
+id: lookup-to-embedded
+name: Lookup to Embedded Document Access
+category: multi-model/document
+databases: [mongodb, couchbase, cosmosdb]
+standard: "mql:5"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [document, lookup, embedded, denormalization, join]
+---
+
+# Lookup to Embedded Document Access
+
+## Description
+
+Replaces a `$lookup` (join) between two collections with direct embedded
+document access when the related data is denormalized (embedded within
+the parent document). Document databases encourage denormalization; when
+the "foreign" data already exists as a nested subdocument, a cross-
+collection lookup is unnecessary.
+
+**When to apply**: A `$lookup` references a collection whose data is
+already embedded as a nested field in the source collection.
+
+**Why it works**: `$lookup` performs an index lookup or hash join across
+collections for each input document. Embedded access reads nested data
+from the same BSON document already in memory, costing O(1) per
+document.
+
+## Relational Algebra
+
+```algebra
+R lookup[R.fk = S._id] S
+  -> pi[R.*, R.embedded_S](R)
+  where R.embedded_S contains a copy of S
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("lookup-to-embedded";
+    "(lookup ?from ?local ?foreign ?as (doc-scan ?coll))" =>
+    "(project-embedded ?coll ?as)"
+    if has_embedded_field("?coll", "?as")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    collection: &str,
+    embedded_field: &str,
+    schema: &DocumentSchema,
+) -> bool {
+    schema.has_embedded_subdocument(collection, embedded_field)
+    && schema.embedded_is_consistent(collection, embedded_field)
+}
+```
+
+**Restrictions:**
+- Embedded data must be a consistent copy of the foreign collection
+- Data freshness concerns if source and embedded are out of sync
+- Not applicable for references (DBRef) that point to separate documents
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    doc_count: f64,
+    lookup_cost_per_doc: f64,
+) -> f64 {
+    let lookup_total = doc_count * lookup_cost_per_doc;
+    let embedded_total = doc_count * FIELD_ACCESS_COST;
+    (lookup_total - embedded_total) / lookup_total
+}
+```
+
+**Typical benefit**: 0.8-0.99 since embedded access avoids cross-collection I/O.
+
+## Test Cases
+
+```javascript
+// Positive: orders embed customer subdocument
+db.orders.aggregate([
+  { $lookup: {
+      from: "customers",
+      localField: "customer_id",
+      foreignField: "_id",
+      as: "customer"
+    }
+  }
+]);
+// Rewritten to direct field access:
+db.orders.aggregate([
+  { $project: { customer: "$embedded_customer", /* ... */ } }
+]);
+
+// Negative: no embedded copy exists
+db.orders.aggregate([
+  { $lookup: { from: "products", localField: "product_id",
+    foreignField: "_id", as: "product" } }
+]);
+// Must use lookup; no embedded product data
+```
+
+## References
+
+MongoDB: docs.mongodb.com/manual/core/data-model-design
+Copeland, Khoshafian "A Decomposition Storage Model" (SIGMOD 1985)
+Chodorow "MongoDB: The Definitive Guide" (O'Reilly, 3rd ed.) Chapter 8

@@ -1,0 +1,109 @@
+---
+id: datafusion-type-coercion
+name: DataFusion Type Coercion Optimization
+category: database-specific/datafusion
+databases: [datafusion]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, datafusion, type-coercion, arrow, cast]
+complexity: O(n)
+benefit_range: [0.05, 0.3]
+---
+
+# DataFusion Type Coercion Optimization
+
+## Description
+
+Resolves implicit type mismatches in expressions by inserting minimal
+CAST operations according to Arrow's type promotion rules.  DataFusion's
+type coercion pass ensures that both sides of a comparison or arithmetic
+expression share a common Arrow type.
+
+**When to apply**: An expression compares or combines values of
+different Arrow types (e.g., Int32 vs Int64, Utf8 vs LargeUtf8).
+
+**Why it works**: Arrow kernels require operands of the same type.
+By choosing the smallest common type (e.g., promoting Int32 to Int64
+rather than casting both to Float64), DataFusion minimizes conversion
+overhead and preserves precision.
+
+**Database version**: DataFusion 20.0+
+
+## Relational Algebra
+
+```algebra
+-- Implicit coercion: insert cast on narrower side
+expr(col_i32, col_i64)
+  -> expr(CAST(col_i32 AS Int64), col_i64)
+
+-- String coercion: unify Utf8 and LargeUtf8
+eq(col_utf8, col_largeutf8)
+  -> eq(CAST(col_utf8 AS LargeUtf8), col_largeutf8)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("datafusion-coerce-int32-to-int64";
+    "(eq (col-typed ?c1 int32) (col-typed ?c2 int64))" =>
+    "(eq (cast (col-typed ?c1 int32) int64) (col-typed ?c2 int64))"
+    if is_database("datafusion")
+),
+
+rw!("datafusion-coerce-utf8-to-largeutf8";
+    "(eq (col-typed ?c1 utf8) (col-typed ?c2 largeutf8))" =>
+    "(eq (cast (col-typed ?c1 utf8) largeutf8) (col-typed ?c2 largeutf8))"
+    if is_database("datafusion")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(left_type: &DataType, right_type: &DataType) -> bool {
+    left_type != right_type
+    && common_type(left_type, right_type).is_some()
+}
+```
+
+**Restrictions:**
+- Only coerce when a lossless promotion exists
+- Incompatible types (e.g., Boolean and Timestamp) produce an error
+- User-specified CASTs are preserved as-is
+
+## Cost Model
+
+```rust
+fn coercion_cost(rows: f64, type_size_bytes: usize) -> f64 {
+    // Cost of casting one column
+    rows * type_size_bytes as f64 * 0.001
+}
+```
+
+**Typical benefit**: Prevents runtime errors and enables kernel dispatch.
+Overhead is minimal (nanoseconds per row for numeric widening).
+
+## Test Cases
+
+```sql
+-- Positive: Int32 column compared with Int64 literal
+SELECT * FROM events WHERE count_i32 > 1000000;
+-- 1000000 is Int64; count_i32 is cast to Int64
+
+-- Positive: mixed string types in join
+SELECT * FROM t1 JOIN t2 ON t1.name_utf8 = t2.name_largeutf8;
+-- t1.name is cast to LargeUtf8
+```
+
+```sql
+-- Negative: same types, no coercion needed
+SELECT * FROM events WHERE count_i64 > 100;
+```
+
+## References
+
+DataFusion: datafusion/optimizer/src/analyzer/type_coercion.rs
+DataFusion: datafusion/expr/src/type_coercion/binary.rs
+Arrow type system: https://arrow.apache.org/docs/format/Columnar.html#physical-memory-layout

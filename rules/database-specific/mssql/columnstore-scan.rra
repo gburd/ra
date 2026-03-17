@@ -1,0 +1,121 @@
+---
+id: mssql-columnstore-scan
+name: SQL Server Columnstore Index Scan
+category: database-specific/mssql
+databases: [mssql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, mssql, columnstore, scan, batch-mode, analytics]
+complexity: O(n)
+benefit_range: [0.3, 0.9]
+---
+
+# SQL Server Columnstore Index Scan
+
+## Description
+
+Routes analytical queries through columnstore indexes using batch
+mode execution.  SQL Server's columnstore indexes store data in
+compressed column segments, and batch mode processes ~900 rows at
+a time using SIMD instructions instead of row-at-a-time iterator
+model.
+
+**When to apply**: A query scans a table with a columnstore index
+and performs filtering, aggregation, or joins on a subset of columns.
+
+**Why it works**: Columnstore indexes compress data 10x, enable
+segment elimination (min/max pruning), and batch mode execution
+processes vectors of rows with SIMD.  The combination of reduced I/O,
+compression, and vectorized execution yields 10-100x speedup for
+analytical workloads.
+
+**Database version**: SQL Server 2012+ (nonclustered), 2014+ (clustered),
+2019+ (batch mode on rowstore)
+
+## Relational Algebra
+
+```algebra
+-- Before: rowstore scan with row mode execution
+sigma[region = 'US'](row-scan(sales))
+
+-- After: columnstore scan with batch mode
+sigma[region = 'US'](columnstore-scan(sales, batch_mode=true))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mssql-columnstore-scan";
+    "(filter ?pred (scan ?table))" =>
+    "(filter-batch ?pred (columnstore-scan ?table))"
+    if is_database("mssql")
+    if has_columnstore_index("?table")
+    if benefits_from_batch_mode("?pred")
+),
+
+rw!("mssql-batch-mode-aggregate";
+    "(aggregate ?aggs ?groups (columnstore-scan ?table))" =>
+    "(batch-aggregate ?aggs ?groups (columnstore-scan ?table))"
+    if is_database("mssql")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(table: &Table, query: &LogicalPlan) -> bool {
+    table.has_columnstore_index()
+    && (query.is_analytical()
+        || query.scans_many_rows())
+}
+```
+
+**Restrictions:**
+- Point lookups are faster on rowstore B-tree indexes
+- Columnstore indexes have higher DML overhead (delta store + merge)
+- Batch mode requires compatible operators (not all support it)
+- Memory-optimized tables have separate columnstore support
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    rows: f64,
+    columns_scanned: usize,
+    total_columns: usize,
+    compression_ratio: f64,
+) -> f64 {
+    let rowstore_io = rows * total_columns as f64 * 8.0;
+    let columnstore_io =
+        rows * columns_scanned as f64 * 8.0 / compression_ratio;
+    let batch_speedup = 10.0; // batch vs row mode
+    rowstore_io - columnstore_io / batch_speedup
+}
+```
+
+**Typical benefit**: For analytical queries on 1B rows with 10x
+compression and batch mode, 100x faster than rowstore scans.
+
+## Test Cases
+
+```sql
+-- Positive: analytical aggregation on columnstore
+SELECT region, SUM(amount), COUNT(*)
+FROM sales WITH (INDEX(cci_sales))
+GROUP BY region;
+-- Columnstore scan + batch mode aggregate
+```
+
+```sql
+-- Negative: point lookup on primary key
+SELECT * FROM sales WHERE sale_id = 12345;
+-- B-tree index seek is faster for single-row lookup
+```
+
+## References
+
+SQL Server: Columnstore Indexes - Overview
+SQL Server: Batch Mode Execution - Overview
+SQL Server: sys.column_store_segments DMV

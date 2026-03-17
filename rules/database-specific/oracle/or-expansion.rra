@@ -1,0 +1,116 @@
+---
+id: oracle-or-expansion
+name: Oracle OR Expansion
+category: database-specific/oracle
+databases: [oracle]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, oracle, or-expansion, union, index, concatenation]
+complexity: O(n)
+benefit_range: [0.2, 0.7]
+---
+
+# Oracle OR Expansion
+
+## Description
+
+Transforms a query with OR predicates into a UNION ALL of queries,
+each with one branch of the OR.  This allows Oracle to use different
+indexes for each branch instead of falling back to a full table scan
+when no single index covers all OR conditions.
+
+**When to apply**: A WHERE clause contains OR predicates on different
+indexed columns, and each branch can use a different index.
+
+**Why it works**: Oracle's B-tree indexes cannot efficiently satisfy
+OR predicates across different columns.  By splitting into UNION ALL
+branches, each branch uses its optimal index access path, and the
+CONCATENATION operator merges the results.
+
+**Database version**: Oracle 10g+
+
+## Relational Algebra
+
+```algebra
+-- Before: OR prevents index usage
+sigma[a = 1 OR b = 2](R)
+
+-- After: OR expansion (CONCATENATION)
+sigma[a = 1](R) union-all sigma[b = 2 AND NOT(a = 1)](R)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("oracle-or-expansion";
+    "(filter (or ?p1 ?p2) ?input)" =>
+    "(union-all
+        (filter ?p1 ?input)
+        (filter (and ?p2 (not ?p1)) ?input))"
+    if is_database("oracle")
+    if branches_have_different_indexes("?p1", "?p2", "?input")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    pred: &Expr,
+    table: &Table,
+) -> bool {
+    let branches = pred.or_branches();
+    branches.len() >= 2
+    && branches.iter().all(|b| {
+        table.has_usable_index(b.column_refs())
+    })
+}
+```
+
+**Restrictions:**
+- The NOT(p1) guard prevents duplicates in the second branch
+- More than 2 OR branches create cascading UNION ALLs
+- Not beneficial if a full table scan is cheaper than multiple index scans
+- Oracle hint USE_CONCAT controls this transformation
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    table_rows: f64,
+    branch_selectivities: &[f64],
+) -> f64 {
+    let combined = branch_selectivities.iter().sum::<f64>();
+    let full_scan_cost = table_rows * 0.01;
+    let index_cost: f64 = branch_selectivities.iter()
+        .map(|s| s * table_rows * 0.005)
+        .sum();
+    full_scan_cost - index_cost
+}
+```
+
+**Typical benefit**: For two 1%-selective branches on a 10M-row table,
+index scans read 200K rows vs full scan reading 10M rows.
+
+## Test Cases
+
+```sql
+-- Positive: OR on different indexed columns
+SELECT * FROM employees
+WHERE department_id = 10 OR job_id = 'SA_REP';
+-- Branch 1: index on department_id
+-- Branch 2: index on job_id
+```
+
+```sql
+-- Negative: OR on same column
+SELECT * FROM employees WHERE salary > 10000 OR salary < 1000;
+-- Single index on salary can handle both branches
+```
+
+## References
+
+Oracle: Oracle Database SQL Tuning Guide, "OR Expansion"
+Oracle: USE_CONCAT / NO_EXPAND optimizer hints

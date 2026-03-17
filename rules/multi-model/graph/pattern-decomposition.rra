@@ -1,0 +1,101 @@
+---
+id: pattern-decomposition
+name: Graph Pattern Decomposition
+category: multi-model/graph
+databases: [neo4j, janusgraph, tigergraph]
+standard: "cypher:9"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [graph, pattern, decomposition, subgraph]
+---
+
+# Graph Pattern Decomposition
+
+## Description
+
+Decomposes a complex multi-edge graph pattern into smaller sub-patterns
+that can be evaluated independently and joined. This enables the optimizer
+to choose the best join order for the sub-pattern results, similar to
+join reordering in relational systems but applied to graph pattern
+matching.
+
+**When to apply**: A graph pattern contains three or more edges forming
+a connected subgraph, and cardinality estimation shows that evaluating
+some sub-patterns first reduces intermediate result sizes.
+
+**Why it works**: A monolithic pattern match may explore large Cartesian
+products of intermediate results. Decomposing allows the optimizer to
+start with the most selective sub-patterns and prune early.
+
+## Relational Algebra
+
+```algebra
+match(a-[e1]->b-[e2]->c-[e3]->d)
+  -> join(match(a-[e1]->b-[e2]->c), match(c-[e3]->d))
+  where decomposition reduces estimated intermediate cardinality
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("pattern-decomposition-3";
+    "(match-path ?a ?e1 ?b ?e2 ?c ?e3 ?d)" =>
+    "(hash-join ?c \
+       (match-path ?a ?e1 ?b ?e2 ?c) \
+       (match-path ?c ?e3 ?d))"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(pattern: &GraphPattern) -> bool {
+    pattern.edge_count() >= 3
+    && pattern.is_connected()
+    && estimated_intermediate_card(pattern) > THRESHOLD
+}
+```
+
+**Restrictions:**
+- Pattern must be connected
+- Only beneficial when intermediate sizes are large
+- Decomposition point must be at a shared node
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    monolithic_card: f64,
+    sub1_card: f64,
+    sub2_card: f64,
+) -> f64 {
+    let monolithic_cost = monolithic_card;
+    let decomposed_cost =
+        sub1_card + sub2_card + sub1_card.min(sub2_card);
+    (monolithic_cost - decomposed_cost) / monolithic_cost
+}
+```
+
+**Typical benefit**: 0.3-0.8 for patterns with high fan-out intermediate steps.
+
+## Test Cases
+
+```cypher
+-- Positive: 3-edge pattern, decomposable at node c
+MATCH (a:Person)-[:KNOWS]->(b:Person)-[:WORKS_AT]->(c:Company)
+      -[:LOCATED_IN]->(d:City)
+RETURN a.name, d.name;
+-- Decomposed into (a)-[:KNOWS]->(b)-[:WORKS_AT]->(c) joined
+-- with (c)-[:LOCATED_IN]->(d)
+
+-- Negative: 2-edge pattern, too small to decompose
+MATCH (a:Person)-[:KNOWS]->(b:Person)-[:LIKES]->(c:Movie)
+RETURN a, c;
+```
+
+## References
+
+Neo4j: org.neo4j.cypher.internal.compiler.planner.logical.idp.IDPQueryGraphSolver
+Lai et al. "Subgraph Matching with Efficient Handling of Symmetry" (VLDB 2019)

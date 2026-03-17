@@ -1,0 +1,177 @@
+---
+id: union-all-pushdown
+name: Distributed UNION ALL Pushdown
+category: distributed/data-movement
+databases: [presto, trino, spark, cockroachdb, greenplum, citus]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, union, pushdown, federated, parallel]
+complexity: O(n)
+benefit_range: [0.1, 0.6]
+---
+
+# Distributed UNION ALL Pushdown
+
+## Description
+
+When a UNION ALL combines results from multiple distributed tables with
+the same schema, pushes operators (filter, project, aggregate) through
+the union to each branch independently. In a distributed setting, this
+enables each branch to execute on its own set of nodes without first
+gathering all data.
+
+**When to apply**: A filter, projection, or partial aggregation sits
+above a UNION ALL of distributed tables.
+
+**Why it works**: UNION ALL is a simple concatenation; pushing operators
+into each branch reduces the data volume that each branch sends to the
+coordinator. Each branch can independently prune, project, and partially
+aggregate.
+
+## Relational Algebra
+
+```algebra
+-- Push filter through union
+sigma[p](R UNION ALL S) -> sigma[p](R) UNION ALL sigma[p](S)
+
+-- Push project through union
+pi[a](R UNION ALL S) -> pi[a](R) UNION ALL pi[a](S)
+
+-- Push partial agg through union (distributed)
+gamma[g, agg](R UNION ALL S)
+  -> gamma_final[g, merge](
+       gamma_partial[g, agg](R)
+       UNION ALL
+       gamma_partial[g, agg](S)
+     )
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("push-filter-through-union";
+    "(filter ?pred (union_all ?left ?right))" =>
+    "(union_all (filter ?pred ?left) (filter ?pred ?right))"
+),
+
+rw!("push-project-through-union";
+    "(project ?cols (union_all ?left ?right))" =>
+    "(union_all (project ?cols ?left) (project ?cols ?right))"
+),
+
+rw!("push-partial-agg-through-union";
+    "(aggregate ?groups ?agg (union_all ?left ?right))" =>
+    "(aggregate_final ?groups ?agg
+        (union_all
+            (aggregate_partial ?groups ?agg ?left)
+            (aggregate_partial ?groups ?agg ?right)))"
+    if agg_is_decomposable("?agg")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    operator: &Operator,
+    union_branches: &[RelNode],
+) -> bool {
+    match operator {
+        Operator::Filter(pred) => {
+            // Predicate must reference columns present in all branches
+            union_branches.iter().all(|b|
+                pred.referenced_columns()
+                    .is_subset(&b.output_columns())
+            )
+        }
+        Operator::Project(cols) => {
+            // All projected columns must exist in all branches
+            union_branches.iter().all(|b|
+                cols.iter().all(|c| b.output_columns().contains(c))
+            )
+        }
+        Operator::Aggregate(_, agg) => agg.is_decomposable(),
+        _ => false,
+    }
+}
+```
+
+**Restrictions:**
+- UNION (with deduplication) requires additional handling: filters and
+  projections can be pushed, but the deduplication must remain above
+- Aggregate pushdown through UNION requires decomposable aggregations
+- Column names and types must match across all branches
+
+## Cost Model
+
+```rust
+fn pushdown_benefit(
+    branches: &[BranchStats],
+    selectivity: f64,
+    network_bandwidth: f64,
+) -> f64 {
+    let bytes_before: f64 = branches.iter()
+        .map(|b| b.bytes).sum();
+    let bytes_after: f64 = branches.iter()
+        .map(|b| b.bytes * selectivity).sum();
+    (bytes_before - bytes_after) / network_bandwidth
+}
+```
+
+**Typical benefit**: Proportional to the operator's reduction ratio,
+applied independently to each branch.
+
+## Test Cases
+
+```sql
+-- Positive: filter pushed into both union branches
+-- Before
+SELECT * FROM (
+    SELECT * FROM orders_2023
+    UNION ALL
+    SELECT * FROM orders_2024
+) all_orders
+WHERE region = 'EU';
+
+-- After: each branch filters independently
+-- Union
+--   Filter(region='EU') -> Scan(orders_2023)  -- on nodes A
+--   Filter(region='EU') -> Scan(orders_2024)  -- on nodes B
+-- Each branch scans and filters on its own nodes
+```
+
+```sql
+-- Positive: aggregation pushed into branches
+SELECT region, SUM(amount) FROM (
+    SELECT region, amount FROM sales_q1
+    UNION ALL
+    SELECT region, amount FROM sales_q2
+) GROUP BY region;
+
+-- After:
+-- AggregateFinal(region, SUM)
+--   Union
+--     AggregatePartial(region, SUM(amount))
+--       Scan(sales_q1)
+--     AggregatePartial(region, SUM(amount))
+--       Scan(sales_q2)
+```
+
+```sql
+-- Negative: UNION (with DISTINCT) prevents aggregate pushdown
+SELECT region, SUM(amount) FROM (
+    SELECT region, amount FROM sales_q1
+    UNION              -- dedup!
+    SELECT region, amount FROM sales_q2
+) GROUP BY region;
+-- Deduplication must happen before aggregation
+```
+
+## References
+
+Presto/Trino: presto-main/src/main/java/com/facebook/presto/sql/planner/iterative/rule/PushFilterThroughUnion.java
+Spark SQL: sql/catalyst/src/main/scala/org/apache/spark/sql/catalyst/optimizer/Optimizer.scala - PushDownPredicates
+CockroachDB: pkg/sql/opt/norm/rules/select.opt
+Greenplum: src/backend/optimizer/prep/prepunion.c

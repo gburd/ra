@@ -17,5 +17,9 @@ cranelift-native = { workspace = true }
 wasmtime = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+wat = "1.219"
 
 [dev-dependencies]
+serde_json = { workspace = true }

@@ -1,0 +1,124 @@
+---
+id: oracle-view-merging
+name: Oracle View Merging
+category: database-specific/oracle
+databases: [oracle]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, oracle, view, merging, inline-view, optimization]
+complexity: O(n)
+benefit_range: [0.2, 0.7]
+---
+
+# Oracle View Merging
+
+## Description
+
+Merges inline views and stored views into the outer query block,
+eliminating the view boundary.  Oracle's complex view merging (CVM)
+can merge views containing GROUP BY, DISTINCT, and outer joins into
+the parent query, enabling the optimizer to consider join orders and
+access paths across the merged query.
+
+**When to apply**: A query references a view (inline or stored) that
+can be flattened into the outer query without changing semantics.
+
+**Why it works**: View boundaries force the optimizer to plan the view
+independently.  Merging removes this barrier, allowing the optimizer
+to choose globally optimal join orders, push predicates further, and
+select access paths considering all tables together.
+
+**Database version**: Oracle 10g+ (CVM), Oracle 8i+ (simple merging)
+
+## Relational Algebra
+
+```algebra
+-- Before: view boundary prevents global optimization
+sigma[v.x > 10](R join[R.k = V.k]
+    (pi[k, x](sigma[y = 5](S)) AS V))
+
+-- After: view merged into outer query
+sigma[S.x > 10 AND S.y = 5](R join[R.k = S.k] S)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("oracle-simple-view-merging";
+    "(join ?type ?cond ?outer
+        (view ?vid (project ?cols (filter ?pred ?inner))))" =>
+    "(filter ?pred (join ?type ?cond ?outer ?inner))"
+    if is_database("oracle")
+    if view_is_mergeable("?vid")
+),
+
+rw!("oracle-complex-view-merging";
+    "(join ?type ?cond ?outer
+        (view ?vid (aggregate ?aggs ?groups ?inner)))" =>
+    "(aggregate ?aggs (extend-groups ?groups (join-cols ?cond))
+        (join ?type ?cond ?outer ?inner))"
+    if is_database("oracle")
+    if complex_merge_is_valid("?vid", "?aggs", "?type")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(view: &View) -> bool {
+    !view.contains_rownum()
+    && !view.contains_connect_by()
+    && !view.contains_model_clause()
+    && !view.has_no_merge_hint()
+    && (view.is_simple()
+        || (view.has_group_by()
+            && complex_merge_preserves_semantics(view)))
+}
+```
+
+**Restrictions:**
+- ROWNUM prevents merging (position-dependent)
+- CONNECT BY (hierarchical queries) prevent merging
+- Views with set operators (UNION, INTERSECT) prevent simple merging
+- NO_MERGE hint overrides the optimization
+- Aggregate views require complex merging rules
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    view_materialization_cost: f64,
+    merged_plan_cost: f64,
+) -> f64 {
+    // Benefit is the difference between isolated view + outer plan
+    // vs merged plan with global optimization
+    view_materialization_cost - merged_plan_cost
+}
+```
+
+**Typical benefit**: 2x-10x improvement by enabling cross-view
+join reordering and predicate pushdown.
+
+## Test Cases
+
+```sql
+-- Positive: simple inline view merged
+SELECT * FROM departments d
+JOIN (SELECT * FROM employees WHERE active = true) e
+ON d.id = e.dept_id
+WHERE d.location = 'NYC';
+-- View merged: optimizer considers join order of 2 base tables
+```
+
+```sql
+-- Negative: ROWNUM prevents merging
+SELECT * FROM (SELECT *, ROWNUM rn FROM employees) WHERE rn <= 10;
+-- ROWNUM is position-dependent; cannot merge
+```
+
+## References
+
+Oracle: Oracle Database SQL Tuning Guide, "View Merging"
+Oracle: MERGE / NO_MERGE optimizer hints

@@ -58,16 +58,48 @@ pub enum ValidationError {
 ///
 /// Matches the directories under `rules/database-specific/`.
 pub const KNOWN_DATABASES: &[&str] = &[
+    "blazingsql",
+    "calcite",
+    "citus",
+    "clickhouse",
+    "cockroachdb",
+    "cosmosdb",
+    "couchbase",
     "datafusion",
     "derby",
     "duckdb",
+    "dynamodb",
+    "greenplum",
+    "heavydb",
+    "hyper",
+    "ibm-netezza",
+    "influxdb",
+    "intel-pac",
+    "janusgraph",
     "materialize",
     "monetdb",
+    "mongodb",
     "mssql",
     "mysql",
+    "neo4j",
+    "neptune",
     "oracle",
+    "pg-strom",
     "postgresql",
+    "presto",
+    "questdb",
+    "sap-hana",
+    "singlestore",
+    "spark",
     "sqlite",
+    "sqream",
+    "tigergraph",
+    "timescaledb",
+    "trino",
+    "umbra",
+    "velox",
+    "xilinx-alveo",
+    "yugabytedb",
 ];
 
 /// Top-level category prefixes from `rules/index.toml`.
@@ -78,6 +110,9 @@ pub const KNOWN_CATEGORY_PREFIXES: &[&str] = &[
     "execution-models",
     "cost-models",
     "experimental",
+    "distributed",
+    "hardware",
+    "multi-model",
 ];
 
 // ── Public API ───────────────────────────────────────────────

@@ -1,0 +1,123 @@
+---
+id: mssql-star-join-optimization
+name: SQL Server Star Join Optimization
+category: database-specific/mssql
+databases: [mssql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, mssql, star-join, bitmap, data-warehouse, columnstore]
+complexity: O(n)
+benefit_range: [0.3, 0.9]
+---
+
+# SQL Server Star Join Optimization
+
+## Description
+
+Optimizes star-schema queries by applying bitmap filters from dimension
+tables to the fact table scan.  SQL Server builds bitmap filters during
+hash join build phases and pushes them down to the fact table scan
+operator, eliminating non-matching rows early.
+
+**When to apply**: A fact table joins multiple dimension tables, and
+the dimension tables have selective filters that reduce the join result
+significantly.
+
+**Why it works**: Bitmap filters are compact probabilistic filters
+that can be evaluated during the fact table scan with near-zero
+per-row cost.  Rows that fail the bitmap check are discarded before
+reaching the join operator, reducing hash table probes and memory usage.
+
+**Database version**: SQL Server 2008+
+
+## Relational Algebra
+
+```algebra
+-- Before: fact table scanned fully, then joined
+hash-join(hash-join(fact, dim1), dim2)
+
+-- After: bitmap filters from dims applied to fact scan
+hash-join(
+    hash-join(
+        bitmap-filter[dim1, dim2](scan(fact)),
+        dim1),
+    dim2)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mssql-star-join-bitmap";
+    "(hash-join ?type1 ?cond1
+        (hash-join ?type2 ?cond2 (scan ?fact) ?dim1)
+        ?dim2)" =>
+    "(hash-join ?type1 ?cond1
+        (hash-join ?type2 ?cond2
+            (bitmap-filtered-scan ?fact ?dim1 ?dim2)
+            ?dim1)
+        ?dim2)"
+    if is_database("mssql")
+    if is_star_schema("?fact", "?dim1", "?dim2")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    fact_rows: f64,
+    dim_selectivities: &[f64],
+) -> bool {
+    let combined = dim_selectivities.iter().product::<f64>();
+    combined < 0.5 // bitmap worth it when filtering > 50%
+    && fact_rows > 100_000.0
+}
+```
+
+**Restrictions:**
+- Bitmap filters are most effective with columnstore indexes
+- The optimizer must detect the star join pattern (fact + dimensions)
+- Bitmap filters add memory overhead during build phase
+- Not beneficial when dimension filters are non-selective
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    fact_rows: f64,
+    combined_selectivity: f64,
+) -> f64 {
+    let rows_eliminated = fact_rows * (1.0 - combined_selectivity);
+    rows_eliminated * 0.005 // cost per eliminated row
+}
+```
+
+**Typical benefit**: For a star schema with 3 selective dimension
+filters (combined 1% selectivity), eliminates 99% of fact rows early.
+
+## Test Cases
+
+```sql
+-- Positive: star schema with selective dimensions
+SELECT d.year, g.region, SUM(f.revenue)
+FROM fact_sales f
+JOIN dim_date d ON f.date_key = d.key
+JOIN dim_geography g ON f.geo_key = g.key
+WHERE d.year = 2025 AND g.country = 'US'
+GROUP BY d.year, g.region;
+-- Bitmap filters from dim_date and dim_geography applied to fact scan
+```
+
+```sql
+-- Negative: non-selective dimension filter
+SELECT * FROM fact_sales f
+JOIN dim_date d ON f.date_key = d.key;
+-- No WHERE clause on dimension; bitmap filter not useful
+```
+
+## References
+
+SQL Server: Star Join Query Optimization
+SQL Server: Bitmap operator in Showplan

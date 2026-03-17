@@ -1,0 +1,164 @@
+---
+id: two-phase-aggregation
+name: Two-Phase Distributed Aggregation
+category: distributed/partial-aggregation
+databases: [presto, trino, spark, cockroachdb, greenplum, citus]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, aggregation, partial, two-phase, reduction]
+complexity: O(n)
+benefit_range: [0.3, 0.95]
+---
+
+# Two-Phase Distributed Aggregation
+
+## Description
+
+Splits a distributed aggregation into a local (partial) phase that runs
+on each node and a global (final) phase that merges partial results. The
+local phase reduces data volume before the network shuffle, and the
+global phase combines partial aggregates into the final result.
+
+**When to apply**: A grouped aggregation runs on distributed data, and
+the aggregation function supports partial/merge decomposition.
+
+**Why it works**: If there are K distinct groups and N nodes, the local
+phase produces at most K partial aggregates per node. Instead of
+shuffling all rows (potentially billions), only K * N partial aggregates
+cross the network.
+
+## Relational Algebra
+
+```algebra
+-- Single-phase (naive)
+gamma[g, agg(a)](Exchange[hash(g)](R))
+
+-- Two-phase (optimized)
+gamma[g, merge_agg(partial_a)](
+    Exchange[hash(g)](
+        gamma[g, partial_agg(a)](R)
+    )
+)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("two-phase-aggregation";
+    "(aggregate ?group_keys ?agg_fn (exchange hash_partition ?child ?keys))" =>
+    "(aggregate_final ?group_keys ?agg_fn
+        (exchange hash_partition
+            (aggregate_partial ?group_keys ?agg_fn ?child)
+            ?group_keys))"
+    if agg_is_decomposable("?agg_fn")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(agg_fn: &AggFunction) -> bool {
+    // Aggregation must support partial/merge decomposition
+    match agg_fn {
+        AggFunction::Count => true,     // partial count -> sum
+        AggFunction::Sum => true,       // partial sum -> sum
+        AggFunction::Min => true,       // partial min -> min
+        AggFunction::Max => true,       // partial max -> max
+        AggFunction::Avg => true,       // partial (sum, count) -> sum/count
+        AggFunction::CountDistinct => false, // not decomposable
+        AggFunction::Median => false,        // not decomposable
+        AggFunction::Percentile(_) => false, // not decomposable
+        _ => false,
+    }
+}
+```
+
+**Decomposition rules:**
+| Function | Partial | Merge |
+|----------|---------|-------|
+| COUNT(*) | COUNT(*) | SUM(partial_count) |
+| SUM(x) | SUM(x) | SUM(partial_sum) |
+| MIN(x) | MIN(x) | MIN(partial_min) |
+| MAX(x) | MAX(x) | MAX(partial_max) |
+| AVG(x) | (SUM(x), COUNT(x)) | SUM(p_sum) / SUM(p_count) |
+
+**Restrictions:**
+- Not all aggregation functions are decomposable (e.g., MEDIAN, PERCENTILE)
+- COUNT(DISTINCT x) requires special handling (see three-phase aggregation)
+- HAVING clauses apply after the final phase, not the partial phase
+- ORDER BY within aggregate (e.g., STRING_AGG) may prevent decomposition
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    input_rows: f64,
+    distinct_groups: f64,
+    num_nodes: u32,
+    row_bytes: f64,
+    network_bandwidth: f64,
+) -> f64 {
+    let shuffle_fraction = (num_nodes - 1) as f64 / num_nodes as f64;
+    // Without partial: shuffle all rows
+    let cost_single = input_rows * row_bytes * shuffle_fraction
+        / network_bandwidth;
+    // With partial: shuffle only partial aggregates
+    let partial_rows = distinct_groups * num_nodes as f64;
+    let cost_two_phase = partial_rows * row_bytes * shuffle_fraction
+        / network_bandwidth;
+    (cost_single - cost_two_phase) / cost_single
+}
+```
+
+**Typical benefit**: For 1B rows with 10K groups on 100 nodes, reduces
+shuffle from 1B rows to 1M partial aggregates (99.9% reduction).
+
+## Test Cases
+
+```sql
+-- Positive: SUM with high reduction ratio
+SELECT region, SUM(amount) FROM orders GROUP BY region;
+
+-- Plan:
+-- AggregateFinal(region, SUM(partial_sum))
+--   Exchange[hash(region)]
+--     AggregatePartial(region, SUM(amount))
+--       Scan(orders)  -- each node aggregates locally
+```
+
+```sql
+-- Positive: COUNT and AVG decomposition
+SELECT country, COUNT(*), AVG(age) FROM users GROUP BY country;
+
+-- Plan:
+-- AggregateFinal(country,
+--     SUM(partial_count),
+--     SUM(partial_sum_age) / SUM(partial_count_age))
+--   Exchange[hash(country)]
+--     AggregatePartial(country,
+--         COUNT(*), SUM(age), COUNT(age))
+--       Scan(users)
+```
+
+```sql
+-- Negative: MEDIAN is not decomposable
+SELECT region, MEDIAN(amount) FROM orders GROUP BY region;
+-- Must shuffle all rows: MEDIAN requires seeing all values
+```
+
+```sql
+-- Negative: COUNT(DISTINCT) not decomposable in two phases
+SELECT region, COUNT(DISTINCT customer_id) FROM orders GROUP BY region;
+-- Requires three-phase or approximate (HLL) approach
+```
+
+## References
+
+Presto/Trino: presto-main/src/main/java/com/facebook/presto/sql/planner/optimizations/AddExchanges.java - planAggregation()
+Spark SQL: sql/catalyst/src/main/scala/org/apache/spark/sql/catalyst/optimizer/Optimizer.scala - RewriteDistinctAggregates
+CockroachDB: pkg/sql/opt/norm/rules/agg.opt
+Greenplum: src/backend/optimizer/plan/planagg.c
+Citus: src/backend/distributed/planner/multi_logical_optimizer.c
+Gray et al., "Data Cube: A Relational Aggregation Operator" (ICDE 1996)

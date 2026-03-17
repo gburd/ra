@@ -1,0 +1,104 @@
+---
+id: tag-index-scan
+name: Tag Index Scan for Series Filtering
+category: multi-model/timeseries
+databases: [influxdb, timescaledb, questdb]
+standard: "flux:2"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [timeseries, tag, index, scan, filter]
+---
+
+# Tag Index Scan for Series Filtering
+
+## Description
+
+Replaces a full time-series scan with filter by a tag (dimension) index
+scan when the predicate filters on tag columns. Time-series databases
+distinguish between tag columns (low-cardinality dimensions like
+sensor_id, region) and field columns (high-cardinality measurements
+like temperature). Tag indexes enable fast lookup of series matching
+tag predicates.
+
+**When to apply**: A filter predicate references tag columns and a tag
+index exists for those columns.
+
+**Why it works**: Tag indexes map tag value combinations to series IDs.
+Looking up matching series IDs first, then scanning only those series'
+data, avoids reading data from non-matching series entirely.
+
+## Relational Algebra
+
+```algebra
+sigma[tag = value](scan(measurement))
+  -> series_filter(tag, value, measurement)
+  where tag_index(measurement, tag) exists
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("tag-index-scan";
+    "(filter (eq (col ?tag) ?value) (ts-scan ?table))" =>
+    "(ts-tag-scan ?table ?tag ?value)"
+    if is_tag_column("?table", "?tag")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    table: &str,
+    tag: &str,
+    schema: &TimeSeriesSchema,
+) -> bool {
+    schema.is_tag_column(table, tag)
+    && schema.has_tag_index(table, tag)
+}
+```
+
+**Restrictions:**
+- Column must be classified as a tag (dimension), not a field (metric)
+- Only equality and IN predicates efficiently use tag indexes
+- High-cardinality "tags" may not benefit from the tag index
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    total_series: f64,
+    matching_series: f64,
+    rows_per_series: f64,
+) -> f64 {
+    let full_scan = total_series * rows_per_series;
+    let indexed_scan = matching_series * rows_per_series;
+    (full_scan - indexed_scan) / full_scan
+}
+```
+
+**Typical benefit**: 0.8-0.99 for selective tag filters.
+
+## Test Cases
+
+```flux
+// Positive: filter on tag column
+from(bucket: "sensors")
+  |> range(start: -1h)
+  |> filter(fn: (r) => r.sensor_id == "sensor_42")
+// Uses tag index to find series for sensor_42
+
+// Negative: filter on field column
+from(bucket: "sensors")
+  |> range(start: -1h)
+  |> filter(fn: (r) => r.temperature > 30.0)
+// temperature is a field; no tag index
+```
+
+## References
+
+InfluxDB: tsdb/index/tsi1/index.go - Index.TagValueSeriesIDIterator()
+TimescaleDB: docs.timescale.com/latest/using-timescaledb/indexing
+Bader et al. "Efficient Time Series Indexing" (EDBT 2019)

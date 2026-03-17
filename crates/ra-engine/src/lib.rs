@@ -7,6 +7,7 @@
 //! - Cost-based plan extraction
 //! - E-graph analysis for tracking table references and properties
 //! - Memo table for caching optimization results
+//! - Incremental optimization via differential dataflow
 //!
 //! # Usage
 //!
@@ -27,13 +28,17 @@
 #![allow(clippy::module_name_repetitions)]
 
 pub mod analysis;
+pub mod differential;
 pub mod egraph;
 pub mod extract;
 pub mod memo;
 pub mod rewrite;
+pub mod timely;
 
 pub use analysis::RelAnalysis;
+pub use differential::{IncrementalError, IncrementalOptimizer, RuleChange, RuleId};
 pub use egraph::{to_rec_expr, EGraphError, Optimizer, OptimizerConfig, RelLang};
 pub use extract::{extract_best, rec_expr_to_rel_expr, RelCostFn};
 pub use memo::{structural_hash, MemoTable};
 pub use rewrite::all_rules;
+pub use timely::{ComputationStats, TimelyConfig};

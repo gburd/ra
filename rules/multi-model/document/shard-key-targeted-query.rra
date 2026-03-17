@@ -1,0 +1,102 @@
+---
+id: shard-key-targeted-query
+name: Shard Key Targeted Query
+category: multi-model/document
+databases: [mongodb, couchbase, cosmosdb, dynamodb]
+standard: "mql:5"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [document, shard, partition, targeted, routing]
+---
+
+# Shard Key Targeted Query
+
+## Description
+
+Rewrites a scatter-gather query into a targeted single-shard query when
+the filter includes the shard (partition) key. In a sharded document
+database, queries that include the shard key can be routed to a single
+shard, avoiding the overhead of broadcasting to all shards and merging
+results.
+
+**When to apply**: A filter predicate includes an equality condition on
+the full shard key, and the collection is sharded.
+
+**Why it works**: Without the shard key, the query router (mongos)
+broadcasts the query to every shard, each shard executes it, and results
+are merged. With the shard key, the router sends the query to exactly
+one shard, eliminating network round-trips and merge overhead.
+
+## Relational Algebra
+
+```algebra
+scatter_gather(sigma[p](shards(collection)))
+  -> targeted(shard_for(key), sigma[p](collection))
+  where p contains equality on shard_key
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("shard-key-targeted";
+    "(scatter-gather (filter ?pred (doc-scan ?coll)))" =>
+    "(targeted-shard ?coll ?pred)"
+    if includes_shard_key("?coll", "?pred")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    collection: &str,
+    pred: &Expr,
+    sharding: &ShardingConfig,
+) -> bool {
+    let shard_key = sharding.key_for(collection);
+    shard_key.map_or(false, |key| {
+        pred.includes_equality_on_all_fields(&key)
+    })
+}
+```
+
+**Restrictions:**
+- Requires equality on ALL fields of a compound shard key
+- Range queries on the shard key enable targeted range scans but not
+  single-shard targeting
+- Hashed shard keys only support exact equality
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    num_shards: f64,
+    network_round_trip_cost: f64,
+) -> f64 {
+    let scatter_cost = num_shards * network_round_trip_cost;
+    let targeted_cost = network_round_trip_cost;
+    (scatter_cost - targeted_cost) / scatter_cost
+}
+```
+
+**Typical benefit**: 0.8-0.99 for clusters with many shards.
+
+## Test Cases
+
+```javascript
+// Positive: equality on shard key {tenant_id}
+db.events.find({ tenant_id: "acme", type: "click" });
+// Routes to single shard for tenant_id = "acme"
+
+// Negative: missing shard key
+db.events.find({ type: "click" });
+// Must scatter to all shards
+```
+
+## References
+
+MongoDB: src/mongo/s/query/cluster_find.cpp - ClusterFind::runQuery()
+MongoDB docs: "Targeted Queries vs. Scatter Gather Queries"
+DynamoDB: docs.aws.amazon.com/amazondynamodb/latest/developerguide/Query.html

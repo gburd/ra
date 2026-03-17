@@ -1,0 +1,119 @@
+---
+id: pipeline-coalescence
+name: Aggregation Pipeline Coalescence
+category: multi-model/document
+databases: [mongodb, couchbase]
+standard: "mql:5"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [document, pipeline, coalescence, merge, optimization]
+---
+
+# Aggregation Pipeline Coalescence
+
+## Description
+
+Merges adjacent compatible aggregation pipeline stages into a single
+stage. For example, consecutive `$match` stages become one `$match`
+with a combined predicate, and a `$sort` followed by another `$sort`
+collapses to the final sort. This reduces pipeline overhead and enables
+further optimizations by simplifying the pipeline shape.
+
+**When to apply**: Two adjacent pipeline stages are of the same type or
+of types that can be merged (e.g., `$match` + `$match`, `$project` +
+`$project`, `$sort` + `$sort`).
+
+**Why it works**: Each pipeline stage has fixed overhead for
+materialization, scheduling, and data transfer. Merging stages
+eliminates intermediate materialization and reduces the number of
+passes over the data.
+
+## Relational Algebra
+
+```algebra
+sigma[p1](sigma[p2](R)) -> sigma[p1 AND p2](R)
+pi[c1](pi[c2](R)) -> pi[c1](R)  // outer subsumes inner
+sort[k1](sort[k2](R)) -> sort[k1](R)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("match-coalescence";
+    "(doc-match ?p1 (doc-match ?p2 ?input))" =>
+    "(doc-match (and ?p1 ?p2) ?input)"
+),
+
+rw!("project-coalescence";
+    "(doc-project ?c1 (doc-project ?c2 ?input))" =>
+    "(doc-project ?c1 ?input)"
+),
+
+rw!("sort-coalescence";
+    "(doc-sort ?k1 (doc-sort ?k2 ?input))" =>
+    "(doc-sort ?k1 ?input)"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(stage1: &Stage, stage2: &Stage) -> bool {
+    match (stage1, stage2) {
+        (Stage::Match(_), Stage::Match(_)) => true,
+        (Stage::Project(_), Stage::Project(_)) => true,
+        (Stage::Sort(_), Stage::Sort(_)) => true,
+        _ => false,
+    }
+}
+```
+
+**Restrictions:**
+- `$project` coalescence requires that the outer projection subsumes
+  the inner (i.e., all fields needed by outer are produced by inner)
+- `$match` coalescence is always safe for conjunctive predicates
+- `$sort` coalescence is always safe (later sort overrides earlier)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    input_card: f64,
+    materialization_cost: f64,
+) -> f64 {
+    materialization_cost / (input_card + materialization_cost)
+}
+```
+
+**Typical benefit**: 0.1-0.3 per merged stage pair (additive).
+
+## Test Cases
+
+```javascript
+// Positive: merge two $match stages
+db.orders.aggregate([
+  { $match: { status: "shipped" } },
+  { $match: { amount: { $gt: 100 } } }
+]);
+// Coalesced to:
+db.orders.aggregate([
+  { $match: { status: "shipped", amount: { $gt: 100 } } }
+]);
+
+// Positive: merge two $sort stages
+db.orders.aggregate([
+  { $sort: { date: -1 } },
+  { $sort: { amount: 1 } }
+]);
+// Coalesced to:
+db.orders.aggregate([
+  { $sort: { amount: 1 } }
+]);
+```
+
+## References
+
+MongoDB: src/mongo/db/pipeline/pipeline.cpp - Pipeline::optimizePipeline()
+MongoDB docs: "Aggregation Pipeline Optimization"

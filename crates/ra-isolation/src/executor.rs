@@ -70,7 +70,7 @@ pub struct StepResult {
 
 /// Factory for creating database adapters per session.
 pub type AdapterFactory =
-    Box<dyn Fn(&str) -> Box<dyn DatabaseAdapter>>;
+    Box<dyn Fn(&str) -> Box<dyn DatabaseAdapter> + Send + Sync>;
 
 impl TestExecutor {
     /// Create a new executor for the given spec.

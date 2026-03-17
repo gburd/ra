@@ -1,0 +1,111 @@
+---
+id: derby-hash-join
+name: Apache Derby Hash Join Strategy
+category: database-specific/derby
+databases: [derby]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, derby, hash-join, join, equi-join]
+complexity: O(n+m)
+benefit_range: [0.2, 0.7]
+---
+
+# Apache Derby Hash Join Strategy
+
+## Description
+
+Derby chooses between nested-loop and hash join strategies during
+query optimization.  For equi-joins where no suitable index exists
+on the inner table, Derby builds an in-memory hash table on the
+smaller (inner) side and probes it with the outer side.
+
+**When to apply**: An equi-join has no usable index on the inner
+table, or hash join is estimated to be cheaper than index nested-loop.
+
+**Why it works**: Hash join is O(n+m) versus O(n*m) for naive
+nested-loop.  Derby's hash join uses the `derby.language.maxMemoryPerTable`
+property to control hash table size.
+
+**Database version**: Apache Derby 10.1+
+
+## Relational Algebra
+
+```algebra
+-- Before: nested-loop without index
+outer NLJ[o.key = i.key] inner
+
+-- After: hash join
+outer hash-join[o.key = i.key] inner
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("derby-hash-join";
+    "(nested-loop-join ?pred ?outer ?inner)" =>
+    "(hash-join ?pred ?outer ?inner)"
+    if is_database("derby")
+    if is_equi_join("?pred")
+    if no_usable_index("?inner", "?pred")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    join: &Join,
+    inner: &Table,
+) -> bool {
+    join.is_equi_join()
+    && !inner.has_usable_index(join.inner_columns())
+    && inner.estimated_rows()
+        * inner.row_width() < max_memory_per_table()
+}
+```
+
+**Restrictions:**
+- Hash table must fit in memory (controlled by
+  `derby.language.maxMemoryPerTable`)
+- Only equi-joins supported
+- Derby may fall back to nested-loop if hash table overflows
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    outer_rows: f64,
+    inner_rows: f64,
+) -> f64 {
+    let nlj_cost = outer_rows * inner_rows * 0.001;
+    let hash_cost = (outer_rows + inner_rows) * 0.005;
+    nlj_cost - hash_cost
+}
+```
+
+**Typical benefit**: 10-100x for medium-to-large joins without
+indexes.
+
+## Test Cases
+
+```sql
+-- Positive: equi-join without index
+SELECT * FROM orders o
+JOIN customers c ON o.cust_id = c.id;
+-- Hash join if no index on orders.cust_id
+```
+
+```sql
+-- Negative: index available
+CREATE INDEX idx_cust ON orders(cust_id);
+SELECT * FROM orders o
+JOIN customers c ON o.cust_id = c.id;
+-- Index nested-loop preferred
+```
+
+## References
+
+Apache Derby: Derby Developer's Guide, "Join Strategies"
+Source: org.apache.derby.impl.sql.compile.HashJoinStrategy

@@ -1,0 +1,137 @@
+---
+id: datafusion-repartition-insertion
+name: DataFusion Repartition Insertion
+category: database-specific/datafusion
+databases: [datafusion]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, datafusion, repartition, parallelism, physical]
+complexity: O(n)
+benefit_range: [0.2, 0.8]
+---
+
+# DataFusion Repartition Insertion
+
+## Description
+
+Inserts repartition (exchange) operators to increase parallelism in
+the physical plan.  DataFusion's `Repartition` pass adds round-robin
+or hash repartitioning to distribute work across available CPU cores.
+
+**When to apply**: A physical plan has operators that could benefit
+from parallel execution but the input partitioning does not match
+the target parallelism.
+
+**Why it works**: Arrow's columnar format enables efficient parallel
+processing of independent RecordBatch partitions.  Repartitioning
+distributes rows across threads so that downstream operators (filters,
+projections, aggregates) execute concurrently.
+
+**Database version**: DataFusion 20.0+
+
+## Relational Algebra
+
+```algebra
+-- Insert round-robin repartition for parallelism
+Op(scan(T, partitions=1))
+  -> Op(repartition[round-robin, N](scan(T, partitions=1)))
+
+-- Insert hash repartition for join alignment
+hash-join[a.k = b.k](A, B)
+  -> hash-join[a.k = b.k](
+       repartition[hash(a.k), N](A),
+       repartition[hash(b.k), N](B))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("datafusion-insert-round-robin-repartition";
+    "(filter ?pred (scan ?table))" =>
+    "(filter ?pred (repartition round-robin ?target_partitions
+                    (scan ?table)))"
+    if is_database("datafusion")
+    if scan_has_single_partition("?table")
+    if target_partitions_gt_one()
+),
+
+rw!("datafusion-insert-hash-repartition-for-join";
+    "(hash-join ?type (eq ?lk ?rk) ?left ?right)" =>
+    "(hash-join ?type (eq ?lk ?rk)
+        (repartition hash ?lk ?target_partitions ?left)
+        (repartition hash ?rk ?target_partitions ?right))"
+    if is_database("datafusion")
+    if not_hash_partitioned_on("?left", "?lk")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    plan: &ExecutionPlan,
+    config: &SessionConfig,
+) -> bool {
+    let target = config.target_partitions();
+    target > 1
+    && plan.output_partitioning().partition_count() < target
+}
+```
+
+**Restrictions:**
+- Repartitioning adds shuffle overhead; skip if data is already
+  partitioned correctly
+- Single-partition plans (e.g., LIMIT 1 result) should not be
+  repartitioned
+- Hash repartition requires deterministic hash of the partition key
+
+## Cost Model
+
+```rust
+fn repartition_cost(
+    rows: f64,
+    row_bytes: f64,
+    num_partitions: usize,
+) -> f64 {
+    // Serialization + network/memory copy + deserialization
+    rows * row_bytes * 0.001 * num_partitions as f64
+}
+
+fn parallelism_benefit(
+    operator_cost: f64,
+    partitions: usize,
+) -> f64 {
+    // Idealized speedup (Amdahl's law applies)
+    operator_cost * (1.0 - 1.0 / partitions as f64)
+}
+```
+
+**Typical benefit**: On an 8-core machine, repartitioning a single-file
+scan into 8 partitions achieves ~6x speedup for CPU-bound operations.
+
+## Test Cases
+
+```sql
+-- Positive: single CSV file scan benefits from repartition
+SELECT * FROM single_file.csv WHERE amount > 100;
+-- Repartition into N partitions for parallel filter evaluation
+```
+
+```sql
+-- Positive: hash repartition aligns join inputs
+SELECT * FROM orders o JOIN customers c ON o.cust_id = c.id;
+-- Both sides hash-repartitioned on join key
+```
+
+```sql
+-- Negative: already partitioned correctly
+SELECT * FROM partitioned_parquet WHERE date = '2025-01-01';
+-- Parquet already provides per-file partitions
+```
+
+## References
+
+DataFusion: datafusion/physical-optimizer/src/repartition.rs
+DataFusion: datafusion/physical-plan/src/repartition/mod.rs

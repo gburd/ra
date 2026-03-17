@@ -1,0 +1,124 @@
+---
+id: mssql-batch-mode-on-rowstore
+name: SQL Server Batch Mode on Rowstore
+category: database-specific/mssql
+databases: [mssql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, mssql, batch-mode, rowstore, vectorized, analytics]
+complexity: O(n)
+benefit_range: [0.2, 0.8]
+---
+
+# SQL Server Batch Mode on Rowstore
+
+## Description
+
+Enables batch mode execution for analytical queries on traditional
+rowstore (B-tree) tables without requiring a columnstore index.
+SQL Server 2019+ can use batch mode operators for sorts, hash
+aggregates, hash joins, and window functions on rowstore data.
+
+**When to apply**: An analytical query (aggregation, sorting,
+windowing) scans a significant portion of a rowstore table and
+would benefit from vectorized processing.
+
+**Why it works**: Batch mode processes ~900 rows at a time using
+vectorized operations, reducing per-row CPU overhead by 5-10x.
+Previously, this required a columnstore index.  Batch mode on
+rowstore extends this benefit to tables that primarily serve OLTP
+workloads.
+
+**Database version**: SQL Server 2019+ (compat level >= 150)
+
+## Relational Algebra
+
+```algebra
+-- Before: row mode execution
+sort[key](hash-aggregate[groups; aggs](row-scan(T)))
+
+-- After: batch mode on rowstore
+batch-sort[key](batch-hash-aggregate[groups; aggs](row-scan(T)))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mssql-batch-mode-sort";
+    "(sort ?keys (scan ?table))" =>
+    "(batch-sort ?keys (scan ?table))"
+    if is_database("mssql")
+    if scan_row_count_exceeds("?table", 10000)
+),
+
+rw!("mssql-batch-mode-hash-aggregate";
+    "(hash-aggregate ?groups ?aggs ?input)" =>
+    "(batch-hash-aggregate ?groups ?aggs ?input)"
+    if is_database("mssql")
+    if input_row_count_exceeds("?input", 10000)
+),
+
+rw!("mssql-batch-mode-hash-join";
+    "(hash-join ?type ?cond ?left ?right)" =>
+    "(batch-hash-join ?type ?cond ?left ?right)"
+    if is_database("mssql")
+    if either_side_large("?left", "?right")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    query: &LogicalPlan,
+    compat_level: u32,
+) -> bool {
+    compat_level >= 150
+    && query.estimated_rows() > 10_000.0
+    && query.has_batch_eligible_operators()
+}
+```
+
+**Restrictions:**
+- Requires database compatibility level >= 150
+- Not all operators support batch mode (cursors, scalar UDFs)
+- Small result sets see no benefit (batch setup overhead)
+- Batch mode memory grants are larger than row mode
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    rows: f64,
+    row_mode_cost_per_row: f64,
+    batch_mode_cost_per_row: f64,
+) -> f64 {
+    rows * (row_mode_cost_per_row - batch_mode_cost_per_row)
+}
+```
+
+**Typical benefit**: 5-10x CPU reduction for sort, aggregate, and
+hash join operations on 100K+ row results.
+
+## Test Cases
+
+```sql
+-- Positive: large aggregation on rowstore table
+SELECT customer_id, SUM(amount), COUNT(*)
+FROM orders
+GROUP BY customer_id;
+-- Batch mode hash aggregate without columnstore index
+```
+
+```sql
+-- Negative: small result set
+SELECT TOP 10 * FROM orders ORDER BY order_date DESC;
+-- Batch mode overhead not worth it for 10 rows
+```
+
+## References
+
+SQL Server: Batch Mode on Rowstore
+SQL Server: sys.dm_exec_query_profiles (is_batch_mode)
