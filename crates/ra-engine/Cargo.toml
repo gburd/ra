@@ -9,14 +9,16 @@ repository.workspace = true
 
 [dependencies]
 ra-core = { workspace = true }
-ra-compiler = { workspace = true }
 egg = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
 timely = { workspace = true }
 differential-dataflow = { workspace = true }
-serde = { workspace = true }
-thiserror = { workspace = true }
-anyhow = { workspace = true }
-tracing = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
+
+[lints]
+workspace = true

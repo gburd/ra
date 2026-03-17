@@ -8,12 +8,17 @@ license.workspace = true
 repository.workspace = true
 description = "Cross-database isolation testing framework adapted from PostgreSQL"
 
+[features]
+default = []
+wasm = ["ra-wasm"]
+
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
+ra-wasm = { workspace = true, optional = true }
 
 [dev-dependencies]
 proptest = { workspace = true }

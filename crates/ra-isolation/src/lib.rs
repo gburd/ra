@@ -36,6 +36,14 @@ pub mod snapshot;
 pub mod spec_parser;
 pub mod wasm_bridge;
 
+/// Direct `ra-wasm` adapter integration.
+///
+/// Provides convenience functions to wrap `ra_wasm` adapters
+/// (`SqliteAdapter`, `DuckDbAdapter`) as isolation test adapters.
+/// Requires the `wasm` feature flag.
+#[cfg(feature = "wasm")]
+pub mod wasm_adapters;
+
 pub use adapter::DatabaseAdapter;
 pub use events::{TestEvent, TestEventLog};
 pub use executor::{TestExecutor, TestResult};
