@@ -89,6 +89,8 @@
 
 pub mod accuracy;
 pub mod gathering_cost;
+// TODO: Re-enable once Task #22 integration module is fixed
+// pub mod integration;
 pub mod profiles;
 pub mod types;
 
