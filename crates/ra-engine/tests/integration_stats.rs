@@ -995,8 +995,6 @@ fn scalar_aggregate_zero_groups() {
 
 #[test]
 fn cost_consistent_across_profiles() {
-    let tables = vec![("t".to_string(), 100_000u64)];
-
     for profile_fn in &[
         StatisticsProfile::real_time,
         StatisticsProfile::standard,
