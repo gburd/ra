@@ -24,6 +24,8 @@ pub mod detection;
 pub mod device;
 pub mod gpu;
 pub mod memory;
+pub mod network;
+pub mod network_profiles;
 pub mod profile;
 pub mod profiles;
 pub mod storage;
@@ -34,6 +36,9 @@ pub use detection::detect_hardware;
 pub use device::Device;
 pub use gpu::{GpuArchitecture, GpuMemoryType, GpuModel, GpuVendor, TransferCharacteristics};
 pub use memory::{MemoryConfig, MemoryType, NumaTopology};
+pub use network::{
+    BroadcastCost, LinkType, Location, NetworkLink, NetworkTopology, NodeId, TopologyError,
+};
 pub use profile::HardwareProfile;
 pub use profiles::CompleteHardwareProfile;
 pub use storage::{
