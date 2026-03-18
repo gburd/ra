@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Distributed Query Planning - RA Optimizer</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        header h1 { font-size: 2em; margin-bottom: 10px; }
+
+        .content { padding: 30px; }
+
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .control-group {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+        }
+
+        .control-group label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #333;
+        }
+
+        .control-group input[type="range"] { width: 100%; margin: 10px 0; }
+        .value-display { font-size: 1.2em; color: #667eea; font-weight: bold; }
+
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 1.1em;
+            border-radius: 8px;
+            cursor: pointer;
+            width: 100%;
+            font-weight: 600;
+            transition: transform 0.2s;
+        }
+
+        button:hover { transform: translateY(-2px); }
+
+        .results {
+            margin-top: 30px;
+            display: none;
+        }
+
+        .results.visible { display: block; }
+
+        .strategy-card {
+            background: linear-gradient(135deg, #27ae60 0%, #229954 100%);
+            color: white;
+            padding: 40px;
+            border-radius: 12px;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .strategy-card h2 { font-size: 2.5em; margin-bottom: 15px; }
+        .strategy-card .reason { font-size: 1.1em; line-height: 1.6; opacity: 0.95; }
+
+        .cost-comparison {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .cost-card {
+            background: #f8f9fa;
+            padding: 25px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .cost-card .label {
+            font-size: 0.9em;
+            color: #666;
+            margin-bottom: 10px;
+        }
+
+        .cost-card .value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .cost-card.best .value { color: #27ae60; }
+
+        .network-stats {
+            background: #f8f9fa;
+            padding: 25px;
+            border-radius: 8px;
+        }
+
+        .network-stats h3 {
+            color: #333;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 3px solid #667eea;
+        }
+
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 15px;
+            background: white;
+            margin-bottom: 10px;
+            border-radius: 6px;
+        }
+
+        .stat-row .label { font-weight: 600; color: #666; }
+        .stat-row .value { color: #333; font-weight: bold; }
+
+        .loading { display: none; text-align: center; padding: 20px; }
+        .loading.visible { display: block; }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Distributed Query Planning</h1>
+            <p>Choose between co-located, broadcast, and shuffle joins</p>
+        </header>
+
+        <div class="content">
+            <div class="controls">
+                <div class="control-group">
+                    <label for="leftTableSize">Left Table Size (MB):</label>
+                    <input type="range" id="leftTableSize" min="1" max="10000" step="10" value="1000">
+                    <div class="value-display" id="leftTableSizeValue">1,000 MB</div>
+                </div>
+
+                <div class="control-group">
+                    <label for="rightTableSize">Right Table Size (MB):</label>
+                    <input type="range" id="rightTableSize" min="1" max="10000" step="10" value="100">
+                    <div class="value-display" id="rightTableSizeValue">100 MB</div>
+                </div>
+
+                <div class="control-group">
+                    <label for="numNodes">Number of Nodes:</label>
+                    <input type="range" id="numNodes" min="2" max="100" step="1" value="10">
+                    <div class="value-display" id="numNodesValue">10</div>
+                </div>
+
+                <div class="control-group">
+                    <label for="networkBandwidth">Network Bandwidth (Gbps):</label>
+                    <input type="range" id="networkBandwidth" min="1" max="100" step="1" value="10">
+                    <div class="value-display" id="networkBandwidthValue">10 Gbps</div>
+                </div>
+            </div>
+
+            <button id="analyzeBtn">Analyze Distribution Strategy</button>
+
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <p>Analyzing...</p>
+            </div>
+
+            <div class="results" id="results">
+                <div class="strategy-card">
+                    <h2 id="strategy">Broadcast Join</h2>
+                    <div class="reason" id="reasoning">-</div>
+                </div>
+
+                <div class="cost-comparison">
+                    <div class="cost-card" id="colocatedCard">
+                        <div class="label">Co-located Join</div>
+                        <div class="value" id="colocatedCost">-</div>
+                    </div>
+
+                    <div class="cost-card" id="broadcastCard">
+                        <div class="label">Broadcast Join</div>
+                        <div class="value" id="broadcastCost">-</div>
+                    </div>
+
+                    <div class="cost-card" id="shuffleCard">
+                        <div class="label">Shuffle Join</div>
+                        <div class="value" id="shuffleCost">-</div>
+                    </div>
+                </div>
+
+                <div class="network-stats">
+                    <h3>Network Statistics</h3>
+
+                    <div class="stat-row">
+                        <span class="label">Data Transferred:</span>
+                        <span class="value" id="dataTransferred">-</span>
+                    </div>
+
+                    <div class="stat-row">
+                        <span class="label">Transfer Time:</span>
+                        <span class="value" id="transferTime">-</span>
+                    </div>
+
+                    <div class="stat-row">
+                        <span class="label">Parallel Efficiency:</span>
+                        <span class="value" id="efficiency">-</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const leftTableSizeSlider = document.getElementById('leftTableSize');
+        const rightTableSizeSlider = document.getElementById('rightTableSize');
+        const numNodesSlider = document.getElementById('numNodes');
+        const networkBandwidthSlider = document.getElementById('networkBandwidth');
+        const analyzeBtn = document.getElementById('analyzeBtn');
+        const loading = document.getElementById('loading');
+        const results = document.getElementById('results');
+
+        function formatNumber(num) {
+            return num.toLocaleString('en-US');
+        }
+
+        leftTableSizeSlider.addEventListener('input', () => {
+            document.getElementById('leftTableSizeValue').textContent = formatNumber(parseInt(leftTableSizeSlider.value)) + ' MB';
+        });
+
+        rightTableSizeSlider.addEventListener('input', () => {
+            document.getElementById('rightTableSizeValue').textContent = formatNumber(parseInt(rightTableSizeSlider.value)) + ' MB';
+        });
+
+        numNodesSlider.addEventListener('input', () => {
+            document.getElementById('numNodesValue').textContent = numNodesSlider.value;
+        });
+
+        networkBandwidthSlider.addEventListener('input', () => {
+            document.getElementById('networkBandwidthValue').textContent = networkBandwidthSlider.value + ' Gbps';
+        });
+
+        analyzeBtn.addEventListener('click', async () => {
+            loading.classList.add('visible');
+            results.classList.remove('visible');
+
+            const leftSize = parseInt(leftTableSizeSlider.value);
+            const rightSize = parseInt(rightTableSizeSlider.value);
+            const numNodes = parseInt(numNodesSlider.value);
+            const bandwidth = parseFloat(networkBandwidthSlider.value);
+
+            // Mock calculation
+            const colocatedCost = (leftSize + rightSize) * 100; // Best if co-located
+            const broadcastCost = rightSize * numNodes * (125 / bandwidth) + leftSize * 10;
+            const shuffleCost = (leftSize + rightSize) * numNodes * (125 / bandwidth) / 2 + leftSize * 10;
+
+            const costs = [
+                { name: 'Co-located', cost: colocatedCost },
+                { name: 'Broadcast', cost: broadcastCost },
+                { name: 'Shuffle', cost: shuffleCost }
+            ];
+            costs.sort((a, b) => a.cost - b.cost);
+            const best = costs[0].name;
+
+            setTimeout(() => {
+                loading.classList.remove('visible');
+                results.classList.add('visible');
+
+                document.getElementById('strategy').textContent = best + ' Join';
+
+                let reasoning = '';
+                if (best === 'Broadcast') {
+                    reasoning = `Small right table (${rightSize} MB) makes broadcast efficient. `;
+                    reasoning += `Broadcasting to ${numNodes} nodes costs less than shuffling both tables.`;
+                    document.getElementById('dataTransferred').textContent = formatNumber(rightSize * numNodes) + ' MB';
+                    document.getElementById('transferTime').textContent = (rightSize * numNodes * 125 / bandwidth).toFixed(0) + ' ms';
+                } else if (best === 'Shuffle') {
+                    reasoning = `Both tables are large, so shuffle join distributes work evenly. `;
+                    reasoning += `Network bandwidth of ${bandwidth} Gbps supports efficient shuffling.`;
+                    document.getElementById('dataTransferred').textContent = formatNumber((leftSize + rightSize) * numNodes / 2) + ' MB';
+                    document.getElementById('transferTime').textContent = ((leftSize + rightSize) * numNodes * 125 / bandwidth / 2).toFixed(0) + ' ms';
+                } else {
+                    reasoning = `Data is already co-located on nodes, no network transfer needed. `;
+                    reasoning += `This is the optimal scenario for distributed joins.`;
+                    document.getElementById('dataTransferred').textContent = '0 MB';
+                    document.getElementById('transferTime').textContent = '0 ms';
+                }
+                document.getElementById('reasoning').textContent = reasoning;
+
+                document.getElementById('colocatedCost').textContent = colocatedCost.toFixed(0) + ' ms';
+                document.getElementById('broadcastCost').textContent = broadcastCost.toFixed(0) + ' ms';
+                document.getElementById('shuffleCost').textContent = shuffleCost.toFixed(0) + ' ms';
+
+                document.getElementById('colocatedCard').classList.toggle('best', best === 'Co-located');
+                document.getElementById('broadcastCard').classList.toggle('best', best === 'Broadcast');
+                document.getElementById('shuffleCard').classList.toggle('best', best === 'Shuffle');
+
+                const efficiency = (100 / numNodes * (numNodes * 0.8)).toFixed(0);
+                document.getElementById('efficiency').textContent = efficiency + '%';
+
+            }, 500);
+        });
+
+        document.getElementById('leftTableSizeValue').textContent = formatNumber(parseInt(leftTableSizeSlider.value)) + ' MB';
+        document.getElementById('rightTableSizeValue').textContent = formatNumber(parseInt(rightTableSizeSlider.value)) + ' MB';
+        document.getElementById('numNodesValue').textContent = numNodesSlider.value;
+        document.getElementById('networkBandwidthValue').textContent = networkBandwidthSlider.value + ' Gbps';
+    </script>
+</body>
+</html>

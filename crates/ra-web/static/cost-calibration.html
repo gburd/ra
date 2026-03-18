@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cost Model Calibration - RA Optimizer</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        header h1 { font-size: 2em; margin-bottom: 10px; }
+
+        .content { padding: 30px; }
+
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .control-group {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+        }
+
+        .control-group label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #333;
+        }
+
+        .control-group input[type="range"],
+        .control-group select {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+        }
+
+        .control-group select {
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 1em;
+        }
+
+        .value-display { font-size: 1.2em; color: #667eea; font-weight: bold; }
+
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 1.1em;
+            border-radius: 8px;
+            cursor: pointer;
+            width: 100%;
+            font-weight: 600;
+            transition: transform 0.2s;
+        }
+
+        button:hover { transform: translateY(-2px); }
+
+        .results {
+            margin-top: 30px;
+            display: none;
+        }
+
+        .results.visible { display: block; }
+
+        .accuracy-card {
+            padding: 40px;
+            border-radius: 12px;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .accuracy-card.good {
+            background: linear-gradient(135deg, #27ae60 0%, #229954 100%);
+            color: white;
+        }
+
+        .accuracy-card.moderate {
+            background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%);
+            color: white;
+        }
+
+        .accuracy-card.poor {
+            background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+            color: white;
+        }
+
+        .accuracy-card .score {
+            font-size: 4em;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+
+        .accuracy-card .label {
+            font-size: 1.5em;
+            opacity: 0.9;
+        }
+
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .metric-card {
+            background: #f8f9fa;
+            padding: 25px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .metric-card .label {
+            font-size: 0.9em;
+            color: #666;
+            margin-bottom: 10px;
+        }
+
+        .metric-card .value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .recommendations {
+            background: #f8f9fa;
+            padding: 25px;
+            border-radius: 8px;
+        }
+
+        .recommendations h3 {
+            color: #333;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 3px solid #667eea;
+        }
+
+        .recommendation-item {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            border-left: 4px solid #667eea;
+        }
+
+        .recommendation-item h4 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .recommendation-item p {
+            color: #666;
+            line-height: 1.6;
+        }
+
+        .loading { display: none; text-align: center; padding: 20px; }
+        .loading.visible { display: block; }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Cost Model Calibration</h1>
+            <p>Adjust statistics profiles based on workload patterns</p>
+        </header>
+
+        <div class="content">
+            <div class="controls">
+                <div class="control-group">
+                    <label for="workloadType">Workload Type:</label>
+                    <select id="workloadType">
+                        <option value="oltp">OLTP (Transactional)</option>
+                        <option value="olap" selected>OLAP (Analytical)</option>
+                        <option value="mixed">Mixed Workload</option>
+                        <option value="streaming">Streaming</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <label for="updateFrequency">Update Frequency:</label>
+                    <input type="range" id="updateFrequency" min="1" max="10" step="1" value="5">
+                    <div class="value-display" id="updateFrequencyValue">5 (Medium)</div>
+                </div>
+
+                <div class="control-group">
+                    <label for="dataVolatility">Data Volatility:</label>
+                    <input type="range" id="dataVolatility" min="1" max="10" step="1" value="6">
+                    <div class="value-display" id="dataVolatilityValue">6 (Medium-High)</div>
+                </div>
+
+                <div class="control-group">
+                    <label for="accuracyTarget">Accuracy Target:</label>
+                    <input type="range" id="accuracyTarget" min="50" max="99" step="1" value="90">
+                    <div class="value-display" id="accuracyTargetValue">90%</div>
+                </div>
+            </div>
+
+            <button id="analyzeBtn">Calibrate Cost Model</button>
+
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <p>Calibrating...</p>
+            </div>
+
+            <div class="results" id="results">
+                <div class="accuracy-card" id="accuracyCard">
+                    <div class="score" id="accuracyScore">92%</div>
+                    <div class="label">Estimated Accuracy</div>
+                </div>
+
+                <div class="metrics">
+                    <div class="metric-card">
+                        <div class="label">Statistics Profile</div>
+                        <div class="value" id="profile">-</div>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="label">Sample Rate</div>
+                        <div class="value" id="sampleRate">-</div>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="label">Refresh Interval</div>
+                        <div class="value" id="refreshInterval">-</div>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="label">Collection Cost</div>
+                        <div class="value" id="collectionCost">-</div>
+                    </div>
+                </div>
+
+                <div class="recommendations">
+                    <h3>Calibration Recommendations</h3>
+                    <div id="recommendationsList"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const workloadTypeSelect = document.getElementById('workloadType');
+        const updateFrequencySlider = document.getElementById('updateFrequency');
+        const dataVolatilitySlider = document.getElementById('dataVolatility');
+        const accuracyTargetSlider = document.getElementById('accuracyTarget');
+        const analyzeBtn = document.getElementById('analyzeBtn');
+        const loading = document.getElementById('loading');
+        const results = document.getElementById('results');
+
+        function getFrequencyLabel(level) {
+            if (level <= 3) return level + ' (Low)';
+            if (level <= 7) return level + ' (Medium)';
+            return level + ' (High)';
+        }
+
+        function getVolatilityLabel(level) {
+            if (level <= 3) return level + ' (Low)';
+            if (level <= 5) return level + ' (Medium)';
+            if (level <= 7) return level + ' (Medium-High)';
+            return level + ' (High)';
+        }
+
+        updateFrequencySlider.addEventListener('input', () => {
+            document.getElementById('updateFrequencyValue').textContent = getFrequencyLabel(parseInt(updateFrequencySlider.value));
+        });
+
+        dataVolatilitySlider.addEventListener('input', () => {
+            document.getElementById('dataVolatilityValue').textContent = getVolatilityLabel(parseInt(dataVolatilitySlider.value));
+        });
+
+        accuracyTargetSlider.addEventListener('input', () => {
+            document.getElementById('accuracyTargetValue').textContent = accuracyTargetSlider.value + '%';
+        });
+
+        analyzeBtn.addEventListener('click', async () => {
+            loading.classList.add('visible');
+            results.classList.remove('visible');
+
+            const workload = workloadTypeSelect.value;
+            const updateFreq = parseInt(updateFrequencySlider.value);
+            const volatility = parseInt(dataVolatilitySlider.value);
+            const target = parseInt(accuracyTargetSlider.value);
+
+            // Mock calculation
+            let profile = 'Standard';
+            let sampleRate = 10;
+            let refreshHours = 24;
+            let collectionCost = 'Medium';
+
+            if (workload === 'oltp' && updateFreq > 7) {
+                profile = 'RealTime';
+                sampleRate = 50;
+                refreshHours = 1;
+                collectionCost = 'High';
+            } else if (workload === 'streaming') {
+                profile = 'Streaming';
+                sampleRate = 25;
+                refreshHours = 0.5;
+                collectionCost = 'High';
+            } else if (volatility > 7 || updateFreq > 7) {
+                profile = 'Analytical';
+                sampleRate = 20;
+                refreshHours = 6;
+                collectionCost = 'Medium-High';
+            } else if (volatility <= 3 && updateFreq <= 3) {
+                profile = 'Lazy';
+                sampleRate = 5;
+                refreshHours = 168;
+                collectionCost = 'Low';
+            }
+
+            const baseAccuracy = 85;
+            const sampleBonus = sampleRate / 5;
+            const volatilityPenalty = volatility * 1.5;
+            const accuracy = Math.min(99, Math.max(50, baseAccuracy + sampleBonus - volatilityPenalty));
+
+            setTimeout(() => {
+                loading.classList.remove('visible');
+                results.classList.add('visible');
+
+                const accuracyCard = document.getElementById('accuracyCard');
+                if (accuracy >= target) {
+                    accuracyCard.className = 'accuracy-card good';
+                } else if (accuracy >= target - 10) {
+                    accuracyCard.className = 'accuracy-card moderate';
+                } else {
+                    accuracyCard.className = 'accuracy-card poor';
+                }
+
+                document.getElementById('accuracyScore').textContent = accuracy.toFixed(0) + '%';
+                document.getElementById('profile').textContent = profile;
+                document.getElementById('sampleRate').textContent = sampleRate + '%';
+                document.getElementById('refreshInterval').textContent = refreshHours + 'h';
+                document.getElementById('collectionCost').textContent = collectionCost;
+
+                const recommendationsList = document.getElementById('recommendationsList');
+                recommendationsList.innerHTML = '';
+
+                const recommendations = [];
+
+                if (accuracy < target) {
+                    recommendations.push({
+                        title: 'Increase Sample Rate',
+                        text: `Current ${sampleRate}% sampling may not meet ${target}% accuracy target. Consider increasing to ${Math.min(50, sampleRate + 10)}%.`
+                    });
+                }
+
+                if (volatility > 7 && refreshHours > 6) {
+                    recommendations.push({
+                        title: 'Reduce Refresh Interval',
+                        text: `High data volatility requires more frequent statistics updates. Consider reducing refresh interval to ${Math.max(1, refreshHours / 2)}h.`
+                    });
+                }
+
+                if (workload === 'oltp' && profile !== 'RealTime') {
+                    recommendations.push({
+                        title: 'Consider RealTime Profile',
+                        text: 'OLTP workloads benefit from real-time statistics to handle rapidly changing data patterns.'
+                    });
+                }
+
+                if (collectionCost === 'High') {
+                    recommendations.push({
+                        title: 'Optimize Collection Window',
+                        text: 'High collection cost detected. Schedule statistics gathering during low-traffic periods to minimize impact.'
+                    });
+                }
+
+                if (recommendations.length === 0) {
+                    recommendations.push({
+                        title: 'Configuration Optimal',
+                        text: 'Current cost model calibration is well-suited for your workload characteristics.'
+                    });
+                }
+
+                recommendations.forEach(rec => {
+                    const item = document.createElement('div');
+                    item.className = 'recommendation-item';
+                    item.innerHTML = `
+                        <h4>${rec.title}</h4>
+                        <p>${rec.text}</p>
+                    `;
+                    recommendationsList.appendChild(item);
+                });
+
+            }, 500);
+        });
+
+        document.getElementById('updateFrequencyValue').textContent = getFrequencyLabel(parseInt(updateFrequencySlider.value));
+        document.getElementById('dataVolatilityValue').textContent = getVolatilityLabel(parseInt(dataVolatilitySlider.value));
+        document.getElementById('accuracyTargetValue').textContent = accuracyTargetSlider.value + '%';
+    </script>
+</body>
+</html>
