@@ -107,6 +107,36 @@ pub enum RelExpr {
         /// The right input relation.
         right: Box<RelExpr>,
     },
+
+    /// Common Table Expression (WITH clause).
+    Cte {
+        /// The CTE name.
+        name: String,
+        /// The CTE definition.
+        definition: Box<RelExpr>,
+        /// The body that references the CTE.
+        body: Box<RelExpr>,
+    },
+
+    /// Window function application.
+    Window {
+        /// Window function expressions to compute.
+        functions: Vec<WindowExpr>,
+        /// The input relation.
+        input: Box<RelExpr>,
+    },
+
+    /// Remove duplicate rows.
+    Distinct {
+        /// The input relation.
+        input: Box<RelExpr>,
+    },
+
+    /// Inline row values (e.g., VALUES (1, 'a'), (2, 'b')).
+    Values {
+        /// Each inner Vec is one row of expressions.
+        rows: Vec<Vec<Expr>>,
+    },
 }
 
 /// A column in a projection list, consisting of an expression
@@ -168,6 +198,135 @@ pub enum AggregateFunction {
     Min,
     /// Maximum value.
     Max,
+    /// Population standard deviation.
+    StddevPop,
+    /// Sample standard deviation.
+    StddevSamp,
+    /// Population variance.
+    VariancePop,
+    /// Sample variance.
+    VarianceSamp,
+    /// Concatenate strings with a separator.
+    StringAgg,
+    /// Collect values into an array.
+    ArrayAgg,
+    /// The statistical mode (most frequent value).
+    Mode,
+    /// Boolean AND of all values.
+    BoolAnd,
+    /// Boolean OR of all values.
+    BoolOr,
+}
+
+/// A window function expression.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WindowExpr {
+    /// The window function to apply.
+    pub function: WindowFunction,
+    /// PARTITION BY expressions.
+    pub partition_by: Vec<Expr>,
+    /// ORDER BY within the window.
+    pub order_by: Vec<SortKey>,
+    /// The window frame specification.
+    pub frame: Option<WindowFrame>,
+    /// Optional output alias.
+    pub alias: Option<String>,
+}
+
+/// Window function types.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum WindowFunction {
+    /// An aggregate used as a window function.
+    Aggregate(AggregateExpr),
+    /// ROW_NUMBER().
+    RowNumber,
+    /// RANK().
+    Rank,
+    /// DENSE_RANK().
+    DenseRank,
+    /// PERCENT_RANK().
+    PercentRank,
+    /// CUME_DIST().
+    CumeDist,
+    /// NTILE(n).
+    Ntile {
+        /// Number of buckets.
+        n: Expr,
+    },
+    /// LAG(expr, offset, default).
+    Lag {
+        /// The expression to retrieve.
+        expr: Expr,
+        /// Offset rows back (default 1).
+        offset: Option<Expr>,
+        /// Default value if offset goes past partition boundary.
+        default: Option<Expr>,
+    },
+    /// LEAD(expr, offset, default).
+    Lead {
+        /// The expression to retrieve.
+        expr: Expr,
+        /// Offset rows forward (default 1).
+        offset: Option<Expr>,
+        /// Default value if offset goes past partition boundary.
+        default: Option<Expr>,
+    },
+    /// FIRST_VALUE(expr).
+    FirstValue {
+        /// The expression to retrieve.
+        expr: Expr,
+    },
+    /// LAST_VALUE(expr).
+    LastValue {
+        /// The expression to retrieve.
+        expr: Expr,
+    },
+    /// NTH_VALUE(expr, n).
+    NthValue {
+        /// The expression to retrieve.
+        expr: Expr,
+        /// The 1-based position.
+        n: Expr,
+    },
+}
+
+/// Window frame specification.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WindowFrame {
+    /// Whether the frame uses ROWS or RANGE.
+    pub mode: WindowFrameMode,
+    /// The start bound.
+    pub start: WindowFrameBound,
+    /// The end bound.
+    pub end: WindowFrameBound,
+}
+
+/// Frame mode: ROWS counts physical rows, RANGE uses value ranges.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize,
+)]
+pub enum WindowFrameMode {
+    /// Frame defined by physical row offsets.
+    Rows,
+    /// Frame defined by value ranges.
+    Range,
+    /// Frame defined by groups of peer rows.
+    Groups,
+}
+
+/// A bound in a window frame.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum WindowFrameBound {
+    /// CURRENT ROW.
+    CurrentRow,
+    /// N PRECEDING.
+    Preceding(Option<u64>),
+    /// N FOLLOWING.
+    Following(Option<u64>),
+    /// UNBOUNDED PRECEDING.
+    UnboundedPreceding,
+    /// UNBOUNDED FOLLOWING.
+    UnboundedFollowing,
 }
 
 /// A sort key with direction.
@@ -241,20 +400,42 @@ impl RelExpr {
         }
     }
 
+    /// Create a distinct over this expression.
+    #[must_use]
+    pub fn distinct(self) -> Self {
+        Self::Distinct {
+            input: Box::new(self),
+        }
+    }
+
+    /// Create a sort over this expression.
+    #[must_use]
+    pub fn sort(self, keys: Vec<SortKey>) -> Self {
+        Self::Sort {
+            keys,
+            input: Box::new(self),
+        }
+    }
+
     /// Return the direct child inputs of this node.
     #[must_use]
     pub fn children(&self) -> Vec<&RelExpr> {
         match self {
-            Self::Scan { .. } => vec![],
+            Self::Scan { .. } | Self::Values { .. } => vec![],
             Self::Filter { input, .. }
             | Self::Project { input, .. }
             | Self::Aggregate { input, .. }
             | Self::Sort { input, .. }
-            | Self::Limit { input, .. } => vec![input],
+            | Self::Limit { input, .. }
+            | Self::Window { input, .. }
+            | Self::Distinct { input, .. } => vec![input],
             Self::Join { left, right, .. }
             | Self::Union { left, right, .. }
             | Self::Intersect { left, right, .. }
             | Self::Except { left, right, .. } => vec![left, right],
+            Self::Cte {
+                definition, body, ..
+            } => vec![definition, body],
         }
     }
 
@@ -269,6 +450,13 @@ impl RelExpr {
     fn collect_columns(&self, out: &mut Vec<ColumnRef>) {
         match self {
             Self::Scan { .. } => {}
+            Self::Values { rows } => {
+                for row in rows {
+                    for expr in row {
+                        collect_expr_columns(expr, out);
+                    }
+                }
+            }
             Self::Filter {
                 predicate, input, ..
             } => {
@@ -315,7 +503,8 @@ impl RelExpr {
                 }
                 input.collect_columns(out);
             }
-            Self::Limit { input, .. } => {
+            Self::Limit { input, .. }
+            | Self::Distinct { input, .. } => {
                 input.collect_columns(out);
             }
             Self::Union { left, right, .. }
@@ -324,7 +513,67 @@ impl RelExpr {
                 left.collect_columns(out);
                 right.collect_columns(out);
             }
+            Self::Cte {
+                definition, body, ..
+            } => {
+                definition.collect_columns(out);
+                body.collect_columns(out);
+            }
+            Self::Window {
+                functions, input, ..
+            } => {
+                for wf in functions {
+                    collect_window_expr_columns(wf, out);
+                }
+                input.collect_columns(out);
+            }
         }
+    }
+}
+
+/// Collect column references from a window expression.
+fn collect_window_expr_columns(
+    wf: &WindowExpr,
+    out: &mut Vec<ColumnRef>,
+) {
+    for expr in &wf.partition_by {
+        collect_expr_columns(expr, out);
+    }
+    for key in &wf.order_by {
+        collect_expr_columns(&key.expr, out);
+    }
+    match &wf.function {
+        WindowFunction::Aggregate(agg) => {
+            if let Some(arg) = &agg.arg {
+                collect_expr_columns(arg, out);
+            }
+        }
+        WindowFunction::Lag { expr, offset, default }
+        | WindowFunction::Lead { expr, offset, default } => {
+            collect_expr_columns(expr, out);
+            if let Some(o) = offset {
+                collect_expr_columns(o, out);
+            }
+            if let Some(d) = default {
+                collect_expr_columns(d, out);
+            }
+        }
+        WindowFunction::FirstValue { expr }
+        | WindowFunction::LastValue { expr } => {
+            collect_expr_columns(expr, out);
+        }
+        WindowFunction::NthValue { expr, n } => {
+            collect_expr_columns(expr, out);
+            collect_expr_columns(n, out);
+        }
+        WindowFunction::Ntile { n } => {
+            collect_expr_columns(n, out);
+        }
+        WindowFunction::RowNumber
+        | WindowFunction::Rank
+        | WindowFunction::DenseRank
+        | WindowFunction::PercentRank
+        | WindowFunction::CumeDist => {}
     }
 }
 
@@ -390,6 +639,15 @@ impl std::fmt::Display for AggregateFunction {
             Self::Avg => "AVG",
             Self::Min => "MIN",
             Self::Max => "MAX",
+            Self::StddevPop => "STDDEV_POP",
+            Self::StddevSamp => "STDDEV_SAMP",
+            Self::VariancePop => "VAR_POP",
+            Self::VarianceSamp => "VAR_SAMP",
+            Self::StringAgg => "STRING_AGG",
+            Self::ArrayAgg => "ARRAY_AGG",
+            Self::Mode => "MODE",
+            Self::BoolAnd => "BOOL_AND",
+            Self::BoolOr => "BOOL_OR",
         };
         write!(f, "{name}")
     }
@@ -400,6 +658,16 @@ impl std::fmt::Display for SortDirection {
         match self {
             Self::Asc => write!(f, "ASC"),
             Self::Desc => write!(f, "DESC"),
+        }
+    }
+}
+
+impl std::fmt::Display for WindowFrameMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Rows => write!(f, "ROWS"),
+            Self::Range => write!(f, "RANGE"),
+            Self::Groups => write!(f, "GROUPS"),
         }
     }
 }
@@ -443,7 +711,8 @@ mod tests {
 
     #[test]
     fn children_filter_one() {
-        let plan = RelExpr::scan("t").filter(Expr::Const(Const::Bool(true)));
+        let plan =
+            RelExpr::scan("t").filter(Expr::Const(Const::Bool(true)));
         assert_eq!(plan.children().len(), 1);
     }
 
@@ -485,6 +754,23 @@ mod tests {
     }
 
     #[test]
+    fn extended_aggregate_function_display() {
+        assert_eq!(
+            AggregateFunction::StddevPop.to_string(),
+            "STDDEV_POP"
+        );
+        assert_eq!(
+            AggregateFunction::StringAgg.to_string(),
+            "STRING_AGG"
+        );
+        assert_eq!(
+            AggregateFunction::ArrayAgg.to_string(),
+            "ARRAY_AGG"
+        );
+        assert_eq!(AggregateFunction::BoolAnd.to_string(), "BOOL_AND");
+    }
+
+    #[test]
     fn serialize_roundtrip() {
         let plan = RelExpr::scan("users").limit(10, 0);
         let json = serde_json::to_string(&plan)
@@ -492,5 +778,178 @@ mod tests {
         let deserialized: RelExpr = serde_json::from_str(&json)
             .expect("deserialization should succeed");
         assert_eq!(plan, deserialized);
+    }
+
+    #[test]
+    fn distinct_builder() {
+        let plan = RelExpr::scan("t").distinct();
+        if let RelExpr::Distinct { input } = &plan {
+            assert!(matches!(input.as_ref(), RelExpr::Scan { .. }));
+        } else {
+            panic!("expected Distinct variant");
+        }
+    }
+
+    #[test]
+    fn children_distinct_one() {
+        let plan = RelExpr::scan("t").distinct();
+        assert_eq!(plan.children().len(), 1);
+    }
+
+    #[test]
+    fn children_cte_two() {
+        let cte = RelExpr::Cte {
+            name: "sub".into(),
+            definition: Box::new(RelExpr::scan("orders")),
+            body: Box::new(RelExpr::scan("sub")),
+        };
+        assert_eq!(cte.children().len(), 2);
+    }
+
+    #[test]
+    fn children_values_empty() {
+        let vals = RelExpr::Values {
+            rows: vec![vec![Expr::Const(Const::Int(1))]],
+        };
+        assert!(vals.children().is_empty());
+    }
+
+    #[test]
+    fn children_window_one() {
+        let win = RelExpr::Window {
+            functions: vec![WindowExpr {
+                function: WindowFunction::RowNumber,
+                partition_by: vec![],
+                order_by: vec![],
+                frame: None,
+                alias: Some("rn".into()),
+            }],
+            input: Box::new(RelExpr::scan("t")),
+        };
+        assert_eq!(win.children().len(), 1);
+    }
+
+    #[test]
+    fn referenced_columns_window() {
+        let win = RelExpr::Window {
+            functions: vec![WindowExpr {
+                function: WindowFunction::RowNumber,
+                partition_by: vec![Expr::Column(ColumnRef::new("dept"))],
+                order_by: vec![SortKey {
+                    expr: Expr::Column(ColumnRef::new("salary")),
+                    direction: SortDirection::Desc,
+                    nulls: NullOrdering::Last,
+                }],
+                frame: None,
+                alias: None,
+            }],
+            input: Box::new(RelExpr::scan("employees")),
+        };
+        let cols = win.referenced_columns();
+        assert_eq!(cols.len(), 2);
+    }
+
+    #[test]
+    fn cte_referenced_columns() {
+        let cte = RelExpr::Cte {
+            name: "recent".into(),
+            definition: Box::new(
+                RelExpr::scan("orders").filter(Expr::BinOp {
+                    op: ExprBinOp::Gt,
+                    left: Box::new(Expr::Column(ColumnRef::new("dt"))),
+                    right: Box::new(Expr::Const(Const::Int(2024))),
+                }),
+            ),
+            body: Box::new(RelExpr::scan("recent")),
+        };
+        let cols = cte.referenced_columns();
+        assert_eq!(cols.len(), 1);
+        assert_eq!(cols[0].column, "dt");
+    }
+
+    #[test]
+    fn window_frame_mode_display() {
+        assert_eq!(WindowFrameMode::Rows.to_string(), "ROWS");
+        assert_eq!(WindowFrameMode::Range.to_string(), "RANGE");
+        assert_eq!(WindowFrameMode::Groups.to_string(), "GROUPS");
+    }
+
+    #[test]
+    fn serialize_roundtrip_cte() {
+        let plan = RelExpr::Cte {
+            name: "x".into(),
+            definition: Box::new(RelExpr::scan("t")),
+            body: Box::new(RelExpr::scan("x")),
+        };
+        let json = serde_json::to_string(&plan)
+            .expect("serialization should succeed");
+        let deserialized: RelExpr = serde_json::from_str(&json)
+            .expect("deserialization should succeed");
+        assert_eq!(plan, deserialized);
+    }
+
+    #[test]
+    fn serialize_roundtrip_distinct() {
+        let plan = RelExpr::scan("t").distinct();
+        let json = serde_json::to_string(&plan)
+            .expect("serialization should succeed");
+        let deserialized: RelExpr = serde_json::from_str(&json)
+            .expect("deserialization should succeed");
+        assert_eq!(plan, deserialized);
+    }
+
+    #[test]
+    fn serialize_roundtrip_window() {
+        let plan = RelExpr::Window {
+            functions: vec![WindowExpr {
+                function: WindowFunction::Rank,
+                partition_by: vec![],
+                order_by: vec![],
+                frame: Some(WindowFrame {
+                    mode: WindowFrameMode::Rows,
+                    start: WindowFrameBound::UnboundedPreceding,
+                    end: WindowFrameBound::CurrentRow,
+                }),
+                alias: None,
+            }],
+            input: Box::new(RelExpr::scan("t")),
+        };
+        let json = serde_json::to_string(&plan)
+            .expect("serialization should succeed");
+        let deserialized: RelExpr = serde_json::from_str(&json)
+            .expect("deserialization should succeed");
+        assert_eq!(plan, deserialized);
+    }
+
+    #[test]
+    fn sort_builder() {
+        let plan = RelExpr::scan("t").sort(vec![SortKey {
+            expr: Expr::Column(ColumnRef::new("id")),
+            direction: SortDirection::Asc,
+            nulls: NullOrdering::Last,
+        }]);
+        if let RelExpr::Sort { keys, .. } = &plan {
+            assert_eq!(keys.len(), 1);
+        } else {
+            panic!("expected Sort variant");
+        }
+    }
+
+    #[test]
+    fn values_columns() {
+        let vals = RelExpr::Values {
+            rows: vec![
+                vec![
+                    Expr::Column(ColumnRef::new("a")),
+                    Expr::Const(Const::Int(1)),
+                ],
+                vec![
+                    Expr::Column(ColumnRef::new("b")),
+                    Expr::Const(Const::Int(2)),
+                ],
+            ],
+        };
+        let cols = vals.referenced_columns();
+        assert_eq!(cols.len(), 2);
     }
 }

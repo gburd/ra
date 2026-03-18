@@ -88,6 +88,29 @@ pub enum Pattern {
         /// Pattern for the right input.
         right: Box<Pattern>,
     },
+
+    /// Match a CTE node.
+    Cte {
+        /// Pattern for the CTE definition.
+        definition: Box<Pattern>,
+        /// Pattern for the CTE body.
+        body: Box<Pattern>,
+    },
+
+    /// Match a Window node.
+    Window {
+        /// Pattern for the input.
+        input: Box<Pattern>,
+    },
+
+    /// Match a Distinct node.
+    Distinct {
+        /// Pattern for the input.
+        input: Box<Pattern>,
+    },
+
+    /// Match a Values node (leaf, no child patterns).
+    Values,
 }
 
 /// A pattern for matching scalar expressions.
@@ -227,6 +250,18 @@ impl Pattern {
                     input: pat_input,
                 },
                 RelExpr::Limit { input, .. },
+            )
+            | (
+                Self::Window {
+                    input: pat_input,
+                },
+                RelExpr::Window { input, .. },
+            )
+            | (
+                Self::Distinct {
+                    input: pat_input,
+                },
+                RelExpr::Distinct { input, .. },
             ) => pat_input.do_match(input, bindings),
             (
                 Self::Join {
@@ -273,6 +308,19 @@ impl Pattern {
                 pat_left.do_match(left, bindings)
                     && pat_right.do_match(right, bindings)
             }
+            (
+                Self::Cte {
+                    definition: pat_def,
+                    body: pat_body,
+                },
+                RelExpr::Cte {
+                    definition, body, ..
+                },
+            ) => {
+                pat_def.do_match(definition, bindings)
+                    && pat_body.do_match(body, bindings)
+            }
+            (Self::Values, RelExpr::Values { .. }) => true,
             _ => false,
         }
     }
