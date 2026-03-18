@@ -297,10 +297,7 @@ fn render_evolution_panel(
         ),
         Span::raw("  "),
         Span::styled(
-            format!(
-                "Range: {:.0} - {:.0}",
-                min_cost, max_cost
-            ),
+            format!("Range: {min_cost:.0} - {max_cost:.0}"),
             Style::default().fg(Color::DarkGray),
         ),
     ]));

@@ -119,6 +119,18 @@ enum Commands {
         #[arg(long, default_value = "auto")]
         hardware_profile: String,
     },
+    /// Launch interactive TUI for real-time plan monitoring.
+    Tui {
+        /// Path to a timeline JSON file to load.
+        #[arg(long)]
+        timeline: Option<String>,
+        /// Run with built-in demo data.
+        #[arg(long)]
+        demo: bool,
+        /// Run in headless mode (no terminal UI, for testing).
+        #[arg(long)]
+        headless: bool,
+    },
 }
 
 // ── Main ────────────────────────────────────────────────────
@@ -185,6 +197,11 @@ fn main() -> Result<()> {
                 cli.quiet,
             )
         }
+        Commands::Tui {
+            timeline,
+            demo,
+            headless,
+        } => cmd_tui(timeline.as_deref(), demo, headless),
     }
 }
 

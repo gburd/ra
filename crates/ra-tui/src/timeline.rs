@@ -78,6 +78,7 @@ impl Timeline {
 
     /// Build a demo timeline with synthetic data for testing.
     #[must_use]
+    #[allow(clippy::too_many_lines)]
     pub fn demo() -> Self {
         let mut tl = Self::new(
             "SELECT o.id, c.name, SUM(o.amount) \

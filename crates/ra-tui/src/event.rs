@@ -29,6 +29,7 @@ pub struct EventHandler {
 
 impl EventHandler {
     /// Start the event loop with the given tick interval.
+    #[must_use]
     pub fn new(tick_rate: Duration) -> Self {
         let (tx, rx) = mpsc::channel();
 
@@ -81,7 +82,7 @@ pub fn key_action(key: &KeyEvent) -> Action {
         (_, KeyCode::Right | KeyCode::Char('l')) => Action::NextStep,
         (_, KeyCode::Left | KeyCode::Char('h')) => Action::PrevStep,
         (_, KeyCode::Char(' ')) => Action::TogglePlay,
-        (_, KeyCode::Char('+') | KeyCode::Char('=')) => {
+        (_, KeyCode::Char('+' | '=')) => {
             Action::SpeedUp
         }
         (_, KeyCode::Char('-')) => Action::SlowDown,
