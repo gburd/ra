@@ -46,8 +46,8 @@ pub mod timely;
 pub use analysis::RelAnalysis;
 pub use cost::{CostCalibration, IntegratedCostFn, IntegratedCostModel};
 pub use distributed_optimizer::{
-    ClusterTopology, DistributedOptimizer, DistributedOptimizerConfig,
-    DistributedOptimizerError,
+    AggStrategyResult, ClusterTopology, DistributedOptimizer,
+    DistributedOptimizerConfig, DistributedOptimizerError,
 };
 pub use federated_cost::FederatedCostModel;
 pub use federated_optimizer::{
