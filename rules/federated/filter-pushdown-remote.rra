@@ -1,0 +1,106 @@
+---
+id: federated-filter-pushdown-remote
+name: "Filter Pushdown to Remote Database"
+category: federated/pushdown
+databases: [postgresql, mysql, sqlite, snowflake, bigquery, duckdb]
+execution_models: [volcano, vectorized]
+version: "1.0.0"
+authors: ["ra-optimizer"]
+tags: [federated, pushdown, filter, network-optimization]
+complexity: "O(1)"
+benefit_range: [2.0, 100.0]
+---
+
+# Filter Pushdown to Remote Database
+
+## Description
+
+Push filter predicates down to the remote database when the remote
+supports filter pushdown. This reduces the volume of data transferred
+over the network by filtering at the source.
+
+**When to apply**: Whenever a filter references columns from a remote
+table and the remote database supports WHERE clause evaluation.
+
+**Why it works**: Network transfer is typically the bottleneck in
+federated queries. By filtering at the source, only matching rows
+are transferred, reducing both latency and bandwidth usage.
+
+## Example
+
+SELECT * FROM remote_table WHERE status = 'ACTIVE';
+
+## Relational Algebra
+
+```algebra
+Filter[predicate](RemoteScan[table, endpoint])
+=>
+RemoteScan[table, endpoint, pushdown_filter=predicate]
+
+Preconditions:
+  - remote_capabilities.supports_filter_pushdown = true
+  - filter_predicate uses only supported functions
+  - No local-only columns in predicate
+```
+
+## Before
+
+```
+(Filter
+  :predicate (= status "ACTIVE")
+  :input (RemoteScan "remote_table" "db.example.com"))
+```
+
+## After
+
+```
+(RemoteScan "remote_table" "db.example.com"
+  :pushdown_filter (= status "ACTIVE"))
+```
+
+## Conditions
+
+- remote_capabilities.supports_filter_pushdown = true
+- filter_predicate uses only supported functions
+- No local-only columns in predicate
+
+## Cost Benefit
+
+- Without pushdown: Transfer 10M rows (1GB)
+- With pushdown: Transfer 500K rows (50MB) - 20x reduction
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+fn filter_pushdown_remote() -> Vec<Rewrite<RelLang, RelAnalysis>> {
+    vec![rw!("filter-pushdown-remote";
+        "(filter ?pred (remote_scan ?table ?endpoint))" =>
+        "(remote_scan_filtered ?table ?endpoint ?pred)"
+        if is_pushable_filter("?pred", "?endpoint")
+    )]
+}
+```
+
+## References
+
+- Kossmann, D. "The State of the Art in Distributed Query Processing" (2000)
+- Haas et al., "Optimizing Queries Across Diverse Data Sources" (1997)
+
+## Test Cases
+
+### Test 1: Simple equality filter pushdown
+
+#### Input
+```
+(Filter
+  :predicate (= status "ACTIVE")
+  :input (RemoteScan "orders" "pg.example.com"))
+```
+
+#### Expected
+```
+(RemoteScan "orders" "pg.example.com"
+  :pushdown_filter (= status "ACTIVE"))
+```

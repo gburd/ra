@@ -33,6 +33,8 @@ pub mod differential;
 pub mod distributed_optimizer;
 pub mod egraph;
 pub mod extract;
+pub mod federated_cost;
+pub mod federated_optimizer;
 pub mod memo;
 pub mod network_cost;
 pub mod recursive;
@@ -46,6 +48,10 @@ pub use cost::{CostCalibration, IntegratedCostFn, IntegratedCostModel};
 pub use distributed_optimizer::{
     AggStrategyResult, ClusterTopology, DistributedOptimizer,
     DistributedOptimizerConfig, DistributedOptimizerError,
+};
+pub use federated_cost::FederatedCostModel;
+pub use federated_optimizer::{
+    FederatedAnalysis, FederatedError, FederatedOptimizer,
 };
 pub use differential::{IncrementalError, IncrementalOptimizer, RuleChange, RuleId};
 pub use egraph::{
