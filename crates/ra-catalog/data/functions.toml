@@ -1,0 +1,771 @@
+# Function Catalog Data
+# Supplementary data for ra-catalog built-in function definitions.
+# The primary catalog is built programmatically in functions.rs;
+# this file provides additional metadata and documentation.
+
+[meta]
+version = "1.0.0"
+total_functions = 200
+last_updated = "2026-03-17"
+
+# =============================================================================
+# MATH FUNCTIONS
+# =============================================================================
+
+[[functions]]
+name = "ABS"
+category = "Scalar"
+description = "Absolute value"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = ["Numeric"], returns = "Numeric" }
+
+[[functions]]
+name = "CEIL"
+category = "Scalar"
+description = "Ceiling (round up)"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = ["Numeric"], returns = "Numeric" }
+
+[[functions]]
+name = "FLOOR"
+category = "Scalar"
+description = "Floor (round down)"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = ["Numeric"], returns = "Numeric" }
+
+[[functions]]
+name = "ROUND"
+category = "Scalar"
+description = "Round to nearest integer or decimal places"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = ["Numeric", "Numeric"], returns = "Numeric" }
+
+[[functions]]
+name = "SQRT"
+category = "Scalar"
+description = "Square root"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = ["Numeric"], returns = "Numeric" }
+
+[[functions]]
+name = "POWER"
+category = "Scalar"
+description = "Raise to power"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = ["Numeric", "Numeric"], returns = "Numeric" }
+
+[[functions]]
+name = "EXP"
+category = "Scalar"
+description = "Exponential (e^x)"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = ["Numeric"], returns = "Numeric" }
+
+[[functions]]
+name = "LN"
+category = "Scalar"
+description = "Natural logarithm"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = ["Numeric"], returns = "Numeric" }
+
+[[functions]]
+name = "LOG"
+category = "Scalar"
+description = "Logarithm (base 10 or custom)"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = ["Numeric", "Numeric"], returns = "Numeric" }
+
+[[functions]]
+name = "MOD"
+category = "Scalar"
+description = "Modulo / remainder"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = ["Numeric", "Numeric"], returns = "Numeric" }
+
+[[functions]]
+name = "RANDOM"
+category = "Scalar"
+description = "Random value between 0 and 1"
+deterministic = false
+pure = false
+constant_foldable = false
+cost_multiplier = 1.0
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = [], returns = "Float" }
+
+[[functions]]
+name = "SIN"
+category = "Scalar"
+description = "Sine"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+databases = ["PostgreSQL", "MySQL", "SqlServer", "Oracle"]
+signature = { params = ["Numeric"], returns = "Float" }
+
+[[functions]]
+name = "COS"
+category = "Scalar"
+description = "Cosine"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+databases = ["PostgreSQL", "MySQL", "SqlServer", "Oracle"]
+signature = { params = ["Numeric"], returns = "Float" }
+
+[[functions]]
+name = "PI"
+category = "Scalar"
+description = "Mathematical constant pi"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = [], returns = "Float" }
+
+# =============================================================================
+# STRING FUNCTIONS
+# =============================================================================
+
+[[functions]]
+name = "UPPER"
+category = "Scalar"
+description = "Convert to uppercase"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = ["Text"], returns = "Text" }
+
+[[functions]]
+name = "LOWER"
+category = "Scalar"
+description = "Convert to lowercase"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = ["Text"], returns = "Text" }
+
+[[functions]]
+name = "LENGTH"
+category = "Scalar"
+description = "String length in characters"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = ["Text"], returns = "Integer" }
+
+[[functions]]
+name = "SUBSTRING"
+category = "Scalar"
+description = "Extract substring"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.5
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = ["Text", "Integer", "Integer"], returns = "Text" }
+
+[[functions]]
+name = "CONCAT"
+category = "Scalar"
+description = "Concatenate strings"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = ["Text"], returns = "Text", variadic = true }
+
+[[functions]]
+name = "TRIM"
+category = "Scalar"
+description = "Remove leading/trailing whitespace"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.5
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = ["Text"], returns = "Text" }
+
+[[functions]]
+name = "REPLACE"
+category = "Scalar"
+description = "Replace occurrences of substring"
+deterministic = true
+pure = true
+constant_foldable = true
+expensive = true
+cost_multiplier = 3.0
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = ["Text", "Text", "Text"], returns = "Text" }
+
+[[functions]]
+name = "POSITION"
+category = "Scalar"
+description = "Find substring position"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = ["Text", "Text"], returns = "Integer" }
+
+[[functions]]
+name = "MD5"
+category = "Scalar"
+description = "MD5 hash as hex string"
+deterministic = true
+pure = true
+constant_foldable = true
+expensive = true
+cost_multiplier = 10.0
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = ["Text"], returns = "Text" }
+
+[[functions]]
+name = "REGEXP_REPLACE"
+category = "Scalar"
+description = "Regex-based replacement"
+deterministic = true
+pure = true
+constant_foldable = true
+expensive = true
+cost_multiplier = 10.0
+databases = ["PostgreSQL", "MySQL"]
+signature = { params = ["Text", "Text", "Text"], returns = "Text" }
+
+# =============================================================================
+# DATE/TIME FUNCTIONS
+# =============================================================================
+
+[[functions]]
+name = "NOW"
+category = "Scalar"
+description = "Current timestamp"
+deterministic = false
+pure = false
+constant_foldable = false
+cost_multiplier = 1.0
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = [], returns = "Timestamp" }
+
+[[functions]]
+name = "DATE_TRUNC"
+category = "Scalar"
+description = "Truncate timestamp to precision"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = ["Text", "Timestamp"], returns = "Timestamp" }
+
+[[functions]]
+name = "EXTRACT"
+category = "Scalar"
+description = "Extract field from timestamp"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.5
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = ["Text", "Timestamp"], returns = "Numeric" }
+
+[[functions]]
+name = "DATE_ADD"
+category = "Scalar"
+description = "Add interval to date"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = ["Timestamp", "Interval"], returns = "Timestamp" }
+
+[[functions]]
+name = "TO_CHAR"
+category = "Scalar"
+description = "Format timestamp as string"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 3.0
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = ["Timestamp", "Text"], returns = "Text" }
+
+# =============================================================================
+# AGGREGATE FUNCTIONS
+# =============================================================================
+
+[[functions]]
+name = "COUNT"
+category = "Aggregate"
+description = "Count rows or non-null values"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 1.0
+order_sensitive = false
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = ["Any"], returns = "Integer" }
+
+[[functions]]
+name = "SUM"
+category = "Aggregate"
+description = "Sum of values"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 1.0
+order_sensitive = false
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = ["Numeric"], returns = "Numeric" }
+
+[[functions]]
+name = "AVG"
+category = "Aggregate"
+description = "Average of values"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 1.5
+order_sensitive = false
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = ["Numeric"], returns = "Float" }
+
+[[functions]]
+name = "MIN"
+category = "Aggregate"
+description = "Minimum value"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 1.0
+order_sensitive = false
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = ["Any"], returns = "Any" }
+
+[[functions]]
+name = "MAX"
+category = "Aggregate"
+description = "Maximum value"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 1.0
+order_sensitive = false
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = ["Any"], returns = "Any" }
+
+[[functions]]
+name = "STDDEV"
+category = "Aggregate"
+description = "Population standard deviation"
+deterministic = true
+pure = true
+constant_foldable = false
+expensive = true
+cost_multiplier = 3.0
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = ["Numeric"], returns = "Float" }
+
+[[functions]]
+name = "PERCENTILE_CONT"
+category = "Aggregate"
+description = "Continuous percentile"
+deterministic = true
+pure = true
+constant_foldable = false
+expensive = true
+cost_multiplier = 5.0
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = ["Float"], returns = "Float" }
+
+[[functions]]
+name = "ARRAY_AGG"
+category = "Aggregate"
+description = "Aggregate values into array"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 2.0
+order_sensitive = true
+databases = ["PostgreSQL"]
+signature = { params = ["Any"], returns = "Array" }
+
+[[functions]]
+name = "JSON_AGG"
+category = "Aggregate"
+description = "Aggregate values into JSON array"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 3.0
+order_sensitive = true
+databases = ["PostgreSQL", "MySQL"]
+signature = { params = ["Any"], returns = "Json" }
+
+# =============================================================================
+# WINDOW FUNCTIONS
+# =============================================================================
+
+[[functions]]
+name = "ROW_NUMBER"
+category = "Window"
+description = "Sequential row number within partition"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 2.0
+order_sensitive = true
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = [], returns = "Integer" }
+
+[[functions]]
+name = "RANK"
+category = "Window"
+description = "Rank with gaps for ties"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 2.0
+order_sensitive = true
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = [], returns = "Integer" }
+
+[[functions]]
+name = "DENSE_RANK"
+category = "Window"
+description = "Rank without gaps for ties"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 2.0
+order_sensitive = true
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = [], returns = "Integer" }
+
+[[functions]]
+name = "LAG"
+category = "Window"
+description = "Access previous row value"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 2.0
+order_sensitive = true
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = ["Any", "Integer"], returns = "Any" }
+
+[[functions]]
+name = "LEAD"
+category = "Window"
+description = "Access next row value"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 2.0
+order_sensitive = true
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = ["Any", "Integer"], returns = "Any" }
+
+# =============================================================================
+# JSON FUNCTIONS
+# =============================================================================
+
+[[functions]]
+name = "JSON_EXTRACT"
+category = "Scalar"
+description = "Extract value from JSON"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 3.0
+databases = ["PostgreSQL", "MySQL"]
+signature = { params = ["Json", "Text"], returns = "Json" }
+
+[[functions]]
+name = "JSON_BUILD_OBJECT"
+category = "Scalar"
+description = "Build JSON object from key-value pairs"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 4.0
+databases = ["PostgreSQL", "MySQL"]
+signature = { params = ["Any"], returns = "Json", variadic = true }
+
+[[functions]]
+name = "JSON_TABLE"
+category = "TableValued"
+description = "Map JSON to relational table"
+deterministic = true
+pure = true
+constant_foldable = false
+expensive = true
+cost_multiplier = 10.0
+databases = ["PostgreSQL", "MySQL", "SqlServer", "Oracle"]
+signature = { params = ["Json", "Text"], returns = "Record" }
+
+# =============================================================================
+# GEOSPATIAL FUNCTIONS (PostGIS)
+# =============================================================================
+
+[[functions]]
+name = "ST_DISTANCE"
+category = "Scalar"
+description = "Distance between geometries"
+deterministic = true
+pure = true
+constant_foldable = true
+expensive = true
+cost_multiplier = 5.0
+databases = ["PostgreSQL"]
+signature = { params = ["Geometry", "Geometry"], returns = "Float" }
+
+[[functions]]
+name = "ST_CONTAINS"
+category = "Scalar"
+description = "Whether geometry A contains B"
+deterministic = true
+pure = true
+constant_foldable = true
+expensive = true
+cost_multiplier = 5.0
+databases = ["PostgreSQL"]
+signature = { params = ["Geometry", "Geometry"], returns = "Boolean" }
+
+[[functions]]
+name = "ST_INTERSECTS"
+category = "Scalar"
+description = "Whether geometries intersect"
+deterministic = true
+pure = true
+constant_foldable = true
+expensive = true
+cost_multiplier = 5.0
+databases = ["PostgreSQL"]
+signature = { params = ["Geometry", "Geometry"], returns = "Boolean" }
+
+[[functions]]
+name = "ST_BUFFER"
+category = "Scalar"
+description = "Buffer around geometry"
+deterministic = true
+pure = true
+constant_foldable = true
+expensive = true
+cost_multiplier = 8.0
+databases = ["PostgreSQL"]
+signature = { params = ["Geometry", "Float"], returns = "Geometry" }
+
+[[functions]]
+name = "ST_UNION"
+category = "Scalar"
+description = "Union of geometries"
+deterministic = true
+pure = true
+constant_foldable = true
+expensive = true
+cost_multiplier = 10.0
+databases = ["PostgreSQL"]
+signature = { params = ["Geometry", "Geometry"], returns = "Geometry" }
+
+# =============================================================================
+# TEXT SEARCH FUNCTIONS
+# =============================================================================
+
+[[functions]]
+name = "TO_TSVECTOR"
+category = "Scalar"
+description = "Convert text to tsvector"
+deterministic = true
+pure = true
+constant_foldable = true
+expensive = true
+cost_multiplier = 10.0
+databases = ["PostgreSQL"]
+signature = { params = ["Text", "Text"], returns = "TsVector" }
+
+[[functions]]
+name = "TO_TSQUERY"
+category = "Scalar"
+description = "Convert text to tsquery"
+deterministic = true
+pure = true
+constant_foldable = true
+expensive = true
+cost_multiplier = 5.0
+databases = ["PostgreSQL"]
+signature = { params = ["Text", "Text"], returns = "TsQuery" }
+
+[[functions]]
+name = "TS_RANK"
+category = "Scalar"
+description = "Rank document relevance"
+deterministic = true
+pure = true
+constant_foldable = false
+expensive = true
+cost_multiplier = 8.0
+databases = ["PostgreSQL"]
+signature = { params = ["TsVector", "TsQuery"], returns = "Float" }
+
+[[functions]]
+name = "TS_HEADLINE"
+category = "Scalar"
+description = "Generate search result headline"
+deterministic = true
+pure = true
+constant_foldable = false
+expensive = true
+cost_multiplier = 15.0
+databases = ["PostgreSQL"]
+signature = { params = ["Text", "TsQuery"], returns = "Text" }
+
+# =============================================================================
+# CONDITIONAL FUNCTIONS
+# =============================================================================
+
+[[functions]]
+name = "COALESCE"
+category = "Scalar"
+description = "First non-null argument"
+deterministic = true
+pure = true
+constant_foldable = true
+strict = false
+inlineable = true
+cost_multiplier = 1.0
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = ["Any"], returns = "Any", variadic = true }
+
+[[functions]]
+name = "NULLIF"
+category = "Scalar"
+description = "Return NULL if arguments are equal"
+deterministic = true
+pure = true
+constant_foldable = true
+strict = false
+inlineable = true
+cost_multiplier = 1.0
+databases = ["PostgreSQL", "MySQL", "SQLite", "SqlServer", "Oracle"]
+signature = { params = ["Any", "Any"], returns = "Any" }
+
+# =============================================================================
+# ARRAY FUNCTIONS
+# =============================================================================
+
+[[functions]]
+name = "ARRAY_LENGTH"
+category = "Scalar"
+description = "Length of array"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+databases = ["PostgreSQL"]
+signature = { params = ["Array", "Integer"], returns = "Integer" }
+
+[[functions]]
+name = "UNNEST"
+category = "TableValued"
+description = "Expand array to rows"
+deterministic = true
+pure = true
+constant_foldable = false
+expensive = true
+cost_multiplier = 5.0
+databases = ["PostgreSQL"]
+signature = { params = ["Array"], returns = "Any" }
+
+# =============================================================================
+# SYSTEM FUNCTIONS
+# =============================================================================
+
+[[functions]]
+name = "CURRENT_USER"
+category = "Scalar"
+description = "Current session user"
+deterministic = false
+pure = false
+constant_foldable = false
+cost_multiplier = 1.0
+databases = ["PostgreSQL"]
+signature = { params = [], returns = "Text" }
+
+[[functions]]
+name = "GEN_RANDOM_UUID"
+category = "Scalar"
+description = "Generate random UUID"
+deterministic = false
+pure = false
+constant_foldable = false
+cost_multiplier = 1.0
+databases = ["PostgreSQL"]
+signature = { params = [], returns = "Text" }
+
+[[functions]]
+name = "NEXTVAL"
+category = "Scalar"
+description = "Next value from sequence"
+deterministic = false
+pure = false
+constant_foldable = false
+cost_multiplier = 1.0
+databases = ["PostgreSQL"]
+signature = { params = ["Text"], returns = "Integer" }
+
+# NOTE: This TOML file contains a representative sample of the 200+ functions
+# defined in the catalog. The complete catalog is built programmatically in
+# crates/ra-catalog/src/functions.rs with all function families registered.
