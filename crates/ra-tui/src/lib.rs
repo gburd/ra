@@ -21,9 +21,16 @@
 
 pub mod app;
 pub mod event;
+pub mod layout;
+pub mod panels;
+pub mod playback;
+pub mod setup;
 pub mod timeline;
 pub mod ui;
 
 pub use app::{App, AppError};
 pub use event::{EventHandler, TuiEvent};
+pub use layout::{FrameLayout, PanelLayout};
+pub use playback::PlaybackController;
+pub use setup::{SetupError, TuiConfig};
 pub use timeline::{Snapshot, Timeline};

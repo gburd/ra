@@ -247,6 +247,100 @@ impl IntegratedCostModel {
         // `effective_statistics` per table.
         HashMap::new()
     }
+
+    /// Apply execution feedback to adjust confidence and staleness.
+    ///
+    /// For each feedback entry, computes the Q-error between estimated
+    /// and actual rows. High Q-errors reduce confidence in the
+    /// affected table's statistics, signaling that re-analysis may
+    /// be warranted.
+    ///
+    /// Confidence adjustments:
+    /// - Q-error <= 1.5: no change (acceptable estimate)
+    /// - Q-error <= 3.0: reduce confidence by 10%
+    /// - Q-error <= 10.0: reduce confidence by 25%
+    /// - Q-error > 10.0: reduce confidence by 50%
+    ///
+    /// Returns the number of tables whose confidence was adjusted.
+    pub fn apply_execution_feedback(
+        &mut self,
+        feedback: &[ra_stats::timeline::ExecutionFeedback],
+    ) -> usize {
+        let mut adjusted_tables =
+            std::collections::HashSet::<String>::new();
+
+        for fb in feedback {
+            let q_err = fb.q_error();
+
+            let reduction = if q_err <= 1.5 {
+                0.0
+            } else if q_err <= 3.0 {
+                0.10
+            } else if q_err <= 10.0 {
+                0.25
+            } else {
+                0.50
+            };
+
+            if reduction == 0.0 {
+                continue;
+            }
+
+            // Extract table name from operator field or query.
+            let table_name = fb
+                .operator
+                .as_deref()
+                .and_then(extract_table_from_operator)
+                .or_else(|| extract_table_from_query(&fb.query));
+
+            if let Some(name) = table_name {
+                if let Some(managed) =
+                    self.adapter.get_table_stats_mut(&name)
+                {
+                    managed.state.confidence =
+                        (managed.state.confidence - reduction).max(0.0);
+                    adjusted_tables.insert(name);
+                }
+            }
+        }
+
+        adjusted_tables.len()
+    }
+}
+
+/// Extract a table name from an operator description like
+/// `SeqScan on lineitem` or `Index Scan on orders`.
+fn extract_table_from_operator(operator: &str) -> Option<String> {
+    let lower = operator.to_lowercase();
+    if let Some(pos) = lower.find(" on ") {
+        let after = &operator[pos + 4..];
+        let name = after
+            .split(|c: char| c.is_whitespace() || c == '(' || c == ')')
+            .next()?;
+        if name.is_empty() {
+            None
+        } else {
+            Some(name.to_string())
+        }
+    } else {
+        None
+    }
+}
+
+/// Extract the first table name from a SQL query's FROM clause.
+fn extract_table_from_query(query: &str) -> Option<String> {
+    let lower = query.to_lowercase();
+    let from_pos = lower.find(" from ")?;
+    let after = &query[from_pos + 6..];
+    let trimmed = after.trim_start();
+    let name = trimmed
+        .split(|c: char| c.is_whitespace() || c == ',' || c == '(')
+        .next()?;
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_string())
+    }
 }
 
 /// Build an [`IntegratedCostModel`] from raw core statistics and
@@ -2111,5 +2205,471 @@ mod tests {
 
         assert!(cost_after > cost_before);
         assert_eq!(model.table_count(), 1);
+    }
+
+    // ---- apply_execution_feedback ----
+
+    fn make_feedback(
+        estimated: f64,
+        actual: f64,
+        operator: &str,
+    ) -> ra_stats::timeline::ExecutionFeedback {
+        ra_stats::timeline::ExecutionFeedback {
+            time_offset: 0,
+            query: "SELECT * FROM t".to_string(),
+            operator: Some(operator.to_string()),
+            estimated_rows: estimated,
+            actual_rows: actual,
+            estimated_cost: None,
+            actual_time_ms: None,
+        }
+    }
+
+    #[test]
+    fn feedback_good_estimate_no_adjustment() {
+        let mut model = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            HardwareProfile::cpu_only(),
+        );
+        model.add_table(
+            "t".into(),
+            make_managed(10_000, StatisticsSource::ExactCount),
+        );
+        let confidence_before = model
+            .quality_metrics("t")
+            .expect("exists")
+            .confidence;
+
+        let feedback = [make_feedback(1000.0, 1000.0, "SeqScan on t")];
+        let adjusted = model.apply_execution_feedback(&feedback);
+
+        assert_eq!(adjusted, 0);
+        let confidence_after = model
+            .quality_metrics("t")
+            .expect("exists")
+            .confidence;
+        assert!(
+            (confidence_after - confidence_before).abs() < f64::EPSILON
+        );
+    }
+
+    #[test]
+    fn feedback_moderate_error_reduces_confidence() {
+        let mut model = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            HardwareProfile::cpu_only(),
+        );
+        model.add_table(
+            "t".into(),
+            make_managed(10_000, StatisticsSource::ExactCount),
+        );
+
+        // Q-error = 2.0, in the (1.5, 3.0] range => 10% reduction
+        let feedback =
+            [make_feedback(2000.0, 1000.0, "SeqScan on t")];
+        let adjusted = model.apply_execution_feedback(&feedback);
+
+        assert_eq!(adjusted, 1);
+        let confidence = model
+            .quality_metrics("t")
+            .expect("exists")
+            .confidence;
+        assert!((confidence - 0.9).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn feedback_large_error_reduces_confidence_more() {
+        let mut model = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            HardwareProfile::cpu_only(),
+        );
+        model.add_table(
+            "t".into(),
+            make_managed(10_000, StatisticsSource::ExactCount),
+        );
+
+        // Q-error = 5.0, in the (3.0, 10.0] range => 25% reduction
+        let feedback =
+            [make_feedback(5000.0, 1000.0, "SeqScan on t")];
+        let adjusted = model.apply_execution_feedback(&feedback);
+
+        assert_eq!(adjusted, 1);
+        let confidence = model
+            .quality_metrics("t")
+            .expect("exists")
+            .confidence;
+        assert!((confidence - 0.75).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn feedback_extreme_error_halves_confidence() {
+        let mut model = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            HardwareProfile::cpu_only(),
+        );
+        model.add_table(
+            "t".into(),
+            make_managed(10_000, StatisticsSource::ExactCount),
+        );
+
+        // Q-error = 20.0 => 50% reduction
+        let feedback =
+            [make_feedback(20_000.0, 1000.0, "SeqScan on t")];
+        let adjusted = model.apply_execution_feedback(&feedback);
+
+        assert_eq!(adjusted, 1);
+        let confidence = model
+            .quality_metrics("t")
+            .expect("exists")
+            .confidence;
+        assert!((confidence - 0.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn feedback_multiple_entries_accumulate() {
+        let mut model = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            HardwareProfile::cpu_only(),
+        );
+        model.add_table(
+            "t".into(),
+            make_managed(10_000, StatisticsSource::ExactCount),
+        );
+
+        // Two moderate errors: 10% + 10% = confidence goes 1.0 -> 0.8
+        let feedback = [
+            make_feedback(2000.0, 1000.0, "SeqScan on t"),
+            make_feedback(1000.0, 2000.0, "SeqScan on t"),
+        ];
+        let adjusted = model.apply_execution_feedback(&feedback);
+
+        assert_eq!(adjusted, 1);
+        let confidence = model
+            .quality_metrics("t")
+            .expect("exists")
+            .confidence;
+        assert!((confidence - 0.8).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn feedback_confidence_never_negative() {
+        let mut model = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            HardwareProfile::cpu_only(),
+        );
+        model.add_table(
+            "t".into(),
+            make_managed(10_000, StatisticsSource::Default),
+        );
+
+        // Default confidence = 0.3; extreme error reduces by 0.5
+        let feedback =
+            [make_feedback(100_000.0, 1.0, "SeqScan on t")];
+        model.apply_execution_feedback(&feedback);
+
+        let confidence = model
+            .quality_metrics("t")
+            .expect("exists")
+            .confidence;
+        assert!(confidence >= 0.0);
+    }
+
+    #[test]
+    fn feedback_unknown_table_ignored() {
+        let mut model = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            HardwareProfile::cpu_only(),
+        );
+        model.add_table(
+            "t".into(),
+            make_managed(10_000, StatisticsSource::ExactCount),
+        );
+
+        let feedback =
+            [make_feedback(20_000.0, 1000.0, "SeqScan on unknown")];
+        let adjusted = model.apply_execution_feedback(&feedback);
+
+        assert_eq!(adjusted, 0);
+    }
+
+    #[test]
+    fn feedback_empty_input() {
+        let mut model = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            HardwareProfile::cpu_only(),
+        );
+        let adjusted = model.apply_execution_feedback(&[]);
+        assert_eq!(adjusted, 0);
+    }
+
+    #[test]
+    fn feedback_extracts_table_from_query_when_no_operator() {
+        let mut model = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            HardwareProfile::cpu_only(),
+        );
+        model.add_table(
+            "orders".into(),
+            make_managed(10_000, StatisticsSource::ExactCount),
+        );
+
+        let fb = ra_stats::timeline::ExecutionFeedback {
+            time_offset: 0,
+            query: "SELECT * FROM orders WHERE id > 10".to_string(),
+            operator: None,
+            estimated_rows: 5000.0,
+            actual_rows: 1000.0,
+            estimated_cost: None,
+            actual_time_ms: None,
+        };
+        let adjusted = model.apply_execution_feedback(&[fb]);
+
+        assert_eq!(adjusted, 1);
+    }
+
+    #[test]
+    fn feedback_multiple_tables() {
+        let mut model = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            HardwareProfile::cpu_only(),
+        );
+        model.add_table(
+            "a".into(),
+            make_managed(10_000, StatisticsSource::ExactCount),
+        );
+        model.add_table(
+            "b".into(),
+            make_managed(5_000, StatisticsSource::ExactCount),
+        );
+
+        let feedback = [
+            make_feedback(5000.0, 1000.0, "SeqScan on a"),
+            make_feedback(5000.0, 1000.0, "Index Scan on b"),
+        ];
+        let adjusted = model.apply_execution_feedback(&feedback);
+
+        assert_eq!(adjusted, 2);
+    }
+
+    #[test]
+    fn feedback_increases_costs() {
+        let mut model = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            HardwareProfile::cpu_only(),
+        );
+        model.add_table(
+            "t".into(),
+            make_managed(100_000, StatisticsSource::ExactCount),
+        );
+        let cost_before = model.scan_cost("t");
+
+        let feedback =
+            [make_feedback(100_000.0, 10_000.0, "SeqScan on t")];
+        model.apply_execution_feedback(&feedback);
+
+        let cost_after = model.scan_cost("t");
+        assert!(cost_after > cost_before);
+    }
+
+    #[test]
+    fn feedback_at_threshold_boundary_1_5() {
+        let mut model = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            HardwareProfile::cpu_only(),
+        );
+        model.add_table(
+            "t".into(),
+            make_managed(10_000, StatisticsSource::ExactCount),
+        );
+
+        // Q-error = 1.5 exactly => no adjustment
+        let feedback =
+            [make_feedback(1500.0, 1000.0, "SeqScan on t")];
+        let adjusted = model.apply_execution_feedback(&feedback);
+        assert_eq!(adjusted, 0);
+    }
+
+    #[test]
+    fn feedback_just_above_threshold_1_5() {
+        let mut model = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            HardwareProfile::cpu_only(),
+        );
+        model.add_table(
+            "t".into(),
+            make_managed(10_000, StatisticsSource::ExactCount),
+        );
+
+        // Q-error = 1.6 => 10% reduction
+        let feedback =
+            [make_feedback(1600.0, 1000.0, "SeqScan on t")];
+        let adjusted = model.apply_execution_feedback(&feedback);
+        assert_eq!(adjusted, 1);
+    }
+
+    #[test]
+    fn feedback_at_threshold_boundary_3_0() {
+        let mut model = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            HardwareProfile::cpu_only(),
+        );
+        model.add_table(
+            "t".into(),
+            make_managed(10_000, StatisticsSource::ExactCount),
+        );
+
+        // Q-error = 3.0 exactly => 10% reduction
+        let feedback =
+            [make_feedback(3000.0, 1000.0, "SeqScan on t")];
+        let adjusted = model.apply_execution_feedback(&feedback);
+        assert_eq!(adjusted, 1);
+        let confidence = model
+            .quality_metrics("t")
+            .expect("exists")
+            .confidence;
+        assert!((confidence - 0.9).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn feedback_just_above_threshold_3_0() {
+        let mut model = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            HardwareProfile::cpu_only(),
+        );
+        model.add_table(
+            "t".into(),
+            make_managed(10_000, StatisticsSource::ExactCount),
+        );
+
+        // Q-error = 3.1 => 25% reduction
+        let feedback =
+            [make_feedback(3100.0, 1000.0, "SeqScan on t")];
+        let adjusted = model.apply_execution_feedback(&feedback);
+        assert_eq!(adjusted, 1);
+        let confidence = model
+            .quality_metrics("t")
+            .expect("exists")
+            .confidence;
+        assert!((confidence - 0.75).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn feedback_at_threshold_boundary_10_0() {
+        let mut model = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            HardwareProfile::cpu_only(),
+        );
+        model.add_table(
+            "t".into(),
+            make_managed(10_000, StatisticsSource::ExactCount),
+        );
+
+        // Q-error = 10.0 exactly => 25% reduction
+        let feedback =
+            [make_feedback(10_000.0, 1000.0, "SeqScan on t")];
+        let adjusted = model.apply_execution_feedback(&feedback);
+        assert_eq!(adjusted, 1);
+        let confidence = model
+            .quality_metrics("t")
+            .expect("exists")
+            .confidence;
+        assert!((confidence - 0.75).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn feedback_just_above_threshold_10_0() {
+        let mut model = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            HardwareProfile::cpu_only(),
+        );
+        model.add_table(
+            "t".into(),
+            make_managed(10_000, StatisticsSource::ExactCount),
+        );
+
+        // Q-error = 11.0 => 50% reduction
+        let feedback =
+            [make_feedback(11_000.0, 1000.0, "SeqScan on t")];
+        let adjusted = model.apply_execution_feedback(&feedback);
+        assert_eq!(adjusted, 1);
+        let confidence = model
+            .quality_metrics("t")
+            .expect("exists")
+            .confidence;
+        assert!((confidence - 0.5).abs() < f64::EPSILON);
+    }
+
+    // ---- extract_table_from_operator ----
+
+    #[test]
+    fn extract_table_seq_scan() {
+        assert_eq!(
+            extract_table_from_operator("SeqScan on lineitem"),
+            Some("lineitem".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_table_index_scan() {
+        assert_eq!(
+            extract_table_from_operator("Index Scan on orders"),
+            Some("orders".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_table_with_parenthetical() {
+        assert_eq!(
+            extract_table_from_operator(
+                "Bitmap Heap Scan on users (cost=100)"
+            ),
+            Some("users".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_table_no_on_clause() {
+        assert_eq!(
+            extract_table_from_operator("Hash Join"),
+            None
+        );
+    }
+
+    #[test]
+    fn extract_table_empty_after_on() {
+        assert_eq!(
+            extract_table_from_operator("Scan on "),
+            None
+        );
+    }
+
+    // ---- extract_table_from_query ----
+
+    #[test]
+    fn extract_table_from_select() {
+        assert_eq!(
+            extract_table_from_query(
+                "SELECT * FROM orders WHERE id > 10"
+            ),
+            Some("orders".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_table_from_select_with_join() {
+        assert_eq!(
+            extract_table_from_query(
+                "SELECT * FROM lineitem,orders WHERE l_orderkey = o_orderkey"
+            ),
+            Some("lineitem".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_table_no_from() {
+        assert_eq!(
+            extract_table_from_query("SELECT 1 + 1"),
+            None
+        );
     }
 }

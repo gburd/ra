@@ -48,6 +48,14 @@ impl StatisticsAdapter {
         self.tables.get(table)
     }
 
+    /// Get mutable managed statistics for a table.
+    pub fn get_table_stats_mut(
+        &mut self,
+        table: &str,
+    ) -> Option<&mut ManagedTableStats> {
+        self.tables.get_mut(table)
+    }
+
     /// Convert to ra-core Statistics, applying staleness adjustments.
     pub fn to_core_statistics(
         &self,

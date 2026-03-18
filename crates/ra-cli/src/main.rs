@@ -3,7 +3,9 @@
 
 mod diff_validator;
 mod display;
+mod stats_commands;
 mod test_executor;
+mod visualize;
 
 use std::path::{Path, PathBuf};
 
@@ -131,6 +133,46 @@ enum Commands {
         #[arg(long)]
         headless: bool,
     },
+    /// Statistics timeline commands (play, feedback, visualize).
+    #[command(subcommand)]
+    StatsTimeline(StatsTimelineCommands),
+}
+
+#[derive(Subcommand)]
+enum StatsTimelineCommands {
+    /// Replay a statistics timeline with streaming output.
+    Play {
+        /// Path to a timeline TOML file.
+        #[arg(long)]
+        timeline: String,
+        /// Output format (table, json, ascii, html).
+        #[arg(long, default_value = "table")]
+        format: String,
+        /// Playback speed multiplier (0 = instant).
+        #[arg(long, default_value = "0")]
+        speed: f64,
+    },
+    /// Simulate batch execution with feedback loop.
+    Feedback {
+        /// Path to a timeline TOML file.
+        #[arg(long)]
+        timeline: String,
+        /// Output format (table, json, ascii, html).
+        #[arg(long, default_value = "table")]
+        format: String,
+        /// Number of feedback entries per batch.
+        #[arg(long, default_value = "5")]
+        batch_size: usize,
+    },
+    /// Generate cost/cardinality evolution charts.
+    Visualize {
+        /// Path to a timeline TOML file.
+        #[arg(long)]
+        timeline: String,
+        /// Output format (table, json, ascii, html).
+        #[arg(long, default_value = "ascii")]
+        format: String,
+    },
 }
 
 // ── Main ────────────────────────────────────────────────────
@@ -202,6 +244,48 @@ fn main() -> Result<()> {
             demo,
             headless,
         } => cmd_tui(timeline.as_deref(), demo, headless),
+        Commands::StatsTimeline(sub) => match sub {
+            StatsTimelineCommands::Play {
+                timeline,
+                format,
+                speed,
+            } => {
+                let fmt =
+                    stats_commands::OutputFormat::from_str_arg(&format)?;
+                stats_commands::cmd_stats_play(
+                    &timeline,
+                    fmt,
+                    speed,
+                    cli.verbose,
+                )
+            }
+            StatsTimelineCommands::Feedback {
+                timeline,
+                format,
+                batch_size,
+            } => {
+                let fmt =
+                    stats_commands::OutputFormat::from_str_arg(&format)?;
+                stats_commands::cmd_stats_feedback(
+                    &timeline,
+                    fmt,
+                    batch_size,
+                    cli.verbose,
+                )
+            }
+            StatsTimelineCommands::Visualize {
+                timeline,
+                format,
+            } => {
+                let fmt =
+                    stats_commands::OutputFormat::from_str_arg(&format)?;
+                stats_commands::cmd_stats_visualize(
+                    &timeline,
+                    fmt,
+                    cli.verbose,
+                )
+            }
+        },
     }
 }
 
@@ -1058,9 +1142,25 @@ fn cmd_tui(
             .with_context(|| {
                 format!("reading timeline file: {path}")
             })?;
-        serde_json::from_str(&source).with_context(|| {
-            format!("parsing timeline JSON from: {path}")
-        })?
+
+        // Try JSON first (native format), fall back to demo if TOML
+        if path.ends_with(".json") {
+            serde_json::from_str(&source).with_context(|| {
+                format!("parsing timeline JSON from: {path}")
+            })?
+        } else if path.ends_with(".toml") {
+            // TOML statistics timelines not yet supported in TUI
+            // (different format - statistics evolution vs optimizer snapshots)
+            eprintln!("Note: TOML statistics timelines not yet supported in TUI.");
+            eprintln!("Using demo timeline instead.");
+            eprintln!("Tip: Use 'ra-cli tui --demo' for the demo timeline.");
+            ra_tui::Timeline::demo()
+        } else {
+            // Try JSON parse as fallback
+            serde_json::from_str(&source).with_context(|| {
+                format!("parsing timeline from: {path}")
+            })?
+        }
     } else {
         bail!(
             "specify --demo for demo data or \

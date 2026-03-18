@@ -179,3 +179,5 @@ The `timelines/` directory contains example files:
 | `multi-table-join.toml` | Star schema join statistics with growing fact table |
 | `analyze-feedback-loop.toml` | Feedback-driven ANALYZE improving accuracy over time |
 | `delete-heavy-workload.toml` | Delete-heavy workload with dead tuple accumulation |
+| `bulk-load.toml` | Bulk insert with staleness propagation and recovery |
+| `mixed-workload.toml` | Concurrent read/write patterns affecting multiple tables |

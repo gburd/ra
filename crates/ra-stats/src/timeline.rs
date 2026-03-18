@@ -2237,6 +2237,8 @@ ndv = 50
             "multi-table-join.toml",
             "analyze-feedback-loop.toml",
             "delete-heavy-workload.toml",
+            "bulk-load.toml",
+            "mixed-workload.toml",
         ];
         for file in &files {
             let tl = load_example(file);
@@ -2259,6 +2261,8 @@ ndv = 50
             "multi-table-join.toml",
             "analyze-feedback-loop.toml",
             "delete-heavy-workload.toml",
+            "bulk-load.toml",
+            "mixed-workload.toml",
         ];
         for file in &files {
             let tl = load_example(file);
@@ -2280,6 +2284,8 @@ ndv = 50
             "multi-table-join.toml",
             "analyze-feedback-loop.toml",
             "delete-heavy-workload.toml",
+            "bulk-load.toml",
+            "mixed-workload.toml",
         ];
         for file in &files {
             let tl = load_example(file);
@@ -2291,5 +2297,141 @@ ndv = 50
                 );
             }
         }
+    }
+
+    // -- bulk-load.toml --
+
+    #[test]
+    fn example_bulk_load_parses() {
+        let tl = load_example("bulk-load.toml");
+        assert_eq!(tl.metadata.name, "bulk-load");
+        assert!(tl.snapshot_count() >= 4);
+        let names = tl.table_names();
+        assert!(names.contains(&"inventory".to_string()));
+    }
+
+    #[test]
+    fn example_bulk_load_row_count_grows() {
+        let tl = load_example("bulk-load.toml");
+        let player = TimelinePlayer::new(tl).expect("player");
+        let delta = player.row_count_delta("inventory", 0, 1);
+        assert!(delta.is_some());
+        assert!(delta.expect("delta") > 0);
+    }
+
+    #[test]
+    fn example_bulk_load_has_staleness_period() {
+        let tl = load_example("bulk-load.toml");
+        // Should have feedback where estimate != actual (stale)
+        let stale_fb: Vec<_> = tl
+            .feedback
+            .iter()
+            .filter(|f| f.q_error() > 1.5)
+            .collect();
+        assert!(
+            !stale_fb.is_empty(),
+            "bulk-load should have stale feedback entries"
+        );
+    }
+
+    #[test]
+    fn example_bulk_load_recovery_after_analyze() {
+        let tl = load_example("bulk-load.toml");
+        // Last feedback should be close to accurate (post-ANALYZE)
+        let last = tl.feedback.last().expect("feedback");
+        assert!(
+            last.q_error() < 1.5,
+            "post-ANALYZE feedback should be accurate"
+        );
+    }
+
+    #[test]
+    fn example_bulk_load_events() {
+        let tl = load_example("bulk-load.toml");
+        assert!(tl.event_count() >= 5);
+        let insert_count = tl
+            .events
+            .iter()
+            .filter(|e| e.kind == EventKind::Insert)
+            .count();
+        assert!(insert_count >= 3);
+    }
+
+    #[test]
+    fn example_bulk_load_player_walkthrough() {
+        let tl = load_example("bulk-load.toml");
+        let mut player = TimelinePlayer::new(tl).expect("player");
+        player.seek_start();
+        let stats = player.current_managed_stats().expect("stats");
+        assert!(stats.contains_key("inventory"));
+        let inv = &stats["inventory"];
+        assert_eq!(inv.table.row_count, 0);
+    }
+
+    // -- mixed-workload.toml --
+
+    #[test]
+    fn example_mixed_workload_parses() {
+        let tl = load_example("mixed-workload.toml");
+        assert_eq!(tl.metadata.name, "mixed-workload");
+        assert!(tl.snapshot_count() >= 4);
+    }
+
+    #[test]
+    fn example_mixed_workload_has_multiple_tables() {
+        let tl = load_example("mixed-workload.toml");
+        let names = tl.table_names();
+        assert!(names.contains(&"users".to_string()));
+        assert!(names.contains(&"orders".to_string()));
+        assert!(names.contains(&"order_items".to_string()));
+    }
+
+    #[test]
+    fn example_mixed_workload_events() {
+        let tl = load_example("mixed-workload.toml");
+        assert!(tl.event_count() >= 10);
+        let has_insert = tl
+            .events
+            .iter()
+            .any(|e| e.kind == EventKind::Insert);
+        let has_update = tl
+            .events
+            .iter()
+            .any(|e| e.kind == EventKind::Update);
+        let has_delete = tl
+            .events
+            .iter()
+            .any(|e| e.kind == EventKind::Delete);
+        assert!(has_insert);
+        assert!(has_update);
+        assert!(has_delete);
+    }
+
+    #[test]
+    fn example_mixed_workload_orders_grow() {
+        let tl = load_example("mixed-workload.toml");
+        let player = TimelinePlayer::new(tl).expect("player");
+        let last = player.snapshot_count() - 1;
+        let delta = player.row_count_delta("orders", 0, last);
+        assert!(delta.is_some());
+        assert!(delta.expect("delta") > 0);
+    }
+
+    #[test]
+    fn example_mixed_workload_feedback() {
+        let tl = load_example("mixed-workload.toml");
+        assert!(tl.feedback_count() >= 3);
+        let player = TimelinePlayer::new(tl).expect("player");
+        let avg = player.average_q_error().expect("avg");
+        assert!(avg >= 1.0);
+    }
+
+    #[test]
+    fn example_mixed_workload_player_walkthrough() {
+        let tl = load_example("mixed-workload.toml");
+        let mut player = TimelinePlayer::new(tl).expect("player");
+        player.seek_start();
+        let stats = player.current_managed_stats().expect("stats");
+        assert_eq!(stats.len(), 3);
     }
 }
