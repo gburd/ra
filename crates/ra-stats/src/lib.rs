@@ -93,6 +93,7 @@ pub mod gathering_cost;
 pub mod index_types;
 pub mod integration;
 pub mod profiles;
+pub mod skew;
 pub mod timeline;
 pub mod types;
 
@@ -103,6 +104,10 @@ pub use index_types::{IndexCostFactors, IndexMetadata, IndexType};
 pub use profiles::{ProfileSelector, StatisticsProfile};
 pub use timeline::{
     PlaybackState, Timeline, TimelineError, TimelineEvent, TimelinePlayer,
+};
+pub use skew::{
+    FrequencyBucket, FrequencyHistogram, HotKey, SkewAnalysis, SkewDetector, SkewSeverity,
+    SkewStrategy,
 };
 pub use types::{
     AccessPattern, ColumnId, ColumnStats, CorrelationStats, FunctionalDependency, Histogram,
