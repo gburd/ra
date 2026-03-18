@@ -30,6 +30,7 @@
 pub mod analysis;
 pub mod cost;
 pub mod differential;
+pub mod distributed_optimizer;
 pub mod egraph;
 pub mod extract;
 pub mod memo;
@@ -41,6 +42,10 @@ pub mod timely;
 
 pub use analysis::RelAnalysis;
 pub use cost::{CostCalibration, IntegratedCostFn, IntegratedCostModel};
+pub use distributed_optimizer::{
+    ClusterTopology, DistributedOptimizer, DistributedOptimizerConfig,
+    DistributedOptimizerError,
+};
 pub use differential::{IncrementalError, IncrementalOptimizer, RuleChange, RuleId};
 pub use egraph::{
     to_rec_expr, EGraphError, IncrementalStats, OptimizationResult,

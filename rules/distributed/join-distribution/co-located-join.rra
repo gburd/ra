@@ -1,0 +1,117 @@
+---
+id: co-located-join
+name: Co-Located Join (No Data Movement)
+category: distributed/join-distribution
+databases: [cockroachdb, citus, tidb, yugabyte, vitess]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, join, colocation, partition-wise, zero-movement]
+complexity: O(1)
+benefit_range: [0.8, 1.0]
+---
+
+# Co-Located Join (No Data Movement)
+
+## Description
+
+When both tables are already hash-partitioned on the join key with the
+same partition count, each node holds matching partitions from both
+tables. The join executes locally on each node with zero network
+transfer.
+
+**When to apply**: Both inputs are hash-partitioned on the join key
+columns with identical partition counts.
+
+**Why it works**: Hash partitioning guarantees that rows with the same
+key land on the same node, so each local join produces correct results
+without coordination.
+
+## Relational Algebra
+
+```algebra
+Join[c](R, S)
+  -> PartitionWiseJoin[c](R, S)
+  where R.partition_keys == join_keys_left
+  where S.partition_keys == join_keys_right
+  where R.partition_count == S.partition_count
+```
+
+## Implementation
+
+```rust
+rw!("co-located-join";
+    "(join ?type ?cond
+        (exchange hash_partition ?left ?keys)
+        (exchange hash_partition ?right ?keys))" =>
+    "(partition_wise_join ?type ?cond ?left ?right ?keys)"
+    if same_partition_keys("?left", "?right", "?keys")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    left: &DataDistribution,
+    right: &DataDistribution,
+    join_keys_left: &[Expr],
+    join_keys_right: &[Expr],
+) -> bool {
+    if let (
+        DataDistribution::HashPartitioned { keys: lk, partition_count: lc },
+        DataDistribution::HashPartitioned { keys: rk, partition_count: rc },
+    ) = (left, right) {
+        lk == join_keys_left && rk == join_keys_right && lc == rc
+    } else {
+        false
+    }
+}
+```
+
+**Restrictions:**
+- Partition keys must exactly match join keys (subset is insufficient)
+- Partition counts must be identical
+- Hash functions must be compatible across both tables
+
+## Cost Model
+
+```rust
+fn cost() -> f64 {
+    0.0 // No network cost at all
+}
+```
+
+## Test Cases
+
+```sql
+-- Test 1: Both tables partitioned by join key
+SELECT o.*, c.name
+FROM orders o            -- hash(customer_id), 8 partitions
+JOIN customers c         -- hash(customer_id), 8 partitions
+  ON o.customer_id = c.id;
+-- Expected: Partition-wise join, zero data movement
+```
+
+```sql
+-- Test 2: Different partition counts - NOT co-located
+SELECT o.*, c.name
+FROM orders o            -- hash(customer_id), 8 partitions
+JOIN customers c         -- hash(customer_id), 16 partitions
+  ON o.customer_id = c.id;
+-- Expected: Must repartition one side
+```
+
+```sql
+-- Test 3: Different partition keys - NOT co-located
+SELECT o.*, c.name
+FROM orders o            -- hash(order_id)
+JOIN customers c         -- hash(customer_id)
+  ON o.customer_id = c.id;
+-- Expected: Must repartition orders by customer_id
+```
+
+## References
+
+CockroachDB: pkg/sql/opt/memo/logical_props_builder.go
+Citus: src/backend/distributed/planner/multi_join_order.c
+YugabyteDB: src/yb/yql/pggate/pg_gate_impl.cc

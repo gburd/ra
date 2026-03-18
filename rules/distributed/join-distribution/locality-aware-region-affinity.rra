@@ -1,0 +1,75 @@
+---
+id: locality-aware-region-affinity
+name: Region-Affinity Join Execution
+category: distributed/join-distribution
+databases: [spanner, cockroachdb, cosmosdb, dynamodb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, join, locality, region, geo-replication]
+complexity: O(1)
+benefit_range: [0.2, 0.7]
+---
+
+# Region-Affinity Join Execution
+
+## Description
+
+Execute the join in the region closest to the majority of the input
+data, minimizing total cross-region transfer bytes. For globally
+distributed tables, region affinity decisions can reduce latency by
+orders of magnitude.
+
+## Relational Algebra
+
+```algebra
+Join[c](R, S)
+  -> Join[c](R, S) @ best_region
+  where best_region = argmin(
+    region, transfer_cost(R, region) + transfer_cost(S, region)
+  )
+```
+
+## Implementation
+
+```rust
+rw!("locality-aware-region-affinity";
+    "(join ?type ?cond ?left ?right)" =>
+    "(region_join ?type ?cond ?left ?right ?best_region)"
+    if multi_region("?left", "?right")
+),
+```
+
+## Test Cases
+
+```sql
+-- Test 1: Execute where most data lives
+SELECT u.*, o.*
+FROM users u       -- 80% in US-East, 20% in EU-West
+JOIN orders o      -- 90% in US-East, 10% in EU-West
+  ON u.id = o.uid;
+-- Expected: Execute in US-East (minimize EU data transfer)
+```
+
+```sql
+-- Test 2: Balanced data, pick closer to query origin
+SELECT *
+FROM table_a a     -- 50% US-East, 50% US-West
+JOIN table_b b     -- 50% US-East, 50% US-West
+  ON a.id = b.a_id;
+-- Expected: Execute in region closest to client
+```
+
+```sql
+-- Test 3: One table entirely in one region
+SELECT *
+FROM global_events e   -- spread across 5 regions
+JOIN us_config c       -- 100% in US-East
+  ON e.config_id = c.id;
+-- Expected: Broadcast us_config or execute in US-East
+```
+
+## References
+
+Google Spanner: placement-directed queries
+CockroachDB: regional tables and REGIONAL BY ROW
+Azure Cosmos DB: multi-region writes

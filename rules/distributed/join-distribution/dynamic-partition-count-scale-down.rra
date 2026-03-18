@@ -1,0 +1,61 @@
+---
+id: dynamic-partition-count-scale-down
+name: Scale Down Partition Count for Small Data
+category: distributed/join-distribution
+databases: [spark, presto, trino, databricks]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, join, partition-count, scale-down, coalesce]
+complexity: O(1)
+benefit_range: [0.1, 0.5]
+---
+
+# Scale Down Partition Count for Small Data
+
+## Description
+
+When data volume is small, too many partitions create scheduling overhead
+and small-file problems. Coalesce partitions to reduce the count while
+keeping each partition at a reasonable size.
+
+## Relational Algebra
+
+```algebra
+Exchange[hash(k), N partitions](R)
+  -> Exchange[hash(k), M partitions](R)
+  where M = max(1, ceil(|R| / min_partition_size))
+  where M < N
+```
+
+## Test Cases
+
+```sql
+-- Test 1: After filter, data is tiny
+SELECT o.*, c.name
+FROM orders o
+JOIN customers c ON o.cid = c.id
+WHERE o.date = '2024-01-01';    -- 0.3% selectivity
+-- 100GB * 0.003 = 300MB, 200 partitions -> coalesce to ~3
+```
+
+```sql
+-- Test 2: Small tables with many partitions
+SELECT a.*, b.*
+FROM config a           -- 1MB, 200 partitions
+JOIN settings b         -- 500KB, 200 partitions
+  ON a.id = b.config_id;
+-- Expected: Coalesce to 1 partition
+```
+
+```sql
+-- Test 3: Medium data, moderate reduction
+SELECT *
+FROM daily_stats s      -- 5GB, 200 partitions -> 25MB each
+JOIN dimensions d ON s.dim_id = d.id;
+-- Expected: Coalesce to ~50 partitions (100MB each)
+```
+
+## References
+
+Spark: spark.sql.adaptive.coalescePartitions.minPartitionSize
+Presto: min-output-partition-count-for-join

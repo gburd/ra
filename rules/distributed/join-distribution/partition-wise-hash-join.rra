@@ -1,0 +1,62 @@
+---
+id: partition-wise-hash-join
+name: Partition-Wise Hash Join
+category: distributed/join-distribution
+databases: [cockroachdb, citus, greenplum, oracle]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, join, partition-wise, hash-join, zero-movement]
+complexity: O(1)
+benefit_range: [0.8, 1.0]
+---
+
+# Partition-Wise Hash Join
+
+## Description
+
+When both inputs are hash-partitioned on the join key, execute a local
+hash join on each node independently. No data movement, no coordination.
+
+## Relational Algebra
+
+```algebra
+HashJoin[c](R, S)
+  -> Union(HashJoin[c](R_i, S_i) for i in partitions)
+  where R.hash_key == join_key_left
+  where S.hash_key == join_key_right
+  where R.partition_count == S.partition_count
+```
+
+## Test Cases
+
+```sql
+-- Test 1: Both tables partitioned on join key
+SELECT o.total, c.name
+FROM orders o            -- hash(customer_id), 16 partitions
+JOIN customers c         -- hash(id), 16 partitions
+  ON o.customer_id = c.id;
+-- Expected: 16 local hash joins, zero network
+```
+
+```sql
+-- Test 2: Composite partition key
+SELECT *
+FROM sales s             -- hash(store_id, date)
+JOIN targets t           -- hash(store_id, date)
+  ON s.store_id = t.store_id AND s.date = t.date;
+-- Expected: Partition-wise join on composite key
+```
+
+```sql
+-- Test 3: Partition key subset of join key
+SELECT *
+FROM orders o            -- hash(customer_id)
+JOIN line_items l        -- hash(order_id)
+  ON o.id = l.order_id AND o.customer_id = l.customer_id;
+-- Expected: NOT partition-wise, keys don't match
+```
+
+## References
+
+Oracle: partition-wise joins documentation
+Greenplum: collocated join optimization
