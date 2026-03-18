@@ -43,8 +43,8 @@ pub mod timely;
 pub use analysis::RelAnalysis;
 pub use cost::{CostCalibration, IntegratedCostFn, IntegratedCostModel};
 pub use distributed_optimizer::{
-    ClusterTopology, DistributedOptimizer, DistributedOptimizerConfig,
-    DistributedOptimizerError,
+    AggStrategyResult, ClusterTopology, DistributedOptimizer,
+    DistributedOptimizerConfig, DistributedOptimizerError,
 };
 pub use differential::{IncrementalError, IncrementalOptimizer, RuleChange, RuleId};
 pub use egraph::{
