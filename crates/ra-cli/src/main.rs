@@ -1,7 +1,9 @@
 //! Command-line interface for the relational algebra rule system.
 #![allow(clippy::print_stderr)]
 
+mod diff_validator;
 mod display;
+mod test_executor;
 
 use std::path::{Path, PathBuf};
 
@@ -49,6 +51,9 @@ enum Commands {
     Test {
         /// Path to a rule file or directory of rule files.
         path: String,
+        /// Only run tests whose rule ID contains this substring.
+        #[arg(short, long)]
+        filter: Option<String>,
     },
     /// List available rules.
     List {
@@ -80,6 +85,24 @@ enum Commands {
         #[arg(long, default_value = "auto")]
         hardware_profile: String,
     },
+    /// Gather metadata from a database and write schema to JSON.
+    GatherMetadata {
+        /// Database connection string (postgresql://, mysql://, sqlite://).
+        #[arg(long)]
+        db: String,
+        /// Output file path for the schema JSON.
+        #[arg(long)]
+        output: String,
+    },
+    /// Compare an RA plan with a database EXPLAIN plan.
+    Compare {
+        /// SQL query to compare.
+        #[arg(long)]
+        sql: String,
+        /// Path to a schema JSON file (from gather-metadata).
+        #[arg(long)]
+        schema: String,
+    },
 }
 
 // ── Main ────────────────────────────────────────────────────
@@ -104,8 +127,13 @@ fn main() -> Result<()> {
         Commands::Validate { path } => {
             cmd_validate(&path, cli.verbose, cli.quiet)
         }
-        Commands::Test { path } => {
-            cmd_test(&path, cli.quiet)
+        Commands::Test { path, filter } => {
+            cmd_test(
+                &path,
+                cli.verbose,
+                cli.quiet,
+                filter.as_deref(),
+            )
         }
         Commands::List { dir } => {
             let dir = dir.as_deref().unwrap_or("rules");
@@ -120,6 +148,12 @@ fn main() -> Result<()> {
         }
         Commands::Optimize { query, hardware_profile } => {
             cmd_optimize(&query, &hardware_profile, cli.verbose, cli.quiet)
+        }
+        Commands::GatherMetadata { db, output } => {
+            cmd_gather_metadata(&db, &output, cli.quiet)
+        }
+        Commands::Compare { sql, schema } => {
+            cmd_compare(&sql, &schema, cli.verbose, cli.quiet)
         }
     }
 }
@@ -203,7 +237,12 @@ fn cmd_validate(
 
 // ── test ────────────────────────────────────────────────────
 
-fn cmd_test(path: &str, quiet: bool) -> Result<()> {
+fn cmd_test(
+    path: &str,
+    verbose: bool,
+    quiet: bool,
+    filter: Option<&str>,
+) -> Result<()> {
     let files = collect_rra_files(path)?;
 
     if files.is_empty() {
@@ -212,12 +251,13 @@ fn cmd_test(path: &str, quiet: bool) -> Result<()> {
 
     if !quiet {
         print_header(&format!(
-            "Scanning {} file(s) for test cases",
+            "Running tests from {} file(s)",
             files.len()
         ));
     }
 
-    let mut total_tests = 0usize;
+    let optimizer = Optimizer::new();
+    let mut stats = test_executor::TestStats::default();
 
     for file in &files {
         let source = std::fs::read_to_string(file)
@@ -225,46 +265,144 @@ fn cmd_test(path: &str, quiet: bool) -> Result<()> {
                 format!("reading {}", file.display())
             })?;
 
-        match parse_rule_file(&source) {
-            Ok(rule) => {
-                let count = rule.test_cases.len();
-                total_tests += count;
-                if !quiet && count > 0 {
-                    print_status(
-                        &format!("{count} test(s)"),
-                        &format!(
-                            "{} ({})",
-                            rule.metadata.id,
-                            file.display()
-                        ),
-                        true,
-                    );
-                }
-            }
+        let rule = match parse_rule_file(&source) {
+            Ok(r) => r,
             Err(e) => {
-                print_status(
-                    "SKIP",
-                    &file.display().to_string(),
-                    false,
-                );
-                print_parse_error(&e, file);
+                if !quiet {
+                    print_status(
+                        "SKIP",
+                        &file.display().to_string(),
+                        false,
+                    );
+                    print_parse_error(&e, file);
+                }
+                continue;
+            }
+        };
+
+        let rule_id = &rule.metadata.id;
+
+        if let Some(f) = filter {
+            if !rule_id.contains(f) {
+                continue;
             }
         }
+
+        let test_cases = extract_test_cases(&rule);
+
+        if test_cases.is_empty() {
+            continue;
+        }
+
+        run_rule_tests(
+            &test_cases,
+            &optimizer,
+            &mut stats,
+            rule_id,
+            file,
+            verbose,
+            quiet,
+        );
     }
 
     if !quiet {
-        let msg = format!(
-            "\nFound {total_tests} test case(s) across {} file(s).",
-            files.len()
-        );
-        eprintln!("{}", msg.bold());
-        eprintln!(
-            "{}",
-            "(test execution not yet implemented)".dimmed()
-        );
+        print_test_summary(&stats);
+    }
+
+    if stats.failed > 0 {
+        bail!("{} test(s) failed", stats.failed);
     }
 
     Ok(())
+}
+
+fn extract_test_cases(
+    rule: &RuleFile,
+) -> Vec<ra_parser::test_case::TestCase> {
+    let mut all_cases = Vec::new();
+    for block in &rule.test_cases {
+        let cases = ra_parser::test_case::parse_test_block(
+            block,
+            &rule.metadata.id,
+        );
+        all_cases.extend(cases);
+    }
+    all_cases
+}
+
+fn run_rule_tests(
+    test_cases: &[ra_parser::test_case::TestCase],
+    optimizer: &Optimizer,
+    stats: &mut test_executor::TestStats,
+    rule_id: &str,
+    file: &Path,
+    verbose: bool,
+    quiet: bool,
+) {
+    for tc in test_cases {
+        let result =
+            test_executor::execute_test(tc, optimizer);
+        stats.record(&result);
+
+        if quiet {
+            continue;
+        }
+
+        match &result.outcome {
+            test_executor::TestOutcome::Pass => {
+                if verbose {
+                    let label = if tc.label.is_empty() {
+                        rule_id.to_owned()
+                    } else {
+                        format!("{rule_id}: {}", tc.label)
+                    };
+                    print_status("PASS", &label, true);
+                }
+            }
+            test_executor::TestOutcome::Fail(msg) => {
+                let label = if tc.label.is_empty() {
+                    rule_id.to_owned()
+                } else {
+                    format!("{rule_id}: {}", tc.label)
+                };
+                print_status("FAIL", &label, false);
+                if verbose {
+                    print_detail(msg);
+                    print_detail(&format!(
+                        "SQL: {}",
+                        tc.input_sql
+                    ));
+                    print_detail(&format!(
+                        "file: {}",
+                        file.display()
+                    ));
+                }
+            }
+            test_executor::TestOutcome::Skip(msg) => {
+                if verbose {
+                    let label = format!("{rule_id}: {msg}");
+                    print_status("SKIP", &label, false);
+                }
+            }
+            test_executor::TestOutcome::Error(msg) => {
+                let label = format!("{rule_id}: {msg}");
+                print_status("ERR", &label, false);
+            }
+        }
+    }
+}
+
+fn print_test_summary(stats: &test_executor::TestStats) {
+    eprintln!();
+    let summary = format!(
+        "Test results: {}",
+        stats,
+    );
+    if stats.failed == 0 && stats.errors == 0 {
+        eprintln!("{}", summary.green().bold());
+    } else {
+        eprintln!("{}", summary.red().bold());
+    }
 }
 
 // ── list ────────────────────────────────────────────────────
@@ -524,6 +662,129 @@ fn cmd_optimize(query: &str, hardware_profile_name: &str, verbose: bool, quiet: 
 
         eprintln!("{}", "Optimized Plan:".bold());
         eprintln!("{}", format_plan_tree(&optimized));
+    }
+
+    Ok(())
+}
+
+// ── gather-metadata ─────────────────────────────────────────
+
+fn cmd_gather_metadata(
+    db: &str,
+    output: &str,
+    quiet: bool,
+) -> Result<()> {
+    let target =
+        ra_metadata::parse_connection_string(db)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    let engine = match &target {
+        ra_metadata::ConnectionTarget::PostgreSql(_) => {
+            "PostgreSQL"
+        }
+        ra_metadata::ConnectionTarget::MySql(_) => "MySQL",
+        ra_metadata::ConnectionTarget::Sqlite(_) => "SQLite",
+    };
+
+    if !quiet {
+        print_header("Gather Metadata");
+        eprintln!("  {}: {engine}", "Engine".bold());
+        eprintln!("  {}: {db}", "Connection".bold());
+        eprintln!("  {}: {output}", "Output".bold());
+        eprintln!();
+        eprintln!(
+            "{}",
+            "Note: Direct database connections require \
+             a database driver. This command validates the \
+             connection string and outputs the target \
+             configuration. Use the ra-metadata library \
+             with your preferred driver for live gathering."
+                .dimmed()
+        );
+    }
+
+    let schema = ra_metadata::SchemaInfo {
+        database: db.to_string(),
+        tables: vec![],
+        views: vec![],
+    };
+
+    let json = serde_json::to_string_pretty(&schema)
+        .with_context(|| "failed to serialize schema")?;
+
+    std::fs::write(output, json)
+        .with_context(|| format!("writing {output}"))?;
+
+    if !quiet {
+        eprintln!();
+        eprintln!(
+            "{}",
+            diff_validator::format_schema_summary(&schema)
+        );
+        eprintln!(
+            "{}",
+            format!("Schema template written to {output}")
+                .green()
+                .bold()
+        );
+    }
+
+    Ok(())
+}
+
+// ── compare ─────────────────────────────────────────────────
+
+fn cmd_compare(
+    sql: &str,
+    schema_path: &str,
+    verbose: bool,
+    quiet: bool,
+) -> Result<()> {
+    let ra_plan = sql_to_relexpr(sql)
+        .with_context(|| format!("failed to parse SQL: {sql}"))?;
+
+    let schema_json = std::fs::read_to_string(schema_path)
+        .with_context(|| {
+            format!("reading schema file: {schema_path}")
+        })?;
+
+    let _schema: ra_metadata::SchemaInfo =
+        serde_json::from_str(&schema_json).with_context(|| {
+            format!("parsing schema file: {schema_path}")
+        })?;
+
+    if !quiet {
+        print_header("Plan Comparison");
+        eprintln!("  {}: {sql}", "SQL".bold());
+        eprintln!(
+            "  {}: {schema_path}",
+            "Schema".bold()
+        );
+        eprintln!();
+
+        eprintln!("{}", "RA Plan:".bold());
+        eprintln!("{}", format_plan_tree(&ra_plan));
+        eprintln!();
+    }
+
+    if verbose && !quiet {
+        let explain_node =
+            ra_metadata::PlanNode::new("Seq Scan");
+        let explain = ra_metadata::ExplainPlan {
+            engine: "comparison".to_string(),
+            query: sql.to_string(),
+            root: explain_node,
+            total_cost: None,
+            total_rows: None,
+        };
+
+        let report =
+            ra_metadata::compare_plans(&ra_plan, &explain);
+
+        eprintln!(
+            "{}",
+            diff_validator::format_diff_report(&report)
+        );
     }
 
     Ok(())
