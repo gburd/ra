@@ -174,6 +174,17 @@ impl FeatureSchema {
                 features[OP_TYPE_OFFSET + 2] = 1.0;
                 self.encode_expr(input, stats, features);
             }
+            RelExpr::RecursiveCTE {
+                base_case,
+                recursive_case,
+                body,
+                ..
+            } => {
+                features[OP_TYPE_OFFSET + 4] = 1.0;
+                self.encode_expr(base_case, stats, features);
+                self.encode_expr(recursive_case, stats, features);
+                self.encode_expr(body, stats, features);
+            }
             RelExpr::Values { .. } => {
                 features[OP_TYPE_OFFSET] = 1.0;
             }

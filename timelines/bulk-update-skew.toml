@@ -1,0 +1,305 @@
+# Bulk update causing data skew
+#
+# Models a scenario where a bulk UPDATE changes the value distribution
+# of a column, creating skew that invalidates histogram-based estimates.
+# The optimizer initially uses stale histograms leading to bad join
+# order decisions until ANALYZE refreshes statistics.
+
+[metadata]
+name = "bulk-update-skew"
+description = "Bulk UPDATE creating data skew that invalidates histogram estimates"
+database = "postgresql"
+schema = "ecommerce"
+duration_seconds = 3600
+
+# -- Snapshot 0: Uniform distribution --
+[[snapshots]]
+time_offset = 0
+label = "uniform distribution"
+
+[[snapshots.tables]]
+name = "orders"
+row_count = 5000000
+page_count = 62500
+avg_row_size = 96.0
+table_size_bytes = 480_000_000
+
+[[snapshots.tables.columns]]
+name = "order_id"
+ndv = 5000000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.99
+
+[[snapshots.tables.columns]]
+name = "status"
+ndv = 6
+null_fraction = 0.0
+avg_width = 12.0
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 500000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "total_amount"
+ndv = 250000
+null_fraction = 0.0
+avg_width = 8.0
+min_value = "1.00"
+max_value = "10000.00"
+
+[[snapshots.tables]]
+name = "customers"
+row_count = 500000
+page_count = 5000
+avg_row_size = 80.0
+table_size_bytes = 40_000_000
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 500000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.99
+
+[[snapshots.tables.columns]]
+name = "region"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+# -- Snapshot 1: After bulk status update (skewed) --
+[[snapshots]]
+time_offset = 900
+label = "post bulk update - skewed status"
+
+[[snapshots.tables]]
+name = "orders"
+row_count = 5000000
+page_count = 62500
+avg_row_size = 96.0
+table_size_bytes = 480_000_000
+
+[[snapshots.tables.columns]]
+name = "order_id"
+ndv = 5000000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.99
+
+[[snapshots.tables.columns]]
+name = "status"
+ndv = 6
+null_fraction = 0.0
+avg_width = 12.0
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 500000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "total_amount"
+ndv = 250000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables]]
+name = "customers"
+row_count = 500000
+page_count = 5000
+avg_row_size = 80.0
+table_size_bytes = 40_000_000
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 500000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "region"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+# -- Snapshot 2: After ANALYZE with updated histograms --
+[[snapshots]]
+time_offset = 1800
+label = "post-ANALYZE with corrected histograms"
+
+[[snapshots.tables]]
+name = "orders"
+row_count = 5000000
+page_count = 63500
+avg_row_size = 96.0
+table_size_bytes = 480_000_000
+
+[[snapshots.tables.columns]]
+name = "order_id"
+ndv = 5000000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.95
+
+[[snapshots.tables.columns]]
+name = "status"
+ndv = 6
+null_fraction = 0.0
+avg_width = 12.0
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 500000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "total_amount"
+ndv = 250000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables]]
+name = "customers"
+row_count = 500000
+page_count = 5000
+avg_row_size = 80.0
+table_size_bytes = 40_000_000
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 500000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "region"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+# -- Snapshot 3: Stable after vacuum --
+[[snapshots]]
+time_offset = 3600
+label = "stable after vacuum"
+
+[[snapshots.tables]]
+name = "orders"
+row_count = 5000000
+page_count = 62500
+avg_row_size = 96.0
+table_size_bytes = 480_000_000
+
+[[snapshots.tables.columns]]
+name = "order_id"
+ndv = 5000000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.95
+
+[[snapshots.tables.columns]]
+name = "status"
+ndv = 6
+null_fraction = 0.0
+avg_width = 12.0
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 500000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "total_amount"
+ndv = 250000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables]]
+name = "customers"
+row_count = 500000
+page_count = 5000
+avg_row_size = 80.0
+table_size_bytes = 40_000_000
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 500000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "region"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+# -- Events --
+
+[[events]]
+time_offset = 600
+kind = "update"
+table = "orders"
+row_count = 2000000
+description = "Bulk UPDATE setting 40% of orders to 'archived' status"
+
+[[events]]
+time_offset = 1200
+kind = "analyze"
+table = "orders"
+description = "Auto-ANALYZE triggered by 2M modifications"
+
+[[events]]
+time_offset = 1800
+kind = "reoptimize"
+table = "orders"
+description = "Join query plan refreshed"
+
+[[events]]
+time_offset = 2400
+kind = "vacuum"
+table = "orders"
+description = "VACUUM reclaims dead tuples from bulk update"
+
+# -- Feedback: Skew causes bad join estimates --
+
+[[feedback]]
+time_offset = 100
+query = "SELECT c.region, count(*) FROM orders o JOIN customers c ON o.customer_id = c.customer_id WHERE o.status = 'pending' GROUP BY c.region"
+operator = "HashJoin"
+estimated_rows = 833333.0
+actual_rows = 830000.0
+estimated_cost = 125000.0
+actual_time_ms = 3200.0
+
+[[feedback]]
+time_offset = 900
+query = "SELECT c.region, count(*) FROM orders o JOIN customers c ON o.customer_id = c.customer_id WHERE o.status = 'pending' GROUP BY c.region"
+operator = "HashJoin"
+estimated_rows = 833333.0
+actual_rows = 250000.0
+estimated_cost = 125000.0
+actual_time_ms = 1800.0
+
+[[feedback]]
+time_offset = 1800
+query = "SELECT c.region, count(*) FROM orders o JOIN customers c ON o.customer_id = c.customer_id WHERE o.status = 'pending' GROUP BY c.region"
+operator = "HashJoin"
+estimated_rows = 250000.0
+actual_rows = 250000.0
+estimated_cost = 75000.0
+actual_time_ms = 1200.0
+
+[[feedback]]
+time_offset = 3600
+query = "SELECT c.region, count(*) FROM orders o JOIN customers c ON o.customer_id = c.customer_id WHERE o.status = 'pending' GROUP BY c.region"
+operator = "HashJoin"
+estimated_rows = 250000.0
+actual_rows = 250000.0
+estimated_cost = 75000.0
+actual_time_ms = 1100.0

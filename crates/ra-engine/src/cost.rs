@@ -509,6 +509,13 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
             RelLang::Union(_)
             | RelLang::Intersect(_)
             | RelLang::Except(_) => 50.0,
+            RelLang::RecursiveCTE(_) => {
+                #[allow(clippy::cast_precision_loss)]
+                let cache_mb = self.hardware.l3_cache_bytes as f64
+                    / (1024.0 * 1024.0);
+                let cache_factor = 16.0 / cache_mb.max(1.0);
+                1000.0 * cache_factor
+            }
             _ => 0.1,
         };
 

@@ -229,6 +229,10 @@ impl ExecutionFeedback {
 
 impl Timeline {
     /// Parse a timeline from a TOML string.
+    ///
+    /// # Errors
+    ///
+    /// Returns `TimelineError` if parsing fails or validation fails.
     pub fn from_toml(input: &str) -> Result<Self, TimelineError> {
         let timeline: Self = toml::from_str(input)
             .map_err(|e| TimelineError::ParseError(e.to_string()))?;
@@ -237,6 +241,11 @@ impl Timeline {
     }
 
     /// Validate internal consistency.
+    ///
+    /// # Errors
+    ///
+    /// Returns `TimelineError` if snapshots are empty, unsorted, or
+    /// contain duplicate time offsets.
     pub fn validate(&self) -> Result<(), TimelineError> {
         if self.snapshots.is_empty() {
             return Err(TimelineError::EmptyTimeline);
@@ -412,6 +421,11 @@ pub struct TimelinePlayer {
 
 impl TimelinePlayer {
     /// Create a new player positioned before the first snapshot.
+    ///
+    /// # Errors
+    ///
+    /// Returns `TimelineError::EmptyTimeline` if the timeline has no
+    /// snapshots.
     pub fn new(timeline: Timeline) -> Result<Self, TimelineError> {
         if timeline.snapshots.is_empty() {
             return Err(TimelineError::EmptyTimeline);
@@ -487,8 +501,8 @@ impl TimelinePlayer {
     /// Step to the previous snapshot. Returns the new position.
     pub fn step_backward(&mut self) -> PlaybackState {
         self.position = match self.position {
-            PlaybackState::BeforeStart => PlaybackState::BeforeStart,
-            PlaybackState::AtSnapshot(0) => PlaybackState::BeforeStart,
+            PlaybackState::BeforeStart
+            | PlaybackState::AtSnapshot(0) => PlaybackState::BeforeStart,
             PlaybackState::AtSnapshot(i) => {
                 PlaybackState::AtSnapshot(i - 1)
             }
@@ -501,6 +515,11 @@ impl TimelinePlayer {
     }
 
     /// Seek to a specific snapshot index.
+    ///
+    /// # Errors
+    ///
+    /// Returns `TimelineError::SnapshotOutOfBounds` if index exceeds
+    /// the number of snapshots.
     pub fn seek(
         &mut self,
         index: usize,
@@ -540,11 +559,7 @@ impl TimelinePlayer {
         let mut best_diff = u64::MAX;
 
         for (i, snap) in self.timeline.snapshots.iter().enumerate() {
-            let diff = if snap.time_offset >= time {
-                snap.time_offset - time
-            } else {
-                time - snap.time_offset
-            };
+            let diff = snap.time_offset.abs_diff(time);
             if diff < best_diff {
                 best_diff = diff;
                 best_idx = i;
@@ -598,9 +613,8 @@ impl TimelinePlayer {
 
     /// Feedback entries at or before the current snapshot time.
     pub fn feedback_at_current(&self) -> Vec<&ExecutionFeedback> {
-        let time = match self.current_time() {
-            Some(t) => t,
-            None => return Vec::new(),
+        let Some(time) = self.current_time() else {
+            return Vec::new();
         };
         self.timeline
             .feedback
@@ -657,7 +671,7 @@ impl TimelinePlayer {
         self.timeline
             .feedback
             .iter()
-            .map(|f| f.q_error())
+            .map(ExecutionFeedback::q_error)
             .reduce(f64::max)
     }
 }

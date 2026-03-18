@@ -80,6 +80,7 @@ impl egg::CostFunction<RelLang> for RelCostFn {
             }
             RelLang::Limit(_) => 0.5,
             RelLang::Union(_) | RelLang::Intersect(_) | RelLang::Except(_) => 50.0,
+            RelLang::RecursiveCTE(_) => 1000.0,
             _ => 0.1,
         };
 
@@ -207,6 +208,26 @@ fn convert_node(nodes: &[RelLang], idx: usize) -> Result<RelExpr, EGraphError> {
         }
         RelLang::Except([all_id, left_id, right_id]) => {
             convert_set_op(nodes, *all_id, *left_id, *right_id, "except")
+        }
+        RelLang::RecursiveCTE([name_id, base_id, rec_id, body_id]) => {
+            let name = get_symbol(nodes, id(*name_id))?;
+            let base_case = convert_node(nodes, id(*base_id))?;
+            let recursive_case = convert_node(nodes, id(*rec_id))?;
+            let body = convert_node(nodes, id(*body_id))?;
+            Ok(RelExpr::RecursiveCTE {
+                name,
+                base_case: Box::new(base_case),
+                recursive_case: Box::new(recursive_case),
+                body: Box::new(body),
+                cycle_detection: Some(
+                    ra_core::algebra::CycleDetection {
+                        track_columns: vec![],
+                        max_depth: Some(1000),
+                        cycle_mark_column: None,
+                        path_column: None,
+                    },
+                ),
+            })
         }
         other => Err(EGraphError::ExtractionError(format!(
             "unexpected relational node: {other:?}"
