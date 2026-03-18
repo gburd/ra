@@ -23,6 +23,48 @@ services:
       retries: 3
       start_period: 10s
 
+  # Database containers for metadata integration testing
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ra_test
+      POSTGRES_PASSWORD: ra_test_pass
+      POSTGRES_DB: ra_test
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ra_test"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    profiles:
+      - test-db
+
+  mysql:
+    image: mysql:8.0
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ra_root_pass
+      MYSQL_USER: ra_test
+      MYSQL_PASSWORD: ra_test_pass
+      MYSQL_DATABASE: ra_test
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    profiles:
+      - test-db
+
+volumes:
+  postgres_data:
+  mysql_data:
+
 networks:
   default:
     name: ra-network
