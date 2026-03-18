@@ -317,6 +317,12 @@ impl DistributedOptimizer {
         self.network_cost.as_ref()
     }
 
+    /// Get a reference to the cluster topology.
+    #[must_use]
+    pub fn topology(&self) -> &ClusterTopology {
+        &self.topology
+    }
+
     /// Register statistics for a table.
     pub fn register_stats(
         &mut self,
