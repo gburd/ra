@@ -61,12 +61,14 @@ impl egg::CostFunction<RelLang> for RelCostFn {
             RelLang::Join(_) => {
                 // Join cost depends on cache size and memory bandwidth
                 // Larger cache = better hash table performance
+                #[allow(clippy::cast_precision_loss)]
                 let cache_mb = self.hardware.l3_cache_bytes as f64 / (1024.0 * 1024.0);
                 let cache_factor = 16.0 / cache_mb; // Normalize to 16 MB baseline
                 500.0 * cache_factor
             }
             RelLang::Aggregate(_) => {
                 // Aggregate cost depends on cache and parallelism
+                #[allow(clippy::cast_precision_loss)]
                 let cache_mb = self.hardware.l3_cache_bytes as f64 / (1024.0 * 1024.0);
                 let cache_factor = 16.0 / cache_mb;
                 200.0 * cache_factor
@@ -138,17 +140,17 @@ pub fn extract_best<S: BuildHasher>(
 ///
 /// Returns an error if the extracted nodes cannot be converted
 /// back to a [`RelExpr`].
-pub fn extract_best_with_staleness(
+pub fn extract_best_with_staleness<S: BuildHasher, S2: BuildHasher>(
     egraph: &egg::EGraph<RelLang, RelAnalysis>,
     root: Id,
-    table_stats: &HashMap<String, Statistics>,
-    staleness_map: &HashMap<String, Staleness>,
+    table_stats: &HashMap<String, Statistics, S>,
+    staleness_map: &HashMap<String, Staleness, S2>,
     hardware: &ra_hardware::HardwareProfile,
 ) -> Result<RelExpr, EGraphError> {
     let cost_fn = IntegratedCostFn::new(
         hardware.clone(),
-        table_stats.clone(),
-        staleness_map.clone(),
+        table_stats.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        staleness_map.iter().map(|(k, v)| (k.clone(), *v)).collect(),
     );
     let extractor = egg::Extractor::new(egraph, cost_fn);
     let (_, best_expr) = extractor.find_best(root);

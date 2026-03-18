@@ -125,7 +125,7 @@ impl IntegratedCostModel {
         if let Some(managed) = self.adapter.get_table_stats(table) {
             self.adapter.to_core_statistics(managed)
         } else {
-            Statistics::new(1000.0)
+            Statistics::new(DEFAULT_ROW_COUNT)
         }
     }
 
@@ -291,6 +291,88 @@ pub fn from_core_statistics<S: BuildHasher>(
     }
 
     model
+}
+
+/// Hardware cost calibration coefficients.
+///
+/// Derived from a hardware profile, these coefficients adjust the
+/// raw cost model to account for real hardware characteristics.
+/// The calibration normalizes costs to a "reference" machine
+/// (8 cores, 16 MB L3, 256-bit SIMD, 3.5 GB/s storage).
+#[derive(Debug, Clone)]
+pub struct CostCalibration {
+    /// Scan cost multiplier (lower = faster storage).
+    pub scan_factor: f64,
+    /// Filter cost multiplier (lower = wider SIMD).
+    pub filter_factor: f64,
+    /// Join cost multiplier (lower = bigger cache).
+    pub join_factor: f64,
+    /// Sort cost multiplier (lower = more cores).
+    pub sort_factor: f64,
+    /// Aggregate cost multiplier (lower = bigger cache).
+    pub aggregate_factor: f64,
+    /// Whether GPU acceleration is available.
+    pub gpu_available: bool,
+    /// Whether FPGA acceleration is available.
+    pub fpga_available: bool,
+}
+
+impl CostCalibration {
+    /// Calibrate from a hardware profile.
+    ///
+    /// Reference machine: 8 cores, 16 MB L3 cache, 256-bit SIMD,
+    /// 3.5 GB/s storage bandwidth.
+    #[must_use]
+    #[allow(clippy::cast_precision_loss)]
+    pub fn from_hardware(hw: &HardwareProfile) -> Self {
+        let ref_storage_bw = 3.5;
+        let ref_simd_bits = 256.0;
+        let ref_cache_mb = 16.0;
+        let ref_cores = 8.0;
+
+        let storage_bw = hw.storage_bandwidth_gbps.max(0.01);
+        let simd_bits = f64::from(hw.simd_width_bits).max(1.0);
+        let cache_mb =
+            (hw.l3_cache_bytes as f64 / (1024.0 * 1024.0)).max(1.0);
+        let cores = f64::from(hw.cpu_cores).max(1.0);
+
+        Self {
+            scan_factor: ref_storage_bw / storage_bw,
+            filter_factor: ref_simd_bits / simd_bits,
+            join_factor: ref_cache_mb / cache_mb,
+            sort_factor: (ref_cores / cores).max(0.5),
+            aggregate_factor: ref_cache_mb / cache_mb,
+            gpu_available: hw.gpu_available,
+            fpga_available: hw.fpga_available,
+        }
+    }
+
+    /// Return calibration for the reference machine (all factors 1.0).
+    #[must_use]
+    pub fn reference() -> Self {
+        Self {
+            scan_factor: 1.0,
+            filter_factor: 1.0,
+            join_factor: 1.0,
+            sort_factor: 1.0,
+            aggregate_factor: 1.0,
+            gpu_available: false,
+            fpga_available: false,
+        }
+    }
+
+    /// Overall speedup relative to the reference machine.
+    ///
+    /// Values < 1.0 indicate faster hardware; > 1.0 slower.
+    #[must_use]
+    pub fn overall_factor(&self) -> f64 {
+        (self.scan_factor
+            + self.filter_factor
+            + self.join_factor
+            + self.sort_factor
+            + self.aggregate_factor)
+            / 5.0
+    }
 }
 
 /// Extended cost function for egg that uses integrated statistics
@@ -1283,5 +1365,744 @@ mod tests {
         assert!(slight <= moderate);
         assert!(moderate <= very);
         assert!(very <= unknown);
+    }
+
+    // ---- CostCalibration ----
+
+    #[test]
+    fn calibration_reference_all_ones() {
+        let cal = CostCalibration::reference();
+        assert_eq!(cal.scan_factor, 1.0);
+        assert_eq!(cal.filter_factor, 1.0);
+        assert_eq!(cal.join_factor, 1.0);
+        assert_eq!(cal.sort_factor, 1.0);
+        assert_eq!(cal.aggregate_factor, 1.0);
+        assert!(!cal.gpu_available);
+        assert!(!cal.fpga_available);
+    }
+
+    #[test]
+    fn calibration_reference_overall_one() {
+        let cal = CostCalibration::reference();
+        assert!((cal.overall_factor() - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn calibration_cpu_only() {
+        let cal = CostCalibration::from_hardware(
+            &HardwareProfile::cpu_only(),
+        );
+        assert!(cal.scan_factor > 0.0);
+        assert!(cal.filter_factor > 0.0);
+        assert!(cal.join_factor > 0.0);
+        assert!(cal.sort_factor > 0.0);
+        assert!(cal.aggregate_factor > 0.0);
+        assert!(!cal.gpu_available);
+    }
+
+    #[test]
+    fn calibration_gpu_server_has_gpu() {
+        let cal = CostCalibration::from_hardware(
+            &HardwareProfile::gpu_server(),
+        );
+        assert!(cal.gpu_available);
+    }
+
+    #[test]
+    fn calibration_fpga_has_fpga() {
+        let cal = CostCalibration::from_hardware(
+            &HardwareProfile::fpga_appliance(),
+        );
+        assert!(cal.fpga_available);
+    }
+
+    #[test]
+    fn calibration_fast_storage_lowers_scan_factor() {
+        let mut hw = HardwareProfile::cpu_only();
+        hw.storage_bandwidth_gbps = 14.0;
+        let cal = CostCalibration::from_hardware(&hw);
+        assert!(cal.scan_factor < 1.0);
+    }
+
+    #[test]
+    fn calibration_slow_storage_raises_scan_factor() {
+        let mut hw = HardwareProfile::cpu_only();
+        hw.storage_bandwidth_gbps = 0.15;
+        let cal = CostCalibration::from_hardware(&hw);
+        assert!(cal.scan_factor > 1.0);
+    }
+
+    #[test]
+    fn calibration_wide_simd_lowers_filter_factor() {
+        let mut hw = HardwareProfile::cpu_only();
+        hw.simd_width_bits = 512;
+        let cal = CostCalibration::from_hardware(&hw);
+        assert!(cal.filter_factor < 1.0);
+    }
+
+    #[test]
+    fn calibration_narrow_simd_raises_filter_factor() {
+        let mut hw = HardwareProfile::cpu_only();
+        hw.simd_width_bits = 128;
+        let cal = CostCalibration::from_hardware(&hw);
+        assert!(cal.filter_factor > 1.0);
+    }
+
+    #[test]
+    fn calibration_big_cache_lowers_join_factor() {
+        let mut hw = HardwareProfile::cpu_only();
+        hw.l3_cache_bytes = 128 * 1024 * 1024;
+        let cal = CostCalibration::from_hardware(&hw);
+        assert!(cal.join_factor < 1.0);
+    }
+
+    #[test]
+    fn calibration_small_cache_raises_join_factor() {
+        let mut hw = HardwareProfile::cpu_only();
+        hw.l3_cache_bytes = 4 * 1024 * 1024;
+        let cal = CostCalibration::from_hardware(&hw);
+        assert!(cal.join_factor > 1.0);
+    }
+
+    #[test]
+    fn calibration_many_cores_lowers_sort_factor() {
+        let mut hw = HardwareProfile::cpu_only();
+        hw.cpu_cores = 64;
+        let cal = CostCalibration::from_hardware(&hw);
+        assert!(cal.sort_factor < 1.0);
+    }
+
+    #[test]
+    fn calibration_few_cores_raises_sort_factor() {
+        let mut hw = HardwareProfile::cpu_only();
+        hw.cpu_cores = 2;
+        let cal = CostCalibration::from_hardware(&hw);
+        assert!(cal.sort_factor > 1.0);
+    }
+
+    #[test]
+    fn calibration_sort_factor_has_minimum() {
+        let mut hw = HardwareProfile::cpu_only();
+        hw.cpu_cores = 255;
+        let cal = CostCalibration::from_hardware(&hw);
+        assert!(cal.sort_factor >= 0.5);
+    }
+
+    #[test]
+    fn calibration_overall_faster_machine() {
+        let mut hw = HardwareProfile::cpu_only();
+        hw.storage_bandwidth_gbps = 14.0;
+        hw.simd_width_bits = 512;
+        hw.l3_cache_bytes = 128 * 1024 * 1024;
+        hw.cpu_cores = 64;
+        let cal = CostCalibration::from_hardware(&hw);
+        assert!(cal.overall_factor() < 1.0);
+    }
+
+    #[test]
+    fn calibration_overall_slower_machine() {
+        let mut hw = HardwareProfile::cpu_only();
+        hw.storage_bandwidth_gbps = 0.15;
+        hw.simd_width_bits = 128;
+        hw.l3_cache_bytes = 2 * 1024 * 1024;
+        hw.cpu_cores = 2;
+        let cal = CostCalibration::from_hardware(&hw);
+        assert!(cal.overall_factor() > 1.0);
+    }
+
+    // ---- IntegratedCostFn row_count_for staleness levels ----
+
+    #[test]
+    fn cost_fn_row_count_slightly_stale() {
+        let mut stats = HashMap::new();
+        stats.insert("t".into(), Statistics::new(10_000.0));
+        let mut staleness = HashMap::new();
+        staleness.insert("t".into(), Staleness::SlightlyStale);
+
+        let cfn = IntegratedCostFn::new(
+            HardwareProfile::cpu_only(),
+            stats,
+            staleness,
+        );
+        let rows = cfn.row_count_for("t");
+        assert!((rows - 10_500.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn cost_fn_row_count_moderately_stale() {
+        let mut stats = HashMap::new();
+        stats.insert("t".into(), Statistics::new(10_000.0));
+        let mut staleness = HashMap::new();
+        staleness.insert("t".into(), Staleness::ModeratelyStale);
+
+        let cfn = IntegratedCostFn::new(
+            HardwareProfile::cpu_only(),
+            stats,
+            staleness,
+        );
+        let rows = cfn.row_count_for("t");
+        assert!((rows - 12_000.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn cost_fn_row_count_very_stale() {
+        let mut stats = HashMap::new();
+        stats.insert("t".into(), Statistics::new(10_000.0));
+        let mut staleness = HashMap::new();
+        staleness.insert("t".into(), Staleness::VeryStale);
+
+        let cfn = IntegratedCostFn::new(
+            HardwareProfile::cpu_only(),
+            stats,
+            staleness,
+        );
+        let rows = cfn.row_count_for("t");
+        assert!((rows - 15_000.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn cost_fn_missing_staleness_uses_unknown() {
+        let mut stats = HashMap::new();
+        stats.insert("t".into(), Statistics::new(10_000.0));
+
+        let cfn = IntegratedCostFn::new(
+            HardwareProfile::cpu_only(),
+            stats,
+            HashMap::new(),
+        );
+        let rows = cfn.row_count_for("t");
+        assert!((rows - 20_000.0).abs() < f64::EPSILON);
+    }
+
+    // ---- Cost ordering: larger tables cost more ----
+
+    #[test]
+    fn scan_cost_scales_with_row_count() {
+        let hw = HardwareProfile::cpu_only();
+        let mut small = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            hw.clone(),
+        );
+        small.add_table(
+            "t".into(),
+            make_managed(1_000, StatisticsSource::ExactCount),
+        );
+
+        let mut large = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            hw,
+        );
+        large.add_table(
+            "t".into(),
+            make_managed(1_000_000, StatisticsSource::ExactCount),
+        );
+
+        assert!(large.scan_cost("t") > small.scan_cost("t"));
+    }
+
+    #[test]
+    fn filter_cost_scales_with_row_count() {
+        let hw = HardwareProfile::cpu_only();
+        let mut small = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            hw.clone(),
+        );
+        small.add_table(
+            "t".into(),
+            make_managed(1_000, StatisticsSource::ExactCount),
+        );
+
+        let mut large = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            hw,
+        );
+        large.add_table(
+            "t".into(),
+            make_managed(1_000_000, StatisticsSource::ExactCount),
+        );
+
+        assert!(large.filter_cost("t") > small.filter_cost("t"));
+    }
+
+    #[test]
+    fn sort_cost_scales_with_row_count() {
+        let hw = HardwareProfile::cpu_only();
+        let mut small = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            hw.clone(),
+        );
+        small.add_table(
+            "t".into(),
+            make_managed(1_000, StatisticsSource::ExactCount),
+        );
+
+        let mut large = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            hw,
+        );
+        large.add_table(
+            "t".into(),
+            make_managed(1_000_000, StatisticsSource::ExactCount),
+        );
+
+        assert!(large.sort_cost("t") > small.sort_cost("t"));
+    }
+
+    // ---- Cross-cutting: all profiles produce valid costs ----
+
+    #[test]
+    fn all_profiles_produce_finite_scan_costs() {
+        let profiles = [
+            StatisticsProfile::real_time(),
+            StatisticsProfile::standard(),
+            StatisticsProfile::lazy(),
+            StatisticsProfile::stale(),
+            StatisticsProfile::analytical(),
+            StatisticsProfile::streaming(),
+        ];
+        for profile in profiles {
+            let mut model = IntegratedCostModel::new(
+                profile,
+                HardwareProfile::cpu_only(),
+            );
+            model.add_table(
+                "t".into(),
+                make_managed(
+                    50_000,
+                    StatisticsSource::ExactCount,
+                ),
+            );
+            let cost = model.scan_cost("t");
+            assert!(cost > 0.0, "scan cost must be positive");
+            assert!(cost.is_finite(), "scan cost must be finite");
+        }
+    }
+
+    #[test]
+    fn all_profiles_produce_finite_join_costs() {
+        let profiles = [
+            StatisticsProfile::real_time(),
+            StatisticsProfile::standard(),
+            StatisticsProfile::lazy(),
+            StatisticsProfile::stale(),
+            StatisticsProfile::analytical(),
+            StatisticsProfile::streaming(),
+        ];
+        for profile in profiles {
+            let mut model = IntegratedCostModel::new(
+                profile,
+                HardwareProfile::cpu_only(),
+            );
+            model.add_table(
+                "a".into(),
+                make_managed(
+                    10_000,
+                    StatisticsSource::ExactCount,
+                ),
+            );
+            model.add_table(
+                "b".into(),
+                make_managed(
+                    5_000,
+                    StatisticsSource::ExactCount,
+                ),
+            );
+            let cost = model.join_cost("a", "b");
+            assert!(cost > 0.0);
+            assert!(cost.is_finite());
+        }
+    }
+
+    // ---- Cross-cutting: all hardware profiles ----
+
+    #[test]
+    fn all_hardware_profiles_produce_valid_costs() {
+        let profiles = [
+            HardwareProfile::cpu_only(),
+            HardwareProfile::gpu_server(),
+            HardwareProfile::fpga_appliance(),
+        ];
+        for hw in profiles {
+            let mut model = IntegratedCostModel::new(
+                StatisticsProfile::standard(),
+                hw,
+            );
+            model.add_table(
+                "t".into(),
+                make_managed(
+                    10_000,
+                    StatisticsSource::ExactCount,
+                ),
+            );
+            assert!(model.scan_cost("t") > 0.0);
+            assert!(model.filter_cost("t") > 0.0);
+            assert!(model.sort_cost("t") > 0.0);
+            assert!(model.aggregate_cost("t", 100.0) > 0.0);
+        }
+    }
+
+    // ---- from_core_statistics edge cases ----
+
+    #[test]
+    fn from_core_statistics_empty_map() {
+        let stats = HashMap::new();
+        let model = from_core_statistics(
+            &stats,
+            &HardwareProfile::cpu_only(),
+            StatisticsProfile::standard(),
+        );
+        assert_eq!(model.table_count(), 0);
+    }
+
+    #[test]
+    fn from_core_statistics_preserves_row_count() {
+        let mut stats = HashMap::new();
+        stats.insert(
+            "t".into(),
+            Statistics::new(42_000.0),
+        );
+        let model = from_core_statistics(
+            &stats,
+            &HardwareProfile::cpu_only(),
+            StatisticsProfile::standard(),
+        );
+        let es = model.effective_statistics("t");
+        assert!((es.row_count - 42_000.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn from_core_statistics_tables_are_fresh() {
+        let mut stats = HashMap::new();
+        stats.insert("t".into(), Statistics::new(1000.0));
+        let model = from_core_statistics(
+            &stats,
+            &HardwareProfile::cpu_only(),
+            StatisticsProfile::standard(),
+        );
+        assert_eq!(model.staleness("t"), Staleness::Fresh);
+    }
+
+    #[test]
+    fn from_core_statistics_many_tables() {
+        let mut stats = HashMap::new();
+        for i in 0..20 {
+            stats.insert(
+                format!("table_{i}"),
+                Statistics::new(f64::from(i + 1) * 1000.0),
+            );
+        }
+        let model = from_core_statistics(
+            &stats,
+            &HardwareProfile::cpu_only(),
+            StatisticsProfile::standard(),
+        );
+        assert_eq!(model.table_count(), 20);
+    }
+
+    // ---- Stale stats affect all operator types ----
+
+    #[test]
+    fn stale_stats_increase_filter_cost() {
+        let hw = HardwareProfile::cpu_only();
+        let mut fresh = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            hw.clone(),
+        );
+        fresh.add_table(
+            "t".into(),
+            make_managed(100_000, StatisticsSource::ExactCount),
+        );
+
+        let mut stale = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            hw,
+        );
+        stale.add_table(
+            "t".into(),
+            make_stale_managed(100_000, 50_000),
+        );
+
+        assert!(stale.filter_cost("t") > fresh.filter_cost("t"));
+    }
+
+    #[test]
+    fn stale_stats_increase_sort_cost() {
+        let hw = HardwareProfile::cpu_only();
+        let mut fresh = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            hw.clone(),
+        );
+        fresh.add_table(
+            "t".into(),
+            make_managed(100_000, StatisticsSource::ExactCount),
+        );
+
+        let mut stale = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            hw,
+        );
+        stale.add_table(
+            "t".into(),
+            make_stale_managed(100_000, 50_000),
+        );
+
+        assert!(stale.sort_cost("t") > fresh.sort_cost("t"));
+    }
+
+    #[test]
+    fn stale_stats_increase_aggregate_cost() {
+        let hw = HardwareProfile::cpu_only();
+        let mut fresh = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            hw.clone(),
+        );
+        fresh.add_table(
+            "t".into(),
+            make_managed(100_000, StatisticsSource::ExactCount),
+        );
+
+        let mut stale = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            hw,
+        );
+        stale.add_table(
+            "t".into(),
+            make_stale_managed(100_000, 50_000),
+        );
+
+        assert!(
+            stale.aggregate_cost("t", 100.0)
+                > fresh.aggregate_cost("t", 100.0)
+        );
+    }
+
+    // ---- Low confidence affects all operator types ----
+
+    #[test]
+    fn low_confidence_increases_filter_cost() {
+        let hw = HardwareProfile::cpu_only();
+        let mut high = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            hw.clone(),
+        );
+        high.add_table(
+            "t".into(),
+            make_managed(100_000, StatisticsSource::ExactCount),
+        );
+
+        let mut low = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            hw,
+        );
+        low.add_table(
+            "t".into(),
+            make_managed(100_000, StatisticsSource::Default),
+        );
+
+        assert!(low.filter_cost("t") > high.filter_cost("t"));
+    }
+
+    #[test]
+    fn low_confidence_increases_sort_cost() {
+        let hw = HardwareProfile::cpu_only();
+        let mut high = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            hw.clone(),
+        );
+        high.add_table(
+            "t".into(),
+            make_managed(100_000, StatisticsSource::ExactCount),
+        );
+
+        let mut low = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            hw,
+        );
+        low.add_table(
+            "t".into(),
+            make_managed(100_000, StatisticsSource::Default),
+        );
+
+        assert!(low.sort_cost("t") > high.sort_cost("t"));
+    }
+
+    #[test]
+    fn low_confidence_increases_join_cost() {
+        let hw = HardwareProfile::cpu_only();
+        let mut high = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            hw.clone(),
+        );
+        high.add_table(
+            "a".into(),
+            make_managed(100_000, StatisticsSource::ExactCount),
+        );
+        high.add_table(
+            "b".into(),
+            make_managed(10_000, StatisticsSource::ExactCount),
+        );
+
+        let mut low = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            hw,
+        );
+        low.add_table(
+            "a".into(),
+            make_managed(100_000, StatisticsSource::Default),
+        );
+        low.add_table(
+            "b".into(),
+            make_managed(10_000, StatisticsSource::Default),
+        );
+
+        assert!(
+            low.join_cost("a", "b") > high.join_cost("a", "b")
+        );
+    }
+
+    // ---- IntegratedCostFn from_model round-trip ----
+
+    #[test]
+    fn cost_fn_from_model_preserves_staleness() {
+        let mut model = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            HardwareProfile::cpu_only(),
+        );
+        model.add_table(
+            "fresh".into(),
+            make_managed(5000, StatisticsSource::ExactCount),
+        );
+        model.add_table(
+            "stale".into(),
+            make_stale_managed(5000, 3000),
+        );
+
+        let cfn = IntegratedCostFn::from_model(
+            &model,
+            &["fresh".into(), "stale".into()],
+        );
+        assert!(
+            cfn.row_count_for("stale")
+                > cfn.row_count_for("fresh")
+        );
+    }
+
+    #[test]
+    fn cost_fn_from_model_empty_tables() {
+        let model = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            HardwareProfile::cpu_only(),
+        );
+        let cfn =
+            IntegratedCostFn::from_model(&model, &[]);
+        let rows = cfn.row_count_for("missing");
+        assert!((rows - 2000.0).abs() < f64::EPSILON);
+    }
+
+    // ---- Confidence discount boundary tests ----
+
+    #[test]
+    fn confidence_discount_at_boundaries() {
+        assert_eq!(confidence_discount(0.0), 2.0);
+        assert_eq!(confidence_discount(0.25), 1.75);
+        assert_eq!(confidence_discount(0.75), 1.25);
+        assert_eq!(confidence_discount(1.0), 1.0);
+    }
+
+    #[test]
+    fn confidence_discount_is_monotonically_decreasing() {
+        let values: Vec<f64> =
+            (0..=10).map(|i| f64::from(i) / 10.0).collect();
+        for window in values.windows(2) {
+            assert!(
+                confidence_discount(window[0])
+                    >= confidence_discount(window[1])
+            );
+        }
+    }
+
+    // ---- Staleness factor consistency ----
+
+    #[test]
+    fn staleness_factor_all_positive() {
+        let all = [
+            Staleness::Fresh,
+            Staleness::SlightlyStale,
+            Staleness::ModeratelyStale,
+            Staleness::VeryStale,
+            Staleness::Unknown,
+        ];
+        for s in all {
+            assert!(staleness_factor(s) > 0.0);
+        }
+    }
+
+    #[test]
+    fn staleness_factor_fresh_is_one() {
+        assert_eq!(staleness_factor(Staleness::Fresh), 1.0);
+    }
+
+    // ---- Replacing existing table stats ----
+
+    // ---- Aggregate cost scales with group count ----
+
+    #[test]
+    fn aggregate_cost_more_groups_costs_more() {
+        let mut model = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            HardwareProfile::cpu_only(),
+        );
+        model.add_table(
+            "t".into(),
+            make_managed(100_000, StatisticsSource::ExactCount),
+        );
+        assert!(
+            model.aggregate_cost("t", 10_000.0)
+                > model.aggregate_cost("t", 10.0)
+        );
+    }
+
+    #[test]
+    fn join_cost_symmetric_for_same_size() {
+        let mut model = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            HardwareProfile::cpu_only(),
+        );
+        model.add_table(
+            "a".into(),
+            make_managed(10_000, StatisticsSource::ExactCount),
+        );
+        model.add_table(
+            "b".into(),
+            make_managed(10_000, StatisticsSource::ExactCount),
+        );
+        let ab = model.join_cost("a", "b");
+        let ba = model.join_cost("b", "a");
+        assert!((ab - ba).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn add_table_replaces_existing() {
+        let mut model = IntegratedCostModel::new(
+            StatisticsProfile::standard(),
+            HardwareProfile::cpu_only(),
+        );
+        model.add_table(
+            "t".into(),
+            make_managed(1_000, StatisticsSource::ExactCount),
+        );
+        let cost_before = model.scan_cost("t");
+
+        model.add_table(
+            "t".into(),
+            make_managed(
+                1_000_000,
+                StatisticsSource::ExactCount,
+            ),
+        );
+        let cost_after = model.scan_cost("t");
+
+        assert!(cost_after > cost_before);
+        assert_eq!(model.table_count(), 1);
     }
 }

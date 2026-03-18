@@ -7,7 +7,7 @@ mod helpers;
 
 use helpers::*;
 use ra_core::algebra::{JoinType, RelExpr};
-use ra_core::expr::{BinOp, ColumnRef, Expr};
+use ra_core::expr::Expr;
 use ra_engine::Optimizer;
 use ra_hardware::HardwareProfile;
 
@@ -310,10 +310,10 @@ fn test_complex_query_optimizes_reasonably() {
     use std::time::Instant;
 
     // 4-way join with filters
-    let t1 = filtered_scan("table1", "col1", 10);
-    let t2 = filtered_scan("table2", "col2", 20);
-    let t3 = filtered_scan("table3", "col3", 30);
-    let t4 = filtered_scan("table4", "col4", 40);
+    let _t1 = filtered_scan("table1", "col1", 10);
+    let _t2 = filtered_scan("table2", "col2", 20);
+    let _t3 = filtered_scan("table3", "col3", 30);
+    let _t4 = filtered_scan("table4", "col4", 40);
 
     let j1 = two_table_join("table1", "table2", "id", "id");
     let j2 = two_table_join("table3", "table4", "id", "id");

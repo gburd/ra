@@ -9,7 +9,7 @@ mod helpers;
 
 use helpers::*;
 use ra_core::algebra::{AggregateExpr, AggregateFunction, JoinType, RelExpr};
-use ra_core::expr::{BinOp, Expr};
+use ra_core::expr::Expr;
 
 // ── Framework Setup Tests ────────────────────────────────────────
 

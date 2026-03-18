@@ -474,5 +474,16 @@ fn collect_tables_rec(expr: &RelExpr, out: &mut std::collections::HashSet<String
             collect_tables_rec(left, out);
             collect_tables_rec(right, out);
         }
+        RelExpr::CTE {
+            definition, body, ..
+        } => {
+            collect_tables_rec(definition, out);
+            collect_tables_rec(body, out);
+        }
+        RelExpr::Window { input, .. }
+        | RelExpr::Distinct { input, .. } => {
+            collect_tables_rec(input, out);
+        }
+        RelExpr::Values { .. } => {}
     }
 }

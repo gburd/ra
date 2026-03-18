@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use ra_core::algebra::{JoinType, RelExpr};
 use ra_core::expr::{BinOp, ColumnRef, Expr};
 use ra_core::statistics::Statistics;
-use ra_engine::cost::{IntegratedCostFn, IntegratedCostModel};
+use ra_engine::cost::{CostCalibration, IntegratedCostFn, IntegratedCostModel};
 use ra_engine::Optimizer;
 use ra_hardware::detection::detect_hardware;
 use ra_hardware::HardwareProfile;
@@ -572,4 +572,332 @@ fn statistics_profile_serialize_roundtrip() {
     let deser: StatisticsProfile = serde_json::from_str(&json)
         .expect("should deserialize");
     assert_eq!(profile, deser);
+}
+
+// ── CostCalibration Integration ──────────────────────────────────
+
+#[test]
+fn calibration_cpu_only_profile() {
+    let cal = CostCalibration::from_hardware(
+        &HardwareProfile::cpu_only(),
+    );
+    assert!(cal.overall_factor() > 0.0);
+    assert!(cal.overall_factor().is_finite());
+    assert!(!cal.gpu_available);
+    assert!(!cal.fpga_available);
+}
+
+#[test]
+fn calibration_gpu_server_profile() {
+    let cal = CostCalibration::from_hardware(
+        &HardwareProfile::gpu_server(),
+    );
+    assert!(cal.gpu_available);
+    assert!(cal.overall_factor() > 0.0);
+}
+
+#[test]
+fn calibration_fpga_profile() {
+    let cal = CostCalibration::from_hardware(
+        &HardwareProfile::fpga_appliance(),
+    );
+    assert!(cal.fpga_available);
+}
+
+#[test]
+fn calibration_detected_hardware() {
+    let cal = CostCalibration::from_hardware(&detect_hardware());
+    assert!(cal.scan_factor > 0.0);
+    assert!(cal.filter_factor > 0.0);
+    assert!(cal.overall_factor() > 0.0);
+}
+
+#[test]
+fn calibration_consistent_with_cost_model() {
+    let hw = HardwareProfile::cpu_only();
+    let cal = CostCalibration::from_hardware(&hw);
+    let m = populated_model(hw);
+
+    // Faster storage => lower scan_factor, lower scan_cost
+    let mut hw_fast = HardwareProfile::cpu_only();
+    hw_fast.storage_bandwidth_gbps = 14.0;
+    let cal_fast = CostCalibration::from_hardware(&hw_fast);
+    let m_fast = populated_model(hw_fast);
+
+    assert!(cal_fast.scan_factor < cal.scan_factor);
+    assert!(m_fast.scan_cost("events") < m.scan_cost("events"));
+}
+
+// ── Profile Comparison Benchmarks ────────────────────────────────
+
+#[test]
+fn compare_cpu_only_vs_gpu_server_scan() {
+    let m_cpu = populated_model(HardwareProfile::cpu_only());
+    let m_gpu = populated_model(HardwareProfile::gpu_server());
+
+    let cpu_cost = m_cpu.scan_cost("events");
+    let gpu_cost = m_gpu.scan_cost("events");
+
+    // Both should produce positive costs
+    assert!(cpu_cost > 0.0);
+    assert!(gpu_cost > 0.0);
+}
+
+#[test]
+fn compare_cpu_only_vs_gpu_server_join() {
+    let m_cpu = populated_model(HardwareProfile::cpu_only());
+    let m_gpu = populated_model(HardwareProfile::gpu_server());
+
+    let cpu_cost = m_cpu.join_cost("users", "orders");
+    let gpu_cost = m_gpu.join_cost("users", "orders");
+
+    assert!(cpu_cost > 0.0);
+    assert!(gpu_cost > 0.0);
+}
+
+#[test]
+fn compare_cpu_only_vs_gpu_server_sort() {
+    let m_cpu = populated_model(HardwareProfile::cpu_only());
+    let m_gpu = populated_model(HardwareProfile::gpu_server());
+
+    let cpu_cost = m_cpu.sort_cost("events");
+    let gpu_cost = m_gpu.sort_cost("events");
+
+    assert!(cpu_cost > 0.0);
+    assert!(gpu_cost > 0.0);
+}
+
+#[test]
+fn compare_cpu_only_vs_gpu_server_aggregate() {
+    let m_cpu = populated_model(HardwareProfile::cpu_only());
+    let m_gpu = populated_model(HardwareProfile::gpu_server());
+
+    assert!(m_cpu.aggregate_cost("events", 1000.0) > 0.0);
+    assert!(m_gpu.aggregate_cost("events", 1000.0) > 0.0);
+}
+
+#[test]
+fn compare_cpu_only_vs_fpga_scan() {
+    let m_cpu = populated_model(HardwareProfile::cpu_only());
+    let m_fpga = populated_model(HardwareProfile::fpga_appliance());
+
+    assert!(m_cpu.scan_cost("events") > 0.0);
+    assert!(m_fpga.scan_cost("events") > 0.0);
+}
+
+#[test]
+fn compare_gpu_vs_fpga_scan() {
+    let m_gpu = populated_model(HardwareProfile::gpu_server());
+    let m_fpga = populated_model(HardwareProfile::fpga_appliance());
+
+    assert!(m_gpu.scan_cost("events") > 0.0);
+    assert!(m_fpga.scan_cost("events") > 0.0);
+}
+
+#[test]
+fn compare_all_profiles_scan_cost_finite() {
+    for profile in &[
+        HardwareProfile::cpu_only(),
+        HardwareProfile::gpu_server(),
+        HardwareProfile::fpga_appliance(),
+    ] {
+        let m = populated_model(profile.clone());
+        for table in &["users", "orders", "products", "events"] {
+            let cost = m.scan_cost(table);
+            assert!(cost > 0.0, "scan cost should be positive");
+            assert!(cost.is_finite(), "scan cost should be finite");
+        }
+    }
+}
+
+#[test]
+fn compare_all_profiles_join_cost_finite() {
+    for profile in &[
+        HardwareProfile::cpu_only(),
+        HardwareProfile::gpu_server(),
+        HardwareProfile::fpga_appliance(),
+    ] {
+        let m = populated_model(profile.clone());
+        let cost = m.join_cost("users", "orders");
+        assert!(cost > 0.0);
+        assert!(cost.is_finite());
+    }
+}
+
+#[test]
+fn compare_all_profiles_sort_cost_finite() {
+    for profile in &[
+        HardwareProfile::cpu_only(),
+        HardwareProfile::gpu_server(),
+        HardwareProfile::fpga_appliance(),
+    ] {
+        let m = populated_model(profile.clone());
+        let cost = m.sort_cost("events");
+        assert!(cost > 0.0);
+        assert!(cost.is_finite());
+    }
+}
+
+#[test]
+fn compare_all_profiles_aggregate_cost_finite() {
+    for profile in &[
+        HardwareProfile::cpu_only(),
+        HardwareProfile::gpu_server(),
+        HardwareProfile::fpga_appliance(),
+    ] {
+        let m = populated_model(profile.clone());
+        let cost = m.aggregate_cost("events", 1000.0);
+        assert!(cost > 0.0);
+        assert!(cost.is_finite());
+    }
+}
+
+#[test]
+fn compare_all_profiles_filter_cost_finite() {
+    for profile in &[
+        HardwareProfile::cpu_only(),
+        HardwareProfile::gpu_server(),
+        HardwareProfile::fpga_appliance(),
+    ] {
+        let m = populated_model(profile.clone());
+        let cost = m.filter_cost("events");
+        assert!(cost > 0.0);
+        assert!(cost.is_finite());
+    }
+}
+
+// ── Calibration vs Actual Cost Ordering ──────────────────────────
+
+#[test]
+fn calibration_ordering_matches_scan_cost() {
+    let mut hw_fast = HardwareProfile::cpu_only();
+    hw_fast.storage_bandwidth_gbps = 14.0;
+    let mut hw_slow = HardwareProfile::cpu_only();
+    hw_slow.storage_bandwidth_gbps = 0.5;
+
+    let cal_fast = CostCalibration::from_hardware(&hw_fast);
+    let cal_slow = CostCalibration::from_hardware(&hw_slow);
+
+    let m_fast = populated_model(hw_fast);
+    let m_slow = populated_model(hw_slow);
+
+    // Calibration factor ordering matches cost ordering
+    assert!(cal_fast.scan_factor < cal_slow.scan_factor);
+    assert!(m_fast.scan_cost("events") < m_slow.scan_cost("events"));
+}
+
+#[test]
+fn calibration_ordering_matches_filter_cost() {
+    let mut hw_wide = HardwareProfile::cpu_only();
+    hw_wide.simd_width_bits = 512;
+    let mut hw_narrow = HardwareProfile::cpu_only();
+    hw_narrow.simd_width_bits = 128;
+
+    let cal_wide = CostCalibration::from_hardware(&hw_wide);
+    let cal_narrow = CostCalibration::from_hardware(&hw_narrow);
+
+    let m_wide = populated_model(hw_wide);
+    let m_narrow = populated_model(hw_narrow);
+
+    assert!(cal_wide.filter_factor < cal_narrow.filter_factor);
+    assert!(m_wide.filter_cost("events") < m_narrow.filter_cost("events"));
+}
+
+#[test]
+fn calibration_ordering_matches_join_cost() {
+    let mut hw_big = HardwareProfile::cpu_only();
+    hw_big.l3_cache_bytes = 128 * 1024 * 1024;
+    let mut hw_small = HardwareProfile::cpu_only();
+    hw_small.l3_cache_bytes = 4 * 1024 * 1024;
+
+    let cal_big = CostCalibration::from_hardware(&hw_big);
+    let cal_small = CostCalibration::from_hardware(&hw_small);
+
+    let m_big = populated_model(hw_big);
+    let m_small = populated_model(hw_small);
+
+    assert!(cal_big.join_factor < cal_small.join_factor);
+    assert!(
+        m_big.join_cost("users", "orders")
+            < m_small.join_cost("users", "orders")
+    );
+}
+
+#[test]
+fn calibration_ordering_matches_sort_cost() {
+    let mut hw_many = HardwareProfile::cpu_only();
+    hw_many.cpu_cores = 64;
+    let mut hw_few = HardwareProfile::cpu_only();
+    hw_few.cpu_cores = 4;
+
+    let cal_many = CostCalibration::from_hardware(&hw_many);
+    let cal_few = CostCalibration::from_hardware(&hw_few);
+
+    let m_many = populated_model(hw_many);
+    let m_few = populated_model(hw_few);
+
+    assert!(cal_many.sort_factor < cal_few.sort_factor);
+    assert!(m_many.sort_cost("events") < m_few.sort_cost("events"));
+}
+
+// ── Optimizer with Calibrated Profiles ───────────────────────────
+
+#[test]
+fn optimizer_with_fast_nvme() {
+    let mut hw = HardwareProfile::cpu_only();
+    hw.storage_bandwidth_gbps = 7.0;
+    hw.cpu_cores = 16;
+    hw.simd_width_bits = 512;
+    hw.l3_cache_bytes = 32 * 1024 * 1024;
+
+    let mut opt = Optimizer::new();
+    opt.set_hardware_profile(hw);
+    opt.add_table_stats("users", Statistics::new(100_000.0));
+
+    let plan = scan("users").filter(eq(col("active"), col("true")));
+    let result = opt.optimize(&plan).expect("should optimize");
+    assert!(
+        matches!(result, RelExpr::Filter { .. })
+            || matches!(result, RelExpr::Scan { .. })
+    );
+}
+
+#[test]
+fn optimizer_with_slow_hdd() {
+    let mut hw = HardwareProfile::cpu_only();
+    hw.storage_bandwidth_gbps = 0.15;
+    hw.cpu_cores = 4;
+    hw.simd_width_bits = 128;
+    hw.l3_cache_bytes = 8 * 1024 * 1024;
+
+    let mut opt = Optimizer::new();
+    opt.set_hardware_profile(hw);
+    opt.add_table_stats("users", Statistics::new(100_000.0));
+
+    let plan = scan("users");
+    let result = opt.optimize(&plan).expect("should optimize");
+    assert!(matches!(result, RelExpr::Scan { .. }));
+}
+
+#[test]
+fn optimizer_join_different_profiles_both_succeed() {
+    for hw in &[
+        HardwareProfile::cpu_only(),
+        HardwareProfile::gpu_server(),
+        HardwareProfile::fpga_appliance(),
+    ] {
+        let mut opt = Optimizer::new();
+        opt.set_hardware_profile(hw.clone());
+        opt.add_table_stats("a", Statistics::new(10_000.0));
+        opt.add_table_stats("b", Statistics::new(100_000.0));
+
+        let plan = RelExpr::Join {
+            join_type: JoinType::Inner,
+            condition: eq(col("id"), col("fk")),
+            left: Box::new(scan("a")),
+            right: Box::new(scan("b")),
+        };
+        let result = opt.optimize(&plan).expect("should optimize");
+        assert!(matches!(result, RelExpr::Join { .. }));
+    }
 }

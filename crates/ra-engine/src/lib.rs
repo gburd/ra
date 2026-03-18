@@ -37,7 +37,7 @@ pub mod rewrite;
 pub mod timely;
 
 pub use analysis::RelAnalysis;
-pub use cost::{IntegratedCostFn, IntegratedCostModel};
+pub use cost::{CostCalibration, IntegratedCostFn, IntegratedCostModel};
 pub use differential::{IncrementalError, IncrementalOptimizer, RuleChange, RuleId};
 pub use egraph::{to_rec_expr, EGraphError, Optimizer, OptimizerConfig, RelLang};
 pub use extract::{extract_best, extract_best_with_staleness, rec_expr_to_rel_expr, RelCostFn};

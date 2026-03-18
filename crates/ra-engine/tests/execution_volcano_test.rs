@@ -7,7 +7,7 @@
 mod helpers;
 
 use helpers::*;
-use ra_core::algebra::{AggregateExpr, AggregateFunction, JoinType, RelExpr};
+use ra_core::algebra::{AggregateExpr, AggregateFunction, RelExpr};
 use ra_core::expr::{Const, Expr};
 
 // ── Iterator Interface Tests ────────────────────────────────────

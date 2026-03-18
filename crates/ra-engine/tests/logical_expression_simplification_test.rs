@@ -6,7 +6,6 @@
 mod helpers;
 
 use helpers::*;
-use ra_core::algebra::RelExpr;
 
 // ── Constant Folding ────────────────────────────────────────
 

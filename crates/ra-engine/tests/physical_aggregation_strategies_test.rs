@@ -21,6 +21,7 @@ fn test_hash_aggregation_few_groups() {
             function: AggregateFunction::Sum,
             arg: Some(col("amount")),
             distinct: false,
+            alias: None,
         }],
         input: Box::new(input),
     };
@@ -36,6 +37,7 @@ fn test_hash_aggregation_many_groups() {
             function: AggregateFunction::Count,
             arg: Some(Expr::Const(Const::Int(1))),
             distinct: false,
+            alias: None,
         }],
         input: Box::new(input),
     };
@@ -53,11 +55,13 @@ fn test_hash_aggregation_fits_memory() {
                 function: AggregateFunction::Sum,
                 arg: Some(col("total")),
                 distinct: false,
+                alias: None,
             },
             AggregateExpr {
                 function: AggregateFunction::Count,
-                expr: Expr::Const(Const::Int(1)),
+                arg: Some(Expr::Const(Const::Int(1))),
                 distinct: false,
+                alias: None,
             },
         ],
         input: Box::new(input),
@@ -75,16 +79,19 @@ fn test_hash_aggregation_multiple_aggregates() {
                 function: AggregateFunction::Sum,
                 arg: Some(col("debit")),
                 distinct: false,
+                alias: None,
             },
             AggregateExpr {
                 function: AggregateFunction::Sum,
                 arg: Some(col("credit")),
                 distinct: false,
+                alias: None,
             },
             AggregateExpr {
                 function: AggregateFunction::Count,
-                expr: Expr::Const(Const::Int(1)),
+                arg: Some(Expr::Const(Const::Int(1))),
                 distinct: false,
+                alias: None,
             },
         ],
         input: Box::new(input),
@@ -104,6 +111,7 @@ fn test_sort_aggregation_input_sorted() {
             function: AggregateFunction::Avg,
             arg: Some(col("value")),
             distinct: false,
+            alias: None,
         }],
         input: Box::new(input),
     };
@@ -120,6 +128,7 @@ fn test_sort_aggregation_high_cardinality() {
             function: AggregateFunction::Count,
             arg: Some(Expr::Const(Const::Int(1))),
             distinct: false,
+            alias: None,
         }],
         input: Box::new(input),
     };
@@ -136,6 +145,7 @@ fn test_sort_aggregation_memory_constrained() {
             function: AggregateFunction::Max,
             arg: Some(col("price")),
             distinct: false,
+            alias: None,
         }],
         input: Box::new(input),
     };
@@ -154,6 +164,7 @@ fn test_streaming_aggregation_ordered_input() {
             function: AggregateFunction::Count,
             arg: Some(Expr::Const(Const::Int(1))),
             distinct: false,
+            alias: None,
         }],
         input: Box::new(input),
     };
@@ -170,6 +181,7 @@ fn test_streaming_aggregation_single_pass() {
             function: AggregateFunction::Avg,
             arg: Some(col("temperature")),
             distinct: false,
+            alias: None,
         }],
         input: Box::new(input),
     };
@@ -188,6 +200,7 @@ fn test_two_phase_aggregation_distributed() {
             function: AggregateFunction::Sum,
             arg: Some(col("value")),
             distinct: false,
+            alias: None,
         }],
         input: Box::new(input),
     };
@@ -205,16 +218,19 @@ fn test_two_phase_aggregation_decomposable() {
                 function: AggregateFunction::Sum,
                 arg: Some(col("value")),
                 distinct: false,
+                alias: None,
             },
             AggregateExpr {
                 function: AggregateFunction::Min,
                 arg: Some(col("value")),
                 distinct: false,
+                alias: None,
             },
             AggregateExpr {
                 function: AggregateFunction::Max,
                 arg: Some(col("value")),
                 distinct: false,
+                alias: None,
             },
         ],
         input: Box::new(input),
@@ -231,6 +247,7 @@ fn test_two_phase_aggregation_reduces_data_volume() {
             function: AggregateFunction::Count,
             arg: Some(Expr::Const(Const::Int(1))),
             distinct: false,
+            alias: None,
         }],
         input: Box::new(input),
     };
@@ -249,6 +266,7 @@ fn test_three_phase_aggregation_skewed_data() {
             function: AggregateFunction::Sum,
             arg: Some(col("amount")),
             distinct: false,
+            alias: None,
         }],
         input: Box::new(input),
     };
@@ -264,6 +282,7 @@ fn test_three_phase_aggregation_large_groups() {
             function: AggregateFunction::Avg,
             arg: Some(col("value")),
             distinct: false,
+            alias: None,
         }],
         input: Box::new(input),
     };
@@ -279,8 +298,9 @@ fn test_distinct_aggregation_count_distinct() {
         group_by: vec![col("page")],
         aggregates: vec![AggregateExpr {
             function: AggregateFunction::Count,
-            arg: Some(col("user_id"),
+            arg: Some(col("user_id")),
             distinct: true,
+            alias: None,
         }],
         input: Box::new(input),
     };
@@ -294,8 +314,9 @@ fn test_distinct_aggregation_sum_distinct() {
         group_by: vec![col("customer_id")],
         aggregates: vec![AggregateExpr {
             function: AggregateFunction::Sum,
-            arg: Some(col("order_total"),
+            arg: Some(col("order_total")),
             distinct: true,
+            alias: None,
         }],
         input: Box::new(input),
     };
@@ -310,13 +331,15 @@ fn test_distinct_aggregation_multiple_columns() {
         aggregates: vec![
             AggregateExpr {
                 function: AggregateFunction::Count,
-                arg: Some(col("merchant_id"),
+                arg: Some(col("merchant_id")),
                 distinct: true,
+                alias: None,
             },
             AggregateExpr {
                 function: AggregateFunction::Count,
-                arg: Some(col("category"),
+                arg: Some(col("category")),
                 distinct: true,
+                alias: None,
             },
         ],
         input: Box::new(input),
@@ -337,11 +360,13 @@ fn test_global_aggregation_no_grouping() {
                 function: AggregateFunction::Sum,
                 arg: Some(col("amount")),
                 distinct: false,
+                alias: None,
             },
             AggregateExpr {
                 function: AggregateFunction::Count,
-                expr: Expr::Const(Const::Int(1)),
+                arg: Some(Expr::Const(Const::Int(1))),
                 distinct: false,
+                alias: None,
             },
         ],
         input: Box::new(input),
@@ -356,8 +381,9 @@ fn test_global_aggregation_avg() {
         group_by: vec![],
         aggregates: vec![AggregateExpr {
             function: AggregateFunction::Avg,
-            arg: Some(col("score"),
+            arg: Some(col("score")),
             distinct: false,
+            alias: None,
         }],
         input: Box::new(input),
     };
@@ -373,8 +399,9 @@ fn test_aggregation_after_filter() {
         group_by: vec![col("customer_id")],
         aggregates: vec![AggregateExpr {
             function: AggregateFunction::Sum,
-            arg: Some(col("total"),
+            arg: Some(col("total")),
             distinct: false,
+            alias: None,
         }],
         input: Box::new(input),
     };
@@ -391,6 +418,7 @@ fn test_aggregation_with_selective_filter() {
             function: AggregateFunction::Count,
             arg: Some(Expr::Const(Const::Int(1))),
             distinct: false,
+            alias: None,
         }],
         input: Box::new(filtered),
     };
@@ -406,8 +434,9 @@ fn test_aggregation_after_join() {
         group_by: vec![col("country")],
         aggregates: vec![AggregateExpr {
             function: AggregateFunction::Sum,
-            arg: Some(col("order_total"),
+            arg: Some(col("order_total")),
             distinct: false,
+            alias: None,
         }],
         input: Box::new(join),
     };
@@ -425,6 +454,7 @@ fn test_gpu_hash_aggregation() {
             function: AggregateFunction::Sum,
             arg: Some(col("value")),
             distinct: false,
+            alias: None,
         }],
         input: Box::new(input),
     };
@@ -438,8 +468,9 @@ fn test_parallel_aggregation_cpu_cores() {
         group_by: vec![col("timestamp")],
         aggregates: vec![AggregateExpr {
             function: AggregateFunction::Avg,
-            arg: Some(col("cpu_usage"),
+            arg: Some(col("cpu_usage")),
             distinct: false,
+            alias: None,
         }],
         input: Box::new(input),
     };
@@ -458,6 +489,7 @@ fn test_aggregation_spill_to_disk() {
             function: AggregateFunction::Sum,
             arg: Some(col("value")),
             distinct: false,
+            alias: None,
         }],
         input: Box::new(input),
     };
@@ -474,6 +506,7 @@ fn test_aggregation_adaptive_strategy() {
             function: AggregateFunction::Count,
             arg: Some(Expr::Const(Const::Int(1))),
             distinct: false,
+            alias: None,
         }],
         input: Box::new(input),
     };
@@ -489,8 +522,9 @@ fn test_nested_aggregation() {
         group_by: vec![col("product_id")],
         aggregates: vec![AggregateExpr {
             function: AggregateFunction::Sum,
-            arg: Some(col("quantity"),
+            arg: Some(col("quantity")),
             distinct: false,
+            alias: None,
         }],
         input: Box::new(inner_input),
     };
@@ -499,8 +533,9 @@ fn test_nested_aggregation() {
         group_by: vec![],
         aggregates: vec![AggregateExpr {
             function: AggregateFunction::Max,
-            arg: Some(col("sum_quantity"),
+            arg: Some(col("sum_quantity")),
             distinct: false,
+            alias: None,
         }],
         input: Box::new(inner_agg),
     };

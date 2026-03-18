@@ -7,7 +7,7 @@
 mod helpers;
 
 use helpers::*;
-use ra_core::algebra::{AggregateExpr, AggregateFunction, JoinType, RelExpr};
+use ra_core::algebra::{AggregateExpr, AggregateFunction, RelExpr};
 use ra_hardware::HardwareProfile;
 
 // ── Morsel Size Selection Tests ────────────────────────────────
@@ -134,8 +134,9 @@ fn test_morsel_driven_parallel_aggregation() {
         group_by: vec![col("category")],
         aggregates: vec![AggregateExpr {
             function: AggregateFunction::Sum,
-            expr: col("amount"),
+            arg: Some(col("amount")),
             distinct: false,
+            alias: None,
         }],
         input: Box::new(input),
     };
@@ -201,8 +202,9 @@ fn test_morsel_driven_memory_management() {
         group_by: vec![col("high_cardinality")],
         aggregates: vec![AggregateExpr {
             function: AggregateFunction::Count,
-            expr: Expr::Const(Const::Int(1)),
+            arg: Some(int(1)),
             distinct: false,
+            alias: None,
         }],
         input: Box::new(input),
     };
