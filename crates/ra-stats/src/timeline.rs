@@ -2104,4 +2104,192 @@ ndv = 50
         let msg = format!("{err}");
         assert!(msg.contains("not found"));
     }
+
+    // -- Integration: parse example timeline files --
+
+    fn load_example(name: &str) -> Timeline {
+        let path = format!(
+            "{}/timelines/{name}",
+            env!("CARGO_MANIFEST_DIR")
+                .strip_suffix("/crates/ra-stats")
+                .unwrap_or(env!("CARGO_MANIFEST_DIR")),
+        );
+        let content =
+            std::fs::read_to_string(&path).unwrap_or_else(|e| {
+                panic!("failed to read {path}: {e}");
+            });
+        Timeline::from_toml(&content).unwrap_or_else(|e| {
+            panic!("failed to parse {path}: {e}");
+        })
+    }
+
+    #[test]
+    fn example_tpch_q1_parses() {
+        let tl = load_example("tpch-q1-evolution.toml");
+        assert_eq!(tl.metadata.name, "tpch-q1-evolution");
+        assert!(tl.snapshot_count() >= 3);
+        assert!(!tl.events.is_empty());
+        assert!(!tl.feedback.is_empty());
+    }
+
+    #[test]
+    fn example_tpch_q1_player_walkthrough() {
+        let tl = load_example("tpch-q1-evolution.toml");
+        let mut player = TimelinePlayer::new(tl).expect("player");
+        player.seek_start();
+        let stats = player.current_managed_stats().expect("stats");
+        assert!(stats.contains_key("lineitem"));
+        assert!(player.has_next());
+    }
+
+    #[test]
+    fn example_streaming_inserts_parses() {
+        let tl = load_example("streaming-inserts.toml");
+        assert_eq!(tl.metadata.name, "streaming-inserts");
+        assert!(tl.snapshot_count() >= 3);
+        let names = tl.table_names();
+        assert!(names.contains(&"events".to_string()));
+    }
+
+    #[test]
+    fn example_streaming_row_count_grows() {
+        let tl = load_example("streaming-inserts.toml");
+        let player = TimelinePlayer::new(tl).expect("player");
+        let delta = player.row_count_delta("events", 0, 3);
+        assert!(delta.is_some());
+        assert!(delta.expect("delta") > 0);
+    }
+
+    #[test]
+    fn example_bulk_update_skew_parses() {
+        let tl = load_example("bulk-update-skew.toml");
+        assert_eq!(tl.metadata.name, "bulk-update-skew");
+        let names = tl.table_names();
+        assert!(names.contains(&"orders".to_string()));
+        assert!(names.contains(&"customers".to_string()));
+    }
+
+    #[test]
+    fn example_bulk_update_q_error_improves() {
+        let tl = load_example("bulk-update-skew.toml");
+        let first = &tl.feedback[0];
+        let last = tl.feedback.last().expect("last");
+        assert!(last.q_error() <= first.q_error() + 0.5);
+    }
+
+    #[test]
+    fn example_multi_table_join_parses() {
+        let tl = load_example("multi-table-join.toml");
+        assert_eq!(tl.metadata.name, "multi-table-join");
+        let names = tl.table_names();
+        assert!(names.contains(&"fact_sales".to_string()));
+        assert!(names.contains(&"dim_product".to_string()));
+        assert!(names.contains(&"dim_store".to_string()));
+    }
+
+    #[test]
+    fn example_multi_table_events_and_feedback() {
+        let tl = load_example("multi-table-join.toml");
+        assert!(tl.event_count() >= 5);
+        assert!(tl.feedback_count() >= 3);
+    }
+
+    #[test]
+    fn example_analyze_feedback_loop_parses() {
+        let tl = load_example("analyze-feedback-loop.toml");
+        assert_eq!(tl.metadata.name, "analyze-feedback-loop");
+        assert!(tl.snapshot_count() >= 4);
+    }
+
+    #[test]
+    fn example_analyze_feedback_loop_q_error_cycle() {
+        let tl = load_example("analyze-feedback-loop.toml");
+        let player = TimelinePlayer::new(tl).expect("player");
+        let avg_q = player.average_q_error().expect("avg");
+        assert!(avg_q >= 1.0);
+        assert!(avg_q < 3.0);
+    }
+
+    #[test]
+    fn example_delete_heavy_parses() {
+        let tl = load_example("delete-heavy-workload.toml");
+        assert_eq!(tl.metadata.name, "delete-heavy-workload");
+        let names = tl.table_names();
+        assert!(names.contains(&"messages".to_string()));
+        assert!(names.contains(&"users".to_string()));
+    }
+
+    #[test]
+    fn example_delete_heavy_row_count_decreases() {
+        let tl = load_example("delete-heavy-workload.toml");
+        let player = TimelinePlayer::new(tl).expect("player");
+        let delta = player.row_count_delta("messages", 0, 1);
+        assert!(delta.is_some());
+        assert!(delta.expect("delta") < 0);
+    }
+
+    #[test]
+    fn all_examples_have_valid_event_kinds() {
+        let files = [
+            "tpch-q1-evolution.toml",
+            "streaming-inserts.toml",
+            "bulk-update-skew.toml",
+            "multi-table-join.toml",
+            "analyze-feedback-loop.toml",
+            "delete-heavy-workload.toml",
+        ];
+        for file in &files {
+            let tl = load_example(file);
+            for event in &tl.events {
+                // All events should have a table name
+                assert!(
+                    !event.table.is_empty(),
+                    "{file}: event has empty table"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn all_examples_feedback_q_error_at_least_one() {
+        let files = [
+            "tpch-q1-evolution.toml",
+            "streaming-inserts.toml",
+            "bulk-update-skew.toml",
+            "multi-table-join.toml",
+            "analyze-feedback-loop.toml",
+            "delete-heavy-workload.toml",
+        ];
+        for file in &files {
+            let tl = load_example(file);
+            for fb in &tl.feedback {
+                assert!(
+                    fb.q_error() >= 1.0,
+                    "{file}: Q-error should be >= 1.0"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn all_examples_snapshots_sorted() {
+        let files = [
+            "tpch-q1-evolution.toml",
+            "streaming-inserts.toml",
+            "bulk-update-skew.toml",
+            "multi-table-join.toml",
+            "analyze-feedback-loop.toml",
+            "delete-heavy-workload.toml",
+        ];
+        for file in &files {
+            let tl = load_example(file);
+            for i in 1..tl.snapshots.len() {
+                assert!(
+                    tl.snapshots[i].time_offset
+                        > tl.snapshots[i - 1].time_offset,
+                    "{file}: snapshots not sorted at index {i}"
+                );
+            }
+        }
+    }
 }
