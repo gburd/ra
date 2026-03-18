@@ -186,12 +186,6 @@ The `timelines/` directory contains example files:
 
 ### Plan evolution scenarios
 
-These longer timelines (8-15 snapshots over 2-6 hours) demonstrate how the optimizer adapts its plan choices as data characteristics change. See `docs/timeline-examples-guide.md` for detailed walkthroughs.
-
 | File | Duration | Snapshots | Scenario |
 |------|----------|-----------|----------|
-| `join-reordering-cascade.toml` | 6 hours | 10 | 5-table join where promotions table growth (50 -> 500K -> 5K rows) forces three distinct join orderings: left-deep promotions-first, bushy tree, then back to left-deep |
-| `index-vs-seqscan.toml` | 2 hours | 8 | Table with B-tree index where selectivity changes (0.5% -> 15% -> 2% error rate) cause IndexScan/SeqScan oscillation |
-| `aggregation-strategy-evolution.toml` | 3 hours | 11 | IoT sensor platform where device count growth (1K -> 100K) drives HashAgg -> GroupAgg -> 2-phase partial agg transitions |
-| `partition-pruning-effectiveness.toml` | 4 hours | 8 | Time-partitioned event log showing pruning degradation from stale stats, recovery after partition split into weekly sub-partitions |
-| `tpch-q5-plan-evolution.toml` | 4 hours | 7 | TPC-H Q5 6-way join with insert/delete/analyze cycles and execution feedback |
+| `tpch-q5-simple.toml` | 2 hours | 3 | TPC-H Q5 join showing how bulk insert (20% growth) causes statistics staleness, followed by ANALYZE refresh |

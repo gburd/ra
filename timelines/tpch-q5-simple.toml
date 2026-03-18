@@ -1,0 +1,124 @@
+# TPC-H Q5 - Simple plan evolution example
+#
+# Shows how a complex join plan adapts to statistics changes
+# during insert/delete/analyze cycles
+
+[metadata]
+name = "tpch-q5-simple"
+description = "TPC-H Q5 join plan evolution with statistics drift"
+database = "postgresql"
+schema = "TPC-H"
+scale_factor = 1.0
+duration_seconds = 7200
+
+# Snapshot 0: Fresh statistics after initial load
+[[snapshots]]
+time_offset = 0
+label = "fresh statistics"
+
+[[snapshots.tables]]
+name = "lineitem"
+row_count = 6_000_000
+page_count = 90_000
+avg_row_size = 128.0
+
+[[snapshots.tables]]
+name = "orders"
+row_count = 1_500_000
+page_count = 30_000
+avg_row_size = 150.0
+
+# Snapshot 1: After bulk insert (20% growth, stale stats)
+[[snapshots]]
+time_offset = 3600
+label = "bulk insert - stats stale"
+
+[[snapshots.tables]]
+name = "lineitem"
+row_count = 7_200_000
+page_count = 108_000
+avg_row_size = 128.0
+
+[[snapshots.tables]]
+name = "orders"
+row_count = 1_800_000
+page_count = 36_000
+avg_row_size = 150.0
+
+# Snapshot 2: After ANALYZE (fresh stats again)
+[[snapshots]]
+time_offset = 5400
+label = "after ANALYZE"
+
+[[snapshots.tables]]
+name = "lineitem"
+row_count = 7_200_000
+page_count = 108_000
+avg_row_size = 128.0
+
+[[snapshots.tables]]
+name = "orders"
+row_count = 1_800_000
+page_count = 36_000
+avg_row_size = 150.0
+
+# Events timeline
+[[events]]
+time_offset = 0
+kind = "analyze"
+table = "lineitem"
+description = "Initial ANALYZE after load"
+
+[[events]]
+time_offset = 0
+kind = "analyze"
+table = "orders"
+description = "Initial ANALYZE after load"
+
+[[events]]
+time_offset = 1800
+kind = "insert"
+table = "orders"
+row_count = 300_000
+description = "Bulk insert - large historical order import"
+
+[[events]]
+time_offset = 1800
+kind = "insert"
+table = "lineitem"
+row_count = 1_200_000
+description = "Lineitem inserts for new orders"
+
+[[events]]
+time_offset = 5400
+kind = "analyze"
+table = "lineitem"
+description = "Autovacuum triggers ANALYZE"
+
+[[events]]
+time_offset = 5400
+kind = "analyze"
+table = "orders"
+description = "Autovacuum triggers ANALYZE"
+
+# Execution feedback
+[[feedback]]
+time_offset = 1000
+query = "SELECT n_name, SUM(l_extendedprice * (1 - l_discount)) FROM customer, orders, lineitem, supplier, nation, region WHERE c_custkey = o_custkey AND l_orderkey = o_orderkey AND l_suppkey = s_suppkey GROUP BY n_name"
+operator = "HashJoin(orders, lineitem)"
+estimated_rows = 6_000_000.0
+actual_rows = 6_000_000.0
+
+[[feedback]]
+time_offset = 4000
+query = "SELECT n_name, SUM(l_extendedprice * (1 - l_discount)) FROM customer, orders, lineitem, supplier, nation, region WHERE c_custkey = o_custkey AND l_orderkey = o_orderkey AND l_suppkey = s_suppkey GROUP BY n_name"
+operator = "HashJoin(orders, lineitem)"
+estimated_rows = 6_000_000.0
+actual_rows = 7_200_000.0
+
+[[feedback]]
+time_offset = 6000
+query = "SELECT n_name, SUM(l_extendedprice * (1 - l_discount)) FROM customer, orders, lineitem, supplier, nation, region WHERE c_custkey = o_custkey AND l_orderkey = o_orderkey AND l_suppkey = s_suppkey GROUP BY n_name"
+operator = "HashJoin(orders, lineitem)"
+estimated_rows = 7_150_000.0
+actual_rows = 7_200_000.0
