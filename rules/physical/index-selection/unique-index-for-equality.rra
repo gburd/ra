@@ -1,0 +1,101 @@
+---
+id: unique-index-for-equality
+name: Unique Index for Equality Lookups
+category: physical/index-selection
+databases: [postgresql, mysql, mssql, oracle, sqlite, duckdb]
+execution_models: [volcano, vectorized]
+hardware: [cpu, ssd, hdd]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [index, unique, equality, point-lookup, primary-key]
+complexity: "O(log n)"
+benefit_range: [0.8, 0.99]
+---
+
+# Unique Index for Equality Lookups
+
+## Description
+
+Selects a unique index (including primary key indexes) for equality
+predicates, guaranteeing at most one matching row. This lets the
+optimizer set an upper bound of 1 on the output cardinality and skip
+duplicate-elimination operators.
+
+**When to apply**: Equality predicate on all columns of a UNIQUE or
+PRIMARY KEY index.
+
+**Why it works**: The uniqueness guarantee means the search can stop
+after finding the first (and only) match. The optimizer can propagate
+the cardinality=1 estimate through the plan, improving join order
+decisions and avoiding unnecessary sorts/distincts.
+
+## Relational Algebra
+
+```algebra
+sigma[pk = v](R)
+  -> unique_index_lookup[I_unique](pk = v)
+  where is_unique(I) && matches_all_key_columns(I, pk)
+  -- output cardinality: exactly 0 or 1
+```
+
+## Implementation
+
+```rust
+rw!("unique-index-point-lookup";
+    "(filter (= ?cols ?vals) (scan ?table))" =>
+    "(unique-index-lookup ?idx ?cols ?vals)"
+    if has_unique_index("?table", "?cols") &&
+       all_key_columns_bound("?idx", "?cols")
+),
+```
+
+## Cost Model
+
+```rust
+fn cost(index_levels: u32) -> f64 {
+    // At most index_levels page reads + 1 heap fetch
+    index_levels as f64 * IO_COST + HEAP_FETCH_COST
+}
+
+fn benefit_vs_seq_scan(total_pages: u64, index_levels: u32) -> f64 {
+    let seq = total_pages as f64 * IO_COST;
+    let idx = cost(index_levels);
+    (seq - idx) / seq
+}
+```
+
+**Typical benefit**: 80-99% for point lookups on large tables.
+
+## Test Cases
+
+### Positive: Primary key lookup
+
+```sql
+SELECT * FROM users WHERE user_id = 12345;
+
+-- Single B-tree traversal, at most 1 row
+```
+
+### Positive: Multi-column unique index
+
+```sql
+-- UNIQUE(order_id, line_num)
+SELECT * FROM order_lines WHERE order_id = 100 AND line_num = 3;
+
+-- Both key columns bound: unique lookup
+```
+
+### Negative: Partial key match on composite unique
+
+```sql
+-- UNIQUE(order_id, line_num)
+SELECT * FROM order_lines WHERE order_id = 100;
+
+-- Only leading column bound: range scan, not unique lookup
+```
+
+## References
+
+- Selinger et al., "Access Path Selection in a Relational DBMS", SIGMOD 1979
+- PostgreSQL: Unique index scan node
+- MySQL: eq_ref join type for unique index lookups

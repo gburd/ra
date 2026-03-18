@@ -1,0 +1,278 @@
+---
+id: hash-join-with-bloom-filter
+name: Hash Join with Bloom Filter
+category: physical/join-algorithms
+databases: [oracle, mssql, duckdb, clickhouse, spark]
+execution_models: [volcano, vectorized, push-based]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [join, hash, bloom-filter, semi-join-reduction, early-filtering]
+complexity: "O(n + m)"
+benefit_range: [0.3, 0.85]
+---
+
+# Hash Join with Bloom Filter
+
+## Metadata
+- **Rule ID**: `hash-join-with-bloom-filter`
+- **Category**: Physical / Join Algorithms
+- **Complexity**: O(n + m) with reduced constant factor
+- **Introduced**: Oracle (bitmap filtering), SQL Server (bitmap filters in parallel plans)
+- **Prerequisites**: Equijoin, build side significantly smaller than probe side
+- **Alternatives**: hash-join, semi-join-reduction
+
+## Description
+
+Enhances standard hash join by constructing a Bloom filter during the build
+phase. Before probing the hash table, each probe-side tuple is tested against
+the Bloom filter. Non-matching tuples are discarded without accessing the hash
+table, reducing cache misses and probe overhead.
+
+**When to use:**
+- Join selectivity is low (many probe rows do not match)
+- Build side is much smaller than probe side
+- Distributed/parallel joins where filter can be pushed to scan
+- Pipeline with upstream filters that benefit from early pruning
+
+**Advantages:**
+- Reduces hash table probes by filtering non-matches early
+- Bloom filter fits in L1/L2 cache (compact representation)
+- Can be pushed down to storage layer for scan filtering
+- Minimal false positive rate with proper sizing
+
+**Disadvantages:**
+- Additional memory for Bloom filter (typically small)
+- False positives still require hash table probe
+- Build phase slightly longer (Bloom filter construction)
+- No benefit when most probe rows match
+
+## Relational Algebra
+
+```
+HashJoin(R, S, R.key = S.key)
+-> BloomHashJoin(R_build, S_probe, key):
+     1. Build hash table HT on R
+     2. Build Bloom filter BF on R.key
+     3. For each s in S:
+        if BF.test(s.key):    // Fast check
+          probe HT for match  // Only if Bloom says yes
+        else:
+          skip (definite non-match)
+```
+
+## Implementation (egg rewrite rules)
+
+```lisp
+;; Add Bloom filter to hash join when probe side is large
+(rewrite (hash-join ?build ?probe ?key)
+  (bloom-hash-join ?build ?probe ?key
+    :bloom-bits (bloom-filter-size ?build))
+  :if (> (cardinality ?probe) (* 10 (cardinality ?build)))
+  :if (< (join-selectivity ?build ?probe ?key) 0.3))
+
+;; Push Bloom filter below exchange in distributed plans
+(rewrite (exchange ?partitioning
+           (bloom-probe ?bf (scan ?table)))
+  (bloom-probe ?bf (exchange ?partitioning (scan ?table)))
+  :if (is-broadcast ?bf))
+
+;; Push Bloom filter into scan operator
+(rewrite (bloom-probe ?bf (scan ?table))
+  (scan-with-bloom-filter ?table ?bf)
+  :if (supports-runtime-filter ?table))
+```
+
+## Implementation Pattern
+
+```rust
+pub struct BloomHashJoin {
+    build_input: Box<dyn Operator>,
+    probe_input: Box<dyn Operator>,
+    join_key: JoinKey,
+    hash_table: HashMap<JoinKey, Vec<Tuple>>,
+    bloom_filter: BloomFilter,
+    phase: Phase,
+}
+
+struct BloomFilter {
+    bits: Vec<u64>,
+    num_hashes: usize,
+    num_bits: usize,
+}
+
+impl BloomFilter {
+    fn new(expected_elements: u64, fpp: f64) -> Self {
+        let num_bits = optimal_num_bits(expected_elements, fpp);
+        let num_hashes = optimal_num_hashes(num_bits, expected_elements);
+        Self {
+            bits: vec![0u64; (num_bits + 63) / 64],
+            num_hashes,
+            num_bits,
+        }
+    }
+
+    fn insert(&mut self, key: u64) {
+        for i in 0..self.num_hashes {
+            let bit = hash_with_seed(key, i as u64) % self.num_bits;
+            self.bits[bit / 64] |= 1 << (bit % 64);
+        }
+    }
+
+    fn test(&self, key: u64) -> bool {
+        for i in 0..self.num_hashes {
+            let bit = hash_with_seed(key, i as u64) % self.num_bits;
+            if self.bits[bit / 64] & (1 << (bit % 64)) == 0 {
+                return false; // Definite non-match
+            }
+        }
+        true // Possible match (may be false positive)
+    }
+}
+
+impl Operator for BloomHashJoin {
+    fn next(&mut self) -> Option<Tuple> {
+        if matches!(self.phase, Phase::Building) {
+            while let Some(tuple) = self.build_input.next() {
+                let key = tuple.extract_key(&self.join_key);
+                self.bloom_filter.insert(key.hash());
+                self.hash_table.entry(key).or_default().push(tuple);
+            }
+            self.phase = Phase::Probing;
+        }
+
+        loop {
+            let probe_tuple = self.probe_input.next()?;
+            let key = probe_tuple.extract_key(&self.join_key);
+
+            // Bloom filter check -- skip definite non-matches
+            if !self.bloom_filter.test(key.hash()) {
+                continue;
+            }
+
+            // Probe hash table for actual match
+            if let Some(matches) = self.hash_table.get(&key) {
+                return Some(combine(&probe_tuple, &matches[0]));
+            }
+            // False positive: Bloom said yes but no actual match
+        }
+    }
+}
+```
+
+## Cost Model
+
+```rust
+pub fn cost_bloom_hash_join(
+    build_card: u64,
+    probe_card: u64,
+    join_selectivity: f64,
+    hardware: &HardwareModel,
+) -> Cost {
+    // Bloom filter parameters
+    let fpp = 0.01; // 1% false positive rate
+    let bloom_bits = (build_card as f64 * 10.0) as u64; // ~10 bits/element
+    let bloom_bytes = bloom_bits / 8;
+
+    // Build phase: hash table + Bloom filter
+    let build_cost = Cost::cpu(build_card * 15); // Hash + Bloom insert
+
+    // Probe phase with Bloom filtering
+    let bloom_pass_rate = join_selectivity + fpp * (1.0 - join_selectivity);
+    let bloom_checks = Cost::cpu(probe_card * 3); // Bloom test is cheap
+    let ht_probes = (probe_card as f64 * bloom_pass_rate) as u64;
+    let probe_cost = Cost::cpu(ht_probes * 10); // Only matched rows probe HT
+
+    // Memory: hash table + Bloom filter (Bloom is tiny)
+    let memory = Cost::memory(build_card * 100 + bloom_bytes);
+
+    build_cost + bloom_checks + probe_cost + memory
+}
+
+pub fn bloom_filter_benefit(
+    probe_card: u64,
+    join_selectivity: f64,
+) -> f64 {
+    // Fraction of probe-side hash table lookups avoided
+    let without_bloom = probe_card as f64;
+    let with_bloom = probe_card as f64 * (join_selectivity + 0.01);
+    (without_bloom - with_bloom) / without_bloom
+}
+```
+
+## Test Cases
+
+### Test 1: Low selectivity join benefits from Bloom filter
+```sql
+CREATE TABLE orders (id INT, customer_id INT, amount DECIMAL);
+CREATE TABLE vip_customers (id INT PRIMARY KEY); -- 1,000 rows
+
+-- 10M orders, only 1,000 VIP customers
+SELECT o.* FROM orders o
+JOIN vip_customers v ON o.customer_id = v.id;
+
+-- Expected: BloomHashJoin
+-- Build Bloom filter on vip_customers.id (1,000 elements, ~1.2KB)
+-- 99%+ of orders filtered by Bloom before hash table probe
+-- Massive reduction in hash table cache misses
+```
+
+### Test 2: Bloom filter pushed to storage layer
+```sql
+-- Distributed scenario: fact table on storage nodes
+SELECT f.* FROM fact_table f
+JOIN dimension_small d ON f.dim_key = d.id
+WHERE d.category = 'premium';
+
+-- Expected: BloomHashJoin with filter pushdown
+-- Bloom filter shipped to storage nodes
+-- Storage nodes skip non-matching fact rows before network transfer
+```
+
+### Test 3: Negative -- high selectivity join
+```sql
+SELECT * FROM table_a a
+JOIN table_b b ON a.id = b.id;
+
+-- Both tables same size, 1:1 join
+-- NOT suitable: most probe rows match, Bloom filter adds overhead
+-- Standard hash join is better
+```
+
+### Test 4: Multi-join pipeline with cascading Bloom filters
+```sql
+SELECT * FROM fact f
+JOIN dim1 d1 ON f.d1_key = d1.id
+JOIN dim2 d2 ON f.d2_key = d2.id
+WHERE d1.type = 'A' AND d2.region = 'US';
+
+-- Expected: Cascading Bloom filters
+-- BF1 on filtered dim1, BF2 on filtered dim2
+-- Fact table scanned once, both BFs applied to rows
+```
+
+## Performance Characteristics
+
+| Metric | Standard Hash Join | Bloom Hash Join |
+|--------|-------------------|-----------------|
+| Build overhead | Baseline | +5-10% (Bloom construction) |
+| Probe cost (1% match) | 100% HT probes | ~2% HT probes |
+| Probe cost (50% match) | 100% HT probes | ~51% HT probes |
+| Probe cost (99% match) | 100% HT probes | ~99% HT probes |
+| Memory overhead | Baseline | +1-2% (Bloom filter) |
+| Cache behavior | Many misses | Bloom in L1/L2, fewer HT misses |
+
+## References
+
+1. **Bloom (1970)**: "Space/Time Trade-offs in Hash Coding with Allowable Errors"
+   - Original Bloom filter paper
+   - DOI: 10.1145/362686.362692
+
+2. **Oracle Runtime Filtering**: Bitmap filters in parallel/distributed joins
+   - https://docs.oracle.com/en/database/
+
+3. **DuckDB Blog**: "Bloom Filters for Join Optimization"
+   - Runtime filter pushdown in vectorized engine
+
+4. **Ramakrishnan & Gehrke**: "Database Management Systems", Chapter 14
+   - Hash join variants and optimizations

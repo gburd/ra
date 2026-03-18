@@ -10,7 +10,7 @@
 //! - Lookup join caching
 
 use ra_core::algebra::{JoinType, RelExpr};
-use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
+use ra_core::expr::{BinOp, ColumnRef, Expr};
 use ra_engine::Optimizer;
 use ra_hardware::HardwareProfile;
 

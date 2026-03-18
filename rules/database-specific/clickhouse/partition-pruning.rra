@@ -1,0 +1,132 @@
+---
+id: clickhouse-partition-pruning
+name: "ClickHouse Partition Pruning"
+category: database-specific/clickhouse
+databases: [clickhouse]
+execution_models: [column-at-a-time]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [partition, pruning, mergetree, data-skip]
+complexity: "O(p)"
+benefit_range: [0.5, 0.99]
+---
+
+# ClickHouse Partition Pruning
+
+## Metadata
+- **Rule ID**: `clickhouse-partition-pruning`
+- **Category**: Database-specific / ClickHouse
+- **Source**: `src/Storages/MergeTree/PartitionPruner.h`
+- **Complexity**: O(p) where p is number of partitions
+- **Prerequisites**: PARTITION BY clause; filter on partition expression
+- **Alternatives**: Full partition scan
+
+## Description
+
+MergeTree tables can be partitioned by an expression (commonly
+toYYYYMM(date) for monthly partitions). Each partition contains one
+or more data parts stored as separate directories. When a query's
+WHERE clause matches the partition expression, ClickHouse prunes
+entire partitions before granule-level scanning begins.
+
+Partition pruning evaluates the filter against partition min/max
+metadata. Non-matching partitions are excluded from the read plan
+entirely, saving both I/O and the overhead of sparse index checks
+for those partitions.
+
+**When to apply:**
+- Filter on PARTITION BY expression columns
+- Time-range queries on time-partitioned tables
+- Combined with sparse index pruning for two-level elimination
+
+**Why it works for OLAP:**
+- OLAP tables commonly partitioned by time
+- Most queries filter on time ranges
+- Partition elimination is cheaper than granule elimination
+
+## Relational Algebra
+
+```
+filter[partition_pred](scan[T])
+  -> union(
+       filter[partition_pred](scan[T, partition_1]),
+       filter[partition_pred](scan[T, partition_3]))
+     skipping partitions 2, 4, 5, ...
+```
+
+## Implementation (egg rewrite rules)
+
+```lisp
+;; Prune partitions based on filter
+(rewrite (filter ?pred (scan ?table))
+  (filter ?pred
+    (union-all
+      (scan-partitions ?table
+        (matching-partitions ?table ?pred))))
+  :if (is-partitioned ?table)
+  :if (matches-partition-expr ?pred (partition-expr ?table)))
+
+;; Two-level pruning: partition then granule
+(rewrite (filter ?pred (scan-partitions ?table ?parts))
+  (union-all
+    (map ?parts
+      (lambda (?p)
+        (filter ?pred
+          (read-granules (scan-part ?table ?p)
+            (index-lookup (sparse-index ?table ?p) ?pred))))))
+  :if (matches-sort-key-prefix ?pred (sort-key ?table)))
+```
+
+## Cost Model
+
+```rust
+pub fn cost_partition_pruning(
+    total_partitions: u64,
+    matching_partitions: u64,
+    rows_per_partition: u64,
+    hardware: &HardwareModel,
+) -> Cost {
+    let prune_cost = Cost::cpu(total_partitions * 20);
+    let scan_cost = Cost::io(
+        matching_partitions as f64 * rows_per_partition as f64
+        * hardware.seq_read_cost()
+    );
+    prune_cost + scan_cost
+}
+```
+
+**Typical benefit**: 50-99% for time-range queries on time-partitioned data
+
+## Test Cases
+
+### Positive: Monthly partition pruning
+```sql
+CREATE TABLE events (
+    date Date, event String, value Float64
+) ENGINE = MergeTree
+PARTITION BY toYYYYMM(date)
+ORDER BY (date, event);
+
+SELECT * FROM events WHERE date >= '2024-03-01' AND date < '2024-04-01';
+-- Only partition 202403 is read; 11 other monthly partitions skipped
+```
+
+### Positive: Combined partition + granule pruning
+```sql
+SELECT * FROM events
+WHERE date = '2024-03-15' AND event = 'purchase';
+-- Partition prune: only 202403
+-- Sparse index prune: granules containing 2024-03-15
+```
+
+### Negative: No partition expression match
+```sql
+SELECT * FROM events WHERE event = 'purchase';
+-- event not in partition expression; all partitions scanned
+```
+
+## References
+
+- ClickHouse: `src/Storages/MergeTree/PartitionPruner.h`
+- ClickHouse: `src/Storages/MergeTree/MergeTreeDataSelectExecutor.cpp`

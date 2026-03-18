@@ -1,0 +1,289 @@
+---
+id: apply-to-join
+name: Apply to Join
+category: logical/subquery-unnesting
+databases: [postgresql, oracle, mssql, duckdb, cockroachdb]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [subquery, apply, dependent-join, decorrelation, join-conversion]
+complexity: "O(n)"
+benefit_range: [0.6, 0.99]
+---
+
+# Apply to Join
+
+## Description
+
+Eliminates the APPLY (dependent join) operator by converting it to a
+standard join. The APPLY operator represents per-row evaluation of a
+parameterized subquery: for each row in the outer input, the inner input
+is evaluated with the outer row's values as parameters. This is the
+fundamental operator underlying all correlated subquery evaluation, and
+its elimination is the core of subquery decorrelation.
+
+**When to apply**: Any APPLY operator where the inner expression's
+dependency on the outer row can be expressed as a join predicate.
+
+**Why it works**: The APPLY operator `R Apply_p S(p)` where S depends on
+parameter p from R can be rewritten as `R Join S ON R.p = S.p` when the
+dependency is through equality predicates. This allows the optimizer to
+choose hash or merge joins instead of the forced nested-loop execution
+of APPLY.
+
+## Relational Algebra
+
+```algebra
+-- Cross Apply (inner join semantics)
+R CrossApply S(R.col)
+  -> join[R.col = S.corr_col](R, S)
+  where S uses R.col only in equality predicates
+
+-- Outer Apply (left join semantics)
+R OuterApply S(R.col)
+  -> left_join[R.col = S.corr_col](R, S)
+  where S uses R.col only in equality predicates
+
+-- Apply with filter extraction
+R CrossApply (filter[S.fk = R.pk AND S.status = 'active'](S))
+  -> filter[S.status = 'active'](join[R.pk = S.fk](R, S))
+
+-- Apply with aggregation
+R CrossApply (aggregate[agg](filter[S.fk = R.pk](S)))
+  -> left_join[R.pk = T.fk](R, T)
+  where T = aggregate[agg GROUP BY fk](S)
+
+-- Apply with project (remove unused outer columns)
+R CrossApply (project[inner_cols](S(R.col)))
+  -> project[R.*, inner_cols](join[R.col = S.corr_col](R, S))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Cross Apply with filter -> inner join
+rw!("cross-apply-filter-to-join";
+    "(cross-apply ?outer
+       (filter (= ?inner_col ?param) ?inner))" =>
+    "(join (= ?param ?inner_col) ?outer ?inner)"
+    if is_parameter_from("?param", "?outer")
+),
+
+// Outer Apply with filter -> left join
+rw!("outer-apply-filter-to-left-join";
+    "(outer-apply ?outer
+       (filter (= ?inner_col ?param) ?inner))" =>
+    "(left-join (= ?param ?inner_col) ?outer ?inner)"
+    if is_parameter_from("?param", "?outer")
+),
+
+// Apply with aggregate -> grouped aggregate + join
+rw!("apply-aggregate-to-grouped-join";
+    "(cross-apply ?outer
+       (aggregate ?agg (filter (= ?corr ?param) ?inner)))" =>
+    "(join (= ?param ?corr)
+       ?outer
+       (aggregate (?agg group-by ?corr) ?inner))"
+    if is_parameter_from("?param", "?outer")
+),
+
+// Outer Apply with aggregate -> left join + grouped aggregate
+rw!("outer-apply-aggregate-to-left-join";
+    "(outer-apply ?outer
+       (aggregate ?agg (filter (= ?corr ?param) ?inner)))" =>
+    "(left-join (= ?param ?corr)
+       ?outer
+       (aggregate (?agg group-by ?corr) ?inner))"
+    if is_parameter_from("?param", "?outer")
+),
+
+// Apply with multiple parameters
+rw!("apply-multi-param-to-join";
+    "(cross-apply ?outer
+       (filter (and (= ?c1 ?p1) (= ?c2 ?p2)) ?inner))" =>
+    "(join (and (= ?p1 ?c1) (= ?p2 ?c2)) ?outer ?inner)"
+    if is_parameter_from("?p1", "?outer")
+    if is_parameter_from("?p2", "?outer")
+),
+
+// Apply elimination with EXISTS semantics -> semi-join
+rw!("apply-exists-to-semi-join";
+    "(filter (exists (cross-apply ?outer ?inner)) ?outer)" =>
+    "(semi-join ?corr_cond ?outer ?inner)"
+    if extract_correlation_condition("?inner", "?outer")
+),
+```
+
+**Restrictions:**
+- The inner expression must use outer parameters only in equality predicates
+  for standard join conversion
+- Non-equality references (>, <, BETWEEN, LIKE) produce theta-joins which
+  may be less efficient than the apply
+- Side-effecting inner expressions cannot be decorrelated
+- Recursive or iterative apply patterns need specialized handling
+- The inner side must be deterministic (same input -> same output)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    outer_size: u64,
+    inner_size: u64,
+    inner_selectivity: f64,
+    apply_type: ApplyType,
+) -> f64 {
+    // Apply: per outer row, evaluate inner
+    let apply_cost = outer_size as f64
+        * (inner_size as f64 * inner_selectivity + 1.0);
+
+    let join_cost = match apply_type {
+        ApplyType::SimpleFilter => {
+            // Hash join: build inner, probe outer
+            inner_size as f64 + outer_size as f64
+        }
+        ApplyType::Aggregate => {
+            // Group-by + join
+            inner_size as f64 * 1.5 + outer_size as f64
+        }
+        ApplyType::TopN { n } => {
+            // Window function
+            (inner_size as f64) * 2.0 + outer_size as f64
+        }
+    };
+
+    (apply_cost - join_cost) / apply_cost
+}
+```
+
+**Typical benefit**: 60-99%; apply elimination is the single most important
+subquery optimization in any cost-based optimizer
+
+## Test Cases
+
+### Positive: Simple Cross Apply to inner join
+
+```sql
+-- SQL Server CROSS APPLY
+SELECT c.Name, o.OrderDate, o.Total
+FROM Customers c
+CROSS APPLY (
+  SELECT o.OrderDate, o.Total
+  FROM Orders o
+  WHERE o.CustomerID = c.ID
+    AND o.Total > 100
+) o;
+
+-- Convert to join:
+SELECT c.Name, o.OrderDate, o.Total
+FROM Customers c
+JOIN Orders o ON o.CustomerID = c.ID AND o.Total > 100;
+```
+
+### Positive: Outer Apply to left join
+
+```sql
+-- SQL Server OUTER APPLY (preserves outer rows)
+SELECT c.Name, latest.OrderDate
+FROM Customers c
+OUTER APPLY (
+  SELECT TOP 1 o.OrderDate
+  FROM Orders o
+  WHERE o.CustomerID = c.ID
+  ORDER BY o.OrderDate DESC
+) latest;
+
+-- Decorrelate via left join + window:
+SELECT c.Name, o.OrderDate
+FROM Customers c
+LEFT JOIN (
+  SELECT *, ROW_NUMBER() OVER (
+    PARTITION BY CustomerID ORDER BY OrderDate DESC
+  ) AS rn
+  FROM Orders
+) o ON c.ID = o.CustomerID AND o.rn = 1;
+```
+
+### Positive: Apply with aggregation
+
+```sql
+SELECT d.name, emp_stats.total_salary
+FROM departments d
+CROSS APPLY (
+  SELECT SUM(e.salary) AS total_salary
+  FROM employees e
+  WHERE e.dept_id = d.id
+) emp_stats;
+
+-- Decorrelate: GROUP BY + JOIN
+SELECT d.name, s.total_salary
+FROM departments d
+LEFT JOIN (
+  SELECT dept_id, SUM(salary) AS total_salary
+  FROM employees GROUP BY dept_id
+) s ON d.id = s.dept_id;
+```
+
+### Positive: Nested Apply elimination
+
+```sql
+SELECT r.name, s1.val, s2.val
+FROM regions r
+CROSS APPLY (
+  SELECT SUM(o.total) AS val
+  FROM orders o WHERE o.region_id = r.id
+) s1
+CROSS APPLY (
+  SELECT COUNT(*) AS val
+  FROM returns ret WHERE ret.region_id = r.id
+) s2;
+
+-- Decorrelate both applies independently:
+-- Each becomes a grouped aggregate + left join
+```
+
+### Negative: Apply with table-valued function
+
+```sql
+SELECT t.id, x.value
+FROM documents t
+CROSS APPLY extract_keywords(t.content) AS x(value);
+
+-- Table-valued function: opaque dependency
+-- Cannot express as equi-join
+-- Must remain as apply/nested loop
+```
+
+### Negative: Apply with non-deterministic inner
+
+```sql
+SELECT u.id, s.sample_value
+FROM users u
+CROSS APPLY (
+  SELECT value AS sample_value
+  FROM user_data ud
+  WHERE ud.user_id = u.id
+  ORDER BY RANDOM()
+  LIMIT 1
+) s;
+
+-- RANDOM() makes inner non-deterministic
+-- Decorrelation could change result distribution
+-- Must keep apply for correctness
+```
+
+## References
+
+**Academic papers:**
+- Galindo-Legaria & Joshi, "Orthogonal Optimization of Subqueries and Aggregation", SIGMOD 2001
+- Neumann & Kemper, "Unnesting Arbitrary Queries", BTW 2015
+- Elhemali et al., "Execution Strategies for SQL Subqueries", SIGMOD 2007
+
+**Implementation:**
+- SQL Server: Primary APPLY optimizer with `OpApply` -> `OpJoin` rules
+- PostgreSQL: Implicit apply through correlated subqueries in `subselect.c`
+- Oracle: CBQT (Cost-Based Query Transformation) for apply elimination
+- DuckDB: `FlattenDependentJoin()` in binder for all correlated forms
+- CockroachDB: `opt/xform/decorrelate.go` comprehensive apply removal

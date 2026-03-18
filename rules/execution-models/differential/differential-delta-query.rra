@@ -1,45 +1,269 @@
 ---
 id: differential-delta-query
-name: Differential delta query
+name: Differential Delta Query Processing
 category: execution-models
 version: 1.0.0
-databases: [materialize, spark]
-tags: [execution, differential, streaming, incremental]
+databases: [Materialize, Differential Dataflow, Noria]
+authors: [Frank McSherry]
+tags: [execution, differential, delta, incremental, query, join]
+standard: Differential Dataflow
 ---
 
-# Differential delta query
+# Differential Delta Query Processing
 
 ## Description
 
-Delta-only query processing - only compute changes.
+Delta query processing transforms a multi-way join into a set of "delta rules" -- one per input relation. When a change arrives at input R_i, the delta rule for R_i joins the change against the current state of all other inputs. This avoids recomputing the entire join; only the delta (change) propagates. For an N-way join, N delta rules are generated, each handling changes to one input.
+
+**Delta join rules for R JOIN S JOIN T:**
+- Delta(R): new_R JOIN current_S JOIN current_T
+- Delta(S): current_R JOIN new_S JOIN current_T
+- Delta(T): current_R JOIN current_S JOIN new_T
+
+**Key characteristics:**
+- **Per-input delta rules**: One rule per relation in the join
+- **Incremental**: Only process the change, not the full data
+- **Asymptotically optimal**: Work proportional to output change size
+- **Arrangement reuse**: Delta rules share arrangements of current state
+- **Correct**: Union of all delta rules equals the full join delta
+
+**Trade-offs:**
+- N delta rules for N-way join (code/planning complexity)
+- Requires maintaining arrangements of all inputs
+- Delta rule ordering affects performance (most selective first)
+- Transient inconsistency during multi-input updates
+
+## Relational Algebra
+
+```
+Original join:
+  R(a,b) JOIN S(b,c) JOIN T(c,d)
+
+Delta transformation:
+
+When R changes by dR:
+  output += dR(a,b) JOIN S(b,c) JOIN T(c,d)
+  // Probe S arrangement by b, then T arrangement by c
+
+When S changes by dS:
+  output += R(a,b) JOIN dS(b,c) JOIN T(c,d)
+  // Probe R arrangement by b, then T arrangement by c
+
+When T changes by dT:
+  output += R(a,b) JOIN S(b,c) JOIN dT(c,d)
+  // Probe S arrangement by c, then R arrangement by b
+
+Each delta rule produces the exact change in join output
+caused by the change in its input relation.
+```
 
 ## Implementation
 
 ```rust
-pub struct Differentialdeltaquery {
-    state: StreamingState,
-    changes: Vec<Change>,
+/// Delta query processor for incremental multi-way joins
+pub struct DeltaQueryProcessor {
+    /// Delta rules: one per input relation
+    delta_rules: Vec<DeltaRule>,
+    /// Shared arrangements of current state
+    arrangements: Vec<Arrangement>,
 }
 
-impl Differentialdeltaquery {
-    pub fn process_changes(&mut self, input: Vec<Change>) -> Vec<Change> {
-        // Incremental processing
-        let mut output = Vec::new();
-        for change in input {
-            output.extend(self.apply_change(change));
+/// A single delta rule for one input relation
+pub struct DeltaRule {
+    /// Which input this rule handles changes for
+    input_index: usize,
+    /// Join plan: sequence of probes against arrangements
+    join_steps: Vec<JoinStep>,
+}
+
+pub struct JoinStep {
+    /// Arrangement to probe
+    arrangement_index: usize,
+    /// Key columns from current tuple to use as probe key
+    probe_key: Vec<ColumnId>,
+}
+
+impl DeltaQueryProcessor {
+    /// Create delta rules for a multi-way join
+    pub fn from_join(join: &MultiWayJoin) -> Self {
+        let num_inputs = join.inputs.len();
+        let mut delta_rules = Vec::new();
+
+        for i in 0..num_inputs {
+            // Build delta rule for input i
+            let mut steps = Vec::new();
+            for j in 0..num_inputs {
+                if j == i { continue; } // Skip the delta input
+                steps.push(JoinStep {
+                    arrangement_index: j,
+                    probe_key: join.join_keys(i, j),
+                });
+            }
+
+            // Order steps by selectivity (most selective first)
+            steps.sort_by(|a, b| {
+                join.estimated_selectivity(a.arrangement_index)
+                    .partial_cmp(
+                        &join.estimated_selectivity(b.arrangement_index)
+                    )
+                    .unwrap()
+            });
+
+            delta_rules.push(DeltaRule {
+                input_index: i,
+                join_steps: steps,
+            });
         }
-        output
+
+        Self {
+            delta_rules,
+            arrangements: join.create_arrangements(),
+        }
     }
+
+    /// Process a change to one input relation
+    pub fn process_change(
+        &mut self,
+        input_index: usize,
+        changes: Vec<(Data, Timestamp, Diff)>,
+    ) -> Vec<(Data, Timestamp, Diff)> {
+        let rule = &self.delta_rules[input_index];
+        let mut output_changes = Vec::new();
+
+        for (data, time, diff) in &changes {
+            // Start with the changed tuple
+            let mut current_results = vec![(data.clone(), *diff)];
+
+            // Execute join steps: probe each arrangement
+            for step in &rule.join_steps {
+                let arrangement = &self.arrangements[step.arrangement_index];
+                let mut next_results = Vec::new();
+
+                for (tuple, tuple_diff) in &current_results {
+                    let probe_key = extract_key(tuple, &step.probe_key);
+                    let matches = arrangement.lookup(&probe_key, time);
+
+                    for (match_val, match_diff) in matches {
+                        let combined = join_tuples(tuple, &match_val);
+                        let combined_diff = tuple_diff * match_diff;
+                        next_results.push((combined, combined_diff));
+                    }
+                }
+
+                current_results = next_results;
+                if current_results.is_empty() {
+                    break; // No matches: no output changes
+                }
+            }
+
+            // Add all surviving results to output
+            for (result, result_diff) in current_results {
+                output_changes.push((result, time.clone(), result_diff));
+            }
+        }
+
+        // Update the arrangement for the changed input
+        self.arrangements[input_index].append(changes);
+
+        output_changes
+    }
+}
+
+/// Optimize delta rule join order
+pub fn optimize_delta_join_order(
+    rule: &mut DeltaRule,
+    stats: &RelationStats,
+) {
+    // Greedy: pick most selective join step first
+    rule.join_steps.sort_by(|a, b| {
+        let sel_a = stats.arrangement_selectivity(a.arrangement_index);
+        let sel_b = stats.arrangement_selectivity(b.arrangement_index);
+        sel_a.partial_cmp(&sel_b).unwrap()
+    });
+}
+
+/// Cost model for delta query processing
+pub fn delta_query_cost(
+    change_size: f64,
+    num_inputs: usize,
+    avg_arrangement_size: f64,
+    avg_selectivity: f64,
+) -> f64 {
+    // Per-change: probe N-1 arrangements
+    let probes_per_change = (num_inputs - 1) as f64;
+
+    // Each probe: binary search on arrangement
+    let probe_cost = avg_arrangement_size.log2() * 0.00001;
+
+    // Result amplification per step
+    let matches_per_probe = avg_arrangement_size * avg_selectivity;
+
+    // Total per change (geometric chain of probes)
+    let total_per_change = probes_per_change * probe_cost
+        * matches_per_probe;
+
+    change_size * total_per_change
 }
 ```
 
 ## Cost Model
 
-- Update cost: O(changes) not O(data)
-- 100-1000x faster than recomputation
-- State size: O(active_data)
+**Per-Change Cost:**
+- Arrangement lookup: O(log N) per probe
+- Number of probes: (num_inputs - 1) per change
+- Result amplification: depends on join selectivity
+- Total: `changes x (N-1) x O(log A) x matches_per_probe`
+
+**vs. Full Recomputation:**
+- Full join cost: O(|R| x |S| x |T|) in worst case
+- Delta cost: O(|dR| x |S| x |T|) per change
+- Savings: |dR| / |R| ratio (typically 1/1000 to 1/1M)
+
+**Arrangement Overhead:**
+- Memory: one arrangement per input relation
+- Compaction: amortized O(N log N) per compaction cycle
+- Shared: N delta rules share the same arrangements
+
+## Test Cases
+
+```sql
+-- Test 1: Two-way join delta
+CREATE MATERIALIZED VIEW order_details AS
+SELECT o.*, c.name FROM orders o JOIN customers c ON o.cust_id = c.id;
+-- Delta(orders): new_order JOIN customers[cust_id]
+-- Delta(customers): orders[cust_id] JOIN new_customer
+-- INSERT INTO orders: probes customer arrangement once
+
+-- Test 2: Three-way join delta
+CREATE MATERIALIZED VIEW line_details AS
+SELECT l.*, o.date, c.name
+FROM lineitem l JOIN orders o ON l.orderkey = o.orderkey
+JOIN customers c ON o.custkey = c.custkey;
+-- Delta(lineitem): probe orders[orderkey], then customers[custkey]
+-- Delta(orders): probe lineitem[orderkey], then customers[custkey]
+-- Delta(customers): probe orders[custkey], then lineitem[orderkey]
+
+-- Test 3: Retraction (DELETE)
+DELETE FROM customers WHERE id = 42;
+-- Change: (42, 'Alice', time, -1)
+-- Delta propagates -1 diff through join: retracts all order_details for id=42
+
+-- Test 4: Update (DELETE + INSERT)
+UPDATE customers SET name = 'Bob' WHERE id = 42;
+-- Changes: (42, 'Alice', t, -1), (42, 'Bob', t, +1)
+-- Delta: retracts old join results, inserts new ones
+```
 
 ## References
 
-1. McSherry et al., "Differential Dataflow", CIDR 2013
-2. Materialize documentation
+1. **McSherry, Frank et al**. "Differential Dataflow." CIDR 2013.
+   - Delta query transformation for incremental joins
+
+2. **Koch, Christoph et al**. "DBToaster: Higher-Order Delta Processing for Dynamic, Frequently Fresh Views." VLDB 2014.
+   - Higher-order delta rules for nested aggregation
+
+3. **Materialize Documentation**. "Delta Joins."
+   - Production delta join implementation
+
+4. **Ahmad, Yanif; Koch, Christoph**. "DBToaster: A SQL Compiler for High-Performance Delta Processing in Main-Memory Databases." VLDB 2009.
+   - Automatic delta rule generation from SQL

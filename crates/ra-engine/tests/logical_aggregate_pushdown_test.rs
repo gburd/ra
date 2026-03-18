@@ -140,7 +140,7 @@ fn test_group_by_subset_of_key() {
 
 #[test]
 fn test_having_clause_on_group_column() {
-    let agg = RelExpr::Aggregate {
+    let _agg = RelExpr::Aggregate {
         group_by: vec![col("region")],
         aggregates: vec![],
         input: Box::new(scan("sales")),

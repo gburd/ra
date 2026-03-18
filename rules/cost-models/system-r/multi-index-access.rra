@@ -1,0 +1,245 @@
+---
+id: system-r-multi-index-access
+name: "System R Multi-Index Access Paths"
+category: cost-models/system-r
+databases: [postgresql, mysql, oracle]
+execution_models: [volcano]
+version: "1.0.0"
+authors: ["Selinger et al. 1979 - IBM Research"]
+tags: [access-path, multi-index, bitmap-and, bitmap-or, system-r, classic]
+complexity: "O(F1*N + F2*N)"
+benefit_range: [0.5, 10.0]
+---
+
+# System R Multi-Index Access Paths
+
+## Description
+
+When a query has multiple predicates, each matching a different index,
+the optimizer can combine multiple index scans. For AND predicates,
+it intersects the row IDs from each index scan. For OR predicates, it
+unions them. System R supported this via its "RSS" layer which could
+combine candidate lists (similar to modern bitmap index operations).
+
+**When to apply**: Queries with multiple selective predicates on different
+indexed columns, where no single composite index covers all predicates.
+The combined selectivity of intersecting index scans can be much better
+than any single index.
+
+**Why it works**: If predicate P1 has selectivity F1 and P2 has selectivity
+F2, a single index on P1 fetches F1*N tuples, then applies P2 as a
+residual filter. Multi-index access fetches row IDs from both indexes
+and intersects them, fetching only F1*F2*N tuples from the heap. This
+saves heap page fetches when both predicates are moderately selective.
+
+## Relational Algebra
+
+```algebra
+-- Single index:
+index_scan(R, I1, P1) -> filter(P2)
+  cost: F1 * page_fetches + W * F1 * N
+
+-- Multi-index AND:
+intersect(index_scan_rids(I1, P1), index_scan_rids(I2, P2))
+  -> heap_fetch(intersected_rids)
+  cost: index1_cost + index2_cost + F1*F2*N * page_fetch_cost
+
+-- Multi-index OR:
+union(index_scan_rids(I1, P1), index_scan_rids(I2, P2))
+  -> heap_fetch(union_rids)
+  cost: index1_cost + index2_cost + (F1+F2-F1*F2)*N * page_fetch_cost
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("system-r-multi-index-and";
+    "(filter (and ?p1 ?p2) (scan ?table))" =>
+    "(heap_fetch
+       (intersect
+         (index_rid_scan ?table ?p1)
+         (index_rid_scan ?table ?p2))
+       ?table)"
+    if has_separate_indexes("?table", "?p1", "?p2")
+    if multi_index_cheaper_than_single()
+),
+
+rw!("system-r-multi-index-or";
+    "(filter (or ?p1 ?p2) (scan ?table))" =>
+    "(heap_fetch
+       (union
+         (index_rid_scan ?table ?p1)
+         (index_rid_scan ?table ?p2))
+       ?table)"
+    if has_separate_indexes("?table", "?p1", "?p2")
+    if multi_index_or_cheaper()
+),
+
+struct MultiIndexAccessEvaluator {
+    cost_model: SystemRCostModel,
+}
+
+impl MultiIndexAccessEvaluator {
+    fn evaluate_multi_index_and(
+        &self,
+        table: &TableStats,
+        indexes: &[(IndexInfo, f64)], // (index, selectivity)
+    ) -> f64 {
+        // Cost: scan each index + fetch heap for intersection
+        let index_scan_cost: f64 = indexes.iter()
+            .map(|(idx, sel)| {
+                let qualifying = sel * table.num_tuples as f64;
+                // Index leaf scan: ~qualifying / keys_per_page
+                qualifying / 100.0 + 3.0 // leaf pages + tree levels
+            })
+            .sum();
+
+        // Combined selectivity (independence assumption)
+        let combined_sel: f64 = indexes.iter()
+            .map(|(_, sel)| sel)
+            .product();
+
+        // Heap fetches for qualifying rows
+        let qualifying = combined_sel * table.num_tuples as f64;
+        let heap_cost = if qualifying < table.num_pages as f64 {
+            qualifying // One page per tuple (unclustered)
+        } else {
+            table.num_pages as f64 // Seq scan equivalent
+        };
+
+        // RID sort + intersection cost
+        let rid_sort_cost: f64 = indexes.iter()
+            .map(|(_, sel)| {
+                let rids = sel * table.num_tuples as f64;
+                rids * rids.log2().max(1.0) * 0.001
+            })
+            .sum();
+
+        index_scan_cost + rid_sort_cost + heap_cost
+            + self.cost_model.w * qualifying
+    }
+
+    fn is_multi_index_beneficial(
+        &self,
+        table: &TableStats,
+        single_best: f64,
+        multi_index_cost: f64,
+    ) -> bool {
+        multi_index_cost < single_best * 0.9
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    table: &TableStats,
+    predicates: &[Predicate],
+    indexes: &[IndexInfo],
+) -> bool {
+    // Need 2+ predicates on different indexed columns
+    let matching_indexes: Vec<_> = predicates.iter()
+        .filter_map(|p| {
+            indexes.iter().find(|i| i.matches_predicate(p))
+        })
+        .collect();
+
+    matching_indexes.len() >= 2
+}
+```
+
+**Restrictions:**
+- RID intersection/union has CPU overhead (sort + merge)
+- Only beneficial when both predicates are moderately selective
+- Very selective single index may beat multi-index approach
+- Heap fetch after intersection is random I/O (expensive on HDD)
+- Modern databases use bitmap indexes for more efficient intersection
+
+## Cost Model
+
+```rust
+fn benefit_analysis(
+    sel1: f64, sel2: f64,
+    table: &TableStats,
+) -> (f64, f64) {
+    let n = table.num_tuples as f64;
+    let pages = table.num_pages as f64;
+
+    // Single index on P1, filter P2:
+    let single_cost = sel1 * n // heap fetches
+        + 3.0                   // index traversal
+        + 0.05 * sel1 * n;     // CPU for filter P2
+
+    // Multi-index AND:
+    let multi_cost = sel1 * n / 100.0  // I1 leaf scan
+        + sel2 * n / 100.0             // I2 leaf scan
+        + 6.0                          // index traversals
+        + sel1 * sel2 * n              // heap fetches
+        + 0.05 * sel1 * sel2 * n;     // CPU
+
+    (single_cost, multi_cost)
+}
+```
+
+**When multi-index wins:**
+- Both selectivities moderate: sel1 ~5%, sel2 ~5% -> combined 0.25%
+- Single index: 5% * N heap fetches
+- Multi-index: 0.25% * N heap fetches (20x fewer)
+- Saves when RID intersection cost < extra heap fetch savings
+
+## Test Cases
+
+### Positive: AND of two moderately selective predicates
+
+```sql
+-- products: 1M rows
+-- Index on category (100 distinct), Index on price_range (20 distinct)
+SELECT * FROM products
+WHERE category = 'electronics' AND price_range = 'premium';
+
+-- Single (category): F=1/100, fetches 10K tuples, filters price
+-- Single (price_range): F=1/20, fetches 50K tuples, filters category
+-- Multi-index AND: intersect RIDs, fetches 1/100 * 1/20 = 500 tuples
+-- Multi-index is 20x fewer heap fetches than best single index
+```
+
+### Positive: OR combining two indexes
+
+```sql
+-- employees: 500K rows
+-- Index on department, Index on location
+SELECT * FROM employees
+WHERE department = 'Engineering' OR location = 'NYC';
+
+-- Without multi-index: sequential scan (OR cannot use single index)
+-- Multi-index OR: union RIDs from both scans
+-- If each predicate is 5%: fetches ~10% vs 100% seq scan
+```
+
+### Negative: One highly selective predicate
+
+```sql
+SELECT * FROM orders WHERE order_id = 12345 AND status = 'open';
+-- order_id selectivity = 1/1M (unique)
+-- Single index on order_id fetches 1 row, trivially fast
+-- Multi-index adds overhead for no benefit
+```
+
+## References
+
+**Original paper:**
+- Selinger et al., "Access Path Selection", SIGMOD 1979
+  - Section 5: mentions combining candidate lists from multiple indexes
+
+**Modern implementations:**
+- PostgreSQL: bitmap index scans (BitmapAnd, BitmapOr nodes)
+- Oracle: INDEX_COMBINE hint, bitmap conversion
+- MySQL: Index Merge optimization (sort_union, intersect)
+
+**Key evolution:**
+- System R: RID list intersection (in-memory sort + merge)
+- Oracle: bitmap conversion (convert B-tree scan to bitmap)
+- PostgreSQL: bitmap heap scan (bitmap pages, not individual tuples)

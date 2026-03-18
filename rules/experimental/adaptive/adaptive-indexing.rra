@@ -1,0 +1,384 @@
+---
+id: adaptive-indexing
+name: "Adaptive Indexing (Database Cracking)"
+category: experimental/adaptive
+databases: [monetdb, duckdb]
+execution_models: [vectorized, interpreted]
+hardware: [cpu, memory]
+version: "1.0.0"
+authors: ["Idreos et al. 2007", "RA Contributors"]
+tags: [adaptive, cracking, indexing, self-tuning, partial-sorting]
+complexity: "O(n) first query, amortized O(log n)"
+benefit_range: [0.3, 0.8]
+research_status: "mature-research"
+maturity: "prototype"
+---
+
+# Adaptive Indexing (Database Cracking)
+
+## Description
+
+Builds indexes incrementally as a side effect of query processing. Instead
+of creating indexes upfront (which requires predicting the workload) or
+doing full sorts (which is expensive), database cracking partially sorts
+columns in response to each range query. Over time, frequently queried
+ranges become fully sorted, providing index-like performance without
+explicit index creation.
+
+The core idea: a range query on column C with predicate `C BETWEEN a AND b`
+partitions the column into three pieces: values < a, values in [a, b], and
+values > b. The partition boundaries are stored in a "cracker index" (a
+lightweight search tree). Subsequent queries on overlapping ranges refine
+the partitions further.
+
+**When to apply**: Exploratory analytics on fresh data where the workload
+is unknown a priori. Avoids the need for a DBA to create indexes or for
+an auto-tuning system to predict which indexes are needed.
+
+**Why it works**: Each query does a constant factor of extra work to
+reorganize the data. After k queries, the column is partitioned into O(k)
+pieces. For a workload that repeatedly queries similar ranges, the data
+converges to a sorted state. The amortized cost per query approaches
+O(log n) after enough queries.
+
+**Research status**: Originated in MonetDB research (Idreos et al. 2007).
+Extended with stochastic cracking, sideways cracking, and adaptive
+merging. Not widely adopted in production systems, but DuckDB incorporates
+some adaptive techniques.
+
+## Relational Algebra
+
+```algebra
+Initial state: column C stored unsorted
+
+Query: sigma[a <= C <= b](R)
+
+Cracking operation:
+  1. Find the tightest existing partition containing [a, b]
+  2. In-place partition the data around boundaries a and b
+  3. Record new partition boundaries in cracker index
+  4. Return rows in [a, b] partition
+
+After k queries:
+  Column is partitioned into O(2k) pieces
+  Each piece is unsorted internally
+  Cracker index stores partition boundaries (AVL tree)
+
+Convergence:
+  If queries are uniformly distributed over domain [min, max]:
+  After k queries: expected partition count = O(k)
+  Expected cost of query k: O(n/k + log k)
+  Converges to O(log n) as k -> n
+```
+
+## Implementation
+
+```rust
+struct CrackerColumn {
+    data: Vec<f64>,
+    cracker_index: CrackerIndex,
+    row_ids: Vec<usize>,
+}
+
+struct CrackerIndex {
+    // AVL tree of partition boundaries
+    boundaries: BTreeMap<OrderedFloat<f64>, usize>,
+    // boundaries[value] = index in data array where value starts
+}
+
+impl CrackerColumn {
+    fn new(data: Vec<f64>) -> Self {
+        let row_ids: Vec<usize> = (0..data.len()).collect();
+        let mut boundaries = BTreeMap::new();
+        boundaries.insert(OrderedFloat(f64::NEG_INFINITY), 0);
+        boundaries.insert(
+            OrderedFloat(f64::INFINITY),
+            data.len(),
+        );
+
+        Self {
+            data,
+            cracker_index: CrackerIndex { boundaries },
+            row_ids,
+        }
+    }
+
+    fn range_query(
+        &mut self,
+        low: f64,
+        high: f64,
+    ) -> CrackResult {
+        // Step 1: Find tightest enclosing partition for 'low'
+        let (piece_start, piece_end) =
+            self.find_enclosing_partition(low);
+
+        // Step 2: Crack at 'low' boundary
+        let low_pos = if !self.cracker_index.boundaries
+            .contains_key(&OrderedFloat(low))
+        {
+            let pivot = self.partition_around(
+                piece_start, piece_end, low,
+            );
+            self.cracker_index.boundaries
+                .insert(OrderedFloat(low), pivot);
+            pivot
+        } else {
+            *self.cracker_index.boundaries
+                .get(&OrderedFloat(low))
+                .unwrap()
+        };
+
+        // Step 3: Find enclosing partition for 'high'
+        let (piece_start2, piece_end2) =
+            self.find_enclosing_partition(high);
+
+        // Step 4: Crack at 'high' boundary
+        let high_pos = if !self.cracker_index.boundaries
+            .contains_key(&OrderedFloat(high))
+        {
+            let pivot = self.partition_around(
+                piece_start2, piece_end2, high,
+            );
+            self.cracker_index.boundaries
+                .insert(OrderedFloat(high), pivot);
+            pivot
+        } else {
+            *self.cracker_index.boundaries
+                .get(&OrderedFloat(high))
+                .unwrap()
+        };
+
+        // Return rows in [low, high] range
+        CrackResult {
+            row_ids: self.row_ids[low_pos..high_pos].to_vec(),
+            values: self.data[low_pos..high_pos].to_vec(),
+            partitions_before: self.cracker_index.boundaries.len() - 2,
+        }
+    }
+
+    fn partition_around(
+        &mut self,
+        start: usize,
+        end: usize,
+        pivot: f64,
+    ) -> usize {
+        // In-place partition: move values < pivot to left
+        let mut store = start;
+        for i in start..end {
+            if self.data[i] < pivot {
+                self.data.swap(i, store);
+                self.row_ids.swap(i, store);
+                store += 1;
+            }
+        }
+        store
+    }
+
+    fn find_enclosing_partition(
+        &self,
+        value: f64,
+    ) -> (usize, usize) {
+        let key = OrderedFloat(value);
+        // Find the partition [lower_bound, upper_bound) containing value
+        let lower = self.cracker_index.boundaries
+            .range(..=key)
+            .next_back()
+            .map(|(_, &pos)| pos)
+            .unwrap_or(0);
+
+        let upper = self.cracker_index.boundaries
+            .range(key..)
+            .next()
+            .map(|(_, &pos)| pos)
+            .unwrap_or(self.data.len());
+
+        (lower, upper)
+    }
+
+    fn point_query(&mut self, value: f64) -> Vec<usize> {
+        let result = self.range_query(value, value + f64::EPSILON);
+        result.row_ids
+    }
+}
+
+// Stochastic cracking: add random cracks for faster convergence
+struct StochasticCracker {
+    column: CrackerColumn,
+    random_cracks_per_query: usize,
+}
+
+impl StochasticCracker {
+    fn range_query(
+        &mut self,
+        low: f64,
+        high: f64,
+    ) -> CrackResult {
+        // Add random cracks to accelerate convergence
+        let mut rng = rand::thread_rng();
+        for _ in 0..self.random_cracks_per_query {
+            let random_value = rng.gen_range(
+                self.column.min_value()..self.column.max_value(),
+            );
+            let (start, end) =
+                self.column.find_enclosing_partition(random_value);
+            if end - start > 100 {
+                // Only crack large partitions
+                self.column.partition_around(start, end, random_value);
+            }
+        }
+
+        self.column.range_query(low, high)
+    }
+}
+
+// Adaptive merging: alternative using merge operations
+struct AdaptiveMerging {
+    runs: Vec<SortedRun>,
+    merge_buffer: Vec<f64>,
+}
+
+impl AdaptiveMerging {
+    fn range_query(&mut self, low: f64, high: f64) -> Vec<f64> {
+        // Extract qualifying range from each run
+        let mut result = Vec::new();
+
+        for run in &self.runs {
+            let matching = run.binary_search_range(low, high);
+            result.extend(matching);
+        }
+
+        // Merge runs containing the queried range
+        // Gradually consolidates into a single sorted run
+        self.merge_overlapping_runs(low, high);
+
+        result
+    }
+}
+
+struct CrackResult {
+    row_ids: Vec<usize>,
+    values: Vec<f64>,
+    partitions_before: usize,
+}
+```
+
+**Restrictions:**
+- Only benefits range queries on the cracked column
+- In-place data reorganization requires exclusive access
+- Multi-column cracking (sideways cracking) adds complexity
+- Point queries still need to scan the enclosing partition
+- Concurrent queries require careful synchronization
+- Worst case: adversarial query patterns prevent convergence
+
+## Cost Model
+
+```rust
+fn cracking_cost_model(
+    data_size: f64,
+    query_number: u32,
+    query_range_fraction: f64,
+) -> CrackingCostEstimate {
+    // First query: O(n) to crack the column
+    let first_query_cost = data_size;
+
+    // Subsequent queries: O(n/k) expected partition size
+    let expected_partition_size = data_size / query_number as f64;
+    let query_cost =
+        expected_partition_size + (query_number as f64).log2();
+
+    // Comparison with pre-built index
+    let index_build_cost = data_size * data_size.log2();
+    let index_query_cost = data_size.log2() + query_range_fraction * data_size;
+
+    // Break-even: when total cracking cost < index build + queries
+    let cracking_total = first_query_cost
+        + (1..query_number)
+            .map(|k| data_size / k as f64)
+            .sum::<f64>();
+
+    let index_total = index_build_cost
+        + query_number as f64 * index_query_cost;
+
+    CrackingCostEstimate {
+        cracking_amortized: query_cost,
+        index_amortized: index_query_cost,
+        break_even_queries: (data_size.log2() * 2.0) as u32,
+    }
+}
+```
+
+**Typical benefit**: 30-80% improvement for exploratory workloads.
+First query is slower than full scan (partitioning overhead), but
+subsequent queries converge rapidly. Break-even after ~20 queries
+compared to building a full index upfront.
+
+## Test Cases
+
+### Test 1: Convergence over repeated queries
+
+```sql
+-- Column: 10M temperature readings, unsorted
+-- Query pattern: range queries on temperature
+
+-- Query 1: WHERE temp BETWEEN 20 AND 25
+-- Cost: ~10M operations (full partition)
+-- Creates 3 partitions: [<20, 20-25, >25]
+
+-- Query 2: WHERE temp BETWEEN 22 AND 28
+-- Cost: ~3.3M operations (partition the 20-25 and >25 pieces)
+-- Now 5 partitions: [<20, 20-22, 22-25, 25-28, >28]
+
+-- Query 10: similar range
+-- Cost: ~1M operations (small partitions)
+
+-- Query 100: similar range
+-- Cost: ~100K operations (approaching sorted)
+```
+
+### Test 2: Point query after cracking
+
+```sql
+-- After 50 range queries, column has ~100 partitions
+-- Point query: WHERE temp = 23.5
+-- Must scan partition containing 23.5: ~100K rows
+-- After more queries refine that partition: ~10K rows
+-- Eventually approaches O(log n) after sufficient cracking
+```
+
+### Test 3: Stochastic cracking improvement
+
+```sql
+-- Standard cracking after 20 queries: partition count = 40
+-- Stochastic (2 random cracks/query) after 20: partition count = 80
+-- 2x more partitions -> 2x faster subsequent queries
+-- Small overhead: 2 extra partitions per query (~0.1% of query cost)
+```
+
+### Test 4: Multi-column sideways cracking
+
+```sql
+SELECT * FROM sensors WHERE temp BETWEEN 20 AND 25
+AND humidity BETWEEN 40 AND 60;
+
+-- Crack temperature column with first predicate
+-- "Sideways" crack: reorganize humidity in same order as temperature
+-- Both columns physically aligned after cracking
+-- Subsequent queries on temp+humidity benefit from co-cracking
+```
+
+## References
+
+**Original cracking papers:**
+- Idreos, Kersten, Manegold, "Database Cracking", CIDR 2007
+- Idreos, Kersten, Manegold, "Updating a Cracked Database", SIGMOD 2007
+- Idreos, Kersten, Manegold, "Self-organizing Tuple Reconstruction in Column-stores", SIGMOD 2009
+
+**Extensions:**
+- Halim et al., "Stochastic Database Cracking: Towards Robust Adaptive Indexing in Main-Memory Column-Stores", VLDB 2012
+- Graefe & Kuno, "Self-selecting, Self-tuning, Incrementally Optimized Indexes", EDBT 2010
+
+**Adaptive merging:**
+- Graefe & Kuno, "Adaptive Indexing for Relational Keys", SMDB 2010
+
+**Surveys:**
+- Idreos et al., "The Data Calculator: Data Structure Design and Cost Synthesis from First Principles", SIGMOD 2018

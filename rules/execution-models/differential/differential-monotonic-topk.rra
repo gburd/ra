@@ -1,0 +1,444 @@
+---
+id: differential-monotonic-topk
+name: Differential Monotonic Top-K
+category: execution-models/differential
+version: "1.0.0"
+databases: [materialize, differential-dataflow]
+authors: [Frank McSherry]
+tags: [execution, differential, monotonic, topk, streaming, heap, limit, order-by]
+complexity: "O(changes * log k)"
+benefit_range: [0.3, 10.0]
+---
+
+# Differential Monotonic Top-K
+
+## Description
+
+Implements top-K (ORDER BY ... LIMIT k) on monotonic (append-only) collections
+using a simplified operator that avoids full differential retraction tracking.
+For monotonic inputs, the top-K operator maintains a bounded heap of k elements
+per group and only emits changes when a new element displaces an existing one.
+
+**When to apply**: Queries with ORDER BY ... LIMIT k on append-only sources or
+monotonic derived collections. The monotonic variant avoids maintaining the full
+retraction state required by the general differential top-K.
+
+**Why it works**: General differential top-K must handle arbitrary retractions:
+if the 3rd-ranked element is retracted, the (k+1)th element must be promoted.
+This requires maintaining state beyond k elements (potentially all elements, in
+the worst case). Monotonic top-K knows no retractions occur, so it only needs
+to maintain exactly k elements and insert/evict as new elements arrive, similar
+to a streaming min-heap.
+
+**Key differences from general top-K:**
+- **Monotonic**: Only insertions (diff=+1), no retractions (diff=-1)
+- **State**: Exactly k elements per group (bounded memory)
+- **Output changes**: At most 2 per input: one eviction (-1) and one insertion (+1)
+- **No retraction buffer**: General top-K needs to store elements beyond k for
+  potential promotion; monotonic does not
+
+**General top-K retraction problem:**
+```
+Top-3 of [10, 8, 6, 4, 2]:
+  Heap: [10, 8, 6]
+  If 8 is retracted: need to promote 4
+  Requires knowing 4 exists -> must store elements beyond k
+  Monotonic: 8 can never be retracted, so this never happens
+```
+
+**Grouped monotonic top-K:**
+- Maintains a separate heap per group key
+- GROUP BY + ORDER BY + LIMIT pattern
+- Memory: O(groups * k) regardless of input size
+
+## Relational Algebra
+
+```algebra
+-- General top-K (handles retractions):
+TopK(collection, order_by, k)
+  For each change (data, time, diff):
+    if diff > 0: insert into full state
+    if diff < 0: retract from full state, check promotions
+    emit changes to top-k set
+  State: O(|collection|) -- must track all elements
+
+-- Monotonic top-K (append-only):
+MonotonicTopK(collection, order_by, k)
+  For each change (data, time, diff=+1):
+    if heap.len < k:
+      heap.push(data)
+      emit (data, +1)
+    elif data > heap.min:
+      evicted = heap.pop_min()
+      heap.push(data)
+      emit (evicted, -1)
+      emit (data, +1)
+    else:
+      // data doesn't make the cut, discard
+  State: O(k) per group -- bounded
+
+-- Grouped:
+MonotonicTopK(collection, group_by, order_by, k)
+  For each change (key, data, time, diff=+1):
+    heap = heaps[key]
+    // Same logic per group
+  State: O(|groups| * k)
+```
+
+## Implementation
+
+```rust
+/// Monotonic top-K operator for append-only collections
+pub struct MonotonicTopK<K: Ord + Clone> {
+    /// Min-heap of top-K elements (smallest at top for
+    /// efficient eviction check)
+    heap: BinaryHeap<Reverse<K>>,
+    /// Maximum number of elements to retain
+    k: usize,
+}
+
+impl<K: Ord + Clone> MonotonicTopK<K> {
+    pub fn new(k: usize) -> Self {
+        Self {
+            heap: BinaryHeap::with_capacity(k + 1),
+            k,
+        }
+    }
+
+    /// Process a new element (monotonic: always diff=+1)
+    ///
+    /// Returns:
+    /// - None: element didn't make the top-K
+    /// - Some((None, new)): element added, heap not full
+    /// - Some((Some(evicted), new)): element replaced evicted
+    pub fn insert(
+        &mut self,
+        element: K,
+    ) -> Option<(Option<K>, K)> {
+        if self.heap.len() < self.k {
+            // Heap not full: always accept
+            self.heap.push(Reverse(element.clone()));
+            Some((None, element))
+        } else {
+            // Check if new element beats current minimum
+            let min = &self.heap.peek().unwrap().0;
+            if element > *min {
+                let evicted = self.heap.pop().unwrap().0;
+                self.heap.push(Reverse(element.clone()));
+                Some((Some(evicted), element))
+            } else {
+                None // Below threshold, discard
+            }
+        }
+    }
+
+    /// Current top-K elements (no particular order)
+    pub fn current_topk(&self) -> Vec<&K> {
+        self.heap.iter().map(|r| &r.0).collect()
+    }
+
+    /// Current minimum element in top-K (threshold)
+    pub fn threshold(&self) -> Option<&K> {
+        self.heap.peek().map(|r| &r.0)
+    }
+
+    /// Number of elements currently tracked
+    pub fn len(&self) -> usize {
+        self.heap.len()
+    }
+}
+
+/// Grouped monotonic top-K for differential dataflow
+pub struct GroupedMonotonicTopK<G: Eq + Hash, K: Ord + Clone> {
+    /// Per-group heaps
+    groups: HashMap<G, MonotonicTopK<K>>,
+    /// K value (same for all groups)
+    k: usize,
+}
+
+impl<G: Eq + Hash + Clone, K: Ord + Clone>
+    GroupedMonotonicTopK<G, K>
+{
+    pub fn new(k: usize) -> Self {
+        Self {
+            groups: HashMap::new(),
+            k,
+        }
+    }
+
+    /// Process a new element for a specific group
+    pub fn insert(
+        &mut self,
+        group: G,
+        element: K,
+    ) -> Vec<(G, K, i64)> {
+        let heap = self.groups
+            .entry(group.clone())
+            .or_insert_with(|| MonotonicTopK::new(self.k));
+
+        match heap.insert(element) {
+            None => vec![], // No change to top-K
+            Some((None, new)) => {
+                // New element added, no eviction
+                vec![(group, new, 1)]
+            }
+            Some((Some(evicted), new)) => {
+                // Swap: evict old, insert new
+                vec![
+                    (group.clone(), evicted, -1),
+                    (group, new, 1),
+                ]
+            }
+        }
+    }
+
+    /// Memory usage: total elements across all groups
+    pub fn total_elements(&self) -> usize {
+        self.groups.values().map(|h| h.len()).sum()
+    }
+
+    /// Number of active groups
+    pub fn num_groups(&self) -> usize {
+        self.groups.len()
+    }
+}
+
+/// Differential dataflow operator for monotonic top-K
+pub fn monotonic_topk_operator<G, D, K, R>(
+    input: &Collection<G, (D, K), R>,
+    group_fn: impl Fn(&D) -> G + 'static,
+    order_fn: impl Fn(&D) -> K + 'static,
+    k: usize,
+) -> Collection<G, D, R>
+where
+    G: Eq + Hash + Clone,
+    K: Ord + Clone,
+    D: Clone,
+{
+    let mut state = GroupedMonotonicTopK::new(k);
+
+    input.flat_map(move |(data, _key)| {
+        let group = group_fn(&data);
+        let order_key = order_fn(&data);
+
+        let changes = state.insert(group, order_key);
+
+        // Map changes back to data items
+        // (in practice, need to store data alongside key)
+        changes.into_iter().map(|(g, k, diff)| {
+            (data.clone(), diff)
+        })
+    })
+}
+
+/// Comparison: general top-K vs monotonic top-K
+pub struct GeneralTopK<K: Ord + Clone> {
+    /// Top-K elements
+    topk: BTreeSet<K>,
+    /// All elements beyond top-K (for promotions)
+    overflow: BTreeSet<K>,
+    k: usize,
+}
+
+impl<K: Ord + Clone> GeneralTopK<K> {
+    /// Handle a change (insertion or retraction)
+    pub fn update(
+        &mut self,
+        element: K,
+        diff: i64,
+    ) -> Vec<(K, i64)> {
+        let mut output = Vec::new();
+
+        if diff > 0 {
+            // Insertion
+            if self.topk.len() < self.k {
+                self.topk.insert(element.clone());
+                output.push((element, 1));
+            } else {
+                let min = self.topk.iter().next().unwrap()
+                    .clone();
+                if element > min {
+                    self.topk.remove(&min);
+                    self.overflow.insert(min.clone());
+                    self.topk.insert(element.clone());
+                    output.push((min, -1));
+                    output.push((element, 1));
+                } else {
+                    self.overflow.insert(element);
+                }
+            }
+        } else {
+            // Retraction (general case)
+            if self.topk.remove(&element) {
+                output.push((element, -1));
+                // Promote from overflow
+                if let Some(promoted) = self.overflow
+                    .iter().next_back().cloned()
+                {
+                    self.overflow.remove(&promoted);
+                    self.topk.insert(promoted.clone());
+                    output.push((promoted, 1));
+                }
+            } else {
+                self.overflow.remove(&element);
+            }
+        }
+
+        output
+    }
+}
+```
+
+**Restrictions:**
+- Only works for monotonic (append-only) inputs
+- If input has retractions, must fall back to general top-K
+- Per-group state: memory proportional to groups * k
+- Detecting monotonicity: requires static analysis or source annotation
+- Tie-breaking: heap may evict arbitrarily among equal elements
+- Not applicable to non-deterministic ordering (LIMIT without ORDER BY)
+
+## Cost Model
+
+```rust
+fn monotonic_topk_cost(
+    input_changes: u64,
+    k: usize,
+    num_groups: usize,
+) -> TopKCostEstimate {
+    // Monotonic: O(log k) per input element
+    let monotonic_per_element =
+        (k as f64).log2() * 20.0; // ns
+    let monotonic_total =
+        input_changes as f64 * monotonic_per_element;
+    let monotonic_memory = num_groups * k * 64; // bytes
+
+    // General: O(log n) per element (n = all elements)
+    let general_per_element =
+        (input_changes as f64).log2() * 20.0; // ns
+    let general_total =
+        input_changes as f64 * general_per_element;
+    let general_memory = input_changes as usize * 64;
+
+    // Output changes: monotonic emits at most 2 per input
+    let output_changes = input_changes.min(
+        2 * input_changes,
+    );
+
+    TopKCostEstimate {
+        monotonic_time_ns: monotonic_total as u64,
+        general_time_ns: general_total as u64,
+        monotonic_memory_bytes: monotonic_memory,
+        general_memory_bytes: general_memory,
+        speedup: general_total / monotonic_total,
+        memory_savings: general_memory as f64
+            / monotonic_memory as f64,
+    }
+}
+```
+
+**Typical performance:**
+- Monotonic top-100 on 1M inputs: 20ns * log(100) * 1M = ~130ms
+- General top-100 on 1M inputs: 20ns * log(1M) * 1M = ~400ms
+- Memory savings: 1M * 64B (general) vs. 100 * 64B (monotonic) = 10000x
+- Output changes: at most 2 per input (bounded)
+- Per-group overhead: O(k) memory, independent of total input size
+
+## Test Cases
+
+### Positive: Streaming leaderboard (append-only)
+
+```sql
+CREATE MATERIALIZED VIEW top_scores AS
+SELECT player_id, score
+FROM game_events  -- append-only Kafka topic
+ORDER BY score DESC
+LIMIT 100;
+
+-- Monotonic: game_events only has inserts
+-- Maintains heap of 100 highest scores
+-- New event: compare with min of heap
+-- If higher: evict min, insert new (2 output changes)
+-- If lower: discard (0 output changes)
+-- Memory: exactly 100 entries regardless of input volume
+```
+
+### Positive: Per-category top items
+
+```sql
+CREATE MATERIALIZED VIEW top_products AS
+SELECT category, product_id, rating
+FROM product_reviews  -- append-only
+GROUP BY category
+ORDER BY rating DESC
+LIMIT 10;
+
+-- 50 categories * 10 items = 500 elements in memory
+-- 10M reviews processed
+-- Each review: O(log 10) = ~3 comparisons
+-- Total: 30M comparisons vs. full sort of 10M rows
+```
+
+### Positive: Threshold-based early filtering
+
+```sql
+-- After processing 100K events, heap minimum = 950
+-- New events with score < 950 are discarded immediately
+-- O(1) comparison, no heap operation
+-- For selective top-K (small k relative to input):
+--   most elements are below threshold after warmup
+--   amortized cost approaches O(1) per element
+```
+
+### Negative: Non-monotonic input (updates/deletes)
+
+```sql
+CREATE MATERIALIZED VIEW top_accounts AS
+SELECT account_id, balance
+FROM accounts  -- has UPDATEs
+ORDER BY balance DESC
+LIMIT 10;
+
+-- Accounts have updates: balance changes trigger retractions
+-- Monotonic top-K cannot handle retractions
+-- Must use general top-K with overflow state
+-- Memory: O(n) instead of O(k)
+```
+
+### Negative: Large K relative to input
+
+```sql
+SELECT * FROM small_table  -- 100 rows
+ORDER BY score DESC
+LIMIT 50;
+
+-- k=50, input=100: heap holds 50% of table
+-- No memory savings vs. general approach
+-- Heap overhead (per-element) may exceed simple sort
+-- For k > n/2: just sort the full input
+```
+
+### Negative: Tie-heavy data
+
+```sql
+SELECT * FROM survey_responses
+ORDER BY rating DESC  -- rating: 1-5 stars
+LIMIT 1000;
+
+-- Many ties: thousands of elements with rating=5
+-- Heap arbitrarily evicts among equals
+-- Result may be non-deterministic
+-- Solution: add tiebreaker column (timestamp, id)
+```
+
+## References
+
+**Academic papers:**
+- McSherry, Murray, Isaacs, Isard, "Differential Dataflow", CIDR 2013
+- McSherry, "Differential Computation" (Chapter 5: Monotonic operators)
+- Arasu, Manku, "Approximate Counts and Quantiles over Sliding Windows", PODS 2004
+
+**Implementation:**
+- Materialize source: `src/compute/src/render/top_k.rs` (MonotonicTopK variant)
+- Materialize source: `src/compute/src/render/top_k.rs` (BasicTopK for general case)
+- Materialize docs: "Top-K patterns" and "Monotonic one-shot SELECT"
+- differential-dataflow: `examples/` directory for monotonic patterns

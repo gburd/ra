@@ -1,35 +1,544 @@
 ---
 id: quantum-inspired-optimization
-name: Experimental quantum inspired optimization
-category: execution-models
-version: 1.0.0
+name: Quantum-Inspired Query Optimization
+category: execution-models/experimental
+version: "1.0.0"
 databases: [postgresql, spark]
-tags: [execution, experimental, research, quantum]
+authors: [Immanuel Trummer, Davide Venturelli]
+tags: [execution, experimental, research, quantum, annealing, qubo, optimization, combinatorial]
+complexity: "O(annealing_iterations)"
+benefit_range: [1.0, 10.0]
 ---
 
-# Experimental quantum inspired optimization
+# Quantum-Inspired Query Optimization
 
 ## Description
 
-Quantum annealing algorithms for join ordering.
+Quantum-inspired optimization applies techniques from quantum computing --
+particularly quantum annealing and variational algorithms -- to combinatorial
+optimization problems in database query processing. The primary target is
+join ordering, which is NP-hard for bushy tree plans and has a search space
+that grows super-exponentially with the number of tables. Quantum-inspired
+methods reformulate join ordering as a Quadratic Unconstrained Binary
+Optimization (QUBO) problem and solve it using simulated quantum annealing,
+which can escape local minima more effectively than classical heuristics.
+
+**When to apply**: Very large join ordering problems (15+ tables) where dynamic
+programming is infeasible and greedy heuristics produce poor results. Also
+applicable to other combinatorial database problems: partitioning, data
+placement, and index selection.
+
+**Why it might work**: Classical join ordering algorithms face a trade-off:
+- Dynamic programming: optimal but O(3^n), infeasible for n > 15-20
+- Greedy heuristics: fast but often miss good plans (local optima)
+- Genetic algorithms: sometimes find good plans but convergence is slow
+- Simulated annealing: can escape local minima but cooling schedule is tricky
+
+Quantum annealing exploits quantum tunneling to traverse energy barriers that
+trap classical algorithms. While true quantum hardware is limited (noisy,
+small), simulated quantum annealing on classical hardware provides the same
+algorithmic benefit for moderate problem sizes. The key insight is that
+quantum tunneling through narrow energy barriers is exponentially faster
+than classical thermal hopping over them.
+
+**Key concepts:**
+- **QUBO formulation**: Encode join ordering as minimizing x^T Q x where x is a
+  binary vector representing decisions (which table to join next, which join
+  method to use) and Q encodes costs and constraints.
+- **Simulated quantum annealing**: Simulate quantum dynamics on a classical
+  computer. Add transverse field (quantum tunneling) that decreases over time.
+  System explores many configurations simultaneously in superposition.
+- **Penalty terms**: Encode constraints (valid join order, available indexes) as
+  penalty terms in the QUBO objective. Invalid solutions have high energy.
+- **Multi-start**: Run multiple annealing trajectories with different random
+  seeds to improve solution quality.
+
+**QUBO encoding for join ordering:**
+- Binary variables x_{i,k} = 1 if table i is the k-th table joined
+- Cost terms: Σ cost(join_step_k) based on x assignments
+- Constraint: exactly one table per position, each table used once
+- Penalty: λ * (Σ_k x_{i,k} - 1)^2 for each table i
+
+## Relational Algebra
+
+```algebra
+-- Join ordering as optimization problem:
+minimize Σ_{k=1}^{n} cost(
+  join(tables_joined_before_k, table_at_position_k)
+)
+
+subject to:
+  Each table appears exactly once in the ordering
+  Join predicates are available at each step
+
+-- QUBO encoding:
+Variables: x_{i,k} ∈ {0,1} for i ∈ tables, k ∈ positions
+minimize:
+  Σ_{k} Σ_{i,j} cost(i,j) * x_{i,k} * x_{j,k+1}  // join cost
+  + λ * Σ_i (Σ_k x_{i,k} - 1)^2                     // each table once
+  + λ * Σ_k (Σ_i x_{i,k} - 1)^2                     // one table per slot
+
+-- Quantum annealing:
+H(t) = (1 - s(t)) * H_driver + s(t) * H_problem
+  s(t): 0 -> 1 as t increases (annealing schedule)
+  H_driver: quantum tunneling (transverse field)
+  H_problem: QUBO cost function
+  Solution: ground state of H_problem when s(t) = 1
+```
 
 ## Implementation
 
 ```rust
-pub fn quantum_inspired_optimization() {
-    // Map join ordering to QUBO problem
-    // Solve with simulated annealing
-    // Find near-optimal join orders
+/// Quantum-inspired optimizer for join ordering
+pub struct QuantumInspiredOptimizer {
+    /// Number of annealing iterations
+    num_iterations: usize,
+    /// Number of independent runs (multi-start)
+    num_runs: usize,
+    /// Initial transverse field strength
+    initial_gamma: f64,
+    /// Final transverse field strength
+    final_gamma: f64,
+    /// Number of Trotter slices (quantum replicas)
+    num_replicas: usize,
+    /// Penalty coefficient for constraints
+    penalty_lambda: f64,
+}
+
+/// QUBO matrix for join ordering problem
+pub struct QUBOFormulation {
+    /// Number of tables
+    num_tables: usize,
+    /// QUBO matrix Q (sparse representation)
+    q_matrix: HashMap<(usize, usize), f64>,
+    /// Variable mapping: (table_idx, position) -> var_idx
+    var_map: HashMap<(usize, usize), usize>,
+    /// Number of binary variables
+    num_vars: usize,
+}
+
+impl QUBOFormulation {
+    /// Build QUBO from join ordering problem
+    pub fn from_join_problem(
+        tables: &[TableStats],
+        join_predicates: &[JoinPredicate],
+        cardinality_model: &dyn CardinalityEstimator,
+    ) -> Self {
+        let n = tables.len();
+        let num_vars = n * n; // x_{i,k} for each (table, position)
+
+        let mut q = HashMap::new();
+        let mut var_map = HashMap::new();
+
+        // Variable mapping
+        for i in 0..n {
+            for k in 0..n {
+                var_map.insert((i, k), i * n + k);
+            }
+        }
+
+        // Cost terms: join cost when table i is at position k
+        // and table j is at position k+1
+        for k in 0..(n - 1) {
+            for i in 0..n {
+                for j in 0..n {
+                    if i == j { continue; }
+                    let cost = estimate_join_cost(
+                        tables, join_predicates,
+                        i, j, k,
+                        cardinality_model,
+                    );
+                    let var_i = var_map[&(i, k)];
+                    let var_j = var_map[&(j, k + 1)];
+                    *q.entry((var_i, var_j))
+                        .or_insert(0.0) += cost;
+                }
+            }
+        }
+
+        // Constraint: each table appears exactly once
+        let lambda = 10.0
+            * tables.iter()
+                .map(|t| t.estimated_rows as f64)
+                .sum::<f64>();
+
+        for i in 0..n {
+            // (Σ_k x_{i,k} - 1)^2 =
+            //   Σ_k x_{i,k}^2 - 2*Σ_k x_{i,k} + 1
+            //   = Σ_k x_{i,k} - 2*Σ_k x_{i,k} + 1
+            //   (since x^2 = x for binary)
+            for k in 0..n {
+                let var = var_map[&(i, k)];
+                *q.entry((var, var))
+                    .or_insert(0.0) += lambda * (-1.0);
+            }
+            for k1 in 0..n {
+                for k2 in (k1 + 1)..n {
+                    let v1 = var_map[&(i, k1)];
+                    let v2 = var_map[&(i, k2)];
+                    *q.entry((v1, v2))
+                        .or_insert(0.0) += lambda * 2.0;
+                }
+            }
+        }
+
+        // Constraint: each position has exactly one table
+        for k in 0..n {
+            for i in 0..n {
+                let var = var_map[&(i, k)];
+                *q.entry((var, var))
+                    .or_insert(0.0) += lambda * (-1.0);
+            }
+            for i1 in 0..n {
+                for i2 in (i1 + 1)..n {
+                    let v1 = var_map[&(i1, k)];
+                    let v2 = var_map[&(i2, k)];
+                    *q.entry((v1, v2))
+                        .or_insert(0.0) += lambda * 2.0;
+                }
+            }
+        }
+
+        QUBOFormulation {
+            num_tables: n,
+            q_matrix: q,
+            var_map,
+            num_vars,
+        }
+    }
+
+    /// Evaluate QUBO objective for a binary assignment
+    pub fn evaluate(&self, x: &[bool]) -> f64 {
+        let mut cost = 0.0;
+        for (&(i, j), &q_val) in &self.q_matrix {
+            if i == j {
+                if x[i] {
+                    cost += q_val;
+                }
+            } else if x[i] && x[j] {
+                cost += q_val;
+            }
+        }
+        cost
+    }
+}
+
+/// Simulated Quantum Annealing (SQA)
+pub struct SimulatedQuantumAnnealing {
+    config: QuantumInspiredOptimizer,
+}
+
+impl SimulatedQuantumAnnealing {
+    /// Solve QUBO using simulated quantum annealing
+    pub fn solve(
+        &self,
+        qubo: &QUBOFormulation,
+    ) -> Vec<bool> {
+        let n = qubo.num_vars;
+        let p = self.config.num_replicas;
+        let mut rng = StdRng::seed_from_u64(42);
+
+        // Initialize P replicas (Trotter slices)
+        let mut replicas: Vec<Vec<bool>> = (0..p)
+            .map(|_| {
+                (0..n).map(|_| rng.gen_bool(0.5)).collect()
+            })
+            .collect();
+
+        let mut best_solution = replicas[0].clone();
+        let mut best_cost = qubo.evaluate(&best_solution);
+
+        for iter in 0..self.config.num_iterations {
+            // Annealing schedule
+            let progress =
+                iter as f64 / self.config.num_iterations as f64;
+            let gamma = self.config.initial_gamma
+                * (1.0 - progress)
+                + self.config.final_gamma * progress;
+            let beta = 1.0 / (1.0 - progress + 0.01);
+
+            // Inter-replica coupling (quantum tunneling)
+            let j_perp = -0.5 * beta
+                / (p as f64)
+                * ((gamma * beta / p as f64).tanh()).ln();
+
+            // Update each replica
+            for r in 0..p {
+                for var in 0..n {
+                    // Classical energy change from flip
+                    let delta_e =
+                        self.delta_classical_energy(
+                            qubo, &replicas[r], var,
+                        );
+
+                    // Quantum coupling energy change
+                    let prev_r = if r == 0 { p - 1 }
+                        else { r - 1 };
+                    let next_r = if r == p - 1 { 0 }
+                        else { r + 1 };
+
+                    let spin_current =
+                        if replicas[r][var] { 1.0 }
+                        else { -1.0 };
+                    let spin_prev =
+                        if replicas[prev_r][var] { 1.0 }
+                        else { -1.0 };
+                    let spin_next =
+                        if replicas[next_r][var] { 1.0 }
+                        else { -1.0 };
+
+                    let delta_quantum =
+                        -2.0 * j_perp * spin_current
+                        * (spin_prev + spin_next);
+
+                    let total_delta =
+                        delta_e / (p as f64) + delta_quantum;
+
+                    // Metropolis acceptance
+                    if total_delta < 0.0
+                        || rng.gen::<f64>()
+                            < (-beta * total_delta).exp()
+                    {
+                        replicas[r][var] =
+                            !replicas[r][var];
+                    }
+                }
+
+                // Track best solution
+                let cost = qubo.evaluate(&replicas[r]);
+                if cost < best_cost {
+                    best_cost = cost;
+                    best_solution = replicas[r].clone();
+                }
+            }
+        }
+
+        best_solution
+    }
+
+    /// Energy change from flipping one variable
+    fn delta_classical_energy(
+        &self,
+        qubo: &QUBOFormulation,
+        x: &[bool],
+        flip_var: usize,
+    ) -> f64 {
+        let mut delta = 0.0;
+
+        // Linear term
+        if let Some(&q) = qubo.q_matrix
+            .get(&(flip_var, flip_var))
+        {
+            delta += if x[flip_var] { -q } else { q };
+        }
+
+        // Quadratic terms
+        for (&(i, j), &q) in &qubo.q_matrix {
+            if i == flip_var && j != flip_var && x[j] {
+                delta += if x[i] { -q } else { q };
+            }
+            if j == flip_var && i != flip_var && x[i] {
+                delta += if x[j] { -q } else { q };
+            }
+        }
+
+        delta
+    }
+}
+
+impl QuantumInspiredOptimizer {
+    /// Optimize join order using quantum annealing
+    pub fn optimize_join_order(
+        &self,
+        tables: &[TableStats],
+        predicates: &[JoinPredicate],
+        cardinality_model: &dyn CardinalityEstimator,
+    ) -> JoinOrder {
+        // Build QUBO formulation
+        let qubo = QUBOFormulation::from_join_problem(
+            tables, predicates, cardinality_model,
+        );
+
+        // Multi-start quantum annealing
+        let sqa = SimulatedQuantumAnnealing {
+            config: self.clone(),
+        };
+
+        let mut best_order = None;
+        let mut best_cost = f64::MAX;
+
+        for _ in 0..self.num_runs {
+            let solution = sqa.solve(&qubo);
+            let cost = qubo.evaluate(&solution);
+
+            if cost < best_cost {
+                best_cost = cost;
+                best_order =
+                    Some(decode_join_order(&solution, &qubo));
+            }
+        }
+
+        best_order.unwrap_or_else(|| {
+            greedy_join_order(tables, predicates)
+        })
+    }
+}
+
+/// Decode binary solution to join ordering
+fn decode_join_order(
+    solution: &[bool],
+    qubo: &QUBOFormulation,
+) -> JoinOrder {
+    let n = qubo.num_tables;
+    let mut order = vec![0usize; n];
+
+    for (&(table, position), &var_idx) in &qubo.var_map {
+        if solution[var_idx] {
+            order[position] = table;
+        }
+    }
+
+    JoinOrder { tables: order }
 }
 ```
 
+**Restrictions:**
+- Simulated quantum annealing is still O(iterations * variables)
+- QUBO encoding adds overhead vs. direct search
+- Penalty tuning (lambda) requires experimentation
+- No provable optimality guarantees (heuristic method)
+- Encoding overhead: n^2 binary variables for n tables
+- True quantum hardware: limited qubit count, noisy results
+- Simulated version may not outperform classical simulated annealing for small n
+
 ## Cost Model
 
-- Annealing: 100ms-1s per query
-- Quality: within 5% of optimal
-- Scalability: handles 20+ table joins
+```rust
+fn quantum_optimizer_cost(
+    num_tables: usize,
+    num_iterations: usize,
+    num_replicas: usize,
+    num_runs: usize,
+) -> QuantumCostEstimate {
+    let num_vars = num_tables * num_tables;
+
+    // SQA cost per iteration
+    let cost_per_iter = num_replicas as f64
+        * num_vars as f64
+        * 100.0; // ns per variable update
+
+    let total_ns = num_iterations as f64
+        * cost_per_iter
+        * num_runs as f64;
+
+    // Compare with DP
+    let dp_cost_ns = (3.0_f64)
+        .powi(num_tables as i32) * 1000.0;
+
+    // Compare with greedy
+    let greedy_cost_ns = (num_tables * num_tables) as f64
+        * 1000.0;
+
+    QuantumCostEstimate {
+        sqa_time_ms: total_ns / 1e6,
+        dp_time_ms: dp_cost_ns / 1e6,
+        greedy_time_ms: greedy_cost_ns / 1e6,
+        dp_feasible: num_tables <= 15,
+        expected_solution_quality: 0.95,
+    }
+}
+```
+
+**Typical performance:**
+- 10 tables: SQA ~50ms (DP: ~60ms, greedy: ~0.1ms)
+- 20 tables: SQA ~200ms (DP: infeasible, greedy: ~0.4ms)
+- 30 tables: SQA ~500ms (DP: infeasible, greedy: ~0.9ms)
+- Solution quality: within 5% of optimal for 10-15 tables
+- Solution quality: estimated 10-30% better than greedy for 20+ tables
+- True quantum hardware: potential polynomial speedup (unproven at scale)
+
+## Test Cases
+
+### Positive: Very large join (20+ tables)
+
+```sql
+-- Data warehouse with 25-table join
+SELECT ... FROM
+  fact f JOIN dim1 ON ... JOIN dim2 ON ...
+  ... JOIN dim24 ON ...;
+-- DP: 3^25 = 847 billion plans (infeasible)
+-- Greedy: suboptimal, misses good intermediate orderings
+-- SQA: 100ms, finds plan within ~10% of unknown optimal
+-- SQA explores more of the search space than greedy
+```
+
+### Positive: Escaping local minima
+
+```sql
+-- Join graph with cost landscape full of local minima
+-- Tables: A(100K), B(1M), C(10K), D(50K), E(500K)
+-- Greedy: picks C first (smallest), then D, then A
+-- But optimal: A first (selective filter), then C, then D
+-- Greedy trapped in local minimum: 3x suboptimal
+-- SQA tunnels through: finds better ordering
+```
+
+### Positive: Combinatorial index selection
+
+```sql
+-- Which indexes to create on 20 columns?
+-- 2^20 = 1M possible index combinations
+-- Each index has benefit (query speedup) and cost (storage)
+-- QUBO: maximize benefit - cost
+-- SQA: finds near-optimal set in ~100ms
+-- Exhaustive: 1M evaluations, ~10 seconds
+```
+
+### Negative: Small join (DP is faster and optimal)
+
+```sql
+SELECT * FROM A JOIN B ON ... JOIN C ON ... JOIN D ON ...;
+-- 4 tables: DP evaluates 3^4 = 81 plans in <1ms
+-- DP is guaranteed optimal
+-- SQA: 50ms for a heuristic answer
+-- No benefit from quantum-inspired for small problems
+```
+
+### Negative: QUBO encoding overhead
+
+```sql
+-- 15 tables: 15^2 = 225 binary variables
+-- QUBO matrix: 225 x 225 = 50K entries
+-- Matrix construction: ~5ms
+-- SQA: ~100ms
+-- DP for 15 tables: ~15ms (3^15 = 14M, still feasible)
+-- QUBO encoding overhead exceeds DP time for moderate n
+```
+
+### Negative: Simulated vs true quantum
+
+```sql
+-- Simulated quantum annealing on classical hardware:
+-- Still O(iterations * variables * replicas)
+-- No actual quantum speedup (just a heuristic)
+-- Simulated annealing without quantum replicas may
+-- be just as effective for database-sized problems
+-- True quantum advantage requires thousands of stable qubits
+```
 
 ## References
 
-1. Trummer et al., "SkinnerDB: Regret-Bounded Query Evaluation via Reinforcement Learning", SIGMOD 2019
-2. Venturelli et al., "Job Shop Scheduling Solver based on Quantum Annealing", ICAPS 2015
+**Academic papers:**
+- Trummer, Moseley, "SkinnerDB: Regret-Bounded Query Evaluation via Reinforcement Learning", SIGMOD 2019
+- Trummer, Koch, "Multiple Query Optimization on the D-Wave 2X Adiabatic Quantum Computer", VLDB 2016
+- Venturelli et al., "Quantum Optimization of Fully Connected Spin Glasses", Physical Review X 2015
+- Lucas, "Ising Formulations of Many NP Problems", Frontiers in Physics 2014
+- Kadowaki, Nishimori, "Quantum Annealing in the Transverse Ising Model", Physical Review E 1998
+- Albash, Lidar, "Adiabatic Quantum Computation", Reviews of Modern Physics 2018
+
+**Implementation:**
+- D-Wave: Quantum annealing hardware (limited qubits, noisy)
+- IBM Qiskit: Quantum optimization framework (QAOA algorithms)
+- Google Cirq: Quantum programming framework
+- SimCIM (NTT): Classical simulation of coherent Ising machines
+- PostgreSQL: Traditional DP/greedy join ordering for comparison

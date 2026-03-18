@@ -1,0 +1,134 @@
+---
+id: calcite-aggregate-min-max-to-limit
+name: Calcite AggregateMinMaxToLimitRule
+category: logical/aggregate-pushdown
+databases: [calcite, postgresql, mysql, oracle]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [logical, calcite, aggregate, min, max, limit, optimization]
+complexity: O(1)
+benefit_range: [0.5, 0.99]
+---
+
+# Calcite AggregateMinMaxToLimitRule
+
+## Description
+
+Transforms ungrouped MIN/MAX aggregates into equivalent subqueries
+with ORDER BY and LIMIT 1. When an index exists on the aggregated
+column, the database can satisfy the query with a single index lookup
+instead of a full table scan.
+
+**When to apply**: An aggregate with no GROUP BY clause contains only
+MIN and/or MAX aggregate functions on single columns.
+
+**Why it works**: MIN(col) is equivalent to selecting the first row
+when sorted ascending; MAX(col) is the first row sorted descending.
+With a B-tree index, this reduces from O(n) scan to O(log n) lookup.
+
+**Calcite class**: `org.apache.calcite.rel.rules.AggregateMinMaxToLimitRule`
+
+## Relational Algebra
+
+```algebra
+-- Before: full-scan aggregate
+gamma[; MIN(c1), MAX(c2)](R)
+
+-- After: correlated scalar subqueries with limit
+pi[min_c1, max_c2](
+    (SELECT c1 FROM R WHERE c1 IS NOT NULL ORDER BY c1 ASC LIMIT 1) AS min_c1,
+    (SELECT c2 FROM R WHERE c2 IS NOT NULL ORDER BY c2 DESC LIMIT 1) AS max_c2
+)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-aggregate-min-to-limit";
+    "(aggregate empty-group (min ?col) ?input)" =>
+    "(scalar-subquery
+        (limit 1 (sort ?col asc
+            (filter (is-not-null ?col) ?input))))"
+    if no_group_by("empty-group")
+),
+
+rw!("calcite-aggregate-max-to-limit";
+    "(aggregate empty-group (max ?col) ?input)" =>
+    "(scalar-subquery
+        (limit 1 (sort ?col desc
+            (filter (is-not-null ?col) ?input))))"
+    if no_group_by("empty-group")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(agg: &Aggregate) -> bool {
+    agg.group_set().is_empty()
+        && agg.agg_calls().iter().all(|call| {
+            matches!(call.func, AggFunc::Min | AggFunc::Max)
+                && call.args.len() == 1
+                && !call.is_distinct
+        })
+}
+```
+
+**Restrictions:**
+- Only applies when there is no GROUP BY
+- All aggregate functions must be MIN or MAX
+- DISTINCT MIN/MAX are excluded (they are equivalent to MIN/MAX anyway)
+- Multiple MIN/MAX become separate scalar subqueries
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    input_rows: f64,
+    has_index: bool,
+) -> f64 {
+    if has_index {
+        // Index lookup vs full scan
+        (input_rows - 1.0) / input_rows
+    } else {
+        // Sort + limit still needs full scan but avoids hash table
+        0.1
+    }
+}
+```
+
+**Typical benefit**: 50-99% when an index exists on the column.
+
+## Test Cases
+
+```sql
+-- Positive: simple MIN to LIMIT
+SELECT MIN(salary) FROM emp;
+-- Becomes: SELECT salary FROM emp
+--          WHERE salary IS NOT NULL
+--          ORDER BY salary ASC LIMIT 1
+```
+
+```sql
+-- Positive: both MIN and MAX
+SELECT MIN(hire_date), MAX(salary) FROM emp;
+-- Each becomes a separate scalar subquery with LIMIT 1
+```
+
+```sql
+-- Negative: MIN with GROUP BY
+SELECT dept, MIN(salary) FROM emp GROUP BY dept;
+-- Cannot convert: GROUP BY is present
+```
+
+```sql
+-- Negative: mixed aggregates
+SELECT MIN(salary), AVG(salary) FROM emp;
+-- Cannot convert: AVG is not MIN/MAX
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/AggregateMinMaxToLimitRule.java (commit af6367d)

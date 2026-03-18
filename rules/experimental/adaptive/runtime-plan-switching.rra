@@ -1,0 +1,233 @@
+---
+id: runtime-plan-switching
+name: Runtime Plan Switching with Checkpoint Operators
+category: experimental/adaptive
+databases: [oracle, cockroachdb]
+version: "1.0.0"
+authors: ["Oracle Adaptive Query Processing", "Babu et al. 2005", "RA Contributors"]
+tags: [adaptive, runtime, plan-switching, checkpoint, oracle]
+complexity: O(1) per checkpoint
+benefit_range: [0.3, 0.9]
+research_status: production
+maturity: production
+---
+
+# Runtime Plan Switching with Checkpoint Operators
+
+## Description
+
+Inserts checkpoint operators at strategic points in the query plan.
+At runtime, these checkpoints compare actual cardinalities with
+optimizer estimates. If the actual cardinality falls outside a
+predefined tolerance band, the checkpoint triggers an immediate plan
+switch -- replacing the downstream subplan with a pre-computed
+alternative optimized for the observed cardinality.
+
+This is distinct from mid-query re-optimization (which pauses
+execution and re-invokes the optimizer) in that the alternative plans
+are pre-computed during initial optimization, enabling zero-overhead
+plan switches.
+
+**When to apply**: Joins where the optimal algorithm depends on the
+actual cardinality of the build side, or any operator where a
+cardinality threshold determines the best downstream strategy.
+
+**Why it works**: Oracle's Adaptive Plans pre-compute both sides of
+a decision point. For example, at a join, both a nested-loop (small
+build side) and hash join (large build side) subplans are prepared.
+A "statistics collector" operator counts rows flowing through. Once
+the build side exceeds a threshold, the plan transparently switches
+from nested-loop to hash join without restarting.
+
+## Relational Algebra
+
+```algebra
+-- Pre-computed plan with embedded switch point
+AdaptiveJoin[
+    if build_rows < threshold:
+        NestLoopJoin[cond](probe, build)
+    else:
+        HashJoin[cond](probe, build)
+](
+    Scan(probe_table),
+    StatisticsCollector(Scan(build_table))
+)
+```
+
+## Implementation
+
+```rust
+struct AdaptivePlan {
+    // Statistics collector placed at decision points
+    collectors: Vec<StatsCollector>,
+    // Pre-computed alternative subplans
+    alternatives: HashMap<DecisionPoint, Vec<SubPlan>>,
+    // Decision thresholds
+    thresholds: Vec<Threshold>,
+}
+
+struct StatsCollector {
+    id: usize,
+    operator_position: PlanNodeId,
+    // Running count of rows seen
+    rows_seen: AtomicU64,
+    // Threshold that triggers plan switch
+    switch_threshold: u64,
+    // Whether switch has already occurred
+    switched: AtomicBool,
+}
+
+struct Threshold {
+    collector_id: usize,
+    low: u64,
+    high: u64,
+    // Subplan to use for each range
+    plan_below: SubPlanId,
+    plan_above: SubPlanId,
+}
+
+fn build_adaptive_plan(
+    query: &LogicalPlan,
+    optimizer: &Optimizer,
+) -> AdaptivePlan {
+    let base_plan = optimizer.optimize(query);
+
+    // Identify decision points: joins and groupings
+    let decision_points = find_decision_points(&base_plan);
+
+    let mut alternatives = HashMap::new();
+    for dp in &decision_points {
+        // Optimize with different cardinality assumptions
+        let low_card_plan = optimizer.optimize_with_card(
+            query, dp, dp.estimated_card() * 0.1);
+        let high_card_plan = optimizer.optimize_with_card(
+            query, dp, dp.estimated_card() * 10.0);
+
+        if low_card_plan != high_card_plan {
+            alternatives.insert(dp.clone(), vec![
+                SubPlan { plan: low_card_plan, range: (0, dp.threshold()) },
+                SubPlan { plan: high_card_plan, range: (dp.threshold(), u64::MAX) },
+            ]);
+        }
+    }
+
+    AdaptivePlan {
+        collectors: decision_points.iter()
+            .map(|dp| StatsCollector::new(dp))
+            .collect(),
+        alternatives,
+        thresholds: compute_thresholds(&alternatives),
+    }
+}
+
+fn execute_adaptive(
+    plan: &mut AdaptivePlan,
+    row: &Row,
+) -> Result<Row> {
+    for collector in &plan.collectors {
+        collector.rows_seen.fetch_add(1, Relaxed);
+
+        if !collector.switched.load(Relaxed)
+            && collector.rows_seen.load(Relaxed)
+                > collector.switch_threshold
+        {
+            collector.switched.store(true, Relaxed);
+            switch_subplan(plan, collector.id)?;
+        }
+    }
+    // Continue with current (possibly switched) plan
+    plan.current_plan.next(row)
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(query: &LogicalPlan) -> bool {
+    // Must have decision points (joins, aggregations)
+    find_decision_points(query).len() > 0
+    // Alternative plans must differ
+    && has_plan_diversity_at_decision_points(query)
+    // Overhead of statistics collection must be low
+    // relative to query cost
+    && stats_collection_overhead(query) < 0.05 * query.estimated_cost()
+}
+```
+
+**Restrictions:**
+- Pre-computing alternative plans increases optimization time
+  and memory usage
+- The plan switch must happen at a "safe point" where buffered
+  state can be transferred (e.g., hash table already built)
+- Only one switch per decision point is allowed (no oscillation)
+- The statistics collector adds a small per-row overhead
+- Some plan alternatives may share operators, reducing memory cost
+  (Oracle uses "shared subplans" for this)
+- In distributed settings, plan switches must coordinate across
+  nodes
+
+## Cost Model
+
+```rust
+fn adaptive_plan_cost(
+    prob_low_card: f64,
+    cost_low_plan: f64,
+    prob_high_card: f64,
+    cost_high_plan: f64,
+    switch_overhead: f64,
+    collector_overhead_per_row: f64,
+    total_rows: f64,
+) -> f64 {
+    let expected_plan_cost =
+        prob_low_card * cost_low_plan
+        + prob_high_card * cost_high_plan;
+    let monitoring_cost = total_rows * collector_overhead_per_row;
+    let worst_case_switch = switch_overhead;
+    expected_plan_cost + monitoring_cost + worst_case_switch
+}
+```
+
+**Typical benefit**: For a join where the build side is estimated at
+100 rows but actually produces 100K rows, the adaptive plan switches
+from nested-loop (optimal for 100) to hash join (optimal for 100K)
+within milliseconds, avoiding a 1000x performance regression.
+
+## Test Cases
+
+```sql
+-- Positive: Oracle adaptive join
+SELECT o.*, c.name
+FROM orders o JOIN customers c ON o.customer_id = c.id
+WHERE o.status = 'pending';
+
+-- Optimizer estimates 50 pending orders (nested loop optimal)
+-- Runtime: 50,000 pending orders (hash join optimal)
+-- Statistics collector at orders scan:
+--   After 1000 rows, threshold exceeded -> switch to hash join
+--   Total overhead: ~1ms for statistics collection
+--   Benefit: avoids 50,000 index lookups (saves seconds)
+```
+
+```sql
+-- Positive: adaptive distribution in parallel query
+SELECT department, AVG(salary) FROM employees GROUP BY department;
+
+-- Low cardinality estimate: broadcast distribution
+-- High cardinality actual: hash distribution
+-- Switch at statistics collector threshold
+```
+
+```sql
+-- Negative: plan alternatives are identical
+SELECT * FROM orders WHERE id = 42;
+-- Point lookup: always index scan regardless of cardinality
+-- No decision point, no adaptive benefit
+```
+
+## References
+
+Oracle: "Adaptive Query Plans" (12c+) - production implementation
+Oracle: "Statistics Collector" operator in execution plans
+Babu, Bizarro, DeWitt, "Proactive Re-Optimization" (SIGMOD 2005)
+Deshpande, Ives, Raman, "Adaptive Query Processing" (FTDB 2007)
+CockroachDB: adaptive query execution roadmap

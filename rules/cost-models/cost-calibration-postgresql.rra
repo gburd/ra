@@ -1,0 +1,404 @@
+---
+id: cost-calibration-postgresql
+name: "PostgreSQL Cost Model Calibration"
+category: cost-models
+databases: [postgresql]
+execution_models: [volcano]
+hardware: [cpu, memory, hdd, ssd, nvme]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [cost, calibration, postgresql, guc, tuning, seq-page-cost]
+complexity: "O(1) parameter lookup"
+benefit_range: [0.2, 0.6]
+---
+
+# PostgreSQL Cost Model Calibration
+
+## Description
+
+Maps calibrated hardware measurements to PostgreSQL's specific cost model
+parameters (GUC variables). PostgreSQL's optimizer uses seven primary cost
+constants, all expressed relative to `seq_page_cost = 1.0`. This rule
+provides calibrated values for different hardware configurations and the
+methodology for deriving them.
+
+PostgreSQL's cost model: `total_cost = startup_cost + per_row_cost * rows`.
+The per-row cost decomposes into I/O and CPU components controlled by GUC
+parameters. The default values assume a 2000s-era server with RAID-5 HDDs.
+Modern NVMe systems need radically different values.
+
+**When to apply**: When generating PostgreSQL-specific cost estimates for
+plan comparison, or when providing tuning recommendations for PostgreSQL
+deployments.
+
+**Why it works**: PostgreSQL's cost model is well-documented and the
+parameters have clear physical interpretations. Calibrating these parameters
+to match the deployment hardware improves plan selection for the specific
+environment.
+
+## Relational Algebra
+
+```algebra
+PostgreSQL cost formula:
+  Cost(SeqScan(R)) = seq_page_cost * pages(R) + cpu_tuple_cost * rows(R)
+
+  Cost(IndexScan(R, I, F)) =
+    random_page_cost * index_pages(I, F)
+    + seq_page_cost * heap_pages_fetched(R, F)
+    + cpu_index_tuple_cost * index_tuples(I, F)
+    + cpu_tuple_cost * rows_fetched(R, F)
+
+  Cost(HashJoin(R, S)) =
+    Cost(R) + Cost(S)
+    + cpu_operator_cost * rows(R)  -- hash computation
+    + cpu_tuple_cost * join_output_rows
+
+  Cost(Parallel) =
+    parallel_setup_cost + parallel_tuple_cost * rows / workers
+```
+
+## Implementation
+
+```rust
+struct PostgreSQLCostParams {
+    // I/O cost parameters (relative to seq_page_cost = 1.0)
+    seq_page_cost: f64,
+    random_page_cost: f64,
+
+    // CPU cost parameters
+    cpu_tuple_cost: f64,
+    cpu_index_tuple_cost: f64,
+    cpu_operator_cost: f64,
+
+    // Parallel query parameters
+    parallel_setup_cost: f64,
+    parallel_tuple_cost: f64,
+
+    // Buffer/memory parameters
+    effective_cache_size_pages: u64,
+    work_mem_kb: u64,
+}
+
+impl PostgreSQLCostParams {
+    fn defaults() -> Self {
+        // PostgreSQL 16 defaults
+        Self {
+            seq_page_cost: 1.0,
+            random_page_cost: 4.0,
+            cpu_tuple_cost: 0.01,
+            cpu_index_tuple_cost: 0.005,
+            cpu_operator_cost: 0.0025,
+            parallel_setup_cost: 1000.0,
+            parallel_tuple_cost: 0.1,
+            effective_cache_size_pages: 4 * 1024 * 1024 / 8, // 4GB
+            work_mem_kb: 4096,
+        }
+    }
+
+    fn for_ssd_server() -> Self {
+        // Calibrated for modern SSD server (e.g., NVMe, 64GB RAM)
+        Self {
+            seq_page_cost: 1.0,
+            random_page_cost: 1.1,
+            cpu_tuple_cost: 0.01,
+            cpu_index_tuple_cost: 0.005,
+            cpu_operator_cost: 0.0025,
+            parallel_setup_cost: 1000.0,
+            parallel_tuple_cost: 0.1,
+            effective_cache_size_pages: 64 * 1024 * 1024 / 8, // 64GB
+            work_mem_kb: 65536,
+        }
+    }
+
+    fn for_nvme_server() -> Self {
+        // Calibrated for high-end NVMe server
+        Self {
+            seq_page_cost: 1.0,
+            random_page_cost: 1.05,
+            cpu_tuple_cost: 0.03,
+            cpu_index_tuple_cost: 0.015,
+            cpu_operator_cost: 0.0075,
+            parallel_setup_cost: 500.0,
+            parallel_tuple_cost: 0.05,
+            effective_cache_size_pages: 128 * 1024 * 1024 / 8,
+            work_mem_kb: 262144,
+        }
+    }
+
+    fn for_cloud_ebs_gp3() -> Self {
+        // AWS EBS gp3 (moderate IOPS, good throughput)
+        Self {
+            seq_page_cost: 1.0,
+            random_page_cost: 2.0,
+            cpu_tuple_cost: 0.01,
+            cpu_index_tuple_cost: 0.005,
+            cpu_operator_cost: 0.0025,
+            parallel_setup_cost: 1000.0,
+            parallel_tuple_cost: 0.1,
+            effective_cache_size_pages: 16 * 1024 * 1024 / 8,
+            work_mem_kb: 16384,
+        }
+    }
+
+    fn for_cloud_io2() -> Self {
+        // AWS EBS io2 (high IOPS, provisioned)
+        Self {
+            seq_page_cost: 1.0,
+            random_page_cost: 1.2,
+            cpu_tuple_cost: 0.01,
+            cpu_index_tuple_cost: 0.005,
+            cpu_operator_cost: 0.0025,
+            parallel_setup_cost: 1000.0,
+            parallel_tuple_cost: 0.1,
+            effective_cache_size_pages: 32 * 1024 * 1024 / 8,
+            work_mem_kb: 32768,
+        }
+    }
+
+    fn seq_scan_cost(&self, pages: f64, rows: f64) -> f64 {
+        self.seq_page_cost * pages + self.cpu_tuple_cost * rows
+    }
+
+    fn index_scan_cost(
+        &self,
+        index_pages: f64,
+        heap_pages: f64,
+        index_tuples: f64,
+        heap_tuples: f64,
+        correlation: f64,
+    ) -> f64 {
+        // Correlation adjusts between sequential and random heap access
+        // correlation=1.0: perfectly correlated, sequential access
+        // correlation=0.0: uncorrelated, random access
+        let corr_sq = correlation * correlation;
+        let effective_page_cost = corr_sq * self.seq_page_cost
+            + (1.0 - corr_sq) * self.random_page_cost;
+
+        let io_cost =
+            self.random_page_cost * index_pages
+            + effective_page_cost * heap_pages;
+        let cpu_cost =
+            self.cpu_index_tuple_cost * index_tuples
+            + self.cpu_tuple_cost * heap_tuples;
+
+        io_cost + cpu_cost
+    }
+
+    fn bitmap_scan_cost(
+        &self,
+        index_pages: f64,
+        heap_pages: f64,
+        index_tuples: f64,
+        heap_tuples: f64,
+    ) -> f64 {
+        // Bitmap scan: random index access, sequential-ish heap access
+        let io_cost =
+            self.random_page_cost * index_pages
+            + self.seq_page_cost * heap_pages;
+        let cpu_cost =
+            self.cpu_index_tuple_cost * index_tuples
+            + self.cpu_tuple_cost * heap_tuples
+            + self.cpu_operator_cost * heap_tuples; // Recheck
+        io_cost + cpu_cost
+    }
+
+    fn hash_join_cost(
+        &self,
+        build_rows: f64,
+        probe_rows: f64,
+        output_rows: f64,
+        build_pages: f64,
+        probe_pages: f64,
+    ) -> f64 {
+        let scan_cost = self.seq_page_cost * (build_pages + probe_pages);
+        let hash_cost = self.cpu_operator_cost * build_rows;
+        let probe_cost = self.cpu_operator_cost * probe_rows;
+        let output_cost = self.cpu_tuple_cost * output_rows;
+        scan_cost + hash_cost + probe_cost + output_cost
+    }
+
+    fn sort_cost(
+        &self,
+        input_rows: f64,
+        input_pages: f64,
+        comparison_cost: f64,
+    ) -> f64 {
+        let comparisons = input_rows * input_rows.log2().max(1.0);
+        let cpu_cost = comparisons * comparison_cost
+            * self.cpu_operator_cost;
+
+        if input_pages * 8192.0 <= self.work_mem_kb as f64 * 1024.0 {
+            // In-memory sort
+            cpu_cost
+        } else {
+            // External sort: I/O for merge passes
+            let passes = ((input_pages * 8192.0)
+                / (self.work_mem_kb as f64 * 1024.0))
+                .log2()
+                .ceil()
+                .max(1.0);
+            let io_cost = 2.0 * input_pages * passes
+                * self.seq_page_cost;
+            cpu_cost + io_cost
+        }
+    }
+
+    fn generate_sql_commands(&self) -> Vec<String> {
+        vec![
+            format!(
+                "SET seq_page_cost = {};",
+                self.seq_page_cost
+            ),
+            format!(
+                "SET random_page_cost = {};",
+                self.random_page_cost
+            ),
+            format!(
+                "SET cpu_tuple_cost = {};",
+                self.cpu_tuple_cost
+            ),
+            format!(
+                "SET cpu_index_tuple_cost = {};",
+                self.cpu_index_tuple_cost
+            ),
+            format!(
+                "SET cpu_operator_cost = {};",
+                self.cpu_operator_cost
+            ),
+            format!(
+                "SET parallel_setup_cost = {};",
+                self.parallel_setup_cost
+            ),
+            format!(
+                "SET parallel_tuple_cost = {};",
+                self.parallel_tuple_cost
+            ),
+            format!(
+                "SET effective_cache_size = '{}MB';",
+                self.effective_cache_size_pages * 8 / 1024
+            ),
+            format!(
+                "SET work_mem = '{}kB';",
+                self.work_mem_kb
+            ),
+        ]
+    }
+}
+```
+
+**Restrictions:**
+- Parameters are global; cannot tune per-query without SET LOCAL
+- effective_cache_size is a hint, not a hard limit
+- Buffer pool behavior not accurately modeled (LRU vs clock)
+- Parallel cost model is simplistic (ignores communication overhead)
+- Does not account for JIT compilation overhead
+
+## Cost Model
+
+Calibration accuracy measured by plan selection correctness.
+
+```rust
+fn validate_pg_calibration(
+    params: &PostgreSQLCostParams,
+    test_queries: &[Query],
+    conn: &PostgreSQLConnection,
+) -> CalibrationScore {
+    let mut correct_plans = 0;
+    let total = test_queries.len();
+
+    for query in test_queries {
+        // Get plan with current parameters
+        let plan = conn.explain(query, params);
+        let plan_cost = conn.explain_analyze(query).actual_time;
+
+        // Get plan with default parameters
+        let default_plan = conn.explain(query, &PostgreSQLCostParams::defaults());
+        let default_cost = conn.explain_analyze_with(query, &default_plan).actual_time;
+
+        if plan_cost <= default_cost * 1.05 {
+            correct_plans += 1;
+        }
+    }
+
+    CalibrationScore {
+        accuracy: correct_plans as f64 / total as f64,
+        queries_tested: total,
+    }
+}
+```
+
+**Typical benefit**: 20-60% reduction in total query time for workloads
+running on hardware that differs from PostgreSQL's default assumptions.
+
+## Test Cases
+
+### Test 1: SSD random_page_cost impact
+
+```sql
+-- Default (HDD): random_page_cost = 4.0
+EXPLAIN SELECT * FROM orders WHERE customer_id = 42;
+-- Chooses: Seq Scan (cost: 100,000 + 0.01 * 10M = 200K)
+-- Index Scan cost: 4.0 * 100 + 0.005 * 100 = 400.5
+
+-- Calibrated (SSD): random_page_cost = 1.1
+-- Index Scan cost: 1.1 * 100 + 0.005 * 100 = 110.5
+-- Now strongly prefers index scan
+```
+
+### Test 2: effective_cache_size impact
+
+```sql
+-- Small cache (4GB): index scan avoids large table fetch
+-- Large cache (128GB): table likely cached, seq scan viable
+
+EXPLAIN SELECT * FROM large_table WHERE indexed_col BETWEEN 1 AND 1000;
+-- effective_cache_size = 4GB: prefers index scan (assumes cold cache)
+-- effective_cache_size = 128GB: may prefer seq scan (assumes hot cache)
+```
+
+### Test 3: Parallel query threshold
+
+```sql
+-- Default parallel_tuple_cost = 0.1 (high overhead)
+EXPLAIN SELECT COUNT(*) FROM orders WHERE amount > 100;
+-- Parallel workers: 0 (overhead exceeds benefit for small tables)
+
+-- Calibrated parallel_tuple_cost = 0.02
+-- Parallel workers: 4 (parallelism now cost-effective)
+-- Speedup: ~3x on 8-core system
+```
+
+### Test 4: work_mem impact on sort vs hash
+
+```sql
+EXPLAIN SELECT * FROM orders ORDER BY created_at;
+-- work_mem = 4MB: external sort (spills to disk)
+-- work_mem = 256MB: in-memory quicksort (10x faster)
+```
+
+### Test 5: Correlation-based index scan
+
+```sql
+-- orders.created_at has correlation = 0.98 (nearly sorted)
+EXPLAIN SELECT * FROM orders WHERE created_at > '2024-01-01';
+-- High correlation: index scan reads pages nearly sequentially
+-- Index scan cost uses seq_page_cost (not random_page_cost)
+-- Almost as cheap as seq scan but reads fewer pages
+```
+
+## References
+
+**PostgreSQL cost model:**
+- PostgreSQL documentation: "Planner Cost Constants"
+- PostgreSQL source: `src/backend/optimizer/path/costsize.c`
+- Momjian, "PostgreSQL Internals Through Pictures" (optimizer chapter)
+
+**Tuning guides:**
+- PostgreSQL Wiki: "Tuning Your PostgreSQL Server"
+- Dalibo: "Explaining the Unexplainable" (EXPLAIN ANALYZE guide)
+- pgMustard: automated EXPLAIN analysis tool
+
+**Research:**
+- Leis et al., "How Good Are Query Optimizers, Really?", VLDB 2015
+  (evaluated PostgreSQL's cost model accuracy)
+- Wu et al., "Predicting Query Execution Time", ICDE 2013

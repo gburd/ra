@@ -1,0 +1,343 @@
+---
+id: volcano-logical-to-physical
+name: "Volcano Logical-to-Physical Transformation"
+category: physical/optimizer-framework
+databases: [cockroachdb, mssql, greenplum]
+execution_models: [volcano]
+version: "1.0.0"
+authors: ["Goetz Graefe, William McKenna"]
+tags: [volcano, cascades, logical-physical, implementation-rules, classic]
+complexity: "O(n)"
+benefit_range: [1.0, 10.0]
+---
+
+# Volcano Logical-to-Physical Transformation
+
+## Description
+
+The Volcano optimizer framework separates optimization into two kinds of rules:
+transformation rules (logical-to-logical, preserving semantics) and
+implementation rules (logical-to-physical, choosing algorithms). Implementation
+rules map a logical operator to one or more physical implementations.
+
+For example, a logical Join can become a HashJoin, MergeJoin, or
+NestedLoopJoin. A logical Scan can become a SeqScan or IndexScan. Each
+implementation rule generates a physical alternative that is costed and
+compared. The framework ensures all combinations are explored systematically.
+
+This separation is what makes Volcano extensible: new join algorithms are
+added as new implementation rules without changing the search strategy.
+
+**When to apply**: During plan optimization, every logical operator must be
+mapped to at least one physical implementation. Implementation rules fire
+for each logical operator in each equivalence group.
+
+**Why it works**: By enumerating all physical implementations of each logical
+operator, the optimizer explores the full space of physical plans. Combined
+with cost-based pruning (branch and bound), this finds the optimal physical
+plan without exhaustive enumeration.
+
+## Relational Algebra
+
+```algebra
+Implementation Rules (Logical -> Physical):
+
+Rule: Join(L, R, pred) -> HashJoin(L, R, pred)
+  Provided: no ordering
+  Required from children: none
+
+Rule: Join(L, R, pred) -> MergeJoin(L, R, pred)
+  Provided: sorted on join key
+  Required from children: L sorted on join key, R sorted on join key
+
+Rule: Join(L, R, pred) -> NestedLoopJoin(L, R, pred)
+  Provided: preserves outer ordering
+  Required from children: none (index on inner preferred)
+
+Rule: Scan(T) -> SeqScan(T)
+  Provided: no ordering
+  Required from children: (leaf)
+
+Rule: Scan(T, idx) -> IndexScan(T, idx)
+  Provided: sorted on index key
+  Required from children: (leaf)
+
+Rule: Aggregate(input, groupby, agg) -> HashAggregate(input, groupby, agg)
+  Provided: no ordering
+  Required from children: none
+
+Rule: Aggregate(input, groupby, agg) -> SortAggregate(input, groupby, agg)
+  Provided: sorted on groupby
+  Required from children: input sorted on groupby
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Implementation rules expressed as egg rewrites
+// These map logical operators to physical operators
+
+rw!("impl-join-hash";
+    "(join ?type ?pred ?left ?right)" =>
+    "(hash-join ?type ?pred ?left ?right)"
+    if is_equijoin("?pred")
+),
+
+rw!("impl-join-merge";
+    "(join ?type ?pred ?left ?right)" =>
+    "(merge-join ?type ?pred
+       (enforce-sort (join-key-left ?pred) ?left)
+       (enforce-sort (join-key-right ?pred) ?right))"
+    if is_equijoin("?pred")
+),
+
+rw!("impl-join-nested-loop";
+    "(join ?type ?pred ?left ?right)" =>
+    "(nested-loop-join ?type ?pred ?left ?right)"
+),
+
+rw!("impl-scan-seq";
+    "(scan ?table)" =>
+    "(seq-scan ?table)"
+),
+
+rw!("impl-scan-index";
+    "(scan ?table)" =>
+    "(index-scan ?table ?idx)"
+    if has_useful_index("?table")
+),
+
+rw!("impl-filter-scan";
+    "(filter ?pred (scan ?table))" =>
+    "(index-scan ?table ?idx ?pred)"
+    if index_matches_predicate("?table", "?pred")
+),
+
+rw!("impl-aggregate-hash";
+    "(aggregate ?groupby ?aggs ?input)" =>
+    "(hash-aggregate ?groupby ?aggs ?input)"
+),
+
+rw!("impl-aggregate-sort";
+    "(aggregate ?groupby ?aggs ?input)" =>
+    "(sort-aggregate ?groupby ?aggs
+       (enforce-sort ?groupby ?input))"
+),
+
+rw!("impl-sort-enforce";
+    "(enforce-sort ?keys ?input)" =>
+    "?input"
+    if already_sorted("?input", "?keys")
+),
+
+rw!("impl-sort-enforce-add";
+    "(enforce-sort ?keys ?input)" =>
+    "(sort ?keys ?input)"
+    if !already_sorted("?input", "?keys")
+),
+
+// In the Volcano framework, these rules are applied
+// during the FindBestPlan procedure:
+
+struct VolcanoImplementationPhase;
+
+impl VolcanoImplementationPhase {
+    fn implement(
+        &self,
+        logical_expr: &LogicalExpr,
+        required_props: &PhysicalProperties,
+        memo: &mut MemoTable,
+    ) -> Vec<PhysicalExpr> {
+        let mut implementations = Vec::new();
+
+        match logical_expr {
+            LogicalExpr::Join { join_type, pred, left, right } => {
+                // Hash join implementation
+                if pred.is_equijoin() {
+                    implementations.push(
+                        PhysicalExpr::HashJoin {
+                            build: self.smaller_input(left, right, memo),
+                            probe: self.larger_input(left, right, memo),
+                            pred: pred.clone(),
+                        }
+                    );
+                }
+
+                // Merge join implementation
+                if pred.is_equijoin() {
+                    let left_order = PhysicalProperties::sorted_by(
+                        pred.left_key()
+                    );
+                    let right_order = PhysicalProperties::sorted_by(
+                        pred.right_key()
+                    );
+                    implementations.push(
+                        PhysicalExpr::MergeJoin {
+                            left: memo.optimize(left, &left_order),
+                            right: memo.optimize(right, &right_order),
+                            pred: pred.clone(),
+                        }
+                    );
+                }
+
+                // Nested loop (always applicable)
+                implementations.push(
+                    PhysicalExpr::NestedLoopJoin {
+                        outer: *left,
+                        inner: *right,
+                        pred: pred.clone(),
+                    }
+                );
+            }
+
+            LogicalExpr::Scan { table } => {
+                // Sequential scan
+                implementations.push(
+                    PhysicalExpr::SeqScan { table: table.clone() }
+                );
+
+                // Index scans
+                for index in memo.catalog.indexes(table) {
+                    implementations.push(
+                        PhysicalExpr::IndexScan {
+                            table: table.clone(),
+                            index: index.clone(),
+                        }
+                    );
+                }
+            }
+
+            _ => {}
+        }
+
+        implementations
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    hw: &HardwareProfile,
+) -> bool {
+    // Implementation rules always apply during optimization
+    // Each logical operator must have at least one implementation
+    true
+}
+```
+
+**Restrictions:**
+- Every logical operator must have at least one implementation rule
+- Physical properties (ordering, partitioning) must be tracked
+- Enforcers (Sort, Exchange) handle property mismatches
+- Implementation rules should not change the logical semantics
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    // The benefit is exploring the full physical plan space
+    // Without implementation rules, only one algorithm per operator
+    // With them, the optimizer can pick the best algorithm per context
+
+    let n_logical_ops = stats.logical_operator_count as f64;
+    let avg_implementations = 2.5; // Average ~2.5 physical options per logical op
+
+    // Benefit scales with the diversity of physical options
+    // More options -> higher chance of finding a better plan
+    (avg_implementations - 1.0) / avg_implementations
+}
+```
+
+**Assumptions:**
+- Each logical operator has 1-5 physical implementations
+- Cost comparison selects the cheapest for the given context
+- Physical property requirements may eliminate some implementations
+- Memory constraints may limit hash-based implementations
+
+## Test Cases
+
+### Positive: Join implementation selection
+
+```sql
+-- Equijoin with small build side
+SELECT * FROM orders o
+JOIN customers c ON o.customer_id = c.id;
+
+-- Implementation rules generate:
+-- 1. HashJoin(build=customers, probe=orders)    -- best for in-memory
+-- 2. MergeJoin(sort orders, sort customers)      -- best if pre-sorted
+-- 3. NestedLoopJoin(outer=customers, inner=orders) -- with index
+-- Optimizer picks cheapest based on statistics
+```
+
+### Positive: Scan with predicate implementation
+
+```sql
+-- Index on orders(order_date)
+SELECT * FROM orders WHERE order_date > '2024-01-01';
+
+-- Implementation rules generate:
+-- 1. SeqScan(orders) + Filter(order_date > '2024-01-01')
+-- 2. IndexScan(orders, idx_order_date, > '2024-01-01')
+-- Optimizer picks based on selectivity
+```
+
+### Positive: Aggregate implementation
+
+```sql
+SELECT department, COUNT(*)
+FROM employees
+GROUP BY department;
+
+-- Implementation rules generate:
+-- 1. HashAggregate(department, count, SeqScan(employees))
+-- 2. SortAggregate(department, count, Sort(department, SeqScan))
+-- 3. SortAggregate(department, count, IndexScan(idx_dept))  -- pre-sorted
+```
+
+### Positive: Property-based selection
+
+```sql
+SELECT * FROM orders o
+JOIN customers c ON o.customer_id = c.id
+ORDER BY c.name;
+
+-- Required property: sorted by c.name
+-- MergeJoin on customer_id + Sort by name
+-- vs. HashJoin + Sort by name
+-- Property tracking determines which is cheaper end-to-end
+```
+
+## References
+
+**Original papers:**
+- Graefe, G., McKenna, W.J., "The Volcano Optimizer Generator: Extensibility and Efficient Search", IEEE Data Engineering 1993
+  - DOI: 10.1109/69.273032
+  - Section 3: "Implementation rules"
+  - Separation of transformation and implementation rules
+
+- Graefe, G., "The Cascades Framework for Query Optimization", IEEE Data Engineering Bulletin 1995
+  - DOI: 10.1109/69.469815
+  - Refined implementation rule framework
+  - Task-based optimization with memoization
+
+**Follow-up work:**
+- Graefe, G., "The Efficiency of Algorithms", Technical Report CU-CS-975-04, University of Colorado 2004
+  - Detailed analysis of implementation rule costs
+
+- Soliman, M.A., et al., "Orca: A Modular Query Optimizer Architecture for Big Data", ACM SIGMOD 2014
+  - DOI: 10.1145/2588555.2595637
+  - Modern Cascades implementation with implementation rules
+
+**Implementation in databases:**
+- SQL Server: Cascades optimizer with implementation rules
+- CockroachDB: `pkg/sql/opt/xform/` - implementation rules
+- Greenplum Orca: `libgpopt/src/xforms/` - implementation transforms

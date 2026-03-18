@@ -3,43 +3,297 @@ id: vectorized-adaptive-batching
 name: Vectorized Adaptive Batch Sizing
 category: execution-models
 version: 1.0.0
-databases: [DuckDB]
-tags: [execution, vectorized, adaptive, tuning]
+databases: [DuckDB, Velox, DataFusion]
+authors: [Mark Raasveldt, Hannes Muhleisen]
+tags: [execution, vectorized, adaptive, batch-size, tuning, cache]
+standard: MonetDB X100
 ---
 
 # Vectorized Adaptive Batch Sizing
 
 ## Description
 
-Dynamically adjust batch size based on operator selectivity and memory pressure. Small batches for high selectivity, large for low.
+Adaptive batch sizing dynamically adjusts the number of tuples processed per batch based on runtime feedback. The optimal batch size depends on operator characteristics, data types, selectivity, memory pressure, and cache hierarchy. Too small loses SIMD amortization; too large causes cache thrashing. Adaptive sizing monitors execution metrics and adjusts batch boundaries to maintain optimal cache utilization.
+
+**Factors affecting optimal batch size:**
+- **Row width**: Wide rows need smaller batches to fit in cache
+- **Selectivity**: High filtering benefits from larger input batches
+- **Memory pressure**: Competing queries reduce available cache
+- **Operator type**: Hash probes benefit from smaller batches (random access)
+- **SIMD width**: Minimum batch size for full SIMD utilization
+
+**Typical batch sizes:**
+- DuckDB default: 2048 tuples
+- ClickHouse block size: 8192-65536 tuples
+- MonetDB X100: 1024 tuples
+- Cache-conscious optimal: L2_size / (row_width * num_columns_active)
+
+**Key characteristics:**
+- **Runtime feedback**: Adjust based on actual cache miss rates
+- **Per-operator tuning**: Different batch sizes for different pipeline stages
+- **Selectivity-aware**: Inflate input batch to maintain output batch density
+- **Memory-aware**: Reduce batch size under memory pressure
+- **Warm-up period**: Start with default, converge after few batches
+
+**Trade-offs:**
+- Monitoring overhead (performance counters or heuristics)
+- Batch boundary changes cause pipeline disruption
+- Small batches waste SIMD lanes on partial vectors
+- Large batches increase latency to first result
+
+## Relational Algebra
+
+```
+AdaptiveBatch(input, initial_size) -> Iterator<Batch>
+
+state:
+  current_batch_size: usize
+  selectivity_estimate: f64
+  cache_miss_rate: f64
+
+fn next_batch() -> Batch:
+  batch = input.next_batch(current_batch_size)
+
+  // Monitor and adjust
+  actual_selectivity = batch.selected_count / batch.size
+  update_selectivity_estimate(actual_selectivity)
+
+  if selectivity_estimate < 0.1:
+    // High filtering: increase input batch
+    current_batch_size = min(current_batch_size * 2, MAX_BATCH)
+  elif cache_miss_rate > threshold:
+    // Cache pressure: decrease batch size
+    current_batch_size = max(current_batch_size / 2, MIN_BATCH)
+
+  return batch
+```
 
 ## Implementation
 
 ```rust
+use ra_core::algebra::RelExpr;
+
+const MIN_BATCH_SIZE: usize = 64;
+const MAX_BATCH_SIZE: usize = 65536;
+const DEFAULT_BATCH_SIZE: usize = 2048;
+
+/// Adaptive batch size controller
 pub struct AdaptiveBatchSizer {
     current_size: usize,
     min_size: usize,
     max_size: usize,
+
+    // Exponential moving averages
+    selectivity_ema: f64,
+    throughput_ema: f64,
+
+    // Configuration
+    target_output_size: usize,
+    alpha: f64, // EMA smoothing factor
 }
 
 impl AdaptiveBatchSizer {
-    pub fn adjust(&mut self, selectivity: f64, memory_pressure: f64) {
-        if selectivity < 0.1 {
-            // High filtering, use larger batches
-            self.current_size = (self.current_size * 2).min(self.max_size);
-        } else if memory_pressure > 0.8 {
-            // Memory pressure, reduce batch size
-            self.current_size = (self.current_size / 2).max(self.min_size);
+    pub fn new() -> Self {
+        Self {
+            current_size: DEFAULT_BATCH_SIZE,
+            min_size: MIN_BATCH_SIZE,
+            max_size: MAX_BATCH_SIZE,
+            selectivity_ema: 1.0,
+            throughput_ema: 0.0,
+            target_output_size: DEFAULT_BATCH_SIZE,
+            alpha: 0.3,
         }
     }
+
+    /// Update batch size based on observed metrics
+    pub fn adjust(
+        &mut self,
+        batch_input_size: usize,
+        batch_output_size: usize,
+        processing_time_ns: u64,
+    ) {
+        // Update selectivity estimate
+        let selectivity = if batch_input_size > 0 {
+            batch_output_size as f64 / batch_input_size as f64
+        } else {
+            1.0
+        };
+        self.selectivity_ema = self.alpha * selectivity
+            + (1.0 - self.alpha) * self.selectivity_ema;
+
+        // Update throughput estimate
+        let throughput = if processing_time_ns > 0 {
+            batch_input_size as f64 / processing_time_ns as f64
+        } else {
+            0.0
+        };
+        self.throughput_ema = self.alpha * throughput
+            + (1.0 - self.alpha) * self.throughput_ema;
+
+        // Selectivity-based adjustment: inflate input to maintain
+        // target output batch density
+        if self.selectivity_ema < 0.5 && self.selectivity_ema > 0.0 {
+            let desired_input = (self.target_output_size as f64
+                / self.selectivity_ema) as usize;
+            self.current_size = desired_input
+                .max(self.min_size)
+                .min(self.max_size);
+        }
+
+        // Cache-based adjustment: detect throughput degradation
+        if self.throughput_ema > 0.0 && throughput < self.throughput_ema * 0.7 {
+            // Throughput dropped: likely cache thrashing
+            self.current_size = (self.current_size * 3 / 4)
+                .max(self.min_size);
+        }
+    }
+
+    /// Get current optimal batch size
+    pub fn batch_size(&self) -> usize {
+        // Round up to SIMD alignment
+        let simd_align = 8; // 8 elements for AVX2 i32
+        ((self.current_size + simd_align - 1) / simd_align)
+            * simd_align
+    }
+}
+
+/// Row-width-aware batch size calculation
+pub fn compute_optimal_batch_size(
+    row_width_bytes: usize,
+    num_active_columns: usize,
+    l2_cache_bytes: usize,
+) -> usize {
+    // Target: batch data fits in L2 cache
+    let bytes_per_row = row_width_bytes * num_active_columns;
+    let max_rows = l2_cache_bytes / bytes_per_row;
+
+    // Clamp to reasonable range
+    max_rows.max(MIN_BATCH_SIZE).min(MAX_BATCH_SIZE)
+}
+
+/// Per-operator batch size recommendations
+pub fn operator_batch_size(
+    op: &RelExpr,
+    base_size: usize,
+) -> usize {
+    match op {
+        // Sequential scan: large batches (sequential access)
+        RelExpr::Scan { .. } => base_size * 2,
+
+        // Hash join probe: smaller batches (random access)
+        RelExpr::HashJoinProbe { .. } => base_size / 2,
+
+        // Aggregation: medium batches
+        RelExpr::Aggregate { .. } => base_size,
+
+        // Filter: inflate by expected selectivity inverse
+        RelExpr::Filter { selectivity, .. } => {
+            if *selectivity > 0.0 {
+                ((base_size as f64 / selectivity) as usize)
+                    .min(MAX_BATCH_SIZE)
+            } else {
+                base_size
+            }
+        }
+
+        _ => base_size,
+    }
+}
+
+/// Cost model for batch size impact
+pub fn batch_size_impact(
+    rows: f64,
+    batch_size: usize,
+    row_width: usize,
+) -> f64 {
+    let num_batches = (rows / batch_size as f64).ceil();
+
+    // Per-batch overhead
+    let batch_overhead = num_batches * 0.001;
+
+    // SIMD utilization (last batch may be partial)
+    let wasted_simd_lanes = num_batches * 4.0 * 0.0000001;
+
+    // Cache efficiency (larger batch = more misses)
+    let batch_bytes = batch_size * row_width;
+    let l2_size = 256 * 1024; // 256 KB typical
+    let cache_penalty = if batch_bytes > l2_size {
+        (batch_bytes as f64 / l2_size as f64 - 1.0) * 0.1
+    } else {
+        0.0
+    };
+
+    batch_overhead + wasted_simd_lanes + cache_penalty * num_batches
 }
 ```
 
 ## Cost Model
 
-- Optimal batch size: depends on operator, data, hardware
-- Typical: 1024-4096 tuples
+**Batch Size Impact on Performance:**
+
+| Batch Size | Call Overhead | SIMD Util | Cache Fit | Use Case |
+|-----------|-------------|-----------|-----------|----------|
+| 64 | High | Low | Always | Low-selectivity probe |
+| 256 | Medium | Good | Always | Hash join probe |
+| 1024 | Low | Full | Usually | Default analytical |
+| 2048 | Low | Full | Depends | DuckDB default |
+| 4096 | Minimal | Full | Large rows miss | ClickHouse scans |
+| 65536 | Minimal | Full | Often miss | Full-column ops |
+
+**Selectivity Adjustment:**
+- Selectivity 100%: batch_size = target_output (no inflation)
+- Selectivity 10%: batch_size = 10x target_output
+- Selectivity 1%: batch_size = 100x target_output (capped at MAX)
+
+**Cache Model:**
+- L1 (32-64KB): batch of 1024 x 8-byte columns = 8KB (fits)
+- L2 (256KB-1MB): batch of 4096 x 8 columns x 8B = 256KB (borderline)
+- L3 (6-30MB): batch of 65536 x 8 columns x 8B = 4MB (fits)
+
+## Test Cases
+
+```sql
+-- Test 1: High selectivity (small output)
+SELECT * FROM events WHERE event_type = 'click';
+-- Selectivity: ~1%, batch inflation: 100x
+-- Expected: large input batch, small output batch
+
+-- Test 2: Sequential scan (large batches)
+SELECT SUM(amount) FROM transactions;
+-- Expected: Maximum batch size for sequential scan
+-- Cache-friendly: only one column accessed
+
+-- Test 3: Hash join probe (smaller batches)
+SELECT * FROM orders o JOIN customers c ON o.cust_id = c.id;
+-- Expected: Smaller batch for probe side (random HT access)
+-- Prevents cache thrashing on hash table lookups
+
+-- Test 4: Wide rows (cache-limited)
+SELECT * FROM wide_table WHERE id > 1000;
+-- 100 columns x 8 bytes = 800 bytes per row
+-- Expected: batch_size reduced to ~300 for L2 fit
+```
+
+## Comparison with Other Models
+
+| Aspect | Adaptive Batch | Fixed Batch | Volcano (1 tuple) |
+|--------|---------------|------------|-------------------|
+| Batch size | Dynamic | Static 1024-2048 | 1 (always) |
+| Cache aware | Yes | No | N/A |
+| Selectivity aware | Yes | No | N/A |
+| Tuning required | Auto | Manual | None |
+| Overhead | Monitoring cost | None | Call overhead |
 
 ## References
 
-1. Kersten et al., "Everything You Always Wanted to Know About Compiled and Vectorized Queries", VLDB 2018
+1. **Boncz, Peter A.; Zukowski, Marcin; Nes, Niels**. "MonetDB/X100: Hyper-Pipelining Query Execution." CIDR 2005.
+   - Original vectorized batch model, batch size analysis
+
+2. **Kersten, Timo et al**. "Everything You Always Wanted to Know About Compiled and Vectorized Queries But Were Afraid to Ask." VLDB 2018.
+   - Batch size impact on vectorized vs compiled execution
+
+3. **Raasveldt, Mark; Muhleisen, Hannes**. "DuckDB: an Embeddable Analytical Database." SIGMOD 2019.
+   - Practical batch sizing in production vectorized engine
+
+4. **Menon, Prashanth et al**. "Relaxed Operator Fusion for In-Memory Databases." VLDB 2017.
+   - Batch size and materialization boundary interaction

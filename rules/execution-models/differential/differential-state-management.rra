@@ -1,45 +1,217 @@
 ---
 id: differential-state-management
-name: Differential state management
+name: Differential State Management and Compaction
 category: execution-models
 version: 1.0.0
-databases: [materialize, spark]
-tags: [execution, differential, streaming, incremental]
+databases: [Materialize, Differential Dataflow]
+authors: [Frank McSherry]
+tags: [execution, differential, state, compaction, gc, memory, trace]
+standard: Differential Dataflow
 ---
 
-# Differential state management
+# Differential State Management and Compaction
 
 ## Description
 
-Streaming state updates and garbage collection.
+Differential dataflow operators maintain state as append-only traces of changes. Without management, these traces grow without bound. State management involves compaction (merging old trace batches and canceling +1/-1 pairs), garbage collection (removing state for times before the compaction frontier), and memory budgeting (limiting total memory across all operators). The compaction frontier, driven by the progress-tracking protocol, determines the earliest time that may still receive data.
+
+**State lifecycle:**
+1. **Append**: New changes added as new batch to trace
+2. **Accumulate**: Multiple batches coexist, increasing lookup cost
+3. **Compact**: Merge batches, cancel opposing diffs, remove stale times
+4. **Reclaim**: Free memory from compacted entries with zero net diff
+
+**Key characteristics:**
+- **Append-only trace**: New changes never modify existing batches
+- **Background compaction**: Merges happen asynchronously
+- **Frontier-driven GC**: Only compact past the progress frontier
+- **Shared state**: Multiple operators read the same compacted trace
+- **Predictable memory**: After compaction, memory proportional to live data
+
+**Trade-offs:**
+- Compaction CPU cost proportional to trace size
+- Delayed compaction increases lookup cost (more batches to scan)
+- Aggressive compaction increases CPU overhead
+- Memory cannot be reclaimed until frontier advances
 
 ## Implementation
 
 ```rust
-pub struct Differentialstatemanagement {
-    state: StreamingState,
-    changes: Vec<Change>,
+/// Trace: append-only log of change batches
+pub struct Trace<K: Ord, V> {
+    batches: Vec<TraceBatch<K, V>>,
+    compaction_frontier: Frontier,
+    merge_policy: MergePolicy,
+    memory_budget: usize,
 }
 
-impl Differentialstatemanagement {
-    pub fn process_changes(&mut self, input: Vec<Change>) -> Vec<Change> {
-        // Incremental processing
-        let mut output = Vec::new();
-        for change in input {
-            output.extend(self.apply_change(change));
+pub struct TraceBatch<K: Ord, V> {
+    entries: Vec<(K, V, Timestamp, Diff)>,
+    lower: Frontier,
+    upper: Frontier,
+    size_bytes: usize,
+}
+
+impl<K: Ord + Clone, V: Clone> Trace<K, V> {
+    /// Append a new batch of changes
+    pub fn append(&mut self, batch: TraceBatch<K, V>) {
+        self.batches.push(batch);
+        self.maybe_compact();
+    }
+
+    /// Advance compaction frontier (enables GC)
+    pub fn advance_frontier(&mut self, new_frontier: Frontier) {
+        self.compaction_frontier = new_frontier;
+        self.compact();
+    }
+
+    /// Compact trace: merge old batches, cancel opposing diffs
+    pub fn compact(&mut self) {
+        // Find batches entirely before compaction frontier
+        let (old, recent): (Vec<_>, Vec<_>) = self.batches
+            .drain(..)
+            .partition(|b| b.upper.less_than(&self.compaction_frontier));
+
+        if old.len() < 2 {
+            self.batches = old.into_iter().chain(recent).collect();
+            return;
         }
-        output
+
+        // Merge old batches
+        let mut merged: Vec<(K, V, Timestamp, Diff)> = old
+            .into_iter()
+            .flat_map(|b| b.entries)
+            .collect();
+
+        // Sort by key for consolidation
+        merged.sort_by(|a, b| a.0.cmp(&b.0).then(a.2.cmp(&b.2)));
+
+        // Consolidate: sum diffs for same (key, value)
+        let mut write = 0;
+        for read in 1..merged.len() {
+            if merged[write].0 == merged[read].0
+                && merged[write].1 == merged[read].1
+            {
+                merged[write].3 += merged[read].3;
+            } else {
+                if merged[write].3 != 0 { write += 1; }
+                merged[write] = merged[read].clone();
+            }
+        }
+        merged.truncate(write + 1);
+        merged.retain(|e| e.3 != 0); // Remove canceled entries
+
+        let compacted = TraceBatch {
+            size_bytes: merged.len() * std::mem::size_of::<(K, V, Timestamp, Diff)>(),
+            entries: merged,
+            lower: Frontier::minimum(),
+            upper: self.compaction_frontier.clone(),
+        };
+
+        self.batches = std::iter::once(compacted)
+            .chain(recent)
+            .collect();
+    }
+
+    /// Check memory budget and trigger compaction if needed
+    fn maybe_compact(&mut self) {
+        let total_bytes: usize = self.batches.iter()
+            .map(|b| b.size_bytes)
+            .sum();
+
+        if total_bytes > self.memory_budget {
+            self.compact();
+        }
+
+        // If still over budget after compaction, apply merge policy
+        if self.total_bytes() > self.memory_budget {
+            match self.merge_policy {
+                MergePolicy::Aggressive => self.force_merge_all(),
+                MergePolicy::Tiered => self.tiered_merge(),
+                MergePolicy::SizeBased => self.merge_largest(),
+            }
+        }
+    }
+
+    /// Tiered compaction (LSM-tree style)
+    fn tiered_merge(&mut self) {
+        // Group batches by size tier
+        // Merge batches within same tier when count exceeds threshold
+        let tier_threshold = 4;
+        let mut by_tier: HashMap<usize, Vec<usize>> = HashMap::new();
+
+        for (i, batch) in self.batches.iter().enumerate() {
+            let tier = (batch.size_bytes as f64).log2() as usize;
+            by_tier.entry(tier).or_default().push(i);
+        }
+
+        for (_, indices) in by_tier {
+            if indices.len() >= tier_threshold {
+                self.merge_batches(&indices);
+            }
+        }
+    }
+
+    pub fn total_bytes(&self) -> usize {
+        self.batches.iter().map(|b| b.size_bytes).sum()
+    }
+
+    pub fn num_batches(&self) -> usize {
+        self.batches.len()
+    }
+
+    pub fn logical_size(&self) -> usize {
+        self.batches.iter().map(|b| b.entries.len()).sum()
     }
 }
 ```
 
 ## Cost Model
 
-- Update cost: O(changes) not O(data)
-- 100-1000x faster than recomputation
-- State size: O(active_data)
+**Compaction Cost:**
+- Merge sort: O(N log B) where N = entries, B = batches
+- Consolidation: O(N) single pass
+- Frequency: triggered by batch count or memory pressure
+- Amortized: O(log N) per change (similar to LSM-tree)
+
+**Memory:**
+- Before compaction: all historical changes retained
+- After compaction: only live entries (net positive diffs)
+- Compression ratio: depends on update/delete patterns
+- Typical: 2-10x reduction after compaction
+
+**Lookup Cost (number of batches):**
+- 1 batch (after compaction): O(log N) binary search
+- B batches (before compaction): O(B x log N)
+- Compaction reduces B, improving lookup performance
+
+## Test Cases
+
+```sql
+-- Test 1: Compaction after many updates
+-- Insert 1M rows, then update each row 10 times
+-- Before compaction: 11M trace entries
+-- After compaction: 1M entries (only latest values)
+
+-- Test 2: Memory budget enforcement
+-- Budget: 100MB for arrangement
+-- Data: 200MB of changes accumulated
+-- Expected: compaction triggered, reduce to ~50MB (live data)
+
+-- Test 3: Frontier-driven GC
+-- Frontier at T=1000, changes from T=1 to T=2000
+-- Compaction: entries before T=1000 merged and consolidated
+-- State for T<1000 can be represented compactly
+
+-- Test 4: Cascading compaction
+-- Upstream source advances frontier
+-- All downstream operators compact their state
+-- Memory reclaimed across entire dataflow graph
+```
 
 ## References
 
-1. McSherry et al., "Differential Dataflow", CIDR 2013
-2. Materialize documentation
+1. **McSherry, Frank et al**. "Differential Dataflow." CIDR 2013.
+2. **McSherry, Frank**. "Differential Dataflow Internals: A Progress Report." 2017.
+3. **O'Neil, Patrick et al**. "The Log-Structured Merge-Tree (LSM-Tree)." Acta Informatica 1996.
+4. **Materialize Documentation**. "Memory Management and Compaction."

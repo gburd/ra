@@ -1,0 +1,285 @@
+---
+id: adaptive-batch-sizing
+name: Adaptive Batch Size Tuning
+category: execution-models
+version: 1.0.0
+databases: [DuckDB, Velox, DataFusion, Spark]
+tags: [execution, adaptive, batch, morsel, vectorized, cache]
+standard: Vectorized execution batch tuning
+complexity: O(1) per batch decision
+benefit_range: [1.1, 3.0]
+---
+
+# Adaptive Batch Size Tuning
+
+## Description
+
+Adaptive batch sizing dynamically adjusts the number of rows processed per batch (or morsel) based on runtime observations of cache behavior, operator complexity, and row width. Fixed batch sizes are a compromise: too large and the working set spills from L2/L3 cache; too small and per-batch overhead dominates. Adaptive sizing finds the sweet spot.
+
+Modern vectorized engines like DuckDB default to 2048 rows per vector, but this is optimal only for narrow rows with simple operations. Wide rows (many columns, strings, nested types) or complex expressions (UDFs, regex) benefit from smaller batches that keep the working set in cache. Conversely, simple scan + filter pipelines can use larger batches to amortize function call overhead.
+
+**Key characteristics:**
+- **Cache-fitting**: Target L2 cache size as working set upper bound
+- **Row-width aware**: Wider rows need smaller batches
+- **Operator-aware**: Complex operators (sort, hash join build) need smaller batches
+- **Throughput feedback**: Measure rows/second and hill-climb to optimal batch size
+- **Pipeline-local**: Different pipeline stages can use different batch sizes
+
+**Trade-offs:**
+- Tuning overhead: measuring throughput adds minor cost
+- Startup phase: suboptimal batch size for first few batches
+- Hysteresis needed to avoid oscillating between sizes
+- Very short queries don't benefit (too few batches to converge)
+
+## Relational Algebra
+
+```
+AdaptiveBatch(pipeline, initial_size) -> Result
+
+fn execute_adaptive(pipeline, size):
+  current_size = size
+  prev_throughput = 0
+
+  while not pipeline.exhausted():
+    batch = pipeline.source.next(current_size)
+    start = now()
+    result = pipeline.process(batch)
+    elapsed = now() - start
+
+    throughput = batch.len() / elapsed
+    new_size = adjust(current_size, throughput, prev_throughput)
+    current_size = clamp(new_size, MIN_BATCH, MAX_BATCH)
+    prev_throughput = throughput
+
+    emit(result)
+```
+
+## Implementation
+
+```rust
+/// Batch size bounds
+pub const MIN_BATCH_SIZE: usize = 64;
+pub const MAX_BATCH_SIZE: usize = 65536;
+pub const DEFAULT_BATCH_SIZE: usize = 2048;
+
+/// Adaptive batch sizer using hill-climbing
+pub struct AdaptiveBatchSizer {
+    current_size: usize,
+    prev_size: usize,
+    prev_throughput: f64,
+    direction: i32,  // +1 = growing, -1 = shrinking
+    stable_count: usize,
+    step_factor: f64,
+}
+
+impl AdaptiveBatchSizer {
+    pub fn new(initial_size: usize) -> Self {
+        Self {
+            current_size: initial_size,
+            prev_size: initial_size,
+            prev_throughput: 0.0,
+            direction: 1,
+            stable_count: 0,
+            step_factor: 1.5,
+        }
+    }
+
+    /// Compute batch size from row width and cache size
+    pub fn from_row_width(
+        row_bytes: usize,
+        l2_cache_bytes: usize,
+    ) -> Self {
+        // Target: working set fits in L2 cache
+        // Working set = batch_size * row_bytes * pipeline_width
+        let pipeline_width = 3; // typical operators in flight
+        let target = l2_cache_bytes
+            / (row_bytes * pipeline_width);
+        let clamped = target
+            .max(MIN_BATCH_SIZE)
+            .min(MAX_BATCH_SIZE);
+
+        // Round to power of 2 for alignment
+        let size = clamped.next_power_of_two() / 2;
+        Self::new(size.max(MIN_BATCH_SIZE))
+    }
+
+    /// Update batch size based on throughput observation
+    pub fn update(&mut self, rows: usize, elapsed_ns: u64) {
+        if elapsed_ns == 0 {
+            return;
+        }
+
+        let throughput = rows as f64
+            / (elapsed_ns as f64 / 1_000_000_000.0);
+
+        if self.prev_throughput > 0.0 {
+            let improvement = throughput / self.prev_throughput;
+
+            if improvement > 1.05 {
+                // Throughput improved, continue in same direction
+                self.stable_count = 0;
+                self.adjust_in_direction();
+            } else if improvement < 0.95 {
+                // Throughput decreased, reverse direction
+                self.direction = -self.direction;
+                self.step_factor = (self.step_factor - 0.1)
+                    .max(1.1);
+                self.stable_count = 0;
+                self.adjust_in_direction();
+            } else {
+                // Within noise threshold, stabilize
+                self.stable_count += 1;
+            }
+        } else {
+            // First measurement, try growing
+            self.adjust_in_direction();
+        }
+
+        self.prev_throughput = throughput;
+        self.prev_size = self.current_size;
+    }
+
+    fn adjust_in_direction(&mut self) {
+        let new_size = if self.direction > 0 {
+            (self.current_size as f64 * self.step_factor)
+                as usize
+        } else {
+            (self.current_size as f64 / self.step_factor)
+                as usize
+        };
+
+        self.current_size = new_size
+            .max(MIN_BATCH_SIZE)
+            .min(MAX_BATCH_SIZE);
+    }
+
+    pub fn batch_size(&self) -> usize {
+        self.current_size
+    }
+
+    pub fn is_stable(&self) -> bool {
+        self.stable_count >= 3
+    }
+}
+
+/// Static batch size estimator based on operator profile
+pub fn estimate_batch_size(
+    row_width_bytes: usize,
+    num_columns_accessed: usize,
+    has_hash_operator: bool,
+    l2_cache_bytes: usize,
+    l3_cache_bytes: usize,
+) -> usize {
+    // Each column in a vectorized engine is a separate array
+    // Working set = batch_size * num_columns * column_width
+    let avg_column_width = row_width_bytes
+        / num_columns_accessed.max(1);
+
+    // Hash operators need extra memory for hash table probing
+    let memory_per_row = if has_hash_operator {
+        row_width_bytes + 32 // hash entry overhead
+    } else {
+        row_width_bytes
+    };
+
+    // Target L2 for inner loop, L3 for hash table
+    let target_cache = if has_hash_operator {
+        l2_cache_bytes / 2 // leave room for hash table
+    } else {
+        l2_cache_bytes
+    };
+
+    let batch = target_cache / memory_per_row.max(1);
+    batch.next_power_of_two()
+        .min(MAX_BATCH_SIZE)
+        .max(MIN_BATCH_SIZE)
+}
+
+/// Pipeline-aware batch sizing
+pub struct PipelineBatchConfig {
+    pub scan_batch_size: usize,
+    pub filter_batch_size: usize,
+    pub join_batch_size: usize,
+    pub agg_batch_size: usize,
+}
+
+impl PipelineBatchConfig {
+    pub fn for_pipeline(
+        row_width: usize,
+        l2_cache: usize,
+    ) -> Self {
+        let base = estimate_batch_size(
+            row_width, 1, false, l2_cache, l2_cache * 8,
+        );
+        Self {
+            scan_batch_size: base * 2,     // scan is cache-friendly
+            filter_batch_size: base,       // standard
+            join_batch_size: base / 2,     // hash table pressure
+            agg_batch_size: base / 2,      // accumulator state
+        }
+    }
+}
+```
+
+## Cost Model
+
+**Batch overhead (per batch):**
+- Function call: ~10-50 ns
+- Null bitmap setup: ~batch_size / 64 ns (one bit per row)
+- Selection vector allocation: ~batch_size * 4 bytes
+- Total per-batch: ~100-500 ns
+
+**Cache effects:**
+- L1 hit: ~1 ns/access
+- L2 hit: ~5 ns/access
+- L3 hit: ~20 ns/access
+- RAM: ~100 ns/access
+
+**Optimal batch size:**
+- Narrow rows (8 bytes): 4096-8192 rows (fits in 32-64 KB L1)
+- Medium rows (64 bytes): 1024-2048 rows (fits in 256 KB L2)
+- Wide rows (512+ bytes): 128-512 rows (fits in L2)
+- With hash table: halve the above (share cache with hash table)
+
+**Throughput model:**
+- `throughput = batch_size / (per_batch_overhead + batch_size * per_row_cost)`
+- Maximized when: `per_batch_overhead << batch_size * per_row_cost`
+- And working set fits in L2 cache
+
+## Test Cases
+
+```sql
+-- Test 1: Narrow scan -> large batches
+SELECT COUNT(*) FROM lineitem WHERE l_quantity > 25;
+-- 8-byte quantity column only
+-- Optimal batch: 4096+ (L1-resident)
+
+-- Test 2: Wide projection -> small batches
+SELECT * FROM wide_table;  -- 200 columns, 2KB/row
+-- Optimal batch: 128 (fits 256KB L2)
+
+-- Test 3: Hash join -> reduced batch for probe
+SELECT o.*, l.*
+FROM orders o JOIN lineitem l ON o.order_id = l.order_id;
+-- Hash table consumes L3; probe batches target L2/2
+
+-- Test 4: Adaptive convergence
+SELECT complex_udf(col1, col2, col3)
+FROM large_table WHERE col4 > threshold;
+-- UDF cost unknown at compile time
+-- Adaptive: starts at 2048, hill-climbs to ~512 (UDF is expensive)
+```
+
+## References
+
+1. **Boncz, Peter et al**. "MonetDB/X100: Hyper-Pipelining Query Execution." CIDR 2005.
+   - Original vectorized execution with batch sizing analysis
+
+2. **Kersten, Timo et al**. "Everything You Always Wanted to Know About Compiled and Vectorized Query Engines." VLDB 2018.
+   - Batch size impact on vectorized execution performance
+
+3. **Raasveldt, Mark and Hannes Muhleisen**. "DuckDB: an Embeddable Analytical Database." SIGMOD 2019.
+   - DuckDB's 2048-row default vector size and rationale
+
+4. **Polychroniou, Orestis et al**. "Rethinking SIMD Vectorization for In-Memory Databases." SIGMOD 2015.
+   - Cache-conscious batch sizing for SIMD operations

@@ -117,6 +117,45 @@ impl HardwareCostModel {
         }
     }
 
+    /// Estimate the cost of sorting rows on the given device.
+    ///
+    /// Uses O(n log n) comparison model with device-specific constants.
+    #[allow(clippy::cast_precision_loss)]
+    #[must_use]
+    pub fn sort_cost(
+        &self,
+        row_count: f64,
+        avg_row_size: u64,
+        device: Device,
+    ) -> Cost {
+        let data_bytes = row_count * avg_row_size as f64;
+        let mem = f64_to_u64(data_bytes);
+        let n_log_n = if row_count > 1.0 {
+            row_count * row_count.log2()
+        } else {
+            row_count
+        };
+
+        match device {
+            Device::Cpu => {
+                // ~200ns per comparison (includes cache misses for large sorts)
+                let cpu_time = n_log_n * 200e-9;
+                Cost::new(cpu_time, 0.0, 0.0, mem)
+            }
+            Device::Gpu => {
+                let transfer = data_bytes / (self.profile.pcie_bandwidth_gbps * 1e9);
+                let sm = f64::from(self.profile.gpu_sm_count);
+                // GPU sort: bitonic/merge sort parallelized across SMs
+                let gpu_time = n_log_n * 200e-9 / sm;
+                Cost::new(gpu_time + transfer, 0.0, 0.0, mem)
+            }
+            Device::Fpga => {
+                // FPGA sorting networks limited by pipeline depth
+                Cost::new(f64::INFINITY, 0.0, 0.0, 0)
+            }
+        }
+    }
+
     /// Estimate the cost of an aggregation on the given device.
     #[allow(clippy::cast_precision_loss)]
     #[must_use]
@@ -278,6 +317,38 @@ mod tests {
         let model = HardwareCostModel::new(HardwareProfile::fpga_appliance());
         let cost = model.aggregation_cost(1_000_000.0, 1000.0, 100, Device::Fpga);
         assert!(cost.cpu.is_infinite());
+    }
+
+    #[test]
+    fn sort_cost_cpu() {
+        let model = HardwareCostModel::new(HardwareProfile::cpu_only());
+        let cost = model.sort_cost(1_000_000.0, 100, Device::Cpu);
+        assert!(cost.cpu > 0.0);
+        assert_eq!(cost.io, 0.0);
+    }
+
+    #[test]
+    fn sort_cost_gpu_faster_for_large() {
+        let model = HardwareCostModel::new(HardwareProfile::gpu_server());
+        let cpu = model.sort_cost(100_000_000.0, 100, Device::Cpu);
+        let gpu = model.sort_cost(100_000_000.0, 100, Device::Gpu);
+        assert!(gpu.total() < cpu.total());
+    }
+
+    #[test]
+    fn sort_cost_fpga_unsupported() {
+        let model = HardwareCostModel::new(HardwareProfile::fpga_appliance());
+        let cost = model.sort_cost(1_000_000.0, 100, Device::Fpga);
+        assert!(cost.cpu.is_infinite());
+    }
+
+    #[test]
+    fn sort_cost_scales_superlinearly() {
+        let model = HardwareCostModel::new(HardwareProfile::cpu_only());
+        let small = model.sort_cost(1_000.0, 100, Device::Cpu);
+        let large = model.sort_cost(1_000_000.0, 100, Device::Cpu);
+        // Cost should scale more than linearly (n log n)
+        assert!(large.cpu / small.cpu > 1000.0);
     }
 
     #[test]

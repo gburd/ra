@@ -1,0 +1,207 @@
+---
+id: mid-query-replanning
+name: Mid-Query Re-optimization
+category: experimental/adaptive
+databases: [postgresql, oracle, cockroachdb]
+execution_models: [adaptive, volcano]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["Kabra & DeWitt 1998", "Markl et al. 2004", "RA Contributors"]
+tags: [adaptive, re-optimization, runtime, cardinality-feedback]
+complexity: "O(replan_cost) at checkpoints"
+benefit_range: [0.3, 0.8]
+---
+
+# Mid-Query Re-optimization
+
+## Description
+
+Inserts cardinality checkpoints into the query plan. When actual
+cardinality at a checkpoint differs significantly from the estimate,
+the optimizer re-plans the remaining query using the observed
+cardinality. This corrects cascading estimation errors that cause
+suboptimal join orders and algorithm choices in the downstream plan.
+
+**When to apply**: Complex queries (5+ joins) where cardinality
+estimation errors compound across multiple operators. Especially
+effective when the first few operators have predictable cardinality
+but downstream estimates degrade.
+
+**Why it works**: Cardinality estimation errors compound multiplicatively
+across joins: a 3x error in one join becomes 9x after the next join
+and 27x after the third. By checking actual cardinality at intermediate
+points and re-optimizing the remainder, errors are corrected before
+they cascade.
+
+## Relational Algebra
+
+```algebra
+-- Original plan: left-deep join tree
+scan(R) hash_join scan(S) hash_join scan(T) hash_join scan(U)
+
+-- With checkpoints:
+checkpoint[est=1000](
+  scan(R) hash_join scan(S)
+) hash_join scan(T) hash_join scan(U)
+
+-- If checkpoint observes 50000 rows (50x error):
+-- Re-optimize: scan(T) hash_join scan(U) hash_join materialized(50000)
+-- May choose different join order or algorithm
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("insert-replan-checkpoint";
+    "(join ?p2
+       (join ?p1 ?r1 ?r2)
+       ?r3)" =>
+    "(join ?p2
+       (checkpoint
+         (expected_card (estimate_card ?r1 ?r2 ?p1))
+         (replan_threshold 3.0)
+         (join ?p1 ?r1 ?r2))
+       ?r3)"
+    if join_depth_ge_3()
+    if cardinality_uncertainty_high()
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(query: &RelExpr) -> bool {
+    // Must be a multi-join query
+    let join_depth = count_join_depth(query);
+    if join_depth < 3 {
+        return false;
+    }
+
+    // Cardinality estimates must have significant uncertainty
+    let max_uncertainty = compute_max_uncertainty(query);
+    max_uncertainty > 3.0 // Q-error > 3x
+}
+
+struct ReplanCheckpoint {
+    estimated_cardinality: f64,
+    threshold_ratio: f64,  // Trigger replan if actual/est > this
+    materialization_buffer: Option<Vec<Tuple>>,
+}
+
+impl ReplanCheckpoint {
+    fn check(
+        &self,
+        actual_cardinality: usize,
+    ) -> ReplanDecision {
+        let ratio = actual_cardinality as f64
+            / self.estimated_cardinality;
+
+        if ratio > self.threshold_ratio
+            || ratio < 1.0 / self.threshold_ratio
+        {
+            ReplanDecision::Replan {
+                actual_cardinality,
+                materialized: self.materialization_buffer.take(),
+            }
+        } else {
+            ReplanDecision::Continue
+        }
+    }
+}
+```
+
+**Restrictions:**
+- Checkpoint adds materialization overhead (pipeline breaker)
+- Re-optimization has optimizer cost (1-10ms typically)
+- Already-executed portions cannot be changed
+- Materialized intermediate must be stored (memory/disk)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    query: &RelExpr,
+    estimation_accuracy: f64, // Expected q-error
+) -> f64 {
+    // Cost of executing with wrong plan (cascading error)
+    let wrong_plan_cost = estimate_with_error(
+        query, estimation_accuracy,
+    );
+
+    // Cost of replanning + executing corrected plan
+    let replan_cost = 5.0; // ms for re-optimization
+    let checkpoint_cost = estimate_checkpoint_cost(query);
+    let corrected_cost = estimate_optimal_cost(query);
+    let replan_total = replan_cost + checkpoint_cost + corrected_cost;
+
+    if wrong_plan_cost > replan_total {
+        (wrong_plan_cost - replan_total) / wrong_plan_cost
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 3x-100x for queries where estimation errors
+compound across 4+ joins. Prevents catastrophic plan choices.
+
+## Test Cases
+
+### Positive: TPC-H Q9 variant with estimation errors
+
+```sql
+SELECT n.name, EXTRACT(YEAR FROM o.orderdate) AS year,
+       SUM(l.extendedprice * (1 - l.discount) - ps.supplycost * l.quantity)
+FROM part p
+JOIN lineitem l ON p.partkey = l.partkey
+JOIN partsupp ps ON l.partkey = ps.partkey AND l.suppkey = ps.suppkey
+JOIN orders o ON l.orderkey = o.orderkey
+JOIN supplier s ON s.suppkey = l.suppkey
+JOIN nation n ON s.nationkey = n.nationkey
+WHERE p.name LIKE '%green%';
+
+-- Checkpoint after: part JOIN lineitem (LIKE selectivity uncertain)
+-- If 100x more matches than estimated -> replan remaining joins
+-- Different join order for remaining 4 tables
+```
+
+### Positive: Query with UDF filter
+
+```sql
+SELECT *
+FROM transactions t
+JOIN accounts a ON t.account_id = a.id
+JOIN customers c ON a.customer_id = c.id
+WHERE ml_fraud_score(t.features) > 0.8;
+
+-- UDF selectivity unknown at optimization time
+-- Checkpoint after filter: measure actual selectivity
+-- Re-optimize remaining joins with true cardinality
+```
+
+### Negative: Simple 2-way join
+
+```sql
+SELECT * FROM orders o JOIN customers c ON o.cid = c.id;
+-- No cascading errors possible, checkpoint overhead not justified
+```
+
+## References
+
+**Academic papers:**
+- Kabra, DeWitt, "Efficient Mid-Query Re-Optimization of Sub-Optimal Query Execution Plans", SIGMOD 1998
+- Markl et al., "Robust Query Processing through Progressive Optimization", SIGMOD 2004
+- Wu et al., "Towards Predicting Query Execution Time for Concurrent and Dynamic Database Workloads", VLDB 2013
+
+**Implementation:**
+- Oracle: adaptive cursor sharing and statistics feedback
+- SQL Server: adaptive memory grant feedback (since 2017)
+- PostgreSQL: proposed parameterized path replanning
+
+**Key insights:**
+- Optimal checkpoint placement: after operators with highest uncertainty
+- Threshold of 3x q-error balances replan cost vs benefit
+- Materialization cost can be amortized if downstream is expensive
+- Can be combined with adaptive join selection for compound benefit

@@ -1,0 +1,3664 @@
+# =============================================================================
+# SQL Function Catalog for RA Query Optimizer
+# =============================================================================
+# 200+ function definitions with behavioral properties and cost metadata.
+# The optimizer uses this catalog for constant folding, pushdown decisions,
+# expression index matching, and per-row cost estimation.
+#
+# Properties:
+#   deterministic   - same inputs always produce same output
+#   inlineable      - function body can be expanded inline
+#   expensive       - high per-row cost (affects join ordering)
+#   pure            - no side effects, no external state
+#   constant_foldable - can evaluate at plan time when all args are constants
+#   cost_multiplier - relative cost vs a simple comparison (1.0 baseline)
+# =============================================================================
+
+# =============================================================================
+# MATH FUNCTIONS
+# =============================================================================
+
+[[function]]
+name = "ABS"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Integer"]
+return_type = "Integer"
+
+[[function.signature]]
+args = ["Float"]
+return_type = "Float"
+
+[[function.signature]]
+args = ["Decimal"]
+return_type = "Decimal"
+
+[[function]]
+name = "CEIL"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Float"]
+return_type = "Integer"
+
+[[function.signature]]
+args = ["Decimal"]
+return_type = "Integer"
+
+[[function]]
+name = "CEILING"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Float"]
+return_type = "Integer"
+
+[[function]]
+name = "FLOOR"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Float"]
+return_type = "Integer"
+
+[[function.signature]]
+args = ["Decimal"]
+return_type = "Integer"
+
+[[function]]
+name = "ROUND"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Float"]
+return_type = "Float"
+
+[[function.signature]]
+args = ["Float", "Integer"]
+return_type = "Float"
+
+[[function.signature]]
+args = ["Decimal", "Integer"]
+return_type = "Decimal"
+
+[[function]]
+name = "TRUNC"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Float"]
+return_type = "Float"
+
+[[function.signature]]
+args = ["Float", "Integer"]
+return_type = "Float"
+
+[[function]]
+name = "TRUNCATE"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Float", "Integer"]
+return_type = "Float"
+
+[[function]]
+name = "SQRT"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Float"]
+return_type = "Float"
+
+[[function]]
+name = "CBRT"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Float"]
+return_type = "Float"
+
+[[function]]
+name = "POWER"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Float", "Float"]
+return_type = "Float"
+
+[[function]]
+name = "POW"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Float", "Float"]
+return_type = "Float"
+
+[[function]]
+name = "EXP"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Float"]
+return_type = "Float"
+
+[[function]]
+name = "LOG"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Float"]
+return_type = "Float"
+
+[[function.signature]]
+args = ["Float", "Float"]
+return_type = "Float"
+
+[[function]]
+name = "LOG2"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Float"]
+return_type = "Float"
+
+[[function]]
+name = "LOG10"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Float"]
+return_type = "Float"
+
+[[function]]
+name = "LN"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Float"]
+return_type = "Float"
+
+[[function]]
+name = "MOD"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Integer", "Integer"]
+return_type = "Integer"
+
+[[function.signature]]
+args = ["Float", "Float"]
+return_type = "Float"
+
+[[function]]
+name = "SIGN"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Float"]
+return_type = "Integer"
+
+[[function.signature]]
+args = ["Integer"]
+return_type = "Integer"
+
+[[function]]
+name = "PI"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function]]
+name = "DEGREES"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Float"]
+return_type = "Float"
+
+[[function]]
+name = "RADIANS"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Float"]
+return_type = "Float"
+
+[[function]]
+name = "SIN"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Float"]
+return_type = "Float"
+
+[[function]]
+name = "COS"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Float"]
+return_type = "Float"
+
+[[function]]
+name = "TAN"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Float"]
+return_type = "Float"
+
+[[function]]
+name = "ASIN"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Float"]
+return_type = "Float"
+
+[[function]]
+name = "ACOS"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Float"]
+return_type = "Float"
+
+[[function]]
+name = "ATAN"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Float"]
+return_type = "Float"
+
+[[function]]
+name = "ATAN2"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Float", "Float"]
+return_type = "Float"
+
+[[function]]
+name = "COT"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Float"]
+return_type = "Float"
+
+[[function]]
+name = "RANDOM"
+category = "Scalar"
+deterministic = false
+inlineable = false
+expensive = false
+pure = false
+constant_foldable = false
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = []
+return_type = "Float"
+
+[[function]]
+name = "SETSEED"
+category = "Scalar"
+deterministic = false
+inlineable = false
+pure = false
+constant_foldable = false
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Float"]
+return_type = "Float"
+
+[[function]]
+name = "GREATEST"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Any"]
+return_type = "Any"
+variadic = true
+
+[[function]]
+name = "LEAST"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Any"]
+return_type = "Any"
+variadic = true
+
+[[function]]
+name = "WIDTH_BUCKET"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Float", "Float", "Float", "Integer"]
+return_type = "Integer"
+
+# =============================================================================
+# STRING FUNCTIONS
+# =============================================================================
+
+[[function]]
+name = "UPPER"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.5
+
+[[function.signature]]
+args = ["Text"]
+return_type = "Text"
+
+[[function]]
+name = "LOWER"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.5
+
+[[function.signature]]
+args = ["Text"]
+return_type = "Text"
+
+[[function]]
+name = "LENGTH"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Text"]
+return_type = "Integer"
+
+[[function]]
+name = "CHAR_LENGTH"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Text"]
+return_type = "Integer"
+
+[[function]]
+name = "CHARACTER_LENGTH"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Text"]
+return_type = "Integer"
+
+[[function]]
+name = "OCTET_LENGTH"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Text"]
+return_type = "Integer"
+
+[[function]]
+name = "BIT_LENGTH"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Text"]
+return_type = "Integer"
+
+[[function]]
+name = "SUBSTRING"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.5
+
+[[function.signature]]
+args = ["Text", "Integer"]
+return_type = "Text"
+
+[[function.signature]]
+args = ["Text", "Integer", "Integer"]
+return_type = "Text"
+
+[[function]]
+name = "SUBSTR"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.5
+
+[[function.signature]]
+args = ["Text", "Integer", "Integer"]
+return_type = "Text"
+
+[[function]]
+name = "LEFT"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Text", "Integer"]
+return_type = "Text"
+
+[[function]]
+name = "RIGHT"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Text", "Integer"]
+return_type = "Text"
+
+[[function]]
+name = "CONCAT"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.5
+
+[[function.signature]]
+args = ["Text"]
+return_type = "Text"
+variadic = true
+
+[[function]]
+name = "CONCAT_WS"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.5
+
+[[function.signature]]
+args = ["Text", "Text"]
+return_type = "Text"
+variadic = true
+
+[[function]]
+name = "TRIM"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.5
+
+[[function.signature]]
+args = ["Text"]
+return_type = "Text"
+
+[[function]]
+name = "LTRIM"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.5
+
+[[function.signature]]
+args = ["Text"]
+return_type = "Text"
+
+[[function.signature]]
+args = ["Text", "Text"]
+return_type = "Text"
+
+[[function]]
+name = "RTRIM"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.5
+
+[[function.signature]]
+args = ["Text"]
+return_type = "Text"
+
+[[function.signature]]
+args = ["Text", "Text"]
+return_type = "Text"
+
+[[function]]
+name = "LPAD"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.5
+
+[[function.signature]]
+args = ["Text", "Integer"]
+return_type = "Text"
+
+[[function.signature]]
+args = ["Text", "Integer", "Text"]
+return_type = "Text"
+
+[[function]]
+name = "RPAD"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.5
+
+[[function.signature]]
+args = ["Text", "Integer"]
+return_type = "Text"
+
+[[function.signature]]
+args = ["Text", "Integer", "Text"]
+return_type = "Text"
+
+[[function]]
+name = "REPLACE"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Text", "Text", "Text"]
+return_type = "Text"
+
+[[function]]
+name = "TRANSLATE"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Text", "Text", "Text"]
+return_type = "Text"
+
+[[function]]
+name = "REVERSE"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.5
+
+[[function.signature]]
+args = ["Text"]
+return_type = "Text"
+
+[[function]]
+name = "REPEAT"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Text", "Integer"]
+return_type = "Text"
+
+[[function]]
+name = "POSITION"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Text", "Text"]
+return_type = "Integer"
+
+[[function]]
+name = "STRPOS"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Text", "Text"]
+return_type = "Integer"
+
+[[function]]
+name = "INITCAP"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.5
+
+[[function.signature]]
+args = ["Text"]
+return_type = "Text"
+
+[[function]]
+name = "ASCII"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Text"]
+return_type = "Integer"
+
+[[function]]
+name = "CHR"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Integer"]
+return_type = "Text"
+
+[[function]]
+name = "REGEXP_MATCH"
+category = "Scalar"
+deterministic = true
+expensive = true
+pure = true
+constant_foldable = true
+cost_multiplier = 10.0
+
+[[function.signature]]
+args = ["Text", "Text"]
+return_type = "Text[]"
+
+[[function]]
+name = "REGEXP_REPLACE"
+category = "Scalar"
+deterministic = true
+expensive = true
+pure = true
+constant_foldable = true
+cost_multiplier = 10.0
+
+[[function.signature]]
+args = ["Text", "Text", "Text"]
+return_type = "Text"
+
+[[function.signature]]
+args = ["Text", "Text", "Text", "Text"]
+return_type = "Text"
+
+[[function]]
+name = "REGEXP_SUBSTR"
+category = "Scalar"
+deterministic = true
+expensive = true
+pure = true
+constant_foldable = true
+cost_multiplier = 10.0
+
+[[function.signature]]
+args = ["Text", "Text"]
+return_type = "Text"
+
+[[function]]
+name = "REGEXP_COUNT"
+category = "Scalar"
+deterministic = true
+expensive = true
+pure = true
+constant_foldable = true
+cost_multiplier = 10.0
+
+[[function.signature]]
+args = ["Text", "Text"]
+return_type = "Integer"
+
+[[function]]
+name = "LIKE"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Text", "Text"]
+return_type = "Boolean"
+
+[[function]]
+name = "ILIKE"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 4.0
+
+[[function.signature]]
+args = ["Text", "Text"]
+return_type = "Boolean"
+
+[[function]]
+name = "SIMILAR_TO"
+category = "Scalar"
+deterministic = true
+expensive = true
+pure = true
+constant_foldable = true
+cost_multiplier = 8.0
+
+[[function.signature]]
+args = ["Text", "Text"]
+return_type = "Boolean"
+
+[[function]]
+name = "SPLIT_PART"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Text", "Text", "Integer"]
+return_type = "Text"
+
+[[function]]
+name = "STRING_TO_ARRAY"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Text", "Text"]
+return_type = "Text[]"
+
+[[function]]
+name = "ARRAY_TO_STRING"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Text[]", "Text"]
+return_type = "Text"
+
+[[function]]
+name = "ENCODE"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Blob", "Text"]
+return_type = "Text"
+
+[[function]]
+name = "DECODE"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Text", "Text"]
+return_type = "Blob"
+
+[[function]]
+name = "MD5"
+category = "Scalar"
+deterministic = true
+expensive = true
+pure = true
+constant_foldable = true
+cost_multiplier = 5.0
+
+[[function.signature]]
+args = ["Text"]
+return_type = "Text"
+
+[[function]]
+name = "SHA256"
+category = "Scalar"
+deterministic = true
+expensive = true
+pure = true
+constant_foldable = true
+cost_multiplier = 8.0
+
+[[function.signature]]
+args = ["Blob"]
+return_type = "Blob"
+
+[[function]]
+name = "FORMAT"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Text"]
+return_type = "Text"
+variadic = true
+
+[[function]]
+name = "QUOTE_IDENT"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Text"]
+return_type = "Text"
+
+[[function]]
+name = "QUOTE_LITERAL"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Text"]
+return_type = "Text"
+
+# =============================================================================
+# DATE / TIME FUNCTIONS
+# =============================================================================
+
+[[function]]
+name = "NOW"
+category = "Scalar"
+deterministic = false
+pure = false
+constant_foldable = false
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = []
+return_type = "Timestamp"
+
+[[function]]
+name = "CURRENT_TIMESTAMP"
+category = "Scalar"
+deterministic = false
+pure = false
+constant_foldable = false
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = []
+return_type = "Timestamp"
+
+[[function]]
+name = "CURRENT_DATE"
+category = "Scalar"
+deterministic = false
+pure = false
+constant_foldable = false
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = []
+return_type = "Date"
+
+[[function]]
+name = "CURRENT_TIME"
+category = "Scalar"
+deterministic = false
+pure = false
+constant_foldable = false
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = []
+return_type = "Timestamp"
+
+[[function]]
+name = "LOCALTIME"
+category = "Scalar"
+deterministic = false
+pure = false
+constant_foldable = false
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = []
+return_type = "Timestamp"
+
+[[function]]
+name = "LOCALTIMESTAMP"
+category = "Scalar"
+deterministic = false
+pure = false
+constant_foldable = false
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = []
+return_type = "Timestamp"
+
+[[function]]
+name = "CLOCK_TIMESTAMP"
+category = "Scalar"
+deterministic = false
+pure = false
+constant_foldable = false
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = []
+return_type = "Timestamp"
+
+[[function]]
+name = "STATEMENT_TIMESTAMP"
+category = "Scalar"
+deterministic = false
+pure = false
+constant_foldable = false
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = []
+return_type = "Timestamp"
+
+[[function]]
+name = "TRANSACTION_TIMESTAMP"
+category = "Scalar"
+deterministic = false
+pure = false
+constant_foldable = false
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = []
+return_type = "Timestamp"
+
+[[function]]
+name = "DATE_TRUNC"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Text", "Timestamp"]
+return_type = "Timestamp"
+
+[[function.signature]]
+args = ["Text", "Interval"]
+return_type = "Interval"
+
+[[function]]
+name = "EXTRACT"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.5
+
+[[function.signature]]
+args = ["Text", "Timestamp"]
+return_type = "Float"
+
+[[function.signature]]
+args = ["Text", "Interval"]
+return_type = "Float"
+
+[[function.signature]]
+args = ["Text", "Date"]
+return_type = "Float"
+
+[[function]]
+name = "DATE_PART"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.5
+
+[[function.signature]]
+args = ["Text", "Timestamp"]
+return_type = "Float"
+
+[[function]]
+name = "DATE_ADD"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.5
+
+[[function.signature]]
+args = ["Date", "Interval"]
+return_type = "Date"
+
+[[function.signature]]
+args = ["Timestamp", "Interval"]
+return_type = "Timestamp"
+
+[[function]]
+name = "DATE_SUB"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.5
+
+[[function.signature]]
+args = ["Date", "Interval"]
+return_type = "Date"
+
+[[function]]
+name = "DATE_DIFF"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.5
+
+[[function.signature]]
+args = ["Text", "Timestamp", "Timestamp"]
+return_type = "Integer"
+
+[[function]]
+name = "DATEDIFF"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.5
+
+[[function.signature]]
+args = ["Text", "Date", "Date"]
+return_type = "Integer"
+
+[[function]]
+name = "AGE"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.5
+
+[[function.signature]]
+args = ["Timestamp", "Timestamp"]
+return_type = "Interval"
+
+[[function.signature]]
+args = ["Timestamp"]
+return_type = "Interval"
+
+[[function]]
+name = "TO_TIMESTAMP"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Float"]
+return_type = "Timestamp"
+
+[[function.signature]]
+args = ["Text", "Text"]
+return_type = "Timestamp"
+
+[[function]]
+name = "TO_DATE"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Text", "Text"]
+return_type = "Date"
+
+[[function]]
+name = "TO_CHAR"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Timestamp", "Text"]
+return_type = "Text"
+
+[[function.signature]]
+args = ["Integer", "Text"]
+return_type = "Text"
+
+[[function.signature]]
+args = ["Float", "Text"]
+return_type = "Text"
+
+[[function.signature]]
+args = ["Interval", "Text"]
+return_type = "Text"
+
+[[function]]
+name = "MAKE_DATE"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Integer", "Integer", "Integer"]
+return_type = "Date"
+
+[[function]]
+name = "MAKE_TIMESTAMP"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Integer", "Integer", "Integer", "Integer", "Integer", "Float"]
+return_type = "Timestamp"
+
+[[function]]
+name = "MAKE_INTERVAL"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Integer"]
+return_type = "Interval"
+
+[[function]]
+name = "ISFINITE"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Timestamp"]
+return_type = "Boolean"
+
+[[function.signature]]
+args = ["Date"]
+return_type = "Boolean"
+
+[[function.signature]]
+args = ["Interval"]
+return_type = "Boolean"
+
+[[function]]
+name = "DATE"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Timestamp"]
+return_type = "Date"
+
+[[function.signature]]
+args = ["Text"]
+return_type = "Date"
+
+[[function]]
+name = "EPOCH"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Timestamp"]
+return_type = "Float"
+
+# =============================================================================
+# TYPE CONVERSION FUNCTIONS
+# =============================================================================
+
+[[function]]
+name = "CAST"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.5
+
+[[function.signature]]
+args = ["Any", "Any"]
+return_type = "Any"
+
+[[function]]
+name = "COALESCE"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Any"]
+return_type = "Any"
+variadic = true
+
+[[function]]
+name = "NULLIF"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Any", "Any"]
+return_type = "Any"
+
+[[function]]
+name = "IFNULL"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Any", "Any"]
+return_type = "Any"
+
+[[function]]
+name = "NVL"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Any", "Any"]
+return_type = "Any"
+
+[[function]]
+name = "NVL2"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Any", "Any", "Any"]
+return_type = "Any"
+
+[[function]]
+name = "TO_NUMBER"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Text", "Text"]
+return_type = "Decimal"
+
+[[function]]
+name = "TRY_CAST"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Any", "Any"]
+return_type = "Any"
+
+[[function]]
+name = "TYPEOF"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Any"]
+return_type = "Text"
+
+# =============================================================================
+# CONDITIONAL / LOGIC FUNCTIONS
+# =============================================================================
+
+[[function]]
+name = "CASE"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Any"]
+return_type = "Any"
+variadic = true
+
+[[function]]
+name = "IF"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Boolean", "Any", "Any"]
+return_type = "Any"
+
+[[function]]
+name = "IIF"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Boolean", "Any", "Any"]
+return_type = "Any"
+
+[[function]]
+name = "DECODE_ORACLE"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Any"]
+return_type = "Any"
+variadic = true
+
+# =============================================================================
+# AGGREGATE FUNCTIONS
+# =============================================================================
+
+[[function]]
+name = "COUNT"
+category = "Aggregate"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Any"]
+return_type = "Integer"
+
+[[function.signature]]
+args = []
+return_type = "Integer"
+
+[[function]]
+name = "SUM"
+category = "Aggregate"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Integer"]
+return_type = "Integer"
+
+[[function.signature]]
+args = ["Float"]
+return_type = "Float"
+
+[[function.signature]]
+args = ["Decimal"]
+return_type = "Decimal"
+
+[[function]]
+name = "AVG"
+category = "Aggregate"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Integer"]
+return_type = "Decimal"
+
+[[function.signature]]
+args = ["Float"]
+return_type = "Float"
+
+[[function.signature]]
+args = ["Decimal"]
+return_type = "Decimal"
+
+[[function]]
+name = "MIN"
+category = "Aggregate"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Any"]
+return_type = "Any"
+
+[[function]]
+name = "MAX"
+category = "Aggregate"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Any"]
+return_type = "Any"
+
+[[function]]
+name = "STDDEV"
+category = "Aggregate"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Float"]
+return_type = "Float"
+
+[[function]]
+name = "STDDEV_POP"
+category = "Aggregate"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Float"]
+return_type = "Float"
+
+[[function]]
+name = "STDDEV_SAMP"
+category = "Aggregate"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Float"]
+return_type = "Float"
+
+[[function]]
+name = "VARIANCE"
+category = "Aggregate"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Float"]
+return_type = "Float"
+
+[[function]]
+name = "VAR_POP"
+category = "Aggregate"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Float"]
+return_type = "Float"
+
+[[function]]
+name = "VAR_SAMP"
+category = "Aggregate"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Float"]
+return_type = "Float"
+
+[[function]]
+name = "COVAR_POP"
+category = "Aggregate"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Float", "Float"]
+return_type = "Float"
+
+[[function]]
+name = "COVAR_SAMP"
+category = "Aggregate"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Float", "Float"]
+return_type = "Float"
+
+[[function]]
+name = "CORR"
+category = "Aggregate"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Float", "Float"]
+return_type = "Float"
+
+[[function]]
+name = "REGR_SLOPE"
+category = "Aggregate"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Float", "Float"]
+return_type = "Float"
+
+[[function]]
+name = "REGR_INTERCEPT"
+category = "Aggregate"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Float", "Float"]
+return_type = "Float"
+
+[[function]]
+name = "REGR_R2"
+category = "Aggregate"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Float", "Float"]
+return_type = "Float"
+
+[[function]]
+name = "PERCENTILE_CONT"
+category = "Aggregate"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 5.0
+
+[[function.signature]]
+args = ["Float"]
+return_type = "Float"
+
+[[function]]
+name = "PERCENTILE_DISC"
+category = "Aggregate"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 5.0
+
+[[function.signature]]
+args = ["Float"]
+return_type = "Any"
+
+[[function]]
+name = "MODE"
+category = "Aggregate"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 5.0
+
+[[function.signature]]
+args = []
+return_type = "Any"
+
+[[function]]
+name = "STRING_AGG"
+category = "Aggregate"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Text", "Text"]
+return_type = "Text"
+
+[[function]]
+name = "GROUP_CONCAT"
+category = "Aggregate"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Text"]
+return_type = "Text"
+
+[[function]]
+name = "ARRAY_AGG"
+category = "Aggregate"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Any"]
+return_type = "Any[]"
+
+[[function]]
+name = "JSONB_AGG"
+category = "Aggregate"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 5.0
+
+[[function.signature]]
+args = ["Any"]
+return_type = "Json"
+
+[[function]]
+name = "JSON_AGG"
+category = "Aggregate"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 5.0
+
+[[function.signature]]
+args = ["Any"]
+return_type = "Json"
+
+[[function]]
+name = "JSONB_OBJECT_AGG"
+category = "Aggregate"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 5.0
+
+[[function.signature]]
+args = ["Text", "Any"]
+return_type = "Json"
+
+[[function]]
+name = "BOOL_AND"
+category = "Aggregate"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Boolean"]
+return_type = "Boolean"
+
+[[function]]
+name = "BOOL_OR"
+category = "Aggregate"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Boolean"]
+return_type = "Boolean"
+
+[[function]]
+name = "EVERY"
+category = "Aggregate"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Boolean"]
+return_type = "Boolean"
+
+[[function]]
+name = "BIT_AND"
+category = "Aggregate"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Integer"]
+return_type = "Integer"
+
+[[function]]
+name = "BIT_OR"
+category = "Aggregate"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Integer"]
+return_type = "Integer"
+
+[[function]]
+name = "COUNT_DISTINCT"
+category = "Aggregate"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Any"]
+return_type = "Integer"
+
+[[function]]
+name = "APPROX_COUNT_DISTINCT"
+category = "Aggregate"
+deterministic = false
+pure = true
+constant_foldable = false
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Any"]
+return_type = "Integer"
+
+[[function]]
+name = "APPROX_PERCENTILE"
+category = "Aggregate"
+deterministic = false
+pure = true
+constant_foldable = false
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Float", "Float"]
+return_type = "Float"
+
+# =============================================================================
+# WINDOW FUNCTIONS
+# =============================================================================
+
+[[function]]
+name = "ROW_NUMBER"
+category = "Window"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = []
+return_type = "Integer"
+
+[[function]]
+name = "RANK"
+category = "Window"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 1.5
+
+[[function.signature]]
+args = []
+return_type = "Integer"
+
+[[function]]
+name = "DENSE_RANK"
+category = "Window"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 1.5
+
+[[function.signature]]
+args = []
+return_type = "Integer"
+
+[[function]]
+name = "PERCENT_RANK"
+category = "Window"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = []
+return_type = "Float"
+
+[[function]]
+name = "CUME_DIST"
+category = "Window"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = []
+return_type = "Float"
+
+[[function]]
+name = "NTILE"
+category = "Window"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 1.5
+
+[[function.signature]]
+args = ["Integer"]
+return_type = "Integer"
+
+[[function]]
+name = "LAG"
+category = "Window"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Any"]
+return_type = "Any"
+
+[[function.signature]]
+args = ["Any", "Integer"]
+return_type = "Any"
+
+[[function.signature]]
+args = ["Any", "Integer", "Any"]
+return_type = "Any"
+
+[[function]]
+name = "LEAD"
+category = "Window"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Any"]
+return_type = "Any"
+
+[[function.signature]]
+args = ["Any", "Integer"]
+return_type = "Any"
+
+[[function.signature]]
+args = ["Any", "Integer", "Any"]
+return_type = "Any"
+
+[[function]]
+name = "FIRST_VALUE"
+category = "Window"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 1.5
+
+[[function.signature]]
+args = ["Any"]
+return_type = "Any"
+
+[[function]]
+name = "LAST_VALUE"
+category = "Window"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 1.5
+
+[[function.signature]]
+args = ["Any"]
+return_type = "Any"
+
+[[function]]
+name = "NTH_VALUE"
+category = "Window"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Any", "Integer"]
+return_type = "Any"
+
+# =============================================================================
+# JSON FUNCTIONS
+# =============================================================================
+
+[[function]]
+name = "JSON_EXTRACT"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 5.0
+
+[[function.signature]]
+args = ["Json", "Text"]
+return_type = "Json"
+
+[[function]]
+name = "JSON_EXTRACT_PATH"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 5.0
+
+[[function.signature]]
+args = ["Json", "Text"]
+return_type = "Json"
+variadic = true
+
+[[function]]
+name = "JSON_EXTRACT_PATH_TEXT"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 5.0
+
+[[function.signature]]
+args = ["Json", "Text"]
+return_type = "Text"
+variadic = true
+
+[[function]]
+name = "JSONB_EXTRACT_PATH"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 5.0
+
+[[function.signature]]
+args = ["Json", "Text"]
+return_type = "Json"
+variadic = true
+
+[[function]]
+name = "JSONB_EXTRACT_PATH_TEXT"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 5.0
+
+[[function.signature]]
+args = ["Json", "Text"]
+return_type = "Text"
+variadic = true
+
+[[function]]
+name = "JSON_BUILD_OBJECT"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Any"]
+return_type = "Json"
+variadic = true
+
+[[function]]
+name = "JSONB_BUILD_OBJECT"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Any"]
+return_type = "Json"
+variadic = true
+
+[[function]]
+name = "JSON_BUILD_ARRAY"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Any"]
+return_type = "Json"
+variadic = true
+
+[[function]]
+name = "JSONB_BUILD_ARRAY"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Any"]
+return_type = "Json"
+variadic = true
+
+[[function]]
+name = "JSON_OBJECT"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Text[]"]
+return_type = "Json"
+
+[[function]]
+name = "JSON_ARRAY"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Any"]
+return_type = "Json"
+variadic = true
+
+[[function]]
+name = "JSON_ARRAY_LENGTH"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Json"]
+return_type = "Integer"
+
+[[function]]
+name = "JSONB_ARRAY_LENGTH"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Json"]
+return_type = "Integer"
+
+[[function]]
+name = "JSON_TYPEOF"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Json"]
+return_type = "Text"
+
+[[function]]
+name = "JSONB_TYPEOF"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Json"]
+return_type = "Text"
+
+[[function]]
+name = "JSONB_SET"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 5.0
+
+[[function.signature]]
+args = ["Json", "Text[]", "Json"]
+return_type = "Json"
+
+[[function.signature]]
+args = ["Json", "Text[]", "Json", "Boolean"]
+return_type = "Json"
+
+[[function]]
+name = "JSONB_INSERT"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 5.0
+
+[[function.signature]]
+args = ["Json", "Text[]", "Json"]
+return_type = "Json"
+
+[[function]]
+name = "JSONB_STRIP_NULLS"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 5.0
+
+[[function.signature]]
+args = ["Json"]
+return_type = "Json"
+
+[[function]]
+name = "JSONB_PRETTY"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 5.0
+
+[[function.signature]]
+args = ["Json"]
+return_type = "Text"
+
+[[function]]
+name = "JSONB_CONTAINS"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 5.0
+
+[[function.signature]]
+args = ["Json", "Json"]
+return_type = "Boolean"
+
+[[function]]
+name = "JSONB_EXISTS"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Json", "Text"]
+return_type = "Boolean"
+
+[[function]]
+name = "JSONB_EACH"
+category = "TableValued"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 5.0
+
+[[function.signature]]
+args = ["Json"]
+return_type = "Any"
+
+[[function]]
+name = "JSONB_EACH_TEXT"
+category = "TableValued"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 5.0
+
+[[function.signature]]
+args = ["Json"]
+return_type = "Any"
+
+[[function]]
+name = "JSONB_ARRAY_ELEMENTS"
+category = "TableValued"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 5.0
+
+[[function.signature]]
+args = ["Json"]
+return_type = "Json"
+
+[[function]]
+name = "JSONB_ARRAY_ELEMENTS_TEXT"
+category = "TableValued"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 5.0
+
+[[function.signature]]
+args = ["Json"]
+return_type = "Text"
+
+[[function]]
+name = "JSON_KEYS"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Json"]
+return_type = "Text[]"
+
+[[function]]
+name = "JSONB_OBJECT_KEYS"
+category = "TableValued"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Json"]
+return_type = "Text"
+
+[[function]]
+name = "TO_JSON"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Any"]
+return_type = "Json"
+
+[[function]]
+name = "TO_JSONB"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Any"]
+return_type = "Json"
+
+# =============================================================================
+# ARRAY FUNCTIONS
+# =============================================================================
+
+[[function]]
+name = "ARRAY_LENGTH"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Any[]", "Integer"]
+return_type = "Integer"
+
+[[function]]
+name = "CARDINALITY"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Any[]"]
+return_type = "Integer"
+
+[[function]]
+name = "ARRAY_UPPER"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Any[]", "Integer"]
+return_type = "Integer"
+
+[[function]]
+name = "ARRAY_LOWER"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Any[]", "Integer"]
+return_type = "Integer"
+
+[[function]]
+name = "ARRAY_DIMS"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Any[]"]
+return_type = "Text"
+
+[[function]]
+name = "ARRAY_NDIMS"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Any[]"]
+return_type = "Integer"
+
+[[function]]
+name = "UNNEST"
+category = "TableValued"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Any[]"]
+return_type = "Any"
+
+[[function]]
+name = "ARRAY_CAT"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Any[]", "Any[]"]
+return_type = "Any[]"
+
+[[function]]
+name = "ARRAY_APPEND"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Any[]", "Any"]
+return_type = "Any[]"
+
+[[function]]
+name = "ARRAY_PREPEND"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Any", "Any[]"]
+return_type = "Any[]"
+
+[[function]]
+name = "ARRAY_REMOVE"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Any[]", "Any"]
+return_type = "Any[]"
+
+[[function]]
+name = "ARRAY_REPLACE"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Any[]", "Any", "Any"]
+return_type = "Any[]"
+
+[[function]]
+name = "ARRAY_POSITION"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Any[]", "Any"]
+return_type = "Integer"
+
+[[function]]
+name = "ARRAY_POSITIONS"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Any[]", "Any"]
+return_type = "Integer[]"
+
+[[function]]
+name = "ARRAY_CONTAINS"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 2.0
+
+[[function.signature]]
+args = ["Any[]", "Any"]
+return_type = "Boolean"
+
+[[function]]
+name = "ARRAY_OVERLAP"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Any[]", "Any[]"]
+return_type = "Boolean"
+
+[[function]]
+name = "ARRAY_DISTINCT"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Any[]"]
+return_type = "Any[]"
+
+[[function]]
+name = "ARRAY_SORT"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 5.0
+
+[[function.signature]]
+args = ["Any[]"]
+return_type = "Any[]"
+
+[[function]]
+name = "GENERATE_SERIES"
+category = "TableValued"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Integer", "Integer"]
+return_type = "Integer"
+
+[[function.signature]]
+args = ["Integer", "Integer", "Integer"]
+return_type = "Integer"
+
+[[function.signature]]
+args = ["Timestamp", "Timestamp", "Interval"]
+return_type = "Timestamp"
+
+# =============================================================================
+# GEOSPATIAL FUNCTIONS (PostGIS)
+# =============================================================================
+
+[[function]]
+name = "ST_DISTANCE"
+category = "Scalar"
+deterministic = true
+expensive = true
+pure = true
+constant_foldable = true
+cost_multiplier = 15.0
+
+[[function.signature]]
+args = ["Geometry", "Geometry"]
+return_type = "Float"
+
+[[function]]
+name = "ST_DWITHIN"
+category = "Scalar"
+deterministic = true
+expensive = true
+pure = true
+constant_foldable = true
+cost_multiplier = 12.0
+
+[[function.signature]]
+args = ["Geometry", "Geometry", "Float"]
+return_type = "Boolean"
+
+[[function]]
+name = "ST_CONTAINS"
+category = "Scalar"
+deterministic = true
+expensive = true
+pure = true
+constant_foldable = true
+cost_multiplier = 15.0
+
+[[function.signature]]
+args = ["Geometry", "Geometry"]
+return_type = "Boolean"
+
+[[function]]
+name = "ST_WITHIN"
+category = "Scalar"
+deterministic = true
+expensive = true
+pure = true
+constant_foldable = true
+cost_multiplier = 15.0
+
+[[function.signature]]
+args = ["Geometry", "Geometry"]
+return_type = "Boolean"
+
+[[function]]
+name = "ST_INTERSECTS"
+category = "Scalar"
+deterministic = true
+expensive = true
+pure = true
+constant_foldable = true
+cost_multiplier = 12.0
+
+[[function.signature]]
+args = ["Geometry", "Geometry"]
+return_type = "Boolean"
+
+[[function]]
+name = "ST_CROSSES"
+category = "Scalar"
+deterministic = true
+expensive = true
+pure = true
+constant_foldable = true
+cost_multiplier = 12.0
+
+[[function.signature]]
+args = ["Geometry", "Geometry"]
+return_type = "Boolean"
+
+[[function]]
+name = "ST_OVERLAPS"
+category = "Scalar"
+deterministic = true
+expensive = true
+pure = true
+constant_foldable = true
+cost_multiplier = 12.0
+
+[[function.signature]]
+args = ["Geometry", "Geometry"]
+return_type = "Boolean"
+
+[[function]]
+name = "ST_TOUCHES"
+category = "Scalar"
+deterministic = true
+expensive = true
+pure = true
+constant_foldable = true
+cost_multiplier = 12.0
+
+[[function.signature]]
+args = ["Geometry", "Geometry"]
+return_type = "Boolean"
+
+[[function]]
+name = "ST_DISJOINT"
+category = "Scalar"
+deterministic = true
+expensive = true
+pure = true
+constant_foldable = true
+cost_multiplier = 12.0
+
+[[function.signature]]
+args = ["Geometry", "Geometry"]
+return_type = "Boolean"
+
+[[function]]
+name = "ST_EQUALS"
+category = "Scalar"
+deterministic = true
+expensive = true
+pure = true
+constant_foldable = true
+cost_multiplier = 10.0
+
+[[function.signature]]
+args = ["Geometry", "Geometry"]
+return_type = "Boolean"
+
+[[function]]
+name = "ST_BUFFER"
+category = "Scalar"
+deterministic = true
+expensive = true
+pure = true
+constant_foldable = true
+cost_multiplier = 20.0
+
+[[function.signature]]
+args = ["Geometry", "Float"]
+return_type = "Geometry"
+
+[[function]]
+name = "ST_UNION"
+category = "Scalar"
+deterministic = true
+expensive = true
+pure = true
+constant_foldable = true
+cost_multiplier = 20.0
+
+[[function.signature]]
+args = ["Geometry", "Geometry"]
+return_type = "Geometry"
+
+[[function]]
+name = "ST_INTERSECTION"
+category = "Scalar"
+deterministic = true
+expensive = true
+pure = true
+constant_foldable = true
+cost_multiplier = 20.0
+
+[[function.signature]]
+args = ["Geometry", "Geometry"]
+return_type = "Geometry"
+
+[[function]]
+name = "ST_DIFFERENCE"
+category = "Scalar"
+deterministic = true
+expensive = true
+pure = true
+constant_foldable = true
+cost_multiplier = 20.0
+
+[[function.signature]]
+args = ["Geometry", "Geometry"]
+return_type = "Geometry"
+
+[[function]]
+name = "ST_AREA"
+category = "Scalar"
+deterministic = true
+expensive = true
+pure = true
+constant_foldable = true
+cost_multiplier = 10.0
+
+[[function.signature]]
+args = ["Geometry"]
+return_type = "Float"
+
+[[function]]
+name = "ST_LENGTH"
+category = "Scalar"
+deterministic = true
+expensive = true
+pure = true
+constant_foldable = true
+cost_multiplier = 10.0
+
+[[function.signature]]
+args = ["Geometry"]
+return_type = "Float"
+
+[[function]]
+name = "ST_PERIMETER"
+category = "Scalar"
+deterministic = true
+expensive = true
+pure = true
+constant_foldable = true
+cost_multiplier = 10.0
+
+[[function.signature]]
+args = ["Geometry"]
+return_type = "Float"
+
+[[function]]
+name = "ST_CENTROID"
+category = "Scalar"
+deterministic = true
+expensive = true
+pure = true
+constant_foldable = true
+cost_multiplier = 8.0
+
+[[function.signature]]
+args = ["Geometry"]
+return_type = "Geometry"
+
+[[function]]
+name = "ST_POINTONSURFACE"
+category = "Scalar"
+deterministic = true
+expensive = true
+pure = true
+constant_foldable = true
+cost_multiplier = 10.0
+
+[[function.signature]]
+args = ["Geometry"]
+return_type = "Geometry"
+
+[[function]]
+name = "ST_ENVELOPE"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Geometry"]
+return_type = "Geometry"
+
+[[function]]
+name = "ST_CONVEXHULL"
+category = "Scalar"
+deterministic = true
+expensive = true
+pure = true
+constant_foldable = true
+cost_multiplier = 15.0
+
+[[function.signature]]
+args = ["Geometry"]
+return_type = "Geometry"
+
+[[function]]
+name = "ST_SIMPLIFY"
+category = "Scalar"
+deterministic = true
+expensive = true
+pure = true
+constant_foldable = true
+cost_multiplier = 12.0
+
+[[function.signature]]
+args = ["Geometry", "Float"]
+return_type = "Geometry"
+
+[[function]]
+name = "ST_TRANSFORM"
+category = "Scalar"
+deterministic = true
+expensive = true
+pure = true
+constant_foldable = true
+cost_multiplier = 10.0
+
+[[function.signature]]
+args = ["Geometry", "Integer"]
+return_type = "Geometry"
+
+[[function]]
+name = "ST_SRID"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Geometry"]
+return_type = "Integer"
+
+[[function]]
+name = "ST_SETSRID"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Geometry", "Integer"]
+return_type = "Geometry"
+
+[[function]]
+name = "ST_X"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Geometry"]
+return_type = "Float"
+
+[[function]]
+name = "ST_Y"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Geometry"]
+return_type = "Float"
+
+[[function]]
+name = "ST_GEOMFROMTEXT"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 5.0
+
+[[function.signature]]
+args = ["Text"]
+return_type = "Geometry"
+
+[[function.signature]]
+args = ["Text", "Integer"]
+return_type = "Geometry"
+
+[[function]]
+name = "ST_ASTEXT"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 5.0
+
+[[function.signature]]
+args = ["Geometry"]
+return_type = "Text"
+
+[[function]]
+name = "ST_ASGEOJSON"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 5.0
+
+[[function.signature]]
+args = ["Geometry"]
+return_type = "Text"
+
+[[function]]
+name = "ST_MAKEPOINT"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Float", "Float"]
+return_type = "Geometry"
+
+[[function.signature]]
+args = ["Float", "Float", "Float"]
+return_type = "Geometry"
+
+[[function]]
+name = "ST_MAKELINE"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Geometry", "Geometry"]
+return_type = "Geometry"
+
+[[function]]
+name = "ST_COLLECT"
+category = "Aggregate"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 5.0
+
+[[function.signature]]
+args = ["Geometry"]
+return_type = "Geometry"
+
+# =============================================================================
+# FULL-TEXT SEARCH FUNCTIONS (PostgreSQL)
+# =============================================================================
+
+[[function]]
+name = "TO_TSVECTOR"
+category = "Scalar"
+deterministic = true
+expensive = true
+pure = true
+constant_foldable = true
+cost_multiplier = 10.0
+
+[[function.signature]]
+args = ["Text"]
+return_type = "TsVector"
+
+[[function.signature]]
+args = ["Text", "Text"]
+return_type = "TsVector"
+
+[[function]]
+name = "TO_TSQUERY"
+category = "Scalar"
+deterministic = true
+expensive = true
+pure = true
+constant_foldable = true
+cost_multiplier = 5.0
+
+[[function.signature]]
+args = ["Text"]
+return_type = "TsQuery"
+
+[[function.signature]]
+args = ["Text", "Text"]
+return_type = "TsQuery"
+
+[[function]]
+name = "PLAINTO_TSQUERY"
+category = "Scalar"
+deterministic = true
+expensive = true
+pure = true
+constant_foldable = true
+cost_multiplier = 5.0
+
+[[function.signature]]
+args = ["Text"]
+return_type = "TsQuery"
+
+[[function]]
+name = "PHRASETO_TSQUERY"
+category = "Scalar"
+deterministic = true
+expensive = true
+pure = true
+constant_foldable = true
+cost_multiplier = 5.0
+
+[[function.signature]]
+args = ["Text"]
+return_type = "TsQuery"
+
+[[function]]
+name = "WEBSEARCH_TO_TSQUERY"
+category = "Scalar"
+deterministic = true
+expensive = true
+pure = true
+constant_foldable = true
+cost_multiplier = 5.0
+
+[[function.signature]]
+args = ["Text"]
+return_type = "TsQuery"
+
+[[function]]
+name = "TS_RANK"
+category = "Scalar"
+deterministic = true
+expensive = true
+pure = true
+constant_foldable = true
+cost_multiplier = 8.0
+
+[[function.signature]]
+args = ["TsVector", "TsQuery"]
+return_type = "Float"
+
+[[function]]
+name = "TS_RANK_CD"
+category = "Scalar"
+deterministic = true
+expensive = true
+pure = true
+constant_foldable = true
+cost_multiplier = 8.0
+
+[[function.signature]]
+args = ["TsVector", "TsQuery"]
+return_type = "Float"
+
+[[function]]
+name = "TS_HEADLINE"
+category = "Scalar"
+deterministic = true
+expensive = true
+pure = true
+constant_foldable = true
+cost_multiplier = 15.0
+
+[[function.signature]]
+args = ["Text", "TsQuery"]
+return_type = "Text"
+
+[[function]]
+name = "TSVECTOR_CONCAT"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["TsVector", "TsVector"]
+return_type = "TsVector"
+
+# =============================================================================
+# SYSTEM / UTILITY FUNCTIONS
+# =============================================================================
+
+[[function]]
+name = "NEXTVAL"
+category = "Scalar"
+deterministic = false
+pure = false
+constant_foldable = false
+cost_multiplier = 5.0
+
+[[function.signature]]
+args = ["Text"]
+return_type = "Integer"
+
+[[function]]
+name = "CURRVAL"
+category = "Scalar"
+deterministic = false
+pure = false
+constant_foldable = false
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Text"]
+return_type = "Integer"
+
+[[function]]
+name = "SETVAL"
+category = "Scalar"
+deterministic = false
+pure = false
+constant_foldable = false
+cost_multiplier = 5.0
+
+[[function.signature]]
+args = ["Text", "Integer"]
+return_type = "Integer"
+
+[[function]]
+name = "LASTVAL"
+category = "Scalar"
+deterministic = false
+pure = false
+constant_foldable = false
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = []
+return_type = "Integer"
+
+[[function]]
+name = "GEN_RANDOM_UUID"
+category = "Scalar"
+deterministic = false
+pure = false
+constant_foldable = false
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = []
+return_type = "Text"
+
+[[function]]
+name = "UUID_GENERATE_V4"
+category = "Scalar"
+deterministic = false
+pure = false
+constant_foldable = false
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = []
+return_type = "Text"
+
+[[function]]
+name = "PG_TYPEOF"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Any"]
+return_type = "Text"
+
+[[function]]
+name = "PG_TABLE_SIZE"
+category = "Scalar"
+deterministic = false
+pure = false
+constant_foldable = false
+cost_multiplier = 5.0
+
+[[function.signature]]
+args = ["Text"]
+return_type = "Integer"
+
+[[function]]
+name = "PG_RELATION_SIZE"
+category = "Scalar"
+deterministic = false
+pure = false
+constant_foldable = false
+cost_multiplier = 5.0
+
+[[function.signature]]
+args = ["Text"]
+return_type = "Integer"
+
+[[function]]
+name = "PG_TOTAL_RELATION_SIZE"
+category = "Scalar"
+deterministic = false
+pure = false
+constant_foldable = false
+cost_multiplier = 5.0
+
+[[function.signature]]
+args = ["Text"]
+return_type = "Integer"
+
+[[function]]
+name = "PG_SIZE_PRETTY"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Integer"]
+return_type = "Text"
+
+[[function]]
+name = "PG_COLUMN_SIZE"
+category = "Scalar"
+deterministic = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Any"]
+return_type = "Integer"
+
+[[function]]
+name = "VERSION"
+category = "Scalar"
+deterministic = false
+pure = false
+constant_foldable = false
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = []
+return_type = "Text"
+
+[[function]]
+name = "CURRENT_USER"
+category = "Scalar"
+deterministic = false
+pure = false
+constant_foldable = false
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = []
+return_type = "Text"
+
+[[function]]
+name = "SESSION_USER"
+category = "Scalar"
+deterministic = false
+pure = false
+constant_foldable = false
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = []
+return_type = "Text"
+
+[[function]]
+name = "CURRENT_SCHEMA"
+category = "Scalar"
+deterministic = false
+pure = false
+constant_foldable = false
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = []
+return_type = "Text"
+
+[[function]]
+name = "CURRENT_DATABASE"
+category = "Scalar"
+deterministic = false
+pure = false
+constant_foldable = false
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = []
+return_type = "Text"
+
+[[function]]
+name = "HAS_TABLE_PRIVILEGE"
+category = "Scalar"
+deterministic = false
+pure = false
+constant_foldable = false
+cost_multiplier = 3.0
+
+[[function.signature]]
+args = ["Text", "Text", "Text"]
+return_type = "Boolean"
+
+# =============================================================================
+# MISC SCALAR FUNCTIONS
+# =============================================================================
+
+[[function]]
+name = "ROW"
+category = "Scalar"
+deterministic = true
+inlineable = true
+pure = true
+constant_foldable = true
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Any"]
+return_type = "Any"
+variadic = true
+
+[[function]]
+name = "GENERATE_SUBSCRIPTS"
+category = "TableValued"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Any[]", "Integer"]
+return_type = "Integer"
+
+[[function]]
+name = "LATERAL"
+category = "TableValued"
+deterministic = true
+pure = true
+constant_foldable = false
+cost_multiplier = 1.0
+
+[[function.signature]]
+args = ["Any"]
+return_type = "Any"

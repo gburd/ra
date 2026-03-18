@@ -1,0 +1,108 @@
+---
+id: calcite-aggregate-filter-to-filtered-aggregate
+name: Calcite AggregateFilterToFilteredAggregateRule
+category: logical/aggregate-pushdown
+databases: [calcite, postgresql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [logical, calcite, aggregate, filter, view-rewriting]
+complexity: O(n)
+benefit_range: [0.1, 0.6]
+---
+
+# Calcite AggregateFilterToFilteredAggregateRule
+
+## Description
+
+Converts an aggregate sitting on top of a filter into a filtered
+aggregate by moving the WHERE condition into FILTER clauses on each
+aggregate function. This removes the Filter operator from the plan,
+which is useful for materialized view rewriting.
+
+**When to apply**: An aggregate is directly above a filter, and
+the transformation enables materialized view matching.
+
+**Why it works**: `SELECT SUM(x) FROM t WHERE p` is equivalent to
+`SELECT SUM(x) FILTER (WHERE p) FROM t`. The removal of the Filter
+operator makes the plan match materialized view definitions that
+aggregate the entire table.
+
+**Calcite class**: `org.apache.calcite.rel.rules.AggregateFilterToFilteredAggregateRule`
+
+## Relational Algebra
+
+```algebra
+-- Before: aggregate over filter
+gamma[g; SUM(x)](sigma[p](R))
+
+-- After: filtered aggregate (no filter operator)
+gamma[g; SUM(x) FILTER (WHERE p)](R)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-aggregate-filter-to-filtered-aggregate";
+    "(aggregate ?group ?aggs (filter ?pred ?input))" =>
+    "(aggregate ?group
+        (attach-filter ?aggs ?pred)
+        ?input)"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    agg: &Aggregate,
+    filter: &Filter,
+) -> bool {
+    // Filter must be directly below aggregate
+    // All agg functions must support FILTER syntax
+    agg.agg_calls().iter().all(|c| c.func.supports_filter())
+}
+```
+
+**Restrictions:**
+- Aggregate functions must support FILTER syntax
+- The filter predicate must not reference aggregate results
+- Combined with AggregateFilterToCaseRule for backends without FILTER
+
+## Cost Model
+
+```rust
+fn estimated_benefit(input_rows: f64) -> f64 {
+    // Enables view matching
+    0.05 * input_rows
+}
+```
+
+**Typical benefit**: 10-60% when materialized view rewriting triggers.
+
+## Test Cases
+
+```sql
+-- Positive: WHERE becomes FILTER
+SELECT SUM(salary) FROM emp WHERE deptno = 10;
+-- Becomes: SELECT SUM(salary) FILTER (WHERE deptno = 10) FROM emp
+```
+
+```sql
+-- Positive: multiple aggregates
+SELECT SUM(salary), COUNT(*), AVG(bonus)
+FROM emp WHERE status = 'ACTIVE';
+-- Each gets FILTER (WHERE status = 'ACTIVE')
+```
+
+```sql
+-- Negative: filter references aggregate output
+SELECT dept, SUM(salary)
+FROM emp GROUP BY dept HAVING SUM(salary) > 100000;
+-- HAVING on aggregate result; not a pre-filter
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/AggregateFilterToFilteredAggregateRule.java (commit af6367d)

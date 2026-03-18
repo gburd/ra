@@ -1,98 +1,114 @@
 ---
 id: clickhouse-join-to-in-conversion
-name: Convert Join to IN Subquery
+name: "ClickHouse JOIN to IN Subquery Conversion"
 category: database-specific/clickhouse
 databases: [clickhouse]
-version: 1.0.0
+execution_models: [column-at-a-time, vectorized]
+hardware: [cpu]
+version: "1.0.0"
 authors: ["RA Contributors"]
-tags: [database-specific, clickhouse, join, in-subquery, transformation]
-complexity: O(n)
-benefit_range: [0.2, 0.5]
+tags: [join, in, subquery, conversion, semi-join]
+complexity: "O(n + m)"
+benefit_range: [0.2, 0.6]
 ---
 
-# Convert Join to IN Subquery
+# ClickHouse JOIN to IN Subquery Conversion
+
+## Metadata
+- **Rule ID**: `clickhouse-join-to-in-conversion`
+- **Category**: Database-specific / ClickHouse
+- **Source**: `src/Processors/QueryPlan/Optimizations/convertJoinToIn.cpp`
+- **Complexity**: O(n + m) set build + filter
+- **Prerequisites**: Output columns from only one side of the join
+- **Alternatives**: Execute as hash join
 
 ## Description
 
-Converts certain inner joins to IN subqueries when the right side columns aren't used in output and join is an equality on a single column. IN can be more efficient for small right-side cardinality.
+When a JOIN's output columns all come from one table, the join is
+semantically equivalent to an IN-subquery filter. ClickHouse converts
+such JOINs to `column IN (SELECT ...)` form, which can be more
+efficient because: (1) the IN-set can be pushed to the storage layer
+as a skip index or primary key condition, (2) no hash table output
+construction is needed, (3) the IN-set is typically smaller than a
+full hash table.
 
-**When to apply**: Inner join with single-column equality where right columns aren't used.
+**When to apply:**
+- All output columns reference one side of the join
+- Small right-hand side (builds a small IN-set)
+- Left-hand side has primary key on join column
 
-**Why it works**: IN subquery can use specialized execution with in-memory hash sets for small right sides, potentially faster than hash join.
-
-**Database version**: ClickHouse v20.6+
+**Why it works for OLAP:**
+- IN-set pushed to storage enables granule-level pruning
+- No join output construction overhead
+- Smaller memory footprint than hash join
 
 ## Relational Algebra
 
-```algebra
-Project[L_cols](InnerJoin[L.k = R.k](L, R))
-  -> Filter[L.k IN (Project[R.k](R))](L)
-  where L_cols ⊆ columns(L)
-  where |R| is small
+```
+project[A.*](A JOIN B ON A.id = B.a_id)
+  -> filter[A.id IN (SELECT a_id FROM B)](A)
 ```
 
-## Implementation
+## Implementation (egg rewrite rules)
 
-```rust
-use egg::{rewrite as rw, *};
+```lisp
+;; Convert join to IN when output is from left side only
+(rewrite (project ?left-cols
+           (join inner (= ?left-col ?right-col) ?left ?right))
+  (filter (in ?left-col (project (list ?right-col) ?right))
+    ?left)
+  :if (all-from-left ?left-cols ?left)
+  :if (< (row-count ?right) (max-in-set-size)))
 
-rw!("clickhouse-join-to-in-conversion";
-    "(project ?cols
-        (inner_join ?left ?right (eq ?lkey ?rkey)))" =>
-    "(filter (in ?lkey (project [?rkey] ?right))
-        ?left)"
-    if is_database("clickhouse")
-    if only_uses_left_columns("?cols", "?left")
-    if is_small_right_side("?right")
-),
+;; IN-set can be pushed to storage layer
+(rewrite (filter (in ?col ?set) (scan ?table))
+  (scan-with-in-set ?table ?col ?set)
+  :if (is-sort-key-prefix ?col ?table))
 ```
-
-## Preconditions
-
-```rust
-fn applicable(
-    right: &RelNode,
-    right_card: f64,
-) -> bool {
-    // Benefit when right side is small enough for in-memory set
-    right_card < 10000.0
-}
-```
-
-**Restrictions:**
-- Only applies to ClickHouse
-- Single-column join key
-- Right side should be small
-- Only output columns from left side
 
 ## Cost Model
 
 ```rust
-fn estimated_benefit(
-    left_card: f64,
-    right_card: f64,
-) -> f64 {
-    if right_card < 1000.0 {
-        0.3
-    } else {
-        0.1
-    }
+pub fn cost_join_to_in(
+    left_rows: u64,
+    right_rows: u64,
+    in_set_selectivity: f64,
+    hardware: &HardwareModel,
+) -> Cost {
+    let build_set = Cost::cpu(right_rows * 10);
+    let probe = Cost::cpu(left_rows * 5);
+    let io_savings = Cost::io(
+        left_rows as f64 * (1.0 - in_set_selectivity)
+        * hardware.seq_read_cost()
+    );
+    build_set + probe - io_savings
 }
 ```
 
-**Typical benefit**: 20-50% for small right sides
+**Typical benefit**: 20-60% for dimension-filtered fact table queries
 
 ## Test Cases
 
+### Positive: Star schema fact-dimension join
 ```sql
-SELECT o.* FROM orders o
-INNER JOIN active_customers c ON o.customer_id = c.id;
--- If active_customers is small, convert to:
--- SELECT * FROM orders WHERE customer_id IN (SELECT id FROM active_customers);
+SELECT f.* FROM fact_table f
+JOIN dim_category d ON f.category_id = d.id
+WHERE d.name = 'Electronics';
+
+-- Converted to: SELECT * FROM fact_table
+-- WHERE category_id IN (SELECT id FROM dim_category WHERE name = 'Electronics')
+-- IN-set pushed to storage: sparse index on category_id
+```
+
+### Negative: Output from both sides
+```sql
+SELECT f.amount, d.name FROM fact_table f
+JOIN dim_category d ON f.category_id = d.id;
+
+-- d.name needed in output; cannot convert to IN
+-- Must execute as join
 ```
 
 ## References
 
-**Source code:**
 - ClickHouse: `src/Processors/QueryPlan/Optimizations/convertJoinToIn.cpp`
-  - Commit: 35f2d31186cca2f8c50f7ba4bd93817da490da85

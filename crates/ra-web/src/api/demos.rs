@@ -14,12 +14,15 @@ use std::sync::{Arc, Mutex};
 pub type DemoState = Arc<Mutex<DemoStore>>;
 
 /// Store for demo configurations and results.
+///
+/// Used by save/load configuration routes (not yet wired).
+#[allow(dead_code)]
 #[derive(Debug, Default)]
 pub struct DemoStore {
-    /// Saved configurations by ID.
     configurations: std::collections::HashMap<String, DemoConfiguration>,
 }
 
+#[allow(dead_code)]
 impl DemoStore {
     /// Create new demo store.
     pub fn new() -> Self {

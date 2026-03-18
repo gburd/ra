@@ -1,0 +1,317 @@
+---
+id: system-r-interesting-orders
+name: "System R Interesting Orders"
+category: cost-models/system-r
+databases: [postgresql, mysql, duckdb, cockroachdb, mssql, oracle]
+execution_models: [volcano, vectorized]
+version: "1.0.0"
+authors: ["Selinger et al. 1979 - IBM Research"]
+tags: [interesting-orders, sort-avoidance, system-r, optimizer, classic]
+complexity: "O(2^n * |orders|)"
+benefit_range: [0.2, 10.0]
+---
+
+# System R Interesting Orders
+
+## Description
+
+System R introduced the concept of "interesting orders" to track physical
+sort orders through the DP enumeration. An order is "interesting" if it
+could be useful for a downstream operator (ORDER BY, GROUP BY, merge join,
+DISTINCT). The optimizer maintains the best plan for each (subset,
+interesting_order) pair, not just (subset). A plan that is more expensive
+but produces output in a useful sort order may be cheaper overall because
+it eliminates a later sort.
+
+**When to apply**: Queries where sort order matters: ORDER BY, GROUP BY,
+DISTINCT, or merge joins that require sorted input. The optimizer tracks
+interesting orders to avoid redundant sorting.
+
+**Why it works**: Without interesting orders, the optimizer would always
+choose the cheapest plan for each subset regardless of output order, then
+add a sort for ORDER BY. But a plan that uses a clustered index scan
+(producing sorted output) may be slightly more expensive for the scan
+but saves the cost of a later sort, making it cheaper overall.
+
+## Relational Algebra
+
+```algebra
+-- Without interesting orders:
+opt_plan({R,S,T}) = cheapest plan (unsorted output)
+sort[order_by](opt_plan({R,S,T})) -- Must add explicit sort
+
+-- With interesting orders:
+opt_plan({R,S,T}, order=unordered) = cheapest plan
+opt_plan({R,S,T}, order=R.a_asc) = cheapest plan producing R.a ASC
+opt_plan({R,S,T}, order=S.b_asc) = cheapest plan producing S.b ASC
+
+-- Final: choose min(
+--   opt_plan(all, unordered) + sort_cost,
+--   opt_plan(all, order=target_order)
+-- )
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+struct InterestingOrderOptimizer {
+    relations: Vec<RelationStats>,
+    predicates: Vec<JoinPredicate>,
+    cost_model: SystemRCostModel,
+}
+
+impl InterestingOrderOptimizer {
+    fn find_optimal_with_orders(
+        &self,
+        required_orders: &[SortOrder],
+    ) -> JoinPlan {
+        let n = self.relations.len();
+
+        // Collect all interesting orders
+        let interesting = self.collect_interesting_orders(
+            required_orders,
+        );
+
+        // dp[subset][order_idx] = (plan, cost)
+        // order_idx 0 = unordered
+        let num_orders = interesting.len() + 1;
+        let mut dp: HashMap<(u32, usize), (JoinPlan, f64)> =
+            HashMap::new();
+
+        // Base: single relations with various access paths
+        for i in 0..n {
+            let mask = 1u32 << i;
+            for (oidx, order) in
+                std::iter::once(&SortOrder::Unordered)
+                    .chain(interesting.iter())
+                    .enumerate()
+            {
+                if let Some(ap) =
+                    self.best_access_path_for_order(i, order)
+                {
+                    let cost = self.cost_model.cost(&ap);
+                    dp.insert((mask, oidx), (ap, cost));
+                }
+            }
+        }
+
+        // DP: build up subsets, track interesting orders
+        for size in 2..=n {
+            for subset in subsets_of_size(n, size) {
+                for (oidx, order) in
+                    std::iter::once(&SortOrder::Unordered)
+                        .chain(interesting.iter())
+                        .enumerate()
+                {
+                    let mut best_cost = f64::MAX;
+                    let mut best_plan = None;
+
+                    for j in 0..n {
+                        if subset & (1 << j) == 0 {
+                            continue;
+                        }
+                        let left = subset & !(1 << j);
+                        if left == 0 { continue; }
+
+                        // Merge join: both inputs must be sorted
+                        // on join key -> interesting order propagates
+                        for left_oidx in 0..num_orders {
+                            if let Some((lp, _)) =
+                                dp.get(&(left, left_oidx))
+                            {
+                                let left_order = if left_oidx == 0 {
+                                    &SortOrder::Unordered
+                                } else {
+                                    &interesting[left_oidx - 1]
+                                };
+
+                                let join_methods =
+                                    self.viable_join_methods(
+                                        left_order, j,
+                                    );
+
+                                for method in &join_methods {
+                                    let output_order =
+                                        method.output_order(
+                                            left_order,
+                                        );
+
+                                    // Only store if output matches
+                                    // target order
+                                    if output_order != *order
+                                        && *order
+                                            != SortOrder::Unordered
+                                    {
+                                        continue;
+                                    }
+
+                                    let right =
+                                        self.best_access_path(j);
+                                    let candidate =
+                                        method.build_plan(
+                                            lp, &right,
+                                        );
+                                    let cost =
+                                        self.cost_model.cost(
+                                            &candidate,
+                                        );
+
+                                    if cost < best_cost {
+                                        best_cost = cost;
+                                        best_plan =
+                                            Some(candidate);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if let Some(plan) = best_plan {
+                        dp.insert(
+                            (subset, oidx), (plan, best_cost),
+                        );
+                    }
+                }
+            }
+        }
+
+        // Choose: cheapest plan with required order, or
+        // cheapest unordered + sort
+        let full = (1u32 << n) - 1;
+        self.choose_final_plan(&dp, full, required_orders)
+    }
+
+    fn collect_interesting_orders(
+        &self,
+        required: &[SortOrder],
+    ) -> Vec<SortOrder> {
+        let mut orders: Vec<SortOrder> = Vec::new();
+
+        // 1. Required output orders (ORDER BY, GROUP BY)
+        orders.extend(required.iter().cloned());
+
+        // 2. Join key orders (enable merge joins)
+        for pred in &self.predicates {
+            if pred.is_equijoin() {
+                orders.push(SortOrder::Ascending(
+                    pred.left_col.clone(),
+                ));
+                orders.push(SortOrder::Ascending(
+                    pred.right_col.clone(),
+                ));
+            }
+        }
+
+        // 3. Group-by column orders
+        // (already in required if present)
+
+        // Deduplicate
+        orders.sort();
+        orders.dedup();
+        orders
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(query: &RelExpr) -> bool {
+    // Interesting orders matter when:
+    // 1. Query has ORDER BY
+    // 2. Query has GROUP BY
+    // 3. Query has DISTINCT
+    // 4. Merge join is a viable join method
+    has_order_by(query) || has_group_by(query)
+        || has_distinct(query)
+        || merge_join_viable(query)
+}
+```
+
+**Restrictions:**
+- Multiplies DP state by number of interesting orders
+- Total states: O(2^n * |interesting_orders|)
+- Too many interesting orders can blow up search space
+- System R limited to O(n) interesting orders per query
+- Order propagation rules are join-method-specific
+
+## Cost Model
+
+```rust
+fn sort_avoidance_benefit(
+    rows: f64,
+    tuple_width: f64,
+    sort_key_width: f64,
+) -> f64 {
+    // Cost of an explicit sort
+    let pages = rows * tuple_width / PAGE_SIZE;
+    let sort_cost = 2.0 * pages
+        * (pages / BUFFER_PAGES).log2().ceil().max(1.0);
+
+    // This is the cost saved by choosing a plan that
+    // produces output already sorted
+    sort_cost
+}
+```
+
+**Typical benefit**: Sort elimination saves 30-80% of query cost
+when ORDER BY/GROUP BY matches a clustered index order.
+
+## Test Cases
+
+### Positive: ORDER BY matching index order
+
+```sql
+-- Clustered index on orders(customer_id, order_date)
+SELECT * FROM customers c
+JOIN orders o ON c.id = o.customer_id
+ORDER BY o.customer_id, o.order_date;
+
+-- Without interesting orders: hash join + sort
+-- With interesting orders: merge join using clustered index
+-- Merge join outputs in (customer_id, order_date) order -> no sort
+```
+
+### Positive: GROUP BY matching join key order
+
+```sql
+SELECT o.customer_id, SUM(o.amount)
+FROM orders o
+JOIN customers c ON o.customer_id = c.id
+GROUP BY o.customer_id;
+
+-- Interesting order: customer_id ASC
+-- Merge join on customer_id -> output sorted -> stream aggregate
+-- Saves sort before GROUP BY
+```
+
+### Negative: No downstream ordering requirement
+
+```sql
+SELECT COUNT(*) FROM orders o
+JOIN customers c ON o.customer_id = c.id;
+
+-- No ORDER BY, GROUP BY, or DISTINCT
+-- Only unordered plan needed, no benefit from tracking orders
+```
+
+## References
+
+**Original paper:**
+- Selinger et al., "Access Path Selection in a Relational Database Management System", SIGMOD 1979
+  - Section 6.3: "Interesting orderings" concept
+  - "A set of interesting orderings is computed for each joinable relation"
+
+**Extensions:**
+- Simmen et al., "Fundamental Techniques for Order Optimization", SIGMOD 1996
+  - Generalized interesting orders to functional dependencies
+- Neumann, Moerkotte, "A Combined Framework for Grouping and Order Optimization", VLDB 2004
+  - Unified framework for order and grouping optimization
+
+**Key insight from Selinger:**
+- "An access plan for a set of relations produces an interesting order
+  if that order is one of the interesting orderings of the set."
+- This single idea saves more query execution time than almost any
+  other optimizer technique.

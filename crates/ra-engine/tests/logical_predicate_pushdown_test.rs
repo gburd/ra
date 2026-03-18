@@ -30,8 +30,8 @@ fn test_filter_with_projection() {
 
 #[test]
 fn test_predicate_pushdown_inner_join_left() {
-    let left = filtered_scan("orders", "amount", 100);
-    let right = scan("customers");
+    let _left = filtered_scan("orders", "amount", 100);
+    let _right = scan("customers");
     let plan = two_table_join("orders", "customers", "customer_id", "id");
     assert_rule_applies(plan);
 }

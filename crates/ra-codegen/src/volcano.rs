@@ -772,12 +772,16 @@ fn init_agg_states(aggregates: &[AggOp]) -> Vec<AggState> {
         .iter()
         .map(|agg| match agg.function {
             AggregateFunction::Count => AggState::Count(0),
-            AggregateFunction::Sum => AggState::Sum(0.0),
+            AggregateFunction::Sum
+            | AggregateFunction::StdDev
+            | AggregateFunction::Variance => AggState::Sum(0.0),
             AggregateFunction::Min => AggState::Min(None),
             AggregateFunction::Max => AggState::Max(None),
             AggregateFunction::Avg => {
                 AggState::Avg { sum: 0.0, count: 0 }
             }
+            AggregateFunction::StringAgg
+            | AggregateFunction::ArrayAgg => AggState::Count(0),
         })
         .collect()
 }

@@ -1,0 +1,235 @@
+---
+id: column-vectorized-expression
+name: Column-at-a-Time Vectorized Expression Evaluation
+category: execution-models/column-at-a-time
+version: "1.0.0"
+databases: [monetdb, duckdb, vectorwise]
+authors: ["Peter Boncz", "Marcin Zukowski"]
+tags: [execution, columnar, expression, vectorized, interpreted]
+complexity: "O(n * expr_depth)"
+benefit_range: [0.3, 5.0]
+---
+
+# Column-at-a-Time Vectorized Expression Evaluation
+
+## Description
+
+Evaluates complex SQL expressions (arithmetic, string functions, CASE, COALESCE,
+CAST) over column vectors using pre-compiled vectorized primitives. Each
+primitive operates on a vector of values, producing a vector of results. Complex
+expressions are decomposed into a tree of primitives, with intermediate results
+stored as temporary column vectors.
+
+**Expression compilation strategy:**
+- Parse SQL expression into expression tree
+- Select vectorized primitive for each tree node based on input types
+- Allocate temporary column vectors for intermediate results
+- Execute bottom-up: leaves first, root last
+- Each primitive is a tight loop over the vector
+
+**Key advantage**: The inner loop of each primitive is a simple, branchless
+operation on arrays. The compiler generates highly optimized machine code
+(SIMD, loop unrolling) for these tight loops. Type dispatch happens once per
+vector, not once per row.
+
+## Relational Algebra
+
+```
+Expression: (price * quantity) * (1.0 - discount)
+
+Decomposition:
+  tmp1 = vec_mul(price_col, quantity_col)        -- vector multiply
+  tmp2 = vec_sub_scalar(1.0, discount_col)       -- scalar - vector
+  result = vec_mul(tmp1, tmp2)                   -- vector multiply
+
+Each vec_* operation processes entire column in one tight loop.
+```
+
+## Implementation
+
+```rust
+/// Vectorized expression primitive catalog
+pub type VecPrimitive = fn(&[&ColumnVector], &mut ColumnVector);
+
+/// Register of vectorized primitives indexed by (op, type1, type2)
+pub struct PrimitiveCatalog {
+    primitives: HashMap<(Op, TypeId, TypeId), VecPrimitive>,
+}
+
+impl PrimitiveCatalog {
+    pub fn register_defaults(&mut self) {
+        // Arithmetic
+        self.register(Op::Add, TypeId::I64, TypeId::I64, vec_add_i64);
+        self.register(Op::Mul, TypeId::F64, TypeId::F64, vec_mul_f64);
+        self.register(Op::Sub, TypeId::F64, TypeId::F64, vec_sub_f64);
+        // Comparison
+        self.register(Op::Gt, TypeId::I64, TypeId::I64, vec_gt_i64);
+        self.register(Op::Eq, TypeId::Str, TypeId::Str, vec_eq_str);
+        // String
+        self.register(Op::Upper, TypeId::Str, TypeId::None, vec_upper);
+        self.register(Op::Concat, TypeId::Str, TypeId::Str, vec_concat);
+    }
+}
+
+/// Tight-loop vectorized multiply for f64
+fn vec_mul_f64(inputs: &[&ColumnVector], output: &mut ColumnVector) {
+    let a = inputs[0].as_f64_slice();
+    let b = inputs[1].as_f64_slice();
+    let result = output.as_f64_slice_mut();
+
+    // Tight loop: compiler auto-vectorizes to SIMD
+    for i in 0..a.len() {
+        result[i] = a[i] * b[i];
+    }
+}
+
+/// Vectorized comparison producing selection vector
+fn vec_gt_i64(inputs: &[&ColumnVector], output: &mut ColumnVector) {
+    let a = inputs[0].as_i64_slice();
+    let b = inputs[1].as_i64_slice();
+    let result = output.as_bool_slice_mut();
+
+    for i in 0..a.len() {
+        result[i] = a[i] > b[i];
+    }
+}
+
+/// Expression tree node
+pub enum ExprNode {
+    Column(usize),                      // Reference to input column
+    Literal(Value),                     // Constant value
+    BinaryOp(Op, Box<ExprNode>, Box<ExprNode>),
+    UnaryOp(Op, Box<ExprNode>),
+    Case(Vec<(ExprNode, ExprNode)>, Box<ExprNode>), // CASE WHEN
+}
+
+/// Compiled vectorized expression
+pub struct CompiledExpr {
+    /// Sequence of primitive calls with operand references
+    operations: Vec<(VecPrimitive, Vec<OperandRef>, usize)>,
+    /// Temporary column vector pool
+    temps: Vec<ColumnVector>,
+}
+
+impl CompiledExpr {
+    /// Compile expression tree into primitive sequence
+    pub fn compile(
+        expr: &ExprNode,
+        catalog: &PrimitiveCatalog,
+        batch_size: usize,
+    ) -> Self {
+        let mut operations = Vec::new();
+        let mut temps = Vec::new();
+
+        fn compile_recursive(
+            node: &ExprNode,
+            catalog: &PrimitiveCatalog,
+            ops: &mut Vec<(VecPrimitive, Vec<OperandRef>, usize)>,
+            temps: &mut Vec<ColumnVector>,
+            batch_size: usize,
+        ) -> OperandRef {
+            match node {
+                ExprNode::Column(idx) => OperandRef::Input(*idx),
+                ExprNode::Literal(val) => {
+                    let temp_idx = temps.len();
+                    temps.push(ColumnVector::broadcast(val, batch_size));
+                    OperandRef::Temp(temp_idx)
+                }
+                ExprNode::BinaryOp(op, left, right) => {
+                    let left_ref = compile_recursive(
+                        left, catalog, ops, temps, batch_size);
+                    let right_ref = compile_recursive(
+                        right, catalog, ops, temps, batch_size);
+
+                    let result_idx = temps.len();
+                    temps.push(ColumnVector::new(batch_size));
+
+                    let prim = catalog.lookup(*op, left.type_id(), right.type_id());
+                    ops.push((prim, vec![left_ref, right_ref], result_idx));
+                    OperandRef::Temp(result_idx)
+                }
+                _ => unimplemented!(),
+            }
+        }
+
+        compile_recursive(expr, catalog, &mut operations, &mut temps, batch_size);
+        Self { operations, temps }
+    }
+
+    /// Evaluate compiled expression on a batch
+    pub fn evaluate(
+        &mut self,
+        input_columns: &[&ColumnVector],
+    ) -> &ColumnVector {
+        for (primitive, operands, result_idx) in &self.operations {
+            let inputs: Vec<&ColumnVector> = operands.iter()
+                .map(|op| match op {
+                    OperandRef::Input(i) => input_columns[*i],
+                    OperandRef::Temp(i) => &self.temps[*i],
+                })
+                .collect();
+
+            primitive(&inputs, &mut self.temps[*result_idx]);
+        }
+
+        // Return last temp (final result)
+        &self.temps[self.temps.len() - 1]
+    }
+}
+```
+
+## Cost Model
+
+**Per-batch (1024 values):**
+- One function pointer call per expression node: ~5ns
+- Tight loop per node: ~1ns/value * 1024 = ~1024ns
+- Total for depth-D expression: D * 1024ns + D * 5ns
+- Function call overhead: D * 5ns / 1024 = negligible
+
+**vs row-at-a-time interpreted:**
+- Per-row: D virtual function calls * 5ns each = D * 5ns
+- For 1024 rows: 1024 * D * 5ns = 5120 * D ns
+- Vectorized: D * 1024ns + D * 5ns = ~1029 * D ns
+- Speedup: ~5x from eliminating per-row dispatch
+
+**Temporary memory:**
+- D temporary column vectors of batch_size values each
+- For batch=1024, 8-byte values, depth=5: 5 * 8KB = 40KB (fits in L1)
+
+## Test Cases
+
+```sql
+-- Test 1: Arithmetic expression
+SELECT price * quantity * (1.0 - discount) AS total
+FROM lineitem;
+-- 3 vectorized primitives: mul, sub_scalar, mul
+-- Each processes 1024 values in tight loop
+
+-- Test 2: String expression
+SELECT UPPER(first_name) || ' ' || UPPER(last_name) AS full_name
+FROM employees;
+-- 3 primitives: upper, upper, concat, concat
+-- String primitives: not SIMD-friendly but still amortize dispatch
+
+-- Test 3: CASE expression
+SELECT CASE
+  WHEN status = 1 THEN 'active'
+  WHEN status = 2 THEN 'inactive'
+  ELSE 'unknown'
+END FROM users;
+-- Vectorized CASE: evaluate all branches, merge with selection vectors
+```
+
+## References
+
+1. **Boncz, Peter et al**. "MonetDB/X100: Hyper-Pipelining Query Execution."
+   CIDR 2005.
+   - Vectorized primitive catalog and expression evaluation
+
+2. **Zukowski, Marcin et al**. "Vectorwise: A Vectorized Analytical DBMS."
+   ICDE 2012.
+   - Production vectorized expression engine
+
+3. **Sompolski, Jan et al**. "Vectorization vs. Compilation in Query
+   Execution." DaMoN 2011.
+   - Expression evaluation tradeoffs

@@ -1,0 +1,90 @@
+---
+id: expensive-predicate-ordering
+name: Expensive Predicate Ordering
+category: logical/function-optimization
+databases: [postgresql, mysql, mssql, oracle, duckdb]
+execution_models: [volcano, vectorized]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [function, expensive, predicate, ordering, short-circuit]
+complexity: "O(k log k) for k predicates"
+benefit_range: [0.2, 0.8]
+---
+
+# Expensive Predicate Ordering
+
+## Description
+
+Reorders conjunctive predicates so that cheap, highly selective predicates
+are evaluated before expensive ones. SQL's AND short-circuits: if an early
+predicate eliminates most rows, the expensive predicate runs on fewer rows.
+
+**When to apply**: A WHERE clause has multiple AND predicates with
+significantly different costs or selectivities.
+
+**Why it works**: Ordering by ascending `cost / (1 - selectivity)` minimizes
+total evaluation cost. Cheap filters that eliminate many rows should run
+first to reduce the input to expensive filters.
+
+## Relational Algebra
+
+```algebra
+sigma[P1 AND P2 AND P3](R)
+  -> sigma[P_cheapest_most_selective ... P_expensive_least_selective](R)
+  -- reorder by cost_effectiveness = cost / (1 - selectivity)
+```
+
+## Implementation
+
+```rust
+rw!("reorder-predicates-by-cost";
+    "(filter (and ?expensive ?cheap) ?child)" =>
+    "(filter (and ?cheap ?expensive) ?child)"
+    if cost_effectiveness("?cheap") < cost_effectiveness("?expensive")
+),
+```
+
+## Cost Model
+
+```rust
+fn cost_effectiveness(cost: f64, selectivity: f64) -> f64 {
+    cost / (1.0 - selectivity).max(0.001)
+}
+
+fn total_cost(predicates: &[(f64, f64)], rows: u64) -> f64 {
+    let mut remaining = rows as f64;
+    let mut total = 0.0;
+    for (cost, selectivity) in predicates {
+        total += remaining * cost;
+        remaining *= selectivity;
+    }
+    total
+}
+```
+
+## Test Cases
+
+### Positive: Cheap filter before regex
+
+```sql
+WHERE status = 'active'              -- cost=1, sel=0.1
+  AND regexp_match(bio, '.*PhD.*')   -- cost=10, sel=0.05
+
+-- Evaluate status first: 90% of rows skip the regex
+```
+
+### Positive: Index-backed predicate first
+
+```sql
+WHERE indexed_col = 42               -- cost=0.1 (index)
+  AND ST_Contains(geom, point)       -- cost=15
+
+-- Run indexed predicate first
+```
+
+## References
+
+- Hellerstein & Stonebraker, "Predicate Migration", SIGMOD 1993
+- Kemper & Moerkotte, "Optimizing Disjunctive Queries"
+- Ibaraki & Kameda, "Optimal nesting order for conjunctive boolean predicates"

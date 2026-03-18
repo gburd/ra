@@ -1,0 +1,357 @@
+---
+id: query-embedding-similarity
+name: "Query Embedding Similarity for Plan Reuse"
+category: experimental/ml-guided
+databases: [postgresql, mysql, oracle, mssql]
+execution_models: [volcano, vectorized]
+version: "1.0.0"
+authors: ["Jain et al. 2022 - QO-Advisor", "Zhou et al. 2020 - query representation"]
+tags: [embedding, similarity, plan-reuse, workload, transfer-learning, NLP]
+complexity: "O(d) per embedding comparison, O(n*d) for training"
+benefit_range: [0.5, 5.0]
+research_status: "research-active"
+maturity: "research"
+---
+
+# Query Embedding Similarity for Plan Reuse
+
+## Description
+
+Maps SQL queries into dense vector embeddings that capture structural
+and semantic similarity. Similar queries (same joins, similar
+predicates, related tables) map to nearby vectors. The optimizer uses
+these embeddings to: (1) reuse execution plans from similar past
+queries, (2) transfer learned cost models across similar queries,
+(3) cluster workloads for index/materialized view recommendation.
+
+**When to apply**: Workloads with recurring query patterns (OLTP
+templates, BI dashboards, ORM-generated queries). Most real workloads
+have 80% of queries matching a small set of templates, making embedding-
+based plan reuse highly effective.
+
+**Why it works**: Plan optimization is expensive (milliseconds to
+seconds for complex queries). If a structurally similar query was
+recently optimized, its plan is likely optimal or near-optimal for the
+new query. Embeddings capture this similarity more robustly than exact
+template matching, handling parameter variations, predicate reordering,
+and alias differences.
+
+## Relational Algebra
+
+```algebra
+-- Query embedding function:
+embed(query) -> R^d  where d = embedding dimension (64-256)
+
+-- Similarity metric:
+similarity(q1, q2) = cosine(embed(q1), embed(q2))
+
+-- Plan reuse decision:
+reuse_plan(q_new, history) =
+  let q_nearest = argmax_{q in history} similarity(q_new, q)
+  if similarity(q_new, q_nearest) > THRESHOLD:
+    return plan(q_nearest)  -- reuse cached plan
+  else:
+    return optimize(q_new)  -- full optimization
+
+-- Workload clustering:
+clusters = k_means(embed(q) for q in workload, k)
+-- Each cluster shares optimization insights
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+struct QueryEmbedder {
+    table_vocab: HashMap<String, usize>,
+    column_vocab: HashMap<String, usize>,
+    op_vocab: HashMap<String, usize>,
+    embedding_dim: usize,
+    weights: EmbeddingWeights,
+}
+
+struct EmbeddingWeights {
+    table_embeddings: Vec<Vec<f64>>,
+    column_embeddings: Vec<Vec<f64>>,
+    operator_embeddings: Vec<Vec<f64>>,
+    projection: Vec<Vec<f64>>,
+}
+
+impl QueryEmbedder {
+    fn embed(&self, query: &ParsedQuery) -> Vec<f64> {
+        let mut features = vec![0.0; self.embedding_dim];
+
+        // Table set embedding (bag of tables)
+        for table in query.referenced_tables() {
+            if let Some(&idx) = self.table_vocab.get(table) {
+                for d in 0..self.embedding_dim {
+                    features[d] +=
+                        self.weights.table_embeddings[idx][d];
+                }
+            }
+        }
+
+        // Join structure embedding
+        for join in query.join_predicates() {
+            let left_col = &join.left_column;
+            let right_col = &join.right_column;
+            if let (Some(&li), Some(&ri)) = (
+                self.column_vocab.get(left_col),
+                self.column_vocab.get(right_col),
+            ) {
+                for d in 0..self.embedding_dim {
+                    features[d] +=
+                        self.weights.column_embeddings[li][d]
+                            * self.weights.column_embeddings
+                                [ri][d];
+                }
+            }
+        }
+
+        // Predicate type encoding
+        for pred in query.filter_predicates() {
+            let op_name = pred.operator_name();
+            if let Some(&idx) = self.op_vocab.get(op_name) {
+                for d in 0..self.embedding_dim {
+                    features[d] +=
+                        self.weights.operator_embeddings[idx][d];
+                }
+            }
+        }
+
+        // Normalize
+        let norm: f64 =
+            features.iter().map(|x| x * x).sum::<f64>().sqrt();
+        if norm > 0.0 {
+            for f in &mut features {
+                *f /= norm;
+            }
+        }
+
+        features
+    }
+
+    fn cosine_similarity(a: &[f64], b: &[f64]) -> f64 {
+        let dot: f64 =
+            a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+        let norm_a: f64 =
+            a.iter().map(|x| x * x).sum::<f64>().sqrt();
+        let norm_b: f64 =
+            b.iter().map(|x| x * x).sum::<f64>().sqrt();
+        if norm_a > 0.0 && norm_b > 0.0 {
+            dot / (norm_a * norm_b)
+        } else {
+            0.0
+        }
+    }
+}
+
+struct PlanReuseCache {
+    entries: Vec<(Vec<f64>, PhysicalPlan, f64)>,
+    similarity_threshold: f64,
+    max_entries: usize,
+}
+
+impl PlanReuseCache {
+    fn lookup(
+        &self,
+        query_embedding: &[f64],
+    ) -> Option<&PhysicalPlan> {
+        let mut best_sim = 0.0f64;
+        let mut best_plan = None;
+
+        for (emb, plan, cost) in &self.entries {
+            let sim = QueryEmbedder::cosine_similarity(
+                query_embedding,
+                emb,
+            );
+            if sim > best_sim {
+                best_sim = sim;
+                best_plan = Some(plan);
+            }
+        }
+
+        if best_sim >= self.similarity_threshold {
+            best_plan
+        } else {
+            None
+        }
+    }
+
+    fn insert(
+        &mut self,
+        embedding: Vec<f64>,
+        plan: PhysicalPlan,
+        cost: f64,
+    ) {
+        if self.entries.len() >= self.max_entries {
+            // Evict least recently used
+            self.entries.remove(0);
+        }
+        self.entries.push((embedding, plan, cost));
+    }
+}
+
+struct WorkloadClusterer;
+
+impl WorkloadClusterer {
+    fn cluster_workload(
+        embeddings: &[(Vec<f64>, QueryInfo)],
+        k: usize,
+    ) -> Vec<QueryCluster> {
+        // K-means on query embeddings
+        let dim = embeddings[0].0.len();
+        let mut centroids: Vec<Vec<f64>> =
+            embeddings[..k].iter().map(|(e, _)| e.clone()).collect();
+
+        for _iter in 0..50 {
+            let mut assignments = vec![0usize; embeddings.len()];
+            let mut new_centroids =
+                vec![vec![0.0; dim]; k];
+            let mut counts = vec![0usize; k];
+
+            // Assign each query to nearest centroid
+            for (i, (emb, _)) in embeddings.iter().enumerate() {
+                let nearest = centroids
+                    .iter()
+                    .enumerate()
+                    .min_by(|(_, a), (_, b)| {
+                        let da: f64 = a
+                            .iter()
+                            .zip(emb.iter())
+                            .map(|(x, y)| (x - y).powi(2))
+                            .sum();
+                        let db: f64 = b
+                            .iter()
+                            .zip(emb.iter())
+                            .map(|(x, y)| (x - y).powi(2))
+                            .sum();
+                        da.partial_cmp(&db)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                    .map(|(idx, _)| idx)
+                    .unwrap_or(0);
+
+                assignments[i] = nearest;
+                counts[nearest] += 1;
+                for d in 0..dim {
+                    new_centroids[nearest][d] += emb[d];
+                }
+            }
+
+            // Update centroids
+            for c in 0..k {
+                if counts[c] > 0 {
+                    for d in 0..dim {
+                        new_centroids[c][d] /= counts[c] as f64;
+                    }
+                }
+            }
+            centroids = new_centroids;
+        }
+
+        // Build clusters
+        Vec::new() // simplified
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(workload: &WorkloadHistory) -> bool {
+    // Need sufficient history to build embeddings
+    workload.total_queries() > 100
+        && workload.distinct_templates() > 5
+        && workload.recurring_fraction() > 0.5
+}
+```
+
+**Restrictions:**
+- Embedding quality depends on training data diversity
+- Cold start: no history means no embeddings available
+- Schema changes invalidate trained embeddings
+- Parameter-sensitive queries may need different plans despite similar structure
+- Embedding dimension trade-off: higher = more accurate but slower comparison
+
+## Cost Model
+
+```rust
+fn plan_reuse_savings(
+    optimization_time_ms: f64,
+    embedding_time_ms: f64, // ~0.1ms
+    cache_hit_rate: f64,
+    queries_per_second: f64,
+) -> f64 {
+    let saved_per_hit =
+        optimization_time_ms - embedding_time_ms;
+    let hits_per_second = queries_per_second * cache_hit_rate;
+    saved_per_hit * hits_per_second // ms saved per second
+}
+```
+
+**Typical metrics:**
+- Embedding computation: 0.05-0.5ms per query
+- Full optimization: 1-100ms per query
+- Cache hit rate for OLTP workloads: 70-95%
+- Savings: 50-95% of optimization time for recurring workloads
+
+## Test Cases
+
+### Positive: ORM-generated query variants
+
+```sql
+-- Template queries with different parameters:
+SELECT * FROM orders WHERE user_id = 123 AND status = 'pending';
+SELECT * FROM orders WHERE user_id = 456 AND status = 'shipped';
+-- Same structure -> cosine similarity > 0.99
+-- Reuse plan: index scan on user_id, filter on status
+
+-- Slight variation (added column):
+SELECT *, o.total FROM orders o WHERE user_id = 789 AND status = 'pending';
+-- Similarity > 0.95 -> still reuse same plan
+```
+
+### Positive: Workload clustering for index recommendation
+
+```sql
+-- Cluster 1: user-centric queries (80% of workload)
+SELECT * FROM orders WHERE user_id = ?;
+SELECT * FROM reviews WHERE user_id = ? AND rating > ?;
+-- Recommendation: indexes on user_id columns
+
+-- Cluster 2: product-centric queries (15% of workload)
+SELECT * FROM inventory WHERE product_id = ?;
+SELECT * FROM reviews WHERE product_id = ? ORDER BY date;
+-- Recommendation: indexes on product_id columns
+```
+
+### Negative: Structurally similar but semantically different
+
+```sql
+-- Same tables, same join, but different selectivity
+SELECT * FROM orders o JOIN lineitem l ON o.id = l.order_id
+WHERE o.date > '2025-01-01';  -- 25% of orders (hash join)
+
+SELECT * FROM orders o JOIN lineitem l ON o.id = l.order_id
+WHERE o.id = 42;  -- 1 order (index NL)
+
+-- Structure similar (high cosine) but optimal plans differ
+-- Need selectivity-aware embedding or parameter binding check
+```
+
+## References
+
+**Query representation learning:**
+- Jain et al., "QO-Advisor: Query Optimization with Representation Learning", NeurIPS Workshop 2022
+- Zhou et al., "Query Performance Prediction for Concurrent Queries using Graph Embedding", VLDB 2020
+
+**Plan reuse and caching:**
+- Ghosh et al., "Plan Stitch: Harnessing the Best of Many Plans", VLDB 2018
+  - Combining sub-plans from different cached plans
+- Li et al., "AI Meets Database: AI4DB and DB4AI", SIGMOD Tutorial 2021
+
+**Workload analysis:**
+- Ma et al., "Query-Based Workload Forecasting for Self-Driving Database Management Systems", SIGMOD 2018
+- Perera et al., "DBABandits: Deep Bayesian Bandits for Online Workload-Driven Configuration", VLDB 2021

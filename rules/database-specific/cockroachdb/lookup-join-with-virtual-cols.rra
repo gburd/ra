@@ -1,0 +1,138 @@
+---
+id: crdb-lookup-join-virtual-cols
+name: Lookup Join with Virtual Computed Columns
+category: database-specific/cockroachdb
+databases: [cockroachdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, join, lookup, virtual-column, computed, index]
+complexity: O(n)
+benefit_range: [0.2, 0.8]
+---
+
+# Lookup Join with Virtual Computed Columns
+
+## Description
+
+Generates lookup joins when the right side has a Project that produces
+virtual computed columns over a scan, and the join condition references
+those virtual columns. Virtual computed columns are not physically
+stored but are computed on-the-fly. They can participate in indexes,
+enabling lookup joins on expressions like `LOWER(name)` or
+`(a + b)::STRING`.
+
+**When to apply**: The right side of a join is a Project producing
+virtual computed columns from a Scan, the join condition references
+these virtual columns, and the table has an index on the virtual
+column expression.
+
+**Why it works**: Without this rule, the Project wrapping the Scan
+prevents lookup join generation (lookup joins require a Scan directly).
+By recognizing virtual computed columns in the Project, the optimizer
+can generate lookup joins on the corresponding indexes.
+
+## Relational Algebra
+
+```algebra
+Join[L.x = R.lower_name](L, Project[lower_name=LOWER(name)](Scan(R)))
+  -> LookupJoin[L.x = R.lower_name](L, R.idx_lower_name)
+  where R has index on (LOWER(name)) as virtual column
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("lookup-join-with-virtual-cols";
+    "(join ?type ?left
+        (project (scan ?right) ?projections ?passthrough)
+        ?on ?private)" =>
+    "(lookup_join_virtual ?type ?left ?right
+        ?projected_virtual_cols ?on ?private)"
+    if is_canonical_scan("?right")
+    if has_virtual_columns("?right")
+    if projections_are_virtual("?projections", "?right")
+    if on_references_virtual("?on", "?projections")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    scan_private: &ScanPrivate,
+    projections: &ProjectionsExpr,
+    on: &FiltersExpr,
+) -> bool {
+    // Scan must have virtual computed columns
+    let virtual_cols = scan_private.virtual_columns();
+    !virtual_cols.is_empty()
+    // Projections must be subsets of virtual columns
+    && projections.output_cols().subset_of(&virtual_cols)
+    // ON condition must reference projected virtual columns
+    && on.outer_cols().intersects(&projections.output_cols())
+}
+```
+
+**Restrictions:**
+- Only applies when the Project's output columns are virtual
+  computed columns from the scan's table
+- The virtual column must have a corresponding index for the
+  lookup join to be efficient
+- This rule must not create a cycle with HoistProjectFromInnerJoin
+  + GenerateLookupJoins (the condition that ON references virtual
+  cols prevents this)
+- Also supports virtual columns with a Select filter between the
+  Project and Scan
+
+## Cost Model
+
+```rust
+fn virtual_col_lookup_cost(
+    left_rows: f64,
+    lookup_cost_per_row: f64,
+    expression_eval_cost: f64,
+) -> f64 {
+    // Lookup cost plus virtual column computation on result
+    left_rows * (lookup_cost_per_row + expression_eval_cost)
+}
+```
+
+## Test Cases
+
+```sql
+-- Positive: join on virtual computed column
+-- users has virtual column: name_lower = LOWER(name)
+-- INDEX(name_lower)
+SELECT * FROM queries q
+JOIN users u ON q.search_name = u.name_lower;
+
+-- Plan: LookupJoin(q.search_name = u.name_lower)
+--   Scan(queries)
+--   IndexLookup(users, idx_name_lower)
+```
+
+```sql
+-- Positive: virtual column with filter
+SELECT * FROM queries q
+JOIN users u ON q.search_name = u.name_lower
+WHERE u.active = true;
+
+-- LookupJoin with both virtual column and filter pushed
+```
+
+```sql
+-- Negative: projection is not a virtual column
+SELECT * FROM t1
+JOIN (SELECT id, a * b AS computed FROM t2) t2
+  ON t1.x = t2.computed;
+-- a * b is not a virtual column in t2; cannot use lookup join
+-- on the computed expression
+```
+
+## References
+
+CockroachDB: pkg/sql/opt/xform/rules/join.opt:345 - GenerateLookupJoinsWithVirtualCols (commit 51e808c)
+CockroachDB: pkg/sql/opt/xform/rules/join.opt:385 - GenerateLookupJoinsWithVirtualColsAndFilter
+CockroachDB docs: "Virtual Computed Columns" and indexing

@@ -206,6 +206,43 @@ fn format_plan_tree_impl(expr: &RelExpr, buf: &mut String, prefix: &str, is_last
             format_plan_tree_impl(left, buf, &child_prefix, false);
             format_plan_tree_impl(right, buf, &child_prefix, true);
         }
+        RelExpr::CTE {
+            name,
+            definition,
+            body,
+        } => {
+            buf.push_str(prefix);
+            buf.push_str(connector);
+            buf.push_str(&format!("CTE({name})\n"));
+
+            let child_prefix = format!("{prefix}{child_prefix_ext}");
+            format_plan_tree_impl(definition, buf, &child_prefix, false);
+            format_plan_tree_impl(body, buf, &child_prefix, true);
+        }
+        RelExpr::Window { functions, input } => {
+            buf.push_str(prefix);
+            buf.push_str(connector);
+            buf.push_str(&format!(
+                "Window({} function(s))\n",
+                functions.len()
+            ));
+
+            let child_prefix = format!("{prefix}{child_prefix_ext}");
+            format_plan_tree_impl(input, buf, &child_prefix, true);
+        }
+        RelExpr::Distinct { input } => {
+            buf.push_str(prefix);
+            buf.push_str(connector);
+            buf.push_str("Distinct\n");
+
+            let child_prefix = format!("{prefix}{child_prefix_ext}");
+            format_plan_tree_impl(input, buf, &child_prefix, true);
+        }
+        RelExpr::Values { rows } => {
+            buf.push_str(prefix);
+            buf.push_str(connector);
+            buf.push_str(&format!("Values({} row(s))\n", rows.len()));
+        }
     }
 }
 
@@ -302,6 +339,10 @@ fn format_agg_function(func: AggregateFunction) -> &'static str {
         AggregateFunction::Avg => "AVG",
         AggregateFunction::Min => "MIN",
         AggregateFunction::Max => "MAX",
+        AggregateFunction::StdDev => "STDDEV",
+        AggregateFunction::Variance => "VARIANCE",
+        AggregateFunction::StringAgg => "STRING_AGG",
+        AggregateFunction::ArrayAgg => "ARRAY_AGG",
     }
 }
 

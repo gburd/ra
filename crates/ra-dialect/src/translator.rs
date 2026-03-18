@@ -107,6 +107,14 @@ impl DialectTranslator {
         mut query: Query,
         warnings: &mut Vec<TranslationWarning>,
     ) -> Result<Query, TranslationError> {
+        // Translate CTEs
+        if let Some(ref mut with) = query.with {
+            for cte in &mut with.cte_tables {
+                let translated = self.translate_query(*cte.query.clone(), warnings)?;
+                *cte.query = translated;
+            }
+        }
+
         query.body = Box::new(self.translate_set_expr(*query.body, warnings)?);
 
         query = self.translate_limit_offset(query, warnings);
@@ -114,6 +122,14 @@ impl DialectTranslator {
         if let Some(ref mut order_by) = query.order_by {
             for item in &mut order_by.exprs {
                 item.expr = self.translate_expr(item.expr.clone(), warnings);
+            }
+            // Translate NULLS FIRST/LAST for dialects that
+            // don't support it
+            if !self.target.supports_nulls_first_last() {
+                self.translate_order_by_nulls(
+                    &mut order_by.exprs,
+                    warnings,
+                );
             }
         }
 
@@ -326,6 +342,23 @@ impl DialectTranslator {
                 subquery,
                 negated,
             } => self.translate_in_subquery(*expr, *subquery, negated, warnings),
+            Expr::Subquery(subquery) => {
+                let cloned = subquery.clone();
+                match self.translate_query(*cloned, warnings) {
+                    Ok(q) => Expr::Subquery(Box::new(q)),
+                    Err(_) => Expr::Subquery(subquery),
+                }
+            }
+            Expr::Exists { subquery, negated } => {
+                let cloned = subquery.clone();
+                match self.translate_query(*cloned, warnings) {
+                    Ok(q) => Expr::Exists {
+                        subquery: Box::new(q),
+                        negated,
+                    },
+                    Err(_) => Expr::Exists { subquery, negated },
+                }
+            }
             other => other,
         }
     }
@@ -432,6 +465,12 @@ impl DialectTranslator {
         }
 
         func.args = self.translate_function_args(func.args, warnings);
+
+        // Translate OVER clause for window functions
+        if let Some(over) = func.over.take() {
+            func.over =
+                Some(self.translate_window_type(over, warnings));
+        }
 
         Expr::Function(func)
     }
@@ -599,6 +638,61 @@ impl DialectTranslator {
                 Expr::Value(Value::Number(int_val.to_string(), false))
             }
             _ => Expr::Value(value),
+        }
+    }
+
+    /// Strip NULLS FIRST/LAST from ORDER BY for dialects
+    /// that don't support them.
+    fn translate_order_by_nulls(
+        &self,
+        exprs: &mut [ast::OrderByExpr],
+        warnings: &mut Vec<TranslationWarning>,
+    ) {
+        let mut warned = false;
+        for item in exprs.iter_mut() {
+            if item.nulls_first.is_some() {
+                item.nulls_first = None;
+                if !warned {
+                    warnings.push(TranslationWarning {
+                        severity: WarningSeverity::Warning,
+                        message: format!(
+                            "NULLS FIRST/LAST removed for \
+                             {} (not supported)",
+                            self.target
+                        ),
+                        hint: Some(
+                            "Use CASE WHEN ... IS NULL to \
+                             control NULL ordering"
+                                .into(),
+                        ),
+                    });
+                    warned = true;
+                }
+            }
+        }
+    }
+
+    /// Translate window function OVER clauses, recursively
+    /// translating expressions within `partition_by` and
+    /// `order_by`.
+    fn translate_window_type(
+        &self,
+        window: ast::WindowType,
+        warnings: &mut Vec<TranslationWarning>,
+    ) -> ast::WindowType {
+        match window {
+            ast::WindowType::WindowSpec(mut spec) => {
+                for expr in &mut spec.partition_by {
+                    *expr =
+                        self.translate_expr(expr.clone(), warnings);
+                }
+                for item in &mut spec.order_by {
+                    item.expr =
+                        self.translate_expr(item.expr.clone(), warnings);
+                }
+                ast::WindowType::WindowSpec(spec)
+            }
+            named @ ast::WindowType::NamedWindow(_) => named,
         }
     }
 }
@@ -831,5 +925,292 @@ mod tests {
         let t = DialectTranslator::new(Dialect::PostgreSql, Dialect::MySql);
         let err = t.translate("NOT VALID SQL !!! %%%");
         assert!(err.is_err());
+    }
+
+    #[test]
+    fn cte_translation() {
+        let result = pg_to(
+            Dialect::MySql,
+            "WITH active AS (SELECT * FROM users \
+             WHERE active = TRUE) \
+             SELECT * FROM active",
+        );
+        assert!(
+            result.sql.contains("WITH"),
+            "Expected WITH in: {}",
+            result.sql
+        );
+        // Boolean TRUE should be translated for MySQL? No,
+        // MySQL supports TRUE. Let's check it passes through.
+        assert!(result.sql.contains("active"));
+    }
+
+    #[test]
+    fn cte_to_sqlite_boolean_translation() {
+        let result = pg_to(
+            Dialect::Sqlite,
+            "WITH cte AS (SELECT * FROM t \
+             WHERE flag = TRUE) \
+             SELECT * FROM cte",
+        );
+        assert!(
+            result.sql.contains("WITH"),
+            "Expected WITH in: {}",
+            result.sql
+        );
+        assert!(
+            result.sql.contains('1'),
+            "Expected TRUE -> 1 in CTE body: {}",
+            result.sql
+        );
+    }
+
+    #[test]
+    fn recursive_cte_translation() {
+        let result = pg_to(
+            Dialect::MySql,
+            "WITH RECURSIVE nums AS (\
+             SELECT 1 AS n \
+             UNION ALL \
+             SELECT n + 1 FROM nums WHERE n < 10) \
+             SELECT * FROM nums",
+        );
+        assert!(
+            result.sql.contains("RECURSIVE"),
+            "Expected RECURSIVE in: {}",
+            result.sql
+        );
+    }
+
+    #[test]
+    fn window_function_translation() {
+        let result = pg_to(
+            Dialect::MySql,
+            "SELECT name, ROW_NUMBER() OVER \
+             (PARTITION BY dept ORDER BY salary DESC) \
+             AS rn FROM employees",
+        );
+        assert!(
+            result.sql.contains("ROW_NUMBER"),
+            "Expected ROW_NUMBER in: {}",
+            result.sql
+        );
+        assert!(
+            result.sql.contains("OVER"),
+            "Expected OVER in: {}",
+            result.sql
+        );
+        assert!(
+            result.sql.contains("PARTITION BY"),
+            "Expected PARTITION BY in: {}",
+            result.sql
+        );
+    }
+
+    #[test]
+    fn window_function_to_mssql() {
+        let result = pg_to(
+            Dialect::MsSql,
+            "SELECT id, SUM(amount) OVER \
+             (PARTITION BY customer_id ORDER BY date) \
+             FROM orders",
+        );
+        assert!(
+            result.sql.contains("SUM"),
+            "Expected SUM in: {}",
+            result.sql
+        );
+        assert!(
+            result.sql.contains("OVER"),
+            "Expected OVER in: {}",
+            result.sql
+        );
+    }
+
+    #[test]
+    fn window_function_with_boolean_in_partition() {
+        let result = pg_to(
+            Dialect::Sqlite,
+            "SELECT ROW_NUMBER() OVER \
+             (PARTITION BY active ORDER BY id) \
+             FROM users WHERE active = TRUE",
+        );
+        assert!(
+            result.sql.contains("OVER"),
+            "Expected OVER in: {}",
+            result.sql
+        );
+        // TRUE should become 1 for SQLite
+        assert!(
+            result.sql.contains('1'),
+            "Expected TRUE -> 1 in: {}",
+            result.sql
+        );
+    }
+
+    #[test]
+    fn distinct_translation() {
+        let result = pg_to(
+            Dialect::MySql,
+            "SELECT DISTINCT name FROM users",
+        );
+        assert!(
+            result.sql.contains("DISTINCT"),
+            "Expected DISTINCT in: {}",
+            result.sql
+        );
+    }
+
+    #[test]
+    fn having_translation() {
+        let result = pg_to(
+            Dialect::MySql,
+            "SELECT dept, COUNT(*) FROM employees \
+             GROUP BY dept HAVING COUNT(*) > 5",
+        );
+        assert!(
+            result.sql.contains("HAVING"),
+            "Expected HAVING in: {}",
+            result.sql
+        );
+    }
+
+    #[test]
+    fn having_with_boolean_translation() {
+        let result = pg_to(
+            Dialect::Sqlite,
+            "SELECT dept, COUNT(*) FROM employees \
+             GROUP BY dept HAVING COUNT(*) > 5 \
+             AND active = TRUE",
+        );
+        assert!(
+            result.sql.contains("HAVING"),
+            "Expected HAVING in: {}",
+            result.sql
+        );
+        assert!(
+            result.sql.contains('1'),
+            "Expected TRUE -> 1 in: {}",
+            result.sql
+        );
+    }
+
+    #[test]
+    fn subquery_in_where() {
+        let result = pg_to(
+            Dialect::MySql,
+            "SELECT * FROM orders WHERE customer_id \
+             IN (SELECT id FROM customers WHERE active = TRUE)",
+        );
+        assert!(
+            result.sql.contains("IN ("),
+            "Expected IN subquery in: {}",
+            result.sql
+        );
+    }
+
+    #[test]
+    fn exists_subquery() {
+        let result = pg_to(
+            Dialect::Sqlite,
+            "SELECT * FROM orders WHERE EXISTS \
+             (SELECT 1 FROM customers \
+             WHERE customers.id = orders.customer_id \
+             AND active = TRUE)",
+        );
+        assert!(
+            result.sql.contains("EXISTS"),
+            "Expected EXISTS in: {}",
+            result.sql
+        );
+        assert!(
+            result.sql.contains('1'),
+            "Expected TRUE -> 1 in: {}",
+            result.sql
+        );
+    }
+
+    #[test]
+    fn scalar_subquery_translation() {
+        let result = pg_to(
+            Dialect::MySql,
+            "SELECT name, \
+             (SELECT COUNT(*) FROM orders \
+             WHERE orders.user_id = users.id) AS cnt \
+             FROM users",
+        );
+        assert!(
+            result.sql.contains("SELECT"),
+            "Expected nested SELECT in: {}",
+            result.sql
+        );
+    }
+
+    #[test]
+    fn order_by_with_limit_to_mssql() {
+        let result = pg_to(
+            Dialect::MsSql,
+            "SELECT * FROM users \
+             ORDER BY name ASC LIMIT 10",
+        );
+        assert!(
+            result.sql.contains("ORDER BY"),
+            "Expected ORDER BY in: {}",
+            result.sql
+        );
+        assert!(
+            result.sql.contains("FETCH"),
+            "Expected FETCH in: {}",
+            result.sql
+        );
+    }
+
+    #[test]
+    fn cte_with_limit_to_mssql() {
+        let result = pg_to(
+            Dialect::MsSql,
+            "WITH top_users AS (\
+             SELECT * FROM users ORDER BY score DESC \
+             LIMIT 10) \
+             SELECT * FROM top_users",
+        );
+        assert!(
+            result.sql.contains("WITH"),
+            "Expected WITH in: {}",
+            result.sql
+        );
+        assert!(
+            result.sql.contains("FETCH"),
+            "Expected FETCH in CTE body: {}",
+            result.sql
+        );
+    }
+
+    #[test]
+    fn combined_cte_window_distinct() {
+        let result = pg_to(
+            Dialect::MySql,
+            "WITH ranked AS (\
+             SELECT name, \
+             ROW_NUMBER() OVER (ORDER BY score DESC) AS rn \
+             FROM users) \
+             SELECT DISTINCT name FROM ranked \
+             WHERE rn <= 10",
+        );
+        assert!(
+            result.sql.contains("WITH"),
+            "Expected WITH: {}",
+            result.sql
+        );
+        assert!(
+            result.sql.contains("ROW_NUMBER"),
+            "Expected ROW_NUMBER: {}",
+            result.sql
+        );
+        assert!(
+            result.sql.contains("DISTINCT"),
+            "Expected DISTINCT: {}",
+            result.sql
+        );
     }
 }

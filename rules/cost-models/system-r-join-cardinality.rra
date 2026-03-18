@@ -1,0 +1,333 @@
+---
+id: system-r-join-cardinality
+name: "System R Join Cardinality Estimation"
+category: cost-models
+databases: [postgresql, mysql, duckdb, cockroachdb, mssql, oracle]
+execution_models: [volcano, vectorized]
+version: "1.0.0"
+authors: ["Selinger, Astrahan, Chamberlin, Lorie, Price - IBM Research"]
+tags: [cardinality, join-estimation, system-r, containment, uniformity, classic]
+complexity: "O(1)"
+benefit_range: [0.1, 10.0]
+---
+
+# System R Join Cardinality Estimation
+
+## Description
+
+System R's method for estimating the cardinality (output size) of a join
+operation. The fundamental formula is:
+
+  |R join_p S| = |R| * |S| * selectivity(p)
+
+For an equijoin R.a = S.b, the selectivity is estimated as:
+
+  selectivity = 1 / max(ICARD(R.a), ICARD(S.b))
+
+where ICARD is the number of distinct values. This formula assumes the
+"containment" property: the smaller set of distinct values is contained
+within the larger set. Under this assumption, each distinct value in the
+smaller set matches exactly one value in the larger set.
+
+This estimate is the foundation for all cost-based join ordering decisions.
+Accurate cardinality estimation is the single most important factor in
+query optimization -- wrong estimates lead to wrong join orderings and
+plan selections that can be orders of magnitude slower.
+
+**When to apply**: Every join operation in a cost-based optimizer requires
+a cardinality estimate to compare alternative plans.
+
+**Why it works**: The 1/max(ICARD) formula is a reasonable estimate under
+uniform distribution and containment. For primary key / foreign key joins,
+it gives exact results: |R join S| = |R| when R.fk references S.pk
+(since ICARD(S.pk) = |S| and every FK value exists in S).
+
+## Relational Algebra
+
+```algebra
+Join cardinality formulas from System R:
+
+1. Equijoin (R.a = S.b):
+   |R join S| = |R| * |S| / max(ICARD(R.a), ICARD(S.b))
+
+2. Primary key join (R.fk = S.pk where FK(R.fk -> S.pk)):
+   |R join S| = |R|
+   (Each row in R matches exactly one row in S)
+
+3. Multi-column equijoin (R.a = S.b AND R.c = S.d):
+   |R join S| = |R| * |S| / (max(ICARD(R.a), ICARD(S.b)) *
+                               max(ICARD(R.c), ICARD(S.d)))
+   (Independence assumption between join columns)
+
+4. Self-join (R.a = R.b):
+   |R join R| = |R|^2 / max(ICARD(R.a), ICARD(R.b))
+
+5. Multi-way join (R join S join T):
+   Computed pairwise: |(R join S) join T|
+   = |R join S| * |T| / max(ICARD(RS.key), ICARD(T.key))
+   Error compounds multiplicatively across joins
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+struct SystemRJoinCardinalityEstimator;
+
+impl SystemRJoinCardinalityEstimator {
+    fn estimate_equijoin(
+        &self,
+        left_rows: f64,
+        right_rows: f64,
+        left_distinct: f64,
+        right_distinct: f64,
+    ) -> f64 {
+        let max_distinct = left_distinct.max(right_distinct);
+        if max_distinct > 0.0 {
+            left_rows * right_rows / max_distinct
+        } else {
+            left_rows * right_rows * 0.1 // Default
+        }
+    }
+
+    fn estimate_pk_fk_join(
+        &self,
+        fk_table_rows: f64,
+        pk_table_rows: f64,
+        fk_null_fraction: f64,
+    ) -> f64 {
+        // FK join: each FK row matches exactly one PK row
+        // Unless FK is nullable
+        fk_table_rows * (1.0 - fk_null_fraction)
+    }
+
+    fn estimate_multi_column_join(
+        &self,
+        left_rows: f64,
+        right_rows: f64,
+        column_pairs: &[(f64, f64)], // (left_distinct, right_distinct)
+    ) -> f64 {
+        let mut selectivity = 1.0;
+        for (ld, rd) in column_pairs {
+            let max_d = ld.max(*rd);
+            if max_d > 0.0 {
+                selectivity /= max_d;
+            }
+        }
+        left_rows * right_rows * selectivity
+    }
+
+    fn estimate_multi_way_join(
+        &self,
+        relations: &[RelationStats],
+        join_graph: &JoinGraph,
+        join_order: &[usize],
+    ) -> f64 {
+        if join_order.is_empty() {
+            return 0.0;
+        }
+
+        let mut current_rows =
+            relations[join_order[0]].row_count as f64;
+        let mut current_distinct: HashMap<Column, f64> = HashMap::new();
+
+        // Initialize with first relation's distinct counts
+        for col in &relations[join_order[0]].columns {
+            current_distinct.insert(
+                col.clone(),
+                relations[join_order[0]].distinct_count(col) as f64,
+            );
+        }
+
+        for &next_idx in &join_order[1..] {
+            let next = &relations[next_idx];
+            let next_rows = next.row_count as f64;
+
+            // Find join predicate
+            if let Some(pred) =
+                join_graph.predicate(join_order[0..], next_idx)
+            {
+                let left_distinct = current_distinct
+                    .get(&pred.left_col)
+                    .copied()
+                    .unwrap_or(current_rows);
+                let right_distinct =
+                    next.distinct_count(&pred.right_col) as f64;
+
+                let join_card = self.estimate_equijoin(
+                    current_rows,
+                    next_rows,
+                    left_distinct,
+                    right_distinct,
+                );
+
+                current_rows = join_card;
+
+                // Update distinct counts for result
+                // After join, distinct count is bounded by
+                // min of both sides
+                for (col, dc) in &mut current_distinct {
+                    *dc = (*dc).min(current_rows);
+                }
+                for col in &next.columns {
+                    current_distinct.insert(
+                        col.clone(),
+                        (next.distinct_count(col) as f64)
+                            .min(current_rows),
+                    );
+                }
+            } else {
+                // Cartesian product
+                current_rows *= next_rows;
+            }
+        }
+
+        current_rows
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    hw: &HardwareProfile,
+) -> bool {
+    // Always applicable for join cardinality estimation
+    // Quality depends on statistics
+    stats.has_distinct_count_estimates
+}
+```
+
+**Restrictions:**
+- Assumes uniform distribution of join keys
+- Assumes containment: values in smaller domain exist in larger
+- Independence assumption for multi-column joins
+- Errors compound multiplicatively in multi-way joins
+- Skewed data (Zipf distribution) can cause large estimation errors
+- Correlation between columns not modeled
+
+## Cost Model
+
+```rust
+fn estimation_error_analysis(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let n_joins = stats.n_joins as f64;
+
+    // Per-join estimation error factor (empirical)
+    let per_join_error = if stats.has_histograms {
+        2.0  // With histograms: typically within 2x
+    } else if stats.has_distinct_counts {
+        5.0  // With only distinct counts: within 5x
+    } else {
+        10.0 // No statistics: within 10x
+    };
+
+    // Multi-way join: errors compound
+    // n-way join: expected error ~ per_join_error^(n-1)
+    per_join_error.powf(n_joins - 1.0)
+}
+```
+
+**Known estimation failures:**
+- Correlated join keys: estimate too high or too low
+- Data skew: popular values have much higher join fanout
+- Multi-column keys: independence assumption fails
+- Self-joins: ICARD-based formula often overestimates
+- Outer joins: NULL padding complicates cardinality
+
+**Typical accuracy**: Within 2-5x for single joins, errors compound for multi-way.
+
+## Test Cases
+
+### Positive: PK-FK join (exact estimate)
+
+```sql
+-- orders: 1,000,000 rows, customer_id FK -> customers(id)
+-- customers: 100,000 rows, id is PK (100,000 distinct)
+SELECT * FROM orders o JOIN customers c ON o.customer_id = c.id;
+
+-- ICARD(orders.customer_id) = 100,000
+-- ICARD(customers.id) = 100,000
+-- |join| = 1,000,000 * 100,000 / max(100,000, 100,000)
+--        = 1,000,000 * 100,000 / 100,000
+--        = 1,000,000  (exact! each order has one customer)
+```
+
+### Positive: Many-to-many join
+
+```sql
+-- products: 10,000 rows, category has 50 distinct values
+-- tags: 5,000 rows, category has 200 distinct values
+SELECT * FROM products p JOIN tags t ON p.category = t.category;
+
+-- |join| = 10,000 * 5,000 / max(50, 200)
+--        = 50,000,000 / 200
+--        = 250,000
+-- Each product category matches ~25 tags, so 10,000 * 25 = 250,000
+-- Reasonable estimate under uniform distribution
+```
+
+### Negative: Skewed data causes large error
+
+```sql
+-- users: 1,000,000 rows, country has 200 distinct values
+-- But 40% of users are in 'US'
+SELECT * FROM users u1 JOIN users u2 ON u1.country = u2.country;
+
+-- System R estimate: 1,000,000^2 / 200 = 5,000,000,000
+-- Actual: dominated by US-US pairs = 400,000^2 +
+--         remaining country pairs
+-- Actual ~ 400,000^2 + 3,000,000 * ... ~ 163,000,000,000
+-- System R underestimates by ~32x due to skew!
+```
+
+### Positive: Multi-way join cardinality propagation
+
+```sql
+-- TPC-H: nation(25) join customer(150K) join orders(1.5M)
+SELECT * FROM nation n
+JOIN customer c ON n.nationkey = c.nationkey
+JOIN orders o ON c.custkey = o.custkey;
+
+-- Step 1: nation join customer
+--   25 * 150,000 / max(25, 25) = 150,000
+-- Step 2: (n-c) join orders
+--   150,000 * 1,500,000 / max(150,000, 150,000) = 1,500,000
+-- Final estimate: 1,500,000 (correct: each order has one customer/nation)
+```
+
+## References
+
+**Original paper:**
+- Selinger, P. Griffiths, et al., "Access Path Selection in a Relational Database Management System", ACM SIGMOD 1979
+  - DOI: 10.1145/582095.582099
+  - Section 3: Statistics and selectivity factors
+  - Join selectivity = 1/max(ICARD_left, ICARD_right)
+
+**Error analysis:**
+- Ioannidis, Y.E., Christodoulakis, S., "On the Propagation of Errors in the Size of Join Results", ACM SIGMOD 1991
+  - DOI: 10.1145/115790.115835
+  - Showed that estimation errors compound exponentially in multi-way joins
+
+- Leis, V., et al., "How Good Are Query Optimizers, Really?", VLDB 2015
+  - DOI: 10.14778/2850583.2850594
+  - Empirical evaluation: cardinality errors up to 10^4 in real queries
+
+**Improvements:**
+- Poosala, V., et al., "Improved Histograms for Selectivity Estimation", ACM SIGMOD 1996
+  - DOI: 10.1145/233269.233342
+  - Histograms reduce estimation error for skewed data
+
+- Cai, W., Balazinska, M., Suciu, D., "Pessimistic Cardinality Estimation: Tighter Upper Bounds for Intermediate Join Cardinalities", ACM SIGMOD 2019
+  - DOI: 10.1145/3299869.3319894
+  - Information-theoretic upper bounds as alternative
+
+**Implementation in databases:**
+- PostgreSQL: `src/backend/utils/adt/selfuncs.c` - eqjoinsel()
+- MySQL: `sql/opt_range.cc` - join selectivity
+- All databases use variants of System R's join estimation

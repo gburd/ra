@@ -1,0 +1,280 @@
+---
+id: fpga-query-acceleration
+name: "FPGA-Accelerated Query Processing"
+category: experimental/hardware-accel
+databases: [ibm-netezza, xilinx-alveo, intel-pac]
+execution_models: [fpga-accelerated]
+hardware: [fpga, cpu]
+version: "1.0.0"
+authors: ["Mueller et al. 2009 - streams on FPGAs", "Sidler et al. 2017 - network-attached FPGAs"]
+tags: [fpga, acceleration, streaming, filter, regex, near-data, reconfigurable]
+complexity: "O(n/clock_rate) for streaming, reconfiguration O(ms)"
+benefit_range: [1.0, 20.0]
+research_status: "research-production"
+maturity: "niche-production"
+---
+
+# FPGA-Accelerated Query Processing
+
+## Description
+
+FPGAs implement query operators as hardware circuits, achieving
+deterministic throughput at clock rate without instruction overhead.
+Unlike GPUs (SIMT model requiring data-parallel workloads), FPGAs
+excel at streaming operations: filters, regular expressions, parsing,
+compression/decompression, and network protocol processing. The key
+advantage is near-data processing: FPGAs can sit on the PCIe bus near
+storage or on the network path, filtering data before it reaches the
+CPU.
+
+**When to apply**: Streaming operations with high throughput
+requirements: data ingestion filtering, regex matching on text columns,
+decompression-and-scan pipelines, and network-attached acceleration
+(smart NICs). FPGAs are also used for encryption/decryption at line
+rate.
+
+**Why it works**: An FPGA running at 250 MHz can process one tuple per
+clock cycle with deep pipelines, achieving 250M tuples/sec for simple
+filters. With wide datapaths (512-bit), throughput reaches 16 GB/s per
+FPGA, matching NVMe SSD bandwidth. Unlike CPU cores that context-switch
+and branch-mispredict, FPGA pipelines deliver deterministic latency.
+
+## Relational Algebra
+
+```algebra
+-- FPGA streaming cost:
+fpga_filter_cost(R) =
+  BYTES(R) / FPGA_THROUGHPUT + RECONFIGURATION_TIME
+  where FPGA_THROUGHPUT = DATAPATH_WIDTH * CLOCK_RATE
+
+-- CPU equivalent:
+cpu_filter_cost(R) =
+  BYTES(R) / CPU_THROUGHPUT + branch_mispredict_overhead
+
+-- Near-data filtering:
+-- FPGA on storage path filters before data reaches CPU
+near_data_cost(R, selectivity) =
+  BYTES(R) / STORAGE_BW           -- read from storage
+  + selectivity * BYTES(R) / PCIE_BW  -- filtered to CPU
+
+-- Without near-data:
+standard_cost(R, selectivity) =
+  BYTES(R) / PCIE_BW              -- all data to CPU
+  + BYTES(R) / CPU_FILTER_RATE    -- CPU filters
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+struct FpgaCostModel {
+    clock_mhz: f64,
+    datapath_bits: usize,
+    reconfiguration_ms: f64,
+    pcie_bw_gbps: f64,
+    num_pipelines: usize,
+}
+
+impl FpgaCostModel {
+    fn streaming_throughput_gbps(&self) -> f64 {
+        self.clock_mhz * 1e6
+            * self.datapath_bits as f64
+            / 8.0 // bits to bytes
+            / 1e9 // to GB/s
+            * self.num_pipelines as f64
+    }
+
+    fn filter_cost(
+        &self,
+        data_bytes: f64,
+        predicate_complexity: PredicateComplexity,
+    ) -> f64 {
+        let throughput = match predicate_complexity {
+            PredicateComplexity::Simple => {
+                self.streaming_throughput_gbps()
+            }
+            PredicateComplexity::Regex => {
+                // NFA/DFA in hardware: ~50% throughput
+                self.streaming_throughput_gbps() * 0.5
+            }
+            PredicateComplexity::Complex => {
+                // Multi-stage pipeline: ~30% throughput
+                self.streaming_throughput_gbps() * 0.3
+            }
+        };
+
+        let process_time =
+            data_bytes / (throughput * 1e9) * 1000.0; // ms
+        process_time + self.reconfiguration_ms
+    }
+
+    fn near_data_benefit(
+        &self,
+        data_bytes: f64,
+        selectivity: f64,
+        storage_bw_gbps: f64,
+    ) -> NearDataAnalysis {
+        // With FPGA near storage: filter at storage speed
+        let fpga_time = data_bytes / (storage_bw_gbps * 1e9);
+        let pcie_reduced =
+            data_bytes * selectivity / (self.pcie_bw_gbps * 1e9);
+        let with_fpga = fpga_time + pcie_reduced;
+
+        // Without FPGA: all data traverses PCIe
+        let without_fpga = data_bytes / (self.pcie_bw_gbps * 1e9);
+
+        NearDataAnalysis {
+            with_fpga_s: with_fpga,
+            without_fpga_s: without_fpga,
+            speedup: without_fpga / with_fpga,
+            pcie_savings: 1.0 - selectivity,
+        }
+    }
+
+    fn should_offload(
+        &self,
+        op: &Operator,
+        data_bytes: f64,
+        cpu_throughput_gbps: f64,
+    ) -> bool {
+        match op {
+            Operator::Filter { .. } => {
+                let fpga = self.filter_cost(
+                    data_bytes,
+                    PredicateComplexity::Simple,
+                );
+                let cpu = data_bytes
+                    / (cpu_throughput_gbps * 1e9)
+                    * 1000.0;
+                fpga < cpu
+            }
+            Operator::Decompress { .. } => {
+                // FPGA excels at fixed decompression algorithms
+                data_bytes > 100.0 * 1024.0 * 1024.0 // >100 MB
+            }
+            Operator::RegexMatch { .. } => {
+                // FPGA NFA matching at line rate
+                data_bytes > 10.0 * 1024.0 * 1024.0 // >10 MB
+            }
+            _ => false, // Complex ops better on CPU
+        }
+    }
+
+    fn reconfiguration_amortization(
+        &self,
+        query_batch_size: usize,
+        data_per_query_gb: f64,
+    ) -> f64 {
+        // Reconfiguration cost amortized over batch
+        let reconfig = self.reconfiguration_ms;
+        let process =
+            data_per_query_gb * query_batch_size as f64
+                / self.streaming_throughput_gbps()
+                * 1000.0;
+        reconfig / (reconfig + process) // fraction overhead
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(system: &SystemConfig, op: &Operator) -> bool {
+    system.has_fpga()
+        && matches!(
+            op,
+            Operator::Filter { .. }
+                | Operator::Decompress { .. }
+                | Operator::RegexMatch { .. }
+                | Operator::Parse { .. }
+        )
+}
+```
+
+**Restrictions:**
+- FPGA reconfiguration takes 50-500ms (amortize over many queries)
+- Limited on-chip memory (10-100 MB BRAM/UltraRAM)
+- Complex operations (hash joins, sorts) require external DRAM
+- Development cost much higher than CPU/GPU (HDL programming)
+- Power consumption: 25-75W per FPGA vs 10-300W per GPU
+- Cloud FPGA instances available (AWS F1, Azure NP)
+
+## Cost Model
+
+```rust
+fn fpga_vs_cpu_crossover(
+    fpga_throughput_gbps: f64,
+    cpu_throughput_gbps: f64,
+    reconfig_ms: f64,
+) -> f64 {
+    // Minimum data size where FPGA beats CPU
+    // Solve: data/fpga + reconfig = data/cpu
+    if fpga_throughput_gbps <= cpu_throughput_gbps {
+        return f64::MAX; // FPGA never wins
+    }
+    reconfig_ms / 1000.0
+        * fpga_throughput_gbps
+        * cpu_throughput_gbps
+        / (fpga_throughput_gbps - cpu_throughput_gbps)
+        * 1e9 // bytes
+}
+```
+
+**Typical FPGA advantages:**
+- Regex matching: 2-10x over CPU (NFA at line rate)
+- Decompression + scan: 3-5x (fused pipeline)
+- Near-data filtering: 5-20x (PCIe bandwidth savings)
+- Network parsing: 10-40 Gbps at line rate
+
+## Test Cases
+
+### Positive: Near-data filtering with low selectivity
+
+```sql
+-- 1 TB table on NVMe (7 GB/s)
+-- Filter selectivity: 1%
+-- Without FPGA: 1 TB / 32 GB/s PCIe = 31s to CPU, then filter
+-- With FPGA at storage: 1 TB / 7 GB/s = 143s filter,
+--   10 GB / 32 GB/s = 0.3s to CPU = 143.3s total
+-- Wait - FPGA matches storage rate, so: 143s + 0.3s = 143.3s
+-- But CPU gets only 10 GB instead of 1 TB: massive PCIe savings
+-- Real benefit: CPU freed for other work, reduced memory pressure
+SELECT * FROM logs WHERE message LIKE '%ERROR%critical%'
+AND timestamp > '2025-03-01';
+```
+
+### Positive: Regex matching on text columns
+
+```sql
+-- 100 GB text data, complex regex
+-- CPU: ~2 GB/s regex throughput = 50s
+-- FPGA NFA: ~8 GB/s = 12.5s + 0.1s reconfig = 12.6s
+-- 4x improvement for hardware regex matching
+SELECT * FROM documents
+WHERE content ~ 'patent.*(?:method|system).*(?:claim|invention)';
+```
+
+### Negative: Hash join (complex, stateful)
+
+```sql
+-- Hash join requires random access to hash table
+-- FPGA on-chip memory too small for large hash tables
+-- CPU with L3 cache is better for random-access patterns
+SELECT * FROM orders o JOIN lineitem l ON o.orderkey = l.orderkey;
+```
+
+## References
+
+**FPGA query processing:**
+- Mueller et al., "Streams on Wires - A Query Compiler for FPGAs", VLDB 2009
+  - SQL-to-hardware compilation for streaming queries
+- Sidler et al., "Accelerating Pattern Matching Queries in Hybrid CPU-FPGA Architectures", SIGMOD 2017
+
+**Near-data processing:**
+- Woods et al., "Ibex: An Intelligent Storage Engine with Support for Advanced SQL Offloading", VLDB 2014
+  - Storage-level query processing with FPGA
+- Kara et al., "FPGA-Accelerated Dense Linear Machine Learning: A Precision-Convergence Trade-Off", FCCM 2017
+
+**Smart NICs and network-attached FPGAs:**
+- Firestone et al., "Azure Accelerated Networking: SmartNICs in the Public Cloud", NSDI 2018

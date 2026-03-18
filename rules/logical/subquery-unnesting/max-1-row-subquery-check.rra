@@ -1,0 +1,225 @@
+---
+id: max-1-row-subquery-check
+name: Max-1-Row Subquery Check
+category: logical/subquery-unnesting
+databases: [postgresql, mysql, oracle, mssql, duckdb]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [subquery, scalar, cardinality, validation, max-one-row]
+complexity: "O(1)"
+benefit_range: [0.1, 0.5]
+---
+
+# Max-1-Row Subquery Check
+
+## Description
+
+Validates that a scalar subquery returns at most one row, and when possible,
+statically proves the single-row property to eliminate runtime cardinality
+checks. Scalar subqueries used in SELECT lists, WHERE comparisons, or
+assignments must return exactly zero or one row; multiple rows cause a
+runtime error.
+
+**When to apply**: Any scalar subquery (used where a single value is
+expected) to either:
+1. Prove statically it returns at most one row (eliminate runtime check)
+2. Insert a runtime assertion if it cannot be proven
+3. Convert to a safe form (e.g., add LIMIT 1, use aggregate)
+
+**Why it works**: If the optimizer can prove a subquery returns at most one
+row (via unique keys, aggregates without GROUP BY, or LIMIT 1), the runtime
+cardinality check is unnecessary overhead. Eliminating it simplifies the
+plan and may enable further transformations like join conversion.
+
+## Relational Algebra
+
+```algebra
+-- Static proof: aggregate without GROUP BY always returns one row
+scalar_subquery(aggregate[agg_func](S))
+  -> scalar_value(aggregate[agg_func](S))  -- no check needed
+
+-- Static proof: unique key with equality filter
+scalar_subquery(filter[S.pk = value](S))
+  -> scalar_value(filter[S.pk = value](S))
+  where S.pk is unique/primary key
+
+-- Static proof: LIMIT 1
+scalar_subquery(limit[1](S))
+  -> scalar_value(limit[1](S))  -- at most 1 by construction
+
+-- Cannot prove: insert runtime check
+scalar_subquery(S)
+  -> assert_max_one_row(S)  -- runtime error if |S| > 1
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Aggregate without GROUP BY: always one row
+rw!("scalar-subquery-aggregate-safe";
+    "(scalar-subquery (aggregate ?agg ?input))" =>
+    "(scalar-value (aggregate ?agg ?input))"
+    if has_no_group_by("?agg")
+),
+
+// Unique key equality: at most one row
+rw!("scalar-subquery-unique-key-safe";
+    "(scalar-subquery (filter (= ?pk ?val) ?table))" =>
+    "(scalar-value (filter (= ?pk ?val) ?table))"
+    if is_unique_key("?table", "?pk")
+),
+
+// LIMIT 1: at most one row by construction
+rw!("scalar-subquery-limit-one-safe";
+    "(scalar-subquery (limit 1 ?query))" =>
+    "(scalar-value (limit 1 ?query))"
+),
+
+// Convert unsafe scalar subquery to safe form
+rw!("scalar-subquery-add-limit-safety";
+    "(scalar-subquery ?query)" =>
+    "(scalar-subquery (assert-max-one-row ?query))"
+    if cannot_prove_max_one_row("?query")
+),
+
+// Optimization: scalar subquery that is provably empty returns NULL
+rw!("scalar-subquery-empty-to-null";
+    "(scalar-subquery (filter (literal false) ?any))" =>
+    "(literal null)"
+),
+```
+
+**Restrictions:**
+- GROUP BY with a unique grouping column still returns one row per group,
+  but multiple groups overall
+- DISTINCT does not guarantee single row
+- Aggregates with HAVING may return zero rows (NULL in scalar context)
+- Subquery with UNION may return multiple rows even if each branch is scalar
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    proof_type: ProofType,
+    subquery_cost: f64,
+) -> f64 {
+    match proof_type {
+        // Static proof: remove runtime check entirely
+        ProofType::Aggregate => 0.1, // small savings from check removal
+        ProofType::UniqueKey => 0.2, // enables join conversion
+        ProofType::LimitOne => 0.1,
+        // Cannot prove: add check (negative benefit for safety)
+        ProofType::RuntimeCheck => -0.05,
+    }
+}
+```
+
+**Typical benefit**: 10-50% indirectly by enabling further transformations
+
+## Test Cases
+
+### Positive: Aggregate without GROUP BY (always one row)
+
+```sql
+SELECT e.name, e.salary,
+  (SELECT AVG(salary) FROM employees) AS avg_salary
+FROM employees e;
+
+-- AVG without GROUP BY: guaranteed one row
+-- No runtime cardinality check needed
+-- Can be safely converted to cross join
+```
+
+### Positive: Primary key lookup (at most one row)
+
+```sql
+SELECT o.id,
+  (SELECT c.name FROM customers c WHERE c.id = o.customer_id) AS cust_name
+FROM orders o;
+
+-- c.id is primary key, equality filter: at most one row
+-- Safe scalar subquery, no check needed
+-- Can be converted to LEFT JOIN
+```
+
+### Positive: LIMIT 1 makes any subquery scalar-safe
+
+```sql
+SELECT p.name,
+  (SELECT r.text FROM reviews r
+   WHERE r.product_id = p.id
+   ORDER BY r.date DESC
+   LIMIT 1) AS latest_review
+FROM products p;
+
+-- LIMIT 1 guarantees at most one row
+-- Safe without additional checks
+```
+
+### Positive: Contradictory filter (empty result)
+
+```sql
+SELECT e.name,
+  (SELECT d.budget FROM departments d
+   WHERE d.id = -1 AND d.id = -2) AS impossible
+FROM employees e;
+
+-- Contradictory conditions: always empty -> NULL
+-- Optimize to: SELECT e.name, NULL AS impossible FROM employees e;
+```
+
+### Negative: GROUP BY may produce multiple rows
+
+```sql
+SELECT e.name,
+  (SELECT AVG(salary) FROM employees
+   GROUP BY dept_id) AS dept_avg  -- ERROR at runtime
+FROM employees e;
+
+-- GROUP BY dept_id: one row per department
+-- Multiple departments -> multiple rows -> runtime error
+-- Must add LIMIT 1 or restructure query
+```
+
+### Negative: UNION of scalar subqueries
+
+```sql
+SELECT e.name,
+  (SELECT MIN(salary) FROM employees
+   UNION
+   SELECT MAX(salary) FROM employees) AS boundary
+FROM employees e;
+
+-- Each branch returns one row, but UNION returns two
+-- Runtime error: scalar subquery returns more than one row
+```
+
+### Negative: Correlated subquery with non-unique correlation
+
+```sql
+SELECT d.name,
+  (SELECT e.name FROM employees e
+   WHERE e.dept_id = d.id) AS emp_name  -- may be multiple
+FROM departments d;
+
+-- dept_id is not unique in employees
+-- Multiple employees per department -> runtime error
+-- Fix: add LIMIT 1 or use aggregate
+```
+
+## References
+
+**Academic papers:**
+- Galindo-Legaria & Joshi, "Orthogonal Optimization of Subqueries and Aggregation", SIGMOD 2001
+- Neumann & Kemper, "Unnesting Arbitrary Queries", BTW 2015
+
+**Implementation:**
+- PostgreSQL: `SS_process_ctes()` scalar subquery validation in `subselect.c`
+- Oracle: `SCALAR SUBQUERY` runtime check in CBO plan
+- SQL Server: `Assert(MaxRows=1)` operator in query plans
+- MySQL: Runtime error 1242 "Subquery returns more than 1 row"
+- DuckDB: `MaxOneRowCheck` in query binder

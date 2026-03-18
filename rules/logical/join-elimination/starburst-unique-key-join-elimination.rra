@@ -1,0 +1,323 @@
+---
+id: starburst-unique-key-join-elimination
+name: "Unique Key Join Elimination"
+category: logical/join-elimination
+databases: [postgresql, mysql, mssql, oracle, db2]
+execution_models: [volcano, vectorized]
+version: "1.0.0"
+authors: ["Pirahesh et al. (Starburst); Galindo-Legaria, Rosenthal"]
+tags: [join-elimination, unique-key, primary-key, functional-dependency, starburst, classic]
+complexity: "O(n)"
+benefit_range: [0.5, 10.0]
+---
+
+# Unique Key Join Elimination
+
+## Description
+
+Eliminates a join with a table when the join is on the table's unique/primary
+key and no columns from that table are used in the output or subsequent
+operations. Combined with referential integrity, this proves the join is a
+no-op: each input row matches exactly one row in the joined table (unique key
+guarantees at most one match, FK/NOT NULL guarantees at least one match), and
+since no columns are needed from the joined table, it can be removed.
+
+This extends the FK-based join elimination from Starburst with a focus on the
+unique key property. Even without an explicit FK constraint, if the optimizer
+can determine that the join produces exactly one match per input row (through
+UNIQUE constraints or query analysis), the join can be eliminated.
+
+**When to apply**: Queries with joins where one side has a unique constraint
+on the join column and its other columns are not referenced.
+
+**Why it works**: A join on a unique key produces at most one match per input
+row (no row duplication). If exactly-one semantics can be established (via
+FK or NOT NULL + unique on the other side), the join is a 1:1 mapping that
+only adds columns. If those columns are unused, the join has no effect.
+
+## Relational Algebra
+
+```algebra
+Conditions for elimination of table S from: pi_A(R join_{R.a = S.pk} S)
+
+1. S.pk is UNIQUE (or PRIMARY KEY)
+   => At most one S row matches each R row (no duplication)
+
+2. One of:
+   a. FK(R.a -> S.pk) AND R.a IS NOT NULL
+      => At least one S row matches each R row (no lost rows)
+   b. It's a LEFT JOIN (R LEFT JOIN S)
+      => No R rows are lost (NULLs for unmatched)
+      AND no S columns are used (NULLs don't affect output)
+
+3. A subset of columns(R)
+   => No columns from S needed in output
+
+When all three hold: pi_A(R join_{R.a = S.pk} S) = pi_A(R)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Join elimination when joined on unique key and no columns needed
+
+rw!("unique-key-join-elim-inner";
+    "(project ?cols
+       (join inner (= ?fk_col ?uk_col)
+         ?left
+         ?right))" =>
+    "(project ?cols ?left)"
+    if is_unique_key("?uk_col")
+       && foreign_key_not_null("?fk_col", "?uk_col")
+       && !uses_columns_from("?cols", "?right")
+),
+
+rw!("unique-key-join-elim-left";
+    "(project ?cols
+       (join left-outer (= ?col_l ?uk_col)
+         ?left
+         ?right))" =>
+    "(project ?cols ?left)"
+    if is_unique_key("?uk_col")
+       && !uses_columns_from("?cols", "?right")
+       && !uses_columns_from_predicates("?right")
+),
+
+// Handle the case where join is used for filtering (semi-join pattern)
+rw!("unique-key-semi-join-to-filter";
+    "(project ?cols
+       (join inner (= ?fk_col ?uk_col)
+         ?left
+         (filter ?pred ?right)))" =>
+    "(project ?cols
+       (filter (derived-pred ?fk_col ?pred) ?left))"
+    if is_unique_key("?uk_col")
+       && foreign_key_not_null("?fk_col", "?uk_col")
+       && !uses_columns_from("?cols", "?right")
+       && pred_can_be_derived("?pred", "?fk_col", "?uk_col")
+),
+
+struct UniqueKeyJoinEliminator {
+    catalog: Catalog,
+}
+
+impl UniqueKeyJoinEliminator {
+    fn try_eliminate(
+        &self,
+        join: &JoinNode,
+        projected_cols: &[Column],
+        outer_predicates: &[Predicate],
+    ) -> Option<PlanNode> {
+        // Step 1: Identify join columns
+        let (left_col, right_col) =
+            self.extract_equijoin_columns(&join.predicate)?;
+
+        // Step 2: Find which side has the unique key
+        let (fk_side, uk_side, uk_col) =
+            if self.catalog.is_unique(&right_col) {
+                (&join.left, &join.right, &right_col)
+            } else if self.catalog.is_unique(&left_col) {
+                (&join.right, &join.left, &left_col)
+            } else {
+                return None;
+            };
+
+        // Step 3: Check no columns from UK side are needed
+        let uk_table = uk_col.table();
+        let uk_cols_used = projected_cols.iter()
+            .any(|c| c.table() == uk_table)
+            || outer_predicates.iter()
+                .any(|p| p.references_table(uk_table));
+
+        if uk_cols_used {
+            return None;
+        }
+
+        // Step 4: Verify no-row-loss guarantee
+        let no_row_loss = match join.join_type {
+            JoinType::Inner => {
+                // Need FK + NOT NULL to guarantee match
+                self.catalog.has_foreign_key(
+                    &self.other_col(&left_col, &right_col, uk_col),
+                    uk_col,
+                ) && self.catalog.is_not_null(
+                    &self.other_col(&left_col, &right_col, uk_col),
+                )
+            }
+            JoinType::LeftOuter => {
+                // Left join preserves all left rows
+                // But only if UK side is on the right
+                uk_side == &join.right
+            }
+            _ => false,
+        };
+
+        if !no_row_loss {
+            return None;
+        }
+
+        // Step 5: Eliminate the join
+        Some(PlanNode::Project {
+            columns: projected_cols.to_vec(),
+            input: Box::new((**fk_side).clone()),
+        })
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    hw: &HardwareProfile,
+) -> bool {
+    // Must have unique key information
+    stats.has_unique_key_info
+        // Must have a join on a unique/primary key
+        && stats.join_on_unique_key
+        // Not all columns from the unique key table are needed
+        && stats.can_prune_unique_key_table
+}
+```
+
+**Restrictions:**
+- Unique key column must have a UNIQUE or PRIMARY KEY constraint
+- For inner join elimination: FK + NOT NULL required on the other column
+- For left join elimination: unique key side must be on the right
+- Cannot eliminate if any column from the unique key table is used later
+- Cannot eliminate if the join produces filtering effects (e.g., inner join
+  when FK column is nullable eliminates NULLs)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    // Benefit: avoid scanning the unique key table entirely
+    let uk_table_cost =
+        stats.uk_table_scan_cost + stats.join_cost;
+    let total_cost =
+        stats.fk_table_scan_cost + uk_table_cost;
+
+    if total_cost > 0.0 {
+        uk_table_cost / total_cost
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 50% to 10x (eliminates one table scan and join entirely).
+
+## Test Cases
+
+### Positive: PK join elimination with FK guarantee
+
+```sql
+-- Schema:
+-- orders(id PK, customer_id FK -> customers(id) NOT NULL, total, date)
+-- customers(id PK, name, email)
+
+SELECT o.id, o.total, o.date
+FROM orders o
+JOIN customers c ON o.customer_id = c.id;
+
+-- Conditions met:
+-- 1. customers.id is PK (unique)
+-- 2. FK(orders.customer_id -> customers.id) NOT NULL
+-- 3. Output only uses orders columns
+-- Result: SELECT o.id, o.total, o.date FROM orders o;
+```
+
+### Positive: Left join elimination
+
+```sql
+-- Same schema, but LEFT JOIN
+SELECT o.id, o.total
+FROM orders o
+LEFT JOIN customers c ON o.customer_id = c.id;
+
+-- Conditions met:
+-- 1. customers.id is PK (unique)
+-- 2. LEFT JOIN preserves all orders rows
+-- 3. Output only uses orders columns
+-- Result: SELECT o.id, o.total FROM orders o;
+```
+
+### Positive: Cascading elimination
+
+```sql
+SELECT l.quantity, l.price
+FROM lineitem l
+JOIN orders o ON l.order_id = o.id         -- o.id is PK
+JOIN customers c ON o.customer_id = c.id;  -- c.id is PK
+
+-- First eliminate customers (only o and l columns needed)
+-- Then eliminate orders (only l columns needed)
+-- Result: SELECT l.quantity, l.price FROM lineitem l;
+```
+
+### Negative: Column from unique key table needed
+
+```sql
+SELECT o.id, c.name, o.total  -- c.name needed!
+FROM orders o
+JOIN customers c ON o.customer_id = c.id;
+
+-- Cannot eliminate: c.name is from the customers table
+```
+
+### Negative: No FK guarantee (inner join may lose rows)
+
+```sql
+-- orders.customer_id is NOT a foreign key (no constraint)
+SELECT o.id, o.total
+FROM orders o
+JOIN customers c ON o.customer_id = c.id;
+
+-- Cannot eliminate inner join: some orders may have customer_id
+-- values that don't exist in customers (orphaned references)
+-- Those rows would be lost by the join
+```
+
+### Positive: DISTINCT on unique key allows elimination
+
+```sql
+-- Unique index on employees.email
+SELECT DISTINCT e.department
+FROM employees e
+JOIN email_domains d ON e.email_domain = d.domain;
+
+-- email_domains.domain has UNIQUE constraint
+-- But e.email_domain may not have FK constraint
+-- However, if INNER JOIN only filters, and we have DISTINCT:
+-- The DISTINCT absorbs any duplication effects
+-- In practice, this requires careful analysis
+```
+
+## References
+
+**Original papers:**
+- Pirahesh, H., Hellerstein, J.M., Hasan, W., "Extensible/Rule Based Query Rewrite Optimization in Starburst", ACM SIGMOD 1992
+  - DOI: 10.1145/130283.130294
+  - Section 4.2: Join elimination using integrity constraints
+
+- Galindo-Legaria, C., Rosenthal, A., "Outerjoin Simplification and Reordering for Query Optimization", ACM TODS 1997
+  - DOI: 10.1145/261124.261126
+  - Extended join elimination to outer joins with unique key analysis
+
+**Modern treatment:**
+- Larson, P.-A., Zhou, J., "View Matching for Outer-Join Views", VLDB 2005
+  - Outer join elimination using unique key + nullability analysis
+
+**Implementation in databases:**
+- PostgreSQL: `src/backend/optimizer/plan/analyzejoins.c` - remove_useless_joins()
+  - Specifically `rel_is_distinct_for()` and `join_is_removable()`
+- SQL Server: Join elimination transformation in Cascades
+- Oracle: "table elimination" optimization
+- MySQL 8.0+: Derived table/view merge with join elimination

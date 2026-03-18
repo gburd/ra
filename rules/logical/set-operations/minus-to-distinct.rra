@@ -1,0 +1,117 @@
+---
+id: calcite-minus-to-distinct
+name: Calcite MinusToDistinctRule
+category: logical/set-operations
+databases: [calcite, postgresql, mysql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [logical, calcite, minus, except, distinct, rewrite]
+complexity: O(n)
+benefit_range: [0.0, 0.3]
+---
+
+# Calcite MinusToDistinctRule
+
+## Description
+
+Translates a MINUS (EXCEPT) into a combination of UNION ALL,
+aggregate with branch indicators, and filter. Each branch is
+tagged with a branch indicator, then a grouped aggregate counts
+occurrences per branch. A final filter retains rows present in
+the first branch but absent from subsequent branches.
+
+**When to apply**: When anti-join conversion is not available or
+the plan benefits from a UNION-based approach.
+
+**Why it works**: By tagging each row with its source branch and
+counting per-branch occurrences, the filter can identify rows
+unique to the first input.
+
+**Calcite class**: `org.apache.calcite.rel.rules.MinusToDistinctRule`
+
+## Relational Algebra
+
+```algebra
+-- Before: EXCEPT
+R EXCEPT S
+
+-- After: tagged UNION with filter
+pi[cols](
+    sigma[cnt_0 > 0 AND cnt_1 = 0](
+        gamma[cols; COUNT(*) FILTER $branch=0 AS cnt_0,
+                    COUNT(*) FILTER $branch=1 AS cnt_1](
+            pi[cols, 0 AS branch](R)
+            UNION ALL
+            pi[cols, 1 AS branch](S)
+        )
+    )
+)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-minus-to-distinct";
+    "(minus ?left ?right)" =>
+    "(project ?cols
+        (filter (and (> ?cnt0 0) (= ?cnt1 0))
+            (aggregate ?cols
+                (count-filter-branch 0 1)
+                (union-all
+                    (project (add-branch 0) ?left)
+                    (project (add-branch 1) ?right)))))"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(minus: &Minus) -> bool {
+    !minus.all
+}
+```
+
+**Restrictions:**
+- Only for EXCEPT DISTINCT
+- Multi-way EXCEPT generates multiple branch indicators
+- Higher overhead than anti-join for simple cases
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    left_rows: f64,
+    right_rows: f64,
+) -> f64 {
+    // Often no direct benefit; alternative plan shape
+    0.0
+}
+```
+
+**Typical benefit**: 0-30% depending on data distribution.
+
+## Test Cases
+
+```sql
+-- Positive: EXCEPT via aggregation
+SELECT empno, ename, job FROM emp WHERE deptno = 10
+EXCEPT
+SELECT empno, ename, job FROM emp WHERE deptno = 20;
+-- Converted to tagged UNION + aggregate + filter
+```
+
+```sql
+-- Positive: multi-way EXCEPT
+SELECT deptno FROM emp
+EXCEPT
+SELECT deptno FROM temp_emp
+EXCEPT
+SELECT deptno FROM contractors;
+-- Three branches with indicators 0, 1, 2
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/MinusToDistinctRule.java (commit af6367d)

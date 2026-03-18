@@ -1,0 +1,87 @@
+---
+id: distinct-to-limit-one
+name: Distinct to Limit One
+category: logical/distinct-elimination
+databases: [postgresql, mysql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distinct, limit, scalar, optimization]
+complexity: "O(1)"
+benefit_range: [0.3, 0.7]
+---
+
+# Distinct to Limit One
+
+## Description
+
+When DISTINCT is applied to a scalar subquery or a single-row-guaranteed input (e.g., an aggregate without GROUP BY), it can be replaced with LIMIT 1 or eliminated entirely.
+
+**When to apply**: Input is guaranteed to produce at most one distinct row.
+
+**Why it works**: A scalar aggregate returns one row; DISTINCT on one row is a no-op. If input has LIMIT 1 already, DISTINCT is redundant.
+
+## Relational Algebra
+
+```algebra
+distinct(limit[1](R))
+  -> limit[1](R)
+
+distinct(aggregate[](R))
+  -> aggregate[](R)
+```
+
+## Implementation
+
+```rust
+rw!("distinct-on-limit-one";
+    "(distinct (limit 1 0 ?input))" =>
+    "(limit 1 0 ?input)"
+),
+rw!("distinct-on-scalar-agg";
+    "(distinct (aggregate () ?aggs ?input))" =>
+    "(aggregate () ?aggs ?input)"
+),
+```
+
+## Cost Model
+
+```rust
+fn benefit() -> f64 {
+    0.5 // Eliminates hash/sort dedup on tiny input
+}
+```
+
+**Typical benefit**: 30-70%
+
+## Test Cases
+
+### Positive: DISTINCT over LIMIT 1
+
+```sql
+SELECT DISTINCT * FROM users LIMIT 1;
+
+-- DISTINCT is redundant with LIMIT 1
+```
+
+### Positive: DISTINCT over scalar aggregate
+
+```sql
+SELECT DISTINCT COUNT(*) FROM orders;
+
+-- Scalar aggregate returns one row
+```
+
+### Negative: DISTINCT over multi-row result
+
+```sql
+SELECT DISTINCT name FROM users;
+
+-- Multiple rows possible; keep DISTINCT
+```
+
+## References
+
+- PostgreSQL: Simplification of trivial DISTINCT
+- DuckDB: DISTINCT elimination heuristics

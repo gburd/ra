@@ -1,0 +1,287 @@
+---
+id: adaptive-aggregation-switching
+name: Adaptive Aggregation Strategy Switching
+category: execution-models
+version: 1.0.0
+databases: [DuckDB, SQL Server, Spark]
+tags: [execution, adaptive, aggregation, hash, sort, runtime]
+standard: Adaptive aggregation
+complexity: O(input_rows)
+benefit_range: [1.2, 10.0]
+---
+
+# Adaptive Aggregation Strategy Switching
+
+## Description
+
+Adaptive aggregation switching monitors the hash table's group count growth rate during the initial phase of hash aggregation. If the number of distinct groups grows at a rate suggesting the final group count will be very large (approaching input cardinality), the executor switches from hash aggregation to sort-based aggregation. This avoids hash table memory blowup when the aggregation has low reduction (many groups relative to input rows).
+
+DuckDB implements this as a "perfect hash table" fast path for low-cardinality groups, with fallback to partitioned hash aggregation when groups exceed memory. The key insight is that the optimal aggregation strategy depends on the group count, which is often poorly estimated.
+
+**Key characteristics:**
+- **Growth rate monitoring**: Track distinct groups per N input rows processed
+- **Early switch**: Decide within first 1-5% of input to minimize wasted work
+- **Memory-bounded**: Hash table growth triggers sort fallback before OOM
+- **Partial result preservation**: Groups already computed transfer to sort path
+
+**Trade-offs:**
+- Sort-based aggregation requires full input sort (O(n log n) vs O(n))
+- Switching cost: partial hash table must be flushed and re-processed
+- False positives: premature switch wastes sort overhead on moderate group counts
+- Works best with external sort for disk spilling
+
+## Relational Algebra
+
+```
+AdaptiveAggregate(input, group_keys, agg_funcs) -> Result
+
+fn execute_adaptive_agg(input, keys, funcs):
+  ht = HashTable::new()
+  sample_size = min(input.estimated_rows() * 0.02, 10000)
+  rows_seen = 0
+
+  // Phase 1: Sample with hash aggregation
+  for row in input:
+    ht.insert_or_update(keys(row), funcs, row)
+    rows_seen += 1
+
+    if rows_seen == sample_size:
+      growth_rate = ht.group_count() / rows_seen
+      if growth_rate > HIGH_CARDINALITY_THRESHOLD:
+        return sort_aggregate(ht.drain(), input.remaining(), keys, funcs)
+
+  // Phase 2: Hash aggregation completed (groups fit in memory)
+  return ht.finalize()
+```
+
+## Implementation
+
+```rust
+/// Configuration for adaptive aggregation
+pub struct AdaptiveAggConfig {
+    /// Ratio of groups/rows above which we switch to sort
+    pub high_card_threshold: f64,
+    /// Number of rows to sample before deciding
+    pub sample_rows: usize,
+    /// Maximum hash table memory before forced switch
+    pub max_ht_memory_bytes: usize,
+}
+
+impl Default for AdaptiveAggConfig {
+    fn default() -> Self {
+        Self {
+            high_card_threshold: 0.5,
+            sample_rows: 10_000,
+            max_ht_memory_bytes: 256 * 1024 * 1024,
+        }
+    }
+}
+
+pub enum AggStrategy {
+    Hash,
+    Sort,
+    PerfectHash, // for very low cardinality (< 256 groups)
+}
+
+/// Adaptive aggregation operator
+pub struct AdaptiveAggregate {
+    input: Box<dyn Iterator<Item = Row>>,
+    group_keys: Vec<ColumnId>,
+    agg_funcs: Vec<AggFunc>,
+    config: AdaptiveAggConfig,
+}
+
+impl AdaptiveAggregate {
+    pub fn execute(&mut self) -> Result<Vec<Row>> {
+        let mut ht = AggHashTable::new(
+            &self.group_keys,
+            &self.agg_funcs,
+        );
+        let mut rows_seen: usize = 0;
+
+        // Phase 1: Sample input
+        while let Some(row) = self.input.next() {
+            ht.insert_or_update(&row);
+            rows_seen += 1;
+
+            if rows_seen == self.config.sample_rows {
+                let strategy = self.decide(
+                    ht.group_count(),
+                    rows_seen,
+                    ht.memory_usage(),
+                );
+                return match strategy {
+                    AggStrategy::Sort => {
+                        self.switch_to_sort(ht)
+                    }
+                    AggStrategy::PerfectHash => {
+                        self.switch_to_perfect(ht)
+                    }
+                    AggStrategy::Hash => {
+                        self.continue_hash(ht)
+                    }
+                };
+            }
+
+            // Memory pressure check
+            if ht.memory_usage()
+                > self.config.max_ht_memory_bytes
+            {
+                return self.switch_to_sort(ht);
+            }
+        }
+
+        // Input exhausted during sampling
+        Ok(ht.finalize())
+    }
+
+    fn decide(
+        &self,
+        groups: usize,
+        rows: usize,
+        memory: usize,
+    ) -> AggStrategy {
+        let growth_rate = groups as f64 / rows as f64;
+
+        if groups <= 256 {
+            return AggStrategy::PerfectHash;
+        }
+
+        if growth_rate > self.config.high_card_threshold {
+            return AggStrategy::Sort;
+        }
+
+        // Project final hash table size
+        let estimated_total = rows * 100; // assume 2% sample
+        let projected_groups =
+            (growth_rate * estimated_total as f64) as usize;
+        let projected_memory = projected_groups
+            * ht_entry_size(&self.group_keys, &self.agg_funcs);
+
+        if projected_memory > self.config.max_ht_memory_bytes {
+            return AggStrategy::Sort;
+        }
+
+        AggStrategy::Hash
+    }
+
+    fn continue_hash(
+        &mut self,
+        mut ht: AggHashTable,
+    ) -> Result<Vec<Row>> {
+        while let Some(row) = self.input.next() {
+            ht.insert_or_update(&row);
+        }
+        Ok(ht.finalize())
+    }
+
+    fn switch_to_sort(
+        &mut self,
+        ht: AggHashTable,
+    ) -> Result<Vec<Row>> {
+        // Drain partial aggregates from hash table
+        let mut partial = ht.drain_partial();
+
+        // Collect remaining input
+        while let Some(row) = self.input.next() {
+            partial.push(row);
+        }
+
+        // Sort by group keys and merge aggregates
+        partial.sort_by(|a, b| {
+            compare_keys(a, b, &self.group_keys)
+        });
+
+        merge_sorted_aggregates(
+            partial,
+            &self.group_keys,
+            &self.agg_funcs,
+        )
+    }
+
+    fn switch_to_perfect(
+        &mut self,
+        ht: AggHashTable,
+    ) -> Result<Vec<Row>> {
+        // Build perfect hash table (array indexed by group key)
+        let mut perfect = PerfectHashTable::from(ht);
+        while let Some(row) = self.input.next() {
+            perfect.insert_or_update(&row);
+        }
+        Ok(perfect.finalize())
+    }
+}
+
+fn ht_entry_size(
+    keys: &[ColumnId],
+    funcs: &[AggFunc],
+) -> usize {
+    // Estimate bytes per hash table entry
+    keys.len() * 8 + funcs.len() * 16 + 32 // overhead
+}
+```
+
+## Cost Model
+
+**Hash aggregation:**
+- Build: O(n) with hash overhead per row
+- Memory: O(groups * entry_size)
+- Best when: group count << input rows (high reduction)
+
+**Sort aggregation:**
+- Sort: O(n log n)
+- Merge: O(n)
+- Memory: O(sort_buffer) with disk spill
+- Best when: group count ~ input rows (low reduction)
+
+**Decision boundary:**
+- Hash wins when: `n * hash_cost < n * log(n) * sort_cost`
+- This holds when groups << n
+- Crossover at growth_rate ~ 0.3-0.7 depending on hardware
+
+**Perfect hash table:**
+- O(1) lookup via direct array index
+- Viable only for cardinality < ~256 (single-byte key)
+- 10-50x faster than generic hash table for eligible queries
+
+## Test Cases
+
+```sql
+-- Test 1: Low cardinality -> perfect hash
+SELECT status, COUNT(*)
+FROM orders GROUP BY status;
+-- ~5 distinct statuses -> perfect hash table
+-- Expected: array[5] direct indexed
+
+-- Test 2: Moderate cardinality -> hash aggregation
+SELECT customer_id, SUM(amount)
+FROM orders GROUP BY customer_id;
+-- 150K customers out of 6M orders
+-- growth_rate = 0.025 -> stay with hash
+
+-- Test 3: High cardinality -> switch to sort
+SELECT order_id, MAX(quantity)
+FROM lineitem GROUP BY order_id;
+-- 6M lineitems, 1.5M distinct order_ids
+-- growth_rate = 0.25, projected memory too large -> sort
+
+-- Test 4: Memory pressure forces switch
+SELECT CONCAT(col1, col2, col3), COUNT(*)
+FROM wide_table GROUP BY CONCAT(col1, col2, col3);
+-- Large composite keys exhaust hash table memory
+-- Adaptive: switch to external sort when memory exceeded
+```
+
+## References
+
+1. **Leis, Viktor et al**. "Morsel-Driven Parallelism." SIGMOD 2014.
+   - Adaptive aggregation in HyPer query engine
+
+2. **Raasveldt, Mark and Hannes Muhleisen**. "DuckDB: an Embeddable Analytical Database." SIGMOD 2019.
+   - Perfect hash table and adaptive aggregation in DuckDB
+
+3. **Larson, Per-Ake et al**. "SQL Server Column Store Indexes." SIGMOD 2011.
+   - Batch-mode adaptive aggregation strategies
+
+4. **Muller, Ingo et al**. "Adaptive String Dictionary Compression in In-Memory Column-Store Database Systems." EDBT 2014.
+   - Dictionary-based group detection for adaptive decisions

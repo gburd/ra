@@ -1,41 +1,329 @@
 ---
 id: network-cost-model
-name: Network Data Transfer Cost for Distributed Queries
+name: "Network Cost Model for Distributed Queries"
 category: cost-models
-version: 1.0.0
-databases: [Spark, Presto, spark]
-tags: [cost, network, distributed]
+databases: [cockroachdb, spark, presto, trino, tidb, yugabytedb]
+execution_models: [distributed]
+hardware: [network]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [cost, network, distributed, shuffle, broadcast, latency, bandwidth]
+complexity: "O(1) per data movement operator"
+benefit_range: [0.3, 0.8]
 ---
 
-# Network Data Transfer Cost
+# Network Cost Model for Distributed Queries
 
 ## Description
 
-Models network transfer costs in distributed query execution. Critical for join ordering and data movement decisions.
+Models the cost of network data transfer in distributed query execution.
+Network costs dominate distributed query performance: a single shuffle of
+a large table across a cluster can take orders of magnitude longer than
+local computation. The model captures latency, bandwidth, serialization
+overhead, and the choice between data movement strategies (broadcast,
+hash shuffle, range partition, co-located access).
+
+**When to apply**: Any distributed query where data must move between nodes.
+Determines join strategy (broadcast vs shuffle), aggregation placement
+(partial vs full), and data co-location decisions.
+
+**Why it works**: Network transfer cost is predictable from data volume,
+message count, and network characteristics. By modeling these factors,
+the optimizer can minimize data movement -- the dominant cost in
+distributed query execution.
+
+## Relational Algebra
+
+```algebra
+Cost_Network(Op) = f(data_volume, num_messages, strategy, network)
+
+Broadcast(R, N nodes):
+  cost = N * |R| / bandwidth + N * latency
+
+Hash Shuffle(R, N partitions):
+  cost = |R| * (N-1)/N / bandwidth + N * latency + serialize(R)
+
+Co-located Join(R, S):
+  cost = 0  (data already partitioned on join key)
+
+Repartition(R, new_key):
+  cost = |R| / bandwidth + N * latency + serialize(R) + deserialize(R)
+```
 
 ## Implementation
 
 ```rust
-pub struct NetworkCostModel {
-    bandwidth_gbps: f64,       // Network bandwidth
-    latency_ms: f64,           // Round-trip latency
+use ra_hardware::NetworkProfile;
+
+struct NetworkCostModel {
+    bandwidth_gbps: f64,
+    latency_us: f64,
+    num_nodes: u32,
+    serialization_cost_ns_per_byte: f64,
+    compression_ratio: f64,
 }
 
 impl NetworkCostModel {
-    pub fn transfer_cost(&self, bytes: f64, num_messages: usize) -> f64 {
-        let transfer_time = (bytes / (self.bandwidth_gbps * 1e9)) * 1000.0;
-        let latency_cost = (num_messages as f64) * self.latency_ms;
-        transfer_time + latency_cost
+    fn for_datacenter() -> Self {
+        Self {
+            bandwidth_gbps: 25.0,
+            latency_us: 50.0,
+            num_nodes: 16,
+            serialization_cost_ns_per_byte: 2.0,
+            compression_ratio: 0.4,
+        }
+    }
+
+    fn for_cloud_region() -> Self {
+        Self {
+            bandwidth_gbps: 10.0,
+            latency_us: 200.0,
+            num_nodes: 32,
+            serialization_cost_ns_per_byte: 2.0,
+            compression_ratio: 0.5,
+        }
+    }
+
+    fn for_cross_region() -> Self {
+        Self {
+            bandwidth_gbps: 1.0,
+            latency_us: 50_000.0,
+            num_nodes: 4,
+            serialization_cost_ns_per_byte: 2.0,
+            compression_ratio: 0.5,
+        }
+    }
+
+    fn broadcast_cost(&self, data_bytes: f64) -> f64 {
+        let compressed = data_bytes * self.compression_ratio;
+        let n = self.num_nodes as f64;
+
+        // Send full copy to each node
+        let transfer_us = (compressed * n)
+            / (self.bandwidth_gbps * 1e9 / 8.0)
+            * 1e6;
+        let latency_us = n * self.latency_us;
+        let serialize_us =
+            data_bytes * self.serialization_cost_ns_per_byte / 1000.0;
+
+        transfer_us + latency_us + serialize_us
+    }
+
+    fn shuffle_cost(&self, data_bytes: f64) -> f64 {
+        let compressed = data_bytes * self.compression_ratio;
+        let n = self.num_nodes as f64;
+
+        // Each node sends (N-1)/N of its data to other nodes
+        let fraction_moved = (n - 1.0) / n;
+        let transfer_us = (compressed * fraction_moved)
+            / (self.bandwidth_gbps * 1e9 / 8.0)
+            * 1e6;
+
+        // N-to-N communication: N*(N-1) messages total
+        let messages = n * (n - 1.0);
+        let latency_us = messages * self.latency_us;
+
+        // Serialization for moved data
+        let serialize_us = data_bytes
+            * fraction_moved
+            * self.serialization_cost_ns_per_byte
+            / 1000.0;
+
+        transfer_us + latency_us + serialize_us
+    }
+
+    fn join_strategy_cost(
+        &self,
+        left_bytes: f64,
+        right_bytes: f64,
+        is_colocated: bool,
+    ) -> JoinNetworkCost {
+        if is_colocated {
+            return JoinNetworkCost {
+                strategy: JoinStrategy::Colocated,
+                cost_us: 0.0,
+            };
+        }
+
+        let broadcast_small = if left_bytes < right_bytes {
+            self.broadcast_cost(left_bytes)
+        } else {
+            self.broadcast_cost(right_bytes)
+        };
+
+        let shuffle_both =
+            self.shuffle_cost(left_bytes)
+            + self.shuffle_cost(right_bytes);
+
+        if broadcast_small < shuffle_both {
+            JoinNetworkCost {
+                strategy: JoinStrategy::BroadcastSmaller,
+                cost_us: broadcast_small,
+            }
+        } else {
+            JoinNetworkCost {
+                strategy: JoinStrategy::ShuffleBoth,
+                cost_us: shuffle_both,
+            }
+        }
+    }
+
+    fn aggregation_strategy_cost(
+        &self,
+        input_bytes: f64,
+        group_count: f64,
+        avg_group_size: u32,
+    ) -> AggregationNetworkCost {
+        // Strategy 1: Partial aggregation then shuffle groups
+        let partial_output_bytes = group_count * avg_group_size as f64;
+        let partial_then_shuffle =
+            self.shuffle_cost(partial_output_bytes);
+
+        // Strategy 2: Shuffle all data then aggregate
+        let shuffle_then_agg = self.shuffle_cost(input_bytes);
+
+        if partial_then_shuffle < shuffle_then_agg {
+            AggregationNetworkCost {
+                strategy: AggStrategy::PartialThenShuffle,
+                cost_us: partial_then_shuffle,
+                reduction_ratio: partial_output_bytes / input_bytes,
+            }
+        } else {
+            AggregationNetworkCost {
+                strategy: AggStrategy::ShuffleThenAggregate,
+                cost_us: shuffle_then_agg,
+                reduction_ratio: 1.0,
+            }
+        }
+    }
+}
+
+struct JoinNetworkCost {
+    strategy: JoinStrategy,
+    cost_us: f64,
+}
+
+enum JoinStrategy {
+    Colocated,
+    BroadcastSmaller,
+    ShuffleBoth,
+}
+
+struct AggregationNetworkCost {
+    strategy: AggStrategy,
+    cost_us: f64,
+    reduction_ratio: f64,
+}
+
+enum AggStrategy {
+    PartialThenShuffle,
+    ShuffleThenAggregate,
+}
+```
+
+**Restrictions:**
+- Assumes uniform network bandwidth between all nodes
+- Does not model network congestion or contention
+- Compression ratio assumed constant (varies by data type)
+- Cross-rack vs intra-rack latency not distinguished
+- TCP window size and connection overhead not modeled
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    query: &DistributedQuery,
+    network_model: &NetworkCostModel,
+    naive_model: &NaiveNetworkModel,
+) -> f64 {
+    // Network-aware optimizer picks broadcast vs shuffle
+    let aware_plan = optimize_with(query, network_model);
+    let aware_cost = aware_plan.network_cost_us();
+
+    // Naive: always shuffle both sides
+    let naive_plan = optimize_naive(query);
+    let naive_cost = naive_plan.network_cost_us();
+
+    if naive_cost > aware_cost {
+        (naive_cost - aware_cost) / naive_cost
+    } else {
+        0.0
     }
 }
 ```
 
-## Cost Model
+**Assumptions:**
+- Network bandwidth is the bottleneck (not CPU or disk)
+- Compression available and effective
+- All nodes have symmetric connectivity
+- Serialization format is efficient (Protobuf, Arrow IPC)
 
-- Bandwidth: 1-100 Gbps
-- Latency: 0.1-10ms
-- Trade-off: broadcast vs shuffle vs co-located
+**Typical benefit**: 30-80% reduction in query time when broadcast join
+replaces shuffle for skewed size ratios. Co-location eliminates network
+cost entirely for pre-partitioned data.
+
+## Test Cases
+
+### Test 1: Broadcast vs shuffle crossover
+
+```sql
+-- 16-node cluster, 25 Gbps network
+-- Small dimension: 100MB, Large fact: 10GB
+
+-- Broadcast small: 100MB * 16 * 0.4 / 3.125GB/s = 0.2s + 0.8ms latency
+-- Shuffle both: (10GB + 100MB) * 15/16 * 0.4 / 3.125GB/s = 1.9s
+-- Broadcast wins by 9.5x
+```
+
+### Test 2: Large-large join
+
+```sql
+-- Both tables: 50GB each, 16 nodes
+-- Broadcast either: 50GB * 16 * 0.4 / 3.125GB/s = 102s
+-- Shuffle both: (50GB + 50GB) * 15/16 * 0.4 / 3.125GB/s = 12s
+-- Shuffle wins (neither side small enough to broadcast)
+```
+
+### Test 3: Co-located join
+
+```sql
+-- orders and lineitem both partitioned on orderkey, same partition count
+-- Network cost: 0 (all join partners are local)
+-- This is the ideal case for pre-partitioned (co-located) tables
+```
+
+### Test 4: Partial aggregation benefit
+
+```sql
+SELECT region, SUM(amount) FROM sales GROUP BY region;
+-- sales: 100GB across 16 nodes, 50 regions
+
+-- Shuffle then aggregate: 100GB * 15/16 * 0.4 / 3.125GB/s = 19.2s
+-- Partial then shuffle: 50 * 100B * 15/16 / 3.125GB/s = ~0s
+-- Partial aggregation reduces network by 99.99%
+```
+
+### Test 5: Cross-region penalty
+
+```sql
+-- Same 100MB broadcast but across regions (1 Gbps, 50ms latency)
+-- Datacenter: 100MB * 16 * 0.4 / 3.125GB/s = 0.2s
+-- Cross-region: 100MB * 4 * 0.5 / 0.125GB/s = 1.6s + 200ms
+-- 9x slower even with fewer nodes and less data
+```
 
 ## References
 
-1. Ching et al., "One Trillion Edges: Graph Processing at Facebook", VLDB 2015
+**Distributed query optimization:**
+- Kossmann, "The State of the Art in Distributed Query Processing", ACM Computing Surveys 2000
+- Ching et al., "One Trillion Edges: Graph Processing at Facebook", VLDB 2015
+
+**Modern implementations:**
+- Spark: catalyst optimizer broadcast threshold (`spark.sql.autoBroadcastJoinThreshold`)
+- Presto/Trino: cost-based optimizer with network cost modeling
+- CockroachDB: distributed SQL optimizer with locality-aware planning
+- TiDB: MPP framework with broadcast/shuffle selection
+
+**Network-aware optimization:**
+- Zhu et al., "Looking Ahead Makes Query Plans Robust", VLDB 2017
+- Trummer & Koch, "Multi-Objective Parametric Query Optimization", SIGMOD 2014

@@ -169,6 +169,50 @@ impl Dialect {
     pub fn supports_recursive_cte(self) -> bool {
         true
     }
+
+    /// Whether this dialect supports named windows
+    /// (`WINDOW w AS (...)`).
+    #[must_use]
+    pub fn supports_named_windows(self) -> bool {
+        match self {
+            Self::PostgreSql | Self::MySql | Self::DuckDb => true,
+            Self::Sqlite | Self::MsSql | Self::Oracle => false,
+        }
+    }
+
+    /// Whether this dialect supports the GROUPS frame mode
+    /// in window functions.
+    #[must_use]
+    pub fn supports_window_frame_groups(self) -> bool {
+        match self {
+            Self::PostgreSql | Self::DuckDb | Self::Sqlite => true,
+            Self::MySql | Self::MsSql | Self::Oracle => false,
+        }
+    }
+
+    /// Whether this dialect supports DISTINCT ON
+    /// (`PostgreSQL` extension).
+    #[must_use]
+    pub fn supports_distinct_on(self) -> bool {
+        matches!(self, Self::PostgreSql | Self::DuckDb)
+    }
+
+    /// Whether this dialect uses TOP N instead of LIMIT
+    /// for row limiting.
+    #[must_use]
+    pub fn uses_top(self) -> bool {
+        matches!(self, Self::MsSql)
+    }
+
+    /// Whether this dialect supports NULLS FIRST/LAST in
+    /// ORDER BY.
+    #[must_use]
+    pub fn supports_nulls_first_last(self) -> bool {
+        match self {
+            Self::PostgreSql | Self::DuckDb | Self::Oracle => true,
+            Self::MySql | Self::Sqlite | Self::MsSql => false,
+        }
+    }
 }
 
 /// Feature support level for a dialect.
@@ -225,6 +269,20 @@ pub enum SqlFeature {
     CurrentTimestamp,
     /// Date extraction.
     DateExtract,
+    /// Window functions (`ROW_NUMBER`, RANK, etc.).
+    WindowFunctions,
+    /// Common Table Expressions (WITH clause).
+    Cte,
+    /// Recursive CTEs (WITH RECURSIVE).
+    RecursiveCte,
+    /// SELECT DISTINCT.
+    Distinct,
+    /// HAVING clause.
+    Having,
+    /// Subqueries (scalar, EXISTS, IN).
+    Subquery,
+    /// ORDER BY clause.
+    OrderBy,
 }
 
 impl fmt::Display for SqlFeature {
@@ -245,6 +303,13 @@ impl fmt::Display for SqlFeature {
             Self::Substring => "SUBSTRING",
             Self::CurrentTimestamp => "CURRENT_TIMESTAMP",
             Self::DateExtract => "EXTRACT",
+            Self::WindowFunctions => "Window Functions",
+            Self::Cte => "CTE (WITH)",
+            Self::RecursiveCte => "RECURSIVE CTE",
+            Self::Distinct => "DISTINCT",
+            Self::Having => "HAVING",
+            Self::Subquery => "Subqueries",
+            Self::OrderBy => "ORDER BY",
         };
         write!(f, "{name}")
     }
@@ -262,7 +327,10 @@ pub fn feature_support(dialect: Dialect, feature: SqlFeature) -> FeatureSupport 
         // Emulated features
         (Dialect::MsSql | Dialect::Oracle, SqlFeature::Limit | SqlFeature::Offset)
         | (Dialect::MySql | Dialect::Sqlite, SqlFeature::Fetch)
-        | (Dialect::Sqlite | Dialect::MsSql | Dialect::Oracle, SqlFeature::BooleanLiterals)
+        | (
+            Dialect::Sqlite | Dialect::MsSql | Dialect::Oracle,
+            SqlFeature::BooleanLiterals,
+        )
         | (Dialect::MySql | Dialect::MsSql, SqlFeature::ConcatOperator)
         | (
             Dialect::MySql | Dialect::Sqlite | Dialect::MsSql | Dialect::Oracle,
@@ -270,9 +338,17 @@ pub fn feature_support(dialect: Dialect, feature: SqlFeature) -> FeatureSupport 
         )
         | (Dialect::Oracle, SqlFeature::Except)
         | (Dialect::MsSql, SqlFeature::Length)
-        | (Dialect::Sqlite, SqlFeature::DateExtract) => FeatureSupport::Emulated,
+        | (
+            Dialect::Sqlite,
+            SqlFeature::DateExtract | SqlFeature::WindowFunctions,
+        )
+        | (Dialect::MySql, SqlFeature::WindowFunctions) => {
+            FeatureSupport::Emulated
+        }
 
-        // Everything else is natively supported
+        // Everything else is natively supported (CTE, Recursive CTE,
+        // Distinct, Having, Subquery, OrderBy are universal across
+        // all 6 supported dialects at their minimum versions)
         _ => FeatureSupport::Native,
     }
 }
@@ -353,5 +429,91 @@ mod tests {
     fn sql_feature_display() {
         assert_eq!(SqlFeature::Limit.to_string(), "LIMIT");
         assert_eq!(SqlFeature::ConcatOperator.to_string(), "|| Concat");
+        assert_eq!(
+            SqlFeature::WindowFunctions.to_string(),
+            "Window Functions"
+        );
+        assert_eq!(SqlFeature::Cte.to_string(), "CTE (WITH)");
+        assert_eq!(SqlFeature::Distinct.to_string(), "DISTINCT");
+    }
+
+    #[test]
+    fn window_function_support() {
+        assert_eq!(
+            feature_support(Dialect::PostgreSql, SqlFeature::WindowFunctions),
+            FeatureSupport::Native
+        );
+        assert_eq!(
+            feature_support(Dialect::MySql, SqlFeature::WindowFunctions),
+            FeatureSupport::Emulated
+        );
+        assert_eq!(
+            feature_support(Dialect::Sqlite, SqlFeature::WindowFunctions),
+            FeatureSupport::Emulated
+        );
+    }
+
+    #[test]
+    fn cte_support() {
+        for dialect in &Dialect::ALL {
+            assert_eq!(
+                feature_support(*dialect, SqlFeature::Cte),
+                FeatureSupport::Native,
+                "CTE should be native for {dialect}"
+            );
+            assert_eq!(
+                feature_support(*dialect, SqlFeature::RecursiveCte),
+                FeatureSupport::Native,
+                "Recursive CTE should be native for {dialect}"
+            );
+        }
+    }
+
+    #[test]
+    fn universal_features() {
+        for dialect in &Dialect::ALL {
+            assert_eq!(
+                feature_support(*dialect, SqlFeature::Distinct),
+                FeatureSupport::Native,
+                "DISTINCT should be native for {dialect}"
+            );
+            assert_eq!(
+                feature_support(*dialect, SqlFeature::Having),
+                FeatureSupport::Native,
+                "HAVING should be native for {dialect}"
+            );
+            assert_eq!(
+                feature_support(*dialect, SqlFeature::Subquery),
+                FeatureSupport::Native,
+                "Subquery should be native for {dialect}"
+            );
+            assert_eq!(
+                feature_support(*dialect, SqlFeature::OrderBy),
+                FeatureSupport::Native,
+                "ORDER BY should be native for {dialect}"
+            );
+        }
+    }
+
+    #[test]
+    fn named_windows_support() {
+        assert!(Dialect::PostgreSql.supports_named_windows());
+        assert!(Dialect::MySql.supports_named_windows());
+        assert!(!Dialect::MsSql.supports_named_windows());
+        assert!(!Dialect::Oracle.supports_named_windows());
+    }
+
+    #[test]
+    fn distinct_on_support() {
+        assert!(Dialect::PostgreSql.supports_distinct_on());
+        assert!(Dialect::DuckDb.supports_distinct_on());
+        assert!(!Dialect::MySql.supports_distinct_on());
+    }
+
+    #[test]
+    fn nulls_first_last_support() {
+        assert!(Dialect::PostgreSql.supports_nulls_first_last());
+        assert!(!Dialect::MySql.supports_nulls_first_last());
+        assert!(!Dialect::MsSql.supports_nulls_first_last());
     }
 }

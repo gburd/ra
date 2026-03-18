@@ -124,6 +124,25 @@ fn hash_rel_expr(expr: &RelExpr, hasher: &mut impl std::hash::Hasher) {
             hash_rel_expr(left, hasher);
             hash_rel_expr(right, hasher);
         }
+        RelExpr::CTE {
+            name,
+            definition,
+            body,
+        } => {
+            name.hash(hasher);
+            hash_rel_expr(definition, hasher);
+            hash_rel_expr(body, hasher);
+        }
+        RelExpr::Window { functions, input } => {
+            functions.len().hash(hasher);
+            hash_rel_expr(input, hasher);
+        }
+        RelExpr::Distinct { input } => {
+            hash_rel_expr(input, hasher);
+        }
+        RelExpr::Values { rows } => {
+            rows.len().hash(hasher);
+        }
     }
 }
 

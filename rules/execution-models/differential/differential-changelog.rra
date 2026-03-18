@@ -1,45 +1,128 @@
 ---
 id: differential-changelog
-name: Differential changelog
+name: Differential Changelog Representation
 category: execution-models
 version: 1.0.0
-databases: [materialize, spark]
-tags: [execution, differential, streaming, incremental]
+databases: [Materialize, Differential Dataflow, Debezium]
+authors: [Frank McSherry]
+tags: [execution, differential, changelog, cdc, change-data-capture, stream]
+standard: Differential Dataflow
 ---
 
-# Differential changelog
+# Differential Changelog Representation
 
 ## Description
 
-Change log processing for incremental view maintenance.
+In differential dataflow, all data is represented as a changelog: a stream of (data, time, diff) triples. Insertions have diff=+1, deletions have diff=-1, and updates are a retraction followed by an insertion. This representation means every operator works identically on initial loads and incremental updates, and maps directly to Change Data Capture (CDC) streams from upstream databases.
+
+**Changelog entry format:**
+- `(data, time, +1)` : insertion
+- `(data, time, -1)` : retraction (deletion)
+- `(data, time, +n)` : n copies inserted (multiset)
+
+**Key characteristics:**
+- **Unified model**: Initial load and incremental updates use same format
+- **Multiset semantics**: Diff can be any integer
+- **Composable**: Output changelog feeds into next operator
+- **CDC compatible**: Maps from database WAL/binlog
+- **Consolidation**: Merge entries to cancel +1/-1 pairs
 
 ## Implementation
 
 ```rust
-pub struct Differentialchangelog {
-    state: StreamingState,
-    changes: Vec<Change>,
+/// Change in a differential collection
+#[derive(Clone)]
+pub struct Change<D> {
+    pub data: D,
+    pub time: Timestamp,
+    pub diff: i64,
 }
 
-impl Differentialchangelog {
-    pub fn process_changes(&mut self, input: Vec<Change>) -> Vec<Change> {
-        // Incremental processing
-        let mut output = Vec::new();
-        for change in input {
-            output.extend(self.apply_change(change));
+pub struct Changelog<D> {
+    entries: Vec<Change<D>>,
+}
+
+impl<D: Eq + Ord + Clone> Changelog<D> {
+    pub fn filter<F: Fn(&D) -> bool>(&self, pred: F) -> Changelog<D> {
+        Changelog {
+            entries: self.entries.iter()
+                .filter(|c| pred(&c.data))
+                .cloned()
+                .collect(),
         }
-        output
+    }
+
+    pub fn consolidate(&mut self) {
+        self.entries.sort_by(|a, b| {
+            a.data.cmp(&b.data).then(a.time.cmp(&b.time))
+        });
+        let mut write = 0;
+        for read in 1..self.entries.len() {
+            if self.entries[write].data == self.entries[read].data
+                && self.entries[write].time == self.entries[read].time
+            {
+                self.entries[write].diff += self.entries[read].diff;
+            } else {
+                if self.entries[write].diff != 0 { write += 1; }
+                self.entries[write] = self.entries[read].clone();
+            }
+        }
+        self.entries.truncate(write + 1);
+        self.entries.retain(|e| e.diff != 0);
+    }
+
+    pub fn from_cdc(events: Vec<CdcEvent<D>>) -> Self {
+        let entries = events.into_iter().flat_map(|e| match e {
+            CdcEvent::Insert { row, ts } =>
+                vec![Change { data: row, time: ts.into(), diff: 1 }],
+            CdcEvent::Delete { row, ts } =>
+                vec![Change { data: row, time: ts.into(), diff: -1 }],
+            CdcEvent::Update { old, new, ts } => vec![
+                Change { data: old, time: ts.into(), diff: -1 },
+                Change { data: new, time: ts.into(), diff: 1 },
+            ],
+        }).collect();
+        Changelog { entries }
+    }
+
+    pub fn materialize_at(&self, time: &Timestamp) -> Vec<(D, i64)> {
+        let mut state: HashMap<D, i64> = HashMap::new();
+        for c in &self.entries {
+            if &c.time <= time {
+                *state.entry(c.data.clone()).or_default() += c.diff;
+            }
+        }
+        state.into_iter().filter(|(_, d)| *d > 0).collect()
     }
 }
 ```
 
 ## Cost Model
 
-- Update cost: O(changes) not O(data)
-- 100-1000x faster than recomputation
-- State size: O(active_data)
+**Append:** O(1) per change
+**Consolidation:** O(N log N) sort + O(N) merge, amortized O(log N) per change
+**Memory:** After consolidation, only net-positive entries survive
+**CDC Ingestion:** INSERT=1 entry, DELETE=1 entry, UPDATE=2 entries
+
+## Test Cases
+
+```sql
+-- Test 1: Insert/delete changelog
+INSERT INTO orders VALUES (1, 100); -- (1,100, t1, +1)
+DELETE FROM orders WHERE id = 1;    -- (1,100, t2, -1)
+-- After consolidation at t2: empty (diffs cancel)
+
+-- Test 2: Update as retract + insert
+UPDATE orders SET amount = 200 WHERE id = 1;
+-- Entries: (1,100, t3, -1), (1,200, t3, +1)
+
+-- Test 3: Materialize view from changelog
+CREATE MATERIALIZED VIEW active AS SELECT * FROM users WHERE active;
+-- Each CDC event produces filtered changelog entries
+```
 
 ## References
 
-1. McSherry et al., "Differential Dataflow", CIDR 2013
-2. Materialize documentation
+1. **McSherry, Frank et al**. "Differential Dataflow." CIDR 2013.
+2. **Kleppmann, Martin**. "Designing Data-Intensive Applications." O'Reilly 2017. (CDC patterns)
+3. **Materialize Documentation**. "Sources and Sinks."

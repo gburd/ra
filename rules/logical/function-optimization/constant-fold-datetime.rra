@@ -1,0 +1,63 @@
+---
+id: constant-fold-datetime
+name: Constant Fold DateTime Functions
+category: logical/function-optimization
+databases: [postgresql, mysql, oracle]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [logical, function, constant-folding, datetime, optimization]
+complexity: O(1)
+benefit_range: [0.01, 0.1]
+---
+
+# Constant Fold DateTime Functions
+
+## Description
+
+Evaluates date/time functions with all-constant arguments at plan
+time. DATE_TRUNC, EXTRACT, and date arithmetic on constants are
+replaced with literal results.
+
+**When to apply**: A datetime function has all constant arguments
+(no column references, no non-deterministic functions like NOW()).
+
+## Implementation
+
+```rust
+rw!("constant-fold-date-trunc";
+    "(date-trunc ?unit ?ts)" =>
+    "(literal (eval-date-trunc ?unit ?ts))"
+    if is_constant("?unit") if is_constant("?ts")
+),
+rw!("constant-fold-extract";
+    "(extract ?field ?ts)" =>
+    "(literal (eval-extract ?field ?ts))"
+    if is_constant("?field") if is_constant("?ts")
+),
+rw!("constant-fold-date-add";
+    "(date-add ?date ?interval)" =>
+    "(literal (eval-date-add ?date ?interval))"
+    if is_constant("?date") if is_constant("?interval")
+),
+```
+
+## Test Cases
+
+```sql
+-- Positive: DATE_TRUNC of constant
+SELECT DATE_TRUNC('month', TIMESTAMP '2024-06-15 10:30:00');
+-- Folded to: '2024-06-01 00:00:00'
+
+-- Positive: EXTRACT of constant
+SELECT EXTRACT(YEAR FROM DATE '2024-06-15');
+-- Folded to: 2024
+
+-- Negative: NOW() is non-deterministic
+SELECT DATE_TRUNC('day', NOW());
+-- Cannot fold: NOW() changes per invocation
+```
+
+## References
+
+- functions.toml: DATE_TRUNC, EXTRACT marked constant_foldable = true
+- Note: NOW(), CURRENT_TIMESTAMP are NOT constant_foldable

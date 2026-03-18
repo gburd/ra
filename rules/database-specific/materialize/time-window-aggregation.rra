@@ -1,0 +1,174 @@
+---
+id: materialize-time-window-aggregation
+name: Materialize Time-Window Aggregation
+category: database-specific/materialize
+databases: [materialize]
+execution_models: [differential]
+version: "1.0.0"
+authors: ["Materialize Inc."]
+tags: [time-window, aggregation, temporal, streaming, differential]
+complexity: "O(changes * log w)"
+benefit_range: [0.3, 10.0]
+---
+
+# Materialize Time-Window Aggregation
+
+## Description
+
+Optimizes time-windowed aggregations in Materialize by pushing temporal filter
+predicates into the dataflow so that arrangements only maintain data within the
+active time window. Instead of computing aggregates over the full history and
+then filtering, the optimizer ensures that data outside the window is retracted
+from arrangements as time advances.
+
+**When to apply**: SQL views with aggregations over time-bounded data, such as
+"last 1 hour" or "today's data". The temporal filter establishes a sliding
+window, and the optimizer propagates this window constraint through the dataflow
+to minimize maintained state.
+
+**Why it works**: Without temporal optimization, a Materialize arrangement for
+`SELECT COUNT(*) FROM events WHERE ts > now() - INTERVAL '1 hour'` would grow
+unboundedly as new events arrive. With temporal filter pushdown, the arrangement
+only maintains events within the 1-hour window, and expired events are retracted
+automatically as the system time advances.
+
+## Relational Algebra
+
+```algebra
+-- Before: unbounded arrangement + late temporal filter
+gamma[count(*)](
+  sigma[ts > now() - 1h](
+    arrangement(events)))
+
+-- After: temporally-bounded arrangement
+gamma[count(*)](
+  temporal-arrangement(events, window=1h, key=ts))
+
+-- Arrangement size bounded by O(events_per_hour) instead of O(total_events)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("materialize-temporal-filter-into-arrangement";
+    "(reduce ?agg-expr
+       (filter (> ?ts-col (mz-now-minus ?interval))
+          (get ?source)))" =>
+    "(reduce ?agg-expr
+       (temporal-filter ?ts-col ?interval
+          (get ?source)))"
+    if is_temporal_predicate("?ts-col", "?interval")
+),
+
+rw!("materialize-temporal-join-pushdown";
+    "(join ?type ?pred
+       (temporal-filter ?ts ?interval ?left)
+       ?right)" =>
+    "(temporal-join ?type ?pred ?ts ?interval
+       ?left ?right)"
+    if join_preserves_temporal_filter("?pred", "?ts")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> bool {
+    stats.has_temporal_filter
+        && stats.temporal_column_is_mz_now_comparable
+        && stats.data_rate > 0.0  // streaming source
+}
+```
+
+**Restrictions:**
+- Temporal filters must reference `mz_now()` or a comparable timestamp function
+- Non-monotonic time columns (e.g., event_time vs processing_time) require care
+- Window must be a constant interval (dynamic windows not supported)
+- Temporal filter pushdown interacts with join ordering
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let total_rows = stats.total_source_rows as f64;
+    let window_rows = stats.estimated_window_rows as f64;
+
+    // Memory savings from bounded arrangement
+    let unbounded_memory = total_rows * stats.avg_row_bytes as f64;
+    let bounded_memory = window_rows * stats.avg_row_bytes as f64;
+
+    // Processing savings: fewer retractions to propagate
+    let retractions_saved = total_rows - window_rows;
+
+    (unbounded_memory - bounded_memory) / unbounded_memory
+}
+```
+
+**Typical benefit**: 30% to 10x memory reduction; proportional to history/window ratio.
+
+## Test Cases
+
+### Positive: Sliding window COUNT
+
+```sql
+-- Count events in last hour (temporal filter pushed down)
+CREATE MATERIALIZED VIEW hourly_count AS
+SELECT sensor_id, COUNT(*) AS cnt
+FROM events
+WHERE mz_now() <= ts + INTERVAL '1 hour'
+GROUP BY sensor_id;
+
+-- Arrangement only holds last hour of events per sensor
+-- Memory bounded regardless of total history
+-- Expired rows retracted automatically as mz_now() advances
+```
+
+### Positive: Temporal join with windowed data
+
+```sql
+-- Join recent orders with products
+CREATE MATERIALIZED VIEW recent_order_details AS
+SELECT o.id, o.amount, p.name
+FROM orders o
+JOIN products p ON o.product_id = p.id
+WHERE mz_now() <= o.created_at + INTERVAL '24 hours';
+
+-- Temporal filter pushed through join
+-- Orders arrangement only holds last 24 hours
+-- Products arrangement is full (no temporal bound)
+```
+
+### Negative: Non-temporal predicate
+
+```sql
+-- Static filter: not a temporal window
+CREATE MATERIALIZED VIEW active_users AS
+SELECT * FROM users WHERE status = 'active';
+
+-- No mz_now() reference; arrangement is unbounded
+-- Cannot apply temporal optimization
+```
+
+## References
+
+**Implementation:**
+- Materialize source: `src/transform/src/canonicalize_mfp.rs`
+- Temporal filter detection: `src/transform/src/normalize_lets.rs`
+- MzNow handling: `src/repr/src/adt/mz_acl_item.rs`
+
+**Documentation:**
+- Materialize docs: "Temporal Filters"
+  - https://materialize.com/docs/sql/patterns/temporal-filters/
+
+**Papers:**
+- McSherry, F., et al., "Differential Dataflow", CIDR 2013
+- Abadi, D.J., et al., "The Design of the Borealis Stream Processing Engine",
+  CIDR 2005

@@ -1,0 +1,216 @@
+---
+id: differential-retraction-handling
+name: Differential Retraction Handling
+category: execution-models/differential
+version: "1.0.0"
+databases: [materialize, differential-dataflow]
+authors: ["Frank McSherry"]
+tags: [execution, differential, retraction, correction, incremental]
+complexity: "O(retractions * fanout)"
+benefit_range: [0.3, 10.0]
+---
+
+# Differential Retraction Handling
+
+## Description
+
+Implements correct propagation of retractions (negative diffs) through dataflow
+operators. When an input row is retracted (deleted or updated), all downstream
+effects of that row must be undone. Each operator must produce matching negative
+outputs for every positive output that was previously derived from the retracted
+input.
+
+**Key concepts:**
+- **Retraction**: A (data, time, diff=-1) triple that cancels a prior insertion
+- **Update**: Modeled as retraction of old value + insertion of new value
+- **Retraction propagation**: Each operator maps input retractions to output
+  retractions using the same logic as forward processing
+- **Correctness invariant**: At any time T, the consolidated collection equals
+  the result of running the query from scratch on the input at time T
+
+**Why this matters**: Incorrect retraction handling is the most common source
+of bugs in incremental view maintenance. If a join produced 5 output rows from
+a retracted input row, all 5 must be retracted. Missing retractions cause
+phantom rows; extra retractions cause negative multiplicities.
+
+## Relational Algebra
+
+```
+Retraction through filter:
+  Input: (data, time, diff=-1)
+  If predicate(data): emit (data, time, -1)
+  If !predicate(data): emit nothing (row was already filtered out)
+
+Retraction through join:
+  Input left retraction: (key, val_L, time, diff=-1)
+  For each (val_R, time_R, diff_R) in right_arrangement[key]:
+    emit (joined, join(time, time_R), -1 * diff_R)
+
+Retraction through aggregation:
+  Input: (group_key, val, time, diff=-1)
+  Old aggregate: agg_old = running_aggregate[group_key]
+  New aggregate: agg_new = agg_old - contribution(val)
+  Emit: (group_key, agg_old, time, -1)  // retract old aggregate
+  Emit: (group_key, agg_new, time, +1)  // insert new aggregate
+```
+
+## Implementation
+
+```rust
+/// Retraction-aware filter operator
+pub fn filter_with_retractions<T: Timestamp>(
+    input: &[(Row, T, Diff)],
+    predicate: &dyn Fn(&Row) -> bool,
+) -> Vec<(Row, T, Diff)> {
+    input.iter()
+        .filter(|(row, _, _)| predicate(row))
+        .cloned()
+        .collect()
+    // Retractions (diff=-1) pass through if they match predicate
+    // This correctly undoes previously emitted positive outputs
+}
+
+/// Retraction-aware join operator
+pub fn join_with_retractions<T: Timestamp>(
+    changes: &[(Key, Value, T, Diff)],
+    other_arrangement: &Arrangement<T>,
+) -> Vec<(JoinedRow, T, Diff)> {
+    let mut output = Vec::new();
+
+    for (key, val, time, diff) in changes {
+        // Look up matches in the other side's arrangement
+        for (other_val, other_time, other_diff) in
+            other_arrangement.lookup(key)
+        {
+            let out_time = time.join(&other_time);
+            // Multiply diffs: retraction * positive = retraction
+            let out_diff = diff * other_diff;
+
+            output.push((
+                join_values(val, &other_val),
+                out_time,
+                out_diff,
+            ));
+        }
+    }
+
+    output
+}
+
+/// Retraction-aware aggregation (hardest case)
+pub fn aggregate_with_retractions<T: Timestamp>(
+    changes: &[(Key, Value, T, Diff)],
+    state: &mut HashMap<Key, AggregateState>,
+) -> Vec<(Key, AggResult, T, Diff)> {
+    let mut output = Vec::new();
+
+    for (key, val, time, diff) in changes {
+        let agg_state = state.entry(key.clone())
+            .or_insert_with(AggregateState::new);
+
+        // Retract old aggregate value
+        let old_result = agg_state.current_result();
+        if let Some(old) = old_result {
+            output.push((key.clone(), old, time.clone(), -1));
+        }
+
+        // Apply change (insertion or retraction)
+        agg_state.apply(val, *diff);
+
+        // Emit new aggregate value
+        let new_result = agg_state.current_result();
+        if let Some(new) = new_result {
+            output.push((key.clone(), new, time.clone(), 1));
+        }
+    }
+
+    output
+}
+
+/// Aggregate state that correctly handles retractions
+pub struct AggregateState {
+    count: i64,       // Can go negative during processing
+    sum: f64,
+    min_heap: BTreeMap<Value, i64>,  // value -> multiplicity
+}
+
+impl AggregateState {
+    pub fn apply(&mut self, val: &Value, diff: Diff) {
+        self.count += diff as i64;
+        self.sum += val.as_f64() * diff as f64;
+        *self.min_heap.entry(val.clone()).or_insert(0) += diff as i64;
+        // Clean up zero-multiplicity entries
+        self.min_heap.retain(|_, &mut mult| mult != 0);
+    }
+
+    pub fn current_result(&self) -> Option<AggResult> {
+        if self.count <= 0 {
+            None // Group is empty
+        } else {
+            Some(AggResult {
+                count: self.count,
+                sum: self.sum,
+                min: self.min_heap.keys().next().cloned(),
+            })
+        }
+    }
+}
+```
+
+## Cost Model
+
+**Filter retractions:** O(1) per retraction (same as forward path)
+
+**Join retractions:**
+- Per retraction: O(matches) lookups in opposite arrangement
+- Same cost as forward join, but produces negative diffs
+- Cascading: retraction in A causes retractions in A JOIN B JOIN C
+
+**Aggregation retractions:**
+- Per retraction: O(1) for SUM/COUNT, O(log N) for MIN/MAX
+- Emits 2 changes per input change (retract old + insert new aggregate)
+- This 2x amplification is fundamental to differential aggregation
+
+**Cascading cost:**
+- A single input retraction can cascade through N operators
+- Total output changes: O(retraction * product_of_fanouts)
+- Worst case: retraction of hub node in star join
+
+## Test Cases
+
+```sql
+-- Test 1: Simple retraction through filter
+-- Insert (id=1, status="active") at time 1
+-- Retract (id=1, status="active") at time 2 (DELETE)
+-- Filter WHERE status="active" emits:
+--   (id=1, time=1, diff=+1) then (id=1, time=2, diff=-1)
+
+-- Test 2: Retraction through join
+CREATE MATERIALIZED VIEW order_details AS
+SELECT o.id, c.name FROM orders o JOIN customers c ON o.cid = c.id;
+-- DELETE FROM customers WHERE id = 42;
+-- Must retract ALL order_details rows where cid=42
+
+-- Test 3: Update = retraction + insertion
+-- UPDATE customers SET name = 'Bob' WHERE id = 42;
+-- Produces: (42, 'Alice', time, -1) and (42, 'Bob', time, +1)
+-- Downstream join sees both changes and updates its output
+
+-- Test 4: Aggregation retraction
+CREATE MATERIALIZED VIEW dept_count AS
+SELECT dept, COUNT(*) FROM employees GROUP BY dept;
+-- DELETE FROM employees WHERE id = 100; (dept='Engineering')
+-- Emits: ('Engineering', old_count, time, -1)
+--        ('Engineering', old_count-1, time, +1)
+```
+
+## References
+
+1. **McSherry, Frank et al**. "Differential Dataflow." CIDR 2013.
+   - Retraction semantics and correctness proofs
+
+2. **Koch, Christoph et al**. "DBToaster: Higher-Order Delta Processing." VLDB 2014.
+   - Delta processing for aggregations and nested queries
+
+3. **Materialize Documentation**. "How Retractions Work."
+   - Practical retraction handling in production

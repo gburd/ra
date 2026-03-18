@@ -1,0 +1,195 @@
+---
+id: tiflash-mpp-pushdown
+name: TiFlash MPP Execution Pushdown
+category: distributed/coprocessor-pushdown
+databases: [tidb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, tiflash, mpp, columnar, pushdown, parallel]
+complexity: O(n)
+benefit_range: [0.4, 0.95]
+---
+
+# TiFlash MPP Execution Pushdown
+
+## Description
+
+Routes analytical queries to TiFlash (columnar store) for massively
+parallel processing (MPP) execution. TiDB maintains both row-store
+(TiKV) and columnar-store (TiFlash) replicas. For OLAP queries with
+large scans, aggregations, and joins, the optimizer can push the
+entire query subplan to TiFlash for distributed columnar execution
+with shuffle-based data exchange.
+
+**When to apply**: Tables have TiFlash replicas, the query is
+analytical (large scans, aggregations, joins), and the MPP framework
+can handle the required operations (joins, aggregations, window
+functions, TopN).
+
+**Why it works**: TiFlash stores data in columnar format with
+compression, enabling vectorized execution and efficient scans of wide
+tables when only a few columns are needed. The MPP framework adds
+distributed shuffle-based joins and aggregations, enabling parallel
+execution across all TiFlash nodes without sending data back to TiDB.
+
+## Relational Algebra
+
+```algebra
+-- Single-node execution via TiDB
+gamma[g, agg](Join(TableReader(Scan(A)), TableReader(Scan(B))))
+
+-- MPP execution in TiFlash
+MPPGather(
+    gamma[g, final_agg](
+        Exchange[hash(g)](
+            gamma[g, partial_agg](
+                HashJoin(
+                    Exchange[hash(k)](TiFlashScan(A)),
+                    Exchange[hash(k)](TiFlashScan(B))
+                )
+            )
+        )
+    )
+)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("route-to-tiflash-mpp";
+    "(aggregate ?gk ?agg
+        (join ?type ?left ?right ?cond))" =>
+    "(mpp_gather
+        (aggregate_final ?gk ?agg
+            (exchange hash ?gk
+                (aggregate_partial ?gk ?agg
+                    (hash_join ?type
+                        (exchange hash ?join_keys_l
+                            (tiflash_scan ?left))
+                        (exchange hash ?join_keys_r
+                            (tiflash_scan ?right))
+                        ?cond)))))"
+    if has_tiflash_replica("?left")
+    if has_tiflash_replica("?right")
+    if mpp_supports_operations("?agg", "?type")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    tables: &[TableMeta],
+    operations: &[RelExpr],
+) -> bool {
+    // All tables must have TiFlash replicas
+    tables.iter().all(|t| t.has_tiflash_replica())
+    // MPP mode must be enabled
+    && session.tidb_allow_mpp()
+    // All operations must be MPP-supported
+    && operations.iter().all(|op| mpp_supports(op))
+    // TiFlash replicas must be available and healthy
+    && tables.iter().all(|t| t.tiflash_replica_available())
+}
+
+fn mpp_supports(op: &RelExpr) -> bool {
+    match op {
+        HashJoin(_) => true,
+        Aggregation(_) => true,
+        WindowFunction(_) => true,    // since TiDB 5.x
+        TopN(_) => true,
+        Sort(_) => true,
+        Filter(_) => true,
+        // Not yet supported in MPP
+        MergeJoin(_) => false,
+        IndexLookup(_) => false,
+    }
+}
+```
+
+**Restrictions:**
+- All participating tables must have TiFlash replicas
+- Certain operations are not supported in MPP mode (index lookups,
+  some window function types)
+- MPP adds exchange operators (shuffle) which have network cost
+- For small queries, the overhead of MPP coordination may exceed
+  the benefit
+- TiFlash replicas may lag behind TiKV (eventual consistency)
+- Session variable `tidb_allow_mpp` must be enabled
+
+## Cost Model
+
+```rust
+fn mpp_vs_tidb_cost(
+    total_rows: f64,
+    tiflash_nodes: u32,
+    columns_needed: u32,
+    total_columns: u32,
+    columnar_compression_ratio: f64,
+) -> (f64, f64) {
+    // TiKV row-store cost: read all columns per row
+    let tikv_cost = total_rows * total_columns as f64;
+
+    // TiFlash MPP cost: read only needed columns, compressed
+    let tiflash_cost = total_rows * columns_needed as f64
+        * columnar_compression_ratio
+        / tiflash_nodes as f64;
+
+    (tikv_cost, tiflash_cost)
+}
+```
+
+**Typical benefit**: For OLAP queries scanning 1B rows across 50
+columns but only needing 5 columns, TiFlash reduces I/O by 10x
+from column pruning alone, plus parallelism across nodes.
+
+## Test Cases
+
+```sql
+-- Positive: star schema join pushed to TiFlash MPP
+-- All tables have TiFlash replicas
+SELECT d.region, SUM(f.amount)
+FROM fact_sales f
+JOIN dim_store d ON f.store_id = d.id
+WHERE d.country = 'Japan'
+GROUP BY d.region;
+
+-- MPP Plan:
+-- MPPGather
+--   HashAgg(region, SUM(partial_sum))
+--     Exchange[hash(region)]
+--       HashAgg(region, SUM(amount))
+--         HashJoin(f.store_id = d.id)
+--           Exchange[hash(store_id)]
+--             TiFlashScan(fact_sales)
+--           Exchange[broadcast]
+--             Selection(country='Japan')
+--               TiFlashScan(dim_store)
+```
+
+```sql
+-- Positive: window function in MPP
+SELECT customer_id,
+       ROW_NUMBER() OVER (ORDER BY total DESC) AS rank
+FROM (
+    SELECT customer_id, SUM(amount) AS total
+    FROM orders
+    GROUP BY customer_id
+) t;
+-- Entire query runs in TiFlash MPP including window function
+```
+
+```sql
+-- Negative: table without TiFlash replica
+SELECT * FROM system_config WHERE key = 'setting';
+-- system_config has no TiFlash replica; must use TiKV
+```
+
+## References
+
+TiDB: pkg/planner/core/exhaust_physical_plans.go:88 - MPP plan generation (commit e2184a2)
+TiDB: pkg/planner/core/find_best_task.go - MPP task planning
+TiDB: pkg/planner/core/task.go - MPP task types
+TiDB docs: "TiFlash MPP Mode" in architecture documentation

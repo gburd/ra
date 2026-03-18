@@ -1,0 +1,162 @@
+---
+id: mongodb-hashed-sharding-targeted-query
+name: MongoDB Hashed Shard Key Targeted Query
+category: database-specific/mongodb
+databases: [mongodb]
+execution_models: [distributed]
+version: "1.0.0"
+authors: ["MongoDB Inc."]
+tags: [sharding, hashed, targeted, routing, distributed]
+complexity: "O(1) routing + O(log n) shard query"
+benefit_range: [0.5, 50.0]
+---
+
+# MongoDB Hashed Shard Key Targeted Query
+
+## Description
+
+Routes queries to a single shard when the query predicate includes the hashed
+shard key with an equality condition. Hashed sharding distributes documents
+uniformly across shards by hashing the shard key value, but equality queries
+on the shard key can still be targeted to exactly one shard by computing the
+hash at query time.
+
+**When to apply**: Equality queries on the hashed shard key field. The query
+router (mongos) computes the hash of the query value to determine the target
+shard, avoiding a scatter-gather across all shards.
+
+**Why it works**: Hashed sharding maps each shard key value to a deterministic
+hash. For equality lookups, mongos can compute the same hash and consult the
+chunk metadata to route the query to exactly one shard. This converts an O(S)
+scatter-gather into an O(1) targeted query, where S is the number of shards.
+
+## Relational Algebra
+
+```algebra
+-- Scatter-gather (range query on hashed key):
+union-all(
+  sigma[user_id IN range](shard_1),
+  sigma[user_id IN range](shard_2),
+  ...
+  sigma[user_id IN range](shard_S)
+)
+
+-- Targeted (equality on hashed key):
+sigma[user_id = 12345](shard_k)
+  where k = chunk_lookup(hash(12345))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mongodb-hashed-shard-targeted";
+    "(scatter-gather
+       (filter (eq ?shard_key ?val) ?query)
+       ?shards)" =>
+    "(targeted-query
+       (filter (eq ?shard_key ?val) ?query)
+       (route-to-shard (hash-lookup ?shard_key ?val)))"
+    if is_hashed_shard_key("?shard_key")
+    if is_equality_predicate("?val")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> bool {
+    stats.is_sharded_collection
+        && stats.shard_key_is_hashed
+        && stats.query_has_shard_key_equality
+        && stats.shard_count > 1
+}
+```
+
+**Restrictions:**
+- Only equality queries can be targeted; range queries scatter to all shards
+- Hashed shard keys lose range query locality
+- Compound hashed shard keys: only the hashed field benefits from targeted routing
+- mongos must have up-to-date chunk metadata
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let shard_count = stats.shard_count as f64;
+    let per_shard_query_cost = stats.avg_query_latency_ms;
+    let network_overhead_ms = 2.0; // per-shard network round trip
+
+    // Scatter-gather: query all shards, merge results
+    let scatter_cost = shard_count * (per_shard_query_cost + network_overhead_ms);
+
+    // Targeted: query one shard
+    let targeted_cost = per_shard_query_cost + network_overhead_ms;
+
+    if scatter_cost > targeted_cost {
+        (scatter_cost - targeted_cost) / scatter_cost
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: Linear in shard count. With 10 shards, ~10x improvement.
+
+## Test Cases
+
+### Positive: Equality on hashed shard key
+
+```javascript
+// Collection sharded on hashed user_id
+sh.shardCollection("mydb.users", {user_id: "hashed"})
+
+// Targeted query: equality on shard key
+db.users.find({user_id: ObjectId("507f1f77bcf86cd799439011")})
+
+// mongos computes hash(507f1f77bcf86cd799439011)
+// Routes to single shard owning that hash range
+// explain shows: SINGLE_SHARD targeting shard-0002
+```
+
+### Positive: findOne with shard key
+
+```javascript
+// Targeted single document lookup
+db.users.findOne({user_id: "alice@example.com"})
+
+// Single shard query + index lookup = sub-millisecond
+```
+
+### Negative: Range query on hashed shard key
+
+```javascript
+// Range query cannot be targeted with hashed sharding
+db.users.find({user_id: {$gte: "A", $lte: "M"}})
+
+// Hashing destroys ordering; query scatters to ALL shards
+// explain shows: SHARD_MERGE with all shards queried
+```
+
+## References
+
+**Implementation:**
+- MongoDB source: `src/mongo/s/query/cluster_find.cpp`
+- Hash routing: `src/mongo/s/chunk_manager.cpp`
+- Shard targeting: `src/mongo/s/write_ops/chunk_manager_targeter.cpp`
+
+**Documentation:**
+- MongoDB Manual: "Hashed Sharding"
+  - https://docs.mongodb.com/manual/core/hashed-sharding/
+- MongoDB Manual: "Targeted Operations vs. Broadcast Operations"
+
+**Related papers:**
+- DeCandia, G., et al., "Dynamo: Amazon's Highly Available Key-value Store", SOSP 2007
+  - Consistent hashing concepts underlie MongoDB's hash-based distribution

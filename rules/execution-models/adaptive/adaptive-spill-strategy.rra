@@ -1,0 +1,348 @@
+---
+id: adaptive-spill-strategy
+name: Adaptive Spill-to-Disk Strategy
+category: execution-models
+version: 1.0.0
+databases: [DuckDB, PostgreSQL, SQL Server, Spark]
+authors: [Goetz Graefe]
+tags: [execution, adaptive, spill, disk, memory, hash, sort, graceful-degradation]
+standard: Graceful degradation under memory pressure
+complexity: O(n) partition + O(spilled_rows * passes) I/O
+benefit_range: [1.0, 5.0]
+---
+
+# Adaptive Spill-to-Disk Strategy
+
+## Description
+
+Adaptive spill-to-disk strategies allow memory-intensive operators (hash joins, hash aggregations, sorts, window functions) to exceed their memory budget without failing, by selectively spilling partitions to disk. The adaptive aspect is choosing when, what, and how much to spill based on runtime memory pressure rather than fixed thresholds.
+
+The classic approach is Grace hash join's recursive partitioning: when the hash table exceeds memory, the input is partitioned into P buckets, and partitions that don't fit are written to disk for later processing. The adaptive improvement monitors memory consumption continuously and makes incremental spill decisions: spill the coldest (least recently accessed) partition first, keep hot partitions in memory, and adjust the number of partitions based on actual data sizes.
+
+DuckDB's approach is notable: it starts with a single in-memory hash table and only partitions when memory is exceeded, choosing the optimal partition count based on observed data size.
+
+**Key characteristics:**
+- **Lazy partitioning**: Don't partition upfront; start in-memory and partition on demand
+- **Incremental spill**: Spill one partition at a time, keeping hot data in memory
+- **Cost-based selection**: Spill the partition with best cost/benefit ratio
+- **Recursive handling**: If spilled partitions still don't fit, recursively partition
+- **Hybrid execution**: Some partitions in memory, some on disk simultaneously
+
+**Trade-offs:**
+- I/O cost for spilled partitions (write + read back)
+- CPU overhead for partitioning and hash table rebuilding
+- Fragmented I/O if many small partitions spilled
+- Over-partitioning wastes memory on partition metadata
+- Under-partitioning causes recursive spilling (expensive)
+
+## Relational Algebra
+
+```
+AdaptiveSpillJoin(build, probe, condition, mem_budget) -> Result
+
+fn execute(build, probe, cond, budget):
+  // Phase 1: Build hash table, spill on memory pressure
+  ht = HashTable::new()
+  spilled = SpillManager::new()
+
+  for row in build:
+    partition = hash(cond.build_key(row)) % NUM_PARTITIONS
+    if ht.memory_usage() < budget:
+      ht.insert(partition, row)
+    else:
+      // Memory exceeded: pick partition to spill
+      victim = coldest_partition(ht)
+      spilled.write_build(victim, ht.drain(victim))
+      ht.insert(partition, row)
+
+  // Phase 2: Probe in-memory partitions, spill matching
+  for row in probe:
+    partition = hash(cond.probe_key(row)) % NUM_PARTITIONS
+    if ht.has_partition(partition):
+      emit matches from ht
+    else:
+      spilled.write_probe(partition, row)
+
+  // Phase 3: Process spilled partitions
+  for partition in spilled.partitions():
+    build_data = spilled.read_build(partition)
+    probe_data = spilled.read_probe(partition)
+    // Recursive: if still too large, re-partition
+    results.extend(join(build_data, probe_data, cond, budget))
+```
+
+## Implementation
+
+```rust
+use std::collections::HashMap;
+use std::path::PathBuf;
+
+/// Spill partition metadata
+pub struct SpillPartition {
+    pub partition_id: usize,
+    pub build_file: PathBuf,
+    pub probe_file: PathBuf,
+    pub build_rows: usize,
+    pub probe_rows: usize,
+    pub build_bytes: usize,
+}
+
+/// Manages disk spilling for hash-based operators
+pub struct SpillManager {
+    spill_dir: PathBuf,
+    partitions: HashMap<usize, SpillPartition>,
+    total_spilled_bytes: usize,
+    io_stats: SpillIOStats,
+}
+
+pub struct SpillIOStats {
+    pub bytes_written: usize,
+    pub bytes_read: usize,
+    pub write_count: usize,
+    pub read_count: usize,
+}
+
+impl SpillManager {
+    pub fn new(spill_dir: PathBuf) -> Self {
+        Self {
+            spill_dir,
+            partitions: HashMap::new(),
+            total_spilled_bytes: 0,
+            io_stats: SpillIOStats {
+                bytes_written: 0,
+                bytes_read: 0,
+                write_count: 0,
+                read_count: 0,
+            },
+        }
+    }
+
+    /// Spill a partition's build-side data to disk
+    pub fn spill_build(
+        &mut self,
+        partition_id: usize,
+        rows: Vec<Row>,
+    ) -> Result<()> {
+        let entry = self.partitions
+            .entry(partition_id)
+            .or_insert_with(|| SpillPartition {
+                partition_id,
+                build_file: self.spill_dir.join(
+                    format\!("build_{partition_id}.spill"),
+                ),
+                probe_file: self.spill_dir.join(
+                    format\!("probe_{partition_id}.spill"),
+                ),
+                build_rows: 0,
+                probe_rows: 0,
+                build_bytes: 0,
+            });
+
+        let bytes = serialize_rows(&rows, &entry.build_file)?;
+        entry.build_rows += rows.len();
+        entry.build_bytes += bytes;
+        self.total_spilled_bytes += bytes;
+        self.io_stats.bytes_written += bytes;
+        self.io_stats.write_count += 1;
+
+        Ok(())
+    }
+
+    /// Read back spilled build-side partition
+    pub fn read_build(
+        &mut self,
+        partition_id: usize,
+    ) -> Result<Vec<Row>> {
+        let entry = self.partitions.get(&partition_id)
+            .ok_or_else(|| {
+                Error::msg("partition not found")
+            })?;
+        let rows = deserialize_rows(&entry.build_file)?;
+        self.io_stats.bytes_read += entry.build_bytes;
+        self.io_stats.read_count += 1;
+        Ok(rows)
+    }
+}
+
+/// Adaptive hash join with graceful spilling
+pub struct AdaptiveSpillHashJoin {
+    condition: JoinCondition,
+    memory_budget: usize,
+    num_partitions: usize,
+    recursion_depth: usize,
+    max_recursion: usize,
+}
+
+impl AdaptiveSpillHashJoin {
+    pub fn execute(
+        &self,
+        build_input: &mut dyn Iterator<Item = Row>,
+        probe_input: &mut dyn Iterator<Item = Row>,
+        spill_dir: &PathBuf,
+    ) -> Result<Vec<Row>> {
+        let mut ht = PartitionedHashTable::new(
+            self.num_partitions,
+        );
+        let mut spill = SpillManager::new(spill_dir.clone());
+        let mut in_memory_partitions = vec\![
+            true; self.num_partitions
+        ];
+
+        // Phase 1: Build with adaptive spilling
+        for row in build_input {
+            let key = self.condition.build_key(&row);
+            let part = hash_partition(&key, self.num_partitions);
+
+            if \!in_memory_partitions[part] {
+                spill.spill_build(part, vec\![row])?;
+                continue;
+            }
+
+            ht.insert(part, key, row);
+
+            if ht.memory_usage() > self.memory_budget {
+                let victim = self.select_victim(
+                    &ht, &in_memory_partitions,
+                );
+                let evicted = ht.drain_partition(victim);
+                spill.spill_build(victim, evicted)?;
+                in_memory_partitions[victim] = false;
+            }
+        }
+
+        // Phase 2: Probe
+        let mut results = Vec::new();
+        for row in probe_input {
+            let key = self.condition.probe_key(&row);
+            let part = hash_partition(&key, self.num_partitions);
+
+            if in_memory_partitions[part] {
+                for build_row in ht.probe(part, &key) {
+                    results.push(Row::join(build_row, &row));
+                }
+            } else {
+                spill.spill_probe(part, vec\![row])?;
+            }
+        }
+
+        // Phase 3: Process spilled partitions
+        for part_id in 0..self.num_partitions {
+            if in_memory_partitions[part_id] {
+                continue;
+            }
+
+            let build_data = spill.read_build(part_id)?;
+            let probe_data = spill.read_probe(part_id)?;
+
+            if self.fits_in_memory(&build_data) {
+                let part_results = in_memory_join(
+                    &build_data, &probe_data, &self.condition,
+                )?;
+                results.extend(part_results);
+            } else if self.recursion_depth < self.max_recursion {
+                // Recursive partitioning
+                let sub_join = AdaptiveSpillHashJoin {
+                    condition: self.condition.clone(),
+                    memory_budget: self.memory_budget,
+                    num_partitions: self.num_partitions,
+                    recursion_depth: self.recursion_depth + 1,
+                    max_recursion: self.max_recursion,
+                };
+                let part_results = sub_join.execute(
+                    &mut build_data.into_iter(),
+                    &mut probe_data.into_iter(),
+                    spill_dir,
+                )?;
+                results.extend(part_results);
+            }
+        }
+
+        Ok(results)
+    }
+
+    /// Select partition to evict (largest in-memory partition)
+    fn select_victim(
+        &self,
+        ht: &PartitionedHashTable,
+        in_memory: &[bool],
+    ) -> usize {
+        (0..self.num_partitions)
+            .filter(|&i| in_memory[i])
+            .max_by_key(|&i| ht.partition_size(i))
+            .unwrap_or(0)
+    }
+
+    fn fits_in_memory(&self, data: &[Row]) -> bool {
+        let size: usize = data.iter()
+            .map(|r| r.size_bytes())
+            .sum();
+        size <= self.memory_budget
+    }
+}
+```
+
+## Cost Model
+
+**In-memory join:**
+- Build: O(build_rows) hash inserts
+- Probe: O(probe_rows) hash lookups
+- No I/O cost
+
+**Single-level spill:**
+- Write: `spilled_bytes * write_cost` (sequential, ~0.5 us/KB SSD)
+- Read: `spilled_bytes * read_cost` (sequential, ~0.3 us/KB SSD)
+- Total I/O: `2 * spilled_bytes * io_cost`
+- Plus: rebuild hash table for spilled partition
+
+**Recursive spill (depth d):**
+- I/O: `2^d * partition_size * io_cost` (each level reads/writes)
+- Very expensive: avoid by choosing partition count wisely
+- Optimal partitions: `total_size / memory_budget`
+
+**Partition selection:**
+- Over-partition: metadata overhead, fragmented I/O
+- Under-partition: recursive spilling (2x I/O per level)
+- Optimal: `ceil(build_size / (0.8 * memory_budget))`
+
+## Test Cases
+
+```sql
+-- Test 1: Hash join fits in memory (no spill)
+SELECT * FROM orders o
+JOIN small_dim d ON o.dim_id = d.id;
+-- dim table: 1MB, memory budget: 256MB
+-- No spill needed: pure in-memory hash join
+
+-- Test 2: Hash join requires single-level spill
+SELECT * FROM lineitem l
+JOIN orders o ON l.order_id = o.order_id;
+-- orders: 2GB hash table, memory budget: 512MB
+-- Spill 3 of 8 partitions, process them sequentially
+
+-- Test 3: Large aggregation with spill
+SELECT customer_id, SUM(amount), COUNT(*)
+FROM transactions GROUP BY customer_id;
+-- 10M distinct customers, 200 bytes per group state
+-- 2GB needed, 512MB available
+-- Partition groups, spill cold partitions
+
+-- Test 4: Sort with external merge
+SELECT * FROM huge_log ORDER BY timestamp;
+-- 50GB log, 4GB sort buffer
+-- Generate sorted runs, multi-pass merge
+-- Adaptive: minimize passes by maximizing run length
+```
+
+## References
+
+1. **Graefe, Goetz**. "Sort-Merge-Join: An Idea Whose Time Has(h) Passed?" ICDE 1994.
+   - Hash join with graceful degradation under memory pressure
+
+2. **Shapiro, Leonard D**. "Join Processing in Database Systems with Large Main Memories." ACM TODS, 1986.
+   - Grace hash join and hybrid hash join algorithms
+
+3. **Raasveldt, Mark and Hannes Muhleisen**. "DuckDB: an Embeddable Analytical Database." SIGMOD 2019.
+   - Adaptive out-of-core operators in DuckDB
+
+4. **DeWitt, David and Jim Gray**. "Parallel Database Systems: The Future of High Performance Database Processing." CACM, 1992.
+   - Partitioned parallel execution with spill handling

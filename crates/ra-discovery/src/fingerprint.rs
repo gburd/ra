@@ -188,6 +188,27 @@ fn fingerprint_rel(expr: &RelExpr, out: &mut Vec<Token>) {
             fingerprint_rel(right, out);
             out.push(Token::End);
         }
+        RelExpr::CTE {
+            definition, body, ..
+        } => {
+            out.push(Token::Aggregate);
+            fingerprint_rel(definition, out);
+            fingerprint_rel(body, out);
+            out.push(Token::End);
+        }
+        RelExpr::Window { input, .. } => {
+            out.push(Token::Project);
+            fingerprint_rel(input, out);
+            out.push(Token::End);
+        }
+        RelExpr::Distinct { input, .. } => {
+            out.push(Token::Project);
+            fingerprint_rel(input, out);
+            out.push(Token::End);
+        }
+        RelExpr::Values { .. } => {
+            out.push(Token::Scan);
+        }
     }
 }
 

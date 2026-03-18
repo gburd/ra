@@ -11,6 +11,8 @@ pub enum CpuArchitecture {
     ARM64,
     /// RISC-V 64-bit architecture.
     RISCV64,
+    /// PowerPC 64-bit architecture.
+    PowerPC64,
 }
 
 impl CpuArchitecture {
@@ -19,7 +21,7 @@ impl CpuArchitecture {
     pub fn typical_issue_width(self) -> u32 {
         match self {
             Self::ARM64 => 6,
-            Self::X86_64 | Self::RISCV64 => 4,
+            Self::X86_64 | Self::RISCV64 | Self::PowerPC64 => 4,
         }
     }
 
@@ -27,7 +29,7 @@ impl CpuArchitecture {
     #[must_use]
     pub fn has_hardware_prefetch(self) -> bool {
         match self {
-            Self::X86_64 | Self::ARM64 => true,
+            Self::X86_64 | Self::ARM64 | Self::PowerPC64 => true,
             Self::RISCV64 => false,
         }
     }
@@ -197,6 +199,8 @@ pub struct CpuModel {
     pub architecture: CpuArchitecture,
     /// Number of physical cores.
     pub cores: u32,
+    /// Hardware threads per physical core (e.g., 2 for SMT/hyperthreading).
+    pub threads_per_core: u32,
     /// Base clock frequency (GHz).
     pub base_clock_ghz: f64,
     /// Boost clock frequency (GHz).
@@ -214,6 +218,12 @@ pub struct CpuModel {
 }
 
 impl CpuModel {
+    /// Returns the total number of hardware threads (cores x `threads_per_core`).
+    #[must_use]
+    pub fn logical_cores(&self) -> u32 {
+        self.cores * self.threads_per_core
+    }
+
     /// Intel Xeon Platinum 8380 (Ice Lake, 40 cores, 2.3 GHz base).
     #[must_use]
     pub fn intel_xeon_8380() -> Self {
@@ -221,6 +231,7 @@ impl CpuModel {
             name: "Intel Xeon Platinum 8380".into(),
             architecture: CpuArchitecture::X86_64,
             cores: 40,
+            threads_per_core: 2,
             base_clock_ghz: 2.3,
             boost_clock_ghz: 3.4,
             simd: SimdCapability::AVX512,
@@ -238,6 +249,7 @@ impl CpuModel {
             name: "AMD EPYC 7763".into(),
             architecture: CpuArchitecture::X86_64,
             cores: 64,
+            threads_per_core: 2,
             base_clock_ghz: 2.45,
             boost_clock_ghz: 3.5,
             simd: SimdCapability::AVX2,
@@ -255,6 +267,7 @@ impl CpuModel {
             name: "Apple M2".into(),
             architecture: CpuArchitecture::ARM64,
             cores: 8,
+            threads_per_core: 1,
             base_clock_ghz: 3.5,
             boost_clock_ghz: 3.5,
             simd: SimdCapability::NEON,
@@ -272,6 +285,7 @@ impl CpuModel {
             name: "AWS Graviton3".into(),
             architecture: CpuArchitecture::ARM64,
             cores: 64,
+            threads_per_core: 1,
             base_clock_ghz: 2.6,
             boost_clock_ghz: 2.6,
             simd: SimdCapability::SVE2,
@@ -289,6 +303,7 @@ impl CpuModel {
             name: "Intel Core i9-13900K".into(),
             architecture: CpuArchitecture::X86_64,
             cores: 24,
+            threads_per_core: 2,
             base_clock_ghz: 3.0,
             boost_clock_ghz: 5.8,
             simd: SimdCapability::AVX512,
@@ -306,6 +321,7 @@ impl CpuModel {
             name: "AMD Ryzen 9 7950X".into(),
             architecture: CpuArchitecture::X86_64,
             cores: 16,
+            threads_per_core: 2,
             base_clock_ghz: 4.5,
             boost_clock_ghz: 5.7,
             simd: SimdCapability::AVX2,
@@ -313,6 +329,64 @@ impl CpuModel {
             memory_bandwidth_gbps: 83.2,
             dram_latency_ns: 80.0,
             tdp_watts: 170,
+        }
+    }
+
+    /// Raspberry Pi 4 (Broadcom BCM2711, 4 cores Cortex-A72, 1.8 GHz).
+    #[must_use]
+    pub fn raspberry_pi_4() -> Self {
+        Self {
+            name: "Raspberry Pi 4 (BCM2711)".into(),
+            architecture: CpuArchitecture::ARM64,
+            cores: 4,
+            threads_per_core: 1,
+            base_clock_ghz: 1.5,
+            boost_clock_ghz: 1.8,
+            simd: SimdCapability::NEON,
+            cache: CacheHierarchy {
+                l1d_bytes: 32_768,
+                l1d_latency_ns: 1.5,
+                l1d_associativity: 2,
+                l2_bytes: 1_048_576,
+                l2_latency_ns: 8.0,
+                l2_associativity: 16,
+                l3_bytes: 0,
+                l3_latency_ns: 0.0,
+                l3_associativity: 0,
+                line_size_bytes: 64,
+            },
+            memory_bandwidth_gbps: 4.0,
+            dram_latency_ns: 120.0,
+            tdp_watts: 6,
+        }
+    }
+
+    /// Intel Core i7-12700K (12 cores: 8P+4E, 3.6 GHz base).
+    #[must_use]
+    pub fn intel_core_i7_12700k() -> Self {
+        Self {
+            name: "Intel Core i7-12700K".into(),
+            architecture: CpuArchitecture::X86_64,
+            cores: 12,
+            threads_per_core: 2,
+            base_clock_ghz: 3.6,
+            boost_clock_ghz: 5.0,
+            simd: SimdCapability::AVX2,
+            cache: CacheHierarchy {
+                l1d_bytes: 49_152,
+                l1d_latency_ns: 1.2,
+                l1d_associativity: 12,
+                l2_bytes: 1_310_720,
+                l2_latency_ns: 4.0,
+                l2_associativity: 10,
+                l3_bytes: 25_165_824,
+                l3_latency_ns: 15.0,
+                l3_associativity: 12,
+                line_size_bytes: 64,
+            },
+            memory_bandwidth_gbps: 76.8,
+            dram_latency_ns: 82.0,
+            tdp_watts: 190,
         }
     }
 
@@ -416,6 +490,83 @@ mod tests {
         let cpu = CpuModel::amd_epyc_7763();
         let time = cpu.hash_join_time_s(100_000, 1_000_000);
         assert!(time > 0.0);
+    }
+
+    #[test]
+    fn powerpc64_issue_width() {
+        assert_eq!(CpuArchitecture::PowerPC64.typical_issue_width(), 4);
+    }
+
+    #[test]
+    fn powerpc64_has_prefetch() {
+        assert!(CpuArchitecture::PowerPC64.has_hardware_prefetch());
+    }
+
+    #[test]
+    fn logical_cores_with_smt() {
+        let cpu = CpuModel::intel_xeon_8380();
+        assert_eq!(cpu.threads_per_core, 2);
+        assert_eq!(cpu.logical_cores(), 80);
+    }
+
+    #[test]
+    fn logical_cores_no_smt() {
+        let cpu = CpuModel::apple_m2();
+        assert_eq!(cpu.threads_per_core, 1);
+        assert_eq!(cpu.logical_cores(), 8);
+    }
+
+    #[test]
+    fn raspberry_pi_4_model() {
+        let cpu = CpuModel::raspberry_pi_4();
+        assert_eq!(cpu.architecture, CpuArchitecture::ARM64);
+        assert_eq!(cpu.cores, 4);
+        assert_eq!(cpu.threads_per_core, 1);
+        assert!(cpu.tdp_watts < 10);
+    }
+
+    #[test]
+    fn intel_i7_12700k_model() {
+        let cpu = CpuModel::intel_core_i7_12700k();
+        assert_eq!(cpu.cores, 12);
+        assert_eq!(cpu.threads_per_core, 2);
+        assert_eq!(cpu.logical_cores(), 24);
+    }
+
+    #[test]
+    fn neon_vector_width() {
+        assert_eq!(SimdCapability::NEON.vector_width_bits(), 128);
+    }
+
+    #[test]
+    fn sve_has_fma() {
+        assert!(SimdCapability::SVE.has_fma());
+    }
+
+    #[test]
+    fn rvv_elements_f32() {
+        assert_eq!(SimdCapability::RVV.elements_f32(), 8);
+    }
+
+    #[test]
+    fn amd_epyc_cache_larger_l3() {
+        let cache = CacheHierarchy::amd_epyc_milan();
+        assert!(cache.l3_bytes > cache.l2_bytes);
+        assert!(cache.l3_bytes > 200_000_000);
+    }
+
+    #[test]
+    fn apple_m2_no_l3() {
+        let cache = CacheHierarchy::apple_m2();
+        assert_eq!(cache.l3_bytes, 0);
+        assert!(cache.l2_bytes > 10_000_000);
+    }
+
+    #[test]
+    fn arm_neoverse_cache_hierarchy() {
+        let cache = CacheHierarchy::arm_neoverse_v1();
+        assert!(cache.l1d_bytes < cache.l2_bytes);
+        assert!(cache.l2_bytes < cache.l3_bytes);
     }
 
     #[test]

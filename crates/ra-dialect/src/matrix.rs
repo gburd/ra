@@ -36,6 +36,13 @@ impl CompatibilityMatrix {
             SqlFeature::Substring,
             SqlFeature::CurrentTimestamp,
             SqlFeature::DateExtract,
+            SqlFeature::WindowFunctions,
+            SqlFeature::Cte,
+            SqlFeature::RecursiveCte,
+            SqlFeature::Distinct,
+            SqlFeature::Having,
+            SqlFeature::Subquery,
+            SqlFeature::OrderBy,
         ];
 
         let mut entries = BTreeMap::new();

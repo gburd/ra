@@ -78,7 +78,7 @@ fn test_temp_table_for_large_intermediate() {
 #[test]
 fn test_temp_table_vs_subquery() {
     // Complex subquery repeated → temp table
-    let complex = filtered_scan("complex_computation", "expensive", 1);
+    let _complex = filtered_scan("complex_computation", "expensive", 1);
     let j1 = two_table_join("orders", "complex_computation", "key", "key");
     assert_rule_applies(j1);
 }
@@ -175,7 +175,7 @@ fn test_materialized_view_rewrite() {
 #[test]
 fn test_partial_materialized_view_match() {
     // Query partially matches materialized view
-    let mv_scan = scan("sales_mv");
+    let _mv_scan = scan("sales_mv");
     let filtered = filtered_scan("sales_mv", "region", 1);
     assert_rule_applies(filtered);
 }

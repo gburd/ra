@@ -343,6 +343,12 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
             let right_id = add_rel_expr(rec, right)?;
             Ok(rec.add(RelLang::Except([all_id, left_id, right_id])))
         }
+        RelExpr::CTE { .. }
+        | RelExpr::Window { .. }
+        | RelExpr::Distinct { .. }
+        | RelExpr::Values { .. } => Err(EGraphError::ConversionError(
+            "CTE/Window/Distinct/Values not yet supported in e-graph".to_owned(),
+        )),
     }
 }
 
@@ -511,6 +517,15 @@ fn add_aggregate_list(
             AggregateFunction::Max => {
                 let arg_id = add_agg_arg(rec, agg.arg.as_ref())?;
                 RelLang::Max([arg_id])
+            }
+            AggregateFunction::StdDev
+            | AggregateFunction::Variance
+            | AggregateFunction::StringAgg
+            | AggregateFunction::ArrayAgg => {
+                return Err(EGraphError::ConversionError(format!(
+                    "aggregate function {:?} not yet supported in e-graph",
+                    agg.function
+                )));
             }
         };
         let func_id = rec.add(func_node);

@@ -7,7 +7,8 @@
 mod helpers;
 
 use helpers::*;
-use ra_core::algebra::{AggregateExpr, AggregateFunction, JoinType, RelExpr};
+use ra_core::algebra::{AggregateExpr, AggregateFunction, RelExpr};
+use ra_core::expr::{Const, Expr};
 
 // ── Iterator Interface Tests ────────────────────────────────────
 
@@ -73,9 +74,10 @@ fn test_volcano_hash_aggregation_breaks_pipeline() {
     let agg = RelExpr::Aggregate {
         group_by: vec![col("region")],
         aggregates: vec![AggregateExpr {
-            func: AggregateFunction::Sum,
-            expr: col("amount"),
+            function: AggregateFunction::Sum,
+            arg: Some(col("amount")),
             distinct: false,
+            alias: None,
         }],
         input: Box::new(input),
     };
@@ -107,9 +109,10 @@ fn test_volcano_materialization_aggregation() {
     let agg = RelExpr::Aggregate {
         group_by: vec![col("account_id")],
         aggregates: vec![AggregateExpr {
-            func: AggregateFunction::Count,
-            expr: Expr::Const(Const::Int(1)),
+            function: AggregateFunction::Count,
+            arg: Some(Expr::Const(Const::Int(1))),
             distinct: false,
+            alias: None,
         }],
         input: Box::new(input),
     };
@@ -177,9 +180,10 @@ fn test_volcano_stateful_aggregation() {
         group_by: vec![col("metric_name")],
         aggregates: vec![
             AggregateExpr {
-                func: AggregateFunction::Avg,
-                expr: col("value"),
+                function: AggregateFunction::Avg,
+                arg: Some(col("value")),
                 distinct: false,
+                alias: None,
             },
         ],
         input: Box::new(input),

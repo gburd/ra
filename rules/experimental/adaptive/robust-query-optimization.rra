@@ -1,0 +1,306 @@
+---
+id: robust-query-optimization
+name: "Robust Query Optimization with Worst-Case Guarantees"
+category: experimental/adaptive
+databases: [postgresql, cockroachdb, oracle]
+execution_models: [volcano, vectorized]
+version: "1.0.0"
+authors: ["Babcock & Chaudhuri 2005", "Dutt & Haritsa 2014 - plan bouquets"]
+tags: [robust, worst-case, cardinality-uncertainty, plan-diagram, bouquet, adaptive]
+complexity: "O(k * optimizer_cost) where k = robustness samples"
+benefit_range: [0.5, 10.0]
+research_status: "research-mature"
+maturity: "research"
+---
+
+# Robust Query Optimization with Worst-Case Guarantees
+
+## Description
+
+Standard optimizers choose the single cheapest plan given point
+estimates of cardinalities. But cardinality estimates can be wrong by
+orders of magnitude (the independence assumption, stale statistics,
+skew). Robust optimization instead chooses the plan that minimizes
+worst-case cost across a range of plausible cardinality values.
+
+**When to apply**: Queries where cardinality estimation is unreliable
+(complex predicates, correlated columns, UDFs, parameterized queries)
+and where plan regression from a bad estimate is catastrophic (e.g.,
+nested-loop on a large table due to underestimated cardinality).
+
+**Why it works**: The optimal plan under point estimates may be
+catastrophic when estimates are wrong (e.g., hash join 100x faster at
+true cardinality, but optimizer chose nested-loop based on bad
+estimate). A robust plan may be 20% slower at the point estimate but
+only 2x slower in the worst case, vs 100x for the "optimal" plan.
+
+## Relational Algebra
+
+```algebra
+-- Standard optimization (fragile):
+plan* = argmin_{p in Plans} cost(p, estimate)
+
+-- Robust optimization (minimax regret):
+plan* = argmin_{p in Plans} max_{c in C} regret(p, c)
+  where regret(p, c) = cost(p, c) / min_{p'} cost(p', c)
+
+-- Cardinality uncertainty set:
+C = { c : c_low <= c <= c_high }
+  where c_low = estimate / error_bound
+        c_high = estimate * error_bound
+
+-- Plan bouquets (Dutt & Haritsa 2014):
+-- Sample cardinality space, find plan regions
+bouquet = { (p_i, region_i) : plan_i optimal in region_i }
+-- At runtime, choose plan based on observed cardinality
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+struct RobustOptimizer {
+    base_optimizer: Box<dyn Optimizer>,
+    error_bound: f64, // e.g., 10.0 means 10x under/over
+    num_samples: usize,
+}
+
+impl RobustOptimizer {
+    fn optimize_robust(
+        &self,
+        query: &Query,
+        estimates: &[CardinalityEstimate],
+    ) -> PhysicalPlan {
+        // Generate candidate plans at sampled cardinalities
+        let samples = self.sample_cardinality_space(estimates);
+        let mut candidate_plans: Vec<PhysicalPlan> = Vec::new();
+
+        for sample in &samples {
+            let plan = self.base_optimizer.optimize_with(
+                query, sample,
+            );
+            if !candidate_plans.contains(&plan) {
+                candidate_plans.push(plan);
+            }
+        }
+
+        // Evaluate each candidate across all samples
+        let mut best_plan = None;
+        let mut best_max_regret = f64::MAX;
+
+        for plan in &candidate_plans {
+            let mut max_regret = 0.0f64;
+
+            for sample in &samples {
+                let plan_cost =
+                    self.base_optimizer.cost(plan, sample);
+                let optimal_cost =
+                    self.optimal_cost_at(query, sample);
+                let regret = plan_cost / optimal_cost;
+                max_regret = max_regret.max(regret);
+            }
+
+            if max_regret < best_max_regret {
+                best_max_regret = max_regret;
+                best_plan = Some(plan.clone());
+            }
+        }
+
+        best_plan.unwrap_or_else(|| {
+            self.base_optimizer.optimize(query)
+        })
+    }
+
+    fn sample_cardinality_space(
+        &self,
+        estimates: &[CardinalityEstimate],
+    ) -> Vec<Vec<f64>> {
+        let mut samples = Vec::new();
+
+        // Corner samples: each estimate at low/high bound
+        for i in 0..estimates.len() {
+            let mut low_sample: Vec<f64> = estimates
+                .iter()
+                .map(|e| e.point_estimate)
+                .collect();
+            low_sample[i] =
+                estimates[i].point_estimate / self.error_bound;
+            samples.push(low_sample);
+
+            let mut high_sample: Vec<f64> = estimates
+                .iter()
+                .map(|e| e.point_estimate)
+                .collect();
+            high_sample[i] =
+                estimates[i].point_estimate * self.error_bound;
+            samples.push(high_sample);
+        }
+
+        // Point estimate
+        samples.push(
+            estimates
+                .iter()
+                .map(|e| e.point_estimate)
+                .collect(),
+        );
+
+        samples
+    }
+
+    fn optimal_cost_at(
+        &self,
+        query: &Query,
+        cardinalities: &[f64],
+    ) -> f64 {
+        let plan = self.base_optimizer.optimize_with(
+            query,
+            cardinalities,
+        );
+        self.base_optimizer.cost(&plan, cardinalities)
+    }
+}
+
+struct PlanBouquet {
+    plans: Vec<(PhysicalPlan, CardinalityRegion)>,
+}
+
+impl PlanBouquet {
+    fn build(
+        optimizer: &dyn Optimizer,
+        query: &Query,
+        param_ranges: &[(f64, f64)],
+        grid_points: usize,
+    ) -> Self {
+        let mut plan_regions: Vec<(PhysicalPlan, CardinalityRegion)>
+            = Vec::new();
+
+        // Sample the parameter space on a grid
+        for point in grid_sample(param_ranges, grid_points) {
+            let plan = optimizer.optimize_with(query, &point);
+
+            // Find or create region for this plan
+            let found = plan_regions
+                .iter_mut()
+                .find(|(p, _)| p == &plan);
+            match found {
+                Some((_, region)) => region.extend(&point),
+                None => plan_regions.push((
+                    plan,
+                    CardinalityRegion::new(&point),
+                )),
+            }
+        }
+
+        PlanBouquet {
+            plans: plan_regions,
+        }
+    }
+
+    fn select_plan(
+        &self,
+        observed: &[f64],
+    ) -> &PhysicalPlan {
+        self.plans
+            .iter()
+            .find(|(_, region)| region.contains(observed))
+            .map(|(plan, _)| plan)
+            .unwrap_or(&self.plans[0].0)
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(query: &Query) -> bool {
+    // Beneficial when estimation uncertainty is high
+    query.has_complex_predicates()
+        || query.has_correlated_columns()
+        || query.has_parameterized_predicates()
+        || query.num_joins() >= 3
+}
+```
+
+**Restrictions:**
+- Robustness optimization is more expensive (k * optimizer_cost)
+- Trade-off: robust plans are suboptimal at point estimate
+- Requires knowing error bounds (itself an estimation problem)
+- Plan bouquets require runtime cardinality monitoring
+- Not useful when estimates are accurate (adds overhead)
+
+## Cost Model
+
+```rust
+fn robustness_overhead(
+    num_tables: usize,
+    error_bound: f64,
+) -> f64 {
+    // Samples: 2 * num_tables (corner) + 1 (center)
+    let samples = 2 * num_tables + 1;
+    // Each sample requires full optimization
+    // Overhead: samples * base_optimization_time
+    samples as f64
+}
+
+fn regret_bound(
+    num_plans: usize,
+    error_bound: f64,
+) -> f64 {
+    // With k candidate plans and error bound E,
+    // worst-case regret is bounded by E (not E^n)
+    error_bound.min(num_plans as f64)
+}
+```
+
+## Test Cases
+
+### Positive: Correlated columns cause plan regression
+
+```sql
+-- city and state are correlated
+-- Point estimate: 20 rows (independence assumption)
+-- True cardinality: 1000 rows
+-- Optimal plan at 20 rows: index NL (fast for small result)
+-- Optimal plan at 1000 rows: hash join
+-- Index NL at 1000 rows: 50x slower than hash join
+-- Robust optimizer: chooses hash join (1.2x at 20, 1x at 1000)
+SELECT * FROM addresses a
+JOIN orders o ON a.customer_id = o.customer_id
+WHERE a.city = 'SF' AND a.state = 'CA';
+```
+
+### Positive: Parameterized query with varying selectivity
+
+```sql
+-- Parameter $1 varies from 'rare_category' to 'common_category'
+-- Selectivity range: 0.001 to 0.3
+-- Plan bouquet: {index_scan for <0.05, seq_scan for >0.05}
+-- Runtime: choose plan based on actual parameter
+PREPARE q AS SELECT * FROM products WHERE category = $1;
+```
+
+### Negative: Simple query with accurate estimates
+
+```sql
+-- Primary key lookup: cardinality always exactly 1
+-- No estimation uncertainty, robust optimization adds overhead
+SELECT * FROM users WHERE id = 42;
+```
+
+## References
+
+**Robust optimization:**
+- Babcock & Chaudhuri, "Towards a Robust Query Optimizer: A Principled and Practical Approach", SIGMOD 2005
+  - Minimax regret formulation for query optimization
+- Dutt & Haritsa, "Plan Bouquets: Query Processing without Selectivity Estimation", SIGMOD 2014
+  - Precompute plan set covering cardinality space
+
+**Parametric optimization:**
+- Ioannidis et al., "Parametric Query Optimization", VLDB 1992
+  - Plan diagrams: map parameter space to optimal plans
+- Hulgeri & Sudarshan, "Parametric Query Optimization for Linear and Piecewise Linear Cost Functions", VLDB 2002
+
+**Worst-case optimal plans:**
+- Harish et al., "On the Production of Robust Query Plans", VLDB 2008
+- Abhirama et al., "On the Stability of Plan Costs and the Costs of Plan Stability", VLDB 2010

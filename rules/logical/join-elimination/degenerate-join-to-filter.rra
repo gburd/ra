@@ -1,0 +1,226 @@
+---
+id: degenerate-join-to-filter
+name: Degenerate Join to Filter
+category: logical/join-elimination
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [join, elimination, degenerate, constant, filter, cross-join]
+complexity: "O(1)"
+benefit_range: [0.5, 0.95]
+---
+
+# Degenerate Join to Filter
+
+## Description
+
+Eliminates a join when one side is a single-row constant relation (e.g., a
+subquery returning exactly one row, or a `VALUES` clause with one row). The
+join becomes a cross product with a single row, which is equivalent to
+applying the join condition as a filter on the other side, substituting the
+constant values.
+
+**When to apply**: Join where one input is provably a single-row relation:
+- Aggregate without GROUP BY (always returns one row)
+- SELECT of only constants or scalar functions
+- VALUES clause with a single row
+- Subquery with LIMIT 1 on a non-empty table
+
+**Why it works**: A join with a single-row relation R produces at most one
+copy of each row from the other side S (since |R| = 1). The join condition
+can be rewritten as a filter on S by substituting the constant values from
+R. This eliminates the join operator entirely.
+
+## Relational Algebra
+
+```algebra
+join[S.col = R.val](S, single_row(R))
+  -> filter[S.col = constant](S)
+  where R produces exactly one row with R.val = constant
+
+join[cond](S, aggregate[agg](T))    -- no GROUP BY
+  -> filter[cond[agg_result/agg_col]](S)
+  -- substitute aggregate result into condition
+
+cross_join(S, single_row(R))
+  -> project[S.*, R.*](S)
+  -- cross with single row is just appending constants
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Join with constant single-row relation
+rw!("join-with-constant-to-filter";
+    "(join ?cond ?left (single-row ?vals))" =>
+    "(filter (substitute ?cond ?vals) ?left)"
+),
+
+// Join with scalar aggregate (no GROUP BY)
+rw!("join-with-scalar-aggregate-to-filter";
+    "(join (= ?col ?agg_col) ?left (aggregate ?agg_func ?input))" =>
+    "(filter (= ?col (scalar-subquery (aggregate ?agg_func ?input))) ?left)"
+    if is_scalar_aggregate("?agg_func", "?input")
+),
+
+// Cross join with single row becomes projection
+rw!("cross-join-single-row-elimination";
+    "(cross-join ?left (single-row ?vals))" =>
+    "(project-append ?left ?vals)"
+),
+
+// Symmetric: single row on left side
+rw!("join-with-constant-left-to-filter";
+    "(join ?cond (single-row ?vals) ?right)" =>
+    "(filter (substitute ?cond ?vals) ?right)"
+),
+
+fn is_scalar_aggregate(agg: &Expr, input: &Expr) -> bool {
+    // Aggregate without GROUP BY always returns exactly one row
+    !has_group_by(agg) && !input.is_empty_relation()
+}
+```
+
+**Restrictions:**
+- Must prove the relation produces exactly one row (not zero, not many)
+- Aggregate without GROUP BY on empty input returns one row with NULL/0
+- LIMIT 1 may return zero rows (need additional constraint)
+- Correlated single-row subqueries need special handling
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    left_size: u64,
+    right_size: u64,
+    join_type: JoinType,
+) -> f64 {
+    // Original: hash join build + probe
+    let join_cost = right_size as f64 + left_size as f64;
+
+    // After: filter scan (effectively free comparison per row)
+    let filter_cost = left_size as f64 * 0.01; // comparison cost
+
+    (join_cost - filter_cost) / join_cost
+}
+```
+
+**Typical benefit**: 50-95% by completely eliminating join infrastructure
+
+## Test Cases
+
+### Positive: Join with scalar aggregate subquery
+
+```sql
+SELECT e.name, e.salary
+FROM employees e
+JOIN (SELECT AVG(salary) AS avg_sal FROM employees) t
+  ON e.salary > t.avg_sal;
+
+-- Scalar aggregate returns one row
+-- Rewrite to:
+SELECT e.name, e.salary
+FROM employees e
+WHERE e.salary > (SELECT AVG(salary) FROM employees);
+
+-- Eliminates hash join, uses scalar subquery as filter
+```
+
+### Positive: Join with constants (VALUES single row)
+
+```sql
+SELECT p.name, p.price
+FROM products p
+JOIN (VALUES (100, 'USD')) AS params(threshold, currency)
+  ON p.price > params.threshold;
+
+-- Single-row VALUES -> substitute constants
+-- Rewrite to:
+SELECT p.name, p.price
+FROM products p
+WHERE p.price > 100;
+```
+
+### Positive: Cross join with configuration row
+
+```sql
+SELECT e.name, e.salary, c.min_salary
+FROM employees e
+CROSS JOIN (SELECT MIN(salary) AS min_salary FROM employees) c;
+
+-- Cross join with single row -> append constant column
+-- Execute aggregate once, attach result to every row
+```
+
+### Positive: Join with LIMIT 1 subquery on non-empty table
+
+```sql
+SELECT o.id, o.date
+FROM orders o
+JOIN (SELECT rate FROM exchange_rates
+      WHERE currency = 'USD'
+      ORDER BY effective_date DESC
+      LIMIT 1) er
+  ON true;
+
+-- LIMIT 1 + known non-empty -> single row
+-- Cross join degenerates to appending one value
+```
+
+### Negative: Aggregate with GROUP BY (multiple rows possible)
+
+```sql
+SELECT e.name, d.avg_sal
+FROM employees e
+JOIN (SELECT dept_id, AVG(salary) AS avg_sal
+      FROM employees GROUP BY dept_id) d
+  ON e.dept_id = d.dept_id;
+
+-- GROUP BY produces multiple rows, not degenerate
+-- Regular join optimization applies instead
+```
+
+### Negative: LIMIT 1 on potentially empty table
+
+```sql
+SELECT * FROM orders o
+JOIN (SELECT id FROM archived_orders LIMIT 1) a
+  ON o.id = a.id;
+
+-- archived_orders might be empty -> zero rows
+-- LIMIT 1 does not guarantee exactly one row
+-- Cannot safely convert to filter
+```
+
+### Negative: Correlated single-row subquery
+
+```sql
+SELECT e.name
+FROM employees e
+JOIN LATERAL (
+  SELECT MAX(salary) AS max_sal
+  FROM employees e2
+  WHERE e2.dept_id = e.dept_id
+) d ON e.salary = d.max_sal;
+
+-- Correlated: result changes per outer row
+-- Not a single constant -> cannot substitute once
+-- Requires decorrelation first
+```
+
+## References
+
+**Academic papers:**
+- Pirahesh et al., "Extensible/Rule Based Query Rewrite Optimization in Starburst", SIGMOD 1992
+- Chaudhuri, "An Overview of Query Optimization in Relational Systems", PODS 1998
+
+**Implementation:**
+- PostgreSQL: Detects single-row subqueries in `convert_ANY_sublink_to_join()`
+- Oracle: Scalar subquery caching and join elimination
+- SQL Server: Constant scan detection in join simplification
+- DuckDB: `SingleJoinOptimizer` for guaranteed-single-row joins
+- SQLite: Flattens scalar subqueries into parent query

@@ -1,0 +1,421 @@
+---
+id: gpu-offloading
+name: "GPU Query Execution Offloading"
+category: experimental/hardware-accel
+databases: [omnisci, blazingsql, sqream]
+execution_models: [gpu-accelerated]
+hardware: [gpu, cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [gpu, cuda, opencl, offloading, parallel, simt, columnar]
+complexity: "O(n/p) where p = GPU cores (thousands)"
+benefit_range: [0.5, 0.95]
+research_status: "production-for-analytics"
+maturity: "production-niche"
+---
+
+# GPU Query Execution Offloading
+
+## Description
+
+Offloads data-parallel query operators to GPU hardware, exploiting massive
+parallelism (thousands of cores) and high memory bandwidth (1-3 TB/s vs
+50-100 GB/s for CPU DRAM). GPUs excel at simple, regular operations on
+large datasets: scans, filters, hash joins, aggregations, and sorts.
+
+The key challenge is data transfer: PCIe bandwidth (32 GB/s for PCIe 5.0)
+limits the benefit of GPU processing. Effective GPU query execution
+requires: (1) data resident in GPU memory or using fast interconnects,
+(2) operators that are compute-bound rather than memory-bound on CPU,
+(3) sufficient parallelism to utilize thousands of cores.
+
+**When to apply**: Large analytical scans and aggregations (millions of
+rows), hash joins with large probe sides, and GROUP BY with many groups.
+Not suitable for index lookups, small tables, or complex string operations.
+
+**Why it works**: GPU architecture provides 10-100x more arithmetic
+throughput and 10-30x more memory bandwidth than CPUs. For data-parallel
+operations where every element undergoes the same computation, GPUs
+achieve near-theoretical throughput. Columnar storage is naturally
+GPU-friendly (coalesced memory access).
+
+**Research status**: Production in niche systems (OmniSci/HEAVY.AI,
+SQreamDB, BlazingSQL). Not mainstream due to: data transfer overhead,
+limited GPU memory (16-80GB), and complexity of GPU programming. NVIDIA
+RAPIDS cuDF brings GPU acceleration to dataframe operations.
+
+## Relational Algebra
+
+```algebra
+GPU-offloadable operators:
+  sigma[p](R)     -> GPU_filter(R_gpu, p)     -- parallel filter
+  gamma[G, agg](R) -> GPU_aggregate(R_gpu, G, agg) -- parallel reduce
+  R join[a=b] S   -> GPU_hash_join(R_gpu, S_gpu)   -- parallel build+probe
+  tau[k](R)        -> GPU_radix_sort(R_gpu, k)      -- parallel sort
+  pi[cols](R)      -> GPU_project(R_gpu, cols)       -- parallel projection
+
+Offloading decision:
+  GPU_benefit(op) > transfer_cost(data) + kernel_launch_overhead
+
+Transfer cost:
+  H2D(data) = |data| / PCIe_bandwidth + latency
+  D2H(result) = |result| / PCIe_bandwidth + latency
+```
+
+## Implementation
+
+```rust
+struct GPUQueryEngine {
+    device: GPUDevice,
+    device_memory: GPUMemoryPool,
+    pcie_bandwidth_gb_s: f64,
+    kernel_launch_overhead_us: f64,
+}
+
+struct GPUDevice {
+    name: String,
+    sm_count: u32,
+    cores_per_sm: u32,
+    clock_ghz: f64,
+    memory_gb: u32,
+    memory_bandwidth_gb_s: f64,
+}
+
+impl GPUDevice {
+    fn a100() -> Self {
+        Self {
+            name: "NVIDIA A100".into(),
+            sm_count: 108,
+            cores_per_sm: 64,
+            clock_ghz: 1.41,
+            memory_gb: 80,
+            memory_bandwidth_gb_s: 2039.0,
+        }
+    }
+
+    fn total_cores(&self) -> u32 {
+        self.sm_count * self.cores_per_sm
+    }
+}
+
+impl GPUQueryEngine {
+    fn should_offload(
+        &self,
+        operator: &Operator,
+        data_size_bytes: u64,
+        result_size_bytes: u64,
+    ) -> OffloadDecision {
+        // Cost of data transfer
+        let h2d_time_us = data_size_bytes as f64
+            / (self.pcie_bandwidth_gb_s * 1e9 / 1e6);
+        let d2h_time_us = result_size_bytes as f64
+            / (self.pcie_bandwidth_gb_s * 1e9 / 1e6);
+        let transfer_cost =
+            h2d_time_us + d2h_time_us + self.kernel_launch_overhead_us;
+
+        // Estimate GPU execution time
+        let gpu_time = self.estimate_gpu_time(operator, data_size_bytes);
+
+        // Estimate CPU execution time
+        let cpu_time = self.estimate_cpu_time(operator, data_size_bytes);
+
+        let gpu_total = transfer_cost + gpu_time;
+
+        if gpu_total < cpu_time * 0.8 {
+            OffloadDecision::GPU {
+                speedup: cpu_time / gpu_total,
+                transfer_fraction: transfer_cost / gpu_total,
+            }
+        } else {
+            OffloadDecision::CPU {
+                reason: if transfer_cost > gpu_time {
+                    "Transfer overhead dominates"
+                } else {
+                    "Insufficient parallelism"
+                },
+            }
+        }
+    }
+
+    fn estimate_gpu_time(
+        &self,
+        operator: &Operator,
+        data_bytes: u64,
+    ) -> f64 {
+        let cores = self.device.total_cores() as f64;
+        let bandwidth = self.device.memory_bandwidth_gb_s;
+
+        match operator {
+            Operator::Filter { .. } => {
+                // Memory bandwidth bound
+                data_bytes as f64 / (bandwidth * 1e9 / 1e6)
+            }
+
+            Operator::Aggregate { num_groups, .. } => {
+                // Parallel reduction
+                let reduce_passes = (data_bytes as f64 / cores).ceil();
+                let merge_time = (*num_groups as f64).log2() * 10.0;
+                reduce_passes / (bandwidth * 1e9 / 1e6) + merge_time
+            }
+
+            Operator::HashJoin { build_bytes, probe_bytes, .. } => {
+                // Build: parallel hash table construction
+                let build_time = *build_bytes as f64
+                    / (bandwidth * 1e9 / 1e6);
+                // Probe: parallel probing
+                let probe_time = *probe_bytes as f64
+                    / (bandwidth * 1e9 / 1e6);
+                build_time + probe_time
+            }
+
+            Operator::Sort { .. } => {
+                // GPU radix sort: O(n * w / p) where w = key width
+                let elements = data_bytes / 8;
+                let passes = 4; // 32-bit key, 8-bit radix
+                let per_pass = elements as f64
+                    / (bandwidth * 1e9 / 1e6);
+                per_pass * passes as f64
+            }
+        }
+    }
+
+    fn gpu_filter(
+        &self,
+        column_data: &GPUBuffer,
+        predicate: &Predicate,
+    ) -> GPUBuffer {
+        // Step 1: Evaluate predicate on all elements in parallel
+        let flags = self.launch_kernel(
+            "evaluate_predicate",
+            column_data,
+            predicate,
+        );
+
+        // Step 2: Prefix sum to compute output positions
+        let positions = self.parallel_prefix_sum(&flags);
+
+        // Step 3: Compact (stream compaction)
+        let result = self.launch_kernel(
+            "compact",
+            column_data,
+            &positions,
+        );
+
+        result
+    }
+
+    fn gpu_hash_join(
+        &self,
+        build_keys: &GPUBuffer,
+        build_payloads: &GPUBuffer,
+        probe_keys: &GPUBuffer,
+    ) -> GPUBuffer {
+        // Build phase: parallel hash table construction
+        let ht_size = (build_keys.len() * 2).next_power_of_two();
+        let hash_table = self.allocate_gpu(ht_size);
+
+        self.launch_kernel(
+            "hash_build",
+            build_keys,
+            build_payloads,
+            &hash_table,
+        );
+
+        // Probe phase: parallel probing
+        let result = self.launch_kernel(
+            "hash_probe",
+            probe_keys,
+            &hash_table,
+        );
+
+        result
+    }
+
+    fn gpu_aggregate(
+        &self,
+        keys: &GPUBuffer,
+        values: &GPUBuffer,
+        agg_type: AggType,
+    ) -> GPUBuffer {
+        match agg_type {
+            AggType::Sum | AggType::Count => {
+                // Parallel reduction tree
+                self.launch_kernel("parallel_reduce", values)
+            }
+            AggType::GroupBySum => {
+                // Hash-based group-by aggregation
+                let ht = self.allocate_gpu(keys.distinct_estimate() * 2);
+                self.launch_kernel(
+                    "hash_aggregate",
+                    keys,
+                    values,
+                    &ht,
+                );
+                ht
+            }
+            AggType::Min | AggType::Max => {
+                self.launch_kernel("parallel_minmax", values)
+            }
+        }
+    }
+
+    fn gpu_sort(
+        &self,
+        keys: &GPUBuffer,
+        payloads: &GPUBuffer,
+    ) -> (GPUBuffer, GPUBuffer) {
+        // Radix sort: naturally parallel, stable, predictable
+        // 4 passes for 32-bit keys (8-bit radix per pass)
+        let sorted_keys = self.launch_kernel(
+            "radix_sort",
+            keys,
+            payloads,
+        );
+        sorted_keys
+    }
+}
+
+enum OffloadDecision {
+    GPU {
+        speedup: f64,
+        transfer_fraction: f64,
+    },
+    CPU {
+        reason: &'static str,
+    },
+}
+```
+
+**Restrictions:**
+- GPU memory limited (16-80GB vs TB of CPU RAM)
+- PCIe transfer bottleneck for non-resident data
+- String operations are slow on GPUs (irregular memory access)
+- Complex joins with many conditions may not parallelize well
+- Power consumption: 300-400W per GPU
+- Programming complexity (CUDA/OpenCL kernels)
+- GPU memory management and fragmentation
+
+## Cost Model
+
+```rust
+fn gpu_offloading_benefit(
+    data_size_gb: f64,
+    gpu: &GPUDevice,
+    cpu_cores: u32,
+    pcie_bandwidth_gb_s: f64,
+    data_resident_on_gpu: bool,
+) -> GPUBenefit {
+    // GPU compute throughput
+    let gpu_throughput_gb_s = gpu.memory_bandwidth_gb_s;
+
+    // CPU compute throughput (memory bound)
+    let cpu_throughput_gb_s = 50.0; // DDR4/DDR5 bandwidth
+
+    // Transfer overhead
+    let transfer_time_s = if data_resident_on_gpu {
+        0.0
+    } else {
+        data_size_gb / pcie_bandwidth_gb_s
+    };
+
+    let gpu_compute_s = data_size_gb / gpu_throughput_gb_s;
+    let cpu_compute_s = data_size_gb / cpu_throughput_gb_s;
+
+    let gpu_total = transfer_time_s + gpu_compute_s;
+
+    GPUBenefit {
+        gpu_time_s: gpu_total,
+        cpu_time_s: cpu_compute_s,
+        speedup: cpu_compute_s / gpu_total,
+        transfer_overhead_pct: transfer_time_s / gpu_total * 100.0,
+    }
+}
+```
+
+**Typical benefit**: 5-50x speedup for scan-heavy analytics when data
+fits in GPU memory. Transfer overhead reduces benefit to 2-10x when
+data must be transferred per query.
+
+## Test Cases
+
+### Test 1: Full scan + filter (data on GPU)
+
+```sql
+SELECT COUNT(*) FROM events WHERE event_type = 3
+AND timestamp > 1704067200;
+-- 1B rows, 16 bytes/row = 16GB on GPU (A100 80GB)
+
+-- CPU (16 cores, 50 GB/s): 16GB / 50 = 320ms
+-- GPU (A100, 2TB/s): 16GB / 2000 = 8ms
+-- Speedup: 40x (data already on GPU, no transfer)
+```
+
+### Test 2: Transfer-limited scenario
+
+```sql
+SELECT SUM(amount) FROM transactions WHERE region = 'US';
+-- 10GB data, must transfer from CPU to GPU
+
+-- Transfer: 10GB / 32 GB/s (PCIe 5.0) = 312ms
+-- GPU compute: 10GB / 2000 GB/s = 5ms
+-- GPU total: 317ms
+-- CPU: 10GB / 50 GB/s = 200ms
+-- GPU is SLOWER (transfer dominates)
+-- Only beneficial if data stays on GPU across queries
+```
+
+### Test 3: Hash join acceleration
+
+```sql
+SELECT SUM(lo.revenue) FROM lineorder lo
+JOIN date d ON lo.lo_orderdate = d.d_datekey
+WHERE d.d_year = 1997;
+-- Build (date, filtered): 365 rows (trivial)
+-- Probe (lineorder): 6B rows, 8GB keys
+
+-- CPU hash join: 6B * 80ns/probe = 480s
+-- GPU hash join: 6B / 2000 GB/s bandwidth + parallel probing = 4s
+-- Speedup: 120x (embarrassingly parallel probing)
+```
+
+### Test 4: GPU sort
+
+```sql
+SELECT * FROM sensor_data ORDER BY reading LIMIT 100;
+-- 500M rows, 4-byte keys
+
+-- CPU radix sort (16 cores): 2GB / 50 GB/s * 4 passes = 160ms
+-- GPU radix sort (A100): 2GB / 2000 GB/s * 4 passes = 4ms
+-- Speedup: 40x
+```
+
+### Test 5: String operations (negative case)
+
+```sql
+SELECT * FROM documents WHERE content LIKE '%database%';
+-- Variable-length strings, irregular memory access
+-- GPU: poor memory coalescing, warp divergence
+-- CPU with SIMD: better for string operations
+-- GPU speedup: <2x (not worth the complexity)
+```
+
+## References
+
+**GPU database systems:**
+- OmniSci/HEAVY.AI: production GPU-accelerated analytics
+- SQreamDB: GPU-native SQL database
+- BlazingSQL: GPU-accelerated SQL on Apache Arrow
+- NVIDIA RAPIDS cuDF: GPU DataFrame library
+
+**Research papers:**
+- He et al., "Relational Query Coprocessing on Graphics Processors", TODS 2009
+- Kaldewey et al., "GPU Join Processing Revisited", DaMoN 2012
+- Paul et al., "GPL: A GPU-based Pipelined Query Processing Engine", SIGMOD 2016
+
+**GPU algorithms:**
+- Satish et al., "Fast Sort on CPUs and GPUs", SIGMOD 2010
+- Merrill & Grimshaw, "High Performance and Scalable Radix Sorting", Tech Report 2011
+
+**Cost modeling:**
+- He & Lo, "Toward GPU-accelerated Database Systems", DaMoN 2013
+- Yuan et al., "GPU Query Processing: When to Use and When Not to Use", ADMS 2013

@@ -3,6 +3,8 @@
 //! Provides common functions for testing optimization rules, cost models,
 //! and integration testing of the optimizer.
 
+#![allow(dead_code)]
+
 use ra_core::algebra::{JoinType, ProjectionColumn, RelExpr, SortDirection, SortKey};
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
 use ra_engine::{Optimizer, OptimizerConfig};

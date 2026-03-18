@@ -1,0 +1,148 @@
+---
+id: window-function-optimization
+name: Window Function Optimization
+category: logical/function-optimization
+databases: [postgresql, mysql, oracle, mssql, duckdb]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [function, window, partition, optimization, frame]
+complexity: "O(n)"
+benefit_range: [0.2, 0.7]
+---
+
+# Window Function Optimization
+
+## Description
+
+Optimizes window function evaluation by merging compatible window
+specifications, eliminating redundant sorts, and simplifying degenerate
+window expressions.
+
+**When to apply**: Queries with multiple window functions that share the
+same PARTITION BY and/or ORDER BY, or window functions that can be
+simplified.
+
+## Relational Algebra
+
+```algebra
+-- Merge compatible windows (same partition + order)
+project[
+  ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC),
+  RANK() OVER (PARTITION BY dept ORDER BY salary DESC)
+](R)
+  -> single_window_pass[PARTITION BY dept ORDER BY salary DESC](
+       ROW_NUMBER, RANK
+     )(R)
+
+-- Degenerate window: no PARTITION BY, no ORDER BY
+SUM(col) OVER () -> scalar_subquery(SUM(col))
+
+-- Window with constant PARTITION BY
+ROW_NUMBER() OVER (PARTITION BY 'constant') -> ROW_NUMBER() OVER ()
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Merge compatible window specifications
+rw!("merge-compatible-windows";
+    "(project
+       (window ?func1 ?partition ?order ?frame1 ?input)
+       (window ?func2 ?partition ?order ?frame2 ?input))" =>
+    "(project
+       (multi-window (?func1 ?frame1) (?func2 ?frame2)
+         ?partition ?order ?input))"
+),
+
+// Degenerate window to scalar aggregate
+rw!("window-no-partition-to-scalar";
+    "(window (sum ?col) () () (unbounded-preceding unbounded-following) ?input)" =>
+    "(cross-join ?input (aggregate (sum ?col) ?input))"
+),
+
+// Constant partition elimination
+rw!("window-constant-partition";
+    "(window ?func (partition-by (literal ?c)) ?order ?frame ?input)" =>
+    "(window ?func () ?order ?frame ?input)"
+),
+
+// ROW_NUMBER with LIMIT -> Top-N optimization
+rw!("row-number-limit-to-top-n";
+    "(filter (<= ?rn ?n)
+       (window (row-number) ?partition ?order ?frame ?input))" =>
+    "(top-n ?n ?partition ?order ?input)"
+),
+```
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    num_windows: usize,
+    windows_merged: usize,
+) -> f64 {
+    // Each unmerged window requires a separate sort
+    let sort_savings = windows_merged as f64 / num_windows as f64;
+    sort_savings * 0.7
+}
+```
+
+## Test Cases
+
+### Positive: Merge compatible windows
+
+```sql
+SELECT
+  ROW_NUMBER() OVER (PARTITION BY dept_id ORDER BY salary DESC) AS rn,
+  RANK() OVER (PARTITION BY dept_id ORDER BY salary DESC) AS rnk,
+  SUM(salary) OVER (PARTITION BY dept_id ORDER BY salary DESC) AS running_sum
+FROM employees;
+-- All three share same PARTITION BY + ORDER BY
+-- Single sort pass computes all three
+```
+
+### Positive: ROW_NUMBER + filter to Top-N
+
+```sql
+SELECT * FROM (
+  SELECT *, ROW_NUMBER() OVER (PARTITION BY dept_id ORDER BY salary DESC) AS rn
+  FROM employees
+) t WHERE rn <= 3;
+-- Convert to Top-3 per partition (specialized operator)
+-- Avoids full sort; uses bounded heap
+```
+
+### Positive: Empty window to scalar aggregate
+
+```sql
+SELECT name, salary,
+  AVG(salary) OVER () AS company_avg
+FROM employees;
+-- OVER () = entire table = scalar aggregate
+-- Compute once, broadcast to all rows
+```
+
+### Negative: Different PARTITION BY clauses
+
+```sql
+SELECT
+  SUM(salary) OVER (PARTITION BY dept_id) AS dept_total,
+  SUM(salary) OVER (PARTITION BY location) AS loc_total
+FROM employees;
+-- Different partitions: cannot merge, require separate passes
+```
+
+## References
+
+**Academic papers:**
+- Cao et al., "Optimization of Analytic Window Functions", PVLDB 2012
+- Leis et al., "Morsel-Driven Parallelism", SIGMOD 2014 (window parallelism)
+
+**Implementation:**
+- PostgreSQL: `WindowAgg` node with shared sort
+- Oracle: Window sort optimization and star transformation
+- DuckDB: Parallel window function evaluation with streaming

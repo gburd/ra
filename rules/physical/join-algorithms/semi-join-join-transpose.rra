@@ -1,0 +1,129 @@
+---
+id: calcite-semi-join-join-transpose
+name: Calcite SemiJoinJoinTransposeRule
+category: physical/join-algorithms
+databases: [calcite, postgresql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [physical, calcite, semi-join, join, transpose, pushdown]
+complexity: O(n)
+benefit_range: [0.1, 0.5]
+---
+
+# Calcite SemiJoinJoinTransposeRule
+
+## Description
+
+Pushes a semi-join down past a regular join to apply the semi-join
+filter closer to the base table. This reduces the number of rows
+flowing into the regular join.
+
+**When to apply**: A semi-join sits above a regular join, and the
+semi-join condition references columns from only one side of the
+inner join.
+
+**Why it works**: Semi-joins filter rows early. By pushing the
+semi-join below the regular join, fewer rows participate in the
+join, reducing the join cost.
+
+**Calcite class**: `org.apache.calcite.rel.rules.SemiJoinJoinTransposeRule`
+
+## Relational Algebra
+
+```algebra
+-- Before: semi-join above join
+(X JOIN Y) SEMI JOIN Z
+  where semi-join references only X
+
+-- After: semi-join pushed to left input
+(X SEMI JOIN Z) JOIN Y
+
+-- Or if semi-join references only Y:
+X JOIN (Y SEMI JOIN Z)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-semi-join-join-transpose-left";
+    "(semi-join ?scond
+        (join ?type ?jcond ?x ?y)
+        ?z)" =>
+    "(join ?type ?jcond
+        (semi-join ?scond ?x ?z)
+        ?y)"
+    if semi_join_refs_only_left("?scond", "?x")
+),
+
+rw!("calcite-semi-join-join-transpose-right";
+    "(semi-join ?scond
+        (join ?type ?jcond ?x ?y)
+        ?z)" =>
+    "(join ?type ?jcond
+        ?x
+        (semi-join ?scond ?y ?z))"
+    if semi_join_refs_only_right("?scond", "?x", "?y")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    semi_join: &Join,
+    inner_join: &Join,
+) -> bool {
+    semi_join.is_semi_join()
+        && inner_join.join_type() == JoinType::Inner
+}
+```
+
+**Restrictions:**
+- Semi-join keys must reference only one side of the inner join
+- The inner join must be an inner join (not outer)
+- Semi-join condition must be remapped after pushdown
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    x_rows: f64,
+    y_rows: f64,
+    semi_selectivity: f64,
+) -> f64 {
+    let before = x_rows * y_rows;
+    let after = (x_rows * semi_selectivity) * y_rows;
+    if before > 0.0 { (before - after) / before } else { 0.0 }
+}
+```
+
+**Typical benefit**: 10-50% by reducing join input sizes.
+
+## Test Cases
+
+```sql
+-- Positive: semi-join pushed to left of inner join
+SELECT * FROM emp e
+JOIN dept d ON e.deptno = d.deptno
+WHERE e.empno IN (SELECT empno FROM bonus);
+-- Semi-join on empno references only emp; push below join
+```
+
+```sql
+-- Positive: semi-join pushed to right
+SELECT * FROM orders o
+JOIN products p ON o.prod_id = p.id
+WHERE p.id IN (SELECT prod_id FROM featured);
+-- Semi-join on prod_id references only products; push to right
+```
+
+```sql
+-- Negative: semi-join references both sides
+-- Unlikely in practice but theoretically possible
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/SemiJoinJoinTransposeRule.java (commit af6367d)

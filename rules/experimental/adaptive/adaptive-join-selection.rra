@@ -1,0 +1,202 @@
+---
+id: adaptive-join-selection
+name: Adaptive Join Algorithm Selection
+category: experimental/adaptive
+databases: [postgresql, duckdb, cockroachdb]
+execution_models: [adaptive, vectorized]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["Babu et al. 2005", "RA Contributors"]
+tags: [adaptive, join, runtime, algorithm-selection]
+complexity: "O(n + m) + switching overhead"
+benefit_range: [0.2, 0.7]
+---
+
+# Adaptive Join Algorithm Selection
+
+## Description
+
+Defers the choice of join algorithm (hash join, sort-merge join, nested
+loop join) until runtime, when actual data characteristics are observed.
+The executor starts with a default algorithm and monitors runtime metrics
+(build side size, sort progress, memory pressure). If conditions change
+(e.g., build side exceeds memory budget), it switches to a more
+appropriate algorithm mid-execution.
+
+**When to apply**: Joins where the optimal algorithm depends on data
+characteristics that are uncertain at optimization time (cardinality
+estimates, memory availability, sort order of incoming data).
+
+**Why it works**: Hash joins are optimal when the build side fits in
+memory but degrade to expensive disk-based variants when it does not.
+Sort-merge joins are optimal when input is pre-sorted. By observing
+runtime conditions, the executor can pick the right algorithm and
+switch before paying the full cost of the wrong choice.
+
+## Relational Algebra
+
+```algebra
+join[R.a = S.a](R, S)
+  -> adaptive_join(
+       algorithms: [hash_join, sort_merge_join, grace_hash_join],
+       initial: hash_join,
+       switch_conditions: [
+         (memory_pressure > 0.8, -> grace_hash_join),
+         (input_sorted(R) AND input_sorted(S), -> sort_merge_join)
+       ],
+       inputs: (R, S)
+     )
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("adaptive-join-selection";
+    "(join ?pred ?left ?right)" =>
+    "(adaptive_join
+       (algorithms hash_join sort_merge grace_hash nested_loop)
+       (initial (choose_initial ?left ?right))
+       (switch_policy runtime_monitor)
+       (pred ?pred)
+       (inputs ?left ?right))"
+    if cardinality_uncertain("?left", "?right")
+    if multiple_algorithms_viable()
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    left: &Statistics,
+    right: &Statistics,
+) -> bool {
+    // Cardinality estimates have high uncertainty
+    let uncertainty = left.confidence.min(right.confidence);
+    if uncertainty > 0.9 {
+        return false; // Estimates are reliable
+    }
+
+    // Multiple algorithms are viable
+    let viable = count_viable_algorithms(left, right);
+    viable >= 2
+}
+
+fn count_viable_algorithms(
+    left: &Statistics,
+    right: &Statistics,
+) -> usize {
+    let mut count = 0;
+    let smaller = left.row_count.min(right.row_count);
+    let larger = left.row_count.max(right.row_count);
+
+    // Hash join: viable if build side might fit in memory
+    if smaller * 100 < available_memory() * 2 {
+        count += 1;
+    }
+    // Sort-merge: viable if input might be sorted
+    if left.might_be_sorted() || right.might_be_sorted() {
+        count += 1;
+    }
+    // Nested loop with index: viable if one side is small
+    if smaller < 1000 {
+        count += 1;
+    }
+    // Grace hash: always viable as fallback
+    count += 1;
+
+    count
+}
+```
+
+**Restrictions:**
+- Switching algorithms mid-stream has overhead (partial results may be discarded)
+- Not all transitions are possible (NL->hash easy, hash->sort-merge harder)
+- Monitor overhead per tuple (~5-10ns for condition checks)
+- Requires runtime memory monitoring infrastructure
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    left: &Statistics,
+    right: &Statistics,
+) -> f64 {
+    // Cost of wrong algorithm choice
+    let hash_cost = estimate_hash_join(left, right);
+    let merge_cost = estimate_sort_merge_join(left, right);
+    let nl_cost = estimate_nested_loop(left, right);
+
+    let best_cost = hash_cost.min(merge_cost).min(nl_cost);
+    let worst_cost = hash_cost.max(merge_cost).max(nl_cost);
+
+    // Adaptive: pays best_cost + small switching overhead
+    let switch_overhead = 1000.0; // Fixed overhead
+    let adaptive_cost = best_cost + switch_overhead;
+
+    // Benefit: avoid worst-case when estimates are wrong
+    let expected_static_cost = (best_cost + worst_cost) / 2.0;
+
+    if expected_static_cost > adaptive_cost {
+        (expected_static_cost - adaptive_cost) / expected_static_cost
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 2x-5x improvement when cardinality estimates are
+off by 10x or more. Insurance against catastrophic hash join spills.
+
+## Test Cases
+
+### Positive: Uncertain build side size
+
+```sql
+SELECT * FROM orders o
+JOIN returns r ON o.id = r.order_id
+WHERE r.reason LIKE '%defective%';
+
+-- Estimate: 1000 returns (fits in memory -> hash join)
+-- Actual: 10M returns (doesn't fit -> should use grace hash)
+-- Adaptive: starts hash, detects memory pressure, switches to grace
+```
+
+### Positive: Unexpectedly sorted input
+
+```sql
+SELECT * FROM events e
+JOIN users u ON e.user_id = u.id
+ORDER BY e.user_id;
+
+-- Input from events may arrive sorted by user_id (clustered index)
+-- Adaptive: detects sorted input, switches to sort-merge join
+-- Saves sort cost and produces ordered output naturally
+```
+
+### Negative: Small tables with reliable estimates
+
+```sql
+SELECT * FROM config c JOIN features f ON c.id = f.config_id;
+-- Both tables < 1000 rows, any algorithm works, no benefit
+```
+
+## References
+
+**Academic papers:**
+- Babu et al., "Adaptive Query Processing in the Looking Glass", CIDR 2005
+- Deshpande et al., "Adaptive Query Processing", FnT Databases 2007
+- Li et al., "Robust Query Processing through Progressive Optimization", SIGMOD 2007
+
+**Implementation:**
+- SQL Server: adaptive joins (since 2017) switch between NL and hash
+- Oracle: adaptive plans with statistics collectors
+- PostgreSQL: proposed adaptive NL-to-hash switching
+
+**Key insights:**
+- SQL Server's adaptive joins are the first production implementation
+- Switch point determined by "tipping point" of build side cardinality
+- Statistics collector operators inserted at join inputs gather runtime info
+- Adaptive execution is orthogonal to adaptive optimization (plan vs algorithm)

@@ -1,0 +1,271 @@
+---
+id: adaptive-index-routing
+name: Adaptive Index vs. Scan Routing
+category: execution-models
+version: 1.0.0
+databases: [Oracle, PostgreSQL, SQL Server, MySQL]
+authors: [Goetz Graefe]
+tags: [execution, adaptive, index, scan, selectivity, runtime]
+standard: Adaptive access path selection
+complexity: O(sample_size) per decision
+benefit_range: [1.5, 15.0]
+---
+
+# Adaptive Index vs. Scan Routing
+
+## Description
+
+Adaptive index routing defers the choice between index scan and sequential scan until runtime, when the actual selectivity of filter predicates is known. The optimizer generates a plan with both access paths available, and the executor samples the first few index lookups to estimate true selectivity. If selectivity is low (few matching rows), the index path continues. If selectivity is high (many matching rows), execution switches to a sequential scan to avoid the random I/O penalty of index lookups.
+
+This is critical for parameterized queries where the same plan template is reused for different parameter values. A query like `WHERE status = ?` has vastly different selectivity for `status='active'` (90% of rows) versus `status='recalled'` (0.01% of rows).
+
+**Key characteristics:**
+- **Sample-based decision**: Execute first N index lookups, measure actual selectivity
+- **Tipping point**: Switch to scan when estimated qualifying rows exceed threshold
+- **I/O pattern awareness**: Random I/O (index) vs. sequential I/O (scan) cost ratio
+- **Buffer pool awareness**: Hot data reduces random I/O penalty
+- **Per-execution**: Each execution independently decides (no cross-execution feedback)
+
+**Trade-offs:**
+- Sampling overhead: first N lookups may be wasted if switching to scan
+- Index startup cost committed before decision point
+- Cannot switch back to index after starting scan
+- Requires both access methods available in plan
+
+## Relational Algebra
+
+```
+AdaptiveAccess(table, predicate, index) -> Iterator<Row>
+
+fn execute_adaptive(table, pred, idx):
+  SAMPLE_SIZE = 100
+  sample_results = []
+
+  // Phase 1: Sample via index
+  for i in 0..SAMPLE_SIZE:
+    page_id = idx.lookup_next(pred)
+    if page_id is None:
+      // Index exhausted during sampling -> use index (small result)
+      return index_scan_remaining(idx, sample_results)
+    sample_results.push(fetch_row(page_id))
+
+  // Phase 2: Estimate total qualifying rows
+  index_entries_scanned = idx.entries_examined()
+  selectivity = SAMPLE_SIZE / index_entries_scanned
+  estimated_total = selectivity * table.row_count()
+
+  // Phase 3: Choose path
+  if estimated_total > TIPPING_POINT(table):
+    return sequential_scan(table, pred)  // discard sample
+  else:
+    return index_scan_remaining(idx, sample_results)
+```
+
+## Implementation
+
+```rust
+/// Configuration for adaptive access path selection
+pub struct AdaptiveAccessConfig {
+    /// Number of index lookups to sample
+    pub sample_size: usize,
+    /// Sequential-to-random I/O cost ratio
+    pub seq_random_ratio: f64,
+    /// Buffer pool hit rate estimate (0.0 to 1.0)
+    pub buffer_hit_rate: f64,
+}
+
+impl Default for AdaptiveAccessConfig {
+    fn default() -> Self {
+        Self {
+            sample_size: 100,
+            seq_random_ratio: 0.1, // seq is 10x cheaper
+            buffer_hit_rate: 0.8,
+        }
+    }
+}
+
+/// Tipping point: row fraction above which scan wins
+pub fn tipping_point(
+    table_pages: usize,
+    index_height: usize,
+    seq_random_ratio: f64,
+    clustering_factor: f64,
+) -> f64 {
+    // For clustered index: tipping point is higher (~50%)
+    // For unclustered: tipping point is lower (~5-15%)
+    //
+    // scan_cost = table_pages * seq_io_cost
+    // index_cost = qualifying_rows * (index_height + 1)
+    //              * random_io_cost * (1 - clustering)
+    // Solve for qualifying_fraction where index = scan
+
+    let scan_cost = table_pages as f64;
+    let per_row_index_cost = (index_height as f64 + 1.0)
+        * (1.0 / seq_random_ratio)
+        * (1.0 - clustering_factor);
+
+    if per_row_index_cost <= 0.0 {
+        return 1.0; // Index always better (fully clustered)
+    }
+
+    // tipping_fraction = scan_cost / (total_rows * per_row)
+    // Simplified: return fraction
+    (scan_cost / per_row_index_cost).min(1.0)
+}
+
+/// Adaptive access operator
+pub struct AdaptiveAccess {
+    table: TableHandle,
+    predicate: Predicate,
+    index: IndexHandle,
+    config: AdaptiveAccessConfig,
+}
+
+impl AdaptiveAccess {
+    pub fn execute(&self) -> Result<Box<dyn Iterator<Item = Row>>> {
+        let mut sample_rows = Vec::new();
+        let mut index_cursor = self.index.open_cursor(
+            &self.predicate,
+        )?;
+        let mut pages_visited = 0;
+
+        // Phase 1: Sample via index
+        for _ in 0..self.config.sample_size {
+            match index_cursor.next()? {
+                Some((page_id, row)) => {
+                    pages_visited += 1;
+                    sample_rows.push(row);
+                }
+                None => {
+                    // Index exhausted: result is small
+                    return Ok(Box::new(
+                        sample_rows.into_iter(),
+                    ));
+                }
+            }
+        }
+
+        // Phase 2: Estimate selectivity
+        let entries_examined = index_cursor.entries_examined();
+        let selectivity = self.config.sample_size as f64
+            / entries_examined.max(1) as f64;
+        let estimated_rows = selectivity
+            * self.table.row_count() as f64;
+
+        // Phase 3: Compute tipping point
+        let tp = tipping_point(
+            self.table.page_count(),
+            self.index.height(),
+            self.config.seq_random_ratio,
+            self.index.clustering_factor(),
+        );
+
+        let qualifying_fraction = estimated_rows
+            / self.table.row_count() as f64;
+
+        if qualifying_fraction > tp {
+            // Switch to sequential scan
+            Ok(Box::new(
+                self.table.seq_scan(&self.predicate)?,
+            ))
+        } else {
+            // Continue index scan (prepend sample rows)
+            let remaining = index_cursor.remaining()?;
+            Ok(Box::new(
+                sample_rows.into_iter().chain(remaining),
+            ))
+        }
+    }
+}
+
+/// Cost comparison between access paths
+pub fn access_path_cost(
+    table_pages: usize,
+    qualifying_rows: f64,
+    index_height: usize,
+    clustering_factor: f64,
+    buffer_hit_rate: f64,
+) -> (f64, f64) {
+    let seq_io_cost = 0.1;  // ms per sequential page
+    let rand_io_cost = 1.0; // ms per random page
+
+    let scan_cost = table_pages as f64 * seq_io_cost;
+
+    let effective_rand = rand_io_cost
+        * (1.0 - buffer_hit_rate);
+    let index_pages = qualifying_rows
+        * (1.0 - clustering_factor)
+        + qualifying_rows * clustering_factor
+            / (table_pages as f64 / 100.0).max(1.0);
+
+    let index_cost = qualifying_rows
+        * (index_height as f64) * effective_rand * 0.01
+        + index_pages * effective_rand;
+
+    (scan_cost, index_cost)
+}
+```
+
+## Cost Model
+
+**Index scan cost:**
+- Unclustered: `qualifying_rows * random_IO_cost`
+- Clustered: `qualifying_pages * sequential_IO_cost` (much cheaper)
+- B-tree traversal: `index_height * random_IO_cost` per lookup
+
+**Sequential scan cost:**
+- `table_pages * sequential_IO_cost`
+- Constant regardless of selectivity
+
+**Tipping point:**
+- Unclustered index: ~5-15% of rows (varies with page size, caching)
+- Clustered index: ~30-50% of rows
+- In-memory (high buffer hit rate): ~50-70% (random I/O cheap when cached)
+- PostgreSQL default: uses `random_page_cost / seq_page_cost` ratio (default 4:1)
+
+**Sampling overhead:**
+- 100 index lookups: ~0.1-1 ms (mostly in buffer pool)
+- Decision time: negligible
+- Wasted work on switch: sample rows discarded (100 * row_size bytes)
+
+## Test Cases
+
+```sql
+-- Test 1: Low selectivity -> use index
+SELECT * FROM orders WHERE order_id = 42;
+-- Selectivity ~1/6M, well below tipping point
+-- Sample: 1 row found in 1 lookup -> index path
+
+-- Test 2: High selectivity -> switch to scan
+SELECT * FROM orders WHERE status = 'shipped';
+-- 90% of orders are shipped
+-- Sample: 100/100 lookups match -> selectivity ~0.9
+-- Exceeds tipping point -> sequential scan
+
+-- Test 3: Parameter-sensitive with different values
+PREPARE stmt AS SELECT * FROM orders WHERE priority = $1;
+EXECUTE stmt('urgent');    -- 0.1% match -> index
+EXECUTE stmt('normal');    -- 85% match -> scan
+-- Same plan template, different runtime decisions
+
+-- Test 4: Clustered index shifts tipping point
+SELECT * FROM lineitem
+WHERE l_shipdate BETWEEN '2024-01-01' AND '2024-06-30';
+-- Clustered on shipdate: 50% of rows
+-- Clustered tipping point ~50%, borderline case
+-- Adaptive samples and picks based on actual distribution
+```
+
+## References
+
+1. **Graefe, Goetz**. "Adaptive Query Processing." ICDE Tutorial, 2000.
+   - Adaptive operator framework including access path selection
+
+2. **Selinger, P. Griffiths et al**. "Access Path Selection in a Relational Database Management System." SIGMOD 1979.
+   - Original access path cost model (System R)
+
+3. **PostgreSQL Documentation**. "Planner Cost Constants."
+   - `random_page_cost` and `seq_page_cost` parameters
+
+4. **Oracle Documentation**. "Adaptive Plans." Oracle 12c.
+   - Runtime access path switching in Oracle's adaptive framework

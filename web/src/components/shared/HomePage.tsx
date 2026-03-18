@@ -45,6 +45,14 @@ export function HomePage(_props: HomePageProps) {
             MSSQL, and Oracle. See syntax differences.
           </p>
         </a>
+
+        <a href="/demos" class="feature-card">
+          <h2>Interactive Demos</h2>
+          <p>
+            Explore how statistics staleness, hardware profiles, and
+            cost model parameters affect query optimizer decisions.
+          </p>
+        </a>
       </section>
     </div>
   );

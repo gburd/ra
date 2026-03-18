@@ -37,5 +37,6 @@ pub use memory::{MemoryConfig, MemoryType, NumaTopology};
 pub use profile::HardwareProfile;
 pub use profiles::CompleteHardwareProfile;
 pub use storage::{
-    CloudStorageTier, PcieGen, SpindleSpeed, StorageDevice, StorageTechnology,
+    CloudStorageTier, LtoGeneration, NasProtocol, PcieGen, SpindleSpeed, StorageDevice,
+    StorageTechnology,
 };

@@ -1,0 +1,133 @@
+---
+id: locality-optimized-search-of-join
+name: Locality-Optimized Search of Lookup Join
+category: distributed/locality-optimization
+databases: [cockroachdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, locality, join, lookup, multi-region, nested-search]
+complexity: O(n)
+benefit_range: [0.2, 0.85]
+---
+
+# Locality-Optimized Search of Lookup Join
+
+## Description
+
+Converts a lookup join whose input is a REGIONAL BY ROW scan into a
+locality-optimized search of two lookup joins. The left branch reads
+local rows from the input table and feeds them to a lookup join. The
+right branch reads remote rows. If the left branch (local scan +
+lookup) produces enough rows (e.g., satisfies a LIMIT), the right
+branch is never executed.
+
+**When to apply**: A lookup join has a REGIONAL BY ROW input table with
+cardinality above the threshold for a simple locality-optimized scan,
+and the lookup join itself may or may not be locality-optimized.
+
+**Why it works**: By splitting the input scan by locality and feeding
+each partition to its own lookup join, the optimizer can satisfy
+LIMIT queries entirely from local data, avoiding both cross-region
+input scans and cross-region lookups.
+
+## Relational Algebra
+
+```algebra
+LookupJoin[cond](Scan(T_rbr), index)
+  -> LocalityOptimizedSearch(
+       LookupJoin[cond](Scan(T_rbr, local_spans), index),
+       LookupJoin[cond](Scan(T_rbr, remote_spans), index)
+     )
+  where T_rbr is REGIONAL BY ROW
+  where cardinality(T_rbr) > locality_opt_scan_threshold
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("locality-optimized-search-of-join";
+    "(lookup_join ?type (scan ?table ?spans) ?index ?expr ?on)" =>
+    "(locality_optimized_search
+        (lookup_join ?type (scan ?table ?local_spans) ?index ?expr ?on)
+        (lookup_join ?type (scan ?table ?remote_spans) ?index ?expr ?on))"
+    if is_regional_by_row("?table")
+    if cardinality_above_threshold("?table")
+    if can_split_local_remote("?spans", "?local_spans", "?remote_spans")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    input: &RelExpr,
+    join_private: &JoinPrivate,
+    gateway_region: &str,
+) -> bool {
+    // Input must be a scan (or select from scan) of REGIONAL BY ROW
+    input.is_regional_by_row_scan()
+    // Input cardinality must exceed the locality-optimized scan threshold
+    && input.cardinality() > LOCALITY_OPT_SCAN_MAX_CARDINALITY
+    // Must not be an anti join
+    && !join_private.is_anti_join()
+    // Input scan must be splittable by locality
+    && can_split_scan_by_locality(input, gateway_region)
+}
+```
+
+**Restrictions:**
+- Not applicable to anti joins (which have their own optimization)
+- The input cardinality must exceed the locality-optimized scan
+  threshold (otherwise GenerateLocalityOptimizedScan handles it)
+- Both the input scan splitting and the lookup join locality
+  optimization may apply simultaneously
+- A pessimization if the query always needs remote input rows
+
+## Cost Model
+
+```rust
+fn search_of_join_cost(
+    local_input_rows: f64,
+    remote_input_rows: f64,
+    lookup_cost_per_row: f64,
+    probability_local_sufficient: f64,
+) -> f64 {
+    let local_cost = local_input_rows * lookup_cost_per_row;
+    let remote_cost = remote_input_rows * lookup_cost_per_row;
+    probability_local_sufficient * local_cost
+        + (1.0 - probability_local_sufficient)
+            * (local_cost + remote_cost)
+}
+```
+
+## Test Cases
+
+```sql
+-- Positive: LIMIT query with REGIONAL BY ROW input and lookup
+-- child and parent are both REGIONAL BY ROW, query from ap-southeast-2
+SELECT * FROM child
+INNER LOOKUP JOIN parent ON c_p_id = p_id
+LIMIT 3;
+
+-- Plan:
+-- Limit(3)
+--   LocalityOptimizedSearch
+--     LookupJoin(c_p_id = p_id)
+--       Scan(child, region='ap-southeast-2')  -- local
+--     LookupJoin(c_p_id = p_id)
+--       Scan(child, region IN ('ca-central-1','us-east-1'))  -- remote
+```
+
+```sql
+-- Negative: no limit, all rows needed
+SELECT * FROM child
+INNER LOOKUP JOIN parent ON c_p_id = p_id;
+-- Must process all input rows from all regions
+```
+
+## References
+
+CockroachDB: pkg/sql/opt/xform/rules/join.opt:821 - GenerateLocalityOptimizedSearchOfLocalityOptimizedJoin (commit 51e808c)
+CockroachDB: pkg/sql/opt/xform/rules/join.opt:921 - GenerateLocalityOptimizedSearchOfLookupJoins

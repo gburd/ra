@@ -1,0 +1,138 @@
+---
+id: calcite-set-op-to-filter
+name: Calcite SetOpToFilterRule
+category: logical/set-operations
+databases: [calcite, postgresql, mysql, oracle]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [logical, calcite, union, except, intersect, filter, same-source]
+complexity: O(n)
+benefit_range: [0.3, 0.9]
+---
+
+# Calcite SetOpToFilterRule
+
+## Description
+
+Replaces a set operation (UNION, EXCEPT, INTERSECT) with a filter
+when both inputs come from the same source table and differ only in
+their filter conditions. This eliminates the set operation entirely.
+
+**When to apply**: A set operation's inputs are the same table scan
+(possibly with projections) and differ only in their WHERE clauses.
+
+**Why it works**: For the same base table:
+- UNION: combine filters with OR
+- EXCEPT: negate the second filter
+- INTERSECT: combine filters with AND
+
+**Calcite class**: `org.apache.calcite.rel.rules.SetOpToFilterRule`
+
+## Relational Algebra
+
+```algebra
+-- Before: UNION of same source
+sigma[p1](R) UNION sigma[p2](R)
+
+-- After: single scan with combined filter
+gamma[*](sigma[p1 OR p2](R))
+
+-- Before: EXCEPT of same source
+sigma[p1](R) EXCEPT sigma[p2](R)
+
+-- After: single scan with negated filter
+gamma[*](sigma[p1 AND NOT p2](R))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-union-to-filter";
+    "(union-distinct
+        (filter ?p1 ?source)
+        (filter ?p2 ?source))" =>
+    "(aggregate (all-cols)
+        (filter (or ?p1 ?p2) ?source))"
+),
+
+rw!("calcite-except-to-filter";
+    "(minus
+        (filter ?p1 ?source)
+        (filter ?p2 ?source))" =>
+    "(aggregate (all-cols)
+        (filter (and ?p1 (not ?p2)) ?source))"
+),
+
+rw!("calcite-intersect-to-filter";
+    "(intersect
+        (filter ?p1 ?source)
+        (filter ?p2 ?source))" =>
+    "(aggregate (all-cols)
+        (filter (and ?p1 ?p2) ?source))"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(set_op: &SetOp) -> bool {
+    let inputs = set_op.inputs();
+    inputs.len() >= 2
+        && inputs.windows(2).all(|w| {
+            w[0].base_table() == w[1].base_table()
+        })
+}
+```
+
+**Restrictions:**
+- All inputs must reference the same base table
+- Projections must be identical across inputs
+- Only single-layer filters are inspected; use FilterMerge first
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    table_rows: f64,
+    num_inputs: usize,
+) -> f64 {
+    // Single scan vs multiple scans
+    let before = table_rows * num_inputs as f64;
+    let after = table_rows;
+    if before > 0.0 { (before - after) / before } else { 0.0 }
+}
+```
+
+**Typical benefit**: 30-90% by eliminating duplicate table scans.
+
+## Test Cases
+
+```sql
+-- Positive: UNION from same table
+SELECT mgr, comm FROM emp WHERE mgr = 12
+UNION
+SELECT mgr, comm FROM emp WHERE comm = 5;
+-- Becomes: SELECT DISTINCT mgr, comm FROM emp WHERE mgr = 12 OR comm = 5
+```
+
+```sql
+-- Positive: EXCEPT from same table
+SELECT mgr, comm FROM emp WHERE mgr = 12
+EXCEPT
+SELECT mgr, comm FROM emp WHERE comm = 5;
+-- Becomes: SELECT DISTINCT mgr, comm FROM emp WHERE mgr = 12 AND NOT(comm = 5)
+```
+
+```sql
+-- Negative: different source tables
+SELECT deptno FROM emp
+UNION
+SELECT deptno FROM dept;
+-- Different tables; cannot combine
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/SetOpToFilterRule.java (commit af6367d)

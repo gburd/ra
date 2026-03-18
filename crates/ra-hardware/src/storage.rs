@@ -13,6 +13,83 @@ pub enum StorageTechnology {
     SataHDD,
     /// Cloud object storage (S3, GCS, Azure Blob).
     CloudStorage,
+    /// Tape storage (LTO).
+    Tape,
+    /// Network-attached storage.
+    NAS,
+    /// `microSD` / eMMC (embedded or edge devices).
+    MicroSD,
+}
+
+/// NAS protocol type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum NasProtocol {
+    /// NFS v4.
+    NFSv4,
+    /// SMB / CIFS.
+    SMB,
+    /// iSCSI block-level.
+    ISCSI,
+}
+
+impl NasProtocol {
+    /// Returns typical sequential read bandwidth (MB/s) over 10GbE.
+    #[must_use]
+    pub fn bandwidth_10gbe_mbps(self) -> u32 {
+        match self {
+            Self::NFSv4 => 1100,
+            Self::SMB => 900,
+            Self::ISCSI => 1150,
+        }
+    }
+
+    /// Returns typical latency overhead (microseconds).
+    #[must_use]
+    pub fn latency_overhead_us(self) -> f64 {
+        match self {
+            Self::NFSv4 => 200.0,
+            Self::SMB => 300.0,
+            Self::ISCSI => 150.0,
+        }
+    }
+}
+
+/// LTO tape generation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum LtoGeneration {
+    /// LTO-8 (12 TB native, 360 MB/s).
+    LTO8,
+    /// LTO-9 (18 TB native, 400 MB/s).
+    LTO9,
+}
+
+impl LtoGeneration {
+    /// Returns native (uncompressed) capacity in bytes.
+    #[must_use]
+    pub fn native_capacity_bytes(self) -> u64 {
+        match self {
+            Self::LTO8 => 13_194_139_533_312, // 12 TB
+            Self::LTO9 => 19_791_209_299_968, // 18 TB
+        }
+    }
+
+    /// Returns sustained transfer rate (MB/s).
+    #[must_use]
+    pub fn transfer_rate_mbps(self) -> u32 {
+        match self {
+            Self::LTO8 => 360,
+            Self::LTO9 => 400,
+        }
+    }
+
+    /// Returns typical load/position time (seconds).
+    #[must_use]
+    pub fn load_time_s(self) -> f64 {
+        match self {
+            Self::LTO8 => 15.0,
+            Self::LTO9 => 12.0,
+        }
+    }
 }
 
 /// `PCIe` generation for `NVMe` devices.
@@ -342,6 +419,81 @@ impl StorageDevice {
         }
     }
 
+    /// LTO-9 tape drive (18 TB native, 400 MB/s).
+    #[must_use]
+    pub fn tape_lto9() -> Self {
+        Self {
+            name: "LTO-9 Tape (18TB native)".into(),
+            technology: StorageTechnology::Tape,
+            capacity_bytes: 19_791_209_299_968,
+            sequential_read_mbps: 400,
+            sequential_write_mbps: 400,
+            random_read_iops: 0,
+            random_write_iops: 0,
+            latency_us: 12_000_000.0, // 12 seconds load + position
+        }
+    }
+
+    /// LTO-8 tape drive (12 TB native, 360 MB/s).
+    #[must_use]
+    pub fn tape_lto8() -> Self {
+        Self {
+            name: "LTO-8 Tape (12TB native)".into(),
+            technology: StorageTechnology::Tape,
+            capacity_bytes: 13_194_139_533_312,
+            sequential_read_mbps: 360,
+            sequential_write_mbps: 360,
+            random_read_iops: 0,
+            random_write_iops: 0,
+            latency_us: 15_000_000.0, // 15 seconds load + position
+        }
+    }
+
+    /// NAS over NFS v4 on 10GbE.
+    #[must_use]
+    pub fn nas_nfs_10gbe() -> Self {
+        Self {
+            name: "NAS (NFSv4, 10GbE)".into(),
+            technology: StorageTechnology::NAS,
+            capacity_bytes: u64::MAX,
+            sequential_read_mbps: 1_100,
+            sequential_write_mbps: 1_000,
+            random_read_iops: 50_000,
+            random_write_iops: 30_000,
+            latency_us: 200.0,
+        }
+    }
+
+    /// NAS over SMB on 10GbE.
+    #[must_use]
+    pub fn nas_smb_10gbe() -> Self {
+        Self {
+            name: "NAS (SMB, 10GbE)".into(),
+            technology: StorageTechnology::NAS,
+            capacity_bytes: u64::MAX,
+            sequential_read_mbps: 900,
+            sequential_write_mbps: 800,
+            random_read_iops: 30_000,
+            random_write_iops: 20_000,
+            latency_us: 300.0,
+        }
+    }
+
+    /// `microSD` card (UHS-I, typical for Raspberry Pi).
+    #[must_use]
+    pub fn microsd_uhs1() -> Self {
+        Self {
+            name: "microSD UHS-I (64GB)".into(),
+            technology: StorageTechnology::MicroSD,
+            capacity_bytes: 68_719_476_736,
+            sequential_read_mbps: 100,
+            sequential_write_mbps: 60,
+            random_read_iops: 2_500,
+            random_write_iops: 1_500,
+            latency_us: 1_000.0,
+        }
+    }
+
     /// Estimate sequential read time (seconds).
     #[allow(clippy::cast_precision_loss)]
     #[must_use]
@@ -452,9 +604,92 @@ mod tests {
     }
 
     #[test]
+    fn tape_lto9_sequential() {
+        let tape = StorageDevice::tape_lto9();
+        assert_eq!(tape.technology, StorageTechnology::Tape);
+        assert_eq!(tape.sequential_read_mbps, 400);
+        assert_eq!(tape.random_read_iops, 0);
+    }
+
+    #[test]
+    fn tape_lto8_high_latency() {
+        let tape = StorageDevice::tape_lto8();
+        assert!(tape.latency_us > 10_000_000.0);
+    }
+
+    #[test]
+    fn tape_no_random_access() {
+        let tape = StorageDevice::tape_lto9();
+        assert_eq!(tape.random_read_iops, 0);
+        assert_eq!(tape.random_write_iops, 0);
+    }
+
+    #[test]
+    fn nas_nfs_10gbe() {
+        let nas = StorageDevice::nas_nfs_10gbe();
+        assert_eq!(nas.technology, StorageTechnology::NAS);
+        assert!(nas.sequential_read_mbps > 1000);
+    }
+
+    #[test]
+    fn nas_smb_slower_than_nfs() {
+        let nfs = StorageDevice::nas_nfs_10gbe();
+        let smb = StorageDevice::nas_smb_10gbe();
+        assert!(nfs.sequential_read_mbps > smb.sequential_read_mbps);
+    }
+
+    #[test]
+    fn microsd_low_performance() {
+        let sd = StorageDevice::microsd_uhs1();
+        assert_eq!(sd.technology, StorageTechnology::MicroSD);
+        assert!(sd.sequential_read_mbps <= 100);
+        assert!(sd.random_read_iops < 5_000);
+    }
+
+    #[test]
+    fn lto_generation_capacity() {
+        assert!(LtoGeneration::LTO9.native_capacity_bytes() > LtoGeneration::LTO8.native_capacity_bytes());
+    }
+
+    #[test]
+    fn lto_generation_speed() {
+        assert!(LtoGeneration::LTO9.transfer_rate_mbps() > LtoGeneration::LTO8.transfer_rate_mbps());
+    }
+
+    #[test]
+    fn nas_protocol_bandwidth() {
+        assert!(NasProtocol::ISCSI.bandwidth_10gbe_mbps() > NasProtocol::SMB.bandwidth_10gbe_mbps());
+    }
+
+    #[test]
+    fn nas_protocol_latency() {
+        assert!(NasProtocol::ISCSI.latency_overhead_us() < NasProtocol::SMB.latency_overhead_us());
+    }
+
+    #[test]
     #[allow(clippy::expect_used)]
     fn serialize_roundtrip() {
         let device = StorageDevice::nvme_gen4_samsung_990_pro();
+        let json = serde_json::to_string(&device).expect("serialization should succeed");
+        let deserialized: StorageDevice =
+            serde_json::from_str(&json).expect("deserialization should succeed");
+        assert_eq!(device, deserialized);
+    }
+
+    #[test]
+    #[allow(clippy::expect_used)]
+    fn serialize_roundtrip_tape() {
+        let device = StorageDevice::tape_lto9();
+        let json = serde_json::to_string(&device).expect("serialization should succeed");
+        let deserialized: StorageDevice =
+            serde_json::from_str(&json).expect("deserialization should succeed");
+        assert_eq!(device, deserialized);
+    }
+
+    #[test]
+    #[allow(clippy::expect_used)]
+    fn serialize_roundtrip_nas() {
+        let device = StorageDevice::nas_nfs_10gbe();
         let json = serde_json::to_string(&device).expect("serialization should succeed");
         let deserialized: StorageDevice =
             serde_json::from_str(&json).expect("deserialization should succeed");

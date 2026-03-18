@@ -1,0 +1,338 @@
+---
+id: volcano-transformation-rules
+name: "Volcano Logical Transformation Rules"
+category: physical/optimizer-framework
+databases: [cockroachdb, mssql, greenplum]
+execution_models: [volcano]
+version: "1.0.0"
+authors: ["Goetz Graefe, William McKenna"]
+tags: [volcano, cascades, transformation, equivalence, commutativity, associativity, classic]
+complexity: "O(n)"
+benefit_range: [0.5, 10.0]
+---
+
+# Volcano Logical Transformation Rules
+
+## Description
+
+Volcano's transformation rules explore the space of logically equivalent
+query expressions. Unlike implementation rules (which map logical to physical),
+transformation rules map one logical expression to another equivalent one.
+They expand the search space by generating alternative logical forms that may
+lead to cheaper physical plans.
+
+The core transformation rules in Volcano/Cascades are:
+1. **Join commutativity**: A join B = B join A
+2. **Join associativity**: (A join B) join C = A join (B join C)
+3. **Join left-associativity**: A join (B join C) = (A join B) join C
+4. **Predicate pushdown**: sigma(A join B) = sigma(A) join B (when predicate
+   references only A's columns)
+5. **Projection pushdown**: pi(A join B) = pi(A) join pi(B)
+
+These rules are declarative and composable. The optimizer applies them
+exhaustively to populate equivalence groups in the memo, then uses cost-based
+search to pick the best physical realization.
+
+**When to apply**: During the exploration phase of Cascades optimization. Rules
+fire on logical expressions in the memo to generate alternatives.
+
+**Why it works**: Different logical forms lead to different physical plans
+with different costs. Join(A, Join(B, C)) may be cheaper than Join(Join(A, B), C)
+if B join C is small. By exploring all equivalent forms, the optimizer is more
+likely to find the globally optimal plan.
+
+## Relational Algebra
+
+```algebra
+Core transformation rules:
+
+Commutativity:
+  R1 join_p R2 <=> R2 join_p R1
+
+Associativity:
+  (R1 join_p1 R2) join_p2 R3 <=> R1 join_p1 (R2 join_p2 R3)
+  (when p2 references R2 and R3 only)
+
+Left Commutativity:
+  (R1 join_p1 R2) join_p2 R3 <=> (R1 join_p2 R3) join_p1 R2
+  (when p1 references R1 and R2, p2 references R1 and R3)
+
+Predicate Pushdown:
+  sigma_p(R1 join R2) => sigma_p(R1) join R2
+  (when p references only R1)
+
+Projection Pushdown:
+  pi_A(R1 join R2) => pi_A(pi_{A intersect attrs(R1)}(R1) join pi_{A intersect attrs(R2)}(R2))
+
+Group-By Pushdown:
+  gamma_G(R1 join R2) => gamma_G(gamma_{G+join_keys}(R1) join R2)
+  (eager aggregation, when applicable)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Volcano/Cascades transformation rules as egg rewrites
+
+// Join commutativity
+rw!("join-commute";
+    "(join ?type ?pred ?left ?right)" =>
+    "(join ?type (swap-pred ?pred) ?right ?left)"
+),
+
+// Join associativity
+rw!("join-assoc-lr";
+    "(join ?t1 ?p1
+       (join ?t2 ?p2 ?a ?b)
+       ?c)" =>
+    "(join ?t2 ?p2
+       ?a
+       (join ?t1 ?p1 ?b ?c))"
+    if pred_compatible("?p1", "?b", "?c")
+),
+
+rw!("join-assoc-rl";
+    "(join ?t1 ?p1
+       ?a
+       (join ?t2 ?p2 ?b ?c))" =>
+    "(join ?t2 ?p2
+       (join ?t1 ?p1 ?a ?b)
+       ?c)"
+    if pred_compatible("?p1", "?a", "?b")
+),
+
+// Left commutativity (exchange)
+rw!("join-left-commute";
+    "(join ?t1 ?p1
+       (join ?t2 ?p2 ?a ?b)
+       ?c)" =>
+    "(join ?t2 ?p2
+       (join ?t1 ?p1 ?a ?c)
+       ?b)"
+    if pred_references("?p1", "?a", "?c")
+       && pred_references("?p2", "?a", "?b")
+),
+
+// Predicate pushdown into join
+rw!("filter-into-join-left";
+    "(filter ?pred
+       (join ?type ?jpred ?left ?right))" =>
+    "(join ?type ?jpred
+       (filter ?pred ?left)
+       ?right)"
+    if pred_references_only("?pred", "?left")
+),
+
+rw!("filter-into-join-right";
+    "(filter ?pred
+       (join ?type ?jpred ?left ?right))" =>
+    "(join ?type ?jpred
+       ?left
+       (filter ?pred ?right))"
+    if pred_references_only("?pred", "?right")
+),
+
+// Predicate split and push
+rw!("filter-split-and-push";
+    "(filter (and ?p1 ?p2)
+       (join ?type ?jpred ?left ?right))" =>
+    "(filter ?p1
+       (join ?type ?jpred
+         (filter ?p2 ?left)
+         ?right))"
+    if pred_references_only("?p2", "?left")
+       && !pred_references_only("?p1", "?left")
+),
+
+// Projection pushdown through join
+rw!("project-through-join";
+    "(project ?cols
+       (join ?type ?pred ?left ?right))" =>
+    "(project ?cols
+       (join ?type ?pred
+         (project (needed-cols-left ?cols ?pred) ?left)
+         (project (needed-cols-right ?cols ?pred) ?right)))"
+),
+
+// In the Volcano framework, rules are registered and applied:
+
+struct VolcanoRuleSet {
+    transformation_rules: Vec<TransformationRule>,
+    implementation_rules: Vec<ImplementationRule>,
+}
+
+impl VolcanoRuleSet {
+    fn standard_rules() -> Self {
+        Self {
+            transformation_rules: vec![
+                TransformationRule::new(
+                    "join-commute",
+                    Pattern::Join(Var("L"), Var("R")),
+                    Pattern::Join(Var("R"), Var("L")),
+                ),
+                TransformationRule::new(
+                    "join-assoc",
+                    Pattern::Join(
+                        Pattern::Join(Var("A"), Var("B")),
+                        Var("C"),
+                    ),
+                    Pattern::Join(
+                        Var("A"),
+                        Pattern::Join(Var("B"), Var("C")),
+                    ),
+                ),
+                // ... more rules
+            ],
+            implementation_rules: vec![
+                // ... implementation rules
+            ],
+        }
+    }
+
+    fn apply_all(
+        &self,
+        memo: &mut CascadesMemo,
+        group: GroupId,
+    ) {
+        // Apply transformation rules until fixpoint
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for rule in &self.transformation_rules {
+                for expr in memo.expressions(group) {
+                    if let Some(new_exprs) = rule.apply(&expr) {
+                        for new_expr in new_exprs {
+                            let new_group = memo.insert(new_expr);
+                            if new_group != group {
+                                memo.merge_groups(group, new_group);
+                                changed = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    hw: &HardwareProfile,
+) -> bool {
+    // Transformation rules always apply during Volcano/Cascades search
+    // They expand the search space of equivalent plans
+    stats.n_relations >= 2
+        && hw.optimizer_style == OptimizerStyle::Cascades
+}
+```
+
+**Restrictions:**
+- Rules must preserve semantic equivalence
+- Join associativity requires checking predicate compatibility
+- Exploration must terminate (rules applied to fixpoint)
+- Rule firing order can affect optimization time but not result quality
+- Cascades applies rules lazily (on demand) vs. Volcano (eagerly)
+
+## Cost Model
+
+```rust
+fn exploration_cost(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let n = stats.n_relations as f64;
+
+    // Number of logically equivalent expressions generated
+    // Commutativity: 2x per join
+    // Associativity: generates all tree shapes
+    let n_expressions = 2.0_f64.powf(n) * catalan(n as u64) as f64;
+
+    // Pruning via memo deduplication
+    let unique_expressions = 2.0_f64.powf(n) * n;
+
+    // Overhead of rule application
+    let rule_overhead = unique_expressions * 10.0; // 10 rules per expression
+
+    rule_overhead
+}
+```
+
+## Test Cases
+
+### Positive: Commutativity finds better join order
+
+```sql
+SELECT * FROM small_table s
+JOIN large_table l ON s.id = l.small_id;
+
+-- Original: small_table as left, large_table as right
+-- After commutativity: large_table as left, small_table as right
+-- For hash join: building on small_table (right) is cheaper
+-- Commutativity enables this exploration
+```
+
+### Positive: Associativity changes join tree shape
+
+```sql
+SELECT * FROM A JOIN B ON A.x = B.y
+              JOIN C ON B.z = C.w;
+
+-- Original: (A join B) join C
+-- After associativity: A join (B join C)
+-- If B join C is very small (selective predicate on C):
+--   A join (small result) is much cheaper
+```
+
+### Positive: Left commutativity enables better access
+
+```sql
+-- A has index on col_c, B has no useful indexes
+SELECT * FROM A JOIN B ON A.x = B.x
+              JOIN C ON A.c = C.c;
+
+-- Original: (A join B) join C
+-- Left commute: (A join C) join B
+-- A join C can use A's index on col_c
+-- This ordering wasn't reachable through just commutativity + associativity
+```
+
+### Positive: Predicate pushdown reduces join input
+
+```sql
+SELECT *
+FROM orders o JOIN customers c ON o.cust_id = c.id
+WHERE o.total > 10000;
+
+-- Before: Join(orders, customers) then Filter(total > 10000)
+-- After pushdown: Join(Filter(orders, total > 10000), customers)
+-- Orders filtered before join: fewer tuples to process
+```
+
+## References
+
+**Original papers:**
+- Graefe, G., McKenna, W.J., "The Volcano Optimizer Generator: Extensibility and Efficient Search", IEEE Data Engineering 1993
+  - DOI: 10.1109/69.273032
+  - Section 3: "Rules" -- transformation rules vs. implementation rules
+  - Table 1: Standard transformation rules
+
+- Graefe, G., "The Cascades Framework for Query Optimization", IEEE Data Engineering Bulletin 1995
+  - DOI: 10.1109/69.469815
+  - Rule application strategy: lazy (Cascades) vs. eager (Volcano)
+
+**Rule analysis:**
+- Pellenkoft, A., Galindo-Legaria, C., Kersten, M., "The Complexity of Transformation-Based Join Enumeration", VLDB 1997
+  - How many expressions are generated by transformation rules
+  - Completeness: commutativity + associativity + left-commutativity generates all trees
+
+**Implementation in databases:**
+- SQL Server: Transformation rules in Cascades optimizer
+- CockroachDB: `pkg/sql/opt/xform/` - exploration rules
+- Greenplum Orca: `libgpopt/src/xforms/` - transformation transforms
+- Apache Calcite: `RelOptRule` subclasses for transformations

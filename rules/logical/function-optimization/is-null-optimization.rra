@@ -1,0 +1,116 @@
+---
+id: is-null-optimization
+name: IS NULL/IS NOT NULL Optimization
+category: logical/function-optimization
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [function, null, is-null, not-null, constraint, optimization]
+complexity: "O(1)"
+benefit_range: [0.1, 0.6]
+---
+
+# IS NULL/IS NOT NULL Optimization
+
+## Description
+
+Simplifies IS NULL and IS NOT NULL predicates using column constraints
+and expression properties. NOT NULL constraints make IS NOT NULL always
+TRUE and IS NULL always FALSE.
+
+**When to apply**: NULL checks on columns with known nullability or
+expressions with deterministic NULL behavior.
+
+## Relational Algebra
+
+```algebra
+col IS NOT NULL -> TRUE     where col has NOT NULL constraint
+col IS NULL     -> FALSE    where col has NOT NULL constraint
+(a + b) IS NULL -> (a IS NULL OR b IS NULL)  -- NULL propagation
+NOT (col IS NULL) -> col IS NOT NULL
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("is-not-null-on-not-null-column";
+    "(is-not-null ?col)" => "(literal true)"
+    if has_not_null_constraint("?col")
+),
+
+rw!("is-null-on-not-null-column";
+    "(is-null ?col)" => "(literal false)"
+    if has_not_null_constraint("?col")
+),
+
+rw!("not-is-null-to-is-not-null";
+    "(not (is-null ?col))" => "(is-not-null ?col)"
+),
+
+rw!("not-is-not-null-to-is-null";
+    "(not (is-not-null ?col))" => "(is-null ?col)"
+),
+
+rw!("is-null-after-inner-join";
+    "(is-null ?col)" => "(literal false)"
+    if column_from_inner_join_side("?col")
+    // Inner join guarantees matched rows: join columns are NOT NULL
+),
+```
+
+## Cost Model
+
+```rust
+fn estimated_benefit(eliminates_check: bool, num_rows: u64) -> f64 {
+    if eliminates_check {
+        // Removes per-row NULL check entirely
+        0.1 + (num_rows as f64 * 0.001).min(0.5)
+    } else {
+        0.0
+    }
+}
+```
+
+## Test Cases
+
+### Positive: IS NOT NULL on PRIMARY KEY
+
+```sql
+SELECT * FROM users WHERE id IS NOT NULL;
+-- id is PK (NOT NULL) -> always TRUE
+-- Rewrite to: SELECT * FROM users;
+```
+
+### Positive: IS NULL on NOT NULL column
+
+```sql
+SELECT * FROM orders WHERE order_date IS NULL;
+-- order_date has NOT NULL constraint -> always FALSE
+-- Rewrite to: empty result (no rows)
+```
+
+### Positive: Double negation
+
+```sql
+SELECT * FROM t WHERE NOT (col IS NULL);
+-- Simplify to: WHERE col IS NOT NULL
+```
+
+### Negative: IS NULL on nullable column
+
+```sql
+SELECT * FROM employees WHERE manager_id IS NULL;
+-- manager_id is nullable (CEO has no manager)
+-- Cannot simplify: legitimate NULL check
+```
+
+## References
+
+**Implementation:**
+- PostgreSQL: `clause_is_redundant_null_check()` in `predtest.c`
+- MySQL: NULL constraint propagation
+- DuckDB: Constraint-based expression simplification

@@ -1,21 +1,32 @@
 //! Integration between ra-stats and ra-core cost models.
 //!
-//! This module bridges the statistics abstraction system with the
-//! query optimizer's cost model, enabling statistics-aware planning.
+//! Bridges the statistics abstraction system with the query optimizer's
+//! cost model, enabling statistics-aware planning.
 
+use crate::accuracy::{StatisticsState, Staleness};
 use crate::profiles::StatisticsProfile;
-use crate::types::{TableStats, ColumnStats};
-use crate::accuracy::{StatisticsState, Staleness, RefreshThreshold};
+use crate::types::{ColumnStats, TableStats};
+use std::collections::HashMap;
 
-/// Statistics adapter that implements the ra-core StatisticsProvider trait.
+/// Bundled table statistics with accuracy metadata.
+#[derive(Debug, Clone)]
+pub struct ManagedTableStats {
+    /// Core table-level statistics.
+    pub table: TableStats,
+    /// Per-column statistics keyed by column name.
+    pub columns: HashMap<String, ColumnStats>,
+    /// Accuracy state tracking staleness and confidence.
+    pub state: StatisticsState,
+}
+
+/// Statistics adapter bridging ra-stats with ra-core.
 ///
-/// This bridges ra-stats types with the cost model interface.
-#[derive(Debug)]
+/// Applies staleness adjustments when converting to core statistics
+/// types, ensuring the optimizer accounts for uncertainty.
+#[derive(Debug, Clone)]
 pub struct StatisticsAdapter {
-    /// The active statistics profile
     profile: StatisticsProfile,
-    /// Table statistics keyed by table name
-    tables: std::collections::HashMap<String, TableStatistics>,
+    tables: HashMap<String, ManagedTableStats>,
 }
 
 impl StatisticsAdapter {
@@ -23,219 +34,217 @@ impl StatisticsAdapter {
     pub fn new(profile: StatisticsProfile) -> Self {
         Self {
             profile,
-            tables: std::collections::HashMap::new(),
+            tables: HashMap::new(),
         }
     }
 
     /// Register statistics for a table.
-    pub fn add_table(&mut self, name: String, stats: TableStatistics) {
+    pub fn add_table(&mut self, name: String, stats: ManagedTableStats) {
         self.tables.insert(name, stats);
     }
 
-    /// Get statistics for a table, respecting profile constraints.
-    pub fn get_table_stats(&self, table: &str) -> Option<&TableStatistics> {
+    /// Get managed statistics for a table.
+    pub fn get_table_stats(&self, table: &str) -> Option<&ManagedTableStats> {
         self.tables.get(table)
     }
 
-    /// Convert ra-stats TableStatistics to ra-core Statistics.
-    ///
-    /// This applies staleness adjustments based on the active profile.
+    /// Convert to ra-core Statistics, applying staleness adjustments.
     pub fn to_core_statistics(
         &self,
-        table_stats: &TableStatistics,
+        managed: &ManagedTableStats,
     ) -> ra_core::statistics::Statistics {
-        let state = &table_stats.state;
+        let factor = Self::staleness_factor(&managed.state);
+        let adjusted_rows = managed.table.row_count as f64 * factor;
 
-        // Apply staleness penalty to cardinality estimate
-        let adjusted_row_count = self.adjust_for_staleness(
-            table_stats.row_count as f64,
-            state,
-        );
+        let mut stats = ra_core::statistics::Statistics::new(adjusted_rows);
+        stats.avg_row_size = managed.table.average_row_size as u64;
+        stats.total_size = managed.table.table_size_bytes;
 
-        let mut stats = ra_core::statistics::Statistics::new(adjusted_row_count);
-        stats.avg_row_size = table_stats.avg_row_size;
-        stats.total_size = table_stats.total_size;
-
-        // Convert column statistics
-        for (col_name, col_stats) in &table_stats.columns {
-            let mut core_col = ra_core::statistics::ColumnStats::new(
-                self.adjust_for_staleness(col_stats.distinct_count as f64, state)
-            );
+        for (col_name, col_stats) in &managed.columns {
+            let adjusted_ndv = col_stats.ndv as f64 * factor;
+            let mut core_col =
+                ra_core::statistics::ColumnStats::new(adjusted_ndv);
             core_col.null_fraction = col_stats.null_fraction;
-
             stats.columns.insert(col_name.clone(), core_col);
         }
 
         stats
     }
 
-    /// Adjust a statistic value based on staleness and profile.
-    ///
-    /// Stale statistics increase uncertainty, modeled as a confidence interval.
-    fn adjust_for_staleness(&self, value: f64, state: &StatisticsState) -> f64 {
-        let staleness = state.staleness();
-
-        match staleness {
-            Staleness::Fresh => value,
-            Staleness::Acceptable => {
-                // Small uncertainty: ±5%
-                value * 1.05
-            }
-            Staleness::Stale => {
-                // Medium uncertainty: ±20%
-                value * 1.2
-            }
-            Staleness::VeryStale => {
-                // High uncertainty: ±50%
-                value * 1.5
-            }
+    /// Staleness multiplier: fresh = 1.0, increasingly inflated as
+    /// statistics become stale to account for uncertainty.
+    fn staleness_factor(state: &StatisticsState) -> f64 {
+        match state.staleness() {
+            Staleness::Fresh => 1.0,
+            Staleness::SlightlyStale => 1.05,
+            Staleness::ModeratelyStale => 1.2,
+            Staleness::VeryStale => 1.5,
+            Staleness::Unknown => 2.0,
         }
     }
 
-    /// Check if the profile would reject using these statistics.
-    ///
-    /// Returns true if stats are too stale for the profile's threshold.
-    pub fn should_reject_statistics(&self, state: &StatisticsState) -> bool {
-        let staleness = state.staleness();
-        let threshold = self.profile.refresh_threshold();
-
-        match staleness {
-            Staleness::Fresh => false,
-            Staleness::Acceptable => threshold.max_staleness_acceptable(),
-            Staleness::Stale => threshold.max_staleness_stale(),
-            Staleness::VeryStale => true, // Always reject very stale
-        }
+    /// Whether the profile would reject these statistics as too stale.
+    pub fn should_reject(&self, state: &StatisticsState) -> bool {
+        state.should_refresh(self.profile.refresh_threshold.clone())
     }
 
     /// Get the active statistics profile.
     pub fn profile(&self) -> &StatisticsProfile {
         &self.profile
     }
-}
 
-/// Simulates statistics staleness for testing.
-///
-/// This allows testing how stale statistics affect query plans.
-#[derive(Debug, Clone)]
-pub struct StatisticsSimulator {
-    /// Staleness level to simulate
-    staleness: Staleness,
-    /// Modification count to simulate
-    modifications: u64,
-}
-
-impl StatisticsSimulator {
-    /// Create a simulator with fresh statistics.
-    pub fn fresh() -> Self {
-        Self {
-            staleness: Staleness::Fresh,
-            modifications: 0,
-        }
-    }
-
-    /// Create a simulator with stale statistics.
-    pub fn stale(modifications: u64) -> Self {
-        Self {
-            staleness: Staleness::Stale,
-            modifications,
-        }
-    }
-
-    /// Apply simulated staleness to table statistics.
-    pub fn apply(&self, stats: &mut TableStatistics) {
-        stats.state.record_modifications(self.modifications);
-    }
-
-    /// Create a simulated state matching this simulator.
-    pub fn create_state(&self) -> StatisticsState {
-        let mut state = StatisticsState::default();
-        state.record_modifications(self.modifications);
-        state
+    /// Number of registered tables.
+    pub fn table_count(&self) -> usize {
+        self.tables.len()
     }
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
+    use crate::accuracy::StatisticsSource;
     use crate::profiles::StatisticsProfile;
-    use crate::types::{TableStatistics, ColumnStatistics};
+    use crate::types::TableStats;
 
-    #[test]
-    fn adapter_fresh_statistics() {
-        let profile = StatisticsProfile::standard();
-        let adapter = StatisticsAdapter::new(profile);
-
-        let mut table_stats = TableStatistics::new("users".to_string(), 1000);
-        let state = StatisticsState::default(); // Fresh
-        table_stats.state = state;
-
-        let core_stats = adapter.to_core_statistics(&table_stats);
-
-        // Fresh stats: no adjustment
-        assert!((core_stats.row_count - 1000.0).abs() < f64::EPSILON);
+    fn sample_table() -> ManagedTableStats {
+        ManagedTableStats {
+            table: TableStats {
+                row_count: 10_000,
+                page_count: 100,
+                average_row_size: 100.0,
+                table_size_bytes: 1_000_000,
+                live_tuples: Some(9_500),
+                dead_tuples: Some(500),
+                last_analyzed: Some(1_000_000),
+            },
+            columns: HashMap::new(),
+            state: StatisticsState::new(
+                StatisticsSource::ExactCount,
+                10_000,
+            ),
+        }
     }
 
-    #[test]
-    fn adapter_stale_statistics_adjustment() {
-        let profile = StatisticsProfile::standard();
-        let adapter = StatisticsAdapter::new(profile);
-
-        let mut table_stats = TableStatistics::new("orders".to_string(), 1000);
-        let mut state = StatisticsState::default();
-        state.record_modifications(1000); // Make stale
-        table_stats.state = state;
-
-        let core_stats = adapter.to_core_statistics(&table_stats);
-
-        // Stale stats: should be adjusted upward
-        assert!(core_stats.row_count > 1000.0);
-        assert!(core_stats.row_count <= 1000.0 * 1.5);
-    }
-
-    #[test]
-    fn adapter_column_statistics() {
-        let profile = StatisticsProfile::standard();
-        let adapter = StatisticsAdapter::new(profile);
-
-        let mut table_stats = TableStatistics::new("products".to_string(), 1000);
-        table_stats.columns.insert(
-            "category".to_string(),
-            ColumnStatistics {
-                distinct_count: 50,
-                null_fraction: 0.1,
-                ..Default::default()
+    fn sample_with_columns() -> ManagedTableStats {
+        let mut managed = sample_table();
+        managed.columns.insert(
+            "id".to_string(),
+            ColumnStats {
+                column_id: "id".to_string(),
+                ndv: 10_000,
+                null_fraction: 0.0,
+                avg_width: 8.0,
+                mcv: None,
+                histogram: None,
+                correlation: Some(1.0),
             },
         );
-
-        let core_stats = adapter.to_core_statistics(&table_stats);
-
-        let col = core_stats.columns.get("category").unwrap();
-        assert!((col.distinct_count - 50.0).abs() < f64::EPSILON);
-        assert!((col.null_fraction - 0.1).abs() < f64::EPSILON);
+        managed.columns.insert(
+            "status".to_string(),
+            ColumnStats {
+                column_id: "status".to_string(),
+                ndv: 5,
+                null_fraction: 0.02,
+                avg_width: 12.0,
+                mcv: None,
+                histogram: None,
+                correlation: None,
+            },
+        );
+        managed
     }
 
     #[test]
-    fn simulator_fresh() {
-        let sim = StatisticsSimulator::fresh();
-        assert!(matches!(sim.staleness, Staleness::Fresh));
+    fn adapter_fresh_stats_no_adjustment() {
+        let adapter = StatisticsAdapter::new(StatisticsProfile::standard());
+        let managed = sample_table();
+        let core = adapter.to_core_statistics(&managed);
+        assert!((core.row_count - 10_000.0).abs() < f64::EPSILON);
     }
 
     #[test]
-    fn simulator_stale() {
-        let sim = StatisticsSimulator::stale(1000);
-        let state = sim.create_state();
-        assert!(matches!(state.staleness(), Staleness::Stale));
+    fn adapter_stale_stats_inflated() {
+        let adapter = StatisticsAdapter::new(StatisticsProfile::standard());
+        let mut managed = sample_table();
+        managed.state.record_modifications(5_000);
+        let core = adapter.to_core_statistics(&managed);
+        assert!(core.row_count > 10_000.0);
     }
 
     #[test]
-    fn profile_rejection() {
-        let profile = StatisticsProfile::real_time(); // Strict
-        let adapter = StatisticsAdapter::new(profile);
+    fn adapter_very_stale_large_inflation() {
+        let adapter = StatisticsAdapter::new(StatisticsProfile::standard());
+        let mut managed = sample_table();
+        managed.state.record_modifications(50_000);
+        let core = adapter.to_core_statistics(&managed);
+        assert!((core.row_count - 15_000.0).abs() < f64::EPSILON);
+    }
 
-        let mut state = StatisticsState::default();
-        state.record_modifications(100);
+    #[test]
+    fn adapter_column_stats_converted() {
+        let adapter = StatisticsAdapter::new(StatisticsProfile::standard());
+        let managed = sample_with_columns();
+        let core = adapter.to_core_statistics(&managed);
+        assert_eq!(core.columns.len(), 2);
+        let id = core.columns.get("id").expect("id column");
+        assert!((id.distinct_count - 10_000.0).abs() < f64::EPSILON);
+    }
 
-        // RealTime profile should reject stale stats
-        assert!(adapter.should_reject_statistics(&state));
+    #[test]
+    fn adapter_column_null_fraction_preserved() {
+        let adapter = StatisticsAdapter::new(StatisticsProfile::standard());
+        let managed = sample_with_columns();
+        let core = adapter.to_core_statistics(&managed);
+        let status = core.columns.get("status").expect("status column");
+        assert!((status.null_fraction - 0.02).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn adapter_should_reject_fresh_stats() {
+        let adapter =
+            StatisticsAdapter::new(StatisticsProfile::real_time());
+        let state = StatisticsState::new(
+            StatisticsSource::ExactCount,
+            10_000,
+        );
+        assert!(!adapter.should_reject(&state));
+    }
+
+    #[test]
+    fn adapter_should_reject_stale_stats() {
+        let adapter =
+            StatisticsAdapter::new(StatisticsProfile::real_time());
+        let mut state = StatisticsState::new(
+            StatisticsSource::ExactCount,
+            10_000,
+        );
+        state.record_modifications(5_000);
+        assert!(adapter.should_reject(&state));
+    }
+
+    #[test]
+    fn adapter_table_count() {
+        let mut adapter =
+            StatisticsAdapter::new(StatisticsProfile::standard());
+        assert_eq!(adapter.table_count(), 0);
+        adapter.add_table("users".to_string(), sample_table());
+        assert_eq!(adapter.table_count(), 1);
+    }
+
+    #[test]
+    fn adapter_get_table_stats() {
+        let mut adapter =
+            StatisticsAdapter::new(StatisticsProfile::standard());
+        adapter.add_table("users".to_string(), sample_table());
+        assert!(adapter.get_table_stats("users").is_some());
+        assert!(adapter.get_table_stats("orders").is_none());
+    }
+
+    #[test]
+    fn adapter_profile_accessor() {
+        let adapter =
+            StatisticsAdapter::new(StatisticsProfile::analytical());
+        assert_eq!(adapter.profile().name, "Analytical");
     }
 }
