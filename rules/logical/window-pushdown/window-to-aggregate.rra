@@ -1,0 +1,58 @@
+---
+id: window-to-aggregate
+name: Window to Aggregate Conversion
+category: logical/window-pushdown
+databases: [postgresql, duckdb, oracle]
+standard: "sql:2003"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [window, aggregate, conversion]
+---
+
+# Window to Aggregate Conversion
+
+## Description
+
+When a window function with no PARTITION BY and no ORDER BY computes
+an aggregate over the entire input (e.g., SUM(x) OVER ()), and the
+result is used with GROUP BY, convert to a regular aggregate joined
+back to the original data.
+
+## Relational Algebra
+
+```algebra
+WINDOW[AGG(x) OVER ()](R)  ->  CROSS_JOIN(R, AGG[AGG(x)](R))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("window-to-aggregate";
+    "(window ?funcs ?input)" =>
+    { WindowToAggregate {
+        funcs: "?funcs".parse().unwrap(),
+        input: "?input".parse().unwrap(),
+    }}
+    if is_global_window_aggregate("?funcs")
+),
+```
+
+## Test Cases
+
+```sql
+SELECT name, salary, SUM(salary) OVER () AS total_salary
+FROM employees;
+
+-- Converted:
+SELECT name, salary, t.total_salary
+FROM employees CROSS JOIN (
+    SELECT SUM(salary) AS total_salary FROM employees
+) t;
+```
+
+## References
+
+PostgreSQL: Window function to aggregate optimization
+Oracle: Analytic function decomposition

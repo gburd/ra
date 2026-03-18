@@ -1,0 +1,98 @@
+---
+id: composite-index-column-order
+name: Composite Index Column Order Optimization
+category: physical/index-selection
+databases: [postgresql, mysql, mssql, oracle, sqlite]
+execution_models: [volcano, vectorized]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [index, composite, column-order, leftmost-prefix]
+complexity: "O(log n + k)"
+benefit_range: [0.3, 0.8]
+---
+
+# Composite Index Column Order Optimization
+
+## Description
+
+Selects the most effective composite index by matching predicate types
+to column positions. Equality predicates should appear before range
+predicates in the index column order, because the B-tree can use
+equality prefixes to narrow the range scan.
+
+**When to apply**: Multiple predicates on columns of a composite index,
+mixing equality and range conditions.
+
+**Why it works**: B-tree indexes use leftmost prefix matching. An
+equality predicate on column 1 followed by a range on column 2
+narrows the scan to a contiguous range. The reverse order forces
+scanning all values of column 1 within the range of column 2.
+
+## Relational Algebra
+
+```algebra
+sigma[a = v1 AND b > v2](R)
+  -> index_scan[I(a,b)](a = v1, b > v2)     -- Preferred
+  -- vs --
+  -> index_scan[I(b,a)](b > v2)              -- Only uses first column
+```
+
+## Implementation
+
+```rust
+rw!("prefer-equality-first-composite";
+    "(filter (and (= ?col_eq ?val) (> ?col_range ?lo)) (scan ?table))" =>
+    "(index-range-scan ?idx ?col_eq ?val ?col_range ?lo)"
+    if has_composite_index_eq_first("?table", "?col_eq", "?col_range")
+),
+```
+
+## Cost Model
+
+```rust
+fn selectivity_with_eq_prefix(eq_ndv: u64, range_sel: f64) -> f64 {
+    (1.0 / eq_ndv as f64) * range_sel // Both predicates narrow
+}
+
+fn selectivity_without_eq_prefix(range_sel: f64) -> f64 {
+    range_sel // Only range predicate used from index
+}
+```
+
+**Typical benefit**: 30-80% when equality-first ordering enables tighter range
+
+## Test Cases
+
+### Positive: Equality + range with correct order
+
+```sql
+-- Index on (status, created_at)
+SELECT * FROM orders
+WHERE status = 'active' AND created_at > '2025-01-01';
+-- Seeks to status='active', then range scan on created_at
+```
+
+### Positive: Multi-equality prefix
+
+```sql
+-- Index on (country, city, zip)
+SELECT * FROM addresses
+WHERE country = 'US' AND city = 'NYC' AND zip LIKE '100%';
+-- Two equality columns narrow, then prefix scan on zip
+```
+
+### Negative: Range on first column wastes second
+
+```sql
+-- Index on (amount, date)
+SELECT * FROM transactions
+WHERE amount > 100 AND date = '2025-01-15';
+-- Range on amount: cannot use date for seeking
+```
+
+## References
+
+- "Use The Index, Luke" - Composite index column ordering
+- MySQL: Multiple-column index optimization
+- PostgreSQL: Multicolumn index planning

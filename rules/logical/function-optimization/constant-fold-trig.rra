@@ -1,0 +1,57 @@
+---
+id: constant-fold-trig
+name: Constant Fold Trigonometric Functions
+category: logical/function-optimization
+databases: [postgresql, mysql, mssql, oracle]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [constant-folding, trigonometry, pure-function, optimization]
+---
+
+# Constant Fold Trigonometric Functions
+
+## Description
+
+Evaluates trigonometric functions (SIN, COS, TAN, ASIN, ACOS, ATAN,
+ATAN2, RADIANS, DEGREES) at compile time when arguments are constants.
+
+**When to apply**: Trigonometric function with all-constant arguments.
+
+**Why it works**: Trigonometric functions are pure and deterministic.
+They are more expensive than basic arithmetic, making folding
+more beneficial.
+
+## Implementation
+
+```rust
+rw!("fold-sin"; "(sin ?a)" => { Fold1("?a", f64::sin) } if is_const("?a")),
+rw!("fold-cos"; "(cos ?a)" => { Fold1("?a", f64::cos) } if is_const("?a")),
+rw!("fold-tan"; "(tan ?a)" => { Fold1("?a", f64::tan) } if is_const("?a")),
+rw!("fold-asin"; "(asin ?a)" => { Fold1("?a", f64::asin) } if is_const("?a")),
+rw!("fold-acos"; "(acos ?a)" => { Fold1("?a", f64::acos) } if is_const("?a")),
+rw!("fold-atan"; "(atan ?a)" => { Fold1("?a", f64::atan) } if is_const("?a")),
+rw!("fold-atan2"; "(atan2 ?a ?b)" => { Fold2("?a", "?b", f64::atan2) } if both_const("?a", "?b")),
+rw!("fold-radians"; "(radians ?a)" => { Fold1("?a", to_radians) } if is_const("?a")),
+rw!("fold-degrees"; "(degrees ?a)" => { Fold1("?a", to_degrees) } if is_const("?a")),
+```
+
+## Test Cases
+
+```sql
+-- Before
+SELECT SIN(0) FROM t;
+-- After
+SELECT 0.0 FROM t;
+```
+
+```sql
+-- Before
+SELECT COS(PI()) FROM t;
+-- After folding PI then COS:
+SELECT -1.0 FROM t;
+```
+
+## References
+
+- Standard mathematical function folding
+- All databases with trigonometric function support

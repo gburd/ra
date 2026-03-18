@@ -1,0 +1,65 @@
+---
+id: expensive-function-lazy-eval
+name: Lazy Evaluation of Expensive Functions in OR/CASE
+category: logical/function-optimization
+databases: [postgresql, mysql, duckdb, mssql, oracle]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [lazy-evaluation, expensive-function, short-circuit, optimization]
+---
+
+# Lazy Evaluation of Expensive Functions in OR/CASE
+
+## Description
+
+Reorders OR predicates and CASE branches so cheap conditions are
+evaluated first, short-circuiting before expensive functions run.
+In `expensive_f(x) OR cheap_check`, swap to `cheap_check OR expensive_f(x)`.
+
+**When to apply**: OR/CASE with a mix of cheap and expensive conditions
+where evaluation order can be changed without semantic difference.
+
+**Why it works**: SQL OR short-circuits (in most implementations).
+Evaluating the cheap branch first means the expensive branch is
+skipped when the cheap branch is true.
+
+## Implementation
+
+```rust
+rw!("reorder-or-cheap-first";
+    "(or ?expensive ?cheap)" => "(or ?cheap ?expensive)"
+    if is_expensive("?expensive") && !is_expensive("?cheap")
+),
+rw!("reorder-case-cheap-first";
+    "(case (when ?expensive_cond ?then1) (when ?cheap_cond ?then2) ?rest)" =>
+    "(case (when ?cheap_cond ?then2) (when ?expensive_cond ?then1) ?rest)"
+    if is_expensive("?expensive_cond") && !is_expensive("?cheap_cond") &&
+       branches_independent("?expensive_cond", "?cheap_cond")
+),
+```
+
+## Preconditions
+
+Branches must be independent (neither depends on the other). If
+branch evaluation has side effects, reordering is not safe.
+
+## Test Cases
+
+### Positive: Cheap check before regex
+
+```sql
+WHERE REGEXP_MATCH(content, 'complex.*pattern') OR status = 'flagged'
+-- Reorder: WHERE status = 'flagged' OR REGEXP_MATCH(content, ...)
+```
+
+### Negative: Dependent conditions
+
+```sql
+WHERE x IS NOT NULL AND expensive_f(x) > 0
+-- Cannot reorder: second branch depends on first (NULL guard)
+```
+
+## References
+
+- CockroachDB: predicate reordering by cost
+- PostgreSQL: qual ordering by evaluation cost

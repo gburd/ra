@@ -1,0 +1,50 @@
+---
+id: window-frame-optimization
+name: Window Frame Optimization
+category: logical/window-pushdown
+databases: [postgresql, duckdb, oracle]
+standard: "sql:2003"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [window, frame, optimization]
+---
+
+# Window Frame Optimization
+
+## Description
+
+Optimize window frame specifications. Replace RANGE with ROWS when the
+ORDER BY column has unique values (same semantics, faster execution).
+Remove unnecessary frame clauses that match the default.
+
+## Relational Algebra
+
+```algebra
+WINDOW[f OVER (ORDER BY unique_col RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)](R)
+    -> WINDOW[f OVER (ORDER BY unique_col ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)](R)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("window-range-to-rows";
+    "(window-frame range ?start ?end ?func ?part ?order ?input)" =>
+    "(window-frame rows ?start ?end ?func ?part ?order ?input)"
+    if order_column_unique("?order", "?input")
+),
+```
+
+## Test Cases
+
+```sql
+SELECT SUM(x) OVER (ORDER BY id RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+FROM t;
+-- id is unique, so RANGE is equivalent to ROWS
+```
+
+## References
+
+PostgreSQL: src/backend/executor/nodeWindowAgg.c
+DuckDB: src/execution/window_segment_tree.cpp

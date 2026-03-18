@@ -1,0 +1,92 @@
+---
+id: clustered-index-for-range
+name: Clustered Index for Range Scans
+category: physical/index-selection
+databases: [mysql, mssql, oracle]
+execution_models: [volcano]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [index, clustered, range-scan, sequential-io]
+complexity: "O(log n + k)"
+benefit_range: [0.5, 0.95]
+---
+
+# Clustered Index for Range Scans
+
+## Description
+
+Selects clustered index when query has range predicates on the clustering key.
+Because the table data is physically ordered by the clustering key, range scans
+become sequential I/O with no random lookups.
+
+**When to apply**: Range predicate (BETWEEN, >, <, >=, <=) on clustering key columns.
+
+**Why it works**: Clustered index stores data rows in key order. A range scan reads
+contiguous pages, eliminating random I/O and bookmark lookups entirely.
+
+## Relational Algebra
+
+```algebra
+sigma[key BETWEEN v1 AND v2](R)
+  -> clustered_range_scan[I](key, v1, v2)
+  where is_clustered(I, key)
+```
+
+## Implementation
+
+```rust
+rw!("clustered-range-scan";
+    "(filter (between ?key ?lo ?hi) (scan ?table))" =>
+    "(clustered-range-scan ?idx ?key ?lo ?hi)"
+    if has_clustered_index("?table", "?key")
+),
+```
+
+## Cost Model
+
+```rust
+fn cost(selectivity: f64, table_pages: u64) -> f64 {
+    let pages_read = (selectivity * table_pages as f64).max(1.0);
+    pages_read * SEQUENTIAL_IO_COST // No random I/O
+}
+
+fn benefit(selectivity: f64, table_pages: u64) -> f64 {
+    let full_scan = table_pages as f64 * SEQUENTIAL_IO_COST;
+    let range_scan = (selectivity * table_pages as f64) * SEQUENTIAL_IO_COST;
+    (full_scan - range_scan) / full_scan
+}
+```
+
+**Typical benefit**: 50-95% for selective range predicates
+
+## Test Cases
+
+### Positive: Date range on clustered key
+
+```sql
+SELECT * FROM events
+WHERE event_date BETWEEN '2025-01-01' AND '2025-01-31';
+-- Clustered on event_date: sequential read of ~3% of table
+```
+
+### Positive: ID range scan
+
+```sql
+SELECT * FROM transactions
+WHERE id >= 1000000 AND id < 2000000;
+-- Primary clustered key: contiguous page reads
+```
+
+### Negative: Non-clustered column range
+
+```sql
+SELECT * FROM orders WHERE amount > 100;
+-- amount not clustered: secondary index + random lookups
+```
+
+## References
+
+- SQL Server: Clustered index range scans
+- MySQL InnoDB: Primary key range optimization
+- Oracle IOT: Range scan on primary key

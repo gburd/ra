@@ -1,0 +1,71 @@
+---
+id: function-index-spatial-predicate
+name: Spatial Function to Index Predicate Conversion
+category: logical/function-optimization
+databases: [postgresql, mysql, mssql]
+execution_models: [volcano]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [function-index, spatial, geometry, gist, predicate, optimization]
+---
+
+# Spatial Function to Index Predicate Conversion
+
+## Description
+
+Converts expensive spatial function calls in WHERE clauses into
+equivalent spatial index-friendly predicates. For example,
+ST_Distance(a, b) < 1000 can be converted to ST_DWithin(a, b, 1000)
+which can leverage a spatial index, while ST_Distance cannot.
+
+**When to apply**: Spatial distance comparison that can be rewritten
+as a spatial predicate supported by the index.
+
+**Why it works**: ST_Distance computes exact distance and compares;
+ST_DWithin uses the spatial index's bounding box to eliminate
+non-candidates before computing exact distance.
+
+## Implementation
+
+```rust
+rw!("distance-to-dwithin";
+    "(< (st-distance ?a ?b) ?dist)" =>
+    "(st-dwithin ?a ?b ?dist)"
+),
+rw!("distance-le-to-dwithin";
+    "(<= (st-distance ?a ?b) ?dist)" =>
+    "(st-dwithin ?a ?b ?dist)"
+),
+rw!("area-filter-to-bbox";
+    "(> (st-area ?geom) ?min_area)" =>
+    "(and (bbox-filter ?geom ?min_area) (> (st-area ?geom) ?min_area))"
+    if has_spatial_index_on("?geom")
+),
+```
+
+## Test Cases
+
+### Positive: Distance to DWithin conversion
+
+```sql
+-- Before
+SELECT * FROM restaurants
+WHERE ST_Distance(location, ST_MakePoint(-73.9, 40.7)) < 1000;
+-- After
+SELECT * FROM restaurants
+WHERE ST_DWithin(location, ST_MakePoint(-73.9, 40.7), 1000);
+-- Now uses spatial index
+```
+
+### Negative: Already using DWithin
+
+```sql
+SELECT * FROM restaurants
+WHERE ST_DWithin(location, point, 1000);
+-- Already optimal: no conversion needed
+```
+
+## References
+
+- PostGIS: ST_DWithin vs ST_Distance performance
+- PostGIS documentation: Index usage patterns

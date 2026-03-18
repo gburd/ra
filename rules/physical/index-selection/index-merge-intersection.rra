@@ -1,0 +1,99 @@
+---
+id: index-merge-intersection
+name: Index Merge Intersection
+category: physical/index-selection
+databases: [mysql, postgresql, mssql]
+execution_models: [volcano]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [index, merge, intersection, bitmap, multi-index]
+complexity: "O(k1 + k2)"
+benefit_range: [0.2, 0.7]
+---
+
+# Index Merge Intersection
+
+## Description
+
+Combines results from multiple indexes using intersection (AND) when
+a single composite index is not available. Each index scans its portion
+independently, and the results are intersected by row ID to find rows
+matching all predicates.
+
+**When to apply**: AND predicates on columns with separate indexes but
+no composite index covering all predicate columns.
+
+**Why it works**: Each individual index reduces the candidate set.
+The intersection of two selective index scans can be much smaller
+than either alone, avoiding a full table scan. PostgreSQL uses
+bitmap index scans; MySQL uses index merge intersection.
+
+## Relational Algebra
+
+```algebra
+sigma[pred_a AND pred_b](R)
+  -> intersect_rid(index_scan[I_a](pred_a), index_scan[I_b](pred_b))
+  where has_index(I_a, columns(pred_a)) && has_index(I_b, columns(pred_b))
+```
+
+## Implementation
+
+```rust
+rw!("index-merge-intersection";
+    "(filter (and ?pred_a ?pred_b) (scan ?table))" =>
+    "(row-id-intersect
+        (index-scan ?idx_a ?pred_a)
+        (index-scan ?idx_b ?pred_b))"
+    if separate_indexes_exist("?table", "?pred_a", "?pred_b")
+),
+```
+
+## Cost Model
+
+```rust
+fn cost(
+    idx_a_pages: u64, sel_a: f64,
+    idx_b_pages: u64, sel_b: f64,
+    table_pages: u64,
+) -> f64 {
+    let scan_a = idx_a_pages as f64 * sel_a;
+    let scan_b = idx_b_pages as f64 * sel_b;
+    let intersection_rows = sel_a * sel_b * table_pages as f64;
+    let heap_fetch = intersection_rows * RANDOM_IO_COST;
+    scan_a + scan_b + heap_fetch
+}
+```
+
+**Typical benefit**: 20-70% when individual selectivities are moderate
+
+## Test Cases
+
+### Positive: Two separate indexes with AND
+
+```sql
+-- Indexes on (age) and (city) separately
+SELECT * FROM users WHERE age = 30 AND city = 'NYC';
+-- Merge: scan age index + city index, intersect TIDs
+```
+
+### Negative: Single composite index exists
+
+```sql
+-- Composite index on (age, city)
+SELECT * FROM users WHERE age = 30 AND city = 'NYC';
+-- Composite index is better: no merge needed
+```
+
+### Negative: Low selectivity makes full scan cheaper
+
+```sql
+SELECT * FROM users WHERE gender = 'M' AND active = true;
+-- Both columns low selectivity: full scan may be cheaper
+```
+
+## References
+
+- MySQL: Index merge intersection optimization
+- PostgreSQL: Bitmap index scans, BitmapAnd
+- SQL Server: Index intersection

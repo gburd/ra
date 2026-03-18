@@ -1,0 +1,46 @@
+---
+id: distinct-over-single-row
+name: Distinct Over Single Row Elimination
+category: logical/distinct-elimination
+databases: [postgresql, mysql, duckdb, sqlite, oracle]
+standard: "sql:1992"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distinct, single-row, elimination]
+---
+
+# Distinct Over Single Row Elimination
+
+## Description
+
+When the input is guaranteed to produce at most one row (scalar aggregate
+with no GROUP BY, or LIMIT 1), DISTINCT is redundant.
+
+## Relational Algebra
+
+```algebra
+DISTINCT(AGG[funcs](R))  ->  AGG[funcs](R)   [no GROUP BY keys]
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("distinct-over-single-row";
+    "(distinct (aggregate nil ?aggs ?input))" =>
+    "(aggregate nil ?aggs ?input)"
+),
+```
+
+## Test Cases
+
+```sql
+SELECT DISTINCT COUNT(*) FROM users;
+-- COUNT(*) with no GROUP BY returns exactly one row
+-- Simplified: SELECT COUNT(*) FROM users;
+```
+
+## References
+
+PostgreSQL: scalar aggregate optimization

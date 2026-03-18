@@ -1,0 +1,49 @@
+---
+id: cte-distinct-pushdown
+name: CTE Distinct Pushdown
+category: logical/cte-optimization
+databases: [postgresql, duckdb, cockroachdb]
+standard: "sql:1999"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [cte, distinct, pushdown]
+---
+
+# CTE Distinct Pushdown
+
+## Description
+
+When DISTINCT is applied to a single-use CTE, push the distinct operation
+into the CTE definition to reduce the materialized result size.
+
+## Relational Algebra
+
+```algebra
+DISTINCT(CTE(name, Q, scan(name)))  ->  CTE(name, DISTINCT(Q), scan(name))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("cte-distinct-pushdown";
+    "(distinct (cte ?name ?def (scan ?name)))" =>
+    "(cte ?name (distinct ?def) (scan ?name))"
+),
+```
+
+## Test Cases
+
+```sql
+WITH data AS (SELECT category FROM products)
+SELECT DISTINCT * FROM data;
+
+-- Pushed:
+WITH data AS (SELECT DISTINCT category FROM products)
+SELECT * FROM data;
+```
+
+## References
+
+CockroachDB: pkg/sql/opt/norm/rules/with.opt

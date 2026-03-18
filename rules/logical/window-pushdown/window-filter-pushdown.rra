@@ -1,0 +1,54 @@
+---
+id: window-filter-pushdown
+name: Window Filter Pushdown
+category: logical/window-pushdown
+databases: [postgresql, duckdb, cockroachdb, oracle]
+standard: "sql:2003"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [window, filter, pushdown]
+---
+
+# Window Filter Pushdown
+
+## Description
+
+Push a filter below a window function when the filter predicate does not
+reference any window function output columns. This reduces the number of
+rows the window function must process.
+
+## Relational Algebra
+
+```algebra
+sigma[p](WINDOW[funcs](R))  ->  WINDOW[funcs](sigma[p](R))
+    [when p does not reference any column in funcs.output]
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("window-filter-pushdown";
+    "(filter ?pred (window ?funcs ?input))" =>
+    "(window ?funcs (filter ?pred ?input))"
+    if pred_independent_of_window("?pred", "?funcs")
+),
+```
+
+## Test Cases
+
+```sql
+SELECT * FROM (
+    SELECT *, ROW_NUMBER() OVER (ORDER BY id) AS rn FROM orders
+) t WHERE status = 'active';
+
+-- Pushed:
+SELECT *, ROW_NUMBER() OVER (ORDER BY id) AS rn
+FROM orders WHERE status = 'active';
+```
+
+## References
+
+PostgreSQL: src/backend/optimizer/plan/planner.c
+DuckDB: src/optimizer/filter_pushdown.cpp

@@ -1,0 +1,45 @@
+---
+id: distinct-over-limit-one
+name: Distinct Over Limit 1 Elimination
+category: logical/distinct-elimination
+databases: [postgresql, mysql, duckdb, sqlite, oracle]
+standard: "sql:1992"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distinct, limit, elimination]
+---
+
+# Distinct Over Limit 1 Elimination
+
+## Description
+
+When DISTINCT is applied over a LIMIT 1, the DISTINCT is redundant
+because at most one row is returned.
+
+## Relational Algebra
+
+```algebra
+DISTINCT(LIMIT[1](R))  ->  LIMIT[1](R)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("distinct-over-limit-one";
+    "(distinct (limit 1 0 ?input))" =>
+    "(limit 1 0 ?input)"
+),
+```
+
+## Test Cases
+
+```sql
+SELECT DISTINCT * FROM users LIMIT 1;
+-- Simplified: SELECT * FROM users LIMIT 1;
+```
+
+## References
+
+PostgreSQL: optimizer simplification rules

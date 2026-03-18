@@ -1,0 +1,60 @@
+---
+id: expensive-function-avoid-join-pushdown
+name: Avoid Pushing Expensive Functions Below Joins
+category: logical/function-optimization
+databases: [postgresql, mysql, duckdb, mssql, oracle]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [pushdown, expensive-function, join, optimization]
+---
+
+# Avoid Pushing Expensive Functions Below Joins
+
+## Description
+
+Prevents pushing expensive function evaluations below joins where
+they would be evaluated more times due to row multiplication. If a
+join produces more rows than the input, an expensive function on the
+input side would run on each output row instead of once per input row.
+
+**When to apply**: Expensive function in projection above a join
+where the join is many-to-many or one-to-many.
+
+**Why it works**: In a 1:N join, pushing a function from the "1" side
+means it runs N times instead of once. Keeping it above the join
+evaluates it once per distinct input row.
+
+## Implementation
+
+```rust
+rw!("block-expensive-fn-pushdown-through-join";
+    "(project ?expensive_exprs (join ?cond ?left ?right))" =>
+    "(project ?expensive_exprs (join ?cond ?left ?right))"
+    if has_expensive_function("?expensive_exprs") &&
+       join_multiplies_rows("?cond", "?left", "?right")
+),
+```
+
+## Test Cases
+
+### Positive: Expensive function above one-to-many join
+
+```sql
+SELECT ST_Buffer(a.geom, 100), b.name
+FROM areas a
+JOIN points b ON ST_Contains(a.geom, b.location);
+-- ST_Buffer on areas: evaluate once per area, not per matching point
+```
+
+### Negative: Function on the "many" side
+
+```sql
+SELECT a.id, UPPER(b.name)
+FROM orders a JOIN items b ON a.id = b.order_id;
+-- UPPER is cheap and on the many side: pushdown is fine
+```
+
+## References
+
+- Query optimizer literature: expression placement
+- PostgreSQL: target list evaluation order

@@ -1,0 +1,49 @@
+---
+id: cte-eliminate-unused
+name: CTE Eliminate Unused
+category: logical/cte-optimization
+databases: [postgresql, duckdb, sqlite, mysql]
+standard: "sql:1999"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [cte, eliminate, dead-code]
+---
+
+# CTE Eliminate Unused
+
+## Description
+
+Remove a CTE definition that is never referenced in the body. This is
+dead code elimination for CTEs.
+
+## Relational Algebra
+
+```algebra
+CTE(name, Q, body) -> body   [when name not in refs(body)]
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("cte-eliminate-unused";
+    "(cte ?name ?def ?body)" =>
+    "?body"
+    if not_referenced("?name", "?body")
+),
+```
+
+## Test Cases
+
+```sql
+WITH unused AS (SELECT * FROM big_table)
+SELECT * FROM other_table;
+
+-- Simplified:
+SELECT * FROM other_table;
+```
+
+## References
+
+PostgreSQL: src/backend/optimizer/plan/subselect.c (remove unused CTEs)

@@ -1,0 +1,101 @@
+---
+id: filtered-index-matching
+name: Filtered/Partial Index Matching
+category: physical/index-selection
+databases: [postgresql, mssql]
+execution_models: [volcano]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [index, filtered, partial, conditional]
+complexity: "O(log n + k)"
+benefit_range: [0.5, 0.95]
+---
+
+# Filtered/Partial Index Matching
+
+## Description
+
+Matches query predicates against filtered (partial) index WHERE clauses.
+A filtered index only indexes rows satisfying its predicate, making it
+smaller and more cache-friendly than a full index. The query must imply
+the index filter predicate for the index to be usable.
+
+**When to apply**: Query WHERE clause logically implies the filtered
+index predicate.
+
+**Why it works**: The filtered index is smaller (fewer leaf pages),
+fits better in cache, and has lower maintenance cost. If the query
+already filters to a subset that matches the index predicate, the
+index is both applicable and more efficient than a full index.
+
+## Relational Algebra
+
+```algebra
+sigma[pred](R)
+  -> filtered_index_scan[I_filtered](pred)
+  where pred => I_filtered.filter_predicate
+```
+
+## Implementation
+
+```rust
+rw!("use-filtered-index";
+    "(filter ?pred (scan ?table))" =>
+    "(filtered-index-scan ?idx ?pred)"
+    if has_matching_filtered_index("?table", "?pred")
+),
+```
+
+## Cost Model
+
+```rust
+fn cost(filtered_index_pages: u64, full_index_pages: u64, selectivity: f64) -> f64 {
+    let filtered = (selectivity * filtered_index_pages as f64).max(1.0);
+    filtered * RANDOM_IO_COST
+}
+
+fn benefit_over_full(filtered_pages: u64, full_pages: u64) -> f64 {
+    let ratio = filtered_pages as f64 / full_pages.max(1) as f64;
+    1.0 - ratio
+}
+```
+
+**Typical benefit**: 50-95% when filtered index is much smaller than full table
+
+## Test Cases
+
+### Positive: Query matches partial index predicate
+
+```sql
+-- Partial index: WHERE status = 'active'
+CREATE INDEX idx_active ON orders(customer_id) WHERE status = 'active';
+
+SELECT * FROM orders WHERE status = 'active' AND customer_id = 42;
+-- Query implies index predicate: use smaller index
+```
+
+### Positive: Stronger predicate implies filter
+
+```sql
+-- Partial index: WHERE amount > 0
+CREATE INDEX idx_positive ON transactions(account_id) WHERE amount > 0;
+
+SELECT * FROM transactions WHERE amount > 100 AND account_id = 5;
+-- amount > 100 implies amount > 0: filtered index applicable
+```
+
+### Negative: Query does not imply filter
+
+```sql
+-- Partial index: WHERE status = 'active'
+CREATE INDEX idx_active ON orders(customer_id) WHERE status = 'active';
+
+SELECT * FROM orders WHERE customer_id = 42;
+-- No status filter: cannot use partial index
+```
+
+## References
+
+- PostgreSQL: Partial indexes (CREATE INDEX ... WHERE)
+- SQL Server: Filtered indexes

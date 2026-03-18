@@ -1,0 +1,67 @@
+---
+id: function-index-collation-match
+name: Collation-Aware Function Index Matching
+category: logical/function-optimization
+databases: [postgresql, mssql, oracle]
+execution_models: [volcano]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [function-index, collation, case-insensitive, optimization]
+---
+
+# Collation-Aware Function Index Matching
+
+## Description
+
+Matches case-insensitive comparisons to indexes that use case-insensitive
+collations or LOWER/UPPER expression indexes. Different databases handle
+this differently: PostgreSQL uses expression indexes on LOWER(), SQL Server
+uses case-insensitive collations, Oracle uses linguistic indexes.
+
+**When to apply**: Case-insensitive equality or LIKE predicate where a
+matching collation or expression index is available.
+
+**Why it works**: Rather than applying LOWER() per row and doing a seq scan,
+the optimizer recognizes that the expression index already stores lowercase
+values and can be used directly.
+
+## Implementation
+
+```rust
+rw!("collation-index-for-ci-compare";
+    "(filter (= (lower ?col) (lower ?val)) (scan ?table))" =>
+    "(index-scan ?ci_idx (= ?col ?val))"
+    if has_ci_index("?table", "?col")
+),
+```
+
+## Test Cases
+
+### Positive: Case-insensitive search with LOWER index
+
+```sql
+CREATE INDEX idx_ci_name ON users (LOWER(name));
+
+SELECT * FROM users WHERE LOWER(name) = LOWER('Alice');
+-- Uses ci index
+```
+
+### Positive: Collation-based CI index (SQL Server)
+
+```sql
+-- Index with CI collation
+SELECT * FROM users WHERE name = 'Alice' COLLATE Latin1_General_CI_AS;
+```
+
+### Negative: No CI index available
+
+```sql
+SELECT * FROM users WHERE LOWER(name) = 'alice';
+-- No expression index: full scan with per-row LOWER()
+```
+
+## References
+
+- PostgreSQL: Expression indexes, LOWER() indexes
+- SQL Server: Collation-sensitive index usage
+- Oracle: Linguistic indexes

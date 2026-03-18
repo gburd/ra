@@ -1,0 +1,89 @@
+---
+id: unique-index-for-distinct
+name: Unique Index for DISTINCT Elimination
+category: physical/index-selection
+databases: [postgresql, mysql, mssql, oracle, sqlite]
+execution_models: [volcano, vectorized]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [index, unique, distinct, deduplication]
+complexity: "O(log n)"
+benefit_range: [0.5, 0.9]
+---
+
+# Unique Index for DISTINCT Elimination
+
+## Description
+
+Eliminates DISTINCT operations when a unique index guarantees that
+the selected columns are already unique. If the projection columns
+form a superset of a unique index key, no deduplication is needed.
+
+**When to apply**: SELECT DISTINCT on columns that include all columns
+of a unique index or primary key.
+
+**Why it works**: The unique constraint enforces that no two rows share
+the same key values. If all DISTINCT columns cover a unique key,
+the DISTINCT is redundant and can be removed from the plan.
+
+## Relational Algebra
+
+```algebra
+delta(pi[cols](R))
+  -> pi[cols](R)
+  where exists_unique_index(R, key) && key ⊆ cols
+```
+
+## Implementation
+
+```rust
+rw!("eliminate-distinct-with-unique";
+    "(distinct (project ?cols (scan ?table)))" =>
+    "(project ?cols (scan ?table))"
+    if unique_index_covers("?table", "?cols")
+),
+```
+
+## Cost Model
+
+```rust
+fn benefit(rows: u64) -> f64 {
+    // Eliminates sort + dedup or hash aggregate
+    let dedup_cost = rows as f64 * (SORT_COST_PER_ROW + COMPARISON_COST);
+    dedup_cost
+}
+```
+
+**Typical benefit**: 50-90% by removing sort/hash aggregate for dedup
+
+## Test Cases
+
+### Positive: DISTINCT on primary key superset
+
+```sql
+SELECT DISTINCT id, name, email FROM users;
+-- id is primary key: rows already unique, DISTINCT is no-op
+```
+
+### Positive: DISTINCT on unique index columns
+
+```sql
+CREATE UNIQUE INDEX idx ON employees(emp_id, dept_id);
+
+SELECT DISTINCT emp_id, dept_id, name FROM employees;
+-- Unique on (emp_id, dept_id): DISTINCT redundant
+```
+
+### Negative: DISTINCT on non-unique columns
+
+```sql
+SELECT DISTINCT city FROM addresses;
+-- No unique constraint on city: must deduplicate
+```
+
+## References
+
+- PostgreSQL: Redundant DISTINCT elimination
+- MySQL: DISTINCT optimization with unique indexes
+- SQL Server: DISTINCT removal in query optimizer

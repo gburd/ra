@@ -1,0 +1,107 @@
+---
+id: index-for-order-by
+name: Index for ORDER BY Elimination
+category: physical/index-selection
+databases: [postgresql, mysql, mssql, oracle, sqlite]
+execution_models: [volcano]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [index, order-by, sort-elimination, btree]
+complexity: "O(log n + k)"
+benefit_range: [0.4, 0.9]
+---
+
+# Index for ORDER BY Elimination
+
+## Description
+
+Uses an ordered index scan to satisfy ORDER BY without a separate sort
+operator. If the index key order matches the required output order
+(including direction), the sort is redundant.
+
+**When to apply**: ORDER BY columns match the leading columns of a
+B-tree index in the same direction, and the query accesses a small
+fraction of the table.
+
+**Why it works**: B-tree indexes maintain key order. An index scan
+produces rows in index order, eliminating the need for an explicit
+sort step which would buffer and sort all qualifying rows.
+
+## Relational Algebra
+
+```algebra
+tau[cols ASC](sigma[pred](R))
+  -> ordered_index_scan[I](pred, cols)
+  where index_order_matches(I, cols, directions)
+```
+
+## Implementation
+
+```rust
+rw!("index-for-order-by";
+    "(sort ?cols ?dirs (filter ?pred (scan ?table)))" =>
+    "(ordered-index-scan ?idx ?pred ?cols ?dirs)"
+    if index_matches_order("?table", "?cols", "?dirs")
+),
+
+rw!("index-for-order-by-limit";
+    "(limit ?n (sort ?cols ?dirs (scan ?table)))" =>
+    "(limit ?n (ordered-index-scan ?idx true ?cols ?dirs))"
+    if index_matches_order("?table", "?cols", "?dirs")
+),
+```
+
+## Cost Model
+
+```rust
+fn sort_cost(rows: u64, row_size: u64, memory: u64) -> f64 {
+    let data_size = rows as f64 * row_size as f64;
+    if data_size <= memory as f64 {
+        rows as f64 * (rows as f64).log2() * COMPARISON_COST
+    } else {
+        let runs = data_size / memory as f64;
+        rows as f64 * (runs.log2() + 1.0) * IO_COST
+    }
+}
+
+fn benefit(sort_cost: f64, index_overhead: f64) -> f64 {
+    (sort_cost - index_overhead) / sort_cost
+}
+```
+
+**Typical benefit**: 40-90% by avoiding explicit sort
+
+## Test Cases
+
+### Positive: ORDER BY matches index
+
+```sql
+-- Index on (created_at)
+SELECT * FROM posts ORDER BY created_at DESC LIMIT 20;
+-- Backward index scan: no sort needed
+```
+
+### Positive: Composite index matches compound ORDER BY
+
+```sql
+-- Index on (department, hire_date)
+SELECT * FROM employees
+WHERE department = 'eng'
+ORDER BY hire_date;
+-- Equality on dept + order by hire_date: index provides order
+```
+
+### Negative: ORDER BY direction mismatch
+
+```sql
+-- Index on (a ASC, b ASC)
+SELECT * FROM t ORDER BY a ASC, b DESC;
+-- Mixed directions: index cannot satisfy (unless database supports mixed)
+```
+
+## References
+
+- PostgreSQL: Index scans for ORDER BY
+- MySQL: ORDER BY optimization with indexes
+- "Use The Index, Luke" - Sorting and grouping

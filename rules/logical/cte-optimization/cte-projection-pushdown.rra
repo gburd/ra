@@ -1,0 +1,50 @@
+---
+id: cte-projection-pushdown
+name: CTE Projection Pushdown
+category: logical/cte-optimization
+databases: [postgresql, duckdb, cockroachdb]
+standard: "sql:1999"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [cte, projection, pushdown]
+---
+
+# CTE Projection Pushdown
+
+## Description
+
+Push projection into a CTE definition to reduce the width of materialized
+data. Only columns actually used by the CTE body are retained.
+
+## Relational Algebra
+
+```algebra
+pi[cols](CTE(name, Q, body))  ->  CTE(name, pi[cols](Q), body)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("cte-projection-pushdown";
+    "(project ?cols (cte ?name ?def ?body))" =>
+    "(cte ?name (project ?cols ?def) ?body)"
+    if columns_subset_of_cte("?cols", "?def")
+),
+```
+
+## Test Cases
+
+```sql
+WITH data AS (SELECT * FROM wide_table)
+SELECT name, age FROM data;
+
+-- Pushed down:
+WITH data AS (SELECT name, age FROM wide_table)
+SELECT name, age FROM data;
+```
+
+## References
+
+PostgreSQL: src/backend/optimizer/plan/subselect.c

@@ -1,0 +1,95 @@
+---
+id: index-for-group-by
+name: Index for GROUP BY Optimization
+category: physical/index-selection
+databases: [postgresql, mysql, mssql, oracle]
+execution_models: [volcano]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [index, group-by, sorted-aggregation, btree]
+complexity: "O(log n + k)"
+benefit_range: [0.3, 0.8]
+---
+
+# Index for GROUP BY Optimization
+
+## Description
+
+Uses index order to perform sorted (stream) aggregation for GROUP BY,
+avoiding hash aggregation or an explicit sort. When the index key
+prefix matches the GROUP BY columns, rows arrive pre-grouped and
+can be aggregated in a single pass.
+
+**When to apply**: GROUP BY columns match the leading columns of an
+available B-tree index.
+
+**Why it works**: Sorted aggregation processes groups in order, requiring
+O(1) memory per group (only current group state). Hash aggregation
+requires O(groups) memory, and sort-based aggregation requires
+O(n log n) sort time.
+
+## Relational Algebra
+
+```algebra
+gamma[group_cols; aggs](R)
+  -> sorted_aggregate(index_scan[I](group_cols), aggs)
+  where index_prefix_matches(I, group_cols)
+```
+
+## Implementation
+
+```rust
+rw!("index-for-group-by";
+    "(aggregate ?groups ?aggs (scan ?table))" =>
+    "(sorted-aggregate ?groups ?aggs (index-scan ?idx))"
+    if index_prefix_matches("?table", "?groups")
+),
+```
+
+## Cost Model
+
+```rust
+fn hash_agg_cost(rows: u64, groups: u64) -> f64 {
+    rows as f64 * HASH_COST + groups as f64 * MEMORY_COST
+}
+
+fn sorted_agg_cost(rows: u64, index_scan_cost: f64) -> f64 {
+    index_scan_cost + rows as f64 * COMPARISON_COST
+}
+```
+
+**Typical benefit**: 30-80% when avoiding sort or large hash table
+
+## Test Cases
+
+### Positive: GROUP BY matches index prefix
+
+```sql
+-- Index on (department, role)
+SELECT department, COUNT(*) FROM employees GROUP BY department;
+-- Index scan delivers rows grouped by department
+```
+
+### Positive: GROUP BY with filter using same index
+
+```sql
+-- Index on (status, category)
+SELECT category, AVG(price) FROM products
+WHERE status = 'active'
+GROUP BY category;
+-- Equality on status, groups on category: sorted aggregate
+```
+
+### Negative: GROUP BY on non-indexed columns
+
+```sql
+SELECT city, COUNT(*) FROM users GROUP BY city;
+-- No index on city: hash aggregate or sort needed
+```
+
+## References
+
+- PostgreSQL: GroupAggregate vs HashAggregate
+- MySQL: GROUP BY optimization, loose index scan
+- SQL Server: Stream aggregate vs hash aggregate

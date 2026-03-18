@@ -1,0 +1,101 @@
+---
+id: covering-index-optimization
+name: Covering Index Optimization
+category: physical/index-selection
+databases: [postgresql, mysql, mssql, oracle]
+execution_models: [volcano, vectorized]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [index, covering, index-only-scan, include-columns]
+complexity: "O(log n + k)"
+benefit_range: [0.6, 0.95]
+---
+
+# Covering Index Optimization
+
+## Description
+
+Extends covering index detection to consider SQL Server INCLUDE columns
+and PostgreSQL index-only scan visibility map checks. When all required
+columns exist in the index (as key or included columns), heap access
+is eliminated entirely.
+
+**When to apply**: All SELECT and WHERE columns are present in the index
+key columns or INCLUDE columns.
+
+**Why it works**: The index leaf pages contain all needed data. No
+heap page fetches means dramatically fewer I/O operations.
+
+## Relational Algebra
+
+```algebra
+pi[cols](sigma[pred](R))
+  -> index_only_scan[I](pred, cols)
+  where covers(I.key_cols ∪ I.include_cols, cols ∪ columns(pred))
+```
+
+## Implementation
+
+```rust
+rw!("covering-index-with-includes";
+    "(project ?cols (filter ?pred (scan ?table)))" =>
+    "(index-only-scan ?index ?pred ?cols)"
+    if index_covers_with_includes("?table", "?pred", "?cols")
+),
+```
+
+## Cost Model
+
+```rust
+fn cost(index_leaf_pages: u64, selectivity: f64) -> f64 {
+    let pages = (selectivity * index_leaf_pages as f64).max(1.0);
+    pages * SEQUENTIAL_IO_COST // Index pages only
+}
+
+fn benefit_over_heap(index_pages: u64, heap_pages: u64, selectivity: f64) -> f64 {
+    let with_heap = index_pages as f64 + selectivity * heap_pages as f64;
+    let index_only = (selectivity * index_pages as f64).max(1.0);
+    (with_heap - index_only) / with_heap
+}
+```
+
+**Typical benefit**: 60-95% when heap access is eliminated
+
+## Test Cases
+
+### Positive: INCLUDE columns cover projection
+
+```sql
+CREATE INDEX idx ON orders(customer_id) INCLUDE (total, status);
+
+SELECT customer_id, total, status FROM orders
+WHERE customer_id = 42;
+-- All columns in index: no heap access
+```
+
+### Positive: Composite key covers query
+
+```sql
+CREATE INDEX idx ON sales(region, product_id, amount);
+
+SELECT region, SUM(amount) FROM sales
+WHERE region = 'EMEA'
+GROUP BY region;
+-- Index covers region + amount
+```
+
+### Negative: Missing column forces heap access
+
+```sql
+CREATE INDEX idx ON users(email);
+
+SELECT email, phone FROM users WHERE email = 'a@b.com';
+-- phone not in index: must access heap
+```
+
+## References
+
+- PostgreSQL: Index-only scans, visibility map
+- SQL Server: INCLUDE columns in nonclustered indexes
+- MySQL: Covering index optimization

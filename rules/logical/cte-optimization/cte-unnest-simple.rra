@@ -1,0 +1,52 @@
+---
+id: cte-unnest-simple
+name: CTE Unnest Simple Scan
+category: logical/cte-optimization
+databases: [postgresql, duckdb, sqlite]
+standard: "sql:1999"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [cte, unnest, simplification]
+---
+
+# CTE Unnest Simple Scan
+
+## Description
+
+When a CTE definition is just a table scan (possibly with alias), unnest
+it by replacing references with the scan directly.
+
+## Relational Algebra
+
+```algebra
+CTE(name, Scan(t), body)  ->  body[name := t]
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("cte-unnest-simple";
+    "(cte ?name (scan ?table) ?body)" =>
+    { SubstituteScan {
+        name: "?name".parse().unwrap(),
+        table: "?table".parse().unwrap(),
+        body: "?body".parse().unwrap(),
+    }}
+),
+```
+
+## Test Cases
+
+```sql
+WITH t AS (SELECT * FROM users)
+SELECT * FROM t WHERE age > 21;
+
+-- Unnested:
+SELECT * FROM users WHERE age > 21;
+```
+
+## References
+
+SQLite: src/select.c (flattenSubquery)

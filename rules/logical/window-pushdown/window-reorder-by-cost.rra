@@ -1,0 +1,53 @@
+---
+id: window-reorder-by-cost
+name: Window Reorder by Cost
+category: logical/window-pushdown
+databases: [postgresql, duckdb, oracle]
+standard: "sql:2003"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [window, reorder, cost]
+---
+
+# Window Reorder by Cost
+
+## Description
+
+When multiple window functions with different specifications must be
+computed, reorder them to minimize the number of sorts required. Window
+functions sharing sort prefixes should be grouped together.
+
+## Relational Algebra
+
+```algebra
+WINDOW[f1 OVER w1](WINDOW[f2 OVER w2](R))  ->
+    WINDOW[f2 OVER w2](WINDOW[f1 OVER w1](R))
+    [when sort(w1) is a prefix of sort(w2)]
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("window-reorder-by-cost";
+    "(window ?f1 (window ?f2 ?input))" =>
+    "(window ?f2 (window ?f1 ?input))"
+    if reorder_saves_sort("?f1", "?f2")
+),
+```
+
+## Test Cases
+
+```sql
+SELECT
+    ROW_NUMBER() OVER (ORDER BY a, b) AS rn1,
+    SUM(x) OVER (ORDER BY a) AS s
+FROM t;
+-- Order: first compute SUM (ORDER BY a), then ROW_NUMBER (ORDER BY a, b)
+-- Second sort extends the first, saving one full sort
+```
+
+## References
+
+PostgreSQL: src/backend/optimizer/plan/planner.c (select_active_windows)

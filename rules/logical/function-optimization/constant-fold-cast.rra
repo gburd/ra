@@ -1,0 +1,64 @@
+---
+id: constant-fold-cast
+name: Constant Fold CAST/Type Conversions
+category: logical/function-optimization
+databases: [postgresql, mysql, duckdb, sqlite, oracle, mssql]
+standard: "sql:1992"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [constant-folding, cast, type-conversion, optimization]
+---
+
+# Constant Fold CAST/Type Conversions
+
+## Description
+
+Evaluates CAST expressions at compile time when the input is a constant.
+CAST('42' AS INTEGER) becomes 42. CAST(3.14 AS TEXT) becomes '3.14'.
+
+**When to apply**: CAST with a constant input value.
+
+**Why it works**: Type conversions on constants can be computed once
+at plan time instead of per row.
+
+## Implementation
+
+```rust
+rw!("fold-cast";
+    "(cast ?val ?type)" => { FoldCast("?val", "?type") }
+    if is_const("?val")
+),
+rw!("fold-redundant-cast";
+    "(cast ?val ?type)" => "?val"
+    if has_type("?val", "?type")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(val: &Expr, target_type: &DataType) -> bool {
+    val.is_literal()
+    && can_cast(val.data_type(), target_type)
+}
+```
+
+## Test Cases
+
+```sql
+-- Before
+SELECT * FROM t WHERE id = CAST('42' AS INTEGER);
+-- After
+SELECT * FROM t WHERE id = 42;
+```
+
+```sql
+-- Redundant cast removal
+SELECT CAST(42 AS INTEGER) FROM t;
+-- After: SELECT 42 FROM t;
+```
+
+## References
+
+- PostgreSQL: eval_const_expressions for CAST
+- DuckDB: CastConstantRule

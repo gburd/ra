@@ -1,0 +1,63 @@
+---
+id: function-index-range-match
+name: Function-Based Index Range Match
+category: logical/function-optimization
+databases: [postgresql, oracle, mssql]
+execution_models: [volcano]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [function-index, expression-index, range-scan, optimization]
+---
+
+# Function-Based Index Range Match
+
+## Description
+
+Matches range predicates (>, <, BETWEEN) on function expressions to
+expression indexes. If an index exists on EXTRACT(year FROM date_col),
+then WHERE EXTRACT(year FROM date_col) BETWEEN 2020 AND 2025 can use
+that index for a range scan.
+
+**When to apply**: Range predicate on a function expression that
+matches an expression index.
+
+**Why it works**: Expression indexes store computed values in B-tree
+order. Range predicates on those computed values can leverage the
+B-tree's ordered structure for efficient range scans.
+
+## Implementation
+
+```rust
+rw!("function-index-range";
+    "(filter (between (?f ?col) ?lo ?hi) (scan ?table))" =>
+    "(index-range-scan ?expr_idx ?lo ?hi)"
+    if has_expression_index("?table", "?f", "?col")
+),
+```
+
+## Test Cases
+
+### Positive: EXTRACT with range
+
+```sql
+CREATE INDEX idx_year ON events (EXTRACT(year FROM event_date));
+
+SELECT * FROM events
+WHERE EXTRACT(year FROM event_date) BETWEEN 2020 AND 2025;
+-- Range scan on idx_year
+```
+
+### Negative: Function not matching index
+
+```sql
+CREATE INDEX idx_year ON events (EXTRACT(year FROM event_date));
+
+SELECT * FROM events
+WHERE EXTRACT(month FROM event_date) = 3;
+-- month != year: index not usable
+```
+
+## References
+
+- PostgreSQL: Range scans on expression indexes
+- Oracle: Function-based index range optimization

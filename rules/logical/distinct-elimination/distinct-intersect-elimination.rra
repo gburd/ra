@@ -1,0 +1,54 @@
+---
+id: distinct-intersect-elimination
+name: Distinct Over Intersect Elimination
+category: logical/distinct-elimination
+databases: [postgresql, duckdb, oracle, mssql]
+standard: "sql:1992"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distinct, intersect, elimination]
+---
+
+# Distinct Over Intersect Elimination
+
+## Description
+
+INTERSECT (without ALL) already produces distinct results. Applying
+DISTINCT on top is redundant.
+
+## Relational Algebra
+
+```algebra
+DISTINCT(INTERSECT(L, R))  ->  INTERSECT(L, R)
+DISTINCT(EXCEPT(L, R))  ->  EXCEPT(L, R)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("distinct-over-intersect";
+    "(distinct (intersect false ?left ?right))" =>
+    "(intersect false ?left ?right)"
+),
+
+rw!("distinct-over-except";
+    "(distinct (except false ?left ?right))" =>
+    "(except false ?left ?right)"
+),
+```
+
+## Test Cases
+
+```sql
+SELECT DISTINCT * FROM (
+    SELECT * FROM t1 INTERSECT SELECT * FROM t2
+);
+-- INTERSECT already eliminates duplicates
+-- Simplified: SELECT * FROM t1 INTERSECT SELECT * FROM t2;
+```
+
+## References
+
+SQL standard: set operations produce distinct results by default

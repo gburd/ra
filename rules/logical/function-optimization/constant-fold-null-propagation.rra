@@ -1,0 +1,71 @@
+---
+id: constant-fold-null-propagation
+name: Constant Fold NULL Propagation
+category: logical/function-optimization
+databases: [postgresql, mysql, duckdb, sqlite, oracle, mssql]
+standard: "sql:1992"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [constant-folding, null, propagation, strict, optimization]
+---
+
+# Constant Fold NULL Propagation
+
+## Description
+
+Propagates NULL through strict functions (functions where any NULL
+argument produces a NULL result). Most SQL functions are strict by
+default. ABS(NULL) -> NULL, CONCAT('a', NULL) -> NULL (in some
+databases), NULL + 5 -> NULL.
+
+**When to apply**: Strict function with any NULL constant argument.
+
+**Why it works**: SQL three-valued logic specifies that strict
+functions return NULL when any argument is NULL.
+
+## Implementation
+
+```rust
+rw!("null-prop-unary";
+    "(?f null)" => "null"
+    if is_strict("?f")
+),
+rw!("null-prop-binary-left";
+    "(?f null ?b)" => "null"
+    if is_strict("?f")
+),
+rw!("null-prop-binary-right";
+    "(?f ?a null)" => "null"
+    if is_strict("?f")
+),
+rw!("null-comparison";
+    "(= ?x null)" => "null"
+),
+rw!("null-arithmetic";
+    "(+ ?x null)" => "null"
+),
+```
+
+## Preconditions
+
+Non-strict functions (COALESCE, NULLIF, IS NULL, IS NOT NULL) are excluded.
+
+## Test Cases
+
+```sql
+-- Before
+SELECT ABS(NULL) FROM t;
+-- After
+SELECT NULL FROM t;
+```
+
+```sql
+-- Negative: COALESCE is not strict
+SELECT COALESCE(NULL, 5) FROM t;
+-- Stays: COALESCE(NULL, 5) -> 5 (handled by coalesce folding)
+```
+
+## References
+
+- SQL Standard: NULL propagation rules
+- PostgreSQL: strict function handling in eval_const_expressions

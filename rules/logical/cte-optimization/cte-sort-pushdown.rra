@@ -1,0 +1,51 @@
+---
+id: cte-sort-pushdown
+name: CTE Sort Pushdown
+category: logical/cte-optimization
+databases: [postgresql, duckdb]
+standard: "sql:1999"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [cte, sort, pushdown]
+---
+
+# CTE Sort Pushdown
+
+## Description
+
+When a sort is applied to a single-use CTE and no other operations
+between CTE and sort would disrupt ordering, push the sort into the
+CTE definition.
+
+## Relational Algebra
+
+```algebra
+SORT[keys](CTE(name, Q, scan(name)))  ->
+    CTE(name, SORT[keys](Q), scan(name))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("cte-sort-pushdown";
+    "(sort ?keys (cte ?name ?def (scan ?name)))" =>
+    "(cte ?name (sort ?keys ?def) (scan ?name))"
+),
+```
+
+## Test Cases
+
+```sql
+WITH data AS (SELECT * FROM orders)
+SELECT * FROM data ORDER BY date DESC;
+
+-- Pushed:
+WITH data AS (SELECT * FROM orders ORDER BY date DESC)
+SELECT * FROM data;
+```
+
+## References
+
+DuckDB: src/optimizer/topn_optimizer.cpp

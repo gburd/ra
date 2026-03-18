@@ -1,0 +1,103 @@
+---
+id: index-only-count
+name: Index-Only COUNT Optimization
+category: physical/index-selection
+databases: [postgresql, mysql, mssql, oracle, sqlite]
+execution_models: [volcano]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [index, count, aggregate, index-only-scan]
+complexity: "O(n_index)"
+benefit_range: [0.3, 0.8]
+---
+
+# Index-Only COUNT Optimization
+
+## Description
+
+Uses the smallest available index for COUNT(*) or COUNT(indexed_col)
+to avoid scanning the heap. Since COUNT does not need actual column
+values (just existence), any narrow index suffices, and the smallest
+index minimizes I/O.
+
+**When to apply**: COUNT(*) or COUNT(col) where col has a NOT NULL
+constraint or an index, and no other columns are needed.
+
+**Why it works**: Index leaf pages are smaller and denser than heap
+pages. Scanning the smallest index to count entries avoids reading
+wide heap rows. For COUNT(*), any non-partial index works.
+
+## Relational Algebra
+
+```algebra
+gamma[; COUNT(*)](R)
+  -> count_index_scan[I_smallest]()
+  where exists_any_index(I_smallest, R)
+
+gamma[; COUNT(col)](R)
+  -> count_index_scan[I](col)
+  where has_index(I, col)
+```
+
+## Implementation
+
+```rust
+rw!("count-star-via-smallest-index";
+    "(aggregate () (count-star) (scan ?table))" =>
+    "(count-index-scan ?smallest_idx)"
+    if has_any_index("?table")
+),
+
+rw!("count-col-via-index";
+    "(aggregate () (count ?col) (scan ?table))" =>
+    "(count-index-scan ?idx ?col)"
+    if has_index("?table", "?col")
+),
+```
+
+## Cost Model
+
+```rust
+fn cost(index_pages: u64) -> f64 {
+    index_pages as f64 * SEQUENTIAL_IO_COST
+}
+
+fn benefit(heap_pages: u64, index_pages: u64) -> f64 {
+    let heap_scan = heap_pages as f64 * SEQUENTIAL_IO_COST;
+    let idx_scan = index_pages as f64 * SEQUENTIAL_IO_COST;
+    (heap_scan - idx_scan) / heap_scan
+}
+```
+
+**Typical benefit**: 30-80% when index is significantly smaller than heap
+
+## Test Cases
+
+### Positive: COUNT(*) with narrow index
+
+```sql
+-- Table has narrow index on (id)
+SELECT COUNT(*) FROM orders;
+-- Scans smallest index instead of heap
+```
+
+### Positive: COUNT with filter on indexed column
+
+```sql
+SELECT COUNT(*) FROM products WHERE category = 'books';
+-- Index on category: count matching entries without heap access
+```
+
+### Negative: COUNT(*) on table with no indexes
+
+```sql
+SELECT COUNT(*) FROM temp_staging;
+-- No index: must scan heap
+```
+
+## References
+
+- PostgreSQL: Index-only scan for COUNT
+- MySQL: InnoDB smallest secondary index for COUNT(*)
+- SQL Server: Narrow nonclustered index for COUNT

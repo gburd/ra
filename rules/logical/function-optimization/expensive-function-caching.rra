@@ -1,0 +1,67 @@
+---
+id: expensive-function-caching
+name: Cache Results of Expensive Deterministic Functions
+category: logical/function-optimization
+databases: [postgresql, mysql, duckdb, mssql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [caching, expensive-function, deterministic, memoization]
+---
+
+# Cache Results of Expensive Deterministic Functions
+
+## Description
+
+When an expensive deterministic function is called with the same
+arguments multiple times (e.g., in both SELECT and WHERE, or in
+repeated subexpressions), compute it once and reuse the result.
+
+**When to apply**: Same expensive deterministic function call appears
+multiple times in the same query with identical arguments.
+
+**Why it works**: Deterministic functions return the same value for
+the same input. Computing once and referencing the result via a
+temporary column avoids redundant work.
+
+## Relational Algebra
+
+```algebra
+pi[f(x), ...](sigma[f(x) > threshold](R))
+  -> let t = f(x) in pi[t, ...](sigma[t > threshold](R))
+```
+
+## Implementation
+
+```rust
+rw!("cache-expensive-fn";
+    "(project (list ?exprs_with_f) (filter (> (?f ?args) ?threshold) ?input))" =>
+    "(project (list ?exprs_with_cached)
+        (filter (> ?cached ?threshold)
+            (extend ?cached (?f ?args) ?input)))"
+    if is_expensive("?f") && is_deterministic("?f") &&
+       appears_multiple_times("?f", "?args")
+),
+```
+
+## Test Cases
+
+### Positive: Same function in SELECT and WHERE
+
+```sql
+SELECT MD5(payload) AS hash
+FROM messages
+WHERE MD5(payload) = 'abc123';
+-- Compute MD5 once, use in both filter and projection
+```
+
+### Negative: Function appears only once
+
+```sql
+SELECT MD5(payload) FROM messages;
+-- Single use: no caching benefit
+```
+
+## References
+
+- Common subexpression elimination (CSE)
+- PostgreSQL: no built-in CSE for functions, but can be done in custom optimizer

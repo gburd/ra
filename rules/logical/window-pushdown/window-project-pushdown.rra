@@ -1,0 +1,55 @@
+---
+id: window-project-pushdown
+name: Window Projection Pushdown
+category: logical/window-pushdown
+databases: [postgresql, duckdb, cockroachdb]
+standard: "sql:2003"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [window, projection, pushdown]
+---
+
+# Window Projection Pushdown
+
+## Description
+
+Push a projection below a window function to reduce the width of data
+flowing through the window computation. Only columns needed by the
+window function (partition keys, order keys, arguments) and the
+projected columns are retained.
+
+## Relational Algebra
+
+```algebra
+pi[cols](WINDOW[funcs](R))  ->
+    pi[cols](WINDOW[funcs](pi[cols + window_deps](R)))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("window-project-pushdown";
+    "(project ?cols (window ?funcs ?input))" =>
+    { WindowProjectPushdown {
+        cols: "?cols".parse().unwrap(),
+        funcs: "?funcs".parse().unwrap(),
+        input: "?input".parse().unwrap(),
+    }}
+),
+```
+
+## Test Cases
+
+```sql
+SELECT name, rn FROM (
+    SELECT *, ROW_NUMBER() OVER (ORDER BY id) AS rn
+    FROM employees
+) t;
+-- Only name, id (for ORDER BY), and rn are needed
+```
+
+## References
+
+DuckDB: src/optimizer/column_lifetime_analyzer.cpp

@@ -1,0 +1,52 @@
+---
+id: distinct-pushdown-through-union
+name: Distinct Pushdown Through Union
+category: logical/distinct-elimination
+databases: [postgresql, duckdb, cockroachdb]
+standard: "sql:1992"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distinct, union, pushdown]
+---
+
+# Distinct Pushdown Through Union
+
+## Description
+
+Push DISTINCT through UNION ALL to reduce the size of intermediate results.
+Apply DISTINCT to each branch, then apply a final DISTINCT or convert
+UNION ALL to UNION (which implies distinct).
+
+## Relational Algebra
+
+```algebra
+DISTINCT(UNION ALL(L, R))  ->  UNION(L, R)
+DISTINCT(UNION ALL(L, R))  ->  DISTINCT(UNION ALL(DISTINCT(L), DISTINCT(R)))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("distinct-union-all-to-union";
+    "(distinct (union true ?left ?right))" =>
+    "(union false ?left ?right)"
+),
+```
+
+## Test Cases
+
+```sql
+SELECT DISTINCT * FROM (
+    SELECT name FROM t1
+    UNION ALL
+    SELECT name FROM t2
+);
+-- Simplified: SELECT name FROM t1 UNION SELECT name FROM t2;
+```
+
+## References
+
+PostgreSQL: src/backend/optimizer/plan/planner.c
+DuckDB: src/optimizer/distinct_pushdown.cpp

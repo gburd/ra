@@ -1,0 +1,61 @@
+---
+id: constant-fold-comparison
+name: Constant Fold Comparison Functions
+category: logical/function-optimization
+databases: [postgresql, mysql, duckdb, sqlite, oracle, mssql]
+standard: "sql:1992"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [constant-folding, comparison, boolean, optimization]
+---
+
+# Constant Fold Comparison Functions
+
+## Description
+
+Evaluates comparison expressions (=, <>, <, >, BETWEEN, IN) and
+boolean operations (AND, OR, NOT) at compile time when all operands
+are constants. Chains with boolean simplification to eliminate
+always-true or always-false predicates.
+
+**When to apply**: Comparison where both sides are constants, or
+boolean expressions that can be resolved.
+
+**Why it works**: `10 > 5` is always TRUE. Folding to TRUE enables
+predicate elimination upstream.
+
+## Implementation
+
+```rust
+rw!("fold-eq"; "(= ?a ?b)" => { FoldCmp("?a", "?b", Eq) } if both_const("?a", "?b")),
+rw!("fold-neq"; "(<> ?a ?b)" => { FoldCmp("?a", "?b", Neq) } if both_const("?a", "?b")),
+rw!("fold-lt"; "(< ?a ?b)" => { FoldCmp("?a", "?b", Lt) } if both_const("?a", "?b")),
+rw!("fold-gt"; "(> ?a ?b)" => { FoldCmp("?a", "?b", Gt) } if both_const("?a", "?b")),
+rw!("fold-lte"; "(<= ?a ?b)" => { FoldCmp("?a", "?b", Lte) } if both_const("?a", "?b")),
+rw!("fold-gte"; "(>= ?a ?b)" => { FoldCmp("?a", "?b", Gte) } if both_const("?a", "?b")),
+rw!("fold-between";
+    "(between ?a ?lo ?hi)" => { FoldBetween("?a", "?lo", "?hi") }
+    if all_const("?a", "?lo", "?hi")
+),
+```
+
+## Test Cases
+
+```sql
+-- Before
+SELECT * FROM t WHERE 10 > 5 AND 'abc' = 'abc';
+-- After
+SELECT * FROM t WHERE TRUE AND TRUE;
+-- Then: SELECT * FROM t;  (after boolean simplification)
+```
+
+```sql
+-- Negative: column reference
+SELECT * FROM t WHERE x > 5;
+-- Cannot fold: x is a column
+```
+
+## References
+
+- PostgreSQL: evaluate_expr()
+- CockroachDB: foldComparisonExpr

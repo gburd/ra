@@ -1,0 +1,71 @@
+---
+id: constant-fold-coalesce
+name: Constant Fold COALESCE and Conditional Functions
+category: logical/function-optimization
+databases: [postgresql, mysql, duckdb, sqlite, oracle, mssql]
+standard: "sql:1992"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [constant-folding, coalesce, nullif, conditional, optimization]
+---
+
+# Constant Fold COALESCE and Conditional Functions
+
+## Description
+
+Simplifies COALESCE, NULLIF, and CASE expressions when arguments are
+constant. COALESCE(NULL, NULL, 5) becomes 5. NULLIF(1, 2) becomes 1.
+CASE WHEN TRUE THEN x ELSE y END becomes x.
+
+**When to apply**: COALESCE/NULLIF with all-constant arguments, or
+CASE with constant conditions.
+
+**Why it works**: These conditional expressions follow deterministic
+rules with constant inputs. Folding eliminates branching per row.
+
+## Implementation
+
+```rust
+rw!("fold-coalesce-first-non-null";
+    "(coalesce ?a ?rest)" => "?a"
+    if is_non_null_const("?a")
+),
+rw!("fold-coalesce-skip-null";
+    "(coalesce null ?rest)" => "(coalesce ?rest)"
+),
+rw!("fold-nullif-equal";
+    "(nullif ?a ?a)" => "null"
+    if is_const("?a")
+),
+rw!("fold-nullif-unequal";
+    "(nullif ?a ?b)" => "?a"
+    if both_const("?a", "?b") && values_differ("?a", "?b")
+),
+rw!("fold-case-true";
+    "(case (when true ?then) ?rest)" => "?then"
+),
+rw!("fold-case-false";
+    "(case (when false ?then) ?rest)" => "(case ?rest)"
+),
+```
+
+## Test Cases
+
+```sql
+-- Before
+SELECT COALESCE(NULL, NULL, 'default') FROM t;
+-- After
+SELECT 'default' FROM t;
+```
+
+```sql
+-- Before
+SELECT NULLIF(1, 2) FROM t;
+-- After
+SELECT 1 FROM t;
+```
+
+## References
+
+- PostgreSQL: simplify_function for COALESCE
+- CockroachDB: FoldNullInCaseCondition

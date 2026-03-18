@@ -1,0 +1,65 @@
+---
+id: constant-fold-boolean
+name: Constant Fold Boolean Expressions
+category: logical/function-optimization
+databases: [postgresql, mysql, duckdb, sqlite, oracle, mssql]
+standard: "sql:1992"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [constant-folding, boolean, and, or, not, optimization]
+---
+
+# Constant Fold Boolean Expressions
+
+## Description
+
+Simplifies boolean expressions with known constant operands:
+- `TRUE AND x` -> `x`
+- `FALSE AND x` -> `FALSE`
+- `TRUE OR x` -> `TRUE`
+- `FALSE OR x` -> `x`
+- `NOT TRUE` -> `FALSE`
+- `NOT FALSE` -> `TRUE`
+
+**When to apply**: Boolean expression with at least one constant operand.
+
+**Why it works**: Boolean algebra identities eliminate unnecessary
+evaluation. Cascading with other constant folding rules can
+eliminate entire predicate trees.
+
+## Implementation
+
+```rust
+rw!("and-true-left"; "(and true ?x)" => "?x"),
+rw!("and-true-right"; "(and ?x true)" => "?x"),
+rw!("and-false-left"; "(and false ?x)" => "false"),
+rw!("and-false-right"; "(and ?x false)" => "false"),
+rw!("or-true-left"; "(or true ?x)" => "true"),
+rw!("or-true-right"; "(or ?x true)" => "true"),
+rw!("or-false-left"; "(or false ?x)" => "?x"),
+rw!("or-false-right"; "(or ?x false)" => "?x"),
+rw!("not-true"; "(not true)" => "false"),
+rw!("not-false"; "(not false)" => "true"),
+rw!("not-not"; "(not (not ?x))" => "?x"),
+```
+
+## Test Cases
+
+```sql
+-- Before
+SELECT * FROM t WHERE TRUE AND active = true;
+-- After
+SELECT * FROM t WHERE active = true;
+```
+
+```sql
+-- Before
+SELECT * FROM t WHERE FALSE OR status = 'open';
+-- After
+SELECT * FROM t WHERE status = 'open';
+```
+
+## References
+
+- All databases: fundamental boolean simplification
+- PostgreSQL: clausesel.c simplification

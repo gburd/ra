@@ -1,0 +1,80 @@
+---
+id: constant-fold-datetime
+name: Constant Fold Date/Time Functions
+category: logical/function-optimization
+databases: [postgresql, mysql, duckdb, sqlite, oracle, mssql]
+standard: "sql:1992"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [constant-folding, datetime, pure-function, optimization]
+---
+
+# Constant Fold Date/Time Functions
+
+## Description
+
+Evaluates deterministic date/time functions at compile time when all
+arguments are constants. Functions like EXTRACT, DATE_TRUNC, and
+DATE_ADD with literal timestamps and intervals produce known results.
+
+**When to apply**: Deterministic datetime function with constant arguments.
+Non-deterministic functions (NOW, CURRENT_TIMESTAMP) are excluded.
+
+**Why it works**: DATE_TRUNC('month', TIMESTAMP '2025-03-15') always
+returns '2025-03-01'. Computing this once saves per-row work.
+
+## Relational Algebra
+
+```algebra
+sigma[EXTRACT(year FROM TIMESTAMP '2025-03-15') = 2025](R)
+  -> sigma[2025 = 2025](R)
+  -> R  (after boolean folding)
+```
+
+## Implementation
+
+```rust
+rw!("fold-extract";
+    "(extract ?field ?ts)" => { FoldExtract("?field", "?ts") }
+    if is_const("?ts")
+),
+rw!("fold-date-trunc";
+    "(date_trunc ?precision ?ts)" => { FoldDateTrunc("?precision", "?ts") }
+    if both_const("?precision", "?ts")
+),
+rw!("fold-date-add";
+    "(date_add ?ts ?interval)" => { FoldDateAdd("?ts", "?interval") }
+    if both_const("?ts", "?interval")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(func_name: &str, args: &[Expr]) -> bool {
+    // Must be deterministic (exclude NOW, CURRENT_TIMESTAMP, etc.)
+    is_deterministic_datetime_fn(func_name)
+    && args.iter().all(|a| a.is_literal())
+}
+```
+
+## Test Cases
+
+```sql
+-- Before
+SELECT * FROM events
+WHERE EXTRACT(year FROM TIMESTAMP '2025-03-15') = 2025;
+-- After
+SELECT * FROM events WHERE TRUE;
+```
+
+```sql
+-- Negative: NOW() is non-deterministic
+SELECT EXTRACT(year FROM NOW());
+-- Cannot fold: NOW() changes per statement
+```
+
+## References
+
+- PostgreSQL: eval_const_expressions for timestamp operations
+- DuckDB: DateTrunc constant folding

@@ -1,0 +1,47 @@
+---
+id: distinct-after-aggregate
+name: Distinct After Aggregate Elimination
+category: logical/distinct-elimination
+databases: [postgresql, mysql, duckdb, oracle, cockroachdb]
+standard: "sql:1992"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distinct, aggregate, elimination]
+---
+
+# Distinct After Aggregate Elimination
+
+## Description
+
+When DISTINCT is applied after a GROUP BY that already produces unique
+rows (one per group), the DISTINCT is redundant and can be removed.
+
+## Relational Algebra
+
+```algebra
+DISTINCT(AGG[keys, funcs](R))  ->  AGG[keys, funcs](R)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("distinct-after-aggregate";
+    "(distinct (aggregate ?keys ?aggs ?input))" =>
+    "(aggregate ?keys ?aggs ?input)"
+),
+```
+
+## Test Cases
+
+```sql
+SELECT DISTINCT dept, COUNT(*) FROM employees GROUP BY dept;
+-- GROUP BY dept already produces one row per dept
+-- Simplified: SELECT dept, COUNT(*) FROM employees GROUP BY dept;
+```
+
+## References
+
+PostgreSQL: src/backend/optimizer/plan/planner.c
+CockroachDB: pkg/sql/opt/norm/rules/groupby.opt

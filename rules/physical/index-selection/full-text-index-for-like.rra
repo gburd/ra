@@ -1,0 +1,101 @@
+---
+id: full-text-index-for-like
+name: Full-Text Index for LIKE/CONTAINS
+category: physical/index-selection
+databases: [postgresql, mysql, mssql, oracle]
+execution_models: [volcano]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [index, full-text, text-search, like, contains]
+complexity: "O(log n + k)"
+benefit_range: [0.8, 0.99]
+---
+
+# Full-Text Index for LIKE/CONTAINS
+
+## Description
+
+Replaces LIKE '%word%' pattern scans and CONTAINS predicates with
+full-text index lookups. B-tree indexes cannot accelerate mid-string
+or suffix patterns; full-text indexes use inverted indexes to find
+matching documents directly.
+
+**When to apply**: LIKE '%pattern%', CONTAINS(), or MATCH() predicates
+on columns with full-text indexes.
+
+**Why it works**: Full-text indexes build inverted indexes mapping
+terms to document IDs. Term lookup is O(log n) instead of a full
+table scan.
+
+## Relational Algebra
+
+```algebra
+sigma[col LIKE '%term%'](R)
+  -> fulltext_scan[I_ft](col, 'term')
+  where has_fulltext_index(I_ft, col)
+```
+
+## Implementation
+
+```rust
+rw!("fulltext-for-like-pattern";
+    "(filter (like ?col (pattern ?pct ?term ?pct)) (scan ?table))" =>
+    "(fulltext-scan ?ft_idx ?col ?term)"
+    if has_fulltext_index("?table", "?col")
+),
+
+rw!("fulltext-for-contains";
+    "(filter (contains ?col ?terms) (scan ?table))" =>
+    "(fulltext-scan ?ft_idx ?col ?terms)"
+    if has_fulltext_index("?table", "?col")
+),
+```
+
+## Cost Model
+
+```rust
+fn cost(matching_docs: u64, total_rows: u64) -> f64 {
+    let term_lookup = 1.0; // Inverted index lookup
+    let doc_fetch = matching_docs as f64 * RANDOM_IO_COST;
+    term_lookup + doc_fetch
+}
+
+fn benefit(total_rows: u64, matching_docs: u64) -> f64 {
+    let full_scan = total_rows as f64 * SEQUENTIAL_IO_COST;
+    let ft_scan = 1.0 + matching_docs as f64 * RANDOM_IO_COST;
+    (full_scan - ft_scan) / full_scan
+}
+```
+
+**Typical benefit**: 80-99% for text search on large tables
+
+## Test Cases
+
+### Positive: Mid-string LIKE with full-text index
+
+```sql
+SELECT * FROM articles
+WHERE body LIKE '%database optimization%';
+-- Full-text index: inverted index lookup
+```
+
+### Positive: MATCH AGAINST (MySQL)
+
+```sql
+SELECT * FROM products
+WHERE MATCH(description) AGAINST ('wireless headphones');
+```
+
+### Negative: Prefix LIKE can use B-tree
+
+```sql
+SELECT * FROM users WHERE name LIKE 'John%';
+-- Prefix pattern: B-tree index is sufficient
+```
+
+## References
+
+- PostgreSQL: GIN tsvector indexes, pg_trgm
+- MySQL: InnoDB full-text indexes, MATCH AGAINST
+- SQL Server: Full-text search, CONTAINS/FREETEXT

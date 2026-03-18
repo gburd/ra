@@ -1,0 +1,60 @@
+---
+id: window-remove-unused
+name: Window Remove Unused Functions
+category: logical/window-pushdown
+databases: [postgresql, duckdb, cockroachdb]
+standard: "sql:2003"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [window, unused, elimination]
+---
+
+# Window Remove Unused Functions
+
+## Description
+
+Remove window function computations whose output columns are not
+referenced by any subsequent operator. If all functions in a Window
+node are unused, remove the entire Window node.
+
+## Relational Algebra
+
+```algebra
+pi[cols](WINDOW[f1, f2](R))  ->  pi[cols](WINDOW[f1](R))
+    [when f2.output not in cols]
+
+pi[cols](WINDOW[f1](R))  ->  pi[cols](R)
+    [when f1.output not in cols]
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("window-remove-unused";
+    "(project ?cols (window ?funcs ?input))" =>
+    { RemoveUnusedWindows {
+        cols: "?cols".parse().unwrap(),
+        funcs: "?funcs".parse().unwrap(),
+        input: "?input".parse().unwrap(),
+    }}
+    if any_window_unused("?cols", "?funcs")
+),
+```
+
+## Test Cases
+
+```sql
+SELECT name FROM (
+    SELECT name, ROW_NUMBER() OVER (ORDER BY id) AS rn,
+           SUM(salary) OVER () AS total
+    FROM employees
+) t;
+-- rn and total are unused, remove window functions entirely
+```
+
+## References
+
+DuckDB: src/optimizer/column_lifetime_analyzer.cpp
+CockroachDB: pkg/sql/opt/norm/rules/window.opt

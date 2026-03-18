@@ -1,0 +1,48 @@
+---
+id: distinct-filter-swap
+name: Distinct Filter Swap
+category: logical/distinct-elimination
+databases: [postgresql, duckdb, cockroachdb]
+standard: "sql:1992"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distinct, filter, reorder]
+---
+
+# Distinct Filter Swap
+
+## Description
+
+Swap a filter below a DISTINCT when the filter predicate references only
+columns that survive the distinct. This reduces the number of rows before
+deduplication.
+
+## Relational Algebra
+
+```algebra
+sigma[p](DISTINCT(R))  ->  DISTINCT(sigma[p](R))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("distinct-filter-swap";
+    "(filter ?pred (distinct ?input))" =>
+    "(distinct (filter ?pred ?input))"
+),
+```
+
+## Test Cases
+
+```sql
+SELECT * FROM (SELECT DISTINCT name, age FROM users) t WHERE age > 21;
+-- Rewritten:
+SELECT DISTINCT name, age FROM users WHERE age > 21;
+```
+
+## References
+
+PostgreSQL: filter pushdown through DISTINCT
+CockroachDB: pkg/sql/opt/norm/rules/groupby.opt

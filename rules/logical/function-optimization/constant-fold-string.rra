@@ -1,0 +1,68 @@
+---
+id: constant-fold-string
+name: Constant Fold String Functions
+category: logical/function-optimization
+databases: [postgresql, mysql, duckdb, sqlite, oracle, mssql]
+standard: "sql:1992"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [constant-folding, string, pure-function, optimization]
+---
+
+# Constant Fold String Functions
+
+## Description
+
+Evaluates string functions (UPPER, LOWER, LENGTH, CONCAT, SUBSTRING,
+TRIM, REPLACE) at compile time when all arguments are literal strings.
+
+**When to apply**: String function with all-constant arguments.
+
+**Why it works**: String functions are deterministic. String operations
+can be especially expensive per row; folding eliminates allocation.
+
+## Relational Algebra
+
+```algebra
+pi[UPPER('hello')](R) -> pi['HELLO'](R)
+pi[LENGTH('world')](R) -> pi[5](R)
+pi[CONCAT('a', 'b', 'c')](R) -> pi['abc'](R)
+```
+
+## Implementation
+
+```rust
+rw!("fold-upper"; "(upper ?a)" => { FoldStr("?a", str::to_uppercase) } if is_const("?a")),
+rw!("fold-lower"; "(lower ?a)" => { FoldStr("?a", str::to_lowercase) } if is_const("?a")),
+rw!("fold-length"; "(length ?a)" => { FoldStr("?a", |s| s.len()) } if is_const("?a")),
+rw!("fold-concat"; "(concat ?a ?b)" => { FoldStr2("?a", "?b", concat) } if both_const("?a", "?b")),
+rw!("fold-substring";
+    "(substring ?a ?start ?len)" => { FoldSubstr("?a", "?start", "?len") }
+    if all_const("?a", "?start", "?len")
+),
+rw!("fold-trim"; "(trim ?a)" => { FoldStr("?a", str::trim) } if is_const("?a")),
+rw!("fold-replace";
+    "(replace ?a ?from ?to)" => { FoldReplace("?a", "?from", "?to") }
+    if all_const("?a", "?from", "?to")
+),
+```
+
+## Test Cases
+
+```sql
+-- Before
+SELECT id, UPPER('hello') || ' ' || LOWER('WORLD') FROM t;
+-- After
+SELECT id, 'HELLO world' FROM t;
+```
+
+```sql
+-- Negative: column argument
+SELECT UPPER(name) FROM users;
+-- Cannot fold: name is a column
+```
+
+## References
+
+- PostgreSQL: simplify_function()
+- MySQL: fold_condition()

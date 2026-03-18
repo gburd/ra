@@ -1,0 +1,70 @@
+---
+id: function-index-exact-match
+name: Function-Based Index Exact Match
+category: logical/function-optimization
+databases: [postgresql, oracle, mssql]
+execution_models: [volcano]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [function-index, expression-index, exact-match, optimization]
+---
+
+# Function-Based Index Exact Match
+
+## Description
+
+Matches a function call in a WHERE predicate to a function-based
+(expression) index. If an index is built on LOWER(email), then
+WHERE LOWER(email) = 'user@example.com' can use that index.
+
+**When to apply**: Predicate applies a function to a column, and an
+expression index exists on that exact function application.
+
+**Why it works**: Expression indexes pre-compute and store the function
+result. The optimizer matches the predicate expression to the index
+expression and uses a standard index scan.
+
+## Implementation
+
+```rust
+rw!("function-index-match";
+    "(filter (= (?f ?col) ?val) (scan ?table))" =>
+    "(index-scan ?expr_idx (= ?indexed_col ?val))"
+    if has_expression_index("?table", "?f", "?col")
+),
+```
+
+## Test Cases
+
+### Positive: LOWER() with expression index
+
+```sql
+CREATE INDEX idx_lower_email ON users (LOWER(email));
+
+SELECT * FROM users WHERE LOWER(email) = 'alice@example.com';
+-- Uses idx_lower_email
+```
+
+### Positive: DATE() with expression index
+
+```sql
+CREATE INDEX idx_date ON events (DATE(created_at));
+
+SELECT * FROM events WHERE DATE(created_at) = '2025-03-15';
+-- Uses idx_date
+```
+
+### Negative: Different function
+
+```sql
+CREATE INDEX idx_lower_email ON users (LOWER(email));
+
+SELECT * FROM users WHERE UPPER(email) = 'ALICE@EXAMPLE.COM';
+-- UPPER != LOWER: index not usable
+```
+
+## References
+
+- PostgreSQL: Indexes on expressions
+- Oracle: Function-based indexes
+- SQL Server: Computed column indexes

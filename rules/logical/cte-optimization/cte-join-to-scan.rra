@@ -1,0 +1,52 @@
+---
+id: cte-join-to-scan
+name: CTE Self-Join to Single Scan
+category: logical/cte-optimization
+databases: [postgresql, oracle, mssql]
+standard: "sql:1999"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [cte, join, simplification]
+---
+
+# CTE Self-Join to Single Scan
+
+## Description
+
+When a CTE is self-joined with itself on the same key, and the join
+condition is always true for identical rows, simplify to a single scan
+of the CTE.
+
+## Relational Algebra
+
+```algebra
+CTE(name, Q, join[t1.pk = t2.pk](scan(name) AS t1, scan(name) AS t2))
+    -> CTE(name, Q, scan(name))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("cte-join-to-scan";
+    "(cte ?name ?def (join inner (eq ?k1 ?k2) (scan ?name) (scan ?name)))" =>
+    "(cte ?name ?def (scan ?name))"
+    if same_key("?k1", "?k2")
+),
+```
+
+## Test Cases
+
+```sql
+WITH data AS (SELECT * FROM t)
+SELECT * FROM data a JOIN data b ON a.id = b.id;
+
+-- Simplified:
+WITH data AS (SELECT * FROM t)
+SELECT * FROM data;
+```
+
+## References
+
+Oracle: CTE self-join elimination

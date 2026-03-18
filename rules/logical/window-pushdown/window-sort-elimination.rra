@@ -1,0 +1,48 @@
+---
+id: window-sort-elimination
+name: Window Sort Elimination
+category: logical/window-pushdown
+databases: [postgresql, duckdb, oracle]
+standard: "sql:2003"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [window, sort, elimination]
+---
+
+# Window Sort Elimination
+
+## Description
+
+When a Sort immediately follows a Window function that already requires
+the same sort order, eliminate the redundant Sort.
+
+## Relational Algebra
+
+```algebra
+SORT[keys](WINDOW[f OVER (ORDER BY keys)](R))  ->
+    WINDOW[f OVER (ORDER BY keys)](R)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("window-sort-elimination";
+    "(sort ?keys (window ?funcs ?input))" =>
+    "(window ?funcs ?input)"
+    if window_provides_order("?funcs", "?keys")
+),
+```
+
+## Test Cases
+
+```sql
+SELECT *, ROW_NUMBER() OVER (ORDER BY id) AS rn
+FROM orders ORDER BY id;
+-- The window already sorts by id, ORDER BY is redundant
+```
+
+## References
+
+PostgreSQL: src/backend/optimizer/plan/planner.c

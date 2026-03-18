@@ -1,0 +1,49 @@
+---
+id: cte-limit-pushdown
+name: CTE Limit Pushdown
+category: logical/cte-optimization
+databases: [postgresql, duckdb, mysql]
+standard: "sql:1999"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [cte, limit, pushdown]
+---
+
+# CTE Limit Pushdown
+
+## Description
+
+When a LIMIT is applied to a query using a single-use CTE, push the limit
+into the CTE definition to reduce materialization.
+
+## Relational Algebra
+
+```algebra
+LIMIT[n](CTE(name, Q, scan(name)))  ->  CTE(name, LIMIT[n](Q), scan(name))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("cte-limit-pushdown";
+    "(limit ?n ?off (cte ?name ?def (scan ?name)))" =>
+    "(cte ?name (limit ?n ?off ?def) (scan ?name))"
+),
+```
+
+## Test Cases
+
+```sql
+WITH data AS (SELECT * FROM big_table ORDER BY id)
+SELECT * FROM data LIMIT 10;
+
+-- Pushed:
+WITH data AS (SELECT * FROM big_table ORDER BY id LIMIT 10)
+SELECT * FROM data;
+```
+
+## References
+
+DuckDB: src/optimizer/limit_pushdown.cpp

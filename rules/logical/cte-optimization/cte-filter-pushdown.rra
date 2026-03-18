@@ -1,0 +1,50 @@
+---
+id: cte-filter-pushdown
+name: CTE Filter Pushdown
+category: logical/cte-optimization
+databases: [postgresql, duckdb, cockroachdb]
+standard: "sql:1999"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [cte, filter, pushdown]
+---
+
+# CTE Filter Pushdown
+
+## Description
+
+Push a filter applied to a CTE reference into the CTE definition itself,
+reducing the number of rows materialized or returned.
+
+## Relational Algebra
+
+```algebra
+sigma[p](CTE(name, Q, body))  ->  CTE(name, sigma[p](Q), body)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("cte-filter-pushdown";
+    "(filter ?pred (cte ?name ?def ?body))" =>
+    "(cte ?name (filter ?pred ?def) ?body)"
+    if filter_references_only_cte("?pred", "?name")
+),
+```
+
+## Test Cases
+
+```sql
+WITH data AS (SELECT * FROM big_table)
+SELECT * FROM data WHERE status = 'active';
+
+-- Pushed down:
+WITH data AS (SELECT * FROM big_table WHERE status = 'active')
+SELECT * FROM data;
+```
+
+## References
+
+DuckDB: src/optimizer/cte_filter_pusher.cpp

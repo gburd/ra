@@ -1,0 +1,94 @@
+---
+id: gin-index-for-containment
+name: GIN Index for Containment Queries
+category: physical/index-selection
+databases: [postgresql]
+execution_models: [volcano]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [index, gin, containment, jsonb, array, tsvector, postgresql]
+complexity: "O(log n + k)"
+benefit_range: [0.7, 0.99]
+---
+
+# GIN Index for Containment Queries
+
+## Description
+
+Uses PostgreSQL GIN (Generalized Inverted Index) for containment and
+membership queries on JSONB, array, tsvector, and other composite types.
+GIN indexes build an inverted index mapping element values to row TIDs.
+
+**When to apply**: Containment operators (@>, <@, &&, @@) on columns
+with GIN indexes.
+
+**Why it works**: GIN indexes invert the mapping: each distinct element
+points to all rows containing it. Containment checks become set
+intersections on posting lists, which is fast even for large tables.
+
+## Relational Algebra
+
+```algebra
+sigma[col @> value](R)
+  -> gin_index_scan[I_gin](col, value, 'contains')
+  where has_gin_index(I_gin, col)
+```
+
+## Implementation
+
+```rust
+rw!("gin-for-jsonb-containment";
+    "(filter (jsonb-contains ?col ?pattern) (scan ?table))" =>
+    "(gin-index-scan ?gin_idx ?col ?pattern)"
+    if has_gin_index("?table", "?col")
+),
+
+rw!("gin-for-array-overlap";
+    "(filter (array-overlap ?col ?arr) (scan ?table))" =>
+    "(gin-index-scan ?gin_idx ?col ?arr)"
+    if has_gin_index("?table", "?col")
+),
+```
+
+## Cost Model
+
+```rust
+fn cost(posting_list_pages: u64, matching_rows: u64) -> f64 {
+    let index_scan = posting_list_pages as f64 * SEQUENTIAL_IO_COST;
+    let heap_fetch = matching_rows as f64 * RANDOM_IO_COST;
+    index_scan + heap_fetch
+}
+```
+
+**Typical benefit**: 70-99% for selective containment queries
+
+## Test Cases
+
+### Positive: JSONB containment
+
+```sql
+SELECT * FROM events
+WHERE payload @> '{"type": "click"}';
+-- GIN index on payload: inverted index lookup
+```
+
+### Positive: Array overlap
+
+```sql
+SELECT * FROM products
+WHERE tags && ARRAY['electronics', 'sale'];
+-- GIN index on tags: posting list intersection
+```
+
+### Negative: Non-containment operator
+
+```sql
+SELECT * FROM events WHERE payload->>'count' > '10';
+-- Comparison operator: GIN cannot help, use btree expression index
+```
+
+## References
+
+- PostgreSQL: GIN indexes, jsonb_ops, jsonb_path_ops
+- PostgreSQL: Array GIN indexes with gin__int_ops

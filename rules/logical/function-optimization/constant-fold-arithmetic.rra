@@ -1,0 +1,65 @@
+---
+id: constant-fold-arithmetic
+name: Constant Fold Arithmetic Functions
+category: logical/function-optimization
+databases: [postgresql, mysql, duckdb, sqlite, oracle, mssql]
+standard: "sql:1992"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [constant-folding, arithmetic, pure-function, optimization]
+---
+
+# Constant Fold Arithmetic Functions
+
+## Description
+
+Evaluates arithmetic functions (ABS, CEIL, FLOOR, ROUND, SQRT, POWER,
+etc.) at compile time when all arguments are constants. Eliminates
+per-row function evaluation.
+
+**When to apply**: Arithmetic function with all-constant arguments.
+
+**Why it works**: Deterministic functions produce the same result for
+the same inputs. If inputs are known at plan time, compute once.
+
+## Relational Algebra
+
+```algebra
+sigma[ABS(const)](R) -> sigma[result](R)
+pi[ROUND(3.14159, 2)](R) -> pi[3.14](R)
+```
+
+## Implementation
+
+```rust
+rw!("fold-abs"; "(abs ?a)" => { Fold1("?a", fn_abs) } if is_const("?a")),
+rw!("fold-ceil"; "(ceil ?a)" => { Fold1("?a", fn_ceil) } if is_const("?a")),
+rw!("fold-floor"; "(floor ?a)" => { Fold1("?a", fn_floor) } if is_const("?a")),
+rw!("fold-round"; "(round ?a ?b)" => { Fold2("?a", "?b", fn_round) } if both_const("?a", "?b")),
+rw!("fold-sqrt"; "(sqrt ?a)" => { Fold1("?a", fn_sqrt) } if is_const("?a")),
+rw!("fold-power"; "(power ?a ?b)" => { Fold2("?a", "?b", fn_power) } if both_const("?a", "?b")),
+rw!("fold-exp"; "(exp ?a)" => { Fold1("?a", fn_exp) } if is_const("?a")),
+rw!("fold-ln"; "(ln ?a)" => { Fold1("?a", fn_ln) } if is_const("?a")),
+rw!("fold-log"; "(log ?a ?b)" => { Fold2("?a", "?b", fn_log) } if both_const("?a", "?b")),
+rw!("fold-mod"; "(mod ?a ?b)" => { Fold2("?a", "?b", fn_mod) } if both_const("?a", "?b")),
+```
+
+## Test Cases
+
+```sql
+-- Before: SQRT(144) evaluated per row
+SELECT id, SQRT(144) AS val FROM t;
+-- After: constant 12.0
+SELECT id, 12.0 AS val FROM t;
+```
+
+```sql
+-- Negative: column reference
+SELECT SQRT(area) FROM parcels;
+-- Cannot fold: area is not a constant
+```
+
+## References
+
+- PostgreSQL: eval_const_expressions()
+- DuckDB: ConstantFoldingRule

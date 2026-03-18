@@ -1,0 +1,83 @@
+---
+id: expensive-function-above-filter
+name: Move Expensive Functions Above Filters
+category: logical/function-optimization
+databases: [postgresql, mysql, duckdb, mssql, oracle]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [pushdown, expensive-function, filter, optimization]
+---
+
+# Move Expensive Functions Above Filters
+
+## Description
+
+Reorders plan so expensive functions in the SELECT list are evaluated
+after filtering, not before. If a projection contains an expensive
+function (regexp, crypto, spatial) and is followed by a filter, move
+the filter below the projection so fewer rows trigger the expensive
+computation.
+
+**When to apply**: Projection with expensive function followed by
+a filter that does not reference the expensive function's output.
+
+**Why it works**: If the filter eliminates 90% of rows, the expensive
+function runs on 10% of data instead of 100%.
+
+## Relational Algebra
+
+```algebra
+pi[expensive_f(col), ...](sigma[pred](R))
+  -> pi[expensive_f(col), ...](sigma[pred](R))  -- filter first
+  vs
+  sigma[pred](pi[expensive_f(col), ...](R))       -- function first (bad)
+```
+
+## Implementation
+
+```rust
+rw!("expensive-fn-after-filter";
+    "(project ?exprs_with_expensive (filter ?pred ?input))" =>
+    "(project ?exprs_with_expensive (filter ?pred ?input))"
+    // Ensure filter stays below expensive projection
+    if has_expensive_function("?exprs_with_expensive") &&
+       filter_independent_of("?pred", expensive_outputs("?exprs_with_expensive"))
+),
+```
+
+## Cost Model
+
+```rust
+fn benefit(
+    rows_before_filter: u64,
+    rows_after_filter: u64,
+    fn_cost_multiplier: f64,
+) -> f64 {
+    let saved_evals = rows_before_filter - rows_after_filter;
+    saved_evals as f64 * fn_cost_multiplier * BASE_EVAL_COST
+}
+```
+
+## Test Cases
+
+### Positive: Regex after filter
+
+```sql
+SELECT REGEXP_REPLACE(content, 'pattern', 'repl') AS cleaned, id
+FROM documents
+WHERE status = 'published';
+-- Filter first (cheap), then regex on survivors only
+```
+
+### Negative: Filter references expensive output
+
+```sql
+SELECT MD5(data) AS hash FROM files
+WHERE MD5(data) = 'abc123';
+-- Filter uses MD5: cannot avoid computing it
+```
+
+## References
+
+- PostgreSQL: qual evaluation order
+- CockroachDB: expression ordering optimization

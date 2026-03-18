@@ -1,0 +1,44 @@
+---
+id: distinct-over-distinct
+name: Distinct Over Distinct Elimination
+category: logical/distinct-elimination
+databases: [postgresql, mysql, duckdb, sqlite, oracle, cockroachdb]
+standard: "sql:1992"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distinct, idempotent, elimination]
+---
+
+# Distinct Over Distinct Elimination
+
+## Description
+
+Applying DISTINCT twice is idempotent. Remove the redundant outer DISTINCT.
+
+## Relational Algebra
+
+```algebra
+DISTINCT(DISTINCT(R))  ->  DISTINCT(R)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("distinct-over-distinct";
+    "(distinct (distinct ?input))" =>
+    "(distinct ?input)"
+),
+```
+
+## Test Cases
+
+```sql
+SELECT DISTINCT * FROM (SELECT DISTINCT name FROM users) t;
+-- Simplified: SELECT DISTINCT name FROM users;
+```
+
+## References
+
+Any SQL database: algebraic identity

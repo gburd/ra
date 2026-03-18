@@ -1,0 +1,68 @@
+---
+id: expensive-function-limit-pushdown
+name: Push LIMIT Below Expensive Function Projections
+category: logical/function-optimization
+databases: [postgresql, mysql, duckdb, mssql, oracle]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [pushdown, expensive-function, limit, optimization]
+---
+
+# Push LIMIT Below Expensive Function Projections
+
+## Description
+
+Pushes LIMIT below projections containing expensive functions so the
+expensive computation runs only on the limited number of output rows,
+not the full input.
+
+**When to apply**: LIMIT above a projection with expensive functions,
+where the projection does not change row count or order.
+
+**Why it works**: If we only need 10 rows, compute the expensive
+function on 10 rows instead of 10 million.
+
+## Relational Algebra
+
+```algebra
+limit[N](pi[expensive_f(col), ...](R))
+  -> pi[expensive_f(col), ...](limit[N](R))
+  where no_filter_on_expensive_output
+```
+
+## Implementation
+
+```rust
+rw!("limit-below-expensive-projection";
+    "(limit ?n (project ?exprs ?input))" =>
+    "(project ?exprs (limit ?n ?input))"
+    if has_expensive_function("?exprs") &&
+       no_order_dependency("?exprs")
+),
+```
+
+## Test Cases
+
+### Positive: LIMIT with expensive projection
+
+```sql
+SELECT ST_AsGeoJSON(geom), name
+FROM cities
+LIMIT 10;
+-- Push LIMIT below ST_AsGeoJSON: serialize only 10 geometries
+```
+
+### Negative: ORDER BY on expensive output
+
+```sql
+SELECT MD5(data) AS hash
+FROM files
+ORDER BY hash
+LIMIT 10;
+-- Must compute MD5 for all rows to sort, then limit
+```
+
+## References
+
+- General query optimization: limit pushdown through projections
+- PostgreSQL: limit propagation

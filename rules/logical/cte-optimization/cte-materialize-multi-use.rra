@@ -1,0 +1,61 @@
+---
+id: cte-materialize-multi-use
+name: CTE Materialize Multi-Use
+category: logical/cte-optimization
+databases: [postgresql, oracle, mssql]
+standard: "sql:1999"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [cte, materialize, optimization]
+---
+
+# CTE Materialize Multi-Use
+
+## Description
+
+When a CTE is referenced multiple times, materialize it once and reuse the
+result. This avoids re-executing the CTE definition for each reference.
+
+## Relational Algebra
+
+```algebra
+WITH t AS (Q) ... t ... t ...  ->  MATERIALIZE(Q) AS t; ... t ... t ...
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("cte-materialize-multi-use";
+    "(cte ?name ?def ?body)" =>
+    "(cte-materialized ?name ?def ?body)"
+    if is_multi_use("?name", "?body")
+),
+```
+
+## Cost Model
+
+```rust
+fn estimated_benefit(cte_card: f64, ref_count: u64) -> f64 {
+    let execute_once = cte_card;
+    let execute_many = cte_card * ref_count as f64;
+    (execute_many - execute_once) / execute_many
+}
+```
+
+## Test Cases
+
+```sql
+WITH totals AS (
+    SELECT region, SUM(amount) AS total FROM orders GROUP BY region
+)
+SELECT * FROM totals WHERE total > 1000
+UNION ALL
+SELECT * FROM totals WHERE total < 100;
+```
+
+## References
+
+PostgreSQL: src/backend/optimizer/plan/subselect.c
+Oracle: CTE materialization hint /*+ MATERIALIZE */

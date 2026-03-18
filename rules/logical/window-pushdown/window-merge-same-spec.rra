@@ -1,0 +1,55 @@
+---
+id: window-merge-same-spec
+name: Window Merge Same Specification
+category: logical/window-pushdown
+databases: [postgresql, duckdb, oracle, mssql]
+standard: "sql:2003"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [window, merge, optimization]
+---
+
+# Window Merge Same Specification
+
+## Description
+
+Merge multiple window function applications that share the same
+PARTITION BY and ORDER BY into a single Window node. This avoids
+redundant sorting and partitioning.
+
+## Relational Algebra
+
+```algebra
+WINDOW[f1 OVER w](WINDOW[f2 OVER w](R))  ->  WINDOW[f1, f2 OVER w](R)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("window-merge-same-spec";
+    "(window ?funcs1 (window ?funcs2 ?input))" =>
+    { MergeWindowSpecs {
+        funcs1: "?funcs1".parse().unwrap(),
+        funcs2: "?funcs2".parse().unwrap(),
+        input: "?input".parse().unwrap(),
+    }}
+    if same_window_spec("?funcs1", "?funcs2")
+),
+```
+
+## Test Cases
+
+```sql
+SELECT
+    ROW_NUMBER() OVER (ORDER BY id) AS rn,
+    SUM(amount) OVER (ORDER BY id) AS running_sum
+FROM orders;
+-- Both functions share the same window spec, computed in one pass
+```
+
+## References
+
+PostgreSQL: src/backend/optimizer/plan/planner.c (select_active_windows)
+DuckDB: src/optimizer/column_binding_replacer.cpp

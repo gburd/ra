@@ -1,0 +1,50 @@
+---
+id: cte-aggregate-pushdown
+name: CTE Aggregate Pushdown
+category: logical/cte-optimization
+databases: [postgresql, cockroachdb]
+standard: "sql:1999"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [cte, aggregate, pushdown]
+---
+
+# CTE Aggregate Pushdown
+
+## Description
+
+When an aggregate is applied to a single-use CTE and the CTE body is
+compatible, push the aggregate into the CTE definition.
+
+## Relational Algebra
+
+```algebra
+AGG[keys, funcs](CTE(name, Q, scan(name)))  ->
+    CTE(name, AGG[keys, funcs](Q), scan(name))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("cte-aggregate-pushdown";
+    "(aggregate ?keys ?aggs (cte ?name ?def (scan ?name)))" =>
+    "(cte ?name (aggregate ?keys ?aggs ?def) (scan ?name))"
+),
+```
+
+## Test Cases
+
+```sql
+WITH raw AS (SELECT * FROM sales)
+SELECT region, SUM(amount) FROM raw GROUP BY region;
+
+-- Pushed:
+WITH raw AS (SELECT region, SUM(amount) FROM sales GROUP BY region)
+SELECT * FROM raw;
+```
+
+## References
+
+CockroachDB: pkg/sql/opt/norm/rules/with.opt

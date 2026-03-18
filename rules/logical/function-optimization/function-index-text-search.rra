@@ -1,0 +1,86 @@
+---
+id: function-index-text-search
+name: Text Search Function to GIN Index Match
+category: logical/function-optimization
+databases: [postgresql]
+execution_models: [volcano]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [function-index, text-search, gin, tsvector, optimization]
+---
+
+# Text Search Function to GIN Index Match
+
+## Description
+
+Matches full-text search predicates (to_tsvector @@ to_tsquery) to
+GIN indexes on tsvector columns or expressions. Also matches
+pre-computed tsvector columns to avoid per-row to_tsvector calls.
+
+**When to apply**: Text search predicate (@@ operator) where a GIN
+index exists on the tsvector expression.
+
+**Why it works**: GIN indexes on tsvector columns build an inverted
+index of lexemes. The @@ operator can use this index to find matching
+documents without scanning every row.
+
+## Implementation
+
+```rust
+rw!("tsvector-gin-match";
+    "(filter (ts-match (to-tsvector ?config ?col) ?query) (scan ?table))" =>
+    "(gin-ts-scan ?gin_idx ?col ?query)"
+    if has_tsvector_gin_index("?table", "?col")
+),
+rw!("precomputed-tsvector-match";
+    "(filter (ts-match ?tsv_col ?query) (scan ?table))" =>
+    "(gin-ts-scan ?gin_idx ?tsv_col ?query)"
+    if has_gin_index("?table", "?tsv_col")
+),
+```
+
+## Cost Model
+
+```rust
+fn cost(query_terms: usize, matching_docs: u64) -> f64 {
+    let posting_list_reads = query_terms as f64 * SEQUENTIAL_IO_COST;
+    let heap_fetches = matching_docs as f64 * RANDOM_IO_COST;
+    posting_list_reads + heap_fetches
+}
+```
+
+## Test Cases
+
+### Positive: GIN index on tsvector column
+
+```sql
+CREATE INDEX idx_fts ON articles USING gin (search_vector);
+
+SELECT * FROM articles
+WHERE search_vector @@ to_tsquery('english', 'optimization & query');
+-- GIN index scan on search_vector
+```
+
+### Positive: GIN index on expression
+
+```sql
+CREATE INDEX idx_fts ON articles
+  USING gin (to_tsvector('english', title || ' ' || body));
+
+SELECT * FROM articles
+WHERE to_tsvector('english', title || ' ' || body)
+   @@ to_tsquery('english', 'database');
+```
+
+### Negative: No GIN index
+
+```sql
+SELECT * FROM articles
+WHERE to_tsvector('english', body) @@ to_tsquery('search');
+-- No index: full table scan with per-row tsvector computation
+```
+
+## References
+
+- PostgreSQL: GIN indexes for full-text search
+- PostgreSQL: tsvector and tsquery types

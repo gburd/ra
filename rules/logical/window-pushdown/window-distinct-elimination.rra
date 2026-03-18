@@ -1,0 +1,49 @@
+---
+id: window-distinct-elimination
+name: Window Distinct Elimination
+category: logical/window-pushdown
+databases: [postgresql, duckdb]
+standard: "sql:2003"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [window, distinct, elimination]
+---
+
+# Window Distinct Elimination
+
+## Description
+
+When a DISTINCT is applied after a window function that already produces
+unique rows (e.g., ROW_NUMBER assigns unique values per partition), the
+DISTINCT is redundant and can be removed.
+
+## Relational Algebra
+
+```algebra
+DISTINCT(WINDOW[ROW_NUMBER() OVER (PARTITION BY p ORDER BY o)](R))  ->
+    WINDOW[ROW_NUMBER() OVER (PARTITION BY p ORDER BY o)](R)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("window-distinct-elimination";
+    "(distinct (window ?funcs ?input))" =>
+    "(window ?funcs ?input)"
+    if window_produces_unique_rows("?funcs")
+),
+```
+
+## Test Cases
+
+```sql
+SELECT DISTINCT id, ROW_NUMBER() OVER (ORDER BY id) AS rn
+FROM t;
+-- ROW_NUMBER already makes every row unique, DISTINCT is no-op
+```
+
+## References
+
+PostgreSQL: src/backend/optimizer/plan/planner.c

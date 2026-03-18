@@ -1,0 +1,74 @@
+---
+id: function-index-json-path
+name: JSON Path Expression Index Matching
+category: logical/function-optimization
+databases: [postgresql, mysql]
+execution_models: [volcano]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [function-index, json, jsonb, path, expression-index, optimization]
+---
+
+# JSON Path Expression Index Matching
+
+## Description
+
+Matches JSON path extraction predicates to expression indexes built
+on the same path. An index on (data->>'email') enables direct lookup
+for WHERE data->>'email' = 'user@example.com'.
+
+**When to apply**: Predicate uses JSON path extraction (->>, ->, #>>)
+on a column with a matching expression index.
+
+**Why it works**: Expression indexes on JSON paths materialize the
+extracted value in a B-tree. This avoids per-row JSON parsing and
+enables standard index scans.
+
+## Implementation
+
+```rust
+rw!("json-path-index-match";
+    "(filter (= (json-extract-text ?col ?path) ?val) (scan ?table))" =>
+    "(index-scan ?json_idx (= ?extracted_col ?val))"
+    if has_json_path_index("?table", "?col", "?path")
+),
+
+rw!("json-path-index-range";
+    "(filter (> (json-extract-text ?col ?path) ?val) (scan ?table))" =>
+    "(index-range-scan ?json_idx ?val)"
+    if has_json_path_index("?table", "?col", "?path")
+),
+```
+
+## Test Cases
+
+### Positive: JSONB expression index
+
+```sql
+CREATE INDEX idx_email ON users ((data->>'email'));
+
+SELECT * FROM users WHERE data->>'email' = 'alice@example.com';
+-- Uses idx_email expression index
+```
+
+### Positive: Nested JSON path
+
+```sql
+CREATE INDEX idx_city ON profiles ((data->'address'->>'city'));
+
+SELECT * FROM profiles WHERE data->'address'->>'city' = 'NYC';
+```
+
+### Negative: Different JSON path
+
+```sql
+CREATE INDEX idx_email ON users ((data->>'email'));
+
+SELECT * FROM users WHERE data->>'phone' = '555-0100';
+-- Different path: index not usable
+```
+
+## References
+
+- PostgreSQL: Expression indexes on JSONB paths
+- MySQL: Multi-valued indexes on JSON

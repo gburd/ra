@@ -1,0 +1,59 @@
+---
+id: constant-fold-json
+name: Constant Fold JSON Functions
+category: logical/function-optimization
+databases: [postgresql, mysql, mssql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [constant-folding, json, jsonb, optimization]
+---
+
+# Constant Fold JSON Functions
+
+## Description
+
+Evaluates JSON functions at compile time when the JSON document and
+path arguments are all constants. JSON_EXTRACT('{"a":1}', '$.a')
+becomes 1.
+
+**When to apply**: JSON function with constant document and path arguments.
+
+**Why it works**: JSON parsing and path extraction are expensive. When
+the document is a literal, the result is known at plan time.
+
+## Implementation
+
+```rust
+rw!("fold-json-extract";
+    "(json_extract ?doc ?path)" => { FoldJsonExtract("?doc", "?path") }
+    if both_const("?doc", "?path")
+),
+rw!("fold-json-typeof";
+    "(json_typeof ?doc)" => { FoldJsonTypeof("?doc") }
+    if is_const("?doc")
+),
+rw!("fold-json-array-length";
+    "(json_array_length ?doc)" => { FoldJsonArrayLen("?doc") }
+    if is_const("?doc")
+),
+```
+
+## Test Cases
+
+```sql
+-- Before
+SELECT JSON_EXTRACT('{"name":"Alice","age":30}', '$.name') FROM t;
+-- After
+SELECT '"Alice"' FROM t;
+```
+
+```sql
+-- Negative: column JSON document
+SELECT JSON_EXTRACT(metadata, '$.key') FROM events;
+-- Cannot fold: metadata is a column
+```
+
+## References
+
+- PostgreSQL: jsonb constant folding
+- MySQL: JSON function optimization

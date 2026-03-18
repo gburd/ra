@@ -1,0 +1,71 @@
+---
+id: cte-inline-single-use
+name: CTE Inline Single Use
+category: logical/cte-optimization
+databases: [postgresql, duckdb, sqlite, mysql, oracle]
+standard: "sql:1999"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [cte, inline, optimization]
+---
+
+# CTE Inline Single Use
+
+## Description
+
+When a CTE is referenced exactly once in the body, inline the CTE definition
+directly at the reference site. This avoids materializing the CTE result.
+
+## Relational Algebra
+
+```algebra
+WITH t AS (Q) SELECT ... FROM t  ->  SELECT ... FROM (Q) AS t
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("cte-inline-single-use";
+    "(cte ?name ?def ?body)" =>
+    { CteInlineSingleUse { name: "?name".parse().unwrap(),
+                           def: "?def".parse().unwrap(),
+                           body: "?body".parse().unwrap() } }
+    if is_single_use("?name", "?body")
+),
+```
+
+## Preconditions
+
+```rust
+fn is_single_use(name: &str, body: &RelExpr) -> bool {
+    count_references(name, body) == 1
+}
+```
+
+## Cost Model
+
+```rust
+fn estimated_benefit(cte_card: f64) -> f64 {
+    // Saves materialization cost
+    cte_card * 0.1
+}
+```
+
+## Test Cases
+
+```sql
+WITH recent_orders AS (
+    SELECT * FROM orders WHERE date > '2024-01-01'
+)
+SELECT * FROM recent_orders WHERE total > 100;
+
+-- Inlined:
+SELECT * FROM orders WHERE date > '2024-01-01' AND total > 100;
+```
+
+## References
+
+PostgreSQL: src/backend/optimizer/plan/subselect.c (inline_cte)
+DuckDB: src/optimizer/cte_filter_pusher.cpp

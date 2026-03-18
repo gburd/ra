@@ -1,0 +1,49 @@
+---
+id: distinct-on-key
+name: Distinct on Key Elimination
+category: logical/distinct-elimination
+databases: [postgresql, mysql, duckdb, sqlite, oracle, cockroachdb]
+standard: "sql:1992"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distinct, key, elimination, core]
+---
+
+# Distinct on Key Elimination
+
+## Description
+
+When the projected columns include a key (unique constraint or primary key)
+of the input relation, DISTINCT is redundant because rows are already unique.
+
+## Relational Algebra
+
+```algebra
+DISTINCT(pi[key, ...](R))  ->  pi[key, ...](R)
+    [when key is a key of R]
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("distinct-on-key";
+    "(distinct (project ?cols ?input))" =>
+    "(project ?cols ?input)"
+    if projects_key("?cols", "?input")
+),
+```
+
+## Test Cases
+
+```sql
+-- users.id is PRIMARY KEY
+SELECT DISTINCT id, name FROM users;
+-- Simplified: SELECT id, name FROM users;
+```
+
+## References
+
+PostgreSQL: src/backend/optimizer/plan/analyzejoins.c (remove_useless_groupby_columns)
+CockroachDB: pkg/sql/opt/norm/rules/groupby.opt (EliminateDistinct)

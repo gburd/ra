@@ -1,0 +1,95 @@
+---
+id: columnstore-for-aggregation
+name: Columnstore Index for Aggregation
+category: physical/index-selection
+databases: [mssql, clickhouse, duckdb]
+execution_models: [vectorized, batch]
+hardware: [cpu, simd]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [index, columnstore, aggregation, analytical, batch-mode]
+complexity: "O(n/batch_size)"
+benefit_range: [0.5, 0.95]
+---
+
+# Columnstore Index for Aggregation
+
+## Description
+
+Uses columnstore indexes for aggregate queries (SUM, AVG, COUNT, etc.)
+that scan large portions of a table. Columnstore storage enables
+batch-mode processing, compression, and column-pruning to dramatically
+reduce I/O and CPU for analytical workloads.
+
+**When to apply**: Aggregate queries scanning >10% of rows, especially
+with GROUP BY on low-cardinality columns.
+
+**Why it works**: Columnstore stores data in compressed column segments.
+Only accessed columns are read. Batch-mode execution processes vectors
+of rows simultaneously, leveraging SIMD and CPU cache lines.
+
+## Relational Algebra
+
+```algebra
+gamma[group_cols; agg(col)](sigma[pred](R))
+  -> columnstore_scan[I_cs](pred, group_cols, agg_cols)
+  where has_columnstore(I_cs) && selectivity(pred) > 0.1
+```
+
+## Implementation
+
+```rust
+rw!("columnstore-for-aggregate";
+    "(aggregate ?groups ?aggs (filter ?pred (scan ?table)))" =>
+    "(columnstore-aggregate ?cs_idx ?groups ?aggs ?pred)"
+    if has_columnstore_index("?table") &&
+       high_selectivity("?pred")
+),
+```
+
+## Cost Model
+
+```rust
+fn cost(total_rows: u64, num_columns: usize, accessed_columns: usize) -> f64 {
+    let column_ratio = accessed_columns as f64 / num_columns as f64;
+    let compression_factor = 0.1; // ~10x compression typical
+    let batch_factor = 0.01; // Batch mode amortization
+    total_rows as f64 * column_ratio * compression_factor * batch_factor
+}
+```
+
+**Typical benefit**: 50-95% for analytical queries vs row-store
+
+## Test Cases
+
+### Positive: Aggregate over large table
+
+```sql
+SELECT region, SUM(revenue), COUNT(*)
+FROM sales
+GROUP BY region;
+-- Columnstore: reads only region + revenue columns, batch mode
+```
+
+### Positive: Filtered aggregate
+
+```sql
+SELECT product_category, AVG(price)
+FROM products
+WHERE year = 2025
+GROUP BY product_category;
+-- Segment elimination on year, batch aggregate
+```
+
+### Negative: Point lookup
+
+```sql
+SELECT * FROM sales WHERE sale_id = 12345;
+-- Single row: rowstore with B-tree is faster
+```
+
+## References
+
+- SQL Server: Columnstore indexes, batch mode processing
+- ClickHouse: MergeTree engine with column pruning
+- DuckDB: Native columnar storage

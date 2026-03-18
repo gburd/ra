@@ -1,0 +1,73 @@
+---
+id: function-index-gin-trigram
+name: GIN Trigram Index for LIKE/ILIKE
+category: logical/function-optimization
+databases: [postgresql]
+execution_models: [volcano]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [function-index, gin, trigram, like, ilike, postgresql]
+---
+
+# GIN Trigram Index for LIKE/ILIKE
+
+## Description
+
+Uses PostgreSQL pg_trgm GIN index to accelerate LIKE and ILIKE
+patterns including mid-string matches ('%pattern%'). Standard B-tree
+indexes only help with prefix patterns; trigram indexes decompose
+the pattern into 3-character grams and use the inverted index.
+
+**When to apply**: LIKE or ILIKE predicate on a column with a
+pg_trgm GIN or GiST index.
+
+**Why it works**: The pg_trgm extension decomposes strings into
+trigrams. A GIN index maps trigrams to rows. The query pattern is
+also decomposed into trigrams, and the intersection of posting
+lists finds candidate rows.
+
+## Implementation
+
+```rust
+rw!("gin-trigram-for-like";
+    "(filter (like ?col ?pattern) (scan ?table))" =>
+    "(gin-trigram-scan ?trgm_idx ?col ?pattern)"
+    if has_trigram_index("?table", "?col") &&
+       pattern_has_enough_trigrams("?pattern")
+),
+
+rw!("gin-trigram-for-ilike";
+    "(filter (ilike ?col ?pattern) (scan ?table))" =>
+    "(gin-trigram-scan ?trgm_idx ?col ?pattern)"
+    if has_trigram_index("?table", "?col")
+),
+```
+
+## Test Cases
+
+### Positive: Mid-string LIKE with trigram index
+
+```sql
+CREATE INDEX idx_trgm ON articles USING gin (title gin_trgm_ops);
+
+SELECT * FROM articles WHERE title LIKE '%optimization%';
+-- Trigram index scan
+```
+
+### Positive: Case-insensitive search
+
+```sql
+SELECT * FROM articles WHERE title ILIKE '%Database%';
+-- Trigram index handles case-insensitive patterns
+```
+
+### Negative: Pattern too short for trigrams
+
+```sql
+SELECT * FROM articles WHERE title LIKE '%ab%';
+-- Only 1 trigram extractable: may fall back to seq scan
+```
+
+## References
+
+- PostgreSQL: pg_trgm extension, GIN trigram indexes

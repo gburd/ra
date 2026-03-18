@@ -1,0 +1,56 @@
+---
+id: window-limit-optimization
+name: Window Limit Optimization (Top-N)
+category: logical/window-pushdown
+databases: [postgresql, duckdb, oracle, mssql]
+standard: "sql:2003"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [window, limit, topn, optimization]
+---
+
+# Window Limit Optimization (Top-N)
+
+## Description
+
+Optimize the common pattern of ROW_NUMBER() + filter to get top-N rows
+per partition. Convert to a more efficient TopN physical operator.
+
+## Relational Algebra
+
+```algebra
+sigma[rn <= N](WINDOW[ROW_NUMBER() OVER (PARTITION BY p ORDER BY o) AS rn](R))
+    -> TOPN[N, PARTITION BY p, ORDER BY o](R)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("window-limit-optimization";
+    "(filter (le ?rn_col ?n) (window ?funcs ?input))" =>
+    { TopNRewrite {
+        n: "?n".parse().unwrap(),
+        funcs: "?funcs".parse().unwrap(),
+        input: "?input".parse().unwrap(),
+    }}
+    if is_row_number_filter("?rn_col", "?funcs")
+),
+```
+
+## Test Cases
+
+```sql
+SELECT * FROM (
+    SELECT *, ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC) AS rn
+    FROM employees
+) t WHERE rn <= 3;
+-- Top 3 employees per department by salary
+```
+
+## References
+
+PostgreSQL: Window function optimization
+DuckDB: src/optimizer/topn_optimizer.cpp
+Oracle: Analytic function top-N optimization

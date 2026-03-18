@@ -1,0 +1,55 @@
+---
+id: window-aggregate-split
+name: Window Aggregate Split
+category: logical/window-pushdown
+databases: [postgresql, duckdb]
+standard: "sql:2003"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [window, aggregate, split]
+---
+
+# Window Aggregate Split
+
+## Description
+
+When a window function uses an aggregate (e.g., SUM, COUNT) with the
+same GROUP BY as a preceding Aggregate node, split the window computation
+to reuse the already-computed aggregate values.
+
+## Relational Algebra
+
+```algebra
+WINDOW[SUM(x) OVER (PARTITION BY g)](AGG[g, SUM(x)](R))  ->
+    AGG[g, SUM(x)](R)  -- aggregate already computed
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("window-aggregate-split";
+    "(window ?funcs (aggregate ?groups ?aggs ?input))" =>
+    { WindowAggregateSplit {
+        funcs: "?funcs".parse().unwrap(),
+        groups: "?groups".parse().unwrap(),
+        aggs: "?aggs".parse().unwrap(),
+        input: "?input".parse().unwrap(),
+    }}
+    if window_matches_aggregate("?funcs", "?groups", "?aggs")
+),
+```
+
+## Test Cases
+
+```sql
+SELECT dept, SUM(salary),
+       SUM(salary) OVER (PARTITION BY dept) AS dept_total
+FROM employees GROUP BY dept;
+-- The window SUM can reuse the GROUP BY SUM
+```
+
+## References
+
+PostgreSQL: src/backend/optimizer/plan/planner.c

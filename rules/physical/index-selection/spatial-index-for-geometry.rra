@@ -1,0 +1,96 @@
+---
+id: spatial-index-for-geometry
+name: Spatial Index for Geometry Operations
+category: physical/index-selection
+databases: [postgresql, mysql, mssql, oracle]
+execution_models: [volcano]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [index, spatial, geometry, gist, rtree, postgis]
+complexity: "O(log n + k)"
+benefit_range: [0.7, 0.99]
+---
+
+# Spatial Index for Geometry Operations
+
+## Description
+
+Uses R-tree or GiST spatial indexes for geometric predicates like
+ST_Contains, ST_Intersects, ST_DWithin, and bounding box operations.
+Without a spatial index, these operations require a full table scan
+with per-row distance calculations.
+
+**When to apply**: Spatial predicates (containment, intersection,
+distance) on geometry/geography columns with spatial indexes.
+
+**Why it works**: Spatial indexes partition space into bounding boxes.
+The index filters out non-overlapping regions quickly, leaving only
+a small number of candidates for exact geometric computation.
+
+## Relational Algebra
+
+```algebra
+sigma[ST_Contains(a.geom, b.geom)](R)
+  -> spatial_index_scan[I_spatial](a.geom, b.geom, 'contains')
+  where has_spatial_index(I_spatial, a.geom)
+```
+
+## Implementation
+
+```rust
+rw!("spatial-index-for-contains";
+    "(filter (st-contains ?col ?geom) (scan ?table))" =>
+    "(spatial-index-scan ?sp_idx ?col ?geom contains)"
+    if has_spatial_index("?table", "?col")
+),
+
+rw!("spatial-index-for-dwithin";
+    "(filter (st-dwithin ?col ?point ?dist) (scan ?table))" =>
+    "(spatial-index-scan ?sp_idx ?col ?point dwithin ?dist)"
+    if has_spatial_index("?table", "?col")
+),
+```
+
+## Cost Model
+
+```rust
+fn cost(bounding_box_selectivity: f64, table_pages: u64) -> f64 {
+    let index_traversal = 3.0 * RANDOM_IO_COST; // R-tree levels
+    let candidate_pages = bounding_box_selectivity * table_pages as f64;
+    let recheck = candidate_pages * CPU_OPERATOR_COST * 10.0; // Exact geometry check
+    index_traversal + candidate_pages * RANDOM_IO_COST + recheck
+}
+```
+
+**Typical benefit**: 70-99% for selective spatial queries
+
+## Test Cases
+
+### Positive: Point-in-polygon with spatial index
+
+```sql
+SELECT * FROM parcels
+WHERE ST_Contains(geom, ST_MakePoint(-122.4, 37.7));
+```
+
+### Positive: Distance query
+
+```sql
+SELECT * FROM restaurants
+WHERE ST_DWithin(location, ST_MakePoint(-73.9, 40.7), 1000);
+```
+
+### Negative: No spatial index available
+
+```sql
+SELECT * FROM events
+WHERE ST_Intersects(area, some_polygon);
+-- No spatial index: full table scan with per-row ST_Intersects
+```
+
+## References
+
+- PostGIS: GiST indexes for geometry
+- MySQL: SPATIAL indexes on geometry columns
+- SQL Server: Spatial indexes with tessellation

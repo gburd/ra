@@ -1,0 +1,50 @@
+---
+id: distinct-to-group-by
+name: Distinct to Group By Conversion
+category: logical/distinct-elimination
+databases: [postgresql, mysql, duckdb, oracle, mssql]
+standard: "sql:1992"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distinct, group-by, conversion]
+---
+
+# Distinct to Group By Conversion
+
+## Description
+
+Convert DISTINCT to GROUP BY when there are no aggregates. This enables
+the optimizer to use hash-based or sort-based grouping strategies and
+potentially push the grouping down.
+
+## Relational Algebra
+
+```algebra
+DISTINCT(pi[a, b](R))  ->  AGG[GROUP BY a, b](R)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("distinct-to-group-by";
+    "(distinct (project ?cols ?input))" =>
+    { DistinctToGroupBy {
+        cols: "?cols".parse().unwrap(),
+        input: "?input".parse().unwrap(),
+    }}
+),
+```
+
+## Test Cases
+
+```sql
+SELECT DISTINCT dept FROM employees;
+-- Equivalent: SELECT dept FROM employees GROUP BY dept;
+```
+
+## References
+
+PostgreSQL: convert DISTINCT to GROUP BY for hash aggregation
+MySQL: DISTINCT implementation uses GROUP BY internally

@@ -1,0 +1,46 @@
+---
+id: distinct-over-values
+name: Distinct Over Constant Values
+category: logical/distinct-elimination
+databases: [postgresql, duckdb, sqlite]
+standard: "sql:1992"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distinct, values, constant-folding]
+---
+
+# Distinct Over Constant Values
+
+## Description
+
+When DISTINCT is applied over a VALUES clause with known constant rows,
+evaluate the distinct at compile time by removing duplicate rows.
+
+## Relational Algebra
+
+```algebra
+DISTINCT(VALUES((1,'a'), (2,'b'), (1,'a')))  ->  VALUES((1,'a'), (2,'b'))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("distinct-over-values";
+    "(distinct (values ?rows))" =>
+    { DeduplicateValues { rows: "?rows".parse().unwrap() } }
+    if all_rows_constant("?rows")
+),
+```
+
+## Test Cases
+
+```sql
+SELECT DISTINCT * FROM (VALUES (1, 'a'), (2, 'b'), (1, 'a'));
+-- Simplified: VALUES (1, 'a'), (2, 'b');
+```
+
+## References
+
+Constant folding optimization in all major databases

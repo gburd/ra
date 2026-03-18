@@ -1,0 +1,91 @@
+---
+id: hash-index-for-equality
+name: Hash Index for Equality Lookups
+category: physical/index-selection
+databases: [postgresql, mysql]
+execution_models: [volcano]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [index, hash, equality, point-lookup]
+complexity: "O(1)"
+benefit_range: [0.1, 0.4]
+---
+
+# Hash Index for Equality Lookups
+
+## Description
+
+Uses hash index for exact-match (equality) lookups. Hash indexes
+provide O(1) amortized lookup cost but cannot support range scans,
+ordering, or partial key matching.
+
+**When to apply**: Equality predicate on a column with a hash index,
+and no range or ordering requirements on that column.
+
+**Why it works**: Hash indexes compute a hash of the key and jump
+directly to the bucket containing matching entries. This avoids
+tree traversal entirely.
+
+## Relational Algebra
+
+```algebra
+sigma[col = value](R)
+  -> hash_index_scan[I_hash](col, value)
+  where has_hash_index(I_hash, col)
+```
+
+## Implementation
+
+```rust
+rw!("hash-index-for-equality";
+    "(filter (= ?col ?val) (scan ?table))" =>
+    "(hash-index-scan ?hash_idx ?col ?val)"
+    if has_hash_index("?table", "?col") &&
+       no_range_or_order_needed("?col")
+),
+```
+
+## Cost Model
+
+```rust
+fn cost(overflow_pages: u64) -> f64 {
+    1.0 + overflow_pages as f64 * RANDOM_IO_COST // Usually 1-2 pages
+}
+
+fn benefit_over_btree(btree_levels: u32) -> f64 {
+    let btree_cost = btree_levels as f64 * RANDOM_IO_COST;
+    let hash_cost = 1.0;
+    (btree_cost - hash_cost) / btree_cost
+}
+```
+
+**Typical benefit**: 10-40% over B-tree for pure equality lookups
+
+## Test Cases
+
+### Positive: Exact-match lookup
+
+```sql
+SELECT * FROM sessions WHERE session_token = 'abc123';
+-- Hash index: direct bucket lookup
+```
+
+### Negative: Range query
+
+```sql
+SELECT * FROM users WHERE age > 30;
+-- Hash index cannot support range: use B-tree
+```
+
+### Negative: ORDER BY on hashed column
+
+```sql
+SELECT * FROM users WHERE email = 'x@y.com' ORDER BY email;
+-- Ordering: B-tree preferred (hash has no order)
+```
+
+## References
+
+- PostgreSQL: Hash indexes (WAL-logged since v10)
+- MySQL: MEMORY engine hash indexes

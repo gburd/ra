@@ -1,0 +1,55 @@
+---
+id: cte-merge-identical
+name: CTE Merge Identical Definitions
+category: logical/cte-optimization
+databases: [postgresql, oracle, mssql]
+standard: "sql:1999"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [cte, merge, deduplication]
+---
+
+# CTE Merge Identical Definitions
+
+## Description
+
+When two CTEs have structurally identical definitions, merge them into a
+single CTE and rewrite references to point to the surviving one.
+
+## Relational Algebra
+
+```algebra
+CTE(a, Q, CTE(b, Q, body))  ->  CTE(a, Q, body[b := a])
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("cte-merge-identical";
+    "(cte ?name1 ?def (cte ?name2 ?def ?body))" =>
+    { MergeIdenticalCtes {
+        surviving: "?name1".parse().unwrap(),
+        removed: "?name2".parse().unwrap(),
+        def: "?def".parse().unwrap(),
+        body: "?body".parse().unwrap(),
+    }}
+),
+```
+
+## Test Cases
+
+```sql
+WITH a AS (SELECT * FROM t WHERE x > 0),
+     b AS (SELECT * FROM t WHERE x > 0)
+SELECT * FROM a UNION ALL SELECT * FROM b;
+
+-- Merged:
+WITH a AS (SELECT * FROM t WHERE x > 0)
+SELECT * FROM a UNION ALL SELECT * FROM a;
+```
+
+## References
+
+CockroachDB: pkg/sql/opt/norm/rules/with.opt

@@ -1,0 +1,97 @@
+---
+id: gist-index-for-range-types
+name: GiST Index for Range and Overlap Types
+category: physical/index-selection
+databases: [postgresql]
+execution_models: [volcano]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [index, gist, range, overlap, postgresql, nearest-neighbor]
+complexity: "O(log n + k)"
+benefit_range: [0.6, 0.95]
+---
+
+# GiST Index for Range and Overlap Types
+
+## Description
+
+Uses PostgreSQL GiST (Generalized Search Tree) indexes for range
+containment, overlap, and nearest-neighbor queries on range types,
+geometric types, and full-text search. GiST provides a balanced tree
+structure with customizable splitting and consistent functions.
+
+**When to apply**: Range overlap (&&), containment (@>), or KNN (<->)
+operators on columns with GiST indexes.
+
+**Why it works**: GiST indexes decompose the search space into nested
+bounding regions. Range overlap and containment checks prune large
+portions of the tree, and KNN uses priority queue traversal for
+ordered nearest-neighbor results.
+
+## Relational Algebra
+
+```algebra
+sigma[range_col && query_range](R)
+  -> gist_index_scan[I_gist](range_col, query_range, 'overlap')
+  where has_gist_index(I_gist, range_col)
+```
+
+## Implementation
+
+```rust
+rw!("gist-for-range-overlap";
+    "(filter (range-overlap ?col ?range) (scan ?table))" =>
+    "(gist-index-scan ?gist_idx ?col ?range overlap)"
+    if has_gist_index("?table", "?col")
+),
+
+rw!("gist-for-knn";
+    "(order-by (distance ?col ?point) (scan ?table))" =>
+    "(gist-knn-scan ?gist_idx ?col ?point)"
+    if has_gist_index("?table", "?col")
+),
+```
+
+## Cost Model
+
+```rust
+fn cost(selectivity: f64, index_pages: u64, table_pages: u64) -> f64 {
+    let index_scan = (selectivity * index_pages as f64).max(1.0) * 2.0;
+    let heap_fetch = (selectivity * table_pages as f64) * RANDOM_IO_COST;
+    index_scan + heap_fetch
+}
+```
+
+**Typical benefit**: 60-95% for selective range/overlap queries
+
+## Test Cases
+
+### Positive: Timestamp range overlap
+
+```sql
+SELECT * FROM reservations
+WHERE period && tsrange('2025-03-01', '2025-03-15');
+-- GiST on period: finds overlapping reservations
+```
+
+### Positive: Nearest neighbor
+
+```sql
+SELECT * FROM restaurants
+ORDER BY location <-> point(40.7, -73.9)
+LIMIT 10;
+-- GiST KNN: traverses tree in distance order
+```
+
+### Negative: Equality on range type
+
+```sql
+SELECT * FROM events WHERE period = tsrange('2025-01-01', '2025-01-02');
+-- Equality: B-tree on range type may be sufficient
+```
+
+## References
+
+- PostgreSQL: GiST indexes, range types
+- PostgreSQL: KNN-GiST for nearest-neighbor queries

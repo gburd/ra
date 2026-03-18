@@ -1,0 +1,102 @@
+---
+id: index-for-min-max
+name: Index for MIN/MAX Optimization
+category: physical/index-selection
+databases: [postgresql, mysql, mssql, oracle, sqlite]
+execution_models: [volcano]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [index, min, max, aggregate, skip-scan]
+complexity: "O(log n)"
+benefit_range: [0.9, 0.99]
+---
+
+# Index for MIN/MAX Optimization
+
+## Description
+
+Replaces a full table/index scan for MIN() or MAX() with a single
+index probe to the first or last leaf page. B-tree indexes store
+values in sorted order, so the minimum is the leftmost leaf entry
+and the maximum is the rightmost.
+
+**When to apply**: Standalone MIN() or MAX() aggregate on an indexed
+column with no GROUP BY (or with GROUP BY that matches an index prefix).
+
+**Why it works**: Instead of scanning all rows, the optimizer seeks to
+the boundary of the B-tree. This reduces the operation from O(n)
+to O(log n).
+
+## Relational Algebra
+
+```algebra
+gamma[; MIN(col)](R)
+  -> index_min_scan[I](col)
+  where has_ordered_index(I, col)
+
+gamma[; MAX(col)](R)
+  -> index_max_scan[I](col)
+  where has_ordered_index(I, col)
+```
+
+## Implementation
+
+```rust
+rw!("index-min-optimization";
+    "(aggregate () (min ?col) (scan ?table))" =>
+    "(index-first ?idx ?col)"
+    if has_btree_index("?table", "?col")
+),
+
+rw!("index-max-optimization";
+    "(aggregate () (max ?col) (scan ?table))" =>
+    "(index-last ?idx ?col)"
+    if has_btree_index("?table", "?col")
+),
+```
+
+## Cost Model
+
+```rust
+fn cost(index_levels: u32) -> f64 {
+    index_levels as f64 * RANDOM_IO_COST // Just tree traversal
+}
+
+fn benefit(table_rows: u64, index_levels: u32) -> f64 {
+    let full_scan = table_rows as f64 * SEQUENTIAL_IO_COST;
+    let index_probe = index_levels as f64 * RANDOM_IO_COST;
+    (full_scan - index_probe) / full_scan
+}
+```
+
+**Typical benefit**: 90-99% by replacing full scan with index probe
+
+## Test Cases
+
+### Positive: Simple MIN on indexed column
+
+```sql
+SELECT MIN(created_at) FROM events;
+-- Index on created_at: seek to first leaf entry
+```
+
+### Positive: MAX with WHERE
+
+```sql
+SELECT MAX(price) FROM products WHERE category = 'electronics';
+-- Index on (category, price): seek to category='electronics', last entry
+```
+
+### Negative: MIN/MAX with non-indexed column
+
+```sql
+SELECT MIN(description_length) FROM articles;
+-- No index: must scan all rows
+```
+
+## References
+
+- MySQL: MIN/MAX optimization
+- PostgreSQL: Index-based MIN/MAX
+- SQLite: Index scan for aggregate min/max

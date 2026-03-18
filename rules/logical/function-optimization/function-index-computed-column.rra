@@ -1,0 +1,73 @@
+---
+id: function-index-computed-column
+name: Computed Column Index Matching
+category: logical/function-optimization
+databases: [mssql, oracle, mysql]
+execution_models: [volcano]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [function-index, computed-column, virtual-column, optimization]
+---
+
+# Computed Column Index Matching
+
+## Description
+
+Matches predicates involving computed expressions to indexes on
+computed/virtual columns. SQL Server and MySQL support computed
+columns that can be indexed; predicates on the same expression
+can use these indexes even without explicitly referencing the
+computed column.
+
+**When to apply**: Predicate expression matches the definition of
+a persisted computed column with an index.
+
+**Why it works**: The database has already materialized and indexed
+the computed expression. Matching the expression in a WHERE clause
+to the computed column definition enables index usage.
+
+## Implementation
+
+```rust
+rw!("computed-column-index-match";
+    "(filter (= (?expr ?cols) ?val) (scan ?table))" =>
+    "(index-scan ?cc_idx (= ?computed_col ?val))"
+    if has_computed_column_index("?table", "?expr", "?cols")
+),
+```
+
+## Test Cases
+
+### Positive: Computed column match (SQL Server)
+
+```sql
+ALTER TABLE orders ADD total_with_tax AS (amount * 1.08) PERSISTED;
+CREATE INDEX idx_total_tax ON orders (total_with_tax);
+
+SELECT * FROM orders WHERE amount * 1.08 > 100;
+-- Matches computed column: uses idx_total_tax
+```
+
+### Positive: Virtual column (MySQL)
+
+```sql
+ALTER TABLE users ADD full_name VARCHAR(200)
+  GENERATED ALWAYS AS (CONCAT(first_name, ' ', last_name)) STORED;
+CREATE INDEX idx_full ON users (full_name);
+
+SELECT * FROM users WHERE CONCAT(first_name, ' ', last_name) = 'John Doe';
+```
+
+### Negative: Expression differs from computed
+
+```sql
+-- Computed: amount * 1.08
+SELECT * FROM orders WHERE amount * 1.10 > 100;
+-- Different multiplier: index not usable
+```
+
+## References
+
+- SQL Server: Computed column indexes, expression matching
+- MySQL: Generated column indexes
+- Oracle: Virtual column indexes

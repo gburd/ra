@@ -1,0 +1,60 @@
+---
+id: cte-recursive-to-iterative
+name: CTE Recursive to Iterative
+category: logical/cte-optimization
+databases: [postgresql, oracle, mssql, cockroachdb]
+standard: "sql:1999"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [cte, recursive, iterative]
+---
+
+# CTE Recursive to Iterative
+
+## Description
+
+Convert a recursive CTE with a known fixed depth into an iterative
+expansion. This is beneficial when the recursion depth is bounded and
+small, avoiding the overhead of the work-table approach.
+
+## Relational Algebra
+
+```algebra
+REC_CTE(name, base, step, depth=N)  ->
+    UNION_ALL(base, step(base), step(step(base)), ... N times)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("cte-recursive-to-iterative";
+    "(cte-recursive ?name ?base ?step)" =>
+    { UnrollRecursion {
+        name: "?name".parse().unwrap(),
+        base: "?base".parse().unwrap(),
+        step: "?step".parse().unwrap(),
+        max_depth: 10,
+    }}
+    if bounded_recursion("?step", 10)
+),
+```
+
+## Test Cases
+
+```sql
+WITH RECURSIVE ancestors AS (
+    SELECT id, parent_id, 1 AS depth FROM tree WHERE id = 42
+    UNION ALL
+    SELECT t.id, t.parent_id, a.depth + 1
+    FROM tree t JOIN ancestors a ON t.id = a.parent_id
+    WHERE a.depth < 3
+)
+SELECT * FROM ancestors;
+```
+
+## References
+
+PostgreSQL: src/backend/executor/nodeRecursiveunion.c
+CockroachDB: pkg/sql/opt/norm/rules/with.opt

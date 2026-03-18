@@ -1,0 +1,55 @@
+---
+id: window-partition-filter
+name: Window Partition Filter
+category: logical/window-pushdown
+databases: [postgresql, duckdb, oracle, mssql]
+standard: "sql:2003"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [window, partition, filter]
+---
+
+# Window Partition Filter
+
+## Description
+
+When a filter on a window function result filters by a PARTITION BY column,
+push the filter below the window function. The partition column is available
+in the input, so the filter can reduce partitions before window computation.
+
+## Relational Algebra
+
+```algebra
+sigma[partition_col = v](WINDOW[OVER(PARTITION BY partition_col)](R))  ->
+    WINDOW[OVER(PARTITION BY partition_col)](sigma[partition_col = v](R))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("window-partition-filter";
+    "(filter (eq ?col ?val) (window ?funcs ?input))" =>
+    "(window ?funcs (filter (eq ?col ?val) ?input))"
+    if is_partition_key("?col", "?funcs")
+),
+```
+
+## Test Cases
+
+```sql
+SELECT * FROM (
+    SELECT *, RANK() OVER (PARTITION BY dept ORDER BY salary DESC) AS rnk
+    FROM employees
+) t WHERE dept = 'Engineering';
+
+-- Pushed:
+SELECT *, RANK() OVER (PARTITION BY dept ORDER BY salary DESC) AS rnk
+FROM employees WHERE dept = 'Engineering';
+```
+
+## References
+
+Oracle: Partition pruning for analytic functions
+PostgreSQL: Window function optimization
