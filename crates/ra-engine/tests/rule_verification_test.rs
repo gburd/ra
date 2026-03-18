@@ -60,6 +60,16 @@ fn collect_tables_rec(expr: &RelExpr, out: &mut Vec<String>) {
             collect_tables_rec(definition, out);
             collect_tables_rec(body, out);
         }
+        RelExpr::RecursiveCTE {
+            base_case,
+            recursive_case,
+            body,
+            ..
+        } => {
+            collect_tables_rec(base_case, out);
+            collect_tables_rec(recursive_case, out);
+            collect_tables_rec(body, out);
+        }
         RelExpr::Values { .. } => {}
     }
 }
@@ -83,6 +93,16 @@ fn depth(expr: &RelExpr) -> usize {
         RelExpr::CTE {
             definition, body, ..
         } => 1 + depth(definition).max(depth(body)),
+        RelExpr::RecursiveCTE {
+            base_case,
+            recursive_case,
+            body,
+            ..
+        } => {
+            1 + depth(base_case)
+                .max(depth(recursive_case))
+                .max(depth(body))
+        }
     }
 }
 
