@@ -8,14 +8,19 @@
 
 use std::collections::HashMap;
 
-use ra_core::algebra::{JoinType, RelExpr};
+use ra_core::algebra::{AggregateExpr, AggregateFunction, JoinType, RelExpr};
 use ra_core::cost::Cost;
+use ra_core::distributed_agg::{
+    all_decomposable, decompose_all, is_two_phase_worthwhile,
+    AggValue, AggregationStrategy, DistributedAggConfig,
+};
 use ra_core::distribution::{
     check_join_compatibility, DataDistribution, DistributedRelExpr,
     DistributionCompatibility, DistributionStrategy, NodeId,
 };
 use ra_core::expr::Expr;
 use ra_core::statistics::Statistics;
+use ra_stats::skew::{FrequencyHistogram, SkewDetector, SkewStrategy};
 
 use crate::network_cost::{
     self, JoinSides, NetworkCostModel,
@@ -263,6 +268,20 @@ fn from_network_strategy(
     }
 }
 
+/// Result of aggregation strategy selection for a distributed plan.
+///
+/// Contains the chosen strategy and the decomposed local/global
+/// aggregates when two-phase or three-phase is selected.
+#[derive(Debug, Clone)]
+pub struct AggStrategyResult {
+    /// The chosen aggregation strategy.
+    pub strategy: AggregationStrategy,
+    /// Decomposed local and global aggregate pairs (if applicable).
+    pub decomposed: Option<Vec<(AggregateExpr, AggregateExpr)>>,
+    /// Whether skew was detected on group-by keys.
+    pub has_skew: bool,
+}
+
 /// Distributed query optimizer.
 ///
 /// Takes a logical plan and cluster topology, and annotates each
@@ -279,6 +298,10 @@ pub struct DistributedOptimizer {
     topology: ClusterTopology,
     table_stats: HashMap<String, Statistics>,
     network_cost: Option<NetworkCostModel>,
+    /// Frequency histograms per (table, column) for skew detection.
+    histograms: HashMap<(String, String), FrequencyHistogram>,
+    /// Skew detector for analyzing column distributions.
+    skew_detector: SkewDetector,
 }
 
 impl DistributedOptimizer {
@@ -288,11 +311,15 @@ impl DistributedOptimizer {
         config: DistributedOptimizerConfig,
         topology: ClusterTopology,
     ) -> Self {
+        let skew_detector =
+            SkewDetector::new(config.skew_threshold);
         Self {
             config,
             topology,
             table_stats: HashMap::new(),
             network_cost: None,
+            histograms: HashMap::new(),
+            skew_detector,
         }
     }
 
@@ -330,6 +357,22 @@ impl DistributedOptimizer {
         stats: Statistics,
     ) {
         self.table_stats.insert(table.to_owned(), stats);
+    }
+
+    /// Register a frequency histogram for a column.
+    ///
+    /// Used by skew detection to identify hot keys in group-by
+    /// columns.
+    pub fn register_histogram(
+        &mut self,
+        table: &str,
+        column: &str,
+        histogram: FrequencyHistogram,
+    ) {
+        self.histograms.insert(
+            (table.to_owned(), column.to_owned()),
+            histogram,
+        );
     }
 
     /// Optimize the distribution for a complete plan.
@@ -494,6 +537,9 @@ impl DistributedOptimizer {
     }
 
     /// Annotate an aggregate with distribution info.
+    ///
+    /// Integrates two-phase/three-phase aggregation decomposition
+    /// and skew detection to produce optimal distributed plans.
     fn annotate_aggregate(
         &self,
         input: &RelExpr,
@@ -521,9 +567,125 @@ impl DistributedOptimizer {
             });
         }
 
-        // Otherwise, shuffle by group-by keys.
-        if !group_by.is_empty() {
-            let source = self
+        // Extract aggregates from the plan.
+        let aggregates = if let RelExpr::Aggregate {
+            aggregates, ..
+        } = plan
+        {
+            aggregates.clone()
+        } else {
+            Vec::new()
+        };
+
+        // Check if two-phase aggregation is applicable.
+        let agg_result =
+            self.select_agg_strategy(input, group_by, &aggregates);
+
+        match &agg_result.strategy {
+            AggregationStrategy::TwoPhase { .. }
+            | AggregationStrategy::ThreePhase { .. } => {
+                self.build_two_phase_plan(
+                    plan, group_by, &agg_result,
+                )
+            }
+            AggregationStrategy::SkewAware { .. } => {
+                self.build_skew_aware_plan(
+                    plan, group_by, &agg_result,
+                )
+            }
+            AggregationStrategy::SinglePhase
+            | AggregationStrategy::MapReduce { .. } => {
+                self.build_single_phase_plan(plan, group_by)
+            }
+        }
+    }
+
+    /// Select the best aggregation strategy based on input
+    /// characteristics and skew analysis.
+    fn select_agg_strategy(
+        &self,
+        input: &RelExpr,
+        group_by: &[Expr],
+        aggregates: &[AggregateExpr],
+    ) -> AggStrategyResult {
+        // If no aggregates or not decomposable, use single-phase.
+        if aggregates.is_empty() || !all_decomposable(aggregates) {
+            return AggStrategyResult {
+                strategy: AggregationStrategy::SinglePhase,
+                decomposed: None,
+                has_skew: false,
+            };
+        }
+
+        let input_rows = self.estimate_row_count(input);
+        let distinct_groups = self.estimate_distinct_groups(
+            input, group_by,
+        );
+
+        let agg_config = self.make_agg_config();
+
+        // Check if two-phase is worthwhile.
+        if !is_two_phase_worthwhile(
+            input_rows,
+            distinct_groups,
+            &agg_config,
+        ) {
+            return AggStrategyResult {
+                strategy: AggregationStrategy::SinglePhase,
+                decomposed: None,
+                has_skew: false,
+            };
+        }
+
+        // Detect skew on group-by keys.
+        let has_skew = self.detect_group_key_skew(input, group_by);
+
+        // Choose strategy based on the first aggregate function
+        // (all are decomposable at this point).
+        let primary_func = aggregates
+            .first()
+            .map_or(AggregateFunction::Count, |a| a.function);
+
+        let strategy = AggregationStrategy::choose_strategy(
+            primary_func,
+            input_rows,
+            distinct_groups,
+            has_skew,
+            &agg_config,
+        );
+
+        // Decompose all aggregates for two/three-phase.
+        let decomposed = match &strategy {
+            AggregationStrategy::TwoPhase { .. }
+            | AggregationStrategy::ThreePhase { .. }
+            | AggregationStrategy::SkewAware { .. } => {
+                decompose_all(aggregates)
+            }
+            _ => None,
+        };
+
+        AggStrategyResult {
+            strategy,
+            decomposed,
+            has_skew,
+        }
+    }
+
+    /// Build a two-phase or three-phase distributed aggregate plan.
+    ///
+    /// Inserts a local pre-aggregation before the shuffle, then a
+    /// global finalization after the shuffle.
+    #[allow(clippy::unnecessary_wraps)]
+    fn build_two_phase_plan(
+        &self,
+        plan: &RelExpr,
+        group_by: &[Expr],
+        _agg_result: &AggStrategyResult,
+    ) -> Result<DistributedRelExpr, DistributedOptimizerError> {
+        if group_by.is_empty() {
+            // Global aggregate with two-phase: local partial on
+            // each node, then gather to one node for global.
+            let target = self
                 .topology
                 .nodes
                 .first()
@@ -531,10 +693,122 @@ impl DistributedOptimizer {
                 .unwrap_or(NodeId(0));
             return Ok(DistributedRelExpr {
                 plan: plan.clone(),
+                distribution: DataDistribution::SinglePartition {
+                    node: target,
+                },
+                node_assignment: Some(target),
+                input_strategy: None,
+            });
+        }
+
+        // For grouped aggregates: local pre-agg on each node,
+        // then shuffle by group keys to finalize.
+        let source = self
+            .topology
+            .nodes
+            .first()
+            .copied()
+            .unwrap_or(NodeId(0));
+
+        // Both two-phase and three-phase use shuffle by group keys.
+        // Three-phase adds an intermediate shuffle internally,
+        // but the final distribution is the same.
+        let strategy = DistributionStrategy::Shuffle {
+            source,
+            targets: self.topology.nodes.clone(),
+            partition_keys: group_by.to_vec(),
+        };
+
+        #[allow(clippy::cast_possible_truncation)]
+        let partition_count = self.topology.nodes.len() as u32;
+
+        Ok(DistributedRelExpr {
+            plan: plan.clone(),
+            distribution: DataDistribution::HashPartitioned {
+                keys: group_by.to_vec(),
+                partition_count,
+            },
+            node_assignment: None,
+            input_strategy: Some(strategy),
+        })
+    }
+
+    /// Build a skew-aware distributed aggregate plan.
+    ///
+    /// Hot keys are routed separately from normal keys. The output
+    /// uses the same hash distribution on group-by keys.
+    #[allow(clippy::unnecessary_wraps)]
+    fn build_skew_aware_plan(
+        &self,
+        plan: &RelExpr,
+        group_by: &[Expr],
+        _agg_result: &AggStrategyResult,
+    ) -> Result<DistributedRelExpr, DistributedOptimizerError> {
+        if group_by.is_empty() {
+            let target = self
+                .topology
+                .nodes
+                .first()
+                .copied()
+                .unwrap_or(NodeId(0));
+            return Ok(DistributedRelExpr {
+                plan: plan.clone(),
+                distribution: DataDistribution::SinglePartition {
+                    node: target,
+                },
+                node_assignment: Some(target),
+                input_strategy: None,
+            });
+        }
+
+        let source = self
+            .topology
+            .nodes
+            .first()
+            .copied()
+            .unwrap_or(NodeId(0));
+
+        #[allow(clippy::cast_possible_truncation)]
+        let partition_count = self.topology.nodes.len() as u32;
+
+        Ok(DistributedRelExpr {
+            plan: plan.clone(),
+            distribution: DataDistribution::HashPartitioned {
+                keys: group_by.to_vec(),
+                partition_count,
+            },
+            node_assignment: None,
+            input_strategy: Some(DistributionStrategy::Shuffle {
+                source,
+                targets: self.topology.nodes.clone(),
+                partition_keys: group_by.to_vec(),
+            }),
+        })
+    }
+
+    /// Build a single-phase (centralized) aggregate plan.
+    #[allow(clippy::unnecessary_wraps)]
+    fn build_single_phase_plan(
+        &self,
+        plan: &RelExpr,
+        group_by: &[Expr],
+    ) -> Result<DistributedRelExpr, DistributedOptimizerError> {
+        if !group_by.is_empty() {
+            let source = self
+                .topology
+                .nodes
+                .first()
+                .copied()
+                .unwrap_or(NodeId(0));
+
+            #[allow(clippy::cast_possible_truncation)]
+            let partition_count = self.topology.nodes.len() as u32;
+
+            return Ok(DistributedRelExpr {
+                plan: plan.clone(),
                 distribution: DataDistribution::HashPartitioned {
                     keys: group_by.to_vec(),
-                    partition_count: self.topology.nodes.len()
-                        as u32,
+                    partition_count,
                 },
                 node_assignment: None,
                 input_strategy: Some(
@@ -558,6 +832,159 @@ impl DistributedOptimizer {
             node_assignment: Some(target),
             input_strategy: None,
         })
+    }
+
+    /// Detect skew in group-by keys by checking registered
+    /// histograms.
+    fn detect_group_key_skew(
+        &self,
+        input: &RelExpr,
+        group_by: &[Expr],
+    ) -> bool {
+        let Some(table) = Self::extract_table_name(input) else {
+            return false;
+        };
+
+        for key in group_by {
+            let Some(col_name) = Self::extract_column_name(key)
+            else {
+                continue;
+            };
+
+            let hist_key = (table.clone(), col_name.clone());
+            if let Some(histogram) = self.histograms.get(&hist_key)
+            {
+                let analysis = self
+                    .skew_detector
+                    .analyze(&col_name, histogram);
+                if !analysis.hot_keys.is_empty() {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    /// Analyze skew on a specific group-by column and return the
+    /// recommended strategy with any detected hot key values.
+    #[must_use]
+    pub fn analyze_group_key_skew(
+        &self,
+        input: &RelExpr,
+        group_by: &[Expr],
+    ) -> Option<(SkewStrategy, Vec<AggValue>)> {
+        let table = Self::extract_table_name(input)?;
+
+        for key in group_by {
+            let col_name = Self::extract_column_name(key)?;
+            let hist_key = (table.clone(), col_name.clone());
+            let histogram = self.histograms.get(&hist_key)?;
+
+            let analysis =
+                self.skew_detector.analyze(&col_name, histogram);
+            if !analysis.hot_keys.is_empty() {
+                let hot_values: Vec<AggValue> = analysis
+                    .hot_keys
+                    .iter()
+                    .map(|hk| AggValue::String(hk.value.clone()))
+                    .collect();
+                return Some((
+                    analysis.recommended_strategy,
+                    hot_values,
+                ));
+            }
+        }
+
+        None
+    }
+
+    /// Extract the base table name from a plan tree.
+    fn extract_table_name(plan: &RelExpr) -> Option<String> {
+        match plan {
+            RelExpr::Scan { table, .. } => Some(table.clone()),
+            RelExpr::Filter { input, .. }
+            | RelExpr::Project { input, .. }
+            | RelExpr::Distinct { input, .. }
+            | RelExpr::Sort { input, .. }
+            | RelExpr::Limit { input, .. } => {
+                Self::extract_table_name(input)
+            }
+            _ => None,
+        }
+    }
+
+    /// Extract a column name from a simple column expression.
+    fn extract_column_name(expr: &Expr) -> Option<String> {
+        if let Expr::Column(col_ref) = expr {
+            Some(col_ref.column.clone())
+        } else {
+            None
+        }
+    }
+
+    /// Build a `DistributedAggConfig` from the optimizer's
+    /// settings and cluster topology.
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_precision_loss,
+    )]
+    fn make_agg_config(&self) -> DistributedAggConfig {
+        DistributedAggConfig {
+            num_nodes: self.topology.nodes.len() as u32,
+            network_bandwidth_bps: 1_250_000_000.0,
+            avg_row_bytes: self.config.default_row_width as f64,
+            ..DistributedAggConfig::default()
+        }
+    }
+
+    /// Estimate the row count for a plan.
+    #[allow(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+    )]
+    fn estimate_row_count(&self, plan: &RelExpr) -> u64 {
+        match plan {
+            RelExpr::Scan { table, .. } => {
+                if let Some(stats) = self.table_stats.get(table) {
+                    stats.row_count as u64
+                } else {
+                    1000
+                }
+            }
+            RelExpr::Filter { input, .. } => {
+                self.estimate_row_count(input) / 10
+            }
+            RelExpr::Project { input, .. } => {
+                self.estimate_row_count(input)
+            }
+            RelExpr::Aggregate { input, .. } => {
+                self.estimate_row_count(input) / 100
+            }
+            RelExpr::Join { left, right, .. } => {
+                let l = self.estimate_row_count(left);
+                let r = self.estimate_row_count(right);
+                (l / 10).saturating_add(r / 10)
+            }
+            _ => 1000,
+        }
+    }
+
+    /// Estimate distinct group count for group-by keys.
+    #[allow(clippy::cast_precision_loss)]
+    fn estimate_distinct_groups(
+        &self,
+        input: &RelExpr,
+        group_by: &[Expr],
+    ) -> u64 {
+        if group_by.is_empty() {
+            return 1;
+        }
+        // Heuristic: assume distinct groups is ~10% of input rows,
+        // capped at 1M.
+        let input_rows = self.estimate_row_count(input);
+        (input_rows / 10).clamp(1, 1_000_000)
     }
 
     /// Enumerate candidate distribution strategies for a join.
@@ -1658,5 +2085,282 @@ mod tests {
         } else {
             panic!("project should preserve distribution");
         }
+    }
+
+    // --- Aggregation strategy selection ---
+
+    #[test]
+    fn select_agg_strategy_non_decomposable() {
+        let opt = make_optimizer_with_tables(4);
+        let aggs = vec![AggregateExpr {
+            function: AggregateFunction::StdDev,
+            arg: None,
+            distinct: false,
+            alias: None,
+        }];
+        let result = opt.select_agg_strategy(
+            &RelExpr::scan("orders"),
+            &[col("country_code")],
+            &aggs,
+        );
+        assert!(matches!(
+            result.strategy,
+            AggregationStrategy::SinglePhase
+        ));
+        assert!(result.decomposed.is_none());
+    }
+
+    #[test]
+    fn select_agg_strategy_decomposable_large_table() {
+        let opt = make_optimizer_with_tables(4);
+        let aggs = vec![AggregateExpr {
+            function: AggregateFunction::Sum,
+            arg: Some(col("amount")),
+            distinct: false,
+            alias: Some("total".into()),
+        }];
+        let result = opt.select_agg_strategy(
+            &RelExpr::scan("orders"),
+            &[col("country_code")],
+            &aggs,
+        );
+        // 100M rows on orders, should pick two-phase or
+        // three-phase.
+        assert!(
+            matches!(
+                result.strategy,
+                AggregationStrategy::TwoPhase { .. }
+                    | AggregationStrategy::ThreePhase { .. }
+            ),
+            "expected two/three-phase for large table, got {:?}",
+            result.strategy
+        );
+        assert!(result.decomposed.is_some());
+    }
+
+    #[test]
+    fn select_agg_strategy_with_skew_histogram() {
+        let config = DistributedOptimizerConfig::default();
+        let mut topology = ClusterTopology::uniform(4);
+        topology.register_table(
+            "sales",
+            NodeId(0),
+            DataDistribution::Arbitrary,
+        );
+        let mut sales_stats = Statistics::new(50_000_000.0);
+        sales_stats.avg_row_size = 128;
+        sales_stats.total_size = 6_400_000_000;
+
+        let mut opt =
+            DistributedOptimizer::new(config, topology);
+        opt.register_stats("sales", sales_stats);
+
+        // Register a skewed histogram for the region column.
+        // avg = (5_000_000 + 9*100) / 10 = ~500,090
+        // threshold = 10 * 500,090 = ~5,000,900
+        // "US" at 5M is just below, so use more cold keys.
+        // avg = (5_000_000 + 100*100) / 101 = ~59,505
+        // threshold = 10 * 59505 = ~595,050
+        // "US" at 5M > 595K => hot
+        let mut buckets = vec![ra_stats::skew::FrequencyBucket {
+            value: "US".to_owned(),
+            count: 5_000_000,
+        }];
+        for i in 0..100 {
+            buckets.push(ra_stats::skew::FrequencyBucket {
+                value: format!("region_{i}"),
+                count: 100,
+            });
+        }
+        let histogram =
+            ra_stats::skew::FrequencyHistogram::new(buckets);
+        opt.register_histogram("sales", "region", histogram);
+
+        let result = opt.analyze_group_key_skew(
+            &RelExpr::scan("sales"),
+            &[col("region")],
+        );
+        assert!(
+            result.is_some(),
+            "should detect skew on region column"
+        );
+        let (strategy, hot_values) = result.expect("has skew");
+        assert!(
+            !hot_values.is_empty(),
+            "should have hot key values"
+        );
+        assert!(
+            matches!(
+                strategy,
+                SkewStrategy::ThreePhase
+                    | SkewStrategy::SkewAware
+            ),
+            "expected non-TwoPhase strategy, got {strategy:?}"
+        );
+    }
+
+    #[test]
+    fn select_agg_strategy_empty_aggregates() {
+        let opt = make_optimizer_with_tables(4);
+        let result = opt.select_agg_strategy(
+            &RelExpr::scan("orders"),
+            &[col("status")],
+            &[],
+        );
+        assert!(matches!(
+            result.strategy,
+            AggregationStrategy::SinglePhase
+        ));
+    }
+
+    #[test]
+    fn extract_table_name_from_scan() {
+        let name = DistributedOptimizer::extract_table_name(
+            &RelExpr::scan("users"),
+        );
+        assert_eq!(name, Some("users".to_owned()));
+    }
+
+    #[test]
+    fn extract_table_name_through_filter() {
+        let plan = RelExpr::scan("orders").filter(
+            Expr::Const(Const::Bool(true)),
+        );
+        let name =
+            DistributedOptimizer::extract_table_name(&plan);
+        assert_eq!(name, Some("orders".to_owned()));
+    }
+
+    #[test]
+    fn extract_column_name_from_column_expr() {
+        let name = DistributedOptimizer::extract_column_name(
+            &col("region"),
+        );
+        assert_eq!(name, Some("region".to_owned()));
+    }
+
+    #[test]
+    fn extract_column_name_from_non_column() {
+        let name = DistributedOptimizer::extract_column_name(
+            &Expr::Const(Const::Int(42)),
+        );
+        assert!(name.is_none());
+    }
+
+    #[test]
+    fn register_histogram_and_detect() {
+        let config = DistributedOptimizerConfig::default();
+        let topology = ClusterTopology::uniform(4);
+        let mut opt =
+            DistributedOptimizer::new(config, topology);
+        let histogram = ra_stats::skew::FrequencyHistogram::new(
+            vec![
+                ra_stats::skew::FrequencyBucket {
+                    value: "hot".to_owned(),
+                    count: 100_000,
+                },
+                ra_stats::skew::FrequencyBucket {
+                    value: "a".to_owned(),
+                    count: 100,
+                },
+                ra_stats::skew::FrequencyBucket {
+                    value: "b".to_owned(),
+                    count: 100,
+                },
+                ra_stats::skew::FrequencyBucket {
+                    value: "c".to_owned(),
+                    count: 100,
+                },
+                ra_stats::skew::FrequencyBucket {
+                    value: "d".to_owned(),
+                    count: 100,
+                },
+                ra_stats::skew::FrequencyBucket {
+                    value: "e".to_owned(),
+                    count: 100,
+                },
+                ra_stats::skew::FrequencyBucket {
+                    value: "f".to_owned(),
+                    count: 100,
+                },
+                ra_stats::skew::FrequencyBucket {
+                    value: "g".to_owned(),
+                    count: 100,
+                },
+                ra_stats::skew::FrequencyBucket {
+                    value: "h".to_owned(),
+                    count: 100,
+                },
+                ra_stats::skew::FrequencyBucket {
+                    value: "i".to_owned(),
+                    count: 100,
+                },
+                ra_stats::skew::FrequencyBucket {
+                    value: "j".to_owned(),
+                    count: 100,
+                },
+            ],
+        );
+        opt.register_histogram("t", "key", histogram);
+        let has_skew = opt.detect_group_key_skew(
+            &RelExpr::scan("t"),
+            &[col("key")],
+        );
+        assert!(has_skew);
+    }
+
+    #[test]
+    fn no_skew_without_histogram() {
+        let opt = make_optimizer_with_tables(4);
+        let has_skew = opt.detect_group_key_skew(
+            &RelExpr::scan("orders"),
+            &[col("country_code")],
+        );
+        assert!(!has_skew);
+    }
+
+    #[test]
+    fn agg_config_from_optimizer() {
+        let opt = make_optimizer_with_tables(4);
+        let config = opt.make_agg_config();
+        assert_eq!(config.num_nodes, 4);
+    }
+
+    #[test]
+    fn estimate_row_count_known_table() {
+        let opt = make_optimizer_with_tables(4);
+        let rows = opt.estimate_row_count(
+            &RelExpr::scan("orders"),
+        );
+        assert_eq!(rows, 100_000_000);
+    }
+
+    #[test]
+    fn estimate_row_count_unknown_table() {
+        let opt = make_optimizer(4);
+        let rows =
+            opt.estimate_row_count(&RelExpr::scan("unknown"));
+        assert_eq!(rows, 1000);
+    }
+
+    #[test]
+    fn estimate_distinct_groups_grouped() {
+        let opt = make_optimizer_with_tables(4);
+        let groups = opt.estimate_distinct_groups(
+            &RelExpr::scan("orders"),
+            &[col("country_code")],
+        );
+        // 100M / 10 = 10M, capped at 1M.
+        assert_eq!(groups, 1_000_000);
+    }
+
+    #[test]
+    fn estimate_distinct_groups_global() {
+        let opt = make_optimizer_with_tables(4);
+        let groups = opt.estimate_distinct_groups(
+            &RelExpr::scan("orders"),
+            &[],
+        );
+        assert_eq!(groups, 1);
     }
 }

@@ -15,6 +15,7 @@
 // Re-export main types
 pub mod algebra;
 pub mod cost;
+pub mod distributed_agg;
 pub mod distribution;
 pub mod expr;
 pub mod pattern;
@@ -24,6 +25,7 @@ pub mod statistics;
 
 pub use algebra::*;
 pub use cost::*;
+pub use distributed_agg::*;
 pub use distribution::*;
 pub use expr::*;
 pub use pattern::*;
