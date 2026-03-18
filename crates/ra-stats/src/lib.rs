@@ -92,12 +92,16 @@ pub mod gathering_cost;
 pub mod index_types;
 pub mod integration;
 pub mod profiles;
+pub mod timeline;
 pub mod types;
 
 pub use accuracy::{QualityMetrics, RefreshThreshold, Staleness, StatisticsSource, StatisticsState};
 pub use gathering_cost::{CostEstimator, GatheringCost, GatheringMethod, GatheringPriority};
 pub use index_types::{IndexCostFactors, IndexMetadata, IndexType};
 pub use profiles::{ProfileSelector, StatisticsProfile};
+pub use timeline::{
+    PlaybackState, Timeline, TimelineError, TimelineEvent, TimelinePlayer,
+};
 pub use types::{
     AccessPattern, ColumnId, ColumnStats, CorrelationStats, FunctionalDependency, Histogram,
     HotColumn, IndexStats, JoinStats, MostCommonValues, MultiColumnNdv, PredicateStats, Sketch,

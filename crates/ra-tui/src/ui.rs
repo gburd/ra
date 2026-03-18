@@ -272,7 +272,7 @@ fn render_evolution_panel(
         .copied()
         .fold(f64::INFINITY, f64::min);
 
-    let inner_height = area.height.saturating_sub(2) as usize;
+    let _inner_height = area.height.saturating_sub(2) as usize;
     let inner_width = area.width.saturating_sub(2) as usize;
 
     let mut lines: Vec<Line> = Vec::new();
@@ -308,8 +308,6 @@ fn render_evolution_panel(
     lines.push(Line::raw(""));
 
     // Bar chart: one bar per step
-    let chart_height =
-        inner_height.saturating_sub(3).min(costs.len());
     let bar_width = if costs.is_empty() {
         0
     } else {
@@ -618,6 +616,19 @@ fn cost_color(cost: f64, app: &App) -> Color {
         Color::Yellow
     } else {
         Color::Red
+    }
+}
+
+/// Format a row count with K/M/B suffixes.
+fn format_row_count(count: u64) -> String {
+    if count >= 1_000_000_000 {
+        format!("{:.1}B", count as f64 / 1_000_000_000.0)
+    } else if count >= 1_000_000 {
+        format!("{:.1}M", count as f64 / 1_000_000.0)
+    } else if count >= 1_000 {
+        format!("{:.1}K", count as f64 / 1_000.0)
+    } else {
+        count.to_string()
     }
 }
 

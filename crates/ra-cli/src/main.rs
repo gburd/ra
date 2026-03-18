@@ -1027,6 +1027,48 @@ fn cmd_compare(
     Ok(())
 }
 
+// ── tui ─────────────────────────────────────────────────────
+
+fn cmd_tui(
+    timeline_path: Option<&str>,
+    demo: bool,
+    headless: bool,
+) -> Result<()> {
+    let timeline = if demo {
+        ra_tui::Timeline::demo()
+    } else if let Some(path) = timeline_path {
+        let source = std::fs::read_to_string(path)
+            .with_context(|| {
+                format!("reading timeline file: {path}")
+            })?;
+        serde_json::from_str(&source).with_context(|| {
+            format!("parsing timeline JSON from: {path}")
+        })?
+    } else {
+        bail!(
+            "specify --demo for demo data or \
+             --timeline <path> to load a timeline file"
+        );
+    };
+
+    let mut app =
+        ra_tui::App::new(timeline).context("initializing TUI")?;
+
+    if headless {
+        let final_cost = app
+            .run_headless()
+            .context("running headless TUI")?;
+        eprintln!(
+            "Headless run complete. Final cost: {final_cost:.0}"
+        );
+        return Ok(());
+    }
+
+    app.run().context("running TUI")?;
+
+    Ok(())
+}
+
 // ── Helpers ─────────────────────────────────────────────────
 
 /// Load a hardware profile by name.
