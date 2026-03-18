@@ -5,6 +5,10 @@
 //! - Ship Query: send the query to a remote database
 //! - Ship Data: fetch data from remote, execute locally
 //! - Hybrid: push part of the query, fetch intermediate results
+//!
+//! When a [`NetworkCostModel`] is attached, the cost model uses
+//! real network topology (latency, bandwidth per link) instead of
+//! the flat estimates from [`RemoteConnection`].
 
 use ra_core::algebra::RelExpr;
 use ra_core::federated::{
@@ -12,6 +16,13 @@ use ra_core::federated::{
     RemoteConnection,
 };
 use ra_core::statistics::Statistics;
+
+use crate::network_cost::NetworkCostModel;
+
+/// Intermediate result from network transfer estimation.
+struct NetworkTransferResult {
+    transfer_ms: f64,
+}
 
 /// Cost model for federated query execution strategies.
 #[derive(Debug, Clone)]
@@ -30,6 +41,8 @@ pub struct FederatedCostModel {
     pub default_row_count: f64,
     /// Default average row size when statistics are unavailable.
     pub default_avg_row_size: u64,
+    /// Optional network topology model for accurate transfer costs.
+    network_model: Option<NetworkCostModel>,
 }
 
 impl Default for FederatedCostModel {
@@ -42,6 +55,7 @@ impl Default for FederatedCostModel {
             default_filter_selectivity: 0.1,
             default_row_count: 100_000.0,
             default_avg_row_size: 200,
+            network_model: None,
         }
     }
 }
@@ -51,6 +65,62 @@ impl FederatedCostModel {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Attach a network cost model for topology-aware transfer
+    /// estimates.
+    ///
+    /// When set, transfer cost calculations use real link bandwidth
+    /// and latency from the topology instead of the flat estimates
+    /// in [`RemoteConnection`].
+    #[must_use]
+    pub fn with_network_model(
+        mut self,
+        model: NetworkCostModel,
+    ) -> Self {
+        self.network_model = Some(model);
+        self
+    }
+
+    /// Return the attached network cost model, if any.
+    #[must_use]
+    pub fn network_model(&self) -> Option<&NetworkCostModel> {
+        self.network_model.as_ref()
+    }
+
+    /// Estimate network transfer time for `bytes` using the network
+    /// topology model if available, otherwise fall back to the flat
+    /// estimate from `connection`.
+    fn network_transfer_ms(
+        &self,
+        connection: &RemoteConnection,
+        table: &str,
+        bytes: u64,
+    ) -> NetworkTransferResult {
+        if let Some(net) = &self.network_model {
+            if let Some(source_node) = net.node_for_table(table) {
+                // Transfer to local node (node 0 by convention)
+                let local_node =
+                    ra_hardware::network::NodeId(0);
+                // Use row_width=1 so rows*width = bytes
+                let est = net.node_transfer_cost(
+                    source_node,
+                    local_node,
+                    bytes,
+                    1,
+                );
+                return NetworkTransferResult {
+                    transfer_ms: est
+                        .transfer_time
+                        .as_secs_f64()
+                        * 1000.0,
+                };
+            }
+        }
+        // Fall back to flat estimate
+        NetworkTransferResult {
+            transfer_ms: connection.transfer_time_ms(bytes),
+        }
     }
 
     /// Estimate cost of shipping the entire query to a remote.
@@ -64,6 +134,26 @@ impl FederatedCostModel {
         stats: Option<&Statistics>,
         result_rows: f64,
         result_row_size: u64,
+    ) -> FederatedCostBreakdown {
+        self.estimate_ship_query_for_table(
+            connection,
+            stats,
+            result_rows,
+            result_row_size,
+            "",
+        )
+    }
+
+    /// Estimate cost of shipping a query to a remote, with
+    /// topology-aware network costs when a table name is provided.
+    #[must_use]
+    pub fn estimate_ship_query_for_table(
+        &self,
+        connection: &RemoteConnection,
+        stats: Option<&Statistics>,
+        result_rows: f64,
+        result_row_size: u64,
+        table: &str,
     ) -> FederatedCostBreakdown {
         let row_count = stats
             .map_or(self.default_row_count, |s| s.row_count);
@@ -79,14 +169,19 @@ impl FederatedCostModel {
             * self.remote_execution_overhead;
 
         // Result transfer
+        #[allow(clippy::cast_precision_loss)]
         #[allow(clippy::cast_possible_truncation)]
         #[allow(clippy::cast_sign_loss)]
         let result_bytes =
             (result_rows * result_row_size as f64) as u64;
-        let network_ms =
-            connection.transfer_time_ms(result_bytes);
 
-        let total_ms = remote_exec_ms + network_ms;
+        let transfer = self.network_transfer_ms(
+            connection,
+            table,
+            result_bytes,
+        );
+
+        let total_ms = remote_exec_ms + transfer.transfer_ms;
 
         #[allow(clippy::cast_possible_truncation)]
         #[allow(clippy::cast_sign_loss)]
@@ -95,7 +190,7 @@ impl FederatedCostModel {
         FederatedCostBreakdown {
             strategy: "ship_query".into(),
             remote_exec_ms,
-            network_transfer_ms: network_ms,
+            network_transfer_ms: transfer.transfer_ms,
             transfer_bytes: result_bytes,
             local_exec_ms: 0.0,
             total_ms,
@@ -113,6 +208,21 @@ impl FederatedCostModel {
         connection: &RemoteConnection,
         stats: Option<&Statistics>,
         has_filter: bool,
+    ) -> FederatedCostBreakdown {
+        self.estimate_ship_data_for_table(
+            connection, stats, has_filter, "",
+        )
+    }
+
+    /// Estimate cost of fetching data from remote with
+    /// topology-aware network costs.
+    #[must_use]
+    pub fn estimate_ship_data_for_table(
+        &self,
+        connection: &RemoteConnection,
+        stats: Option<&Statistics>,
+        has_filter: bool,
+        table: &str,
     ) -> FederatedCostBreakdown {
         let row_count = stats
             .map_or(self.default_row_count, |s| s.row_count);
@@ -134,19 +244,24 @@ impl FederatedCostModel {
             * self.remote_execution_overhead;
 
         // Transfer cost
+        #[allow(clippy::cast_precision_loss)]
         #[allow(clippy::cast_possible_truncation)]
         #[allow(clippy::cast_sign_loss)]
         let transfer_bytes =
             (transfer_rows * avg_row_size as f64) as u64;
-        let network_ms =
-            connection.transfer_time_ms(transfer_bytes);
+
+        let transfer = self.network_transfer_ms(
+            connection,
+            table,
+            transfer_bytes,
+        );
 
         // Local execution cost
         let local_exec_ms =
             transfer_rows * self.cpu_cost_per_row;
 
         let total_ms =
-            remote_exec_ms + network_ms + local_exec_ms;
+            remote_exec_ms + transfer.transfer_ms + local_exec_ms;
 
         #[allow(clippy::cast_possible_truncation)]
         #[allow(clippy::cast_sign_loss)]
@@ -159,7 +274,7 @@ impl FederatedCostModel {
                 "ship_data_full".into()
             },
             remote_exec_ms,
-            network_transfer_ms: network_ms,
+            network_transfer_ms: transfer.transfer_ms,
             transfer_bytes,
             local_exec_ms,
             total_ms,
@@ -181,6 +296,25 @@ impl FederatedCostModel {
         pushdown_selectivity: f64,
         local_complexity_factor: f64,
     ) -> FederatedCostBreakdown {
+        self.estimate_hybrid_for_table(
+            connection,
+            stats,
+            pushdown_selectivity,
+            local_complexity_factor,
+            "",
+        )
+    }
+
+    /// Estimate hybrid cost with topology-aware network costs.
+    #[must_use]
+    pub fn estimate_hybrid_for_table(
+        &self,
+        connection: &RemoteConnection,
+        stats: Option<&Statistics>,
+        pushdown_selectivity: f64,
+        local_complexity_factor: f64,
+        table: &str,
+    ) -> FederatedCostBreakdown {
         let row_count = stats
             .map_or(self.default_row_count, |s| s.row_count);
         let avg_row_size = stats
@@ -198,12 +332,17 @@ impl FederatedCostModel {
 
         // Intermediate result transfer
         let intermediate_rows = row_count * pushdown_selectivity;
+        #[allow(clippy::cast_precision_loss)]
         #[allow(clippy::cast_possible_truncation)]
         #[allow(clippy::cast_sign_loss)]
         let transfer_bytes =
             (intermediate_rows * avg_row_size as f64) as u64;
-        let network_ms =
-            connection.transfer_time_ms(transfer_bytes);
+
+        let transfer = self.network_transfer_ms(
+            connection,
+            table,
+            transfer_bytes,
+        );
 
         // Local operations on intermediate results
         let local_exec_ms = intermediate_rows
@@ -211,7 +350,7 @@ impl FederatedCostModel {
             * local_complexity_factor;
 
         let total_ms =
-            remote_exec_ms + network_ms + local_exec_ms;
+            remote_exec_ms + transfer.transfer_ms + local_exec_ms;
 
         #[allow(clippy::cast_possible_truncation)]
         #[allow(clippy::cast_sign_loss)]
@@ -220,7 +359,7 @@ impl FederatedCostModel {
         FederatedCostBreakdown {
             strategy: "hybrid".into(),
             remote_exec_ms,
-            network_transfer_ms: network_ms,
+            network_transfer_ms: transfer.transfer_ms,
             transfer_bytes,
             local_exec_ms,
             total_ms,
@@ -265,7 +404,10 @@ impl FederatedCostModel {
         query: &FederatedQuery,
     ) -> FederatedCostBreakdown {
         match location {
-            ExecutionLocation::ShipQuery { target, .. } => {
+            ExecutionLocation::ShipQuery {
+                target, query: q, ..
+            } => {
+                let table = Self::first_table(q);
                 let stats = self.best_stats(query);
                 let row_count = stats
                     .map_or(self.default_row_count, |s| {
@@ -277,30 +419,36 @@ impl FederatedCostModel {
                     });
                 // Assume result is 10% of source for full queries
                 let result_rows = row_count * 0.1;
-                self.estimate_ship_query(
+                self.estimate_ship_query_for_table(
                     target,
                     stats,
                     result_rows,
                     avg_row_size,
+                    &table,
                 )
             }
             ExecutionLocation::ShipData {
-                source, predicate, ..
+                source,
+                table,
+                predicate,
             } => {
                 let stats = self.best_stats(query);
-                self.estimate_ship_data(
+                self.estimate_ship_data_for_table(
                     source,
                     stats,
                     predicate.is_some(),
+                    table,
                 )
             }
             ExecutionLocation::Hybrid { target, .. } => {
+                let table = Self::first_remote_table(query);
                 let stats = self.best_stats(query);
-                self.estimate_hybrid(
+                self.estimate_hybrid_for_table(
                     target,
                     stats,
                     self.default_filter_selectivity,
                     2.0,
+                    &table,
                 )
             }
             ExecutionLocation::Local { .. } => {
@@ -310,11 +458,45 @@ impl FederatedCostModel {
         }
     }
 
+    /// Extract the first table name from a relational expression.
+    fn first_table(expr: &RelExpr) -> String {
+        match expr {
+            RelExpr::Scan { table, .. } => table.clone(),
+            RelExpr::Filter { input, .. }
+            | RelExpr::Project { input, .. }
+            | RelExpr::Aggregate { input, .. }
+            | RelExpr::Sort { input, .. }
+            | RelExpr::Limit { input, .. }
+            | RelExpr::Window { input, .. }
+            | RelExpr::Distinct { input, .. } => {
+                Self::first_table(input)
+            }
+            RelExpr::Join { left, .. }
+            | RelExpr::Union { left, .. }
+            | RelExpr::Intersect { left, .. }
+            | RelExpr::Except { left, .. } => {
+                Self::first_table(left)
+            }
+            _ => String::new(),
+        }
+    }
+
+    /// Find the first remote table name in a federated query.
+    fn first_remote_table(query: &FederatedQuery) -> String {
+        for (name, source) in &query.sources {
+            if source.is_remote() {
+                return name.clone();
+            }
+        }
+        String::new()
+    }
+
     /// Extract the best available statistics from the query.
     fn best_stats<'a>(
         &self,
         query: &'a FederatedQuery,
     ) -> Option<&'a Statistics> {
+        let _ = self; // used for future expansion
         for source in query.sources.values() {
             if let Some(stats) = source.statistics() {
                 return Some(stats);
@@ -376,6 +558,7 @@ impl FederatedCostModel {
             .map_or(self.default_row_count, |s| s.row_count);
         let avg_row_size = stats
             .map_or(self.default_avg_row_size, |s| s.avg_row_size);
+        #[allow(clippy::cast_precision_loss)]
         #[allow(clippy::cast_possible_truncation)]
         #[allow(clippy::cast_sign_loss)]
         let size = (row_count * avg_row_size as f64) as u64;
