@@ -129,6 +129,14 @@ fn estimate_heuristic(
             let input_rows = estimate_heuristic(input, stats);
             (input_rows * 0.75).max(1.0)
         }
+        RelExpr::RecursiveCTE {
+            base_case, body, ..
+        } => {
+            let base_rows = estimate_heuristic(base_case, stats);
+            let body_rows = estimate_heuristic(body, stats);
+            // Rough heuristic: assume ~10 iterations
+            (base_rows * 10.0).max(body_rows)
+        }
         RelExpr::Values { rows, .. } => rows.len() as f64,
     }
 }
@@ -271,6 +279,16 @@ fn collect_tables_recursive(
             definition, body, ..
         } => {
             collect_tables_recursive(definition, provider, map);
+            collect_tables_recursive(body, provider, map);
+        }
+        RelExpr::RecursiveCTE {
+            base_case,
+            recursive_case,
+            body,
+            ..
+        } => {
+            collect_tables_recursive(base_case, provider, map);
+            collect_tables_recursive(recursive_case, provider, map);
             collect_tables_recursive(body, provider, map);
         }
         RelExpr::Values { .. } => {}

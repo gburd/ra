@@ -206,6 +206,18 @@ fn fingerprint_rel(expr: &RelExpr, out: &mut Vec<Token>) {
             fingerprint_rel(input, out);
             out.push(Token::End);
         }
+        RelExpr::RecursiveCTE {
+            base_case,
+            recursive_case,
+            body,
+            ..
+        } => {
+            out.push(Token::Aggregate);
+            fingerprint_rel(base_case, out);
+            fingerprint_rel(recursive_case, out);
+            fingerprint_rel(body, out);
+            out.push(Token::End);
+        }
         RelExpr::Values { .. } => {
             out.push(Token::Scan);
         }

@@ -236,6 +236,21 @@ fn render_expr(expr: &RelExpr, ctx: &mut RenderContext) {
             };
             ctx.select = format!("DISTINCT {current}");
         }
+        RelExpr::RecursiveCTE {
+            name,
+            base_case,
+            recursive_case,
+            body,
+            ..
+        } => {
+            let base_sql = SqlRenderer::render(base_case);
+            let rec_sql = SqlRenderer::render(recursive_case);
+            let body_sql = SqlRenderer::render(body);
+            ctx.from = format!(
+                "-- WITH RECURSIVE {name} AS \
+                 ({base_sql} UNION ALL {rec_sql})\n{body_sql}"
+            );
+        }
         RelExpr::Values { rows } => {
             let row_strs: Vec<String> = rows
                 .iter()

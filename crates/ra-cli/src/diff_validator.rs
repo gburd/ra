@@ -147,7 +147,8 @@ fn compare_node(
                 compare_node(right, child, agreements, disagreements);
             }
         }
-        RelExpr::CTE { body, .. } => {
+        RelExpr::CTE { body, .. }
+        | RelExpr::RecursiveCTE { body, .. } => {
             compare_node(body, db, agreements, disagreements);
         }
         RelExpr::Values { .. } => {}

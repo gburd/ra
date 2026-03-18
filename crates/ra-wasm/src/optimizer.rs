@@ -351,6 +351,16 @@ fn estimate_cost(plan: &RelExpr) -> f64 {
         } => estimate_cost(definition) + estimate_cost(body),
         RelExpr::Window { input, .. } => estimate_cost(input) * 2.5,
         RelExpr::Distinct { input, .. } => estimate_cost(input) * 1.5,
+        RelExpr::RecursiveCTE {
+            base_case,
+            recursive_case,
+            body,
+            ..
+        } => {
+            estimate_cost(base_case)
+                + estimate_cost(recursive_case) * 10.0
+                + estimate_cost(body)
+        }
         RelExpr::Values { rows, .. } => rows.len() as f64,
     }
 }

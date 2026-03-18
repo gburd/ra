@@ -37,6 +37,12 @@ maintainable, formally verified framework.
   bytecode interpretation
 - **Formal Verification** -- TLA+ specifications proving termination,
   cost monotonicity, and semantic equivalence
+- **Resource Budgets** -- Constrain optimizer time, memory, and
+  iterations with predefined profiles (interactive, standard, batch,
+  memory-constrained) and custom limits
+- **Plan Diff Visualization** -- Colorized structural diffs between
+  original and optimized plans in four formats (colored, plain,
+  side-by-side, compact)
 
 ## Quick Start
 
@@ -74,6 +80,15 @@ cargo run --bin ra-cli -- list
 
 # Run rule test cases
 cargo run --bin ra-cli -- test rules/logical/predicate-pushdown/filter-through-join.rra
+
+# Optimize with a resource budget
+cargo run --bin ra-cli -- optimize "SELECT * FROM orders JOIN customers ON orders.cid = customers.id" --resource-budget interactive
+
+# View a colorized plan diff
+cargo run --bin ra-cli -- optimize "SELECT * FROM t1 WHERE x > 10" --diff colored
+
+# Bounded optimization with custom limits and diff
+cargo run --bin ra-cli -- optimize "SELECT * FROM t1" --max-time 500ms --max-iterations 5 --diff side-by-side
 ```
 
 ### Web Explorer
@@ -182,6 +197,8 @@ sigma[p](R join[c] S) -> (sigma[p](R)) join[c] S
 - [WASM Databases](docs/wasm-databases.md) -- Browser-based database execution
 - [Formal Verification](docs/formal-verification.md) -- TLA+ specifications and verification approach
 - [TLA+ Specifications](tla/README.md) -- Mathematical proofs of correctness properties
+- [Resource Budgets](docs/resource-budgets.md) -- Predefined profiles, custom limits, and overflow strategies
+- [Plan Visualization](docs/plan-visualization.md) -- Colorized plan diffs and output formats
 
 ### Examples
 

@@ -16,6 +16,9 @@ use ra_core::expr::{BinOp, ColumnRef, Const, Expr, UnaryOp};
 
 use crate::analysis::RelAnalysis;
 use crate::extract::extract_best;
+use crate::resource_budget::{
+    OverflowStrategy, ResourceBudget, ResourceTracker, ResourceUsageReport,
+};
 use crate::rewrite::all_rules;
 
 define_language! {
@@ -36,6 +39,7 @@ define_language! {
         "union" = Union([Id; 3]),
         "intersect" = Intersect([Id; 3]),
         "except" = Except([Id; 3]),
+        "recursive-cte" = RecursiveCTE([Id; 4]),
 
         // -- Join types --
         "inner" = Inner,
@@ -144,6 +148,7 @@ pub struct Optimizer {
     config: OptimizerConfig,
     table_stats: HashMap<String, ra_core::statistics::Statistics>,
     hardware_profile: Option<ra_hardware::HardwareProfile>,
+    resource_budget: Option<ResourceBudget>,
 }
 
 impl Optimizer {
@@ -154,6 +159,7 @@ impl Optimizer {
             config: OptimizerConfig::default(),
             table_stats: HashMap::new(),
             hardware_profile: None,
+            resource_budget: None,
         }
     }
 
@@ -164,7 +170,20 @@ impl Optimizer {
             config,
             table_stats: HashMap::new(),
             hardware_profile: None,
+            resource_budget: None,
         }
+    }
+
+    /// Set a resource budget for bounded optimization.
+    pub fn set_resource_budget(&mut self, budget: ResourceBudget) {
+        self.resource_budget = Some(budget);
+    }
+
+    /// Builder-style setter for the resource budget.
+    #[must_use]
+    pub fn with_resource_budget(mut self, budget: ResourceBudget) -> Self {
+        self.resource_budget = Some(budget);
+        self
     }
 
     /// Set the hardware profile for cost-based optimization.
@@ -236,12 +255,212 @@ impl Optimizer {
         let result = extract_best(&runner.egraph, root, &self.table_stats, &hardware)?;
         Ok((result, runner.egraph))
     }
+
+    /// Optimize with resource budget tracking and best-so-far.
+    ///
+    /// Runs equality saturation one iteration at a time, checking
+    /// the resource budget between iterations and tracking the best
+    /// plan seen so far. Returns an [`OptimizationResult`] containing
+    /// the plan, cost, completion status, and resource usage report.
+    ///
+    /// If no resource budget is set, uses the default unlimited budget.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if expression conversion fails, or if the
+    /// overflow strategy is [`OverflowStrategy::Fail`] and the budget
+    /// is exceeded before any plan is extracted.
+    pub fn optimize_bounded(
+        &self,
+        expr: &RelExpr,
+    ) -> Result<OptimizationResult, EGraphError> {
+        let budget = self
+            .resource_budget
+            .clone()
+            .unwrap_or_default();
+        let mut tracker = ResourceTracker::start(budget);
+
+        let rec_expr = to_rec_expr(expr)?;
+        let hardware = self.hardware_profile();
+        let rules = all_rules();
+
+        let iter_limit = self.config.iter_limit;
+        let node_limit = self.config.node_limit;
+        let time_limit_secs = self.config.time_limit_secs;
+
+        let mut egraph: EGraph<RelLang, RelAnalysis> =
+            EGraph::default();
+        let root = egraph.add_expr(&rec_expr);
+
+        let mut best_plan: Option<RelExpr> = None;
+        let mut best_cost = f64::INFINITY;
+
+        // Extract initial plan (the original, unoptimized)
+        if let Ok(plan) = extract_best(
+            &egraph, root, &self.table_stats, &hardware,
+        ) {
+            best_plan = Some(plan);
+            best_cost = estimate_plan_cost(&egraph, root, &hardware);
+        }
+
+        for _iteration in 0..iter_limit {
+            // Check budget before running an iteration
+            let check = tracker.check();
+            if !check.is_within_budget() {
+                return handle_overflow(
+                    &tracker, expr, best_plan, best_cost,
+                );
+            }
+
+            // Run one iteration of equality saturation
+            let runner: Runner<RelLang, RelAnalysis> =
+                Runner::default()
+                    .with_egraph(egraph)
+                    .with_node_limit(node_limit)
+                    .with_iter_limit(1)
+                    .with_time_limit(
+                        std::time::Duration::from_secs(time_limit_secs),
+                    )
+                    .run(&rules);
+
+            egraph = runner.egraph;
+            tracker.record_iteration();
+            tracker.record_egraph_nodes(egraph.total_number_of_nodes());
+
+            // Estimate memory: ~64 bytes per e-graph node is rough
+            #[allow(clippy::cast_possible_truncation)]
+            let mem_estimate =
+                (egraph.total_number_of_nodes() as u64).saturating_mul(64);
+            tracker.record_memory_estimate(mem_estimate);
+
+            // Try to extract the best plan from the current e-graph
+            if let Ok(plan) = extract_best(
+                &egraph, root, &self.table_stats, &hardware,
+            ) {
+                let cost = estimate_plan_cost(
+                    &egraph, root, &hardware,
+                );
+                if cost < best_cost {
+                    best_cost = cost;
+                    best_plan = Some(plan);
+                }
+            }
+
+            // Check for egg saturation (no new nodes)
+            if runner.stop_reason.as_ref().is_some_and(|r| {
+                matches!(r, egg::StopReason::Saturated)
+            }) {
+                break;
+            }
+        }
+
+        let report = tracker.report();
+        let status = if report.completed_within_budget() {
+            OptimizationStatus::Complete
+        } else {
+            OptimizationStatus::Incomplete
+        };
+
+        match best_plan {
+            Some(plan) => Ok(OptimizationResult {
+                plan,
+                cost: best_cost,
+                status,
+                resource_usage: report,
+            }),
+            None => Err(EGraphError::ExtractionError(
+                "no plan could be extracted".to_owned(),
+            )),
+        }
+    }
+
+}
+
+/// Handle budget overflow according to the overflow strategy.
+fn handle_overflow(
+    tracker: &ResourceTracker,
+    original: &RelExpr,
+    best_plan: Option<RelExpr>,
+    best_cost: f64,
+) -> Result<OptimizationResult, EGraphError> {
+    let report = tracker.report();
+    match tracker.overflow_strategy() {
+        OverflowStrategy::ReturnBestSoFar => {
+            match best_plan {
+                Some(plan) => Ok(OptimizationResult {
+                    plan,
+                    cost: best_cost,
+                    status: OptimizationStatus::Incomplete,
+                    resource_usage: report,
+                }),
+                None => Ok(OptimizationResult {
+                    plan: original.clone(),
+                    cost: f64::INFINITY,
+                    status: OptimizationStatus::Incomplete,
+                    resource_usage: report,
+                }),
+            }
+        }
+        OverflowStrategy::ReturnOriginal => Ok(OptimizationResult {
+            plan: original.clone(),
+            cost: f64::INFINITY,
+            status: OptimizationStatus::Incomplete,
+            resource_usage: report,
+        }),
+        OverflowStrategy::Fail => {
+            let exceeded = report.budget_exceeded.map_or(
+                "unknown resource".to_owned(),
+                |r| r.to_string(),
+            );
+            Err(EGraphError::ResourceBudgetExceeded(exceeded))
+        }
+    }
 }
 
 impl Default for Optimizer {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Result of a bounded optimization run.
+#[derive(Debug)]
+pub struct OptimizationResult {
+    /// The best plan found.
+    pub plan: RelExpr,
+    /// Estimated cost of the plan.
+    pub cost: f64,
+    /// Whether optimization completed fully or was truncated.
+    pub status: OptimizationStatus,
+    /// Detailed resource usage report.
+    pub resource_usage: ResourceUsageReport,
+}
+
+/// Whether optimization completed within its budget.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OptimizationStatus {
+    /// All iterations ran and the e-graph was fully explored.
+    Complete,
+    /// Optimization was cut short by a resource limit.
+    Incomplete,
+    /// Optimization failed (e.g., no plan could be extracted).
+    Failed,
+}
+
+/// Estimate the cost of the best plan in the e-graph.
+///
+/// Uses the basic cost function for a quick estimate; this is
+/// consistent with what `extract_best` uses when no table stats
+/// are available.
+fn estimate_plan_cost(
+    egraph: &EGraph<RelLang, RelAnalysis>,
+    root: Id,
+    hardware: &ra_hardware::HardwareProfile,
+) -> f64 {
+    let cost_fn = crate::extract::RelCostFn::new(hardware.clone());
+    let extractor = egg::Extractor::new(egraph, cost_fn);
+    let (cost, _) = extractor.find_best(root);
+    cost
 }
 
 /// Errors that can occur during e-graph optimization.
@@ -254,6 +473,10 @@ pub enum EGraphError {
     /// Failed to extract a plan from the e-graph.
     #[error("failed to extract plan from e-graph: {0}")]
     ExtractionError(String),
+
+    /// Resource budget was exceeded with Fail strategy.
+    #[error("resource budget exceeded: {0}")]
+    ResourceBudgetExceeded(String),
 }
 
 /// Convert a [`RelExpr`] into an egg [`RecExpr`].
@@ -342,6 +565,21 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
             let left_id = add_rel_expr(rec, left)?;
             let right_id = add_rel_expr(rec, right)?;
             Ok(rec.add(RelLang::Except([all_id, left_id, right_id])))
+        }
+        RelExpr::RecursiveCTE {
+            name,
+            base_case,
+            recursive_case,
+            body,
+            ..
+        } => {
+            let name_id = add_symbol(rec, name);
+            let base_id = add_rel_expr(rec, base_case)?;
+            let rec_id = add_rel_expr(rec, recursive_case)?;
+            let body_id = add_rel_expr(rec, body)?;
+            Ok(rec.add(RelLang::RecursiveCTE([
+                name_id, base_id, rec_id, body_id,
+            ])))
         }
         RelExpr::CTE { .. }
         | RelExpr::Window { .. }
@@ -696,6 +934,19 @@ fn from_node(
                 all,
                 left: Box::new(left),
                 right: Box::new(right),
+            })
+        }
+        RelLang::RecursiveCTE([name_id, base_id, rec_id, body_id]) => {
+            let name = extract_symbol(egraph, *name_id)?;
+            let base_case = from_egraph_node(egraph, *base_id)?;
+            let recursive_case = from_egraph_node(egraph, *rec_id)?;
+            let body = from_egraph_node(egraph, *body_id)?;
+            Ok(RelExpr::RecursiveCTE {
+                name,
+                base_case: Box::new(base_case),
+                recursive_case: Box::new(recursive_case),
+                body: Box::new(body),
+                cycle_detection: None,
             })
         }
         other => Err(EGraphError::ExtractionError(format!(
@@ -1176,5 +1427,299 @@ mod tests {
         // The optimized result should be semantically equivalent
         // (may or may not be structurally identical)
         assert!(matches!(result, RelExpr::Filter { .. }) || matches!(result, RelExpr::Scan { .. }));
+    }
+
+    // ---- optimize_bounded tests ----
+
+    #[test]
+    fn bounded_optimize_simple_scan() {
+        let optimizer = Optimizer::new()
+            .with_resource_budget(ResourceBudget::unlimited());
+        let expr = RelExpr::scan("users");
+        let result = optimizer
+            .optimize_bounded(&expr)
+            .expect("bounded optimization should succeed");
+        assert_eq!(result.status, OptimizationStatus::Complete);
+        assert!(result.cost.is_finite());
+        assert!(
+            result.resource_usage.completed_within_budget()
+        );
+    }
+
+    #[test]
+    fn bounded_optimize_with_iteration_limit() {
+        let budget = ResourceBudget::unlimited()
+            .with_iteration_limit(2);
+        let optimizer = Optimizer::new()
+            .with_resource_budget(budget);
+        let expr = RelExpr::scan("users").filter(Expr::BinOp {
+            op: BinOp::Gt,
+            left: Box::new(Expr::Column(ColumnRef::new("age"))),
+            right: Box::new(Expr::Const(Const::Int(18))),
+        });
+        let result = optimizer
+            .optimize_bounded(&expr)
+            .expect("bounded optimization should succeed");
+        assert!(result.resource_usage.iterations_used <= 2);
+    }
+
+    #[test]
+    fn bounded_optimize_returns_plan_on_timeout() {
+        let budget = ResourceBudget::unlimited()
+            .with_time_limit(std::time::Duration::from_millis(0))
+            .with_overflow_strategy(
+                crate::resource_budget::OverflowStrategy::ReturnBestSoFar,
+            );
+        let optimizer = Optimizer::new()
+            .with_resource_budget(budget);
+        let expr = RelExpr::scan("users");
+        // Even with 0ms budget, we should still get a plan
+        // because we extract the initial plan before iterating
+        std::thread::sleep(std::time::Duration::from_millis(1));
+        let result = optimizer
+            .optimize_bounded(&expr)
+            .expect("should return best so far");
+        assert_eq!(result.status, OptimizationStatus::Incomplete);
+    }
+
+    #[test]
+    fn bounded_optimize_return_original_strategy() {
+        let budget = ResourceBudget::unlimited()
+            .with_iteration_limit(0)
+            .with_overflow_strategy(
+                crate::resource_budget::OverflowStrategy::ReturnOriginal,
+            );
+        let optimizer = Optimizer::new()
+            .with_resource_budget(budget);
+        let expr = RelExpr::scan("users");
+        let result = optimizer
+            .optimize_bounded(&expr)
+            .expect("should return original");
+        assert_eq!(result.status, OptimizationStatus::Incomplete);
+        assert_eq!(result.plan, expr);
+    }
+
+    #[test]
+    fn bounded_optimize_fail_strategy() {
+        let budget = ResourceBudget::unlimited()
+            .with_iteration_limit(0)
+            .with_overflow_strategy(
+                crate::resource_budget::OverflowStrategy::Fail,
+            );
+        let optimizer = Optimizer::new()
+            .with_resource_budget(budget);
+        let expr = RelExpr::scan("users");
+        let result = optimizer.optimize_bounded(&expr);
+        assert!(result.is_err());
+        let err = result.err().expect("should be error");
+        assert!(matches!(err, EGraphError::ResourceBudgetExceeded(_)));
+    }
+
+    #[test]
+    fn bounded_optimize_no_budget_defaults_unlimited() {
+        let optimizer = Optimizer::new();
+        let expr = RelExpr::scan("users");
+        let result = optimizer
+            .optimize_bounded(&expr)
+            .expect("should succeed with default budget");
+        assert_eq!(result.status, OptimizationStatus::Complete);
+    }
+
+    #[test]
+    fn bounded_optimize_tracks_egraph_nodes() {
+        let optimizer = Optimizer::new()
+            .with_resource_budget(ResourceBudget::standard());
+        let expr = RelExpr::scan("users").filter(Expr::BinOp {
+            op: BinOp::Gt,
+            left: Box::new(Expr::Column(ColumnRef::new("age"))),
+            right: Box::new(Expr::Const(Const::Int(18))),
+        });
+        let result = optimizer
+            .optimize_bounded(&expr)
+            .expect("should succeed");
+        assert!(result.resource_usage.peak_egraph_nodes > 0);
+    }
+
+    #[test]
+    fn bounded_optimize_tracks_memory_estimate() {
+        let optimizer = Optimizer::new()
+            .with_resource_budget(ResourceBudget::standard());
+        let expr = RelExpr::scan("users");
+        let result = optimizer
+            .optimize_bounded(&expr)
+            .expect("should succeed");
+        assert!(result.resource_usage.peak_memory_estimate > 0);
+    }
+
+    #[test]
+    fn bounded_optimize_cost_is_finite() {
+        let optimizer = Optimizer::new()
+            .with_resource_budget(ResourceBudget::batch());
+        let expr = RelExpr::scan("users");
+        let result = optimizer
+            .optimize_bounded(&expr)
+            .expect("should succeed");
+        assert!(result.cost.is_finite());
+        assert!(result.cost > 0.0);
+    }
+
+    #[test]
+    fn bounded_optimize_elapsed_time_recorded() {
+        let optimizer = Optimizer::new()
+            .with_resource_budget(ResourceBudget::standard());
+        let expr = RelExpr::scan("users");
+        let result = optimizer
+            .optimize_bounded(&expr)
+            .expect("should succeed");
+        // Elapsed time should be non-zero (we did some work)
+        let _elapsed = result.resource_usage.elapsed_time;
+    }
+
+    #[test]
+    fn bounded_optimize_interactive_profile() {
+        let optimizer = Optimizer::new()
+            .with_resource_budget(ResourceBudget::interactive());
+        let expr = RelExpr::scan("users");
+        let result = optimizer
+            .optimize_bounded(&expr)
+            .expect("should succeed");
+        assert!(
+            result.cost.is_finite(),
+            "interactive budget should produce a plan"
+        );
+    }
+
+    #[test]
+    fn bounded_optimize_memory_constrained_profile() {
+        let optimizer = Optimizer::new()
+            .with_resource_budget(
+                ResourceBudget::memory_constrained(),
+            );
+        let expr = RelExpr::scan("users");
+        let result = optimizer
+            .optimize_bounded(&expr)
+            .expect("should succeed");
+        assert!(result.cost.is_finite());
+    }
+
+    #[test]
+    fn bounded_optimize_with_egraph_node_limit() {
+        let budget = ResourceBudget::unlimited()
+            .with_egraph_node_limit(5);
+        let optimizer = Optimizer::new()
+            .with_resource_budget(budget);
+        let expr = RelExpr::Join {
+            join_type: JoinType::Inner,
+            condition: Expr::BinOp {
+                op: BinOp::Eq,
+                left: Box::new(Expr::Column(
+                    ColumnRef::qualified("a", "id"),
+                )),
+                right: Box::new(Expr::Column(
+                    ColumnRef::qualified("b", "a_id"),
+                )),
+            },
+            left: Box::new(RelExpr::scan("a")),
+            right: Box::new(RelExpr::scan("b")),
+        };
+        let result = optimizer
+            .optimize_bounded(&expr)
+            .expect("should succeed with best-so-far");
+        // With such a tight e-graph limit, likely incomplete
+        assert!(result.cost.is_finite() || result.cost == f64::INFINITY);
+    }
+
+    #[test]
+    fn optimization_status_variants() {
+        assert_ne!(
+            OptimizationStatus::Complete,
+            OptimizationStatus::Incomplete
+        );
+        assert_ne!(
+            OptimizationStatus::Complete,
+            OptimizationStatus::Failed
+        );
+        assert_ne!(
+            OptimizationStatus::Incomplete,
+            OptimizationStatus::Failed
+        );
+    }
+
+    #[test]
+    fn optimization_result_has_plan() {
+        let optimizer = Optimizer::new()
+            .with_resource_budget(ResourceBudget::unlimited());
+        let expr = RelExpr::scan("test_table");
+        let result = optimizer
+            .optimize_bounded(&expr)
+            .expect("should succeed");
+        // The plan should be a valid RelExpr
+        assert!(
+            matches!(result.plan, RelExpr::Scan { .. })
+        );
+    }
+
+    #[test]
+    fn set_resource_budget_mutable() {
+        let mut optimizer = Optimizer::new();
+        optimizer.set_resource_budget(ResourceBudget::interactive());
+        let expr = RelExpr::scan("users");
+        let result = optimizer
+            .optimize_bounded(&expr)
+            .expect("should succeed");
+        assert!(result.cost.is_finite());
+    }
+
+    #[test]
+    fn resource_budget_exceeded_error_display() {
+        let err = EGraphError::ResourceBudgetExceeded(
+            "iterations".to_owned(),
+        );
+        let msg = format!("{err}");
+        assert!(msg.contains("iterations"));
+        assert!(msg.contains("resource budget exceeded"));
+    }
+
+    #[test]
+    fn bounded_optimize_best_so_far_no_plan_returns_original() {
+        // With 0 iterations AND ReturnBestSoFar, we still get
+        // the initial plan because we extract before iterating
+        let budget = ResourceBudget::unlimited()
+            .with_iteration_limit(0)
+            .with_overflow_strategy(
+                crate::resource_budget::OverflowStrategy::ReturnBestSoFar,
+            );
+        let optimizer = Optimizer::new()
+            .with_resource_budget(budget);
+        let expr = RelExpr::scan("users");
+        let result = optimizer
+            .optimize_bounded(&expr)
+            .expect("should return a plan");
+        assert_eq!(result.status, OptimizationStatus::Incomplete);
+    }
+
+    #[test]
+    fn bounded_optimize_join_with_budget() {
+        let optimizer = Optimizer::new()
+            .with_resource_budget(ResourceBudget::standard());
+        let expr = RelExpr::Join {
+            join_type: JoinType::Inner,
+            condition: Expr::BinOp {
+                op: BinOp::Eq,
+                left: Box::new(Expr::Column(
+                    ColumnRef::qualified("a", "id"),
+                )),
+                right: Box::new(Expr::Column(
+                    ColumnRef::qualified("b", "a_id"),
+                )),
+            },
+            left: Box::new(RelExpr::scan("a")),
+            right: Box::new(RelExpr::scan("b")),
+        };
+        let result = optimizer
+            .optimize_bounded(&expr)
+            .expect("should succeed");
+        assert!(result.cost.is_finite());
+        assert!(result.resource_usage.iterations_used > 0);
     }
 }

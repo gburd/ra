@@ -238,6 +238,42 @@ fn format_plan_tree_impl(expr: &RelExpr, buf: &mut String, prefix: &str, is_last
             let child_prefix = format!("{prefix}{child_prefix_ext}");
             format_plan_tree_impl(input, buf, &child_prefix, true);
         }
+        RelExpr::RecursiveCTE {
+            name,
+            base_case,
+            recursive_case,
+            body,
+            cycle_detection,
+        } => {
+            buf.push_str(prefix);
+            buf.push_str(connector);
+            buf.push_str(&format!("RecursiveCTE({name})"));
+            if let Some(cd) = cycle_detection {
+                if let Some(depth) = cd.max_depth {
+                    buf.push_str(&format!(" [max_depth={depth}]"));
+                }
+            }
+            buf.push('\n');
+
+            let child_prefix = format!("{prefix}{child_prefix_ext}");
+            buf.push_str(&child_prefix);
+            buf.push_str("├─ base:\n");
+            format_plan_tree_impl(
+                base_case,
+                buf,
+                &format!("{child_prefix}│  "),
+                true,
+            );
+            buf.push_str(&child_prefix);
+            buf.push_str("├─ recursive:\n");
+            format_plan_tree_impl(
+                recursive_case,
+                buf,
+                &format!("{child_prefix}│  "),
+                true,
+            );
+            format_plan_tree_impl(body, buf, &child_prefix, true);
+        }
         RelExpr::Values { rows } => {
             buf.push_str(prefix);
             buf.push_str(connector);

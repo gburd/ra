@@ -3,7 +3,11 @@
 
 mod diff_validator;
 mod display;
+pub(crate) mod plan_diff;
+pub(crate) mod side_by_side;
+mod stats_commands;
 mod test_executor;
+mod visualize;
 
 use std::path::{Path, PathBuf};
 
@@ -97,6 +101,28 @@ enum Commands {
         /// Hardware profile for cost estimation (edge, mobile, laptop, desktop, server, gpu-server, auto).
         #[arg(long, default_value = "auto")]
         hardware_profile: String,
+        /// Diff output format: colored, plain, side-by-side, compact.
+        #[arg(long)]
+        diff: Option<String>,
+        /// Disable color output.
+        #[arg(long)]
+        no_color: bool,
+        /// Resource budget profile: interactive, standard, batch,
+        /// memory-constrained, unlimited.
+        #[arg(long)]
+        resource_budget: Option<String>,
+        /// Maximum wall-clock time for optimization (e.g. "100ms", "1s", "10s").
+        #[arg(long)]
+        max_time: Option<String>,
+        /// Maximum memory for optimization (e.g. "10MB", "500MB", "2GB").
+        #[arg(long)]
+        max_memory: Option<String>,
+        /// Maximum number of optimization iterations.
+        #[arg(long)]
+        max_iterations: Option<usize>,
+        /// Overflow strategy: best-so-far, original, fail.
+        #[arg(long)]
+        overflow_strategy: Option<String>,
     },
     /// Gather database metadata and write to a JSON file.
     GatherMetadata {
@@ -118,6 +144,58 @@ enum Commands {
         /// Hardware profile for cost estimation.
         #[arg(long, default_value = "auto")]
         hardware_profile: String,
+    },
+    /// Launch interactive TUI for real-time plan monitoring.
+    Tui {
+        /// Path to a timeline JSON file to load.
+        #[arg(long)]
+        timeline: Option<String>,
+        /// Run with built-in demo data.
+        #[arg(long)]
+        demo: bool,
+        /// Run in headless mode (no terminal UI, for testing).
+        #[arg(long)]
+        headless: bool,
+    },
+    /// Statistics timeline commands (play, feedback, visualize).
+    #[command(subcommand)]
+    StatsTimeline(StatsTimelineCommands),
+}
+
+#[derive(Subcommand)]
+enum StatsTimelineCommands {
+    /// Replay a statistics timeline with streaming output.
+    Play {
+        /// Path to a timeline TOML file.
+        #[arg(long)]
+        timeline: String,
+        /// Output format (table, json, ascii, html).
+        #[arg(long, default_value = "table")]
+        format: String,
+        /// Playback speed multiplier (0 = instant).
+        #[arg(long, default_value = "0")]
+        speed: f64,
+    },
+    /// Simulate batch execution with feedback loop.
+    Feedback {
+        /// Path to a timeline TOML file.
+        #[arg(long)]
+        timeline: String,
+        /// Output format (table, json, ascii, html).
+        #[arg(long, default_value = "table")]
+        format: String,
+        /// Number of feedback entries per batch.
+        #[arg(long, default_value = "5")]
+        batch_size: usize,
+    },
+    /// Generate cost/cardinality evolution charts.
+    Visualize {
+        /// Path to a timeline TOML file.
+        #[arg(long)]
+        timeline: String,
+        /// Output format (table, json, ascii, html).
+        #[arg(long, default_value = "ascii")]
+        format: String,
     },
 }
 
@@ -166,8 +244,33 @@ fn main() -> Result<()> {
         Commands::Explain { query, hardware_profile } => {
             cmd_explain(&query, &hardware_profile, cli.verbose, cli.quiet)
         }
-        Commands::Optimize { query, hardware_profile } => {
-            cmd_optimize(&query, &hardware_profile, cli.verbose, cli.quiet)
+        Commands::Optimize {
+            query,
+            hardware_profile,
+            diff,
+            no_color,
+            resource_budget,
+            max_time,
+            max_memory,
+            max_iterations,
+            overflow_strategy,
+        } => {
+            let budget = build_resource_budget(
+                resource_budget.as_deref(),
+                max_time.as_deref(),
+                max_memory.as_deref(),
+                max_iterations,
+                overflow_strategy.as_deref(),
+            )?;
+            cmd_optimize(
+                &query,
+                &hardware_profile,
+                diff.as_deref(),
+                no_color,
+                budget.as_ref(),
+                cli.verbose,
+                cli.quiet,
+            )
         }
         Commands::GatherMetadata { schema, output } => {
             cmd_gather_metadata(&schema, &output, cli.verbose, cli.quiet)
@@ -185,6 +288,53 @@ fn main() -> Result<()> {
                 cli.quiet,
             )
         }
+        Commands::Tui {
+            timeline,
+            demo,
+            headless,
+        } => cmd_tui(timeline.as_deref(), demo, headless),
+        Commands::StatsTimeline(sub) => match sub {
+            StatsTimelineCommands::Play {
+                timeline,
+                format,
+                speed,
+            } => {
+                let fmt =
+                    stats_commands::OutputFormat::from_str_arg(&format)?;
+                stats_commands::cmd_stats_play(
+                    &timeline,
+                    fmt,
+                    speed,
+                    cli.verbose,
+                )
+            }
+            StatsTimelineCommands::Feedback {
+                timeline,
+                format,
+                batch_size,
+            } => {
+                let fmt =
+                    stats_commands::OutputFormat::from_str_arg(&format)?;
+                stats_commands::cmd_stats_feedback(
+                    &timeline,
+                    fmt,
+                    batch_size,
+                    cli.verbose,
+                )
+            }
+            StatsTimelineCommands::Visualize {
+                timeline,
+                format,
+            } => {
+                let fmt =
+                    stats_commands::OutputFormat::from_str_arg(&format)?;
+                stats_commands::cmd_stats_visualize(
+                    &timeline,
+                    fmt,
+                    cli.verbose,
+                )
+            }
+        },
     }
 }
 
@@ -800,44 +950,157 @@ fn cmd_explain(query: &str, hardware_profile_name: &str, verbose: bool, quiet: b
 
 // ── optimize ────────────────────────────────────────────────
 
-fn cmd_optimize(query: &str, hardware_profile_name: &str, verbose: bool, quiet: bool) -> Result<()> {
+fn cmd_optimize(
+    query: &str,
+    hardware_profile_name: &str,
+    diff_format: Option<&str>,
+    no_color: bool,
+    budget: Option<&ra_engine::ResourceBudget>,
+    verbose: bool,
+    quiet: bool,
+) -> Result<()> {
+    let color_mode = if no_color {
+        plan_diff::ColorMode::Never
+    } else if std::env::var("FORCE_COLOR").is_ok() {
+        plan_diff::ColorMode::Always
+    } else {
+        plan_diff::ColorMode::Auto
+    };
+    plan_diff::apply_color_mode(color_mode);
+
     let plan = sql_to_relexpr(query)
         .with_context(|| format!("failed to parse SQL: {query}"))?;
-
     let hardware = load_hardware_profile(hardware_profile_name)?;
 
     let mut optimizer = Optimizer::new();
     optimizer.set_hardware_profile(hardware.clone());
 
-    let optimized = optimizer
-        .optimize(&plan)
-        .with_context(|| format!("failed to optimize query: {query}"))?;
-
-    if !quiet {
-        print_header("Query Optimization");
-        eprintln!("  {}: {query}", "SQL".bold());
-
-        if verbose {
-            eprintln!("  {}: {} ({} cores, {} MB L3 cache, {}-bit SIMD)",
-                "Hardware".bold(),
-                hardware.name,
-                hardware.cpu_cores,
-                hardware.l3_cache_bytes / (1024 * 1024),
-                hardware.simd_width_bits
-            );
-        }
-
-        eprintln!();
-
-        eprintln!("{}", "Original Plan:".bold());
-        eprintln!("{}", format_plan_tree(&plan));
-        eprintln!();
-
-        eprintln!("{}", "Optimized Plan:".bold());
-        eprintln!("{}", format_plan_tree(&optimized));
+    if let Some(b) = budget {
+        optimizer.set_resource_budget(b.clone());
     }
 
+    if budget.is_some() {
+        optimize_bounded(
+            &optimizer, &plan, &hardware, diff_format, verbose,
+            quiet, query,
+        )
+    } else {
+        optimize_unbounded(
+            &optimizer, &plan, &hardware, diff_format, verbose,
+            quiet, query,
+        )
+    }
+}
+
+fn optimize_bounded(
+    optimizer: &Optimizer,
+    plan: &ra_core::algebra::RelExpr,
+    hardware: &ra_hardware::HardwareProfile,
+    diff_format: Option<&str>,
+    verbose: bool,
+    quiet: bool,
+    query: &str,
+) -> Result<()> {
+    let result = optimizer.optimize_bounded(plan).with_context(|| {
+        format!("failed to optimize query: {query}")
+    })?;
+
+    if !quiet {
+        print_optimization_header(
+            "Query Optimization (Resource-Bounded)",
+            query,
+            hardware,
+            verbose,
+        );
+        print_resource_usage(&result, verbose);
+        eprintln!();
+        print_plan_output(plan, &result.plan, diff_format)?;
+    }
     Ok(())
+}
+
+fn optimize_unbounded(
+    optimizer: &Optimizer,
+    plan: &ra_core::algebra::RelExpr,
+    hardware: &ra_hardware::HardwareProfile,
+    diff_format: Option<&str>,
+    verbose: bool,
+    quiet: bool,
+    query: &str,
+) -> Result<()> {
+    let optimized = optimizer.optimize(plan).with_context(|| {
+        format!("failed to optimize query: {query}")
+    })?;
+
+    if !quiet {
+        print_optimization_header(
+            "Query Optimization",
+            query,
+            hardware,
+            verbose,
+        );
+        print_plan_output(plan, &optimized, diff_format)?;
+    }
+    Ok(())
+}
+
+fn print_optimization_header(
+    title: &str,
+    query: &str,
+    hardware: &ra_hardware::HardwareProfile,
+    verbose: bool,
+) {
+    print_header(title);
+    eprintln!("  {}: {query}", "SQL".bold());
+    if verbose {
+        eprintln!(
+            "  {}: {} ({} cores, {} MB L3, {}-bit SIMD)",
+            "Hardware".bold(),
+            hardware.name,
+            hardware.cpu_cores,
+            hardware.l3_cache_bytes / (1024 * 1024),
+            hardware.simd_width_bits
+        );
+    }
+    eprintln!();
+}
+
+fn print_plan_output(
+    original: &ra_core::algebra::RelExpr,
+    optimized: &ra_core::algebra::RelExpr,
+    diff_format: Option<&str>,
+) -> Result<()> {
+    if let Some(fmt_str) = diff_format {
+        let fmt = parse_diff_format(fmt_str)?;
+        let diff_output =
+            plan_diff::render_diff(original, optimized, fmt);
+        eprintln!("{diff_output}");
+    } else {
+        eprintln!("{}", "Original Plan:".bold());
+        eprintln!("{}", format_plan_tree(original));
+        eprintln!();
+        eprintln!("{}", "Optimized Plan:".bold());
+        eprintln!("{}", format_plan_tree(optimized));
+    }
+    Ok(())
+}
+
+/// Parse a diff format string into a `DiffFormat`.
+fn parse_diff_format(s: &str) -> Result<plan_diff::DiffFormat> {
+    match s.to_lowercase().as_str() {
+        "colored" | "color" => Ok(plan_diff::DiffFormat::Colored),
+        "plain" | "text" => Ok(plan_diff::DiffFormat::Plain),
+        "side-by-side" | "sbs" => {
+            Ok(plan_diff::DiffFormat::SideBySide)
+        }
+        "compact" | "summary" => {
+            Ok(plan_diff::DiffFormat::Compact)
+        }
+        _ => bail!(
+            "unknown diff format: '{s}'. \
+             Valid options: colored, plain, side-by-side, compact"
+        ),
+    }
 }
 
 // ── gather-metadata ────────────────────────────────────────
@@ -1027,6 +1290,64 @@ fn cmd_compare(
     Ok(())
 }
 
+// ── tui ─────────────────────────────────────────────────────
+
+fn cmd_tui(
+    timeline_path: Option<&str>,
+    demo: bool,
+    headless: bool,
+) -> Result<()> {
+    let timeline = if demo {
+        ra_tui::Timeline::demo()
+    } else if let Some(path) = timeline_path {
+        let source = std::fs::read_to_string(path)
+            .with_context(|| {
+                format!("reading timeline file: {path}")
+            })?;
+
+        // Try JSON first (native format), fall back to demo if TOML
+        if path.ends_with(".json") {
+            serde_json::from_str(&source).with_context(|| {
+                format!("parsing timeline JSON from: {path}")
+            })?
+        } else if path.ends_with(".toml") {
+            // TOML statistics timelines not yet supported in TUI
+            // (different format - statistics evolution vs optimizer snapshots)
+            eprintln!("Note: TOML statistics timelines not yet supported in TUI.");
+            eprintln!("Using demo timeline instead.");
+            eprintln!("Tip: Use 'ra-cli tui --demo' for the demo timeline.");
+            ra_tui::Timeline::demo()
+        } else {
+            // Try JSON parse as fallback
+            serde_json::from_str(&source).with_context(|| {
+                format!("parsing timeline from: {path}")
+            })?
+        }
+    } else {
+        bail!(
+            "specify --demo for demo data or \
+             --timeline <path> to load a timeline file"
+        );
+    };
+
+    let mut app =
+        ra_tui::App::new(timeline).context("initializing TUI")?;
+
+    if headless {
+        let final_cost = app
+            .run_headless()
+            .context("running headless TUI")?;
+        eprintln!(
+            "Headless run complete. Final cost: {final_cost:.0}"
+        );
+        return Ok(());
+    }
+
+    app.run().context("running TUI")?;
+
+    Ok(())
+}
+
 // ── Helpers ─────────────────────────────────────────────────
 
 /// Load a hardware profile by name.
@@ -1096,6 +1417,178 @@ fn find_rule_by_id(
         }
     }
     None
+}
+
+// ── Resource budget helpers ──────────────────────────────────
+
+/// Build a [`ResourceBudget`] from CLI flags.
+fn build_resource_budget(
+    profile: Option<&str>,
+    max_time: Option<&str>,
+    max_memory: Option<&str>,
+    max_iterations: Option<usize>,
+    overflow_strategy: Option<&str>,
+) -> Result<Option<ra_engine::ResourceBudget>> {
+    let has_custom = max_time.is_some()
+        || max_memory.is_some()
+        || max_iterations.is_some()
+        || overflow_strategy.is_some();
+
+    if profile.is_none() && !has_custom {
+        return Ok(None);
+    }
+
+    let mut budget = match profile {
+        Some("interactive") => ra_engine::ResourceBudget::interactive(),
+        Some("standard") => ra_engine::ResourceBudget::standard(),
+        Some("batch") => ra_engine::ResourceBudget::batch(),
+        Some("memory-constrained") => {
+            ra_engine::ResourceBudget::memory_constrained()
+        }
+        Some("unlimited") => ra_engine::ResourceBudget::unlimited(),
+        Some(other) => bail!(
+            "unknown resource budget profile: '{other}'. \
+             Valid: interactive, standard, batch, \
+             memory-constrained, unlimited"
+        ),
+        None => ra_engine::ResourceBudget::standard(),
+    };
+
+    if let Some(t) = max_time {
+        budget = budget.with_time_limit(parse_duration(t)?);
+    }
+    if let Some(m) = max_memory {
+        budget = budget.with_memory_limit(parse_byte_size(m)?);
+    }
+    if let Some(n) = max_iterations {
+        budget = budget.with_iteration_limit(n);
+    }
+    if let Some(s) = overflow_strategy {
+        budget = budget.with_overflow_strategy(parse_overflow(s)?);
+    }
+
+    Ok(Some(budget))
+}
+
+/// Parse a human-readable duration string (e.g. "100ms", "1s", "10s").
+fn parse_duration(s: &str) -> Result<std::time::Duration> {
+    let s = s.trim();
+    if let Some(ms) = s.strip_suffix("ms") {
+        let n: u64 = ms
+            .trim()
+            .parse()
+            .context("invalid millisecond value")?;
+        return Ok(std::time::Duration::from_millis(n));
+    }
+    if let Some(secs) = s.strip_suffix('s') {
+        let n: u64 =
+            secs.trim().parse().context("invalid seconds value")?;
+        return Ok(std::time::Duration::from_secs(n));
+    }
+    // Default to seconds
+    let n: u64 = s.parse().context(
+        "invalid duration; use e.g. '100ms' or '1s'",
+    )?;
+    Ok(std::time::Duration::from_secs(n))
+}
+
+/// Parse a human-readable byte size (e.g. "10MB", "500MB", "2GB").
+fn parse_byte_size(s: &str) -> Result<u64> {
+    let s = s.trim();
+    let upper = s.to_uppercase();
+    if let Some(gb) = upper.strip_suffix("GB") {
+        let n: u64 =
+            gb.trim().parse().context("invalid GB value")?;
+        return Ok(n.saturating_mul(1024 * 1024 * 1024));
+    }
+    if let Some(mb) = upper.strip_suffix("MB") {
+        let n: u64 =
+            mb.trim().parse().context("invalid MB value")?;
+        return Ok(n.saturating_mul(1024 * 1024));
+    }
+    if let Some(kb) = upper.strip_suffix("KB") {
+        let n: u64 =
+            kb.trim().parse().context("invalid KB value")?;
+        return Ok(n.saturating_mul(1024));
+    }
+    s.parse::<u64>().context(
+        "invalid byte size; use e.g. '10MB', '2GB', or raw bytes",
+    )
+}
+
+/// Parse an overflow strategy string.
+fn parse_overflow(
+    s: &str,
+) -> Result<ra_engine::OverflowStrategy> {
+    match s.to_lowercase().as_str() {
+        "best-so-far" | "best" => {
+            Ok(ra_engine::OverflowStrategy::ReturnBestSoFar)
+        }
+        "original" => {
+            Ok(ra_engine::OverflowStrategy::ReturnOriginal)
+        }
+        "fail" => Ok(ra_engine::OverflowStrategy::Fail),
+        _ => bail!(
+            "unknown overflow strategy: '{s}'. \
+             Valid: best-so-far, original, fail"
+        ),
+    }
+}
+
+/// Display resource usage from a bounded optimization result.
+fn print_resource_usage(
+    result: &ra_engine::OptimizationResult,
+    verbose: bool,
+) {
+    let usage = &result.resource_usage;
+    let status = match result.status {
+        ra_engine::OptimizationStatus::Complete => {
+            format!("{}", "complete".green())
+        }
+        ra_engine::OptimizationStatus::Incomplete => {
+            let msg = match usage.budget_exceeded {
+                Some(ref r) => format!("stopped ({r})"),
+                None => "incomplete".to_owned(),
+            };
+            format!("{}", msg.yellow())
+        }
+        ra_engine::OptimizationStatus::Failed => {
+            format!("{}", "failed".red())
+        }
+    };
+
+    eprintln!("{}", "Resource Usage:".bold());
+    eprintln!("  {}: {status}", "Status".bold());
+    eprintln!(
+        "  {}: {:.1}ms",
+        "Time".bold(),
+        usage.elapsed_time.as_secs_f64() * 1000.0,
+    );
+    eprintln!(
+        "  {}: {}",
+        "Iterations".bold(),
+        usage.iterations_used,
+    );
+    eprintln!(
+        "  {}: {}",
+        "Peak e-graph nodes".bold(),
+        usage.peak_egraph_nodes,
+    );
+
+    if verbose {
+        #[allow(clippy::cast_precision_loss)]
+        let mem_mb =
+            usage.peak_memory_estimate as f64 / (1024.0 * 1024.0);
+        eprintln!(
+            "  {}: {mem_mb:.2} MB",
+            "Peak memory (est.)".bold(),
+        );
+        eprintln!(
+            "  {}: {:.2}",
+            "Plan cost".bold(),
+            result.cost,
+        );
+    }
 }
 
 // ── Output formatting ───────────────────────────────────────

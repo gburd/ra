@@ -1,0 +1,27 @@
+[package]
+name = "ra-tui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+ra-core = { workspace = true }
+ra-engine = { workspace = true }
+ra-stats = { workspace = true }
+ra-hardware = { workspace = true }
+ra-parser = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+crossterm = { workspace = true }
+ratatui = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

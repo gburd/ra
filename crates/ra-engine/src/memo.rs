@@ -143,6 +143,22 @@ fn hash_rel_expr(expr: &RelExpr, hasher: &mut impl std::hash::Hasher) {
         RelExpr::Values { rows } => {
             rows.len().hash(hasher);
         }
+        RelExpr::RecursiveCTE {
+            name,
+            base_case,
+            recursive_case,
+            body,
+            cycle_detection,
+        } => {
+            name.hash(hasher);
+            hash_rel_expr(base_case, hasher);
+            hash_rel_expr(recursive_case, hasher);
+            hash_rel_expr(body, hasher);
+            if let Some(cd) = cycle_detection {
+                cd.track_columns.hash(hasher);
+                cd.max_depth.hash(hasher);
+            }
+        }
     }
 }
 

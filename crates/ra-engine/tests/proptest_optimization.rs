@@ -484,6 +484,16 @@ fn collect_tables_rec(expr: &RelExpr, out: &mut std::collections::HashSet<String
         | RelExpr::Distinct { input, .. } => {
             collect_tables_rec(input, out);
         }
+        RelExpr::RecursiveCTE {
+            base_case,
+            recursive_case,
+            body,
+            ..
+        } => {
+            collect_tables_rec(base_case, out);
+            collect_tables_rec(recursive_case, out);
+            collect_tables_rec(body, out);
+        }
         RelExpr::Values { .. } => {}
     }
 }

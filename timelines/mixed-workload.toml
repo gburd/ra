@@ -1,0 +1,572 @@
+# Mixed read/write workload
+#
+# Demonstrates concurrent read/write patterns where inserts, updates,
+# and deletes all affect statistics accuracy. Shows how different
+# tables evolve at different rates under a mixed workload.
+
+[metadata]
+name = "mixed-workload"
+description = "Concurrent read/write patterns affecting multiple tables"
+database = "postgresql"
+schema = "ecommerce"
+duration_seconds = 7200
+
+# -- Snapshot 0: Steady state --
+[[snapshots]]
+time_offset = 0
+label = "steady state"
+
+[[snapshots.tables]]
+name = "users"
+row_count = 100000
+page_count = 1000
+avg_row_size = 128.0
+table_size_bytes = 12800000
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 100000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 1.0
+
+[[snapshots.tables.columns]]
+name = "email"
+ndv = 100000
+null_fraction = 0.0
+avg_width = 32.0
+
+[[snapshots.tables.columns]]
+name = "status"
+ndv = 4
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables]]
+name = "orders"
+row_count = 500000
+page_count = 6000
+avg_row_size = 96.0
+table_size_bytes = 48000000
+
+[[snapshots.tables.columns]]
+name = "order_id"
+ndv = 500000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.99
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 80000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "total"
+ndv = 45000
+null_fraction = 0.0
+avg_width = 8.0
+min_value = "1.00"
+max_value = "9999.99"
+
+[[snapshots.tables]]
+name = "order_items"
+row_count = 2000000
+page_count = 20000
+avg_row_size = 80.0
+table_size_bytes = 160000000
+
+[[snapshots.tables.columns]]
+name = "item_id"
+ndv = 2000000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.98
+
+[[snapshots.tables.columns]]
+name = "order_id"
+ndv = 500000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 10000
+null_fraction = 0.0
+avg_width = 8.0
+
+# -- Snapshot 1: After peak write period --
+[[snapshots]]
+time_offset = 1800
+label = "after peak writes"
+
+[[snapshots.tables]]
+name = "users"
+row_count = 105000
+page_count = 1050
+avg_row_size = 128.0
+table_size_bytes = 13440000
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 105000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.99
+
+[[snapshots.tables.columns]]
+name = "email"
+ndv = 105000
+null_fraction = 0.0
+avg_width = 32.0
+
+[[snapshots.tables.columns]]
+name = "status"
+ndv = 4
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables]]
+name = "orders"
+row_count = 600000
+page_count = 7200
+avg_row_size = 96.0
+table_size_bytes = 57600000
+
+[[snapshots.tables.columns]]
+name = "order_id"
+ndv = 600000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.95
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 92000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "total"
+ndv = 52000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables]]
+name = "order_items"
+row_count = 2400000
+page_count = 24000
+avg_row_size = 80.0
+table_size_bytes = 192000000
+
+[[snapshots.tables.columns]]
+name = "item_id"
+ndv = 2400000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.90
+
+[[snapshots.tables.columns]]
+name = "order_id"
+ndv = 600000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 10000
+null_fraction = 0.0
+avg_width = 8.0
+
+# -- Snapshot 2: After bulk update + delete --
+[[snapshots]]
+time_offset = 3600
+label = "after bulk update and delete"
+
+[[snapshots.tables]]
+name = "users"
+row_count = 103000
+page_count = 1050
+avg_row_size = 128.0
+table_size_bytes = 13184000
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 103000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.98
+
+[[snapshots.tables.columns]]
+name = "email"
+ndv = 103000
+null_fraction = 0.0
+avg_width = 32.0
+
+[[snapshots.tables.columns]]
+name = "status"
+ndv = 4
+null_fraction = 0.02
+avg_width = 8.0
+
+[[snapshots.tables]]
+name = "orders"
+row_count = 580000
+page_count = 7200
+avg_row_size = 96.0
+table_size_bytes = 55680000
+
+[[snapshots.tables.columns]]
+name = "order_id"
+ndv = 580000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.92
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 88000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "total"
+ndv = 50000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables]]
+name = "order_items"
+row_count = 2300000
+page_count = 24000
+avg_row_size = 80.0
+table_size_bytes = 184000000
+
+[[snapshots.tables.columns]]
+name = "item_id"
+ndv = 2300000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.85
+
+[[snapshots.tables.columns]]
+name = "order_id"
+ndv = 580000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 10000
+null_fraction = 0.0
+avg_width = 8.0
+
+# -- Snapshot 3: Post ANALYZE recovery --
+[[snapshots]]
+time_offset = 5400
+label = "post-ANALYZE"
+
+[[snapshots.tables]]
+name = "users"
+row_count = 108000
+page_count = 1080
+avg_row_size = 128.0
+table_size_bytes = 13824000
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 108000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.97
+
+[[snapshots.tables.columns]]
+name = "email"
+ndv = 108000
+null_fraction = 0.0
+avg_width = 32.0
+
+[[snapshots.tables.columns]]
+name = "status"
+ndv = 4
+null_fraction = 0.01
+avg_width = 8.0
+
+[[snapshots.tables]]
+name = "orders"
+row_count = 650000
+page_count = 7800
+avg_row_size = 96.0
+table_size_bytes = 62400000
+
+[[snapshots.tables.columns]]
+name = "order_id"
+ndv = 650000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.94
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 95000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "total"
+ndv = 55000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables]]
+name = "order_items"
+row_count = 2600000
+page_count = 26000
+avg_row_size = 80.0
+table_size_bytes = 208000000
+
+[[snapshots.tables.columns]]
+name = "item_id"
+ndv = 2600000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.88
+
+[[snapshots.tables.columns]]
+name = "order_id"
+ndv = 650000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 10000
+null_fraction = 0.0
+avg_width = 8.0
+
+# -- Snapshot 4: End of workload --
+[[snapshots]]
+time_offset = 7200
+label = "end of workload"
+
+[[snapshots.tables]]
+name = "users"
+row_count = 112000
+page_count = 1120
+avg_row_size = 128.0
+table_size_bytes = 14336000
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 112000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.96
+
+[[snapshots.tables.columns]]
+name = "email"
+ndv = 112000
+null_fraction = 0.0
+avg_width = 32.0
+
+[[snapshots.tables.columns]]
+name = "status"
+ndv = 4
+null_fraction = 0.01
+avg_width = 8.0
+
+[[snapshots.tables]]
+name = "orders"
+row_count = 720000
+page_count = 8640
+avg_row_size = 96.0
+table_size_bytes = 69120000
+
+[[snapshots.tables.columns]]
+name = "order_id"
+ndv = 720000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.93
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 100000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "total"
+ndv = 60000
+null_fraction = 0.0
+avg_width = 8.0
+min_value = "1.00"
+max_value = "9999.99"
+
+[[snapshots.tables]]
+name = "order_items"
+row_count = 2900000
+page_count = 29000
+avg_row_size = 80.0
+table_size_bytes = 232000000
+
+[[snapshots.tables.columns]]
+name = "item_id"
+ndv = 2900000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.87
+
+[[snapshots.tables.columns]]
+name = "order_id"
+ndv = 720000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 10000
+null_fraction = 0.0
+avg_width = 8.0
+
+# -- Events --
+
+[[events]]
+time_offset = 300
+kind = "insert"
+table = "users"
+row_count = 2000
+description = "New user signups"
+
+[[events]]
+time_offset = 300
+kind = "insert"
+table = "orders"
+row_count = 50000
+description = "Peak hour orders"
+
+[[events]]
+time_offset = 300
+kind = "insert"
+table = "order_items"
+row_count = 200000
+description = "Items for peak hour orders"
+
+[[events]]
+time_offset = 2400
+kind = "update"
+table = "orders"
+row_count = 30000
+description = "Bulk status update: shipped orders"
+
+[[events]]
+time_offset = 2700
+kind = "delete"
+table = "users"
+row_count = 2000
+description = "Inactive account cleanup"
+
+[[events]]
+time_offset = 2700
+kind = "delete"
+table = "order_items"
+row_count = 100000
+description = "Cancelled order cleanup"
+
+[[events]]
+time_offset = 4200
+kind = "analyze"
+table = "users"
+description = "Auto-ANALYZE on users"
+
+[[events]]
+time_offset = 4200
+kind = "analyze"
+table = "orders"
+description = "Auto-ANALYZE on orders"
+
+[[events]]
+time_offset = 4200
+kind = "analyze"
+table = "order_items"
+description = "Auto-ANALYZE on order_items"
+
+[[events]]
+time_offset = 5400
+kind = "reoptimize"
+table = "orders"
+description = "Join plans refreshed"
+
+[[events]]
+time_offset = 6000
+kind = "insert"
+table = "orders"
+row_count = 70000
+description = "Evening order batch"
+
+[[events]]
+time_offset = 6000
+kind = "insert"
+table = "order_items"
+row_count = 300000
+description = "Items for evening orders"
+
+[[events]]
+time_offset = 6600
+kind = "vacuum"
+table = "orders"
+description = "VACUUM on orders"
+
+[[events]]
+time_offset = 6600
+kind = "vacuum"
+table = "order_items"
+description = "VACUUM on order_items"
+
+# -- Execution feedback --
+
+[[feedback]]
+time_offset = 200
+query = "SELECT u.email, count(o.order_id) FROM users u JOIN orders o ON u.user_id = o.user_id GROUP BY u.email"
+operator = "Hash Join on orders"
+estimated_rows = 500000.0
+actual_rows = 500000.0
+estimated_cost = 25000.0
+actual_time_ms = 850.0
+
+[[feedback]]
+time_offset = 2000
+query = "SELECT u.email, count(o.order_id) FROM users u JOIN orders o ON u.user_id = o.user_id GROUP BY u.email"
+operator = "Hash Join on orders"
+estimated_rows = 500000.0
+actual_rows = 600000.0
+estimated_cost = 25000.0
+actual_time_ms = 1100.0
+
+[[feedback]]
+time_offset = 4000
+query = "SELECT u.email, count(o.order_id) FROM users u JOIN orders o ON u.user_id = o.user_id GROUP BY u.email"
+operator = "Hash Join on orders"
+estimated_rows = 600000.0
+actual_rows = 580000.0
+estimated_cost = 30000.0
+actual_time_ms = 1050.0
+
+[[feedback]]
+time_offset = 5400
+query = "SELECT u.email, count(o.order_id) FROM users u JOIN orders o ON u.user_id = o.user_id GROUP BY u.email"
+operator = "Hash Join on orders"
+estimated_rows = 650000.0
+actual_rows = 650000.0
+estimated_cost = 32000.0
+actual_time_ms = 1150.0
+
+[[feedback]]
+time_offset = 7200
+query = "SELECT u.email, count(o.order_id) FROM users u JOIN orders o ON u.user_id = o.user_id GROUP BY u.email"
+operator = "Hash Join on orders"
+estimated_rows = 650000.0
+actual_rows = 720000.0
+estimated_cost = 32000.0
+actual_time_ms = 1300.0
