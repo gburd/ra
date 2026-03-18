@@ -3,10 +3,13 @@
 //! Provides common functions for testing optimization rules, cost models,
 //! and integration testing of the optimizer.
 
-use ra_core::algebra::{JoinType, ProjectionColumn, RelExpr, SortDirection, SortKey};
-use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
-use ra_engine::{Optimizer, OptimizerConfig};
-use ra_hardware::HardwareProfile;
+pub use ra_core::algebra::{
+    AggregateExpr, AggregateFunction, JoinType, ProjectionColumn,
+    RelExpr, SortDirection, SortKey,
+};
+pub use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
+pub use ra_engine::{Optimizer, OptimizerConfig};
+pub use ra_hardware::HardwareProfile;
 
 /// Create a test optimizer with default configuration.
 pub fn create_test_optimizer() -> Optimizer {

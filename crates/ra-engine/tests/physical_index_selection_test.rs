@@ -282,7 +282,7 @@ fn test_expression_index_function_call() {
     // Index on LOWER(email)
     let input = scan("users");
     let filter = input.filter(eq(
-        Expr::Func {
+        Expr::Function {
             name: "lower".to_string(),
             args: vec![col("email")],
         },
@@ -309,7 +309,7 @@ fn test_index_scan_is_null() {
     let input = scan("customers");
     let filter = input.filter(Expr::UnaryOp {
         op: ra_core::expr::UnaryOp::IsNull,
-        expr: Box::new(col("email")),
+        operand: Box::new(col("email")),
     });
     assert_optimization_improves(filter);
 }
@@ -319,7 +319,7 @@ fn test_index_scan_is_not_null() {
     let input = scan("users");
     let filter = input.filter(Expr::UnaryOp {
         op: ra_core::expr::UnaryOp::IsNotNull,
-        expr: Box::new(col("phone")),
+        operand: Box::new(col("phone")),
     });
     assert_rule_applies(filter);
 }

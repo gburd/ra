@@ -138,7 +138,7 @@ fn test_vectorized_function_call_batch() {
     // Batch function evaluation
     let input = scan("strings");
     let filtered = input.filter(eq(
-        Expr::Func {
+        Expr::Function {
             name: "length".to_string(),
             args: vec![col("text")],
         },
@@ -191,9 +191,10 @@ fn test_vectorized_batch_aggregation() {
     let agg = RelExpr::Aggregate {
         group_by: vec![col("category")],
         aggregates: vec![AggregateExpr {
-            func: AggregateFunction::Sum,
-            expr: col("amount"),
+            function: AggregateFunction::Sum,
+            arg: Some(col("amount")),
             distinct: false,
+            alias: None,
         }],
         input: Box::new(input),
     };
@@ -209,9 +210,10 @@ fn test_vectorized_batch_spilling() {
     let agg = RelExpr::Aggregate {
         group_by: vec![col("high_cardinality_key")],
         aggregates: vec![AggregateExpr {
-            func: AggregateFunction::Count,
-            expr: Expr::Const(Const::Int(1)),
+            function: AggregateFunction::Count,
+            arg: Some(Expr::Const(Const::Int(1))),
             distinct: false,
+            alias: None,
         }],
         input: Box::new(input),
     };

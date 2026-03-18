@@ -416,7 +416,7 @@ fn test_command_scans_fixtures_for_test_cases() {
         .args(["test", &fixtures_dir()])
         .assert()
         .success()
-        .stderr(predicate::str::contains("test case(s)"));
+        .stderr(predicate::str::contains("Running tests from"));
 }
 
 #[test]
@@ -425,7 +425,7 @@ fn test_command_reports_test_count_per_rule() {
         .args(["test", &fixtures_dir()])
         .assert()
         .success()
-        .stderr(predicate::str::contains("test(s)"));
+        .stderr(predicate::str::contains("Test results:"));
 }
 
 #[test]
@@ -438,12 +438,12 @@ fn test_command_skips_invalid_files() {
 }
 
 #[test]
-fn test_command_shows_stub_message() {
+fn test_command_reports_pass_rate() {
     ra_cli()
         .args(["test", &fixtures_dir()])
         .assert()
         .success()
-        .stderr(predicate::str::contains("not yet implemented"));
+        .stderr(predicate::str::contains("pass rate"));
 }
 
 #[test]
@@ -457,7 +457,7 @@ fn test_single_valid_file() {
         .args(["test", &fixture])
         .assert()
         .success()
-        .stderr(predicate::str::contains("test case(s)"));
+        .stderr(predicate::str::contains("Test results:"));
 }
 
 #[test]

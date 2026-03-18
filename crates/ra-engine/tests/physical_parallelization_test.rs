@@ -85,9 +85,10 @@ fn test_parallel_hash_aggregation() {
     let agg = RelExpr::Aggregate {
         group_by: vec![col("merchant_id")],
         aggregates: vec![AggregateExpr {
-            func: AggregateFunction::Sum,
-            expr: col("amount"),
+            function: AggregateFunction::Sum,
+            arg: Some(col("amount")),
             distinct: false,
+            alias: None,
         }],
         input: Box::new(input),
     };
@@ -100,9 +101,10 @@ fn test_parallel_sort_aggregation() {
     let agg = RelExpr::Aggregate {
         group_by: vec![col("event_type")],
         aggregates: vec![AggregateExpr {
-            func: AggregateFunction::Count,
-            expr: Expr::Const(Const::Int(1)),
+            function: AggregateFunction::Count,
+            arg: Some(Expr::Const(Const::Int(1))),
             distinct: false,
+            alias: None,
         }],
         input: Box::new(input),
     };
@@ -115,9 +117,10 @@ fn test_parallel_global_aggregation() {
     let agg = RelExpr::Aggregate {
         group_by: vec![],
         aggregates: vec![AggregateExpr {
-            func: AggregateFunction::Sum,
-            expr: col("total"),
+            function: AggregateFunction::Sum,
+            arg: Some(col("total")),
             distinct: false,
+            alias: None,
         }],
         input: Box::new(input),
     };
@@ -200,9 +203,10 @@ fn test_intra_operator_parallelism_partitioned() {
     let agg = RelExpr::Aggregate {
         group_by: vec![col("partition_key")],
         aggregates: vec![AggregateExpr {
-            func: AggregateFunction::Count,
-            expr: Expr::Const(Const::Int(1)),
+            function: AggregateFunction::Count,
+            arg: Some(Expr::Const(Const::Int(1))),
             distinct: false,
+            alias: None,
         }],
         input: Box::new(input),
     };
@@ -239,9 +243,10 @@ fn test_morsel_driven_load_balancing() {
     let agg = RelExpr::Aggregate {
         group_by: vec![col("key")],
         aggregates: vec![AggregateExpr {
-            func: AggregateFunction::Sum,
-            expr: col("value"),
+            function: AggregateFunction::Sum,
+            arg: Some(col("value")),
             distinct: false,
+            alias: None,
         }],
         input: Box::new(input),
     };
