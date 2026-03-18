@@ -60,9 +60,7 @@ pub use egraph::{
 };
 pub use extract::{extract_best, extract_best_with_staleness, rec_expr_to_rel_expr, RelCostFn};
 pub use memo::{structural_hash, MemoTable};
-pub use network_cost::{
-    DistributionStrategy, JoinSides, NetworkCostEstimate, NetworkCostModel,
-};
+pub use network_cost::{JoinSides, NetworkCostEstimate, NetworkCostModel};
 pub use recursive::{
     ExecutionContext, ExecutionError, ExprEvaluator, RecursiveCTEConfig,
     RecursiveCTEExecutor, RecursionResult, Row, TerminationReason,

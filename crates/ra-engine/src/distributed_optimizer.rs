@@ -17,6 +17,10 @@ use ra_core::distribution::{
 use ra_core::expr::Expr;
 use ra_core::statistics::Statistics;
 
+use crate::network_cost::{
+    self, JoinSides, NetworkCostModel,
+};
+
 /// Errors from the distributed optimizer.
 #[derive(Debug, thiserror::Error)]
 pub enum DistributedOptimizerError {
@@ -161,15 +165,120 @@ impl ClusterTopology {
     }
 }
 
+/// Convert a `ra_core::distribution::DistributionStrategy` to the
+/// `network_cost` module's simpler `DistributionStrategy` for costing.
+///
+/// Strategies with no direct mapping (`PartitionWise`, `RangePartition`,
+/// `PartialBroadcast`) return `None` because they don't participate
+/// in the network cost model's cost calculation.
+fn to_network_strategy(
+    strategy: &DistributionStrategy,
+) -> Option<network_cost::DistributionStrategy> {
+    match strategy {
+        DistributionStrategy::Broadcast { source, targets } => {
+            Some(network_cost::DistributionStrategy::Broadcast {
+                source: ra_hardware::network::NodeId(source.0),
+                targets: targets
+                    .iter()
+                    .map(|n| ra_hardware::network::NodeId(n.0))
+                    .collect(),
+            })
+        }
+        DistributionStrategy::Shuffle {
+            source, targets, ..
+        } => {
+            Some(network_cost::DistributionStrategy::Shuffle {
+                source: ra_hardware::network::NodeId(source.0),
+                targets: targets
+                    .iter()
+                    .map(|n| ra_hardware::network::NodeId(n.0))
+                    .collect(),
+            })
+        }
+        DistributionStrategy::CoLocated
+        | DistributionStrategy::PartitionWise { .. } => {
+            Some(network_cost::DistributionStrategy::CoLocated)
+        }
+        DistributionStrategy::PartialBroadcast {
+            source, targets, ..
+        } => {
+            Some(network_cost::DistributionStrategy::Broadcast {
+                source: ra_hardware::network::NodeId(source.0),
+                targets: targets
+                    .iter()
+                    .map(|n| ra_hardware::network::NodeId(n.0))
+                    .collect(),
+            })
+        }
+        DistributionStrategy::RangePartition { .. } => None,
+    }
+}
+
+/// Convert a `network_cost::DistributionStrategy` back to a
+/// `ra_core::distribution::DistributionStrategy`.
+///
+/// This is used when the network cost model recommends a strategy
+/// and we need to include it as a candidate in the optimizer's
+/// enumeration.
+fn from_network_strategy(
+    strategy: &network_cost::DistributionStrategy,
+    nodes: &[NodeId],
+) -> Option<DistributionStrategy> {
+    match strategy {
+        network_cost::DistributionStrategy::Broadcast {
+            source,
+            targets,
+        } => Some(DistributionStrategy::Broadcast {
+            source: NodeId(source.0),
+            targets: targets
+                .iter()
+                .map(|n| NodeId(n.0))
+                .collect(),
+        }),
+        network_cost::DistributionStrategy::Shuffle {
+            source,
+            targets,
+        } => {
+            // We don't have join keys from the network model's
+            // recommendation, so use an empty key list. The
+            // caller's existing Shuffle strategy with keys will
+            // typically be preferred if keys are available.
+            Some(DistributionStrategy::Shuffle {
+                source: NodeId(source.0),
+                targets: targets
+                    .iter()
+                    .map(|n| NodeId(n.0))
+                    .collect(),
+                partition_keys: Vec::new(),
+            })
+        }
+        network_cost::DistributionStrategy::CoLocated => {
+            // Only add if we don't already have CoLocated.
+            if nodes.len() > 1 {
+                Some(DistributionStrategy::CoLocated)
+            } else {
+                None
+            }
+        }
+    }
+}
+
 /// Distributed query optimizer.
 ///
 /// Takes a logical plan and cluster topology, and annotates each
 /// operator with the cheapest distribution strategy.
+///
+/// When a [`NetworkCostModel`] is provided via [`with_network_cost`],
+/// the optimizer uses topology-aware transfer times and billing
+/// costs instead of simple heuristic estimates.
+///
+/// [`with_network_cost`]: DistributedOptimizer::with_network_cost
 #[derive(Debug)]
 pub struct DistributedOptimizer {
     config: DistributedOptimizerConfig,
     topology: ClusterTopology,
     table_stats: HashMap<String, Statistics>,
+    network_cost: Option<NetworkCostModel>,
 }
 
 impl DistributedOptimizer {
@@ -183,7 +292,35 @@ impl DistributedOptimizer {
             config,
             topology,
             table_stats: HashMap::new(),
+            network_cost: None,
         }
+    }
+
+    /// Attach a network cost model for topology-aware costing.
+    ///
+    /// When set, `cost_strategy` uses real network transfer times
+    /// and billing costs from the topology instead of simple
+    /// heuristic estimates. Strategy enumeration also consults
+    /// `recommend_join_strategy` from the network cost model.
+    #[must_use]
+    pub fn with_network_cost(
+        mut self,
+        model: NetworkCostModel,
+    ) -> Self {
+        self.network_cost = Some(model);
+        self
+    }
+
+    /// Get a reference to the attached network cost model, if any.
+    #[must_use]
+    pub fn network_cost(&self) -> Option<&NetworkCostModel> {
+        self.network_cost.as_ref()
+    }
+
+    /// Get a reference to the cluster topology.
+    #[must_use]
+    pub fn topology(&self) -> &ClusterTopology {
+        &self.topology
     }
 
     /// Register statistics for a table.
@@ -424,7 +561,15 @@ impl DistributedOptimizer {
     }
 
     /// Enumerate candidate distribution strategies for a join.
+    ///
+    /// When a [`NetworkCostModel`] is attached, the network model's
+    /// `recommend_join_strategy` is also consulted and its result
+    /// is included as an additional candidate (converted to
+    /// `ra_core`'s `DistributionStrategy`).
     #[must_use]
+    #[allow(clippy::cast_precision_loss)]
+    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_lines)]
     pub fn enumerate_strategies(
         &self,
         left_dist: &DataDistribution,
@@ -471,7 +616,8 @@ impl DistributedOptimizer {
         if right_bytes < self.config.broadcast_threshold
             && is_broadcast_compatible(join_type, false)
         {
-            let source = nodes.first().copied().unwrap_or(NodeId(0));
+            let source =
+                nodes.first().copied().unwrap_or(NodeId(0));
             strategies.push(DistributionStrategy::Broadcast {
                 source,
                 targets: nodes.clone(),
@@ -482,7 +628,8 @@ impl DistributedOptimizer {
         if left_bytes < self.config.broadcast_threshold
             && is_broadcast_compatible(join_type, true)
         {
-            let source = nodes.first().copied().unwrap_or(NodeId(0));
+            let source =
+                nodes.first().copied().unwrap_or(NodeId(0));
             strategies.push(DistributionStrategy::Broadcast {
                 source,
                 targets: nodes.clone(),
@@ -515,18 +662,147 @@ impl DistributedOptimizer {
                     (i.to_string(), (i + 1).to_string())
                 })
                 .collect();
-            strategies.push(DistributionStrategy::RangePartition {
-                partition_key: key,
-                ranges,
-            });
+            strategies.push(
+                DistributionStrategy::RangePartition {
+                    partition_key: key,
+                    ranges,
+                },
+            );
+        }
+
+        // Strategy 6: Network cost model recommendation.
+        if let Some(ncm) = &self.network_cost {
+            let row_width =
+                self.config.default_row_width.max(1) as usize;
+            let left_rows = left_bytes / row_width as u64;
+            let right_rows = right_bytes / row_width as u64;
+
+            let left_node = nodes
+                .first()
+                .copied()
+                .unwrap_or(NodeId(0));
+            let right_node = nodes
+                .last()
+                .copied()
+                .unwrap_or(NodeId(0));
+
+            let hw_nodes: Vec<ra_hardware::network::NodeId> =
+                nodes
+                    .iter()
+                    .map(|n| ra_hardware::network::NodeId(n.0))
+                    .collect();
+
+            let sides = JoinSides {
+                left_node: ra_hardware::network::NodeId(
+                    left_node.0,
+                ),
+                right_node: ra_hardware::network::NodeId(
+                    right_node.0,
+                ),
+                left_rows,
+                right_rows,
+                row_width,
+            };
+
+            let recommended = ncm.recommend_join_strategy(
+                &sides,
+                &hw_nodes,
+                self.config.broadcast_threshold,
+            );
+
+            if let Some(converted) =
+                from_network_strategy(&recommended, nodes)
+            {
+                strategies.push(converted);
+            }
         }
 
         strategies
     }
 
     /// Cost a distribution strategy.
+    ///
+    /// When a [`NetworkCostModel`] is attached, Broadcast and Shuffle
+    /// costs are computed from real topology transfer times and
+    /// billing costs. Otherwise, falls back to heuristic estimates
+    /// using the `ClusterTopology` bandwidth/latency tables.
     #[must_use]
+    #[allow(clippy::cast_precision_loss)]
     pub fn cost_strategy(
+        &self,
+        strategy: &DistributionStrategy,
+        left_bytes: u64,
+        right_bytes: u64,
+    ) -> Cost {
+        // Try the network cost model for Broadcast/Shuffle/CoLocated
+        if let Some(ncm) = &self.network_cost {
+            if let Some(net_strat) = to_network_strategy(strategy) {
+                return self.cost_via_network_model(
+                    ncm,
+                    &net_strat,
+                    strategy,
+                    left_bytes,
+                    right_bytes,
+                );
+            }
+        }
+
+        self.cost_heuristic(strategy, left_bytes, right_bytes)
+    }
+
+    /// Cost using the [`NetworkCostModel`] for topology-aware
+    /// transfer time and billing.
+    #[allow(clippy::cast_precision_loss)]
+    fn cost_via_network_model(
+        &self,
+        ncm: &NetworkCostModel,
+        net_strat: &network_cost::DistributionStrategy,
+        orig: &DistributionStrategy,
+        left_bytes: u64,
+        right_bytes: u64,
+    ) -> Cost {
+        let row_width =
+            self.config.default_row_width.max(1) as usize;
+
+        let input_rows = match orig {
+            DistributionStrategy::Broadcast { .. }
+            | DistributionStrategy::PartialBroadcast { .. } => {
+                let small = left_bytes.min(right_bytes);
+                small / row_width as u64
+            }
+            DistributionStrategy::Shuffle { .. } => {
+                (left_bytes + right_bytes) / row_width as u64
+            }
+            _ => 0,
+        };
+
+        let est =
+            ncm.distribution_cost(net_strat, input_rows, row_width);
+
+        // Combine: network component from topology model,
+        // add CPU hashing cost for shuffle, add monetary weight.
+        let network_ms = est.cost.network;
+        let monetary = est.monetary_cost;
+
+        let cpu = match orig {
+            DistributionStrategy::Shuffle { .. } => {
+                (left_bytes + right_bytes) as f64 * 0.001
+            }
+            _ => 0.0,
+        };
+
+        Cost::new(
+            cpu,
+            0.0,
+            network_ms * self.config.network_weight
+                + monetary * self.config.monetary_weight,
+            est.bytes_transferred,
+        )
+    }
+
+    /// Heuristic cost when no `NetworkCostModel` is available.
+    #[allow(clippy::cast_precision_loss)]
+    fn cost_heuristic(
         &self,
         strategy: &DistributionStrategy,
         left_bytes: u64,
@@ -541,11 +817,13 @@ impl DistributedOptimizer {
                 let small_bytes = left_bytes.min(right_bytes);
                 let mut total_network = 0.0;
                 for &target in targets {
-                    total_network += self.topology.transfer_time_ms(
-                        *source,
-                        target,
-                        small_bytes,
-                    );
+                    total_network += self
+                        .topology
+                        .transfer_time_ms(
+                            *source,
+                            target,
+                            small_bytes,
+                        );
                 }
                 Cost::new(
                     0.0,
@@ -567,11 +845,12 @@ impl DistributedOptimizer {
                 };
                 let mut total_network = 0.0;
                 for &target in targets {
-                    total_network += self.topology.transfer_time_ms(
-                        *source, target, per_node,
-                    );
+                    total_network += self
+                        .topology
+                        .transfer_time_ms(
+                            *source, target, per_node,
+                        );
                 }
-                // CPU cost for hashing.
                 let hash_cpu = total_bytes as f64 * 0.001;
                 Cost::new(
                     hash_cpu,
@@ -588,11 +867,13 @@ impl DistributedOptimizer {
                 let small_bytes = left_bytes.min(right_bytes);
                 let mut total_network = 0.0;
                 for &target in targets {
-                    total_network += self.topology.transfer_time_ms(
-                        *source,
-                        target,
-                        small_bytes,
-                    );
+                    total_network += self
+                        .topology
+                        .transfer_time_ms(
+                            *source,
+                            target,
+                            small_bytes,
+                        );
                 }
                 Cost::new(
                     0.0,
@@ -601,16 +882,16 @@ impl DistributedOptimizer {
                     small_bytes * targets.len() as u64,
                 )
             }
-            DistributionStrategy::RangePartition { ranges, .. } => {
+            DistributionStrategy::RangePartition {
+                ranges, ..
+            } => {
                 let total_bytes = left_bytes + right_bytes;
                 let per_range = if ranges.is_empty() {
                     0
                 } else {
                     total_bytes / ranges.len() as u64
                 };
-                // Sorting cost for range determination.
                 let sort_cpu = total_bytes as f64 * 0.005;
-                // Network: approximate as shuffle.
                 let network = total_bytes as f64 * 0.001
                     * self.config.network_weight;
                 Cost::new(sort_cpu, 0.0, network, per_range)
