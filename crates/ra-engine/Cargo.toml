@@ -35,5 +35,9 @@ harness = false
 name = "differential_timeline"
 harness = false
 
+[[bench]]
+name = "tpch_distributed"
+harness = false
+
 [lints]
 workspace = true

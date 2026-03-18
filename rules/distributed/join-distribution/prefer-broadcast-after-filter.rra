@@ -1,0 +1,72 @@
+---
+id: prefer-broadcast-after-filter
+name: Prefer Broadcast After Selective Filter
+category: distributed/join-distribution
+databases: [spark, presto, trino, cockroachdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, join, broadcast, filter, selectivity]
+complexity: O(1)
+benefit_range: [0.3, 0.85]
+---
+
+# Prefer Broadcast After Selective Filter
+
+## Description
+
+When a filter significantly reduces the size of one join input, re-evaluate
+whether broadcast is now cheaper than shuffle. A highly selective filter
+can turn a large table into a broadcast candidate.
+
+## Relational Algebra
+
+```algebra
+Join[c](R, Filter[p](S))
+  -> Join[c](R, Broadcast(Filter[p](S)))
+  where estimated_rows(Filter[p](S)) < broadcast_threshold
+  where selectivity(p) < 0.01
+```
+
+## Implementation
+
+```rust
+rw!("prefer-broadcast-after-filter";
+    "(join ?type ?cond ?left (filter ?pred ?right))" =>
+    "(join ?type ?cond ?left (exchange broadcast (filter ?pred ?right)))"
+    if filter_makes_broadcastable("?pred", "?right", THRESHOLD)
+),
+```
+
+## Test Cases
+
+```sql
+-- Test 1: Selective filter makes right side broadcastable
+SELECT o.*, c.name
+FROM orders o                    -- 100M rows
+JOIN customers c ON o.cid = c.id -- 10M rows
+WHERE c.vip = true;              -- 0.1% selectivity -> 10K rows
+-- Expected: Broadcast filtered customers
+```
+
+```sql
+-- Test 2: Non-selective filter, still too large
+SELECT o.*, c.name
+FROM orders o
+JOIN customers c ON o.cid = c.id
+WHERE c.created_year = 2024;     -- 33% selectivity -> 3.3M rows
+-- Expected: Shuffle both, filter not selective enough
+```
+
+```sql
+-- Test 3: Filter on join input with range predicate
+SELECT f.*, d.name
+FROM fact_table f
+JOIN dim_products d ON f.pid = d.id
+WHERE d.price BETWEEN 10 AND 20; -- ~5% selectivity
+-- Expected: Depends on absolute size of filtered result
+```
+
+## References
+
+Spark: AQE (Adaptive Query Execution) dynamic broadcast threshold
+Presto: DetermineJoinDistributionType with statistics

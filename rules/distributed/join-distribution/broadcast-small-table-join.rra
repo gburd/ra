@@ -1,0 +1,117 @@
+---
+id: broadcast-small-table-join
+name: Broadcast Small Table for Join
+category: distributed/join-distribution
+databases: [presto, trino, spark, cockroachdb, citus, greenplum]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, join, broadcast, small-table, data-movement]
+complexity: O(n)
+benefit_range: [0.3, 0.95]
+---
+
+# Broadcast Small Table for Join
+
+## Description
+
+When joining two tables with significant size difference, broadcast the
+smaller table to all nodes. This avoids the expensive shuffle of the
+large table.
+
+Threshold: broadcast when `small_table_size < 10% of large_table_size`
+AND `small_table_size < memory_limit`.
+
+**When to apply**: One input is small enough to fit in memory on every
+node. The size ratio should be at least 10:1.
+
+**Why it works**: Broadcasting `|S|` to N nodes costs `|S| * N` bytes.
+Shuffling the large table costs `|R| * (N-1)/N` bytes. When
+`|S| * N < |R|`, broadcast is cheaper.
+
+## Relational Algebra
+
+```algebra
+Join[c](R, S)
+  -> Join[c](R, Broadcast(S))
+  where |S| < broadcast_threshold
+  where |S| * num_nodes < |R|
+  where join_type in [Inner, LeftOuter, Semi, Anti]
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("broadcast-small-table-join";
+    "(join ?type ?cond ?left ?right)" =>
+    "(join ?type ?cond ?left (exchange broadcast ?right))"
+    if is_small("?right", BROADCAST_THRESHOLD)
+    if size_ratio("?left", "?right", 10.0)
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    small: &RelNode,
+    large: &RelNode,
+    num_nodes: u32,
+    threshold: u64,
+) -> bool {
+    let small_size = small.estimated_size_bytes();
+    small_size < threshold
+        && small_size * num_nodes as u64
+            < large.estimated_size_bytes()
+}
+```
+
+**Restrictions:**
+- Small side must fit in memory on every node
+- Not valid for FULL OUTER joins (loses non-matching rows)
+- RIGHT OUTER: can only broadcast right side
+- Cardinality estimates must be accurate; wrong decision causes OOM
+
+## Cost Model
+
+```rust
+fn cost(small_bytes: u64, num_nodes: u32, bandwidth: u64) -> f64 {
+    (small_bytes as f64 * num_nodes as f64) / bandwidth as f64
+}
+```
+
+## Test Cases
+
+```sql
+-- Test 1: Small dimension table broadcast
+SELECT o.*, c.name
+FROM orders o          -- 100M rows, 50GB
+JOIN countries c       -- 200 rows, 10KB
+  ON o.country_code = c.code;
+-- Expected: Broadcast(countries) to all nodes
+```
+
+```sql
+-- Test 2: After filter reduces table size
+SELECT o.*, c.name
+FROM orders o
+JOIN customers c ON o.customer_id = c.id
+WHERE c.tier = 'platinum';
+-- After filter: customers ~1000 rows -> broadcast
+```
+
+```sql
+-- Test 3: Negative - both sides large
+SELECT *
+FROM orders o     -- 100M rows
+JOIN items i      -- 500M rows
+  ON o.id = i.order_id;
+-- Must use shuffle join, not broadcast
+```
+
+## References
+
+Presto: DetermineJoinDistributionType.java
+Spark SQL: BroadcastHashJoinExec.scala
+CockroachDB: pkg/sql/opt/xform/join_funcs.go
