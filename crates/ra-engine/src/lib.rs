@@ -34,6 +34,7 @@ pub mod distributed_optimizer;
 pub mod egraph;
 pub mod extract;
 pub mod memo;
+pub mod network_cost;
 pub mod recursive;
 pub mod resource_budget;
 pub mod resource_profiles;
@@ -53,6 +54,7 @@ pub use egraph::{
 };
 pub use extract::{extract_best, extract_best_with_staleness, rec_expr_to_rel_expr, RelCostFn};
 pub use memo::{structural_hash, MemoTable};
+pub use network_cost::{JoinSides, NetworkCostEstimate, NetworkCostModel};
 pub use recursive::{
     ExecutionContext, ExecutionError, ExprEvaluator, RecursiveCTEConfig,
     RecursiveCTEExecutor, RecursionResult, Row, TerminationReason,
