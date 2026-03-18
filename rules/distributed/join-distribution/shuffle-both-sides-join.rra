@@ -1,0 +1,113 @@
+---
+id: shuffle-both-sides-join
+name: Shuffle Both Sides for Balanced Join
+category: distributed/join-distribution
+databases: [presto, trino, spark, cockroachdb, citus]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, join, shuffle, hash-partition, repartition]
+complexity: O(n)
+benefit_range: [0.1, 0.7]
+---
+
+# Shuffle Both Sides for Balanced Join
+
+## Description
+
+When both tables are large and not co-located on the join key,
+hash-partition both sides by the join key and send each partition to the
+same node. This evenly distributes work across all nodes.
+
+**When to apply**: Both inputs are large, neither is small enough to
+broadcast, and they are not already co-located on the join key.
+
+**Why it works**: Each node processes only 1/N of the data. Network cost
+is `(|R| + |S|) * (N-1)/N` bytes, which is less than broadcasting
+either large table.
+
+## Relational Algebra
+
+```algebra
+Join[c](R, S)
+  -> Join[c](Exchange[hash(k1)](R), Exchange[hash(k2)](S))
+  where not colocated(R, S, k1, k2)
+  where |R| > broadcast_threshold AND |S| > broadcast_threshold
+```
+
+## Implementation
+
+```rust
+rw!("shuffle-both-sides-join";
+    "(join ?type ?cond ?left ?right)" =>
+    "(join ?type ?cond
+        (exchange hash_partition ?left ?keys)
+        (exchange hash_partition ?right ?keys))"
+    if not_colocated("?left", "?right", "?keys")
+    if both_large("?left", "?right", BROADCAST_THRESHOLD)
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(left: &RelNode, right: &RelNode, threshold: u64) -> bool {
+    let l = left.estimated_size_bytes();
+    let r = right.estimated_size_bytes();
+    l > threshold && r > threshold
+}
+```
+
+**Restrictions:**
+- Requires equi-join condition to determine partition keys
+- Network cost scales with total data size
+- Both sides need sufficient memory for hash table on each node
+
+## Cost Model
+
+```rust
+fn cost(
+    left_bytes: u64,
+    right_bytes: u64,
+    num_nodes: u32,
+    bandwidth: u64,
+) -> f64 {
+    let total = left_bytes + right_bytes;
+    let fraction = (num_nodes - 1) as f64 / num_nodes as f64;
+    (total as f64 * fraction) / bandwidth as f64
+}
+```
+
+## Test Cases
+
+```sql
+-- Test 1: Two large tables, shuffle both
+SELECT o.*, l.quantity
+FROM orders o            -- 100M rows, hash(order_id)
+JOIN line_items l        -- 500M rows, hash(item_id)
+  ON o.id = l.order_id;
+-- Expected: Shuffle both by order_id
+```
+
+```sql
+-- Test 2: Already colocated - should NOT apply
+SELECT o.*, l.quantity
+FROM orders o            -- hash(order_id)
+JOIN line_items l        -- hash(order_id) same key
+  ON o.id = l.order_id;
+-- Expected: partition-wise join, no shuffle
+```
+
+```sql
+-- Test 3: Multi-key join
+SELECT *
+FROM sales s
+JOIN inventory i
+  ON s.product_id = i.product_id
+ AND s.warehouse_id = i.warehouse_id;
+-- Expected: Shuffle both by (product_id, warehouse_id)
+```
+
+## References
+
+Spark SQL: ShuffledHashJoinExec.scala
+Presto: AddExchanges.java

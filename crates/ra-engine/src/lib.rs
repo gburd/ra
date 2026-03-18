@@ -30,6 +30,7 @@
 pub mod analysis;
 pub mod cost;
 pub mod differential;
+pub mod distributed_optimizer;
 pub mod egraph;
 pub mod extract;
 pub mod federated_cost;
@@ -44,6 +45,10 @@ pub mod timely;
 
 pub use analysis::RelAnalysis;
 pub use cost::{CostCalibration, IntegratedCostFn, IntegratedCostModel};
+pub use distributed_optimizer::{
+    ClusterTopology, DistributedOptimizer, DistributedOptimizerConfig,
+    DistributedOptimizerError,
+};
 pub use federated_cost::FederatedCostModel;
 pub use federated_optimizer::{
     FederatedAnalysis, FederatedError, FederatedOptimizer,
