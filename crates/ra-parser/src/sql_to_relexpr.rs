@@ -47,6 +47,10 @@ pub enum SqlConversionError {
     /// Invalid SQL semantics.
     #[error("invalid SQL: {0}")]
     InvalidSql(String),
+
+    /// Invalid recursive CTE structure.
+    #[error("invalid recursive CTE: {0}")]
+    InvalidRecursiveCTE(String),
 }
 
 /// Parse SQL and convert to RelExpr.
@@ -84,20 +88,23 @@ fn convert_query(query: &Query) -> Result<RelExpr, SqlConversionError> {
     let mut plan = convert_query_body(query)?;
 
     if let Some(with) = &query.with {
-        if with.recursive {
-            return Err(SqlConversionError::UnsupportedFeature(
-                "RECURSIVE CTE not yet supported".to_owned(),
-            ));
-        }
-        // Wrap body in nested CTE nodes (innermost CTE first)
         for cte in with.cte_tables.iter().rev() {
             let cte_name = cte.alias.name.value.clone();
             let cte_def = convert_query(&cte.query)?;
-            plan = RelExpr::CTE {
-                name: cte_name,
-                definition: Box::new(cte_def),
-                body: Box::new(plan),
-            };
+
+            if with.recursive
+                && cte_def_is_recursive(&cte_def, &cte_name)
+            {
+                plan = convert_recursive_cte(
+                    &cte_name, &cte_def, plan,
+                )?;
+            } else {
+                plan = RelExpr::CTE {
+                    name: cte_name,
+                    definition: Box::new(cte_def),
+                    body: Box::new(plan),
+                };
+            }
         }
     }
 
@@ -130,6 +137,64 @@ fn convert_query(query: &Query) -> Result<RelExpr, SqlConversionError> {
     }
 
     Ok(plan)
+}
+
+/// Check whether a CTE definition references itself (is recursive).
+fn cte_def_is_recursive(def: &RelExpr, name: &str) -> bool {
+    def.references_cte(name)
+}
+
+/// Split a UNION ALL definition into base and recursive members.
+fn convert_recursive_cte(
+    name: &str,
+    definition: &RelExpr,
+    body: RelExpr,
+) -> Result<RelExpr, SqlConversionError> {
+    let RelExpr::Union {
+        all: true,
+        left,
+        right,
+    } = definition
+    else {
+        return Err(SqlConversionError::InvalidRecursiveCTE(
+            "recursive CTE must use UNION ALL".to_owned(),
+        ));
+    };
+
+    let (base_case, recursive_case) =
+        if right.references_cte(name) && !left.references_cte(name)
+        {
+            (left.as_ref().clone(), right.as_ref().clone())
+        } else if left.references_cte(name)
+            && !right.references_cte(name)
+        {
+            (right.as_ref().clone(), left.as_ref().clone())
+        } else if left.references_cte(name)
+            && right.references_cte(name)
+        {
+            return Err(SqlConversionError::InvalidRecursiveCTE(
+                "both sides of UNION ALL reference the CTE"
+                    .to_owned(),
+            ));
+        } else {
+            return Err(SqlConversionError::InvalidRecursiveCTE(
+                "neither side of UNION ALL references the CTE"
+                    .to_owned(),
+            ));
+        };
+
+    Ok(RelExpr::RecursiveCTE {
+        name: name.to_owned(),
+        base_case: Box::new(base_case),
+        recursive_case: Box::new(recursive_case),
+        body: Box::new(body),
+        cycle_detection: Some(ra_core::algebra::CycleDetection {
+            track_columns: vec![],
+            max_depth: Some(1000),
+            cycle_mark_column: None,
+            path_column: None,
+        }),
+    })
 }
 
 fn convert_query_body(

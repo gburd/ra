@@ -36,6 +36,7 @@ define_language! {
         "union" = Union([Id; 3]),
         "intersect" = Intersect([Id; 3]),
         "except" = Except([Id; 3]),
+        "recursive-cte" = RecursiveCTE([Id; 4]),
 
         // -- Join types --
         "inner" = Inner,
@@ -342,6 +343,21 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
             let left_id = add_rel_expr(rec, left)?;
             let right_id = add_rel_expr(rec, right)?;
             Ok(rec.add(RelLang::Except([all_id, left_id, right_id])))
+        }
+        RelExpr::RecursiveCTE {
+            name,
+            base_case,
+            recursive_case,
+            body,
+            ..
+        } => {
+            let name_id = add_symbol(rec, name);
+            let base_id = add_rel_expr(rec, base_case)?;
+            let rec_id = add_rel_expr(rec, recursive_case)?;
+            let body_id = add_rel_expr(rec, body)?;
+            Ok(rec.add(RelLang::RecursiveCTE([
+                name_id, base_id, rec_id, body_id,
+            ])))
         }
         RelExpr::CTE { .. }
         | RelExpr::Window { .. }
@@ -696,6 +712,19 @@ fn from_node(
                 all,
                 left: Box::new(left),
                 right: Box::new(right),
+            })
+        }
+        RelLang::RecursiveCTE([name_id, base_id, rec_id, body_id]) => {
+            let name = extract_symbol(egraph, *name_id)?;
+            let base_case = from_egraph_node(egraph, *base_id)?;
+            let recursive_case = from_egraph_node(egraph, *rec_id)?;
+            let body = from_egraph_node(egraph, *body_id)?;
+            Ok(RelExpr::RecursiveCTE {
+                name,
+                base_case: Box::new(base_case),
+                recursive_case: Box::new(recursive_case),
+                body: Box::new(body),
+                cycle_detection: None,
             })
         }
         other => Err(EGraphError::ExtractionError(format!(

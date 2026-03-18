@@ -137,6 +137,33 @@ pub enum RelExpr {
         /// Rows of constant expressions.
         rows: Vec<Vec<Expr>>,
     },
+
+    /// Recursive CTE with explicit base/recursive separation.
+    RecursiveCTE {
+        /// CTE name.
+        name: String,
+        /// Base case (anchor member) - executed once.
+        base_case: Box<RelExpr>,
+        /// Recursive case (recursive member) - executed iteratively.
+        recursive_case: Box<RelExpr>,
+        /// Body query using the CTE.
+        body: Box<RelExpr>,
+        /// Cycle detection configuration.
+        cycle_detection: Option<CycleDetection>,
+    },
+}
+
+/// Configuration for cycle detection in recursive CTEs.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CycleDetection {
+    /// Columns to track for cycles.
+    pub track_columns: Vec<String>,
+    /// Maximum recursion depth (prevents infinite loops).
+    pub max_depth: Option<u32>,
+    /// Cycle mark column name (SQL standard: CYCLE clause).
+    pub cycle_mark_column: Option<String>,
+    /// Path tracking column (optional).
+    pub path_column: Option<String>,
 }
 
 /// A column in a projection list, consisting of an expression
@@ -399,6 +426,12 @@ impl RelExpr {
             Self::CTE {
                 definition, body, ..
             } => vec![definition, body],
+            Self::RecursiveCTE {
+                base_case,
+                recursive_case,
+                body,
+                ..
+            } => vec![base_case, recursive_case, body],
         }
     }
 
@@ -492,12 +525,65 @@ impl RelExpr {
                 definition.collect_columns(out);
                 body.collect_columns(out);
             }
+            Self::RecursiveCTE {
+                base_case,
+                recursive_case,
+                body,
+                ..
+            } => {
+                base_case.collect_columns(out);
+                recursive_case.collect_columns(out);
+                body.collect_columns(out);
+            }
             Self::Union { left, right, .. }
             | Self::Intersect { left, right, .. }
             | Self::Except { left, right, .. } => {
                 left.collect_columns(out);
                 right.collect_columns(out);
             }
+        }
+    }
+}
+
+impl RelExpr {
+    /// Check whether this expression tree references a CTE by name.
+    #[must_use]
+    pub fn references_cte(&self, cte_name: &str) -> bool {
+        match self {
+            Self::Scan { table, .. } => table == cte_name,
+            Self::Filter { input, .. }
+            | Self::Project { input, .. }
+            | Self::Aggregate { input, .. }
+            | Self::Sort { input, .. }
+            | Self::Limit { input, .. }
+            | Self::Window { input, .. }
+            | Self::Distinct { input, .. } => {
+                input.references_cte(cte_name)
+            }
+            Self::Join { left, right, .. }
+            | Self::Union { left, right, .. }
+            | Self::Intersect { left, right, .. }
+            | Self::Except { left, right, .. } => {
+                left.references_cte(cte_name)
+                    || right.references_cte(cte_name)
+            }
+            Self::CTE {
+                definition, body, ..
+            } => {
+                definition.references_cte(cte_name)
+                    || body.references_cte(cte_name)
+            }
+            Self::RecursiveCTE {
+                base_case,
+                recursive_case,
+                body,
+                ..
+            } => {
+                base_case.references_cte(cte_name)
+                    || recursive_case.references_cte(cte_name)
+                    || body.references_cte(cte_name)
+            }
+            Self::Values { .. } => false,
         }
     }
 }
@@ -745,5 +831,70 @@ mod tests {
         let deserialized: RelExpr = serde_json::from_str(&json)
             .expect("deserialization should succeed");
         assert_eq!(plan, deserialized);
+    }
+
+    #[test]
+    fn children_recursive_cte_three() {
+        let rcte = RelExpr::RecursiveCTE {
+            name: "reachable".to_owned(),
+            base_case: Box::new(RelExpr::scan("edges")),
+            recursive_case: Box::new(RelExpr::scan("edges")),
+            body: Box::new(RelExpr::scan("reachable")),
+            cycle_detection: None,
+        };
+        assert_eq!(rcte.children().len(), 3);
+    }
+
+    #[test]
+    fn references_cte_finds_scan() {
+        let plan = RelExpr::Join {
+            join_type: JoinType::Inner,
+            condition: Expr::Const(Const::Bool(true)),
+            left: Box::new(RelExpr::scan("edges")),
+            right: Box::new(RelExpr::scan("reachable")),
+        };
+        assert!(plan.references_cte("reachable"));
+        assert!(!plan.references_cte("missing"));
+    }
+
+    #[test]
+    fn recursive_cte_serialize_roundtrip() {
+        let rcte = RelExpr::RecursiveCTE {
+            name: "r".to_owned(),
+            base_case: Box::new(RelExpr::scan("t")),
+            recursive_case: Box::new(RelExpr::scan("t")),
+            body: Box::new(RelExpr::scan("r")),
+            cycle_detection: Some(CycleDetection {
+                track_columns: vec!["id".to_owned()],
+                max_depth: Some(100),
+                cycle_mark_column: None,
+                path_column: None,
+            }),
+        };
+        let json = serde_json::to_string(&rcte)
+            .expect("serialization should succeed");
+        let deserialized: RelExpr = serde_json::from_str(&json)
+            .expect("deserialization should succeed");
+        assert_eq!(rcte, deserialized);
+    }
+
+    #[test]
+    fn recursive_cte_referenced_columns() {
+        let rcte = RelExpr::RecursiveCTE {
+            name: "r".to_owned(),
+            base_case: Box::new(
+                RelExpr::scan("t").filter(Expr::BinOp {
+                    op: ExprBinOp::Eq,
+                    left: Box::new(Expr::Column(ColumnRef::new("x"))),
+                    right: Box::new(Expr::Const(Const::Int(1))),
+                }),
+            ),
+            recursive_case: Box::new(RelExpr::scan("t")),
+            body: Box::new(RelExpr::scan("r")),
+            cycle_detection: None,
+        };
+        let cols = rcte.referenced_columns();
+        assert_eq!(cols.len(), 1);
+        assert_eq!(cols[0].column, "x");
     }
 }

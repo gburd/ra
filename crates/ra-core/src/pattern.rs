@@ -108,6 +108,16 @@ pub enum Pattern {
         /// Pattern for the input.
         input: Box<Pattern>,
     },
+
+    /// Match a RecursiveCTE node.
+    RecursiveCTE {
+        /// Pattern for the base case.
+        base_case: Box<Pattern>,
+        /// Pattern for the recursive case.
+        recursive_case: Box<Pattern>,
+        /// Pattern for the body.
+        body: Box<Pattern>,
+    },
 }
 
 /// A pattern for matching scalar expressions.
@@ -315,6 +325,23 @@ impl Pattern {
                 },
             ) => {
                 pat_def.do_match(definition, bindings)
+                    && pat_body.do_match(body, bindings)
+            }
+            (
+                Self::RecursiveCTE {
+                    base_case: pat_base,
+                    recursive_case: pat_rec,
+                    body: pat_body,
+                },
+                RelExpr::RecursiveCTE {
+                    base_case,
+                    recursive_case,
+                    body,
+                    ..
+                },
+            ) => {
+                pat_base.do_match(base_case, bindings)
+                    && pat_rec.do_match(recursive_case, bindings)
                     && pat_body.do_match(body, bindings)
             }
             _ => false,
