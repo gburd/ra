@@ -34,18 +34,27 @@ pub mod egraph;
 pub mod extract;
 pub mod memo;
 pub mod recursive;
+pub mod resource_budget;
+pub mod resource_profiles;
 pub mod rewrite;
 pub mod timely;
 
 pub use analysis::RelAnalysis;
 pub use cost::{CostCalibration, IntegratedCostFn, IntegratedCostModel};
 pub use differential::{IncrementalError, IncrementalOptimizer, RuleChange, RuleId};
-pub use egraph::{to_rec_expr, EGraphError, Optimizer, OptimizerConfig, RelLang};
+pub use egraph::{
+    to_rec_expr, EGraphError, OptimizationResult, OptimizationStatus,
+    Optimizer, OptimizerConfig, RelLang,
+};
 pub use extract::{extract_best, extract_best_with_staleness, rec_expr_to_rel_expr, RelCostFn};
 pub use memo::{structural_hash, MemoTable};
 pub use recursive::{
     ExecutionContext, ExecutionError, ExprEvaluator, RecursiveCTEConfig,
     RecursiveCTEExecutor, RecursionResult, Row, TerminationReason,
+};
+pub use resource_budget::{
+    ExceededResource, OverflowStrategy, ResourceBudget, ResourceCheckResult,
+    ResourceTracker, ResourceUsageReport,
 };
 pub use rewrite::all_rules;
 pub use timely::{ComputationStats, TimelyConfig};
