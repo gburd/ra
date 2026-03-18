@@ -1,0 +1,67 @@
+---
+id: constant-fold-nested
+name: Constant Fold Nested Function Calls
+category: logical/function-optimization
+databases: [postgresql, mysql, oracle, mssql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [logical, function, constant-folding, nested, composition]
+complexity: O(d)
+benefit_range: [0.05, 0.2]
+---
+
+# Constant Fold Nested Function Calls
+
+## Description
+
+Folds nested function calls bottom-up when all leaf arguments are
+constants. UPPER(CONCAT('hello', ' world')) first folds CONCAT to
+'hello world', then UPPER to 'HELLO WORLD'.
+
+**When to apply**: A function call's arguments are all either
+constants or other foldable function calls with constant arguments.
+
+## Implementation
+
+```rust
+// Bottom-up folding: inner functions fold first
+rw!("constant-fold-nested-unary";
+    "(?func (literal ?val))" =>
+    "(literal (eval-func ?func ?val))"
+    if is_constant_foldable("?func")
+),
+rw!("constant-fold-nested-binary";
+    "(?func (literal ?a) (literal ?b))" =>
+    "(literal (eval-func ?func ?a ?b))"
+    if is_constant_foldable("?func")
+),
+```
+
+## Test Cases
+
+```sql
+-- Positive: nested string functions
+SELECT UPPER(CONCAT('hello', ' world'));
+-- Step 1: CONCAT -> 'hello world'
+-- Step 2: UPPER -> 'HELLO WORLD'
+
+-- Positive: nested math
+SELECT ABS(FLOOR(-3.7));
+-- Step 1: FLOOR(-3.7) -> -4
+-- Step 2: ABS(-4) -> 4
+
+-- Positive: deep nesting
+SELECT LENGTH(UPPER(TRIM('  hello  ')));
+-- Step 1: TRIM -> 'hello'
+-- Step 2: UPPER -> 'HELLO'
+-- Step 3: LENGTH -> 5
+
+-- Negative: column in nested call
+SELECT UPPER(CONCAT(name, ' - ', title)) FROM emp;
+-- Cannot fold: name and title are columns
+```
+
+## References
+
+- Bottom-up evaluation strategy for constant folding
+- functions.toml: constant_foldable property

@@ -8,6 +8,7 @@ import { IsolationPage } from "src/components/isolation/IsolationPage.tsx";
 import { TranslatePage } from "src/components/translation/TranslatePage.tsx";
 import { HomePage } from "src/components/shared/HomePage.tsx";
 import { SharePage } from "src/components/shared/SharePage.tsx";
+import { DemosPage } from "src/components/demonstrations/DemosPage.tsx";
 
 export function App() {
   const [activeDb, setActiveDb] = useState<DatabaseId>("sqlite");
@@ -22,6 +23,7 @@ export function App() {
           <ComparePage path="/compare" />
           <IsolationPage path="/isolation" database={activeDb} />
           <TranslatePage path="/translate" />
+          <DemosPage path="/demos" />
           <SharePage path="/share/:id" />
         </Router>
       </main>

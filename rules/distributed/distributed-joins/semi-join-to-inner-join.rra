@@ -1,0 +1,159 @@
+---
+id: semi-join-to-inner-join
+name: Semi Join to Inner Join Conversion
+category: distributed/distributed-joins
+databases: [cockroachdb, tidb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, join, semi-join, inner-join, rewrite, exists]
+complexity: O(n)
+benefit_range: [0.1, 0.5]
+---
+
+# Semi Join to Inner Join Conversion
+
+## Description
+
+Converts a semi join into an inner join with a DistinctOn, allowing
+the optimizer to explore different join orders and join methods
+(especially lookup joins) that are not available for semi joins. The
+DistinctOn ensures the one-row-per-left-row semantics of the original
+semi join.
+
+**When to apply**: The semi join has simple equality conditions that
+guarantee at most one matching right row per left row, or a DistinctOn
+on the right side's join columns can enforce this property.
+
+**Why it works**: Semi joins impose a partial order on join inputs
+(left must be the outer/driving side). Converting to an inner join
+relaxes this constraint, enabling the optimizer to commute the join
+and potentially use a lookup join in the opposite direction.
+
+## Relational Algebra
+
+```algebra
+-- When ON is simple equalities:
+SemiJoin[L.k = R.k](L, R)
+  -> Project[L.cols](InnerJoin[L.k = R.k](L, DistinctOn[k](R)))
+
+-- When ON has non-equality predicates:
+SemiJoin[cond](L, R)
+  -> Project[L.cols](
+       DistinctOn[L.pk](
+         InnerJoin[cond](EnsureKey(L), R)
+       )
+     )
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("commute-semi-join-simple";
+    "(semi_join ?left ?right ?on ?private)" =>
+    "(project
+        (join inner
+            ?left
+            (distinct_on ?right (intersect_cols ?right ?on))
+            ?on ?private)
+        (output_cols ?left))"
+    if is_simple_equality("?on")
+    if no_join_hints("?private")
+),
+
+rw!("convert-semi-to-inner-join";
+    "(semi_join ?left ?right ?on ?private)" =>
+    "(project
+        (distinct_on
+            (join inner (ensure_key ?left) ?right ?on ?private)
+            (key_cols ?left))
+        (output_cols ?left))"
+    if not_simple_equality("?on")
+    if no_join_hints("?private")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    on: &FiltersExpr,
+    join_private: &JoinPrivate,
+) -> bool {
+    // No join hints that would prevent transformation
+    join_private.no_hints()
+    // ON condition exists (not a cross semi join)
+    && !on.is_empty()
+}
+```
+
+**Restrictions:**
+- For simple equalities, the DistinctOn on the right side's join
+  columns must produce at most one row per distinct key
+- For non-equality conditions, a DistinctOn after the inner join
+  is needed, which may be expensive
+- The transformed join inherits SkipReorderJoins to prevent
+  infinite reordering cycles
+- Not applicable when join hints force a specific join method
+
+## Cost Model
+
+```rust
+fn semi_to_inner_benefit(
+    left_rows: f64,
+    right_rows: f64,
+    right_distinct_keys: f64,
+    lookup_join_available: bool,
+) -> f64 {
+    if lookup_join_available {
+        // Lookup join on the (now left) side may be much cheaper
+        let lookup_cost = left_rows * LOOKUP_COST_PER_ROW;
+        let hash_semi_cost = left_rows + right_rows; // build + probe
+        hash_semi_cost - lookup_cost
+    } else {
+        0.0 // No benefit without enabling a new join method
+    }
+}
+```
+
+## Test Cases
+
+```sql
+-- Positive: semi join to inner + distinct enables lookup join
+-- TiDB: EXISTS subquery rewrite
+SELECT * FROM orders o WHERE EXISTS (
+    SELECT 1 FROM customers c WHERE c.id = o.customer_id
+);
+
+-- As semi join: SemiJoin(o.customer_id = c.id)
+-- Rewritten:
+--   Project(o.*)
+--     InnerJoin(o.customer_id = c.id)
+--       Scan(orders)
+--       DistinctOn(id)(Scan(customers))
+-- Now the inner join can be a lookup join on customers.id
+```
+
+```sql
+-- Positive: TiDB semi join rewrite with hint
+SELECT * FROM t WHERE EXISTS (
+    SELECT /*+ SEMI_JOIN_REWRITE() */ * FROM s WHERE s.a = t.a
+);
+-- Rewritten to: SELECT * FROM t JOIN (SELECT a FROM s GROUP BY a) s
+--   ON t.a = s.a;
+```
+
+```sql
+-- Negative: semi join with non-equality and no useful index
+SELECT * FROM t1 WHERE EXISTS (
+    SELECT 1 FROM t2 WHERE t2.val > t1.threshold
+);
+-- Theta predicate; DistinctOn after inner join is expensive
+```
+
+## References
+
+CockroachDB: pkg/sql/opt/xform/rules/join.opt:65 - CommuteSemiJoin (commit 51e808c)
+CockroachDB: pkg/sql/opt/xform/rules/join.opt:104 - ConvertSemiToInnerJoin
+TiDB: pkg/planner/core/rule_semi_join_rewrite.go:29 - SemiJoinRewriter (commit e2184a2)

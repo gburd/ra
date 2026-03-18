@@ -1,0 +1,242 @@
+---
+id: ripple-join
+name: Ripple Join for Online Aggregation
+category: experimental/adaptive
+databases: [postgresql]
+execution_models: [adaptive, interpreted]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["Haas & Hellerstein 1999", "RA Contributors"]
+tags: [adaptive, ripple-join, online-aggregation, approximate, sampling]
+complexity: "O(sqrt(n*m)) for confidence interval"
+benefit_range: [0.3, 0.8]
+---
+
+# Ripple Join for Online Aggregation
+
+## Description
+
+A join algorithm designed for online aggregation that returns
+progressively refined approximate answers. Unlike block-based hash joins
+that produce no output until the build phase completes, Ripple Join
+interleaves reading from both inputs, producing output tuples
+incrementally. This enables aggregate queries to show running estimates
+with confidence intervals that tighten over time.
+
+**When to apply**: Aggregate queries where approximate early results are
+valuable (exploratory analytics, dashboards, user-facing applications
+that can display running estimates). Also useful when the user may
+cancel the query after seeing initial results.
+
+**Why it works**: Traditional joins process one relation fully before
+probing. Ripple Join reads one tuple at a time from each relation in
+alternation, maintaining a growing sample of both sides. At any point,
+the matched tuples form an unbiased sample of the join result, enabling
+valid statistical estimation of aggregates.
+
+## Relational Algebra
+
+```algebra
+aggregate[SUM(x)](R join[R.a = S.a] S)
+  -> ripple_join_aggregate(
+       strategy: hash_ripple,
+       confidence: 0.95,
+       error_bound: 0.05,
+       aggregate: SUM(x),
+       inputs: (R, S)
+     )
+  where is_aggregate_query()
+  where approximate_answer_acceptable()
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("ripple-join";
+    "(aggregate ?agg (join ?pred ?left ?right))" =>
+    "(ripple_join_aggregate
+       (strategy hash_ripple)
+       (confidence 0.95)
+       (aggregate ?agg)
+       (pred ?pred)
+       (inputs ?left ?right))"
+    if is_aggregate_over_join()
+    if online_aggregation_enabled()
+),
+
+struct RippleJoin {
+    left_tuples: Vec<Tuple>,
+    right_tuples: Vec<Tuple>,
+    left_index: HashMap<JoinKey, Vec<usize>>,
+    right_index: HashMap<JoinKey, Vec<usize>>,
+    aggregate_state: OnlineAggregateState,
+    left_total: usize,   // Estimated total rows in left
+    right_total: usize,  // Estimated total rows in right
+}
+
+impl RippleJoin {
+    fn next_estimate(&mut self) -> AggregateEstimate {
+        // Read one tuple from each side (alternating)
+        if let Some(l_tuple) = self.left_source.next() {
+            self.left_tuples.push(l_tuple.clone());
+            let key = l_tuple.join_key();
+            self.left_index.entry(key)
+                .or_default()
+                .push(self.left_tuples.len() - 1);
+
+            // Probe right index for matches
+            if let Some(matches) =
+                self.right_index.get(&l_tuple.join_key())
+            {
+                for &idx in matches {
+                    self.aggregate_state.update(
+                        &l_tuple, &self.right_tuples[idx],
+                    );
+                }
+            }
+        }
+
+        if let Some(r_tuple) = self.right_source.next() {
+            self.right_tuples.push(r_tuple.clone());
+            let key = r_tuple.join_key();
+            self.right_index.entry(key)
+                .or_default()
+                .push(self.right_tuples.len() - 1);
+
+            // Probe left index
+            if let Some(matches) =
+                self.left_index.get(&r_tuple.join_key())
+            {
+                for &idx in matches {
+                    self.aggregate_state.update(
+                        &self.left_tuples[idx], &r_tuple,
+                    );
+                }
+            }
+        }
+
+        // Compute running estimate with confidence interval
+        let n_l = self.left_tuples.len() as f64;
+        let n_r = self.right_tuples.len() as f64;
+        let scale = (self.left_total as f64 / n_l)
+                   * (self.right_total as f64 / n_r);
+
+        AggregateEstimate {
+            value: self.aggregate_state.current() * scale,
+            confidence_interval: self.aggregate_state
+                .confidence_interval(0.95, scale),
+            tuples_processed: (n_l + n_r) as usize,
+        }
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(query: &RelExpr) -> bool {
+    // Must be aggregate over join
+    if !is_aggregate_over_join(query) {
+        return false;
+    }
+
+    // Aggregate must support online estimation
+    let agg = extract_aggregate(query);
+    match agg {
+        Aggregate::Count | Aggregate::Sum
+        | Aggregate::Avg => true,
+        Aggregate::Min | Aggregate::Max => false, // Need full scan
+        Aggregate::Median => false,
+        _ => false,
+    }
+}
+```
+
+**Restrictions:**
+- Only works for estimable aggregates (COUNT, SUM, AVG)
+- MIN/MAX/MEDIAN require full scan (not incrementally estimable)
+- Confidence intervals assume random access to both relations
+- Skewed join keys can cause slow convergence
+- Relations must support random or shuffled access (not sorted)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    left: &Statistics,
+    right: &Statistics,
+    required_confidence: f64,
+    required_error: f64,
+) -> f64 {
+    // Full join cost
+    let full_cost = left.row_count as f64
+                  + right.row_count as f64;
+
+    // Ripple join cost for given confidence/error
+    // Sample size ~ (z^2 * variance) / error^2
+    let z = 1.96; // 95% confidence
+    let sample_fraction = (z * z) / (required_error * required_error);
+    let ripple_cost = (left.row_count as f64
+                      + right.row_count as f64)
+                      * sample_fraction.min(1.0);
+
+    if full_cost > ripple_cost {
+        (full_cost - ripple_cost) / full_cost
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 10x-100x speedup for exploratory queries where
+5% error with 95% confidence is acceptable. Returns first estimate
+after processing ~sqrt(N) tuples.
+
+## Test Cases
+
+### Positive: Exploratory analytics
+
+```sql
+-- Dashboard query: "What's the total revenue by region?"
+SELECT r.name, SUM(o.amount)
+FROM orders o JOIN regions r ON o.region_id = r.id
+GROUP BY r.name;
+
+-- Ripple join returns estimates after 1000 tuples (< 1 second)
+-- Full result requires processing 100M orders (minutes)
+-- User sees early estimate: "US: $5.2B +/- 2%"
+```
+
+### Positive: Data exploration
+
+```sql
+SELECT AVG(p.price)
+FROM products p JOIN sales s ON p.id = s.product_id
+WHERE s.year = 2024;
+
+-- Quick estimate for data scientist exploring the dataset
+-- Ripple: estimate after 5000 tuples with 3% error
+```
+
+### Negative: Exact result required
+
+```sql
+-- Financial report requiring exact figures
+SELECT SUM(amount) FROM transactions WHERE account_id = 42;
+-- Cannot use approximate answer
+```
+
+## References
+
+**Academic papers:**
+- Haas, Hellerstein, "Ripple Joins for Online Aggregation", SIGMOD 1999
+- Hellerstein et al., "Online Aggregation", SIGMOD 1997
+- Li et al., "Wander Join: Online Aggregation via Random Walks", SIGMOD 2016
+
+**Key insights:**
+- Hash Ripple Join extends to multi-way joins
+- Wander Join (2016) uses random walks for multi-way join estimation
+- Online aggregation provides "anytime" query answers
+- Useful for interactive data exploration (AQP systems like BlinkDB)

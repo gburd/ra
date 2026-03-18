@@ -136,5 +136,6 @@ export const ROUTES = {
   compare: "/compare",
   isolation: "/isolation",
   translate: "/translate",
+  demos: "/demos",
   share: "/share/:id",
 } as const;

@@ -1,0 +1,197 @@
+---
+id: column-compression-aware
+name: Column-at-a-Time Compression-Aware Processing
+category: execution-models/column-at-a-time
+version: "1.0.0"
+databases: [monetdb, clickhouse, duckdb, vertica]
+authors: ["Daniel Abadi", "Peter Boncz"]
+tags: [execution, columnar, compression, lightweight, operate-on-compressed]
+complexity: "O(n / compression_ratio)"
+benefit_range: [0.3, 10.0]
+---
+
+# Column-at-a-Time Compression-Aware Processing
+
+## Description
+
+Executes query operators directly on compressed column data without full
+decompression, exploiting the structure of lightweight compression schemes.
+For dictionary encoding, run-length encoding (RLE), and frame-of-reference
+(FOR), operators can process compressed representations at reduced cost.
+
+**Compression schemes and operator compatibility:**
+- **Dictionary encoding**: Equality predicates operate on dictionary codes;
+  aggregation groups by code; projection remaps codes to values only at output
+- **Run-length encoding**: COUNT = sum of run lengths; filters skip entire runs;
+  aggregation processes one value per run
+- **Frame-of-reference / delta**: Range predicates adjust bounds, operate on
+  deltas; SUM = base * count + sum of deltas
+- **Bit-packing**: SIMD operations on packed values without unpacking
+
+**Key insight**: Decompression is often the bottleneck for I/O-bound queries.
+Operating on compressed data reduces memory bandwidth by the compression ratio
+and can reduce computation by operating on fewer distinct values.
+
+## Relational Algebra
+
+```
+Traditional: decompress -> filter -> aggregate
+  values = decompress(compressed_column)    -- N values, bandwidth B
+  selected = filter(values, pred)           -- scan N values
+  result = aggregate(selected)              -- scan S*N values
+
+Compression-aware: filter on compressed -> aggregate on compressed
+  Dictionary:
+    matching_codes = filter(dictionary, pred)  -- scan D entries (D << N)
+    selected = match_codes(codes_column, matching_codes)  -- SIMD on codes
+    result = aggregate_by_code(codes_column, selected)
+
+  RLE:
+    for (value, count) in rle_column:
+      if pred(value):
+        result += value * count  -- one operation per run, not per row
+```
+
+## Implementation
+
+```rust
+/// Dictionary-encoded column
+pub struct DictColumn {
+    dictionary: Vec<Value>,     // D distinct values
+    codes: Vec<u16>,            // N code indices (2 bytes each)
+}
+
+/// Compression-aware filter on dictionary column
+pub fn dict_filter_eq(
+    col: &DictColumn,
+    target: &Value,
+) -> SelectionVector {
+    // Step 1: Find matching code(s) in dictionary
+    let matching_codes: Vec<u16> = col.dictionary.iter()
+        .enumerate()
+        .filter(|(_, v)| *v == target)
+        .map(|(i, _)| i as u16)
+        .collect();
+
+    if matching_codes.is_empty() {
+        return SelectionVector::Positions(vec![]);
+    }
+
+    // Step 2: Scan codes array (2 bytes per entry, not full value width)
+    let code = matching_codes[0];
+    let positions: Vec<u32> = col.codes.iter()
+        .enumerate()
+        .filter(|(_, &c)| c == code)
+        .map(|(i, _)| i as u32)
+        .collect();
+
+    SelectionVector::Positions(positions)
+}
+
+/// RLE-aware aggregation
+pub struct RleColumn {
+    runs: Vec<(Value, u32)>,  // (value, count) pairs
+}
+
+pub fn rle_sum(col: &RleColumn, selection: &SelectionVector) -> f64 {
+    match selection {
+        SelectionVector::All(_) => {
+            // Sum directly on RLE: one multiply per run
+            col.runs.iter()
+                .map(|(val, count)| val.as_f64() * *count as f64)
+                .sum()
+        }
+        _ => {
+            // Must decompress for partial selection
+            let decompressed = col.decompress();
+            sum_with_selection(&decompressed, selection)
+        }
+    }
+}
+
+pub fn rle_count(col: &RleColumn) -> u64 {
+    // O(R) where R = number of runs, typically R << N
+    col.runs.iter().map(|(_, count)| *count as u64).sum()
+}
+
+/// Frame-of-reference filter: adjust predicate to delta space
+pub struct ForColumn {
+    base: i64,
+    deltas: Vec<i32>,  // 4 bytes per value instead of 8
+    bits_per_delta: u8,
+}
+
+pub fn for_filter_range(
+    col: &ForColumn,
+    lo: i64,
+    hi: i64,
+) -> SelectionVector {
+    // Adjust bounds to delta space
+    let delta_lo = (lo - col.base) as i32;
+    let delta_hi = (hi - col.base) as i32;
+
+    // Filter on narrow deltas (half the bandwidth)
+    let positions: Vec<u32> = col.deltas.iter()
+        .enumerate()
+        .filter(|(_, &d)| d >= delta_lo && d <= delta_hi)
+        .map(|(i, _)| i as u32)
+        .collect();
+
+    SelectionVector::Positions(positions)
+}
+```
+
+## Cost Model
+
+**Dictionary encoding:**
+- Filter: O(D) dictionary scan + O(N) code comparison (2-byte codes vs 8+ byte values)
+- Bandwidth saving: N * (value_width - code_width) bytes
+- For 1000 distinct values in 1B rows: codes = 2 bytes vs avg 20-byte strings
+
+**Run-length encoding:**
+- Aggregation: O(R) where R = number of runs (typically N/100 to N/1000)
+- Speedup: N/R (100-1000x for sorted columns)
+- Random access: O(log R) binary search on cumulative counts
+
+**Frame-of-reference:**
+- Filter: same algorithm, 50% less bandwidth (4-byte deltas vs 8-byte values)
+- SUM: base * count + sum(deltas), same computation but less memory traffic
+- Composes with bit-packing for further reduction
+
+## Test Cases
+
+```sql
+-- Test 1: Dictionary-encoded string filter
+SELECT COUNT(*) FROM orders WHERE status = 'shipped';
+-- Dictionary: ['pending', 'shipped', 'delivered', 'cancelled']
+-- Find code for 'shipped' (code=1): O(4)
+-- Scan 1B codes (2 bytes each): 2 GB vs 10 GB for raw strings
+-- 5x less memory bandwidth
+
+-- Test 2: RLE aggregation on sorted column
+SELECT SUM(amount) FROM daily_sales;
+-- Data sorted by date, same amounts within each day
+-- RLE: 365 runs for a year of daily data
+-- SUM = 365 multiplications vs 10M additions
+-- 27000x fewer operations
+
+-- Test 3: FOR range filter
+SELECT * FROM sensor_data WHERE reading BETWEEN 1000 AND 1100;
+-- Base = 1000, deltas stored as 16-bit integers
+-- Filter on deltas: BETWEEN 0 AND 100
+-- 2 bytes/value vs 8 bytes/value = 4x less bandwidth
+```
+
+## References
+
+1. **Abadi, Daniel et al**. "Integrating Compression and Execution in
+   Column-Oriented Database Systems." SIGMOD 2006.
+   - Compression-aware execution in C-Store
+
+2. **Boncz, Peter et al**. "MonetDB/X100: Hyper-Pipelining Query Execution."
+   CIDR 2005.
+   - Lightweight compression in vectorized execution
+
+3. **Zukowski, Marcin et al**. "Super-Scalar RAM-CPU Cache Compression."
+   ICDE 2006.
+   - Frame-of-reference and delta encoding for cache efficiency

@@ -1,0 +1,199 @@
+---
+id: wcoj-clique-detection
+name: WCOJ for Clique Detection Patterns
+category: experimental/wcoj
+databases: [duckdb]
+execution_models: [vectorized]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["Aberger et al. 2017", "RA Contributors"]
+tags: [wcoj, clique, subgraph-matching, graph-analytics]
+complexity: "O(N^(k/2))"
+benefit_range: [0.5, 0.99]
+---
+
+# WCOJ for Clique Detection Patterns
+
+## Description
+
+Applies worst-case optimal join algorithms to k-clique detection queries,
+which are among the most extreme cases where WCOJ outperforms binary joins.
+A k-clique requires k*(k-1)/2 edge checks; binary join plans produce
+intermediate results of size O(N^(k-1)), while WCOJ achieves O(N^(k/2))
+via the AGM bound for clique patterns.
+
+**When to apply**: Graph queries searching for complete subgraphs (cliques)
+of size 3 or larger. Common in social network analysis, fraud detection,
+and community detection.
+
+**Why it works**: The fractional edge cover number for a k-clique is k/2.
+Binary joins process edges pairwise, creating intermediate results that
+grow as N^(k-1). WCOJ processes all edges simultaneously at each level,
+achieving the AGM bound of N^(k/2).
+
+## Relational Algebra
+
+```algebra
+-- k-clique pattern: k nodes, k*(k-1)/2 edges
+join[e_ij.v2 = e_jk.v1 for all i<j<k](e_12, e_13, ..., e_{k-1,k})
+  -> wcoj_clique(
+       k: clique_size,
+       edge_relation: edges,
+       variable_order: [v1, v2, ..., vk],
+       algorithm: generic_join
+     )
+  where is_clique_pattern(k)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("wcoj-clique-3";
+    "(join ?p1 (join ?p2 ?e1 ?e2) ?e3)" =>
+    "(wcoj_clique
+       (k 3)
+       (edges ?e1 ?e2 ?e3)
+       (predicates (merge_preds ?p1 ?p2))
+       (algorithm generic_join))"
+    if is_triangle_pattern("?e1", "?e2", "?e3", "?p1", "?p2")
+),
+
+rw!("wcoj-clique-4";
+    "(join ?p3 (join ?p2 (join ?p1 ?e1 ?e2) ?e3) ?e4)" =>
+    "(wcoj_clique
+       (k 4)
+       (edges ?e1 ?e2 ?e3 ?e4)
+       (predicates (merge_preds ?p1 ?p2 ?p3))
+       (algorithm generic_join))"
+    if is_4clique_pattern("?e1", "?e2", "?e3", "?e4")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    relations: &[RelExpr],
+    predicates: &[JoinPredicate],
+) -> bool {
+    // Detect clique pattern: each pair of "node" variables
+    // must be connected by a join predicate
+    let variables = extract_node_variables(predicates);
+    let k = variables.len();
+
+    if k < 3 {
+        return false;
+    }
+
+    // Check all k*(k-1)/2 edges exist
+    let edge_count = predicates.len();
+    let expected_edges = k * (k - 1) / 2;
+
+    if edge_count != expected_edges {
+        return false;
+    }
+
+    // Verify complete graph structure
+    for i in 0..k {
+        for j in (i + 1)..k {
+            if !has_edge_predicate(
+                &variables[i], &variables[j], predicates,
+            ) {
+                return false;
+            }
+        }
+    }
+
+    true
+}
+```
+
+**Restrictions:**
+- Must be a complete subgraph pattern (all pairs connected)
+- All edges must come from the same relation (self-join on edges table)
+- k <= 8 practical limit (AGM bound grows as N^(k/2))
+- Requires sorted indexes or hash indexes on both endpoints
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    edge_stats: &Statistics,
+    k: usize,
+) -> f64 {
+    let n = edge_stats.row_count;
+
+    // Binary plan: O(N^(k-1)) intermediate results
+    let binary_cost = (n as f64).powf((k - 1) as f64);
+
+    // WCOJ: O(N^(k/2)) via AGM bound
+    let wcoj_cost = (n as f64).powf(k as f64 / 2.0);
+
+    // Index construction overhead
+    let index_overhead = n as f64 * k as f64 * 1.5;
+    let total_wcoj = wcoj_cost + index_overhead;
+
+    if binary_cost > total_wcoj {
+        (binary_cost - total_wcoj) / binary_cost
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: Exponential improvement. For k=4 cliques on a graph
+with N=10^6 edges: binary produces O(10^18) intermediates, WCOJ produces
+O(10^12). For k=5: O(10^24) vs O(10^15).
+
+## Test Cases
+
+### Positive: Triangle detection (3-clique)
+
+```sql
+SELECT e1.v1, e1.v2, e2.v2
+FROM edges e1, edges e2, edges e3
+WHERE e1.v2 = e2.v1
+  AND e2.v2 = e3.v1
+  AND e3.v2 = e1.v1;
+
+-- rho* = 3/2, so O(N^1.5) vs O(N^2) for binary joins
+```
+
+### Positive: 4-clique detection
+
+```sql
+SELECT e1.v1, e2.v1, e3.v1, e4.v1
+FROM edges e1, edges e2, edges e3,
+     edges e4, edges e5, edges e6
+WHERE e1.v1 = e2.v1 AND e1.v2 = e3.v1
+  AND e2.v2 = e3.v2 AND e1.v2 = e4.v1
+  AND e2.v2 = e4.v2 AND e3.v2 = e4.v2;
+
+-- rho* = 2, so O(N^2) vs O(N^3) for binary joins
+-- 6 edges needed for 4-clique
+```
+
+### Negative: Path query (acyclic)
+
+```sql
+SELECT e1.v1, e3.v2
+FROM edges e1, edges e2, edges e3
+WHERE e1.v2 = e2.v1 AND e2.v2 = e3.v1;
+
+-- Path pattern, not clique. Binary joins are optimal.
+```
+
+## References
+
+**Academic papers:**
+- Aberger et al., "EmptyHeaded: A Relational Engine for Graph Processing", SIGMOD 2017
+- Ngo et al., "Worst-Case Optimal Join Algorithms", JACM 2018
+- Ammar et al., "Distributed Evaluation of Subgraph Queries Using WCOJ", VLDB 2018
+
+**Key insights:**
+- k-clique AGM bound: rho* = k/2 (each edge covers 2 of k nodes)
+- Exponential gap between WCOJ and binary for k >= 3
+- Practical for k <= 6-8 on modern hardware
+- Common in fraud detection (ring patterns) and social network analysis

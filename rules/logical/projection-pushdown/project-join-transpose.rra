@@ -1,0 +1,132 @@
+---
+id: calcite-project-join-transpose
+name: Calcite ProjectJoinTransposeRule
+category: logical/projection-pushdown
+databases: [calcite, postgresql, mysql, oracle]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [logical, calcite, project, join, transpose, pushdown]
+complexity: O(n)
+benefit_range: [0.1, 0.5]
+---
+
+# Calcite ProjectJoinTransposeRule
+
+## Description
+
+Pushes a projection past a join by splitting it into projections on
+each child of the join. Each child projection retains only the columns
+needed by the join condition and the output projection.
+
+**When to apply**: A project sits above a join and can be decomposed
+into sub-projections that reference only one side of the join.
+
+**Why it works**: Projecting away columns before the join reduces
+the width of rows flowing through the join, reducing memory usage
+for hash tables and sort buffers.
+
+**Calcite class**: `org.apache.calcite.rel.rules.ProjectJoinTransposeRule`
+
+## Relational Algebra
+
+```algebra
+-- Before: wide project above join
+pi[L.a, R.x](L JOIN[L.k = R.k] R)
+  where L has columns {a, b, c, k}
+  and R has columns {x, y, z, k}
+
+-- After: narrow inputs to join
+pi[L.a, R.x](
+    pi[a, k](L) JOIN[k = k] pi[x, k](R)
+)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-project-join-transpose";
+    "(project ?cols (join ?type ?cond ?left ?right))" =>
+    "(project ?cols
+        (join ?type ?cond
+            (project ?left_cols ?left)
+            (project ?right_cols ?right)))"
+    if can_split_project("?cols", "?cond", "?left", "?right")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    project: &Project,
+    join: &Join,
+) -> bool {
+    let needed = project.referenced_columns()
+        .union(&join.condition().referenced_columns());
+    let left_count = join.left().row_type().field_count();
+    let right_count = join.right().row_type().field_count();
+
+    // Benefit only if we can eliminate columns from at least one side
+    let left_needed = needed.iter().filter(|&&c| c < left_count).count();
+    let right_needed = needed.iter()
+        .filter(|&&c| c >= left_count).count();
+
+    left_needed < left_count || right_needed < right_count
+}
+```
+
+**Restrictions:**
+- Join condition columns must be preserved in sub-projections
+- Expressions referencing both sides cannot be pushed
+- A final projection above the join maps to the original output
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    left_rows: f64,
+    right_rows: f64,
+    left_cols_removed: usize,
+    right_cols_removed: usize,
+) -> f64 {
+    let left_saving = left_rows * left_cols_removed as f64 * 8.0;
+    let right_saving = right_rows * right_cols_removed as f64 * 8.0;
+    let total = (left_rows + right_rows)
+        * (left_cols_removed + right_cols_removed) as f64 * 8.0;
+    if total > 0.0 {
+        (left_saving + right_saving) / total
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 10-50% by reducing join input widths.
+
+## Test Cases
+
+```sql
+-- Positive: narrow columns from wide tables
+SELECT e.ename, d.dname
+FROM emp e JOIN dept d ON e.deptno = d.deptno;
+-- Only ename+deptno from emp, dname+deptno from dept
+```
+
+```sql
+-- Positive: significant column reduction
+SELECT a.id, b.value
+FROM wide_table_a a JOIN wide_table_b b ON a.key = b.key;
+-- If tables have 50+ columns, major width reduction
+```
+
+```sql
+-- Negative: all columns needed
+SELECT * FROM emp e JOIN dept d ON e.deptno = d.deptno;
+-- No columns to project away
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/ProjectJoinTransposeRule.java (commit af6367d)

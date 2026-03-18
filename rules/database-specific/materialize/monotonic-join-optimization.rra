@@ -1,0 +1,186 @@
+---
+id: materialize-monotonic-join-optimization
+name: Materialize Monotonic Join Optimization
+category: database-specific/materialize
+databases: [materialize]
+execution_models: [differential]
+version: "1.0.0"
+authors: ["Materialize Inc."]
+tags: [monotonic, join, append-only, streaming, differential]
+complexity: "O(changes)"
+benefit_range: [0.3, 5.0]
+---
+
+# Materialize Monotonic Join Optimization
+
+## Description
+
+Exploits monotonicity (append-only) properties of input collections to simplify
+join implementations. When both inputs to a join are monotonic (only insertions,
+no retractions), the join operator can use a simplified one-sided arrangement
+that avoids maintaining full differential state for retraction handling.
+
+**When to apply**: Joins where one or both inputs are known to be monotonic
+sources (e.g., append-only Kafka topics, log tables, or the output of monotonic
+operators like UNION ALL of monotonic inputs). The optimizer marks monotonic
+collections and selects a lighter join implementation.
+
+**Why it works**: Standard differential joins maintain full arrangements on both
+sides to handle arbitrary retractions. Monotonic joins know that retractions
+never occur, so they can use a simpler "lookup in existing arrangement, emit
+matches" strategy without maintaining inverse mappings for retraction propagation.
+This reduces memory by ~50% and computation per update by eliminating retraction
+bookkeeping.
+
+## Relational Algebra
+
+```algebra
+-- Standard differential join (handles retractions):
+diff-join(arrange(L, key), arrange(R, key))
+  -- Maintains full arrangements for both L and R
+  -- On retraction of L row: look up R matches, emit retraction
+
+-- Monotonic join (no retractions possible):
+mono-join(arrange(L, key), R_stream)
+  -- Only arranges L (smaller side)
+  -- R stream looks up in L arrangement, emits matches
+  -- No retraction handling needed
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("materialize-monotonic-join";
+    "(join ?type ?pred
+       (arrange ?left ?key)
+       (arrange ?right ?key))" =>
+    "(monotonic-join ?type ?pred
+       (arrange ?left ?key)
+       (stream ?right))"
+    if is_monotonic("?left")
+    if is_monotonic("?right")
+),
+
+rw!("materialize-monotonic-lookup-join";
+    "(join ?type ?pred
+       (arrange ?large ?key)
+       (arrange ?small ?key))" =>
+    "(monotonic-lookup-join ?type ?pred
+       (arrange ?large ?key)
+       (stream ?small))"
+    if is_monotonic("?small")
+    if smaller_side("?small", "?large")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> bool {
+    (stats.left_is_monotonic || stats.right_is_monotonic)
+        && stats.join_type != JoinType::AntiJoin
+        // Anti-joins on monotonic sources need special handling
+}
+```
+
+**Restrictions:**
+- Monotonicity must be provable: append-only sources or derived through
+  monotonicity-preserving operators (filter, map, union all of monotonics)
+- DELETE operations on upstream sources break monotonicity
+- Temporal filters (WHERE ts > mz_now() - interval) introduce implicit retractions
+- Anti-joins and EXCEPT require retraction capability even on monotonic inputs
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let arrangement_rows = stats.arranged_collection_rows as f64;
+    let row_bytes = stats.avg_row_bytes as f64;
+
+    // Standard join: two full arrangements
+    let standard_memory = 2.0 * arrangement_rows * row_bytes;
+
+    // Monotonic join: one arrangement + streaming
+    let mono_memory = arrangement_rows * row_bytes;
+
+    // Computation savings: no retraction propagation
+    let retraction_savings = 0.3; // ~30% of update processing is retraction handling
+
+    let memory_benefit = (standard_memory - mono_memory) / standard_memory;
+    let compute_benefit = retraction_savings;
+
+    (memory_benefit + compute_benefit) / 2.0
+}
+```
+
+**Typical benefit**: 30% to 5x memory and CPU reduction for append-only workloads.
+
+## Test Cases
+
+### Positive: Join of two append-only sources
+
+```sql
+-- Both sources are append-only Kafka topics
+CREATE SOURCE clicks FROM KAFKA CONNECTION kafka_conn
+  (TOPIC 'clicks') FORMAT AVRO;
+
+CREATE SOURCE impressions FROM KAFKA CONNECTION kafka_conn
+  (TOPIC 'impressions') FORMAT AVRO;
+
+-- Join of two monotonic sources
+CREATE MATERIALIZED VIEW click_through AS
+SELECT c.user_id, c.click_time, i.impression_time
+FROM clicks c
+JOIN impressions i ON c.impression_id = i.id;
+
+-- Monotonic join: no retraction state needed
+-- One-sided arrangement lookup
+```
+
+### Positive: Monotonic aggregate
+
+```sql
+-- Append-only source with monotonic COUNT
+CREATE MATERIALIZED VIEW event_counts AS
+SELECT event_type, COUNT(*) AS cnt
+FROM append_only_events
+GROUP BY event_type;
+
+-- COUNT on monotonic source is itself monotonic (only increases)
+-- No retraction handling for the aggregate
+```
+
+### Negative: Source with retractions
+
+```sql
+-- Upsert source: keys can be updated (retraction + insertion)
+CREATE SOURCE users FROM KAFKA CONNECTION kafka_conn
+  (TOPIC 'users') FORMAT AVRO
+  ENVELOPE UPSERT;
+
+-- Not monotonic: updates generate retractions
+-- Must use standard differential join
+```
+
+## References
+
+**Implementation:**
+- Materialize source: `src/compute/src/render/join/linear_join.rs`
+- Monotonicity analysis: `src/transform/src/monotonic.rs`
+- TopK monotonic: `src/compute/src/render/top_k.rs`
+
+**Documentation:**
+- Materialize docs: "Optimization" section on monotonic operators
+- Materialize blog: "Understanding Materialize's Optimizer"
+
+**Papers:**
+- McSherry, F., et al., "Differential Dataflow", CIDR 2013
+- Murray, D.G., et al., "Naiad: A Timely Dataflow System", SOSP 2013

@@ -1,0 +1,481 @@
+---
+id: volcano-memory-management
+name: Volcano Iterator Model - Memory Management
+category: execution-models
+version: 1.0.0
+databases: [postgresql, mysql, oracle, sqlite, mssql]
+authors: [Goetz Graefe]
+tags: [execution, iterator, volcano, memory, buffer, spill, work-mem]
+standard: Volcano model
+complexity: advanced
+benefit_range: [1.5, 5.0]
+---
+
+# Volcano Iterator Model - Memory Management
+
+## Description
+
+Memory management in the Volcano iterator model governs how tuple
+buffers, materialization buffers, and operator state are allocated,
+sized, and reclaimed during query execution. Pipelined operators
+require O(1) memory (one tuple at a time), but pipeline breakers
+(sort, hash join, hash aggregate) require O(N) memory that may
+exceed available RAM, triggering spill-to-disk.
+
+**When to apply:** Every query plan with materializing operators
+must budget memory. The executor must decide: (1) how much memory
+each operator gets, (2) when to spill, (3) how to partition work
+for external algorithms.
+
+**Why it matters:** Memory allocation directly determines whether
+a query runs in-memory (fast) or spills to disk (10-100x slower).
+Intelligent memory management can mean the difference between a
+sub-second query and a multi-minute query.
+
+**Key concerns:**
+- **Tuple lifetime**: When can a tuple buffer be reused?
+- **Work memory budgets**: How much RAM per operator?
+- **Spill strategies**: How to gracefully degrade when memory is
+  exceeded?
+- **Memory accounting**: Track actual vs estimated usage.
+- **Multi-operator coordination**: Divide memory among concurrent
+  materializers in the same query.
+
+## Relational Algebra
+
+```
+Memory zones in a Volcano execution:
+
+1. Per-tuple buffer (O(1)):
+   - Current tuple being processed
+   - Reused after each next() call
+   - Allocated once per operator
+
+2. Operator state (O(1) to O(N)):
+   - Pipelined: O(1) — cursor, predicate
+   - Sort: O(N) — sort buffer
+   - Hash Join: O(build_side) — hash table
+   - Hash Agg: O(groups) — hash table
+   - Window: O(partition) — partition buffer
+
+3. Expression evaluation (O(1)):
+   - Intermediate computation buffers
+   - Reused per tuple
+
+Memory lifecycle:
+  open()  — allocate operator buffers
+  next()  — fill/consume tuple buffers
+  close() — deallocate all buffers
+
+Spill decision:
+  if used_memory > work_mem_limit:
+    partition data into disk-resident runs
+    process each partition separately
+    merge results
+
+Memory budget allocation for plan with N materializers:
+  Strategy 1: Equal split — work_mem / N per operator
+  Strategy 2: Proportional — based on estimated cardinality
+  Strategy 3: Adaptive — start equal, redistribute on demand
+```
+
+## Implementation
+
+```rust
+/// Memory management for Volcano-style query execution.
+///
+/// Tracks memory usage per operator and triggers spill-to-disk
+/// when budgets are exceeded.
+
+/// Memory budget for a single operator.
+#[derive(Debug, Clone)]
+pub struct OperatorMemoryBudget {
+    /// Maximum bytes this operator may use in memory.
+    pub limit_bytes: usize,
+    /// Current bytes allocated.
+    pub used_bytes: usize,
+    /// Whether this operator has spilled to disk.
+    pub spilled: bool,
+}
+
+impl OperatorMemoryBudget {
+    pub fn new(limit_bytes: usize) -> Self {
+        Self {
+            limit_bytes,
+            used_bytes: 0,
+            spilled: false,
+        }
+    }
+
+    /// Try to allocate bytes. Returns false if over budget.
+    pub fn try_allocate(
+        &mut self,
+        bytes: usize,
+    ) -> bool {
+        if self.used_bytes + bytes > self.limit_bytes {
+            return false;
+        }
+        self.used_bytes += bytes;
+        true
+    }
+
+    /// Release previously allocated bytes.
+    pub fn release(&mut self, bytes: usize) {
+        self.used_bytes =
+            self.used_bytes.saturating_sub(bytes);
+    }
+
+    /// Check if spill is needed.
+    pub fn should_spill(&self) -> bool {
+        self.used_bytes >= self.limit_bytes
+    }
+}
+
+/// Query-level memory manager that coordinates budgets
+/// across all operators in a plan.
+pub struct QueryMemoryManager {
+    /// Total memory budget for this query.
+    total_budget: usize,
+    /// Per-operator budgets, keyed by operator ID.
+    operator_budgets: HashMap<usize, OperatorMemoryBudget>,
+    /// Peak memory usage observed.
+    peak_usage: usize,
+}
+
+impl QueryMemoryManager {
+    pub fn new(total_budget: usize) -> Self {
+        Self {
+            total_budget,
+            operator_budgets: HashMap::new(),
+            peak_usage: 0,
+        }
+    }
+
+    /// Assign memory budgets to operators based on plan
+    /// analysis.
+    pub fn assign_budgets(
+        &mut self,
+        plan: &RelExpr,
+    ) {
+        let materializers = find_materializers(plan);
+        let count = materializers.len().max(1);
+
+        // Strategy: proportional allocation based on
+        // estimated materialization size.
+        let total_estimated: f64 = materializers
+            .iter()
+            .map(|m| m.estimated_buffer_size())
+            .sum();
+
+        for m in &materializers {
+            let fraction = if total_estimated > 0.0 {
+                m.estimated_buffer_size() / total_estimated
+            } else {
+                1.0 / count as f64
+            };
+
+            let budget = (self.total_budget as f64
+                * fraction)
+                .max(1024.0 * 1024.0) // minimum 1 MB
+                as usize;
+
+            self.operator_budgets.insert(
+                m.operator_id(),
+                OperatorMemoryBudget::new(budget),
+            );
+        }
+    }
+
+    /// Called by an operator when it allocates memory.
+    pub fn allocate(
+        &mut self,
+        operator_id: usize,
+        bytes: usize,
+    ) -> MemoryAllocation {
+        let budget = match self
+            .operator_budgets
+            .get_mut(&operator_id)
+        {
+            Some(b) => b,
+            None => {
+                return MemoryAllocation::Granted;
+            }
+        };
+
+        if budget.try_allocate(bytes) {
+            let current_total: usize = self
+                .operator_budgets
+                .values()
+                .map(|b| b.used_bytes)
+                .sum();
+            self.peak_usage =
+                self.peak_usage.max(current_total);
+            MemoryAllocation::Granted
+        } else {
+            budget.spilled = true;
+            MemoryAllocation::SpillRequired
+        }
+    }
+
+    /// Report peak memory usage for EXPLAIN ANALYZE.
+    pub fn peak_memory_bytes(&self) -> usize {
+        self.peak_usage
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum MemoryAllocation {
+    Granted,
+    SpillRequired,
+}
+
+/// Sort operator with spill-to-disk support.
+pub struct SortIterator {
+    input: Box<dyn VolcanoIterator>,
+    order_by: Vec<SortKey>,
+    memory_budget: OperatorMemoryBudget,
+    /// In-memory buffer for small sorts.
+    mem_buffer: Vec<Tuple>,
+    /// Sorted runs on disk for external sort.
+    disk_runs: Vec<TempFile>,
+    /// Merge iterator over disk runs.
+    merge_cursor: Option<MergeCursor>,
+    state: SortState,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum SortState {
+    Collecting,
+    Sorting,
+    Producing,
+}
+
+impl VolcanoIterator for SortIterator {
+    fn open(&mut self) -> Result<()> {
+        self.input.open()?;
+        self.state = SortState::Collecting;
+
+        // Consume all input, spilling if necessary
+        loop {
+            match self.input.next_tuple()? {
+                None => break,
+                Some(tuple) => {
+                    let tuple_size = tuple.heap_size();
+                    if self
+                        .memory_budget
+                        .try_allocate(tuple_size)
+                    {
+                        self.mem_buffer.push(tuple);
+                    } else {
+                        // Memory exceeded: sort current
+                        // buffer and flush to disk
+                        self.flush_run_to_disk()?;
+                        self.mem_buffer.push(tuple);
+                        self.memory_budget =
+                            OperatorMemoryBudget::new(
+                                self.memory_budget
+                                    .limit_bytes,
+                            );
+                        self.memory_budget
+                            .try_allocate(tuple_size);
+                    }
+                }
+            }
+        }
+
+        self.input.close()?;
+
+        // Finalize: sort in-memory or set up merge
+        if self.disk_runs.is_empty() {
+            // Pure in-memory sort
+            self.mem_buffer
+                .sort_by(|a, b| compare_keys(a, b, &self.order_by));
+        } else {
+            // Flush remaining buffer as final run
+            self.flush_run_to_disk()?;
+            // Set up k-way merge over all runs
+            self.merge_cursor =
+                Some(MergeCursor::new(&self.disk_runs)?);
+        }
+
+        self.state = SortState::Producing;
+        Ok(())
+    }
+
+    fn next_tuple(&mut self) -> Result<Option<Tuple>> {
+        match &mut self.merge_cursor {
+            None => {
+                // In-memory: pop from sorted buffer
+                if self.mem_buffer.is_empty() {
+                    Ok(None)
+                } else {
+                    Ok(Some(self.mem_buffer.remove(0)))
+                }
+            }
+            Some(cursor) => {
+                // External: read from merge cursor
+                cursor.next()
+            }
+        }
+    }
+
+    fn close(&mut self) -> Result<()> {
+        self.mem_buffer.clear();
+        self.memory_budget.release(
+            self.memory_budget.used_bytes,
+        );
+        // Clean up temp files
+        for run in self.disk_runs.drain(..) {
+            run.delete()?;
+        }
+        self.merge_cursor = None;
+        Ok(())
+    }
+
+    fn schema(&self) -> &Schema {
+        self.input.schema()
+    }
+
+    fn estimated_cardinality(&self) -> f64 {
+        self.input.estimated_cardinality()
+    }
+}
+
+impl SortIterator {
+    fn flush_run_to_disk(&mut self) -> Result<()> {
+        self.mem_buffer
+            .sort_by(|a, b| compare_keys(a, b, &self.order_by));
+        let temp = TempFile::create()?;
+        for tuple in self.mem_buffer.drain(..) {
+            temp.write_tuple(&tuple)?;
+        }
+        self.disk_runs.push(temp);
+        Ok(())
+    }
+}
+```
+
+## Preconditions
+
+- Work memory limit configured (e.g., `work_mem` in PostgreSQL)
+- Temporary disk space available for spill files
+- Plan analysis identifies materializing operators
+- Cardinality estimates available for budget proportioning
+
+## Cost Model
+
+**In-memory execution:**
+- Allocation: ~50 ns per `malloc` (amortized via arena)
+- Tuple copy to buffer: `tuple_width` bytes memcpy
+- Total: `N_tuples x (alloc_cost + copy_cost)`
+
+**Spill-to-disk penalty:**
+- Write sorted run: `run_size / disk_bandwidth`
+- Read back for merge: `run_size / disk_bandwidth`
+- Total I/O: `2 x total_data_size` (write + read)
+- For 1 GB sort with 256 MB work_mem:
+  - 4 runs of 256 MB each
+  - Write: 4 x 256 MB = 1 GB
+  - Read merge: 1 GB
+  - Total disk I/O: 2 GB at ~500 MB/s = 4 seconds
+  - vs in-memory: ~0.5 seconds
+
+**External hash join (hybrid hash):**
+- Partition both sides to disk
+- Process each partition pair in memory
+- I/O: `3 x (build_size + probe_size)` (partition + build + probe)
+- Number of partitions: `ceil(build_size / work_mem)`
+
+**Memory budget impact on plan choice:**
+- Small work_mem → nested loop join preferred (O(1) memory)
+- Large work_mem → hash join preferred (O(build) memory, O(N+M) time)
+- Optimizer must consider memory in cost model
+
+**Tuple lifetime and reuse:**
+- Pipelined tuple buffer reused every next() call
+- Materializer buffers live from open() to close()
+- Expression temporaries: stack-allocated, freed per tuple
+
+## Test Cases
+
+```sql
+-- Test 1: In-memory sort (fits in work_mem)
+SET work_mem = '256MB';
+SELECT * FROM small_orders ORDER BY created_at;
+-- Expected: pure in-memory sort, no spill
+-- Verify: EXPLAIN ANALYZE shows "Sort Method: quicksort"
+
+-- Test 2: External sort (exceeds work_mem)
+SET work_mem = '4MB';
+SELECT * FROM large_orders ORDER BY created_at;
+-- Expected: spill to disk, external merge sort
+-- Verify: EXPLAIN ANALYZE shows "Sort Method: external merge"
+-- Verify: temp files created and cleaned up
+
+-- Test 3: Hash join memory pressure
+SET work_mem = '64MB';
+SELECT * FROM orders o
+JOIN customers c ON o.cust_id = c.id;
+-- If customers fits in 64MB: pure hash join
+-- If not: hybrid hash join with partitioning
+
+-- Test 4: Multiple materializers compete for memory
+SELECT region, SUM(amount)
+FROM orders
+WHERE status = 'complete'
+GROUP BY region
+ORDER BY SUM(amount);
+-- Two materializers: HashAgg + Sort
+-- Memory split proportionally between them
+-- Each gets work_mem / 2 (approximately)
+
+-- Test 5: Tuple buffer reuse (no materialization)
+SELECT name, email FROM users WHERE active = true;
+-- Expected: O(1) memory, tuple buffer reused per row
+-- Verify: constant memory regardless of table size
+
+-- Test 6: Window function partial materialization
+SELECT *, AVG(amount) OVER (
+  PARTITION BY region ORDER BY date
+  ROWS BETWEEN 10 PRECEDING AND CURRENT ROW
+)
+FROM orders;
+-- Expected: buffers 11 rows per partition (frame size)
+-- Memory: O(frame_size), not O(N)
+
+-- Negative test: insufficient memory for minimum operation
+SET work_mem = '64kB';
+SELECT * FROM orders ORDER BY amount;
+-- Expected: still works via external sort
+-- Verify: many small runs, more merge passes
+-- Performance: degraded but correct
+```
+
+## References
+
+1. **Graefe, Goetz**. "Query Evaluation Techniques for Large
+   Databases." ACM Computing Surveys 25(2), 1993.
+   - External sort and hash algorithms
+   - Memory management for query operators
+
+2. **Graefe, Goetz**. "Sort-Merge-Join: An Idea Whose Time Has(h)
+   Passed?" ICDE 1994.
+   - Hybrid hash join memory management
+   - Run generation and merging strategies
+
+3. **PostgreSQL Source**: `src/backend/utils/sort/tuplesort.c`
+   - Production external sort implementation
+   - Work memory tracking and spill logic
+
+4. **PostgreSQL Source**: `src/backend/executor/nodeHash.c`
+   - Hash join memory management
+   - Batch partitioning when exceeding work_mem
+
+5. **Larson, Per-Ake et al**. "Memory Management in Microsoft SQL
+   Server." IEEE Data Engineering Bulletin 37(1), 2014.
+   - Query memory grants and dynamic adjustment
+   - Memory broker for concurrent queries
+
+6. **Leis, Viktor et al**. "Morsel-Driven Parallelism: A NUMA-Aware
+   Query Evaluation Framework." SIGMOD 2014.
+   - Contrasts Volcano memory model with morsel-driven approach

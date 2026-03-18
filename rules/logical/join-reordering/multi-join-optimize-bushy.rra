@@ -1,0 +1,105 @@
+---
+id: calcite-multi-join-optimize-bushy
+name: Calcite MultiJoinOptimizeBushyRule
+category: logical/join-reordering
+databases: [calcite, postgresql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [logical, calcite, join, reorder, bushy, heuristic, multi-join]
+complexity: O(n^2)
+benefit_range: [0.1, 0.8]
+---
+
+# Calcite MultiJoinOptimizeBushyRule
+
+## Description
+
+Finds an approximately optimal ordering for join operators using a
+heuristic algorithm that can produce bushy join trees. Unlike
+LoptOptimizeJoinRule which only produces left-deep trees, this rule
+explores bushy plans that can be better for parallel execution.
+
+**When to apply**: A MultiJoin node represents a flattened set of
+join inputs that need to be ordered.
+
+**Why it works**: Bushy join trees allow intermediate results to be
+computed in parallel. The heuristic greedily pairs the two relations
+with the smallest estimated join result at each step.
+
+**Calcite class**: `org.apache.calcite.rel.rules.MultiJoinOptimizeBushyRule`
+
+## Relational Algebra
+
+```algebra
+-- Before: left-deep join tree
+((A JOIN B) JOIN C) JOIN D
+
+-- After: bushy join tree
+(A JOIN B) JOIN (C JOIN D)
+-- Both joins can execute in parallel
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-multi-join-optimize-bushy";
+    "(project ?proj (multi-join ?inputs ?filters))" =>
+    "(project ?proj (bushy-join-order ?inputs ?filters))"
+    if has_multiple_inputs("?inputs")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(multi_join: &MultiJoin) -> bool {
+    multi_join.inputs().len() >= 3
+}
+```
+
+**Restrictions:**
+- Heuristic; may not find the true optimal plan
+- Requires cardinality estimates
+- Preserves outer join constraints
+- Better than left-deep for parallel execution environments
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    left_deep_cost: f64,
+    bushy_cost: f64,
+) -> f64 {
+    if left_deep_cost > 0.0 {
+        (left_deep_cost - bushy_cost) / left_deep_cost
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 10-80% for queries with many joins.
+
+## Test Cases
+
+```sql
+-- Positive: 5-way join benefits from bushy plan
+SELECT * FROM A
+JOIN B ON A.k = B.k
+JOIN C ON B.k = C.k
+JOIN D ON C.k = D.k
+JOIN E ON D.k = E.k;
+-- Bushy tree: (A JOIN B) JOIN (C JOIN (D JOIN E))
+```
+
+```sql
+-- Negative: 2-way join
+SELECT * FROM A JOIN B ON A.k = B.k;
+-- Only 2 inputs; no bushy optimization possible
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/MultiJoinOptimizeBushyRule.java (commit af6367d)

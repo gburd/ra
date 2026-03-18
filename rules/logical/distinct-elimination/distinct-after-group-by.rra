@@ -1,0 +1,79 @@
+---
+id: distinct-after-group-by
+name: Distinct After GROUP BY Elimination
+category: logical/distinct-elimination
+databases: [postgresql, mysql, oracle, duckdb, mssql]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distinct, group-by, redundant, elimination]
+complexity: "O(1)"
+benefit_range: [0.3, 0.8]
+---
+
+# Distinct After GROUP BY Elimination
+
+## Description
+
+Removes DISTINCT when applied after a GROUP BY that already produces unique rows. GROUP BY guarantees one output row per group, making a subsequent DISTINCT redundant.
+
+**When to apply**: DISTINCT wraps a projection over an Aggregate node where the projected columns are a subset of the GROUP BY columns plus aggregate outputs.
+
+**Why it works**: GROUP BY already deduplicates by the grouping columns; aggregate outputs are deterministic per group.
+
+## Relational Algebra
+
+```algebra
+distinct(aggregate[G, A](R))
+  -> aggregate[G, A](R)
+```
+
+## Implementation
+
+```rust
+rw!("distinct-after-group-by";
+    "(distinct (aggregate ?group_by ?aggs ?input))" =>
+    "(aggregate ?group_by ?aggs ?input)"
+),
+```
+
+## Cost Model
+
+```rust
+fn benefit(groups: u64) -> f64 {
+    let distinct_cost = groups as f64 * (groups as f64).log2();
+    distinct_cost / (distinct_cost + groups as f64)
+}
+```
+
+**Typical benefit**: 30-80% (skip entire dedup pass)
+
+## Test Cases
+
+### Positive: DISTINCT over GROUP BY
+
+```sql
+SELECT DISTINCT dept_id, COUNT(*)
+FROM employees
+GROUP BY dept_id;
+
+-- GROUP BY already produces unique dept_id rows
+```
+
+### Negative: GROUP BY with non-deterministic function
+
+```sql
+SELECT DISTINCT dept_id, RANDOM()
+FROM employees
+GROUP BY dept_id;
+
+-- RANDOM() could differ; but still one row per group
+-- (this is actually still safe to eliminate)
+```
+
+## References
+
+- PostgreSQL: Redundant DISTINCT removal
+- MySQL: DISTINCT optimization over GROUP BY
+- Oracle: DISTINCT elimination in aggregation queries

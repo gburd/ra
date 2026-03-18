@@ -1,0 +1,102 @@
+---
+id: calcite-join-extract-filter
+name: Calcite JoinExtractFilterRule
+category: logical/predicate-pushdown
+databases: [calcite, postgresql, mysql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [logical, calcite, join, filter, extract, cartesian]
+complexity: O(n)
+benefit_range: [0.0, 0.2]
+---
+
+# Calcite JoinExtractFilterRule
+
+## Description
+
+Extracts the join condition from an inner join and places it as a
+filter above a cartesian join. This canonical form allows the
+condition to be combined with other filters above the join.
+
+**When to apply**: An inner join has a non-trivial join condition
+that could benefit from being combined with filters above.
+
+**Why it works**: By separating the join condition into a filter,
+other rules (like FilterMergeRule or predicate pushdown) can combine
+or rearrange conditions more effectively.
+
+**Calcite class**: `org.apache.calcite.rel.rules.JoinExtractFilterRule`
+
+## Relational Algebra
+
+```algebra
+-- Before: inner join with condition
+R JOIN[R.k = S.k AND R.x > 5] S
+
+-- After: filter above cartesian join
+sigma[R.k = S.k AND R.x > 5](R CROSS JOIN S)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-join-extract-filter";
+    "(join inner ?cond ?left ?right)" =>
+    "(filter ?cond (join inner true ?left ?right))"
+    if has_non_trivial_condition("?cond")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(join: &Join) -> bool {
+    join.join_type() == JoinType::Inner
+        && !join.condition().is_always_true()
+}
+```
+
+**Restrictions:**
+- Only applies to INNER joins (not outer joins)
+- Condition must not be trivially TRUE
+- This is primarily a normalization step; the resulting cross join
+  must not be executed as-is
+
+## Cost Model
+
+```rust
+fn estimated_benefit(_: f64) -> f64 {
+    // No direct benefit; enables other optimizations
+    0.0
+}
+```
+
+**Typical benefit**: 0-20% indirectly through enabling further rewrites.
+
+## Test Cases
+
+```sql
+-- Positive: inner join with condition
+SELECT * FROM emp e
+JOIN dept d ON e.deptno = d.deptno;
+-- Condition extracted to filter above cross join
+```
+
+```sql
+-- Negative: outer join
+SELECT * FROM emp e
+LEFT JOIN dept d ON e.deptno = d.deptno;
+-- Cannot extract: outer join semantics differ
+```
+
+```sql
+-- Negative: cross join (no condition)
+SELECT * FROM emp e, dept d;
+-- No condition to extract
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/JoinExtractFilterRule.java (commit af6367d)

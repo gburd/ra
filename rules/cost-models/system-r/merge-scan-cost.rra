@@ -1,0 +1,270 @@
+---
+id: system-r-merge-scan-cost
+name: "System R Sort-Merge (Merge-Scan) Join Cost"
+category: cost-models/system-r
+databases: [postgresql, mysql, duckdb, cockroachdb, mssql, oracle]
+execution_models: [volcano]
+version: "1.0.0"
+authors: ["Selinger et al. 1979 - IBM Research"]
+tags: [join-cost, sort-merge, merge-scan, system-r, classic]
+complexity: "O(n log n + m log m + n + m)"
+benefit_range: [0.5, 20.0]
+---
+
+# System R Sort-Merge (Merge-Scan) Join Cost
+
+## Description
+
+System R's sort-merge join (called "merge scan" in the paper) sorts both
+inputs on the join key, then merges them in a single pass. The total cost
+is the sum of sorting both inputs plus one merge pass. Sort-merge is
+preferred over nested-loop when both inputs are large and no suitable
+index exists, because the O(n log n + m log m) sort cost is much less
+than the O(n * m) nested-loop cost.
+
+System R recognized that sort-merge has a key advantage: the output is
+sorted on the join key, which can eliminate a downstream ORDER BY or
+enable a subsequent merge join without re-sorting (the "interesting
+orders" optimization).
+
+**When to apply**: Joins of two large relations where neither has a
+suitable index for index nested-loop, or when the output must be sorted
+on the join key. Also preferred when inputs are already sorted (from
+a clustered index or a previous sort).
+
+**Why it works**: External sort costs O(n * ceil(log_B(n/B))) I/Os where
+B is the buffer size. The merge phase is a single linear pass O(n + m).
+Total cost is sub-quadratic, unlike nested-loop.
+
+## Relational Algebra
+
+```algebra
+-- Sort-Merge Join cost:
+merge_join_cost(R, S, join_key) =
+  sort_cost(R, join_key) + sort_cost(S, join_key)
+  + PAGES(R) + PAGES(S)     -- merge pass
+  + W * (TUPLES(R) + TUPLES(S))  -- CPU for merge
+
+-- If R is already sorted on join_key:
+  sort_cost(R, join_key) = 0  -- avoid sort for sorted input
+
+-- External sort cost (multi-pass merge sort):
+sort_cost(R, key) =
+  2 * PAGES(R) * ceil(log_B(PAGES(R) / B))
+  where B = buffer_pages available for sorting
+  -- Factor 2: each pass reads and writes all pages
+  -- log_B passes: each pass merges B runs into 1
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+struct MergeScanCostCalculator {
+    w: f64,
+    buffer_pages: usize,
+}
+
+impl MergeScanCostCalculator {
+    fn sort_cost(&self, rel: &RelStats) -> f64 {
+        let pages = rel.num_pages as f64;
+        let b = self.buffer_pages as f64;
+
+        if pages <= b {
+            // Fits in memory: in-memory sort, read + write
+            2.0 * pages
+        } else {
+            // External merge sort
+            let initial_runs = (pages / b).ceil();
+            let passes = (initial_runs.log(b)).ceil().max(1.0);
+            2.0 * pages * (1.0 + passes)
+        }
+    }
+
+    fn merge_cost(&self, left: &RelStats, right: &RelStats) -> f64 {
+        // Linear merge: read both sorted inputs once
+        let page_fetches =
+            left.num_pages as f64 + right.num_pages as f64;
+        let rsi_calls =
+            left.num_tuples as f64 + right.num_tuples as f64;
+
+        page_fetches + self.w * rsi_calls
+    }
+
+    fn sort_merge_join_cost(
+        &self,
+        left: &RelStats,
+        right: &RelStats,
+        left_sorted: bool,
+        right_sorted: bool,
+    ) -> f64 {
+        let left_sort = if left_sorted {
+            0.0
+        } else {
+            self.sort_cost(left)
+        };
+
+        let right_sort = if right_sorted {
+            0.0
+        } else {
+            self.sort_cost(right)
+        };
+
+        let merge = self.merge_cost(left, right);
+
+        left_sort + right_sort + merge
+    }
+
+    fn compare_with_nl(
+        &self,
+        left: &RelStats,
+        right: &RelStats,
+    ) -> JoinComparison {
+        let sm_cost = self.sort_merge_join_cost(
+            left, right, false, false,
+        );
+
+        let nl_cost = left.num_pages as f64
+            + (left.num_tuples as f64 / self.buffer_pages as f64).ceil()
+                * right.num_pages as f64
+            + self.w * left.num_tuples as f64
+                * right.num_tuples as f64;
+
+        if sm_cost < nl_cost {
+            JoinComparison::SortMergeWins {
+                sm_cost,
+                nl_cost,
+                ratio: nl_cost / sm_cost,
+            }
+        } else {
+            JoinComparison::NestedLoopWins {
+                sm_cost,
+                nl_cost,
+                ratio: sm_cost / nl_cost,
+            }
+        }
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    left: &RelStats,
+    right: &RelStats,
+    join_pred: &JoinPredicate,
+) -> bool {
+    // Sort-merge requires equijoin (or inequality join with sort)
+    join_pred.is_equijoin()
+}
+```
+
+**Restrictions:**
+- Only works for equijoins (or theta-joins with sort-compatible predicates)
+- Sort phase is a pipeline breaker (must materialize sorted input)
+- Memory-intensive: needs buffer for external sort runs
+- Duplicate handling in merge phase can be complex (many-to-many)
+- System R does not consider hash join (not available until later)
+
+## Cost Model
+
+```rust
+fn external_sort_passes(
+    pages: usize,
+    buffer: usize,
+) -> usize {
+    if pages <= buffer {
+        return 0; // In-memory sort, no external passes
+    }
+    let runs = (pages + buffer - 1) / buffer;
+    let passes = ((runs as f64).log(buffer as f64)).ceil() as usize;
+    passes.max(1)
+}
+
+fn sort_merge_vs_nl_crossover(
+    n_pages: f64, // outer pages
+    m_pages: f64, // inner pages
+    buffer: f64,
+) -> bool {
+    // SM: 2*n*log_B(n) + 2*m*log_B(m) + n + m
+    // NL: n + ceil(n/B)*m
+    // SM wins when both are large
+    // NL wins when outer is small (< B pages)
+
+    let sm = 2.0 * n_pages * (n_pages / buffer).log2().max(1.0)
+           + 2.0 * m_pages * (m_pages / buffer).log2().max(1.0)
+           + n_pages + m_pages;
+
+    let nl = n_pages + (n_pages / buffer).ceil() * m_pages;
+
+    sm < nl
+}
+```
+
+**Typical crossover:**
+- NL wins: outer < buffer_size pages
+- SM wins: both inputs > buffer_size pages
+- With index NL: index NL often beats SM for selective joins
+
+## Test Cases
+
+### Positive: Two large unsorted relations
+
+```sql
+-- orders: 10M rows, 1M pages
+-- lineitem: 60M rows, 6M pages
+-- Buffer: 10K pages
+SELECT * FROM orders o
+JOIN lineitem l ON o.orderkey = l.orderkey;
+
+-- Sort orders: 2 * 1M * ceil(log_10K(100)) = 2M * 2 = 4M
+-- Sort lineitem: 2 * 6M * ceil(log_10K(600)) = 12M * 3 = 36M
+-- Merge: 1M + 6M = 7M
+-- Total SM: 47M page fetches
+-- NL: 1M + 100 * 6M = 601M (100 = ceil(1M/10K))
+-- SM is 12x cheaper
+```
+
+### Positive: One input already sorted
+
+```sql
+-- orders has clustered index on orderkey (already sorted)
+-- lineitem: unsorted
+SELECT * FROM orders o
+JOIN lineitem l ON o.orderkey = l.orderkey
+ORDER BY o.orderkey;
+
+-- Sort orders: 0 (already sorted by clustered index)
+-- Sort lineitem: 36M
+-- Merge: 7M
+-- Total SM: 43M, produces sorted output (free ORDER BY)
+-- Interesting order saves sort for ORDER BY
+```
+
+### Negative: Small outer with index on inner
+
+```sql
+-- departments: 50 rows, 5 pages
+-- employees: 1M rows, index on dept_id
+SELECT * FROM departments d
+JOIN employees e ON d.id = e.dept_id;
+
+-- Index NL: 5 + 50 * 4 = 205
+-- SM: sort(5) + sort(100K) + 5 + 100K = ~200K
+-- Index NL is 1000x cheaper for small outer
+```
+
+## References
+
+**Original paper:**
+- Selinger et al., "Access Path Selection", SIGMOD 1979
+  - Section 6.2: "Merge scan join" cost formulas
+  - Recognized advantage of preserving sort order
+
+**External sorting:**
+- Knuth, "The Art of Computer Programming, Vol. 3: Sorting and Searching"
+  - External merge sort algorithm and analysis
+- Graefe, "Implementing Sorting in Database Systems", Computing Surveys 2006
+  - Modern sorting techniques and optimizations

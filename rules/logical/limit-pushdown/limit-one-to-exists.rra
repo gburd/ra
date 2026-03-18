@@ -1,0 +1,232 @@
+---
+id: limit-one-to-exists
+name: LIMIT 1 to EXISTS
+category: logical/limit-pushdown
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [limit, exists, semi-join, early-termination, boolean-check]
+complexity: "O(1)"
+benefit_range: [0.3, 0.8]
+---
+
+# LIMIT 1 to EXISTS
+
+## Description
+
+Converts patterns where LIMIT 1 is used purely as an existence check into
+an EXISTS predicate or semi-join. When the query only needs to know whether
+any row exists (not the actual row values), EXISTS enables the engine to
+stop after finding the first match without materializing or sorting.
+
+**When to apply**: Queries where:
+- LIMIT 1 result is only checked for NULL/non-NULL (existence test)
+- LIMIT 1 subquery is used in a boolean context (IF, CASE WHEN, WHERE)
+- `SELECT COUNT(*) ... LIMIT 1` patterns for existence
+- Application-level existence checks using LIMIT 1
+
+**Why it works**: EXISTS short-circuits after the first matching row.
+LIMIT 1 may still require plan setup, buffering, or sorting depending
+on context. EXISTS communicates intent clearly to the optimizer, enabling
+semi-join algorithms.
+
+## Relational Algebra
+
+```algebra
+-- Subquery existence check pattern
+filter[
+  (SELECT col FROM S WHERE cond LIMIT 1) IS NOT NULL
+](R)
+  -> semi_join[cond](R, S)
+
+-- COUNT with LIMIT pattern
+filter[
+  (SELECT COUNT(*) FROM S WHERE cond) > 0
+](R)
+  -> semi_join[cond](R, S)
+
+-- Standalone existence check
+SELECT CASE WHEN EXISTS(SELECT 1 FROM S WHERE cond) THEN ... END
+  -- Preferred over:
+SELECT CASE WHEN (SELECT 1 FROM S WHERE cond LIMIT 1) IS NOT NULL THEN ... END
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// LIMIT 1 in IS NOT NULL context -> EXISTS
+rw!("limit-one-is-not-null-to-exists";
+    "(is-not-null (scalar-subquery (limit 1 ?query)))" =>
+    "(exists ?query)"
+),
+
+// LIMIT 1 in IS NULL context -> NOT EXISTS
+rw!("limit-one-is-null-to-not-exists";
+    "(is-null (scalar-subquery (limit 1 ?query)))" =>
+    "(not-exists ?query)"
+),
+
+// COUNT > 0 to EXISTS
+rw!("count-positive-to-exists";
+    "(> (scalar-subquery (aggregate (count-star) ?query)) (literal 0))" =>
+    "(exists ?query)"
+),
+
+// COUNT = 0 to NOT EXISTS
+rw!("count-zero-to-not-exists";
+    "(= (scalar-subquery (aggregate (count-star) ?query)) (literal 0))" =>
+    "(not-exists ?query)"
+),
+
+// Filter with LIMIT 1 subquery existence check
+rw!("filter-limit-one-to-semi-join";
+    "(filter (is-not-null (scalar-subquery (limit 1 ?inner))) ?outer)" =>
+    "(semi-join ?corr_cond ?outer ?inner)"
+    if extract_correlation("?inner", "?outer")
+),
+```
+
+**Restrictions:**
+- LIMIT 1 must not be relied upon for the actual row value
+- ORDER BY + LIMIT 1 (top-1 query) has different semantics than EXISTS
+- COUNT(*) > 0 conversion assumes no HAVING clause
+- Works only when the result is used in a boolean context
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    inner_size: u64,
+    selectivity: f64,
+    has_index: bool,
+) -> f64 {
+    // LIMIT 1: may scan until first match, then stop
+    let limit_cost = if has_index {
+        1.0 // Index lookup
+    } else {
+        inner_size as f64 * selectivity * 0.5 // Expected scan
+    };
+
+    // EXISTS: same early termination, but enables semi-join
+    let exists_cost = if has_index {
+        1.0
+    } else {
+        // Semi-join hash build once, probe with early exit
+        inner_size as f64 * 0.3
+    };
+
+    // Main benefit: semi-join enables join reordering
+    let reorder_bonus = 0.2;
+
+    ((limit_cost - exists_cost) / limit_cost + reorder_bonus).min(1.0)
+}
+```
+
+**Typical benefit**: 30-80% through semi-join optimization and clearer intent
+
+## Test Cases
+
+### Positive: LIMIT 1 existence check in WHERE
+
+```sql
+-- Application pattern: check if customer has orders
+SELECT c.id, c.name
+FROM customers c
+WHERE (SELECT o.id FROM orders o
+       WHERE o.customer_id = c.id LIMIT 1) IS NOT NULL;
+
+-- Rewrite to EXISTS (clearer, enables semi-join):
+SELECT c.id, c.name
+FROM customers c
+WHERE EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.id);
+```
+
+### Positive: COUNT > 0 existence check
+
+```sql
+-- Inefficient existence check via COUNT
+SELECT p.name
+FROM products p
+WHERE (SELECT COUNT(*) FROM reviews r
+       WHERE r.product_id = p.id) > 0;
+
+-- Rewrite to EXISTS:
+SELECT p.name
+FROM products p
+WHERE EXISTS (SELECT 1 FROM reviews r WHERE r.product_id = p.id);
+
+-- COUNT scans all matching rows; EXISTS stops at first
+```
+
+### Positive: CASE WHEN with LIMIT 1 boolean test
+
+```sql
+SELECT e.name,
+  CASE WHEN (SELECT 1 FROM bonuses b
+             WHERE b.emp_id = e.id LIMIT 1) IS NOT NULL
+       THEN 'Has bonus'
+       ELSE 'No bonus'
+  END AS bonus_status
+FROM employees e;
+
+-- LIMIT 1 used purely as boolean -> EXISTS
+-- Rewrite CASE to use EXISTS subquery
+```
+
+### Positive: COUNT = 0 to NOT EXISTS
+
+```sql
+SELECT d.name
+FROM departments d
+WHERE (SELECT COUNT(*) FROM employees e
+       WHERE e.dept_id = d.id) = 0;
+
+-- Rewrite to NOT EXISTS:
+SELECT d.name
+FROM departments d
+WHERE NOT EXISTS (SELECT 1 FROM employees e WHERE e.dept_id = d.id);
+```
+
+### Negative: LIMIT 1 with ORDER BY (top-1 semantics)
+
+```sql
+SELECT c.name,
+  (SELECT o.date FROM orders o
+   WHERE o.customer_id = c.id
+   ORDER BY o.date DESC LIMIT 1) AS latest_order
+FROM customers c;
+
+-- Needs the actual value, not just existence
+-- ORDER BY + LIMIT 1 finds a specific row
+-- Cannot convert to EXISTS
+```
+
+### Negative: LIMIT 1 result used as a value
+
+```sql
+SELECT e.name, e.salary,
+  (SELECT salary FROM employees
+   WHERE dept_id = e.dept_id
+   ORDER BY salary DESC LIMIT 1) AS max_dept_salary
+FROM employees e;
+
+-- LIMIT 1 result is used as a scalar value in SELECT
+-- Not an existence check -> conversion not applicable
+```
+
+## References
+
+**Academic papers:**
+- Kim, "On Optimizing an SQL-like Nested Query", ACM TODS 1982
+- Seshadri et al., "Cost-Based Optimization for Magic: Algebra and Implementation", SIGMOD 1996
+
+**Implementation:**
+- PostgreSQL: `convert_EXISTS_sublink_to_join()` in `subselect.c`
+- MySQL: Subquery to semi-join conversion in optimizer
+- Oracle: EXISTS transformation in CBO
+- SQL Server: `EXISTS` introduction via algebrizer
+- DuckDB: `ExistentialJoinOptimizer` for correlated LIMIT 1 patterns

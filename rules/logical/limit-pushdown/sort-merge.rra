@@ -1,0 +1,124 @@
+---
+id: calcite-sort-merge
+name: Calcite SortMergeRule
+category: logical/limit-pushdown
+databases: [calcite, postgresql, mysql, oracle]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [logical, calcite, sort, merge, limit, topn]
+complexity: O(n)
+benefit_range: [0.1, 0.8]
+---
+
+# Calcite SortMergeRule
+
+## Description
+
+Merges two consecutive Sort operators (one with LIMIT semantics,
+another with LIMIT or TOPN semantics) into a single Sort. When a
+LIMIT sits on top of another LIMIT, the minimum of the two limits
+is used. When a LIMIT sits on top of a TOPN (ORDER BY + LIMIT),
+the TOPN's limit can be tightened.
+
+**When to apply**: Two Sort operators appear consecutively, where
+the outer adds a LIMIT or both have ORDER BY + LIMIT.
+
+**Why it works**: LIMIT(n, LIMIT(m, R)) = LIMIT(min(n,m), R).
+Similarly, LIMIT(n, TOPN(k, m, R)) = TOPN(k, min(n,m), R).
+
+**Calcite class**: `org.apache.calcite.rel.rules.SortMergeRule`
+
+## Relational Algebra
+
+```algebra
+-- Before: double limit
+LIMIT 10(LIMIT 10000(R))
+
+-- After: single limit
+LIMIT 10(R)
+
+-- Before: limit on top of TOPN
+LIMIT 10(TOPN[k DESC, 10000](R))
+
+-- After: tighter TOPN
+TOPN[k DESC, 10](R)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-sort-merge-limit-limit";
+    "(limit ?n (limit ?m ?input))" =>
+    "(limit (min ?n ?m) ?input)"
+),
+
+rw!("calcite-sort-merge-limit-topn";
+    "(limit ?n (sort-limit ?keys ?m ?input))" =>
+    "(sort-limit ?keys (min ?n ?m) ?input)"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(outer: &Sort, inner: &Sort) -> bool {
+    // Outer must have LIMIT semantics (fetch is set)
+    outer.fetch.is_some()
+        && (inner.fetch.is_some() || !inner.collation.is_empty())
+}
+```
+
+**Restrictions:**
+- OFFSET handling requires careful arithmetic
+- If outer has OFFSET, the inner limit must be >= outer.offset + outer.fetch
+- Usually combined with SortProjectTransposeRule
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    input_rows: f64,
+    original_limit: f64,
+    merged_limit: f64,
+) -> f64 {
+    if original_limit > 0.0 {
+        (original_limit - merged_limit) / original_limit
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 10-80% by reducing the amount of data sorted/buffered.
+
+## Test Cases
+
+```sql
+-- Positive: nested LIMIT merging
+SELECT * FROM (
+    SELECT * FROM nation LIMIT 10000
+) t LIMIT 10;
+-- Merged to: SELECT * FROM nation LIMIT 10
+```
+
+```sql
+-- Positive: LIMIT on TOPN
+SELECT * FROM (
+    SELECT * FROM nation ORDER BY n_regionkey DESC LIMIT 10000
+) t LIMIT 10;
+-- Merged to: ORDER BY n_regionkey DESC LIMIT 10
+```
+
+```sql
+-- Negative: different sort orders (incompatible merge)
+SELECT * FROM (
+    SELECT * FROM nation ORDER BY name ASC LIMIT 100
+) t ORDER BY id DESC LIMIT 10;
+-- Cannot merge: different sort keys
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/SortMergeRule.java (commit af6367d)

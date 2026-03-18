@@ -27,6 +27,9 @@ export function Header({ activeDb, onDbChange }: HeaderProps) {
           <a href="/translate" class="nav-link">
             Translate
           </a>
+          <a href="/demos" class="nav-link">
+            Demos
+          </a>
         </nav>
       </div>
       <div class="header-right">

@@ -1,32 +1,153 @@
 ---
 id: differential-late-data
-name: Differential late data
+name: Differential Late-Arriving Data Handling
 category: execution-models
 version: 1.0.0
-databases: [materialize, spark]
-tags: [execution, differential, streaming, incremental]
+databases: [Materialize, Apache Flink, Differential Dataflow]
+authors: [Frank McSherry, Tyler Akidau]
+tags: [execution, differential, late-data, out-of-order, streaming, correctness]
+standard: Differential Dataflow
 ---
 
-# Differential late data
+# Differential Late-Arriving Data Handling
 
 ## Description
 
-Handling late-arriving data in streaming computations.
+Late-arriving data occurs when events arrive with timestamps earlier than the current watermark/frontier. Traditional streaming systems either drop late data or use allowed-lateness windows. Differential dataflow handles this naturally: late data is simply a change at an earlier timestamp, and the system retracts old results and emits corrected ones. This provides eventual correctness without special late-data handling logic.
+
+**Late data strategies:**
+1. **Drop (Flink default)**: Discard data behind watermark -- lossy but simple
+2. **Allowed lateness (Flink)**: Buffer for configurable duration -- bounded correctness
+3. **Retractions (Differential)**: Process late data, emit corrections -- fully correct
+4. **Append-only (Kafka Streams)**: No retractions, only additions -- simple but accumulating
+
+**Differential approach:**
+- Late data arrives as `(data, old_time, +1)`
+- Operators reprocess: old results retracted, new results emitted
+- Downstream sees corrections automatically
+- No special configuration needed -- it just works
+
+**Trade-offs:**
+- Retractions require downstream systems to handle corrections
+- State must be maintained for times that may still receive late data
+- Unbounded late data prevents compaction (state grows without bound)
+- Materialized views may briefly show incorrect results during correction
 
 ## Implementation
 
 ```rust
-pub struct Differentiallatedata {
-    state: StreamingState,
-    changes: Vec<Change>,
+/// Late data processor in differential dataflow
+pub struct LateDataHandler {
+    /// Compaction frontier: state before this is compacted
+    compaction_frontier: Timestamp,
+    /// Allowed lateness: how far behind watermark data can arrive
+    allowed_lateness: Duration,
+    /// Operator state: needed to recompute on late data
+    operator_state: OperatorState,
 }
 
-impl Differentiallatedata {
-    pub fn process_changes(&mut self, input: Vec<Change>) -> Vec<Change> {
-        // Incremental processing
+impl LateDataHandler {
+    /// Process a potentially late-arriving change
+    pub fn process_change(
+        &mut self,
+        change: Change,
+        current_watermark: &Timestamp,
+    ) -> LateDataResult {
+        let is_late = &change.time < current_watermark;
+
+        if is_late {
+            let lateness = current_watermark.diff(&change.time);
+
+            if change.time < self.compaction_frontier {
+                // Beyond compaction: state already discarded
+                return LateDataResult::Dropped {
+                    reason: "Beyond compaction frontier",
+                    lateness,
+                };
+            }
+
+            // Within allowed lateness: process normally
+            // Differential handles this by reprocessing
+            let corrections = self.reprocess_with_late_data(&change);
+            return LateDataResult::Corrected {
+                retractions: corrections.retractions,
+                insertions: corrections.insertions,
+                lateness,
+            };
+        }
+
+        // On-time data: process normally
+        let output = self.operator_state.process(change);
+        LateDataResult::OnTime { output }
+    }
+
+    /// Reprocess: retract old result, emit new result
+    fn reprocess_with_late_data(
+        &mut self,
+        late_change: &Change,
+    ) -> Corrections {
+        // The beauty of differential: late data is just another change
+        // at an earlier time. The operator produces the correct delta.
+        let output_changes = self.operator_state.process(
+            late_change.clone(),
+        );
+
+        // Output changes naturally contain retractions of old results
+        // and insertions of corrected results
+        let retractions: Vec<_> = output_changes.iter()
+            .filter(|c| c.diff < 0)
+            .cloned()
+            .collect();
+        let insertions: Vec<_> = output_changes.iter()
+            .filter(|c| c.diff > 0)
+            .cloned()
+            .collect();
+
+        Corrections { retractions, insertions }
+    }
+}
+
+/// Example: Late data in aggregation
+pub struct IncrementalAggregate {
+    /// Group -> accumulated state (must retain for reprocessing)
+    groups: HashMap<GroupKey, AggState>,
+}
+
+impl IncrementalAggregate {
+    /// Process change (works for both on-time and late data)
+    pub fn process(&mut self, change: Change) -> Vec<Change> {
+        let key = extract_group_key(&change.data);
+        let entry = self.groups.entry(key.clone())
+            .or_insert_with(AggState::new);
+
+        // Old output value (before this change)
+        let old_output = entry.current_value();
+
+        // Apply change
+        entry.apply(change.diff, &change.data);
+
+        // New output value (after this change)
+        let new_output = entry.current_value();
+
+        if old_output == new_output {
+            return vec![]; // No change in output
+        }
+
+        // Emit retraction of old and insertion of new
         let mut output = Vec::new();
-        for change in input {
-            output.extend(self.apply_change(change));
+        if let Some(old) = old_output {
+            output.push(Change {
+                data: (key.clone(), old),
+                time: change.time.clone(),
+                diff: -1,
+            });
+        }
+        if let Some(new) = new_output {
+            output.push(Change {
+                data: (key, new),
+                time: change.time,
+                diff: 1,
+            });
         }
         output
     }
@@ -35,11 +156,43 @@ impl Differentiallatedata {
 
 ## Cost Model
 
-- Update cost: O(changes) not O(data)
-- 100-1000x faster than recomputation
-- State size: O(active_data)
+**On-time data:** Same as normal processing -- O(1) per change for simple operators
+**Late data correction:** O(affected_groups) to recompute and emit corrections
+**State retention:** Must keep state for `allowed_lateness` duration
+**Compaction delay:** State compactable only after `watermark - allowed_lateness`
+
+**Memory trade-off:**
+- No late data handling: compact immediately at watermark
+- 1-hour allowed lateness: retain 1 hour of operator state
+- Unbounded lateness: retain all state (never compact)
+
+## Test Cases
+
+```sql
+-- Test 1: Late event in COUNT
+CREATE MATERIALIZED VIEW hourly AS
+SELECT hour, COUNT(*) FROM events GROUP BY hour;
+-- Event arrives 5 minutes late for hour 10:00
+-- Output: retract (10:00, 99), insert (10:00, 100)
+
+-- Test 2: Late event in JOIN
+CREATE MATERIALIZED VIEW joined AS
+SELECT * FROM orders o JOIN payments p ON o.id = p.order_id;
+-- Late payment arrives for existing order
+-- Output: new join result emitted with correction
+
+-- Test 3: Beyond compaction frontier
+-- Compaction frontier: T=1000, late event at T=500
+-- Expected: dropped (state no longer available)
+
+-- Test 4: Cascading corrections
+-- Late data -> corrected aggregate -> corrected downstream filter
+-- All corrections propagate through the dataflow automatically
+```
 
 ## References
 
-1. McSherry et al., "Differential Dataflow", CIDR 2013
-2. Materialize documentation
+1. **McSherry, Frank et al**. "Differential Dataflow." CIDR 2013.
+2. **Akidau, Tyler et al**. "The Dataflow Model: A Practical Approach to Balancing Correctness, Latency, and Cost." VLDB 2015.
+3. **Materialize Documentation**. "Temporal Filters and Late Data."
+4. **Li, Jin et al**. "Out-of-Order Processing: A New Architecture for High-Performance Stream Systems." VLDB 2008.

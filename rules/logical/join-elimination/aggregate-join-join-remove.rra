@@ -1,0 +1,131 @@
+---
+id: calcite-aggregate-join-join-remove
+name: Calcite AggregateJoinJoinRemoveRule
+category: logical/join-elimination
+databases: [calcite, postgresql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [logical, calcite, aggregate, join, elimination, chain]
+complexity: O(n)
+benefit_range: [0.3, 0.9]
+---
+
+# Calcite AggregateJoinJoinRemoveRule
+
+## Description
+
+Removes the left input of a join when an aggregate sits above a chain
+of two left joins, and the intermediate join's left side is not needed.
+This extends AggregateJoinRemoveRule to handle cascading join chains.
+
+**When to apply**: An aggregate over a left join whose left input is
+itself a left join, and the innermost left side is not referenced by
+the aggregate output.
+
+**Why it works**: If the aggregate only needs columns from the
+outermost right side, the inner join is just passing through keys
+that the aggregate will group away.
+
+**Calcite class**: `org.apache.calcite.rel.rules.AggregateJoinJoinRemoveRule`
+
+## Relational Algebra
+
+```algebra
+-- Before: aggregate over chained left joins
+gamma[g; DISTINCT](
+    (R LEFT JOIN S ON R.k = S.k) LEFT JOIN T ON S.k = T.k
+)
+  where g references only S and T columns
+
+-- After: remove R
+gamma[g; DISTINCT](S LEFT JOIN T ON S.k = T.k)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-aggregate-join-join-remove";
+    "(aggregate ?group ?aggs
+        (left-join ?cond2
+            (left-join ?cond1 ?r ?s)
+            ?t))" =>
+    "(aggregate ?group ?aggs
+        (left-join ?cond2 ?s ?t))"
+    if aggs_reference_only_s_and_t("?group", "?aggs", "?r", "?s")
+    if join_keys_come_from_s("?cond1", "?cond2", "?r", "?s")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    agg: &Aggregate,
+    outer_join: &Join,
+    inner_join: &Join,
+) -> bool {
+    // Both joins must be LEFT
+    outer_join.join_type() == JoinType::Left
+        && inner_join.join_type() == JoinType::Left
+        // Aggregate must not reference inner left side
+        && !agg.references_side(inner_join.left())
+        // Outer join key from inner must come from S
+        && outer_join.left_keys_from(inner_join.right())
+}
+```
+
+**Restrictions:**
+- Both joins must be LEFT joins
+- The innermost left relation must be fully unreferenced
+- Aggregate must use DISTINCT or have no aggregate calls
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    r_rows: f64,
+    s_rows: f64,
+    t_rows: f64,
+) -> f64 {
+    let before = r_rows * s_rows + (r_rows * s_rows) * t_rows;
+    let after = s_rows * t_rows;
+    if before > 0.0 { (before - after) / before } else { 0.0 }
+}
+```
+
+**Typical benefit**: 30-90% by removing an entire join from a chain.
+
+## Test Cases
+
+```sql
+-- Positive: chained left joins with unused inner table
+SELECT DISTINCT s.product_id, pc.category
+FROM sales AS s
+LEFT JOIN product AS p ON s.product_id = p.product_id
+LEFT JOIN product_class AS pc ON s.product_id = pc.product_id;
+-- product table is unused; remove it
+```
+
+```sql
+-- Negative: inner table columns referenced
+SELECT DISTINCT s.product_id, p.name
+FROM sales AS s
+LEFT JOIN product AS p ON s.product_id = p.product_id
+LEFT JOIN product_class AS pc ON p.class_id = pc.class_id;
+-- p.name is referenced; cannot remove
+```
+
+```sql
+-- Negative: INNER join (not LEFT)
+SELECT DISTINCT s.product_id
+FROM sales AS s
+JOIN product AS p ON s.product_id = p.product_id
+LEFT JOIN product_class AS pc ON s.product_id = pc.product_id;
+-- Inner join cannot be removed (it filters rows)
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/AggregateJoinJoinRemoveRule.java (commit af6367d)

@@ -1,0 +1,108 @@
+---
+id: calcite-project-filter-transpose
+name: Calcite ProjectFilterTransposeRule
+category: logical/projection-pushdown
+databases: [calcite, postgresql, mysql, oracle]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [logical, calcite, project, filter, transpose, pushdown]
+complexity: O(n)
+benefit_range: [0.05, 0.2]
+---
+
+# Calcite ProjectFilterTransposeRule
+
+## Description
+
+Pushes a projection past a filter. The projection is applied to the
+filter's input, and the filter predicate is remapped to reference
+the projected columns. This can reduce the width of data flowing
+through the filter.
+
+**When to apply**: A project sits above a filter, and the project
+does not compute expressions needed by the filter.
+
+**Why it works**: Narrower rows consume less memory and bandwidth.
+By projecting away unused columns before filtering, the filter
+operates on smaller tuples.
+
+**Calcite class**: `org.apache.calcite.rel.rules.ProjectFilterTransposeRule`
+
+## Relational Algebra
+
+```algebra
+-- Before: project above filter
+pi[a, b](sigma[c > 10](R))
+
+-- After: filter above project (or project pushed with remapping)
+sigma[c > 10](pi[a, b, c](R))
+-- Then a second project removes c
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-project-filter-transpose";
+    "(project ?cols (filter ?pred ?input))" =>
+    "(project ?cols
+        (filter ?pred
+            (project ?cols_plus_pred_refs ?input)))"
+    if can_push_project_past_filter("?cols", "?pred")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    project: &Project,
+    filter: &Filter,
+) -> bool {
+    // Project expressions must be simple enough to push
+    project.projects().iter().all(|p| {
+        p.is_column_ref() || p.is_deterministic()
+    })
+}
+```
+
+**Restrictions:**
+- The pushed project must include all columns referenced by the filter
+- Non-deterministic expressions should not be pushed
+- A subsequent ProjectMergeRule may be needed to clean up
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    input_rows: f64,
+    cols_removed: usize,
+    total_cols: usize,
+) -> f64 {
+    let width_reduction = cols_removed as f64 / total_cols as f64;
+    input_rows * width_reduction * 0.001
+}
+```
+
+**Typical benefit**: 5-20% through reduced tuple width.
+
+## Test Cases
+
+```sql
+-- Positive: narrow projection before filter
+SELECT a, b FROM (
+    SELECT * FROM wide_table WHERE c > 10
+);
+-- Push projection to reduce tuple width
+```
+
+```sql
+-- Negative: projection uses filter column
+SELECT a, c + 1 AS c1 FROM table WHERE c > 10;
+-- Must keep c for filter; limited benefit
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/ProjectFilterTransposeRule.java (commit af6367d)

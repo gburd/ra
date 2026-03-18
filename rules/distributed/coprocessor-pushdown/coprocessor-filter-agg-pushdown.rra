@@ -1,0 +1,186 @@
+---
+id: coprocessor-filter-agg-pushdown
+name: Coprocessor Filter and Aggregation Pushdown
+category: distributed/coprocessor-pushdown
+databases: [tidb, cockroachdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, coprocessor, pushdown, filter, aggregation, storage]
+complexity: O(n)
+benefit_range: [0.3, 0.95]
+---
+
+# Coprocessor Filter and Aggregation Pushdown
+
+## Description
+
+Pushes filter predicates and aggregation operations down to the storage
+layer (TiKV coprocessor in TiDB, KV layer in CockroachDB) for
+execution close to the data. Instead of fetching all rows to the
+compute layer and then filtering/aggregating, the storage node performs
+these operations and returns only the filtered or aggregated results.
+
+**When to apply**: A query has filter predicates or aggregation
+functions that the storage coprocessor can evaluate. The predicates
+must reference columns available in the storage scan, and the
+aggregation functions must be supported by the coprocessor.
+
+**Why it works**: Storage nodes hold the data locally. By computing
+filters and aggregations at the storage layer, only matching or
+aggregated rows cross the network. For selective filters, this reduces
+network transfer by orders of magnitude. For aggregations, it reduces
+data volume from millions of rows to the number of distinct groups.
+
+## Relational Algebra
+
+```algebra
+-- Filter pushdown to coprocessor
+sigma[p](TableReader(TableScan(T)))
+  -> TableReader(sigma[p](TableScan(T)))
+
+-- Aggregation pushdown to coprocessor
+gamma[g, agg](TableReader(TableScan(T)))
+  -> FinalAgg(gamma[g, partial_agg](
+       TableReader(TableScan(T))))
+
+-- Combined filter + aggregation pushdown
+gamma[g, agg](sigma[p](TableReader(TableScan(T))))
+  -> FinalAgg(gamma[g, partial_agg](
+       TableReader(sigma[p](TableScan(T)))))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("cop-filter-pushdown";
+    "(filter ?pred (table_reader (table_scan ?table)))" =>
+    "(table_reader (filter ?pred (table_scan ?table)))"
+    if predicate_is_cop_pushable("?pred")
+),
+
+rw!("cop-agg-pushdown";
+    "(aggregate ?group_keys ?agg_fns
+        (table_reader (table_scan ?table)))" =>
+    "(aggregate_final ?group_keys ?agg_fns
+        (table_reader
+            (aggregate_partial ?group_keys ?agg_fns
+                (table_scan ?table))))"
+    if agg_fns_are_cop_pushable("?agg_fns")
+),
+```
+
+## Preconditions
+
+```rust
+fn filter_is_pushable(pred: &Expression) -> bool {
+    // Must not contain non-deterministic functions
+    !pred.has_non_deterministic()
+    // Must not contain correlated subqueries
+    && !pred.has_correlated_subquery()
+    // All referenced columns must be in the scan
+    && pred.columns_in_scan()
+    // Expression type must be supported by coprocessor
+    && pred.all_functions_cop_supported()
+}
+
+fn agg_is_pushable(agg: &AggFunction) -> bool {
+    match agg.name {
+        Count | Sum | Min | Max | Avg | BitAnd | BitOr
+            | BitXor | ApproxCountDistinct => true,
+        // Not pushable to coprocessor
+        GroupConcat | JsonArrayAgg | Percentile
+            | VarPop | StddevPop => false,
+        _ => false,
+    }
+}
+```
+
+**Restrictions:**
+- Non-deterministic functions (RAND(), NOW()) cannot be pushed down
+- Correlated subqueries block pushdown
+- Some expression types are not supported by the coprocessor (e.g.,
+  complex JSON operations, certain string functions)
+- TiFlash coprocessor supports a different set of operations than
+  TiKV coprocessor
+- CockroachDB's storage layer has more limited pushdown compared
+  to TiDB's coprocessor model
+
+## Cost Model
+
+```rust
+fn pushdown_benefit(
+    total_rows: f64,
+    matching_rows: f64,
+    row_size_bytes: f64,
+    network_bandwidth: f64,
+    cop_processing_cost: f64,
+) -> f64 {
+    let rows_eliminated = total_rows - matching_rows;
+    let network_savings =
+        rows_eliminated * row_size_bytes / network_bandwidth;
+    let processing_cost = total_rows * cop_processing_cost;
+    network_savings - processing_cost
+}
+```
+
+**Typical benefit**: For a 1B row table with 0.1% selectivity, filter
+pushdown transfers 1M rows instead of 1B, reducing network I/O by
+99.9%.
+
+## Test Cases
+
+```sql
+-- Positive: filter pushdown to TiKV coprocessor
+SELECT * FROM orders WHERE status = 'pending' AND amount > 100;
+
+-- Plan:
+-- TableReader
+--   Selection(status='pending' AND amount > 100)  -- at TiKV
+--     TableScan(orders)
+```
+
+```sql
+-- Positive: aggregation pushdown
+SELECT region, SUM(amount), COUNT(*)
+FROM orders
+GROUP BY region;
+
+-- Plan:
+-- FinalAgg(region, SUM(partial_sum), SUM(partial_count))
+--   TableReader
+--     PartialAgg(region, SUM(amount), COUNT(*))  -- at TiKV
+--       TableScan(orders)
+```
+
+```sql
+-- Positive: combined filter + aggregation
+SELECT country, AVG(salary)
+FROM employees
+WHERE department = 'engineering'
+GROUP BY country;
+
+-- Both filter and aggregation pushed to coprocessor
+```
+
+```sql
+-- Negative: non-deterministic function
+SELECT * FROM orders WHERE created_at > NOW() - INTERVAL 1 HOUR;
+-- NOW() cannot be evaluated at coprocessor time
+-- (unless the value is computed and sent as a constant)
+```
+
+```sql
+-- Negative: correlated subquery in filter
+SELECT * FROM orders o
+WHERE amount > (SELECT AVG(amount) FROM orders WHERE region = o.region);
+-- Correlated subquery blocks filter pushdown
+```
+
+## References
+
+TiDB: pkg/planner/core/rule_predicate_push_down.go:31 - PPDSolver (commit e2184a2)
+TiDB: pkg/planner/core/rule_aggregation_push_down.go - aggregation pushdown
+TiDB: coprocessor protocol - pushdown request encoding
+CockroachDB: pkg/sql/opt/norm/rules/select.opt - filter normalization for pushdown

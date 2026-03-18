@@ -1,0 +1,338 @@
+---
+id: adaptive-parallelism-scaling
+name: Adaptive Parallelism Scaling
+category: execution-models
+version: 1.0.0
+databases: [SQL Server, Oracle, Spark, Snowflake]
+tags: [execution, adaptive, parallelism, threads, scaling, elasticity]
+standard: Elastic query execution
+complexity: O(num_workers) per scaling decision
+benefit_range: [1.3, 8.0]
+---
+
+# Adaptive Parallelism Scaling
+
+## Description
+
+Adaptive parallelism scaling adjusts the degree of parallelism (DOP) of a running query based on observed system load, data skew, and operator progress. Rather than committing to a fixed thread count at compile time, the executor starts with a conservative DOP and scales up or down as conditions change.
+
+Cloud data warehouses (Snowflake, BigQuery) routinely scale compute resources mid-query. On single-node systems, Spark's Adaptive Query Execution (AQE) adjusts shuffle partitions based on actual data sizes, effectively tuning parallelism. The key challenge is balancing throughput (more threads = faster for this query) against system fairness (more threads = less for other queries).
+
+**Key characteristics:**
+- **Progress monitoring**: Track rows/sec per worker to detect bottlenecks
+- **Skew detection**: Identify workers processing disproportionately more data
+- **Load-aware**: Consider system-wide CPU and memory utilization
+- **Elastic scaling**: Add or remove workers at pipeline boundaries
+- **Work stealing**: Idle workers steal work from busy workers
+
+**Trade-offs:**
+- Scaling up: synchronization overhead, memory for additional thread state
+- Scaling down: wasted partial work if worker is mid-morsel
+- Coordination cost: barrier synchronization at scaling points
+- Over-parallelism: cache thrashing, context switching overhead
+
+## Relational Algebra
+
+```
+AdaptiveParallel(plan, initial_dop) -> Result
+
+fn execute_adaptive(plan, dop):
+  workers = spawn_workers(dop)
+  monitor = ProgressMonitor::new(workers)
+
+  loop:
+    stats = monitor.collect_stats()
+
+    if stats.throughput_declining() and system.cpu_idle() > 20%:
+      new_worker = spawn_worker()
+      workers.add(new_worker)
+      redistribute_work(workers)
+
+    if stats.has_skew(threshold=3.0):
+      fast_workers = stats.fastest_workers()
+      slow_workers = stats.slowest_workers()
+      steal_work(fast_workers, slow_workers)
+
+    if stats.all_waiting() or system.memory_pressure():
+      remove_idle_workers(workers)
+
+    if workers.all_complete():
+      break
+
+  return merge_results(workers)
+```
+
+## Implementation
+
+```rust
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+/// Per-worker progress tracking
+pub struct WorkerStats {
+    pub worker_id: usize,
+    pub rows_processed: AtomicUsize,
+    pub last_checkpoint_rows: usize,
+    pub stall_count: usize,
+}
+
+impl WorkerStats {
+    pub fn throughput_since_checkpoint(&self) -> usize {
+        let current = self.rows_processed.load(
+            Ordering::Relaxed,
+        );
+        current - self.last_checkpoint_rows
+    }
+}
+
+/// Parallelism scaling decisions
+pub enum ScalingAction {
+    ScaleUp(usize),    // Add N workers
+    ScaleDown(usize),  // Remove N workers
+    Rebalance,         // Redistribute work among existing
+    NoChange,
+}
+
+/// Adaptive parallelism controller
+pub struct ParallelismController {
+    min_dop: usize,
+    max_dop: usize,
+    current_dop: usize,
+    workers: Vec<WorkerStats>,
+    scaling_interval_rows: usize,
+}
+
+impl ParallelismController {
+    pub fn new(
+        initial_dop: usize,
+        max_dop: usize,
+    ) -> Self {
+        Self {
+            min_dop: 1,
+            max_dop,
+            current_dop: initial_dop,
+            workers: Vec::with_capacity(max_dop),
+            scaling_interval_rows: 100_000,
+        }
+    }
+
+    /// Evaluate whether to scale up or down
+    pub fn evaluate(
+        &self,
+        system_load: &SystemLoad,
+    ) -> ScalingAction {
+        // Check for data skew
+        if self.detect_skew() {
+            return ScalingAction::Rebalance;
+        }
+
+        // Check system capacity
+        let cpu_available = system_load.cpu_idle_fraction();
+        let memory_ok = system_load.memory_available()
+            > self.per_worker_memory() * 2;
+
+        // Scale up if throughput declining and resources free
+        if self.throughput_declining()
+            && cpu_available > 0.2
+            && memory_ok
+            && self.current_dop < self.max_dop
+        {
+            let additional = self.compute_scale_up(
+                cpu_available,
+            );
+            return ScalingAction::ScaleUp(additional);
+        }
+
+        // Scale down if workers are idle
+        if self.workers_idle_fraction() > 0.3
+            && self.current_dop > self.min_dop
+        {
+            let remove = self.compute_scale_down();
+            return ScalingAction::ScaleDown(remove);
+        }
+
+        // Scale down under memory pressure
+        if \!memory_ok && self.current_dop > self.min_dop {
+            return ScalingAction::ScaleDown(1);
+        }
+
+        ScalingAction::NoChange
+    }
+
+    fn detect_skew(&self) -> bool {
+        if self.workers.len() < 2 {
+            return false;
+        }
+
+        let throughputs: Vec<usize> = self.workers.iter()
+            .map(|w| w.throughput_since_checkpoint())
+            .collect();
+
+        let max = *throughputs.iter().max().unwrap_or(&1);
+        let min = *throughputs.iter().min().unwrap_or(&1);
+
+        if min == 0 {
+            return true;
+        }
+        (max / min) > 3
+    }
+
+    fn throughput_declining(&self) -> bool {
+        // Compare recent throughput to historical average
+        let recent: usize = self.workers.iter()
+            .map(|w| w.throughput_since_checkpoint())
+            .sum();
+
+        // Simplified: declining if any worker stalled
+        self.workers.iter().any(|w| w.stall_count > 2)
+    }
+
+    fn workers_idle_fraction(&self) -> f64 {
+        let idle = self.workers.iter()
+            .filter(|w| {
+                w.throughput_since_checkpoint() == 0
+            })
+            .count();
+        idle as f64 / self.workers.len() as f64
+    }
+
+    fn compute_scale_up(
+        &self,
+        cpu_available: f64,
+    ) -> usize {
+        let headroom = (self.max_dop - self.current_dop)
+            .min(
+                (cpu_available * self.max_dop as f64) as usize,
+            );
+        headroom.max(1).min(self.current_dop)
+    }
+
+    fn compute_scale_down(&self) -> usize {
+        let idle = self.workers.iter()
+            .filter(|w| {
+                w.throughput_since_checkpoint() == 0
+            })
+            .count();
+        idle.max(1)
+    }
+
+    fn per_worker_memory(&self) -> usize {
+        // Estimated memory per worker thread state
+        4 * 1024 * 1024 // 4 MB default
+    }
+}
+
+/// Work stealing for skew mitigation
+pub struct WorkStealingQueue {
+    queue: Arc<crossbeam::deque::Injector<WorkUnit>>,
+    stealers: Vec<crossbeam::deque::Stealer<WorkUnit>>,
+}
+
+impl WorkStealingQueue {
+    /// Worker tries to steal from others when local queue empty
+    pub fn try_steal(&self, worker_id: usize) -> Option<WorkUnit> {
+        // Round-robin steal attempts from other workers
+        for (i, stealer) in self.stealers.iter().enumerate() {
+            if i == worker_id {
+                continue;
+            }
+            if let crossbeam::deque::Steal::Success(unit) =
+                stealer.steal()
+            {
+                return Some(unit);
+            }
+        }
+        // Fall back to global queue
+        match self.queue.steal() {
+            crossbeam::deque::Steal::Success(unit) => {
+                Some(unit)
+            }
+            _ => None,
+        }
+    }
+}
+
+/// Cost model for parallelism scaling
+pub fn parallel_efficiency(
+    dop: usize,
+    sequential_cost: f64,
+    sync_overhead_per_worker: f64,
+    memory_bandwidth_limit: f64,
+) -> f64 {
+    let parallel_cost = sequential_cost / dop as f64;
+    let sync_cost = dop as f64 * sync_overhead_per_worker;
+    let bandwidth_factor = if dop as f64
+        > memory_bandwidth_limit
+    {
+        memory_bandwidth_limit / dop as f64
+    } else {
+        1.0
+    };
+
+    parallel_cost / bandwidth_factor + sync_cost
+}
+```
+
+## Cost Model
+
+**Scaling up benefit:**
+- Ideal: `cost / DOP` (linear speedup)
+- CPU-bound: near-linear up to core count
+- Memory-bound: saturates at memory bandwidth (~4-8 cores)
+- I/O-bound: saturates at storage bandwidth
+
+**Scaling overhead:**
+- Thread spawn: ~10-50 us
+- Work redistribution: barrier sync + rebalance
+- Cache warming: new worker has cold caches (~1 ms)
+- Total scaling cost: 0.1-1 ms per scaling event
+
+**Skew handling:**
+- Without mitigation: runtime = max(worker_times) -> worst skew dominates
+- With work stealing: runtime approaches mean(worker_times)
+- Steal overhead: ~100 ns per steal (lock-free deque)
+
+**Optimal DOP:**
+- `DOP* = min(cores, data_size / min_morsel, memory / per_worker_memory)`
+- Beyond optimal: overhead > benefit
+
+## Test Cases
+
+```sql
+-- Test 1: Scale up on large scan
+SELECT SUM(amount) FROM transactions;
+-- Starts with DOP=4, system idle at 70%
+-- Scales to DOP=12 after first 100K rows
+
+-- Test 2: Scale down under memory pressure
+SELECT * FROM orders o
+JOIN lineitem l ON o.order_id = l.order_id
+ORDER BY l.quantity DESC;
+-- Hash join + sort needs memory
+-- Reduce DOP from 8 to 4 to give each worker more memory
+
+-- Test 3: Skew detection and rebalance
+SELECT customer_id, COUNT(*)
+FROM orders
+GROUP BY customer_id;
+-- Partition-parallel: one partition has 80% of data
+-- Work stealing redistributes from loaded workers
+
+-- Test 4: Small query skips parallelism
+SELECT * FROM regions WHERE region_id = 1;
+-- 5 rows total, DOP=1 (overhead not justified)
+```
+
+## References
+
+1. **Leis, Viktor et al**. "Morsel-Driven Parallelism: A NUMA-Aware Query Evaluation Framework." SIGMOD 2014.
+   - Morsel-driven work stealing and adaptive parallelism
+
+2. **Spark Documentation**. "Adaptive Query Execution."
+   - Runtime partition coalescing and join strategy switching
+
+3. **Snowflake Documentation**. "Elastic Compute Scaling."
+   - Cloud-native adaptive resource allocation
+
+4. **Blumofe, Robert and Charles Leiserson**. "Scheduling Multithreaded Computations by Work Stealing." JACM 1999.
+   - Theoretical foundation for work stealing algorithms

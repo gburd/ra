@@ -1,32 +1,251 @@
 ---
 id: push-based-aggregate
-name: Push-Based aggregate
+name: Push-Based Compiled Aggregation
 category: execution-models
 version: 1.0.0
-databases: [HyPer, Umbra]
-tags: [execution, push-based, compilation]
+databases: [HyPer, Umbra, SingleStore]
+authors: [Thomas Neumann]
+tags: [execution, push-based, compilation, aggregation, hash, pipeline-breaker]
+standard: HyPer model
 ---
 
-# Push-Based aggregate
+# Push-Based Compiled Aggregation
 
 ## Description
 
-Compiled aggregate operator in push-based execution model. Generates tight loops with minimal overhead.
+Compiled aggregation in push-based execution fuses the scan, filter, and group-by hash table update into a single tight loop. The aggregate function (SUM, COUNT, AVG, etc.) is compiled to direct arithmetic on hash table entries, eliminating expression evaluation overhead. Like hash join, aggregation is a pipeline breaker -- the output cannot be produced until all input has been consumed.
+
+**Key characteristics:**
+- **Inline aggregate update**: SUM/COUNT compiled to register increment
+- **Fused pipeline**: scan + filter + hash-aggregate in one loop
+- **Specialized hash table**: Layout matches group key + aggregate state
+- **Pipeline breaker**: Results produced only after consuming all input
+- **Overflow handling**: Compiled check for hash table resize
+
+**Trade-offs:**
+- Full input must be consumed before producing output
+- Hash table memory proportional to number of distinct groups
+- High-cardinality groups cause cache pressure
+- Recompilation needed if aggregate functions change
+
+## Relational Algebra
+
+```
+Push-based aggregation compilation:
+
+produce(Aggregate(groupby=[g], agg=[SUM(v)], Scan(table))):
+
+Pipeline 1 (Consume all input):
+  for each tuple t in table:
+    key = hash(t.g)
+    entry = ht.find_or_create(key, t.g)
+    entry.sum += t.v    // Inlined aggregate update
+    entry.count += 1
+
+Pipeline 2 (Produce results):
+  for each entry in ht:
+    consume(entry.g, entry.sum, entry.count)
+```
 
 ## Implementation
 
 ```rust
-pub fn compile_aggregate(ctx: &mut CompileContext) {
-    ctx.emit("// Compiled aggregate");
-    // Generate optimized machine code
+use ra_core::algebra::RelExpr;
+
+/// Compiled aggregation with inline aggregate updates
+pub struct CompiledAggregate {
+    group_keys: Vec<ColumnId>,
+    aggregates: Vec<AggFunc>,
+    input: RelExpr,
+}
+
+impl CompiledAggregate {
+    /// Generate the aggregation pipeline
+    pub fn compile(&self, codegen: &mut CodeGen) {
+        // Declare specialized hash table
+        let ht = codegen.declare_agg_hash_table(
+            "agg_ht",
+            &self.group_keys,
+            &self.aggregates,
+        );
+
+        // Pipeline 1: Consume input, update aggregates
+        codegen.emit("// Pipeline 1: Aggregate accumulation");
+        self.input.produce(codegen);
+
+        codegen.set_consumer(|cg, tuple_vars| {
+            // Compute group key hash
+            cg.emit("let group_hash = hash(");
+            for key in &self.group_keys {
+                cg.emit(&format!("  {},", tuple_vars.get(key)));
+            }
+            cg.emit(");");
+
+            // Find or create hash table entry
+            cg.emit("let entry = agg_ht.find_or_create(group_hash);");
+
+            // Initialize on first insert
+            cg.emit("if entry.is_new() {");
+            for key in &self.group_keys {
+                cg.emit(&format!(
+                    "  entry.set_key({}, {});",
+                    key.index(), tuple_vars.get(key)
+                ));
+            }
+            for (i, agg) in self.aggregates.iter().enumerate() {
+                cg.emit(&format!(
+                    "  entry.agg_{} = {};", i, agg.initial_value()
+                ));
+            }
+            cg.emit("}");
+
+            // Update aggregates (compiled inline)
+            for (i, agg) in self.aggregates.iter().enumerate() {
+                let val = tuple_vars.get(&agg.column);
+                match agg.func {
+                    AggType::Sum => {
+                        cg.emit(&format!(
+                            "entry.agg_{} += {};", i, val
+                        ));
+                    }
+                    AggType::Count => {
+                        cg.emit(&format!(
+                            "entry.agg_{} += 1;", i
+                        ));
+                    }
+                    AggType::Min => {
+                        cg.emit(&format!(
+                            "if {} < entry.agg_{} {{ entry.agg_{0} = {}; }}",
+                            val, i, i, val
+                        ));
+                    }
+                    AggType::Max => {
+                        cg.emit(&format!(
+                            "if {} > entry.agg_{} {{ entry.agg_{0} = {}; }}",
+                            val, i, i, val
+                        ));
+                    }
+                    AggType::Avg => {
+                        cg.emit(&format!(
+                            "entry.sum_{} += {};", i, val
+                        ));
+                        cg.emit(&format!(
+                            "entry.count_{} += 1;", i
+                        ));
+                    }
+                }
+            }
+        });
+
+        // Pipeline 2: Scan hash table and produce results
+        codegen.emit("// Pipeline 2: Produce aggregate results");
+        codegen.emit("for entry in agg_ht.entries() {");
+        codegen.emit_consume_call();
+        codegen.emit("}");
+    }
+}
+
+/// Cost model for compiled aggregation
+pub fn compiled_aggregate_cost(
+    input_rows: f64,
+    num_groups: f64,
+    num_aggregates: usize,
+) -> f64 {
+    // Hash computation per input tuple
+    let hash_cost = input_rows * 0.00005; // ~50 ns
+
+    // Hash table probe + update per tuple
+    let update_cost = input_rows * 0.00004; // ~40 ns
+
+    // Aggregate update (register operation)
+    let agg_cost = input_rows * num_aggregates as f64 * 0.000005;
+
+    // Hash table resize (amortized)
+    let resize_cost = num_groups * 0.0001;
+
+    // Output scan
+    let output_cost = num_groups * 0.00001;
+
+    // Compilation
+    let compile_cost = 6.0;
+
+    compile_cost + hash_cost + update_cost + agg_cost
+        + resize_cost + output_cost
 }
 ```
 
 ## Cost Model
 
-- Near-zero per-tuple overhead
-- Compilation amortized
+**Input Phase (Pipeline 1):**
+- Hash group key: ~10-50 ns per tuple
+- Hash table probe: ~40 ns (1-2 cache misses for large groups)
+- Aggregate update: ~5 ns per aggregate (register operation)
+- Total per tuple: `hash_cost + probe_cost + num_aggs x 5ns`
+
+**Output Phase (Pipeline 2):**
+- Sequential scan of hash table entries
+- Cost: `num_groups x output_cost_per_group`
+
+**Memory:**
+- Hash table: `num_groups x (key_size + agg_state_size + overhead)`
+- Cache behavior: good for low cardinality, poor for high
+- Threshold: hash table fits in L2/L3 cache for best performance
+
+**Specialization Benefits:**
+- SUM: single ADD instruction (vs expression tree eval)
+- COUNT: single INCREMENT instruction
+- MIN/MAX: single conditional move (CMOV) instruction
+- AVG: compiled as SUM + COUNT, divided at output
+
+## Test Cases
+
+```sql
+-- Test 1: Simple aggregation (no grouping)
+SELECT COUNT(*), SUM(amount) FROM orders;
+-- Expected: Single hash table entry, inline accumulation
+-- Fastest possible: scan loop with two register increments
+
+-- Test 2: Low-cardinality grouping
+SELECT status, COUNT(*), AVG(amount)
+FROM orders GROUP BY status;
+-- Expected: ~5 groups, hash table fits in L1 cache
+-- Pipeline: scan -> hash -> update (all in registers)
+
+-- Test 3: High-cardinality grouping
+SELECT customer_id, SUM(amount)
+FROM orders GROUP BY customer_id;
+-- Expected: Many groups, hash table in L2/L3 cache
+-- Cache misses dominate cost on random key access
+
+-- Test 4: Fused scan-filter-aggregate pipeline
+SELECT region, SUM(revenue)
+FROM sales
+WHERE year = 2024
+GROUP BY region;
+-- Expected: Single compiled loop:
+--   for row in sales: if year==2024: ht[region].sum += revenue
+```
+
+## Comparison with Other Models
+
+| Aspect | Push-Based Agg | Volcano Agg | Vectorized Agg |
+|--------|---------------|-------------|----------------|
+| Update cost | ~5 ns (register) | ~100 ns (expr eval) | ~20 ns (batch) |
+| Hash cost | Inline hash fn | Generic hash | SIMD batch hash |
+| Fused pipeline | Yes (one loop) | No (separate ops) | Partial (batch) |
+| Low-cardinality | Optimal | Acceptable | Good (SIMD) |
+| High-cardinality | Cache-limited | Cache-limited | Better (prefetch) |
 
 ## References
 
-1. Neumann, "Efficiently Compiling Efficient Query Plans", VLDB 2011
+1. **Neumann, Thomas**. "Efficiently Compiling Efficient Query Plans for Modern Hardware." VLDB 2011.
+   - Compiled aggregation as pipeline breaker
+
+2. **Ye, Yinan et al**. "Scalable Aggregation on Multicore Processors." DaMoN 2011.
+   - Parallel aggregation strategies for compiled engines
+
+3. **Kester, Michael S. et al**. "Access Path Selection in Main-Memory Optimized Data Systems." SIGMOD 2017.
+   - Aggregation optimization in modern compiled engines
+
+4. **Leis, Viktor et al**. "The Adaptive Radix Tree: ARTful Indexing for Main-Memory Databases." ICDE 2013.
+   - Cache-efficient hash table structures used in HyPer

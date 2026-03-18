@@ -1,0 +1,137 @@
+---
+id: zigzag-join
+name: Zigzag Join on Multiple Indexes
+category: distributed/distributed-joins
+databases: [cockroachdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, join, zigzag, index-intersection, multi-index]
+complexity: O(n)
+benefit_range: [0.3, 0.9]
+---
+
+# Zigzag Join on Multiple Indexes
+
+## Description
+
+Replaces a filter on a table with a zigzag join that simultaneously
+scans two indexes, alternating between them to skip non-matching rows.
+When a filter has constant equality predicates on prefix columns of two
+different indexes, a zigzag join can intersect the matching rows from
+both indexes without a full table scan.
+
+**When to apply**: A select on a scan has constant equality constraints
+that match prefix columns of two or more indexes on the same table.
+
+**Why it works**: Each index provides a sorted stream of rows matching
+one predicate. The zigzag join advances the "lagging" index to catch up
+with the "leading" index, skipping large ranges of non-matching rows.
+This intersects results from both indexes efficiently without
+materializing either full result set.
+
+## Relational Algebra
+
+```algebra
+sigma[a = 1 AND b = 2](Scan(T))
+  -> ZigzagJoin(
+       IndexScan(T, idx_a, a = 1),
+       IndexScan(T, idx_b, b = 2)
+     )
+  where idx_a has prefix column a
+  where idx_b has prefix column b
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("generate-zigzag-join";
+    "(filter ?filters (scan ?table))" =>
+    "(zigzag_join ?table ?left_index ?right_index
+        ?left_fixed ?right_fixed ?remaining)"
+    if is_canonical_scan("?table")
+    if has_two_matching_indexes("?table", "?filters")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    table: &ScanPrivate,
+    filters: &FiltersExpr,
+) -> bool {
+    let indexes = table.indexes_with_fixed_prefix(filters);
+    // Need at least two indexes with constant prefix columns
+    indexes.len() >= 2
+    // Scan must be canonical (no pre-existing constraints)
+    && table.is_canonical_scan()
+}
+```
+
+**Restrictions:**
+- Requires at least two indexes where prefix columns are constrained
+  to constants in the filter
+- The zigzag join only works with equality predicates on prefix
+  columns, not range predicates
+- Inverted indexes can also participate in zigzag joins (see
+  GenerateInvertedIndexZigzagJoins)
+- Performance degrades if the selectivity of individual indexes is
+  poor (many rows match each index)
+
+## Cost Model
+
+```rust
+fn zigzag_join_cost(
+    index_a_matching: f64,
+    index_b_matching: f64,
+    total_rows: f64,
+    index_seek_cost: f64,
+) -> f64 {
+    // Zigzag alternates between indexes
+    // Number of seeks is proportional to the intersection size
+    let intersection = index_a_matching.min(index_b_matching);
+    let seeks = intersection * 2.0; // alternating seeks
+    seeks * index_seek_cost
+}
+```
+
+**Typical benefit**: For a table with 1M rows where index A matches
+1000 rows and index B matches 500 rows, a zigzag join examines at most
+~1500 index entries instead of scanning 1M rows.
+
+## Test Cases
+
+```sql
+-- Positive: two indexes with constant prefix
+-- t has INDEX(a), INDEX(b)
+SELECT * FROM t WHERE a = 1 AND b = 2;
+
+-- Plan: ZigzagJoin
+--   IndexScan(t, idx_a, a = 1)
+--   IndexScan(t, idx_b, b = 2)
+-- Rows interleaved by PK ordering
+```
+
+```sql
+-- Positive: inverted index zigzag for JSON
+-- documents has GIN index on data
+SELECT * FROM documents
+WHERE data @> '{"type": "report"}' AND data @> '{"status": "active"}';
+
+-- ZigzagJoin on the same inverted index with two entry keys
+```
+
+```sql
+-- Negative: only one index has matching prefix
+SELECT * FROM t WHERE a = 1 AND c > 10;
+-- c > 10 is a range predicate, not suitable for zigzag
+-- Falls back to constrained index scan on idx_a
+```
+
+## References
+
+CockroachDB: pkg/sql/opt/xform/rules/select.opt:97 - GenerateZigzagJoins (commit 51e808c)
+CockroachDB: pkg/sql/opt/xform/rules/select.opt:108 - GenerateInvertedIndexZigzagJoins
+CockroachDB: pkg/sql/rowexec/zigzagjoiner.go - zigzag join execution

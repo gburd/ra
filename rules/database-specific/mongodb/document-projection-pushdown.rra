@@ -1,0 +1,177 @@
+---
+id: mongodb-document-projection-pushdown
+name: MongoDB Document Projection Pushdown
+category: database-specific/mongodb
+databases: [mongodb]
+execution_models: [pipeline]
+version: "1.0.0"
+authors: ["MongoDB Inc."]
+tags: [projection, pushdown, document, storage, optimization]
+complexity: "O(n)"
+benefit_range: [0.2, 8.0]
+---
+
+# MongoDB Document Projection Pushdown
+
+## Description
+
+Pushes projection (field selection) from aggregation pipeline `$project` stages
+down to the storage layer, so the storage engine returns only the requested
+fields rather than full documents. This reduces deserialization overhead, memory
+usage, and network transfer for sharded queries.
+
+**When to apply**: Queries or aggregation pipelines that project a subset of
+fields from documents. The optimizer analyzes all downstream stages to compute
+the minimal set of fields required and pushes this projection to the initial
+scan or index scan stage.
+
+**Why it works**: MongoDB documents can be large (up to 16MB). If a query only
+needs 3 fields from a 100-field document, fetching and deserializing all 100
+fields wastes CPU and memory. By computing a dependency set across all pipeline
+stages and pushing the minimal projection to the scan, only required fields
+are read from storage.
+
+## Relational Algebra
+
+```algebra
+-- Before: full document scan, late projection
+pi[name, email](sigma[status = "active"](scan(users)))
+
+-- After: early projection pushed to scan
+pi[name, email](sigma[status = "active"](
+  scan(users, projection={name: 1, email: 1, status: 1})))
+
+-- status included because filter needs it, then dropped after filter
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mongodb-projection-pushdown";
+    "(project ?output-fields
+       (pipeline ?stages
+          (scan ?coll (no-projection))))" =>
+    "(project ?output-fields
+       (pipeline ?stages
+          (scan ?coll (compute-dependencies ?output-fields ?stages))))"
+    if projection_reduces_fields("?output-fields", "?stages", "?coll")
+),
+
+rw!("mongodb-covered-query-projection";
+    "(project ?fields
+       (filter ?pred
+          (index-scan ?idx ?bounds)))" =>
+    "(project ?fields
+       (filter ?pred
+          (index-only-scan ?idx ?bounds)))"
+    if index_covers_fields("?idx", "?fields", "?pred")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> bool {
+    let projected = stats.projected_field_count as f64;
+    let total = stats.avg_field_count as f64;
+    projected < total * 0.8  // projection removes at least 20% of fields
+        && stats.avg_document_size_bytes > 256
+}
+```
+
+**Restrictions:**
+- Projection cannot be pushed past stages that access all fields (e.g., `$replaceRoot`)
+- `$project` with expressions may compute new fields requiring upstream data
+- Array projections (`$slice`, `$elemMatch` in projection) have special rules
+- Covered queries (index-only) require all fields in the index
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let doc_count = stats.input_document_count as f64;
+    let avg_doc_bytes = stats.avg_document_size_bytes as f64;
+    let projected_fraction = stats.projected_field_count as f64
+        / stats.avg_field_count as f64;
+
+    // Without pushdown: read full documents
+    let without = doc_count * avg_doc_bytes * 0.000001;
+
+    // With pushdown: read only projected fields
+    let with = doc_count * avg_doc_bytes * projected_fraction * 0.000001;
+
+    if without > with {
+        (without - with) / without
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 20% to 8x for narrow projections on wide documents.
+
+## Test Cases
+
+### Positive: Narrow projection on wide documents
+
+```javascript
+// Documents have 50+ fields, 10KB average
+db.profiles.find(
+  {country: "US"},
+  {name: 1, email: 1, _id: 0}
+)
+
+// Storage layer returns only name and email fields
+// ~95% reduction in bytes read from disk
+// explain shows: PROJECTION_COVERED or PROJECTION_SIMPLE
+```
+
+### Positive: Pipeline dependency analysis
+
+```javascript
+db.orders.aggregate([
+  {$match: {status: "shipped"}},
+  {$group: {_id: "$region", total: {$sum: "$amount"}}},
+  {$sort: {total: -1}}
+])
+
+// Dependency analysis: only status, region, amount needed
+// Pushes {status: 1, region: 1, amount: 1} to scan
+// All other fields (customer, items, notes, ...) skipped
+```
+
+### Negative: $replaceRoot blocks pushdown
+
+```javascript
+db.orders.aggregate([
+  {$replaceRoot: {newRoot: "$shipping_details"}},
+  {$project: {city: 1, zip: 1}}
+])
+
+// $replaceRoot needs the entire shipping_details subdocument
+// Cannot push narrow projection past it
+// Full document must be fetched to extract shipping_details
+```
+
+## References
+
+**Implementation:**
+- MongoDB source: `src/mongo/db/exec/projection.cpp`
+- Dependency analysis: `src/mongo/db/pipeline/dependencies.cpp`
+- DepsTracker: `DepsTracker::getNeedAll()` / `getNeededFields()`
+
+**Documentation:**
+- MongoDB Manual: "Project Fields to Return from Query"
+  - https://docs.mongodb.com/manual/tutorial/project-fields-from-query-results/
+
+**Related papers:**
+- Chaudhuri, S., Shim, K., "An Overview of Cost-based Optimization of Queries
+  with Aggregates", IEEE Data Eng. Bull. 1995

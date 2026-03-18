@@ -1,0 +1,558 @@
+//! Extended index type modeling for query optimizer cost estimation.
+//!
+//! Models the full range of index types found in modern database systems,
+//! including B-tree variants, specialized indexes (full-text, spatial,
+//! columnstore), and PostgreSQL-specific types (GIN, GiST, BRIN).
+//!
+//! Each index type carries cost factors that the optimizer uses to compare
+//! access paths and choose the cheapest plan.
+
+use serde::{Deserialize, Serialize};
+
+use crate::types::IndexStats;
+
+/// Discriminated union of index access methods.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum IndexType {
+    /// B-tree where leaf order matches physical row order.
+    Clustered {
+        /// Indexed columns.
+        columns: Vec<String>,
+    },
+    /// Secondary B-tree, optionally with INCLUDE columns.
+    NonClustered {
+        /// Key columns used for lookups.
+        columns: Vec<String>,
+        /// Additional payload columns stored in the leaf pages.
+        included_columns: Vec<String>,
+    },
+    /// Multi-column B-tree with explicit key ordering.
+    Composite {
+        /// Indexed columns.
+        columns: Vec<String>,
+        /// Positional order of columns in the key.
+        column_order: Vec<usize>,
+    },
+    /// Inverted index for natural-language search.
+    FullText {
+        /// Columns covered by the full-text index.
+        columns: Vec<String>,
+        /// Natural-language configuration (e.g. "english").
+        language: String,
+        /// Custom stop-word list, if any.
+        stopwords: Option<Vec<String>>,
+    },
+    /// B-tree with a uniqueness constraint.
+    Unique {
+        /// Indexed columns.
+        columns: Vec<String>,
+    },
+    /// Partial index with a WHERE-clause filter predicate.
+    Filtered {
+        /// Key columns.
+        columns: Vec<String>,
+        /// Textual representation of the filter predicate.
+        filter_predicate: String,
+    },
+    /// R-tree / GiST index for geometric or geographic data.
+    Spatial {
+        /// Indexed geometry column.
+        column: String,
+        /// Spatial Reference Identifier.
+        srid: Option<i32>,
+    },
+    /// Column-oriented storage index for analytics workloads.
+    Columnstore {
+        /// Columns included in the columnstore.
+        columns: Vec<String>,
+    },
+    /// Hash index -- equality lookups only.
+    Hash {
+        /// Indexed columns.
+        columns: Vec<String>,
+    },
+    /// PostgreSQL Generalized Inverted Index for composite values.
+    GIN {
+        /// Indexed column (typically array, jsonb, or tsvector).
+        column: String,
+        /// Operator class (e.g. "jsonb_ops", "gin_trgm_ops").
+        opclass: String,
+    },
+    /// PostgreSQL Generalized Search Tree for spatial/range types.
+    GiST {
+        /// Indexed column.
+        column: String,
+        /// Operator class (e.g. "gist_geometry_ops_2d").
+        opclass: String,
+    },
+    /// PostgreSQL Block Range Index for large, naturally ordered tables.
+    BRIN {
+        /// Indexed column.
+        column: String,
+        /// Number of pages summarized per range entry.
+        pages_per_range: u32,
+    },
+    /// Bitmap index for low-cardinality columns.
+    Bitmap {
+        /// Indexed columns.
+        columns: Vec<String>,
+    },
+    /// Expression-based index on a computed value.
+    Expression {
+        /// SQL expression text (e.g. "lower(email)").
+        expression: String,
+        /// Underlying index structure.
+        backing_type: Box<IndexType>,
+    },
+}
+
+impl IndexType {
+    /// Columns participating in the index key.
+    pub fn key_columns(&self) -> &[String] {
+        match self {
+            Self::Clustered { columns }
+            | Self::NonClustered { columns, .. }
+            | Self::Composite { columns, .. }
+            | Self::FullText { columns, .. }
+            | Self::Unique { columns }
+            | Self::Filtered { columns, .. }
+            | Self::Columnstore { columns }
+            | Self::Hash { columns }
+            | Self::Bitmap { columns } => columns,
+            Self::Spatial { column, .. }
+            | Self::GIN { column, .. }
+            | Self::GiST { column, .. }
+            | Self::BRIN { column, .. } => {
+                std::slice::from_ref(column)
+            }
+            Self::Expression { backing_type, .. } => {
+                backing_type.key_columns()
+            }
+        }
+    }
+
+    /// Whether this index supports range scans natively.
+    pub fn supports_range_scan(&self) -> bool {
+        matches!(
+            self,
+            Self::Clustered { .. }
+                | Self::NonClustered { .. }
+                | Self::Composite { .. }
+                | Self::Unique { .. }
+                | Self::Filtered { .. }
+                | Self::BRIN { .. }
+        )
+    }
+
+    /// Whether this index supports equality lookups.
+    pub fn supports_equality(&self) -> bool {
+        !matches!(self, Self::FullText { .. } | Self::Columnstore { .. })
+    }
+
+    /// Whether the index is a covering index for the given columns.
+    pub fn is_covering(&self, required: &[String]) -> bool {
+        match self {
+            Self::NonClustered {
+                columns,
+                included_columns,
+            } => required
+                .iter()
+                .all(|c| columns.contains(c) || included_columns.contains(c)),
+            Self::Clustered { .. } => true,
+            _ => {
+                let keys = self.key_columns();
+                required.iter().all(|c| keys.contains(c))
+            }
+        }
+    }
+}
+
+/// Full metadata for a table index, including statistics and cost factors.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IndexMetadata {
+    /// Index name (e.g. "idx_orders_date").
+    pub name: String,
+    /// The kind of index and its structural parameters.
+    pub index_type: IndexType,
+    /// Table the index belongs to.
+    pub table: String,
+    /// Physical statistics gathered from the catalog.
+    pub statistics: IndexStats,
+    /// Per-operation cost multipliers for the optimizer.
+    pub cost_factors: IndexCostFactors,
+}
+
+/// Per-operation cost multipliers used by the optimizer to rank access paths.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IndexCostFactors {
+    /// Cost of a single-key lookup (random I/O + tree traversal).
+    pub lookup_cost: f64,
+    /// Cost per page of a range scan (sequential I/O).
+    pub range_scan_cost: f64,
+    /// Extra cost per tuple when a heap fetch is required.
+    pub tuple_fetch_cost: f64,
+    /// Whether the index can satisfy the query without a heap fetch.
+    pub covering: bool,
+}
+
+impl IndexCostFactors {
+    /// Default cost factors for a well-tuned B-tree index.
+    pub fn btree_default() -> Self {
+        Self {
+            lookup_cost: 4.0,
+            range_scan_cost: 1.0,
+            tuple_fetch_cost: 1.5,
+            covering: false,
+        }
+    }
+
+    /// Default cost factors for a hash index.
+    pub fn hash_default() -> Self {
+        Self {
+            lookup_cost: 1.0,
+            range_scan_cost: f64::INFINITY,
+            tuple_fetch_cost: 1.5,
+            covering: false,
+        }
+    }
+
+    /// Default cost factors for a BRIN index.
+    pub fn brin_default() -> Self {
+        Self {
+            lookup_cost: 0.5,
+            range_scan_cost: 0.1,
+            tuple_fetch_cost: 2.0,
+            covering: false,
+        }
+    }
+
+    /// Default cost factors for a GIN index.
+    pub fn gin_default() -> Self {
+        Self {
+            lookup_cost: 3.0,
+            range_scan_cost: 0.5,
+            tuple_fetch_cost: 2.0,
+            covering: false,
+        }
+    }
+
+    /// Default cost factors for a columnstore index.
+    pub fn columnstore_default() -> Self {
+        Self {
+            lookup_cost: 10.0,
+            range_scan_cost: 0.05,
+            tuple_fetch_cost: 0.0,
+            covering: true,
+        }
+    }
+
+    /// Estimated total cost for a point lookup returning `rows` tuples.
+    pub fn point_lookup_cost(&self, rows: u64) -> f64 {
+        let fetch = if self.covering {
+            0.0
+        } else {
+            rows as f64 * self.tuple_fetch_cost
+        };
+        self.lookup_cost + fetch
+    }
+
+    /// Estimated total cost for a range scan over `pages` leaf pages
+    /// returning `rows` tuples.
+    pub fn range_cost(&self, pages: u64, rows: u64) -> f64 {
+        let scan = pages as f64 * self.range_scan_cost;
+        let fetch = if self.covering {
+            0.0
+        } else {
+            rows as f64 * self.tuple_fetch_cost
+        };
+        self.lookup_cost + scan + fetch
+    }
+}
+
+impl IndexMetadata {
+    /// Whether the index is usable for the given predicate columns.
+    pub fn matches_predicate(&self, predicate_columns: &[String]) -> bool {
+        let keys = self.index_type.key_columns();
+        if keys.is_empty() {
+            return false;
+        }
+        // A prefix of the key columns must match the predicate columns.
+        predicate_columns
+            .iter()
+            .all(|pc| keys.contains(pc))
+    }
+
+    /// Whether the leading key column matches the given column.
+    pub fn leading_column_matches(&self, column: &str) -> bool {
+        self.index_type
+            .key_columns()
+            .first()
+            .is_some_and(|c| c == column)
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    fn sample_stats() -> IndexStats {
+        IndexStats {
+            index_id: "idx_test".to_string(),
+            clustering_factor: 100.0,
+            leaf_pages: 500,
+            levels: 3,
+            avg_leaf_density: 0.7,
+            distinct_keys: 100_000,
+        }
+    }
+
+    // -- IndexType --
+
+    #[test]
+    fn clustered_key_columns() {
+        let idx = IndexType::Clustered {
+            columns: vec!["id".into()],
+        };
+        assert_eq!(idx.key_columns(), &["id".to_string()]);
+    }
+
+    #[test]
+    fn nonclustered_key_columns_excludes_included() {
+        let idx = IndexType::NonClustered {
+            columns: vec!["a".into()],
+            included_columns: vec!["b".into()],
+        };
+        assert_eq!(idx.key_columns(), &["a".to_string()]);
+    }
+
+    #[test]
+    fn composite_preserves_all_columns() {
+        let idx = IndexType::Composite {
+            columns: vec!["a".into(), "b".into(), "c".into()],
+            column_order: vec![0, 1, 2],
+        };
+        assert_eq!(idx.key_columns().len(), 3);
+    }
+
+    #[test]
+    fn hash_does_not_support_range_scan() {
+        let idx = IndexType::Hash {
+            columns: vec!["id".into()],
+        };
+        assert!(!idx.supports_range_scan());
+        assert!(idx.supports_equality());
+    }
+
+    #[test]
+    fn btree_supports_both_scan_types() {
+        let idx = IndexType::Clustered {
+            columns: vec!["id".into()],
+        };
+        assert!(idx.supports_range_scan());
+        assert!(idx.supports_equality());
+    }
+
+    #[test]
+    fn fulltext_does_not_support_equality() {
+        let idx = IndexType::FullText {
+            columns: vec!["body".into()],
+            language: "english".into(),
+            stopwords: None,
+        };
+        assert!(!idx.supports_equality());
+    }
+
+    #[test]
+    fn nonclustered_covering_check() {
+        let idx = IndexType::NonClustered {
+            columns: vec!["a".into()],
+            included_columns: vec!["b".into(), "c".into()],
+        };
+        assert!(idx.is_covering(&["a".into(), "b".into()]));
+        assert!(!idx.is_covering(&["a".into(), "d".into()]));
+    }
+
+    #[test]
+    fn clustered_always_covering() {
+        let idx = IndexType::Clustered {
+            columns: vec!["id".into()],
+        };
+        assert!(idx.is_covering(&["id".into(), "name".into(), "anything".into()]));
+    }
+
+    #[test]
+    fn expression_delegates_to_backing() {
+        let idx = IndexType::Expression {
+            expression: "lower(email)".into(),
+            backing_type: Box::new(IndexType::Unique {
+                columns: vec!["email".into()],
+            }),
+        };
+        assert_eq!(idx.key_columns(), &["email".to_string()]);
+    }
+
+    #[test]
+    fn brin_supports_range_scan() {
+        let idx = IndexType::BRIN {
+            column: "created_at".into(),
+            pages_per_range: 128,
+        };
+        assert!(idx.supports_range_scan());
+    }
+
+    #[test]
+    fn gin_single_column_key() {
+        let idx = IndexType::GIN {
+            column: "tags".into(),
+            opclass: "jsonb_ops".into(),
+        };
+        assert_eq!(idx.key_columns(), &["tags".to_string()]);
+    }
+
+    #[test]
+    fn gist_single_column_key() {
+        let idx = IndexType::GiST {
+            column: "geom".into(),
+            opclass: "gist_geometry_ops_2d".into(),
+        };
+        assert_eq!(idx.key_columns(), &["geom".to_string()]);
+    }
+
+    #[test]
+    fn spatial_single_column_key() {
+        let idx = IndexType::Spatial {
+            column: "location".into(),
+            srid: Some(4326),
+        };
+        assert_eq!(idx.key_columns(), &["location".to_string()]);
+    }
+
+    // -- IndexCostFactors --
+
+    #[test]
+    fn btree_default_factors() {
+        let f = IndexCostFactors::btree_default();
+        assert_eq!(f.lookup_cost, 4.0);
+        assert!(!f.covering);
+    }
+
+    #[test]
+    fn hash_default_infinite_range_cost() {
+        let f = IndexCostFactors::hash_default();
+        assert!(f.range_scan_cost.is_infinite());
+    }
+
+    #[test]
+    fn point_lookup_cost_covering() {
+        let f = IndexCostFactors {
+            lookup_cost: 4.0,
+            range_scan_cost: 1.0,
+            tuple_fetch_cost: 1.5,
+            covering: true,
+        };
+        assert_eq!(f.point_lookup_cost(10), 4.0);
+    }
+
+    #[test]
+    fn point_lookup_cost_non_covering() {
+        let f = IndexCostFactors::btree_default();
+        // 4.0 + 10 * 1.5 = 19.0
+        assert_eq!(f.point_lookup_cost(10), 19.0);
+    }
+
+    #[test]
+    fn range_cost_covering() {
+        let f = IndexCostFactors {
+            covering: true,
+            ..IndexCostFactors::btree_default()
+        };
+        // 4.0 + 100 * 1.0 + 0 = 104.0
+        assert_eq!(f.range_cost(100, 1000), 104.0);
+    }
+
+    #[test]
+    fn range_cost_non_covering() {
+        let f = IndexCostFactors::btree_default();
+        // 4.0 + 100 * 1.0 + 1000 * 1.5 = 1604.0
+        assert_eq!(f.range_cost(100, 1000), 1604.0);
+    }
+
+    #[test]
+    fn brin_default_cheap_range() {
+        let f = IndexCostFactors::brin_default();
+        assert!(f.range_scan_cost < IndexCostFactors::btree_default().range_scan_cost);
+    }
+
+    #[test]
+    fn columnstore_default_is_covering() {
+        let f = IndexCostFactors::columnstore_default();
+        assert!(f.covering);
+        assert_eq!(f.tuple_fetch_cost, 0.0);
+    }
+
+    // -- IndexMetadata --
+
+    #[test]
+    fn metadata_matches_predicate() {
+        let meta = IndexMetadata {
+            name: "idx_orders_date".into(),
+            index_type: IndexType::NonClustered {
+                columns: vec!["order_date".into(), "customer_id".into()],
+                included_columns: vec![],
+            },
+            table: "orders".into(),
+            statistics: sample_stats(),
+            cost_factors: IndexCostFactors::btree_default(),
+        };
+        assert!(meta.matches_predicate(&["order_date".into()]));
+        assert!(meta.matches_predicate(&["customer_id".into()]));
+        assert!(!meta.matches_predicate(&["amount".into()]));
+    }
+
+    #[test]
+    fn metadata_leading_column() {
+        let meta = IndexMetadata {
+            name: "idx_comp".into(),
+            index_type: IndexType::Composite {
+                columns: vec!["a".into(), "b".into()],
+                column_order: vec![0, 1],
+            },
+            table: "t".into(),
+            statistics: sample_stats(),
+            cost_factors: IndexCostFactors::btree_default(),
+        };
+        assert!(meta.leading_column_matches("a"));
+        assert!(!meta.leading_column_matches("b"));
+    }
+
+    #[test]
+    fn metadata_empty_index_no_match() {
+        let meta = IndexMetadata {
+            name: "idx_empty".into(),
+            index_type: IndexType::Clustered { columns: vec![] },
+            table: "t".into(),
+            statistics: sample_stats(),
+            cost_factors: IndexCostFactors::btree_default(),
+        };
+        assert!(!meta.matches_predicate(&["x".into()]));
+    }
+
+    #[test]
+    fn serialize_roundtrip() {
+        let meta = IndexMetadata {
+            name: "idx_rt".into(),
+            index_type: IndexType::GIN {
+                column: "data".into(),
+                opclass: "jsonb_ops".into(),
+            },
+            table: "events".into(),
+            statistics: sample_stats(),
+            cost_factors: IndexCostFactors::gin_default(),
+        };
+        let json = serde_json::to_string(&meta).expect("serialize");
+        let back: IndexMetadata =
+            serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(meta, back);
+    }
+}

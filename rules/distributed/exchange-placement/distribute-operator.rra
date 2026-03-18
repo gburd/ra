@@ -1,0 +1,148 @@
+---
+id: distribute-operator
+name: Distribute Operator Placement
+category: distributed/exchange-placement
+databases: [cockroachdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, exchange, distribute, multi-region, placement]
+complexity: O(n)
+benefit_range: [0.1, 0.6]
+---
+
+# Distribute Operator Placement
+
+## Description
+
+Inserts a Distribute operator to move query execution from one region
+to another when the data or the required computation resides in a
+different region than the gateway. In CockroachDB's multi-region
+architecture, the optimizer must reason about where data resides and
+where computation should happen. The Distribute operator explicitly
+models the cost of moving data or results between regions.
+
+**When to apply**: The query plan requires data from a region different
+from the gateway region, and the optimizer determines it is cheaper
+to send the computation to the data (or vice versa) than to process
+locally with remote reads.
+
+**Why it works**: Cross-region data movement is expensive (50-200ms
+latency). By explicitly modeling distribution as an operator, the
+optimizer can compare the cost of:
+1. Moving the query to the data (compute remotely, return small result)
+2. Moving the data to the query (remote reads, compute locally)
+3. Partial computation at each location (hybrid approach)
+
+## Relational Algebra
+
+```algebra
+-- Move computation to data region
+Query(RemoteData)
+  -> Distribute(gateway_region,
+       Query(LocalData)  -- executed in data's region
+     )
+
+-- Move data to computation region
+Query(RemoteData)
+  -> Query(Distribute(gateway_region, RemoteData))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("insert-distribute-operator";
+    "(scan ?table)" =>
+    "(distribute ?gateway_region (scan ?table))"
+    if data_not_in_gateway_region("?table")
+),
+
+rw!("push-distribute-above-join";
+    "(join ?type
+        (distribute ?region ?left)
+        (distribute ?region ?right)
+        ?on ?private)" =>
+    "(distribute ?region
+        (join ?type ?left ?right ?on ?private))"
+    if same_region("?left", "?right")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    expr: &RelExpr,
+    gateway_region: &str,
+    data_distribution: &Distribution,
+) -> bool {
+    // Data resides in a different region than the gateway
+    !data_distribution.provides(gateway_region)
+    // The expression can benefit from regional placement
+    && expr.has_significant_data_movement()
+}
+```
+
+**Restrictions:**
+- The Distribute operator adds a network hop for the result transfer
+- For queries that return large result sets, distribution may not
+  help (the result still needs to travel to the client)
+- In CockroachDB, the DistributeExpr is the mechanism for enforcing
+  the `enforce_home_region` setting
+- The optimizer considers distribution as part of the physical
+  property framework, alongside ordering
+
+## Cost Model
+
+```rust
+fn distribute_cost(
+    result_rows: f64,
+    result_row_bytes: f64,
+    cross_region_latency: f64,
+    cross_region_bandwidth: f64,
+) -> f64 {
+    let latency_cost = cross_region_latency;
+    let transfer_cost =
+        result_rows * result_row_bytes / cross_region_bandwidth;
+    latency_cost + transfer_cost
+}
+```
+
+## Test Cases
+
+```sql
+-- Positive: small result from remote region
+-- Query from us-east1, table in europe-west1
+SELECT COUNT(*) FROM remote_events WHERE date = '2024-01-01';
+
+-- Plan: Distribute(us-east1,
+--         Aggregate(COUNT(*))
+--           Scan(remote_events))
+-- Execute aggregate in europe-west1, send single count to us-east1
+```
+
+```sql
+-- Positive: join between local and remote tables
+-- orders in us-east1, inventory in us-west1
+SELECT o.id, i.quantity
+FROM orders o JOIN inventory i ON o.product_id = i.product_id
+WHERE o.customer_id = 42;
+
+-- Plan: Join
+--   Scan(orders)  -- local
+--   Distribute(us-east1, Scan(inventory))  -- move inventory data
+```
+
+```sql
+-- Negative: data is already local
+SELECT * FROM local_table WHERE id = 5;
+-- No Distribute needed; data is in gateway region
+```
+
+## References
+
+CockroachDB: pkg/sql/opt/distribution/distribution.go:22 - CanProvide (commit 51e808c)
+CockroachDB: pkg/sql/opt/distribution/distribution.go:38 - DistributeExpr
+CockroachDB: pkg/sql/opt/xform/physical_props.go - distribution enforcement
+CockroachDB docs: "Multi-region SQL performance"

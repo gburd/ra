@@ -1,0 +1,80 @@
+---
+id: differential-consolidation
+name: Differential Collection Consolidation
+category: execution-models/differential
+version: "1.0.0"
+databases: [materialize]
+tags: [execution, differential, consolidation, compaction, state]
+complexity: "O(n log n)"
+benefit_range: [0.2, 5.0]
+---
+
+# Differential Collection Consolidation
+
+## Description
+
+Consolidates a differential collection by merging updates at the same (key, time)
+pair, summing their multiplicities (diffs). Entries whose multiplicities sum to
+zero are removed entirely. This is the fundamental state-reduction operation in
+differential dataflow, converting a log of updates into a minimal representation.
+
+**When to apply**: After a sequence of updates has been applied and the frontier
+has advanced, consolidation merges all updates below the frontier into a single
+entry per key. This reduces arrangement sizes and speeds up future lookups.
+
+**Why it works**: Differential dataflow represents collections as multisets of
+(data, time, diff) triples. Over time, a single key accumulates many triples:
+insertions (+1) and retractions (-1). Consolidation sums diffs at each (key, time)
+and removes zero-sum entries. For upsert sources, this collapses
+insert-retract-insert sequences into a single entry.
+
+## Implementation
+
+```rust
+/// Consolidate a batch of differential updates
+pub fn consolidate<D: Ord>(updates: &mut Vec<(D, i64)>) {
+    updates.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut offset = 0;
+    for i in 1..updates.len() {
+        if updates[i].0 == updates[offset].0 {
+            updates[offset].1 += updates[i].1;
+        } else {
+            if updates[offset].1 != 0 {
+                offset += 1;
+            }
+            updates[offset] = updates[i].clone();
+        }
+    }
+    if updates[offset].1 != 0 {
+        offset += 1;
+    }
+    updates.truncate(offset);
+}
+```
+
+## Cost Model
+
+- Sort: O(n log n) for n unconsolidated entries
+- Merge: O(n) linear scan after sort
+- Result size: O(distinct_keys) << O(total_updates) for high-churn data
+- Triggers: after frontier advancement or when batch size exceeds threshold
+
+## Test Cases
+
+```
+// Before consolidation (key=42):
+// (42, time=1, diff=+1)  -- inserted
+// (42, time=2, diff=-1)  -- retracted (update part 1)
+// (42, time=2, diff=+1)  -- re-inserted with new value (update part 2)
+// (42, time=3, diff=-1)  -- retracted again
+
+// After consolidation at frontier=3:
+// (42, time=3, diff=-1)  -- net effect: key removed
+// All intermediate entries eliminated
+```
+
+## References
+
+1. McSherry et al., "Differential Dataflow", CIDR 2013
+2. Materialize source: `differential-dataflow/src/consolidation.rs`
+3. Timely dataflow: trace compaction in `differential-dataflow/src/trace/`

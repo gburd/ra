@@ -1,0 +1,184 @@
+---
+id: materialize-delta-join-planning
+name: Materialize Delta Join Planning
+category: database-specific/materialize
+databases: [materialize]
+execution_models: [differential]
+version: "1.0.0"
+authors: ["Materialize Inc."]
+tags: [delta-join, incremental, multi-way-join, streaming, differential]
+complexity: "O(changes * join_selectivity)"
+benefit_range: [0.3, 10.0]
+---
+
+# Materialize Delta Join Planning
+
+## Description
+
+Implements multi-way joins as delta queries, where each input change is
+immediately joined with the current state of all other inputs. Instead of
+maintaining a tree of binary join operators, a delta join creates one dataflow
+path per input, each joining that input's changes against the existing
+arrangements of the other inputs. This eliminates the intermediate arrangements
+required by binary join trees.
+
+**When to apply**: Multi-way equi-joins (3+ inputs) in materialized views.
+The optimizer selects delta join when the join inputs are already arranged on
+compatible keys and the join is equi-join. Delta joins are the default for
+multi-way joins in Materialize.
+
+**Why it works**: A binary join tree for A JOIN B JOIN C requires intermediate
+arrangements: first arrange A JOIN B, then join with C. A delta join creates
+three paths:
+1. changes(A) JOIN state(B) JOIN state(C)
+2. state(A) JOIN changes(B) JOIN state(C)
+3. state(A) JOIN state(B) JOIN changes(C)
+Each path produces exactly the output changes caused by that input's changes,
+with no intermediate arrangements. Memory is reduced by ~50% for 3-way joins.
+
+## Relational Algebra
+
+```algebra
+-- Binary join tree (intermediate arrangements):
+join(join(A, B, A.k=B.k), C, B.k=C.k)
+  -- Intermediate: arrange(A JOIN B) on B.k
+
+-- Delta join (no intermediate arrangements):
+delta-join([A, B, C], [A.k=B.k, B.k=C.k])
+  -- Path 1: dA -> lookup B(k) -> lookup C(k)
+  -- Path 2: dB -> lookup A(k) -> lookup C(k)
+  -- Path 3: dC -> lookup B(k) -> lookup A(k)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("materialize-binary-to-delta-join";
+    "(join ?type2 ?pred2
+       (join ?type1 ?pred1 ?a ?b)
+       ?c)" =>
+    "(delta-join (?a ?b ?c)
+       (join-preds ?pred1 ?pred2)
+       (delta-paths
+          (path ?a (lookup ?b ?pred1) (lookup ?c ?pred2))
+          (path ?b (lookup ?a ?pred1) (lookup ?c ?pred2))
+          (path ?c (lookup ?b ?pred2) (lookup ?a ?pred1))))"
+    if all_equi_joins("?pred1", "?pred2")
+    if inputs_already_arranged("?a", "?b", "?c")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> bool {
+    stats.num_join_inputs >= 3
+        && stats.all_equi_joins
+        && stats.inputs_have_compatible_arrangements
+}
+```
+
+**Restrictions:**
+- Only equi-joins can use delta join (no theta-joins or cross products)
+- All inputs must have arrangements on the join key
+- Delta joins create N dataflow paths for N inputs (code complexity)
+- Non-deterministic sources may see inconsistent snapshots across paths
+- Outer joins require additional handling for null padding
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let num_inputs = stats.num_join_inputs as f64;
+    let avg_arrangement_size = stats.avg_arrangement_rows as f64;
+    let row_bytes = stats.avg_row_bytes as f64;
+
+    // Binary tree: (num_inputs - 1) intermediate arrangements
+    let binary_memory = (num_inputs - 1.0) * avg_arrangement_size * row_bytes;
+
+    // Delta join: only base arrangements (no intermediates)
+    let delta_memory = 0.0; // base arrangements already counted
+
+    // Extra computation: N paths instead of 1, but each does same lookups
+    let extra_paths = num_inputs - 1.0; // extra dataflow paths
+
+    let memory_savings = binary_memory;
+    let compute_overhead = extra_paths * 0.1; // ~10% overhead per extra path
+
+    memory_savings / (memory_savings + compute_overhead * avg_arrangement_size * row_bytes)
+}
+```
+
+**Typical benefit**: 30% to 10x memory reduction for multi-way joins.
+
+## Test Cases
+
+### Positive: Three-way delta join
+
+```sql
+-- Star schema: fact joins two dimensions
+CREATE MATERIALIZED VIEW report AS
+SELECT c.name, p.category, SUM(s.amount)
+FROM sales s
+JOIN customers c ON s.customer_id = c.id
+JOIN products p ON s.product_id = p.id
+GROUP BY c.name, p.category;
+
+-- Delta join with 3 paths:
+-- 1. New sale -> lookup customer -> lookup product -> aggregate
+-- 2. Customer change -> lookup sales -> lookup product -> aggregate
+-- 3. Product change -> lookup sales -> lookup customer -> aggregate
+-- No intermediate (sales JOIN customers) arrangement needed
+```
+
+### Positive: Four-way join
+
+```sql
+CREATE MATERIALIZED VIEW full_report AS
+SELECT o.id, c.name, p.name, w.location
+FROM orders o
+JOIN customers c ON o.customer_id = c.id
+JOIN products p ON o.product_id = p.id
+JOIN warehouses w ON o.warehouse_id = w.id;
+
+-- 4 delta paths, 0 intermediate arrangements
+-- Binary tree would need 3 intermediate arrangements
+```
+
+### Negative: Non-equi join
+
+```sql
+-- Theta join: cannot use delta join
+CREATE MATERIALIZED VIEW price_comparison AS
+SELECT a.name, b.name
+FROM products a, products b
+WHERE a.price > b.price AND a.category = b.category;
+
+-- Inequality join (a.price > b.price) prevents delta join
+-- Falls back to binary join with nested loop for inequality
+```
+
+## References
+
+**Implementation:**
+- Materialize source: `src/compute/src/render/join/delta_join.rs`
+- Join planning: `src/transform/src/join_implementation.rs`
+- Delta path construction: `src/compute/src/render/join/mod.rs`
+
+**Documentation:**
+- Materialize docs: "Join implementation"
+- Materialize blog: "Delta Joins in Materialize"
+
+**Papers:**
+- McSherry, F., et al., "Differential Dataflow", CIDR 2013
+- Koch, C., et al., "DBToaster: Higher-Order Delta Processing for Dynamic,
+  Frequently Fresh Views", VLDB 2014
+  - DOI: 10.14778/2732951.2732953

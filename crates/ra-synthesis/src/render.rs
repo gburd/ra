@@ -166,6 +166,88 @@ fn render_expr(expr: &RelExpr, ctx: &mut RenderContext) {
             let kw = if *all { "EXCEPT ALL" } else { "EXCEPT" };
             ctx.from = format!("({l}) {kw} ({r})");
         }
+        RelExpr::CTE {
+            name,
+            definition,
+            body,
+        } => {
+            let def_sql = SqlRenderer::render(definition);
+            let body_sql = SqlRenderer::render(body);
+            ctx.from = format!(
+                "-- CTE: WITH {name} AS ({def_sql})\n{body_sql}"
+            );
+        }
+        RelExpr::Window {
+            functions, input, ..
+        } => {
+            render_expr(input, ctx);
+            for wf in functions {
+                let func_name = format!("{}", wf.function);
+                let arg = match &wf.arg {
+                    Some(a) => render_scalar(a),
+                    None => String::new(),
+                };
+                let partition = if wf.partition_by.is_empty() {
+                    String::new()
+                } else {
+                    let parts: Vec<String> = wf
+                        .partition_by
+                        .iter()
+                        .map(render_scalar)
+                        .collect();
+                    format!("PARTITION BY {}", parts.join(", "))
+                };
+                let order = if wf.order_by.is_empty() {
+                    String::new()
+                } else {
+                    let parts: Vec<String> = wf
+                        .order_by
+                        .iter()
+                        .map(render_sort_key)
+                        .collect();
+                    format!("ORDER BY {}", parts.join(", "))
+                };
+                let over_parts: Vec<&str> = [
+                    partition.as_str(),
+                    order.as_str(),
+                ]
+                .into_iter()
+                .filter(|s| !s.is_empty())
+                .collect();
+                let alias = match &wf.alias {
+                    Some(a) => format!(" AS {a}"),
+                    None => String::new(),
+                };
+                if !ctx.select.is_empty() {
+                    ctx.select.push_str(", ");
+                }
+                ctx.select.push_str(&format!(
+                    "{func_name}({arg}) OVER ({}){alias}",
+                    over_parts.join(" ")
+                ));
+            }
+        }
+        RelExpr::Distinct { input } => {
+            render_expr(input, ctx);
+            let current = if ctx.select.is_empty() {
+                "*".to_string()
+            } else {
+                ctx.select.clone()
+            };
+            ctx.select = format!("DISTINCT {current}");
+        }
+        RelExpr::Values { rows } => {
+            let row_strs: Vec<String> = rows
+                .iter()
+                .map(|row| {
+                    let vals: Vec<String> =
+                        row.iter().map(render_scalar).collect();
+                    format!("({})", vals.join(", "))
+                })
+                .collect();
+            ctx.from =
+                format!("(VALUES {}) AS t", row_strs.join(", "));
+        }
     }
 }
 

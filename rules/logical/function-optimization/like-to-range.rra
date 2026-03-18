@@ -1,0 +1,141 @@
+---
+id: like-to-range
+name: LIKE to Range Conversion
+category: logical/function-optimization
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [function, like, pattern, range, index, sargable]
+complexity: "O(1)"
+benefit_range: [0.5, 0.95]
+---
+
+# LIKE to Range Conversion
+
+## Description
+
+Converts LIKE patterns with a fixed prefix into range predicates that can
+use B-tree indexes. `col LIKE 'abc%'` becomes `col >= 'abc' AND col < 'abd'`,
+enabling index range scans instead of full table scans.
+
+**When to apply**: LIKE patterns where the prefix before the first wildcard
+(% or _) is a non-empty constant string.
+
+**Why it works**: A LIKE pattern with a fixed prefix defines a contiguous
+range in sort order. B-tree indexes store data in sorted order, so a range
+scan efficiently finds all matching rows.
+
+## Relational Algebra
+
+```algebra
+filter[col LIKE 'prefix%'](R)
+  -> filter[col >= 'prefix' AND col < successor('prefix')](R)
+  where successor('abc') = 'abd' (increment last character)
+
+filter[col LIKE 'prefix_suffix%'](R)
+  -> filter[col >= 'prefix' AND col < successor('prefix')
+            AND col LIKE 'prefix_suffix%'](R)
+  -- Keep original LIKE for exact matching after range narrowing
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("like-prefix-to-range";
+    "(like ?col (literal ?pattern))" =>
+    { LikeToRange { col: "?col", pattern: "?pattern" } }
+    if has_fixed_prefix("?pattern")
+),
+
+fn extract_prefix(pattern: &str) -> Option<String> {
+    let mut prefix = String::new();
+    for ch in pattern.chars() {
+        match ch {
+            '%' | '_' => break,
+            '\\' => { /* handle escape */ }
+            c => prefix.push(c),
+        }
+    }
+    if prefix.is_empty() { None } else { Some(prefix) }
+}
+
+fn successor(prefix: &str) -> String {
+    let mut bytes = prefix.as_bytes().to_vec();
+    // Increment last byte
+    if let Some(last) = bytes.last_mut() {
+        *last += 1;
+    }
+    String::from_utf8(bytes).unwrap()
+}
+```
+
+**Restrictions:**
+- `LIKE '%suffix'` has no fixed prefix (cannot convert)
+- Collation affects sort order and successor computation
+- ILIKE (case-insensitive) requires additional handling
+- Escape characters in the pattern need special parsing
+
+## Cost Model
+
+```rust
+fn estimated_benefit(table_size: u64, prefix_selectivity: f64) -> f64 {
+    let full_scan_cost = table_size as f64;
+    let range_scan_cost = table_size as f64 * prefix_selectivity;
+    (full_scan_cost - range_scan_cost) / full_scan_cost
+}
+```
+
+**Typical benefit**: 50-95% when prefix selectivity is low
+
+## Test Cases
+
+### Positive: Simple prefix pattern
+
+```sql
+SELECT * FROM customers WHERE name LIKE 'Smith%';
+-- Convert to: name >= 'Smith' AND name < 'Smiti'
+-- Enables B-tree index range scan
+```
+
+### Positive: Single-character prefix
+
+```sql
+SELECT * FROM products WHERE code LIKE 'A%';
+-- Convert to: code >= 'A' AND code < 'B'
+```
+
+### Positive: Multi-character prefix with trailing wildcards
+
+```sql
+SELECT * FROM logs WHERE message LIKE 'ERROR: connection%';
+-- Convert to: message >= 'ERROR: connection' AND message < 'ERROR: connectioo'
+-- Keep LIKE for exact match verification after range scan
+```
+
+### Negative: Leading wildcard
+
+```sql
+SELECT * FROM users WHERE email LIKE '%@gmail.com';
+-- No fixed prefix: cannot convert to range
+-- Requires full scan or reverse index
+```
+
+### Negative: Only wildcards
+
+```sql
+SELECT * FROM t WHERE col LIKE '%test%';
+-- No prefix: full scan required
+-- Consider full-text search index instead
+```
+
+## References
+
+**Implementation:**
+- PostgreSQL: `like_regex_support()` converts LIKE to index bounds
+- MySQL: Range optimization for LIKE with constant prefix
+- Oracle: LIKE predicate index access path
+- SQLite: LIKE optimization with index prefix

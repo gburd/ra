@@ -1,0 +1,327 @@
+---
+id: workload-aware-indexing
+name: ML-Guided Workload-Aware Index Selection
+category: experimental/ml-guided
+databases: [postgresql, mysql, cockroachdb]
+execution_models: [physical-design]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["Ding et al. 2019", "Sadri et al. 2020", "RA Contributors"]
+tags: [ml, index-selection, workload, physical-design, DRL]
+complexity: "O(w * c) for w queries, c candidate indexes"
+benefit_range: [0.3, 0.8]
+---
+
+# ML-Guided Workload-Aware Index Selection
+
+## Description
+
+Uses machine learning to recommend optimal indexes for a given workload.
+Rather than evaluating all possible index combinations (exponential in the
+number of columns), a learned model predicts which indexes will most
+benefit the workload based on query patterns, column statistics, and
+access patterns. The model considers the trade-off between query speedup
+and index maintenance overhead (insert/update/delete slowdown).
+
+**When to apply**: When the workload has changed significantly from when
+indexes were last tuned, or for new applications where no indexes exist
+beyond primary keys. Also useful for periodic index maintenance.
+
+**Why it works**: Traditional index advisors use what-if analysis (hypothetical
+indexes) which requires O(n * w) optimizer calls for n candidate indexes
+and w workload queries. ML models learn the relationship between workload
+patterns and beneficial indexes, amortizing the analysis cost across
+similar workloads and enabling real-time index recommendations.
+
+## Relational Algebra
+
+```algebra
+-- Workload: set of queries with frequencies
+W = {(Q1, freq=100), (Q2, freq=50), (Q3, freq=10)}
+
+-- Index selection problem:
+maximize: sum(freq_i * speedup(Q_i, indexes))
+subject to: maintenance_cost(indexes) < budget
+            storage(indexes) < disk_budget
+
+-- ML model: workload features -> recommended indexes
+recommend_indexes(W) = model.predict(
+  query_features(W), table_stats, current_indexes
+)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// This is a physical design rule, not a per-query rewrite
+struct WorkloadAwareIndexAdvisor {
+    model: IndexRecommendationModel,
+    workload_tracker: WorkloadTracker,
+    what_if_cache: HashMap<IndexSet, f64>,
+}
+
+impl WorkloadAwareIndexAdvisor {
+    fn recommend(
+        &self,
+        workload: &Workload,
+        constraints: &IndexConstraints,
+    ) -> Vec<IndexRecommendation> {
+        // Extract workload features
+        let features = self.extract_features(workload);
+
+        // ML model generates candidate indexes
+        let candidates = self.model.predict_candidates(
+            &features, 20, // top-20 candidates
+        );
+
+        // Validate candidates with what-if analysis
+        let mut recommendations = Vec::new();
+        let mut current_indexes = get_current_indexes();
+
+        for candidate in &candidates {
+            let benefit = self.estimate_benefit(
+                workload, candidate, &current_indexes,
+            );
+            let maintenance = self.estimate_maintenance(
+                workload, candidate,
+            );
+            let storage = estimate_index_storage(candidate);
+
+            if benefit > maintenance
+                && storage < constraints.max_storage
+            {
+                recommendations.push(IndexRecommendation {
+                    index: candidate.clone(),
+                    estimated_speedup: benefit,
+                    maintenance_overhead: maintenance,
+                    storage_bytes: storage,
+                });
+                current_indexes.push(candidate.clone());
+            }
+        }
+
+        // Prune dominated recommendations
+        pareto_filter(&mut recommendations);
+
+        recommendations
+    }
+
+    fn extract_features(
+        &self,
+        workload: &Workload,
+    ) -> WorkloadFeatures {
+        WorkloadFeatures {
+            // Per-column access patterns
+            column_access_frequency: workload
+                .column_access_counts(),
+            // Predicate types per column
+            predicate_types: workload.predicate_types(),
+            // Join patterns
+            join_columns: workload.join_column_pairs(),
+            // GROUP BY / ORDER BY columns
+            ordering_columns: workload.ordering_columns(),
+            // Read vs write ratio
+            read_write_ratio: workload.read_write_ratio(),
+            // Table sizes
+            table_statistics: get_table_stats(),
+        }
+    }
+
+    fn estimate_benefit(
+        &self,
+        workload: &Workload,
+        candidate: &IndexCandidate,
+        existing: &[Index],
+    ) -> f64 {
+        // What-if: estimate workload cost with and without index
+        let cache_key = (candidate.clone(), existing.to_vec());
+        if let Some(&cached) = self.what_if_cache.get(&cache_key) {
+            return cached;
+        }
+
+        let cost_without = estimate_workload_cost(
+            workload, existing,
+        );
+        let mut with_index = existing.to_vec();
+        with_index.push(candidate.to_index());
+        let cost_with = estimate_workload_cost(
+            workload, &with_index,
+        );
+
+        cost_without - cost_with
+    }
+}
+
+// DRL model for index selection
+struct IndexRecommendationModel {
+    // Encodes workload as graph (tables -> columns -> queries)
+    graph_encoder: GraphNeuralNetwork,
+    // Predicts index benefit scores
+    benefit_predictor: FeedForward,
+}
+
+impl IndexRecommendationModel {
+    fn predict_candidates(
+        &self,
+        features: &WorkloadFeatures,
+        top_k: usize,
+    ) -> Vec<IndexCandidate> {
+        // Encode workload as bipartite graph
+        let encoding = self.graph_encoder.encode(features);
+
+        // Score each possible single-column index
+        let mut scores = Vec::new();
+        for (table, col) in features.all_columns() {
+            let col_features = features.column_features(
+                table, col,
+            );
+            let score = self.benefit_predictor.predict(
+                &concat(&encoding, &col_features),
+            );
+            scores.push((table, col, score));
+        }
+
+        // Top-k single columns + composite candidates
+        scores.sort_by(|a, b|
+            b.2.partial_cmp(&a.2).unwrap()
+        );
+
+        let mut candidates: Vec<IndexCandidate> = scores.iter()
+            .take(top_k)
+            .map(|(t, c, _)| IndexCandidate::single(*t, *c))
+            .collect();
+
+        // Generate composite index candidates from top columns
+        for i in 0..candidates.len().min(5) {
+            for j in (i + 1)..candidates.len().min(5) {
+                if candidates[i].table == candidates[j].table {
+                    candidates.push(IndexCandidate::composite(
+                        candidates[i].table,
+                        vec![candidates[i].column,
+                             candidates[j].column],
+                    ));
+                }
+            }
+        }
+
+        candidates
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(workload: &Workload) -> bool {
+    // Must have workload history
+    if workload.query_count() < 100 {
+        return false;
+    }
+
+    // Must have column access patterns
+    if workload.column_access_counts().is_empty() {
+        return false;
+    }
+
+    // Workload must have changed since last recommendation
+    workload.drift_score() > 0.2
+}
+```
+
+**Restrictions:**
+- Requires workload monitoring infrastructure
+- Index creation has storage and maintenance costs
+- Recommendations may conflict with DBA-managed indexes
+- Model needs retraining as workload evolves
+- What-if analysis for validation still required (model is filter, not oracle)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    workload: &Workload,
+    recommended_indexes: &[IndexRecommendation],
+) -> f64 {
+    let current_cost = estimate_workload_cost(
+        workload, &get_current_indexes(),
+    );
+
+    let new_indexes: Vec<Index> = get_current_indexes()
+        .into_iter()
+        .chain(recommended_indexes.iter()
+            .map(|r| r.index.to_index()))
+        .collect();
+
+    let new_cost = estimate_workload_cost(
+        workload, &new_indexes,
+    );
+
+    let maintenance_overhead: f64 = recommended_indexes.iter()
+        .map(|r| r.maintenance_overhead)
+        .sum();
+
+    if current_cost > new_cost + maintenance_overhead {
+        (current_cost - new_cost - maintenance_overhead)
+            / current_cost
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 30-70% workload improvement. Most impactful for
+OLAP workloads with missing covering indexes.
+
+## Test Cases
+
+### Positive: Missing composite index
+
+```sql
+-- Frequent workload query (100x/hour):
+SELECT * FROM orders
+WHERE customer_id = ? AND status = 'open'
+ORDER BY created_at DESC LIMIT 10;
+
+-- Current: only index on (customer_id)
+-- ML recommends: composite index on (customer_id, status, created_at)
+-- Benefit: index-only scan instead of filter + sort
+```
+
+### Positive: Unused index detection
+
+```sql
+-- Index on (email) exists but workload never queries by email
+-- Workload is write-heavy (1000 inserts/sec)
+-- ML recommends: DROP INDEX idx_email
+-- Benefit: 15% faster inserts, no query regression
+```
+
+### Negative: Well-tuned production database
+
+```sql
+-- DBA has manually optimized indexes over 5 years
+-- Workload is stable, all queries use appropriate indexes
+-- ML recommendation: no changes (current set is near-optimal)
+```
+
+## References
+
+**Academic papers:**
+- Ding et al., "AI Meets AI: Leveraging Query Executions to Improve Index Recommendations", SIGMOD 2019
+- Sadri et al., "DRLindex: Deep Reinforcement Learning Index Advisor", SIGMOD 2020
+- Kossmann et al., "Self-Driving Database Management Systems", CIDR 2017
+
+**Implementation:**
+- Microsoft AutoIndex (Azure SQL Database)
+- PostgreSQL: pg_qualstats + HypoPG for what-if analysis
+- MySQL: sys.schema_unused_indexes for unused index detection
+- CockroachDB: automatic statistics and index recommendations
+
+**Key insights:**
+- What-if analysis validates ML candidates (safety net)
+- Composite indexes offer largest gains but have largest search space
+- ML reduces search from exponential to top-k candidates
+- Write amplification must be factored into benefit calculation
+- Online learning: continuously improve as workload evolves

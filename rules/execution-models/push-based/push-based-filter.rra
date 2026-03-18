@@ -1,32 +1,228 @@
 ---
 id: push-based-filter
-name: Push-Based filter
+name: Push-Based Compiled Filter (Predicate Inlining)
 category: execution-models
 version: 1.0.0
-databases: [HyPer, Umbra]
-tags: [execution, push-based, compilation]
+databases: [HyPer, Umbra, SingleStore]
+authors: [Thomas Neumann]
+tags: [execution, push-based, compilation, filter, predicate, jit]
+standard: HyPer model
 ---
 
-# Push-Based filter
+# Push-Based Compiled Filter (Predicate Inlining)
 
 ## Description
 
-Compiled filter operator in push-based execution model. Generates tight loops with minimal overhead.
+In push-based compilation, the filter operator does not exist as a separate physical operator. Instead, the predicate is inlined directly into the producer's loop body as an `if` statement. This eliminates the function call boundary between scan and filter that exists in Volcano, and enables the compiler to optimize the predicate evaluation together with surrounding code.
+
+**Key characteristics:**
+- **Predicate inlining**: Filter becomes an `if` guard in the scan loop
+- **No operator boundary**: Filter and scan share the same compiled function
+- **Branch prediction**: CPU can predict filter outcomes efficiently
+- **Short-circuit evaluation**: Compiler orders conjuncts by selectivity
+- **Dead code elimination**: Unreachable branches pruned at compile time
+
+**Trade-offs:**
+- Complex predicates increase generated code size
+- Predicate changes require recompilation
+- No runtime filter adaptation (unlike adaptive vectorized)
+
+## Relational Algebra
+
+```
+Push-based filter compilation:
+
+produce(Filter(pred, Scan(table))):
+  for each tuple t in table:
+    if eval(pred, t):     // Inlined predicate
+      consume(t)          // Continue pipeline
+
+Compiled output (conceptual):
+  fn execute() {
+    for row in table.rows() {
+      let col_a = row.get(0);    // Register
+      let col_b = row.get(1);    // Register
+      if col_a > 100 && col_b < 50 {  // Inlined
+        emit(col_a, col_b);
+      }
+    }
+  }
+
+vs. Volcano:
+  FilterIterator.next():
+    loop {
+      t = child.next()       // Virtual call
+      if eval(pred, t):      // Expression tree walk
+        return t
+    }
+```
 
 ## Implementation
 
 ```rust
-pub fn compile_filter(ctx: &mut CompileContext) {
-    ctx.emit("// Compiled filter");
-    // Generate optimized machine code
+use ra_core::algebra::RelExpr;
+use ra_core::expr::Expr;
+
+/// Compile a filter predicate into inline code
+pub fn compile_filter(
+    codegen: &mut CodeGen,
+    predicate: &Expr,
+    child: &RelExpr,
+) {
+    // First, produce tuples from child (e.g., scan)
+    child.produce(codegen);
+
+    // In the consumer callback, emit the predicate check
+    codegen.set_consumer(|cg, tuple_vars| {
+        // Compile predicate to native comparison
+        let pred_code = compile_predicate(cg, predicate, tuple_vars);
+
+        cg.emit(&format!("if {} {{", pred_code));
+        // Continue pipeline to next consumer
+        cg.emit_consume_call();
+        cg.emit("}");
+    });
+}
+
+/// Compile a predicate expression to native code
+fn compile_predicate(
+    codegen: &mut CodeGen,
+    expr: &Expr,
+    vars: &TupleVars,
+) -> String {
+    match expr {
+        Expr::Compare { op, left, right } => {
+            let l = compile_expr(codegen, left, vars);
+            let r = compile_expr(codegen, right, vars);
+            format!("{} {} {}", l, op.to_native(), r)
+        }
+        Expr::And(exprs) => {
+            // Short-circuit: order by selectivity (most selective first)
+            let mut sorted = exprs.clone();
+            sorted.sort_by(|a, b| {
+                a.selectivity().partial_cmp(&b.selectivity()).unwrap()
+            });
+            sorted
+                .iter()
+                .map(|e| compile_predicate(codegen, e, vars))
+                .collect::<Vec<_>>()
+                .join(" && ")
+        }
+        Expr::Or(exprs) => {
+            exprs
+                .iter()
+                .map(|e| format!(
+                    "({})", compile_predicate(codegen, e, vars)
+                ))
+                .collect::<Vec<_>>()
+                .join(" || ")
+        }
+        Expr::IsNull(col) => {
+            let c = vars.get(col);
+            format!("{}.is_null()", c)
+        }
+        Expr::Between { col, low, high } => {
+            let c = vars.get(col);
+            format!("{} >= {} && {} <= {}", c, low, c, high)
+        }
+        _ => "true".to_string(),
+    }
+}
+
+/// Cost model for compiled filter
+pub fn compiled_filter_cost(
+    input_rows: f64,
+    selectivity: f64,
+    predicate_complexity: usize,
+) -> f64 {
+    // Per-tuple cost: just a branch instruction
+    let branch_cost = 0.000002; // ~2 ns per comparison
+    let complexity_factor = predicate_complexity as f64;
+
+    // No function call overhead
+    let cpu_cost = input_rows * branch_cost * complexity_factor;
+
+    // Branch misprediction penalty
+    let misprediction_rate = 2.0 * selectivity * (1.0 - selectivity);
+    let misprediction_penalty = input_rows * misprediction_rate * 0.00001;
+
+    cpu_cost + misprediction_penalty
 }
 ```
 
 ## Cost Model
 
-- Near-zero per-tuple overhead
-- Compilation amortized
+**CPU Cost:**
+- Predicate evaluation: native comparison instruction (~1-2 ns)
+- No expression tree interpretation overhead
+- Short-circuit: skips remaining conjuncts on failure
+- Total: `input_rows x predicate_complexity x 2ns`
+
+**Branch Prediction:**
+- High selectivity (>0.9) or low selectivity (<0.1): well predicted
+- Selectivity near 0.5: worst case for branch predictor
+- Misprediction penalty: ~15 CPU cycles per misprediction
+- Estimated: `rows x 2 x sel x (1-sel) x 15 cycles`
+
+**Memory:**
+- Zero additional memory: predicate compiled inline
+- No selection vectors, no intermediate results
+- Tuple fields remain in CPU registers
+
+**Code Size:**
+- Simple predicate: ~5-20 instructions
+- Complex AND/OR: linear in number of conjuncts
+- BETWEEN: compiled to two comparisons
+
+## Test Cases
+
+```sql
+-- Test 1: Simple equality filter (inlined comparison)
+SELECT * FROM orders WHERE status = 'shipped';
+-- Expected: Compiled to single integer comparison (enum encoding)
+-- Cost: ~2 ns per tuple, no function call overhead
+
+-- Test 2: Compound predicate (short-circuit)
+SELECT * FROM lineitem
+WHERE l_shipdate > '1998-01-01'
+  AND l_quantity < 25
+  AND l_discount BETWEEN 0.05 AND 0.07;
+-- Expected: Most selective predicate evaluated first
+-- Short-circuit avoids evaluating remaining conjuncts
+
+-- Test 3: Disjunctive predicate
+SELECT * FROM orders
+WHERE status = 'urgent' OR priority > 5;
+-- Expected: Compiled to OR with early exit on first true
+-- Branch prediction: depends on individual selectivities
+
+-- Test 4: IS NULL handling
+SELECT * FROM customers WHERE email IS NOT NULL;
+-- Expected: Compiled to null bitmap check (single bit test)
+-- Near-zero cost per tuple
+```
+
+## Comparison with Other Models
+
+| Aspect | Push-Based Filter | Volcano Filter | Vectorized Filter |
+|--------|------------------|---------------|-------------------|
+| Per-tuple cost | ~2 ns | ~100 ns | ~10 ns/batch |
+| Mechanism | Inline `if` | Expression tree walk | SIMD batch eval |
+| Adaptability | None (compiled) | None | Selection vectors |
+| Short-circuit | Native `&&` | Manual check | No (batch eval) |
+| Branch penalty | Yes (per-tuple) | Yes (per-tuple) | No (branchless) |
+| Best case | High/low selectivity | Any selectivity | Medium selectivity |
 
 ## References
 
-1. Neumann, "Efficiently Compiling Efficient Query Plans", VLDB 2011
+1. **Neumann, Thomas**. "Efficiently Compiling Efficient Query Plans for Modern Hardware." VLDB 2011.
+   - Predicate compilation as inline branch statements
+
+2. **Pirk, Holger et al**. "Waste Not... Efficient Co-Processing of Relational Data." ICDE 2014.
+   - Predicate evaluation strategies in compiled engines
+
+3. **Menon, Prashanth et al**. "Relaxed Operator Fusion for In-Memory Databases." VLDB 2017.
+   - Balancing filter inlining vs materialization boundaries
+
+4. **Ross, Kenneth A**. "Conjunctive Predicate Evaluation Order Optimization." VLDB 2004.
+   - Optimal ordering of predicate conjuncts

@@ -13,7 +13,7 @@ use crate::profile::HardwareProfile;
 ///
 /// # Platform Support
 ///
-/// - **macOS**: Uses sysctl and IOKit for hardware info
+/// - **macOS**: Uses sysctl and `IOKit` for hardware info
 /// - **Linux**: Reads /proc/cpuinfo, /sys/devices for hardware info
 /// - **Windows**: Uses WMI queries for hardware info
 ///

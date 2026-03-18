@@ -1,0 +1,177 @@
+---
+id: min-max-to-limit
+name: Replace Scalar MIN/MAX with LIMIT 1
+category: distributed/partial-aggregation
+databases: [cockroachdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, aggregation, min, max, limit, index, optimization]
+complexity: O(log(n))
+benefit_range: [0.5, 0.99]
+---
+
+# Replace Scalar MIN/MAX with LIMIT 1
+
+## Description
+
+Replaces a MIN or MAX aggregation with a LIMIT 1 on an ordered scan.
+When the aggregated column is indexed, reading the first (or last)
+row from the index produces the MIN (or MAX) value without scanning
+the entire table.
+
+**When to apply**: A scalar GroupBy (no grouping columns, or constant
+grouping columns) contains a single MIN or MAX aggregation, and the
+aggregated column is indexed.
+
+**Why it works**: MIN(x) is equivalent to "SELECT x FROM t ORDER BY x
+ASC LIMIT 1" and MAX(x) is equivalent to "ORDER BY x DESC LIMIT 1".
+An index on x provides the ordering, making this a single index seek
+instead of a full scan.
+
+## Relational Algebra
+
+```algebra
+gamma[MIN(x)](Scan(T))
+  -> ConstAgg(Limit(1, Sort[x ASC](
+       sigma[x IS NOT NULL](Scan(T)))))
+
+gamma[MAX(x)](Scan(T))
+  -> ConstAgg(Limit(1, Sort[x DESC](Scan(T))))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("scalar-min-to-limit";
+    "(scalar_group_by (scan ?table) [(min ?col)] ?private)" =>
+    "(scalar_group_by
+        (limit 1
+            (filter [(is_not_null ?col)]
+                (scan ?table))
+            (ordering asc ?col))
+        [(const_agg ?col)]
+        ?private)"
+    if is_canonical_group_by("?private")
+    if col_is_not_null("?col", "?table")
+),
+
+rw!("scalar-max-to-limit";
+    "(scalar_group_by (scan ?table) [(max ?col)] ?private)" =>
+    "(scalar_group_by
+        (limit 1
+            (scan ?table)
+            (ordering desc ?col))
+        [(const_agg ?col)]
+        ?private)"
+    if is_canonical_group_by("?private")
+),
+
+rw!("grouped-min-to-limit";
+    "(group_by ?input [(min ?col)] ?private)" =>
+    "(limit 1 ?input (ordering asc ?col))"
+    if is_canonical_group_by("?private")
+    if grouping_cols_are_constant("?private", "?input")
+    if col_is_not_null("?col", "?input")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    agg_fn: AggFunction,
+    col: ColumnId,
+    input: &RelExpr,
+    group_private: &GroupingPrivate,
+) -> bool {
+    // Must be a canonical group-by
+    group_private.is_canonical()
+    // For scalar: no grouping columns
+    // For grouped: grouping columns must be constant
+    && (group_private.grouping_cols().is_empty()
+        || group_private.grouping_cols_are_constant(input))
+    // For MIN: column must be NOT NULL (NULL sorts first in CRDB)
+    && (agg_fn == Max || !input.col_is_nullable(col))
+}
+```
+
+**Restrictions:**
+- MIN requires the column to be NOT NULL because NULL sorts first in
+  CockroachDB, and MIN should ignore NULLs
+- MAX works even with nullable columns because NULL sorts first, so
+  the last row (DESC) is the maximum non-null value
+- Only works for scalar or constant-grouped aggregations
+- The column must be indexed for this to be faster than a full scan
+
+## Cost Model
+
+```rust
+fn min_max_limit_cost(
+    index_seek_cost: f64,
+    full_scan_rows: f64,
+    row_compare_cost: f64,
+) -> f64 {
+    // LIMIT 1 with index: single seek
+    let limit_cost = index_seek_cost;
+    // Full scan aggregation: read all rows
+    let scan_cost = full_scan_rows * row_compare_cost;
+    scan_cost - limit_cost
+}
+```
+
+**Typical benefit**: For a table with 1B rows and an index on the
+aggregated column, this turns a full table scan into a single index
+lookup -- O(1) instead of O(n).
+
+## Test Cases
+
+```sql
+-- Positive: scalar MIN with index
+-- t has INDEX(value)
+SELECT MIN(value) FROM t;
+
+-- Plan: ScalarGroupBy(ConstAgg(value))
+--   Limit(1)
+--     IndexScan(t, idx_value, ASC)
+
+-- Instead of: ScalarGroupBy(MIN(value))
+--               FullScan(t)
+```
+
+```sql
+-- Positive: multiple MIN/MAX split into subqueries
+SELECT MIN(a), MAX(b) FROM t;
+
+-- Split into:
+-- (SELECT a FROM t WHERE a IS NOT NULL ORDER BY a LIMIT 1),
+-- (SELECT b FROM t ORDER BY b DESC LIMIT 1)
+```
+
+```sql
+-- Positive: grouped with constant group key
+SELECT w, MIN(k) FROM kw WHERE w = 5 GROUP BY w;
+
+-- Rewritten to: SELECT w, k FROM kw@wk WHERE w = 5 LIMIT 1
+```
+
+```sql
+-- Negative: MIN on nullable column
+SELECT MIN(nullable_col) FROM t;
+-- Cannot use LIMIT 1 because NULL sorts first
+-- Must scan and skip NULLs (unless IS NOT NULL filter added)
+```
+
+```sql
+-- Negative: no index on aggregated column
+SELECT MAX(unindexed_col) FROM large_table;
+-- Full scan still required; LIMIT 1 needs an ordering
+```
+
+## References
+
+CockroachDB: pkg/sql/opt/xform/rules/groupby.opt:46 - ReplaceScalarMinMaxWithLimit (commit 51e808c)
+CockroachDB: pkg/sql/opt/xform/rules/groupby.opt:88 - ReplaceMinWithLimit
+CockroachDB: pkg/sql/opt/xform/rules/groupby.opt:121 - ReplaceMaxWithLimit
+CockroachDB: pkg/sql/opt/xform/rules/groupby.opt:11 - ReplaceScalarMinMaxWithScalarSubqueries

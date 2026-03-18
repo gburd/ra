@@ -1,0 +1,259 @@
+---
+id: learned-cost-calibration
+name: Learned Cost Model Calibration
+category: experimental/ml-guided
+databases: [postgresql, duckdb, cockroachdb]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["Sun et al. 2019", "RA Contributors"]
+tags: [ml, cost-model, calibration, hardware-aware, regression]
+complexity: "O(1) per operator"
+benefit_range: [0.2, 0.6]
+---
+
+# Learned Cost Model Calibration
+
+## Description
+
+Replaces hand-tuned cost model coefficients (e.g., sequential page cost,
+random page cost, CPU tuple cost in PostgreSQL) with coefficients learned
+from actual execution measurements on the target hardware. A regression
+model maps operator type, input size, and hardware characteristics to
+actual execution time, providing hardware-specific cost estimates that
+are more accurate than default settings.
+
+**When to apply**: When the database runs on hardware that differs from
+the assumptions baked into the default cost model (e.g., SSDs vs HDDs,
+NVMe vs SATA, large RAM vs disk-constrained systems). Also when the
+default cost model consistently makes wrong plan choices.
+
+**Why it works**: PostgreSQL's default cost model assumes seq_page_cost=1.0
+and random_page_cost=4.0, calibrated for spinning disks. On NVMe SSDs,
+random reads are only 1.1-1.5x slower than sequential. Wrong ratios lead
+to wrong plan choices (e.g., preferring sequential scan over index scan
+on SSD). Learning coefficients from actual measurements corrects this.
+
+## Relational Algebra
+
+```algebra
+-- Traditional cost: hand-tuned coefficients
+cost(seq_scan(R)) = seq_page_cost * pages(R) + cpu_tuple_cost * rows(R)
+cost(index_scan(R, idx)) = random_page_cost * pages_fetched
+                         + cpu_index_tuple_cost * index_rows
+
+-- Learned cost: regression model
+cost_learned(op) = model.predict(
+  op_type, input_rows, output_rows, pages,
+  selectivity, available_memory, hw_profile
+)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("learned-cost-calibration";
+    "(cost ?op)" =>
+    "(learned_cost ?op (calibrate ?op))"
+    if calibration_model_available()
+),
+
+struct LearnedCostModel {
+    // Per-operator type regression models
+    seq_scan_model: LinearRegression,
+    index_scan_model: LinearRegression,
+    hash_join_model: GradientBoostedRegression,
+    sort_model: LinearRegression,
+    aggregate_model: LinearRegression,
+}
+
+impl LearnedCostModel {
+    fn predict(
+        &self,
+        op: &PhysicalOperator,
+        stats: &OperatorStatistics,
+    ) -> f64 {
+        let features = self.extract_features(op, stats);
+
+        match op {
+            PhysicalOperator::SeqScan { .. } =>
+                self.seq_scan_model.predict(&features),
+            PhysicalOperator::IndexScan { .. } =>
+                self.index_scan_model.predict(&features),
+            PhysicalOperator::HashJoin { .. } =>
+                self.hash_join_model.predict(&features),
+            PhysicalOperator::Sort { .. } =>
+                self.sort_model.predict(&features),
+            PhysicalOperator::Aggregate { .. } =>
+                self.aggregate_model.predict(&features),
+        }
+    }
+
+    fn extract_features(
+        &self,
+        op: &PhysicalOperator,
+        stats: &OperatorStatistics,
+    ) -> Vec<f64> {
+        vec![
+            stats.input_rows as f64,
+            stats.output_rows as f64,
+            stats.pages_accessed as f64,
+            stats.selectivity,
+            stats.avg_tuple_width as f64,
+            stats.distinct_values as f64,
+            stats.buffer_hit_rate,
+            // Hardware features
+            available_memory() as f64,
+            cpu_speed_mhz() as f64,
+            io_bandwidth_mbps() as f64,
+        ]
+    }
+
+    fn train(
+        &mut self,
+        measurements: &[OperatorMeasurement],
+    ) {
+        // Group measurements by operator type
+        let grouped = group_by_op_type(measurements);
+
+        for (op_type, ops) in &grouped {
+            let features: Vec<Vec<f64>> = ops.iter()
+                .map(|m| self.extract_features(
+                    &m.operator, &m.stats,
+                ))
+                .collect();
+            let targets: Vec<f64> = ops.iter()
+                .map(|m| m.actual_time_ms)
+                .collect();
+
+            match op_type {
+                OpType::SeqScan =>
+                    self.seq_scan_model.fit(&features, &targets),
+                OpType::IndexScan =>
+                    self.index_scan_model.fit(&features, &targets),
+                OpType::HashJoin =>
+                    self.hash_join_model.fit(&features, &targets),
+                OpType::Sort =>
+                    self.sort_model.fit(&features, &targets),
+                OpType::Aggregate =>
+                    self.aggregate_model.fit(&features, &targets),
+            }
+        }
+    }
+}
+
+// Measurement collection
+struct OperatorMeasurement {
+    operator: PhysicalOperator,
+    stats: OperatorStatistics,
+    actual_time_ms: f64,
+    actual_rows: usize,
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable() -> bool {
+    // Calibration model must be trained
+    if !calibration_model_trained() {
+        return false;
+    }
+
+    // Must have sufficient training data
+    let min_samples = 100; // per operator type
+    measurements_per_op_type().iter()
+        .all(|&count| count >= min_samples)
+}
+```
+
+**Restrictions:**
+- Requires execution measurement collection (EXPLAIN ANALYZE overhead)
+- Models need retraining when hardware changes (cloud instance migration)
+- Linear models may not capture non-linear effects (cache cliffs)
+- Cold start: need initial measurement phase before model is useful
+- Buffer pool state affects actual cost but is hard to model
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    default_cost_error: f64, // Average relative error of default model
+    learned_cost_error: f64, // Average relative error of learned model
+) -> f64 {
+    // Better cost estimates lead to better plan choices
+    // Impact is non-linear: small errors don't matter, large errors cause
+    // catastrophic plan choices
+    let default_plan_quality = 1.0 / (1.0 + default_cost_error.powi(2));
+    let learned_plan_quality = 1.0 / (1.0 + learned_cost_error.powi(2));
+
+    if learned_plan_quality > default_plan_quality {
+        (learned_plan_quality - default_plan_quality)
+            / learned_plan_quality
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 20-50% better plan choices on non-default hardware.
+Most impactful for index scan vs seq scan decisions on SSDs.
+
+## Test Cases
+
+### Positive: SSD with default HDD cost model
+
+```sql
+-- Default: random_page_cost = 4.0 (HDD assumption)
+-- SSD reality: random_page_cost ≈ 1.1
+
+SELECT * FROM orders WHERE customer_id = 42;
+
+-- Default model: prefers seq_scan (random pages too expensive)
+-- Learned model: prefers index_scan (SSD random ≈ sequential)
+-- Learned model selects correct plan for SSD
+```
+
+### Positive: Large memory system
+
+```sql
+-- Default: assumes moderate buffer pool
+-- Reality: 256GB RAM, most data cached
+
+SELECT * FROM products p
+JOIN categories c ON p.category_id = c.id
+WHERE c.name = 'Electronics';
+
+-- Default: costs based on disk I/O
+-- Learned: costs based on buffer pool (99% hit rate)
+-- Learned model correctly costs hash join lower (in-memory)
+```
+
+### Negative: Default hardware matching cost model assumptions
+
+```sql
+-- PostgreSQL on spinning disk with default settings
+SELECT * FROM users WHERE email = 'test@example.com';
+-- Default cost model is well-calibrated, learning adds no benefit
+```
+
+## References
+
+**Academic papers:**
+- Sun et al., "An End-to-End Learning-based Cost Estimator", VLDB 2019
+- Leis et al., "Query Optimization Through the Looking Glass", VLDB 2015
+- Wu et al., "Towards a Learning Optimizer for Shared Clouds", VLDB 2019
+
+**Implementation:**
+- PostgreSQL: pg_hint_plan, pg_store_plans for measurement collection
+- DB2: learning optimizer (LEO) includes cost model feedback
+- Research: End-to-end learned cost estimator (Sun et al.)
+
+**Key insights:**
+- Simple linear regression captures most cost model improvement
+- Per-operator models are more interpretable than end-to-end models
+- Buffer pool hit rate is the single most important missing feature
+- Cost calibration is simpler and safer than full learned optimization
+- Can be deployed as a tuning knob update (no optimizer code changes)

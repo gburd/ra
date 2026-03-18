@@ -1,0 +1,195 @@
+---
+id: mongodb-graphlookup-optimization
+name: MongoDB $graphLookup Recursive Traversal Optimization
+category: database-specific/mongodb
+databases: [mongodb]
+execution_models: [pipeline]
+version: "1.0.0"
+authors: ["MongoDB Inc."]
+tags: [graphlookup, recursive, traversal, graph, pipeline]
+complexity: "O(V + E) with index, O(V * N) without"
+benefit_range: [0.3, 20.0]
+---
+
+# MongoDB $graphLookup Recursive Traversal Optimization
+
+## Description
+
+Optimizes MongoDB's `$graphLookup` aggregation stage, which performs recursive
+graph traversals within a collection. The optimizer ensures that recursive
+lookups use an index on the `connectToField`, limits traversal depth via
+`maxDepth`, and prunes the search space using `restrictSearchWithMatch`.
+
+**When to apply**: Aggregation pipelines using `$graphLookup` for hierarchical
+or graph-structured data (org charts, category trees, social networks). The
+optimizer selects indexed lookups and pushes filters into the recursion.
+
+**Why it works**: Without an index on `connectToField`, each recursive step
+requires a collection scan. With an index, each step is O(log N) instead of
+O(N). Additionally, pushing `restrictSearchWithMatch` predicates into the
+recursion prunes branches early, avoiding exponential blowup in deep graphs.
+
+## Relational Algebra
+
+```algebra
+-- Recursive graph traversal (transitive closure)
+mu[connectFrom -> connectTo](
+  sigma[restrictPred](collection)
+) starting from startWith
+
+-- Optimization: index-backed lookup per recursion step
+mu_indexed[idx(connectTo)](
+  sigma[restrictPred](collection)
+) starting from startWith, maxDepth=d
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mongodb-graphlookup-use-index";
+    "(graph-lookup ?coll ?startWith ?connectFrom ?connectTo
+       ?as ?maxDepth ?restrict)" =>
+    "(graph-lookup-indexed ?coll ?startWith ?connectFrom ?connectTo
+       ?as ?maxDepth ?restrict
+       (index-for ?coll ?connectTo))"
+    if has_index_on("?coll", "?connectTo")
+),
+
+rw!("mongodb-graphlookup-push-restrict";
+    "(graph-lookup ?coll ?start ?from ?to ?as ?depth
+       (no-restrict))" =>
+    "(graph-lookup ?coll ?start ?from ?to ?as ?depth
+       (restrict (extract-prunable-preds ?downstream-match)))"
+    if has_downstream_match_on_as("?as")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> bool {
+    stats.has_graphlookup_stage
+        && stats.connectto_field_indexed
+        && stats.max_depth.unwrap_or(10) <= 20
+}
+```
+
+**Restrictions:**
+- `$graphLookup` can only traverse within a single collection (or sharded collection)
+- Without `maxDepth`, cycles cause infinite recursion (MongoDB detects and limits)
+- `restrictSearchWithMatch` only supports a subset of query operators
+- Memory limit: 100MB per `$graphLookup` stage (default)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let collection_size = stats.total_documents as f64;
+    let avg_branching_factor = stats.avg_children_per_node as f64;
+    let max_depth = stats.max_depth.unwrap_or(5) as f64;
+
+    // Without index: collection scan per recursion step
+    let nodes_visited = avg_branching_factor.powf(max_depth).min(collection_size);
+    let without_index = nodes_visited * collection_size * 0.001;
+
+    // With index: indexed lookup per recursion step
+    let with_index = nodes_visited * collection_size.log2() * 0.00001;
+
+    if without_index > with_index {
+        (without_index - with_index) / without_index
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 30% to 20x depending on graph depth and index availability.
+
+## Test Cases
+
+### Positive: Indexed $graphLookup on org chart
+
+```javascript
+// Index on reportsTo field for recursive traversal
+db.employees.createIndex({reportsTo: 1})
+
+// Find all reports (direct and indirect) for a manager
+db.employees.aggregate([
+  {$match: {_id: "CEO"}},
+  {$graphLookup: {
+    from: "employees",
+    startWith: "$_id",
+    connectFromField: "_id",
+    connectToField: "reportsTo",
+    as: "allReports",
+    maxDepth: 10,
+    depthField: "level"
+  }}
+])
+
+// Each recursive step uses index on reportsTo
+// O(log N) per step instead of O(N) collection scan
+```
+
+### Positive: restrictSearchWithMatch pruning
+
+```javascript
+// Find connected active users in social graph
+db.users.aggregate([
+  {$match: {_id: "alice"}},
+  {$graphLookup: {
+    from: "users",
+    startWith: "$friends",
+    connectFromField: "friends",
+    connectToField: "_id",
+    as: "network",
+    maxDepth: 3,
+    restrictSearchWithMatch: {status: "active"}
+  }}
+])
+
+// restrictSearchWithMatch prunes inactive users at each step
+// Prevents exponential blowup through inactive branches
+```
+
+### Negative: No index on connectToField
+
+```javascript
+// Missing index on parent_id
+db.categories.aggregate([
+  {$match: {_id: "root"}},
+  {$graphLookup: {
+    from: "categories",
+    startWith: "$_id",
+    connectFromField: "_id",
+    connectToField: "parent_id",  // No index!
+    as: "subtree"
+  }}
+])
+
+// Each recursion step: full collection scan
+// For 100K categories and depth 5: potentially millions of scans
+```
+
+## References
+
+**Implementation:**
+- MongoDB source: `src/mongo/db/pipeline/document_source_graph_lookup.cpp`
+- Recursive expansion: `DocumentSourceGraphLookUp::getNext()`
+- Index selection: `src/mongo/db/pipeline/pipeline_d.cpp`
+
+**Documentation:**
+- MongoDB Manual: "$graphLookup"
+  - https://docs.mongodb.com/manual/reference/operator/aggregation/graphLookup/
+
+**Related papers:**
+- Bancilhon, F., Ramakrishnan, R., "An Amateur's Introduction to Recursive
+  Query Processing Strategies", SIGMOD 1986

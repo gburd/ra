@@ -28,6 +28,7 @@
 #![allow(clippy::module_name_repetitions)]
 
 pub mod analysis;
+pub mod cost;
 pub mod differential;
 pub mod egraph;
 pub mod extract;
@@ -36,9 +37,10 @@ pub mod rewrite;
 pub mod timely;
 
 pub use analysis::RelAnalysis;
+pub use cost::{IntegratedCostFn, IntegratedCostModel};
 pub use differential::{IncrementalError, IncrementalOptimizer, RuleChange, RuleId};
 pub use egraph::{to_rec_expr, EGraphError, Optimizer, OptimizerConfig, RelLang};
-pub use extract::{extract_best, rec_expr_to_rel_expr, RelCostFn};
+pub use extract::{extract_best, extract_best_with_staleness, rec_expr_to_rel_expr, RelCostFn};
 pub use memo::{structural_hash, MemoTable};
 pub use rewrite::all_rules;
 pub use timely::{ComputationStats, TimelyConfig};

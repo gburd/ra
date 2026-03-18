@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::cpu::CpuModel;
 use crate::gpu::GpuModel;
-use crate::memory::MemoryConfig;
+use crate::memory::{MemoryConfig, MemoryType, NumaTopology};
 use crate::storage::StorageDevice;
 
 /// A complete hardware profile combining all components.
@@ -311,12 +311,81 @@ impl CompleteHardwareProfile {
         }
     }
 
+    /// Raspberry Pi 4 edge device: 4-core ARM, 4GB LPDDR4, `microSD`.
+    #[must_use]
+    pub fn raspberry_pi_4() -> Self {
+        Self {
+            name: "Raspberry Pi 4 (4GB)".into(),
+            cpu: CpuModel::raspberry_pi_4(),
+            memory: MemoryConfig {
+                name: "LPDDR4-3200 (4GB)".into(),
+                memory_type: MemoryType::DDR4,
+                capacity_bytes: 4_294_967_296,
+                channels_per_socket: 1,
+                sockets: 1,
+                numa_topology: NumaTopology::UMA,
+                local_bandwidth_gbps: 4.0,
+                remote_bandwidth_gbps: 4.0,
+                latency_ns: 120.0,
+            },
+            storage: StorageDevice::microsd_uhs1(),
+            gpu: None,
+        }
+    }
+
+    /// Tape archive server: Xeon, 128GB, LTO-9 tape library.
+    #[must_use]
+    pub fn tape_archive() -> Self {
+        Self {
+            name: "Tape Archive Server".into(),
+            cpu: CpuModel::intel_xeon_8380(),
+            memory: MemoryConfig::ddr4_single_socket(),
+            storage: StorageDevice::tape_lto9(),
+            gpu: None,
+        }
+    }
+
+    /// NAS-backed analytics: EPYC, 256GB, NFS over 10GbE.
+    #[must_use]
+    pub fn nas_analytics() -> Self {
+        Self {
+            name: "NAS Analytics Server".into(),
+            cpu: CpuModel::amd_epyc_7763(),
+            memory: MemoryConfig::ddr4_dual_socket(),
+            storage: StorageDevice::nas_nfs_10gbe(),
+            gpu: None,
+        }
+    }
+
+    /// Desktop workstation (budget): Intel i7, 16GB DDR5, `NVMe` Gen4, no GPU.
+    #[must_use]
+    pub fn desktop_budget() -> Self {
+        Self {
+            name: "Desktop Budget".into(),
+            cpu: CpuModel::intel_core_i7_12700k(),
+            memory: MemoryConfig {
+                name: "DDR5-4800 (16GB, 2ch)".into(),
+                memory_type: MemoryType::DDR5,
+                capacity_bytes: 17_179_869_184,
+                channels_per_socket: 2,
+                sockets: 1,
+                numa_topology: NumaTopology::UMA,
+                local_bandwidth_gbps: 76.8,
+                remote_bandwidth_gbps: 76.8,
+                latency_ns: 78.0,
+            },
+            storage: StorageDevice::nvme_gen4_samsung_990_pro(),
+            gpu: None,
+        }
+    }
+
     /// Returns a list of all predefined profiles.
     #[must_use]
     pub fn all_profiles() -> Vec<Self> {
         vec![
             Self::desktop_workstation(),
             Self::desktop_enthusiast(),
+            Self::desktop_budget(),
             Self::apple_mac_m2(),
             Self::entry_server(),
             Self::dual_socket_server(),
@@ -330,12 +399,15 @@ impl CompleteHardwareProfile {
             Self::oltp_database(),
             Self::olap_database(),
             Self::edge_device(),
+            Self::raspberry_pi_4(),
             Self::cloud_vm_small(),
             Self::cloud_vm_large(),
             Self::cloud_gpu_instance(),
             Self::cloud_arm_instance(),
             Self::persistent_memory_server(),
             Self::archive_storage(),
+            Self::tape_archive(),
+            Self::nas_analytics(),
             Self::all_flash_array(),
             Self::ml_training_workstation(),
             Self::ml_inference_server(),
@@ -345,7 +417,7 @@ impl CompleteHardwareProfile {
     /// Returns the number of predefined profiles.
     #[must_use]
     pub fn profile_count() -> usize {
-        24
+        28
     }
 }
 
@@ -455,7 +527,7 @@ mod tests {
     fn all_profiles_count() {
         let profiles = CompleteHardwareProfile::all_profiles();
         assert_eq!(profiles.len(), CompleteHardwareProfile::profile_count());
-        assert_eq!(profiles.len(), 24);
+        assert_eq!(profiles.len(), 28);
     }
 
     #[test]
@@ -466,9 +538,54 @@ mod tests {
     }
 
     #[test]
+    fn raspberry_pi_4_profile() {
+        let profile = CompleteHardwareProfile::raspberry_pi_4();
+        assert!(profile.gpu.is_none());
+        assert_eq!(profile.cpu.cores, 4);
+        assert!(profile.memory.capacity_bytes <= 8_589_934_592);
+    }
+
+    #[test]
+    fn tape_archive_profile() {
+        let profile = CompleteHardwareProfile::tape_archive();
+        assert!(profile.gpu.is_none());
+        assert_eq!(
+            profile.storage.technology,
+            crate::storage::StorageTechnology::Tape
+        );
+    }
+
+    #[test]
+    fn nas_analytics_profile() {
+        let profile = CompleteHardwareProfile::nas_analytics();
+        assert!(profile.gpu.is_none());
+        assert_eq!(
+            profile.storage.technology,
+            crate::storage::StorageTechnology::NAS
+        );
+    }
+
+    #[test]
+    fn desktop_budget_profile() {
+        let profile = CompleteHardwareProfile::desktop_budget();
+        assert!(profile.gpu.is_none());
+        assert_eq!(profile.cpu.cores, 12);
+    }
+
+    #[test]
     #[allow(clippy::expect_used)]
     fn serialize_roundtrip() {
         let profile = CompleteHardwareProfile::gpu_server_a100();
+        let json = serde_json::to_string(&profile).expect("serialization should succeed");
+        let deserialized: CompleteHardwareProfile =
+            serde_json::from_str(&json).expect("deserialization should succeed");
+        assert_eq!(profile, deserialized);
+    }
+
+    #[test]
+    #[allow(clippy::expect_used)]
+    fn serialize_roundtrip_raspberry_pi() {
+        let profile = CompleteHardwareProfile::raspberry_pi_4();
         let json = serde_json::to_string(&profile).expect("serialization should succeed");
         let deserialized: CompleteHardwareProfile =
             serde_json::from_str(&json).expect("deserialization should succeed");

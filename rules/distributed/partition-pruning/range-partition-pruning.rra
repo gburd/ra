@@ -1,0 +1,144 @@
+---
+id: range-partition-pruning
+name: Range Partition Pruning with Constraint Generation
+category: distributed/partition-pruning
+databases: [cockroachdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, partition, pruning, constraint, range, scan]
+complexity: O(n)
+benefit_range: [0.3, 0.95]
+---
+
+# Range Partition Pruning with Constraint Generation
+
+## Description
+
+Generates constrained scans by analyzing filter predicates against
+index key columns and partition boundaries. For each index on the
+table, the optimizer generates scan constraints that eliminate
+non-matching ranges, turning a full table scan into a set of targeted
+span reads.
+
+**When to apply**: A Select operator filters a Scan, and the filter
+predicates can be expressed as index key constraints that eliminate
+partitions or key ranges.
+
+**Why it works**: In distributed databases, data is split into ranges
+(CockroachDB) or regions (TiDB). A constrained scan reads only the
+ranges that could contain matching rows, avoiding network requests to
+nodes that hold irrelevant data.
+
+## Relational Algebra
+
+```algebra
+sigma[a >= 10 AND a <= 20](Scan(T))
+  -> Scan(T, constraint=[/10 - /20])
+
+sigma[a = 5 AND b > 100](Scan(T))
+  -> Scan(T, constraint=[/5/101 - /5])
+  using index on (a, b)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("generate-constrained-scan";
+    "(filter ?filters (scan ?table))" =>
+    "(scan ?table (constraints_from ?filters ?table))"
+    if is_canonical_scan("?table")
+    if filters_constrain_index("?filters", "?table")
+),
+
+rw!("generate-partial-index-scan";
+    "(filter ?filters (scan ?table))" =>
+    "(scan ?table (partial_index_match ?filters ?table))"
+    if is_canonical_scan("?table")
+    if filters_imply_partial_index("?filters", "?table")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    scan: &ScanPrivate,
+    filters: &FiltersExpr,
+) -> bool {
+    // Scan must be canonical (no pre-existing constraints)
+    scan.is_canonical_scan()
+    // At least one filter must constrain an index key column
+    && filters.iter().any(|f|
+        f.constrains_index_columns(scan.table()))
+}
+```
+
+**Restrictions:**
+- Constraints are generated per-index; the optimizer evaluates the
+  cost of each constrained scan and picks the cheapest
+- For multi-column indexes, prefix columns must be constrained for
+  later columns to be usable
+- Partial indexes require the filter to logically imply the partial
+  index predicate
+- Complex expressions (functions, casts) may not be constrainable
+
+## Cost Model
+
+```rust
+fn constrained_scan_cost(
+    total_rows: f64,
+    matching_rows: f64,
+    spans: &[Span],
+    seek_cost: f64,
+    row_cost: f64,
+) -> f64 {
+    spans.len() as f64 * seek_cost + matching_rows * row_cost
+}
+```
+
+**Typical benefit**: A range query on a 1B row table with 1000
+ranges may narrow to 5 ranges, reducing I/O by 99.5%.
+
+## Test Cases
+
+```sql
+-- Positive: equality + range on composite index
+-- t has INDEX(region, created_at)
+SELECT * FROM t
+WHERE region = 'us-east' AND created_at > '2024-01-01';
+
+-- Constrained scan: [/'us-east'/'2024-01-01' - /'us-east']
+-- Only reads ranges for us-east after 2024-01-01
+```
+
+```sql
+-- Positive: partial index pruning
+-- CREATE INDEX idx_active ON orders(customer_id) WHERE status='active'
+SELECT * FROM orders
+WHERE status = 'active' AND customer_id = 42;
+
+-- Partial index scan: only reads the idx_active index
+-- Smaller index = fewer ranges to scan
+```
+
+```sql
+-- Positive: IN list becomes multiple spans
+SELECT * FROM t WHERE region IN ('us-east', 'us-west');
+-- Constraint: [/'us-east' - /'us-east'] [/'us-west' - /'us-west']
+```
+
+```sql
+-- Negative: function on indexed column
+SELECT * FROM t WHERE LOWER(name) = 'alice';
+-- Cannot generate constraint on name index (function wrapping)
+-- Unless a computed column or expression index exists
+```
+
+## References
+
+CockroachDB: pkg/sql/opt/xform/rules/select.opt:34 - GenerateConstrainedScans (commit 51e808c)
+CockroachDB: pkg/sql/opt/xform/rules/select.opt:19 - GeneratePartialIndexScans
+CockroachDB: pkg/sql/opt/idxconstraint/ - index constraint generation
+CockroachDB: pkg/sql/opt/constraint/ - constraint representation

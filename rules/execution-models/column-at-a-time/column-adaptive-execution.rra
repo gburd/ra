@@ -1,35 +1,416 @@
 ---
 id: column-adaptive-execution
-name: Column-at-a-Time adaptive execution
+name: Column-at-a-Time Adaptive Execution
 category: execution-models
 version: 1.0.0
-databases: [monetdb, clickhouse]
-tags: [execution, columnar, x100, cache-conscious]
+databases: [MonetDB, DuckDB, VectorWise, ClickHouse, Vertica]
+authors: [Marcin Zukowski, Peter Boncz, Hannes Muehleisen]
+tags: [execution, columnar, adaptive, runtime, column-group, hybrid, vectorized, compiled]
+standard: MonetDB X100
 ---
 
-# Column-at-a-Time adaptive execution
+# Column-at-a-Time Adaptive Execution
 
 ## Description
 
-Runtime column access pattern optimization.
+Adaptive execution dynamically adjusts column processing strategies at runtime based on observed data characteristics, hardware conditions, and query progress. Rather than committing to a single execution strategy at plan time, the system monitors per-operator metrics (selectivity, cardinality, cache miss rate, throughput) and switches between execution modes. This includes: choosing between column-at-a-time and vector-at-a-time granularity, switching between hash and sort-based aggregation, adapting compression-aware execution based on actual data distribution, and selecting between vectorized interpretation and JIT compilation.
+
+**Adaptive decisions at runtime:**
+1. **Granularity**: Full column vs. chunked (vector-at-a-time) based on memory pressure
+2. **Algorithm selection**: Hash vs. sort aggregation based on observed cardinality
+3. **Materialization timing**: Late vs. early based on measured selectivity
+4. **SIMD width**: AVX-512 vs. AVX2 vs. scalar based on data alignment and thermal throttling
+5. **Compression**: Operate-on-compressed vs. decompress based on predicate selectivity
+6. **Parallelism degree**: Adjust thread count based on memory bandwidth saturation
+
+**Key characteristics:**
+- **Online statistics**: Collect cardinality, selectivity, and distribution during execution
+- **Mode switching**: Transition between strategies at operator boundaries
+- **Feedback loops**: Results from early batches inform later batch processing
+- **Graceful degradation**: Fall back to simpler strategies under memory pressure
+- **No upfront commitment**: Avoid worst-case of wrong optimizer estimates
+
+**Hybrid vectorized + compiled execution:**
+- Start with vectorized interpretation (low latency, no compilation cost)
+- Monitor operator hotness (fraction of total execution time)
+- JIT-compile hot operators after threshold (amortize compilation cost)
+- DuckDB model: vectorized baseline with optional adaptive compilation
+
+**Trade-offs:**
+- Monitoring overhead: collecting statistics costs CPU cycles
+- Mode switching: state migration between strategies has overhead
+- Hysteresis needed: avoid oscillating between modes
+- Complexity: more code paths to test and maintain
+- Warm-up period: first batches may use suboptimal strategy
+
+## Relational Algebra
+
+```
+-- Adaptive aggregation: choose strategy based on observed cardinality
+AdaptiveAggregate(col, GROUP BY key)
+  = if observed_groups < 256:
+      DirectArrayAggregate(col, key)  -- O(1) per row
+    elif observed_groups < L2_capacity:
+      HashAggregate(col, key)          -- O(1) amortized
+    else:
+      SortAggregate(col, key)          -- O(N log N) but sequential
+
+-- Adaptive materialization: switch based on selectivity
+AdaptiveFilter(cols, predicate)
+  = if measured_selectivity < 0.3:
+      LateMaterialization(cols, predicate)
+    else:
+      EarlyMaterialization(cols, predicate)
+```
 
 ## Implementation
 
 ```rust
-pub fn column_adaptive-execution() {
-    // Process entire columns at once
-    // Excellent cache behavior
-    // Sequential I/O
+/// Adaptive execution engine
+pub struct AdaptiveExecutor {
+    /// Per-operator runtime statistics
+    operator_stats: HashMap<OperatorId, OperatorStats>,
+    /// Hardware configuration
+    hw_config: HardwareConfig,
+    /// Current execution modes per operator
+    modes: HashMap<OperatorId, ExecutionMode>,
+    /// Adaptation thresholds
+    thresholds: AdaptiveThresholds,
+}
+
+pub struct OperatorStats {
+    /// Rows processed so far
+    rows_processed: usize,
+    /// Observed selectivity (for filters)
+    selectivity: f64,
+    /// Observed group cardinality (for aggregates)
+    observed_groups: usize,
+    /// Throughput (rows/second)
+    throughput: f64,
+    /// Cache miss rate (via perf counters if available)
+    cache_miss_rate: f64,
+    /// Time spent in this operator (ns)
+    cumulative_ns: u64,
+}
+
+pub enum ExecutionMode {
+    /// Full column-at-a-time processing
+    FullColumn,
+    /// Chunked (vector-at-a-time) processing
+    Chunked { chunk_size: usize },
+    /// Compiled (JIT) execution
+    Compiled { jit_fn: JitFunction },
+}
+
+pub struct AdaptiveThresholds {
+    /// Switch from hash to sort agg above this cardinality
+    sort_agg_threshold: usize,
+    /// Use direct-array agg below this cardinality
+    direct_agg_threshold: usize,
+    /// Switch to early materialization above this selectivity
+    early_materialize_threshold: f64,
+    /// Compile after this many rows processed
+    jit_compile_threshold: usize,
+    /// Minimum rows before making adaptive decisions
+    warmup_rows: usize,
+}
+
+impl AdaptiveExecutor {
+    /// Process a batch and adapt strategy
+    pub fn process_adaptive(
+        &mut self,
+        op_id: OperatorId,
+        operator: &mut dyn Operator,
+        input: &[ColumnArray],
+    ) -> Vec<ColumnArray> {
+        let start = std::time::Instant::now();
+        let stats = self.operator_stats
+            .entry(op_id)
+            .or_insert_with(OperatorStats::new);
+
+        // Execute with current mode
+        let result = match self.modes.get(&op_id) {
+            Some(ExecutionMode::FullColumn) => {
+                operator.execute_full_column(input)
+            }
+            Some(ExecutionMode::Chunked { chunk_size }) => {
+                operator.execute_chunked(input, *chunk_size)
+            }
+            Some(ExecutionMode::Compiled { jit_fn }) => {
+                jit_fn.execute(input)
+            }
+            None => {
+                // Default: full column
+                operator.execute_full_column(input)
+            }
+        };
+
+        // Update statistics
+        let elapsed = start.elapsed().as_nanos() as u64;
+        let rows = result.first()
+            .map(|c| c.len).unwrap_or(0);
+        stats.rows_processed += rows;
+        stats.cumulative_ns += elapsed;
+        stats.throughput = stats.rows_processed as f64
+            / (stats.cumulative_ns as f64 / 1e9);
+
+        // Adapt after warmup period
+        if stats.rows_processed > self.thresholds.warmup_rows
+        {
+            self.maybe_adapt(op_id, operator);
+        }
+
+        result
+    }
+
+    /// Check if strategy should be adapted
+    fn maybe_adapt(
+        &mut self,
+        op_id: OperatorId,
+        operator: &dyn Operator,
+    ) {
+        let stats = &self.operator_stats[&op_id];
+
+        match operator.operator_type() {
+            OpType::Aggregate => {
+                self.adapt_aggregate(op_id, stats);
+            }
+            OpType::Filter => {
+                self.adapt_filter(op_id, stats);
+            }
+            OpType::Scan => {
+                self.adapt_scan(op_id, stats);
+            }
+            _ => {
+                self.adapt_generic(op_id, stats);
+            }
+        }
+    }
+
+    /// Adapt aggregation strategy based on cardinality
+    fn adapt_aggregate(
+        &mut self,
+        op_id: OperatorId,
+        stats: &OperatorStats,
+    ) {
+        let groups = stats.observed_groups;
+
+        if groups < self.thresholds.direct_agg_threshold {
+            // Few groups: use direct-indexed array
+            self.modes.insert(
+                op_id,
+                ExecutionMode::FullColumn,
+            );
+        } else if groups
+            < self.hw_config.l2_size / 24
+        {
+            // Moderate groups: hash table fits L2
+            // Keep current hash-based strategy
+        } else {
+            // Many groups: consider sort-based
+            // or switch to chunked to manage cache
+            let chunk = self.hw_config.l1_chunk_size(16);
+            self.modes.insert(
+                op_id,
+                ExecutionMode::Chunked {
+                    chunk_size: chunk,
+                },
+            );
+        }
+    }
+
+    /// Adapt filter strategy based on selectivity
+    fn adapt_filter(
+        &mut self,
+        op_id: OperatorId,
+        stats: &OperatorStats,
+    ) {
+        // Track selectivity from output/input ratio
+        if stats.selectivity
+            > self.thresholds.early_materialize_threshold
+        {
+            // High selectivity: switch to early materialization
+            // (sequential access better than random gather)
+            self.modes.insert(
+                op_id,
+                ExecutionMode::FullColumn,
+            );
+        }
+        // Low selectivity: keep late materialization (default)
+    }
+
+    /// Adapt scan granularity based on memory pressure
+    fn adapt_scan(
+        &mut self,
+        op_id: OperatorId,
+        stats: &OperatorStats,
+    ) {
+        // If throughput is low (memory pressure), use chunks
+        let expected_throughput =
+            self.hw_config.memory_bandwidth * 0.5;
+        if stats.throughput < expected_throughput {
+            let chunk = self.hw_config.l2_size / 8;
+            self.modes.insert(
+                op_id,
+                ExecutionMode::Chunked {
+                    chunk_size: chunk,
+                },
+            );
+        }
+    }
+
+    /// Generic: consider JIT compilation for hot operators
+    fn adapt_generic(
+        &mut self,
+        op_id: OperatorId,
+        stats: &OperatorStats,
+    ) {
+        if stats.rows_processed
+            > self.thresholds.jit_compile_threshold
+        {
+            // Hot operator: worth compiling
+            // (DuckDB adaptive compilation model)
+            if let Some(jit_fn) =
+                try_compile_operator(op_id)
+            {
+                self.modes.insert(
+                    op_id,
+                    ExecutionMode::Compiled { jit_fn },
+                );
+            }
+        }
+    }
+}
+
+/// Adaptive batch size selection
+pub fn adaptive_chunk_size(
+    operator: &dyn Operator,
+    stats: &OperatorStats,
+    hw: &HardwareConfig,
+) -> usize {
+    let working_set_per_row = operator.bytes_per_row();
+
+    // Target: working set fits in L1 cache (~75% of L1)
+    let l1_target = hw.l1_size * 3 / 4;
+    let l1_chunk = l1_target / working_set_per_row;
+
+    // Adjust for observed behavior
+    let adjusted = if stats.cache_miss_rate > 0.05 {
+        // Too many cache misses: reduce chunk size
+        l1_chunk / 2
+    } else if stats.cache_miss_rate < 0.01 {
+        // Very few misses: can increase chunk size
+        // (process more per iteration, reduce loop overhead)
+        (l1_chunk * 2).min(hw.l2_size / working_set_per_row)
+    } else {
+        l1_chunk
+    };
+
+    // Clamp to reasonable range
+    adjusted.clamp(64, 65536)
+}
+
+/// Adaptive compression decision
+pub fn should_operate_on_compressed(
+    compression: CompressionType,
+    operation: OperationType,
+    estimated_selectivity: f64,
+) -> bool {
+    match (compression, operation) {
+        // Dictionary: always filter on codes
+        (CompressionType::Dictionary, OperationType::Filter)
+            => true,
+        // RLE: aggregate on runs if column is long
+        (CompressionType::Rle, OperationType::Aggregate)
+            => true,
+        // RLE filter: skip runs (always beneficial)
+        (CompressionType::Rle, OperationType::Filter)
+            => true,
+        // Bitpacked: filter if selectivity is low
+        (CompressionType::BitPacked, OperationType::Filter)
+            => estimated_selectivity < 0.5,
+        // Default: decompress then execute
+        _ => false,
+    }
 }
 ```
 
 ## Cost Model
 
-- Sequential I/O: fastest possible
-- Cache-friendly: process full columns
-- SIMD: 4-8x speedup for operations
+**Adaptation Overhead:**
+- Statistics collection: ~1-5 ns per row (counter increments)
+- Mode switching check: ~100 ns per batch (threshold comparison)
+- Actual mode switch: ~1-10 us (state migration)
+- JIT compilation: ~1-100 ms (one-time cost, amortized)
+
+**Benefit of Adaptation:**
+
+| Scenario | Static Wrong | Adaptive | Speedup |
+|---------|-------------|---------|---------|
+| Hash agg, 10M groups | Hash: 60 ns/row | Sort: 20 ns/row | 3x |
+| Late mat, 90% sel | Late: 50 ns/row | Early: 5 ns/row | 10x |
+| Full col, mem pressure | Full: L3 misses | Chunked: L1 hits | 2-4x |
+| Interpreted hot loop | Interp: 10 ns/row | JIT: 2 ns/row | 5x |
+
+**When Adaptation Hurts:**
+- Short queries (<100K rows): warmup period > query duration
+- Perfectly estimated plans: no adaptation needed
+- Oscillating data: mode switching overhead > benefit
+- Hysteresis gap: brief suboptimal period during transition
+
+**Warmup Period:**
+- Minimum rows before adapting: 10K-100K (configurable)
+- Cost: suboptimal execution for warmup rows
+- Benefit: correct strategy for remaining millions of rows
+
+## Test Cases
+
+```sql
+-- Test 1: Adaptive aggregation strategy
+SELECT product_id, SUM(quantity) FROM orders GROUP BY product_id;
+-- Optimizer estimates: 1K products -> hash agg
+-- Reality: 5M distinct products -> hash table exceeds L3
+-- Adaptive: detect high cardinality after 100K rows
+-- Switch to sort-based or chunked processing
+
+-- Test 2: Adaptive materialization
+SELECT * FROM events WHERE priority > 8;
+-- Optimizer estimates: 5% selectivity -> late materialization
+-- Reality: 85% of events are high priority
+-- Adaptive: detect high selectivity after first batch
+-- Switch to early materialization (avoid random gather)
+
+-- Test 3: Adaptive JIT compilation (DuckDB model)
+SELECT a*b + c*d - e/f FROM large_table;
+-- Start: vectorized interpretation (~10 ns/row)
+-- After 1M rows: JIT compile expression
+-- Continue: compiled execution (~2 ns/row)
+-- Break-even: ~500K rows for compilation cost
+
+-- Test 4: Adaptive chunk sizing
+SELECT region, AVG(temperature) FROM sensor_data
+GROUP BY region;
+-- Initial chunk: 1024 rows (default)
+-- Observe: cache miss rate 8% (too high)
+-- Reduce to 512 rows: cache miss rate drops to 1%
+-- Stable: process remaining data at 512-row chunks
+```
+
+## Comparison
+
+| Property | Adaptive | Static Column | Static Vectorized | Static Compiled |
+|----------|---------|--------------|-----------------|----------------|
+| Strategy | Runtime chosen | Full column | Fixed 1024 chunk | JIT everything |
+| Warmup cost | 10K-100K rows | None | None | Compile time |
+| Wrong estimate | Self-correcting | Stuck | Stuck | Stuck |
+| Complexity | High | Low | Medium | High |
+| Short queries | Overhead | Good | Good | Bad (compile) |
+| Long queries | Optimal | Often good | Good | Good (amortized) |
+| Implementation | Many code paths | Single path | Single path | Codegen |
 
 ## References
 
-1. Boncz et al., "MonetDB/X100: Hyper-Pipelining Query Execution", CIDR 2005
-2. Idreos et al., "MonetDB: Two Decades of Research", IEEE Data Eng. Bull. 2012
+1. **Zukowski, Marcin**. "Balancing Vectorized Query Execution with Bandwidth-Optimized Storage." PhD Thesis, CWI, 2009.
+2. **Kersten, Timo; Leis, Viktor; Kemper, Alfons; Neumann, Thomas; Pavlo, Andrew; Boncz, Peter**. "Everything You Always Wanted to Know About Compiled and Vectorized Queries But Were Afraid to Ask." VLDB 2018.
+3. **Kohn, Andre; Leis, Viktor; Neumann, Thomas**. "Adaptive Execution of Compiled Queries." ICDE 2018.
+4. **Raasveldt, Mark; Muehleisen, Hannes**. "DuckDB: an Embeddable Analytical Database." SIGMOD 2019.

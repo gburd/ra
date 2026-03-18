@@ -14,6 +14,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 ra-core = { workspace = true }
 ra-engine = { workspace = true }
+ra-hardware = { workspace = true }
 ra-parser = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

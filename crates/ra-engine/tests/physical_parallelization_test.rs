@@ -62,8 +62,8 @@ fn test_parallel_merge_join() {
 
 #[test]
 fn test_parallel_nested_loop_join() {
-    let small = scan("small_dim");
-    let large = scan("large_fact");
+    let _small = scan("small_dim");
+    let _large = scan("large_fact");
     let join = two_table_join("large_fact", "small_dim", "dim_id", "id");
     assert_optimization_improves(join);
 }
@@ -71,8 +71,8 @@ fn test_parallel_nested_loop_join() {
 #[test]
 fn test_parallel_join_build_phase() {
     // Parallel build phase in hash join
-    let t1 = scan("build_table");
-    let t2 = scan("probe_table");
+    let _t1 = scan("build_table");
+    let _t2 = scan("probe_table");
     let join = two_table_join("probe_table", "build_table", "key", "key");
     assert_rule_applies(join);
 }
@@ -85,9 +85,10 @@ fn test_parallel_hash_aggregation() {
     let agg = RelExpr::Aggregate {
         group_by: vec![col("merchant_id")],
         aggregates: vec![AggregateExpr {
-            func: AggregateFunction::Sum,
-            expr: col("amount"),
+            function: AggregateFunction::Sum,
+            arg: Some(col("amount")),
             distinct: false,
+            alias: None,
         }],
         input: Box::new(input),
     };
@@ -100,9 +101,10 @@ fn test_parallel_sort_aggregation() {
     let agg = RelExpr::Aggregate {
         group_by: vec![col("event_type")],
         aggregates: vec![AggregateExpr {
-            func: AggregateFunction::Count,
-            expr: Expr::Const(Const::Int(1)),
+            function: AggregateFunction::Count,
+            arg: Some(int(1)),
             distinct: false,
+            alias: None,
         }],
         input: Box::new(input),
     };
@@ -115,9 +117,10 @@ fn test_parallel_global_aggregation() {
     let agg = RelExpr::Aggregate {
         group_by: vec![],
         aggregates: vec![AggregateExpr {
-            func: AggregateFunction::Sum,
-            expr: col("total"),
+            function: AggregateFunction::Sum,
+            arg: Some(col("total")),
             distinct: false,
+            alias: None,
         }],
         input: Box::new(input),
     };
@@ -200,9 +203,10 @@ fn test_intra_operator_parallelism_partitioned() {
     let agg = RelExpr::Aggregate {
         group_by: vec![col("partition_key")],
         aggregates: vec![AggregateExpr {
-            func: AggregateFunction::Count,
-            expr: Expr::Const(Const::Int(1)),
+            function: AggregateFunction::Count,
+            arg: Some(int(1)),
             distinct: false,
+            alias: None,
         }],
         input: Box::new(input),
     };
@@ -228,7 +232,7 @@ fn test_morsel_driven_execution() {
 #[test]
 fn test_morsel_driven_adaptive_size() {
     // Adaptive morsel sizing based on workload
-    let input = scan("variable_workload");
+    let _input = scan("variable_workload");
     let join = two_table_join("variable_workload", "lookup", "key", "id");
     assert_rule_applies(join);
 }
@@ -239,9 +243,10 @@ fn test_morsel_driven_load_balancing() {
     let agg = RelExpr::Aggregate {
         group_by: vec![col("key")],
         aggregates: vec![AggregateExpr {
-            func: AggregateFunction::Sum,
-            expr: col("value"),
+            function: AggregateFunction::Sum,
+            arg: Some(col("value")),
             distinct: false,
+            alias: None,
         }],
         input: Box::new(input),
     };
@@ -305,7 +310,7 @@ fn test_work_stealing_dynamic_scheduling() {
 
 #[test]
 fn test_work_stealing_task_granularity() {
-    let input = scan("fine_grained_tasks");
+    let _input = scan("fine_grained_tasks");
     let join = two_table_join("fine_grained_tasks", "reference", "key", "id");
     assert_optimization_improves(join);
 }

@@ -10,6 +10,9 @@
  * the `.wasm` binaries and provide real execution.
  */
 
+// Module marker: ensures TypeScript treats this as a module.
+export type WasmWorkerSelf = typeof self;
+
 interface WorkerMessage {
   readonly id: number;
   readonly type: "execute" | "init" | "reset";

@@ -1,0 +1,353 @@
+---
+id: multi-column-correlation
+name: Multi-Column Correlation Modeling
+category: cost-models
+databases: [postgresql, oracle, mssql, cockroachdb, duckdb]
+execution_models: [all]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [cost, correlation, multi-column, statistics, selectivity, independence]
+complexity: "O(k^2) for k correlated columns"
+benefit_range: [0.4, 0.9]
+---
+
+# Multi-Column Correlation Modeling
+
+## Metadata
+- **Rule ID**: `multi-column-correlation`
+- **Category**: Cost Models
+- **Complexity**: O(k^2) for pairwise correlation among k columns
+- **Introduced**: PostgreSQL 10 (extended statistics), Oracle (column group statistics)
+- **Prerequisites**: Multi-column statistics collection
+- **Alternatives**: independence assumption, sampling-based estimation
+
+## Description
+
+Multi-column correlation modeling captures statistical dependencies between
+columns to improve cardinality estimation for conjunctive predicates. The
+standard independence assumption -- P(A AND B) = P(A) * P(B) -- can be
+orders of magnitude wrong when columns are correlated (e.g., city and
+state, make and model, latitude and longitude).
+
+Three primary approaches exist:
+1. **Functional dependencies**: Column A determines column B (e.g.,
+   zip_code -> state). Knowing this, P(state='CA' AND zip='94105') =
+   P(zip='94105'), not P(state='CA') * P(zip='94105').
+2. **MCV lists on column groups**: Track the most common value
+   combinations across multiple columns jointly.
+3. **Correlation coefficients**: Track pairwise Pearson or rank
+   correlation to adjust independence estimates.
+
+PostgreSQL 10+ implements all three via CREATE STATISTICS. Oracle uses
+column group statistics and expression statistics. SQL Server uses
+multi-column density vectors.
+
+**When to use:**
+- Queries with multiple predicates on correlated columns
+- Geographic data (city/state/country, lat/lon)
+- Hierarchical categories (make/model, department/team)
+- Temporal patterns (year/month, quarter/fiscal_year)
+- Any columns with functional or partial dependencies
+
+**Advantages:**
+- Eliminates worst-case independence assumption errors (100x-10000x)
+- Enables correct join ordering for multi-predicate queries
+- Detects functional dependencies automatically
+- Low storage overhead for pairwise statistics
+
+**Disadvantages:**
+- Combinatorial explosion for many-column groups
+- Statistics collection more expensive than single-column
+- Stale multi-column stats harder to detect
+- Does not capture all forms of dependency (nonlinear, conditional)
+
+## Formal Model
+
+```
+Independence assumption:
+  P(A=a AND B=b) = P(A=a) * P(B=b)
+
+With functional dependency A -> B:
+  P(A=a AND B=b) = P(A=a) if f(a) = b, else 0
+
+With correlation coefficient rho(A,B):
+  P(A=a AND B=b) ~= P(A=a) * P(B=b) * adjustment(rho)
+  where adjustment corrects for the dependency
+
+With joint MCV list:
+  P(A=a AND B=b) = freq(a,b) from joint statistics
+  For non-MCV values: fall back to adjusted independence
+```
+
+## Implementation (egg rewrite rules)
+
+```lisp
+;; Use multi-column statistics when available
+(rewrite (selectivity (and (= ?col1 ?val1) (= ?col2 ?val2)) ?table)
+  (multi-column-selectivity ?table (?col1 ?col2) (?val1 ?val2))
+  :if (has-multi-column-stats ?table (?col1 ?col2)))
+
+;; Apply functional dependency adjustment
+(rewrite (selectivity (and ?pred1 ?pred2) ?table)
+  (selectivity ?pred1 ?table)
+  :if (functionally-determines
+        (columns ?pred1) (columns ?pred2) ?table))
+
+;; Correlation-adjusted independence
+(rewrite (selectivity (and ?pred1 ?pred2) ?table)
+  (correlation-adjusted-selectivity ?pred1 ?pred2
+    (correlation ?table (columns ?pred1) (columns ?pred2)))
+  :if (has-correlation-stats ?table
+        (columns ?pred1) (columns ?pred2))
+  :if (not (has-multi-column-stats ?table
+        (columns ?pred1) (columns ?pred2))))
+
+;; Fall back to independence when no correlation info
+(rewrite (selectivity (and ?pred1 ?pred2) ?table)
+  (* (selectivity ?pred1 ?table)
+     (selectivity ?pred2 ?table))
+  :if (not (has-correlation-stats ?table
+        (columns ?pred1) (columns ?pred2))))
+```
+
+## Implementation Pattern
+
+```rust
+pub enum CorrelationType {
+    FunctionalDependency {
+        determinant: Vec<Column>,
+        dependent: Vec<Column>,
+        strength: f64, // 1.0 = perfect FD
+    },
+    JointMCV {
+        columns: Vec<Column>,
+        values: Vec<(Vec<Value>, f64)>, // (value_combo, frequency)
+        null_fraction: f64,
+    },
+    PairwiseCorrelation {
+        col_a: Column,
+        col_b: Column,
+        pearson_r: f64,  // Linear correlation
+        rank_r: f64,     // Spearman rank correlation
+    },
+}
+
+pub fn estimate_conjunctive_selectivity(
+    predicates: &[Predicate],
+    table: &TableStats,
+    correlations: &[CorrelationType],
+) -> f64 {
+    let columns: Vec<_> = predicates.iter()
+        .flat_map(|p| p.columns())
+        .collect();
+
+    // Check for joint MCV statistics
+    if let Some(joint_mcv) = find_joint_mcv(table, &columns) {
+        return estimate_from_joint_mcv(predicates, &joint_mcv);
+    }
+
+    // Check for functional dependencies
+    for corr in correlations {
+        if let CorrelationType::FunctionalDependency {
+            determinant, dependent, strength
+        } = corr {
+            if covers(predicates, determinant) && covers(predicates, dependent) {
+                // Dependent predicate is subsumed
+                let det_sel = selectivity_for_columns(predicates, determinant, table);
+                let indep_sel = selectivity_for_columns(predicates, dependent, table);
+                // Blend based on FD strength
+                return det_sel * (strength + (1.0 - strength) * indep_sel);
+            }
+        }
+    }
+
+    // Check for pairwise correlations
+    if let Some(corr) = find_pairwise_correlation(correlations, &columns) {
+        let independent = predicates.iter()
+            .map(|p| single_selectivity(p, table))
+            .product::<f64>();
+
+        return adjust_for_correlation(independent, corr);
+    }
+
+    // Fall back to independence assumption
+    predicates.iter()
+        .map(|p| single_selectivity(p, table))
+        .product()
+}
+
+fn adjust_for_correlation(
+    independent_estimate: f64,
+    correlation: &PairwiseCorrelation,
+) -> f64 {
+    let r = correlation.rank_r.abs();
+
+    // High positive correlation: predicates are partially redundant
+    // The combined selectivity is closer to max(sel_a, sel_b) than sel_a * sel_b
+    // Use geometric interpolation based on |r|
+    let sel_a = independent_estimate.sqrt(); // Approximate individual sels
+    let max_sel = sel_a; // max(sel_a, sel_b) ~= sel_a for equal selectivities
+
+    // Blend: r=0 -> independent, r=1 -> max(individual)
+    let adjusted = independent_estimate.powf(1.0 - r)
+        * max_sel.powf(r);
+
+    adjusted.clamp(0.0, 1.0)
+}
+```
+
+## PostgreSQL Extended Statistics
+
+```sql
+-- Create multi-column statistics
+CREATE STATISTICS stts_city_state (dependencies, mcv, ndistinct)
+    ON city, state FROM addresses;
+
+-- Analyze to collect statistics
+ANALYZE addresses;
+
+-- View the statistics
+SELECT * FROM pg_stats_ext WHERE statistics_name = 'stts_city_state';
+
+-- Before: independence assumption
+EXPLAIN SELECT * FROM addresses
+WHERE city = 'San Francisco' AND state = 'CA';
+-- Rows estimate: 500 * 0.02 * 0.08 = 0.8 rows (way too low!)
+
+-- After: uses functional dependency city -> state
+-- Rows estimate: 500 * 0.02 = 10 rows (correct!)
+```
+
+## Cost Model
+
+```rust
+pub fn estimation_error_without_correlation(
+    actual_selectivity: f64,
+    individual_selectivities: &[f64],
+) -> f64 {
+    let independent_estimate: f64 = individual_selectivities.iter()
+        .product();
+    (independent_estimate - actual_selectivity).abs()
+        / actual_selectivity
+}
+
+pub fn correlation_detection_cost(
+    table_card: u64,
+    num_column_pairs: usize,
+    sample_rate: f64,
+) -> Cost {
+    let sample_size = (table_card as f64 * sample_rate) as u64;
+
+    // Scan sample
+    let scan = Cost::io(sample_size);
+
+    // Compute pairwise correlations
+    let correlation = Cost::cpu(
+        sample_size * num_column_pairs as u64 * 10,
+    );
+
+    // Detect functional dependencies
+    let fd_detection = Cost::cpu(
+        sample_size * num_column_pairs as u64 * 5,
+    );
+
+    scan + correlation + fd_detection
+}
+```
+
+## Test Cases
+
+### Test 1: Functional dependency -- city determines state
+```sql
+CREATE TABLE addresses (
+    id INT, city TEXT, state TEXT, zip TEXT
+);
+CREATE STATISTICS stts ON city, state FROM addresses;
+ANALYZE addresses;
+
+-- 1M addresses, 50 states, 10K cities
+-- P(state='CA') = 0.12, P(city='San Francisco') = 0.002
+
+SELECT COUNT(*) FROM addresses
+WHERE city = 'San Francisco' AND state = 'CA';
+
+-- Without correlation: 1M * 0.12 * 0.002 = 240 (wrong, too low)
+-- With FD (city->state): 1M * 0.002 = 2000 (correct)
+-- Error without: 8x underestimate
+```
+
+### Test 2: Joint MCV -- make and model
+```sql
+CREATE TABLE vehicles (make TEXT, model TEXT, year INT);
+CREATE STATISTICS stts ON make, model FROM vehicles;
+ANALYZE vehicles;
+
+-- P(make='Toyota') = 0.15, P(model='Camry') = 0.03
+SELECT COUNT(*) FROM vehicles
+WHERE make = 'Toyota' AND model = 'Camry';
+
+-- Without correlation: 100K * 0.15 * 0.03 = 450
+-- With joint MCV: 100K * 0.025 = 2500 (Camry is common for Toyota)
+-- Independence 5.5x too low
+```
+
+### Test 3: Continuous correlation -- height and weight
+```sql
+CREATE TABLE people (height_cm INT, weight_kg INT);
+
+SELECT COUNT(*) FROM people
+WHERE height_cm > 180 AND weight_kg > 90;
+
+-- P(height>180) = 0.15, P(weight>90) = 0.20
+-- Without: 100K * 0.15 * 0.20 = 3000
+-- With correlation (r=0.7): ~5500 (tall people tend to be heavier)
+-- Independence 1.8x too low
+```
+
+### Test 4: Negative correlation -- age and student status
+```sql
+SELECT COUNT(*) FROM users
+WHERE age > 50 AND is_student = true;
+
+-- P(age>50) = 0.30, P(student=true) = 0.15
+-- Without: 100K * 0.30 * 0.15 = 4500
+-- With negative correlation (r=-0.6): ~1200 (older people less likely students)
+-- Independence 3.75x too high
+```
+
+### Test 5: No correlation -- independent columns
+```sql
+SELECT COUNT(*) FROM orders
+WHERE amount > 100 AND weekday = 'Monday';
+
+-- These are genuinely independent
+-- Independence assumption is correct
+-- Multi-column stats add no benefit here
+```
+
+## Performance Characteristics
+
+| Scenario | Independence Error | With Correlation | Method |
+|----------|-------------------|------------------|--------|
+| City + State (FD) | 5-20x under | < 1.5x | Functional dependency |
+| Make + Model | 3-10x under | < 2x | Joint MCV |
+| Height + Weight (r=0.7) | 1.5-3x under | < 1.3x | Pairwise correlation |
+| Age + Student (r=-0.6) | 2-5x over | < 1.5x | Pairwise correlation |
+| Independent columns | Accurate | Same | No benefit |
+
+## References
+
+1. **PostgreSQL Extended Statistics**: CREATE STATISTICS documentation
+   - https://www.postgresql.org/docs/current/sql-createstatistics.html
+
+2. **Ilyas et al.**: "CORDS: Automatic Discovery of Correlations and Soft Functional Dependencies"
+   - SIGMOD 2004, DOI: 10.1145/1007568.1007641
+
+3. **Oracle Column Group Statistics**:
+   - https://docs.oracle.com/en/database/oracle/oracle-database/19/tgsql/optimizer-statistics.html
+
+4. **SQL Server Multi-Column Statistics**:
+   - Density vectors for multi-column cardinality estimation
+
+5. **Markl et al.**: "Consistently Estimating the Selectivity of Conjuncts of Predicates"
+   - VLDB 2005, maximum entropy approach to correlation modeling

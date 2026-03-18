@@ -224,105 +224,315 @@ impl ProfileSelector {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
 
+    // ---- Individual profiles ----
+
     #[test]
-    fn test_real_time_profile() {
-        let profile = StatisticsProfile::real_time();
-        assert_eq!(profile.name, "RealTime");
-        assert!(profile.min_confidence > 0.9);
-        assert_eq!(profile.priority, GatheringPriority::High);
-        assert!(profile.multi_column_stats);
+    fn real_time_profile_name() {
+        assert_eq!(StatisticsProfile::real_time().name, "RealTime");
     }
 
     #[test]
-    fn test_standard_profile() {
-        let profile = StatisticsProfile::standard();
-        assert_eq!(profile.name, "Standard");
-        assert!(profile.use_sketches);
-        assert_eq!(profile.priority, GatheringPriority::Normal);
+    fn real_time_high_confidence() {
+        assert!(StatisticsProfile::real_time().min_confidence > 0.9);
     }
 
     #[test]
-    fn test_lazy_profile() {
-        let profile = StatisticsProfile::lazy();
-        assert_eq!(profile.name, "Lazy");
-        assert_eq!(profile.priority, GatheringPriority::Low);
-        assert!(!profile.multi_column_stats);
+    fn real_time_high_priority() {
+        assert_eq!(
+            StatisticsProfile::real_time().priority,
+            GatheringPriority::High
+        );
     }
 
     #[test]
-    fn test_stale_profile() {
-        let profile = StatisticsProfile::stale();
-        assert_eq!(profile.name, "Stale");
-        assert_eq!(profile.priority, GatheringPriority::Deferred);
-        assert!(matches!(profile.default_method, GatheringMethod::Sketch));
+    fn real_time_multi_column() {
+        assert!(StatisticsProfile::real_time().multi_column_stats);
     }
 
     #[test]
-    fn test_analytical_profile() {
-        let profile = StatisticsProfile::analytical();
-        assert_eq!(profile.name, "Analytical");
-        assert!(profile.correlation_stats);
-        assert!(matches!(profile.default_method, GatheringMethod::FullScan));
+    fn real_time_correlation() {
+        assert!(StatisticsProfile::real_time().correlation_stats);
     }
 
     #[test]
-    fn test_streaming_profile() {
-        let profile = StatisticsProfile::streaming();
-        assert_eq!(profile.name, "Streaming");
-        assert!(profile.use_sketches);
-        assert!(matches!(profile.default_method, GatheringMethod::Sketch));
+    fn real_time_no_sketches() {
+        assert!(!StatisticsProfile::real_time().use_sketches);
     }
 
     #[test]
-    fn test_all_profiles() {
-        let profiles = StatisticsProfile::all_profiles();
-        assert_eq!(profiles.len(), 6);
+    fn standard_profile_name() {
+        assert_eq!(StatisticsProfile::standard().name, "Standard");
     }
 
     #[test]
-    fn test_profile_by_name() {
+    fn standard_uses_sketches() {
+        assert!(StatisticsProfile::standard().use_sketches);
+    }
+
+    #[test]
+    fn standard_normal_priority() {
+        assert_eq!(
+            StatisticsProfile::standard().priority,
+            GatheringPriority::Normal
+        );
+    }
+
+    #[test]
+    fn standard_block_sample() {
+        assert!(matches!(
+            StatisticsProfile::standard().default_method,
+            GatheringMethod::BlockSample { .. }
+        ));
+    }
+
+    #[test]
+    fn lazy_profile_name() {
+        assert_eq!(StatisticsProfile::lazy().name, "Lazy");
+    }
+
+    #[test]
+    fn lazy_low_priority() {
+        assert_eq!(
+            StatisticsProfile::lazy().priority,
+            GatheringPriority::Low
+        );
+    }
+
+    #[test]
+    fn lazy_no_multi_column() {
+        assert!(!StatisticsProfile::lazy().multi_column_stats);
+    }
+
+    #[test]
+    fn lazy_no_correlation() {
+        assert!(!StatisticsProfile::lazy().correlation_stats);
+    }
+
+    #[test]
+    fn stale_profile_name() {
+        assert_eq!(StatisticsProfile::stale().name, "Stale");
+    }
+
+    #[test]
+    fn stale_deferred_priority() {
+        assert_eq!(
+            StatisticsProfile::stale().priority,
+            GatheringPriority::Deferred
+        );
+    }
+
+    #[test]
+    fn stale_uses_sketch() {
+        assert!(matches!(
+            StatisticsProfile::stale().default_method,
+            GatheringMethod::Sketch
+        ));
+    }
+
+    #[test]
+    fn stale_no_max_age() {
+        assert!(StatisticsProfile::stale().max_age_seconds.is_none());
+    }
+
+    #[test]
+    fn analytical_profile_name() {
+        assert_eq!(StatisticsProfile::analytical().name, "Analytical");
+    }
+
+    #[test]
+    fn analytical_full_scan() {
+        assert!(matches!(
+            StatisticsProfile::analytical().default_method,
+            GatheringMethod::FullScan
+        ));
+    }
+
+    #[test]
+    fn analytical_correlation() {
+        assert!(StatisticsProfile::analytical().correlation_stats);
+    }
+
+    #[test]
+    fn analytical_multi_column() {
+        assert!(StatisticsProfile::analytical().multi_column_stats);
+    }
+
+    #[test]
+    fn streaming_profile_name() {
+        assert_eq!(StatisticsProfile::streaming().name, "Streaming");
+    }
+
+    #[test]
+    fn streaming_uses_sketch() {
+        assert!(matches!(
+            StatisticsProfile::streaming().default_method,
+            GatheringMethod::Sketch
+        ));
+    }
+
+    #[test]
+    fn streaming_uses_sketches() {
+        assert!(StatisticsProfile::streaming().use_sketches);
+    }
+
+    #[test]
+    fn streaming_high_priority() {
+        assert_eq!(
+            StatisticsProfile::streaming().priority,
+            GatheringPriority::High
+        );
+    }
+
+    // ---- all_profiles ----
+
+    #[test]
+    fn all_profiles_count() {
+        assert_eq!(StatisticsProfile::all_profiles().len(), 6);
+    }
+
+    #[test]
+    fn all_profiles_unique_names() {
+        let names: Vec<String> = StatisticsProfile::all_profiles()
+            .into_iter()
+            .map(|p| p.name)
+            .collect();
+        let unique: std::collections::HashSet<&String> =
+            names.iter().collect();
+        assert_eq!(names.len(), unique.len());
+    }
+
+    // ---- by_name ----
+
+    #[test]
+    fn by_name_realtime() {
         assert!(StatisticsProfile::by_name("realtime").is_some());
+    }
+
+    #[test]
+    fn by_name_real_time() {
+        assert!(StatisticsProfile::by_name("real_time").is_some());
+    }
+
+    #[test]
+    fn by_name_standard() {
         assert!(StatisticsProfile::by_name("standard").is_some());
+    }
+
+    #[test]
+    fn by_name_default_alias() {
+        let p = StatisticsProfile::by_name("default");
+        assert!(p.is_some());
+        assert_eq!(p.map(|p| p.name), Some("Standard".to_string()));
+    }
+
+    #[test]
+    fn by_name_lazy() {
         assert!(StatisticsProfile::by_name("lazy").is_some());
+    }
+
+    #[test]
+    fn by_name_stale() {
+        assert!(StatisticsProfile::by_name("stale").is_some());
+    }
+
+    #[test]
+    fn by_name_analytical() {
+        assert!(StatisticsProfile::by_name("analytical").is_some());
+    }
+
+    #[test]
+    fn by_name_olap_alias() {
+        let p = StatisticsProfile::by_name("olap");
+        assert!(p.is_some());
+        assert_eq!(p.map(|p| p.name), Some("Analytical".to_string()));
+    }
+
+    #[test]
+    fn by_name_streaming() {
+        assert!(StatisticsProfile::by_name("streaming").is_some());
+    }
+
+    #[test]
+    fn by_name_nonexistent() {
         assert!(StatisticsProfile::by_name("nonexistent").is_none());
     }
 
     #[test]
-    fn test_profile_selector_high_write() {
-        let selector = ProfileSelector {
+    fn by_name_case_insensitive() {
+        assert!(StatisticsProfile::by_name("STANDARD").is_some());
+        assert!(StatisticsProfile::by_name("Lazy").is_some());
+    }
+
+    // ---- ProfileSelector ----
+
+    #[test]
+    fn selector_high_write_latency_sensitive() {
+        let s = ProfileSelector {
             writes_per_second: 1000.0,
             reads_per_second: 500.0,
             table_size: 1_000_000,
             latency_sensitivity: 0.9,
         };
-        let profile = selector.recommend();
-        assert_eq!(profile.name, "RealTime");
+        assert_eq!(s.recommend().name, "RealTime");
     }
 
     #[test]
-    fn test_profile_selector_read_mostly() {
-        let selector = ProfileSelector {
+    fn selector_moderate_write() {
+        let s = ProfileSelector {
+            writes_per_second: 100.0,
+            reads_per_second: 200.0,
+            table_size: 1_000_000,
+            latency_sensitivity: 0.5,
+        };
+        assert_eq!(s.recommend().name, "Standard");
+    }
+
+    #[test]
+    fn selector_read_mostly() {
+        let s = ProfileSelector {
             writes_per_second: 1.0,
             reads_per_second: 1000.0,
             table_size: 1_000_000,
             latency_sensitivity: 0.5,
         };
-        let profile = selector.recommend();
-        assert_eq!(profile.name, "Lazy");
+        assert_eq!(s.recommend().name, "Lazy");
     }
 
     #[test]
-    fn test_profile_selector_analytical() {
-        let selector = ProfileSelector {
+    fn selector_large_analytical() {
+        let s = ProfileSelector {
             writes_per_second: 10.0,
             reads_per_second: 100.0,
             table_size: 200_000_000,
             latency_sensitivity: 0.3,
         };
-        let profile = selector.recommend();
-        assert_eq!(profile.name, "Analytical");
+        assert_eq!(s.recommend().name, "Analytical");
+    }
+
+    #[test]
+    fn selector_balanced_defaults_to_standard() {
+        let s = ProfileSelector {
+            writes_per_second: 50.0,
+            reads_per_second: 200.0,
+            table_size: 1_000_000,
+            latency_sensitivity: 0.5,
+        };
+        assert_eq!(s.recommend().name, "Standard");
+    }
+
+    // ---- Serialization ----
+
+    #[test]
+    fn profile_serialize_roundtrip() {
+        let p = StatisticsProfile::standard();
+        let json = serde_json::to_string(&p)
+            .expect("serialize");
+        let d: StatisticsProfile = serde_json::from_str(&json)
+            .expect("deserialize");
+        assert_eq!(p, d);
     }
 }

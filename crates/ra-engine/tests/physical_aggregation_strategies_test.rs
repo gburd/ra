@@ -8,6 +8,7 @@ mod helpers;
 
 use helpers::*;
 use ra_core::algebra::{AggregateExpr, AggregateFunction, RelExpr};
+use ra_core::expr::{Const, Expr};
 
 // ── Hash Aggregation Tests ──────────────────────────────────────
 
@@ -17,7 +18,7 @@ fn test_hash_aggregation_few_groups() {
     let agg = RelExpr::Aggregate {
         group_by: vec![col("region")],
         aggregates: vec![AggregateExpr {
-            func: AggregateFunction::Sum,
+            function: AggregateFunction::Sum,
             expr: col("amount"),
             distinct: false,
         }],
@@ -32,8 +33,8 @@ fn test_hash_aggregation_many_groups() {
     let agg = RelExpr::Aggregate {
         group_by: vec![col("user_id"), col("event_type")],
         aggregates: vec![AggregateExpr {
-            func: AggregateFunction::Count,
-            expr: Expr::Const(Const::Int(1)),
+            function: AggregateFunction::Count,
+            arg: Some(Expr::Const(Const::Int(1))),
             distinct: false,
         }],
         input: Box::new(input),
@@ -49,12 +50,12 @@ fn test_hash_aggregation_fits_memory() {
         group_by: vec![col("customer_id")],
         aggregates: vec![
             AggregateExpr {
-                func: AggregateFunction::Sum,
+                function: AggregateFunction::Sum,
                 expr: col("total"),
                 distinct: false,
             },
             AggregateExpr {
-                func: AggregateFunction::Count,
+                function: AggregateFunction::Count,
                 expr: Expr::Const(Const::Int(1)),
                 distinct: false,
             },
@@ -71,17 +72,17 @@ fn test_hash_aggregation_multiple_aggregates() {
         group_by: vec![col("account_id")],
         aggregates: vec![
             AggregateExpr {
-                func: AggregateFunction::Sum,
+                function: AggregateFunction::Sum,
                 expr: col("debit"),
                 distinct: false,
             },
             AggregateExpr {
-                func: AggregateFunction::Sum,
+                function: AggregateFunction::Sum,
                 expr: col("credit"),
                 distinct: false,
             },
             AggregateExpr {
-                func: AggregateFunction::Count,
+                function: AggregateFunction::Count,
                 expr: Expr::Const(Const::Int(1)),
                 distinct: false,
             },
@@ -100,7 +101,7 @@ fn test_sort_aggregation_input_sorted() {
     let agg = RelExpr::Aggregate {
         group_by: vec![col("timestamp")],
         aggregates: vec![AggregateExpr {
-            func: AggregateFunction::Avg,
+            function: AggregateFunction::Avg,
             expr: col("value"),
             distinct: false,
         }],
@@ -116,8 +117,8 @@ fn test_sort_aggregation_high_cardinality() {
     let agg = RelExpr::Aggregate {
         group_by: vec![col("session_id"), col("event_id")],
         aggregates: vec![AggregateExpr {
-            func: AggregateFunction::Count,
-            expr: Expr::Const(Const::Int(1)),
+            function: AggregateFunction::Count,
+            arg: Some(Expr::Const(Const::Int(1))),
             distinct: false,
         }],
         input: Box::new(input),
@@ -132,7 +133,7 @@ fn test_sort_aggregation_memory_constrained() {
     let agg = RelExpr::Aggregate {
         group_by: vec![col("category")],
         aggregates: vec![AggregateExpr {
-            func: AggregateFunction::Max,
+            function: AggregateFunction::Max,
             expr: col("price"),
             distinct: false,
         }],
@@ -150,8 +151,8 @@ fn test_streaming_aggregation_ordered_input() {
     let agg = RelExpr::Aggregate {
         group_by: vec![col("hour")],
         aggregates: vec![AggregateExpr {
-            func: AggregateFunction::Count,
-            expr: Expr::Const(Const::Int(1)),
+            function: AggregateFunction::Count,
+            arg: Some(Expr::Const(Const::Int(1))),
             distinct: false,
         }],
         input: Box::new(input),
@@ -166,7 +167,7 @@ fn test_streaming_aggregation_single_pass() {
     let agg = RelExpr::Aggregate {
         group_by: vec![col("sensor_id")],
         aggregates: vec![AggregateExpr {
-            func: AggregateFunction::Avg,
+            function: AggregateFunction::Avg,
             expr: col("temperature"),
             distinct: false,
         }],
@@ -184,7 +185,7 @@ fn test_two_phase_aggregation_distributed() {
     let agg = RelExpr::Aggregate {
         group_by: vec![col("partition_key")],
         aggregates: vec![AggregateExpr {
-            func: AggregateFunction::Sum,
+            function: AggregateFunction::Sum,
             expr: col("value"),
             distinct: false,
         }],
@@ -201,17 +202,17 @@ fn test_two_phase_aggregation_decomposable() {
         group_by: vec![col("metric_name")],
         aggregates: vec![
             AggregateExpr {
-                func: AggregateFunction::Sum,
+                function: AggregateFunction::Sum,
                 expr: col("value"),
                 distinct: false,
             },
             AggregateExpr {
-                func: AggregateFunction::Min,
+                function: AggregateFunction::Min,
                 expr: col("value"),
                 distinct: false,
             },
             AggregateExpr {
-                func: AggregateFunction::Max,
+                function: AggregateFunction::Max,
                 expr: col("value"),
                 distinct: false,
             },
@@ -227,8 +228,8 @@ fn test_two_phase_aggregation_reduces_data_volume() {
     let agg = RelExpr::Aggregate {
         group_by: vec![col("group_id")],
         aggregates: vec![AggregateExpr {
-            func: AggregateFunction::Count,
-            expr: Expr::Const(Const::Int(1)),
+            function: AggregateFunction::Count,
+            arg: Some(Expr::Const(Const::Int(1))),
             distinct: false,
         }],
         input: Box::new(input),
@@ -245,7 +246,7 @@ fn test_three_phase_aggregation_skewed_data() {
     let agg = RelExpr::Aggregate {
         group_by: vec![col("hot_key")],
         aggregates: vec![AggregateExpr {
-            func: AggregateFunction::Sum,
+            function: AggregateFunction::Sum,
             expr: col("amount"),
             distinct: false,
         }],
@@ -260,7 +261,7 @@ fn test_three_phase_aggregation_large_groups() {
     let agg = RelExpr::Aggregate {
         group_by: vec![col("category"), col("subcategory")],
         aggregates: vec![AggregateExpr {
-            func: AggregateFunction::Avg,
+            function: AggregateFunction::Avg,
             expr: col("value"),
             distinct: false,
         }],
@@ -277,7 +278,7 @@ fn test_distinct_aggregation_count_distinct() {
     let agg = RelExpr::Aggregate {
         group_by: vec![col("page")],
         aggregates: vec![AggregateExpr {
-            func: AggregateFunction::Count,
+            function: AggregateFunction::Count,
             expr: col("user_id"),
             distinct: true,
         }],
@@ -292,7 +293,7 @@ fn test_distinct_aggregation_sum_distinct() {
     let agg = RelExpr::Aggregate {
         group_by: vec![col("customer_id")],
         aggregates: vec![AggregateExpr {
-            func: AggregateFunction::Sum,
+            function: AggregateFunction::Sum,
             expr: col("order_total"),
             distinct: true,
         }],
@@ -308,12 +309,12 @@ fn test_distinct_aggregation_multiple_columns() {
         group_by: vec![col("account_id")],
         aggregates: vec![
             AggregateExpr {
-                func: AggregateFunction::Count,
+                function: AggregateFunction::Count,
                 expr: col("merchant_id"),
                 distinct: true,
             },
             AggregateExpr {
-                func: AggregateFunction::Count,
+                function: AggregateFunction::Count,
                 expr: col("category"),
                 distinct: true,
             },
@@ -333,12 +334,12 @@ fn test_global_aggregation_no_grouping() {
         group_by: vec![],
         aggregates: vec![
             AggregateExpr {
-                func: AggregateFunction::Sum,
+                function: AggregateFunction::Sum,
                 expr: col("amount"),
                 distinct: false,
             },
             AggregateExpr {
-                func: AggregateFunction::Count,
+                function: AggregateFunction::Count,
                 expr: Expr::Const(Const::Int(1)),
                 distinct: false,
             },
@@ -354,7 +355,7 @@ fn test_global_aggregation_avg() {
     let agg = RelExpr::Aggregate {
         group_by: vec![],
         aggregates: vec![AggregateExpr {
-            func: AggregateFunction::Avg,
+            function: AggregateFunction::Avg,
             expr: col("score"),
             distinct: false,
         }],
@@ -371,7 +372,7 @@ fn test_aggregation_after_filter() {
     let agg = RelExpr::Aggregate {
         group_by: vec![col("customer_id")],
         aggregates: vec![AggregateExpr {
-            func: AggregateFunction::Sum,
+            function: AggregateFunction::Sum,
             expr: col("total"),
             distinct: false,
         }],
@@ -387,8 +388,8 @@ fn test_aggregation_with_selective_filter() {
     let agg = RelExpr::Aggregate {
         group_by: vec![col("product_id")],
         aggregates: vec![AggregateExpr {
-            func: AggregateFunction::Count,
-            expr: Expr::Const(Const::Int(1)),
+            function: AggregateFunction::Count,
+            arg: Some(Expr::Const(Const::Int(1))),
             distinct: false,
         }],
         input: Box::new(filtered),
@@ -404,7 +405,7 @@ fn test_aggregation_after_join() {
     let agg = RelExpr::Aggregate {
         group_by: vec![col("country")],
         aggregates: vec![AggregateExpr {
-            func: AggregateFunction::Sum,
+            function: AggregateFunction::Sum,
             expr: col("order_total"),
             distinct: false,
         }],
@@ -421,7 +422,7 @@ fn test_gpu_hash_aggregation() {
     let agg = RelExpr::Aggregate {
         group_by: vec![col("category")],
         aggregates: vec![AggregateExpr {
-            func: AggregateFunction::Sum,
+            function: AggregateFunction::Sum,
             expr: col("value"),
             distinct: false,
         }],
@@ -436,7 +437,7 @@ fn test_parallel_aggregation_cpu_cores() {
     let agg = RelExpr::Aggregate {
         group_by: vec![col("timestamp")],
         aggregates: vec![AggregateExpr {
-            func: AggregateFunction::Avg,
+            function: AggregateFunction::Avg,
             expr: col("cpu_usage"),
             distinct: false,
         }],
@@ -454,7 +455,7 @@ fn test_aggregation_spill_to_disk() {
     let agg = RelExpr::Aggregate {
         group_by: vec![col("high_card_column")],
         aggregates: vec![AggregateExpr {
-            func: AggregateFunction::Sum,
+            function: AggregateFunction::Sum,
             expr: col("value"),
             distinct: false,
         }],
@@ -470,8 +471,8 @@ fn test_aggregation_adaptive_strategy() {
     let agg = RelExpr::Aggregate {
         group_by: vec![col("key")],
         aggregates: vec![AggregateExpr {
-            func: AggregateFunction::Count,
-            expr: Expr::Const(Const::Int(1)),
+            function: AggregateFunction::Count,
+            arg: Some(Expr::Const(Const::Int(1))),
             distinct: false,
         }],
         input: Box::new(input),
@@ -487,7 +488,7 @@ fn test_nested_aggregation() {
     let inner_agg = RelExpr::Aggregate {
         group_by: vec![col("product_id")],
         aggregates: vec![AggregateExpr {
-            func: AggregateFunction::Sum,
+            function: AggregateFunction::Sum,
             expr: col("quantity"),
             distinct: false,
         }],
@@ -497,7 +498,7 @@ fn test_nested_aggregation() {
     let outer_agg = RelExpr::Aggregate {
         group_by: vec![],
         aggregates: vec![AggregateExpr {
-            func: AggregateFunction::Max,
+            function: AggregateFunction::Max,
             expr: col("sum_quantity"),
             distinct: false,
         }],

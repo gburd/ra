@@ -1,32 +1,296 @@
 ---
 id: push-based-llvm-codegen
-name: Push-Based llvm-codegen
+name: Push-Based LLVM Code Generation
 category: execution-models
 version: 1.0.0
-databases: [HyPer, Umbra]
-tags: [execution, push-based, compilation]
+databases: [HyPer, Umbra, PostgreSQL (JIT), CockroachDB]
+authors: [Thomas Neumann, Andres Freund]
+tags: [execution, push-based, llvm, jit, codegen, compilation]
+standard: HyPer model
 ---
 
-# Push-Based llvm-codegen
+# Push-Based LLVM Code Generation
 
 ## Description
 
-Compiled llvm-codegen operator in push-based execution model. Generates tight loops with minimal overhead.
+LLVM-based code generation compiles query pipelines to optimized native machine code using the LLVM compiler infrastructure. The query engine translates the relational plan into LLVM IR (Intermediate Representation), applies LLVM's optimization passes (constant propagation, dead code elimination, loop unrolling, auto-vectorization), and then generates architecture-specific machine code. This gives query execution near-handwritten-C performance.
+
+**LLVM pipeline:**
+1. **Query plan** -> Pipeline identification
+2. **Pipeline** -> LLVM IR generation
+3. **LLVM IR** -> Optimization passes (O2/O3)
+4. **Optimized IR** -> Machine code (x86-64, AArch64)
+5. **Machine code** -> Execute via MCJIT/ORC JIT
+
+**Key advantages:**
+- Professional-grade optimizations (40+ passes)
+- Architecture-specific code (AVX2, NEON, etc.)
+- Auto-vectorization of tight loops
+- Aggressive inlining and register allocation
+- Well-tested, production-quality backend
+
+**Trade-offs:**
+- LLVM compilation latency (5-100ms per pipeline)
+- LLVM library is large (~50MB)
+- IR generation requires deep LLVM API knowledge
+- Debugging generated code is difficult
+
+## Relational Algebra
+
+```
+LLVM IR generation for a scan-filter-project pipeline:
+
+define void @pipeline_1(%Table* %table, %Result* %output) {
+entry:
+  %num_pages = call i64 @table_num_pages(%Table* %table)
+  br label %page_loop
+
+page_loop:
+  %page_idx = phi i64 [0, %entry], [%next_page, %page_continue]
+  %page = call %Page* @table_get_page(%Table* %table, i64 %page_idx)
+  %num_rows = call i64 @page_num_rows(%Page* %page)
+  br label %row_loop
+
+row_loop:
+  %row_idx = phi i64 [0, %page_loop], [%next_row, %row_continue]
+  ; Load columns (filter + project)
+  %col_a = call i64 @page_get_int(%Page* %page, i64 %row_idx, i32 0)
+  %col_b = call double @page_get_float(%Page* %page, i64 %row_idx, i32 1)
+
+  ; Inline filter: col_a > 100
+  %cmp = icmp sgt i64 %col_a, 100
+  br i1 %cmp, label %filter_pass, label %row_continue
+
+filter_pass:
+  ; Inline project: col_b * 1.08
+  %result = fmul double %col_b, 1.08
+  call void @emit_result(%Result* %output, double %result)
+  br label %row_continue
+
+row_continue:
+  %next_row = add i64 %row_idx, 1
+  %done_rows = icmp eq i64 %next_row, %num_rows
+  br i1 %done_rows, label %page_continue, label %row_loop
+
+page_continue:
+  %next_page = add i64 %page_idx, 1
+  %done_pages = icmp eq i64 %next_page, %num_pages
+  br i1 %done_pages, label %exit, label %page_loop
+
+exit:
+  ret void
+}
+```
 
 ## Implementation
 
 ```rust
-pub fn compile_llvm-codegen(ctx: &mut CompileContext) {
-    ctx.emit("// Compiled llvm-codegen");
-    // Generate optimized machine code
+use ra_core::algebra::RelExpr;
+
+/// LLVM JIT compilation engine for query pipelines
+pub struct LLVMQueryCompiler {
+    context: LLVMContext,
+    module: LLVMModule,
+    builder: LLVMBuilder,
+    execution_engine: LLVMExecutionEngine,
+}
+
+impl LLVMQueryCompiler {
+    pub fn new() -> Self {
+        let context = LLVMContext::new();
+        let module = context.create_module("query");
+        let builder = context.create_builder();
+        let execution_engine = LLVMExecutionEngine::new(&module);
+        Self { context, module, builder, execution_engine }
+    }
+
+    /// Compile a pipeline to LLVM IR, optimize, and JIT
+    pub fn compile_pipeline(
+        &mut self,
+        pipeline: &Pipeline,
+    ) -> CompiledFunction {
+        // Step 1: Create function signature
+        let fn_type = self.context.function_type(
+            self.context.void_type(),
+            &[
+                self.context.pointer_type(), // table
+                self.context.pointer_type(), // output
+            ],
+        );
+        let function = self.module.add_function(
+            &format!("pipeline_{}", pipeline.id()),
+            fn_type,
+        );
+
+        // Step 2: Generate LLVM IR for pipeline body
+        let entry = self.context.append_basic_block(function, "entry");
+        self.builder.position_at_end(entry);
+        self.generate_pipeline_ir(pipeline, function);
+
+        // Step 3: Run optimization passes
+        self.run_optimization_passes(function);
+
+        // Step 4: JIT compile to native code
+        self.execution_engine.compile(function)
+    }
+
+    fn generate_pipeline_ir(
+        &mut self,
+        pipeline: &Pipeline,
+        function: LLVMValue,
+    ) {
+        // Generate nested loops for scan
+        let (page_loop, row_loop) = self.emit_scan_loops(
+            function, &pipeline.source,
+        );
+
+        // Generate inline code for each operator
+        for op in &pipeline.operators {
+            match op {
+                RelExpr::Filter { predicate, .. } => {
+                    self.emit_filter_ir(predicate);
+                }
+                RelExpr::Project { exprs, .. } => {
+                    self.emit_project_ir(exprs);
+                }
+                RelExpr::HashJoinProbe { .. } => {
+                    self.emit_hash_probe_ir(op);
+                }
+                _ => {}
+            }
+        }
+
+        // Generate sink
+        self.emit_sink_ir(&pipeline.sink);
+    }
+
+    /// LLVM optimization passes applied to generated IR
+    fn run_optimization_passes(&self, function: LLVMValue) {
+        let pass_manager = LLVMPassManager::new();
+
+        // Standard optimization pipeline (similar to -O2)
+        pass_manager.add_instruction_combining();
+        pass_manager.add_reassociate();
+        pass_manager.add_gvn(); // Global Value Numbering (CSE)
+        pass_manager.add_cfg_simplification();
+        pass_manager.add_dead_code_elimination();
+        pass_manager.add_loop_unrolling();
+
+        // Auto-vectorization
+        pass_manager.add_loop_vectorize();
+        pass_manager.add_slp_vectorize(); // Superword Level Parallelism
+
+        // Memory optimization
+        pass_manager.add_mem_to_reg(); // Stack to register promotion
+        pass_manager.add_licm(); // Loop Invariant Code Motion
+
+        // Aggressive inlining
+        pass_manager.add_function_inlining();
+
+        pass_manager.run(function);
+    }
+}
+
+/// Compilation time model
+pub fn llvm_compilation_cost(
+    num_operators: usize,
+    ir_complexity: usize,
+) -> f64 {
+    // IR generation: ~0.5ms per operator
+    let ir_gen_cost = num_operators as f64 * 0.5;
+
+    // Optimization passes: ~2-20ms depending on IR size
+    let opt_cost = (ir_complexity as f64).sqrt() * 2.0;
+
+    // Machine code generation: ~1-5ms
+    let codegen_cost = (ir_complexity as f64 / 100.0).max(1.0);
+
+    ir_gen_cost + opt_cost + codegen_cost
 }
 ```
 
 ## Cost Model
 
-- Near-zero per-tuple overhead
-- Compilation amortized
+**Compilation Latency:**
+- IR generation: 0.5-2ms per pipeline operator
+- Optimization passes: 2-50ms (depends on IR size)
+- Machine code generation: 1-10ms
+- Total: typically 5-100ms per pipeline
+- Amortized: negligible for queries processing >100K rows
+
+**Execution Performance:**
+- Generated code quality: comparable to -O2 compiled C
+- Auto-vectorization: 4-8x speedup where applicable
+- Register allocation: optimal for the generated function
+- Branch prediction: tight loops are highly predictable
+
+**Optimization Pass Impact:**
+- GVN (CSE): ~15-30% code size reduction
+- Dead code elimination: ~5-10% reduction
+- Loop unrolling: ~2x for small loop bodies
+- Auto-vectorization: 4-8x for numeric operations
+- Inlining: eliminates all internal function calls
+
+**vs. Interpretation:**
+- 10-100x faster execution for CPU-bound queries
+- Break-even: queries processing >10K rows
+
+## Test Cases
+
+```sql
+-- Test 1: Simple pipeline (fast compilation)
+SELECT * FROM orders WHERE amount > 1000;
+-- Expected: ~5ms compilation, ~2 LLVM IR instructions per row
+-- Generated: tight loop with one icmp + conditional branch
+
+-- Test 2: Complex pipeline (LLVM optimizations matter)
+SELECT
+  l_returnflag,
+  SUM(l_extendedprice * (1 - l_discount)) AS sum_disc_price,
+  SUM(l_extendedprice * (1 - l_discount) * (1 + l_tax)) AS sum_charge
+FROM lineitem
+WHERE l_shipdate <= DATE '1998-12-01' - INTERVAL '90' DAY
+GROUP BY l_returnflag;
+-- Expected: LLVM CSE eliminates duplicate (1 - l_discount)
+-- Auto-vectorization of arithmetic on contiguous columns
+
+-- Test 3: Adaptive compilation (short vs long queries)
+SELECT * FROM small_table WHERE id = 42;
+-- Expected: Skip LLVM, use interpreted execution
+-- Compilation cost exceeds execution time for small inputs
+
+-- Test 4: Multi-pipeline compilation
+SELECT c.name, SUM(o.total)
+FROM customers c JOIN orders o ON c.id = o.cust_id
+GROUP BY c.name ORDER BY SUM(o.total) DESC;
+-- Expected: 4 pipelines compiled to 4 functions
+-- Total compilation: ~30-50ms, amortized over execution
+```
+
+## Comparison with Other Models
+
+| Aspect | LLVM JIT | Bytecode Interp | C++ Templates |
+|--------|---------|----------------|---------------|
+| Compilation time | 5-100ms | 0 | Ahead-of-time |
+| Code quality | Optimal | 10-50x slower | Optimal |
+| Optimization | Full LLVM | None | Full compiler |
+| Portability | Multi-arch | Portable | Compile-time |
+| Debug support | Hard | Easy | Medium |
+| Memory footprint | ~50MB (LLVM) | Minimal | N/A |
 
 ## References
 
-1. Neumann, "Efficiently Compiling Efficient Query Plans", VLDB 2011
+1. **Neumann, Thomas**. "Efficiently Compiling Efficient Query Plans for Modern Hardware." VLDB 2011.
+   - LLVM IR generation for query pipelines in HyPer
+
+2. **Lattner, Chris; Adve, Vikram**. "LLVM: A Compilation Framework for Lifelong Program Analysis & Transformation." CGO 2004.
+   - LLVM compiler infrastructure
+
+3. **Freund, Andres**. "JIT-compiling SQL queries in PostgreSQL using LLVM." PGCon 2018.
+   - LLVM JIT integration in PostgreSQL
+
+4. **Kersten, Timo et al**. "Everything You Always Wanted to Know About Compiled and Vectorized Queries But Were Afraid to Ask." VLDB 2018.
+   - Analysis of LLVM compilation overhead vs vectorized execution
+
+5. **Wanderman-Milne, Skye; Li, Nong**. "Runtime Code Generation in Cloudera Impala." IEEE Data Eng. Bull. 2014.
+   - LLVM codegen in Impala query engine

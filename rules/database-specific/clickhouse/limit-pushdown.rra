@@ -1,0 +1,110 @@
+---
+id: clickhouse-limit-pushdown
+name: "ClickHouse LIMIT Pushdown"
+category: database-specific/clickhouse
+databases: [clickhouse]
+execution_models: [column-at-a-time, vectorized]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [limit, pushdown, early-termination, olap]
+complexity: "O(1)"
+benefit_range: [0.3, 0.95]
+---
+
+# ClickHouse LIMIT Pushdown
+
+## Metadata
+- **Rule ID**: `clickhouse-limit-pushdown`
+- **Category**: Database-specific / ClickHouse
+- **Source**: `src/Processors/QueryPlan/Optimizations/limitPushDown.cpp`
+- **Complexity**: O(1) plan transformation
+- **Prerequisites**: LimitStep above compatible operators
+- **Alternatives**: Full computation followed by limit
+
+## Description
+
+ClickHouse pushes LIMIT down through the query plan to enable early
+termination. When a LimitStep sits above operators that preserve or
+reduce cardinality (expressions, filters, sorting), the limit is
+propagated to the storage layer where it enables the ReadFromMergeTree
+step to stop reading after enough rows are found.
+
+Combined with the sparse index, limit pushdown means point queries
+(LIMIT 1) on sorted data can return after reading a single granule.
+
+**When to apply:**
+- LIMIT above expressions, filters, or sorts
+- LIMIT pushed to storage enables early scan termination
+
+**Why it works for OLAP:**
+- Dashboard "top N" queries are extremely common
+- Early termination avoids scanning billions of rows
+- Combined with read-in-order: streaming top-N
+
+## Relational Algebra
+
+```
+limit[N](expression(filter[pred](scan[T])))
+  -> expression(filter[pred](limit-scan[T, N]))
+```
+
+## Implementation (egg rewrite rules)
+
+```lisp
+;; Push LIMIT through expression
+(rewrite (limit ?n (expression ?expr ?input))
+  (expression ?expr (limit ?n ?input)))
+
+;; Push LIMIT through filter (as scan limit hint)
+(rewrite (limit ?n (filter ?pred ?input))
+  (filter ?pred (scan-with-limit ?input ?n)))
+
+;; Push LIMIT to storage layer
+(rewrite (limit ?n (scan ?table))
+  (scan-with-limit ?table ?n))
+```
+
+## Cost Model
+
+```rust
+pub fn cost_limit_pushdown(
+    total_rows: u64,
+    limit: u64,
+    selectivity: f64,
+    hardware: &HardwareModel,
+) -> Cost {
+    let rows_to_scan = (limit as f64 / selectivity).min(total_rows as f64);
+    Cost::io(rows_to_scan * hardware.seq_read_cost())
+}
+```
+
+**Typical benefit**: 30-95% for small LIMIT on large tables
+
+## Test Cases
+
+### Positive: Simple LIMIT pushdown
+```sql
+SELECT * FROM events LIMIT 100;
+-- Storage reads only ~100 rows worth of granules, then stops
+```
+
+### Positive: LIMIT through filter
+```sql
+SELECT * FROM events WHERE status = 'error' LIMIT 10;
+-- Storage limit hint: stop scanning after finding 10 matches
+-- May read more granules if selectivity is low
+```
+
+### Negative: LIMIT after aggregation
+```sql
+SELECT department, count(*) FROM employees
+GROUP BY department LIMIT 5;
+-- Cannot push limit below aggregation
+-- All rows must be aggregated first
+```
+
+## References
+
+- ClickHouse: `src/Processors/QueryPlan/Optimizations/limitPushDown.cpp`
+- ClickHouse: `src/Processors/QueryPlan/Optimizations/optimizePrimaryKeyConditionAndLimit.cpp`

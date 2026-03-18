@@ -1,0 +1,151 @@
+---
+id: calcite-aggregate-join-remove
+name: Calcite AggregateJoinRemoveRule
+category: logical/join-elimination
+databases: [calcite, postgresql, mysql, oracle]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [logical, calcite, aggregate, join, elimination, simplification]
+complexity: O(n)
+benefit_range: [0.3, 0.9]
+---
+
+# Calcite AggregateJoinRemoveRule
+
+## Description
+
+Removes a join beneath an aggregate when the join's non-preserved
+side contributes no columns to the aggregate output. In a LEFT JOIN
+where only columns from the left side are used in GROUP BY and
+aggregate functions, the right side can be eliminated entirely.
+
+**When to apply**: An aggregate sits on top of a LEFT or RIGHT join,
+and all group-by columns and aggregate arguments reference only the
+preserved side of the join.
+
+**Why it works**: If the aggregate uses DISTINCT or all aggregate calls
+have DISTINCT, the join cannot introduce new distinct values from the
+preserved side. The right side either matches (no change) or produces
+NULLs (filtered by the aggregate), making it redundant.
+
+**Calcite class**: `org.apache.calcite.rel.rules.AggregateJoinRemoveRule`
+
+## Relational Algebra
+
+```algebra
+-- Before: aggregate over left join
+gamma[g; DISTINCT](R LEFT JOIN S ON R.k = S.k)
+  where g references only R's columns
+
+-- After: aggregate over left side only
+gamma[g; DISTINCT](R)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-aggregate-join-remove-left";
+    "(aggregate ?group ?aggs
+        (left-join ?cond ?left ?right))" =>
+    "(aggregate ?group ?aggs ?left)"
+    if aggs_reference_only_left("?group", "?aggs", "?left")
+    if all_aggs_distinct_or_no_aggs("?aggs")
+),
+
+rw!("calcite-aggregate-join-remove-right";
+    "(aggregate ?group ?aggs
+        (right-join ?cond ?left ?right))" =>
+    "(aggregate ?group ?aggs ?right)"
+    if aggs_reference_only_right("?group", "?aggs", "?right")
+    if all_aggs_distinct_or_no_aggs("?aggs")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    agg: &Aggregate,
+    join: &Join,
+) -> bool {
+    let join_type = join.join_type();
+    if !matches!(join_type, JoinType::Left | JoinType::Right) {
+        return false;
+    }
+
+    let preserved_side = match join_type {
+        JoinType::Left => join.left(),
+        JoinType::Right => join.right(),
+        _ => return false,
+    };
+
+    let preserved_cols = preserved_side.row_type().field_count();
+    let all_refs = agg.all_referenced_columns();
+
+    // All referenced columns must come from the preserved side
+    let only_preserved = all_refs.iter()
+        .all(|&col| col < preserved_cols);
+
+    // Either no agg calls, or all are distinct
+    let valid_aggs = agg.agg_calls().is_empty()
+        || agg.agg_calls().iter().all(|c| c.is_distinct);
+
+    only_preserved && valid_aggs
+}
+```
+
+**Restrictions:**
+- Join must be LEFT or RIGHT (not INNER or FULL)
+- All group-by and aggregate references must be from preserved side
+- Non-distinct aggregates like SUM would be affected by join fanout
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    left_rows: f64,
+    right_rows: f64,
+    join_selectivity: f64,
+) -> f64 {
+    let join_cost = left_rows * right_rows * join_selectivity;
+    let saved = join_cost - left_rows;
+    if join_cost > 0.0 { saved / join_cost } else { 0.0 }
+}
+```
+
+**Typical benefit**: 30-90% by eliminating an entire join operation.
+
+## Test Cases
+
+```sql
+-- Positive: DISTINCT with unused right side
+SELECT DISTINCT s.product_id
+FROM sales AS s
+LEFT JOIN product AS p ON s.product_id = p.product_id;
+-- Right side contributes nothing; becomes:
+-- SELECT DISTINCT s.product_id FROM sales AS s
+```
+
+```sql
+-- Positive: COUNT(DISTINCT) referencing only left
+SELECT s.store_id, COUNT(DISTINCT s.product_id)
+FROM sales AS s
+LEFT JOIN product AS p ON s.product_id = p.product_id
+GROUP BY s.store_id;
+-- Becomes: SELECT store_id, COUNT(DISTINCT product_id) FROM sales GROUP BY store_id
+```
+
+```sql
+-- Negative: SUM without DISTINCT
+SELECT s.store_id, SUM(s.amount)
+FROM sales AS s
+LEFT JOIN product AS p ON s.product_id = p.product_id
+GROUP BY s.store_id;
+-- Cannot remove: JOIN fanout affects SUM result
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/AggregateJoinRemoveRule.java (commit af6367d)

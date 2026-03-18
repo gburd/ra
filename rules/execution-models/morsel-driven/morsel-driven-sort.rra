@@ -1,48 +1,308 @@
 ---
 id: morsel-driven-sort
-name: Morsel-Driven sort
+name: Morsel-Driven Parallel Sort
 category: execution-models
 version: 1.0.0
-databases: [hyper, duckdb]
-tags: [execution, parallel, morsel, work-stealing]
+databases: [HyPer, DuckDB, Umbra]
+authors: [Viktor Leis, Thomas Neumann]
+tags: [execution, parallel, morsel, sort, merge, partitioned]
+standard: HyPer morsel model
 ---
 
-# Morsel-Driven sort
+# Morsel-Driven Parallel Sort
 
 ## Description
 
-Parallel execution of sorting using morsel-driven work-stealing model. Processes small chunks (morsels) of 10K-100K tuples across worker threads.
+Morsel-driven parallel sort uses a three-phase approach: (1) parallel local sort of morsels, (2) range partitioning across workers, and (3) parallel merge of sorted partitions. Each worker sorts its assigned morsels independently (embarrassingly parallel), then a global merge produces the final sorted output. For ORDER BY with LIMIT, a parallel top-K approach avoids sorting the full dataset.
+
+**Phases:**
+1. **Parallel local sort**: Each worker sorts its morsels using quicksort/radix sort
+2. **Sample-based range partition**: Sample keys to determine partition boundaries
+3. **Parallel merge**: Each worker merges its range partition from all local sorts
+
+**Key characteristics:**
+- **Embarrassingly parallel phase 1**: No communication during local sort
+- **Sample-based partitioning**: Avoids skew in merge phase
+- **K-way merge**: Final merge is O(N log K) where K = num_workers
+- **Top-K optimization**: Maintain per-worker heaps, merge only top K
+
+**Trade-offs:**
+- Full materialization required (pipeline breaker)
+- Memory: 2x data for merge buffers
+- Merge phase has less parallelism than local sort
+- Sample quality affects partition balance
+
+## Relational Algebra
+
+```
+MorselSort(input, sort_keys):
+
+Phase 1: Parallel local sort
+  parallel_for worker in 0..num_workers:
+    local_data[worker] = collect_morsels(worker)
+    sort(local_data[worker], sort_keys)
+
+Phase 2: Range partition (determine boundaries)
+  samples = sample_from_each(local_data, 1000)
+  boundaries = compute_quantiles(samples, num_workers)
+
+Phase 3: Parallel merge
+  parallel_for partition in 0..num_workers:
+    // Each worker merges one range from all local sorts
+    sources = extract_range(local_data, boundaries[partition])
+    result[partition] = k_way_merge(sources)
+
+  return concat(result)  // Already in order
+```
 
 ## Implementation
 
 ```rust
+use std::sync::Arc;
+
+/// Morsel-driven parallel sort
 pub struct MorselDrivenSort {
-    work_queue: Arc<Mutex<Vec<Morsel>>>,
+    source: MorselSource,
+    sort_keys: Vec<SortKey>,
     num_workers: usize,
 }
 
 impl MorselDrivenSort {
-    pub fn execute_parallel(&self) -> Result<Vec<Tuple>> {
-        // Spawn worker threads
-        let workers: Vec<_> = (0..self.num_workers)
-            .map(|id| self.spawn_worker(id))
+    pub fn execute(&self) -> Result<Vec<Batch>> {
+        // Phase 1: Parallel local sort
+        let source = Arc::new(self.source.clone());
+        let sort_keys = self.sort_keys.clone();
+
+        let local_sorted: Vec<Vec<Batch>> = (0..self.num_workers)
+            .into_par_iter()
+            .map(|worker_id| {
+                let mut local_data = Vec::new();
+
+                // Collect all morsels for this worker
+                while let Some(morsel) = source.next_morsel() {
+                    local_data.extend(morsel.to_batches());
+                }
+
+                // Sort locally
+                let mut rows: Vec<SortEntry> = local_data.iter()
+                    .flat_map(|b| b.to_sort_entries(&sort_keys))
+                    .collect();
+
+                rows.sort_unstable_by(|a, b| {
+                    a.key.cmp(&b.key)
+                });
+
+                reconstruct_batches(&rows)
+            })
             .collect();
-        
-        // Collect results
-        workers.into_iter()
-            .map(|w| w.join().unwrap())
-            .flatten()
-            .collect()
+
+        // Phase 2: Sample-based range partitioning
+        let boundaries = self.compute_range_boundaries(
+            &local_sorted,
+        )?;
+
+        // Phase 3: Parallel K-way merge
+        let merged: Vec<Vec<Batch>> = (0..self.num_workers)
+            .into_par_iter()
+            .map(|partition| {
+                // Extract this partition's range from each local sort
+                let sources: Vec<_> = local_sorted.iter()
+                    .map(|sorted| {
+                        extract_range(
+                            sorted,
+                            &boundaries,
+                            partition,
+                        )
+                    })
+                    .collect();
+
+                // K-way merge of sorted sources
+                k_way_merge(sources, &self.sort_keys)
+            })
+            .collect();
+
+        // Concatenate partitions (already in global order)
+        Ok(merged.into_iter().flatten().collect())
     }
+
+    /// Compute range boundaries via sampling
+    fn compute_range_boundaries(
+        &self,
+        local_sorted: &[Vec<Batch>],
+    ) -> Result<Vec<SortKey>> {
+        // Sample ~1000 keys from each worker
+        let sample_size = 1000;
+        let mut all_samples = Vec::new();
+
+        for sorted in local_sorted {
+            let total_rows: usize = sorted.iter()
+                .map(|b| b.size)
+                .sum();
+            let step = (total_rows / sample_size).max(1);
+
+            for (i, batch) in sorted.iter().enumerate() {
+                for row in (0..batch.size).step_by(step) {
+                    all_samples.push(
+                        batch.extract_sort_key(row, &self.sort_keys),
+                    );
+                }
+            }
+        }
+
+        all_samples.sort();
+
+        // Compute quantile boundaries
+        let mut boundaries = Vec::new();
+        for i in 1..self.num_workers {
+            let idx = i * all_samples.len() / self.num_workers;
+            boundaries.push(all_samples[idx].clone());
+        }
+
+        Ok(boundaries)
+    }
+}
+
+/// Parallel top-K sort (ORDER BY ... LIMIT K)
+pub struct MorselDrivenTopK {
+    source: MorselSource,
+    sort_keys: Vec<SortKey>,
+    k: usize,
+    num_workers: usize,
+}
+
+impl MorselDrivenTopK {
+    pub fn execute(&self) -> Result<Vec<Batch>> {
+        let source = Arc::new(self.source.clone());
+
+        // Phase 1: Per-worker top-K heaps
+        let local_heaps: Vec<_> = (0..self.num_workers)
+            .into_par_iter()
+            .map(|_| {
+                let mut heap = BinaryHeap::with_capacity(self.k);
+
+                while let Some(morsel) = source.next_morsel() {
+                    for row_idx in 0..morsel.size() {
+                        let key = morsel.extract_sort_key(
+                            row_idx, &self.sort_keys,
+                        );
+                        if heap.len() < self.k {
+                            heap.push(Reverse((key, row_idx)));
+                        } else if key < heap.peek().unwrap().0.0 {
+                            heap.pop();
+                            heap.push(Reverse((key, row_idx)));
+                        }
+                    }
+                }
+
+                heap
+            })
+            .collect();
+
+        // Phase 2: Merge local top-K heaps
+        let mut global_heap = BinaryHeap::with_capacity(self.k);
+        for local in local_heaps {
+            for entry in local {
+                if global_heap.len() < self.k {
+                    global_heap.push(entry);
+                } else if entry < *global_heap.peek().unwrap() {
+                    global_heap.pop();
+                    global_heap.push(entry);
+                }
+            }
+        }
+
+        // Sort final K results
+        let mut result: Vec<_> = global_heap.into_vec();
+        result.sort_by(|a, b| a.0.cmp(&b.0));
+
+        reconstruct_batches_from_entries(&result)
+    }
+}
+
+/// Cost model for parallel sort
+pub fn parallel_sort_cost(
+    total_rows: f64,
+    num_workers: usize,
+    key_bytes: usize,
+) -> f64 {
+    let rows_per_worker = total_rows / num_workers as f64;
+
+    // Phase 1: Local sort (parallel)
+    let local_sort = rows_per_worker * rows_per_worker.log2()
+        * 0.00001;
+
+    // Phase 2: Sampling + boundary computation
+    let sample_cost = num_workers as f64 * 1000.0 * 0.0001;
+
+    // Phase 3: K-way merge (parallel, log K overhead)
+    let merge_per_row = (num_workers as f64).log2() * 0.00002;
+    let merge_cost = rows_per_worker * merge_per_row;
+
+    local_sort + sample_cost + merge_cost
 }
 ```
 
 ## Cost Model
 
-- Parallel speedup: near-linear up to memory bandwidth
-- Overhead: ~5% for work stealing
-- NUMA-aware: avoids remote memory access
+**Phase 1 (Local Sort):**
+- Per-worker: O(N/P x log(N/P))
+- Parallel speedup: near-linear
+- Cache-friendly: worker's data fits in per-core cache
+
+**Phase 2 (Range Partition):**
+- Sampling: O(S x P) where S = samples per worker
+- Boundary computation: O(S x P x log(S x P))
+- Typically negligible: ~1ms
+
+**Phase 3 (Merge):**
+- Per-worker: O(N/P x log(P)) for K-way merge
+- Parallel: each worker merges its range partition
+- Total: O(N/P x log(P)), good parallel efficiency
+
+**Top-K Optimization:**
+- Local phase: O(N/P x log(K)) per worker (heap operations)
+- Merge phase: O(P x K x log(K))
+- Massive savings when K << N (e.g., LIMIT 100 on 1M rows)
+
+## Test Cases
+
+```sql
+-- Test 1: Full ORDER BY
+SELECT * FROM lineitem ORDER BY l_shipdate;
+-- 6M rows, 16 workers: ~375K rows per worker local sort
+-- Range partition: 16 boundaries from sampled shipdates
+-- Parallel 16-way merge: O(375K x log(16)) = O(375K x 4)
+
+-- Test 2: ORDER BY LIMIT (top-K)
+SELECT * FROM orders ORDER BY total DESC LIMIT 100;
+-- 1.5M rows, 16 workers: per-worker heap of 100
+-- Merge: combine 16 heaps of 100 = 1600 entries
+-- Orders of magnitude faster than full sort
+
+-- Test 3: Multi-key sort
+SELECT * FROM events ORDER BY user_id, timestamp DESC;
+-- Composite key normalization, then parallel sort
+-- Range partition on first key (user_id)
+
+-- Test 4: Sort with downstream aggregation
+SELECT customer_id, SUM(amount)
+FROM orders
+GROUP BY customer_id
+ORDER BY SUM(amount) DESC;
+-- First: parallel aggregation (morsel-driven)
+-- Then: parallel sort on aggregation result (smaller)
+```
 
 ## References
 
-1. Leis et al., "Morsel-Driven Parallelism: A NUMA-Aware Query Evaluation Framework", SIGMOD 2014
+1. **Leis, Viktor et al**. "Morsel-Driven Parallelism." SIGMOD 2014.
+   - Parallel sort within morsel-driven framework
+
+2. **Kim, Changkyu et al**. "Sort vs. Hash Revisited: Fast Join Implementation on Modern Multi-Core CPUs." VLDB 2009.
+   - Parallel sorting algorithms on multi-core
+
+3. **Polychroniou, Orestis; Ross, Kenneth A**. "A Comprehensive Study of Main-Memory Partitioning and its Application to Large-Scale Comparison- and Radix-Sort." SIGMOD 2014.
+   - Range-partitioned parallel sorting
+
+4. **Satish, Nadathur et al**. "Fast Sort on CPUs and GPUs." SIGMOD 2010.
+   - SIMD-accelerated parallel sorting

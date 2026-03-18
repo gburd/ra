@@ -1,0 +1,138 @@
+---
+id: clickhouse-prewhere-filter-pushdown
+name: "ClickHouse PREWHERE Filter Pushdown"
+category: database-specific/clickhouse
+databases: [clickhouse]
+execution_models: [vectorized, column-at-a-time]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [prewhere, filter, pushdown, columnar, late-materialization]
+complexity: "O(n)"
+benefit_range: [0.3, 0.9]
+---
+
+# ClickHouse PREWHERE Filter Pushdown
+
+## Metadata
+- **Rule ID**: `clickhouse-prewhere-filter-pushdown`
+- **Category**: Database-specific / ClickHouse
+- **Source**: `src/Storages/MergeTree/MergeTreeWhereOptimizer.cpp`
+- **Complexity**: O(n) scan of filtered columns only
+- **Prerequisites**: MergeTree engine; filter condition references table columns
+- **Alternatives**: Standard WHERE (reads all columns first)
+
+## Description
+
+ClickHouse's PREWHERE optimization moves selective filter conditions from
+WHERE into a PREWHERE phase that executes before full row materialization.
+Only the columns referenced by the PREWHERE condition are read first;
+rows that fail the predicate are skipped entirely, avoiding I/O on the
+remaining columns.
+
+The MergeTreeWhereOptimizer scores conditions by selectivity (estimated
+row count), column data size, and whether the condition uses the primary
+key. Conditions on small columns with high selectivity are preferred.
+Primary-key conditions are moved to the end of PREWHERE so the sparse
+index can prune granules before column reads.
+
+**When to apply:**
+- Wide MergeTree tables with many columns
+- Selective WHERE predicates on small columns
+- Queries that read only a subset of table columns
+
+**Why it works for OLAP:**
+- Columnar storage means each column is a separate file
+- Reading fewer columns first avoids I/O on irrelevant data
+- High selectivity filters eliminate most rows early
+
+## Relational Algebra
+
+```
+filter[pred](scan[T, cols])
+  -> prewhere[pred](scan[T, pred_cols])
+     -> materialize(remaining_cols, surviving_rows)
+```
+
+## Implementation (egg rewrite rules)
+
+```lisp
+;; Move selective filter to PREWHERE phase
+(rewrite (filter ?pred (column-scan ?table ?all-cols))
+  (materialize
+    (column-scan ?table (remaining-cols ?all-cols ?pred))
+    (prewhere ?pred (column-scan ?table (pred-cols ?pred))))
+  :if (is-mergetree-table ?table)
+  :if (< (selectivity ?pred) 0.5)
+  :if (< (columns-size ?pred) (* 0.3 (total-columns-size ?all-cols))))
+
+;; Multi-step PREWHERE: split into cascaded predicates
+(rewrite (prewhere (and ?p1 ?p2) ?scan)
+  (prewhere ?p2 (prewhere ?p1 ?scan))
+  :if (< (selectivity ?p1) (selectivity ?p2))
+  :if (< (columns-size ?p1) (columns-size ?p2)))
+
+;; Move primary key conditions to end of PREWHERE chain
+(rewrite (prewhere ?pk-pred (prewhere ?non-pk-pred ?scan))
+  (prewhere ?non-pk-pred (prewhere ?pk-pred ?scan))
+  :if (uses-primary-key ?pk-pred)
+  :if (not (uses-primary-key ?non-pk-pred)))
+```
+
+## Cost Model
+
+```rust
+pub fn cost_prewhere(
+    rows: u64,
+    pred_col_bytes: u64,
+    remaining_col_bytes: u64,
+    selectivity: f64,
+    hardware: &HardwareModel,
+) -> Cost {
+    let prewhere_io = Cost::io(pred_col_bytes as f64 * hardware.seq_read_cost());
+    let prewhere_cpu = Cost::cpu(rows * 5);
+    let surviving_rows = (rows as f64 * selectivity) as u64;
+    let materialize_io = Cost::io(
+        remaining_col_bytes as f64 * selectivity * hardware.seq_read_cost()
+    );
+    prewhere_io + prewhere_cpu + materialize_io
+}
+```
+
+**Typical benefit**: 30-90% I/O reduction for selective queries on wide tables
+
+## Test Cases
+
+### Positive: Selective filter on small column
+```sql
+SELECT user_id, name, email, profile_json
+FROM users
+WHERE status = 'active';
+
+-- status column is 1 byte per row, profile_json is 1KB+
+-- PREWHERE reads status first, skips profile_json for inactive users
+-- If 10% active: 90% I/O savings on large columns
+```
+
+### Positive: Multi-step PREWHERE
+```sql
+SELECT * FROM events
+WHERE event_type = 'purchase' AND amount > 100;
+
+-- Step 1 PREWHERE: event_type = 'purchase' (small, selective)
+-- Step 2 PREWHERE: amount > 100 (on surviving rows only)
+```
+
+### Negative: Non-selective filter
+```sql
+SELECT * FROM logs WHERE level != 'DEBUG';
+
+-- If 90% of rows are not DEBUG, PREWHERE saves little
+-- Standard WHERE may be cheaper (avoids PREWHERE overhead)
+```
+
+## References
+
+- ClickHouse: `src/Storages/MergeTree/MergeTreeWhereOptimizer.cpp`
+- ClickHouse: `src/Processors/QueryPlan/Optimizations/optimizePrewhere.cpp`
+- ClickHouse: `src/Storages/MergeTree/MergeTreeSplitPrewhereIntoReadSteps.cpp`

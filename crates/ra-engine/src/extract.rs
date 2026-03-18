@@ -10,8 +10,10 @@ use std::hash::BuildHasher;
 use egg::{Id, Language, RecExpr};
 use ra_core::algebra::RelExpr;
 use ra_core::statistics::Statistics;
+use ra_stats::accuracy::Staleness;
 
 use crate::analysis::RelAnalysis;
+use crate::cost::IntegratedCostFn;
 use crate::egraph::{EGraphError, RelLang};
 
 /// Cost function for plan extraction from the e-graph.
@@ -87,9 +89,9 @@ impl egg::CostFunction<RelLang> for RelCostFn {
 
 /// Extract the lowest-cost plan from the e-graph.
 ///
-/// Uses the provided hardware profile to compute hardware-aware costs.
-/// The `_table_stats` parameter is reserved for future use by a
-/// statistics-aware cost model.
+/// Uses both the hardware profile and table statistics to compute
+/// costs. When table statistics are available, staleness adjustments
+/// inflate row count estimates to bias toward robust plans.
 ///
 /// # Errors
 ///
@@ -98,10 +100,56 @@ impl egg::CostFunction<RelLang> for RelCostFn {
 pub fn extract_best<S: BuildHasher>(
     egraph: &egg::EGraph<RelLang, RelAnalysis>,
     root: Id,
-    _table_stats: &HashMap<String, Statistics, S>,
+    table_stats: &HashMap<String, Statistics, S>,
     hardware: &ra_hardware::HardwareProfile,
 ) -> Result<RelExpr, EGraphError> {
-    let cost_fn = RelCostFn::new(hardware.clone());
+    if table_stats.is_empty() {
+        let cost_fn = RelCostFn::new(hardware.clone());
+        let extractor = egg::Extractor::new(egraph, cost_fn);
+        let (_, best_expr) = extractor.find_best(root);
+        rec_expr_to_rel_expr(&best_expr)
+    } else {
+        let stats: HashMap<String, Statistics> = table_stats
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        let staleness_map: HashMap<String, Staleness> = stats
+            .keys()
+            .map(|k| (k.clone(), Staleness::Fresh))
+            .collect();
+        let cost_fn = IntegratedCostFn::new(
+            hardware.clone(),
+            stats,
+            staleness_map,
+        );
+        let extractor = egg::Extractor::new(egraph, cost_fn);
+        let (_, best_expr) = extractor.find_best(root);
+        rec_expr_to_rel_expr(&best_expr)
+    }
+}
+
+/// Extract the lowest-cost plan using staleness-aware statistics.
+///
+/// Unlike [`extract_best`], this function accepts per-table staleness
+/// information, allowing the cost function to inflate estimates for
+/// tables with stale statistics.
+///
+/// # Errors
+///
+/// Returns an error if the extracted nodes cannot be converted
+/// back to a [`RelExpr`].
+pub fn extract_best_with_staleness(
+    egraph: &egg::EGraph<RelLang, RelAnalysis>,
+    root: Id,
+    table_stats: &HashMap<String, Statistics>,
+    staleness_map: &HashMap<String, Staleness>,
+    hardware: &ra_hardware::HardwareProfile,
+) -> Result<RelExpr, EGraphError> {
+    let cost_fn = IntegratedCostFn::new(
+        hardware.clone(),
+        table_stats.clone(),
+        staleness_map.clone(),
+    );
     let extractor = egg::Extractor::new(egraph, cost_fn);
     let (_, best_expr) = extractor.find_best(root);
     rec_expr_to_rel_expr(&best_expr)

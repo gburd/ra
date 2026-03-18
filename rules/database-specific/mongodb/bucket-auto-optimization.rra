@@ -1,0 +1,141 @@
+---
+id: mongodb-bucket-auto-optimization
+name: MongoDB $bucketAuto Granularity Optimization
+category: database-specific/mongodb
+databases: [mongodb]
+execution_models: [pipeline]
+version: "1.0.0"
+authors: ["MongoDB Inc."]
+tags: [aggregation, bucket, histogram, auto-partition, optimization]
+complexity: "O(n log b)"
+benefit_range: [0.2, 3.0]
+---
+
+# MongoDB $bucketAuto Granularity Optimization
+
+## Description
+
+Optimizes `$bucketAuto` aggregation by using pre-computed statistics and index
+bounds to avoid full collection scans when computing histogram buckets. When an
+index exists on the groupBy field, the optimizer uses index min/max values and
+key distribution to estimate bucket boundaries without scanning all documents.
+
+**When to apply**: Aggregation pipelines using `$bucketAuto` or `$bucket` on
+indexed numeric or date fields. The optimizer leverages index metadata (min, max,
+key count) and optionally samples index keys to compute bucket boundaries.
+
+**Why it works**: `$bucketAuto` normally scans all documents to compute equal-
+frequency (or preferred-granularity) bucket boundaries. With an index, the
+planner retrieves the min/max from index metadata in O(1) and samples O(b * k)
+keys to estimate boundaries, where b is bucket count and k is oversample factor.
+
+## Relational Algebra
+
+```algebra
+-- Before: full scan to compute bucket boundaries
+gamma[bucket(amount, boundaries)](scan(orders))
+
+-- After: index-assisted bucket boundary computation
+gamma[bucket(amount, boundaries)](
+  index-sample-scan(idx_amount, sample_size=buckets*10))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mongodb-bucket-auto-use-index";
+    "(bucket-auto ?groupBy ?buckets ?granularity
+       (collection-scan ?coll))" =>
+    "(bucket-auto ?groupBy ?buckets ?granularity
+       (index-boundary-estimate ?coll ?groupBy ?buckets))"
+    if has_index_on("?coll", "?groupBy")
+    if is_numeric_or_date("?groupBy")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> bool {
+    stats.has_bucket_auto_stage
+        && stats.group_by_field_indexed
+        && stats.collection_size > 10000
+}
+```
+
+**Restrictions:**
+- Granularity options (POWERSOF2, 1-2-5, E-series) constrain bucket boundaries
+- Highly skewed distributions may produce uneven buckets
+- Index sampling trades accuracy for speed
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let collection_size = stats.total_documents as f64;
+    let bucket_count = stats.bucket_count as f64;
+    let sample_size = bucket_count * 10.0;
+
+    let full_scan_cost = collection_size * 0.001;
+    let sample_cost = sample_size * 0.001 + sample_size.log2() * 0.0001;
+
+    if full_scan_cost > sample_cost {
+        (full_scan_cost - sample_cost) / full_scan_cost
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 20% to 3x for large collections with indexed groupBy fields.
+
+## Test Cases
+
+### Positive: Histogram with index
+
+```javascript
+db.sales.createIndex({amount: 1})
+
+db.sales.aggregate([
+  {$bucketAuto: {
+    groupBy: "$amount",
+    buckets: 20,
+    granularity: "POWERSOF2"
+  }}
+])
+
+// With index: sample ~200 keys to estimate 20 bucket boundaries
+// Without index: scan entire collection to sort and partition
+```
+
+### Negative: Non-indexed field
+
+```javascript
+// No index on computed_score
+db.results.aggregate([
+  {$bucketAuto: {
+    groupBy: "$computed_score",
+    buckets: 10
+  }}
+])
+
+// Must scan all documents; no index optimization possible
+```
+
+## References
+
+**Implementation:**
+- MongoDB source: `src/mongo/db/pipeline/document_source_bucket_auto.cpp`
+- Granularity rounder: `src/mongo/db/pipeline/granularity_rounder.cpp`
+
+**Documentation:**
+- MongoDB Manual: "$bucketAuto"
+  - https://docs.mongodb.com/manual/reference/operator/aggregation/bucketAuto/

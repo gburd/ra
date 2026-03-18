@@ -1,0 +1,191 @@
+---
+id: range-index-selection
+name: "Range Index Selection for Ordered Access"
+category: physical/index-selection
+databases: [postgresql, mysql, oracle, mssql, clickhouse, cockroachdb]
+execution_models: [volcano, vectorized]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [index, range, btree, ordered, scan]
+complexity: "O(log n + k)"
+benefit_range: [0.3, 0.9]
+---
+
+# Range Index Selection for Ordered Access
+
+## Metadata
+- **Rule ID**: `range-index-selection`
+- **Category**: Physical / Index Selection
+- **Complexity**: O(log n) tree descent + O(k) leaf scan
+- **Prerequisites**: B-tree (or equivalent) index; range predicate
+- **Alternatives**: Sequential scan with filter; bitmap scan
+
+## Description
+
+B-tree indexes efficiently support range predicates (>, <, >=, <=,
+BETWEEN) by exploiting the sorted structure of the index. The
+optimizer locates the start of the range via tree descent (O(log n)),
+then scans leaf pages sequentially until the range end.
+
+The key decision is whether a range index scan is cheaper than a
+sequential scan. This depends on:
+- Range selectivity (what fraction of index entries match)
+- Clustering factor (are heap tuples in index order?)
+- Need for sorted output (index provides ordering for free)
+
+When the index is clustered (or the table is physically sorted in
+index order), range scans are particularly efficient because heap
+access becomes sequential rather than random.
+
+**When to apply:**
+- Range predicates on indexed column
+- Moderate selectivity (5-50% depending on clustering)
+- ORDER BY matches index order (eliminates sort)
+- LIMIT with ORDER BY on indexed column
+
+**When to avoid:**
+- Very low selectivity (entire table qualifies)
+- Unclustered index with selectivity > 10%
+
+## Relational Algebra
+
+```
+filter[col BETWEEN a AND b](scan[T])
+  -> range-scan[I(col)](a, b)
+     -> heap-fetch[T](tids)
+
+filter[col > a](sort[col](scan[T]))
+  -> range-scan[I(col)](a, +inf)    -- ordered output, no sort needed
+```
+
+## Implementation (egg rewrite rules)
+
+```lisp
+;; Range scan for BETWEEN predicate
+(rewrite (filter (between ?col ?lo ?hi) (scan ?table))
+  (heap-fetch ?table
+    (range-scan (btree-index ?table ?col) ?lo ?hi))
+  :if (has-btree-index ?table ?col)
+  :if (< (range-selectivity ?col ?lo ?hi) (range-tipping-point ?table ?col)))
+
+;; Range scan eliminates sort
+(rewrite (sort (list ?col)
+           (filter (>= ?col ?lo) (scan ?table)))
+  (heap-fetch ?table
+    (range-scan (btree-index ?table ?col) ?lo +inf))
+  :if (has-btree-index ?table ?col))
+
+;; Range scan with LIMIT (early termination)
+(rewrite (limit ?n
+           (sort (list ?col)
+             (filter (>= ?col ?lo) (scan ?table))))
+  (limit ?n
+    (heap-fetch ?table
+      (range-scan (btree-index ?table ?col) ?lo +inf)))
+  :if (has-btree-index ?table ?col))
+
+;; Prefer clustered index for wide ranges
+(rewrite (filter (between ?col ?lo ?hi) (scan ?table))
+  (clustered-range-scan (clustered-index ?table ?col) ?lo ?hi)
+  :if (has-clustered-index ?table ?col)
+  :if (< (range-selectivity ?col ?lo ?hi) 0.5))
+```
+
+## Cost Model
+
+```rust
+pub fn cost_range_index_scan(
+    selectivity: f64,
+    table_rows: u64,
+    table_pages: u64,
+    index_height: u64,
+    is_clustered: bool,
+    hardware: &HardwareModel,
+) -> Cost {
+    let matching_rows = (table_rows as f64 * selectivity) as u64;
+
+    let index_descent = Cost::io(
+        index_height as f64 * hardware.random_page_cost()
+    );
+    let leaf_scan = Cost::io(
+        (matching_rows as f64 / 100.0).ceil() * hardware.seq_page_cost()
+    );
+
+    let heap_cost = if is_clustered {
+        let matching_pages = (table_pages as f64 * selectivity).ceil();
+        Cost::io(matching_pages * hardware.seq_page_cost())
+    } else {
+        Cost::io(
+            matching_rows.min(table_pages) as f64 * hardware.random_page_cost()
+        )
+    };
+
+    let cpu = Cost::cpu(matching_rows * 3);
+
+    index_descent + leaf_scan + heap_cost + cpu
+}
+
+pub fn range_tipping_point(
+    is_clustered: bool,
+    random_page_cost: f64,
+    seq_page_cost: f64,
+) -> f64 {
+    if is_clustered {
+        0.50
+    } else {
+        seq_page_cost / random_page_cost
+    }
+}
+```
+
+**Typical benefit**: 30-90% for selective range queries; eliminates sort
+
+## Test Cases
+
+### Positive: Date range on clustered index
+```sql
+CREATE TABLE events (date DATE, ...) WITH (FILLFACTOR = 90);
+CLUSTER events USING events_pkey;
+
+SELECT * FROM events
+WHERE date BETWEEN '2024-03-01' AND '2024-03-31';
+-- Clustered index: sequential heap access
+-- 1/12 of data: well within tipping point for clustered
+```
+
+### Positive: ORDER BY with LIMIT
+```sql
+CREATE INDEX idx_price ON products(price);
+
+SELECT * FROM products ORDER BY price DESC LIMIT 10;
+-- Backward range scan from +inf, stop after 10 rows
+-- No sort needed: index provides ordering
+-- Reads only ~1 leaf page + 10 heap pages
+```
+
+### Positive: Range + sort elimination
+```sql
+SELECT * FROM transactions
+WHERE amount > 1000
+ORDER BY amount;
+-- Range scan from 1000 to +inf: already in order
+-- Sort step eliminated; streaming output
+```
+
+### Negative: Wide range, unclustered
+```sql
+CREATE INDEX idx_status ON orders(status_code);
+
+SELECT * FROM orders WHERE status_code BETWEEN 1 AND 8;
+-- 10 status codes, 8 match: 80% selectivity
+-- Unclustered: random heap access for 80% of rows
+-- Sequential scan cheaper
+```
+
+## References
+
+- Selinger et al., "Access Path Selection in a RDBMS", SIGMOD 1979
+- PostgreSQL: Index scan cost model in `costsize.c`
+- Graefe, "Implementing Sorting in Database Systems", ACM Computing Surveys 2006
+- O'Neil & O'Neil, "Database: Principles, Programming, and Performance"

@@ -250,75 +250,326 @@ pub enum GatheringPriority {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
 
+    // ---- GatheringCost ----
+
     #[test]
-    fn test_gathering_cost_zero() {
-        let cost = GatheringCost::zero();
-        assert_eq!(cost.cpu_time_ms, 0);
-        assert_eq!(cost.io_operations, 0);
-        assert_eq!(cost.interference_factor, 0.0);
+    fn cost_zero_all_fields() {
+        let c = GatheringCost::zero();
+        assert_eq!(c.cpu_time_ms, 0);
+        assert_eq!(c.io_operations, 0);
+        assert_eq!(c.memory_bytes, 0);
+        assert_eq!(c.interference_factor, 0.0);
+        assert_eq!(c.wall_time_ms, 0);
     }
 
     #[test]
-    fn test_gathering_cost_add() {
-        let cost1 = GatheringCost {
+    fn cost_add_sums_cpu_and_io() {
+        let a = GatheringCost {
             cpu_time_ms: 100,
             io_operations: 50,
             memory_bytes: 1000,
             interference_factor: 0.5,
             wall_time_ms: 150,
         };
-        let cost2 = GatheringCost {
+        let b = GatheringCost {
             cpu_time_ms: 200,
             io_operations: 75,
             memory_bytes: 2000,
             interference_factor: 0.3,
             wall_time_ms: 250,
         };
-        let total = cost1.add(&cost2);
-        assert_eq!(total.cpu_time_ms, 300);
-        assert_eq!(total.io_operations, 125);
-        assert_eq!(total.memory_bytes, 2000);
-        assert_eq!(total.interference_factor, 0.5);
+        let t = a.add(&b);
+        assert_eq!(t.cpu_time_ms, 300);
+        assert_eq!(t.io_operations, 125);
+        assert_eq!(t.wall_time_ms, 400);
     }
 
     #[test]
-    fn test_cost_estimator_full_scan() {
-        let estimator = CostEstimator::default();
-        let cost = estimator.estimate(GatheringMethod::FullScan, 1_000_000, 10_000);
-        assert!(cost.cpu_time_ms > 0);
-        assert!(cost.io_operations > 0);
-        assert!(cost.interference_factor > 0.5);
+    fn cost_add_takes_max_memory() {
+        let a = GatheringCost {
+            memory_bytes: 1000,
+            ..GatheringCost::zero()
+        };
+        let b = GatheringCost {
+            memory_bytes: 2000,
+            ..GatheringCost::zero()
+        };
+        assert_eq!(a.add(&b).memory_bytes, 2000);
     }
 
     #[test]
-    fn test_cost_estimator_sample() {
-        let estimator = CostEstimator::default();
-        let cost = estimator.estimate(
+    fn cost_add_takes_max_interference() {
+        let a = GatheringCost {
+            interference_factor: 0.5,
+            ..GatheringCost::zero()
+        };
+        let b = GatheringCost {
+            interference_factor: 0.3,
+            ..GatheringCost::zero()
+        };
+        assert_eq!(a.add(&b).interference_factor, 0.5);
+    }
+
+    #[test]
+    fn cost_scale_doubles() {
+        let c = GatheringCost {
+            cpu_time_ms: 100,
+            io_operations: 50,
+            memory_bytes: 1000,
+            interference_factor: 0.5,
+            wall_time_ms: 200,
+        };
+        let s = c.scale(2.0);
+        assert_eq!(s.cpu_time_ms, 200);
+        assert_eq!(s.io_operations, 100);
+        assert_eq!(s.wall_time_ms, 400);
+        assert_eq!(s.memory_bytes, 1000);
+        assert_eq!(s.interference_factor, 0.5);
+    }
+
+    #[test]
+    fn cost_scale_half() {
+        let c = GatheringCost {
+            cpu_time_ms: 100,
+            io_operations: 50,
+            memory_bytes: 1000,
+            interference_factor: 0.5,
+            wall_time_ms: 200,
+        };
+        let s = c.scale(0.5);
+        assert_eq!(s.cpu_time_ms, 50);
+        assert_eq!(s.io_operations, 25);
+    }
+
+    #[test]
+    fn cost_scale_zero() {
+        let c = GatheringCost {
+            cpu_time_ms: 100,
+            io_operations: 50,
+            memory_bytes: 1000,
+            interference_factor: 0.5,
+            wall_time_ms: 200,
+        };
+        let s = c.scale(0.0);
+        assert_eq!(s.cpu_time_ms, 0);
+        assert_eq!(s.io_operations, 0);
+    }
+
+    // ---- CostEstimator ----
+
+    #[test]
+    fn estimator_default_values() {
+        let e = CostEstimator::default();
+        assert_eq!(e.cpu_cost_per_row, 1.0);
+        assert_eq!(e.io_cost_per_page, 10.0);
+        assert_eq!(e.page_size, 8192);
+        assert_eq!(e.rows_per_page, 100);
+        assert_eq!(e.buffer_hit_ratio, 0.9);
+    }
+
+    #[test]
+    fn full_scan_has_high_interference() {
+        let e = CostEstimator::default();
+        let c = e.estimate(GatheringMethod::FullScan, 1_000_000, 10_000);
+        assert!(c.interference_factor > 0.5);
+    }
+
+    #[test]
+    fn full_scan_reads_all_pages() {
+        let e = CostEstimator::default();
+        let c = e.estimate(GatheringMethod::FullScan, 1_000_000, 10_000);
+        assert_eq!(c.io_operations, 10_000);
+    }
+
+    #[test]
+    fn full_scan_cpu_positive() {
+        let e = CostEstimator::default();
+        let c = e.estimate(GatheringMethod::FullScan, 1_000_000, 10_000);
+        assert!(c.cpu_time_ms > 0);
+    }
+
+    #[test]
+    fn block_sample_fewer_pages_than_full_scan() {
+        let e = CostEstimator::default();
+        let sample = e.estimate(
             GatheringMethod::BlockSample { sample_rate: 10 },
             1_000_000,
             10_000,
         );
-        let full_cost = estimator.estimate(GatheringMethod::FullScan, 1_000_000, 10_000);
-        assert!(cost.cpu_time_ms < full_cost.cpu_time_ms);
-        assert!(cost.io_operations < full_cost.io_operations);
+        let full = e.estimate(GatheringMethod::FullScan, 1_000_000, 10_000);
+        assert!(sample.io_operations < full.io_operations);
     }
 
     #[test]
-    fn test_cost_estimator_sketch() {
-        let estimator = CostEstimator::default();
-        let cost = estimator.estimate(GatheringMethod::Sketch, 1_000_000, 10_000);
-        assert!(cost.interference_factor < 0.1);
-        assert_eq!(cost.io_operations, 0);
+    fn block_sample_less_cpu_than_full_scan() {
+        let e = CostEstimator::default();
+        let sample = e.estimate(
+            GatheringMethod::BlockSample { sample_rate: 10 },
+            1_000_000,
+            10_000,
+        );
+        let full = e.estimate(GatheringMethod::FullScan, 1_000_000, 10_000);
+        assert!(sample.cpu_time_ms < full.cpu_time_ms);
     }
 
     #[test]
-    fn test_gathering_priority_ordering() {
+    fn block_sample_lower_interference() {
+        let e = CostEstimator::default();
+        let sample = e.estimate(
+            GatheringMethod::BlockSample { sample_rate: 10 },
+            1_000_000,
+            10_000,
+        );
+        assert!(sample.interference_factor < 0.5);
+    }
+
+    #[test]
+    fn row_sample_reads_all_pages() {
+        let e = CostEstimator::default();
+        let c = e.estimate(
+            GatheringMethod::RowSample { sample_rate: 10 },
+            1_000_000,
+            10_000,
+        );
+        assert_eq!(c.io_operations, 10_000);
+    }
+
+    #[test]
+    fn row_sample_less_cpu_than_full() {
+        let e = CostEstimator::default();
+        let sample = e.estimate(
+            GatheringMethod::RowSample { sample_rate: 10 },
+            1_000_000,
+            10_000,
+        );
+        let full = e.estimate(GatheringMethod::FullScan, 1_000_000, 10_000);
+        assert!(sample.cpu_time_ms < full.cpu_time_ms);
+    }
+
+    #[test]
+    fn index_scan_lower_interference_than_full() {
+        let e = CostEstimator::default();
+        let idx = e.estimate(GatheringMethod::IndexScan, 1_000_000, 10_000);
+        let full = e.estimate(GatheringMethod::FullScan, 1_000_000, 10_000);
+        assert!(idx.interference_factor < full.interference_factor);
+    }
+
+    #[test]
+    fn incremental_minimal_cost() {
+        let e = CostEstimator::default();
+        let inc = e.estimate(GatheringMethod::Incremental, 1_000_000, 10_000);
+        let full = e.estimate(GatheringMethod::FullScan, 1_000_000, 10_000);
+        assert!(inc.cpu_time_ms < full.cpu_time_ms);
+        assert!(inc.io_operations < full.io_operations);
+    }
+
+    #[test]
+    fn incremental_low_interference() {
+        let e = CostEstimator::default();
+        let inc = e.estimate(GatheringMethod::Incremental, 1_000_000, 10_000);
+        assert!(inc.interference_factor <= 0.1);
+    }
+
+    #[test]
+    fn sketch_no_io() {
+        let e = CostEstimator::default();
+        let c = e.estimate(GatheringMethod::Sketch, 1_000_000, 10_000);
+        assert_eq!(c.io_operations, 0);
+    }
+
+    #[test]
+    fn sketch_very_low_interference() {
+        let e = CostEstimator::default();
+        let c = e.estimate(GatheringMethod::Sketch, 1_000_000, 10_000);
+        assert!(c.interference_factor < 0.1);
+    }
+
+    #[test]
+    fn sketch_memory_usage() {
+        let e = CostEstimator::default();
+        let c = e.estimate(GatheringMethod::Sketch, 1_000_000, 10_000);
+        assert_eq!(c.memory_bytes, 1024 * 1024);
+    }
+
+    #[test]
+    fn higher_sample_rate_higher_cost() {
+        let e = CostEstimator::default();
+        let low = e.estimate(
+            GatheringMethod::BlockSample { sample_rate: 5 },
+            1_000_000,
+            10_000,
+        );
+        let high = e.estimate(
+            GatheringMethod::BlockSample { sample_rate: 50 },
+            1_000_000,
+            10_000,
+        );
+        assert!(high.cpu_time_ms > low.cpu_time_ms);
+    }
+
+    #[test]
+    fn larger_table_higher_cost() {
+        let e = CostEstimator::default();
+        let small = e.estimate(GatheringMethod::FullScan, 10_000, 100);
+        let large = e.estimate(GatheringMethod::FullScan, 10_000_000, 100_000);
+        assert!(large.cpu_time_ms > small.cpu_time_ms);
+    }
+
+    #[test]
+    fn custom_estimator_params() {
+        let e = CostEstimator {
+            cpu_cost_per_row: 0.5,
+            io_cost_per_page: 5.0,
+            page_size: 4096,
+            rows_per_page: 50,
+            buffer_hit_ratio: 0.95,
+        };
+        let c = e.estimate(GatheringMethod::FullScan, 100_000, 2_000);
+        assert!(c.cpu_time_ms > 0);
+    }
+
+    // ---- GatheringPriority ----
+
+    #[test]
+    fn priority_ordering() {
         assert!(GatheringPriority::Critical > GatheringPriority::High);
         assert!(GatheringPriority::High > GatheringPriority::Normal);
         assert!(GatheringPriority::Normal > GatheringPriority::Low);
         assert!(GatheringPriority::Low > GatheringPriority::Deferred);
+    }
+
+    #[test]
+    fn priority_equality() {
+        assert_eq!(GatheringPriority::Normal, GatheringPriority::Normal);
+    }
+
+    #[test]
+    fn gathering_cost_serialize_roundtrip() {
+        let c = GatheringCost {
+            cpu_time_ms: 100,
+            io_operations: 50,
+            memory_bytes: 1000,
+            interference_factor: 0.5,
+            wall_time_ms: 200,
+        };
+        let json = serde_json::to_string(&c)
+            .expect("serialize");
+        let d: GatheringCost = serde_json::from_str(&json)
+            .expect("deserialize");
+        assert_eq!(c, d);
+    }
+
+    #[test]
+    fn gathering_method_serialize_roundtrip() {
+        let m = GatheringMethod::BlockSample { sample_rate: 10 };
+        let json = serde_json::to_string(&m)
+            .expect("serialize");
+        let d: GatheringMethod = serde_json::from_str(&json)
+            .expect("deserialize");
+        assert_eq!(m, d);
     }
 }
