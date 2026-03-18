@@ -1,0 +1,169 @@
+---
+id: cockroachdb-split-disjunction-join-to-union
+name: Split Disjunctive Join Conditions into Union
+category: database-specific/cockroachdb
+databases: [cockroachdb]
+version: 1.0.0
+authors: ["RA Contributors"]
+tags: [database-specific, cockroachdb, join, disjunction, union, index]
+complexity: O(n1 + n2)
+benefit_range: [0.3, 0.8]
+---
+
+# Split Disjunctive Join Conditions into Union
+
+## Description
+
+Splits disjunctions (OR expressions) in ON clause predicates of inner or semi joins into a Union of two Join expressions. The first join contains the left subexpression of the OR, and the second contains the right subexpression. The Union is implemented as UNION ALL followed by DistinctOn to eliminate duplicates.
+
+**When to apply**: Join has an OR condition in the ON clause where indexes can cover both sides of the disjunction, or to enable hash-based join methods instead of cross join.
+
+**Why it works**: The execution plan can use separate indexes to satisfy each side of the disjunction and union the results. This avoids a full cross join or sequential scan, especially when each disjunct has good selectivity via an index.
+
+**Database version**: CockroachDB v20.1+
+
+## Relational Algebra
+
+```algebra
+Join[c1 OR c2](R, S)
+  -> DistinctOn[R.pk, S.pk](
+       UnionAll(
+         Join[c1](R, S),
+         Join[c2](R, S)
+       )
+     )
+  where can_split_join_disjuncts
+```
+
+Where:
+- `c1` and `c2` are predicates from the disjunctive ON clause
+- Primary keys are used for deduplication via DistinctOn
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("cockroachdb-split-disjunction-join-to-union";
+    "(inner_join ?left ?right ?on ?private)" =>
+    "(project
+        (distinct_on
+            (union_all
+                (inner_join ?left ?right (first_disjunct ?on) ?private)
+                (inner_join ?left ?right (second_disjunct ?on) ?private))
+            (primary_keys ?left ?right))
+        (output_cols (root)))"
+    if is_database("cockroachdb")
+    if can_split_join_with_disjuncts("?on")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    on_condition: &Expr,
+    left: &RelNode,
+    right: &RelNode,
+) -> bool {
+    // Must contain OR in ON clause
+    let (c1, c2) = match extract_disjunction(on_condition) {
+        Some((first, second)) => (first, second),
+        None => return false,
+    };
+
+    // Check if indexes can cover both disjuncts
+    let left_has_index_c1 = left.has_index_for_predicate(&c1);
+    let right_has_index_c1 = right.has_index_for_predicate(&c1);
+    let left_has_index_c2 = left.has_index_for_predicate(&c2);
+    let right_has_index_c2 = right.has_index_for_predicate(&c2);
+
+    // Benefit if at least one side per disjunct has an index
+    (left_has_index_c1 || right_has_index_c1)
+        && (left_has_index_c2 || right_has_index_c2)
+}
+```
+
+**Restrictions:**
+- Only applies to CockroachDB
+- Requires disjunction (OR) in ON clause
+- Most effective when indexes exist for both disjuncts
+- Adds overhead of DistinctOn operation
+- Both sides must have primary keys for deduplication
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    cross_join_card: f64,
+    indexed_join1_card: f64,
+    indexed_join2_card: f64,
+    distinct_overhead: f64,
+) -> f64 {
+    let cross_cost = cross_join_card * 100.0; // arbitrary cost factor
+    let union_cost = (indexed_join1_card + indexed_join2_card) * 10.0
+                   + distinct_overhead;
+
+    (cross_cost - union_cost) / cross_cost
+}
+```
+
+**Assumptions:**
+- Each disjunct can use an index for efficient join
+- Cross join would require full cartesian product
+- DistinctOn overhead is acceptable relative to cross join savings
+
+**Typical benefit**: 30-80% cost reduction when both disjuncts use indexes
+
+## Test Cases
+
+### Positive Case 1: Multi-Index Disjunction
+
+```sql
+-- Both disjuncts can use indexes
+SELECT * FROM orders o
+INNER JOIN customers c
+  ON (o.customer_id = c.id OR o.backup_customer_id = c.id);
+
+-- Transformed to:
+-- DistinctOn[o.pk, c.pk](
+--   UnionAll(
+--     InnerJoin[o.customer_id = c.id](orders, customers),
+--     InnerJoin[o.backup_customer_id = c.id](orders, customers)
+--   )
+-- )
+```
+
+### Positive Case 2: Semi-Join with OR
+
+```sql
+SELECT * FROM table1 t1
+WHERE EXISTS (
+  SELECT 1 FROM table2 t2
+  WHERE t1.key1 = t2.key OR t1.key2 = t2.key
+);
+
+-- Split into union of two semi-joins, each using an index
+```
+
+### Negative Case 1: No Indexes
+
+```sql
+-- Input (rule should NOT apply - no benefit without indexes)
+SELECT * FROM t1 JOIN t2 ON (t1.a = t2.a OR t1.b = t2.b);
+-- Where neither t1.a, t1.b, t2.a, nor t2.b have indexes
+
+-- Output (unchanged)
+```
+
+## References
+
+**Source code:**
+- CockroachDB: `pkg/sql/opt/xform/rules/join.opt`
+  - Rule: `SplitDisjunctionOfJoinTerms` (lines 127-196)
+  - Git: https://github.com/cockroachdb/cockroach
+  - Commit: 6e210ba6aa33cea5e27b1a8fae212c27941781f4 (2026-03-17)
+
+**Documentation:**
+- Related to Select rules: `SplitDisjunction` and `SplitDisjunctionAddKey`
+- CockroachDB optimizer blog: https://www.cockroachlabs.com/blog/building-cost-based-sql-optimizer/

@@ -1,0 +1,42 @@
+---
+id: flink-lookup-join-caching
+name: Lookup Join Caching (Flink)
+category: database-specific/flink
+databases: [flink]
+execution_models: [volcano, vectorized, push-based]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# Lookup Join Caching (Flink)
+
+## Metadata
+- **Rule ID**: `flink-lookup-join-caching`
+- **Category**: Database-Specific / Flink
+- **Source**: Apache Flink
+
+## Description
+
+Flink caches lookup join results (external table lookups) to reduce repeated queries to external systems.
+
+## Test Cases
+
+### Test 1: Cached JDBC lookup
+```sql
+SELECT e.*, u.name
+FROM events e
+LEFT JOIN users FOR SYSTEM_TIME AS OF e.event_time AS u
+  ON e.user_id = u.user_id;
+
+-- With caching:
+-- user_id=123 looked up once, cached for 5 minutes
+-- Subsequent events for user_id=123 use cache
+-- Reduces JDBC queries by 90%+
+```
+
+## Tags
+`database-specific`, `flink`, `lookup-join`, `caching`, `external-table`

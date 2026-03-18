@@ -1,0 +1,35 @@
+---
+id: approximate-query-processing
+name: Experimental approximate query processing
+category: execution-models
+version: 1.0.0
+databases: [spark, trino, clickhouse]
+tags: [execution, experimental, research, sampling]
+---
+
+# Experimental approximate query processing
+
+## Description
+
+Sample-based approximate results with error bounds.
+
+## Implementation
+
+```rust
+pub fn approximate_query_processing() {
+    // Uniform/stratified sampling
+    // Compute approximate aggregates
+    // Return result + confidence interval
+}
+```
+
+## Cost Model
+
+- Sampling: 0.1-1% of full scan
+- Accuracy: 95% confidence within 5% error
+- Speedup: 10-100x for aggregates
+
+## References
+
+1. Agarwal et al., "BlinkDB: Queries with Bounded Errors and Bounded Response Times", EuroSys 2013
+2. Pansare et al., "Online Aggregation for Large MapReduce Jobs", VLDB 2011

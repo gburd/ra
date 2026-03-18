@@ -1,0 +1,35 @@
+---
+id: learned-cost-models
+name: Experimental learned cost models
+category: execution-models
+version: 1.0.0
+databases: [postgresql, spark, trino]
+tags: [execution, experimental, research, machine-learning]
+---
+
+# Experimental learned cost models
+
+## Description
+
+ML-based cost prediction replacing hand-tuned models.
+
+## Implementation
+
+```rust
+pub fn learned_cost_models() {
+    // Train on actual query execution times
+    // Predict operator costs
+    // Adapt to workload changes
+}
+```
+
+## Cost Model
+
+- Training: continuous online learning
+- Prediction: sub-millisecond
+- Accuracy: 2-5x better than traditional models
+
+## References
+
+1. Marcus et al., "Neo: A Learned Query Optimizer", VLDB 2019
+2. Dutt et al., "Selectivity Estimation for Range Predicates using Lightweight Models", VLDB 2019

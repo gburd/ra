@@ -1,0 +1,52 @@
+---
+id: impala-codegen-disabled-fallback
+name: Codegen Disabled Fallback (Impala)
+category: database-specific/impala
+databases: [impala]
+execution_models: [volcano, vectorized, push-based]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# Codegen Disabled Fallback (Impala)
+
+## Metadata
+- **Rule ID**: `impala-codegen-fallback`
+- **Category**: Database-Specific / Impala
+- **Source**: Apache Impala
+
+## Description
+
+Impala adaptively disables codegen for simple queries where interpretation overhead is lower than compilation overhead.
+
+## Test Cases
+
+### Test 1: Simple query (no codegen)
+```sql
+SELECT * FROM users WHERE id = 123;
+
+-- Single-row lookup: interpretation faster
+-- Codegen disabled automatically
+```
+
+### Test 2: Complex query (codegen enabled)
+```sql
+SELECT user_id, COUNT(*), SUM(amount), AVG(price)
+FROM transactions
+WHERE date >= '2024-01-01'
+GROUP BY user_id
+HAVING SUM(amount) > 1000;
+
+-- Complex operators: codegen beneficial
+-- LLVM compilation enabled
+```
+
+## References
+1. **Impala Docs**: "Runtime Code Generation"
+
+## Tags
+`database-specific`, `impala`, `codegen`, `adaptive`, `llvm`, `interpretation`

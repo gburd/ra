@@ -1,0 +1,35 @@
+---
+id: column-vectorized-ops
+name: Column-at-a-Time vectorized ops
+category: execution-models
+version: 1.0.0
+databases: [monetdb, clickhouse]
+tags: [execution, columnar, x100, cache-conscious]
+---
+
+# Column-at-a-Time vectorized ops
+
+## Description
+
+SIMD operations on columns for arithmetic and comparisons.
+
+## Implementation
+
+```rust
+pub fn column_vectorized-ops() {
+    // Process entire columns at once
+    // Excellent cache behavior
+    // Sequential I/O
+}
+```
+
+## Cost Model
+
+- Sequential I/O: fastest possible
+- Cache-friendly: process full columns
+- SIMD: 4-8x speedup for operations
+
+## References
+
+1. Boncz et al., "MonetDB/X100: Hyper-Pipelining Query Execution", CIDR 2005
+2. Idreos et al., "MonetDB: Two Decades of Research", IEEE Data Eng. Bull. 2012

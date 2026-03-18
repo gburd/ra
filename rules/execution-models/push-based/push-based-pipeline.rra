@@ -1,0 +1,86 @@
+---
+id: push-based-pipeline
+name: Push-Based Data-Centric Execution Pipeline
+category: execution-models
+version: 1.0.0
+databases: [hyper, umbra, mssql]
+authors: [Thomas Neumann]
+tags: [execution, push-based, pipeline, compilation]
+standard: HyPer model
+---
+
+# Push-Based Data-Centric Execution Pipeline
+
+## Description
+
+Push-based execution inverts the Volcano iterator model: operators push data to their parents instead of parents pulling from children. Combined with JIT compilation, this eliminates function call overhead and enables aggressive compiler optimizations.
+
+**Key advantages:**
+- Data-centric: tuples "flow" through pipeline
+- Tight loops: excellent instruction cache behavior  
+- Register allocation: intermediate results in registers
+- Branch prediction: minimal mispredictions
+- No iterator overhead: 10-100x faster than Volcano
+
+## Relational Algebra
+
+```
+Push-based pipeline compilation:
+
+Compiled Pipeline:
+  for tuple in scan(table):
+    if predicate(tuple):
+      project(tuple)
+      emit(tuple)
+
+vs. Volcano (interpreted):
+  scan.open()
+  while tuple = scan.next():
+    if filter.next(tuple):
+      proj.next(tuple)
+```
+
+## Implementation
+
+```rust
+pub fn compile_push_pipeline(plan: &RelExpr) -> CompiledPipeline {
+    let mut code = CodeGen::new();
+    
+    code.emit("fn execute() {");
+    code.emit("  for tuple in table.scan() {");
+    
+    // Generate inline code for pipeline
+    generate_pipeline(&mut code, plan, "tuple");
+    
+    code.emit("  }");
+    code.emit("}");
+    
+    compile_to_native(code)
+}
+
+fn generate_pipeline(code: &mut CodeGen, plan: &RelExpr, var: &str) {
+    match plan {
+        RelExpr::Filter { predicate, .. } => {
+            code.emit(&format\!("if eval({}, {}) {{", var, predicate));
+            // Continue pipeline
+            code.emit("}");
+        }
+        RelExpr::Project { columns, .. } => {
+            code.emit(&format\!("let result = project({}, {:?});", var, columns));
+            code.emit("emit(result);");
+        }
+        _ => {}
+    }
+}
+```
+
+## Cost Model
+
+- Minimal per-tuple overhead (~1-5 CPU cycles)
+- Compilation cost amortized over execution
+- 10-100x faster than Volcano for tight loops
+
+## References
+
+1. Neumann, "Efficiently Compiling Efficient Query Plans for Modern Hardware", VLDB 2011
+2. Kersten et al., "Everything You Always Wanted to Know About Compiled and Vectorized Queries", VLDB 2018

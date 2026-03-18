@@ -1,0 +1,38 @@
+---
+id: flink-retract-optimization
+name: Retraction Optimization (Flink)
+category: database-specific/flink
+databases: [flink]
+execution_models: [volcano, vectorized, push-based]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# Retraction Optimization (Flink)
+
+## Metadata
+- **Rule ID**: `flink-retraction-optimization`
+- **Category**: Database-Specific / Flink
+- **Source**: Apache Flink
+
+## Description
+
+Flink minimizes retractions in changelog streams by detecting operations that don't require retractions (append-only, monotonic aggregates).
+
+## Test Cases
+
+### Test 1: Append-only aggregation (no retractions)
+```sql
+SELECT COUNT(*) FROM events;
+
+-- COUNT is monotonic (always increasing)
+-- No retractions generated
+-- More efficient state management
+```
+
+## Tags
+`database-specific`, `flink`, `retraction`, `changelog`, `streaming`

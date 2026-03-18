@@ -1,0 +1,72 @@
+---
+id: morsel-driven-parallelism
+name: Morsel-Driven Parallel Execution
+category: execution-models
+version: 1.0.0
+databases: [HyPer, DuckDB]
+authors: [Leis et al.]
+tags: [execution, parallel, morsel, work-stealing]
+---
+
+# Morsel-Driven Parallel Execution
+
+## Description
+
+Morsel-driven execution parallelizes query execution using work-stealing on small chunks (morsels) of data. Achieves near-linear speedup on multi-core systems.
+
+**Key concepts:**
+- **Morsel:** Small chunk of tuples (10K-100K)
+- **Work stealing:** Idle threads steal work from busy threads
+- **NUMA-aware:** Schedule morsels on local memory
+- **Elasticity:** Adapt to available cores dynamically
+
+## Implementation
+
+```rust
+pub struct MorselDrivenExecutor {
+    num_workers: usize,
+    morsel_size: usize,
+    work_queue: Arc<Mutex<Vec<Morsel>>>,
+}
+
+impl MorselDrivenExecutor {
+    pub fn execute_parallel(&self, plan: &RelExpr) -> Result<Vec<Tuple>> {
+        let workers: Vec<_> = (0..self.num_workers)
+            .map(|id| self.spawn_worker(id, plan.clone()))
+            .collect();
+        
+        // Collect results from all workers
+        workers.into_iter()
+            .map(|w| w.join().unwrap())
+            .flatten()
+            .collect()
+    }
+    
+    fn spawn_worker(&self, id: usize, plan: RelExpr) -> JoinHandle<Vec<Tuple>> {
+        let queue = self.work_queue.clone();
+        thread::spawn(move || {
+            let mut results = Vec::new();
+            loop {
+                // Try to get work
+                let morsel = queue.lock().unwrap().pop();
+                match morsel {
+                    Some(m) => results.extend(process_morsel(&plan, m)),
+                    None => break, // No more work
+                }
+            }
+            results
+        })
+    }
+}
+```
+
+## Cost Model
+
+- Speedup: near-linear up to memory bandwidth limit
+- Overhead: ~5% for work stealing and synchronization
+- Optimal morsel size: 10K-100K tuples
+
+## References
+
+1. Leis et al., "Morsel-Driven Parallelism: A NUMA-Aware Query Evaluation Framework", SIGMOD 2014
+2. DuckDB: Parallel execution implementation

@@ -1,0 +1,41 @@
+---
+id: voltdb-replicated-table-optimization
+name: Replicated Table Optimization (VoltDB)
+category: database-specific/voltdb
+databases: [voltdb]
+execution_models: [volcano, vectorized, push-based]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# Replicated Table Optimization (VoltDB)
+
+## Metadata
+- **Rule ID**: `voltdb-replicated-table`
+- **Category**: Database-Specific / VoltDB
+- **Source**: VoltDB
+
+## Description
+
+VoltDB replicates small dimension tables to all partitions, enabling local joins without network traffic.
+
+## Test Cases
+
+### Test 1: Replicated dimension join
+```sql
+CREATE TABLE products (id INT PRIMARY KEY, name VARCHAR) REPLICATE;
+CREATE TABLE sales (id INT PRIMARY KEY, product_id INT) PARTITION BY id;
+
+SELECT s.*, p.name
+FROM sales s JOIN products p ON s.product_id = p.id;
+
+-- products replicated to all partitions
+-- Join executes locally (no network)
+```
+
+## Tags
+`database-specific`, `voltdb`, `replication`, `local-join`, `dimension`

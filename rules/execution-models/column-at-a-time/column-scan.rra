@@ -1,0 +1,42 @@
+---
+id: column-scan
+name: Column-at-a-Time Table Scan (MonetDB X100)
+category: execution-models
+version: 1.0.0
+databases: [MonetDB, ClickHouse]
+authors: [Boncz et al.]
+tags: [execution, columnar, x100, scan]
+---
+
+# Column-at-a-Time Table Scan
+
+## Description
+
+Columnar table scan that processes entire columns at once. Foundation of MonetDB X100 model.
+
+## Implementation
+
+```rust
+pub fn column_scan(table: &str, columns: &[usize]) -> Vec<Column> {
+    columns.iter()
+        .map(|&col_id| read_entire_column(table, col_id))
+        .collect()
+}
+
+pub fn read_entire_column(table: &str, col_id: usize) -> Column {
+    // Read full column from storage
+    // Excellent cache behavior, sequential I/O
+    Column::from_storage(table, col_id)
+}
+```
+
+## Cost Model
+
+- Sequential I/O: fastest possible scan
+- Cache-friendly: processes entire column
+- Memory: holds full columns
+
+## References
+
+1. Boncz et al., "MonetDB/X100: Hyper-Pipelining Query Execution", CIDR 2005
+2. Idreos et al., "MonetDB: Two Decades of Research in Column-oriented Database Architectures", IEEE Data Eng. Bull. 2012

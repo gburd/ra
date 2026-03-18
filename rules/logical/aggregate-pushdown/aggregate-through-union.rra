@@ -1,0 +1,159 @@
+---
+id: aggregate-through-union
+name: Aggregate Through Union
+category: logical/aggregate-pushdown
+databases: [postgresql, mysql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [aggregation, union, pushdown]
+complexity: "O(1)"
+benefit_range: [0.4, 0.8]
+---
+
+# Aggregate Through Union
+
+## Description
+
+Pushes aggregation through UNION ALL by applying the aggregate to each branch
+separately and then aggregating the results. This enables parallel execution
+of aggregates and can reduce the amount of data flowing through the union.
+
+**When to apply**: Queries with aggregates over UNION ALL where the aggregate
+function is distributive (SUM, COUNT, MIN, MAX).
+
+**Why it works**: Distributive aggregates can be decomposed: AGG(A ∪ B) =
+AGG(AGG(A), AGG(B)). This allows independent computation on each branch,
+enabling parallelism and reducing intermediate result size.
+
+## Relational Algebra
+
+```algebra
+aggregate[agg_func](union_all[R, S])
+  -> aggregate[agg_func](
+       union_all[
+         aggregate[agg_func](R),
+         aggregate[agg_func](S)
+       ]
+     )
+  where is_distributive(agg_func)
+
+Distributive aggregates:
+- SUM(x) = SUM(SUM_R(x), SUM_S(x))
+- COUNT(*) = COUNT_R(*) + COUNT_S(*)
+- MIN(x) = MIN(MIN_R(x), MIN_S(x))
+- MAX(x) = MAX(MAX_R(x), MAX_S(x))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("aggregate-through-union";
+    "(aggregate ?agg (union-all ?left ?right))" =>
+    "(aggregate ?agg (union-all (aggregate ?agg ?left) (aggregate ?agg ?right)))"
+    if is_distributive_aggregate("?agg")
+),
+```
+
+**Restrictions:**
+- Only applies to UNION ALL (not UNION which has implicit DISTINCT)
+- Aggregate function must be distributive
+- Non-distributive aggregates (AVG, STDDEV) require two-phase approach
+
+## Cost Model
+
+```rust
+fn estimated_benefit(union_size: u64, branch_sizes: &[u64]) -> f64 {
+    // Without pushdown: union materializes all rows, then aggregate
+    let baseline_cost = union_size as f64;
+
+    // With pushdown: aggregate each branch (parallel), then combine
+    let pushdown_cost = branch_sizes.iter()
+        .map(|&size| size as f64)
+        .max()
+        .unwrap_or(0.0) // Parallel execution
+        + branch_sizes.len() as f64; // Final aggregation
+
+    (baseline_cost - pushdown_cost) / baseline_cost
+}
+```
+
+**Assumptions:**
+- Branches can execute in parallel
+- Aggregation reduces data significantly (>90% reduction typical)
+- Final aggregation over branch results is cheap
+
+**Typical benefit**: 40-80% faster for large unions with many branches
+
+## Test Cases
+
+### Positive: SUM through UNION ALL
+
+```sql
+SELECT SUM(amount) FROM (
+  SELECT amount FROM sales_2023
+  UNION ALL
+  SELECT amount FROM sales_2024
+);
+
+-- Before: union 10M rows, then SUM
+-- After: SUM each branch (2x 5M), then SUM(sum1, sum2)
+-- Benefit: 2x speedup with parallel execution
+```
+
+### Positive: COUNT(*) through multi-branch UNION
+
+```sql
+SELECT COUNT(*) FROM (
+  SELECT * FROM log_jan
+  UNION ALL
+  SELECT * FROM log_feb
+  UNION ALL
+  SELECT * FROM log_mar
+);
+
+-- Before: union 100M rows, count
+-- After: count each month in parallel, sum counts
+-- Benefit: 3x speedup with 3-way parallelism
+```
+
+### Positive: MIN/MAX through UNION ALL
+
+```sql
+SELECT MIN(timestamp), MAX(timestamp) FROM (
+  SELECT timestamp FROM events_2023
+  UNION ALL
+  SELECT timestamp FROM events_2024
+);
+
+-- Pushes MIN/MAX to each branch
+-- Final step: MIN(min1, min2), MAX(max1, max2)
+```
+
+### Negative: AVG through UNION ALL
+
+```sql
+SELECT AVG(price) FROM (
+  SELECT price FROM products_us
+  UNION ALL
+  SELECT price FROM products_eu
+);
+
+-- AVG is not distributive: AVG(A ∪ B) ≠ AVG(AVG(A), AVG(B))
+-- Requires two-phase: push SUM and COUNT, then divide
+-- This rule does not apply directly
+```
+
+## References
+
+**Academic papers:**
+- Graefe, "The Cascades Framework for Query Optimization", IEEE Data Eng. Bull. 1995
+- Chaudhuri, "An Overview of Query Optimization in Relational Systems", PODS 1998
+
+**Implementation:**
+- PostgreSQL: Partial aggregation with parallel workers
+- DuckDB: Parallel UNION ALL with per-branch aggregation
+- Presto/Trino: Distributed aggregation over union branches

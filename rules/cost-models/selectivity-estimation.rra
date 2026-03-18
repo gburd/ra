@@ -1,0 +1,43 @@
+---
+id: selectivity-estimation
+name: Predicate Selectivity Estimation
+category: cost-models
+version: 1.0.0
+databases: [postgresql, oracle]
+tags: [cost, selectivity, statistics]
+---
+
+# Predicate Selectivity Estimation
+
+## Description
+
+Estimates fraction of rows passing a predicate. Uses statistics (histograms, MCVs, distinct counts).
+
+## Implementation
+
+```rust
+pub fn estimate_selectivity(predicate: &Expr, stats: &ColumnStats) -> f64 {
+    match predicate {
+        Expr::BinOp { op: BinOp::Eq, .. } => 1.0 / stats.distinct_count as f64,
+        Expr::BinOp { op: BinOp::Lt, left, right } => {
+            range_selectivity(stats, left, right)
+        }
+        Expr::BinOp { op: BinOp::And, left, right } => {
+            estimate_selectivity(left, stats) * estimate_selectivity(right, stats)
+        }
+        _ => 0.1 // Default
+    }
+}
+```
+
+## Cost Model
+
+- Equality: `1 / distinct_count`
+- Range: from histogram
+- AND: multiply selectivities
+- OR: `sel1 + sel2 - sel1 * sel2`
+
+## References
+
+1. Selinger et al., SIGMOD 1979
+2. Ioannidis & Christodoulakis, "On the Propagation of Errors in the Size of Join Results", SIGMOD 1991

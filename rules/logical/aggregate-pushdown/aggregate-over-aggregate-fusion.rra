@@ -1,0 +1,98 @@
+---
+id: aggregate-over-aggregate-fusion
+name: Aggregate Over Aggregate Fusion
+category: logical/aggregate-pushdown
+databases: [postgresql, duckdb]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [aggregation, fusion, nested]
+complexity: "O(1)"
+benefit_range: [0.4, 0.7]
+---
+
+# Aggregate Over Aggregate Fusion
+
+## Description
+
+Fuses nested aggregations when inner aggregate's result is directly consumed
+by outer aggregate.
+
+**When to apply**: Aggregate over another aggregate with compatible functions.
+
+**Why it works**: Single-pass aggregation instead of two passes.
+
+## Relational Algebra
+
+```algebra
+aggregate[agg_outer](aggregate[group, agg_inner](R))
+  -> aggregate[fused_agg](R)
+  where can_fuse(agg_outer, agg_inner)
+
+Example:
+COUNT(*) over SUM(x) GROUP BY g
+  -> Cannot fuse (different semantics)
+
+SUM(COUNT(*))
+  -> COUNT(*) (if grouping allows)
+```
+
+## Implementation
+
+```rust
+rw!("fuse-count-over-count";
+    "(aggregate (sum (count-star)) (aggregate ?group (count-star) ?input))" =>
+    "(aggregate (count-star) ?input)"
+    if no_grouping("?group")
+),
+```
+
+## Cost Model
+
+```rust
+fn benefit(input_size: u64) -> f64 {
+    let two_pass = input_size * 2; // Two aggregations
+    let one_pass = input_size; // Fused
+    (two_pass - one_pass) as f64 / two_pass as f64
+}
+```
+
+**Typical benefit**: 40-70% (eliminates one aggregation pass)
+
+## Test Cases
+
+### Positive: Total count
+
+```sql
+SELECT SUM(cnt) FROM (
+  SELECT COUNT(*) as cnt FROM orders GROUP BY customer_id
+);
+
+-- Fuse to: SELECT COUNT(*) FROM orders;
+```
+
+### Positive: Nested grouping simplification
+
+```sql
+SELECT COUNT(*) FROM (
+  SELECT dept_id FROM employees GROUP BY dept_id
+);
+
+-- Fuse to: SELECT COUNT(DISTINCT dept_id) FROM employees;
+```
+
+### Negative: Incompatible aggregates
+
+```sql
+SELECT AVG(total) FROM (
+  SELECT SUM(amount) as total FROM sales GROUP BY product_id
+);
+
+-- Cannot fuse: AVG(SUM(...)) has different semantics
+```
+
+## References
+
+- PostgreSQL: Nested aggregate optimization
+- DuckDB: Aggregate pushdown and fusion

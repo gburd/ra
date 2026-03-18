@@ -1,0 +1,117 @@
+---
+id: volcano-union
+name: Volcano Iterator Model - Union
+category: execution-models
+version: 1.0.0
+databases: [PostgreSQL, MySQL, Oracle]
+authors: [Goetz Graefe]
+tags: [execution, iterator, volcano, union, set-operation]
+---
+
+# Volcano Iterator Model - Union
+
+## Description
+
+Union operator returns tuples from both inputs. UNION (distinct) requires deduplication, UNION ALL is fully pipelined.
+
+## Relational Algebra
+
+```
+Union(left, right, all) → Iterator<Tuple>
+
+UnionIterator {
+  left: Iterator
+  right: Iterator
+  current_input: Left | Right
+  seen: HashSet<Tuple>  // For UNION (distinct)
+  all: bool
+
+  fn next() → Tuple | None {
+    loop {
+      tuple = if current_input == Left {
+        left.next()
+      } else {
+        right.next()
+      }
+
+      if tuple == None {
+        if current_input == Left {
+          current_input = Right
+          continue
+        }
+        return None
+      }
+
+      if all || !seen.contains(tuple) {
+        seen.insert(tuple)
+        return tuple
+      }
+    }
+  }
+}
+```
+
+## Implementation
+
+```rust
+pub struct UnionIterator {
+    left: Box<dyn Iterator<Item = Tuple>>,
+    right: Box<dyn Iterator<Item = Tuple>>,
+    current_input: InputSide,
+    seen: HashSet<Tuple>,
+    all: bool,
+}
+
+enum InputSide { Left, Right }
+
+impl Iterator for UnionIterator {
+    fn next(&mut self) -> Result<Option<Tuple>> {
+        loop {
+            let tuple = match self.current_input {
+                InputSide::Left => self.left.next()?,
+                InputSide::Right => self.right.next()?,
+            };
+
+            match tuple {
+                None => {
+                    if matches!(self.current_input, InputSide::Left) {
+                        self.current_input = InputSide::Right;
+                        continue;
+                    }
+                    return Ok(None);
+                }
+                Some(t) => {
+                    if self.all || self.seen.insert(t.clone()) {
+                        return Ok(Some(t));
+                    }
+                }
+            }
+        }
+    }
+}
+
+pub fn union_cost(left_rows: f64, right_rows: f64, all: bool) -> f64 {
+    let base = (left_rows + right_rows) * 0.0001;
+    if all {
+        base
+    } else {
+        base + (left_rows + right_rows) * 0.0005 // Deduplication
+    }
+}
+```
+
+## Cost Model
+
+- **UNION ALL:** O(N + M), fully pipelined
+- **UNION:** O(N + M) with O(N + M) space for hash table
+
+## Test Cases
+
+```sql
+SELECT id FROM orders UNION ALL SELECT id FROM archived_orders;
+SELECT email FROM users UNION SELECT email FROM subscribers;
+```
+
+## References
+
+1. Graefe, "Volcano", IEEE TKDE 1994

@@ -1,0 +1,181 @@
+---
+id: clickhouse-prewhere-pushdown
+name: Filter to PREWHERE Optimization
+category: database-specific/clickhouse
+databases: [clickhouse]
+version: 1.0.0
+authors: ["RA Contributors"]
+tags: [database-specific, clickhouse, prewhere, filter, mergetree, column-storage]
+complexity: O(n_filtered)
+benefit_range: [0.4, 0.9]
+---
+
+# Filter to PREWHERE Optimization
+
+## Description
+
+Moves filter predicates from the WHERE clause into the PREWHERE stage of MergeTree table scans. PREWHERE evaluates predicates before reading all columns, allowing ClickHouse to skip reading unnecessary columns for rows that don't pass the filter. This is especially beneficial for wide tables where only a few columns are needed for filtering.
+
+**When to apply**: Filter on a MergeTree table scan where predicates reference a small subset of columns that can be evaluated early.
+
+**Why it works**: MergeTree stores data in columnar format. PREWHERE reads only the filter columns first, evaluates the predicate, and then reads remaining columns only for matching rows. This minimizes I/O when filters are selective.
+
+**Database version**: ClickHouse v1.1+
+
+## Relational Algebra
+
+```algebra
+Filter[c](Scan[MergeTree](T))
+  -> Scan[MergeTree, prewhere=c](T)
+  where can_move_to_prewhere(c)
+  where c references_few_columns
+```
+
+Where:
+- `c` is a filter predicate referencing a small subset of table columns
+- PREWHERE stage reads filter columns, evaluates c, then reads other columns
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("clickhouse-prewhere-pushdown";
+    "(filter ?cond (scan ?table ?props))" =>
+    "(scan ?table (add_prewhere ?props ?cond))"
+    if is_database("clickhouse")
+    if is_mergetree_table("?table")
+    if can_move_to_prewhere("?cond", "?table")
+    if optimize_move_to_prewhere_enabled()
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    filter: &Expr,
+    table: &TableRef,
+    storage: &StorageInfo,
+) -> bool {
+    // Must be a MergeTree family table
+    if !storage.is_mergetree_family() {
+        return false;
+    }
+
+    // Filter columns should be a small fraction of total columns
+    let filter_cols = extract_columns(filter);
+    let total_cols = table.schema().columns().len();
+    if filter_cols.len() > total_cols / 3 {
+        return false; // Too many columns for PREWHERE benefit
+    }
+
+    // Check setting
+    if !storage.settings().optimize_move_to_prewhere {
+        return false;
+    }
+
+    // Cannot move aggregated columns to PREWHERE
+    !contains_aggregate_functions(filter)
+}
+```
+
+**Restrictions:**
+- Only applies to ClickHouse MergeTree family engines
+- Requires `optimize_move_to_prewhere` setting enabled (default: true)
+- Filter must not reference too many columns
+- Cannot contain aggregate functions
+- Cannot be used with FINAL modifier unless `optimize_move_to_prewhere_if_final` is enabled
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    table_rows: f64,
+    filter_cols_size: f64,
+    other_cols_size: f64,
+    filter_selectivity: f64,
+) -> f64 {
+    // Normal WHERE: read all columns
+    let where_cost = table_rows * (filter_cols_size + other_cols_size);
+
+    // PREWHERE: read filter cols for all rows, other cols only for matches
+    let prewhere_cost = table_rows * filter_cols_size
+                      + (table_rows * filter_selectivity) * other_cols_size;
+
+    (where_cost - prewhere_cost) / where_cost
+}
+```
+
+**Assumptions:**
+- Columnar storage allows reading column subsets efficiently
+- Filter has good selectivity (< 50% of rows pass)
+- Other columns are much larger than filter columns
+
+**Typical benefit**: 40-90% I/O reduction on selective filters with few filter columns
+
+## Test Cases
+
+### Positive Case 1: Selective Filter on Small Column
+
+```sql
+-- Wide table with many columns
+CREATE TABLE events (
+  timestamp DateTime,
+  user_id UInt64,
+  event_type String,
+  payload String,  -- large column
+  data1 String,
+  data2 String,
+  ... (many more columns)
+) ENGINE = MergeTree()
+ORDER BY timestamp;
+
+-- Query with selective filter on small columns
+SELECT * FROM events
+WHERE user_id = 12345 AND timestamp > '2024-01-01';
+
+-- Optimized to:
+-- PREWHERE stage: Read only user_id and timestamp, filter rows
+-- WHERE stage: Read remaining columns only for matching rows
+```
+
+### Positive Case 2: Multiple Predicates
+
+```sql
+SELECT payload FROM events
+WHERE event_type = 'click' AND user_id IN (1,2,3);
+
+-- PREWHERE reads event_type and user_id (small columns)
+-- Then reads payload only for matching rows
+```
+
+### Negative Case 1: Filter on Many Columns
+
+```sql
+-- Filter references too many columns - no benefit
+SELECT * FROM events
+WHERE col1 = 1 AND col2 = 2 AND col3 = 3 AND ... AND col20 = 20;
+
+-- Rule should NOT apply (reading many columns anyway)
+```
+
+### Negative Case 2: Non-MergeTree Table
+
+```sql
+-- Memory engine - rule should NOT apply
+SELECT * FROM memory_table WHERE id = 10;
+```
+
+## References
+
+**Source code:**
+- ClickHouse: `src/Processors/QueryPlan/Optimizations/optimizePrewhere.cpp`
+  - Function: `splitAndFillPrewhereInfo` (lines 50-120)
+  - Git: https://github.com/ClickHouse/ClickHouse
+  - Commit: 35f2d31186cca2f8c50f7ba4bd93817da490da85 (2026-03-17)
+- ClickHouse: `src/Storages/MergeTree/MergeTreeWhereOptimizer.h`
+
+**Documentation:**
+- ClickHouse PREWHERE: https://clickhouse.com/docs/en/sql-reference/statements/select/prewhere
+- MergeTree engine: https://clickhouse.com/docs/en/engines/table-engines/mergetree-family/mergetree

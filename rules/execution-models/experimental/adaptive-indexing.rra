@@ -1,0 +1,35 @@
+---
+id: adaptive-indexing
+name: Experimental adaptive indexing
+category: execution-models
+version: 1.0.0
+databases: [monetdb, postgresql]
+tags: [execution, experimental, research, indexing]
+---
+
+# Experimental adaptive indexing
+
+## Description
+
+Self-organizing indexes (database cracking) built incrementally.
+
+## Implementation
+
+```rust
+pub fn adaptive_indexing() {
+    // Crack column on first range query
+    // Refine partitioning on subsequent queries
+    // No explicit index creation
+}
+```
+
+## Cost Model
+
+- First query: full scan + partitioning
+- Subsequent queries: increasingly selective
+- Convergence: 5-10 queries to stable index
+
+## References
+
+1. Idreos et al., "Database Cracking", CIDR 2007
+2. Idreos et al., "Self-organizing Tuple Reconstruction in Column-stores", SIGMOD 2009

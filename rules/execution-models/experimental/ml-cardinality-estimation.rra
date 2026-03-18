@@ -1,0 +1,35 @@
+---
+id: ml-cardinality-estimation
+name: Experimental ML cardinality estimation
+category: execution-models
+version: 1.0.0
+databases: [postgresql, spark, trino]
+tags: [execution, experimental, research, machine-learning]
+---
+
+# Experimental ML cardinality estimation
+
+## Description
+
+Neural network-based cardinality estimation replacing traditional statistics.
+
+## Implementation
+
+```rust
+pub fn ml_cardinality_estimation() {
+    // Train neural network on query workload
+    // Predict join cardinalities
+    // 10-100x more accurate than histograms
+}
+```
+
+## Cost Model
+
+- Training overhead: one-time cost
+- Inference: 1-10ms per query
+- Accuracy: 90%+ on complex joins
+
+## References
+
+1. Kipf et al., "Learned Cardinalities: Estimating Correlated Joins with Deep Learning", CIDR 2019
+2. Yang et al., "Deep Unsupervised Cardinality Estimation", VLDB 2019

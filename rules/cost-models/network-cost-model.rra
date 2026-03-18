@@ -1,0 +1,41 @@
+---
+id: network-cost-model
+name: Network Data Transfer Cost for Distributed Queries
+category: cost-models
+version: 1.0.0
+databases: [Spark, Presto, spark]
+tags: [cost, network, distributed]
+---
+
+# Network Data Transfer Cost
+
+## Description
+
+Models network transfer costs in distributed query execution. Critical for join ordering and data movement decisions.
+
+## Implementation
+
+```rust
+pub struct NetworkCostModel {
+    bandwidth_gbps: f64,       // Network bandwidth
+    latency_ms: f64,           // Round-trip latency
+}
+
+impl NetworkCostModel {
+    pub fn transfer_cost(&self, bytes: f64, num_messages: usize) -> f64 {
+        let transfer_time = (bytes / (self.bandwidth_gbps * 1e9)) * 1000.0;
+        let latency_cost = (num_messages as f64) * self.latency_ms;
+        transfer_time + latency_cost
+    }
+}
+```
+
+## Cost Model
+
+- Bandwidth: 1-100 Gbps
+- Latency: 0.1-10ms
+- Trade-off: broadcast vs shuffle vs co-located
+
+## References
+
+1. Ching et al., "One Trillion Edges: Graph Processing at Facebook", VLDB 2015

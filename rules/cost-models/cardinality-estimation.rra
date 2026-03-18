@@ -1,0 +1,41 @@
+---
+id: cardinality-estimation
+name: Output Cardinality Estimation
+category: cost-models
+version: 1.0.0
+databases: [PostgreSQL, Oracle, mssql]
+tags: [cost, cardinality, estimation, statistics]
+---
+
+# Output Cardinality Estimation
+
+## Description
+
+Estimates the number of output rows for operators. Foundation for cost-based optimization.
+
+## Implementation
+
+```rust
+pub fn estimate_scan_cardinality(table_rows: f64, selectivity: f64) -> f64 {
+    table_rows * selectivity
+}
+
+pub fn estimate_join_cardinality(
+    left_rows: f64,
+    right_rows: f64,
+    join_selectivity: f64,
+) -> f64 {
+    left_rows * right_rows * join_selectivity
+}
+```
+
+## Cost Model
+
+- Scan: `table_rows × selectivity`
+- Join: `left_rows × right_rows × join_selectivity`
+- Aggregate: `input_rows / group_count`
+
+## References
+
+1. Selinger et al., "Access Path Selection", SIGMOD 1979
+2. Ioannidis, "Query Optimization", ACM Computing Surveys 1996

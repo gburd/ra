@@ -1,0 +1,45 @@
+---
+id: differential-arrangement
+name: Differential arrangement
+category: execution-models
+version: 1.0.0
+databases: [materialize, spark]
+tags: [execution, differential, streaming, incremental]
+---
+
+# Differential arrangement
+
+## Description
+
+Indexed intermediate results for efficient delta queries.
+
+## Implementation
+
+```rust
+pub struct Differentialarrangement {
+    state: StreamingState,
+    changes: Vec<Change>,
+}
+
+impl Differentialarrangement {
+    pub fn process_changes(&mut self, input: Vec<Change>) -> Vec<Change> {
+        // Incremental processing
+        let mut output = Vec::new();
+        for change in input {
+            output.extend(self.apply_change(change));
+        }
+        output
+    }
+}
+```
+
+## Cost Model
+
+- Update cost: O(changes) not O(data)
+- 100-1000x faster than recomputation
+- State size: O(active_data)
+
+## References
+
+1. McSherry et al., "Differential Dataflow", CIDR 2013
+2. Materialize documentation

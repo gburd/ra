@@ -1,0 +1,50 @@
+---
+id: clickhouse-merge-expressions
+name: Merge Adjacent Expression Steps
+category: database-specific/clickhouse
+databases: [clickhouse]
+version: 1.0.0
+authors: ["RA Contributors"]
+tags: [database-specific, clickhouse, expression, merge, optimization]
+complexity: O(1)
+benefit_range: [0.2, 0.4]
+---
+
+# Merge Adjacent Expression Steps
+
+## Description
+
+Merges multiple consecutive ExpressionStep operators into a single step. This reduces pipeline overhead and allows better expression compilation/vectorization.
+
+**When to apply**: Multiple expression steps in sequence.
+
+**Why it works**: Each expression step has overhead (pipeline boundaries, state). Merging reduces overhead and enables better optimization of the combined expressions.
+
+**Database version**: ClickHouse v20.1+
+
+## Relational Algebra
+
+```algebra
+Expression[e2](Expression[e1](R))
+  -> Expression[e2 ∘ e1](R)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("clickhouse-merge-expressions";
+    "(expression ?e2 (expression ?e1 ?input))" =>
+    "(expression (compose ?e2 ?e1) ?input)"
+    if is_database("clickhouse")
+),
+```
+
+**Typical benefit**: 20-40% reduction in pipeline overhead
+
+## References
+
+**Source code:**
+- ClickHouse: `src/Processors/QueryPlan/Optimizations/mergeExpressions.cpp`
+  - Commit: 35f2d31186cca2f8c50f7ba4bd93817da490da85

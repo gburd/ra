@@ -1,0 +1,38 @@
+---
+id: vectorized-projection
+name: Vectorized Execution - Batch Projection
+category: execution-models
+version: 1.0.0
+databases: [DuckDB, ClickHouse]
+tags: [execution, vectorized, projection]
+---
+
+# Vectorized Execution - Batch Projection
+
+## Description
+
+Vectorized projection evaluates expressions on entire columns using SIMD. Expression templates enable efficient codegen.
+
+## Implementation
+
+```rust
+pub fn vectorized_project(batch: &Batch, exprs: &[Expr]) -> Result<Batch> {
+    let mut result = Batch::new(batch.size);
+    
+    for expr in exprs {
+        let column = simd_eval_expr(expr, batch)?;
+        result.add_column(column);
+    }
+    
+    Ok(result)
+}
+```
+
+## Cost Model
+
+- CPU: `rows / SIMD_width × expr_complexity`
+- Fully pipelined
+
+## References
+
+1. Boncz, "MonetDB/X100", CIDR 2005

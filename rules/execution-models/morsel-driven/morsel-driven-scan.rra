@@ -1,0 +1,44 @@
+---
+id: morsel-driven-scan
+name: Morsel-Driven Parallel Table Scan
+category: execution-models
+version: 1.0.0
+databases: [HyPer, DuckDB]
+tags: [execution, parallel, scan, morsel]
+---
+
+# Morsel-Driven Parallel Table Scan
+
+## Description
+
+Parallel table scan that divides table into morsels and distributes them across worker threads using work stealing.
+
+## Implementation
+
+```rust
+pub struct ParallelScan {
+    table: String,
+    morsel_size: usize,
+    current_offset: AtomicUsize,
+}
+
+impl ParallelScan {
+    pub fn next_morsel(&self) -> Option<Morsel> {
+        let offset = self.current_offset.fetch_add(self.morsel_size, Ordering::Relaxed);
+        if offset < self.table_size() {
+            Some(self.read_morsel(offset, self.morsel_size))
+        } else {
+            None
+        }
+    }
+}
+```
+
+## Cost Model
+
+- Parallel speedup: `sequential_cost / num_cores`
+- Overhead: minimal with large morsels
+
+## References
+
+1. Leis et al., "Morsel-Driven Parallelism", SIGMOD 2014

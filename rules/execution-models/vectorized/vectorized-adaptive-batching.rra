@@ -1,0 +1,45 @@
+---
+id: vectorized-adaptive-batching
+name: Vectorized Adaptive Batch Sizing
+category: execution-models
+version: 1.0.0
+databases: [DuckDB]
+tags: [execution, vectorized, adaptive, tuning]
+---
+
+# Vectorized Adaptive Batch Sizing
+
+## Description
+
+Dynamically adjust batch size based on operator selectivity and memory pressure. Small batches for high selectivity, large for low.
+
+## Implementation
+
+```rust
+pub struct AdaptiveBatchSizer {
+    current_size: usize,
+    min_size: usize,
+    max_size: usize,
+}
+
+impl AdaptiveBatchSizer {
+    pub fn adjust(&mut self, selectivity: f64, memory_pressure: f64) {
+        if selectivity < 0.1 {
+            // High filtering, use larger batches
+            self.current_size = (self.current_size * 2).min(self.max_size);
+        } else if memory_pressure > 0.8 {
+            // Memory pressure, reduce batch size
+            self.current_size = (self.current_size / 2).max(self.min_size);
+        }
+    }
+}
+```
+
+## Cost Model
+
+- Optimal batch size: depends on operator, data, hardware
+- Typical: 1024-4096 tuples
+
+## References
+
+1. Kersten et al., "Everything You Always Wanted to Know About Compiled and Vectorized Queries", VLDB 2018

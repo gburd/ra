@@ -1,0 +1,55 @@
+---
+id: io-cost-model
+name: I/O Cost Model for Storage Access
+category: cost-models
+version: 1.0.0
+databases: [postgresql, mysql, oracle]
+authors: [Selinger et al.]
+tags: [cost, io, storage, disk]
+---
+
+# I/O Cost Model for Storage Access
+
+## Description
+
+Models the cost of disk I/O operations including sequential scans, random access, and page reads. Critical for selecting between scan strategies.
+
+## Implementation
+
+```rust
+pub struct IOCostModel {
+    seq_page_cost: f64,      // 1.0 (baseline)
+    random_page_cost: f64,   // 4.0 (seek penalty)
+    page_size: usize,        // 8192 bytes
+}
+
+impl IOCostModel {
+    pub fn scan_cost(&self, pages: f64, sequential: bool) -> f64 {
+        if sequential {
+            pages * self.seq_page_cost
+        } else {
+            pages * self.random_page_cost
+        }
+    }
+    
+    pub fn index_scan_cost(&self, index_pages: f64, table_pages: f64, selectivity: f64) -> f64 {
+        // Index access (random)
+        let index_cost = index_pages * self.random_page_cost;
+        // Table access (random for each matching row)
+        let table_cost = table_pages * selectivity * self.random_page_cost;
+        index_cost + table_cost
+    }
+}
+```
+
+## Cost Model
+
+- **Sequential:** 1.0 per page (baseline)
+- **Random:** 4.0 per page (seek + rotational latency)
+- **SSD:** 1.0-1.5 per page (no seek penalty)
+- **Cache hit:** 0.01 per page (memory speed)
+
+## References
+
+1. Selinger et al., "Access Path Selection in a Relational Database", SIGMOD 1979
+2. PostgreSQL: `src/backend/optimizer/path/costsize.c`

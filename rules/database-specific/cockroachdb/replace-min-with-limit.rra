@@ -1,0 +1,112 @@
+---
+id: cockroachdb-replace-min-with-limit
+name: Replace MIN GroupBy with Limit (0-1 Groups)
+category: database-specific/cockroachdb
+databases: [cockroachdb]
+version: 1.0.0
+authors: ["RA Contributors"]
+tags: [database-specific, cockroachdb, aggregation, min, limit, group-by]
+complexity: O(log n)
+benefit_range: [0.7, 0.95]
+---
+
+# Replace MIN GroupBy with Limit (0-1 Groups)
+
+## Description
+
+Replaces a MIN group-by with a simple limit when grouping columns are constant (returns 0 or 1 groups). The entire GroupBy is eliminated and replaced with a Project over a limited scan.
+
+**When to apply**: GroupBy with MIN aggregation where grouping columns have constant values (e.g., WHERE clause makes them constant).
+
+**Why it works**: When grouping columns are constant, MIN(k) is just the first value in k's order. A LIMIT 1 with appropriate ordering replaces the full aggregation.
+
+**Database version**: CockroachDB v19.2+
+
+## Relational Algebra
+
+```algebra
+GroupBy[const_cols, min(k)](Filter[const_cols = c](R))
+  -> Project[const_cols, k](Limit[1, order_by_k](Filter[const_cols = c, k IS NOT NULL](R)))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("cockroachdb-replace-min-with-limit";
+    "(group_by ?group_cols
+        [(agg_item (min ?col) ?priv)]
+        (filter ?cond ?input))" =>
+    "(project [?group_cols ?col]
+        (limit 1
+            (filter (and ?cond (is_not_null ?col)) ?input)
+            (ordering ?col asc)))"
+    if is_database("cockroachdb")
+    if grouping_cols_are_constant("?group_cols", "?cond")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    group_cols: &[Column],
+    filter: &Expr,
+) -> bool {
+    // All grouping columns must be constant in the filter
+    group_cols.iter().all(|gc| {
+        filter.makes_constant(gc)
+    })
+}
+```
+
+**Restrictions:**
+- Only applies to CockroachDB
+- Grouping columns must be provably constant
+- Works for MIN (also MAX with DESC ordering)
+- Most beneficial when min column has an index
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    table_rows: f64,
+    has_index: bool,
+) -> f64 {
+    // GroupBy cost: scan all + aggregate
+    let groupby_cost = table_rows * 150.0;
+
+    // Limit cost: index seek or scan until first match
+    let limit_cost = if has_index {
+        table_rows.log2() * 10.0
+    } else {
+        table_rows * 0.5  // Expected to find match halfway
+    };
+
+    (groupby_cost - limit_cost) / groupby_cost
+}
+```
+
+**Typical benefit**: 70-95%
+
+## Test Cases
+
+```sql
+SELECT w, min(k) FROM kw
+WHERE w = 5
+GROUP BY w;
+
+-- Optimized to:
+SELECT w, k FROM kw@wk
+WHERE w = 5 AND k IS NOT NULL
+ORDER BY k
+LIMIT 1;
+```
+
+## References
+
+**Source code:**
+- CockroachDB: `pkg/sql/opt/xform/rules/groupby.opt`
+  - Rule: `ReplaceMinWithLimit` (lines 70-80)
+  - Commit: 6e210ba6aa33cea5e27b1a8fae212c27941781f4

@@ -1,0 +1,44 @@
+---
+id: vectorized-compression
+name: Vectorized Column Compression
+category: execution-models
+version: 1.0.0
+databases: [duckdb, clickhouse]
+tags: [execution, vectorized, compression]
+---
+
+# Vectorized Column Compression
+
+## Description
+
+Lightweight compression (RLE, dict, bitpacking) with SIMD decompression directly into execution buffers.
+
+## Implementation
+
+```rust
+pub fn simd_decompress_rle(
+    compressed: &[u8],
+    output: &mut [i64],
+) -> Result<()> {
+    // Use SIMD to expand run-length encoded data
+    let mut pos = 0;
+    while pos < compressed.len() {
+        let value = read_i64(&compressed[pos..]);
+        let count = read_u32(&compressed[pos + 8..]) as usize;
+        
+        // SIMD fill
+        simd_fill(&mut output[..count], value);
+        pos += 12;
+    }
+    Ok(())
+}
+```
+
+## Cost Model
+
+- Decompression: minimal CPU overhead
+- I/O savings: 5-10x for analytical workloads
+
+## References
+
+1. Zukowski et al., "Super-Scalar RAM-CPU Cache Compression", ICDE 2006

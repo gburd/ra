@@ -1,0 +1,35 @@
+---
+id: query-compilation-jit
+name: Experimental query compilation JIT
+category: execution-models
+version: 1.0.0
+databases: [hyper, duckdb, umbra]
+tags: [execution, experimental, research, compilation]
+---
+
+# Experimental query compilation JIT
+
+## Description
+
+Just-in-time compilation of queries to native code.
+
+## Implementation
+
+```rust
+pub fn query_compilation_jit() {
+    // Generate LLVM IR from query plan
+    // Compile to native code
+    // Execute compiled pipeline
+}
+```
+
+## Cost Model
+
+- Compilation: 10-100ms one-time cost
+- Execution: 5-10x faster than interpretation
+- Break-even: ~1000 rows processed
+
+## References
+
+1. Neumann, "Efficiently Compiling Efficient Query Plans for Modern Hardware", VLDB 2011
+2. Shaikhha et al., "How to Architect a Query Compiler, Revisited", SIGMOD 2018

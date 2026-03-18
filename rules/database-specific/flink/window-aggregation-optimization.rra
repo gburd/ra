@@ -1,0 +1,48 @@
+---
+id: flink-window-aggregation-optimization
+name: Window Aggregation Optimization (Flink)
+category: database-specific/flink
+databases: [flink]
+execution_models: [volcano, vectorized, push-based]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# Window Aggregation Optimization (Flink)
+
+## Metadata
+- **Rule ID**: `flink-window-aggregation`
+- **Category**: Database-Specific / Flink
+- **Source**: Apache Flink
+
+## Description
+
+Flink optimizes windowed aggregations using incremental aggregation (update state per event) rather than buffering all events and aggregating at window close.
+
+## Test Cases
+
+### Test 1: Tumbling window with incremental aggregation
+```sql
+SELECT
+  TUMBLE_START(event_time, INTERVAL '1' MINUTE) as window_start,
+  user_id,
+  COUNT(*) as event_count,
+  SUM(amount) as total_amount
+FROM events
+GROUP BY TUMBLE(event_time, INTERVAL '1' MINUTE), user_id;
+
+-- Incremental aggregation:
+-- Each event updates COUNT and SUM in state
+-- At window close, emit accumulated results
+-- Memory: O(distinct user_ids) not O(all events in window)
+```
+
+## References
+1. **Flink Docs**: "Window Aggregations"
+
+## Tags
+`database-specific`, `flink`, `window`, `aggregation`, `streaming`, `incremental`

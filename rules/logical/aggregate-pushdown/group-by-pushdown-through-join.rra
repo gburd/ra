@@ -1,0 +1,152 @@
+---
+id: group-by-pushdown-through-join
+name: Group-By Pushdown Through Join
+category: logical/aggregate-pushdown
+databases: [postgresql, mysql, duckdb]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [aggregation, join, pushdown, group-by]
+complexity: "O(1)"
+benefit_range: [0.5, 0.9]
+---
+
+# Group-By Pushdown Through Join
+
+## Description
+
+Pushes GROUP BY aggregation through a join when the grouping columns come from
+only one side of the join. This pre-aggregates data before the join, reducing
+the number of rows that participate in the join operation.
+
+**When to apply**: When GROUP BY columns are all from one join input, and the
+aggregate function is compatible with early evaluation.
+
+**Why it works**: Pre-aggregating reduces cardinality before the join, making
+the join itself cheaper. For N-to-1 joins, this can reduce input by orders of
+magnitude.
+
+## Relational Algebra
+
+```algebra
+aggregate[group_by: R.cols, agg](join[R.key = S.key](R, S))
+  -> join[R.key = S.key](aggregate[group_by: R.cols, agg](R), S)
+  where all_columns_from(group_by, R)
+  where preserves_join_semantics(agg)
+
+Conditions:
+- Grouping columns must be from R only
+- R.key must be in grouping columns (preserve join key)
+- Aggregate must be compatible (SUM, COUNT, MIN, MAX)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("group-by-pushdown-through-join";
+    "(aggregate ?group_cols ?agg (join ?pred ?left ?right))" =>
+    "(join ?pred (aggregate ?group_cols ?agg ?left) ?right)"
+    if all_group_cols_from_left("?group_cols", "?left")
+    if join_key_in_group("?pred", "?group_cols")
+    if is_compatible_aggregate("?agg")
+),
+```
+
+**Restrictions:**
+- Join key must be in GROUP BY (to preserve join semantics)
+- Not applicable for outer joins (would change semantics)
+- AVG requires special handling (push SUM and COUNT separately)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    left_size: u64,
+    right_size: u64,
+    group_cardinality: u64,
+    join_selectivity: f64,
+) -> f64 {
+    // Without pushdown: join N rows, then aggregate
+    let join_output = (left_size as f64 * right_size as f64 * join_selectivity) as u64;
+    let baseline_cost = (left_size * right_size) as f64 + join_output as f64;
+
+    // With pushdown: aggregate to G groups, join G rows
+    let agg_cost = left_size as f64;
+    let reduced_join_cost = (group_cardinality * right_size) as f64;
+    let pushdown_cost = agg_cost + reduced_join_cost;
+
+    (baseline_cost - pushdown_cost) / baseline_cost
+}
+```
+
+**Assumptions:**
+- Aggregation achieves significant cardinality reduction (10x-1000x typical)
+- Join key is part of GROUP BY
+- Hash join cost is O(M + N) where M, N are input sizes
+
+**Typical benefit**: 50-90% cost reduction when aggregation reduces rows by 10x+
+
+## Test Cases
+
+### Positive: COUNT per customer through orders
+
+```sql
+SELECT c.customer_id, COUNT(o.order_id)
+FROM customers c
+JOIN orders o ON c.id = o.customer_id
+GROUP BY c.customer_id;
+
+-- Before: Join 1M customers × 100M orders, then group
+-- After: Group orders (100M → 1M groups), then join
+-- Benefit: 100x fewer join inputs
+```
+
+### Positive: SUM revenue per product
+
+```sql
+SELECT p.product_id, p.name, SUM(s.amount)
+FROM products p
+JOIN sales s ON p.id = s.product_id
+GROUP BY p.product_id, p.name;
+
+-- Push aggregation to sales side
+-- Reduces sales from 10M rows to 100K product groups
+```
+
+### Positive: MAX timestamp per user
+
+```sql
+SELECT u.user_id, MAX(e.timestamp)
+FROM users u
+JOIN events e ON u.id = e.user_id
+GROUP BY u.user_id;
+
+-- Pre-compute MAX per user from events
+-- Then join reduced result with users
+```
+
+### Negative: GROUP BY from both sides
+
+```sql
+SELECT c.country, p.category, COUNT(*)
+FROM customers c
+JOIN purchases p ON c.id = p.customer_id
+GROUP BY c.country, p.category;
+
+-- Cannot push down: grouping uses columns from both sides
+-- Would change join semantics
+```
+
+## References
+
+**Academic papers:**
+- Yan & Larson, "Eager Aggregation and Lazy Aggregation", VLDB 1995
+- Chaudhuri & Shim, "Including Group-By in Query Optimization", VLDB 1994
+
+**Implementation:**
+- PostgreSQL: partial_paths for parallel aggregation before join
+- DuckDB: Automatic aggregate pushdown in optimizer
+- SQL Server: Pre-aggregation in query plans

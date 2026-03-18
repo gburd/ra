@@ -1,0 +1,50 @@
+---
+id: vectorized-aggregate
+name: Vectorized Execution - Batch Aggregation
+category: execution-models
+version: 1.0.0
+databases: [DuckDB, ClickHouse]
+tags: [execution, vectorized, aggregate, batch]
+---
+
+# Vectorized Execution - Batch Aggregation
+
+## Description
+
+Vectorized aggregation processes entire batches using SIMD for hash computation and aggregate updates. Perfect hash aggregation for known cardinality, hash aggregation otherwise.
+
+## Implementation
+
+```rust
+pub struct VectorizedAggregateIterator {
+    input: Box<dyn VectorizedIterator>,
+    group_keys: Vec<usize>,
+    agg_table: HashMap<GroupKey, AggState>,
+}
+
+impl VectorizedIterator for VectorizedAggregateIterator {
+    fn next_batch(&mut self) -> Result<Option<Batch>> {
+        while let Some(batch) = self.input.next_batch()? {
+            // SIMD hash computation
+            let hashes = simd_hash_batch(&batch, &self.group_keys)?;
+            
+            // Update aggregates in batch
+            update_aggregates_vectorized(&mut self.agg_table, &batch, &hashes)?;
+        }
+        
+        // Finalize and return results
+        Ok(Some(finalize_aggregates(&self.agg_table)?))
+    }
+}
+```
+
+## Cost Model
+
+- CPU: `batch_count × batch_overhead + rows / SIMD_width`
+- Memory: O(groups)
+- SIMD speedup: 4-8x for aggregation
+
+## References
+
+1. Boncz, "MonetDB/X100", CIDR 2005
+2. Neumann, "Efficiently Compiling Efficient Query Plans", VLDB 2011

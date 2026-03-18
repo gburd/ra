@@ -1,0 +1,93 @@
+---
+id: limit-with-top-k-join
+name: LIMIT with Top-K Join
+category: logical/limit-pushdown
+databases: [postgresql, duckdb]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [limit, join, top-k]
+complexity: "O(1)"
+benefit_range: [0.4, 0.7]
+---
+
+# LIMIT with Top-K Join
+
+## Description
+
+Transforms LIMIT over join with ORDER BY into Top-K join that stops early.
+
+**When to apply**: SELECT ... FROM R JOIN S ORDER BY ... LIMIT K
+
+**Why it works**: Top-K join algorithm stops after finding K matches instead
+of computing full join.
+
+## Relational Algebra
+
+```algebra
+limit[K](sort[key](join[cond](R, S)))
+  -> top_k_join[K, key, cond](R, S)
+
+Algorithm: Nested loop with early termination
+```
+
+## Implementation
+
+```rust
+rw!("limit-sort-join-to-top-k";
+    "(limit ?k (sort ?key (join ?cond ?left ?right)))" =>
+    "(top-k-join ?k ?key ?cond ?left ?right)"
+    if is_nested_loop_join("?cond")
+),
+```
+
+## Cost Model
+
+```rust
+fn benefit(left_size: u64, right_size: u64, k: u64) -> f64 {
+    let full_join = left_size * right_size; // Full join + sort
+    let top_k = (left_size * k).min(full_join); // Stop at K
+    (full_join - top_k) as f64 / full_join as f64
+}
+```
+
+**Typical benefit**: 40-70% when K << join output
+
+## Test Cases
+
+### Positive: Recent orders per customer
+
+```sql
+SELECT * FROM customers c
+JOIN orders o ON c.id = o.customer_id
+ORDER BY o.date DESC
+LIMIT 100;
+
+-- Top-K nested loop: stop after 100 matches
+```
+
+### Positive: Top products
+
+```sql
+SELECT * FROM products p
+JOIN reviews r ON p.id = r.product_id
+ORDER BY r.rating DESC
+LIMIT 10;
+```
+
+### Negative: Hash join
+
+```sql
+SELECT * FROM large_table1 t1
+JOIN large_table2 t2 ON t1.id = t2.id
+ORDER BY t1.value
+LIMIT 100;
+
+-- Hash join required: cannot use Top-K join
+```
+
+## References
+
+- PostgreSQL: Limit-aware nested loop join
+- DuckDB: Top-K optimization in join executor

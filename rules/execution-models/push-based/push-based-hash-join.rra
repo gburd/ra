@@ -1,0 +1,32 @@
+---
+id: push-based-hash-join
+name: Push-Based hash-join
+category: execution-models
+version: 1.0.0
+databases: [HyPer, Umbra]
+tags: [execution, push-based, compilation]
+---
+
+# Push-Based hash-join
+
+## Description
+
+Compiled hash-join operator in push-based execution model. Generates tight loops with minimal overhead.
+
+## Implementation
+
+```rust
+pub fn compile_hash-join(ctx: &mut CompileContext) {
+    ctx.emit("// Compiled hash-join");
+    // Generate optimized machine code
+}
+```
+
+## Cost Model
+
+- Near-zero per-tuple overhead
+- Compilation amortized
+
+## References
+
+1. Neumann, "Efficiently Compiling Efficient Query Plans", VLDB 2011

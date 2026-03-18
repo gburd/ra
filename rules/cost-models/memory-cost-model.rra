@@ -1,0 +1,41 @@
+---
+id: memory-cost-model
+name: Memory Allocation and Bandwidth Cost
+category: cost-models
+version: 1.0.0
+databases: [PostgreSQL, singlestore]
+tags: [cost, memory, bandwidth]
+---
+
+# Memory Allocation and Bandwidth Cost
+
+## Description
+
+Models memory allocation overhead and bandwidth consumption. Critical for operators that materialize data (sort, hash join, aggregation).
+
+## Implementation
+
+```rust
+pub struct MemoryCostModel {
+    allocation_cost: f64,      // Per allocation overhead
+    bandwidth_gb_per_sec: f64, // Memory bandwidth
+}
+
+impl MemoryCostModel {
+    pub fn materialization_cost(&self, bytes: f64) -> f64 {
+        let alloc_cost = self.allocation_cost;
+        let transfer_time = bytes / (self.bandwidth_gb_per_sec * 1e9);
+        alloc_cost + transfer_time * 1000.0 // Convert to ms
+    }
+}
+```
+
+## Cost Model
+
+- Allocation: ~0.1ms overhead
+- Bandwidth: 10-100 GB/s (depends on hardware)
+- NUMA penalty: 1.5-2x for remote memory
+
+## References
+
+1. Leis et al., "Query Optimization Through the Looking Glass", VLDB 2017

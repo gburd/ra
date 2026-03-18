@@ -1,0 +1,48 @@
+---
+id: morsel-driven-hash-join
+name: Morsel-Driven hash join
+category: execution-models
+version: 1.0.0
+databases: [hyper, duckdb]
+tags: [execution, parallel, morsel, work-stealing]
+---
+
+# Morsel-Driven hash join
+
+## Description
+
+Parallel execution of hash join using morsel-driven work-stealing model. Processes small chunks (morsels) of 10K-100K tuples across worker threads.
+
+## Implementation
+
+```rust
+pub struct MorselDrivenHashJoin {
+    work_queue: Arc<Mutex<Vec<Morsel>>>,
+    num_workers: usize,
+}
+
+impl MorselDrivenHashJoin {
+    pub fn execute_parallel(&self) -> Result<Vec<Tuple>> {
+        // Spawn worker threads
+        let workers: Vec<_> = (0..self.num_workers)
+            .map(|id| self.spawn_worker(id))
+            .collect();
+        
+        // Collect results
+        workers.into_iter()
+            .map(|w| w.join().unwrap())
+            .flatten()
+            .collect()
+    }
+}
+```
+
+## Cost Model
+
+- Parallel speedup: near-linear up to memory bandwidth
+- Overhead: ~5% for work stealing
+- NUMA-aware: avoids remote memory access
+
+## References
+
+1. Leis et al., "Morsel-Driven Parallelism: A NUMA-Aware Query Evaluation Framework", SIGMOD 2014

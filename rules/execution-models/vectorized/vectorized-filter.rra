@@ -1,0 +1,70 @@
+---
+id: vectorized-filter
+name: Vectorized Execution - SIMD Filter
+category: execution-models
+version: 1.0.0
+databases: [DuckDB, ClickHouse]
+tags: [execution, vectorized, filter, simd]
+---
+
+# Vectorized Execution - SIMD Filter
+
+## Description
+
+Vectorized filter evaluates predicates on entire batches using SIMD instructions. Selection vectors track which rows pass the filter without copying data.
+
+## Relational Algebra
+
+```
+VectorizedFilter(input, predicate) → Iterator<Batch>
+
+fn next_batch() → Batch:
+  batch = input.next_batch()
+  results = simd_eval_predicate(batch, predicate)
+  selection = build_selection_vector(results)
+  batch.selection = selection
+  return batch
+```
+
+## Implementation
+
+```rust
+pub struct VectorizedFilterIterator {
+    input: Box<dyn VectorizedIterator>,
+    predicate: Expr,
+}
+
+impl VectorizedIterator for VectorizedFilterIterator {
+    fn next_batch(&mut self) -> Result<Option<Batch>> {
+        let mut batch = match self.input.next_batch()? {
+            None => return Ok(None),
+            Some(b) => b,
+        };
+
+        // SIMD predicate evaluation
+        let results = simd_eval_predicate(&self.predicate, &batch)?;
+
+        // Build selection vector
+        let mut selection = Vec::new();
+        for (i, &pass) in results.iter().enumerate() {
+            if pass {
+                selection.push(i);
+            }
+        }
+
+        batch.selection = Some(selection);
+        Ok(Some(batch))
+    }
+}
+```
+
+## Cost Model
+
+- CPU: `batch_count × (batch_overhead + batch_size / SIMD_width)`
+- SIMD speedup: 4-8x
+- Memory: O(batch_size) for selection vector
+
+## References
+
+1. Boncz, "MonetDB/X100", CIDR 2005
+2. Zhou, "Implementing Database Operations Using SIMD Instructions", SIGMOD 2002

@@ -1,0 +1,205 @@
+---
+id: clickhouse-lazy-materialization
+name: Lazy Column Materialization for MergeTree Scans
+category: database-specific/clickhouse
+databases: [clickhouse]
+version: 1.0.0
+authors: ["RA Contributors"]
+tags: [database-specific, clickhouse, mergetree, lazy-materialization, column-storage, filter]
+complexity: O(n_filtered)
+benefit_range: [0.3, 0.8]
+---
+
+# Lazy Column Materialization for MergeTree Scans
+
+## Description
+
+Defers reading of non-essential columns from MergeTree tables until after filters and limits are applied. The scan first reads only columns needed for predicates and ordering, filters/limits the data, then materializes remaining columns only for surviving rows. This reduces I/O when filters or limits eliminate many rows.
+
+**When to apply**: MergeTree scan with filters and/or limits where many columns are not needed for filtering but are in the SELECT list.
+
+**Why it works**: Columnar storage allows reading columns independently. By reading filter columns first and deferring others, we avoid reading large column data for rows that will be filtered out. Similar to late materialization in column stores.
+
+**Database version**: ClickHouse v20.3+
+
+## Relational Algebra
+
+```algebra
+Project[cols](Filter[c](Scan[MergeTree](T)))
+  -> Project[cols](LazyMaterialize(
+       Filter[c](Scan[MergeTree, read_cols=essential_cols](T)),
+       deferred_cols
+     ))
+  where |deferred_cols| > 0
+  where c references_only essential_cols
+```
+
+Where:
+- `essential_cols` = columns in filter + sort key + primary key
+- `deferred_cols` = other columns in SELECT list
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("clickhouse-lazy-materialization";
+    "(project ?cols
+        (filter ?cond
+            (scan ?table ?props)))" =>
+    "(project ?cols
+        (lazy_materialize
+            (filter ?cond
+                (scan ?table (set_read_cols ?props (essential_cols ?cond))))
+            (deferred_cols ?cols (essential_cols ?cond))))"
+    if is_database("clickhouse")
+    if is_mergetree_table("?table")
+    if can_use_lazy_materialization("?table", "?cond")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    scan: &ReadFromMergeTree,
+    filter: &Expr,
+    selected_cols: &[Column],
+) -> bool {
+    // Cannot use with FINAL or SAMPLE
+    if scan.is_query_with_final() || scan.is_query_with_sampling() {
+        return false;
+    }
+
+    // Cannot use with vector search
+    if scan.is_vector_column_replaced() {
+        return false;
+    }
+
+    // Identify essential columns (needed for filter/sort)
+    let essential_cols: HashSet<_> = filter.referenced_columns()
+        .chain(scan.sort_key_columns())
+        .chain(scan.primary_key_columns())
+        .collect();
+
+    // Deferred columns are those in SELECT but not essential
+    let deferred_cols: Vec<_> = selected_cols.iter()
+        .filter(|c| !essential_cols.contains(c))
+        .collect();
+
+    // Need some columns to defer for benefit
+    !deferred_cols.is_empty()
+        // Deferred columns should be a significant portion
+        && deferred_cols.len() >= selected_cols.len() / 3
+}
+```
+
+**Restrictions:**
+- Only applies to ClickHouse MergeTree family
+- Cannot be used with FINAL modifier
+- Cannot be used with SAMPLE modifier
+- Cannot be used when vector columns are involved
+- Requires sufficient deferred columns for benefit
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    table_rows: f64,
+    essential_cols_size: f64,
+    deferred_cols_size: f64,
+    filter_selectivity: f64,
+    limit_fraction: f64,
+) -> f64 {
+    // Normal execution: read all columns
+    let normal_cost = table_rows * (essential_cols_size + deferred_cols_size);
+
+    // Lazy materialization: read essential cols, then deferred only for survivors
+    let surviving_rows = table_rows * filter_selectivity * limit_fraction;
+    let lazy_cost = table_rows * essential_cols_size
+                  + surviving_rows * deferred_cols_size;
+
+    (normal_cost - lazy_cost) / normal_cost
+}
+```
+
+**Assumptions:**
+- Filter or limit reduces row count significantly (< 50% survive)
+- Deferred columns are large relative to essential columns
+- Columnar storage allows efficient selective column reading
+
+**Typical benefit**: 30-80% I/O reduction with selective filters and large deferred columns
+
+## Test Cases
+
+### Positive Case 1: Selective Filter with Many Output Columns
+
+```sql
+CREATE TABLE logs (
+  timestamp DateTime,
+  user_id UInt64,
+  request_path String,
+  response_body String,  -- very large column
+  headers String,        -- large column
+  metadata String        -- large column
+) ENGINE = MergeTree()
+ORDER BY (timestamp, user_id);
+
+-- Query with selective filter
+SELECT * FROM logs
+WHERE user_id = 12345 AND timestamp > '2024-01-01'
+LIMIT 100;
+
+-- Optimization:
+-- 1. Read timestamp, user_id (essential for filter + sort key)
+-- 2. Apply filter: user_id = 12345 AND timestamp > '2024-01-01'
+-- 3. Apply limit: 100 rows
+-- 4. Materialize request_path, response_body, headers, metadata
+--    only for the 100 surviving rows
+```
+
+### Positive Case 2: Large Table with LIMIT
+
+```sql
+SELECT id, name, large_column FROM big_table
+WHERE category = 'active'
+LIMIT 10;
+
+-- Read id, name, category first
+-- Filter by category
+-- Take 10 rows
+-- Materialize large_column only for those 10 rows
+```
+
+### Negative Case 1: Query with FINAL
+
+```sql
+-- FINAL prevents lazy materialization
+SELECT * FROM replicated_table FINAL
+WHERE user_id = 12345;
+
+-- Rule should NOT apply (FINAL requires all columns early)
+```
+
+### Negative Case 2: Few Deferred Columns
+
+```sql
+-- Only 2 columns total, both needed for filter
+SELECT user_id FROM logs WHERE user_id = 12345;
+
+-- Rule should NOT apply (no columns to defer)
+```
+
+## References
+
+**Source code:**
+- ClickHouse: `src/Processors/QueryPlan/Optimizations/optimizeLazyMaterialization.cpp`
+  - Function: `canUseLazyMaterializationForReadingStep` (lines 28-40)
+  - Git: https://github.com/ClickHouse/ClickHouse
+  - Commit: 35f2d31186cca2f8c50f7ba4bd93817da490da85 (2026-03-17)
+- ClickHouse: `src/Processors/QueryPlan/LazilyReadFromMergeTree.h`
+- ClickHouse: `src/Processors/Transforms/LazyMaterializingTransform.h`
+
+**Documentation:**
+- Similar concept to late materialization in column stores
+- ClickHouse blog on query optimization: https://clickhouse.com/docs/en/guides/developer/optimizing-performance

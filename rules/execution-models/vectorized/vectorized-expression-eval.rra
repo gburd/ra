@@ -1,0 +1,39 @@
+---
+id: vectorized-expression-eval
+name: Vectorized Expression Evaluation
+category: execution-models
+version: 1.0.0
+databases: [DuckDB]
+tags: [execution, vectorized, expressions, simd]
+---
+
+# Vectorized Expression Evaluation
+
+## Description
+
+SIMD-accelerated expression evaluation on column vectors. Supports arithmetic, comparisons, string operations.
+
+## Implementation
+
+```rust
+pub fn simd_add_i64(a: &[i64], b: &[i64], result: &mut [i64]) {
+    #[cfg(target_feature = "avx2")]
+    unsafe {
+        for i in (0..a.len()).step_by(4) {
+            let va = _mm256_loadu_si256(a.as_ptr().add(i) as *const __m256i);
+            let vb = _mm256_loadu_si256(b.as_ptr().add(i) as *const __m256i);
+            let vr = _mm256_add_epi64(va, vb);
+            _mm256_storeu_si256(result.as_mut_ptr().add(i) as *mut __m256i, vr);
+        }
+    }
+}
+```
+
+## Cost Model
+
+- SIMD speedup: 4-8x
+- Vectorized: add, sub, mul, cmp, etc.
+
+## References
+
+1. Polychroniou et al., "Efficient Lightweight Compression", DaMoN 2015

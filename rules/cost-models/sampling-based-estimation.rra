@@ -1,0 +1,39 @@
+---
+id: sampling-based-estimation
+name: sampling uased estimation
+category: cost-models
+version: 1.0.0
+databases: [PostgreSQL, Oracle, Spark]
+tags: [cost, estimation, statistics]
+---
+
+# sampling uased estimation
+
+## Description
+
+Uses sampling to estimate cardinality for complex queries where statistics are insufficient.
+
+## Implementation
+
+```rust
+pub struct samplinguasedestimationModel {
+    // Model parameters
+}
+
+impl samplinguasedestimationModel {
+    pub fn estimate(&self) -> f64 {
+        // Implementation
+        0.0
+    }
+}
+```
+
+## Cost Model
+
+- Based on database statistics and runtime metrics
+- Adjusts for actual workload characteristics
+
+## References
+
+1. Selinger et al., "Access Path Selection", SIGMOD 1979
+2. Lohman, "Is Query Optimization a Solved Problem?", SIGMOD 2014

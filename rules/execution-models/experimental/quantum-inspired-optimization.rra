@@ -1,0 +1,35 @@
+---
+id: quantum-inspired-optimization
+name: Experimental quantum inspired optimization
+category: execution-models
+version: 1.0.0
+databases: [postgresql, spark]
+tags: [execution, experimental, research, quantum]
+---
+
+# Experimental quantum inspired optimization
+
+## Description
+
+Quantum annealing algorithms for join ordering.
+
+## Implementation
+
+```rust
+pub fn quantum_inspired_optimization() {
+    // Map join ordering to QUBO problem
+    // Solve with simulated annealing
+    // Find near-optimal join orders
+}
+```
+
+## Cost Model
+
+- Annealing: 100ms-1s per query
+- Quality: within 5% of optimal
+- Scalability: handles 20+ table joins
+
+## References
+
+1. Trummer et al., "SkinnerDB: Regret-Bounded Query Evaluation via Reinforcement Learning", SIGMOD 2019
+2. Venturelli et al., "Job Shop Scheduling Solver based on Quantum Annealing", ICAPS 2015

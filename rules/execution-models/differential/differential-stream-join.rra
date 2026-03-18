@@ -1,0 +1,50 @@
+---
+id: differential-stream-join
+name: Differential Streaming Join
+category: execution-models
+version: 1.0.0
+databases: [materialize, spark]
+tags: [execution, differential, streaming, join]
+---
+
+# Differential Streaming Join
+
+## Description
+
+Temporal join on streaming data using differential dataflow. Maintains join state incrementally as data arrives.
+
+## Implementation
+
+```rust
+pub struct StreamingJoin {
+    left_state: HashMap<JoinKey, Vec<(Tuple, Time)>>,
+    right_state: HashMap<JoinKey, Vec<(Tuple, Time)>>,
+}
+
+impl StreamingJoin {
+    pub fn process_change(&mut self, change: Change) -> Vec<Change> {
+        let key = extract_key(&change.data);
+        
+        // Probe opposite side
+        let matches = if change.is_left {
+            &self.right_state[&key]
+        } else {
+            &self.left_state[&key]
+        };
+        
+        // Update state and emit changes
+        self.update_state(change);
+        self.emit_join_results(matches, &change)
+    }
+}
+```
+
+## Cost Model
+
+- Per-change cost: O(matches) instead of O(N × M)
+- State size: O(active_data)
+
+## References
+
+1. McSherry, "Differential Dataflow", CIDR 2013
+2. Begoli et al., "Apache Calcite: A Foundational Framework for Optimized Query Processing", SIGMOD 2018

@@ -1,0 +1,35 @@
+---
+id: gpu-offloading
+name: Experimental GPU offloading
+category: execution-models
+version: 1.0.0
+databases: [postgresql, heavydb, blazingsql]
+tags: [execution, experimental, research, gpu]
+---
+
+# Experimental GPU offloading
+
+## Description
+
+GPU-accelerated operators for analytical queries.
+
+## Implementation
+
+```rust
+pub fn gpu_offloading() {
+    // Transfer data to GPU memory
+    // Execute scan/join/aggregate on GPU
+    // 10-100x parallelism vs CPU
+}
+```
+
+## Cost Model
+
+- Transfer: 10-50ms to GPU
+- Execution: 10-100x faster for SIMD operations
+- Break-even: ~1M rows
+
+## References
+
+1. Breß et al., "Efficient Co-Processor Utilization in Database Query Processing", Information Systems 2014
+2. He et al., "Relational Joins on Graphics Processors", SIGMOD 2008

@@ -1,0 +1,117 @@
+---
+id: clickhouse-filter-pushdown-through-join
+name: Push Filter Below Join
+category: database-specific/clickhouse
+databases: [clickhouse]
+version: 1.0.0
+authors: ["RA Contributors"]
+tags: [database-specific, clickhouse, filter, pushdown, join]
+complexity: O(n_filtered)
+benefit_range: [0.4, 0.9]
+---
+
+# Push Filter Below Join
+
+## Description
+
+Pushes filter predicates below a join operation when the predicate references only one side of the join. This reduces the input cardinality to the join, making it more efficient. Predicates are split and pushed to the appropriate join input.
+
+**When to apply**: Filter above a join where predicate columns come from only one join input.
+
+**Why it works**: Filtering before joining reduces the number of rows that participate in the join, lowering both I/O and join computation cost.
+
+**Database version**: ClickHouse v19.1+
+
+## Relational Algebra
+
+```algebra
+Filter[c](Join[L, R])
+  -> Join[Filter[c_L](L), Filter[c_R](R)]
+  where c = c_L ∧ c_R
+  where columns(c_L) ⊆ columns(L)
+  where columns(c_R) ⊆ columns(R)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("clickhouse-filter-pushdown-through-join";
+    "(filter ?cond (join ?type ?left ?right ?join_cond))" =>
+    "(join ?type
+        (filter (left_predicates ?cond ?left) ?left)
+        (filter (right_predicates ?cond ?right) ?right)
+        ?join_cond)"
+    if is_database("clickhouse")
+    if can_push_filter_through_join("?cond", "?type")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    filter: &Expr,
+    join_type: JoinType,
+) -> bool {
+    // Cannot push through outer joins in all cases
+    match join_type {
+        JoinType::Inner => true,
+        JoinType::LeftOuter => {
+            // Can only push to left side
+            // (pushing to right would change semantics)
+            has_left_predicates_only(filter)
+        }
+        JoinType::RightOuter => {
+            has_right_predicates_only(filter)
+        }
+        _ => false,
+    }
+}
+```
+
+**Restrictions:**
+- Only applies to ClickHouse
+- Limited pushdown for outer joins (only to preserved side)
+- Predicates must be deterministic
+- Cannot push predicates referencing both sides
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    left_card: f64,
+    right_card: f64,
+    filter_selectivity: f64,
+) -> f64 {
+    // Without pushdown
+    let normal_join_cost = left_card * right_card;
+
+    // With pushdown (assuming predicate on left)
+    let filtered_left = left_card * filter_selectivity;
+    let pushdown_join_cost = filtered_left * right_card;
+
+    (normal_join_cost - pushdown_join_cost) / normal_join_cost
+}
+```
+
+**Typical benefit**: 40-90% with selective filters
+
+## Test Cases
+
+### Positive Case 1: Filter on Left Side
+
+```sql
+SELECT * FROM orders o
+JOIN customers c ON o.customer_id = c.id
+WHERE o.status = 'pending';
+
+-- Push filter to orders before join
+```
+
+## References
+
+**Source code:**
+- ClickHouse: `src/Processors/QueryPlan/Optimizations/filterPushDown.cpp`
+  - Commit: 35f2d31186cca2f8c50f7ba4bd93817da490da85

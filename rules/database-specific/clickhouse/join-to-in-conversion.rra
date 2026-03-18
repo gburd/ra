@@ -1,0 +1,98 @@
+---
+id: clickhouse-join-to-in-conversion
+name: Convert Join to IN Subquery
+category: database-specific/clickhouse
+databases: [clickhouse]
+version: 1.0.0
+authors: ["RA Contributors"]
+tags: [database-specific, clickhouse, join, in-subquery, transformation]
+complexity: O(n)
+benefit_range: [0.2, 0.5]
+---
+
+# Convert Join to IN Subquery
+
+## Description
+
+Converts certain inner joins to IN subqueries when the right side columns aren't used in output and join is an equality on a single column. IN can be more efficient for small right-side cardinality.
+
+**When to apply**: Inner join with single-column equality where right columns aren't used.
+
+**Why it works**: IN subquery can use specialized execution with in-memory hash sets for small right sides, potentially faster than hash join.
+
+**Database version**: ClickHouse v20.6+
+
+## Relational Algebra
+
+```algebra
+Project[L_cols](InnerJoin[L.k = R.k](L, R))
+  -> Filter[L.k IN (Project[R.k](R))](L)
+  where L_cols ⊆ columns(L)
+  where |R| is small
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("clickhouse-join-to-in-conversion";
+    "(project ?cols
+        (inner_join ?left ?right (eq ?lkey ?rkey)))" =>
+    "(filter (in ?lkey (project [?rkey] ?right))
+        ?left)"
+    if is_database("clickhouse")
+    if only_uses_left_columns("?cols", "?left")
+    if is_small_right_side("?right")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    right: &RelNode,
+    right_card: f64,
+) -> bool {
+    // Benefit when right side is small enough for in-memory set
+    right_card < 10000.0
+}
+```
+
+**Restrictions:**
+- Only applies to ClickHouse
+- Single-column join key
+- Right side should be small
+- Only output columns from left side
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    left_card: f64,
+    right_card: f64,
+) -> f64 {
+    if right_card < 1000.0 {
+        0.3
+    } else {
+        0.1
+    }
+}
+```
+
+**Typical benefit**: 20-50% for small right sides
+
+## Test Cases
+
+```sql
+SELECT o.* FROM orders o
+INNER JOIN active_customers c ON o.customer_id = c.id;
+-- If active_customers is small, convert to:
+-- SELECT * FROM orders WHERE customer_id IN (SELECT id FROM active_customers);
+```
+
+## References
+
+**Source code:**
+- ClickHouse: `src/Processors/QueryPlan/Optimizations/convertJoinToIn.cpp`
+  - Commit: 35f2d31186cca2f8c50f7ba4bd93817da490da85

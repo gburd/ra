@@ -1,0 +1,47 @@
+---
+id: vectorized-sort
+name: Vectorized Execution - Radix Sort
+category: execution-models
+version: 1.0.0
+databases: [DuckDB]
+tags: [execution, vectorized, sort, radix-sort]
+---
+
+# Vectorized Execution - Radix Sort
+
+## Description
+
+Vectorized radix sort exploits cache-conscious partitioning and SIMD for fast comparison-free sorting on integer keys.
+
+## Implementation
+
+```rust
+pub fn vectorized_radix_sort(batch: &mut Batch, key_col: usize) -> Result<()> {
+    const RADIX: usize = 256;
+    let mut buckets = vec\![Vec::new(); RADIX];
+    
+    // Partition by radix
+    for pass in 0..8 { // 8 passes for 64-bit keys
+        let shift = pass * 8;
+        for i in 0..batch.size {
+            let key = batch.columns[key_col].get_int(i);
+            let digit = ((key >> shift) & 0xFF) as usize;
+            buckets[digit].push(i);
+        }
+        // Collect buckets back
+        reconstruct_batch_from_buckets(batch, &mut buckets)?;
+    }
+    Ok(())
+}
+```
+
+## Cost Model
+
+- CPU: O(N × k) where k = key size in bytes
+- Cache-friendly: sequential access patterns
+- SIMD: used for partitioning
+
+## References
+
+1. Satish et al., "Fast Sort on CPUs and GPUs", SIGMOD 2010
+2. Kim et al., "Sort vs. Hash Revisited", VLDB 2009

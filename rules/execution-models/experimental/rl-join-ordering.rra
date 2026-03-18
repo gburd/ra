@@ -1,0 +1,36 @@
+---
+id: rl-join-ordering
+name: Experimental RL join ordering
+category: execution-models
+version: 1.0.0
+databases: [postgresql, spark, trino]
+tags: [execution, experimental, research, reinforcement-learning]
+---
+
+# Experimental RL join ordering
+
+## Description
+
+Reinforcement learning for join order optimization.
+
+## Implementation
+
+```rust
+pub fn rl_join_ordering() {
+    // DQN/PPO agent learns join orders
+    // State: query graph
+    // Action: next join
+    // Reward: execution time
+}
+```
+
+## Cost Model
+
+- Training: offline on workload
+- Inference: 10-100ms per query
+- Quality: matches or exceeds dynamic programming
+
+## References
+
+1. Marcus et al., "Towards a Hands-Free Query Optimizer through Deep Learning", CIDR 2019
+2. Krishnan et al., "Learning to Optimize Join Queries With Deep Reinforcement Learning", arXiv 2018

@@ -1,0 +1,39 @@
+---
+id: composite-cost-model
+name: composite cost model
+category: cost-models
+version: 1.0.0
+databases: [PostgreSQL, Oracle, Spark]
+tags: [cost, estimation, statistics]
+---
+
+# composite cost model
+
+## Description
+
+Combines CPU, I/O, memory, and network costs into unified cost metric.
+
+## Implementation
+
+```rust
+pub struct compositecostmodelModel {
+    // Model parameters
+}
+
+impl compositecostmodelModel {
+    pub fn estimate(&self) -> f64 {
+        // Implementation
+        0.0
+    }
+}
+```
+
+## Cost Model
+
+- Based on database statistics and runtime metrics
+- Adjusts for actual workload characteristics
+
+## References
+
+1. Selinger et al., "Access Path Selection", SIGMOD 1979
+2. Lohman, "Is Query Optimization a Solved Problem?", SIGMOD 2014

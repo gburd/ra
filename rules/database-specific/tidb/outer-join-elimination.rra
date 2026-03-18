@@ -1,0 +1,58 @@
+---
+id: tidb-outer-join-elimination
+name: TiDB Outer Join Elimination
+category: database-specific/tidb
+databases: [tidb]
+execution_models: [vectorized]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["PingCAP TiDB Team", "RA Contributors"]
+tags: [join, outer-join, elimination, optimization]
+complexity: "O(1)"
+benefit_range: [0.5, 0.9]
+source_file: "pkg/planner/core/rule_outer_join_elimination.go"
+source_repo: "github.com/pingcap/tidb"
+---
+
+# TiDB Outer Join Elimination
+
+## Description
+
+Simplifies outer joins to inner joins when predicates on the null-supplying
+side guarantee that NULL-extended rows will be filtered out anyway.
+
+## Relational Algebra
+
+```algebra
+Filter[pred on S](R LEFT JOIN S ON R.a = S.b)
+  -> Filter[pred](R INNER JOIN S ON R.a = S.b)
+  where pred rejects nulls
+```
+
+## Implementation
+
+```rust
+fn eliminate_outer_join(outer: &OuterJoin, filter: &Filter) -> Option<InnerJoin> {
+    if filter.rejects_nulls_from(outer.null_side) {
+        Some(InnerJoin::new(outer.left, outer.right, outer.predicate))
+    } else {
+        None
+    }
+}
+```
+
+## Cost Model
+
+Inner joins are more efficient and enable more optimization opportunities.
+
+## Test Cases
+
+```sql
+-- LEFT JOIN with filter on right side
+SELECT * FROM orders o LEFT JOIN customers c ON o.customer_id = c.id
+WHERE c.status = 'active';
+-- Simplified: INNER JOIN (status filter rejects NULLs)
+```
+
+## References
+- Source: `pkg/planner/core/rule_outer_join_elimination.go`

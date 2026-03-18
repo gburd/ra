@@ -1,0 +1,50 @@
+---
+id: vectorized-predicate-pushdown
+name: Vectorized Predicate Pushdown in Batches
+category: execution-models
+version: 1.0.0
+databases: [duckdb, clickhouse]
+tags: [execution, vectorized, pushdown, filter]
+---
+
+# Vectorized Predicate Pushdown in Batches
+
+## Description
+
+Push filter predicates into scan operators, applying them during batch construction to avoid materializing filtered data.
+
+## Implementation
+
+```rust
+pub struct VectorizedScanWithFilter {
+    cursor: Cursor,
+    filter: Expr,
+}
+
+impl VectorizedIterator for VectorizedScanWithFilter {
+    fn next_batch(&mut self) -> Result<Option<Batch>> {
+        loop {
+            let batch = self.cursor.read_batch()?;
+            
+            // Apply filter during scan
+            let selection = simd_eval_predicate(&self.filter, &batch)?;
+            
+            if selection.len() > 0 {
+                batch.apply_selection(selection);
+                return Ok(Some(batch));
+            }
+        }
+    }
+}
+```
+
+## Cost Model
+
+- Avoids materializing filtered data
+- Reduces memory bandwidth
+- SIMD filtering during scan
+
+## References
+
+1. Graefe, "Encapsulation of Parallelism in the Volcano Query Processing System", SIGMOD 1990
+2. Boncz, "MonetDB/X100", CIDR 2005

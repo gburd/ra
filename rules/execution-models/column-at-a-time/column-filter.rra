@@ -1,0 +1,38 @@
+---
+id: column-filter
+name: Column-at-a-Time Filter
+category: execution-models
+version: 1.0.0
+databases: [MonetDB]
+tags: [execution, columnar, filter]
+---
+
+# Column-at-a-Time Filter
+
+## Description
+
+Column-wise filtering with late materialization - only fetch needed columns after filtering.
+
+## Implementation
+
+```rust
+pub fn column_filter(columns: &[Column], predicate: &Expr) -> Vec<usize> {
+    // Evaluate predicate on columns
+    let selection = eval_on_column(predicate, columns);
+    
+    // Return positions of matching rows
+    selection.iter()
+        .enumerate()
+        .filter_map(|(i, &pass)| if pass { Some(i) } else { None })
+        .collect()
+}
+```
+
+## Cost Model
+
+- Process entire columns: excellent cache behavior
+- Late materialization: only fetch needed columns
+
+## References
+
+1. Boncz, "MonetDB/X100", CIDR 2005

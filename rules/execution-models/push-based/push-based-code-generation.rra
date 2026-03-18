@@ -1,0 +1,70 @@
+---
+id: push-based-code-generation
+name: Push-Based JIT Code Generation
+category: execution-models
+version: 1.0.0
+databases: [HyPer, Umbra]
+authors: [Thomas Neumann]
+tags: [execution, push-based, jit, compilation, llvm]
+---
+
+# Push-Based JIT Code Generation
+
+## Description
+
+Just-in-time compilation of query plans to native machine code. Generates specialized code for each query, eliminating interpretation overhead.
+
+**Compilation pipeline:**
+1. Query plan → IR (intermediate representation)
+2. IR → LLVM IR
+3. LLVM optimizations
+4. Native code generation
+
+## Implementation
+
+```rust
+pub struct JITCompiler {
+    context: llvm::Context,
+    module: llvm::Module,
+}
+
+impl JITCompiler {
+    pub fn compile_query(plan: &RelExpr) -> CompiledQuery {
+        let mut compiler = Self::new();
+        
+        // Generate LLVM IR
+        let function = compiler.generate_pipeline_function(plan);
+        
+        // Optimize
+        compiler.run_optimization_passes();
+        
+        // Compile to native code
+        compiler.compile_to_native(function)
+    }
+    
+    fn generate_pipeline_function(&mut self, plan: &RelExpr) -> FunctionValue {
+        let func = self.module.add_function("execute", /* signature */);
+        let builder = self.context.create_builder();
+        
+        // Generate pipeline code
+        match plan {
+            RelExpr::Scan { .. } => self.gen_scan(&builder),
+            RelExpr::Filter { .. } => self.gen_filter(&builder),
+            _ => {}
+        }
+        
+        func
+    }
+}
+```
+
+## Cost Model
+
+- Compilation: 1-100ms (amortized over execution)
+- Execution: near-optimal machine code
+- Trade-off: compilation time vs execution speedup
+
+## References
+
+1. Neumann, "Efficiently Compiling Efficient Query Plans", VLDB 2011
+2. Klonatos et al., "Building Efficient Query Engines in a High-Level Language", VLDB 2014

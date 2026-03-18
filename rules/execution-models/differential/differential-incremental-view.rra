@@ -1,0 +1,66 @@
+---
+id: differential-incremental-view
+name: Differential Incremental View Maintenance
+category: execution-models
+version: 1.0.0
+databases: [materialize, spark]
+authors: [McSherry et al.]
+tags: [execution, differential, incremental, streaming]
+---
+
+# Differential Incremental View Maintenance
+
+## Description
+
+Maintains materialized views incrementally by computing only the changes (deltas) instead of recomputing from scratch. Based on differential dataflow principles.
+
+**Key concepts:**
+- **Changes:** (data, time, diff) triples
+- **Incremental:** Only process changes
+- **Correctness:** Maintains consistency across updates
+
+## Implementation
+
+```rust
+pub struct IncrementalView {
+    query: RelExpr,
+    state: ViewState,
+}
+
+impl IncrementalView {
+    pub fn update(&mut self, changes: Vec<Change>) -> Vec<Change> {
+        // Compute output changes from input changes
+        let mut output_changes = Vec::new();
+        
+        for change in changes {
+            match &self.query {
+                RelExpr::Filter { predicate, .. } => {
+                    if eval_predicate(predicate, &change.data) {
+                        output_changes.push(change);
+                    }
+                }
+                RelExpr::Join { .. } => {
+                    // Delta join: probe existing state
+                    let matches = self.state.probe(&change);
+                    for m in matches {
+                        output_changes.push(Change::new(m, change.diff));
+                    }
+                }
+                _ => {}
+            }
+        }
+        
+        output_changes
+    }
+}
+```
+
+## Cost Model
+
+- Update cost: proportional to change size, not data size
+- 100-1000x faster than recomputation for small updates
+
+## References
+
+1. McSherry et al., "Differential Dataflow", CIDR 2013
+2. Materialize: Incremental view maintenance

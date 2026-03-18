@@ -1,0 +1,27 @@
+---
+id: greenplum-external-table-pushdown
+name: External Table Pushdown (Greenplum)
+category: database-specific/greenplum
+databases: [greenplum]
+execution_models: [volcano, vectorized, push-based]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# External Table Pushdown (Greenplum)
+
+## Metadata
+- **Rule ID**: `greenplum-external-table-pushdown`
+- **Category**: Database-Specific / Greenplum
+- **Source**: Greenplum
+
+## Description
+
+Greenplum pushes filters and projections to external tables (HDFS, S3, etc.) using PXF (Platform Extension Framework), reducing data transfer.
+
+## Tags
+`database-specific`, `greenplum`, `external-table`, `pushdown`, `pxf`

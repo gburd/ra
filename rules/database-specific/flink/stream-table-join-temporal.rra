@@ -1,0 +1,218 @@
+---
+id: flink-stream-table-join-temporal
+name: Stream-Table Join with Temporal Constraint (Flink)
+category: database-specific/flink
+databases: [flink]
+execution_models: [volcano, vectorized, push-based]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# Stream-Table Join with Temporal Constraint (Flink)
+
+## Metadata
+- **Rule ID**: `flink-stream-table-join-temporal`
+- **Category**: Database-Specific / Flink
+- **Complexity**: O(n) with bounded state
+- **Source**: Apache Flink Table API
+- **Docs**: https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/table/sql/queries/joins/
+- **Introduced**: Flink 1.9+ (2019)
+
+## Description
+
+Flink optimizes stream-table joins by adding temporal constraints, converting unbounded state joins into bounded lookups. Critical for streaming query performance.
+
+**Types:**
+1. **Temporal Join** (versioned table): Join with "as of" time
+2. **Lookup Join** (external table): Join with external system
+3. **Interval Join** (stream-stream): Join within time window
+
+**Key innovation**: Automatic state cleanup based on time constraints
+
+## Relational Algebra
+
+```
+// Unbounded join (infinite state)
+StreamR ⋈ StreamS
+
+// Temporal join (bounded state)
+StreamR ⋈_{R.time = S.time AND R.time BETWEEN S.start AND S.end} StreamS
+
+// Lookup join (no state)
+StreamR ⋈_{lookup(S, R.key)} ExternalTableS
+```
+
+## Implementation Pattern
+
+```java
+// Flink TemporalJoinRule.java (conceptual)
+public class TemporalJoinRule extends RelOptRule {
+    @Override
+    public void onMatch(RelOptRuleCall call) {
+        LogicalJoin join = call.rel(0);
+
+        // Check for temporal predicate
+        RexNode condition = join.getCondition();
+        TemporalConstraint temporal = extractTemporalConstraint(condition);
+
+        if (temporal \!= null) {
+            // Convert to temporal join
+            RelNode newJoin = new FlinkLogicalTemporalTableJoin(
+                join.getCluster(),
+                join.getTraitSet(),
+                join.getLeft(),
+                join.getRight(),
+                join.getCondition(),
+                temporal);
+
+            call.transformTo(newJoin);
+        }
+    }
+
+    private TemporalConstraint extractTemporalConstraint(RexNode condition) {
+        // Look for patterns like:
+        // - FOR SYSTEM_TIME AS OF
+        // - R.time BETWEEN S.start_time AND S.end_time
+        // - R.time = S.time AND R.time > S.time - INTERVAL '1' HOUR
+        ...
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn can_apply_temporal_join(
+    join: &JoinNode,
+    left: &StreamNode,
+    right: &StreamNode,
+) -> bool {
+    // Must have time attribute
+    if \!left.has_time_attribute() || \!right.has_time_attribute() {
+        return false;
+    }
+
+    // Must have temporal constraint in predicate
+    let has_temporal = join.predicates().iter().any(|p| {
+        matches\!(p, Predicate::TemporalBetween(_) | Predicate::ForSystemTimeAsOf(_))
+    });
+
+    has_temporal
+}
+```
+
+## Cost Model
+
+```rust
+pub fn cost_temporal_join(
+    left_rate: f64,  // Events per second
+    right_rate: f64,
+    window_size: Duration,
+) -> Cost {
+    // State size: events within window
+    let left_state = (left_rate * window_size.as_secs_f64()) as u64;
+    let right_state = (right_rate * window_size.as_secs_f64()) as u64;
+
+    let state_memory = Cost::memory((left_state + right_state) * 128);
+
+    // Join cost: O(left_rate * right_state)
+    let join_throughput = left_rate * right_state as f64;
+    let cpu_cost = Cost::cpu(join_throughput as u64);
+
+    state_memory + cpu_cost
+}
+```
+
+## Test Cases
+
+### Test 1: Temporal table join with FOR SYSTEM_TIME AS OF
+```sql
+-- Versioned dimension table (changes over time)
+CREATE TABLE product_prices (
+    product_id INT,
+    price DECIMAL,
+    start_time TIMESTAMP,
+    end_time TIMESTAMP,
+    PRIMARY KEY (product_id, start_time)
+) WITH (
+    'connector' = 'jdbc',
+    'table-name' = 'products'
+);
+
+-- Stream of orders
+CREATE TABLE orders (
+    order_id BIGINT,
+    product_id INT,
+    order_time TIMESTAMP,
+    WATERMARK FOR order_time AS order_time - INTERVAL '5' SECOND
+) WITH (
+    'connector' = 'kafka',
+    'topic' = 'orders'
+);
+
+-- Temporal join: Get price at order time
+SELECT o.order_id, o.product_id, p.price, o.order_time
+FROM orders o
+JOIN product_prices FOR SYSTEM_TIME AS OF o.order_time AS p
+  ON o.product_id = p.product_id;
+
+-- Optimization: Lookup join (no buffering orders)
+-- Each order triggers single lookup for price at order_time
+-- State: O(1) per query
+```
+
+### Test 2: Interval join (bounded state)
+```sql
+-- Two streams with time bounds
+SELECT *
+FROM stream1 s1
+JOIN stream2 s2
+  ON s1.key = s2.key
+  AND s1.event_time BETWEEN s2.event_time - INTERVAL '1' HOUR
+                        AND s2.event_time + INTERVAL '1' HOUR;
+
+-- State bounded by interval: keep only 2 hours of data
+-- Automatic cleanup of events outside window
+```
+
+### Test 3: Lookup join (external)
+```sql
+-- Enrich stream with external MySQL table
+CREATE TABLE users (
+    user_id INT PRIMARY KEY,
+    name VARCHAR
+) WITH (
+    'connector' = 'jdbc',
+    'url' = 'jdbc:mysql://localhost/db',
+    'table-name' = 'users'
+);
+
+SELECT e.*, u.name
+FROM event_stream e
+LEFT JOIN users FOR SYSTEM_TIME AS OF e.event_time AS u
+  ON e.user_id = u.user_id;
+
+-- Optimization: Async lookup (no state)
+-- Each event triggers async JDBC query
+```
+
+## References
+
+1. **Flink Documentation**: "Joins in Continuous Queries"
+   - URL: https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/table/sql/queries/joins/
+
+2. **Flink FLIP-29**: "Temporal Table Join"
+   - URL: https://cwiki.apache.org/confluence/display/FLINK/FLIP-29
+
+3. **Paper**: "One SQL to Rule Them All" (Flink SQL, VLDB 2019)
+   - Authors: Hequn Cheng et al.
+
+4. **Flink Source**: TemporalJoinRule.java
+   - https://github.com/apache/flink/tree/master/flink-table/flink-table-planner
+
+## Tags
+`database-specific`, `flink`, `stream-processing`, `temporal-join`, `bounded-state`, `streaming`

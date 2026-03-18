@@ -1,0 +1,39 @@
+---
+id: aggregate-cardinality-estimation
+name: aggregate cardinality estimation
+category: cost-models
+version: 1.0.0
+databases: [PostgreSQL, Oracle, Spark]
+tags: [cost, estimation, statistics]
+---
+
+# aggregate cardinality estimation
+
+## Description
+
+Estimates GROUP BY output size based on distinct value counts.
+
+## Implementation
+
+```rust
+pub struct aggregatecardinalityestimationModel {
+    // Model parameters
+}
+
+impl aggregatecardinalityestimationModel {
+    pub fn estimate(&self) -> f64 {
+        // Implementation
+        0.0
+    }
+}
+```
+
+## Cost Model
+
+- Based on database statistics and runtime metrics
+- Adjusts for actual workload characteristics
+
+## References
+
+1. Selinger et al., "Access Path Selection", SIGMOD 1979
+2. Lohman, "Is Query Optimization a Solved Problem?", SIGMOD 2014

@@ -1,0 +1,50 @@
+---
+id: histogram-based-estimation
+name: Histogram-Based Cardinality Estimation
+category: cost-models
+version: 1.0.0
+databases: [PostgreSQL, Oracle, mssql]
+tags: [cost, histogram, statistics]
+---
+
+# Histogram-Based Cardinality Estimation
+
+## Description
+
+Uses histograms of column value distributions for accurate selectivity estimates.
+
+## Implementation
+
+```rust
+pub struct Histogram {
+    buckets: Vec<HistogramBucket>,
+}
+
+pub struct HistogramBucket {
+    lower_bound: Value,
+    upper_bound: Value,
+    count: f64,
+}
+
+impl Histogram {
+    pub fn range_selectivity(&self, lower: &Value, upper: &Value) -> f64 {
+        let mut count = 0.0;
+        for bucket in &self.buckets {
+            if bucket.overlaps(lower, upper) {
+                count += bucket.count;
+            }
+        }
+        count / self.total_count()
+    }
+}
+```
+
+## Cost Model
+
+- Equi-depth histograms: each bucket has equal count
+- Range queries: interpolate within buckets
+- Accuracy: depends on bucket count (10-1000)
+
+## References
+
+1. Poosala et al., "Selectivity Estimation Without the Attribute Value Independence Assumption", VLDB 1997

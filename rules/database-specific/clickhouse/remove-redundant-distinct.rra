@@ -1,0 +1,90 @@
+---
+id: clickhouse-remove-redundant-distinct
+name: Remove Redundant DISTINCT
+category: database-specific/clickhouse
+databases: [clickhouse]
+version: 1.0.0
+authors: ["RA Contributors"]
+tags: [database-specific, clickhouse, distinct, optimization, elimination]
+complexity: O(1)
+benefit_range: [0.5, 0.9]
+---
+
+# Remove Redundant DISTINCT
+
+## Description
+
+Removes DISTINCT operation when input is already unique on the projected columns (e.g., input contains a unique key in the projection).
+
+**When to apply:** DISTINCT on columns that include a unique key.
+
+**Why it works**: DISTINCT has O(n log n) cost for sorting or O(n) for hashing. Eliminating it when provably unnecessary is a significant win.
+
+**Database version**: ClickHouse v20.3+
+
+## Relational Algebra
+
+```algebra
+Distinct[cols](R) -> R
+  where cols ⊇ unique_key(R)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("clickhouse-remove-redundant-distinct";
+    "(distinct ?cols ?input)" =>
+    "?input"
+    if is_database("clickhouse")
+    if cols_contain_unique_key("?cols", "?input")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    distinct_cols: &[Column],
+    input: &RelNode,
+) -> bool {
+    // Check if distinct columns include a unique key
+    for key in input.unique_keys() {
+        if key.iter().all(|k| distinct_cols.contains(k)) {
+            return true;
+        }
+    }
+    false
+}
+```
+
+**Restrictions:**
+- Only applies to ClickHouse
+- Requires provable uniqueness on distinct columns
+
+## Cost Model
+
+```rust
+fn estimated_benefit(input_rows: f64) -> f64 {
+    // Eliminates DISTINCT cost entirely
+    let distinct_cost = input_rows * input_rows.log2();
+    distinct_cost / (distinct_cost + input_rows * 100.0)
+}
+```
+
+**Typical benefit**: 50-90%
+
+## Test Cases
+
+```sql
+-- Primary key makes DISTINCT redundant
+SELECT DISTINCT id FROM users;  -- id is primary key
+-- Optimized to: SELECT id FROM users;
+```
+
+## References
+
+**Source code:**
+- ClickHouse: `src/Processors/QueryPlan/Optimizations/removeRedundantDistinct.cpp`
+  - Commit: 35f2d31186cca2f8c50f7ba4bd93817da490da85
