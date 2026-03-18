@@ -31,5 +31,9 @@ harness = false
 name = "resource_budgets"
 harness = false
 
+[[bench]]
+name = "differential_timeline"
+harness = false
+
 [lints]
 workspace = true

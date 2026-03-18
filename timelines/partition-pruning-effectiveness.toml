@@ -1,0 +1,2101 @@
+# Partition pruning effectiveness degradation
+#
+# Demonstrates how partition pruning becomes less effective as
+# statistics become stale and partition sizes grow unevenly.
+#
+# Scenario: A time-partitioned event log with monthly partitions.
+# A query filters by date range. Initially, pruning eliminates most
+# partitions effectively. As data skews toward recent months and
+# stats become stale, the optimizer scans too many partitions.
+# ANALYZE restores accurate partition statistics and pruning recovers.
+#
+# Query:
+#   SELECT event_type, COUNT(*), AVG(duration_ms)
+#   FROM event_log
+#   WHERE event_time >= '2025-10-01' AND event_time < '2025-11-01'
+#     AND user_id IS NOT NULL
+#   GROUP BY event_type
+
+[metadata]
+name = "partition-pruning-effectiveness"
+description = "Partition pruning degradation from stale stats and skewed partition sizes"
+database = "postgresql"
+schema = "analytics"
+duration_seconds = 14400  # 4 hours
+
+# -- Snapshot 0: Fresh stats, uniform partitions --
+[[snapshots]]
+time_offset = 0
+label = "initial - 12 partitions, uniform, 2 scanned"
+
+[[snapshots.tables]]
+name = "event_log_2025_01"
+row_count = 5000000
+page_count = 40000
+avg_row_size = 64.0
+table_size_bytes = 320_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 5000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 2600000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.99
+min_value = "2025-01-01"
+max_value = "2025-01-31"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 500000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 10000
+null_fraction = 0.01
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "event_log_2025_06"
+row_count = 5000000
+page_count = 40000
+avg_row_size = 64.0
+table_size_bytes = 320_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 5000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 2500000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.99
+min_value = "2025-06-01"
+max_value = "2025-06-30"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 500000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 10000
+null_fraction = 0.01
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "event_log_2025_10"
+row_count = 5000000
+page_count = 40000
+avg_row_size = 64.0
+table_size_bytes = 320_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 5000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 2600000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.99
+min_value = "2025-10-01"
+max_value = "2025-10-31"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 500000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 10000
+null_fraction = 0.01
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "event_log_2025_11"
+row_count = 5000000
+page_count = 40000
+avg_row_size = 64.0
+table_size_bytes = 320_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 5000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 2500000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.99
+min_value = "2025-11-01"
+max_value = "2025-11-30"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 500000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 10000
+null_fraction = 0.01
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "event_log_2025_12"
+row_count = 2000000
+page_count = 16000
+avg_row_size = 64.0
+table_size_bytes = 128_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 2000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 1500000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.99
+min_value = "2025-12-01"
+max_value = "2025-12-31"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 400000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 8000
+null_fraction = 0.01
+avg_width = 4.0
+
+# -- Snapshot 1: October partition growing fast --
+[[snapshots]]
+time_offset = 1800
+label = "October partition 3x larger - pruning still works"
+
+[[snapshots.tables]]
+name = "event_log_2025_01"
+row_count = 5000000
+page_count = 40000
+avg_row_size = 64.0
+table_size_bytes = 320_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 5000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 2600000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.99
+min_value = "2025-01-01"
+max_value = "2025-01-31"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 500000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 10000
+null_fraction = 0.01
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "event_log_2025_06"
+row_count = 5000000
+page_count = 40000
+avg_row_size = 64.0
+table_size_bytes = 320_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 5000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 2500000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.99
+min_value = "2025-06-01"
+max_value = "2025-06-30"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 500000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 10000
+null_fraction = 0.01
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "event_log_2025_10"
+row_count = 15000000
+page_count = 120000
+avg_row_size = 64.0
+table_size_bytes = 960_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 15000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 2600000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.92
+min_value = "2025-10-01"
+max_value = "2025-10-31"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 800000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 12000
+null_fraction = 0.01
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "event_log_2025_11"
+row_count = 8000000
+page_count = 64000
+avg_row_size = 64.0
+table_size_bytes = 512_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 8000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 2500000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.96
+min_value = "2025-11-01"
+max_value = "2025-11-30"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 600000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 11000
+null_fraction = 0.01
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "event_log_2025_12"
+row_count = 5000000
+page_count = 40000
+avg_row_size = 64.0
+table_size_bytes = 320_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 5000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 2500000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.98
+min_value = "2025-12-01"
+max_value = "2025-12-31"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 500000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 10000
+null_fraction = 0.01
+avg_width = 4.0
+
+# -- Snapshot 2: Stale stats on October, cost estimate wrong --
+[[snapshots]]
+time_offset = 3600
+label = "stale stats on Oct partition - cost underestimated"
+
+[[snapshots.tables]]
+name = "event_log_2025_01"
+row_count = 5000000
+page_count = 40000
+avg_row_size = 64.0
+table_size_bytes = 320_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 5000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 2600000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.99
+min_value = "2025-01-01"
+max_value = "2025-01-31"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 500000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 10000
+null_fraction = 0.01
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "event_log_2025_06"
+row_count = 5000000
+page_count = 40000
+avg_row_size = 64.0
+table_size_bytes = 320_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 5000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 2500000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.99
+min_value = "2025-06-01"
+max_value = "2025-06-30"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 500000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 10000
+null_fraction = 0.01
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "event_log_2025_10"
+row_count = 25000000
+page_count = 200000
+avg_row_size = 64.0
+table_size_bytes = 1_600_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 25000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 2600000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.80
+min_value = "2025-10-01"
+max_value = "2025-10-31"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 1200000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 15000
+null_fraction = 0.01
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "event_log_2025_11"
+row_count = 12000000
+page_count = 96000
+avg_row_size = 64.0
+table_size_bytes = 768_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 12000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 2500000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.90
+min_value = "2025-11-01"
+max_value = "2025-11-30"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 800000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 13000
+null_fraction = 0.01
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "event_log_2025_12"
+row_count = 8000000
+page_count = 64000
+avg_row_size = 64.0
+table_size_bytes = 512_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 8000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 2600000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.95
+min_value = "2025-12-01"
+max_value = "2025-12-31"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 600000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 11000
+null_fraction = 0.01
+avg_width = 4.0
+
+# -- Snapshot 3: Post-ANALYZE on October --
+[[snapshots]]
+time_offset = 5400
+label = "post-ANALYZE Oct - accurate cost, scan plan improved"
+
+[[snapshots.tables]]
+name = "event_log_2025_01"
+row_count = 5000000
+page_count = 40000
+avg_row_size = 64.0
+table_size_bytes = 320_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 5000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 2600000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.99
+min_value = "2025-01-01"
+max_value = "2025-01-31"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 500000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 10000
+null_fraction = 0.01
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "event_log_2025_06"
+row_count = 5000000
+page_count = 40000
+avg_row_size = 64.0
+table_size_bytes = 320_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 5000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 2500000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.99
+min_value = "2025-06-01"
+max_value = "2025-06-30"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 500000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 10000
+null_fraction = 0.01
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "event_log_2025_10"
+row_count = 30000000
+page_count = 240000
+avg_row_size = 64.0
+table_size_bytes = 1_920_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 30000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 2680000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.75
+min_value = "2025-10-01"
+max_value = "2025-10-31"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 1500000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 16000
+null_fraction = 0.01
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "event_log_2025_11"
+row_count = 15000000
+page_count = 120000
+avg_row_size = 64.0
+table_size_bytes = 960_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 15000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 2500000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.85
+min_value = "2025-11-01"
+max_value = "2025-11-30"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 900000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 14000
+null_fraction = 0.01
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "event_log_2025_12"
+row_count = 10000000
+page_count = 80000
+avg_row_size = 64.0
+table_size_bytes = 640_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 10000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 2600000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.92
+min_value = "2025-12-01"
+max_value = "2025-12-31"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 700000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 12000
+null_fraction = 0.01
+avg_width = 4.0
+
+# -- Snapshot 4: Data redistribution after partition split --
+[[snapshots]]
+time_offset = 7200
+label = "October split into weeks - finer pruning possible"
+
+[[snapshots.tables]]
+name = "event_log_2025_01"
+row_count = 5000000
+page_count = 40000
+avg_row_size = 64.0
+table_size_bytes = 320_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 5000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 2600000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.99
+min_value = "2025-01-01"
+max_value = "2025-01-31"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 500000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 10000
+null_fraction = 0.01
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "event_log_2025_06"
+row_count = 5000000
+page_count = 40000
+avg_row_size = 64.0
+table_size_bytes = 320_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 5000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 2500000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.99
+min_value = "2025-06-01"
+max_value = "2025-06-30"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 500000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 10000
+null_fraction = 0.01
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "event_log_2025_10_w1"
+row_count = 8000000
+page_count = 64000
+avg_row_size = 64.0
+table_size_bytes = 512_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 8000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 600000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.98
+min_value = "2025-10-01"
+max_value = "2025-10-07"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 800000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 14000
+null_fraction = 0.01
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "event_log_2025_10_w2"
+row_count = 10000000
+page_count = 80000
+avg_row_size = 64.0
+table_size_bytes = 640_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 10000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 600000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.97
+min_value = "2025-10-08"
+max_value = "2025-10-14"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 900000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 15000
+null_fraction = 0.01
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "event_log_2025_10_w3"
+row_count = 8000000
+page_count = 64000
+avg_row_size = 64.0
+table_size_bytes = 512_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 8000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 600000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.97
+min_value = "2025-10-15"
+max_value = "2025-10-21"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 800000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 14000
+null_fraction = 0.01
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "event_log_2025_10_w4"
+row_count = 6000000
+page_count = 48000
+avg_row_size = 64.0
+table_size_bytes = 384_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 6000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 860000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.97
+min_value = "2025-10-22"
+max_value = "2025-10-31"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 700000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 13000
+null_fraction = 0.01
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "event_log_2025_11"
+row_count = 18000000
+page_count = 144000
+avg_row_size = 64.0
+table_size_bytes = 1_152_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 18000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 2500000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.82
+min_value = "2025-11-01"
+max_value = "2025-11-30"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 1000000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 15000
+null_fraction = 0.01
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "event_log_2025_12"
+row_count = 12000000
+page_count = 96000
+avg_row_size = 64.0
+table_size_bytes = 768_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 12000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 2600000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.90
+min_value = "2025-12-01"
+max_value = "2025-12-31"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 800000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 12000
+null_fraction = 0.01
+avg_width = 4.0
+
+# -- Snapshot 5: Old partitions archived --
+[[snapshots]]
+time_offset = 9000
+label = "old partitions archived - Jan+Jun dropped"
+
+[[snapshots.tables]]
+name = "event_log_2025_10_w1"
+row_count = 8000000
+page_count = 64000
+avg_row_size = 64.0
+table_size_bytes = 512_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 8000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 600000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.98
+min_value = "2025-10-01"
+max_value = "2025-10-07"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 800000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 14000
+null_fraction = 0.01
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "event_log_2025_10_w2"
+row_count = 10000000
+page_count = 80000
+avg_row_size = 64.0
+table_size_bytes = 640_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 10000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 600000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.97
+min_value = "2025-10-08"
+max_value = "2025-10-14"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 900000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 15000
+null_fraction = 0.01
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "event_log_2025_10_w3"
+row_count = 8000000
+page_count = 64000
+avg_row_size = 64.0
+table_size_bytes = 512_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 8000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 600000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.97
+min_value = "2025-10-15"
+max_value = "2025-10-21"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 800000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 14000
+null_fraction = 0.01
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "event_log_2025_10_w4"
+row_count = 6000000
+page_count = 48000
+avg_row_size = 64.0
+table_size_bytes = 384_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 6000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 860000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.97
+min_value = "2025-10-22"
+max_value = "2025-10-31"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 700000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 13000
+null_fraction = 0.01
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "event_log_2025_11"
+row_count = 20000000
+page_count = 160000
+avg_row_size = 64.0
+table_size_bytes = 1_280_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 20000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 2500000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.80
+min_value = "2025-11-01"
+max_value = "2025-11-30"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 1100000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 16000
+null_fraction = 0.01
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "event_log_2025_12"
+row_count = 15000000
+page_count = 120000
+avg_row_size = 64.0
+table_size_bytes = 960_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 15000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 2600000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.88
+min_value = "2025-12-01"
+max_value = "2025-12-31"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 900000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 14000
+null_fraction = 0.01
+avg_width = 4.0
+
+# -- Snapshot 6: Final ANALYZE, optimal pruning restored --
+[[snapshots]]
+time_offset = 10800
+label = "final ANALYZE - optimal weekly pruning"
+
+[[snapshots.tables]]
+name = "event_log_2025_10_w1"
+row_count = 8000000
+page_count = 64000
+avg_row_size = 64.0
+table_size_bytes = 512_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 8000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 600000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.98
+min_value = "2025-10-01"
+max_value = "2025-10-07"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 800000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 14000
+null_fraction = 0.01
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "event_log_2025_10_w2"
+row_count = 10000000
+page_count = 80000
+avg_row_size = 64.0
+table_size_bytes = 640_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 10000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 600000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.97
+min_value = "2025-10-08"
+max_value = "2025-10-14"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 900000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 15000
+null_fraction = 0.01
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "event_log_2025_10_w3"
+row_count = 8000000
+page_count = 64000
+avg_row_size = 64.0
+table_size_bytes = 512_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 8000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 600000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.97
+min_value = "2025-10-15"
+max_value = "2025-10-21"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 800000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 14000
+null_fraction = 0.01
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "event_log_2025_10_w4"
+row_count = 6000000
+page_count = 48000
+avg_row_size = 64.0
+table_size_bytes = 384_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 6000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 860000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.97
+min_value = "2025-10-22"
+max_value = "2025-10-31"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 700000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 13000
+null_fraction = 0.01
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "event_log_2025_11"
+row_count = 20000000
+page_count = 160000
+avg_row_size = 64.0
+table_size_bytes = 1_280_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 20000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 2500000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.80
+min_value = "2025-11-01"
+max_value = "2025-11-30"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 1100000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 16000
+null_fraction = 0.01
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "event_log_2025_12"
+row_count = 16000000
+page_count = 128000
+avg_row_size = 64.0
+table_size_bytes = 1_024_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 16000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 2600000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.88
+min_value = "2025-12-01"
+max_value = "2025-12-31"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 950000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 14500
+null_fraction = 0.01
+avg_width = 4.0
+
+# -- Snapshot 7: Final steady state --
+[[snapshots]]
+time_offset = 14400
+label = "steady state - weekly pruning efficient"
+
+[[snapshots.tables]]
+name = "event_log_2025_10_w1"
+row_count = 8000000
+page_count = 64000
+avg_row_size = 64.0
+table_size_bytes = 512_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 8000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 600000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.98
+min_value = "2025-10-01"
+max_value = "2025-10-07"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 800000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 14000
+null_fraction = 0.01
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "event_log_2025_10_w2"
+row_count = 10000000
+page_count = 80000
+avg_row_size = 64.0
+table_size_bytes = 640_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 10000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 600000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.97
+min_value = "2025-10-08"
+max_value = "2025-10-14"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 900000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 15000
+null_fraction = 0.01
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "event_log_2025_10_w3"
+row_count = 8000000
+page_count = 64000
+avg_row_size = 64.0
+table_size_bytes = 512_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 8000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 600000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.97
+min_value = "2025-10-15"
+max_value = "2025-10-21"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 800000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 14000
+null_fraction = 0.01
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "event_log_2025_10_w4"
+row_count = 6000000
+page_count = 48000
+avg_row_size = 64.0
+table_size_bytes = 384_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 6000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 860000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.97
+min_value = "2025-10-22"
+max_value = "2025-10-31"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 700000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 13000
+null_fraction = 0.01
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "event_log_2025_11"
+row_count = 22000000
+page_count = 176000
+avg_row_size = 64.0
+table_size_bytes = 1_408_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 22000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 2500000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.78
+min_value = "2025-11-01"
+max_value = "2025-11-30"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 1200000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 16000
+null_fraction = 0.01
+avg_width = 4.0
+
+[[snapshots.tables]]
+name = "event_log_2025_12"
+row_count = 18000000
+page_count = 144000
+avg_row_size = 64.0
+table_size_bytes = 1_152_000_000
+
+[[snapshots.tables.columns]]
+name = "event_id"
+ndv = 18000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_time"
+ndv = 2600000
+null_fraction = 0.0
+avg_width = 8.0
+correlation = 0.85
+min_value = "2025-12-01"
+max_value = "2025-12-31"
+
+[[snapshots.tables.columns]]
+name = "user_id"
+ndv = 1000000
+null_fraction = 0.05
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "event_type"
+ndv = 50
+null_fraction = 0.0
+avg_width = 16.0
+
+[[snapshots.tables.columns]]
+name = "duration_ms"
+ndv = 15000
+null_fraction = 0.01
+avg_width = 4.0
+
+# -- Events --
+
+[[events]]
+time_offset = 900
+kind = "insert"
+table = "event_log_2025_10"
+row_count = 10000000
+description = "Traffic spike in October partition"
+
+[[events]]
+time_offset = 1800
+kind = "insert"
+table = "event_log_2025_11"
+row_count = 3000000
+description = "November partition growing"
+
+[[events]]
+time_offset = 1800
+kind = "insert"
+table = "event_log_2025_12"
+row_count = 3000000
+description = "December partition growing"
+
+[[events]]
+time_offset = 2700
+kind = "insert"
+table = "event_log_2025_10"
+row_count = 10000000
+description = "Continued October surge (25M total)"
+
+[[events]]
+time_offset = 3600
+kind = "insert"
+table = "event_log_2025_11"
+row_count = 4000000
+description = "November growth"
+
+[[events]]
+time_offset = 4800
+kind = "analyze"
+table = "event_log_2025_10"
+description = "ANALYZE on bloated October partition"
+
+[[events]]
+time_offset = 5400
+kind = "reoptimize"
+table = "event_log_2025_10"
+description = "Plan adjusted for 5x larger October partition"
+
+[[events]]
+time_offset = 6600
+kind = "schema_change"
+table = "event_log_2025_10"
+description = "October partition split into weekly sub-partitions"
+
+[[events]]
+time_offset = 7200
+kind = "analyze"
+table = "event_log_2025_10_w1"
+description = "ANALYZE on weekly sub-partitions"
+
+[[events]]
+time_offset = 7200
+kind = "analyze"
+table = "event_log_2025_10_w2"
+description = "ANALYZE on weekly sub-partitions"
+
+[[events]]
+time_offset = 7200
+kind = "analyze"
+table = "event_log_2025_10_w3"
+description = "ANALYZE on weekly sub-partitions"
+
+[[events]]
+time_offset = 7200
+kind = "analyze"
+table = "event_log_2025_10_w4"
+description = "ANALYZE on weekly sub-partitions"
+
+[[events]]
+time_offset = 8400
+kind = "delete"
+table = "event_log_2025_01"
+row_count = 5000000
+description = "Archive January partition to cold storage"
+
+[[events]]
+time_offset = 8400
+kind = "delete"
+table = "event_log_2025_06"
+row_count = 5000000
+description = "Archive June partition to cold storage"
+
+[[events]]
+time_offset = 9000
+kind = "vacuum"
+table = "event_log_2025_01"
+description = "VACUUM after archive"
+
+[[events]]
+time_offset = 9000
+kind = "vacuum"
+table = "event_log_2025_06"
+description = "VACUUM after archive"
+
+[[events]]
+time_offset = 10200
+kind = "analyze"
+table = "event_log_2025_11"
+description = "Scheduled ANALYZE on November"
+
+[[events]]
+time_offset = 10800
+kind = "analyze"
+table = "event_log_2025_12"
+description = "Scheduled ANALYZE on December"
+
+[[events]]
+time_offset = 13500
+kind = "analyze"
+table = "event_log_2025_11"
+description = "Final ANALYZE cycle"
+
+# -- Feedback: partition pruning accuracy --
+
+[[feedback]]
+time_offset = 600
+query = "SELECT event_type, COUNT(*), AVG(duration_ms) FROM event_log WHERE event_time >= '2025-10-01' AND event_time < '2025-11-01' AND user_id IS NOT NULL GROUP BY event_type"
+operator = "Append (1 partition scanned, 4 pruned)"
+estimated_rows = 4750000.0
+actual_rows = 4750000.0
+estimated_cost = 100000.0
+actual_time_ms = 3500.0
+
+[[feedback]]
+time_offset = 1800
+query = "SELECT event_type, COUNT(*), AVG(duration_ms) FROM event_log WHERE event_time >= '2025-10-01' AND event_time < '2025-11-01' AND user_id IS NOT NULL GROUP BY event_type"
+operator = "Append (1 partition scanned, stale stats)"
+estimated_rows = 4750000.0
+actual_rows = 14250000.0
+estimated_cost = 100000.0
+actual_time_ms = 9800.0
+
+[[feedback]]
+time_offset = 3600
+query = "SELECT event_type, COUNT(*), AVG(duration_ms) FROM event_log WHERE event_time >= '2025-10-01' AND event_time < '2025-11-01' AND user_id IS NOT NULL GROUP BY event_type"
+operator = "Append (1 partition scanned, very stale)"
+estimated_rows = 4750000.0
+actual_rows = 23750000.0
+estimated_cost = 100000.0
+actual_time_ms = 16000.0
+
+[[feedback]]
+time_offset = 5400
+query = "SELECT event_type, COUNT(*), AVG(duration_ms) FROM event_log WHERE event_time >= '2025-10-01' AND event_time < '2025-11-01' AND user_id IS NOT NULL GROUP BY event_type"
+operator = "Append (1 partition scanned, fresh stats)"
+estimated_rows = 28500000.0
+actual_rows = 28500000.0
+estimated_cost = 600000.0
+actual_time_ms = 18500.0
+
+[[feedback]]
+time_offset = 7200
+query = "SELECT event_type, COUNT(*), AVG(duration_ms) FROM event_log WHERE event_time >= '2025-10-01' AND event_time < '2025-11-01' AND user_id IS NOT NULL GROUP BY event_type"
+operator = "Append (4 weekly sub-partitions scanned)"
+estimated_rows = 30400000.0
+actual_rows = 32000000.0
+estimated_cost = 640000.0
+actual_time_ms = 20000.0
+
+[[feedback]]
+time_offset = 9000
+query = "SELECT event_type, COUNT(*), AVG(duration_ms) FROM event_log WHERE event_time >= '2025-10-01' AND event_time < '2025-11-01' AND user_id IS NOT NULL GROUP BY event_type"
+operator = "Append (4 weekly sub-partitions, old months archived)"
+estimated_rows = 30400000.0
+actual_rows = 30400000.0
+estimated_cost = 640000.0
+actual_time_ms = 19500.0
+
+[[feedback]]
+time_offset = 10800
+query = "SELECT event_type, COUNT(*), AVG(duration_ms) FROM event_log WHERE event_time >= '2025-10-01' AND event_time < '2025-11-01' AND user_id IS NOT NULL GROUP BY event_type"
+operator = "Append (4 weekly sub-partitions, fresh stats)"
+estimated_rows = 30400000.0
+actual_rows = 30400000.0
+estimated_cost = 640000.0
+actual_time_ms = 19200.0
+
+[[feedback]]
+time_offset = 14400
+query = "SELECT event_type, COUNT(*), AVG(duration_ms) FROM event_log WHERE event_time >= '2025-10-01' AND event_time < '2025-11-01' AND user_id IS NOT NULL GROUP BY event_type"
+operator = "Append (4 weekly sub-partitions, stable)"
+estimated_rows = 30500000.0
+actual_rows = 30400000.0
+estimated_cost = 642000.0
+actual_time_ms = 19300.0

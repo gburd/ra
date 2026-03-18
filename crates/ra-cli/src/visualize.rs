@@ -450,6 +450,204 @@ fn html_escape(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
+// ── Plan evolution types and rendering ──────────────────────
+
+/// A single snapshot in the plan evolution trace.
+#[derive(Debug, Clone)]
+pub struct PlanSnapshot {
+    /// Time offset label (e.g. "t=3600s").
+    pub time_label: String,
+    /// Operator description (e.g. "SeqScan on lineitem").
+    pub operator: String,
+    /// Estimated cost at this snapshot.
+    pub cost: Option<f64>,
+    /// Whether the plan changed from the previous snapshot.
+    pub changed: bool,
+    /// Description of why the plan changed.
+    pub reason: Option<String>,
+}
+
+/// A trace of how a query plan evolved over time.
+#[derive(Debug, Clone)]
+pub struct PlanEvolutionTrace {
+    /// Query identifier or truncated SQL.
+    pub query_label: String,
+    /// Ordered snapshots of plan state over time.
+    pub snapshots: Vec<PlanSnapshot>,
+}
+
+/// Detect whether the operator changed between two strings.
+#[must_use]
+pub fn operators_differ(a: &str, b: &str) -> bool {
+    a != b
+}
+
+/// Format a cost delta as a percentage string with arrow.
+#[must_use]
+pub fn format_cost_delta(
+    previous: f64,
+    current: f64,
+) -> String {
+    if previous <= 0.0 {
+        return format!("{current:.0}");
+    }
+    let pct = ((current - previous) / previous) * 100.0;
+    if pct.abs() < 0.5 {
+        "unchanged".to_owned()
+    } else if pct > 0.0 {
+        format!(
+            "{current:.0} (\u{2191}{pct:.0}%)",
+        )
+    } else {
+        format!(
+            "{current:.0} (\u{2193}{:.0}%)",
+            pct.abs(),
+        )
+    }
+}
+
+/// Infer a reason for a plan change from context.
+#[must_use]
+pub fn infer_change_reason(
+    prev_operator: &str,
+    new_operator: &str,
+    events_between: &[&str],
+) -> String {
+    if events_between
+        .iter()
+        .any(|e| e.eq_ignore_ascii_case("analyze"))
+    {
+        return format!(
+            "Fresh statistics after ANALYZE: {prev_operator} \
+             \u{2192} {new_operator}"
+        );
+    }
+    if events_between
+        .iter()
+        .any(|e| e.eq_ignore_ascii_case("reoptimize"))
+    {
+        return format!(
+            "Reoptimization triggered: {prev_operator} \
+             \u{2192} {new_operator}"
+        );
+    }
+    if events_between
+        .iter()
+        .any(|e| e.eq_ignore_ascii_case("insert"))
+    {
+        return format!(
+            "Cardinality change after INSERT: {prev_operator} \
+             \u{2192} {new_operator}"
+        );
+    }
+    if events_between
+        .iter()
+        .any(|e| e.eq_ignore_ascii_case("delete"))
+    {
+        return format!(
+            "Cardinality change after DELETE: {prev_operator} \
+             \u{2192} {new_operator}"
+        );
+    }
+    format!("{prev_operator} \u{2192} {new_operator}")
+}
+
+/// Render a plan evolution trace as ASCII output.
+#[must_use]
+pub fn render_plan_evolution_ascii(
+    trace: &PlanEvolutionTrace,
+) -> String {
+    if trace.snapshots.is_empty() {
+        return String::new();
+    }
+
+    let mut out = String::new();
+    let title = format!(
+        "Plan Evolution: {}",
+        trace.query_label
+    );
+    let _ = writeln!(out, "{title}");
+    let _ = writeln!(out, "{}", "-".repeat(title.len()));
+    let _ = writeln!(out);
+
+    for (i, snap) in trace.snapshots.iter().enumerate() {
+        if i == 0 {
+            let _ = write!(
+                out,
+                "{:<12}Initial: {}",
+                snap.time_label, snap.operator,
+            );
+            if let Some(cost) = snap.cost {
+                let _ = writeln!(out);
+                let _ = write!(
+                    out,
+                    "{:>12}Cost: {cost:.0}",
+                    "",
+                );
+            }
+            let _ = writeln!(out);
+        } else if snap.changed {
+            let _ = writeln!(out);
+            let _ = write!(
+                out,
+                "{:<12}PLAN CHANGED: {}",
+                snap.time_label, snap.operator,
+            );
+            let _ = writeln!(out);
+            if let Some(ref reason) = snap.reason {
+                let _ = writeln!(
+                    out,
+                    "{:>12}Reason: {reason}",
+                    "",
+                );
+            }
+            if let Some(cost) = snap.cost {
+                let prev_cost = trace.snapshots[..i]
+                    .iter()
+                    .rev()
+                    .find_map(|s| s.cost);
+                if let Some(prev) = prev_cost {
+                    let _ = writeln!(
+                        out,
+                        "{:>12}Cost: {}",
+                        "",
+                        format_cost_delta(prev, cost),
+                    );
+                } else {
+                    let _ = writeln!(
+                        out,
+                        "{:>12}Cost: {cost:.0}",
+                        "",
+                    );
+                }
+            }
+        } else {
+            let _ = writeln!(out);
+            let _ = write!(
+                out,
+                "{:<12}Plan unchanged",
+                snap.time_label,
+            );
+            if let Some(cost) = snap.cost {
+                let prev_cost = trace.snapshots[..i]
+                    .iter()
+                    .rev()
+                    .find_map(|s| s.cost);
+                if let Some(prev) = prev_cost {
+                    let delta = format_cost_delta(prev, cost);
+                    let _ = write!(out, " (cost: {delta})");
+                } else {
+                    let _ =
+                        write!(out, " (cost: {cost:.0})");
+                }
+            }
+            let _ = writeln!(out);
+        }
+    }
+
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -805,5 +1003,288 @@ mod tests {
         let out = render_ascii_bar_chart(&s, &config);
         assert!(out.contains("-10.0"));
         assert!(out.contains("10.0"));
+    }
+
+    // ── Plan evolution tests ───────────────────────────────
+
+    fn sample_trace() -> PlanEvolutionTrace {
+        PlanEvolutionTrace {
+            query_label: "Q1".to_owned(),
+            snapshots: vec![
+                PlanSnapshot {
+                    time_label: "t=0s".to_owned(),
+                    operator: "HashJoin(orders, lineitem)".to_owned(),
+                    cost: Some(1500.0),
+                    changed: false,
+                    reason: None,
+                },
+                PlanSnapshot {
+                    time_label: "t=3600s".to_owned(),
+                    operator: "HashJoin(orders, lineitem)".to_owned(),
+                    cost: Some(1575.0),
+                    changed: false,
+                    reason: None,
+                },
+                PlanSnapshot {
+                    time_label: "t=7200s".to_owned(),
+                    operator: "NestedLoop(orders, lineitem)".to_owned(),
+                    cost: Some(2100.0),
+                    changed: true,
+                    reason: Some(
+                        "Cardinality change after INSERT: \
+                         HashJoin(orders, lineitem) \u{2192} \
+                         NestedLoop(orders, lineitem)"
+                            .to_owned(),
+                    ),
+                },
+                PlanSnapshot {
+                    time_label: "t=9000s".to_owned(),
+                    operator: "HashJoin(orders, lineitem)".to_owned(),
+                    cost: Some(1650.0),
+                    changed: true,
+                    reason: Some(
+                        "Fresh statistics after ANALYZE: \
+                         NestedLoop(orders, lineitem) \u{2192} \
+                         HashJoin(orders, lineitem)"
+                            .to_owned(),
+                    ),
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn plan_evolution_empty_trace() {
+        let trace = PlanEvolutionTrace {
+            query_label: "Q1".to_owned(),
+            snapshots: vec![],
+        };
+        let out = render_plan_evolution_ascii(&trace);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn plan_evolution_single_snapshot() {
+        let trace = PlanEvolutionTrace {
+            query_label: "Q1".to_owned(),
+            snapshots: vec![PlanSnapshot {
+                time_label: "t=0s".to_owned(),
+                operator: "SeqScan".to_owned(),
+                cost: Some(100.0),
+                changed: false,
+                reason: None,
+            }],
+        };
+        let out = render_plan_evolution_ascii(&trace);
+        assert!(out.contains("Plan Evolution: Q1"));
+        assert!(out.contains("Initial: SeqScan"));
+        assert!(out.contains("Cost: 100"));
+    }
+
+    #[test]
+    fn plan_evolution_has_title() {
+        let trace = sample_trace();
+        let out = render_plan_evolution_ascii(&trace);
+        assert!(out.contains("Plan Evolution: Q1"));
+        assert!(out.contains("---"));
+    }
+
+    #[test]
+    fn plan_evolution_shows_initial() {
+        let trace = sample_trace();
+        let out = render_plan_evolution_ascii(&trace);
+        assert!(out.contains("Initial: HashJoin(orders, lineitem)"));
+        assert!(out.contains("Cost: 1500"));
+    }
+
+    #[test]
+    fn plan_evolution_shows_unchanged() {
+        let trace = sample_trace();
+        let out = render_plan_evolution_ascii(&trace);
+        assert!(out.contains("Plan unchanged"));
+    }
+
+    #[test]
+    fn plan_evolution_shows_plan_changed() {
+        let trace = sample_trace();
+        let out = render_plan_evolution_ascii(&trace);
+        assert!(
+            out.contains("PLAN CHANGED: NestedLoop(orders, lineitem)")
+        );
+    }
+
+    #[test]
+    fn plan_evolution_shows_reason() {
+        let trace = sample_trace();
+        let out = render_plan_evolution_ascii(&trace);
+        assert!(out.contains("Reason:"));
+        assert!(out.contains("INSERT"));
+    }
+
+    #[test]
+    fn plan_evolution_shows_cost_increase() {
+        let trace = sample_trace();
+        let out = render_plan_evolution_ascii(&trace);
+        // t=7200s: cost goes from 1575 to 2100 = +33%
+        assert!(out.contains("\u{2191}"));
+    }
+
+    #[test]
+    fn plan_evolution_shows_cost_decrease() {
+        let trace = sample_trace();
+        let out = render_plan_evolution_ascii(&trace);
+        // t=9000s: cost goes from 2100 to 1650 = -21%
+        assert!(out.contains("\u{2193}"));
+    }
+
+    #[test]
+    fn plan_evolution_shows_analyze_reason() {
+        let trace = sample_trace();
+        let out = render_plan_evolution_ascii(&trace);
+        assert!(out.contains("ANALYZE"));
+    }
+
+    #[test]
+    fn cost_delta_increase() {
+        let delta = format_cost_delta(1000.0, 1500.0);
+        assert!(delta.contains("\u{2191}"));
+        assert!(delta.contains("50%"));
+    }
+
+    #[test]
+    fn cost_delta_decrease() {
+        let delta = format_cost_delta(2000.0, 1000.0);
+        assert!(delta.contains("\u{2193}"));
+        assert!(delta.contains("50%"));
+    }
+
+    #[test]
+    fn cost_delta_unchanged() {
+        let delta = format_cost_delta(1000.0, 1003.0);
+        assert_eq!(delta, "unchanged");
+    }
+
+    #[test]
+    fn cost_delta_zero_previous() {
+        let delta = format_cost_delta(0.0, 500.0);
+        assert_eq!(delta, "500");
+    }
+
+    #[test]
+    fn operators_differ_same() {
+        assert!(!operators_differ("SeqScan", "SeqScan"));
+    }
+
+    #[test]
+    fn operators_differ_different() {
+        assert!(operators_differ("SeqScan", "IndexScan"));
+    }
+
+    #[test]
+    fn infer_reason_analyze() {
+        let reason = infer_change_reason(
+            "SeqScan",
+            "IndexScan",
+            &["ANALYZE"],
+        );
+        assert!(reason.contains("ANALYZE"));
+        assert!(reason.contains("SeqScan"));
+        assert!(reason.contains("IndexScan"));
+    }
+
+    #[test]
+    fn infer_reason_reoptimize() {
+        let reason = infer_change_reason(
+            "HashJoin",
+            "NestedLoop",
+            &["REOPTIMIZE"],
+        );
+        assert!(reason.contains("Reoptimization"));
+    }
+
+    #[test]
+    fn infer_reason_insert() {
+        let reason = infer_change_reason(
+            "HashJoin",
+            "NestedLoop",
+            &["INSERT"],
+        );
+        assert!(reason.contains("INSERT"));
+        assert!(reason.contains("Cardinality"));
+    }
+
+    #[test]
+    fn infer_reason_delete() {
+        let reason = infer_change_reason(
+            "SeqScan",
+            "IndexScan",
+            &["DELETE"],
+        );
+        assert!(reason.contains("DELETE"));
+    }
+
+    #[test]
+    fn infer_reason_no_events() {
+        let reason = infer_change_reason(
+            "SeqScan",
+            "IndexScan",
+            &[],
+        );
+        assert!(reason.contains("\u{2192}"));
+        assert!(reason.contains("SeqScan"));
+        assert!(reason.contains("IndexScan"));
+    }
+
+    #[test]
+    fn plan_evolution_no_cost() {
+        let trace = PlanEvolutionTrace {
+            query_label: "Q2".to_owned(),
+            snapshots: vec![
+                PlanSnapshot {
+                    time_label: "t=0s".to_owned(),
+                    operator: "SeqScan".to_owned(),
+                    cost: None,
+                    changed: false,
+                    reason: None,
+                },
+                PlanSnapshot {
+                    time_label: "t=60s".to_owned(),
+                    operator: "IndexScan".to_owned(),
+                    cost: None,
+                    changed: true,
+                    reason: Some("operator change".to_owned()),
+                },
+            ],
+        };
+        let out = render_plan_evolution_ascii(&trace);
+        assert!(out.contains("Initial: SeqScan"));
+        assert!(out.contains("PLAN CHANGED: IndexScan"));
+        assert!(!out.contains("Cost:"));
+    }
+
+    #[test]
+    fn plan_snapshot_fields() {
+        let snap = PlanSnapshot {
+            time_label: "t=0s".to_owned(),
+            operator: "op".to_owned(),
+            cost: Some(42.0),
+            changed: true,
+            reason: Some("test".to_owned()),
+        };
+        assert_eq!(snap.time_label, "t=0s");
+        assert_eq!(snap.operator, "op");
+        assert!((snap.cost.unwrap_or(0.0) - 42.0).abs() < f64::EPSILON);
+        assert!(snap.changed);
+        assert_eq!(snap.reason.as_deref(), Some("test"));
+    }
+
+    #[test]
+    fn plan_evolution_trace_fields() {
+        let trace = PlanEvolutionTrace {
+            query_label: "Q5".to_owned(),
+            snapshots: vec![],
+        };
+        assert_eq!(trace.query_label, "Q5");
+        assert!(trace.snapshots.is_empty());
     }
 }

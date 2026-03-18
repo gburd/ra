@@ -88,6 +88,7 @@
 #![cfg_attr(test, allow(clippy::float_cmp))]
 
 pub mod accuracy;
+pub mod delta;
 pub mod gathering_cost;
 pub mod index_types;
 pub mod integration;
@@ -96,6 +97,7 @@ pub mod timeline;
 pub mod types;
 
 pub use accuracy::{QualityMetrics, RefreshThreshold, Staleness, StatisticsSource, StatisticsState};
+pub use delta::{DeltaSet, StatisticsDelta};
 pub use gathering_cost::{CostEstimator, GatheringCost, GatheringMethod, GatheringPriority};
 pub use index_types::{IndexCostFactors, IndexMetadata, IndexType};
 pub use profiles::{ProfileSelector, StatisticsProfile};

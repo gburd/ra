@@ -674,6 +674,95 @@ impl TimelinePlayer {
             .map(ExecutionFeedback::q_error)
             .reduce(f64::max)
     }
+
+    /// Compute the statistics delta between two snapshot indices.
+    ///
+    /// Returns `None` if either index is out of bounds.
+    pub fn compute_delta(
+        &self,
+        from_idx: usize,
+        to_idx: usize,
+    ) -> Option<crate::delta::DeltaSet> {
+        let from = self.timeline.snapshots.get(from_idx)?;
+        let to = self.timeline.snapshots.get(to_idx)?;
+        Some(crate::delta::DeltaSet::compute(from, to))
+    }
+
+    /// Compute the delta from the current snapshot to the next one.
+    ///
+    /// Returns `None` if not positioned at a snapshot, or if at the
+    /// last snapshot.
+    pub fn delta_to_next(&self) -> Option<crate::delta::DeltaSet> {
+        let idx = self.current_index()?;
+        self.compute_delta(idx, idx + 1)
+    }
+
+    /// Compute cumulative delta from a starting snapshot to the
+    /// current position.
+    ///
+    /// Merges all consecutive deltas from `from_idx` to the current
+    /// snapshot index. Returns `None` if not positioned at a snapshot
+    /// or if `from_idx` >= current index.
+    pub fn cumulative_delta(
+        &self,
+        from_idx: usize,
+    ) -> Option<crate::delta::DeltaSet> {
+        let current = self.current_index()?;
+        if from_idx >= current {
+            return None;
+        }
+        let mut merged = self.compute_delta(from_idx, from_idx + 1)?;
+        for i in (from_idx + 1)..current {
+            if let Some(next) = self.compute_delta(i, i + 1) {
+                merged.merge(&next);
+            }
+        }
+        Some(merged)
+    }
+
+    /// Find the most recent ANALYZE event index at or before the
+    /// current position.
+    ///
+    /// Returns the snapshot index closest to (but not after) the
+    /// ANALYZE event time, or `None` if no ANALYZE events exist
+    /// before current position.
+    pub fn last_analyze_snapshot_idx(&self) -> Option<usize> {
+        let current_time = self.current_time()?;
+        let mut best_idx = None;
+
+        for event in &self.timeline.events {
+            if event.kind == EventKind::Analyze
+                && event.time_offset <= current_time
+            {
+                // Find the snapshot closest to this ANALYZE event.
+                for (i, snap) in
+                    self.timeline.snapshots.iter().enumerate()
+                {
+                    if snap.time_offset <= event.time_offset {
+                        best_idx = Some(i);
+                    }
+                }
+            }
+        }
+
+        best_idx
+    }
+
+    /// Whether a full reoptimization is needed based on the delta
+    /// from the last ANALYZE event to the current position.
+    ///
+    /// Returns `true` if:
+    /// - No ANALYZE events found (always full-optimize)
+    /// - The cumulative delta since ANALYZE warrants full reopt
+    pub fn needs_full_reoptimization(&self) -> bool {
+        let Some(analyze_idx) = self.last_analyze_snapshot_idx() else {
+            return true;
+        };
+        let Some(delta) = self.cumulative_delta(analyze_idx) else {
+            return false;
+        };
+        delta.needs_full_reoptimization()
+    }
 }
 
 #[cfg(test)]
@@ -2228,6 +2317,235 @@ ndv = 50
         assert!(delta.expect("delta") < 0);
     }
 
+    // -- join-reordering-cascade.toml --
+
+    #[test]
+    fn example_join_reordering_cascade_parses() {
+        let tl = load_example("join-reordering-cascade.toml");
+        assert_eq!(tl.metadata.name, "join-reordering-cascade");
+        assert_eq!(tl.snapshot_count(), 10);
+        let names = tl.table_names();
+        assert!(names.contains(&"fact_transactions".to_string()));
+        assert!(names.contains(&"promotions".to_string()));
+        assert!(names.contains(&"dim_products".to_string()));
+        assert!(names.contains(&"dim_stores".to_string()));
+        assert!(names.contains(&"dim_customers".to_string()));
+    }
+
+    #[test]
+    fn example_join_reordering_cascade_promotions_lifecycle() {
+        let tl = load_example("join-reordering-cascade.toml");
+        let player = TimelinePlayer::new(tl).expect("player");
+        // Promotions grow from 50 to 500K then shrink to 5K
+        let growth = player.row_count_delta("promotions", 0, 4);
+        assert!(growth.expect("growth") > 400_000);
+        let shrink = player.row_count_delta("promotions", 4, 7);
+        assert!(shrink.expect("shrink") < -400_000);
+    }
+
+    #[test]
+    fn example_join_reordering_cascade_feedback_stale_period() {
+        let tl = load_example("join-reordering-cascade.toml");
+        // Should have stale period where estimates diverge
+        let stale_fb: Vec<_> = tl
+            .feedback
+            .iter()
+            .filter(|f| f.q_error() > 1.5)
+            .collect();
+        assert!(
+            !stale_fb.is_empty(),
+            "join-reordering should have stale feedback"
+        );
+    }
+
+    #[test]
+    fn example_join_reordering_cascade_events() {
+        let tl = load_example("join-reordering-cascade.toml");
+        assert!(tl.event_count() >= 10);
+        let reopt_count = tl
+            .events
+            .iter()
+            .filter(|e| e.kind == EventKind::Reoptimize)
+            .count();
+        assert!(
+            reopt_count >= 3,
+            "should have multiple reoptimize events"
+        );
+    }
+
+    // -- index-vs-seqscan.toml --
+
+    #[test]
+    fn example_index_vs_seqscan_parses() {
+        let tl = load_example("index-vs-seqscan.toml");
+        assert_eq!(tl.metadata.name, "index-vs-seqscan");
+        assert_eq!(tl.snapshot_count(), 8);
+        let names = tl.table_names();
+        assert!(names.contains(&"http_requests".to_string()));
+    }
+
+    #[test]
+    fn example_index_vs_seqscan_table_growth() {
+        let tl = load_example("index-vs-seqscan.toml");
+        let player = TimelinePlayer::new(tl).expect("player");
+        let delta = player.row_count_delta("http_requests", 0, 4);
+        assert!(delta.expect("delta") > 4_000_000);
+    }
+
+    #[test]
+    fn example_index_vs_seqscan_plan_transitions() {
+        let tl = load_example("index-vs-seqscan.toml");
+        // Verify feedback shows scan type transitions
+        let has_index = tl.feedback.iter().any(|f| {
+            f.operator
+                .as_ref()
+                .is_some_and(|o| o.contains("IndexScan"))
+        });
+        let has_seq = tl.feedback.iter().any(|f| {
+            f.operator
+                .as_ref()
+                .is_some_and(|o| o.contains("SeqScan"))
+        });
+        assert!(has_index, "should have IndexScan feedback");
+        assert!(has_seq, "should have SeqScan feedback");
+    }
+
+    #[test]
+    fn example_index_vs_seqscan_accuracy_recovery() {
+        let tl = load_example("index-vs-seqscan.toml");
+        let last = tl.feedback.last().expect("last");
+        assert!(
+            last.q_error() < 1.1,
+            "final feedback should be accurate"
+        );
+    }
+
+    // -- aggregation-strategy-evolution.toml --
+
+    #[test]
+    fn example_aggregation_strategy_parses() {
+        let tl =
+            load_example("aggregation-strategy-evolution.toml");
+        assert_eq!(
+            tl.metadata.name,
+            "aggregation-strategy-evolution"
+        );
+        assert_eq!(tl.snapshot_count(), 11);
+        let names = tl.table_names();
+        assert!(names.contains(&"sensor_readings".to_string()));
+        assert!(names.contains(&"devices".to_string()));
+    }
+
+    #[test]
+    fn example_aggregation_strategy_device_growth() {
+        let tl =
+            load_example("aggregation-strategy-evolution.toml");
+        let player = TimelinePlayer::new(tl).expect("player");
+        // Snapshot 0 = 1K devices, snapshot 7 = 105K devices
+        let delta = player.row_count_delta("devices", 0, 7);
+        assert!(
+            delta.expect("delta") > 99_000,
+            "devices should grow from 1K to 100K+"
+        );
+    }
+
+    #[test]
+    fn example_aggregation_strategy_transitions() {
+        let tl =
+            load_example("aggregation-strategy-evolution.toml");
+        // Should have HashAgg, GroupAgg, and 2-phase transitions
+        let has_hash = tl.feedback.iter().any(|f| {
+            f.operator
+                .as_ref()
+                .is_some_and(|o| o.contains("HashAggregate"))
+        });
+        let has_group = tl.feedback.iter().any(|f| {
+            f.operator
+                .as_ref()
+                .is_some_and(|o| o.contains("GroupAggregate"))
+        });
+        assert!(has_hash, "should have HashAggregate feedback");
+        assert!(has_group, "should have GroupAggregate feedback");
+    }
+
+    #[test]
+    fn example_aggregation_archive_shrinks_table() {
+        let tl =
+            load_example("aggregation-strategy-evolution.toml");
+        let player = TimelinePlayer::new(tl).expect("player");
+        // After archive (snapshot 7->8), readings drop
+        let delta =
+            player.row_count_delta("sensor_readings", 7, 8);
+        assert!(delta.expect("delta") < -50_000_000);
+    }
+
+    // -- partition-pruning-effectiveness.toml --
+
+    #[test]
+    fn example_partition_pruning_parses() {
+        let tl =
+            load_example("partition-pruning-effectiveness.toml");
+        assert_eq!(
+            tl.metadata.name,
+            "partition-pruning-effectiveness"
+        );
+        assert_eq!(tl.snapshot_count(), 8);
+    }
+
+    #[test]
+    fn example_partition_pruning_has_partitions() {
+        let tl =
+            load_example("partition-pruning-effectiveness.toml");
+        let names = tl.table_names();
+        // Should have weekly sub-partitions after split
+        assert!(names
+            .iter()
+            .any(|n| n.starts_with("event_log_2025_10")));
+        assert!(names.contains(&"event_log_2025_11".to_string()));
+    }
+
+    #[test]
+    fn example_partition_pruning_stale_period() {
+        let tl =
+            load_example("partition-pruning-effectiveness.toml");
+        // Should have feedback where stale stats cause big errors
+        let stale_fb: Vec<_> = tl
+            .feedback
+            .iter()
+            .filter(|f| f.q_error() > 3.0)
+            .collect();
+        assert!(
+            !stale_fb.is_empty(),
+            "should have badly stale partition estimates"
+        );
+    }
+
+    #[test]
+    fn example_partition_pruning_recovery() {
+        let tl =
+            load_example("partition-pruning-effectiveness.toml");
+        let last = tl.feedback.last().expect("last");
+        assert!(
+            last.q_error() < 1.1,
+            "final feedback should be accurate after ANALYZE"
+        );
+    }
+
+    #[test]
+    fn example_partition_pruning_events() {
+        let tl =
+            load_example("partition-pruning-effectiveness.toml");
+        assert!(tl.event_count() >= 10);
+        let has_schema_change = tl
+            .events
+            .iter()
+            .any(|e| e.kind == EventKind::SchemaChange);
+        assert!(
+            has_schema_change,
+            "should have partition split schema change"
+        );
+    }
+
     #[test]
     fn all_examples_have_valid_event_kinds() {
         let files = [
@@ -2239,6 +2557,10 @@ ndv = 50
             "delete-heavy-workload.toml",
             "bulk-load.toml",
             "mixed-workload.toml",
+            "join-reordering-cascade.toml",
+            "index-vs-seqscan.toml",
+            "aggregation-strategy-evolution.toml",
+            "partition-pruning-effectiveness.toml",
         ];
         for file in &files {
             let tl = load_example(file);
@@ -2263,6 +2585,10 @@ ndv = 50
             "delete-heavy-workload.toml",
             "bulk-load.toml",
             "mixed-workload.toml",
+            "join-reordering-cascade.toml",
+            "index-vs-seqscan.toml",
+            "aggregation-strategy-evolution.toml",
+            "partition-pruning-effectiveness.toml",
         ];
         for file in &files {
             let tl = load_example(file);
@@ -2286,6 +2612,10 @@ ndv = 50
             "delete-heavy-workload.toml",
             "bulk-load.toml",
             "mixed-workload.toml",
+            "join-reordering-cascade.toml",
+            "index-vs-seqscan.toml",
+            "aggregation-strategy-evolution.toml",
+            "partition-pruning-effectiveness.toml",
         ];
         for file in &files {
             let tl = load_example(file);
@@ -2433,5 +2763,117 @@ ndv = 50
         player.seek_start();
         let stats = player.current_managed_stats().expect("stats");
         assert_eq!(stats.len(), 3);
+    }
+
+    // ---- Delta integration tests ----
+
+    #[test]
+    fn compute_delta_basic() {
+        let tl = Timeline::from_toml(minimal_toml()).expect("parse");
+        let player = TimelinePlayer::new(tl).expect("player");
+        let ds = player.compute_delta(0, 1).expect("delta");
+        assert!(!ds.is_empty());
+        assert_eq!(ds.from_time, 0);
+        assert_eq!(ds.to_time, 60);
+    }
+
+    #[test]
+    fn compute_delta_out_of_bounds() {
+        let tl = Timeline::from_toml(minimal_toml()).expect("parse");
+        let player = TimelinePlayer::new(tl).expect("player");
+        assert!(player.compute_delta(0, 99).is_none());
+        assert!(player.compute_delta(99, 0).is_none());
+    }
+
+    #[test]
+    fn compute_delta_same_index() {
+        let tl = Timeline::from_toml(minimal_toml()).expect("parse");
+        let player = TimelinePlayer::new(tl).expect("player");
+        let ds = player.compute_delta(0, 0).expect("delta");
+        assert!(ds.is_empty());
+    }
+
+    #[test]
+    fn compute_delta_row_count_change() {
+        let tl = Timeline::from_toml(minimal_toml()).expect("parse");
+        let player = TimelinePlayer::new(tl).expect("player");
+        let ds = player.compute_delta(0, 1).expect("delta");
+        assert_eq!(ds.len(), 1);
+        assert!(ds.row_count_change_pct() > 0.0);
+    }
+
+    #[test]
+    fn delta_to_next_at_first_snapshot() {
+        let tl = Timeline::from_toml(minimal_toml()).expect("parse");
+        let mut player = TimelinePlayer::new(tl).expect("player");
+        player.seek_start();
+        let ds = player.delta_to_next().expect("delta");
+        assert!(!ds.is_empty());
+    }
+
+    #[test]
+    fn delta_to_next_at_last_snapshot() {
+        let tl = Timeline::from_toml(minimal_toml()).expect("parse");
+        let mut player = TimelinePlayer::new(tl).expect("player");
+        player.seek_end();
+        let ds = player.delta_to_next();
+        assert!(ds.is_none());
+    }
+
+    #[test]
+    fn delta_to_next_before_start() {
+        let tl = Timeline::from_toml(minimal_toml()).expect("parse");
+        let player = TimelinePlayer::new(tl).expect("player");
+        let ds = player.delta_to_next();
+        assert!(ds.is_none());
+    }
+
+    #[test]
+    fn cumulative_delta_two_snapshots() {
+        let tl = Timeline::from_toml(full_toml()).expect("parse");
+        let mut player = TimelinePlayer::new(tl).expect("player");
+        player.seek_end();
+        let ds = player.cumulative_delta(0).expect("delta");
+        assert!(!ds.is_empty());
+    }
+
+    #[test]
+    fn cumulative_delta_same_index_returns_none() {
+        let tl = Timeline::from_toml(minimal_toml()).expect("parse");
+        let mut player = TimelinePlayer::new(tl).expect("player");
+        player.seek_start();
+        let ds = player.cumulative_delta(0);
+        assert!(ds.is_none());
+    }
+
+    #[test]
+    fn cumulative_delta_before_start_returns_none() {
+        let tl = Timeline::from_toml(minimal_toml()).expect("parse");
+        let player = TimelinePlayer::new(tl).expect("player");
+        let ds = player.cumulative_delta(0);
+        assert!(ds.is_none());
+    }
+
+    #[test]
+    fn needs_full_reopt_no_analyze_events() {
+        let tl = Timeline::from_toml(minimal_toml()).expect("parse");
+        let mut player = TimelinePlayer::new(tl).expect("player");
+        player.seek_end();
+        assert!(player.needs_full_reoptimization());
+    }
+
+    #[test]
+    fn needs_full_reopt_before_start() {
+        let tl = Timeline::from_toml(minimal_toml()).expect("parse");
+        let player = TimelinePlayer::new(tl).expect("player");
+        assert!(player.needs_full_reoptimization());
+    }
+
+    #[test]
+    fn last_analyze_snapshot_idx_no_events() {
+        let tl = Timeline::from_toml(minimal_toml()).expect("parse");
+        let mut player = TimelinePlayer::new(tl).expect("player");
+        player.seek_end();
+        assert!(player.last_analyze_snapshot_idx().is_none());
     }
 }

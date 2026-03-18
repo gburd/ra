@@ -1,0 +1,1502 @@
+# Multi-table join with cascading reorder
+#
+# Demonstrates how growth in a single table can cascade through
+# a multi-way join plan, causing the optimizer to reorder joins.
+#
+# Scenario: E-commerce analytics query joining 5 tables in a star schema.
+# Initially, the small `promotions` table is joined first as a filter.
+# As the promotions table grows from a seasonal campaign, the optimal
+# join order shifts: the optimizer switches from promotions-first to
+# products-first, then eventually to a bushy join tree.
+#
+# Query:
+#   SELECT p.category, pr.campaign, s.region, SUM(f.revenue)
+#   FROM fact_transactions f
+#   JOIN dim_products p ON f.product_id = p.product_id
+#   JOIN dim_stores s ON f.store_id = s.store_id
+#   JOIN dim_customers c ON f.customer_id = c.customer_id
+#   JOIN promotions pr ON f.promo_id = pr.promo_id
+#   WHERE pr.active = true AND s.region = 'WEST'
+#   GROUP BY p.category, pr.campaign, s.region
+
+[metadata]
+name = "join-reordering-cascade"
+description = "Multi-table join showing cascading reorder as promotions table grows"
+database = "postgresql"
+schema = "ecommerce"
+scale_factor = 10.0
+duration_seconds = 21600  # 6 hours
+
+# -- Snapshot 0: Initial state - small promotions, optimal left-deep plan --
+[[snapshots]]
+time_offset = 0
+label = "initial - promotions small, left-deep join"
+
+[[snapshots.tables]]
+name = "fact_transactions"
+row_count = 50000000
+page_count = 500000
+avg_row_size = 80.0
+table_size_bytes = 4_000_000_000
+
+[[snapshots.tables.columns]]
+name = "txn_id"
+ndv = 50000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 200000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 1000
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 2000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 50
+null_fraction = 0.3
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "revenue"
+ndv = 15000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables]]
+name = "dim_products"
+row_count = 200000
+page_count = 2400
+avg_row_size = 96.0
+table_size_bytes = 19_200_000
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 200000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "category"
+ndv = 80
+null_fraction = 0.0
+avg_width = 20.0
+
+[[snapshots.tables]]
+name = "dim_stores"
+row_count = 1000
+page_count = 10
+avg_row_size = 80.0
+table_size_bytes = 80_000
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 1000
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "region"
+ndv = 5
+null_fraction = 0.0
+avg_width = 12.0
+
+[[snapshots.tables]]
+name = "dim_customers"
+row_count = 2000000
+page_count = 24000
+avg_row_size = 96.0
+table_size_bytes = 192_000_000
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 2000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "segment"
+ndv = 5
+null_fraction = 0.0
+avg_width = 12.0
+
+[[snapshots.tables]]
+name = "promotions"
+row_count = 50
+page_count = 1
+avg_row_size = 120.0
+table_size_bytes = 6_000
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 50
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "campaign"
+ndv = 20
+null_fraction = 0.0
+avg_width = 24.0
+
+[[snapshots.tables.columns]]
+name = "active"
+ndv = 2
+null_fraction = 0.0
+avg_width = 1.0
+
+# -- Snapshot 1: Seasonal campaign begins - promotions growing --
+[[snapshots]]
+time_offset = 2700
+label = "campaign starts - promotions growing"
+
+[[snapshots.tables]]
+name = "fact_transactions"
+row_count = 50500000
+page_count = 505000
+avg_row_size = 80.0
+table_size_bytes = 4_040_000_000
+
+[[snapshots.tables.columns]]
+name = "txn_id"
+ndv = 50500000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 200000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 1000
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 2010000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 150
+null_fraction = 0.15
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "revenue"
+ndv = 15000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables]]
+name = "dim_products"
+row_count = 200000
+page_count = 2400
+avg_row_size = 96.0
+table_size_bytes = 19_200_000
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 200000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "category"
+ndv = 80
+null_fraction = 0.0
+avg_width = 20.0
+
+[[snapshots.tables]]
+name = "dim_stores"
+row_count = 1000
+page_count = 10
+avg_row_size = 80.0
+table_size_bytes = 80_000
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 1000
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "region"
+ndv = 5
+null_fraction = 0.0
+avg_width = 12.0
+
+[[snapshots.tables]]
+name = "dim_customers"
+row_count = 2010000
+page_count = 24120
+avg_row_size = 96.0
+table_size_bytes = 192_960_000
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 2010000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "segment"
+ndv = 5
+null_fraction = 0.0
+avg_width = 12.0
+
+[[snapshots.tables]]
+name = "promotions"
+row_count = 5000
+page_count = 50
+avg_row_size = 120.0
+table_size_bytes = 600_000
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 5000
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "campaign"
+ndv = 200
+null_fraction = 0.0
+avg_width = 24.0
+
+[[snapshots.tables.columns]]
+name = "active"
+ndv = 2
+null_fraction = 0.0
+avg_width = 1.0
+
+# -- Snapshot 2: Promotions still growing, plan becomes suboptimal --
+[[snapshots]]
+time_offset = 5400
+label = "promotions 100x larger - join order suboptimal"
+
+[[snapshots.tables]]
+name = "fact_transactions"
+row_count = 51000000
+page_count = 510000
+avg_row_size = 80.0
+table_size_bytes = 4_080_000_000
+
+[[snapshots.tables.columns]]
+name = "txn_id"
+ndv = 51000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 205000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 1000
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 2020000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 25000
+null_fraction = 0.05
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "revenue"
+ndv = 16000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables]]
+name = "dim_products"
+row_count = 205000
+page_count = 2460
+avg_row_size = 96.0
+table_size_bytes = 19_680_000
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 205000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "category"
+ndv = 85
+null_fraction = 0.0
+avg_width = 20.0
+
+[[snapshots.tables]]
+name = "dim_stores"
+row_count = 1000
+page_count = 10
+avg_row_size = 80.0
+table_size_bytes = 80_000
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 1000
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "region"
+ndv = 5
+null_fraction = 0.0
+avg_width = 12.0
+
+[[snapshots.tables]]
+name = "dim_customers"
+row_count = 2020000
+page_count = 24240
+avg_row_size = 96.0
+table_size_bytes = 193_920_000
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 2020000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "segment"
+ndv = 5
+null_fraction = 0.0
+avg_width = 12.0
+
+[[snapshots.tables]]
+name = "promotions"
+row_count = 50000
+page_count = 500
+avg_row_size = 120.0
+table_size_bytes = 6_000_000
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 50000
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "campaign"
+ndv = 2000
+null_fraction = 0.0
+avg_width = 24.0
+
+[[snapshots.tables.columns]]
+name = "active"
+ndv = 2
+null_fraction = 0.0
+avg_width = 1.0
+
+# -- Snapshot 3: ANALYZE triggers - optimizer detects change --
+[[snapshots]]
+time_offset = 7200
+label = "post-ANALYZE - optimizer switches to products-first"
+
+[[snapshots.tables]]
+name = "fact_transactions"
+row_count = 51500000
+page_count = 515000
+avg_row_size = 80.0
+table_size_bytes = 4_120_000_000
+
+[[snapshots.tables.columns]]
+name = "txn_id"
+ndv = 51500000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 205000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 1000
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 2025000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 50000
+null_fraction = 0.05
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "revenue"
+ndv = 16500
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables]]
+name = "dim_products"
+row_count = 205000
+page_count = 2460
+avg_row_size = 96.0
+table_size_bytes = 19_680_000
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 205000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "category"
+ndv = 85
+null_fraction = 0.0
+avg_width = 20.0
+
+[[snapshots.tables]]
+name = "dim_stores"
+row_count = 1000
+page_count = 10
+avg_row_size = 80.0
+table_size_bytes = 80_000
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 1000
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "region"
+ndv = 5
+null_fraction = 0.0
+avg_width = 12.0
+
+[[snapshots.tables]]
+name = "dim_customers"
+row_count = 2025000
+page_count = 24300
+avg_row_size = 96.0
+table_size_bytes = 194_400_000
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 2025000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "segment"
+ndv = 5
+null_fraction = 0.0
+avg_width = 12.0
+
+[[snapshots.tables]]
+name = "promotions"
+row_count = 50000
+page_count = 500
+avg_row_size = 120.0
+table_size_bytes = 6_000_000
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 50000
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "campaign"
+ndv = 2000
+null_fraction = 0.0
+avg_width = 24.0
+
+[[snapshots.tables.columns]]
+name = "active"
+ndv = 2
+null_fraction = 0.0
+avg_width = 1.0
+
+# -- Snapshot 4: Campaign peak - massive promotions growth --
+[[snapshots]]
+time_offset = 10800
+label = "campaign peak - promotions 10K, bushy join emerges"
+
+[[snapshots.tables]]
+name = "fact_transactions"
+row_count = 53000000
+page_count = 530000
+avg_row_size = 80.0
+table_size_bytes = 4_240_000_000
+
+[[snapshots.tables.columns]]
+name = "txn_id"
+ndv = 53000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 210000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 1000
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 2050000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 100000
+null_fraction = 0.02
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "revenue"
+ndv = 18000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables]]
+name = "dim_products"
+row_count = 210000
+page_count = 2520
+avg_row_size = 96.0
+table_size_bytes = 20_160_000
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 210000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "category"
+ndv = 90
+null_fraction = 0.0
+avg_width = 20.0
+
+[[snapshots.tables]]
+name = "dim_stores"
+row_count = 1000
+page_count = 10
+avg_row_size = 80.0
+table_size_bytes = 80_000
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 1000
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "region"
+ndv = 5
+null_fraction = 0.0
+avg_width = 12.0
+
+[[snapshots.tables]]
+name = "dim_customers"
+row_count = 2050000
+page_count = 24600
+avg_row_size = 96.0
+table_size_bytes = 196_800_000
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 2050000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "segment"
+ndv = 5
+null_fraction = 0.0
+avg_width = 12.0
+
+[[snapshots.tables]]
+name = "promotions"
+row_count = 500000
+page_count = 5000
+avg_row_size = 120.0
+table_size_bytes = 60_000_000
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 500000
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "campaign"
+ndv = 10000
+null_fraction = 0.0
+avg_width = 24.0
+
+[[snapshots.tables.columns]]
+name = "active"
+ndv = 2
+null_fraction = 0.0
+avg_width = 1.0
+
+# -- Snapshot 5: Post-ANALYZE at peak - bushy plan confirmed --
+[[snapshots]]
+time_offset = 12600
+label = "post-ANALYZE at peak - bushy join tree optimal"
+
+[[snapshots.tables]]
+name = "fact_transactions"
+row_count = 53500000
+page_count = 535000
+avg_row_size = 80.0
+table_size_bytes = 4_280_000_000
+
+[[snapshots.tables.columns]]
+name = "txn_id"
+ndv = 53500000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 210000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 1000
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 2055000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 500000
+null_fraction = 0.02
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "revenue"
+ndv = 18500
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables]]
+name = "dim_products"
+row_count = 210000
+page_count = 2520
+avg_row_size = 96.0
+table_size_bytes = 20_160_000
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 210000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "category"
+ndv = 90
+null_fraction = 0.0
+avg_width = 20.0
+
+[[snapshots.tables]]
+name = "dim_stores"
+row_count = 1000
+page_count = 10
+avg_row_size = 80.0
+table_size_bytes = 80_000
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 1000
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "region"
+ndv = 5
+null_fraction = 0.0
+avg_width = 12.0
+
+[[snapshots.tables]]
+name = "dim_customers"
+row_count = 2055000
+page_count = 24660
+avg_row_size = 96.0
+table_size_bytes = 197_280_000
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 2055000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "segment"
+ndv = 5
+null_fraction = 0.0
+avg_width = 12.0
+
+[[snapshots.tables]]
+name = "promotions"
+row_count = 500000
+page_count = 5000
+avg_row_size = 120.0
+table_size_bytes = 60_000_000
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 500000
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "campaign"
+ndv = 10000
+null_fraction = 0.0
+avg_width = 24.0
+
+[[snapshots.tables.columns]]
+name = "active"
+ndv = 2
+null_fraction = 0.0
+avg_width = 1.0
+
+# -- Snapshot 6: Campaign winding down, promotions expire --
+[[snapshots]]
+time_offset = 16200
+label = "campaign winding down - many promos inactive"
+
+[[snapshots.tables]]
+name = "fact_transactions"
+row_count = 54000000
+page_count = 540000
+avg_row_size = 80.0
+table_size_bytes = 4_320_000_000
+
+[[snapshots.tables.columns]]
+name = "txn_id"
+ndv = 54000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 210000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 1000
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 2060000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 500000
+null_fraction = 0.02
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "revenue"
+ndv = 18500
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables]]
+name = "dim_products"
+row_count = 210000
+page_count = 2520
+avg_row_size = 96.0
+table_size_bytes = 20_160_000
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 210000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "category"
+ndv = 90
+null_fraction = 0.0
+avg_width = 20.0
+
+[[snapshots.tables]]
+name = "dim_stores"
+row_count = 1000
+page_count = 10
+avg_row_size = 80.0
+table_size_bytes = 80_000
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 1000
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "region"
+ndv = 5
+null_fraction = 0.0
+avg_width = 12.0
+
+[[snapshots.tables]]
+name = "dim_customers"
+row_count = 2060000
+page_count = 24720
+avg_row_size = 96.0
+table_size_bytes = 197_760_000
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 2060000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "segment"
+ndv = 5
+null_fraction = 0.0
+avg_width = 12.0
+
+[[snapshots.tables]]
+name = "promotions"
+row_count = 500000
+page_count = 5000
+avg_row_size = 120.0
+table_size_bytes = 60_000_000
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 500000
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "campaign"
+ndv = 10000
+null_fraction = 0.0
+avg_width = 24.0
+
+[[snapshots.tables.columns]]
+name = "active"
+ndv = 2
+null_fraction = 0.0
+avg_width = 1.0
+
+# -- Snapshot 7: Post-cleanup - old promotions purged --
+[[snapshots]]
+time_offset = 18000
+label = "post-cleanup - promotions purged, stale stats"
+
+[[snapshots.tables]]
+name = "fact_transactions"
+row_count = 54000000
+page_count = 540000
+avg_row_size = 80.0
+table_size_bytes = 4_320_000_000
+
+[[snapshots.tables.columns]]
+name = "txn_id"
+ndv = 54000000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 210000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 1000
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 2060000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 500000
+null_fraction = 0.02
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "revenue"
+ndv = 18500
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables]]
+name = "dim_products"
+row_count = 210000
+page_count = 2520
+avg_row_size = 96.0
+table_size_bytes = 20_160_000
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 210000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "category"
+ndv = 90
+null_fraction = 0.0
+avg_width = 20.0
+
+[[snapshots.tables]]
+name = "dim_stores"
+row_count = 1000
+page_count = 10
+avg_row_size = 80.0
+table_size_bytes = 80_000
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 1000
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "region"
+ndv = 5
+null_fraction = 0.0
+avg_width = 12.0
+
+[[snapshots.tables]]
+name = "dim_customers"
+row_count = 2060000
+page_count = 24720
+avg_row_size = 96.0
+table_size_bytes = 197_760_000
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 2060000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "segment"
+ndv = 5
+null_fraction = 0.0
+avg_width = 12.0
+
+[[snapshots.tables]]
+name = "promotions"
+row_count = 5000
+page_count = 50
+avg_row_size = 120.0
+table_size_bytes = 600_000
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 5000
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "campaign"
+ndv = 500
+null_fraction = 0.0
+avg_width = 24.0
+
+[[snapshots.tables.columns]]
+name = "active"
+ndv = 2
+null_fraction = 0.0
+avg_width = 1.0
+
+# -- Snapshot 8: Post-ANALYZE - plan returns to left-deep --
+[[snapshots]]
+time_offset = 19800
+label = "post-ANALYZE - back to promotions-first left-deep"
+
+[[snapshots.tables]]
+name = "fact_transactions"
+row_count = 54200000
+page_count = 542000
+avg_row_size = 80.0
+table_size_bytes = 4_336_000_000
+
+[[snapshots.tables.columns]]
+name = "txn_id"
+ndv = 54200000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 210000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 1000
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 2065000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 5000
+null_fraction = 0.3
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "revenue"
+ndv = 18500
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables]]
+name = "dim_products"
+row_count = 210000
+page_count = 2520
+avg_row_size = 96.0
+table_size_bytes = 20_160_000
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 210000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "category"
+ndv = 90
+null_fraction = 0.0
+avg_width = 20.0
+
+[[snapshots.tables]]
+name = "dim_stores"
+row_count = 1000
+page_count = 10
+avg_row_size = 80.0
+table_size_bytes = 80_000
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 1000
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "region"
+ndv = 5
+null_fraction = 0.0
+avg_width = 12.0
+
+[[snapshots.tables]]
+name = "dim_customers"
+row_count = 2065000
+page_count = 24780
+avg_row_size = 96.0
+table_size_bytes = 198_240_000
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 2065000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "segment"
+ndv = 5
+null_fraction = 0.0
+avg_width = 12.0
+
+[[snapshots.tables]]
+name = "promotions"
+row_count = 5000
+page_count = 50
+avg_row_size = 120.0
+table_size_bytes = 600_000
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 5000
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "campaign"
+ndv = 500
+null_fraction = 0.0
+avg_width = 24.0
+
+[[snapshots.tables.columns]]
+name = "active"
+ndv = 2
+null_fraction = 0.0
+avg_width = 1.0
+
+# -- Snapshot 9: Final steady state --
+[[snapshots]]
+time_offset = 21600
+label = "final steady state - optimal plan restored"
+
+[[snapshots.tables]]
+name = "fact_transactions"
+row_count = 54500000
+page_count = 545000
+avg_row_size = 80.0
+table_size_bytes = 4_360_000_000
+
+[[snapshots.tables.columns]]
+name = "txn_id"
+ndv = 54500000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 210000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 1000
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 2070000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 5100
+null_fraction = 0.3
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "revenue"
+ndv = 18800
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables]]
+name = "dim_products"
+row_count = 212000
+page_count = 2544
+avg_row_size = 96.0
+table_size_bytes = 20_352_000
+
+[[snapshots.tables.columns]]
+name = "product_id"
+ndv = 212000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "category"
+ndv = 92
+null_fraction = 0.0
+avg_width = 20.0
+
+[[snapshots.tables]]
+name = "dim_stores"
+row_count = 1000
+page_count = 10
+avg_row_size = 80.0
+table_size_bytes = 80_000
+
+[[snapshots.tables.columns]]
+name = "store_id"
+ndv = 1000
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "region"
+ndv = 5
+null_fraction = 0.0
+avg_width = 12.0
+
+[[snapshots.tables]]
+name = "dim_customers"
+row_count = 2070000
+page_count = 24840
+avg_row_size = 96.0
+table_size_bytes = 198_720_000
+
+[[snapshots.tables.columns]]
+name = "customer_id"
+ndv = 2070000
+null_fraction = 0.0
+avg_width = 8.0
+
+[[snapshots.tables.columns]]
+name = "segment"
+ndv = 5
+null_fraction = 0.0
+avg_width = 12.0
+
+[[snapshots.tables]]
+name = "promotions"
+row_count = 5100
+page_count = 51
+avg_row_size = 120.0
+table_size_bytes = 612_000
+
+[[snapshots.tables.columns]]
+name = "promo_id"
+ndv = 5100
+null_fraction = 0.0
+avg_width = 4.0
+
+[[snapshots.tables.columns]]
+name = "campaign"
+ndv = 510
+null_fraction = 0.0
+avg_width = 24.0
+
+[[snapshots.tables.columns]]
+name = "active"
+ndv = 2
+null_fraction = 0.0
+avg_width = 1.0
+
+# -- Events --
+
+[[events]]
+time_offset = 1800
+kind = "insert"
+table = "promotions"
+row_count = 4950
+description = "Seasonal campaign promotions bulk-loaded"
+
+[[events]]
+time_offset = 2700
+kind = "insert"
+table = "fact_transactions"
+row_count = 500000
+description = "Continuous transaction ingest"
+
+[[events]]
+time_offset = 4500
+kind = "insert"
+table = "promotions"
+row_count = 45000
+description = "Second wave of campaign promotions"
+
+[[events]]
+time_offset = 5400
+kind = "analyze"
+table = "promotions"
+description = "ANALYZE on promotions after 1000x growth"
+
+[[events]]
+time_offset = 6900
+kind = "analyze"
+table = "fact_transactions"
+description = "Scheduled ANALYZE on fact table"
+
+[[events]]
+time_offset = 7200
+kind = "reoptimize"
+table = "fact_transactions"
+description = "Join order changed: products-first replaces promotions-first"
+
+[[events]]
+time_offset = 9000
+kind = "insert"
+table = "promotions"
+row_count = 450000
+description = "Campaign peak: flash sale promotions"
+
+[[events]]
+time_offset = 10800
+kind = "analyze"
+table = "promotions"
+description = "ANALYZE detects 500K promotions"
+
+[[events]]
+time_offset = 12600
+kind = "reoptimize"
+table = "fact_transactions"
+description = "Switched to bushy join: (fact x stores) join (promos x products)"
+
+[[events]]
+time_offset = 15000
+kind = "delete"
+table = "promotions"
+row_count = 495000
+description = "Expired campaign promotions purged"
+
+[[events]]
+time_offset = 16200
+kind = "vacuum"
+table = "promotions"
+description = "VACUUM reclaims dead promotion rows"
+
+[[events]]
+time_offset = 19200
+kind = "analyze"
+table = "promotions"
+description = "ANALYZE after cleanup - back to 5K rows"
+
+[[events]]
+time_offset = 19800
+kind = "reoptimize"
+table = "fact_transactions"
+description = "Reverted to promotions-first left-deep join"
+
+[[events]]
+time_offset = 21000
+kind = "analyze"
+table = "fact_transactions"
+description = "Final scheduled ANALYZE"
+
+# -- Feedback: 5-way join estimates --
+
+[[feedback]]
+time_offset = 900
+query = "SELECT p.category, pr.campaign, s.region, SUM(f.revenue) FROM fact_transactions f JOIN dim_products p ON f.product_id = p.product_id JOIN dim_stores s ON f.store_id = s.store_id JOIN dim_customers c ON f.customer_id = c.customer_id JOIN promotions pr ON f.promo_id = pr.promo_id WHERE pr.active = true AND s.region = 'WEST' GROUP BY p.category, pr.campaign, s.region"
+operator = "HashJoin (promotions-first left-deep)"
+estimated_rows = 1800000.0
+actual_rows = 1820000.0
+estimated_cost = 4500000.0
+actual_time_ms = 12500.0
+
+[[feedback]]
+time_offset = 3600
+query = "SELECT p.category, pr.campaign, s.region, SUM(f.revenue) FROM fact_transactions f JOIN dim_products p ON f.product_id = p.product_id JOIN dim_stores s ON f.store_id = s.store_id JOIN dim_customers c ON f.customer_id = c.customer_id JOIN promotions pr ON f.promo_id = pr.promo_id WHERE pr.active = true AND s.region = 'WEST' GROUP BY p.category, pr.campaign, s.region"
+operator = "HashJoin (promotions-first left-deep, stale)"
+estimated_rows = 1800000.0
+actual_rows = 2400000.0
+estimated_cost = 4500000.0
+actual_time_ms = 18200.0
+
+[[feedback]]
+time_offset = 5400
+query = "SELECT p.category, pr.campaign, s.region, SUM(f.revenue) FROM fact_transactions f JOIN dim_products p ON f.product_id = p.product_id JOIN dim_stores s ON f.store_id = s.store_id JOIN dim_customers c ON f.customer_id = c.customer_id JOIN promotions pr ON f.promo_id = pr.promo_id WHERE pr.active = true AND s.region = 'WEST' GROUP BY p.category, pr.campaign, s.region"
+operator = "HashJoin (promotions-first, very stale)"
+estimated_rows = 1800000.0
+actual_rows = 3200000.0
+estimated_cost = 4500000.0
+actual_time_ms = 24500.0
+
+[[feedback]]
+time_offset = 7200
+query = "SELECT p.category, pr.campaign, s.region, SUM(f.revenue) FROM fact_transactions f JOIN dim_products p ON f.product_id = p.product_id JOIN dim_stores s ON f.store_id = s.store_id JOIN dim_customers c ON f.customer_id = c.customer_id JOIN promotions pr ON f.promo_id = pr.promo_id WHERE pr.active = true AND s.region = 'WEST' GROUP BY p.category, pr.campaign, s.region"
+operator = "HashJoin (products-first, fresh stats)"
+estimated_rows = 3100000.0
+actual_rows = 3200000.0
+estimated_cost = 5200000.0
+actual_time_ms = 15800.0
+
+[[feedback]]
+time_offset = 10800
+query = "SELECT p.category, pr.campaign, s.region, SUM(f.revenue) FROM fact_transactions f JOIN dim_products p ON f.product_id = p.product_id JOIN dim_stores s ON f.store_id = s.store_id JOIN dim_customers c ON f.customer_id = c.customer_id JOIN promotions pr ON f.promo_id = pr.promo_id WHERE pr.active = true AND s.region = 'WEST' GROUP BY p.category, pr.campaign, s.region"
+operator = "HashJoin (products-first, stale promos)"
+estimated_rows = 3100000.0
+actual_rows = 5500000.0
+estimated_cost = 5200000.0
+actual_time_ms = 35000.0
+
+[[feedback]]
+time_offset = 12600
+query = "SELECT p.category, pr.campaign, s.region, SUM(f.revenue) FROM fact_transactions f JOIN dim_products p ON f.product_id = p.product_id JOIN dim_stores s ON f.store_id = s.store_id JOIN dim_customers c ON f.customer_id = c.customer_id JOIN promotions pr ON f.promo_id = pr.promo_id WHERE pr.active = true AND s.region = 'WEST' GROUP BY p.category, pr.campaign, s.region"
+operator = "Bushy join ((fact x stores) x (promos x products))"
+estimated_rows = 5400000.0
+actual_rows = 5500000.0
+estimated_cost = 6800000.0
+actual_time_ms = 22000.0
+
+[[feedback]]
+time_offset = 16200
+query = "SELECT p.category, pr.campaign, s.region, SUM(f.revenue) FROM fact_transactions f JOIN dim_products p ON f.product_id = p.product_id JOIN dim_stores s ON f.store_id = s.store_id JOIN dim_customers c ON f.customer_id = c.customer_id JOIN promotions pr ON f.promo_id = pr.promo_id WHERE pr.active = true AND s.region = 'WEST' GROUP BY p.category, pr.campaign, s.region"
+operator = "Bushy join (stale after purge)"
+estimated_rows = 5400000.0
+actual_rows = 1900000.0
+estimated_cost = 6800000.0
+actual_time_ms = 14500.0
+
+[[feedback]]
+time_offset = 19800
+query = "SELECT p.category, pr.campaign, s.region, SUM(f.revenue) FROM fact_transactions f JOIN dim_products p ON f.product_id = p.product_id JOIN dim_stores s ON f.store_id = s.store_id JOIN dim_customers c ON f.customer_id = c.customer_id JOIN promotions pr ON f.promo_id = pr.promo_id WHERE pr.active = true AND s.region = 'WEST' GROUP BY p.category, pr.campaign, s.region"
+operator = "HashJoin (promotions-first left-deep, restored)"
+estimated_rows = 1850000.0
+actual_rows = 1900000.0
+estimated_cost = 4600000.0
+actual_time_ms = 13000.0
+
+[[feedback]]
+time_offset = 21600
+query = "SELECT p.category, pr.campaign, s.region, SUM(f.revenue) FROM fact_transactions f JOIN dim_products p ON f.product_id = p.product_id JOIN dim_stores s ON f.store_id = s.store_id JOIN dim_customers c ON f.customer_id = c.customer_id JOIN promotions pr ON f.promo_id = pr.promo_id WHERE pr.active = true AND s.region = 'WEST' GROUP BY p.category, pr.campaign, s.region"
+operator = "HashJoin (promotions-first, final)"
+estimated_rows = 1900000.0
+actual_rows = 1920000.0
+estimated_cost = 4650000.0
+actual_time_ms = 13200.0

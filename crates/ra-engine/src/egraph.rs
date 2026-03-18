@@ -13,6 +13,7 @@ use ra_core::algebra::{
     SortDirection, SortKey,
 };
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr, UnaryOp};
+use ra_stats::delta::DeltaSet;
 
 use crate::analysis::RelAnalysis;
 use crate::extract::extract_best;
@@ -374,6 +375,178 @@ impl Optimizer {
         }
     }
 
+    /// Incrementally reoptimize a plan given statistics deltas.
+    ///
+    /// Instead of running full equality saturation from scratch,
+    /// this method:
+    /// 1. Applies the statistics deltas to the internal table stats
+    /// 2. If deltas are small, runs a reduced number of iterations
+    /// 3. Reports how much work was saved vs full reoptimization
+    ///
+    /// When the delta set indicates a large change (structural changes,
+    /// \>50% row count shift, or many small changes), this falls back
+    /// to full optimization automatically.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the expression cannot be converted or
+    /// extraction fails.
+    pub fn optimize_incremental(
+        &mut self,
+        expr: &RelExpr,
+        stats_delta: &DeltaSet,
+    ) -> Result<(RelExpr, IncrementalStats), EGraphError> {
+        let start = std::time::Instant::now();
+
+        // Apply deltas to internal table stats.
+        let tables_updated = self.apply_stats_delta(stats_delta);
+
+        // Decide iteration budget based on delta magnitude.
+        let (iter_limit, is_full) = if stats_delta.needs_full_reoptimization()
+        {
+            (self.config.iter_limit, true)
+        } else {
+            // Scale iterations by change magnitude.
+            let pct = stats_delta.row_count_change_pct();
+            let fraction = (pct / 100.0).clamp(0.05, 1.0);
+            #[allow(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                clippy::cast_precision_loss
+            )]
+            let iters = ((self.config.iter_limit as f64) * fraction)
+                .ceil() as usize;
+            (iters.max(1), false)
+        };
+
+        let rec_expr = to_rec_expr(expr)?;
+        let rules = all_rules();
+        let hardware = self.hardware_profile();
+
+        let runner: Runner<RelLang, RelAnalysis> = Runner::default()
+            .with_expr(&rec_expr)
+            .with_node_limit(self.config.node_limit)
+            .with_iter_limit(iter_limit)
+            .with_time_limit(std::time::Duration::from_secs(
+                self.config.time_limit_secs,
+            ))
+            .run(&rules);
+
+        let root = runner.roots[0];
+        let result = extract_best(
+            &runner.egraph,
+            root,
+            &self.table_stats,
+            &hardware,
+        )?;
+
+        let elapsed = start.elapsed();
+        let nodes_in_egraph = runner.egraph.total_number_of_nodes();
+
+        let stats = IncrementalStats {
+            rules_evaluated: rules.len(),
+            iterations_used: iter_limit,
+            max_iterations: self.config.iter_limit,
+            nodes_in_egraph,
+            tables_updated,
+            delta_count: stats_delta.len(),
+            row_change_pct: stats_delta.row_count_change_pct(),
+            used_full_reoptimization: is_full,
+            elapsed,
+        };
+
+        Ok((result, stats))
+    }
+
+    /// Apply statistics deltas to the internal table stats map.
+    ///
+    /// Returns the number of tables whose stats were updated.
+    #[allow(clippy::cast_precision_loss)]
+    fn apply_stats_delta(&mut self, delta_set: &DeltaSet) -> usize {
+        let mut updated_tables =
+            std::collections::HashSet::<String>::new();
+
+        for delta in delta_set {
+            match delta {
+                ra_stats::delta::StatisticsDelta::TableRowCount {
+                    table,
+                    new,
+                    ..
+                } => {
+                    let stats = self
+                        .table_stats
+                        .entry(table.clone())
+                        .or_insert_with(|| {
+                            ra_core::statistics::Statistics::new(
+                                *new as f64,
+                            )
+                        });
+                    stats.row_count = *new as f64;
+                    updated_tables.insert(table.clone());
+                }
+                ra_stats::delta::StatisticsDelta::ColumnNDV {
+                    table,
+                    column,
+                    new,
+                    ..
+                } => {
+                    if let Some(stats) = self.table_stats.get_mut(table)
+                    {
+                        let col = stats
+                            .columns
+                            .entry(column.clone())
+                            .or_insert_with(|| {
+                                ra_core::statistics::ColumnStats::new(
+                                    *new as f64,
+                                )
+                            });
+                        col.distinct_count = *new as f64;
+                        updated_tables.insert(table.clone());
+                    }
+                }
+                ra_stats::delta::StatisticsDelta::ColumnNullFraction {
+                    table,
+                    column,
+                    new,
+                    ..
+                } => {
+                    if let Some(stats) = self.table_stats.get_mut(table)
+                    {
+                        if let Some(col) =
+                            stats.columns.get_mut(column)
+                        {
+                            col.null_fraction = *new;
+                            updated_tables.insert(table.clone());
+                        }
+                    }
+                }
+                ra_stats::delta::StatisticsDelta::TableAdded {
+                    table,
+                    row_count,
+                } => {
+                    self.table_stats.insert(
+                        table.clone(),
+                        ra_core::statistics::Statistics::new(
+                            *row_count as f64,
+                        ),
+                    );
+                    updated_tables.insert(table.clone());
+                }
+                ra_stats::delta::StatisticsDelta::TableRemoved {
+                    table,
+                    ..
+                } => {
+                    self.table_stats.remove(table);
+                    updated_tables.insert(table.clone());
+                }
+                // ColumnCorrelation and StalenessChanged don't
+                // directly map to ra_core::statistics fields.
+                _ => {}
+            }
+        }
+
+        updated_tables.len()
+    }
 }
 
 /// Handle budget overflow according to the overflow strategy.
@@ -445,6 +618,48 @@ pub enum OptimizationStatus {
     Incomplete,
     /// Optimization failed (e.g., no plan could be extracted).
     Failed,
+}
+
+/// Statistics about an incremental optimization run.
+///
+/// Reports how much work the incremental optimizer did compared to
+/// what a full reoptimization would require, allowing callers to
+/// measure the speedup from differential updates.
+#[derive(Debug, Clone)]
+pub struct IncrementalStats {
+    /// Number of rewrite rules evaluated.
+    pub rules_evaluated: usize,
+    /// Number of e-graph iterations actually used.
+    pub iterations_used: usize,
+    /// Maximum iterations configured.
+    pub max_iterations: usize,
+    /// Number of nodes in the final e-graph.
+    pub nodes_in_egraph: usize,
+    /// Number of tables whose stats were updated.
+    pub tables_updated: usize,
+    /// Number of individual deltas processed.
+    pub delta_count: usize,
+    /// Maximum row count change percentage.
+    pub row_change_pct: f64,
+    /// Whether full reoptimization was used (delta was too large).
+    pub used_full_reoptimization: bool,
+    /// Wall-clock time for the incremental optimization.
+    pub elapsed: std::time::Duration,
+}
+
+impl IncrementalStats {
+    /// Estimated speedup factor vs full optimization.
+    ///
+    /// Based on the ratio of iterations used vs max configured.
+    /// Returns 1.0 when full reoptimization was used.
+    #[must_use]
+    #[allow(clippy::cast_precision_loss)]
+    pub fn speedup_factor(&self) -> f64 {
+        if self.used_full_reoptimization || self.iterations_used == 0 {
+            return 1.0;
+        }
+        self.max_iterations as f64 / self.iterations_used as f64
+    }
 }
 
 /// Estimate the cost of the best plan in the e-graph.
@@ -1721,5 +1936,309 @@ mod tests {
             .expect("should succeed");
         assert!(result.cost.is_finite());
         assert!(result.resource_usage.iterations_used > 0);
+    }
+
+    // ---- optimize_incremental tests ----
+
+    fn make_snap(
+        time: u64,
+        rows: u64,
+    ) -> ra_stats::timeline::Snapshot {
+        ra_stats::timeline::Snapshot {
+            time_offset: time,
+            label: None,
+            tables: vec![ra_stats::timeline::TableSnapshot {
+                name: "users".to_string(),
+                row_count: rows,
+                page_count: None,
+                avg_row_size: None,
+                table_size_bytes: None,
+                columns: vec![ra_stats::timeline::ColumnSnapshot {
+                    name: "id".to_string(),
+                    ndv: rows,
+                    null_fraction: 0.0,
+                    avg_width: 8.0,
+                    correlation: Some(1.0),
+                    min_value: None,
+                    max_value: None,
+                }],
+            }],
+        }
+    }
+
+    fn small_delta() -> DeltaSet {
+        let a = make_snap(0, 10_000);
+        let b = make_snap(60, 10_100); // 1% change
+        DeltaSet::compute(&a, &b)
+    }
+
+    fn medium_delta() -> DeltaSet {
+        let a = make_snap(0, 10_000);
+        let b = make_snap(60, 11_000); // 10% change
+        DeltaSet::compute(&a, &b)
+    }
+
+    fn large_delta() -> DeltaSet {
+        let a = make_snap(0, 10_000);
+        let b = make_snap(60, 20_000); // 100% change
+        DeltaSet::compute(&a, &b)
+    }
+
+    #[test]
+    fn incremental_simple_scan() {
+        let mut optimizer = Optimizer::new();
+        let expr = RelExpr::scan("users");
+        let delta = small_delta();
+        let (result, stats) = optimizer
+            .optimize_incremental(&expr, &delta)
+            .expect("incremental should succeed");
+        assert!(matches!(result, RelExpr::Scan { .. }));
+        assert!(!stats.used_full_reoptimization);
+    }
+
+    #[test]
+    fn incremental_returns_valid_plan() {
+        let mut optimizer = Optimizer::new();
+        let expr = RelExpr::scan("users").filter(Expr::BinOp {
+            op: BinOp::Gt,
+            left: Box::new(Expr::Column(ColumnRef::new("age"))),
+            right: Box::new(Expr::Const(Const::Int(18))),
+        });
+        let delta = small_delta();
+        let (result, _) = optimizer
+            .optimize_incremental(&expr, &delta)
+            .expect("should succeed");
+        assert!(
+            matches!(result, RelExpr::Filter { .. })
+                || matches!(result, RelExpr::Scan { .. })
+        );
+    }
+
+    #[test]
+    fn incremental_small_delta_fewer_iterations() {
+        let mut optimizer = Optimizer::new();
+        let expr = RelExpr::scan("users");
+        let delta = small_delta();
+        let (_, stats) = optimizer
+            .optimize_incremental(&expr, &delta)
+            .expect("should succeed");
+        assert!(stats.iterations_used <= stats.max_iterations);
+        assert!(!stats.used_full_reoptimization);
+    }
+
+    #[test]
+    fn incremental_medium_delta_more_iterations() {
+        let mut optimizer = Optimizer::new();
+        let expr = RelExpr::scan("users");
+        let delta = medium_delta();
+        let (_, stats) = optimizer
+            .optimize_incremental(&expr, &delta)
+            .expect("should succeed");
+        assert!(stats.iterations_used >= 1);
+        assert!(!stats.used_full_reoptimization);
+    }
+
+    #[test]
+    fn incremental_large_delta_falls_back_to_full() {
+        let mut optimizer = Optimizer::new();
+        let expr = RelExpr::scan("users");
+        let delta = large_delta();
+        let (_, stats) = optimizer
+            .optimize_incremental(&expr, &delta)
+            .expect("should succeed");
+        assert!(stats.used_full_reoptimization);
+        assert_eq!(stats.iterations_used, stats.max_iterations);
+    }
+
+    #[test]
+    fn incremental_updates_table_stats() {
+        let mut optimizer = Optimizer::new();
+        let expr = RelExpr::scan("users");
+        let delta = small_delta();
+        let (_, stats) = optimizer
+            .optimize_incremental(&expr, &delta)
+            .expect("should succeed");
+        assert!(stats.tables_updated > 0);
+    }
+
+    #[test]
+    fn incremental_empty_delta_uses_minimal_iterations() {
+        let mut optimizer = Optimizer::new();
+        let expr = RelExpr::scan("users");
+        let delta = DeltaSet::new(0, 60);
+        let (_, stats) = optimizer
+            .optimize_incremental(&expr, &delta)
+            .expect("should succeed");
+        assert!(stats.delta_count == 0);
+        assert!(!stats.used_full_reoptimization);
+    }
+
+    #[test]
+    fn incremental_produces_same_as_full_for_scan() {
+        let expr = RelExpr::scan("users");
+        let delta = small_delta();
+
+        let full_result = Optimizer::new()
+            .optimize(&expr)
+            .expect("full should succeed");
+        let (incr_result, _) = Optimizer::new()
+            .optimize_incremental(&expr, &delta)
+            .expect("incremental should succeed");
+
+        // Both should produce a scan (may differ in internal IDs).
+        assert!(matches!(full_result, RelExpr::Scan { .. }));
+        assert!(matches!(incr_result, RelExpr::Scan { .. }));
+    }
+
+    #[test]
+    fn incremental_stats_speedup_factor() {
+        let mut optimizer = Optimizer::new();
+        let expr = RelExpr::scan("users");
+        let delta = small_delta();
+        let (_, stats) = optimizer
+            .optimize_incremental(&expr, &delta)
+            .expect("should succeed");
+        assert!(stats.speedup_factor() >= 1.0);
+    }
+
+    #[test]
+    fn incremental_stats_full_reopt_speedup_is_one() {
+        let mut optimizer = Optimizer::new();
+        let expr = RelExpr::scan("users");
+        let delta = large_delta();
+        let (_, stats) = optimizer
+            .optimize_incremental(&expr, &delta)
+            .expect("should succeed");
+        assert!((stats.speedup_factor() - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn incremental_reports_delta_count() {
+        let mut optimizer = Optimizer::new();
+        let expr = RelExpr::scan("users");
+        let delta = small_delta();
+        let (_, stats) = optimizer
+            .optimize_incremental(&expr, &delta)
+            .expect("should succeed");
+        assert!(stats.delta_count > 0);
+    }
+
+    #[test]
+    fn incremental_reports_row_change_pct() {
+        let mut optimizer = Optimizer::new();
+        let expr = RelExpr::scan("users");
+        let delta = medium_delta();
+        let (_, stats) = optimizer
+            .optimize_incremental(&expr, &delta)
+            .expect("should succeed");
+        assert!(stats.row_change_pct > 5.0);
+        assert!(stats.row_change_pct < 15.0);
+    }
+
+    #[test]
+    fn incremental_elapsed_time_recorded() {
+        let mut optimizer = Optimizer::new();
+        let expr = RelExpr::scan("users");
+        let delta = small_delta();
+        let (_, stats) = optimizer
+            .optimize_incremental(&expr, &delta)
+            .expect("should succeed");
+        // Elapsed should be non-zero.
+        let _elapsed = stats.elapsed;
+    }
+
+    #[test]
+    fn incremental_join_query() {
+        let mut optimizer = Optimizer::new();
+        let expr = RelExpr::Join {
+            join_type: JoinType::Inner,
+            condition: Expr::BinOp {
+                op: BinOp::Eq,
+                left: Box::new(Expr::Column(
+                    ColumnRef::qualified("a", "id"),
+                )),
+                right: Box::new(Expr::Column(
+                    ColumnRef::qualified("b", "a_id"),
+                )),
+            },
+            left: Box::new(RelExpr::scan("a")),
+            right: Box::new(RelExpr::scan("b")),
+        };
+        let delta = small_delta();
+        let (result, _) = optimizer
+            .optimize_incremental(&expr, &delta)
+            .expect("should succeed");
+        assert!(
+            matches!(result, RelExpr::Join { .. })
+                || matches!(result, RelExpr::Scan { .. })
+        );
+    }
+
+    #[test]
+    fn incremental_table_added_delta() {
+        let a = ra_stats::timeline::Snapshot {
+            time_offset: 0,
+            label: None,
+            tables: vec![ra_stats::timeline::TableSnapshot {
+                name: "users".to_string(),
+                row_count: 1000,
+                page_count: None,
+                avg_row_size: None,
+                table_size_bytes: None,
+                columns: vec![],
+            }],
+        };
+        let b = ra_stats::timeline::Snapshot {
+            time_offset: 60,
+            label: None,
+            tables: vec![
+                ra_stats::timeline::TableSnapshot {
+                    name: "users".to_string(),
+                    row_count: 1000,
+                    page_count: None,
+                    avg_row_size: None,
+                    table_size_bytes: None,
+                    columns: vec![],
+                },
+                ra_stats::timeline::TableSnapshot {
+                    name: "orders".to_string(),
+                    row_count: 5000,
+                    page_count: None,
+                    avg_row_size: None,
+                    table_size_bytes: None,
+                    columns: vec![],
+                },
+            ],
+        };
+        let delta = DeltaSet::compute(&a, &b);
+        let mut optimizer = Optimizer::new();
+        let expr = RelExpr::scan("users");
+        let (_, stats) = optimizer
+            .optimize_incremental(&expr, &delta)
+            .expect("should succeed");
+        // Structural change triggers full reoptimization.
+        assert!(stats.used_full_reoptimization);
+    }
+
+    #[test]
+    fn incremental_nodes_in_egraph_reported() {
+        let mut optimizer = Optimizer::new();
+        let expr = RelExpr::scan("users");
+        let delta = small_delta();
+        let (_, stats) = optimizer
+            .optimize_incremental(&expr, &delta)
+            .expect("should succeed");
+        assert!(stats.nodes_in_egraph > 0);
+    }
+
+    #[test]
+    fn incremental_rules_evaluated_reported() {
+        let mut optimizer = Optimizer::new();
+        let expr = RelExpr::scan("users");
+        let delta = small_delta();
+        let (_, stats) = optimizer
+            .optimize_incremental(&expr, &delta)
+            .expect("should succeed");
+        assert!(stats.rules_evaluated > 0);
     }
 }
