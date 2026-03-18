@@ -171,6 +171,8 @@ let max_q = player.max_q_error();
 
 The `timelines/` directory contains example files:
 
+### Basic scenarios
+
 | File | Scenario |
 |------|----------|
 | `tpch-q1-evolution.toml` | TPC-H Q1 lineitem over batch inserts and ANALYZE cycles |
@@ -181,3 +183,9 @@ The `timelines/` directory contains example files:
 | `delete-heavy-workload.toml` | Delete-heavy workload with dead tuple accumulation |
 | `bulk-load.toml` | Bulk insert with staleness propagation and recovery |
 | `mixed-workload.toml` | Concurrent read/write patterns affecting multiple tables |
+
+### Plan evolution scenarios
+
+| File | Duration | Snapshots | Scenario |
+|------|----------|-----------|----------|
+| `tpch-q5-simple.toml` | 2 hours | 3 | TPC-H Q5 join showing how bulk insert (20% growth) causes statistics staleness, followed by ANALYZE refresh |

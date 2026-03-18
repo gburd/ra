@@ -27,8 +27,10 @@ use ra_stats::timeline::{
 };
 
 use crate::visualize::{
-    ChartConfig, DataPoint, Series, render_ascii_bar_chart,
+    ChartConfig, DataPoint, PlanEvolutionTrace, PlanSnapshot, Series,
+    infer_change_reason, operators_differ, render_ascii_bar_chart,
     render_ascii_sparkline, render_ascii_table, render_html_chart,
+    render_plan_evolution_ascii,
 };
 
 /// Output format for stats commands.
@@ -698,6 +700,19 @@ fn visualize_table(
                 render_ascii_table(&fb_headers, &fb_rows)
             );
         }
+
+        // Plan evolution
+        let traces = build_plan_evolution_traces(tl);
+        if !traces.is_empty() {
+            eprintln!();
+            eprintln!("{}", "Plan Evolution:".bold());
+            for trace in &traces {
+                eprintln!(
+                    "{}",
+                    render_plan_evolution_ascii(trace)
+                );
+            }
+        }
     }
 
     Ok(())
@@ -760,6 +775,15 @@ fn visualize_ascii(
         eprintln!(
             "{}",
             render_ascii_sparkline(&[est, act], &config2)
+        );
+    }
+
+    // Plan evolution section
+    let traces = build_plan_evolution_traces(tl);
+    for trace in &traces {
+        eprintln!(
+            "{}",
+            render_plan_evolution_ascii(trace)
         );
     }
 
@@ -848,6 +872,101 @@ fn visualize_json(
         .context("serializing visualization to JSON")?;
     println!("{json}");
     Ok(())
+}
+
+// -- Plan evolution --
+
+/// Build plan evolution traces from timeline feedback data.
+///
+/// Groups feedback entries by query, then detects operator changes
+/// between consecutive entries and annotates with reasons derived
+/// from timeline events.
+fn build_plan_evolution_traces(
+    tl: &Timeline,
+) -> Vec<PlanEvolutionTrace> {
+    if tl.feedback.is_empty() {
+        return Vec::new();
+    }
+
+    // Group feedback by query, preserving insertion order.
+    let mut keys: Vec<String> = Vec::new();
+    let mut groups: std::collections::HashMap<
+        String,
+        Vec<&ExecutionFeedback>,
+    > = std::collections::HashMap::new();
+
+    for fb in &tl.feedback {
+        let key = truncate_query(&fb.query, 60);
+        if !groups.contains_key(&key) {
+            keys.push(key.clone());
+        }
+        groups.entry(key).or_default().push(fb);
+    }
+
+    let mut traces = Vec::new();
+
+    for query_label in &keys {
+        let entries = &groups[query_label];
+        let mut snapshots = Vec::new();
+
+        for (i, fb) in entries.iter().enumerate() {
+            let operator = fb
+                .operator
+                .as_deref()
+                .unwrap_or("unknown")
+                .to_owned();
+            let cost = fb.estimated_cost;
+            let time_label = format!("t={}s", fb.time_offset);
+
+            let (changed, reason) = if i == 0 {
+                (false, None)
+            } else {
+                let prev = entries[i - 1];
+                let prev_op = prev
+                    .operator
+                    .as_deref()
+                    .unwrap_or("unknown");
+
+                if operators_differ(prev_op, &operator) {
+                    let event_strs: Vec<String> = tl
+                        .events_in_range(
+                            prev.time_offset,
+                            fb.time_offset,
+                        )
+                        .iter()
+                        .map(|e| format_event_kind(&e.kind))
+                        .collect();
+                    let event_refs: Vec<&str> = event_strs
+                        .iter()
+                        .map(String::as_str)
+                        .collect();
+                    let reason = infer_change_reason(
+                        prev_op,
+                        &operator,
+                        &event_refs,
+                    );
+                    (true, Some(reason))
+                } else {
+                    (false, None)
+                }
+            };
+
+            snapshots.push(PlanSnapshot {
+                time_label,
+                operator,
+                cost,
+                changed,
+                reason,
+            });
+        }
+
+        traces.push(PlanEvolutionTrace {
+            query_label: query_label.clone(),
+            snapshots,
+        });
+    }
+
+    traces
 }
 
 // -- Helpers --
@@ -1585,5 +1704,259 @@ mod tests {
                 result.err().map_or(String::new(), |e| e.to_string()),
             );
         }
+    }
+
+    // -- Plan evolution integration tests --
+
+    #[test]
+    fn build_traces_tpch_q1() {
+        let tl = load_timeline(&test_timeline_path())
+            .expect("load");
+        let traces = build_plan_evolution_traces(&tl);
+        assert!(
+            !traces.is_empty(),
+            "tpch-q1 has feedback, should produce traces"
+        );
+        // All feedback has the same operator, so no changes
+        let trace = &traces[0];
+        assert!(!trace.snapshots.is_empty());
+        assert!(!trace.snapshots[0].changed);
+    }
+
+    #[test]
+    fn build_traces_renders_without_panic() {
+        let tl = load_timeline(&test_timeline_path())
+            .expect("load");
+        let traces = build_plan_evolution_traces(&tl);
+        for trace in &traces {
+            let out = render_plan_evolution_ascii(trace);
+            assert!(out.contains("Plan Evolution:"));
+        }
+    }
+
+    #[test]
+    fn build_traces_streaming_inserts() {
+        let tl = load_timeline(&streaming_timeline_path())
+            .expect("load");
+        let traces = build_plan_evolution_traces(&tl);
+        // Streaming inserts has feedback entries
+        if !tl.feedback.is_empty() {
+            assert!(!traces.is_empty());
+        }
+    }
+
+    #[test]
+    fn build_traces_analyze_loop() {
+        let tl = load_timeline(&analyze_loop_path())
+            .expect("load");
+        let traces = build_plan_evolution_traces(&tl);
+        if !tl.feedback.is_empty() {
+            assert!(!traces.is_empty());
+        }
+    }
+
+    #[test]
+    fn build_traces_empty_feedback() {
+        let tl = Timeline::from_toml(
+            r#"
+[metadata]
+name = "empty-fb"
+description = "no feedback"
+
+[[snapshots]]
+time_offset = 0
+
+[[snapshots.tables]]
+name = "t"
+row_count = 100
+"#,
+        )
+        .expect("parse");
+        let traces = build_plan_evolution_traces(&tl);
+        assert!(traces.is_empty());
+    }
+
+    #[test]
+    fn build_traces_operator_change_detected() {
+        let tl = Timeline::from_toml(
+            r#"
+[metadata]
+name = "plan-change"
+description = "Operator changes between feedback entries"
+
+[[snapshots]]
+time_offset = 0
+
+[[snapshots.tables]]
+name = "t"
+row_count = 100
+
+[[snapshots]]
+time_offset = 3600
+
+[[snapshots.tables]]
+name = "t"
+row_count = 200
+
+[[events]]
+time_offset = 1800
+kind = "analyze"
+table = "t"
+
+[[feedback]]
+time_offset = 100
+query = "SELECT * FROM t"
+operator = "SeqScan on t"
+estimated_rows = 100.0
+actual_rows = 100.0
+
+[[feedback]]
+time_offset = 3600
+query = "SELECT * FROM t"
+operator = "IndexScan on t"
+estimated_rows = 200.0
+actual_rows = 200.0
+"#,
+        )
+        .expect("parse");
+        let traces = build_plan_evolution_traces(&tl);
+        assert_eq!(traces.len(), 1);
+        let trace = &traces[0];
+        assert_eq!(trace.snapshots.len(), 2);
+        assert!(!trace.snapshots[0].changed);
+        assert!(trace.snapshots[1].changed);
+        let reason =
+            trace.snapshots[1].reason.as_deref().unwrap_or("");
+        assert!(
+            reason.contains("ANALYZE"),
+            "should detect ANALYZE event: {reason}"
+        );
+    }
+
+    #[test]
+    fn build_traces_cost_tracked() {
+        let tl = Timeline::from_toml(
+            r#"
+[metadata]
+name = "cost-tracking"
+description = "Track cost changes"
+
+[[snapshots]]
+time_offset = 0
+
+[[snapshots.tables]]
+name = "t"
+row_count = 100
+
+[[feedback]]
+time_offset = 100
+query = "SELECT * FROM t"
+operator = "SeqScan on t"
+estimated_rows = 100.0
+actual_rows = 100.0
+estimated_cost = 1500.0
+
+[[feedback]]
+time_offset = 200
+query = "SELECT * FROM t"
+operator = "SeqScan on t"
+estimated_rows = 110.0
+actual_rows = 110.0
+estimated_cost = 1600.0
+"#,
+        )
+        .expect("parse");
+        let traces = build_plan_evolution_traces(&tl);
+        assert_eq!(traces.len(), 1);
+        let snaps = &traces[0].snapshots;
+        assert!(
+            (snaps[0].cost.unwrap_or(0.0) - 1500.0).abs()
+                < f64::EPSILON
+        );
+        assert!(
+            (snaps[1].cost.unwrap_or(0.0) - 1600.0).abs()
+                < f64::EPSILON
+        );
+    }
+
+    #[test]
+    fn build_traces_multiple_queries() {
+        let tl = Timeline::from_toml(
+            r#"
+[metadata]
+name = "multi-query"
+description = "Multiple queries in feedback"
+
+[[snapshots]]
+time_offset = 0
+
+[[snapshots.tables]]
+name = "t"
+row_count = 100
+
+[[feedback]]
+time_offset = 100
+query = "SELECT * FROM t WHERE id = 1"
+operator = "IndexScan"
+estimated_rows = 1.0
+actual_rows = 1.0
+
+[[feedback]]
+time_offset = 200
+query = "SELECT COUNT(*) FROM t"
+operator = "SeqScan"
+estimated_rows = 100.0
+actual_rows = 100.0
+
+[[feedback]]
+time_offset = 300
+query = "SELECT * FROM t WHERE id = 1"
+operator = "IndexScan"
+estimated_rows = 1.0
+actual_rows = 1.0
+"#,
+        )
+        .expect("parse");
+        let traces = build_plan_evolution_traces(&tl);
+        assert_eq!(
+            traces.len(),
+            2,
+            "should group by distinct query"
+        );
+    }
+
+    #[test]
+    fn visualize_ascii_with_plan_evolution() {
+        // Verify visualize_ascii runs with plan evolution
+        // without panicking on all example timelines
+        let paths = [
+            test_timeline_path(),
+            streaming_timeline_path(),
+            bulk_update_path(),
+            multi_table_path(),
+            analyze_loop_path(),
+            delete_heavy_path(),
+        ];
+        for path in &paths {
+            let result = cmd_stats_visualize(
+                path,
+                OutputFormat::Ascii,
+                false,
+            );
+            assert!(
+                result.is_ok(),
+                "visualize ascii with evolution failed for {path}"
+            );
+        }
+    }
+
+    #[test]
+    fn visualize_table_with_plan_evolution() {
+        let result = cmd_stats_visualize(
+            &test_timeline_path(),
+            OutputFormat::Table,
+            true,
+        );
+        assert!(result.is_ok());
     }
 }
