@@ -33,6 +33,7 @@ pub mod differential;
 pub mod egraph;
 pub mod extract;
 pub mod memo;
+pub mod recursive;
 pub mod rewrite;
 pub mod timely;
 
@@ -42,5 +43,9 @@ pub use differential::{IncrementalError, IncrementalOptimizer, RuleChange, RuleI
 pub use egraph::{to_rec_expr, EGraphError, Optimizer, OptimizerConfig, RelLang};
 pub use extract::{extract_best, extract_best_with_staleness, rec_expr_to_rel_expr, RelCostFn};
 pub use memo::{structural_hash, MemoTable};
+pub use recursive::{
+    ExecutionContext, ExecutionError, ExprEvaluator, RecursiveCTEConfig,
+    RecursiveCTEExecutor, RecursionResult, Row, TerminationReason,
+};
 pub use rewrite::all_rules;
 pub use timely::{ComputationStats, TimelyConfig};
