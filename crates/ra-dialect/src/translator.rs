@@ -111,7 +111,7 @@ impl DialectTranslator {
         if let Some(ref mut with) = query.with {
             for cte in &mut with.cte_tables {
                 let translated = self.translate_query(*cte.query.clone(), warnings)?;
-                cte.query = Box::new(translated);
+                *cte.query = translated;
             }
         }
 
@@ -673,8 +673,8 @@ impl DialectTranslator {
     }
 
     /// Translate window function OVER clauses, recursively
-    /// translating expressions within partition_by and
-    /// order_by.
+    /// translating expressions within `partition_by` and
+    /// `order_by`.
     fn translate_window_type(
         &self,
         window: ast::WindowType,

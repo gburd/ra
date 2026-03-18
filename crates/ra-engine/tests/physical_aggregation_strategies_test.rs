@@ -19,7 +19,7 @@ fn test_hash_aggregation_few_groups() {
         group_by: vec![col("region")],
         aggregates: vec![AggregateExpr {
             function: AggregateFunction::Sum,
-            expr: col("amount"),
+            arg: Some(col("amount")),
             distinct: false,
         }],
         input: Box::new(input),
@@ -51,7 +51,7 @@ fn test_hash_aggregation_fits_memory() {
         aggregates: vec![
             AggregateExpr {
                 function: AggregateFunction::Sum,
-                expr: col("total"),
+                arg: Some(col("total")),
                 distinct: false,
             },
             AggregateExpr {
@@ -73,12 +73,12 @@ fn test_hash_aggregation_multiple_aggregates() {
         aggregates: vec![
             AggregateExpr {
                 function: AggregateFunction::Sum,
-                expr: col("debit"),
+                arg: Some(col("debit")),
                 distinct: false,
             },
             AggregateExpr {
                 function: AggregateFunction::Sum,
-                expr: col("credit"),
+                arg: Some(col("credit")),
                 distinct: false,
             },
             AggregateExpr {
@@ -102,7 +102,7 @@ fn test_sort_aggregation_input_sorted() {
         group_by: vec![col("timestamp")],
         aggregates: vec![AggregateExpr {
             function: AggregateFunction::Avg,
-            expr: col("value"),
+            arg: Some(col("value")),
             distinct: false,
         }],
         input: Box::new(input),
@@ -134,7 +134,7 @@ fn test_sort_aggregation_memory_constrained() {
         group_by: vec![col("category")],
         aggregates: vec![AggregateExpr {
             function: AggregateFunction::Max,
-            expr: col("price"),
+            arg: Some(col("price")),
             distinct: false,
         }],
         input: Box::new(input),
@@ -168,7 +168,7 @@ fn test_streaming_aggregation_single_pass() {
         group_by: vec![col("sensor_id")],
         aggregates: vec![AggregateExpr {
             function: AggregateFunction::Avg,
-            expr: col("temperature"),
+            arg: Some(col("temperature")),
             distinct: false,
         }],
         input: Box::new(input),
@@ -186,7 +186,7 @@ fn test_two_phase_aggregation_distributed() {
         group_by: vec![col("partition_key")],
         aggregates: vec![AggregateExpr {
             function: AggregateFunction::Sum,
-            expr: col("value"),
+            arg: Some(col("value")),
             distinct: false,
         }],
         input: Box::new(input),
@@ -203,17 +203,17 @@ fn test_two_phase_aggregation_decomposable() {
         aggregates: vec![
             AggregateExpr {
                 function: AggregateFunction::Sum,
-                expr: col("value"),
+                arg: Some(col("value")),
                 distinct: false,
             },
             AggregateExpr {
                 function: AggregateFunction::Min,
-                expr: col("value"),
+                arg: Some(col("value")),
                 distinct: false,
             },
             AggregateExpr {
                 function: AggregateFunction::Max,
-                expr: col("value"),
+                arg: Some(col("value")),
                 distinct: false,
             },
         ],
@@ -247,7 +247,7 @@ fn test_three_phase_aggregation_skewed_data() {
         group_by: vec![col("hot_key")],
         aggregates: vec![AggregateExpr {
             function: AggregateFunction::Sum,
-            expr: col("amount"),
+            arg: Some(col("amount")),
             distinct: false,
         }],
         input: Box::new(input),
@@ -262,7 +262,7 @@ fn test_three_phase_aggregation_large_groups() {
         group_by: vec![col("category"), col("subcategory")],
         aggregates: vec![AggregateExpr {
             function: AggregateFunction::Avg,
-            expr: col("value"),
+            arg: Some(col("value")),
             distinct: false,
         }],
         input: Box::new(input),
@@ -279,7 +279,7 @@ fn test_distinct_aggregation_count_distinct() {
         group_by: vec![col("page")],
         aggregates: vec![AggregateExpr {
             function: AggregateFunction::Count,
-            expr: col("user_id"),
+            arg: Some(col("user_id"),
             distinct: true,
         }],
         input: Box::new(input),
@@ -294,7 +294,7 @@ fn test_distinct_aggregation_sum_distinct() {
         group_by: vec![col("customer_id")],
         aggregates: vec![AggregateExpr {
             function: AggregateFunction::Sum,
-            expr: col("order_total"),
+            arg: Some(col("order_total"),
             distinct: true,
         }],
         input: Box::new(input),
@@ -310,12 +310,12 @@ fn test_distinct_aggregation_multiple_columns() {
         aggregates: vec![
             AggregateExpr {
                 function: AggregateFunction::Count,
-                expr: col("merchant_id"),
+                arg: Some(col("merchant_id"),
                 distinct: true,
             },
             AggregateExpr {
                 function: AggregateFunction::Count,
-                expr: col("category"),
+                arg: Some(col("category"),
                 distinct: true,
             },
         ],
@@ -335,7 +335,7 @@ fn test_global_aggregation_no_grouping() {
         aggregates: vec![
             AggregateExpr {
                 function: AggregateFunction::Sum,
-                expr: col("amount"),
+                arg: Some(col("amount")),
                 distinct: false,
             },
             AggregateExpr {
@@ -356,7 +356,7 @@ fn test_global_aggregation_avg() {
         group_by: vec![],
         aggregates: vec![AggregateExpr {
             function: AggregateFunction::Avg,
-            expr: col("score"),
+            arg: Some(col("score"),
             distinct: false,
         }],
         input: Box::new(input),
@@ -373,7 +373,7 @@ fn test_aggregation_after_filter() {
         group_by: vec![col("customer_id")],
         aggregates: vec![AggregateExpr {
             function: AggregateFunction::Sum,
-            expr: col("total"),
+            arg: Some(col("total"),
             distinct: false,
         }],
         input: Box::new(input),
@@ -406,7 +406,7 @@ fn test_aggregation_after_join() {
         group_by: vec![col("country")],
         aggregates: vec![AggregateExpr {
             function: AggregateFunction::Sum,
-            expr: col("order_total"),
+            arg: Some(col("order_total"),
             distinct: false,
         }],
         input: Box::new(join),
@@ -423,7 +423,7 @@ fn test_gpu_hash_aggregation() {
         group_by: vec![col("category")],
         aggregates: vec![AggregateExpr {
             function: AggregateFunction::Sum,
-            expr: col("value"),
+            arg: Some(col("value")),
             distinct: false,
         }],
         input: Box::new(input),
@@ -438,7 +438,7 @@ fn test_parallel_aggregation_cpu_cores() {
         group_by: vec![col("timestamp")],
         aggregates: vec![AggregateExpr {
             function: AggregateFunction::Avg,
-            expr: col("cpu_usage"),
+            arg: Some(col("cpu_usage"),
             distinct: false,
         }],
         input: Box::new(input),
@@ -456,7 +456,7 @@ fn test_aggregation_spill_to_disk() {
         group_by: vec![col("high_card_column")],
         aggregates: vec![AggregateExpr {
             function: AggregateFunction::Sum,
-            expr: col("value"),
+            arg: Some(col("value")),
             distinct: false,
         }],
         input: Box::new(input),
@@ -489,7 +489,7 @@ fn test_nested_aggregation() {
         group_by: vec![col("product_id")],
         aggregates: vec![AggregateExpr {
             function: AggregateFunction::Sum,
-            expr: col("quantity"),
+            arg: Some(col("quantity"),
             distinct: false,
         }],
         input: Box::new(inner_input),
@@ -499,7 +499,7 @@ fn test_nested_aggregation() {
         group_by: vec![],
         aggregates: vec![AggregateExpr {
             function: AggregateFunction::Max,
-            expr: col("sum_quantity"),
+            arg: Some(col("sum_quantity"),
             distinct: false,
         }],
         input: Box::new(inner_agg),
