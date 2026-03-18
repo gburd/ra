@@ -1,0 +1,120 @@
+---
+id: skew-aware-aggregation
+name: Skew-Aware Aggregation
+category: distributed/aggregation
+databases: [presto, trino, spark, greenplum, citus]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, aggregation, skew, hot-keys, straggler]
+complexity: O(n)
+benefit_range: [0.2, 0.9]
+---
+
+# Skew-Aware Aggregation
+
+## Description
+
+When detecting hot keys (e.g., NULL, "UNKNOWN", dominant values), handle
+them separately to avoid straggler nodes. Split into hot + cold paths
+where hot keys are replicated or processed with a different strategy.
+
+**When to apply**: Column statistics reveal hot keys with frequency
+exceeding 100x the average, and fewer than 5 such keys exist.
+
+**Why it works**: In hash-partitioned aggregation, hot keys concentrate
+on a single node, creating a straggler that holds up the entire query.
+By splitting hot keys into a separate path (broadcast or replicated
+aggregation), the remaining data distributes evenly.
+
+## Relational Algebra
+
+```algebra
+-- Before
+gamma[g, agg(a)](Exchange[hash(g)](R))
+
+-- After (split hot/cold)
+Union(
+    gamma[g, agg(a)](Filter[g IN hot_keys](R)),          -- hot path
+    gamma[g, merge_agg(partial_a)](                       -- cold path
+        Exchange[hash(g)](
+            gamma[g, partial_agg(a)](Filter[g NOT IN hot_keys](R))
+        )
+    )
+)
+```
+
+## Implementation
+
+```rust
+rw!("skew-aware-aggregation";
+    "(aggregate ?group ?agg
+        (exchange hash_partition ?child ?group))" =>
+    "(union
+        (aggregate ?group ?agg
+            (filter (in ?group ?hot_keys) ?child))
+        (aggregate_final ?group ?agg
+            (exchange hash_partition
+                (aggregate_partial ?group ?agg
+                    (filter (not_in ?group ?hot_keys) ?child))
+                ?group)))"
+    if has_hot_keys("?group", "?child")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(group_col: &Column, stats: &Stats) -> bool {
+    let detector = SkewDetector::default();
+    let hot_keys = detector.detect_hot_keys(stats.histogram(group_col));
+    !hot_keys.is_empty()
+        && hot_keys.len() < 5
+        && hot_keys[0].skew_ratio > 100.0
+}
+```
+
+## Cost Model
+
+```rust
+fn skew_aware_benefit(
+    input_rows: f64,
+    hot_key_fraction: f64,
+    normal_groups: f64,
+    num_nodes: u32,
+) -> f64 {
+    // Hot path: centralized but small fraction
+    let hot_cost = input_rows * hot_key_fraction;
+    // Cold path: well-distributed two-phase
+    let cold_rows = input_rows * (1.0 - hot_key_fraction);
+    let cold_cost = normal_groups * num_nodes as f64;
+    // Compare to naive: all rows through one hot node
+    let naive_bottleneck = input_rows * hot_key_fraction;
+    (naive_bottleneck - hot_cost.max(cold_cost)) / naive_bottleneck
+}
+```
+
+## Test Cases
+
+```sql
+-- Positive: NULL-dominated group key
+SELECT status, COUNT(*) FROM events GROUP BY status;
+-- status has 80% NULL values -> split NULL into hot path
+
+-- Positive: single dominant value
+SELECT country, SUM(revenue) FROM sales GROUP BY country;
+-- country='US' has 60% of rows -> handle US separately
+
+-- Negative: many hot keys (>5) - use three-phase instead
+SELECT zipcode, COUNT(*) FROM addresses GROUP BY zipcode;
+-- Top 20 zipcodes are all hot -> three-phase is better
+
+-- Negative: no significant skew
+SELECT product_id, SUM(qty) FROM orders GROUP BY product_id;
+-- Uniform distribution -> standard two-phase is fine
+```
+
+## References
+
+Presto: SkewedJoinOptimizer (similar concept for joins)
+Spark: adaptive query execution skew handling
+DeWitt et al., "Practical Skew Handling in Parallel Joins" (VLDB 1992)
