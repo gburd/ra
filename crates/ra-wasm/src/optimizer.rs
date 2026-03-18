@@ -172,6 +172,12 @@ fn estimate_cost(plan: &RelExpr) -> f64 {
         RelExpr::Union { left, right, .. } => estimate_cost(left) + estimate_cost(right),
         RelExpr::Intersect { left, right, .. } => estimate_cost(left) + estimate_cost(right),
         RelExpr::Except { left, right, .. } => estimate_cost(left) + estimate_cost(right),
+        RelExpr::Cte { definition, body, .. } => {
+            estimate_cost(definition) + estimate_cost(body)
+        }
+        RelExpr::Window { input, .. } => estimate_cost(input) * 2.5,
+        RelExpr::Distinct { input, .. } => estimate_cost(input) * 1.5,
+        RelExpr::Values { rows, .. } => rows.len() as f64,
     }
 }
 

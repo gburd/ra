@@ -119,6 +119,17 @@ fn estimate_heuristic(
             let right_rows = estimate_heuristic(right, stats);
             (left_rows - right_rows * 0.5).max(0.0)
         }
+        RelExpr::Cte { body, .. } => {
+            estimate_heuristic(body, stats)
+        }
+        RelExpr::Window { input, .. } => {
+            estimate_heuristic(input, stats)
+        }
+        RelExpr::Distinct { input, .. } => {
+            let input_rows = estimate_heuristic(input, stats);
+            (input_rows * 0.8).max(1.0)
+        }
+        RelExpr::Values { rows, .. } => rows.len() as f64,
     }
 }
 
@@ -254,6 +265,17 @@ fn collect_tables_recursive(
             collect_tables_recursive(left, provider, map);
             collect_tables_recursive(right, provider, map);
         }
+        RelExpr::Window { input, .. }
+        | RelExpr::Distinct { input, .. } => {
+            collect_tables_recursive(input, provider, map);
+        }
+        RelExpr::Cte {
+            definition, body, ..
+        } => {
+            collect_tables_recursive(definition, provider, map);
+            collect_tables_recursive(body, provider, map);
+        }
+        RelExpr::Values { .. } => {}
     }
 }
 

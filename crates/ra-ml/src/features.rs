@@ -162,6 +162,26 @@ impl FeatureSchema {
                 self.encode_expr(left, stats, features);
                 self.encode_expr(right, stats, features);
             }
+            RelExpr::Cte {
+                definition, body, ..
+            } => {
+                features[OP_TYPE_OFFSET + 4] = 1.0;
+                self.encode_expr(definition, stats, features);
+                self.encode_expr(body, stats, features);
+            }
+            RelExpr::Window { input, .. } => {
+                features[OP_TYPE_OFFSET + 5] = 1.0;
+                self.encode_expr(input, stats, features);
+            }
+            RelExpr::Distinct { input, .. } => {
+                features[OP_TYPE_OFFSET + 4] = 1.0;
+                self.encode_expr(input, stats, features);
+            }
+            RelExpr::Values { rows, .. } => {
+                features[OP_TYPE_OFFSET] = 1.0;
+                features[STATS_OFFSET] =
+                    log_scale(rows.len() as f64);
+            }
         }
     }
 

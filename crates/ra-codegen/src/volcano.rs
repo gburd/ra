@@ -778,6 +778,15 @@ fn init_agg_states(aggregates: &[AggOp]) -> Vec<AggState> {
             AggregateFunction::Avg => {
                 AggState::Avg { sum: 0.0, count: 0 }
             }
+            AggregateFunction::StddevPop
+            | AggregateFunction::StddevSamp
+            | AggregateFunction::VariancePop
+            | AggregateFunction::VarianceSamp
+            | AggregateFunction::StringAgg
+            | AggregateFunction::ArrayAgg
+            | AggregateFunction::Mode
+            | AggregateFunction::BoolAnd
+            | AggregateFunction::BoolOr => AggState::Sum(0.0),
         })
         .collect()
 }

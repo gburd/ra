@@ -166,6 +166,39 @@ fn render_expr(expr: &RelExpr, ctx: &mut RenderContext) {
             let kw = if *all { "EXCEPT ALL" } else { "EXCEPT" };
             ctx.from = format!("({l}) {kw} ({r})");
         }
+        RelExpr::Cte {
+            name,
+            definition,
+            body,
+        } => {
+            let def_sql = SqlRenderer::render(definition);
+            render_expr(body, ctx);
+            ctx.from = format!(
+                "(WITH {name} AS ({def_sql}) {})",
+                ctx.from
+            );
+        }
+        RelExpr::Window { input, .. } => {
+            render_expr(input, ctx);
+        }
+        RelExpr::Distinct { input } => {
+            render_expr(input, ctx);
+            ctx.select = format!("DISTINCT {}", ctx.select);
+        }
+        RelExpr::Values { rows } => {
+            let row_strs: Vec<String> = rows
+                .iter()
+                .map(|row| {
+                    let vals: Vec<String> =
+                        row.iter().map(render_scalar).collect();
+                    format!("({})", vals.join(", "))
+                })
+                .collect();
+            ctx.from = format!(
+                "(VALUES {}) AS t",
+                row_strs.join(", ")
+            );
+        }
     }
 }
 

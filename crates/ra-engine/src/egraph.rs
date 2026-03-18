@@ -343,6 +343,21 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
             let right_id = add_rel_expr(rec, right)?;
             Ok(rec.add(RelLang::Except([all_id, left_id, right_id])))
         }
+        RelExpr::Cte { .. } => Err(EGraphError::ConversionError(
+            "CTE not yet supported in e-graph representation".into(),
+        )),
+        RelExpr::Window { .. } => Err(EGraphError::ConversionError(
+            "Window functions not yet supported in e-graph representation".into(),
+        )),
+        RelExpr::Distinct { input } => {
+            let input_id = add_rel_expr(rec, input)?;
+            let true_id = rec.add(RelLang::True);
+            let nil_id = rec.add(RelLang::Nil);
+            Ok(rec.add(RelLang::Aggregate([nil_id, true_id, input_id])))
+        }
+        RelExpr::Values { .. } => Err(EGraphError::ConversionError(
+            "VALUES not yet supported in e-graph representation".into(),
+        )),
     }
 }
 
@@ -511,6 +526,19 @@ fn add_aggregate_list(
             AggregateFunction::Max => {
                 let arg_id = add_agg_arg(rec, agg.arg.as_ref())?;
                 RelLang::Max([arg_id])
+            }
+            AggregateFunction::StddevPop
+            | AggregateFunction::StddevSamp
+            | AggregateFunction::VariancePop
+            | AggregateFunction::VarianceSamp
+            | AggregateFunction::StringAgg
+            | AggregateFunction::ArrayAgg
+            | AggregateFunction::Mode
+            | AggregateFunction::BoolAnd
+            | AggregateFunction::BoolOr => {
+                let name_id = add_symbol(rec, &agg.function.to_string());
+                let arg_id = add_agg_arg(rec, agg.arg.as_ref())?;
+                RelLang::Func(vec![name_id, arg_id].into_boxed_slice())
             }
         };
         let func_id = rec.add(func_node);
