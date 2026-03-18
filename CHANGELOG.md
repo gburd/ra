@@ -26,6 +26,9 @@
 - 34 optimization rules for join distribution, filter pushdown, partition
   pruning, locality awareness, and skew handling
 - 84 unit tests
+- Network cost integration: `DistributedOptimizer` uses `NetworkCostModel`
+  for topology-aware broadcast vs shuffle decisions
+- 26 integration tests
 
 **Distributed Aggregation** (`ra-core`, `ra-stats`)
 - Two-phase aggregation: local pre-aggregation + global merge for
@@ -37,6 +40,9 @@
 - 25 optimization rules for aggregation pushdown, phase selection,
   and skew-aware strategies
 - 170 unit tests
+- Integration with `DistributedOptimizer` for automatic two-phase/three-phase
+  selection with skew detection
+- 35 integration tests
 
 **Federated Queries** (`ra-core`, `ra-engine`)
 - `FederatedCostModel` estimating cost of pushing operations to remote
@@ -45,14 +51,24 @@
 - Capability-aware optimization respecting per-database SQL support
 - 24 optimization rules for federated pushdown
 - 89 unit tests
+- Network topology integration: `FederatedCostModel` uses real network costs
+  for ShipQuery vs ShipData decisions
+- 33 integration tests
+
+**TPC-H Distributed Benchmarks** (`ra-engine`)
+- 7 TPC-H queries adapted for distributed execution
+- 4 network topologies (single DC, multi-DC, cloud federation, edge+cloud)
+- 36 benchmark measurement points
 
 ### Metrics
 
 | Metric              | Value     |
 |---------------------|-----------|
-| Lines of Rust       | 12,492    |
-| New tests           | 461+      |
-| New .rra rules      | 83        |
+| Lines of Rust       | ~8,550    |
+| Base tests          | 461       |
+| Integration tests   | 94        |
+| Benchmarks          | 36        |
+| New .rra rules      | 59        |
 | Documentation pages | 2 new     |
 | Crates modified     | 4         |
 | Breaking changes    | None      |
