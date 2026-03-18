@@ -32,6 +32,8 @@ pub mod cost;
 pub mod differential;
 pub mod egraph;
 pub mod extract;
+pub mod federated_cost;
+pub mod federated_optimizer;
 pub mod memo;
 pub mod recursive;
 pub mod resource_budget;
@@ -41,6 +43,10 @@ pub mod timely;
 
 pub use analysis::RelAnalysis;
 pub use cost::{CostCalibration, IntegratedCostFn, IntegratedCostModel};
+pub use federated_cost::FederatedCostModel;
+pub use federated_optimizer::{
+    FederatedAnalysis, FederatedError, FederatedOptimizer,
+};
 pub use differential::{IncrementalError, IncrementalOptimizer, RuleChange, RuleId};
 pub use egraph::{
     to_rec_expr, EGraphError, IncrementalStats, OptimizationResult,

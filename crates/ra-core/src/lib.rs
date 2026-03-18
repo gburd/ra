@@ -16,6 +16,7 @@
 pub mod algebra;
 pub mod cost;
 pub mod expr;
+pub mod federated;
 pub mod pattern;
 pub mod properties;
 pub mod rule;
@@ -24,6 +25,7 @@ pub mod statistics;
 pub use algebra::*;
 pub use cost::*;
 pub use expr::*;
+pub use federated::*;
 pub use pattern::*;
 pub use properties::*;
 pub use rule::*;

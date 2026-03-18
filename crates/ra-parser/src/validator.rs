@@ -58,6 +58,7 @@ pub enum ValidationError {
 ///
 /// Matches the directories under `rules/database-specific/`.
 pub const KNOWN_DATABASES: &[&str] = &[
+    "bigquery",
     "blazingsql",
     "calcite",
     "citus",
@@ -93,6 +94,7 @@ pub const KNOWN_DATABASES: &[&str] = &[
     "questdb",
     "sap-hana",
     "singlestore",
+    "snowflake",
     "spark",
     "sqlite",
     "sqream",
@@ -116,6 +118,7 @@ pub const KNOWN_CATEGORY_PREFIXES: &[&str] = &[
     "cost-models",
     "experimental",
     "distributed",
+    "federated",
     "hardware",
     "multi-model",
 ];

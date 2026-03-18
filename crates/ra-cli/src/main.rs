@@ -3,6 +3,7 @@
 
 mod diff_validator;
 mod display;
+mod federated_commands;
 pub(crate) mod plan_diff;
 pub(crate) mod side_by_side;
 mod stats_commands;
@@ -160,6 +161,9 @@ enum Commands {
     /// Statistics timeline commands (play, feedback, visualize).
     #[command(subcommand)]
     StatsTimeline(StatsTimelineCommands),
+    /// Federated query analysis commands.
+    #[command(subcommand)]
+    Federated(FederatedCommands),
 }
 
 #[derive(Subcommand)]
@@ -196,6 +200,34 @@ enum StatsTimelineCommands {
         /// Output format (table, json, ascii, html).
         #[arg(long, default_value = "ascii")]
         format: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum FederatedCommands {
+    /// Analyze a federated query's execution strategy.
+    Analyze {
+        /// SQL query to analyze.
+        #[arg(long)]
+        query: String,
+        /// Remote database connection string or type.
+        #[arg(long)]
+        remote_db: String,
+        /// Remote table name.
+        #[arg(long)]
+        remote_table: String,
+        /// Estimated network latency in milliseconds.
+        #[arg(long, default_value = "10")]
+        latency: u64,
+        /// Estimated bandwidth in Mbps.
+        #[arg(long, default_value = "100")]
+        bandwidth: u64,
+        /// Estimated row count of the remote table.
+        #[arg(long, default_value = "1000000")]
+        remote_rows: f64,
+        /// Average row size in bytes.
+        #[arg(long, default_value = "200")]
+        avg_row_size: u64,
     },
 }
 
@@ -334,6 +366,27 @@ fn main() -> Result<()> {
                     cli.verbose,
                 )
             }
+        },
+        Commands::Federated(sub) => match sub {
+            FederatedCommands::Analyze {
+                query,
+                remote_db,
+                remote_table,
+                latency,
+                bandwidth,
+                remote_rows,
+                avg_row_size,
+            } => federated_commands::cmd_federated_analyze(
+                &query,
+                &remote_db,
+                &remote_table,
+                latency,
+                bandwidth,
+                remote_rows,
+                avg_row_size,
+                cli.verbose,
+                cli.quiet,
+            ),
         },
     }
 }
