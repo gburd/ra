@@ -198,3 +198,10 @@ targets) rather than sequential time, since transfers happen concurrently.
 
 For shuffle operations, each target receives `rows / N` rows, and only
 non-local targets incur transfer cost.
+
+## Related Documentation
+
+- [Distributed Query Optimization](phase19-distributed-optimization.md) -- Phase 19 overview
+- [Cost Models](cost-models.md) -- Core cost estimation framework
+- [Hardware Acceleration](hardware-acceleration.md) -- GPU/FPGA/SIMD cost models
+- [Architecture](architecture.md) -- Overall system design
