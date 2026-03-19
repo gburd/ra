@@ -276,6 +276,9 @@ fn encode_binop(op: BinOp, features: &mut [f64]) {
         BinOp::Sub => 9,
         BinOp::Mul => 10,
         BinOp::Div => 11,
+        BinOp::Mod => 12,
+        BinOp::Concat => 13,
+        BinOp::JsonAccess => 14,
     };
     features[PRED_OP_OFFSET + idx] = 1.0;
 }

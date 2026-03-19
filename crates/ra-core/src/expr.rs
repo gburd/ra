@@ -134,6 +134,12 @@ pub enum BinOp {
     And,
     /// Logical OR.
     Or,
+    /// Modulo.
+    Mod,
+    /// String concatenation (`||`).
+    Concat,
+    /// JSON field access (`->>`).
+    JsonAccess,
 }
 
 /// Unary operators for expressions.
@@ -174,6 +180,9 @@ impl std::fmt::Display for BinOp {
             Self::Ge => ">=",
             Self::And => "AND",
             Self::Or => "OR",
+            Self::Mod => "%",
+            Self::Concat => "||",
+            Self::JsonAccess => "->>",
         };
         write!(f, "{sym}")
     }

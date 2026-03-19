@@ -109,6 +109,7 @@ fn emit_wasm_expr(
                 BinOp::Sub => "i64.sub",
                 BinOp::Mul => "i64.mul",
                 BinOp::Div => "i64.div_s",
+                BinOp::Mod => "i64.rem_s",
                 BinOp::Eq => "i64.eq",
                 BinOp::Ne => "i64.ne",
                 BinOp::Lt => "i64.lt_s",
@@ -117,6 +118,10 @@ fn emit_wasm_expr(
                 BinOp::Ge => "i64.ge_s",
                 BinOp::And => "i64.and",
                 BinOp::Or => "i64.or",
+                BinOp::Concat | BinOp::JsonAccess => {
+                    // String ops not supported in WASM - use nop
+                    "nop"
+                }
             };
             // Comparison ops return i32 in WASM; extend to i64
             let needs_extend = matches!(

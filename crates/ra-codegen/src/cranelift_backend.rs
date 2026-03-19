@@ -227,6 +227,7 @@ fn emit_binop(
         BinOp::Sub => builder.ins().isub(left, right),
         BinOp::Mul => builder.ins().imul(left, right),
         BinOp::Div => builder.ins().sdiv(left, right),
+        BinOp::Mod => builder.ins().srem(left, right),
         BinOp::Eq => {
             let cmp =
                 builder.ins().icmp(IntCC::Equal, left, right);
@@ -267,6 +268,15 @@ fn emit_binop(
         }
         BinOp::And => builder.ins().band(left, right),
         BinOp::Or => builder.ins().bor(left, right),
+        BinOp::Mod => {
+            // Signed remainder (a % b)
+            builder.ins().srem(left, right)
+        }
+        BinOp::Concat | BinOp::JsonAccess => {
+            // String operations not yet supported in Cranelift backend
+            // Return left operand as placeholder
+            left
+        }
     }
 }
 

@@ -178,6 +178,7 @@ fn eval_binop(
         BinOp::Sub => numeric_op(left, right, |a, b| a - b, |a, b| a - b),
         BinOp::Mul => numeric_op(left, right, |a, b| a * b, |a, b| a * b),
         BinOp::Div => numeric_op(left, right, |a, b| a / b, |a, b| a / b),
+        BinOp::Mod => numeric_op(left, right, |a, b| a % b, |a, b| a % b),
         BinOp::Eq => Ok(Value::Bool(left == right)),
         BinOp::Ne => Ok(Value::Bool(left != right)),
         BinOp::Lt => compare_op(left, right, |o| {
@@ -204,6 +205,19 @@ fn eval_binop(
         }
         BinOp::Or => {
             Ok(Value::Bool(left.is_truthy() || right.is_truthy()))
+        }
+        BinOp::Concat => {
+            // String concatenation
+            match (left, right) {
+                (Value::Utf8(l), Value::Utf8(r)) => {
+                    Ok(Value::Utf8(format!("{}{}", l, r)))
+                }
+                _ => Ok(Value::Null),
+            }
+        }
+        BinOp::JsonAccess => {
+            // JSON field access - unimplemented for now
+            Ok(Value::Null)
         }
     }
 }
