@@ -964,6 +964,13 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
             }
             Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
         }
+        RelExpr::RowPattern { input, pattern, .. } => {
+            let tag_id = add_symbol(rec, "MATCH_RECOGNIZE");
+            let pattern_id = add_symbol(rec, &pattern.to_string());
+            let input_id = add_rel_expr(rec, input)?;
+            let ids = vec![tag_id, pattern_id, input_id];
+            Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
+        }
     }
 }
 
@@ -1042,6 +1049,44 @@ fn add_scalar_expr(rec: &mut RecExpr<RelLang>, expr: &Expr) -> Result<Id, EGraph
             let idx_id = add_scalar_expr(rec, index)?;
             let tag_id = add_symbol(rec, "ARRAY_INDEX");
             let ids = vec![tag_id, arr_id, idx_id];
+            Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
+        }
+        Expr::PatternPrev(inner, offset) => {
+            let tag_id = add_symbol(rec, "PREV");
+            let inner_id = add_scalar_expr(rec, inner)?;
+            let offset_id = add_symbol(rec, &offset.to_string());
+            let ids = vec![tag_id, inner_id, offset_id];
+            Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
+        }
+        Expr::PatternNext(inner, offset) => {
+            let tag_id = add_symbol(rec, "NEXT");
+            let inner_id = add_scalar_expr(rec, inner)?;
+            let offset_id = add_symbol(rec, &offset.to_string());
+            let ids = vec![tag_id, inner_id, offset_id];
+            Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
+        }
+        Expr::PatternFirst(inner, var) => {
+            let tag_id = add_symbol(rec, "FIRST");
+            let inner_id = add_scalar_expr(rec, inner)?;
+            let var_id = add_symbol(rec, var);
+            let ids = vec![tag_id, inner_id, var_id];
+            Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
+        }
+        Expr::PatternLast(inner, var) => {
+            let tag_id = add_symbol(rec, "LAST");
+            let inner_id = add_scalar_expr(rec, inner)?;
+            let var_id = add_symbol(rec, var);
+            let ids = vec![tag_id, inner_id, var_id];
+            Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
+        }
+        Expr::PatternClassifier => {
+            let tag_id = add_symbol(rec, "CLASSIFIER");
+            let ids = vec![tag_id];
+            Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
+        }
+        Expr::PatternMatchNumber => {
+            let tag_id = add_symbol(rec, "MATCH_NUMBER");
+            let ids = vec![tag_id];
             Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
         }
     }

@@ -64,6 +64,24 @@ pub enum Expr {
 
     /// Array element access (e.g., `arr[2]`).
     ArrayIndex(Box<Expr>, Box<Expr>),
+
+    /// Row pattern navigation: PREV(expr, offset).
+    PatternPrev(Box<Expr>, usize),
+
+    /// Row pattern navigation: NEXT(expr, offset).
+    PatternNext(Box<Expr>, usize),
+
+    /// Row pattern navigation: FIRST(expr) for a pattern variable.
+    PatternFirst(Box<Expr>, String),
+
+    /// Row pattern navigation: LAST(expr) for a pattern variable.
+    PatternLast(Box<Expr>, String),
+
+    /// Row pattern classifier: returns matched variable name.
+    PatternClassifier,
+
+    /// Row pattern match number: returns match sequence number.
+    PatternMatchNumber,
 }
 
 /// A reference to a column, optionally qualified by a table name.

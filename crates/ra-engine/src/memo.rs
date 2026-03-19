@@ -178,6 +178,20 @@ fn hash_rel_expr(expr: &RelExpr, hasher: &mut impl std::hash::Hasher) {
                 hash_rel_expr(inp, hasher);
             }
         }
+        RelExpr::RowPattern {
+            input,
+            partition_by,
+            order_by,
+            defines,
+            measures,
+            ..
+        } => {
+            partition_by.len().hash(hasher);
+            order_by.len().hash(hasher);
+            defines.len().hash(hasher);
+            measures.len().hash(hasher);
+            hash_rel_expr(input, hasher);
+        }
     }
 }
 

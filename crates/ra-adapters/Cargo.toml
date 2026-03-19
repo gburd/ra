@@ -7,6 +7,10 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+default = []
+postgres = ["dep:postgres"]
+
 [dependencies]
 ra-core = { workspace = true }
 ra-stats = { workspace = true }
@@ -15,6 +19,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+postgres = { workspace = true, optional = true }
 
 [lints]
 workspace = true

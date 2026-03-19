@@ -218,6 +218,7 @@ pub fn synthesize_rules(pairs: &[PatternPair], config: &SynthesisConfig) -> Vec<
                     category: RuleCategory::Logical,
                     databases: vec![],
                     priority: 100,
+                    preconditions: vec![],
                 },
                 match_pattern: mp,
                 replacement_pattern: rp,

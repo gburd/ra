@@ -1,12 +1,13 @@
 //! Database adapters for integrating external databases with the RA optimizer.
 //!
-//! This crate provides the DatabaseAdapter trait and implementations for
-//! various database systems (PostgreSQL, Stoolap, etc.) to gather statistics,
+//! This crate provides the `DatabaseAdapter` trait and implementations for
+//! various database systems (`PostgreSQL`, Stoolap, etc.) to gather statistics,
 //! schema information, and capabilities for use by the pre-condition system.
 
 #![warn(missing_docs)]
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
+#![allow(clippy::unnecessary_literal_bound)]
 
 use anyhow::Result;
 use ra_core::{FactsProvider, SqlDialect};
@@ -125,7 +126,7 @@ pub trait DatabaseAdapter: Send + Sync {
     /// Get the database name/type.
     fn database_name(&self) -> &str;
 
-    /// Convert this adapter into a FactsProvider.
+    /// Convert this adapter into a [`FactsProvider`].
     ///
     /// This allows the adapter to be used directly by the pre-condition evaluator.
     fn as_facts_provider(&self) -> &dyn FactsProvider;
@@ -209,6 +210,7 @@ pub struct DatabaseCapabilities {
 
 impl DatabaseCapabilities {
     /// Check if a feature is supported.
+    #[must_use]
     pub fn supports(&self, feature: &str) -> bool {
         self.features.get(feature).copied().unwrap_or(false)
     }

@@ -7,6 +7,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::expr::{ColumnRef, Expr};
+use crate::row_pattern::{
+    MatchMode, PatternDefine, PatternExpr, PatternMeasure, SkipMode,
+};
 
 /// A relational expression (query plan node).
 ///
@@ -174,6 +177,26 @@ pub enum RelExpr {
         columns: Vec<(String, String)>,
         /// Correlated input relation (for LATERAL).
         input: Option<Box<RelExpr>>,
+    },
+
+    /// Row Pattern Recognition (SQL:2016 MATCH_RECOGNIZE).
+    RowPattern {
+        /// The input relation to match patterns against.
+        input: Box<RelExpr>,
+        /// PARTITION BY expressions.
+        partition_by: Vec<Expr>,
+        /// ORDER BY keys (required for pattern matching).
+        order_by: Vec<SortKey>,
+        /// The regex-like pattern expression.
+        pattern: PatternExpr,
+        /// Variable definitions (DEFINE clause).
+        defines: Vec<PatternDefine>,
+        /// Measure computations (MEASURES clause).
+        measures: Vec<PatternMeasure>,
+        /// Match output mode (ONE ROW / ALL ROWS).
+        mode: MatchMode,
+        /// Skip strategy after a match.
+        skip_mode: SkipMode,
     },
 }
 
@@ -505,6 +528,7 @@ impl RelExpr {
                 Some(inp) => vec![inp],
                 None => vec![],
             },
+            Self::RowPattern { input, .. } => vec![input],
         }
     }
 
@@ -630,6 +654,28 @@ impl RelExpr {
                     inp.collect_columns(out);
                 }
             }
+            Self::RowPattern {
+                input,
+                partition_by,
+                order_by,
+                defines,
+                measures,
+                ..
+            } => {
+                for expr in partition_by {
+                    collect_expr_columns(expr, out);
+                }
+                for key in order_by {
+                    collect_expr_columns(&key.expr, out);
+                }
+                for define in defines {
+                    collect_expr_columns(&define.condition, out);
+                }
+                for measure in measures {
+                    collect_expr_columns(&measure.expr, out);
+                }
+                input.collect_columns(out);
+            }
         }
     }
 }
@@ -646,7 +692,8 @@ impl RelExpr {
             | Self::Sort { input, .. }
             | Self::Limit { input, .. }
             | Self::Window { input, .. }
-            | Self::Distinct { input, .. } => {
+            | Self::Distinct { input, .. }
+            | Self::RowPattern { input, .. } => {
                 input.references_cte(cte_name)
             }
             Self::Join { left, right, .. }
@@ -728,6 +775,13 @@ fn collect_expr_columns(expr: &Expr, out: &mut Vec<ColumnRef>) {
             collect_expr_columns(array, out);
             collect_expr_columns(index, out);
         }
+        Expr::PatternPrev(inner, _)
+        | Expr::PatternNext(inner, _)
+        | Expr::PatternFirst(inner, _)
+        | Expr::PatternLast(inner, _) => {
+            collect_expr_columns(inner, out);
+        }
+        Expr::PatternClassifier | Expr::PatternMatchNumber => {}
     }
 }
 

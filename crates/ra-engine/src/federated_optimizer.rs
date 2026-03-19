@@ -242,12 +242,14 @@ impl FederatedOptimizer {
                 self.can_ship_query(left, capabilities)
                     && self.can_ship_query(right, capabilities)
             }
-            // CTEs, VALUES, and table functions are too complex to ship
+            // CTEs, VALUES, table functions, and pattern matching
+            // are too complex to ship
             RelExpr::CTE { .. }
             | RelExpr::RecursiveCTE { .. }
             | RelExpr::Values { .. }
             | RelExpr::Unnest { .. }
-            | RelExpr::TableFunction { .. } => false,
+            | RelExpr::TableFunction { .. }
+            | RelExpr::RowPattern { .. } => false,
         }
     }
 
@@ -333,6 +335,14 @@ impl FederatedOptimizer {
                         index, table_name,
                     )
             }
+            Expr::PatternPrev(inner, _)
+            | Expr::PatternNext(inner, _)
+            | Expr::PatternFirst(inner, _)
+            | Expr::PatternLast(inner, _) => {
+                self.filter_references_table(inner, table_name)
+            }
+            Expr::PatternClassifier
+            | Expr::PatternMatchNumber => false,
         }
     }
 
