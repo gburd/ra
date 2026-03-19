@@ -108,50 +108,6 @@ impl FactsContext {
         self.features.write().unwrap().insert(feature, supported);
     }
 
-    /// Convert ra-stats TableStats to ra-core TableStats
-    fn convert_table_stats(stats: &TableStats) -> CoreTableStats {
-        CoreTableStats {
-            row_count: stats.row_count as f64,
-            page_count: stats.page_count,
-            average_row_size: stats.average_row_size,
-            table_size_bytes: stats.table_size_bytes,
-            live_tuples: stats.live_tuples.map(|v| v as f64),
-            dead_tuples: stats.dead_tuples.map(|v| v as f64),
-            last_analyzed: stats.last_analyzed,
-            confidence: 1.0, // Default confidence
-        }
-    }
-
-    /// Convert ra-stats ColumnStats to ra-core ColumnStats
-    fn convert_column_stats(stats: &StatsColumnStats) -> ColumnStats {
-        ColumnStats {
-            distinct_count: stats.ndv as f64,
-            null_fraction: stats.null_fraction,
-            min_value: None, // TODO: Extract from histogram
-            max_value: None, // TODO: Extract from histogram
-            avg_length: Some(stats.avg_width),
-            histogram: None, // TODO: Convert histogram
-        }
-    }
-
-    /// Convert ra-hardware HardwareProfile to ra-core HardwareProfile
-    fn convert_hardware_profile(hw: &HardwareProfile) -> CoreHardwareProfile {
-        CoreHardwareProfile {
-            cpu_cores: hw.cpu_cores,
-            available_memory: (hw.gpu_memory_bytes as f64 * 0.9) as u64, // Estimate
-            total_memory: hw.gpu_memory_bytes,
-            simd_width: hw.simd_width_bits,
-            has_gpu: hw.gpu_available,
-            gpu_memory: if hw.gpu_available {
-                Some(hw.gpu_memory_bytes)
-            } else {
-                None
-            },
-            l1_cache_size: 32 * 1024,     // Default 32KB
-            l2_cache_size: hw.l2_cache_bytes,
-            l3_cache_size: hw.l3_cache_bytes,
-        }
-    }
 }
 
 impl FactsProvider for FactsContext {
@@ -206,7 +162,7 @@ impl FactsProvider for FactsContext {
         self.hardware.simd_width_bits
     }
 
-    fn get_schema(&self, table: &str) -> Option<&TableInfo> {
+    fn get_schema(&self, _table: &str) -> Option<&TableInfo> {
         // Same reference lifetime issue
         None
     }
