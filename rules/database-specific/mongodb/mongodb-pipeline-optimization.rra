@@ -1,0 +1,43 @@
+---
+id: mongodb-pipeline-optimization
+name: "Aggregation Pipeline Stage Reordering"
+category: physical/aggregation
+databases: [mongodb]
+version: "1.0.0"
+authors: ["Database Contributors", "RA Contributors"]
+tags: [database-mining, mongodb, optimization]
+complexity: "O(n)"
+benefit_range: [1.0, 10.0]
+---
+
+# Aggregation Pipeline Stage Reordering
+
+## Description
+
+Optimizes MongoDB aggregation pipelines by reordering stages.
+
+**When to apply**: During query optimization phase.
+
+## Relational Algebra
+
+```algebra
+-- Before
+[, , , ]
+
+-- After
+[, , , ]
+```
+
+## Preconditions
+
+-  stage filters can be applied before 
+
+## Test Cases
+
+```sql
+SELECT * FROM table WHERE condition;
+```
+
+## References
+
+- Database documentation

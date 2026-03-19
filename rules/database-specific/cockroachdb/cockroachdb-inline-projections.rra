@@ -1,0 +1,43 @@
+---
+id: cockroachdb-inline-projections
+name: "Inline Projections Through Operators"
+category: logical/projection
+databases: [cockroachdb]
+version: "1.0.0"
+authors: ["Database Contributors", "RA Contributors"]
+tags: [database-mining, cockroachdb, optimization]
+complexity: "O(n)"
+benefit_range: [1.0, 10.0]
+---
+
+# Inline Projections Through Operators
+
+## Description
+
+Pushes projections down through operators to reduce intermediate row complexity.
+
+**When to apply**: During query optimization phase.
+
+## Relational Algebra
+
+```algebra
+-- Before
+(project [a,b] (sort (scan table)))
+
+-- After
+(sort (project [a,b] (scan table)))
+```
+
+## Preconditions
+
+- All sort keys present in projection
+
+## Test Cases
+
+```sql
+SELECT * FROM table WHERE condition;
+```
+
+## References
+
+- Database documentation

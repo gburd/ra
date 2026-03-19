@@ -1,0 +1,43 @@
+---
+id: neo4j-apply-strategy-selection
+name: "Apply Strategy Selection (Eager vs Lazy)"
+category: physical/apply-strategy
+databases: [neo4j]
+version: "1.0.0"
+authors: ["Database Contributors", "RA Contributors"]
+tags: [database-mining, neo4j, optimization]
+complexity: "O(n)"
+benefit_range: [1.0, 10.0]
+---
+
+# Apply Strategy Selection (Eager vs Lazy)
+
+## Description
+
+Chooses between eager and lazy evaluation strategies.
+
+**When to apply**: During query optimization phase.
+
+## Relational Algebra
+
+```algebra
+-- Before
+(apply (scan users) :FOLLOWS)
+
+-- After
+(lazy-apply (scan users) :FOLLOWS)
+```
+
+## Preconditions
+
+- Memory constraints suggest lazy evaluation
+
+## Test Cases
+
+```sql
+SELECT * FROM table WHERE condition;
+```
+
+## References
+
+- Database documentation

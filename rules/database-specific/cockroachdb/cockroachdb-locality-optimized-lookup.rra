@@ -1,0 +1,43 @@
+---
+id: cockroachdb-locality-optimized-lookup
+name: "Locality Optimized Search for Lookup Joins"
+category: distributed/locality
+databases: [cockroachdb]
+version: "1.0.0"
+authors: ["Database Contributors", "RA Contributors"]
+tags: [database-mining, cockroachdb, optimization]
+complexity: "O(n)"
+benefit_range: [1.0, 10.0]
+---
+
+# Locality Optimized Search for Lookup Joins
+
+## Description
+
+Optimizes lookup joins for geo-distributed tables by preferring local replicas.
+
+**When to apply**: During query optimization phase.
+
+## Relational Algebra
+
+```algebra
+-- Before
+(lookup-join (scan orders) (index-scan customers))
+
+-- After
+(locality-optimized-search (lookup-join (scan orders) (index-scan customers)))
+```
+
+## Preconditions
+
+- Input is REGIONAL BY ROW table
+
+## Test Cases
+
+```sql
+SELECT * FROM table WHERE condition;
+```
+
+## References
+
+- Database documentation

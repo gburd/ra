@@ -1,0 +1,43 @@
+---
+id: tidb-join-reorder
+name: "Join Reordering for Selectivity"
+category: logical/join-reorder
+databases: [tidb]
+version: "1.0.0"
+authors: ["Database Contributors", "RA Contributors"]
+tags: [database-mining, tidb, optimization]
+complexity: "O(n)"
+benefit_range: [1.0, 10.0]
+---
+
+# Join Reordering for Selectivity
+
+## Description
+
+Reorders joins to minimize intermediate result sizes.
+
+**When to apply**: During query optimization phase.
+
+## Relational Algebra
+
+```algebra
+-- Before
+(inner-join (inner-join a b) (inner-join c d))
+
+-- After
+(inner-join (inner-join a c) (inner-join b d))
+```
+
+## Preconditions
+
+- Selectivity estimates available for all predicates
+
+## Test Cases
+
+```sql
+SELECT * FROM table WHERE condition;
+```
+
+## References
+
+- Database documentation
