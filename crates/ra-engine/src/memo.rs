@@ -159,6 +159,25 @@ fn hash_rel_expr(expr: &RelExpr, hasher: &mut impl std::hash::Hasher) {
                 cd.max_depth.hash(hasher);
             }
         }
+        RelExpr::Unnest {
+            expr, alias, input, with_ordinality,
+        } => {
+            hash_scalar_expr(expr, hasher);
+            alias.hash(hasher);
+            with_ordinality.hash(hasher);
+            if let Some(inp) = input {
+                hash_rel_expr(inp, hasher);
+            }
+        }
+        RelExpr::TableFunction {
+            name, args, input, ..
+        } => {
+            name.hash(hasher);
+            args.len().hash(hasher);
+            if let Some(inp) = input {
+                hash_rel_expr(inp, hasher);
+            }
+        }
     }
 }
 

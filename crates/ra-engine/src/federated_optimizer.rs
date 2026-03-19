@@ -242,10 +242,12 @@ impl FederatedOptimizer {
                 self.can_ship_query(left, capabilities)
                     && self.can_ship_query(right, capabilities)
             }
-            // CTEs and VALUES are too complex to ship
+            // CTEs, VALUES, and table functions are too complex to ship
             RelExpr::CTE { .. }
             | RelExpr::RecursiveCTE { .. }
-            | RelExpr::Values { .. } => false,
+            | RelExpr::Values { .. }
+            | RelExpr::Unnest { .. }
+            | RelExpr::TableFunction { .. } => false,
         }
     }
 
@@ -321,6 +323,15 @@ impl FederatedOptimizer {
             }
             Expr::Cast { expr, .. } => {
                 self.filter_references_table(expr, table_name)
+            }
+            Expr::Array(elements) => elements.iter().any(|e| {
+                self.filter_references_table(e, table_name)
+            }),
+            Expr::ArrayIndex(array, index) => {
+                self.filter_references_table(array, table_name)
+                    || self.filter_references_table(
+                        index, table_name,
+                    )
             }
         }
     }

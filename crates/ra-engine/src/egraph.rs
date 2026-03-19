@@ -938,6 +938,32 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
                 row_ids.into_boxed_slice(),
             )))
         }
+        RelExpr::Unnest { expr, alias, input, with_ordinality } => {
+            let expr_id = add_scalar_expr(rec, expr)?;
+            let alias_id = add_symbol(rec, alias.as_deref().unwrap_or(""));
+            let ord_id = add_bool_flag(rec, *with_ordinality);
+            if let Some(inp) = input {
+                let input_id = add_rel_expr(rec, inp)?;
+                let tag_id = add_symbol(rec, "unnest_lateral");
+                let ids = vec![tag_id, expr_id, alias_id, ord_id, input_id];
+                Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
+            } else {
+                let tag_id = add_symbol(rec, "unnest");
+                let ids = vec![tag_id, expr_id, alias_id, ord_id];
+                Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
+            }
+        }
+        RelExpr::TableFunction { name, args, input, .. } => {
+            let name_id = add_symbol(rec, name);
+            let mut ids = vec![name_id];
+            for arg in args {
+                ids.push(add_scalar_expr(rec, arg)?);
+            }
+            if let Some(inp) = input {
+                ids.push(add_rel_expr(rec, inp)?);
+            }
+            Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
+        }
     }
 }
 
@@ -1003,6 +1029,21 @@ fn add_scalar_expr(rec: &mut RecExpr<RelLang>, expr: &Expr) -> Result<Id, EGraph
                  e-graph representation"
                 .into(),
         )),
+        Expr::Array(elements) => {
+            let tag_id = add_symbol(rec, "ARRAY");
+            let mut ids = vec![tag_id];
+            for elem in elements {
+                ids.push(add_scalar_expr(rec, elem)?);
+            }
+            Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
+        }
+        Expr::ArrayIndex(array, index) => {
+            let arr_id = add_scalar_expr(rec, array)?;
+            let idx_id = add_scalar_expr(rec, index)?;
+            let tag_id = add_symbol(rec, "ARRAY_INDEX");
+            let ids = vec![tag_id, arr_id, idx_id];
+            Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
+        }
     }
 }
 
