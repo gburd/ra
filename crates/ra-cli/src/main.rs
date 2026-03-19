@@ -1,6 +1,7 @@
 //! Command-line interface for the relational algebra rule system.
 #![allow(clippy::print_stderr)]
 
+mod cache_commands;
 mod config_commands;
 mod diff_validator;
 mod display;
@@ -221,6 +222,9 @@ enum Commands {
     /// Manage configuration settings.
     #[command(subcommand)]
     Config(ConfigCommands),
+    /// Plan cache management.
+    #[command(subcommand)]
+    Cache(CacheCommands),
 }
 
 #[derive(Subcommand)]
@@ -310,6 +314,28 @@ enum ConfigCommands {
     Reset,
     /// Show the configuration file path.
     Path,
+}
+
+#[derive(Subcommand)]
+enum CacheCommands {
+    /// Show all cached plans.
+    List,
+    /// Show cache hit rate, size, and utilization.
+    Stats,
+    /// Clear cached plans (optionally scoped to a table).
+    Clear {
+        /// Clear only entries referencing this table.
+        #[arg(long)]
+        table: Option<String>,
+    },
+    /// Reoptimize stale cached plans.
+    Reoptimize {
+        /// Drift threshold percentage (default 20).
+        #[arg(long, default_value = "20")]
+        threshold_pct: f64,
+    },
+    /// Show statistics drift for cached plans.
+    Drift,
 }
 
 // ── Main ────────────────────────────────────────────────────
@@ -546,6 +572,35 @@ fn main() -> Result<()> {
             }
             ConfigCommands::Path => {
                 config_commands::cmd_config_path()
+            }
+        },
+        Commands::Cache(sub) => match sub {
+            CacheCommands::List => {
+                cache_commands::cmd_cache_list(
+                    cli.verbose,
+                    cli.quiet,
+                )
+            }
+            CacheCommands::Stats => {
+                cache_commands::cmd_cache_stats(cli.quiet)
+            }
+            CacheCommands::Clear { table } => {
+                cache_commands::cmd_cache_clear(
+                    table.as_deref(),
+                    cli.quiet,
+                )
+            }
+            CacheCommands::Reoptimize { threshold_pct } => {
+                cache_commands::cmd_cache_reoptimize(
+                    threshold_pct,
+                    cli.quiet,
+                )
+            }
+            CacheCommands::Drift => {
+                cache_commands::cmd_cache_drift(
+                    cli.verbose,
+                    cli.quiet,
+                )
             }
         },
     }

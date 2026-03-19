@@ -1,20 +1,18 @@
 [package]
-name = "ra-adaptive"
+name = "ra-cache"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Adaptive query execution with runtime reoptimization for ra"
+description = "Plan cache with LRU/LFU/adaptive eviction and statistics-driven reoptimization"
 
 [dependencies]
 ra-core = { workspace = true }
-ra-cache = { workspace = true }
 ra-engine = { workspace = true }
 ra-hardware = { workspace = true }
 ra-parser = { workspace = true }
-ra-stats = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
