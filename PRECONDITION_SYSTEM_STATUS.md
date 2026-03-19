@@ -116,35 +116,36 @@ Created comprehensive documentation:
 
 ## Remaining Work
 
-### 🔲 Task 3: FactsContext Aggregator
+### ✅ Task 3: FactsContext Aggregator
 
-**Status:** Pending
-**Location:** `/Users/gregburd/src/ra/crates/ra-engine/src/facts_context.rs` (NEW)
-**Estimated Size:** 400 lines
+**Status:** Complete (Commit c52bee2)
+**Location:** `/Users/gregburd/src/ra/crates/ra-engine/src/facts_context.rs`
+**Actual Size:** 339 lines
 
-Implement FactsContext that aggregates:
-- StatisticsProvider (from ra-stats)
+Implemented FactsContext that aggregates:
+- TableStats and ColumnStats (from ra-stats)
 - HardwareProfile (from ra-hardware)
-- SchemaInfo (new or from ra-catalog)
-- RuntimeStatsCache (new)
-- DatabaseCapabilities (new)
+- SchemaInfo (TableInfo)
+- RuntimeStatsCache (OperatorStats)
+- DatabaseCapabilities (feature registry)
 
-Wire in existing ra-stats and ra-hardware modules.
+Includes FactsContextBuilder for easy construction.
 
-### 🔲 Task 4: PreConditionEvaluator
+### ✅ Task 4: PreConditionEvaluator
 
-**Status:** Pending
-**Location:** `/Users/gregburd/src/ra/crates/ra-engine/src/evaluator.rs` (NEW)
-**Estimated Size:** 500 lines
+**Status:** Complete (Commit c52bee2)
+**Location:** `/Users/gregburd/src/ra/crates/ra-engine/src/precondition_eval.rs`
+**Actual Size:** 489 lines
 
-Implement evaluation logic for all pre-condition types:
-- Pattern matching (delegate to egg rewrite system)
-- Predicate evaluation (call registered functions)
-- Fact lookup and comparison
-- Capability checks
+Implemented evaluation logic for all pre-condition types:
+- Pattern matching (delegates to egg rewrite system)
+- Predicate evaluation (extensible function registry)
+- Fact lookup and comparison (17+ fact types)
+- Capability checks (database features)
 - Composite condition logic (AND/OR/NOT)
 
-Return EvaluationResult (Satisfied/NotSatisfied/Error).
+Returns EvaluationResult (Satisfied/NotSatisfied/Error).
+Handles optional pre-conditions gracefully.
 
 ### 🔲 Task 6: Optimizer Integration
 
@@ -175,6 +176,8 @@ Test coverage needed:
 
 ✅ **ra-core:** Compiles cleanly with no warnings
 ✅ **ra-parser:** Compiles successfully with preconditions support
+✅ **ra-engine:** Compiles cleanly with PreConditionEvaluator and FactsContext
+✅ **All tests passing:** 5 evaluator tests + 2 context tests = 7 new tests
 
 ## Next Steps (Prioritized)
 
