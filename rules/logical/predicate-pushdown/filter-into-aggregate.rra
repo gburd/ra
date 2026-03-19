@@ -1,0 +1,38 @@
+---
+id: filter-into-aggregate
+name: "Filter Transpose Aggregate"
+category: logical/predicate-pushdown
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [academic, calcite]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# Filter Transpose Aggregate
+
+## Description
+
+Transposes filters through aggregation
+
+## Relational Algebra
+
+```algebra
+σ(Agg(R)) => Agg(σ(R))
+```
+
+## Implementation
+
+```
+Implement rule transformation for calcite optimization
+```
+
+## Tests
+
+Add test cases for this rule
+
+## References
+

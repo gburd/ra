@@ -1,0 +1,31 @@
+---
+id: function-push-down
+name: "Function Push-Down"
+category: logical/predicate-pushdown
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [academic, optimization]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# Function Push-Down
+
+## Description
+
+Pushes user-defined functions to storage
+
+## Implementation
+
+Add implementation details for Function Push-Down
+
+## Tests
+
+Add test cases for this optimization
+
+## References
+
+- Paper: Function Push-Down Optimization

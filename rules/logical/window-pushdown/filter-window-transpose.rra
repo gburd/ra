@@ -1,0 +1,38 @@
+---
+id: filter-window-transpose
+name: "Filter Window Transpose"
+category: logical/window-pushdown
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [academic, calcite]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# Filter Window Transpose
+
+## Description
+
+Pushes filters through window functions
+
+## Relational Algebra
+
+```algebra
+σ(Window(R)) => Window(σ(R))
+```
+
+## Implementation
+
+```
+Implement rule transformation for calcite optimization
+```
+
+## Tests
+
+Add test cases for this rule
+
+## References
+

@@ -1,0 +1,37 @@
+---
+id: union-eliminator
+name: "UnionEliminator"
+category: logical/set-operations
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [academic, calcite]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# UnionEliminator
+
+## Description
+
+Eliminates unnecessary union
+
+## Relational Algebra
+
+```algebra
+Union(R, R) => R
+```
+
+## Implementation
+
+```
+Implement rule transformation for calcite optimization
+```
+
+## Tests
+
+Add test cases for this rule
+
+## References

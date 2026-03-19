@@ -1,0 +1,31 @@
+---
+id: stream-join-optimization
+name: "Stream Join Optimization"
+category: execution-models/streaming
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [academic, optimization]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# Stream Join Optimization
+
+## Description
+
+Optimizes joins over streaming data
+
+## Implementation
+
+Add implementation details for Stream Join Optimization
+
+## Tests
+
+Add test cases for this optimization
+
+## References
+
+- Paper: Stream Join Algorithms

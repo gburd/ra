@@ -1,0 +1,37 @@
+---
+id: sort-remove
+name: "SortRemove"
+category: logical/limit-pushdown
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [academic, calcite]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# SortRemove
+
+## Description
+
+Removes redundant sort
+
+## Relational Algebra
+
+```algebra
+Sort(already_sorted(R)) => R
+```
+
+## Implementation
+
+```
+Implement rule transformation for calcite optimization
+```
+
+## Tests
+
+Add test cases for this rule
+
+## References

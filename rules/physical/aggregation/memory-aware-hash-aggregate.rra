@@ -1,0 +1,31 @@
+---
+id: memory-aware-hash-aggregate
+name: "Memory-Aware Hash Aggregate"
+category: physical/aggregation
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [academic, optimization]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# Memory-Aware Hash Aggregate
+
+## Description
+
+Hash aggregate with memory awareness
+
+## Implementation
+
+Add implementation details for Memory-Aware Hash Aggregate
+
+## Tests
+
+Add test cases for this optimization
+
+## References
+
+- Paper: Adaptive Aggregation

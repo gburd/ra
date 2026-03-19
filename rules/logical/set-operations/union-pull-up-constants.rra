@@ -1,0 +1,38 @@
+---
+id: union-pull-up-constants
+name: "Union Pull Up Constants"
+category: logical/set-operations
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [academic, calcite]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# Union Pull Up Constants
+
+## Description
+
+Pulls up constant expressions in union
+
+## Relational Algebra
+
+```algebra
+Union(π_const(R), π_const(S))
+```
+
+## Implementation
+
+```
+Implement rule transformation for calcite optimization
+```
+
+## Tests
+
+Add test cases for this rule
+
+## References
+

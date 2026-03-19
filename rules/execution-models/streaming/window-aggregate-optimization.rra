@@ -1,0 +1,31 @@
+---
+id: window-aggregate-optimization
+name: "Window Aggregate Optimization"
+category: execution-models/streaming
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [academic, optimization]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# Window Aggregate Optimization
+
+## Description
+
+Optimizes windowed aggregates over streams
+
+## Implementation
+
+Add implementation details for Window Aggregate Optimization
+
+## Tests
+
+Add test cases for this optimization
+
+## References
+
+- Paper: Windowed Aggregation

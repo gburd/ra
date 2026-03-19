@@ -1,0 +1,31 @@
+---
+id: repartition-pushdown
+name: "Repartition Pushdown"
+category: physical/distributed
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [academic, optimization]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# Repartition Pushdown
+
+## Description
+
+Pushes repartition to earliest point
+
+## Implementation
+
+Add implementation details for Repartition Pushdown
+
+## Tests
+
+Add test cases for this optimization
+
+## References
+
+- Paper: Distributed Query Optimization

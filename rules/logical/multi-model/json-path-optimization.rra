@@ -1,0 +1,31 @@
+---
+id: json-path-optimization
+name: "JSON Path Optimization"
+category: logical/multi-model
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [academic, optimization]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# JSON Path Optimization
+
+## Description
+
+Optimizes JSON path expressions
+
+## Implementation
+
+Add implementation details for JSON Path Optimization
+
+## Tests
+
+Add test cases for this optimization
+
+## References
+
+- Paper: JSON Query Optimization

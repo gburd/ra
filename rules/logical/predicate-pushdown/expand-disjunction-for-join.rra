@@ -1,0 +1,38 @@
+---
+id: expand-disjunction-for-join
+name: "Expand Disjunction For Join"
+category: logical/predicate-pushdown
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [academic, calcite]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# Expand Disjunction For Join
+
+## Description
+
+Expands OR conditions in join predicates
+
+## Relational Algebra
+
+```algebra
+(A OR B) in join => optimization
+```
+
+## Implementation
+
+```
+Implement rule transformation for calcite optimization
+```
+
+## Tests
+
+Add test cases for this rule
+
+## References
+
