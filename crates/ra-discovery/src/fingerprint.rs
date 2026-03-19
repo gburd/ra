@@ -235,6 +235,11 @@ fn fingerprint_rel(expr: &RelExpr, out: &mut Vec<Token>) {
             }
             out.push(Token::End);
         }
+        RelExpr::RowPattern { input, .. } => {
+            out.push(Token::Filter);
+            fingerprint_rel(input, out);
+            out.push(Token::End);
+        }
     }
 }
 

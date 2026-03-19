@@ -195,6 +195,10 @@ impl FeatureSchema {
                     self.encode_expr(inp, stats, features);
                 }
             }
+            RelExpr::RowPattern { input, .. } => {
+                features[OP_TYPE_OFFSET + 2] = 1.0;
+                self.encode_expr(input, stats, features);
+            }
         }
     }
 
@@ -253,7 +257,13 @@ impl FeatureSchema {
             | Expr::Case { .. }
             | Expr::Cast { .. }
             | Expr::Array(_)
-            | Expr::ArrayIndex(_, _) => {}
+            | Expr::ArrayIndex(_, _)
+            | Expr::PatternPrev(_, _)
+            | Expr::PatternNext(_, _)
+            | Expr::PatternFirst(_, _)
+            | Expr::PatternLast(_, _)
+            | Expr::PatternClassifier
+            | Expr::PatternMatchNumber => {}
         }
     }
 }

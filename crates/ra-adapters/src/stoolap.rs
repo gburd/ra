@@ -5,6 +5,78 @@ use ra_core::{FactsProvider, SqlDialect};
 use ra_stats::types::{ColumnStats, TableStats};
 use std::collections::HashMap;
 
+/// Empty facts provider for Stoolap.
+#[derive(Debug)]
+struct StoolapFacts {
+    hardware: ra_core::CoreHardwareProfile,
+}
+
+impl StoolapFacts {
+    fn new() -> Self {
+        Self {
+            hardware: ra_core::CoreHardwareProfile {
+                cpu_cores: 8,
+                available_memory: 16 * 1024 * 1024 * 1024,
+                total_memory: 16 * 1024 * 1024 * 1024,
+                simd_width: 256,
+                has_gpu: false,
+                gpu_memory: None,
+                l1_cache_size: 32 * 1024,
+                l2_cache_size: 256 * 1024,
+                l3_cache_size: 8 * 1024 * 1024,
+            },
+        }
+    }
+}
+
+impl FactsProvider for StoolapFacts {
+    fn get_table_stats(
+        &self,
+        _table: &str,
+    ) -> Option<&ra_core::CoreTableStats> {
+        None
+    }
+    fn get_column_stats(
+        &self,
+        _table: &str,
+        _column: &str,
+    ) -> Option<&ra_core::ColumnStats> {
+        None
+    }
+    fn hardware_profile(
+        &self,
+    ) -> &ra_core::CoreHardwareProfile {
+        &self.hardware
+    }
+    fn get_schema(
+        &self,
+        _table: &str,
+    ) -> Option<&ra_core::facts::TableInfo> {
+        None
+    }
+    fn runtime_stats(
+        &self,
+        _operator_id: &str,
+    ) -> Option<&ra_core::facts::OperatorStats> {
+        None
+    }
+    fn database_name(&self) -> &str {
+        "stoolap"
+    }
+    fn supports_feature(&self, _feature: &str) -> bool {
+        false
+    }
+    fn sql_dialect(&self) -> SqlDialect {
+        SqlDialect::Generic
+    }
+    fn memory_limit(&self) -> Option<u64> {
+        None
+    }
+    fn optimizer_timeout(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(60)
+    }
+}
+
 /// Stoolap database adapter.
 ///
 /// Connects to Stoolap databases to gather statistics and schema information.
@@ -13,6 +85,7 @@ use std::collections::HashMap;
 pub struct StoolapAdapter {
     connection_string: Option<String>,
     connected: bool,
+    facts: StoolapFacts,
 }
 
 impl StoolapAdapter {
@@ -22,6 +95,7 @@ impl StoolapAdapter {
         Self {
             connection_string: None,
             connected: false,
+            facts: StoolapFacts::new(),
         }
     }
 }
@@ -113,7 +187,6 @@ impl DatabaseAdapter for StoolapAdapter {
     }
 
     fn as_facts_provider(&self) -> &dyn FactsProvider {
-        // TODO: Implement FactsProvider trait for StoolapAdapter
-        unimplemented!("StoolapAdapter as FactsProvider not yet implemented")
+        &self.facts
     }
 }

@@ -370,6 +370,9 @@ fn estimate_cost(plan: &RelExpr) -> f64 {
             Some(inp) => estimate_cost(inp) + 100.0,
             None => 100.0,
         },
+        RelExpr::RowPattern { input, .. } => {
+            estimate_cost(input) * 5.0
+        }
     }
 }
 

@@ -22,6 +22,7 @@ pub mod facts;
 pub mod federated;
 pub mod pattern;
 pub mod precondition;
+pub mod row_pattern;
 pub mod properties;
 pub mod rule;
 pub mod statistics;
@@ -40,6 +41,7 @@ pub use facts::{
 pub use federated::*;
 pub use pattern::*;
 pub use precondition::*;
+pub use row_pattern::*;
 pub use properties::*;
 pub use rule::*;
 pub use statistics::*;

@@ -149,6 +149,11 @@ fn estimate_heuristic(
             Some(inp) => estimate_heuristic(inp, stats),
             None => 100.0,
         },
+        RelExpr::RowPattern { input, .. } => {
+            let input_rows = estimate_heuristic(input, stats);
+            // Pattern matching typically reduces output rows
+            (input_rows * 0.1).max(1.0)
+        }
     }
 }
 
@@ -308,6 +313,9 @@ fn collect_tables_recursive(
             if let Some(inp) = input {
                 collect_tables_recursive(inp, provider, map);
             }
+        }
+        RelExpr::RowPattern { input, .. } => {
+            collect_tables_recursive(input, provider, map);
         }
     }
 }

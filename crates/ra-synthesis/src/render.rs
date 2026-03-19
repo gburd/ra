@@ -291,6 +291,13 @@ fn render_expr(expr: &RelExpr, ctx: &mut RenderContext) {
                 arg_strs.join(", ")
             );
         }
+        RelExpr::RowPattern { input, pattern, .. } => {
+            render_expr(input, ctx);
+            ctx.from = format!(
+                "{} MATCH_RECOGNIZE(PATTERN ({pattern}))",
+                ctx.from
+            );
+        }
     }
 }
 
@@ -341,7 +348,27 @@ fn render_scalar(expr: &Expr) -> String {
             format!("ARRAY[{}]", elems.join(", "))
         }
         Expr::ArrayIndex(array, index) => {
-            format!("{}[{}]", render_scalar(array), render_scalar(index))
+            format!(
+                "{}[{}]",
+                render_scalar(array),
+                render_scalar(index)
+            )
+        }
+        Expr::PatternPrev(inner, offset) => {
+            format!("PREV({}, {offset})", render_scalar(inner))
+        }
+        Expr::PatternNext(inner, offset) => {
+            format!("NEXT({}, {offset})", render_scalar(inner))
+        }
+        Expr::PatternFirst(inner, var) => {
+            format!("FIRST({var}.{})", render_scalar(inner))
+        }
+        Expr::PatternLast(inner, var) => {
+            format!("LAST({var}.{})", render_scalar(inner))
+        }
+        Expr::PatternClassifier => "CLASSIFIER()".to_owned(),
+        Expr::PatternMatchNumber => {
+            "MATCH_NUMBER()".to_owned()
         }
     }
 }
