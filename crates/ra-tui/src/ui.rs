@@ -34,7 +34,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     render_keybindings_bar(frame, app, fl.keybindings_bar);
 
     if app.show_help {
-        render_help_overlay(frame);
+        render_help_overlay(frame, app);
     }
 }
 
@@ -280,12 +280,14 @@ fn render_keybindings_bar(
 }
 
 /// Help overlay rendered on top of all panels.
-fn render_help_overlay(frame: &mut Frame) {
+fn render_help_overlay(frame: &mut Frame, app: &App) {
+    use crate::panels::sql_editor::KeybindingMode;
+
     let area =
         layout::centered_rect(60, 70, frame.area());
     frame.render_widget(Clear, area);
 
-    let help_text = vec![
+    let mut lines = vec![
         Line::from(Span::styled(
             "Keyboard Shortcuts",
             Style::default()
@@ -296,7 +298,7 @@ fn render_help_overlay(frame: &mut Frame) {
         help_line("q / Ctrl-C", "Quit"),
         help_line("Space", "Toggle play/pause"),
         help_line("Right / l", "Next optimization step"),
-        help_line("Left / h", "Previous optimization step"),
+        help_line("Left / h", "Previous step"),
         help_line("Home", "Jump to first step"),
         help_line("End", "Jump to last step"),
         help_line("+ / =", "Increase playback speed"),
@@ -305,18 +307,54 @@ fn render_help_overlay(frame: &mut Frame) {
         help_line("Shift+Tab", "Focus previous panel"),
         help_line("j / Down", "Scroll down"),
         help_line("k / Up", "Scroll up"),
-        help_line("L", "Toggle layout (4-panel/editor)"),
+        help_line("L", "Toggle layout"),
         help_line("E", "Toggle SQL editor mode"),
         help_line("Esc", "Exit edit mode"),
         help_line("?", "Toggle this help"),
-        Line::raw(""),
-        Line::from(Span::styled(
-            "Press ? to close",
-            Style::default().fg(Color::DarkGray),
-        )),
     ];
 
-    let paragraph = Paragraph::new(help_text)
+    match app.sql_editor.keybinding_mode() {
+        KeybindingMode::Vi => {
+            lines.push(Line::raw(""));
+            lines.push(Line::from(Span::styled(
+                "Vi Keys (edit mode)",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )));
+            lines.push(help_line("i", "Insert mode"));
+            lines.push(help_line("a", "Append after cursor"));
+            lines.push(help_line(
+                "h/j/k/l",
+                "Move left/down/up/right",
+            ));
+            lines.push(help_line("0 / $", "Line start/end"));
+            lines.push(help_line("dd", "Delete line"));
+            lines.push(help_line("p", "Paste line"));
+            lines.push(help_line("x", "Delete char"));
+            lines.push(help_line("Esc", "Command mode"));
+        }
+        KeybindingMode::Nano => {
+            lines.push(Line::raw(""));
+            lines.push(Line::from(Span::styled(
+                "Nano Keys (edit mode)",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )));
+            lines.push(help_line("Ctrl-K", "Cut line"));
+            lines.push(help_line("Ctrl-U", "Paste line"));
+        }
+        KeybindingMode::Normal => {}
+    }
+
+    lines.push(Line::raw(""));
+    lines.push(Line::from(Span::styled(
+        "Press ? to close",
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    let paragraph = Paragraph::new(lines)
         .block(
             Block::default()
                 .title(" Help ")
