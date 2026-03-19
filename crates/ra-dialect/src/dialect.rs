@@ -213,6 +213,25 @@ impl Dialect {
             Self::MySql | Self::Sqlite | Self::MsSql => false,
         }
     }
+
+    /// Whether this dialect supports the `::` double-colon
+    /// cast syntax (e.g. `value::int`).
+    #[must_use]
+    pub fn supports_double_colon_cast(self) -> bool {
+        matches!(self, Self::PostgreSql | Self::DuckDb)
+    }
+
+    /// Whether this dialect supports the RETURNING clause
+    /// in INSERT/UPDATE/DELETE.
+    #[must_use]
+    pub fn supports_returning(self) -> bool {
+        match self {
+            Self::PostgreSql | Self::DuckDb => true,
+            Self::MySql | Self::MsSql => false,
+            Self::Sqlite => true, // since 3.35
+            Self::Oracle => true, // since 12c
+        }
+    }
 }
 
 /// Feature support level for a dialect.
@@ -515,5 +534,29 @@ mod tests {
         assert!(Dialect::PostgreSql.supports_nulls_first_last());
         assert!(!Dialect::MySql.supports_nulls_first_last());
         assert!(!Dialect::MsSql.supports_nulls_first_last());
+    }
+
+    #[test]
+    fn double_colon_cast_support() {
+        assert!(
+            Dialect::PostgreSql.supports_double_colon_cast()
+        );
+        assert!(
+            Dialect::DuckDb.supports_double_colon_cast()
+        );
+        assert!(
+            !Dialect::MySql.supports_double_colon_cast()
+        );
+        assert!(
+            !Dialect::MsSql.supports_double_colon_cast()
+        );
+    }
+
+    #[test]
+    fn returning_support() {
+        assert!(Dialect::PostgreSql.supports_returning());
+        assert!(!Dialect::MySql.supports_returning());
+        assert!(Dialect::Sqlite.supports_returning());
+        assert!(Dialect::Oracle.supports_returning());
     }
 }

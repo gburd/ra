@@ -590,10 +590,15 @@ fn contains_joins(expr: &RelExpr) -> bool {
                 || contains_joins(recursive_case)
                 || contains_joins(body)
         }
-        RelExpr::Scan { .. } | RelExpr::Values { .. } => false,
+        RelExpr::Scan { .. }
+        | RelExpr::Values { .. }
+        | RelExpr::MultiUnnest { .. } => false,
         RelExpr::Unnest { input, .. }
         | RelExpr::TableFunction { input, .. } => {
             input.as_ref().is_some_and(|i| contains_joins(i))
+        }
+        RelExpr::RowPattern { input, .. } => {
+            contains_joins(input)
         }
     }
 }
@@ -766,12 +771,16 @@ fn collect_tables_rec(expr: &RelExpr, out: &mut std::collections::HashSet<String
             collect_tables_rec(recursive_case, out);
             collect_tables_rec(body, out);
         }
-        RelExpr::Values { .. } => {}
+        RelExpr::Values { .. }
+        | RelExpr::MultiUnnest { .. } => {}
         RelExpr::Unnest { input, .. }
         | RelExpr::TableFunction { input, .. } => {
             if let Some(inp) = input {
                 collect_tables_rec(inp, out);
             }
+        }
+        RelExpr::RowPattern { input, .. } => {
+            collect_tables_rec(input, out);
         }
     }
 }

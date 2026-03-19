@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result, bail};
 use colored::Colorize;
-use ra_core::{FactValue, PreCondition, PreConditionBuilder};
+use ra_core::{FactValue, PreCondition};
 use ra_parser::{RuleFile, parse_rule_file};
 use serde_yaml;
 use std::fs;

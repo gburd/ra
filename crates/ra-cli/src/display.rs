@@ -279,6 +279,11 @@ fn format_plan_tree_impl(expr: &RelExpr, buf: &mut String, prefix: &str, is_last
             buf.push_str(connector);
             buf.push_str(&format!("Values({} row(s))\n", rows.len()));
         }
+        other => {
+            buf.push_str(prefix);
+            buf.push_str(connector);
+            buf.push_str(&format!("{:?}\n", std::mem::discriminant(other)));
+        }
     }
 }
 
@@ -329,6 +334,7 @@ fn format_expr(expr: &Expr) -> String {
         Expr::Cast { expr, target_type } => {
             format!("CAST({} AS {target_type})", format_expr(expr))
         }
+        other => format!("{other:?}"),
     }
 }
 

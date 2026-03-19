@@ -285,6 +285,10 @@ fn collect_tables_recursive(
             collect_tables_recursive(recursive_case, out);
             collect_tables_recursive(body, out);
         }
-        ra_core::algebra::RelExpr::Values { .. } => {}
+        ra_core::algebra::RelExpr::Values { .. }
+        | ra_core::algebra::RelExpr::Unnest { .. }
+        | ra_core::algebra::RelExpr::MultiUnnest { .. }
+        | ra_core::algebra::RelExpr::TableFunction { .. }
+        | ra_core::algebra::RelExpr::RowPattern { .. } => {}
     }
 }

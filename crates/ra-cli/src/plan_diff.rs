@@ -184,6 +184,16 @@ fn operator_label(expr: &RelExpr) -> String {
         RelExpr::RecursiveCTE { name, .. } => {
             format!("RecursiveCTE({name})")
         }
+        RelExpr::Unnest { alias, .. } => {
+            format!("Unnest({})", alias.as_deref().unwrap_or("?"))
+        }
+        RelExpr::MultiUnnest { .. } => "MultiUnnest".to_owned(),
+        RelExpr::TableFunction { name, .. } => {
+            format!("TableFunction({name})")
+        }
+        RelExpr::RowPattern { .. } => {
+            "MatchRecognize".to_owned()
+        }
     }
 }
 

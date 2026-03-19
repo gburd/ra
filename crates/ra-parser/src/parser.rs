@@ -5,7 +5,7 @@
 
 use pulldown_cmark::{Event, Options, Parser as MdParser, Tag};
 use ra_core::PreCondition;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::extractor::{CodeBlock, extract_code_blocks};
@@ -59,7 +59,7 @@ pub struct RuleFile {
 }
 
 /// Metadata extracted from YAML frontmatter.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RuleMetadata {
     /// Unique rule identifier (e.g. `filter-through-join`).
     pub id: String,

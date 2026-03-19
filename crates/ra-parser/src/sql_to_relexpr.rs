@@ -53,6 +53,38 @@ pub enum SqlConversionError {
     InvalidRecursiveCTE(String),
 }
 
+/// Parse multiple SQL statements and convert each to a `RelExpr`.
+///
+/// Splits on semicolons. Non-SELECT statements are returned
+/// as errors for the individual entry.
+///
+/// # Errors
+///
+/// Returns error if SQL parsing fails entirely.
+pub fn sql_to_relexprs(
+    sql: &str,
+) -> Result<Vec<RelExpr>, SqlConversionError> {
+    let dialect = GenericDialect {};
+    let statements = Parser::parse_sql(&dialect, sql)
+        .map_err(|e| SqlConversionError::ParseError(e.to_string()))?;
+
+    if statements.is_empty() {
+        return Err(SqlConversionError::InvalidSql(
+            "no SQL statement found".to_owned(),
+        ));
+    }
+
+    statements
+        .iter()
+        .map(|stmt| match stmt {
+            Statement::Query(query) => convert_query(query),
+            _ => Err(SqlConversionError::UnsupportedFeature(
+                "only SELECT queries are supported".to_owned(),
+            )),
+        })
+        .collect()
+}
+
 /// Parse SQL and convert to RelExpr.
 ///
 /// # Errors

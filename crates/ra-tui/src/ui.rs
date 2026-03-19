@@ -281,7 +281,7 @@ fn render_keybindings_bar(
 
 /// Help overlay rendered on top of all panels.
 fn render_help_overlay(frame: &mut Frame, app: &App) {
-    use crate::panels::sql_editor::KeybindingMode;
+    use ra_config::EditorMode as KeybindingMode;
 
     let area =
         layout::centered_rect(60, 70, frame.area());
@@ -313,7 +313,7 @@ fn render_help_overlay(frame: &mut Frame, app: &App) {
         help_line("?", "Toggle this help"),
     ];
 
-    match app.sql_editor.keybinding_mode() {
+    match app.sql_editor.keybinding() {
         KeybindingMode::Vi => {
             lines.push(Line::raw(""));
             lines.push(Line::from(Span::styled(

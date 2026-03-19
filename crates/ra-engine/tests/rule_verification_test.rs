@@ -70,12 +70,16 @@ fn collect_tables_rec(expr: &RelExpr, out: &mut Vec<String>) {
             collect_tables_rec(recursive_case, out);
             collect_tables_rec(body, out);
         }
-        RelExpr::Values { .. } => {}
+        RelExpr::Values { .. }
+        | RelExpr::MultiUnnest { .. } => {}
         RelExpr::Unnest { input, .. }
         | RelExpr::TableFunction { input, .. } => {
             if let Some(inp) = input {
                 collect_tables_rec(inp, out);
             }
+        }
+        RelExpr::RowPattern { input, .. } => {
+            collect_tables_rec(input, out);
         }
     }
 }
@@ -114,6 +118,8 @@ fn depth(expr: &RelExpr) -> usize {
             Some(inp) => 1 + depth(inp),
             None => 1,
         },
+        RelExpr::MultiUnnest { .. } => 1,
+        RelExpr::RowPattern { input, .. } => 1 + depth(input),
     }
 }
 

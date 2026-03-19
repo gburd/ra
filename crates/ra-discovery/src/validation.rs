@@ -203,6 +203,7 @@ mod tests {
                 category: RuleCategory::Logical,
                 databases: vec![],
                 priority: 100,
+                preconditions: vec![],
             },
             match_pattern: StructuralPattern {
                 root: Token::Filter,

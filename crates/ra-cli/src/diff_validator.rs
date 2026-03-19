@@ -151,7 +151,11 @@ fn compare_node(
         | RelExpr::RecursiveCTE { body, .. } => {
             compare_node(body, db, agreements, disagreements);
         }
-        RelExpr::Values { .. } => {}
+        RelExpr::Values { .. }
+        | RelExpr::Unnest { .. }
+        | RelExpr::MultiUnnest { .. }
+        | RelExpr::TableFunction { .. }
+        | RelExpr::RowPattern { .. } => {}
     }
 }
 
