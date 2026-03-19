@@ -18,7 +18,9 @@ use ratatui::Terminal;
 
 use crate::event::{Action, EventHandler, TuiEvent, key_action};
 use crate::layout::LayoutMode;
-use crate::panels::sql_editor::{EditorMode, SqlEditor};
+use crate::panels::sql_editor::{
+    EditorMode, KeybindingMode, SqlEditor, ViSubMode,
+};
 use crate::timeline::Timeline;
 use crate::ui;
 
@@ -55,7 +57,9 @@ impl Panel {
                 Self::Stats => Self::Plan,
                 Self::Plan => Self::Evolution,
                 Self::Evolution => Self::Feedback,
-                Self::Feedback | Self::SqlEditor => Self::Stats,
+                Self::Feedback | Self::SqlEditor => {
+                    Self::Stats
+                }
             },
             LayoutMode::Editor => match self {
                 Self::SqlEditor => Self::Plan,
@@ -71,7 +75,9 @@ impl Panel {
     fn prev(self, layout: LayoutMode) -> Self {
         match layout {
             LayoutMode::Classic => match self {
-                Self::Stats | Self::SqlEditor => Self::Feedback,
+                Self::Stats | Self::SqlEditor => {
+                    Self::Feedback
+                }
                 Self::Plan => Self::Stats,
                 Self::Evolution => Self::Plan,
                 Self::Feedback => Self::Evolution,
@@ -80,7 +86,9 @@ impl Panel {
                 Self::SqlEditor => Self::Feedback,
                 Self::Plan => Self::SqlEditor,
                 Self::Stats => Self::Plan,
-                Self::Feedback | Self::Evolution => Self::Stats,
+                Self::Feedback | Self::Evolution => {
+                    Self::Stats
+                }
             },
         }
     }
@@ -127,7 +135,9 @@ impl App {
     /// # Errors
     ///
     /// Returns an error if the timeline is empty.
-    pub fn new(timeline: Timeline) -> Result<Self, AppError> {
+    pub fn new(
+        timeline: Timeline,
+    ) -> Result<Self, AppError> {
         if timeline.is_empty() {
             return Err(AppError::EmptyTimeline);
         }
@@ -137,6 +147,42 @@ impl App {
             current_step: 0,
             playing: false,
             speed_index: 2, // 1x
+            focused: Panel::Plan,
+            scroll_offset: 0,
+            show_help: false,
+            should_quit: false,
+            layout_mode: LayoutMode::Classic,
+            sql_editor,
+            last_advance: Instant::now(),
+        })
+    }
+
+    /// Create a new app with config-driven keybinding mode.
+    ///
+    /// Loads editor mode from `config.editor.mode` and applies
+    /// it to the SQL editor.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the timeline is empty.
+    pub fn with_config(
+        timeline: Timeline,
+        config: &ra_config::RaConfig,
+    ) -> Result<Self, AppError> {
+        if timeline.is_empty() {
+            return Err(AppError::EmptyTimeline);
+        }
+        let kb_mode: KeybindingMode =
+            config.editor.mode.into();
+        let sql_editor = SqlEditor::with_keybinding_mode(
+            &timeline.query,
+            kb_mode,
+        );
+        Ok(Self {
+            timeline,
+            current_step: 0,
+            playing: false,
+            speed_index: 2,
             focused: Panel::Plan,
             scroll_offset: 0,
             show_help: false,
@@ -160,7 +206,6 @@ impl App {
 
     /// Process an action from the event handler.
     pub fn handle_action(&mut self, action: Action) {
-        // In edit mode, most keys go to the editor
         if self.sql_editor.mode() == EditorMode::Edit {
             match action {
                 Action::ToggleEditor => {
@@ -261,10 +306,11 @@ impl App {
         }
     }
 
-    /// Handle auto-play tick. Returns true if a step was advanced.
+    /// Handle auto-play tick.
     fn tick(&mut self) -> bool {
         if self.playing
-            && self.last_advance.elapsed() >= self.tick_duration()
+            && self.last_advance.elapsed()
+                >= self.tick_duration()
         {
             self.step_forward();
             self.last_advance = Instant::now();
@@ -273,56 +319,236 @@ impl App {
         false
     }
 
-    /// Handle a raw key event, routing to the editor if in edit
-    /// mode or to the normal action handler otherwise.
+    /// Handle a raw key event, routing based on keybinding
+    /// mode and editor state.
     fn handle_key(
+        &mut self,
+        key: &crossterm::event::KeyEvent,
+    ) {
+        if self.sql_editor.mode() == EditorMode::Edit {
+            match self.sql_editor.keybinding_mode() {
+                KeybindingMode::Vi => {
+                    self.handle_key_vi_edit(key);
+                }
+                KeybindingMode::Nano => {
+                    self.handle_key_nano_edit(key);
+                }
+                KeybindingMode::Normal => {
+                    self.handle_key_normal_edit(key);
+                }
+            }
+        } else {
+            let action = key_action(key);
+            self.handle_action(action);
+        }
+    }
+
+    /// Key handling for Normal keybindings in edit mode.
+    fn handle_key_normal_edit(
+        &mut self,
+        key: &crossterm::event::KeyEvent,
+    ) {
+        use crossterm::event::{KeyCode, KeyModifiers};
+        match (key.modifiers, key.code) {
+            (_, KeyCode::Esc) => {
+                self.sql_editor
+                    .set_mode(EditorMode::View);
+            }
+            (_, KeyCode::Up) => self.sql_editor.move_up(),
+            (_, KeyCode::Down) => {
+                self.sql_editor.move_down();
+            }
+            (_, KeyCode::Left) => {
+                self.sql_editor.move_left();
+            }
+            (_, KeyCode::Right) => {
+                self.sql_editor.move_right();
+            }
+            (_, KeyCode::Home) => {
+                self.sql_editor.move_home();
+            }
+            (_, KeyCode::End) => {
+                self.sql_editor.move_end();
+            }
+            (_, KeyCode::Backspace) => {
+                self.sql_editor.backspace();
+            }
+            (_, KeyCode::Delete) => {
+                self.sql_editor.delete_char();
+            }
+            (_, KeyCode::Enter) => {
+                self.sql_editor.insert_char('\n');
+            }
+            (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
+                self.should_quit = true;
+            }
+            (_, KeyCode::Char(ch)) => {
+                self.sql_editor.insert_char(ch);
+            }
+            _ => {}
+        }
+    }
+
+    /// Key handling for Vi keybindings in edit mode.
+    fn handle_key_vi_edit(
         &mut self,
         key: &crossterm::event::KeyEvent,
     ) {
         use crossterm::event::{KeyCode, KeyModifiers};
 
-        if self.sql_editor.mode() == EditorMode::Edit {
-            match (key.modifiers, key.code) {
-                (_, KeyCode::Esc) => {
-                    self.sql_editor
-                        .set_mode(EditorMode::View);
-                }
-                (_, KeyCode::Up) => self.sql_editor.move_up(),
-                (_, KeyCode::Down) => {
-                    self.sql_editor.move_down();
-                }
-                (_, KeyCode::Left) => {
-                    self.sql_editor.move_left();
-                }
-                (_, KeyCode::Right) => {
-                    self.sql_editor.move_right();
-                }
-                (_, KeyCode::Home) => {
-                    self.sql_editor.move_home();
-                }
-                (_, KeyCode::End) => {
-                    self.sql_editor.move_end();
-                }
-                (_, KeyCode::Backspace) => {
-                    self.sql_editor.backspace();
-                }
-                (_, KeyCode::Delete) => {
-                    self.sql_editor.delete_char();
-                }
-                (_, KeyCode::Enter) => {
-                    self.sql_editor.insert_char('\n');
-                }
-                (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
-                    self.should_quit = true;
-                }
-                (_, KeyCode::Char(ch)) => {
-                    self.sql_editor.insert_char(ch);
-                }
-                _ => {}
+        if self.sql_editor.vi_mode() == ViSubMode::Insert {
+            self.handle_key_vi_insert(key);
+            return;
+        }
+
+        // Vi command mode
+        match (key.modifiers, key.code) {
+            (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
+                self.should_quit = true;
             }
-        } else {
-            let action = key_action(key);
-            self.handle_action(action);
+            (_, KeyCode::Esc) => {
+                self.sql_editor
+                    .set_mode(EditorMode::View);
+            }
+            (_, KeyCode::Char('h') | KeyCode::Left) => {
+                self.sql_editor.vi_cancel_pending();
+                self.sql_editor.move_left();
+            }
+            (_, KeyCode::Char('j') | KeyCode::Down) => {
+                self.sql_editor.vi_cancel_pending();
+                self.sql_editor.move_down();
+            }
+            (_, KeyCode::Char('k') | KeyCode::Up) => {
+                self.sql_editor.vi_cancel_pending();
+                self.sql_editor.move_up();
+            }
+            (_, KeyCode::Char('l') | KeyCode::Right) => {
+                self.sql_editor.vi_cancel_pending();
+                self.sql_editor.move_right();
+            }
+            (_, KeyCode::Char('0') | KeyCode::Home) => {
+                self.sql_editor.vi_cancel_pending();
+                self.sql_editor.move_home();
+            }
+            (_, KeyCode::Char('$') | KeyCode::End) => {
+                self.sql_editor.vi_cancel_pending();
+                self.sql_editor.move_end();
+            }
+            (_, KeyCode::Char('i')) => {
+                self.sql_editor.vi_cancel_pending();
+                self.sql_editor.vi_enter_insert();
+            }
+            (_, KeyCode::Char('a')) => {
+                self.sql_editor.vi_cancel_pending();
+                self.sql_editor.vi_enter_append();
+            }
+            (_, KeyCode::Char('d')) => {
+                self.sql_editor.vi_press_d();
+            }
+            (_, KeyCode::Char('p')) => {
+                self.sql_editor.vi_cancel_pending();
+                self.sql_editor.paste_line();
+            }
+            (_, KeyCode::Char('x')) => {
+                self.sql_editor.vi_cancel_pending();
+                self.sql_editor.delete_char();
+            }
+            _ => {
+                self.sql_editor.vi_cancel_pending();
+            }
+        }
+    }
+
+    /// Key handling for Vi insert sub-mode.
+    fn handle_key_vi_insert(
+        &mut self,
+        key: &crossterm::event::KeyEvent,
+    ) {
+        use crossterm::event::{KeyCode, KeyModifiers};
+        match (key.modifiers, key.code) {
+            (_, KeyCode::Esc) => {
+                self.sql_editor.vi_escape();
+            }
+            (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
+                self.should_quit = true;
+            }
+            (_, KeyCode::Up) => self.sql_editor.move_up(),
+            (_, KeyCode::Down) => {
+                self.sql_editor.move_down();
+            }
+            (_, KeyCode::Left) => {
+                self.sql_editor.move_left();
+            }
+            (_, KeyCode::Right) => {
+                self.sql_editor.move_right();
+            }
+            (_, KeyCode::Backspace) => {
+                self.sql_editor.backspace();
+            }
+            (_, KeyCode::Delete) => {
+                self.sql_editor.delete_char();
+            }
+            (_, KeyCode::Enter) => {
+                self.sql_editor.insert_char('\n');
+            }
+            (_, KeyCode::Char(ch)) => {
+                self.sql_editor.insert_char(ch);
+            }
+            _ => {}
+        }
+    }
+
+    /// Key handling for Nano keybindings in edit mode.
+    fn handle_key_nano_edit(
+        &mut self,
+        key: &crossterm::event::KeyEvent,
+    ) {
+        use crossterm::event::{KeyCode, KeyModifiers};
+        match (key.modifiers, key.code) {
+            (_, KeyCode::Esc) => {
+                self.sql_editor
+                    .set_mode(EditorMode::View);
+            }
+            (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
+                self.should_quit = true;
+            }
+            // Nano Ctrl-K: cut line
+            (KeyModifiers::CONTROL, KeyCode::Char('k')) => {
+                self.sql_editor.delete_line();
+            }
+            // Nano Ctrl-U: uncut (paste) line
+            (KeyModifiers::CONTROL, KeyCode::Char('u')) => {
+                self.sql_editor.paste_line();
+            }
+            (_, KeyCode::Up) => self.sql_editor.move_up(),
+            (_, KeyCode::Down) => {
+                self.sql_editor.move_down();
+            }
+            (_, KeyCode::Left) => {
+                self.sql_editor.move_left();
+            }
+            (_, KeyCode::Right) => {
+                self.sql_editor.move_right();
+            }
+            (_, KeyCode::Home) => {
+                self.sql_editor.move_home();
+            }
+            (_, KeyCode::End) => {
+                self.sql_editor.move_end();
+            }
+            (_, KeyCode::Backspace) => {
+                self.sql_editor.backspace();
+            }
+            (_, KeyCode::Delete) => {
+                self.sql_editor.delete_char();
+            }
+            (_, KeyCode::Enter) => {
+                self.sql_editor.insert_char('\n');
+            }
+            (_, KeyCode::Char(ch)) => {
+                self.sql_editor.insert_char(ch);
+            }
+            _ => {}
         }
     }
 
@@ -344,7 +570,8 @@ impl App {
             EventHandler::new(Duration::from_millis(50));
 
         loop {
-            terminal.draw(|frame| ui::render(frame, self))?;
+            terminal
+                .draw(|frame| ui::render(frame, self))?;
 
             match events.next() {
                 Ok(TuiEvent::Key(key)) => {
@@ -374,7 +601,7 @@ impl App {
     }
 
     /// Run in headless mode: advance through all steps and return
-    /// the final snapshot's cost. Useful for automated testing.
+    /// the final snapshot's cost.
     ///
     /// # Errors
     ///
