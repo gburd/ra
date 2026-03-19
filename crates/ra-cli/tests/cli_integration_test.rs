@@ -469,7 +469,61 @@ fn test_nonexistent_path_fails() {
         .stderr(predicate::str::contains("not found"));
 }
 
-// ── optimize command (stub) ─────────────────────────────────
+// ── explain --stdin ──────────────────────────────────────────
+
+#[test]
+fn explain_stdin_reads_query_from_pipe() {
+    ra_cli()
+        .args(["explain", "--stdin"])
+        .write_stdin("SELECT * FROM orders WHERE amount > 100")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Plan"));
+}
+
+#[test]
+fn explain_stdin_empty_input_fails() {
+    ra_cli()
+        .args(["explain", "--stdin"])
+        .write_stdin("")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no SQL received on stdin"));
+}
+
+#[test]
+fn explain_stdin_whitespace_only_fails() {
+    ra_cli()
+        .args(["explain", "--stdin"])
+        .write_stdin("   \n  \n  ")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no SQL received on stdin"));
+}
+
+// ── optimize --stdin ────────────────────────────────────────
+
+#[test]
+fn optimize_stdin_reads_query_from_pipe() {
+    ra_cli()
+        .args(["optimize", "--stdin"])
+        .write_stdin("SELECT * FROM users WHERE active = true")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Query Optimization"));
+}
+
+#[test]
+fn optimize_stdin_empty_input_fails() {
+    ra_cli()
+        .args(["optimize", "--stdin"])
+        .write_stdin("")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no SQL received on stdin"));
+}
+
+// ── optimize command (positional arg) ───────────────────────
 
 #[test]
 fn optimize_stub_succeeds_and_shows_input() {
