@@ -918,19 +918,19 @@ fn convert_projection(
                 }
             }
             SelectItem::QualifiedWildcard(obj_name, _) => {
-                return Err(SqlConversionError::UnsupportedFeature(
-                    format!(
-                        "qualified wildcard {obj_name}.* \
-                         not yet supported"
-                    ),
-                ))
+                let table = object_name_to_string(obj_name);
+                columns.push(ProjectionColumn {
+                    expr: Expr::Column(ColumnRef::qualified(
+                        &table, "*",
+                    )),
+                    alias: None,
+                });
             }
             SelectItem::Wildcard(_) => {
-                return Err(SqlConversionError::UnsupportedFeature(
-                    "wildcard in multi-column projection \
-                     not yet supported"
-                        .to_owned(),
-                ))
+                columns.push(ProjectionColumn {
+                    expr: Expr::Column(ColumnRef::new("*")),
+                    alias: None,
+                });
             }
         }
     }
@@ -979,12 +979,22 @@ fn convert_expr(expr: &SqlExpr) -> Result<Expr, SqlConversionError> {
         }
         SqlExpr::Value(val) => convert_value(val),
         SqlExpr::BinaryOp { left, op, right } => {
-            let bin_op = convert_binary_op(op)?;
-            Ok(Expr::BinOp {
-                op: bin_op,
-                left: Box::new(convert_expr(left)?),
-                right: Box::new(convert_expr(right)?),
-            })
+            match convert_binary_op(op) {
+                Ok(bin_op) => Ok(Expr::BinOp {
+                    op: bin_op,
+                    left: Box::new(convert_expr(left)?),
+                    right: Box::new(convert_expr(right)?),
+                }),
+                Err(_) => {
+                    // Represent unsupported operators as functions
+                    let l = convert_expr(left)?;
+                    let r = convert_expr(right)?;
+                    Ok(Expr::Function {
+                        name: format!("OP_{op:?}"),
+                        args: vec![l, r],
+                    })
+                }
+            }
         }
         SqlExpr::UnaryOp { op, expr } => {
             let unary_op = convert_unary_op(op)?;
@@ -1034,6 +1044,82 @@ fn convert_expr(expr: &SqlExpr) -> Result<Expr, SqlConversionError> {
             Ok(Expr::Function {
                 name: "EXISTS".to_owned(),
                 args: vec![],
+            })
+        }
+        SqlExpr::InList {
+            expr, list, negated,
+        } => {
+            let left = convert_expr(expr)?;
+            let list_exprs: Result<Vec<_>, _> =
+                list.iter().map(convert_expr).collect();
+            let mut args = vec![left];
+            args.extend(list_exprs?);
+            let func = if *negated {
+                "NOT_IN_LIST"
+            } else {
+                "IN_LIST"
+            };
+            Ok(Expr::Function {
+                name: func.to_owned(),
+                args,
+            })
+        }
+        SqlExpr::Like {
+            expr,
+            pattern,
+            negated,
+            ..
+        } => {
+            let left = convert_expr(expr)?;
+            let right = convert_expr(pattern)?;
+            let like_expr = Expr::Function {
+                name: "LIKE".to_owned(),
+                args: vec![left, right],
+            };
+            if *negated {
+                Ok(Expr::UnaryOp {
+                    op: ra_core::expr::UnaryOp::Not,
+                    operand: Box::new(like_expr),
+                })
+            } else {
+                Ok(like_expr)
+            }
+        }
+        SqlExpr::ILike {
+            expr,
+            pattern,
+            negated,
+            ..
+        } => {
+            let left = convert_expr(expr)?;
+            let right = convert_expr(pattern)?;
+            let ilike_expr = Expr::Function {
+                name: "ILIKE".to_owned(),
+                args: vec![left, right],
+            };
+            if *negated {
+                Ok(Expr::UnaryOp {
+                    op: ra_core::expr::UnaryOp::Not,
+                    operand: Box::new(ilike_expr),
+                })
+            } else {
+                Ok(ilike_expr)
+            }
+        }
+        SqlExpr::Interval(interval) => {
+            let val = convert_expr(&interval.value)?;
+            Ok(Expr::Function {
+                name: "INTERVAL".to_owned(),
+                args: vec![val],
+            })
+        }
+        SqlExpr::TypedString { data_type, value } => {
+            // DATE '2024-01-01', TIMESTAMP '...', etc.
+            Ok(Expr::Cast {
+                expr: Box::new(Expr::Const(Const::String(
+                    value.clone(),
+                ))),
+                target_type: data_type.to_string(),
             })
         }
         SqlExpr::Between {
@@ -1116,6 +1202,10 @@ fn convert_value(val: &Value) -> Result<Expr, SqlConversionError> {
         }
         Value::Boolean(b) => Ok(Expr::Const(Const::Bool(*b))),
         Value::Null => Ok(Expr::Const(Const::Null)),
+        Value::Placeholder(p) => {
+            // Bind parameter like ? or $1
+            Ok(Expr::Const(Const::String(p.clone())))
+        }
         _ => Err(SqlConversionError::UnsupportedFeature(format!(
             "value type not supported: {val:?}"
         ))),
