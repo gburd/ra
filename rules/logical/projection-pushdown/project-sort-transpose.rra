@@ -1,0 +1,87 @@
+---
+id: calcite-project-sort-transpose
+name: Calcite ProjectSortTransposeRule
+category: logical/projection-pushdown
+databases: [calcite, postgresql, mysql, duckdb, sqlite]
+version: "1.0.0"
+authors: ["Apache Calcite"]
+tags: [logical, calcite, projection, sort, pushdown]
+complexity: O(n)
+benefit_range: [0.05, 0.3]
+---
+
+# Project Sort Transpose
+
+## Description
+
+Pushes a projection below a Sort operator when the projection does not
+remove any columns referenced by ORDER BY. Sorting narrower tuples
+reduces memory pressure and cache misses during external sorts.
+
+**When to apply**: A Project sits above a Sort, and all ORDER BY columns
+are preserved by the projection.
+
+**Calcite class**: `org.apache.calcite.rel.rules.ProjectSortTransposeRule`
+
+## Relational Algebra
+
+```algebra
+-- Before
+pi[a, b](Sort[ORDER BY a](R(a, b, c, d)))
+
+-- After
+Sort[ORDER BY a](pi[a, b](R))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw\!("project-sort-transpose";
+    "(project ?cols (sort ?order ?input))" =>
+    "(sort ?order (project (union-cols ?cols ?order) ?input))"
+    if sort_cols_in_project("?order", "?cols")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(project: &Project, sort: &Sort) -> bool {
+    let sort_cols: HashSet<_> = sort.order_keys().iter()
+        .map(|k| k.column_index()).collect();
+    sort_cols.is_subset(&project.input_columns())
+}
+```
+
+**Restrictions:**
+- ORDER BY columns must survive the projection
+- LIMIT/OFFSET interact with sort; both stay above
+
+## Cost Model
+
+```rust
+fn estimated_benefit(rows: f64, cols_removed: usize) -> f64 {
+    let sort_memory_saved = rows * cols_removed as f64 * 8.0;
+    sort_memory_saved / (1024.0 * 1024.0) // MB saved
+}
+```
+
+**Typical benefit**: 5-30% for wide tables with few sort columns.
+
+## Test Cases
+
+```sql
+-- Positive: prune columns before sort
+SELECT name, age FROM students ORDER BY age;
+-- pi[name, age] pushed below Sort[age]
+
+-- Negative: ORDER BY uses removed column
+SELECT name FROM students ORDER BY score;
+-- score needed for sort, cannot prune it
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/ProjectSortTransposeRule.java

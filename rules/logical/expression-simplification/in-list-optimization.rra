@@ -1,0 +1,109 @@
+---
+id: in-list-optimization
+name: IN-List to Range/Join Optimization
+category: logical/expression-simplification
+databases: [postgresql, mysql, oracle, duckdb, mssql]
+version: "1.0.0"
+authors: ["Graefe, Goetz"]
+tags: [logical, expression, in-list, range, semi-join, optimization]
+complexity: O(n * log(n))
+benefit_range: [0.05, 0.5]
+---
+
+# IN-List to Range/Join Optimization
+
+## Description
+
+Optimizes IN-list predicates based on list size and value distribution.
+Small lists are sorted for binary search. Consecutive value ranges are
+converted to BETWEEN predicates (enabling range index scans). Very large
+IN-lists are converted to semi-joins against a temporary values table
+(enabling hash-based matching).
+
+**When to apply**: IN predicates with more than a few values, especially
+when values form ranges or when the list is very large.
+
+## Relational Algebra
+
+```algebra
+-- Before: large IN list
+sigma[id IN (1,2,3,...,1000)](R)
+
+-- After option 1 (consecutive): range predicate
+sigma[id BETWEEN 1 AND 1000](R)
+
+-- After option 2 (large list): semi-join
+R semi-join Values(1,2,3,...,1000)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("in-list-to-range";
+    "(in ?col ?vals)" =>
+    "(between ?col (min-val ?vals) (max-val ?vals))"
+    if values_are_consecutive("?vals")
+),
+
+rw!("in-list-to-semijoin";
+    "(filter (in ?col ?vals) ?input)" =>
+    "(semijoin ?col ?input (values-scan ?vals))"
+    if in_list_is_large("?vals")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(in_pred: &InPredicate) -> bool {
+    let vals = in_pred.value_list();
+    vals.len() > 10 // small lists are fine as-is
+        || vals.is_consecutive_range()
+}
+```
+
+**Restrictions:**
+- NULL values in IN-list require special handling
+- NOT IN with NULLs has surprising SQL semantics
+- Semi-join conversion requires hash table memory
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    rows: f64,
+    list_size: usize,
+) -> f64 {
+    if list_size > 100 {
+        // Semi-join: O(1) lookup vs O(n) linear scan
+        rows * (list_size as f64 * 0.01 - 1.0) * 0.01
+    } else {
+        rows * list_size as f64 * 0.001
+    }
+}
+```
+
+**Typical benefit**: 5-50% for large IN-lists.
+
+## Test Cases
+
+```sql
+-- Positive: consecutive range
+SELECT * FROM orders WHERE status_id IN (1, 2, 3, 4, 5);
+-- Converts to: status_id BETWEEN 1 AND 5
+
+-- Positive: large IN list to semi-join
+SELECT * FROM products WHERE id IN (/* 10000 values */);
+-- Converts to semi-join against values table
+
+-- Negative: small IN list
+SELECT * FROM orders WHERE status IN ('pending', 'shipped');
+-- Only 2 values: keep as-is
+```
+
+## References
+
+- Graefe, G. "Query Evaluation Techniques" (1993) - IN-list processing
+- PostgreSQL: ScalarArrayOp optimization

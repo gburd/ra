@@ -1,0 +1,105 @@
+---
+id: limit-join-pushdown
+name: LIMIT Pushdown Through Join
+category: logical/limit-pushdown
+databases: [postgresql, mysql, duckdb, cockroachdb]
+version: "1.0.0"
+authors: ["PostgreSQL Team", "DuckDB Team"]
+tags: [logical, limit, pushdown, join, top-n, early-termination]
+complexity: O(n)
+benefit_range: [0.2, 0.9]
+---
+
+# LIMIT Pushdown Through Join
+
+## Description
+
+Pushes a LIMIT operator below or into a join to enable early termination.
+For a nested loop join with LIMIT N, the outer loop can stop after
+producing N results. For some join types, adding a LIMIT to the outer
+input produces the first N results faster. This is especially effective
+with ORDER BY ... LIMIT (Top-N) patterns.
+
+**When to apply**: LIMIT above a join where early termination can reduce
+the amount of data processed.
+
+## Relational Algebra
+
+```algebra
+-- Before: join all, then limit
+LIMIT 10 (R join S)
+
+-- After: push limit into nested loop outer
+LIMIT 10 (NestLoop(LIMIT 10(R), S))
+-- Or: use Top-N aware join that stops after 10 results
+TopNJoin(10, R, S)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("limit-into-nestloop-outer";
+    "(limit ?n (nestloop ?cond ?outer ?inner))" =>
+    "(limit ?n (nestloop ?cond (limit ?n ?outer) ?inner))"
+    if join_preserves_limit("?cond")
+),
+
+rw!("topn-sort-limit-to-heap";
+    "(limit ?n (sort ?order ?input))" =>
+    "(top-n-sort ?n ?order ?input)"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(limit: &Limit, join: &Join) -> bool {
+    // Must be a 1:many or many:1 join for limit pushdown
+    join.is_many_to_one() || join.type_is_nested_loop()
+}
+```
+
+**Restrictions:**
+- Cannot push LIMIT through hash/merge joins (need to see all matches)
+- Many-to-many joins: pushed limit may miss results
+- OFFSET complicates pushdown (must still skip rows)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    outer_rows: f64,
+    inner_rows: f64,
+    limit_n: f64,
+) -> f64 {
+    let full_cost = outer_rows * inner_rows;
+    let limited_cost = limit_n * inner_rows;
+    full_cost - limited_cost
+}
+```
+
+**Typical benefit**: 20-90% for small LIMIT on large joins.
+
+## Test Cases
+
+```sql
+-- Positive: LIMIT with nested loop
+SELECT * FROM orders o JOIN customers c ON o.cust_id = c.id
+LIMIT 10;
+-- Push LIMIT 10 to outer side of nested loop
+
+-- Positive: ORDER BY + LIMIT (Top-N)
+SELECT * FROM orders ORDER BY created_at DESC LIMIT 20;
+-- Use heap-based Top-N sort instead of full sort
+
+-- Negative: LIMIT after aggregation (cannot push below GROUP BY)
+SELECT dept, COUNT(*) FROM employees GROUP BY dept LIMIT 5;
+-- Must compute all groups before limiting
+```
+
+## References
+
+- PostgreSQL: limit_needed_for_sort optimization
+- DuckDB: Top-N optimization

@@ -1,0 +1,106 @@
+---
+id: arithmetic-identity
+name: Arithmetic Identity and Annihilator Simplification
+category: logical/expression-simplification
+databases: [postgresql, mysql, oracle, duckdb, sqlite, mssql]
+version: "1.0.0"
+authors: ["Aho, Sethi, Ullman"]
+tags: [logical, expression, arithmetic, identity, simplification]
+complexity: O(1)
+benefit_range: [0.01, 0.05]
+---
+
+# Arithmetic Identity and Annihilator Simplification
+
+## Description
+
+Removes redundant arithmetic operations using algebraic identities:
+`x + 0 = x`, `x * 1 = x`, `x * 0 = 0`, `x - 0 = x`, `x / 1 = x`.
+These patterns frequently appear in generated SQL (ORM queries, report
+builders) and can be simplified at compile time.
+
+**When to apply**: Arithmetic expressions containing identity elements
+(0 for addition, 1 for multiplication).
+
+## Relational Algebra
+
+```algebra
+-- Before
+pi[price * 1 + 0 AS adjusted_price](products)
+
+-- After
+pi[price AS adjusted_price](products)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Additive identity
+rw!("add-zero-right"; "(+ ?x 0)" => "?x"),
+rw!("add-zero-left"; "(+ 0 ?x)" => "?x"),
+rw!("sub-zero"; "(- ?x 0)" => "?x"),
+
+// Multiplicative identity
+rw!("mul-one-right"; "(* ?x 1)" => "?x"),
+rw!("mul-one-left"; "(* 1 ?x)" => "?x"),
+rw!("div-one"; "(/ ?x 1)" => "?x"),
+
+// Annihilators
+rw!("mul-zero-right"; "(* ?x 0)" => "0"),
+rw!("mul-zero-left"; "(* 0 ?x)" => "0"),
+
+// Self-cancellation
+rw!("sub-self"; "(- ?x ?x)" => "0"),
+rw!("div-self"; "(/ ?x ?x)" => "1" if not_zero("?x")),
+```
+
+## Preconditions
+
+```rust
+fn applicable(expr: &Expr) -> bool {
+    expr.has_identity_operand()
+        || expr.is_self_cancelling()
+}
+```
+
+**Restrictions:**
+- `x * 0` must handle NULL: `NULL * 0 = NULL` in SQL
+- `x / x` undefined when x = 0 (division by zero)
+- Floating-point: `x - x` may not be exactly 0 for NaN/Inf
+
+## Cost Model
+
+```rust
+fn estimated_benefit(rows: f64, ops_eliminated: usize) -> f64 {
+    rows * ops_eliminated as f64 * 0.001
+}
+```
+
+**Typical benefit**: 1-5%, mainly in ORM-generated queries.
+
+## Test Cases
+
+```sql
+-- Positive: multiplicative identity
+SELECT price * 1 FROM products;
+-- Simplifies to: SELECT price FROM products
+
+-- Positive: additive identity
+SELECT salary + 0 FROM employees;
+-- Simplifies to: SELECT salary FROM employees
+
+-- Positive: self-cancellation
+SELECT (end_date - start_date) - (end_date - start_date) FROM events;
+-- Simplifies to: 0
+
+-- Negative: NULL operand
+SELECT NULL * 0 FROM t;
+-- Must remain NULL, not 0
+```
+
+## References
+
+- Aho, A.V. et al. "Compilers: Principles, Techniques, and Tools" (1986)
+- PostgreSQL: simplify_function in clauses.c

@@ -1,0 +1,108 @@
+---
+id: distinct-over-pk
+name: DISTINCT Elimination on Primary Key
+category: logical/distinct-elimination
+databases: [postgresql, mysql, oracle, duckdb, mssql]
+version: "1.0.0"
+authors: ["Graefe, Goetz"]
+tags: [logical, distinct, elimination, primary-key, unique, redundant]
+complexity: O(1)
+benefit_range: [0.1, 0.5]
+---
+
+# DISTINCT Elimination on Primary Key
+
+## Description
+
+Eliminates a redundant DISTINCT operation when the query output already
+includes a column (or set of columns) that forms a unique key for the
+result. If the SELECT list includes the primary key of the source table
+(and only one table is involved, or joins preserve uniqueness), the
+DISTINCT is redundant because no duplicate rows can exist.
+
+**When to apply**: SELECT DISTINCT where the output columns include a
+unique key or primary key of the base relation.
+
+## Relational Algebra
+
+```algebra
+-- Before: DISTINCT on output that already includes PK
+delta(pi[id, name, email](employees))
+
+-- After: PK guarantees uniqueness, DISTINCT removed
+pi[id, name, email](employees)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("distinct-over-unique-key";
+    "(distinct ?input)" =>
+    "?input"
+    if output_contains_unique_key("?input")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(distinct: &Distinct, catalog: &Catalog) -> bool {
+    let output_cols = distinct.output_columns();
+    let source_table = distinct.input().single_source_table();
+    if let Some(table) = source_table {
+        catalog.unique_keys(table).iter().any(|uk|
+            uk.columns().iter().all(|c| output_cols.contains(c))
+        )
+    } else {
+        // Multi-table: check if join preserves uniqueness
+        distinct.input().output_is_unique()
+    }
+}
+```
+
+**Restrictions:**
+- UNION (without ALL) still needs deduplication
+- Aggregation may introduce duplicates in HAVING results
+- Outer joins may nullify unique keys (duplicating NULLs)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(rows: f64, has_sort: bool) -> f64 {
+    if has_sort {
+        rows * rows.log2() * 0.5 // avoid sort for distinct
+    } else {
+        rows * 0.3 // avoid hash-based dedup
+    }
+}
+```
+
+**Typical benefit**: 10-50% by removing unnecessary sort or hash.
+
+## Test Cases
+
+```sql
+-- Positive: PK in SELECT list
+SELECT DISTINCT id, name, email FROM employees;
+-- id is PK: DISTINCT is redundant
+
+-- Positive: UNIQUE constraint
+SELECT DISTINCT email FROM employees;
+-- email has UNIQUE constraint: DISTINCT redundant
+
+-- Negative: non-unique columns only
+SELECT DISTINCT dept, title FROM employees;
+-- Neither dept nor title is unique: DISTINCT needed
+
+-- Negative: outer join may introduce duplicate NULLs
+SELECT DISTINCT o.id, c.name
+FROM orders o LEFT JOIN customers c ON o.cust_id = c.id;
+-- Multiple orders may have c.name = NULL
+```
+
+## References
+
+- Graefe, G. "Query Evaluation Techniques" (1993)
+- PostgreSQL: remove_useless_groupby_columns()

@@ -1,0 +1,110 @@
+---
+id: calcite-project-set-op-transpose
+name: Calcite ProjectSetOpTransposeRule
+category: logical/projection-pushdown
+databases: [calcite, postgresql, mysql, duckdb, sqlite]
+version: "1.0.0"
+authors: ["Apache Calcite"]
+tags: [logical, calcite, projection, set-operation, pushdown]
+complexity: O(n)
+benefit_range: [0.05, 0.3]
+---
+
+# Project Set-Op Transpose
+
+## Description
+
+Pushes a projection through a set operation (UNION, INTERSECT, EXCEPT) so
+that each branch only produces the columns actually needed by the parent.
+This reduces the width of intermediate results flowing through the set
+operation, cutting memory and I/O costs.
+
+**When to apply**: A Project sits on top of a UNION / INTERSECT / EXCEPT
+and not all source columns are referenced.
+
+**Why it works**: Set operations preserve row identity per column; narrowing
+columns before the set op does not change semantics but reduces tuple width.
+
+**Calcite class**: `org.apache.calcite.rel.rules.ProjectSetOpTransposeRule`
+
+## Relational Algebra
+
+```algebra
+-- Before
+pi[c1, c3](R1 UNION R2)
+
+-- After
+(pi[c1, c3](R1)) UNION (pi[c1, c3](R2))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("project-set-op-transpose";
+    "(project ?cols (union ?left ?right))" =>
+    "(union (project ?cols ?left) (project ?cols ?right))"
+),
+rw!("project-intersect-transpose";
+    "(project ?cols (intersect ?left ?right))" =>
+    "(intersect (project ?cols ?left) (project ?cols ?right))"
+),
+rw!("project-except-transpose";
+    "(project ?cols (except ?left ?right))" =>
+    "(except (project ?cols ?left) (project ?cols ?right))"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(project: &Project, set_op: &SetOp) -> bool {
+    // Projection must be a simple column selection (no expressions)
+    project.is_column_selection()
+        // Set op branches must have compatible schemas
+        && set_op.left_schema() == set_op.right_schema()
+}
+```
+
+**Restrictions:**
+- If projection includes computed expressions, they must be pushable
+- UNION ALL vs UNION DISTINCT: both supported
+
+## Cost Model
+
+```rust
+fn estimated_benefit(input_rows: f64, n_cols_removed: usize) -> f64 {
+    let width_reduction = n_cols_removed as f64 * 8.0; // bytes per col
+    input_rows * width_reduction / 1024.0 // KB saved
+}
+```
+
+**Typical benefit**: 5-30% reduction in intermediate data size.
+
+## Test Cases
+
+```sql
+-- Positive: narrow projection through UNION
+SELECT name FROM (
+    SELECT id, name, email FROM customers
+    UNION ALL
+    SELECT id, name, email FROM prospects
+);
+-- Becomes: (SELECT name FROM customers) UNION ALL (SELECT name FROM prospects)
+```
+
+```sql
+-- Positive: through INTERSECT
+SELECT a FROM (SELECT a, b FROM t1 INTERSECT SELECT a, b FROM t2);
+```
+
+```sql
+-- Negative: all columns referenced
+SELECT * FROM (SELECT a, b FROM t1 UNION SELECT a, b FROM t2);
+-- No benefit: all columns already needed
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/ProjectSetOpTransposeRule.java

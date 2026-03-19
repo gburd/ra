@@ -1,0 +1,110 @@
+---
+id: index-skip-scan
+name: Index Skip Scan for Non-Prefix Predicates
+category: physical/access-path-selection
+databases: [mysql, oracle, postgresql, cockroachdb]
+version: "1.0.0"
+authors: ["Graefe, Goetz", "Oracle Corporation"]
+tags: [physical, index, skip-scan, non-prefix, access-path]
+complexity: O(d * log(n))
+benefit_range: [0.1, 0.7]
+---
+
+# Index Skip Scan for Non-Prefix Predicates
+
+## Description
+
+Uses an index even when the query predicate does not include the leading
+(prefix) columns of a composite index. The skip scan iterates over each
+distinct value of the leading column(s), performing a range scan on the
+suffix for each. Beneficial when the leading column has low cardinality.
+
+**When to apply**: A composite index exists on (A, B) but the query only
+filters on B. Column A has few distinct values.
+
+**Key insight**: If the leading column has D distinct values, the skip
+scan performs D range scans, which is cheaper than a full table scan
+when D is small and the suffix predicate is selective.
+
+## Relational Algebra
+
+```algebra
+-- Index on (gender, age), query filters on age only
+-- Before
+sigma[age > 30](TableScan(employees))
+
+-- After: skip scan with 2 distinct gender values
+IndexSkipScan(idx_gender_age, gender IN {M, F}, age > 30)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("index-skip-scan";
+    "(filter ?pred (tablescan ?table))" =>
+    "(index-skip-scan
+        (find-skip-index ?table ?pred)
+        (leading-distinct-vals ?table ?pred)
+        ?pred)"
+    if has_skip_scan_index("?table", "?pred")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(pred: &Predicate, index: &Index) -> bool {
+    let leading_cols = index.prefix_columns_not_in(pred);
+    let leading_ndv = leading_cols.iter()
+        .map(|c| c.distinct_values())
+        .product::<u64>();
+    // Leading columns must have low cardinality
+    leading_ndv < 100
+        // Suffix predicate must be selective
+        && pred.selectivity_on_suffix(index) < 0.1
+}
+```
+
+**Restrictions:**
+- Leading column(s) must have low number of distinct values
+- Only composite B-tree indexes
+- Not supported on hash indexes or bitmap indexes
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    table_rows: f64,
+    leading_ndv: u64,
+    suffix_selectivity: f64,
+    index_height: u32,
+) -> f64 {
+    let skip_cost = leading_ndv as f64
+        * (index_height as f64 + table_rows * suffix_selectivity);
+    let scan_cost = table_rows;
+    scan_cost - skip_cost
+}
+```
+
+**Typical benefit**: 10-70% when leading column has <50 distinct values.
+
+## Test Cases
+
+```sql
+-- Positive: composite index (status, created_at), status has 3 values
+CREATE INDEX idx_status_date ON orders(status, created_at);
+SELECT * FROM orders WHERE created_at > '2024-01-01';
+-- Skip scan over status IN ('pending','shipped','delivered')
+
+-- Negative: leading column has high cardinality
+CREATE INDEX idx_userid_date ON events(user_id, event_date);
+SELECT * FROM events WHERE event_date = '2024-06-15';
+-- user_id has millions of values: skip scan not beneficial
+```
+
+## References
+
+- Oracle "Index Skip Scans" documentation
+- MySQL 8.0 "Skip Scan Range Access Method"

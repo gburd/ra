@@ -1,0 +1,94 @@
+---
+id: magic-sets-adorned-program
+name: Magic Sets Adorned Program Transformation
+category: logical/sideways-information-passing
+databases: [postgresql, oracle, db2]
+version: "1.0.0"
+authors: ["Bancilhon et al."]
+tags: [logical, magic-sets, adornment, recursive, deductive]
+complexity: O(n*m)
+benefit_range: [0.3, 0.9]
+---
+
+# Magic Sets Adorned Program Transformation
+
+## Description
+
+Transforms a recursive Datalog program by adding "magic" predicates that
+propagate binding information from the query to restrict the evaluation
+of recursive rules. Instead of computing the full recursive closure and
+then filtering, magic sets push the query constants into the recursion.
+
+**When to apply**: Recursive queries (WITH RECURSIVE) where the query
+binds some arguments.
+
+## Relational Algebra
+
+```algebra
+-- Original: ancestor(X, Y) :- parent(X, Y).
+--           ancestor(X, Y) :- parent(X, Z), ancestor(Z, Y).
+-- Query: ?- ancestor("Alice", Y).
+
+-- Magic transformation:
+-- magic_ancestor("Alice").
+-- magic_ancestor(Z) :- magic_ancestor(X), parent(X, Z).
+-- ancestor(X, Y) :- magic_ancestor(X), parent(X, Y).
+-- ancestor(X, Y) :- magic_ancestor(X), parent(X, Z), ancestor(Z, Y).
+```
+
+## Implementation
+
+```rust
+fn magic_transform(program: &DatalogProgram, query: &Query) -> DatalogProgram {
+    let adornment = compute_adornment(query);
+    let magic_rules = generate_magic_rules(program, &adornment);
+    let modified_rules = add_magic_guards(program, &adornment);
+    let seed = generate_magic_seed(query);
+    DatalogProgram::new(vec\![seed], magic_rules, modified_rules)
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(query: &RecursiveQuery) -> bool {
+    query.has_bound_arguments()
+        && query.is_linear_recursive()
+}
+```
+
+## Cost Model
+
+```rust
+fn estimated_benefit(total_closure: f64, reachable_from_query: f64) -> f64 {
+    (total_closure - reachable_from_query) / total_closure
+}
+```
+
+## Test Cases
+
+```sql
+-- Positive: ancestor query with bound start
+WITH RECURSIVE ancestors AS (
+    SELECT parent_id, child_id FROM family WHERE child_id = 42
+    UNION ALL
+    SELECT f.parent_id, f.child_id
+    FROM family f JOIN ancestors a ON f.child_id = a.parent_id
+)
+SELECT * FROM ancestors;
+-- Magic sets restrict recursion to ancestors of person 42 only
+
+-- Negative: no binding (full closure needed)
+WITH RECURSIVE all_pairs AS (
+    SELECT parent_id, child_id FROM family
+    UNION ALL
+    SELECT f.parent_id, a.child_id
+    FROM family f JOIN all_pairs a ON f.child_id = a.parent_id
+)
+SELECT * FROM all_pairs;
+```
+
+## References
+
+- Bancilhon, F. et al., "Magic Sets and Other Strange Ways to Implement Logic Programs", ACM PODS 1986, DOI: 10.1145/6012.15399
+- Beeri, C. & Ramakrishnan, R., "On the Power of Magic", Journal of Logic Programming 10(3), 1991

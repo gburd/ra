@@ -1,0 +1,100 @@
+---
+id: case-simplification
+name: CASE Expression Simplification
+category: logical/expression-simplification
+databases: [postgresql, mysql, oracle, duckdb, mssql]
+version: "1.0.0"
+authors: ["Graefe, Goetz"]
+tags: [logical, expression, case, simplification, conditional]
+complexity: O(1)
+benefit_range: [0.01, 0.15]
+---
+
+# CASE Expression Simplification
+
+## Description
+
+Simplifies CASE expressions by detecting constant conditions, unreachable
+branches, single-branch CASE, and CASE expressions that can be replaced
+with simpler constructs like COALESCE, NULLIF, or GREATEST/LEAST.
+
+**When to apply**: CASE expressions with redundant branches, constant
+conditions, or patterns matching simpler SQL constructs.
+
+## Relational Algebra
+
+```algebra
+-- Before: CASE with constant TRUE condition
+CASE WHEN TRUE THEN x ELSE y END
+
+-- After
+x
+
+-- Before: CASE matching COALESCE pattern
+CASE WHEN a IS NOT NULL THEN a ELSE b END
+
+-- After
+COALESCE(a, b)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("case-true"; "(case true ?then ?else)" => "?then"),
+rw!("case-false"; "(case false ?then ?else)" => "?else"),
+rw!("case-single-branch";
+    "(case ?cond ?val ?val)" => "?val"),
+rw!("case-to-coalesce";
+    "(case (is-not-null ?a) ?a ?b)" => "(coalesce ?a ?b)"),
+rw!("case-to-nullif";
+    "(case (= ?a ?b) null ?a)" => "(nullif ?a ?b)"),
+```
+
+## Preconditions
+
+```rust
+fn applicable(case_expr: &CaseExpr) -> bool {
+    case_expr.has_constant_condition()
+        || case_expr.all_branches_same_value()
+        || case_expr.matches_coalesce_pattern()
+        || case_expr.matches_nullif_pattern()
+}
+```
+
+**Restrictions:**
+- Must preserve NULL semantics in all branches
+- Searched vs simple CASE require different patterns
+- Side effects in WHEN conditions affect evaluation
+
+## Cost Model
+
+```rust
+fn estimated_benefit(rows: f64, branches_eliminated: usize) -> f64 {
+    rows * branches_eliminated as f64 * 0.005
+}
+```
+
+**Typical benefit**: 1-15%, mainly code clarity and enabling other rewrites.
+
+## Test Cases
+
+```sql
+-- Positive: constant TRUE condition
+SELECT CASE WHEN 1=1 THEN 'yes' ELSE 'no' END FROM t;
+-- Simplifies to: SELECT 'yes' FROM t
+
+-- Positive: COALESCE pattern
+SELECT CASE WHEN name IS NOT NULL THEN name ELSE 'Unknown' END
+FROM customers;
+-- Simplifies to: SELECT COALESCE(name, 'Unknown') FROM customers
+
+-- Negative: non-trivial conditions
+SELECT CASE WHEN x > 10 THEN 'high' ELSE 'low' END FROM t;
+```
+
+## References
+
+- PostgreSQL: eval_const_expressions handles CASE simplification
+- MySQL: Item_func_case simplification in optimizer
