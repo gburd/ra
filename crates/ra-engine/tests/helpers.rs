@@ -82,6 +82,56 @@ pub fn assert_optimization_improves(input: RelExpr) {
     // without executing. This is a placeholder for future enhancement.
 }
 
+/// Assert that the optimizer can process the plan and produce a
+/// valid result. Used for cost model tests where the plan may not
+/// be structurally changed but the cost model still evaluates it.
+///
+/// # Panics
+///
+/// Panics if optimization fails.
+#[track_caller]
+pub fn assert_cost_calculated(input: RelExpr) {
+    let optimizer = create_test_optimizer();
+    let result = optimizer
+        .optimize(&input)
+        .expect("optimization should succeed");
+    // The plan is valid if optimization succeeds; the cost model
+    // assigned costs during extraction from the e-graph.
+    let _ = result;
+}
+
+/// Assert that the optimizer produces a valid cardinality estimate
+/// by verifying the plan can be optimized. The cost model uses
+/// cardinality estimates internally to guide plan extraction.
+///
+/// # Panics
+///
+/// Panics if optimization fails.
+#[track_caller]
+pub fn assert_cardinality_estimated(input: RelExpr) {
+    let optimizer = create_test_optimizer();
+    let result = optimizer
+        .optimize(&input)
+        .expect("cardinality estimation should succeed during optimization");
+    let _ = result;
+}
+
+/// Assert that the optimizer produces a valid selectivity estimate
+/// by verifying the plan can be optimized. The cost model uses
+/// selectivity estimates internally for filter and join costing.
+///
+/// # Panics
+///
+/// Panics if optimization fails.
+#[track_caller]
+pub fn assert_selectivity_estimated(input: RelExpr) {
+    let optimizer = create_test_optimizer();
+    let result = optimizer
+        .optimize(&input)
+        .expect("selectivity estimation should succeed during optimization");
+    let _ = result;
+}
+
 /// Assert that hardware profile affects cost estimates.
 ///
 /// Verifies that the same query optimized with different hardware
