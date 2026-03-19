@@ -125,6 +125,9 @@ enum Commands {
         /// Overflow strategy: best-so-far, original, fail.
         #[arg(long)]
         overflow_strategy: Option<String>,
+        /// Output EXPLAIN in a database-specific format: postgresql, mysql, oracle, sqlserver.
+        #[arg(long)]
+        explain_format: Option<String>,
     },
     /// Gather database metadata and write to a JSON file.
     GatherMetadata {
@@ -325,6 +328,7 @@ fn main() -> Result<()> {
             max_memory,
             max_iterations,
             overflow_strategy,
+            explain_format,
         } => {
             let budget = build_resource_budget(
                 resource_budget.as_deref(),
@@ -339,6 +343,7 @@ fn main() -> Result<()> {
                 diff.as_deref(),
                 no_color,
                 budget.as_ref(),
+                explain_format.as_deref(),
                 cli.verbose,
                 cli.quiet,
             )
@@ -1082,6 +1087,7 @@ fn cmd_optimize(
     diff_format: Option<&str>,
     no_color: bool,
     budget: Option<&ra_engine::ResourceBudget>,
+    explain_format: Option<&str>,
     verbose: bool,
     quiet: bool,
 ) -> Result<()> {
@@ -1107,13 +1113,13 @@ fn cmd_optimize(
 
     if budget.is_some() {
         optimize_bounded(
-            &optimizer, &plan, &hardware, diff_format, verbose,
-            quiet, query,
+            &optimizer, &plan, &hardware, diff_format,
+            explain_format, verbose, quiet, query,
         )
     } else {
         optimize_unbounded(
-            &optimizer, &plan, &hardware, diff_format, verbose,
-            quiet, query,
+            &optimizer, &plan, &hardware, diff_format,
+            explain_format, verbose, quiet, query,
         )
     }
 }
@@ -1123,6 +1129,7 @@ fn optimize_bounded(
     plan: &ra_core::algebra::RelExpr,
     hardware: &ra_hardware::HardwareProfile,
     diff_format: Option<&str>,
+    explain_format: Option<&str>,
     verbose: bool,
     quiet: bool,
     query: &str,
@@ -1130,6 +1137,10 @@ fn optimize_bounded(
     let result = optimizer.optimize_bounded(plan).with_context(|| {
         format!("failed to optimize query: {query}")
     })?;
+
+    if let Some(fmt) = explain_format {
+        return print_explain_output(&result.plan, fmt);
+    }
 
     if !quiet {
         print_optimization_header(
@@ -1150,6 +1161,7 @@ fn optimize_unbounded(
     plan: &ra_core::algebra::RelExpr,
     hardware: &ra_hardware::HardwareProfile,
     diff_format: Option<&str>,
+    explain_format: Option<&str>,
     verbose: bool,
     quiet: bool,
     query: &str,
@@ -1157,6 +1169,10 @@ fn optimize_unbounded(
     let optimized = optimizer.optimize(plan).with_context(|| {
         format!("failed to optimize query: {query}")
     })?;
+
+    if let Some(fmt) = explain_format {
+        return print_explain_output(&optimized, fmt);
+    }
 
     if !quiet {
         print_optimization_header(
@@ -1227,6 +1243,55 @@ fn parse_diff_format(s: &str) -> Result<plan_diff::DiffFormat> {
              Valid options: colored, plain, side-by-side, compact"
         ),
     }
+}
+
+/// Parse an EXPLAIN format string into format + cost params.
+fn parse_explain_format(
+    s: &str,
+) -> Result<(
+    ra_metadata::ExplainFormat,
+    ra_metadata::DatabaseCostParams,
+)> {
+    match s.to_lowercase().as_str() {
+        "postgresql" | "postgres" | "pg" => Ok((
+            ra_metadata::ExplainFormat::PostgresJson,
+            ra_metadata::DatabaseCostParams::postgres_default(),
+        )),
+        "postgresql-text" | "postgres-text" | "pg-text" => Ok((
+            ra_metadata::ExplainFormat::PostgresText,
+            ra_metadata::DatabaseCostParams::postgres_default(),
+        )),
+        "mysql" => Ok((
+            ra_metadata::ExplainFormat::MysqlJson,
+            ra_metadata::DatabaseCostParams::mysql_default(),
+        )),
+        "oracle" => Ok((
+            ra_metadata::ExplainFormat::OracleText,
+            ra_metadata::DatabaseCostParams::oracle_default(),
+        )),
+        "sqlserver" | "mssql" => Ok((
+            ra_metadata::ExplainFormat::SqlServerXml,
+            ra_metadata::DatabaseCostParams::sqlserver_default(),
+        )),
+        _ => bail!(
+            "unknown explain format: '{s}'. \
+             Valid options: postgresql, postgresql-text, mysql, \
+             oracle, sqlserver"
+        ),
+    }
+}
+
+/// Generate and print EXPLAIN output for an optimized plan.
+fn print_explain_output(
+    plan: &ra_core::algebra::RelExpr,
+    format_str: &str,
+) -> Result<()> {
+    let (format, cost_params) = parse_explain_format(format_str)?;
+    let explain_plan =
+        ra_metadata::from_relexpr(plan, &cost_params);
+    let output = explain_plan.to_format(format);
+    eprintln!("{output}");
+    Ok(())
 }
 
 // ── gather-metadata ────────────────────────────────────────
