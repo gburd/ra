@@ -433,6 +433,7 @@ fn try_binop(node: &RelLang) -> Option<(ra_core::expr::BinOp, Id, Id)> {
         RelLang::Sub([l, r]) => (BinOp::Sub, *l, *r),
         RelLang::Mul([l, r]) => (BinOp::Mul, *l, *r),
         RelLang::Div([l, r]) => (BinOp::Div, *l, *r),
+        RelLang::Mod([l, r]) => (BinOp::Mod, *l, *r),
         RelLang::Eq([l, r]) => (BinOp::Eq, *l, *r),
         RelLang::Ne([l, r]) => (BinOp::Ne, *l, *r),
         RelLang::Lt([l, r]) => (BinOp::Lt, *l, *r),
@@ -441,6 +442,8 @@ fn try_binop(node: &RelLang) -> Option<(ra_core::expr::BinOp, Id, Id)> {
         RelLang::Ge([l, r]) => (BinOp::Ge, *l, *r),
         RelLang::And([l, r]) => (BinOp::And, *l, *r),
         RelLang::Or([l, r]) => (BinOp::Or, *l, *r),
+        RelLang::Concat([l, r]) => (BinOp::Concat, *l, *r),
+        RelLang::JsonAccess([l, r]) => (BinOp::JsonAccess, *l, *r),
         _ => return None,
     };
     Some((op, l, r))

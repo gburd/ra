@@ -49,3 +49,4 @@ tla/states/
 *.tmp
 *.temp
 .*.swp
+.worktrees/

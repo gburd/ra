@@ -354,8 +354,11 @@ fn format_binop(op: BinOp) -> &'static str {
         BinOp::Sub => "-",
         BinOp::Mul => "*",
         BinOp::Div => "/",
+        BinOp::Mod => "%",
         BinOp::And => "AND",
         BinOp::Or => "OR",
+        BinOp::Concat => "||",
+        BinOp::JsonAccess => "->>",
     }
 }
 

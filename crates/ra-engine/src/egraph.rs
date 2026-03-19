@@ -88,6 +88,7 @@ define_language! {
         "sub" = Sub([Id; 2]),
         "mul" = Mul([Id; 2]),
         "div" = Div([Id; 2]),
+        "mod" = Mod([Id; 2]),
         "eq" = Eq([Id; 2]),
         "ne" = Ne([Id; 2]),
         "lt" = Lt([Id; 2]),
@@ -96,6 +97,8 @@ define_language! {
         "ge" = Ge([Id; 2]),
         "and" = And([Id; 2]),
         "or" = Or([Id; 2]),
+        "concat" = Concat([Id; 2]),
+        "json-access" = JsonAccess([Id; 2]),
 
         // -- Unary operators --
         "not" = Not([Id; 1]),
@@ -874,6 +877,7 @@ fn add_scalar_expr(rec: &mut RecExpr<RelLang>, expr: &Expr) -> Result<Id, EGraph
                 BinOp::Sub => RelLang::Sub([left_id, right_id]),
                 BinOp::Mul => RelLang::Mul([left_id, right_id]),
                 BinOp::Div => RelLang::Div([left_id, right_id]),
+                BinOp::Mod => RelLang::Mod([left_id, right_id]),
                 BinOp::Eq => RelLang::Eq([left_id, right_id]),
                 BinOp::Ne => RelLang::Ne([left_id, right_id]),
                 BinOp::Lt => RelLang::Lt([left_id, right_id]),
@@ -882,6 +886,8 @@ fn add_scalar_expr(rec: &mut RecExpr<RelLang>, expr: &Expr) -> Result<Id, EGraph
                 BinOp::Ge => RelLang::Ge([left_id, right_id]),
                 BinOp::And => RelLang::And([left_id, right_id]),
                 BinOp::Or => RelLang::Or([left_id, right_id]),
+                BinOp::Concat => RelLang::Concat([left_id, right_id]),
+                BinOp::JsonAccess => RelLang::JsonAccess([left_id, right_id]),
             };
             Ok(rec.add(node))
         }

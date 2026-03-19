@@ -69,18 +69,16 @@ pub fn sql_to_relexpr(sql: &str) -> Result<RelExpr, SqlConversionError> {
         ));
     }
 
-    if statements.len() > 1 {
-        return Err(SqlConversionError::UnsupportedFeature(
-            "multiple statements not supported".to_owned(),
-        ));
+    // Take the first SELECT statement, skip non-SELECT (DDL, DML)
+    for stmt in &statements {
+        if let Statement::Query(query) = stmt {
+            return convert_query(query);
+        }
     }
 
-    match &statements[0] {
-        Statement::Query(query) => convert_query(query),
-        _ => Err(SqlConversionError::UnsupportedFeature(
-            "only SELECT queries are supported".to_owned(),
-        )),
-    }
+    Err(SqlConversionError::UnsupportedFeature(
+        "only SELECT queries are supported".to_owned(),
+    ))
 }
 
 fn convert_query(query: &Query) -> Result<RelExpr, SqlConversionError> {
@@ -357,9 +355,10 @@ fn convert_from(
     from: &[TableWithJoins],
 ) -> Result<RelExpr, SqlConversionError> {
     if from.is_empty() {
-        return Err(SqlConversionError::InvalidSql(
-            "SELECT without FROM not supported".to_owned(),
-        ));
+        // SELECT without FROM (e.g., SELECT 1+1, SELECT CURRENT_DATE)
+        return Ok(RelExpr::Values {
+            rows: vec![vec![]],
+        });
     }
 
     // Handle multiple FROM items as implicit cross joins
