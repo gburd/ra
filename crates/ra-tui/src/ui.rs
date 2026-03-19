@@ -1,7 +1,8 @@
-//! Rendering logic for the 4-panel TUI layout.
+//! Rendering logic for the TUI layout.
 //!
-//! Delegates to individual panel modules for rendering and uses
-//! the layout module for responsive panel positioning.
+//! Supports both the classic 4-panel layout and the editor 3-panel
+//! layout. Delegates to individual panel modules for rendering and
+//! uses the layout module for responsive panel positioning.
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -10,16 +11,27 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 
 use crate::app::{App, Panel};
-use crate::layout;
-use crate::panels::{evolution, feedback, plan_tree, statistics};
+use crate::layout::{self, LayoutMode};
+use crate::panels::{
+    evolution, feedback, plan_tree, sql_editor, statistics,
+};
 
 /// Render the full TUI frame.
 pub fn render(frame: &mut Frame, app: &App) {
     let fl = layout::frame_layout(frame.area());
 
     render_status_bar(frame, app, fl.status_bar);
-    render_panels(frame, app, fl.content);
-    render_keybindings_bar(frame, fl.keybindings_bar);
+
+    match app.layout_mode {
+        LayoutMode::Classic => {
+            render_classic_panels(frame, app, fl.content);
+        }
+        LayoutMode::Editor => {
+            render_editor_panels(frame, app, fl.content);
+        }
+    }
+
+    render_keybindings_bar(frame, app, fl.keybindings_bar);
 
     if app.show_help {
         render_help_overlay(frame);
@@ -35,12 +47,18 @@ fn render_status_bar(
     let step_total = app.timeline.len();
     let step_cur = app.current_step + 1;
 
-    let snapshot = &app.timeline.snapshots[app.current_step];
+    let snapshot =
+        &app.timeline.snapshots[app.current_step];
     let play_indicator =
         if app.playing { "PLAY" } else { "PAUSE" };
 
     let query_display =
         truncate_str(&app.timeline.query, 60);
+
+    let layout_label = match app.layout_mode {
+        LayoutMode::Classic => "4-Panel",
+        LayoutMode::Editor => "Editor",
+    };
 
     let line = Line::from(vec![
         Span::styled(
@@ -68,12 +86,18 @@ fn render_status_bar(
         Span::raw(" | "),
         Span::styled(
             format!("Cost: {:.0}", snapshot.cost),
-            Style::default().fg(cost_color(snapshot.cost, app)),
+            Style::default()
+                .fg(cost_color(snapshot.cost, app)),
         ),
         Span::raw(" | "),
         Span::styled(
             format!("Speed: {}", app.speed_label()),
             Style::default().fg(Color::DarkGray),
+        ),
+        Span::raw(" | "),
+        Span::styled(
+            format!("[{layout_label}]"),
+            Style::default().fg(Color::Magenta),
         ),
         Span::raw(" | "),
         Span::styled(
@@ -89,10 +113,15 @@ fn render_status_bar(
     frame.render_widget(paragraph, area);
 }
 
-/// Main 4-panel layout using dedicated panel modules.
-fn render_panels(frame: &mut Frame, app: &App, area: Rect) {
+/// Classic 4-panel layout using dedicated panel modules.
+fn render_classic_panels(
+    frame: &mut Frame,
+    app: &App,
+    area: Rect,
+) {
     let pl = layout::panel_layout(area);
-    let snapshot = &app.timeline.snapshots[app.current_step];
+    let snapshot =
+        &app.timeline.snapshots[app.current_step];
 
     statistics::render(
         frame,
@@ -134,9 +163,55 @@ fn render_panels(frame: &mut Frame, app: &App, area: Rect) {
     );
 }
 
+/// Editor 3-panel layout: SQL editor + plan + stats/feedback.
+fn render_editor_panels(
+    frame: &mut Frame,
+    app: &App,
+    area: Rect,
+) {
+    let el = layout::editor_layout(area);
+    let snapshot =
+        &app.timeline.snapshots[app.current_step];
+
+    sql_editor::render(
+        frame,
+        &app.sql_editor,
+        el.sql_editor,
+        app.focused == Panel::SqlEditor,
+    );
+
+    plan_tree::render(
+        frame,
+        &snapshot.plan_text,
+        el.plan,
+        app.focused == Panel::Plan,
+        panel_scroll(app, Panel::Plan),
+    );
+
+    statistics::render(
+        frame,
+        &snapshot.table_stats,
+        el.stats,
+        app.focused == Panel::Stats,
+        panel_scroll(app, Panel::Stats),
+    );
+
+    feedback::render(
+        frame,
+        snapshot,
+        el.feedback,
+        app.focused == Panel::Feedback,
+        panel_scroll(app, Panel::Feedback),
+    );
+}
+
 /// Bottom keybindings bar.
-fn render_keybindings_bar(frame: &mut Frame, area: Rect) {
-    let line = Line::from(vec![
+fn render_keybindings_bar(
+    frame: &mut Frame,
+    app: &App,
+    area: Rect,
+) {
+    let mut spans = vec![
         Span::styled(
             " q",
             Style::default()
@@ -173,21 +248,33 @@ fn render_keybindings_bar(frame: &mut Frame, area: Rect) {
         ),
         Span::raw(" Panel  "),
         Span::styled(
-            "j/k",
+            "L",
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw(" Scroll  "),
-        Span::styled(
-            "?",
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::raw(" Help"),
-    ]);
+        Span::raw(" Layout  "),
+    ];
 
+    if app.layout_mode == LayoutMode::Editor {
+        spans.push(Span::styled(
+            "E",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::raw(" Edit SQL  "));
+    }
+
+    spans.push(Span::styled(
+        "?",
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD),
+    ));
+    spans.push(Span::raw(" Help"));
+
+    let line = Line::from(spans);
     let paragraph = Paragraph::new(line);
     frame.render_widget(paragraph, area);
 }
@@ -218,6 +305,9 @@ fn render_help_overlay(frame: &mut Frame) {
         help_line("Shift+Tab", "Focus previous panel"),
         help_line("j / Down", "Scroll down"),
         help_line("k / Up", "Scroll up"),
+        help_line("L", "Toggle layout (4-panel/editor)"),
+        help_line("E", "Toggle SQL editor mode"),
+        help_line("Esc", "Exit edit mode"),
         help_line("?", "Toggle this help"),
         Line::raw(""),
         Line::from(Span::styled(
@@ -320,7 +410,8 @@ mod tests {
 
     #[test]
     fn truncate_long_string() {
-        let result = truncate_str("hello world this is long", 10);
+        let result =
+            truncate_str("hello world this is long", 10);
         assert_eq!(result, "hello w...");
     }
 
@@ -342,7 +433,6 @@ mod tests {
         let app = App::new(tl).unwrap_or_else(|e| {
             panic!("app creation failed: {e}");
         });
-        // With varying costs, should return a color
         let color = cost_color(50_000.0, &app);
         assert!(matches!(
             color,

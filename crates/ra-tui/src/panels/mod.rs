@@ -1,4 +1,4 @@
-//! Panel rendering modules for the 4-panel TUI layout.
+//! Panel rendering modules for the TUI layout.
 //!
 //! Each panel is a self-contained rendering module that takes
 //! snapshot data and draws into a ratatui [`Frame`] at a given
