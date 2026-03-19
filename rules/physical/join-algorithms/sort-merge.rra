@@ -1,0 +1,37 @@
+---
+id: sort-merge
+name: "SortMerge"
+category: physical/join-algorithms
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [academic, calcite]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# SortMerge
+
+## Description
+
+Sort-merge join implementation
+
+## Relational Algebra
+
+```algebra
+Join_sorted(sort(R), sort(S))
+```
+
+## Implementation
+
+```
+Implement rule transformation for calcite optimization
+```
+
+## Tests
+
+Add test cases for this rule
+
+## References

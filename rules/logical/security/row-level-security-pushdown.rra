@@ -1,0 +1,31 @@
+---
+id: row-level-security-pushdown
+name: "Row Level Security Pushdown"
+category: logical/security
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [academic, optimization]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# Row Level Security Pushdown
+
+## Description
+
+Pushes RLS filters early in execution
+
+## Implementation
+
+Add implementation details for Row Level Security Pushdown
+
+## Tests
+
+Add test cases for this optimization
+
+## References
+
+- Paper: Row Level Security Optimization

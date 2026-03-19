@@ -1,0 +1,39 @@
+---
+id: starburst-semantic
+name: "Starburst Semantic Rewrite"
+category: logical/semantic-rewriting
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [academic, academic]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# Starburst Semantic Rewrite
+
+## Description
+
+Semantic query optimization and rewrite
+
+## Relational Algebra
+
+```algebra
+
+```
+
+## Implementation
+
+```
+Implement rule transformation for academic optimization
+```
+
+## Tests
+
+Add test cases for this rule
+
+## References
+- Paper: Starburst by Lohman et al.
+- DOI: 10.1145/127894.127898

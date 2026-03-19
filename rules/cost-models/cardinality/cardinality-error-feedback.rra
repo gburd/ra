@@ -1,0 +1,40 @@
+---
+id: cardinality-error-feedback
+name: "Cardinality Error Feedback"
+category: cost-models/cardinality
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [academic, academic]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# Cardinality Error Feedback
+
+## Description
+
+Feedback loop for cardinality estimation errors
+
+## Relational Algebra
+
+```algebra
+
+```
+
+## Implementation
+
+```
+Implement rule transformation for academic optimization
+```
+
+## Tests
+
+Add test cases for this rule
+
+## References
+
+- Paper: Adaptive Cardinality Estimation
+- DOI: 10.1145/3299869

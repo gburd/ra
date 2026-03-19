@@ -1,0 +1,39 @@
+---
+id: free-join-algorithm
+name: "Free Join Algorithm"
+category: physical/join-algorithms
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [academic, academic]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# Free Join Algorithm
+
+## Description
+
+Worst-case optimal join algorithm for cyclic queries
+
+## Relational Algebra
+
+```algebra
+
+```
+
+## Implementation
+
+```
+Implement rule transformation for academic optimization
+```
+
+## Tests
+
+Add test cases for this rule
+
+## References
+- Paper: Free Join by Ngo et al.
+- DOI: 10.1145/2463676.2465314

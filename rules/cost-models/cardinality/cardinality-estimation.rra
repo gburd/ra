@@ -1,0 +1,39 @@
+---
+id: cardinality-estimation
+name: "Learned Cardinality Estimation"
+category: cost-models/cardinality
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [academic, academic]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# Learned Cardinality Estimation
+
+## Description
+
+ML models for cardinality prediction
+
+## Relational Algebra
+
+```algebra
+
+```
+
+## Implementation
+
+```
+Implement rule transformation for academic optimization
+```
+
+## Tests
+
+Add test cases for this rule
+
+## References
+- Paper: Learned Cardinality Estimation by Kipf et al.
+- DOI: 10.1145/3299869.3319856

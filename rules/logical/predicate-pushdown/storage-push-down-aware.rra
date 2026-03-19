@@ -1,0 +1,31 @@
+---
+id: storage-push-down-aware
+name: "Storage Push-Down Aware"
+category: logical/predicate-pushdown
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [academic, optimization]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# Storage Push-Down Aware
+
+## Description
+
+Respects storage engine push-down capabilities
+
+## Implementation
+
+Add implementation details for Storage Push-Down Aware
+
+## Tests
+
+Add test cases for this optimization
+
+## References
+
+- Paper: Storage Aware Query Optimization

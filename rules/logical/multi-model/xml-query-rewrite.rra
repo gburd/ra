@@ -1,0 +1,31 @@
+---
+id: xml-query-rewrite
+name: "XML Query Rewrite"
+category: logical/multi-model
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [academic, optimization]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# XML Query Rewrite
+
+## Description
+
+Rewrites XML queries for efficiency
+
+## Implementation
+
+Add implementation details for XML Query Rewrite
+
+## Tests
+
+Add test cases for this optimization
+
+## References
+
+- Paper: XML Query Optimization
