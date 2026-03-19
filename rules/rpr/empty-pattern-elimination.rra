@@ -1,0 +1,154 @@
+---
+id: rpr-empty-pattern-elimination
+name: Eliminate Empty Patterns
+category: logical/rpr
+databases: [postgresql, oracle, duckdb, generic]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [rpr, pattern, simplification, empty, elimination]
+complexity: "O(1)"
+benefit_range: [0.5, 1.0]
+preconditions:
+  - type: pattern
+    must_match: "(row-pattern ?input ?partition ?order ?defines ?measures ?pattern)"
+  - type: predicate
+    condition: "pattern_matches_empty(?pattern)"
+    description: "Pattern can only match the empty string (zero rows)"
+---
+
+# Eliminate Empty Patterns
+
+## Description
+
+Removes RowPattern operators whose pattern can only match zero
+rows. An empty pattern (after simplification) never produces output,
+so the entire operator can be replaced with an empty relation or
+removed from a join.
+
+**When to apply**: After pattern simplification, the pattern reduces
+to an empty sequence, or all variables have `false` DEFINE conditions.
+
+**Why it works**: If the compiled pattern's language is empty (no
+accepting states reachable from start), no input row sequence will
+ever match. The RowPattern operator always produces zero output rows.
+
+## Relational Algebra
+
+```algebra
+-- Before: pattern that matches nothing
+RowPattern(
+  input: R,
+  pattern: Sequence([]),  -- empty sequence
+  ...
+)
+
+-- After: empty relation
+EmptyRelation(schema_of(measures))
+
+-- Before: all defines are false
+RowPattern(
+  defines: { A: false, B: false },
+  pattern: Sequence([A, B]),
+  ...
+)
+
+-- After: empty relation
+EmptyRelation(schema_of(measures))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Empty pattern -> empty relation
+rw!("rpr-empty-pattern-to-empty";
+    "(row-pattern ?input ?partition ?order ?defines ?measures
+       (pattern-sequence))" =>
+    "(empty-relation (schema-of ?measures))"
+),
+
+// All defines false -> empty relation
+rw!("rpr-all-false-defines-to-empty";
+    "(row-pattern ?input ?partition ?order
+       (defines ?defs) ?measures ?pattern)" =>
+    "(empty-relation (schema-of ?measures))"
+    if all_defines_false("?defs")
+),
+
+// Pattern with unsatisfiable quantifier -> empty
+rw!("rpr-unsatisfiable-quantifier";
+    "(pattern-quantified ?var (range ?min ?max))" =>
+    "(pattern-empty)"
+    if min_exceeds_max("?min", "?max")
+),
+```
+
+## Preconditions
+
+```rust
+fn pattern_matches_empty(pattern: &PatternExpr) -> bool {
+    match pattern {
+        PatternExpr::Sequence(parts) => parts.is_empty(),
+        PatternExpr::Quantified(_, Quantifier::Range(min, Some(max)))
+            if min > max => true,
+        _ => false,
+    }
+}
+
+fn all_defines_false(defs: &HashMap<Symbol, Expr>) -> bool {
+    defs.values().all(|d| d.is_constant_false())
+}
+```
+
+**Restrictions:**
+- Must be applied after constant propagation and DEFINE simplification.
+- An empty pattern in LEFT JOIN context should produce NULL-padded rows, not an empty result.
+
+## Cost Model
+
+```rust
+fn estimated_benefit() -> f64 {
+    // Eliminates all DFA compilation and evaluation.
+    1.0
+}
+```
+
+**Typical benefit**: 50-100%. Completely eliminates the RPR operator.
+
+## Test Cases
+
+### Positive: contradictory DEFINE after constant propagation
+
+```sql
+-- After specialization: DEFINE A becomes always false
+MATCH_RECOGNIZE (
+  PATTERN (A+)
+  DEFINE A AS 1 = 0  -- contradiction
+)
+-- After: replaced with empty result
+```
+
+### Positive: empty pattern from simplification
+
+```sql
+-- Pattern simplified to empty after all variables eliminated
+-- Produces empty relation
+```
+
+### Negative: pattern with valid accepts
+
+```sql
+-- Pattern A+ B+ has valid accepting states
+MATCH_RECOGNIZE (
+  PATTERN (A+ B+)
+  DEFINE A AS price > PREV(price), B AS price < PREV(price)
+)
+```
+
+## References
+
+- Hopcroft, Motwani, Ullman. "Introduction to Automata Theory" (2006)
+- Zemke, F. "Row Pattern Recognition in SQL" ISO/IEC 19075-5:2016

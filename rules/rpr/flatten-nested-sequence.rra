@@ -1,0 +1,151 @@
+---
+id: rpr-flatten-sequence
+name: Flatten Nested Sequences
+category: logical/rpr
+databases: [postgresql, oracle, duckdb, generic]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [rpr, pattern, simplification, sequence, flatten]
+complexity: "O(n)"
+benefit_range: [0.1, 0.2]
+preconditions:
+  - type: pattern
+    must_match: "(pattern-sequence (pattern-sequence ?inner) ?rest)"
+---
+
+# Flatten Nested Sequences
+
+## Description
+
+Flattens nested pattern sequences into a single top-level sequence.
+Grouping in pattern expressions creates nesting that adds complexity
+to DFA compilation without changing matching semantics (when the
+group has no quantifier).
+
+**When to apply**: A sequence node contains another sequence node
+as a direct child (with no quantifier on the inner group).
+
+**Why it works**: Sequence concatenation is associative:
+`(A B) C = A (B C) = A B C`. Removing unnecessary nesting
+simplifies the pattern AST and produces a more compact DFA.
+
+## Relational Algebra
+
+```algebra
+-- Before: nested sequence
+Sequence([Sequence([A, B]), C, D])
+
+-- After: flat sequence
+Sequence([A, B, C, D])
+
+-- Before: deeply nested
+Sequence([Sequence([A, Sequence([B, C])]), D])
+
+-- After: fully flattened
+Sequence([A, B, C, D])
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Flatten left-nested sequence
+rw!("rpr-flatten-sequence-left";
+    "(pattern-sequence (pattern-sequence ?inner) ?rest)" =>
+    "(pattern-sequence (append ?inner ?rest))"
+),
+
+// Flatten right-nested sequence
+rw!("rpr-flatten-sequence-right";
+    "(pattern-sequence ?first (pattern-sequence ?inner))" =>
+    "(pattern-sequence (prepend ?first ?inner))"
+),
+
+// Flatten single-element group without quantifier
+rw!("rpr-flatten-singleton-group";
+    "(pattern-group (pattern-sequence ?single))" =>
+    "?single"
+    if is_single_element("?single")
+),
+```
+
+## Preconditions
+
+```rust
+fn is_unquantified_group(node: &PatternExpr) -> bool {
+    // The inner sequence must not be wrapped in a quantifier.
+    // (A B)+ should NOT be flattened because the + applies
+    // to the entire group.
+    matches!(node, PatternExpr::Sequence(_))
+}
+
+fn is_single_element(seq: &[PatternExpr]) -> bool {
+    seq.len() == 1
+}
+```
+
+**Restrictions:**
+- Do not flatten sequences that are children of a quantified group.
+  `(A B)+` must remain grouped because `+` applies to the pair.
+- Only flatten when the group itself has no quantifier.
+
+## Cost Model
+
+```rust
+fn estimated_benefit(nesting_depth: usize) -> f64 {
+    // Each level of unnecessary nesting adds 1-2 intermediate
+    // nodes in the pattern AST. Flattening reduces traversal
+    // cost during DFA compilation.
+    let saved_nodes = nesting_depth.saturating_sub(1) * 2;
+    (saved_nodes as f64 * 0.05).min(0.2)
+}
+```
+
+**Typical benefit**: 10-20%. Primarily a compile-time optimization
+that simplifies subsequent rule matching.
+
+## Test Cases
+
+### Positive: parenthesized sequence without quantifier
+
+```sql
+-- Pattern: (A B) C D
+-- After:   A B C D
+MATCH_RECOGNIZE (
+  PATTERN ((A B) C D)
+  DEFINE A AS price > 100, B AS price > PREV(price),
+         C AS price < PREV(price), D AS price > 200
+)
+```
+
+### Positive: deeply nested
+
+```sql
+-- Pattern: ((A (B C)) D)
+-- After:   A B C D
+MATCH_RECOGNIZE (
+  PATTERN (((A (B C)) D))
+  DEFINE A AS price > 100, B AS price > PREV(price),
+         C AS price < PREV(price), D AS price > 200
+)
+```
+
+### Negative: quantified group
+
+```sql
+-- Pattern: (A B)+ C  -- DO NOT flatten (A B)+
+-- The + quantifier applies to the group.
+MATCH_RECOGNIZE (
+  PATTERN ((A B)+ C)
+  DEFINE A AS price > PREV(price), B AS price > PREV(price),
+         C AS price < PREV(price)
+)
+```
+
+## References
+
+- Aho, Sethi, Ullman. "Compilers: Principles, Techniques, and Tools" (1986)
+- Berry & Sethi. "From Regular Expressions to Deterministic Automata" (1986)

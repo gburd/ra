@@ -1,0 +1,212 @@
+---
+id: rpr-push-partition-filter
+name: Push Filter Through PARTITION BY
+category: logical/rpr
+databases: [postgresql, oracle, duckdb, generic]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [rpr, predicate-pushdown, partition, filter]
+complexity: "O(1)"
+benefit_range: [0.3, 0.9]
+preconditions:
+  - type: pattern
+    must_match: "(filter ?pred (row-pattern ?input ?partition ?order ?defines ?measures ?pattern))"
+  - type: predicate
+    condition: "references_only_partition_columns(?pred, ?partition)"
+    description: "Filter predicate references only PARTITION BY columns"
+---
+
+# Push Filter Through PARTITION BY
+
+## Description
+
+Pushes predicates that reference only PARTITION BY columns through
+the RowPattern operator and into its input relation. Since PARTITION
+BY groups rows before pattern matching, filtering on partition
+columns before grouping eliminates entire partitions early.
+
+**When to apply**: A filter sits on top of a RowPattern operator and
+references only columns listed in PARTITION BY.
+
+**Why it works**: PARTITION BY is semantically equivalent to GROUP BY
+for the purpose of predicate pushdown. A predicate on a partition
+column evaluates the same for every row in that partition, so it can
+be applied before partitioning without changing the result.
+
+## Relational Algebra
+
+```algebra
+-- Before: filter after pattern matching
+sigma[symbol = 'AAPL'](
+  RowPattern[PARTITION BY symbol, ORDER BY date](Scan(T))
+)
+
+-- After: filter pushed below RowPattern
+RowPattern[PARTITION BY symbol, ORDER BY date](
+  sigma[symbol = 'AAPL'](Scan(T))
+)
+```
+
+### Conjunctive predicate with mixed columns
+
+```algebra
+-- Before
+sigma[symbol = 'AAPL' AND price > 100](
+  RowPattern[PARTITION BY symbol, ...](Scan(T))
+)
+
+-- After: split and push partition predicate only
+sigma[price > 100](
+  RowPattern[PARTITION BY symbol, ...](
+    sigma[symbol = 'AAPL'](Scan(T))
+  )
+)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Push partition-only filter below RowPattern
+rw!("rpr-push-partition-filter";
+    "(filter ?pred
+       (row-pattern ?input ?partition ?order
+         ?defines ?measures ?pattern))" =>
+    "(row-pattern
+       (filter ?pred ?input)
+       ?partition ?order ?defines ?measures ?pattern)"
+    if references_only_partition_columns("?pred", "?partition")
+),
+
+// Split conjunctive filter: push partition part, keep rest
+rw!("rpr-split-push-partition-filter";
+    "(filter (and ?part_pred ?other_pred)
+       (row-pattern ?input ?partition ?order
+         ?defines ?measures ?pattern))" =>
+    "(filter ?other_pred
+       (row-pattern
+         (filter ?part_pred ?input)
+         ?partition ?order ?defines ?measures ?pattern))"
+    if references_only_partition_columns("?part_pred", "?partition")
+    if does_not_reference_partition_only("?other_pred", "?partition")
+),
+```
+
+## Preconditions
+
+```rust
+fn references_only_partition_columns(
+    pred: &Expr,
+    partition: &[Expr],
+) -> bool {
+    let pred_cols = pred.column_references();
+    let part_cols: HashSet<_> = partition.iter()
+        .filter_map(|e| e.as_column_ref())
+        .collect();
+    pred_cols.iter().all(|c| part_cols.contains(c))
+}
+
+fn does_not_reference_partition_only(
+    pred: &Expr,
+    partition: &[Expr],
+) -> bool {
+    !references_only_partition_columns(pred, partition)
+}
+```
+
+**Restrictions:**
+- Predicate must reference only PARTITION BY columns (no ORDER BY, DEFINE, or MEASURE columns).
+- For conjunctive predicates, only the partition-referencing conjuncts are pushed.
+- Non-deterministic functions in the predicate block pushdown.
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    total_partitions: f64,
+    selectivity: f64,
+) -> f64 {
+    // Each eliminated partition avoids: sorting + DFA evaluation
+    // for all rows in that partition.
+    let partitions_eliminated = total_partitions * (1.0 - selectivity);
+    partitions_eliminated / total_partitions
+}
+```
+
+**Typical benefit**: 30-90%. Filtering `symbol = 'AAPL'` from a
+table with 500 stock symbols eliminates 499/500 = 99.8% of
+partitions. This is the single most impactful RPR optimization
+for selective partition predicates.
+
+## Test Cases
+
+### Positive: equality on partition column
+
+```sql
+-- Before
+SELECT * FROM stock_prices
+  MATCH_RECOGNIZE (
+    PARTITION BY symbol
+    ORDER BY trade_date
+    PATTERN (A+ B+)
+    DEFINE A AS price > PREV(price), B AS price < PREV(price)
+  )
+WHERE symbol = 'AAPL';
+
+-- After: filter pushed below RowPattern
+```
+
+### Positive: range on partition column
+
+```sql
+-- Before
+SELECT * FROM sensor_data
+  MATCH_RECOGNIZE (
+    PARTITION BY sensor_id
+    ORDER BY ts
+    PATTERN (A+ B)
+    DEFINE A AS reading > PREV(reading), B AS reading < 0
+  )
+WHERE sensor_id BETWEEN 100 AND 200;
+
+-- After: filter on sensor_id range pushed below
+```
+
+### Positive: mixed predicate split
+
+```sql
+-- Before
+SELECT * FROM stock_prices
+  MATCH_RECOGNIZE (
+    PARTITION BY symbol
+    ORDER BY trade_date
+    PATTERN (A+ B+)
+    DEFINE A AS price > PREV(price), B AS price < PREV(price)
+  )
+WHERE symbol = 'AAPL' AND price > 100;
+
+-- After: symbol = 'AAPL' pushed below, price > 100 stays above
+```
+
+### Negative: filter on non-partition column
+
+```sql
+-- Cannot push: price is not a PARTITION BY column
+SELECT * FROM stock_prices
+  MATCH_RECOGNIZE (
+    PARTITION BY symbol
+    ORDER BY trade_date
+    PATTERN (A+)
+    DEFINE A AS price > PREV(price)
+  )
+WHERE price > 100;
+```
+
+## References
+
+- Zemke, F. "SQL Row Pattern Recognition" ISO/IEC 19075-5:2016
+- PostgreSQL: set_plan_references for partition pruning
+- Graefe, G. "The Cascades Framework for Query Optimization" (1995)

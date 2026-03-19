@@ -1,0 +1,165 @@
+---
+id: rpr-normalize-quantifier-ranges
+name: Normalize Quantifier Ranges
+category: logical/rpr
+databases: [postgresql, oracle, duckdb, generic]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [rpr, pattern, simplification, quantifier, normalization]
+complexity: "O(1)"
+benefit_range: [0.05, 0.2]
+preconditions:
+  - type: pattern
+    must_match: "(pattern-quantified ?var (range ?min ?max))"
+  - type: predicate
+    condition: "is_decomposable_range(?min, ?max)"
+    description: "Range quantifier can be decomposed into exact + optional parts"
+---
+
+# Normalize Quantifier Ranges
+
+## Description
+
+Decomposes range quantifiers into a mandatory exact-count prefix
+and an optional suffix. This canonical form simplifies DFA
+compilation by separating the "must match" part from the "may
+match" part.
+
+**When to apply**: A range quantifier `{min, max}` has `min > 0`
+and can be split into a mandatory `{min}` followed by an optional
+`{0, max-min}`.
+
+**Why it works**: `A{2,5}` is equivalent to `A{2} A{0,3}`. The
+mandatory part generates linear DFA states (no branching), while
+the optional part generates branching states. Separating them
+allows the DFA compiler to optimize each independently.
+
+## Relational Algebra
+
+```algebra
+-- Before
+PatternQuantified(A, Range(2, 5))
+
+-- After
+Sequence([
+  PatternQuantified(A, Exactly(2)),
+  PatternQuantified(A, Range(0, 3))
+])
+
+-- Before
+PatternQuantified(A, Range(3, 3))
+
+-- After (via eliminate-redundant-quantifier)
+PatternQuantified(A, Exactly(3))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Decompose {min, max} where min > 0
+rw!("rpr-decompose-range-quantifier";
+    "(pattern-quantified ?var (range ?min ?max))" =>
+    "(pattern-sequence
+       (pattern-quantified ?var (exactly ?min))
+       (pattern-quantified ?var (range 0 (sub ?max ?min))))"
+    if min_greater_than_zero("?min")
+    if max_greater_than_min("?min", "?max")
+),
+
+// {0,0} matches empty string, eliminate
+rw!("rpr-eliminate-zero-range";
+    "(pattern-quantified ?var (range 0 0))" =>
+    "(pattern-empty)"
+),
+
+// {n,n} simplifies to {n}
+rw!("rpr-range-to-exact";
+    "(pattern-quantified ?var (range ?n ?n))" =>
+    "(pattern-quantified ?var (exactly ?n))"
+),
+```
+
+## Preconditions
+
+```rust
+fn is_decomposable_range(min: usize, max: Option<usize>) -> bool {
+    match max {
+        Some(m) => min > 0 && m > min,
+        None => min > 0, // {min,} -> {min} followed by *
+    }
+}
+
+fn min_greater_than_zero(min: usize) -> bool {
+    min > 0
+}
+
+fn max_greater_than_min(min: usize, max: Option<usize>) -> bool {
+    match max {
+        Some(m) => m > min,
+        None => true,
+    }
+}
+```
+
+**Restrictions:**
+- Only applies when min > 0 and max > min (or max is unbounded).
+- Do not decompose if the range is already in simplest form ({0,1}, {1,}, etc.).
+
+## Cost Model
+
+```rust
+fn estimated_benefit(min: usize, max: usize) -> f64 {
+    // Linear states for exact part: min * 2
+    // Branching states for optional part: (max - min) * 3
+    // vs original: max * 3 (all branching)
+    let original = max * 3;
+    let decomposed = min * 2 + (max - min) * 3;
+    (original as f64 - decomposed as f64) / original as f64
+}
+```
+
+**Typical benefit**: 5-20%. Reduces DFA state count for the
+mandatory portion by converting branching states to linear chains.
+
+## Test Cases
+
+### Positive: range with positive minimum
+
+```sql
+-- Pattern: A{2,5}
+-- After:   A{2} A{0,3}
+MATCH_RECOGNIZE (
+  PATTERN (A{2,5})
+  DEFINE A AS price > PREV(price)
+)
+```
+
+### Positive: unbounded range
+
+```sql
+-- Pattern: A{3,}
+-- After:   A{3} A*
+MATCH_RECOGNIZE (
+  PATTERN (A{3,})
+  DEFINE A AS price > PREV(price)
+)
+```
+
+### Negative: zero minimum
+
+```sql
+-- Pattern: A{0,3}  -- Already in canonical form
+MATCH_RECOGNIZE (
+  PATTERN (A{0,3})
+  DEFINE A AS price > PREV(price)
+)
+```
+
+## References
+
+- Aho, Sethi, Ullman. "Compilers: Principles, Techniques, and Tools" (1986), Ch. 3
+- Cox, R. "Regular Expression Matching Can Be Simple And Fast" (2007)

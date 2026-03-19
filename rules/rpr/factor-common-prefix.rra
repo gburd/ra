@@ -1,0 +1,200 @@
+---
+id: rpr-factor-common-prefix
+name: Factor Common Prefixes in Alternation
+category: logical/rpr
+databases: [postgresql, oracle, duckdb, generic]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [rpr, pattern, simplification, alternation, factoring]
+complexity: "O(n*m)"
+benefit_range: [0.2, 0.5]
+preconditions:
+  - type: pattern
+    must_match: "(pattern-alternation ?branches)"
+  - type: predicate
+    condition: "has_common_prefix(?branches)"
+    description: "At least two alternation branches share a common prefix"
+---
+
+# Factor Common Prefixes in Alternation
+
+## Description
+
+When alternation branches share a common prefix, factor it out to
+reduce duplicate DFA state transitions. This is the pattern-level
+equivalent of left-factoring in grammar optimization.
+
+**When to apply**: Two or more branches of a `|` alternation begin
+with the same sequence of pattern variables.
+
+**Why it works**: `(A B C) | (A B D)` matches the same strings as
+`A B (C | D)`. The factored version shares DFA states for `A B`,
+reducing state count and transition table size.
+
+## Relational Algebra
+
+```algebra
+-- Before: alternation with common prefix
+Alternation([
+  Sequence([A, B, C]),
+  Sequence([A, B, D])
+])
+
+-- After: factored
+Sequence([A, B, Alternation([C, D])])
+
+-- Before: three branches with partial common prefix
+Alternation([
+  Sequence([A, B, C]),
+  Sequence([A, B, D]),
+  Sequence([A, E])
+])
+
+-- After: nested factoring
+Sequence([A, Alternation([
+  Sequence([B, Alternation([C, D])]),
+  E
+])])
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Factor common prefix from two alternation branches
+rw!("rpr-factor-common-prefix-2";
+    "(pattern-alternation
+       (pattern-sequence ?prefix ?suffix_x)
+       (pattern-sequence ?prefix ?suffix_y))" =>
+    "(pattern-sequence ?prefix
+       (pattern-alternation ?suffix_x ?suffix_y))"
+    if is_identical_prefix("?prefix")
+),
+
+// Factor common suffix from two alternation branches
+rw!("rpr-factor-common-suffix-2";
+    "(pattern-alternation
+       (pattern-sequence ?prefix_x ?suffix)
+       (pattern-sequence ?prefix_y ?suffix))" =>
+    "(pattern-sequence
+       (pattern-alternation ?prefix_x ?prefix_y)
+       ?suffix)"
+    if is_identical_suffix("?suffix")
+),
+
+// Factor single common prefix variable
+rw!("rpr-factor-single-prefix";
+    "(pattern-alternation
+       (pattern-sequence ?a ?rest_x)
+       (pattern-sequence ?a ?rest_y))" =>
+    "(pattern-sequence ?a
+       (pattern-alternation ?rest_x ?rest_y))"
+),
+```
+
+## Preconditions
+
+```rust
+fn has_common_prefix(branches: &[PatternExpr]) -> bool {
+    if branches.len() < 2 {
+        return false;
+    }
+    // Check if any pair of branches shares a leading element.
+    for i in 0..branches.len() {
+        for j in (i + 1)..branches.len() {
+            if common_prefix_length(&branches[i], &branches[j]) > 0 {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn common_prefix_length(a: &PatternExpr, b: &PatternExpr) -> usize {
+    match (a, b) {
+        (PatternExpr::Sequence(sa), PatternExpr::Sequence(sb)) => {
+            sa.iter().zip(sb.iter())
+                .take_while(|(x, y)| x == y)
+                .count()
+        }
+        _ => 0,
+    }
+}
+```
+
+**Restrictions:**
+- Prefixes must be structurally identical (same variables, same quantifiers).
+- Factoring alternations with different quantifiers on the prefix is not valid.
+- This rule may need multiple applications to fully factor deeply nested alternations.
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    prefix_len: usize,
+    num_branches: usize,
+) -> f64 {
+    // Each shared prefix variable saves (num_branches - 1) DFA
+    // states that would otherwise be duplicated.
+    let saved_states = prefix_len * (num_branches - 1) * 2;
+    let total_states = prefix_len * num_branches * 2 + 10;
+    saved_states as f64 / total_states as f64
+}
+```
+
+**Typical benefit**: 20-50%. Proportional to prefix length and
+branch count. A 5-variable common prefix across 3 branches saves
+20 DFA states.
+
+## Test Cases
+
+### Positive: two branches with common prefix
+
+```sql
+-- Pattern: (A B C) | (A B D)
+-- After:   A B (C | D)
+MATCH_RECOGNIZE (
+  PATTERN ((A B C) | (A B D))
+  DEFINE
+    A AS price > PREV(price),
+    B AS price > PREV(price),
+    C AS price < PREV(price),
+    D AS volume > 1000000
+)
+```
+
+### Positive: three branches with shared start
+
+```sql
+-- Pattern: (A B C) | (A B D) | (A E)
+-- After:   A ((B (C | D)) | E)
+MATCH_RECOGNIZE (
+  PATTERN ((A B C) | (A B D) | (A E))
+  DEFINE
+    A AS price > 100,
+    B AS price > PREV(price),
+    C AS price > 200,
+    D AS volume > 500000,
+    E AS price < PREV(price)
+)
+```
+
+### Negative: no common prefix
+
+```sql
+-- Pattern: (A B) | (C D)  -- No shared prefix
+MATCH_RECOGNIZE (
+  PATTERN ((A B) | (C D))
+  DEFINE
+    A AS price > 100, B AS price > 200,
+    C AS price < 50, D AS price < 25
+)
+```
+
+## References
+
+- Aho, Lam, Sethi, Ullman. "Compilers" (2006), Section 4.3 (Left Factoring)
+- Hopcroft, J. "An n log n Algorithm for Minimizing States in a Finite Automaton" (1971)

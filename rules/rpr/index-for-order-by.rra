@@ -1,0 +1,227 @@
+---
+id: rpr-index-for-order-by
+name: Use Index for ORDER BY in Pattern Matching
+category: physical/rpr
+databases: [postgresql, oracle, duckdb, mssql]
+execution_models: [logical-rewrite, physical-optimization]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [rpr, index, order-by, sort-elimination, physical]
+complexity: "O(1)"
+benefit_range: [0.3, 0.8]
+preconditions:
+  - type: pattern
+    must_match: "(row-pattern (sort ?order ?input) ?partition ?order ?defines ?measures ?pattern)"
+  - type: fact
+    fact_type: schema.index_exists
+    table: "?input_table"
+    columns: "?order_cols"
+    description: "Index exists covering the ORDER BY columns"
+  - type: fact
+    fact_type: statistics.cardinality
+    table: "?input_table"
+    comparator: ">"
+    threshold: 10000
+    description: "Table is large enough to benefit from index scan"
+---
+
+# Use Index for ORDER BY in Pattern Matching
+
+## Description
+
+Replaces explicit Sort + SeqScan with an IndexScan that delivers
+rows in the ORDER BY sequence required by MATCH_RECOGNIZE. This
+eliminates the O(n log n) sort step, which is often the dominant
+cost in RPR queries on large tables.
+
+**When to apply**: The RowPattern operator requires sorted input
+(ORDER BY), the underlying table has an index on the ORDER BY
+columns, and the table is large enough to benefit.
+
+**Why it works**: An index on `(trade_date)` or `(symbol, trade_date)`
+delivers rows in sorted order without an explicit sort. Since RPR
+requires sequential processing in ORDER BY order, pre-sorted input
+eliminates the sort entirely.
+
+## Relational Algebra
+
+```algebra
+-- Before: explicit sort
+RowPattern(
+  Sort(order_by: [trade_date], SeqScan(stock_prices)),
+  partition: [symbol],
+  order: [trade_date],
+  ...
+)
+
+-- After: index scan (pre-sorted)
+RowPattern(
+  IndexScan(stock_prices, idx_trade_date),
+  partition: [symbol],
+  order: [trade_date],
+  ...
+)
+
+-- With composite index matching PARTITION + ORDER
+-- Before
+RowPattern(
+  Sort(order_by: [trade_date],
+    SeqScan(stock_prices)),
+  partition: [symbol],
+  order: [trade_date], ...
+)
+
+-- After (composite index covers both)
+RowPattern(
+  IndexScan(stock_prices, idx_symbol_date,
+    bounds: partition_ranges),
+  partition: [symbol],
+  order: [trade_date], ...
+)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Replace Sort + SeqScan with IndexScan
+rw!("rpr-index-for-order";
+    "(row-pattern
+       (sort ?order (scan ?table))
+       ?partition ?order ?defines ?measures ?pattern)" =>
+    "(row-pattern
+       (index-scan ?table (lookup-index ?table ?order))
+       ?partition ?order ?defines ?measures ?pattern)"
+    if index_exists_for_order("?table", "?order")
+),
+
+// Composite index covers PARTITION BY + ORDER BY
+rw!("rpr-composite-index-for-partition-order";
+    "(row-pattern
+       (sort ?order (scan ?table))
+       ?partition ?order ?defines ?measures ?pattern)" =>
+    "(row-pattern
+       (index-scan ?table
+         (lookup-index ?table (append ?partition ?order)))
+       ?partition ?order ?defines ?measures ?pattern)"
+    if index_exists_for_columns("?table", "?partition", "?order")
+),
+
+// Sort elimination when input is already ordered
+rw!("rpr-eliminate-redundant-sort";
+    "(row-pattern
+       (sort ?order (index-scan ?table ?idx))
+       ?partition ?order ?defines ?measures ?pattern)" =>
+    "(row-pattern
+       (index-scan ?table ?idx)
+       ?partition ?order ?defines ?measures ?pattern)"
+    if index_provides_order("?idx", "?order")
+),
+```
+
+## Preconditions
+
+```rust
+fn index_exists_for_order(table: &str, order: &[OrderByExpr]) -> bool {
+    let order_cols: Vec<_> = order.iter()
+        .map(|o| o.column.clone())
+        .collect();
+    schema::find_index(table, &order_cols).is_some()
+}
+
+fn index_exists_for_columns(
+    table: &str,
+    partition: &[Expr],
+    order: &[OrderByExpr],
+) -> bool {
+    let mut cols: Vec<String> = partition.iter()
+        .filter_map(|e| e.as_column_ref())
+        .map(|c| c.to_string())
+        .collect();
+    cols.extend(order.iter().map(|o| o.column.clone()));
+    schema::find_index(table, &cols).is_some()
+}
+```
+
+**Restrictions:**
+- Index must cover all ORDER BY columns in the correct direction (ASC/DESC).
+- For composite indexes, PARTITION BY columns should be prefix of the index, followed by ORDER BY columns.
+- If the table has additional filter predicates, the index must also satisfy those (or a separate filter can be applied after index scan).
+- Small tables (< 10K rows) may not benefit due to index access overhead.
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    table_card: f64,
+    has_composite_index: bool,
+) -> f64 {
+    // Sort cost: O(n log n)
+    let sort_cost = table_card * table_card.log2() * 0.001;
+
+    // Index scan cost: O(n) sequential read
+    let index_scan_cost = table_card * 0.005;
+
+    // Composite index additionally eliminates partition grouping
+    let partition_savings = if has_composite_index { 0.1 } else { 0.0 };
+
+    ((sort_cost - index_scan_cost) / sort_cost) + partition_savings
+}
+```
+
+**Typical benefit**: 30-80%. For 1M rows, sort is ~20x cost of
+index scan. Composite index additionally groups partitions.
+
+## Test Cases
+
+### Positive: index on ORDER BY column
+
+```sql
+-- Given: CREATE INDEX idx_date ON stock_prices(trade_date)
+-- Before: Sort(trade_date) + SeqScan
+-- After: IndexScan(idx_date)
+SELECT * FROM stock_prices
+  MATCH_RECOGNIZE (
+    ORDER BY trade_date
+    PATTERN (A+ B+)
+    DEFINE A AS price > PREV(price), B AS price < PREV(price)
+  );
+```
+
+### Positive: composite index on PARTITION + ORDER
+
+```sql
+-- Given: CREATE INDEX idx_sym_date ON stock_prices(symbol, trade_date)
+-- Before: Sort(trade_date) + SeqScan
+-- After: IndexScan(idx_sym_date) -- sorted within each partition
+SELECT * FROM stock_prices
+  MATCH_RECOGNIZE (
+    PARTITION BY symbol
+    ORDER BY trade_date
+    PATTERN (A+)
+    DEFINE A AS price > PREV(price)
+  );
+```
+
+### Negative: no suitable index
+
+```sql
+-- No index on trade_date or (symbol, trade_date)
+-- Sort cannot be eliminated. Rule does not apply.
+```
+
+### Negative: wrong index direction
+
+```sql
+-- Index: CREATE INDEX idx_date_desc ON prices(trade_date DESC)
+-- ORDER BY trade_date ASC  -- direction mismatch
+-- Rule does not apply unless database supports backward index scan.
+```
+
+## References
+
+- Selinger et al. "Access Path Selection in a Relational Database Management System" (1979)
+- PostgreSQL: pathkeys.c (sort order inference from indexes)
+- Oracle: INDEX_DESC hint for reverse-order scans

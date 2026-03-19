@@ -1,0 +1,186 @@
+---
+id: rpr-next-pattern-to-lead
+name: Translate NEXT-Based Pattern to LEAD()
+category: logical/rpr
+databases: [postgresql, oracle, duckdb, mssql, generic]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [rpr, translation, window-function, lead, next]
+complexity: "O(1)"
+benefit_range: [0.5, 0.8]
+preconditions:
+  - type: pattern
+    must_match: "(row-pattern ?input ?partition ?order ?defines ?measures ?pattern)"
+  - type: predicate
+    condition: "defines_use_only_next(?defines)"
+    description: "All DEFINE conditions use only NEXT() navigation"
+  - type: predicate
+    condition: "is_single_var_pattern(?pattern)"
+    description: "Pattern is a single variable with quantifier"
+---
+
+# Translate NEXT-Based Pattern to LEAD()
+
+## Description
+
+Translates MATCH_RECOGNIZE patterns that use `NEXT()` navigation
+to LEAD() window functions. This is the forward-looking counterpart
+to the LAG() translation rule for PREV()-based patterns.
+
+**When to apply**: Pattern is a single variable with quantifier
+and DEFINE uses only `NEXT(col, offset)` comparisons.
+
+**Why it works**: `DEFINE A AS price < NEXT(price)` matches rows
+where the current price is less than the next row's price. This
+is exactly `price < LEAD(price, 1) OVER (ORDER BY ...)`.
+
+## Relational Algebra
+
+```algebra
+-- Before: NEXT-based pattern
+RowPattern(
+  input: R,
+  order: [ts],
+  pattern: Quantified(A, OneOrMore),
+  defines: { A: Lt(col, Next(col, 1)) }
+)
+
+-- After: LEAD window function
+Filter(
+  col < LEAD(col, 1) OVER (ORDER BY ts),
+  R
+)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// NEXT(col, 1) -> LEAD(col, 1)
+rw!("rpr-next-to-lead";
+    "(row-pattern ?input ?partition ?order
+       (defines ((define ?var (compare ?op ?col (next ?col 1)))))
+       ?measures
+       (pattern-quantified ?var one-or-more))" =>
+    "(filter
+       (compare ?op ?col (lead ?col 1 (window ?partition ?order)))
+       ?input)"
+    if is_simple_comparison("?op")
+),
+
+// NEXT with arbitrary offset
+rw!("rpr-next-n-to-lead-n";
+    "(row-pattern ?input ?partition ?order
+       (defines ((define ?var (compare ?op ?col (next ?col ?n)))))
+       ?measures
+       (pattern-quantified ?var one-or-more))" =>
+    "(filter
+       (compare ?op ?col (lead ?col ?n (window ?partition ?order)))
+       ?input)"
+    if is_simple_comparison("?op")
+    if is_constant_offset("?n")
+),
+
+// Mixed PREV and NEXT -> LAG and LEAD combination
+rw!("rpr-prev-next-to-lag-lead";
+    "(row-pattern ?input ?partition ?order
+       (defines ((define ?var
+         (and (compare ?op1 ?col1 (prev ?col1 1))
+              (compare ?op2 ?col2 (next ?col2 1))))))
+       ?measures
+       (pattern-quantified ?var one-or-more))" =>
+    "(filter
+       (and
+         (compare ?op1 ?col1 (lag ?col1 1 (window ?partition ?order)))
+         (compare ?op2 ?col2 (lead ?col2 1 (window ?partition ?order))))
+       ?input)"
+    if is_simple_comparison("?op1")
+    if is_simple_comparison("?op2")
+),
+```
+
+## Preconditions
+
+```rust
+fn defines_use_only_next(defines: &HashMap<Symbol, Expr>) -> bool {
+    defines.values().all(|expr| {
+        let nav_calls = expr.navigation_calls();
+        nav_calls.iter().all(|n| matches!(n, NavCall::Next(_, _)))
+    })
+}
+
+fn is_single_var_pattern(pattern: &PatternExpr) -> bool {
+    matches!(pattern,
+        PatternExpr::Quantified(box PatternExpr::Var(_), _)
+    )
+}
+```
+
+**Restrictions:**
+- Same constraints as simple-pattern-to-lag: single variable, simple comparison.
+- NEXT() offset must be a positive constant.
+- Mixed PREV/NEXT patterns require both conditions to be simple comparisons.
+
+## Cost Model
+
+```rust
+fn estimated_benefit(input_card: f64) -> f64 {
+    // Same as LAG translation: window functions avoid DFA overhead.
+    let dfa_cost = input_card * 3.0 * 0.01;
+    let window_cost = input_card * 1.0 * 0.01;
+    (dfa_cost - window_cost) / dfa_cost
+}
+```
+
+**Typical benefit**: 50-80%. LEAD is as efficient as LAG in all
+major databases.
+
+## Test Cases
+
+### Positive: simple NEXT pattern
+
+```sql
+-- Before
+SELECT * FROM sensor_data
+  MATCH_RECOGNIZE (
+    ORDER BY ts
+    PATTERN (A+)
+    DEFINE A AS reading < NEXT(reading)
+  );
+
+-- After
+SELECT * FROM sensor_data
+WHERE reading < LEAD(reading, 1) OVER (ORDER BY ts);
+```
+
+### Positive: NEXT with offset 2
+
+```sql
+-- Before
+MATCH_RECOGNIZE (
+  ORDER BY ts
+  PATTERN (A+)
+  DEFINE A AS value > NEXT(value, 2)
+)
+
+-- After
+WHERE value > LEAD(value, 2) OVER (ORDER BY ts)
+```
+
+### Negative: NEXT combined with non-navigation condition
+
+```sql
+-- Cannot translate: DEFINE has non-navigation predicate
+MATCH_RECOGNIZE (
+  PATTERN (A+)
+  DEFINE A AS reading < NEXT(reading) AND status = 'active'
+)
+```
+
+## References
+
+- SQL:2016 ISO/IEC 19075-5 (Row Pattern Recognition)
+- SQL:2003 ISO/IEC 9075 Section 7.11 (Window Functions)

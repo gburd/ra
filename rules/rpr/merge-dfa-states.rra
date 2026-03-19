@@ -1,0 +1,250 @@
+---
+id: rpr-merge-equivalent-dfa-states
+name: Merge Equivalent DFA States
+category: physical/rpr
+databases: [postgresql, oracle, duckdb, generic]
+execution_models: [logical-rewrite, physical-optimization]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [rpr, dfa, minimization, states, hopcroft]
+complexity: "O(n log n)"
+benefit_range: [0.1, 0.4]
+preconditions:
+  - type: pattern
+    must_match: "(row-pattern ?input ?partition ?order ?defines ?measures ?pattern)"
+  - type: predicate
+    condition: "dfa_has_equivalent_states(?pattern, ?defines)"
+    description: "Compiled DFA contains states with identical transitions and acceptance"
+---
+
+# Merge Equivalent DFA States
+
+## Description
+
+Applies Hopcroft's DFA minimization algorithm to the compiled
+pattern automaton. DFA states with identical outgoing transitions
+and identical acceptance status are merged, reducing the state
+count and transition table size.
+
+**When to apply**: After DFA compilation from the pattern, when
+the compiled automaton has equivalent states. This is common when
+patterns have alternations or when different DEFINE conditions
+produce overlapping state sets during subset construction.
+
+**Why it works**: Two DFA states are equivalent if they accept
+the same set of future input strings. Hopcroft's algorithm
+computes the minimal DFA in O(n log n) time, where n is the
+number of states.
+
+## Relational Algebra
+
+```algebra
+-- Before: compiled DFA with redundant states
+RowPattern(
+  ...,
+  dfa: DFA {
+    states: [S0, S1, S2, S3, S4],
+    transitions: {
+      S0 -[A]-> S1,
+      S0 -[B]-> S2,
+      S1 -[C]-> S3,
+      S2 -[C]-> S3,  -- S1 and S2 have same out-transitions
+    },
+    accept: [S3]
+  }
+)
+
+-- After: minimized DFA (S1 and S2 merged)
+RowPattern(
+  ...,
+  dfa: DFA {
+    states: [S0, S12, S3],
+    transitions: {
+      S0 -[A]-> S12,
+      S0 -[B]-> S12,
+      S12 -[C]-> S3,
+    },
+    accept: [S3]
+  }
+)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Trigger DFA minimization after compilation
+rw!("rpr-minimize-dfa";
+    "(row-pattern ?input ?partition ?order ?defines ?measures
+       (compiled-dfa ?states ?transitions ?accept))" =>
+    "(row-pattern ?input ?partition ?order ?defines ?measures
+       (minimized-dfa (hopcroft-minimize ?states ?transitions ?accept)))"
+    if dfa_has_equivalent_states("?states", "?transitions", "?accept")
+),
+
+// Merge states with identical DEFINE conditions
+rw!("rpr-merge-define-equivalent-states";
+    "(dfa-state ?s1 (transitions ?t1) (define ?cond))
+     (dfa-state ?s2 (transitions ?t1) (define ?cond))" =>
+    "(dfa-state ?s1 (transitions ?t1) (define ?cond))"
+    if states_have_identical_transitions("?s1", "?s2")
+),
+```
+
+## Algorithm
+
+```rust
+fn hopcroft_minimize(dfa: &DFA) -> DFA {
+    // Hopcroft's partition refinement algorithm
+    // 1. Initial partition: {accepting states} U {non-accepting states}
+    // 2. For each partition P and input symbol a:
+    //    Split partitions based on where transitions on 'a' lead.
+    // 3. Repeat until no partition can be split.
+    // 4. Each final partition becomes one state in the minimal DFA.
+
+    let mut partitions = vec![
+        dfa.accepting_states().clone(),
+        dfa.non_accepting_states().clone(),
+    ];
+    let mut worklist: VecDeque<_> = partitions.iter().cloned().collect();
+
+    while let Some(splitter) = worklist.pop_front() {
+        for symbol in dfa.alphabet() {
+            let preimage = dfa.preimage(&splitter, symbol);
+            let mut new_partitions = Vec::new();
+
+            for partition in &partitions {
+                let intersection: HashSet<_> = partition
+                    .intersection(&preimage).cloned().collect();
+                let difference: HashSet<_> = partition
+                    .difference(&preimage).cloned().collect();
+
+                if !intersection.is_empty() && !difference.is_empty() {
+                    new_partitions.push(intersection.clone());
+                    new_partitions.push(difference.clone());
+                    worklist.push_back(
+                        if intersection.len() <= difference.len() {
+                            intersection
+                        } else {
+                            difference
+                        }
+                    );
+                } else {
+                    new_partitions.push(partition.clone());
+                }
+            }
+            partitions = new_partitions;
+        }
+    }
+
+    build_minimal_dfa(&partitions, dfa)
+}
+```
+
+## Preconditions
+
+```rust
+fn dfa_has_equivalent_states(
+    states: &[State],
+    transitions: &TransitionTable,
+    accept: &HashSet<State>,
+) -> bool {
+    // Check if any two states have identical outgoing transitions
+    // and same acceptance status.
+    for i in 0..states.len() {
+        for j in (i + 1)..states.len() {
+            let same_accept = accept.contains(&states[i])
+                == accept.contains(&states[j]);
+            let same_trans = transitions.outgoing(&states[i])
+                == transitions.outgoing(&states[j]);
+            if same_accept && same_trans {
+                return true;
+            }
+        }
+    }
+    false
+}
+```
+
+**Restrictions:**
+- Only applies to the compiled DFA, not the pattern AST.
+- Must preserve pattern variable labels on transitions for MEASURES computation.
+- Minimization must be done after all pattern simplification rules have been applied.
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    original_states: usize,
+    minimized_states: usize,
+    input_card: f64,
+) -> f64 {
+    // Per-row cost is proportional to number of active states
+    // (DFA has exactly one active state, but transition table
+    // lookup cost scales with table size).
+    let transition_table_before = original_states * original_states;
+    let transition_table_after = minimized_states * minimized_states;
+
+    let cache_benefit = if transition_table_after <= 64 { 0.1 } else { 0.0 };
+
+    let state_reduction = (original_states - minimized_states) as f64
+        / original_states as f64;
+    state_reduction * 0.4 + cache_benefit
+}
+```
+
+**Typical benefit**: 10-40%. Depends on pattern complexity and
+amount of state duplication. Complex patterns with alternations
+see the greatest reduction (20-40% state reduction).
+
+## Test Cases
+
+### Positive: alternation producing duplicate states
+
+```sql
+-- Pattern: (A B) | (A C)
+-- NFA -> DFA may produce duplicate states for the A prefix.
+-- After minimization: shared states for A.
+MATCH_RECOGNIZE (
+  PATTERN ((A B) | (A C))
+  DEFINE
+    A AS price > 100,
+    B AS price > PREV(price),
+    C AS volume > 1000000
+)
+```
+
+### Positive: patterns with equivalent DEFINE conditions
+
+```sql
+-- A and B have the same DEFINE condition
+-- DFA states for A-matching and B-matching are equivalent
+MATCH_RECOGNIZE (
+  PATTERN (A B)
+  DEFINE
+    A AS price > PREV(price),
+    B AS price > PREV(price)
+)
+-- After minimization: A and B states merged (same behavior)
+```
+
+### Negative: all states already distinct
+
+```sql
+-- Every state has unique transitions (already minimal)
+MATCH_RECOGNIZE (
+  PATTERN (A B C)
+  DEFINE
+    A AS price > 100,
+    B AS volume > 1000000,
+    C AS price < 50
+)
+```
+
+## References
+
+- Hopcroft, J. "An n log n Algorithm for Minimizing States in a Finite Automaton" (1971)
+- Brzozowski, J. "Canonical Regular Expressions and Minimal State Graphs" (1962)
+- Watson, B. "A Taxonomy of Finite Automata Minimization Algorithms" (1993)

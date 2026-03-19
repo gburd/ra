@@ -1,0 +1,181 @@
+---
+id: rpr-merge-equivalent-alternations
+name: Merge Equivalent Alternation Branches
+category: logical/rpr
+databases: [postgresql, oracle, duckdb, generic]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [rpr, pattern, simplification, alternation, deduplication]
+complexity: "O(n^2)"
+benefit_range: [0.1, 0.4]
+preconditions:
+  - type: pattern
+    must_match: "(pattern-alternation ?branches)"
+  - type: predicate
+    condition: "has_duplicate_branches(?branches)"
+    description: "Alternation has structurally identical branches"
+---
+
+# Merge Equivalent Alternation Branches
+
+## Description
+
+Removes duplicate branches from alternation patterns. When the same
+pattern sequence appears multiple times in a `|` expression, only
+one copy is needed. Also merges branches where the DEFINE conditions
+are logically equivalent even if structurally different.
+
+**When to apply**: An alternation contains two or more structurally
+identical branches, or branches whose DEFINE conditions are
+equivalent.
+
+**Why it works**: `A | A = A` in regular expression algebra.
+Duplicate branches add DFA states and transitions without changing
+the matched language.
+
+## Relational Algebra
+
+```algebra
+-- Before: duplicate branch
+Alternation([A, B, A])
+
+-- After: deduplicated
+Alternation([A, B])
+
+-- Before: branches with equivalent DEFINE
+Alternation([
+  Var(X, define: price > 100),
+  Var(Y, define: price > 100)
+])
+-- where X and Y have identical conditions
+
+-- After: single branch
+Var(X, define: price > 100)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Remove structurally identical branches
+rw!("rpr-dedup-alternation";
+    "(pattern-alternation ?a ?a ?rest)" =>
+    "(pattern-alternation ?a ?rest)"
+),
+
+// Remove duplicate from two-branch alternation
+rw!("rpr-dedup-alternation-pair";
+    "(pattern-alternation ?a ?a)" =>
+    "?a"
+),
+
+// Merge variables with equivalent DEFINE conditions
+rw!("rpr-merge-equiv-defines";
+    "(pattern-alternation
+       (pattern-var ?x (define ?cond))
+       (pattern-var ?y (define ?cond)))" =>
+    "(pattern-var ?x (define ?cond))"
+    if defines_equivalent("?x", "?y")
+),
+
+// Single-branch alternation reduces to its child
+rw!("rpr-singleton-alternation";
+    "(pattern-alternation ?single)" =>
+    "?single"
+),
+```
+
+## Preconditions
+
+```rust
+fn has_duplicate_branches(branches: &[PatternExpr]) -> bool {
+    for i in 0..branches.len() {
+        for j in (i + 1)..branches.len() {
+            if branches[i] == branches[j] {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn defines_equivalent(x: &Symbol, y: &Symbol, defs: &HashMap<Symbol, Expr>) -> bool {
+    // Check if two pattern variables have logically equivalent
+    // DEFINE conditions (structural equality after normalization).
+    match (defs.get(x), defs.get(y)) {
+        (Some(dx), Some(dy)) => dx.normalize() == dy.normalize(),
+        _ => false,
+    }
+}
+```
+
+**Restrictions:**
+- Structural equality check only; logical equivalence of complex predicates is not attempted.
+- DEFINE condition comparison uses normalized form (sorted conjuncts).
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    num_duplicates: usize,
+    branch_complexity: usize,
+) -> f64 {
+    // Each removed branch saves its full DFA state subtree.
+    let saved = num_duplicates * branch_complexity * 2;
+    let total = (num_duplicates + 1) * branch_complexity * 2 + 5;
+    saved as f64 / total as f64
+}
+```
+
+**Typical benefit**: 10-40%. Duplicate branches are uncommon in
+hand-written patterns but arise from automated pattern generation
+or macro expansion.
+
+## Test Cases
+
+### Positive: identical branches
+
+```sql
+-- Pattern: (A B) | (C D) | (A B)
+-- After:   (A B) | (C D)
+MATCH_RECOGNIZE (
+  PATTERN ((A B) | (C D) | (A B))
+  DEFINE
+    A AS price > 100, B AS price > PREV(price),
+    C AS price < 50, D AS price < PREV(price)
+)
+```
+
+### Positive: equivalent DEFINE conditions
+
+```sql
+-- X and Y have the same condition
+-- Pattern: X | Y  -> X
+MATCH_RECOGNIZE (
+  PATTERN (X | Y)
+  DEFINE
+    X AS price > PREV(price),
+    Y AS price > PREV(price)
+)
+```
+
+### Negative: structurally different branches
+
+```sql
+-- Pattern: (A B) | (A C)  -- B != C
+MATCH_RECOGNIZE (
+  PATTERN ((A B) | (A C))
+  DEFINE
+    A AS price > 100,
+    B AS price > PREV(price),
+    C AS volume > 1000000
+)
+```
+
+## References
+
+- Hopcroft, J. "An n log n Algorithm for Minimizing States in a Finite Automaton" (1971)
+- Brzozowski, J. "Canonical Regular Expressions and Minimal State Graphs" (1962)
