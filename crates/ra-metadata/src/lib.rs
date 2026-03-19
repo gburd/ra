@@ -23,6 +23,7 @@ pub mod connector;
 pub mod diff_validator;
 pub mod error;
 pub mod explain;
+pub mod factory;
 pub mod mysql;
 pub mod postgres;
 pub mod schema;
@@ -35,6 +36,7 @@ pub use explain::{
     parse_sqlite_explain, ExplainNode, ExplainPlan, JoinType,
     NodeType,
 };
+pub use factory::{AnyConnector, connect, detect_kind};
 pub use schema::{
     ColumnInfo, ColumnStatistics, ConstraintInfo, ConstraintKind,
     DatabaseKind, IndexInfo, SchemaInfo, TableInfo, TableStats,
