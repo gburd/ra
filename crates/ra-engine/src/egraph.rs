@@ -953,6 +953,23 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
                 Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
             }
         }
+        RelExpr::MultiUnnest {
+            exprs, aliases, with_ordinality,
+        } => {
+            let tag_id = add_symbol(rec, "multi_unnest");
+            let ord_id = add_bool_flag(rec, *with_ordinality);
+            let mut ids = vec![tag_id, ord_id];
+            for (expr, alias) in
+                exprs.iter().zip(aliases.iter())
+            {
+                ids.push(add_scalar_expr(rec, expr)?);
+                ids.push(add_symbol(
+                    rec,
+                    alias.as_deref().unwrap_or(""),
+                ));
+            }
+            Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
+        }
         RelExpr::TableFunction { name, args, input, .. } => {
             let name_id = add_symbol(rec, name);
             let mut ids = vec![name_id];
@@ -1087,6 +1104,23 @@ fn add_scalar_expr(rec: &mut RecExpr<RelLang>, expr: &Expr) -> Result<Id, EGraph
         Expr::PatternMatchNumber => {
             let tag_id = add_symbol(rec, "MATCH_NUMBER");
             let ids = vec![tag_id];
+            Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
+        }
+        Expr::ArraySlice {
+            array, start, end,
+        } => {
+            let arr_id = add_scalar_expr(rec, array)?;
+            let start_id = match start {
+                Some(s) => add_scalar_expr(rec, s)?,
+                None => rec.add(RelLang::ConstNull),
+            };
+            let end_id = match end {
+                Some(e) => add_scalar_expr(rec, e)?,
+                None => rec.add(RelLang::ConstNull),
+            };
+            let tag_id = add_symbol(rec, "ARRAY_SLICE");
+            let ids =
+                vec![tag_id, arr_id, start_id, end_id];
             Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
         }
     }

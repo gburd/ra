@@ -9,6 +9,7 @@ use std::hash::BuildHasher;
 
 use egg::{Id, Language, RecExpr};
 use ra_core::algebra::RelExpr;
+use ra_core::expr::Const;
 use ra_core::statistics::Statistics;
 use ra_stats::accuracy::Staleness;
 
@@ -413,6 +414,39 @@ fn convert_func_as_relational(
                 with_ordinality,
             })
         }
+        "multi_unnest" => {
+            // [tag, ordinality, expr0, alias0, expr1, alias1, ...]
+            if ids.len() < 4 {
+                return Err(EGraphError::ExtractionError(
+                    "multi_unnest requires at least 4 children"
+                        .into(),
+                ));
+            }
+            let with_ordinality =
+                convert_bool_flag(nodes, id(ids[1]))?;
+            let mut exprs = Vec::new();
+            let mut aliases = Vec::new();
+            let mut i = 2;
+            while i + 1 < ids.len() {
+                exprs.push(convert_scalar(
+                    nodes,
+                    id(ids[i]),
+                )?);
+                let alias_str =
+                    get_symbol(nodes, id(ids[i + 1]))?;
+                aliases.push(if alias_str.is_empty() {
+                    None
+                } else {
+                    Some(alias_str)
+                });
+                i += 2;
+            }
+            Ok(RelExpr::MultiUnnest {
+                exprs,
+                aliases,
+                with_ordinality,
+            })
+        }
         _ => {
             // General table function: [name, arg0, arg1, ..., optional_input]
             let name = tag;
@@ -525,6 +559,28 @@ fn convert_scalar_operator(
                 Box::new(array),
                 Box::new(index),
             ));
+        }
+        if name == "ARRAY_SLICE" && ids.len() == 4 {
+            let array = convert_scalar(nodes, id(ids[1]))?;
+            let start_expr =
+                convert_scalar(nodes, id(ids[2]))?;
+            let end_expr =
+                convert_scalar(nodes, id(ids[3]))?;
+            let start = if start_expr == Expr::Const(Const::Null) {
+                None
+            } else {
+                Some(Box::new(start_expr))
+            };
+            let end = if end_expr == Expr::Const(Const::Null) {
+                None
+            } else {
+                Some(Box::new(end_expr))
+            };
+            return Ok(Expr::ArraySlice {
+                array: Box::new(array),
+                start,
+                end,
+            });
         }
         let mut args = Vec::with_capacity(ids.len() - 1);
         for &fid in &ids[1..] {

@@ -144,6 +144,111 @@ impl UnnestExecutor {
     }
 }
 
+/// Executor for multi-argument UNNEST (parallel array expansion).
+///
+/// PostgreSQL allows unnesting multiple arrays in parallel:
+/// `SELECT * FROM unnest(ARRAY[1,2,3], ARRAY['a','b','c'])`.
+/// Shorter arrays are padded with NULL.
+#[derive(Debug)]
+pub struct MultiUnnestExecutor {
+    /// Expressions producing the arrays to unnest.
+    exprs: Vec<Expr>,
+    /// Column aliases for each array.
+    aliases: Vec<Option<String>>,
+    /// Whether to include an ordinality column.
+    with_ordinality: bool,
+}
+
+impl MultiUnnestExecutor {
+    /// Create a multi-argument unnest executor.
+    #[must_use]
+    pub fn new(
+        exprs: Vec<Expr>,
+        aliases: Vec<Option<String>>,
+        with_ordinality: bool,
+    ) -> Self {
+        Self {
+            exprs,
+            aliases,
+            with_ordinality,
+        }
+    }
+
+    /// Execute the multi-argument unnest.
+    ///
+    /// Expands each array in parallel. The output has one column
+    /// per array, plus an optional ordinality column. Rows are
+    /// padded with NULL when arrays have different lengths.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any expression does not evaluate to
+    /// an array.
+    pub fn execute(&self) -> Result<Vec<Row>, ExecutionError> {
+        let mut columns: Vec<Vec<Const>> =
+            Vec::with_capacity(self.exprs.len());
+
+        for expr in &self.exprs {
+            let elements = extract_array_from_expr(expr)?;
+            columns.push(elements);
+        }
+
+        let max_len = columns
+            .iter()
+            .map(Vec::len)
+            .max()
+            .unwrap_or(0);
+
+        let mut rows = Vec::with_capacity(max_len);
+        for idx in 0..max_len {
+            let mut values = Vec::with_capacity(
+                columns.len() + usize::from(self.with_ordinality),
+            );
+            for col in &columns {
+                let val = col
+                    .get(idx)
+                    .cloned()
+                    .unwrap_or(Const::Null);
+                values.push(val);
+            }
+            if self.with_ordinality {
+                #[allow(clippy::cast_possible_wrap)]
+                values.push(Const::Int((idx as i64) + 1));
+            }
+            rows.push(Row::new(values));
+        }
+
+        Ok(rows)
+    }
+
+    /// Column aliases for the output.
+    #[must_use]
+    pub fn column_aliases(&self) -> &[Option<String>] {
+        &self.aliases
+    }
+}
+
+/// Extract array elements from an expression.
+fn extract_array_from_expr(
+    expr: &Expr,
+) -> Result<Vec<Const>, ExecutionError> {
+    match expr {
+        Expr::Array(elements) => {
+            let mut result =
+                Vec::with_capacity(elements.len());
+            for elem in elements {
+                result.push(eval_const_expr(elem)?);
+            }
+            Ok(result)
+        }
+        Expr::Const(Const::Null) => Ok(vec![]),
+        other => Err(ExecutionError::EvalError(format!(
+            "multi-UNNEST requires array expressions, got: \
+             {other:?}"
+        ))),
+    }
+}
+
 /// Evaluate a constant expression to a [`Const`] value.
 fn eval_const_expr(expr: &Expr) -> Result<Const, ExecutionError> {
     match expr {

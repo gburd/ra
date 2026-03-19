@@ -248,6 +248,7 @@ impl FederatedOptimizer {
             | RelExpr::RecursiveCTE { .. }
             | RelExpr::Values { .. }
             | RelExpr::Unnest { .. }
+            | RelExpr::MultiUnnest { .. }
             | RelExpr::TableFunction { .. }
             | RelExpr::RowPattern { .. } => false,
         }
@@ -343,6 +344,21 @@ impl FederatedOptimizer {
             }
             Expr::PatternClassifier
             | Expr::PatternMatchNumber => false,
+            Expr::ArraySlice {
+                array, start, end,
+            } => {
+                self.filter_references_table(array, table_name)
+                    || start.as_ref().is_some_and(|s| {
+                        self.filter_references_table(
+                            s, table_name,
+                        )
+                    })
+                    || end.as_ref().is_some_and(|e| {
+                        self.filter_references_table(
+                            e, table_name,
+                        )
+                    })
+            }
         }
     }
 

@@ -199,6 +199,9 @@ impl FeatureSchema {
                 features[OP_TYPE_OFFSET + 2] = 1.0;
                 self.encode_expr(input, stats, features);
             }
+            RelExpr::MultiUnnest { .. } => {
+                features[OP_TYPE_OFFSET + 3] = 1.0;
+            }
         }
     }
 
@@ -263,7 +266,8 @@ impl FeatureSchema {
             | Expr::PatternFirst(_, _)
             | Expr::PatternLast(_, _)
             | Expr::PatternClassifier
-            | Expr::PatternMatchNumber => {}
+            | Expr::PatternMatchNumber
+            | Expr::ArraySlice { .. } => {}
         }
     }
 }

@@ -240,6 +240,10 @@ fn fingerprint_rel(expr: &RelExpr, out: &mut Vec<Token>) {
             fingerprint_rel(input, out);
             out.push(Token::End);
         }
+        RelExpr::MultiUnnest { .. } => {
+            out.push(Token::Scan);
+            out.push(Token::End);
+        }
     }
 }
 

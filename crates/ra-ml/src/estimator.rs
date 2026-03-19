@@ -145,6 +145,9 @@ fn estimate_heuristic(
             }
             None => 10.0,
         },
+        RelExpr::MultiUnnest { exprs, .. } => {
+            exprs.len().max(1) as f64 * 10.0
+        }
         RelExpr::TableFunction { input, .. } => match input {
             Some(inp) => estimate_heuristic(inp, stats),
             None => 100.0,
@@ -307,7 +310,8 @@ fn collect_tables_recursive(
             collect_tables_recursive(recursive_case, provider, map);
             collect_tables_recursive(body, provider, map);
         }
-        RelExpr::Values { .. } => {}
+        RelExpr::Values { .. }
+        | RelExpr::MultiUnnest { .. } => {}
         RelExpr::Unnest { input, .. }
         | RelExpr::TableFunction { input, .. } => {
             if let Some(inp) = input {

@@ -169,6 +169,16 @@ fn hash_rel_expr(expr: &RelExpr, hasher: &mut impl std::hash::Hasher) {
                 hash_rel_expr(inp, hasher);
             }
         }
+        RelExpr::MultiUnnest {
+            exprs, aliases, with_ordinality,
+        } => {
+            exprs.len().hash(hasher);
+            for expr in exprs {
+                hash_scalar_expr(expr, hasher);
+            }
+            aliases.hash(hasher);
+            with_ordinality.hash(hasher);
+        }
         RelExpr::TableFunction {
             name, args, input, ..
         } => {
