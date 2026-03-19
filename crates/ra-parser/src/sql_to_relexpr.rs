@@ -448,6 +448,8 @@ fn convert_join(
                 right: Box::new(right),
             })
         }
+        JoinOperator::LeftSemi(c) => (JoinType::Semi, c),
+        JoinOperator::LeftAnti(c) => (JoinType::Anti, c),
         _ => {
             return Err(SqlConversionError::UnsupportedFeature(
                 "unsupported join type".to_owned(),
@@ -1175,6 +1177,71 @@ fn convert_expr(expr: &SqlExpr) -> Result<Expr, SqlConversionError> {
                 operand: op,
                 when_clauses,
                 else_result: else_r,
+            })
+        }
+        SqlExpr::Extract { field, expr, .. } => {
+            let arg = convert_expr(expr)?;
+            Ok(Expr::Function {
+                name: format!("EXTRACT_{field}"),
+                args: vec![arg],
+            })
+        }
+        SqlExpr::Trim {
+            expr,
+            trim_what,
+            ..
+        } => {
+            let arg = convert_expr(expr)?;
+            let mut args = vec![arg];
+            if let Some(what) = trim_what {
+                args.push(convert_expr(what)?);
+            }
+            Ok(Expr::Function {
+                name: "TRIM".to_owned(),
+                args,
+            })
+        }
+        SqlExpr::Array(arr) => {
+            let elems: Result<Vec<_>, _> =
+                arr.elem.iter().map(convert_expr).collect();
+            Ok(Expr::Function {
+                name: "ARRAY".to_owned(),
+                args: elems?,
+            })
+        }
+        SqlExpr::AnyOp { .. }
+        | SqlExpr::AllOp { .. } => {
+            // ANY/ALL operators: represent as opaque function
+            Ok(Expr::Function {
+                name: "ANY_ALL".to_owned(),
+                args: vec![],
+            })
+        }
+        SqlExpr::Position { expr, r#in, .. } => {
+            let needle = convert_expr(expr)?;
+            let haystack = convert_expr(r#in)?;
+            Ok(Expr::Function {
+                name: "POSITION".to_owned(),
+                args: vec![needle, haystack],
+            })
+        }
+        SqlExpr::Substring {
+            expr,
+            substring_from,
+            substring_for,
+            ..
+        } => {
+            let arg = convert_expr(expr)?;
+            let mut args = vec![arg];
+            if let Some(from) = substring_from {
+                args.push(convert_expr(from)?);
+            }
+            if let Some(len) = substring_for {
+                args.push(convert_expr(len)?);
+            }
+            Ok(Expr::Function {
+                name: "SUBSTRING".to_owned(),
+                args,
             })
         }
         _ => Err(SqlConversionError::UnsupportedFeature(format!(
@@ -2108,5 +2175,96 @@ mod tests {
             3,
             "RecursiveCTE has 3 children"
         );
+    }
+
+    // ---- Multi-statement and non-SELECT handling ----
+
+    #[test]
+    fn test_multi_statement_takes_first_select() {
+        let sql = "CREATE TABLE t (id INT); \
+                   SELECT * FROM users WHERE age > 18";
+        let result = sql_to_relexpr(sql);
+        assert!(
+            result.is_ok(),
+            "multi-statement with SELECT should work"
+        );
+    }
+
+    #[test]
+    fn test_select_without_from() {
+        let sql = "SELECT 1 + 2";
+        let result = sql_to_relexpr(sql);
+        assert!(result.is_ok(), "SELECT without FROM: {result:?}");
+    }
+
+    // ---- Qualified wildcard and mixed wildcard ----
+
+    #[test]
+    fn test_qualified_wildcard() {
+        let sql = "SELECT o.*, u.name \
+                   FROM orders o JOIN users u ON o.uid = u.id";
+        let result = sql_to_relexpr(sql);
+        assert!(
+            result.is_ok(),
+            "qualified wildcard o.*: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_wildcard_in_multi_column() {
+        let sql = "SELECT *, name FROM users";
+        let result = sql_to_relexpr(sql);
+        assert!(
+            result.is_ok(),
+            "wildcard in multi-column: {result:?}"
+        );
+    }
+
+    // ---- IN, LIKE, INTERVAL, DATE ----
+
+    #[test]
+    fn test_in_list() {
+        let sql = "SELECT * FROM orders \
+                   WHERE status IN ('shipped', 'delivered')";
+        let result = sql_to_relexpr(sql);
+        assert!(result.is_ok(), "IN list: {result:?}");
+    }
+
+    #[test]
+    fn test_like() {
+        let sql = "SELECT * FROM users WHERE email LIKE 'a%'";
+        let result = sql_to_relexpr(sql);
+        assert!(result.is_ok(), "LIKE: {result:?}");
+    }
+
+    #[test]
+    fn test_interval() {
+        let sql = "SELECT * FROM events \
+                   WHERE created_at > INTERVAL '1 hour'";
+        let result = sql_to_relexpr(sql);
+        assert!(result.is_ok(), "INTERVAL: {result:?}");
+    }
+
+    #[test]
+    fn test_date_literal() {
+        let sql = "SELECT * FROM orders \
+                   WHERE order_date > DATE '2024-01-01'";
+        let result = sql_to_relexpr(sql);
+        assert!(result.is_ok(), "DATE literal: {result:?}");
+    }
+
+    #[test]
+    fn test_placeholder() {
+        let sql = "SELECT * FROM users WHERE id = ?";
+        let result = sql_to_relexpr(sql);
+        assert!(result.is_ok(), "placeholder: {result:?}");
+    }
+
+    #[test]
+    fn test_extract() {
+        let sql = "SELECT EXTRACT(YEAR FROM order_date) \
+                   FROM orders";
+        let result = sql_to_relexpr(sql);
+        assert!(result.is_ok(), "EXTRACT: {result:?}");
     }
 }
