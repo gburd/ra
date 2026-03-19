@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 
-use ra_engine::Optimizer;
+use ra_engine::{Optimizer, OptimizerConfig};
 use ra_parser::{
     TestCase, TestExpectation, parse_rule_file, parse_test_block,
     sql_to_relexpr,
@@ -80,138 +80,192 @@ pub fn run_tests(
     filter: Option<&str>,
     verbose: bool,
 ) -> Result<(Vec<TestResult>, TestSummary)> {
-    let optimizer = Optimizer::new();
+    let test_config = OptimizerConfig {
+        node_limit: 5_000,
+        iter_limit: 2,
+        time_limit_secs: 1,
+    };
+    let optimizer = Optimizer::with_config(test_config);
     let start = Instant::now();
     let mut results = Vec::new();
     let mut summary = TestSummary::default();
 
     for file in files {
-        let source = std::fs::read_to_string(file)
-            .with_context(|| {
-                format!("reading {}", file.display())
-            })?;
-
-        let rule = match parse_rule_file(&source) {
-            Ok(r) => r,
-            Err(e) => {
-                if verbose {
-                    results.push(TestResult {
-                        name: file.display().to_string(),
-                        outcome: TestOutcome::Skip {
-                            reason: format!(
-                                "parse error: {e}"
-                            ),
-                        },
-                        duration: Duration::ZERO,
-                    });
-                    summary.skipped += 1;
-                    summary.total += 1;
-                }
-                continue;
-            }
-        };
-
-        let rule_id = &rule.metadata.id;
-        let mut file_passed = 0usize;
-        let mut file_total = 0usize;
-        let mut file_failures: Vec<(String, String)> = Vec::new();
-
-        for (block_idx, block) in
-            rule.test_cases.iter().enumerate()
-        {
-            let cases = parse_test_block(
-                block,
-                rule_id,
-                block_idx,
-            );
-
-            for case in &cases {
-                let test_name = case
-                    .description
-                    .clone()
-                    .unwrap_or_else(|| {
-                        format!(
-                            "{rule_id}::block_{block_idx}"
-                        )
-                    });
-
-                let full_name = format!(
-                    "{}::{}",
-                    short_path(file),
-                    test_name
-                );
-
-                if let Some(f) = filter {
-                    if !full_name.contains(f)
-                        && !rule_id.contains(f)
-                    {
-                        continue;
-                    }
-                }
-
-                summary.total += 1;
-                file_total += 1;
-
-                let test_start = Instant::now();
-                let outcome =
-                    execute_test(case, &optimizer);
-                let duration = test_start.elapsed();
-
-                match &outcome {
-                    TestOutcome::Pass => {
-                        summary.passed += 1;
-                        file_passed += 1;
-                    }
-                    TestOutcome::Fail { reason } => {
-                        summary.failed += 1;
-                        file_failures.push((
-                            test_name.clone(),
-                            reason.clone(),
-                        ));
-                    }
-                    TestOutcome::Skip { .. } => {
-                        summary.skipped += 1;
-                        file_passed += 1;
-                    }
-                    TestOutcome::Error { message } => {
-                        summary.errored += 1;
-                        file_failures.push((
-                            test_name.clone(),
-                            format!("error: {message}"),
-                        ));
-                    }
-                }
-
-                results.push(TestResult {
-                    name: full_name,
-                    outcome,
-                    duration,
-                });
-            }
-        }
-
-        if file_total > 0 {
-            summary.file_results.push(FileResult {
-                display_path: short_path(file),
-                passed: file_passed,
-                total: file_total,
-                failures: file_failures,
-            });
-        }
+        run_file(
+            file,
+            &optimizer,
+            filter,
+            verbose,
+            &mut results,
+            &mut summary,
+        )?;
     }
 
     summary.duration = start.elapsed();
+    summary.slowest = collect_slowest(&results, 10);
 
+    Ok((results, summary))
+}
+
+fn run_file(
+    file: &Path,
+    optimizer: &Optimizer,
+    filter: Option<&str>,
+    verbose: bool,
+    results: &mut Vec<TestResult>,
+    summary: &mut TestSummary,
+) -> Result<()> {
+    let source = std::fs::read_to_string(file)
+        .with_context(|| {
+            format!("reading {}", file.display())
+        })?;
+
+    let rule = match parse_rule_file(&source) {
+        Ok(r) => r,
+        Err(e) => {
+            if verbose {
+                results.push(TestResult {
+                    name: file.display().to_string(),
+                    outcome: TestOutcome::Skip {
+                        reason: format!(
+                            "parse error: {e}"
+                        ),
+                    },
+                    duration: Duration::ZERO,
+                });
+                summary.skipped += 1;
+                summary.total += 1;
+            }
+            return Ok(());
+        }
+    };
+
+    let rule_id = &rule.metadata.id;
+    let mut file_passed = 0usize;
+    let mut file_total = 0usize;
+    let mut file_failures: Vec<(String, String)> = Vec::new();
+
+    for (block_idx, block) in
+        rule.test_cases.iter().enumerate()
+    {
+        let cases =
+            parse_test_block(block, rule_id, block_idx);
+
+        for case in &cases {
+            run_case(
+                case,
+                optimizer,
+                file,
+                rule_id,
+                block_idx,
+                filter,
+                results,
+                summary,
+                &mut file_passed,
+                &mut file_total,
+                &mut file_failures,
+            );
+        }
+    }
+
+    if file_total > 0 {
+        summary.file_results.push(FileResult {
+            display_path: short_path(file),
+            passed: file_passed,
+            total: file_total,
+            failures: file_failures,
+        });
+    }
+
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_case(
+    case: &TestCase,
+    optimizer: &Optimizer,
+    file: &Path,
+    rule_id: &str,
+    block_idx: usize,
+    filter: Option<&str>,
+    results: &mut Vec<TestResult>,
+    summary: &mut TestSummary,
+    file_passed: &mut usize,
+    file_total: &mut usize,
+    file_failures: &mut Vec<(String, String)>,
+) {
+    let test_name = case
+        .description
+        .clone()
+        .unwrap_or_else(|| {
+            format!("{rule_id}::block_{block_idx}")
+        });
+
+    let full_name = format!(
+        "{}::{}",
+        short_path(file),
+        test_name
+    );
+
+    if let Some(f) = filter {
+        if !full_name.contains(f)
+            && !rule_id.contains(f)
+        {
+            return;
+        }
+    }
+
+    summary.total += 1;
+    *file_total += 1;
+
+    let test_start = Instant::now();
+    let outcome = execute_test(case, optimizer);
+    let duration = test_start.elapsed();
+
+    match &outcome {
+        TestOutcome::Pass => {
+            summary.passed += 1;
+            *file_passed += 1;
+        }
+        TestOutcome::Fail { reason } => {
+            summary.failed += 1;
+            file_failures.push((
+                test_name.clone(),
+                reason.clone(),
+            ));
+        }
+        TestOutcome::Skip { .. } => {
+            summary.skipped += 1;
+            *file_passed += 1;
+        }
+        TestOutcome::Error { message } => {
+            summary.errored += 1;
+            file_failures.push((
+                test_name.clone(),
+                format!("error: {message}"),
+            ));
+        }
+    }
+
+    results.push(TestResult {
+        name: full_name,
+        outcome,
+        duration,
+    });
+}
+
+fn collect_slowest(
+    results: &[TestResult],
+    limit: usize,
+) -> Vec<(String, Duration)> {
     let mut timed: Vec<(String, Duration)> = results
         .iter()
         .filter(|r| matches!(r.outcome, TestOutcome::Pass))
         .map(|r| (r.name.clone(), r.duration))
         .collect();
     timed.sort_by(|a, b| b.1.cmp(&a.1));
-    timed.truncate(10);
-    summary.slowest = timed;
-
-    Ok((results, summary))
+    timed.truncate(limit);
+    timed
 }
 
 /// Execute a single test case against the optimizer.
@@ -330,6 +384,14 @@ fn short_path(path: &Path) -> String {
 mod tests {
     use super::*;
 
+    fn test_optimizer() -> Optimizer {
+        Optimizer::with_config(OptimizerConfig {
+            node_limit: 5_000,
+            iter_limit: 2,
+            time_limit_secs: 1,
+        })
+    }
+
     #[test]
     fn execute_parseable_sql() {
         let test = TestCase {
@@ -339,8 +401,7 @@ mod tests {
             description: Some("basic parse".to_owned()),
             negative: false,
         };
-        let optimizer = Optimizer::new();
-        let result = execute_test(&test, &optimizer);
+        let result = execute_test(&test, &test_optimizer());
         assert!(matches!(result, TestOutcome::Pass));
     }
 
@@ -352,8 +413,88 @@ mod tests {
             description: Some("bad sql".to_owned()),
             negative: false,
         };
-        let optimizer = Optimizer::new();
-        let result = execute_test(&test, &optimizer);
+        let result = execute_test(&test, &test_optimizer());
+        assert!(matches!(result, TestOutcome::Fail { .. }));
+    }
+
+    #[test]
+    fn execute_unparseable_skips_non_parse_test() {
+        let test = TestCase {
+            input_sql: "NOT VALID SQL AT ALL".to_owned(),
+            expected: TestExpectation::PlanChanged,
+            description: Some("bad sql".to_owned()),
+            negative: false,
+        };
+        let result = execute_test(&test, &test_optimizer());
+        assert!(matches!(result, TestOutcome::Skip { .. }));
+    }
+
+    #[test]
+    fn execute_plan_unchanged_passes_for_simple_scan() {
+        let test = TestCase {
+            input_sql: "SELECT * FROM users".to_owned(),
+            expected: TestExpectation::PlanUnchanged,
+            description: Some("no rules apply".to_owned()),
+            negative: true,
+        };
+        let result = execute_test(&test, &test_optimizer());
+        assert!(matches!(result, TestOutcome::Pass));
+    }
+
+    #[test]
+    fn execute_plan_changed_fails_for_simple_scan() {
+        let test = TestCase {
+            input_sql: "SELECT * FROM users".to_owned(),
+            expected: TestExpectation::PlanChanged,
+            description: Some("no rule fires".to_owned()),
+            negative: false,
+        };
+        let result = execute_test(&test, &test_optimizer());
+        assert!(matches!(result, TestOutcome::Fail { .. }));
+        if let TestOutcome::Fail { reason } = result {
+            assert!(reason.contains("stayed the same"));
+        }
+    }
+
+    #[test]
+    fn execute_described_positive_passes() {
+        let test = TestCase {
+            input_sql: "SELECT * FROM users".to_owned(),
+            expected: TestExpectation::Described(
+                "some description".to_owned(),
+            ),
+            description: Some("described test".to_owned()),
+            negative: false,
+        };
+        let result = execute_test(&test, &test_optimizer());
+        assert!(matches!(result, TestOutcome::Pass));
+    }
+
+    #[test]
+    fn execute_described_negative_passes_when_unchanged() {
+        let test = TestCase {
+            input_sql: "SELECT * FROM users".to_owned(),
+            expected: TestExpectation::Described(
+                "should not change".to_owned(),
+            ),
+            description: Some("neg described".to_owned()),
+            negative: true,
+        };
+        let result = execute_test(&test, &test_optimizer());
+        assert!(matches!(result, TestOutcome::Pass));
+    }
+
+    #[test]
+    fn execute_rule_applied_fails_for_simple_scan() {
+        let test = TestCase {
+            input_sql: "SELECT * FROM users".to_owned(),
+            expected: TestExpectation::RuleApplied {
+                rule_id: "filter-pushdown".to_owned(),
+            },
+            description: Some("rule check".to_owned()),
+            negative: false,
+        };
+        let result = execute_test(&test, &test_optimizer());
         assert!(matches!(result, TestOutcome::Fail { .. }));
     }
 
@@ -364,10 +505,18 @@ mod tests {
         );
         let short = short_path(&path);
         assert!(short.contains("filter.rra"));
+        assert_eq!(short, "rules/logical/filter.rra");
     }
 
     #[test]
-    fn execute_plan_changed() {
+    fn short_path_short_path() {
+        let path = PathBuf::from("filter.rra");
+        let short = short_path(&path);
+        assert_eq!(short, "filter.rra");
+    }
+
+    #[test]
+    fn execute_plan_changed_doesnt_error() {
         let test = TestCase {
             input_sql:
                 "SELECT * FROM orders o \
@@ -378,10 +527,37 @@ mod tests {
             description: Some("filter pushdown".to_owned()),
             negative: false,
         };
-        let optimizer = Optimizer::new();
-        let result = execute_test(&test, &optimizer);
-        // Either passes or fails depending on optimizer rules;
-        // we just verify it doesn't error or skip.
+        let result = execute_test(&test, &test_optimizer());
         assert!(!matches!(result, TestOutcome::Error { .. }));
+    }
+
+    #[test]
+    fn test_summary_defaults() {
+        let summary = TestSummary::default();
+        assert_eq!(summary.total, 0);
+        assert_eq!(summary.passed, 0);
+        assert_eq!(summary.failed, 0);
+        assert_eq!(summary.skipped, 0);
+        assert_eq!(summary.errored, 0);
+        assert!(summary.file_results.is_empty());
+        assert!(summary.slowest.is_empty());
+    }
+
+    #[test]
+    fn test_outcome_debug_format() {
+        let pass = TestOutcome::Pass;
+        let fail = TestOutcome::Fail {
+            reason: "test".to_owned(),
+        };
+        let skip = TestOutcome::Skip {
+            reason: "test".to_owned(),
+        };
+        let err = TestOutcome::Error {
+            message: "test".to_owned(),
+        };
+        assert!(format!("{pass:?}").contains("Pass"));
+        assert!(format!("{fail:?}").contains("Fail"));
+        assert!(format!("{skip:?}").contains("Skip"));
+        assert!(format!("{err:?}").contains("Error"));
     }
 }
