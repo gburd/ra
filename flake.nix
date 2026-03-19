@@ -58,12 +58,11 @@
 
             # Deployment
             flyctl
-
-            # System libraries
+          ] ++ lib.optionals stdenv.isDarwin [
+            # Darwin-specific system libraries and frameworks
             libiconv
             darwin.apple_sdk.frameworks.Security
             darwin.apple_sdk.frameworks.SystemConfiguration
-          ] ++ lib.optionals stdenv.isDarwin [
             darwin.apple_sdk.frameworks.CoreFoundation
             darwin.apple_sdk.frameworks.CoreServices
           ];
