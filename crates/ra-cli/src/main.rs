@@ -6,6 +6,7 @@ mod config_commands;
 mod diff_validator;
 mod display;
 mod federated_commands;
+mod migrate_commands;
 pub(crate) mod plan_diff;
 pub(crate) mod side_by_side;
 mod stats_commands;
@@ -236,6 +237,40 @@ enum Commands {
     /// Plan cache management.
     #[command(subcommand)]
     Cache(CacheCommands),
+    /// Migrate rule pre-conditions from prose to formal YAML.
+    #[command(subcommand)]
+    Migrate(MigrateCommands),
+}
+
+#[derive(Subcommand)]
+enum MigrateCommands {
+    /// Migrate pre-conditions in rule files.
+    Preconditions {
+        /// Path to input rule file or directory.
+        #[arg(short, long)]
+        input: String,
+        /// Path to output directory for migrated files.
+        #[arg(short, long)]
+        output: String,
+        /// Perform validation after migration.
+        #[arg(short, long)]
+        validate: bool,
+        /// Dry run mode (show what would be migrated without writing).
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Validate migrated pre-conditions against baseline.
+    Validate {
+        /// Path to baseline rules directory.
+        #[arg(short, long)]
+        baseline: String,
+        /// Path to migrated rules directory.
+        #[arg(short, long)]
+        migrated: String,
+        /// Path to facts TOML file for testing.
+        #[arg(short, long)]
+        facts: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -623,6 +658,55 @@ fn main() -> Result<()> {
                     cli.verbose,
                     cli.quiet,
                 )
+            }
+        },
+        Commands::Migrate(sub) => match sub {
+            MigrateCommands::Preconditions {
+                input,
+                output,
+                validate,
+                dry_run,
+            } => {
+                let input_path = std::path::Path::new(&input);
+                let output_path = std::path::Path::new(&output);
+                match migrate_commands::migrate_preconditions(
+                    input_path,
+                    output_path,
+                    dry_run,
+                    validate,
+                ) {
+                    Ok(report) => {
+                        report.print_summary();
+                        Ok(())
+                    }
+                    Err(e) => {
+                        eprintln!("{} {}", "Migration failed:".red().bold(), e);
+                        std::process::exit(1);
+                    }
+                }
+            }
+            MigrateCommands::Validate {
+                baseline,
+                migrated,
+                facts,
+            } => {
+                let baseline_path = std::path::Path::new(&baseline);
+                let migrated_path = std::path::Path::new(&migrated);
+                let facts_path = facts.as_ref().map(|s| std::path::Path::new(s.as_str()));
+                match migrate_commands::validate_preconditions(
+                    baseline_path,
+                    migrated_path,
+                    facts_path,
+                ) {
+                    Ok(report) => {
+                        report.print_summary();
+                        Ok(())
+                    }
+                    Err(e) => {
+                        eprintln!("{} {}", "Validation failed:".red().bold(), e);
+                        std::process::exit(1);
+                    }
+                }
             }
         },
     }
