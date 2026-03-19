@@ -1,0 +1,272 @@
+---
+id: unnest-pushdown-into-scan
+name: Push Unnest into Table Scan
+category: logical/unnest
+databases: [postgresql, duckdb]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [unnest, pushdown, scan, fusion, physical]
+complexity: "O(n)"
+benefit_range: [0.2, 0.6]
+preconditions:
+  - type: pattern
+    must_match: "(unnest ?col (project ?cols (filter ?cond (scan ?table))))"
+  - type: predicate
+    condition: "col_is_array_column(?col, ?table)"
+    description: "Unnested column is an array column in the scanned table"
+---
+
+# Push Unnest into Table Scan
+
+## Description
+
+Fuses an unnest operator with its preceding scan, filter, and
+projection into a single UnnestScan operator. This avoids
+materializing intermediate results between the scan and unnest
+stages, and enables the storage engine to expand array elements
+during the scan itself.
+
+**When to apply**: An unnest operator sits on top of a chain of
+projection and/or filter operators over a base table scan, and
+the unnested expression is a column from that table.
+
+**Why it works**: Instead of scanning the table, materializing
+rows, projecting the array column, and then unnesting, the
+combined UnnestScan reads each row and immediately expands the
+array column inline. This reduces memory allocation and improves
+cache locality.
+
+## Relational Algebra
+
+```algebra
+-- Before: separate operators
+unnest(pi[arr](sigma[cond](Scan(T)))) AS u(val)
+
+-- After: fused operator
+UnnestScan(T, arr, cond) AS u(val)
+```
+
+### With additional projected columns
+
+```algebra
+-- Before
+pi[id, val](
+  unnest(
+    pi[id, arr](sigma[active = true](Scan(T)))
+  ) AS u(val)
+)
+
+-- After
+UnnestScan(T, arr, active = true, project=[id]) AS (id, val)
+```
+
+### Multi-level fusion
+
+```algebra
+-- Before: filter -> project -> unnest pipeline
+sigma[val > 10](
+  unnest(
+    pi[tags](
+      sigma[status = 'active'](Scan(products))
+    )
+  ) AS u(val)
+)
+
+-- After: single fused operator with both predicates
+UnnestScan(products, tags,
+  scan_pred = [status = 'active'],
+  unnest_pred = [val > 10])
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Basic unnest-over-scan fusion
+rw!("unnest-pushdown-scan-basic";
+    "(unnest ?col (scan ?table))" =>
+    "(unnest-scan ?table ?col)"
+    if col_is_array_column("?col", "?table")
+),
+
+// Unnest over filter over scan
+rw!("unnest-pushdown-scan-filter";
+    "(unnest ?col (filter ?cond (scan ?table)))" =>
+    "(unnest-scan ?table ?col ?cond)"
+    if col_is_array_column("?col", "?table")
+    if filter_does_not_reference_unnest("?cond")
+),
+
+// Unnest over project over scan
+rw!("unnest-pushdown-scan-project";
+    "(unnest ?col (project ?cols (scan ?table)))" =>
+    "(unnest-scan ?table ?col (project-cols ?cols))"
+    if col_is_array_column("?col", "?table")
+    if col_in_projection("?col", "?cols")
+),
+
+// Full chain: unnest over project over filter over scan
+rw!("unnest-pushdown-scan-full";
+    "(unnest ?col (project ?cols (filter ?cond (scan ?table))))" =>
+    "(unnest-scan ?table ?col ?cond (project-cols ?cols))"
+    if col_is_array_column("?col", "?table")
+    if filter_does_not_reference_unnest("?cond")
+    if col_in_projection("?col", "?cols")
+),
+
+// Post-unnest filter can also be pushed into UnnestScan
+rw!("filter-into-unnest-scan";
+    "(filter ?pred (unnest-scan ?table ?col ?args))" =>
+    "(unnest-scan ?table ?col ?args (unnest-pred ?pred))"
+    if pred_on_unnest_col_only("?pred")
+),
+```
+
+## Preconditions
+
+```rust
+fn col_is_array_column(col: &Expr, table: &str) -> bool {
+    // The unnested expression must be a direct column reference
+    // to an array-typed column in the target table.
+    match col {
+        Expr::Column(c) => {
+            c.table_matches(table)
+                && schema_lookup(table, c.name()).is_array_type()
+        }
+        _ => false,
+    }
+}
+
+fn filter_does_not_reference_unnest(cond: &Expr) -> bool {
+    // The scan-level filter must not reference the unnested
+    // column alias (which does not exist yet at scan time).
+    !cond.references_unnest_alias()
+}
+
+fn col_in_projection(col: &Expr, proj: &[Expr]) -> bool {
+    // The array column must be included in the projection
+    // list so UnnestScan knows which column to expand.
+    proj.iter().any(|p| p == col)
+}
+
+fn pred_on_unnest_col_only(pred: &Expr) -> bool {
+    // Post-unnest predicates that reference only the unnested
+    // value (not base table columns) can be pushed into the
+    // unnest-scan as an element-level filter.
+    let refs = pred.column_references();
+    refs.iter().all(|r| r.is_from_unnest())
+}
+```
+
+**Restrictions:**
+- Unnested expression must be a direct column reference to an array column in the scanned table.
+- Scan-level filter predicates must not reference the unnested column alias.
+- The table must have a known schema with array type information.
+- This is primarily a physical optimization; it changes the execution strategy but not the logical semantics.
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    table_card: f64,
+    filter_selectivity: f64,
+    avg_array_length: f64,
+    num_projected_cols: usize,
+) -> f64 {
+    // Before: Scan produces table_card rows, filter reduces to
+    // table_card * selectivity, project materializes subset,
+    // then unnest expands arrays.
+    let scan_rows = table_card;
+    let filtered_rows = table_card * filter_selectivity;
+    let projected_size = filtered_rows
+        * num_projected_cols as f64 * 100.0;
+    let unnest_rows = filtered_rows * avg_array_length;
+    let cost_before = scan_rows + filtered_rows
+        + projected_size + unnest_rows;
+
+    // After: UnnestScan does everything in one pass.
+    // Cost is dominated by output row count.
+    let cost_after = scan_rows + unnest_rows;
+
+    (cost_before - cost_after) / cost_before
+}
+```
+
+**Typical benefit**: 20-60%. The main savings come from eliminating
+intermediate materialization buffers between scan, filter, project,
+and unnest stages. Benefit increases with larger tables and more
+selective filters.
+
+## Test Cases
+
+### Positive: simple unnest over scan
+
+```sql
+-- Before
+SELECT u.tag
+FROM (SELECT tags FROM products) sub,
+  LATERAL unnest(sub.tags) AS u(tag);
+
+-- After (fused UnnestScan)
+-- UnnestScan(products, tags) -> (tag)
+```
+
+### Positive: unnest over filtered scan
+
+```sql
+-- Before
+SELECT u.item
+FROM orders o, LATERAL unnest(o.line_items) AS u(item)
+WHERE o.status = 'shipped';
+
+-- After (fused with scan predicate)
+-- UnnestScan(orders, line_items, status='shipped') -> (item)
+```
+
+### Positive: unnest over project over filtered scan
+
+```sql
+-- Before
+SELECT o.id, u.item
+FROM (
+  SELECT id, line_items
+  FROM orders
+  WHERE created_at > '2024-01-01'
+) o, LATERAL unnest(o.line_items) AS u(item);
+
+-- After
+-- UnnestScan(orders, line_items,
+--   scan_pred=[created_at > '2024-01-01'],
+--   project=[id]) -> (id, item)
+```
+
+### Negative: unnest of computed array
+
+```sql
+-- Cannot push: unnested expression is not a table column
+SELECT u.val
+FROM (
+  SELECT array_agg(price) AS prices FROM items GROUP BY category
+) sub, LATERAL unnest(sub.prices) AS u(val);
+
+-- sub.prices is computed by array_agg, not a stored column.
+```
+
+### Negative: unnest of array literal (no scan)
+
+```sql
+-- No scan to push into
+SELECT * FROM unnest(array[1, 2, 3]) AS t(val);
+
+-- Use unnest-array-literal rule instead.
+```
+
+## References
+
+- DuckDB: PhysicalUnnest fusion with PhysicalTableScan
+- PostgreSQL: set_rel_pathlist for array expansion planning
+- Neumann & Kemper, "Unnesting Arbitrary Queries" BTW (2015)
+- Graefe, "Query Evaluation Techniques for Large Databases" (1993)
