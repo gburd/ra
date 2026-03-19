@@ -1,0 +1,109 @@
+---
+id: like-to-range
+name: LIKE Prefix to Range Predicate Conversion
+category: logical/expression-simplification
+databases: [postgresql, mysql, oracle, sqlite, duckdb]
+version: "1.0.0"
+authors: ["PostgreSQL Team"]
+tags: [logical, expression, like, range, index, prefix]
+complexity: O(1)
+benefit_range: [0.1, 0.8]
+---
+
+# LIKE Prefix to Range Predicate Conversion
+
+## Description
+
+Converts LIKE predicates with a constant prefix (e.g., `name LIKE 'Sm%'`)
+into range predicates (`name >= 'Sm' AND name < 'Sn'`) that can use
+B-tree index range scans. The LIKE operator normally requires a full
+scan, but when the pattern starts with literal characters, the prefix
+defines a searchable range in the index.
+
+**When to apply**: LIKE predicates where the pattern begins with one or
+more literal characters followed by a wildcard.
+
+## Relational Algebra
+
+```algebra
+-- Before
+sigma[name LIKE 'Smith%'](customers)
+
+-- After
+sigma[name >= 'Smith' AND name < 'Smiti'](customers)
+-- 'Smiti' is the successor of 'Smith' in collation order
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("like-prefix-to-range";
+    "(like ?col ?pattern)" =>
+    "(and (>= ?col (like-prefix ?pattern))
+          (< ?col (like-prefix-successor ?pattern)))"
+    if has_constant_prefix("?pattern")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(like: &LikePredicate) -> bool {
+    let pattern = like.pattern();
+    // Must have a non-empty constant prefix before first wildcard
+    let prefix = pattern.chars()
+        .take_while(|c| *c != '%' && *c != '_')
+        .collect::<String>();
+    !prefix.is_empty()
+        // Collation must support range comparison
+        && like.collation().supports_range_comparison()
+}
+```
+
+**Restrictions:**
+- Collation-dependent: ICU collations may not have simple successors
+- Patterns starting with wildcard (e.g., `%smith`) cannot be converted
+- Case-insensitive ILIKE requires different handling
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    rows: f64,
+    prefix_selectivity: f64,
+    has_index: bool,
+) -> f64 {
+    if has_index {
+        rows * (1.0 - prefix_selectivity) * 4.0
+    } else {
+        rows * 0.01 // minor: avoids regex engine per row
+    }
+}
+```
+
+**Typical benefit**: 10-80% when an index can be used.
+
+## Test Cases
+
+```sql
+-- Positive: prefix LIKE with B-tree index
+CREATE INDEX idx_name ON customers(name);
+SELECT * FROM customers WHERE name LIKE 'Smith%';
+-- Converts to: name >= 'Smith' AND name < 'Smiti'
+-- Uses index range scan
+
+-- Negative: leading wildcard
+SELECT * FROM customers WHERE name LIKE '%smith';
+-- Cannot extract prefix: full scan or trigram index
+
+-- Negative: ILIKE (case-insensitive)
+SELECT * FROM customers WHERE name ILIKE 'smith%';
+-- Range conversion not straightforward with collation
+```
+
+## References
+
+- PostgreSQL: LIKE pattern optimization in indxpath.c
+- MySQL: Range optimization for LIKE with constant prefix

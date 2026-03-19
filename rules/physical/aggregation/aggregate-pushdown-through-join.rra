@@ -1,0 +1,111 @@
+---
+id: aggregate-pushdown-through-join
+name: Eager Aggregation Through Join
+category: physical/aggregation
+databases: [calcite, postgresql, oracle, mssql, duckdb]
+version: "1.0.0"
+authors: ["Yan, Larson"]
+tags: [physical, aggregation, eager, pushdown, join, pre-aggregation]
+complexity: O(n)
+benefit_range: [0.2, 0.8]
+---
+
+# Eager Aggregation Through Join
+
+## Description
+
+Pushes aggregation below a join to reduce the number of rows entering
+the join. If the aggregation groups include the join key, partial
+aggregation can be performed on one or both sides before joining,
+dramatically reducing the join input size. This is especially beneficial
+for fact-dimension joins in star schemas.
+
+**When to apply**: Aggregation above a join where group-by columns
+include the join key, allowing pre-aggregation on one side.
+
+## Relational Algebra
+
+```algebra
+-- Before: join then aggregate
+gamma[d.region; SUM(f.amount)](
+    f JOIN d ON f.dim_id = d.id)
+
+-- After: pre-aggregate fact table, then join
+gamma[d.region; SUM(partial_sum)](
+    gamma[f.dim_id; SUM(f.amount) AS partial_sum](f)
+    JOIN d ON f.dim_id = d.id)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("eager-agg-through-join";
+    "(aggregate ?groups ?fn (join ?key ?fact ?dim))" =>
+    "(aggregate ?groups ?fn
+        (join ?key
+            (aggregate (join-key-groups ?key ?groups) ?fn ?fact)
+            ?dim))"
+    if groups_include_join_key("?groups", "?key")
+    if agg_is_decomposable("?fn")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(agg: &Aggregate, join: &Join) -> bool {
+    let join_key = join.key_columns();
+    let group_cols = agg.group_columns();
+    // Group columns must include the join key
+    join_key.iter().all(|k| group_cols.contains(k))
+        // Aggregate must be decomposable
+        && agg.function().is_decomposable()
+        // Pre-aggregation must reduce cardinality significantly
+        && join.fact_side().cardinality()
+            / join.fact_side().distinct_values_on(&join_key) > 5.0
+}
+```
+
+**Restrictions:**
+- Only decomposable aggregates (SUM, COUNT, MIN, MAX)
+- Group columns must include the join key
+- Pre-aggregation must significantly reduce cardinality
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    fact_rows: f64,
+    pre_agg_rows: f64,
+    dim_rows: f64,
+) -> f64 {
+    let join_before = fact_rows * dim_rows.log2(); // hash join
+    let join_after = pre_agg_rows * dim_rows.log2();
+    join_before - join_after
+}
+```
+
+**Typical benefit**: 20-80% for high-cardinality fact tables.
+
+## Test Cases
+
+```sql
+-- Positive: star schema aggregation
+SELECT d.region, SUM(f.revenue)
+FROM fact_sales f JOIN dim_store d ON f.store_id = d.id
+GROUP BY d.region;
+-- Pre-aggregate fact_sales by store_id before joining
+
+-- Negative: no reduction from pre-aggregation
+SELECT c.name, SUM(o.amount)
+FROM orders o JOIN customers c ON o.cust_id = c.id
+GROUP BY c.name;
+-- If each order has a unique customer: no reduction
+```
+
+## References
+
+- Yan, Y., Larson, P.A. "Eager Aggregation and Lazy Aggregation" (VLDB 1995)
+- Calcite: AggregateJoinTransposeRule

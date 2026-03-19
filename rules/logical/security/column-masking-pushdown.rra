@@ -1,0 +1,93 @@
+---
+id: column-masking-pushdown
+name: Column Masking Projection Pushdown
+category: logical/security
+databases: [mssql, oracle, snowflake, databricks]
+version: "1.0.0"
+authors: ["Microsoft SQL Server Team"]
+tags: [logical, security, column-masking, dynamic-masking, projection]
+complexity: O(1)
+benefit_range: [0.0, 0.05]
+---
+
+# Column Masking Projection Pushdown
+
+## Description
+
+Optimizes queries involving dynamic data masking by pushing masking
+functions into projections and eliminating unnecessary masking when
+the masked column is not in the final output. If a column with a
+masking policy is only used in a join or filter (not selected), the
+masking function can be deferred or eliminated.
+
+**When to apply**: Queries on tables with column-level masking policies
+where masked columns are used internally but not exposed in output.
+
+## Relational Algebra
+
+```algebra
+-- Before: mask applied, then projected away
+pi[a](sigma[b > 10](mask[b -> '***'](R(a, b, c))))
+
+-- After: mask deferred (b used for filter, not output)
+pi[a](sigma[b > 10](R))
+-- Masking on b unnecessary since b not in output
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mask-elimination-unused";
+    "(project ?cols (mask ?mask_col ?mask_fn ?input))" =>
+    "(project ?cols ?input)"
+    if col_not_in_projection("?mask_col", "?cols")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(project: &Project, mask: &Mask) -> bool {
+    let output_cols = project.output_columns();
+    let masked_col = mask.target_column();
+    // Masked column not in final output
+    !output_cols.contains(&masked_col)
+        // No downstream operator uses the masked value
+        && !project.parent_references(&masked_col)
+}
+```
+
+**Restrictions:**
+- Must verify masked column is truly unused downstream
+- Audit requirements may mandate masking regardless
+- Cannot defer masking if user-defined functions observe the value
+
+## Cost Model
+
+```rust
+fn estimated_benefit(rows: f64, mask_cost_per_row: f64) -> f64 {
+    rows * mask_cost_per_row
+}
+```
+
+**Typical benefit**: 0-5%, masking functions are usually lightweight.
+
+## Test Cases
+
+```sql
+-- Positive: masked column used in filter but not selected
+-- Policy: email column masked for non-admin users
+SELECT name, dept FROM employees WHERE email LIKE '%@eng%';
+-- Masking on email can be deferred since not in SELECT list
+
+-- Negative: masked column in output
+SELECT name, email FROM employees;
+-- Masking must be applied
+```
+
+## References
+
+- Microsoft SQL Server Dynamic Data Masking documentation
+- Snowflake Column-level Security Policies

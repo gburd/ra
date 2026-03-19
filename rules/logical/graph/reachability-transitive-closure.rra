@@ -1,0 +1,126 @@
+---
+id: reachability-transitive-closure
+name: Reachability via Transitive Closure Optimization
+category: logical/graph
+databases: [postgresql, oracle, neo4j, duckdb]
+version: "1.0.0"
+authors: ["Warshall, Stephen", "Nuutila, Esko"]
+tags: [logical, graph, reachability, transitive-closure, recursive-cte]
+complexity: O(V * E)
+benefit_range: [0.2, 0.8]
+---
+
+# Reachability via Transitive Closure Optimization
+
+## Description
+
+Optimizes reachability queries (can node A reach node B?) by selecting
+between eager transitive closure computation, lazy BFS/DFS exploration,
+or materialized reachability indexes. For frequently-queried static
+graphs, precomputing the transitive closure matrix avoids repeated
+traversals. For dynamic graphs or one-off queries, lazy exploration
+with early termination is preferred.
+
+**When to apply**: Recursive CTE queries that check reachability or
+compute transitive closure of a relation.
+
+## Relational Algebra
+
+```algebra
+-- Before: recursive CTE for reachability
+mu[reachable](
+    base: {source},
+    step: reachable join edges -> new_nodes
+)
+
+-- After option 1: BFS with early termination
+BFS(source, edges, stop_at=target)
+
+-- After option 2: precomputed TC lookup
+TCLookup(tc_index, source, target)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("reachability-bfs-early-stop";
+    "(recursive-cte ?base ?step ?target_check)" =>
+    "(bfs-early-stop ?base ?step ?target_check)"
+    if has_target_condition("?target_check")
+),
+
+rw!("reachability-tc-materialized";
+    "(recursive-cte ?base ?step ?check)" =>
+    "(tc-lookup (tc-index ?step) ?base ?check)"
+    if tc_is_materialized("?step")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(cte: &RecursiveCTE) -> bool {
+    cte.is_reachability_pattern()
+        && (cte.has_known_target() // BFS with early stop
+            || cte.graph_is_static()) // TC materialization
+}
+```
+
+**Restrictions:**
+- TC materialization uses O(V^2) space
+- Dynamic graphs invalidate materialized TC
+- Cycle detection needed for cyclic graphs
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    vertices: f64,
+    edges: f64,
+    query_frequency: f64,
+    graph_is_static: bool,
+) -> f64 {
+    if graph_is_static && query_frequency > 10.0 {
+        // TC materialization amortized over queries
+        let tc_build = vertices * edges;
+        let tc_query = 1.0; // O(1) lookup
+        let recursive_cost = vertices + edges;
+        (recursive_cost - tc_query) * query_frequency - tc_build
+    } else {
+        // BFS early termination benefit
+        let avg_explored = (vertices * edges).sqrt();
+        (vertices + edges) - avg_explored
+    }
+}
+```
+
+**Typical benefit**: 20-80% for repeated reachability checks.
+
+## Test Cases
+
+```sql
+-- Positive: point-to-point reachability
+WITH RECURSIVE reachable AS (
+    SELECT 'alice' AS node
+    UNION
+    SELECT e.dst FROM reachable r JOIN edges e ON r.node = e.src
+)
+SELECT EXISTS (SELECT 1 FROM reachable WHERE node = 'bob');
+-- BFS with early termination at 'bob'
+
+-- Negative: full transitive closure needed
+WITH RECURSIVE tc AS (
+    SELECT src, dst FROM edges
+    UNION
+    SELECT tc.src, e.dst FROM tc JOIN edges e ON tc.dst = e.src
+)
+SELECT * FROM tc;
+-- Must compute complete TC
+```
+
+## References
+
+- Warshall, S. "A Theorem on Boolean Matrices" (JACM 1962)
+- Nuutila, E. "Efficient Transitive Closure Computation in Large Digraphs" (1995)
