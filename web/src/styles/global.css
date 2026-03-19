@@ -2078,3 +2078,307 @@ a:hover {
   color: var(--success);
   font-size: 11px;
 }
+
+/* ================================================================
+   PLAN VISUALIZER
+   ================================================================ */
+
+.plan-visualizer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.plan-visualizer-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.plan-visualizer-svg-wrap {
+  position: relative;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-input);
+}
+
+.plan-visualizer-svg {
+  display: block;
+  min-width: 100%;
+}
+
+.plan-svg-node:hover rect {
+  filter: brightness(1.15);
+}
+
+/* ---- Plan Tooltip ---- */
+
+.plan-tooltip {
+  position: absolute;
+  z-index: 100;
+  padding: 10px 14px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text);
+  pointer-events: none;
+  max-width: 280px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.plan-tooltip-header {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--accent);
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.plan-tooltip-row {
+  display: flex;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.plan-tooltip-key {
+  color: var(--text-dim);
+  min-width: 60px;
+}
+
+/* ---- Node Detail Panel ---- */
+
+.plan-detail-panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  overflow: hidden;
+}
+
+.plan-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+}
+
+.plan-detail-title {
+  font-weight: 700;
+  font-size: 14px;
+  font-family: var(--font-mono);
+  color: var(--accent);
+}
+
+.plan-detail-body {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.plan-detail-stat {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.plan-detail-stat-label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.plan-detail-stat-value {
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--text);
+}
+
+.plan-detail-properties {
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.plan-detail-props-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.plan-detail-prop {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 0;
+  font-size: 12px;
+}
+
+.plan-detail-prop-key {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.plan-detail-prop-value {
+  color: var(--text);
+  font-family: var(--font-mono);
+}
+
+/* ================================================================
+   PLAN COMPARATOR (Godbolt-style)
+   ================================================================ */
+
+.comparator-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.comparator-header h2 {
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.comparator-desc {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.comparator-editor-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.comparator-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.comparator-sample-select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.comparator-sample-label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ---- 2x2 Grid ---- */
+
+.comparator-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 900px) {
+  .comparator-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.comparator-panel {
+  border: 1px solid var(--border);
+  border-top: 3px solid;
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.comparator-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+}
+
+.comparator-panel-name {
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.comparator-panel-cost {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  margin-left: auto;
+}
+
+.comparator-cheapest-badge {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: rgba(80, 200, 120, 0.15);
+  color: var(--success);
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.comparator-panel-body {
+  padding: 12px;
+  overflow: auto;
+  max-height: 400px;
+}
+
+/* ---- Cost Comparison Table ---- */
+
+.comparator-cost-table {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  overflow: hidden;
+}
+
+.comparator-cost-table h3 {
+  font-size: 14px;
+  font-weight: 600;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+}
+
+.comparator-cost-table .demo-table {
+  border: none;
+}
+
+.comparator-cheapest-row {
+  background: rgba(80, 200, 120, 0.04);
+}
+
+.comparator-cost-bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.comparator-cost-bar {
+  height: 16px;
+  border-radius: 3px;
+  min-width: 4px;
+  transition: width 0.3s ease;
+  opacity: 0.7;
+}
+
+.comparator-cost-pct {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  min-width: 36px;
+}

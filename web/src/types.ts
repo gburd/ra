@@ -134,6 +134,7 @@ export const ROUTES = {
   home: "/",
   editor: "/editor",
   compare: "/compare",
+  visualize: "/visualize",
   isolation: "/isolation",
   translate: "/translate",
   demos: "/demos",

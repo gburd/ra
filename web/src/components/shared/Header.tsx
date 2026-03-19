@@ -21,6 +21,9 @@ export function Header({ activeDb, onDbChange }: HeaderProps) {
           <a href="/compare" class="nav-link">
             Compare
           </a>
+          <a href="/visualize" class="nav-link">
+            Visualize
+          </a>
           <a href="/isolation" class="nav-link">
             Isolation
           </a>

@@ -10,3 +10,4 @@ pub mod optimize;
 pub mod rules;
 pub mod share;
 pub mod translate;
+pub mod visualize;
