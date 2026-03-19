@@ -13,7 +13,9 @@ ra-engine = { workspace = true }
 ra-stats = { workspace = true }
 ra-hardware = { workspace = true }
 ra-parser = { workspace = true }
+ra-dialect = { workspace = true }
 anyhow = { workspace = true }
+fuzzy-matcher = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

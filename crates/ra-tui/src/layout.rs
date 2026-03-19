@@ -114,6 +114,66 @@ fn stacked_layout(area: Rect) -> PanelLayout {
     }
 }
 
+/// Layout mode selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LayoutMode {
+    /// Standard 4-panel layout.
+    Classic,
+    /// 3-panel layout with SQL editor on the left.
+    Editor,
+}
+
+impl LayoutMode {
+    /// Toggle between Classic and Editor modes.
+    #[must_use]
+    pub fn toggle(self) -> Self {
+        match self {
+            Self::Classic => Self::Editor,
+            Self::Editor => Self::Classic,
+        }
+    }
+}
+
+/// Layout regions for the editor-mode 3-panel layout.
+pub struct EditorLayout {
+    /// Left: SQL editor.
+    pub editor: Rect,
+    /// Top-right: plan tree.
+    pub plan: Rect,
+    /// Middle-right: statistics.
+    pub stats: Rect,
+    /// Bottom-right: feedback.
+    pub feedback: Rect,
+}
+
+/// Compute the editor-mode 3-panel layout.
+#[must_use]
+pub fn editor_layout(area: Rect) -> EditorLayout {
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(40),
+            Constraint::Percentage(60),
+        ])
+        .split(area);
+
+    let right_rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage(40),
+            Constraint::Percentage(30),
+            Constraint::Percentage(30),
+        ])
+        .split(cols[1]);
+
+    EditorLayout {
+        editor: cols[0],
+        plan: right_rows[0],
+        stats: right_rows[1],
+        feedback: right_rows[2],
+    }
+}
+
 /// Create a centered rectangle of the given percentage
 /// within the provided area.
 #[must_use]

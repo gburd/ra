@@ -1,15 +1,16 @@
 //! Terminal UI for interactive optimizer plan monitoring.
 //!
-//! Provides a 4-panel ratatui interface for visualizing query
+//! Provides a multi-panel ratatui interface for visualizing query
 //! optimization behavior over time:
 //!
 //! - **Statistics panel**: table stats, staleness, confidence
 //! - **Plan tree**: visual relational algebra tree
 //! - **Evolution chart**: cost over optimization iterations
 //! - **Execution feedback**: rule applications and diagnostics
+//! - **SQL editor**: editable SQL with auto-complete
 //!
-//! Supports play/pause/step controls and headless mode for
-//! automated testing.
+//! Supports play/pause/step controls, SQL formatting,
+//! dialect translation, and headless mode for automated testing.
 
 #![warn(missing_docs)]
 #![warn(clippy::pedantic)]
@@ -30,7 +31,13 @@ pub mod ui;
 
 pub use app::{App, AppError};
 pub use event::{EventHandler, TuiEvent};
-pub use layout::{FrameLayout, PanelLayout};
+pub use layout::{
+    EditorLayout, FrameLayout, LayoutMode, PanelLayout,
+};
+pub use panels::autocomplete::{
+    CompletionContext, CompletionKind, SqlCompleter,
+};
+pub use panels::sql_editor::{EditorMode, SqlEditor};
 pub use playback::PlaybackController;
 pub use setup::{SetupError, TuiConfig};
 pub use timeline::{Snapshot, Timeline};

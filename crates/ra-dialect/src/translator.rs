@@ -23,6 +23,93 @@ pub struct TranslationResult {
     pub warnings: Vec<TranslationWarning>,
 }
 
+/// Database dialect with version information.
+///
+/// Used to enable version-specific translation rules
+/// (e.g. PostgreSQL 15 features vs 12 features).
+#[derive(Debug, Clone)]
+pub struct DialectVersion {
+    /// The database dialect.
+    pub dialect: Dialect,
+    /// Major version number (e.g. 15 for PostgreSQL 15).
+    pub major: u16,
+    /// Minor version number.
+    pub minor: u16,
+}
+
+impl DialectVersion {
+    /// Create a new dialect version.
+    #[must_use]
+    pub fn new(
+        dialect: Dialect,
+        major: u16,
+        minor: u16,
+    ) -> Self {
+        Self {
+            dialect,
+            major,
+            minor,
+        }
+    }
+
+    /// Create a version with defaults (latest known).
+    #[must_use]
+    pub fn latest(dialect: Dialect) -> Self {
+        let (major, minor) = match dialect {
+            Dialect::PostgreSql => (17, 0),
+            Dialect::MySql => (8, 4),
+            Dialect::Sqlite => (3, 45),
+            Dialect::MsSql => (16, 0),
+            Dialect::Oracle => (23, 0),
+            Dialect::DuckDb => (1, 1),
+        };
+        Self {
+            dialect,
+            major,
+            minor,
+        }
+    }
+
+    /// Whether this version supports the RETURNING clause.
+    #[must_use]
+    pub fn supports_returning(&self) -> bool {
+        match self.dialect {
+            Dialect::PostgreSql => true,
+            Dialect::MySql => false,
+            Dialect::Sqlite => self.major >= 3 && self.minor >= 35,
+            Dialect::MsSql => true, // OUTPUT clause
+            Dialect::Oracle => self.major >= 12,
+            Dialect::DuckDb => true,
+        }
+    }
+
+    /// Whether this version supports CTE (WITH clause).
+    #[must_use]
+    pub fn supports_cte(&self) -> bool {
+        match self.dialect {
+            Dialect::PostgreSql => true,
+            Dialect::MySql => self.major >= 8,
+            Dialect::Sqlite => self.major >= 3 && self.minor >= 8,
+            Dialect::MsSql => true,
+            Dialect::Oracle => true,
+            Dialect::DuckDb => true,
+        }
+    }
+
+    /// Whether this version supports window functions.
+    #[must_use]
+    pub fn supports_window_functions(&self) -> bool {
+        match self.dialect {
+            Dialect::PostgreSql => true,
+            Dialect::MySql => self.major >= 8,
+            Dialect::Sqlite => self.major >= 3 && self.minor >= 25,
+            Dialect::MsSql => true,
+            Dialect::Oracle => true,
+            Dialect::DuckDb => true,
+        }
+    }
+}
+
 /// Translates SQL between different database dialects.
 ///
 /// # Example
@@ -42,13 +129,34 @@ pub struct TranslationResult {
 pub struct DialectTranslator {
     source: Dialect,
     target: Dialect,
+    source_version: DialectVersion,
+    target_version: DialectVersion,
 }
 
 impl DialectTranslator {
     /// Create a new translator from source to target dialect.
     #[must_use]
     pub fn new(source: Dialect, target: Dialect) -> Self {
-        Self { source, target }
+        Self {
+            source,
+            target,
+            source_version: DialectVersion::latest(source),
+            target_version: DialectVersion::latest(target),
+        }
+    }
+
+    /// Create a translator with specific dialect versions.
+    #[must_use]
+    pub fn with_versions(
+        source: DialectVersion,
+        target: DialectVersion,
+    ) -> Self {
+        Self {
+            source: source.dialect,
+            target: target.dialect,
+            source_version: source,
+            target_version: target,
+        }
     }
 
     /// The source dialect.
@@ -61,6 +169,18 @@ impl DialectTranslator {
     #[must_use]
     pub fn target(&self) -> Dialect {
         self.target
+    }
+
+    /// The source dialect version.
+    #[must_use]
+    pub fn source_version(&self) -> &DialectVersion {
+        &self.source_version
+    }
+
+    /// The target dialect version.
+    #[must_use]
+    pub fn target_version(&self) -> &DialectVersion {
+        &self.target_version
     }
 
     /// Translate a SQL string from the source dialect to the
@@ -331,12 +451,10 @@ impl DialectTranslator {
                 data_type,
                 format,
                 kind,
-            } => Expr::Cast {
-                expr: Box::new(self.translate_expr(*expr, warnings)),
-                data_type,
-                format,
-                kind,
-            },
+            } => self.translate_cast(
+                *expr, data_type, format, kind,
+                warnings,
+            ),
             Expr::InSubquery {
                 expr,
                 subquery,
@@ -638,6 +756,47 @@ impl DialectTranslator {
                 Expr::Value(Value::Number(int_val.to_string(), false))
             }
             _ => Expr::Value(value),
+        }
+    }
+
+    /// Translate CAST expressions, converting PostgreSQL's
+    /// `::` shorthand to standard CAST syntax for dialects
+    /// that do not support it.
+    fn translate_cast(
+        &self,
+        expr: Expr,
+        data_type: ast::DataType,
+        format: Option<ast::CastFormat>,
+        kind: ast::CastKind,
+        warnings: &mut Vec<TranslationWarning>,
+    ) -> Expr {
+        let translated_expr =
+            self.translate_expr(expr, warnings);
+
+        // PostgreSQL :: cast -> standard CAST for other dialects
+        let new_kind =
+            if kind == ast::CastKind::DoubleColon
+                && !self.target.supports_double_colon_cast()
+            {
+                warnings.push(TranslationWarning {
+                    severity: WarningSeverity::Info,
+                    message: format!(
+                        ":: cast translated to CAST() \
+                         for {}",
+                        self.target
+                    ),
+                    hint: None,
+                });
+                ast::CastKind::Cast
+            } else {
+                kind
+            };
+
+        Expr::Cast {
+            expr: Box::new(translated_expr),
+            data_type,
+            format,
+            kind: new_kind,
         }
     }
 
@@ -1182,6 +1341,67 @@ mod tests {
         assert!(
             result.sql.contains("FETCH"),
             "Expected FETCH in CTE body: {}",
+            result.sql
+        );
+    }
+
+    #[test]
+    fn version_support() {
+        let pg17 = DialectVersion::latest(Dialect::PostgreSql);
+        assert!(pg17.supports_returning());
+        assert!(pg17.supports_cte());
+        assert!(pg17.supports_window_functions());
+
+        let mysql5 = DialectVersion::new(Dialect::MySql, 5, 7);
+        assert!(!mysql5.supports_cte());
+        assert!(!mysql5.supports_window_functions());
+
+        let mysql8 = DialectVersion::new(Dialect::MySql, 8, 0);
+        assert!(mysql8.supports_cte());
+        assert!(mysql8.supports_window_functions());
+
+        let sqlite_old = DialectVersion::new(Dialect::Sqlite, 3, 24);
+        assert!(!sqlite_old.supports_returning());
+        assert!(!sqlite_old.supports_window_functions());
+
+        let sqlite_new = DialectVersion::new(Dialect::Sqlite, 3, 35);
+        assert!(sqlite_new.supports_returning());
+    }
+
+    #[test]
+    fn translator_with_versions() {
+        let source = DialectVersion::new(Dialect::PostgreSql, 15, 0);
+        let target = DialectVersion::new(Dialect::MySql, 8, 0);
+        let t = DialectTranslator::with_versions(source, target);
+        assert_eq!(t.source(), Dialect::PostgreSql);
+        assert_eq!(t.target(), Dialect::MySql);
+        assert_eq!(t.source_version().major, 15);
+        assert_eq!(t.target_version().major, 8);
+    }
+
+    #[test]
+    fn double_colon_cast_to_mysql() {
+        let result = pg_to(
+            Dialect::MySql,
+            "SELECT age::int FROM users",
+        );
+        assert!(
+            result.sql.contains("CAST"),
+            "Expected CAST in: {}",
+            result.sql
+        );
+    }
+
+    #[test]
+    fn double_colon_cast_stays_for_postgres() {
+        let result = pg_to(
+            Dialect::PostgreSql,
+            "SELECT age::int FROM users",
+        );
+        // PostgreSQL supports ::, so it should stay as-is
+        assert!(
+            result.sql.contains("::") || result.sql.contains("CAST"),
+            "Expected :: or CAST in: {}",
             result.sql
         );
     }

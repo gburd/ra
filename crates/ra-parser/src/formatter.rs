@@ -47,6 +47,9 @@ pub struct FormatConfig {
     pub max_width: usize,
     /// Put each major clause on its own line.
     pub clause_per_line: bool,
+    /// Right-align major clause keywords (SELECT, FROM, WHERE)
+    /// to a consistent column width.
+    pub align_keywords: bool,
 }
 
 impl Default for FormatConfig {
@@ -56,6 +59,7 @@ impl Default for FormatConfig {
             indent: IndentStyle::Spaces(2),
             max_width: 80,
             clause_per_line: true,
+            align_keywords: false,
         }
     }
 }
@@ -124,7 +128,10 @@ impl SqlFormatter {
 
     fn apply_clause_breaks(&self, sql: &str) -> String {
         let indent = self.indent_string();
-        let mut result = String::with_capacity(sql.len() + 64);
+        // Alignment width for right-aligning keywords
+        let align_width: usize = 9; // len("RETURNING") + 1
+        let mut result =
+            String::with_capacity(sql.len() + 64);
         let mut depth: usize = 0;
         let mut in_string = false;
         let mut string_char: char = '\'';
@@ -139,8 +146,8 @@ impl SqlFormatter {
                 && (token == "'" || token == "\"")
             {
                 in_string = true;
-                string_char = token.chars().next()
-                    .unwrap_or('\'');
+                string_char =
+                    token.chars().next().unwrap_or('\'');
                 result.push_str(token);
                 continue;
             }
@@ -170,25 +177,56 @@ impl SqlFormatter {
             if depth == 0 {
                 let is_clause = matches!(
                     upper.as_str(),
-                    "FROM" | "WHERE" | "GROUP"
-                        | "HAVING" | "ORDER"
-                        | "LIMIT" | "OFFSET"
-                        | "UNION" | "INTERSECT"
-                        | "EXCEPT" | "WITH"
+                    "FROM"
+                        | "WHERE"
+                        | "GROUP"
+                        | "HAVING"
+                        | "ORDER"
+                        | "LIMIT"
+                        | "OFFSET"
+                        | "UNION"
+                        | "INTERSECT"
+                        | "EXCEPT"
+                        | "WITH"
+                        | "RETURNING"
                 );
 
                 let is_join = matches!(
                     upper.as_str(),
-                    "JOIN" | "INNER" | "LEFT"
-                        | "RIGHT" | "FULL" | "CROSS"
+                    "JOIN"
+                        | "INNER"
+                        | "LEFT"
+                        | "RIGHT"
+                        | "FULL"
+                        | "CROSS"
+                );
+
+                let is_subclause = matches!(
+                    upper.as_str(),
+                    "AND" | "OR"
                 );
 
                 if is_clause && i > 0 {
-                    result = result.trim_end().to_owned();
+                    result =
+                        result.trim_end().to_owned();
                     result.push('\n');
+                    if self.config.align_keywords {
+                        let padding = align_width
+                            .saturating_sub(token.len());
+                        for _ in 0..padding {
+                            result.push(' ');
+                        }
+                    }
                     result.push_str(token);
                 } else if is_join && i > 0 {
-                    result = result.trim_end().to_owned();
+                    result =
+                        result.trim_end().to_owned();
+                    result.push('\n');
+                    result.push_str(&indent);
+                    result.push_str(token);
+                } else if is_subclause && i > 0 {
+                    result =
+                        result.trim_end().to_owned();
                     result.push('\n');
                     result.push_str(&indent);
                     result.push_str(token);
@@ -234,6 +272,10 @@ fn capitalize_keywords(sql: &str) -> String {
         "LAG", "LEAD", "FIRST_VALUE", "LAST_VALUE",
         "STDDEV", "VARIANCE", "COALESCE", "NULLIF",
         "USING", "NATURAL", "WINDOW",
+        "RETURNING", "CONFLICT", "DO", "NOTHING",
+        "INDEX", "CONSTRAINT", "PRIMARY", "KEY",
+        "FOREIGN", "REFERENCES", "UNIQUE", "CHECK",
+        "DEFAULT",
     ];
 
     let tokens = tokenize_for_formatting(sql);
@@ -526,12 +568,76 @@ mod tests {
 
     #[test]
     fn tokenize_simple() {
-        let tokens = tokenize_for_formatting("SELECT id FROM t");
+        let tokens =
+            tokenize_for_formatting("SELECT id FROM t");
         let non_ws: Vec<_> = tokens
             .iter()
             .filter(|t| !t.trim().is_empty())
             .cloned()
             .collect();
-        assert_eq!(non_ws, vec!["SELECT", "id", "FROM", "t"]);
+        assert_eq!(
+            non_ws,
+            vec!["SELECT", "id", "FROM", "t"]
+        );
+    }
+
+    #[test]
+    fn format_align_keywords() {
+        let config = FormatConfig {
+            align_keywords: true,
+            ..FormatConfig::default()
+        };
+        let formatter = SqlFormatter::new(config);
+        let result = formatter
+            .format(
+                "select id, name from users \
+                 where age > 18 order by name",
+            )
+            .expect("should format");
+        assert!(
+            result.contains('\n'),
+            "expected newlines: {result}"
+        );
+        // Keywords should be right-aligned with padding
+        let lines: Vec<&str> =
+            result.lines().collect();
+        assert!(
+            lines.len() >= 3,
+            "expected multiple lines: {result}"
+        );
+    }
+
+    #[test]
+    fn format_and_or_subclauses() {
+        let formatter = SqlFormatter::default_style();
+        let result = formatter
+            .format(
+                "select * from users where age > 18 \
+                 and name = 'test' or active = true",
+            )
+            .expect("should format");
+        // AND and OR should be on their own lines
+        let lines: Vec<&str> =
+            result.lines().collect();
+        assert!(
+            lines.len() >= 3,
+            "expected AND/OR on own lines: {result}"
+        );
+    }
+
+    #[test]
+    fn format_returning_clause() {
+        let formatter = SqlFormatter::default_style();
+        let result = formatter
+            .format(
+                "INSERT INTO users (name) VALUES ('test') \
+                 RETURNING id",
+            )
+            .expect("should format");
+        let upper = result.to_uppercase();
+        assert!(
+            upper.contains("RETURNING"),
+            "expected RETURNING: {result}"
+        );
     }
 }

@@ -11,7 +11,10 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 
 use crate::app::{App, Panel};
 use crate::layout;
-use crate::panels::{evolution, feedback, plan_tree, statistics};
+use crate::layout::LayoutMode;
+use crate::panels::{
+    evolution, feedback, plan_tree, sql_editor, statistics,
+};
 
 /// Render the full TUI frame.
 pub fn render(frame: &mut Frame, app: &App) {
@@ -89,10 +92,27 @@ fn render_status_bar(
     frame.render_widget(paragraph, area);
 }
 
-/// Main 4-panel layout using dedicated panel modules.
+/// Main panel layout using dedicated panel modules.
 fn render_panels(frame: &mut Frame, app: &App, area: Rect) {
+    match app.layout_mode {
+        LayoutMode::Classic => {
+            render_classic_panels(frame, app, area);
+        }
+        LayoutMode::Editor => {
+            render_editor_panels(frame, app, area);
+        }
+    }
+}
+
+/// Classic 4-panel layout.
+fn render_classic_panels(
+    frame: &mut Frame,
+    app: &App,
+    area: Rect,
+) {
     let pl = layout::panel_layout(area);
-    let snapshot = &app.timeline.snapshots[app.current_step];
+    let snapshot =
+        &app.timeline.snapshots[app.current_step];
 
     statistics::render(
         frame,
@@ -129,6 +149,48 @@ fn render_panels(frame: &mut Frame, app: &App, area: Rect) {
         frame,
         snapshot,
         pl.feedback,
+        app.focused == Panel::Feedback,
+        panel_scroll(app, Panel::Feedback),
+    );
+}
+
+/// Editor 3-panel layout with SQL editor on the left.
+fn render_editor_panels(
+    frame: &mut Frame,
+    app: &App,
+    area: Rect,
+) {
+    let el = layout::editor_layout(area);
+    let snapshot =
+        &app.timeline.snapshots[app.current_step];
+
+    sql_editor::render(
+        frame,
+        &app.sql_editor,
+        el.editor,
+        app.focused == Panel::SqlEditor,
+    );
+
+    plan_tree::render(
+        frame,
+        &snapshot.plan_text,
+        el.plan,
+        app.focused == Panel::Plan,
+        panel_scroll(app, Panel::Plan),
+    );
+
+    statistics::render(
+        frame,
+        &snapshot.table_stats,
+        el.stats,
+        app.focused == Panel::Stats,
+        panel_scroll(app, Panel::Stats),
+    );
+
+    feedback::render(
+        frame,
+        snapshot,
+        el.feedback,
         app.focused == Panel::Feedback,
         panel_scroll(app, Panel::Feedback),
     );
@@ -185,7 +247,28 @@ fn render_keybindings_bar(frame: &mut Frame, area: Rect) {
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw(" Help"),
+        Span::raw(" Help  "),
+        Span::styled(
+            "L",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" Layout  "),
+        Span::styled(
+            "Ctrl-F",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" Format  "),
+        Span::styled(
+            "T",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" Translate"),
     ]);
 
     let paragraph = Paragraph::new(line);
@@ -218,6 +301,12 @@ fn render_help_overlay(frame: &mut Frame) {
         help_line("Shift+Tab", "Focus previous panel"),
         help_line("j / Down", "Scroll down"),
         help_line("k / Up", "Scroll up"),
+        help_line("L", "Toggle layout (Classic/Editor)"),
+        help_line("E", "Toggle SQL editor mode"),
+        help_line("Ctrl-F", "Format SQL in editor"),
+        help_line("T", "Translate SQL dialect"),
+        help_line("Tab (editor)", "Trigger/accept completion"),
+        help_line("Ctrl-Space", "Trigger completion"),
         help_line("?", "Toggle this help"),
         Line::raw(""),
         Line::from(Span::styled(

@@ -99,6 +99,7 @@ ra-tui = { path = "crates/ra-tui" }
 toml = "0.8"
 crossterm = "0.29"
 ratatui = "0.30"
+fuzzy-matcher = "0.3"
 
 [profile.release]
 lto = "thin"
