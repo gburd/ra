@@ -22,6 +22,7 @@ members = [
     "crates/ra-catalog",
     "crates/ra-tui",
     "crates/ra-config",
+    "crates/ra-cache",
 ]
 
 [workspace.package]
@@ -98,6 +99,7 @@ ra-metadata = { path = "crates/ra-metadata" }
 ra-catalog = { path = "crates/ra-catalog" }
 ra-tui = { path = "crates/ra-tui" }
 ra-config = { path = "crates/ra-config" }
+ra-cache = { path = "crates/ra-cache" }
 toml = "0.8"
 crossterm = "0.29"
 ratatui = "0.30"

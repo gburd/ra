@@ -13,6 +13,8 @@ path = "src/main.rs"
 
 [dependencies]
 ra-core = { workspace = true }
+ra-cache = { workspace = true }
+ra-adaptive = { workspace = true }
 ra-config = { workspace = true }
 ra-parser = { workspace = true }
 ra-engine = { workspace = true }

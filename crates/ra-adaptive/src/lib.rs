@@ -30,6 +30,7 @@
 #![allow(clippy::cast_possible_wrap)]
 
 pub mod batch;
+pub mod cache_adapter;
 pub mod checkpoint;
 pub mod executor;
 pub mod plan_switch;
