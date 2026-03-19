@@ -444,6 +444,7 @@ fn count_nodes(plan: &RelExpr) -> usize {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
     use ra_core::statistics::Statistics;

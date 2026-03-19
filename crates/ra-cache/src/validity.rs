@@ -131,6 +131,7 @@ pub(crate) fn check_plan_drift(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::float_cmp)]
 mod tests {
     use super::*;
     use ra_core::statistics::Statistics;

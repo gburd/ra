@@ -96,6 +96,7 @@ fn adaptive_score(plan: &CachedPlan) -> f64 {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
     use ra_core::algebra::RelExpr;
@@ -109,8 +110,9 @@ mod tests {
         age_ms: u64,
     ) -> CachedPlan {
         let now = Instant::now();
-        let accessed =
-            now - std::time::Duration::from_millis(age_ms);
+        let accessed = now
+            .checked_sub(std::time::Duration::from_millis(age_ms))
+            .unwrap();
         let mut snapshot = HashMap::new();
         snapshot.insert("t".to_owned(), Statistics::new(100.0));
         CachedPlan {
