@@ -33,6 +33,7 @@ pub mod cost;
 pub mod differential;
 pub mod distributed_optimizer;
 pub mod egraph;
+pub mod executors;
 pub mod extract;
 pub mod facts_context;
 pub mod federated_cost;
@@ -86,3 +87,4 @@ pub use trigger_optimizer::{
     analyze_dml_cost, detect_cascade, CascadeWarning,
     DmlCostEstimate, TriggerAnalysis,
 };
+pub use executors::{LateralJoinExecutor, TableFunctionExecutor, UnnestExecutor};

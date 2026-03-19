@@ -284,6 +284,9 @@ fn convert_node(nodes: &[RelLang], idx: usize) -> Result<RelExpr, EGraphError> {
             }
             Ok(RelExpr::Values { rows })
         }
+        RelLang::Func(ids) if !ids.is_empty() => {
+            convert_func_as_relational(nodes, ids)
+        }
         other => Err(EGraphError::ExtractionError(format!(
             "unexpected relational node: {other:?}"
         ))),
@@ -347,6 +350,98 @@ fn convert_set_op(
         _ => Err(EGraphError::ExtractionError(format!(
             "unknown set operation: {kind}"
         ))),
+    }
+}
+
+/// Convert a `Func` e-graph node back to a relational operator.
+///
+/// Unnest and `TableFunction` are encoded as `Func` nodes in the
+/// e-graph with a tag symbol as the first child. This function
+/// dispatches on the tag to reconstruct the original `RelExpr`.
+fn convert_func_as_relational(
+    nodes: &[RelLang],
+    ids: &[Id],
+) -> Result<RelExpr, EGraphError> {
+    let tag = get_symbol(nodes, id(ids[0]))?;
+
+    match tag.as_str() {
+        "unnest" => {
+            // [tag, expr, alias, ordinality]
+            if ids.len() < 4 {
+                return Err(EGraphError::ExtractionError(
+                    "unnest Func node requires 4 children".into(),
+                ));
+            }
+            let expr = convert_scalar(nodes, id(ids[1]))?;
+            let alias_str = get_symbol(nodes, id(ids[2]))?;
+            let alias = if alias_str.is_empty() {
+                None
+            } else {
+                Some(alias_str)
+            };
+            let with_ordinality =
+                convert_bool_flag(nodes, id(ids[3]))?;
+            Ok(RelExpr::Unnest {
+                expr,
+                alias,
+                input: None,
+                with_ordinality,
+            })
+        }
+        "unnest_lateral" => {
+            // [tag, expr, alias, ordinality, input]
+            if ids.len() < 5 {
+                return Err(EGraphError::ExtractionError(
+                    "unnest_lateral Func node requires 5 children"
+                        .into(),
+                ));
+            }
+            let expr = convert_scalar(nodes, id(ids[1]))?;
+            let alias_str = get_symbol(nodes, id(ids[2]))?;
+            let alias = if alias_str.is_empty() {
+                None
+            } else {
+                Some(alias_str)
+            };
+            let with_ordinality =
+                convert_bool_flag(nodes, id(ids[3]))?;
+            let input = convert_node(nodes, id(ids[4]))?;
+            Ok(RelExpr::Unnest {
+                expr,
+                alias,
+                input: Some(Box::new(input)),
+                with_ordinality,
+            })
+        }
+        _ => {
+            // General table function: [name, arg0, arg1, ..., optional_input]
+            let name = tag;
+            let mut args = Vec::new();
+            for &arg_id in &ids[1..] {
+                // Try to convert as scalar; if that fails,
+                // the remaining child may be a relational input.
+                match convert_scalar(nodes, id(arg_id)) {
+                    Ok(expr) => args.push(expr),
+                    Err(_) => {
+                        // Assume it's a relational input
+                        let input =
+                            convert_node(nodes, id(arg_id))?;
+                        return Ok(RelExpr::TableFunction {
+                            name,
+                            args,
+                            columns: vec![],
+                            input: Some(Box::new(input)),
+                        });
+                    }
+                }
+            }
+            Ok(RelExpr::TableFunction {
+                name,
+                args,
+                columns: vec![],
+                input: None,
+            })
+        }
     }
 }
 
@@ -415,6 +510,22 @@ fn convert_scalar_operator(
             return Err(EGraphError::ExtractionError("empty function call".into()));
         }
         let name = get_symbol(nodes, id(ids[0]))?;
+        // Reconstruct Array and ArrayIndex from their tagged Func encoding
+        if name == "ARRAY" {
+            let mut elements = Vec::with_capacity(ids.len() - 1);
+            for &fid in &ids[1..] {
+                elements.push(convert_scalar(nodes, id(fid))?);
+            }
+            return Ok(Expr::Array(elements));
+        }
+        if name == "ARRAY_INDEX" && ids.len() == 3 {
+            let array = convert_scalar(nodes, id(ids[1]))?;
+            let index = convert_scalar(nodes, id(ids[2]))?;
+            return Ok(Expr::ArrayIndex(
+                Box::new(array),
+                Box::new(index),
+            ));
+        }
         let mut args = Vec::with_capacity(ids.len() - 1);
         for &fid in &ids[1..] {
             args.push(convert_scalar(nodes, id(fid))?);
