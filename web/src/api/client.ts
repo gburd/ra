@@ -99,6 +99,26 @@ export async function loadShare(
   return request<Record<string, unknown>>(`/share/${id}`);
 }
 
+/** Visualize a single plan for a SQL query. */
+export async function visualizePlan<T>(
+  req: { sql: string; hardware_profile?: string },
+): Promise<T> {
+  return request<T>("/visualize", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+/** Compare plans across multiple optimizers. */
+export async function comparePlans<T>(
+  req: { sql: string; hardware_profile?: string },
+): Promise<T> {
+  return request<T>("/compare-plans", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
 // ----------------------------------------------------------------
 // Mock responses for offline development
 // ----------------------------------------------------------------
@@ -115,6 +135,12 @@ function mockResponse<T>(path: string, options: RequestInit): T {
   }
   if (path === "/share") {
     return mockShareResponse() as T;
+  }
+  if (path === "/visualize") {
+    return mockVisualizeResponse() as T;
+  }
+  if (path === "/compare-plans") {
+    return mockComparePlansResponse() as T;
   }
   return {} as T;
 }
@@ -202,5 +228,139 @@ function mockShareResponse(): ShareResponse {
   return {
     id: "mock-share-id",
     url: `${window.location.origin}/share/mock-share-id`,
+  };
+}
+
+function mockPlanNode(
+  prefix: string,
+  opType: string,
+  cost: number,
+  rows: number,
+  children: unknown[],
+  details: { key: string; value: string }[] = [],
+): unknown {
+  return {
+    id: `${prefix}-${String(Math.random()).slice(2, 8)}`,
+    operator_type: opType,
+    cost,
+    rows,
+    details,
+    children,
+    position: { x: 0, y: 0, width: 160, height: 60 },
+  };
+}
+
+function mockVisualizeResponse(): unknown {
+  const scan = mockPlanNode("ra", "SeqScan", 120, 10000, [], [
+    { key: "table", value: "users" },
+  ]);
+  const filter = mockPlanNode("ra", "Filter", 80, 2500, [scan], [
+    { key: "predicate", value: "age > 25" },
+  ]);
+  const project = mockPlanNode(
+    "ra",
+    "Project",
+    10,
+    2500,
+    [filter],
+    [{ key: "columns", value: "*" }],
+  );
+  return {
+    plan: project,
+    total_cost: 210,
+    rules_applied: [
+      "predicate-pushdown",
+      "projection-pruning",
+    ],
+  };
+}
+
+function mockComparePlansResponse(): unknown {
+  const raScan = mockPlanNode("ra", "SeqScan", 120, 10000, [], [
+    { key: "table", value: "users" },
+  ]);
+  const raFilter = mockPlanNode("ra", "Filter", 80, 2500, [raScan]);
+  const raPlan = mockPlanNode("ra", "Project", 10, 2500, [raFilter]);
+
+  const pgScan = mockPlanNode("pg", "Seq Scan", 145, 10000, [], [
+    { key: "relation", value: "users" },
+  ]);
+  const pgFilter = mockPlanNode(
+    "pg",
+    "Filter",
+    95,
+    3333,
+    [pgScan],
+  );
+  const pgPlan = mockPlanNode("pg", "Result", 5, 3333, [pgFilter]);
+
+  const myScan = mockPlanNode(
+    "mysql",
+    "Full Table Scan",
+    180,
+    10000,
+    [],
+  );
+  const myFilter = mockPlanNode(
+    "mysql",
+    "Using where",
+    110,
+    2000,
+    [myScan],
+  );
+  const myPlan = mockPlanNode("mysql", "Query", 5, 2000, [myFilter]);
+
+  const dkScan = mockPlanNode("duck", "SCAN", 95, 10000, []);
+  const dkFilter = mockPlanNode(
+    "duck",
+    "FILTER",
+    65,
+    2500,
+    [dkScan],
+  );
+  const dkPlan = mockPlanNode(
+    "duck",
+    "PROJECTION",
+    8,
+    2500,
+    [dkFilter],
+  );
+
+  return {
+    plans: [
+      {
+        optimizer: "Ra",
+        plan: raPlan,
+        total_cost: 210,
+        available: true,
+      },
+      {
+        optimizer: "PostgreSQL",
+        plan: pgPlan,
+        total_cost: 245,
+        available: true,
+      },
+      {
+        optimizer: "MySQL",
+        plan: myPlan,
+        total_cost: 295,
+        available: true,
+      },
+      {
+        optimizer: "DuckDB",
+        plan: dkPlan,
+        total_cost: 168,
+        available: true,
+      },
+    ],
+    summary: {
+      cheapest: "DuckDB",
+      costs: [
+        { optimizer: "Ra", total_cost: 210, node_count: 3 },
+        { optimizer: "PostgreSQL", total_cost: 245, node_count: 3 },
+        { optimizer: "MySQL", total_cost: 295, node_count: 3 },
+        { optimizer: "DuckDB", total_cost: 168, node_count: 3 },
+      ],
+    },
   };
 }

@@ -117,6 +117,8 @@ fn build_rocket() -> rocket::Rocket<rocket::Build> {
                 api::demos2::demo_distributed_query,
                 api::demos2::demo_cost_calibration,
                 websocket::isolation_ws,
+                api::visualize::visualize,
+                api::visualize::compare_plans,
             ],
         )
         .mount("/static", FileServer::from(relative!("static")))
@@ -471,6 +473,8 @@ mod tests {
                     api::demos2::demo_distributed_query,
                     api::demos2::demo_cost_calibration,
                     websocket::isolation_ws,
+                    api::visualize::visualize,
+                    api::visualize::compare_plans,
                 ],
             )
             .mount("/static", FileServer::from(relative!("static")))
@@ -526,6 +530,121 @@ mod tests {
             Status::TooManyRequests,
             "third request should be rate limited"
         );
+    }
+
+    #[test]
+    fn test_visualize_empty_sql() {
+        let client = client();
+        let response = client
+            .post("/api/visualize")
+            .header(ContentType::JSON)
+            .body(r#"{"sql":""}"#)
+            .dispatch();
+        assert_eq!(response.status(), Status::BadRequest);
+    }
+
+    #[test]
+    fn test_visualize_valid() {
+        let client = client();
+        let response = client
+            .post("/api/visualize")
+            .header(ContentType::JSON)
+            .body(r#"{"sql":"SELECT * FROM users WHERE age > 25"}"#)
+            .dispatch();
+        assert_eq!(response.status(), Status::Ok);
+        let body: serde_json::Value =
+            serde_json::from_str(
+                &response.into_string().unwrap(),
+            )
+            .unwrap();
+        assert!(body["plan"]["operator_type"].is_string());
+        assert!(body["total_cost"].as_f64().unwrap() > 0.0);
+        assert!(!body["rules_applied"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn test_compare_plans_empty_sql() {
+        let client = client();
+        let response = client
+            .post("/api/compare-plans")
+            .header(ContentType::JSON)
+            .body(r#"{"sql":""}"#)
+            .dispatch();
+        assert_eq!(response.status(), Status::BadRequest);
+    }
+
+    #[test]
+    fn test_compare_plans_valid() {
+        let client = client();
+        let response = client
+            .post("/api/compare-plans")
+            .header(ContentType::JSON)
+            .body(
+                r#"{"sql":"SELECT * FROM users WHERE age > 25"}"#,
+            )
+            .dispatch();
+        assert_eq!(response.status(), Status::Ok);
+        let body: serde_json::Value =
+            serde_json::from_str(
+                &response.into_string().unwrap(),
+            )
+            .unwrap();
+        assert_eq!(
+            body["plans"].as_array().unwrap().len(),
+            4,
+            "should have plans for Ra, PostgreSQL, MySQL, DuckDB"
+        );
+        assert!(body["summary"]["cheapest"].is_string());
+        assert_eq!(
+            body["summary"]["costs"]
+                .as_array()
+                .unwrap()
+                .len(),
+            4
+        );
+    }
+
+    #[test]
+    fn test_compare_plans_with_join() {
+        let client = client();
+        let sql = "SELECT u.name FROM users u \
+                   JOIN orders o ON u.id = o.user_id \
+                   WHERE o.total > 100";
+        let response = client
+            .post("/api/compare-plans")
+            .header(ContentType::JSON)
+            .body(format!(r#"{{"sql":"{sql}"}}"#))
+            .dispatch();
+        assert_eq!(response.status(), Status::Ok);
+        let body: serde_json::Value =
+            serde_json::from_str(
+                &response.into_string().unwrap(),
+            )
+            .unwrap();
+        let ra_plan = &body["plans"][0]["plan"];
+        // With JOIN, the Ra plan should have a nested tree
+        assert!(
+            has_operator(&ra_plan, "HashJoin"),
+            "Ra plan should contain HashJoin for JOIN queries"
+        );
+    }
+
+    fn has_operator(
+        node: &serde_json::Value,
+        op: &str,
+    ) -> bool {
+        if node["operator_type"].as_str() == Some(op) {
+            return true;
+        }
+        if let Some(children) = node["children"].as_array() {
+            return children
+                .iter()
+                .any(|c| has_operator(c, op));
+        }
+        false
     }
 
     #[test]

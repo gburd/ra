@@ -46,6 +46,14 @@ export function HomePage(_props: HomePageProps) {
           </p>
         </a>
 
+        <a href="/visualize" class="feature-card">
+          <h2>Plan Visualizer</h2>
+          <p>
+            Compare query execution plans across Ra, PostgreSQL, MySQL,
+            and DuckDB side by side with interactive tree visualization.
+          </p>
+        </a>
+
         <a href="/demos" class="feature-card">
           <h2>Interactive Demos</h2>
           <p>
