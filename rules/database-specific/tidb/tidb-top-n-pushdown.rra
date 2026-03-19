@@ -1,0 +1,43 @@
+---
+id: tidb-top-n-pushdown
+name: "TOP-N Pushdown (ORDER BY LIMIT)"
+category: physical/order-limit
+databases: [tidb]
+version: "1.0.0"
+authors: ["Database Contributors", "RA Contributors"]
+tags: [database-mining, tidb, optimization]
+complexity: "O(n)"
+benefit_range: [1.0, 10.0]
+---
+
+# TOP-N Pushdown (ORDER BY LIMIT)
+
+## Description
+
+Pushes ORDER BY with LIMIT to storage layer early.
+
+**When to apply**: During query optimization phase.
+
+## Relational Algebra
+
+```algebra
+-- Before
+(limit (sort (scan orders) BY created_at DESC) 10)
+
+-- After
+(sort (index-seek orders idx_created_at_desc LIMIT 10))
+```
+
+## Preconditions
+
+- Descending index exists on ORDER BY column
+
+## Test Cases
+
+```sql
+SELECT * FROM table WHERE condition;
+```
+
+## References
+
+- Database documentation

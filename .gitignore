@@ -27,6 +27,7 @@ result-*
 # Testing
 /test-data/
 /test-output/
+*.proptest-regressions
 
 # Build artifacts
 /dist/

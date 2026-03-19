@@ -443,11 +443,279 @@ proptest! {
             result.err()
         );
     }
+
+    /// Cost Monotonicity: optimized cost should never exceed original cost.
+    ///
+    /// This is the core promise of query optimization - we should never
+    /// make queries slower. Allow 1% tolerance for rounding/measurement errors.
+    #[test]
+    fn optimized_cost_never_increases(expr in arb_rel_expr(2)) {
+        let config = OptimizerConfig {
+            node_limit: 10_000,
+            iter_limit: 5,
+            time_limit_secs: 2,
+        };
+        let optimizer = Optimizer::with_config(config);
+
+        // Estimate original cost
+        let original_cost = estimate_cost(&expr);
+        if original_cost.is_err() {
+            // Skip if cost estimation fails (e.g., unsupported constructs)
+            return Ok(());
+        }
+        let original_cost = original_cost.unwrap();
+
+        // Optimize
+        if let Ok(optimized) = optimizer.optimize(&expr) {
+            // Estimate optimized cost
+            if let Ok(optimized_cost) = estimate_cost(&optimized) {
+                prop_assert!(
+                    optimized_cost <= original_cost * 1.01,
+                    "Optimization increased cost: {:.2} → {:.2} ({:.1}% increase)\n\
+                     Original expr: {:?}\n\
+                     Optimized expr: {:?}",
+                    original_cost,
+                    optimized_cost,
+                    ((optimized_cost / original_cost) - 1.0) * 100.0,
+                    expr,
+                    optimized
+                );
+            }
+        }
+    }
+
+    /// Saturation terminates quickly without infinite loops.
+    ///
+    /// Detects rule conflicts, infinite rewrite loops, or poorly-behaved
+    /// rule combinations. Should complete within 20 iterations.
+    #[test]
+    fn saturation_terminates_quickly(expr in arb_rel_expr(2)) {
+        use egg::Runner;
+        use ra_engine::RelLang;
+        use ra_engine::RelAnalysis;
+
+        let rec = to_rec_expr(&expr)
+            .expect("conversion should succeed");
+        let runner: Runner<RelLang, RelAnalysis> = Runner::default()
+            .with_expr(&rec)
+            .with_node_limit(10_000)
+            .with_iter_limit(100)  // Allow up to 100 but expect much less
+            .run(&all_rules());
+
+        let iteration_count = runner.iterations.len();
+        prop_assert!(
+            iteration_count <= 20,
+            "Saturation took {} iterations (possible cycle or rule conflict)\n\
+             Expression: {:?}",
+            iteration_count,
+            expr
+        );
+    }
+
+    /// Hardware profiles affect cost estimation.
+    ///
+    /// Different hardware (CPU-only vs GPU server) should produce different
+    /// cost estimates, which can lead to different plan selections. This
+    /// validates that hardware-aware optimization is working.
+    #[test]
+    fn hardware_profile_affects_costs(
+        expr in arb_rel_expr_with_joins()
+    ) {
+        use egg::{Extractor, Runner};
+        use ra_engine::{RelLang, RelAnalysis, RelCostFn};
+
+        let rec = to_rec_expr(&expr)
+            .expect("conversion should succeed");
+        let runner: Runner<RelLang, RelAnalysis> = Runner::default()
+            .with_expr(&rec)
+            .with_node_limit(10_000)
+            .with_iter_limit(5)
+            .run(&all_rules());
+
+        let root = runner.roots[0];
+
+        // Estimate cost with CPU-only hardware
+        let cpu_hardware = ra_hardware::HardwareProfile::cpu_only();
+        let cpu_cost_fn = RelCostFn::new(cpu_hardware.clone());
+        let cpu_extractor = Extractor::new(&runner.egraph, cpu_cost_fn);
+        let (cpu_cost, _) = cpu_extractor.find_best(root);
+
+        // Estimate cost with GPU server hardware
+        let gpu_hardware = ra_hardware::HardwareProfile::gpu_server();
+        let gpu_cost_fn = RelCostFn::new(gpu_hardware.clone());
+        let gpu_extractor = Extractor::new(&runner.egraph, gpu_cost_fn);
+        let (gpu_cost, _) = gpu_extractor.find_best(root);
+
+        // Costs should differ (unless expr is trivial)
+        // We allow them to be equal for very simple expressions
+        if contains_joins(&expr) {
+            prop_assert!(
+                (cpu_cost - gpu_cost).abs() > 0.01,
+                "Hardware profiles did not affect cost: CPU={:.2}, GPU={:.2}\n\
+                 Expression: {:?}",
+                cpu_cost,
+                gpu_cost,
+                expr
+            );
+        }
+    }
+}
+
+/// Check if an expression contains any joins
+fn contains_joins(expr: &RelExpr) -> bool {
+    match expr {
+        RelExpr::Join { .. } => true,
+        RelExpr::Filter { input, .. }
+        | RelExpr::Project { input, .. }
+        | RelExpr::Aggregate { input, .. }
+        | RelExpr::Sort { input, .. }
+        | RelExpr::Limit { input, .. }
+        | RelExpr::Distinct { input, .. }
+        | RelExpr::Window { input, .. } => contains_joins(input),
+        RelExpr::Union { left, right, .. }
+        | RelExpr::Intersect { left, right, .. }
+        | RelExpr::Except { left, right, .. } => {
+            contains_joins(left) || contains_joins(right)
+        }
+        RelExpr::CTE { definition, body, .. } => {
+            contains_joins(definition) || contains_joins(body)
+        }
+        RelExpr::RecursiveCTE {
+            base_case,
+            recursive_case,
+            body,
+            ..
+        } => {
+            contains_joins(base_case)
+                || contains_joins(recursive_case)
+                || contains_joins(body)
+        }
+        RelExpr::Scan { .. } | RelExpr::Values { .. } => false,
+    }
+}
+
+/// Generate expressions that are more likely to contain joins
+fn arb_rel_expr_with_joins() -> impl Strategy<Value = RelExpr> {
+    arb_rel_expr(2).prop_filter("contains joins", |expr| contains_joins(expr))
+}
+
+proptest! {
+    /// Statistics are accepted by the cost model without errors.
+    ///
+    /// This test verifies that the optimizer can handle different table
+    /// statistics without crashing. Future enhancement: verify that statistics
+    /// actually affect plan selection and join ordering.
+    ///
+    /// Note: The current cost model uses fixed operator costs and doesn't
+    /// incorporate cardinality estimates into cost calculations. This is a
+    /// known limitation that should be addressed in future work.
+    #[test]
+    fn statistics_accepted_by_cost_model(
+        expr in arb_rel_expr_with_joins()
+    ) {
+        use egg::{Extractor, Runner};
+        use ra_engine::{RelLang, RelAnalysis, IntegratedCostFn};
+        use std::collections::HashMap;
+        use ra_core::statistics::Statistics;
+        use ra_stats::accuracy::Staleness;
+
+        let rec = to_rec_expr(&expr)
+            .expect("conversion should succeed");
+        let runner: Runner<RelLang, RelAnalysis> = Runner::default()
+            .with_expr(&rec)
+            .with_node_limit(10_000)
+            .with_iter_limit(5)
+            .run(&all_rules());
+
+        let root = runner.roots[0];
+        let tables = collect_tables(&expr);
+
+        // Skip if no tables (shouldn't happen but be safe)
+        if tables.is_empty() {
+            return Ok(());
+        }
+
+        // Scenario 1: Uniform statistics (all tables same size)
+        let mut uniform_stats: HashMap<String, Statistics> = HashMap::new();
+        let mut uniform_staleness: HashMap<String, Staleness> = HashMap::new();
+        for table in &tables {
+            uniform_stats.insert(table.clone(), Statistics::new(100_000.0));
+            uniform_staleness.insert(table.clone(), Staleness::Fresh);
+        }
+
+        // Scenario 2: Skewed statistics (first table much smaller)
+        let mut skewed_stats: HashMap<String, Statistics> = HashMap::new();
+        let mut skewed_staleness: HashMap<String, Staleness> = HashMap::new();
+        for (idx, table) in tables.iter().enumerate() {
+            let row_count = if idx == 0 { 1_000.0 } else { 100_000.0 };
+            skewed_stats.insert(table.clone(), Statistics::new(row_count));
+            skewed_staleness.insert(table.clone(), Staleness::Fresh);
+        }
+
+        let hardware = ra_hardware::HardwareProfile::cpu_only();
+
+        // Estimate costs with both scenarios - should not panic
+        let uniform_cost_fn = IntegratedCostFn::new(
+            hardware.clone(),
+            uniform_stats,
+            uniform_staleness,
+        );
+        let uniform_extractor = Extractor::new(&runner.egraph, uniform_cost_fn);
+        let (uniform_cost, _) = uniform_extractor.find_best(root);
+
+        let skewed_cost_fn = IntegratedCostFn::new(
+            hardware,
+            skewed_stats,
+            skewed_staleness,
+        );
+        let skewed_extractor = Extractor::new(&runner.egraph, skewed_cost_fn);
+        let (skewed_cost, _) = skewed_extractor.find_best(root);
+
+        // Verify costs are finite and positive (basic sanity check)
+        prop_assert!(
+            uniform_cost > 0.0 && uniform_cost.is_finite(),
+            "Uniform cost invalid: {:.2}",
+            uniform_cost
+        );
+        prop_assert!(
+            skewed_cost > 0.0 && skewed_cost.is_finite(),
+            "Skewed cost invalid: {:.2}",
+            skewed_cost
+        );
+
+        // TODO: Once cardinality-aware cost model is implemented,
+        // add assertion that costs differ for skewed statistics:
+        // prop_assert!((uniform_cost - skewed_cost).abs() > 1.0);
+    }
 }
 
 // ---------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------
+
+/// Estimate the cost of a RelExpr by converting it to RecExpr and
+/// computing the extraction cost using the integrated cost model.
+fn estimate_cost(expr: &RelExpr) -> Result<f64, Box<dyn std::error::Error>> {
+    use egg::{Extractor, Runner};
+    use ra_engine::{RelLang, RelAnalysis, RelCostFn};
+
+    let rec = to_rec_expr(expr)?;
+    let runner: Runner<RelLang, RelAnalysis> = Runner::default()
+        .with_expr(&rec)
+        .with_node_limit(10_000)
+        .with_iter_limit(1)  // No optimization, just cost estimation
+        .run(&[]);  // Empty rules - just build the egraph
+
+    let root = runner.roots[0];
+    let hardware = ra_hardware::HardwareProfile::cpu_only();
+
+    // Create cost function and extract best plan with its cost
+    let cost_fn = RelCostFn::new(hardware);
+    let extractor = Extractor::new(&runner.egraph, cost_fn);
+    let (cost, _best_expr) = extractor.find_best(root);
+
+    Ok(cost)
+}
 
 fn collect_tables(expr: &RelExpr) -> std::collections::HashSet<String> {
     let mut tables = std::collections::HashSet::new();

@@ -1,0 +1,43 @@
+---
+id: clickhouse-array-join-optimization
+name: "Array Join Specialization"
+category: physical/array-operations
+databases: [clickhouse]
+version: "1.0.0"
+authors: ["Database Contributors", "RA Contributors"]
+tags: [database-mining, clickhouse, optimization]
+complexity: "O(n)"
+benefit_range: [1.0, 10.0]
+---
+
+# Array Join Specialization
+
+## Description
+
+Specializes array join processing for ClickHouse's array join semantics.
+
+**When to apply**: During query optimization phase.
+
+## Relational Algebra
+
+```algebra
+-- Before
+(join (scan table) (array-join array_col))
+
+-- After
+(optimized-array-join (scan table) array_col)
+```
+
+## Preconditions
+
+- Array join on columnar array types
+
+## Test Cases
+
+```sql
+SELECT * FROM table WHERE condition;
+```
+
+## References
+
+- Database documentation

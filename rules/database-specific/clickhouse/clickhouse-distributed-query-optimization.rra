@@ -1,0 +1,43 @@
+---
+id: clickhouse-distributed-query-optimization
+name: "Distributed Query Optimization"
+category: distributed/distributed-execution
+databases: [clickhouse]
+version: "1.0.0"
+authors: ["Database Contributors", "RA Contributors"]
+tags: [database-mining, clickhouse, optimization]
+complexity: "O(n)"
+benefit_range: [1.0, 10.0]
+---
+
+# Distributed Query Optimization
+
+## Description
+
+Optimizes queries across distributed clusters by pushing down predicates and projections.
+
+**When to apply**: During query optimization phase.
+
+## Relational Algebra
+
+```algebra
+-- Before
+(select * from distributed_table WHERE condition)
+
+-- After
+(distributed-select (select * from local_table WHERE condition))
+```
+
+## Preconditions
+
+- Table is Distributed engine
+
+## Test Cases
+
+```sql
+SELECT * FROM table WHERE condition;
+```
+
+## References
+
+- Database documentation

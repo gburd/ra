@@ -1,0 +1,43 @@
+---
+id: mongodb-covering-index
+name: "Covering Index Query Optimization"
+category: physical/covering-index
+databases: [mongodb]
+version: "1.0.0"
+authors: ["Database Contributors", "RA Contributors"]
+tags: [database-mining, mongodb, optimization]
+complexity: "O(n)"
+benefit_range: [1.0, 10.0]
+---
+
+# Covering Index Query Optimization
+
+## Description
+
+Uses covering indexes to avoid collection fetches when all fields are in index.
+
+**When to apply**: During query optimization phase.
+
+## Relational Algebra
+
+```algebra
+-- Before
+(project [name, email, age] (filter (scan users) (eq status 'active')))
+
+-- After
+(project [name, email, age] (filter (index-scan users idx_status_fields) (eq status 'active')))
+```
+
+## Preconditions
+
+- Index contains all projected and filtered fields
+
+## Test Cases
+
+```sql
+SELECT * FROM table WHERE condition;
+```
+
+## References
+
+- Database documentation

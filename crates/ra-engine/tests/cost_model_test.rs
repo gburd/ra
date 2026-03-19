@@ -7,6 +7,13 @@
 //! 1. **Cardinality Estimation** - Predicting result set sizes
 //! 2. **Selectivity Estimation** - Predicting filter effectiveness
 //! 3. **Cost Calibration** - Balancing CPU, I/O, memory, and network costs
+//!
+//! Many of these tests verify that the cost model can process various plan
+//! shapes without error (cardinality/selectivity estimation happens inside
+//! the e-graph cost function during plan extraction). Tests that exercise
+//! rewrite rules use `assert_rule_applies`; tests that only exercise cost
+//! estimation use `assert_cardinality_estimated`, `assert_selectivity_estimated`,
+//! or `assert_cost_calculated`.
 
 mod helpers;
 
@@ -15,43 +22,49 @@ use ra_core::algebra::{JoinType, RelExpr};
 use ra_core::expr::{BinOp, Expr};
 
 // ── Cardinality Estimation: Base Tables ────────────────────────
+// Base table scans have no rewrite rules that change them; the cost
+// model assigns costs via the e-graph cost function during extraction.
 
 #[test]
 fn test_base_table_cardinality_known() {
     // Known table statistics should guide optimization
     let plan = scan("users");
-    assert_rule_applies(plan);
+    assert_cardinality_estimated(plan);
 }
 
 #[test]
 fn test_base_table_cardinality_unknown() {
     // Unknown table should use default cardinality estimates
     let plan = scan("unknown_table");
-    assert_rule_applies(plan);
+    assert_cardinality_estimated(plan);
 }
 
 #[test]
 fn test_empty_table_cardinality() {
     // Empty table (0 rows) should affect downstream operators
     let plan = scan("empty_table");
-    assert_rule_applies(plan);
+    assert_cardinality_estimated(plan);
 }
 
 #[test]
 fn test_large_table_cardinality() {
     // Very large tables (billions of rows) affect cost models
     let plan = scan("huge_fact_table");
-    assert_rule_applies(plan);
+    assert_cardinality_estimated(plan);
 }
 
 #[test]
 fn test_view_cardinality_estimation() {
     // Views should estimate cardinality through their definition
     let plan = scan("customer_view");
-    assert_rule_applies(plan);
+    assert_cardinality_estimated(plan);
 }
 
 // ── Cardinality Estimation: Filters ─────────────────────────────
+// Simple filtered scans with a single predicate: the `filter > const`
+// pattern does not match any rewrite rule that changes the plan
+// structure, but conjunctive/disjunctive filters trigger filter-merge
+// or filter-split rules.
 
 #[test]
 fn test_filter_selectivity_high() {
@@ -103,26 +116,30 @@ fn test_multiple_filter_disjunction() {
 }
 
 // ── Cardinality Estimation: Joins ───────────────────────────────
+// Simple two-table inner joins with an equality condition: join
+// commutativity fires in the e-graph, but cost-based extraction may
+// select the original order. The cost model still evaluates
+// cardinality for both orderings.
 
 #[test]
 fn test_join_cardinality_foreign_key() {
     // Foreign key join typically preserves left cardinality
     let plan = two_table_join("orders", "customers", "customer_id", "id");
-    assert_rule_applies(plan);
+    assert_cardinality_estimated(plan);
 }
 
 #[test]
 fn test_join_cardinality_many_to_many() {
     // Many-to-many join can explode cardinality
     let plan = two_table_join("students", "courses", "course_id", "id");
-    assert_rule_applies(plan);
+    assert_cardinality_estimated(plan);
 }
 
 #[test]
 fn test_join_cardinality_unique_key() {
     // Join on unique key limits result size
     let plan = two_table_join("orders", "order_details", "id", "order_id");
-    assert_rule_applies(plan);
+    assert_cardinality_estimated(plan);
 }
 
 #[test]
@@ -134,7 +151,7 @@ fn test_cross_join_cardinality() {
         left: Box::new(scan("small_table")),
         right: Box::new(scan("tiny_table")),
     };
-    assert_rule_applies(plan);
+    assert_cardinality_estimated(plan);
 }
 
 #[test]
@@ -151,6 +168,9 @@ fn test_multi_way_join_cardinality() {
 }
 
 // ── Cardinality Estimation: Aggregates ──────────────────────────
+// Aggregates without nested filters or sorts don't trigger rewrite
+// rules. The cost model estimates output cardinality based on
+// group-by column count.
 
 #[test]
 fn test_aggregate_no_groupby_cardinality() {
@@ -160,18 +180,18 @@ fn test_aggregate_no_groupby_cardinality() {
         aggregates: vec![],
         input: Box::new(scan("orders")),
     };
-    assert_rule_applies(plan);
+    assert_cardinality_estimated(plan);
 }
 
 #[test]
 fn test_aggregate_single_groupby() {
-    // Single GROUP BY cardinality ≈ NDV of grouping column
+    // Single GROUP BY cardinality ~ NDV of grouping column
     let plan = RelExpr::Aggregate {
         group_by: vec![col("customer_id")],
         aggregates: vec![],
         input: Box::new(scan("orders")),
     };
-    assert_rule_applies(plan);
+    assert_cardinality_estimated(plan);
 }
 
 #[test]
@@ -182,7 +202,7 @@ fn test_aggregate_multi_groupby() {
         aggregates: vec![],
         input: Box::new(scan("events")),
     };
-    assert_rule_applies(plan);
+    assert_cardinality_estimated(plan);
 }
 
 #[test]
@@ -193,7 +213,7 @@ fn test_aggregate_high_cardinality_groupby() {
         aggregates: vec![],
         input: Box::new(scan("transactions")),
     };
-    assert_rule_applies(plan);
+    assert_cardinality_estimated(plan);
 }
 
 #[test]
@@ -204,10 +224,13 @@ fn test_aggregate_low_cardinality_groupby() {
         aggregates: vec![],
         input: Box::new(scan("orders")),
     };
-    assert_rule_applies(plan);
+    assert_cardinality_estimated(plan);
 }
 
 // ── Cardinality Estimation: Set Operations ──────────────────────
+// Set operations between different tables don't trigger rewrite
+// rules (commutativity and self-identity rules only fire on
+// identical subtrees).
 
 #[test]
 fn test_union_all_cardinality() {
@@ -217,7 +240,7 @@ fn test_union_all_cardinality() {
         left: Box::new(scan("current_orders")),
         right: Box::new(scan("archived_orders")),
     };
-    assert_rule_applies(plan);
+    assert_cardinality_estimated(plan);
 }
 
 #[test]
@@ -228,32 +251,35 @@ fn test_union_distinct_cardinality() {
         left: Box::new(scan("customers_us")),
         right: Box::new(scan("customers_eu")),
     };
-    assert_rule_applies(plan);
+    assert_cardinality_estimated(plan);
 }
 
 #[test]
 fn test_intersect_cardinality() {
-    // INTERSECT cardinality ≤ min(left, right)
+    // INTERSECT cardinality <= min(left, right)
     let plan = RelExpr::Intersect {
         all: false,
         left: Box::new(scan("active_users")),
         right: Box::new(scan("premium_users")),
     };
-    assert_rule_applies(plan);
+    assert_cardinality_estimated(plan);
 }
 
 #[test]
 fn test_except_cardinality() {
-    // EXCEPT cardinality ≤ left cardinality
+    // EXCEPT cardinality <= left cardinality
     let plan = RelExpr::Except {
         all: false,
         left: Box::new(scan("all_products")),
         right: Box::new(scan("discontinued_products")),
     };
-    assert_rule_applies(plan);
+    assert_cardinality_estimated(plan);
 }
 
 // ── Selectivity Estimation: Equality Predicates ─────────────────
+// Single equality/comparison filters on a scan don't trigger
+// structural rewrites. The cost model evaluates selectivity
+// internally during cost-based extraction.
 
 #[test]
 fn test_selectivity_equality_high_ndv() {
@@ -262,7 +288,7 @@ fn test_selectivity_equality_high_ndv() {
         predicate: eq(col("user_id"), int(12345)),
         input: Box::new(scan("events")),
     };
-    assert_rule_applies(plan);
+    assert_selectivity_estimated(plan);
 }
 
 #[test]
@@ -272,7 +298,7 @@ fn test_selectivity_equality_low_ndv() {
         predicate: eq(col("is_active"), int(1)),
         input: Box::new(scan("accounts")),
     };
-    assert_rule_applies(plan);
+    assert_selectivity_estimated(plan);
 }
 
 #[test]
@@ -282,7 +308,7 @@ fn test_selectivity_equality_with_mcv() {
         predicate: eq(col("country"), string("US")),
         input: Box::new(scan("users")),
     };
-    assert_rule_applies(plan);
+    assert_selectivity_estimated(plan);
 }
 
 #[test]
@@ -295,7 +321,7 @@ fn test_selectivity_in_list_small() {
         ),
         input: Box::new(scan("orders")),
     };
-    assert_rule_applies(plan);
+    assert_selectivity_estimated(plan);
 }
 
 #[test]
@@ -309,10 +335,12 @@ fn test_selectivity_in_list_large() {
         },
         input: Box::new(scan("inventory")),
     };
-    assert_rule_applies(plan);
+    assert_selectivity_estimated(plan);
 }
 
 // ── Selectivity Estimation: Range Predicates ────────────────────
+// Range predicates using AND of two comparisons trigger the
+// filter-split / filter-merge rules, so they DO change the plan.
 
 #[test]
 fn test_selectivity_range_narrow() {
@@ -369,6 +397,8 @@ fn test_selectivity_range_between() {
 }
 
 // ── Selectivity Estimation: Pattern Matching ────────────────────
+// Function-based predicates (LIKE, REGEX) don't match any rewrite
+// rule patterns.
 
 #[test]
 fn test_selectivity_like_prefix() {
@@ -380,7 +410,7 @@ fn test_selectivity_like_prefix() {
         },
         input: Box::new(scan("customers")),
     };
-    assert_rule_applies(plan);
+    assert_selectivity_estimated(plan);
 }
 
 #[test]
@@ -393,7 +423,7 @@ fn test_selectivity_like_contains() {
         },
         input: Box::new(scan("tickets")),
     };
-    assert_rule_applies(plan);
+    assert_selectivity_estimated(plan);
 }
 
 #[test]
@@ -406,10 +436,13 @@ fn test_selectivity_regex_simple() {
         },
         input: Box::new(scan("users")),
     };
-    assert_rule_applies(plan);
+    assert_selectivity_estimated(plan);
 }
 
 // ── Selectivity Estimation: NULL Handling ───────────────────────
+// IS NULL / IS NOT NULL filters don't match rewrite patterns
+// (they would need `not-is-null` or `not-is-not-null` patterns
+// which require a NOT wrapper).
 
 #[test]
 fn test_selectivity_is_null() {
@@ -421,7 +454,7 @@ fn test_selectivity_is_null() {
         },
         input: Box::new(scan("records")),
     };
-    assert_rule_applies(plan);
+    assert_selectivity_estimated(plan);
 }
 
 #[test]
@@ -434,7 +467,7 @@ fn test_selectivity_is_not_null() {
         },
         input: Box::new(scan("contacts")),
     };
-    assert_rule_applies(plan);
+    assert_selectivity_estimated(plan);
 }
 
 #[test]
@@ -444,10 +477,11 @@ fn test_selectivity_null_safe_equality() {
         predicate: eq(col("optional_field"), col("other_field")),
         input: Box::new(scan("data")),
     };
-    assert_rule_applies(plan);
+    assert_selectivity_estimated(plan);
 }
 
 // ── Selectivity Estimation: Correlations ────────────────────────
+// Conjunctive filters with AND trigger filter-split rules.
 
 #[test]
 fn test_selectivity_correlated_columns() {
@@ -459,12 +493,12 @@ fn test_selectivity_correlated_columns() {
         ),
         input: Box::new(scan("addresses")),
     };
-    assert_rule_applies(plan);
+    assert_selectivity_estimated(plan);
 }
 
 #[test]
 fn test_selectivity_functional_dependency() {
-    // Functional dependency (e.g., zip → city) affects selectivity
+    // Functional dependency (e.g., zip -> city) affects selectivity
     let plan = RelExpr::Filter {
         predicate: and(
             eq(col("zip_code"), string("98101")),
@@ -472,7 +506,7 @@ fn test_selectivity_functional_dependency() {
         ),
         input: Box::new(scan("locations")),
     };
-    assert_rule_applies(plan);
+    assert_selectivity_estimated(plan);
 }
 
 #[test]
@@ -489,6 +523,9 @@ fn test_selectivity_independent_columns() {
 }
 
 // ── Cost Calibration: CPU vs I/O ────────────────────────────────
+// Arithmetic expressions in filter predicates don't trigger
+// simplification rules unless they contain identity elements
+// (e.g., +0, *1).
 
 #[test]
 fn test_cost_cpu_bound_operation() {
@@ -505,14 +542,14 @@ fn test_cost_cpu_bound_operation() {
         },
         input: Box::new(scan("line_items")),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
 fn test_cost_io_bound_operation() {
     // I/O-intensive operation (e.g., large table scan)
     let plan = scan("huge_fact_table");
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -531,7 +568,7 @@ fn test_cost_sequential_vs_random_io() {
         left: Box::new(scan("fact_table")),
         right: Box::new(scan("dimension_table")),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 // ── Cost Calibration: Memory Costs ──────────────────────────────
@@ -552,7 +589,7 @@ fn test_cost_hash_join_memory() {
 fn test_cost_sort_memory() {
     // Sort memory requirements affect cost
     let plan = sort(scan("unsorted_data"), "key", true);
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -563,7 +600,7 @@ fn test_cost_aggregate_memory() {
         aggregates: vec![],
         input: Box::new(scan("events")),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -574,7 +611,7 @@ fn test_cost_memory_spill() {
         aggregates: vec![],
         input: Box::new(scan("billion_row_table")),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 // ── Cost Calibration: Network Costs ─────────────────────────────
@@ -600,7 +637,7 @@ fn test_cost_broadcast_join() {
         left: Box::new(scan("fact_table")),
         right: Box::new(scan("small_dimension")),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -611,7 +648,7 @@ fn test_cost_gather_operation() {
         aggregates: vec![],
         input: Box::new(scan("distributed_table")),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 // ── Cost Calibration: Hardware Profile Impact ───────────────────
@@ -665,7 +702,7 @@ fn test_cost_model_prefers_indexed_access() {
 fn test_cost_model_prefers_hash_join() {
     // Cost model should prefer hash join for equi-joins
     let plan = two_table_join("large_a", "large_b", "key", "key");
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -691,7 +728,7 @@ fn test_cost_model_prefers_nested_loop_small() {
         left: Box::new(scan("tiny_table_10_rows")),
         right: Box::new(scan("small_table_100_rows")),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 // ── Cost Model Edge Cases ───────────────────────────────────────
@@ -703,7 +740,7 @@ fn test_cost_model_zero_rows() {
         predicate: Expr::Const(ra_core::expr::Const::Bool(false)),
         input: Box::new(scan("any_table")),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -713,7 +750,7 @@ fn test_cost_model_single_row() {
         predicate: eq(col("primary_key"), int(42)),
         input: Box::new(scan("indexed_table")),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -723,7 +760,7 @@ fn test_cost_model_skewed_distribution() {
         predicate: eq(col("skewed_column"), string("common_value")),
         input: Box::new(scan("skewed_table")),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -753,7 +790,7 @@ fn test_cost_model_self_join() {
             alias: Some("managers".to_string()),
         }),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -765,7 +802,7 @@ fn test_cost_model_outer_join_cardinality() {
         left: Box::new(scan("orders")),
         right: Box::new(scan("customers")),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -777,19 +814,19 @@ fn test_cost_model_anti_join_selectivity() {
         left: Box::new(scan("available_products")),
         right: Box::new(scan("sold_out_products")),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
 fn test_cost_model_semi_join_selectivity() {
-    // Semi-join cardinality ≤ left cardinality
+    // Semi-join cardinality <= left cardinality
     let plan = RelExpr::Join {
         join_type: JoinType::Semi,
         condition: eq(col("user_id"), col("id")),
         left: Box::new(scan("all_users")),
         right: Box::new(scan("active_sessions")),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -799,6 +836,192 @@ fn test_cost_model_stale_statistics() {
         group_by: vec![col("category")],
         aggregates: vec![],
         input: Box::new(scan("table_with_stale_stats")),
+    };
+    assert_cost_calculated(plan);
+}
+
+// ── Positive Rewrite Rule Tests ─────────────────────────────────
+// These tests verify that specific rewrite rules DO fire, validating
+// that the test framework's `assert_rule_applies` works correctly.
+
+#[test]
+fn test_rewrite_filter_true_eliminated() {
+    // filter(true, input) => input
+    let plan = RelExpr::Filter {
+        predicate: Expr::Const(ra_core::expr::Const::Bool(true)),
+        input: Box::new(scan("any_table")),
+    };
+    assert_rule_applies(plan);
+}
+
+#[test]
+fn test_rewrite_filter_merge() {
+    // Two stacked filters merge into a single AND filter
+    let plan = RelExpr::Filter {
+        predicate: gt(col("a"), int(10)),
+        input: Box::new(RelExpr::Filter {
+            predicate: gt(col("b"), int(20)),
+            input: Box::new(scan("t")),
+        }),
+    };
+    assert_rule_applies(plan);
+}
+
+#[test]
+fn test_rewrite_filter_pushdown_through_join() {
+    // Filter above a join gets pushed into join sides
+    let join = RelExpr::Join {
+        join_type: JoinType::Inner,
+        condition: eq(col("id"), col("fk_id")),
+        left: Box::new(scan("left_table")),
+        right: Box::new(scan("right_table")),
+    };
+    let plan = RelExpr::Filter {
+        predicate: gt(col("value"), int(100)),
+        input: Box::new(join),
+    };
+    assert_rule_applies(plan);
+}
+
+#[test]
+fn test_rewrite_join_commutativity() {
+    // Inner join inputs can be swapped (the e-graph explores both
+    // orderings; the cost function picks the cheaper one).
+    // Use optimize_with_egraph to verify the e-graph grew.
+    let plan = RelExpr::Join {
+        join_type: JoinType::Inner,
+        condition: eq(col("a"), col("b")),
+        left: Box::new(scan("left_t")),
+        right: Box::new(scan("right_t")),
+    };
+    let optimizer = create_test_optimizer();
+    let (_, egraph) = optimizer
+        .optimize_with_egraph(&plan)
+        .expect("optimization should succeed");
+    assert!(
+        egraph.number_of_classes() > 3,
+        "e-graph should grow from join commutativity"
+    );
+}
+
+#[test]
+fn test_rewrite_project_merge() {
+    // Nested projects collapse into one
+    let plan = project(
+        project(scan("t"), vec!["a", "b", "c"]),
+        vec!["a", "b"],
+    );
+    assert_rule_applies(plan);
+}
+
+#[test]
+fn test_rewrite_sort_below_sort_eliminated() {
+    // Inner sort is eliminated when an outer sort exists
+    let plan = sort(sort(scan("t"), "a", true), "b", false);
+    assert_rule_applies(plan);
+}
+
+#[test]
+fn test_rewrite_limit_through_project() {
+    // Limit pushes through project
+    let plan = limit(project(scan("t"), vec!["a"]), 10);
+    assert_rule_applies(plan);
+}
+
+#[test]
+fn test_rewrite_filter_through_union() {
+    // Filter pushes into both sides of a union
+    let union = RelExpr::Union {
+        all: true,
+        left: Box::new(scan("t1")),
+        right: Box::new(scan("t2")),
+    };
+    let plan = RelExpr::Filter {
+        predicate: gt(col("x"), int(0)),
+        input: Box::new(union),
+    };
+    assert_rule_applies(plan);
+}
+
+#[test]
+fn test_rewrite_duckdb_sort_below_aggregate() {
+    // Sort below aggregate is eliminated (DuckDB-inspired rule)
+    let plan = RelExpr::Aggregate {
+        group_by: vec![col("category")],
+        aggregates: vec![],
+        input: Box::new(sort(scan("data"), "irrelevant_col", true)),
+    };
+    assert_rule_applies(plan);
+}
+
+#[test]
+fn test_rewrite_filter_pushdown_through_intersect() {
+    // Filter pushes into both sides of intersect
+    let intersect = RelExpr::Intersect {
+        all: false,
+        left: Box::new(scan("set_a")),
+        right: Box::new(scan("set_b")),
+    };
+    let plan = RelExpr::Filter {
+        predicate: gt(col("val"), int(5)),
+        input: Box::new(intersect),
+    };
+    assert_rule_applies(plan);
+}
+
+#[test]
+fn test_rewrite_filter_pushdown_through_except() {
+    // Filter pushes into left side of except
+    let except = RelExpr::Except {
+        all: false,
+        left: Box::new(scan("all_items")),
+        right: Box::new(scan("excluded_items")),
+    };
+    let plan = RelExpr::Filter {
+        predicate: gt(col("price"), int(0)),
+        input: Box::new(except),
+    };
+    assert_rule_applies(plan);
+}
+
+#[test]
+fn test_rewrite_cartesian_to_join() {
+    // Filter on a cross join converts to an inner join
+    let cross = RelExpr::Join {
+        join_type: JoinType::Cross,
+        condition: Expr::Const(ra_core::expr::Const::Bool(true)),
+        left: Box::new(scan("t1")),
+        right: Box::new(scan("t2")),
+    };
+    let plan = RelExpr::Filter {
+        predicate: eq(col("t1_id"), col("t2_id")),
+        input: Box::new(cross),
+    };
+    assert_rule_applies(plan);
+}
+
+#[test]
+fn test_rewrite_boolean_and_false_short_circuits() {
+    // AND with false short-circuits to false
+    let plan = RelExpr::Filter {
+        predicate: and(
+            col("x"),
+            Expr::Const(ra_core::expr::Const::Bool(false)),
+        ),
+        input: Box::new(scan("t")),
+    };
+    assert_rule_applies(plan);
+}
+
+#[test]
+fn test_rewrite_boolean_or_true_short_circuits() {
+    // OR with true short-circuits to true, then filter(true) is eliminated
+    let plan = RelExpr::Filter {
+        predicate: or(
+            col("x"),
+            Expr::Const(ra_core::expr::Const::Bool(true)),
+        ),
+        input: Box::new(scan("t")),
     };
     assert_rule_applies(plan);
 }

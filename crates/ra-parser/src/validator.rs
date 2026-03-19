@@ -58,9 +58,12 @@ pub enum ValidationError {
 ///
 /// Matches the directories under `rules/database-specific/`.
 pub const KNOWN_DATABASES: &[&str] = &[
+    "agensgraph",
+    "apache-kylin",
     "aurora",
     "bigquery",
     "blazingsql",
+    "blinkdb",
     "brytlyt",
     "c-store",
     "calcite",
@@ -70,6 +73,8 @@ pub const KNOWN_DATABASES: &[&str] = &[
     "cosmosdb",
     "couchbase",
     "databricks",
+    "datadog",
+    "dataflow",
     "datafusion",
     "db2",
     "debezium",
@@ -89,8 +94,11 @@ pub const KNOWN_DATABASES: &[&str] = &[
     "influxdb",
     "intel-pac",
     "janusgraph",
+    "ksqldb",
     "logicblox",
+    "mariadb",
     "materialize",
+    "memgraph",
     "memsql",        // Legacy name for SingleStore
     "monetdb",
     "mongodb",
@@ -103,17 +111,22 @@ pub const KNOWN_DATABASES: &[&str] = &[
     "omnisci",       // Legacy name for HeavyDB
     "oracle",
     "pg-strom",
+    "pinot",
     "postgresql",
     "presto",
     "questdb",
     "redshift",
+    "research",
+    "risingwave",
     "sap-hana",
     "singlestore",
     "snowflake",
     "spanner",
     "spark",
+    "spark-streaming",
     "sqlite",
     "sqream",
+    "telegraphcq",
     "theoretical",
     "tidb",
     "tigergraph",
@@ -290,6 +303,7 @@ mod tests {
             version: "1.0.0".to_owned(),
             authors: vec![],
             tags: vec![],
+            preconditions: vec![],
         }
     }
 
@@ -432,6 +446,7 @@ mod tests {
             version: "bad".to_owned(),
             authors: vec![],
             tags: vec![],
+            preconditions: vec![],
         };
         let errs = validate_metadata_all(&m);
         assert!(

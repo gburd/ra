@@ -1,0 +1,43 @@
+---
+id: tidb-max-min-to-index-seek
+name: "MAX/MIN to Index Seek Conversion"
+category: physical/aggregate-optimization
+databases: [tidb]
+version: "1.0.0"
+authors: ["Database Contributors", "RA Contributors"]
+tags: [database-mining, tidb, optimization]
+complexity: "O(n)"
+benefit_range: [1.0, 10.0]
+---
+
+# MAX/MIN to Index Seek Conversion
+
+## Description
+
+Replaces MAX() and MIN() with single index seek instead of full scan.
+
+**When to apply**: During query optimization phase.
+
+## Relational Algebra
+
+```algebra
+-- Before
+(aggregate (max id) (scan orders))
+
+-- After
+(project (index-seek orders idx_id DESC LIMIT 1))
+```
+
+## Preconditions
+
+- Ascending/descending index exists on aggregated column
+
+## Test Cases
+
+```sql
+SELECT * FROM table WHERE condition;
+```
+
+## References
+
+- Database documentation

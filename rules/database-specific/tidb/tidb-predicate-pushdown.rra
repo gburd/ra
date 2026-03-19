@@ -1,0 +1,43 @@
+---
+id: tidb-predicate-pushdown
+name: "Predicate Pushdown Through Operators"
+category: logical/predicate-pushdown
+databases: [tidb]
+version: "1.0.0"
+authors: ["Database Contributors", "RA Contributors"]
+tags: [database-mining, tidb, optimization]
+complexity: "O(n)"
+benefit_range: [1.0, 10.0]
+---
+
+# Predicate Pushdown Through Operators
+
+## Description
+
+Pushes WHERE predicates closer to the data source.
+
+**When to apply**: During query optimization phase.
+
+## Relational Algebra
+
+```algebra
+-- Before
+(filter (join (scan t1) (scan t2)) (and (eq t1.a 5) (eq t2.b 10)))
+
+-- After
+(filter (join (filter (scan t1) (eq a 5)) (filter (scan t2) (eq b 10))))
+```
+
+## Preconditions
+
+- Predicates only reference one side of join
+
+## Test Cases
+
+```sql
+SELECT * FROM table WHERE condition;
+```
+
+## References
+
+- Database documentation

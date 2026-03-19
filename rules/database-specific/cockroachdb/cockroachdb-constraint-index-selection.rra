@@ -1,0 +1,43 @@
+---
+id: cockroachdb-constraint-index-selection
+name: "Constrain Index Selection via Predicates"
+category: physical/index-selection
+databases: [cockroachdb]
+version: "1.0.0"
+authors: ["Database Contributors", "RA Contributors"]
+tags: [database-mining, cockroachdb, optimization]
+complexity: "O(n)"
+benefit_range: [1.0, 10.0]
+---
+
+# Constrain Index Selection via Predicates
+
+## Description
+
+Derives constraints from WHERE clause and applies to index selection.
+
+**When to apply**: During query optimization phase.
+
+## Relational Algebra
+
+```algebra
+-- Before
+(filter (scan orders) (and (eq region 'us-east') (gt total 100)))
+
+-- After
+(filter (index-scan orders idx_region_total) (and (eq region 'us-east') (gt total 100)))
+```
+
+## Preconditions
+
+- Index supports derived constraints from predicates
+
+## Test Cases
+
+```sql
+SELECT * FROM table WHERE condition;
+```
+
+## References
+
+- Database documentation

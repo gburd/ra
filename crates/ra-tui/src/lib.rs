@@ -31,9 +31,7 @@ pub mod ui;
 pub use app::{App, AppError};
 pub use event::{EventHandler, TuiEvent};
 pub use layout::{EditorLayout, FrameLayout, LayoutMode, PanelLayout};
-pub use panels::sql_editor::{
-    EditorMode, KeybindingMode, SqlEditor, ViSubMode,
-};
+pub use panels::sql_editor::{EditorMode, SqlEditor, ViMode};
 pub use playback::PlaybackController;
 pub use setup::{SetupError, TuiConfig};
 pub use timeline::{Snapshot, Timeline};

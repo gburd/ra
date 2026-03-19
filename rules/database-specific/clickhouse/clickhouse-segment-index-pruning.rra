@@ -1,0 +1,43 @@
+---
+id: clickhouse-segment-index-pruning
+name: "Segment Index Pruning"
+category: logical/index-pruning
+databases: [clickhouse]
+version: "1.0.0"
+authors: ["Database Contributors", "RA Contributors"]
+tags: [database-mining, clickhouse, optimization]
+complexity: "O(n)"
+benefit_range: [1.0, 10.0]
+---
+
+# Segment Index Pruning
+
+## Description
+
+Prunes segments based on min/max statistics during query execution.
+
+**When to apply**: During query optimization phase.
+
+## Relational Algebra
+
+```algebra
+-- Before
+(scan orders WHERE ts > now() - 1h)
+
+-- After
+(scan orders_segment_pruned WHERE ts > now() - 1h)
+```
+
+## Preconditions
+
+- Segment index available on timestamp column
+
+## Test Cases
+
+```sql
+SELECT * FROM table WHERE condition;
+```
+
+## References
+
+- Database documentation

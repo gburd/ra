@@ -1,0 +1,43 @@
+---
+id: neo4j-merge-cardinality
+name: "Merge Cardinality Rules"
+category: logical/merge-cardinality
+databases: [neo4j]
+version: "1.0.0"
+authors: ["Database Contributors", "RA Contributors"]
+tags: [database-mining, neo4j, optimization]
+complexity: "O(n)"
+benefit_range: [1.0, 10.0]
+---
+
+# Merge Cardinality Rules
+
+## Description
+
+Combines adjacent patterns with optimal ordering.
+
+**When to apply**: During query optimization phase.
+
+## Relational Algebra
+
+```algebra
+-- Before
+(expand (expand p1 :REL1) :REL2)
+
+-- After
+(expand (expand p1 :REL2) :REL1)
+```
+
+## Preconditions
+
+- REL2 has better selectivity
+
+## Test Cases
+
+```sql
+SELECT * FROM table WHERE condition;
+```
+
+## References
+
+- Database documentation

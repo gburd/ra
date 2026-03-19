@@ -1,0 +1,43 @@
+---
+id: mongodb-sort-elimination
+name: "Sort Elimination via Index Ordering"
+category: logical/sort-elimination
+databases: [mongodb]
+version: "1.0.0"
+authors: ["Database Contributors", "RA Contributors"]
+tags: [database-mining, mongodb, optimization]
+complexity: "O(n)"
+benefit_range: [1.0, 10.0]
+---
+
+# Sort Elimination via Index Ordering
+
+## Description
+
+Removes sorts when index provides required ordering.
+
+**When to apply**: During query optimization phase.
+
+## Relational Algebra
+
+```algebra
+-- Before
+(sort (filter (scan users) (eq status 'active')) BY created_at DESC)
+
+-- After
+(sort (filter (index-scan users idx_status_created_at DESC) (eq status 'active')))
+```
+
+## Preconditions
+
+- Index already ordered by sort column
+
+## Test Cases
+
+```sql
+SELECT * FROM table WHERE condition;
+```
+
+## References
+
+- Database documentation

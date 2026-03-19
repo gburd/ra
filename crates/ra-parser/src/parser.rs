@@ -4,6 +4,7 @@
 //! [`RuleFile`] values containing metadata, prose, and code blocks.
 
 use pulldown_cmark::{Event, Options, Parser as MdParser, Tag};
+use ra_core::PreCondition;
 use serde::Deserialize;
 use thiserror::Error;
 
@@ -40,7 +41,7 @@ pub enum ParseError {
 // ── Public types ─────────────────────────────────────────────
 
 /// A fully parsed `.rra` rule file.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RuleFile {
     /// YAML frontmatter metadata.
     pub metadata: RuleMetadata,
@@ -58,7 +59,7 @@ pub struct RuleFile {
 }
 
 /// Metadata extracted from YAML frontmatter.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct RuleMetadata {
     /// Unique rule identifier (e.g. `filter-through-join`).
     pub id: String,
@@ -84,6 +85,9 @@ pub struct RuleMetadata {
     /// Free-form tags.
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Formal pre-conditions (optional, for rule filtering).
+    #[serde(default)]
+    pub preconditions: Vec<PreCondition>,
 }
 
 fn default_version() -> String {

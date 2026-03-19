@@ -1,0 +1,43 @@
+---
+id: mongodb-sort-pushdown
+name: "Sort Pushdown Through Index"
+category: physical/sort
+databases: [mongodb]
+version: "1.0.0"
+authors: ["Database Contributors", "RA Contributors"]
+tags: [database-mining, mongodb, optimization]
+complexity: "O(n)"
+benefit_range: [1.0, 10.0]
+---
+
+# Sort Pushdown Through Index
+
+## Description
+
+Pushes ordering to index seek when possible.
+
+**When to apply**: During query optimization phase.
+
+## Relational Algebra
+
+```algebra
+-- Before
+(sort (index-scan users idx_email) BY updated_at DESC LIMIT 10)
+
+-- After
+(index-scan users idx_updated_at_desc LIMIT 10)
+```
+
+## Preconditions
+
+- Descending index exists on updated_at
+
+## Test Cases
+
+```sql
+SELECT * FROM table WHERE condition;
+```
+
+## References
+
+- Database documentation

@@ -1,0 +1,43 @@
+---
+id: cockroachdb-elide-projection
+name: "Elide Unnecessary Projections"
+category: logical/projection
+databases: [cockroachdb]
+version: "1.0.0"
+authors: ["Database Contributors", "RA Contributors"]
+tags: [database-mining, cockroachdb, optimization]
+complexity: "O(n)"
+benefit_range: [1.0, 10.0]
+---
+
+# Elide Unnecessary Projections
+
+## Description
+
+Removes unnecessary projection operators when column sets match exactly.
+
+**When to apply**: During query optimization phase.
+
+## Relational Algebra
+
+```algebra
+-- Before
+(project [a,b,c] (project [a,b,c] (scan table)))
+
+-- After
+(project [a,b,c] (scan table))
+```
+
+## Preconditions
+
+- Inner projection columns identical to outer
+
+## Test Cases
+
+```sql
+SELECT * FROM table WHERE condition;
+```
+
+## References
+
+- Database documentation

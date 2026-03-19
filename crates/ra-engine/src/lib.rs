@@ -34,10 +34,12 @@ pub mod differential;
 pub mod distributed_optimizer;
 pub mod egraph;
 pub mod extract;
+pub mod facts_context;
 pub mod federated_cost;
 pub mod federated_optimizer;
 pub mod memo;
 pub mod network_cost;
+pub mod precondition_eval;
 pub mod recursive;
 pub mod resource_budget;
 pub mod resource_profiles;
@@ -76,7 +78,9 @@ pub use resource_budget::{
 pub use constraint_optimizer::{
     optimize_with_constraints, ConstraintOptResult,
 };
+pub use facts_context::{FactsContext, FactsContextBuilder};
 pub use rewrite::all_rules;
+pub use precondition_eval::{EvaluationError, PreConditionEvaluator};
 pub use timely::{ComputationStats, TimelyConfig};
 pub use trigger_optimizer::{
     analyze_dml_cost, detect_cascade, CascadeWarning,
