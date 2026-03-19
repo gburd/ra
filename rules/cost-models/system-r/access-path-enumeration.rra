@@ -306,5 +306,5 @@ ORDER BY revenue DESC, o.orderdate;
 
 **Key legacy:**
 - Every major database optimizer is a direct descendant of System R
-- PostgreSQL, MySQL, Oracle, SQL Server, DB2 all use System R's DP approach
+- PostgreSQL, MySQL, Oracle, mssql, DB2 all use System R's DP approach
 - The paper has been cited 3000+ times and influenced 45 years of research

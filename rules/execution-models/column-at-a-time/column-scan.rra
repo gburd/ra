@@ -3,7 +3,7 @@ id: column-scan
 name: Column-at-a-Time Table Scan (MonetDB X100)
 category: execution-models
 version: 1.0.0
-databases: [MonetDB, ClickHouse, DuckDB, VectorWise, Vertica]
+databases: [MonetDB, ClickHouse, DuckDB, vectorwise, vertica]
 authors: [Peter Boncz, Marcin Zukowski, Niels Nes]
 tags: [execution, columnar, x100, scan, sequential-io, cache-conscious, bat]
 standard: MonetDB X100

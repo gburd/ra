@@ -228,5 +228,5 @@ WHERE product_id = 456 AND order_date BETWEEN '2024-01-01' AND '2024-01-31';
   - Comprehensive treatment of index selection
 
 **Implementation:**
-- All major databases (PostgreSQL, MySQL, Oracle, SQL Server)
+- All major databases (PostgreSQL, MySQL, Oracle, mssql)
 - PostgreSQL: `src/backend/optimizer/path/indxpath.c`

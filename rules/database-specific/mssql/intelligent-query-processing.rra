@@ -1,6 +1,6 @@
 ---
 id: mssql-memory-grant-feedback
-name: SQL Server Memory Grant Feedback
+name: mssql Memory Grant Feedback
 category: database-specific/mssql
 databases: [mssql]
 version: "1.0.0"
@@ -10,12 +10,12 @@ complexity: O(1)
 benefit_range: [0.1, 0.6]
 ---
 
-# SQL Server Memory Grant Feedback
+# mssql Memory Grant Feedback
 
 ## Description
 
 Adjusts memory grants for queries based on actual execution statistics.
-When a query spills to tempdb or wastes excessive memory, SQL Server
+When a query spills to tempdb or wastes excessive memory, mssql
 adjusts the grant for subsequent executions to match actual needs.
 
 **When to apply**: A cached query plan has a memory grant that is
@@ -27,7 +27,7 @@ that other queries could use.  Underestimates cause expensive tempdb
 spills for sorts and hash joins.  Feedback adjusts grants to match
 reality, eliminating spills and reducing memory waste.
 
-**Database version**: SQL Server 2017+ (batch mode), 2019+ (row mode),
+**Database version**: mssql 2017+ (batch mode), 2019+ (row mode),
 2022+ (percentile and persistence)
 
 ## Relational Algebra
@@ -109,6 +109,6 @@ SELECT TOP 10 * FROM small_table;
 
 ## References
 
-SQL Server: Memory Grant Feedback
-SQL Server: sys.dm_exec_query_memory_grants
-SQL Server: Query Store (memory grant feedback persistence in 2022+)
+mssql: Memory Grant Feedback
+mssql: sys.dm_exec_query_memory_grants
+mssql: Query Store (memory grant feedback persistence in 2022+)

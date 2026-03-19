@@ -1,6 +1,6 @@
 ---
 id: mssql-window-aggregate-pushdown
-name: SQL Server Window Function Optimization
+name: mssql Window Function Optimization
 category: database-specific/mssql
 databases: [mssql]
 version: "1.0.0"
@@ -10,12 +10,12 @@ complexity: O(n log n)
 benefit_range: [0.1, 0.5]
 ---
 
-# SQL Server Window Function Optimization
+# mssql Window Function Optimization
 
 ## Description
 
 Optimizes window function execution using batch mode window aggregate
-operators and segment-based processing.  SQL Server 2016+ introduces
+operators and segment-based processing.  mssql 2016+ introduces
 batch mode window aggregates that process windows without explicit
 sorting when the input is already in batch mode.
 
@@ -27,7 +27,7 @@ a time with SIMD operations.  The Segment operator detects partition
 boundaries without materializing full partitions.  Combined, they
 avoid explicit sorts and reduce per-row overhead.
 
-**Database version**: SQL Server 2016+ (batch mode window)
+**Database version**: mssql 2016+ (batch mode window)
 
 ## Relational Algebra
 
@@ -113,5 +113,5 @@ FROM (SELECT TOP 10 * FROM employees) t;
 
 ## References
 
-SQL Server: Window Aggregate Operator (Showplan)
-SQL Server: Segment Operator (Showplan)
+mssql: Window Aggregate Operator (Showplan)
+mssql: Segment Operator (Showplan)

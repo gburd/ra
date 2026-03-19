@@ -205,11 +205,11 @@ SELECT * FROM config WHERE key = 'max_connections';
 
 **Implementation:**
 - Oracle: Adaptive cursor sharing (partial implementation)
-- SQL Server: Parameter Sensitive Plan Optimization (since 2022)
+- mssql: Parameter Sensitive Plan Optimization (since 2022)
 - Research: Plan bouquets (Dutt & Haritsa)
 
 **Key insights:**
 - "Plan bouquets" generalize to handle multiple uncertain operators
 - Switch points correspond to cost function crossover points
-- SQL Server's PSPO is a production implementation of this idea
+- mssql's PSPO is a production implementation of this idea
 - Pre-compiled plans amortize compilation cost across executions

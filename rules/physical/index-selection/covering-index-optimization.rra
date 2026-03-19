@@ -99,6 +99,6 @@ SELECT order_date, total FROM orders WHERE customer_id = 42;
 ## References
 
 - PostgreSQL: Index-only scans and visibility map
-- SQL Server: INCLUDE columns in nonclustered indexes
+- mssql: INCLUDE columns in nonclustered indexes
 - MySQL: InnoDB covering indexes
 - Oracle: Index-organized tables as covering structures

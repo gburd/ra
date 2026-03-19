@@ -16,7 +16,7 @@ benefit_range: [0.5, 0.95]
 
 ## Description
 
-Converts LATERAL joins (also known as APPLY in SQL Server, or dependent
+Converts LATERAL joins (also known as APPLY in mssql, or dependent
 joins in relational algebra) into regular joins when the lateral reference
 can be replaced by an equi-join condition. LATERAL forces row-at-a-time
 evaluation because the right side depends on each left row. Decorrelation
@@ -199,10 +199,10 @@ JOIN (
 ) o ON c.id = o.customer_id AND o.rn <= 3;
 ```
 
-### Positive: SQL Server CROSS APPLY
+### Positive: mssql CROSS APPLY
 
 ```sql
--- SQL Server syntax for LATERAL
+-- mssql syntax for LATERAL
 SELECT c.Name, a.MostRecent
 FROM Customers c
 CROSS APPLY (
@@ -253,6 +253,6 @@ LATERAL (
 **Implementation:**
 - PostgreSQL: LATERAL join support since 9.3, decorrelation in `pull_up_subqueries()`
 - Oracle: LATERAL inline views with decorrelation
-- SQL Server: CROSS/OUTER APPLY with apply elimination in optimizer
+- mssql: CROSS/OUTER APPLY with apply elimination in optimizer
 - DuckDB: `Binder::DecorrelateLateral()` and `FlattenDependentJoin`
 - CockroachDB: `opt/xform/decorrelate.go` handles LATERAL

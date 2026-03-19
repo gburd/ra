@@ -197,5 +197,5 @@ JOIN table_c c ON b.id = c.b_id;
 **Implementation:**
 - PostgreSQL: `build_joinrel_tlist()` uniqueness tracking
 - Oracle: Key-preserved table analysis in join elimination
-- SQL Server: Functional dependency tracking in cardinality estimation
+- mssql: Functional dependency tracking in cardinality estimation
 - DuckDB: Column binding metadata propagation

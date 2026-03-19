@@ -351,7 +351,7 @@ JOIN expensive_query e2 ON e1.id = e2.parent_id;
 
 - Galindo-Legaria, C., Joshi, M., "Orthogonal Optimization of Subqueries and Aggregation", ACM SIGMOD 2001
   - DOI: 10.1145/375663.375746
-  - Modern view merging in SQL Server (subquery removal)
+  - Modern view merging in mssql (subquery removal)
 
 - Elhemali, M., et al., "Execution Strategies for SQL Subqueries", ACM SIGMOD 2007
   - DOI: 10.1145/1247480.1247598
@@ -361,4 +361,4 @@ JOIN expensive_query e2 ON e1.id = e2.parent_id;
 - PostgreSQL: `src/backend/optimizer/plan/subselect.c` - subquery flattening
 - MySQL: `sql/sql_derived.cc` - derived table merging
 - Oracle: "complex view merging" optimizer transformation
-- SQL Server: "view/subquery removal" in Cascades optimizer
+- mssql: "view/subquery removal" in Cascades optimizer

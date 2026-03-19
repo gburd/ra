@@ -199,7 +199,7 @@ LEFT JOIN customers c
 **Implementation in databases:**
 - Apache Calcite: `JoinExpandOrToUnionRule.java`
 - Oracle: OR-expansion optimization (documented in tuning guides)
-- SQL Server: OR condition handling in join optimizer
+- mssql: OR condition handling in join optimizer
 
 **Academic papers:**
 - Graefe & McKenna, "The Volcano Optimizer Generator", IEEE Data Engineering 1993

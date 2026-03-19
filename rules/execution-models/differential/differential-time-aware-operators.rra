@@ -193,7 +193,7 @@ FROM left_source l JOIN right_source r ON l.key = r.key;
 
 ## References
 
-1. **McSherry, Frank et al**. "Differential Dataflow." CIDR 2013.
+1. **McSherry, Frank et al**. "differential-dataflow." CIDR 2013.
    - Lattice-based timestamp model for incremental computation
 
 2. **Murray, Derek G. et al**. "Naiad: A Timely Dataflow System." SOSP 2013.

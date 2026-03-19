@@ -1,6 +1,6 @@
 ---
 id: mssql-indexed-view-matching
-name: SQL Server Indexed View Matching
+name: mssql Indexed View Matching
 category: database-specific/mssql
 databases: [mssql]
 version: "1.0.0"
@@ -10,12 +10,12 @@ complexity: O(n)
 benefit_range: [0.5, 0.99]
 ---
 
-# SQL Server Indexed View Matching
+# mssql Indexed View Matching
 
 ## Description
 
 Automatically matches queries against indexed (materialized) views
-and substitutes the pre-computed view result.  SQL Server's optimizer
+and substitutes the pre-computed view result.  mssql's optimizer
 scans available indexed views during optimization and substitutes them
 when they can satisfy the query more efficiently than base table access.
 
@@ -25,10 +25,10 @@ makes it cheaper than base table access.
 
 **Why it works**: Indexed views pre-compute joins, aggregations, and
 filters.  The clustered index on the view provides fast access to the
-materialized data.  SQL Server automatically maintains the view on
+materialized data.  mssql automatically maintains the view on
 DML to base tables.
 
-**Database version**: SQL Server 2000+ (Enterprise), 2016+ (all editions
+**Database version**: mssql 2000+ (Enterprise), 2016+ (all editions
 with NOEXPAND hint)
 
 ## Relational Algebra
@@ -129,5 +129,5 @@ GROUP BY dept_name;
 
 ## References
 
-SQL Server: Designing Indexed Views
-SQL Server: sys.indexes WHERE type = 1 AND object_id IN (views)
+mssql: Designing Indexed Views
+mssql: sys.indexes WHERE type = 1 AND object_id IN (views)

@@ -18,7 +18,7 @@ benefit_range: [0.3, 0.7]
 - **Rule ID**: `flink-stream-table-join-temporal`
 - **Category**: Database-Specific / Flink
 - **Complexity**: O(n) with bounded state
-- **Source**: Apache Flink Table API
+- **Source**: flink Table API
 - **Docs**: https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/table/sql/queries/joins/
 - **Introduced**: Flink 1.9+ (2019)
 

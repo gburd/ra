@@ -157,5 +157,5 @@ SELECT * FROM t WHERE col % 7 = 0;
 **Implementation:**
 - PostgreSQL: Expression index support as alternative
 - MySQL: "Cannot use index" warning for non-SARGable predicates
-- SQL Server: SARGability analysis in query optimizer
+- mssql: SARGability analysis in query optimizer
 - Oracle: Function-based index as fallback

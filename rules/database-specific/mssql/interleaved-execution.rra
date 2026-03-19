@@ -1,6 +1,6 @@
 ---
 id: mssql-interleaved-execution
-name: SQL Server Interleaved Execution
+name: mssql Interleaved Execution
 category: database-specific/mssql
 databases: [mssql]
 version: "1.0.0"
@@ -10,7 +10,7 @@ complexity: O(n)
 benefit_range: [0.1, 0.6]
 ---
 
-# SQL Server Interleaved Execution
+# mssql Interleaved Execution
 
 ## Description
 
@@ -30,7 +30,7 @@ choose wrong join types and memory grants.  Interleaved execution
 materializes the TVF first, counts actual rows, then optimizes the
 rest of the query with accurate cardinality.
 
-**Database version**: SQL Server 2017+ (compat level >= 140)
+**Database version**: mssql 2017+ (compat level >= 140)
 
 ## Relational Algebra
 
@@ -120,5 +120,5 @@ JOIN products p ON t.product_id = p.id;
 
 ## References
 
-SQL Server: Interleaved Execution for MSTVFs
-SQL Server: Adaptive Query Processing
+mssql: Interleaved Execution for MSTVFs
+mssql: Adaptive Query Processing

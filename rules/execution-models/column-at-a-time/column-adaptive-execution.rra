@@ -3,7 +3,7 @@ id: column-adaptive-execution
 name: Column-at-a-Time Adaptive Execution
 category: execution-models
 version: 1.0.0
-databases: [MonetDB, DuckDB, VectorWise, ClickHouse, Vertica]
+databases: [MonetDB, DuckDB, vectorwise, ClickHouse, vertica]
 authors: [Marcin Zukowski, Peter Boncz, Hannes Muehleisen]
 tags: [execution, columnar, adaptive, runtime, column-group, hybrid, vectorized, compiled]
 standard: MonetDB X100

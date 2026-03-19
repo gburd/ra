@@ -1,0 +1,63 @@
+---
+id: limit-before-exchange
+name: Push Limit Before Exchange
+category: distributed/filter-pushdown-distributed
+databases: [spark, presto, cockroachdb, greenplum]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, limit, pushdown, exchange, top-k]
+complexity: O(1)
+benefit_range: [0.3, 0.95]
+---
+
+# Push Limit Before Exchange
+
+## Description
+
+Push a LIMIT operator below the exchange to reduce network transfer.
+Apply a local LIMIT on each node before gathering results.
+
+For ORDER BY + LIMIT (Top-K), push a local Top-K to each node, then
+merge-sort the partial results.
+
+## Relational Algebra
+
+```algebra
+Limit[n](Exchange[gather](R))
+  -> Limit[n](Exchange[gather](Limit[n](R)))
+
+Limit[n](Sort[k](Exchange[gather](R)))
+  -> Limit[n](MergeSort[k](Exchange[gather](TopK[n,k](R))))
+```
+
+## Test Cases
+
+```sql
+-- Test 1: Simple LIMIT pushed below gather
+SELECT * FROM orders LIMIT 10;
+-- Expected: Each node returns at most 10 rows,
+-- coordinator picks final 10
+```
+
+```sql
+-- Test 2: ORDER BY + LIMIT (Top-K)
+SELECT * FROM orders
+ORDER BY total DESC
+LIMIT 100;
+-- Expected: Each node computes local Top-100,
+-- coordinator merge-sorts and returns final 100
+```
+
+```sql
+-- Test 3: LIMIT with OFFSET
+SELECT * FROM orders
+ORDER BY id
+LIMIT 10 OFFSET 100;
+-- Expected: Each node returns top 110, coordinator skips 100
+```
+
+## References
+
+Spark: LocalLimit + GlobalLimit
+CockroachDB: limitNode pushdown
+Greenplum: LimitPath cost_limit

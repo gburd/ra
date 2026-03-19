@@ -166,7 +166,7 @@ subquery optimization in any cost-based optimizer
 ### Positive: Simple Cross Apply to inner join
 
 ```sql
--- SQL Server CROSS APPLY
+-- mssql CROSS APPLY
 SELECT c.Name, o.OrderDate, o.Total
 FROM Customers c
 CROSS APPLY (
@@ -185,7 +185,7 @@ JOIN Orders o ON o.CustomerID = c.ID AND o.Total > 100;
 ### Positive: Outer Apply to left join
 
 ```sql
--- SQL Server OUTER APPLY (preserves outer rows)
+-- mssql OUTER APPLY (preserves outer rows)
 SELECT c.Name, latest.OrderDate
 FROM Customers c
 OUTER APPLY (
@@ -282,7 +282,7 @@ CROSS APPLY (
 - Elhemali et al., "Execution Strategies for SQL Subqueries", SIGMOD 2007
 
 **Implementation:**
-- SQL Server: Primary APPLY optimizer with `OpApply` -> `OpJoin` rules
+- mssql: Primary APPLY optimizer with `OpApply` -> `OpJoin` rules
 - PostgreSQL: Implicit apply through correlated subqueries in `subselect.c`
 - Oracle: CBQT (Cost-Based Query Transformation) for apply elimination
 - DuckDB: `FlattenDependentJoin()` in binder for all correlated forms

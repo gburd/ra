@@ -104,7 +104,7 @@ GROUP BY product;
 ## References
 
 1. **Teradata**: Three-phase aggregation in MPP architecture
-2. **Vertica**: Hash segmentation with multi-phase aggregation
+2. **vertica**: Hash segmentation with multi-phase aggregation
 3. **Greenplum**: MPP query execution
 
 ## Tags

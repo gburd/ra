@@ -1,6 +1,6 @@
 ---
 id: mssql-adaptive-join
-name: SQL Server Adaptive Join
+name: mssql Adaptive Join
 category: database-specific/mssql
 databases: [mssql]
 version: "1.0.0"
@@ -10,11 +10,11 @@ complexity: O(n)
 benefit_range: [0.1, 0.5]
 ---
 
-# SQL Server Adaptive Join
+# mssql Adaptive Join
 
 ## Description
 
-SQL Server 2017+ introduces adaptive joins that defer the choice
+mssql 2017+ introduces adaptive joins that defer the choice
 between nested-loop join and hash join until runtime.  The operator
 begins buffering rows from the build input.  If the actual row
 count stays below an adaptive threshold, it switches to nested-loop
@@ -31,7 +31,7 @@ especially with parameter sniffing, correlated predicates, or
 multi-table joins.  Adaptive joins eliminate the performance cliff
 that occurs when the wrong join strategy is chosen.
 
-**Database version**: SQL Server 2017+ (compatibility level 140+)
+**Database version**: mssql 2017+ (compatibility level 140+)
 
 ## Relational Algebra
 
@@ -122,5 +122,5 @@ JOIN ref_table r ON l.code = r.code;
 ## References
 
 Microsoft: "Adaptive Query Processing" documentation
-Microsoft: "Adaptive Joins" (SQL Server 2017+)
+Microsoft: "Adaptive Joins" (mssql 2017+)
 Microsoft: sys.dm_exec_query_profiles (adaptive join statistics)

@@ -1,6 +1,6 @@
 ---
 id: mssql-subquery-to-apply
-name: SQL Server Subquery to Apply (Lateral Join)
+name: mssql Subquery to Apply (Lateral Join)
 category: database-specific/mssql
 databases: [mssql]
 version: "1.0.0"
@@ -10,12 +10,12 @@ complexity: O(n)
 benefit_range: [0.2, 0.7]
 ---
 
-# SQL Server Subquery to Apply (Lateral Join)
+# mssql Subquery to Apply (Lateral Join)
 
 ## Description
 
 Converts correlated subqueries into Apply operators (CROSS APPLY /
-OUTER APPLY), SQL Server's implementation of lateral joins.  The Apply
+OUTER APPLY), mssql's implementation of lateral joins.  The Apply
 operator evaluates the inner subquery once per outer row, using index
 seeks on the inner table when available.
 
@@ -23,12 +23,12 @@ seeks on the inner table when available.
 join, especially when the inner side can use index seeks on the
 correlation predicate.
 
-**Why it works**: The Apply operator is SQL Server's native mechanism
+**Why it works**: The Apply operator is mssql's native mechanism
 for row-by-row evaluation of parameterized subqueries.  When the inner
 side has an index on the correlation column, each evaluation is an
 efficient index seek rather than a full scan.
 
-**Database version**: SQL Server 2005+
+**Database version**: mssql 2005+
 
 ## Relational Algebra
 
@@ -126,5 +126,5 @@ WHERE EXISTS (SELECT 1 FROM small_table s WHERE s.id = t.ref_id);
 
 ## References
 
-SQL Server: CROSS APPLY and OUTER APPLY
-SQL Server: Nested Loops Join (Apply variant in Showplan)
+mssql: CROSS APPLY and OUTER APPLY
+mssql: Nested Loops Join (Apply variant in Showplan)

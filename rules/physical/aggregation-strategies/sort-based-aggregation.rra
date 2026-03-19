@@ -115,4 +115,4 @@ GROUP BY status;
 - PostgreSQL: Group aggregate with presort
 - Oracle: Sort-based GROUP BY
 - MySQL: Filesort with grouping
-- SQL Server: Stream aggregate operator
+- mssql: Stream aggregate operator

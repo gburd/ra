@@ -3,7 +3,7 @@ id: adaptive-memory-grant
 name: Adaptive Memory Grant Feedback
 category: execution-models
 version: 1.0.0
-databases: [SQL Server, Oracle, PostgreSQL]
+databases: [mssql, Oracle, PostgreSQL]
 authors: [Joe Chang]
 tags: [execution, adaptive, memory, spill, grant, feedback]
 standard: Memory grant feedback (MGF)
@@ -17,7 +17,7 @@ benefit_range: [1.2, 5.0]
 
 Adaptive memory grant feedback adjusts operator memory allocations based on actual usage from previous executions. Traditional optimizers estimate memory needs (for hash tables, sort buffers, window functions) at compile time, often getting it wrong -- over-granting wastes memory that other queries could use, while under-granting forces expensive disk spills.
 
-Memory grant feedback tracks the actual peak memory usage of each memory-consuming operator and adjusts the grant for subsequent executions. SQL Server implements three generations: batch-mode MGF (2017), row-mode MGF (2019), and percentile-based MGF (2022) which uses a distribution of past executions rather than just the last one.
+Memory grant feedback tracks the actual peak memory usage of each memory-consuming operator and adjusts the grant for subsequent executions. mssql implements three generations: batch-mode MGF (2017), row-mode MGF (2019), and percentile-based MGF (2022) which uses a distribution of past executions rather than just the last one.
 
 **Key characteristics:**
 - **Per-operator tracking**: Each hash join, sort, and window function tracked independently
@@ -259,10 +259,10 @@ GROUP BY customer_id;
 
 ## References
 
-1. **SQL Server Documentation**. "Memory Grant Feedback." Microsoft Docs.
+1. **mssql Documentation**. "Memory Grant Feedback." Microsoft Docs.
    - Three generations: batch-mode (2017), row-mode (2019), percentile (2022)
 
-2. **Freedman, Craig et al**. "Compilation in the Microsoft SQL Server Hekaton Engine." IEEE Data Engineering Bulletin, 2014.
+2. **Freedman, Craig et al**. "Compilation in the Microsoft mssql Hekaton Engine." IEEE Data Engineering Bulletin, 2014.
    - Memory management for in-memory operators
 
 3. **Graefe, Goetz**. "Sort-Merge-Join: An Idea Whose Time Has(h) Passed?" ICDE 1994.

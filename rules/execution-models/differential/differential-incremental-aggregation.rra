@@ -221,7 +221,7 @@ SELECT account_id, SUM(amount) AS balance FROM transactions GROUP BY account_id;
 
 ## References
 
-1. **McSherry, Frank et al**. "Differential Dataflow." CIDR 2013.
+1. **McSherry, Frank et al**. "differential-dataflow." CIDR 2013.
    - Incremental aggregation semantics in differential dataflow
 
 2. **Koch, Christoph et al**. "Incremental View Maintenance." CACM 2015.

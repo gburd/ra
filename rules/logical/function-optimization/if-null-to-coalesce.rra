@@ -28,7 +28,7 @@ equivalent COALESCE form.
 IFNULL(a, b)     -> COALESCE(a, b)        -- MySQL/SQLite
 NVL(a, b)        -> COALESCE(a, b)        -- Oracle
 NVL2(a, b, c)    -> CASE WHEN a IS NOT NULL THEN b ELSE c END
-ISNULL(a, b)     -> COALESCE(a, b)        -- SQL Server
+ISNULL(a, b)     -> COALESCE(a, b)        -- mssql
 IIF(cond, a, b)  -> CASE WHEN cond THEN a ELSE b END
 ```
 
@@ -76,7 +76,7 @@ SELECT NVL(commission, 0) FROM employees;
 -- Normalize to: COALESCE(commission, 0)
 ```
 
-### Positive: SQL Server ISNULL
+### Positive: mssql ISNULL
 
 ```sql
 SELECT ISNULL(discount, 0) FROM products;

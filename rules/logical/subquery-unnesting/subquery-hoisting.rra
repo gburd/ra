@@ -260,6 +260,6 @@ WHERE o.status = 'pending';
 **Implementation:**
 - PostgreSQL: Subquery caching via `SubPlan` with `useHashTable` flag
 - Oracle: Scalar subquery caching (result cache per distinct input)
-- SQL Server: Lazy spool for repeated subquery evaluation
+- mssql: Lazy spool for repeated subquery evaluation
 - DuckDB: Common subexpression elimination in binder
 - CockroachDB: `HoistSubqueries` optimizer pass

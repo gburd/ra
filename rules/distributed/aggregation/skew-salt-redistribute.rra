@@ -1,0 +1,56 @@
+---
+id: skew-salt-redistribute
+name: Skew Mitigation via Salted Redistribution
+category: distributed/aggregation
+databases: [spark, presto, trino, greenplum]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, aggregation, skew, salting, redistribute, straggler]
+complexity: O(n)
+benefit_range: [0.2, 0.7]
+---
+
+# Skew Mitigation via Salted Redistribution
+
+## Description
+
+Add a random salt to the group key hash to spread hot keys across
+multiple nodes. The first aggregation uses hash(g, salt), and a
+second aggregation removes the salt by grouping only on g. This
+prevents any single node from processing all rows for a hot key.
+
+**When to apply**: Moderate skew detected (10-50x average frequency)
+where separating hot keys is too complex but uniform distribution
+is needed.
+
+## Relational Algebra
+
+```algebra
+-- Before (hot key -> single node)
+gamma[g, agg(a)](Exchange[hash(g)](R))
+
+-- After (salted redistribution)
+gamma[g, merge_agg(partial)](
+    Exchange[hash(g)](
+        gamma[g, partial_agg(a)](
+            Exchange[hash(g, rand_salt(N))](R)
+        )
+    )
+)
+```
+
+## Test Cases
+
+```sql
+-- Positive: moderate skew on group key
+SELECT status, COUNT(*) FROM events GROUP BY status;
+-- status='active' is 30% of rows -> salt with N=4
+
+-- Negative: no skew detected
+SELECT product_id, SUM(quantity) FROM orders GROUP BY product_id;
+-- Uniform distribution, salting adds unnecessary overhead
+```
+
+## References
+
+Spark AQE: OptimizeSkewedJoin (similar salting for joins)

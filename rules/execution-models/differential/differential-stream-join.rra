@@ -3,10 +3,10 @@ id: differential-stream-join
 name: Differential Incremental Stream Join
 category: execution-models
 version: 1.0.0
-databases: [Materialize, Differential Dataflow, Noria]
+databases: [Materialize, differential-dataflow, Noria]
 authors: [Frank McSherry]
 tags: [execution, differential, streaming, join, incremental, delta]
-standard: Differential Dataflow
+standard: differential-dataflow
 ---
 
 # Differential Incremental Stream Join
@@ -132,7 +132,7 @@ DELETE FROM S WHERE b = 1;
 
 ## References
 
-1. **McSherry, Frank et al**. "Differential Dataflow." CIDR 2013.
+1. **McSherry, Frank et al**. "differential-dataflow." CIDR 2013.
 2. **Koch, Christoph et al**. "DBToaster." VLDB 2014. (Delta join rules)
 3. **Materialize Documentation**. "Join Execution."
 4. **Chirkova, Rada; Yang, Jun**. "Materialized Views." Foundations and Trends in Databases 2012.

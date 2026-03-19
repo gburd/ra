@@ -367,5 +367,5 @@ SELECT COUNT(*) FROM R JOIN S ON R.a = S.b WHERE R.x > 10;
 **Modern approaches:**
 - Oracle: dynamic sampling (optimizer_dynamic_sampling parameter)
 - PostgreSQL: ANALYZE sample rate, default_statistics_target
-- SQL Server: auto-create statistics with sampling
+- mssql: auto-create statistics with sampling
 - DuckDB: reservoir sampling for statistics collection

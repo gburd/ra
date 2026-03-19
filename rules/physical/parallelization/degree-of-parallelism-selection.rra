@@ -18,7 +18,7 @@ benefit_range: [0.3, 0.9]
 - **Rule ID**: `degree-of-parallelism-selection`
 - **Category**: Physical / Parallelization
 - **Complexity**: O(1) for DOP selection; affects operator cost as O(n/DOP)
-- **Introduced**: Oracle (parallel query hints), SQL Server (MAXDOP)
+- **Introduced**: Oracle (parallel query hints), mssql (MAXDOP)
 - **Prerequisites**: Parallelizable query plan
 - **Alternatives**: Fixed DOP, manual hint-based parallelism
 
@@ -339,7 +339,7 @@ GROUP BY department;
 1. **Oracle**: Adaptive Degree of Parallelism
    - https://docs.oracle.com/en/database/oracle/oracle-database/19/vldbg/degree-parallel.html
 
-2. **SQL Server**: MAXDOP configuration and recommendations
+2. **mssql**: MAXDOP configuration and recommendations
    - https://learn.microsoft.com/en-us/sql/database-engine/configure-windows/configure-the-max-degree-of-parallelism-server-configuration-option
 
 3. **PostgreSQL**: max_parallel_workers_per_gather

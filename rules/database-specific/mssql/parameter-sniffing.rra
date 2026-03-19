@@ -1,6 +1,6 @@
 ---
 id: mssql-parameter-sniffing
-name: SQL Server Parameter Sensitivity Plan
+name: mssql Parameter Sensitivity Plan
 category: database-specific/mssql
 databases: [mssql]
 version: "1.0.0"
@@ -10,12 +10,12 @@ complexity: O(n)
 benefit_range: [0.2, 0.8]
 ---
 
-# SQL Server Parameter Sensitivity Plan
+# mssql Parameter Sensitivity Plan
 
 ## Description
 
 Generates multiple cached plan variants for the same query based on
-parameter value ranges.  SQL Server 2022's Parameter Sensitivity Plan
+parameter value ranges.  mssql 2022's Parameter Sensitivity Plan
 (PSP) optimization detects when a single plan is suboptimal for
 different parameter values and caches multiple plans keyed by value
 ranges.
@@ -29,7 +29,7 @@ the first parameter value seen and reuses it for all subsequent values.
 PSP identifies skew and creates boundary points, caching separate plans
 for different ranges so each execution uses the appropriate plan.
 
-**Database version**: SQL Server 2022+ (PSP), 2017+ (OPTIMIZE FOR hints)
+**Database version**: mssql 2022+ (PSP), 2017+ (OPTIMIZE FOR hints)
 
 ## Relational Algebra
 
@@ -75,7 +75,7 @@ fn applicable(
 ```
 
 **Restrictions:**
-- Requires SQL Server 2022+ with database compat level >= 160
+- Requires mssql 2022+ with database compat level >= 160
 - Limited to equality predicates on single columns
 - OPTION(RECOMPILE) may still be needed for complex cases
 - PSP creates at most 3 plan variants per query
@@ -113,6 +113,6 @@ SELECT * FROM orders WHERE order_id = @id;
 
 ## References
 
-SQL Server: Parameter Sensitivity Plan Optimization
-SQL Server: sys.query_store_plan_forcing_locations
-SQL Server: OPTIMIZE FOR / OPTIMIZE FOR UNKNOWN hints
+mssql: Parameter Sensitivity Plan Optimization
+mssql: sys.query_store_plan_forcing_locations
+mssql: OPTIMIZE FOR / OPTIMIZE FOR UNKNOWN hints

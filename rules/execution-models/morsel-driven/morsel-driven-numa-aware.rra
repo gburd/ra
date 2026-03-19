@@ -3,7 +3,7 @@ id: morsel-driven-numa-aware
 name: Morsel-Driven NUMA-Aware Execution
 category: execution-models
 version: 1.0.0
-databases: [HyPer, DuckDB, Umbra, SAP HANA]
+databases: [HyPer, DuckDB, Umbra, sap-hana]
 authors: [Viktor Leis, Thomas Neumann, Alfons Kemper]
 tags: [execution, parallel, morsel, numa, memory, locality, multi-socket]
 standard: HyPer morsel model

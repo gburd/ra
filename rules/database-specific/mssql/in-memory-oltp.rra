@@ -1,6 +1,6 @@
 ---
 id: mssql-in-memory-oltp
-name: SQL Server In-Memory OLTP (Hekaton) Optimization
+name: mssql In-Memory OLTP (Hekaton) Optimization
 category: database-specific/mssql
 databases: [mssql]
 version: "1.0.0"
@@ -10,11 +10,11 @@ complexity: O(n)
 benefit_range: [0.3, 0.9]
 ---
 
-# SQL Server In-Memory OLTP (Hekaton) Optimization
+# mssql In-Memory OLTP (Hekaton) Optimization
 
 ## Description
 
-Routes queries on memory-optimized tables through SQL Server's
+Routes queries on memory-optimized tables through mssql's
 In-Memory OLTP engine (Hekaton), which uses latch-free data structures,
 native compilation, and optimistic multi-version concurrency control.
 Natively compiled stored procedures eliminate the SQL interpretation
@@ -24,12 +24,12 @@ overhead entirely.
 with MEMORY_OPTIMIZED = ON) and can benefit from latch-free access
 and native compilation.
 
-**Why it works**: Traditional SQL Server uses latches (lightweight
+**Why it works**: Traditional mssql uses latches (lightweight
 locks) to protect B-tree page access.  Memory-optimized tables use
 lock-free hash and range indexes with MVCC, eliminating latch
 contention that limits OLTP throughput on hot pages.
 
-**Database version**: SQL Server 2014+
+**Database version**: mssql 2014+
 
 ## Relational Algebra
 
@@ -116,6 +116,6 @@ SELECT * FROM orders_disk WHERE id = @id;
 
 ## References
 
-SQL Server: In-Memory OLTP (In-Memory Optimization)
-SQL Server: Natively Compiled Stored Procedures
-SQL Server: sys.dm_db_xtp_table_memory_stats
+mssql: In-Memory OLTP (In-Memory Optimization)
+mssql: Natively Compiled Stored Procedures
+mssql: sys.dm_db_xtp_table_memory_stats

@@ -406,6 +406,6 @@ SELECT * FROM data WHERE my_udf(col) > threshold;
 **Implementation:**
 - HyPer: Original push-based JIT compilation (Neumann 2011)
 - Umbra: Adaptive compilation with interpretation fallback
-- SQL Server: Hekaton in-memory engine with JIT compilation
+- mssql: Hekaton in-memory engine with JIT compilation
 - CockroachDB: Vectorized execution with optional JIT
 - Apache Spark: Whole-stage code generation (Tungsten)

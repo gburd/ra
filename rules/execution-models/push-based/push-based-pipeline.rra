@@ -350,6 +350,6 @@ FROM employees e;
 **Implementation:**
 - HyPer: Original produce/consume compilation (Neumann 2011)
 - Umbra: Adaptive interpretation/compilation with Babelfish IR
-- SQL Server Hekaton: Native compilation for in-memory tables
+- mssql Hekaton: Native compilation for in-memory tables
 - Apache Spark: Whole-stage code generation via Janino
 - Photon (Databricks): Vectorized push-based C++ engine

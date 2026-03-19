@@ -318,6 +318,6 @@ JOIN email_domains d ON e.email_domain = d.domain;
 **Implementation in databases:**
 - PostgreSQL: `src/backend/optimizer/plan/analyzejoins.c` - remove_useless_joins()
   - Specifically `rel_is_distinct_for()` and `join_is_removable()`
-- SQL Server: Join elimination transformation in Cascades
+- mssql: Join elimination transformation in Cascades
 - Oracle: "table elimination" optimization
 - MySQL 8.0+: Derived table/view merge with join elimination

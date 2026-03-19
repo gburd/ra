@@ -220,6 +220,6 @@ FROM departments d;
 **Implementation:**
 - PostgreSQL: `SS_process_ctes()` scalar subquery validation in `subselect.c`
 - Oracle: `SCALAR SUBQUERY` runtime check in CBO plan
-- SQL Server: `Assert(MaxRows=1)` operator in query plans
+- mssql: `Assert(MaxRows=1)` operator in query plans
 - MySQL: Runtime error 1242 "Subquery returns more than 1 row"
 - DuckDB: `MaxOneRowCheck` in query binder

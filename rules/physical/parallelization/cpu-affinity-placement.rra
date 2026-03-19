@@ -18,7 +18,7 @@ benefit_range: [0.2, 0.5]
 - **Rule ID**: `cpu-affinity-placement`
 - **Category**: Physical / Parallelization
 - **Complexity**: O(n/p) with improved constant factor from cache effects
-- **Introduced**: HyPer, Oracle RAC, SAP HANA thread management
+- **Introduced**: HyPer, Oracle RAC, sap-hana thread management
 - **Prerequisites**: OS CPU affinity API, known CPU topology
 - **Alternatives**: numa-aware-scheduling, work-stealing-parallelism
 

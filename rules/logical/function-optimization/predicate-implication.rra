@@ -113,4 +113,4 @@ SELECT * FROM t WHERE a > 10 AND b > 5;
 **Implementation:**
 - PostgreSQL: `predicate_implied_by()` in `predtest.c`
 - Oracle: Predicate analysis in CBO
-- SQL Server: Contradiction detection in simplification phase
+- mssql: Contradiction detection in simplification phase

@@ -177,11 +177,11 @@ GROUP BY p.name;
 - Arrangement management: `src/compute/src/arrangement/manager.rs`
 
 **Documentation:**
-- Materialize blog: "How Materialize and Differential Dataflow Work"
+- Materialize blog: "How Materialize and differential-dataflow Work"
 
 **Papers:**
 - Bloom, B.H., "Space/Time Trade-offs in Hash Coding with Allowable Errors",
   CACM 1970
-- McSherry, F., et al., "Differential Dataflow", CIDR 2013
+- McSherry, F., et al., "differential-dataflow", CIDR 2013
 - Zhu, S., et al., "Improving Join Performance in Streaming Systems with Bloom
   Filters", EDBT 2019

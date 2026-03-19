@@ -169,6 +169,6 @@ SELECT * FROM users WHERE status = 'active';
   - https://materialize.com/docs/sql/patterns/temporal-filters/
 
 **Papers:**
-- McSherry, F., et al., "Differential Dataflow", CIDR 2013
+- McSherry, F., et al., "differential-dataflow", CIDR 2013
 - Abadi, D.J., et al., "The Design of the Borealis Stream Processing Engine",
   CIDR 2005

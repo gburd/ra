@@ -392,6 +392,6 @@ WHERE ds.avg_sal > 100000;
 
 **Implementation in databases:**
 - IBM DB2: QGM-based optimizer (direct descendant of Starburst)
-- SQL Server: Similar graph representation in Cascades
+- mssql: Similar graph representation in Cascades
 - Greenplum Orca: DXL (Data Exchange Language) as QGM successor
 - PostgreSQL: `src/backend/optimizer/plan/subselect.c` - subquery decorrelation

@@ -134,5 +134,5 @@ SELECT * FROM users WHERE UPPER(name) = 'JOHN';
 **Implementation:**
 - PostgreSQL: Expression index support via `indexprs` in `pg_index`
 - Oracle: Function-based indexes
-- SQL Server: Computed columns with indexes
+- mssql: Computed columns with indexes
 - DuckDB: Expression index support

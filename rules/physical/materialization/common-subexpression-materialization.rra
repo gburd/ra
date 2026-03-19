@@ -33,7 +33,7 @@ or hash), materializes the result into a temp table or in-memory
 buffer, and replaces each occurrence with a scan of the materialized
 result.
 
-SQL Server uses "Spool" operators (Table Spool, Index Spool) to share
+mssql uses "Spool" operators (Table Spool, Index Spool) to share
 intermediate results. ClickHouse's `useMemoryBufferForCommonSubplanResult`
 optimization stores common subplan results in memory. PostgreSQL uses
 CTEs with MATERIALIZED hint.
@@ -173,7 +173,7 @@ UNION ALL SELECT * FROM t2, constants;
 
 ## References
 
-- SQL Server: Table Spool and Index Spool operators
+- mssql: Table Spool and Index Spool operators
 - ClickHouse: `useMemoryBufferForCommonSubplanResult` optimization
 - PostgreSQL: CTE MATERIALIZED/NOT MATERIALIZED hints
 - Neumann, "Efficiently Compiling Efficient Query Plans for Modern Hardware"

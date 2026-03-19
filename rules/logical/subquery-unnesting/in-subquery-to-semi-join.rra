@@ -149,4 +149,4 @@ WHERE c.id IN (
 - PostgreSQL: pull_up_subqueries() in optimizer
 - MySQL: IN-to-EXISTS to semi-join transformation
 - Oracle: Complex View Merging with semi-join conversion
-- SQL Server: Subquery unnesting with Apply operator elimination
+- mssql: Subquery unnesting with Apply operator elimination

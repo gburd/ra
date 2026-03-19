@@ -208,7 +208,7 @@ SELECT * FROM temp_analysis WHERE complex_condition();
 **Implementation:**
 - Oracle: Adaptive Cursor Sharing, Automatic SQL Plan Management
 - DB2: LEO (Learning Optimizer) since v8
-- SQL Server: CE Feedback (since 2022), memory grant feedback
+- mssql: CE Feedback (since 2022), memory grant feedback
 - PostgreSQL: pg_plan_guarantee extension (community)
 
 **Key insights:**

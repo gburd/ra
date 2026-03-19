@@ -3,7 +3,7 @@ id: differential-timely-dataflow
 name: Differential Timely Dataflow Execution
 category: execution-models
 version: 1.0.0
-databases: [Materialize, Differential Dataflow]
+databases: [Materialize, differential-dataflow]
 authors: [Frank McSherry, Derek Murray, Rebecca Isaacs]
 tags: [execution, differential, streaming, incremental, timely, progress-tracking]
 standard: Timely Dataflow
@@ -267,7 +267,7 @@ GROUP BY region;
 1. **Murray, Derek G. et al**. "Naiad: A Timely Dataflow System." SOSP 2013.
    - Timely dataflow model and progress tracking protocol
 
-2. **McSherry, Frank et al**. "Differential Dataflow." CIDR 2013.
+2. **McSherry, Frank et al**. "differential-dataflow." CIDR 2013.
    - Differential computation on timely dataflow
 
 3. **Abadi, Daniel et al**. "Materialize: A Platform for Operational Data." VLDB 2020.

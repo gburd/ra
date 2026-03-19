@@ -3,7 +3,7 @@ id: column-compression
 name: Column-at-a-Time Compression-Aware Execution
 category: execution-models
 version: 1.0.0
-databases: [MonetDB, ClickHouse, DuckDB, Vertica, CStore]
+databases: [MonetDB, ClickHouse, DuckDB, vertica, c-store]
 authors: [Daniel Abadi, Marcin Zukowski, Peter Boncz]
 tags: [execution, columnar, compression, dictionary, rle, bitpacking, simd, operate-on-compressed]
 standard: MonetDB X100

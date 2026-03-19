@@ -3,7 +3,7 @@ id: push-based-llvm-codegen
 name: Push-Based LLVM Code Generation
 category: execution-models
 version: 1.0.0
-databases: [HyPer, Umbra, PostgreSQL (JIT), CockroachDB]
+databases: [HyPer, Umbra, postgresql, CockroachDB]
 authors: [Thomas Neumann, Andres Freund]
 tags: [execution, push-based, llvm, jit, codegen, compilation]
 standard: HyPer model

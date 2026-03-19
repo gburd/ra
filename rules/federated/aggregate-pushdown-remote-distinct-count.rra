@@ -1,0 +1,64 @@
+---
+id: federated-aggregate-pushdown-distinct-count
+name: "Aggregate Pushdown: COUNT DISTINCT"
+category: federated/pushdown
+databases: [postgresql, mysql, snowflake, bigquery, duckdb]
+execution_models: [volcano, vectorized]
+version: "1.0.0"
+authors: ["ra-optimizer"]
+tags: [federated, pushdown, aggregate, count-distinct]
+complexity: "O(1)"
+benefit_range: [5.0, 5000.0]
+---
+
+# Aggregate Pushdown: COUNT DISTINCT
+
+## Description
+
+Push COUNT(DISTINCT col) to the remote when supported. COUNT DISTINCT
+is not decomposable in general, but can be pushed when the entire
+aggregation runs on one remote.
+
+For multi-site COUNT DISTINCT, use approximate methods like HyperLogLog.
+
+## Relational Algebra
+
+```algebra
+Aggregate[COUNT(DISTINCT col)](RemoteScan[table, endpoint])
+=>
+RemoteScan[table, endpoint, pushdown_agg=COUNT(DISTINCT col)]
+
+Preconditions:
+  - Single remote source (not cross-site)
+  - OR remote supports APPROX_COUNT_DISTINCT
+```
+
+## Before
+
+```
+(Aggregate :aggregates [(COUNT DISTINCT user_id)]
+  :input (RemoteScan "events" "db.example.com"))
+```
+
+## After
+
+```
+(RemoteScan "events" "db.example.com"
+  :pushdown_agg [(COUNT DISTINCT user_id)])
+```
+
+## Test Cases
+
+### Test 1: Count distinct pushdown
+
+#### Input
+```
+(Aggregate :aggregates [(COUNT DISTINCT user_id)]
+  :input (RemoteScan "events" "pg.example.com"))
+```
+
+#### Expected
+```
+(RemoteScan "events" "pg.example.com"
+  :pushdown_agg [(COUNT DISTINCT user_id)])
+```

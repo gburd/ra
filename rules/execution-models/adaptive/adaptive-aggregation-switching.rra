@@ -3,7 +3,7 @@ id: adaptive-aggregation-switching
 name: Adaptive Aggregation Strategy Switching
 category: execution-models
 version: 1.0.0
-databases: [DuckDB, SQL Server, Spark]
+databases: [DuckDB, mssql, Spark]
 tags: [execution, adaptive, aggregation, hash, sort, runtime]
 standard: Adaptive aggregation
 complexity: O(input_rows)
@@ -280,7 +280,7 @@ FROM wide_table GROUP BY CONCAT(col1, col2, col3);
 2. **Raasveldt, Mark and Hannes Muhleisen**. "DuckDB: an Embeddable Analytical Database." SIGMOD 2019.
    - Perfect hash table and adaptive aggregation in DuckDB
 
-3. **Larson, Per-Ake et al**. "SQL Server Column Store Indexes." SIGMOD 2011.
+3. **Larson, Per-Ake et al**. "mssql Column Store Indexes." SIGMOD 2011.
    - Batch-mode adaptive aggregation strategies
 
 4. **Muller, Ingo et al**. "Adaptive String Dictionary Compression in In-Memory Column-Store Database Systems." EDBT 2014.

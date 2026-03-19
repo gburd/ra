@@ -43,6 +43,10 @@ maintainable, formally verified framework.
 - **Plan Diff Visualization** -- Colorized structural diffs between
   original and optimized plans in four formats (colored, plain,
   side-by-side, compact)
+- **Distributed Query Optimization** -- Network-aware cost modeling,
+  broadcast/shuffle/co-located distribution strategies, two-phase and
+  three-phase distributed aggregation, and federated query planning
+  across multiple databases
 
 ## Quick Start
 
@@ -120,7 +124,7 @@ ra/
 │   ├── ra-compiler/         # Rule compilation and indexing
 │   ├── ra-engine/           # Optimization engine (egg + differential)
 │   ├── ra-codegen/          # Code generation (Cranelift, WASM, bytecode)
-│   ├── ra-hardware/         # GPU/FPGA/SIMD/NUMA cost models
+│   ├── ra-hardware/         # GPU/FPGA/SIMD/NUMA + network cost models
 │   ├── ra-ml/               # ML cardinality estimation
 │   ├── ra-adaptive/         # Runtime reoptimization
 │   ├── ra-dialect/          # SQL dialect translation (6 dialects)
@@ -199,6 +203,8 @@ sigma[p](R join[c] S) -> (sigma[p](R)) join[c] S
 - [TLA+ Specifications](tla/README.md) -- Mathematical proofs of correctness properties
 - [Resource Budgets](docs/resource-budgets.md) -- Predefined profiles, custom limits, and overflow strategies
 - [Plan Visualization](docs/plan-visualization.md) -- Colorized plan diffs and output formats
+- [Distributed Query Optimization](docs/phase19-distributed-optimization.md) -- Network costs, distribution strategies, aggregation, federated queries
+- [Network Modeling](docs/network-modeling.md) -- Network topology and transfer cost estimation
 
 ### Examples
 

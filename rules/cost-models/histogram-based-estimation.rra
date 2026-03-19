@@ -339,4 +339,4 @@ SELECT * FROM web_logs WHERE status_code BETWEEN 500 AND 599;
 - PostgreSQL: `src/backend/commands/analyze.c` (equi-depth + MCV)
 - MySQL 8.0: `sql/histograms/` (equi-height + singleton)
 - Oracle: height-balanced with frequency (hybrid)
-- SQL Server: equi-height with density vector
+- mssql: equi-height with density vector

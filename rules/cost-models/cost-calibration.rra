@@ -356,7 +356,7 @@ differs significantly from default assumptions (e.g., NVMe vs HDD defaults).
 - PostgreSQL: `random_page_cost`, `cpu_tuple_cost` GUC parameters
 - MySQL: cost model API (`opt_costmodel.h`)
 - Oracle: `DBMS_STATS.GATHER_SYSTEM_STATS` for system statistics
-- SQL Server: auto-tuning with Query Store
+- mssql: auto-tuning with Query Store
 
 **Feedback-driven calibration:**
 - Stillger et al., "LEO - DB2's LEarning Optimizer", VLDB 2001

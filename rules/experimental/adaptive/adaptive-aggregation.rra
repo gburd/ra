@@ -225,11 +225,11 @@ SELECT status, COUNT(*) FROM orders GROUP BY status;
 **Academic papers:**
 - Leis et al., "How Good Are Query Optimizers, Really?", VLDB 2015
 - Graefe, "Implementing Sorting in Database Systems", ACM Computing Surveys 2006
-- Larson et al., "SQL Server Column Store Indexes", SIGMOD 2011
+- Larson et al., "mssql Column Store Indexes", SIGMOD 2011
 
 **Implementation:**
 - DuckDB: adaptive aggregation with hash-to-sort fallback
-- SQL Server: memory grant feedback for hash aggregation
+- mssql: memory grant feedback for hash aggregation
 - CockroachDB: hash vs ordered aggregation selection
 
 **Key insights:**

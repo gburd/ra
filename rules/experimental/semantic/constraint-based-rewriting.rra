@@ -191,7 +191,7 @@ SELECT * FROM log_entries WHERE message LIKE '%error%';
 **Implementation:**
 - PostgreSQL: constraint-aware join elimination (since v12)
 - Oracle: constraint-based query rewriting for materialized views
-- SQL Server: foreign key trust for join elimination
+- mssql: foreign key trust for join elimination
 
 **Key insights:**
 - Chase algorithm systematically propagates constraints through queries

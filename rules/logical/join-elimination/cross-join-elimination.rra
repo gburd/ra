@@ -95,4 +95,4 @@ CROSS JOIN (SELECT price FROM products WHERE id = ?);
 
 - PostgreSQL: Cross join optimization with single-row tables
 - MySQL: Cartesian product elimination
-- SQL Server: Cross apply simplification
+- mssql: Cross apply simplification

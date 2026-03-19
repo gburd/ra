@@ -253,6 +253,6 @@ SELECT * FROM config WHERE key = 'timeout';
 
 **NUMA effects on databases:**
 - Psaroudakis et al., "Scaling Up Concurrent Main-Memory Column-Store Scans", VLDB 2015
-  - NUMA effects on concurrent scans in SAP HANA
+  - NUMA effects on concurrent scans in sap-hana
 - Balkesen et al., "NUMA-Aware Hash Joins on Multi-Core CPUs", VLDB 2015
   - NUMA-partitioned hash join implementations

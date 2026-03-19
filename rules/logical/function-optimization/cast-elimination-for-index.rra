@@ -111,5 +111,5 @@ SELECT * FROM orders WHERE CAST(id AS BIGINT) = 3000000000;
 ## References
 
 - PostgreSQL: Type Conversion and Index Usage
-- SQL Server: Implicit Conversion and SARGability
+- mssql: Implicit Conversion and SARGability
 - "SARGable Predicates" in query optimization literature

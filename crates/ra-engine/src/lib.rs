@@ -30,9 +30,13 @@
 pub mod analysis;
 pub mod cost;
 pub mod differential;
+pub mod distributed_optimizer;
 pub mod egraph;
 pub mod extract;
+pub mod federated_cost;
+pub mod federated_optimizer;
 pub mod memo;
+pub mod network_cost;
 pub mod recursive;
 pub mod resource_budget;
 pub mod resource_profiles;
@@ -41,6 +45,14 @@ pub mod timely;
 
 pub use analysis::RelAnalysis;
 pub use cost::{CostCalibration, IntegratedCostFn, IntegratedCostModel};
+pub use distributed_optimizer::{
+    AggStrategyResult, ClusterTopology, DistributedOptimizer,
+    DistributedOptimizerConfig, DistributedOptimizerError,
+};
+pub use federated_cost::FederatedCostModel;
+pub use federated_optimizer::{
+    FederatedAnalysis, FederatedError, FederatedOptimizer,
+};
 pub use differential::{IncrementalError, IncrementalOptimizer, RuleChange, RuleId};
 pub use egraph::{
     to_rec_expr, EGraphError, IncrementalStats, OptimizationResult,
@@ -48,6 +60,9 @@ pub use egraph::{
 };
 pub use extract::{extract_best, extract_best_with_staleness, rec_expr_to_rel_expr, RelCostFn};
 pub use memo::{structural_hash, MemoTable};
+pub use network_cost::{
+    DistributionStrategy, JoinSides, NetworkCostEstimate, NetworkCostModel,
+};
 pub use recursive::{
     ExecutionContext, ExecutionError, ExprEvaluator, RecursiveCTEConfig,
     RecursiveCTEExecutor, RecursionResult, Row, TerminationReason,

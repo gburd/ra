@@ -1,6 +1,6 @@
 ---
 id: mssql-batch-mode-on-rowstore
-name: SQL Server Batch Mode on Rowstore
+name: mssql Batch Mode on Rowstore
 category: database-specific/mssql
 databases: [mssql]
 version: "1.0.0"
@@ -10,13 +10,13 @@ complexity: O(n)
 benefit_range: [0.2, 0.8]
 ---
 
-# SQL Server Batch Mode on Rowstore
+# mssql Batch Mode on Rowstore
 
 ## Description
 
 Enables batch mode execution for analytical queries on traditional
 rowstore (B-tree) tables without requiring a columnstore index.
-SQL Server 2019+ can use batch mode operators for sorts, hash
+mssql 2019+ can use batch mode operators for sorts, hash
 aggregates, hash joins, and window functions on rowstore data.
 
 **When to apply**: An analytical query (aggregation, sorting,
@@ -29,7 +29,7 @@ Previously, this required a columnstore index.  Batch mode on
 rowstore extends this benefit to tables that primarily serve OLTP
 workloads.
 
-**Database version**: SQL Server 2019+ (compat level >= 150)
+**Database version**: mssql 2019+ (compat level >= 150)
 
 ## Relational Algebra
 
@@ -120,5 +120,5 @@ SELECT TOP 10 * FROM orders ORDER BY order_date DESC;
 
 ## References
 
-SQL Server: Batch Mode on Rowstore
-SQL Server: sys.dm_exec_query_profiles (is_batch_mode)
+mssql: Batch Mode on Rowstore
+mssql: sys.dm_exec_query_profiles (is_batch_mode)

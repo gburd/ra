@@ -3,7 +3,7 @@ id: column-hash-join
 name: Column-at-a-Time Hash Join
 category: execution-models
 version: 1.0.0
-databases: [MonetDB, ClickHouse, DuckDB, VectorWise]
+databases: [MonetDB, ClickHouse, DuckDB, vectorwise]
 authors: [Peter Boncz, Marcin Zukowski, Stefan Manegold]
 tags: [execution, columnar, x100, hash-join, late-materialization, partitioning, cache-conscious]
 standard: MonetDB X100

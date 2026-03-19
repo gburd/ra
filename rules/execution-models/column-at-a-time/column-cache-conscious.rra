@@ -3,7 +3,7 @@ id: column-cache-conscious
 name: Column-at-a-Time Cache-Conscious Processing
 category: execution-models
 version: 1.0.0
-databases: [MonetDB, ClickHouse, DuckDB, VectorWise]
+databases: [MonetDB, ClickHouse, DuckDB, vectorwise]
 authors: [Stefan Manegold, Peter Boncz, Martin Kersten]
 tags: [execution, columnar, cache-conscious, radix, partitioning, prefetch, memory-hierarchy, numa]
 standard: MonetDB X100

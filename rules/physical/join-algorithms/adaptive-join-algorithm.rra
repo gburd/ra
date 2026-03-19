@@ -18,7 +18,7 @@ benefit_range: [0.3, 0.9]
 - **Rule ID**: `adaptive-join-algorithm`
 - **Category**: Physical / Join Algorithms
 - **Complexity**: Varies -- adapts at runtime between O(n+m) and O(n*m)
-- **Introduced**: Oracle 12c adaptive plans, SQL Server adaptive joins
+- **Introduced**: Oracle 12c adaptive plans, mssql adaptive joins
 - **Prerequisites**: Runtime cardinality feedback mechanism
 - **Alternatives**: hash-join, nested-loop-join, sort-merge-join
 
@@ -237,7 +237,7 @@ JOIN small_lookup_table t2 ON t1.key = t2.key;
 1. **Oracle Adaptive Plans**: "Adaptive Query Processing" (Oracle 12c)
    - Runtime plan adaptation based on actual cardinalities
 
-2. **SQL Server Adaptive Joins**: "Adaptive query processing in SQL databases"
+2. **mssql Adaptive Joins**: "Adaptive query processing in SQL databases"
    - https://learn.microsoft.com/en-us/sql/relational-databases/performance/adaptive-query-processing
 
 3. **Babu & Bizarro**: "Adaptive Query Processing in the Looking Glass"

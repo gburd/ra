@@ -3,7 +3,7 @@ id: adaptive-parallelism-scaling
 name: Adaptive Parallelism Scaling
 category: execution-models
 version: 1.0.0
-databases: [SQL Server, Oracle, Spark, Snowflake]
+databases: [mssql, Oracle, Spark, Snowflake]
 tags: [execution, adaptive, parallelism, threads, scaling, elasticity]
 standard: Elastic query execution
 complexity: O(num_workers) per scaling decision

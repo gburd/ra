@@ -283,7 +283,7 @@ SELECT * FROM small_lookup WHERE id = 42;
 2. **Psaroudakis et al.**: "Scaling Up Concurrent Main-Memory Column-Store Scans"
    - VLDB 2015 -- NUMA effects on analytical workloads
 
-3. **SAP HANA**: NUMA-aware memory allocation and thread scheduling
+3. **sap-hana**: NUMA-aware memory allocation and thread scheduling
    - Multi-socket in-memory database optimization
 
 4. **Li et al.**: "NUMA-Aware Algorithms: the Case of Data Shuffling"

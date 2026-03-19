@@ -3,7 +3,7 @@ id: column-decomposed-storage
 name: Decomposed Storage Model Exploitation
 category: execution-models
 version: 1.0.0
-databases: [MonetDB, C-Store, Vertica, DuckDB, ClickHouse]
+databases: [MonetDB, c-store, vertica, DuckDB, ClickHouse]
 authors: [George Copeland, Stonebraker, Abadi]
 tags: [execution, columnar, dsm, storage, nsm, pax, column-group, projection]
 standard: DSM (Decomposed Storage Model)
@@ -21,9 +21,9 @@ The key insight is that analytical queries typically access a small fraction of 
 
 **Storage model spectrum:**
 - **NSM (N-ary Storage Model)**: Row-oriented; all columns of a row on same page. PostgreSQL, MySQL, Oracle.
-- **DSM (Decomposed Storage Model)**: Each column stored independently. MonetDB, Vertica.
-- **PAX (Partition Attributes Across)**: Hybrid; within each page, data is columnar. SQL Server columnstore.
-- **Column Groups**: Related columns stored together. C-Store projections, Vertica.
+- **DSM (Decomposed Storage Model)**: Each column stored independently. MonetDB, vertica.
+- **PAX (Partition Attributes Across)**: Hybrid; within each page, data is columnar. mssql columnstore.
+- **Column Groups**: Related columns stored together. c-store projections, vertica.
 - **Flexible Storage**: Runtime choice based on workload. H2O, Peloton (adaptive).
 
 **Key characteristics:**
@@ -154,7 +154,7 @@ pub struct ColumnGroup {
     pub sort_key: Option<Vec<ColumnId>>,
 }
 
-/// C-Store style projection: sorted column group
+/// c-store style projection: sorted column group
 pub struct Projection {
     pub name: String,
     pub columns: Vec<ColumnId>,
@@ -325,7 +325,7 @@ SELECT * FROM orders WHERE order_id = 42;
 -- NSM wins for point lookups on all columns
 
 -- Test 3: Column group optimization
--- Vertica projection: (customer_id, order_date, amount)
+-- vertica projection: (customer_id, order_date, amount)
 -- sorted by customer_id
 SELECT customer_id, SUM(amount)
 FROM orders GROUP BY customer_id;
@@ -345,7 +345,7 @@ WHERE timestamp BETWEEN '2024-01-01' AND '2024-01-31';
 1. **Copeland, George P. and Khoshafian, Setrag N**. "A Decomposition Storage Model." SIGMOD 1985.
    - Original DSM paper proposing per-column storage
 
-2. **Stonebraker, Michael et al**. "C-Store: A Column-oriented DBMS." VLDB 2005.
+2. **Stonebraker, Michael et al**. "c-store: A Column-oriented DBMS." VLDB 2005.
    - Column groups (projections) and segment-level metadata
 
 3. **Abadi, Daniel J. et al**. "Column-Oriented Database Systems." VLDB Tutorial, 2009.

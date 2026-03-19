@@ -1,6 +1,6 @@
 ---
 id: mssql-partition-elimination
-name: SQL Server Partition Elimination
+name: mssql Partition Elimination
 category: database-specific/mssql
 databases: [mssql]
 version: "1.0.0"
@@ -10,12 +10,12 @@ complexity: O(1)
 benefit_range: [0.5, 0.99]
 ---
 
-# SQL Server Partition Elimination
+# mssql Partition Elimination
 
 ## Description
 
 Eliminates irrelevant partitions from table scans based on query
-predicates matching the partition function definition.  SQL Server
+predicates matching the partition function definition.  mssql
 identifies which partitions can contain matching rows and restricts
 the scan to only those partitions.
 
@@ -26,7 +26,7 @@ partitioned table.
 own data pages and potentially its own filegroup.  Skipping partitions
 avoids reading their data pages entirely, proportionally reducing I/O.
 
-**Database version**: SQL Server 2005+
+**Database version**: mssql 2005+
 
 ## Relational Algebra
 
@@ -106,5 +106,5 @@ SELECT * FROM orders WHERE YEAR(order_date) = 2025;
 
 ## References
 
-SQL Server: Partitioned Tables and Indexes, "Partition Elimination"
-SQL Server: sys.partitions, sys.partition_range_values
+mssql: Partitioned Tables and Indexes, "Partition Elimination"
+mssql: sys.partitions, sys.partition_range_values

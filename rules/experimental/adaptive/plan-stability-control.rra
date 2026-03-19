@@ -192,6 +192,6 @@ EXPLAIN SELECT * FROM orders WHERE customer_id = 42;
 Bruno & Chaudhuri, "Plan Regression: Automatic Detection and Fixing" (SIGMOD 2005)
 Oracle: "SQL Plan Management" (SPM) - plan baselines and evolution
 PostgreSQL: contrib/pg_plan_guarantee (proposed)
-SQL Server: "Plan Forcing" and "Automatic Plan Correction"
+mssql: "Plan Forcing" and "Automatic Plan Correction"
 CockroachDB: "Statement Diagnostics" - plan capture and replay
-Agrawal et al., "Database Tuning Advisor for Microsoft SQL Server 2005" (VLDB 2004)
+Agrawal et al., "Database Tuning Advisor for Microsoft mssql 2005" (VLDB 2004)

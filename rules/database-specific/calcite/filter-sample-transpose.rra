@@ -177,7 +177,7 @@ WHERE user_age BETWEEN 18 AND 35
 **Implementation in databases:**
 - Apache Calcite: `FilterSampleTransposeRule.java`
 - PostgreSQL: TABLESAMPLE with predicate pushdown
-- SQL Server: TABLESAMPLE optimization
+- mssql: TABLESAMPLE optimization
 
 **Academic papers:**
 - Olken & Rotem, "Random Sampling from Database Files: A Survey", SSDBM 1990

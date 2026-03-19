@@ -307,7 +307,7 @@ GROUP BY customer_id;
   - Modern implementation in Greenplum/HAWQ
 
 **Implementation in databases:**
-- SQL Server: Volcano-style optimizer with interesting orders
+- mssql: Volcano-style optimizer with interesting orders
 - Greenplum/PostgreSQL (Orca): Cascades framework with physical properties
 - CockroachDB: Cost-based optimizer with interesting orders
 - Most modern optimizers (Oracle, DB2) use Volcano/Cascades principles

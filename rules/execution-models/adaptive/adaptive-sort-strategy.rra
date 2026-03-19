@@ -3,7 +3,7 @@ id: adaptive-sort-strategy
 name: Adaptive Sort Strategy Selection
 category: execution-models
 version: 1.0.0
-databases: [PostgreSQL, SQL Server, DuckDB, Oracle]
+databases: [PostgreSQL, mssql, DuckDB, Oracle]
 authors: [Goetz Graefe]
 tags: [execution, adaptive, sort, quicksort, mergesort, radix, runtime]
 standard: Adaptive sorting

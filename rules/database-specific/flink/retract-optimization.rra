@@ -17,7 +17,7 @@ benefit_range: [0.3, 0.7]
 ## Metadata
 - **Rule ID**: `flink-retraction-optimization`
 - **Category**: Database-Specific / Flink
-- **Source**: Apache Flink
+- **Source**: flink
 
 ## Description
 

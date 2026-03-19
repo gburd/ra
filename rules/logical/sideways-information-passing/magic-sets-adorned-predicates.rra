@@ -346,4 +346,4 @@ SELECT * FROM chain;
 **Implementation in databases:**
 - LogicBlox: Full adornment-based optimization for Datalog
 - PostgreSQL: Implicit adornment in recursive CTE optimization
-- Apache Flink: Datalog evaluation with binding propagation
+- flink: Datalog evaluation with binding propagation

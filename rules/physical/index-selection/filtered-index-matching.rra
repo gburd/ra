@@ -95,6 +95,6 @@ SELECT email FROM users WHERE email LIKE 'a%';
 ## References
 
 - PostgreSQL: Partial indexes (CREATE INDEX ... WHERE)
-- SQL Server: Filtered indexes
+- mssql: Filtered indexes
 - SQLite: Partial indexes
 - Stonebraker, "Partial Indexes", SIGMOD 1989

@@ -228,5 +228,5 @@ FROM employees e;
 - PostgreSQL: `convert_EXISTS_sublink_to_join()` in `subselect.c`
 - MySQL: Subquery to semi-join conversion in optimizer
 - Oracle: EXISTS transformation in CBO
-- SQL Server: `EXISTS` introduction via algebrizer
+- mssql: `EXISTS` introduction via algebrizer
 - DuckDB: `ExistentialJoinOptimizer` for correlated LIMIT 1 patterns

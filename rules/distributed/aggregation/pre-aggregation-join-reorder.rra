@@ -1,0 +1,48 @@
+---
+id: pre-aggregation-join-reorder
+name: Pre-Aggregation Join Reorder
+category: distributed/aggregation
+databases: [presto, trino, spark, cockroachdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, aggregation, pre-aggregation, join, reorder]
+complexity: O(n)
+benefit_range: [0.1, 0.5]
+---
+
+# Pre-Aggregation Join Reorder
+
+## Description
+
+When aggregation follows a join and the aggregate can be pushed below
+the join (group keys come from one side only), push the partial
+aggregation before the join to reduce the join input size.
+
+**When to apply**: Group keys and aggregate arguments come entirely
+from one side of the join, and the aggregation is decomposable.
+
+## Relational Algebra
+
+```algebra
+-- Before
+gamma[g, SUM(a)](R join S on R.k = S.k)
+
+-- After (push agg below join when g, a are from R)
+gamma[g, SUM(partial_sum)](
+    (gamma[g, R.k, SUM(a) as partial_sum](R)) join S on R.k = S.k
+)
+```
+
+## Test Cases
+
+```sql
+-- Positive: aggregate only on left side
+SELECT o.region, SUM(o.amount)
+FROM orders o JOIN regions r ON o.region_id = r.id
+GROUP BY o.region;
+
+-- Negative: aggregate references both sides
+SELECT o.region, SUM(o.amount * r.tax_rate)
+FROM orders o JOIN regions r ON o.region_id = r.id
+GROUP BY o.region;
+```

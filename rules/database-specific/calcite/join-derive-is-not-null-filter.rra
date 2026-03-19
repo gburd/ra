@@ -187,7 +187,7 @@ JOIN referrals r ON s.referral_id = r.id;
 - Apache Calcite: `JoinDeriveIsNotNullFilterRule.java`
 - PostgreSQL: Implied predicate generation (predtest.c)
 - MySQL: Null-rejecting join optimization
-- SQL Server: Null filter inference
+- mssql: Null filter inference
 
 **Academic papers:**
 - Galindo-Legaria & Rosenthal, "Outerjoin Simplification and Reordering for Query Optimization", ACM TODS 1997

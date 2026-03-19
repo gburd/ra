@@ -91,5 +91,5 @@ SELECT * FROM orders WHERE customer_id = 12345;
 ## References
 
 - MySQL: InnoDB clustered indexes
-- SQL Server: Clustered index structure
+- mssql: Clustered index structure
 - Oracle: Index-organized tables (IOT)

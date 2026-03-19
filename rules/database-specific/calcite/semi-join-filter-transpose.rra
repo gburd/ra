@@ -182,7 +182,7 @@ WHERE e.user_id = 12345 -- Single user
 **Implementation in databases:**
 - Apache Calcite: `SemiJoinFilterTransposeRule.java`
 - PostgreSQL: Semi-join with filter pushdown (joinrels.c)
-- SQL Server: Exists subquery optimization
+- mssql: Exists subquery optimization
 
 **Academic papers:**
 - Pirahesh et al., "Extensible/Rule Based Query Rewrite Optimization in Starburst", ACM SIGMOD 1992

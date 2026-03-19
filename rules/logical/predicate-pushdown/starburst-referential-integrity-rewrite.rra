@@ -329,6 +329,6 @@ JOIN customers c ON o.customer_id = c.id;
 **Implementation in databases:**
 - PostgreSQL: `src/backend/optimizer/plan/analyzejoins.c` - remove_useless_joins()
   - Removes inner joins where FK guarantees 1:1 match and only FK side projected
-- SQL Server: Join elimination in Cascades optimizer
+- mssql: Join elimination in Cascades optimizer
 - Oracle: "join elimination" / "table elimination" optimization
 - DB2: Starburst-derived join elimination

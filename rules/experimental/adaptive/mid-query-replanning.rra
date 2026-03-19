@@ -197,7 +197,7 @@ SELECT * FROM orders o JOIN customers c ON o.cid = c.id;
 
 **Implementation:**
 - Oracle: adaptive cursor sharing and statistics feedback
-- SQL Server: adaptive memory grant feedback (since 2017)
+- mssql: adaptive memory grant feedback (since 2017)
 - PostgreSQL: proposed parameterized path replanning
 
 **Key insights:**

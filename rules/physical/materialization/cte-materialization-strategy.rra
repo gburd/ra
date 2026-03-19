@@ -195,5 +195,5 @@ SELECT * FROM t1, nums UNION ALL SELECT * FROM t2, nums;
 
 - PostgreSQL: CTE inlining (PG 12+), MATERIALIZED hint
 - Neumann & Kemper, "Unnesting Arbitrary Queries", BTW 2015
-- SQL Server: Common Table Spool optimization
+- mssql: Common Table Spool optimization
 - DuckDB: CTE materialization heuristics

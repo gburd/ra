@@ -299,6 +299,6 @@ WHERE date > '2024-01-01' GROUP BY region;
 
 **Key insights:**
 - Query execution time prediction enables proactive scheduling
-- Memory grant prediction prevents spilling (SQL Server memory grant feedback)
+- Memory grant prediction prevents spilling (mssql memory grant feedback)
 - SLO-aware scheduling prioritizes latency-sensitive queries
 - Resource elasticity in cloud enables dynamic allocation

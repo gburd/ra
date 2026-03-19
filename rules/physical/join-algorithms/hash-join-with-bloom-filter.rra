@@ -18,7 +18,7 @@ benefit_range: [0.3, 0.85]
 - **Rule ID**: `hash-join-with-bloom-filter`
 - **Category**: Physical / Join Algorithms
 - **Complexity**: O(n + m) with reduced constant factor
-- **Introduced**: Oracle (bitmap filtering), SQL Server (bitmap filters in parallel plans)
+- **Introduced**: Oracle (bitmap filtering), mssql (bitmap filters in parallel plans)
 - **Prerequisites**: Equijoin, build side significantly smaller than probe side
 - **Alternatives**: hash-join, semi-join-reduction
 

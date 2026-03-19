@@ -3,10 +3,10 @@ id: differential-changelog
 name: Differential Changelog Representation
 category: execution-models
 version: 1.0.0
-databases: [Materialize, Differential Dataflow, Debezium]
+databases: [Materialize, differential-dataflow, Debezium]
 authors: [Frank McSherry]
 tags: [execution, differential, changelog, cdc, change-data-capture, stream]
-standard: Differential Dataflow
+standard: differential-dataflow
 ---
 
 # Differential Changelog Representation
@@ -123,6 +123,6 @@ CREATE MATERIALIZED VIEW active AS SELECT * FROM users WHERE active;
 
 ## References
 
-1. **McSherry, Frank et al**. "Differential Dataflow." CIDR 2013.
+1. **McSherry, Frank et al**. "differential-dataflow." CIDR 2013.
 2. **Kleppmann, Martin**. "Designing Data-Intensive Applications." O'Reilly 2017. (CDC patterns)
 3. **Materialize Documentation**. "Sources and Sinks."

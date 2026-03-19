@@ -139,7 +139,7 @@ GROUP BY user_id;
 ## References
 
 1. **DuckDB**: Adaptive aggregation with spilling
-2. **SQL Server**: Adaptive query processing
+2. **mssql**: Adaptive query processing
 3. **Oracle**: Automatic workload management
 
 ## Tags

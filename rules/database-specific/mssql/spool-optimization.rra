@@ -1,6 +1,6 @@
 ---
 id: mssql-spool-optimization
-name: SQL Server Spool Optimization
+name: mssql Spool Optimization
 category: database-specific/mssql
 databases: [mssql]
 version: "1.0.0"
@@ -10,12 +10,12 @@ complexity: O(n)
 benefit_range: [0.1, 0.5]
 ---
 
-# SQL Server Spool Optimization
+# mssql Spool Optimization
 
 ## Description
 
 Introduces spool operators to cache intermediate results when the same
-subtree is accessed multiple times.  SQL Server uses eager spools
+subtree is accessed multiple times.  mssql uses eager spools
 (materialize all rows first), lazy spools (materialize on demand),
 and index spools (build a temporary index) to avoid re-executing
 expensive subplans.
@@ -29,7 +29,7 @@ multiple times.  A spool materializes the result into tempdb once and
 replays it for subsequent accesses, converting O(N * cost) to
 O(cost + N * replay_cost).
 
-**Database version**: SQL Server 2000+
+**Database version**: mssql 2000+
 
 ## Relational Algebra
 
@@ -126,5 +126,5 @@ SELECT * FROM small_table;
 
 ## References
 
-SQL Server: Spool Operator (Showplan)
-SQL Server: Understanding Spools in Execution Plans
+mssql: Spool Operator (Showplan)
+mssql: Understanding Spools in Execution Plans

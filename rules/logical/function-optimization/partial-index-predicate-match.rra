@@ -64,7 +64,7 @@ rw!("partial-index-func-pred";
 
 ## Preconditions
 
-- Database must support partial/filtered indexes (PostgreSQL, SQL Server)
+- Database must support partial/filtered indexes (PostgreSQL, mssql)
 - Query predicate must logically imply the index's WHERE clause
 - Implication check must handle: equality, range subsumption, AND conjunctions
 - NULL handling: partial index predicate with IS NOT NULL is implied
@@ -109,5 +109,5 @@ WHERE status = 'completed' AND customer_id = 42;
 ## References
 
 - PostgreSQL: Partial Indexes documentation
-- SQL Server: Filtered Indexes
+- mssql: Filtered Indexes
 - "Partial Indexing in POSTGRES" (Stonebraker, 1989)

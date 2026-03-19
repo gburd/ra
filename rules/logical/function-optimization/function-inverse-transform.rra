@@ -158,4 +158,4 @@ SELECT * FROM emp WHERE salary / 3 = 10;
 
 - "SARGable Predicates and Query Optimization" (Selinger et al.)
 - PostgreSQL: Planner and Index-Optimizable Operators
-- SQL Server: Query Tuning and SARGability
+- mssql: Query Tuning and SARGability

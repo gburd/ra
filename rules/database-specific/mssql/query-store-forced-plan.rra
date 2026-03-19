@@ -1,6 +1,6 @@
 ---
 id: mssql-query-store-forced-plan
-name: SQL Server Query Store Plan Forcing
+name: mssql Query Store Plan Forcing
 category: database-specific/mssql
 databases: [mssql]
 version: "1.0.0"
@@ -10,12 +10,12 @@ complexity: O(1)
 benefit_range: [0.2, 0.9]
 ---
 
-# SQL Server Query Store Plan Forcing
+# mssql Query Store Plan Forcing
 
 ## Description
 
 Forces the optimizer to use a previously observed good plan from the
-Query Store when plan regression is detected.  SQL Server's Automatic
+Query Store when plan regression is detected.  mssql's Automatic
 Plan Correction (APC) monitors query performance and automatically
 forces the last known good plan when a regression is identified.
 
@@ -25,11 +25,11 @@ historical plan.
 
 **Why it works**: Plan regressions are a major cause of production
 incidents.  By automatically reverting to the last known good plan,
-SQL Server prevents regressions while the optimizer may choose a
+mssql prevents regressions while the optimizer may choose a
 different plan due to changed statistics, parameter sniffing, or CE
 model updates.
 
-**Database version**: SQL Server 2016+ (manual), 2017+ (automatic)
+**Database version**: mssql 2016+ (manual), 2017+ (automatic)
 
 ## Relational Algebra
 
@@ -72,7 +72,7 @@ fn applicable(
 **Restrictions:**
 - Query Store must be enabled (READ_WRITE mode)
 - Forced plan must still be valid (indexes must still exist)
-- Automatic plan correction requires SQL Server 2017+
+- Automatic plan correction requires mssql 2017+
 - Plan forcing is per-query, not global
 
 ## Cost Model
@@ -107,6 +107,6 @@ EXEC sp_query_store_force_plan @query_id = 42, @plan_id = 1;
 
 ## References
 
-SQL Server: Query Store Overview
-SQL Server: Automatic Plan Correction
-SQL Server: sys.query_store_plan, sys.query_store_runtime_stats
+mssql: Query Store Overview
+mssql: Automatic Plan Correction
+mssql: sys.query_store_plan, sys.query_store_runtime_stats

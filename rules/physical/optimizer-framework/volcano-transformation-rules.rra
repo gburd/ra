@@ -332,7 +332,7 @@ WHERE o.total > 10000;
   - Completeness: commutativity + associativity + left-commutativity generates all trees
 
 **Implementation in databases:**
-- SQL Server: Transformation rules in Cascades optimizer
+- mssql: Transformation rules in Cascades optimizer
 - CockroachDB: `pkg/sql/opt/xform/` - exploration rules
 - Greenplum Orca: `libgpopt/src/xforms/` - transformation transforms
 - Apache Calcite: `RelOptRule` subclasses for transformations

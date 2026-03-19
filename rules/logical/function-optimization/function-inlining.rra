@@ -156,5 +156,5 @@ CREATE FUNCTION factorial(n INT) RETURNS INT
 **Implementation:**
 - PostgreSQL: `inline_function()` in `clauses.c`
 - Oracle: Deterministic function inlining
-- SQL Server: Scalar UDF inlining (SQL Server 2019+)
+- mssql: Scalar UDF inlining (mssql 2019+)
 - DuckDB: Macro expansion for SQL macros

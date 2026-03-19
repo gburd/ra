@@ -165,7 +165,7 @@ FROM employees;
 - Apache Calcite: `ProjectToWindowRule.java`
 - PostgreSQL: Window function optimization (window.c)
 - Oracle: Analytical functions implementation
-- SQL Server: OVER clause optimization
+- mssql: OVER clause optimization
 
 **Academic papers:**
 - Leis et al., "How Good Are Query Optimizers, Really?", VLDB 2015

@@ -3,10 +3,10 @@ id: differential-late-data
 name: Differential Late-Arriving Data Handling
 category: execution-models
 version: 1.0.0
-databases: [Materialize, Apache Flink, Differential Dataflow]
+databases: [Materialize, flink, differential-dataflow]
 authors: [Frank McSherry, Tyler Akidau]
 tags: [execution, differential, late-data, out-of-order, streaming, correctness]
-standard: Differential Dataflow
+standard: differential-dataflow
 ---
 
 # Differential Late-Arriving Data Handling
@@ -192,7 +192,7 @@ SELECT * FROM orders o JOIN payments p ON o.id = p.order_id;
 
 ## References
 
-1. **McSherry, Frank et al**. "Differential Dataflow." CIDR 2013.
+1. **McSherry, Frank et al**. "differential-dataflow." CIDR 2013.
 2. **Akidau, Tyler et al**. "The Dataflow Model: A Practical Approach to Balancing Correctness, Latency, and Cost." VLDB 2015.
 3. **Materialize Documentation**. "Temporal Filters and Late Data."
 4. **Li, Jin et al**. "Out-of-Order Processing: A New Architecture for High-Performance Stream Systems." VLDB 2008.
