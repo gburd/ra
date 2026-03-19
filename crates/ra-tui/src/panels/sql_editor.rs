@@ -1,17 +1,19 @@
 //! SQL editor panel for the TUI.
 //!
-//! Provides a basic text editor for viewing and editing SQL queries
-//! directly within the TUI. Supports two modes:
-//! - **View**: read-only display of the current query
-//! - **Edit**: basic text editing with cursor movement
+//! Provides a text editor for viewing and editing SQL queries within
+//! the TUI. Supports three keybinding modes loaded from config:
+//! - **Normal**: arrow-key navigation and basic editing
+//! - **Vi**: modal editing with normal/insert sub-modes
+//! - **Nano**: Ctrl-key shortcuts (Ctrl-K cut, Ctrl-U paste)
 
+use ra_config::EditorMode as KeybindingMode;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 
-/// Editor mode for the SQL panel.
+/// Visual mode of the SQL panel (view-only vs editable).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorMode {
     /// Read-only view of the query.
@@ -31,6 +33,15 @@ impl EditorMode {
     }
 }
 
+/// Vi sub-mode when keybinding mode is Vi.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ViMode {
+    /// Normal mode -- cursor movement and commands.
+    Normal,
+    /// Insert mode -- typing inserts characters.
+    Insert,
+}
+
 /// State for the SQL editor panel.
 #[derive(Debug, Clone)]
 pub struct SqlEditor {
@@ -40,10 +51,16 @@ pub struct SqlEditor {
     cursor_row: usize,
     /// Cursor column (0-indexed).
     cursor_col: usize,
-    /// Current editor mode.
+    /// Current editor mode (view vs edit).
     mode: EditorMode,
     /// Vertical scroll offset.
     scroll_offset: usize,
+    /// Keybinding mode from config.
+    keybinding: KeybindingMode,
+    /// Vi sub-mode (only meaningful when keybinding is Vi).
+    vi_mode: ViMode,
+    /// Cut/yank buffer for line operations (dd, Ctrl-K).
+    cut_buffer: Option<String>,
 }
 
 impl SqlEditor {
@@ -61,6 +78,9 @@ impl SqlEditor {
             cursor_col: 0,
             mode: EditorMode::View,
             scroll_offset: 0,
+            keybinding: KeybindingMode::Normal,
+            vi_mode: ViMode::Normal,
+            cut_buffer: None,
         }
     }
 
@@ -70,14 +90,38 @@ impl SqlEditor {
         self.mode
     }
 
+    /// Get the keybinding mode.
+    #[must_use]
+    pub fn keybinding(&self) -> KeybindingMode {
+        self.keybinding
+    }
+
+    /// Set the keybinding mode.
+    pub fn set_keybinding(&mut self, mode: KeybindingMode) {
+        self.keybinding = mode;
+        self.vi_mode = ViMode::Normal;
+    }
+
+    /// Get the Vi sub-mode (Normal or Insert).
+    #[must_use]
+    pub fn vi_mode(&self) -> ViMode {
+        self.vi_mode
+    }
+
     /// Toggle the editor mode between View and Edit.
     pub fn toggle_mode(&mut self) {
         self.mode = self.mode.toggle();
+        if self.mode == EditorMode::View {
+            self.vi_mode = ViMode::Normal;
+        }
     }
 
     /// Set the editor mode.
     pub fn set_mode(&mut self, mode: EditorMode) {
         self.mode = mode;
+        if mode == EditorMode::View {
+            self.vi_mode = ViMode::Normal;
+        }
     }
 
     /// Get the full text content of the editor.
@@ -113,7 +157,9 @@ impl SqlEditor {
 
     /// Move cursor down one line.
     pub fn move_down(&mut self) {
-        if self.cursor_row < self.lines.len().saturating_sub(1) {
+        if self.cursor_row
+            < self.lines.len().saturating_sub(1)
+        {
             self.cursor_row += 1;
             self.clamp_col();
             self.scroll_into_view();
@@ -136,7 +182,9 @@ impl SqlEditor {
         let line_len = self.current_line_len();
         if self.cursor_col < line_len {
             self.cursor_col += 1;
-        } else if self.cursor_row < self.lines.len().saturating_sub(1) {
+        } else if self.cursor_row
+            < self.lines.len().saturating_sub(1)
+        {
             self.cursor_row += 1;
             self.cursor_col = 0;
             self.scroll_into_view();
@@ -187,7 +235,8 @@ impl SqlEditor {
         }
         if self.cursor_col > 0 {
             let row = self.cursor_row;
-            let col = self.cursor_col.min(self.lines[row].len());
+            let col =
+                self.cursor_col.min(self.lines[row].len());
             self.lines[row].remove(col - 1);
             self.cursor_col = col - 1;
         } else if self.cursor_row > 0 {
@@ -213,6 +262,59 @@ impl SqlEditor {
         } else if row < self.lines.len().saturating_sub(1) {
             let next = self.lines.remove(row + 1);
             self.lines[row].push_str(&next);
+        }
+    }
+
+    /// Delete (cut) the entire current line into the cut
+    /// buffer. Used by Vi `dd` and Nano Ctrl-K.
+    pub fn delete_line(&mut self) {
+        if self.mode != EditorMode::Edit {
+            return;
+        }
+        let row = self.cursor_row;
+        self.cut_buffer = Some(self.lines[row].clone());
+        if self.lines.len() > 1 {
+            self.lines.remove(row);
+        } else {
+            self.lines[0].clear();
+        }
+        self.clamp_cursor();
+    }
+
+    /// Paste the cut buffer below the current line. Used by
+    /// Vi `p` and Nano Ctrl-U.
+    pub fn paste_line(&mut self) {
+        if self.mode != EditorMode::Edit {
+            return;
+        }
+        if let Some(ref buf) = self.cut_buffer.clone() {
+            let row = self.cursor_row;
+            self.lines.insert(row + 1, buf.clone());
+            self.cursor_row += 1;
+            self.cursor_col = 0;
+            self.scroll_into_view();
+        }
+    }
+
+    /// Enter Vi insert mode. Cursor stays at current position.
+    pub fn vi_enter_insert(&mut self) {
+        self.vi_mode = ViMode::Insert;
+    }
+
+    /// Enter Vi insert mode with cursor after current char.
+    pub fn vi_enter_append(&mut self) {
+        self.vi_mode = ViMode::Insert;
+        let line_len = self.current_line_len();
+        if self.cursor_col < line_len {
+            self.cursor_col += 1;
+        }
+    }
+
+    /// Exit Vi insert mode back to normal.
+    pub fn vi_exit_insert(&mut self) {
+        self.vi_mode = ViMode::Normal;
+        if self.cursor_col > 0 {
+            self.cursor_col -= 1;
         }
     }
 
@@ -257,17 +359,42 @@ impl SqlEditor {
     fn visible_scroll(&self, height: usize) -> usize {
         let mut offset = self.scroll_offset;
         if self.cursor_row >= offset + height {
-            offset = self.cursor_row.saturating_sub(height - 1);
+            offset =
+                self.cursor_row.saturating_sub(height - 1);
         }
         if self.cursor_row < offset {
             offset = self.cursor_row;
         }
         offset
     }
+
+    /// Build a mode label string for the panel title.
+    #[must_use]
+    pub fn mode_label(&self) -> String {
+        match self.mode {
+            EditorMode::View => "SQL [View]".to_owned(),
+            EditorMode::Edit => {
+                let binding = match self.keybinding {
+                    KeybindingMode::Normal => "Edit",
+                    KeybindingMode::Vi => match self.vi_mode {
+                        ViMode::Normal => "Vi:Normal",
+                        ViMode::Insert => "Vi:Insert",
+                    },
+                    KeybindingMode::Nano => "Nano",
+                };
+                format!("SQL [{binding}]")
+            }
+        }
+    }
 }
 
 /// Render the SQL editor panel.
-pub fn render(frame: &mut Frame, editor: &SqlEditor, area: Rect, focused: bool) {
+pub fn render(
+    frame: &mut Frame,
+    editor: &SqlEditor,
+    area: Rect,
+    focused: bool,
+) {
     let border_color = if focused {
         match editor.mode {
             EditorMode::Edit => Color::Green,
@@ -277,10 +404,7 @@ pub fn render(frame: &mut Frame, editor: &SqlEditor, area: Rect, focused: bool) 
         Color::DarkGray
     };
 
-    let mode_label = match editor.mode {
-        EditorMode::View => "SQL [View]",
-        EditorMode::Edit => "SQL [Edit]",
-    };
+    let mode_label = editor.mode_label();
 
     let block = Block::default()
         .title(format!(" {mode_label} "))
@@ -298,13 +422,18 @@ pub fn render(frame: &mut Frame, editor: &SqlEditor, area: Rect, focused: bool) 
     let scroll = editor.visible_scroll(visible_height);
 
     let mut text_lines: Vec<Line<'_>> = Vec::new();
-    let end = (scroll + visible_height).min(editor.lines.len());
+    let end =
+        (scroll + visible_height).min(editor.lines.len());
 
-    for (idx, line) in editor.lines[scroll..end].iter().enumerate() {
+    for (idx, line) in
+        editor.lines[scroll..end].iter().enumerate()
+    {
         let abs_row = scroll + idx;
         let line_num = format!("{:>3} ", abs_row + 1);
 
-        if editor.mode == EditorMode::Edit && abs_row == editor.cursor_row {
+        if editor.mode == EditorMode::Edit
+            && abs_row == editor.cursor_row
+        {
             let col = editor.cursor_col.min(line.len());
             let before = &line[..col];
             let cursor_ch = if col < line.len() {
@@ -319,7 +448,10 @@ pub fn render(frame: &mut Frame, editor: &SqlEditor, area: Rect, focused: bool) 
             };
 
             text_lines.push(Line::from(vec![
-                Span::styled(line_num, Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    line_num,
+                    Style::default().fg(Color::DarkGray),
+                ),
                 Span::raw(before.to_owned()),
                 Span::styled(
                     cursor_ch.to_owned(),
@@ -332,13 +464,20 @@ pub fn render(frame: &mut Frame, editor: &SqlEditor, area: Rect, focused: bool) 
             ]));
         } else {
             text_lines.push(Line::from(vec![
-                Span::styled(line_num, Style::default().fg(Color::DarkGray)),
-                Span::styled(line.clone(), Style::default().fg(Color::White)),
+                Span::styled(
+                    line_num,
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled(
+                    line.clone(),
+                    Style::default().fg(Color::White),
+                ),
             ]));
         }
     }
 
-    let paragraph = Paragraph::new(text_lines).wrap(Wrap { trim: false });
+    let paragraph =
+        Paragraph::new(text_lines).wrap(Wrap { trim: false });
     frame.render_widget(paragraph, inner);
 }
 
@@ -465,13 +604,13 @@ mod tests {
         assert_eq!(editor.cursor_row, 1);
         editor.move_down();
         assert_eq!(editor.cursor_row, 2);
-        editor.move_down(); // at bottom, stays
+        editor.move_down();
         assert_eq!(editor.cursor_row, 2);
         editor.move_up();
         assert_eq!(editor.cursor_row, 1);
         editor.move_up();
         assert_eq!(editor.cursor_row, 0);
-        editor.move_up(); // at top, stays
+        editor.move_up();
         assert_eq!(editor.cursor_row, 0);
     }
 
@@ -523,8 +662,14 @@ mod tests {
 
     #[test]
     fn editor_mode_toggle_values() {
-        assert_eq!(EditorMode::View.toggle(), EditorMode::Edit);
-        assert_eq!(EditorMode::Edit.toggle(), EditorMode::View);
+        assert_eq!(
+            EditorMode::View.toggle(),
+            EditorMode::Edit
+        );
+        assert_eq!(
+            EditorMode::Edit.toggle(),
+            EditorMode::View
+        );
     }
 
     #[test]
@@ -555,5 +700,200 @@ mod tests {
         editor.cursor_col = 1;
         editor.delete_char();
         assert_eq!(editor.text(), "ABC");
+    }
+
+    // ── Keybinding mode tests ───────────────────────────────
+
+    #[test]
+    fn default_keybinding_is_normal() {
+        let editor = SqlEditor::new("SELECT 1");
+        assert_eq!(editor.keybinding(), KeybindingMode::Normal);
+    }
+
+    #[test]
+    fn set_keybinding_to_vi() {
+        let mut editor = SqlEditor::new("SELECT 1");
+        editor.set_keybinding(KeybindingMode::Vi);
+        assert_eq!(editor.keybinding(), KeybindingMode::Vi);
+        assert_eq!(editor.vi_mode(), ViMode::Normal);
+    }
+
+    #[test]
+    fn vi_enter_and_exit_insert() {
+        let mut editor = SqlEditor::new("AB");
+        editor.set_mode(EditorMode::Edit);
+        editor.set_keybinding(KeybindingMode::Vi);
+
+        editor.vi_enter_insert();
+        assert_eq!(editor.vi_mode(), ViMode::Insert);
+
+        editor.vi_exit_insert();
+        assert_eq!(editor.vi_mode(), ViMode::Normal);
+    }
+
+    #[test]
+    fn vi_append_moves_cursor_right() {
+        let mut editor = SqlEditor::new("ABC");
+        editor.set_mode(EditorMode::Edit);
+        editor.set_keybinding(KeybindingMode::Vi);
+        editor.cursor_col = 1;
+
+        editor.vi_enter_append();
+        assert_eq!(editor.vi_mode(), ViMode::Insert);
+        assert_eq!(editor.cursor_col, 2);
+    }
+
+    #[test]
+    fn vi_append_at_end_stays() {
+        let mut editor = SqlEditor::new("ABC");
+        editor.set_mode(EditorMode::Edit);
+        editor.set_keybinding(KeybindingMode::Vi);
+        editor.cursor_col = 3;
+
+        editor.vi_enter_append();
+        assert_eq!(editor.cursor_col, 3);
+    }
+
+    #[test]
+    fn delete_line_cuts_to_buffer() {
+        let mut editor = SqlEditor::new("AA\nBB\nCC");
+        editor.set_mode(EditorMode::Edit);
+        editor.cursor_row = 1;
+
+        editor.delete_line();
+        assert_eq!(editor.text(), "AA\nCC");
+        assert_eq!(editor.cut_buffer, Some("BB".to_owned()));
+    }
+
+    #[test]
+    fn delete_line_on_single_line_clears() {
+        let mut editor = SqlEditor::new("only");
+        editor.set_mode(EditorMode::Edit);
+
+        editor.delete_line();
+        assert_eq!(editor.text(), "");
+        assert_eq!(editor.cut_buffer, Some("only".to_owned()));
+    }
+
+    #[test]
+    fn paste_line_inserts_below() {
+        let mut editor = SqlEditor::new("AA\nBB");
+        editor.set_mode(EditorMode::Edit);
+        editor.cursor_row = 0;
+        editor.cut_buffer = Some("XX".to_owned());
+
+        editor.paste_line();
+        assert_eq!(editor.text(), "AA\nXX\nBB");
+        assert_eq!(editor.cursor_row, 1);
+    }
+
+    #[test]
+    fn paste_line_without_buffer_is_noop() {
+        let mut editor = SqlEditor::new("AA");
+        editor.set_mode(EditorMode::Edit);
+
+        editor.paste_line();
+        assert_eq!(editor.text(), "AA");
+    }
+
+    #[test]
+    fn delete_line_view_mode_noop() {
+        let mut editor = SqlEditor::new("AA\nBB");
+        editor.delete_line();
+        assert_eq!(editor.text(), "AA\nBB");
+    }
+
+    #[test]
+    fn paste_line_view_mode_noop() {
+        let mut editor = SqlEditor::new("AA");
+        editor.cut_buffer = Some("XX".to_owned());
+        editor.paste_line();
+        assert_eq!(editor.text(), "AA");
+    }
+
+    #[test]
+    fn mode_label_view() {
+        let editor = SqlEditor::new("SELECT 1");
+        assert_eq!(editor.mode_label(), "SQL [View]");
+    }
+
+    #[test]
+    fn mode_label_edit_normal_keybinding() {
+        let mut editor = SqlEditor::new("SELECT 1");
+        editor.set_mode(EditorMode::Edit);
+        assert_eq!(editor.mode_label(), "SQL [Edit]");
+    }
+
+    #[test]
+    fn mode_label_vi_normal() {
+        let mut editor = SqlEditor::new("SELECT 1");
+        editor.set_mode(EditorMode::Edit);
+        editor.set_keybinding(KeybindingMode::Vi);
+        assert_eq!(editor.mode_label(), "SQL [Vi:Normal]");
+    }
+
+    #[test]
+    fn mode_label_vi_insert() {
+        let mut editor = SqlEditor::new("SELECT 1");
+        editor.set_mode(EditorMode::Edit);
+        editor.set_keybinding(KeybindingMode::Vi);
+        editor.vi_enter_insert();
+        assert_eq!(editor.mode_label(), "SQL [Vi:Insert]");
+    }
+
+    #[test]
+    fn mode_label_nano() {
+        let mut editor = SqlEditor::new("SELECT 1");
+        editor.set_mode(EditorMode::Edit);
+        editor.set_keybinding(KeybindingMode::Nano);
+        assert_eq!(editor.mode_label(), "SQL [Nano]");
+    }
+
+    #[test]
+    fn toggle_mode_resets_vi_to_normal() {
+        let mut editor = SqlEditor::new("SELECT 1");
+        editor.set_keybinding(KeybindingMode::Vi);
+        editor.set_mode(EditorMode::Edit);
+        editor.vi_enter_insert();
+        assert_eq!(editor.vi_mode(), ViMode::Insert);
+
+        editor.toggle_mode(); // -> View
+        assert_eq!(editor.vi_mode(), ViMode::Normal);
+    }
+
+    #[test]
+    fn vi_exit_insert_moves_cursor_back() {
+        let mut editor = SqlEditor::new("ABCDE");
+        editor.set_mode(EditorMode::Edit);
+        editor.set_keybinding(KeybindingMode::Vi);
+        editor.cursor_col = 3;
+        editor.vi_enter_insert();
+        editor.vi_exit_insert();
+        assert_eq!(editor.cursor_col, 2);
+    }
+
+    #[test]
+    fn vi_exit_insert_at_col_zero_stays() {
+        let mut editor = SqlEditor::new("ABC");
+        editor.set_mode(EditorMode::Edit);
+        editor.set_keybinding(KeybindingMode::Vi);
+        editor.cursor_col = 0;
+        editor.vi_enter_insert();
+        editor.vi_exit_insert();
+        assert_eq!(editor.cursor_col, 0);
+    }
+
+    #[test]
+    fn delete_then_paste_round_trip() {
+        let mut editor = SqlEditor::new("AA\nBB\nCC");
+        editor.set_mode(EditorMode::Edit);
+        editor.cursor_row = 1;
+
+        editor.delete_line();
+        assert_eq!(editor.text(), "AA\nCC");
+
+        editor.cursor_row = 0;
+        editor.paste_line();
+        assert_eq!(editor.text(), "AA\nBB\nCC");
     }
 }
