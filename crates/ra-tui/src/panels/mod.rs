@@ -7,4 +7,5 @@
 pub mod evolution;
 pub mod feedback;
 pub mod plan_tree;
+pub mod sql_editor;
 pub mod statistics;

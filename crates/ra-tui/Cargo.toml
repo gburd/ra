@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 ra-core = { workspace = true }
+ra-config = { workspace = true }
 ra-engine = { workspace = true }
 ra-stats = { workspace = true }
 ra-hardware = { workspace = true }

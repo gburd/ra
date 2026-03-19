@@ -1,6 +1,7 @@
 //! Command-line interface for the relational algebra rule system.
 #![allow(clippy::print_stderr)]
 
+mod config_commands;
 mod diff_validator;
 mod display;
 mod federated_commands;
@@ -164,6 +165,9 @@ enum Commands {
     /// Federated query analysis commands.
     #[command(subcommand)]
     Federated(FederatedCommands),
+    /// Manage configuration settings.
+    #[command(subcommand)]
+    Config(ConfigCommands),
 }
 
 #[derive(Subcommand)]
@@ -229,6 +233,30 @@ enum FederatedCommands {
         #[arg(long, default_value = "200")]
         avg_row_size: u64,
     },
+}
+
+#[derive(Subcommand)]
+enum ConfigCommands {
+    /// List all configuration settings.
+    List,
+    /// Get a specific configuration value.
+    Get {
+        /// Dotted key path (e.g. "editor.mode").
+        key: String,
+    },
+    /// Set a configuration value.
+    Set {
+        /// Dotted key path (e.g. "editor.mode").
+        key: String,
+        /// New value for the setting.
+        value: String,
+    },
+    /// Open configuration file in $EDITOR.
+    Edit,
+    /// Reset configuration to defaults.
+    Reset,
+    /// Show the configuration file path.
+    Path,
 }
 
 // ── Main ────────────────────────────────────────────────────
@@ -387,6 +415,30 @@ fn main() -> Result<()> {
                 cli.verbose,
                 cli.quiet,
             ),
+        },
+        Commands::Config(sub) => match sub {
+            ConfigCommands::List => {
+                config_commands::cmd_config_list(cli.quiet)
+            }
+            ConfigCommands::Get { key } => {
+                config_commands::cmd_config_get(&key)
+            }
+            ConfigCommands::Set { key, value } => {
+                config_commands::cmd_config_set(
+                    &key,
+                    &value,
+                    cli.quiet,
+                )
+            }
+            ConfigCommands::Edit => {
+                config_commands::cmd_config_edit()
+            }
+            ConfigCommands::Reset => {
+                config_commands::cmd_config_reset(cli.quiet)
+            }
+            ConfigCommands::Path => {
+                config_commands::cmd_config_path()
+            }
         },
     }
 }
