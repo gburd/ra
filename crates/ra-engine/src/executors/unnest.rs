@@ -459,4 +459,104 @@ mod tests {
             vec![Const::Int(1), Const::Null, Const::Int(3)]
         );
     }
+
+    #[test]
+    fn multi_unnest_basic() {
+        let exec = MultiUnnestExecutor::new(
+            vec![
+                Expr::Array(vec![
+                    Expr::Const(Const::Int(1)),
+                    Expr::Const(Const::Int(2)),
+                ]),
+                Expr::Array(vec![
+                    Expr::Const(Const::String("a".into())),
+                    Expr::Const(Const::String("b".into())),
+                ]),
+            ],
+            vec![Some("num".into()), Some("letter".into())],
+            false,
+        );
+        let rows = exec.execute().expect("should succeed");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(
+            rows[0].values,
+            vec![Const::Int(1), Const::String("a".into())]
+        );
+        assert_eq!(
+            rows[1].values,
+            vec![Const::Int(2), Const::String("b".into())]
+        );
+    }
+
+    #[test]
+    fn multi_unnest_padding() {
+        let exec = MultiUnnestExecutor::new(
+            vec![
+                Expr::Array(vec![
+                    Expr::Const(Const::Int(1)),
+                    Expr::Const(Const::Int(2)),
+                    Expr::Const(Const::Int(3)),
+                ]),
+                Expr::Array(vec![
+                    Expr::Const(Const::String("x".into())),
+                ]),
+            ],
+            vec![None, None],
+            false,
+        );
+        let rows = exec.execute().expect("should succeed");
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[1].values[1], Const::Null);
+        assert_eq!(rows[2].values[1], Const::Null);
+    }
+
+    #[test]
+    fn multi_unnest_with_ordinality() {
+        let exec = MultiUnnestExecutor::new(
+            vec![
+                Expr::Array(vec![
+                    Expr::Const(Const::Int(10)),
+                    Expr::Const(Const::Int(20)),
+                ]),
+            ],
+            vec![None],
+            true,
+        );
+        let rows = exec.execute().expect("should succeed");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(
+            rows[0].values,
+            vec![Const::Int(10), Const::Int(1)]
+        );
+        assert_eq!(
+            rows[1].values,
+            vec![Const::Int(20), Const::Int(2)]
+        );
+    }
+
+    #[test]
+    fn multi_unnest_empty() {
+        let exec = MultiUnnestExecutor::new(
+            vec![Expr::Array(vec![])],
+            vec![None],
+            false,
+        );
+        let rows = exec.execute().expect("should succeed");
+        assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn multi_unnest_column_aliases() {
+        let exec = MultiUnnestExecutor::new(
+            vec![Expr::Array(vec![
+                Expr::Const(Const::Int(1)),
+            ])],
+            vec![Some("col1".into())],
+            false,
+        );
+        assert_eq!(
+            exec.column_aliases(),
+            &[Some("col1".to_owned())]
+        );
+    }
 }

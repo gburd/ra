@@ -9,7 +9,6 @@
 use ra_core::expr::{Const, Expr};
 use ra_engine::executors::table_function::TableFunctionExecutor;
 use ra_engine::executors::unnest::{MultiUnnestExecutor, UnnestExecutor};
-use ra_engine::Row;
 
 /// Verifies basic UNNEST of integer array matches PG semantics.
 ///
