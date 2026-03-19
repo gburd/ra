@@ -1,0 +1,68 @@
+---
+id: cte-join-elimination
+name: CTE Join Elimination
+category: logical/cte-optimization
+databases: [postgresql, mysql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [cte, join-elimination, simplification]
+complexity: "O(n)"
+benefit_range: [0.1, 0.5]
+---
+
+# CTE Join Elimination
+
+## Description
+
+When a CTE is joined with itself on the primary key and no columns from one side are used in the output, eliminate the redundant self-join.
+
+**When to apply**: Self-join of a CTE on a unique key, and only columns from one side are projected.
+
+## Relational Algebra
+
+```algebra
+Project[L.*](Join[L.pk = R.pk](CTE_ref[name] as L, CTE_ref[name] as R))
+  -> CTE_ref[name]
+  where is_unique_key(pk, name)
+    and output_cols subset_of L.*
+```
+
+## Implementation
+
+```rust
+rw!("cte-join-elimination";
+    "(project ?cols (join inner (= ?lpk ?rpk) (scan ?name) (scan ?name)))" =>
+    "(project ?cols (scan ?name))"
+    if is_self_join_on_unique_key("?name", "?lpk", "?rpk")
+    if cols_from_one_side("?cols", "?name")
+),
+```
+
+## Test Cases
+
+### Positive: Redundant self-join
+
+```sql
+WITH data AS (SELECT id, name FROM users)
+SELECT d1.id, d1.name
+FROM data d1 JOIN data d2 ON d1.id = d2.id;
+
+-- d2 columns not used; eliminate the join
+```
+
+### Negative: Both sides projected
+
+```sql
+WITH data AS (SELECT id, name FROM users)
+SELECT d1.name, d2.name
+FROM data d1 JOIN data d2 ON d1.id <> d2.id;
+
+-- Different join condition and both sides used
+```
+
+## References
+
+- Join elimination in PostgreSQL
+- Redundant join removal in modern query optimizers

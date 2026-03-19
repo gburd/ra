@@ -1,0 +1,68 @@
+---
+id: window-frame-optimization
+name: Window Frame Optimization
+category: logical/window-pushdown
+databases: [postgresql, duckdb, mssql, oracle]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [window, frame, optimization]
+complexity: "O(1)"
+benefit_range: [0.05, 0.3]
+---
+
+# Window Frame Optimization
+
+## Description
+
+Simplifies window frame specifications. For ranking functions (ROW_NUMBER, RANK, DENSE_RANK), the frame clause is irrelevant and can be removed. For running aggregates with ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW, the default frame can be used.
+
+**When to apply**: Window function has an unnecessary or default frame specification.
+
+## Relational Algebra
+
+```algebra
+Window[ROW_NUMBER() OVER (... ROWS BETWEEN ...)](input)
+  -> Window[ROW_NUMBER() OVER (... )  -- no frame](input)
+  where is_ranking_function(fn)
+```
+
+## Implementation
+
+```rust
+rw!("window-frame-optimization";
+    "(window-expr ?fn ?arg ?part ?order (frame ?mode ?start ?end))" =>
+    "(window-expr ?fn ?arg ?part ?order none)"
+    if is_ranking_function("?fn")
+),
+```
+
+## Test Cases
+
+### Positive: Ranking with unnecessary frame
+
+```sql
+SELECT ROW_NUMBER() OVER (
+    ORDER BY id
+    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+) FROM users;
+
+-- Frame is unnecessary for ROW_NUMBER; remove
+```
+
+### Negative: Aggregate with meaningful frame
+
+```sql
+SELECT SUM(amount) OVER (
+    ORDER BY date
+    ROWS BETWEEN 3 PRECEDING AND CURRENT ROW
+) FROM transactions;
+
+-- Frame is meaningful; keep
+```
+
+## References
+
+- SQL standard window frame defaults
+- Window function optimization in analytical databases

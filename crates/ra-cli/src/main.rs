@@ -185,6 +185,31 @@ enum Commands {
     /// Statistics timeline commands (play, feedback, visualize).
     #[command(subcommand)]
     StatsTimeline(StatsTimelineCommands),
+    /// Format a SQL query with configurable style.
+    Format {
+        /// SQL query to format (omit to read from stdin).
+        query: Option<String>,
+        /// Read SQL from stdin.
+        #[arg(long)]
+        stdin: bool,
+        /// Keyword capitalization: keywords, all, none.
+        #[arg(long, default_value = "keywords")]
+        capitalize: String,
+        /// Indentation: spaces2, spaces4, tab.
+        #[arg(long, default_value = "spaces2")]
+        indent: String,
+    },
+    /// Translate SQL between database dialects.
+    Translate {
+        /// SQL query to translate.
+        query: String,
+        /// Source dialect: postgresql, mysql, sqlite, duckdb, mssql, oracle.
+        #[arg(long)]
+        from: String,
+        /// Target dialect: postgresql, mysql, sqlite, duckdb, mssql, oracle.
+        #[arg(long)]
+        to: String,
+    },
     /// Federated query analysis commands.
     #[command(subcommand)]
     Federated(FederatedCommands),
@@ -446,6 +471,21 @@ fn main() -> Result<()> {
                 )
             }
         },
+        Commands::Format {
+            query,
+            stdin,
+            capitalize,
+            indent,
+        } => cmd_format(
+            query.as_deref(),
+            stdin,
+            &capitalize,
+            &indent,
+            cli.quiet,
+        ),
+        Commands::Translate { query, from, to } => {
+            cmd_translate(&query, &from, &to, cli.quiet)
+        }
         Commands::Federated(sub) => match sub {
             FederatedCommands::Analyze {
                 query,
@@ -1606,6 +1646,135 @@ fn cmd_tui(
     app.run().context("running TUI")?;
 
     Ok(())
+}
+
+// ── format ───────────────────────────────────────────────────
+
+fn cmd_format(
+    query: Option<&str>,
+    stdin: bool,
+    capitalize: &str,
+    indent: &str,
+    quiet: bool,
+) -> Result<()> {
+    let sql = if stdin || query.is_none() {
+        use std::io::Read;
+        let mut buf = String::new();
+        std::io::stdin()
+            .read_to_string(&mut buf)
+            .context("reading SQL from stdin")?;
+        buf
+    } else {
+        query.unwrap_or_default().to_owned()
+    };
+
+    let cap_mode = match capitalize.to_lowercase().as_str() {
+        "keywords" | "kw" => ra_parser::CapitalizeMode::Keywords,
+        "all" => ra_parser::CapitalizeMode::All,
+        "none" => ra_parser::CapitalizeMode::None,
+        other => bail!(
+            "unknown capitalize mode: '{other}'. \
+             Valid: keywords, all, none"
+        ),
+    };
+
+    let indent_style = match indent.to_lowercase().as_str() {
+        "spaces2" | "2" => ra_parser::IndentStyle::Spaces(2),
+        "spaces4" | "4" => ra_parser::IndentStyle::Spaces(4),
+        "tab" | "tabs" => ra_parser::IndentStyle::Tab,
+        other => bail!(
+            "unknown indent style: '{other}'. \
+             Valid: spaces2, spaces4, tab"
+        ),
+    };
+
+    let config = ra_parser::FormatConfig {
+        capitalize: cap_mode,
+        indent: indent_style,
+        ..ra_parser::FormatConfig::default()
+    };
+
+    let formatter = ra_parser::SqlFormatter::new(config);
+    let formatted = formatter
+        .format(&sql)
+        .with_context(|| format!("formatting SQL: {sql}"))?;
+
+    if !quiet {
+        eprintln!("{formatted}");
+    }
+
+    Ok(())
+}
+
+// ── translate ────────────────────────────────────────────────
+
+fn cmd_translate(
+    query: &str,
+    from: &str,
+    to: &str,
+    quiet: bool,
+) -> Result<()> {
+    let source_dialect = parse_dialect(from)?;
+    let target_dialect = parse_dialect(to)?;
+
+    let translator = ra_dialect::DialectTranslator::new(
+        source_dialect,
+        target_dialect,
+    );
+
+    let result = translator.translate(query).with_context(|| {
+        format!(
+            "translating SQL from {from} to {to}: {query}"
+        )
+    })?;
+
+    if !quiet {
+        print_header(&format!(
+            "SQL Translation: {} -> {}",
+            source_dialect, target_dialect
+        ));
+        eprintln!("  {}: {query}", "Input".bold());
+        eprintln!();
+        eprintln!("{}", "Translated:".bold());
+        eprintln!("  {}", result.sql);
+
+        if !result.warnings.is_empty() {
+            eprintln!();
+            eprintln!("{}", "Warnings:".bold());
+            for w in &result.warnings {
+                eprintln!(
+                    "  {} {}",
+                    format!("[{}]", w.severity).yellow(),
+                    w.message
+                );
+                if let Some(ref hint) = w.hint {
+                    eprintln!("    {}: {hint}", "hint".dimmed());
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Parse a dialect name string into a `Dialect` enum.
+fn parse_dialect(name: &str) -> Result<ra_dialect::Dialect> {
+    match name.to_lowercase().as_str() {
+        "postgresql" | "postgres" | "pg" => {
+            Ok(ra_dialect::Dialect::PostgreSql)
+        }
+        "mysql" => Ok(ra_dialect::Dialect::MySql),
+        "sqlite" => Ok(ra_dialect::Dialect::Sqlite),
+        "duckdb" => Ok(ra_dialect::Dialect::DuckDb),
+        "mssql" | "mssqlserver" | "sqlserver" => {
+            Ok(ra_dialect::Dialect::MsSql)
+        }
+        "oracle" => Ok(ra_dialect::Dialect::Oracle),
+        other => bail!(
+            "unknown dialect: '{other}'. Valid: postgresql, \
+             mysql, sqlite, duckdb, mssql, oracle"
+        ),
+    }
 }
 
 // ── Helpers ─────────────────────────────────────────────────

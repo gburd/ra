@@ -81,6 +81,21 @@ impl egg::CostFunction<RelLang> for RelCostFn {
             RelLang::Limit(_) => 0.5,
             RelLang::Union(_) | RelLang::Intersect(_) | RelLang::Except(_) => 50.0,
             RelLang::RecursiveCTE(_) => 1000.0,
+            RelLang::CTE(_) => 10.0,
+            RelLang::Window(_) => {
+                let parallelism_factor =
+                    8.0 / f64::from(self.hardware.cpu_cores);
+                200.0 * parallelism_factor.max(0.5)
+            }
+            RelLang::DistinctRel(_) => {
+                #[allow(clippy::cast_precision_loss)]
+                let cache_mb = self.hardware.l3_cache_bytes
+                    as f64
+                    / (1024.0 * 1024.0);
+                let cache_factor = 16.0 / cache_mb;
+                150.0 * cache_factor
+            }
+            RelLang::Values(_) => 1.0,
             _ => 0.1,
         };
 
@@ -228,6 +243,46 @@ fn convert_node(nodes: &[RelLang], idx: usize) -> Result<RelExpr, EGraphError> {
                     },
                 ),
             })
+        }
+        RelLang::CTE([name_id, def_id, body_id]) => {
+            let name = get_symbol(nodes, id(*name_id))?;
+            let definition =
+                convert_node(nodes, id(*def_id))?;
+            let body =
+                convert_node(nodes, id(*body_id))?;
+            Ok(RelExpr::CTE {
+                name,
+                definition: Box::new(definition),
+                body: Box::new(body),
+            })
+        }
+        RelLang::Window([fns_id, input_id]) => {
+            let functions =
+                convert_window_expr_list(nodes, id(*fns_id))?;
+            let input =
+                convert_node(nodes, id(*input_id))?;
+            Ok(RelExpr::Window {
+                functions,
+                input: Box::new(input),
+            })
+        }
+        RelLang::DistinctRel([input_id]) => {
+            let input =
+                convert_node(nodes, id(*input_id))?;
+            Ok(RelExpr::Distinct {
+                input: Box::new(input),
+            })
+        }
+        RelLang::Values(row_ids) => {
+            let mut rows =
+                Vec::with_capacity(row_ids.len());
+            for &row_id in row_ids.iter() {
+                rows.push(convert_values_row(
+                    nodes,
+                    id(row_id),
+                )?);
+            }
+            Ok(RelExpr::Values { rows })
         }
         other => Err(EGraphError::ExtractionError(format!(
             "unexpected relational node: {other:?}"
@@ -589,6 +644,206 @@ fn convert_agg_function(
         _ => Some(convert_scalar(nodes, arg_idx)?),
     };
     Ok((func, arg))
+}
+
+fn convert_window_expr_list(
+    nodes: &[RelLang],
+    idx: usize,
+) -> Result<Vec<ra_core::algebra::WindowExpr>, EGraphError> {
+    let RelLang::List(ids) = &nodes[idx] else {
+        return Err(EGraphError::ExtractionError(
+            "expected List for window expressions".into(),
+        ));
+    };
+    ids.iter()
+        .map(|&child| convert_window_expr(nodes, id(child)))
+        .collect()
+}
+
+fn convert_window_expr(
+    nodes: &[RelLang],
+    idx: usize,
+) -> Result<ra_core::algebra::WindowExpr, EGraphError> {
+    let RelLang::WindowExprNode([
+        fn_id,
+        arg_id,
+        part_id,
+        order_id,
+        frame_id,
+        alias_id,
+    ]) = &nodes[idx]
+    else {
+        return Err(EGraphError::ExtractionError(format!(
+            "expected WindowExprNode, got {:?}",
+            nodes[idx]
+        )));
+    };
+    let function = convert_window_fn(nodes, id(*fn_id))?;
+    let arg = convert_optional_scalar(nodes, id(*arg_id))?;
+    let partition_by =
+        convert_scalar_list(nodes, id(*part_id))?;
+    let order_by =
+        convert_sort_key_list(nodes, id(*order_id))?;
+    let frame = convert_window_frame(nodes, id(*frame_id))?;
+    let alias = convert_optional_symbol(nodes, id(*alias_id))?;
+    Ok(ra_core::algebra::WindowExpr {
+        function,
+        arg,
+        partition_by,
+        order_by,
+        frame,
+        alias,
+    })
+}
+
+fn convert_window_fn(
+    nodes: &[RelLang],
+    idx: usize,
+) -> Result<ra_core::algebra::WindowFunction, EGraphError> {
+    use ra_core::algebra::WindowFunction;
+    let RelLang::WindowFn([name_id]) = &nodes[idx] else {
+        return Err(EGraphError::ExtractionError(format!(
+            "expected WindowFn, got {:?}",
+            nodes[idx]
+        )));
+    };
+    let name = get_symbol(nodes, id(*name_id))?;
+    match name.as_str() {
+        "RowNumber" => Ok(WindowFunction::RowNumber),
+        "Rank" => Ok(WindowFunction::Rank),
+        "DenseRank" => Ok(WindowFunction::DenseRank),
+        "PercentRank" => Ok(WindowFunction::PercentRank),
+        "Ntile" => Ok(WindowFunction::Ntile),
+        "Lag" => Ok(WindowFunction::Lag),
+        "Lead" => Ok(WindowFunction::Lead),
+        "FirstValue" => Ok(WindowFunction::FirstValue),
+        "LastValue" => Ok(WindowFunction::LastValue),
+        "NthValue" => Ok(WindowFunction::NthValue),
+        "Avg" => Ok(WindowFunction::Avg),
+        "Sum" => Ok(WindowFunction::Sum),
+        "Count" => Ok(WindowFunction::Count),
+        "Min" => Ok(WindowFunction::Min),
+        "Max" => Ok(WindowFunction::Max),
+        other => Err(EGraphError::ExtractionError(format!(
+            "unknown window function: {other}"
+        ))),
+    }
+}
+
+fn convert_window_frame(
+    nodes: &[RelLang],
+    idx: usize,
+) -> Result<Option<ra_core::algebra::WindowFrame>, EGraphError>
+{
+    use ra_core::algebra::{
+        WindowFrame, WindowFrameMode,
+    };
+    if let RelLang::Nil = &nodes[idx] {
+        return Ok(None);
+    }
+    let RelLang::WindowFrameNode([
+        mode_id,
+        start_id,
+        end_id,
+    ]) = &nodes[idx]
+    else {
+        return Err(EGraphError::ExtractionError(format!(
+            "expected WindowFrameNode, got {:?}",
+            nodes[idx]
+        )));
+    };
+    let mode = match &nodes[id(*mode_id)] {
+        RelLang::FrameRows => WindowFrameMode::Rows,
+        RelLang::FrameRange => WindowFrameMode::Range,
+        RelLang::FrameGroups => WindowFrameMode::Groups,
+        other => {
+            return Err(EGraphError::ExtractionError(
+                format!(
+                    "expected frame mode, got {other:?}"
+                ),
+            ))
+        }
+    };
+    let start = convert_frame_bound(nodes, id(*start_id))?;
+    let end = convert_frame_bound(nodes, id(*end_id))?;
+    Ok(Some(WindowFrame { mode, start, end }))
+}
+
+fn convert_frame_bound(
+    nodes: &[RelLang],
+    idx: usize,
+) -> Result<ra_core::algebra::WindowFrameBound, EGraphError> {
+    use ra_core::algebra::WindowFrameBound;
+    match &nodes[idx] {
+        RelLang::FrameUnboundedPreceding => {
+            Ok(WindowFrameBound::UnboundedPreceding)
+        }
+        RelLang::FramePreceding([n_id]) => {
+            let s = get_symbol(nodes, id(*n_id))?;
+            let n = s.parse::<u64>().map_err(|e| {
+                EGraphError::ExtractionError(format!(
+                    "invalid frame bound: {e}"
+                ))
+            })?;
+            Ok(WindowFrameBound::Preceding(n))
+        }
+        RelLang::FrameCurrentRow => {
+            Ok(WindowFrameBound::CurrentRow)
+        }
+        RelLang::FrameFollowing([n_id]) => {
+            let s = get_symbol(nodes, id(*n_id))?;
+            let n = s.parse::<u64>().map_err(|e| {
+                EGraphError::ExtractionError(format!(
+                    "invalid frame bound: {e}"
+                ))
+            })?;
+            Ok(WindowFrameBound::Following(n))
+        }
+        RelLang::FrameUnboundedFollowing => {
+            Ok(WindowFrameBound::UnboundedFollowing)
+        }
+        other => Err(EGraphError::ExtractionError(format!(
+            "expected frame bound, got {other:?}"
+        ))),
+    }
+}
+
+fn convert_values_row(
+    nodes: &[RelLang],
+    idx: usize,
+) -> Result<Vec<ra_core::expr::Expr>, EGraphError> {
+    let RelLang::ValuesRow(ids) = &nodes[idx] else {
+        return Err(EGraphError::ExtractionError(format!(
+            "expected ValuesRow, got {:?}",
+            nodes[idx]
+        )));
+    };
+    ids.iter()
+        .map(|&child| convert_scalar(nodes, id(child)))
+        .collect()
+}
+
+fn convert_optional_scalar(
+    nodes: &[RelLang],
+    idx: usize,
+) -> Result<Option<ra_core::expr::Expr>, EGraphError> {
+    if let RelLang::Nil = &nodes[idx] {
+        return Ok(None);
+    }
+    Ok(Some(convert_scalar(nodes, idx)?))
+}
+
+fn convert_optional_symbol(
+    nodes: &[RelLang],
+    idx: usize,
+) -> Result<Option<String>, EGraphError> {
+    match &nodes[idx] {
+        RelLang::Nil => Ok(None),
+        RelLang::Symbol(s) => Ok(Some(s.to_string())),
+        other => Err(EGraphError::ExtractionError(format!(
+            "expected Nil/Symbol, got {other:?}"
+        ))),
+    }
 }
 
 fn convert_sort_key_list(

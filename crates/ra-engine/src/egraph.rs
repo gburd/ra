@@ -10,7 +10,8 @@ use std::collections::HashMap;
 use egg::{define_language, EGraph, Id, RecExpr, Runner};
 use ra_core::algebra::{
     AggregateExpr, AggregateFunction, JoinType, NullOrdering, ProjectionColumn, RelExpr,
-    SortDirection, SortKey,
+    SortDirection, SortKey, WindowExpr, WindowFrame, WindowFrameBound, WindowFrameMode,
+    WindowFunction,
 };
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr, UnaryOp};
 use ra_stats::delta::DeltaSet;
@@ -41,6 +42,24 @@ define_language! {
         "intersect" = Intersect([Id; 3]),
         "except" = Except([Id; 3]),
         "recursive-cte" = RecursiveCTE([Id; 4]),
+        "cte" = CTE([Id; 3]),
+        "window" = Window([Id; 2]),
+        "distinct-rel" = DistinctRel([Id; 1]),
+        "values" = Values(Box<[Id]>),
+        "values-row" = ValuesRow(Box<[Id]>),
+
+        // -- Window function expression --
+        "window-expr" = WindowExprNode([Id; 6]),
+        "window-fn" = WindowFn([Id; 1]),
+        "window-frame" = WindowFrameNode([Id; 3]),
+        "frame-rows" = FrameRows,
+        "frame-range" = FrameRange,
+        "frame-groups" = FrameGroups,
+        "frame-unbounded-preceding" = FrameUnboundedPreceding,
+        "frame-preceding" = FramePreceding([Id; 1]),
+        "frame-current-row" = FrameCurrentRow,
+        "frame-following" = FrameFollowing([Id; 1]),
+        "frame-unbounded-following" = FrameUnboundedFollowing,
 
         // -- Join types --
         "inner" = Inner,
@@ -796,12 +815,42 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
                 name_id, base_id, rec_id, body_id,
             ])))
         }
-        RelExpr::CTE { .. }
-        | RelExpr::Window { .. }
-        | RelExpr::Distinct { .. }
-        | RelExpr::Values { .. } => Err(EGraphError::ConversionError(
-            "CTE/Window/Distinct/Values not yet supported in e-graph".to_owned(),
-        )),
+        RelExpr::CTE {
+            name,
+            definition,
+            body,
+        } => {
+            let name_id = add_symbol(rec, name);
+            let def_id = add_rel_expr(rec, definition)?;
+            let body_id = add_rel_expr(rec, body)?;
+            Ok(rec.add(RelLang::CTE([name_id, def_id, body_id])))
+        }
+        RelExpr::Window { functions, input } => {
+            let fns_id = add_window_expr_list(rec, functions)?;
+            let input_id = add_rel_expr(rec, input)?;
+            Ok(rec.add(RelLang::Window([fns_id, input_id])))
+        }
+        RelExpr::Distinct { input } => {
+            let input_id = add_rel_expr(rec, input)?;
+            Ok(rec.add(RelLang::DistinctRel([input_id])))
+        }
+        RelExpr::Values { rows } => {
+            let mut row_ids = Vec::with_capacity(rows.len());
+            for row in rows {
+                let mut cell_ids =
+                    Vec::with_capacity(row.len());
+                for cell in row {
+                    cell_ids
+                        .push(add_scalar_expr(rec, cell)?);
+                }
+                row_ids.push(rec.add(RelLang::ValuesRow(
+                    cell_ids.into_boxed_slice(),
+                )));
+            }
+            Ok(rec.add(RelLang::Values(
+                row_ids.into_boxed_slice(),
+            )))
+        }
     }
 }
 
@@ -1023,6 +1072,83 @@ fn add_sort_key_list(rec: &mut RecExpr<RelLang>, keys: &[SortKey]) -> Result<Id,
     Ok(rec.add(RelLang::List(ids.into_boxed_slice())))
 }
 
+fn add_window_expr_list(
+    rec: &mut RecExpr<RelLang>,
+    exprs: &[WindowExpr],
+) -> Result<Id, EGraphError> {
+    let mut ids = Vec::with_capacity(exprs.len());
+    for wexpr in exprs {
+        ids.push(add_window_expr(rec, wexpr)?);
+    }
+    Ok(rec.add(RelLang::List(ids.into_boxed_slice())))
+}
+
+fn add_window_expr(
+    rec: &mut RecExpr<RelLang>,
+    wexpr: &WindowExpr,
+) -> Result<Id, EGraphError> {
+    let fn_name = add_symbol(rec, &format!("{:?}", wexpr.function));
+    let fn_id = rec.add(RelLang::WindowFn([fn_name]));
+    let arg_id = match &wexpr.arg {
+        Some(e) => add_scalar_expr(rec, e)?,
+        None => rec.add(RelLang::Nil),
+    };
+    let part_id = add_expr_list(rec, &wexpr.partition_by)?;
+    let order_id = add_sort_key_list(rec, &wexpr.order_by)?;
+    let frame_id = add_window_frame(rec, wexpr.frame.as_ref())?;
+    let alias_id = match &wexpr.alias {
+        Some(a) => add_symbol(rec, a),
+        None => rec.add(RelLang::Nil),
+    };
+    Ok(rec.add(RelLang::WindowExprNode([
+        fn_id, arg_id, part_id, order_id, frame_id, alias_id,
+    ])))
+}
+
+fn add_window_frame(
+    rec: &mut RecExpr<RelLang>,
+    frame: Option<&WindowFrame>,
+) -> Result<Id, EGraphError> {
+    let Some(f) = frame else {
+        return Ok(rec.add(RelLang::Nil));
+    };
+    let mode_id = match f.mode {
+        WindowFrameMode::Rows => rec.add(RelLang::FrameRows),
+        WindowFrameMode::Range => rec.add(RelLang::FrameRange),
+        WindowFrameMode::Groups => rec.add(RelLang::FrameGroups),
+    };
+    let start_id = add_frame_bound(rec, &f.start);
+    let end_id = add_frame_bound(rec, &f.end);
+    Ok(rec.add(RelLang::WindowFrameNode([
+        mode_id, start_id, end_id,
+    ])))
+}
+
+fn add_frame_bound(
+    rec: &mut RecExpr<RelLang>,
+    bound: &WindowFrameBound,
+) -> Id {
+    match bound {
+        WindowFrameBound::UnboundedPreceding => {
+            rec.add(RelLang::FrameUnboundedPreceding)
+        }
+        WindowFrameBound::Preceding(n) => {
+            let n_id = add_symbol(rec, &n.to_string());
+            rec.add(RelLang::FramePreceding([n_id]))
+        }
+        WindowFrameBound::CurrentRow => {
+            rec.add(RelLang::FrameCurrentRow)
+        }
+        WindowFrameBound::Following(n) => {
+            let n_id = add_symbol(rec, &n.to_string());
+            rec.add(RelLang::FrameFollowing([n_id]))
+        }
+        WindowFrameBound::UnboundedFollowing => {
+            rec.add(RelLang::FrameUnboundedFollowing)
+        }
+    }
+}
+
 /// Convert an e-graph node (by class [`Id`]) back to a [`RelExpr`].
 ///
 /// Extracts the best node from each e-class using the given extractor
@@ -1163,6 +1289,38 @@ fn from_node(
                 body: Box::new(body),
                 cycle_detection: None,
             })
+        }
+        RelLang::CTE([name_id, def_id, body_id]) => {
+            let name = extract_symbol(egraph, *name_id)?;
+            let definition = from_egraph_node(egraph, *def_id)?;
+            let body = from_egraph_node(egraph, *body_id)?;
+            Ok(RelExpr::CTE {
+                name,
+                definition: Box::new(definition),
+                body: Box::new(body),
+            })
+        }
+        RelLang::Window([fns_id, input_id]) => {
+            let functions =
+                extract_window_expr_list(egraph, *fns_id)?;
+            let input = from_egraph_node(egraph, *input_id)?;
+            Ok(RelExpr::Window {
+                functions,
+                input: Box::new(input),
+            })
+        }
+        RelLang::DistinctRel([input_id]) => {
+            let input = from_egraph_node(egraph, *input_id)?;
+            Ok(RelExpr::Distinct {
+                input: Box::new(input),
+            })
+        }
+        RelLang::Values(row_ids) => {
+            let mut rows = Vec::with_capacity(row_ids.len());
+            for &row_id in row_ids.iter() {
+                rows.push(extract_values_row(egraph, row_id)?);
+            }
+            Ok(RelExpr::Values { rows })
         }
         other => Err(EGraphError::ExtractionError(format!(
             "unexpected relational node: {other:?}"
@@ -1504,6 +1662,228 @@ fn extract_distinct_flag(
     }
     Err(EGraphError::ExtractionError(
         "expected Distinct/All flag".into(),
+    ))
+}
+
+fn extract_window_expr_list(
+    egraph: &EGraph<RelLang, RelAnalysis>,
+    id: Id,
+) -> Result<Vec<WindowExpr>, EGraphError> {
+    let canonical = egraph.find(id);
+    for node in &egraph[canonical].nodes {
+        if let RelLang::List(ids) = node {
+            let mut exprs = Vec::with_capacity(ids.len());
+            for &child_id in ids.iter() {
+                exprs.push(extract_window_expr(
+                    egraph, child_id,
+                )?);
+            }
+            return Ok(exprs);
+        }
+    }
+    Err(EGraphError::ExtractionError(
+        "expected List node for window expressions".into(),
+    ))
+}
+
+fn extract_window_expr(
+    egraph: &EGraph<RelLang, RelAnalysis>,
+    id: Id,
+) -> Result<WindowExpr, EGraphError> {
+    let canonical = egraph.find(id);
+    for node in &egraph[canonical].nodes {
+        if let RelLang::WindowExprNode([
+            fn_id,
+            arg_id,
+            part_id,
+            order_id,
+            frame_id,
+            alias_id,
+        ]) = node
+        {
+            let function =
+                extract_window_function(egraph, *fn_id)?;
+            let arg = extract_optional_expr(egraph, *arg_id)?;
+            let partition_by =
+                extract_expr_list(egraph, *part_id)?;
+            let order_by =
+                extract_sort_key_list(egraph, *order_id)?;
+            let frame =
+                extract_window_frame(egraph, *frame_id)?;
+            let alias =
+                extract_optional_symbol(egraph, *alias_id)?;
+            return Ok(WindowExpr {
+                function,
+                arg,
+                partition_by,
+                order_by,
+                frame,
+                alias,
+            });
+        }
+    }
+    Err(EGraphError::ExtractionError(
+        "expected WindowExprNode".into(),
+    ))
+}
+
+fn extract_window_function(
+    egraph: &EGraph<RelLang, RelAnalysis>,
+    id: Id,
+) -> Result<WindowFunction, EGraphError> {
+    let canonical = egraph.find(id);
+    for node in &egraph[canonical].nodes {
+        if let RelLang::WindowFn([name_id]) = node {
+            let name = extract_symbol(egraph, *name_id)?;
+            let func = match name.as_str() {
+                "RowNumber" => WindowFunction::RowNumber,
+                "Rank" => WindowFunction::Rank,
+                "DenseRank" => WindowFunction::DenseRank,
+                "PercentRank" => WindowFunction::PercentRank,
+                "Ntile" => WindowFunction::Ntile,
+                "Lag" => WindowFunction::Lag,
+                "Lead" => WindowFunction::Lead,
+                "FirstValue" => WindowFunction::FirstValue,
+                "LastValue" => WindowFunction::LastValue,
+                "NthValue" => WindowFunction::NthValue,
+                "Avg" => WindowFunction::Avg,
+                "Sum" => WindowFunction::Sum,
+                "Count" => WindowFunction::Count,
+                "Min" => WindowFunction::Min,
+                "Max" => WindowFunction::Max,
+                other => {
+                    return Err(EGraphError::ExtractionError(
+                        format!(
+                            "unknown window function: {other}"
+                        ),
+                    ));
+                }
+            };
+            return Ok(func);
+        }
+    }
+    Err(EGraphError::ExtractionError(
+        "expected WindowFn node".into(),
+    ))
+}
+
+fn extract_window_frame(
+    egraph: &EGraph<RelLang, RelAnalysis>,
+    id: Id,
+) -> Result<Option<WindowFrame>, EGraphError> {
+    let canonical = egraph.find(id);
+    for node in &egraph[canonical].nodes {
+        if let RelLang::Nil = node {
+            return Ok(None);
+        }
+        if let RelLang::WindowFrameNode([
+            mode_id,
+            start_id,
+            end_id,
+        ]) = node
+        {
+            let mode =
+                extract_frame_mode(egraph, *mode_id)?;
+            let start =
+                extract_frame_bound(egraph, *start_id)?;
+            let end =
+                extract_frame_bound(egraph, *end_id)?;
+            return Ok(Some(WindowFrame { mode, start, end }));
+        }
+    }
+    Err(EGraphError::ExtractionError(
+        "expected WindowFrameNode or Nil".into(),
+    ))
+}
+
+fn extract_frame_mode(
+    egraph: &EGraph<RelLang, RelAnalysis>,
+    id: Id,
+) -> Result<WindowFrameMode, EGraphError> {
+    let canonical = egraph.find(id);
+    for node in &egraph[canonical].nodes {
+        match node {
+            RelLang::FrameRows => {
+                return Ok(WindowFrameMode::Rows)
+            }
+            RelLang::FrameRange => {
+                return Ok(WindowFrameMode::Range)
+            }
+            RelLang::FrameGroups => {
+                return Ok(WindowFrameMode::Groups)
+            }
+            _ => {}
+        }
+    }
+    Err(EGraphError::ExtractionError(
+        "expected frame mode node".into(),
+    ))
+}
+
+fn extract_frame_bound(
+    egraph: &EGraph<RelLang, RelAnalysis>,
+    id: Id,
+) -> Result<WindowFrameBound, EGraphError> {
+    let canonical = egraph.find(id);
+    for node in &egraph[canonical].nodes {
+        match node {
+            RelLang::FrameUnboundedPreceding => {
+                return Ok(
+                    WindowFrameBound::UnboundedPreceding,
+                );
+            }
+            RelLang::FramePreceding([n_id]) => {
+                let s = extract_symbol(egraph, *n_id)?;
+                let n = s.parse::<u64>().map_err(|e| {
+                    EGraphError::ExtractionError(format!(
+                        "invalid frame bound: {e}"
+                    ))
+                })?;
+                return Ok(WindowFrameBound::Preceding(n));
+            }
+            RelLang::FrameCurrentRow => {
+                return Ok(WindowFrameBound::CurrentRow);
+            }
+            RelLang::FrameFollowing([n_id]) => {
+                let s = extract_symbol(egraph, *n_id)?;
+                let n = s.parse::<u64>().map_err(|e| {
+                    EGraphError::ExtractionError(format!(
+                        "invalid frame bound: {e}"
+                    ))
+                })?;
+                return Ok(WindowFrameBound::Following(n));
+            }
+            RelLang::FrameUnboundedFollowing => {
+                return Ok(
+                    WindowFrameBound::UnboundedFollowing,
+                );
+            }
+            _ => {}
+        }
+    }
+    Err(EGraphError::ExtractionError(
+        "expected frame bound node".into(),
+    ))
+}
+
+fn extract_values_row(
+    egraph: &EGraph<RelLang, RelAnalysis>,
+    id: Id,
+) -> Result<Vec<Expr>, EGraphError> {
+    let canonical = egraph.find(id);
+    for node in &egraph[canonical].nodes {
+        if let RelLang::ValuesRow(ids) = node {
+            let mut cells = Vec::with_capacity(ids.len());
+            for &cell_id in ids.iter() {
+                cells.push(
+                    extract_scalar_expr(egraph, cell_id)?,
+                );
+            }
+            return Ok(cells);
+        }
+    }
+    Err(EGraphError::ExtractionError(
+        "expected ValuesRow node".into(),
     ))
 }
 
