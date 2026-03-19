@@ -104,4 +104,4 @@ FROM departments d;
 
 - PostgreSQL: Common subexpression elimination for subqueries
 - Oracle: Subquery result caching
-- SQL Server: Repeated subquery execution plan sharing
+- mssql: Repeated subquery execution plan sharing

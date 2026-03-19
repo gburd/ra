@@ -215,7 +215,7 @@ JOIN users u ON logs.user_id = u.id;
 - Apache Calcite: `JoinUnionTransposeRule.java`
 - PostgreSQL: Partition-wise join (optimizer/plan/joinpath.c)
 - Oracle: Partition-wise operations
-- SQL Server: Parallel partition-wise joins
+- mssql: Parallel partition-wise joins
 
 **Academic papers:**
 - Graefe, "Encapsulation of Parallelism in the Volcano Query Processing System", ACM SIGMOD 1990

@@ -1,6 +1,6 @@
 ---
 id: mssql-trivial-plan
-name: SQL Server Trivial Plan Optimization
+name: mssql Trivial Plan Optimization
 category: database-specific/mssql
 databases: [mssql]
 version: "1.0.0"
@@ -10,12 +10,12 @@ complexity: O(1)
 benefit_range: [0.1, 0.3]
 ---
 
-# SQL Server Trivial Plan Optimization
+# mssql Trivial Plan Optimization
 
 ## Description
 
 Bypasses the full cost-based optimizer for simple queries that have
-only one reasonable execution plan.  SQL Server's trivial plan
+only one reasonable execution plan.  mssql's trivial plan
 optimization phase detects queries where the optimal plan is obvious
 (e.g., single-table point lookups, simple inserts) and produces the
 plan without invoking the expensive search phases of the optimizer.
@@ -30,7 +30,7 @@ plan, so optimization effort is wasted.  Trivial plan skips directly
 to plan generation, reducing compilation time from milliseconds to
 microseconds.
 
-**Database version**: SQL Server 2000+
+**Database version**: mssql 2000+
 
 ## Relational Algebra
 
@@ -118,6 +118,6 @@ JOIN orders o ON u.id = o.user_id WHERE o.total > 100;
 
 ## References
 
-SQL Server: Query Processing Architecture (Trivial Plan phase)
-SQL Server: sys.dm_exec_query_optimizer_info (trivial plan counter)
-SQL Server: SET STATISTICS XML (optimization phases)
+mssql: Query Processing Architecture (Trivial Plan phase)
+mssql: sys.dm_exec_query_optimizer_info (trivial plan counter)
+mssql: SET STATISTICS XML (optimization phases)

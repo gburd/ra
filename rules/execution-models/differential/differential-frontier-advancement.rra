@@ -246,7 +246,7 @@ pub fn frontier_tracking_cost(
 1. **Murray, Derek G. et al**. "Naiad: A Timely Dataflow System." SOSP 2013.
    - Pointstamp protocol for distributed progress tracking
 
-2. **McSherry, Frank et al**. "Differential Dataflow." CIDR 2013.
+2. **McSherry, Frank et al**. "differential-dataflow." CIDR 2013.
    - Frontier-based compaction for differential collections
 
 3. **Abadi, Daniel et al**. "Materialize: Operational Simplicity." CIDR 2022.

@@ -183,4 +183,4 @@ FROM events e JOIN users u ON e.user_id = u.id;
 **Papers:**
 - Murray, D.G., et al., "Naiad: A Timely Dataflow System", SOSP 2013
   - DOI: 10.1145/2517349.2522738
-- McSherry, F., et al., "Differential Dataflow", CIDR 2013
+- McSherry, F., et al., "differential-dataflow", CIDR 2013

@@ -3,7 +3,7 @@ id: adaptive-index-routing
 name: Adaptive Index vs. Scan Routing
 category: execution-models
 version: 1.0.0
-databases: [Oracle, PostgreSQL, SQL Server, MySQL]
+databases: [Oracle, PostgreSQL, mssql, MySQL]
 authors: [Goetz Graefe]
 tags: [execution, adaptive, index, scan, selectivity, runtime]
 standard: Adaptive access path selection

@@ -160,7 +160,7 @@ SELECT * FROM nation WHERE n_regionkey = 1;
 
 **Implementation in databases:**
 - HyPer/Umbra: Morsel-driven parallelism with NUMA awareness
-- SAP HANA: NUMA-aware memory allocation
+- sap-hana: NUMA-aware memory allocation
 - SingleStore (MemSQL): NUMA-local partitioning
 
 **Academic papers:**

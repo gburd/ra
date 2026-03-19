@@ -3,7 +3,7 @@ id: adaptive-spill-strategy
 name: Adaptive Spill-to-Disk Strategy
 category: execution-models
 version: 1.0.0
-databases: [DuckDB, PostgreSQL, SQL Server, Spark]
+databases: [DuckDB, PostgreSQL, mssql, Spark]
 authors: [Goetz Graefe]
 tags: [execution, adaptive, spill, disk, memory, hash, sort, graceful-degradation]
 standard: Graceful degradation under memory pressure

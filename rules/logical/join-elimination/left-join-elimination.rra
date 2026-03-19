@@ -95,4 +95,4 @@ WHERE orders.total > 100;
 
 - PostgreSQL: join_is_removable in optimizer
 - MySQL: Outer join simplification
-- SQL Server: Unnecessary outer join removal
+- mssql: Unnecessary outer join removal

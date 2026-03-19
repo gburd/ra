@@ -324,6 +324,6 @@ JOIN orders o ON c.id = o.customer_id;
   - Empirical analysis of plan space exploration
 
 **Implementation in databases:**
-- SQL Server: Cascades optimizer with branch-and-bound
+- mssql: Cascades optimizer with branch-and-bound
 - CockroachDB: `pkg/sql/opt/memo/` - memo structure with cost tracking
 - Greenplum Orca: `libgpopt/src/engine/CEngine.cpp` - optimization engine

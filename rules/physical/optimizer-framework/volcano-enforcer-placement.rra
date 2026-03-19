@@ -335,7 +335,7 @@ ORDER BY o.order_id;
   - Formal treatment of sort enforcers and order propagation
 
 **Implementation in databases:**
-- SQL Server: Sort and Exchange enforcers in Cascades optimizer
+- mssql: Sort and Exchange enforcers in Cascades optimizer
 - CockroachDB: `pkg/sql/opt/xform/physical_props.go` - enforcer insertion
 - Greenplum Orca: `libgpopt/src/operators/CPhysicalSort.cpp` - sort enforcer
 - PostgreSQL: Sort node insertion in `createplan.c`

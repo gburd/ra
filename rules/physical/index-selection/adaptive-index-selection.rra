@@ -161,6 +161,6 @@ SELECT * FROM events WHERE id = ?;
 
 - ClickHouse: `updateQueryConditionCache.cpp` - runtime condition effectiveness
 - Oracle: Adaptive Cursor Sharing, Adaptive Plans
-- SQL Server: Adaptive Joins, Interleaved Execution
+- mssql: Adaptive Joins, Interleaved Execution
 - PostgreSQL: Custom/generic plan switching for prepared statements
 - Ioannidis et al., "Parametric Query Optimization", VLDB 1992

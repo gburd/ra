@@ -205,7 +205,7 @@ SELECT email FROM customers EXCEPT SELECT email FROM blacklist;
 
 ## References
 
-1. **McSherry, Frank et al**. "Differential Dataflow." CIDR 2013.
+1. **McSherry, Frank et al**. "differential-dataflow." CIDR 2013.
    - Collection operator semantics and composition
 
 2. **McSherry, Frank**. "differential-dataflow" documentation.

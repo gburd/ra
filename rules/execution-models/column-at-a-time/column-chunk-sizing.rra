@@ -3,7 +3,7 @@ id: column-chunk-sizing
 name: Column Chunk Size Selection
 category: execution-models
 version: 1.0.0
-databases: [MonetDB, DuckDB, VectorWise, ClickHouse, Velox]
+databases: [MonetDB, DuckDB, vectorwise, ClickHouse, Velox]
 authors: [Peter Boncz, Marcin Zukowski]
 tags: [execution, columnar, chunk, vector-size, cache, tuning, batch]
 standard: MonetDB X100 vector sizing
@@ -21,7 +21,7 @@ The original MonetDB/X100 paper established that processing entire columns (Mone
 
 Different engines have converged on different defaults:
 - **DuckDB**: 2048 values per vector (hardcoded `STANDARD_VECTOR_SIZE`)
-- **VectorWise**: 1024 values per vector
+- **vectorwise**: 1024 values per vector
 - **ClickHouse**: 65536 rows per block (larger, relies on different pipeline model)
 - **Velox**: 1024 values per batch (configurable)
 - **Arrow**: variable batch sizes, typically 1024-65536

@@ -220,7 +220,7 @@ SELECT * FROM employees WHERE department = 'Engineering';
 **Modern extensions:**
 - PostgreSQL: Index-Only Scans (since v9.2), INCLUDE clause (v11)
 - MySQL: Covering indexes documentation
-- SQL Server: INCLUDE columns in CREATE INDEX
+- mssql: INCLUDE columns in CREATE INDEX
 
 **Key insight:**
 - "If the index contains all columns needed by the query, the data

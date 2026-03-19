@@ -3,7 +3,7 @@ id: column-aggregate
 name: Column-at-a-Time Aggregation
 category: execution-models
 version: 1.0.0
-databases: [MonetDB, ClickHouse, DuckDB, VectorWise, Vertica]
+databases: [MonetDB, ClickHouse, DuckDB, vectorwise, vertica]
 authors: [Peter Boncz, Marcin Zukowski]
 tags: [execution, columnar, x100, aggregate, group-by, hash-aggregate, simd]
 standard: MonetDB X100

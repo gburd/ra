@@ -410,4 +410,4 @@ SELECT * FROM orders_2023 WHERE year = 2024;
   - Also: constraint exclusion for partitions
 - MySQL: Constant propagation and impossible WHERE detection
 - Oracle: Constraint-based optimization pass
-- SQL Server: Contradiction detection in Cascades optimizer
+- mssql: Contradiction detection in Cascades optimizer

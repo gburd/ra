@@ -83,4 +83,4 @@ SELECT * FROM orders WHERE status = 'pending';
 
 - PostgreSQL: Temporary tables
 - MySQL: MEMORY and temporary tables
-- SQL Server: #temp tables
+- mssql: #temp tables

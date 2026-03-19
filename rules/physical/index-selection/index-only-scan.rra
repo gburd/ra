@@ -197,5 +197,5 @@ SELECT email, address FROM users WHERE email = 'test@example.com';
 3. **Selinger et al.**: "Access Path Selection in a Relational Database Management System"
    - System R optimizer, SIGMOD 1979
 
-4. **SQL Server**: Included columns in nonclustered indexes
+4. **mssql**: Included columns in nonclustered indexes
    - CREATE INDEX ... INCLUDE for covering without key expansion

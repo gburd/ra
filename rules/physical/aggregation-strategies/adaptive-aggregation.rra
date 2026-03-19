@@ -220,7 +220,7 @@ GROUP BY product_id;
 ## References
 
 1. **Dutt et al. (2018)**: "Adaptive Query Execution in Modern Database Systems"
-2. **SQL Server**: Adaptive query processing
+2. **mssql**: Adaptive query processing
    - https://docs.microsoft.com/sql/relational-databases/performance/adaptive-query-processing
 3. **Presto**: Adaptive execution framework
 4. **Spark 3.0**: Adaptive Query Execution (AQE)

@@ -131,5 +131,5 @@ SELECT * FROM t WHERE RANDOM() > 0.5;
 **Implementation:**
 - PostgreSQL: `func_volatile` classification (PROVOLATILE in pg_proc)
 - Oracle: DETERMINISTIC keyword for function caching
-- SQL Server: WITH SCHEMABINDING for deterministic marking
+- mssql: WITH SCHEMABINDING for deterministic marking
 - DuckDB: Function stability annotations in catalog

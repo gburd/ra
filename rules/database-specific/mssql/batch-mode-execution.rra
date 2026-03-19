@@ -1,6 +1,6 @@
 ---
 id: mssql-batch-mode-execution
-name: SQL Server Batch Mode Execution
+name: mssql Batch Mode Execution
 category: database-specific/mssql
 databases: [mssql]
 version: "1.0.0"
@@ -10,15 +10,15 @@ complexity: O(1)
 benefit_range: [0.3, 0.9]
 ---
 
-# SQL Server Batch Mode Execution
+# mssql Batch Mode Execution
 
 ## Description
 
-SQL Server's batch mode processes data in vectors of approximately
+mssql's batch mode processes data in vectors of approximately
 900 rows at a time instead of the traditional row-by-row (row mode)
 execution.  Originally available only for queries involving
 columnstore indexes, batch mode was extended to rowstore tables in
-SQL Server 2019 via "batch mode on rowstore."  Batch mode operators
+mssql 2019 via "batch mode on rowstore."  Batch mode operators
 use vectorized execution with tight loops, SIMD instructions, and
 cache-friendly data access patterns.
 
@@ -32,7 +32,7 @@ the per-row overhead of the Volcano iterator model.  Batch mode
 operators operate on columnar in-memory formats, enabling CPU cache
 line utilization and SIMD vectorization.
 
-**Database version**: SQL Server 2012+ (columnstore), 2019+
+**Database version**: mssql 2012+ (columnstore), 2019+
 (rowstore)
 
 ## Relational Algebra
@@ -79,7 +79,7 @@ fn applicable(
 **Restrictions:**
 - Not all operators support batch mode (e.g., nested loop join
   does not)
-- SQL Server 2019+ required for batch mode on rowstore
+- mssql 2019+ required for batch mode on rowstore
 - Memory grant required for batch mode operators
 - Can be forced with OPTION (USE HINT('ENABLE_BATCH_MODE'))
 
@@ -119,5 +119,5 @@ SELECT * FROM orders WHERE order_id = 12345;
 ## References
 
 Microsoft: "Batch Mode Execution" documentation
-Microsoft: "Batch Mode on Rowstore" (SQL Server 2019)
+Microsoft: "Batch Mode on Rowstore" (mssql 2019)
 Microsoft: DMV sys.dm_exec_query_profiles (batch vs row mode)

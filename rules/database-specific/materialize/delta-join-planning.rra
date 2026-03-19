@@ -178,7 +178,7 @@ WHERE a.price > b.price AND a.category = b.category;
 - Materialize blog: "Delta Joins in Materialize"
 
 **Papers:**
-- McSherry, F., et al., "Differential Dataflow", CIDR 2013
+- McSherry, F., et al., "differential-dataflow", CIDR 2013
 - Koch, C., et al., "DBToaster: Higher-Order Delta Processing for Dynamic,
   Frequently Fresh Views", VLDB 2014
   - DOI: 10.14778/2732951.2732953

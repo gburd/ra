@@ -433,7 +433,7 @@ LIMIT 1000;
 ## References
 
 **Academic papers:**
-- McSherry, Murray, Isaacs, Isard, "Differential Dataflow", CIDR 2013
+- McSherry, Murray, Isaacs, Isard, "differential-dataflow", CIDR 2013
 - McSherry, "Differential Computation" (Chapter 5: Monotonic operators)
 - Arasu, Manku, "Approximate Counts and Quantiles over Sliding Windows", PODS 2004
 

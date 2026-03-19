@@ -3,7 +3,7 @@ id: column-multi-operation
 name: Multi-Column Compound Operations
 category: execution-models
 version: 1.0.0
-databases: [DuckDB, VectorWise, ClickHouse, Velox, DataFusion]
+databases: [DuckDB, vectorwise, ClickHouse, Velox, DataFusion]
 authors: [Thomas Neumann, Timo Kersten]
 tags: [execution, columnar, expression, fusion, compound, multi-column, simd]
 standard: Expression fusion / super-operators

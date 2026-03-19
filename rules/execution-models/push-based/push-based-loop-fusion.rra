@@ -3,7 +3,7 @@ id: push-based-loop-fusion
 name: Push-Based Loop Fusion (Operator Fusion)
 category: execution-models
 version: 1.0.0
-databases: [HyPer, Umbra, Peloton/NoisePage]
+databases: [HyPer, Umbra, noisepage]
 authors: [Thomas Neumann, Prashanth Menon]
 tags: [execution, push-based, compilation, loop-fusion, pipeline, optimization]
 standard: HyPer model

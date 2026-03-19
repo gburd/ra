@@ -254,5 +254,5 @@ WHERE e1.timestamp BETWEEN e2.timestamp - INTERVAL '5 minutes'
 **Modern implementations:**
 - PostgreSQL: `src/backend/executor/nodeHashjoin.c` - hash join implementation
   - Explores both build-probe and symmetric variants
-- SQL Server: Adaptive join operators using symmetric hash join
-- Apache Flink: Symmetric hash join for stream processing
+- mssql: Adaptive join operators using symmetric hash join
+- flink: Symmetric hash join for stream processing

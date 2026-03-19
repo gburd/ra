@@ -174,7 +174,7 @@ GROUP BY ROLLUP (city, category);
 ## References
 
 1. **SQL:1999 Standard**: CUBE, ROLLUP, GROUPING SETS specification
-2. **Microsoft SQL Server**: GROUPING SETS implementation
+2. **Microsoft mssql**: GROUPING SETS implementation
    - https://docs.microsoft.com/sql/t-sql/queries/select-group-by-transact-sql
 3. **Oracle**: GROUP BY Extensions
    - https://docs.oracle.com/database/grouping-sets.html

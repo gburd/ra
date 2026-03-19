@@ -3,10 +3,10 @@ id: differential-delta-query
 name: Differential Delta Query Processing
 category: execution-models
 version: 1.0.0
-databases: [Materialize, Differential Dataflow, Noria]
+databases: [Materialize, differential-dataflow, Noria]
 authors: [Frank McSherry]
 tags: [execution, differential, delta, incremental, query, join]
-standard: Differential Dataflow
+standard: differential-dataflow
 ---
 
 # Differential Delta Query Processing
@@ -256,7 +256,7 @@ UPDATE customers SET name = 'Bob' WHERE id = 42;
 
 ## References
 
-1. **McSherry, Frank et al**. "Differential Dataflow." CIDR 2013.
+1. **McSherry, Frank et al**. "differential-dataflow." CIDR 2013.
    - Delta query transformation for incremental joins
 
 2. **Koch, Christoph et al**. "DBToaster: Higher-Order Delta Processing for Dynamic, Frequently Fresh Views." VLDB 2014.

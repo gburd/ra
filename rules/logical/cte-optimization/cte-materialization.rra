@@ -81,4 +81,4 @@ SELECT * FROM t LIMIT 10;
 
 - PostgreSQL: MATERIALIZED / NOT MATERIALIZED hints (PG 12+)
 - Oracle: MATERIALIZE hint for CTEs
-- SQL Server: Automatic CTE spooling
+- mssql: Automatic CTE spooling

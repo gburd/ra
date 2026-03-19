@@ -241,5 +241,5 @@ WHERE (
 **Implementation:**
 - PostgreSQL: `pull_up_subqueries()` with aggregate detection in `prepjointree.c`
 - Oracle: Subquery unnesting with GROUP BY introduction
-- SQL Server: Apply removal for correlated aggregates
+- mssql: Apply removal for correlated aggregates
 - DuckDB: `FlattenCorrelatedAggregate` in the binder

@@ -372,6 +372,6 @@ WHERE age > 60 AND income > 100000 AND education = 'PhD';
 - Han et al., "Cardinality Estimation in DBMS: A Comprehensive Benchmark Evaluation", VLDB 2022
 
 **Production systems:**
-- Microsoft: CardLearner in SQL Server
+- Microsoft: CardLearner in mssql
 - Google: learned index structures for Spanner
 - Alibaba: ML cardinality in OceanBase

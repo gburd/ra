@@ -3,7 +3,7 @@ id: push-based-expression-fusion
 name: Push-Based Expression Fusion
 category: execution-models
 version: 1.0.0
-databases: [HyPer, Umbra, Peloton/NoisePage]
+databases: [HyPer, Umbra, noisepage]
 authors: [Thomas Neumann, Prashanth Menon]
 tags: [execution, push-based, compilation, expression, fusion, optimization]
 standard: HyPer model

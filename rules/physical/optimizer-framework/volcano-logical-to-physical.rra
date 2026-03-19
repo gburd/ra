@@ -338,6 +338,6 @@ ORDER BY c.name;
   - Modern Cascades implementation with implementation rules
 
 **Implementation in databases:**
-- SQL Server: Cascades optimizer with implementation rules
+- mssql: Cascades optimizer with implementation rules
 - CockroachDB: `pkg/sql/opt/xform/` - implementation rules
 - Greenplum Orca: `libgpopt/src/xforms/` - implementation transforms

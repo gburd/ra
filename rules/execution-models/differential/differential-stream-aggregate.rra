@@ -3,10 +3,10 @@ id: differential-stream-aggregate
 name: Differential Incremental Stream Aggregation
 category: execution-models
 version: 1.0.0
-databases: [Materialize, Differential Dataflow, Noria]
+databases: [Materialize, differential-dataflow, Noria]
 authors: [Frank McSherry]
 tags: [execution, differential, aggregation, streaming, incremental, reduce]
-standard: Differential Dataflow
+standard: differential-dataflow
 ---
 
 # Differential Incremental Stream Aggregation
@@ -229,7 +229,7 @@ SELECT customer_id, AVG(total) FROM orders GROUP BY customer_id;
 
 ## References
 
-1. **McSherry, Frank et al**. "Differential Dataflow." CIDR 2013.
+1. **McSherry, Frank et al**. "differential-dataflow." CIDR 2013.
 2. **Koch, Christoph et al**. "DBToaster: Higher-Order Delta Processing for Dynamic, Frequently Fresh Views." VLDB 2014.
 3. **Materialize Documentation**. "Aggregation and Reduction."
 4. **Ahmad, Yanif; Koch, Christoph**. "DBToaster: A SQL Compiler for High-Performance Delta Processing." VLDB 2009.

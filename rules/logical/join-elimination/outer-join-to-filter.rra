@@ -198,5 +198,5 @@ WHERE COALESCE(d.active, true) = true;
 **Implementation:**
 - PostgreSQL: `reduce_outer_joins()` in `optimizer/plan/analyzejoins.c`
 - Oracle: "Outer Join to Inner Join" conversion in CBO
-- SQL Server: `OptimizerSimplifyOuterJoin` rule
+- mssql: `OptimizerSimplifyOuterJoin` rule
 - DuckDB: `OuterJoinSimplification` optimizer pass

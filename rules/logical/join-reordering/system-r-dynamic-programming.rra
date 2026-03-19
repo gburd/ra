@@ -268,4 +268,4 @@ ORDER BY o_year;
 **Implementation in databases:**
 - PostgreSQL: `src/backend/optimizer/path/joinrels.c` - DP join ordering
 - MySQL: `sql/sql_optimizer.cc` - Greedy approximation of System R
-- Most commercial databases (Oracle, SQL Server, DB2) use variants of System R DP
+- Most commercial databases (Oracle, mssql, DB2) use variants of System R DP

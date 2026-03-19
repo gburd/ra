@@ -216,11 +216,11 @@ JOIN customers c ON o.customer_id = c.id;
 **Academic papers:**
 - Galindo-Legaria & Rosenthal, "Outerjoin Simplification and Reordering for Query Optimization", ACM TODS 1997
 - Pirahesh et al., "Extensible/Rule Based Query Rewrite Optimization in Starburst", SIGMOD 1992
-- Elhemali et al., "The Microsoft SQL Server 2014 Query Optimizer", IEEE Data Eng. Bull. 2014
+- Elhemali et al., "The Microsoft mssql 2014 Query Optimizer", IEEE Data Eng. Bull. 2014
 
 **Implementation:**
 - PostgreSQL: `remove_useless_joins()` in `optimizer/plan/analyzejoins.c`
 - Oracle: "Table Elimination" optimization
-- SQL Server: "Join Elimination" in query plans
+- mssql: "Join Elimination" in query plans
 - MySQL: Limited support via `unique_subquery`
 - DuckDB: Aggressive join elimination using constraint inference

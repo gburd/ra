@@ -114,6 +114,6 @@ SELECT * FROM prices WHERE price_text = 1.5;
 
 ## References
 
-- SQL Server: "Implicit Conversions that cause Index Scans"
+- mssql: "Implicit Conversions that cause Index Scans"
 - PostgreSQL: Type Resolution and Implicit Casts
 - MySQL: Type Conversion in Expression Evaluation

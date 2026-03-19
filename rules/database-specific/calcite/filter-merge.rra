@@ -140,7 +140,7 @@ WHERE o.total > 1000 AND c.status = 'active';
 **Implementation in databases:**
 - Apache Calcite: `FilterMergeRule.java`
 - Apache Drill: Filter merge optimization
-- Apache Flink: FilterMergeRule in optimizer
+- flink: FilterMergeRule in optimizer
 
 **Academic papers:**
 - Graefe & McKenna, "The Volcano Optimizer Generator", IEEE Data Engineering 1993

@@ -122,5 +122,5 @@ SELECT * FROM t WHERE ST_Contains(ST_Buffer(geom, 100), point);
 
 - PostGIS: Spatial indexing with GiST
 - Oracle Spatial: R-tree indexes
-- SQL Server: Spatial indexes
+- mssql: Spatial indexes
 - de Berg et al., "Computational Geometry", Ch. 10 (R-trees)

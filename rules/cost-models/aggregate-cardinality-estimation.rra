@@ -366,4 +366,4 @@ FROM employees;
 **Implementations:**
 - PostgreSQL: `src/backend/optimizer/util/plancat.c` (estimate_num_groups)
 - DuckDB: statistics propagation for aggregates
-- SQL Server: density vector for multi-column estimation
+- mssql: density vector for multi-column estimation

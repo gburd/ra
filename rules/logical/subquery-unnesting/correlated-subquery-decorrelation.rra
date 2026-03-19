@@ -253,6 +253,6 @@ FROM customers c;
 **Implementation:**
 - PostgreSQL: `pull_up_subqueries()` and `SS_process_ctes()` in rewriter
 - Oracle: Complex decorrelation in CBO with CBQT (Cost-Based Query Transformation)
-- SQL Server: `OpApply` -> `OpJoin` conversion in optimizer
+- mssql: `OpApply` -> `OpJoin` conversion in optimizer
 - DuckDB: `Binder::DecorrelateSubquery()` with apply elimination
 - CockroachDB: `opt/xform/decorrelate.go` for general apply removal

@@ -191,12 +191,12 @@ SELECT * FROM config c JOIN features f ON c.id = f.config_id;
 - Li et al., "Robust Query Processing through Progressive Optimization", SIGMOD 2007
 
 **Implementation:**
-- SQL Server: adaptive joins (since 2017) switch between NL and hash
+- mssql: adaptive joins (since 2017) switch between NL and hash
 - Oracle: adaptive plans with statistics collectors
 - PostgreSQL: proposed adaptive NL-to-hash switching
 
 **Key insights:**
-- SQL Server's adaptive joins are the first production implementation
+- mssql's adaptive joins are the first production implementation
 - Switch point determined by "tipping point" of build side cardinality
 - Statistics collector operators inserted at join inputs gather runtime info
 - Adaptive execution is orthogonal to adaptive optimization (plan vs algorithm)

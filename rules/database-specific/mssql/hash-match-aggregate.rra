@@ -1,6 +1,6 @@
 ---
 id: mssql-hash-match-aggregate
-name: SQL Server Hash Match Aggregate
+name: mssql Hash Match Aggregate
 category: database-specific/mssql
 databases: [mssql]
 version: "1.0.0"
@@ -10,12 +10,12 @@ complexity: O(n)
 benefit_range: [0.1, 0.5]
 ---
 
-# SQL Server Hash Match Aggregate
+# mssql Hash Match Aggregate
 
 ## Description
 
 Chooses between hash aggregate and stream aggregate based on input
-ordering and estimated group count.  SQL Server uses stream aggregate
+ordering and estimated group count.  mssql uses stream aggregate
 when the input is already sorted by GROUP BY columns, and hash
 aggregate otherwise.
 
@@ -28,7 +28,7 @@ handles unsorted input but needs O(groups) memory for the hash table.
 Choosing correctly avoids either an unnecessary sort or an expensive
 hash table.
 
-**Database version**: SQL Server 2000+
+**Database version**: mssql 2000+
 
 ## Relational Algebra
 
@@ -123,5 +123,5 @@ SELECT city, COUNT(*) FROM events GROUP BY city;
 
 ## References
 
-SQL Server: Hash Match Operator (Showplan)
-SQL Server: Stream Aggregate Operator (Showplan)
+mssql: Hash Match Operator (Showplan)
+mssql: Stream Aggregate Operator (Showplan)

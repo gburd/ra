@@ -221,6 +221,6 @@ JOIN LATERAL (
 **Implementation:**
 - PostgreSQL: Detects single-row subqueries in `convert_ANY_sublink_to_join()`
 - Oracle: Scalar subquery caching and join elimination
-- SQL Server: Constant scan detection in join simplification
+- mssql: Constant scan detection in join simplification
 - DuckDB: `SingleJoinOptimizer` for guaranteed-single-row joins
 - SQLite: Flattens scalar subqueries into parent query

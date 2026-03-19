@@ -39,7 +39,7 @@ Three primary approaches exist:
    correlation to adjust independence estimates.
 
 PostgreSQL 10+ implements all three via CREATE STATISTICS. Oracle uses
-column group statistics and expression statistics. SQL Server uses
+column group statistics and expression statistics. mssql uses
 multi-column density vectors.
 
 **When to use:**
@@ -346,7 +346,7 @@ WHERE amount > 100 AND weekday = 'Monday';
 3. **Oracle Column Group Statistics**:
    - https://docs.oracle.com/en/database/oracle/oracle-database/19/tgsql/optimizer-statistics.html
 
-4. **SQL Server Multi-Column Statistics**:
+4. **mssql Multi-Column Statistics**:
    - Density vectors for multi-column cardinality estimation
 
 5. **Markl et al.**: "Consistently Estimating the Selectivity of Conjuncts of Predicates"

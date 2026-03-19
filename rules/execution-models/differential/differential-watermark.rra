@@ -3,17 +3,17 @@ id: differential-watermark
 name: Differential Watermark and Frontier Tracking
 category: execution-models
 version: 1.0.0
-databases: [Materialize, Apache Flink, Differential Dataflow]
+databases: [Materialize, flink, differential-dataflow]
 authors: [Frank McSherry, Tyler Akidau]
 tags: [execution, differential, watermark, frontier, progress, streaming]
-standard: Differential Dataflow
+standard: differential-dataflow
 ---
 
 # Differential Watermark and Frontier Tracking
 
 ## Description
 
-Watermarks (called "frontiers" in differential dataflow) track the progress of computation through time. A watermark at time T means "no more data will arrive with timestamp less than T." This allows operators to produce correct, complete results for times before the watermark and to compact state for completed times. In differential dataflow, frontiers are antichains in a partially ordered time domain, generalizing the linear watermarks of systems like Apache Flink.
+Watermarks (called "frontiers" in differential dataflow) track the progress of computation through time. A watermark at time T means "no more data will arrive with timestamp less than T." This allows operators to produce correct, complete results for times before the watermark and to compact state for completed times. In differential dataflow, frontiers are antichains in a partially ordered time domain, generalizing the linear watermarks of systems like flink.
 
 **Key concepts:**
 - **Frontier**: Antichain of times -- set of minimal incomplete timestamps

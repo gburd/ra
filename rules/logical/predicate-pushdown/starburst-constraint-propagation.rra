@@ -342,10 +342,10 @@ WHERE e2.location = 'NYC';
 **Modern implementations:**
 - Galindo-Legaria, C., Joshi, M., "Orthogonal Optimization of Subqueries and Aggregation", ACM SIGMOD 2001
   - DOI: 10.1145/375663.375746
-  - Constraint propagation in SQL Server
+  - Constraint propagation in mssql
 
 **Implementation in databases:**
 - PostgreSQL: `src/backend/optimizer/util/predtest.c` - predicate implication
 - PostgreSQL: `src/backend/optimizer/path/equivclass.c` - equivalence classes
 - Oracle: Transitive closure of join predicates
-- SQL Server: Predicate derivation from constraints
+- mssql: Predicate derivation from constraints

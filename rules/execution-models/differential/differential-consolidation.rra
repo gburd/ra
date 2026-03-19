@@ -414,7 +414,7 @@ GROUP BY user_id;
 ## References
 
 **Academic papers:**
-- McSherry, Murray, Isaacs, Isard, "Differential Dataflow", CIDR 2013
+- McSherry, Murray, Isaacs, Isard, "differential-dataflow", CIDR 2013
 - McSherry, "Differential Computation", Chapter on consolidation semantics
 
 **Implementation:**

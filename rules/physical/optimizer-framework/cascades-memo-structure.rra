@@ -353,7 +353,7 @@ SELECT * FROM orders WHERE total > 100 ORDER BY order_date;
   - Extended memo for parallel plans
 
 **Implementation in databases:**
-- SQL Server: Cascades memo in query optimizer
+- mssql: Cascades memo in query optimizer
 - CockroachDB: `pkg/sql/opt/memo/memo.go` - Memo structure
 - Greenplum Orca: `libgpopt/src/engine/CMemo.cpp` - MEMO implementation
 - Apache Calcite: `RelSet` + `RelSubset` (equivalent to groups + properties)

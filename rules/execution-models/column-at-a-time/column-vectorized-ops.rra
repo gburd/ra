@@ -3,7 +3,7 @@ id: column-vectorized-ops
 name: Column-at-a-Time SIMD Vectorized Primitives
 category: execution-models
 version: 1.0.0
-databases: [MonetDB, ClickHouse, DuckDB, VectorWise]
+databases: [MonetDB, ClickHouse, DuckDB, vectorwise]
 authors: [Peter Boncz, Marcin Zukowski, Orestis Polychroniou]
 tags: [execution, columnar, x100, simd, vectorized, avx2, avx512, neon, primitives]
 standard: MonetDB X100

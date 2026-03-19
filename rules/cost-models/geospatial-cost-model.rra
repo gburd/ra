@@ -18,7 +18,7 @@ benefit_range: [0.3, 0.85]
 - **Rule ID**: `geospatial-cost-model`
 - **Category**: Cost Models
 - **Complexity**: O(log n + k) per spatial index lookup, k = result size
-- **Introduced**: PostGIS (R-tree/GiST), Oracle Spatial, SQL Server spatial
+- **Introduced**: PostGIS (R-tree/GiST), Oracle Spatial, mssql spatial
 - **Prerequisites**: Spatial index (R-tree, GiST, quadtree), geometry statistics
 - **Alternatives**: generic cardinality-estimation (inaccurate for spatial)
 

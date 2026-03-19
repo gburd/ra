@@ -203,7 +203,7 @@ WHERE amount > 100;
 - Apache Calcite: `FilterWindowTransposeRule.java`
 - PostgreSQL: Window function with filter pushdown (window.c)
 - Oracle: Analytical function optimization
-- SQL Server: Window function filter optimization
+- mssql: Window function filter optimization
 
 **Academic papers:**
 - Cao et al., "Optimization of Analytic Window Functions", VLDB 2012

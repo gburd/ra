@@ -186,7 +186,7 @@ SELECT * FROM sensor_data WHERE reading BETWEEN 1000 AND 1100;
 
 1. **Abadi, Daniel et al**. "Integrating Compression and Execution in
    Column-Oriented Database Systems." SIGMOD 2006.
-   - Compression-aware execution in C-Store
+   - Compression-aware execution in c-store
 
 2. **Boncz, Peter et al**. "MonetDB/X100: Hyper-Pipelining Query Execution."
    CIDR 2005.

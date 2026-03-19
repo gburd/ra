@@ -265,7 +265,7 @@ WHERE year = 2024;
 **Modern implementations and extensions:**
 - Galindo-Legaria, C., Joshi, M., "Orthogonal Optimization of Subqueries and Aggregation", ACM SIGMOD 2001
   - DOI: 10.1145/375663.375746
-  - Modern semantic optimization in SQL Server
+  - Modern semantic optimization in mssql
 
 - Rao, J., et al., "Using EELs, a Practical Approach to Outerjoin and Antijoin Reordering", IEEE Data Engineering 2001
   - Semantic optimization with outer joins
@@ -276,4 +276,4 @@ WHERE year = 2024;
   - `src/backend/optimizer/plan/analyzejoins.c` - join removal
   - `src/backend/optimizer/util/plancat.c` - constraint exclusion
 - Oracle: Constraint-based optimization
-- SQL Server: Semantic optimization (join elimination, contradiction detection)
+- mssql: Semantic optimization (join elimination, contradiction detection)

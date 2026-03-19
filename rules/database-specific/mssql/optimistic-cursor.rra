@@ -1,6 +1,6 @@
 ---
 id: mssql-key-lookup-elimination
-name: SQL Server Key Lookup Elimination
+name: mssql Key Lookup Elimination
 category: database-specific/mssql
 databases: [mssql]
 version: "1.0.0"
@@ -10,7 +10,7 @@ complexity: O(n)
 benefit_range: [0.2, 0.7]
 ---
 
-# SQL Server Key Lookup Elimination
+# mssql Key Lookup Elimination
 
 ## Description
 
@@ -28,7 +28,7 @@ clustered index.  For queries returning many rows, the cumulative cost
 of random lookups often exceeds a full table scan.  Including the
 needed columns in the index (via INCLUDE) eliminates lookups entirely.
 
-**Database version**: SQL Server 2005+ (INCLUDE columns)
+**Database version**: mssql 2005+ (INCLUDE columns)
 
 ## Relational Algebra
 
@@ -108,6 +108,6 @@ SELECT * FROM orders WHERE status = 'pending';
 
 ## References
 
-SQL Server: Key Lookup Operator (Showplan)
-SQL Server: CREATE INDEX ... INCLUDE
-SQL Server: Missing Index DMVs (sys.dm_db_missing_index_details)
+mssql: Key Lookup Operator (Showplan)
+mssql: CREATE INDEX ... INCLUDE
+mssql: Missing Index DMVs (sys.dm_db_missing_index_details)

@@ -17,7 +17,7 @@ benefit_range: [2.0, 100.0]
 
 Adaptive skew handling detects and mitigates data skew during query execution. Data skew occurs when hash partitioning produces partitions of vastly different sizes, causing some workers to process orders of magnitude more data than others. The slowest worker (processing the largest partition) determines total query runtime, negating the benefits of parallelism.
 
-The executor monitors partition sizes during hash redistribution (shuffle in Spark, exchange in SQL Server). When a partition exceeds a threshold (e.g., 5x the median partition size), the skewed partition is split using a secondary hash function or range-based sub-partitioning, and the sub-partitions are distributed across multiple workers.
+The executor monitors partition sizes during hash redistribution (shuffle in Spark, exchange in mssql). When a partition exceeds a threshold (e.g., 5x the median partition size), the skewed partition is split using a secondary hash function or range-based sub-partitioning, and the sub-partitions are distributed across multiple workers.
 
 Spark AQE's skew join optimization is the most widely deployed implementation: it detects skewed partitions in the shuffle output and splits them, duplicating the corresponding partition from the other join side to all workers that receive a sub-partition.
 

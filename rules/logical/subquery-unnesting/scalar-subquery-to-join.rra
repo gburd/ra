@@ -108,4 +108,4 @@ FROM departments d;
 - PostgreSQL: pull_up_subqueries for scalar subqueries
 - Oracle: Subquery unnesting transformation
 - MySQL: Scalar subquery optimization
-- SQL Server: Apply operator for correlated subqueries
+- mssql: Apply operator for correlated subqueries

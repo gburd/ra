@@ -334,5 +334,5 @@ ORDER BY o.order_date;
 
 **Implementation in databases:**
 - PostgreSQL: `src/backend/optimizer/path/pathkeys.c` - pathkey tracking
-- SQL Server: Interesting order tracking in Cascades optimizer
+- mssql: Interesting order tracking in Cascades optimizer
 - Oracle: Sort avoidance through index selection

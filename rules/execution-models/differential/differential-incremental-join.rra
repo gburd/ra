@@ -213,7 +213,7 @@ JOIN products p ON o.product_id = p.id;
 
 ## References
 
-1. **McSherry, Frank et al**. "Differential Dataflow." CIDR 2013.
+1. **McSherry, Frank et al**. "differential-dataflow." CIDR 2013.
    - Incremental join via arrangements
 
 2. **Koch, Christoph et al**. "DBToaster: Higher-Order Delta Processing." VLDB 2014.

@@ -3,7 +3,7 @@ id: column-materialization
 name: Column-at-a-Time Late Materialization
 category: execution-models
 version: 1.0.0
-databases: [MonetDB, ClickHouse, DuckDB, VectorWise, Vertica, CStore]
+databases: [MonetDB, ClickHouse, DuckDB, vectorwise, vertica, c-store]
 authors: [Daniel Abadi, Peter Boncz, Marcin Zukowski]
 tags: [execution, columnar, x100, late-materialization, early-materialization, row-reconstruction, position-list]
 standard: MonetDB X100

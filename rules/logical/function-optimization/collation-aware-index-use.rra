@@ -102,5 +102,5 @@ SELECT * FROM users WHERE LOWER(city) = 'nyc';
 ## References
 
 - PostgreSQL: Collation Support and Index use
-- SQL Server: Collation and Index Selection
+- mssql: Collation and Index Selection
 - ICU Collation Algorithm

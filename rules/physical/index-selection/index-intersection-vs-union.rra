@@ -130,4 +130,4 @@ WHERE year >= 2024 AND status IN ('A', 'B', 'C');
 
 - PostgreSQL: Index intersection via BitmapAnd
 - MySQL: Index merge optimization
-- SQL Server: Index intersection
+- mssql: Index intersection

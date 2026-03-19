@@ -1,6 +1,6 @@
 ---
 id: mssql-columnstore-scan
-name: SQL Server Columnstore Index Scan
+name: mssql Columnstore Index Scan
 category: database-specific/mssql
 databases: [mssql]
 version: "1.0.0"
@@ -10,12 +10,12 @@ complexity: O(n)
 benefit_range: [0.3, 0.9]
 ---
 
-# SQL Server Columnstore Index Scan
+# mssql Columnstore Index Scan
 
 ## Description
 
 Routes analytical queries through columnstore indexes using batch
-mode execution.  SQL Server's columnstore indexes store data in
+mode execution.  mssql's columnstore indexes store data in
 compressed column segments, and batch mode processes ~900 rows at
 a time using SIMD instructions instead of row-at-a-time iterator
 model.
@@ -29,7 +29,7 @@ processes vectors of rows with SIMD.  The combination of reduced I/O,
 compression, and vectorized execution yields 10-100x speedup for
 analytical workloads.
 
-**Database version**: SQL Server 2012+ (nonclustered), 2014+ (clustered),
+**Database version**: mssql 2012+ (nonclustered), 2014+ (clustered),
 2019+ (batch mode on rowstore)
 
 ## Relational Algebra
@@ -116,6 +116,6 @@ SELECT * FROM sales WHERE sale_id = 12345;
 
 ## References
 
-SQL Server: Columnstore Indexes - Overview
-SQL Server: Batch Mode Execution - Overview
-SQL Server: sys.column_store_segments DMV
+mssql: Columnstore Indexes - Overview
+mssql: Batch Mode Execution - Overview
+mssql: sys.column_store_segments DMV

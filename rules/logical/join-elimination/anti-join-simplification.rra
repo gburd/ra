@@ -230,6 +230,6 @@ WHERE p.price NOT IN (
 **Implementation:**
 - PostgreSQL: `convert_ANY_sublink_to_join()` and anti-join in `subselect.c`
 - Oracle: Anti-join transformation rules in CBO
-- SQL Server: Anti-semi-join optimization in query processor
+- mssql: Anti-semi-join optimization in query processor
 - MySQL: `Item_subselect` to anti-join conversion in `sql_optimizer.cc`
 - DuckDB: `AntiJoin` operator with hash-based implementation

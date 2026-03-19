@@ -99,5 +99,5 @@ WHERE amount BETWEEN 100 AND 500;
 
 - PostgreSQL: Index-only scans on clustered tables
 - MySQL InnoDB: Primary key clustering
-- SQL Server: Clustered index seek operator
+- mssql: Clustered index seek operator
 - Ramakrishnan & Gehrke, "Database Management Systems", Ch. 8

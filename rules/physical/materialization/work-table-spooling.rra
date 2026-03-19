@@ -74,5 +74,5 @@ SELECT * FROM table WHERE condition;
 
 ## References
 
-- SQL Server: Table spool operators
+- mssql: Table spool operators
 - Oracle: Work area management

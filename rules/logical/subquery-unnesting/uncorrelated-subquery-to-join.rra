@@ -206,5 +206,5 @@ WHERE e.id IN (
 - PostgreSQL: `pull_up_subqueries()` in `prepjointree.c`
 - MySQL: Subquery materialization and semi-join in `sql_optimizer.cc`
 - Oracle: Subquery unnesting in CBO
-- SQL Server: `OpDecorrelate` in query optimizer
+- mssql: `OpDecorrelate` in query optimizer
 - DuckDB: `FlattenSubquery` optimizer pass

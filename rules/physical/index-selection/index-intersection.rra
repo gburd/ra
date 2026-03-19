@@ -83,4 +83,4 @@ WHERE status = 'completed' AND priority = 'normal';
 
 - PostgreSQL: Bitmap index scan + BitmapAnd
 - MySQL: Index merge intersection
-- SQL Server: Index intersection execution plan
+- mssql: Index intersection execution plan

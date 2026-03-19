@@ -206,7 +206,7 @@ SELECT dept, COUNT(*) FROM employees GROUP BY dept;
 
 ## References
 
-1. **McSherry, Frank et al**. "Differential Dataflow." CIDR 2013.
+1. **McSherry, Frank et al**. "differential-dataflow." CIDR 2013.
    - Retraction semantics and correctness proofs
 
 2. **Koch, Christoph et al**. "DBToaster: Higher-Order Delta Processing." VLDB 2014.

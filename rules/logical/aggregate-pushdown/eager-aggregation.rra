@@ -229,7 +229,7 @@ GROUP BY n.name;
   - Modern treatment of aggregate optimization
 
 **Implementation in databases:**
-- Microsoft SQL Server: Full eager aggregation optimization (Yan & Larson implemented it)
+- Microsoft mssql: Full eager aggregation optimization (Yan & Larson implemented it)
 - PostgreSQL: Partial aggregation pushdown (`src/backend/optimizer/plan/planner.c`)
 - Apache Spark: Partial aggregation before shuffle
 - Presto/Trino: Partial aggregation and local aggregation before exchange

@@ -89,4 +89,4 @@ SELECT * FROM users WHERE LENGTH(email) > 50;
 
 - PostgreSQL: Indexes on Expressions documentation
 - Oracle: Function-Based Indexes
-- SQL Server: Computed Column Indexes
+- mssql: Computed Column Indexes

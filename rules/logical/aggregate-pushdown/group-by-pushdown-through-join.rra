@@ -149,4 +149,4 @@ GROUP BY c.country, p.category;
 **Implementation:**
 - PostgreSQL: partial_paths for parallel aggregation before join
 - DuckDB: Automatic aggregate pushdown in optimizer
-- SQL Server: Pre-aggregation in query plans
+- mssql: Pre-aggregation in query plans

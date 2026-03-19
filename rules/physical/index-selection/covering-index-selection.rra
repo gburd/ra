@@ -94,4 +94,4 @@ SELECT category, name FROM products WHERE category = 'Electronics';
 
 - PostgreSQL: Index-only scans
 - MySQL: Covering indexes
-- SQL Server: Covering indexes with INCLUDE
+- mssql: Covering indexes with INCLUDE

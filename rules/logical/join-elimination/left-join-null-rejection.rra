@@ -211,5 +211,5 @@ WHERE b.val > 10 OR a.status = 'special';
 - PostgreSQL: `reduce_outer_joins()` checks `nonnullable_rels` in `analyzejoins.c`
 - MySQL: `simplify_joins()` in `sql_optimizer.cc` with `OUTER_JOIN_NULL_REJECT`
 - Oracle: Outer join conversion in cost-based optimizer
-- SQL Server: `CNullRejection` analysis in algebrizer
+- mssql: `CNullRejection` analysis in algebrizer
 - DuckDB: `FilterPullup` + `JoinOrderOptimizer` null rejection detection
