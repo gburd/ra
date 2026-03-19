@@ -392,7 +392,22 @@ fn convert_table_factor(
     table: &TableFactor,
 ) -> Result<RelExpr, SqlConversionError> {
     match table {
-        TableFactor::Table { name, alias, .. } => {
+        TableFactor::Table {
+            name, alias, args, ..
+        } => {
+            if let Some(table_args) = args {
+                // Table-valued function like generate_series(1, 10)
+                let func_args: Vec<FunctionArg> = table_args
+                    .args
+                    .iter()
+                    .cloned()
+                    .collect();
+                return convert_table_valued_function(
+                    name,
+                    &func_args,
+                    alias,
+                );
+            }
             let table_name = object_name_to_string(name);
             let alias_name =
                 alias.as_ref().map(|a| a.name.value.clone());
@@ -420,11 +435,109 @@ fn convert_table_factor(
         }
         TableFactor::TableFunction { .. } => {
             Err(SqlConversionError::UnsupportedFeature(
-                "table functions not supported".to_owned(),
+                "TABLE() syntax not supported".to_owned(),
             ))
+        }
+        TableFactor::UNNEST {
+            alias,
+            array_exprs,
+            with_ordinality,
+            ..
+        } => {
+            if array_exprs.is_empty() {
+                return Err(SqlConversionError::InvalidSql(
+                    "UNNEST requires at least one argument"
+                        .to_owned(),
+                ));
+            }
+            let arr_expr = convert_expr(&array_exprs[0])?;
+            let alias_name =
+                alias.as_ref().map(|a| a.name.value.clone());
+
+            Ok(RelExpr::Unnest {
+                expr: arr_expr,
+                alias: alias_name,
+                input: None,
+                with_ordinality: *with_ordinality,
+            })
+        }
+        TableFactor::Function {
+            name, args, alias, ..
+        } => {
+            convert_table_valued_function(name, args, alias)
         }
         _ => Err(SqlConversionError::UnsupportedFeature(
             "unsupported table factor".to_owned(),
+        )),
+    }
+}
+
+fn convert_table_valued_function(
+    name: &ObjectName,
+    args: &[FunctionArg],
+    alias: &Option<sqlparser::ast::TableAlias>,
+) -> Result<RelExpr, SqlConversionError> {
+    let func_name = object_name_to_string(name);
+    let lower = func_name.to_lowercase();
+
+    match lower.as_str() {
+        "unnest" => {
+            if args.is_empty() {
+                return Err(SqlConversionError::InvalidSql(
+                    "UNNEST requires at least one argument"
+                        .to_owned(),
+                ));
+            }
+            let arr_expr = convert_function_arg(&args[0])?;
+            let alias_name =
+                alias.as_ref().map(|a| a.name.value.clone());
+
+            Ok(RelExpr::Unnest {
+                expr: arr_expr,
+                alias: alias_name,
+                input: None,
+                with_ordinality: false,
+            })
+        }
+        "generate_series" => {
+            let arg_exprs: Result<Vec<_>, _> =
+                args.iter().map(convert_function_arg).collect();
+            Ok(RelExpr::TableFunction {
+                name: "generate_series".to_owned(),
+                args: arg_exprs?,
+                columns: vec![(
+                    "generate_series".to_owned(),
+                    "Int64".to_owned(),
+                )],
+                input: None,
+            })
+        }
+        _ => {
+            let arg_exprs: Result<Vec<_>, _> =
+                args.iter().map(convert_function_arg).collect();
+            Ok(RelExpr::TableFunction {
+                name: func_name,
+                args: arg_exprs?,
+                columns: vec![],
+                input: None,
+            })
+        }
+    }
+}
+
+fn convert_function_arg(
+    arg: &FunctionArg,
+) -> Result<Expr, SqlConversionError> {
+    match arg {
+        FunctionArg::Unnamed(FunctionArgExpr::Expr(e)) => {
+            convert_expr(e)
+        }
+        FunctionArg::Unnamed(FunctionArgExpr::Wildcard) => {
+            Ok(Expr::Column(ColumnRef::new("*")))
+        }
+        _ => Err(SqlConversionError::UnsupportedFeature(
+            "named or qualified function arguments not supported"
+                .to_owned(),
         )),
     }
 }
@@ -1204,10 +1317,7 @@ fn convert_expr(expr: &SqlExpr) -> Result<Expr, SqlConversionError> {
         SqlExpr::Array(arr) => {
             let elems: Result<Vec<_>, _> =
                 arr.elem.iter().map(convert_expr).collect();
-            Ok(Expr::Function {
-                name: "ARRAY".to_owned(),
-                args: elems?,
-            })
+            Ok(Expr::Array(elems?))
         }
         SqlExpr::AnyOp { .. }
         | SqlExpr::AllOp { .. } => {
@@ -1243,6 +1353,24 @@ fn convert_expr(expr: &SqlExpr) -> Result<Expr, SqlConversionError> {
                 name: "SUBSTRING".to_owned(),
                 args,
             })
+        }
+        SqlExpr::Subscript { expr, subscript } => {
+            let array_expr = convert_expr(expr)?;
+            match subscript.as_ref() {
+                sqlparser::ast::Subscript::Index { index } => {
+                    let index_expr = convert_expr(index)?;
+                    Ok(Expr::ArrayIndex(
+                        Box::new(array_expr),
+                        Box::new(index_expr),
+                    ))
+                }
+                sqlparser::ast::Subscript::Slice { .. } => {
+                    Err(SqlConversionError::UnsupportedFeature(
+                        "array slicing not supported"
+                            .to_owned(),
+                    ))
+                }
+            }
         }
         _ => Err(SqlConversionError::UnsupportedFeature(format!(
             "expression type not yet supported: {expr}"
