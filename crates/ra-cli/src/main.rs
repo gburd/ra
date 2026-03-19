@@ -139,6 +139,9 @@ enum Commands {
         /// Output EXPLAIN in a database-specific format: postgresql, mysql, oracle, sqlserver.
         #[arg(long)]
         explain_format: Option<String>,
+        /// Show optimizer trace information (iteration details, search/apply times).
+        #[arg(long)]
+        trace: bool,
     },
     /// Gather database metadata and write to a JSON file.
     GatherMetadata {
@@ -315,7 +318,15 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     let is_test_cmd = matches!(cli.command, Commands::Test { .. });
-    let filter = if cli.quiet {
+
+    // Check if optimize command without trace flag or with explain_format
+    let suppress_logs = matches!(
+        &cli.command,
+        Commands::Optimize { trace, explain_format, .. }
+        if !trace || explain_format.is_some()
+    );
+
+    let filter = if cli.quiet || suppress_logs {
         "error".to_owned()
     } else if cli.verbose && !is_test_cmd {
         "debug".to_owned()
@@ -381,6 +392,7 @@ fn main() -> Result<()> {
             max_iterations,
             overflow_strategy,
             explain_format,
+            trace: _,
         } => {
             let resolved = resolve_query(
                 &query, use_stdin,
