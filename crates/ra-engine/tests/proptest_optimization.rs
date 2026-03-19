@@ -591,6 +591,10 @@ fn contains_joins(expr: &RelExpr) -> bool {
                 || contains_joins(body)
         }
         RelExpr::Scan { .. } | RelExpr::Values { .. } => false,
+        RelExpr::Unnest { input, .. }
+        | RelExpr::TableFunction { input, .. } => {
+            input.as_ref().is_some_and(|i| contains_joins(i))
+        }
     }
 }
 
@@ -763,5 +767,11 @@ fn collect_tables_rec(expr: &RelExpr, out: &mut std::collections::HashSet<String
             collect_tables_rec(body, out);
         }
         RelExpr::Values { .. } => {}
+        RelExpr::Unnest { input, .. }
+        | RelExpr::TableFunction { input, .. } => {
+            if let Some(inp) = input {
+                collect_tables_rec(inp, out);
+            }
+        }
     }
 }
