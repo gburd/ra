@@ -188,6 +188,13 @@ impl FeatureSchema {
             RelExpr::Values { .. } => {
                 features[OP_TYPE_OFFSET] = 1.0;
             }
+            RelExpr::Unnest { input, .. }
+            | RelExpr::TableFunction { input, .. } => {
+                features[OP_TYPE_OFFSET + 2] = 1.0;
+                if let Some(inp) = input {
+                    self.encode_expr(inp, stats, features);
+                }
+            }
         }
     }
 
@@ -244,7 +251,9 @@ impl FeatureSchema {
             Expr::Const(_)
             | Expr::Function { .. }
             | Expr::Case { .. }
-            | Expr::Cast { .. } => {}
+            | Expr::Cast { .. }
+            | Expr::Array(_)
+            | Expr::ArrayIndex(_, _) => {}
         }
     }
 }

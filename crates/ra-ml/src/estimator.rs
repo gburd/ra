@@ -138,6 +138,17 @@ fn estimate_heuristic(
             (base_rows * 10.0).max(body_rows)
         }
         RelExpr::Values { rows, .. } => rows.len() as f64,
+        RelExpr::Unnest { input, .. } => match input {
+            Some(inp) => {
+                let input_rows = estimate_heuristic(inp, stats);
+                input_rows * 10.0 // assume avg array length of 10
+            }
+            None => 10.0,
+        },
+        RelExpr::TableFunction { input, .. } => match input {
+            Some(inp) => estimate_heuristic(inp, stats),
+            None => 100.0,
+        },
     }
 }
 
@@ -292,6 +303,12 @@ fn collect_tables_recursive(
             collect_tables_recursive(body, provider, map);
         }
         RelExpr::Values { .. } => {}
+        RelExpr::Unnest { input, .. }
+        | RelExpr::TableFunction { input, .. } => {
+            if let Some(inp) = input {
+                collect_tables_recursive(inp, provider, map);
+            }
+        }
     }
 }
 

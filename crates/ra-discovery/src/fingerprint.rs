@@ -221,6 +221,20 @@ fn fingerprint_rel(expr: &RelExpr, out: &mut Vec<Token>) {
         RelExpr::Values { .. } => {
             out.push(Token::Scan);
         }
+        RelExpr::Unnest { input, .. } => {
+            out.push(Token::Scan);
+            if let Some(inp) = input {
+                fingerprint_rel(inp, out);
+            }
+            out.push(Token::End);
+        }
+        RelExpr::TableFunction { input, .. } => {
+            out.push(Token::Scan);
+            if let Some(inp) = input {
+                fingerprint_rel(inp, out);
+            }
+            out.push(Token::End);
+        }
     }
 }
 

@@ -362,6 +362,14 @@ fn estimate_cost(plan: &RelExpr) -> f64 {
                 + estimate_cost(body)
         }
         RelExpr::Values { rows, .. } => rows.len() as f64,
+        RelExpr::Unnest { input, .. } => match input {
+            Some(inp) => estimate_cost(inp) + 50.0,
+            None => 50.0,
+        },
+        RelExpr::TableFunction { input, .. } => match input {
+            Some(inp) => estimate_cost(inp) + 100.0,
+            None => 100.0,
+        },
     }
 }
 
