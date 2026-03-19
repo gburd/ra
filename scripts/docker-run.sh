@@ -1,21 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# RA Web Explorer - Docker Launcher
-# Builds and runs the web explorer in a Docker container
+# RA Web Explorer - Container Launcher
+# Builds and runs the web explorer in a Docker/Podman container
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 cd "$PROJECT_ROOT"
 
+# Detect container runtime
+# shellcheck source=detect-container-runtime.sh
+source "$SCRIPT_DIR/detect-container-runtime.sh"
+
 # Colors for output
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-echo -e "${YELLOW}Building RA Web Explorer Docker image...${NC}"
-docker build -t ra-web:latest .
+echo -e "${YELLOW}Building RA Web Explorer image...${NC}"
+$CONTAINER_RUNTIME build -t ra-web:latest .
 
 echo -e "${GREEN}Build complete!${NC}"
 echo ""
@@ -26,7 +30,7 @@ echo "Press Ctrl+C to stop"
 echo ""
 
 # Run container with proper signal handling
-docker run --rm -it \
+$CONTAINER_RUNTIME run --rm -it \
     --name ra-web \
     -p 8000:8000 \
     -e RUST_LOG=info \
