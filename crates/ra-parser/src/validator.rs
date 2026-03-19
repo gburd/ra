@@ -303,6 +303,7 @@ mod tests {
             version: "1.0.0".to_owned(),
             authors: vec![],
             tags: vec![],
+            preconditions: vec![],
         }
     }
 
@@ -445,6 +446,7 @@ mod tests {
             version: "bad".to_owned(),
             authors: vec![],
             tags: vec![],
+            preconditions: vec![],
         };
         let errs = validate_metadata_all(&m);
         assert!(

@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::algebra::RelExpr;
 use crate::pattern::Pattern;
+use crate::precondition::PreCondition;
 
 /// A transformation rule that rewrites relational expressions.
 ///
@@ -36,7 +37,7 @@ pub trait Rule: std::fmt::Debug + Send + Sync {
 }
 
 /// Metadata describing a rule.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RuleMetadata {
     /// Unique identifier for the rule.
     pub id: String,
@@ -51,6 +52,10 @@ pub struct RuleMetadata {
     pub databases: Vec<String>,
     /// Priority for ordering rules (lower runs first).
     pub priority: i32,
+    /// Formal pre-conditions that must be satisfied for this rule to apply.
+    /// These can reference system facts (statistics, hardware, schema).
+    #[serde(default)]
+    pub preconditions: Vec<PreCondition>,
 }
 
 /// Categories of optimization rules.
@@ -101,11 +106,13 @@ mod tests {
             category: RuleCategory::Logical,
             databases: vec![],
             priority: 10,
+            preconditions: vec![],
         };
 
         assert_eq!(meta.id, "push-filter");
         assert_eq!(meta.category, RuleCategory::Logical);
         assert!(meta.databases.is_empty());
+        assert!(meta.preconditions.is_empty());
     }
 
     #[test]

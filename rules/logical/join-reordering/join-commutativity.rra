@@ -7,6 +7,19 @@ standard: "sql:1992"
 version: "1.0.0"
 authors: ["RA Contributors"]
 tags: [join, reordering, commutativity, core]
+preconditions:
+  - type: pattern
+    must_match: "(join inner ?cond ?left ?right)"
+    description: "Inner join only (cross join also valid)"
+  - type: fact
+    fact_type: statistics.cardinality
+    table: "?right"
+    comparator: "<"
+    threshold:
+      expression: "cardinality(?left)"
+    confidence: 0.7
+    description: "Right side should be smaller than left (optional optimization hint)"
+    optional: true
 ---
 
 # Join Commutativity

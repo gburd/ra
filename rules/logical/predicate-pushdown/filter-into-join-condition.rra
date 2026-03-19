@@ -7,6 +7,16 @@ standard: "sql:1992"
 version: "1.0.0"
 authors: ["RA Contributors"]
 tags: [filter, join, pushdown, core]
+preconditions:
+  - type: pattern
+    must_match: "(filter ?pred (join inner ?cond ?left ?right))"
+    description: "Filter above an inner join"
+  - type: predicate
+    condition: "is_deterministic(?pred)"
+    description: "Predicate must be deterministic"
+  - type: predicate
+    condition: "references_both_sides(?pred, ?left, ?right)"
+    description: "Predicate must reference columns from both join sides"
 ---
 
 # Filter Absorption Into Join Condition

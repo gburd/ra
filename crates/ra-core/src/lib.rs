@@ -18,8 +18,10 @@ pub mod cost;
 pub mod distributed_agg;
 pub mod distribution;
 pub mod expr;
+pub mod facts;
 pub mod federated;
 pub mod pattern;
+pub mod precondition;
 pub mod properties;
 pub mod rule;
 pub mod statistics;
@@ -29,8 +31,13 @@ pub use cost::*;
 pub use distributed_agg::*;
 pub use distribution::*;
 pub use expr::*;
+pub use facts::{
+    DataType, EmptyFactsProvider, FactsProvider, ForeignKey, HardwareProfile, IndexInfo,
+    IndexType, OperatorStats, SqlDialect, TableInfo, TableStats,
+};
 pub use federated::*;
 pub use pattern::*;
+pub use precondition::*;
 pub use properties::*;
 pub use rule::*;
 pub use statistics::*;
