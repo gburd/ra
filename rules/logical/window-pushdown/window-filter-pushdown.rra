@@ -1,0 +1,66 @@
+---
+id: window-filter-pushdown
+name: Window Function Filter Pushdown
+category: logical/window-pushdown
+databases: [postgresql, mysql, duckdb, mssql, oracle]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [window, filter, pushdown]
+complexity: "O(n)"
+benefit_range: [0.1, 0.5]
+---
+
+# Window Function Filter Pushdown
+
+## Description
+
+Push filters that do not reference window function output columns below the Window operator. This reduces the number of rows processed by the window function.
+
+**When to apply**: Filter predicate references only base columns, not window function results.
+
+## Relational Algebra
+
+```algebra
+Filter[p](Window[fns](input))
+  -> Window[fns](Filter[p](input))
+  where !references_window_output(p, fns)
+```
+
+## Implementation
+
+```rust
+rw!("window-filter-pushdown";
+    "(filter ?pred (window ?fns ?input))" =>
+    "(window ?fns (filter ?pred ?input))"
+    if pred_independent_of_window("?pred", "?fns")
+),
+```
+
+## Test Cases
+
+### Positive: Filter on base column
+
+```sql
+SELECT *, ROW_NUMBER() OVER (ORDER BY id) as rn
+FROM orders
+WHERE status = 'shipped';
+
+-- Push status filter below window
+```
+
+### Negative: Filter on window result
+
+```sql
+SELECT * FROM (
+    SELECT *, ROW_NUMBER() OVER (ORDER BY id) as rn FROM orders
+) t WHERE rn <= 10;
+
+-- Cannot push rn filter below window
+```
+
+## References
+
+- Window function optimization in SQL Server
+- Filter pushdown in Apache Calcite

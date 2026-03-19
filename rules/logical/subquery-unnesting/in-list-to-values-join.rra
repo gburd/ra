@@ -1,0 +1,62 @@
+---
+id: in-list-to-values-join
+name: IN List to VALUES Join
+category: logical/subquery-unnesting
+databases: [postgresql, mysql, duckdb, sqlite, mssql, oracle]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [subquery, in-list, values, join]
+complexity: "O(n)"
+benefit_range: [0.1, 0.5]
+---
+
+# IN List to VALUES Join
+
+## Description
+
+Converts a large IN list to a semi-join with an inline VALUES table. This enables the optimizer to use index lookups or hash joins instead of sequential OR comparisons.
+
+**When to apply**: IN list with more than a threshold number of constant values.
+
+## Relational Algebra
+
+```algebra
+Filter[col IN (v1, v2, ..., vN)](Scan[table])
+  -> SemiJoin[col = v](Scan[table], Values[(v1), (v2), ..., (vN)])
+  where N > in_list_threshold
+```
+
+## Implementation
+
+```rust
+rw!("in-list-to-values-join";
+    "(filter (in ?col ?values) ?input)" =>
+    "(join semi (= ?col ?v) ?input (values ?values))"
+    if large_in_list("?values")
+),
+```
+
+## Test Cases
+
+### Positive: Large IN list
+
+```sql
+SELECT * FROM orders WHERE customer_id IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12);
+
+-- Convert to semi-join with VALUES
+```
+
+### Negative: Small IN list
+
+```sql
+SELECT * FROM orders WHERE status IN ('open', 'closed');
+
+-- Keep as OR comparison
+```
+
+## References
+
+- IN list optimization in PostgreSQL (enable_hashjoin)
+- DuckDB IN list to hash join conversion

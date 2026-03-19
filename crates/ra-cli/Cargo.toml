@@ -17,6 +17,7 @@ ra-parser = { workspace = true }
 ra-engine = { workspace = true }
 ra-hardware = { workspace = true }
 ra-metadata = { workspace = true }
+ra-dialect = { workspace = true }
 ra-stats = { workspace = true }
 ra-tui = { workspace = true }
 clap = { workspace = true }

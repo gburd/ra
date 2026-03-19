@@ -9,6 +9,7 @@
 #![allow(clippy::similar_names)]
 
 pub mod extractor;
+pub mod formatter;
 pub mod lexer;
 pub mod parser;
 pub mod sql_to_relexpr;
@@ -16,6 +17,7 @@ pub mod test_case;
 pub mod validator;
 
 pub use extractor::*;
+pub use formatter::*;
 pub use parser::*;
 pub use sql_to_relexpr::*;
 pub use test_case::*;
