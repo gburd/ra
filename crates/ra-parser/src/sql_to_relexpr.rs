@@ -53,7 +53,10 @@ pub enum SqlConversionError {
     InvalidRecursiveCTE(String),
 }
 
-/// Parse SQL and convert to RelExpr.
+/// Parse SQL and convert to `RelExpr`.
+///
+/// Accepts a single SQL SELECT statement. Use [`sql_to_relexprs`]
+/// for multiple statements separated by semicolons.
 ///
 /// # Errors
 ///
@@ -71,11 +74,41 @@ pub fn sql_to_relexpr(sql: &str) -> Result<RelExpr, SqlConversionError> {
 
     if statements.len() > 1 {
         return Err(SqlConversionError::UnsupportedFeature(
-            "multiple statements not supported".to_owned(),
+            "multiple statements not supported; \
+             use sql_to_relexprs instead"
+                .to_owned(),
         ));
     }
 
-    match &statements[0] {
+    convert_statement(&statements[0])
+}
+
+/// Parse SQL containing one or more statements and convert each
+/// to a `RelExpr`.
+///
+/// # Errors
+///
+/// Returns error if any statement is invalid or unsupported.
+pub fn sql_to_relexprs(
+    sql: &str,
+) -> Result<Vec<RelExpr>, SqlConversionError> {
+    let dialect = GenericDialect {};
+    let statements = Parser::parse_sql(&dialect, sql)
+        .map_err(|e| SqlConversionError::ParseError(e.to_string()))?;
+
+    if statements.is_empty() {
+        return Err(SqlConversionError::InvalidSql(
+            "no SQL statement found".to_owned(),
+        ));
+    }
+
+    statements.iter().map(convert_statement).collect()
+}
+
+fn convert_statement(
+    stmt: &Statement,
+) -> Result<RelExpr, SqlConversionError> {
+    match stmt {
         Statement::Query(query) => convert_query(query),
         _ => Err(SqlConversionError::UnsupportedFeature(
             "only SELECT queries are supported".to_owned(),
@@ -357,9 +390,12 @@ fn convert_from(
     from: &[TableWithJoins],
 ) -> Result<RelExpr, SqlConversionError> {
     if from.is_empty() {
-        return Err(SqlConversionError::InvalidSql(
-            "SELECT without FROM not supported".to_owned(),
-        ));
+        // SELECT without FROM (e.g., SELECT 1) produces a
+        // single-row virtual table, like PostgreSQL's implicit
+        // behavior or Oracle/MySQL DUAL.
+        return Ok(RelExpr::Values {
+            rows: vec![vec![]],
+        });
     }
 
     // Handle multiple FROM items as implicit cross joins
@@ -988,7 +1024,7 @@ fn convert_expr(expr: &SqlExpr) -> Result<Expr, SqlConversionError> {
             })
         }
         SqlExpr::UnaryOp { op, expr } => {
-            let unary_op = convert_unary_op(op)?;
+            let unary_op = convert_unary_op(*op)?;
             Ok(Expr::UnaryOp {
                 op: unary_op,
                 operand: Box::new(convert_expr(expr)?),
@@ -1003,60 +1039,20 @@ fn convert_expr(expr: &SqlExpr) -> Result<Expr, SqlConversionError> {
             op: ra_core::expr::UnaryOp::IsNotNull,
             operand: Box::new(convert_expr(expr)?),
         }),
-        SqlExpr::Function(func) => {
-            let name = func.name.to_string().to_uppercase();
-            let arg = extract_single_func_arg(&func.args)?;
-            let args = match arg {
-                Some(a) => vec![a],
-                None => vec![],
-            };
-            Ok(Expr::Function { name, args })
+        SqlExpr::Function(func) => convert_function(func),
+        SqlExpr::Subquery(q) => convert_subquery_func("SUBQUERY", q),
+        SqlExpr::InList { expr, list, negated } => {
+            convert_in_list(expr, list, *negated)
         }
-        SqlExpr::Subquery(query) => {
-            // Represent subquery as a function node for now
-            let _plan = convert_query(query)?;
-            Ok(Expr::Function {
-                name: "SUBQUERY".to_owned(),
-                args: vec![],
-            })
-        }
-        SqlExpr::InSubquery {
-            expr, subquery, ..
-        } => {
-            let left = convert_expr(expr)?;
-            let _plan = convert_query(subquery)?;
-            Ok(Expr::Function {
-                name: "IN_SUBQUERY".to_owned(),
-                args: vec![left],
-            })
+        SqlExpr::InSubquery { expr, subquery, .. } => {
+            convert_in_subquery(expr, subquery)
         }
         SqlExpr::Exists { subquery, .. } => {
-            let _plan = convert_query(subquery)?;
-            Ok(Expr::Function {
-                name: "EXISTS".to_owned(),
-                args: vec![],
-            })
+            convert_subquery_func("EXISTS", subquery)
         }
         SqlExpr::Between {
             expr, low, high, ..
-        } => {
-            let col = convert_expr(expr)?;
-            let low_expr = convert_expr(low)?;
-            let high_expr = convert_expr(high)?;
-            Ok(Expr::BinOp {
-                op: BinOp::And,
-                left: Box::new(Expr::BinOp {
-                    op: BinOp::Ge,
-                    left: Box::new(col.clone()),
-                    right: Box::new(low_expr),
-                }),
-                right: Box::new(Expr::BinOp {
-                    op: BinOp::Le,
-                    left: Box::new(col),
-                    right: Box::new(high_expr),
-                }),
-            })
-        }
+        } => convert_between(expr, low, high),
         SqlExpr::Cast {
             expr, data_type, ..
         } => Ok(Expr::Cast {
@@ -1068,33 +1064,170 @@ fn convert_expr(expr: &SqlExpr) -> Result<Expr, SqlConversionError> {
             conditions,
             results,
             else_result,
-        } => {
-            let op = match operand {
-                Some(e) => Some(Box::new(convert_expr(e)?)),
-                None => None,
-            };
-            let mut when_clauses = Vec::new();
-            for (cond, result) in
-                conditions.iter().zip(results.iter())
-            {
-                when_clauses.push((
-                    convert_expr(cond)?,
-                    convert_expr(result)?,
-                ));
-            }
-            let else_r = match else_result {
-                Some(e) => Some(Box::new(convert_expr(e)?)),
-                None => None,
-            };
-            Ok(Expr::Case {
-                operand: op,
-                when_clauses,
-                else_result: else_r,
-            })
-        }
+        } => convert_case(
+            operand.as_deref(),
+            conditions,
+            results,
+            else_result.as_deref(),
+        ),
+        SqlExpr::Like {
+            negated,
+            expr,
+            pattern,
+            ..
+        } => convert_like("LIKE", expr, pattern, *negated),
+        SqlExpr::ILike {
+            negated,
+            expr,
+            pattern,
+            ..
+        } => convert_like("ILIKE", expr, pattern, *negated),
         _ => Err(SqlConversionError::UnsupportedFeature(format!(
             "expression type not yet supported: {expr}"
         ))),
+    }
+}
+
+fn convert_subquery_func(
+    name: &str,
+    query: &Query,
+) -> Result<Expr, SqlConversionError> {
+    convert_query(query)?;
+    Ok(Expr::Function {
+        name: name.to_owned(),
+        args: vec![],
+    })
+}
+
+fn convert_function(
+    func: &sqlparser::ast::Function,
+) -> Result<Expr, SqlConversionError> {
+    let name = func.name.to_string().to_uppercase();
+    let arg = extract_single_func_arg(&func.args)?;
+    let args = match arg {
+        Some(a) => vec![a],
+        None => vec![],
+    };
+    Ok(Expr::Function { name, args })
+}
+
+fn convert_in_subquery(
+    expr: &SqlExpr,
+    subquery: &Query,
+) -> Result<Expr, SqlConversionError> {
+    let left = convert_expr(expr)?;
+    convert_query(subquery)?;
+    Ok(Expr::Function {
+        name: "IN_SUBQUERY".to_owned(),
+        args: vec![left],
+    })
+}
+
+fn convert_between(
+    expr: &SqlExpr,
+    low: &SqlExpr,
+    high: &SqlExpr,
+) -> Result<Expr, SqlConversionError> {
+    let col = convert_expr(expr)?;
+    let low_expr = convert_expr(low)?;
+    let high_expr = convert_expr(high)?;
+    Ok(Expr::BinOp {
+        op: BinOp::And,
+        left: Box::new(Expr::BinOp {
+            op: BinOp::Ge,
+            left: Box::new(col.clone()),
+            right: Box::new(low_expr),
+        }),
+        right: Box::new(Expr::BinOp {
+            op: BinOp::Le,
+            left: Box::new(col),
+            right: Box::new(high_expr),
+        }),
+    })
+}
+
+fn convert_case(
+    operand: Option<&SqlExpr>,
+    conditions: &[SqlExpr],
+    results: &[SqlExpr],
+    else_result: Option<&SqlExpr>,
+) -> Result<Expr, SqlConversionError> {
+    let op = match operand {
+        Some(e) => Some(Box::new(convert_expr(e)?)),
+        None => None,
+    };
+    let mut when_clauses = Vec::new();
+    for (cond, result) in conditions.iter().zip(results.iter()) {
+        when_clauses.push((
+            convert_expr(cond)?,
+            convert_expr(result)?,
+        ));
+    }
+    let else_r = match else_result {
+        Some(e) => Some(Box::new(convert_expr(e)?)),
+        None => None,
+    };
+    Ok(Expr::Case {
+        operand: op,
+        when_clauses,
+        else_result: else_r,
+    })
+}
+
+fn convert_in_list(
+    expr: &SqlExpr,
+    list: &[SqlExpr],
+    negated: bool,
+) -> Result<Expr, SqlConversionError> {
+    let left = convert_expr(expr)?;
+    if list.is_empty() {
+        return Ok(Expr::Const(Const::Bool(negated)));
+    }
+    let mut chain = Expr::BinOp {
+        op: BinOp::Eq,
+        left: Box::new(left.clone()),
+        right: Box::new(convert_expr(&list[0])?),
+    };
+    for item in &list[1..] {
+        chain = Expr::BinOp {
+            op: BinOp::Or,
+            left: Box::new(chain),
+            right: Box::new(Expr::BinOp {
+                op: BinOp::Eq,
+                left: Box::new(left.clone()),
+                right: Box::new(convert_expr(item)?),
+            }),
+        };
+    }
+    if negated {
+        Ok(Expr::UnaryOp {
+            op: ra_core::expr::UnaryOp::Not,
+            operand: Box::new(chain),
+        })
+    } else {
+        Ok(chain)
+    }
+}
+
+fn convert_like(
+    func_name: &str,
+    expr: &SqlExpr,
+    pattern: &SqlExpr,
+    negated: bool,
+) -> Result<Expr, SqlConversionError> {
+    let lhs = convert_expr(expr)?;
+    let rhs = convert_expr(pattern)?;
+    let call = Expr::Function {
+        name: func_name.to_owned(),
+        args: vec![lhs, rhs],
+    };
+    if negated {
+        Ok(Expr::UnaryOp {
+            op: ra_core::expr::UnaryOp::Not,
+            operand: Box::new(call),
+        })
+    } else {
+        Ok(call)
     }
 }
 
@@ -1146,7 +1279,7 @@ fn convert_binary_op(
 }
 
 fn convert_unary_op(
-    op: &UnaryOperator,
+    op: UnaryOperator,
 ) -> Result<ra_core::expr::UnaryOp, SqlConversionError> {
     match op {
         UnaryOperator::Not => Ok(ra_core::expr::UnaryOp::Not),
@@ -2018,6 +2151,194 @@ mod tests {
             plan.children().len(),
             3,
             "RecursiveCTE has 3 children"
+        );
+    }
+
+    // ── SELECT without FROM ──────────────────────────────────
+
+    #[test]
+    fn test_select_without_from_literal() {
+        let sql = "SELECT 1";
+        let plan = sql_to_relexpr(sql).expect("should parse");
+        assert!(
+            matches!(
+                &plan,
+                RelExpr::Project {
+                    input,
+                    ..
+                } if matches!(**input, RelExpr::Values { .. })
+            ),
+            "SELECT 1 should be Project over Values: {plan:?}"
+        );
+    }
+
+    #[test]
+    fn test_select_without_from_alias() {
+        let sql = "SELECT 42 AS answer";
+        let plan = sql_to_relexpr(sql).expect("should parse");
+        if let RelExpr::Project { columns, .. } = &plan {
+            assert_eq!(
+                columns[0].alias.as_deref(),
+                Some("answer")
+            );
+        } else {
+            panic!("expected Project, got: {plan:?}");
+        }
+    }
+
+    #[test]
+    fn test_select_without_from_multi_col() {
+        let sql = "SELECT 1, 2, 3";
+        let plan = sql_to_relexpr(sql).expect("should parse");
+        if let RelExpr::Project { columns, .. } = &plan {
+            assert_eq!(columns.len(), 3);
+        } else {
+            panic!("expected Project, got: {plan:?}");
+        }
+    }
+
+    // ── IN list ──────────────────────────────────────────────
+
+    #[test]
+    fn test_in_list() {
+        let sql =
+            "SELECT * FROM t WHERE id IN (1, 2, 3)";
+        let plan = sql_to_relexpr(sql).expect("should parse");
+        assert!(
+            matches!(plan, RelExpr::Filter { .. }),
+            "IN list should produce Filter: {plan:?}"
+        );
+    }
+
+    #[test]
+    fn test_not_in_list() {
+        let sql =
+            "SELECT * FROM t WHERE id NOT IN (4, 5)";
+        let plan = sql_to_relexpr(sql).expect("should parse");
+        if let RelExpr::Filter { predicate, .. } = &plan {
+            assert!(
+                matches!(
+                    predicate,
+                    Expr::UnaryOp {
+                        op: ra_core::expr::UnaryOp::Not,
+                        ..
+                    }
+                ),
+                "NOT IN should wrap with Not: {predicate:?}"
+            );
+        } else {
+            panic!("expected Filter, got: {plan:?}");
+        }
+    }
+
+    #[test]
+    fn test_in_list_single_value() {
+        let sql = "SELECT * FROM t WHERE id IN (42)";
+        let plan = sql_to_relexpr(sql).expect("should parse");
+        if let RelExpr::Filter { predicate, .. } = &plan {
+            assert!(
+                matches!(
+                    predicate,
+                    Expr::BinOp {
+                        op: BinOp::Eq,
+                        ..
+                    }
+                ),
+                "single-element IN = Eq: {predicate:?}"
+            );
+        } else {
+            panic!("expected Filter, got: {plan:?}");
+        }
+    }
+
+    // ── LIKE / ILIKE ─────────────────────────────────────────
+
+    #[test]
+    fn test_like() {
+        let sql =
+            "SELECT * FROM t WHERE name LIKE '%foo%'";
+        let plan = sql_to_relexpr(sql).expect("should parse");
+        if let RelExpr::Filter { predicate, .. } = &plan {
+            assert!(
+                matches!(
+                    predicate,
+                    Expr::Function { name, .. }
+                        if name == "LIKE"
+                ),
+                "LIKE -> Function: {predicate:?}"
+            );
+        } else {
+            panic!("expected Filter, got: {plan:?}");
+        }
+    }
+
+    #[test]
+    fn test_not_like() {
+        let sql =
+            "SELECT * FROM t WHERE name NOT LIKE 'x%'";
+        let plan = sql_to_relexpr(sql).expect("should parse");
+        if let RelExpr::Filter { predicate, .. } = &plan {
+            assert!(
+                matches!(
+                    predicate,
+                    Expr::UnaryOp {
+                        op: ra_core::expr::UnaryOp::Not,
+                        ..
+                    }
+                ),
+                "NOT LIKE wraps Not: {predicate:?}"
+            );
+        } else {
+            panic!("expected Filter, got: {plan:?}");
+        }
+    }
+
+    #[test]
+    fn test_ilike() {
+        let sql =
+            "SELECT * FROM t WHERE name ILIKE '%bar%'";
+        let plan = sql_to_relexpr(sql).expect("should parse");
+        if let RelExpr::Filter { predicate, .. } = &plan {
+            assert!(
+                matches!(
+                    predicate,
+                    Expr::Function { name, .. }
+                        if name == "ILIKE"
+                ),
+                "ILIKE -> Function: {predicate:?}"
+            );
+        } else {
+            panic!("expected Filter, got: {plan:?}");
+        }
+    }
+
+    // ── Multiple statements ──────────────────────────────────
+
+    #[test]
+    fn test_multiple_statements() {
+        let sql = "\
+            SELECT a FROM t1; \
+            SELECT b FROM t2";
+        let plans =
+            sql_to_relexprs(sql).expect("should parse");
+        assert_eq!(plans.len(), 2);
+    }
+
+    #[test]
+    fn test_single_statement_via_relexprs() {
+        let sql = "SELECT x FROM t";
+        let plans =
+            sql_to_relexprs(sql).expect("should parse");
+        assert_eq!(plans.len(), 1);
+    }
+
+    #[test]
+    fn test_multiple_statements_error_in_single() {
+        let sql = "SELECT 1; SELECT 2";
+        let err = sql_to_relexpr(sql).unwrap_err();
+        assert!(
+            err.to_string().contains("multiple statements"),
+            "got: {err}"
         );
     }
 }
