@@ -2,7 +2,7 @@
 //!
 //! These types represent the structure of a database as discovered
 //! through system catalog queries: tables, columns, constraints,
-//! indexes, and their properties.
+//! indexes, triggers, and their properties.
 
 use std::collections::HashMap;
 
@@ -30,6 +30,32 @@ impl SchemaInfo {
     #[must_use]
     pub fn table_count(&self) -> usize {
         self.tables.len()
+    }
+
+    /// Returns all triggers across all tables in this schema.
+    #[must_use]
+    pub fn all_triggers(&self) -> Vec<(&str, &TriggerInfo)> {
+        let mut result = Vec::new();
+        for table in self.tables.values() {
+            for trigger in &table.triggers {
+                result.push((table.name.as_str(), trigger));
+            }
+        }
+        result
+    }
+
+    /// Returns all foreign key constraints across all tables.
+    #[must_use]
+    pub fn all_foreign_keys(&self) -> Vec<(&str, &ConstraintInfo)> {
+        let mut result = Vec::new();
+        for table in self.tables.values() {
+            for constraint in &table.constraints {
+                if constraint.kind == ConstraintKind::ForeignKey {
+                    result.push((table.name.as_str(), constraint));
+                }
+            }
+        }
+        result
     }
 }
 
@@ -61,10 +87,12 @@ pub struct TableInfo {
     pub name: String,
     /// Columns in declaration order.
     pub columns: Vec<ColumnInfo>,
-    /// Constraints (primary key, foreign key, unique, check).
+    /// Constraints (primary key, foreign key, unique, check, not null).
     pub constraints: Vec<ConstraintInfo>,
     /// Indexes on this table.
     pub indexes: Vec<IndexInfo>,
+    /// Triggers defined on this table.
+    pub triggers: Vec<TriggerInfo>,
     /// Estimated row count (from catalog statistics).
     pub estimated_rows: Option<f64>,
 }
@@ -81,7 +109,11 @@ impl TableInfo {
     pub fn primary_key_columns(&self) -> Vec<&str> {
         for constraint in &self.constraints {
             if constraint.kind == ConstraintKind::PrimaryKey {
-                return constraint.columns.iter().map(String::as_str).collect();
+                return constraint
+                    .columns
+                    .iter()
+                    .map(String::as_str)
+                    .collect();
             }
         }
         Vec::new()
@@ -92,6 +124,89 @@ impl TableInfo {
     pub fn column_count(&self) -> usize {
         self.columns.len()
     }
+
+    /// Returns all unique constraints (including primary key).
+    #[must_use]
+    pub fn unique_constraints(&self) -> Vec<&ConstraintInfo> {
+        self.constraints
+            .iter()
+            .filter(|c| {
+                c.kind == ConstraintKind::PrimaryKey
+                    || c.kind == ConstraintKind::Unique
+            })
+            .collect()
+    }
+
+    /// Returns all foreign key constraints on this table.
+    #[must_use]
+    pub fn foreign_keys(&self) -> Vec<&ConstraintInfo> {
+        self.constraints
+            .iter()
+            .filter(|c| c.kind == ConstraintKind::ForeignKey)
+            .collect()
+    }
+
+    /// Returns all check constraints on this table.
+    #[must_use]
+    pub fn check_constraints(&self) -> Vec<&ConstraintInfo> {
+        self.constraints
+            .iter()
+            .filter(|c| c.kind == ConstraintKind::Check)
+            .collect()
+    }
+
+    /// Returns not-null column names based on constraints and
+    /// column metadata.
+    #[must_use]
+    pub fn not_null_columns(&self) -> Vec<&str> {
+        self.columns
+            .iter()
+            .filter(|c| !c.nullable)
+            .map(|c| c.name.as_str())
+            .collect()
+    }
+
+    /// Check if a set of columns is covered by a unique constraint
+    /// (primary key or unique).
+    #[must_use]
+    pub fn has_unique_constraint_on(
+        &self,
+        columns: &[&str],
+    ) -> bool {
+        for constraint in &self.constraints {
+            if constraint.kind != ConstraintKind::PrimaryKey
+                && constraint.kind != ConstraintKind::Unique
+            {
+                continue;
+            }
+            let constraint_cols: Vec<&str> = constraint
+                .columns
+                .iter()
+                .map(String::as_str)
+                .collect();
+            if columns_subset_of(&constraint_cols, columns) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Returns triggers that fire on a specific DML event.
+    #[must_use]
+    pub fn triggers_for_event(
+        &self,
+        event: TriggerEvent,
+    ) -> Vec<&TriggerInfo> {
+        self.triggers
+            .iter()
+            .filter(|t| t.event == event)
+            .collect()
+    }
+}
+
+/// Check if `subset` columns are all contained in `superset`.
+fn columns_subset_of(subset: &[&str], superset: &[&str]) -> bool {
+    subset.iter().all(|c| superset.contains(c))
 }
 
 /// Information about a single column.
@@ -122,6 +237,8 @@ pub struct ConstraintInfo {
     pub referenced_table: Option<String>,
     /// For foreign keys, the referenced columns.
     pub referenced_columns: Vec<String>,
+    /// For check constraints, the expression text.
+    pub check_expression: Option<String>,
 }
 
 /// Kinds of table constraints.
@@ -135,15 +252,118 @@ pub enum ConstraintKind {
     Unique,
     /// Check constraint.
     Check,
+    /// Not-null constraint.
+    NotNull,
 }
 
 impl std::fmt::Display for ConstraintKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
         match self {
             Self::PrimaryKey => write!(f, "PRIMARY KEY"),
             Self::ForeignKey => write!(f, "FOREIGN KEY"),
             Self::Unique => write!(f, "UNIQUE"),
             Self::Check => write!(f, "CHECK"),
+            Self::NotNull => write!(f, "NOT NULL"),
+        }
+    }
+}
+
+/// Information about a database trigger.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TriggerInfo {
+    /// Trigger name.
+    pub name: String,
+    /// The DML event that fires this trigger.
+    pub event: TriggerEvent,
+    /// When the trigger fires relative to the event.
+    pub timing: TriggerTiming,
+    /// Whether the trigger fires per row or per statement.
+    pub scope: TriggerScope,
+    /// The SQL body or function name executed by the trigger.
+    pub action_sql: String,
+    /// The table this trigger is defined on.
+    pub table_name: String,
+    /// Whether the trigger is enabled.
+    pub enabled: bool,
+}
+
+/// The DML event that fires a trigger.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize,
+)]
+pub enum TriggerEvent {
+    /// INSERT operation.
+    Insert,
+    /// UPDATE operation.
+    Update,
+    /// DELETE operation.
+    Delete,
+    /// TRUNCATE operation (PostgreSQL).
+    Truncate,
+}
+
+impl std::fmt::Display for TriggerEvent {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        match self {
+            Self::Insert => write!(f, "INSERT"),
+            Self::Update => write!(f, "UPDATE"),
+            Self::Delete => write!(f, "DELETE"),
+            Self::Truncate => write!(f, "TRUNCATE"),
+        }
+    }
+}
+
+/// When a trigger fires relative to the DML event.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize,
+)]
+pub enum TriggerTiming {
+    /// Before the event.
+    Before,
+    /// After the event.
+    After,
+    /// Instead of the event (views).
+    InsteadOf,
+}
+
+impl std::fmt::Display for TriggerTiming {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        match self {
+            Self::Before => write!(f, "BEFORE"),
+            Self::After => write!(f, "AFTER"),
+            Self::InsteadOf => write!(f, "INSTEAD OF"),
+        }
+    }
+}
+
+/// Whether a trigger fires per row or per statement.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize,
+)]
+pub enum TriggerScope {
+    /// Fires once per affected row.
+    Row,
+    /// Fires once per statement.
+    Statement,
+}
+
+impl std::fmt::Display for TriggerScope {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        match self {
+            Self::Row => write!(f, "FOR EACH ROW"),
+            Self::Statement => write!(f, "FOR EACH STATEMENT"),
         }
     }
 }
@@ -182,7 +402,8 @@ impl TableStats {
         stats.total_size = self.total_bytes;
 
         for (col_name, col_stats) in &self.columns {
-            let mut core_col = ra_core::ColumnStats::new(col_stats.distinct_count);
+            let mut core_col =
+                ra_core::ColumnStats::new(col_stats.distinct_count);
             core_col.null_fraction = col_stats.null_fraction;
             core_col.avg_length = col_stats.avg_width;
             stats.columns.insert(col_name.clone(), core_col);
@@ -215,17 +436,100 @@ mod tests {
 
     #[test]
     fn database_kind_display() {
-        assert_eq!(DatabaseKind::PostgreSQL.to_string(), "PostgreSQL");
+        assert_eq!(
+            DatabaseKind::PostgreSQL.to_string(),
+            "PostgreSQL"
+        );
         assert_eq!(DatabaseKind::MySQL.to_string(), "MySQL");
         assert_eq!(DatabaseKind::SQLite.to_string(), "SQLite");
     }
 
     #[test]
     fn constraint_kind_display() {
-        assert_eq!(ConstraintKind::PrimaryKey.to_string(), "PRIMARY KEY");
-        assert_eq!(ConstraintKind::ForeignKey.to_string(), "FOREIGN KEY");
+        assert_eq!(
+            ConstraintKind::PrimaryKey.to_string(),
+            "PRIMARY KEY"
+        );
+        assert_eq!(
+            ConstraintKind::ForeignKey.to_string(),
+            "FOREIGN KEY"
+        );
         assert_eq!(ConstraintKind::Unique.to_string(), "UNIQUE");
         assert_eq!(ConstraintKind::Check.to_string(), "CHECK");
+        assert_eq!(ConstraintKind::NotNull.to_string(), "NOT NULL");
+    }
+
+    #[test]
+    fn trigger_event_display() {
+        assert_eq!(TriggerEvent::Insert.to_string(), "INSERT");
+        assert_eq!(TriggerEvent::Update.to_string(), "UPDATE");
+        assert_eq!(TriggerEvent::Delete.to_string(), "DELETE");
+        assert_eq!(TriggerEvent::Truncate.to_string(), "TRUNCATE");
+    }
+
+    #[test]
+    fn trigger_timing_display() {
+        assert_eq!(TriggerTiming::Before.to_string(), "BEFORE");
+        assert_eq!(TriggerTiming::After.to_string(), "AFTER");
+        assert_eq!(
+            TriggerTiming::InsteadOf.to_string(),
+            "INSTEAD OF"
+        );
+    }
+
+    #[test]
+    fn trigger_scope_display() {
+        assert_eq!(
+            TriggerScope::Row.to_string(),
+            "FOR EACH ROW"
+        );
+        assert_eq!(
+            TriggerScope::Statement.to_string(),
+            "FOR EACH STATEMENT"
+        );
+    }
+
+    fn make_test_table() -> TableInfo {
+        TableInfo {
+            name: "test".to_owned(),
+            columns: vec![
+                ColumnInfo {
+                    name: "id".to_owned(),
+                    data_type: "integer".to_owned(),
+                    nullable: false,
+                    ordinal: 1,
+                    default_value: None,
+                },
+                ColumnInfo {
+                    name: "name".to_owned(),
+                    data_type: "text".to_owned(),
+                    nullable: true,
+                    ordinal: 2,
+                    default_value: None,
+                },
+            ],
+            constraints: vec![
+                ConstraintInfo {
+                    name: "test_pkey".to_owned(),
+                    kind: ConstraintKind::PrimaryKey,
+                    columns: vec!["id".to_owned()],
+                    referenced_table: None,
+                    referenced_columns: vec![],
+                    check_expression: None,
+                },
+                ConstraintInfo {
+                    name: "test_name_unique".to_owned(),
+                    kind: ConstraintKind::Unique,
+                    columns: vec!["name".to_owned()],
+                    referenced_table: None,
+                    referenced_columns: vec![],
+                    check_expression: None,
+                },
+            ],
+            indexes: vec![],
+            triggers: vec![],
+            estimated_rows: None,
+        }
     }
 
     #[test]
@@ -262,16 +566,26 @@ mod tests {
         };
 
         let core = table_stats.to_core_statistics();
-        assert!((core.row_count - 1000.0).abs() < f64::EPSILON);
+        assert!(
+            (core.row_count - 1000.0).abs() < f64::EPSILON
+        );
         assert_eq!(core.total_size, 64000);
         assert_eq!(core.columns.len(), 2);
 
-        let id_stats = core.columns.get("id").expect("id column");
-        assert!((id_stats.distinct_count - 1000.0).abs() < f64::EPSILON);
+        let id_stats =
+            core.columns.get("id").expect("id column");
+        assert!(
+            (id_stats.distinct_count - 1000.0).abs()
+                < f64::EPSILON
+        );
         assert!(id_stats.null_fraction.abs() < f64::EPSILON);
 
-        let name_stats = core.columns.get("name").expect("name column");
-        assert!((name_stats.null_fraction - 0.05).abs() < f64::EPSILON);
+        let name_stats =
+            core.columns.get("name").expect("name column");
+        assert!(
+            (name_stats.null_fraction - 0.05).abs()
+                < f64::EPSILON
+        );
     }
 
     #[test]
@@ -282,10 +596,10 @@ mod tests {
             tables: HashMap::new(),
         };
 
-        let json =
-            serde_json::to_string(&schema).expect("serialization should succeed");
-        let deserialized: SchemaInfo =
-            serde_json::from_str(&json).expect("deserialization should succeed");
+        let json = serde_json::to_string(&schema)
+            .expect("serialization should succeed");
+        let deserialized: SchemaInfo = serde_json::from_str(&json)
+            .expect("deserialization should succeed");
         assert_eq!(schema, deserialized);
     }
 
@@ -315,6 +629,7 @@ mod tests {
                 columns: vec!["id".to_owned()],
                 referenced_table: None,
                 referenced_columns: vec![],
+                check_expression: None,
             }],
             indexes: vec![IndexInfo {
                 name: "orders_pkey".to_owned(),
@@ -322,6 +637,7 @@ mod tests {
                 unique: true,
                 index_type: "btree".to_owned(),
             }],
+            triggers: vec![],
             estimated_rows: Some(50000.0),
         };
 
@@ -332,29 +648,7 @@ mod tests {
 
     #[test]
     fn table_info_get_column() {
-        let table = TableInfo {
-            name: "test".to_owned(),
-            columns: vec![
-                ColumnInfo {
-                    name: "id".to_owned(),
-                    data_type: "integer".to_owned(),
-                    nullable: false,
-                    ordinal: 1,
-                    default_value: None,
-                },
-                ColumnInfo {
-                    name: "name".to_owned(),
-                    data_type: "text".to_owned(),
-                    nullable: true,
-                    ordinal: 2,
-                    default_value: None,
-                },
-            ],
-            constraints: vec![],
-            indexes: vec![],
-            estimated_rows: None,
-        };
-
+        let table = make_test_table();
         assert!(table.get_column("id").is_some());
         assert!(table.get_column("missing").is_none());
         assert_eq!(table.column_count(), 2);
@@ -362,31 +656,9 @@ mod tests {
 
     #[test]
     fn table_info_primary_key_columns() {
-        let table = TableInfo {
-            name: "test".to_owned(),
-            columns: vec![],
-            constraints: vec![
-                ConstraintInfo {
-                    name: "test_pkey".to_owned(),
-                    kind: ConstraintKind::PrimaryKey,
-                    columns: vec!["id".to_owned(), "tenant_id".to_owned()],
-                    referenced_table: None,
-                    referenced_columns: vec![],
-                },
-                ConstraintInfo {
-                    name: "test_name_unique".to_owned(),
-                    kind: ConstraintKind::Unique,
-                    columns: vec!["name".to_owned()],
-                    referenced_table: None,
-                    referenced_columns: vec![],
-                },
-            ],
-            indexes: vec![],
-            estimated_rows: None,
-        };
-
+        let table = make_test_table();
         let pk = table.primary_key_columns();
-        assert_eq!(pk, vec!["id", "tenant_id"]);
+        assert_eq!(pk, vec!["id"]);
     }
 
     #[test]
@@ -396,10 +668,69 @@ mod tests {
             columns: vec![],
             constraints: vec![],
             indexes: vec![],
+            triggers: vec![],
             estimated_rows: None,
         };
 
         assert!(table.primary_key_columns().is_empty());
+    }
+
+    #[test]
+    fn table_info_unique_constraints() {
+        let table = make_test_table();
+        let uniq = table.unique_constraints();
+        assert_eq!(uniq.len(), 2);
+    }
+
+    #[test]
+    fn table_info_has_unique_on() {
+        let table = make_test_table();
+        assert!(table.has_unique_constraint_on(&["id"]));
+        assert!(table.has_unique_constraint_on(&["name"]));
+        assert!(!table.has_unique_constraint_on(&["missing"]));
+    }
+
+    #[test]
+    fn table_info_not_null_columns() {
+        let table = make_test_table();
+        let nn = table.not_null_columns();
+        assert_eq!(nn, vec!["id"]);
+    }
+
+    #[test]
+    fn table_info_triggers_for_event() {
+        let mut table = make_test_table();
+        table.triggers.push(TriggerInfo {
+            name: "trg_audit".to_owned(),
+            event: TriggerEvent::Insert,
+            timing: TriggerTiming::After,
+            scope: TriggerScope::Row,
+            action_sql: "EXECUTE FUNCTION audit()".to_owned(),
+            table_name: "test".to_owned(),
+            enabled: true,
+        });
+        table.triggers.push(TriggerInfo {
+            name: "trg_validate".to_owned(),
+            event: TriggerEvent::Update,
+            timing: TriggerTiming::Before,
+            scope: TriggerScope::Row,
+            action_sql: "EXECUTE FUNCTION validate()".to_owned(),
+            table_name: "test".to_owned(),
+            enabled: true,
+        });
+
+        let insert_trgs =
+            table.triggers_for_event(TriggerEvent::Insert);
+        assert_eq!(insert_trgs.len(), 1);
+        assert_eq!(insert_trgs[0].name, "trg_audit");
+
+        let update_trgs =
+            table.triggers_for_event(TriggerEvent::Update);
+        assert_eq!(update_trgs.len(), 1);
+
+        let delete_trgs =
+            table.triggers_for_event(TriggerEvent::Delete);
+        assert!(delete_trgs.is_empty());
     }
 
     #[test]
@@ -412,6 +743,7 @@ mod tests {
                 columns: vec![],
                 constraints: vec![],
                 indexes: vec![],
+                triggers: vec![],
                 estimated_rows: Some(1000.0),
             },
         );
@@ -425,6 +757,113 @@ mod tests {
         assert!(schema.get_table("users").is_some());
         assert!(schema.get_table("missing").is_none());
         assert_eq!(schema.table_count(), 1);
+    }
+
+    #[test]
+    fn schema_info_all_triggers() {
+        let mut tables = HashMap::new();
+        tables.insert(
+            "t1".to_owned(),
+            TableInfo {
+                name: "t1".to_owned(),
+                columns: vec![],
+                constraints: vec![],
+                indexes: vec![],
+                triggers: vec![TriggerInfo {
+                    name: "trg1".to_owned(),
+                    event: TriggerEvent::Insert,
+                    timing: TriggerTiming::After,
+                    scope: TriggerScope::Row,
+                    action_sql: "SELECT 1".to_owned(),
+                    table_name: "t1".to_owned(),
+                    enabled: true,
+                }],
+                estimated_rows: None,
+            },
+        );
+
+        let schema = SchemaInfo {
+            kind: DatabaseKind::PostgreSQL,
+            schema_name: "public".to_owned(),
+            tables,
+        };
+
+        let triggers = schema.all_triggers();
+        assert_eq!(triggers.len(), 1);
+        assert_eq!(triggers[0].1.name, "trg1");
+    }
+
+    #[test]
+    fn schema_info_all_foreign_keys() {
+        let mut tables = HashMap::new();
+        tables.insert(
+            "orders".to_owned(),
+            TableInfo {
+                name: "orders".to_owned(),
+                columns: vec![],
+                constraints: vec![ConstraintInfo {
+                    name: "fk_user".to_owned(),
+                    kind: ConstraintKind::ForeignKey,
+                    columns: vec!["user_id".to_owned()],
+                    referenced_table: Some("users".to_owned()),
+                    referenced_columns: vec!["id".to_owned()],
+                    check_expression: None,
+                }],
+                indexes: vec![],
+                triggers: vec![],
+                estimated_rows: None,
+            },
+        );
+
+        let schema = SchemaInfo {
+            kind: DatabaseKind::PostgreSQL,
+            schema_name: "public".to_owned(),
+            tables,
+        };
+
+        let fks = schema.all_foreign_keys();
+        assert_eq!(fks.len(), 1);
+        assert_eq!(fks[0].1.name, "fk_user");
+    }
+
+    #[test]
+    fn constraint_info_check_expression() {
+        let check = ConstraintInfo {
+            name: "check_positive".to_owned(),
+            kind: ConstraintKind::Check,
+            columns: vec!["amount".to_owned()],
+            referenced_table: None,
+            referenced_columns: vec![],
+            check_expression: Some(
+                "(amount > 0)".to_owned(),
+            ),
+        };
+
+        assert_eq!(check.kind, ConstraintKind::Check);
+        assert_eq!(
+            check.check_expression.as_deref(),
+            Some("(amount > 0)")
+        );
+    }
+
+    #[test]
+    fn trigger_info_serialize_roundtrip() {
+        let trigger = TriggerInfo {
+            name: "trg_audit".to_owned(),
+            event: TriggerEvent::Insert,
+            timing: TriggerTiming::After,
+            scope: TriggerScope::Row,
+            action_sql: "EXECUTE FUNCTION audit_fn()".to_owned(),
+            table_name: "orders".to_owned(),
+            enabled: true,
+        };
+
+        let json = serde_json::to_string(&trigger)
+            .expect("serialization should succeed");
+        let deserialized: TriggerInfo =
+            serde_json::from_str(&json)
+                .expect("deserialization should succeed");
+        assert_eq!(trigger, deserialized);
     }
 
     #[test]
@@ -443,7 +882,10 @@ mod tests {
         };
 
         assert_eq!(stats.most_common_values.len(), 3);
-        assert!((stats.most_common_values[0].1 - 0.7).abs() < f64::EPSILON);
+        assert!(
+            (stats.most_common_values[0].1 - 0.7).abs()
+                < f64::EPSILON
+        );
     }
 
     #[test]
@@ -501,10 +943,14 @@ mod tests {
             columns: vec!["user_id".to_owned()],
             referenced_table: Some("users".to_owned()),
             referenced_columns: vec!["id".to_owned()],
+            check_expression: None,
         };
 
         assert_eq!(fk.kind, ConstraintKind::ForeignKey);
-        assert_eq!(fk.referenced_table.as_deref(), Some("users"));
+        assert_eq!(
+            fk.referenced_table.as_deref(),
+            Some("users")
+        );
     }
 
     #[test]
@@ -517,9 +963,11 @@ mod tests {
             columns: HashMap::new(),
         };
 
-        let json = serde_json::to_string(&stats).expect("serialization should succeed");
+        let json = serde_json::to_string(&stats)
+            .expect("serialization should succeed");
         let deserialized: TableStats =
-            serde_json::from_str(&json).expect("deserialization should succeed");
+            serde_json::from_str(&json)
+                .expect("deserialization should succeed");
         assert_eq!(stats, deserialized);
     }
 
@@ -534,9 +982,18 @@ mod tests {
             default_value: None,
         };
 
-        let json = serde_json::to_string(&col).expect("serialization should succeed");
-        let deserialized: ColumnInfo =
-            serde_json::from_str(&json).expect("deserialization should succeed");
+        let json = serde_json::to_string(&col)
+            .expect("serialization should succeed");
+        let deserialized: ColumnInfo = serde_json::from_str(&json)
+            .expect("deserialization should succeed");
         assert_eq!(col, deserialized);
+    }
+
+    #[test]
+    fn columns_subset_of_basic() {
+        assert!(columns_subset_of(&["a"], &["a", "b"]));
+        assert!(columns_subset_of(&["a", "b"], &["a", "b"]));
+        assert!(!columns_subset_of(&["a", "c"], &["a", "b"]));
+        assert!(columns_subset_of(&[], &["a"]));
     }
 }
