@@ -471,7 +471,7 @@ fn convert_table_factor(
                     .map(|a| {
                         a.columns
                             .iter()
-                            .map(|c| Some(c.name.value.clone()))
+                            .map(|c| Some(c.value.clone()))
                             .collect::<Vec<_>>()
                     })
                     .unwrap_or_default();
@@ -534,7 +534,7 @@ fn convert_table_valued_function(
                     .map(|a| {
                         a.columns
                             .iter()
-                            .map(|c| Some(c.name.value.clone()))
+                            .map(|c| Some(c.value.clone()))
                             .collect::<Vec<_>>()
                     })
                     .unwrap_or_default();

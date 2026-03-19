@@ -7,7 +7,6 @@
 
 use ra_core::expr::{Const, Expr};
 use ra_engine::executors::unnest::{MultiUnnestExecutor, UnnestExecutor};
-use ra_engine::Row;
 
 #[test]
 fn unnest_empty_array_with_ordinality() {
