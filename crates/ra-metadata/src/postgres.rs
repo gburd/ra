@@ -14,6 +14,7 @@ use crate::explain::{ExplainPlan, parse_postgres_explain};
 use crate::schema::{
     ColumnInfo, ColumnStatistics, ConstraintInfo, ConstraintKind,
     DatabaseKind, IndexInfo, SchemaInfo, TableInfo, TableStats,
+    TriggerEvent, TriggerInfo, TriggerScope, TriggerTiming,
 };
 
 /// `PostgreSQL` connector using the `postgres` crate.
@@ -170,6 +171,7 @@ impl PostgresConnector {
                 referenced_table,
                 referenced_columns: referenced_columns
                     .unwrap_or_default(),
+                check_expression: None,
             });
         }
         Ok(constraints)
@@ -315,6 +317,115 @@ impl PostgresConnector {
         Ok(columns)
     }
 
+    fn query_triggers(
+        &mut self,
+        table: &str,
+    ) -> MetadataResult<Vec<TriggerInfo>> {
+        let rows = self
+            .client
+            .query(
+                "SELECT t.tgname, \
+                 CASE WHEN t.tgtype & 4 > 0 THEN 'INSERT' \
+                      WHEN t.tgtype & 8 > 0 THEN 'DELETE' \
+                      WHEN t.tgtype & 16 > 0 THEN 'UPDATE' \
+                      WHEN t.tgtype & 32 > 0 THEN 'TRUNCATE' \
+                      ELSE 'UNKNOWN' END AS event, \
+                 CASE WHEN t.tgtype & 2 > 0 THEN 'BEFORE' \
+                      WHEN t.tgtype & 64 > 0 THEN 'INSTEAD OF' \
+                      ELSE 'AFTER' END AS timing, \
+                 CASE WHEN t.tgtype & 1 > 0 THEN 'ROW' \
+                      ELSE 'STATEMENT' END AS scope, \
+                 p.proname AS function_name, \
+                 t.tgenabled \
+                 FROM pg_trigger t \
+                 JOIN pg_class c ON t.tgrelid = c.oid \
+                 JOIN pg_namespace ns ON c.relnamespace = ns.oid \
+                 JOIN pg_proc p ON t.tgfoid = p.oid \
+                 WHERE ns.nspname = $1 AND c.relname = $2 \
+                 AND NOT t.tgisinternal",
+                &[&self.schema, &table],
+            )
+            .map_err(|e| MetadataError::Query {
+                message: format!(
+                    "failed to query triggers for {table}: {e}"
+                ),
+            })?;
+
+        let mut triggers = Vec::new();
+        for row in &rows {
+            let name: String = row.get(0);
+            let event_str: String = row.get(1);
+            let timing_str: String = row.get(2);
+            let scope_str: String = row.get(3);
+            let function_name: String = row.get(4);
+            let enabled_char: String = row.get(5);
+
+            let event = match event_str.as_str() {
+                "INSERT" => TriggerEvent::Insert,
+                "DELETE" => TriggerEvent::Delete,
+                "UPDATE" => TriggerEvent::Update,
+                "TRUNCATE" => TriggerEvent::Truncate,
+                _ => continue,
+            };
+
+            let timing = match timing_str.as_str() {
+                "BEFORE" => TriggerTiming::Before,
+                "INSTEAD OF" => TriggerTiming::InsteadOf,
+                _ => TriggerTiming::After,
+            };
+
+            let scope = match scope_str.as_str() {
+                "ROW" => TriggerScope::Row,
+                _ => TriggerScope::Statement,
+            };
+
+            triggers.push(TriggerInfo {
+                name,
+                event,
+                timing,
+                scope,
+                action_sql: format!(
+                    "EXECUTE FUNCTION {function_name}()"
+                ),
+                table_name: table.to_owned(),
+                enabled: enabled_char != "D",
+            });
+        }
+        Ok(triggers)
+    }
+
+    fn query_check_expressions(
+        &mut self,
+        table: &str,
+    ) -> MetadataResult<HashMap<String, String>> {
+        let rows = self
+            .client
+            .query(
+                "SELECT c.conname, \
+                 pg_get_constraintdef(c.oid) \
+                 FROM pg_constraint c \
+                 JOIN pg_class t ON c.conrelid = t.oid \
+                 JOIN pg_namespace ns ON t.relnamespace = ns.oid \
+                 WHERE ns.nspname = $1 AND t.relname = $2 \
+                 AND c.contype = 'c'",
+                &[&self.schema, &table],
+            )
+            .map_err(|e| MetadataError::Query {
+                message: format!(
+                    "failed to query check constraints for \
+                     {table}: {e}"
+                ),
+            })?;
+
+        let mut result = HashMap::new();
+        for row in &rows {
+            let name: String = row.get(0);
+            let expr: String = row.get(1);
+            result.insert(name, expr);
+        }
+        Ok(result)
+    }
+
     /// Gather full schema information.
     ///
     /// # Errors
@@ -328,9 +439,19 @@ impl PostgresConnector {
 
         for name in &table_names {
             let columns = self.query_columns(name)?;
-            let constraints = self.query_constraints(name)?;
+            let mut constraints = self.query_constraints(name)?;
             let indexes = self.query_indexes(name)?;
+            let triggers = self.query_triggers(name)?;
             let (row_count, _) = self.query_table_stats(name)?;
+            let check_exprs =
+                self.query_check_expressions(name)?;
+
+            for constraint in &mut constraints {
+                if constraint.kind == ConstraintKind::Check {
+                    constraint.check_expression =
+                        check_exprs.get(&constraint.name).cloned();
+                }
+            }
 
             tables.insert(
                 name.clone(),
@@ -339,6 +460,7 @@ impl PostgresConnector {
                     columns,
                     constraints,
                     indexes,
+                    triggers,
                     estimated_rows: Some(row_count),
                 },
             );

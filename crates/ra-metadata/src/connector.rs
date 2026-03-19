@@ -79,6 +79,7 @@ mod tests {
                     ],
                     constraints: vec![],
                     indexes: vec![],
+                    triggers: vec![],
                     estimated_rows: Some(100.0),
                 },
             );

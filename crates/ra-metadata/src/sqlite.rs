@@ -15,6 +15,7 @@ use crate::explain::ExplainPlan;
 use crate::schema::{
     ColumnInfo, ColumnStatistics, ConstraintInfo, ConstraintKind,
     DatabaseKind, IndexInfo, SchemaInfo, TableInfo, TableStats,
+    TriggerEvent, TriggerInfo, TriggerScope, TriggerTiming,
 };
 
 /// `SQLite` connector using the `rusqlite` crate.
@@ -242,6 +243,7 @@ impl SqliteConnector {
             columns: pk_cols,
             referenced_table: None,
             referenced_columns: vec![],
+            check_expression: None,
         }]
     }
 
@@ -291,6 +293,7 @@ impl SqliteConnector {
                 columns: from_cols,
                 referenced_table: Some(ref_table),
                 referenced_columns: to_cols,
+                check_expression: None,
             });
         }
 
@@ -338,6 +341,75 @@ impl SqliteConnector {
             })?;
 
         Ok(count)
+    }
+
+    fn query_triggers(
+        &self,
+        table: &str,
+    ) -> MetadataResult<Vec<TriggerInfo>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT name, sql FROM sqlite_master \
+                 WHERE type = 'trigger' \
+                 AND tbl_name = ?1",
+            )
+            .map_err(|e| MetadataError::Query {
+                message: format!(
+                    "failed to query triggers for {table}: {e}"
+                ),
+            })?;
+
+        let triggers: Vec<(String, String)> = stmt
+            .query_map([table], |row| {
+                let name: String = row.get(0)?;
+                let sql: String = row.get(1)?;
+                Ok((name, sql))
+            })
+            .map_err(|e| MetadataError::Query {
+                message: format!(
+                    "failed to read triggers for {table}: {e}"
+                ),
+            })?
+            .filter_map(Result::ok)
+            .collect();
+
+        let mut result = Vec::new();
+        for (name, sql) in triggers {
+            let upper = sql.to_uppercase();
+            let event = if upper.contains("INSERT") {
+                TriggerEvent::Insert
+            } else if upper.contains("DELETE") {
+                TriggerEvent::Delete
+            } else if upper.contains("UPDATE") {
+                TriggerEvent::Update
+            } else {
+                continue;
+            };
+
+            let timing = if upper.contains("BEFORE") {
+                TriggerTiming::Before
+            } else if upper.contains("INSTEAD OF") {
+                TriggerTiming::InsteadOf
+            } else {
+                TriggerTiming::After
+            };
+
+            // SQLite triggers are always FOR EACH ROW
+            let scope = TriggerScope::Row;
+
+            result.push(TriggerInfo {
+                name,
+                event,
+                timing,
+                scope,
+                action_sql: sql,
+                table_name: table.to_owned(),
+                enabled: true,
+            });
+        }
+
+        Ok(result)
     }
 
     fn build_explain_text(
@@ -400,6 +472,7 @@ impl DatabaseConnector for SqliteConnector {
                 self.query_pk_constraint(name);
             constraints
                 .extend(self.query_fk_constraints(name));
+            let triggers = self.query_triggers(name)?;
             let row_count = self.query_row_count(name)?;
 
             tables.insert(
@@ -409,6 +482,7 @@ impl DatabaseConnector for SqliteConnector {
                     columns,
                     constraints,
                     indexes,
+                    triggers,
                     estimated_rows: Some(row_count),
                 },
             );

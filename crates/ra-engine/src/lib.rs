@@ -28,6 +28,7 @@
 #![allow(clippy::module_name_repetitions)]
 
 pub mod analysis;
+pub mod constraint_optimizer;
 pub mod cost;
 pub mod differential;
 pub mod distributed_optimizer;
@@ -42,6 +43,7 @@ pub mod resource_budget;
 pub mod resource_profiles;
 pub mod rewrite;
 pub mod timely;
+pub mod trigger_optimizer;
 
 pub use analysis::RelAnalysis;
 pub use cost::{CostCalibration, IntegratedCostFn, IntegratedCostModel};
@@ -71,5 +73,12 @@ pub use resource_budget::{
     ExceededResource, OverflowStrategy, ResourceBudget, ResourceCheckResult,
     ResourceTracker, ResourceUsageReport,
 };
+pub use constraint_optimizer::{
+    optimize_with_constraints, ConstraintOptResult,
+};
 pub use rewrite::all_rules;
 pub use timely::{ComputationStats, TimelyConfig};
+pub use trigger_optimizer::{
+    analyze_dml_cost, detect_cascade, CascadeWarning,
+    DmlCostEstimate, TriggerAnalysis,
+};

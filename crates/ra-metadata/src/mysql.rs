@@ -14,6 +14,7 @@ use crate::explain::{ExplainPlan, parse_mysql_explain};
 use crate::schema::{
     ColumnInfo, ColumnStatistics, ConstraintInfo, ConstraintKind,
     DatabaseKind, IndexInfo, SchemaInfo, TableInfo, TableStats,
+    TriggerEvent, TriggerInfo, TriggerScope, TriggerTiming,
 };
 
 /// Row type for constraint queries.
@@ -171,6 +172,7 @@ impl MySqlConnector {
                 columns,
                 referenced_table: ref_table,
                 referenced_columns,
+                check_expression: None,
             });
         }
 
@@ -245,6 +247,53 @@ impl MySqlConnector {
         Ok((*row_count, *total_bytes))
     }
 
+    fn query_triggers(
+        &mut self,
+        table: &str,
+    ) -> MetadataResult<Vec<TriggerInfo>> {
+        let rows: Vec<(String, String, String, String)> = self
+            .conn
+            .exec(
+                "SELECT TRIGGER_NAME, EVENT_MANIPULATION, \
+                 ACTION_TIMING, ACTION_STATEMENT \
+                 FROM information_schema.TRIGGERS \
+                 WHERE TRIGGER_SCHEMA = ? \
+                 AND EVENT_OBJECT_TABLE = ?",
+                (&self.database, table),
+            )
+            .map_err(|e| MetadataError::Query {
+                message: format!(
+                    "failed to query triggers for {table}: {e}"
+                ),
+            })?;
+
+        let mut triggers = Vec::new();
+        for (name, event_str, timing_str, action_sql) in rows {
+            let event = match event_str.as_str() {
+                "INSERT" => TriggerEvent::Insert,
+                "DELETE" => TriggerEvent::Delete,
+                "UPDATE" => TriggerEvent::Update,
+                _ => continue,
+            };
+
+            let timing = match timing_str.as_str() {
+                "BEFORE" => TriggerTiming::Before,
+                _ => TriggerTiming::After,
+            };
+
+            triggers.push(TriggerInfo {
+                name,
+                event,
+                timing,
+                scope: TriggerScope::Row,
+                action_sql,
+                table_name: table.to_owned(),
+                enabled: true,
+            });
+        }
+        Ok(triggers)
+    }
+
     /// Gather full schema information.
     ///
     /// # Errors
@@ -260,6 +309,7 @@ impl MySqlConnector {
             let columns = self.query_columns(name)?;
             let constraints = self.query_constraints(name)?;
             let indexes = self.query_indexes(name)?;
+            let triggers = self.query_triggers(name)?;
             let (row_count, _) =
                 self.query_table_row_count(name)?;
 
@@ -270,6 +320,7 @@ impl MySqlConnector {
                     columns,
                     constraints,
                     indexes,
+                    triggers,
                     estimated_rows: Some(row_count),
                 },
             );
