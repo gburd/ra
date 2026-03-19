@@ -25,6 +25,7 @@ pub mod diff_validator;
 pub mod error;
 pub mod explain;
 pub mod explain_gen;
+pub mod factory;
 pub mod mysql;
 pub mod postgres;
 pub mod schema;
@@ -37,6 +38,7 @@ pub use explain::{
     JoinType, NodeType,
 };
 pub use explain_gen::{from_relexpr, DatabaseCostParams, ExplainFormat};
+pub use factory::{connect, detect_kind, AnyConnector};
 pub use schema::{
     ColumnInfo, ColumnStatistics, ConstraintInfo, ConstraintKind, DatabaseKind, IndexInfo,
     SchemaInfo, TableInfo, TableStats,

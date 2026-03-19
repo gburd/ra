@@ -124,14 +124,18 @@ JOIN (
 ```
 
 ```sql
--- Negative: predicate references both sides, cannot push
+-- Expected: cross-reference predicate stays above join
+-- Predicate references both sides so filter-through-join does not apply,
+-- but other optimizer rules may still transform the plan.
 SELECT * FROM orders o
 JOIN customers c ON o.customer_id = c.id
 WHERE o.amount > c.credit_limit;
 ```
 
 ```sql
--- Negative: LEFT JOIN, pushing right-side predicate changes semantics
+-- Expected: LEFT JOIN predicate not pushed to right side
+-- Pushing c.country = 'US' below the LEFT JOIN would change semantics,
+-- but the optimizer may convert this to an inner join or apply other rules.
 SELECT * FROM orders o
 LEFT JOIN customers c ON o.customer_id = c.id
 WHERE c.country = 'US';

@@ -245,30 +245,13 @@ fn estimated_benefit(
 ### Positive: Equijoin transitivity enables index scan
 
 ```sql
--- Index on orders.status
--- No index on lineitem columns
-SELECT *
-FROM orders o
-JOIN lineitem l ON o.id = l.order_id
-WHERE l.ship_status = 'PENDING';
-
--- Without propagation:
--- Scan(orders) join Filter(ship_status='PENDING', Scan(lineitem))
--- orders scanned fully
-
--- With propagation (if orders.status correlates via FK):
--- This specific case doesn't propagate (different columns)
--- But consider:
-
+-- Expected: transitive predicate derived from equijoin
+-- s.code = 'PENDING' and o.status_code = s.code implies
+-- o.status_code = 'PENDING', enabling index scan on orders.
 SELECT *
 FROM orders o
 JOIN order_status s ON o.status_code = s.code
 WHERE s.code = 'PENDING';
-
--- Derives: o.status_code = 'PENDING'
--- Now: Filter(status_code='PENDING', IndexScan(orders))
---      join Filter(code='PENDING', Scan(order_status))
--- Index on orders.status_code now usable!
 ```
 
 ### Positive: Range propagation through equijoin

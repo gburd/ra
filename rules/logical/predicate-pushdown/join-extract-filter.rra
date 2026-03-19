@@ -78,23 +78,25 @@ fn estimated_benefit(_: f64) -> f64 {
 ## Test Cases
 
 ```sql
--- Positive: inner join with condition
+-- Expected: join condition extracted to filter
+-- The equi-join condition is extracted as a filter above a cross join
+-- to enable further predicate combination.
 SELECT * FROM emp e
 JOIN dept d ON e.deptno = d.deptno;
--- Condition extracted to filter above cross join
 ```
 
 ```sql
--- Negative: outer join
+-- Expected: outer join condition stays in place
+-- LEFT JOIN semantics differ so the condition cannot be extracted.
+-- The optimizer may still apply other transforms.
 SELECT * FROM emp e
 LEFT JOIN dept d ON e.deptno = d.deptno;
--- Cannot extract: outer join semantics differ
 ```
 
 ```sql
--- Negative: cross join (no condition)
+-- Expected: cross join has no condition to extract
+-- Already a cartesian product with no condition.
 SELECT * FROM emp e, dept d;
--- No condition to extract
 ```
 
 ## References

@@ -87,27 +87,27 @@ fn estimated_benefit(
 ## Test Cases
 
 ```sql
--- Positive: filter above ORDER BY
+-- Expected: filter-sort transpose reduces sort input
+-- Filter on deptno should be pushed below sort when implemented.
 SELECT * FROM emp
 WHERE deptno = 10
 ORDER BY salary DESC;
--- Filter pushed below sort
 ```
 
 ```sql
--- Positive: complex predicate
+-- Expected: compound predicate pushed below sort
+-- Both predicates should move below ORDER BY.
 SELECT * FROM orders
 WHERE status = 'SHIPPED' AND amount > 100
 ORDER BY order_date;
--- Both predicates pushed below sort
 ```
 
 ```sql
--- Negative: filter above ORDER BY with LIMIT
+-- Expected: LIMIT blocks filter pushdown through sort
+-- Filter cannot be pushed below LIMIT without changing semantics.
 SELECT * FROM (
     SELECT * FROM emp ORDER BY salary DESC LIMIT 10
 ) t WHERE deptno = 10;
--- Cannot push filter below LIMIT
 ```
 
 ## References

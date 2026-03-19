@@ -411,15 +411,16 @@ fn show_rule_from_real_rules_dir() {
 // ── test command ────────────────────────────────────────────
 
 #[test]
-fn test_command_scans_fixtures_for_test_cases() {
+fn test_command_shows_summary() {
+    // Fixtures include tests that may fail, so don't check exit code.
     ra_cli()
         .args(["test", &fixtures_dir()])
         .assert()
-        .stderr(predicate::str::contains("Test Results"));
+        .stderr(predicate::str::contains("Summary:"));
 }
 
 #[test]
-fn test_command_reports_test_count_per_rule() {
+fn test_command_reports_pass_rate() {
     ra_cli()
         .args(["test", &fixtures_dir()])
         .assert()
@@ -427,19 +428,19 @@ fn test_command_reports_test_count_per_rule() {
 }
 
 #[test]
-fn test_command_skips_invalid_files() {
+fn test_command_shows_per_file_results() {
     ra_cli()
         .args(["test", &fixtures_dir(), "--verbose"])
         .assert()
-        .stderr(predicate::str::contains("[SKIP]"));
+        .stderr(predicate::str::contains("passed)"));
 }
 
 #[test]
-fn test_command_shows_stub_message() {
+fn test_command_shows_duration() {
     ra_cli()
         .args(["test", &fixtures_dir()])
         .assert()
-        .stderr(predicate::str::contains("Running tests"));
+        .stderr(predicate::str::contains("Duration"));
 }
 
 #[test]
@@ -453,7 +454,10 @@ fn test_single_valid_file() {
         .args(["test", &fixture])
         .assert()
         .success()
-        .stderr(predicate::str::contains("Test Results"));
+        .stderr(
+            predicate::str::contains("Summary:")
+                .and(predicate::str::contains("passed")),
+        );
 }
 
 #[test]

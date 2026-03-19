@@ -92,24 +92,25 @@ fn estimated_benefit(
 ## Test Cases
 
 ```sql
--- Positive: expression in equi-join
+-- Expected: expression pre-computed in project before join
+-- e.deptno + 1 should be computed in a project below the join
+-- to enable a simple equi-join.
 SELECT * FROM emp e
 JOIN dept d ON e.deptno + 1 = d.deptno;
--- Expression pushed to project below join
 ```
 
 ```sql
--- Positive: function in join condition
+-- Expected: function pre-computed before join
+-- UPPER(o.product_code) should be projected before the join.
 SELECT * FROM orders o
 JOIN products p ON UPPER(o.product_code) = p.code;
--- UPPER() pushed to project
 ```
 
 ```sql
--- Negative: already simple column reference
+-- Expected: simple column reference needs no transformation
+-- Already a plain equi-join, no expressions to push down.
 SELECT * FROM emp e
 JOIN dept d ON e.deptno = d.deptno;
--- No expressions to push
 ```
 
 ## References

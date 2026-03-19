@@ -38,6 +38,19 @@ pub enum TestOutcome {
     Error { message: String },
 }
 
+/// Per-file test summary.
+#[derive(Debug)]
+pub struct FileResult {
+    /// Shortened file path for display.
+    pub display_path: String,
+    /// Number of tests that passed.
+    pub passed: usize,
+    /// Total tests in this file.
+    pub total: usize,
+    /// Names of failed tests with reasons.
+    pub failures: Vec<(String, String)>,
+}
+
 /// Aggregate statistics from a test run.
 #[derive(Debug, Default)]
 pub struct TestSummary {
@@ -53,6 +66,10 @@ pub struct TestSummary {
     pub errored: usize,
     /// Total wall-clock duration.
     pub duration: Duration,
+    /// Per-file summaries.
+    pub file_results: Vec<FileResult>,
+    /// Slowest tests (name, duration), sorted descending.
+    pub slowest: Vec<(String, Duration)>,
 }
 
 /// Run all test cases from a set of `.rra` files.
@@ -79,10 +96,7 @@ pub fn run_tests(
             Err(e) => {
                 if verbose {
                     results.push(TestResult {
-
-                        name: file
-                            .display()
-                            .to_string(),
+                        name: file.display().to_string(),
                         outcome: TestOutcome::Skip {
                             reason: format!(
                                 "parse error: {e}"
@@ -98,6 +112,9 @@ pub fn run_tests(
         };
 
         let rule_id = &rule.metadata.id;
+        let mut file_passed = 0usize;
+        let mut file_total = 0usize;
+        let mut file_failures: Vec<(String, String)> = Vec::new();
 
         for (block_idx, block) in
             rule.test_cases.iter().enumerate()
@@ -133,23 +150,35 @@ pub fn run_tests(
                 }
 
                 summary.total += 1;
+                file_total += 1;
 
                 let test_start = Instant::now();
-                let outcome = execute_test(
-                    case, &optimizer,
-                );
+                let outcome =
+                    execute_test(case, &optimizer);
                 let duration = test_start.elapsed();
 
                 match &outcome {
-                    TestOutcome::Pass => summary.passed += 1,
-                    TestOutcome::Fail { .. } => {
+                    TestOutcome::Pass => {
+                        summary.passed += 1;
+                        file_passed += 1;
+                    }
+                    TestOutcome::Fail { reason } => {
                         summary.failed += 1;
+                        file_failures.push((
+                            test_name.clone(),
+                            reason.clone(),
+                        ));
                     }
                     TestOutcome::Skip { .. } => {
                         summary.skipped += 1;
+                        file_passed += 1;
                     }
-                    TestOutcome::Error { .. } => {
+                    TestOutcome::Error { message } => {
                         summary.errored += 1;
+                        file_failures.push((
+                            test_name.clone(),
+                            format!("error: {message}"),
+                        ));
                     }
                 }
 
@@ -160,9 +189,28 @@ pub fn run_tests(
                 });
             }
         }
+
+        if file_total > 0 {
+            summary.file_results.push(FileResult {
+                display_path: short_path(file),
+                passed: file_passed,
+                total: file_total,
+                failures: file_failures,
+            });
+        }
     }
 
     summary.duration = start.elapsed();
+
+    let mut timed: Vec<(String, Duration)> = results
+        .iter()
+        .filter(|r| matches!(r.outcome, TestOutcome::Pass))
+        .map(|r| (r.name.clone(), r.duration))
+        .collect();
+    timed.sort_by(|a, b| b.1.cmp(&a.1));
+    timed.truncate(10);
+    summary.slowest = timed;
+
     Ok((results, summary))
 }
 
@@ -171,7 +219,6 @@ fn execute_test(
     test: &TestCase,
     optimizer: &Optimizer,
 ) -> TestOutcome {
-    // Step 1: parse SQL to RelExpr
     let input_plan = match sql_to_relexpr(&test.input_sql) {
         Ok(plan) => plan,
         Err(e) => {
@@ -190,12 +237,10 @@ fn execute_test(
         }
     };
 
-    // For parse-only tests, success means the SQL parsed
     if test.expected == TestExpectation::Parses {
         return TestOutcome::Pass;
     }
 
-    // Step 2: optimize
     let optimized = match optimizer.optimize(&input_plan) {
         Ok(plan) => plan,
         Err(e) => {
@@ -205,7 +250,6 @@ fn execute_test(
         }
     };
 
-    // Step 3: compare against expectation
     let plan_changed = input_plan != optimized;
 
     match &test.expected {
@@ -215,7 +259,8 @@ fn execute_test(
             } else {
                 TestOutcome::Fail {
                     reason:
-                        "expected plan to change, but it stayed the same"
+                        "expected plan to change, \
+                         but it stayed the same"
                             .to_owned(),
                 }
             }
@@ -224,7 +269,8 @@ fn execute_test(
             if plan_changed {
                 TestOutcome::Fail {
                     reason:
-                        "expected plan unchanged, but optimizer modified it"
+                        "expected plan unchanged, \
+                         but optimizer modified it"
                             .to_owned(),
                 }
             } else {
@@ -232,47 +278,38 @@ fn execute_test(
             }
         }
         TestExpectation::RuleApplied { rule_id: _ } => {
-            // For now we can only check if the plan changed.
-            // Rule-specific tracking would require e-graph
-            // introspection.
             if plan_changed {
                 TestOutcome::Pass
             } else {
                 TestOutcome::Fail {
                     reason:
-                        "expected rule to apply, but plan unchanged"
+                        "expected rule to apply, \
+                         but plan unchanged"
                             .to_owned(),
                 }
             }
         }
         TestExpectation::Described(_desc) => {
-            // Freeform expectations: if the test is negative,
-            // plan should be unchanged; otherwise changed.
             if test.negative {
                 if plan_changed {
                     TestOutcome::Fail {
                         reason:
-                            "negative test: plan should not have changed"
+                            "negative test: plan should \
+                             not have changed"
                                 .to_owned(),
                     }
                 } else {
                     TestOutcome::Pass
                 }
             } else {
-                // For positive described tests, passing means
-                // the optimizer at least did something (or the
-                // SQL parsed and optimized without error).
                 TestOutcome::Pass
             }
         }
-        TestExpectation::Parses => {
-            // Already handled above
-            TestOutcome::Pass
-        }
+        TestExpectation::Parses => TestOutcome::Pass,
     }
 }
 
-/// Shorten a path for display by taking the last 2-3 components.
+/// Shorten a path for display by taking the last 3 components.
 fn short_path(path: &Path) -> String {
     let components: Vec<_> = path
         .components()
@@ -327,5 +364,24 @@ mod tests {
         );
         let short = short_path(&path);
         assert!(short.contains("filter.rra"));
+    }
+
+    #[test]
+    fn execute_plan_changed() {
+        let test = TestCase {
+            input_sql:
+                "SELECT * FROM orders o \
+                 JOIN customers c ON o.cid = c.id \
+                 WHERE o.amount > 100"
+                    .to_owned(),
+            expected: TestExpectation::PlanChanged,
+            description: Some("filter pushdown".to_owned()),
+            negative: false,
+        };
+        let optimizer = Optimizer::new();
+        let result = execute_test(&test, &optimizer);
+        // Either passes or fails depending on optimizer rules;
+        // we just verify it doesn't error or skip.
+        assert!(!matches!(result, TestOutcome::Error { .. }));
     }
 }
