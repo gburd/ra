@@ -58,6 +58,12 @@ pub enum Expr {
         /// Target type name.
         target_type: String,
     },
+
+    /// An array constructor (e.g., `ARRAY[1, 2, 3]`).
+    Array(Vec<Expr>),
+
+    /// Array element access (e.g., `arr[2]`).
+    ArrayIndex(Box<Expr>, Box<Expr>),
 }
 
 /// A reference to a column, optionally qualified by a table name.

@@ -151,6 +151,30 @@ pub enum RelExpr {
         /// Cycle detection configuration.
         cycle_detection: Option<CycleDetection>,
     },
+
+    /// Unnest an array or set expression into rows.
+    Unnest {
+        /// Expression producing array or set.
+        expr: Expr,
+        /// Column alias for unnested values.
+        alias: Option<String>,
+        /// Correlated input relation (for LATERAL unnest).
+        input: Option<Box<RelExpr>>,
+        /// Whether WITH ORDINALITY was specified.
+        with_ordinality: bool,
+    },
+
+    /// General table-valued function (generate_series, etc.).
+    TableFunction {
+        /// Function name.
+        name: String,
+        /// Function arguments.
+        args: Vec<Expr>,
+        /// Output column definitions (name, type as string).
+        columns: Vec<(String, String)>,
+        /// Correlated input relation (for LATERAL).
+        input: Option<Box<RelExpr>>,
+    },
 }
 
 /// Configuration for cycle detection in recursive CTEs.
@@ -407,6 +431,47 @@ impl RelExpr {
         }
     }
 
+    /// Create a standalone unnest operator.
+    #[must_use]
+    pub fn unnest(expr: Expr, alias: Option<String>) -> Self {
+        Self::Unnest {
+            expr,
+            alias,
+            input: None,
+            with_ordinality: false,
+        }
+    }
+
+    /// Create a correlated (lateral) unnest operator.
+    #[must_use]
+    pub fn unnest_lateral(
+        expr: Expr,
+        input: RelExpr,
+        alias: Option<String>,
+    ) -> Self {
+        Self::Unnest {
+            expr,
+            alias,
+            input: Some(Box::new(input)),
+            with_ordinality: false,
+        }
+    }
+
+    /// Create a table-valued function operator.
+    #[must_use]
+    pub fn table_function(
+        name: impl Into<String>,
+        args: Vec<Expr>,
+        columns: Vec<(String, String)>,
+    ) -> Self {
+        Self::TableFunction {
+            name: name.into(),
+            args,
+            columns,
+            input: None,
+        }
+    }
+
     /// Return the direct child inputs of this node.
     #[must_use]
     pub fn children(&self) -> Vec<&RelExpr> {
@@ -432,6 +497,14 @@ impl RelExpr {
                 body,
                 ..
             } => vec![base_case, recursive_case, body],
+            Self::Unnest { input, .. } => match input {
+                Some(inp) => vec![inp],
+                None => vec![],
+            },
+            Self::TableFunction { input, .. } => match input {
+                Some(inp) => vec![inp],
+                None => vec![],
+            },
         }
     }
 
@@ -541,6 +614,22 @@ impl RelExpr {
                 left.collect_columns(out);
                 right.collect_columns(out);
             }
+            Self::Unnest { expr, input, .. } => {
+                collect_expr_columns(expr, out);
+                if let Some(inp) = input {
+                    inp.collect_columns(out);
+                }
+            }
+            Self::TableFunction {
+                args, input, ..
+            } => {
+                for arg in args {
+                    collect_expr_columns(arg, out);
+                }
+                if let Some(inp) = input {
+                    inp.collect_columns(out);
+                }
+            }
         }
     }
 }
@@ -584,6 +673,12 @@ impl RelExpr {
                     || body.references_cte(cte_name)
             }
             Self::Values { .. } => false,
+            Self::Unnest { input, .. }
+            | Self::TableFunction { input, .. } => {
+                input
+                    .as_ref()
+                    .is_some_and(|i| i.references_cte(cte_name))
+            }
         }
     }
 }
@@ -623,6 +718,15 @@ fn collect_expr_columns(expr: &Expr, out: &mut Vec<ColumnRef>) {
         }
         Expr::Cast { expr, .. } => {
             collect_expr_columns(expr, out);
+        }
+        Expr::Array(elements) => {
+            for elem in elements {
+                collect_expr_columns(elem, out);
+            }
+        }
+        Expr::ArrayIndex(array, index) => {
+            collect_expr_columns(array, out);
+            collect_expr_columns(index, out);
         }
     }
 }
