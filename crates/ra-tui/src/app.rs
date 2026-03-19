@@ -17,6 +17,8 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
 use crate::event::{Action, EventHandler, TuiEvent, key_action};
+use crate::layout::LayoutMode;
+use crate::panels::sql_editor::{EditorMode, SqlEditor};
 use crate::timeline::Timeline;
 use crate::ui;
 
@@ -42,24 +44,44 @@ pub enum Panel {
     Evolution,
     /// Execution feedback (bottom-right).
     Feedback,
+    /// SQL editor panel (editor layout only).
+    SqlEditor,
 }
 
 impl Panel {
-    fn next(self) -> Self {
-        match self {
-            Self::Stats => Self::Plan,
-            Self::Plan => Self::Evolution,
-            Self::Evolution => Self::Feedback,
-            Self::Feedback => Self::Stats,
+    fn next(self, layout: LayoutMode) -> Self {
+        match layout {
+            LayoutMode::Classic => match self {
+                Self::Stats => Self::Plan,
+                Self::Plan => Self::Evolution,
+                Self::Evolution => Self::Feedback,
+                Self::Feedback | Self::SqlEditor => Self::Stats,
+            },
+            LayoutMode::Editor => match self {
+                Self::SqlEditor => Self::Plan,
+                Self::Plan => Self::Stats,
+                Self::Stats => Self::Feedback,
+                Self::Feedback | Self::Evolution => {
+                    Self::SqlEditor
+                }
+            },
         }
     }
 
-    fn prev(self) -> Self {
-        match self {
-            Self::Stats => Self::Feedback,
-            Self::Plan => Self::Stats,
-            Self::Evolution => Self::Plan,
-            Self::Feedback => Self::Evolution,
+    fn prev(self, layout: LayoutMode) -> Self {
+        match layout {
+            LayoutMode::Classic => match self {
+                Self::Stats | Self::SqlEditor => Self::Feedback,
+                Self::Plan => Self::Stats,
+                Self::Evolution => Self::Plan,
+                Self::Feedback => Self::Evolution,
+            },
+            LayoutMode::Editor => match self {
+                Self::SqlEditor => Self::Feedback,
+                Self::Plan => Self::SqlEditor,
+                Self::Stats => Self::Plan,
+                Self::Feedback | Self::Evolution => Self::Stats,
+            },
         }
     }
 }
@@ -91,6 +113,10 @@ pub struct App {
     pub show_help: bool,
     /// Whether the app should quit.
     pub should_quit: bool,
+    /// Current layout mode.
+    pub layout_mode: LayoutMode,
+    /// SQL editor state.
+    pub sql_editor: SqlEditor,
     /// Last auto-advance time.
     last_advance: Instant,
 }
@@ -105,6 +131,7 @@ impl App {
         if timeline.is_empty() {
             return Err(AppError::EmptyTimeline);
         }
+        let sql_editor = SqlEditor::new(&timeline.query);
         Ok(Self {
             timeline,
             current_step: 0,
@@ -114,6 +141,8 @@ impl App {
             scroll_offset: 0,
             show_help: false,
             should_quit: false,
+            layout_mode: LayoutMode::Classic,
+            sql_editor,
             last_advance: Instant::now(),
         })
     }
@@ -131,6 +160,18 @@ impl App {
 
     /// Process an action from the event handler.
     pub fn handle_action(&mut self, action: Action) {
+        // In edit mode, most keys go to the editor
+        if self.sql_editor.mode() == EditorMode::Edit {
+            match action {
+                Action::ToggleEditor => {
+                    self.sql_editor.toggle_mode();
+                }
+                Action::Quit => self.should_quit = true,
+                _ => {}
+            }
+            return;
+        }
+
         match action {
             Action::Quit => self.should_quit = true,
             Action::NextStep => self.step_forward(),
@@ -144,7 +185,9 @@ impl App {
                     self.timeline.len().saturating_sub(1);
                 self.scroll_offset = 0;
             }
-            Action::TogglePlay => self.playing = !self.playing,
+            Action::TogglePlay => {
+                self.playing = !self.playing;
+            }
             Action::SpeedUp => {
                 if self.speed_index < SPEEDS.len() - 1 {
                     self.speed_index += 1;
@@ -156,11 +199,13 @@ impl App {
                 }
             }
             Action::NextPanel => {
-                self.focused = self.focused.next();
+                self.focused =
+                    self.focused.next(self.layout_mode);
                 self.scroll_offset = 0;
             }
             Action::PrevPanel => {
-                self.focused = self.focused.prev();
+                self.focused =
+                    self.focused.prev(self.layout_mode);
                 self.scroll_offset = 0;
             }
             Action::ScrollUp => {
@@ -173,6 +218,25 @@ impl App {
             }
             Action::ToggleHelp => {
                 self.show_help = !self.show_help;
+            }
+            Action::ToggleLayout => {
+                self.layout_mode = self.layout_mode.toggle();
+                if self.layout_mode == LayoutMode::Classic
+                    && self.focused == Panel::SqlEditor
+                {
+                    self.focused = Panel::Plan;
+                }
+                if self.layout_mode == LayoutMode::Editor
+                    && self.focused == Panel::Evolution
+                {
+                    self.focused = Panel::Stats;
+                }
+            }
+            Action::ToggleEditor => {
+                if self.layout_mode == LayoutMode::Editor {
+                    self.focused = Panel::SqlEditor;
+                    self.sql_editor.toggle_mode();
+                }
             }
             Action::None => {}
         }
@@ -209,6 +273,59 @@ impl App {
         false
     }
 
+    /// Handle a raw key event, routing to the editor if in edit
+    /// mode or to the normal action handler otherwise.
+    fn handle_key(
+        &mut self,
+        key: &crossterm::event::KeyEvent,
+    ) {
+        use crossterm::event::{KeyCode, KeyModifiers};
+
+        if self.sql_editor.mode() == EditorMode::Edit {
+            match (key.modifiers, key.code) {
+                (_, KeyCode::Esc) => {
+                    self.sql_editor
+                        .set_mode(EditorMode::View);
+                }
+                (_, KeyCode::Up) => self.sql_editor.move_up(),
+                (_, KeyCode::Down) => {
+                    self.sql_editor.move_down();
+                }
+                (_, KeyCode::Left) => {
+                    self.sql_editor.move_left();
+                }
+                (_, KeyCode::Right) => {
+                    self.sql_editor.move_right();
+                }
+                (_, KeyCode::Home) => {
+                    self.sql_editor.move_home();
+                }
+                (_, KeyCode::End) => {
+                    self.sql_editor.move_end();
+                }
+                (_, KeyCode::Backspace) => {
+                    self.sql_editor.backspace();
+                }
+                (_, KeyCode::Delete) => {
+                    self.sql_editor.delete_char();
+                }
+                (_, KeyCode::Enter) => {
+                    self.sql_editor.insert_char('\n');
+                }
+                (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
+                    self.should_quit = true;
+                }
+                (_, KeyCode::Char(ch)) => {
+                    self.sql_editor.insert_char(ch);
+                }
+                _ => {}
+            }
+        } else {
+            let action = key_action(key);
+            self.handle_action(action);
+        }
+    }
+
     /// Run the interactive TUI event loop.
     ///
     /// # Errors
@@ -223,15 +340,15 @@ impl App {
         let mut terminal = Terminal::new(backend)?;
         terminal.clear()?;
 
-        let events = EventHandler::new(Duration::from_millis(50));
+        let events =
+            EventHandler::new(Duration::from_millis(50));
 
         loop {
             terminal.draw(|frame| ui::render(frame, self))?;
 
             match events.next() {
                 Ok(TuiEvent::Key(key)) => {
-                    let action = key_action(&key);
-                    self.handle_action(action);
+                    self.handle_key(&key);
                 }
                 Ok(TuiEvent::Tick) => {
                     self.tick();

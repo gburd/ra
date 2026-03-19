@@ -7,7 +7,10 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use crossterm::event::{self, Event as CrosstermEvent, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{
+    self, Event as CrosstermEvent, KeyCode, KeyEvent,
+    KeyModifiers,
+};
 
 /// Events consumed by the TUI application.
 #[derive(Debug, Clone)]
@@ -38,12 +41,18 @@ impl EventHandler {
                 if event::poll(tick_rate).unwrap_or(false) {
                     match event::read() {
                         Ok(CrosstermEvent::Key(key)) => {
-                            if tx.send(TuiEvent::Key(key)).is_err() {
+                            if tx
+                                .send(TuiEvent::Key(key))
+                                .is_err()
+                            {
                                 return;
                             }
                         }
                         Ok(CrosstermEvent::Resize(w, h)) => {
-                            if tx.send(TuiEvent::Resize(w, h)).is_err() {
+                            if tx
+                                .send(TuiEvent::Resize(w, h))
+                                .is_err()
+                            {
                                 return;
                             }
                         }
@@ -69,34 +78,45 @@ impl EventHandler {
     pub fn next(&self) -> anyhow::Result<TuiEvent> {
         self.rx
             .recv()
-            .map_err(|e| anyhow::anyhow!("event channel closed: {e}"))
+            .map_err(|e| {
+                anyhow::anyhow!("event channel closed: {e}")
+            })
     }
 }
 
 /// Map a key event to a named action for the app state machine.
+///
+/// This is used only when not in SQL edit mode. In edit mode,
+/// keys are routed directly to the editor.
 #[must_use]
 pub fn key_action(key: &KeyEvent) -> Action {
     match (key.modifiers, key.code) {
         (KeyModifiers::CONTROL, KeyCode::Char('c'))
         | (_, KeyCode::Char('q')) => Action::Quit,
-        (_, KeyCode::Right | KeyCode::Char('l')) => Action::NextStep,
-        (_, KeyCode::Left | KeyCode::Char('h')) => Action::PrevStep,
-        (_, KeyCode::Char(' ')) => Action::TogglePlay,
-        (_, KeyCode::Char('+' | '=')) => {
-            Action::SpeedUp
+        (_, KeyCode::Right | KeyCode::Char('l')) => {
+            Action::NextStep
         }
+        (_, KeyCode::Left | KeyCode::Char('h')) => {
+            Action::PrevStep
+        }
+        (_, KeyCode::Char(' ')) => Action::TogglePlay,
+        (_, KeyCode::Char('+' | '=')) => Action::SpeedUp,
         (_, KeyCode::Char('-')) => Action::SlowDown,
         (_, KeyCode::Tab) => Action::NextPanel,
         (KeyModifiers::SHIFT, KeyCode::BackTab) => {
             Action::PrevPanel
         }
-        (_, KeyCode::Up | KeyCode::Char('k')) => Action::ScrollUp,
+        (_, KeyCode::Up | KeyCode::Char('k')) => {
+            Action::ScrollUp
+        }
         (_, KeyCode::Down | KeyCode::Char('j')) => {
             Action::ScrollDown
         }
         (_, KeyCode::Home) => Action::FirstStep,
         (_, KeyCode::End) => Action::LastStep,
         (_, KeyCode::Char('?')) => Action::ToggleHelp,
+        (_, KeyCode::Char('L')) => Action::ToggleLayout,
+        (_, KeyCode::Char('E')) => Action::ToggleEditor,
         _ => Action::None,
     }
 }
@@ -130,6 +150,10 @@ pub enum Action {
     ScrollDown,
     /// Toggle the help overlay.
     ToggleHelp,
+    /// Toggle between classic and editor layout.
+    ToggleLayout,
+    /// Toggle SQL editor mode (enter/exit edit).
+    ToggleEditor,
     /// No-op.
     None,
 }

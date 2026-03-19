@@ -1,22 +1,45 @@
-//! Responsive 4-panel layout system for the TUI.
+//! Responsive layout system for the TUI.
 //!
-//! Manages how the four panels (statistics, plan tree, evolution,
-//! feedback) are arranged within the terminal area, including
-//! the status bar, main content area, and keybindings bar.
+//! Supports two layout modes:
+//! - **Classic**: 4-panel 2x2 grid (statistics, plan, evolution, feedback)
+//! - **Editor**: 3-panel with SQL editor on the left, plan tree top-right,
+//!   and statistics/feedback split on the bottom
+//!
+//! Press 'L' to toggle between layouts at runtime.
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
+
+/// Which layout mode is active.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LayoutMode {
+    /// Classic 4-panel 2x2 grid layout.
+    Classic,
+    /// Editor layout with SQL editor panel.
+    Editor,
+}
+
+impl LayoutMode {
+    /// Toggle to the next layout mode.
+    #[must_use]
+    pub fn toggle(self) -> Self {
+        match self {
+            Self::Classic => Self::Editor,
+            Self::Editor => Self::Classic,
+        }
+    }
+}
 
 /// Layout regions for the full TUI frame.
 pub struct FrameLayout {
     /// Top status bar area.
     pub status_bar: Rect,
-    /// Main content area (holds the four panels).
+    /// Main content area (holds the panels).
     pub content: Rect,
     /// Bottom keybindings bar area.
     pub keybindings_bar: Rect,
 }
 
-/// Layout regions for the four panels within the content area.
+/// Layout regions for the four panels within the content area (classic mode).
 pub struct PanelLayout {
     /// Top-left: statistics dashboard.
     pub stats: Rect,
@@ -25,6 +48,18 @@ pub struct PanelLayout {
     /// Bottom-left: cost evolution chart.
     pub evolution: Rect,
     /// Bottom-right: execution feedback log.
+    pub feedback: Rect,
+}
+
+/// Layout regions for the editor layout (3-panel mode).
+pub struct EditorLayout {
+    /// Left: SQL editor panel (35% width).
+    pub sql_editor: Rect,
+    /// Top-right: plan tree (65% width, 55% height).
+    pub plan: Rect,
+    /// Bottom-left of right side: statistics (50%).
+    pub stats: Rect,
+    /// Bottom-right of right side: feedback (50%).
     pub feedback: Rect,
 }
 
@@ -57,6 +92,49 @@ pub fn panel_layout(area: Rect) -> PanelLayout {
         stacked_layout(area)
     } else {
         grid_layout(area)
+    }
+}
+
+/// Compute the editor 3-panel layout within a content area.
+///
+/// Left side: SQL editor (35% width).
+/// Right side split vertically: plan tree (55% top), then
+/// bottom split horizontally into stats (50%) and feedback (50%).
+#[must_use]
+pub fn editor_layout(area: Rect) -> EditorLayout {
+    if area.width < 80 {
+        return editor_stacked_layout(area);
+    }
+
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(35),
+            Constraint::Percentage(65),
+        ])
+        .split(area);
+
+    let right_rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage(55),
+            Constraint::Percentage(45),
+        ])
+        .split(cols[1]);
+
+    let bottom_cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(50),
+            Constraint::Percentage(50),
+        ])
+        .split(right_rows[1]);
+
+    EditorLayout {
+        sql_editor: cols[0],
+        plan: right_rows[0],
+        stats: bottom_cols[0],
+        feedback: bottom_cols[1],
     }
 }
 
@@ -110,6 +188,26 @@ fn stacked_layout(area: Rect) -> PanelLayout {
         stats: chunks[0],
         plan: chunks[1],
         evolution: chunks[2],
+        feedback: chunks[3],
+    }
+}
+
+/// Stacked editor layout for narrow terminals.
+fn editor_stacked_layout(area: Rect) -> EditorLayout {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage(30),
+            Constraint::Percentage(30),
+            Constraint::Percentage(20),
+            Constraint::Percentage(20),
+        ])
+        .split(area);
+
+    EditorLayout {
+        sql_editor: chunks[0],
+        plan: chunks[1],
+        stats: chunks[2],
         feedback: chunks[3],
     }
 }
@@ -170,21 +268,17 @@ mod tests {
     #[test]
     fn panel_layout_wide_uses_grid() {
         let pl = panel_layout(test_area(120, 40));
-        // In grid mode, stats and plan share the top row
         assert_eq!(pl.stats.y, pl.plan.y);
-        // Evolution and feedback share the bottom row
         assert_eq!(pl.evolution.y, pl.feedback.y);
     }
 
     #[test]
     fn panel_layout_narrow_stacks() {
         let pl = panel_layout(test_area(60, 40));
-        // In stacked mode, all panels have full width
         assert_eq!(pl.stats.width, 60);
         assert_eq!(pl.plan.width, 60);
         assert_eq!(pl.evolution.width, 60);
         assert_eq!(pl.feedback.width, 60);
-        // Each panel is below the previous
         assert!(pl.plan.y > pl.stats.y);
         assert!(pl.evolution.y > pl.plan.y);
         assert!(pl.feedback.y > pl.evolution.y);
@@ -193,11 +287,7 @@ mod tests {
     #[test]
     fn panel_layout_no_overlap() {
         let pl = panel_layout(test_area(120, 40));
-        // Stats and plan don't overlap horizontally
-        assert!(
-            pl.stats.x + pl.stats.width <= pl.plan.x
-        );
-        // Evolution and feedback don't overlap horizontally
+        assert!(pl.stats.x + pl.stats.width <= pl.plan.x);
         assert!(
             pl.evolution.x + pl.evolution.width
                 <= pl.feedback.x
@@ -207,7 +297,6 @@ mod tests {
     #[test]
     fn panel_layout_top_bottom_no_overlap() {
         let pl = panel_layout(test_area(120, 40));
-        // Top row ends before bottom row starts
         assert!(
             pl.stats.y + pl.stats.height <= pl.evolution.y
         );
@@ -223,17 +312,21 @@ mod tests {
         assert!(rect.x >= area.x);
         assert!(rect.y >= area.y);
         assert!(rect.x + rect.width <= area.x + area.width);
-        assert!(rect.y + rect.height <= area.y + area.height);
+        assert!(
+            rect.y + rect.height <= area.y + area.height
+        );
     }
 
     #[test]
     fn centered_rect_is_centered() {
         let area = test_area(100, 50);
         let rect = centered_rect(50, 50, area);
-        // Should be roughly centered (rounding may differ by 1)
         let mid_x = area.x + area.width / 2;
         let rect_mid_x = rect.x + rect.width / 2;
-        assert!((mid_x as i32 - rect_mid_x as i32).unsigned_abs() <= 1);
+        assert!(
+            (mid_x as i32 - rect_mid_x as i32).unsigned_abs()
+                <= 1
+        );
     }
 
     #[test]
@@ -247,15 +340,82 @@ mod tests {
     #[test]
     fn panel_layout_exact_boundary() {
         let pl = panel_layout(test_area(80, 40));
-        // Width 80 is the threshold, should use grid layout
         assert_eq!(pl.stats.y, pl.plan.y);
     }
 
     #[test]
     fn panel_layout_boundary_minus_one() {
         let pl = panel_layout(test_area(79, 40));
-        // Width 79 < 80, should use stacked layout
         assert_eq!(pl.stats.width, 79);
         assert_eq!(pl.plan.width, 79);
+    }
+
+    // -- Editor layout tests --
+
+    #[test]
+    fn editor_layout_wide_has_left_panel() {
+        let el = editor_layout(test_area(120, 40));
+        assert_eq!(el.sql_editor.x, 0);
+        assert!(el.plan.x > el.sql_editor.x);
+    }
+
+    #[test]
+    fn editor_layout_no_overlap_horizontal() {
+        let el = editor_layout(test_area(120, 40));
+        assert!(
+            el.sql_editor.x + el.sql_editor.width
+                <= el.plan.x
+        );
+    }
+
+    #[test]
+    fn editor_layout_plan_above_bottom() {
+        let el = editor_layout(test_area(120, 40));
+        assert!(
+            el.plan.y + el.plan.height <= el.stats.y
+        );
+        assert!(
+            el.plan.y + el.plan.height <= el.feedback.y
+        );
+    }
+
+    #[test]
+    fn editor_layout_bottom_same_row() {
+        let el = editor_layout(test_area(120, 40));
+        assert_eq!(el.stats.y, el.feedback.y);
+    }
+
+    #[test]
+    fn editor_layout_stats_feedback_no_overlap() {
+        let el = editor_layout(test_area(120, 40));
+        assert!(
+            el.stats.x + el.stats.width <= el.feedback.x
+        );
+    }
+
+    #[test]
+    fn editor_layout_narrow_stacks() {
+        let el = editor_layout(test_area(60, 40));
+        assert_eq!(el.sql_editor.width, 60);
+        assert_eq!(el.plan.width, 60);
+        assert!(el.plan.y > el.sql_editor.y);
+    }
+
+    #[test]
+    fn layout_mode_toggle() {
+        assert_eq!(
+            LayoutMode::Classic.toggle(),
+            LayoutMode::Editor
+        );
+        assert_eq!(
+            LayoutMode::Editor.toggle(),
+            LayoutMode::Classic
+        );
+    }
+
+    #[test]
+    fn layout_mode_double_toggle_identity() {
+        let mode = LayoutMode::Classic;
+        assert_eq!(mode.toggle().toggle(), mode);
     }
 }

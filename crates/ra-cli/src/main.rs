@@ -10,6 +10,7 @@ mod stats_commands;
 mod test_executor;
 mod visualize;
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
@@ -89,19 +90,27 @@ enum Commands {
     },
     /// Explain a SQL query's relational algebra plan.
     Explain {
-        /// SQL query to explain.
+        /// SQL query to explain (ignored when --stdin is set).
+        #[arg(default_value = "")]
         query: String,
         /// Hardware profile for cost estimation (edge, mobile, laptop, desktop, server, gpu-server, auto).
         #[arg(long, default_value = "auto")]
         hardware_profile: String,
+        /// Read SQL from stdin instead of the positional argument.
+        #[arg(long)]
+        stdin: bool,
     },
     /// Optimize a SQL query using rewrite rules.
     Optimize {
-        /// SQL query to optimize.
+        /// SQL query to optimize (ignored when --stdin is set).
+        #[arg(default_value = "")]
         query: String,
         /// Hardware profile for cost estimation (edge, mobile, laptop, desktop, server, gpu-server, auto).
         #[arg(long, default_value = "auto")]
         hardware_profile: String,
+        /// Read SQL from stdin instead of the positional argument.
+        #[arg(long)]
+        stdin: bool,
         /// Diff output format: colored, plain, side-by-side, compact.
         #[arg(long)]
         diff: Option<String>,
@@ -273,12 +282,25 @@ fn main() -> Result<()> {
             let dir = dir.as_deref().unwrap_or("rules");
             cmd_show(&rule_id, dir)
         }
-        Commands::Explain { query, hardware_profile } => {
-            cmd_explain(&query, &hardware_profile, cli.verbose, cli.quiet)
+        Commands::Explain {
+            query,
+            hardware_profile,
+            stdin: use_stdin,
+        } => {
+            let resolved = resolve_query(
+                &query, use_stdin,
+            )?;
+            cmd_explain(
+                &resolved,
+                &hardware_profile,
+                cli.verbose,
+                cli.quiet,
+            )
         }
         Commands::Optimize {
             query,
             hardware_profile,
+            stdin: use_stdin,
             diff,
             no_color,
             resource_budget,
@@ -287,6 +309,9 @@ fn main() -> Result<()> {
             max_iterations,
             overflow_strategy,
         } => {
+            let resolved = resolve_query(
+                &query, use_stdin,
+            )?;
             let budget = build_resource_budget(
                 resource_budget.as_deref(),
                 max_time.as_deref(),
@@ -295,7 +320,7 @@ fn main() -> Result<()> {
                 overflow_strategy.as_deref(),
             )?;
             cmd_optimize(
-                &query,
+                &resolved,
                 &hardware_profile,
                 diff.as_deref(),
                 no_color,
@@ -1358,20 +1383,19 @@ fn cmd_tui(
                 format!("reading timeline file: {path}")
             })?;
 
-        // Try JSON first (native format), fall back to demo if TOML
         if path.ends_with(".json") {
             serde_json::from_str(&source).with_context(|| {
                 format!("parsing timeline JSON from: {path}")
             })?
         } else if path.ends_with(".toml") {
-            // TOML statistics timelines not yet supported in TUI
-            // (different format - statistics evolution vs optimizer snapshots)
-            eprintln!("Note: TOML statistics timelines not yet supported in TUI.");
-            eprintln!("Using demo timeline instead.");
-            eprintln!("Tip: Use 'ra-cli tui --demo' for the demo timeline.");
-            ra_tui::Timeline::demo()
+            ra_tui::Timeline::from_toml(&source)
+                .map_err(|e| anyhow::anyhow!("{e}"))
+                .with_context(|| {
+                    format!(
+                        "converting TOML timeline: {path}"
+                    )
+                })?
         } else {
-            // Try JSON parse as fallback
             serde_json::from_str(&source).with_context(|| {
                 format!("parsing timeline from: {path}")
             })?
@@ -1402,6 +1426,36 @@ fn cmd_tui(
 }
 
 // ── Helpers ─────────────────────────────────────────────────
+
+/// Resolve the SQL query from either the positional argument or stdin.
+fn resolve_query(
+    positional: &str,
+    use_stdin: bool,
+) -> Result<String> {
+    if use_stdin {
+        let mut buf = String::new();
+        std::io::stdin()
+            .read_to_string(&mut buf)
+            .context("reading SQL from stdin")?;
+        let trimmed = buf.trim().to_owned();
+        if trimmed.is_empty() {
+            bail!(
+                "no SQL received on stdin\n\
+                 hint: pipe a query, e.g. \
+                 echo \"SELECT 1\" | ra-cli explain --stdin"
+            );
+        }
+        Ok(trimmed)
+    } else {
+        if positional.is_empty() {
+            bail!(
+                "no SQL query provided\n\
+                 hint: pass a query argument or use --stdin"
+            );
+        }
+        Ok(positional.to_owned())
+    }
+}
 
 /// Load a hardware profile by name.
 fn load_hardware_profile(name: &str) -> Result<ra_hardware::HardwareProfile> {
