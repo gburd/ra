@@ -268,10 +268,6 @@ fn emit_binop(
         }
         BinOp::And => builder.ins().band(left, right),
         BinOp::Or => builder.ins().bor(left, right),
-        BinOp::Mod => {
-            // Signed remainder (a % b)
-            builder.ins().srem(left, right)
-        }
         BinOp::Concat | BinOp::JsonAccess => {
             // String operations not yet supported in Cranelift backend
             // Return left operand as placeholder
