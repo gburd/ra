@@ -366,6 +366,9 @@ fn estimate_cost(plan: &RelExpr) -> f64 {
             Some(inp) => estimate_cost(inp) + 50.0,
             None => 50.0,
         },
+        RelExpr::MultiUnnest { exprs, .. } => {
+            exprs.len() as f64 * 50.0
+        }
         RelExpr::TableFunction { input, .. } => match input {
             Some(inp) => estimate_cost(inp) + 100.0,
             None => 100.0,

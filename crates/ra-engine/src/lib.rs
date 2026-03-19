@@ -87,4 +87,7 @@ pub use trigger_optimizer::{
     analyze_dml_cost, detect_cascade, CascadeWarning,
     DmlCostEstimate, TriggerAnalysis,
 };
-pub use executors::{LateralJoinExecutor, TableFunctionExecutor, UnnestExecutor};
+pub use executors::{
+    LateralJoinExecutor, MultiUnnestExecutor, TableFunctionExecutor,
+    UnnestExecutor,
+};

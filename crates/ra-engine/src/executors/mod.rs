@@ -12,4 +12,4 @@ pub mod unnest;
 
 pub use lateral_join::LateralJoinExecutor;
 pub use table_function::TableFunctionExecutor;
-pub use unnest::UnnestExecutor;
+pub use unnest::{MultiUnnestExecutor, UnnestExecutor};

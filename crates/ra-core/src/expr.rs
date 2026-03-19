@@ -64,6 +64,16 @@ pub enum Expr {
 
     /// Array element access (e.g., `arr[2]`).
     ArrayIndex(Box<Expr>, Box<Expr>),
+
+    /// Array slice (e.g., `arr[1:3]`).
+    ArraySlice {
+        /// The array expression.
+        array: Box<Expr>,
+        /// Start index (None means from beginning).
+        start: Option<Box<Expr>>,
+        /// End index (None means to end).
+        end: Option<Box<Expr>>,
+    },
 }
 
 /// A reference to a column, optionally qualified by a table name.

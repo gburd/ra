@@ -278,6 +278,25 @@ fn render_expr(expr: &RelExpr, ctx: &mut RenderContext) {
                 render_scalar(expr)
             );
         }
+        RelExpr::MultiUnnest {
+            exprs, aliases, ..
+        } => {
+            let arg_strs: Vec<String> =
+                exprs.iter().map(render_scalar).collect();
+            let alias_list: Vec<String> = aliases
+                .iter()
+                .filter_map(|a| a.clone())
+                .collect();
+            let alias_str = if alias_list.is_empty() {
+                String::new()
+            } else {
+                format!(" AS t({})", alias_list.join(", "))
+            };
+            ctx.from = format!(
+                "unnest({}){alias_str}",
+                arg_strs.join(", ")
+            );
+        }
         RelExpr::TableFunction {
             name, args, input, ..
         } => {
@@ -342,6 +361,17 @@ fn render_scalar(expr: &Expr) -> String {
         }
         Expr::ArrayIndex(array, index) => {
             format!("{}[{}]", render_scalar(array), render_scalar(index))
+        }
+        Expr::ArraySlice {
+            array, start, end,
+        } => {
+            let s = start
+                .as_ref()
+                .map_or(String::new(), |e| render_scalar(e));
+            let e = end
+                .as_ref()
+                .map_or(String::new(), |e| render_scalar(e));
+            format!("{}[{s}:{e}]", render_scalar(array))
         }
     }
 }

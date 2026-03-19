@@ -195,6 +195,9 @@ impl FeatureSchema {
                     self.encode_expr(inp, stats, features);
                 }
             }
+            RelExpr::MultiUnnest { .. } => {
+                features[OP_TYPE_OFFSET + 2] = 1.0;
+            }
         }
     }
 
@@ -253,7 +256,8 @@ impl FeatureSchema {
             | Expr::Case { .. }
             | Expr::Cast { .. }
             | Expr::Array(_)
-            | Expr::ArrayIndex(_, _) => {}
+            | Expr::ArrayIndex(_, _)
+            | Expr::ArraySlice { .. } => {}
         }
     }
 }

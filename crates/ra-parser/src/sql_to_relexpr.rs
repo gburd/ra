@@ -450,16 +450,41 @@ fn convert_table_factor(
                         .to_owned(),
                 ));
             }
-            let arr_expr = convert_expr(&array_exprs[0])?;
-            let alias_name =
-                alias.as_ref().map(|a| a.name.value.clone());
-
-            Ok(RelExpr::Unnest {
-                expr: arr_expr,
-                alias: alias_name,
-                input: None,
-                with_ordinality: *with_ordinality,
-            })
+            if array_exprs.len() == 1 {
+                let arr_expr = convert_expr(&array_exprs[0])?;
+                let alias_name = alias
+                    .as_ref()
+                    .map(|a| a.name.value.clone());
+                Ok(RelExpr::Unnest {
+                    expr: arr_expr,
+                    alias: alias_name,
+                    input: None,
+                    with_ordinality: *with_ordinality,
+                })
+            } else {
+                let exprs: Result<Vec<_>, _> = array_exprs
+                    .iter()
+                    .map(convert_expr)
+                    .collect();
+                let col_aliases = alias
+                    .as_ref()
+                    .map(|a| {
+                        a.columns
+                            .iter()
+                            .map(|c| Some(c.name.value.clone()))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                let aliases = pad_aliases(
+                    col_aliases,
+                    array_exprs.len(),
+                );
+                Ok(RelExpr::MultiUnnest {
+                    exprs: exprs?,
+                    aliases,
+                    with_ordinality: *with_ordinality,
+                })
+            }
         }
         TableFactor::Function {
             name, args, alias, ..
@@ -488,16 +513,39 @@ fn convert_table_valued_function(
                         .to_owned(),
                 ));
             }
-            let arr_expr = convert_function_arg(&args[0])?;
-            let alias_name =
-                alias.as_ref().map(|a| a.name.value.clone());
-
-            Ok(RelExpr::Unnest {
-                expr: arr_expr,
-                alias: alias_name,
-                input: None,
-                with_ordinality: false,
-            })
+            if args.len() == 1 {
+                let arr_expr = convert_function_arg(&args[0])?;
+                let alias_name = alias
+                    .as_ref()
+                    .map(|a| a.name.value.clone());
+                Ok(RelExpr::Unnest {
+                    expr: arr_expr,
+                    alias: alias_name,
+                    input: None,
+                    with_ordinality: false,
+                })
+            } else {
+                let exprs: Result<Vec<_>, _> = args
+                    .iter()
+                    .map(convert_function_arg)
+                    .collect();
+                let col_aliases = alias
+                    .as_ref()
+                    .map(|a| {
+                        a.columns
+                            .iter()
+                            .map(|c| Some(c.name.value.clone()))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                let aliases =
+                    pad_aliases(col_aliases, args.len());
+                Ok(RelExpr::MultiUnnest {
+                    exprs: exprs?,
+                    aliases,
+                    with_ordinality: false,
+                })
+            }
         }
         "generate_series" => {
             let arg_exprs: Result<Vec<_>, _> =
@@ -1364,11 +1412,24 @@ fn convert_expr(expr: &SqlExpr) -> Result<Expr, SqlConversionError> {
                         Box::new(index_expr),
                     ))
                 }
-                sqlparser::ast::Subscript::Slice { .. } => {
-                    Err(SqlConversionError::UnsupportedFeature(
-                        "array slicing not supported"
-                            .to_owned(),
-                    ))
+                sqlparser::ast::Subscript::Slice {
+                    lower_bound,
+                    upper_bound,
+                    ..
+                } => {
+                    let start = lower_bound
+                        .as_ref()
+                        .map(|e| convert_expr(e).map(Box::new))
+                        .transpose()?;
+                    let end = upper_bound
+                        .as_ref()
+                        .map(|e| convert_expr(e).map(Box::new))
+                        .transpose()?;
+                    Ok(Expr::ArraySlice {
+                        array: Box::new(array_expr),
+                        start,
+                        end,
+                    })
                 }
             }
         }
@@ -1457,6 +1518,15 @@ fn extract_u64_from_expr(
                 .to_owned(),
         )),
     }
+}
+
+/// Pad column aliases to match the expected count, filling with None.
+fn pad_aliases(
+    mut aliases: Vec<Option<String>>,
+    count: usize,
+) -> Vec<Option<String>> {
+    aliases.resize(count, None);
+    aliases
 }
 
 fn object_name_to_string(name: &ObjectName) -> String {

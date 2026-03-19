@@ -164,6 +164,16 @@ pub enum RelExpr {
         with_ordinality: bool,
     },
 
+    /// Multi-argument unnest (parallel unnest of multiple arrays).
+    MultiUnnest {
+        /// Expressions producing arrays to unnest in parallel.
+        exprs: Vec<Expr>,
+        /// Column aliases for each unnested array.
+        aliases: Vec<Option<String>>,
+        /// Whether WITH ORDINALITY was specified.
+        with_ordinality: bool,
+    },
+
     /// General table-valued function (generate_series, etc.).
     TableFunction {
         /// Function name.
@@ -501,6 +511,7 @@ impl RelExpr {
                 Some(inp) => vec![inp],
                 None => vec![],
             },
+            Self::MultiUnnest { .. } => vec![],
             Self::TableFunction { input, .. } => match input {
                 Some(inp) => vec![inp],
                 None => vec![],
@@ -620,6 +631,11 @@ impl RelExpr {
                     inp.collect_columns(out);
                 }
             }
+            Self::MultiUnnest { exprs, .. } => {
+                for expr in exprs {
+                    collect_expr_columns(expr, out);
+                }
+            }
             Self::TableFunction {
                 args, input, ..
             } => {
@@ -672,7 +688,8 @@ impl RelExpr {
                     || recursive_case.references_cte(cte_name)
                     || body.references_cte(cte_name)
             }
-            Self::Values { .. } => false,
+            Self::Values { .. }
+            | Self::MultiUnnest { .. } => false,
             Self::Unnest { input, .. }
             | Self::TableFunction { input, .. } => {
                 input
@@ -727,6 +744,17 @@ fn collect_expr_columns(expr: &Expr, out: &mut Vec<ColumnRef>) {
         Expr::ArrayIndex(array, index) => {
             collect_expr_columns(array, out);
             collect_expr_columns(index, out);
+        }
+        Expr::ArraySlice {
+            array, start, end,
+        } => {
+            collect_expr_columns(array, out);
+            if let Some(s) = start {
+                collect_expr_columns(s, out);
+            }
+            if let Some(e) = end {
+                collect_expr_columns(e, out);
+            }
         }
     }
 }
