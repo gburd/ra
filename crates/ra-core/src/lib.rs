@@ -32,8 +32,10 @@ pub use distributed_agg::*;
 pub use distribution::*;
 pub use expr::*;
 pub use facts::{
-    DataType, EmptyFactsProvider, FactsProvider, ForeignKey, HardwareProfile, IndexInfo,
-    IndexType, OperatorStats, SqlDialect, TableInfo, TableStats,
+    DataType, EmptyFactsProvider, FactsProvider, ForeignKey,
+    HardwareProfile as CoreHardwareProfile, IndexInfo,
+    IndexType, OperatorStats, SqlDialect, TableInfo,
+    TableStats as CoreTableStats,
 };
 pub use federated::*;
 pub use pattern::*;

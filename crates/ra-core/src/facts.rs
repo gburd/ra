@@ -45,24 +45,8 @@ pub struct TableStats {
     pub confidence: f64,
 }
 
-/// Statistics for a single column
-#[derive(Debug, Clone)]
-pub struct ColumnStats {
-    /// Number of distinct values
-    pub distinct_count: f64,
-    /// Fraction of null values (0.0 to 1.0)
-    pub null_fraction: f64,
-    /// Average column width in bytes
-    pub avg_width: f64,
-    /// Most common values
-    pub most_common_values: Vec<String>,
-    /// Frequencies of most common values
-    pub most_common_freqs: Vec<f64>,
-    /// Histogram bounds
-    pub histogram_bounds: Vec<String>,
-    /// Confidence in these statistics (0.0 to 1.0)
-    pub confidence: f64,
-}
+// Re-export ColumnStats from statistics module
+pub use crate::statistics::ColumnStats;
 
 /// Data type of a column
 #[derive(Debug, Clone, PartialEq, Eq)]
