@@ -10,6 +10,16 @@ authors: ["RA Contributors"]
 tags: [academic, optimization]
 complexity: "O(n)"
 benefit_range: [0.3, 0.7]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter (func ?fname ?args) ?input)"
+    description: "Filter using a function predicate"
+  - type: "predicate"
+    condition: "is_deterministic(func(?fname, ?args))"
+    description: "Function must be deterministic"
+  - type: "predicate"
+    condition: "is_pushable_function(?fname)"
+    description: "Function must be safe to push down to storage"
 ---
 
 # Function Push-Down

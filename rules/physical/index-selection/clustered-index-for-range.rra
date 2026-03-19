@@ -10,6 +10,16 @@ authors: ["RA Contributors"]
 tags: [index, clustered, range-scan, sequential-io]
 complexity: "O(log n + k)"
 benefit_range: [0.6, 0.95]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter ?pred (scan ?table))"
+    description: "Range filter on clustered index column"
+  - type: "predicate"
+    condition: "has_clustered_index(?table, columns(?pred))"
+    description: "Clustered index must exist on predicate column"
+  - type: "predicate"
+    condition: "is_range_predicate(?pred)"
+    description: "Predicate must be a range comparison"
 ---
 
 # Clustered Index for Range Predicates

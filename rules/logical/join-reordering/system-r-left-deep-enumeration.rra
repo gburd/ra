@@ -9,6 +9,22 @@ authors: ["Selinger, Astrahan, Chamberlin, Lorie, Price - IBM Research"]
 tags: [left-deep, join-ordering, dynamic-programming, pipeline, system-r, classic]
 complexity: "O(n * 2^n)"
 benefit_range: [0.1, 5.0]
+preconditions:
+  - type: "pattern"
+    must_match: "(multi-join ?inputs ?predicates)"
+    description: "Multi-way join for left-deep enumeration"
+  - type: "predicate"
+    condition: "count(?inputs) >= 3"
+    description: "At least 3 relations for reordering benefit"
+  - type: "predicate"
+    condition: "all_inner_joins(?inputs)"
+    description: "All joins must be inner joins"
+  - type: "fact"
+    fact_type: "hardware.memory"
+    comparator: "<"
+    threshold: 1073741824
+    optional: true
+    description: "Left-deep preferred when memory is limited (<1GB)"
 ---
 
 # System R Left-Deep Join Tree Enumeration
@@ -191,6 +207,9 @@ impl LeftDeepEnumerator {
 ```
 
 ## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
 
 ```rust
 fn applicable(

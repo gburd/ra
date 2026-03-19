@@ -10,6 +10,13 @@ authors: ["RA Contributors"]
 tags: [index, union, bitmap, or]
 complexity: "O(log n + log m)"
 benefit_range: [0.3, 0.6]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter (or ?pred1 ?pred2) (scan ?table))"
+    description: "Disjunctive filter with index union opportunity"
+  - type: "predicate"
+    condition: "has_index(?table, columns(?pred1)) && has_index(?table, columns(?pred2))"
+    description: "Indexes must exist on both disjunct columns"
 ---
 
 # Index Union

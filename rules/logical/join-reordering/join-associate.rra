@@ -10,6 +10,13 @@ authors: ["RA Contributors"]
 tags: [academic, calcite]
 complexity: "O(n)"
 benefit_range: [0.3, 0.7]
+preconditions:
+  - type: "pattern"
+    must_match: "(join inner ?c2 (join inner ?c1 ?r ?s) ?t)"
+    description: "Nested inner join for associative reordering"
+  - type: "predicate"
+    condition: "is_inner_join(?c1) && is_inner_join(?c2)"
+    description: "Both joins must be inner joins"
 ---
 
 # JoinAssociate

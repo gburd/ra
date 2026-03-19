@@ -10,6 +10,16 @@ authors: ["RA Contributors"]
 tags: [aggregation, pushdown, join, eager, group-by]
 complexity: "O(n)"
 benefit_range: [0.2, 0.7]
+preconditions:
+  - type: "pattern"
+    must_match: "(aggregate (join ?type ?cond ?left ?right) ?groups ?aggs)"
+    description: "Aggregation above a join"
+  - type: "predicate"
+    condition: "references_only(?groups, ?left) || references_only(?groups, ?right)"
+    description: "Grouping columns must come from one join side"
+  - type: "predicate"
+    condition: "all_decomposable(?aggs)"
+    description: "All aggregate functions must be decomposable (SUM, COUNT, MIN, MAX)"
 ---
 
 # Aggregation Pushdown Below Join

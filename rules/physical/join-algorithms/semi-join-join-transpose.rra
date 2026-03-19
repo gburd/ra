@@ -8,6 +8,13 @@ authors: ["RA Contributors"]
 tags: [physical, calcite, semi-join, join, transpose, pushdown]
 complexity: O(n)
 benefit_range: [0.1, 0.5]
+preconditions:
+  - type: "pattern"
+    must_match: "(semi-join ?cond (join ?type ?jcond ?left ?right) ?s)"
+    description: "Semi-join above a join (transpose opportunity)"
+  - type: "predicate"
+    condition: "references_only(?cond, ?left)"
+    description: "Semi-join condition must reference only one side of the inner join"
 ---
 
 # Calcite SemiJoinJoinTransposeRule
@@ -69,6 +76,9 @@ rw!("calcite-semi-join-join-transpose-right";
 ```
 
 ## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
 
 ```rust
 fn applicable(

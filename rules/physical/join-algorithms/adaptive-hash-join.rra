@@ -10,6 +10,17 @@ authors: ["RA Contributors"]
 tags: [join, hash, adaptive, runtime]
 complexity: "O(n + m)"
 benefit_range: [0.3, 0.7]
+preconditions:
+  - type: "pattern"
+    must_match: "(join inner (= ?lcol ?rcol) ?left ?right)"
+    description: "Equi-join with runtime adaptive strategy"
+  - type: "predicate"
+    condition: "is_equijoin(= ?lcol ?rcol)"
+    description: "Must be an equi-join for hash-based execution"
+  - type: "capability"
+    database: "current"
+    requires: "adaptive_execution"
+    description: "Database supports adaptive query execution"
 ---
 
 # Adaptive Hash Join

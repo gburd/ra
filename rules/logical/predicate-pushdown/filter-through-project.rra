@@ -7,6 +7,16 @@ standard: "sql:1992"
 version: "1.0.0"
 authors: ["RA Contributors"]
 tags: [filter, projection, pushdown, core]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter ?pred (project ?cols ?input))"
+    description: "Filter above a projection"
+  - type: "predicate"
+    condition: "references_subset(?pred, columns(?input))"
+    description: "All filter columns must be available in the input"
+  - type: "predicate"
+    condition: "is_deterministic(?pred)"
+    description: "Predicate must be deterministic"
 ---
 
 # Filter Pushdown Through Projection
@@ -45,6 +55,9 @@ rw!("filter-through-project";
 ```
 
 ## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
 
 ```rust
 fn applicable(pred: &Expr, projection_cols: &[Column]) -> bool {

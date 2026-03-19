@@ -9,6 +9,16 @@ authors: ["Pirahesh, Hellerstein, Hasan - IBM Starburst"]
 tags: [referential-integrity, foreign-key, join-elimination, constraint-based, starburst, classic]
 complexity: "O(n)"
 benefit_range: [0.5, 10.0]
+preconditions:
+  - type: "pattern"
+    must_match: "(join inner ?cond ?left ?right)"
+    description: "Join that may be eliminable via FK constraint"
+  - type: "predicate"
+    condition: "has_foreign_key(?left, ?right) || has_foreign_key(?right, ?left)"
+    description: "Foreign key relationship must exist between tables"
+  - type: "predicate"
+    condition: "!references_columns_from(?projection, referenced_table(?fk))"
+    description: "Query must not need columns from the referenced table"
 ---
 
 # Starburst Referential Integrity Rewrite
@@ -179,6 +189,9 @@ impl ReferentialIntegrityRewriter {
 ```
 
 ## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
 
 ```rust
 fn applicable(

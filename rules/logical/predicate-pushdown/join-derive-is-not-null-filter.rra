@@ -10,6 +10,13 @@ authors: ["RA Contributors"]
 tags: [academic, calcite]
 complexity: "O(n)"
 benefit_range: [0.3, 0.7]
+preconditions:
+  - type: "pattern"
+    must_match: "(join inner ?cond ?left ?right)"
+    description: "Inner join with equi-join condition"
+  - type: "predicate"
+    condition: "has_equi_condition(?cond)"
+    description: "Join condition must have equality on non-nullable columns"
 ---
 
 # JoinDeriveIsNotNullFilter

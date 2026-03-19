@@ -10,6 +10,17 @@ authors: ["RA Contributors"]
 tags: [index, columnstore, aggregation, analytics, olap]
 complexity: "O(n/compression)"
 benefit_range: [0.5, 0.95]
+preconditions:
+  - type: "pattern"
+    must_match: "(aggregate (scan ?table) ?groups ?aggs)"
+    description: "Aggregation on column store table"
+  - type: "capability"
+    database: "current"
+    requires: "columnstore_index"
+    description: "Database supports columnstore indexes"
+  - type: "predicate"
+    condition: "has_columnstore_index(?table)"
+    description: "Table must have a columnstore index"
 ---
 
 # Columnstore Index for Aggregation Queries

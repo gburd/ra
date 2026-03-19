@@ -7,6 +7,16 @@ standard: "sql:1992"
 version: "1.0.0"
 authors: ["RA Contributors"]
 tags: [join, reordering, associativity, core]
+preconditions:
+  - type: "pattern"
+    must_match: "(join inner ?c2 (join inner ?c1 ?r ?s) ?t)"
+    description: "Nested inner join structure"
+  - type: "predicate"
+    condition: "is_inner_join(?c1) && is_inner_join(?c2)"
+    description: "Both joins must be inner joins"
+  - type: "predicate"
+    condition: "join_conds_compatible(?c1, ?c2, ?r, ?s, ?t)"
+    description: "Join conditions must remain valid after reassociation"
 ---
 
 # Join Associativity
@@ -51,6 +61,9 @@ rw!("join-assoc-r-to-l";
 ```
 
 ## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
 
 ```rust
 fn applicable(

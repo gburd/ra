@@ -8,6 +8,18 @@ authors: ["RA Contributors"]
 tags: [logical, calcite, join, reorder, dphyp, hypergraph, optimal]
 complexity: O(2^n)
 benefit_range: [0.1, 0.95]
+preconditions:
+  - type: "pattern"
+    must_match: "(hyper-graph ?nodes ?edges)"
+    description: "Hyper-graph representation of join inputs"
+  - type: "predicate"
+    condition: "count(?nodes) >= 3"
+    description: "At least 3 relations needed for reordering"
+  - type: "fact"
+    fact_type: "statistics.cardinality"
+    table: "?nodes"
+    comparator: "exists"
+    description: "Cardinality estimates must be available for cost-based decisions"
 ---
 
 # Calcite DphypJoinReorderRule
@@ -52,6 +64,9 @@ rw!("calcite-dphyp-join-reorder";
 ```
 
 ## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
 
 ```rust
 fn applicable(hyper_graph: &HyperGraph) -> bool {

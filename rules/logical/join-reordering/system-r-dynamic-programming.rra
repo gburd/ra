@@ -9,6 +9,21 @@ authors: ["Selinger et al., IBM System R"]
 tags: [join-reordering, dynamic-programming, cost-based, classic]
 complexity: "O(n * 2^n)"
 benefit_range: [0.1, 10.0]
+preconditions:
+  - type: "pattern"
+    must_match: "(multi-join ?inputs ?predicates)"
+    description: "Multi-way join for DP ordering"
+  - type: "predicate"
+    condition: "count(?inputs) >= 3 && count(?inputs) <= 20"
+    description: "3-20 relations (practical limit for exponential DP)"
+  - type: "predicate"
+    condition: "all_inner_joins(?inputs)"
+    description: "All joins must be inner (outer joins break optimality principle)"
+  - type: "fact"
+    fact_type: "statistics.cardinality"
+    table: "?inputs"
+    comparator: "exists"
+    description: "Cardinality estimates required for cost-based decisions"
 ---
 
 # System R Dynamic Programming Join Ordering
@@ -112,6 +127,9 @@ impl SystemROptimizer {
 ```
 
 ## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
 
 ```rust
 fn applicable(

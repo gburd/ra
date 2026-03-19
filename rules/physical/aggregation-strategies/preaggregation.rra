@@ -10,6 +10,16 @@ authors: ["RA Contributors"]
 tags: [aggregation, optimization, early]
 complexity: "O(n)"
 benefit_range: [0.3, 0.7]
+preconditions:
+  - type: "pattern"
+    must_match: "(aggregate (join ?type ?cond ?left ?right) ?groups ?aggs)"
+    description: "Aggregation that can be pre-aggregated before join"
+  - type: "predicate"
+    condition: "all_decomposable(?aggs)"
+    description: "Aggregate functions must be decomposable for pre-aggregation"
+  - type: "predicate"
+    condition: "references_only(?groups, ?left) || references_only(?groups, ?right)"
+    description: "Grouping columns from one join side"
 ---
 
 # Preaggregation

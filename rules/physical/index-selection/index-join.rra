@@ -10,6 +10,13 @@ authors: ["RA Contributors"]
 tags: [index, join, nested-loop]
 complexity: "O(n * log m)"
 benefit_range: [0.5, 0.8]
+preconditions:
+  - type: "pattern"
+    must_match: "(join inner (= ?lcol ?rcol) ?left ?right)"
+    description: "Equi-join with index on join column"
+  - type: "predicate"
+    condition: "has_index(?right, ?rcol) || has_index(?left, ?lcol)"
+    description: "Index must exist on join column of at least one side"
 ---
 
 # Index Join

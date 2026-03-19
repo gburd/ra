@@ -10,6 +10,20 @@ authors: ["RA Contributors"]
 tags: [index, unique, equality, point-lookup, primary-key]
 complexity: "O(log n)"
 benefit_range: [0.8, 0.99]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter (= ?col ?val) (scan ?table))"
+    description: "Equality predicate on unique index column"
+  - type: "predicate"
+    condition: "has_unique_index(?table, ?col)"
+    description: "Unique index must exist on the column"
+  - type: "fact"
+    fact_type: "statistics.cardinality"
+    table: "?table"
+    comparator: "<="
+    threshold: 1
+    description: "Returns at most 1 row (point lookup)"
+    optional: true
 ---
 
 # Unique Index for Equality Lookups

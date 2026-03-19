@@ -9,6 +9,14 @@ authors: ["Database Systems Textbooks"]
 tags: [join, nested-loop, basic, any-predicate]
 complexity: "O(n * m)"
 benefit_range: [0.0, 0.5]
+preconditions:
+  - type: "pattern"
+    must_match: "(join ?type ?cond ?left ?right)"
+    description: "Join for nested loop execution (any predicate)"
+  - type: "predicate"
+    condition: "!is_equijoin(?cond) || cardinality(?left) < 1000"
+    description: "Preferred for non-equijoins or very small outer input"
+    optional: true
 ---
 
 # Nested Loop Join
@@ -63,6 +71,9 @@ impl Operator for NestedLoopJoin {
 ```
 
 ## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
 
 ```rust
 fn applicable(

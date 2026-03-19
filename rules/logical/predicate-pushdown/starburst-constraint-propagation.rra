@@ -9,6 +9,17 @@ authors: ["Pirahesh, Hellerstein, Hasan - IBM Starburst"]
 tags: [constraint-propagation, predicate-derivation, transitive-closure, starburst, classic]
 complexity: "O(c * p)"
 benefit_range: [0.2, 5.0]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter ?pred ?input)"
+    description: "Filter that can exploit integrity constraints"
+  - type: "predicate"
+    condition: "has_integrity_constraints(?input)"
+    description: "Table must have CHECK, FK, or NOT NULL constraints"
+  - type: "capability"
+    database: "current"
+    requires: "constraint_metadata"
+    description: "Database must expose constraint metadata"
 ---
 
 # Starburst Constraint-Based Predicate Propagation
@@ -184,6 +195,9 @@ impl ConstraintPropagator {
 ```
 
 ## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
 
 ```rust
 fn applicable(

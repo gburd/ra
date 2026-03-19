@@ -10,6 +10,20 @@ authors: ["RA Contributors"]
 tags: [join, hash, partition, out-of-core]
 complexity: "O(n + m)"
 benefit_range: [0.3, 0.7]
+preconditions:
+  - type: "pattern"
+    must_match: "(join inner (= ?lcol ?rcol) ?left ?right)"
+    description: "Equi-join with Grace hash partitioning"
+  - type: "predicate"
+    condition: "is_equijoin(= ?lcol ?rcol)"
+    description: "Must be an equi-join"
+  - type: "fact"
+    fact_type: "statistics.size_bytes"
+    table: "smaller_input(?left, ?right)"
+    comparator: ">"
+    threshold: "available_memory()"
+    description: "Build input exceeds memory (triggers Grace partitioning)"
+    optional: true
 ---
 
 # Grace Hash Join

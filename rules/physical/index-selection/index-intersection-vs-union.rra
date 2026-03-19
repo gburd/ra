@@ -10,6 +10,13 @@ authors: ["RA Contributors"]
 tags: [index, intersection, union, multi-index, cost-comparison]
 complexity: "O(n log n)"
 benefit_range: [0.1, 0.6]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter (and ?pred1 ?pred2) (scan ?table))"
+    description: "Conjunctive filter evaluating intersection vs union"
+  - type: "predicate"
+    condition: "has_index(?table, columns(?pred1)) && has_index(?table, columns(?pred2))"
+    description: "Separate indexes must exist on each predicate column"
 ---
 
 # Index Intersection vs Union Selection

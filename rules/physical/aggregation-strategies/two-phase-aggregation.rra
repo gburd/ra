@@ -10,6 +10,20 @@ authors: ["RA Contributors"]
 tags: [aggregation, parallel, distributed]
 complexity: "O(n)"
 benefit_range: [0.3, 0.7]
+preconditions:
+  - type: "pattern"
+    must_match: "(aggregate ?input ?groups ?aggs)"
+    description: "Two-phase (partial + final) aggregation"
+  - type: "predicate"
+    condition: "all_decomposable(?aggs)"
+    description: "All aggregate functions must be decomposable (SUM, COUNT, MIN, MAX)"
+  - type: "fact"
+    fact_type: "statistics.cardinality"
+    table: "?input"
+    comparator: ">"
+    threshold: 100000
+    optional: true
+    description: "Input large enough to benefit from two-phase approach"
 ---
 
 # Two-Phase Aggregation

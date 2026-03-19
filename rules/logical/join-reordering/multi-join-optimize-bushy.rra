@@ -8,6 +8,18 @@ authors: ["RA Contributors"]
 tags: [logical, calcite, join, reorder, bushy, heuristic, multi-join]
 complexity: O(n^2)
 benefit_range: [0.1, 0.8]
+preconditions:
+  - type: "pattern"
+    must_match: "(project ?proj (multi-join ?inputs ?filters))"
+    description: "MultiJoin node with multiple inputs"
+  - type: "predicate"
+    condition: "count(?inputs) >= 3"
+    description: "At least 3 inputs for bushy optimization"
+  - type: "fact"
+    fact_type: "statistics.cardinality"
+    table: "?inputs"
+    comparator: "exists"
+    description: "Cardinality estimates needed for greedy pairing"
 ---
 
 # Calcite MultiJoinOptimizeBushyRule
@@ -52,6 +64,9 @@ rw!("calcite-multi-join-optimize-bushy";
 ```
 
 ## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
 
 ```rust
 fn applicable(multi_join: &MultiJoin) -> bool {

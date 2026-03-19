@@ -8,6 +8,16 @@ authors: ["RA Contributors"]
 tags: [logical, calcite, filter, table-scan, pushdown, index]
 complexity: O(1)
 benefit_range: [0.3, 0.95]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter ?pred (scan ?table))"
+    description: "Filter above a table scan"
+  - type: "predicate"
+    condition: "is_deterministic(?pred)"
+    description: "Predicate must be deterministic"
+  - type: "predicate"
+    condition: "references_only(?pred, columns(?table))"
+    description: "Predicate must reference only columns from the table"
 ---
 
 # Calcite FilterTableScanRule
@@ -50,6 +60,9 @@ rw!("calcite-filter-table-scan";
 ```
 
 ## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
 
 ```rust
 fn applicable(

@@ -10,6 +10,13 @@ authors: ["RA Contributors"]
 tags: [index, partial, filtered]
 complexity: "O(log n)"
 benefit_range: [0.5, 0.8]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter ?pred (scan ?table))"
+    description: "Filter matching a partial index condition"
+  - type: "predicate"
+    condition: "has_partial_index(?table, ?pred)"
+    description: "Partial index must exist whose condition is implied by the filter"
 ---
 
 # Partial Index Selection

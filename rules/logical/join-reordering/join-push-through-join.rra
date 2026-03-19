@@ -10,6 +10,16 @@ authors: ["RA Contributors"]
 tags: [academic, calcite]
 complexity: "O(n)"
 benefit_range: [0.3, 0.7]
+preconditions:
+  - type: "pattern"
+    must_match: "(join ?type1 ?c1 (join ?type2 ?c2 ?a ?b) ?c)"
+    description: "Join above another join"
+  - type: "predicate"
+    condition: "is_inner_or_cross(?type1) && is_inner_or_cross(?type2)"
+    description: "Both joins must be inner or cross"
+  - type: "predicate"
+    condition: "can_push_through(?c1, ?a, ?b, ?c)"
+    description: "Outer join condition must be pushable through inner join"
 ---
 
 # JoinPushThroughJoin

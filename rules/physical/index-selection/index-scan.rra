@@ -10,6 +10,20 @@ authors: ["RA Contributors"]
 tags: [index, scan, b-tree, access-path, range-scan]
 complexity: "O(log n + k)"
 benefit_range: [0.4, 0.95]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter ?pred (scan ?table))"
+    description: "Filter eligible for index scan"
+  - type: "predicate"
+    condition: "has_index(?table, columns(?pred))"
+    description: "Index must exist on the filter column"
+  - type: "fact"
+    fact_type: "statistics.selectivity"
+    table: "?table"
+    comparator: "<"
+    threshold: 0.15
+    optional: true
+    description: "Selectivity should be low enough to benefit from index"
 ---
 
 # Index Scan

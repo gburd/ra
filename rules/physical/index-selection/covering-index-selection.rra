@@ -10,6 +10,13 @@ authors: ["RA Contributors"]
 tags: [index, covering, index-only-scan]
 complexity: "O(log n + k)"
 benefit_range: [0.6, 0.9]
+preconditions:
+  - type: "pattern"
+    must_match: "(project ?cols (filter ?pred (scan ?table)))"
+    description: "Projection + filter eligible for index-only scan"
+  - type: "predicate"
+    condition: "exists_covering_index(?table, ?pred, ?cols)"
+    description: "Index must cover all query columns (predicates and projections)"
 ---
 
 # Covering Index Selection

@@ -10,6 +10,13 @@ authors: ["RA Contributors"]
 tags: [academic, calcite]
 complexity: "O(n)"
 benefit_range: [0.3, 0.7]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter ?pred (project ?cols ?input))"
+    description: "Filter above a projection"
+  - type: "predicate"
+    condition: "references_subset(?pred, columns(?input))"
+    description: "Filter columns must exist in input before projection"
 ---
 
 # FilterProjectTranspose

@@ -10,6 +10,13 @@ authors: ["RA Contributors"]
 tags: [index, index-only-scan, visibility-map, covering]
 complexity: "O(log n + k)"
 benefit_range: [0.3, 0.8]
+preconditions:
+  - type: "pattern"
+    must_match: "(project ?cols (filter ?pred (scan ?table)))"
+    description: "Query eligible for index-only scan"
+  - type: "predicate"
+    condition: "exists_covering_index(?table, ?pred, ?cols)"
+    description: "Covering index must exist for index-only scan"
 ---
 
 # Index-Only Scan Preference

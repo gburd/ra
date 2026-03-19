@@ -10,6 +10,16 @@ authors: ["RA Contributors"]
 tags: [index, sparse, granule, primary-key, mergetree, pruning]
 complexity: "O(log n + k)"
 benefit_range: [0.5, 0.99]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter ?pred (scan ?table))"
+    description: "Filter using sparse index"
+  - type: "predicate"
+    condition: "has_sparse_index(?table, columns(?pred))"
+    description: "Sparse index must exist on the column"
+  - type: "predicate"
+    condition: "is_range_predicate(?pred)"
+    description: "Predicate should be range-based for sparse index"
 ---
 
 # Sparse Index Scan (Granule-Level Pruning)

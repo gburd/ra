@@ -10,6 +10,16 @@ authors: ["RA Contributors"]
 tags: [academic, calcite]
 complexity: "O(n)"
 benefit_range: [0.3, 0.7]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter ?pred (aggregate ?input ?groups ?aggs))"
+    description: "Filter above an aggregation"
+  - type: "predicate"
+    condition: "references_only(?pred, columns(?input))"
+    description: "Filter predicate must reference pre-aggregation columns"
+  - type: "predicate"
+    condition: "!references_any(?pred, ?aggs)"
+    description: "Filter must not reference aggregate results"
 ---
 
 # Filter Transpose Aggregate

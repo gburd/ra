@@ -10,6 +10,20 @@ authors: ["RA Contributors"]
 tags: [index, bitmap, low-cardinality]
 complexity: "O(n)"
 benefit_range: [0.3, 0.7]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter ?pred (scan ?table))"
+    description: "Filter on low-cardinality column with bitmap index"
+  - type: "predicate"
+    condition: "has_bitmap_index(?table, columns(?pred))"
+    description: "Bitmap index must exist on predicate column"
+  - type: "fact"
+    fact_type: "statistics.distinct_count"
+    table: "?table"
+    comparator: "<"
+    threshold: 1000
+    description: "Column cardinality should be low for bitmap efficiency"
+    optional: true
 ---
 
 # Bitmap Index Selection

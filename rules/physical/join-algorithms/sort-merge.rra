@@ -10,6 +10,13 @@ authors: ["RA Contributors"]
 tags: [academic, calcite]
 complexity: "O(n)"
 benefit_range: [0.3, 0.7]
+preconditions:
+  - type: "pattern"
+    must_match: "(join inner (= ?lcol ?rcol) ?left ?right)"
+    description: "Sort-merge join implementation"
+  - type: "predicate"
+    condition: "is_equijoin(= ?lcol ?rcol)"
+    description: "Must be an equi-join (or inequality with sort)"
 ---
 
 # SortMerge

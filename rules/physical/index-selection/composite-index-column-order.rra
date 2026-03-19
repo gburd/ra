@@ -10,6 +10,16 @@ authors: ["RA Contributors"]
 tags: [index, composite, column-order, selectivity, prefix]
 complexity: "O(log n + k)"
 benefit_range: [0.1, 0.8]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter ?pred (scan ?table))"
+    description: "Multi-column filter with composite index"
+  - type: "predicate"
+    condition: "has_composite_index(?table, columns(?pred))"
+    description: "Composite index must exist covering predicate columns"
+  - type: "predicate"
+    condition: "matches_index_prefix(?pred, ?index)"
+    description: "Predicate columns must match index prefix order"
 ---
 
 # Composite Index Column Order Selection

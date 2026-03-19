@@ -10,6 +10,17 @@ authors: ["RA Contributors"]
 tags: [index, gist, spatial, range, postgresql, nearest-neighbor]
 complexity: "O(log n + k)"
 benefit_range: [0.5, 0.95]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter (spatial_op ?col ?geom) (scan ?table))"
+    description: "Spatial predicate with GiST index"
+  - type: "predicate"
+    condition: "has_gist_index(?table, ?col)"
+    description: "GiST index must exist on the spatial column"
+  - type: "capability"
+    database: "current"
+    requires: "gist_index"
+    description: "Database supports GiST indexes"
 ---
 
 # GiST Index for Spatial and Range Types

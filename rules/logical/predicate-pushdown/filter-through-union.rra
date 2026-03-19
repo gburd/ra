@@ -7,6 +7,13 @@ standard: "sql:1992"
 version: "1.0.0"
 authors: ["RA Contributors"]
 tags: [filter, union, pushdown, core]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter ?pred (union ?left ?right))"
+    description: "Filter above a union"
+  - type: "predicate"
+    condition: "is_deterministic(?pred)"
+    description: "Predicate must be deterministic (applied to both branches)"
 ---
 
 # Filter Pushdown Through Union
@@ -47,6 +54,9 @@ rw!("filter-through-union-all";
 ```
 
 ## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
 
 ```rust
 fn applicable(pred: &Expr) -> bool {

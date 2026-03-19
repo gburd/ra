@@ -10,6 +10,13 @@ authors: ["RA Contributors"]
 tags: [join, band, range, non-equijoin, inequality]
 complexity: "O(n log n + n * w)"
 benefit_range: [0.3, 0.8]
+preconditions:
+  - type: "pattern"
+    must_match: "(join inner (and (>= ?lcol (- ?rcol ?delta)) (<= ?lcol (+ ?rcol ?delta))) ?left ?right)"
+    description: "Range/band join condition (value within delta)"
+  - type: "predicate"
+    condition: "is_band_predicate(?cond)"
+    description: "Join condition must define a band/range relationship"
 ---
 
 # Band Join

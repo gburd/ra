@@ -8,6 +8,17 @@ version: "1.0.0"
 tags: [join, sort-merge, equijoin, sorted-inputs]
 complexity: "O(n log n + m log m)"
 benefit_range: [0.3, 5.0]
+preconditions:
+  - type: "pattern"
+    must_match: "(join inner (= ?lcol ?rcol) ?left ?right)"
+    description: "Equi-join for sort-merge execution"
+  - type: "predicate"
+    condition: "is_equijoin(= ?lcol ?rcol)"
+    description: "Must be an equi-join"
+  - type: "predicate"
+    condition: "is_sorted_by(?left, ?lcol) || is_sorted_by(?right, ?rcol) || needs_sorted_output(?parent)"
+    description: "Preferred when inputs are already sorted or sorted output is needed"
+    optional: true
 ---
 
 # Sort-Merge Join

@@ -9,6 +9,17 @@ authors: ["Pirahesh, Hellerstein, Hasan - IBM Starburst"]
 tags: [semantic-optimization, constraints, integrity-rules, classic]
 complexity: "O(n)"
 benefit_range: [0.3, 5.0]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter ?pred ?input)"
+    description: "Filter amenable to semantic optimization"
+  - type: "predicate"
+    condition: "has_semantic_knowledge(?input)"
+    description: "Schema constraints or domain knowledge available"
+  - type: "capability"
+    database: "current"
+    requires: "constraint_metadata"
+    description: "Database must expose integrity constraints"
 ---
 
 # Starburst Semantic Query Optimization
@@ -86,6 +97,9 @@ rw!("semantic-transitive-constraint";
 ```
 
 ## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
 
 ```rust
 fn applicable(

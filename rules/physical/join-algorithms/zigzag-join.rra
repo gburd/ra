@@ -10,6 +10,13 @@ authors: ["RA Contributors"]
 tags: [join, zigzag, index, multi-column, intersection]
 complexity: "O(k * log n)"
 benefit_range: [0.4, 0.85]
+preconditions:
+  - type: "pattern"
+    must_match: "(join inner ?cond ?left ?right)"
+    description: "Join using zigzag/leapfrog strategy"
+  - type: "predicate"
+    condition: "has_sorted_index(?left, join_cols(?cond)) && has_sorted_index(?right, join_cols(?cond))"
+    description: "Both inputs must have sorted indexes on join columns"
 ---
 
 # Zigzag Join
@@ -118,6 +125,9 @@ pub fn cost_zigzag_join(
 ```
 
 ## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
 
 ```rust
 fn can_use_zigzag_join(

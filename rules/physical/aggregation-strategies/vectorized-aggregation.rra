@@ -10,6 +10,21 @@ authors: ["RA Contributors"]
 tags: [aggregation, vectorized, simd]
 complexity: "O(n)"
 benefit_range: [0.4, 0.8]
+preconditions:
+  - type: "pattern"
+    must_match: "(aggregate ?input ?groups ?aggs)"
+    description: "Aggregation using vectorized execution"
+  - type: "capability"
+    database: "current"
+    requires: "vectorized_execution"
+    description: "Database supports vectorized execution"
+  - type: "fact"
+    fact_type: "statistics.cardinality"
+    table: "?input"
+    comparator: ">"
+    threshold: 10000
+    optional: true
+    description: "Input large enough to benefit from SIMD vectorization"
 ---
 
 # Vectorized Aggregation

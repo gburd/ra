@@ -10,6 +10,13 @@ authors: ["RA Contributors"]
 tags: [index, filtered, partial, where-clause]
 complexity: "O(log n + k)"
 benefit_range: [0.5, 0.95]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter ?pred (scan ?table))"
+    description: "Filter matching a partial/filtered index"
+  - type: "predicate"
+    condition: "has_filtered_index(?table, ?pred)"
+    description: "Filtered/partial index exists whose WHERE clause matches the predicate"
 ---
 
 # Filtered (Partial) Index Matching

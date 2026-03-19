@@ -10,6 +10,17 @@ authors: ["RA Contributors"]
 tags: [academic, academic]
 complexity: "O(n)"
 benefit_range: [0.3, 0.7]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter ?pred (partition-scan ?table ?partitions))"
+    description: "Filter above a partitioned table scan"
+  - type: "predicate"
+    condition: "references_partition_key(?pred, ?table)"
+    description: "Predicate must reference the partition key"
+  - type: "capability"
+    database: "current"
+    requires: "table_partitioning"
+    description: "Database must support table partitioning"
 ---
 
 # Partition Pushdown

@@ -10,6 +10,17 @@ authors: ["RA Contributors"]
 tags: [index, full-text, like, pattern-matching, search]
 complexity: "O(log n + k)"
 benefit_range: [0.5, 0.99]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter (like ?col ?pattern) (scan ?table))"
+    description: "LIKE predicate eligible for full-text index"
+  - type: "predicate"
+    condition: "has_fulltext_index(?table, ?col)"
+    description: "Full-text index must exist on the column"
+  - type: "capability"
+    database: "current"
+    requires: "fulltext_index"
+    description: "Database supports full-text indexes"
 ---
 
 # Full-Text Index for LIKE Patterns

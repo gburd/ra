@@ -10,6 +10,20 @@ authors: ["RA Contributors"]
 tags: [join, hash, hybrid, adaptive]
 complexity: "O(n + m)"
 benefit_range: [0.4, 0.8]
+preconditions:
+  - type: "pattern"
+    must_match: "(join inner (= ?lcol ?rcol) ?left ?right)"
+    description: "Equi-join with hybrid hash strategy"
+  - type: "predicate"
+    condition: "is_equijoin(= ?lcol ?rcol)"
+    description: "Must be an equi-join"
+  - type: "fact"
+    fact_type: "statistics.size_bytes"
+    table: "smaller_input(?left, ?right)"
+    comparator: ">"
+    threshold: "available_memory() * 0.5"
+    optional: true
+    description: "Build input partially exceeds memory (hybrid keeps one partition in memory)"
 ---
 
 # Hybrid Hash Join

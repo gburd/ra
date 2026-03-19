@@ -10,6 +10,17 @@ authors: ["RA Contributors"]
 tags: [index, gin, array, jsonb, postgresql, containment]
 complexity: "O(log n + k)"
 benefit_range: [0.5, 0.95]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter (contains ?col ?val) (scan ?table))"
+    description: "Array containment filter with GIN index"
+  - type: "predicate"
+    condition: "has_gin_index(?table, ?col)"
+    description: "GIN index must exist on the array column"
+  - type: "capability"
+    database: "current"
+    requires: "gin_index"
+    description: "Database supports GIN indexes (PostgreSQL)"
 ---
 
 # GIN Index for Array Operations

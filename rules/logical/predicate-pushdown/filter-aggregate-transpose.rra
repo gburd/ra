@@ -10,6 +10,16 @@ authors: ["RA Contributors"]
 tags: [academic, calcite]
 complexity: "O(n)"
 benefit_range: [0.3, 0.7]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter ?pred (aggregate ?input ?groups ?aggs))"
+    description: "Filter above an aggregation"
+  - type: "predicate"
+    condition: "references_only(?pred, ?groups)"
+    description: "Filter predicate must reference only grouping columns"
+  - type: "predicate"
+    condition: "is_deterministic(?pred)"
+    description: "Predicate must be deterministic"
 ---
 
 # FilterAggregateTranspose

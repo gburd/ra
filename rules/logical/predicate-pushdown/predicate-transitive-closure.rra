@@ -9,6 +9,13 @@ authors: ["Selinger et al. (System R); Pirahesh et al. (Starburst)"]
 tags: [transitive-closure, equijoin-propagation, predicate-derivation, classic]
 complexity: "O(e * p)"
 benefit_range: [0.2, 10.0]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter ?pred (join inner ?cond ?left ?right))"
+    description: "Filter on join with transitive closure opportunity"
+  - type: "predicate"
+    condition: "has_equality_chain(?pred, ?cond)"
+    description: "Equality chain exists (a=b AND b=c implies a=c)"
 ---
 
 # Predicate Transitive Closure
@@ -177,6 +184,9 @@ impl TransitiveClosureComputer {
 ```
 
 ## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
 
 ```rust
 fn applicable(

@@ -10,6 +10,13 @@ authors: ["RA Contributors"]
 tags: [index, clustered, primary-key]
 complexity: "O(log n)"
 benefit_range: [0.5, 0.9]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter ?pred (scan ?table))"
+    description: "Filter using clustered index"
+  - type: "predicate"
+    condition: "has_clustered_index(?table, columns(?pred))"
+    description: "Clustered index must exist on predicate column"
 ---
 
 # Clustered Index Selection

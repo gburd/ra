@@ -10,6 +10,17 @@ authors: ["RA Contributors"]
 tags: [index, spatial, r-tree, gist, geometry, geographic]
 complexity: "O(log n + k)"
 benefit_range: [0.5, 0.99]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter (spatial_op ?col ?geom) (scan ?table))"
+    description: "Spatial operation filter with spatial index"
+  - type: "predicate"
+    condition: "has_spatial_index(?table, ?col)"
+    description: "Spatial index (R-tree/GiST) must exist on the column"
+  - type: "capability"
+    database: "current"
+    requires: "spatial_index"
+    description: "Database supports spatial indexes"
 ---
 
 # Spatial Index for Geometry Queries

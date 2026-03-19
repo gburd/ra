@@ -10,6 +10,18 @@ authors: ["RA Contributors"]
 tags: [index, scan, cost, comparison, selectivity, tipping-point]
 complexity: "O(n) or O(log n + k)"
 benefit_range: [0.0, 0.95]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter ?pred (scan ?table))"
+    description: "Filter with multiple candidate indexes"
+  - type: "predicate"
+    condition: "has_multiple_indexes(?table)"
+    description: "Multiple indexes must exist for cost comparison"
+  - type: "fact"
+    fact_type: "statistics.cardinality"
+    table: "?table"
+    comparator: "exists"
+    description: "Cardinality statistics needed for cost comparison"
 ---
 
 # Index vs Sequential Scan Cost Comparison

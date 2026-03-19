@@ -10,6 +10,17 @@ authors: ["RA Contributors"]
 tags: [aggregation, cube, rollup]
 complexity: "O(n * k)"
 benefit_range: [0.3, 0.7]
+preconditions:
+  - type: "pattern"
+    must_match: "(grouping-sets ?input ?sets ?aggs)"
+    description: "GROUPING SETS / CUBE / ROLLUP aggregation"
+  - type: "predicate"
+    condition: "count(?sets) > 1"
+    description: "Multiple grouping sets for expansion benefit"
+  - type: "capability"
+    database: "current"
+    requires: "grouping_sets"
+    description: "Database supports GROUPING SETS syntax"
 ---
 
 # Grouping Sets Expansion

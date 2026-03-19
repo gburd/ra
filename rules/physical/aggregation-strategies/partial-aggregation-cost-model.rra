@@ -10,6 +10,20 @@ authors: ["RA Contributors"]
 tags: [aggregation, partial, cost-model, pre-aggregate, cardinality]
 complexity: "O(n)"
 benefit_range: [0.0, 0.8]
+preconditions:
+  - type: "pattern"
+    must_match: "(aggregate ?input ?groups ?aggs)"
+    description: "Aggregation evaluating partial aggregation benefit"
+  - type: "predicate"
+    condition: "all_decomposable(?aggs)"
+    description: "All aggregate functions must be decomposable"
+  - type: "fact"
+    fact_type: "statistics.cardinality"
+    table: "?input"
+    comparator: ">"
+    threshold: 10000
+    optional: true
+    description: "Input must be large enough to benefit from partial aggregation"
 ---
 
 # Partial Aggregation Cost Model (When to Pre-Aggregate)
@@ -95,6 +109,9 @@ aggregate[groups, aggs](R)
 ```
 
 ## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
 
 ```rust
 fn can_use_partial_aggregation(

@@ -10,6 +10,17 @@ authors: ["RA Contributors"]
 tags: [index, bitmap, combining, and, or, multi-predicate]
 complexity: "O(n/64)"
 benefit_range: [0.3, 0.8]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter (and ?pred1 ?pred2) (scan ?table))"
+    description: "Conjunctive filter on table with bitmap indexes"
+  - type: "predicate"
+    condition: "has_bitmap_index(?table, columns(?pred1)) && has_bitmap_index(?table, columns(?pred2))"
+    description: "Bitmap indexes must exist on both predicate columns"
+  - type: "capability"
+    database: "current"
+    requires: "bitmap_index"
+    description: "Database supports bitmap indexes"
 ---
 
 # Bitmap Index Combining with AND/OR

@@ -10,6 +10,14 @@ authors: ["RA Contributors"]
 tags: [aggregation, sort, external]
 complexity: "O(n log n)"
 benefit_range: [0.3, 0.7]
+preconditions:
+  - type: "pattern"
+    must_match: "(aggregate ?input ?groups ?aggs)"
+    description: "Aggregation using sort-based strategy"
+  - type: "predicate"
+    condition: "is_sorted_by(?input, ?groups) || needs_sorted_output(?parent)"
+    description: "Input sorted or sorted output needed downstream"
+    optional: true
 ---
 
 # Sort Aggregation

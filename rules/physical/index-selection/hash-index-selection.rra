@@ -10,6 +10,13 @@ authors: ["RA Contributors"]
 tags: [index, hash, equality, point-lookup]
 complexity: "O(1)"
 benefit_range: [0.5, 0.95]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter (= ?col ?val) (scan ?table))"
+    description: "Equality filter with hash index candidate"
+  - type: "predicate"
+    condition: "has_hash_index(?table, ?col)"
+    description: "Hash index must exist on the column"
 ---
 
 # Hash Index Selection for Equality Lookups

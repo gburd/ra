@@ -7,6 +7,13 @@ standard: "sql:1992"
 version: "1.0.0"
 authors: ["RA Contributors"]
 tags: [filter, merge, simplification, core]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter ?pred1 (filter ?pred2 ?input))"
+    description: "Two consecutive filters"
+  - type: "predicate"
+    condition: "is_deterministic(?pred1) && is_deterministic(?pred2)"
+    description: "Both predicates must be deterministic"
 ---
 
 # Filter Merge (Cascading Selections)
@@ -51,6 +58,9 @@ rw!("filter-split";
 ```
 
 ## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
 
 ```rust
 fn applicable() -> bool {

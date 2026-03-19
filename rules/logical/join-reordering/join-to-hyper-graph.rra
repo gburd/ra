@@ -10,6 +10,13 @@ authors: ["RA Contributors"]
 tags: [academic, calcite]
 complexity: "O(n)"
 benefit_range: [0.3, 0.7]
+preconditions:
+  - type: "pattern"
+    must_match: "(multi-join ?inputs ?predicates)"
+    description: "Multi-way join to convert to hypergraph"
+  - type: "predicate"
+    condition: "count(?inputs) >= 3"
+    description: "At least 3 relations for hypergraph representation"
 ---
 
 # JoinToHyperGraph

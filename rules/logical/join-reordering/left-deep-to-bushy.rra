@@ -7,6 +7,16 @@ standard: "sql:1992"
 version: "1.0.0"
 authors: ["RA Contributors"]
 tags: [join, reordering, bushy, parallel, core]
+preconditions:
+  - type: "pattern"
+    must_match: "(join inner ?c3 (join inner ?c2 (join inner ?c1 ?r ?s) ?t) ?u)"
+    description: "Left-deep chain of 4+ inner joins"
+  - type: "predicate"
+    condition: "all_inner_joins(?c1, ?c2, ?c3)"
+    description: "All joins must be inner joins"
+  - type: "predicate"
+    condition: "has_independent_subtrees(?r, ?s, ?t, ?u)"
+    description: "Independent sub-trees must exist for bushy form"
 ---
 
 # Left-Deep to Bushy Join Tree
@@ -52,6 +62,9 @@ rw!("left-deep-to-bushy";
 ```
 
 ## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
 
 ```rust
 fn applicable(

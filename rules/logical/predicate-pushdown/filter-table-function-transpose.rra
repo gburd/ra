@@ -8,6 +8,13 @@ authors: ["RA Contributors"]
 tags: [logical, calcite, filter, table-function, pushdown]
 complexity: O(n)
 benefit_range: [0.1, 0.5]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter ?pred (table-function ?func ?args))"
+    description: "Filter above a table function"
+  - type: "predicate"
+    condition: "is_deterministic(?pred) && references_only(?pred, output(?func))"
+    description: "Predicate must be deterministic and reference only table function output columns"
 ---
 
 # Calcite FilterTableFunctionTransposeRule
@@ -52,6 +59,9 @@ rw!("calcite-filter-table-function-transpose";
 ```
 
 ## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
 
 ```rust
 fn applicable(

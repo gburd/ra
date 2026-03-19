@@ -10,6 +10,13 @@ authors: ["RA Contributors"]
 tags: [aggregation, distinct, dedup]
 complexity: "O(n)"
 benefit_range: [0.3, 0.7]
+preconditions:
+  - type: "pattern"
+    must_match: "(aggregate ?input ?groups (distinct_agg ?func ?col))"
+    description: "Aggregation with DISTINCT aggregate function"
+  - type: "predicate"
+    condition: "has_distinct_aggregate(?aggs)"
+    description: "At least one aggregate must use DISTINCT modifier"
 ---
 
 # Distinct Aggregation Strategy

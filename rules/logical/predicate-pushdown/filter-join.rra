@@ -10,6 +10,13 @@ authors: ["RA Contributors"]
 tags: [academic, calcite]
 complexity: "O(n)"
 benefit_range: [0.3, 0.7]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter ?pred (join inner ?cond ?left ?right))"
+    description: "Filter above an inner join"
+  - type: "predicate"
+    condition: "is_deterministic(?pred)"
+    description: "Predicate must be deterministic"
 ---
 
 # FilterJoin

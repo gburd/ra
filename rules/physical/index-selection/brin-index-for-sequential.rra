@@ -10,6 +10,20 @@ authors: ["RA Contributors"]
 tags: [index, brin, block-range, sequential, temporal, time-series]
 complexity: "O(1) per range + O(k) pages"
 benefit_range: [0.3, 0.9]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter ?pred (scan ?table))"
+    description: "Range filter on physically ordered column"
+  - type: "predicate"
+    condition: "has_brin_index(?table, columns(?pred))"
+    description: "BRIN index must exist on predicate column"
+  - type: "predicate"
+    condition: "is_range_predicate(?pred)"
+    description: "Predicate must be a range comparison"
+  - type: "capability"
+    database: "current"
+    requires: "brin_index"
+    description: "Database supports BRIN indexes"
 ---
 
 # BRIN Index for Sequential/Temporal Data

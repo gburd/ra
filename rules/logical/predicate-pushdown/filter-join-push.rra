@@ -8,6 +8,16 @@ authors: ["RA Contributors"]
 tags: [logical, calcite, filter, join, pushdown, decomposition]
 complexity: O(n)
 benefit_range: [0.2, 0.8]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter ?pred (join ?type ?cond ?left ?right))"
+    description: "Filter above a join"
+  - type: "predicate"
+    condition: "is_deterministic(?pred)"
+    description: "Predicate must be deterministic"
+  - type: "predicate"
+    condition: "references_only(?pred, ?left) || references_only(?pred, ?right)"
+    description: "Predicate must reference columns from only one side"
 ---
 
 # Calcite FilterJoinRule
@@ -56,6 +66,9 @@ rw!("calcite-filter-into-join";
 ```
 
 ## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
 
 ```rust
 fn applicable(filter: &Filter, join: &Join) -> bool {

@@ -10,6 +10,13 @@ authors: ["RA Contributors"]
 tags: [index, composite, multi-column]
 complexity: "O(log n)"
 benefit_range: [0.4, 0.8]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter ?pred (scan ?table))"
+    description: "Multi-column predicate with composite index"
+  - type: "predicate"
+    condition: "has_multi_column_index(?table, columns(?pred))"
+    description: "Multi-column index must exist covering predicate columns"
 ---
 
 # Multi-Column Index Selection

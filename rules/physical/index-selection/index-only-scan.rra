@@ -10,6 +10,13 @@ authors: ["RA Contributors"]
 tags: [index, covering, index-only, no-heap-access]
 complexity: "O(log n + k)"
 benefit_range: [0.6, 0.95]
+preconditions:
+  - type: "pattern"
+    must_match: "(project ?cols (filter ?pred (scan ?table)))"
+    description: "Query for index-only scan execution"
+  - type: "predicate"
+    condition: "exists_covering_index(?table, ?pred, ?cols)"
+    description: "All required columns must be in the index"
 ---
 
 # Index-Only Scan

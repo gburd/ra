@@ -7,6 +7,16 @@ standard: "sql:1992"
 version: "1.0.0"
 authors: ["RA Contributors"]
 tags: [join, cartesian, cross, conversion, core]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter ?pred (join cross true ?left ?right))"
+    description: "Filter above a cross product"
+  - type: "predicate"
+    condition: "references_both_sides(?pred, ?left, ?right)"
+    description: "Predicate must reference columns from both inputs"
+  - type: "predicate"
+    condition: "is_deterministic(?pred)"
+    description: "Predicate must be deterministic"
 ---
 
 # Cartesian Product to Join Conversion
@@ -47,6 +57,9 @@ rw!("cartesian-to-join";
 ```
 
 ## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
 
 ```rust
 fn applicable(

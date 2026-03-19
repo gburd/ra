@@ -10,6 +10,13 @@ authors: ["RA Contributors"]
 tags: [index, merge, intersection, bitmap-and, multi-predicate]
 complexity: "O(n1 + n2) for merge, O(k) for result"
 benefit_range: [0.3, 0.85]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter (and ?pred1 ?pred2) (scan ?table))"
+    description: "Multi-predicate filter for index merge intersection"
+  - type: "predicate"
+    condition: "has_index(?table, columns(?pred1)) && has_index(?table, columns(?pred2))"
+    description: "Multiple indexes available for merge intersection"
 ---
 
 # Index Merge Intersection

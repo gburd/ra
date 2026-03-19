@@ -10,6 +10,13 @@ authors: ["RA Contributors"]
 tags: [academic, calcite]
 complexity: "O(n)"
 benefit_range: [0.3, 0.7]
+preconditions:
+  - type: "pattern"
+    must_match: "(join inner ?cond ?left ?right)"
+    description: "Inner join with two inputs"
+  - type: "predicate"
+    condition: "is_inner_or_cross(?type)"
+    description: "Only inner and cross joins are commutative"
 ---
 
 # JoinCommute

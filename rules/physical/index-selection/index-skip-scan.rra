@@ -10,6 +10,20 @@ authors: ["RA Contributors"]
 tags: [index, skip-scan, composite]
 complexity: "O(d * log n)"
 benefit_range: [0.3, 0.6]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter ?pred (scan ?table))"
+    description: "Filter on non-prefix column of composite index"
+  - type: "predicate"
+    condition: "has_composite_index_with_skip(?table, columns(?pred))"
+    description: "Composite index exists where predicate column is not the prefix"
+  - type: "fact"
+    fact_type: "statistics.distinct_count"
+    table: "?table"
+    comparator: "<"
+    threshold: 100
+    optional: true
+    description: "Prefix column should have low cardinality for skip scan efficiency"
 ---
 
 # Index Skip Scan

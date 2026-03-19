@@ -10,6 +10,17 @@ authors: ["RA Contributors"]
 tags: [aggregation, columnar, column-at-a-time, hash, olap]
 complexity: "O(n)"
 benefit_range: [0.3, 0.7]
+preconditions:
+  - type: "pattern"
+    must_match: "(aggregate (scan ?table) ?groups ?aggs)"
+    description: "Aggregation on columnar storage"
+  - type: "capability"
+    database: "current"
+    requires: "columnar_storage"
+    description: "Table must use columnar storage format"
+  - type: "predicate"
+    condition: "is_columnar(?table)"
+    description: "Table must be stored in columnar format"
 ---
 
 # Columnar Aggregation with Column-at-a-Time Processing

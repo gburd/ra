@@ -10,6 +10,16 @@ authors: ["RA Contributors"]
 tags: [index, range, btree, ordered, scan]
 complexity: "O(log n + k)"
 benefit_range: [0.3, 0.9]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter ?pred (scan ?table))"
+    description: "Range predicate on indexed column"
+  - type: "predicate"
+    condition: "is_range_predicate(?pred)"
+    description: "Predicate must be a range comparison"
+  - type: "predicate"
+    condition: "has_btree_index(?table, columns(?pred))"
+    description: "B-tree index must exist on the column"
 ---
 
 # Range Index Selection for Ordered Access

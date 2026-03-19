@@ -10,6 +10,20 @@ authors: ["RA Contributors"]
 tags: [aggregation, parallel, numa]
 complexity: "O(n)"
 benefit_range: [0.3, 0.7]
+preconditions:
+  - type: "pattern"
+    must_match: "(aggregate ?input ?groups ?aggs)"
+    description: "Distributed aggregation with three phases"
+  - type: "predicate"
+    condition: "all_decomposable(?aggs)"
+    description: "All aggregates must be decomposable"
+  - type: "predicate"
+    condition: "is_distributed(?input)"
+    description: "Input must be distributed across nodes"
+  - type: "capability"
+    database: "current"
+    requires: "distributed_execution"
+    description: "Database supports distributed execution"
 ---
 
 # Three-Phase Aggregation

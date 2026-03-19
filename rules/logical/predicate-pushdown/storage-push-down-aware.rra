@@ -10,6 +10,17 @@ authors: ["RA Contributors"]
 tags: [academic, optimization]
 complexity: "O(n)"
 benefit_range: [0.3, 0.7]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter ?pred (scan ?table))"
+    description: "Filter pushable to storage engine"
+  - type: "predicate"
+    condition: "is_storage_pushable(?pred)"
+    description: "Predicate must be expressible in storage engine's filter language"
+  - type: "capability"
+    database: "current"
+    requires: "storage_pushdown"
+    description: "Storage engine must support predicate pushdown"
 ---
 
 # Storage Push-Down Aware

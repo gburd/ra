@@ -8,6 +8,13 @@ authors: ["RA Contributors"]
 tags: [logical, calcite, filter, sort, transpose, pushdown]
 complexity: O(n)
 benefit_range: [0.1, 0.7]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter ?pred (sort ?order ?input))"
+    description: "Filter above a sort"
+  - type: "predicate"
+    condition: "is_deterministic(?pred)"
+    description: "Predicate must be deterministic"
 ---
 
 # Calcite FilterSortTransposeRule
@@ -48,6 +55,9 @@ rw!("calcite-filter-sort-transpose";
 ```
 
 ## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
 
 ```rust
 fn applicable(

@@ -8,6 +8,13 @@ authors: ["RA Contributors"]
 tags: [logical, calcite, filter, correlate, pushdown, lateral]
 complexity: O(n)
 benefit_range: [0.1, 0.5]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter ?pred (correlate ?type ?left ?right))"
+    description: "Filter above a correlated subquery"
+  - type: "predicate"
+    condition: "references_only(?pred, ?left)"
+    description: "Filter predicate must reference only outer relation"
 ---
 
 # Calcite FilterCorrelateRule
@@ -63,6 +70,9 @@ rw!("calcite-filter-correlate-right";
 ```
 
 ## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
 
 ```rust
 fn applicable(

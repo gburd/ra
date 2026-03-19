@@ -10,6 +10,14 @@ authors: ["RA Contributors"]
 tags: [aggregation, sort, grouping]
 complexity: "O(n log n)"
 benefit_range: [0.3, 0.6]
+preconditions:
+  - type: "pattern"
+    must_match: "(aggregate ?input ?groups ?aggs)"
+    description: "Sort-based aggregation implementation"
+  - type: "predicate"
+    condition: "is_sorted_by(?input, ?groups) || sort_cost(?input, ?groups) < hash_cost(?input, ?groups)"
+    description: "Sort-based preferred when input is sorted or sort is cheaper than hash"
+    optional: true
 ---
 
 # Sort-Based Aggregation

@@ -10,6 +10,20 @@ authors: ["RA Contributors"]
 tags: [index, loose-scan, skip-scan, distinct, group-by]
 complexity: "O(g * log n)"
 benefit_range: [0.5, 0.95]
+preconditions:
+  - type: "pattern"
+    must_match: "(aggregate (filter ?pred (scan ?table)) ?groups ?aggs)"
+    description: "Aggregation with DISTINCT or GROUP BY on indexed column"
+  - type: "predicate"
+    condition: "has_index(?table, ?groups)"
+    description: "Index must exist on the grouping columns"
+  - type: "fact"
+    fact_type: "statistics.distinct_count"
+    table: "?table"
+    comparator: "<"
+    threshold: 10000
+    optional: true
+    description: "Few distinct values for efficient skip behavior"
 ---
 
 # Loose Index Scan

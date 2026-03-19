@@ -10,6 +10,13 @@ authors: ["RA Contributors"]
 tags: [academic, calcite]
 complexity: "O(n)"
 benefit_range: [0.3, 0.7]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter (or ?p1 ?p2) (join ?type ?cond ?left ?right))"
+    description: "Disjunctive filter above a join"
+  - type: "predicate"
+    condition: "each_disjunct_references_single_side(?p1, ?p2, ?left, ?right)"
+    description: "Each disjunct must reference only one join side"
 ---
 
 # Expand Disjunction For Join

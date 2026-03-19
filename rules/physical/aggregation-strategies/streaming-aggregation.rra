@@ -10,6 +10,13 @@ authors: ["RA Contributors"]
 tags: [aggregation, streaming, sorted]
 complexity: "O(n)"
 benefit_range: [0.3, 0.7]
+preconditions:
+  - type: "pattern"
+    must_match: "(aggregate ?input ?groups ?aggs)"
+    description: "Aggregation on streaming/sorted input"
+  - type: "predicate"
+    condition: "is_sorted_by(?input, ?groups)"
+    description: "Input must be sorted by grouping columns for streaming"
 ---
 
 # Streaming Aggregation

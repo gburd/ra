@@ -7,6 +7,16 @@ standard: "sql:1992"
 version: "1.0.0"
 authors: ["RA Contributors"]
 tags: [join, outer, inner, simplification, core]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter ?pred (join ?type ?cond ?left ?right))"
+    description: "Filter above an outer join"
+  - type: "predicate"
+    condition: "is_outer_join(?type)"
+    description: "Join must be LEFT, RIGHT, or FULL OUTER"
+  - type: "predicate"
+    condition: "is_null_rejecting(?pred, nullable_side(?type))"
+    description: "Filter predicate must be null-rejecting on the nullable side"
 ---
 
 # Outer Join to Inner Join Simplification
@@ -64,6 +74,9 @@ rw!("full-join-to-inner";
 ```
 
 ## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
 
 ```rust
 fn is_null_rejecting(pred: &Expr, nullable_side: &Relation) -> bool {

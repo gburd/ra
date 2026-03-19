@@ -10,6 +10,13 @@ authors: ["RA Contributors"]
 tags: [index, intersection, bitmap]
 complexity: "O(log n + log m)"
 benefit_range: [0.4, 0.7]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter (and ?pred1 ?pred2) (scan ?table))"
+    description: "Conjunctive filter with index intersection opportunity"
+  - type: "predicate"
+    condition: "has_index(?table, columns(?pred1)) && has_index(?table, columns(?pred2))"
+    description: "Separate indexes must exist for intersection"
 ---
 
 # Index Intersection

@@ -8,6 +8,16 @@ authors: ["RA Contributors"]
 tags: [logical, calcite, join, transitive, predicate, pushdown]
 complexity: O(n)
 benefit_range: [0.1, 0.6]
+preconditions:
+  - type: "pattern"
+    must_match: "(join inner ?cond ?left ?right)"
+    description: "Inner join with transitive predicate opportunity"
+  - type: "predicate"
+    condition: "has_equi_condition(?cond)"
+    description: "Join must have equality condition for transitivity"
+  - type: "predicate"
+    condition: "has_filter_on_one_side(?left, ?right)"
+    description: "Filter on one side can be transitively applied to the other"
 ---
 
 # Calcite JoinPushTransitivePredicatesRule
@@ -54,6 +64,9 @@ rw!("calcite-join-push-transitive-predicates";
 ```
 
 ## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
 
 ```rust
 fn applicable(join: &Join) -> bool {

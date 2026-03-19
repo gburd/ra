@@ -10,6 +10,13 @@ authors: ["RA Contributors"]
 tags: [aggregation, ordered, sort-key, streaming, in-order]
 complexity: "O(n)"
 benefit_range: [0.3, 0.8]
+preconditions:
+  - type: "pattern"
+    must_match: "(aggregate ?input ?groups ?aggs)"
+    description: "Aggregation on pre-sorted input"
+  - type: "predicate"
+    condition: "is_sorted_by(?input, ?groups)"
+    description: "Input must already be sorted by grouping columns"
 ---
 
 # Ordered Aggregation (Aggregation-in-Order)

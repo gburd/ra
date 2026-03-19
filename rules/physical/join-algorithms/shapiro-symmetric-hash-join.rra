@@ -9,6 +9,17 @@ authors: ["Leonard Shapiro"]
 tags: [hash-join, symmetric, pipelining, classic]
 complexity: "O(n + m)"
 benefit_range: [0.3, 1.5]
+preconditions:
+  - type: "pattern"
+    must_match: "(join inner (= ?lcol ?rcol) ?left ?right)"
+    description: "Equi-join with symmetric hash (pipelined)"
+  - type: "predicate"
+    condition: "is_equijoin(= ?lcol ?rcol)"
+    description: "Must be an equi-join"
+  - type: "predicate"
+    condition: "is_streaming(?left) || is_streaming(?right)"
+    description: "At least one input is a stream (benefits from symmetric hashing)"
+    optional: true
 ---
 
 # Shapiro Symmetric Hash Join
@@ -110,6 +121,9 @@ impl SymmetricHashJoin {
 ```
 
 ## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
 
 ```rust
 fn applicable(

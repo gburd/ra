@@ -10,6 +10,19 @@ authors: ["RA Contributors"]
 tags: [index, adaptive, runtime, feedback, statistics, reoptimization]
 complexity: "O(log n + k)"
 benefit_range: [0.2, 0.8]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter ?pred (scan ?table))"
+    description: "Filter on table scan with adaptive index choice"
+  - type: "fact"
+    fact_type: "statistics.workload_history"
+    table: "?table"
+    comparator: "exists"
+    description: "Workload history must be available for adaptation"
+  - type: "capability"
+    database: "current"
+    requires: "adaptive_indexing"
+    description: "Database supports adaptive index creation"
 ---
 
 # Adaptive Index Selection with Runtime Feedback

@@ -10,6 +10,13 @@ authors: ["RA Contributors"]
 tags: [index, expression, functional]
 complexity: "O(log n)"
 benefit_range: [0.5, 0.8]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter (func ?fname ?args) (scan ?table))"
+    description: "Filter with expression matching an expression index"
+  - type: "predicate"
+    condition: "has_expression_index(?table, func(?fname, ?args))"
+    description: "Expression index must exist matching the filter expression"
 ---
 
 # Expression Index Selection

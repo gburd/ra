@@ -9,6 +9,18 @@ authors: ["Whang, Wiederhold, Sagalowicz"]
 tags: [index-selection, access-path, classic]
 complexity: "O(n)"
 benefit_range: [0.5, 100.0]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter ?pred (scan ?table))"
+    description: "Filter for DBMIN index selection algorithm"
+  - type: "fact"
+    fact_type: "statistics.workload_history"
+    table: "?table"
+    comparator: "exists"
+    description: "Workload statistics needed for DBMIN algorithm"
+  - type: "predicate"
+    condition: "has_multiple_indexes(?table)"
+    description: "Multiple candidate indexes must exist for selection"
 ---
 
 # Index Selection for Conjunctive Queries
@@ -99,6 +111,9 @@ impl IndexSelector {
 ```
 
 ## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
 
 ```rust
 fn applicable(

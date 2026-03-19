@@ -10,6 +10,17 @@ authors: ["RA Contributors"]
 tags: [academic, academic]
 complexity: "O(n)"
 benefit_range: [0.3, 0.7]
+preconditions:
+  - type: "pattern"
+    must_match: "(multi-join ?inputs ?predicates)"
+    description: "Multi-way join for free join algorithm"
+  - type: "predicate"
+    condition: "count(?inputs) >= 3"
+    description: "At least 3 inputs for free join benefit"
+  - type: "predicate"
+    condition: "has_cyclic_join_graph(?inputs, ?predicates)"
+    description: "Cyclic join graphs benefit most from free join"
+    optional: true
 ---
 
 # Free Join Algorithm

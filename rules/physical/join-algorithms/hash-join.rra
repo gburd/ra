@@ -9,6 +9,19 @@ authors: ["Database Systems"]
 tags: [join, hash, equijoin, O(n+m)]
 complexity: "O(n + m)"
 benefit_range: [0.5, 10.0]
+preconditions:
+  - type: "pattern"
+    must_match: "(join inner (= ?lcol ?rcol) ?left ?right)"
+    description: "Equi-join for hash join execution"
+  - type: "predicate"
+    condition: "is_equijoin(= ?lcol ?rcol)"
+    description: "Must be an equi-join (equality condition)"
+  - type: "fact"
+    fact_type: "hardware.memory"
+    comparator: ">="
+    threshold: "build_side_size(?left, ?right)"
+    description: "Sufficient memory to hold build side hash table"
+    optional: true
 ---
 
 # Hash Join

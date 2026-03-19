@@ -8,6 +8,13 @@ authors: ["RA Contributors"]
 tags: [logical, calcite, join, filter, extract, cartesian]
 complexity: O(n)
 benefit_range: [0.0, 0.2]
+preconditions:
+  - type: "pattern"
+    must_match: "(join ?type (and ?join_cond ?filter_pred) ?left ?right)"
+    description: "Join with compound condition containing a filter"
+  - type: "predicate"
+    condition: "references_only(?filter_pred, ?left) || references_only(?filter_pred, ?right)"
+    description: "Filter part must reference only one side of the join"
 ---
 
 # Calcite JoinExtractFilterRule
@@ -50,6 +57,9 @@ rw!("calcite-join-extract-filter";
 ```
 
 ## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
 
 ```rust
 fn applicable(join: &Join) -> bool {

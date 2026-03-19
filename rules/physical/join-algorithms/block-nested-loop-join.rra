@@ -10,6 +10,13 @@ authors: ["RA Contributors"]
 tags: [join, nested-loop, blocking]
 complexity: "O(n * m / b)"
 benefit_range: [0.3, 0.6]
+preconditions:
+  - type: "pattern"
+    must_match: "(join ?type ?cond ?left ?right)"
+    description: "Join using block nested loop strategy"
+  - type: "predicate"
+    condition: "!is_equijoin(?cond) || !has_memory_for_hash(?left)"
+    description: "Used when hash join not possible (non-equijoin or insufficient memory)"
 ---
 
 # Block Nested Loop Join

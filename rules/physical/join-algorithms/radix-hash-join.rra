@@ -10,6 +10,17 @@ authors: ["RA Contributors"]
 tags: [join, hash, radix, cache-conscious]
 complexity: "O(n + m)"
 benefit_range: [0.2, 0.5]
+preconditions:
+  - type: "pattern"
+    must_match: "(join inner (= ?lcol ?rcol) ?left ?right)"
+    description: "Equi-join with radix-partitioned hash join"
+  - type: "predicate"
+    condition: "is_equijoin(= ?lcol ?rcol)"
+    description: "Must be an equi-join"
+  - type: "fact"
+    fact_type: "hardware.cache_size"
+    comparator: "exists"
+    description: "Cache size info needed for radix partitioning"
 ---
 
 # Radix Hash Join
