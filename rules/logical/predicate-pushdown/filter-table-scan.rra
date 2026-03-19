@@ -88,21 +88,21 @@ fn estimated_benefit(
 ## Test Cases
 
 ```sql
--- Positive: simple predicate on indexed column
+-- Expected: equality predicate for index scan
+-- When filter-table-scan is implemented, this pushes into the scan.
 SELECT * FROM emp WHERE empno = 7369;
--- Pushed to index scan on empno
 ```
 
 ```sql
--- Positive: range predicate
+-- Expected: range predicate for range scan
+-- BETWEEN translates to a range scan on order_date.
 SELECT * FROM orders WHERE order_date BETWEEN '2024-01-01' AND '2024-12-31';
--- Pushed to range scan
 ```
 
 ```sql
--- Negative: non-filterable table
+-- Expected: table function not filterable
+-- generate_series is not a filterable table, so the filter stays above.
 SELECT * FROM generate_series(1, 100) WHERE value > 50;
--- Table function not filterable
 ```
 
 ## References

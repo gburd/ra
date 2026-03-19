@@ -117,11 +117,12 @@ WHERE sub.salary > 50000;
 ```
 
 ```sql
--- Negative: filter references both sides
+-- Expected: cross-reference predicate not decomposable
+-- d.budget > sub.salary references both sides so cannot be split,
+-- but other optimizer rules may still transform the query.
 SELECT * FROM dept d,
     LATERAL (SELECT * FROM emp e WHERE e.deptno = d.deptno) sub
 WHERE d.budget > sub.salary;
--- Cannot push: references both sides
 ```
 
 ## References

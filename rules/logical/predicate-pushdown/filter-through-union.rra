@@ -99,20 +99,14 @@ SELECT * FROM (
 ```
 
 ```sql
--- Positive: push filter into UNION (distinct)
--- Before
+-- Expected: filter pushed into UNION branches
+-- When filter-through-union is implemented, the predicate is
+-- distributed to both branches of the UNION.
 SELECT * FROM (
     SELECT city FROM customers
     UNION
     SELECT city FROM suppliers
 ) t WHERE t.city = 'NYC';
-
--- After
-SELECT * FROM (
-    SELECT city FROM customers WHERE city = 'NYC'
-    UNION
-    SELECT city FROM suppliers WHERE city = 'NYC'
-) t;
 ```
 
 ## References

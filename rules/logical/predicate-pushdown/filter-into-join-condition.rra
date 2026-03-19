@@ -117,7 +117,9 @@ JOIN departments d ON e.dept_id = d.id AND e.salary > d.min_salary;
 ```
 
 ```sql
--- Negative: predicate references only one side (use filter-through-join)
+-- Expected: single-side predicate uses filter-through-join instead
+-- o.amount > 1000 references only the left side, so filter-into-join-condition
+-- does not apply. The optimizer may use filter-through-join to push it down.
 SELECT * FROM orders o
 JOIN customers c ON o.customer_id = c.id
 WHERE o.amount > 1000;

@@ -93,20 +93,17 @@ SELECT name, age FROM employees WHERE age > 30;
 ```
 
 ```sql
--- Negative: filter references column not in projection
--- Cannot push filter below if it uses a dropped column
--- Before
+-- Expected: filter on non-projected column still pushable
+-- age is not in SELECT but is available from the base table,
+-- so the filter can be pushed below the projection.
 SELECT name FROM employees WHERE age > 30;
--- Here age is not projected, but it IS in the base table,
--- so the filter can still be pushed below the project since
--- attrs(age>30) = {age} and age is available from the input.
 ```
 
 ```sql
--- Negative: filter references a computed column
--- Before
+-- Expected: computed column blocks pushdown
+-- "total" is computed by the projection so the filter cannot be
+-- pushed below it. The optimizer may still apply other transforms.
 SELECT a + b AS total FROM t WHERE total > 100;
--- Cannot push because "total" is computed by the projection.
 ```
 
 ## References

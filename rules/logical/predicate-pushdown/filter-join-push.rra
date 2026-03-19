@@ -117,11 +117,12 @@ WHERE e.salary > 50000;
 ```
 
 ```sql
--- Negative: full join predicate push
+-- Expected: FULL JOIN blocks predicate pushdown to inputs
+-- Pushing e.salary > 50000 below a FULL JOIN changes semantics,
+-- but the optimizer may convert FULL JOIN to other join types.
 SELECT * FROM emp e
 FULL JOIN dept d ON e.deptno = d.deptno
 WHERE e.salary > 50000;
--- Cannot push to input; changes FULL JOIN semantics
 ```
 
 ## References

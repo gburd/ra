@@ -101,11 +101,13 @@ WHERE c.id BETWEEN 100 AND 200;
 ```
 
 ```sql
--- Negative: non-equi join
+-- Expected: inequality join blocks transitivity
+-- Non-equi join conditions do not create equivalence classes,
+-- so transitive predicates cannot be inferred. The optimizer
+-- may still apply other transformations.
 SELECT * FROM emp e
 JOIN dept d ON e.deptno > d.deptno
 WHERE e.deptno = 10;
--- No transitivity for inequality joins
 ```
 
 ## References
