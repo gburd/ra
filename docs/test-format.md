@@ -69,7 +69,7 @@ Multiple test cases can appear in one SQL block. Each `-- Positive:` or
 ## Running tests
 
 ```sh
-# Run all tests
+# Run all tests (1199 rule files, ~2600 test cases)
 ra-cli test rules/
 
 # Run tests for a single file
@@ -78,24 +78,52 @@ ra-cli test rules/logical/predicate-pushdown/filter-through-join.rra
 # Run only tests matching a substring
 ra-cli test rules/ --filter filter-pushdown
 
-# Verbose output (show passing tests)
-ra-cli -v test rules/
+# Verbose output (show passing tests and per-test timing)
+ra-cli test rules/ --verbose
+
+# Quiet mode (only show summary)
+ra-cli test rules/ --quiet
 ```
 
 ## Output
 
 ```
-Running tests from 450 file(s)...
+Running tests from 1199 file(s)...
 
-  [PASS] logical/predicate-pushdown/filter-through-join.rra::basic filter pushdown (2ms)
-  [FAIL] join-reorder/complex.rra::three-way join
-        expected plan to change, but it stayed the same
+  [FAIL] logical/join-reordering/join-commutativity.rra (1/2 passed)
+        - join-commutativity::block_0 (expected plan to change, but it stayed the same)
 
-Test Results: 1020/1794 passed (56.9%)
-  Failed: 514 tests
-  Skipped: 222 tests
-  Errors: 38 tests
-  Duration: 34.9s
+Summary: 1454/2593 passed (56.1%)
+  Failed: 770 tests
+  Skipped: 357 tests
+  Errors: 12 tests
+  Duration: 57.7s
 ```
 
-Exit code is non-zero when any test fails.
+Exit code is non-zero when any test fails. Skipped tests (SQL parse
+limitations) count as passing for file-level summaries since they
+indicate the test infrastructure cannot yet validate that case, not
+that the rule is broken.
+
+## Failure categories
+
+Most failures fall into predictable categories:
+
+| Category | Cause |
+|----------|-------|
+| "plan stayed the same" | Rule not yet implemented in the optimizer |
+| "multiple statements not supported" | Test SQL uses semicolons to separate statements |
+| "plan should not have changed" | Negative test where the optimizer applies a different rule |
+| "unsupported SQL feature" | Parser doesn't support CTEs, INTERVAL, etc. |
+
+## Optimizer configuration
+
+The test runner uses a lightweight optimizer configuration to keep
+execution fast:
+
+- **Node limit**: 5,000 (vs 100,000 default)
+- **Iteration limit**: 2 (vs 30 default)
+- **Time limit**: 1 second per test (vs 10 default)
+
+This is sufficient to detect whether a rule fires without fully
+saturating the e-graph.
