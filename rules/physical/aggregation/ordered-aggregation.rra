@@ -1,0 +1,106 @@
+---
+id: ordered-aggregation
+name: Ordered (Streaming) Aggregation
+category: physical/aggregation
+databases: [postgresql, oracle, mssql, duckdb]
+version: "1.0.0"
+authors: ["Selinger et al."]
+tags: [physical, aggregation, ordered, streaming, interesting-order]
+complexity: O(n)
+benefit_range: [0.2, 0.7]
+---
+
+# Ordered (Streaming) Aggregation
+
+## Description
+
+Exploits existing sort order in the input (from an index scan, merge
+join, or prior sort) to perform aggregation in a single streaming pass
+without building a hash table. When input is sorted by the GROUP BY
+columns, the aggregation operator simply tracks the current group and
+emits results when the group key changes. This uses O(1) memory per
+group instead of O(groups) for hash aggregation.
+
+**When to apply**: Aggregation where the input is already sorted by
+GROUP BY columns (an "interesting order" from System R terminology).
+
+## Relational Algebra
+
+```algebra
+-- Before: hash aggregate on sorted input (wastes the sort order)
+HashAggregate[dept; SUM(salary)](
+    IndexScan(idx_dept_salary, employees))
+
+-- After: streaming aggregate (exploits sort order)
+StreamAggregate[dept; SUM(salary)](
+    IndexScan(idx_dept_salary, employees))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("ordered-streaming-agg";
+    "(hash-aggregate ?groups ?fn ?input)" =>
+    "(stream-aggregate ?groups ?fn ?input)"
+    if input_provides_order("?input", "?groups")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(agg: &Aggregate) -> bool {
+    let input_order = agg.input().provided_sort_order();
+    let group_cols = agg.group_columns();
+    // Input order must be a prefix of (or equal to) group columns
+    group_cols.is_prefix_of(&input_order)
+}
+```
+
+**Restrictions:**
+- Requires input sorted by ALL group columns (or a prefix thereof)
+- Cannot parallelize as easily as hash aggregation
+- If order only covers prefix, partial streaming + hash for remainder
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    rows: f64,
+    groups: f64,
+    hash_table_overhead: f64,
+) -> f64 {
+    // Hash agg: build hash table of `groups` entries
+    let hash_cost = rows * 1.5 + groups * hash_table_overhead;
+    // Stream agg: single pass, O(1) memory
+    let stream_cost = rows * 0.5;
+    hash_cost - stream_cost
+}
+```
+
+**Typical benefit**: 20-70% when sort order is available for free.
+
+## Test Cases
+
+```sql
+-- Positive: index provides sort order
+CREATE INDEX idx_dept ON employees(dept);
+SELECT dept, AVG(salary) FROM employees GROUP BY dept;
+-- Index scan provides dept order: use streaming aggregate
+
+-- Positive: ORDER BY matches GROUP BY
+SELECT dept, SUM(salary) FROM employees
+GROUP BY dept ORDER BY dept;
+-- Single sort satisfies both GROUP BY and ORDER BY
+
+-- Negative: no available sort order
+SELECT city, COUNT(*) FROM customers GROUP BY city;
+-- No index on city: hash aggregate is typically better
+```
+
+## References
+
+- Selinger, P.G. et al. "Access Path Selection in a Relational Database Management System" (SIGMOD 1979)
+- Graefe, G. "Query Evaluation Techniques" (1993) - interesting orders

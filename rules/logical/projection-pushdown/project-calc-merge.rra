@@ -1,0 +1,79 @@
+---
+id: calcite-project-calc-merge
+name: Project Calc Merge
+category: logical/projection-pushdown
+databases: [calcite, postgresql, duckdb]
+version: "1.0.0"
+authors: ["Apache Calcite"]
+tags: [logical, calcite, projection, calc, merge]
+complexity: O(n)
+benefit_range: [0.01, 0.1]
+---
+
+# Project Calc Merge
+
+## Description
+
+Merges a Project into an adjacent Calc (combined filter + project) node,
+producing a single Calc that performs both the filtering and the combined
+projection. This reduces operator count and avoids intermediate tuple
+materialization.
+
+**When to apply**: A Project sits directly above or below a Calc operator.
+
+**Calcite class**: `org.apache.calcite.rel.rules.ProjectCalcMergeRule`
+
+## Relational Algebra
+
+```algebra
+-- Before
+pi[a, b+1 AS c](Calc[filter=x>0; project=a, b, x](R))
+
+-- After
+Calc[filter=x>0; project=a, b+1 AS c](R)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw\!("project-calc-merge";
+    "(project ?proj_exprs (calc ?filter ?calc_exprs ?input))" =>
+    "(calc ?filter (compose-exprs ?proj_exprs ?calc_exprs) ?input)"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(project: &Project, calc: &Calc) -> bool {
+    // All project expressions must be composable with calc programs
+    project.expressions().iter().all(|e| calc.program().can_compose(e))
+}
+```
+
+## Cost Model
+
+```rust
+fn estimated_benefit(_rows: f64) -> f64 {
+    0.05 // Fixed overhead reduction from merging operators
+}
+```
+
+**Typical benefit**: 1-10% from reduced operator overhead.
+
+## Test Cases
+
+```sql
+-- Positive: merge project into calc
+SELECT a, b + 1 AS c FROM (SELECT a, b FROM t WHERE x > 0);
+-- Single Calc: filter x>0, project a, b+1
+
+-- Negative: incompatible expressions
+-- (no common case; rule is broadly applicable)
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/ProjectCalcMergeRule.java

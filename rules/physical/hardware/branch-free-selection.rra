@@ -1,0 +1,101 @@
+---
+id: branch-free-selection
+name: Branch-Free Predicate Evaluation
+category: physical/hardware
+databases: [duckdb, monetdb, hyper, clickhouse]
+version: "1.0.0"
+authors: ["Ross, Kenneth"]
+tags: [physical, hardware, branch-free, predication, selection, pipeline]
+complexity: O(n)
+benefit_range: [0.05, 0.3]
+---
+
+# Branch-Free Predicate Evaluation
+
+## Description
+
+Replaces branching predicate evaluation (if-then-else) with arithmetic
+predication (conditional move or selection vector arithmetic). Branch
+mispredictions on modern CPUs cost 10-20 cycles; for predicates with
+~50% selectivity, the branch predictor fails half the time. Branch-free
+code uses CMOV or arithmetic to always compute both paths, avoiding
+the misprediction penalty.
+
+**When to apply**: Filter predicates with selectivity near 50% (worst
+case for branch prediction), evaluated in tight scan loops.
+
+## Relational Algebra
+
+```algebra
+-- Before: branching selection
+for each row:
+    if pred(row): emit(row)      -- branch misprediction ~50%
+
+-- After: branch-free selection vector
+selection_vec = evaluate_pred_vectorized(batch)  -- no branches
+compact(batch, selection_vec)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("branch-free-filter";
+    "(filter ?pred (scan ?table))" =>
+    "(compact (scan ?table) (branchfree-eval ?pred))"
+    if selectivity_near_half("?pred")
+    if is_simple_predicate("?pred")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(pred: &Predicate) -> bool {
+    let sel = pred.estimated_selectivity();
+    // Branch-free wins when selectivity is near 50%
+    (0.2..=0.8).contains(&sel)
+        // Only for simple predicates (not function calls)
+        && pred.is_arithmetic_evaluable()
+}
+```
+
+**Restrictions:**
+- Only for simple comparison predicates
+- Short-circuit evaluation (AND/OR chains) may still prefer branches
+- Very selective (<5%) or unselective (>95%) predicates: branches are fine
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    rows: f64,
+    selectivity: f64,
+    branch_mispredict_cost: f64,
+) -> f64 {
+    let mispredict_rate = selectivity.min(1.0 - selectivity);
+    let branch_cost = rows * mispredict_rate * branch_mispredict_cost;
+    let branchfree_overhead = rows * 1.0; // CMOV always executes
+    branch_cost - branchfree_overhead
+}
+```
+
+**Typical benefit**: 5-30% for mid-selectivity predicates in tight loops.
+
+## Test Cases
+
+```sql
+-- Positive: ~50% selectivity predicate
+SELECT * FROM orders WHERE o_totalprice > median_price;
+-- Branch predictor fails ~50%: branch-free is better
+
+-- Negative: very selective predicate
+SELECT * FROM orders WHERE o_orderkey = 12345;
+-- >99.99% not taken: branch predictor succeeds almost always
+```
+
+## References
+
+- Ross, K. "Conjunctive Selection Conditions in Main Memory" (PODS 2002)
+- Ross, K. "Selection Conditions in Main Memory" (TODS 2004)

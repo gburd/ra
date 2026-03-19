@@ -1,0 +1,111 @@
+---
+id: continuous-aggregate-rewriting
+name: Continuous Aggregate Query Rewriting
+category: logical/time-series
+databases: [timescaledb, clickhouse, materialize, ksqldb]
+version: "1.0.0"
+authors: ["Timescale Inc.", "Materialize Inc."]
+tags: [logical, time-series, continuous-aggregate, materialized-view, incremental]
+complexity: O(1)
+benefit_range: [0.9, 0.99]
+---
+
+# Continuous Aggregate Query Rewriting
+
+## Description
+
+Rewrites time-series aggregate queries to read from pre-computed
+continuous aggregates (materialized views that are incrementally updated)
+instead of scanning raw data. The optimizer matches the query's grouping
+and aggregation pattern against available continuous aggregates and
+substitutes a scan of the materialized data, potentially with a
+compensation query for the most recent unmaterialized data.
+
+**When to apply**: Aggregate queries whose grouping columns, time bucket,
+and aggregate functions match an existing continuous aggregate.
+
+## Relational Algebra
+
+```algebra
+-- Before: query raw data
+gamma[time_bucket('1h', ts), device_id; AVG(temp)](raw_data)
+
+-- After: read from continuous aggregate + unmaterialized delta
+UNION ALL(
+    Scan(cagg_hourly_temp),           -- materialized portion
+    gamma[bucket, device_id; AVG(temp)](  -- real-time delta
+        sigma[ts > cagg_watermark](raw_data)
+    )
+)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("continuous-aggregate-rewrite";
+    "(aggregate ?groups ?agg_fn (scan ?raw_table))" =>
+    "(union-all
+        (scan (matching-cagg ?raw_table ?groups ?agg_fn))
+        (aggregate ?groups ?agg_fn
+            (filter (> ?ts (cagg-watermark ?raw_table))
+                (scan ?raw_table))))"
+    if has_matching_cagg("?raw_table", "?groups", "?agg_fn")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(query: &Aggregate, catalog: &Catalog) -> bool {
+    catalog.continuous_aggregates().iter().any(|cagg| {
+        cagg.matches_grouping(query.groups())
+            && cagg.matches_bucket(query.time_bucket())
+            && cagg.covers_aggregates(query.functions())
+    })
+}
+```
+
+**Restrictions:**
+- Query bucket must be a multiple of the cagg bucket
+- Aggregate functions must be roll-up compatible
+- Real-time delta adds latency for recent data
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    raw_rows: f64,
+    cagg_rows: f64,
+    delta_rows: f64,
+) -> f64 {
+    let raw_cost = raw_rows * 8.0;
+    let cagg_cost = cagg_rows * 8.0 + delta_rows * 8.0;
+    raw_cost - cagg_cost
+}
+```
+
+**Typical benefit**: 90-99% for queries spanning large time ranges.
+
+## Test Cases
+
+```sql
+-- Positive: hourly cagg exists, query asks for hourly data
+-- cagg: hourly avg temperature per device
+SELECT time_bucket('1 hour', ts) AS bucket,
+       device_id, AVG(temperature)
+FROM sensor_data
+WHERE ts >= '2024-01-01' AND ts < '2024-07-01'
+GROUP BY bucket, device_id;
+-- Rewritten to read from cagg + real-time delta
+
+-- Negative: no matching cagg (different bucket size)
+SELECT time_bucket('15 minutes', ts), device_id, AVG(temperature)
+FROM sensor_data GROUP BY 1, 2;
+```
+
+## References
+
+- TimescaleDB: Continuous Aggregates documentation
+- Materialize: Materialized Views with incremental maintenance
