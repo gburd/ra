@@ -127,9 +127,13 @@ enum Commands {
     },
     /// Gather database metadata and write to a JSON file.
     GatherMetadata {
+        /// Database connection URL for live gathering
+        /// (postgresql://, mysql://, sqlite://, or .db file path).
+        #[arg(long)]
+        db: Option<String>,
         /// Path to a schema JSON file to load (offline mode).
         #[arg(long)]
-        schema: String,
+        schema: Option<String>,
         /// Output file path for gathered metadata.
         #[arg(short, long, default_value = "schema.json")]
         output: String,
@@ -139,9 +143,16 @@ enum Commands {
         /// SQL query to compare.
         #[arg(long)]
         sql: String,
-        /// Path to a database EXPLAIN plan in JSON format.
+        /// Database connection URL for live EXPLAIN
+        /// (postgresql://, mysql://, sqlite://).
         #[arg(long)]
-        explain_json: String,
+        db: Option<String>,
+        /// Path to a database EXPLAIN plan in JSON format (offline).
+        #[arg(long)]
+        explain_json: Option<String>,
+        /// Path to a schema JSON file (used with --db for stats).
+        #[arg(long)]
+        schema: Option<String>,
         /// Hardware profile for cost estimation.
         #[arg(long, default_value = "auto")]
         hardware_profile: String,
@@ -304,17 +315,27 @@ fn main() -> Result<()> {
                 cli.quiet,
             )
         }
-        Commands::GatherMetadata { schema, output } => {
-            cmd_gather_metadata(&schema, &output, cli.verbose, cli.quiet)
+        Commands::GatherMetadata { db, schema, output } => {
+            cmd_gather_metadata(
+                db.as_deref(),
+                schema.as_deref(),
+                &output,
+                cli.verbose,
+                cli.quiet,
+            )
         }
         Commands::Compare {
             sql,
+            db,
             explain_json,
+            schema,
             hardware_profile,
         } => {
             cmd_compare(
                 &sql,
-                &explain_json,
+                db.as_deref(),
+                explain_json.as_deref(),
+                schema.as_deref(),
                 &hardware_profile,
                 cli.verbose,
                 cli.quiet,
@@ -1159,22 +1180,44 @@ fn parse_diff_format(s: &str) -> Result<plan_diff::DiffFormat> {
 // ── gather-metadata ────────────────────────────────────────
 
 fn cmd_gather_metadata(
-    schema_path: &str,
+    db_url: Option<&str>,
+    schema_path: Option<&str>,
     output_path: &str,
     verbose: bool,
     quiet: bool,
 ) -> Result<()> {
-    let source = std::fs::read_to_string(schema_path)
-        .with_context(|| {
-            format!("reading schema file: {schema_path}")
-        })?;
-
-    let schema: ra_metadata::SchemaInfo =
+    let schema = if let Some(url) = db_url {
+        if !quiet {
+            let kind = ra_metadata::detect_kind(url)
+                .map_or_else(
+                    |_| "unknown".to_owned(),
+                    |k| k.to_string(),
+                );
+            eprintln!(
+                "Connecting to {} database...",
+                kind.cyan()
+            );
+        }
+        let mut connector = ra_metadata::connect(url)
+            .with_context(|| {
+                format!("connecting to database: {url}")
+            })?;
+        connector.gather_schema().with_context(|| {
+            format!("gathering schema from: {url}")
+        })?
+    } else if let Some(path) = schema_path {
+        let source = std::fs::read_to_string(path)
+            .with_context(|| {
+                format!("reading schema file: {path}")
+            })?;
         serde_json::from_str(&source).with_context(|| {
-            format!(
-                "parsing schema JSON from: {schema_path}"
-            )
-        })?;
+            format!("parsing schema JSON from: {path}")
+        })?
+    } else {
+        bail!(
+            "either --db <url> or --schema <path> is required"
+        );
+    };
 
     if !quiet {
         print_header("Database Metadata");
@@ -1229,7 +1272,9 @@ fn cmd_gather_metadata(
 
 fn cmd_compare(
     sql: &str,
-    explain_json_path: &str,
+    db_url: Option<&str>,
+    explain_json_path: Option<&str>,
+    _schema_path: Option<&str>,
     hardware_profile_name: &str,
     verbose: bool,
     quiet: bool,
@@ -1237,22 +1282,43 @@ fn cmd_compare(
     let ra_plan = sql_to_relexpr(sql)
         .with_context(|| format!("failed to parse SQL: {sql}"))?;
 
-    let explain_source =
-        std::fs::read_to_string(explain_json_path)
+    let db_explain = if let Some(url) = db_url {
+        if !quiet {
+            let kind = ra_metadata::detect_kind(url)
+                .map_or_else(
+                    |_| "unknown".to_owned(),
+                    |k| k.to_string(),
+                );
+            eprintln!(
+                "Running EXPLAIN on {} database...",
+                kind.cyan()
+            );
+        }
+        let mut connector = ra_metadata::connect(url)
             .with_context(|| {
-                format!(
-                    "reading EXPLAIN JSON: {explain_json_path}"
-                )
+                format!("connecting to database: {url}")
             })?;
-
-    let db_explain: ra_metadata::ExplainPlan =
+        connector.explain_query(sql).with_context(|| {
+            format!("running EXPLAIN on: {url}")
+        })?
+    } else if let Some(path) = explain_json_path {
+        let explain_source =
+            std::fs::read_to_string(path)
+                .with_context(|| {
+                    format!("reading EXPLAIN JSON: {path}")
+                })?;
         serde_json::from_str(&explain_source)
             .with_context(|| {
                 format!(
-                    "parsing EXPLAIN JSON from: \
-                     {explain_json_path}"
+                    "parsing EXPLAIN JSON from: {path}"
                 )
-            })?;
+            })?
+    } else {
+        bail!(
+            "either --db <url> or --explain-json <path> \
+             is required"
+        );
+    };
 
     let hardware =
         load_hardware_profile(hardware_profile_name)?;
