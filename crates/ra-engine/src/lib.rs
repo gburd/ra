@@ -54,6 +54,7 @@ pub mod recursive;
 pub mod resource_budget;
 pub mod resource_profiles;
 pub mod rewrite;
+pub mod rule_metadata;
 pub mod runtime_filters;
 // pub mod semi_join; // TODO: incomplete, has invalid egg syntax
 pub mod timely;
@@ -111,6 +112,10 @@ pub use large_join::{
     JoinNode, LargeJoinOptimizer, LargeJoinStrategy,
 };
 pub use rewrite::all_rules;
+pub use rule_metadata::{
+    filter_rules_by_preconditions, load_rules_from_directory, parse_rra_file, ParsedRule,
+    Precondition, RuleMetadata,
+};
 pub use precondition_eval::{EvaluationError, PreConditionEvaluator};
 pub use timely::{ComputationStats, TimelyConfig};
 pub use trigger_optimizer::{

@@ -11,8 +11,7 @@ use anyhow::{anyhow, Result};
 use rand::prelude::*;
 use ra_core::{
     algebra::{JoinType, RelExpr},
-    cost::{Cost, CostModel, StatisticsProvider},
-    statistics::Statistics,
+    cost::{CostModel, StatisticsProvider},
 };
 use serde::{Deserialize, Serialize};
 
@@ -235,7 +234,7 @@ impl LargeJoinOptimizer {
     }
 
     /// Perturb a join order by swapping two random joins in the tree.
-    fn perturb_join_order(&self, plan: &RelExpr, joins: &[JoinNode]) -> Result<RelExpr> {
+    fn perturb_join_order(&self, _plan: &RelExpr, joins: &[JoinNode]) -> Result<RelExpr> {
         // For simplicity, we'll regenerate the plan with a randomized join order
         // A more sophisticated implementation would swap subtrees in the existing plan
 
@@ -327,7 +326,7 @@ impl LargeJoinOptimizer {
             RelExpr::Join {
                 left,
                 right,
-                condition,
+                condition: _,
                 ..
             } => {
                 // Extract tables from both sides

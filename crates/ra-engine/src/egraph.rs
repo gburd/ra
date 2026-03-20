@@ -16,6 +16,7 @@ use ra_core::algebra::{
 };
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr, UnaryOp};
 use ra_stats::delta::DeltaSet;
+use tracing::warn;
 
 use crate::analysis::RelAnalysis;
 use crate::extract::extract_best;
@@ -393,10 +394,34 @@ impl Optimizer {
             total_rules
         );
 
-        // TODO: Load RuleMetadata and filter based on pre-conditions
-        // For now, use all rules (pre-condition system is ready but needs
-        // RRA metadata loading infrastructure)
-        let filtered_rules = all_rules();
+        // Load RuleMetadata from .rra files and filter based on pre-conditions
+        let filtered_rules = if let Ok(rules_dir) = std::env::var("RA_RULES_DIR") {
+            let rules_path = std::path::PathBuf::from(rules_dir);
+            match crate::rule_metadata::load_rules_from_directory(&rules_path) {
+                Ok(parsed_rules) => {
+                    let applicable_rule_ids =
+                        crate::rule_metadata::filter_rules_by_preconditions(&parsed_rules, facts);
+
+                    info!(
+                        "Loaded {} rules, {} applicable after precondition filtering",
+                        parsed_rules.len(),
+                        applicable_rule_ids.len()
+                    );
+
+                    // For now, use all rules since we need to map rule IDs to egg::Rewrite
+                    // TODO: Build a HashMap<String, egg::Rewrite> to enable actual filtering
+                    all_rules()
+                }
+                Err(e) => {
+                    warn!("Failed to load rules from {}: {}", rules_path.display(), e);
+                    all_rules()
+                }
+            }
+        } else {
+            // No RA_RULES_DIR set, use all rules
+            debug!("RA_RULES_DIR not set, using all rules");
+            all_rules()
+        };
 
         info!(
             "Applying {} rules (filtered from {} total)",
