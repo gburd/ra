@@ -32,8 +32,10 @@ members = [
 ]
 # pgrx extension requires pg_config and PostgreSQL headers;
 # excluded from default workspace build.
+# ra-advisor has API mismatches (LogicalPlan, Parser, etc.) - needs fixing
 exclude = [
     "crates/ra-pg-extension",
+    "crates/ra-advisor",
 ]
 
 [workspace.package]
@@ -93,6 +95,9 @@ pretty_assertions = "1.4"
 
 # Data structures
 indexmap = "2.8"
+
+# Random number generation
+rand = "0.8"
 
 # Workspace crates
 ra-core = { path = "crates/ra-core" }

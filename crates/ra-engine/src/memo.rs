@@ -211,6 +211,61 @@ fn hash_rel_expr(expr: &RelExpr, hasher: &mut impl std::hash::Hasher) {
             suffix_keys.len().hash(hasher);
             hash_rel_expr(input, hasher);
         }
+        RelExpr::BitmapIndexScan {
+            table, index, predicate,
+        } => {
+            table.hash(hasher);
+            index.hash(hasher);
+            hash_scalar_expr(predicate, hasher);
+        }
+        RelExpr::BitmapAnd { inputs }
+        | RelExpr::BitmapOr { inputs } => {
+            inputs.len().hash(hasher);
+            for inp in inputs {
+                hash_rel_expr(inp, hasher);
+            }
+        }
+        RelExpr::BitmapHeapScan {
+            table, bitmap, recheck_cond,
+        } => {
+            table.hash(hasher);
+            hash_rel_expr(bitmap, hasher);
+            if let Some(cond) = recheck_cond {
+                hash_scalar_expr(cond, hasher);
+            }
+        }
+        RelExpr::ParallelScan { table, workers } => {
+            table.hash(hasher);
+            workers.hash(hasher);
+        }
+        RelExpr::ParallelHashJoin {
+            join_type,
+            condition,
+            left,
+            right,
+            workers,
+        } => {
+            join_type.hash(hasher);
+            hash_scalar_expr(condition, hasher);
+            hash_rel_expr(left, hasher);
+            hash_rel_expr(right, hasher);
+            workers.hash(hasher);
+        }
+        RelExpr::ParallelAggregate {
+            group_by,
+            aggregates,
+            input,
+            workers,
+        } => {
+            group_by.len().hash(hasher);
+            aggregates.len().hash(hasher);
+            hash_rel_expr(input, hasher);
+            workers.hash(hasher);
+        }
+        RelExpr::Gather { input, workers } => {
+            hash_rel_expr(input, hasher);
+            workers.hash(hasher);
+        }
     }
 }
 

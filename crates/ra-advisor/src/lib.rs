@@ -10,7 +10,9 @@ pub mod workload;
 
 use anyhow::{Context, Result};
 use indexmap::IndexMap;
-use ra_core::{Expr, LogicalPlan, Optimizer, Schema};
+use ra_core::{Expr, RelExpr};
+use ra_engine::Optimizer;
+use ra_metadata::schema::SchemaInfo;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use tracing::{debug, info};
@@ -23,7 +25,7 @@ pub use workload::{Query, QueryId, Workload};
 #[derive(Debug)]
 pub struct IndexAdvisor {
     /// Schema information including tables and existing indexes
-    schema: Schema,
+    schema: SchemaInfo,
     /// Query optimizer for cost estimation
     optimizer: Optimizer,
     /// Statistics for accurate cost estimation
@@ -58,8 +60,8 @@ pub enum Priority {
 
 impl IndexAdvisor {
     /// Create a new index advisor with the given schema and statistics
-    pub fn new(schema: Schema, stats: ra_stats::Statistics) -> Self {
-        let optimizer = Optimizer::new(schema.clone());
+    pub fn new(schema: SchemaInfo, stats: ra_stats::Statistics) -> Self {
+        let optimizer = Optimizer::new();
         Self {
             schema,
             optimizer,
@@ -189,27 +191,27 @@ impl IndexAdvisor {
     }
 
     /// Extract columns used in WHERE clauses
-    fn extract_filter_columns(&self, plan: &LogicalPlan) -> Result<Vec<ColumnRef>> {
+    fn extract_filter_columns(&self, plan: &RelExpr) -> Result<Vec<ColumnRef>> {
         let mut columns = Vec::new();
         self.walk_plan_for_filters(plan, &mut columns)?;
         Ok(columns)
     }
 
     /// Recursively walk the plan to find filter predicates
-    fn walk_plan_for_filters(&self, plan: &LogicalPlan, columns: &mut Vec<ColumnRef>) -> Result<()> {
+    fn walk_plan_for_filters(&self, plan: &RelExpr, columns: &mut Vec<ColumnRef>) -> Result<()> {
         match plan {
-            LogicalPlan::Filter { predicate, input } => {
+            RelExpr::Filter { predicate, input } => {
                 self.extract_columns_from_expr(predicate, columns)?;
                 self.walk_plan_for_filters(input, columns)?;
             }
-            LogicalPlan::Join { left, right, on, .. } => {
+            RelExpr::Join { left, right, on, .. } => {
                 if let Some(on_expr) = on {
                     self.extract_columns_from_expr(on_expr, columns)?;
                 }
                 self.walk_plan_for_filters(left, columns)?;
                 self.walk_plan_for_filters(right, columns)?;
             }
-            LogicalPlan::Scan { .. } => {
+            RelExpr::Scan { .. } => {
                 // Base case
             }
             _ => {

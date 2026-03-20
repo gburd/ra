@@ -6,6 +6,7 @@
 //! the [`Optimizer`] that drives equality saturation.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use egg::{define_language, EGraph, Id, RecExpr, Runner};
 use ra_core::algebra::{
@@ -257,6 +258,39 @@ impl Optimizer {
     /// Returns an error if the expression cannot be converted to
     /// the e-graph representation or if extraction fails.
     pub fn optimize(&self, expr: &RelExpr) -> Result<RelExpr, EGraphError> {
+        // Check if we should use large join optimization
+        let table_count = crate::large_join::LargeJoinOptimizer::count_tables(expr);
+
+        if table_count >= self.config.large_join_threshold {
+            match &self.config.large_join_strategy {
+                crate::large_join::LargeJoinStrategy::EGraph => {
+                    // Continue with standard e-graph optimization
+                }
+                _ => {
+                    // Use large join optimizer
+                    let cost_model = Arc::new(crate::cost::IntegratedCostModel::new(
+                        crate::cost::CostCalibration::default(),
+                    ));
+                    let stats_provider = Arc::new(TableStatsProvider {
+                        stats: self.table_stats.clone(),
+                    });
+
+                    let large_optimizer = crate::large_join::LargeJoinOptimizer::new(
+                        self.config.large_join_strategy.clone(),
+                        cost_model,
+                        stats_provider,
+                    );
+
+                    let joins = crate::large_join::LargeJoinOptimizer::extract_joins(expr);
+                    if !joins.is_empty() {
+                        return large_optimizer.optimize(joins)
+                            .map_err(|e| EGraphError::ExtractionFailed(e.to_string()));
+                    }
+                }
+            }
+        }
+
+        // Standard e-graph optimization
         let rec_expr = to_rec_expr(expr)?;
         let runner: Runner<RelLang, RelAnalysis> = Runner::default()
             .with_expr(&rec_expr)
@@ -1044,6 +1078,50 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
             let pattern_id = add_symbol(rec, &pattern.to_string());
             let input_id = add_rel_expr(rec, input)?;
             let ids = vec![tag_id, pattern_id, input_id];
+            Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
+        }
+        RelExpr::ParallelScan { table, workers } => {
+            let tag_id = add_symbol(rec, "parallel_scan");
+            let table_id = add_symbol(rec, table);
+            let workers_id = add_symbol(rec, &workers.to_string());
+            let ids = vec![tag_id, table_id, workers_id];
+            Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
+        }
+        RelExpr::ParallelHashJoin {
+            join_type,
+            condition,
+            left,
+            right,
+            workers,
+        } => {
+            let tag_id = add_symbol(rec, "parallel_hash_join");
+            let jt_id = add_join_type(rec, *join_type);
+            let cond_id = add_scalar_expr(rec, condition)?;
+            let left_id = add_rel_expr(rec, left)?;
+            let right_id = add_rel_expr(rec, right)?;
+            let workers_id = add_symbol(rec, &workers.to_string());
+            let ids = vec![tag_id, jt_id, cond_id, left_id, right_id, workers_id];
+            Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
+        }
+        RelExpr::ParallelAggregate {
+            group_by,
+            aggregates,
+            input,
+            workers,
+        } => {
+            let tag_id = add_symbol(rec, "parallel_aggregate");
+            let groups_id = add_expr_list(rec, group_by)?;
+            let aggs_id = add_aggregate_list(rec, aggregates)?;
+            let input_id = add_rel_expr(rec, input)?;
+            let workers_id = add_symbol(rec, &workers.to_string());
+            let ids = vec![tag_id, groups_id, aggs_id, input_id, workers_id];
+            Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
+        }
+        RelExpr::Gather { input, workers } => {
+            let tag_id = add_symbol(rec, "gather");
+            let input_id = add_rel_expr(rec, input)?;
+            let workers_id = add_symbol(rec, &workers.to_string());
+            let ids = vec![tag_id, input_id, workers_id];
             Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
         }
     }
@@ -2990,5 +3068,17 @@ mod tests {
         // Should produce an optimized plan
         // (actual plan may vary, but should not error)
         assert!(matches!(result, RelExpr::Join { .. }) || matches!(result, RelExpr::Scan { .. }));
+    }
+}
+
+/// Statistics provider for table statistics.
+#[derive(Debug, Clone)]
+struct TableStatsProvider {
+    stats: HashMap<String, ra_core::statistics::Statistics>,
+}
+
+impl ra_core::cost::StatisticsProvider for TableStatsProvider {
+    fn get_statistics(&self, table: &str) -> Option<&ra_core::statistics::Statistics> {
+        self.stats.get(table)
     }
 }

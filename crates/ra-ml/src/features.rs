@@ -213,6 +213,52 @@ impl FeatureSchema {
             RelExpr::MultiUnnest { .. } => {
                 features[OP_TYPE_OFFSET + 3] = 1.0;
             }
+            RelExpr::BitmapIndexScan { table, .. } => {
+                features[OP_TYPE_OFFSET] = 1.0;
+                self.encode_table(table, stats, features);
+            }
+            RelExpr::BitmapHeapScan {
+                table, bitmap, ..
+            } => {
+                features[OP_TYPE_OFFSET] = 1.0;
+                self.encode_table(table, stats, features);
+                self.encode_expr(bitmap, stats, features);
+            }
+            RelExpr::BitmapAnd { inputs }
+            | RelExpr::BitmapOr { inputs } => {
+                features[OP_TYPE_OFFSET + 1] = 1.0;
+                for inp in inputs {
+                    self.encode_expr(inp, stats, features);
+                }
+            }
+            RelExpr::ParallelScan { table, .. } => {
+                features[OP_TYPE_OFFSET] = 1.0;
+                self.encode_table(table, stats, features);
+            }
+            RelExpr::ParallelHashJoin {
+                join_type,
+                condition,
+                left,
+                right,
+                ..
+            } => {
+                features[OP_TYPE_OFFSET + 3] = 1.0;
+                encode_join_type(*join_type, features);
+                self.encode_predicate(condition, features);
+                self.encode_expr(left, stats, features);
+                self.encode_expr(right, stats, features);
+            }
+            RelExpr::ParallelAggregate {
+                group_by, input, ..
+            } => {
+                features[OP_TYPE_OFFSET + 4] = 1.0;
+                features[STATS_OFFSET + 4] =
+                    log_scale(group_by.len() as f64);
+                self.encode_expr(input, stats, features);
+            }
+            RelExpr::Gather { input, .. } => {
+                self.encode_expr(input, stats, features);
+            }
         }
     }
 

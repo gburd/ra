@@ -269,6 +269,25 @@ fn collect_join_order(expr: &RelExpr, out: &mut Vec<String>) {
                 collect_join_order(inp, out);
             }
         }
+        RelExpr::BitmapIndexScan { .. }
+        | RelExpr::BitmapHeapScan { .. }
+        | RelExpr::ParallelScan { .. } => {}
+        RelExpr::BitmapAnd { inputs }
+        | RelExpr::BitmapOr { inputs } => {
+            for inp in inputs {
+                collect_join_order(inp, out);
+            }
+        }
+        RelExpr::ParallelHashJoin {
+            left, right, ..
+        } => {
+            collect_join_order(left, out);
+            collect_join_order(right, out);
+        }
+        RelExpr::ParallelAggregate { input, .. }
+        | RelExpr::Gather { input, .. } => {
+            collect_join_order(input, out);
+        }
         RelExpr::Values { .. } | RelExpr::MultiUnnest { .. } => {}
     }
 }
@@ -328,6 +347,37 @@ fn collect_join_hints(expr: &RelExpr, out: &mut Vec<JoinHint>) {
                 collect_join_hints(inp, out);
             }
         }
+        RelExpr::BitmapIndexScan { .. }
+        | RelExpr::BitmapHeapScan { .. }
+        | RelExpr::ParallelScan { .. } => {}
+        RelExpr::BitmapAnd { inputs }
+        | RelExpr::BitmapOr { inputs } => {
+            for inp in inputs {
+                collect_join_hints(inp, out);
+            }
+        }
+        RelExpr::ParallelHashJoin {
+            join_type,
+            left,
+            right,
+            ..
+        } => {
+            let right_name = first_table_name(right);
+            if let Some(rel) = right_name {
+                if let Some(m) = join_type_to_method(*join_type) {
+                    out.push(JoinHint {
+                        relation: rel,
+                        method: m,
+                    });
+                }
+            }
+            collect_join_hints(left, out);
+            collect_join_hints(right, out);
+        }
+        RelExpr::ParallelAggregate { input, .. }
+        | RelExpr::Gather { input, .. } => {
+            collect_join_hints(input, out);
+        }
         RelExpr::Scan { .. }
         | RelExpr::Values { .. }
         | RelExpr::MultiUnnest { .. } => {}
@@ -383,6 +433,41 @@ fn collect_scan_hints(expr: &RelExpr, out: &mut Vec<ScanHint>) {
             if let Some(inp) = input {
                 collect_scan_hints(inp, out);
             }
+        }
+        RelExpr::BitmapIndexScan { table, .. } => {
+            out.push(ScanHint {
+                relation: table.clone(),
+                method: ScanMethodHint::Index(String::new()),
+            });
+        }
+        RelExpr::BitmapHeapScan { table, bitmap, .. } => {
+            out.push(ScanHint {
+                relation: table.clone(),
+                method: ScanMethodHint::Index(String::new()),
+            });
+            collect_scan_hints(bitmap, out);
+        }
+        RelExpr::BitmapAnd { inputs }
+        | RelExpr::BitmapOr { inputs } => {
+            for inp in inputs {
+                collect_scan_hints(inp, out);
+            }
+        }
+        RelExpr::ParallelScan { table, .. } => {
+            out.push(ScanHint {
+                relation: table.clone(),
+                method: ScanMethodHint::Sequential,
+            });
+        }
+        RelExpr::ParallelHashJoin {
+            left, right, ..
+        } => {
+            collect_scan_hints(left, out);
+            collect_scan_hints(right, out);
+        }
+        RelExpr::ParallelAggregate { input, .. }
+        | RelExpr::Gather { input, .. } => {
+            collect_scan_hints(input, out);
         }
         RelExpr::Values { .. }
         | RelExpr::MultiUnnest { .. } => {}

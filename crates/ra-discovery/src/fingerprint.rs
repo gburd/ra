@@ -245,6 +245,46 @@ fn fingerprint_rel(expr: &RelExpr, out: &mut Vec<Token>) {
             out.push(Token::Scan);
             out.push(Token::End);
         }
+        RelExpr::BitmapIndexScan { .. } => {
+            out.push(Token::Scan);
+        }
+        RelExpr::BitmapAnd { inputs }
+        | RelExpr::BitmapOr { inputs } => {
+            out.push(Token::Filter);
+            for inp in inputs {
+                fingerprint_rel(inp, out);
+            }
+            out.push(Token::End);
+        }
+        RelExpr::BitmapHeapScan { bitmap, .. } => {
+            out.push(Token::Scan);
+            fingerprint_rel(bitmap, out);
+            out.push(Token::End);
+        }
+        RelExpr::ParallelScan { .. } => {
+            out.push(Token::Scan);
+        }
+        RelExpr::ParallelHashJoin {
+            join_type,
+            condition,
+            left,
+            right,
+            ..
+        } => {
+            out.push(Token::Join(join_type.to_string()));
+            fingerprint_expr(condition, out);
+            fingerprint_rel(left, out);
+            fingerprint_rel(right, out);
+            out.push(Token::End);
+        }
+        RelExpr::ParallelAggregate { input, .. } => {
+            out.push(Token::Aggregate);
+            fingerprint_rel(input, out);
+            out.push(Token::End);
+        }
+        RelExpr::Gather { input, .. } => {
+            fingerprint_rel(input, out);
+        }
     }
 }
 

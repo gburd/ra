@@ -485,6 +485,182 @@ impl IntegratedCostModel {
 
         adjusted_tables.len()
     }
+
+    // ===== Parallel Query Execution Cost Functions =====
+
+    /// Estimate cost for a parallel scan operator.
+    ///
+    /// Distributes the scan across multiple workers, reducing wall-clock
+    /// time but increasing total resource consumption due to coordination.
+    #[must_use]
+    pub fn parallel_scan_cost(&self, table: &str, workers: usize) -> f64 {
+        let seq_cost = self.scan_cost(table);
+        let parallel_speedup = self.parallel_efficiency(workers);
+
+        // Parallel scan cost = sequential cost / speedup + coordination overhead
+        let parallel_cost = seq_cost / parallel_speedup;
+        let coordination_overhead = self.parallel_coordination_cost(workers);
+
+        parallel_cost + coordination_overhead
+    }
+
+    /// Calculate parallel efficiency based on Amdahl's law.
+    ///
+    /// Models diminishing returns from parallelism due to:
+    /// - Serial portions that can't be parallelized
+    /// - Coordination overhead between workers
+    /// - Resource contention (memory bandwidth, cache)
+    #[must_use]
+    #[allow(clippy::cast_precision_loss)]
+    pub fn parallel_efficiency(&self, workers: usize) -> f64 {
+        if workers <= 1 {
+            return 1.0;
+        }
+
+        let workers_f = workers as f64;
+
+        // Amdahl's law: speedup = 1 / (s + p/n)
+        // where s = serial fraction, p = parallel fraction, n = workers
+        let serial_fraction = 0.05;  // 5% of work is inherently serial
+        let parallel_fraction = 1.0 - serial_fraction;
+
+        // Theoretical speedup from Amdahl's law
+        let amdahl_speedup = 1.0 / (serial_fraction + parallel_fraction / workers_f);
+
+        // Additional efficiency losses
+        let coordination_factor = 0.95_f64.powf(workers_f - 1.0);  // 5% loss per worker
+        let contention_factor = (1.0 - 0.1 * (workers_f - 1.0).min(5.0)).max(0.5);  // Up to 50% loss
+
+        // Combined efficiency
+        amdahl_speedup * coordination_factor * contention_factor
+    }
+
+    /// Estimate coordination overhead for parallel execution.
+    ///
+    /// Includes costs for:
+    /// - Worker startup and shutdown
+    /// - Synchronization barriers
+    /// - Result gathering
+    #[must_use]
+    #[allow(clippy::cast_precision_loss)]
+    pub fn parallel_coordination_cost(&self, workers: usize) -> f64 {
+        if workers <= 1 {
+            return 0.0;
+        }
+
+        let workers_f = workers as f64;
+
+        // Fixed startup cost per worker (in microseconds)
+        let startup_cost = 1000.0 * workers_f;
+
+        // Synchronization cost grows with workers
+        let sync_cost = 100.0 * workers_f * workers_f.log2();
+
+        // Gathering cost (merging results)
+        let gather_cost = 50.0 * workers_f;
+
+        // Convert to normalized cost units
+        (startup_cost + sync_cost + gather_cost) * 1e-6
+    }
+
+    /// Estimate cost for a parallel hash join.
+    ///
+    /// Build phase creates a shared hash table (sequential).
+    /// Probe phase is parallelized across workers.
+    #[must_use]
+    pub fn parallel_hash_join_cost(
+        &self,
+        build_table: &str,
+        probe_table: &str,
+        workers: usize,
+    ) -> f64 {
+        let build_stats = self.effective_statistics(build_table);
+        let probe_stats = self.effective_statistics(probe_table);
+
+        // Build phase is sequential (shared hash table)
+        let build_cost = build_stats.row_count * 100e-6;
+
+        // Probe phase is parallelized
+        let sequential_probe_cost = probe_stats.row_count * 50e-6;
+        let parallel_speedup = self.parallel_efficiency(workers);
+        let parallel_probe_cost = sequential_probe_cost / parallel_speedup;
+
+        // Add coordination overhead
+        let coordination_overhead = self.parallel_coordination_cost(workers);
+
+        // Total cost
+        let total = build_cost + parallel_probe_cost + coordination_overhead;
+
+        // Apply confidence discount
+        let disc_build = self.confidence_for_table(build_table);
+        let disc_probe = self.confidence_for_table(probe_table);
+        total * disc_build.max(disc_probe)
+    }
+
+    /// Estimate cost for parallel aggregation.
+    ///
+    /// Uses two-phase aggregation:
+    /// 1. Partial aggregation in each worker
+    /// 2. Final aggregation to combine partial results
+    #[must_use]
+    #[allow(clippy::cast_precision_loss)]
+    pub fn parallel_aggregate_cost(
+        &self,
+        table: &str,
+        group_count: f64,
+        workers: usize,
+    ) -> f64 {
+        let stats = self.effective_statistics(table);
+        let input_rows = stats.row_count;
+
+        // Phase 1: Partial aggregation in each worker
+        let rows_per_worker = input_rows / workers as f64;
+        let groups_per_worker = (group_count / workers as f64).max(1.0).min(rows_per_worker);
+
+        // Cost of partial aggregation (parallelized)
+        let partial_cost = rows_per_worker * 80e-9;
+        let parallel_speedup = self.parallel_efficiency(workers);
+        let parallel_partial_cost = partial_cost / parallel_speedup;
+
+        // Phase 2: Final aggregation (combining partial results)
+        let combine_rows = groups_per_worker * workers as f64;
+        let combine_cost = combine_rows * 100e-9;
+
+        // Add coordination overhead
+        let coordination_overhead = self.parallel_coordination_cost(workers);
+
+        // Total cost
+        let cost = parallel_partial_cost + combine_cost + coordination_overhead;
+
+        // Apply confidence discount
+        let disc = self.confidence_for_table(table);
+        cost * disc
+    }
+
+    /// Determine optimal number of workers for a parallel operation.
+    ///
+    /// Balances speedup against coordination overhead.
+    #[must_use]
+    #[allow(clippy::cast_precision_loss)]
+    pub fn optimal_worker_count(
+        &self,
+        estimated_rows: f64,
+        max_workers: usize,
+    ) -> usize {
+        // No parallelism for small inputs
+        if estimated_rows < 10_000.0 {
+            return 1;
+        }
+
+        let cpu_cores = self.hardware.cpu_cores as usize;
+
+        // Scale workers based on input size
+        // 1 worker per 100k rows, up to CPU core count
+        let size_based = (estimated_rows / 100_000.0).ceil() as usize;
+
+        // Don't exceed hardware limits or configured maximum
+        size_based.min(cpu_cores).min(max_workers).max(1)
+    }
 }
 
 /// Extract a table name from an operator description like

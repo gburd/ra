@@ -251,7 +251,15 @@ impl FederatedOptimizer {
             | RelExpr::MultiUnnest { .. }
             | RelExpr::TableFunction { .. }
             | RelExpr::RowPattern { .. }
-            | RelExpr::IncrementalSort { .. } => false,
+            | RelExpr::IncrementalSort { .. }
+            | RelExpr::BitmapIndexScan { .. }
+            | RelExpr::BitmapAnd { .. }
+            | RelExpr::BitmapOr { .. }
+            | RelExpr::BitmapHeapScan { .. }
+            | RelExpr::ParallelScan { .. }
+            | RelExpr::ParallelHashJoin { .. }
+            | RelExpr::ParallelAggregate { .. }
+            | RelExpr::Gather { .. } => false,
         }
     }
 

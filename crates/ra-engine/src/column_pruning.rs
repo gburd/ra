@@ -22,15 +22,8 @@ use crate::egraph::RelLang;
 pub fn column_pruning_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // ---------------------------------------------------------------
-        // Basic projection pushdown
+        // Basic projection pushdown (unconditional patterns)
         // ---------------------------------------------------------------
-
-        // Push projection through filter to reduce columns early
-        rewrite!("project-through-filter";
-            "(project ?cols (filter ?pred ?input))" =>
-            "(project ?cols (filter ?pred (project (union-cols ?cols (pred-cols ?pred)) ?input)))"
-            if can_add_projection(?input)
-        ),
 
         // Push projection through join (left side)
         rewrite!("project-through-join-left";

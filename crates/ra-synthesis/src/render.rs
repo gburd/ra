@@ -329,6 +329,49 @@ fn render_expr(expr: &RelExpr, ctx: &mut RenderContext) {
                 ctx.from
             );
         }
+        // Bitmap scan operators (PostgreSQL-specific)
+        RelExpr::BitmapIndexScan { table, index, predicate, .. } => {
+            ctx.from = format!("-- Bitmap Index Scan on {table} using {index}");
+            ctx.where_clauses.push(render_scalar(predicate));
+        }
+        RelExpr::BitmapAnd { inputs } => {
+            ctx.from = format!("-- BitmapAnd({} inputs)", inputs.len());
+        }
+        RelExpr::BitmapOr { inputs } => {
+            ctx.from = format!("-- BitmapOr({} inputs)", inputs.len());
+        }
+        RelExpr::BitmapHeapScan { bitmap, table, recheck_cond, .. } => {
+            render_expr(bitmap, ctx);
+            ctx.from = format!("-- Bitmap Heap Scan on {table}");
+            if let Some(cond) = recheck_cond {
+                ctx.where_clauses.push(render_scalar(cond));
+            }
+        }
+        // Parallel query operators (PostgreSQL-specific)
+        RelExpr::ParallelScan { table, workers, .. } => {
+            ctx.from = format!("-- Parallel Seq Scan on {table} (workers={workers})");
+        }
+        RelExpr::ParallelHashJoin { left, right, condition, workers, .. } => {
+            render_expr(left, ctx);
+            let right_table = extract_table_name(right);
+            let cond = render_scalar(condition);
+            ctx.joins.push(format!(
+                "-- Parallel Hash Join (workers={workers}) {right_table} ON {cond}"
+            ));
+        }
+        RelExpr::ParallelAggregate { group_by, aggregates, input, workers } => {
+            render_expr(input, ctx);
+            ctx.select = render_aggregate_select(aggregates, group_by);
+            ctx.group_by = group_by
+                .iter()
+                .map(render_scalar)
+                .collect();
+            ctx.from = format!("{} -- Parallel Aggregate (workers={workers})", ctx.from);
+        }
+        RelExpr::Gather { input, workers } => {
+            render_expr(input, ctx);
+            ctx.from = format!("{} -- Gather (workers={workers})", ctx.from);
+        }
     }
 }
 
