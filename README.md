@@ -189,22 +189,24 @@ sigma[p](R join[c] S) -> (sigma[p](R)) join[c] S
 
 ## Documentation
 
-- [Platform Architecture](docs/platform-architecture.md) -- High-level system overview
+- [Documentation Index](docs/README.md) -- Full documentation map
+- [Getting Started](docs/GETTING_STARTED.md) -- Installation and first optimization
 - [Architecture](docs/architecture.md) -- Detailed component design
-- [Rule Authoring Guide](docs/rule-authoring.md) -- How to write `.rra` files
+- [Contributing](docs/CONTRIBUTING.md) -- Development standards and contribution guide
+- [Rule Authoring Guide](docs/guides/rule-authoring.md) -- How to write `.rra` files
 - [API Reference](docs/api-reference.md) -- Library API documentation
-- [Cost Models](docs/cost-models.md) -- Cost estimation framework
-- [Hardware Acceleration](docs/hardware-acceleration.md) -- GPU/FPGA/SIMD rules
-- [Execution Models](docs/execution-models.md) -- Volcano, vectorized, push-based, differential, column-at-a-time
-- [Dialect Translation](docs/dialect-translation.md) -- SQL cross-database translation
-- [Isolation Testing](docs/isolation-testing.md) -- Transaction isolation verification
-- [WASM Databases](docs/wasm-databases.md) -- Browser-based database execution
-- [Formal Verification](docs/formal-verification.md) -- TLA+ specifications and verification approach
+- [Cost Models](docs/guides/cost-models.md) -- Cost estimation framework
+- [Hardware Acceleration](docs/features/hardware-acceleration.md) -- GPU/FPGA/SIMD rules
+- [Execution Models](docs/features/execution-models.md) -- Volcano, vectorized, push-based, differential, column-at-a-time
+- [Dialect Translation](docs/guides/dialect-translation.md) -- SQL cross-database translation
+- [Isolation Testing](docs/features/isolation-testing.md) -- Transaction isolation verification
+- [WASM Databases](docs/features/wasm-databases.md) -- Browser-based database execution
+- [Formal Verification](docs/features/formal-verification.md) -- TLA+ specifications and verification approach
 - [TLA+ Specifications](tla/README.md) -- Mathematical proofs of correctness properties
-- [Resource Budgets](docs/resource-budgets.md) -- Predefined profiles, custom limits, and overflow strategies
-- [Plan Visualization](docs/plan-visualization.md) -- Colorized plan diffs and output formats
-- [Distributed Query Optimization](docs/phase19-distributed-optimization.md) -- Network costs, distribution strategies, aggregation, federated queries
-- [Network Modeling](docs/network-modeling.md) -- Network topology and transfer cost estimation
+- [Resource Budgets](docs/features/resource-budgets.md) -- Predefined profiles, custom limits, and overflow strategies
+- [Plan Visualization](docs/features/plan-visualization.md) -- Colorized plan diffs and output formats
+- [Distributed Query Optimization](docs/features/distributed-optimization.md) -- Network costs, distribution strategies, aggregation, federated queries
+- [Network Modeling](docs/features/network-modeling.md) -- Network topology and transfer cost estimation
 
 ### Examples
 
