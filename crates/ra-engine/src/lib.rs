@@ -38,6 +38,7 @@ pub mod executors;
 pub mod extract;
 pub mod facts_context;
 pub mod incremental_sort;
+pub mod join_transformations;
 pub mod federated_cost;
 pub mod federated_optimizer;
 pub mod memo;
@@ -91,6 +92,12 @@ pub use incremental_sort::{
     IncrementalSortCost, PrefixMatch, detect_prefix_match,
     estimate_costs as estimate_incremental_sort_costs,
     try_incremental_sort,
+};
+pub use join_transformations::{
+    SchemaInfo, SelfJoinMatch, UniqueConstraint,
+    apply_join_transformations, can_eliminate_self_join,
+    detect_self_join, is_null_rejecting, outer_to_inner_conversion,
+    try_convert_outer_to_inner, try_eliminate_self_join,
 };
 pub use rewrite::all_rules;
 pub use precondition_eval::{EvaluationError, PreConditionEvaluator};

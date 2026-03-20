@@ -39,6 +39,9 @@ pub fn all_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     rules.extend(duckdb_inspired_rules());
     rules.extend(sqlite_inspired_rules());
     rules.extend(runtime_filter_rules());
+    rules.extend(
+        crate::join_transformations::join_transformation_rules(),
+    );
     rules
 }
 
