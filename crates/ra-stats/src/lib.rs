@@ -89,6 +89,7 @@
 
 pub mod accuracy;
 pub mod delta;
+pub mod feedback;
 pub mod gathering_cost;
 pub mod index_types;
 pub mod integration;
@@ -99,6 +100,10 @@ pub mod types;
 
 pub use accuracy::{QualityMetrics, RefreshThreshold, Staleness, StatisticsSource, StatisticsState};
 pub use delta::{DeltaSet, StatisticsDelta};
+pub use feedback::{
+    CardinalityError, CardinalityErrorTracker, ErrorRecommendation, ErrorSeverity, OperatorKind,
+    RecommendationEngine, RecommendationKind,
+};
 pub use gathering_cost::{CostEstimator, GatheringCost, GatheringMethod, GatheringPriority};
 pub use index_types::{IndexCostFactors, IndexMetadata, IndexType};
 pub use profiles::{ProfileSelector, StatisticsProfile};

@@ -5,6 +5,7 @@
 //! - **Schema analysis**: unused/missing/duplicate indexes, bloat, FK issues
 //! - **Configuration tuning**: memory, planner, parallelism recommendations
 //! - **Statistics freshness**: staleness detection and ANALYZE suggestions
+//! - **Cardinality errors**: q-error tracking and estimation feedback
 //! - **TUI dashboard**: real-time monitoring with actionable advice
 
 #![warn(missing_docs)]
@@ -17,6 +18,7 @@
 
 pub mod bloat_detector;
 pub mod config_checker;
+pub mod error_detection;
 pub mod monitor_tui;
 pub mod query_monitor;
 pub mod recommendations;
@@ -25,6 +27,7 @@ pub mod stats_staleness;
 
 pub use bloat_detector::{BloatDetector, BloatInfo, BloatSeverity};
 pub use config_checker::{ConfigChecker, ConfigIssue, PgConfig};
+pub use error_detection::{ErrorDetector, TableErrorSummary};
 pub use monitor_tui::MonitorApp;
 pub use query_monitor::{QueryMonitor, QueryRecord, QuerySeverity};
 pub use recommendations::{Advisor, Recommendation, Severity};
