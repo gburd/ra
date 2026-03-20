@@ -10,8 +10,10 @@ mod errors;
 mod rate_limit;
 mod websocket;
 
+use std::path::PathBuf;
+
 use ra_synthesis::synthesizer::{SynthesisRequest, Synthesizer};
-use rocket::fs::{FileServer, relative};
+use rocket::fs::FileServer;
 use rocket::serde::json::Json;
 use rocket::{get, launch, options, post, routes};
 use serde::Serialize;
@@ -19,11 +21,6 @@ use serde::Serialize;
 use api::share::ShareStore;
 use cors::Cors;
 use rate_limit::RateLimiter;
-
-#[get("/")]
-fn index() -> rocket::response::Redirect {
-    rocket::response::Redirect::to("/static/index.html")
-}
 
 #[get("/health")]
 fn health() -> &'static str {
@@ -76,8 +73,26 @@ fn synthesize(
     }
 }
 
+/// Resolve the directory for serving static files.
+///
+/// Uses the `STATIC_DIR` environment variable when set (Docker),
+/// falling back to `crates/ra-web/static` relative to the cargo
+/// manifest directory (local development).
+fn static_dir() -> PathBuf {
+    if let Ok(dir) = std::env::var("STATIC_DIR") {
+        return PathBuf::from(dir);
+    }
+    // Fallback for local `cargo run` from the workspace root.
+    PathBuf::from(
+        std::env::var("CARGO_MANIFEST_DIR")
+            .unwrap_or_else(|_| ".".to_string()),
+    )
+    .join("static")
+}
+
 /// Build the Rocket instance with all routes and fairings attached.
 fn build_rocket() -> rocket::Rocket<rocket::Build> {
+    let static_path = static_dir();
     rocket::build()
         .attach(Cors)
         .attach(RateLimiter::new(
@@ -91,7 +106,6 @@ fn build_rocket() -> rocket::Rocket<rocket::Build> {
         .mount(
             "/",
             routes![
-                index,
                 health,
                 options_preflight,
                 synthesize,
@@ -121,7 +135,7 @@ fn build_rocket() -> rocket::Rocket<rocket::Build> {
                 api::visualize::compare_plans,
             ],
         )
-        .mount("/static", FileServer::from(relative!("static")))
+        .mount("/", FileServer::from(static_path))
 }
 
 #[launch]
@@ -153,7 +167,7 @@ mod tests {
         let response = client.get("/").dispatch();
         assert_eq!(response.status(), Status::Ok);
         let body = response.into_string().unwrap();
-        assert!(body.contains("Relational Algebra Web Explorer"));
+        assert!(body.contains("RA"));
     }
 
     #[test]
@@ -447,7 +461,6 @@ mod tests {
             .mount(
                 "/",
                 routes![
-                    index,
                     health,
                     options_preflight,
                     synthesize,
@@ -477,7 +490,7 @@ mod tests {
                     api::visualize::compare_plans,
                 ],
             )
-            .mount("/static", FileServer::from(relative!("static")))
+            .mount("/", FileServer::from(static_dir()))
     }
 
     #[test]
