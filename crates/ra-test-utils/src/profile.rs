@@ -67,7 +67,7 @@ static CURRENT_PROFILE: Lazy<TestProfile> = Lazy::new(|| {
     // Try to load from .ra-test-profile.toml, fall back to baseline
     if Path::new(".ra-test-profile.toml").exists() {
         match fs::read_to_string(".ra-test-profile.toml") {
-            Ok(content) => match toml::from_str(&content) {
+            Ok(content) => match toml::from_str::<TestProfile>(&content) {
                 Ok(profile) => {
                     eprintln!(
                         "Loaded test profile: {} (scale: {:.2}x)",

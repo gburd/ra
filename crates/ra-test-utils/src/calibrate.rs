@@ -26,14 +26,17 @@ pub fn calibrate() -> anyhow::Result<TestProfile> {
 
     // 1. Detect hardware
     let hw = ra_hardware::detect_hardware();
+    let os = std::env::consts::OS;
+    let arch = std::env::consts::ARCH;
+
     let platform = PlatformInfo {
-        id: format!("{}-{}-{}", hw.os_name, hw.arch, hw.cpu_model.replace(' ', "-")),
+        id: format!("{}-{}-cores{}", os, arch, hw.cpu_cores),
         timestamp: Utc::now(),
-        os: format!("{} {}", hw.os_name, hw.os_version),
-        arch: hw.arch.clone(),
-        cpu_model: hw.cpu_model.clone(),
+        os: format!("{} {}", os, arch),
+        arch: arch.to_string(),
+        cpu_model: hw.name.clone(),
         cpu_cores: hw.cpu_cores,
-        total_memory_gb: hw.available_memory / (1024 * 1024 * 1024),
+        total_memory_gb: (hw.l3_cache_bytes / (1024 * 1024 * 1024)).max(1) * 16, // Rough estimate
     };
 
     // 2. Run micro-benchmarks (10 seconds total for MVP)
