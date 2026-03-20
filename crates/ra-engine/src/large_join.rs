@@ -294,6 +294,17 @@ impl LargeJoinOptimizer {
                 inputs.iter().map(|i| Self::count_tables(i)).sum()
             }
             RelExpr::BitmapHeapScan { bitmap, .. } => Self::count_tables(bitmap),
+            RelExpr::Unnest { input, .. } => input.as_ref().map_or(0, |i| Self::count_tables(i)),
+            RelExpr::MultiUnnest { .. } => 0,
+            RelExpr::TableFunction { input, .. } => input.as_ref().map_or(0, |i| Self::count_tables(i)),
+            RelExpr::IncrementalSort { input, .. } => Self::count_tables(input),
+            RelExpr::ParallelScan { .. } => 1,
+            RelExpr::ParallelHashJoin { left, right, .. } => {
+                Self::count_tables(left) + Self::count_tables(right)
+            }
+            RelExpr::ParallelAggregate { input, .. } | RelExpr::Gather { input, .. } => {
+                Self::count_tables(input)
+            }
         }
     }
 
@@ -361,8 +372,20 @@ impl LargeJoinOptimizer {
                     Self::extract_joins_recursive(input, joins);
                 }
             }
-            RelExpr::Values { .. } | RelExpr::BitmapIndexScan { .. } => {
+            RelExpr::Values { .. } | RelExpr::BitmapIndexScan { .. } | RelExpr::MultiUnnest { .. } | RelExpr::ParallelScan { .. } => {
                 // No tables to extract
+            }
+            RelExpr::Unnest { input, .. } | RelExpr::TableFunction { input, .. } => {
+                if let Some(inp) = input {
+                    Self::extract_joins_recursive(inp, joins);
+                }
+            }
+            RelExpr::IncrementalSort { input, .. } | RelExpr::ParallelAggregate { input, .. } | RelExpr::Gather { input, .. } => {
+                Self::extract_joins_recursive(input, joins);
+            }
+            RelExpr::ParallelHashJoin { left, right, .. } => {
+                Self::extract_joins_recursive(left, joins);
+                Self::extract_joins_recursive(right, joins);
             }
         }
     }
