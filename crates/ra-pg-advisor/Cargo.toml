@@ -1,0 +1,32 @@
+[package]
+name = "ra-pg-advisor"
+description = "PostgreSQL plan advisor: generates pg_plan_advice hints from RA optimizer output"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "ra-pg-advisor"
+path = "src/main.rs"
+
+[dependencies]
+ra-core = { workspace = true }
+ra-pg-monitor = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+clap = { workspace = true, features = ["env"] }
+tokio = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+tempfile = { workspace = true }
+
+[lints]
+workspace = true
