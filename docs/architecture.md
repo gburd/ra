@@ -299,7 +299,7 @@ Hardware-aware cost models and operator placement:
 - **cost.rs**: HardwareCostModel implementing CostModel trait, estimating
   execution cost on each device including PCIe transfer overhead
 
-See [hardware-acceleration.md](hardware-acceleration.md) for details on
+See [hardware-acceleration.md](features/hardware-acceleration.md) for details on
 the 21 hardware-specific optimization rules covering GPU scans/joins/
 aggregations, FPGA streaming filters, SIMD vectorization, and NUMA-aware
 partitioning.
