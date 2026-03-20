@@ -15,7 +15,7 @@
 //!
 //! fn check_large_table(facts: &dyn FactsProvider, table: &str) -> bool {
 //!     if let Some(stats) = facts.get_table_stats(table) {
-//!         stats.row_count > 1_000_000
+//!         stats.row_count > 1_000_000.0
 //!     } else {
 //!         false
 //!     }
