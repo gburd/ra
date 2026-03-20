@@ -157,6 +157,12 @@ pub struct OptimizerConfig {
     pub iter_limit: usize,
     /// Time limit in seconds.
     pub time_limit_secs: u64,
+    /// Number of tables to trigger large join fallback.
+    pub large_join_threshold: usize,
+    /// Strategy for large join optimization.
+    pub large_join_strategy: crate::large_join::LargeJoinStrategy,
+    /// Hard timeout for optimization (ms).
+    pub max_optimization_time_ms: u64,
 }
 
 impl Default for OptimizerConfig {
@@ -165,6 +171,9 @@ impl Default for OptimizerConfig {
             node_limit: 100_000,
             iter_limit: 30,
             time_limit_secs: 10,
+            large_join_threshold: 10,
+            large_join_strategy: crate::large_join::LargeJoinStrategy::default(),
+            max_optimization_time_ms: 30000,
         }
     }
 }

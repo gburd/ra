@@ -24,6 +24,7 @@ members = [
     "crates/ra-config",
     "crates/ra-cache",
     "crates/ra-adapters",
+    "crates/ra-advisor",
     "crates/ra-pg-monitor",
     "crates/ra-pg-advisor",
     "crates/ra-test-utils",
@@ -88,6 +89,10 @@ criterion = "0.5"
 assert_cmd = "2.2"
 predicates = "3.1"
 tempfile = "3.27"
+pretty_assertions = "1.4"
+
+# Data structures
+indexmap = "2.8"
 
 # Workspace crates
 ra-core = { path = "crates/ra-core" }

@@ -158,6 +158,44 @@ fn estimate_heuristic(
             // Pattern matching typically reduces output rows
             (input_rows * 0.1).max(1.0)
         }
+        RelExpr::BitmapIndexScan { table, .. } => stats
+            .get_statistics(table)
+            .map_or(1000.0, |s| s.row_count * 0.1),
+        RelExpr::BitmapAnd { inputs } => {
+            let min_rows = inputs.iter()
+                .map(|b| estimate_heuristic(b, stats))
+                .min_by(|a, b| a.partial_cmp(b).unwrap())
+                .unwrap_or(1.0);
+            min_rows
+        }
+        RelExpr::BitmapOr { inputs } => {
+            let total_rows: f64 = inputs.iter()
+                .map(|b| estimate_heuristic(b, stats))
+                .sum();
+            total_rows * 0.8 // account for overlap
+        }
+        RelExpr::BitmapHeapScan { bitmap, .. } => {
+            estimate_heuristic(bitmap, stats)
+        }
+        RelExpr::ParallelScan { table, .. } => stats
+            .get_statistics(table)
+            .map_or(1000.0, |s| s.row_count),
+        RelExpr::ParallelHashJoin { left, right, .. } => {
+            let left_rows = estimate_heuristic(left, stats);
+            let right_rows = estimate_heuristic(right, stats);
+            left_rows * right_rows * 0.1
+        }
+        RelExpr::ParallelAggregate { group_by, input, .. } => {
+            let input_rows = estimate_heuristic(input, stats);
+            if group_by.is_empty() {
+                1.0
+            } else {
+                (input_rows / 10.0).max(1.0)
+            }
+        }
+        RelExpr::Gather { input, .. } => {
+            estimate_heuristic(input, stats)
+        }
     }
 }
 
@@ -321,6 +359,34 @@ fn collect_tables_recursive(
             }
         }
         RelExpr::RowPattern { input, .. } => {
+            collect_tables_recursive(input, provider, map);
+        }
+        RelExpr::BitmapIndexScan { table, .. } => {
+            if let Some(s) = provider.get_statistics(table) {
+                map.insert(table.clone(), s.clone());
+            }
+        }
+        RelExpr::BitmapAnd { inputs } | RelExpr::BitmapOr { inputs } => {
+            for bitmap in inputs {
+                collect_tables_recursive(bitmap, provider, map);
+            }
+        }
+        RelExpr::BitmapHeapScan { bitmap, table, .. } => {
+            if let Some(s) = provider.get_statistics(table) {
+                map.insert(table.clone(), s.clone());
+            }
+            collect_tables_recursive(bitmap, provider, map);
+        }
+        RelExpr::ParallelScan { table, .. } => {
+            if let Some(s) = provider.get_statistics(table) {
+                map.insert(table.clone(), s.clone());
+            }
+        }
+        RelExpr::ParallelHashJoin { left, right, .. } => {
+            collect_tables_recursive(left, provider, map);
+            collect_tables_recursive(right, provider, map);
+        }
+        RelExpr::ParallelAggregate { input, .. } | RelExpr::Gather { input, .. } => {
             collect_tables_recursive(input, provider, map);
         }
     }

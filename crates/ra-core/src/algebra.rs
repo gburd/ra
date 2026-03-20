@@ -259,6 +259,54 @@ pub enum RelExpr {
         /// Optional condition to recheck on heap tuples.
         recheck_cond: Option<Expr>,
     },
+
+    // ===== Parallel Query Execution Operators =====
+
+    /// Parallel scan: distributes table scan across multiple workers.
+    /// Each worker scans a subset of the table pages/blocks.
+    ParallelScan {
+        /// Table name.
+        table: String,
+        /// Number of parallel workers.
+        workers: usize,
+    },
+
+    /// Parallel hash join: distributes join processing across workers.
+    /// Build phase creates shared hash table, probe phase is parallelized.
+    ParallelHashJoin {
+        /// The type of join.
+        join_type: JoinType,
+        /// The join condition.
+        condition: Expr,
+        /// The left input relation.
+        left: Box<RelExpr>,
+        /// The right input relation.
+        right: Box<RelExpr>,
+        /// Number of parallel workers.
+        workers: usize,
+    },
+
+    /// Parallel aggregation: distributes GROUP BY across workers.
+    /// Uses two-phase aggregation: partial per-worker, then final combine.
+    ParallelAggregate {
+        /// Grouping key expressions.
+        group_by: Vec<Expr>,
+        /// Aggregate function calls.
+        aggregates: Vec<AggregateExpr>,
+        /// The input relation.
+        input: Box<RelExpr>,
+        /// Number of parallel workers.
+        workers: usize,
+    },
+
+    /// Gather: collects results from parallel workers.
+    /// Merges parallel execution streams back into a single stream.
+    Gather {
+        /// The parallel input relation.
+        input: Box<RelExpr>,
+        /// Number of parallel workers to gather from.
+        workers: usize,
+    },
 }
 
 /// Configuration for cycle detection in recursive CTEs.
@@ -592,6 +640,14 @@ impl RelExpr {
                 None => vec![],
             },
             Self::RowPattern { input, .. } => vec![input],
+            Self::BitmapIndexScan { .. } => vec![],
+            Self::BitmapAnd { inputs } | Self::BitmapOr { inputs } => {
+                inputs.iter().map(|b| b.as_ref()).collect()
+            }
+            Self::BitmapHeapScan { bitmap, .. } => vec![bitmap],
+            Self::ParallelScan { .. } => vec![],
+            Self::ParallelHashJoin { left, right, .. } => vec![left, right],
+            Self::ParallelAggregate { input, .. } | Self::Gather { input, .. } => vec![input],
         }
     }
 
@@ -757,6 +813,56 @@ impl RelExpr {
                 }
                 input.collect_columns(out);
             }
+            Self::BitmapIndexScan { predicate, .. } => {
+                collect_expr_columns(predicate, out);
+            }
+            Self::BitmapAnd { inputs } | Self::BitmapOr { inputs } => {
+                for bitmap in inputs {
+                    bitmap.collect_columns(out);
+                }
+            }
+            Self::BitmapHeapScan {
+                bitmap,
+                recheck_cond,
+                ..
+            } => {
+                bitmap.collect_columns(out);
+                if let Some(cond) = recheck_cond {
+                    collect_expr_columns(cond, out);
+                }
+            }
+            Self::ParallelScan { .. } => {
+                // No columns to collect from parallel scan metadata
+            }
+            Self::ParallelHashJoin {
+                condition,
+                left,
+                right,
+                ..
+            } => {
+                collect_expr_columns(condition, out);
+                left.collect_columns(out);
+                right.collect_columns(out);
+            }
+            Self::ParallelAggregate {
+                group_by,
+                aggregates,
+                input,
+                ..
+            } => {
+                for expr in group_by {
+                    collect_expr_columns(expr, out);
+                }
+                for agg in aggregates {
+                    if let Some(arg) = &agg.arg {
+                        collect_expr_columns(arg, out);
+                    }
+                }
+                input.collect_columns(out);
+            }
+            Self::Gather { input, .. } => {
+                input.collect_columns(out);
+            }
         }
     }
 }
@@ -808,6 +914,20 @@ impl RelExpr {
                 input
                     .as_ref()
                     .is_some_and(|i| i.references_cte(cte_name))
+            }
+            Self::BitmapIndexScan { table, .. } => table == cte_name,
+            Self::BitmapAnd { inputs } | Self::BitmapOr { inputs} => {
+                inputs.iter().any(|b| b.references_cte(cte_name))
+            }
+            Self::BitmapHeapScan { bitmap, table, .. } => {
+                table == cte_name || bitmap.references_cte(cte_name)
+            }
+            Self::ParallelScan { table, .. } => table == cte_name,
+            Self::ParallelHashJoin { left, right, .. } => {
+                left.references_cte(cte_name) || right.references_cte(cte_name)
+            }
+            Self::ParallelAggregate { input, .. } | Self::Gather { input, .. } => {
+                input.references_cte(cte_name)
             }
         }
     }

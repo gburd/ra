@@ -41,11 +41,11 @@ pub fn all_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     rules.extend(set_operation_rules());
     rules.extend(subquery_optimization_rules());
 
-    // New optimization rules
-    rules.extend(crate::redundant_join::redundant_join_elimination_rules());
-    rules.extend(crate::functional_deps::functional_dependency_rules());
-    rules.extend(crate::semi_join::semi_join_reduction_rules());
-    rules.extend(crate::column_pruning::column_pruning_rules());
+    // New optimization rules (TODO: incomplete, commented out)
+    // rules.extend(crate::redundant_join::redundant_join_elimination_rules());
+    // rules.extend(crate::functional_deps::functional_dependency_rules());
+    // rules.extend(crate::semi_join::semi_join_reduction_rules());
+    // rules.extend(crate::column_pruning::column_pruning_rules());
 
     // Database-inspired rules
     rules.extend(duckdb_inspired_rules());

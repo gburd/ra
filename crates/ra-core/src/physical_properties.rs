@@ -104,6 +104,17 @@ pub fn derive_properties(
                 .collect();
             derive_sort_properties(&all_keys, input_props)
         }
+
+        // Bitmap scans don't provide ordering guarantees
+        RelExpr::BitmapIndexScan { .. }
+        | RelExpr::BitmapAnd { .. }
+        | RelExpr::BitmapOr { .. }
+        | RelExpr::BitmapHeapScan { .. } => PropertySet::new(),
+        // Parallel operators don't provide ordering guarantees
+        RelExpr::ParallelScan { .. }
+        | RelExpr::ParallelHashJoin { .. }
+        | RelExpr::ParallelAggregate { .. }
+        | RelExpr::Gather { .. } => PropertySet::new(),
     }
 }
 

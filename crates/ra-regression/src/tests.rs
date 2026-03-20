@@ -24,14 +24,13 @@ mod integration_tests {
         let history = storage.load().unwrap();
         let detector = RegressionDetector::new();
 
-        // Create a dummy fingerprint
-        let ctx = datafusion::prelude::SessionContext::new();
-        let plan = ctx
-            .sql("SELECT * FROM users WHERE id = 1")
-            .await
-            .unwrap()
-            .into_unoptimized_plan();
-        let fingerprint = PlanFingerprint::from_plan(&plan);
+        // Use a simple fingerprint for testing (avoiding async DataFusion)
+        let fingerprint = PlanFingerprint::from_plan(&datafusion::logical_expr::LogicalPlan::EmptyRelation(
+            datafusion::logical_expr::EmptyRelation {
+                produce_one_row: false,
+                schema: std::sync::Arc::new(datafusion::arrow::datatypes::Schema::empty()),
+            },
+        ));
 
         // Test error-level regression (2.5x cost increase)
         let report = detector.detect("test_query", 250.0, &fingerprint, &history);
@@ -75,14 +74,19 @@ mod integration_tests {
         };
         let detector = RegressionDetector::with_config(config);
 
-        // Create a different plan fingerprint
-        let ctx = datafusion::prelude::SessionContext::new();
-        let plan = ctx
-            .sql("SELECT * FROM users ORDER BY id")
-            .await
-            .unwrap()
-            .into_unoptimized_plan();
-        let new_fingerprint = PlanFingerprint::from_plan(&plan);
+        // Create a different plan fingerprint (using a Sort node instead of EmptyRelation)
+        let new_fingerprint = PlanFingerprint::from_plan(&datafusion::logical_expr::LogicalPlan::Sort(
+            datafusion::logical_expr::Sort {
+                expr: vec![],
+                input: std::sync::Arc::new(datafusion::logical_expr::LogicalPlan::EmptyRelation(
+                    datafusion::logical_expr::EmptyRelation {
+                        produce_one_row: false,
+                        schema: std::sync::Arc::new(datafusion::arrow::datatypes::Schema::empty()),
+                    },
+                )),
+                fetch: None,
+            },
+        ));
 
         // Detect with same cost but different plan
         let report = detector.detect("test_query", 100.0, &new_fingerprint, &history);
@@ -107,13 +111,12 @@ mod integration_tests {
         }
 
         let detector = RegressionDetector::new();
-        let ctx = datafusion::prelude::SessionContext::new();
-        let plan = ctx
-            .sql("SELECT * FROM users")
-            .await
-            .unwrap()
-            .into_unoptimized_plan();
-        let fingerprint = PlanFingerprint::from_plan(&plan);
+        let fingerprint = PlanFingerprint::from_plan(&datafusion::logical_expr::LogicalPlan::EmptyRelation(
+            datafusion::logical_expr::EmptyRelation {
+                produce_one_row: false,
+                schema: std::sync::Arc::new(datafusion::arrow::datatypes::Schema::empty()),
+            },
+        ));
 
         // Current cost significantly above average
         let report = detector.detect("test_query", 300.0, &fingerprint, &history);
