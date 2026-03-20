@@ -52,3 +52,12 @@ tla/states/
 .*.swp
 .worktrees/
 /tmp/
+
+# Agent working files (status, progress tracking)
+/agent/
+**/TASK*_PROGRESS.md
+**/TASK*_STATUS.md
+**/*_PROGRESS.md
+**/*_STATUS.md
+PROJECT_STATUS.md
+PRECONDITION_SYSTEM_STATUS.md
