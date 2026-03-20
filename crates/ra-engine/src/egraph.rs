@@ -298,8 +298,8 @@ impl Optimizer {
                 }
                 _ => {
                     // Use large join optimizer
-                    let cost_model = Arc::new(crate::cost::IntegratedCostModel::new(
-                        crate::cost::CostCalibration::default(),
+                    let cost_model: Arc<dyn ra_core::cost::CostModel> = Arc::new(ra_hardware::HardwareCostModel::new(
+                        self.hardware_profile(),
                     ));
                     let stats_provider = Arc::new(TableStatsProvider {
                         stats: self.table_stats.clone(),
@@ -314,7 +314,7 @@ impl Optimizer {
                     let joins = crate::large_join::LargeJoinOptimizer::extract_joins(expr);
                     if !joins.is_empty() {
                         return large_optimizer.optimize(joins)
-                            .map_err(|e| EGraphError::ExtractionFailed(e.to_string()));
+                            .map_err(|e| EGraphError::ExtractionError(e.to_string()));
                     }
                 }
             }
