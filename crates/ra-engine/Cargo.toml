@@ -8,6 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+anyhow = { workspace = true }
 ra-core = { workspace = true }
 ra-hardware = { workspace = true }
 ra-metadata = { workspace = true }

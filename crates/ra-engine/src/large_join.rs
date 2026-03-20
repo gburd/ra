@@ -277,11 +277,13 @@ impl LargeJoinOptimizer {
             RelExpr::Except { left, right, .. } => {
                 Self::count_tables(left).max(Self::count_tables(right))
             }
-            RelExpr::RecursiveCTE { base, recursive, .. } => {
-                Self::count_tables(base).max(Self::count_tables(recursive))
+            RelExpr::RecursiveCTE { base_case, recursive_case, body, .. } => {
+                Self::count_tables(base_case)
+                    .max(Self::count_tables(recursive_case))
+                    .max(Self::count_tables(body))
             }
-            RelExpr::CTE { name: _, definition, usage } => {
-                Self::count_tables(definition).max(Self::count_tables(usage))
+            RelExpr::CTE { definition, body, .. } => {
+                Self::count_tables(definition).max(Self::count_tables(body))
             }
             RelExpr::Window { input, .. } => Self::count_tables(input),
             RelExpr::Distinct { input } => Self::count_tables(input),
@@ -339,16 +341,17 @@ impl LargeJoinOptimizer {
                 Self::extract_joins_recursive(right, joins);
             }
             RelExpr::RecursiveCTE {
-                base, recursive, ..
+                base_case, recursive_case, body, ..
             } => {
-                Self::extract_joins_recursive(base, joins);
-                Self::extract_joins_recursive(recursive, joins);
+                Self::extract_joins_recursive(base_case, joins);
+                Self::extract_joins_recursive(recursive_case, joins);
+                Self::extract_joins_recursive(body, joins);
             }
             RelExpr::CTE {
-                definition, usage, ..
+                definition, body, ..
             } => {
                 Self::extract_joins_recursive(definition, joins);
-                Self::extract_joins_recursive(usage, joins);
+                Self::extract_joins_recursive(body, joins);
             }
             RelExpr::BitmapHeapScan { bitmap, .. } => {
                 Self::extract_joins_recursive(bitmap, joins);
