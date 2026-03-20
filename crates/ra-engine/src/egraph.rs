@@ -164,6 +164,35 @@ pub struct OptimizerConfig {
     pub large_join_strategy: crate::large_join::LargeJoinStrategy,
     /// Hard timeout for optimization (ms).
     pub max_optimization_time_ms: u64,
+    /// Parallel query execution configuration.
+    pub parallel: ParallelConfig,
+}
+
+/// Configuration for parallel query execution.
+#[derive(Debug, Clone)]
+pub struct ParallelConfig {
+    /// Maximum number of parallel workers across all operations.
+    pub max_parallel_workers: usize,
+    /// Maximum workers for a single gather operation.
+    pub max_parallel_workers_per_gather: usize,
+    /// Minimum table size in bytes to consider parallel scan.
+    pub min_parallel_table_scan_size: usize,
+    /// Cost of processing one tuple in parallel context.
+    pub parallel_tuple_cost: f64,
+    /// Fixed setup cost for parallel execution.
+    pub parallel_setup_cost: f64,
+}
+
+impl Default for ParallelConfig {
+    fn default() -> Self {
+        Self {
+            max_parallel_workers: 8,
+            max_parallel_workers_per_gather: 4,
+            min_parallel_table_scan_size: 8_388_608,  // 8 MB
+            parallel_tuple_cost: 0.1,
+            parallel_setup_cost: 1000.0,
+        }
+    }
 }
 
 impl Default for OptimizerConfig {
@@ -175,6 +204,7 @@ impl Default for OptimizerConfig {
             large_join_threshold: 10,
             large_join_strategy: crate::large_join::LargeJoinStrategy::default(),
             max_optimization_time_ms: 30000,
+            parallel: ParallelConfig::default(),
         }
     }
 }

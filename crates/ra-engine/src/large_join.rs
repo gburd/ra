@@ -138,7 +138,9 @@ impl LargeJoinOptimizer {
             .iter()
             .enumerate()
             .map(|(i, j)| {
-                let stats = self.stats_provider.get_statistics(&j.table)?;
+                let stats = self.stats_provider
+                    .get_statistics(&j.table)
+                    .ok_or_else(|| anyhow!("No statistics for table {}", j.table))?;
                 Ok((i, stats.row_count))
             })
             .collect::<Result<Vec<_>>>()?

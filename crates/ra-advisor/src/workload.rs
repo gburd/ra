@@ -1,8 +1,8 @@
 //! Workload analysis and query representation
 
 use anyhow::{Context, Result};
-use ra_core::LogicalPlan;
-use ra_parser::Parser;
+use ra_core::RelExpr;
+use ra_parser::sql_to_relexpr;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
@@ -19,7 +19,7 @@ pub struct Query {
     pub sql: String,
     /// Parsed logical plan
     #[serde(skip)]
-    pub parsed_query: LogicalPlan,
+    pub parsed_query: RelExpr,
     /// Execution frequency (times per day)
     pub frequency: u32,
     /// Average execution time in milliseconds (if known)
@@ -65,7 +65,6 @@ impl Workload {
     /// Parse workload from SQL string
     pub fn from_sql_string(sql: &str) -> Result<Self> {
         let mut workload = Workload::new();
-        let parser = Parser::new();
 
         // Split by semicolons and parse each query
         let queries: Vec<&str> = sql
@@ -79,8 +78,8 @@ impl Workload {
             let frequency = Self::extract_frequency(query_sql);
 
             // Parse the query
-            let parsed = parser.parse(query_sql)
-                .with_context(|| format!("Failed to parse query {}: {}", i + 1, query_sql))?;
+            let parsed = sql_to_relexpr(query_sql)
+                .map_err(|e| anyhow::anyhow!("Failed to parse query {}: {}", i + 1, e))?;
 
             let query = Query {
                 id: format!("q{}", i + 1),

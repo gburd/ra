@@ -10,9 +10,10 @@ repository.workspace = true
 
 [dependencies]
 ra-core = { workspace = true }
+ra-engine = { workspace = true }
 ra-parser = { workspace = true }
 ra-stats = { workspace = true }
-ra-catalog = { workspace = true }
+ra-metadata = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

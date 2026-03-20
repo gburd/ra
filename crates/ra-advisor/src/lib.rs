@@ -256,16 +256,16 @@ impl IndexAdvisor {
     }
 
     /// Extract columns used in JOIN conditions
-    fn extract_join_columns(&self, plan: &LogicalPlan) -> Result<Vec<(ColumnRef, ColumnRef)>> {
+    fn extract_join_columns(&self, plan: &RelExpr) -> Result<Vec<(ColumnRef, ColumnRef)>> {
         let mut join_pairs = Vec::new();
         self.walk_plan_for_joins(plan, &mut join_pairs)?;
         Ok(join_pairs)
     }
 
     /// Recursively walk the plan to find join conditions
-    fn walk_plan_for_joins(&self, plan: &LogicalPlan, pairs: &mut Vec<(ColumnRef, ColumnRef)>) -> Result<()> {
+    fn walk_plan_for_joins(&self, plan: &RelExpr, pairs: &mut Vec<(ColumnRef, ColumnRef)>) -> Result<()> {
         match plan {
-            LogicalPlan::Join { left, right, on, .. } => {
+            RelExpr::Join { left, right, on, .. } => {
                 if let Some(on_expr) = on {
                     self.extract_join_pairs_from_expr(on_expr, pairs)?;
                 }
@@ -304,22 +304,22 @@ impl IndexAdvisor {
     }
 
     /// Extract columns used in ORDER BY/GROUP BY
-    fn extract_sort_columns(&self, plan: &LogicalPlan) -> Result<Vec<ColumnRef>> {
+    fn extract_sort_columns(&self, plan: &RelExpr) -> Result<Vec<ColumnRef>> {
         let mut columns = Vec::new();
         self.walk_plan_for_sorts(plan, &mut columns)?;
         Ok(columns)
     }
 
     /// Recursively walk the plan to find sort columns
-    fn walk_plan_for_sorts(&self, plan: &LogicalPlan, columns: &mut Vec<ColumnRef>) -> Result<()> {
+    fn walk_plan_for_sorts(&self, plan: &RelExpr, columns: &mut Vec<ColumnRef>) -> Result<()> {
         match plan {
-            LogicalPlan::Sort { exprs, input } => {
+            RelExpr::Sort { exprs, input } => {
                 for expr in exprs {
                     self.extract_columns_from_expr(expr, columns)?;
                 }
                 self.walk_plan_for_sorts(input, columns)?;
             }
-            LogicalPlan::Aggregate { group_exprs, input, .. } => {
+            RelExpr::Aggregate { group_exprs, input, .. } => {
                 for expr in group_exprs {
                     self.extract_columns_from_expr(expr, columns)?;
                 }
@@ -336,7 +336,7 @@ impl IndexAdvisor {
     }
 
     /// Generate composite index candidates (two-column combinations)
-    fn generate_composite_candidates(&self, plan: &LogicalPlan) -> Result<Vec<IndexCandidate>> {
+    fn generate_composite_candidates(&self, plan: &RelExpr) -> Result<Vec<IndexCandidate>> {
         let mut candidates = Vec::new();
 
         // Find filters and sorts in the same query
@@ -422,32 +422,32 @@ impl IndexAdvisor {
     }
 
     /// Estimate the cost of a logical plan
-    fn estimate_plan_cost(&self, plan: &LogicalPlan) -> Result<f64> {
+    fn estimate_plan_cost(&self, plan: &RelExpr) -> Result<f64> {
         // Simplified cost estimation
         // In a real implementation, this would use the statistics module
         match plan {
-            LogicalPlan::Scan { table, .. } => {
+            RelExpr::Scan { table, .. } => {
                 // Base cost for scanning a table
                 let rows = self.stats.get_table_rows(table).unwrap_or(1000.0);
                 Ok(rows * 1.0) // 1 cost unit per row
             }
-            LogicalPlan::IndexScan { table, .. } => {
+            RelExpr::IndexScan { table, .. } => {
                 // Lower cost for index scan
                 let rows = self.stats.get_table_rows(table).unwrap_or(1000.0);
                 Ok(rows * 0.1) // 0.1 cost unit per row (10x faster than table scan)
             }
-            LogicalPlan::Filter { input, predicate } => {
+            RelExpr::Filter { input, predicate } => {
                 let input_cost = self.estimate_plan_cost(input)?;
                 let selectivity = self.estimate_selectivity(predicate)?;
                 Ok(input_cost * selectivity)
             }
-            LogicalPlan::Join { left, right, .. } => {
+            RelExpr::Join { left, right, .. } => {
                 let left_cost = self.estimate_plan_cost(left)?;
                 let right_cost = self.estimate_plan_cost(right)?;
                 // Nested loop join cost approximation
                 Ok(left_cost + (left_cost * right_cost * 0.01))
             }
-            LogicalPlan::Sort { input, .. } => {
+            RelExpr::Sort { input, .. } => {
                 let input_cost = self.estimate_plan_cost(input)?;
                 // n log n cost for sorting
                 Ok(input_cost * (input_cost.log2() + 1.0))

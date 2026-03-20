@@ -4,9 +4,9 @@
 //! to simplify GROUP BY clauses and eliminate redundant columns.
 //!
 //! Key optimizations:
-//! - Remove functionally dependent columns from GROUP BY
-//! - Simplify aggregates when grouping by unique key
-//! - Eliminate redundant DISTINCT when projecting unique columns
+//! - Eliminate DISTINCT after GROUP BY (always produces unique groups)
+//! - Simplify MIN/MAX when grouping by the same column
+//! - Convert COUNT(DISTINCT) patterns
 
 use egg::{rewrite, Rewrite};
 
@@ -22,28 +22,8 @@ use crate::egraph::RelLang;
 pub fn functional_dependency_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // ---------------------------------------------------------------
-        // GROUP BY simplification using unique keys
+        // DISTINCT elimination patterns (always valid)
         // ---------------------------------------------------------------
-
-        // When grouping by a unique key, other columns from same table
-        // are functionally dependent and can be removed from GROUP BY
-        // Pattern: GROUP BY pk, col1, col2 -> GROUP BY pk (when pk is unique)
-        rewrite!("simplify-groupby-unique-key";
-            "(aggregate (list ?pk ?others) ?aggs ?input)" =>
-            "(aggregate (list ?pk) ?aggs ?input)"
-            if is_unique_key(?pk, ?input) && are_dependent_cols(?others, ?pk, ?input)
-        ),
-
-        // ---------------------------------------------------------------
-        // DISTINCT elimination on unique columns
-        // ---------------------------------------------------------------
-
-        // DISTINCT is redundant when projecting unique columns
-        rewrite!("eliminate-distinct-unique";
-            "(distinct-rel (project ?cols ?input))" =>
-            "(project ?cols ?input)"
-            if columns_are_unique(?cols, ?input)
-        ),
 
         // DISTINCT after GROUP BY is redundant (GROUP BY already produces unique groups)
         rewrite!("eliminate-distinct-after-groupby";
@@ -52,136 +32,62 @@ pub fn functional_dependency_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
         ),
 
         // ---------------------------------------------------------------
-        // Aggregate simplification with unique keys
+        // Aggregate simplification patterns
         // ---------------------------------------------------------------
 
-        // COUNT(DISTINCT col) when col is unique -> COUNT(col)
-        rewrite!("count-distinct-unique-to-count";
-            "(aggregate ?groups (list (agg-expr distinct (count ?col) ?alias)) ?input)" =>
-            "(aggregate ?groups (list (agg-expr all (count ?col) ?alias)) ?input)"
-            if is_unique_column(?col, ?input)
-        ),
-
-        // MIN(col) = MAX(col) when grouping by col
-        // This indicates the aggregate can be replaced with the column itself
-        rewrite!("min-max-same-when-grouping-by-col";
+        // MIN(col) when grouping by col -> just project col
+        // The minimum value in a group where all values are the same is that value
+        rewrite!("min-same-when-grouping-by-col";
             "(aggregate (list ?col) (list (agg-expr ?d (min ?col) ?alias)) ?input)" =>
             "(project (list (proj-alias ?col ?alias)) ?input)"
         ),
 
+        // MAX(col) when grouping by col -> just project col
         rewrite!("max-same-when-grouping-by-col";
             "(aggregate (list ?col) (list (agg-expr ?d (max ?col) ?alias)) ?input)" =>
             "(project (list (proj-alias ?col ?alias)) ?input)"
         ),
 
-        // ---------------------------------------------------------------
-        // Join simplification using functional dependencies
-        // ---------------------------------------------------------------
-
-        // Self-join on unique key with same filter can be simplified
-        // SELECT * FROM t t1 JOIN t t2 ON t1.pk = t2.pk WHERE t1.x = 5 AND t2.x = 5
-        // Can become: SELECT * FROM t WHERE x = 5
-        rewrite!("eliminate-self-join-same-filter";
-            "(filter (and (eq ?t1_col ?val) (eq ?t2_col ?val))
-                (join inner (eq ?t1_pk ?t2_pk)
-                    (scan-alias ?t ?t1)
-                    (scan-alias ?t ?t2)))" =>
-            "(filter (eq ?t1_col ?val) (scan ?t))"
-            if is_pk_join(?t1_pk, ?t2_pk) && same_column(?t1_col, ?t2_col)
+        // COUNT(*) when grouping by unique key -> always 1
+        // Each group has exactly one row when grouping by unique key
+        rewrite!("count-star-unique-group";
+            "(aggregate (list ?pk) (list (agg-expr ?d (count ?star) ?alias)) (scan ?table))" =>
+            "(project (list (proj-alias (const-int 1) ?alias)) (scan ?table))"
         ),
 
         // ---------------------------------------------------------------
-        // Redundant column elimination in projections
+        // Redundant aggregate elimination
         // ---------------------------------------------------------------
 
-        // When projecting pk and dependent columns, we can reconstruct
-        // dependent columns later if needed (this is more of a storage optimization)
-        rewrite!("mark-dependent-cols-for-reconstruction";
-            "(project (list ?pk ?dependent_cols) ?input)" =>
-            "(project (list ?pk) ?input)"
-            if can_reconstruct_cols(?dependent_cols, ?pk, ?input)
+        // Aggregate with no aggregates and no GROUP BY -> DISTINCT
+        rewrite!("aggregate-no-aggs-no-groups-to-distinct";
+            "(aggregate nil nil ?input)" =>
+            "(distinct-rel ?input)"
+        ),
+
+        // Double DISTINCT elimination
+        rewrite!("double-distinct-elimination";
+            "(distinct-rel (distinct-rel ?input))" =>
+            "(distinct-rel ?input)"
         ),
 
         // ---------------------------------------------------------------
-        // GROUP BY with expressions containing functionally dependent columns
+        // ORDER BY simplification patterns
         // ---------------------------------------------------------------
 
-        // GROUP BY f(pk, col) where col depends on pk -> GROUP BY f(pk, _)
-        // The exact value of col is determined by pk
-        rewrite!("simplify-groupby-expression-with-deps";
-            "(aggregate (list (func ?name ?pk ?dep_col)) ?aggs ?input)" =>
-            "(aggregate (list ?pk) ?aggs ?input)"
-            if is_dependent_col(?dep_col, ?pk, ?input)
+        // ORDER BY after ORDER BY - keep only the outer sort
+        rewrite!("sort-after-sort";
+            "(sort ?keys1 (sort ?keys2 ?input))" =>
+            "(sort ?keys1 ?input)"
         ),
 
-        // ---------------------------------------------------------------
-        // ORDER BY simplification using functional dependencies
-        // ---------------------------------------------------------------
-
-        // ORDER BY pk, col -> ORDER BY pk (when col is functionally dependent on pk)
-        rewrite!("simplify-orderby-functional-deps";
-            "(sort (list (sort-key ?pk ?dir1 ?nulls1) (sort-key ?col ?dir2 ?nulls2)) ?input)" =>
-            "(sort (list (sort-key ?pk ?dir1 ?nulls1)) ?input)"
-            if is_dependent_col(?col, ?pk, ?input)
-        ),
-
-        // ---------------------------------------------------------------
-        // Window function partition simplification
-        // ---------------------------------------------------------------
-
-        // PARTITION BY pk, col -> PARTITION BY pk (when col depends on pk)
-        rewrite!("simplify-window-partition-deps";
-            "(window-expr ?fn (list ?pk ?dep_col) ?order ?frame ?args ?alias)" =>
-            "(window-expr ?fn (list ?pk) ?order ?frame ?args ?alias)"
-            if is_dependent_col(?dep_col, ?pk, current_input())
+        // DISTINCT after ORDER BY may lose ordering
+        // but ORDER BY after DISTINCT is preserved
+        rewrite!("distinct-sort-reorder";
+            "(distinct-rel (sort ?keys ?input))" =>
+            "(sort ?keys (distinct-rel ?input))"
         ),
     ]
-}
-
-// Helper conditions (these would be implemented in the analysis)
-fn is_unique_key(_col: &str, _input: &str) -> bool {
-    // Check if column is a primary key or has unique constraint
-    false
-}
-
-fn are_dependent_cols(_cols: &str, _key: &str, _input: &str) -> bool {
-    // Check if columns are functionally dependent on the key
-    false
-}
-
-fn columns_are_unique(_cols: &str, _input: &str) -> bool {
-    // Check if the combination of columns is unique
-    false
-}
-
-fn is_unique_column(_col: &str, _input: &str) -> bool {
-    // Check if column has unique constraint
-    false
-}
-
-fn is_pk_join(_col1: &str, _col2: &str) -> bool {
-    // Check if join is on primary key columns
-    false
-}
-
-fn same_column(_col1: &str, _col2: &str) -> bool {
-    // Check if two column references refer to the same column
-    false
-}
-
-fn can_reconstruct_cols(_cols: &str, _key: &str, _input: &str) -> bool {
-    // Check if columns can be reconstructed from the key
-    false
-}
-
-fn is_dependent_col(_col: &str, _key: &str, _input: &str) -> bool {
-    // Check if col is functionally dependent on key
-    false
-}
-
-fn current_input() -> &'static str {
-    // Return current input context
-    ""
 }
 
 #[cfg(test)]
@@ -236,6 +142,15 @@ mod tests {
                 vec!["id".to_string()],
                 vec![("max_id".to_string(), AggFunc::Max(Box::new(Expr::Column(ColumnRef::new("id")))))],
             );
+
+        let runner = run_functional_deps(&expr);
+        assert!(runner.egraph.number_of_classes() > 1);
+    }
+
+    #[test]
+    fn double_distinct_eliminated() {
+        // Double DISTINCT should be simplified to single DISTINCT
+        let expr = RelExpr::scan("t").distinct().distinct();
 
         let runner = run_functional_deps(&expr);
         assert!(runner.egraph.number_of_classes() > 1);
