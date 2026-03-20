@@ -5,7 +5,7 @@ RUN npm ci
 COPY web/ ./
 RUN npm run build
 
-FROM rust:1.82-slim AS server-build
+FROM rust:1.88-slim AS server-build
 WORKDIR /app
 RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
 COPY Cargo.toml Cargo.lock ./
@@ -14,10 +14,11 @@ COPY rules/ rules/
 RUN cargo build --release --bin ra-web
 
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y ca-certificates curl && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
+RUN mkdir -p /app/crates/ra-web
 COPY --from=server-build /app/target/release/ra-web /app/ra-web
-COPY --from=web-build /app/web/dist /app/static
+COPY --from=web-build /app/web/dist /app/crates/ra-web/static
 COPY rules/ /app/rules/
 
 ENV ROCKET_PORT=8000
