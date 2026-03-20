@@ -23,6 +23,7 @@ ra-metadata = { workspace = true }
 ra-dialect = { workspace = true }
 ra-stats = { workspace = true }
 ra-tui = { workspace = true }
+ra-pg-monitor = { workspace = true }
 clap = { workspace = true }
 colored = { workspace = true }
 atty = { workspace = true }
