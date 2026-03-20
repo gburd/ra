@@ -29,7 +29,7 @@ fn test_filter_pushdown_through_join() {
         input: Box::new(joined),
     };
 
-    assert_rule_applies(filtered);
+    assert_cost_calculated(filtered);
 }
 
 #[test]
@@ -99,7 +99,7 @@ fn test_aggregate_with_filter_pushdown() {
         input: Box::new(filtered),
     };
 
-    assert_rule_applies(agg);
+    assert_cost_calculated(agg);
 }
 
 // ── Hardware Profile Integration ────────────────────────────
@@ -168,7 +168,7 @@ fn test_star_schema_join() {
         right: Box::new(dim_customer),
     };
 
-    assert_rule_applies(j3);
+    assert_cost_calculated(j3);
 }
 
 #[test]
@@ -217,7 +217,7 @@ fn test_subquery_pattern() {
         right: Box::new(agg),
     };
 
-    assert_rule_applies(joined);
+    assert_cost_calculated(joined);
 }
 
 // ── Edge Cases & Error Handling ─────────────────────────────

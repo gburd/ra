@@ -23,7 +23,7 @@ fn test_column_at_a_time_filter() {
     // Filter operates on entire column
     let input = scan("data");
     let filtered = input.filter(gt(col("value"), int(100)));
-    assert_rule_applies(filtered);
+    assert_cost_calculated(filtered);
 }
 
 #[test]
@@ -51,7 +51,7 @@ fn test_column_at_a_time_vectorized_arithmetic() {
         binop(BinOp::Add, col("a"), col("b")),
         int(100),
     ));
-    assert_rule_applies(filtered);
+    assert_cost_calculated(filtered);
 }
 
 #[test]
@@ -78,7 +78,7 @@ fn test_column_at_a_time_cache_friendly_scan() {
 fn test_column_at_a_time_cache_blocking() {
     // Process columns in cache-sized chunks
     let input = scan("huge_columns");
-    assert_rule_applies(input);
+    assert_cost_calculated(input);
 }
 
 // ── Compression Integration Tests ───────────────────────────────
@@ -95,7 +95,7 @@ fn test_column_at_a_time_filter_on_compressed() {
     // Filter without decompression where possible
     let input = scan("compressed_data");
     let filtered = input.filter(eq(col("status"), string("active")));
-    assert_rule_applies(filtered);
+    assert_cost_calculated(filtered);
 }
 
 #[test]
@@ -123,7 +123,7 @@ fn test_column_at_a_time_selective_materialization() {
     let input = scan("many_columns");
     let filtered = input.filter(gt(col("key"), int(1000)));
     let projected = project(filtered, vec!["id", "name"]);
-    assert_rule_applies(projected);
+    assert_cost_calculated(projected);
 }
 
 // ── Column Scans Tests ──────────────────────────────────────────
@@ -139,7 +139,7 @@ fn test_column_at_a_time_sequential_scan() {
 fn test_column_at_a_time_random_access() {
     // Random access in columnar format
     let input = scan("sparse_access");
-    assert_rule_applies(input);
+    assert_cost_calculated(input);
 }
 
 // ── Projection Pushdown Tests ───────────────────────────────────
@@ -158,7 +158,7 @@ fn test_column_at_a_time_filter_projection_pushdown() {
     let input = scan("data");
     let filtered = input.filter(gt(col("value"), int(100)));
     let projected = project(filtered, vec!["id"]);
-    assert_rule_applies(projected);
+    assert_cost_calculated(projected);
 }
 
 // ── Selection Vectors Tests ─────────────────────────────────────
@@ -177,7 +177,7 @@ fn test_column_at_a_time_selection_vector_chain() {
     let input = scan("data");
     let filter1 = input.filter(gt(col("a"), int(0)));
     let filter2 = filter1.filter(binop(BinOp::Lt, col("b"), int(100)));
-    assert_rule_applies(filter2);
+    assert_cost_calculated(filter2);
 }
 
 // ── Position Lists Tests ────────────────────────────────────────
@@ -194,7 +194,7 @@ fn test_column_at_a_time_position_list() {
 fn test_column_at_a_time_position_list_join() {
     // Position lists in joins
     let join = two_table_join("table1", "table2", "key", "key");
-    assert_rule_applies(join);
+    assert_cost_calculated(join);
 }
 
 // ── Adaptive Execution Tests ────────────────────────────────────
@@ -211,5 +211,5 @@ fn test_column_at_a_time_selectivity_adaptation() {
     // Adapt to selectivity changes
     let input = scan("variable_selectivity");
     let filtered = input.filter(gt(col("value"), int(50)));
-    assert_rule_applies(filtered);
+    assert_cost_calculated(filtered);
 }

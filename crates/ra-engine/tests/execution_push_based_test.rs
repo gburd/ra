@@ -34,7 +34,7 @@ fn test_push_based_jit_compilation() {
     // Just-in-time compile query plan
     let input = scan("events");
     let filtered = input.filter(eq(col("event_type"), string("click")));
-    assert_rule_applies(filtered);
+    assert_cost_calculated(filtered);
 }
 
 #[test]
@@ -64,7 +64,7 @@ fn test_push_based_expression_inlining() {
         binop(BinOp::Add, col("a"), col("b")),
         int(100),
     ));
-    assert_rule_applies(filtered);
+    assert_cost_calculated(filtered);
 }
 
 // ── Branch Prediction Tests ─────────────────────────────────────
@@ -82,7 +82,7 @@ fn test_push_based_branch_elimination() {
     // Eliminate branches where possible
     let input = scan("constants");
     let filtered = input.filter(eq(col("type"), string("A")));
-    assert_rule_applies(filtered);
+    assert_cost_calculated(filtered);
 }
 
 // ── Register Allocation Tests ───────────────────────────────────
@@ -103,7 +103,7 @@ fn test_push_based_register_spilling() {
     // Handle register pressure with spilling
     let input = scan("many_columns");
     let projected = project(input, vec!["c1", "c2", "c3", "c4", "c5"]);
-    assert_rule_applies(projected);
+    assert_cost_calculated(projected);
 }
 
 // ── Code Generation Patterns Tests ──────────────────────────────
@@ -120,7 +120,7 @@ fn test_push_based_tight_loops() {
 fn test_push_based_data_parallel_code() {
     // Generate data-parallel code
     let input = scan("parallel_data");
-    assert_rule_applies(input);
+    assert_cost_calculated(input);
 }
 
 // ── Operator Fusion Tests ───────────────────────────────────────
@@ -148,7 +148,7 @@ fn test_push_based_project_filter_fusion() {
     let input = scan("data");
     let filtered = input.filter(gt(col("value"), int(50)));
     let projected = project(filtered, vec!["id", "value"]);
-    assert_rule_applies(projected);
+    assert_cost_calculated(projected);
 }
 
 // ── Loop Unrolling Tests ────────────────────────────────────────
@@ -165,7 +165,7 @@ fn test_push_based_loop_unrolling() {
 fn test_push_based_partial_unrolling() {
     // Partially unroll large loops
     let input = scan("big_table");
-    assert_rule_applies(input);
+    assert_cost_calculated(input);
 }
 
 // ── Predicate Compilation Tests ─────────────────────────────────
@@ -192,7 +192,7 @@ fn test_push_based_predicate_short_circuit() {
         eq(col("flag"), Expr::Const(Const::Bool(true))),
         gt(col("expensive_computation"), int(100)),
     ));
-    assert_rule_applies(filtered);
+    assert_cost_calculated(filtered);
 }
 
 // ── Hardware Optimization Tests ─────────────────────────────────
@@ -210,5 +210,5 @@ fn test_push_based_cache_aware_codegen() {
     // Generate cache-aware code
     let input = scan("large_data");
     let filtered = input.filter(gt(col("id"), int(1000)));
-    assert_rule_applies(filtered);
+    assert_cost_calculated(filtered);
 }

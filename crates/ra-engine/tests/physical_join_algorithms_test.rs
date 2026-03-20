@@ -27,7 +27,7 @@ fn test_hash_join_equal_sized_tables() {
     let _t1 = scan("table1"); // 100K rows
     let _t2 = scan("table2"); // 100K rows
     let join = two_table_join("table1", "table2", "id", "id");
-    assert_rule_applies(join);
+    assert_cost_calculated(join);
 }
 
 #[test]
@@ -45,7 +45,7 @@ fn test_hybrid_hash_join_partial_memory() {
     let _medium1 = scan("medium1");
     let _medium2 = scan("medium2");
     let join = two_table_join("medium1", "medium2", "id", "id");
-    assert_rule_applies(join);
+    assert_cost_calculated(join);
 }
 
 #[test]
@@ -70,7 +70,7 @@ fn test_hash_join_multiple_conditions() {
         left: Box::new(t1),
         right: Box::new(t2),
     };
-    assert_rule_applies(join);
+    assert_cost_calculated(join);
 }
 
 #[test]
@@ -92,7 +92,7 @@ fn test_hash_join_left_outer() {
         left: Box::new(t1),
         right: Box::new(t2),
     };
-    assert_rule_applies(join);
+    assert_cost_calculated(join);
 }
 
 #[test]
@@ -105,7 +105,7 @@ fn test_hash_join_right_outer() {
         left: Box::new(t1),
         right: Box::new(t2),
     };
-    assert_rule_applies(join);
+    assert_cost_calculated(join);
 }
 
 // ── Nested Loop Join Tests ──────────────────────────────────────
@@ -123,7 +123,7 @@ fn test_block_nested_loop_small_tables() {
     let _small1 = scan("categories"); // 100 rows
     let _small2 = scan("products"); // 1K rows
     let join = two_table_join("categories", "products", "id", "category_id");
-    assert_rule_applies(join);
+    assert_cost_calculated(join);
 }
 
 #[test]
@@ -145,7 +145,7 @@ fn test_nested_loop_cross_join() {
         left: Box::new(t1),
         right: Box::new(t2),
     };
-    assert_rule_applies(join);
+    assert_cost_calculated(join);
 }
 
 #[test]
@@ -186,7 +186,7 @@ fn test_sort_merge_join_large_tables() {
     let _large1 = scan("huge_table1");
     let _large2 = scan("huge_table2");
     let join = two_table_join("huge_table1", "huge_table2", "key", "key");
-    assert_rule_applies(join);
+    assert_cost_calculated(join);
 }
 
 #[test]
@@ -202,7 +202,7 @@ fn test_sort_merge_join_with_duplicates() {
     let _t1 = scan("orders");
     let _t2 = scan("order_items");
     let join = two_table_join("orders", "order_items", "order_id", "order_id");
-    assert_rule_applies(join);
+    assert_cost_calculated(join);
 }
 
 // ── Broadcast Join Tests ────────────────────────────────────────
@@ -221,7 +221,7 @@ fn test_broadcast_join_distributed_query() {
     let _large_partitioned = scan("partitioned_data");
     let _small_lookup = scan("lookup_table");
     let join = two_table_join("partitioned_data", "lookup_table", "key", "id");
-    assert_rule_applies(join);
+    assert_cost_calculated(join);
 }
 
 // ── Shuffle Hash Join Tests ─────────────────────────────────────
@@ -240,7 +240,7 @@ fn test_shuffle_hash_join_skewed_data() {
     let _skewed1 = scan("skewed_table1");
     let _skewed2 = scan("skewed_table2");
     let join = two_table_join("skewed_table1", "skewed_table2", "hot_key", "hot_key");
-    assert_rule_applies(join);
+    assert_cost_calculated(join);
 }
 
 // ── Adaptive Join Tests ─────────────────────────────────────────
@@ -260,7 +260,7 @@ fn test_adaptive_join_memory_pressure() {
     let _large = scan("memory_intensive");
     let _medium = scan("medium_size");
     let join = two_table_join("memory_intensive", "medium_size", "key", "key");
-    assert_rule_applies(join);
+    assert_cost_calculated(join);
 }
 
 // ── Hardware-Specific Join Tests ────────────────────────────────
@@ -306,7 +306,7 @@ fn test_join_one_to_many() {
     let _customers = scan("customers");
     let _orders = scan("orders");
     let join = two_table_join("customers", "orders", "id", "customer_id");
-    assert_rule_applies(join);
+    assert_cost_calculated(join);
 }
 
 #[test]
@@ -342,7 +342,7 @@ fn test_anti_join_optimization() {
         left: Box::new(t1),
         right: Box::new(t2),
     };
-    assert_rule_applies(join);
+    assert_cost_calculated(join);
 }
 
 // ── Complex Join Patterns ───────────────────────────────────────

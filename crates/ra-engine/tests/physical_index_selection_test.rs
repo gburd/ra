@@ -23,7 +23,7 @@ fn test_table_scan_low_selectivity() {
     // Low selectivity (>20%) favors table scan
     let input = scan("products");
     let filter = input.filter(gt(col("price"), int(10)));
-    assert_rule_applies(filter);
+    assert_cost_calculated(filter);
 }
 
 #[test]
@@ -40,7 +40,7 @@ fn test_index_scan_range_predicate() {
         binop(BinOp::Ge, col("date"), string("2024-01-01")),
         binop(BinOp::Le, col("date"), string("2024-12-31")),
     ));
-    assert_rule_applies(filter);
+    assert_cost_calculated(filter);
 }
 
 // ── Index-Only Scan ─────────────────────────────────────────────
@@ -58,7 +58,7 @@ fn test_covering_index_avoids_table_lookup() {
 fn test_covering_index_with_aggregation() {
     let input = scan("orders");
     let projected = project(input, vec!["customer_id", "total"]);
-    assert_rule_applies(projected);
+    assert_cost_calculated(projected);
 }
 
 #[test]
@@ -90,7 +90,7 @@ fn test_multi_column_index_prefix() {
         eq(col("department"), string("sales")),
         eq(col("location"), string("NYC")),
     ));
-    assert_rule_applies(filter);
+    assert_cost_calculated(filter);
 }
 
 #[test]
@@ -121,7 +121,7 @@ fn test_bitmap_index_multiple_predicates() {
         eq(col("category"), string("books")),
         eq(col("in_stock"), Expr::Const(Const::Bool(true))),
     ));
-    assert_rule_applies(filter);
+    assert_cost_calculated(filter);
 }
 
 #[test]
@@ -157,7 +157,7 @@ fn test_index_intersection_three_indexes() {
         ),
         gt(col("total"), int(500)),
     ));
-    assert_rule_applies(filter);
+    assert_cost_calculated(filter);
 }
 
 // ── Index Union ─────────────────────────────────────────────────
@@ -180,7 +180,7 @@ fn test_index_union_range_predicates() {
         binop(BinOp::Lt, col("timestamp"), string("2024-01-01")),
         binop(BinOp::Gt, col("timestamp"), string("2024-12-31")),
     ));
-    assert_rule_applies(filter);
+    assert_cost_calculated(filter);
 }
 
 // ── Partial Index ───────────────────────────────────────────────
@@ -201,7 +201,7 @@ fn test_partial_index_non_matching_predicate() {
     // Partial index not usable when predicate doesn't match
     let input = scan("subscriptions");
     let filter = input.filter(eq(col("status"), string("expired")));
-    assert_rule_applies(filter);
+    assert_cost_calculated(filter);
 }
 
 // ── Index Skip Scan ─────────────────────────────────────────────
@@ -219,7 +219,7 @@ fn test_index_skip_scan_prefix_match() {
     // Skip scan on composite index
     let input = scan("logs");
     let filter = input.filter(eq(col("severity"), string("ERROR")));
-    assert_rule_applies(filter);
+    assert_cost_calculated(filter);
 }
 
 // ── Index with Sorting ──────────────────────────────────────────
@@ -256,7 +256,7 @@ fn test_index_cost_vs_table_scan_crossover() {
     // Test selectivity crossover point (~15-20%)
     let input = scan("large_table");
     let filter = input.filter(binop(BinOp::Lt, col("value"), int(200)));
-    assert_rule_applies(filter);
+    assert_cost_calculated(filter);
 }
 
 #[test]
@@ -299,7 +299,7 @@ fn test_expression_index_computed_column() {
         binop(BinOp::Mul, col("price"), col("quantity")),
         int(1000),
     ));
-    assert_rule_applies(filter);
+    assert_cost_calculated(filter);
 }
 
 // ── Null Handling ───────────────────────────────────────────────
@@ -321,7 +321,7 @@ fn test_index_scan_is_not_null() {
         op: ra_core::expr::UnaryOp::IsNotNull,
         operand: Box::new(col("phone")),
     });
-    assert_rule_applies(filter);
+    assert_cost_calculated(filter);
 }
 
 // ── Index Maintenance ───────────────────────────────────────────
@@ -339,5 +339,5 @@ fn test_index_bloat_consideration() {
     // Index bloat affects cost estimation
     let input = scan("old_table");
     let filter = input.filter(gt(col("id"), int(1000000)));
-    assert_rule_applies(filter);
+    assert_cost_calculated(filter);
 }

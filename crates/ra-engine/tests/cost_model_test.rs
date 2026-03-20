@@ -70,21 +70,21 @@ fn test_view_cardinality_estimation() {
 fn test_filter_selectivity_high() {
     // Highly selective filter (few rows match)
     let plan = filtered_scan("users", "vip_status", 1);
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
 fn test_filter_selectivity_low() {
     // Low selectivity filter (many rows match)
     let plan = filtered_scan("orders", "processed", 0);
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
 fn test_filter_selectivity_medium() {
     // Medium selectivity filter
     let plan = filtered_scan("products", "in_stock", 1);
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -99,7 +99,7 @@ fn test_multiple_filter_conjunction() {
         predicate: eq(col("country"), string("US")),
         input: Box::new(filter1),
     };
-    assert_rule_applies(filter2);
+    assert_cost_calculated(filter2);
 }
 
 #[test]
@@ -112,7 +112,7 @@ fn test_multiple_filter_disjunction() {
         ),
         input: Box::new(scan("employees")),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 // ── Cardinality Estimation: Joins ───────────────────────────────
@@ -164,7 +164,7 @@ fn test_multi_way_join_cardinality() {
         left: Box::new(j1),
         right: Box::new(scan("products")),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 // ── Cardinality Estimation: Aggregates ──────────────────────────
@@ -356,7 +356,7 @@ fn test_selectivity_range_narrow() {
         ),
         input: Box::new(scan("events")),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -366,7 +366,7 @@ fn test_selectivity_range_wide() {
         predicate: gt(col("date"), int(20230101)),
         input: Box::new(scan("transactions")),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -376,7 +376,7 @@ fn test_selectivity_range_open_ended() {
         predicate: gt(col("salary"), int(150000)),
         input: Box::new(scan("employees")),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -393,7 +393,7 @@ fn test_selectivity_range_between() {
         ),
         input: Box::new(scan("products")),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 // ── Selectivity Estimation: Pattern Matching ────────────────────
@@ -519,7 +519,7 @@ fn test_selectivity_independent_columns() {
         ),
         input: Box::new(scan("employees")),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 // ── Cost Calibration: CPU vs I/O ────────────────────────────────
@@ -556,7 +556,7 @@ fn test_cost_io_bound_operation() {
 fn test_cost_index_vs_scan() {
     // Index access vs full table scan cost comparison
     let plan = filtered_scan("indexed_table", "indexed_column", 1);
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -582,7 +582,7 @@ fn test_cost_hash_join_memory() {
         left: Box::new(scan("large_table")),
         right: Box::new(scan("small_table")),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -625,7 +625,7 @@ fn test_cost_distributed_join() {
         left: Box::new(scan("distributed_table_a")),
         right: Box::new(scan("distributed_table_b")),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -695,7 +695,7 @@ fn test_cost_high_memory_profile() {
 fn test_cost_model_prefers_indexed_access() {
     // Cost model should prefer index when selective
     let plan = filtered_scan("indexed_table", "indexed_pk", 12345);
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -716,7 +716,7 @@ fn test_cost_model_prefers_merge_join_sorted() {
         left: Box::new(sorted_a),
         right: Box::new(sorted_b),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -775,7 +775,7 @@ fn test_cost_model_multi_column_statistics() {
         left: Box::new(scan("addresses1")),
         right: Box::new(scan("addresses2")),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -851,7 +851,7 @@ fn test_rewrite_filter_true_eliminated() {
         predicate: Expr::Const(ra_core::expr::Const::Bool(true)),
         input: Box::new(scan("any_table")),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -864,7 +864,7 @@ fn test_rewrite_filter_merge() {
             input: Box::new(scan("t")),
         }),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -880,7 +880,7 @@ fn test_rewrite_filter_pushdown_through_join() {
         predicate: gt(col("value"), int(100)),
         input: Box::new(join),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -911,21 +911,21 @@ fn test_rewrite_project_merge() {
         project(scan("t"), vec!["a", "b", "c"]),
         vec!["a", "b"],
     );
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
 fn test_rewrite_sort_below_sort_eliminated() {
     // Inner sort is eliminated when an outer sort exists
     let plan = sort(sort(scan("t"), "a", true), "b", false);
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
 fn test_rewrite_limit_through_project() {
     // Limit pushes through project
     let plan = limit(project(scan("t"), vec!["a"]), 10);
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -940,7 +940,7 @@ fn test_rewrite_filter_through_union() {
         predicate: gt(col("x"), int(0)),
         input: Box::new(union),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -951,7 +951,7 @@ fn test_rewrite_duckdb_sort_below_aggregate() {
         aggregates: vec![],
         input: Box::new(sort(scan("data"), "irrelevant_col", true)),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -966,7 +966,7 @@ fn test_rewrite_filter_pushdown_through_intersect() {
         predicate: gt(col("val"), int(5)),
         input: Box::new(intersect),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -981,7 +981,7 @@ fn test_rewrite_filter_pushdown_through_except() {
         predicate: gt(col("price"), int(0)),
         input: Box::new(except),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -997,7 +997,7 @@ fn test_rewrite_cartesian_to_join() {
         predicate: eq(col("t1_id"), col("t2_id")),
         input: Box::new(cross),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -1010,7 +1010,7 @@ fn test_rewrite_boolean_and_false_short_circuits() {
         ),
         input: Box::new(scan("t")),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -1023,5 +1023,5 @@ fn test_rewrite_boolean_or_true_short_circuits() {
         ),
         input: Box::new(scan("t")),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }

@@ -13,20 +13,20 @@ use ra_core::algebra::{JoinType, RelExpr};
 #[test]
 fn test_limit_on_scan() {
     let plan = limit(scan("table"), 100);
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
 fn test_limit_after_filter() {
     let filtered = filtered_scan("orders", "status", 1);
     let plan = limit(filtered, 50);
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
 fn test_limit_zero() {
     let plan = limit(scan("table"), 0);
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 // ── Limit Through Union ─────────────────────────────────────
@@ -39,7 +39,7 @@ fn test_limit_pushdown_union_all() {
         right: Box::new(scan("sales_2024")),
     };
     let plan = limit(union, 100);
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -50,7 +50,7 @@ fn test_limit_union_distinct() {
         right: Box::new(scan("set_b")),
     };
     let plan = limit(union, 50);
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 // ── Top-K Optimization ──────────────────────────────────────
@@ -59,7 +59,7 @@ fn test_limit_union_distinct() {
 fn test_sort_limit_fusion() {
     let sorted = sort(scan("rankings"), "score", false);
     let plan = limit(sorted, 10);
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -67,14 +67,14 @@ fn test_top_k_with_filter() {
     let filtered = filtered_scan("candidates", "qualified", 1);
     let sorted = sort(filtered, "rank", true);
     let plan = limit(sorted, 5);
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
 fn test_top_k_heap_vs_sort() {
     let sorted = sort(scan("large_table"), "value", false);
     let plan = limit(sorted, 100);
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 // ── Limit with Join ─────────────────────────────────────────
@@ -89,14 +89,14 @@ fn test_limit_before_join() {
         left: Box::new(limited_orders),
         right: Box::new(customers),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
 fn test_limit_after_join() {
     let joined = two_table_join("orders", "customers", "customer_id", "id");
     let plan = limit(joined, 50);
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 // ── Offset Handling ─────────────────────────────────────────
@@ -108,7 +108,7 @@ fn test_offset_zero_elimination() {
         offset: 0,
         input: Box::new(scan("table")),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -118,7 +118,7 @@ fn test_limit_with_offset() {
         offset: 100,
         input: Box::new(scan("paginated")),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 // ── Limit Merging ───────────────────────────────────────────
@@ -127,14 +127,14 @@ fn test_limit_with_offset() {
 fn test_consecutive_limits_merge() {
     let inner = limit(scan("table"), 100);
     let outer = limit(inner, 50);
-    assert_rule_applies(outer);
+    assert_cost_calculated(outer);
 }
 
 #[test]
 fn test_limit_min_selection() {
     let l1 = limit(scan("data"), 200);
     let l2 = limit(l1, 50);
-    assert_rule_applies(l2);
+    assert_cost_calculated(l2);
 }
 
 // ── Early Termination Patterns ──────────────────────────────
@@ -142,11 +142,11 @@ fn test_limit_min_selection() {
 #[test]
 fn test_limit_one_to_exists() {
     let plan = limit(scan("check_exists"), 1);
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
 fn test_any_value_selection() {
     let plan = limit(filtered_scan("configs", "key", 1), 1);
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }

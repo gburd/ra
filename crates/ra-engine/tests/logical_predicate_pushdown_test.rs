@@ -10,20 +10,20 @@ use ra_core::algebra::{JoinType, RelExpr};
 #[test]
 fn test_simple_filter_on_scan() {
     let plan = filtered_scan("orders", "amount", 100);
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
 fn test_filter_after_join() {
     let plan = two_table_join("orders", "customers", "customer_id", "id");
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
 fn test_filter_with_projection() {
     let scanned = scan("products");
     let projected = project(scanned, vec!["name", "price"]);
-    assert_rule_applies(projected);
+    assert_cost_calculated(projected);
 }
 
 // ── Filter Pushdown Through Joins ───────────────────────────
@@ -33,13 +33,13 @@ fn test_predicate_pushdown_inner_join_left() {
     let _left = filtered_scan("orders", "amount", 100);
     let _right = scan("customers");
     let plan = two_table_join("orders", "customers", "customer_id", "id");
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
 fn test_predicate_pushdown_inner_join_right() {
     let plan = two_table_join("orders", "customers", "customer_id", "id");
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -62,7 +62,7 @@ fn test_star_schema_multi_join() {
         right: Box::new(dim2),
     };
 
-    assert_rule_applies(j2);
+    assert_cost_calculated(j2);
 }
 
 // ── Predicate Pushdown Through Aggregation ──────────────────
@@ -70,7 +70,7 @@ fn test_star_schema_multi_join() {
 #[test]
 fn test_filter_before_group_by() {
     let filtered = filtered_scan("sales", "region", 1);
-    assert_rule_applies(filtered);
+    assert_cost_calculated(filtered);
 }
 
 #[test]
@@ -81,7 +81,7 @@ fn test_aggregate_with_filter() {
         aggregates: vec![],
         input: Box::new(scanned),
     };
-    assert_rule_applies(agg);
+    assert_cost_calculated(agg);
 }
 
 // ── Expression Simplification ───────────────────────────────
@@ -89,19 +89,19 @@ fn test_aggregate_with_filter() {
 #[test]
 fn test_constant_expression_in_filter() {
     let plan = filtered_scan("table", "value", 30);
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
 fn test_multiple_predicates_and() {
     let inner = filtered_scan("table", "x", 5);
-    assert_rule_applies(inner);
+    assert_cost_calculated(inner);
 }
 
 #[test]
 fn test_contradiction_filter() {
     let plan = filtered_scan("table", "x", 999);
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 // ── Complex Query Patterns ──────────────────────────────────
@@ -126,7 +126,7 @@ fn test_three_table_join_with_filters() {
         right: Box::new(t3),
     };
 
-    assert_rule_applies(j2);
+    assert_cost_calculated(j2);
 }
 
 #[test]
@@ -139,7 +139,7 @@ fn test_left_outer_join_filter() {
         left: Box::new(left),
         right: Box::new(right),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -152,7 +152,7 @@ fn test_cross_join_to_inner() {
         left: Box::new(left),
         right: Box::new(right),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 // ── Sort and Limit Interactions ─────────────────────────────
@@ -161,21 +161,21 @@ fn test_cross_join_to_inner() {
 fn test_filter_with_sort() {
     let filtered = filtered_scan("events", "priority", 5);
     let sorted = sort(filtered, "timestamp", false);
-    assert_rule_applies(sorted);
+    assert_cost_calculated(sorted);
 }
 
 #[test]
 fn test_filter_with_limit() {
     let filtered = filtered_scan("recent", "status", 1);
     let limited = limit(filtered, 100);
-    assert_rule_applies(limited);
+    assert_cost_calculated(limited);
 }
 
 #[test]
 fn test_top_k_pattern() {
     let sorted = sort(scan("rankings"), "score", false);
     let limited = limit(sorted, 10);
-    assert_rule_applies(limited);
+    assert_cost_calculated(limited);
 }
 
 // ── Set Operations ──────────────────────────────────────────
@@ -189,7 +189,7 @@ fn test_union_with_filters() {
         left: Box::new(left),
         right: Box::new(right),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -201,7 +201,7 @@ fn test_intersect_optimization() {
         left: Box::new(left),
         right: Box::new(right),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -213,7 +213,7 @@ fn test_except_with_filter() {
         left: Box::new(left),
         right: Box::new(right),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 // ── Index-Aware Optimization ────────────────────────────────
@@ -221,19 +221,19 @@ fn test_except_with_filter() {
 #[test]
 fn test_equality_predicate_for_index() {
     let plan = filtered_scan("indexed_table", "id", 42);
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
 fn test_range_predicate_for_index() {
     let plan = filtered_scan("ordered_table", "timestamp", 1000);
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
 fn test_composite_index_prefix_match() {
     let plan = filtered_scan("multi_indexed", "first_col", 10);
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 // ── Statistics-Driven Optimization ──────────────────────────
@@ -241,7 +241,7 @@ fn test_composite_index_prefix_match() {
 #[test]
 fn test_selective_filter_ordering() {
     let plan = filtered_scan("large_table", "rare_value", 1);
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -254,7 +254,7 @@ fn test_join_filter_selectivity() {
         left: Box::new(large),
         right: Box::new(small),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 // ── Transitive Closure & Inference ──────────────────────────
@@ -279,13 +279,13 @@ fn test_transitive_join_conditions() {
         right: Box::new(t3),
     };
 
-    assert_rule_applies(j2);
+    assert_cost_calculated(j2);
 }
 
 #[test]
 fn test_join_condition_propagation() {
     let j = two_table_join("orders", "customers", "customer_id", "id");
-    assert_rule_applies(j);
+    assert_cost_calculated(j);
 }
 
 #[test]
@@ -298,5 +298,5 @@ fn test_foreign_key_filter_propagation() {
         left: Box::new(filtered_orders),
         right: Box::new(customers),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }

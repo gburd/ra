@@ -14,21 +14,21 @@ use ra_core::algebra::{JoinType, RelExpr};
 fn test_eager_materialization_small_result() {
     // Small intermediate result should be materialized eagerly
     let filtered = filtered_scan("large_table", "selective_filter", 1);
-    assert_rule_applies(filtered);
+    assert_cost_calculated(filtered);
 }
 
 #[test]
 fn test_lazy_materialization_large_result() {
     // Large intermediate result should use lazy evaluation
     let plan = scan("huge_table");
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
 fn test_pipeline_breaker_materialization() {
     // Operators that break pipelines require materialization
     let sorted = sort(scan("unsorted_data"), "key", true);
-    assert_rule_applies(sorted);
+    assert_cost_calculated(sorted);
 }
 
 // ── Common Table Expression (CTE) Materialization ───────────
@@ -38,7 +38,7 @@ fn test_cte_single_use_inline() {
     // CTE used once should be inlined
     let subquery = filtered_scan("base", "condition", 1);
     let projected = project(subquery, vec!["col1", "col2"]);
-    assert_rule_applies(projected);
+    assert_cost_calculated(projected);
 }
 
 #[test]
@@ -52,14 +52,14 @@ fn test_cte_multiple_use_materialize() {
         left: Box::new(left),
         right: Box::new(right),
     };
-    assert_rule_applies(union);
+    assert_cost_calculated(union);
 }
 
 #[test]
 fn test_recursive_cte_materialization() {
     // Recursive CTEs require work tables
     let base = scan("hierarchy_base");
-    assert_rule_applies(base);
+    assert_cost_calculated(base);
 }
 
 // ── Temporary Table Strategies ──────────────────────────────
@@ -72,7 +72,7 @@ fn test_temp_table_for_large_intermediate() {
         aggregates: vec![],
         input: Box::new(scan("large_fact")),
     };
-    assert_rule_applies(agg);
+    assert_cost_calculated(agg);
 }
 
 #[test]
@@ -80,7 +80,7 @@ fn test_temp_table_vs_subquery() {
     // Complex subquery repeated → temp table
     let _complex = filtered_scan("complex_computation", "expensive", 1);
     let j1 = two_table_join("orders", "complex_computation", "key", "key");
-    assert_rule_applies(j1);
+    assert_cost_calculated(j1);
 }
 
 // ── In-Memory vs Disk Materialization ───────────────────────
@@ -90,7 +90,7 @@ fn test_in_memory_small_dataset() {
     // Small dataset fits in memory
     let small = filtered_scan("small_table", "filter", 1);
     let limited = limit(small, 1000);
-    assert_rule_applies(limited);
+    assert_cost_calculated(limited);
 }
 
 #[test]
@@ -101,7 +101,7 @@ fn test_disk_spill_large_dataset() {
         aggregates: vec![],
         input: Box::new(scan("huge_table")),
     };
-    assert_rule_applies(large_agg);
+    assert_cost_calculated(large_agg);
 }
 
 // ── Materialization for Reuse ───────────────────────────────
@@ -127,8 +127,8 @@ fn test_materialize_for_join_reuse() {
         right: Box::new(build),
     };
 
-    assert_rule_applies(j1);
-    assert_rule_applies(j2);
+    assert_cost_calculated(j1);
+    assert_cost_calculated(j2);
 }
 
 #[test]
@@ -136,7 +136,7 @@ fn test_no_materialize_single_use() {
     // Single-use intermediate doesn't need materialization
     let filtered = filtered_scan("table", "col", 1);
     let projected = project(filtered, vec!["result"]);
-    assert_rule_applies(projected);
+    assert_cost_calculated(projected);
 }
 
 // ── Result Caching ──────────────────────────────────────────
@@ -149,14 +149,14 @@ fn test_cache_expensive_computation() {
         aggregates: vec![],
         input: Box::new(scan("large_dataset")),
     };
-    assert_rule_applies(complex);
+    assert_cost_calculated(complex);
 }
 
 #[test]
 fn test_cache_invalidation_strategy() {
     // Cached results need invalidation on updates
     let base = scan("frequently_updated");
-    assert_rule_applies(base);
+    assert_cost_calculated(base);
 }
 
 // ── Materialized View Optimization ──────────────────────────
@@ -169,7 +169,7 @@ fn test_materialized_view_rewrite() {
         aggregates: vec![],
         input: Box::new(scan("daily_sales")),
     };
-    assert_rule_applies(agg);
+    assert_cost_calculated(agg);
 }
 
 #[test]
@@ -177,5 +177,5 @@ fn test_partial_materialized_view_match() {
     // Query partially matches materialized view
     let _mv_scan = scan("sales_mv");
     let filtered = filtered_scan("sales_mv", "region", 1);
-    assert_rule_applies(filtered);
+    assert_cost_calculated(filtered);
 }

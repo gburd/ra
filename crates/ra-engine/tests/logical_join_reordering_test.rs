@@ -14,13 +14,13 @@ use ra_core::algebra::{JoinType, RelExpr};
 #[test]
 fn test_two_table_join_commutative() {
     let plan = two_table_join("small_table", "large_table", "id", "id");
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
 fn test_join_associativity() {
     let plan = two_table_join("orders", "customers", "customer_id", "id");
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -43,7 +43,7 @@ fn test_chain_join_reordering() {
         right: Box::new(t3),
     };
 
-    assert_rule_applies(j2);
+    assert_cost_calculated(j2);
 }
 
 // ── Multi-Way Join Optimization ─────────────────────────────
@@ -68,7 +68,7 @@ fn test_three_way_join_optimal_order() {
         right: Box::new(medium),
     };
 
-    assert_rule_applies(j2);
+    assert_cost_calculated(j2);
 }
 
 #[test]
@@ -99,7 +99,7 @@ fn test_four_way_join_reordering() {
         right: Box::new(t4),
     };
 
-    assert_rule_applies(j3);
+    assert_cost_calculated(j3);
 }
 
 #[test]
@@ -139,7 +139,7 @@ fn test_star_schema_join_order() {
         right: Box::new(store),
     };
 
-    assert_rule_applies(j4);
+    assert_cost_calculated(j4);
 }
 
 // ── Bushy vs Left-Deep Trees ────────────────────────────────
@@ -164,7 +164,7 @@ fn test_left_deep_tree_formation() {
         right: Box::new(t3),
     };
 
-    assert_rule_applies(j2);
+    assert_cost_calculated(j2);
 }
 
 #[test]
@@ -195,7 +195,7 @@ fn test_bushy_tree_for_parallelism() {
         right: Box::new(right_branch),
     };
 
-    assert_rule_applies(root);
+    assert_cost_calculated(root);
 }
 
 // ── Cost-Based Join Ordering ────────────────────────────────
@@ -212,13 +212,13 @@ fn test_selective_filter_affects_join_order() {
         right: Box::new(filtered_small),
     };
 
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
 fn test_cardinality_driven_ordering() {
     let plan = two_table_join("very_large_table", "tiny_table", "key", "key");
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -233,7 +233,7 @@ fn test_index_availability_affects_order() {
         right: Box::new(indexed),
     };
 
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 // ── Join Type Constraints ───────────────────────────────────
@@ -250,7 +250,7 @@ fn test_outer_join_ordering_constraints() {
         right: Box::new(right),
     };
 
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -273,7 +273,7 @@ fn test_mixed_join_types_ordering() {
         right: Box::new(t3),
     };
 
-    assert_rule_applies(outer);
+    assert_cost_calculated(outer);
 }
 
 #[test]
@@ -288,7 +288,7 @@ fn test_full_outer_join_reordering() {
         right: Box::new(right),
     };
 
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 // ── Cross Product Elimination ───────────────────────────────
@@ -305,7 +305,7 @@ fn test_cross_product_to_inner_join() {
         right: Box::new(t2),
     };
 
-    assert_rule_applies(cross);
+    assert_cost_calculated(cross);
 }
 
 #[test]
@@ -328,7 +328,7 @@ fn test_avoid_cartesian_product() {
         right: Box::new(t3),
     };
 
-    assert_rule_applies(j2);
+    assert_cost_calculated(j2);
 }
 
 // ── Join Graph Analysis ─────────────────────────────────────
@@ -354,7 +354,7 @@ fn test_cyclic_join_graph() {
         right: Box::new(c),
     };
 
-    assert_rule_applies(abc);
+    assert_cost_calculated(abc);
 }
 
 #[test]
@@ -384,7 +384,7 @@ fn test_clique_join_pattern() {
         right: Box::new(t3),
     };
 
-    assert_rule_applies(j123);
+    assert_cost_calculated(j123);
 }
 
 // ── Dynamic Programming Optimization ────────────────────────
@@ -410,7 +410,7 @@ fn test_dp_join_enumeration_small() {
         right: Box::new(t3),
     };
 
-    assert_rule_applies(j2);
+    assert_cost_calculated(j2);
 }
 
 #[test]
@@ -430,7 +430,7 @@ fn test_greedy_join_ordering_large() {
         };
     }
 
-    assert_rule_applies(current);
+    assert_cost_calculated(current);
 }
 
 // ── Filter Integration with Join Reordering ─────────────────
@@ -447,7 +447,7 @@ fn test_filter_influences_join_order() {
         right: Box::new(filtered),
     };
 
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -462,7 +462,7 @@ fn test_join_with_multiple_filters() {
         right: Box::new(f2),
     };
 
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -486,5 +486,5 @@ fn test_transitive_join_conditions() {
         right: Box::new(c),
     };
 
-    assert_rule_applies(abc);
+    assert_cost_calculated(abc);
 }

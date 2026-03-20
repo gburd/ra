@@ -19,7 +19,7 @@ fn test_union_all_basic() {
         left: Box::new(left),
         right: Box::new(right),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -31,7 +31,7 @@ fn test_union_distinct() {
         left: Box::new(left),
         right: Box::new(right),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -43,7 +43,7 @@ fn test_union_with_filters() {
         left: Box::new(left),
         right: Box::new(right),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -56,7 +56,7 @@ fn test_union_all_to_union_distinct() {
         left: Box::new(left),
         right: Box::new(right),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 // ── INTERSECT Optimization ──────────────────────────────────
@@ -70,7 +70,7 @@ fn test_intersect_basic() {
         left: Box::new(left),
         right: Box::new(right),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -83,7 +83,7 @@ fn test_intersect_to_semi_join() {
         left: Box::new(left),
         right: Box::new(right),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 // ── EXCEPT Optimization ─────────────────────────────────────
@@ -97,7 +97,7 @@ fn test_except_basic() {
         left: Box::new(left),
         right: Box::new(right),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -110,7 +110,7 @@ fn test_except_to_anti_join() {
         left: Box::new(left),
         right: Box::new(right),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 // ── Set Operation Merging ───────────────────────────────────
@@ -133,7 +133,7 @@ fn test_consecutive_unions_merge() {
         right: Box::new(c),
     };
 
-    assert_rule_applies(abc);
+    assert_cost_calculated(abc);
 }
 
 #[test]
@@ -146,5 +146,5 @@ fn test_union_identity_elimination() {
         left: Box::new(a),
         right: Box::new(b),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }

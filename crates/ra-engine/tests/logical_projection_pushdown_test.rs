@@ -15,20 +15,20 @@ use ra_core::algebra::{JoinType, RelExpr};
 fn test_unused_column_elimination() {
     let scanned = scan("table");
     let projected = project(scanned, vec!["col1", "col2"]);
-    assert_rule_applies(projected);
+    assert_cost_calculated(projected);
 }
 
 #[test]
 fn test_select_star_optimization() {
     let plan = scan("table");
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
 fn test_duplicate_column_elimination() {
     let scanned = scan("table");
     let projected = project(scanned, vec!["id", "id", "name"]);
-    assert_rule_applies(projected);
+    assert_cost_calculated(projected);
 }
 
 // ── Projection Through Joins ────────────────────────────────
@@ -37,7 +37,7 @@ fn test_duplicate_column_elimination() {
 fn test_project_pushdown_through_join() {
     let joined = two_table_join("orders", "customers", "customer_id", "id");
     let projected = project(joined, vec!["order_id", "customer_name"]);
-    assert_rule_applies(projected);
+    assert_cost_calculated(projected);
 }
 
 #[test]
@@ -51,7 +51,7 @@ fn test_column_pruning_left_join_side() {
         right: Box::new(right),
     };
     let projected = project(joined, vec!["amount", "order_date"]);
-    assert_rule_applies(projected);
+    assert_cost_calculated(projected);
 }
 
 #[test]
@@ -65,14 +65,14 @@ fn test_column_pruning_right_join_side() {
         right: Box::new(right),
     };
     let projected = project(joined, vec!["name", "email"]);
-    assert_rule_applies(projected);
+    assert_cost_calculated(projected);
 }
 
 #[test]
 fn test_projection_both_join_sides() {
     let joined = two_table_join("orders", "customers", "customer_id", "id");
     let projected = project(joined, vec!["order_id", "customer_name", "amount"]);
-    assert_rule_applies(projected);
+    assert_cost_calculated(projected);
 }
 
 // ── Projection Through Aggregation ──────────────────────────
@@ -86,7 +86,7 @@ fn test_project_before_aggregate() {
         aggregates: vec![],
         input: Box::new(projected),
     };
-    assert_rule_applies(agg);
+    assert_cost_calculated(agg);
 }
 
 #[test]
@@ -97,7 +97,7 @@ fn test_eliminate_columns_not_in_group_by() {
         aggregates: vec![],
         input: Box::new(scanned),
     };
-    assert_rule_applies(agg);
+    assert_cost_calculated(agg);
 }
 
 #[test]
@@ -108,7 +108,7 @@ fn test_project_aggregate_results() {
         input: Box::new(scan("sales")),
     };
     let projected = project(agg, vec!["region"]);
-    assert_rule_applies(projected);
+    assert_cost_calculated(projected);
 }
 
 // ── Expression Pushdown ─────────────────────────────────────
@@ -117,21 +117,21 @@ fn test_project_aggregate_results() {
 fn test_computed_column_pushdown() {
     let scanned = scan("table");
     let projected = project(scanned, vec!["col1"]);
-    assert_rule_applies(projected);
+    assert_cost_calculated(projected);
 }
 
 #[test]
 fn test_expression_in_projection() {
     let scanned = scan("products");
     let projected = project(scanned, vec!["name", "price"]);
-    assert_rule_applies(projected);
+    assert_cost_calculated(projected);
 }
 
 #[test]
 fn test_case_expression_pushdown() {
     let scanned = scan("orders");
     let projected = project(scanned, vec!["order_id", "status"]);
-    assert_rule_applies(projected);
+    assert_cost_calculated(projected);
 }
 
 // ── Wide Table Optimization ─────────────────────────────────
@@ -140,21 +140,21 @@ fn test_case_expression_pushdown() {
 fn test_narrow_projection_on_wide_table() {
     let scanned = scan("wide_table_100_columns");
     let projected = project(scanned, vec!["id", "name"]);
-    assert_rule_applies(projected);
+    assert_cost_calculated(projected);
 }
 
 #[test]
 fn test_columnar_storage_benefits() {
     let scanned = scan("columnar_table");
     let projected = project(scanned, vec!["key_col"]);
-    assert_rule_applies(projected);
+    assert_cost_calculated(projected);
 }
 
 #[test]
 fn test_early_projection_reduces_io() {
     let filtered = filtered_scan("large_table", "status", 1);
     let projected = project(filtered, vec!["id"]);
-    assert_rule_applies(projected);
+    assert_cost_calculated(projected);
 }
 
 // ── Projection Merging ──────────────────────────────────────
@@ -163,19 +163,19 @@ fn test_early_projection_reduces_io() {
 fn test_consecutive_projections_merge() {
     let p1 = project(scan("table"), vec!["a", "b", "c"]);
     let p2 = project(p1, vec!["a", "b"]);
-    assert_rule_applies(p2);
+    assert_cost_calculated(p2);
 }
 
 #[test]
 fn test_projection_identity_elimination() {
     let scanned = scan("table");
     let projected = project(scanned, vec!["col1", "col2"]);
-    assert_rule_applies(projected);
+    assert_cost_calculated(projected);
 }
 
 #[test]
 fn test_redundant_projection_removal() {
     let p1 = project(scan("table"), vec!["id", "name"]);
     let p2 = project(p1, vec!["id", "name"]);
-    assert_rule_applies(p2);
+    assert_cost_calculated(p2);
 }

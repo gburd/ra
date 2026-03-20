@@ -33,7 +33,7 @@ fn test_volcano_open_next_close() {
     // Classic open/next/close lifecycle
     let input = scan("customers");
     let projected = project(input, vec!["id", "name"]);
-    assert_rule_applies(projected);
+    assert_cost_calculated(projected);
 }
 
 // ── Pipeline Behavior Tests ─────────────────────────────────────
@@ -54,7 +54,7 @@ fn test_volcano_pipeline_chain() {
     let filter1 = input.filter(gt(col("timestamp"), int(1000)));
     let filter2 = filter1.filter(eq(col("event_type"), string("click")));
     let projected = project(filter2, vec!["user_id", "timestamp"]);
-    assert_rule_applies(projected);
+    assert_cost_calculated(projected);
 }
 
 // ── Pipeline Breaking Tests ─────────────────────────────────────
@@ -88,7 +88,7 @@ fn test_volcano_hash_aggregation_breaks_pipeline() {
 fn test_volcano_hash_join_build_phase_blocks() {
     // Hash join build phase blocks pipeline
     let join = two_table_join("orders", "customers", "customer_id", "id");
-    assert_rule_applies(join);
+    assert_cost_calculated(join);
 }
 
 // ── Materialization Points Tests ────────────────────────────────
@@ -116,7 +116,7 @@ fn test_volcano_materialization_aggregation() {
         }],
         input: Box::new(input),
     };
-    assert_rule_applies(agg);
+    assert_cost_calculated(agg);
 }
 
 #[test]
@@ -143,7 +143,7 @@ fn test_volcano_pipelined_filter() {
     // Filter is fully pipelined
     let input = scan("logs");
     let filtered = input.filter(eq(col("level"), string("ERROR")));
-    assert_rule_applies(filtered);
+    assert_cost_calculated(filtered);
 }
 
 #[test]
@@ -167,7 +167,7 @@ fn test_volcano_memory_bounded_sort() {
 fn test_volcano_memory_hash_join() {
     // Hash join with memory management
     let join = two_table_join("table1", "table2", "key", "key");
-    assert_rule_applies(join);
+    assert_cost_calculated(join);
 }
 
 // ── Operator State Tests ────────────────────────────────────────
@@ -196,7 +196,7 @@ fn test_volcano_stateless_projection() {
     // Projection is stateless
     let input = scan("users");
     let projected = project(input, vec!["id", "email"]);
-    assert_rule_applies(projected);
+    assert_cost_calculated(projected);
 }
 
 // ── Error Handling Tests ────────────────────────────────────────

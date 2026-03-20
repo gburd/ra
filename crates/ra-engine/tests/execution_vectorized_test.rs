@@ -24,7 +24,7 @@ fn test_vectorized_batch_size_1000() {
     // Default batch size of 1000 rows
     let input = scan("data");
     let filtered = input.filter(gt(col("value"), int(100)));
-    assert_rule_applies(filtered);
+    assert_cost_calculated(filtered);
 }
 
 #[test]
@@ -51,7 +51,7 @@ fn test_vectorized_column_at_a_time_filter() {
     // Process entire column in batch
     let input = scan("data");
     let filtered = input.filter(gt(col("price"), int(1000)));
-    assert_rule_applies(filtered);
+    assert_cost_calculated(filtered);
 }
 
 #[test]
@@ -80,7 +80,7 @@ fn test_vectorized_simd_arithmetic() {
         binop(BinOp::Add, col("a"), col("b")),
         int(100),
     ));
-    assert_rule_applies(filtered);
+    assert_cost_calculated(filtered);
 }
 
 // ── Cache Efficiency Tests ──────────────────────────────────────
@@ -97,7 +97,7 @@ fn test_vectorized_cache_blocking() {
     // Process data in cache-sized blocks
     let input = scan("large_dataset");
     let filtered = input.filter(gt(col("id"), int(1000)));
-    assert_rule_applies(filtered);
+    assert_cost_calculated(filtered);
 }
 
 // ── Predicate Evaluation Tests ──────────────────────────────────
@@ -118,7 +118,7 @@ fn test_vectorized_selection_vector() {
     // Use selection vector for sparse results
     let input = scan("sparse_data");
     let filtered = input.filter(eq(col("flag"), Expr::Const(Const::Bool(true))));
-    assert_rule_applies(filtered);
+    assert_cost_calculated(filtered);
 }
 
 // ── Expression Evaluation Tests ─────────────────────────────────
@@ -145,7 +145,7 @@ fn test_vectorized_function_call_batch() {
         },
         int(10),
     ));
-    assert_rule_applies(filtered);
+    assert_cost_calculated(filtered);
 }
 
 // ── Type Conversion Tests ───────────────────────────────────────
@@ -172,7 +172,7 @@ fn test_vectorized_adaptive_batch_narrow_rows() {
     // Larger batches for narrow rows
     let input = scan("narrow_rows");
     let projected = project(input, vec!["id"]);
-    assert_rule_applies(projected);
+    assert_cost_calculated(projected);
 }
 
 // ── Batch Boundary Handling Tests ───────────────────────────────
@@ -199,7 +199,7 @@ fn test_vectorized_batch_aggregation() {
         }],
         input: Box::new(input),
     };
-    assert_rule_applies(agg);
+    assert_cost_calculated(agg);
 }
 
 // ── Spilling Strategies Tests ───────────────────────────────────

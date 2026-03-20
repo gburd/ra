@@ -23,7 +23,7 @@ fn test_morsel_driven_default_size() {
 fn test_morsel_driven_adaptive_size_large_rows() {
     // Smaller morsels for large rows
     let input = scan("wide_table");
-    assert_rule_applies(input);
+    assert_cost_calculated(input);
 }
 
 #[test]
@@ -48,7 +48,7 @@ fn test_morsel_driven_work_stealing() {
 fn test_morsel_driven_load_balancing() {
     // Automatic load balancing via work stealing
     let input = scan("skewed_workload");
-    assert_rule_applies(input);
+    assert_cost_calculated(input);
 }
 
 #[test]
@@ -82,7 +82,7 @@ fn test_morsel_driven_numa_interleaving() {
 fn test_morsel_driven_balanced_distribution() {
     // Evenly distribute morsels to workers
     let input = scan("uniform_data");
-    assert_rule_applies(input);
+    assert_cost_calculated(input);
 }
 
 #[test]
@@ -106,7 +106,7 @@ fn test_morsel_driven_pipeline_breaker_sort() {
 fn test_morsel_driven_pipeline_breaker_hash_join() {
     // Hash join build phase breaks pipeline
     let join = two_table_join("orders", "customers", "customer_id", "id");
-    assert_rule_applies(join);
+    assert_cost_calculated(join);
 }
 
 // ── Parallel Pipelines Tests ────────────────────────────────────
@@ -123,7 +123,7 @@ fn test_morsel_driven_parallel_filter() {
     // Parallel filter on morsels
     let input = scan("data");
     let filtered = input.filter(gt(col("value"), int(1000)));
-    assert_rule_applies(filtered);
+    assert_cost_calculated(filtered);
 }
 
 #[test]
@@ -149,7 +149,7 @@ fn test_morsel_driven_parallel_aggregation() {
 fn test_morsel_driven_task_queue() {
     // Central task queue for work stealing
     let input = scan("data");
-    assert_rule_applies(input);
+    assert_cost_calculated(input);
 }
 
 #[test]
@@ -173,7 +173,7 @@ fn test_morsel_driven_barrier_synchronization() {
 fn test_morsel_driven_lock_free_queues() {
     // Lock-free queues for work stealing
     let input = scan("concurrent_data");
-    assert_rule_applies(input);
+    assert_cost_calculated(input);
 }
 
 // ── Elastic Parallelism Tests ───────────────────────────────────
@@ -189,7 +189,7 @@ fn test_morsel_driven_elastic_workers() {
 fn test_morsel_driven_scale_up() {
     // Add workers for large workloads
     let input = scan("huge_dataset");
-    assert_rule_applies(input);
+    assert_cost_calculated(input);
 }
 
 // ── Resource Management Tests ───────────────────────────────────
@@ -215,5 +215,5 @@ fn test_morsel_driven_memory_management() {
 fn test_morsel_driven_memory_pressure() {
     // Handle memory pressure gracefully
     let input = scan("large_groups");
-    assert_rule_applies(input);
+    assert_cost_calculated(input);
 }

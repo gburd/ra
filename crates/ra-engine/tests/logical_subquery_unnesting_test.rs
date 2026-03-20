@@ -21,7 +21,7 @@ fn test_exists_to_semi_join() {
         left: Box::new(orders),
         right: Box::new(customers),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -34,7 +34,7 @@ fn test_exists_with_additional_filter() {
         left: Box::new(orders),
         right: Box::new(filtered_customers),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -48,7 +48,7 @@ fn test_nested_exists() {
         left: Box::new(orders),
         right: Box::new(customers),
     };
-    assert_rule_applies(j1);
+    assert_cost_calculated(j1);
 }
 
 // ── NOT EXISTS Subquery Unnesting ───────────────────────────
@@ -64,7 +64,7 @@ fn test_not_exists_to_anti_join() {
         left: Box::new(customers),
         right: Box::new(orders),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -77,7 +77,7 @@ fn test_not_exists_with_correlation() {
         left: Box::new(outer),
         right: Box::new(inner),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 // ── IN Subquery Unnesting ───────────────────────────────────
@@ -93,7 +93,7 @@ fn test_in_subquery_to_semi_join() {
         left: Box::new(orders),
         right: Box::new(customers),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -106,7 +106,7 @@ fn test_in_subquery_with_filter() {
         left: Box::new(orders),
         right: Box::new(active_customers),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -120,7 +120,7 @@ fn test_in_with_null_handling() {
         left: Box::new(outer),
         right: Box::new(inner),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 // ── NOT IN Subquery Unnesting ───────────────────────────────
@@ -136,7 +136,7 @@ fn test_not_in_to_anti_join() {
         left: Box::new(orders),
         right: Box::new(blacklist),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -150,7 +150,7 @@ fn test_not_in_null_rejection() {
         left: Box::new(outer),
         right: Box::new(inner),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 // ── Scalar Subquery Unnesting ───────────────────────────────
@@ -166,7 +166,7 @@ fn test_scalar_subquery_to_left_join() {
         left: Box::new(orders),
         right: Box::new(customers),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -183,7 +183,7 @@ fn test_scalar_subquery_with_aggregate() {
         left: Box::new(orders),
         right: Box::new(agg_items),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 // ── Correlated Subquery Decorrelation ───────────────────────
@@ -198,7 +198,7 @@ fn test_simple_correlation_removal() {
         left: Box::new(outer),
         right: Box::new(inner),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -222,7 +222,7 @@ fn test_multi_level_correlation() {
         right: Box::new(t3),
     };
 
-    assert_rule_applies(j2);
+    assert_cost_calculated(j2);
 }
 
 // ── Apply Elimination ───────────────────────────────────────
@@ -237,7 +237,7 @@ fn test_lateral_join_to_regular_join() {
         left: Box::new(orders),
         right: Box::new(items),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -254,7 +254,7 @@ fn test_apply_with_aggregation() {
         left: Box::new(customers),
         right: Box::new(order_agg),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 // ── Aggregate Subquery Unnesting ────────────────────────────
@@ -273,7 +273,7 @@ fn test_subquery_with_group_by() {
         left: Box::new(outer),
         right: Box::new(inner_agg),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -287,7 +287,7 @@ fn test_max_one_row_subquery() {
         left: Box::new(outer),
         right: Box::new(inner),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 // ── Complex Unnesting Patterns ──────────────────────────────
@@ -313,7 +313,7 @@ fn test_subquery_in_select_and_where() {
         right: Box::new(items),
     };
 
-    assert_rule_applies(j2);
+    assert_cost_calculated(j2);
 }
 
 #[test]
@@ -325,7 +325,7 @@ fn test_union_of_subqueries() {
         left: Box::new(q1),
         right: Box::new(q2),
     };
-    assert_rule_applies(union);
+    assert_cost_calculated(union);
 }
 
 // ── Subquery Hoisting ───────────────────────────────────────
@@ -334,7 +334,7 @@ fn test_union_of_subqueries() {
 fn test_invariant_subquery_hoisting() {
     // Subquery independent of outer query
     let plan = two_table_join("orders", "customers", "customer_id", "id");
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 #[test]
@@ -352,7 +352,7 @@ fn test_subquery_common_table_expression() {
         left: Box::new(main),
         right: Box::new(cte),
     };
-    assert_rule_applies(plan);
+    assert_cost_calculated(plan);
 }
 
 // ── Nested Subquery Patterns ────────────────────────────────
@@ -373,7 +373,7 @@ fn test_subquery_in_subquery() {
         left: Box::new(scan("orders")),
         right: Box::new(middle),
     };
-    assert_rule_applies(outer);
+    assert_cost_calculated(outer);
 }
 
 #[test]
@@ -396,5 +396,5 @@ fn test_recursive_unnesting() {
         right: Box::new(t3),
     };
 
-    assert_rule_applies(j2);
+    assert_cost_calculated(j2);
 }

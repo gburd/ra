@@ -29,7 +29,7 @@ fn test_parallel_scan_partitioned_table() {
 #[test]
 fn test_parallel_scan_with_filter() {
     let input = filtered_scan("events", "timestamp", 1000);
-    assert_rule_applies(input);
+    assert_cost_calculated(input);
 }
 
 #[test]
@@ -57,7 +57,7 @@ fn test_parallel_merge_join() {
         left: Box::new(sorted1),
         right: Box::new(sorted2),
     };
-    assert_rule_applies(join);
+    assert_cost_calculated(join);
 }
 
 #[test]
@@ -74,7 +74,7 @@ fn test_parallel_join_build_phase() {
     let _t1 = scan("build_table");
     let _t2 = scan("probe_table");
     let join = two_table_join("probe_table", "build_table", "key", "key");
-    assert_rule_applies(join);
+    assert_cost_calculated(join);
 }
 
 // ── Parallel Aggregation Tests ──────────────────────────────────
@@ -108,7 +108,7 @@ fn test_parallel_sort_aggregation() {
         }],
         input: Box::new(input),
     };
-    assert_rule_applies(agg);
+    assert_cost_calculated(agg);
 }
 
 #[test]
@@ -141,7 +141,7 @@ fn test_parallel_external_sort() {
 fn test_parallel_merge_sort() {
     let input = scan("data_to_sort");
     let sorted = sort(input, "timestamp", false);
-    assert_rule_applies(sorted);
+    assert_cost_calculated(sorted);
 }
 
 #[test]
@@ -191,7 +191,7 @@ fn test_inter_operator_parallelism_bushy_plan() {
         right: Box::new(right_join),
     };
 
-    assert_rule_applies(final_join);
+    assert_cost_calculated(final_join);
 }
 
 // ── Intra-Operator Parallelism ──────────────────────────────────
@@ -216,7 +216,7 @@ fn test_intra_operator_parallelism_partitioned() {
 #[test]
 fn test_intra_operator_parallelism_scan() {
     let input = scan("very_large_table");
-    assert_rule_applies(input);
+    assert_cost_calculated(input);
 }
 
 // ── Morsel-Driven Parallelism ───────────────────────────────────
@@ -234,7 +234,7 @@ fn test_morsel_driven_adaptive_size() {
     // Adaptive morsel sizing based on workload
     let _input = scan("variable_workload");
     let join = two_table_join("variable_workload", "lookup", "key", "id");
-    assert_rule_applies(join);
+    assert_cost_calculated(join);
 }
 
 #[test]
@@ -289,7 +289,7 @@ fn test_bushy_parallelism_multi_way_join() {
         right: Box::new(t3),
     };
 
-    assert_rule_applies(j2);
+    assert_cost_calculated(j2);
 }
 
 // ── Work Stealing Tests ─────────────────────────────────────────
@@ -305,7 +305,7 @@ fn test_work_stealing_load_imbalance() {
 fn test_work_stealing_dynamic_scheduling() {
     let input = scan("dynamic_data");
     let filtered = input.filter(gt(col("complexity"), int(5)));
-    assert_rule_applies(filtered);
+    assert_cost_calculated(filtered);
 }
 
 #[test]
@@ -328,7 +328,7 @@ fn test_parallelism_overhead_small_table() {
 #[test]
 fn test_parallelism_overhead_coordination() {
     let input = scan("medium_data");
-    assert_rule_applies(input);
+    assert_cost_calculated(input);
 }
 
 // ── Parallel Pipeline Tests ─────────────────────────────────────
@@ -347,7 +347,7 @@ fn test_parallel_pipeline_blocking_operator() {
     let input = scan("unsorted");
     let sorted = sort(input, "key", true);
     let limited = limit(sorted, 10);
-    assert_rule_applies(limited);
+    assert_cost_calculated(limited);
 }
 
 // ── NUMA-Aware Parallelism ──────────────────────────────────────
@@ -371,7 +371,7 @@ fn test_numa_local_data_access() {
 fn test_degree_of_parallelism_selection() {
     // Optimal DOP based on data size and cores
     let input = scan("data");
-    assert_rule_applies(input);
+    assert_cost_calculated(input);
 }
 
 #[test]

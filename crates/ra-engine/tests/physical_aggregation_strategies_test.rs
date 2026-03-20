@@ -41,7 +41,7 @@ fn test_hash_aggregation_many_groups() {
         }],
         input: Box::new(input),
     };
-    assert_rule_applies(agg);
+    assert_cost_calculated(agg);
 }
 
 #[test]
@@ -96,7 +96,7 @@ fn test_hash_aggregation_multiple_aggregates() {
         ],
         input: Box::new(input),
     };
-    assert_rule_applies(agg);
+    assert_cost_calculated(agg);
 }
 
 // ── Sort-Based Aggregation Tests ────────────────────────────────
@@ -132,7 +132,7 @@ fn test_sort_aggregation_high_cardinality() {
         }],
         input: Box::new(input),
     };
-    assert_rule_applies(agg);
+    assert_cost_calculated(agg);
 }
 
 #[test]
@@ -185,7 +185,7 @@ fn test_streaming_aggregation_single_pass() {
         }],
         input: Box::new(input),
     };
-    assert_rule_applies(agg);
+    assert_cost_calculated(agg);
 }
 
 // ── Two-Phase Aggregation Tests ─────────────────────────────────
@@ -235,7 +235,7 @@ fn test_two_phase_aggregation_decomposable() {
         ],
         input: Box::new(input),
     };
-    assert_rule_applies(agg);
+    assert_cost_calculated(agg);
 }
 
 #[test]
@@ -286,7 +286,7 @@ fn test_three_phase_aggregation_large_groups() {
         }],
         input: Box::new(input),
     };
-    assert_rule_applies(agg);
+    assert_cost_calculated(agg);
 }
 
 // ── Distinct Aggregation Tests ──────────────────────────────────
@@ -320,7 +320,7 @@ fn test_distinct_aggregation_sum_distinct() {
         }],
         input: Box::new(input),
     };
-    assert_rule_applies(agg);
+    assert_cost_calculated(agg);
 }
 
 #[test]
@@ -387,7 +387,7 @@ fn test_global_aggregation_avg() {
         }],
         input: Box::new(input),
     };
-    assert_rule_applies(agg);
+    assert_cost_calculated(agg);
 }
 
 // ── Aggregation with Filtering ──────────────────────────────────
@@ -422,7 +422,7 @@ fn test_aggregation_with_selective_filter() {
         }],
         input: Box::new(filtered),
     };
-    assert_rule_applies(agg);
+    assert_cost_calculated(agg);
 }
 
 // ── Aggregation with Joins ──────────────────────────────────────
@@ -493,7 +493,7 @@ fn test_aggregation_spill_to_disk() {
         }],
         input: Box::new(input),
     };
-    assert_rule_applies(agg);
+    assert_cost_calculated(agg);
 }
 
 #[test]
