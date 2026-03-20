@@ -48,6 +48,9 @@ impl HardwareCostModel {
     }
 
     /// Estimate the cost of a scan on the given device.
+    ///
+    /// Scans are pipelined operators: startup cost is zero (first
+    /// row available immediately).
     #[allow(clippy::cast_precision_loss)]
     #[must_use]
     pub fn scan_cost(&self, row_count: f64, avg_row_size: u64, device: Device) -> Cost {
@@ -75,6 +78,10 @@ impl HardwareCostModel {
     }
 
     /// Estimate the cost of a hash join on the given device.
+    ///
+    /// Hash join is a blocking operator on the build side: all
+    /// build rows must be consumed before the first probe row is
+    /// processed. Startup cost = build cost.
     #[allow(clippy::cast_precision_loss)]
     #[must_use]
     pub fn hash_join_cost(
@@ -92,26 +99,36 @@ impl HardwareCostModel {
 
         match device {
             Device::Cpu => {
-                let cpu_time = build_rows * 100e-9 + probe_rows * 50e-9;
-                Cost::new(cpu_time, 0.0, 0.0, ht_mem)
+                let build_cost = build_rows * 100e-9;
+                let probe_cost = probe_rows * 50e-9;
+                Cost::with_startup(
+                    build_cost + probe_cost,
+                    0.0, 0.0, ht_mem,
+                    build_cost, 0.0, 0.0,
+                )
             }
             Device::Gpu => {
                 let transfer = total_bytes / (self.profile.pcie_bandwidth_gbps * 1e9);
                 let sm = f64::from(self.profile.gpu_sm_count);
                 let gpu_build = build_rows * 100e-9 / sm;
                 let gpu_probe = probe_rows * 50e-9 / sm;
-                Cost::new(gpu_build + gpu_probe + transfer, 0.0, 0.0, ht_mem)
+                let build_transfer = build_bytes / (self.profile.pcie_bandwidth_gbps * 1e9);
+                Cost::with_startup(
+                    gpu_build + gpu_probe + transfer,
+                    0.0, 0.0, ht_mem,
+                    gpu_build + build_transfer, 0.0, 0.0,
+                )
             }
             Device::Fpga => {
                 let clock_mhz = f64::from(self.profile.fpga_clock_mhz);
                 let clock_period = 1.0 / (clock_mhz * 1e6);
                 let fpga_build = build_rows * clock_period * 2.0;
                 let fpga_probe = probe_rows * clock_period;
-                Cost::new(
+                Cost::with_startup(
                     fpga_build + fpga_probe,
-                    0.0,
-                    0.0,
+                    0.0, 0.0,
                     self.profile.fpga_bram_bytes,
+                    fpga_build, 0.0, 0.0,
                 )
             }
         }
@@ -120,6 +137,9 @@ impl HardwareCostModel {
     /// Estimate the cost of sorting rows on the given device.
     ///
     /// Uses O(n log n) comparison model with device-specific constants.
+    /// Sort is a fully blocking operator: startup cost equals total
+    /// cost because all input must be consumed before producing the
+    /// first sorted row.
     #[allow(clippy::cast_precision_loss)]
     #[must_use]
     pub fn sort_cost(
@@ -138,25 +158,36 @@ impl HardwareCostModel {
 
         match device {
             Device::Cpu => {
-                // ~200ns per comparison (includes cache misses for large sorts)
                 let cpu_time = n_log_n * 200e-9;
-                Cost::new(cpu_time, 0.0, 0.0, mem)
+                // Sort is fully blocking: startup = total
+                Cost::with_startup(
+                    cpu_time, 0.0, 0.0, mem,
+                    cpu_time, 0.0, 0.0,
+                )
             }
             Device::Gpu => {
                 let transfer = data_bytes / (self.profile.pcie_bandwidth_gbps * 1e9);
                 let sm = f64::from(self.profile.gpu_sm_count);
-                // GPU sort: bitonic/merge sort parallelized across SMs
                 let gpu_time = n_log_n * 200e-9 / sm;
-                Cost::new(gpu_time + transfer, 0.0, 0.0, mem)
+                let total = gpu_time + transfer;
+                Cost::with_startup(
+                    total, 0.0, 0.0, mem,
+                    total, 0.0, 0.0,
+                )
             }
             Device::Fpga => {
-                // FPGA sorting networks limited by pipeline depth
-                Cost::new(f64::INFINITY, 0.0, 0.0, 0)
+                Cost::with_startup(
+                    f64::INFINITY, 0.0, 0.0, 0,
+                    f64::INFINITY, 0.0, 0.0,
+                )
             }
         }
     }
 
     /// Estimate the cost of an aggregation on the given device.
+    ///
+    /// Hash aggregation is blocking: all input rows must be consumed
+    /// before groups can be emitted. Startup cost = total cost.
     #[allow(clippy::cast_precision_loss)]
     #[must_use]
     pub fn aggregation_cost(
@@ -172,15 +203,25 @@ impl HardwareCostModel {
         match device {
             Device::Cpu => {
                 let cpu_time = input_rows * 80e-9;
-                Cost::new(cpu_time, 0.0, 0.0, group_mem)
+                Cost::with_startup(
+                    cpu_time, 0.0, 0.0, group_mem,
+                    cpu_time, 0.0, 0.0,
+                )
             }
             Device::Gpu => {
                 let transfer = data_bytes / (self.profile.pcie_bandwidth_gbps * 1e9);
                 let sm = f64::from(self.profile.gpu_sm_count);
                 let gpu_time = input_rows * 80e-9 / sm + group_count * 100e-9;
-                Cost::new(gpu_time + transfer, 0.0, 0.0, group_mem)
+                let total = gpu_time + transfer;
+                Cost::with_startup(
+                    total, 0.0, 0.0, group_mem,
+                    total, 0.0, 0.0,
+                )
             }
-            Device::Fpga => Cost::new(f64::INFINITY, 0.0, 0.0, 0),
+            Device::Fpga => Cost::with_startup(
+                f64::INFINITY, 0.0, 0.0, 0,
+                f64::INFINITY, 0.0, 0.0,
+            ),
         }
     }
 

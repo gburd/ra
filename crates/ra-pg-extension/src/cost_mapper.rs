@@ -52,19 +52,26 @@ impl CostCalibration {
 
     /// Decompose an RA cost into PostgreSQL startup and total costs.
     ///
-    /// Startup cost is estimated as a fraction of total cost based
-    /// on the operator type. For most operators, startup is small.
-    /// For sorts and hash builds, startup is a larger fraction.
+    /// Uses the startup cost fields from RA's Cost struct directly
+    /// when available. Falls back to the fraction-based estimate
+    /// when `startup_fraction` is provided for backward compat.
     pub fn ra_to_pg_costs(
         &self,
         ra_cost: &Cost,
         startup_fraction: f64,
     ) -> PgCost {
         let total = self.ra_to_pg_total(ra_cost);
-        PgCost {
-            startup: total * startup_fraction.clamp(0.0, 1.0),
-            total,
-        }
+        let ra_startup = ra_cost.startup_cpu * self.cpu_factor
+            + ra_cost.startup_io * self.io_factor
+            + ra_cost.startup_network * self.network_factor;
+        // Use RA startup cost if any startup component is non-zero;
+        // otherwise fall back to fraction-based estimate.
+        let startup = if ra_startup > 0.0 {
+            ra_startup.min(total)
+        } else {
+            total * startup_fraction.clamp(0.0, 1.0)
+        };
+        PgCost { startup, total }
     }
 
     /// Record a calibration sample: the RA-predicted cost vs the
