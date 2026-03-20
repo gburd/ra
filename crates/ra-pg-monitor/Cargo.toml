@@ -1,0 +1,27 @@
+[package]
+name = "ra-pg-monitor"
+description = "PostgreSQL monitoring, schema analysis, and configuration advisory system"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+ra-core = { workspace = true }
+ra-stats = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+crossterm = { workspace = true }
+ratatui = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

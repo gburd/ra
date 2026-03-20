@@ -24,6 +24,13 @@ members = [
     "crates/ra-config",
     "crates/ra-cache",
     "crates/ra-adapters",
+    "crates/ra-pg-monitor",
+    "crates/ra-pg-advisor",
+]
+# pgrx extension requires pg_config and PostgreSQL headers;
+# excluded from default workspace build.
+exclude = [
+    "crates/ra-pg-extension",
 ]
 
 [workspace.package]
@@ -102,6 +109,8 @@ ra-tui = { path = "crates/ra-tui" }
 ra-config = { path = "crates/ra-config" }
 ra-cache = { path = "crates/ra-cache" }
 ra-adapters = { path = "crates/ra-adapters" }
+ra-pg-monitor = { path = "crates/ra-pg-monitor" }
+ra-pg-advisor = { path = "crates/ra-pg-advisor" }
 postgres = "0.19"
 toml = "0.8"
 crossterm = "0.29"
