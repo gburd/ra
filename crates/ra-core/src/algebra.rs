@@ -223,6 +223,42 @@ pub enum RelExpr {
         /// The input relation (already sorted by `prefix_keys`).
         input: Box<RelExpr>,
     },
+
+    /// Bitmap index scan: scans an index and produces a bitmap of
+    /// matching heap pages. Used as input to BitmapAnd/BitmapOr.
+    BitmapIndexScan {
+        /// Table name.
+        table: String,
+        /// Index name to scan.
+        index: String,
+        /// Predicate to evaluate using the index.
+        predicate: Expr,
+    },
+
+    /// Bitmap AND: combines multiple bitmap index scans with bitwise
+    /// AND to produce a bitmap of pages matching all predicates.
+    BitmapAnd {
+        /// Input bitmap scans to combine with AND.
+        inputs: Vec<Box<RelExpr>>,
+    },
+
+    /// Bitmap OR: combines multiple bitmap index scans with bitwise
+    /// OR to produce a bitmap of pages matching any predicate.
+    BitmapOr {
+        /// Input bitmap scans to combine with OR.
+        inputs: Vec<Box<RelExpr>>,
+    },
+
+    /// Bitmap heap scan: uses a bitmap to fetch matching rows from
+    /// the heap in physical page order, minimizing random I/O.
+    BitmapHeapScan {
+        /// Table name.
+        table: String,
+        /// Bitmap input (BitmapIndexScan, BitmapAnd, or BitmapOr).
+        bitmap: Box<RelExpr>,
+        /// Optional condition to recheck on heap tuples.
+        recheck_cond: Option<Expr>,
+    },
 }
 
 /// Configuration for cycle detection in recursive CTEs.

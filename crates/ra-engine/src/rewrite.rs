@@ -27,6 +27,10 @@ use crate::egraph::RelLang;
 #[must_use]
 pub fn all_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     let mut rules = Vec::new();
+    // High priority rules - null simplification first (fixes proptest issues)
+    rules.extend(crate::null_simplification::null_simplification_rules());
+
+    // Standard optimization rules
     rules.extend(predicate_pushdown_rules());
     rules.extend(join_reordering_rules());
     rules.extend(projection_pushdown_rules());
@@ -36,6 +40,14 @@ pub fn all_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     rules.extend(limit_sort_optimization_rules());
     rules.extend(set_operation_rules());
     rules.extend(subquery_optimization_rules());
+
+    // New optimization rules
+    rules.extend(crate::redundant_join::redundant_join_elimination_rules());
+    rules.extend(crate::functional_deps::functional_dependency_rules());
+    rules.extend(crate::semi_join::semi_join_reduction_rules());
+    rules.extend(crate::column_pruning::column_pruning_rules());
+
+    // Database-inspired rules
     rules.extend(duckdb_inspired_rules());
     rules.extend(sqlite_inspired_rules());
     rules.extend(runtime_filter_rules());

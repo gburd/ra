@@ -294,6 +294,111 @@ impl IntegratedCostModel {
         cost * disc
     }
 
+    /// Estimate cost for a bitmap index scan.
+    ///
+    /// Cost includes:
+    /// 1. Index scan to build bitmap (random I/O)
+    /// 2. Bitmap construction overhead
+    #[must_use]
+    #[allow(clippy::cast_precision_loss)]
+    pub fn bitmap_index_scan_cost(
+        &self,
+        table: &str,
+        selectivity: f64,
+    ) -> f64 {
+        let stats = self.effective_statistics(table);
+        let storage_factor = 100.0 / self.hardware.storage_bandwidth_gbps;
+
+        // Index scan cost (random I/O)
+        let index_pages = (stats.row_count * selectivity / 100.0).max(1.0);
+        let index_cost = index_pages * storage_factor * 0.3;
+
+        // Bitmap construction (CPU cost, very cheap)
+        let bitmap_cost = stats.row_count / 64.0 * 1e-9;
+
+        let disc = self.confidence_for_table(table);
+        (index_cost + bitmap_cost) * disc
+    }
+
+    /// Estimate cost for combining bitmaps with AND/OR.
+    ///
+    /// Bitwise operations run at memory bandwidth speed.
+    #[must_use]
+    #[allow(clippy::cast_precision_loss)]
+    pub fn bitmap_combine_cost(
+        &self,
+        table: &str,
+        num_bitmaps: usize,
+    ) -> f64 {
+        let stats = self.effective_statistics(table);
+        // Bitmap size in 64-bit words
+        let bitmap_words = (stats.row_count / 64.0).max(1.0);
+        // AND/OR operations are extremely fast (memory bandwidth)
+        let ops_per_bitmap = bitmap_words * 1e-10;
+        ops_per_bitmap * num_bitmaps as f64
+    }
+
+    /// Estimate cost for bitmap heap scan.
+    ///
+    /// After combining bitmaps, heap pages are accessed in physical
+    /// order, which is much cheaper than random access.
+    #[must_use]
+    #[allow(clippy::cast_precision_loss)]
+    pub fn bitmap_heap_scan_cost(
+        &self,
+        table: &str,
+        combined_selectivity: f64,
+    ) -> f64 {
+        let stats = self.effective_statistics(table);
+
+        // Sequential page cost (much cheaper than random)
+        let pages_accessed = (stats.row_count * combined_selectivity / 100.0).max(1.0);
+        let storage_factor = 100.0 / self.hardware.storage_bandwidth_gbps;
+
+        // Sequential access is ~4x faster than random
+        let heap_cost = pages_accessed * storage_factor * 0.25;
+
+        // Recheck condition overhead (CPU)
+        let recheck_cost = stats.row_count * combined_selectivity * 5e-9;
+
+        let disc = self.confidence_for_table(table);
+        (heap_cost + recheck_cost) * disc
+    }
+
+    /// Estimate total cost for a bitmap scan with multiple predicates.
+    ///
+    /// This combines index scan costs, bitmap combine cost, and heap
+    /// scan cost. Returns the total cost and whether bitmap scan is
+    /// cheaper than alternatives.
+    #[must_use]
+    #[allow(clippy::cast_precision_loss)]
+    pub fn full_bitmap_scan_cost(
+        &self,
+        table: &str,
+        selectivities: &[f64],
+    ) -> f64 {
+        if selectivities.is_empty() {
+            return self.scan_cost(table);
+        }
+
+        // Cost of individual index scans
+        let index_costs: f64 = selectivities
+            .iter()
+            .map(|&sel| self.bitmap_index_scan_cost(table, sel))
+            .sum();
+
+        // Cost of combining bitmaps
+        let combine_cost = self.bitmap_combine_cost(table, selectivities.len());
+
+        // Combined selectivity (product for AND)
+        let combined_sel: f64 = selectivities.iter().product();
+
+        // Heap scan cost with combined selectivity
+        let heap_cost = self.bitmap_heap_scan_cost(table, combined_sel);
+
+        index_costs + combine_cost + heap_cost
+    }
+
     /// Compute the confidence discount for a table.
     fn confidence_for_table(&self, table: &str) -> f64 {
         self.adapter
@@ -688,6 +793,20 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
                     / (1024.0 * 1024.0);
                 let cache_factor = 16.0 / cache_mb.max(1.0);
                 1000.0 * cache_factor
+            }
+            RelLang::BitmapIndexScan(_) => {
+                // Index scan cost (random I/O, cheaper than full index)
+                10.0
+            }
+            RelLang::BitmapAnd(_) | RelLang::BitmapOr(_) => {
+                // Bitwise operations are extremely cheap
+                0.1
+            }
+            RelLang::BitmapHeapScan(_) => {
+                // Sequential heap access
+                let storage_factor =
+                    100.0 / self.hardware.storage_bandwidth_gbps;
+                5.0 * storage_factor
             }
             _ => 0.1,
         };

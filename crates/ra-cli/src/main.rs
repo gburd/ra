@@ -9,6 +9,7 @@ mod federated_commands;
 mod migrate_commands;
 pub(crate) mod plan_diff;
 pub(crate) mod side_by_side;
+mod regression_commands;
 mod stats_commands;
 mod test_executor;
 mod visualize;
@@ -257,6 +258,68 @@ enum Commands {
         /// Output format for non-TUI mode: text, json.
         #[arg(long, default_value = "text")]
         format: String,
+    },
+    /// Query regression detection commands.
+    #[command(subcommand)]
+    Regression(RegressionCommands),
+}
+
+#[derive(Subcommand)]
+enum RegressionCommands {
+    /// Establish a baseline for a query.
+    Baseline {
+        /// Path to SQL query file.
+        query_file: PathBuf,
+        /// Query identifier (defaults to filename).
+        #[arg(long)]
+        query_id: Option<String>,
+        /// Storage backend: sqlite or toml.
+        #[arg(long, default_value = "sqlite")]
+        storage: String,
+        /// Path to storage file.
+        #[arg(long, default_value = "regression.db")]
+        storage_path: PathBuf,
+        /// Hardware profile for cost estimation.
+        #[arg(long, default_value = "auto")]
+        hardware_profile: String,
+    },
+    /// Check for regressions in a query.
+    Check {
+        /// Path to SQL query file.
+        query_file: PathBuf,
+        /// Query identifier (defaults to filename).
+        #[arg(long)]
+        query_id: Option<String>,
+        /// Storage backend: sqlite or toml.
+        #[arg(long, default_value = "sqlite")]
+        storage: String,
+        /// Path to storage file.
+        #[arg(long, default_value = "regression.db")]
+        storage_path: PathBuf,
+        /// Hardware profile for cost estimation.
+        #[arg(long, default_value = "auto")]
+        hardware_profile: String,
+        /// Warning threshold (default: 1.25 = 25% increase).
+        #[arg(long)]
+        warn_threshold: Option<f64>,
+        /// Error threshold (default: 2.0 = 2x increase).
+        #[arg(long)]
+        error_threshold: Option<f64>,
+    },
+    /// Show regression report for all queries.
+    Report {
+        /// Storage backend: sqlite or toml.
+        #[arg(long, default_value = "sqlite")]
+        storage: String,
+        /// Path to storage file.
+        #[arg(long, default_value = "regression.db")]
+        storage_path: PathBuf,
+        /// Output format: text, json.
+        #[arg(long, default_value = "text")]
+        format: String,
+        /// Show only regressions (not improvements).
+        #[arg(long)]
+        only_regressions: bool,
     },
 }
 
@@ -690,6 +753,55 @@ fn main() -> Result<()> {
             demo,
             format,
         } => cmd_monitor(tui, demo, &format, cli.quiet),
+        Commands::Regression(sub) => match sub {
+            RegressionCommands::Baseline {
+                query_file,
+                query_id,
+                storage,
+                storage_path,
+                hardware_profile,
+            } => regression_commands::cmd_regression_baseline(
+                &query_file,
+                query_id.as_deref(),
+                &storage,
+                &storage_path,
+                &hardware_profile,
+                cli.verbose,
+                cli.quiet,
+            ),
+            RegressionCommands::Check {
+                query_file,
+                query_id,
+                storage,
+                storage_path,
+                hardware_profile,
+                warn_threshold,
+                error_threshold,
+            } => regression_commands::cmd_regression_check(
+                &query_file,
+                query_id.as_deref(),
+                &storage,
+                &storage_path,
+                &hardware_profile,
+                warn_threshold,
+                error_threshold,
+                cli.verbose,
+                cli.quiet,
+            ),
+            RegressionCommands::Report {
+                storage,
+                storage_path,
+                format,
+                only_regressions,
+            } => regression_commands::cmd_regression_report(
+                &storage,
+                &storage_path,
+                &format,
+                only_regressions,
+                cli.verbose,
+                cli.quiet,
+            ),
+        },
         Commands::Migrate(sub) => match sub {
             MigrateCommands::Preconditions {
                 input,

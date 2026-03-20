@@ -289,6 +289,10 @@ fn test_left_outer_join() {
 fn test_optimization_is_fast() {
     // Simple query should optimize quickly
     use std::time::Instant;
+    use ra_test_utils::TestProfile;
+
+    let profile = TestProfile::current();
+    let expected_ms = profile.scale_time_ms(1000.0);
 
     let plan = two_table_join("users", "orders", "id", "user_id");
     let optimizer = create_test_optimizer();
@@ -298,9 +302,11 @@ fn test_optimization_is_fast() {
     let duration = start.elapsed();
 
     assert!(
-        duration.as_millis() < 3000,
-        "optimization took too long: {:?}",
-        duration
+        duration.as_millis() < expected_ms as u128,
+        "optimization took {}ms (expected < {:.0}ms on this platform, scale={:.2}x)",
+        duration.as_millis(),
+        expected_ms,
+        profile.scale_factors.time_scale
     );
 }
 
@@ -308,6 +314,10 @@ fn test_optimization_is_fast() {
 fn test_complex_query_optimizes_reasonably() {
     // More complex query should still complete in reasonable time
     use std::time::Instant;
+    use ra_test_utils::TestProfile;
+
+    let profile = TestProfile::current();
+    let expected_ms = profile.scale_time_ms(5000.0);
 
     // 4-way join with filters
     let _t1 = filtered_scan("table1", "col1", 10);
@@ -330,9 +340,10 @@ fn test_complex_query_optimizes_reasonably() {
     let duration = start.elapsed();
 
     assert!(
-        duration.as_secs() < 8,
-        "complex optimization took too long: {:?}",
-        duration
+        duration.as_millis() < expected_ms as u128,
+        "complex optimization took {}ms (expected < {:.0}ms on this platform)",
+        duration.as_millis(),
+        expected_ms
     );
 }
 

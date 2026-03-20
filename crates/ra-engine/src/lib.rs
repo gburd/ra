@@ -29,6 +29,7 @@
 
 pub mod adaptive_calibration;
 pub mod analysis;
+pub mod column_pruning;
 pub mod constraint_optimizer;
 pub mod cost;
 pub mod differential;
@@ -37,18 +38,22 @@ pub mod egraph;
 pub mod executors;
 pub mod extract;
 pub mod facts_context;
+pub mod functional_deps;
 pub mod incremental_sort;
 pub mod join_transformations;
 pub mod federated_cost;
 pub mod federated_optimizer;
 pub mod memo;
 pub mod network_cost;
+pub mod null_simplification;
 pub mod precondition_eval;
 pub mod recursive;
+pub mod redundant_join;
 pub mod resource_budget;
 pub mod resource_profiles;
 pub mod rewrite;
 pub mod runtime_filters;
+pub mod semi_join;
 pub mod timely;
 pub mod trigger_optimizer;
 

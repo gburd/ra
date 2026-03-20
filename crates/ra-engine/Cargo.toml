@@ -24,6 +24,7 @@ toml = { workspace = true }
 [dev-dependencies]
 criterion = { workspace = true }
 proptest = { workspace = true }
+ra-test-utils = { workspace = true }
 
 [[bench]]
 name = "optimizer"

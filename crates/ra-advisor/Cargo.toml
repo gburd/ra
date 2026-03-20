@@ -1,0 +1,29 @@
+[package]
+name = "ra-advisor"
+description = "Automatic index advisor for workload analysis and optimization"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+ra-core = { workspace = true }
+ra-parser = { workspace = true }
+ra-stats = { workspace = true }
+ra-catalog = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+indexmap = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+tempfile = { workspace = true }
+pretty_assertions = { workspace = true }
+
+[lints]
+workspace = true

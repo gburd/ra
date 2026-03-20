@@ -49,6 +49,12 @@ define_language! {
         "values" = Values(Box<[Id]>),
         "values-row" = ValuesRow(Box<[Id]>),
 
+        // -- Bitmap index operators --
+        "bitmap-index-scan" = BitmapIndexScan([Id; 3]),
+        "bitmap-and" = BitmapAnd(Box<[Id]>),
+        "bitmap-or" = BitmapOr(Box<[Id]>),
+        "bitmap-heap-scan" = BitmapHeapScan([Id; 3]),
+
         // -- Window function expression --
         "window-expr" = WindowExprNode([Id; 6]),
         "window-fn" = WindowFn([Id; 1]),
@@ -994,6 +1000,36 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
             }
             Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
         }
+        RelExpr::BitmapIndexScan { table, index, predicate } => {
+            let table_id = add_symbol(rec, table);
+            let index_id = add_symbol(rec, index);
+            let pred_id = add_scalar_expr(rec, predicate)?;
+            Ok(rec.add(RelLang::BitmapIndexScan([table_id, index_id, pred_id])))
+        }
+        RelExpr::BitmapAnd { inputs } => {
+            let mut input_ids = Vec::with_capacity(inputs.len());
+            for input in inputs {
+                input_ids.push(add_rel_expr(rec, input)?);
+            }
+            Ok(rec.add(RelLang::BitmapAnd(input_ids.into_boxed_slice())))
+        }
+        RelExpr::BitmapOr { inputs } => {
+            let mut input_ids = Vec::with_capacity(inputs.len());
+            for input in inputs {
+                input_ids.push(add_rel_expr(rec, input)?);
+            }
+            Ok(rec.add(RelLang::BitmapOr(input_ids.into_boxed_slice())))
+        }
+        RelExpr::BitmapHeapScan { table, bitmap, recheck_cond } => {
+            let table_id = add_symbol(rec, table);
+            let bitmap_id = add_rel_expr(rec, bitmap)?;
+            let recheck_id = if let Some(cond) = recheck_cond {
+                add_scalar_expr(rec, cond)?
+            } else {
+                add_symbol(rec, "")
+            };
+            Ok(rec.add(RelLang::BitmapHeapScan([table_id, bitmap_id, recheck_id])))
+        }
         RelExpr::RowPattern { input, pattern, .. } => {
             let tag_id = add_symbol(rec, "MATCH_RECOGNIZE");
             let pattern_id = add_symbol(rec, &pattern.to_string());
@@ -1556,6 +1592,45 @@ fn from_node(
                 rows.push(extract_values_row(egraph, row_id)?);
             }
             Ok(RelExpr::Values { rows })
+        }
+        RelLang::BitmapIndexScan([table_id, index_id, pred_id]) => {
+            let table = extract_symbol(egraph, *table_id)?;
+            let index = extract_symbol(egraph, *index_id)?;
+            let predicate = extract_scalar_expr(egraph, *pred_id)?;
+            Ok(RelExpr::BitmapIndexScan {
+                table,
+                index,
+                predicate,
+            })
+        }
+        RelLang::BitmapAnd(input_ids) => {
+            let mut inputs = Vec::with_capacity(input_ids.len());
+            for &input_id in input_ids.iter() {
+                inputs.push(Box::new(from_egraph_node(egraph, input_id)?));
+            }
+            Ok(RelExpr::BitmapAnd { inputs })
+        }
+        RelLang::BitmapOr(input_ids) => {
+            let mut inputs = Vec::with_capacity(input_ids.len());
+            for &input_id in input_ids.iter() {
+                inputs.push(Box::new(from_egraph_node(egraph, input_id)?));
+            }
+            Ok(RelExpr::BitmapOr { inputs })
+        }
+        RelLang::BitmapHeapScan([table_id, bitmap_id, recheck_id]) => {
+            let table = extract_symbol(egraph, *table_id)?;
+            let bitmap = from_egraph_node(egraph, *bitmap_id)?;
+            let recheck_str = extract_symbol(egraph, *recheck_id)?;
+            let recheck_cond = if recheck_str.is_empty() {
+                None
+            } else {
+                Some(extract_scalar_expr(egraph, *recheck_id)?)
+            };
+            Ok(RelExpr::BitmapHeapScan {
+                table,
+                bitmap: Box::new(bitmap),
+                recheck_cond,
+            })
         }
         other => Err(EGraphError::ExtractionError(format!(
             "unexpected relational node: {other:?}"

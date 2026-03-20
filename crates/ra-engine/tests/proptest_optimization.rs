@@ -494,6 +494,10 @@ proptest! {
         use ra_engine::RelLang;
         use ra_engine::RelAnalysis;
         use ra_core::expr::{Const, Expr};
+        use ra_test_utils::TestProfile;
+
+        let profile = TestProfile::current();
+        let max_iters = profile.scale_iterations(50);
 
         // Skip expressions with null predicates - they can cause excessive
         // rewrites without proper null-constant simplification rules.
@@ -527,18 +531,17 @@ proptest! {
         let runner: Runner<RelLang, RelAnalysis> = Runner::default()
             .with_expr(&rec)
             .with_node_limit(10_000)
-            .with_iter_limit(100)  // Allow up to 100 but expect much less
+            .with_iter_limit((max_iters * 2).min(200))  // Cap at 200
             .run(&all_rules());
 
         let iteration_count = runner.iterations.len();
-        // With Phase 2 optimizations (physical properties, runtime filters,
-        // incremental sort, join transformations), rule count is much higher.
-        // Allow more iterations than original 20, but still catch true cycles.
         prop_assert!(
-            iteration_count < 100,
-            "Saturation hit iteration limit {} (possible infinite cycle)\n\
+            iteration_count <= max_iters,
+            "Saturation took {} iterations (expected <= {} on this platform, scale={:.2}x)\n\
              Expression: {:?}",
             iteration_count,
+            max_iters,
+            profile.scale_factors.iteration_scale,
             expr
         );
     }
