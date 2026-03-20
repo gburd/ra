@@ -79,6 +79,16 @@ impl egg::CostFunction<RelLang> for RelCostFn {
                 let parallelism_factor = 8.0 / f64::from(self.hardware.cpu_cores);
                 150.0 * parallelism_factor.max(0.5) // Don't over-penalize many-core systems
             }
+            RelLang::IncrementalSort(_) => {
+                // Incremental sort is cheaper than full sort: only sorts
+                // within prefix groups, so cost is proportional to
+                // group_size * log(group_size) instead of n * log(n).
+                // Model as 40% of full sort cost (conservative estimate
+                // assuming moderate prefix selectivity).
+                let parallelism_factor =
+                    8.0 / f64::from(self.hardware.cpu_cores);
+                60.0 * parallelism_factor.max(0.5)
+            }
             RelLang::Limit(_) => 0.5,
             RelLang::Union(_) | RelLang::Intersect(_) | RelLang::Except(_) => 50.0,
             RelLang::RecursiveCTE(_) => 1000.0,

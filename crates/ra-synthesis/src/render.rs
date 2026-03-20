@@ -138,6 +138,18 @@ fn render_expr(expr: &RelExpr, ctx: &mut RenderContext) {
             ctx.order_by =
                 keys.iter().map(render_sort_key).collect();
         }
+        RelExpr::IncrementalSort {
+            prefix_keys,
+            suffix_keys,
+            input,
+        } => {
+            render_expr(input, ctx);
+            ctx.order_by = prefix_keys
+                .iter()
+                .chain(suffix_keys.iter())
+                .map(render_sort_key)
+                .collect();
+        }
         RelExpr::Limit {
             count,
             offset,

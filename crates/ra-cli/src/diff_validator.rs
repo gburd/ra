@@ -119,7 +119,8 @@ fn compare_node(
                 *join_type, left, right, db, agreements, disagreements,
             );
         }
-        RelExpr::Sort { input, .. } => {
+        RelExpr::Sort { input, .. }
+        | RelExpr::IncrementalSort { input, .. } => {
             compare_sort(db, agreements, disagreements);
             compare_node(input, db, agreements, disagreements);
         }

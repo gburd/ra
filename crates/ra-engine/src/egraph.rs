@@ -37,6 +37,7 @@ define_language! {
         "join" = Join([Id; 4]),
         "aggregate" = Aggregate([Id; 3]),
         "sort" = Sort([Id; 2]),
+        "incremental-sort" = IncrementalSort([Id; 3]),
         "limit" = Limit([Id; 3]),
         "union" = Union([Id; 3]),
         "intersect" = Intersect([Id; 3]),
@@ -859,6 +860,18 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
             let input_id = add_rel_expr(rec, input)?;
             Ok(rec.add(RelLang::Sort([keys_id, input_id])))
         }
+        RelExpr::IncrementalSort {
+            prefix_keys,
+            suffix_keys,
+            input,
+        } => {
+            let prefix_id = add_sort_key_list(rec, prefix_keys)?;
+            let suffix_id = add_sort_key_list(rec, suffix_keys)?;
+            let input_id = add_rel_expr(rec, input)?;
+            Ok(rec.add(RelLang::IncrementalSort([
+                prefix_id, suffix_id, input_id,
+            ])))
+        }
         RelExpr::Limit {
             count,
             offset,
@@ -1438,6 +1451,18 @@ fn from_node(
             let input = from_egraph_node(egraph, *input_id)?;
             Ok(RelExpr::Sort {
                 keys,
+                input: Box::new(input),
+            })
+        }
+        RelLang::IncrementalSort([prefix_id, suffix_id, input_id]) => {
+            let prefix_keys =
+                extract_sort_key_list(egraph, *prefix_id)?;
+            let suffix_keys =
+                extract_sort_key_list(egraph, *suffix_id)?;
+            let input = from_egraph_node(egraph, *input_id)?;
+            Ok(RelExpr::IncrementalSort {
+                prefix_keys,
+                suffix_keys,
                 input: Box::new(input),
             })
         }

@@ -208,6 +208,21 @@ pub enum RelExpr {
         /// Skip strategy after a match.
         skip_mode: SkipMode,
     },
+
+    /// Incremental sort: input is already sorted by `prefix_keys`,
+    /// so only sort within each prefix group by `suffix_keys`.
+    ///
+    /// Cost is O(n * log(m)) where m is average group size, vs
+    /// O(n * log(n)) for a full sort. Effective when the prefix
+    /// covers high-cardinality columns.
+    IncrementalSort {
+        /// Keys the input is already sorted by (prefix).
+        prefix_keys: Vec<SortKey>,
+        /// Additional keys to sort within each prefix group.
+        suffix_keys: Vec<SortKey>,
+        /// The input relation (already sorted by `prefix_keys`).
+        input: Box<RelExpr>,
+    },
 }
 
 /// Configuration for cycle detection in recursive CTEs.
@@ -514,6 +529,7 @@ impl RelExpr {
             | Self::Project { input, .. }
             | Self::Aggregate { input, .. }
             | Self::Sort { input, .. }
+            | Self::IncrementalSort { input, .. }
             | Self::Limit { input, .. }
             | Self::Window { input, .. }
             | Self::Distinct { input, .. } => vec![input],
@@ -603,6 +619,19 @@ impl RelExpr {
             }
             Self::Sort { keys, input, .. } => {
                 for key in keys {
+                    collect_expr_columns(&key.expr, out);
+                }
+                input.collect_columns(out);
+            }
+            Self::IncrementalSort {
+                prefix_keys,
+                suffix_keys,
+                input,
+            } => {
+                for key in prefix_keys {
+                    collect_expr_columns(&key.expr, out);
+                }
+                for key in suffix_keys {
                     collect_expr_columns(&key.expr, out);
                 }
                 input.collect_columns(out);
@@ -709,6 +738,7 @@ impl RelExpr {
             | Self::Limit { input, .. }
             | Self::Window { input, .. }
             | Self::Distinct { input, .. }
+            | Self::IncrementalSort { input, .. }
             | Self::RowPattern { input, .. } => {
                 input.references_cte(cte_name)
             }

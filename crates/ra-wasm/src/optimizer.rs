@@ -340,6 +340,9 @@ fn estimate_cost(plan: &RelExpr) -> f64 {
         }
         RelExpr::Aggregate { input, .. } => estimate_cost(input) * 2.0,
         RelExpr::Sort { input, .. } => estimate_cost(input) * 3.0,
+        RelExpr::IncrementalSort { input, .. } => {
+            estimate_cost(input) * 1.5
+        }
         RelExpr::Limit { input, .. } => estimate_cost(input) + 1.0,
         RelExpr::Union { left, right, .. }
         | RelExpr::Intersect { left, right, .. }

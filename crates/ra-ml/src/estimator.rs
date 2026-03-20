@@ -70,7 +70,8 @@ fn estimate_heuristic(
             input_rows * Statistics::default_selectivity()
         }
         RelExpr::Project { input, .. }
-        | RelExpr::Sort { input, .. } => {
+        | RelExpr::Sort { input, .. }
+        | RelExpr::IncrementalSort { input, .. } => {
             estimate_heuristic(input, stats)
         }
         RelExpr::Join {
@@ -282,6 +283,7 @@ fn collect_tables_recursive(
         | RelExpr::Project { input, .. }
         | RelExpr::Aggregate { input, .. }
         | RelExpr::Sort { input, .. }
+        | RelExpr::IncrementalSort { input, .. }
         | RelExpr::Limit { input, .. }
         | RelExpr::Window { input, .. }
         | RelExpr::Distinct { input, .. } => {

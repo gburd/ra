@@ -243,6 +243,36 @@ impl IntegratedCostModel {
         cost * disc
     }
 
+    /// Estimate cost for an incremental sort operator.
+    ///
+    /// The cost model assumes the input is already sorted by prefix
+    /// columns with `prefix_ndv` distinct values. Only the suffix
+    /// columns within each group need sorting.
+    ///
+    /// Cost = groups * (group_size * log(group_size)) * per_row_factor.
+    #[must_use]
+    pub fn incremental_sort_cost(
+        &self,
+        table: &str,
+        prefix_ndv: f64,
+    ) -> f64 {
+        let stats = self.effective_statistics(table);
+        let n = stats.row_count.max(1.0);
+        let groups = prefix_ndv.max(1.0).min(n);
+        let avg_group_size = n / groups;
+
+        let group_sort = avg_group_size
+            * avg_group_size.log2().max(1.0);
+        let total = groups * group_sort;
+
+        let par_factor =
+            8.0 / f64::from(self.hardware.cpu_cores).max(1.0);
+        let cost = total * 200e-9 * par_factor.max(0.5);
+
+        let disc = self.confidence_for_table(table);
+        cost * disc
+    }
+
     /// Estimate cost for an aggregate operator.
     #[must_use]
     #[allow(clippy::cast_precision_loss)]

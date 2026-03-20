@@ -251,6 +251,7 @@ fn collect_join_order(expr: &RelExpr, out: &mut Vec<String>) {
         RelExpr::Filter { input, .. }
         | RelExpr::Project { input, .. }
         | RelExpr::Sort { input, .. }
+        | RelExpr::IncrementalSort { input, .. }
         | RelExpr::Limit { input, .. }
         | RelExpr::Distinct { input, .. }
         | RelExpr::Window { input, .. }
@@ -303,6 +304,7 @@ fn collect_join_hints(expr: &RelExpr, out: &mut Vec<JoinHint>) {
         RelExpr::Filter { input, .. }
         | RelExpr::Project { input, .. }
         | RelExpr::Sort { input, .. }
+        | RelExpr::IncrementalSort { input, .. }
         | RelExpr::Limit { input, .. }
         | RelExpr::Distinct { input, .. }
         | RelExpr::Window { input, .. }
@@ -364,6 +366,7 @@ fn collect_scan_hints(expr: &RelExpr, out: &mut Vec<ScanHint>) {
         RelExpr::Filter { input, .. }
         | RelExpr::Project { input, .. }
         | RelExpr::Sort { input, .. }
+        | RelExpr::IncrementalSort { input, .. }
         | RelExpr::Limit { input, .. }
         | RelExpr::Distinct { input, .. }
         | RelExpr::Window { input, .. }

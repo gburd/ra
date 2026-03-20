@@ -160,6 +160,17 @@ fn operator_label(expr: &RelExpr) -> String {
         }
         RelExpr::Aggregate { .. } => "Aggregate".to_owned(),
         RelExpr::Sort { .. } => "Sort".to_owned(),
+        RelExpr::IncrementalSort {
+            prefix_keys,
+            suffix_keys,
+            ..
+        } => {
+            format!(
+                "IncrementalSort(prefix={}, suffix={})",
+                prefix_keys.len(),
+                suffix_keys.len()
+            )
+        }
         RelExpr::Limit { count, offset, .. } => {
             format!("Limit(count={count}, offset={offset})")
         }

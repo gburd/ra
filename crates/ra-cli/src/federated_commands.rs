@@ -249,6 +249,7 @@ fn collect_tables_recursive(
         | ra_core::algebra::RelExpr::Project { input, .. }
         | ra_core::algebra::RelExpr::Aggregate { input, .. }
         | ra_core::algebra::RelExpr::Sort { input, .. }
+        | ra_core::algebra::RelExpr::IncrementalSort { input, .. }
         | ra_core::algebra::RelExpr::Limit { input, .. }
         | ra_core::algebra::RelExpr::Window { input, .. }
         | ra_core::algebra::RelExpr::Distinct { input, .. } => {

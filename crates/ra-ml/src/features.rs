@@ -134,6 +134,17 @@ impl FeatureSchema {
                     log_scale(keys.len() as f64);
                 self.encode_expr(input, stats, features);
             }
+            RelExpr::IncrementalSort {
+                prefix_keys,
+                suffix_keys,
+                input,
+            } => {
+                features[OP_TYPE_OFFSET + 5] = 1.0;
+                features[STATS_OFFSET + 5] = log_scale(
+                    (prefix_keys.len() + suffix_keys.len()) as f64,
+                );
+                self.encode_expr(input, stats, features);
+            }
             RelExpr::Limit {
                 count,
                 offset,

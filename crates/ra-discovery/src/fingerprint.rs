@@ -160,7 +160,8 @@ fn fingerprint_rel(expr: &RelExpr, out: &mut Vec<Token>) {
             fingerprint_rel(input, out);
             out.push(Token::End);
         }
-        RelExpr::Sort { input, .. } => {
+        RelExpr::Sort { input, .. }
+        | RelExpr::IncrementalSort { input, .. } => {
             out.push(Token::Sort);
             fingerprint_rel(input, out);
             out.push(Token::End);
