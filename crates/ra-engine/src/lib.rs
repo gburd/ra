@@ -29,6 +29,7 @@
 
 pub mod adaptive_calibration;
 pub mod analysis;
+pub mod cardinality_cost;
 // pub mod column_pruning; // TODO: incomplete, has invalid egg syntax
 pub mod constraint_optimizer;
 pub mod cost;
@@ -63,6 +64,7 @@ pub use adaptive_calibration::{
     CostFeedback, OperatorKind,
 };
 pub use analysis::RelAnalysis;
+pub use cardinality_cost::CardinalityAwareCostFn;
 pub use cost::{CostCalibration, IntegratedCostFn, IntegratedCostModel};
 pub use distributed_optimizer::{
     AggStrategyResult, ClusterTopology, DistributedOptimizer,
@@ -77,7 +79,7 @@ pub use egraph::{
     to_rec_expr, EGraphError, IncrementalStats, OptimizationResult,
     OptimizationStatus, Optimizer, OptimizerConfig, RelLang,
 };
-pub use extract::{extract_best, extract_best_with_staleness, rec_expr_to_rel_expr, RelCostFn};
+pub use extract::{extract_best, extract_best_with_staleness, extract_best_with_cardinality, rec_expr_to_rel_expr, RelCostFn};
 pub use memo::{structural_hash, MemoTable};
 pub use network_cost::{
     DistributionStrategy, JoinSides, NetworkCostEstimate, NetworkCostModel,

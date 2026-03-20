@@ -184,6 +184,34 @@ pub fn extract_best_with_staleness<S: BuildHasher, S2: BuildHasher>(
     rec_expr_to_rel_expr(&best_expr)
 }
 
+/// Extract the lowest-cost plan using cardinality-aware costing.
+///
+/// Uses ML-based cardinality estimation to scale operator costs
+/// based on estimated intermediate result sizes. This produces more
+/// accurate cost estimates than pure operator-based costing.
+///
+/// # Errors
+///
+/// Returns an error if the extracted nodes cannot be converted
+/// back to a [`RelExpr`].
+pub fn extract_best_with_cardinality<S: BuildHasher, S2: BuildHasher>(
+    egraph: &egg::EGraph<RelLang, RelAnalysis>,
+    root: Id,
+    table_stats: &HashMap<String, Statistics, S>,
+    staleness_map: &HashMap<String, Staleness, S2>,
+    hardware: &ra_hardware::HardwareProfile,
+) -> Result<RelExpr, EGraphError> {
+    let cost_fn = crate::cardinality_cost::CardinalityAwareCostFn::new(
+        hardware.clone(),
+        table_stats.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        staleness_map.iter().map(|(k, v)| (k.clone(), *v)).collect(),
+    );
+    let extractor = egg::Extractor::new(egraph, cost_fn);
+    let (cost, best_expr) = extractor.find_best(root);
+    tracing::debug!("Extracted plan with cardinality-aware cost: {}", cost);
+    rec_expr_to_rel_expr(&best_expr)
+}
+
 /// Convert a [`RecExpr`] back to a [`RelExpr`].
 ///
 /// # Errors
