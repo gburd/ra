@@ -184,6 +184,50 @@ impl IntegratedCostModel {
         cost * disc_left.max(disc_right)
     }
 
+    /// Estimate cost for a hash join with a runtime filter applied.
+    ///
+    /// Models the reduced probe-side cost when a bloom/min-max/in-list
+    /// filter is built during the hash join build phase and pushed to
+    /// the probe-side scan. The `filter_selectivity` is the estimated
+    /// fraction of probe rows that pass the filter (0.0 = all
+    /// filtered, 1.0 = nothing filtered).
+    #[must_use]
+    #[allow(clippy::cast_precision_loss)]
+    pub fn join_cost_with_runtime_filter(
+        &self,
+        build_table: &str,
+        probe_table: &str,
+        filter_selectivity: f64,
+    ) -> f64 {
+        let build_stats = self.effective_statistics(build_table);
+        let probe_stats = self.effective_statistics(probe_table);
+
+        let cache_mb =
+            self.hardware.l3_cache_bytes as f64 / (1024.0 * 1024.0);
+        let cache_factor = 16.0 / cache_mb.max(1.0);
+
+        let build_rows = build_stats.row_count;
+        let probe_rows = probe_stats.row_count;
+
+        // Filter build cost: proportional to build side
+        let filter_build_cost = build_rows * 10e-9;
+        // Filter apply cost: per probe row
+        let filter_apply_cost = probe_rows * 20e-9;
+        // Effective probe rows after filtering
+        let sel = filter_selectivity.clamp(0.0, 1.0);
+        let effective_probe = probe_rows * sel;
+
+        let join_cost = (build_rows * 100e-6
+            + effective_probe * 50e-6)
+            * cache_factor;
+
+        let total = join_cost + filter_build_cost + filter_apply_cost;
+
+        let disc_build = self.confidence_for_table(build_table);
+        let disc_probe = self.confidence_for_table(probe_table);
+        total * disc_build.max(disc_probe)
+    }
+
     /// Estimate cost for a sort operator.
     #[must_use]
     pub fn sort_cost(&self, table: &str) -> f64 {
@@ -598,6 +642,11 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
                 let par_factor =
                     8.0 / f64::from(self.hardware.cpu_cores);
                 150.0 * par_factor.max(0.5)
+            }
+            RelLang::IncrementalSort(_) => {
+                let par_factor =
+                    8.0 / f64::from(self.hardware.cpu_cores);
+                60.0 * par_factor.max(0.5)
             }
             RelLang::Limit(_) => 0.5,
             RelLang::Union(_)

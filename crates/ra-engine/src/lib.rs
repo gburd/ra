@@ -27,6 +27,7 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
+pub mod adaptive_calibration;
 pub mod analysis;
 pub mod constraint_optimizer;
 pub mod cost;
@@ -36,6 +37,7 @@ pub mod egraph;
 pub mod executors;
 pub mod extract;
 pub mod facts_context;
+pub mod incremental_sort;
 pub mod federated_cost;
 pub mod federated_optimizer;
 pub mod memo;
@@ -45,9 +47,14 @@ pub mod recursive;
 pub mod resource_budget;
 pub mod resource_profiles;
 pub mod rewrite;
+pub mod runtime_filters;
 pub mod timely;
 pub mod trigger_optimizer;
 
+pub use adaptive_calibration::{
+    AdaptiveCalibrator, CalibrationConfig, CalibrationState,
+    CostFeedback, OperatorKind,
+};
 pub use analysis::RelAnalysis;
 pub use cost::{CostCalibration, IntegratedCostFn, IntegratedCostModel};
 pub use distributed_optimizer::{
@@ -80,6 +87,11 @@ pub use constraint_optimizer::{
     optimize_with_constraints, ConstraintOptResult,
 };
 pub use facts_context::{FactsContext, FactsContextBuilder};
+pub use incremental_sort::{
+    IncrementalSortCost, PrefixMatch, detect_prefix_match,
+    estimate_costs as estimate_incremental_sort_costs,
+    try_incremental_sort,
+};
 pub use rewrite::all_rules;
 pub use precondition_eval::{EvaluationError, PreConditionEvaluator};
 pub use timely::{ComputationStats, TimelyConfig};
@@ -90,4 +102,11 @@ pub use trigger_optimizer::{
 pub use executors::{
     LateralJoinExecutor, MultiUnnestExecutor, TableFunctionExecutor,
     UnnestExecutor,
+};
+pub use runtime_filters::{
+    BloomFilterState, FilterBuilder, FilterConfig, FilterEffectiveness,
+    FilterOpportunity, FilterStrategy, InListFilterState,
+    MinMaxFilterState, RuntimeFilter, RuntimeFilterCost,
+    estimate_filter_cost, identify_filter_opportunities,
+    should_apply_filter,
 };

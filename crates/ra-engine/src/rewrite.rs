@@ -38,6 +38,7 @@ pub fn all_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     rules.extend(subquery_optimization_rules());
     rules.extend(duckdb_inspired_rules());
     rules.extend(sqlite_inspired_rules());
+    rules.extend(runtime_filter_rules());
     rules
 }
 
@@ -475,6 +476,41 @@ fn sqlite_inspired_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
         rewrite!("sqlite-const-prop-join";
             "(filter (eq ?col ?val) (join inner (eq ?col ?col2) ?left ?right))" =>
             "(filter (eq ?col ?val) (join inner (eq ?val ?col2) ?left ?right))"
+        ),
+    ]
+}
+
+// ---------------------------------------------------------------
+// Runtime filter rules (sideways information passing)
+// Inspired by: StarRocks, Spark, Presto runtime filters
+// ---------------------------------------------------------------
+
+fn runtime_filter_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
+    vec![
+        // Convert hash join to semi-join + hash join pattern.
+        // This models the runtime filter: the semi-join acts as a
+        // pre-filter on the probe side using build-side keys.
+        //
+        // hash_join(cond, build, probe) =>
+        //   hash_join(cond, build, semi_join(cond, probe, build))
+        //
+        // The semi-join represents the bloom filter application:
+        // it filters probe rows that have no matching build key.
+        rewrite!("runtime-filter-hash-to-semi";
+            "(join inner (eq ?lcol ?rcol) ?build ?probe)" =>
+            "(join inner (eq ?lcol ?rcol) ?build (join semi (eq ?rcol ?lcol) ?probe ?build))"
+        ),
+        // Push runtime filter (semi-join) through projection.
+        // If the probe side has a project, push the filter below.
+        rewrite!("runtime-filter-through-project";
+            "(join semi ?cond (project ?cols ?input) ?build)" =>
+            "(project ?cols (join semi ?cond ?input ?build))"
+        ),
+        // Push runtime filter through filter.
+        // Combine runtime filter with existing scan-level filters.
+        rewrite!("runtime-filter-through-filter";
+            "(join semi ?cond (filter ?pred ?input) ?build)" =>
+            "(filter ?pred (join semi ?cond ?input ?build))"
         ),
     ]
 }

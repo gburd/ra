@@ -571,7 +571,8 @@ fn contains_joins(expr: &RelExpr) -> bool {
         | RelExpr::Sort { input, .. }
         | RelExpr::Limit { input, .. }
         | RelExpr::Distinct { input, .. }
-        | RelExpr::Window { input, .. } => contains_joins(input),
+        | RelExpr::Window { input, .. }
+        | RelExpr::IncrementalSort { input, .. } => contains_joins(input),
         RelExpr::Union { left, right, .. }
         | RelExpr::Intersect { left, right, .. }
         | RelExpr::Except { left, right, .. } => {
@@ -741,6 +742,7 @@ fn collect_tables_rec(expr: &RelExpr, out: &mut std::collections::HashSet<String
         | RelExpr::Project { input, .. }
         | RelExpr::Aggregate { input, .. }
         | RelExpr::Sort { input, .. }
+        | RelExpr::IncrementalSort { input, .. }
         | RelExpr::Limit { input, .. } => {
             collect_tables_rec(input, out);
         }

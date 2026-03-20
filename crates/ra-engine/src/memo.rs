@@ -202,6 +202,15 @@ fn hash_rel_expr(expr: &RelExpr, hasher: &mut impl std::hash::Hasher) {
             measures.len().hash(hasher);
             hash_rel_expr(input, hasher);
         }
+        RelExpr::IncrementalSort {
+            prefix_keys,
+            suffix_keys,
+            input,
+        } => {
+            prefix_keys.len().hash(hasher);
+            suffix_keys.len().hash(hasher);
+            hash_rel_expr(input, hasher);
+        }
     }
 }
 

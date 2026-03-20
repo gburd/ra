@@ -250,7 +250,8 @@ impl FederatedOptimizer {
             | RelExpr::Unnest { .. }
             | RelExpr::MultiUnnest { .. }
             | RelExpr::TableFunction { .. }
-            | RelExpr::RowPattern { .. } => false,
+            | RelExpr::RowPattern { .. }
+            | RelExpr::IncrementalSort { .. } => false,
         }
     }
 
