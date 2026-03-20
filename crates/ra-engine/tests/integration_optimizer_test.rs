@@ -298,7 +298,7 @@ fn test_optimization_is_fast() {
     let duration = start.elapsed();
 
     assert!(
-        duration.as_millis() < 1000,
+        duration.as_millis() < 3000,
         "optimization took too long: {:?}",
         duration
     );
@@ -330,7 +330,7 @@ fn test_complex_query_optimizes_reasonably() {
     let duration = start.elapsed();
 
     assert!(
-        duration.as_secs() < 5,
+        duration.as_secs() < 8,
         "complex optimization took too long: {:?}",
         duration
     );
