@@ -1,0 +1,44 @@
+[package]
+name = "ra-pg-extension"
+description = "PostgreSQL pgrx extension: augments the planner with RA optimizer advice"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75.0"
+authors = ["RA Contributors"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/gregburd/ra"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+default = ["pg17"]
+pg14 = ["pgrx/pg14"]
+pg15 = ["pgrx/pg15"]
+pg16 = ["pgrx/pg16"]
+pg17 = ["pgrx/pg17"]
+pg_test = []
+
+[dependencies]
+pgrx = "0.17"
+ra-core = { path = "../ra-core" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+
+[dev-dependencies]
+pgrx-tests = "0.17"
+proptest = "1.5"
+
+# Override workspace lints: pgrx generates code that triggers
+# several of the workspace clippy denials (unsafe, panic, etc.)
+# so we use a relaxed lint configuration here.
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+similar_names = "allow"
+# pgrx macros generate code with these patterns
+missing_safety_doc = "allow"
+missing_panics_doc = "allow"
+# pgrx extension code legitimately uses unsafe
+unsafe_derive_deserialize = "allow"

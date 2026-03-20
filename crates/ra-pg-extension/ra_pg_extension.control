@@ -1,0 +1,5 @@
+comment = 'RA optimizer integration for PostgreSQL planner'
+default_version = '0.1.0'
+module_pathname = '$libdir/ra_pg_extension'
+relocatable = false
+superuser = true
