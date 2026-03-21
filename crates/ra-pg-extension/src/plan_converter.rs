@@ -13,6 +13,8 @@
 
 use ra_core::{JoinType, RelExpr};
 
+use crate::pg_constants::{guc_names, guc_tuning};
+
 /// A complete set of plan advice extracted from an RA `RelExpr`.
 #[derive(Debug, Clone)]
 pub struct PlanAdviceSet {
@@ -653,13 +655,13 @@ impl Drop for SavedPlannerGucs {
     fn drop(&mut self) {
         // Restore GUC values on drop
         unsafe {
-            set_guc_bool("enable_hashjoin", self.enable_hashjoin);
-            set_guc_bool("enable_mergejoin", self.enable_mergejoin);
-            set_guc_bool("enable_nestloop", self.enable_nestloop);
-            set_guc_bool("enable_seqscan", self.enable_seqscan);
-            set_guc_bool("enable_indexscan", self.enable_indexscan);
-            set_guc_bool("enable_bitmapscan", self.enable_bitmapscan);
-            set_guc_real("random_page_cost", self.random_page_cost);
+            set_guc_bool(guc_names::ENABLE_HASHJOIN, self.enable_hashjoin);
+            set_guc_bool(guc_names::ENABLE_MERGEJOIN, self.enable_mergejoin);
+            set_guc_bool(guc_names::ENABLE_NESTLOOP, self.enable_nestloop);
+            set_guc_bool(guc_names::ENABLE_SEQSCAN, self.enable_seqscan);
+            set_guc_bool(guc_names::ENABLE_INDEXSCAN, self.enable_indexscan);
+            set_guc_bool(guc_names::ENABLE_BITMAPSCAN, self.enable_bitmapscan);
+            set_guc_real(guc_names::RANDOM_PAGE_COST, self.random_page_cost);
         }
     }
 }
@@ -667,13 +669,13 @@ impl Drop for SavedPlannerGucs {
 fn save_planner_gucs() -> SavedPlannerGucs {
     unsafe {
         SavedPlannerGucs {
-            enable_hashjoin: get_guc_bool("enable_hashjoin"),
-            enable_mergejoin: get_guc_bool("enable_mergejoin"),
-            enable_nestloop: get_guc_bool("enable_nestloop"),
-            enable_seqscan: get_guc_bool("enable_seqscan"),
-            enable_indexscan: get_guc_bool("enable_indexscan"),
-            enable_bitmapscan: get_guc_bool("enable_bitmapscan"),
-            random_page_cost: get_guc_real("random_page_cost"),
+            enable_hashjoin: get_guc_bool(guc_names::ENABLE_HASHJOIN),
+            enable_mergejoin: get_guc_bool(guc_names::ENABLE_MERGEJOIN),
+            enable_nestloop: get_guc_bool(guc_names::ENABLE_NESTLOOP),
+            enable_seqscan: get_guc_bool(guc_names::ENABLE_SEQSCAN),
+            enable_indexscan: get_guc_bool(guc_names::ENABLE_INDEXSCAN),
+            enable_bitmapscan: get_guc_bool(guc_names::ENABLE_BITMAPSCAN),
+            random_page_cost: get_guc_real(guc_names::RANDOM_PAGE_COST),
         }
     }
 }
@@ -701,9 +703,9 @@ fn apply_advice_to_gucs(
         if want_hash > 0 || want_merge > 0 || want_nestloop > 0 {
             // Enable the method we want most, disable others
             let total = want_hash + want_merge + want_nestloop;
-            set_guc_bool("enable_hashjoin", want_hash > total / 2);
-            set_guc_bool("enable_mergejoin", want_merge > total / 2);
-            set_guc_bool("enable_nestloop", want_nestloop > total / 2);
+            set_guc_bool(guc_names::ENABLE_HASHJOIN, want_hash > total / 2);
+            set_guc_bool(guc_names::ENABLE_MERGEJOIN, want_merge > total / 2);
+            set_guc_bool(guc_names::ENABLE_NESTLOOP, want_nestloop > total / 2);
         }
 
         // Count scan method preferences
@@ -725,18 +727,18 @@ fn apply_advice_to_gucs(
 
             // If we want index scans, reduce random_page_cost to favor them
             if want_indexscan > total / 2 {
-                set_guc_real("random_page_cost", 1.0);
-                set_guc_bool("enable_indexscan", true);
-                set_guc_bool("enable_seqscan", false);
+                set_guc_real(guc_names::RANDOM_PAGE_COST, guc_tuning::RANDOM_PAGE_COST_SSD);
+                set_guc_bool(guc_names::ENABLE_INDEXSCAN, true);
+                set_guc_bool(guc_names::ENABLE_SEQSCAN, false);
             }
             // If we want sequential scans, increase random_page_cost
             else if want_seqscan > total / 2 {
-                set_guc_real("random_page_cost", 10.0);
-                set_guc_bool("enable_seqscan", true);
-                set_guc_bool("enable_indexscan", false);
+                set_guc_real(guc_names::RANDOM_PAGE_COST, guc_tuning::RANDOM_PAGE_COST_FORCE_SEQSCAN);
+                set_guc_bool(guc_names::ENABLE_SEQSCAN, true);
+                set_guc_bool(guc_names::ENABLE_INDEXSCAN, false);
             }
 
-            set_guc_bool("enable_bitmapscan", want_bitmapscan > 0);
+            set_guc_bool(guc_names::ENABLE_BITMAPSCAN, want_bitmapscan > 0);
         }
     }
 
@@ -794,6 +796,7 @@ unsafe fn set_guc_bool(name: &str, value: bool) {
 ///
 /// Calls PostgreSQL C API.
 unsafe fn get_guc_real(name: &str) -> f64 {
+    use crate::pg_constants::cost_defaults;
     use pgrx::pg_sys;
     use std::ffi::CString;
 
@@ -805,12 +808,12 @@ unsafe fn get_guc_real(name: &str) -> f64 {
     );
 
     if value_str.is_null() {
-        return 4.0; // Default PostgreSQL random_page_cost
+        return cost_defaults::RANDOM_PAGE_COST;
     }
 
     let value_cstr = std::ffi::CStr::from_ptr(value_str);
     let value = value_cstr.to_string_lossy();
-    value.parse::<f64>().unwrap_or(4.0)
+    value.parse::<f64>().unwrap_or(cost_defaults::RANDOM_PAGE_COST)
 }
 
 /// Set a real (float) GUC value.

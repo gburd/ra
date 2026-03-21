@@ -12,6 +12,7 @@ use pgrx::prelude::*;
 
 mod cost_mapper;
 mod extension_state;
+mod pg_constants;
 mod plan_converter;
 mod planner_hook;
 mod stats_bridge;

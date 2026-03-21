@@ -24,8 +24,9 @@ use crate::extension_state::{
     RaOptimizerState, RA_ENABLED, RA_LOG_DECISIONS,
     RA_MAX_RELATIONS, RA_MIN_CONFIDENCE,
 };
-use crate::stats_bridge;
+use crate::pg_constants::{cost_defaults, estimation};
 use crate::plan_converter;
+use crate::stats_bridge;
 
 /// Saved pointer to the previous planner hook (for chaining).
 static mut PREV_PLANNER_HOOK: pg_sys::planner_hook_type = None;
@@ -282,24 +283,34 @@ fn estimate_relexpr_cost(
         | RelExpr::ParallelScan { table, .. } => {
             // Sequential scan cost: rows * page_cost
             let row_count = get_table_row_count(table, stats);
-            let pages = (row_count / 100.0).max(1.0); // ~100 rows per page
-            let mem_kb = (row_count * 0.1).max(1.0); // ~100 bytes per row avg
-            Cost::new(row_count * 0.01, pages, 0.0, mem_kb as u64)
+            let pages = (row_count / estimation::ROWS_PER_PAGE).max(1.0);
+            let mem_bytes = (row_count * estimation::BYTES_PER_ROW).max(1.0);
+            Cost::new(row_count * cost_defaults::CPU_TUPLE_COST, pages, 0.0, mem_bytes as u64)
         }
         RelExpr::IndexScan { table, .. }
         | RelExpr::IndexOnlyScan { table, .. } => {
             // Index scan cost: log(rows) * random_page_cost + rows * cpu_cost
             let row_count = get_table_row_count(table, stats);
             let index_pages = row_count.log2().max(1.0);
-            let mem_kb = (row_count * 0.1).max(1.0);
-            Cost::new(row_count * 0.01, index_pages * 4.0, 0.0, mem_kb as u64)
+            let mem_bytes = (row_count * estimation::BYTES_PER_ROW).max(1.0);
+            Cost::new(
+                row_count * cost_defaults::CPU_INDEX_TUPLE_COST,
+                index_pages * cost_defaults::RANDOM_PAGE_COST,
+                0.0,
+                mem_bytes as u64,
+            )
         }
         RelExpr::BitmapHeapScan { table, .. } => {
             // Bitmap scan: similar to index scan but more efficient for multiple matches
             let row_count = get_table_row_count(table, stats);
-            let pages = (row_count / 100.0).max(1.0) * 0.5; // More efficient than seq scan
-            let mem_kb = (row_count * 0.1).max(1.0);
-            Cost::new(row_count * 0.01, pages * 2.0, 0.0, mem_kb as u64)
+            let pages = (row_count / estimation::ROWS_PER_PAGE).max(1.0) * 0.5; // More efficient than seq scan
+            let mem_bytes = (row_count * estimation::BYTES_PER_ROW).max(1.0);
+            Cost::new(
+                row_count * cost_defaults::CPU_TUPLE_COST,
+                pages * cost_defaults::RANDOM_PAGE_COST * 0.5, // Bitmap is more efficient
+                0.0,
+                mem_bytes as u64,
+            )
         }
         RelExpr::Join { left, right, .. }
         | RelExpr::ParallelHashJoin { left, right, .. } => {
@@ -372,7 +383,7 @@ fn get_table_row_count(table: &str, stats: &[(String, ra_core::Statistics)]) -> 
         .iter()
         .find(|(name, _)| name == table)
         .map(|(_, s)| s.row_count)
-        .unwrap_or(1000.0) // Default estimate if no stats
+        .unwrap_or(estimation::DEFAULT_ROW_COUNT)
 }
 
 /// Calculate what fraction of tables have statistics available.

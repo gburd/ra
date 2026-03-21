@@ -6,6 +6,8 @@
 
 use ra_core::Cost;
 
+use crate::pg_constants::cost_defaults;
+
 /// Calibration factors mapping RA cost components to PG cost units.
 ///
 /// PostgreSQL costs are expressed in units where a sequential page
@@ -27,17 +29,13 @@ pub struct CostCalibration {
 impl CostCalibration {
     /// Initial calibration using PostgreSQL default cost parameters.
     ///
-    /// These factors assume:
-    /// - `seq_page_cost` = 1.0
-    /// - `random_page_cost` = 4.0
-    /// - `cpu_tuple_cost` = 0.01
-    /// - `cpu_index_tuple_cost` = 0.005
-    /// - `cpu_operator_cost` = 0.0025
+    /// Maps RA cost components to PostgreSQL cost units based on
+    /// PostgreSQL's defaults documented in `pg_constants::cost_defaults`.
     pub fn default_calibration() -> Self {
         Self {
-            cpu_factor: 0.01,
-            io_factor: 1.0,
-            network_factor: 0.5,
+            cpu_factor: cost_defaults::CPU_TUPLE_COST,
+            io_factor: cost_defaults::SEQ_PAGE_COST,
+            network_factor: 0.5, // Network has no PostgreSQL equivalent; use heuristic
             sample_count: 0,
             mean_error: 0.0,
         }
