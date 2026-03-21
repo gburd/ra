@@ -18,6 +18,86 @@ pub enum Dialect {
     MsSql,
     /// Oracle Database (12c+).
     Oracle,
+
+    // Extended dialects (polyglot-backend only)
+    /// Google BigQuery.
+    #[cfg(feature = "polyglot-backend")]
+    BigQuery,
+    /// Snowflake.
+    #[cfg(feature = "polyglot-backend")]
+    Snowflake,
+    /// Databricks.
+    #[cfg(feature = "polyglot-backend")]
+    Databricks,
+    /// Amazon Redshift.
+    #[cfg(feature = "polyglot-backend")]
+    Redshift,
+    /// ClickHouse.
+    #[cfg(feature = "polyglot-backend")]
+    ClickHouse,
+    /// Trino (formerly PrestoSQL).
+    #[cfg(feature = "polyglot-backend")]
+    Trino,
+    /// Presto.
+    #[cfg(feature = "polyglot-backend")]
+    Presto,
+    /// Amazon Athena.
+    #[cfg(feature = "polyglot-backend")]
+    Athena,
+    /// Apache Hive.
+    #[cfg(feature = "polyglot-backend")]
+    Hive,
+    /// Apache Spark SQL.
+    #[cfg(feature = "polyglot-backend")]
+    Spark,
+    /// Teradata.
+    #[cfg(feature = "polyglot-backend")]
+    Teradata,
+    /// Exasol.
+    #[cfg(feature = "polyglot-backend")]
+    Exasol,
+    /// Microsoft Fabric.
+    #[cfg(feature = "polyglot-backend")]
+    Fabric,
+    /// Dremio.
+    #[cfg(feature = "polyglot-backend")]
+    Dremio,
+    /// Apache Drill.
+    #[cfg(feature = "polyglot-backend")]
+    Drill,
+    /// Apache Druid.
+    #[cfg(feature = "polyglot-backend")]
+    Druid,
+    /// CockroachDB.
+    #[cfg(feature = "polyglot-backend")]
+    CockroachDb,
+    /// Materialize.
+    #[cfg(feature = "polyglot-backend")]
+    Materialize,
+    /// RisingWave.
+    #[cfg(feature = "polyglot-backend")]
+    RisingWave,
+    /// SingleStore (formerly MemSQL).
+    #[cfg(feature = "polyglot-backend")]
+    SingleStore,
+    /// StarRocks.
+    #[cfg(feature = "polyglot-backend")]
+    StarRocks,
+    /// Apache Doris.
+    #[cfg(feature = "polyglot-backend")]
+    Doris,
+    /// TiDB.
+    #[cfg(feature = "polyglot-backend")]
+    TiDb,
+    /// Tableau.
+    #[cfg(feature = "polyglot-backend")]
+    Tableau,
+    /// Apache Solr.
+    #[cfg(feature = "polyglot-backend")]
+    Solr,
+    /// Dune Analytics.
+    #[cfg(feature = "polyglot-backend")]
+    Dune,
 }
 
 impl fmt::Display for Dialect {
@@ -29,14 +109,66 @@ impl fmt::Display for Dialect {
             Self::DuckDb => "DuckDB",
             Self::MsSql => "MSSQL",
             Self::Oracle => "Oracle",
+            #[cfg(feature = "polyglot-backend")]
+            Self::BigQuery => "BigQuery",
+            #[cfg(feature = "polyglot-backend")]
+            Self::Snowflake => "Snowflake",
+            #[cfg(feature = "polyglot-backend")]
+            Self::Databricks => "Databricks",
+            #[cfg(feature = "polyglot-backend")]
+            Self::Redshift => "Redshift",
+            #[cfg(feature = "polyglot-backend")]
+            Self::ClickHouse => "ClickHouse",
+            #[cfg(feature = "polyglot-backend")]
+            Self::Trino => "Trino",
+            #[cfg(feature = "polyglot-backend")]
+            Self::Presto => "Presto",
+            #[cfg(feature = "polyglot-backend")]
+            Self::Athena => "Athena",
+            #[cfg(feature = "polyglot-backend")]
+            Self::Hive => "Hive",
+            #[cfg(feature = "polyglot-backend")]
+            Self::Spark => "Spark",
+            #[cfg(feature = "polyglot-backend")]
+            Self::Teradata => "Teradata",
+            #[cfg(feature = "polyglot-backend")]
+            Self::Exasol => "Exasol",
+            #[cfg(feature = "polyglot-backend")]
+            Self::Fabric => "Fabric",
+            #[cfg(feature = "polyglot-backend")]
+            Self::Dremio => "Dremio",
+            #[cfg(feature = "polyglot-backend")]
+            Self::Drill => "Drill",
+            #[cfg(feature = "polyglot-backend")]
+            Self::Druid => "Druid",
+            #[cfg(feature = "polyglot-backend")]
+            Self::CockroachDb => "CockroachDB",
+            #[cfg(feature = "polyglot-backend")]
+            Self::Materialize => "Materialize",
+            #[cfg(feature = "polyglot-backend")]
+            Self::RisingWave => "RisingWave",
+            #[cfg(feature = "polyglot-backend")]
+            Self::SingleStore => "SingleStore",
+            #[cfg(feature = "polyglot-backend")]
+            Self::StarRocks => "StarRocks",
+            #[cfg(feature = "polyglot-backend")]
+            Self::Doris => "Doris",
+            #[cfg(feature = "polyglot-backend")]
+            Self::TiDb => "TiDB",
+            #[cfg(feature = "polyglot-backend")]
+            Self::Tableau => "Tableau",
+            #[cfg(feature = "polyglot-backend")]
+            Self::Solr => "Solr",
+            #[cfg(feature = "polyglot-backend")]
+            Self::Dune => "Dune",
         };
         write!(f, "{name}")
     }
 }
 
 impl Dialect {
-    /// All supported dialects.
-    pub const ALL: [Self; 6] = [
+    /// All supported dialects (core set).
+    pub const ALL_CORE: [Self; 6] = [
         Self::PostgreSql,
         Self::MySql,
         Self::Sqlite,
@@ -44,6 +176,47 @@ impl Dialect {
         Self::MsSql,
         Self::Oracle,
     ];
+
+    /// All supported dialects (including extended with polyglot-backend).
+    #[cfg(feature = "polyglot-backend")]
+    pub const ALL: [Self; 32] = [
+        Self::PostgreSql,
+        Self::MySql,
+        Self::Sqlite,
+        Self::DuckDb,
+        Self::MsSql,
+        Self::Oracle,
+        Self::BigQuery,
+        Self::Snowflake,
+        Self::Databricks,
+        Self::Redshift,
+        Self::ClickHouse,
+        Self::Trino,
+        Self::Presto,
+        Self::Athena,
+        Self::Hive,
+        Self::Spark,
+        Self::Teradata,
+        Self::Exasol,
+        Self::Fabric,
+        Self::Dremio,
+        Self::Drill,
+        Self::Druid,
+        Self::CockroachDb,
+        Self::Materialize,
+        Self::RisingWave,
+        Self::SingleStore,
+        Self::StarRocks,
+        Self::Doris,
+        Self::TiDb,
+        Self::Tableau,
+        Self::Solr,
+        Self::Dune,
+    ];
+
+    /// All supported dialects.
+    #[cfg(not(feature = "polyglot-backend"))]
+    pub const ALL: [Self; 6] = Self::ALL_CORE;
 
     /// Returns the `sqlparser` dialect implementation for
     /// parsing.

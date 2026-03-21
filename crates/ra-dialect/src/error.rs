@@ -23,6 +23,10 @@ pub enum TranslationError {
     /// The SQL statement type is not supported for translation.
     #[error("unsupported statement type: {0}")]
     UnsupportedStatement(String),
+
+    /// Transpilation failed in the backend.
+    #[error("transpilation failed: {0}")]
+    TranspilationFailed(String),
 }
 
 /// A warning generated during translation when the target

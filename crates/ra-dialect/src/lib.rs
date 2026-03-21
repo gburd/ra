@@ -43,12 +43,14 @@
 
 #![warn(missing_docs)]
 
+pub mod backends;
 pub mod dialect;
 pub mod error;
 pub mod functions;
 pub mod matrix;
 pub mod translator;
 
+pub use backends::{Backend, TranslationBackend};
 pub use dialect::{feature_support, Dialect, FeatureSupport, SqlFeature};
 pub use error::{TranslationError, TranslationWarning, WarningSeverity};
 pub use matrix::CompatibilityMatrix;

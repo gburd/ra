@@ -8,8 +8,8 @@ use sqlparser::ast::{
     self, Expr, FunctionArg, FunctionArgExpr, FunctionArguments, Ident, ObjectName, Query,
     SelectItem, SetExpr, Statement, Value,
 };
-use sqlparser::parser::Parser;
 
+use crate::backends::{Backend, TranslationBackend};
 use crate::dialect::Dialect;
 use crate::error::{TranslationError, TranslationWarning, WarningSeverity};
 use crate::functions::build_function_map;
@@ -131,6 +131,7 @@ pub struct DialectTranslator {
     target: Dialect,
     source_version: DialectVersion,
     target_version: DialectVersion,
+    backend: TranslationBackend,
 }
 
 impl DialectTranslator {
@@ -142,6 +143,23 @@ impl DialectTranslator {
             target,
             source_version: DialectVersion::latest(source),
             target_version: DialectVersion::latest(target),
+            backend: TranslationBackend::default(),
+        }
+    }
+
+    /// Create a translator with a specific backend.
+    #[must_use]
+    pub fn with_backend(
+        source: Dialect,
+        target: Dialect,
+        backend: TranslationBackend,
+    ) -> Self {
+        Self {
+            source,
+            target,
+            source_version: DialectVersion::latest(source),
+            target_version: DialectVersion::latest(target),
+            backend,
         }
     }
 
@@ -156,6 +174,7 @@ impl DialectTranslator {
             target: target.dialect,
             source_version: source,
             target_version: target,
+            backend: TranslationBackend::default(),
         }
     }
 
@@ -183,6 +202,12 @@ impl DialectTranslator {
         &self.target_version
     }
 
+    /// Get the current backend.
+    #[must_use]
+    pub fn backend(&self) -> TranslationBackend {
+        self.backend
+    }
+
     /// Translate a SQL string from the source dialect to the
     /// target dialect.
     ///
@@ -191,21 +216,18 @@ impl DialectTranslator {
     /// Returns `TranslationError` if parsing fails or the SQL
     /// contains unsupported constructs.
     pub fn translate(&self, sql: &str) -> Result<TranslationResult, TranslationError> {
-        let dialect = self.source.sqlparser_dialect();
-        let statements = Parser::parse_sql(&*dialect, sql)?;
+        // Delegate to the configured backend
+        let backend_impl: Box<dyn Backend> = match self.backend {
+            TranslationBackend::Native => {
+                Box::new(crate::backends::native::NativeBackend)
+            }
+            #[cfg(feature = "polyglot-backend")]
+            TranslationBackend::Polyglot => {
+                Box::new(crate::backends::polyglot_backend::PolyglotBackend)
+            }
+        };
 
-        let mut warnings = Vec::new();
-        let mut translated = Vec::new();
-
-        for stmt in statements {
-            let rewritten = self.translate_statement(stmt, &mut warnings)?;
-            translated.push(rewritten.to_string());
-        }
-
-        Ok(TranslationResult {
-            sql: translated.join(";\n"),
-            warnings,
-        })
+        backend_impl.translate(sql, self.source, self.target)
     }
 
     fn translate_statement(
