@@ -845,4 +845,285 @@ mod tests {
         assert!(index.contains_key("r1"));
         assert!(index.contains_key("r2"));
     }
+
+    // ---- parse_rra_file tests ----
+
+    fn write_temp_rra(
+        dir: &std::path::Path,
+        name: &str,
+        content: &str,
+    ) -> std::path::PathBuf {
+        let path = dir.join(name);
+        fs::write(&path, content).unwrap();
+        path
+    }
+
+    #[test]
+    fn parse_rra_file_valid() {
+        let dir = std::env::temp_dir().join(
+            format!("ra_test_rra_{}", std::process::id()),
+        );
+        fs::create_dir_all(&dir).unwrap();
+
+        let rra = write_temp_rra(
+            &dir,
+            "test_rule.rra",
+            "---\n\
+             id: push-filter\n\
+             name: Push Filter Down\n\
+             category: logical/predicate-pushdown\n\
+             databases:\n\
+               - postgresql\n\
+             ---\n\
+             # Push filter below join\n\
+             This rule pushes filters.\n",
+        );
+
+        let result = parse_rra_file(&rra);
+        assert!(result.is_ok(), "{:?}", result.err());
+        let parsed = result.unwrap();
+        assert_eq!(parsed.metadata.id, "push-filter");
+        assert_eq!(parsed.metadata.name, "Push Filter Down");
+        assert_eq!(
+            parsed.metadata.category,
+            "logical/predicate-pushdown",
+        );
+        assert_eq!(
+            parsed.metadata.databases,
+            vec!["postgresql"],
+        );
+        assert!(parsed.content.contains("Push filter"));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn parse_rra_file_missing_frontmatter() {
+        let dir = std::env::temp_dir().join(
+            format!("ra_test_nofm_{}", std::process::id()),
+        );
+        fs::create_dir_all(&dir).unwrap();
+
+        let rra = write_temp_rra(
+            &dir,
+            "bad.rra",
+            "No frontmatter here, just content.",
+        );
+
+        let result = parse_rra_file(&rra);
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("Invalid .rra file format"),
+            "got: {msg}",
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn parse_rra_file_invalid_yaml() {
+        let dir = std::env::temp_dir().join(
+            format!("ra_test_badyml_{}", std::process::id()),
+        );
+        fs::create_dir_all(&dir).unwrap();
+
+        let rra = write_temp_rra(
+            &dir,
+            "bad_yaml.rra",
+            "---\n\
+             [invalid yaml content\n\
+             ---\n\
+             body\n",
+        );
+
+        let result = parse_rra_file(&rra);
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("Failed to parse YAML"),
+            "got: {msg}",
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn parse_rra_file_nonexistent() {
+        let path =
+            std::path::Path::new("/tmp/nonexistent_rule.rra");
+        let result = parse_rra_file(path);
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("Failed to read rule file"),
+            "got: {msg}",
+        );
+    }
+
+    // ---- load_rules_from_directory tests ----
+
+    #[test]
+    fn load_rules_nonexistent_dir_returns_empty() {
+        let dir =
+            std::path::Path::new("/tmp/nonexistent_rules_dir");
+        let result = load_rules_from_directory(dir);
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
+
+    #[test]
+    fn load_rules_from_dir_with_valid_rra() {
+        let dir = std::env::temp_dir().join(
+            format!("ra_test_loaddir_{}", std::process::id()),
+        );
+        fs::create_dir_all(&dir).unwrap();
+
+        write_temp_rra(
+            &dir,
+            "rule1.rra",
+            "---\n\
+             id: rule-one\n\
+             name: Rule One\n\
+             category: logical\n\
+             ---\n\
+             Content one.\n",
+        );
+
+        write_temp_rra(
+            &dir,
+            "rule2.rra",
+            "---\n\
+             id: rule-two\n\
+             name: Rule Two\n\
+             category: physical\n\
+             ---\n\
+             Content two.\n",
+        );
+
+        // Non-rra file should be ignored
+        write_temp_rra(
+            &dir,
+            "notes.txt",
+            "Not a rule file.",
+        );
+
+        let result = load_rules_from_directory(&dir);
+        assert!(result.is_ok(), "{:?}", result.err());
+        let rules = result.unwrap();
+        assert_eq!(rules.len(), 2);
+
+        let ids: Vec<&str> =
+            rules.iter().map(|r| r.metadata.id.as_str()).collect();
+        assert!(ids.contains(&"rule-one"));
+        assert!(ids.contains(&"rule-two"));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_rules_skips_malformed_rra() {
+        let dir = std::env::temp_dir().join(
+            format!("ra_test_malformed_{}", std::process::id()),
+        );
+        fs::create_dir_all(&dir).unwrap();
+
+        write_temp_rra(
+            &dir,
+            "good.rra",
+            "---\n\
+             id: good-rule\n\
+             name: Good Rule\n\
+             category: logical\n\
+             ---\n\
+             Good content.\n",
+        );
+
+        write_temp_rra(
+            &dir,
+            "bad.rra",
+            "no frontmatter at all",
+        );
+
+        let result = load_rules_from_directory(&dir);
+        assert!(result.is_ok());
+        let rules = result.unwrap();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].metadata.id, "good-rule");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_rules_recursive_subdirectory() {
+        let dir = std::env::temp_dir().join(
+            format!("ra_test_recursive_{}", std::process::id()),
+        );
+        let subdir = dir.join("subdir");
+        fs::create_dir_all(&subdir).unwrap();
+
+        write_temp_rra(
+            &dir,
+            "top.rra",
+            "---\n\
+             id: top-rule\n\
+             name: Top Rule\n\
+             category: logical\n\
+             ---\n\
+             Top.\n",
+        );
+
+        write_temp_rra(
+            &subdir,
+            "nested.rra",
+            "---\n\
+             id: nested-rule\n\
+             name: Nested Rule\n\
+             category: physical\n\
+             ---\n\
+             Nested.\n",
+        );
+
+        let result = load_rules_from_directory(&dir);
+        assert!(result.is_ok());
+        let rules = result.unwrap();
+        assert_eq!(rules.len(), 2);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // ---- parse_rra_file with preconditions ----
+
+    #[test]
+    fn parse_rra_file_with_preconditions() {
+        let dir = std::env::temp_dir().join(
+            format!("ra_test_precond_{}", std::process::id()),
+        );
+        fs::create_dir_all(&dir).unwrap();
+
+        let rra = write_temp_rra(
+            &dir,
+            "precond.rra",
+            "\
+---
+id: gpu-rule
+name: GPU Rule
+category: physical
+preconditions:
+  - type: hardware
+    requirement: GPU acceleration
+    description: Needs GPU
+  - type: database
+    system: postgresql
+    description: PG only
+---
+GPU optimization rule.
+",
+        );
+
+        let parsed = parse_rra_file(&rra).unwrap();
+        assert_eq!(parsed.metadata.preconditions.len(), 2);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
 }
