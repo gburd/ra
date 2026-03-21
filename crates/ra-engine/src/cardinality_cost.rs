@@ -35,13 +35,22 @@ impl StatisticsProvider for TableStatsProvider {
 /// 2. Scales the base cost by the estimated cardinality
 /// 3. Uses hardware-aware cost factors
 pub struct CardinalityAwareCostFn {
-    /// Cardinality estimator (ML or heuristic)
+    /// Cardinality estimator (ML or heuristic).
+    /// Read by tests; will be wired into `cost()` once
+    /// cardinality scaling is implemented.
+    #[allow(dead_code)]
     estimator: Arc<dyn CardinalityEstimator>,
-    /// Statistics provider for base table stats
+    /// Statistics provider for base table stats.
+    /// Read by tests; will be wired into `cost()` once
+    /// cardinality scaling is implemented.
+    #[allow(dead_code)]
     stats_provider: Arc<TableStatsProvider>,
     /// Hardware profile for cost adjustments
     hardware: HardwareProfile,
-    /// Staleness adjustments per table
+    /// Staleness adjustments per table.
+    /// Read by tests via `staleness_factor()`; will be wired
+    /// into `cost()` once cardinality scaling is implemented.
+    #[allow(dead_code)]
     staleness_map: HashMap<String, Staleness>,
 }
 
@@ -64,6 +73,9 @@ impl CardinalityAwareCostFn {
     }
 
     /// Get staleness factor for a table.
+    /// Used by tests; will be called from `cost()` once
+    /// cardinality scaling is implemented.
+    #[allow(dead_code)]
     fn staleness_factor(&self, table: &str) -> f64 {
         self.staleness_map
             .get(table)

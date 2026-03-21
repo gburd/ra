@@ -23,7 +23,7 @@ pub use postgres::PostgresAdapter;
 pub use stoolap::StoolapAdapter;
 
 /// Errors that can occur during database adapter operations.
-#[derive(Debug, Error)]
+#[derive(Debug, PartialEq, Error)]
 pub enum AdapterError {
     /// Failed to connect to the database.
     #[error("Connection failed: {0}")]

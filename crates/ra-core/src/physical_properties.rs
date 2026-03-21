@@ -108,9 +108,7 @@ pub fn derive_properties(
         }
 
         // Bitmap scans don't provide ordering guarantees
-        RelExpr::IndexScan { .. }
-        | RelExpr::IndexOnlyScan { .. }
-        | RelExpr::BitmapIndexScan { .. }
+        RelExpr::BitmapIndexScan { .. }
         | RelExpr::BitmapAnd { .. }
         | RelExpr::BitmapOr { .. }
         | RelExpr::BitmapHeapScan { .. } => PropertySet::new(),

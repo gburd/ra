@@ -76,7 +76,7 @@ fn translate_query(
     let mut warnings = Vec::new();
 
     // Handle LIMIT/OFFSET translation
-    if let Some(limit) = &query.limit {
+    if let Some(_limit) = &query.limit {
         if !target.supports_limit() {
             // Convert to FETCH for dialects that don't support LIMIT
             if target.supports_fetch() {

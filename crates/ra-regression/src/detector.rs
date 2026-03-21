@@ -2,7 +2,7 @@
 
 use crate::{
     fingerprint::PlanFingerprint,
-    history::{CostHistory, QueryEntry},
+    history::CostHistory,
     RegressionConfig,
 };
 use std::fmt;

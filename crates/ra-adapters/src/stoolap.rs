@@ -10,11 +10,9 @@
 //! ra-adapters = { workspace = true, features = ["stoolap"] }
 //! ```
 
-use crate::{
-    AdapterError, ColumnInfo, DatabaseAdapter,
-    DatabaseCapabilities, ForeignKeyInfo, IndexInfo, SchemaInfo,
-    TableInfo,
-};
+use crate::{AdapterError, DatabaseAdapter, DatabaseCapabilities, SchemaInfo};
+#[cfg(feature = "stoolap")]
+use crate::{ColumnInfo, IndexInfo, TableInfo};
 use ra_core::{FactsProvider, SqlDialect};
 use ra_stats::types::{ColumnStats, TableStats};
 use std::collections::HashMap;
@@ -177,7 +175,12 @@ impl StoolapAdapter {
     fn build_features() -> HashMap<String, bool> {
         StoolapFacts::default_features()
     }
+}
 
+// Type-conversion utilities used by the stoolap feature and
+// exercised directly by unit tests.
+#[allow(dead_code)]
+impl StoolapAdapter {
     /// Convert `ra_stats::types::TableStats` to
     /// `ra_core::CoreTableStats`.
     fn to_core_table_stats(
