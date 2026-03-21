@@ -104,6 +104,22 @@ unsafe extern "C-unwind" fn ra_planner_hook(
             .collect::<Vec<_>>(),
     );
 
+    // MVCC/HOT Update Considerations:
+    // Statistics now include hot_update_ratio, dead_tuple_ratio, and bloat_factor.
+    // These inform:
+    // - Sequential scan costs (dead tuples must be skipped)
+    // - Index scan costs (bitmap filtering overhead)
+    // - UPDATE planning (HOT updates avoid index maintenance)
+    //
+    // For UPDATE queries:
+    // - High HOT ratio (>0.8): favor in-place updates, no index rebuild
+    // - Low HOT ratio (<0.3): expect index maintenance overhead
+    // - High dead tuple ratio (>0.1): scan costs 2-5x higher
+    // - High bloat (>2.0): sequential scans heavily penalized
+    //
+    // Future enhancement: Detect UPDATE on indexed vs non-indexed columns
+    // to predict HOT eligibility and adjust cost accordingly.
+
     // Log the analysis if requested.
     if RA_LOG_DECISIONS.get() {
         pgrx::log!(

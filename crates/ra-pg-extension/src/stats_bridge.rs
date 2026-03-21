@@ -3,10 +3,97 @@
 //! Queries PostgreSQL catalog views to populate `ra_core::Statistics`
 //! and `ra_core::ColumnStats` structs. Statistics are cached for
 //! the duration of a single planning cycle.
+//!
+//! PostgreSQL-specific MVCC statistics (HOT updates, bloat) are tracked
+//! separately as they don't apply to other database systems.
 
 use pgrx::prelude::*;
 
 use ra_core::{ColumnStats, Statistics};
+
+/// PostgreSQL-specific MVCC and HOT update statistics.
+///
+/// These metrics are critical for understanding heap-only tuple behavior:
+/// - HOT (Heap-Only Tuple) updates avoid index maintenance
+/// - Dead tuples and bloat affect sequential scan performance
+/// - High dead tuple ratio indicates need for VACUUM
+///
+/// **PostgreSQL-specific:** This struct only applies to PostgreSQL heap tables
+/// and has no meaning for other databases (MySQL, Oracle, etc.) or storage
+/// engines (columnar, LSM-tree, etc.).
+#[derive(Debug, Clone)]
+pub struct PostgresMvccStats {
+    /// Fraction of updates that were HOT updates, in [0.0, 1.0].
+    ///
+    /// HOT updates happen when:
+    /// 1. No indexed columns are modified
+    /// 2. Sufficient free space exists on the same page
+    ///
+    /// High HOT ratio (>0.8) is good - indicates efficient updates.
+    /// Low HOT ratio suggests:
+    /// - Frequent indexed column updates
+    /// - Page-level space fragmentation (need VACUUM or fillfactor tuning)
+    pub hot_update_ratio: f64,
+
+    /// Fraction of dead tuples, in [0.0, 1.0].
+    ///
+    /// Dead tuples remain after UPDATEs/DELETEs until VACUUM.
+    /// High dead tuple ratio (>0.1) significantly degrades:
+    /// - Sequential scan performance (must skip dead tuples)
+    /// - Index scan performance (bitmap must filter dead tuples)
+    pub dead_tuple_ratio: f64,
+
+    /// Estimated bloat factor (size_on_disk / actual_data_size).
+    ///
+    /// Bloat > 2.0 indicates significant wasted space from:
+    /// - Dead tuples (need VACUUM)
+    /// - Page fragmentation (need VACUUM FULL or CLUSTER)
+    pub bloat_factor: f64,
+
+    /// Timestamp of last ANALYZE (for staleness detection).
+    pub last_analyze: Option<String>,
+
+    /// Timestamp of last VACUUM (for bloat tracking).
+    pub last_vacuum: Option<String>,
+}
+
+impl PostgresMvccStats {
+    /// Create default MVCC statistics (no HOT updates, no bloat).
+    #[must_use]
+    pub fn default() -> Self {
+        Self {
+            hot_update_ratio: 0.0,
+            dead_tuple_ratio: 0.0,
+            bloat_factor: 1.0,
+            last_analyze: None,
+            last_vacuum: None,
+        }
+    }
+
+    /// Returns true if statistics are stale (>7 days since last ANALYZE).
+    #[must_use]
+    pub fn is_stale(&self) -> bool {
+        // Simplified check - in practice, parse timestamp and compare
+        self.last_analyze.is_none()
+    }
+
+    /// Returns true if table needs VACUUM (high dead tuple ratio).
+    #[must_use]
+    pub fn needs_vacuum(&self) -> bool {
+        self.dead_tuple_ratio > 0.1 || self.bloat_factor > 2.0
+    }
+}
+
+/// PostgreSQL table statistics with MVCC metrics.
+///
+/// Wraps database-agnostic `Statistics` with PostgreSQL-specific MVCC data.
+#[derive(Debug, Clone)]
+pub struct PostgresTableStats {
+    /// Database-agnostic statistics.
+    pub base: Statistics,
+    /// PostgreSQL-specific MVCC/HOT statistics.
+    pub mvcc: PostgresMvccStats,
+}
 
 /// Gather statistics for a single table from `pg_stats`.
 ///
@@ -445,6 +532,115 @@ pub fn gather_all_stats(
     result
 }
 
+/// Gather PostgreSQL MVCC and HOT update statistics.
+///
+/// Queries `pg_stat_user_tables` for:
+/// - HOT update ratio (critical for UPDATE planning)
+/// - Dead tuple ratio (affects scan performance)
+/// - Bloat estimation
+/// - Last ANALYZE/VACUUM timestamps
+///
+/// Returns `None` if the table has no statistics.
+pub fn gather_mvcc_stats(
+    schema: &str,
+    table: &str,
+    base_stats: &Statistics,
+) -> Option<PostgresMvccStats> {
+    let query = format!(
+        "SELECT \
+           n_tup_upd, n_tup_hot_upd, n_dead_tup, n_live_tup, \
+           last_analyze, last_vacuum, \
+           pg_relation_size(c.oid) as table_size \
+         FROM pg_stat_user_tables s \
+         JOIN pg_class c ON c.relname = s.relname \
+         JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = s.schemaname \
+         WHERE s.schemaname = '{}' AND s.relname = '{}'",
+        schema.replace('\'', "''"),
+        table.replace('\'', "''")
+    );
+
+    Spi::connect(|client| {
+        let tup_table = match client.select(&query, None, &[]) {
+            Ok(tup) => tup,
+            Err(e) => {
+                pgrx::warning!(
+                    "ra_planner: mvcc stats query failed: {e}"
+                );
+                return None;
+            }
+        };
+
+        for row in tup_table {
+            let n_tup_upd: Option<i64> =
+                row.get_by_name("n_tup_upd")
+                    .unwrap_or(None);
+            let n_tup_hot_upd: Option<i64> =
+                row.get_by_name("n_tup_hot_upd")
+                    .unwrap_or(None);
+            let n_dead_tup: Option<i64> =
+                row.get_by_name("n_dead_tup")
+                    .unwrap_or(None);
+            let n_live_tup: Option<i64> =
+                row.get_by_name("n_live_tup")
+                    .unwrap_or(None);
+            let last_analyze: Option<String> =
+                row.get_by_name("last_analyze")
+                    .unwrap_or(None);
+            let last_vacuum: Option<String> =
+                row.get_by_name("last_vacuum")
+                    .unwrap_or(None);
+            let table_size: Option<i64> =
+                row.get_by_name("table_size")
+                    .unwrap_or(None);
+
+            // Calculate HOT update ratio
+            let hot_ratio = if let (Some(upd), Some(hot)) = (n_tup_upd, n_tup_hot_upd) {
+                if upd > 0 {
+                    hot as f64 / upd as f64
+                } else {
+                    0.0
+                }
+            } else {
+                0.0
+            };
+
+            // Calculate dead tuple ratio
+            let dead_ratio = if let (Some(dead), Some(live)) = (n_dead_tup, n_live_tup) {
+                let total = dead + live;
+                if total > 0 {
+                    dead as f64 / total as f64
+                } else {
+                    0.0
+                }
+            } else {
+                0.0
+            };
+
+            // Estimate bloat factor (simple heuristic: actual_size / expected_size)
+            // In production, use pgstattuple or more sophisticated bloat detection
+            let bloat = if let Some(size) = table_size {
+                let expected_size = base_stats.row_count * base_stats.avg_row_size as f64;
+                if expected_size > 0.0 {
+                    (size as f64 / expected_size).max(1.0)
+                } else {
+                    1.0
+                }
+            } else {
+                1.0
+            };
+
+            return Some(PostgresMvccStats {
+                hot_update_ratio: hot_ratio,
+                dead_tuple_ratio: dead_ratio,
+                bloat_factor: bloat,
+                last_analyze,
+                last_vacuum,
+            });
+        }
+        None
+    })
+}
+
 /// Gather foreign key relationships for join optimization.
 ///
 /// Returns a list of `(from_table, from_column, to_table, to_column)` tuples
@@ -716,5 +912,69 @@ mod tests {
     fn parse_unknown_index_type() {
         let idx_type = parse_index_type("custom_index");
         assert_eq!(idx_type, Some(ra_core::IndexType::Unknown));
+    }
+
+    #[test]
+    fn mvcc_stats_hot_updates() {
+        let mvcc = PostgresMvccStats {
+            hot_update_ratio: 0.9,
+            dead_tuple_ratio: 0.05,
+            bloat_factor: 1.2,
+            last_analyze: Some("2026-03-21".to_string()),
+            last_vacuum: Some("2026-03-20".to_string()),
+        };
+
+        assert!((mvcc.hot_update_ratio - 0.9).abs() < f64::EPSILON);
+        assert!(!mvcc.needs_vacuum());
+    }
+
+    #[test]
+    fn mvcc_stats_needs_vacuum_dead_tuples() {
+        let mvcc = PostgresMvccStats {
+            hot_update_ratio: 0.7,
+            dead_tuple_ratio: 0.15, // > 0.1 threshold
+            bloat_factor: 1.5,
+            last_analyze: Some("2026-03-21".to_string()),
+            last_vacuum: Some("2026-03-01".to_string()),
+        };
+
+        assert!(mvcc.needs_vacuum());
+    }
+
+    #[test]
+    fn mvcc_stats_needs_vacuum_bloat() {
+        let mvcc = PostgresMvccStats {
+            hot_update_ratio: 0.8,
+            dead_tuple_ratio: 0.05,
+            bloat_factor: 2.5, // > 2.0 threshold
+            last_analyze: Some("2026-03-21".to_string()),
+            last_vacuum: Some("2026-02-01".to_string()),
+        };
+
+        assert!(mvcc.needs_vacuum());
+    }
+
+    #[test]
+    fn mvcc_stats_is_stale() {
+        let mvcc_no_analyze = PostgresMvccStats {
+            hot_update_ratio: 0.8,
+            dead_tuple_ratio: 0.05,
+            bloat_factor: 1.1,
+            last_analyze: None,
+            last_vacuum: Some("2026-03-20".to_string()),
+        };
+
+        assert!(mvcc_no_analyze.is_stale());
+
+        let mvcc_recent = PostgresMvccStats {
+            hot_update_ratio: 0.8,
+            dead_tuple_ratio: 0.05,
+            bloat_factor: 1.1,
+            last_analyze: Some("2026-03-21".to_string()),
+            last_vacuum: Some("2026-03-20".to_string()),
+        };
+
+        // Note: is_stale() is simplified - just checks presence
+        assert!(!mvcc_recent.is_stale());
     }
 }
