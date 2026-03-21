@@ -240,12 +240,10 @@ unsafe fn try_optimize_query(
 ///
 /// Returns Ok(None) for unsupported query types (DDL, utility statements).
 unsafe fn parse_query_to_relexpr(
-    _parse: *mut pg_sys::Query,
+    parse: *mut pg_sys::Query,
     _sql: &str,
 ) -> Result<Option<ra_core::algebra::RelExpr>, String> {
-    // TODO: Implement full query parsing.
-    // For now, return None to indicate unsupported.
-    Ok(None)
+    crate::query_parser::parse(parse)
 }
 
 /// Run RA optimizer on a RelExpr.

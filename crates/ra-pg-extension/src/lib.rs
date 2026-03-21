@@ -15,18 +15,25 @@ mod extension_state;
 mod pg_constants;
 mod plan_converter;
 mod planner_hook;
+mod query_parser;
 mod stats_bridge;
 
 pgrx::pg_module_magic!();
 
 /// Extension initialization -- called when the shared library is loaded.
 ///
-/// Registers GUC variables and planner hooks.
+/// Registers GUC variables, detects hardware, and registers planner hooks.
 #[allow(non_snake_case)]
 #[pg_guard]
 pub extern "C-unwind" fn _PG_init() {
-    planner_hook::register_hooks();
+    // Detect hardware capabilities for adaptive planning
+    extension_state::init_hardware_profile();
+
+    // Register configuration variables
     extension_state::register_gucs();
+
+    // Hook into PostgreSQL planner
+    planner_hook::register_hooks();
 }
 
 #[cfg(any(test, feature = "pg_test"))]
