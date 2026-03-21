@@ -259,9 +259,7 @@ impl FederatedOptimizer {
             | RelExpr::ParallelScan { .. }
             | RelExpr::ParallelHashJoin { .. }
             | RelExpr::ParallelAggregate { .. }
-            | RelExpr::Gather { .. }
-            | RelExpr::IndexScan { .. }
-            | RelExpr::IndexOnlyScan { .. } => false,
+            | RelExpr::Gather { .. } => false,
         }
     }
 

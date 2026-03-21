@@ -490,4 +490,71 @@ mod tests {
         assert!(!facts.has_index("users", &["id"], None));
         assert!(!facts.has_index("users", &["id"], Some(IndexType::BTree)));
     }
+
+    struct SchemaFacts {
+        inner: EmptyFactsProvider,
+        schemas: Vec<TableInfo>,
+    }
+    impl SchemaFacts {
+        fn with_table(info: TableInfo) -> Self {
+            Self { inner: EmptyFactsProvider::new(), schemas: vec![info] }
+        }
+    }
+    impl FactsProvider for SchemaFacts {
+        fn get_table_stats(&self, t: &str) -> Option<&TableStats> { self.inner.get_table_stats(t) }
+        fn get_column_stats(&self, t: &str, c: &str) -> Option<&ColumnStats> { self.inner.get_column_stats(t, c) }
+        fn hardware_profile(&self) -> &HardwareProfile { self.inner.hardware_profile() }
+        fn get_schema(&self, table: &str) -> Option<&TableInfo> { self.schemas.iter().find(|s| s.name == table) }
+        fn runtime_stats(&self, id: &str) -> Option<&OperatorStats> { self.inner.runtime_stats(id) }
+        fn database_name(&self) -> &str { self.inner.database_name() }
+        fn supports_feature(&self, f: &str) -> bool { self.inner.supports_feature(f) }
+        fn sql_dialect(&self) -> SqlDialect { self.inner.sql_dialect() }
+        fn memory_limit(&self) -> Option<u64> { self.inner.memory_limit() }
+        fn optimizer_timeout(&self) -> Duration { self.inner.optimizer_timeout() }
+    }
+
+    #[test]
+    fn empty_facts_no_covering_indexes() {
+        let facts = EmptyFactsProvider::new();
+        assert!(!facts.has_covering_index("orders", &["id", "amount"]));
+        assert!(facts.get_covering_indexes("orders", &["id"]).is_empty());
+    }
+
+    #[test]
+    fn covering_index_with_key_columns() {
+        let facts = SchemaFacts::with_table(TableInfo {
+            name: "orders".to_string(),
+            columns: vec![("id".into(), DataType::Integer), ("customer_id".into(), DataType::Integer), ("amount".into(), DataType::Float)],
+            primary_key: vec!["id".into()],
+            foreign_keys: vec![],
+            indexes: vec![IndexInfo {
+                name: "idx_orders_cust_amt".into(),
+                index_type: IndexType::BTree,
+                columns: vec!["customer_id".into(), "amount".into()],
+                is_unique: false,
+                included_columns: vec![],
+            }],
+        });
+        assert!(facts.has_covering_index("orders", &["customer_id", "amount"]));
+        assert!(!facts.has_covering_index("orders", &["customer_id", "id"]));
+    }
+
+    #[test]
+    fn covering_index_with_included_columns() {
+        let facts = SchemaFacts::with_table(TableInfo {
+            name: "orders".to_string(),
+            columns: vec![("id".into(), DataType::Integer), ("customer_id".into(), DataType::Integer), ("order_date".into(), DataType::Timestamp)],
+            primary_key: vec!["id".into()],
+            foreign_keys: vec![],
+            indexes: vec![IndexInfo {
+                name: "idx_cust_incl_date".into(),
+                index_type: IndexType::BTree,
+                columns: vec!["customer_id".into()],
+                is_unique: false,
+                included_columns: vec!["order_date".into()],
+            }],
+        });
+        assert!(facts.has_covering_index("orders", &["customer_id", "order_date"]));
+        assert!(!facts.has_covering_index("orders", &["customer_id", "id"]));
+    }
 }

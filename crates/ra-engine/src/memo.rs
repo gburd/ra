@@ -276,21 +276,6 @@ fn hash_rel_expr(expr: &RelExpr, hasher: &mut impl std::hash::Hasher) {
             hash_rel_expr(input, hasher);
             workers.hash(hasher);
         }
-        RelExpr::IndexScan { table, column } => {
-            table.hash(hasher);
-            column.hash(hasher);
-        }
-        RelExpr::IndexOnlyScan {
-            table,
-            index,
-            columns,
-            predicate,
-        } => {
-            table.hash(hasher);
-            index.hash(hasher);
-            columns.len().hash(hasher);
-            hash_scalar_expr(predicate, hasher);
-        }
     }
 }
 

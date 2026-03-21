@@ -196,8 +196,7 @@ fn estimate_heuristic(
         RelExpr::Gather { input, .. } => {
             estimate_heuristic(input, stats)
         }
-        RelExpr::IndexScan { table, .. }
-        | RelExpr::IndexOnlyScan { table, .. } => stats
+        RelExpr::IndexScan { table, .. } => stats
             .get_statistics(table)
             .map_or(1.0, |s| s.row_count),
     }
