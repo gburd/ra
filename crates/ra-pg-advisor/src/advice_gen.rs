@@ -272,9 +272,7 @@ fn collect_join_order(expr: &RelExpr, out: &mut Vec<String>) {
                 collect_join_order(inp, out);
             }
         }
-        RelExpr::IndexScan { .. }
-        | RelExpr::IndexOnlyScan { .. }
-        | RelExpr::BitmapIndexScan { .. }
+        RelExpr::BitmapIndexScan { .. }
         | RelExpr::BitmapHeapScan { .. }
         | RelExpr::ParallelScan { .. } => {}
         RelExpr::BitmapAnd { inputs }
