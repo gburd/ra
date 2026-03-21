@@ -24,18 +24,10 @@ use crate::extension_state::{
     RaOptimizerState, RA_ENABLED, RA_LOG_DECISIONS,
     RA_MAX_RELATIONS, RA_MIN_CONFIDENCE,
 };
-use crate::plan_converter;
 use crate::stats_bridge;
 
 /// Saved pointer to the previous planner hook (for chaining).
-static mut PREV_PLANNER_HOOK: Option<
-    unsafe extern "C" fn(
-        parse: *mut pg_sys::Query,
-        query_string: *const std::ffi::c_char,
-        cursorOptions: i32,
-        boundParams: *mut pg_sys::ParamListInfoData,
-    ) -> *mut pg_sys::PlannedStmt,
-> = None;
+static mut PREV_PLANNER_HOOK: pg_sys::planner_hook_type = None;
 
 /// Register the planner hook on extension load.
 pub fn register_hooks() {
@@ -52,8 +44,7 @@ pub fn register_hooks() {
 /// Called by PostgreSQL's planner infrastructure with valid pointers
 /// to internal planner structures. Must chain to the previous hook
 /// or the standard planner.
-#[pg_guard]
-unsafe extern "C" fn ra_planner_hook(
+unsafe extern "C-unwind" fn ra_planner_hook(
     parse: *mut pg_sys::Query,
     query_string: *const std::ffi::c_char,
     cursor_options: i32,
@@ -181,6 +172,9 @@ unsafe fn count_rtable_entries(
 
 /// Extract table names from the Query's range table.
 ///
+/// Uses `pg_sys::list_nth` to traverse the array-based List and
+/// `pg_sys::get_rel_name` to resolve OIDs to names.
+///
 /// # Safety
 ///
 /// Caller must pass a valid `Query` pointer.
@@ -196,29 +190,26 @@ unsafe fn extract_rtable_names(
         return names;
     }
 
-    let length = (*rtable).length as usize;
-    let mut cell = (*rtable).head;
+    let length = (*rtable).length as i32;
 
-    for _ in 0..length {
-        if cell.is_null() {
-            break;
+    for i in 0..length {
+        let rte = pg_sys::list_nth(rtable, i)
+            as *mut pg_sys::RangeTblEntry;
+        if rte.is_null() {
+            continue;
         }
-        let rte = (*cell).ptr_value as *mut pg_sys::RangeTblEntry;
-        if !rte.is_null()
-            && (*rte).rtekind == pg_sys::RTEKind::RTE_RELATION
-        {
+        if (*rte).rtekind == pg_sys::RTEKind::RTE_RELATION {
             let relid = (*rte).relid;
             let rel_name = get_rel_name(relid);
             if let Some(name) = rel_name {
                 names.push(name);
             }
         }
-        cell = (*cell).next;
     }
     names
 }
 
-/// Look up a relation name by OID using SPI.
+/// Look up a relation name by OID.
 unsafe fn get_rel_name(relid: pg_sys::Oid) -> Option<String> {
     let name_ptr = pg_sys::get_rel_name(relid);
     if name_ptr.is_null() {

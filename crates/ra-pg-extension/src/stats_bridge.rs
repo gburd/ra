@@ -27,7 +27,7 @@ pub fn gather_table_stats(
 
     Spi::connect(|client| {
         let tup_table = client
-            .select(&query, None, None)
+            .select(&query, None, &[])
             .unwrap_or_else(|e| {
                 pgrx::warning!(
                     "ra_planner: pg_stats query failed: {e}"
@@ -84,7 +84,7 @@ fn estimate_row_count(
 
     Spi::connect(|client| {
         let tup_table = client
-            .select(&query, None, None)
+            .select(&query, None, &[])
             .unwrap_or_else(|e| {
                 pgrx::warning!(
                     "ra_planner: row count query failed: {e}"

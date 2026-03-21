@@ -4,12 +4,13 @@
 //! and manages per-query optimizer state that flows through the
 //! planner hooks.
 
-use pgrx::prelude::*;
+use pgrx::guc::{GucContext, GucFlags, GucRegistry, GucSetting};
 
 use ra_core::{Cost, RelExpr, Statistics};
 
 /// GUC: master switch (`ra_planner.enabled`).
-pub static RA_ENABLED: GucSetting<bool> = GucSetting::<bool>::new(true);
+pub static RA_ENABLED: GucSetting<bool> =
+    GucSetting::<bool>::new(true);
 
 /// GUC: minimum confidence to apply advice (`ra_planner.min_confidence`).
 ///
@@ -32,19 +33,19 @@ pub static RA_MAX_RELATIONS: GucSetting<i32> =
 /// Register all GUC variables with PostgreSQL.
 pub fn register_gucs() {
     GucRegistry::define_bool_guc(
-        "ra_planner.enabled",
-        "Enable or disable the RA planner extension.",
-        "When off, the extension hooks are still registered \
-         but immediately defer to the standard planner.",
+        c"ra_planner.enabled",
+        c"Enable or disable the RA planner extension.",
+        c"When off, the extension hooks are still registered \
+          but immediately defer to the standard planner.",
         &RA_ENABLED,
         GucContext::Userset,
         GucFlags::default(),
     );
 
     GucRegistry::define_float_guc(
-        "ra_planner.min_confidence",
-        "Minimum confidence threshold for applying advice.",
-        "Advice with confidence below this value is discarded.",
+        c"ra_planner.min_confidence",
+        c"Minimum confidence threshold for applying advice.",
+        c"Advice with confidence below this value is discarded.",
         &RA_MIN_CONFIDENCE,
         0.0,
         1.0,
@@ -53,19 +54,19 @@ pub fn register_gucs() {
     );
 
     GucRegistry::define_bool_guc(
-        "ra_planner.log_decisions",
-        "Log all RA planner decisions.",
-        "Writes optimizer decisions to the PostgreSQL log at \
-         LOG level.",
+        c"ra_planner.log_decisions",
+        c"Log all RA planner decisions.",
+        c"Writes optimizer decisions to the PostgreSQL log at \
+          LOG level.",
         &RA_LOG_DECISIONS,
         GucContext::Userset,
         GucFlags::default(),
     );
 
     GucRegistry::define_int_guc(
-        "ra_planner.max_relations",
-        "Maximum relations before fallback to PG planner.",
-        "Queries exceeding this join count skip RA optimization.",
+        c"ra_planner.max_relations",
+        c"Maximum relations before fallback to PG planner.",
+        c"Queries exceeding this join count skip RA optimization.",
         &RA_MAX_RELATIONS,
         1,
         100,

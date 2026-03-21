@@ -21,8 +21,9 @@ pgrx::pg_module_magic!();
 /// Extension initialization -- called when the shared library is loaded.
 ///
 /// Registers GUC variables and planner hooks.
+#[allow(non_snake_case)]
 #[pg_guard]
-pub extern "C" fn _PG_init() {
+pub extern "C-unwind" fn _PG_init() {
     planner_hook::register_hooks();
     extension_state::register_gucs();
 }

@@ -104,7 +104,7 @@ impl PlanAdviceSet {
                 }
                 ScanMethod::BitmapHeap => {
                     parts.push(format!(
-                        "SEQ_SCAN({})",
+                        "BITMAP_HEAP_SCAN({})",
                         sm.relation
                     ));
                 }
@@ -203,7 +203,57 @@ fn collect_advice(
                 method: ScanMethod::Sequential,
             });
         }
+        RelExpr::IndexScan { table, .. } => {
+            join_order.push(table.clone());
+            scan_methods.push(ScanAdvice {
+                relation: table.clone(),
+                method: ScanMethod::Index("auto".to_string()),
+            });
+        }
+        RelExpr::IndexOnlyScan {
+            table, index, ..
+        } => {
+            join_order.push(table.clone());
+            scan_methods.push(ScanAdvice {
+                relation: table.clone(),
+                method: ScanMethod::Index(index.clone()),
+            });
+        }
+        RelExpr::BitmapHeapScan {
+            table, bitmap, ..
+        } => {
+            join_order.push(table.clone());
+            scan_methods.push(ScanAdvice {
+                relation: table.clone(),
+                method: ScanMethod::BitmapHeap,
+            });
+            collect_advice(
+                bitmap,
+                join_order,
+                join_methods,
+                scan_methods,
+            );
+        }
+        RelExpr::BitmapIndexScan { .. }
+        | RelExpr::BitmapAnd { .. }
+        | RelExpr::BitmapOr { .. } => {
+            // Bitmap sub-plans are handled through
+            // BitmapHeapScan; nothing to extract here.
+        }
+        RelExpr::ParallelScan { table, .. } => {
+            join_order.push(table.clone());
+            scan_methods.push(ScanAdvice {
+                relation: table.clone(),
+                method: ScanMethod::Sequential,
+            });
+        }
         RelExpr::Join {
+            join_type,
+            left,
+            right,
+            ..
+        }
+        | RelExpr::ParallelHashJoin {
             join_type,
             left,
             right,
@@ -236,11 +286,14 @@ fn collect_advice(
         RelExpr::Filter { input, .. }
         | RelExpr::Project { input, .. }
         | RelExpr::Sort { input, .. }
+        | RelExpr::IncrementalSort { input, .. }
         | RelExpr::Limit { input, .. }
         | RelExpr::Distinct { input, .. }
         | RelExpr::Window { input, .. }
         | RelExpr::Aggregate { input, .. }
-        | RelExpr::RowPattern { input, .. } => {
+        | RelExpr::RowPattern { input, .. }
+        | RelExpr::ParallelAggregate { input, .. }
+        | RelExpr::Gather { input, .. } => {
             collect_advice(
                 input,
                 join_order,
@@ -295,12 +348,20 @@ fn first_relation_name(expr: &RelExpr) -> Option<String> {
         RelExpr::Scan { table, alias, .. } => {
             Some(alias.as_deref().unwrap_or(table).to_string())
         }
+        RelExpr::IndexScan { table, .. }
+        | RelExpr::IndexOnlyScan { table, .. }
+        | RelExpr::BitmapHeapScan { table, .. }
+        | RelExpr::ParallelScan { table, .. } => {
+            Some(table.clone())
+        }
         RelExpr::Filter { input, .. }
         | RelExpr::Project { input, .. }
-        | RelExpr::Distinct { input, .. } => {
+        | RelExpr::Distinct { input, .. }
+        | RelExpr::Gather { input, .. } => {
             first_relation_name(input)
         }
-        RelExpr::Join { left, .. } => {
+        RelExpr::Join { left, .. }
+        | RelExpr::ParallelHashJoin { left, .. } => {
             first_relation_name(left)
         }
         _ => None,
@@ -326,8 +387,12 @@ fn map_join_type(jt: JoinType) -> Option<JoinMethod> {
 /// Count the number of base relations in a `RelExpr` tree.
 pub fn count_relations(expr: &RelExpr) -> usize {
     match expr {
-        RelExpr::Scan { .. } => 1,
+        RelExpr::Scan { .. }
+        | RelExpr::IndexScan { .. }
+        | RelExpr::IndexOnlyScan { .. }
+        | RelExpr::ParallelScan { .. } => 1,
         RelExpr::Join { left, right, .. }
+        | RelExpr::ParallelHashJoin { left, right, .. }
         | RelExpr::Union { left, right, .. }
         | RelExpr::Intersect { left, right, .. }
         | RelExpr::Except { left, right, .. } => {
@@ -336,11 +401,14 @@ pub fn count_relations(expr: &RelExpr) -> usize {
         RelExpr::Filter { input, .. }
         | RelExpr::Project { input, .. }
         | RelExpr::Sort { input, .. }
+        | RelExpr::IncrementalSort { input, .. }
         | RelExpr::Limit { input, .. }
         | RelExpr::Distinct { input, .. }
         | RelExpr::Window { input, .. }
         | RelExpr::Aggregate { input, .. }
-        | RelExpr::RowPattern { input, .. } => {
+        | RelExpr::RowPattern { input, .. }
+        | RelExpr::ParallelAggregate { input, .. }
+        | RelExpr::Gather { input, .. } => {
             count_relations(input)
         }
         RelExpr::CTE {
@@ -356,12 +424,36 @@ pub fn count_relations(expr: &RelExpr) -> usize {
                 + count_relations(recursive_case)
                 + count_relations(body)
         }
+        RelExpr::BitmapHeapScan { bitmap, .. } => {
+            count_bitmap_relations(bitmap)
+        }
+        RelExpr::BitmapIndexScan { .. } => 1,
+        RelExpr::BitmapAnd { inputs }
+        | RelExpr::BitmapOr { inputs } => {
+            inputs.iter().map(|b| count_bitmap_relations(b)).sum()
+        }
         RelExpr::Unnest { input, .. }
         | RelExpr::TableFunction { input, .. } => {
             input.as_ref().map_or(0, |i| count_relations(i))
         }
         RelExpr::Values { .. }
         | RelExpr::MultiUnnest { .. } => 0,
+    }
+}
+
+/// Count relations in bitmap sub-plans (bitmap scans reference
+/// a single table, so we count each `BitmapIndexScan` as one).
+fn count_bitmap_relations(expr: &RelExpr) -> usize {
+    match expr {
+        RelExpr::BitmapIndexScan { .. } => 1,
+        RelExpr::BitmapAnd { inputs }
+        | RelExpr::BitmapOr { inputs } => {
+            inputs.iter().map(|b| count_bitmap_relations(b)).sum()
+        }
+        // BitmapHeapScan wraps a bitmap sub-plan, count 1 for
+        // the table itself.
+        RelExpr::BitmapHeapScan { .. } => 1,
+        _ => count_relations(expr),
     }
 }
 
@@ -382,10 +474,29 @@ fn collect_table_names(
     out: &mut Vec<String>,
 ) {
     match expr {
-        RelExpr::Scan { table, .. } => {
+        RelExpr::Scan { table, .. }
+        | RelExpr::IndexScan { table, .. }
+        | RelExpr::IndexOnlyScan { table, .. }
+        | RelExpr::ParallelScan { table, .. } => {
             out.push(table.clone());
         }
+        RelExpr::BitmapHeapScan {
+            table, bitmap, ..
+        } => {
+            out.push(table.clone());
+            collect_table_names(bitmap, out);
+        }
+        RelExpr::BitmapIndexScan { table, .. } => {
+            out.push(table.clone());
+        }
+        RelExpr::BitmapAnd { inputs }
+        | RelExpr::BitmapOr { inputs } => {
+            for bitmap in inputs {
+                collect_table_names(bitmap, out);
+            }
+        }
         RelExpr::Join { left, right, .. }
+        | RelExpr::ParallelHashJoin { left, right, .. }
         | RelExpr::Union { left, right, .. }
         | RelExpr::Intersect { left, right, .. }
         | RelExpr::Except { left, right, .. } => {
@@ -395,11 +506,14 @@ fn collect_table_names(
         RelExpr::Filter { input, .. }
         | RelExpr::Project { input, .. }
         | RelExpr::Sort { input, .. }
+        | RelExpr::IncrementalSort { input, .. }
         | RelExpr::Limit { input, .. }
         | RelExpr::Distinct { input, .. }
         | RelExpr::Window { input, .. }
         | RelExpr::Aggregate { input, .. }
-        | RelExpr::RowPattern { input, .. } => {
+        | RelExpr::RowPattern { input, .. }
+        | RelExpr::ParallelAggregate { input, .. }
+        | RelExpr::Gather { input, .. } => {
             collect_table_names(input, out);
         }
         RelExpr::CTE {
@@ -598,5 +712,28 @@ mod tests {
             scan_methods: vec![],
         };
         assert!(set.to_pg_hint_plan().is_empty());
+    }
+
+    #[test]
+    fn index_scan_produces_index_advice() {
+        let expr = RelExpr::IndexScan {
+            table: "orders".to_string(),
+            column: "id".to_string(),
+        };
+        let advice = extract_plan_advice(&expr);
+        assert_eq!(advice.scan_methods.len(), 1);
+        assert_eq!(
+            advice.scan_methods[0].method,
+            ScanMethod::Index("auto".to_string())
+        );
+    }
+
+    #[test]
+    fn parallel_scan_counted_as_relation() {
+        let expr = RelExpr::ParallelScan {
+            table: "big_table".to_string(),
+            workers: 4,
+        };
+        assert_eq!(count_relations(&expr), 1);
     }
 }
