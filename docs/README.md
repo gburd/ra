@@ -94,6 +94,18 @@ Database and system integrations:
 - **[Database Adapters](integrations/database-adapters.md)** - Connecting to various databases
 - **[Web UI](integrations/web-ui.md)** - Interactive query visualization
 
+### 📖 Encyclopedia
+
+Comprehensive reference for SQL patterns, schemas, and optimization:
+
+- **[SQL Query Encyclopedia](encyclopedia/)** - 50+ query patterns with relational algebra and optimization details
+  - **[Query Patterns](encyclopedia/query-patterns/)** - OLTP, OLAP, analytical, recursive, temporal, joins, subqueries
+  - **[Schema Patterns](encyclopedia/schema-patterns/)** - Star, snowflake, normalized, partitioned designs
+  - **[Dataset Characteristics](encyclopedia/dataset-characteristics/)** - Cardinality, distribution, skew, correlation
+  - **[Workload Patterns](encyclopedia/workload-patterns/)** - OLTP, OLAP, HTAP, batch, real-time
+  - **[Distributed Patterns](encyclopedia/distributed-patterns/)** - Shuffle joins, broadcast, co-located joins
+  - **[Index Structures](encyclopedia/index-structures/)** - B-tree, hash, bitmap, covering indexes
+
 ### 📝 Examples
 
 Practical demonstrations:
