@@ -13,7 +13,7 @@
 
 use ra_core::{JoinType, RelExpr};
 
-use crate::pg_constants::{guc_names, guc_tuning};
+use crate::pg_constants::{guc_names, guc_tuning, hardware_aware};
 
 /// A complete set of plan advice extracted from an RA `RelExpr`.
 #[derive(Debug, Clone)]
@@ -725,9 +725,11 @@ fn apply_advice_to_gucs(
         if want_seqscan > 0 || want_indexscan > 0 || want_bitmapscan > 0 {
             let total = want_seqscan + want_indexscan + want_bitmapscan;
 
-            // If we want index scans, reduce random_page_cost to favor them
+            // If we want index scans, use hardware-aware cost to favor them
             if want_indexscan > total / 2 {
-                set_guc_real(guc_names::RANDOM_PAGE_COST, guc_tuning::RANDOM_PAGE_COST_SSD);
+                // Use detected storage type (SSD=1.0, HDD=4.0)
+                let optimal_cost = hardware_aware::random_page_cost();
+                set_guc_real(guc_names::RANDOM_PAGE_COST, optimal_cost);
                 set_guc_bool(guc_names::ENABLE_INDEXSCAN, true);
                 set_guc_bool(guc_names::ENABLE_SEQSCAN, false);
             }

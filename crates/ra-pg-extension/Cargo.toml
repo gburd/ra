@@ -28,6 +28,7 @@ pg_test = []
 [dependencies]
 pgrx = "=0.17.0"
 ra-core = { path = "../ra-core" }
+ra-hardware = { path = "../ra-hardware" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tracing = "0.1"

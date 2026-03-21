@@ -4,9 +4,12 @@
 //! and manages per-query optimizer state that flows through the
 //! planner hooks.
 
+use std::sync::OnceLock;
+
 use pgrx::guc::{GucContext, GucFlags, GucRegistry, GucSetting};
 
 use ra_core::{Cost, RelExpr, Statistics};
+use ra_hardware::HardwareProfile;
 
 /// GUC: master switch (`ra_planner.enabled`).
 pub static RA_ENABLED: GucSetting<bool> =
@@ -29,6 +32,29 @@ pub static RA_LOG_DECISIONS: GucSetting<bool> =
 /// time in e-graph saturation. This limit triggers an early bail-out.
 pub static RA_MAX_RELATIONS: GucSetting<i32> =
     GucSetting::<i32>::new(12);
+
+/// Hardware profile detected at extension initialization.
+///
+/// Used to make hardware-aware planning decisions (SSD vs HDD,
+/// CPU cores for parallelism, available RAM for work_mem).
+static HARDWARE_PROFILE: OnceLock<HardwareProfile> = OnceLock::new();
+
+/// Get the detected hardware profile.
+///
+/// Returns the hardware profile detected during extension initialization.
+/// This information is used to adjust cost parameters and GUC values
+/// based on actual system capabilities.
+pub fn hardware_profile() -> &'static HardwareProfile {
+    HARDWARE_PROFILE.get().expect("Hardware profile not initialized")
+}
+
+/// Detect and store hardware profile.
+///
+/// Called once during extension initialization (_PG_init).
+pub fn init_hardware_profile() {
+    let profile = ra_hardware::detect_hardware();
+    HARDWARE_PROFILE.set(profile).expect("Hardware profile already initialized");
+}
 
 /// Register all GUC variables with PostgreSQL.
 pub fn register_gucs() {
