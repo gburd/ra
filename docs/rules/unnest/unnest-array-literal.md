@@ -42,20 +42,20 @@ at plan time avoids runtime array construction and element extraction.
 
 ```algebra
 -- Before
-unnest(array[1, 2, 3]) AS t(val)
+unnest(array[1, 2, 3]) AS t_result(val)
 
 -- After
-VALUES (1), (2), (3) AS t(val)
+VALUES (1), (2), (3) AS t_result(val)
 ```
 
 ### With ordinality
 
 ```algebra
 -- Before
-unnest(array['a', 'b', 'c']) WITH ORDINALITY AS t(val, ord)
+unnest(array['a', 'b', 'c']) WITH ORDINALITY AS t_result(val, ord)
 
 -- After
-VALUES ('a', 1), ('b', 2), ('c', 3) AS t(val, ord)
+VALUES ('a', 1), ('b', 2), ('c', 3) AS t_result(val, ord)
 ```
 
 ## Implementation
@@ -124,20 +124,20 @@ that an unnest operator blocks.
 
 ```sql
 -- Before
-SELECT * FROM unnest(array[1, 2, 3]) AS t(val);
+SELECT * FROM unnest(array[1, 2, 3]) AS t_result(val);
 
 -- After (internal)
-SELECT * FROM (VALUES (1), (2), (3)) AS t(val);
+SELECT * FROM (VALUES (1), (2), (3)) AS t_result(val);
 ```
 
 ### Positive: string array literal
 
 ```sql
 -- Before
-SELECT * FROM unnest(array['alpha', 'beta', 'gamma']) AS t(name);
+SELECT * FROM unnest(array['alpha', 'beta', 'gamma']) AS t_result(name);
 
 -- After (internal)
-SELECT * FROM (VALUES ('alpha'), ('beta'), ('gamma')) AS t(name);
+SELECT * FROM (VALUES ('alpha'), ('beta'), ('gamma')) AS t_result(name);
 ```
 
 ### Positive: used in join context
@@ -146,19 +146,19 @@ SELECT * FROM (VALUES ('alpha'), ('beta'), ('gamma')) AS t(name);
 -- Before
 SELECT e.name, t.tag
 FROM employees e
-JOIN unnest(array['senior', 'lead', 'staff']) AS t(tag) ON true;
+JOIN unnest(array['senior', 'lead', 'staff']) AS t_result(tag) ON true;
 
 -- After: VALUES can be hash-joined
 SELECT e.name, t.tag
 FROM employees e
-JOIN (VALUES ('senior'), ('lead'), ('staff')) AS t(tag) ON true;
+JOIN (VALUES ('senior'), ('lead'), ('staff')) AS t_result(tag) ON true;
 ```
 
 ### Negative: array contains column reference
 
 ```sql
 -- Cannot fold: array includes non-constant element
-SELECT * FROM unnest(array[1, t.id, 3]) AS u(val);
+SELECT * FROM unnest(array[1, t.id, 3]) AS u_result(val);
 
 -- t.id is not a compile-time constant.
 ```
@@ -167,7 +167,7 @@ SELECT * FROM unnest(array[1, t.id, 3]) AS u(val);
 
 ```sql
 -- Cannot fold: array is result of function, not literal
-SELECT * FROM unnest(string_to_array('a,b,c', ',')) AS u(val);
+SELECT * FROM unnest(string_to_array('a,b,c', ',')) AS u_result(val);
 
 -- string_to_array result is not known at compile time.
 ```

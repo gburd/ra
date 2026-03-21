@@ -53,10 +53,10 @@ unnest(array_filter(arr, lambda x. x > 10)) AS val
 
 ```algebra
 -- Before: filter on lateral unnest result
-sigma[u.elem > 10](R join_lateral unnest(R.arr) AS u(elem))
+sigma[u.elem > 10](R join_lateral unnest(R.arr) AS u_result(elem))
 
 -- After: filter array before unnest
-R join_lateral unnest(array_filter(R.arr, lambda x. x > 10)) AS u(elem)
+R join_lateral unnest(array_filter(R.arr, lambda x. x > 10)) AS u_result(elem)
 ```
 
 ## Implementation
@@ -137,7 +137,7 @@ a selective predicate (e.g., matching 1 of 100 elements), up to
 
 ```sql
 -- Before
-SELECT val FROM unnest(array[1, 5, 10, 20, 50]) AS t(val)
+SELECT val FROM unnest(array[1, 5, 10, 20, 50]) AS t_result(val)
 WHERE val > 10;
 
 -- After (internal representation)
@@ -150,12 +150,12 @@ WHERE val > 10;
 ```sql
 -- Before
 SELECT o.id, u.item
-FROM orders o, LATERAL unnest(o.items) AS u(item)
+FROM orders o, LATERAL unnest(o.items) AS u_result(item)
 WHERE u.item > 100;
 
 -- After
 SELECT o.id, u.item
-FROM orders o, LATERAL unnest(array_filter(o.items, lambda x. x > 100)) AS u(item);
+FROM orders o, LATERAL unnest(array_filter(o.items, lambda x. x > 100)) AS u_result(item);
 ```
 
 ### Negative: predicate references outer column
@@ -163,7 +163,7 @@ FROM orders o, LATERAL unnest(array_filter(o.items, lambda x. x > 100)) AS u(ite
 ```sql
 -- Cannot push: predicate involves both unnested and outer columns
 SELECT o.id, u.item
-FROM orders o, LATERAL unnest(o.items) AS u(item)
+FROM orders o, LATERAL unnest(o.items) AS u_result(item)
 WHERE u.item = o.min_price;
 
 -- Predicate references o.min_price (outer), so it cannot be
@@ -174,7 +174,7 @@ WHERE u.item = o.min_price;
 
 ```sql
 -- Cannot push: generate_series is not an array
-SELECT val FROM generate_series(1, 100) AS t(val)
+SELECT val FROM generate_series(1, 100) AS t_result(val)
 WHERE val > 50;
 
 -- generate_series is a streaming SRF, not a filterable array.

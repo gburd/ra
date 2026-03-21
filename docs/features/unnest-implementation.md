@@ -33,14 +33,14 @@ Error: unsupported SQL feature: unsupported table factor
 This occurs when parsing queries with table-valued functions like:
 
 ```sql
-SELECT * FROM unnest(array[1,2,3]) AS t(value);
-LEFT JOIN unnest(my_array_column) AS u(elem) ON elem = other_col;
+SELECT * FROM unnest(array[1,2,3]) AS t_result(value);
+LEFT JOIN unnest(my_array_column) AS u_result(elem) ON elem = other_col;
 ```
 
 ### Blocked Query Patterns
 
 1. **Array unnesting:** `SELECT * FROM unnest(array[1,2,3])`
-2. **Correlated unnest:** `SELECT t.*, u.* FROM t LEFT JOIN unnest(t.arr) AS u(val) ON ...`
+2. **Correlated unnest:** `SELECT t.*, u.* FROM t LEFT JOIN unnest(t.arr) AS u_result(val) ON ...`
 3. **Lateral joins:** `SELECT * FROM t, LATERAL unnest(t.arr)`
 4. **JSON expansion:** `SELECT * FROM json_array_elements('[1,2,3]')`
 5. **Series generation:** `SELECT * FROM generate_series(1, 10)`
@@ -495,7 +495,7 @@ Test SQL → RelExpr conversion:
 ```rust
 #[test]
 fn parse_unnest_array_literal() {
-    let sql = "SELECT * FROM unnest(array[1,2,3]) AS t(val)";
+    let sql = "SELECT * FROM unnest(array[1,2,3]) AS t_result(val)";
     let expr = parse_query(sql).unwrap();
 
     assert!(matches!(expr, RelExpr::Project { .. }));
@@ -876,11 +876,11 @@ UNNEST ... WITH ORDINALITY can use window function infrastructure.
 
 ```sql
 -- Before
-SELECT * FROM unnest(arr) WITH ORDINALITY AS t(val, ord)
+SELECT * FROM unnest(arr) WITH ORDINALITY AS t_result(val, ord)
 
 -- After (internal representation)
 SELECT val, ROW_NUMBER() OVER (ORDER BY val) AS ord
-FROM unnest(arr) AS t(val)
+FROM unnest(arr) AS t_result(val)
 ```
 ```
 
@@ -986,7 +986,7 @@ Decorrelate lateral unnest into regular join when possible.
 
 ```algebra
 -- Before (correlated)
-SELECT * FROM t1, LATERAL unnest(array[t1.id, t1.id+1]) AS u(val)
+SELECT * FROM t1, LATERAL unnest(array[t1.id, t1.id+1]) AS u_result(val)
 
 -- After (decorrelated)
 SELECT * FROM t1
@@ -1071,7 +1071,7 @@ PostgreSQL allows unnesting multiple arrays in parallel:
 SELECT * FROM unnest(
   ARRAY[1,2,3],
   ARRAY['a','b','c']
-) AS t(num, letter);
+) AS t_result(num, letter);
 ```
 
 **Deliverable:** 200 lines
@@ -1081,7 +1081,7 @@ SELECT * FROM unnest(
 Add ordinal column support:
 
 ```sql
-SELECT * FROM unnest(ARRAY[10,20,30]) WITH ORDINALITY AS t(val, ord);
+SELECT * FROM unnest(ARRAY[10,20,30]) WITH ORDINALITY AS t_result(val, ord);
 -- Result: (10,1), (20,2), (30,3)
 ```
 

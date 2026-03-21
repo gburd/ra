@@ -31,7 +31,7 @@ generate_series + LEFT JOIN patterns for time series visualization.
 ```algebra
 -- Before: generate_series + LEFT JOIN
 pi[bucket, COALESCE(val, prev_val)](
-    generate_series('2024-01-01', '2024-01-31', '1 hour') AS g(bucket)
+    generate_series('2024-01-01', '2024-01-31', '1 hour') AS g_result(bucket)
     LEFT JOIN
     gamma[time_bucket('1h', ts); AVG(val)](data) AS d
     ON g.bucket = d.bucket

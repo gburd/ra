@@ -105,7 +105,7 @@ fn estimated_benefit(
 -- Positive: UNNEST of correlated array
 SELECT e.name, u.skill
 FROM employees e,
-     UNNEST(e.skills) AS u(skill);
+     UNNEST(e.skills) AS u_result(skill);
 -- Decorrelate to non-correlated unnest
 ```
 
@@ -113,14 +113,14 @@ FROM employees e,
 -- Positive: LATERAL UNNEST
 SELECT d.name, t.tag
 FROM documents d,
-     LATERAL UNNEST(d.tags) AS t(tag)
+     LATERAL UNNEST(d.tags) AS t_result(tag)
 WHERE t.tag LIKE 'important%';
 -- Decorrelate and push filter
 ```
 
 ```sql
 -- Negative: non-correlated UNNEST
-SELECT * FROM UNNEST(ARRAY[1, 2, 3]) AS t(x);
+SELECT * FROM UNNEST(ARRAY[1, 2, 3]) AS t_result(x);
 -- Already non-correlated; rule does not apply
 ```
 

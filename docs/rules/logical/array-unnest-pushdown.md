@@ -94,7 +94,7 @@ fn estimated_benefit(
 ```sql
 -- Positive: filter before unnest
 SELECT u.id, t.tag
-FROM users u, UNNEST(u.tags) AS t(tag)
+FROM users u, UNNEST(u.tags) AS t_result(tag)
 WHERE u.active = true;
 -- Push active filter before UNNEST
 
@@ -103,7 +103,7 @@ SELECT id, COUNT(*) FROM users, UNNEST(tags) GROUP BY id;
 -- Replace with: SELECT id, array_length(tags, 1) FROM users
 
 -- Negative: filter on unnested column
-SELECT u.id, t.tag FROM users u, UNNEST(u.tags) AS t(tag)
+SELECT u.id, t.tag FROM users u, UNNEST(u.tags) AS t_result(tag)
 WHERE t.tag LIKE 'tech%';
 -- Cannot push: filter depends on unnested value
 ```

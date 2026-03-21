@@ -44,7 +44,7 @@ avoids materializing the unnested rows and can leverage array indexes
 
 ```algebra
 -- Before: lateral unnest with existence check
-sigma[EXISTS](R join_lateral unnest(R.arr) AS u(val) WHERE u.val = ?)
+sigma[EXISTS](R join_lateral unnest(R.arr) AS u_result(val) WHERE u.val = ?)
 
 -- After: semi-join with array containment
 R semi_join (R.arr IS NOT NULL AND cardinality(R.arr) > 0)
@@ -161,7 +161,7 @@ is O(log N) instead of O(N).
 -- Before
 SELECT c.name FROM customers c
 WHERE EXISTS (
-  SELECT 1 FROM unnest(c.tags) AS u(tag)
+  SELECT 1 FROM unnest(c.tags) AS u_result(tag)
   WHERE u.tag = 'premium'
 );
 
@@ -176,7 +176,7 @@ WHERE 'premium' = ANY(c.tags);
 -- Before
 SELECT o.id FROM orders o
 WHERE EXISTS (
-  SELECT 1 FROM unnest(o.line_items) AS u(item)
+  SELECT 1 FROM unnest(o.line_items) AS u_result(item)
 );
 
 -- After
@@ -191,7 +191,7 @@ WHERE o.line_items IS NOT NULL
 -- Before
 SELECT p.name
 FROM products p
-LEFT JOIN LATERAL unnest(p.categories) AS u(cat) ON true
+LEFT JOIN LATERAL unnest(p.categories) AS u_result(cat) ON true
 WHERE u.cat IS NOT NULL;
 
 -- After (semi-join eliminates left join + filter)
@@ -205,7 +205,7 @@ WHERE cardinality(p.categories) > 0;
 ```sql
 -- Cannot convert: query uses the actual unnested values
 SELECT c.name, u.tag
-FROM customers c, LATERAL unnest(c.tags) AS u(tag);
+FROM customers c, LATERAL unnest(c.tags) AS u_result(tag);
 
 -- u.tag is projected, not just existence-checked.
 ```
@@ -215,7 +215,7 @@ FROM customers c, LATERAL unnest(c.tags) AS u(tag);
 ```sql
 -- Cannot convert: aggregation uses unnested values
 SELECT c.name, COUNT(DISTINCT u.tag)
-FROM customers c, LATERAL unnest(c.tags) AS u(tag)
+FROM customers c, LATERAL unnest(c.tags) AS u_result(tag)
 GROUP BY c.name;
 
 -- COUNT(DISTINCT u.tag) requires actual tag values.

@@ -46,11 +46,11 @@ rw!("constant-fold-min-values";
 
 ```sql
 -- Positive: COUNT over VALUES
-SELECT COUNT(*) FROM (VALUES (1), (2), (3)) AS t(x);
+SELECT COUNT(*) FROM (VALUES (1), (2), (3)) AS t_result(x);
 -- Folded to: SELECT 3
 
 -- Positive: SUM over VALUES
-SELECT SUM(x) FROM (VALUES (10), (20), (30)) AS t(x);
+SELECT SUM(x) FROM (VALUES (10), (20), (30)) AS t_result(x);
 -- Folded to: SELECT 60
 
 -- Negative: aggregate over table

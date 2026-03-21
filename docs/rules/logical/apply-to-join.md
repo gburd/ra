@@ -249,7 +249,7 @@ CROSS APPLY (
 ```sql
 SELECT t.id, x.value
 FROM documents t
-CROSS APPLY extract_keywords(t.content) AS x(value);
+CROSS APPLY extract_keywords(t.content) AS x_result(value);
 
 -- Table-valued function: opaque dependency
 -- Cannot express as equi-join

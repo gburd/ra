@@ -46,10 +46,10 @@ cache locality.
 
 ```algebra
 -- Before: separate operators
-unnest(pi[arr](sigma[cond](Scan(T)))) AS u(val)
+unnest(pi[arr](sigma[cond](Scan(T)))) AS u_result(val)
 
 -- After: fused operator
-UnnestScan(T, arr, cond) AS u(val)
+UnnestScan(T, arr, cond) AS u_result(val)
 ```
 
 ### With additional projected columns
@@ -59,7 +59,7 @@ UnnestScan(T, arr, cond) AS u(val)
 pi[id, val](
   unnest(
     pi[id, arr](sigma[active = true](Scan(T)))
-  ) AS u(val)
+  ) AS u_result(val)
 )
 
 -- After
@@ -75,7 +75,7 @@ sigma[val > 10](
     pi[tags](
       sigma[status = 'active'](Scan(products))
     )
-  ) AS u(val)
+  ) AS u_result(val)
 )
 
 -- After: single fused operator with both predicates
@@ -212,7 +212,7 @@ selective filters.
 -- Before
 SELECT u.tag
 FROM (SELECT tags FROM products) sub,
-  LATERAL unnest(sub.tags) AS u(tag);
+  LATERAL unnest(sub.tags) AS u_result(tag);
 
 -- After (fused UnnestScan)
 -- UnnestScan(products, tags) -> (tag)
@@ -223,7 +223,7 @@ FROM (SELECT tags FROM products) sub,
 ```sql
 -- Before
 SELECT u.item
-FROM orders o, LATERAL unnest(o.line_items) AS u(item)
+FROM orders o, LATERAL unnest(o.line_items) AS u_result(item)
 WHERE o.status = 'shipped';
 
 -- After (fused with scan predicate)
@@ -239,7 +239,7 @@ FROM (
   SELECT id, line_items
   FROM orders
   WHERE created_at > '2024-01-01'
-) o, LATERAL unnest(o.line_items) AS u(item);
+) o, LATERAL unnest(o.line_items) AS u_result(item);
 
 -- After
 -- UnnestScan(orders, line_items,
@@ -254,7 +254,7 @@ FROM (
 SELECT u.val
 FROM (
   SELECT array_agg(price) AS prices FROM items GROUP BY category
-) sub, LATERAL unnest(sub.prices) AS u(val);
+) sub, LATERAL unnest(sub.prices) AS u_result(val);
 
 -- sub.prices is computed by array_agg, not a stored column.
 ```
@@ -263,7 +263,7 @@ FROM (
 
 ```sql
 -- No scan to push into
-SELECT * FROM unnest(array[1, 2, 3]) AS t(val);
+SELECT * FROM unnest(array[1, 2, 3]) AS t_result(val);
 
 -- Use unnest-array-literal rule instead.
 ```

@@ -66,15 +66,15 @@ fn estimated_benefit(n_tuples: usize, cols_removed: usize) -> f64 {
 
 ```sql
 -- Positive: prune unused column
-SELECT a FROM (VALUES (1, 2), (3, 4)) AS t(a, b);
+SELECT a FROM (VALUES (1, 2), (3, 4)) AS t_result(a, b);
 -- Becomes VALUES (1), (3)
 
 -- Positive: fold constant expression
-SELECT a + b AS sum FROM (VALUES (1, 2), (3, 4)) AS t(a, b);
+SELECT a + b AS sum FROM (VALUES (1, 2), (3, 4)) AS t_result(a, b);
 -- Becomes VALUES (3), (7)
 
 -- Negative: all columns used
-SELECT * FROM (VALUES (1, 2), (3, 4)) AS t(a, b);
+SELECT * FROM (VALUES (1, 2), (3, 4)) AS t_result(a, b);
 ```
 
 ## References

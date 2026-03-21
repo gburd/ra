@@ -118,7 +118,7 @@ fn estimated_benefit(
 ```sql
 -- Query with filter on VALUES
 SELECT a - b
-FROM (VALUES (1, 2), (3, 5), (7, 11)) AS t(a, b)
+FROM (VALUES (1, 2), (3, 5), (7, 11)) AS t_result(a, b)
 WHERE a + b > 4;
 
 -- Before values-reduce:
@@ -136,7 +136,7 @@ WHERE a + b > 4;
 ```sql
 -- Query with arithmetic on constants
 SELECT x * 2 + 1
-FROM (VALUES (10), (20), (30)) AS t(x);
+FROM (VALUES (10), (20), (30)) AS t_result(x);
 
 -- After values-reduce:
 -- Values((21), (41), (61))
@@ -147,7 +147,7 @@ FROM (VALUES (10), (20), (30)) AS t(x);
 ```sql
 -- Cannot pre-compute random values
 SELECT RANDOM()
-FROM (VALUES (1), (2), (3)) AS t(x);
+FROM (VALUES (1), (2), (3)) AS t_result(x);
 
 -- Stays as:
 -- Project(RANDOM())
@@ -159,7 +159,7 @@ FROM (VALUES (1), (2), (3)) AS t(x);
 ```sql
 -- Filter that rejects all tuples
 SELECT *
-FROM (VALUES (1, 2), (3, 4)) AS t(a, b)
+FROM (VALUES (1, 2), (3, 4)) AS t_result(a, b)
 WHERE a > b AND a < b;
 
 -- After values-reduce:

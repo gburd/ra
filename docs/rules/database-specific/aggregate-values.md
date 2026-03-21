@@ -109,7 +109,7 @@ fn estimated_benefit(
 ```sql
 -- Count constant rows
 SELECT COUNT(*)
-FROM (VALUES (1), (2), (3), (4), (5)) AS t(x);
+FROM (VALUES (1), (2), (3), (4), (5)) AS t_result(x);
 
 -- Before:
 -- Aggregate[COUNT(*)]
@@ -129,7 +129,7 @@ FROM (VALUES
   ('B', 20),
   ('A', 15),
   ('B', 25)
-) AS t(category, amount)
+) AS t_result(category, amount)
 GROUP BY category;
 
 -- After aggregate-values:
@@ -146,7 +146,7 @@ SELECT
   AVG(val) as avg,
   MIN(val) as min_val,
   MAX(val) as max_val
-FROM (VALUES (10), (20), (30), (40)) AS t(val);
+FROM (VALUES (10), (20), (30), (40)) AS t_result(val);
 
 -- After aggregate-values:
 -- Values((4, 100, 25.0, 10, 40))
@@ -157,7 +157,7 @@ FROM (VALUES (10), (20), (30), (40)) AS t(val);
 ```sql
 -- ARRAY_AGG order is non-deterministic without ORDER BY
 SELECT ARRAY_AGG(val)
-FROM (VALUES (1), (2), (3)) AS t(val);
+FROM (VALUES (1), (2), (3)) AS t_result(val);
 
 -- May not be safe to pre-compute if order matters
 -- (though with ORDER BY it could be)
@@ -172,7 +172,7 @@ FROM (VALUES
   ('A', 10),
   ('B', 5),
   ('A', 15)
-) AS t(category, amount)
+) AS t_result(category, amount)
 GROUP BY category
 HAVING SUM(amount) > 10;
 

@@ -151,33 +151,37 @@ N^2 - N intermediate rows from the cross product.
 
 ### Positive: parallel array unnest
 
+::: v-pre
 ```sql
 -- Before
 SELECT u1.id, u2.name
-FROM unnest(ARRAY[1, 2, 3]) WITH ORDINALITY AS u1_alias (id, ord1),
-     unnest(ARRAY['a', 'b', 'c']) WITH ORDINALITY AS u2_alias (name, ord2)
+FROM unnest(ARRAY[1, 2, 3]) WITH ORDINALITY AS u1(id, ord1),
+     unnest(ARRAY['a', 'b', 'c']) WITH ORDINALITY AS u2(name, ord2)
 WHERE u1.ord1 = u2.ord2;
 
 -- After (PostgreSQL multi-arg UNNEST)
 SELECT id, name
-FROM unnest(ARRAY[1, 2, 3], ARRAY['a', 'b', 'c']) AS unnest_result (id, name);
+FROM unnest(ARRAY[1, 2, 3], ARRAY['a', 'b', 'c']) AS t(id, name);
 ```
+:::
 
 ### Positive: lateral parallel unnest from same row
 
+::: v-pre
 ```sql
 -- Before
 SELECT p.name, u1.tag, u2.score
 FROM products p,
-  LATERAL unnest(p.tags) WITH ORDINALITY AS u1_alias (tag, o1),
-  LATERAL unnest(p.scores) WITH ORDINALITY AS u2_alias (score, o2)
+  LATERAL unnest(p.tags) WITH ORDINALITY AS u1(tag, o1),
+  LATERAL unnest(p.scores) WITH ORDINALITY AS u2(score, o2)
 WHERE u1.o1 = u2.o2;
 
 -- After
 SELECT p.name, t.tag, t.score
 FROM products p,
-  LATERAL unnest(p.tags, p.scores) AS unnest_result (tag, score);
+  LATERAL unnest(p.tags, p.scores) AS t(tag, score);
 ```
+:::
 
 ### Negative: arrays from different relations
 

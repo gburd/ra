@@ -123,7 +123,7 @@ WHERE t.computed_score > 0.5;
 
 ```sql
 -- Negative: no column mappings
-SELECT * FROM TABLE(generate_series(1, 100)) AS t(x)
+SELECT * FROM TABLE(generate_series(1, 100)) AS t_result(x)
 WHERE x > 50;
 -- No column mappings available; cannot push
 ```

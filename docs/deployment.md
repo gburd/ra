@@ -24,6 +24,82 @@ The workflow automatically:
 **Required settings**:
 - Repository Settings → Pages → Source: "GitHub Actions"
 
+### Netlify
+
+Netlify provides continuous deployment with automatic builds from Git.
+
+**URL**: https://[site-name].netlify.app/ (custom domains supported)
+
+#### Initial Setup
+
+1. **Sign up for Netlify**:
+   - Visit https://netlify.com
+   - Sign up with GitHub, GitLab, Bitbucket, or email
+
+2. **Connect Repository**:
+   - Click "Add new site" → "Import an existing project"
+   - Choose your Git provider (GitHub, GitLab, Bitbucket, Codeberg)
+   - Authorize Netlify to access your repositories
+   - Select the `ra` repository
+
+3. **Configure Build Settings**:
+   Netlify will auto-detect the `netlify.toml` configuration:
+   - **Base directory**: `docs`
+   - **Build command**: `npm install && npm run docs:build`
+   - **Publish directory**: `docs/.vitepress/dist`
+   - **Node version**: 22
+
+4. **Deploy**:
+   - Click "Deploy site"
+   - Netlify will assign a random subdomain (e.g., `energetic-unicorn-123abc.netlify.app`)
+   - Builds trigger automatically on every git push to `main`
+
+#### Custom Domain
+
+1. **Add Custom Domain**:
+   - Go to Site settings → Domain management
+   - Click "Add custom domain"
+   - Enter your domain (e.g., `docs.ra-optimizer.org`)
+
+2. **Configure DNS**:
+   - Add CNAME record pointing to `[site-name].netlify.app`
+   - Or use Netlify DNS for automatic configuration
+
+3. **Enable HTTPS**:
+   - Netlify automatically provisions Let's Encrypt SSL certificates
+   - HTTPS is enforced by default
+
+#### Environment Variables
+
+No secrets required for documentation deployment. Build uses only public npm packages.
+
+#### Deploy Previews
+
+Netlify automatically creates preview deployments for pull requests:
+- Each PR gets a unique URL
+- Preview updates automatically on new commits
+- Useful for reviewing documentation changes before merging
+
+#### Build Notifications
+
+Configure notifications in Site settings → Build & deploy → Deploy notifications:
+- Email notifications for build success/failure
+- Slack webhook integration
+- GitHub commit status checks
+
+#### Known Issues
+
+**VitePress Vue Template Parser**:
+Currently, some documentation files fail to build due to VitePress treating SQL patterns like `AS t(col)` as HTML tags. This affects unnest-related rule documentation.
+
+**Workaround**: These files are temporarily excluded from the build. Track progress on fixing this issue in the repository.
+
+**Files Affected**:
+- `rules/unnest/merge-unnests.md`
+- Several other `rules/unnest/*.md` files
+
+**Fix in Progress**: Investigating VitePress configuration options to disable Vue template compilation in code blocks.
+
 ### Codeberg Pages
 
 Codeberg Pages provides an alternative free static hosting platform.
