@@ -780,12 +780,11 @@ unsafe fn set_guc_bool(name: &str, value: bool) {
     let c_name = CString::new(name).unwrap();
     let c_value = CString::new(if value { "on" } else { "off" }).unwrap();
 
-    // PGC_USERSET = 0, PGC_S_SESSION = 7
     pg_sys::SetConfigOption(
         c_name.as_ptr(),
         c_value.as_ptr(),
-        0, // PGC_USERSET
-        7, // PGC_S_SESSION
+        pg_sys::GucContext::PGC_USERSET,
+        pg_sys::GucSource::PGC_S_SESSION,
     );
 }
 
@@ -826,12 +825,11 @@ unsafe fn set_guc_real(name: &str, value: f64) {
     let c_name = CString::new(name).unwrap();
     let c_value = CString::new(format!("{}", value)).unwrap();
 
-    // PGC_USERSET = 0, PGC_S_SESSION = 7
     pg_sys::SetConfigOption(
         c_name.as_ptr(),
         c_value.as_ptr(),
-        0, // PGC_USERSET
-        7, // PGC_S_SESSION
+        pg_sys::GucContext::PGC_USERSET,
+        pg_sys::GucSource::PGC_S_SESSION,
     );
 }
 

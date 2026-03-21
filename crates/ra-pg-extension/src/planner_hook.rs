@@ -258,21 +258,141 @@ fn optimize_relexpr(
 
 /// Estimate cost of a plan using RA's cost model.
 fn estimate_plan_cost(
-    _rel_expr: &ra_core::algebra::RelExpr,
-    _stats: &[(String, ra_core::Statistics)],
-    _calibration: &CostCalibration,
+    rel_expr: &ra_core::algebra::RelExpr,
+    stats: &[(String, ra_core::Statistics)],
+    calibration: &CostCalibration,
 ) -> f64 {
-    // TODO: Implement cost estimation.
-    1.0
+    // Get base table costs from statistics
+    let base_cost = estimate_relexpr_cost(rel_expr, stats);
+
+    // Convert RA cost to PostgreSQL cost units
+    calibration.ra_to_pg_total(&base_cost)
+}
+
+/// Recursively estimate the cost of a RelExpr tree.
+fn estimate_relexpr_cost(
+    expr: &ra_core::algebra::RelExpr,
+    stats: &[(String, ra_core::Statistics)],
+) -> ra_core::Cost {
+    use ra_core::algebra::RelExpr;
+    use ra_core::Cost;
+
+    match expr {
+        RelExpr::Scan { table, .. }
+        | RelExpr::ParallelScan { table, .. } => {
+            // Sequential scan cost: rows * page_cost
+            let row_count = get_table_row_count(table, stats);
+            let pages = (row_count / 100.0).max(1.0); // ~100 rows per page
+            let mem_kb = (row_count * 0.1).max(1.0); // ~100 bytes per row avg
+            Cost::new(row_count * 0.01, pages, 0.0, mem_kb as u64)
+        }
+        RelExpr::IndexScan { table, .. }
+        | RelExpr::IndexOnlyScan { table, .. } => {
+            // Index scan cost: log(rows) * random_page_cost + rows * cpu_cost
+            let row_count = get_table_row_count(table, stats);
+            let index_pages = row_count.log2().max(1.0);
+            let mem_kb = (row_count * 0.1).max(1.0);
+            Cost::new(row_count * 0.01, index_pages * 4.0, 0.0, mem_kb as u64)
+        }
+        RelExpr::BitmapHeapScan { table, .. } => {
+            // Bitmap scan: similar to index scan but more efficient for multiple matches
+            let row_count = get_table_row_count(table, stats);
+            let pages = (row_count / 100.0).max(1.0) * 0.5; // More efficient than seq scan
+            let mem_kb = (row_count * 0.1).max(1.0);
+            Cost::new(row_count * 0.01, pages * 2.0, 0.0, mem_kb as u64)
+        }
+        RelExpr::Join { left, right, .. }
+        | RelExpr::ParallelHashJoin { left, right, .. } => {
+            // Join cost: left + right + approximate join CPU cost
+            let left_cost = estimate_relexpr_cost(left, stats);
+            let right_cost = estimate_relexpr_cost(right, stats);
+            // Approximate join cost based on memory (rough cardinality estimate)
+            let join_cpu = (left_cost.memory as f64 * right_cost.memory as f64).sqrt() * 0.001;
+            Cost::new(
+                left_cost.cpu + right_cost.cpu + join_cpu,
+                left_cost.io + right_cost.io,
+                left_cost.network + right_cost.network,
+                left_cost.memory.max(right_cost.memory),
+            )
+        }
+        RelExpr::Filter { input, .. }
+        | RelExpr::Project { input, .. }
+        | RelExpr::Gather { input, .. } => {
+            // Passthrough operators: add small CPU cost proportional to memory (rows)
+            let mut cost = estimate_relexpr_cost(input, stats);
+            cost.cpu += cost.memory as f64 * 0.001;
+            cost
+        }
+        RelExpr::Sort { input, .. }
+        | RelExpr::IncrementalSort { input, .. } => {
+            // Sort cost: n * log(n) * cpu_cost
+            let mut cost = estimate_relexpr_cost(input, stats);
+            let n = cost.memory as f64;
+            cost.cpu += n * n.log2() * 0.002;
+            cost
+        }
+        RelExpr::Aggregate { input, .. }
+        | RelExpr::ParallelAggregate { input, .. } => {
+            // Aggregate cost: hash table build + input processing
+            let mut cost = estimate_relexpr_cost(input, stats);
+            cost.cpu += cost.memory as f64 * 0.005;
+            // Aggregation typically reduces rows significantly
+            cost.memory = (cost.memory as f64 * 0.1).max(1.0) as u64;
+            cost
+        }
+        RelExpr::Limit { input, .. } => {
+            // Limit significantly reduces memory/rows
+            let mut cost = estimate_relexpr_cost(input, stats);
+            cost.memory = (cost.memory / 10).max(1);
+            cost
+        }
+        RelExpr::Union { left, right, .. }
+        | RelExpr::Intersect { left, right, .. }
+        | RelExpr::Except { left, right, .. } => {
+            // Set operations: process both sides
+            let left_cost = estimate_relexpr_cost(left, stats);
+            let right_cost = estimate_relexpr_cost(right, stats);
+            Cost::new(
+                left_cost.cpu + right_cost.cpu,
+                left_cost.io + right_cost.io,
+                left_cost.network + right_cost.network,
+                left_cost.memory + right_cost.memory,
+            )
+        }
+        _ => {
+            // Default: minimal cost
+            Cost::new(1.0, 1.0, 0.0, 1)
+        }
+    }
+}
+
+/// Get the row count for a table from statistics.
+fn get_table_row_count(table: &str, stats: &[(String, ra_core::Statistics)]) -> f64 {
+    stats
+        .iter()
+        .find(|(name, _)| name == table)
+        .map(|(_, s)| s.row_count)
+        .unwrap_or(1000.0) // Default estimate if no stats
 }
 
 /// Calculate what fraction of tables have statistics available.
 fn calculate_stats_coverage(
-    _rel_expr: &ra_core::algebra::RelExpr,
-    _stats: &[(String, ra_core::Statistics)],
+    rel_expr: &ra_core::algebra::RelExpr,
+    stats: &[(String, ra_core::Statistics)],
 ) -> f64 {
-    // TODO: Walk RelExpr and check stats availability.
-    0.5 // Placeholder: assume 50% coverage
+    let table_names = plan_converter::extract_table_names(rel_expr);
+    if table_names.is_empty() {
+        return 1.0; // No tables = 100% coverage
+    }
+
+    let covered = table_names
+        .iter()
+        .filter(|table| {
+            stats.iter().any(|(name, _)| name == *table)
+        })
+        .count();
+
+    covered as f64 / table_names.len() as f64
 }
 
 /// Chain to the previous planner hook or the standard planner.
