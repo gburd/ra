@@ -36,6 +36,7 @@ impl Analysis<RelLang> for RelAnalysis {
         match enode {
             RelLang::Scan([table_id])
             | RelLang::ScanAlias([table_id, _])
+            | RelLang::IndexScan([table_id, _])
             | RelLang::IndexOnlyScan([table_id, _, _, _]) => {
                 data.is_relational = true;
                 if let Some(sym) = get_symbol(egraph, *table_id) {

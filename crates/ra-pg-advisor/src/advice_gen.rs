@@ -441,6 +441,18 @@ fn collect_scan_hints(expr: &RelExpr, out: &mut Vec<ScanHint>) {
                 collect_scan_hints(inp, out);
             }
         }
+        RelExpr::IndexScan { table, column, .. } => {
+            out.push(ScanHint {
+                relation: table.clone(),
+                method: ScanMethodHint::Index(column.clone()),
+            });
+        }
+        RelExpr::IndexOnlyScan { table, index, .. } => {
+            out.push(ScanHint {
+                relation: table.clone(),
+                method: ScanMethodHint::Index(index.clone()),
+            });
+        }
         RelExpr::BitmapIndexScan { table, .. } => {
             out.push(ScanHint {
                 relation: table.clone(),

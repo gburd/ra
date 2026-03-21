@@ -142,7 +142,7 @@ mod tests {
         // Verify the index-scan node exists somewhere in the e-graph
         let has_index_scan = runner.egraph.classes().any(|class| {
             class.nodes.iter().any(|node| {
-                matches!(node, RelLang::IndexOnlyScan(_))
+                matches!(node, RelLang::IndexScan(_))
             })
         });
         assert!(
@@ -167,7 +167,7 @@ mod tests {
 
         let has_index_scan = runner.egraph.classes().any(|class| {
             class.nodes.iter().any(|node| {
-                matches!(node, RelLang::IndexOnlyScan(_))
+                matches!(node, RelLang::IndexScan(_))
             })
         });
         assert!(
@@ -210,7 +210,7 @@ mod tests {
 
         let has_index_scan = runner.egraph.classes().any(|class| {
             class.nodes.iter().any(|node| {
-                matches!(node, RelLang::IndexOnlyScan(_))
+                matches!(node, RelLang::IndexScan(_))
             })
         });
         assert!(
@@ -247,7 +247,7 @@ mod tests {
         // so no index-scan should appear.
         let has_index_scan = runner.egraph.classes().any(|class| {
             class.nodes.iter().any(|node| {
-                matches!(node, RelLang::IndexOnlyScan(_))
+                matches!(node, RelLang::IndexScan(_))
             })
         });
         assert!(
@@ -270,7 +270,7 @@ mod tests {
 
         let has_index_scan = runner.egraph.classes().any(|class| {
             class.nodes.iter().any(|node| {
-                matches!(node, RelLang::IndexOnlyScan(_))
+                matches!(node, RelLang::IndexScan(_))
             })
         });
         assert!(
@@ -288,7 +288,7 @@ mod tests {
         // it tracks the "orders" table.
         let tracks_table = runner.egraph.classes().any(|class| {
             let has_iscan = class.nodes.iter().any(|node| {
-                matches!(node, RelLang::IndexOnlyScan(_))
+                matches!(node, RelLang::IndexScan(_))
             });
             has_iscan && class.data.tables.contains("orders")
         });

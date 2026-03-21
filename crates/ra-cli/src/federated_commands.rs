@@ -242,7 +242,12 @@ fn collect_tables_recursive(
     out: &mut Vec<String>,
 ) {
     match expr {
-        ra_core::algebra::RelExpr::Scan { table, .. } => {
+        ra_core::algebra::RelExpr::Scan { table, .. }
+        | ra_core::algebra::RelExpr::IndexScan { table, .. }
+        | ra_core::algebra::RelExpr::IndexOnlyScan { table, .. }
+        | ra_core::algebra::RelExpr::BitmapIndexScan { table, .. }
+        | ra_core::algebra::RelExpr::BitmapHeapScan { table, .. }
+        | ra_core::algebra::RelExpr::ParallelScan { table, .. } => {
             out.push(table.clone());
         }
         ra_core::algebra::RelExpr::Filter { input, .. }
@@ -266,9 +271,22 @@ fn collect_tables_recursive(
         }
         | ra_core::algebra::RelExpr::Except {
             left, right, ..
+        }
+        | ra_core::algebra::RelExpr::ParallelHashJoin {
+            left, right, ..
         } => {
             collect_tables_recursive(left, out);
             collect_tables_recursive(right, out);
+        }
+        ra_core::algebra::RelExpr::BitmapAnd { inputs }
+        | ra_core::algebra::RelExpr::BitmapOr { inputs } => {
+            for inp in inputs {
+                collect_tables_recursive(inp, out);
+            }
+        }
+        ra_core::algebra::RelExpr::ParallelAggregate { input, .. }
+        | ra_core::algebra::RelExpr::Gather { input, .. } => {
+            collect_tables_recursive(input, out);
         }
         ra_core::algebra::RelExpr::CTE {
             definition, body, ..

@@ -383,6 +383,8 @@ fn estimate_cost(plan: &RelExpr) -> f64 {
         RelExpr::RowPattern { input, .. } => {
             estimate_cost(input) * 5.0
         }
+        RelExpr::IndexScan { .. } => 15.0,
+        RelExpr::IndexOnlyScan { .. } => 10.0,
         RelExpr::BitmapIndexScan { .. } => 20.0,
         RelExpr::BitmapAnd { inputs } => {
             inputs.iter().map(|i| estimate_cost(i)).sum::<f64>() * 0.8

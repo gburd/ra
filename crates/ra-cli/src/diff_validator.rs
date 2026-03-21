@@ -156,7 +156,17 @@ fn compare_node(
         | RelExpr::Unnest { .. }
         | RelExpr::MultiUnnest { .. }
         | RelExpr::TableFunction { .. }
-        | RelExpr::RowPattern { .. } => {}
+        | RelExpr::RowPattern { .. }
+        | RelExpr::IndexScan { .. }
+        | RelExpr::IndexOnlyScan { .. }
+        | RelExpr::BitmapIndexScan { .. }
+        | RelExpr::BitmapAnd { .. }
+        | RelExpr::BitmapOr { .. }
+        | RelExpr::BitmapHeapScan { .. }
+        | RelExpr::ParallelScan { .. }
+        | RelExpr::ParallelHashJoin { .. }
+        | RelExpr::ParallelAggregate { .. }
+        | RelExpr::Gather { .. } => {}
     }
 }
 

@@ -55,6 +55,10 @@ define_language! {
         "metadata-lookup" = MetadataLookup([Id; 2]),
         "row-count" = RowCount,
 
+        // -- MIN/MAX index scan optimization --
+        // Children: [table, column]
+        "index-scan" = IndexScan([Id; 2]),
+
         // -- Index-only scan (covering index) --
         // Children: [table, index_name, projected_cols, predicate]
         "index-only-scan" = IndexOnlyScan([Id; 4]),
