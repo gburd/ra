@@ -22,7 +22,7 @@ on:
 jobs:
   build-and-deploy:
     name: Build and deploy documentation
-    runs-on: ubuntu-latest
+    runs-on: docker
     steps:
       - name: Checkout repository
         uses: https://github.com/actions/checkout@v4
