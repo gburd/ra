@@ -543,6 +543,35 @@ fn collect_table_names(
     }
 }
 
+/// Convert optimized RA RelExpr to PostgreSQL PlannedStmt.
+///
+/// This is the full plan conversion that generates actual PostgreSQL
+/// plan nodes, not just advice strings.
+///
+/// # Safety
+///
+/// Caller must pass a valid `Query` pointer.
+///
+/// # Note
+///
+/// This is currently a stub - full implementation requires constructing
+/// PostgreSQL Plan node structures via pgrx bindings.
+pub unsafe fn convert_to_planned_stmt(
+    _expr: &ra_core::algebra::RelExpr,
+    _original_query: *mut pgrx::pg_sys::Query,
+    _stats: &[(String, ra_core::Statistics)],
+    _calibration: &crate::cost_mapper::CostCalibration,
+) -> Result<*mut pgrx::pg_sys::PlannedStmt, String> {
+    // TODO: Implement full plan conversion:
+    // 1. Walk RelExpr tree
+    // 2. Create corresponding PostgreSQL Plan nodes
+    // 3. Set costs, row estimates, etc. from RA cost model
+    // 4. Wrap in PlannedStmt structure
+    //
+    // For now, return error to indicate not yet implemented.
+    Err("Direct PlannedStmt conversion not yet implemented".to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

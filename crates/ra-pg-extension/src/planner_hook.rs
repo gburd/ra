@@ -25,6 +25,7 @@ use crate::extension_state::{
     RA_MAX_RELATIONS, RA_MIN_CONFIDENCE,
 };
 use crate::stats_bridge;
+use crate::plan_converter;
 
 /// Saved pointer to the previous planner hook (for chaining).
 static mut PREV_PLANNER_HOOK: pg_sys::planner_hook_type = None;
@@ -113,20 +114,165 @@ unsafe extern "C-unwind" fn ra_planner_hook(
         );
     }
 
-    // Conservative strategy: always use the standard planner.
-    //
-    // Future: run RA optimizer on the parsed query, check if the
-    // resulting plan's confidence exceeds RA_MIN_CONFIDENCE, and
-    // if so, apply advice to influence the planner.
-    let _min_confidence = RA_MIN_CONFIDENCE.get();
-    let _calibration = CostCalibration::default_calibration();
+    // Attempt to optimize with RA.
+    let min_confidence = RA_MIN_CONFIDENCE.get();
+    let calibration = CostCalibration::default_calibration();
 
+    // Try to convert Query → RelExpr and optimize.
+    match try_optimize_query(parse, &sql, stats.as_slice(), &calibration) {
+        Ok(Some(optimized_plan)) => {
+            // Check confidence threshold.
+            if optimized_plan.confidence >= min_confidence {
+                if RA_LOG_DECISIONS.get() {
+                    pgrx::log!(
+                        "ra_planner: using RA-optimized plan (confidence: {:.2}): {}",
+                        optimized_plan.confidence,
+                        truncate_sql(&sql, 100)
+                    );
+                }
+                // Return the RA-optimized PlannedStmt.
+                return optimized_plan.plan;
+            } else {
+                if RA_LOG_DECISIONS.get() {
+                    pgrx::log!(
+                        "ra_planner: RA plan confidence too low ({:.2} < {:.2}), \
+                         falling back to standard planner: {}",
+                        optimized_plan.confidence,
+                        min_confidence,
+                        truncate_sql(&sql, 100)
+                    );
+                }
+            }
+        }
+        Ok(None) => {
+            // No optimization possible (e.g., unsupported query type).
+            if RA_LOG_DECISIONS.get() {
+                pgrx::log!(
+                    "ra_planner: query not optimizable by RA: {}",
+                    truncate_sql(&sql, 100)
+                );
+            }
+        }
+        Err(e) => {
+            // Optimization failed - log error and fall back.
+            if RA_LOG_DECISIONS.get() {
+                pgrx::warning!(
+                    "ra_planner: optimization failed ({}), \
+                     falling back to standard planner: {}",
+                    e,
+                    truncate_sql(&sql, 100)
+                );
+            }
+        }
+    }
+
+    // Fall back to standard planner.
     call_prev_planner(
         parse,
         query_string,
         cursor_options,
         bound_params,
     )
+}
+
+/// Result of RA optimization with confidence score.
+struct OptimizedPlan {
+    plan: *mut pg_sys::PlannedStmt,
+    confidence: f64,
+}
+
+/// Attempt to optimize a query using RA.
+///
+/// # Safety
+///
+/// Caller must pass a valid `Query` pointer.
+unsafe fn try_optimize_query(
+    parse: *mut pg_sys::Query,
+    sql: &str,
+    stats: &[(String, ra_core::Statistics)],
+    calibration: &CostCalibration,
+) -> Result<Option<OptimizedPlan>, String> {
+    // Step 1: Convert PostgreSQL Query → RA RelExpr.
+    let rel_expr = match parse_query_to_relexpr(parse, sql) {
+        Ok(Some(expr)) => expr,
+        Ok(None) => return Ok(None), // Unsupported query type
+        Err(e) => return Err(format!("Failed to parse query: {}", e)),
+    };
+
+    // Step 2: Run RA optimizer.
+    let optimized_expr = match optimize_relexpr(&rel_expr, stats) {
+        Ok(expr) => expr,
+        Err(e) => return Err(format!("Optimization failed: {}", e)),
+    };
+
+    // Step 3: Estimate confidence based on cost improvement.
+    let original_cost = estimate_plan_cost(&rel_expr, stats, calibration);
+    let optimized_cost = estimate_plan_cost(&optimized_expr, stats, calibration);
+    let improvement_ratio = if original_cost > 0.0 {
+        1.0 - (optimized_cost / original_cost)
+    } else {
+        0.0
+    };
+
+    // Confidence is based on improvement ratio and statistics availability.
+    let stats_coverage = calculate_stats_coverage(&rel_expr, stats);
+    let confidence = (improvement_ratio * 0.7 + stats_coverage * 0.3).clamp(0.0, 1.0);
+
+    // Step 4: Convert optimized RelExpr → PostgreSQL PlannedStmt.
+    let planned_stmt = match plan_converter::convert_to_planned_stmt(
+        &optimized_expr,
+        parse,
+        stats,
+        calibration,
+    ) {
+        Ok(plan) => plan,
+        Err(e) => return Err(format!("Plan conversion failed: {}", e)),
+    };
+
+    Ok(Some(OptimizedPlan {
+        plan: planned_stmt,
+        confidence,
+    }))
+}
+
+/// Parse PostgreSQL Query to RA RelExpr.
+///
+/// Returns Ok(None) for unsupported query types (DDL, utility statements).
+unsafe fn parse_query_to_relexpr(
+    _parse: *mut pg_sys::Query,
+    _sql: &str,
+) -> Result<Option<ra_core::algebra::RelExpr>, String> {
+    // TODO: Implement full query parsing.
+    // For now, return None to indicate unsupported.
+    Ok(None)
+}
+
+/// Run RA optimizer on a RelExpr.
+fn optimize_relexpr(
+    _rel_expr: &ra_core::algebra::RelExpr,
+    _stats: &[(String, ra_core::Statistics)],
+) -> Result<ra_core::algebra::RelExpr, String> {
+    // TODO: Integrate with ra-engine optimizer.
+    Err("RA optimizer not yet integrated".to_string())
+}
+
+/// Estimate cost of a plan using RA's cost model.
+fn estimate_plan_cost(
+    _rel_expr: &ra_core::algebra::RelExpr,
+    _stats: &[(String, ra_core::Statistics)],
+    _calibration: &CostCalibration,
+) -> f64 {
+    // TODO: Implement cost estimation.
+    1.0
+}
+
+/// Calculate what fraction of tables have statistics available.
+fn calculate_stats_coverage(
+    _rel_expr: &ra_core::algebra::RelExpr,
+    _stats: &[(String, ra_core::Statistics)],
+) -> f64 {
+    // TODO: Walk RelExpr and check stats availability.
+    0.5 // Placeholder: assume 50% coverage
 }
 
 /// Chain to the previous planner hook or the standard planner.
