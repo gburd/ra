@@ -18,6 +18,9 @@ mod planner_hook;
 mod query_parser;
 mod stats_bridge;
 
+#[cfg(any(test, feature = "pg_test"))]
+mod integration_tests;
+
 pgrx::pg_module_magic!();
 
 /// Extension initialization -- called when the shared library is loaded.
@@ -36,17 +39,7 @@ pub extern "C-unwind" fn _PG_init() {
     planner_hook::register_hooks();
 }
 
-#[cfg(any(test, feature = "pg_test"))]
-#[pg_schema]
-mod tests {
-    use pgrx::prelude::*;
-
-    #[pg_test]
-    fn test_extension_loads() {
-        // Extension loaded successfully if we reach here.
-        assert!(true);
-    }
-}
+// Integration tests are in integration_tests.rs
 
 #[cfg(test)]
 pub mod pg_test {
