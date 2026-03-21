@@ -25,13 +25,16 @@ hash sets for dense integer ranges.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Local bitmap + global OR
-gamma[g, bitmap_count(bitmap_or(partial_bm))](
+$$
+\gamma_{g, bitmap_count(bitmap_or(partial_bm))}(
     Exchange[hash(g)](
-        gamma[g, bitmap_add(x) as partial_bm](R)
+        \gamma_{g, bitmap_add(x) as partial_bm}(R)
     )
 )
+$$
+
 ```
 
 ## Test Cases

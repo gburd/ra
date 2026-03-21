@@ -25,12 +25,17 @@ are preserved by the projection.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
-pi[a, b](Sort[ORDER BY a](R(a, b, c, d)))
+$$
+\pi_{a, b}(Sort[ORDER BY a](R(a, b, c, d)))
+$$
 
 -- After
-Sort[ORDER BY a](pi[a, b](R))
+$$
+Sort[ORDER BY a](\pi_{a, b}(R))
+$$
+
 ```
 
 ## Implementation

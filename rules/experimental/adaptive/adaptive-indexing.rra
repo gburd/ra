@@ -48,27 +48,38 @@ some adaptive techniques.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Initial state: column C stored unsorted
+$$
 
-Query: sigma[a <= C <= b](R)
+$$
+Query: \sigma_{a <= C <= b}(R)
+$$
 
+$$
 Cracking operation:
   1. Find the tightest existing partition containing [a, b]
   2. In-place partition the data around boundaries a and b
   3. Record new partition boundaries in cracker index
   4. Return rows in [a, b] partition
+$$
 
+$$
 After k queries:
   Column is partitioned into O(2k) pieces
   Each piece is unsorted internally
   Cracker index stores partition boundaries (AVL tree)
+$$
 
+$$
 Convergence:
   If queries are uniformly distributed over domain [min, max]:
   After k queries: expected partition count = O(k)
   Expected cost of query k: O(n/k + log k)
-  Converges to O(log n) as k -> n
+  Converges to O(log n) as k \rightarrow n
+$$
+
 ```
 
 ## Implementation

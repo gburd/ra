@@ -24,10 +24,13 @@ Uses a pre-aggregated projection instead of scanning raw table data for GROUP BY
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 GroupBy[keys, aggs](Scan[MergeTree](T))
-  -> GroupBy[keys, merge_aggs](Scan[Projection[keys, agg_states]](T))
-  where has_matching_projection(T, keys, aggs)
+  \rightarrow GroupBy[keys, merge_aggs](Scan[Projection[keys, agg_states]](T))
+  \text{where} has_matching_projection(T, keys, aggs)
+$$
+
 ```
 
 Where:

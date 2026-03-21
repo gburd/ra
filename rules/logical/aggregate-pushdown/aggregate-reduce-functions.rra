@@ -20,8 +20,11 @@ Reduces aggregate functions
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Complex agg => simpler equivalent
+$$
+
 ```
 
 ## Implementation

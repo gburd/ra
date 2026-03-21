@@ -31,15 +31,22 @@ while preserving parallelism.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- When parent requires HashPartitioned(k) and child produces Random:
-Op(child) -> Op(Exchange[hash(k)](child))
+$$
+Op(child) \rightarrow Op(Exchange[hash(k)](child))
+$$
 
 -- When parent requires Singleton and child produces HashPartitioned:
-Op(child) -> Op(Exchange[gather](child))
+$$
+Op(child) \rightarrow Op(Exchange[gather](child))
+$$
 
 -- When parent requires Replicated and child is small:
-Op(child) -> Op(Exchange[broadcast](child))
+$$
+Op(child) \rightarrow Op(Exchange[broadcast](child))
+$$
+
 ```
 
 ## Implementation

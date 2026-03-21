@@ -29,16 +29,23 @@ the sort's comparison cost and may eliminate the sort entirely.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: sort with constant key
-tau[const_col, var_col](sigma[const_col = 5](R))
+$$
+tau[const_col, var_col](\sigma_{const_col = 5}(R))
+$$
 
 -- After: constant key removed
-tau[var_col](sigma[const_col = 5](R))
+$$
+tau[var_col](\sigma_{const_col = 5}(R))
+$$
 
 -- If all keys are constant:
-tau[const_col](sigma[const_col = 5](R))
+$$
+tau[const_col](\sigma_{const_col = 5}(R))
+$$
 -- Becomes just: sigma[const_col = 5](R)
+
 ```
 
 ## Implementation

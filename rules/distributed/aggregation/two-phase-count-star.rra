@@ -22,16 +22,21 @@ a single integer per group, and global SUM combines them.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
-gamma[g, COUNT(*)](R)
+$$
+\gamma_{g, COUNT(*)}(R)
+$$
 
 -- After
-gamma[g, SUM(partial_count)](
+$$
+\gamma_{g, SUM(partial_count)}(
     Exchange[hash(g)](
-        gamma[g, COUNT(*) as partial_count](R)
+        \gamma_{g, COUNT(*) as partial_count}(R)
     )
 )
+$$
+
 ```
 
 ## Test Cases

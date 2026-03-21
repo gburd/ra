@@ -32,16 +32,19 @@ data movement.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Both sides partitioned on join keys -> eliminate exchanges
+$$
 Join[k1 = k2](
     Exchange[hash(k1)](R),
     Exchange[hash(k2)](S)
-) -> Join[k1 = k2](R, S)
-  where distribution(R) = HashPartitioned(k1)
-  where distribution(S) = HashPartitioned(k2)
-  where compatible_hash(hash_func(R), hash_func(S))
-  where num_partitions(R) = num_partitions(S)
+) \rightarrow Join[k1 = k2](R, S)
+  \text{where} distribution(R) = HashPartitioned(k1)
+  \text{where} distribution(S) = HashPartitioned(k2)
+  \text{where} compatible_hash(hash_func(R), hash_func(S))
+  \text{where} num_partitions(R) = num_partitions(S)
+$$
+
 ```
 
 ## Implementation

@@ -20,10 +20,13 @@ balances load across nodes.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Exchange[hash(k)](R)
-  -> Exchange[histogram_partition(k, histogram)](R)
-  where histogram shows skew (max_freq / avg_freq > threshold)
+  \rightarrow Exchange[histogram_partition(k, histogram)](R)
+  \text{where} histogram shows skew (max_freq / avg_freq > threshold)
+$$
+
 ```
 
 ## Test Cases

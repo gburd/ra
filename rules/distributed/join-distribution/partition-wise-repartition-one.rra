@@ -20,11 +20,14 @@ partitioning. This avoids moving the larger (already-partitioned) side.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join[c](R, S)
-  -> PartitionWiseJoin[c](R, Exchange[hash(k)](S))
-  where R.hash_key == join_key_left
-  where S.hash_key != join_key_right
+  \rightarrow PartitionWiseJoin[c](R, Exchange[hash(k)](S))
+  \text{where} R.hash_key == join_key_left
+  \text{where} S.hash_key != join_key_right
+$$
+
 ```
 
 ## Test Cases

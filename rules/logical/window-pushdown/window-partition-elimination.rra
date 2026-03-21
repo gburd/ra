@@ -24,9 +24,12 @@ Removes redundant PARTITION BY columns from window functions when the input is a
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 window[W PARTITION BY c](filter[c = const](R))
-  -> window[W](filter[c = const](R))
+  \rightarrow window[W](filter[c = const](R))
+$$
+
 ```
 
 ## Implementation

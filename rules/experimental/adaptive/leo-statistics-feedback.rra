@@ -40,20 +40,27 @@ intervention.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Standard estimation:
-est_card(sigma[a=1 AND b=2](T)) = |T| * sel(a=1) * sel(b=2)
+$$
+est_card(\sigma_{a=1 AND b=2}(T)) = |T| * sel(a=1) * sel(b=2)
   = 1000 * 0.1 * 0.01 = 1.0
+$$
 
 -- Actual execution produces 50 rows (a and b are correlated)
 
 -- LEO stores adjustment factor:
+$$
 factor(T, {a, b}, equality) = 50.0 / 1.0 = 50.0
+$$
 
 -- Next query with similar predicates:
-est_card(sigma[a=3 AND b=4](T))
+$$
+est_card(\sigma_{a=3 AND b=4}(T))
   = base_estimate * factor(T, {a, b}, equality)
   = 0.8 * 50.0 = 40.0  -- much closer to reality
+$$
+
 ```
 
 ## Implementation

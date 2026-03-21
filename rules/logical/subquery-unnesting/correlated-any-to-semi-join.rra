@@ -24,9 +24,12 @@ Converts correlated ANY/SOME subqueries to semi-joins for efficient execution.
 
 ## Relational Algebra
 
-```algebra
-filter[A.x > ANY (select S.y from S where S.key = A.key)](A)
-  -> semi_join[A.x > S.y AND S.key = A.key](A, S)
+```latex
+$$
+filter[A.x > ANY (select S.y from S \text{where} S.key = A.key)](A)
+  \rightarrow semi_\bowtie_{A.x > S.y AND S.key = A.key}(A, S)
+$$
+
 ```
 
 ## Implementation

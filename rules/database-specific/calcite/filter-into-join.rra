@@ -32,15 +32,20 @@ join inputs, decreasing the cost of the join operator.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: filter above join
-sigma[p1 AND p2 AND p3](R join[c] S)
+$$
+\sigma_{p1 AND p2 AND p3}(R \bowtie_{c} S)
+$$
 
 -- After: push p1 to left, p2 to right, p3 into join condition
-(sigma[p1](R)) join[c AND p3] (sigma[p2](S))
-  where attrs(p1) subset attrs(R)
-  where attrs(p2) subset attrs(S)
-  where attrs(p3) subset attrs(R) union attrs(S)
+$$
+(\sigma_{p1}(R)) \bowtie_{c AND p3} (\sigma_{p2}(S))
+  \text{where} \text{attrs}(p1) \subseteq \text{attrs}(R)
+  \text{where} \text{attrs}(p2) \subseteq \text{attrs}(S)
+  \text{where} \text{attrs}(p3) \subseteq \text{attrs}(R) \cup \text{attrs}(S)
+$$
+
 ```
 
 ## Implementation

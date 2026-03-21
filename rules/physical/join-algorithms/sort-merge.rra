@@ -27,8 +27,11 @@ Sort-merge join implementation
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join_sorted(sort(R), sort(S))
+$$
+
 ```
 
 ## Implementation

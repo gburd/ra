@@ -31,15 +31,20 @@ traversal setup and can batch relationship lookups.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: correlated subquery per row
+$$
 for each n in NodeScan(:Person):
   result[n] = [m.name for m in expand(n, :KNOWS, outgoing)]
+$$
 
 -- After: flattened traversal with rollup
+$$
 expand(NodeScan(:Person), :KNOWS, outgoing)
   |> group by source_node
   |> collect(target.name) as list
+$$
+
 ```
 
 ## Implementation

@@ -24,12 +24,15 @@ Splits disjunctions (OR) in anti-join ON clauses into an intersection of two ant
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 AntiJoin[c1 OR c2](L, R)
-  -> Intersect(
+  \rightarrow Intersect(
        AntiJoin[c1](L, R),
        AntiJoin[c2](L, R)
      )
+$$
+
 ```
 
 ## Implementation

@@ -45,11 +45,14 @@ decisions and avoiding unnecessary sorts/distincts.
 
 ## Relational Algebra
 
-```algebra
-sigma[pk = v](R)
-  -> unique_index_lookup[I_unique](pk = v)
-  where is_unique(I) && matches_all_key_columns(I, pk)
+```latex
+$$
+\sigma_{pk = v}(R)
+  \rightarrow unique_index_lookup[I_unique](pk = v)
+  \text{where} is_unique(I) && matches_all_key_columns(I, pk)
+$$
   -- output cardinality: exactly 0 or 1
+
 ```
 
 ## Implementation

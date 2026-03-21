@@ -28,23 +28,30 @@ intermediate result is cheaper than shuffling the original large tables.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Example: 3-way join with partial co-location
+$$
 Join[c3](Join[c1](R, S), T)
+$$
 
 -- R and S co-located on c1, T is not
 -- Optimal order: co-located join first
--> Join[c3](
+$$
+\rightarrow Join[c3](
      Exchange[hash(k3)](Join_local[c1](R, S)),
      Exchange[hash(k3)](T)
    )
+$$
 
 -- vs naive: shuffle everything
--> Join[c3](
+$$
+\rightarrow Join[c3](
      Join[c1](Exchange[hash(k1)](R), Exchange[hash(k1)](S)),
      Exchange[hash(k3)](T)
    )
+$$
 -- The naive version shuffles R and S unnecessarily
+
 ```
 
 ## Implementation

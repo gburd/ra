@@ -24,12 +24,17 @@ a broadcast join, and the aggregate result is small.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before (aggregate after broadcast)
-gamma[g, agg(a)](Exchange[broadcast](R))
+$$
+\gamma_{g, agg(a)}(Exchange[broadcast](R))
+$$
 
 -- After (aggregate before broadcast)
-Exchange[broadcast](gamma[g, agg(a)](R))
+$$
+Exchange[broadcast](\gamma_{g, agg(a)}(R))
+$$
+
 ```
 
 ## Test Cases

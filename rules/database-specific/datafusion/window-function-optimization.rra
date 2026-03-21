@@ -33,13 +33,18 @@ that processes each row in O(1) amortized time instead of O(window_size).
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: separate window operators with same partition/order
+$$
 window[PARTITION BY p ORDER BY o; f1=SUM(a)](
   window[PARTITION BY p ORDER BY o; f2=AVG(b)](R))
+$$
 
 -- After: merged window operator
+$$
 window[PARTITION BY p ORDER BY o; f1=SUM(a), f2=AVG(b)](R)
+$$
+
 ```
 
 ## Implementation

@@ -29,10 +29,13 @@ by series avoids reading historical data entirely.
 
 ## Relational Algebra
 
-```algebra
-gamma[series_id, max(ts), last(value)](scan(table))
-  -> last_point_scan(table, series_id)
+```latex
+$$
+\gamma_{series_id, \text{max}(ts), last(value)}(scan(table))
+  \rightarrow last_point_scan(table, series_id)
+$$
   -- Scans latest chunk per series using reverse index
+
 ```
 
 ## Implementation

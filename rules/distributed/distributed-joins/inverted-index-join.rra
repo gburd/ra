@@ -31,10 +31,13 @@ into O(n*log(m)).
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join[R.json_col @> L.search_val](L, Scan(R))
-  -> InvertedJoin[R.json_col @> L.search_val](L, R.inv_idx)
-  where R has inverted index on json_col
+  \rightarrow InvertedJoin[R.json_col @> L.search_val](L, R.inv_idx)
+  \text{where} R has inverted index on json_col
+$$
+
 ```
 
 ## Implementation

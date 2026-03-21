@@ -39,21 +39,30 @@ expensive top-level sort, reducing total cost.
 
 ## Relational Algebra
 
-```algebra
-Given query: pi_{cols}(R1 join R2 join R3) ORDER BY a
+```latex
+$$
+Given query: pi_{cols}(R1 \bowtie R2 \bowtie R3) ORDER BY a
+$$
 
-Interesting orders: {a}, plus any merge-join orders
+$$
+Interesting orders: {a}, plus any merge-\bowtie orders
+$$
 
+$$
 DP enumeration at each level stores:
-  best_plan[subset, NO_ORDER] = cheapest plan for subset
-  best_plan[subset, ORDER_a] = cheapest plan producing order a
+  best_plan[\subseteq, NO_ORDER] = cheapest plan for \subseteq
+  best_plan[\subseteq, ORDER_a] = cheapest plan producing order a
   ...one entry per interesting order
+$$
 
+$$
 Final plan cost:
-  min(
+  \text{min}(
     cost(best_plan[all, NO_ORDER]) + sort_cost(a),
     cost(best_plan[all, ORDER_a])
   )
+$$
+
 ```
 
 ## Implementation

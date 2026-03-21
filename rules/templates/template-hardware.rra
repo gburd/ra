@@ -27,9 +27,12 @@ custom logic, etc.) makes this faster than CPU execution.
 
 ## Relational Algebra
 
-```algebra
-CPU_OPERATOR(R) -> DEVICE_OPERATOR(R)
-  where CONDITION
+```latex
+$$
+CPU_OPERATOR(R) \rightarrow DEVICE_OPERATOR(R)
+  \text{where} CONDITION
+$$
+
 ```
 
 ## Implementation

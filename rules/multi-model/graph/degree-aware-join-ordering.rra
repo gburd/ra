@@ -28,10 +28,13 @@ and expanding outward, each intermediate result set stays small.
 
 ## Relational Algebra
 
-```algebra
-match(a-[e1]->b-[e2]->c)  -- if degree(c) << degree(a)
-  -> match(c<-[e2]-b<-[e1]-a)
+```latex
+$$
+match(a-[e1]\rightarrowb-[e2]\rightarrowc)  -- if degree(c) << degree(a)
+  \rightarrow match(c<-[e2]-b<-[e1]-a)
+$$
   -- Start traversal from c instead of a
+
 ```
 
 ## Implementation

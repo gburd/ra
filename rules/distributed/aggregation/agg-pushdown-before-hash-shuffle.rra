@@ -24,16 +24,21 @@ and the aggregate function is decomposable.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
-gamma[g, agg(a)](Exchange[hash(g)](R))
+$$
+\gamma_{g, agg(a)}(Exchange[hash(g)](R))
+$$
 
 -- After
-gamma[g, merge_agg(partial)](
+$$
+\gamma_{g, merge_agg(partial)}(
     Exchange[hash(g)](
-        gamma[g, partial_agg(a)](R)
+        \gamma_{g, partial_agg(a)}(R)
     )
 )
+$$
+
 ```
 
 ## Test Cases

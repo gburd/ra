@@ -32,13 +32,18 @@ NULLs (filtered by the aggregate), making it redundant.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: aggregate over left join
-gamma[g; DISTINCT](R LEFT JOIN S ON R.k = S.k)
-  where g references only R's columns
+$$
+\gamma_{g; DISTINCT}(R LEFT JOIN S ON R.k = S.k)
+  \text{where} g references only R's columns
+$$
 
 -- After: aggregate over left side only
-gamma[g; DISTINCT](R)
+$$
+\gamma_{g; DISTINCT}(R)
+$$
+
 ```
 
 ## Implementation

@@ -33,12 +33,17 @@ workloads.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: row mode execution
+$$
 sort[key](hash-aggregate[groups; aggs](row-scan(T)))
+$$
 
 -- After: batch mode on rowstore
+$$
 batch-sort[key](batch-hash-aggregate[groups; aggs](row-scan(T)))
+$$
+
 ```
 
 ## Implementation

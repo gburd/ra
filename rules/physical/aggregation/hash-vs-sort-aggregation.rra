@@ -26,13 +26,18 @@ aggregation are feasible.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Option 1: Hash aggregation
+$$
 HashAggregate[dept; SUM(salary)](employees)
+$$
 
 -- Option 2: Sort aggregation (when input pre-sorted by dept)
+$$
 SortAggregate[dept; SUM(salary)](
     IndexScan(idx_dept, employees))  -- already sorted by dept
+$$
+
 ```
 
 ## Implementation

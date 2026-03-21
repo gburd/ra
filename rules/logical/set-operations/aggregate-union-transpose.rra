@@ -20,8 +20,11 @@ Pushes aggregation through union
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Agg(Union(R, S)) => Union(Agg(R), Agg(S))
+$$
+
 ```
 
 ## Implementation

@@ -40,8 +40,9 @@ the scan can stop immediately after the first match per partition.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: full partition scan in ONE ROW mode
+$$
 Limit(1,
   RowPattern(
     input: Scan(T),
@@ -50,8 +51,10 @@ Limit(1,
     ...
   )
 )
+$$
 
 -- After: early-terminating pattern matcher
+$$
 RowPattern(
   input: Scan(T),
   mode: ONE_ROW_PER_MATCH,
@@ -59,24 +62,31 @@ RowPattern(
   early_terminate: FIRST_MATCH,
   ...
 )
+$$
+
 ```
 
 ### With partition-wise limit
 
-```algebra
+```latex
 -- Before: LIMIT per partition using window function
+$$
 Filter(rn = 1,
   Window(ROW_NUMBER() OVER (PARTITION BY ...),
     RowPattern(mode: ONE_ROW, ...)
   )
 )
+$$
 
 -- After: stop after first match per partition
+$$
 RowPattern(
   mode: ONE_ROW,
   early_terminate: FIRST_MATCH_PER_PARTITION,
   ...
 )
+$$
+
 ```
 
 ## Implementation

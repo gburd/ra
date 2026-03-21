@@ -20,12 +20,17 @@ Reorders joins to minimize intermediate result sizes using join graph constructi
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
-(inner-join (inner-join a b) (inner-join c d))
+$$
+(inner-\bowtie (inner-\bowtie a b) (inner-\bowtie c d))
+$$
 
 -- After
-(inner-join (inner-join a c) (inner-join b d))
+$$
+(inner-\bowtie (inner-\bowtie a c) (inner-\bowtie b d))
+$$
+
 ```
 
 ## Preconditions

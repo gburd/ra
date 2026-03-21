@@ -31,17 +31,22 @@ hardware prefetching and avoiding cache conflicts.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: single-threaded scan
-sigma[price > 100](products.price)
+$$
+\sigma_{price > 100}(products.price)
+$$
 
 -- After: parallel mitosis (4 cores)
+$$
 merge(
-    sigma[price > 100](products.price[0..N/4]),
-    sigma[price > 100](products.price[N/4..N/2]),
-    sigma[price > 100](products.price[N/2..3N/4]),
-    sigma[price > 100](products.price[3N/4..N])
+    \sigma_{price > 100}(products.price[0..N/4]),
+    \sigma_{price > 100}(products.price[N/4..N/2]),
+    \sigma_{price > 100}(products.price[N/2..3N/4]),
+    \sigma_{price > 100}(products.price[3N/4..N])
 )
+$$
+
 ```
 
 ## Implementation

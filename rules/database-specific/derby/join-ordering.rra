@@ -31,13 +31,18 @@ intermediate result sizes, decreasing overall I/O and CPU cost.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: left-to-right order
-(A join B) join C
+$$
+(A \bowtie B) \bowtie C
+$$
 
 -- After: reordered by cost
-(B join C) join A
+$$
+(B \bowtie C) \bowtie A
+$$
 -- If B join C is more selective
+
 ```
 
 ## Implementation

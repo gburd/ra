@@ -32,12 +32,17 @@ MySQL 8.0+ (improved for InnoDB)
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: storage returns all rows, SQL filters
-sigma[age > 30](engine_scan(users))
+$$
+\sigma_{age > 30}(engine_scan(users))
+$$
 
 -- After: engine evaluates condition during scan
+$$
 engine_scan(users, pushed_cond=[age > 30])
+$$
+
 ```
 
 ## Implementation

@@ -33,18 +33,27 @@ simplifies the pattern AST and produces a more compact DFA.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: nested sequence
+$$
 Sequence([Sequence([A, B]), C, D])
+$$
 
 -- After: flat sequence
+$$
 Sequence([A, B, C, D])
+$$
 
 -- Before: deeply nested
+$$
 Sequence([Sequence([A, Sequence([B, C])]), D])
+$$
 
 -- After: fully flattened
+$$
 Sequence([A, B, C, D])
+$$
+
 ```
 
 ## Implementation

@@ -32,9 +32,12 @@ of rows passed to the union operator and any subsequent operators.
 
 ## Relational Algebra
 
-```algebra
-sigma[p](R union S) -> sigma[p](R) union sigma[p](S)
-sigma[p](R union_all S) -> sigma[p](R) union_all sigma[p](S)
+```latex
+$$
+\sigma_{p}(R \cup S) \rightarrow \sigma_{p}(R) \cup \sigma_{p}(S)
+\sigma_{p}(R union_all S) \rightarrow \sigma_{p}(R) union_all \sigma_{p}(S)
+$$
+
 ```
 
 ## Implementation

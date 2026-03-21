@@ -32,14 +32,19 @@ for Arrow's columnar format.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: distinct aggregate
-gamma[g; cnt=COUNT(DISTINCT a)](R)
+$$
+\gamma_{g; cnt=COUNT(DISTINCT a)}(R)
+$$
 
 -- After: two-phase with GROUP BY
-gamma[g; cnt=COUNT(a)](
-    gamma[g, a](R)
+$$
+\gamma_{g; cnt=COUNT(a)}(
+    \gamma_{g, a}(R)
 )
+$$
+
 ```
 
 ## Implementation

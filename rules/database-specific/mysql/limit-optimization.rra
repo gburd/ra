@@ -31,12 +31,17 @@ only N rows are read and the query terminates immediately.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: full scan + sort + limit
+$$
 limit[10](sort[created_at DESC](scan(events)))
+$$
 
 -- After: index scan with early termination
+$$
 limit[10](index_scan[idx_ts, DESC](events))
+$$
+
 ```
 
 ## Implementation

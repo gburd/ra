@@ -31,12 +31,17 @@ where the query uses 3 columns, this saves 97% of data transfer.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: load all columns
-pi[a, b](scan(table[a, b, c, d, e, ..., z]))
+$$
+\pi_{a, b}(scan(table[a, b, c, d, e, ..., z]))
+$$
 
 -- After: load only needed columns
-pi[a, b](scan-columns(table, [a, b]))
+$$
+\pi_{a, b}(scan-columns(table, [a, b]))
+$$
+
 ```
 
 ## Implementation

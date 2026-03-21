@@ -32,18 +32,23 @@ understand what sort orderings are available from each input's potential plans.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: nested loop join (generic)
-(inner-join
+$$
+(inner-\bowtie
   (scan $table1)
   (scan $table2)
   (eq $a $b))
+$$
 
 -- After: merge join when both sides have compatible orderings
-(merge-join
+$$
+(merge-\bowtie
   (sort (scan $table1) $ordering)
   (sort (scan $table2) $ordering)
   (eq $a $b))
+$$
+
 ```
 
 ## Implementation Notes

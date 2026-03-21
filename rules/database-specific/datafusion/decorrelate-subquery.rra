@@ -31,18 +31,25 @@ O(N * M) to O(N + M) complexity.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- EXISTS to semi-join
-sigma[EXISTS(sigma[S.k = R.k](S))](R)
-  -> R semi-join[R.k = S.k] S
+$$
+\sigma_{EXISTS(sigma[S.k = R.k}(S))](R)
+  \rightarrow R semi-\bowtie_{R.k = S.k} S
+$$
 
 -- NOT EXISTS to anti-join
-sigma[NOT EXISTS(sigma[S.k = R.k](S))](R)
-  -> R anti-join[R.k = S.k] S
+$$
+\sigma_{NOT EXISTS(sigma[S.k = R.k}(S))](R)
+  \rightarrow R anti-\bowtie_{R.k = S.k} S
+$$
 
 -- IN to semi-join
-sigma[R.a IN (pi[S.a](sigma[S.k = R.k](S)))](R)
-  -> R semi-join[R.k = S.k AND R.a = S.a] S
+$$
+\sigma_{R.a IN (\pi_{S.a}(\sigma_{S.k = R.k}(S)))}(R)
+  \rightarrow R semi-\bowtie_{R.k = S.k AND R.a = S.a} S
+$$
+
 ```
 
 ## Implementation

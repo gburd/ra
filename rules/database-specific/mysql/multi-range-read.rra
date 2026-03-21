@@ -34,13 +34,18 @@ read-ahead and reduced seek overhead.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: random row fetches from index scan
+$$
 fetch_rows(index_range_scan[idx, a BETWEEN 10 AND 100](T))
+$$
 
 -- After: sort rowids, then sequential fetch
+$$
 sequential_fetch(sort_by_pk(
     index_range_scan[idx, a BETWEEN 10 AND 100](T)))
+$$
+
 ```
 
 ## Implementation

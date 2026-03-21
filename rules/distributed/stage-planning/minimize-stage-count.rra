@@ -30,14 +30,19 @@ operator fusion within the stage.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: unnecessary intermediate stage
-Stage_A -> Exchange[hash(k)] -> Stage_B -> Exchange[hash(k)] -> Stage_C
-  where Stage_B only does filter/project
+$$
+Stage_A \rightarrow Exchange[hash(k)] \rightarrow Stage_B \rightarrow Exchange[hash(k)] \rightarrow Stage_C
+  \text{where} Stage_B only does filter/project
+$$
 
 -- After: merged
-Stage_A -> Exchange[hash(k)] -> Stage_BC
-  where filter/project merged into Stage_BC
+$$
+Stage_A \rightarrow Exchange[hash(k)] \rightarrow Stage_BC
+  \text{where} filter/project merged into Stage_BC
+$$
+
 ```
 
 ## Implementation

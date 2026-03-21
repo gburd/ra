@@ -22,10 +22,13 @@ When DISTINCT is followed by ORDER BY on the same columns, merge the two operati
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Sort[keys](Distinct(input))
-  -> SortDistinct[keys](input)
-  where distinct_cols subset_of keys
+  \rightarrow SortDistinct[keys](input)
+  \text{where} distinct_cols subset_of keys
+$$
+
 ```
 
 ## Implementation

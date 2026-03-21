@@ -38,18 +38,23 @@ discarding them afterward.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: filter after pattern matching
-sigma[price > 100](
+$$
+\sigma_{price > 100}(
   RowPattern[
     DEFINE A AS price > PREV(price)
   ](R)
 )
+$$
 
 -- After: filter absorbed into DEFINE
+$$
 RowPattern[
   DEFINE A AS (price > PREV(price) AND price > 100)
 ](R)
+$$
+
 ```
 
 ## Implementation

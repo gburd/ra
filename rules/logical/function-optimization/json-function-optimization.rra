@@ -31,14 +31,19 @@ index scans instead of sequential scans for containment checks.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Collapse nested extractions
-pi[json_extract(json_extract(doc, '$.a'), '$.b')](R)
-  -> pi[json_extract(doc, '$.a.b')](R)
+$$
+\pi_{json_extract(json_extract(doc, '$.a'), '$.b')}(R)
+  \rightarrow \pi_{json_extract(doc, '$.a.b')}(R)
+$$
 
 -- Match GIN index for containment
-sigma[doc @> '{"status":"active"}'](R)
-  -> gin_index_scan[I_gin](doc @> '{"status":"active"}')
+$$
+\sigma_{doc @> '{"status":"active"}'}(R)
+  \rightarrow gin_index_scan[I_gin](doc @> '{"status":"active"}')
+$$
+
 ```
 
 ## Implementation

@@ -24,12 +24,15 @@ Pushes filter predicates below a join operation when the predicate references on
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Filter[c](Join[L, R])
-  -> Join[Filter[c_L](L), Filter[c_R](R)]
-  where c = c_L ∧ c_R
-  where columns(c_L) ⊆ columns(L)
-  where columns(c_R) ⊆ columns(R)
+  \rightarrow Join[Filter[c_L](L), Filter[c_R](R)]
+  \text{where} c = c_L ∧ c_R
+  \text{where} columns(c_L) ⊆ columns(L)
+  \text{where} columns(c_R) ⊆ columns(R)
+$$
+
 ```
 
 ## Implementation

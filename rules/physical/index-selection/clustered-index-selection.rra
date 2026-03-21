@@ -31,10 +31,13 @@ Uses clustered index (data stored in index order) for range scans and ordered ac
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 sort[key](filter[key BETWEEN v1 AND v2](scan[T]))
-  -> clustered_index_scan[I_clustered](key BETWEEN v1 AND v2)
-  where is_clustered(I) && matches(key)
+  \rightarrow clustered_index_scan[I_clustered](key BETWEEN v1 AND v2)
+  \text{where} is_clustered(I) && matches(key)
+$$
+
 ```
 
 ## Implementation

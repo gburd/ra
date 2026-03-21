@@ -25,12 +25,17 @@ that can be combined without changing semantics.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: separate filter and project operators
-pi[a, b](sigma[a > 10](stream))
+$$
+\pi_{a, b}(\sigma_{a > 10}(stream))
+$$
 
 -- After: fused filter-project operator
+$$
 FusedFilterProject(stream, pred: a > 10, cols: [a, b])
+$$
+
 ```
 
 ## Implementation

@@ -32,12 +32,17 @@ calculations need.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: window SUM that may produce NULL
-pi[SUM(x) OVER (PARTITION BY g ORDER BY k)](R)
+$$
+\pi_{SUM(x) OVER (PARTITION BY g ORDER BY k)}(R)
+$$
 
 -- After: SUM0 that returns 0 for empty frames
-pi[SUM0(x) OVER (PARTITION BY g ORDER BY k)](R)
+$$
+\pi_{SUM0(x) OVER (PARTITION BY g ORDER BY k)}(R)
+$$
+
 ```
 
 ## Implementation

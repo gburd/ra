@@ -29,16 +29,21 @@ magnitude.
 
 ## Relational Algebra
 
-```algebra
-aggregate[group_by: R.cols, agg](join[R.key = S.key](R, S))
-  -> join[R.key = S.key](aggregate[group_by: R.cols, agg](R), S)
-  where all_columns_from(group_by, R)
-  where preserves_join_semantics(agg)
+```latex
+$$
+aggregate[group_by: R.cols, agg](\bowtie_{R.key = S.key}(R, S))
+  \rightarrow \bowtie_{R.key = S.key}(aggregate[group_by: R.cols, agg](R), S)
+  \text{where} all_columns_from(group_by, R)
+  \text{where} preserves_join_semantics(agg)
+$$
 
+$$
 Conditions:
 - Grouping columns must be from R only
-- R.key must be in grouping columns (preserve join key)
+- R.key must be in grouping columns (preserve \bowtie key)
 - Aggregate must be compatible (SUM, COUNT, MIN, MAX)
+$$
+
 ```
 
 ## Implementation

@@ -23,10 +23,13 @@ grouping columns are a subset of the inner aggregation's grouping columns.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Agg[outer_groups, outer_aggs](Agg[inner_groups, inner_aggs](R))
-  -> Agg[outer_groups, merged_aggs](R)
-  where outer_groups ⊆ inner_groups
+  \rightarrow Agg[outer_groups, merged_aggs](R)
+  \text{where} outer_groups ⊆ inner_groups
+$$
+
 ```
 
 ## Implementation

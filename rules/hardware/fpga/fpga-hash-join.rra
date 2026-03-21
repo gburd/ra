@@ -33,10 +33,13 @@ deterministic throughput regardless of data distribution.
 
 ## Relational Algebra
 
-```algebra
-R join[equi(R.a = S.b)] S -> fpga_hash_join[equi(R.a = S.b)](R, S)
-  where size(build_side) <= fpga_bram_capacity
+```latex
+$$
+R \bowtie_{equi(R.a = S.b)} S \rightarrow fpga_hash_\bowtie_{equi(R.a = S.b)}(R, S)
+  \text{where} size(build_side) <= fpga_bram_capacity
     AND key_type is fixed_width
+$$
+
 ```
 
 ## Implementation

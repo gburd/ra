@@ -35,16 +35,19 @@ Multi-pass partitioning using radix bits to create cache-sized partitions for ef
 
 ## Relational Algebra
 
-```algebra
-join[R.key = S.key](R, S)
-  -> partition_pass_1:
-       radix_partition(R, bits=8) -> R1...R256
-       radix_partition(S, bits=8) -> S1...S256
+```latex
+$$
+\bowtie_{R.key = S.key}(R, S)
+  \rightarrow partition_pass_1:
+       radix_partition(R, bits=8) \rightarrow R1...R256
+       radix_partition(S, bits=8) \rightarrow S1...S256
      partition_pass_2 (if needed):
        for each partition: further partition to cache size
      join_phase:
        for each partition pair (Ri, Si):
          vectorized_hash_join(Ri, Si)
+$$
+
 ```
 
 ## Implementation

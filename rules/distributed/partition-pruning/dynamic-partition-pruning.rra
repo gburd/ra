@@ -31,13 +31,16 @@ pruning eliminates 335 partitions at runtime.
 
 ## Relational Algebra
 
-```algebra
-Join[f.pk = d.k](Scan(fact), sigma[p](Scan(dim)))
-  -> Join[f.pk = d.k](
+```latex
+$$
+Join[f.pk = d.k](Scan(fact), \sigma_{p}(Scan(dim)))
+  \rightarrow Join[f.pk = d.k](
        Scan(fact, partitions=runtime_filter(d.k)),
-       sigma[p](Scan(dim))
+       \sigma_{p}(Scan(dim))
      )
-  where pk is partition key of fact
+  \text{where} pk is partition key of fact
+$$
+
 ```
 
 ## Implementation

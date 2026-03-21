@@ -33,16 +33,23 @@ documents. For incremental refreshes where <10% of results change, this is
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- $out: full replacement (drop + insert)
+$$
 drop(output) ; insert(output, pipeline_result)
+$$
 
 -- $merge: incremental upsert
+$$
 for each doc in pipeline_result:
   upsert(output, on=doc._id, doc)
+$$
 
 -- Optimized $merge: bulk batched upsert
+$$
 bulk-upsert(output, on=_id, pipeline_result, batch_size=1000)
+$$
+
 ```
 
 ## Implementation

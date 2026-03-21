@@ -24,10 +24,13 @@ Pushes filters below window function operators when the filter predicate does no
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 filter[P](window[W](R))
-  -> window[W](filter[P](R))
-  where columns(P) ∩ output_cols(W) = ∅
+  \rightarrow window[W](filter[P](R))
+  \text{where} columns(P) ∩ output_cols(W) = ∅
+$$
+
 ```
 
 ## Implementation

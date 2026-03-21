@@ -24,14 +24,19 @@ where the full document is not needed downstream.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: extract JSON after join
-pi[r.id, r.doc->>'name'](R join S)
+$$
+\pi_{r.id, r.doc\rightarrow>'name'}(R \bowtie S)
+$$
 
 -- After: extract JSON before join, narrow projection
-pi[r.id, r.name](
-    pi[id, doc->>'name' AS name](R)
-    join S)
+$$
+\pi_{r.id, r.name}(
+    \pi_{id, doc\rightarrow>'name' AS name}(R)
+    \bowtie S)
+$$
+
 ```
 
 ## Implementation

@@ -28,12 +28,17 @@ with no semantic effect, increasing overhead for no benefit.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: identity projection
-pi[a, b, c](R)  where R has columns {a, b, c}
+$$
+\pi_{a, b, c}(R)  \text{where} R has columns {a, b, c}
+$$
 
 -- After: no projection
+$$
 R
+$$
+
 ```
 
 ## Implementation

@@ -32,13 +32,18 @@ choose join order across all tables.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: derived table materialized
-outer_rel join (materialize(
-    sigma[cond](pi[cols](inner_rel))))
+$$
+outer_rel \bowtie (materialize(
+    \sigma_{cond}(\pi_{cols}(inner_rel))))
+$$
 
 -- After: merged into outer query
-sigma[cond](outer_rel join inner_rel)
+$$
+\sigma_{cond}(outer_rel \bowtie inner_rel)
+$$
+
 ```
 
 ## Implementation

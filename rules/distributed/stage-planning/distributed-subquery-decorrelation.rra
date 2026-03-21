@@ -32,15 +32,20 @@ reducing the number of network round trips from O(n) to O(1).
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Correlated (Apply): N distributed queries
-Apply[exists](R, sigma[R.k = S.k](S))
-  -> SemiJoin[R.k = S.k](R, S)
+$$
+Apply[exists](R, \sigma_{R.k = S.k}(S))
+  \rightarrow SemiJoin[R.k = S.k](R, S)
+$$
 
 -- Scalar subquery decorrelation
+$$
 Project[a, (SELECT MAX(b) FROM S WHERE S.k = R.k)](R)
-  -> LeftJoin[R.k = S.k](R,
-       gamma[k, MAX(b)](S))
+  \rightarrow LeftJoin[R.k = S.k](R,
+       \gamma_{k, MAX(b)}(S))
+$$
+
 ```
 
 ## Implementation

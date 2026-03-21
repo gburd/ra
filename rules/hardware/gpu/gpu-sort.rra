@@ -33,11 +33,14 @@ is 2-10x higher than CPU sort for large inputs.
 
 ## Relational Algebra
 
-```algebra
-tau[k](R) -> gpu_sort[k](R)
-  where |R| > crossover_threshold
+```latex
+$$
+tau[k](R) \rightarrow gpu_sort[k](R)
+  \text{where} |R| > crossover_threshold
     AND type(k) is gpu_sortable
     AND size(R) <= gpu_memory
+$$
+
 ```
 
 ## Implementation

@@ -31,13 +31,18 @@ backward scroll is detected.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: eager materialization
-materialize(query_result) -> cursor
+$$
+materialize(query_result) \rightarrow cursor
+$$
 
 -- After: lazy materialization
-lazy_materialize(query_result) -> cursor
+$$
+lazy_materialize(query_result) \rightarrow cursor
+$$
 -- Only materializes on backward scroll
+
 ```
 
 ## Implementation

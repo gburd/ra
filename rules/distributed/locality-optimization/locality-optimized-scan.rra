@@ -29,15 +29,18 @@ find matching rows locally avoid any cross-region network round trips.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Scan(T, spans=[local_spans ++ remote_spans])
-  -> LocalityOptimizedSearch(
+  \rightarrow LocalityOptimizedSearch(
        Scan(T, spans=local_spans),
        Scan(T, spans=remote_spans)
      )
-  where T is REGIONAL BY ROW
-  where limit <= max_cardinality(local_spans)
+  \text{where} T is REGIONAL BY ROW
+  \text{where} limit <= max_cardinality(local_spans)
         OR max_cardinality(local_spans) >= max_cardinality(T)
+$$
+
 ```
 
 ## Implementation

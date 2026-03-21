@@ -24,9 +24,12 @@ Replaces a MIN group-by with a simple limit when grouping columns are constant (
 
 ## Relational Algebra
 
-```algebra
-GroupBy[const_cols, min(k)](Filter[const_cols = c](R))
-  -> Project[const_cols, k](Limit[1, order_by_k](Filter[const_cols = c, k IS NOT NULL](R)))
+```latex
+$$
+GroupBy[const_cols, \text{min}(k)](Filter[const_cols = c](R))
+  \rightarrow Project[const_cols, k](Limit[1, order_by_k](Filter[const_cols = c, k IS NOT NULL](R)))
+$$
+
 ```
 
 ## Implementation

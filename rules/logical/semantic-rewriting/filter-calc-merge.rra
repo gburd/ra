@@ -28,12 +28,17 @@ efficiently evaluate the combined filter and projection together.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: filter above calc
-sigma[p2](Calc[proj, filter=p1](R))
+$$
+\sigma_{p2}(Calc[proj, filter=p1](R))
+$$
 
 -- After: merged into single calc
+$$
 Calc[proj, filter=(p1 AND p2)](R)
+$$
+
 ```
 
 ## Implementation

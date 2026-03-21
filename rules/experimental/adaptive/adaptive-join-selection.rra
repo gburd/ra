@@ -35,17 +35,20 @@ switch before paying the full cost of the wrong choice.
 
 ## Relational Algebra
 
-```algebra
-join[R.a = S.a](R, S)
-  -> adaptive_join(
+```latex
+$$
+\bowtie_{R.a = S.a}(R, S)
+  \rightarrow adaptive_join(
        algorithms: [hash_join, sort_merge_join, grace_hash_join],
        initial: hash_join,
        switch_conditions: [
-         (memory_pressure > 0.8, -> grace_hash_join),
-         (input_sorted(R) AND input_sorted(S), -> sort_merge_join)
+         (memory_pressure > 0.8, \rightarrow grace_hash_join),
+         (input_sorted(R) AND input_sorted(S), \rightarrow sort_merge_join)
        ],
        inputs: (R, S)
      )
+$$
+
 ```
 
 ## Implementation

@@ -25,11 +25,12 @@ of globally-unique values.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Phase 1: Local dedup
 -- Phase 2: Shuffle by distinct key
 -- Phase 3: Final count
-gamma[g, COUNT(*)](
+$$
+\gamma_{g, COUNT(*)}(
     Exchange[hash(g)](
         delta[g, d](
             Exchange[hash(d)](
@@ -38,6 +39,8 @@ gamma[g, COUNT(*)](
         )
     )
 )
+$$
+
 ```
 
 ## Test Cases

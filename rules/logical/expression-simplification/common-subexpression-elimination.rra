@@ -27,10 +27,13 @@ the cached value is semantically equivalent.
 
 ## Relational Algebra
 
-```algebra
-pi[f(x), g(f(x))](R) -> pi[t1, g(t1)](pi[f(x) as t1, *](R))
-  where f(x) appears multiple times
-  where f is deterministic
+```latex
+$$
+\pi_{f(x), g(f(x))}(R) \rightarrow \pi_{t1, g(t1)}(\pi_{f(x) as t1, *}(R))
+  \text{where} f(x) appears multiple times
+  \text{where} f is deterministic
+$$
+
 ```
 
 ## Implementation

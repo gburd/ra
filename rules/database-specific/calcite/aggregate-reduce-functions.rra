@@ -31,12 +31,19 @@ aggregates share common subexpressions.
 
 ## Relational Algebra
 
-```algebra
-AGG[AVG(x)](R) -> AGG[SUM(x), COUNT(x)](R) followed by division
+```latex
+$$
+AGG[AVG(x)](R) \rightarrow AGG[SUM(x), COUNT(x)](R) followed by division
+$$
 
-AGG[MIN(x), MAX(x), MIN(x)](R) -> AGG[MIN(x), MAX(x)](R)
+$$
+AGG[MIN(x), MAX(x), MIN(x)](R) \rightarrow AGG[MIN(x), MAX(x)](R)
+$$
 
-AGG[SUM(1)](R) -> AGG[COUNT(*)](R)
+$$
+AGG[SUM(1)](R) \rightarrow AGG[COUNT(*)](R)
+$$
+
 ```
 
 ## Implementation

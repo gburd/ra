@@ -31,12 +31,17 @@ of magnitude faster.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Label scan with post-filter
-sigma[name = "Alice"](label-scan(:Person))
+$$
+\sigma_{name = "Alice"}(label-scan(:Person))
+$$
 
 -- Index seek
+$$
 index-seek(:Person(name), "Alice")
+$$
+
 ```
 
 ## Implementation

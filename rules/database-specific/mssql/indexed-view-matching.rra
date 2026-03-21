@@ -33,21 +33,28 @@ with NOEXPAND hint)
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Query:
-gamma[dept; total=SUM(salary)](
-    sigma[active = true](employees join departments))
+$$
+\gamma_{dept; total=SUM(salary)}(
+    \sigma_{active = true}(employees \bowtie departments))
+$$
 
 -- Indexed View:
+$$
 CREATE VIEW v_dept_salary WITH SCHEMABINDING AS
 SELECT d.dept_name AS dept, SUM(e.salary) AS total, COUNT_BIG(*) AS cnt
 FROM employees e JOIN departments d ON e.dept_id = d.id
 WHERE e.active = 1
 GROUP BY d.dept_name;
 CREATE UNIQUE CLUSTERED INDEX ix ON v_dept_salary(dept);
+$$
 
 -- Rewritten:
+$$
 scan(v_dept_salary)
+$$
+
 ```
 
 ## Implementation

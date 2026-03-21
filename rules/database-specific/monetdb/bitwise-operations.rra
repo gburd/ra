@@ -35,15 +35,20 @@ scalar comparison.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Scalar evaluation (per-tuple):
+$$
 filter[col >= 5 AND col <= 10](scan(R))
-  -> for each row: compare(row.col, 5) AND compare(row.col, 10)
+  \rightarrow for each row: compare(row.col, 5) AND compare(row.col, 10)
+$$
 
 -- Bitwise evaluation (per-word):
+$$
 filter[col >= 5 AND col <= 10](scan(R))
-  -> for each word: mask = ge_mask(word, 5) & le_mask(word, 10)
+  \rightarrow for each word: mask = ge_mask(word, 5) & le_mask(word, 10)
+$$
   -- Processes 16 values per word operation (4-bit encoding)
+
 ```
 
 ## Implementation

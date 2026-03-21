@@ -34,11 +34,14 @@ cache-friendly (streaming writes to TLB-friendly output buffers).
 
 ## Relational Algebra
 
-```algebra
-R hash_join[c] S
-  -> radix_partition(R, bits) hash_join[c] radix_partition(S, bits)
-  where min(size(R), size(S)) > L2_cache
+```latex
+$$
+R hash_\bowtie_{c} S
+  \rightarrow radix_partition(R, bits) hash_\bowtie_{c} radix_partition(S, bits)
+  \text{where} \text{min}(size(R), size(S)) > L2_cache
     AND partitions(bits) * bucket_size <= L2_cache
+$$
+
 ```
 
 ## Implementation

@@ -31,12 +31,17 @@ this eliminates the largest cost component.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Current: tables have incompatible distributions
+$$
 Join[c](R hash(a), S hash(b))  -- requires shuffle
+$$
 
 -- After co-location:
-Join[c](R hash(join_key), S hash(join_key))  -- local join
+$$
+Join[c](R hash(join_key), S hash(join_key))  -- local \bowtie
+$$
+
 ```
 
 ## Implementation

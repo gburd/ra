@@ -34,9 +34,10 @@ while finding provably optimal plans within the search restrictions.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- System R Optimizer Algorithm (simplified):
 
+$$
 OPTIMIZE(query):
   1. Parse query into relational algebra tree
   2. Collect statistics: TCARD, ICARD, page counts for all tables
@@ -47,21 +48,23 @@ OPTIMIZE(query):
      - Enumerate access paths: seq scan, each matching index
      - Compute cost for each (path, interesting_order) pair
      - Keep cheapest for each interesting order + unordered
-  5. DP join enumeration (left-deep only):
+  5. DP \bowtie enumeration (left-deep only):
      For subset_size = 2 to n:
-       For each connected subset S:
+       For each connected \subseteq S:
          For each relation R in S as new inner:
            For each interesting order O:
-             For each join method (NL, merge-scan):
-               candidate = join(best(S\R, O'), access_path(R))
+             For each \bowtie method (NL, merge-scan):
+               candidate = \bowtie(best(S\R, O'), access_path(R))
                if cost(candidate) < best(S, O):
                  best(S, O) = candidate
   6. For final result:
-     Choose min(
+     Choose \text{min}(
        best(all_tables, unordered) + sort_cost,
        best(all_tables, required_order)
      )
   7. Return cheapest complete plan
+$$
+
 ```
 
 ## Implementation

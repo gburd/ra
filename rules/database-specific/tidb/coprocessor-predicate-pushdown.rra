@@ -33,11 +33,14 @@ by orders of magnitude.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Filter[pred](Scan[table])
-  -> CopTask(Filter[pred](Scan[table]))
-  where is_pushable_to_tikv(pred)
+  \rightarrow CopTask(Filter[pred](Scan[table]))
+  \text{where} is_pushable_to_tikv(pred)
+$$
 
+$$
 Pushable predicates:
 - Simple comparisons: =, <>, <, >, <=, >=
 - Logical: AND, OR, NOT
@@ -45,6 +48,8 @@ Pushable predicates:
 - IS NULL, IS NOT NULL
 - Pattern matching: LIKE (with leading literal)
 - Arithmetic expressions on columns
+$$
+
 ```
 
 ## Implementation

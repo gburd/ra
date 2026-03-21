@@ -35,28 +35,37 @@ reducing state count and transition table size.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: alternation with common prefix
+$$
 Alternation([
   Sequence([A, B, C]),
   Sequence([A, B, D])
 ])
+$$
 
 -- After: factored
+$$
 Sequence([A, B, Alternation([C, D])])
+$$
 
 -- Before: three branches with partial common prefix
+$$
 Alternation([
   Sequence([A, B, C]),
   Sequence([A, B, D]),
   Sequence([A, E])
 ])
+$$
 
 -- After: nested factoring
+$$
 Sequence([A, Alternation([
   Sequence([B, Alternation([C, D])]),
   E
 ])])
+$$
+
 ```
 
 ## Implementation

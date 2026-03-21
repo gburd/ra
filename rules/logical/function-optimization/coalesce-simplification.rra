@@ -31,12 +31,15 @@ statically determine an argument's nullability, we can prune the list.
 
 ## Relational Algebra
 
-```algebra
-COALESCE(NOT_NULL_expr, ...) -> NOT_NULL_expr
-COALESCE(NULL, x, ...) -> COALESCE(x, ...)
-COALESCE(x) -> x
-COALESCE(x, x) -> x
-COALESCE(COALESCE(a, b), c) -> COALESCE(a, b, c)
+```latex
+$$
+COALESCE(NOT_NULL_expr, ...) \rightarrow NOT_NULL_expr
+COALESCE(NULL, x, ...) \rightarrow COALESCE(x, ...)
+COALESCE(x) \rightarrow x
+COALESCE(x, x) \rightarrow x
+COALESCE(COALESCE(a, b), c) \rightarrow COALESCE(a, b, c)
+$$
+
 ```
 
 ## Implementation

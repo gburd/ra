@@ -21,14 +21,19 @@ the join operation.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join[cond](RemoteScan[t1, endpoint], RemoteScan[t2, endpoint])
 =>
 RemoteScan[pushdown_join(t1, t2, cond), endpoint]
+$$
 
+$$
 Preconditions:
   - Both tables on same endpoint
-  - Remote supports join pushdown
+  - Remote supports \bowtie pushdown
+$$
+
 ```
 
 ## Before

@@ -32,13 +32,18 @@ select access paths considering all tables together.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: view boundary prevents global optimization
-sigma[v.x > 10](R join[R.k = V.k]
-    (pi[k, x](sigma[y = 5](S)) AS V))
+$$
+\sigma_{v.x > 10}(R \bowtie_{R.k = V.k}
+    (\pi_{k, x}(\sigma_{y = 5}(S)) AS V))
+$$
 
 -- After: view merged into outer query
-sigma[S.x > 10 AND S.y = 5](R join[R.k = S.k] S)
+$$
+\sigma_{S.x > 10 AND S.y = 5}(R \bowtie_{R.k = S.k} S)
+$$
+
 ```
 
 ## Implementation

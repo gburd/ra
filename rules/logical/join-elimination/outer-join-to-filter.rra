@@ -32,19 +32,28 @@ are discarded anyway, making the outer join equivalent to an inner join.
 
 ## Relational Algebra
 
-```algebra
-filter[S.col IS NOT NULL](left_join[cond](R, S))
-  -> filter[S.col IS NOT NULL](join[cond](R, S))
+```latex
+$$
+filter[S.col IS NOT NULL](left_\bowtie_{cond}(R, S))
+  \rightarrow filter[S.col IS NOT NULL](\bowtie_{cond}(R, S))
+$$
 
-filter[S.col = value](left_join[cond](R, S))
-  -> filter[S.col = value](join[cond](R, S))
+$$
+filter[S.col = value](left_\bowtie_{cond}(R, S))
+  \rightarrow filter[S.col = value](\bowtie_{cond}(R, S))
+$$
 
-filter[S.col > value](left_join[cond](R, S))
-  -> filter[S.col > value](join[cond](R, S))
+$$
+filter[S.col > value](left_\bowtie_{cond}(R, S))
+  \rightarrow filter[S.col > value](\bowtie_{cond}(R, S))
+$$
 
+$$
 General rule:
-filter[null_rejecting_pred_on_S](left_join[cond](R, S))
-  -> join[cond AND null_rejecting_pred_on_S](R, S)
+filter[null_rejecting_pred_on_S](left_\bowtie_{cond}(R, S))
+  \rightarrow \bowtie_{cond AND null_rejecting_pred_on_S}(R, S)
+$$
+
 ```
 
 ## Implementation

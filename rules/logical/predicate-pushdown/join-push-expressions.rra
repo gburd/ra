@@ -38,16 +38,21 @@ standard equi-join.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: expression in join condition
+$$
 R JOIN[R.x + 1 = S.y] S
+$$
 
 -- After: expression computed in project
-pi[*](
-    pi[*, x + 1 AS x_plus_1](R)
+$$
+\pi_{*}(
+    \pi_{*, \times + 1 AS x_plus_1}(R)
     JOIN[x_plus_1 = S.y]
     S
 )
+$$
+
 ```
 
 ## Implementation

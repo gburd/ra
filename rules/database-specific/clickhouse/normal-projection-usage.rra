@@ -24,11 +24,14 @@ Uses a normal (non-aggregate) projection that stores a subset of columns in a di
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Scan[MergeTree, cols](T)
-  -> Scan[Projection[cols'], sort_order'](T)
-  where cols ⊆ cols'
-  where sort_order' benefits_query
+  \rightarrow Scan[Projection[cols'], sort_order'](T)
+  \text{where} cols ⊆ cols'
+  \text{where} sort_order' benefits_query
+$$
+
 ```
 
 ## Implementation

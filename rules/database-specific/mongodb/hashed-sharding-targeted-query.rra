@@ -32,18 +32,23 @@ scatter-gather into an O(1) targeted query, where S is the number of shards.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Scatter-gather (range query on hashed key):
-union-all(
-  sigma[user_id IN range](shard_1),
-  sigma[user_id IN range](shard_2),
+$$
+\cup-all(
+  \sigma_{user_id IN range}(shard_1),
+  \sigma_{user_id IN range}(shard_2),
   ...
-  sigma[user_id IN range](shard_S)
+  \sigma_{user_id IN range}(shard_S)
 )
+$$
 
 -- Targeted (equality on hashed key):
-sigma[user_id = 12345](shard_k)
-  where k = chunk_lookup(hash(12345))
+$$
+\sigma_{user_id = 12345}(shard_k)
+  \text{where} k = chunk_lookup(hash(12345))
+$$
+
 ```
 
 ## Implementation

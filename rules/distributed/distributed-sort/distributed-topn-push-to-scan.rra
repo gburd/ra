@@ -31,13 +31,16 @@ and stops early once enough groups have been produced for the LIMIT.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Limit[k](GroupBy[g, agg](Scan(T)))
-  -> Limit[k](
+  \rightarrow Limit[k](
        GroupBy[g, agg](
          IndexJoin(T,
            IndexScan(T, idx_g, limit_hint=k))))
-  where idx_g provides ordering on prefix of g
+  \text{where} idx_g provides ordering on prefix of g
+$$
+
 ```
 
 ## Implementation

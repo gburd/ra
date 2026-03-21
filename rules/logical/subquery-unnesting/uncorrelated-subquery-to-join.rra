@@ -32,20 +32,27 @@ algorithms.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- IN subquery (uncorrelated)
+$$
 filter[R.a IN (SELECT S.b FROM S WHERE S.c > 10)](R)
-  -> semi_join[R.a = S.b](R, filter[S.c > 10](S))
+  \rightarrow semi_\bowtie_{R.a = S.b}(R, filter[S.c > 10](S))
+$$
 
 -- Scalar subquery in SELECT list
+$$
 project[R.*, (SELECT MAX(S.val) FROM S) AS max_val](R)
-  -> project[R.*, T.max_val](cross_join(R, T))
-  where T = aggregate[MAX(val)](S)
+  \rightarrow project[R.*, T.max_val](cross_join(R, T))
+  \text{where} T = aggregate[MAX(val)](S)
+$$
 
 -- Subquery in FROM clause
+$$
 SELECT * FROM R, (SELECT * FROM S WHERE S.active) AS sub
   WHERE R.id = sub.r_id
-  -> join[R.id = S.r_id](R, filter[S.active](S))
+  \rightarrow \bowtie_{R.id = S.r_id}(R, filter[S.active](S))
+$$
+
 ```
 
 ## Implementation

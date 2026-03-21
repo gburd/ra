@@ -24,10 +24,13 @@ Pushes projection (column pruning) from the CTE body into the CTE definition, re
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 project[cols](CTE[name, def](body))
-  -> CTE[name, project[cols ∩ output(def)](def)](body)
-  where cols ⊂ output(def)
+  \rightarrow CTE[name, project[cols ∩ output(def)](def)](body)
+  \text{where} cols ⊂ output(def)
+$$
+
 ```
 
 ## Implementation

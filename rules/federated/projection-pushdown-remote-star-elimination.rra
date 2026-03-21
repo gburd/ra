@@ -24,10 +24,13 @@ only a few columns are referenced by parent operators.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Op[uses cols C](RemoteScan[table, endpoint, SELECT *])
 =>
 Op[uses cols C](RemoteScan[table, endpoint, pushdown_project=C])
+$$
+
 ```
 
 ## Before

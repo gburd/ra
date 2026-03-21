@@ -24,10 +24,13 @@ Eliminates joins when joining on unique key and only using unique-side columns.
 
 ## Relational Algebra
 
-```algebra
-project[A.*](join[A.key = B.unique_key](A, B))
-  -> project[A.*](A)
-  where unique(B.unique_key) && !references_columns(B)
+```latex
+$$
+project[A.*](\bowtie_{A.key = B.unique_key}(A, B))
+  \rightarrow project[A.*](A)
+  \text{where} unique(B.unique_key) && !references_columns(B)
+$$
+
 ```
 
 ## Implementation

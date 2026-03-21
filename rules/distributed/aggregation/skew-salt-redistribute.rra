@@ -25,18 +25,23 @@ is needed.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before (hot key -> single node)
-gamma[g, agg(a)](Exchange[hash(g)](R))
+$$
+\gamma_{g, agg(a)}(Exchange[hash(g)](R))
+$$
 
 -- After (salted redistribution)
-gamma[g, merge_agg(partial)](
+$$
+\gamma_{g, merge_agg(partial)}(
     Exchange[hash(g)](
-        gamma[g, partial_agg(a)](
+        \gamma_{g, partial_agg(a)}(
             Exchange[hash(g, rand_salt(N))](R)
         )
     )
 )
+$$
+
 ```
 
 ## Test Cases

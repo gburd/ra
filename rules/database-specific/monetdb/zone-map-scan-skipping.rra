@@ -32,17 +32,22 @@ reducing I/O by an order of magnitude with negligible metadata overhead.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: scan all segments
-sigma[x > 100](
-  union(segment_1, segment_2, ..., segment_z))
+$$
+\sigma_{x > 100}(
+  \cup(segment_1, segment_2, ..., segment_z))
+$$
 
 -- After: zone-map-filtered scan
-sigma[x > 100](
-  union(
+$$
+\sigma_{x > 100}(
+  \cup(
     segment_3,   -- min=50, max=200: might contain matches
     segment_7))  -- min=150, max=300: might contain matches
+$$
 -- Segments 1,2,4,5,6,8,...z skipped (max <= 100)
+
 ```
 
 ## Implementation

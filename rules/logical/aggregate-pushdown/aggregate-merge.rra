@@ -20,8 +20,11 @@ Merges two consecutive aggregates
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Agg2(Agg1(R)) => Agg_merged(R)
+$$
+
 ```
 
 ## Implementation

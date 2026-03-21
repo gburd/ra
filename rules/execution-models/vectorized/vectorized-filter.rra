@@ -42,27 +42,38 @@ operators use to skip filtered rows without data movement.
 
 ## Relational Algebra
 
-```algebra
-VectorizedFilter(input, predicate) -> Iterator<Batch>
+```latex
+$$
+VectorizedFilter(input, predicate) \rightarrow Iterator<Batch>
+$$
 
 -- Batch-level operation:
-fn process_batch(batch: Batch, predicate: Expr) -> Batch:
+$$
+fn process_batch(batch: Batch, predicate: Expr) \rightarrow Batch:
   // Evaluate predicate on all active rows
   result_mask = simd_eval(predicate, batch.columns, batch.selection)
+$$
 
+$$
   // Combine with existing selection (if any)
   if batch.selection exists:
-    new_selection = intersect(batch.selection, result_mask)
+    new_selection = \cap(batch.selection, result_mask)
   else:
     new_selection = result_mask
+$$
 
+$$
   batch.selection = new_selection
   return batch
+$$
 
 -- Conjunctive (AND) optimization:
+$$
 filter[p1 AND p2](batch)
-  -> filter[p2](filter[p1](batch))  // p1 first if more selective
+  \rightarrow filter[p2](filter[p1](batch))  // p1 first if more selective
+$$
   -- p2 evaluates only on rows surviving p1
+
 ```
 
 ## Implementation

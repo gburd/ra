@@ -30,12 +30,17 @@ metadata instead of scanning potentially millions of nodes.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: full label scan with count aggregation
-gamma[count(*)](label-scan(:Person))
+$$
+\gamma_{count(*)}(label-scan(:Person))
+$$
 
 -- After: direct store statistics lookup
+$$
 store-count(:Person)  -- O(1) metadata read
+$$
+
 ```
 
 ## Implementation

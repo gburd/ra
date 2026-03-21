@@ -20,8 +20,11 @@ Pulls up constant expressions in union
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Union(π_const(R), π_const(S))
+$$
+
 ```
 
 ## Implementation

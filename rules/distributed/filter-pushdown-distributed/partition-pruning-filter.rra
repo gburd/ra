@@ -20,10 +20,13 @@ data from irrelevant nodes entirely.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Filter[p](Scan(R[hash(k), partitions P1..Pn]))
-  -> Filter[p](Scan(R[partitions matching p on k]))
-  where p constrains k
+  \rightarrow Filter[p](Scan(R[partitions matching p on k]))
+  \text{where} p constrains k
+$$
+
 ```
 
 ## Test Cases

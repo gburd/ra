@@ -32,12 +32,17 @@ queries.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: full scan + filter
-sigma[age BETWEEN 20 AND 30](scan(users.age))
+$$
+\sigma_{age BETWEEN 20 AND 30}(scan(users.age))
+$$
 
 -- After: ordered index lookup
+$$
 oidx_range_scan(users.age, 20, 30)
+$$
+
 ```
 
 ## Implementation

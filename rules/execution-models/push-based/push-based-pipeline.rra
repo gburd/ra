@@ -47,36 +47,47 @@ branch predictor sees a tight, predictable loop.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Volcano model (pull-based):
+$$
 result = Project.next()
-  -> Filter.next()
-    -> Scan.next()       -- returns one tuple
+  \rightarrow Filter.next()
+    \rightarrow Scan.next()       -- returns one tuple
     <- Filter evaluates predicate
   <- Project extracts columns
+$$
 -- 3 virtual function calls per tuple, values cross stack frames
 
 -- Push-based model:
+$$
 Scan.produce():
   for tuple in table:
     Filter.consume(tuple)
+$$
 
+$$
 Filter.consume(tuple):
   if predicate(tuple):
     Project.consume(tuple)
+$$
 
+$$
 Project.consume(tuple):
   result = extract_columns(tuple)
   Emit.consume(result)
+$$
 
 -- Compiled form (all fused):
+$$
 fn pipeline() {
   for tuple in table.scan():
     if predicate(tuple):
       let result = extract_columns(tuple)
       output.append(result)
 }
+$$
 -- Zero virtual calls, values in registers
+
 ```
 
 ## Implementation

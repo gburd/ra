@@ -26,18 +26,25 @@ compute transitive closure of a relation.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: recursive CTE for reachability
+$$
 mu[reachable](
     base: {source},
-    step: reachable join edges -> new_nodes
+    step: reachable \bowtie edges \rightarrow new_nodes
 )
+$$
 
 -- After option 1: BFS with early termination
+$$
 BFS(source, edges, stop_at=target)
+$$
 
 -- After option 2: precomputed TC lookup
+$$
 TCLookup(tc_index, source, target)
+$$
+
 ```
 
 ## Implementation

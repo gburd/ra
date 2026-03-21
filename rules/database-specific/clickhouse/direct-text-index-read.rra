@@ -24,10 +24,13 @@ Reads results directly from a full-text or specialized text index (tokenbf_v1, n
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Project[count(*)](Filter[hasToken(text_col, 'term')](Scan[MergeTree](T)))
-  -> CountFromTextIndex('term', text_index)
-  where only_uses_text_index_predicates
+  \rightarrow CountFromTextIndex('term', text_index)
+  \text{where} only_uses_text_index_predicates
+$$
+
 ```
 
 ## Implementation

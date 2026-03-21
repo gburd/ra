@@ -28,10 +28,13 @@ O(log(degree)) with sorted adjacency or O(1) with a hash set.
 
 ## Relational Algebra
 
-```algebra
-sigma[dst = known_node](expand(src, edge_type))
-  -> expand_into(src, known_node, edge_type)
-  where both src and known_node are bound
+```latex
+$$
+\sigma_{dst = known_node}(expand(src, edge_type))
+  \rightarrow expand_into(src, known_node, edge_type)
+  \text{where} both src and known_node are bound
+$$
+
 ```
 
 ## Implementation

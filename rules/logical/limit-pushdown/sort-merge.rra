@@ -30,18 +30,27 @@ Similarly, LIMIT(n, TOPN(k, m, R)) = TOPN(k, min(n,m), R).
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: double limit
+$$
 LIMIT 10(LIMIT 10000(R))
+$$
 
 -- After: single limit
+$$
 LIMIT 10(R)
+$$
 
 -- Before: limit on top of TOPN
+$$
 LIMIT 10(TOPN[k DESC, 10000](R))
+$$
 
 -- After: tighter TOPN
+$$
 TOPN[k DESC, 10](R)
+$$
+
 ```
 
 ## Implementation

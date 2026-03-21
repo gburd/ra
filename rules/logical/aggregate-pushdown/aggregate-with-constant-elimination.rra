@@ -24,12 +24,17 @@ Simplifies aggregates over constants or expressions that don't require grouping.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 aggregate[group, SUM(constant)](R)
-  -> project[group, constant * COUNT(*)](aggregate[group, COUNT(*))](R))
+  \rightarrow project[group, constant * COUNT(*)](aggregate[group, COUNT(*))](R))
+$$
 
+$$
 aggregate[AVG(constant)](R)
-  -> constant
+  \rightarrow constant
+$$
+
 ```
 
 ## Implementation

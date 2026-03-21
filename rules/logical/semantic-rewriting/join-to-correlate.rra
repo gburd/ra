@@ -30,12 +30,17 @@ cost is O(n * log m) with an index vs O(n * m) without.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: standard join
+$$
 R JOIN[R.k = S.k] S
+$$
 
 -- After: correlated execution
-R CORRELATE (sigma[S.k = $cor0.k](S))
+$$
+R CORRELATE (\sigma_{S.k = $cor0.k}(S))
+$$
+
 ```
 
 ## Implementation

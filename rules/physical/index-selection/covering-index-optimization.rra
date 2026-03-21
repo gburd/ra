@@ -36,10 +36,13 @@ read instead of a leaf-page read plus a random heap-page read.
 
 ## Relational Algebra
 
-```algebra
-pi[cols](sigma[pred](R))
-  -> index_only_scan[I_covering](pred)
-  where is_covering(I, cols ∪ pred_columns)
+```latex
+$$
+\pi_{cols}(\sigma_{pred}(R))
+  \rightarrow index_only_scan[I_covering](pred)
+  \text{where} is_covering(I, cols ∪ pred_columns)
+$$
+
 ```
 
 ## Implementation

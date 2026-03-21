@@ -30,13 +30,18 @@ operates on smaller tuples.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: project above filter
-pi[a, b](sigma[c > 10](R))
+$$
+\pi_{a, b}(\sigma_{c > 10}(R))
+$$
 
 -- After: filter above project (or project pushed with remapping)
-sigma[c > 10](pi[a, b, c](R))
+$$
+\sigma_{c > 10}(\pi_{a, b, c}(R))
+$$
 -- Then a second project removes c
+
 ```
 
 ## Implementation

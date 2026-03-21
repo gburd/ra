@@ -28,18 +28,25 @@ guarantees that every remaining tuple participates in at least one output.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Relations: R(A,B), S(B,C), T(C,D) with join tree R-S-T
 -- Step 1: Bottom-up semi-join reduction
-S_reduced = S semi-join T    -- remove S tuples with no T match
-R_reduced = R semi-join S_reduced
+$$
+S_reduced = S semi-\bowtie T    -- remove S tuples with no T match
+R_reduced = R semi-\bowtie S_reduced
+$$
 
 -- Step 2: Top-down semi-join reduction
-S_final = S_reduced semi-join R_reduced
-T_final = T semi-join S_final
+$$
+S_final = S_reduced semi-\bowtie R_reduced
+T_final = T semi-\bowtie S_final
+$$
 
 -- Step 3: Join reduced relations (no dangling tuples)
-Result = R_reduced join S_final join T_final
+$$
+Result = R_reduced \bowtie S_final \bowtie T_final
+$$
+
 ```
 
 ## Implementation

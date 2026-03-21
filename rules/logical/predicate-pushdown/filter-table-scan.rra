@@ -39,12 +39,17 @@ avoiding full table scans.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: filter above table scan
-sigma[p](Scan(T))
+$$
+\sigma_{p}(Scan(T))
+$$
 
 -- After: filtered table scan
+$$
 FilteredScan(T, p)
+$$
+
 ```
 
 ## Implementation

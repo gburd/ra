@@ -25,15 +25,20 @@ differential privacy budget (epsilon) is configured.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: plain aggregate
-gamma[dept; COUNT(*), AVG(salary)](employees)
+$$
+\gamma_{dept; COUNT(*), AVG(salary)}(employees)
+$$
 
 -- After: noise-injected aggregates
+$$
 pi[dept,
    count_noisy = count + laplace(1/epsilon),
    avg_noisy = avg + laplace(sensitivity/epsilon)
-](gamma[dept; COUNT(*) as count, AVG(salary) as avg](employees))
+](\gamma_{dept; COUNT(*) as count, AVG(salary) as avg}(employees))
+$$
+
 ```
 
 ## Implementation

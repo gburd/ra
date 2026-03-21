@@ -36,10 +36,13 @@ intermediate result sizes, which the cost model exploits.
 
 ## Relational Algebra
 
-```algebra
-(R join[c1] S) join[c2] T -> R join[c1] (S join[c2] T)
-  where c1 references attrs(R) and attrs(S)
-  where c2 references attrs(S) and attrs(T)
+```latex
+$$
+(R \bowtie_{c1} S) \bowtie_{c2} T \rightarrow R \bowtie_{c1} (S \bowtie_{c2} T)
+  \text{where} c1 references \text{attrs}(R) and \text{attrs}(S)
+  \text{where} c2 references \text{attrs}(S) and \text{attrs}(T)
+$$
+
 ```
 
 ## Implementation

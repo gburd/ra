@@ -31,16 +31,21 @@ projections, aggregates) execute concurrently.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Insert round-robin repartition for parallelism
+$$
 Op(scan(T, partitions=1))
-  -> Op(repartition[round-robin, N](scan(T, partitions=1)))
+  \rightarrow Op(repartition[round-robin, N](scan(T, partitions=1)))
+$$
 
 -- Insert hash repartition for join alignment
-hash-join[a.k = b.k](A, B)
-  -> hash-join[a.k = b.k](
+$$
+hash-\bowtie_{a.k = b.k}(A, B)
+  \rightarrow hash-\bowtie_{a.k = b.k}(
        repartition[hash(a.k), N](A),
        repartition[hash(b.k), N](B))
+$$
+
 ```
 
 ## Implementation

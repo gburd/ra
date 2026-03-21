@@ -36,16 +36,21 @@ negatives.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Without zone maps:
-sigma[x > 100](scan(R))
-  -> scan all N rows, compare each
+$$
+\sigma_{x > 100}(scan(R))
+  \rightarrow scan all N rows, compare each
+$$
 
 -- With zone maps:
-sigma[x > 100](zonemap_scan(R))
-  -> for each zone z in R:
+$$
+\sigma_{x > 100}(zonemap_scan(R))
+  \rightarrow for each zone z in R:
        if z.max > 100: scan zone, apply predicate
        else: skip zone entirely
+$$
+
 ```
 
 ## Implementation

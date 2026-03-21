@@ -31,15 +31,20 @@ Loads blocks of outer table into memory, scans inner once per block; reduces I/O
 
 ## Relational Algebra
 
-```algebra
-join[R.key = S.key](R, S)
-  -> for each block B in R:
+```latex
+$$
+\bowtie_{R.key = S.key}(R, S)
+  \rightarrow for each block B in R:
        load B into memory
        for each s in S:
          for each r in B:
            if r.key = s.key: emit (r, s)
+$$
 
+$$
 Cost: (|R| / block_size) * |S| + |R|
+$$
+
 ```
 
 ## Implementation

@@ -20,8 +20,11 @@ Removes redundant sort
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Sort(already_sorted(R)) => R
+$$
+
 ```
 
 ## Implementation

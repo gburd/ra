@@ -20,12 +20,15 @@ smaller side and perform a nested-loop or band join.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join[c](R, S)
-  -> NestedLoopJoin[c](R, Broadcast(S))
-  where c is not equi-join
-  where |S| < |R|
-  where |S| < broadcast_threshold
+  \rightarrow NestedLoopJoin[c](R, Broadcast(S))
+  \text{where} c is not equi-\bowtie
+  \text{where} |S| < |R|
+  \text{where} |S| < broadcast_threshold
+$$
+
 ```
 
 ## Implementation

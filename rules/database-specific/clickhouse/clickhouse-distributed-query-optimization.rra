@@ -20,12 +20,17 @@ Optimizes queries across distributed clusters by pushing down predicates and pro
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
+$$
 (select * from distributed_table WHERE condition)
+$$
 
 -- After
+$$
 (distributed-select (select * from local_table WHERE condition))
+$$
+
 ```
 
 ## Preconditions

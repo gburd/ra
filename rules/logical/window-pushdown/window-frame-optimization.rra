@@ -22,10 +22,13 @@ Simplifies window frame specifications. For ranking functions (ROW_NUMBER, RANK,
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Window[ROW_NUMBER() OVER (... ROWS BETWEEN ...)](input)
-  -> Window[ROW_NUMBER() OVER (... )  -- no frame](input)
-  where is_ranking_function(fn)
+  \rightarrow Window[ROW_NUMBER() OVER (... )  -- no frame](input)
+  \text{where} is_ranking_function(fn)
+$$
+
 ```
 
 ## Implementation

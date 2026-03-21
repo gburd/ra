@@ -29,10 +29,13 @@ neighbors, avoiding a full table scan of the edge set.
 
 ## Relational Algebra
 
-```algebra
-R join[R.id = E.src] E join[E.dst = S.id] S
-  -> traverse(R, edge_type, S)
-  where E represents an edge table with (src, dst) columns
+```latex
+$$
+R \bowtie_{R.id = E.src} E \bowtie_{E.dst = S.id} S
+  \rightarrow traverse(R, edge_type, S)
+  \text{where} E represents an edge table with (src, dst) columns
+$$
+
 ```
 
 ## Implementation

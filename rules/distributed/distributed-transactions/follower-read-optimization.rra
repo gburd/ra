@@ -33,13 +33,18 @@ for local reads.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Standard read: must go to Raft leader
-Scan(T) -> LeaderRead(T)
+$$
+Scan(T) \rightarrow LeaderRead(T)
+$$
 
 -- Follower read: can go to nearest replica
+$$
 Scan(T, AS OF SYSTEM TIME '-10s')
-  -> FollowerRead(T, nearest_replica, staleness=10s)
+  \rightarrow FollowerRead(T, nearest_replica, staleness=10s)
+$$
+
 ```
 
 ## Implementation

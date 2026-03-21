@@ -29,10 +29,13 @@ aggregation CPU cost.
 
 ## Relational Algebra
 
-```algebra
-gamma[time_bucket(interval, ts), agg(value)](scan(raw_table))
-  -> scan(continuous_aggregate)
-  where continuous_aggregate has matching interval and agg
+```latex
+$$
+\gamma_{time_bucket(interval, ts), agg(value)}(scan(raw_table))
+  \rightarrow scan(continuous_aggregate)
+  \text{where} continuous_aggregate has matching interval and agg
+$$
+
 ```
 
 ## Implementation

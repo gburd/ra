@@ -30,13 +30,18 @@ table).  The amortized cost over many queries makes this profitable.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: unsorted column requires hash join
-hash-join[a.fk = b.pk](a, b)
+$$
+hash-\bowtie_{a.fk = b.pk}(a, b)
+$$
 
 -- After: sorted column enables merge join
+$$
 sort(a.fk)  -- one-time
-merge-join[a.fk = b.pk](a, b)  -- subsequent queries
+merge-\bowtie_{a.fk = b.pk}(a, b)  -- subsequent queries
+$$
+
 ```
 
 ## Implementation

@@ -28,15 +28,20 @@ lookups or a full table scan.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: two separate indexes, complex predicate
-sigma[a = 1 AND b > 50](TableScan(R))
+$$
+\sigma_{a = 1 AND b > 50}(TableScan(R))
+$$
 
 -- After: bitmap combination
+$$
 HeapFetch(BitmapAnd(
     BitmapIndexScan(idx_a, a = 1),
     BitmapIndexScan(idx_b, b > 50)
 ))
+$$
+
 ```
 
 ## Implementation

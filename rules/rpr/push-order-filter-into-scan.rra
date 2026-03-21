@@ -37,25 +37,33 @@ into the scan avoids reading, sorting, and evaluating those rows.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: filter on order column after pattern matching
-sigma[trade_date >= '2025-01-01'](
+$$
+\sigma_{trade_date >= '2025-01-01'}(
   RowPattern[ORDER BY trade_date](Scan(T))
 )
+$$
 
 -- After: filter pushed into scan
+$$
 RowPattern[ORDER BY trade_date](
-  sigma[trade_date >= '2025-01-01'](Scan(T))
+  \sigma_{trade_date >= '2025-01-01'}(Scan(T))
 )
+$$
+
 ```
 
 ### With index availability
 
-```algebra
+```latex
 -- After further optimization by index selection rules
+$$
 RowPattern[ORDER BY trade_date](
   IndexRangeScan(T, idx_trade_date, ['2025-01-01', +inf))
 )
+$$
+
 ```
 
 ## Implementation

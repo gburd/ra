@@ -30,12 +30,17 @@ memory beyond the scan buffer.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: scan + sort
+$$
 sort[created_at](scan(events))
+$$
 
 -- After: ordered index scan
+$$
 index_scan[idx_created](events)
+$$
+
 ```
 
 ## Implementation

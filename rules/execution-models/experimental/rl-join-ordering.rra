@@ -59,26 +59,33 @@ execution costs, bypassing cardinality estimation entirely.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Traditional DP join ordering:
+$$
 JoinOrder(R1, R2, ..., Rn) = min over all permutations:
   cost(build_left_deep_plan(permutation))
+$$
   -- O(n!) permutations, DP reduces to O(3^n)
   -- Requires accurate cardinality estimates for cost()
 
 -- RL join ordering:
+$$
 State_0 = {R1, R2, ..., Rn}  -- all tables unjoined
 for step in 1..n:
   action = RL_policy(State_{step-1})  -- select next table
-  State_step = join(State_{step-1}, action)
+  State_step = \bowtie(State_{step-1}, action)
 Plan = sequence of actions
+$$
 
 -- Training:
+$$
 for episode in 1..N_episodes:
   plan = RL_policy.generate_plan(query)
   execution_time = execute(plan)
   reward = -log(execution_time)  -- negative log cost
   RL_policy.update(reward)
+$$
+
 ```
 
 ## Implementation

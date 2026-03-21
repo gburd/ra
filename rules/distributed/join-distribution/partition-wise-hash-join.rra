@@ -19,12 +19,15 @@ hash join on each node independently. No data movement, no coordination.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 HashJoin[c](R, S)
-  -> Union(HashJoin[c](R_i, S_i) for i in partitions)
-  where R.hash_key == join_key_left
-  where S.hash_key == join_key_right
-  where R.partition_count == S.partition_count
+  \rightarrow Union(HashJoin[c](R_i, S_i) for i in partitions)
+  \text{where} R.hash_key == join_key_left
+  \text{where} S.hash_key == join_key_right
+  \text{where} R.partition_count == S.partition_count
+$$
+
 ```
 
 ## Test Cases

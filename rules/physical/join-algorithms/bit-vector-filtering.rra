@@ -34,7 +34,8 @@ Bloom filter based join optimization
 
 ## Relational Algebra
 
-```algebra
+```latex
+
 
 ```
 

@@ -30,11 +30,14 @@ much less when the probe side is small and selectivity is high.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join[c](R, Exchange[hash(k)](S))
-  -> LookupJoin[c, index(S, k)](R, S)
-  where |R| is small
-  where S has index on k
+  \rightarrow LookupJoin[c, index(S, k)](R, S)
+  \text{where} |R| is small
+  \text{where} S has index on k
+$$
+
 ```
 
 ## Implementation

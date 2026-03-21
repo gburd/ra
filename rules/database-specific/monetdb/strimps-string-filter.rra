@@ -31,13 +31,18 @@ per-string regex evaluation.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: full column LIKE scan
-sigma[name LIKE '%Smith%'](scan(users.name))
+$$
+\sigma_{name LIKE '%Smith%'}(scan(users.name))
+$$
 
 -- After: strimps-filtered scan
-sigma[name LIKE '%Smith%'](
+$$
+\sigma_{name LIKE '%Smith%'}(
     strimps_filter(users.name, bigrams=['Sm', 'mi', 'it', 'th']))
+$$
+
 ```
 
 ## Implementation

@@ -34,21 +34,28 @@ NOT NULL constraints eliminate IS NULL checks.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- FK join elimination (when only left columns needed)
-project[R.*](R join[R.a = S.id] S)
-  -> R
-  where FK(R.a -> S.id) AND NOT NULL(R.a)
+$$
+project[R.*](R \bowtie_{R.a = S.id} S)
+  \rightarrow R
+  \text{where} FK(R.a \rightarrow S.id) AND NOT NULL(R.a)
+$$
 
 -- Implied predicate from FK
-filter[R.a = 5](R join[R.a = S.id] S)
-  -> filter[R.a = 5](R) join[R.a = S.id] filter[S.id = 5](S)
+$$
+filter[R.a = 5](R \bowtie_{R.a = S.id} S)
+  \rightarrow filter[R.a = 5](R) \bowtie_{R.a = S.id} filter[S.id = 5](S)
+$$
   -- FK guarantees S.id = 5 exists if R.a = 5 passes
 
 -- NOT NULL simplification
+$$
 filter[R.a IS NOT NULL](R)
-  -> R
-  where NOT NULL(R.a)
+  \rightarrow R
+  \text{where} NOT NULL(R.a)
+$$
+
 ```
 
 ## Implementation

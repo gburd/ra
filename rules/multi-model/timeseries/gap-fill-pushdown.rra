@@ -30,14 +30,17 @@ engine generates the complete timeline in a single pass.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 gap_fill(
-  gamma[time_bucket(interval, ts), agg(value)](R),
+  \gamma_{time_bucket(interval, ts), agg(value)}(R),
   start, end, interval
 )
-  -> gamma_gap_filled[
+  \rightarrow gamma_gap_filled[
        time_bucket(interval, ts), agg(value)
      ](R, start, end, interval)
+$$
+
 ```
 
 ## Implementation

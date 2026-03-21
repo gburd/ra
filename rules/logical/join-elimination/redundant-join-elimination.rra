@@ -31,18 +31,23 @@ are needed, the join adds no information.
 
 ## Relational Algebra
 
-```algebra
-project[cols_from_R](join[R.fk = S.pk](R, S))
-  -> project[cols_from_R](R)
-  where S.pk is unique/primary key
-  where R.fk is NOT NULL
-  where no columns selected from S
-  where no additional predicates on S
+```latex
+$$
+project[cols_from_R](\bowtie_{R.fk = S.pk}(R, S))
+  \rightarrow project[cols_from_R](R)
+  \text{where} S.pk is unique/primary key
+  \text{where} R.fk is NOT NULL
+  \text{where} no columns selected from S
+  \text{where} no additional predicates on S
+$$
 
+$$
 Alternative for LEFT JOIN:
-project[cols_from_R](left_join[R.fk = S.pk](R, S))
-  -> project[cols_from_R](R)
-  where no columns from S (including NULL indicators)
+project[cols_from_R](left_\bowtie_{R.fk = S.pk}(R, S))
+  \rightarrow project[cols_from_R](R)
+  \text{where} no columns from S (including NULL indicators)
+$$
+
 ```
 
 ## Implementation

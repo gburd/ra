@@ -32,12 +32,17 @@ single operation with hash or nested-loop strategy (O(n+m) or O(n*k)).
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: correlated NOT EXISTS
-sigma[NOT EXISTS(sigma[r.order_id = o.id](returns))](orders)
+$$
+\sigma_{NOT EXISTS(sigma[r.order_id = o.id}(returns))](orders)
+$$
 
 -- After: anti-join
-orders anti-join[o.id = r.order_id] returns
+$$
+orders anti-\bowtie_{o.id = r.order_id} returns
+$$
+
 ```
 
 ## Implementation

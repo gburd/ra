@@ -24,10 +24,13 @@ Converts semi-join to simple existence check when only testing for row existence
 
 ## Relational Algebra
 
-```algebra
-semi_join[cond](L, R)
-  -> filter[exists(R where cond)](L)
-  where simple_condition(cond)
+```latex
+$$
+semi_\bowtie_{cond}(L, R)
+  \rightarrow filter[exists(R \text{where} cond)](L)
+  \text{where} simple_condition(cond)
+$$
+
 ```
 
 ## Implementation

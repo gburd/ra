@@ -24,9 +24,12 @@ Removes DISTINCT when applied after a GROUP BY that already produces unique rows
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 distinct(aggregate[G, A](R))
-  -> aggregate[G, A](R)
+  \rightarrow aggregate[G, A](R)
+$$
+
 ```
 
 ## Implementation

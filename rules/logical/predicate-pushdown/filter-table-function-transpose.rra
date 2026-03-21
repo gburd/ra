@@ -37,13 +37,18 @@ applied before the table function executes.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: filter above table function
-sigma[input_col > 5](TableFunc(R))
-  where input_col maps to R's column
+$$
+\sigma_{input_col > 5}(TableFunc(R))
+  \text{where} input_col maps to R's column
+$$
 
 -- After: filter pushed below table function
-TableFunc(sigma[R.col > 5](R))
+$$
+TableFunc(\sigma_{R.col > 5}(R))
+$$
+
 ```
 
 ## Implementation

@@ -51,33 +51,46 @@ and cold-start.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 ML cardinality estimation replaces:
-  CardEst_traditional(sigma[p](R join S)) =
+  CardEst_traditional(\sigma_{p}(R \bowtie S)) =
     |R| * |S| * sel_independent(p)
+$$
 
+$$
 With:
-  CardEst_ML(sigma[p](R join S)) =
+  CardEst_ML(\sigma_{p}(R \bowtie S)) =
     model.predict(featurize(R, S, p))
+$$
 
+$$
 Model architectures:
+$$
 
+$$
 MSCN (Multi-Set Convolutional Network):
   Input: (table_set, join_set, predicate_set) as multi-sets
   Output: log(cardinality)
   Training: supervised on executed query workload
+$$
 
+$$
 NeuroCard (Autoregressive):
   Input: (table, column, value) tuples
   Output: P(column = value | preceding columns)
   Cardinality = product of conditional probabilities
   Training: unsupervised on data (no query workload needed)
+$$
 
+$$
 DeepDB (Sum-Product Network):
   Input: data tuples
   Output: joint probability distribution
   Cardinality = integrate P(conditions) over data
   Training: structure learning + parameter fitting on data
+$$
+
 ```
 
 ## Implementation

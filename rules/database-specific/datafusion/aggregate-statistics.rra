@@ -30,12 +30,17 @@ orders of magnitude faster than scanning gigabytes of columnar data.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: full table scan with aggregate
-gamma[; count=COUNT(*)](scan(T))
+$$
+\gamma_{; count=COUNT(*)}(scan(T))
+$$
 
 -- After: values from statistics
+$$
 values(count = statistics.row_count(T))
+$$
+
 ```
 
 ## Implementation

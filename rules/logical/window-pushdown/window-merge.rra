@@ -24,10 +24,13 @@ Merges multiple window functions that share the same PARTITION BY and ORDER BY s
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 window[W1 OVER (P ORDER BY O)](window[W2 OVER (P ORDER BY O)](R))
-  -> window[W1, W2 OVER (P ORDER BY O)](R)
-  where partition(W1) = partition(W2) AND order(W1) = order(W2)
+  \rightarrow window[W1, W2 OVER (P ORDER BY O)](R)
+  \text{where} partition(W1) = partition(W2) AND order(W1) = order(W2)
+$$
+
 ```
 
 ## Implementation

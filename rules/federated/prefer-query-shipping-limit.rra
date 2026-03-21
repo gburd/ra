@@ -28,11 +28,14 @@ Ship query when:
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 IF has_limit(query) AND limit_value < threshold
    AND can_execute_remotely(query)
 THEN:
   Limit[N](RemoteScan) => ShipQuery(remote, Limit[N](Scan))
+$$
+
 ```
 
 ## Before

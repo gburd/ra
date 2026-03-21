@@ -25,10 +25,11 @@ joins (inner or outer) exists.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- MV: R LEFT JOIN S ON R.id = S.rid (contains null-extended rows)
 -- Query: R INNER JOIN S ON R.id = S.rid
 -- Rewrite: sigma[S.rid IS NOT NULL](MV)
+
 ```
 
 ## Implementation

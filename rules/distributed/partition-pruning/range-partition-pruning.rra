@@ -31,13 +31,18 @@ nodes that hold irrelevant data.
 
 ## Relational Algebra
 
-```algebra
-sigma[a >= 10 AND a <= 20](Scan(T))
-  -> Scan(T, constraint=[/10 - /20])
+```latex
+$$
+\sigma_{a >= 10 AND a <= 20}(Scan(T))
+  \rightarrow Scan(T, constraint=[/10 - /20])
+$$
 
-sigma[a = 5 AND b > 100](Scan(T))
-  -> Scan(T, constraint=[/5/101 - /5])
+$$
+\sigma_{a = 5 AND b > 100}(Scan(T))
+  \rightarrow Scan(T, constraint=[/5/101 - /5])
   using index on (a, b)
+$$
+
 ```
 
 ## Implementation

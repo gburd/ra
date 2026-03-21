@@ -24,12 +24,17 @@ Materializes subquery/CTE results immediately into temp table; reuses materializ
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 WITH cte AS (expensive_query)
 SELECT ... FROM cte, cte AS cte2 ...
+$$
 
--> materialize(cte) = temp_table
+$$
+\rightarrow materialize(cte) = temp_table
    use temp_table twice
+$$
+
 ```
 
 ## Implementation

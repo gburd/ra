@@ -25,11 +25,14 @@ more efficient execution strategy exists.
 
 ## Relational Algebra
 
-```algebra
-col IN (1)              -> col = 1
-col IN (1, 1, 2, 2, 3) -> col IN (1, 2, 3)          -- deduplicate
-col IN (1, 2, 3, 4, 5) -> col BETWEEN 1 AND 5       -- contiguous range
-col IN (list > N)       -> col IN (hash_set(list))   -- hash lookup
+```latex
+$$
+col IN (1)              \rightarrow col = 1
+col IN (1, 1, 2, 2, 3) \rightarrow col IN (1, 2, 3)          -- deduplicate
+col IN (1, 2, 3, 4, 5) \rightarrow col BETWEEN 1 AND 5       -- contiguous range
+col IN (list > N)       \rightarrow col IN (hash_set(list))   -- hash lookup
+$$
+
 ```
 
 ## Implementation

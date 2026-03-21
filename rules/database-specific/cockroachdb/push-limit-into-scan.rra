@@ -24,11 +24,14 @@ Pushes a hard row limit into a Scan operator that already has constraints or sca
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Limit[n](Scan[constraints=c](T))
-  -> Scan[constraints=c, hard_limit=n](T)
-  where n > 0
-  where can_limit_filtered_scan
+  \rightarrow Scan[constraints=c, hard_limit=n](T)
+  \text{where} n > 0
+  \text{where} can_limit_filtered_scan
+$$
+
 ```
 
 ## Implementation

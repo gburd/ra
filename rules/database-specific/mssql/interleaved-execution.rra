@@ -34,16 +34,21 @@ rest of the query with accurate cardinality.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: fixed cardinality estimate for TVF
-hash-join(TVF(param), large_table)
+$$
+hash-\bowtie(TVF(param), large_table)
+$$
   -- estimated 100 rows from TVF; actually 50,000
 
 -- After: interleaved execution
 -- Step 1: execute TVF, observe 50,000 rows
 -- Step 2: optimize join with actual cardinality
-hash-join(TVF_materialized[50000], large_table)
+$$
+hash-\bowtie(TVF_materialized[50000], large_table)
+$$
   -- correct memory grant and join choice
+
 ```
 
 ## Implementation

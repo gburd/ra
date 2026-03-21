@@ -29,10 +29,13 @@ qualifying documents, only matching elements are emitted.
 
 ## Relational Algebra
 
-```algebra
-sigma[p(elem)](unwind(doc, array_field))
-  -> unwind(sigma[$elemMatch(array_field, p)](doc), array_field)
-  where p references only the unwound element
+```latex
+$$
+\sigma_{p(elem)}(unwind(doc, array_field))
+  \rightarrow unwind(\sigma_{$elemMatch(array_field, p)}(doc), array_field)
+  \text{where} p references only the unwound element
+$$
+
 ```
 
 ## Implementation

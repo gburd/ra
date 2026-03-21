@@ -25,15 +25,18 @@ or double-negated expressions.
 
 ## Relational Algebra
 
-```algebra
-NOT (A AND B) -> (NOT A) OR (NOT B)     -- De Morgan
-NOT (A OR B)  -> (NOT A) AND (NOT B)    -- De Morgan
-NOT (NOT A)   -> A                       -- double negation
-NOT TRUE      -> FALSE
-NOT FALSE     -> TRUE
-NOT (a = b)   -> a != b
-NOT (a > b)   -> a <= b
-NOT (a IN S)  -> a NOT IN S
+```latex
+$$
+NOT (A AND B) \rightarrow (NOT A) OR (NOT B)     -- De Morgan
+NOT (A OR B)  \rightarrow (NOT A) AND (NOT B)    -- De Morgan
+NOT (NOT A)   \rightarrow A                       -- double negation
+NOT TRUE      \rightarrow FALSE
+NOT FALSE     \rightarrow TRUE
+NOT (a = b)   \rightarrow a != b
+NOT (a > b)   \rightarrow a <= b
+NOT (a IN S)  \rightarrow a NOT IN S
+$$
+
 ```
 
 ## Implementation

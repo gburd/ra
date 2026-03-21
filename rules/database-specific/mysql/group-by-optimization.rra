@@ -31,14 +31,19 @@ avoids the filesort by reading in index order.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: scan + sort + group
-gamma[dept_id; MIN(salary)](
+$$
+\gamma_{dept_id; MIN(salary)}(
     sort[dept_id](scan(employees)))
+$$
 
 -- After: loose index scan (no sort needed)
-gamma[dept_id; MIN(salary)](
+$$
+\gamma_{dept_id; MIN(salary)}(
     loose_index_scan[idx_dept_sal](employees))
+$$
+
 ```
 
 ## Implementation

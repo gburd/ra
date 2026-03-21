@@ -34,16 +34,19 @@ memory from O(output) to O(aggregate groups).
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 aggregate[COUNT(*)](
-  join[R.a=S.a, S.b=T.b, R.c=T.c](R, S, T)
+  \bowtie_{R.a=S.a, S.b=T.b, R.c=T.c}(R, S, T)
 )
-  -> levelheaded_join(
+  \rightarrow levelheaded_join(
        variable_order: [a, b, c],
        relations: {R(a,c), S(a,b), T(b,c)},
        aggregate: COUNT,
        annotation_semiring: (int, +, *)
      )
+$$
+
 ```
 
 ## Implementation

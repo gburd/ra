@@ -24,10 +24,13 @@ Eliminates joins to tables when foreign key guarantees existence and no columns 
 
 ## Relational Algebra
 
-```algebra
-project[A.*](join[A.fk = B.pk](A, B))
-  -> project[A.*](A)
-  where foreign_key(A.fk → B.pk) && !references_columns(B)
+```latex
+$$
+project[A.*](\bowtie_{A.fk = B.pk}(A, B))
+  \rightarrow project[A.*](A)
+  \text{where} foreign_key(A.fk → B.pk) && !references_columns(B)
+$$
+
 ```
 
 ## Implementation

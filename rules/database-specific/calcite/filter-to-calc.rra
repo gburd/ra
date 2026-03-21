@@ -30,12 +30,17 @@ filter-project-filter chains into a single operator.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: filter
-sigma[x > 10](R)
+$$
+\sigma_{x > 10}(R)
+$$
 
 -- After: calc with condition
-Calc[program: {*}, cond: x > 10](R)
+$$
+Calc[program: {*}, cond: \times > 10](R)
+$$
+
 ```
 
 ## Implementation

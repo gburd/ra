@@ -26,14 +26,19 @@ but can be evaluated from index entries alone.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Index on (a, b, c), range on a, filter on c
 -- Before (without ICP)
-sigma[c > 10](IndexRangeScan(idx_abc, a = 5) -> HeapFetch)
+$$
+\sigma_{c > 10}(IndexRangeScan(idx_abc, a = 5) \rightarrow HeapFetch)
+$$
 
 -- After (with ICP)
-IndexRangeScan(idx_abc, a = 5, icp: c > 10) -> HeapFetch
+$$
+IndexRangeScan(idx_abc, a = 5, icp: c > 10) \rightarrow HeapFetch
+$$
 -- Only rows passing c > 10 are heap-fetched
+
 ```
 
 ## Implementation

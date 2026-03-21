@@ -44,28 +44,41 @@ it gives exact results: |R join S| = |R| when R.fk references S.pk
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join cardinality formulas from System R:
+$$
 
+$$
 1. Equijoin (R.a = S.b):
-   |R join S| = |R| * |S| / max(ICARD(R.a), ICARD(S.b))
+   |R \bowtie S| = |R| * |S| / \text{max}(ICARD(R.a), ICARD(S.b))
+$$
 
-2. Primary key join (R.fk = S.pk where FK(R.fk -> S.pk)):
-   |R join S| = |R|
+$$
+2. Primary key \bowtie (R.fk = S.pk \text{where} FK(R.fk \rightarrow S.pk)):
+   |R \bowtie S| = |R|
    (Each row in R matches exactly one row in S)
+$$
 
+$$
 3. Multi-column equijoin (R.a = S.b AND R.c = S.d):
-   |R join S| = |R| * |S| / (max(ICARD(R.a), ICARD(S.b)) *
-                               max(ICARD(R.c), ICARD(S.d)))
-   (Independence assumption between join columns)
+   |R \bowtie S| = |R| * |S| / (\text{max}(ICARD(R.a), ICARD(S.b)) *
+                               \text{max}(ICARD(R.c), ICARD(S.d)))
+   (Independence assumption between \bowtie columns)
+$$
 
-4. Self-join (R.a = R.b):
-   |R join R| = |R|^2 / max(ICARD(R.a), ICARD(R.b))
+$$
+4. Self-\bowtie (R.a = R.b):
+   |R \bowtie R| = |R|^2 / \text{max}(ICARD(R.a), ICARD(R.b))
+$$
 
-5. Multi-way join (R join S join T):
-   Computed pairwise: |(R join S) join T|
-   = |R join S| * |T| / max(ICARD(RS.key), ICARD(T.key))
+$$
+5. Multi-way \bowtie (R \bowtie S \bowtie T):
+   Computed pairwise: |(R \bowtie S) \bowtie T|
+   = |R \bowtie S| * |T| / \text{max}(ICARD(RS.key), ICARD(T.key))
    Error compounds multiplicatively across joins
+$$
+
 ```
 
 ## Implementation

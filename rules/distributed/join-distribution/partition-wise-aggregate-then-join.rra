@@ -20,11 +20,14 @@ data volume before any network transfer.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Aggregate[g](Join[c](R, S))
-  -> Join[c](Aggregate[g](R), S)
-  where g subset of R.columns
-  where R.hash_key contains g
+  \rightarrow Join[c](Aggregate[g](R), S)
+  \text{where} g \subseteq of R.columns
+  \text{where} R.hash_key contains g
+$$
+
 ```
 
 ## Test Cases

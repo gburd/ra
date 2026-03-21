@@ -23,18 +23,23 @@ global phase sums the partials and divides.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
-gamma[g, AVG(x)](R)
+$$
+\gamma_{g, AVG(x)}(R)
+$$
 
 -- After
-pi[g, sum_x / count_x AS avg_x](
-    gamma[g, SUM(partial_sum) AS sum_x, SUM(partial_count) AS count_x](
+$$
+\pi_{g, sum_x / count_x AS avg_x}(
+    \gamma_{g, SUM(partial_sum) AS sum_x, SUM(partial_count) AS count_x}(
         Exchange[hash(g)](
-            gamma[g, SUM(x) AS partial_sum, COUNT(x) AS partial_count](R)
+            \gamma_{g, SUM(x) AS partial_sum, COUNT(x) AS partial_count}(R)
         )
     )
 )
+$$
+
 ```
 
 ## Test Cases

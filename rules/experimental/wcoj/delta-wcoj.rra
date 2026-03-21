@@ -35,19 +35,24 @@ input sizes.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Original view: V = R join S join T
 -- Insert delta_R into R
 -- Delta query:
-delta_V = delta_R join S join T   (new tuples from delta_R)
+$$
+delta_V = delta_R \bowtie S \bowtie T   (new tuples from delta_R)
+$$
 
-delta_R join[R.a=S.a, S.b=T.b, R.c=T.c] S join T
-  -> delta_wcoj(
+$$
+delta_R \bowtie_{R.a=S.a, S.b=T.b, R.c=T.c} S \bowtie T
+  \rightarrow delta_wcoj(
        delta_relation: delta_R,
        base_relations: [S, T],
        algorithm: generic_join,
        mode: insert
      )
+$$
+
 ```
 
 ## Implementation

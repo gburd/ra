@@ -24,10 +24,13 @@ Adds cycle detection to a recursive CTE that lacks it. Uses the SQL standard CYC
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 RecursiveCTE[name, base, rec, cycle=None](body)
-  -> RecursiveCTE[name, base, rec, cycle=Default{max_depth=1000}](body)
-  where has_join_cycle_risk(rec, name)
+  \rightarrow RecursiveCTE[name, base, rec, cycle=Default{max_depth=1000}](body)
+  \text{where} has_join_cycle_risk(rec, name)
+$$
+
 ```
 
 ## Implementation

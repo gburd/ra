@@ -20,12 +20,17 @@ Removes sorts when index provides required ordering.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
+$$
 (sort (filter (scan users) (eq status 'active')) BY created_at DESC)
+$$
 
 -- After
+$$
 (sort (filter (index-scan users idx_status_created_at DESC) (eq status 'active')))
+$$
+
 ```
 
 ## Preconditions

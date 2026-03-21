@@ -29,12 +29,17 @@ projections in one pass.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: project above calc
-pi[a + 1](Calc[proj={a=x*2, b}, filter=p](R))
+$$
+\pi_{a + 1}(Calc[proj={a=x*2, b}, filter=p](R))
+$$
 
 -- After: merged into single calc
+$$
 Calc[proj={x*2 + 1}, filter=p](R)
+$$
+
 ```
 
 ## Implementation

@@ -38,21 +38,32 @@ makes this tradeoff systematically rather than heuristically.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 When optimizing group G with required property P:
+$$
 
+$$
 Option A: Find plan in G that provides P naturally
   cost_A = FindBestPlan(G, P)
+$$
 
+$$
 Option B: Find cheapest plan in G (any properties) + enforcer for P
   cost_B = FindBestPlan(G, ANY) + cost(Enforcer_P)
+$$
 
-Choose min(cost_A, cost_B)
+$$
+Choose \text{min}(cost_A, cost_B)
+$$
 
+$$
 Enforcer types:
   Sort(keys):    establishes ordering on keys
   Exchange(dist): establishes distribution (hash, broadcast, round-robin)
   Materialize:   establishes reusability (for nested-loop inner)
+$$
+
 ```
 
 ## Implementation

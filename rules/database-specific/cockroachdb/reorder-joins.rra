@@ -24,11 +24,14 @@ Reorders multi-way joins to find better join orders, generating bushy join trees
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join(Join(R1, R2), R3)
-  -> {all valid join orderings without cross joins}
-  where should_reorder_joins
-  where no_join_hints
+  \rightarrow {all valid \bowtie orderings without cross joins}
+  \text{where} should_reorder_joins
+  \text{where} no_join_hints
+$$
+
 ```
 
 ## Implementation

@@ -24,10 +24,13 @@ Eliminates LEFT JOIN when right table columns are not referenced and no filterin
 
 ## Relational Algebra
 
-```algebra
-project[L.*](left_join[cond](L, R))
-  -> project[L.*](L)
-  where !references_columns(R)
+```latex
+$$
+project[L.*](left_\bowtie_{cond}(L, R))
+  \rightarrow project[L.*](L)
+  \text{where} !references_columns(R)
+$$
+
 ```
 
 ## Implementation

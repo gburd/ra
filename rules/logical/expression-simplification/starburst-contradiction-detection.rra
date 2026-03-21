@@ -43,32 +43,49 @@ scanning any tables, building any hash tables, or performing any joins.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Contradiction detection rules:
+$$
 
+$$
 1. Equality contradiction:
    sigma_{a = v1 AND a = v2}(R) => empty  (when v1 != v2)
+$$
 
+$$
 2. Range contradiction:
    sigma_{a > v1 AND a < v2}(R) => empty  (when v1 >= v2)
    sigma_{a >= v1 AND a <= v2}(R) => empty  (when v1 > v2)
+$$
 
+$$
 3. NULL contradiction:
    sigma_{a IS NULL AND a = v}(R) => empty  (for any value v)
    sigma_{a IS NULL AND a > v}(R) => empty  (for any comparison)
+$$
 
+$$
 4. CHECK constraint contradiction:
    sigma_{a < 0}(R) => empty  (when CHECK(a >= 0) on R)
+$$
 
+$$
 5. IN contradiction:
    sigma_{a IN (1,2,3) AND a IN (4,5,6)}(R) => empty  (empty intersection)
+$$
 
+$$
 6. NOT NULL contradiction:
    sigma_{a IS NULL}(R) => empty  (when a is NOT NULL)
+$$
 
+$$
 7. Propagated contradiction through equijoin:
-   sigma_{A.x = B.y AND A.x = 1 AND B.y = 2}(A join B) => empty
+   sigma_{A.x = B.y AND A.x = 1 AND B.y = 2}(A \bowtie B) => empty
    (equijoin + conflicting constants)
+$$
+
 ```
 
 ## Implementation

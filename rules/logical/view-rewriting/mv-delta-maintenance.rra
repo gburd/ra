@@ -24,7 +24,7 @@ supports algebraic differencing.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- View: V = sigma[p](R JOIN S)
 -- Insert delta_R into R:
 -- delta_V = sigma[p](delta_R JOIN S)
@@ -34,6 +34,7 @@ supports algebraic differencing.
 -- V = gamma[g; SUM(x)](R)
 -- delta_V = gamma[g; SUM(x)](delta_R)
 -- V_new = V MERGE_SUM delta_V
+
 ```
 
 ## Implementation

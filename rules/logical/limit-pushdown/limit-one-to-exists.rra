@@ -34,23 +34,32 @@ semi-join algorithms.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Subquery existence check pattern
+$$
 filter[
   (SELECT col FROM S WHERE cond LIMIT 1) IS NOT NULL
 ](R)
-  -> semi_join[cond](R, S)
+  \rightarrow semi_\bowtie_{cond}(R, S)
+$$
 
 -- COUNT with LIMIT pattern
+$$
 filter[
   (SELECT COUNT(*) FROM S WHERE cond) > 0
 ](R)
-  -> semi_join[cond](R, S)
+  \rightarrow semi_\bowtie_{cond}(R, S)
+$$
 
 -- Standalone existence check
+$$
 SELECT CASE WHEN EXISTS(SELECT 1 FROM S WHERE cond) THEN ... END
+$$
   -- Preferred over:
+$$
 SELECT CASE WHEN (SELECT 1 FROM S WHERE cond LIMIT 1) IS NOT NULL THEN ... END
+$$
+
 ```
 
 ## Implementation

@@ -24,14 +24,17 @@ Joins co-partitioned tables partition-by-partition in parallel; no repartitionin
 
 ## Relational Algebra
 
-```algebra
-join[R.key = S.key](partitioned(R), partitioned(S))
-  -> parallel_union(
-       join[R_p1.key = S_p1.key](R_p1, S_p1),
-       join[R_p2.key = S_p2.key](R_p2, S_p2),
+```latex
+$$
+\bowtie_{R.key = S.key}(partitioned(R), partitioned(S))
+  \rightarrow parallel_union(
+       \bowtie_{R_p1.key = S_p1.key}(R_p1, S_p1),
+       \bowtie_{R_p2.key = S_p2.key}(R_p2, S_p2),
        ...
      )
-  where same_partitioning(R, S, key)
+  \text{where} same_partitioning(R, S, key)
+$$
+
 ```
 
 ## Implementation

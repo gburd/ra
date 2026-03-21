@@ -35,24 +35,33 @@ avoid hot-spot access patterns.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Contention-aware cost:
+$$
 contention_cost(op, concurrency) =
   base_cost(op) + wait_time(op, concurrency)
+$$
 
 -- Wait time (M/M/1 queueing model):
+$$
 wait_time(op, concurrency) =
   lock_hold_time(op) * utilization / (1 - utilization)
-  where utilization = concurrency * lock_hold_time(op) / num_resources
+  \text{where} utilization = concurrency * lock_hold_time(op) / num_resources
+$$
 
 -- Lock scope impact:
+$$
 lock_cost(row_lock) = LOCK_OVERHEAD + low_contention
 lock_cost(page_lock) = LOCK_OVERHEAD / rows_per_page + medium_contention
 lock_cost(table_lock) = minimal_overhead + high_contention
+$$
 
 -- Optimistic vs pessimistic:
+$$
 optimistic_cost(op) = base_cost(op) + validation_cost + retry_prob * base_cost(op)
 pessimistic_cost(op) = base_cost(op) + lock_acquire + wait_time
+$$
+
 ```
 
 ## Implementation

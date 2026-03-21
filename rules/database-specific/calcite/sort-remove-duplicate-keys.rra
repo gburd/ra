@@ -30,10 +30,15 @@ comparisons without affecting the final order, improving sort performance.
 
 ## Relational Algebra
 
-```algebra
-SORT_{k1, k2, k1}(R) -> SORT_{k1, k2}(R)
+```latex
+$$
+SORT_{k1, k2, k1}(R) \rightarrow SORT_{k1, k2}(R)
+$$
 
-SORT_{pk, other}(R) where pk is primary key -> SORT_{pk}(R)
+$$
+SORT_{pk, other}(R) \text{where} pk is primary key \rightarrow SORT_{pk}(R)
+$$
+
 ```
 
 ## Implementation

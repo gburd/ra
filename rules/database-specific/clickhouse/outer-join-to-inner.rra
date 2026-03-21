@@ -24,9 +24,12 @@ Converts LEFT/RIGHT/FULL outer joins to inner joins when subsequent filters reje
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Filter[r.col IS NOT NULL](LeftJoin[c](L, R))
-  -> Filter[r.col IS NOT NULL](InnerJoin[c](L, R))
+  \rightarrow Filter[r.col IS NOT NULL](InnerJoin[c](L, R))
+$$
+
 ```
 
 ## Implementation

@@ -36,11 +36,14 @@ running in parallel.
 
 ## Relational Algebra
 
-```algebra
-sigma[REGEXP(col, pattern)](R)
-  -> fpga_regex_filter[NFA(pattern)](col, R)
-  where pattern is NFA-convertible
+```latex
+$$
+\sigma_{REGEXP(col, pattern)}(R)
+  \rightarrow fpga_regex_filter[NFA(pattern)](col, R)
+  \text{where} pattern is NFA-convertible
     AND nfa_size(pattern) <= fpga_lut_budget
+$$
+
 ```
 
 ## Implementation

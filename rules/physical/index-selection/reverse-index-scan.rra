@@ -31,13 +31,18 @@ Scans B-tree index backwards to satisfy DESC ordering or find MAX values efficie
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 sort[key DESC](scan[T])
-  -> reverse_index_scan[I(key)]
-  where has_index(I, key)
+  \rightarrow reverse_index_scan[I(key)]
+  \text{where} has_index(I, key)
+$$
 
+$$
 limit[1](sort[key DESC](scan[T]))
-  -> reverse_index_scan[I(key), limit=1]  // MAX without full scan
+  \rightarrow reverse_index_scan[I(key), limit=1]  // MAX without full scan
+$$
+
 ```
 
 ## Implementation

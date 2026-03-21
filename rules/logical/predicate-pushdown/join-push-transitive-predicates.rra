@@ -39,12 +39,17 @@ members. Pushing these inferred predicates reduces join input sizes.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: predicate on one side only
-sigma[A.x > 10](A) JOIN[A.x = B.y] B
+$$
+\sigma_{A.x > 10}(A) JOIN[A.x = B.y] B
+$$
 
 -- After: inferred predicate pushed to both sides
-sigma[A.x > 10](A) JOIN[A.x = B.y] sigma[B.y > 10](B)
+$$
+\sigma_{A.x > 10}(A) JOIN[A.x = B.y] \sigma_{B.y > 10}(B)
+$$
+
 ```
 
 ## Implementation

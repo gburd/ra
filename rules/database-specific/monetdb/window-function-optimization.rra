@@ -35,19 +35,24 @@ primitives. Segment trees enable O(log n) per row for arbitrary frames.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Row-oriented window evaluation:
+$$
 window[SUM(x) OVER (PARTITION BY p ORDER BY o ROWS BETWEEN 5 PRECEDING AND CURRENT ROW)](R)
-  -> for each partition:
+  \rightarrow for each partition:
        for each row:
          sum = accumulate(frame[row-5..row])
+$$
 
 -- Columnar window evaluation (MonetDB):
+$$
 window[SUM(x) OVER (PARTITION BY p ORDER BY o ROWS BETWEEN 5 PRECEDING AND CURRENT ROW)](R)
-  -> sort_column(R, [p, o])
-  -> compute_partitions(sorted, p) -> partition_boundaries
-  -> compute_frames(partition_boundaries, ROWS BETWEEN -5 AND 0) -> frame_indices
-  -> vectorized_prefix_sum(x_column, frame_indices) -> result_column
+  \rightarrow sort_column(R, [p, o])
+  \rightarrow compute_partitions(sorted, p) \rightarrow partition_boundaries
+  \rightarrow compute_frames(partition_boundaries, ROWS BETWEEN -5 AND 0) \rightarrow frame_indices
+  \rightarrow vectorized_prefix_sum(x_column, frame_indices) \rightarrow result_column
+$$
+
 ```
 
 ## Implementation

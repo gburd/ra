@@ -32,12 +32,17 @@ predicates alone.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: predicate only on t1
-sigma[t1.a = 10](t1 join[t1.a = t2.b] t2)
+$$
+\sigma_{t1.a = 10}(t1 \bowtie_{t1.a = t2.b} t2)
+$$
 
 -- After: transitive predicate added to t2
-sigma[t1.a = 10](t1) join[t1.a = t2.b] sigma[t2.b = 10](t2)
+$$
+\sigma_{t1.a = 10}(t1) \bowtie_{t1.a = t2.b} \sigma_{t2.b = 10}(t2)
+$$
+
 ```
 
 ## Implementation

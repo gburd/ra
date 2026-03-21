@@ -34,10 +34,13 @@ branch-free selection, SIMD scans saturate memory bandwidth.
 
 ## Relational Algebra
 
-```algebra
-sigma[col op const](R) -> simd_filter[col op const](R)
-  where type(col) is simd_friendly
+```latex
+$$
+\sigma_{col op const}(R) \rightarrow simd_filter[col op const](R)
+  \text{where} type(col) is simd_friendly
     AND storage(R) is columnar
+$$
+
 ```
 
 ## Implementation

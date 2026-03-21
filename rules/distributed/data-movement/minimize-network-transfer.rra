@@ -29,14 +29,19 @@ on the source side of an exchange.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- General principle: push reducing operators below exchange
-Op_reduce(Exchange[d](R)) -> Exchange[d](Op_reduce(R))
-  where Op_reduce in {filter, project, partial_agg, limit}
+$$
+Op_reduce(Exchange[d](R)) \rightarrow Exchange[d](Op_reduce(R))
+  \text{where} Op_reduce in {filter, project, partial_agg, limit}
+$$
 
 -- General principle: pull expanding operators above exchange
-Exchange[d](Op_expand(R)) -> Op_expand(Exchange[d](R))
-  where Op_expand in {unnest, generate_series, cross_join}
+$$
+Exchange[d](Op_expand(R)) \rightarrow Op_expand(Exchange[d](R))
+  \text{where} Op_expand in {unnest, generate_series, cross_join}
+$$
+
 ```
 
 ## Implementation

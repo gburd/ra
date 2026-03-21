@@ -33,12 +33,15 @@ fact table volume by orders of magnitude.
 
 ## Relational Algebra
 
-```algebra
-gamma[g, SUM(R.a)](Join[cond](L, R))
-  -> gamma[g, SUM(partial_sum)](
+```latex
+$$
+\gamma_{g, SUM(R.a)}(Join[cond](L, R))
+  \rightarrow \gamma_{g, SUM(partial_sum)}(
        Join[cond](L,
-         gamma[join_keys, SUM(a) AS partial_sum](R)))
-  where a comes entirely from R
+         \gamma_{join_keys, SUM(a) AS partial_sum}(R)))
+  \text{where} a comes entirely from R
+$$
+
 ```
 
 ## Implementation

@@ -32,13 +32,18 @@ complexity.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: unnecessary join
-pi[o.id, o.total](
+$$
+\pi_{o.id, o.total}(
     orders o LEFT JOIN customers c ON o.cust_id = c.id)
+$$
 
 -- After: join eliminated
-pi[o.id, o.total](orders o)
+$$
+\pi_{o.id, o.total}(orders o)
+$$
+
 ```
 
 ## Implementation

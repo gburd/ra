@@ -36,13 +36,16 @@ exhaustive search in polynomial time.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Commutativity: R join S ≡ S join R
 -- Associativity: (R join S) join T ≡ R join (S join T)
 -- Together: all 12 binary trees for 4-way join are equivalent
 
 -- Structural encoding: multi-way join as unordered set
-join(R, S, T, U) represents all orderings simultaneously
+$$
+\bowtie(R, S, T, U) represents all orderings simultaneously
+$$
+
 ```
 
 ## Implementation

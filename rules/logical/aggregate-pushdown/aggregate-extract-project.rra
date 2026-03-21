@@ -30,13 +30,18 @@ for the grouping operation.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: aggregate over wide input
-gamma[g; SUM(x)](R)
-  where R has columns {a, b, c, g, x, y, z}
+$$
+\gamma_{g; SUM(x)}(R)
+  \text{where} R has columns {a, b, c, g, x, y, z}
+$$
 
 -- After: project narrows input first
-gamma[g; SUM(x)](pi[g, x](R))
+$$
+\gamma_{g; SUM(x)}(\pi_{g, x}(R))
+$$
+
 ```
 
 ## Implementation

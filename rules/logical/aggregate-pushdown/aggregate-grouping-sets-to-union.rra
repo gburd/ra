@@ -29,14 +29,19 @@ can be parallelized and each branch can use different access paths.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: GROUPING SETS
-gamma[GROUPING SETS ((a,b), (a,c)); SUM(x)](R)
+$$
+\gamma_{GROUPING SETS ((a,b), (a,c)); SUM(x)}(R)
+$$
 
 -- After: UNION ALL of simple aggregates
-gamma[a, b; SUM(x)](R) with c = NULL
+$$
+\gamma_{a, b; SUM(x)}(R) with c = NULL
 UNION ALL
-gamma[a, c; SUM(x)](R) with b = NULL
+\gamma_{a, c; SUM(x)}(R) with b = NULL
+$$
+
 ```
 
 ## Implementation

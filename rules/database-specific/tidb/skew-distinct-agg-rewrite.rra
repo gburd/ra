@@ -34,11 +34,14 @@ COUNT, SUM) by pre-computing them.
 
 ## Relational Algebra
 
-```algebra
-gamma[g, COUNT(DISTINCT d), COUNT(x)](R)
-  -> gamma[g, COUNT(d), SUM(c)](
-       gamma[g, d, COUNT(x) AS c](R)
+```latex
+$$
+\gamma_{g, COUNT(DISTINCT d), COUNT(x)}(R)
+  \rightarrow \gamma_{g, COUNT(d), SUM(c)}(
+       \gamma_{g, d, COUNT(x) AS c}(R)
      )
+$$
+
 ```
 
 ## Implementation

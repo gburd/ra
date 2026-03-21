@@ -32,14 +32,17 @@ input scans and cross-region lookups.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 LookupJoin[cond](Scan(T_rbr), index)
-  -> LocalityOptimizedSearch(
+  \rightarrow LocalityOptimizedSearch(
        LookupJoin[cond](Scan(T_rbr, local_spans), index),
        LookupJoin[cond](Scan(T_rbr, remote_spans), index)
      )
-  where T_rbr is REGIONAL BY ROW
-  where cardinality(T_rbr) > locality_opt_scan_threshold
+  \text{where} T_rbr is REGIONAL BY ROW
+  \text{where} cardinality(T_rbr) > locality_opt_scan_threshold
+$$
+
 ```
 
 ## Implementation

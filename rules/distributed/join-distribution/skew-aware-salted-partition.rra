@@ -20,13 +20,16 @@ distributes hot-key rows across multiple nodes.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join[c](R_skewed, S)
-  -> Join[c'](
+  \rightarrow Join[c'](
       AddSalt(R_skewed, salt_factor),
       Replicate(S, salt_factor)
      )
-  where c' = (R.key = S.key AND R.salt = S.salt)
+  \text{where} c' = (R.key = S.key AND R.salt = S.salt)
+$$
+
 ```
 
 ## Test Cases

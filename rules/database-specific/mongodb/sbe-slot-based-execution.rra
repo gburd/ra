@@ -33,14 +33,19 @@ columnar processing in analytical databases.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Classic engine: full document passing
-pi[name, age](sigma[age > 21](scan(users)))
+$$
+\pi_{name, age}(\sigma_{age > 21}(scan(users)))
   Each operator receives/emits full BSON document
+$$
 
 -- SBE: slot-based value passing
-pi[slot_name, slot_age](sigma[slot_age > 21](scan(users, slots=[name, age])))
+$$
+\pi_{slot_name, slot_age}(\sigma_{slot_age > 21}(scan(users, slots=[name, age])))
   Scan populates only needed slots; operators work on slots
+$$
+
 ```
 
 ## Implementation

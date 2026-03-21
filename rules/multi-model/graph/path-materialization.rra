@@ -28,11 +28,14 @@ directly instead of walking multiple hops.
 
 ## Relational Algebra
 
-```algebra
-R -[*1..k]-> S
-  -> R -[:MATERIALIZED_PATH]-> S
-  where the path pattern (edge types, direction, depth) is
+```latex
+$$
+R -[*1..k]\rightarrow S
+  \rightarrow R -[:MATERIALIZED_PATH]\rightarrow S
+  \text{where} the path pattern (edge types, direction, depth) is
   registered for materialization
+$$
+
 ```
 
 ## Implementation

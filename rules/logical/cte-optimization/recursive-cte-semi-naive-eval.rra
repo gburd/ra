@@ -22,10 +22,13 @@ Rewrites the recursive step to use semi-naive evaluation: instead of joining aga
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 RecursiveCTE[name, base, Join[name, table](cond), body]
-  -> RecursiveCTE_SemiNaive[name, base, Join[delta_name, table](cond), body]
-  where delta_name tracks only new rows per iteration
+  \rightarrow RecursiveCTE_SemiNaive[name, base, Join[delta_name, table](cond), body]
+  \text{where} delta_name tracks only new rows per iteration
+$$
+
 ```
 
 ## Implementation

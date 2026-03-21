@@ -24,15 +24,18 @@ Divides table into partitions, scans each partition in parallel using multiple w
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 scan[T]
-  -> parallel_union(
+  \rightarrow parallel_union(
        scan[T_partition_1],
        scan[T_partition_2],
        ...
        scan[T_partition_p]
      )
-  where p = num_workers
+  \text{where} p = num_workers
+$$
+
 ```
 
 ## Implementation

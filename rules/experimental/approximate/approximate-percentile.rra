@@ -25,12 +25,17 @@ on large datasets where approximate results are acceptable.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: exact percentile (requires full sort)
-gamma[; PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY latency)](requests)
+$$
+\gamma_{; PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY latency)}(requests)
+$$
 
 -- After: approximate via t-digest
-gamma[; APPROX_PERCENTILE(latency, 0.95, compression=200)](requests)
+$$
+\gamma_{; APPROX_PERCENTILE(latency, 0.95, compression=200)}(requests)
+$$
+
 ```
 
 ## Implementation

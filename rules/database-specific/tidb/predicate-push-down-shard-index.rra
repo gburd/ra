@@ -34,14 +34,19 @@ which is a single-range read instead of a full index scan.
 
 ## Relational Algebra
 
-```algebra
-sigma[a = 10](Scan(T))
-  -> sigma[tidb_shard(a) = hash(10) AND a = 10](Scan(T))
-  where T has index (tidb_shard(a), a)
+```latex
+$$
+\sigma_{a = 10}(Scan(T))
+  \rightarrow \sigma_{tidb_shard(a) = hash(10) AND a = 10}(Scan(T))
+  \text{where} T has index (tidb_shard(a), a)
+$$
 
-sigma[a IN (10, 20)](Scan(T))
-  -> sigma[(tidb_shard(a) = hash(10) AND a = 10)
+$$
+\sigma_{a IN (10, 20)}(Scan(T))
+  \rightarrow sigma[(tidb_shard(a) = hash(10) AND a = 10)
         OR (tidb_shard(a) = hash(20) AND a = 20)](Scan(T))
+$$
+
 ```
 
 ## Implementation

@@ -32,16 +32,21 @@ where it is not, achieving the best of both approaches.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: single plan for all partitions
-sigma[status = 'active'](scan(orders_partitioned))
+$$
+\sigma_{status = 'active'}(scan(orders_partitioned))
+$$
 
 -- After: expanded per partition
-sigma[status = 'active'](scan(orders_p1, index=idx_status))
-  union-all
-sigma[status = 'active'](scan(orders_p2, full))
-  union-all
-sigma[status = 'active'](scan(orders_p3, index=idx_status))
+$$
+\sigma_{status = 'active'}(scan(orders_p1, index=idx_status))
+  \cup-all
+\sigma_{status = 'active'}(scan(orders_p2, full))
+  \cup-all
+\sigma_{status = 'active'}(scan(orders_p3, index=idx_status))
+$$
+
 ```
 
 ## Implementation

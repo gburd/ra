@@ -24,13 +24,16 @@ Optimizes lookup joins in multi-region deployments by attempting lookups in the 
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 LookupJoin[k](Probe, Build[REGIONAL BY ROW])
-  -> LocalityOptimizedLookupJoin[k](
+  \rightarrow LocalityOptimizedLookupJoin[k](
        Probe,
        Build[local_region],
        Build[remote_regions]
      )
+$$
+
 ```
 
 ## Implementation

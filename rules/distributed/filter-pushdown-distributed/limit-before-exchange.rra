@@ -22,12 +22,17 @@ merge-sort the partial results.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Limit[n](Exchange[gather](R))
-  -> Limit[n](Exchange[gather](Limit[n](R)))
+  \rightarrow Limit[n](Exchange[gather](Limit[n](R)))
+$$
 
+$$
 Limit[n](Sort[k](Exchange[gather](R)))
-  -> Limit[n](MergeSort[k](Exchange[gather](TopK[n,k](R))))
+  \rightarrow Limit[n](MergeSort[k](Exchange[gather](TopK[n,k](R))))
+$$
+
 ```
 
 ## Test Cases

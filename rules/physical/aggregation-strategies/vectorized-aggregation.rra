@@ -39,13 +39,16 @@ Processes aggregations on batches of rows using SIMD instructions; amortizes dis
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 aggregate[group_keys, agg_funcs](columnar(R))
-  -> vectorized_aggregate:
+  \rightarrow vectorized_aggregate:
        for each vector batch B in R: // e.g., 1024 rows
-         extract_group_keys_vectorized(B) -> keys
+         extract_group_keys_vectorized(B) \rightarrow keys
          for each aggregate func:
            vectorized_update(hash_table, keys, B.columns)
+$$
+
 ```
 
 ## Implementation

@@ -25,11 +25,14 @@ expressions with deterministic NULL behavior.
 
 ## Relational Algebra
 
-```algebra
-col IS NOT NULL -> TRUE     where col has NOT NULL constraint
-col IS NULL     -> FALSE    where col has NOT NULL constraint
-(a + b) IS NULL -> (a IS NULL OR b IS NULL)  -- NULL propagation
-NOT (col IS NULL) -> col IS NOT NULL
+```latex
+$$
+col IS NOT NULL \rightarrow TRUE     \text{where} col has NOT NULL constraint
+col IS NULL     \rightarrow FALSE    \text{where} col has NOT NULL constraint
+(a + b) IS NULL \rightarrow (a IS NULL OR b IS NULL)  -- NULL propagation
+NOT (col IS NULL) \rightarrow col IS NOT NULL
+$$
+
 ```
 
 ## Implementation

@@ -35,14 +35,19 @@ all subsequent queries O(log n) lookup time.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Standard crack: only partition at query bound
-sigma[x > 100](crack(column))
+$$
+\sigma_{x > 100}(crack(column))
+$$
 -- Partitions: [<=100, >100]
 
 -- Stochastic crack: partition at query bound + random points
-sigma[x > 100](stochastic_crack(column, random_points=[42, 178, 255]))
+$$
+\sigma_{x > 100}(stochastic_crack(column, random_points=[42, 178, 255]))
+$$
 -- Partitions: [<=42, 43..100, 101..178, 179..255, >255]
+
 ```
 
 ## Implementation

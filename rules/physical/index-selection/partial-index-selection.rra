@@ -31,10 +31,13 @@ Selects partial (filtered) index that matches query WHERE clause; smaller, faste
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 filter[matching_condition](scan[T])
-  -> partial_index_scan[I WHERE condition](matching_condition)
-  where subsumes(I.condition, matching_condition)
+  \rightarrow partial_index_scan[I WHERE condition](matching_condition)
+  \text{where} subsumes(I.condition, matching_condition)
+$$
+
 ```
 
 ## Implementation

@@ -34,13 +34,16 @@ inner relation.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Simple Nested-Loop (no inner index):
+$$
 NL_cost(outer, inner) =
   PAGES(outer) + TUPLES(outer) * PAGES(inner)
   + W * TUPLES(outer) * TUPLES(inner)
+$$
 
 -- Index Nested-Loop (inner has index on join key):
+$$
 NL_index_cost(outer, inner, index) =
   PAGES(outer) + TUPLES(outer) * (
     index_levels +
@@ -49,13 +52,17 @@ NL_index_cost(outer, inner, index) =
     else:
       F * TUPLES(inner) + W * F * TUPLES(inner)
   )
-  where F = 1/ICARD(inner.join_key)
+  \text{where} F = 1/ICARD(inner.join_key)
+$$
 
 -- With outer sorted and inner clustered on join key:
+$$
 NL_sorted_cost(outer, inner) =
   sort_cost(outer) + PAGES(inner)
   + W * (TUPLES(outer) + TUPLES(inner))
+$$
   -- Merge-like behavior: scan inner once
+
 ```
 
 ## Implementation

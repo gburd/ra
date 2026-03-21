@@ -33,20 +33,27 @@ data volume from millions of rows to the number of distinct groups.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Filter pushdown to coprocessor
-sigma[p](TableReader(TableScan(T)))
-  -> TableReader(sigma[p](TableScan(T)))
+$$
+\sigma_{p}(TableReader(TableScan(T)))
+  \rightarrow TableReader(\sigma_{p}(TableScan(T)))
+$$
 
 -- Aggregation pushdown to coprocessor
-gamma[g, agg](TableReader(TableScan(T)))
-  -> FinalAgg(gamma[g, partial_agg](
+$$
+\gamma_{g, agg}(TableReader(TableScan(T)))
+  \rightarrow FinalAgg(\gamma_{g, partial_agg}(
        TableReader(TableScan(T))))
+$$
 
 -- Combined filter + aggregation pushdown
-gamma[g, agg](sigma[p](TableReader(TableScan(T))))
-  -> FinalAgg(gamma[g, partial_agg](
-       TableReader(sigma[p](TableScan(T)))))
+$$
+\gamma_{g, agg}(\sigma_{p}(TableReader(TableScan(T))))
+  \rightarrow FinalAgg(\gamma_{g, partial_agg}(
+       TableReader(\sigma_{p}(TableScan(T)))))
+$$
+
 ```
 
 ## Implementation

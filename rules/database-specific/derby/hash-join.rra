@@ -30,12 +30,17 @@ property to control hash table size.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: nested-loop without index
+$$
 outer NLJ[o.key = i.key] inner
+$$
 
 -- After: hash join
-outer hash-join[o.key = i.key] inner
+$$
+outer hash-\bowtie_{o.key = i.key} inner
+$$
+
 ```
 
 ## Implementation

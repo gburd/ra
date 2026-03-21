@@ -31,12 +31,17 @@ ordering, avoiding an explicit sort operator entirely.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: sort above project
-tau[a ASC](pi[a, b](R))
+$$
+tau[a ASC](\pi_{a, b}(R))
+$$
 
 -- After: sort below project
-pi[a, b](tau[a ASC](R))
+$$
+\pi_{a, b}(tau[a ASC](R))
+$$
+
 ```
 
 ## Implementation

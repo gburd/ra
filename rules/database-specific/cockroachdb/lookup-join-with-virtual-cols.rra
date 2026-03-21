@@ -33,10 +33,13 @@ can generate lookup joins on the corresponding indexes.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join[L.x = R.lower_name](L, Project[lower_name=LOWER(name)](Scan(R)))
-  -> LookupJoin[L.x = R.lower_name](L, R.idx_lower_name)
-  where R has index on (LOWER(name)) as virtual column
+  \rightarrow LookupJoin[L.x = R.lower_name](L, R.idx_lower_name)
+  \text{where} R has index on (LOWER(name)) as virtual column
+$$
+
 ```
 
 ## Implementation

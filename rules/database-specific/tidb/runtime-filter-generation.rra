@@ -31,13 +31,16 @@ reducing network transfer and CPU usage at the join operator.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 HashJoin[L.k = R.k](TableScan(L), Exchange(R))
-  -> HashJoin[L.k = R.k](
+  \rightarrow HashJoin[L.k = R.k](
        TableScan(L, runtime_filter=RF(R.k)),
        Exchange(R)
      )
-  where RF is constructed from R's build-side hash table
+  \text{where} RF is constructed from R's build-side hash table
+$$
+
 ```
 
 ## Implementation

@@ -24,11 +24,16 @@ In specific cases, pushes LIMIT through aggregation when only K groups are neede
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 limit[K](aggregate[group, agg](sort[group](R)))
-  -> aggregate[group, agg](limit[K * avg_group_size](sort[group](R)))
+  \rightarrow aggregate[group, agg](limit[K * avg_group_size](sort[group](R)))
+$$
 
+$$
 Simplified for sorted inputs
+$$
+
 ```
 
 ## Implementation

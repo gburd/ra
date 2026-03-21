@@ -25,23 +25,26 @@ and non-decomposable aggregates (COUNT DISTINCT) on the same group keys.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Mixed: SUM + COUNT(DISTINCT)
 -- Split into two branches, join on group keys
+$$
 Join[g](
-    gamma[g, SUM(partial_sum)](  -- decomposable branch
+    \gamma_{g, SUM(partial_sum)}(  -- decomposable branch
         Exchange[hash(g)](
-            gamma[g, SUM(a) as partial_sum](R)
+            \gamma_{g, SUM(a) as partial_sum}(R)
         )
     ),
-    gamma[g, COUNT(*)].final(    -- distinct branch
+    \gamma_{g, COUNT(*)}.final(    -- distinct branch
         Exchange[hash(g)](
-            gamma[g, d].dedup(
+            \gamma_{g, d}.dedup(
                 Exchange[hash(d)](R)
             )
         )
     )
 )
+$$
+
 ```
 
 ## Test Cases

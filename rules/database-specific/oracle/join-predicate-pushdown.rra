@@ -32,13 +32,18 @@ pruning that dramatically reduce the materialized data.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: full view materialization then join
-R join[R.k = V.k] (gamma[k; count=COUNT(*)](S) AS V)
+$$
+R \bowtie_{R.k = V.k} (\gamma_{k; count=COUNT(*)}(S) AS V)
+$$
 
 -- After: join predicate pushed into view
-R join[R.k = V.k]
-    (gamma[k; count=COUNT(*)](sigma[S.k = R.k](S)) AS V)
+$$
+R \bowtie_{R.k = V.k}
+    (\gamma_{k; count=COUNT(*)}(\sigma_{S.k = R.k}(S)) AS V)
+$$
+
 ```
 
 ## Implementation

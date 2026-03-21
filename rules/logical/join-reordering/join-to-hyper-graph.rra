@@ -27,8 +27,11 @@ Converts join tree to hypergraph
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join tree => hypergraph for WCOJ
+$$
+
 ```
 
 ## Implementation

@@ -31,12 +31,17 @@ CONCATENATION operator merges the results.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: OR prevents index usage
-sigma[a = 1 OR b = 2](R)
+$$
+\sigma_{a = 1 OR b = 2}(R)
+$$
 
 -- After: OR expansion (CONCATENATION)
-sigma[a = 1](R) union-all sigma[b = 2 AND NOT(a = 1)](R)
+$$
+\sigma_{a = 1}(R) \cup-all \sigma_{b = 2 AND NOT(a = 1)}(R)
+$$
+
 ```
 
 ## Implementation

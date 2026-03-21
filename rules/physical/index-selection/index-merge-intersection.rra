@@ -39,14 +39,17 @@ scan when individual selectivities are moderate but the product is low.
 
 ## Relational Algebra
 
-```algebra
-sigma[P1 AND P2](R)
-  -> heap_fetch(intersect(
+```latex
+$$
+\sigma_{P1 AND P2}(R)
+  \rightarrow heap_fetch(\cap(
        index_scan[I1](P1),
        index_scan[I2](P2)
      ))
-  where has_index(I1, P1_cols) && has_index(I2, P2_cols)
-    && selectivity(P1) * selectivity(P2) < THRESHOLD
+  \text{where} has_index(I1, P1_cols) && has_index(I2, P2_cols)
+    && \text{selectivity}(P1) * \text{selectivity}(P2) < THRESHOLD
+$$
+
 ```
 
 ## Implementation

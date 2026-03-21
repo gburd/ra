@@ -34,25 +34,34 @@ to choose any join algorithm.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Simple LATERAL with equality correlation
+$$
 lateral_join(R, filter[S.fk = R.pk](project[cols](S)))
-  -> join[R.pk = S.fk](R, project[cols](S))
+  \rightarrow \bowtie_{R.pk = S.fk}(R, project[cols](S))
+$$
 
 -- LATERAL with aggregate (group-by decorrelation)
+$$
 lateral_join(R, aggregate[agg](filter[S.fk = R.pk](S)))
-  -> left_join[R.pk = T.fk](R, T)
-  where T = aggregate[agg, GROUP BY fk](S)
+  \rightarrow left_\bowtie_{R.pk = T.fk}(R, T)
+  \text{where} T = aggregate[agg, GROUP BY fk](S)
+$$
 
 -- LATERAL with ORDER BY + LIMIT (top-N per group)
+$$
 lateral_join(R, limit[N](sort[key](filter[S.fk = R.pk](S))))
-  -> top_n_per_group[N, key, R.pk = S.fk](R, S)
+  \rightarrow top_n_per_group[N, key, R.pk = S.fk](R, S)
+$$
   -- Requires window function or specialized operator
 
 -- Non-decorrelatable LATERAL (must keep apply)
+$$
 lateral_join(R, f(R.col))
-  -> apply(R, f(R.col))
-  where f has side effects or non-equality reference
+  \rightarrow apply(R, f(R.col))
+  \text{where} f has side effects or non-equality reference
+$$
+
 ```
 
 ## Implementation

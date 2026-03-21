@@ -25,15 +25,20 @@ static lookup table (dimension enrichment pattern).
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: symmetric stream-stream join
+$$
 stream JOIN table ON stream.key = table.id
+$$
 
 -- After: lookup join with local cache
+$$
 LookupJoin(
     stream,
     CachedTable(table, ttl=5min),
     key=stream.key)
+$$
+
 ```
 
 ## Implementation

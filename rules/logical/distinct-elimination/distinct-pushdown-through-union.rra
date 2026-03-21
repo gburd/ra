@@ -24,9 +24,12 @@ Pushes DISTINCT below UNION ALL to reduce the number of rows before the union, t
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 distinct(union_all(A, B))
-  -> distinct(union_all(distinct(A), distinct(B)))
+  \rightarrow distinct(union_all(distinct(A), distinct(B)))
+$$
+
 ```
 
 ## Implementation

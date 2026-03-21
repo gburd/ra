@@ -20,10 +20,13 @@ safe because the predicate does not change the partition assignment.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Filter[p](Exchange[hash(k)](R))
-  -> Exchange[hash(k)](Filter[p](R))
-  where columns(p) subset of columns(R)
+  \rightarrow Exchange[hash(k)](Filter[p](R))
+  \text{where} columns(p) \subseteq of columns(R)
+$$
+
 ```
 
 ## Test Cases

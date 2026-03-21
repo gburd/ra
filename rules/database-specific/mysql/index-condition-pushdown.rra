@@ -33,13 +33,18 @@ Reduces I/O by skipping row reads for non-matching index entries.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: filter after full row fetch
-sigma[a = 1 AND b LIKE '%foo%'](
+$$
+\sigma_{a = 1 AND b LIKE '%foo%'}(
     index_scan[idx_a_b, prefix=a](T))
+$$
 
 -- After: filter pushed into index scan
+$$
 index_scan[idx_a_b, prefix=a, icp=(b LIKE '%foo%')](T)
+$$
+
 ```
 
 ## Implementation

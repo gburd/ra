@@ -35,19 +35,26 @@ similar workloads and enabling real-time index recommendations.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Workload: set of queries with frequencies
+$$
 W = {(Q1, freq=100), (Q2, freq=50), (Q3, freq=10)}
+$$
 
 -- Index selection problem:
+$$
 maximize: sum(freq_i * speedup(Q_i, indexes))
 subject to: maintenance_cost(indexes) < budget
             storage(indexes) < disk_budget
+$$
 
 -- ML model: workload features -> recommended indexes
+$$
 recommend_indexes(W) = model.predict(
   query_features(W), table_stats, current_indexes
 )
+$$
+
 ```
 
 ## Implementation

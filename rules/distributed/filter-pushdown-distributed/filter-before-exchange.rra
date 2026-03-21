@@ -20,10 +20,13 @@ locally before sending data is always cheaper.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Filter[p](Exchange[hash(k)](R))
-  -> Exchange[hash(k)](Filter[p](R))
-  where p references only columns from R
+  \rightarrow Exchange[hash(k)](Filter[p](R))
+  \text{where} p references only columns from R
+$$
+
 ```
 
 ## Implementation

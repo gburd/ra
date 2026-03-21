@@ -26,13 +26,18 @@ lead to suboptimal join orders or algorithm choices.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: static plan based on estimates
+$$
 HashJoin(R, NestLoop(S, T))  -- estimated: R=1000, S=100, T=10
+$$
 
 -- At check point: actual S=100000 (100x misestimate)
 -- Re-optimize remaining plan with actual cardinality
+$$
 MergeJoin(R, HashJoin(S, T))  -- better for actual sizes
+$$
+
 ```
 
 ## Implementation

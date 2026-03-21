@@ -20,12 +20,17 @@ Uses relationship indexes for efficient traversal.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
+$$
 (expand (scan users) :FOLLOWS)
+$$
 
 -- After
+$$
 (expand-index (scan users) idx_follows)
+$$
+
 ```
 
 ## Preconditions

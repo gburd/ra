@@ -24,10 +24,13 @@ Optimizes queries with ORDER BY and LIMIT by using a priority queue of size K in
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Limit[k](Sort[cols](R))
-  -> TopK[k, cols](R)
-  where k << |R|
+  \rightarrow TopK[k, cols](R)
+  \text{where} k << |R|
+$$
+
 ```
 
 ## Implementation

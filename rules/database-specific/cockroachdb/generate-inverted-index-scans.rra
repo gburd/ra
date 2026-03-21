@@ -24,9 +24,12 @@ Generates scan alternatives using inverted indexes for JSON containment (@>) and
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Filter[json_col @> '{"key": "value"}'](Scan(T))
-  -> InvertedIndexScan[inverted_idx, json_col @> '{"key": "value"}'](T)
+  \rightarrow InvertedIndexScan[inverted_idx, json_col @> '{"key": "value"}'](T)
+$$
+
 ```
 
 ## Implementation

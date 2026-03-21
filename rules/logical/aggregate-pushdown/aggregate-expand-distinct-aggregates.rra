@@ -20,8 +20,11 @@ Expands distinct aggregates into union
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 COUNT(DISTINCT col) => optimized
+$$
+
 ```
 
 ## Implementation

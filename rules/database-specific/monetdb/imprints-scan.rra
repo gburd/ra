@@ -32,12 +32,17 @@ values, reducing memory bandwidth by the fraction of blocks pruned.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: full column scan
-sigma[price > 100.0](scan(products.price))
+$$
+\sigma_{price > 100.0}(scan(products.price))
+$$
 
 -- After: imprints-accelerated scan
-sigma[price > 100.0](imprints_scan(products.price))
+$$
+\sigma_{price > 100.0}(imprints_scan(products.price))
+$$
+
 ```
 
 ## Implementation

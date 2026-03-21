@@ -35,37 +35,44 @@ O(cost + N * reference_cost).
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Hoist uncorrelated subquery out of correlated context
+$$
 filter[R.val > (SELECT MAX(S.val) FROM S)](R)
-  where subquery is uncorrelated
-  -> cross_join(R, T)
-  where T = aggregate[MAX(val)](S)
+  \text{where} subquery is uncorrelated
+  \rightarrow cross_join(R, T)
+  \text{where} T = aggregate[MAX(val)](S)
   then filter[R.val > T.max_val]
+$$
 
 -- Deduplicate identical subqueries
+$$
 project[
   R.*,
   (SELECT MAX(val) FROM S) AS max_val,
   (SELECT MAX(val) FROM S) AS max_val2  -- duplicate
 ](R)
-  -> project[R.*, T.max_val, T.max_val AS max_val2](
+  \rightarrow project[R.*, T.max_val, T.max_val AS max_val2](
        cross_join(R, T)
      )
-  where T = aggregate[MAX(val)](S)
+  \text{where} T = aggregate[MAX(val)](S)
+$$
 
 -- Hoist from CASE expression
+$$
 project[
   CASE WHEN R.type = 'A'
        THEN (SELECT param FROM config WHERE key = 'threshold_a')
        ELSE (SELECT param FROM config WHERE key = 'threshold_b')
   END
 ](R)
-  -> project[
+  \rightarrow project[
        CASE WHEN R.type = 'A' THEN ta.param ELSE tb.param END
      ](cross_join(R, ta, tb))
-  where ta = filter[key='threshold_a'](config)
-  where tb = filter[key='threshold_b'](config)
+  \text{where} ta = filter[key='threshold_a'](config)
+  \text{where} tb = filter[key='threshold_b'](config)
+$$
+
 ```
 
 ## Implementation

@@ -42,38 +42,51 @@ forms systematically.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 QGM Components:
+$$
 
+$$
 Box types:
-  SELECT box: pi, sigma, join operations
+  SELECT box: pi, sigma, \bowtie operations
   GROUPBY box: gamma (aggregation)
   UNION/INTERSECT/EXCEPT box: set operations
   BASE TABLE box: leaf (table scan)
+$$
 
+$$
 Quantifier types:
   F (foreach/existential): normal FROM clause reference
   E (exists): EXISTS subquery
   A (all): ALL/ANY subquery
   S (scalar): scalar subquery
+$$
 
+$$
 Example QGM for:
   SELECT c.name FROM customers c
   WHERE EXISTS (SELECT 1 FROM orders o WHERE o.cust_id = c.id)
+$$
 
+$$
   Box B1 (SELECT): outputs c.name
-    Quantifier q1 (F): -> Box B2 (BASE: customers)
-    Quantifier q2 (E): -> Box B3
+    Quantifier q1 (F): \rightarrow Box B2 (BASE: customers)
+    Quantifier q2 (E): \rightarrow Box B3
   Box B3 (SELECT): outputs 1
-    Quantifier q3 (F): -> Box B4 (BASE: orders)
+    Quantifier q3 (F): \rightarrow Box B4 (BASE: orders)
     Predicate: o.cust_id = c.id (correlated)
+$$
 
+$$
 QGM transformation (decorrelation):
   Box B1 (SELECT): outputs c.name
-    Quantifier q1 (F): -> Box B2 (BASE: customers)
+    Quantifier q1 (F): \rightarrow Box B2 (BASE: customers)
     SEMI-JOIN: c.id = o.cust_id
-    Quantifier q3 (F): -> Box B4 (BASE: orders)
-  (Boxes B3 and q2 eliminated, replaced by semi-join)
+    Quantifier q3 (F): \rightarrow Box B4 (BASE: orders)
+  (Boxes B3 and q2 eliminated, replaced by semi-\bowtie)
+$$
+
 ```
 
 ## Implementation

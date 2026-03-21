@@ -35,15 +35,20 @@ smaller, making the scan 25x cheaper.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Regular index scan (must fetch heap):
+$$
 project[a, b](filter[a > 100](index_scan(R, I_on_a)))
   cost: index_traversal + F*PAGES(R) + W*F*TUPLES(R)
+$$
 
 -- Index-only scan (no heap fetch):
+$$
 project[a, b](filter[a > 100](index_only_scan(R, I_on(a, b))))
   cost: index_traversal + F*INDEX_PAGES(I) + W*F*TUPLES(R)
+$$
   -- INDEX_PAGES << PAGES(R) since index is narrower
+
 ```
 
 ## Implementation

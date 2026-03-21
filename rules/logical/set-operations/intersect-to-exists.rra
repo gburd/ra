@@ -29,12 +29,17 @@ full hash tables for set intersection.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: INTERSECT
+$$
 R INTERSECT S
+$$
 
 -- After: EXISTS-based filter
-gamma[*](sigma[EXISTS(SELECT 1 FROM S WHERE S.* = R.*)](R))
+$$
+\gamma_{*}(\sigma_{EXISTS(SELECT 1 FROM S WHERE S.* = R.*)}(R))
+$$
+
 ```
 
 ## Implementation

@@ -29,12 +29,17 @@ expensive N*M join into a much smaller n*m join.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: aggregate above join
-gamma[R.a; SUM(R.x)](R join[R.k = S.k] S)
+$$
+\gamma_{R.a; SUM(R.x)}(R \bowtie_{R.k = S.k} S)
+$$
 
 -- After: aggregate pushed below join (eager aggregation)
-(gamma[a, k; SUM(x)](R)) join[k = S.k] S
+$$
+(\gamma_{a, k; SUM(x)}(R)) \bowtie_{k = S.k} S
+$$
+
 ```
 
 ## Implementation

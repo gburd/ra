@@ -30,12 +30,15 @@ benefit.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Shuffle join -> Broadcast join
+$$
 Join[c](Exchange[hash(k1)](R), Exchange[hash(k2)](S))
-  -> Join[c](R, Exchange[broadcast](S))
-  where |S| < broadcast_threshold
-  where |S| * num_nodes < |R|
+  \rightarrow Join[c](R, Exchange[broadcast](S))
+  \text{where} |S| < broadcast_threshold
+  \text{where} |S| * num_nodes < |R|
+$$
+
 ```
 
 ## Implementation

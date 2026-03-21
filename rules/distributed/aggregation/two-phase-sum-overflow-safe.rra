@@ -23,16 +23,21 @@ aggregation where partial sums may exceed the column's type range.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
-gamma[g, SUM(x::INT)](R)
+$$
+\gamma_{g, SUM(x::INT)}(R)
+$$
 
 -- After (widen to BIGINT for partial sum)
-gamma[g, SUM(partial_sum)::INT](
+$$
+\gamma_{g, SUM(partial_sum)::INT}(
     Exchange[hash(g)](
-        gamma[g, SUM(CAST(x AS BIGINT)) AS partial_sum](R)
+        \gamma_{g, SUM(CAST(x AS BIGINT)) AS partial_sum}(R)
     )
 )
+$$
+
 ```
 
 ## Test Cases

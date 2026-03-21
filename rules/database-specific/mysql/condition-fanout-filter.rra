@@ -33,12 +33,17 @@ data skew, leading to better cardinality estimates and join ordering.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: uniform selectivity assumption
-sigma[status = 'active'](users)  -- estimated 50% (1/NDV)
+$$
+\sigma_{status = 'active'}(users)  -- estimated 50% (1/NDV)
+$$
 
 -- After: histogram-based selectivity
-sigma[status = 'active'](users)  -- estimated 85% (from histogram)
+$$
+\sigma_{status = 'active'}(users)  -- estimated 85% (from histogram)
+$$
+
 ```
 
 ## Implementation

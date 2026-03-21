@@ -32,14 +32,21 @@ reducing join cost.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Traditional (lazy aggregation):
 γ_{c.id, SUM(o.total)}((Customer ⋈ Order))
+$$
 
+$$
 Eager aggregation:
 γ_{c.id, SUM(agg_total)}(Customer ⋈ γ_{customer_id, SUM(total) as agg_total}(Order))
+$$
 
-Where the inner aggregation reduces Order cardinality before the join.
+$$
+Where the inner aggregation reduces Order cardinality before the \bowtie.
+$$
+
 ```
 
 ## Implementation

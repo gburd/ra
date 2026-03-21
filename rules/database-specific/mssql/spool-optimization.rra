@@ -33,15 +33,20 @@ O(cost + N * replay_cost).
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: subplan executed twice
-union-all(
-    sigma[p1](expensive_subplan),
-    sigma[p2](expensive_subplan))
+$$
+\cup-all(
+    \sigma_{p1}(expensive_subplan),
+    \sigma_{p2}(expensive_subplan))
+$$
 
 -- After: spool caches subplan result
+$$
 let spool = eager-spool(expensive_subplan) in
-union-all(sigma[p1](spool), sigma[p2](spool))
+\cup-all(\sigma_{p1}(spool), \sigma_{p2}(spool))
+$$
+
 ```
 
 ## Implementation

@@ -33,12 +33,17 @@ optimizer.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: outer join + null-rejecting filter
-sigma[b.x = 5](A LEFT JOIN[a.id = b.fk] B)
+$$
+\sigma_{b.x = 5}(A LEFT JOIN[a.id = b.fk] B)
+$$
 
 -- After: converted to inner join
-sigma[b.x = 5](A INNER JOIN[a.id = b.fk] B)
+$$
+\sigma_{b.x = 5}(A INNER JOIN[a.id = b.fk] B)
+$$
+
 ```
 
 ## Implementation

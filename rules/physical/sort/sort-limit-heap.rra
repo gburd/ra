@@ -23,12 +23,17 @@ dramatically faster and uses O(k) memory instead of O(N).
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
+$$
 Limit[k](Sort[ORDER BY x](R))
+$$
 
 -- After
+$$
 TopN[k, ORDER BY x](R)
+$$
+
 ```
 
 ## Implementation

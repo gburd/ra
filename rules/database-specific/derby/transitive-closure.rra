@@ -32,12 +32,17 @@ only after joining with B.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: filter on B only
-sigma[B.y = 10](A join[A.x = B.y] B)
+$$
+\sigma_{B.y = 10}(A \bowtie_{A.x = B.y} B)
+$$
 
 -- After: transitive closure adds filter on A
-sigma[A.x = 10](A) join[A.x = B.y] sigma[B.y = 10](B)
+$$
+\sigma_{A.x = 10}(A) \bowtie_{A.x = B.y} \sigma_{B.y = 10}(B)
+$$
+
 ```
 
 ## Implementation

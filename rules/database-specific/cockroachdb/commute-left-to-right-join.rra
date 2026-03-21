@@ -24,8 +24,11 @@ Creates a Right Join with swapped left and right inputs from a Left Join. This e
 
 ## Relational Algebra
 
-```algebra
-LeftJoin[c](R, S) -> RightJoin[c](S, R)
+```latex
+$$
+LeftJoin[c](R, S) \rightarrow RightJoin[c](S, R)
+$$
+
 ```
 
 ## Implementation

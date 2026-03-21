@@ -26,9 +26,12 @@ aggregation cheaper.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 aggregate[group, agg] + having[cond_on_base AND cond_on_agg](R)
-  -> having[cond_on_agg](aggregate[group, agg](filter[cond_on_base](R)))
+  \rightarrow having[cond_on_agg](aggregate[group, agg](filter[cond_on_base](R)))
+$$
+
 ```
 
 ## Implementation

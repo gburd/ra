@@ -24,16 +24,21 @@ two-phase decomposition.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
-gamma[g, agg(a)](Exchange[hash(g)](sigma[p](R)))
+$$
+\gamma_{g, agg(a)}(Exchange[hash(g)](\sigma_{p}(R)))
+$$
 
 -- After (push filter below local agg)
-gamma[g, merge_agg(partial_a)](
+$$
+\gamma_{g, merge_agg(partial_a)}(
     Exchange[hash(g)](
-        gamma[g, partial_agg(a)](sigma[p](R))
+        \gamma_{g, partial_agg(a)}(\sigma_{p}(R))
     )
 )
+$$
+
 ```
 
 ## Test Cases

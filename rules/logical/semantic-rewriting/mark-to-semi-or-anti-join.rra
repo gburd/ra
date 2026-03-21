@@ -31,18 +31,27 @@ anti-join produces the same result without the marker overhead.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: mark join with filter on mark
-pi[L.*](sigma[mark = TRUE](L MARK JOIN R))
+$$
+\pi_{L.*}(\sigma_{mark = TRUE}(L MARK JOIN R))
+$$
 
 -- After: semi-join (keep only matching rows)
+$$
 L SEMI JOIN R
+$$
 
 -- Before: mark join with filter on NOT mark
-pi[L.*](sigma[mark = FALSE](L MARK JOIN R))
+$$
+\pi_{L.*}(\sigma_{mark = FALSE}(L MARK JOIN R))
+$$
 
 -- After: anti-join (keep only non-matching rows)
+$$
 L ANTI JOIN R
+$$
+
 ```
 
 ## Implementation

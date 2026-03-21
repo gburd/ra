@@ -29,9 +29,12 @@ entirely, replacing it with a simple VALUES clause containing the result.
 
 ## Relational Algebra
 
-```algebra
-γ_{g, AGG(c)}(VALUES(t1, t2, ...)) where ti are constants ->
+```latex
+$$
+γ_{g, AGG(c)}(VALUES(t1, t2, ...)) \text{where} ti are constants \rightarrow
   VALUES(eval_aggregate(g, AGG(c), [t1, t2, ...]))
+$$
+
 ```
 
 ## Implementation

@@ -31,9 +31,12 @@ self-joins or subqueries.
 
 ## Relational Algebra
 
-```algebra
-π_[col1, AGG(col2)](R) where no GROUP BY ->
+```latex
+$$
+π_[col1, AGG(col2)](R) \text{where} no GROUP BY \rightarrow
   π_[col1, AGG(col2) OVER()](R)
+$$
+
 ```
 
 ## Implementation

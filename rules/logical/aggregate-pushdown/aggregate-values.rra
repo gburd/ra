@@ -20,8 +20,11 @@ Aggregates over constant values
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Agg(VALUES) => constant
+$$
+
 ```
 
 ## Implementation

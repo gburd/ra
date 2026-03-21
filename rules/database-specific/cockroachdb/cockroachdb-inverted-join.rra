@@ -20,12 +20,17 @@ Generates lookup joins using inverted indexes for geospatial (ST_DWithin) and JS
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
-(inner-join (scan docs) (scan regions) (st-dwithin location bounds))
+$$
+(inner-\bowtie (scan docs) (scan regions) (st-dwithin location bounds))
+$$
 
 -- After
-(inverted-join (scan docs) (inverted-index-scan regions))
+$$
+(inverted-\bowtie (scan docs) (inverted-index-scan regions))
+$$
+
 ```
 
 ## Preconditions

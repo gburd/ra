@@ -57,26 +57,33 @@ methods miss entirely.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Traditional estimation (independence assumption):
+$$
 |sigma_{A>10 AND B<5}(R)| = |R| * sel(A>10) * sel(B<5)
+$$
   -- Assumes A and B are independent
   -- Error: if A and B are correlated, can be 100x off
 
 -- ML estimation (learned joint distribution):
+$$
 |sigma_{A>10 AND B<5}(R)| = model.predict(
   table=R, predicates=[(A,>,10), (B,<,5)]
 )
+$$
   -- Model has learned P(A,B) from actual data
   -- Captures correlation: error typically < 3x
 
 -- Join cardinality:
-|R join S on R.a = S.b| = join_model.predict(
-  tables=[R, S], join=[R.a = S.b],
+$$
+|R \bowtie S on R.a = S.b| = join_model.predict(
+  tables=[R, S], \bowtie=[R.a = S.b],
   filters=[R.x > 10]
 )
+$$
   -- Traditional: |R| * |S| / max(NDV(R.a), NDV(S.b))
   -- ML: captures skew, correlations, FK relationships
+
 ```
 
 ## Implementation

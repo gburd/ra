@@ -33,12 +33,15 @@ usage.
 
 ## Relational Algebra
 
-```algebra
-sigma[rn <= k](
+```latex
+$$
+\sigma_{rn <= k}(
     Window[ROW_NUMBER() OVER (PARTITION BY p ORDER BY o) AS rn](R))
-  -> sigma[rn <= k](
+  \rightarrow \sigma_{rn <= k}(
        Window[ROW_NUMBER() OVER (PARTITION BY p ORDER BY o) AS rn](
          PartitionTopN[k, p, o](R)))
+$$
+
 ```
 
 ## Implementation

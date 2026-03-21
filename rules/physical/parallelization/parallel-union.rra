@@ -24,13 +24,16 @@ Executes UNION branches in parallel, gathers results.
 
 ## Relational Algebra
 
-```algebra
-union(query1, query2, query3)
-  -> parallel_gather(
+```latex
+$$
+\cup(query1, query2, query3)
+  \rightarrow parallel_gather(
        concurrent(query1),
        concurrent(query2),
        concurrent(query3)
      )
+$$
+
 ```
 
 ## Implementation

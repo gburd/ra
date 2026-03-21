@@ -59,9 +59,12 @@ more practical than the full search for bushy trees.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Left-deep tree for 4 relations:
+$$
 
+$$
      join4
     /    \
   join3   R4
@@ -69,25 +72,35 @@ Left-deep tree for 4 relations:
 join2  R3
 /   \
 R1   R2
+$$
 
+$$
 vs. Bushy tree:
+$$
 
+$$
     join3
    /     \
  join1   join2
  /  \    /  \
 R1  R2  R3  R4
+$$
 
+$$
 System R enumerates left-deep orderings:
   For n=4: Consider all 4! = 24 left-deep orderings
   With DP: Only evaluate O(n * 2^n) = 4 * 16 = 64 subproblems
   (vs. bushy: 64 subsets * 6 partitions each = 384 subproblems)
+$$
 
+$$
 DP recurrence for left-deep:
   best[{Ri}] = scan_cost(Ri)  for each single relation
   best[S] = min over Ri in S of:
     best[S \ {Ri}] + join_cost(S \ {Ri}, Ri)
   (Right input is always a single relation Ri)
+$$
+
 ```
 
 ## Implementation

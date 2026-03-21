@@ -36,14 +36,19 @@ zero additional sort cost.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: hash aggregation exceeding memory
-hash_gamma[department; SUM(salary)](employees)
-  where |groups| * row_size > work_mem
+$$
+hash_\gamma_{department; SUM(salary)}(employees)
+  \text{where} |groups| * row_size > work_mem
+$$
 
 -- After: sort + streaming aggregation
-sort_gamma[department; SUM(salary)](
+$$
+sort_\gamma_{department; SUM(salary)}(
     sort[department](employees))
+$$
+
 ```
 
 ## Implementation

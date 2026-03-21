@@ -31,14 +31,19 @@ than strictly left-deep or right-deep trees.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: left-deep
-(A join[p1] B) join[p2] C
+$$
+(A \bowtie_{p1} B) \bowtie_{p2} C
+$$
 
 -- After: right-deep
-A join[p1'] (B join[p2'] C)
-  where p2' contains predicates between B and C
-  where p1' contains predicates between A and (B join C)
+$$
+A \bowtie_{p1'} (B \bowtie_{p2'} C)
+  \text{where} p2' contains predicates between B and C
+  \text{where} p1' contains predicates between A and (B \bowtie C)
+$$
+
 ```
 
 ## Implementation

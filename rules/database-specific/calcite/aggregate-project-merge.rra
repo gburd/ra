@@ -30,12 +30,17 @@ materialization and simplifies the plan for downstream rules.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: aggregate above project
-gamma[g'; SUM(x)](pi[a AS x, b AS g](R))
+$$
+\gamma_{g'; SUM(x)}(\pi_{a AS x, b AS g}(R))
+$$
 
 -- After: aggregate directly on input
-gamma[b; SUM(a)](R)
+$$
+\gamma_{b; SUM(a)}(R)
+$$
+
 ```
 
 ## Implementation

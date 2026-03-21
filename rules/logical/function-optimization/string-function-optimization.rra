@@ -25,15 +25,18 @@ eliminated based on argument properties.
 
 ## Relational Algebra
 
-```algebra
-LENGTH(literal_string)  -> constant
-CONCAT('', x)           -> x
-CONCAT(x, '')           -> x
-SUBSTRING(x, 1, LENGTH(x)) -> x    -- full string
-TRIM(TRIM(x))           -> TRIM(x)  -- idempotent
-UPPER(UPPER(x))         -> UPPER(x)
-LOWER(LOWER(x))         -> LOWER(x)
-REPLACE(x, '', y)       -> x        -- empty search string
+```latex
+$$
+LENGTH(literal_string)  \rightarrow constant
+CONCAT('', x)           \rightarrow x
+CONCAT(x, '')           \rightarrow x
+SUBSTRING(x, 1, LENGTH(x)) \rightarrow \times -- full string
+TRIM(TRIM(x))           \rightarrow TRIM(x)  -- idempotent
+UPPER(UPPER(x))         \rightarrow UPPER(x)
+LOWER(LOWER(x))         \rightarrow LOWER(x)
+REPLACE(x, '', y)       \rightarrow \times -- empty search string
+$$
+
 ```
 
 ## Implementation

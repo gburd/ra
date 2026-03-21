@@ -30,19 +30,28 @@ direct index lookup.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 filter[YEAR(date_col) = 2024](R)
-  -> filter[date_col >= '2024-01-01' AND date_col < '2025-01-01'](R)
+  \rightarrow filter[date_col >= '2024-01-01' AND date_col < '2025-01-01'](R)
+$$
 
+$$
 filter[LOWER(name_col) = 'smith'](R)
-  -> filter[name_col ILIKE 'smith'](R)
+  \rightarrow filter[name_col ILIKE 'smith'](R)
+$$
   -- or use case-insensitive collation index
 
+$$
 filter[col + 10 = 50](R)
-  -> filter[col = 40](R)
+  \rightarrow filter[col = 40](R)
+$$
 
+$$
 filter[ABS(col) < 5](R)
-  -> filter[col > -5 AND col < 5](R)
+  \rightarrow filter[col > -5 AND col < 5](R)
+$$
+
 ```
 
 ## Implementation

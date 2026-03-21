@@ -33,24 +33,37 @@ other efficient strategies.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: EXISTS sub-query
-sigma[EXISTS(sigma[S.k = R.k](S))](R)
+$$
+\sigma_{EXISTS(sigma[S.k = R.k}(S))](R)
+$$
 
 -- After: semi-join
-R semi-join[R.k = S.k] S
+$$
+R semi-\bowtie_{R.k = S.k} S
+$$
 
 -- Before: IN sub-query
-sigma[R.x IN (pi[y](S))](R)
+$$
+\sigma_{R.x IN (\pi_{y}(S))}(R)
+$$
 
 -- After: semi-join
-R semi-join[R.x = S.y] S
+$$
+R semi-\bowtie_{R.x = S.y} S
+$$
 
 -- Before: scalar sub-query
-pi[R.*, (SELECT MAX(S.v) FROM S WHERE S.k = R.k)](R)
+$$
+\pi_{R.*, (SELECT MAX(S.v) FROM S WHERE S.k = R.k)}(R)
+$$
 
 -- After: left join with aggregate
-R left-join[R.k = S.k] (gamma[k; MAX(v)](S))
+$$
+R left-\bowtie_{R.k = S.k} (\gamma_{k; MAX(v)}(S))
+$$
+
 ```
 
 ## Implementation

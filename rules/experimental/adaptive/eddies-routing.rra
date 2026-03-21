@@ -26,14 +26,19 @@ or changing, particularly in streaming or federated scenarios.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: static operator order
-sigma[pred3](sigma[pred2](sigma[pred1](R)))
+$$
+\sigma_{pred3}(\sigma_{pred2}(\sigma_{pred1}(R)))
+$$
 
 -- After: eddy routes tuples adaptively
+$$
 Eddy(R, {pred1, pred2, pred3})
+$$
 -- Routes tuples to most selective predicate first
 -- Adapts routing as selectivities are learned
+
 ```
 
 ## Implementation

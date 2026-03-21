@@ -33,17 +33,22 @@ for different ranges so each execution uses the appropriate plan.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Single plan (parameter sniffing problem)
+$$
 plan_cached_for(@status = 'active'):
     index-seek(orders, idx_status, @status)
+$$
 -- Bad for @status = 'active' which returns 90% of rows
 
 -- PSP: multiple plans based on parameter range
+$$
 plan_1 (@status IN high_frequency_values):
-    full-scan(orders) -> filter(@status)
+    full-scan(orders) \rightarrow filter(@status)
 plan_2 (@status NOT IN high_frequency_values):
     index-seek(orders, idx_status, @status)
+$$
+
 ```
 
 ## Implementation

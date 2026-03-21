@@ -20,12 +20,17 @@ Derives constraints from WHERE clause and applies to index selection.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
+$$
 (filter (scan orders) (and (eq region 'us-east') (gt total 100)))
+$$
 
 -- After
+$$
 (filter (index-scan orders idx_region_total) (and (eq region 'us-east') (gt total 100)))
+$$
+
 ```
 
 ## Preconditions

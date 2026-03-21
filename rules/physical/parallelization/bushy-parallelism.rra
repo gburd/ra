@@ -24,12 +24,15 @@ Executes independent branches of bushy join tree in parallel.
 
 ## Relational Algebra
 
-```algebra
-join(join(A, B), join(C, D))
-  -> concurrent:
-       thread1: join(A, B)
-       thread2: join(C, D)
-       main: join(result1, result2)
+```latex
+$$
+\bowtie(\bowtie(A, B), \bowtie(C, D))
+  \rightarrow concurrent:
+       thread1: \bowtie(A, B)
+       thread2: \bowtie(C, D)
+       main: \bowtie(result1, result2)
+$$
+
 ```
 
 ## Implementation

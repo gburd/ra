@@ -34,16 +34,23 @@ expanded expression.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before inlining (function is opaque):
+$$
 filter[my_func(R.col) > 10](R)
+$$
 
 -- Function definition: my_func(x) = x * 2 + 1
 -- After inlining:
+$$
 filter[(R.col * 2 + 1) > 10](R)
+$$
 
 -- Now standard simplification applies:
+$$
 filter[R.col > 4.5](R)
+$$
+
 ```
 
 ## Implementation

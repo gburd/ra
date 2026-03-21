@@ -22,12 +22,17 @@ Eliminates double negation patterns like `NOT NOT EXISTS` or `NOT IN (SELECT ...
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Filter[NOT NOT EXISTS(sub)](input)
-  -> Filter[EXISTS(sub)](input)
+  \rightarrow Filter[EXISTS(sub)](input)
+$$
 
+$$
 Filter[NOT (col NOT IN sub)](input)
-  -> Filter[col IN sub](input)
+  \rightarrow Filter[col IN sub](input)
+$$
+
 ```
 
 ## Implementation

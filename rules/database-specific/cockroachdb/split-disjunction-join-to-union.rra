@@ -24,15 +24,18 @@ Splits disjunctions (OR expressions) in ON clause predicates of inner or semi jo
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join[c1 OR c2](R, S)
-  -> DistinctOn[R.pk, S.pk](
+  \rightarrow DistinctOn[R.pk, S.pk](
        UnionAll(
          Join[c1](R, S),
          Join[c2](R, S)
        )
      )
-  where can_split_join_disjuncts
+  \text{where} can_split_join_disjuncts
+$$
+
 ```
 
 Where:

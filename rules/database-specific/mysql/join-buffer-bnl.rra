@@ -31,12 +31,17 @@ rows.  Without BNL, each outer row triggers a full inner scan.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: simple nested-loop (no index)
+$$
 outer NLJ inner
+$$
 
 -- After: block nested-loop with buffer
+$$
 outer BNL[buffer_size=256KB] inner
+$$
+
 ```
 
 ## Implementation

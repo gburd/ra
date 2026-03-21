@@ -30,12 +30,17 @@ columns before the Window reduces memory for sorting and hashing.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
-pi[a, w](Window[w = ROW_NUMBER() OVER (PARTITION BY a ORDER BY b)](R(a, b, c, d)))
+$$
+\pi_{a, w}(Window[w = ROW_NUMBER() OVER (PARTITION BY a ORDER BY b)](R(a, b, c, d)))
+$$
 
 -- After
-pi[a, w](Window[w = ROW_NUMBER() OVER (PARTITION BY a ORDER BY b)](pi[a, b](R)))
+$$
+\pi_{a, w}(Window[w = ROW_NUMBER() OVER (PARTITION BY a ORDER BY b)](\pi_{a, b}(R)))
+$$
+
 ```
 
 ## Implementation

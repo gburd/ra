@@ -35,20 +35,25 @@ but saves the cost of a later sort, making it cheaper overall.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Without interesting orders:
+$$
 opt_plan({R,S,T}) = cheapest plan (unsorted output)
 sort[order_by](opt_plan({R,S,T})) -- Must add explicit sort
+$$
 
 -- With interesting orders:
+$$
 opt_plan({R,S,T}, order=unordered) = cheapest plan
 opt_plan({R,S,T}, order=R.a_asc) = cheapest plan producing R.a ASC
 opt_plan({R,S,T}, order=S.b_asc) = cheapest plan producing S.b ASC
+$$
 
 -- Final: choose min(
 --   opt_plan(all, unordered) + sort_cost,
 --   opt_plan(all, order=target_order)
 -- )
+
 ```
 
 ## Implementation

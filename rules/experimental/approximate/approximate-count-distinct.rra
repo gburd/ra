@@ -25,12 +25,17 @@ approximate results are acceptable (dashboards, analytics, monitoring).
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: exact distinct count (requires sorting or hash set)
-gamma[; COUNT(DISTINCT user_id)](events)
+$$
+\gamma_{; COUNT(DISTINCT user_id)}(events)
+$$
 
 -- After: HyperLogLog approximation
-gamma[; APPROX_COUNT_DISTINCT(user_id, precision=14)](events)
+$$
+\gamma_{; APPROX_COUNT_DISTINCT(user_id, precision=14)}(events)
+$$
+
 ```
 
 ## Implementation

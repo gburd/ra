@@ -31,16 +31,21 @@ communication while maximizing CPU and I/O parallelism.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Broadcast distribution (small build side)
-parallel-hash-join(
+$$
+parallel-hash-\bowtie(
     broadcast(S_small),
     partition-scan(R_large))
+$$
 
 -- Hash distribution (both sides large)
-parallel-hash-join(
+$$
+parallel-hash-\bowtie(
     hash-distribute(R, key),
     hash-distribute(S, key))
+$$
+
 ```
 
 ## Implementation

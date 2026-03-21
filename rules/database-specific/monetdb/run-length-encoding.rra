@@ -32,12 +32,17 @@ group.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: scan all N values
-gamma[date; COUNT(*)](scan(events.date))  -- O(N)
+$$
+\gamma_{date; COUNT(*)}(scan(events.date))  -- O(N)
+$$
 
 -- After: RLE-aware aggregation
-gamma[date; COUNT_RUNS()](rle_scan(events.date))  -- O(R)
+$$
+\gamma_{date; COUNT_RUNS()}(rle_scan(events.date))  -- O(R)
+$$
+
 ```
 
 ## Implementation

@@ -30,12 +30,17 @@ standard operators that indexes and storage engines understand.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: IS NOT DISTINCT FROM
-sigma[a IS NOT DISTINCT FROM b](R)
+$$
+\sigma_{a IS NOT DISTINCT FROM b}(R)
+$$
 
 -- After: expanded comparison
-sigma[(a = b) OR (a IS NULL AND b IS NULL)](R)
+$$
+\sigma_{(a = b) OR (a IS NULL AND b IS NULL)}(R)
+$$
+
 ```
 
 ## Implementation

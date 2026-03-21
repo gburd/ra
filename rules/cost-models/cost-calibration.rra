@@ -39,18 +39,23 @@ which is sufficient for correct plan selection.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Calibration goal:
   Find parameters P = {seq_page_cost, random_page_cost, cpu_tuple_cost, ...}
   that minimize:
     sum_i (predicted_cost(query_i, P) - actual_time(query_i))^2
+$$
 
+$$
 Calibration queries:
   Q1: Sequential scan (measures seq_page_cost)
   Q2: Random index scan (measures random_page_cost)
   Q3: CPU-only filter (measures cpu_tuple_cost)
-  Q4: Hash join (measures hash overhead)
+  Q4: Hash \bowtie (measures hash overhead)
   Q5: Sort (measures comparison cost)
+$$
+
 ```
 
 ## Implementation

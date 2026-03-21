@@ -24,11 +24,14 @@ Pushes a filter from the body of a recursive CTE into the base case when the fil
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Filter[p](RecursiveCTE[name, base, rec](body))
-  -> RecursiveCTE[name, Filter[p](base), rec](body)
-  where columns(p) ⊆ columns(base)
+  \rightarrow RecursiveCTE[name, Filter[p](base), rec](body)
+  \text{where} columns(p) ⊆ columns(base)
     and not references_cte(p, name)
+$$
+
 ```
 
 ## Implementation

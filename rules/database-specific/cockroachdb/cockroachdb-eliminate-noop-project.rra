@@ -20,12 +20,17 @@ Removes identity projections that don't transform data or reorder columns.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
+$$
 (project [a,b,c] (scan table [a,b,c]))
+$$
 
 -- After
+$$
 (scan table [a,b,c])
+$$
+
 ```
 
 ## Preconditions

@@ -32,10 +32,13 @@ the cast would prevent.
 
 ## Relational Algebra
 
-```algebra
-CAST(x AS T) -> x               where typeof(x) = T
-CAST(CAST(x AS T1) AS T2) -> CAST(x AS T2)  where T1 is lossless intermediate
-CAST(literal AS T) -> literal_of_type_T     (compile-time conversion)
+```latex
+$$
+CAST(x AS T) \rightarrow \times \text{where} typeof(x) = T
+CAST(CAST(x AS T1) AS T2) \rightarrow CAST(x AS T2)  \text{where} T1 is lossless intermediate
+CAST(literal AS T) \rightarrow literal_of_type_T     (compile-time conversion)
+$$
+
 ```
 
 ## Implementation

@@ -28,9 +28,12 @@ All other nodes skip the scan entirely.
 
 ## Relational Algebra
 
-```algebra
-sigma[partition_key = const](Scan(T))
-  -> Scan(T, partitions={p : p.range contains const})
+```latex
+$$
+\sigma_{partition_key = const}(Scan(T))
+  \rightarrow Scan(T, partitions={p : p.range contains const})
+$$
+
 ```
 
 ## Implementation

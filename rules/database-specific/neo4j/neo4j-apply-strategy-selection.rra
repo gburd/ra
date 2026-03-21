@@ -20,12 +20,17 @@ Chooses between eager and lazy evaluation strategies.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
+$$
 (apply (scan users) :FOLLOWS)
+$$
 
 -- After
+$$
 (lazy-apply (scan users) :FOLLOWS)
+$$
+
 ```
 
 ## Preconditions

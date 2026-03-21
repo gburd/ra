@@ -30,10 +30,13 @@ enables index usage and prunes mistyped documents early.
 
 ## Relational Algebra
 
-```algebra
-sigma[field > value](scan(collection))
-  -> sigma[type(field) = numeric AND field > value](scan(collection))
-  where schema_inference shows field has mixed types
+```latex
+$$
+\sigma_{field > value}(scan(collection))
+  \rightarrow \sigma_{type(field) = numeric AND field > value}(scan(collection))
+  \text{where} schema_inference shows field has mixed types
+$$
+
 ```
 
 ## Implementation

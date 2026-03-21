@@ -33,12 +33,17 @@ an inner join eliminates this bookkeeping.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: left join with non-null filter on right
-sigma[S.x > 10](R left-join[R.k = S.k] S)
+$$
+\sigma_{S.x > 10}(R left-\bowtie_{R.k = S.k} S)
+$$
 
 -- After: inner join (S.x > 10 implies S.x IS NOT NULL)
-sigma[S.x > 10](R inner-join[R.k = S.k] S)
+$$
+\sigma_{S.x > 10}(R inner-\bowtie_{R.k = S.k} S)
+$$
+
 ```
 
 ## Implementation

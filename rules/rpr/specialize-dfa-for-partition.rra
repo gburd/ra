@@ -40,8 +40,9 @@ short-circuited (always-true transitions).
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: DFA compiled for general case
+$$
 RowPattern(
   Filter(symbol = 'AAPL', Scan(T)),
   partition: [symbol],
@@ -51,8 +52,10 @@ RowPattern(
   },
   ...
 )
+$$
 
 -- After: constant propagation into DEFINE
+$$
 RowPattern(
   Filter(symbol = 'AAPL', Scan(T)),
   partition: [symbol],
@@ -62,13 +65,17 @@ RowPattern(
   },
   ...
 )
+$$
 
 -- After simplification
+$$
 RowPattern(
   ...,
   defines: { A: price > PREV(price) },
   ...
 )
+$$
+
 ```
 
 ## Implementation

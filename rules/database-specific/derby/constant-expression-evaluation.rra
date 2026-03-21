@@ -30,12 +30,17 @@ optimization.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: expression evaluated per row
-sigma[price > 100 * 1.1](scan(products))
+$$
+\sigma_{price > 100 * 1.1}(scan(products))
+$$
 
 -- After: constant folded
-sigma[price > 110.0](scan(products))
+$$
+\sigma_{price > 110.0}(scan(products))
+$$
+
 ```
 
 ## Implementation

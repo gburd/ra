@@ -25,15 +25,22 @@ when values form ranges or when the list is very large.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: large IN list
-sigma[id IN (1,2,3,...,1000)](R)
+$$
+\sigma_{id IN (1,2,3,...,1000)}(R)
+$$
 
 -- After option 1 (consecutive): range predicate
-sigma[id BETWEEN 1 AND 1000](R)
+$$
+\sigma_{id BETWEEN 1 AND 1000}(R)
+$$
 
 -- After option 2 (large list): semi-join
-R semi-join Values(1,2,3,...,1000)
+$$
+R semi-\bowtie Values(1,2,3,...,1000)
+$$
+
 ```
 
 ## Implementation

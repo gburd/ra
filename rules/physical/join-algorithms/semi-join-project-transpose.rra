@@ -36,12 +36,17 @@ available. The project above then operates on fewer rows.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: semi-join on projected input
-SemiJoin[k](pi[a, b, k](X), Y)
+$$
+SemiJoin[k](\pi_{a, b, k}(X), Y)
+$$
 
 -- After: project above semi-join
-pi[a, b, k](SemiJoin[k](X, Y))
+$$
+\pi_{a, b, k}(SemiJoin[k](X, Y))
+$$
+
 ```
 
 ## Implementation

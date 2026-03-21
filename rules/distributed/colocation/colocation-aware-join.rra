@@ -24,16 +24,21 @@ or range-partitioned by the join key.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: shuffle-based distributed join
+$$
 ShuffleHashJoin(
     Redistribute(R, hash(R.key)),
     Redistribute(S, hash(S.key))
 )
+$$
 
 -- After: local join (tables already co-located)
+$$
 LocalHashJoin(R_local, S_local)
+$$
 -- No shuffle needed: R and S partitioned by same key
+
 ```
 
 ## Implementation

@@ -20,12 +20,17 @@ Replaces MAX() and MIN() with single index seek instead of full scan.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
+$$
 (aggregate (max id) (scan orders))
+$$
 
 -- After
+$$
 (project (index-seek orders idx_id DESC LIMIT 1))
+$$
+
 ```
 
 ## Preconditions

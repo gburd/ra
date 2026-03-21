@@ -36,32 +36,49 @@ Zipfian distributions common in practice.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 sel(col = value):
   If value in MCV: sel = mcv_frequency(value)
   Else: sel = (1 - sum(mcv_frequencies)) / (NDV - |MCV|)
+$$
 
+$$
 sel(col < value):
   From histogram: fraction of values below threshold
+$$
 
+$$
 sel(col BETWEEN low AND high):
   sel = sel(col <= high) - sel(col < low)
+$$
 
+$$
 sel(p1 AND p2):
   sel = sel(p1) * sel(p2)  [independence assumption]
+$$
 
+$$
 sel(p1 OR p2):
   sel = sel(p1) + sel(p2) - sel(p1) * sel(p2)
+$$
 
+$$
 sel(NOT p):
   sel = 1 - sel(p)
+$$
 
+$$
 sel(col IS NULL):
   sel = null_fraction(col)
+$$
 
+$$
 sel(col IN (v1, v2, ...)):
   sel = sum(sel(col = vi)) - pairwise overlaps
-  Approximation: min(1, |values| / NDV)
+  Approximation: \text{min}(1, |values| / NDV)
+$$
+
 ```
 
 ## Implementation

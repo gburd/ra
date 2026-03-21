@@ -29,12 +29,17 @@ the smallest input creates the smallest hash table.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: large input first
+$$
 INTERSECT(A[1M rows], B[100 rows], C[10K rows])
+$$
 
 -- After: smallest first
+$$
 INTERSECT(B[100 rows], C[10K rows], A[1M rows])
+$$
+
 ```
 
 ## Implementation

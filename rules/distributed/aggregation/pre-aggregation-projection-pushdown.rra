@@ -23,12 +23,17 @@ group keys or aggregate arguments.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
-gamma[g, agg(a)](R)  -- R has columns [g, a, x, y, z]
+$$
+\gamma_{g, agg(a)}(R)  -- R has columns [g, a, x, y, z]
+$$
 
 -- After
-gamma[g, agg(a)](pi[g, a](R))  -- narrow to needed columns
+$$
+\gamma_{g, agg(a)}(\pi_{g, a}(R))  -- narrow to needed columns
+$$
+
 ```
 
 ## Test Cases

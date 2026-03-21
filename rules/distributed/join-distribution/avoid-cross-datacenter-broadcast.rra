@@ -20,11 +20,14 @@ datacenter and use a pre-aggregated or cached copy in remote DCs.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Broadcast(S) to all_nodes
-  -> Broadcast(S) to local_dc_nodes
+  \rightarrow Broadcast(S) to local_dc_nodes
   + AsyncReplicate(S) to remote_dc_nodes
-  where cross_dc_broadcast_cost > local_broadcast_cost * dc_count
+  \text{where} cross_dc_broadcast_cost > local_broadcast_cost * dc_count
+$$
+
 ```
 
 ## Implementation

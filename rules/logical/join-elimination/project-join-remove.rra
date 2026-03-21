@@ -32,13 +32,18 @@ on the output.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: project over left join
-pi[R.a, R.b](R LEFT JOIN S ON R.k = S.k)
-  where S.k is unique
+$$
+\pi_{R.a, R.b}(R LEFT JOIN S ON R.k = S.k)
+  \text{where} S.k is unique
+$$
 
 -- After: project without join
-pi[R.a, R.b](R)
+$$
+\pi_{R.a, R.b}(R)
+$$
+
 ```
 
 ## Implementation

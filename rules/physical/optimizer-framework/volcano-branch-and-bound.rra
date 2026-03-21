@@ -40,28 +40,39 @@ them. The pruning is exact -- no optimal plan is ever discarded.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 FindBestPlan(group G, required properties P, cost limit L):
   If memo[G, P] exists and cost <= L:
     return memo[G, P]
+$$
 
+$$
   best = NULL, best_cost = INFINITY
+$$
 
+$$
   For each logical expression E in G:
     // Apply implementation rules
     For each physical expression PhysE implementing E:
       // Compute local cost (this operator only)
       local_cost = cost(PhysE)
       if local_cost >= L: continue  // PRUNE
+$$
 
+$$
       // Remaining budget for children
       remaining = L - local_cost
+$$
 
+$$
       // Optimize children with decreasing budget
       child_plans = []
       total_child_cost = 0
       pruned = false
+$$
 
+$$
       For each child Ci of PhysE:
         child_budget = remaining - total_child_cost
         child_plan = FindBestPlan(
@@ -72,17 +83,25 @@ FindBestPlan(group G, required properties P, cost limit L):
         if child_plan is NULL: pruned = true; break  // PRUNE
         child_plans.push(child_plan)
         total_child_cost += cost(child_plan)
+$$
 
+$$
       if pruned: continue
+$$
 
+$$
       total = local_cost + total_child_cost
       if total < best_cost:
         best_cost = total
         best = PhysicalPlan(PhysE, child_plans)
         L = best_cost  // Tighten the bound!
+$$
 
+$$
   memo[G, P] = (best, best_cost)
   return best
+$$
+
 ```
 
 ## Implementation

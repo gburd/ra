@@ -32,16 +32,21 @@ be filtered out anyway.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: full optional match + null filter
-sigma[m IS NULL](
-  outer-join(label-scan(:Person, n),
+$$
+\sigma_{m IS NULL}(
+  outer-\bowtie(label-scan(:Person, n),
              expand(n, :KNOWS, m)))
+$$
 
 -- After: anti-semi-apply (short-circuits on first match)
+$$
 anti-semi-apply(
   label-scan(:Person, n),
   expand(n, :KNOWS))
+$$
+
 ```
 
 ## Implementation

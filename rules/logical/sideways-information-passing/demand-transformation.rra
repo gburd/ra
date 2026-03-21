@@ -24,12 +24,13 @@ stratified negation that cannot use standard magic sets.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Non-linear recursion: same_generation(X, Y)
 -- sg(X, Y) :- flat(X, Y).
 -- sg(X, Y) :- up(X, X1), sg(X1, Y1), down(Y1, Y).
 -- Query: ?- sg("Alice", Y).
 -- Demand transformation handles the double recursion variable
+
 ```
 
 ## Implementation

@@ -29,16 +29,21 @@ eliminates both the exchange operator and the serialization overhead.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Remove exchange when joining with a replicated table
+$$
 Join[c](Exchange[hash(k)](R), Exchange[broadcast](S_replicated))
-  -> Join[c](R, S_replicated)
-  where distribution(S_replicated) = Replicated
+  \rightarrow Join[c](R, S_replicated)
+  \text{where} distribution(S_replicated) = Replicated
+$$
 
 -- Alternatively, if the planner inserted a broadcast:
+$$
 Join[c](R, Exchange[broadcast](S))
-  -> Join[c](R, S)
-  where distribution(S) = Replicated
+  \rightarrow Join[c](R, S)
+  \text{where} distribution(S) = Replicated
+$$
+
 ```
 
 ## Implementation

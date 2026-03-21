@@ -30,20 +30,27 @@ aggregate.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Push filter through union
-sigma[p](R UNION ALL S) -> sigma[p](R) UNION ALL sigma[p](S)
+$$
+\sigma_{p}(R UNION ALL S) \rightarrow \sigma_{p}(R) UNION ALL \sigma_{p}(S)
+$$
 
 -- Push project through union
-pi[a](R UNION ALL S) -> pi[a](R) UNION ALL pi[a](S)
+$$
+\pi_{a}(R UNION ALL S) \rightarrow \pi_{a}(R) UNION ALL \pi_{a}(S)
+$$
 
 -- Push partial agg through union (distributed)
-gamma[g, agg](R UNION ALL S)
-  -> gamma_final[g, merge](
+$$
+\gamma_{g, agg}(R UNION ALL S)
+  \rightarrow gamma_final[g, merge](
        gamma_partial[g, agg](R)
        UNION ALL
        gamma_partial[g, agg](S)
      )
+$$
+
 ```
 
 ## Implementation

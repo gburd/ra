@@ -38,19 +38,26 @@ and the chance of expensive temp file creation.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Left-deep tree (System R explores these):
-((R1 join R2) join R3) join R4
+$$
+((R1 \bowtie R2) \bowtie R3) \bowtie R4
+$$
 -- Every right child is a base relation
 -- Fully pipelineable in Volcano model
 
 -- Right-deep tree (also considered sometimes):
-R1 join (R2 join (R3 join R4))
+$$
+R1 \bowtie (R2 \bowtie (R3 \bowtie R4))
+$$
 -- Hash joins: build all inner tables, probe outer last
 
 -- Bushy tree (System R does NOT explore):
-(R1 join R2) join (R3 join R4)
+$$
+(R1 \bowtie R2) \bowtie (R3 \bowtie R4)
+$$
 -- Requires materializing at least one intermediate result
+
 ```
 
 ## Implementation

@@ -36,19 +36,26 @@ pipeline entirely.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Traditional: DP-based join ordering using cost model
+$$
 join_order_dp(R, S, T, U, V) using cost_model(cardinality_estimator)
+$$
 
 -- Learned: Neural network predicts join order
+$$
 join_order_learned(R, S, T, U, V) using neo_model(query_encoding)
+$$
 
 -- Bao: Select among optimizer hints
+$$
 bao_select(
-  hint_1: /*+ HashJoin(R S) NestLoop(T U) */ join(R,S,T,U,V),
-  hint_2: /*+ MergeJoin(R S) HashJoin(T U) */ join(R,S,T,U,V),
+  hint_1: /*+ HashJoin(R S) NestLoop(T U) */ \bowtie(R,S,T,U,V),
+  hint_2: /*+ MergeJoin(R S) HashJoin(T U) */ \bowtie(R,S,T,U,V),
   hint_3: default_plan(R,S,T,U,V)
 ) using bandit_model(plan_tree_encoding)
+$$
+
 ```
 
 ## Implementation

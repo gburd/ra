@@ -30,9 +30,12 @@ before they enter the query pipeline.
 
 ## Relational Algebra
 
-```algebra
-sigma[doc.nested.field op value](scan(collection))
-  -> scan_with_filter(collection, nested.field, op, value)
+```latex
+$$
+\sigma_{doc.nested.field op value}(scan(collection))
+  \rightarrow scan_with_filter(collection, nested.field, op, value)
+$$
+
 ```
 
 ## Implementation

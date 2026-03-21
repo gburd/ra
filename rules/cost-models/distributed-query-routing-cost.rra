@@ -34,18 +34,25 @@ transfer. If the dimension table is the build side, broadcast avoids
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Data movement strategies:
+$$
 broadcast_cost(R, nodes) =
   BYTES(R) * (nodes - 1) / NETWORK_BW + nodes * LATENCY
+$$
 
+$$
 shuffle_cost(R, nodes) =
   BYTES(R) * (1 - 1/nodes) / NETWORK_BW + nodes * LATENCY
+$$
   -- Each tuple goes to exactly one node; 1/nodes stays local
 
+$$
 colocated_cost(R) = 0  -- data already on correct node
+$$
 
 -- Strategy selection for join R ⋈ S:
+$$
 best_strategy(R, S, nodes) =
   if partition_key(R) == join_key AND partition_key(S) == join_key:
     colocated_join                    -- no movement
@@ -55,8 +62,12 @@ best_strategy(R, S, nodes) =
     broadcast(S) + local_join(R)
   else:
     shuffle(R) + shuffle(S) + local_join -- both shuffle
+$$
 
+$$
 BROADCAST_THRESHOLD = NETWORK_BW * MAX_ACCEPTABLE_DELAY / nodes
+$$
+
 ```
 
 ## Implementation

@@ -25,13 +25,18 @@ queries where fast approximate answers are preferred over slow exact ones.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: full scan aggregation
-gamma[dept; AVG(salary)](employees)  -- scans 10M rows
+$$
+\gamma_{dept; AVG(salary)}(employees)  -- scans 10M rows
+$$
 
 -- After: sample-based aggregation with error bounds
-gamma[dept; AVG(salary), ERROR_BOUND(0.95)](
+$$
+\gamma_{dept; AVG(salary), ERROR_BOUND(0.95)}(
     SAMPLE(employees, rate=0.01))  -- scans 100K rows
+$$
+
 ```
 
 ## Implementation

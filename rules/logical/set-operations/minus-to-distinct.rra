@@ -31,21 +31,26 @@ unique to the first input.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: EXCEPT
+$$
 R EXCEPT S
+$$
 
 -- After: tagged UNION with filter
-pi[cols](
-    sigma[cnt_0 > 0 AND cnt_1 = 0](
+$$
+\pi_{cols}(
+    \sigma_{cnt_0 > 0 AND cnt_1 = 0}(
         gamma[cols; COUNT(*) FILTER $branch=0 AS cnt_0,
                     COUNT(*) FILTER $branch=1 AS cnt_1](
-            pi[cols, 0 AS branch](R)
+            \pi_{cols, 0 AS branch}(R)
             UNION ALL
-            pi[cols, 1 AS branch](S)
+            \pi_{cols, 1 AS branch}(S)
         )
     )
 )
+$$
+
 ```
 
 ## Implementation

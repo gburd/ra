@@ -39,8 +39,9 @@ function. This avoids DFA compilation and evaluation entirely.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: RPR with simple monotonic pattern
+$$
 RowPattern(
   input: R,
   partition: [symbol],
@@ -49,20 +50,25 @@ RowPattern(
   defines: { A: Gt(price, Prev(price, 1)) },
   measures: [...]
 )
+$$
 
 -- After: window function
+$$
 Filter(
   col > LAG(col, 1) OVER (PARTITION BY symbol ORDER BY trade_date),
   R
 )
+$$
+
 ```
 
 ### With MEASURES translation
 
-```algebra
+```latex
 -- MEASURES FIRST(A.price) -> first value in window frame
 -- MEASURES LAST(A.price) -> last value in window frame
 -- MEASURES COUNT(A.*) -> window count
+
 ```
 
 ## Implementation

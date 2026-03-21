@@ -31,18 +31,27 @@ collections.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Map fusion
-map[f2](map[f1](R)) -> map[f1, f2](R)
+$$
+map[f2](map[f1](R)) \rightarrow map[f1, f2](R)
+$$
 
 -- Filter fusion
-sigma[p2](sigma[p1](R)) -> sigma[p1 AND p2](R)
+$$
+\sigma_{p2}(\sigma_{p1}(R)) \rightarrow \sigma_{p1 AND p2}(R)
+$$
 
 -- Project fusion
-pi[cols2](pi[cols1](R)) -> pi[compose(cols2, cols1)](R)
+$$
+\pi_{cols2}(\pi_{cols1}(R)) \rightarrow \pi_{compose(cols2, cols1)}(R)
+$$
 
 -- Negate fusion
-negate(negate(R)) -> R
+$$
+negate(negate(R)) \rightarrow R
+$$
+
 ```
 
 ## Implementation

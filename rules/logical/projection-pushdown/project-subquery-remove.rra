@@ -23,12 +23,17 @@ allows batch processing.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
-pi[a, (SELECT MAX(b) FROM T2 WHERE T2.fk = T1.id)](T1)
+$$
+\pi_{a, (SELECT MAX(b) FROM T2 WHERE T2.fk = T1.id)}(T1)
+$$
 
 -- After
-pi[a, T2_max.b](LeftJoin(T1, gamma[fk; MAX(b)](T2), T1.id = T2_max.fk))
+$$
+\pi_{a, T2_max.b}(LeftJoin(T1, \gamma_{fk; MAX(b)}(T2), T1.id = T2_max.fk))
+$$
+
 ```
 
 ## Implementation

@@ -26,15 +26,20 @@ size but benefits from cache-resident probing.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: monolithic hash join
+$$
 HashJoin(R, S, key)
+$$
 
 -- After: radix-partitioned hash join
+$$
 Merge(
     for each partition p:
         HashJoin(R_p, S_p, key)  -- each fits in cache
 )
+$$
+
 ```
 
 ## Implementation

@@ -24,10 +24,13 @@ Builds a runtime filter (typically a bloom filter) from the build side of a hash
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 HashJoin[k](Probe, Build)
-  -> HashJoin[k](Filter[k IN build_filter](Probe), Build)
-  where |Build| << |Probe|
+  \rightarrow HashJoin[k](Filter[k IN build_filter](Probe), Build)
+  \text{where} |Build| << |Probe|
+$$
+
 ```
 
 ## Implementation

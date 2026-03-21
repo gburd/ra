@@ -20,12 +20,17 @@ Generates unconstrained index scans over partial indexes with predicates implied
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
+$$
 (scan orders WHERE status \!= 'cancelled')
+$$
 
 -- After
+$$
 (index-scan orders_active_idx)
+$$
+
 ```
 
 ## Preconditions

@@ -20,14 +20,19 @@ compute partial MIN/MAX remotely, take the global MIN/MAX locally.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Aggregate[MIN(col)](RemoteScan[table, endpoint])
 =>
 RemoteScan[table, endpoint, pushdown_agg=MIN(col)]
+$$
 
+$$
 Aggregate[MAX(col)](RemoteScan[table, endpoint])
 =>
 RemoteScan[table, endpoint, pushdown_agg=MAX(col)]
+$$
+
 ```
 
 ## Before

@@ -30,14 +30,19 @@ enable further optimizations like join reordering.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: project below join
-(pi[a, b, a+1 AS c](R)) JOIN[c = S.k] S
+$$
+(\pi_{a, b, a+1 AS c}(R)) JOIN[c = S.k] S
+$$
 
 -- After: project above join
-pi[R.a, R.b, R.a+1 AS c, S.*](
+$$
+\pi_{R.a, R.b, R.a+1 AS c, S.*}(
     R JOIN[R.a+1 = S.k] S
 )
+$$
+
 ```
 
 ## Implementation

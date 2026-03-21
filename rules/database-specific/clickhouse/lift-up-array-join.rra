@@ -24,10 +24,13 @@ Moves ARRAY JOIN above filters when the filter doesn't depend on the array-joine
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Filter[c](ArrayJoin[arr](R))
-  -> ArrayJoin[arr](Filter[c](R))
-  where c does not reference arr
+  \rightarrow ArrayJoin[arr](Filter[c](R))
+  \text{where} c does not reference arr
+$$
+
 ```
 
 ## Implementation

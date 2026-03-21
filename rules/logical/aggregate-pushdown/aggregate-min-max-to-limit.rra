@@ -30,15 +30,20 @@ With a B-tree index, this reduces from O(n) scan to O(log n) lookup.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: full-scan aggregate
-gamma[; MIN(c1), MAX(c2)](R)
+$$
+\gamma_{; MIN(c1), MAX(c2)}(R)
+$$
 
 -- After: correlated scalar subqueries with limit
-pi[min_c1, max_c2](
+$$
+\pi_{min_c1, max_c2}(
     (SELECT c1 FROM R WHERE c1 IS NOT NULL ORDER BY c1 ASC LIMIT 1) AS min_c1,
     (SELECT c2 FROM R WHERE c2 IS NOT NULL ORDER BY c2 DESC LIMIT 1) AS max_c2
 )
+$$
+
 ```
 
 ## Implementation

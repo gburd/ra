@@ -20,12 +20,17 @@ Optimizes lookup joins for geo-distributed tables by preferring local replicas.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
-(lookup-join (scan orders) (index-scan customers))
+$$
+(lookup-\bowtie (scan orders) (index-scan customers))
+$$
 
 -- After
-(locality-optimized-search (lookup-join (scan orders) (index-scan customers)))
+$$
+(locality-optimized-search (lookup-\bowtie (scan orders) (index-scan customers)))
+$$
+
 ```
 
 ## Preconditions

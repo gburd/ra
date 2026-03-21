@@ -42,10 +42,13 @@ scanning every row's array.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 filter[tags @> ARRAY['rust']](scan[T])
-  -> gin_index_scan[I](tags, @>, ARRAY['rust'])
-  where I is a GIN index on column tags
+  \rightarrow gin_index_scan[I](tags, @>, ARRAY['rust'])
+  \text{where} I is a GIN index on column tags
+$$
+
 ```
 
 ## Implementation

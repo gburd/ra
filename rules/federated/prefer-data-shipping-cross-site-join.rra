@@ -28,11 +28,14 @@ Ship data when:
 
 ## Relational Algebra
 
-```algebra
-IF small_side(join) = remote AND estimated_rows(remote) < threshold
+```latex
+$$
+IF small_side(\bowtie) = remote AND estimated_rows(remote) < threshold
 THEN:
   Join[cond](LocalScan, RemoteScan) =>
     Join[cond](LocalScan, ShipData(remote, table, filter))
+$$
+
 ```
 
 ## Before

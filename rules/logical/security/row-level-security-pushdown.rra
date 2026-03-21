@@ -29,12 +29,17 @@ information about filtered rows.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: RLS predicate after join
-sigma[rls_policy(current_user)](R join S)
+$$
+\sigma_{rls_policy(current_user)}(R \bowtie S)
+$$
 
 -- After: push RLS to base table scan
-(sigma[rls_policy(current_user)](R)) join S
+$$
+(\sigma_{rls_policy(current_user)}(R)) \bowtie S
+$$
+
 ```
 
 ## Implementation

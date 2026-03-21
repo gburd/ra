@@ -36,23 +36,30 @@ regressions while still allowing genuine improvements. This is the
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Plan baseline capture
-Execute(Q) -> Plan_baseline  (first execution, capture as baseline)
+$$
+Execute(Q) \rightarrow Plan_baseline  (first execution, capture as baseline)
+$$
 
 -- Plan evolution check
-Optimize(Q) -> Plan_new
+$$
+Optimize(Q) \rightarrow Plan_new
 if cost(Plan_new) < cost(Plan_baseline) * (1 - threshold):
-    Execute(Q) -> Plan_new, update baseline
+    Execute(Q) \rightarrow Plan_new, update baseline
 else:
-    Execute(Q) -> Plan_baseline  (keep stable plan)
+    Execute(Q) \rightarrow Plan_baseline  (keep stable plan)
+$$
 
 -- With A/B verification:
-Optimize(Q) -> Plan_new
+$$
+Optimize(Q) \rightarrow Plan_new
 if Plan_new != Plan_baseline:
     shadow_execute(Plan_new)  -- run in parallel
     if actual_cost(Plan_new) < actual_cost(Plan_baseline):
         evolve(baseline, Plan_new)
+$$
+
 ```
 
 ## Implementation

@@ -35,10 +35,13 @@ This converts sequential cache misses into parallel ones.
 
 ## Relational Algebra
 
-```algebra
-R hash_join[c] S -> prefetch_hash_join[c](R, S)
-  where size(hash_table(build_side)) > L2_cache
+```latex
+$$
+R hash_\bowtie_{c} S \rightarrow prefetch_hash_\bowtie_{c}(R, S)
+  \text{where} size(hash_table(build_side)) > L2_cache
     AND |probe_side| > 1000
+$$
+
 ```
 
 ## Implementation

@@ -25,12 +25,15 @@ where multiple range predicates can be merged.
 
 ## Relational Algebra
 
-```algebra
-col BETWEEN a AND b -> col >= a AND col <= b
-NOT BETWEEN a AND b -> col < a OR col > b
+```latex
+$$
+col BETWEEN a AND b \rightarrow col >= a AND col <= b
+NOT BETWEEN a AND b \rightarrow col < a OR col > b
 col BETWEEN a AND b AND col BETWEEN c AND d
-  -> col BETWEEN MAX(a,c) AND MIN(b,d)  -- intersection
-col BETWEEN 5 AND 3 -> FALSE            -- empty range
+  \rightarrow col BETWEEN MAX(a,c) AND MIN(b,d)  -- intersection
+col BETWEEN 5 AND 3 \rightarrow FALSE            -- empty range
+$$
+
 ```
 
 ## Implementation

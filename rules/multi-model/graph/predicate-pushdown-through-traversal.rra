@@ -29,10 +29,13 @@ results.
 
 ## Relational Algebra
 
-```algebra
-sigma[p(v_i)](traverse(v_0 -[*1..k]-> v_k))
-  -> traverse_with_filter(v_0 -[*1..k]-> v_k, i, p)
-  where p references properties of intermediate vertex v_i
+```latex
+$$
+\sigma_{p(v_i)}(traverse(v_0 -[*1..k]\rightarrow v_k))
+  \rightarrow traverse_with_filter(v_0 -[*1..k]\rightarrow v_k, i, p)
+  \text{where} p references properties of intermediate vertex v_i
+$$
+
 ```
 
 ## Implementation

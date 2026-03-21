@@ -31,8 +31,11 @@ use efficient join algorithms, and the union deduplicates results.
 
 ## Relational Algebra
 
-```algebra
-R ⋈_{p1 ∨ p2} S -> (R ⋈_{p1} S) ∪ (R ⋈_{p2} S)
+```latex
+$$
+R ⋈_{p1 ∨ p2} S \rightarrow (R ⋈_{p1} S) ∪ (R ⋈_{p2} S)
+$$
+
 ```
 
 ## Implementation

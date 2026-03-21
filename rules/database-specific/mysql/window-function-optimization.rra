@@ -32,16 +32,21 @@ computation reduces per-row work from O(frame_size) to O(1).
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: separate sorts per window function
+$$
 window[ROW_NUMBER() OVER (PARTITION BY dept ORDER BY sal)](
   window[SUM(sal) OVER (PARTITION BY dept ORDER BY sal)](
     sort[dept, sal](scan(employees))))
+$$
 
 -- After: single sort, shared window pass
+$$
 window[ROW_NUMBER(), SUM(sal)
     OVER (PARTITION BY dept ORDER BY sal)](
   sort[dept, sal](scan(employees)))
+$$
+
 ```
 
 ## Implementation

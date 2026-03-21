@@ -31,13 +31,18 @@ needed.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: index lookup + row fetch
-pi[name](sigma[dept_id = 5](scan(employees)))
+$$
+\pi_{name}(\sigma_{dept_id = 5}(scan(employees)))
+$$
 
 -- After: covering index scan (no row fetch)
-pi[name](sigma[dept_id = 5](
+$$
+\pi_{name}(\sigma_{dept_id = 5}(
     index_only_scan[idx_dept_name](employees)))
+$$
+
 ```
 
 ## Implementation

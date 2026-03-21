@@ -32,18 +32,25 @@ update latency.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Differential join: maintains one arrangement
-R diff-join[R.k = S.k] S
+$$
+R diff-\bowtie_{R.k = S.k} S
+$$
   -- Arranges smaller side, streams larger side
 
 -- Delta join: uses existing arrangements from both sides
-R delta-join[R.k = S.k] S
+$$
+R delta-\bowtie_{R.k = S.k} S
+$$
   -- No new arrangements; uses arrangements from R and S
 
 -- Lookup join: point lookups into arrangement
-R lookup-join[R.k = S.k] S
+$$
+R lookup-\bowtie_{R.k = S.k} S
+$$
   -- When R is a stream and S has arrangement on k
+
 ```
 
 ## Implementation

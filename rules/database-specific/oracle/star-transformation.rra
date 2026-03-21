@@ -34,19 +34,24 @@ of fact table data.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: standard star join
-sigma[d1.region = 'US' AND d2.year = 2025](
-    F join[F.d1_id = D1.id] D1
-      join[F.d2_id = D2.id] D2)
+$$
+\sigma_{d1.region = 'US' AND d2.year = 2025}(
+    F \bowtie_{F.d1_id = D1.id} D1
+      \bowtie_{F.d2_id = D2.id} D2)
+$$
 
 -- After: star transformation with bitmap semi-joins
+$$
 F bitmap-semi-join[F.d1_id IN
     (SELECT id FROM D1 WHERE region = 'US')]
   bitmap-semi-join[F.d2_id IN
     (SELECT id FROM D2 WHERE year = 2025)]
-  join[F.d1_id = D1.id] D1
-  join[F.d2_id = D2.id] D2
+  \bowtie_{F.d1_id = D1.id} D1
+  \bowtie_{F.d2_id = D2.id} D2
+$$
+
 ```
 
 ## Implementation

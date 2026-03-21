@@ -32,12 +32,17 @@ update latency.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: aggregate on unique key
-gamma[pk; count=COUNT(*)](R)  where pk is unique key of R
+$$
+\gamma_{pk; count=COUNT(*)}(R)  \text{where} pk is unique key of R
+$$
 
 -- After: elide reduce, use map
-pi[pk, 1 AS count](R)
+$$
+\pi_{pk, 1 AS count}(R)
+$$
+
 ```
 
 ## Implementation

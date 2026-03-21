@@ -24,10 +24,13 @@ Identifies and merges identical subqueries to avoid redundant execution.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 project[A.*, (subquery S1), (subquery S2)](A)
-  -> project[A.*, result.val, result.val](join(A, execute_once(S1)))
-  where S1 ≡ S2
+  \rightarrow project[A.*, result.val, result.val](\bowtie(A, execute_once(S1)))
+  \text{where} S1 ≡ S2
+$$
+
 ```
 
 ## Implementation

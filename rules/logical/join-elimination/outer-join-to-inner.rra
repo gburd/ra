@@ -26,12 +26,17 @@ on the nullable side (null-rejecting predicate).
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: LEFT JOIN with null-rejecting WHERE
-sigma[S.col IS NOT NULL](R LEFT JOIN S ON R.id = S.fk)
+$$
+\sigma_{S.col IS NOT NULL}(R LEFT JOIN S ON R.id = S.fk)
+$$
 
 -- After: simplified to INNER JOIN
+$$
 R INNER JOIN S ON R.id = S.fk
+$$
+
 ```
 
 ## Implementation

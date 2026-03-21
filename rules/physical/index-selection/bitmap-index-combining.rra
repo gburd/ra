@@ -41,21 +41,26 @@ accessing only the matching rows, avoids redundant heap fetches.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- AND combination
+$$
 filter[p1 AND p2 AND p3](scan[T])
-  -> bitmap_heap_scan(
+  \rightarrow bitmap_heap_scan(
        bitmap_and(
          bitmap_scan[I1](p1),
          bitmap_scan[I2](p2),
          bitmap_scan[I3](p3)))
+$$
 
 -- OR combination
+$$
 filter[p1 OR p2](scan[T])
-  -> bitmap_heap_scan(
+  \rightarrow bitmap_heap_scan(
        bitmap_or(
          bitmap_scan[I1](p1),
          bitmap_scan[I2](p2)))
+$$
+
 ```
 
 ## Implementation

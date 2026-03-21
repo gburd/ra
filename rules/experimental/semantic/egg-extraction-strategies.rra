@@ -34,18 +34,23 @@ Advanced extraction handles these correctly.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- After saturation, E-graph contains all equivalent plans:
+$$
 E-class {
   (hash_join (scan R) (scan S)),
   (sort_merge_join (scan R) (scan S)),
   (hash_join (scan S) (scan R)),  -- commuted
   ...
 }
+$$
 
 -- Multi-objective extraction:
+$$
 extract_pareto(E-class, [cost, memory, latency])
-  -> Pareto frontier of non-dominated plans
+  \rightarrow Pareto frontier of non-dominated plans
+$$
+
 ```
 
 ## Implementation

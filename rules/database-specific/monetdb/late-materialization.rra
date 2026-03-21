@@ -33,15 +33,20 @@ for rows that survive all filters and joins.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: early materialization (fetch all columns first)
-pi[name, email, bio](
-    sigma[status = 'active'](
+$$
+\pi_{name, email, bio}(
+    \sigma_{status = 'active'}(
         scan(users[id, name, email, bio, status])))
+$$
 
 -- After: late materialization
-qualifying_oids = sigma[status = 'active'](scan(users.status))
-pi[name, email, bio](fetch(users, qualifying_oids))
+$$
+qualifying_oids = \sigma_{status = 'active'}(scan(users.status))
+\pi_{name, email, bio}(fetch(users, qualifying_oids))
+$$
+
 ```
 
 ## Implementation

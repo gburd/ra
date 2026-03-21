@@ -31,9 +31,12 @@ re-scan all groups anyway.
 
 ## Relational Algebra
 
-```algebra
-γ_{g1, AGG1}(γ_{g2, AGG2}(R)) where g2 ⊆ g1 ->
+```latex
+$$
+γ_{g1, AGG1}(γ_{g2, AGG2}(R)) \text{where} g2 ⊆ g1 \rightarrow
   γ_{g1, merge(AGG1, AGG2)}(R)
+$$
+
 ```
 
 ## Implementation

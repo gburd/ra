@@ -20,8 +20,11 @@ Registers common subexpressions
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 CSE(R) => shared computation
+$$
+
 ```
 
 ## Implementation

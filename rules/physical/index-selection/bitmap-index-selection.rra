@@ -38,10 +38,13 @@ Uses bitmap indexes for low-cardinality columns; combines multiple bitmap indexe
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 filter[status='active' AND type='premium'](scan[T])
-  -> bitmap_and(bitmap_index_scan[I1](status='active'),
+  \rightarrow bitmap_and(bitmap_index_scan[I1](status='active'),
                 bitmap_index_scan[I2](type='premium'))
+$$
+
 ```
 
 ## Implementation

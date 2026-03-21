@@ -28,12 +28,17 @@ time, replacing the entire subtree with a single VALUES node.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: UNION of constants
+$$
 VALUES(3, NULL) UNION ALL VALUES(7369, NULL) UNION ALL VALUES(1, 2)
+$$
 
 -- After: single VALUES
+$$
 VALUES((3, NULL), (7369, NULL), (1, 2))
+$$
+
 ```
 
 ## Implementation

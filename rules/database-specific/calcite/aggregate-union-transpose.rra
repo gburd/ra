@@ -31,16 +31,21 @@ branch has high duplication in the group-by columns.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: aggregate above union
-gamma[g; SUM(x)](R UNION ALL S)
+$$
+\gamma_{g; SUM(x)}(R UNION ALL S)
+$$
 
 -- After: two-phase aggregation
-gamma[g; SUM(partial_sum)](
-    gamma[g; SUM(x) AS partial_sum](R)
+$$
+\gamma_{g; SUM(partial_sum)}(
+    \gamma_{g; SUM(x) AS partial_sum}(R)
     UNION ALL
-    gamma[g; SUM(x) AS partial_sum](S)
+    \gamma_{g; SUM(x) AS partial_sum}(S)
 )
+$$
+
 ```
 
 ## Implementation

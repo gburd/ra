@@ -37,11 +37,14 @@ ratio), this eliminates the visibility check overhead as well.
 
 ## Relational Algebra
 
-```algebra
-pi[cols](sigma[pred](R))
-  -> index_only_scan[I](pred)
-  where covers(I, cols ∪ pred_cols)
+```latex
+$$
+\pi_{cols}(\sigma_{pred}(R))
+  \rightarrow index_only_scan[I](pred)
+  \text{where} covers(I, cols ∪ pred_cols)
     AND all_visible_ratio(R) > 0.9
+$$
+
 ```
 
 ## Implementation

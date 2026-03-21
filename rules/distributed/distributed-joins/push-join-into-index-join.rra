@@ -31,13 +31,16 @@ index lookup.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 InnerJoin[cond](IndexJoin(IndexScan(T), T), R)
-  -> LookupJoin(
+  \rightarrow LookupJoin(
        InnerJoin[cond](IndexScan(T), R),
        T
      )
-  where cond references only IndexScan(T).cols and R.cols
+  \text{where} cond references only IndexScan(T).cols and R.cols
+$$
+
 ```
 
 ## Implementation

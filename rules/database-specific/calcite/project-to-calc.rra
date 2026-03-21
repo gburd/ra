@@ -32,12 +32,17 @@ efficient code generation.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: project
-pi[a, b + 1 AS c](R)
+$$
+\pi_{a, b + 1 AS c}(R)
+$$
 
 -- After: calc with project program
+$$
 Calc[program: {a, b + 1 AS c}](R)
+$$
+
 ```
 
 ## Implementation

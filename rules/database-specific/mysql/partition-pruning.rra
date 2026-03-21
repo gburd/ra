@@ -30,12 +30,17 @@ pruning reduces I/O by ~99%.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: scan all partitions
-sigma[year = 2024](scan(sales[p2022, p2023, p2024, p2025]))
+$$
+\sigma_{year = 2024}(scan(sales[p2022, p2023, p2024, p2025]))
+$$
 
 -- After: scan only matching partition
-sigma[year = 2024](scan(sales[p2024]))
+$$
+\sigma_{year = 2024}(scan(sales[p2024]))
+$$
+
 ```
 
 ## Implementation

@@ -20,12 +20,17 @@ Optimizes label scans in Cypher queries.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
+$$
 (scan users WHERE age > 18)
+$$
 
 -- After
+$$
 (label-scan users (age > 18))
+$$
+
 ```
 
 ## Preconditions

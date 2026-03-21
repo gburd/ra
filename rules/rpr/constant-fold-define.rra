@@ -37,18 +37,27 @@ per DFA transition.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: constant arithmetic in DEFINE
+$$
 defines: { A: Gt(price, Mul(100, 1.1)) }
+$$
 
 -- After: folded
+$$
 defines: { A: Gt(price, 110) }
+$$
 
 -- Before: constant boolean in DEFINE
+$$
 defines: { A: And(true, Gt(price, Prev(price))) }
+$$
 
 -- After: simplified
+$$
 defines: { A: Gt(price, Prev(price)) }
+$$
+
 ```
 
 ## Implementation

@@ -23,9 +23,12 @@ top N rows at each region using a min-heap, then merging results at TiDB.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Limit[n](Sort[cols](Scan[table]))
-  -> MergeSort[cols](CopTask(TopN[n, cols](Scan[table])))
+  \rightarrow MergeSort[cols](CopTask(TopN[n, cols](Scan[table])))
+$$
+
 ```
 
 ## Implementation

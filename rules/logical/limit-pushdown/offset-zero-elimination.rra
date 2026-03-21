@@ -24,9 +24,12 @@ Removes OFFSET 0 clauses which have no effect but add operator overhead.
 
 ## Relational Algebra
 
-```algebra
-offset[0](R) -> R
-limit[K](offset[0](R)) -> limit[K](R)
+```latex
+$$
+offset[0](R) \rightarrow R
+limit[K](offset[0](R)) \rightarrow limit[K](R)
+$$
+
 ```
 
 ## Implementation

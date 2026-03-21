@@ -36,19 +36,24 @@ of result sizes.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Independence assumption:
+$$
 F(P1 AND P2) = F(P1) * F(P2)
 F(P1 OR P2) = F(P1) + F(P2) - F(P1) * F(P2)
+$$
 
 -- Reality (correlated predicates):
+$$
 F(P1 AND P2) = F(P1 | P2) * F(P2)  -- conditional probability
              != F(P1) * F(P2) when P1 and P2 are correlated
+$$
 
 -- Example: city='SF' AND state='CA'
 -- Independence: F(city) * F(state) = 1/1000 * 1/50 = 0.00002
 -- Reality: F(city AND state) = F(city) = 1/1000 = 0.001
 -- Error: 50x underestimate (because city implies state)
+
 ```
 
 ## Implementation

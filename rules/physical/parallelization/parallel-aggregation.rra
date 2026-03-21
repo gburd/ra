@@ -24,12 +24,15 @@ Performs local aggregation in parallel workers, then combines results.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 aggregate[group, agg](R)
-  -> final_aggregate(
+  \rightarrow final_aggregate(
        parallel_gather(
          partial_aggregate(R_partition_i)
        ))
+$$
+
 ```
 
 ## Implementation

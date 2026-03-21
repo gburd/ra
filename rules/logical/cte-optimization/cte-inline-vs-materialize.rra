@@ -26,16 +26,21 @@ choose between inlining and materializing.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- CTE referenced once: inline
+$$
 WITH cte AS (SELECT * FROM R WHERE pred)
 SELECT * FROM cte WHERE extra_pred;
+$$
 -- Inlined: SELECT * FROM R WHERE pred AND extra_pred
 
 -- CTE referenced multiple times: materialize
+$$
 WITH cte AS (expensive_query)
 SELECT * FROM cte c1 JOIN cte c2 ON c1.id = c2.parent_id;
+$$
 -- Materialize: compute once, scan twice
+
 ```
 
 ## Implementation

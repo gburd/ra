@@ -20,12 +20,17 @@ Uses covering indexes to avoid collection fetches when all fields are in index.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
+$$
 (project [name, email, age] (filter (scan users) (eq status 'active')))
+$$
 
 -- After
+$$
 (project [name, email, age] (filter (index-scan users idx_status_fields) (eq status 'active')))
+$$
+
 ```
 
 ## Preconditions

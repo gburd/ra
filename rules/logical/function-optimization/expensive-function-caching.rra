@@ -29,11 +29,14 @@ memoized function evaluates at most 100 times instead of 1M times.
 
 ## Relational Algebra
 
-```algebra
-pi[f(a), ...](R)
-  -> pi[cache_lookup(f, a), ...](R)
-  where is_deterministic(f) && is_expensive(f)
+```latex
+$$
+\pi_{f(a), ...}(R)
+  \rightarrow \pi_{cache_lookup(f, a), ...}(R)
+  \text{where} is_deterministic(f) && is_expensive(f)
     && ndv(a) / row_count(R) < 0.01
+$$
+
 ```
 
 ## Implementation

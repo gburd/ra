@@ -24,10 +24,13 @@ unique key, the aggregation becomes a no-op and can be removed.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Agg[group_cols, aggs](R)
-  -> Project[aggs](R)
-  where has_unique_constraint(R, group_cols)
+  \rightarrow Project[aggs](R)
+  \text{where} has_unique_constraint(R, group_cols)
+$$
+
 ```
 
 ## Implementation

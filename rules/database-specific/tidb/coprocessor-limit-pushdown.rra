@@ -23,9 +23,12 @@ at the storage layer and dramatically reducing data transfer.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Limit[n](Scan[table])
-  -> CopTask(Limit[n](Scan[table]))
+  \rightarrow CopTask(Limit[n](Scan[table]))
+$$
+
 ```
 
 ## Implementation

@@ -21,14 +21,17 @@ matching rows from the other side.
 
 ## Relational Algebra
 
-```algebra
-Join[c](R, S) where key k is skewed
-  -> Union(
+```latex
+$$
+Join[c](R, S) \text{where} key k is skewed
+  \rightarrow Union(
       Join[c](R_hot, Broadcast(S_hot)),    -- hot key partition
       Join[c](R_cold, Exchange[hash(k)](S_cold))  -- normal partition
      )
-  where R_hot = Filter(R, k in hot_keys)
-  where R_cold = Filter(R, k not in hot_keys)
+  \text{where} R_hot = Filter(R, k in hot_keys)
+  \text{where} R_cold = Filter(R, k not in hot_keys)
+$$
+
 ```
 
 ## Test Cases

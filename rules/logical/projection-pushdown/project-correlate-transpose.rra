@@ -26,12 +26,17 @@ the outer or inner relation are referenced.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
-pi[o.a, i.x](Correlate(Outer(a, b, c), Inner(x, y)))
+$$
+\pi_{o.a, i.x}(Correlate(Outer(a, b, c), Inner(x, y)))
+$$
 
 -- After
-pi[o.a, i.x](Correlate(pi[a](Outer), pi_inner[x](Inner)))
+$$
+\pi_{o.a, i.x}(Correlate(\pi_{a}(Outer), pi_inner[x](Inner)))
+$$
+
 ```
 
 ## Implementation

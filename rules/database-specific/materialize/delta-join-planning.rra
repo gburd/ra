@@ -38,16 +38,21 @@ with no intermediate arrangements. Memory is reduced by ~50% for 3-way joins.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Binary join tree (intermediate arrangements):
-join(join(A, B, A.k=B.k), C, B.k=C.k)
+$$
+\bowtie(\bowtie(A, B, A.k=B.k), C, B.k=C.k)
+$$
   -- Intermediate: arrange(A JOIN B) on B.k
 
 -- Delta join (no intermediate arrangements):
-delta-join([A, B, C], [A.k=B.k, B.k=C.k])
+$$
+delta-\bowtie([A, B, C], [A.k=B.k, B.k=C.k])
+$$
   -- Path 1: dA -> lookup B(k) -> lookup C(k)
   -- Path 2: dB -> lookup A(k) -> lookup C(k)
   -- Path 3: dC -> lookup B(k) -> lookup A(k)
+
 ```
 
 ## Implementation

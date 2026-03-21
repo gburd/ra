@@ -38,8 +38,11 @@ physical operator pick a smaller build side.
 
 ## Relational Algebra
 
-```algebra
-R join[c] S -> S join[c] R
+```latex
+$$
+R \bowtie_{c} S \rightarrow S \bowtie_{c} R
+$$
+
 ```
 
 ## Implementation

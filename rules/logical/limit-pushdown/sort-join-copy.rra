@@ -30,12 +30,17 @@ below the join can be cheaper than sorting the full join output.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: sort above join
+$$
 tau[k; LIMIT n](R JOIN S)
+$$
 
 -- After: sort copied to join input (without limit)
+$$
 tau[k; LIMIT n](tau[k](R) JOIN S)
+$$
+
 ```
 
 ## Implementation

@@ -24,13 +24,16 @@ Divides index range into sub-ranges, scans each range in parallel.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 index_scan[I WHERE key BETWEEN a AND z]
-  -> parallel_union(
+  \rightarrow parallel_union(
        index_scan[I WHERE key BETWEEN a AND b],
        index_scan[I WHERE key BETWEEN b+1 AND c],
        ...
      )
+$$
+
 ```
 
 ## Implementation

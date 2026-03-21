@@ -20,8 +20,11 @@ Removes redundant calculations
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Calc(identity) => R
+$$
+
 ```
 
 ## Implementation

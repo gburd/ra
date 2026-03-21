@@ -25,15 +25,18 @@ where equivalent forms exist that are easier to optimize.
 
 ## Relational Algebra
 
-```algebra
-constant = col       -> col = constant
-constant < col       -> col > constant
-constant <= col      -> col >= constant
-constant > col       -> col < constant
-NOT (col < x)        -> col >= x
-NOT (col = x)        -> col != x
-col != col           -> FALSE (when NOT NULL)
-col = col            -> TRUE (when NOT NULL)
+```latex
+$$
+constant = col       \rightarrow col = constant
+constant < col       \rightarrow col > constant
+constant <= col      \rightarrow col >= constant
+constant > col       \rightarrow col < constant
+NOT (col < x)        \rightarrow col >= x
+NOT (col = x)        \rightarrow col != x
+col != col           \rightarrow FALSE (when NOT NULL)
+col = col            \rightarrow TRUE (when NOT NULL)
+$$
+
 ```
 
 ## Implementation

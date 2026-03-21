@@ -29,10 +29,13 @@ document.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 R lookup[R.fk = S._id] S
-  -> pi[R.*, R.embedded_S](R)
-  where R.embedded_S contains a copy of S
+  \rightarrow \pi_{R.*, R.embedded_S}(R)
+  \text{where} R.embedded_S contains a copy of S
+$$
+
 ```
 
 ## Implementation

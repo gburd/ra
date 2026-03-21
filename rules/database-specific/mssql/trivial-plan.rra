@@ -34,14 +34,19 @@ microseconds.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Trivial: single-table point lookup
+$$
 index-seek(T, pk_index, id = @id)
+$$
 -- No alternatives to consider; trivial plan
 
 -- Non-trivial: multi-table join with choices
-R join[R.a = S.b] S
+$$
+R \bowtie_{R.a = S.b} S
+$$
 -- Multiple join orders, algorithms; needs cost-based optimization
+
 ```
 
 ## Implementation

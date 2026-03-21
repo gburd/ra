@@ -34,17 +34,22 @@ bookkeeping.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Standard differential join (handles retractions):
-diff-join(arrange(L, key), arrange(R, key))
+$$
+diff-\bowtie(arrange(L, key), arrange(R, key))
+$$
   -- Maintains full arrangements for both L and R
   -- On retraction of L row: look up R matches, emit retraction
 
 -- Monotonic join (no retractions possible):
-mono-join(arrange(L, key), R_stream)
+$$
+mono-\bowtie(arrange(L, key), R_stream)
+$$
   -- Only arranges L (smaller side)
   -- R stream looks up in L arrangement, emits matches
   -- No retraction handling needed
+
 ```
 
 ## Implementation

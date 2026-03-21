@@ -33,15 +33,18 @@ for that partition's groups, with no need for a global merge phase
 
 ## Relational Algebra
 
-```algebra
-gamma[g, agg](PartitionUnionAll(P1, P2, ..., Pn))
-  -> UnionAll(
-       gamma[g, agg](P1),
-       gamma[g, agg](P2),
+```latex
+$$
+\gamma_{g, agg}(PartitionUnionAll(P1, P2, ..., Pn))
+  \rightarrow UnionAll(
+       \gamma_{g, agg}(P1),
+       \gamma_{g, agg}(P2),
        ...,
-       gamma[g, agg](Pn)
+       \gamma_{g, agg}(Pn)
      )
-  where partition_key is subset of g
+  \text{where} partition_key is \subseteq of g
+$$
+
 ```
 
 ## Implementation

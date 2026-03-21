@@ -22,7 +22,8 @@ hash partitions.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join[cond](RemoteScan[t1, ep1], RemoteScan[t2, ep2])
 =>
 Union[all](
@@ -30,10 +31,14 @@ Union[all](
     Join[cond](
       RemoteScan[t1, ep1, pushdown_filter=(hash(key) % N = p)],
       RemoteScan[t2, ep2, pushdown_filter=(hash(key) % N = p)]))
+$$
 
+$$
 Preconditions:
   - Both tables on different endpoints
   - Both tables large (> 1M rows)
+$$
+
 ```
 
 ## Before

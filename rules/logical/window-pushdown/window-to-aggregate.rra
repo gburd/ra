@@ -24,10 +24,13 @@ Converts a window aggregate function without PARTITION BY and with no ORDER BY (
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 window[AGG() OVER ()](R)
-  -> cross_join(R, aggregate[AGG()](R))
-  where no_partition_by AND (no_order_by OR frame = UNBOUNDED)
+  \rightarrow cross_join(R, aggregate[AGG()](R))
+  \text{where} no_partition_by AND (no_order_by OR frame = UNBOUNDED)
+$$
+
 ```
 
 ## Implementation

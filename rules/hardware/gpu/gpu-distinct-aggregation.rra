@@ -34,11 +34,14 @@ hash set contents.
 
 ## Relational Algebra
 
-```algebra
-gamma[g; COUNT(DISTINCT col)](R)
-  -> gpu_distinct_aggregate[g; COUNT(col)](gpu_dedup[g, col](R))
-  where |R| > threshold
+```latex
+$$
+\gamma_{g; COUNT(DISTINCT col)}(R)
+  \rightarrow gpu_distinct_aggregate[g; COUNT(col)](gpu_dedup[g, col](R))
+  \text{where} |R| > threshold
     AND ndv(col) * groups(g) fits gpu_memory
+$$
+
 ```
 
 ## Implementation

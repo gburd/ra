@@ -43,15 +43,22 @@ I/O) versus non-clustered (random I/O).
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Given: σ_{p1 ∧ p2 ∧ ... ∧ pn}(R)
 With indexes: I1 on p1, I2 on p2, ...
+$$
 
+$$
 For each index Ii:
   cost = index_access_cost(Ii) +
          (rows_from_index(Ii) * post_filter_cost(remaining_predicates))
+$$
 
+$$
 Choose index with minimum total cost.
+$$
+
 ```
 
 ## Implementation

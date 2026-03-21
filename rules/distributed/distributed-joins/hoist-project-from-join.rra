@@ -32,15 +32,20 @@ generation can proceed, potentially producing a much faster plan.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 InnerJoin[cond](L, Project[exprs](Scan(R)))
-  -> Project[exprs](InnerJoin[cond](L, Scan(R)))
-  where cond does not reference projected columns
-  where exprs are non-volatile
+  \rightarrow Project[exprs](InnerJoin[cond](L, Scan(R)))
+  \text{where} cond does not reference projected columns
+  \text{where} exprs are non-volatile
+$$
 
+$$
 LeftJoin[cond](L, Project[exprs](Scan(R)))
-  -> Project[case_exprs](LeftJoin[cond](L, Scan(R)))
-  where case_exprs null-extends projections for non-matching rows
+  \rightarrow Project[case_exprs](LeftJoin[cond](L, Scan(R)))
+  \text{where} case_exprs null-extends projections for non-matching rows
+$$
+
 ```
 
 ## Implementation

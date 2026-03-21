@@ -31,10 +31,13 @@ Selects composite index matching query predicates in column order; maximizes ind
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 filter[col1=v1 AND col2=v2](scan[T])
-  -> index_scan[I(col1, col2)](col1=v1 AND col2=v2)
-  where prefix_match(I, [col1, col2])
+  \rightarrow index_scan[I(col1, col2)](col1=v1 AND col2=v2)
+  \text{where} prefix_match(I, [col1, col2])
+$$
+
 ```
 
 ## Implementation

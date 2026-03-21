@@ -29,21 +29,26 @@ enabling parallelism and reducing intermediate result size.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 aggregate[agg_func](union_all[R, S])
-  -> aggregate[agg_func](
+  \rightarrow aggregate[agg_func](
        union_all[
          aggregate[agg_func](R),
          aggregate[agg_func](S)
        ]
      )
-  where is_distributive(agg_func)
+  \text{where} is_distributive(agg_func)
+$$
 
+$$
 Distributive aggregates:
 - SUM(x) = SUM(SUM_R(x), SUM_S(x))
 - COUNT(*) = COUNT_R(*) + COUNT_S(*)
 - MIN(x) = MIN(MIN_R(x), MIN_S(x))
 - MAX(x) = MAX(MAX_R(x), MAX_S(x))
+$$
+
 ```
 
 ## Implementation

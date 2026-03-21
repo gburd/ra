@@ -30,10 +30,15 @@ and allows each branch to use specialized indexes or partition pruning.
 
 ## Relational Algebra
 
-```algebra
-(R1 ∪ R2) ⋈ S -> (R1 ⋈ S) ∪ (R2 ⋈ S)
+```latex
+$$
+(R1 ∪ R2) ⋈ S \rightarrow (R1 ⋈ S) ∪ (R2 ⋈ S)
+$$
 
-S ⋈ (R1 ∪ R2) -> (S ⋈ R1) ∪ (S ⋈ R2)
+$$
+S ⋈ (R1 ∪ R2) \rightarrow (S ⋈ R1) ∪ (S ⋈ R2)
+$$
+
 ```
 
 ## Implementation

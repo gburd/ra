@@ -22,9 +22,12 @@ When the body of a recursive CTE has a LIMIT or a depth filter, push the depth c
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Limit[N](RecursiveCTE[name, base, recursive, body])
-  -> RecursiveCTE[name, base, recursive, Limit[N](body), max_depth=N]
+  \rightarrow RecursiveCTE[name, base, recursive, Limit[N](body), max_depth=N]
+$$
+
 ```
 
 ## Implementation

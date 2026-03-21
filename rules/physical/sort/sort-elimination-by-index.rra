@@ -24,12 +24,17 @@ required sort order.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
+$$
 Sort[a, b](IndexScan[idx_ab](R))
+$$
 
 -- After (sort removed)
+$$
 IndexScan[idx_ab](R)
+$$
+
 ```
 
 ## Implementation

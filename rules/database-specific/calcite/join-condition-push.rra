@@ -31,12 +31,17 @@ intermediate result size.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: join with mixed conditions
-R join[R.a = S.b AND R.x > 10] S
+$$
+R \bowtie_{R.a = S.b AND R.x > 10} S
+$$
 
 -- After: single-side condition pushed to filter
-(sigma[x > 10](R)) join[R.a = S.b] S
+$$
+(\sigma_{x > 10}(R)) \bowtie_{R.a = S.b} S
+$$
+
 ```
 
 ## Implementation

@@ -30,12 +30,17 @@ AggregateUnionTransposeRule can push it down.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: UNION DISTINCT
+$$
 R UNION S
+$$
 
 -- After: UNION ALL with aggregate for dedup
-gamma[*](R UNION ALL S)
+$$
+\gamma_{*}(R UNION ALL S)
+$$
+
 ```
 
 ## Implementation

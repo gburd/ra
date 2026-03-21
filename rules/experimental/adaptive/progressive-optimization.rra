@@ -36,14 +36,17 @@ runtime without paying re-optimization cost.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Plan with validity ranges:
+$$
 plan_envelope(
   range[0, 1000]: nested_loop_join(R, indexed_scan(S)),
   range[1000, 100000]: hash_join(R, scan(S)),
   range[100000, inf]: sort_merge_join(sorted_scan(R), sorted_scan(S)),
   checkpoint: cardinality_of(filter[R.x > ?](R))
 )
+$$
+
 ```
 
 ## Implementation

@@ -37,16 +37,23 @@ join, reducing the join cost.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: semi-join above join
+$$
 (X JOIN Y) SEMI JOIN Z
-  where semi-join references only X
+  \text{where} semi-\bowtie references only X
+$$
 
 -- After: semi-join pushed to left input
+$$
 (X SEMI JOIN Z) JOIN Y
+$$
 
 -- Or if semi-join references only Y:
+$$
 X JOIN (Y SEMI JOIN Z)
+$$
+
 ```
 
 ## Implementation

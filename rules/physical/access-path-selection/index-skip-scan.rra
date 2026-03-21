@@ -28,13 +28,18 @@ when D is small and the suffix predicate is selective.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Index on (gender, age), query filters on age only
 -- Before
-sigma[age > 30](TableScan(employees))
+$$
+\sigma_{age > 30}(TableScan(employees))
+$$
 
 -- After: skip scan with 2 distinct gender values
+$$
 IndexSkipScan(idx_gender_age, gender IN {M, F}, age > 30)
+$$
+
 ```
 
 ## Implementation

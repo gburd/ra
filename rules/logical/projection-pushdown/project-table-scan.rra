@@ -30,12 +30,17 @@ row stores, narrower projections reduce buffer pool usage.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: project above full table scan
-pi[a, b](Scan(T))
+$$
+\pi_{a, b}(Scan(T))
+$$
 
 -- After: projected table scan
+$$
 ProjectedScan(T, [a, b])
+$$
+
 ```
 
 ## Implementation

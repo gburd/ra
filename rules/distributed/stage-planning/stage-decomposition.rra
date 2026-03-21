@@ -29,8 +29,9 @@ stages begin producing output.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Full plan:
+$$
 Aggregate(
     Exchange[gather](
         HashJoin(
@@ -39,17 +40,23 @@ Aggregate(
         )
     )
 )
+$$
 
 -- Decomposed into stages:
+$$
 Stage 0 (source): Scan(R)
 Stage 1 (source): Scan(S)
 Stage 2 (intermediate): HashJoin(input_0, input_1)
 Stage 3 (root): Aggregate(input_2)
+$$
 
 -- Edges:
-Stage 0 --[hash(k)]--> Stage 2
-Stage 1 --[hash(k)]--> Stage 2
-Stage 2 --[gather]--> Stage 3
+$$
+Stage 0 --[hash(k)]-\rightarrow Stage 2
+Stage 1 --[hash(k)]-\rightarrow Stage 2
+Stage 2 --[gather]-\rightarrow Stage 3
+$$
+
 ```
 
 ## Implementation

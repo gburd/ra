@@ -39,19 +39,28 @@ predicate complexity.
 
 ## Relational Algebra
 
-```algebra
-CardEst_sample(sigma[p](R)) =
+```latex
+$$
+CardEst_sample(\sigma_{p}(R)) =
   |R| * (count(matches in sample) / sample_size)
+$$
 
+$$
 Confidence interval (95%):
   estimate +/- 1.96 * sqrt(sel * (1 - sel) / sample_size) * |R|
+$$
 
+$$
 Sample size for target error e at confidence 1-alpha:
   n >= (z_alpha/2)^2 * sel * (1 - sel) / e^2
+$$
 
+$$
 Stratified sampling:
   CardEst_strat = sum(|stratum_i| * sel_i)
-  where sel_i estimated from stratum_i sample
+  \text{where} sel_i estimated from stratum_i sample
+$$
+
 ```
 
 ## Implementation

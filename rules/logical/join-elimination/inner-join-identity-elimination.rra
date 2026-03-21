@@ -24,10 +24,13 @@ Eliminates inner joins with tables that have exactly one row (identity joins).
 
 ## Relational Algebra
 
-```algebra
-join[cond](R, single_row(S))
-  -> extend[S.cols](R)
-  where cardinality(S) = 1
+```latex
+$$
+\bowtie_{cond}(R, single_row(S))
+  \rightarrow extend[S.cols](R)
+  \text{where} cardinality(S) = 1
+$$
+
 ```
 
 ## Implementation

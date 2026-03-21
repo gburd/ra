@@ -33,15 +33,20 @@ using a bottom-up traversal.
 
 ## Relational Algebra
 
-```algebra
-Initial query Q -> E-graph E with Q as root
+```latex
+$$
+Initial query Q \rightarrow E-graph E with Q as root
 Apply rewrite rules until fixpoint: E_saturated
 Extract optimal plan: P_opt = extract_best(E_saturated, cost_model)
+$$
 
+$$
 Example rewrite rules in E-graph:
-- Filter pushdown: (filter p (join R S)) ≡ (join (filter p R) S)
-- Join commutativity: (join R S) ≡ (join S R)
+- Filter pushdown: (filter p (\bowtie R S)) ≡ (\bowtie (filter p R) S)
+- Join commutativity: (\bowtie R S) ≡ (\bowtie S R)
 - Predicate merging: (filter p1 (filter p2 R)) ≡ (filter (and p1 p2) R)
+$$
+
 ```
 
 ## Implementation

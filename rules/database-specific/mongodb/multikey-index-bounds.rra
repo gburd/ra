@@ -32,15 +32,22 @@ of documents that require FETCH + filter verification.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: broad index scan + post-filter
-sigma[a > 5 AND a < 10](index-scan(multikey_idx, (-inf, +inf)))
+$$
+\sigma_{a > 5 AND a < 10}(index-scan(multikey_idx, (-inf, +inf)))
+$$
 
 -- After: tightened bounds on multikey index
-sigma[a > 5 AND a < 10](index-scan(multikey_idx, (5, 10)))
+$$
+\sigma_{a > 5 AND a < 10}(index-scan(multikey_idx, (5, 10)))
+$$
 
 -- With $elemMatch: single array element must satisfy all
-sigma[elemMatch(a, > 5 AND < 10)](index-scan(multikey_idx, (5, 10)))
+$$
+\sigma_{elemMatch(a, > 5 AND < 10)}(index-scan(multikey_idx, (5, 10)))
+$$
+
 ```
 
 ## Implementation

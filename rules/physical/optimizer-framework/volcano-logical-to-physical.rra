@@ -39,36 +39,53 @@ plan without exhaustive enumeration.
 
 ## Relational Algebra
 
-```algebra
-Implementation Rules (Logical -> Physical):
+```latex
+$$
+Implementation Rules (Logical \rightarrow Physical):
+$$
 
-Rule: Join(L, R, pred) -> HashJoin(L, R, pred)
+$$
+Rule: Join(L, R, pred) \rightarrow HashJoin(L, R, pred)
   Provided: no ordering
   Required from children: none
+$$
 
-Rule: Join(L, R, pred) -> MergeJoin(L, R, pred)
-  Provided: sorted on join key
-  Required from children: L sorted on join key, R sorted on join key
+$$
+Rule: Join(L, R, pred) \rightarrow MergeJoin(L, R, pred)
+  Provided: sorted on \bowtie key
+  Required from children: L sorted on \bowtie key, R sorted on \bowtie key
+$$
 
-Rule: Join(L, R, pred) -> NestedLoopJoin(L, R, pred)
+$$
+Rule: Join(L, R, pred) \rightarrow NestedLoopJoin(L, R, pred)
   Provided: preserves outer ordering
   Required from children: none (index on inner preferred)
+$$
 
-Rule: Scan(T) -> SeqScan(T)
+$$
+Rule: Scan(T) \rightarrow SeqScan(T)
   Provided: no ordering
   Required from children: (leaf)
+$$
 
-Rule: Scan(T, idx) -> IndexScan(T, idx)
+$$
+Rule: Scan(T, idx) \rightarrow IndexScan(T, idx)
   Provided: sorted on index key
   Required from children: (leaf)
+$$
 
-Rule: Aggregate(input, groupby, agg) -> HashAggregate(input, groupby, agg)
+$$
+Rule: Aggregate(input, groupby, agg) \rightarrow HashAggregate(input, groupby, agg)
   Provided: no ordering
   Required from children: none
+$$
 
-Rule: Aggregate(input, groupby, agg) -> SortAggregate(input, groupby, agg)
+$$
+Rule: Aggregate(input, groupby, agg) \rightarrow SortAggregate(input, groupby, agg)
   Provided: sorted on groupby
   Required from children: input sorted on groupby
+$$
+
 ```
 
 ## Implementation

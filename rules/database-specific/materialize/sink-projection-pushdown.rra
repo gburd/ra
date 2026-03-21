@@ -32,18 +32,23 @@ columns needed downstream, reducing memory proportionally to the projection rati
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: full-width arrangements throughout
-pi[name, email](
-  join(
+$$
+\pi_{name, email}(
+  \bowtie(
     arrange(users, all_columns),
     arrange(orders, all_columns)))
+$$
 
 -- After: early projection, narrow arrangements
-pi[name, email](
-  join(
-    arrange(pi[id, name, email](users), narrow),
-    arrange(pi[user_id](orders), narrow)))
+$$
+\pi_{name, email}(
+  \bowtie(
+    arrange(\pi_{id, name, email}(users), narrow),
+    arrange(\pi_{user_id}(orders), narrow)))
+$$
+
 ```
 
 ## Implementation

@@ -41,31 +41,46 @@ that exploit the available bindings.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Adornment Algorithm:
+$$
 
+$$
 Input: Query Q and rules R
 Output: Adorned rules R_adorned
+$$
 
+$$
 1. Start with query predicate, adorn based on bound arguments
    Example: ?- ancestor(john, X)
    Adornment: ancestor^bf (first arg bound, second free)
+$$
 
+$$
 2. For each adorned predicate P^a, process each rule for P:
    - Mark head arguments as bound/free per adornment
    - Propagate bindings through rule body left-to-right
    - Select a SIPS (Sideways Information Passing Strategy) to determine
      which body predicates receive bindings
+$$
 
+$$
    Example rule: ancestor(X, Z) :- parent(X, Y), ancestor(Y, Z)
    With ancestor^bf: X is bound from head
-     parent(X, Y): X bound -> Y becomes bound after evaluation
-     ancestor(Y, Z): Y bound from parent -> adorn as ancestor^bf
+     parent(X, Y): X bound \rightarrow Y becomes bound after evaluation
+     ancestor(Y, Z): Y bound from parent \rightarrow adorn as ancestor^bf
      Result: ancestor^bf(X, Z) :- parent^bf(X, Y), ancestor^bf(Y, Z)
+$$
 
+$$
 3. Repeat until no new adorned predicates are generated
+$$
 
+$$
 Adornment is a fixpoint computation over all rules.
+$$
+
 ```
 
 ## Implementation

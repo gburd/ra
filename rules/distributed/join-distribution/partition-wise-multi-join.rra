@@ -20,10 +20,13 @@ locally on each node.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join[c3](Join[c2](Join[c1](F, D1), D2), D3)
-  -> PartitionWiseMultiJoin(F_i, D1_i, D2_i, D3_i)
-  where all tables partitioned on same key
+  \rightarrow PartitionWiseMultiJoin(F_i, D1_i, D2_i, D3_i)
+  \text{where} all tables partitioned on same key
+$$
+
 ```
 
 ## Test Cases

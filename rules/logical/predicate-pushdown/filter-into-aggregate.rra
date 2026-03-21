@@ -30,8 +30,11 @@ Transposes filters through aggregation
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 σ(Agg(R)) => Agg(σ(R))
+$$
+
 ```
 
 ## Implementation

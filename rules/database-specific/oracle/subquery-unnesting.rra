@@ -31,19 +31,26 @@ often finding plans orders of magnitude faster.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- EXISTS to semi-join
-sigma[EXISTS(sigma[S.k = R.k](S))](R)
-  -> R semi-join[R.k = S.k] S
+$$
+\sigma_{EXISTS(sigma[S.k = R.k}(S))](R)
+  \rightarrow R semi-\bowtie_{R.k = S.k} S
+$$
 
 -- NOT IN to anti-join (with null handling)
-sigma[R.a NOT IN (SELECT S.a FROM S)](R)
-  -> R anti-join[R.a = S.a] S
+$$
+\sigma_{R.a NOT IN (SELECT S.a FROM S)}(R)
+  \rightarrow R anti-\bowtie_{R.a = S.a} S
+$$
   -- Special null handling: NOT IN returns NULL if subquery has NULLs
 
 -- Scalar subquery to outer join
-pi[R.*, (SELECT MAX(S.v) FROM S WHERE S.k = R.k)](R)
-  -> R left-join[R.k = S.k] (gamma[k; max_v=MAX(v)](S))
+$$
+\pi_{R.*, (SELECT MAX(S.v) FROM S WHERE S.k = R.k)}(R)
+  \rightarrow R left-\bowtie_{R.k = S.k} (\gamma_{k; max_v=MAX(v)}(S))
+$$
+
 ```
 
 ## Implementation

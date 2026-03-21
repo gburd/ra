@@ -24,11 +24,14 @@ Moves filter predicates from the WHERE clause into the PREWHERE stage of MergeTr
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Filter[c](Scan[MergeTree](T))
-  -> Scan[MergeTree, prewhere=c](T)
-  where can_move_to_prewhere(c)
-  where c references_few_columns
+  \rightarrow Scan[MergeTree, prewhere=c](T)
+  \text{where} can_move_to_prewhere(c)
+  \text{where} c references_few_columns
+$$
+
 ```
 
 Where:

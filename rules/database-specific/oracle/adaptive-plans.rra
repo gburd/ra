@@ -33,15 +33,18 @@ matches reality, avoiding worst-case scenarios from bad estimates.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Adaptive plan with decision point
+$$
 statistics-collector[threshold=100](
-    R -> {
+    R \rightarrow {
         if actual_rows < threshold:
-            nested-loop-join(R, index-scan(S))
+            nested-loop-\bowtie(R, index-scan(S))
         else:
-            hash-join(R, full-scan(S))
+            hash-\bowtie(R, full-scan(S))
     })
+$$
+
 ```
 
 ## Implementation

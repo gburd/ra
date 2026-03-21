@@ -38,19 +38,26 @@ without requiring full optimizer replacement.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Without hints:
-optimizer(Q) -> default_plan (possibly suboptimal)
+$$
+optimizer(Q) \rightarrow default_plan (possibly suboptimal)
+$$
 
 -- With ML-generated hints:
+$$
 optimizer(Q, hints=[HashJoin(R,S), NestLoop(T,U), IndexScan(T,idx1)])
-  -> hinted_plan (closer to optimal)
+  \rightarrow hinted_plan (closer to optimal)
+$$
 
 -- Hint types:
+$$
   - Join algorithm: HashJoin, MergeJoin, NestLoop
   - Join order: Leading(R, S, T, U)
   - Access method: IndexScan, SeqScan, IndexOnlyScan
   - Parallelism: Parallel(degree=8)
+$$
+
 ```
 
 ## Implementation

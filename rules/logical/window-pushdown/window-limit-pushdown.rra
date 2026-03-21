@@ -22,9 +22,12 @@ When a ROW_NUMBER window function is filtered to rn <= N (top-N pattern), push t
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Filter[rn <= N](Window[ROW_NUMBER() ORDER BY keys as rn](input))
-  -> Window[ROW_NUMBER() ORDER BY keys as rn](TopN[N, keys](input))
+  \rightarrow Window[ROW_NUMBER() ORDER BY keys as rn](TopN[N, keys](input))
+$$
+
 ```
 
 ## Implementation

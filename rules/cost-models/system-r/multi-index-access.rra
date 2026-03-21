@@ -34,20 +34,27 @@ saves heap page fetches when both predicates are moderately selective.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Single index:
-index_scan(R, I1, P1) -> filter(P2)
+$$
+index_scan(R, I1, P1) \rightarrow filter(P2)
   cost: F1 * page_fetches + W * F1 * N
+$$
 
 -- Multi-index AND:
-intersect(index_scan_rids(I1, P1), index_scan_rids(I2, P2))
-  -> heap_fetch(intersected_rids)
+$$
+\cap(index_scan_rids(I1, P1), index_scan_rids(I2, P2))
+  \rightarrow heap_fetch(intersected_rids)
   cost: index1_cost + index2_cost + F1*F2*N * page_fetch_cost
+$$
 
 -- Multi-index OR:
-union(index_scan_rids(I1, P1), index_scan_rids(I2, P2))
-  -> heap_fetch(union_rids)
+$$
+\cup(index_scan_rids(I1, P1), index_scan_rids(I2, P2))
+  \rightarrow heap_fetch(union_rids)
   cost: index1_cost + index2_cost + (F1+F2-F1*F2)*N * page_fetch_cost
+$$
+
 ```
 
 ## Implementation

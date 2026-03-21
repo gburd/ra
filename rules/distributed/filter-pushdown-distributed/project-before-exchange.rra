@@ -20,10 +20,13 @@ should be shuffled.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Project[cols](Exchange[hash(k)](R))
-  -> Exchange[hash(k)](Project[cols + k](R))
-  where k subset of cols or k added for partitioning
+  \rightarrow Exchange[hash(k)](Project[cols + k](R))
+  \text{where} k \subseteq of cols or k added for partitioning
+$$
+
 ```
 
 ## Test Cases

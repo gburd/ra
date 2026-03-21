@@ -31,9 +31,12 @@ use NOT NULL indexes, and reduce join cardinality early.
 
 ## Relational Algebra
 
-```algebra
-R ⨝_{R.a = S.b} S ->
+```latex
+$$
+R ⨝_{R.a = S.b} S \rightarrow
   σ_{R.a IS NOT NULL}(R) ⨝_{R.a = S.b} σ_{S.b IS NOT NULL}(S)
+$$
+
 ```
 
 ## Implementation

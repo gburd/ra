@@ -24,11 +24,14 @@ Removes unused columns from a CTE definition by pushing a projection into it. Re
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 CTE[name, def](body)
-  -> CTE[name, Project[used_cols](def)](body)
-  where used_cols = referenced_columns(name, body)
+  \rightarrow CTE[name, Project[used_cols](def)](body)
+  \text{where} used_cols = referenced_columns(name, body)
     and |used_cols| < |output_cols(def)|
+$$
+
 ```
 
 ## Implementation

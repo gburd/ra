@@ -51,30 +51,37 @@ hardware characteristics, data distribution effects, and runtime conditions.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Traditional cost model:
+$$
 Cost(HashJoin(R, S)) =
   seq_scan_cost(R) + build_hash_cost(|R|) +
   seq_scan_cost(S) + probe_cost(|S|) +
-  output_cost(|R join S|)
+  output_cost(|R \bowtie S|)
+$$
 
 -- Learned cost model:
+$$
 Cost(HashJoin(R, S)) = model.predict(
   features = [
-    |R|, |S|, |R join S|_est,   -- cardinalities
+    |R|, |S|, |R \bowtie S|_est,   -- cardinalities
     width(R), width(S),          -- tuple widths
     build_cols, probe_cols,      -- key info
     concurrency, cache_size,     -- runtime context
     plan_tree_embedding,         -- structural features
   ]
 )
+$$
 
 -- Bao approach (plan-level steering):
 -- Instead of predicting cost, predict relative quality
+$$
 for hint_set in [default, hash_only, merge_only, ...]:
   plan = optimizer.plan_with_hints(query, hint_set)
   quality[hint_set] = bao_model.predict(plan)
 best_plan = plans[argmax(quality)]
+$$
+
 ```
 
 ## Implementation

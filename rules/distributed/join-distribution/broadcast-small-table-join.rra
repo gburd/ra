@@ -30,12 +30,15 @@ Shuffling the large table costs `|R| * (N-1)/N` bytes. When
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join[c](R, S)
-  -> Join[c](R, Broadcast(S))
-  where |S| < broadcast_threshold
-  where |S| * num_nodes < |R|
-  where join_type in [Inner, LeftOuter, Semi, Anti]
+  \rightarrow Join[c](R, Broadcast(S))
+  \text{where} |S| < broadcast_threshold
+  \text{where} |S| * num_nodes < |R|
+  \text{where} join_type in [Inner, LeftOuter, Semi, Anti]
+$$
+
 ```
 
 ## Implementation

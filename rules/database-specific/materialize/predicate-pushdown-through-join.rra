@@ -32,9 +32,12 @@ processing each update to either input.
 
 ## Relational Algebra
 
-```algebra
-sigma[p(R)](R join[c] S) -> sigma[p(R)](R) join[c] S
-  where attrs(p) subset attrs(R)
+```latex
+$$
+\sigma_{p(R)}(R \bowtie_{c} S) \rightarrow \sigma_{p(R)}(R) \bowtie_{c} S
+  \text{where} \text{attrs}(p) \subseteq \text{attrs}(R)
+$$
+
 ```
 
 ## Implementation

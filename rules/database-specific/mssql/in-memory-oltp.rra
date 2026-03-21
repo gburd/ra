@@ -33,13 +33,18 @@ contention that limits OLTP throughput on hot pages.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: traditional B-tree access with latches
-latch-acquire -> page-read -> row-locate -> latch-release
+$$
+latch-acquire \rightarrow page-read \rightarrow row-locate \rightarrow latch-release
+$$
 
 -- After: in-memory latch-free access
+$$
 hash-index-probe(memory_optimized_table, key)
+$$
   -- No latches, no page structure, direct pointer chase
+
 ```
 
 ## Implementation

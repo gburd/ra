@@ -38,28 +38,41 @@ bound is faster than B-tree traversal.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- B-tree lookup cost:
+$$
 btree_lookup(n) = log_B(n) * cache_miss_cost
+$$
   -- ~4 cache misses for 1B keys
 
 -- Learned index lookup cost:
+$$
 learned_lookup(n, model) =
   model_inference_cost  -- ~10-50ns for linear/small NN
   + binary_search(error_bound) * cache_miss_cost
+$$
   -- error_bound typically 16-256 for good models
 
 -- Space comparison:
+$$
 btree_space(n) = n * (key_size + pointer_size) / fill_factor
+$$
   -- ~16 bytes per key
+$$
 learned_space(n, model) = model_parameters * sizeof(float)
   + n * key_size  -- still need sorted data
+$$
   -- Model: 1-100 KB vs B-tree internal nodes: MBs
 
 -- PGM index:
+$$
 pgm_lookup(n, epsilon) = log(n/epsilon) * cache_miss_cost
+$$
   -- epsilon = max prediction error
+$$
 pgm_space(n, epsilon) = n / epsilon * model_size
+$$
+
 ```
 
 ## Implementation

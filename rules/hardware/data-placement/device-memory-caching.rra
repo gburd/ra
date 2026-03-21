@@ -35,15 +35,20 @@ from all but the first query.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 // Within a query: share device-resident data across operators
 gpu_op1(transfer_to_gpu(R)) ... gpu_op2(transfer_to_gpu(R))
-  -> let dev_R = transfer_to_gpu(R) in
+  \rightarrow let dev_R = transfer_to_gpu(R) in
      gpu_op1(dev_R) ... gpu_op2(dev_R)
+$$
 
+$$
 // Across queries: pin hot data on device
-transfer_to_gpu(R) -> device_cached(R)
-  where R is hot AND size(R) <= available_device_memory
+transfer_to_gpu(R) \rightarrow device_cached(R)
+  \text{where} R is hot AND size(R) <= available_device_memory
+$$
+
 ```
 
 ## Implementation

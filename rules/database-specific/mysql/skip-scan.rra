@@ -31,17 +31,22 @@ only the sub-ranges where `a` takes each of its distinct values.  If
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: full table scan (no prefix filter)
-sigma[b > 100](scan(T))
+$$
+\sigma_{b > 100}(scan(T))
+$$
 
 -- After: skip scan on index (a, b)
-union(
+$$
+\cup(
     range_scan(T, idx_ab, a=val1, b>100),
     range_scan(T, idx_ab, a=val2, b>100),
     ...
     range_scan(T, idx_ab, a=valN, b>100)
 )
+$$
+
 ```
 
 ## Implementation

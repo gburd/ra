@@ -29,16 +29,21 @@ cross the network.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Single-phase (naive)
-gamma[g, agg(a)](Exchange[hash(g)](R))
+$$
+\gamma_{g, agg(a)}(Exchange[hash(g)](R))
+$$
 
 -- Two-phase (optimized)
-gamma[g, merge_agg(partial_a)](
+$$
+\gamma_{g, merge_agg(partial_a)}(
     Exchange[hash(g)](
-        gamma[g, partial_agg(a)](R)
+        \gamma_{g, partial_agg(a)}(R)
     )
 )
+$$
+
 ```
 
 ## Implementation

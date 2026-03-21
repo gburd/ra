@@ -36,23 +36,32 @@ only 2x slower in the worst case, vs 100x for the "optimal" plan.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Standard optimization (fragile):
+$$
 plan* = argmin_{p in Plans} cost(p, estimate)
+$$
 
 -- Robust optimization (minimax regret):
+$$
 plan* = argmin_{p in Plans} max_{c in C} regret(p, c)
-  where regret(p, c) = cost(p, c) / min_{p'} cost(p', c)
+  \text{where} regret(p, c) = cost(p, c) / min_{p'} cost(p', c)
+$$
 
 -- Cardinality uncertainty set:
+$$
 C = { c : c_low <= c <= c_high }
-  where c_low = estimate / error_bound
+  \text{where} c_low = estimate / error_bound
         c_high = estimate * error_bound
+$$
 
 -- Plan bouquets (Dutt & Haritsa 2014):
 -- Sample cardinality space, find plan regions
+$$
 bouquet = { (p_i, region_i) : plan_i optimal in region_i }
+$$
 -- At runtime, choose plan based on observed cardinality
+
 ```
 
 ## Implementation

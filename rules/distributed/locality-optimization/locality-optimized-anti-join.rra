@@ -33,12 +33,15 @@ communication.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 AntiLookupJoin[expr: k1=k2 AND region IN (L, R1, R2)](input, index)
-  -> AntiLookupJoin[expr: k1=k2 AND region IN (R1, R2)](
+  \rightarrow AntiLookupJoin[expr: k1=k2 AND region IN (R1, R2)](
        AntiLookupJoin[expr: k1=k2 AND region = L](input, index),
        index
      )
+$$
+
 ```
 
 ## Implementation

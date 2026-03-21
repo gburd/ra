@@ -31,14 +31,19 @@ since they stream data without building a hash table.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Hash join (build smaller side)
-R hash-join[R.k = S.k] S
-  where |S| < memory_threshold
+$$
+R hash-\bowtie_{R.k = S.k} S
+  \text{where} |S| < memory_threshold
+$$
 
 -- Sort-merge join (inputs pre-sorted or memory constrained)
-R sort-merge-join[R.k = S.k] S
-  where sorted(R, k) AND sorted(S, k)
+$$
+R sort-merge-\bowtie_{R.k = S.k} S
+  \text{where} sorted(R, k) AND sorted(S, k)
+$$
+
 ```
 
 ## Implementation

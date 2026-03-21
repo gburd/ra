@@ -36,9 +36,10 @@ sort cost). Adaptive selection avoids the worst case of either approach.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 aggregate[GROUP BY cols, agg_fns](R)
-  -> adaptive_aggregate(
+  \rightarrow adaptive_aggregate(
        initial: hash_aggregate,
        fallback: sort_aggregate,
        switch_condition: hash_table_size > memory_budget * 0.8,
@@ -46,6 +47,8 @@ aggregate[GROUP BY cols, agg_fns](R)
        agg_fns: agg_fns,
        input: R
      )
+$$
+
 ```
 
 ## Implementation

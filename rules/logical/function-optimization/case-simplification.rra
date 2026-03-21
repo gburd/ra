@@ -32,11 +32,14 @@ overhead.
 
 ## Relational Algebra
 
-```algebra
-CASE WHEN TRUE THEN x ELSE y END -> x
-CASE WHEN FALSE THEN x ELSE y END -> y
-CASE WHEN cond THEN x ELSE x END -> x
-CASE col WHEN NULL THEN x ELSE y END -> y  (NULL never matches in simple CASE)
+```latex
+$$
+CASE WHEN TRUE THEN \times ELSE y END \rightarrow x
+CASE WHEN FALSE THEN \times ELSE y END \rightarrow y
+CASE WHEN cond THEN \times ELSE \times END \rightarrow x
+CASE col WHEN NULL THEN \times ELSE y END \rightarrow y  (NULL never matches in simple CASE)
+$$
+
 ```
 
 ## Implementation

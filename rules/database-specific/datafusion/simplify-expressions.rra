@@ -30,23 +30,32 @@ reduces the number of kernel calls and intermediate arrays.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Constant folding
-1 + 2 -> 3
+$$
+1 + 2 \rightarrow 3
+$$
 
 -- Boolean simplification
-x AND true -> x
-x OR false -> x
-x AND false -> false
-NOT NOT x -> x
+$$
+x AND true \rightarrow x
+x OR false \rightarrow x
+x AND false \rightarrow false
+NOT NOT \times \rightarrow x
+$$
 
 -- Arithmetic identity
-x + 0 -> x
-x * 1 -> x
-x * 0 -> 0
+$$
+x + 0 \rightarrow x
+x * 1 \rightarrow x
+x * 0 \rightarrow 0
+$$
 
 -- Null propagation
-x + NULL -> NULL (for most types)
+$$
+x + NULL \rightarrow NULL (for most types)
+$$
+
 ```
 
 ## Implementation

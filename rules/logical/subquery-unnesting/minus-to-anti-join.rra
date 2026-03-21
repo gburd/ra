@@ -20,8 +20,11 @@ Converts MINUS to anti-join
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 R MINUS S => AntiJoin(R, S)
+$$
+
 ```
 
 ## Implementation

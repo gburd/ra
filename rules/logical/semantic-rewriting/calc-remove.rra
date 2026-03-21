@@ -28,12 +28,17 @@ produces the desired output. Removing it simplifies the plan tree.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: trivial Calc (identity)
+$$
 Calc[proj={$0, $1, ..., $n}, filter=true](R)
+$$
 
 -- After: remove Calc
+$$
 R
+$$
+
 ```
 
 ## Implementation

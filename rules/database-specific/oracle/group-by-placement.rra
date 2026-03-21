@@ -33,15 +33,20 @@ faster and uses less memory for hash tables.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: join then aggregate
-gamma[d.name; total=SUM(f.amount)](
-    f join[f.dim_id = d.id] d)
+$$
+\gamma_{d.name; total=SUM(f.amount)}(
+    f \bowtie_{f.dim_id = d.id} d)
+$$
 
 -- After: aggregate then join (eager aggregation)
-gamma[d.name; total=SUM(partial_total)](
-    (gamma[f.dim_id; partial_total=SUM(f.amount)](f))
-    join[f.dim_id = d.id] d)
+$$
+\gamma_{d.name; total=SUM(partial_total)}(
+    (\gamma_{f.dim_id; partial_total=SUM(f.amount)}(f))
+    \bowtie_{f.dim_id = d.id} d)
+$$
+
 ```
 
 ## Implementation

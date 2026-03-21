@@ -33,14 +33,17 @@ assignment that minimizes end-to-end latency.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 plan(op1, op2, ..., opN)
-  -> placed_plan(
+  \rightarrow placed_plan(
        (op1, device1), (op2, device2), ..., (opN, deviceN),
        transfers
      )
-  where sum(cost(opi, devicei) + transfer_cost(i, i+1))
+  \text{where} sum(cost(opi, devicei) + transfer_cost(i, i+1))
         is minimized
+$$
+
 ```
 
 ## Implementation

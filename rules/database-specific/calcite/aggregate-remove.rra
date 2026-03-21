@@ -30,13 +30,18 @@ overhead with no semantic effect.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: aggregate on unique key
-gamma[pk; COUNT(*), SUM(x)](R)
-  where {pk} is a unique key of R
+$$
+\gamma_{pk; COUNT(*), SUM(x)}(R)
+  \text{where} {pk} is a unique key of R
+$$
 
 -- After: project with trivial replacements
-pi[pk, 1 AS count_star, x AS sum_x](R)
+$$
+\pi_{pk, 1 AS count_star, \times AS sum_x}(R)
+$$
+
 ```
 
 ## Implementation

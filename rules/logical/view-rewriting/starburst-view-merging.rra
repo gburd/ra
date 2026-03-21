@@ -41,9 +41,12 @@ query's optimizer, enabling global optimization across the view boundary.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 View merging for simple views:
+$$
 
+$$
 Before (view as subquery):
   pi_{a, v.b}(
     sigma_{a > 10}(
@@ -51,18 +54,24 @@ Before (view as subquery):
         [pi_{b, tid}(sigma_{c > 5}(S)) AS v]
     )
   )
+$$
 
+$$
 After view merge:
   pi_{a, S.b}(
     sigma_{a > 10 AND S.c > 5}(
       T join_{T.id = S.tid} S
     )
   )
+$$
 
+$$
 The view boundary is eliminated. Now the optimizer can:
 - Push a > 10 and c > 5 to their respective tables
-- Consider join ordering between T and S
+- Consider \bowtie ordering between T and S
 - Use combined statistics for cost estimation
+$$
+
 ```
 
 ## Implementation

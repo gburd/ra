@@ -40,34 +40,49 @@ scale. The weighting factor W adapts the model to different hardware profiles.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 COST(plan) = PAGE_FETCHES(plan) + W * RSI_CALLS(plan)
+$$
 
+$$
 For each operator:
+$$
 
+$$
 Sequential Scan(R):
   PAGE_FETCHES = N_pages(R)
   RSI_CALLS    = N_tuples(R)
+$$
 
+$$
 Index Scan(R, I, selectivity F):
   If I is clustered:
     PAGE_FETCHES = F * N_pages(R)
   Else:
-    PAGE_FETCHES = min(F * N_tuples(R), N_pages(R))
+    PAGE_FETCHES = \text{min}(F * N_tuples(R), N_pages(R))
   RSI_CALLS    = F * N_tuples(R)
+$$
 
+$$
 Nested-Loop Join(outer, inner):
   PAGE_FETCHES = PAGES(outer) + TUPLES(outer) * PAGES(inner_access)
   RSI_CALLS    = TUPLES(outer) * TUPLES(inner_per_probe)
+$$
 
+$$
 Sort-Merge Join(R, S):
   PAGE_FETCHES = sort_pages(R) + sort_pages(S) + PAGES(R) + PAGES(S)
   RSI_CALLS    = TUPLES(R) + TUPLES(S)
+$$
 
+$$
 Sort(R):
   PAGE_FETCHES = 2 * N_pages(R) * ceil(log_B(N_pages(R)))
   RSI_CALLS    = N_tuples(R) * ceil(log2(N_tuples(R)))
   (B = number of buffer pages available for sorting)
+$$
+
 ```
 
 ## Implementation

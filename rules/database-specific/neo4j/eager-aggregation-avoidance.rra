@@ -34,21 +34,28 @@ peak memory from O(N) to O(1) per row.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: Eager barrier forces full materialization
+$$
 Eager(
   Expand(NodeByLabelScan(:Person), :KNOWS)
 ) |> Create(...)
+$$
 
 -- After: analysis proves no read-write conflict; Eager removed
+$$
 Expand(NodeByLabelScan(:Person), :KNOWS)
   |> Create(...)
+$$
 
 -- Read-only query: Eager never needed
+$$
 Eager(
   Expand(NodeByLabelScan(:Person), :KNOWS)
 ) |> Return
 => Expand(NodeByLabelScan(:Person), :KNOWS) |> Return
+$$
+
 ```
 
 ## Implementation

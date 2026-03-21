@@ -20,12 +20,17 @@ Optimizes ReplacingMergeTree queries using FINAL modifier.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
+$$
 (final (scan replacingmergetree_table))
+$$
 
 -- After
+$$
 (scan replacingmergetree_deduplicated)
+$$
+
 ```
 
 ## Preconditions

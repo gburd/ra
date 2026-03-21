@@ -38,21 +38,30 @@ allows the DFA compiler to optimize each independently.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
+$$
 PatternQuantified(A, Range(2, 5))
+$$
 
 -- After
+$$
 Sequence([
   PatternQuantified(A, Exactly(2)),
   PatternQuantified(A, Range(0, 3))
 ])
+$$
 
 -- Before
+$$
 PatternQuantified(A, Range(3, 3))
+$$
 
 -- After (via eliminate-redundant-quantifier)
+$$
 PatternQuantified(A, Exactly(3))
+$$
+
 ```
 
 ## Implementation

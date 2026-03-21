@@ -29,10 +29,13 @@ array element is smaller, reducing memory usage and serialization cost.
 
 ## Relational Algebra
 
-```algebra
-pi[g, arr.f1, arr.f2](
-  gamma[g, push($$ROOT) as arr](R))
-  -> gamma[g, push({f1: $.f1, f2: $.f2}) as arr](R)
+```latex
+$$
+\pi_{g, arr.f1, arr.f2}(
+  \gamma_{g, push($$ROOT) as arr}(R))
+  \rightarrow \gamma_{g, push({f1: $.f1, f2: $.f2}) as arr}(R)
+$$
+
 ```
 
 ## Implementation

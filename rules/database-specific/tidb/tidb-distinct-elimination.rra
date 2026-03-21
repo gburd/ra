@@ -20,12 +20,17 @@ Removes DISTINCT when output columns guarantee uniqueness.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
+$$
 (distinct (project [id] (scan users)))
+$$
 
 -- After
+$$
 (project [id] (scan users))
+$$
+
 ```
 
 ## Preconditions

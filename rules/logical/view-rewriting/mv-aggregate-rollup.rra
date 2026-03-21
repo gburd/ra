@@ -25,10 +25,11 @@ not AVG directly).
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- MV: gamma[year, month; SUM(amt) AS total](sales)
 -- Query: gamma[year; SUM(amt)](sales)
 -- Rewrite: gamma[year; SUM(total)](MV)
+
 ```
 
 ## Implementation

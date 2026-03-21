@@ -38,14 +38,17 @@ Partitions both inputs on join key, then joins matching partitions; works with l
 
 ## Relational Algebra
 
-```algebra
-join[R.key = S.key](R, S)
-  -> partition_phase:
-       partition(R, hash(key)) -> R1...Rn
-       partition(S, hash(key)) -> S1...Sn
+```latex
+$$
+\bowtie_{R.key = S.key}(R, S)
+  \rightarrow partition_phase:
+       partition(R, hash(key)) \rightarrow R1...Rn
+       partition(S, hash(key)) \rightarrow S1...Sn
      join_phase:
        for i in 1..n:
          hash_join(Ri, Si)
+$$
+
 ```
 
 ## Implementation

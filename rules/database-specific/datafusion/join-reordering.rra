@@ -31,13 +31,18 @@ orders of magnitude compared to a naive left-deep plan.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: left-deep plan (parse order)
-(A join B) join C
+$$
+(A \bowtie B) \bowtie C
+$$
 
 -- After: reordered by cost
-A join (B join C)
-  where |B join C| << |A join B|
+$$
+A \bowtie (B \bowtie C)
+  \text{where} |B \bowtie C| << |A \bowtie B|
+$$
+
 ```
 
 ## Implementation

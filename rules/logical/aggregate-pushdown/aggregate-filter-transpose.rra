@@ -32,12 +32,17 @@ before aggregation is equivalent to filtered aggregation.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: aggregate above filter
-gamma[g; SUM(x)](sigma[p](R))
+$$
+\gamma_{g; SUM(x)}(\sigma_{p}(R))
+$$
 
 -- After: filtered aggregate (no separate filter)
-gamma[g; SUM(x) FILTER (WHERE p)](R)
+$$
+\gamma_{g; SUM(x) FILTER (WHERE p)}(R)
+$$
+
 ```
 
 ## Implementation

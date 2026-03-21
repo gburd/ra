@@ -25,15 +25,22 @@ perform redundant computation.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 EXTRACT(YEAR FROM date_col) = 2024
-  -> date_col >= '2024-01-01' AND date_col < '2025-01-01'
+  \rightarrow date_col >= '2024-01-01' AND date_col < '2025-01-01'
+$$
 
+$$
 DATE_TRUNC('month', ts_col) = '2024-06-01'
-  -> ts_col >= '2024-06-01' AND ts_col < '2024-07-01'
+  \rightarrow ts_col >= '2024-06-01' AND ts_col < '2024-07-01'
+$$
 
-date_col + INTERVAL '0 days' -> date_col
-DATE(timestamp_col) = DATE(timestamp_col) -> TRUE (when NOT NULL)
+$$
+date_col + INTERVAL '0 days' \rightarrow date_col
+DATE(timestamp_col) = DATE(timestamp_col) \rightarrow TRUE (when NOT NULL)
+$$
+
 ```
 
 ## Implementation

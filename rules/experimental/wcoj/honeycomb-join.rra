@@ -34,16 +34,19 @@ the total work across all workers matches the sequential AGM bound.
 
 ## Relational Algebra
 
-```algebra
-join[R.a=S.a, S.b=T.b, R.c=T.c](R, S, T)
-  -> honeycomb_join(
+```latex
+$$
+\bowtie_{R.a=S.a, S.b=T.b, R.c=T.c}(R, S, T)
+  \rightarrow honeycomb_join(
        shares: {a: p_a, b: p_b, c: p_c},
        workers: p,
        local_algorithm: generic_join,
        relations: {R(a,c), S(a,b), T(b,c)}
      )
-  where p_a * p_b * p_c = p
-  where is_parallel_execution()
+  \text{where} p_a * p_b * p_c = p
+  \text{where} is_parallel_execution()
+$$
+
 ```
 
 ## Implementation

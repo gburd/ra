@@ -47,10 +47,13 @@ B-tree.
 
 ## Relational Algebra
 
-```algebra
-sigma[ts BETWEEN v1 AND v2](R)
-  -> brin_scan[I_brin](ts BETWEEN v1 AND v2)
-  where has_brin_index(R, ts) && correlation(R, ts) > 0.9
+```latex
+$$
+\sigma_{ts BETWEEN v1 AND v2}(R)
+  \rightarrow brin_scan[I_brin](ts BETWEEN v1 AND v2)
+  \text{where} has_brin_index(R, ts) && correlation(R, ts) > 0.9
+$$
+
 ```
 
 ## Implementation

@@ -37,9 +37,12 @@ further down.
 
 ## Relational Algebra
 
-```algebra
-sigma[p](pi[A](R)) -> pi[A](sigma[p](R))
-  where attrs(p) subset A
+```latex
+$$
+\sigma_{p}(\pi_{A}(R)) \rightarrow \pi_{A}(\sigma_{p}(R))
+  \text{where} \text{attrs}(p) \subseteq A
+$$
+
 ```
 
 ## Implementation

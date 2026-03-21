@@ -22,10 +22,13 @@ Push filters that do not reference window function output columns below the Wind
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Filter[p](Window[fns](input))
-  -> Window[fns](Filter[p](input))
-  where !references_window_output(p, fns)
+  \rightarrow Window[fns](Filter[p](input))
+  \text{where} !references_window_output(p, fns)
+$$
+
 ```
 
 ## Implementation

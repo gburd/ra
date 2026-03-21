@@ -35,10 +35,11 @@ simultaneously.
 
 ## Relational Algebra
 
-```algebra
-fact join[fk1=d1.id] dim1 join[fk2=d2.id] dim2 join[fk3=d3.id] dim3
+```latex
+$$
+fact \bowtie_{fk1=d1.id} dim1 \bowtie_{fk2=d2.id} dim2 \bowtie_{fk3=d3.id} dim3
   WHERE dim1.attr = 'X' AND dim2.attr = 'Y' AND dim3.attr = 'Z'
-  -> wcoj_star_join(
+  \rightarrow wcoj_star_join(
        fact_table: fact,
        dimensions: [
          (dim1, fk1, filter: attr='X'),
@@ -47,6 +48,8 @@ fact join[fk1=d1.id] dim1 join[fk2=d2.id] dim2 join[fk3=d3.id] dim3
        ],
        strategy: bitmap_intersection
      )
+$$
+
 ```
 
 ## Implementation

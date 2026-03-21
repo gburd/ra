@@ -32,10 +32,13 @@ eliminate rows before the expensive functions run.
 
 ## Relational Algebra
 
-```algebra
-pi[f1(a), f2(b), f3(f1(a))](R)
-  -> pi[t1, f2(b), f3(t1)](pi[f1(a) AS t1, b](R))
+```latex
+$$
+\pi_{f1(a), f2(b), f3(f1(a))}(R)
+  \rightarrow \pi_{t1, f2(b), f3(t1)}(\pi_{f1(a) AS t1, b}(R))
+$$
   -- f1 computed first (dependency of f3), f2 independent
+
 ```
 
 ## Implementation

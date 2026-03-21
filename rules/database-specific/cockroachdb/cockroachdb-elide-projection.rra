@@ -20,12 +20,17 @@ Removes unnecessary projection operators when column sets match exactly.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
+$$
 (project [a,b,c] (project [a,b,c] (scan table)))
+$$
 
 -- After
+$$
 (project [a,b,c] (scan table))
+$$
+
 ```
 
 ## Preconditions

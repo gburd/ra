@@ -31,10 +31,13 @@ concatenation.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 merge_ordered([seg1, seg2, ..., segk])
-  -> concat([seg1, seg2, ..., segk])
-  where forall i: seg_i.max_time < seg_{i+1}.min_time
+  \rightarrow concat([seg1, seg2, ..., segk])
+  \text{where} forall i: seg_i.max_time < seg_{i+1}.min_time
+$$
+
 ```
 
 ## Implementation

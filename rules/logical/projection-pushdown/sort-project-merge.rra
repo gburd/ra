@@ -20,8 +20,11 @@ Merges sort and project operations
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Sort(π(R)) => optimization
+$$
+
 ```
 
 ## Implementation

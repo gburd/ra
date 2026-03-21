@@ -29,15 +29,18 @@ less network traffic.
 
 ## Relational Algebra
 
-```algebra
-gamma[g, agg(a)](Exchange[d](R))
-  -> gamma_final[g, merge(partial)](
+```latex
+$$
+\gamma_{g, agg(a)}(Exchange[d](R))
+  \rightarrow gamma_final[g, merge(partial)](
        Exchange[hash(g)](
          gamma_partial[g, agg(a)](R)
        )
      )
-  where agg is decomposable
-  where ndv(g) / |R| < reduction_threshold
+  \text{where} agg is decomposable
+  \text{where} ndv(g) / |R| < reduction_threshold
+$$
+
 ```
 
 ## Implementation

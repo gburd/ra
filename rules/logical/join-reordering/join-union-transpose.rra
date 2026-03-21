@@ -27,8 +27,11 @@ Transposes join and union
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join(Union(R1, R2), S) => Union(Join(R1, S), Join(R2, S))
+$$
+
 ```
 
 ## Implementation

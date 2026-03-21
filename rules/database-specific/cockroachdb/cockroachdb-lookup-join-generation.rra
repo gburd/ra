@@ -29,18 +29,23 @@ on columns constrained by the ON condition.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: generic inner join
-(inner-join
+$$
+(inner-\bowtie
   (scan orders)
   (scan customers)
   (eq order.customer_id customer.id))
+$$
 
 -- After: lookup join using index on customers.id
-(lookup-join
+$$
+(lookup-\bowtie
   (scan orders)
   (index-scan customers idx_pk_id (const_value order.customer_id))
   (eq order.customer_id customer.id))
+$$
+
 ```
 
 ## Implementation

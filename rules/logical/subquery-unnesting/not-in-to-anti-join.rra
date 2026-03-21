@@ -24,10 +24,13 @@ Converts NOT IN subqueries to anti-joins for efficient execution.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 filter[A.x NOT IN (select S.y from S)](A)
-  -> anti_join[A.x = S.y](A, S)
-  where not_nullable(A.x) && not_nullable(S.y)
+  \rightarrow anti_\bowtie_{A.x = S.y}(A, S)
+  \text{where} not_nullable(A.x) && not_nullable(S.y)
+$$
+
 ```
 
 ## Implementation

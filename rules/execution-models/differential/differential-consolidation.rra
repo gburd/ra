@@ -49,8 +49,9 @@ insert-retract-insert sequences into a single entry.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Unconsolidated collection (log form):
+$$
 Collection = [
   (key=42, val="alice", time=1, diff=+1),  -- insert
   (key=42, val="alice", time=2, diff=-1),  -- retract
@@ -60,24 +61,32 @@ Collection = [
   (key=99, val="dave",  time=1, diff=+1),  -- insert
   (key=99, val="dave",  time=3, diff=-1),  -- retract (delete)
 ]
+$$
 
 -- After consolidation at frontier=4:
+$$
 Consolidated = [
   (key=42, val="carol", time=3, diff=+1),  -- only live entry
+$$
   -- key=99 gone: +1 and -1 cancel
+$$
 ]
+$$
 
 -- Consolidation reduces 7 entries to 1
 -- Memory savings: 86% reduction
 
 -- Partial consolidation (frontier=2):
+$$
 Consolidated = [
   (key=42, val="bob",   time=2, diff=+1),  -- net of t=1,2
   (key=42, val="carol", time=3, diff=+1),  -- still pending
   (key=99, val="dave",  time=1, diff=+1),  -- still live at t=2
   (key=99, val="dave",  time=3, diff=-1),  -- pending retraction
 ]
+$$
 -- Only entries at times <= frontier=2 are consolidated
+
 ```
 
 ## Implementation

@@ -35,14 +35,19 @@ join, a sequence of semi-joins can cascade reductions across all relations.
 
 ## Relational Algebra
 
-```algebra
-R join[R.a = S.a] S join[S.b = T.b] T
-  -> (R ⋉[a] S') join[R.a = S'.a] S' join[S'.b = T'.b] T'
-  where S' = S ⋉[b] T, T' = T ⋉[b] S
+```latex
+$$
+R \bowtie_{R.a = S.a} S \bowtie_{S.b = T.b} T
+  \rightarrow (R ⋉[a] S') \bowtie_{R.a = S'.a} S' \bowtie_{S'.b = T'.b} T'
+  \text{where} S' = S ⋉[b] T, T' = T ⋉[b] S
+$$
 
 -- Bloom filter variant:
-R join[R.a = S.a] S
-  -> R bloom_filter[R.a, bf(S.a)] join[R.a = S.a] S
+$$
+R \bowtie_{R.a = S.a} S
+  \rightarrow R bloom_filter[R.a, bf(S.a)] \bowtie_{R.a = S.a} S
+$$
+
 ```
 
 ## Implementation

@@ -30,12 +30,15 @@ materializing the sorted intermediate.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 window[series, ts, avg(value) OVER (
   PARTITION BY series ORDER BY ts
   ROWS BETWEEN 5 PRECEDING AND CURRENT ROW
 )](scan(table))
-  -> ts_window_scan(table, series, ts, moving_avg, 5)
+  \rightarrow ts_window_scan(table, series, ts, moving_avg, 5)
+$$
+
 ```
 
 ## Implementation

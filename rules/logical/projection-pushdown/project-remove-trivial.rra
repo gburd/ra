@@ -24,12 +24,17 @@ often introduced by earlier rewrites and serve no purpose.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
-pi[a, b, c](R(a, b, c))
+$$
+\pi_{a, b, c}(R(a, b, c))
+$$
 
 -- After
+$$
 R(a, b, c)
+$$
+
 ```
 
 ## Implementation

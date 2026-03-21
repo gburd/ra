@@ -33,14 +33,19 @@ model updates.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: regressed plan
-hash-join(full-scan(orders), full-scan(customers))
+$$
+hash-\bowtie(full-scan(orders), full-scan(customers))
+$$
   -- regressed after statistics update
 
 -- After: forced good plan from Query Store
-nested-loop-join(index-seek(orders), index-seek(customers))
+$$
+nested-loop-\bowtie(index-seek(orders), index-seek(customers))
+$$
   -- previous faster plan forced
+
 ```
 
 ## Implementation

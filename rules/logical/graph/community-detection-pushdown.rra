@@ -25,13 +25,18 @@ pre-computed community/partition structure of the graph.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: traverse all edges from source
-sigma[hops <= 3](Traverse(source, AllEdges))
+$$
+\sigma_{hops <= 3}(Traverse(source, AllEdges))
+$$
 
 -- After: restrict to community edges
-sigma[hops <= 3](Traverse(source,
-    sigma[community = source.community](AllEdges)))
+$$
+\sigma_{hops <= 3}(Traverse(source,
+    \sigma_{community = source.community}(AllEdges)))
+$$
+
 ```
 
 ## Implementation

@@ -22,10 +22,13 @@ When a filter on the PARTITION BY column exists above or below the window, parti
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Filter[partition_col = V](Window[fns PARTITION BY partition_col](input))
-  -> Window[fns](Filter[partition_col = V](input))
+  \rightarrow Window[fns](Filter[partition_col = V](input))
+$$
   -- Remove PARTITION BY since only one partition exists
+
 ```
 
 ## Implementation

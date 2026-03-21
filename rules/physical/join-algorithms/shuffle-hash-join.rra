@@ -34,14 +34,17 @@ Partitions both tables by join key across cluster, then performs local hash join
 
 ## Relational Algebra
 
-```algebra
-join[R.key = S.key](R, S)
-  -> shuffle_phase:
-       partition R by hash(key) across N nodes -> R1...RN
-       partition S by hash(key) across N nodes -> S1...SN
+```latex
+$$
+\bowtie_{R.key = S.key}(R, S)
+  \rightarrow shuffle_phase:
+       partition R by hash(key) across N nodes \rightarrow R1...RN
+       partition S by hash(key) across N nodes \rightarrow S1...SN
      local_join_phase:
        for each node i:
          hash_join(Ri, Si)
+$$
+
 ```
 
 ## Implementation

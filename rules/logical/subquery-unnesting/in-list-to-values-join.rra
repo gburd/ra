@@ -22,10 +22,13 @@ Converts a large IN list to a semi-join with an inline VALUES table. This enable
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Filter[col IN (v1, v2, ..., vN)](Scan[table])
-  -> SemiJoin[col = v](Scan[table], Values[(v1), (v2), ..., (vN)])
-  where N > in_list_threshold
+  \rightarrow SemiJoin[col = v](Scan[table], Values[(v1), (v2), ..., (vN)])
+  \text{where} N > in_list_threshold
+$$
+
 ```
 
 ## Implementation

@@ -32,38 +32,59 @@ exploration of the optimization search space.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 1. Selection commutativity:
    σ_p1(σ_p2(R)) ≡ σ_p2(σ_p1(R)) ≡ σ_{p1 ∧ p2}(R)
+$$
 
+$$
 2. Projection idempotence:
    π_L1(π_L2(R)) ≡ π_L1(R) if L1 ⊆ L2
+$$
 
+$$
 3. Join commutativity:
    R ⋈ S ≡ S ⋈ R
+$$
 
+$$
 4. Join associativity:
    (R ⋈ S) ⋈ T ≡ R ⋈ (S ⋈ T)
+$$
 
-5. Selection pushdown through join:
+$$
+5. Selection pushdown through \bowtie:
    σ_p(R ⋈ S) ≡ σ_p(R) ⋈ S        if p references only R
    σ_p(R ⋈ S) ≡ R ⋈ σ_p(S)        if p references only S
    σ_p(R ⋈ S) ≡ σ_p1(R) ⋈ σ_p2(S) if p = p1 ∧ p2
+$$
 
-6. Projection pushdown through join:
-   π_L(R ⋈ S) ≡ π_L(π_{L∪attrs(join)}(R) ⋈ π_{L∪attrs(join)}(S))
+$$
+6. Projection pushdown through \bowtie:
+   π_L(R ⋈ S) ≡ π_L(π_{L∪\text{attrs}(\bowtie)}(R) ⋈ π_{L∪\text{attrs}(\bowtie)}(S))
+$$
 
-7. Distributivity of selection over union:
+$$
+7. Distributivity of selection over \cup:
    σ_p(R ∪ S) ≡ σ_p(R) ∪ σ_p(S)
+$$
 
-8. Distributivity of projection over union:
+$$
+8. Distributivity of projection over \cup:
    π_L(R ∪ S) ≡ π_L(R) ∪ π_L(S)
+$$
 
+$$
 9. Selection distributivity over difference:
    σ_p(R − S) ≡ σ_p(R) − σ_p(S)
+$$
 
-10. Set difference vs. join:
-    R − S ≡ R − (R ⋈ S) if join is on all attributes
+$$
+10. Set difference vs. \bowtie:
+    R − S ≡ R − (R ⋈ S) if \bowtie is on all attributes
+$$
+
 ```
 
 ## Implementation

@@ -32,13 +32,16 @@ is bounded by N^(rho*), and Generic Join matches this bound.
 
 ## Relational Algebra
 
-```algebra
-join[R.a=S.a, S.b=T.b, R.c=T.c](R, S, T)
-  -> generic_join(
+```latex
+$$
+\bowtie_{R.a=S.a, S.b=T.b, R.c=T.c}(R, S, T)
+  \rightarrow generic_join(
        variable_order: [a, b, c],
        relations: {R(a,c), S(a,b), T(b,c)}
      )
-  where agm_bound(R,S,T) < binary_plan_intermediate_size(R,S,T)
+  \text{where} agm_bound(R,S,T) < binary_plan_intermediate_size(R,S,T)
+$$
+
 ```
 
 ## Implementation

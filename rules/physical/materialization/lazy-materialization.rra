@@ -24,11 +24,16 @@ Delays materialization until needed; keeps pipeline flowing; avoids temp table o
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 WITH cte AS (query)
 SELECT ... FROM cte  // single reference
+$$
 
--> pipeline: inline cte directly (no materialization)
+$$
+\rightarrow pipeline: inline cte directly (no materialization)
+$$
+
 ```
 
 ## Implementation

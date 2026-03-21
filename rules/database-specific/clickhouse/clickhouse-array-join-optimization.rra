@@ -20,12 +20,17 @@ Specializes array join processing for ClickHouse's array join semantics.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
-(join (scan table) (array-join array_col))
+$$
+(\bowtie (scan table) (array-\bowtie array_col))
+$$
 
 -- After
-(optimized-array-join (scan table) array_col)
+$$
+(optimized-array-\bowtie (scan table) array_col)
+$$
+
 ```
 
 ## Preconditions

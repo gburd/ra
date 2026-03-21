@@ -36,20 +36,25 @@ Removing it simplifies the DEFINE map and reduces the DFA alphabet.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: X is defined but not in PATTERN
+$$
 RowPattern(
   defines: { A: ..., B: ..., X: price > 500 },
   pattern: Sequence([A, B]),
   measures: [FIRST(A.price), LAST(B.price)]
 )
+$$
 
 -- After: X removed from defines
+$$
 RowPattern(
   defines: { A: ..., B: ... },
   pattern: Sequence([A, B]),
   measures: [FIRST(A.price), LAST(B.price)]
 )
+$$
+
 ```
 
 ## Implementation

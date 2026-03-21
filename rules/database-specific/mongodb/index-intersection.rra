@@ -31,14 +31,21 @@ overhead.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 σ_{p1 ∧ p2}(R) with Index(p1) and Index(p2)
+$$
 
+$$
 Without intersection:
 SeqScan(R) → filter p1 AND p2
+$$
 
+$$
 With intersection:
 IndexScan(I1, p1) ∩ IndexScan(I2, p2) → fetch matched documents
+$$
+
 ```
 
 ## Implementation

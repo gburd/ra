@@ -30,16 +30,21 @@ When rows are guaranteed disjoint, UNION can be downgraded to UNION ALL.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: UNION with deduplication
+$$
 delta(
-    sigma[type = 'A'](T)
+    \sigma_{type = 'A'}(T)
     UNION
-    sigma[type = 'B'](T)
+    \sigma_{type = 'B'}(T)
 )
+$$
 
 -- After: UNION ALL (disjoint branches)
-sigma[type = 'A'](T) UNION ALL sigma[type = 'B'](T)
+$$
+\sigma_{type = 'A'}(T) UNION ALL \sigma_{type = 'B'}(T)
+$$
+
 ```
 
 ## Implementation

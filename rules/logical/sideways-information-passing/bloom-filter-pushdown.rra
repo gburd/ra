@@ -27,12 +27,17 @@ rows at scan time with near-zero false negatives.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
-R join[R.k = S.k] S
+$$
+R \bowtie_{R.k = S.k} S
+$$
 
 -- After (conceptual)
-R join[R.k = S.k] sigma[bloom(S.k, bf(R.k))](S)
+$$
+R \bowtie_{R.k = S.k} \sigma_{bloom(S.k, bf(R.k))}(S)
+$$
+
 ```
 
 ## Implementation

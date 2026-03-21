@@ -33,13 +33,18 @@ keys can be narrowed.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: redundant filter after equality constraint
-sigma[x > 0](sigma[x = 5](R))
+$$
+\sigma_{x > 0}(\sigma_{x = 5}(R))
+$$
 
 -- After: knowledge propagation eliminates redundant filter
-sigma[x = 5](R)
+$$
+\sigma_{x = 5}(R)
+$$
   -- x > 0 is always true when x = 5
+
 ```
 
 ## Implementation

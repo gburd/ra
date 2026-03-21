@@ -26,13 +26,18 @@ patterns like triangles, cliques, or complex subgraph isomorphism.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Triangle query: find all (a,b,c) where a-b, b-c, c-a
 -- Before: binary join plan (may produce huge intermediates)
-(E(a,b) join E(b,c)) join E(c,a)
+$$
+(E(a,b) \bowtie E(b,c)) \bowtie E(c,a)
+$$
 
 -- After: worst-case optimal join
+$$
 WCOJ(E(a,b), E(b,c), E(c,a))  -- processes all three simultaneously
+$$
+
 ```
 
 ## Implementation

@@ -50,21 +50,30 @@ Snowflake (SAMPLE).
 
 ## Relational Algebra
 
-```algebra
-Exact: gamma[G, SUM(x)](R)   -- processes all of R
-AQP:   gamma[G, SUM(x)](SAMPLE(R, rate)) * (1/rate)
+```latex
+$$
+Exact: \gamma_{G, SUM(x)}(R)   -- processes all of R
+AQP:   \gamma_{G, SUM(x)}(SAMPLE(R, rate)) * (1/rate)
+$$
 
+$$
 Error bounds (for SUM/AVG, 95% confidence):
   estimate +/- 1.96 * stddev(sample) / sqrt(sample_size) * scaling_factor
+$$
 
+$$
 Sketch-based:
   COUNT(DISTINCT col): HyperLogLog(col), error ~1.04/sqrt(m)
   Quantile(col, p): t-digest(col), relative error ~1%
   Heavy hitters: Count-Min Sketch, space O(1/epsilon * log(1/delta))
+$$
 
+$$
 Online aggregation:
   Return running estimate with shrinking confidence interval
   CI_width(t) ~ 1/sqrt(tuples_processed_so_far)
+$$
+
 ```
 
 ## Implementation

@@ -20,11 +20,14 @@ keeping each partition at a reasonable size.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Exchange[hash(k), N partitions](R)
-  -> Exchange[hash(k), M partitions](R)
-  where M = max(1, ceil(|R| / min_partition_size))
-  where M < N
+  \rightarrow Exchange[hash(k), M partitions](R)
+  \text{where} M = \text{max}(1, ceil(|R| / min_partition_size))
+  \text{where} M < N
+$$
+
 ```
 
 ## Test Cases

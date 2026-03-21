@@ -35,15 +35,18 @@ without ever materializing the flat result.
 
 ## Relational Algebra
 
-```algebra
-join[R.a=S.a, S.b=T.b](R(a,x), S(a,b), T(b,y))
-  -> factorized_join(
-       tree: a -> [R.x, S.b -> [T.y]],
+```latex
+$$
+\bowtie_{R.a=S.a, S.b=T.b}(R(a,x), S(a,b), T(b,y))
+  \rightarrow factorized_join(
+       tree: a \rightarrow [R.x, S.b \rightarrow [T.y]],
        relations: {R(a,x), S(a,b), T(b,y)}
      )
+$$
 
 -- Flat result size: |R| * |S| * |T| (worst case)
 -- Factorized size: |domain(a)| * (|R.x| + |domain(b)| * |T.y|)
+
 ```
 
 ## Implementation

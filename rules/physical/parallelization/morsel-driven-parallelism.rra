@@ -24,13 +24,16 @@ Processes data in small batches (morsels); dynamic work distribution with steali
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 operator_pipeline(data)
-  -> morsel_dispatcher:
+  \rightarrow morsel_dispatcher:
        while data:
          morsel = next_batch(MORSEL_SIZE)  // e.g., 100K rows
          assign to available worker
        workers can steal morsels if idle
+$$
+
 ```
 
 ## Implementation

@@ -29,13 +29,18 @@ rows that undergo (potentially expensive) expression evaluation.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: filter above project
-sigma[p](pi[a AS x, b AS y](R))
+$$
+\sigma_{p}(\pi_{a AS x, b AS y}(R))
+$$
 
 -- After: project above filter (predicate remapped)
-pi[a AS x, b AS y](sigma[p'](R))
-  where p' = remap(p, {x -> a, y -> b})
+$$
+\pi_{a AS x, b AS y}(\sigma_{p'}(R))
+  \text{where} p' = remap(p, {x \rightarrow a, y \rightarrow b})
+$$
+
 ```
 
 ## Implementation

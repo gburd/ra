@@ -27,8 +27,11 @@ Expands OR conditions in join predicates
 
 ## Relational Algebra
 
-```algebra
-(A OR B) in join => optimization
+```latex
+$$
+(A OR B) in \bowtie => optimization
+$$
+
 ```
 
 ## Implementation

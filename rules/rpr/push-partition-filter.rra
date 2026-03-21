@@ -37,32 +37,42 @@ be applied before partitioning without changing the result.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: filter after pattern matching
-sigma[symbol = 'AAPL'](
+$$
+\sigma_{symbol = 'AAPL'}(
   RowPattern[PARTITION BY symbol, ORDER BY date](Scan(T))
 )
+$$
 
 -- After: filter pushed below RowPattern
+$$
 RowPattern[PARTITION BY symbol, ORDER BY date](
-  sigma[symbol = 'AAPL'](Scan(T))
+  \sigma_{symbol = 'AAPL'}(Scan(T))
 )
+$$
+
 ```
 
 ### Conjunctive predicate with mixed columns
 
-```algebra
+```latex
 -- Before
-sigma[symbol = 'AAPL' AND price > 100](
+$$
+\sigma_{symbol = 'AAPL' AND price > 100}(
   RowPattern[PARTITION BY symbol, ...](Scan(T))
 )
+$$
 
 -- After: split and push partition predicate only
-sigma[price > 100](
+$$
+\sigma_{price > 100}(
   RowPattern[PARTITION BY symbol, ...](
-    sigma[symbol = 'AAPL'](Scan(T))
+    \sigma_{symbol = 'AAPL'}(Scan(T))
   )
 )
+$$
+
 ```
 
 ## Implementation

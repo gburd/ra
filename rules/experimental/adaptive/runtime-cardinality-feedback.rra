@@ -34,17 +34,22 @@ data-specific patterns statistics cannot represent.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Execution 1: uses estimate, records actual
-join[R.a = S.a](filter[R.x > ?param](R), S)
+$$
+\bowtie_{R.a = S.a}(filter[R.x > ?param](R), S)
   estimated_card: 1000, actual_card: 50000
+$$
 
 -- Feedback stored: correction_factor(R, x > ?, S, a) = 50.0
 
 -- Execution 2: uses corrected estimate
-join[R.a = S.a](filter[R.x > ?param2](R), S)
+$$
+\bowtie_{R.a = S.a}(filter[R.x > ?param2](R), S)
   corrected_estimate: traditional_est * correction_factor
-  -> may choose different join algorithm or order
+  \rightarrow may choose different \bowtie algorithm or order
+$$
+
 ```
 
 ## Implementation

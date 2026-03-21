@@ -32,15 +32,20 @@ select, hash).
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: combined filter
-sigma[price > 100 AND qty < 5](scan(products))
+$$
+\sigma_{price > 100 AND qty < 5}(scan(products))
+$$
 
 -- After: separate selections + intersection
-intersect(
+$$
+\cap(
     thetaselect(products.price, >, 100),
     thetaselect(products.qty, <, 5)
 )
+$$
+
 ```
 
 ## Implementation

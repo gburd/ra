@@ -43,12 +43,15 @@ response time and enabling better parallelism.
 
 ## Relational Algebra
 
-```algebra
-Traditional hash join (build-probe):
+```latex
+$$
+Traditional hash \bowtie (build-probe):
 1. Build phase: Insert all of R into hash table H_R
 2. Probe phase: For each s ∈ S, probe H_R for matches
+$$
 
-Symmetric hash join:
+$$
+Symmetric hash \bowtie:
 1. Maintain H_R and H_S (hash tables on both sides)
 2. For each arriving r ∈ R:
      - Probe H_S for matches, output results
@@ -56,6 +59,8 @@ Symmetric hash join:
 3. For each arriving s ∈ S:
      - Probe H_R for matches, output results
      - Insert s into H_S
+$$
+
 ```
 
 ## Implementation

@@ -28,12 +28,17 @@ efficient multi-input union execution.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: nested unions
+$$
 (A UNION ALL B) UNION ALL C
+$$
 
 -- After: flattened union
+$$
 A UNION ALL B UNION ALL C
+$$
+
 ```
 
 ## Implementation

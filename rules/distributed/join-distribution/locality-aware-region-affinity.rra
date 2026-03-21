@@ -21,12 +21,15 @@ orders of magnitude.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join[c](R, S)
-  -> Join[c](R, S) @ best_region
-  where best_region = argmin(
+  \rightarrow Join[c](R, S) @ best_region
+  \text{where} best_region = argmin(
     region, transfer_cost(R, region) + transfer_cost(S, region)
   )
+$$
+
 ```
 
 ## Implementation

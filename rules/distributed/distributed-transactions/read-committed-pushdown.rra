@@ -34,16 +34,21 @@ since read locks are not held across statements.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- At Read Committed, filters can be pushed to storage
-sigma[p](DistributedScan(T))
-  -> DistributedScan(T, pushed_filter=p)
+$$
+\sigma_{p}(DistributedScan(T))
+  \rightarrow DistributedScan(T, pushed_filter=p)
   at isolation = READ_COMMITTED
+$$
 
 -- Aggregations can use local computation without lock coordination
-gamma[g, agg](DistributedScan(T))
-  -> MergeAgg(gamma[g, partial_agg](LocalScan(T, partition_i)))
+$$
+\gamma_{g, agg}(DistributedScan(T))
+  \rightarrow MergeAgg(\gamma_{g, partial_agg}(LocalScan(T, partition_i)))
   at isolation = READ_COMMITTED
+$$
+
 ```
 
 ## Implementation

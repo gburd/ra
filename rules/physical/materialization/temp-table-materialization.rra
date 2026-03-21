@@ -24,10 +24,13 @@ Materializes intermediate results into temporary table for complex multi-step qu
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 complex_query(expensive_subquery)
-  -> temp_table = materialize(expensive_subquery)
+  \rightarrow temp_table = materialize(expensive_subquery)
      complex_query(temp_table)
+$$
+
 ```
 
 ## Implementation

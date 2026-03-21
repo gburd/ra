@@ -40,44 +40,59 @@ cache locality.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: separate operators
-unnest(pi[arr](sigma[cond](Scan(T)))) AS u(val)
+$$
+unnest(\pi_{arr}(\sigma_{cond}(Scan(T)))) AS u(val)
+$$
 
 -- After: fused operator
+$$
 UnnestScan(T, arr, cond) AS u(val)
+$$
+
 ```
 
 ### With additional projected columns
 
-```algebra
+```latex
 -- Before
-pi[id, val](
+$$
+\pi_{id, val}(
   unnest(
-    pi[id, arr](sigma[active = true](Scan(T)))
+    \pi_{id, arr}(\sigma_{active = true}(Scan(T)))
   ) AS u(val)
 )
+$$
 
 -- After
+$$
 UnnestScan(T, arr, active = true, project=[id]) AS (id, val)
+$$
+
 ```
 
 ### Multi-level fusion
 
-```algebra
+```latex
 -- Before: filter -> project -> unnest pipeline
-sigma[val > 10](
+$$
+\sigma_{val > 10}(
   unnest(
-    pi[tags](
-      sigma[status = 'active'](Scan(products))
+    \pi_{tags}(
+      \sigma_{status = 'active'}(Scan(products))
     )
   ) AS u(val)
 )
+$$
 
 -- After: single fused operator with both predicates
+$$
 UnnestScan(products, tags,
   scan_pred = [status = 'active'],
   unnest_pred = [val > 10])
+$$
+
 ```
 
 ## Implementation

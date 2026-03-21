@@ -25,16 +25,21 @@ policies that require per-row access tracking or filtering.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: plain query on audited table
-pi[name, salary](sigma[dept = 'HR'](employees))
+$$
+\pi_{name, salary}(\sigma_{dept = 'HR'}(employees))
+$$
 
 -- After: VPD predicate + audit hook injected
-pi[name, salary](
+$$
+\pi_{name, salary}(
     audit_hook(
-        sigma[dept = 'HR' AND vpd_policy(current_user)](employees)
+        \sigma_{dept = 'HR' AND vpd_policy(current_user)}(employees)
     )
 )
+$$
+
 ```
 
 ## Implementation

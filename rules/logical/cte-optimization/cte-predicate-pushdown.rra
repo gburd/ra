@@ -24,10 +24,13 @@ Pushes predicates from the CTE body into the CTE definition when the CTE is inli
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 filter[P](CTE[name, def](scan(name)))
-  -> CTE[name, filter[P](def)](scan(name))
-  where columns(P) ⊆ output(def)
+  \rightarrow CTE[name, filter[P](def)](scan(name))
+  \text{where} columns(P) ⊆ output(def)
+$$
+
 ```
 
 ## Implementation

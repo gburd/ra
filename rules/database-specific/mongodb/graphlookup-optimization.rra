@@ -31,16 +31,21 @@ recursion prunes branches early, avoiding exponential blowup in deep graphs.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Recursive graph traversal (transitive closure)
-mu[connectFrom -> connectTo](
-  sigma[restrictPred](collection)
+$$
+mu[connectFrom \rightarrow connectTo](
+  \sigma_{restrictPred}(collection)
 ) starting from startWith
+$$
 
 -- Optimization: index-backed lookup per recursion step
+$$
 mu_indexed[idx(connectTo)](
-  sigma[restrictPred](collection)
+  \sigma_{restrictPred}(collection)
 ) starting from startWith, maxDepth=d
+$$
+
 ```
 
 ## Implementation

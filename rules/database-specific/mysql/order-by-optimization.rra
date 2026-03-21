@@ -31,12 +31,17 @@ temp files.  Reading in index order is O(n) with no extra memory.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: scan + filesort
+$$
 sort[created_at DESC](scan(events))
+$$
 
 -- After: backward index scan
+$$
 index_scan[idx_created, direction=DESC](events)
+$$
+
 ```
 
 ## Implementation

@@ -31,9 +31,12 @@ the union, eliminating redundant computation.
 
 ## Relational Algebra
 
-```algebra
-UNION(π_[a, k](R1), π_[b, k](R2)) where k is constant ->
+```latex
+$$
+UNION(π_[a, k](R1), π_[b, k](R2)) \text{where} k is constant \rightarrow
   π_[col, k](UNION(π_[a](R1), π_[b](R2)))
+$$
+
 ```
 
 ## Implementation

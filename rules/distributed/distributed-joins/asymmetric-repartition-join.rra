@@ -26,10 +26,13 @@ network transfer. The already-partitioned side stays in place.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join[c](R hash(join_key), S hash(other_key))
-  -> Join[c](R, Exchange[hash(join_key_S)](S))
-  where R is already partitioned on join_key
+  \rightarrow Join[c](R, Exchange[hash(join_key_S)](S))
+  \text{where} R is already partitioned on join_key
+$$
+
 ```
 
 ## Implementation

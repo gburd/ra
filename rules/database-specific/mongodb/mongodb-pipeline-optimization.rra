@@ -20,12 +20,17 @@ Optimizes MongoDB aggregation pipelines by reordering stages.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
+$$
 [, , , ]
+$$
 
 -- After
+$$
 [, , , ]
+$$
+
 ```
 
 ## Preconditions

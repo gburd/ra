@@ -27,10 +27,13 @@ improving cache utilization, memory consumption, and I/O.
 
 ## Relational Algebra
 
-```algebra
-pi[needed](scan[all_cols](R)) -> scan[needed](R)
-  where needed subset all_cols
-  where (all_cols minus needed) are never referenced above
+```latex
+$$
+\pi_{needed}(scan[all_cols](R)) \rightarrow scan[needed](R)
+  \text{where} needed \subseteq all_cols
+  \text{where} (all_cols minus needed) are never referenced above
+$$
+
 ```
 
 ## Implementation

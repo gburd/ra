@@ -31,18 +31,23 @@ $lookup reduces join cardinality dramatically.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 MongoDB pipeline stages map to relational operators:
 $match → σ (selection/filter)
 $project → π (projection)
-$lookup → ⋈ (join)
+$lookup → ⋈ (\bowtie)
 $group → γ (aggregation)
 $unwind → unnest
 $limit → LIMIT
+$$
 
+$$
 Reordering:
 [$lookup, $match] → [$match_pushed, $lookup, $match_remaining]
 [$group, $limit] → [$limit_pushed, $group, $limit]
+$$
+
 ```
 
 ## Implementation

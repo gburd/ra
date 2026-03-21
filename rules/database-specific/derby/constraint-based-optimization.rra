@@ -32,13 +32,18 @@ no-op filter node).
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: redundant IS NOT NULL check
-sigma[email IS NOT NULL](scan(users))
+$$
+\sigma_{email IS NOT NULL}(scan(users))
+$$
 -- email has NOT NULL constraint
 
 -- After: predicate eliminated
+$$
 scan(users)
+$$
+
 ```
 
 ## Implementation

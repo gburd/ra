@@ -33,18 +33,25 @@ per storage node.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Limit through projection
+$$
 Limit[k](Project[exprs](R))
-  -> Project[exprs](Limit[k](R))
+  \rightarrow Project[exprs](Limit[k](R))
+$$
 
 -- TopN pushed to coprocessor
+$$
 TopN[k, order](TableScan(T))
-  -> CoprocessorTopN[k, order](TableScan(T))
+  \rightarrow CoprocessorTopN[k, order](TableScan(T))
+$$
 
 -- TopN through union: apply to each branch
+$$
 TopN[k, order](UnionAll(R1, R2))
-  -> TopN[k, order](UnionAll(TopN[k, order](R1), TopN[k, order](R2)))
+  \rightarrow TopN[k, order](UnionAll(TopN[k, order](R1), TopN[k, order](R2)))
+$$
+
 ```
 
 ## Implementation

@@ -30,15 +30,22 @@ the pipeline and avoids hash table entries for irrelevant rows.
 
 ## Relational Algebra
 
-```algebra
-sigma[p(R)](R join[c] S) -> sigma[p(R)](R) join[c] S
-  where attrs(p) subset attrs(R)
+```latex
+$$
+\sigma_{p(R)}(R \bowtie_{c} S) \rightarrow \sigma_{p(R)}(R) \bowtie_{c} S
+  \text{where} \text{attrs}(p) \subseteq \text{attrs}(R)
+$$
 
-sigma[p(S)](R join[c] S) -> R join[c] sigma[p(S)](S)
-  where attrs(p) subset attrs(S)
+$$
+\sigma_{p(S)}(R \bowtie_{c} S) \rightarrow R \bowtie_{c} \sigma_{p(S)}(S)
+  \text{where} \text{attrs}(p) \subseteq \text{attrs}(S)
+$$
 
-sigma[p(R) AND p(S)](R join[c] S)
-  -> sigma[p(R)](R) join[c] sigma[p(S)](S)
+$$
+\sigma_{p(R) AND p(S)}(R \bowtie_{c} S)
+  \rightarrow \sigma_{p(R)}(R) \bowtie_{c} \sigma_{p(S)}(S)
+$$
+
 ```
 
 ## Implementation

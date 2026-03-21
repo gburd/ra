@@ -32,15 +32,20 @@ SELECT * FROM remote_table WHERE status = 'ACTIVE';
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Filter[predicate](RemoteScan[table, endpoint])
 =>
 RemoteScan[table, endpoint, pushdown_filter=predicate]
+$$
 
+$$
 Preconditions:
   - remote_capabilities.supports_filter_pushdown = true
   - filter_predicate uses only supported functions
   - No local-only columns in predicate
+$$
+
 ```
 
 ## Before

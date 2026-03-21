@@ -23,20 +23,25 @@ the ordering is on an aggregate result (e.g., ORDER BY SUM(x) DESC LIMIT 10).
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
-limit[K](sort[agg DESC](gamma[g, agg(a)](Exchange[hash(g)](R))))
+$$
+limit[K](sort[agg DESC](\gamma_{g, agg(a)}(Exchange[hash(g)](R))))
+$$
 
 -- After
+$$
 limit[K](sort[agg DESC](
-    gamma[g, merge_agg(partial_a)](
+    \gamma_{g, merge_agg(partial_a)}(
         Exchange[hash(g)](
             topk[K, partial_agg DESC](
-                gamma[g, partial_agg(a)](R)
+                \gamma_{g, partial_agg(a)}(R)
             )
         )
     )
 ))
+$$
+
 ```
 
 ## Test Cases

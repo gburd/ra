@@ -20,12 +20,17 @@ Identifies and deduplicates redundant expressions in queries.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
+$$
 (select (add col1 col2) (add col1 col2))
+$$
 
 -- After
+$$
 (select (as expr_1 expr_1))
+$$
+
 ```
 
 ## Preconditions

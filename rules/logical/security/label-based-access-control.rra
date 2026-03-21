@@ -24,14 +24,19 @@ where the user's session label is known at compile time.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: label check after join
-sigma[dominates(session_label, row_label)](R join S)
+$$
+\sigma_{dominates(session_label, row_label)}(R \bowtie S)
+$$
 
 -- After: push label checks to base scans
-sigma[dominates(session_label, R.label)](R)
-  join
-sigma[dominates(session_label, S.label)](S)
+$$
+\sigma_{dominates(session_label, R.label)}(R)
+  \bowtie
+\sigma_{dominates(session_label, S.label)}(S)
+$$
+
 ```
 
 ## Implementation

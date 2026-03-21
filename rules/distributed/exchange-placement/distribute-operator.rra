@@ -35,16 +35,21 @@ optimizer can compare the cost of:
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Move computation to data region
+$$
 Query(RemoteData)
-  -> Distribute(gateway_region,
+  \rightarrow Distribute(gateway_region,
        Query(LocalData)  -- executed in data's region
      )
+$$
 
 -- Move data to computation region
+$$
 Query(RemoteData)
-  -> Query(Distribute(gateway_region, RemoteData))
+  \rightarrow Query(Distribute(gateway_region, RemoteData))
+$$
+
 ```
 
 ## Implementation

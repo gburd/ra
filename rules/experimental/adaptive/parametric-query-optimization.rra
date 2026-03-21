@@ -37,20 +37,27 @@ into is O(1), much cheaper than re-optimization.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Traditional: single plan for all parameter values
-Prepare(Q($p)) -> Plan_default
+$$
+Prepare(Q($p)) \rightarrow Plan_default
+$$
 
 -- Parametric: plan set indexed by parameter properties
-Prepare(Q($p)) -> {
-    Plan_A  when selectivity($p) < 0.01,
-    Plan_B  when 0.01 <= selectivity($p) < 0.3,
-    Plan_C  when selectivity($p) >= 0.3
+$$
+Prepare(Q($p)) \rightarrow {
+    Plan_A  when \text{selectivity}($p) < 0.01,
+    Plan_B  when 0.01 <= \text{selectivity}($p) < 0.3,
+    Plan_C  when \text{selectivity}($p) >= 0.3
 }
+$$
 
 -- At execution time:
-Execute(Q(42)) -> Plan_A   -- if selectivity(42) = 0.001
-Execute(Q(0))  -> Plan_C   -- if selectivity(0) = 0.5
+$$
+Execute(Q(42)) \rightarrow Plan_A   -- if \text{selectivity}(42) = 0.001
+Execute(Q(0))  \rightarrow Plan_C   -- if \text{selectivity}(0) = 0.5
+$$
+
 ```
 
 ## Implementation

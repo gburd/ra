@@ -30,11 +30,14 @@ is unnecessary and can be eliminated or simplified.
 
 ## Relational Algebra
 
-```algebra
-UNION(R, ∅) -> R
-UNION(∅, ∅) -> ∅
-UNION(R, R) -> R
-UNION_ALL(R, ∅) -> R
+```latex
+$$
+UNION(R, ∅) \rightarrow R
+UNION(∅, ∅) \rightarrow ∅
+UNION(R, R) \rightarrow R
+UNION_ALL(R, ∅) \rightarrow R
+$$
+
 ```
 
 ## Implementation

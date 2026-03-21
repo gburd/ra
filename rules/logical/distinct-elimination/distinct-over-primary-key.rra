@@ -22,10 +22,13 @@ When SELECT DISTINCT includes the primary key of a table, the result is already 
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Distinct(Project[cols including pk](Scan[table]))
-  -> Project[cols including pk](Scan[table])
-  where pk subset_of cols and is_primary_key(pk, table)
+  \rightarrow Project[cols including pk](Scan[table])
+  \text{where} pk subset_of cols and is_primary_key(pk, table)
+$$
+
 ```
 
 ## Implementation

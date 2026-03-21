@@ -20,8 +20,11 @@ Converts projection to window function
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 π(R) => Window(R)
+$$
+
 ```
 
 ## Implementation

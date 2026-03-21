@@ -20,8 +20,11 @@ Eliminates unnecessary union
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Union(R, R) => R
+$$
+
 ```
 
 ## Implementation

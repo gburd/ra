@@ -30,15 +30,20 @@ that the aggregate will group away.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: aggregate over chained left joins
-gamma[g; DISTINCT](
+$$
+\gamma_{g; DISTINCT}(
     (R LEFT JOIN S ON R.k = S.k) LEFT JOIN T ON S.k = T.k
 )
-  where g references only S and T columns
+  \text{where} g references only S and T columns
+$$
 
 -- After: remove R
-gamma[g; DISTINCT](S LEFT JOIN T ON S.k = T.k)
+$$
+\gamma_{g; DISTINCT}(S LEFT JOIN T ON S.k = T.k)
+$$
+
 ```
 
 ## Implementation

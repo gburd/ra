@@ -28,9 +28,12 @@ need to sort both inputs.
 
 ## Relational Algebra
 
-```algebra
-R intersect S -> R semi_join[R.* = S.*] S
-  where schema(R) = schema(S)
+```latex
+$$
+R \cap S \rightarrow R semi_\bowtie_{R.* = S.*} S
+  \text{where} schema(R) = schema(S)
+$$
+
 ```
 
 ## Implementation

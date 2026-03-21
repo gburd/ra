@@ -31,12 +31,17 @@ ORDER BY matches.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: hash join on sorted columns
-hash-join[a.key = b.key](sorted_a, sorted_b)
+$$
+hash-\bowtie_{a.key = b.key}(sorted_a, sorted_b)
+$$
 
 -- After: merge join (no hash table)
-merge-join[a.key = b.key](sorted_a, sorted_b)
+$$
+merge-\bowtie_{a.key = b.key}(sorted_a, sorted_b)
+$$
+
 ```
 
 ## Implementation

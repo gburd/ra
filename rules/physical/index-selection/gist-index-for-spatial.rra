@@ -41,13 +41,18 @@ entire subtrees, and KNN searches use priority-queue-based traversal.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 filter[geom && bbox](scan[T])
-  -> gist_index_scan[I](geom, &&, bbox)
-  where I is a GiST index on column geom
+  \rightarrow gist_index_scan[I](geom, &&, bbox)
+  \text{where} I is a GiST index on column geom
+$$
 
+$$
 sort[ST_Distance(geom, point)](scan[T]) LIMIT k
-  -> gist_knn_scan[I](geom, point, k)
+  \rightarrow gist_knn_scan[I](geom, point, k)
+$$
+
 ```
 
 ## Implementation

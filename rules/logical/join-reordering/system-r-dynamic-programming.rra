@@ -46,15 +46,20 @@ exhaustive enumeration through memoization.
 
 ## Relational Algebra
 
-```algebra
-Given relations {R1, R2, ..., Rn} with join predicates:
+```latex
+$$
+Given relations {R1, R2, ..., Rn} with \bowtie predicates:
+$$
 
-For each subset S ⊆ {R1, ..., Rn}, |S| = k:
-  For each partition (S1, S2) of S where |S1| < k:
+$$
+For each \subseteq S ⊆ {R1, ..., Rn}, |S| = k:
+  For each partition (S1, S2) of S \text{where} |S1| < k:
     cost = cost(S1) + cost(S2) + cost(S1 ⋈ S2)
     if cost < best_cost(S):
       best_plan(S) = S1 ⋈ S2
       best_cost(S) = cost
+$$
+
 ```
 
 ## Implementation

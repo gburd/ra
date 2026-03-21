@@ -20,8 +20,11 @@ Merges projection into aggregate
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 π(Agg(R)) => Agg with projection
+$$
+
 ```
 
 ## Implementation

@@ -35,10 +35,13 @@ O(n*c) but runs on CPU cache-efficiently using blocked transpose.
 
 ## Relational Algebra
 
-```algebra
-gpu_op(row_data(R)) -> gpu_op(to_columnar(row_data(R)))
-  where query uses only k << total_columns columns
+```latex
+$$
+gpu_op(row_data(R)) \rightarrow gpu_op(to_columnar(row_data(R)))
+  \text{where} query uses only k << total_columns columns
     AND gpu_coalescing_benefit > transpose_cost
+$$
+
 ```
 
 ## Implementation

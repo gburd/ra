@@ -31,10 +31,13 @@ are guaranteed to be co-located.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join[c](Exchange[hash(k1)](R), Exchange[hash(k2)](S))
-  -> Join[c](R, S)
-  where partition_scheme(R, k1) = partition_scheme(S, k2)
+  \rightarrow Join[c](R, S)
+  \text{where} partition_scheme(R, k1) = partition_scheme(S, k2)
+$$
+
 ```
 
 ## Implementation

@@ -30,10 +30,13 @@ prefix of the index key order.
 
 ## Relational Algebra
 
-```algebra
-sigma[a.x = v1 AND a.y > v2](scan(collection))
-  -> index_scan(collection, idx_{a.x, a.y}, [v1, v2..])
-  where idx_{a.x, a.y} covers both predicates as a prefix
+```latex
+$$
+\sigma_{a.x = v1 AND a.y > v2}(scan(collection))
+  \rightarrow index_scan(collection, idx_{a.x, a.y}, [v1, v2..])
+  \text{where} idx_{a.x, a.y} covers both predicates as a prefix
+$$
+
 ```
 
 ## Implementation

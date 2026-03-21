@@ -38,10 +38,13 @@ the filter predicate.
 
 ## Relational Algebra
 
-```algebra
-sigma[P AND Q](R)
-  -> filtered_index_scan[I_filtered](Q)
-  where filter_predicate(I) = P AND Q implies P
+```latex
+$$
+\sigma_{P AND Q}(R)
+  \rightarrow filtered_index_scan[I_filtered](Q)
+  \text{where} filter_predicate(I) = P AND Q implies P
+$$
+
 ```
 
 ## Implementation

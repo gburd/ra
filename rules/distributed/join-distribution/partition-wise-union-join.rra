@@ -20,10 +20,13 @@ exploit partition-wise execution within each branch.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join[c](Union(R1, R2, R3), S)
-  -> Union(Join[c](R1, S), Join[c](R2, S), Join[c](R3, S))
-  where each Ri is partition-aligned with S
+  \rightarrow Union(Join[c](R1, S), Join[c](R2, S), Join[c](R3, S))
+  \text{where} each Ri is partition-aligned with S
+$$
+
 ```
 
 ## Test Cases

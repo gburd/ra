@@ -32,12 +32,17 @@ is identical regardless of where in the plan tree the call appears.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- CTE factoring:
+$$
 WITH t AS (SELECT f(a) AS fa, * FROM R)
 SELECT fa FROM t WHERE fa > 0
+$$
   -- instead of --
+$$
 SELECT f(a) FROM R WHERE f(a) > 0
+$$
+
 ```
 
 ## Implementation

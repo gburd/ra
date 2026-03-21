@@ -32,12 +32,17 @@ it via a Map at the end reduces arrangement memory proportionally.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: constant column flows through join
-join(R, map[c = 42](S))
+$$
+\bowtie(R, map[c = 42](S))
+$$
 
 -- After: constant lifted past join
-map[c = 42](join(R, S))
+$$
+map[c = 42](\bowtie(R, S))
+$$
+
 ```
 
 ## Implementation

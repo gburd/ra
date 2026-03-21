@@ -34,25 +34,36 @@ side has contradictory predicates, the anti-join degenerates.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Empty right side: anti-join returns all left rows
-anti_join[cond](R, empty_set) -> R
+$$
+anti_\bowtie_{cond}(R, empty_set) \rightarrow R
+$$
 
 -- Contradictory filter on right: same as empty
-anti_join[cond](R, filter[false](S)) -> R
+$$
+anti_\bowtie_{cond}(R, filter[false](S)) \rightarrow R
+$$
 
 -- LEFT JOIN + IS NULL -> anti-join (canonical form)
-filter[S.pk IS NULL](left_join[R.fk = S.pk](R, S))
-  -> anti_join[R.fk = S.pk](R, S)
+$$
+filter[S.pk IS NULL](left_\bowtie_{R.fk = S.pk}(R, S))
+  \rightarrow anti_\bowtie_{R.fk = S.pk}(R, S)
+$$
 
 -- Anti-join with tautology: returns empty set
-anti_join[true](R, non_empty_S) -> empty_set
-  where |S| > 0
+$$
+anti_\bowtie_{true}(R, non_empty_S) \rightarrow empty_set
+  \text{where} |S| > 0
+$$
 
 -- NOT IN to anti-join with NULL guard
+$$
 filter[R.a NOT IN (SELECT S.b FROM S)](R)
-  -> anti_join[R.a = S.b](R, filter[S.b IS NOT NULL](S))
-  where S.b is nullable
+  \rightarrow anti_\bowtie_{R.a = S.b}(R, filter[S.b IS NOT NULL](S))
+  \text{where} S.b is nullable
+$$
+
 ```
 
 ## Implementation

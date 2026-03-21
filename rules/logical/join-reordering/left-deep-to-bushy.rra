@@ -37,10 +37,13 @@ sub-joins `R join S` and `T join U`, the bushy form
 
 ## Relational Algebra
 
-```algebra
-((R join[c1] S) join[c2] T) join[c3] U
-  -> (R join[c1] S) join[c4] (T join[c3] U)
-  where c2 can be decomposed into c4 connecting the two sub-trees
+```latex
+$$
+((R \bowtie_{c1} S) \bowtie_{c2} T) \bowtie_{c3} U
+  \rightarrow (R \bowtie_{c1} S) \bowtie_{c4} (T \bowtie_{c3} U)
+  \text{where} c2 can be decomposed into c4 connecting the two sub-trees
+$$
+
 ```
 
 ## Implementation

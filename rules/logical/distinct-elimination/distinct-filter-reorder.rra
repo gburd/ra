@@ -24,10 +24,13 @@ Reorders DISTINCT and Filter so that the filter is applied before DISTINCT, redu
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 filter[P](distinct(R))
-  -> distinct(filter[P](R))
-  where columns(P) ⊆ output(R)
+  \rightarrow distinct(filter[P](R))
+  \text{where} columns(P) ⊆ output(R)
+$$
+
 ```
 
 ## Implementation

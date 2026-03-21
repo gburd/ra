@@ -36,20 +36,27 @@ overhead dominates; for long-running scans, compiled code wins.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Vectorized execution:
-Plan(Q) -> VectorizedPipeline[batch_size=1024](
+$$
+Plan(Q) \rightarrow VectorizedPipeline[batch_size=1024](
     operators = [Scan, Filter, HashBuild, Probe, Project])
+$$
 
 -- Compiled execution:
-Plan(Q) -> CompiledPipeline(
-    generate_code(Scan -> Filter -> HashBuild -> Probe -> Project))
+$$
+Plan(Q) \rightarrow CompiledPipeline(
+    generate_code(Scan \rightarrow Filter \rightarrow HashBuild \rightarrow Probe \rightarrow Project))
+$$
 
 -- Adaptive: choose based on estimated rows
-Plan(Q) -> if estimated_rows < COMPILATION_THRESHOLD:
+$$
+Plan(Q) \rightarrow if estimated_rows < COMPILATION_THRESHOLD:
                VectorizedPipeline(Q)
            else:
                CompiledPipeline(Q)
+$$
+
 ```
 
 ## Implementation

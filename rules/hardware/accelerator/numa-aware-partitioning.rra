@@ -35,10 +35,13 @@ data accesses local, recovering that throughput.
 
 ## Relational Algebra
 
-```algebra
-op(R) -> numa_partition(R, num_nodes) |> parallel_op(per_node)
-  where num_numa_nodes > 1
+```latex
+$$
+op(R) \rightarrow numa_partition(R, num_nodes) |> parallel_op(per_node)
+  \text{where} num_numa_nodes > 1
     AND size(R) > L3_cache_size
+$$
+
 ```
 
 ## Implementation

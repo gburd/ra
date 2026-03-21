@@ -34,9 +34,12 @@ split for independent pushdown.
 
 ## Relational Algebra
 
-```algebra
-sigma[p1](sigma[p2](R)) -> sigma[p1 AND p2](R)
-sigma[p1 AND p2](R) -> sigma[p1](sigma[p2](R))
+```latex
+$$
+\sigma_{p1}(\sigma_{p2}(R)) \rightarrow \sigma_{p1 AND p2}(R)
+\sigma_{p1 AND p2}(R) \rightarrow \sigma_{p1}(\sigma_{p2}(R))
+$$
+
 ```
 
 ## Implementation

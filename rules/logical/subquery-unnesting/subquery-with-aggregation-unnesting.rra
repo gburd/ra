@@ -33,21 +33,26 @@ converts O(N * M) to O(N + M + N).
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Correlated scalar aggregate in WHERE
+$$
 filter[R.val > (SELECT AGG(S.col) FROM S WHERE S.fk = R.pk)](R)
-  -> join[R.pk = T.fk](R, T)
-  where T = project[fk, agg_result](
+  \rightarrow \bowtie_{R.pk = T.fk}(R, T)
+  \text{where} T = project[fk, agg_result](
               aggregate[AGG(col), GROUP BY fk](S)
             )
   and filter condition becomes R.val > T.agg_result
+$$
 
 -- Correlated COUNT in SELECT
+$$
 project[R.*, (SELECT COUNT(*) FROM S WHERE S.fk = R.pk) AS cnt](R)
-  -> project[R.*, COALESCE(T.cnt, 0)](
-       left_join[R.pk = T.fk](R, T)
+  \rightarrow project[R.*, COALESCE(T.cnt, 0)](
+       left_\bowtie_{R.pk = T.fk}(R, T)
      )
-  where T = aggregate[COUNT(*) AS cnt, GROUP BY fk](S)
+  \text{where} T = aggregate[COUNT(*) AS cnt, GROUP BY fk](S)
+$$
+
 ```
 
 ## Implementation

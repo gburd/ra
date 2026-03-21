@@ -22,11 +22,14 @@ Flattens nested CTEs when the inner CTE is only referenced by the outer CTE defi
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 CTE[outer, CTE[inner, inner_def](outer_def)](body)
-  -> CTE[outer, outer_def[inner := inner_def]](body)
-  where !references(body, inner)
+  \rightarrow CTE[outer, outer_def[inner := inner_def]](body)
+  \text{where} !references(body, inner)
     and ref_count(inner, outer_def) = 1
+$$
+
 ```
 
 ## Implementation

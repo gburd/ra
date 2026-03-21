@@ -32,14 +32,19 @@ Pushing filters below unnest reduces the number of rows expanded.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Push filter below unnest when it references non-array columns
-sigma[p(a)](unnest(arr, R)) -> unnest(arr, sigma[p(a)](R))
-  where a not in unnested_columns
+$$
+\sigma_{p(a)}(unnest(arr, R)) \rightarrow unnest(arr, \sigma_{p(a)}(R))
+  \text{where} a not in unnested_columns
+$$
 
 -- Push projection below unnest to reduce columns carried
-pi[a, unnested](unnest(arr, R))
-  -> unnest(arr, pi[a, arr](R))
+$$
+\pi_{a, unnested}(unnest(arr, R))
+  \rightarrow unnest(arr, \pi_{a, arr}(R))
+$$
+
 ```
 
 ## Implementation

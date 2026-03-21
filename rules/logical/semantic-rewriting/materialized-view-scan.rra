@@ -20,8 +20,11 @@ Rewrites scan to use materialized view
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Scan(T) => Scan(MV) if available
+$$
+
 ```
 
 ## Implementation

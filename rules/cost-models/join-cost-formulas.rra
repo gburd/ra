@@ -42,37 +42,50 @@ one input is small and the other has an appropriate index.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join cost decomposition:
   C_total = C_io + C_cpu + C_memory
+$$
 
+$$
 For each algorithm:
+$$
 
+$$
 1. Nested-Loop Join (NLJ):
    C_io(NLJ) = P_R + |R| * P_S                     (no index)
    C_io(NLJ) = P_R + |R| * (h + F*P_S/|S|)         (with index, h=tree height)
    C_cpu(NLJ) = |R| * |S| * c_compare               (no index)
    C_cpu(NLJ) = |R| * (c_hash + F*|S|/D * c_compare) (with index)
+$$
 
+$$
 2. Sort-Merge Join (SMJ):
    C_io(SMJ) = sort_io(R) + sort_io(S) + P_R + P_S
    sort_io(X) = 0 if X sorted, else 2*P_X*ceil(log_M(P_X/M))
    C_cpu(SMJ) = sort_cpu(R) + sort_cpu(S) + (|R| + |S|) * c_compare
+$$
 
+$$
 3. Hash Join (HJ):
    C_io(HJ) = P_R + P_S                             (in-memory)
    C_io(HJ) = 3*(P_R + P_S)                         (one-pass Grace)
    C_io(HJ) = 2*(P_R + P_S)*ceil(log_M(P_R/M)) + P_R + P_S  (recursive)
    C_cpu(HJ) = (|R| + |S|) * c_hash + |S| * c_probe
+$$
 
+$$
 Where:
-  F = join selectivity
-  D = number of distinct join key values
+  F = \bowtie selectivity
+  D = number of distinct \bowtie key values
   M = available memory pages
   h = B-tree index height
   c_compare = cost of one key comparison
   c_hash = cost of one hash computation
   c_probe = cost of one hash table probe
+$$
+
 ```
 
 ## Implementation

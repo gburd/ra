@@ -32,16 +32,23 @@ state memory, and per-update processing cost.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: threshold on monotonic input
+$$
 threshold(source_monotonic)
+$$
 
 -- After: threshold elided
+$$
 source_monotonic
+$$
 
 -- DISTINCT on monotonic input
-threshold(union(R_monotonic, negate(R_monotonic)))
+$$
+threshold(\cup(R_monotonic, negate(R_monotonic)))
+$$
   -- Can be simplified when R is monotonic
+
 ```
 
 ## Implementation

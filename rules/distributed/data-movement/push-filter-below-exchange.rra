@@ -30,9 +30,12 @@ traffic by two orders of magnitude.
 
 ## Relational Algebra
 
-```algebra
-sigma[p](Exchange[d](R)) -> Exchange[d](sigma[p](R))
-  where attrs(p) subset attrs(R)
+```latex
+$$
+\sigma_{p}(Exchange[d](R)) \rightarrow Exchange[d](\sigma_{p}(R))
+  \text{where} \text{attrs}(p) \subseteq \text{attrs}(R)
+$$
+
 ```
 
 ## Implementation

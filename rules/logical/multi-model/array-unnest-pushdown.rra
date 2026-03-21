@@ -25,18 +25,27 @@ where the position of expansion affects performance.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: UNNEST early, filter late
-sigma[pred](UNNEST(R.arr))
+$$
+\sigma_{pred}(UNNEST(R.arr))
+$$
 
 -- After: filter early, UNNEST late
-UNNEST(sigma[pred](R).arr)
+$$
+UNNEST(\sigma_{pred}(R).arr)
+$$
 
 -- Before: UNNEST + COUNT pattern
-gamma[id; COUNT(*)](UNNEST(R.arr))
+$$
+\gamma_{id; COUNT(*)}(UNNEST(R.arr))
+$$
 
 -- After: direct array function
-pi[id, array_length(R.arr)](R)
+$$
+\pi_{id, array_length(R.arr)}(R)
+$$
+
 ```
 
 ## Implementation

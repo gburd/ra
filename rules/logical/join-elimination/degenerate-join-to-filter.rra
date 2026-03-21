@@ -35,18 +35,25 @@ R. This eliminates the join operator entirely.
 
 ## Relational Algebra
 
-```algebra
-join[S.col = R.val](S, single_row(R))
-  -> filter[S.col = constant](S)
-  where R produces exactly one row with R.val = constant
+```latex
+$$
+\bowtie_{S.col = R.val}(S, single_row(R))
+  \rightarrow filter[S.col = constant](S)
+  \text{where} R produces exactly one row with R.val = constant
+$$
 
-join[cond](S, aggregate[agg](T))    -- no GROUP BY
-  -> filter[cond[agg_result/agg_col]](S)
+$$
+\bowtie_{cond}(S, aggregate[agg](T))    -- no GROUP BY
+  \rightarrow filter[cond[agg_result/agg_col]](S)
+$$
   -- substitute aggregate result into condition
 
+$$
 cross_join(S, single_row(R))
-  -> project[S.*, R.*](S)
+  \rightarrow project[S.*, R.*](S)
+$$
   -- cross with single row is just appending constants
+
 ```
 
 ## Implementation

@@ -32,12 +32,17 @@ the O(n*m) cross product to O(n*W) where W << m.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: cross product + filter
-sigma[a.ts BETWEEN b.ts - 60 AND b.ts + 60](a CROSS b)
+$$
+\sigma_{a.ts BETWEEN b.ts - 60 AND b.ts + 60}(a CROSS b)
+$$
 
 -- After: band join
-a band-join[a.ts, b.ts, width=60] b
+$$
+a band-\bowtie_{a.ts, b.ts, width=60} b
+$$
+
 ```
 
 ## Implementation

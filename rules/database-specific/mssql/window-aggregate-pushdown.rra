@@ -31,14 +31,19 @@ avoid explicit sorts and reduce per-row overhead.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: row mode with explicit sort
+$$
 row-window[PARTITION BY p ORDER BY o; ROW_NUMBER()](
     sort[p, o](scan(T)))
+$$
 
 -- After: batch mode window aggregate
+$$
 batch-window-aggregate[PARTITION BY p ORDER BY o; ROW_NUMBER()](
     batch-sort[p, o](batch-scan(T)))
+$$
+
 ```
 
 ## Implementation

@@ -26,15 +26,18 @@ Plans a LocalityOptimizedSearch operation that avoids communicating with remote 
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Scan[constraints: local ∪ remote]
-  -> LocalityOptimizedSearch(
+  \rightarrow LocalityOptimizedSearch(
        Scan[constraints: local],
        Scan[constraints: remote]
      )
-  where has_local_and_remote_constraints
-  where (has_limit && limit ≤ |local_max_card|)
+  \text{where} has_local_and_remote_constraints
+  \text{where} (has_limit && limit ≤ |local_max_card|)
      || |local_max_card| ≥ |total_max_card|
+$$
+
 ```
 
 Where:

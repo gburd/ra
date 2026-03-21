@@ -30,10 +30,13 @@ without materializing Cartesian products.
 
 ## Relational Algebra
 
-```algebra
-R join[R.a=S.a AND R.b=T.b] (S join[S.c=T.c] T)
-  -> leapfrog_triejoin[{R.a=S.a, R.b=T.b, S.c=T.c}](trie(R), trie(S), trie(T))
-  where has_indexes(R, S, T)
+```latex
+$$
+R \bowtie_{R.a=S.a AND R.b=T.b} (S \bowtie_{S.c=T.c} T)
+  \rightarrow leapfrog_trie\bowtie_{{R.a=S.a, R.b=T.b, S.c=T.c}}(trie(R), trie(S), trie(T))
+  \text{where} has_indexes(R, S, T)
+$$
+
 ```
 
 ## Implementation

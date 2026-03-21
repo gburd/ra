@@ -24,10 +24,13 @@ Converts a semi-join with non-equality ON conditions to an inner join with Disti
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 SemiJoin[c](L, R)
-  -> Project[L_cols](DistinctOn[L.key](InnerJoin[c](EnsureKey(L), R)))
-  where ¬is_simple_equality(c)
+  \rightarrow Project[L_cols](DistinctOn[L.key](InnerJoin[c](EnsureKey(L), R)))
+  \text{where} ¬is_simple_equality(c)
+$$
+
 ```
 
 ## Implementation

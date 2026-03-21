@@ -39,35 +39,40 @@ number of states.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: compiled DFA with redundant states
+$$
 RowPattern(
   ...,
   dfa: DFA {
     states: [S0, S1, S2, S3, S4],
     transitions: {
-      S0 -[A]-> S1,
-      S0 -[B]-> S2,
-      S1 -[C]-> S3,
-      S2 -[C]-> S3,  -- S1 and S2 have same out-transitions
+      S0 -[A]\rightarrow S1,
+      S0 -[B]\rightarrow S2,
+      S1 -[C]\rightarrow S3,
+      S2 -[C]\rightarrow S3,  -- S1 and S2 have same out-transitions
     },
     accept: [S3]
   }
 )
+$$
 
 -- After: minimized DFA (S1 and S2 merged)
+$$
 RowPattern(
   ...,
   dfa: DFA {
     states: [S0, S12, S3],
     transitions: {
-      S0 -[A]-> S12,
-      S0 -[B]-> S12,
-      S12 -[C]-> S3,
+      S0 -[A]\rightarrow S12,
+      S0 -[B]\rightarrow S12,
+      S12 -[C]\rightarrow S3,
     },
     accept: [S3]
   }
 )
+$$
+
 ```
 
 ## Implementation

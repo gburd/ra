@@ -35,27 +35,38 @@ CPU is faster because there is no transfer overhead.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- GPU cost model per operator:
+$$
 gpu_cost(op) = transfer_to_gpu(op) + gpu_exec(op) + transfer_from_gpu(op)
 cpu_cost(op) = cpu_exec(op)
+$$
 
 -- Transfer cost:
+$$
 transfer_to_gpu(op) = DATA_SIZE(op.input) / PCIE_BW + PCIE_LATENCY
 transfer_from_gpu(op) = DATA_SIZE(op.output) / PCIE_BW + PCIE_LATENCY
+$$
 
 -- GPU execution (roofline model):
-gpu_exec(op) = max(
+$$
+gpu_exec(op) = \text{max}(
   DATA_SIZE(op.input) / GPU_MEM_BW,   -- memory-bound
   FLOPS(op) / GPU_FLOPS               -- compute-bound
 )
+$$
 
 -- Decision:
+$$
 place_on_gpu(op) = gpu_cost(op) < cpu_cost(op)
+$$
 
 -- Data already on GPU eliminates transfer:
+$$
 if input_resident_on_gpu(op):
   transfer_to_gpu(op) = 0
+$$
+
 ```
 
 ## Implementation

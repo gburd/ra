@@ -24,12 +24,15 @@ AVG is decomposed into SUM + COUNT.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Aggregate[AGG(col)](Union(RemoteScan[t1, ep1], RemoteScan[t2, ep2]))
 =>
 Aggregate[MERGE_AGG](Union(
   RemoteScan[t1, ep1, pushdown_agg=PARTIAL_AGG(col)],
   RemoteScan[t2, ep2, pushdown_agg=PARTIAL_AGG(col)]))
+$$
+
 ```
 
 ## Before

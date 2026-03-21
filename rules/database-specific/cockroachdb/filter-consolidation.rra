@@ -33,14 +33,19 @@ and scan planning decisions.
 
 ## Relational Algebra
 
-```algebra
-sigma[x >= 5 AND x <= 10](R)
-  -> sigma[x IN [5, 10]](R)
+```latex
+$$
+\sigma_{x >= 5 AND \times <= 10}(R)
+  \rightarrow \sigma_{x IN [5, 10}](R)
+$$
   -- internally: Range(x, 5, 10)
 
-sigma[x > 3 AND x > 7](R)
-  -> sigma[x > 7](R)
+$$
+\sigma_{x > 3 AND \times > 7}(R)
+  \rightarrow \sigma_{x > 7}(R)
+$$
   -- redundant lower bound eliminated
+
 ```
 
 ## Implementation

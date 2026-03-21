@@ -28,19 +28,24 @@ aggregation), the remaining data distributes evenly.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
-gamma[g, agg(a)](Exchange[hash(g)](R))
+$$
+\gamma_{g, agg(a)}(Exchange[hash(g)](R))
+$$
 
 -- After (split hot/cold)
+$$
 Union(
-    gamma[g, agg(a)](Filter[g IN hot_keys](R)),          -- hot path
-    gamma[g, merge_agg(partial_a)](                       -- cold path
+    \gamma_{g, agg(a)}(Filter[g IN hot_keys](R)),          -- hot path
+    \gamma_{g, merge_agg(partial_a)}(                       -- cold path
         Exchange[hash(g)](
-            gamma[g, partial_agg(a)](Filter[g NOT IN hot_keys](R))
+            \gamma_{g, partial_agg(a)}(Filter[g NOT IN hot_keys](R))
         )
     )
 )
+$$
+
 ```
 
 ## Implementation

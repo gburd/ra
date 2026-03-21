@@ -25,13 +25,18 @@ same node.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before (unnecessary exchange)
-gamma[g, agg(a)](Exchange[hash(g)](R))
+$$
+\gamma_{g, agg(a)}(Exchange[hash(g)](R))
+$$
 -- where R is already partitioned on g
 
 -- After (no exchange needed)
-gamma[g, agg(a)](R)
+$$
+\gamma_{g, agg(a)}(R)
+$$
+
 ```
 
 ## Test Cases

@@ -32,16 +32,21 @@ each partition.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: single hash group-by
-gamma[city; SUM(amount)](scan(sales))
+$$
+\gamma_{city; SUM(amount)}(scan(sales))
+$$
 
 -- After: partitioned hash group-by
+$$
 merge-aggregates(
-    gamma[city; SUM(amount)](partition_1(sales)),
-    gamma[city; SUM(amount)](partition_2(sales)),
+    \gamma_{city; SUM(amount)}(partition_1(sales)),
+    \gamma_{city; SUM(amount)}(partition_2(sales)),
     ...
 )
+$$
+
 ```
 
 ## Implementation

@@ -24,10 +24,13 @@ Generates a set of limited Scan operators (one per index) when a LIMIT is presen
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Limit[k, order](Scan(T))
-  -> {LimitedScan[idx, k, order](T) | idx ∈ indexes(T)}
-  where k > 0
+  \rightarrow {LimitedScan[idx, k, order](T) | idx ∈ indexes(T)}
+  \text{where} k > 0
+$$
+
 ```
 
 ## Implementation

@@ -35,25 +35,34 @@ is cheaper given the expected number of qualifying rows.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- For relation R with predicate P and available indexes I1, I2:
 
+$$
 access_paths = [
   seq_scan(R, P):
     cost = PAGES(R) + W * TUPLES(R),
+$$
 
+$$
   index_scan(R, I1, P):
     if I1 is clustered:
       cost = F * PAGES(R) + W * F * TUPLES(R)
     else:
       cost = F * TUPLES(R) + W * F * TUPLES(R)
+$$
       -- Each tuple may require a separate page fetch
 
+$$
   index_scan(R, I2, P):
     (same formula with I2's matching columns)
 ]
+$$
 
+$$
 best = argmin(access_paths, cost)
+$$
+
 ```
 
 ## Implementation

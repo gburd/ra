@@ -31,16 +31,21 @@ the data processed by the final sort-merge.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: sort above union
+$$
 tau[a ASC] LIMIT k (R UNION ALL S)
+$$
 
 -- After: sort pushed to branches with limit
+$$
 tau[a ASC] LIMIT k (
     tau[a ASC] LIMIT k (R)
     UNION ALL
     tau[a ASC] LIMIT k (S)
 )
+$$
+
 ```
 
 ## Implementation

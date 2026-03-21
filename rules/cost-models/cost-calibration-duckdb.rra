@@ -39,28 +39,39 @@ measurable and stable.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 DuckDB cost model:
   Cost(ColumnScan(R, cols)) =
     sum(column_bytes(c) for c in cols) / memory_bandwidth
     + num_vectors * vector_processing_cost
+$$
 
+$$
   Cost(Filter(R, p)) =
     Cost(R) + num_vectors * predicate_eval_per_vector
+$$
 
+$$
   Cost(HashJoin(build, probe)) =
     Cost(build) + Cost(probe)
     + build_vectors * hash_build_per_vector
     + probe_vectors * hash_probe_per_vector
     + cache_miss_penalty(build_size, L3_size)
+$$
 
+$$
   Cost(Aggregate(R, G, agg)) =
     Cost(R) + input_vectors * aggregate_per_vector
     + hash_table_cost(num_groups)
+$$
 
+$$
 Vector overhead amortization:
   Per-tuple cost = base_cost / vector_size (2048)
   Much lower than Volcano per-tuple overhead
+$$
+
 ```
 
 ## Implementation

@@ -36,12 +36,17 @@ or rearrange conditions more effectively.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: inner join with condition
+$$
 R JOIN[R.k = S.k AND R.x > 5] S
+$$
 
 -- After: filter above cartesian join
-sigma[R.k = S.k AND R.x > 5](R CROSS JOIN S)
+$$
+\sigma_{R.k = S.k AND R.x > 5}(R CROSS JOIN S)
+$$
+
 ```
 
 ## Implementation

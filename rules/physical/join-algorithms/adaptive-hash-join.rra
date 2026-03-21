@@ -35,9 +35,10 @@ Monitors memory usage during hash join; adaptively switches between in-memory an
 
 ## Relational Algebra
 
-```algebra
-join[R.key = S.key](R, S)
-  -> adaptive_build_phase:
+```latex
+$$
+\bowtie_{R.key = S.key}(R, S)
+  \rightarrow adaptive_build_phase:
        while building hash table for R:
          if memory_exhausted():
            switch to grace/hybrid strategy
@@ -45,6 +46,8 @@ join[R.key = S.key](R, S)
            continue in-memory build
      probe_phase:
        adapt to chosen strategy
+$$
+
 ```
 
 ## Implementation

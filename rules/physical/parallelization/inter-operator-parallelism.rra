@@ -24,10 +24,13 @@ Executes different operators in parallel in pipeline fashion; producer-consumer 
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 operator3(operator2(operator1(data)))
-  -> concurrent_pipeline:
+  \rightarrow concurrent_pipeline:
        operator1 produces → operator2 processes → operator3 consumes
+$$
+
 ```
 
 ## Implementation

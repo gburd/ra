@@ -31,12 +31,17 @@ aggregate the entire table.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: aggregate over filter
-gamma[g; SUM(x)](sigma[p](R))
+$$
+\gamma_{g; SUM(x)}(\sigma_{p}(R))
+$$
 
 -- After: filtered aggregate (no filter operator)
-gamma[g; SUM(x) FILTER (WHERE p)](R)
+$$
+\gamma_{g; SUM(x) FILTER (WHERE p)}(R)
+$$
+
 ```
 
 ## Implementation

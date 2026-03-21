@@ -25,12 +25,17 @@ fixed-width numeric columns in columnar storage.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: scalar filter
-sigma[price > 100.0](ColumnScan(orders.price))
+$$
+\sigma_{price > 100.0}(ColumnScan(orders.price))
+$$
 
 -- After: SIMD-vectorized filter
+$$
 SIMD_Filter(ColumnScan(orders.price), GT, 100.0, width=AVX2_256)
+$$
+
 ```
 
 ## Implementation

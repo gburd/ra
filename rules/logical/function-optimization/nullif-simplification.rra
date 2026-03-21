@@ -23,11 +23,14 @@ returns NULL if a = b, otherwise returns a.
 
 ## Relational Algebra
 
-```algebra
-NULLIF(x, x)         -> NULL              -- always equal
-NULLIF(x, NULL)      -> x                 -- x = NULL is UNKNOWN, never TRUE
-NULLIF(NULL, x)      -> NULL              -- returns first arg when not equal
-NULLIF(literal_a, literal_b) -> folded    -- constant fold
+```latex
+$$
+NULLIF(x, x)         \rightarrow NULL              -- always equal
+NULLIF(x, NULL)      \rightarrow \times -- \times = NULL is UNKNOWN, never TRUE
+NULLIF(NULL, x)      \rightarrow NULL              -- returns first arg when not equal
+NULLIF(literal_a, literal_b) \rightarrow folded    -- constant fold
+$$
+
 ```
 
 ## Implementation

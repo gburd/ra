@@ -35,8 +35,9 @@ distinct values, not the number of updates.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Differential state without compaction:
+$$
 arrangement = {
   (key="alice", val=1, time=100, diff=+1),
   (key="alice", val=1, time=200, diff=-1),
@@ -44,12 +45,16 @@ arrangement = {
   (key="alice", val=2, time=300, diff=-1),
   (key="alice", val=3, time=300, diff=+1)
 }
+$$
 
 -- After frontier advances to 300 and compaction:
+$$
 arrangement = {
   (key="alice", val=3, time=300, diff=+1)
 }
+$$
 -- 5 entries compacted to 1
+
 ```
 
 ## Implementation

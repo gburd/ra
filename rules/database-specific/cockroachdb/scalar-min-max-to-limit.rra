@@ -24,12 +24,17 @@ Replaces a scalar MIN or MAX aggregation with a LIMIT 1 on an ordered scan. This
 
 ## Relational Algebra
 
-```algebra
-ScalarGroupBy[min(x)](R)
-  -> ScalarGroupBy[const_agg(x)](Limit[1](Sort[x ASC](Filter[x IS NOT NULL](R))))
+```latex
+$$
+ScalarGroupBy[\text{min}(x)](R)
+  \rightarrow ScalarGroupBy[const_agg(x)](Limit[1](Sort[x ASC](Filter[x IS NOT NULL](R))))
+$$
 
-ScalarGroupBy[max(x)](R)
-  -> ScalarGroupBy[const_agg(x)](Limit[1](Sort[x DESC](Filter[x IS NOT NULL](R))))
+$$
+ScalarGroupBy[\text{max}(x)](R)
+  \rightarrow ScalarGroupBy[const_agg(x)](Limit[1](Sort[x DESC](Filter[x IS NOT NULL](R))))
+$$
+
 ```
 
 ## Implementation

@@ -52,34 +52,43 @@ on reducing compilation latency and improving adaptive compilation.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Volcano (interpreted):
   while (tuple = child.next()) {
     // Virtual dispatch per tuple per operator
     // Data moves through memory between operators
     process(tuple);
   }
+$$
 
+$$
 Compiled (produce/consume):
-  Pipeline 1: scan -> filter -> hash_build
+  Pipeline 1: scan \rightarrow filter \rightarrow hash_build
     for each tuple in table {
       if (predicate) {
         hash_table.insert(tuple);
       }
     }
+$$
 
-  Pipeline 2: scan -> hash_probe -> aggregate -> output
+$$
+  Pipeline 2: scan \rightarrow hash_probe \rightarrow aggregate \rightarrow output
     for each tuple in probe_table {
       for match in hash_table.probe(tuple.key) {
         agg_state.update(match.value);
       }
     }
+$$
 
+$$
 Pipeline boundaries (breakers):
-  - Hash join build
+  - Hash \bowtie build
   - Sort
   - Materialize (temp table)
   Everything between breakers fuses into one loop
+$$
+
 ```
 
 ## Implementation

@@ -20,12 +20,17 @@ Rewrites queries to use precomputed projections with different primary keys.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
+$$
 (group-by [col1] (sum col2) (scan orders))
+$$
 
 -- After
+$$
 (scan orders_by_col1_sum)
+$$
+
 ```
 
 ## Preconditions

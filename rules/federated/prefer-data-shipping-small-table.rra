@@ -28,10 +28,13 @@ Ship data when:
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 IF estimated_size(remote_table) < threshold
 THEN:
   Op(RemoteScan[table, endpoint]) => Op(ShipData(endpoint, table))
+$$
+
 ```
 
 ## Before

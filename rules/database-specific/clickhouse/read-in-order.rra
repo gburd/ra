@@ -24,11 +24,14 @@ Eliminates explicit sorting when data is read in an order that matches the query
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Sort[k](Scan[MergeTree, sort_key=k](T))
-  -> Scan[MergeTree, read_in_order=k](T)
-  where k is_prefix_of sort_key
-  where no_operations_break_order
+  \rightarrow Scan[MergeTree, read_in_order=k](T)
+  \text{where} k is_prefix_of sort_key
+  \text{where} no_operations_break_order
+$$
+
 ```
 
 ## Implementation

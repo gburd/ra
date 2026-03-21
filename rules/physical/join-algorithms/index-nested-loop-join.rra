@@ -38,12 +38,17 @@ Uses index on inner table to efficiently lookup matching rows for each outer row
 
 ## Relational Algebra
 
-```algebra
-join[R.key = S.indexed_key](R, S)
-  -> for each r in R:
+```latex
+$$
+\bowtie_{R.key = S.indexed_key}(R, S)
+  \rightarrow for each r in R:
        index_lookup(S, r.key)
+$$
 
+$$
 Cost: |R| * (log|S| + matches)
+$$
+
 ```
 
 ## Implementation

@@ -20,10 +20,13 @@ partial sums can be computed remotely and combined locally.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Aggregate[SUM(col)](RemoteScan[table, endpoint])
 =>
 RemoteScan[table, endpoint, pushdown_agg=SUM(col)]
+$$
+
 ```
 
 ## Before

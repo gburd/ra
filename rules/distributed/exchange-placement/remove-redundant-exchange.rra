@@ -27,15 +27,22 @@ unnecessary shuffles directly reduces network I/O and latency.
 
 ## Relational Algebra
 
-```algebra
-Exchange[hash(k)](R) -> R
-  where output_dist(R) = HashPartitioned(k)
+```latex
+$$
+Exchange[hash(k)](R) \rightarrow R
+  \text{where} output_dist(R) = HashPartitioned(k)
+$$
 
-Exchange[gather](R) -> R
-  where output_dist(R) = Singleton
+$$
+Exchange[gather](R) \rightarrow R
+  \text{where} output_dist(R) = Singleton
+$$
 
-Exchange[broadcast](R) -> R
-  where output_dist(R) = Replicated
+$$
+Exchange[broadcast](R) \rightarrow R
+  \text{where} output_dist(R) = Replicated
+$$
+
 ```
 
 ## Implementation

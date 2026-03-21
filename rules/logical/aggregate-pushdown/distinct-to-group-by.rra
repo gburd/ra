@@ -26,9 +26,12 @@ enables more optimization opportunities.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 distinct[cols](R)
-  -> aggregate[group_by: cols, agg: none](R)
+  \rightarrow aggregate[group_by: cols, agg: none](R)
+$$
+
 ```
 
 ## Implementation

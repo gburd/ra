@@ -34,15 +34,18 @@ execution across all TiFlash nodes without sending data back to TiDB.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Single-node execution via TiDB
-gamma[g, agg](Join(TableReader(Scan(A)), TableReader(Scan(B))))
+$$
+\gamma_{g, agg}(Join(TableReader(Scan(A)), TableReader(Scan(B))))
+$$
 
 -- MPP execution in TiFlash
+$$
 MPPGather(
-    gamma[g, final_agg](
+    \gamma_{g, final_agg}(
         Exchange[hash(g)](
-            gamma[g, partial_agg](
+            \gamma_{g, partial_agg}(
                 HashJoin(
                     Exchange[hash(k)](TiFlashScan(A)),
                     Exchange[hash(k)](TiFlashScan(B))
@@ -51,6 +54,8 @@ MPPGather(
         )
     )
 )
+$$
+
 ```
 
 ## Implementation

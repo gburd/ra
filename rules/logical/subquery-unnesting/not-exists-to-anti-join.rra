@@ -26,12 +26,17 @@ detection, avoiding repeated subquery execution.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 filter[NOT EXISTS(subquery)](R)
-  -> anti_join[join_condition](R, subquery)
+  \rightarrow anti_\bowtie_{join_condition}(R, subquery)
+$$
 
+$$
 NOT EXISTS(SELECT * FROM S WHERE S.id = R.id)
-  -> anti_join[R.id = S.id](R, S)
+  \rightarrow anti_\bowtie_{R.id = S.id}(R, S)
+$$
+
 ```
 
 ## Implementation

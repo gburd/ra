@@ -29,14 +29,19 @@ and SIMD vectorization potential.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Cost_CPU(Op) = f(op_type, cardinality, hardware_profile)
+$$
 
+$$
 Examples:
 - Cost_CPU(Scan(n)) = n * tuple_processing_cost
 - Cost_CPU(Filter(n, sel)) = n * predicate_eval_cost
 - Cost_CPU(HashJoin(n, m)) = n * build_cost + m * probe_cost
 - Cost_CPU(Sort(n)) = n * log(n) * comparison_cost
+$$
+
 ```
 
 ## Implementation

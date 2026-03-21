@@ -28,11 +28,14 @@ Ship query when:
 
 ## Relational Algebra
 
-```algebra
-IF selectivity(filter) < 0.01
+```latex
+$$
+IF \text{selectivity}(filter) < 0.01
    AND can_push_filter(remote)
 THEN:
   Filter[pred](RemoteScan) => ShipQuery(remote, Filter[pred](Scan))
+$$
+
 ```
 
 ## Before

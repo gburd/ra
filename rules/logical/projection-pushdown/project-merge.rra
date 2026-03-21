@@ -26,9 +26,12 @@ redundant because the outer one already restricts the columns.
 
 ## Relational Algebra
 
-```algebra
-pi[A](pi[B](R)) -> pi[A](R)
-  where A subset B
+```latex
+$$
+\pi_{A}(\pi_{B}(R)) \rightarrow \pi_{A}(R)
+  \text{where} A \subseteq B
+$$
+
 ```
 
 ## Implementation

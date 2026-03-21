@@ -31,13 +31,18 @@ with appropriate scaling.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: decimal arithmetic
-pi[price * quantity AS total](R)
-  where price is DECIMAL(10,2) and quantity is INT
+$$
+\pi_{price * quantity AS total}(R)
+  \text{where} price is DECIMAL(10,2) and quantity is INT
+$$
 
 -- After: integer arithmetic with scaling
-pi[cast((price_long * quantity) / 100 AS DECIMAL(10,2))](R)
+$$
+\pi_{cast((price_long * quantity) / 100 AS DECIMAL(10,2))}(R)
+$$
+
 ```
 
 ## Implementation

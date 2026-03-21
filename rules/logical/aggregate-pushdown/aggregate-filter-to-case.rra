@@ -31,12 +31,17 @@ enables execution on a wider range of database backends.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: filtered aggregate
-gamma[g; SUM(x) FILTER (WHERE p)](R)
+$$
+\gamma_{g; SUM(x) FILTER (WHERE p)}(R)
+$$
 
 -- After: CASE inside aggregate
-gamma[g; SUM(CASE WHEN p THEN x ELSE NULL END)](R)
+$$
+\gamma_{g; SUM(CASE WHEN p THEN \times ELSE NULL END)}(R)
+$$
+
 ```
 
 ## Implementation

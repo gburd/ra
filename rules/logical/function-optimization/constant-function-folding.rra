@@ -30,17 +30,22 @@ substituting the result avoids repeated evaluation.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 f(const1, const2, ..., constN)
-  -> evaluate_once(f(const1, const2, ..., constN))
-  where f is deterministic (IMMUTABLE)
+  \rightarrow evaluate_once(f(const1, const2, ..., constN))
+  \text{where} f is deterministic (IMMUTABLE)
+$$
 
 -- Examples:
-LENGTH('hello')        -> 5
-UPPER('hello')         -> 'HELLO'
-2 + 3                  -> 5
-EXTRACT(YEAR FROM DATE '2024-01-15') -> 2024
-CAST('42' AS INTEGER)  -> 42
+$$
+LENGTH('hello')        \rightarrow 5
+UPPER('hello')         \rightarrow 'HELLO'
+2 + 3                  \rightarrow 5
+EXTRACT(YEAR FROM DATE '2024-01-15') \rightarrow 2024
+CAST('42' AS INTEGER)  \rightarrow 42
+$$
+
 ```
 
 ## Implementation

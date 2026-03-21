@@ -31,10 +31,13 @@ databases and avoid the overhead of explicit distinct elimination.
 
 ## Relational Algebra
 
-```algebra
-INTERSECT(R, S) -> DISTINCT(R ⋉_R=S S)
+```latex
+$$
+INTERSECT(R, S) \rightarrow DISTINCT(R ⋉_R=S S)
 or with implicit deduplication:
-INTERSECT(R, S) -> R ⋉_R=S DISTINCT(S)
+INTERSECT(R, S) \rightarrow R ⋉_R=S DISTINCT(S)
+$$
+
 ```
 
 ## Implementation

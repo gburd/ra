@@ -24,17 +24,20 @@ relative to the number of nodes, and significant local duplication.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Three-phase COUNT DISTINCT
-gamma[g, COUNT(*)].final(
+$$
+\gamma_{g, COUNT(*)}.final(
     Exchange[hash(g)](
-        gamma[g, d, COUNT(*)].intermediate(
+        \gamma_{g, d, COUNT(*)}.intermediate(
             Exchange[hash(d)](
-                gamma[g, d].local_dedup(R)
+                \gamma_{g, d}.local_dedup(R)
             )
         )
     )
 )
+$$
+
 ```
 
 ## Test Cases

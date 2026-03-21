@@ -32,16 +32,21 @@ needed columns in the index (via INCLUDE) eliminates lookups entirely.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: index seek + key lookup
+$$
 key-lookup(
     index-seek(orders, ix_status, status = 'pending'),
     clustered-index(orders))
+$$
 -- Random I/O per row for non-indexed columns
 
 -- After: covering index (no lookup)
+$$
 index-seek(orders, ix_status_covering, status = 'pending')
+$$
 -- All needed columns in the index
+
 ```
 
 ## Implementation

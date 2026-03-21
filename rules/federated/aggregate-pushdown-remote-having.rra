@@ -21,11 +21,14 @@ groups transferred.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Filter[having_pred](Aggregate[GROUP BY keys, AGG](RemoteScan))
 =>
 RemoteScan[table, endpoint,
   pushdown_agg=[GROUP BY keys, AGG, HAVING having_pred]]
+$$
+
 ```
 
 ## Before

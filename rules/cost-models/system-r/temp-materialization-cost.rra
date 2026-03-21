@@ -37,14 +37,18 @@ plans (left-deep trees with nested-loop joins).
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Materialization cost:
+$$
 materialize_cost(R) = PAGES(R) * 2  -- write + read back
   + W * TUPLES(R)                    -- CPU for serialization
+$$
 
 -- Sort materialization (external sort):
+$$
 sort_materialize_cost(R) =
   2 * PAGES(R) * ceil(log_B(PAGES(R)/B))  -- sort passes
+$$
   -- Each pass reads and writes all pages
 
 -- Pipeline vs materialize decision:
@@ -54,6 +58,7 @@ sort_materialize_cost(R) =
 --   1. Input needed multiple times (e.g., repeated inner in NL)
 --   2. Sort required (pipeline breaker)
 --   3. Hash table build (modern, not in System R)
+
 ```
 
 ## Implementation

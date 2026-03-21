@@ -31,12 +31,17 @@ throughput for analytical queries that touch few columns.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: buffer cache scan (row-major)
-sigma[region = 'US'](scan(sales, buffer_cache))
+$$
+\sigma_{region = 'US'}(scan(sales, buffer_cache))
+$$
 
 -- After: in-memory columnar scan
-sigma[region = 'US'](scan(sales, in_memory_column_store))
+$$
+\sigma_{region = 'US'}(scan(sales, in_memory_column_store))
+$$
+
 ```
 
 ## Implementation

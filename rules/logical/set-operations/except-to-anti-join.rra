@@ -24,10 +24,13 @@ Converts EXCEPT (set difference) operations to anti-joins for better optimizatio
 
 ## Relational Algebra
 
-```algebra
-except(R, S)
-  -> anti_join[R.* = S.*](R, S)
-  where schema_compatible(R, S)
+```latex
+$$
+\setminus(R, S)
+  \rightarrow anti_\bowtie_{R.* = S.*}(R, S)
+  \text{where} schema_compatible(R, S)
+$$
+
 ```
 
 ## Implementation

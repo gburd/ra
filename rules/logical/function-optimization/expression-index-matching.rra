@@ -26,18 +26,25 @@ matching expression index exists in the catalog.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Expression index on LOWER(email)
+$$
 filter[LOWER(email) = 'user@example.com'](scan[users])
-  -> index_scan[idx_lower_email](LOWER(email) = 'user@example.com')
+  \rightarrow index_scan[idx_lower_email](LOWER(email) = 'user@example.com')
+$$
 
 -- Expression index on (price * quantity)
+$$
 filter[(price * quantity) > 1000](scan[orders])
-  -> index_scan[idx_total]((price * quantity) > 1000)
+  \rightarrow index_scan[idx_total]((price * quantity) > 1000)
+$$
 
 -- Expression index on DATE_TRUNC('month', created_at)
+$$
 filter[DATE_TRUNC('month', created_at) = '2024-01-01'](scan[events])
-  -> index_scan[idx_monthly](DATE_TRUNC('month', created_at) = '2024-01-01')
+  \rightarrow index_scan[idx_monthly](DATE_TRUNC('month', created_at) = '2024-01-01')
+$$
+
 ```
 
 ## Implementation

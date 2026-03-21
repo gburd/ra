@@ -28,11 +28,14 @@ Ship query when:
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 IF estimated_result_rows(query) < threshold
    AND can_execute_remotely(query, capabilities)
 THEN:
   query => ShipQuery(remote, query)
+$$
+
 ```
 
 ## Before

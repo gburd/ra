@@ -38,9 +38,10 @@ Combines in-memory hash join with grace hash join; keeps hot partition in memory
 
 ## Relational Algebra
 
-```algebra
-join[R.key = S.key](R, S)
-  -> build_phase:
+```latex
+$$
+\bowtie_{R.key = S.key}(R, S)
+  \rightarrow build_phase:
        partition R, keep R1 in memory, write R2...Rn to disk
      probe_phase:
        for each s in S:
@@ -50,6 +51,8 @@ join[R.key = S.key](R, S)
            write s to disk partition
      recursive_phase:
        grace_hash_join(R2...Rn, S2...Sn)
+$$
+
 ```
 
 ## Implementation

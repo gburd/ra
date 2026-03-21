@@ -30,16 +30,21 @@ probe navigates the B-tree to a specific leaf page.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: full scan + filter
-sigma[status IN ('A', 'B', 'C')](scan(orders))
+$$
+\sigma_{status IN ('A', 'B', 'C')}(scan(orders))
+$$
 
 -- After: multi-probe index scan
-union(
+$$
+\cup(
     point_lookup(orders, idx_status, 'A'),
     point_lookup(orders, idx_status, 'B'),
     point_lookup(orders, idx_status, 'C')
 )
+$$
+
 ```
 
 ## Implementation

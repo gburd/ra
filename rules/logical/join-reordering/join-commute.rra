@@ -27,8 +27,11 @@ Commutes join operands for optimization
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join(R, S) => Join(S, R)
+$$
+
 ```
 
 ## Implementation

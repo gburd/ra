@@ -32,11 +32,12 @@ cost model prevents choosing an index when a full scan is cheaper
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Access path options for sigma[a = 5 AND b > 10](T):
 -- 1. Full table scan + filter: O(N)
 -- 2. Index on (a): O(k) where k = rows with a=5
 -- 3. Index on (a, b): O(j) where j = rows with a=5 AND b>10
+
 ```
 
 ## Implementation

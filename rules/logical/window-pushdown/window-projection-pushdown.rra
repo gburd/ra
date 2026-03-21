@@ -24,10 +24,13 @@ Pushes column pruning below window functions to reduce the width of rows flowing
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 project[cols](window[W](R))
-  -> project[cols](window[W](project[cols ∪ window_deps(W)](R)))
-  where cols ∪ window_deps(W) ⊂ output(R)
+  \rightarrow project[cols](window[W](project[cols ∪ window_deps(W)](R)))
+  \text{where} cols ∪ window_deps(W) ⊂ output(R)
+$$
+
 ```
 
 ## Implementation

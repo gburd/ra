@@ -36,10 +36,13 @@ results.
 
 ## Relational Algebra
 
-```algebra
-sigma[LIKE(col, pattern)](R) -> gpu_string_filter[LIKE(col, pattern)](R)
-  where |R| > threshold
+```latex
+$$
+\sigma_{LIKE(col, pattern)}(R) \rightarrow gpu_string_filter[LIKE(col, pattern)](R)
+  \text{where} |R| > threshold
     AND col is string type
+$$
+
 ```
 
 ## Implementation

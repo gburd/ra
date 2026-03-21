@@ -27,10 +27,13 @@ other types.
 
 ## Relational Algebra
 
-```algebra
-sigma[label(v) = L](all_nodes())
-  -> label_scan(L)
-  where label index for L exists
+```latex
+$$
+\sigma_{label(v) = L}(all_nodes())
+  \rightarrow label_scan(L)
+  \text{where} label index for L exists
+$$
+
 ```
 
 ## Implementation

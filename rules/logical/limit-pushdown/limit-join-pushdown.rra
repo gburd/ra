@@ -25,14 +25,21 @@ the amount of data processed.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: join all, then limit
-LIMIT 10 (R join S)
+$$
+LIMIT 10 (R \bowtie S)
+$$
 
 -- After: push limit into nested loop outer
+$$
 LIMIT 10 (NestLoop(LIMIT 10(R), S))
+$$
 -- Or: use Top-N aware join that stops after 10 results
+$$
 TopNJoin(10, R, S)
+$$
+
 ```
 
 ## Implementation

@@ -23,14 +23,19 @@ For multi-site COUNT DISTINCT, use approximate methods like HyperLogLog.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Aggregate[COUNT(DISTINCT col)](RemoteScan[table, endpoint])
 =>
 RemoteScan[table, endpoint, pushdown_agg=COUNT(DISTINCT col)]
+$$
 
+$$
 Preconditions:
   - Single remote source (not cross-site)
   - OR remote supports APPROX_COUNT_DISTINCT
+$$
+
 ```
 
 ## Before

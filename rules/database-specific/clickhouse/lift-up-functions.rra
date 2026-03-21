@@ -24,9 +24,12 @@ Moves deterministic scalar functions from inside aggregation expressions to afte
 
 ## Relational Algebra
 
-```algebra
-GroupBy[keys, f(agg(x))](R) -> Project[keys, f(y)](GroupBy[keys, agg(x) as y](R))
-  where f is deterministic scalar function
+```latex
+$$
+GroupBy[keys, f(agg(x))](R) \rightarrow Project[keys, f(y)](GroupBy[keys, agg(x) as y](R))
+  \text{where} f is deterministic scalar function
+$$
+
 ```
 
 ## Implementation

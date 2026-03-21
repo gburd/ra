@@ -23,14 +23,19 @@ from one side of the join, and the aggregation is decomposable.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
-gamma[g, SUM(a)](R join S on R.k = S.k)
+$$
+\gamma_{g, SUM(a)}(R \bowtie S on R.k = S.k)
+$$
 
 -- After (push agg below join when g, a are from R)
-gamma[g, SUM(partial_sum)](
-    (gamma[g, R.k, SUM(a) as partial_sum](R)) join S on R.k = S.k
+$$
+\gamma_{g, SUM(partial_sum)}(
+    (\gamma_{g, R.k, SUM(a) as partial_sum}(R)) \bowtie S on R.k = S.k
 )
+$$
+
 ```
 
 ## Test Cases

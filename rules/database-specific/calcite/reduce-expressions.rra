@@ -33,24 +33,37 @@ can be removed entirely).
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: constant expression in filter
-sigma[1 + 2 > x](R)
+$$
+\sigma_{1 + 2 > x}(R)
+$$
 
 -- After: folded constant
-sigma[3 > x](R)
+$$
+\sigma_{3 > x}(R)
+$$
 
 -- Before: tautology
-sigma[x = x AND p](R)
+$$
+\sigma_{x = \times AND p}(R)
+$$
 
 -- After: simplified
-sigma[p](R)
+$$
+\sigma_{p}(R)
+$$
 
 -- Before: contradiction
-sigma[FALSE](R)
+$$
+\sigma_{FALSE}(R)
+$$
 
 -- After: empty relation
+$$
 empty
+$$
+
 ```
 
 ## Implementation

@@ -32,12 +32,17 @@ probing with the larger avoids repeated scans.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: block nested-loop (no index)
+$$
 outer BNL[o.key = i.key] inner
+$$
 
 -- After: hash join
-outer hash-join[o.key = i.key] inner
+$$
+outer hash-\bowtie_{o.key = i.key} inner
+$$
+
 ```
 
 ## Implementation

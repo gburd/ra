@@ -25,12 +25,17 @@ unique key or primary key of the base relation.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: DISTINCT on output that already includes PK
-delta(pi[id, name, email](employees))
+$$
+delta(\pi_{id, name, email}(employees))
+$$
 
 -- After: PK guarantees uniqueness, DISTINCT removed
-pi[id, name, email](employees)
+$$
+\pi_{id, name, email}(employees)
+$$
+
 ```
 
 ## Implementation

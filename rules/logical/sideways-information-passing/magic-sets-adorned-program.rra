@@ -24,7 +24,7 @@ binds some arguments.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Original: ancestor(X, Y) :- parent(X, Y).
 --           ancestor(X, Y) :- parent(X, Z), ancestor(Z, Y).
 -- Query: ?- ancestor("Alice", Y).
@@ -34,6 +34,7 @@ binds some arguments.
 -- magic_ancestor(Z) :- magic_ancestor(X), parent(X, Z).
 -- ancestor(X, Y) :- magic_ancestor(X), parent(X, Y).
 -- ancestor(X, Y) :- magic_ancestor(X), parent(X, Z), ancestor(Z, Y).
+
 ```
 
 ## Implementation

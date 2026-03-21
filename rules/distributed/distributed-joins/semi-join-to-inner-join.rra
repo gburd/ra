@@ -31,18 +31,23 @@ and potentially use a lookup join in the opposite direction.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- When ON is simple equalities:
+$$
 SemiJoin[L.k = R.k](L, R)
-  -> Project[L.cols](InnerJoin[L.k = R.k](L, DistinctOn[k](R)))
+  \rightarrow Project[L.cols](InnerJoin[L.k = R.k](L, DistinctOn[k](R)))
+$$
 
 -- When ON has non-equality predicates:
+$$
 SemiJoin[cond](L, R)
-  -> Project[L.cols](
+  \rightarrow Project[L.cols](
        DistinctOn[L.pk](
          InnerJoin[cond](EnsureKey(L), R)
        )
      )
+$$
+
 ```
 
 ## Implementation

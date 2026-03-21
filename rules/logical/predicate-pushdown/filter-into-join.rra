@@ -30,8 +30,11 @@ Pushes predicates into join operands
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 σ(Join) => Join(σ(R), σ(S))
+$$
+
 ```
 
 ## Implementation

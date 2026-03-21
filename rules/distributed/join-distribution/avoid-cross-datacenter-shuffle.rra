@@ -21,11 +21,14 @@ if the global partition count is suboptimal.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Exchange[hash(k)](R) to all_nodes
-  -> Exchange[hash(k)](R) to same_dc_nodes
-  where same_dc_nodes is not empty
-  where intra_dc_cost * skew_factor < cross_dc_cost
+  \rightarrow Exchange[hash(k)](R) to same_dc_nodes
+  \text{where} same_dc_nodes is not empty
+  \text{where} intra_dc_cost * skew_factor < cross_dc_cost
+$$
+
 ```
 
 ## Implementation

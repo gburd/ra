@@ -20,11 +20,14 @@ reducing network transfer.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join[c](R, S)
-  -> Join[c](BloomFilter(R, S.keys), S)
-  where R is probe side
-  where bloom_filter_selectivity(S) > min_reduction
+  \rightarrow Join[c](BloomFilter(R, S.keys), S)
+  \text{where} R is probe side
+  \text{where} bloom_filter_selectivity(S) > min_reduction
+$$
+
 ```
 
 ## Test Cases

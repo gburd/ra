@@ -31,15 +31,20 @@ Eliminating array round-trips saves allocation and per-element overhead.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- GIN index for array containment
-sigma[tags @> ARRAY['sql']](R)
-  -> gin_index_scan[I_gin](tags @> ARRAY['sql'])
+$$
+\sigma_{tags @> ARRAY['sql'}](R)
+  \rightarrow gin_index_scan[I_gin](tags @> ARRAY['sql'])
+$$
 
 -- Simplify UNNEST + re-aggregate
-gamma[id, ARRAY_AGG(elem)](unnest(tags) AS elem, id)
-  -> pass-through(tags, id)
+$$
+\gamma_{id, ARRAY_AGG(elem)}(unnest(tags) AS elem, id)
+  \rightarrow pass-through(tags, id)
+$$
   -- UNNEST then ARRAY_AGG on same array is identity
+
 ```
 
 ## Implementation

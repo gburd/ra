@@ -29,13 +29,18 @@ local partition of N/P rows.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Naive: sort after gather
+$$
 Sort[k](Exchange[gather](R))
-  -> Sort[k](concat(R_1, R_2, ..., R_P))   -- O(N log N)
+  \rightarrow Sort[k](concat(R_1, R_2, ..., R_P))   -- O(N log N)
+$$
 
 -- Optimized: local sort + merge-sort gather
+$$
 MergeSortGather[k](Sort_local[k](R))         -- O(N log P)
+$$
+
 ```
 
 ## Implementation

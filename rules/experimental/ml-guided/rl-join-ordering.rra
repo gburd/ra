@@ -53,20 +53,29 @@ training instability, sample efficiency, and cold-start issues.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 State: S = {available_relations, join_graph, statistics}
-Action: a = (rel_i, rel_j) -- join two relations
+Action: a = (rel_i, rel_j) -- \bowtie two relations
 Reward: r = -actual_execution_time (or -estimated_cost)
-Transition: S' = S \ {rel_i, rel_j} + {rel_i join rel_j}
+Transition: S' = S \ {rel_i, rel_j} + {rel_i \bowtie rel_j}
+$$
 
-Episode: sequence of n-1 join decisions for n tables
-Policy: pi(a|S) -> probability of choosing action a in state S
+$$
+Episode: sequence of n-1 \bowtie decisions for n tables
+Policy: pi(a|S) \rightarrow probability of choosing action a in state S
+$$
 
+$$
 Optimization:
   max_pi E[sum of rewards] = max_pi E[-total_execution_time]
+$$
 
+$$
 Left-deep plans: actions are (next_table_to_join)
 Bushy plans: actions are (any pair of available relations)
+$$
+
 ```
 
 ## Implementation

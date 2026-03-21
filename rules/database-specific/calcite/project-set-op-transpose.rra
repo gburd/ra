@@ -31,12 +31,17 @@ INTERSECT, or EXCEPT.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: projection above union
-pi[a, b](R UNION ALL S)
+$$
+\pi_{a, b}(R UNION ALL S)
+$$
 
 -- After: projection pushed to each branch
-pi[a, b](R) UNION ALL pi[a, b](S)
+$$
+\pi_{a, b}(R) UNION ALL \pi_{a, b}(S)
+$$
+
 ```
 
 ## Implementation

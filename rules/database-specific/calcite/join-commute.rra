@@ -30,9 +30,12 @@ depends on which input is the outer loop.
 
 ## Relational Algebra
 
-```algebra
-R join[p] S  ->  S join[p'] R
-  where p' = swap_column_refs(p)
+```latex
+$$
+R \bowtie_{p} S  \rightarrow  S \bowtie_{p'} R
+  \text{where} p' = swap_column_refs(p)
+$$
+
 ```
 
 ## Implementation

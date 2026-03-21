@@ -37,22 +37,29 @@ reflects actual hardware characteristics.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Cost(plan) = w_cpu * Cost_CPU(plan)
            + w_io  * Cost_IO(plan)
            + w_mem * Cost_Memory(plan)
            + w_net * Cost_Network(plan)
+$$
 
+$$
 Where weights w_i reflect hardware-specific time conversion:
   w_cpu = ns_per_cpu_op / baseline
   w_io  = ms_per_page_fetch / baseline
   w_mem = ns_per_cache_miss / baseline
   w_net = ms_per_transfer / baseline
+$$
 
+$$
 Alternative: Multi-objective cost vector
   Cost_vector(plan) = (Cost_CPU, Cost_IO, Cost_Memory, Cost_Network)
   plan A dominates plan B iff all components(A) <= components(B)
     and at least one component(A) < component(B)
+$$
+
 ```
 
 ## Implementation

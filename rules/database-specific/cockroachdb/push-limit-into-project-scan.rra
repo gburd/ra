@@ -24,9 +24,12 @@ Pushes a limit through a project operator into a filtered scan, specifically for
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Limit[k](Project[cols+const](Scan[partial_index](T)))
-  -> Project[cols+const](Scan[partial_index, limit=k](T))
+  \rightarrow Project[cols+const](Scan[partial_index, limit=k](T))
+$$
+
 ```
 
 ## Implementation

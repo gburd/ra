@@ -30,10 +30,13 @@ evaluation and enables an index scan instead of a sequential scan.
 
 ## Relational Algebra
 
-```algebra
-sigma[f(col) = val](R)
-  -> expression_index_scan[I_expr](val)
-  where has_expression_index(I_expr, f(col))
+```latex
+$$
+\sigma_{f(col) = val}(R)
+  \rightarrow expression_index_scan[I_expr](val)
+  \text{where} has_expression_index(I_expr, f(col))
+$$
+
 ```
 
 ## Implementation

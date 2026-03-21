@@ -32,13 +32,18 @@ millions of rows to reading a few pages.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: expression evaluated during scan
-sigma[YEAR(order_date) = 2025](scan(orders))
+$$
+\sigma_{YEAR(order_date) = 2025}(scan(orders))
+$$
 
 -- After: matched to computed column with index
-sigma[order_year = 2025](index-seek(orders, ix_order_year))
-  where order_year IS PERSISTED AS YEAR(order_date)
+$$
+\sigma_{order_year = 2025}(index-seek(orders, ix_order_year))
+  \text{where} order_year IS PERSISTED AS YEAR(order_date)
+$$
+
 ```
 
 ## Implementation

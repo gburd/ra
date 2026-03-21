@@ -36,17 +36,22 @@ on SSD). Learning coefficients from actual measurements corrects this.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Traditional cost: hand-tuned coefficients
+$$
 cost(seq_scan(R)) = seq_page_cost * pages(R) + cpu_tuple_cost * rows(R)
 cost(index_scan(R, idx)) = random_page_cost * pages_fetched
                          + cpu_index_tuple_cost * index_rows
+$$
 
 -- Learned cost: regression model
+$$
 cost_learned(op) = model.predict(
   op_type, input_rows, output_rows, pages,
   selectivity, available_memory, hw_profile
 )
+$$
+
 ```
 
 ## Implementation

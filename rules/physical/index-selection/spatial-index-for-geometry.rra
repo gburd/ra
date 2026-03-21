@@ -41,10 +41,13 @@ subtrees of non-overlapping bounding boxes, reducing to O(log n + k).
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 filter[ST_Contains(geom, ?point)](scan[T])
-  -> spatial_index_scan[I](geom, ST_Contains, ?point)
-  where I is a spatial index on column geom
+  \rightarrow spatial_index_scan[I](geom, ST_Contains, ?point)
+  \text{where} I is a spatial index on column geom
+$$
+
 ```
 
 ## Implementation

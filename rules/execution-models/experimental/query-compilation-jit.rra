@@ -60,37 +60,48 @@ performance (optimized native code) but has significant downsides:
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Traditional JIT (HyPer):
-Query Plan -> LLVM IR -> LLVM Optimization -> Native Code -> Execute
+$$
+Query Plan \rightarrow LLVM IR \rightarrow LLVM Optimization \rightarrow Native Code \rightarrow Execute
+$$
   -- Compilation: 10-100ms
   -- Execution: 5ns/tuple (optimal)
 
 -- Adaptive (Umbra):
-Query Plan -> Bytecode
-  -> Interpret (immediate start)
-  -> After 10K tuples: JIT compile hot loop
-  -> Native Code (seamless switch)
+$$
+Query Plan \rightarrow Bytecode
+  \rightarrow Interpret (immediate start)
+  \rightarrow After 10K tuples: JIT compile hot loop
+  \rightarrow Native Code (seamless switch)
+$$
   -- First tuple latency: <1ms
   -- Steady-state: ~7ns/tuple (near-optimal)
 
 -- Cranelift:
-Query Plan -> Cranelift IR -> Cranelift Compile -> Native Code -> Execute
+$$
+Query Plan \rightarrow Cranelift IR \rightarrow Cranelift Compile \rightarrow Native Code \rightarrow Execute
+$$
   -- Compilation: 1-10ms (10x faster than LLVM)
   -- Execution: ~8ns/tuple (80% of LLVM quality)
 
 -- Weld:
-Query Plan -> Weld IR -> Weld Optimization -> LLVM IR -> Native Code
+$$
+Query Plan \rightarrow Weld IR \rightarrow Weld Optimization \rightarrow LLVM IR \rightarrow Native Code
+$$
   -- Cross-operator optimization at Weld level
   -- Then standard LLVM optimization
   -- Benefit: Weld captures data-parallel patterns
 
 -- MLIR:
-Query Plan -> Relational Dialect -> Linalg Dialect -> LLVM Dialect -> Native
+$$
+Query Plan \rightarrow Relational Dialect \rightarrow Linalg Dialect \rightarrow LLVM Dialect \rightarrow Native
+$$
   -- Progressive lowering enables level-specific optimization
   -- Relational: predicate pushdown, join reordering
   -- Linalg: loop tiling, vectorization
   -- LLVM: register allocation, instruction selection
+
 ```
 
 ## Implementation

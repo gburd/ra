@@ -25,9 +25,12 @@ parallelism, I/O patterns, etc.)
 
 ## Relational Algebra
 
-```algebra
-PHYSICAL_LHS -> PHYSICAL_RHS
-  where CONDITION
+```latex
+$$
+PHYSICAL_LHS \rightarrow PHYSICAL_RHS
+  \text{where} CONDITION
+$$
+
 ```
 
 Where:

@@ -31,12 +31,17 @@ all expressions and conditions in a single operator.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: two adjacent calcs
+$$
 Calc[prog2, cond2](Calc[prog1, cond1](R))
+$$
 
 -- After: single merged calc
+$$
 Calc[prog2(prog1), cond1 AND cond2(prog1)](R)
+$$
+
 ```
 
 ## Implementation

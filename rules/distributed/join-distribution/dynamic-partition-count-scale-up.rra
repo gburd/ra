@@ -20,11 +20,14 @@ This prevents OOM on individual nodes and improves parallelism.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Exchange[hash(k), N partitions](R)
-  -> Exchange[hash(k), M partitions](R)
-  where M = max(N, ceil(|R| / target_partition_size))
-  where M <= max_partitions
+  \rightarrow Exchange[hash(k), M partitions](R)
+  \text{where} M = \text{max}(N, ceil(|R| / target_partition_size))
+  \text{where} M <= max_partitions
+$$
+
 ```
 
 ## Test Cases

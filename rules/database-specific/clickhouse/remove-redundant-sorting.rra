@@ -24,9 +24,12 @@ Removes sorting operations when input is already sorted in a compatible order or
 
 ## Relational Algebra
 
-```algebra
-Sort[cols](R) -> R
-  where R is_sorted_by cols
+```latex
+$$
+Sort[cols](R) \rightarrow R
+  \text{where} R is_sorted_by cols
+$$
+
 ```
 
 ## Implementation

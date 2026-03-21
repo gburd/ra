@@ -53,16 +53,19 @@ Top-3 of [10, 8, 6, 4, 2]:
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- General top-K (handles retractions):
+$$
 TopK(collection, order_by, k)
   For each change (data, time, diff):
     if diff > 0: insert into full state
     if diff < 0: retract from full state, check promotions
     emit changes to top-k set
   State: O(|collection|) -- must track all elements
+$$
 
 -- Monotonic top-K (append-only):
+$$
 MonotonicTopK(collection, order_by, k)
   For each change (data, time, diff=+1):
     if heap.len < k:
@@ -76,13 +79,17 @@ MonotonicTopK(collection, order_by, k)
     else:
       // data doesn't make the cut, discard
   State: O(k) per group -- bounded
+$$
 
 -- Grouped:
+$$
 MonotonicTopK(collection, group_by, order_by, k)
   For each change (key, data, time, diff=+1):
     heap = heaps[key]
     // Same logic per group
   State: O(|groups| * k)
+$$
+
 ```
 
 ## Implementation

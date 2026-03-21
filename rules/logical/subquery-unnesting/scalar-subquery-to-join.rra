@@ -24,10 +24,13 @@ Converts scalar subqueries in SELECT list to LEFT JOIN for better optimization.
 
 ## Relational Algebra
 
-```algebra
-project[A.*, (select S.val from S where S.key = A.key)](A)
-  -> project[A.*, S.val](left_join[A.key = S.key](A, S))
-  where unique(S.key)
+```latex
+$$
+project[A.*, (select S.val from S \text{where} S.key = A.key)](A)
+  \rightarrow project[A.*, S.val](left_\bowtie_{A.key = S.key}(A, S))
+  \text{where} unique(S.key)
+$$
+
 ```
 
 ## Implementation

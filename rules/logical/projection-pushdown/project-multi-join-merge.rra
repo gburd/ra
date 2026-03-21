@@ -25,13 +25,18 @@ than the combined input schemas.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
-pi[f.name, d.year](MultiJoin(fact(id, name, amt), dim(id, year, desc, region)))
+$$
+\pi_{f.name, d.year}(MultiJoin(fact(id, name, amt), dim(id, year, desc, region)))
+$$
 
 -- After
-MultiJoin(pi[id, name](fact), pi[id, year](dim))
+$$
+MultiJoin(\pi_{id, name}(fact), \pi_{id, year}(dim))
+$$
 -- with output pi[name, year]
+
 ```
 
 ## Implementation

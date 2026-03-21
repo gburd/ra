@@ -28,10 +28,13 @@ avoiding document deserialization and random disk reads.
 
 ## Relational Algebra
 
-```algebra
-pi[f1, f2, ..., fn](sigma[p](scan(collection)))
-  -> index_only_scan(collection, index, f1..fn, p)
-  where index covers {f1..fn} union attrs(p)
+```latex
+$$
+\pi_{f1, f2, ..., fn}(\sigma_{p}(scan(collection)))
+  \rightarrow index_only_scan(collection, index, f1..fn, p)
+  \text{where} index covers {f1..fn} \cup \text{attrs}(p)
+$$
+
 ```
 
 ## Implementation

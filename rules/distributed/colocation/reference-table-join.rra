@@ -29,10 +29,13 @@ distributed table with the local copy of the reference table.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join[c](R_distributed, S_reference)
-  -> LocalJoin[c](R_i, S_local)  -- per node i
+  \rightarrow LocalJoin[c](R_i, S_local)  -- per node i
+$$
   -- No exchange needed because S is on every node
+
 ```
 
 ## Implementation

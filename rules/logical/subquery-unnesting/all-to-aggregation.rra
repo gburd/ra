@@ -24,12 +24,17 @@ Converts ALL subqueries to aggregations for more efficient evaluation.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 filter[A.x > ALL (select S.y from S)](A)
-  -> join[A.x > (select MAX(S.y) from S)](A, aggregate[MAX(y)](S))
+  \rightarrow \bowtie_{A.x > (select MAX(S.y) from S)}(A, aggregate[MAX(y)](S))
+$$
 
+$$
 filter[A.x < ALL (select S.y from S)](A)
-  -> join[A.x < (select MIN(S.y) from S)](A, aggregate[MIN(y)](S))
+  \rightarrow \bowtie_{A.x < (select MIN(S.y) from S)}(A, aggregate[MIN(y)](S))
+$$
+
 ```
 
 ## Implementation

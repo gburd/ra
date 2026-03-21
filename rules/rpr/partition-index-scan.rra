@@ -40,8 +40,9 @@ the hash-based partition grouping and the sort.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: hash partition + sort
+$$
 RowPattern(
   Sort(trade_date,
     HashPartition(symbol,
@@ -49,13 +50,17 @@ RowPattern(
   partition: [symbol],
   order: [trade_date], ...
 )
+$$
 
 -- After: index scan provides both grouping and ordering
+$$
 RowPattern(
   IndexScan(stock_prices, idx_symbol_date),
   partition: [symbol],
   order: [trade_date], ...
 )
+$$
+
 ```
 
 ## Implementation

@@ -32,14 +32,17 @@ rows are processed in order without full materialization.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join[L.k1 = R.k2](L, R)
-  -> MergeJoin[L.k1 = R.k2](
+  \rightarrow MergeJoin[L.k1 = R.k2](
        Sort[k1](L) or L if already ordered,
        Sort[k2](R) or R if already ordered
      )
-  where interesting_orderings(L) covers k1
+  \text{where} interesting_orderings(L) covers k1
      or interesting_orderings(R) covers k2
+$$
+
 ```
 
 ## Implementation

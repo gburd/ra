@@ -33,16 +33,21 @@ join's selectivity factor.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: parallel hash join
-hash-join[R.k = S.k](
+$$
+hash-\bowtie_{R.k = S.k}(
     parallel-scan(R),
     parallel-scan(S))
+$$
 
 -- After: Bloom filter applied to probe side
-hash-join[R.k = S.k](
+$$
+hash-\bowtie_{R.k = S.k}(
     parallel-scan(R),
     bloom-filter[bf(R.k)](parallel-scan(S)))
+$$
+
 ```
 
 ## Implementation

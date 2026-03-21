@@ -34,19 +34,24 @@ distributed execution contexts.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Generic join input, no specified ordering
-(inner-join
+$$
+(inner-\bowtie
   (scan orders)
   (scan customers)
   (eq order.customer_id customer.id))
+$$
 
 -- After merge join generation with explicit sort orderings
-(merge-join
+$$
+(merge-\bowtie
   (sort (scan orders) [customer_id ASC])
   (sort (scan customers) [id ASC])
   (eq order.customer_id customer.id)
   (synchronizer))
+$$
+
 ```
 
 ## Implementation Notes

@@ -38,25 +38,37 @@ avoids materializing the unnested rows and can leverage array indexes
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: lateral unnest with existence check
-sigma[EXISTS](R join_lateral unnest(R.arr) AS u(val) WHERE u.val = ?)
+$$
+\sigma_{EXISTS}(R join_lateral unnest(R.arr) AS u(val) WHERE u.val = ?)
+$$
 
 -- After: semi-join with array containment
+$$
 R semi_join (R.arr IS NOT NULL AND cardinality(R.arr) > 0)
+$$
 
 -- Or with specific value match:
+$$
 R semi_join (? = ANY(R.arr))
+$$
+
 ```
 
 ### Specific value variant
 
-```algebra
+```latex
 -- Before
-sigma[EXISTS(SELECT 1 FROM unnest(R.tags) u WHERE u = 'urgent')](R)
+$$
+\sigma_{EXISTS(SELECT 1 FROM unnest(R.tags) u WHERE u = 'urgent')}(R)
+$$
 
 -- After
-sigma['urgent' = ANY(R.tags)](R)
+$$
+\sigma_{'urgent' = ANY(R.tags)}(R)
+$$
+
 ```
 
 ## Implementation

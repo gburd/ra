@@ -21,10 +21,13 @@ savings.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Project[cols](Filter[pred](RemoteScan[table, endpoint]))
 =>
 RemoteScan[table, endpoint, pushdown_filter=pred, pushdown_project=cols]
+$$
+
 ```
 
 ## Before

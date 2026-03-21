@@ -24,10 +24,13 @@ Pushes LIMIT below projection to reduce rows before computing projections.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 limit[K](project[exprs](R))
-  -> project[exprs](limit[K](R))
-  where no_side_effects(exprs)
+  \rightarrow project[exprs](limit[K](R))
+  \text{where} no_side_effects(exprs)
+$$
+
 ```
 
 ## Implementation

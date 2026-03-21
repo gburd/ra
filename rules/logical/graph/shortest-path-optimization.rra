@@ -26,17 +26,22 @@ or recursive CTE-based shortest path queries.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: naive recursive expansion
+$$
 mu[path](
-    base: sigma[id = source](V),
-    step: path join E
+    base: \sigma_{id = source}(V),
+    step: path \bowtie E
 ) WHERE reaches(target)
+$$
 
 -- After: bidirectional BFS
+$$
 BidirectionalBFS(source, target, E,
     max_depth=unbounded,
     weight_fn=uniform)
+$$
+
 ```
 
 ## Implementation

@@ -35,13 +35,18 @@ default)
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: nested-loop join with full scan on inner
-T1 nested-loop-join[T1.fk = T2.id] (scan T2)
+$$
+T1 nested-loop-\bowtie_{T1.fk = T2.id} (scan T2)
+$$
 
 -- After: build transient index, then probe
-T1 nested-loop-join[T1.fk = T2.id]
+$$
+T1 nested-loop-\bowtie_{T1.fk = T2.id}
     (transient-index-scan[T2.id](T2))
+$$
+
 ```
 
 ## Implementation

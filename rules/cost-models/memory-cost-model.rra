@@ -37,17 +37,24 @@ build side exceeds L3).
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Cost_Memory(Op) = f(working_set, cache_hierarchy, access_pattern)
+$$
 
+$$
 Cache model:
   If working_set <= L1_size: latency = 1ns
   If working_set <= L2_size: latency = 5ns
   If working_set <= L3_size: latency = 20ns
   If working_set > L3_size:  latency = 100ns (DRAM)
+$$
 
+$$
 Bandwidth model:
-  Throughput = min(compute_rate, bandwidth / bytes_per_access)
+  Throughput = \text{min}(compute_rate, bandwidth / bytes_per_access)
+$$
+
 ```
 
 ## Implementation

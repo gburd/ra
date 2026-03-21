@@ -24,10 +24,13 @@ Creates alternate Scan expressions for each secondary index on the scanned table
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Scan[primary_index](T)
-  -> {Scan[idx](T) | idx ∈ indexes(T)}
-  where is_canonical_scan
+  \rightarrow {Scan[idx](T) | idx ∈ indexes(T)}
+  \text{where} is_canonical_scan
+$$
+
 ```
 
 ## Implementation

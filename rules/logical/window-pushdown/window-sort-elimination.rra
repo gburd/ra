@@ -22,10 +22,13 @@ When a Sort node immediately follows a Window operator and the sort order matche
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Sort[keys](Window[fns with order_by=keys](input))
-  -> Window[fns](input)
-  where keys == window_order_by(fns)
+  \rightarrow Window[fns](input)
+  \text{where} keys == window_order_by(fns)
+$$
+
 ```
 
 ## Implementation

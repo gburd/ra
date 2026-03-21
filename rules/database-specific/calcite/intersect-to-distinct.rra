@@ -31,11 +31,16 @@ while enabling aggregation optimizations like partial aggregation pushdown.
 
 ## Relational Algebra
 
-```algebra
-INTERSECT(R1, R2, ..., Rn) ->
+```latex
+$$
+INTERSECT(R1, R2, ..., Rn) \rightarrow
   π_cols(σ_count=n(γ_cols,COUNT(*)(UNION_ALL(R1, R2, ..., Rn))))
+$$
 
-where cols are all columns in the schema
+$$
+\text{where} cols are all columns in the schema
+$$
+
 ```
 
 ## Implementation

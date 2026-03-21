@@ -37,22 +37,29 @@ sufficient for choosing between grossly different access paths.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Given relation R with TCARD(R) tuples and column A with ICARD(R.A) distinct values:
+$$
 
+$$
 Selectivity formulas from Selinger et al. 1979:
+$$
 
-1. col = value           -> F = 1 / ICARD(R.A)
-2. col1 = col2           -> F = 1 / max(ICARD(R.A), ICARD(R.B))
-3. col > value           -> F = (high_key - value) / (high_key - low_key)
+$$
+1. col = value           \rightarrow F = 1 / ICARD(R.A)
+2. col1 = col2           \rightarrow F = 1 / \text{max}(ICARD(R.A), ICARD(R.B))
+3. col > value           \rightarrow F = (high_key - value) / (high_key - low_key)
                             (linear interpolation, default 1/3 if unknown)
-4. col BETWEEN v1 AND v2 -> F = (v2 - v1) / (high_key - low_key)
-5. col IN (v1, ..., vn)  -> F = min(n / ICARD(R.A), 0.5)
-6. P1 AND P2             -> F = F(P1) * F(P2)  (independence assumption)
-7. P1 OR P2              -> F = F(P1) + F(P2) - F(P1) * F(P2)
-8. NOT P                 -> F = 1 - F(P)
-9. col LIKE 'abc%'       -> F = 1/ICARD(R.A) if prefix is selective, else 1/10
-10. col IS NULL           -> F = null_frac(R.A) if known, else 1/TCARD
+4. col BETWEEN v1 AND v2 \rightarrow F = (v2 - v1) / (high_key - low_key)
+5. col IN (v1, ..., vn)  \rightarrow F = \text{min}(n / ICARD(R.A), 0.5)
+6. P1 AND P2             \rightarrow F = F(P1) * F(P2)  (independence assumption)
+7. P1 OR P2              \rightarrow F = F(P1) + F(P2) - F(P1) * F(P2)
+8. NOT P                 \rightarrow F = 1 - F(P)
+9. col LIKE 'abc%'       \rightarrow F = 1/ICARD(R.A) if prefix is selective, else 1/10
+10. col IS NULL           \rightarrow F = null_frac(R.A) if known, else 1/TCARD
+$$
+
 ```
 
 ## Implementation

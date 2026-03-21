@@ -32,12 +32,17 @@ total O(n) cost.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: sort-based group by
+$$
 sort-group-by[dept; sum=SUM(sal)](R)
+$$
 
 -- After: hash group by
+$$
 hash-group-by[dept; sum=SUM(sal)](R)
+$$
+
 ```
 
 ## Implementation

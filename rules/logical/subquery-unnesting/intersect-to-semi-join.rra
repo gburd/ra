@@ -20,8 +20,11 @@ Converts INTERSECT to semi-join
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 R INTERSECT S => SemiJoin(R, S)
+$$
+
 ```
 
 ## Implementation

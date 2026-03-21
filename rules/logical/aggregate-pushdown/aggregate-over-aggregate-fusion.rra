@@ -25,17 +25,24 @@ by outer aggregate.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 aggregate[agg_outer](aggregate[group, agg_inner](R))
-  -> aggregate[fused_agg](R)
-  where can_fuse(agg_outer, agg_inner)
+  \rightarrow aggregate[fused_agg](R)
+  \text{where} can_fuse(agg_outer, agg_inner)
+$$
 
+$$
 Example:
 COUNT(*) over SUM(x) GROUP BY g
-  -> Cannot fuse (different semantics)
+  \rightarrow Cannot fuse (different semantics)
+$$
 
+$$
 SUM(COUNT(*))
-  -> COUNT(*) (if grouping allows)
+  \rightarrow COUNT(*) (if grouping allows)
+$$
+
 ```
 
 ## Implementation

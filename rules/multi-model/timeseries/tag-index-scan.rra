@@ -29,10 +29,13 @@ data, avoids reading data from non-matching series entirely.
 
 ## Relational Algebra
 
-```algebra
-sigma[tag = value](scan(measurement))
-  -> series_filter(tag, value, measurement)
-  where tag_index(measurement, tag) exists
+```latex
+$$
+\sigma_{tag = value}(scan(measurement))
+  \rightarrow series_filter(tag, value, measurement)
+  \text{where} tag_index(measurement, tag) exists
+$$
+
 ```
 
 ## Implementation

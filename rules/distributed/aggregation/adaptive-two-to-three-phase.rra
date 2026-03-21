@@ -26,24 +26,29 @@ effective for the actual data distribution.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Two-phase (initial plan)
-gamma[g, merge_agg(partial)](
+$$
+\gamma_{g, merge_agg(partial)}(
     Exchange[hash(g)](
-        gamma[g, partial_agg(a)](R)
+        \gamma_{g, partial_agg(a)}(R)
     )
 )
+$$
 
 -- Upgraded to three-phase at runtime
-gamma[g, merge_agg(partial_2)](
+$$
+\gamma_{g, merge_agg(partial_2)}(
     Exchange[hash(g)](
-        gamma[g, merge_agg(partial_1)](
+        \gamma_{g, merge_agg(partial_1)}(
             Exchange[hash(salt(g))](
-                gamma[g, partial_agg(a)](R)
+                \gamma_{g, partial_agg(a)}(R)
             )
         )
     )
 )
+$$
+
 ```
 
 ## Test Cases

@@ -32,16 +32,21 @@ right-to-left visits 5^5 = 3,125 nodes instead of 100^5 = 10 billion nodes.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: left-to-right expansion (high branching)
+$$
 var-length-expand(a, :FOLLOWS, outgoing, 1..5, b)
-  where degree(a, :FOLLOWS, out) = 100
+  \text{where} degree(a, :FOLLOWS, out) = 100
+$$
 
 -- After: right-to-left expansion (low branching)
+$$
 var-length-expand(b, :FOLLOWS, incoming, 1..5, a)
-  where degree(b, :FOLLOWS, in) = 5
+  \text{where} degree(b, :FOLLOWS, in) = 5
+$$
 
 -- Same result set, dramatically fewer nodes visited
+
 ```
 
 ## Implementation

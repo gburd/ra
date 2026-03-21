@@ -37,13 +37,18 @@ line utilization and SIMD vectorization.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: row-mode hash aggregate
-row_mode_gamma[region; SUM(sales)](scan(orders))
+$$
+row_mode_\gamma_{region; SUM(sales)}(scan(orders))
+$$
 
 -- After: batch-mode hash aggregate
-batch_mode_gamma[region; SUM(sales)](
+$$
+batch_mode_\gamma_{region; SUM(sales)}(
     batch_scan(orders))
+$$
+
 ```
 
 ## Implementation

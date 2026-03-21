@@ -32,16 +32,23 @@ CPU and I/O for selective change streams.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: full oplog scan with post-filter
-sigma[operationType = "insert"](oplog-scan(resume_token))
+$$
+\sigma_{operationType = "insert"}(oplog-scan(resume_token))
+$$
 
 -- After: filtered oplog cursor
+$$
 oplog-scan(resume_token, filter=[op = "i"])
+$$
 
 -- With namespace filter:
-sigma[ns.coll = "orders"](oplog-scan(token))
+$$
+\sigma_{ns.coll = "orders"}(oplog-scan(token))
   => oplog-scan(token, ns_filter="orders")
+$$
+
 ```
 
 ## Implementation

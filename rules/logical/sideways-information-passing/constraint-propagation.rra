@@ -25,18 +25,27 @@ declared integrity constraints.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: redundant predicate (CHECK age >= 0 exists)
-sigma[age >= 0](employees)
+$$
+\sigma_{age >= 0}(employees)
+$$
 
 -- After: predicate eliminated
+$$
 employees
+$$
 
 -- Before: FK-guaranteed join
-pi[o.id, o.amount](orders o JOIN customers c ON o.cust_id = c.id)
+$$
+\pi_{o.id, o.amount}(orders o JOIN customers c ON o.cust_id = c.id)
+$$
 
 -- After: join eliminated (FK guarantees match, only order cols used)
-pi[id, amount](orders)
+$$
+\pi_{id, amount}(orders)
+$$
+
 ```
 
 ## Implementation

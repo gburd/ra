@@ -22,9 +22,12 @@ Converts `x = ANY (subquery)` into a semi-join. This is semantically equivalent 
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Filter[col = ANY(subquery)](input)
-  -> SemiJoin[col = sub.col](input, subquery)
+  \rightarrow SemiJoin[col = sub.col](input, subquery)
+$$
+
 ```
 
 ## Implementation

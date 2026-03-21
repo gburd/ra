@@ -24,9 +24,12 @@ Optimizes queries with both primary key predicates and LIMIT by using the sparse
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Limit[k](Filter[pk_pred](Scan[MergeTree](T)))
-  -> Scan[MergeTree, pk_pred, limit=k](T)
+  \rightarrow Scan[MergeTree, pk_pred, limit=k](T)
+$$
+
 ```
 
 ## Implementation

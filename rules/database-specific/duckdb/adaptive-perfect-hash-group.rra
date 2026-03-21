@@ -36,13 +36,18 @@ array-indexable keys, each group lookup is a single array access.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: standard hash aggregation
-gamma[status; SUM(amount)](orders)
+$$
+\gamma_{status; SUM(amount)}(orders)
+$$
 
 -- After: perfect hash aggregation (array-indexed)
-perfect_hash_gamma[status; SUM(amount)](orders)
-  where |domain(status)| <= 256
+$$
+perfect_hash_\gamma_{status; SUM(amount)}(orders)
+  \text{where} |domain(status)| <= 256
+$$
+
 ```
 
 ## Implementation

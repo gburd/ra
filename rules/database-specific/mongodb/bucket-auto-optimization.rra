@@ -31,13 +31,18 @@ keys to estimate boundaries, where b is bucket count and k is oversample factor.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: full scan to compute bucket boundaries
-gamma[bucket(amount, boundaries)](scan(orders))
+$$
+\gamma_{bucket(amount, boundaries)}(scan(orders))
+$$
 
 -- After: index-assisted bucket boundary computation
-gamma[bucket(amount, boundaries)](
+$$
+\gamma_{bucket(amount, boundaries)}(
   index-sample-scan(idx_amount, sample_size=buckets*10))
+$$
+
 ```
 
 ## Implementation

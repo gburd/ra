@@ -42,10 +42,13 @@ columns means 97% less I/O.
 
 ## Relational Algebra
 
-```algebra
-gamma[g; SUM(x)](scan[T])
-  -> gamma[g; SUM(x)](columnstore_scan[I](g, x))
-  where I is a columnstore index covering g and x
+```latex
+$$
+\gamma_{g; SUM(x)}(scan[T])
+  \rightarrow \gamma_{g; SUM(x)}(columnstore_scan[I](g, x))
+  \text{where} I is a columnstore index covering g and x
+$$
+
 ```
 
 ## Implementation

@@ -32,12 +32,17 @@ table lock.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: row-level locks on full scan
+$$
 scan(table, lock=ROW)  -- millions of lock acquire/release
+$$
 
 -- After: table-level lock
+$$
 scan(table, lock=TABLE)  -- single lock acquire/release
+$$
+
 ```
 
 ## Implementation

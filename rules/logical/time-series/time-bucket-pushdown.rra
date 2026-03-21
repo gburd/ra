@@ -25,16 +25,21 @@ grouping on partitioned time-series tables.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
-gamma[time_bucket('1h', ts); SUM(val)](HyperTable)
+$$
+\gamma_{time_bucket('1h', ts); SUM(val)}(HyperTable)
+$$
 
 -- After: push to chunks, merge
+$$
 gamma_merge[bucket; SUM](
-    chunk1: gamma[time_bucket('1h', ts); SUM(val)](Chunk_2024_01),
-    chunk2: gamma[time_bucket('1h', ts); SUM(val)](Chunk_2024_02),
+    chunk1: \gamma_{time_bucket('1h', ts); SUM(val)}(Chunk_2024_01),
+    chunk2: \gamma_{time_bucket('1h', ts); SUM(val)}(Chunk_2024_02),
     ...
 )
+$$
+
 ```
 
 ## Implementation

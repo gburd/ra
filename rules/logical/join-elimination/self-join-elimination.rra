@@ -24,10 +24,13 @@ Eliminates self-joins when table is joined to itself with equivalent conditions.
 
 ## Relational Algebra
 
-```algebra
-join[t1.key = t2.key](scan[T as t1], scan[T as t2])
-  -> scan[T]
-  where equivalent_columns(t1.key, t2.key)
+```latex
+$$
+\bowtie_{t1.key = t2.key}(scan[T as t1], scan[T as t2])
+  \rightarrow scan[T]
+  \text{where} equivalent_columns(t1.key, t2.key)
+$$
+
 ```
 
 ## Implementation

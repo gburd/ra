@@ -25,12 +25,17 @@ materialization.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
-pi[a, b+1 AS c](Calc[filter=x>0; project=a, b, x](R))
+$$
+\pi_{a, b+1 AS c}(Calc[filter=x>0; project=a, b, x](R))
+$$
 
 -- After
+$$
 Calc[filter=x>0; project=a, b+1 AS c](R)
+$$
+
 ```
 
 ## Implementation

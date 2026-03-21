@@ -33,12 +33,17 @@ be immediately discarded.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: materialize all, then filter
-sigma[event_time > mz_now() - INTERVAL '1 hour'](arrangement(S))
+$$
+\sigma_{event_time > mz_now() - INTERVAL '1 hour'}(arrangement(S))
+$$
 
 -- After: temporal frontier applied to arrangement
+$$
 arrangement(S, since = mz_now() - INTERVAL '1 hour')
+$$
+
 ```
 
 ## Implementation

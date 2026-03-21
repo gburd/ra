@@ -30,18 +30,23 @@ without any cross-node communication.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- With PARTITION BY:
+$$
 Window[f OVER (PARTITION BY k ORDER BY s)](R)
-  -> Window_local[f OVER (ORDER BY s)](
+  \rightarrow Window_local[f OVER (ORDER BY s)](
        Exchange[hash(k)](R)
      )
+$$
 
 -- Without PARTITION BY (global window):
+$$
 Window[f OVER (ORDER BY s)](R)
-  -> Window_local[f OVER (ORDER BY s)](
+  \rightarrow Window_local[f OVER (ORDER BY s)](
        Exchange[gather](R)
      )
+$$
+
 ```
 
 ## Implementation

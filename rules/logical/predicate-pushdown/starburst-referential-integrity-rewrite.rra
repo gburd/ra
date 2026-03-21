@@ -51,26 +51,35 @@ existence is redundant -- the constraint already guarantees it.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Pattern 1: Join Elimination
-  Given: FK(R.a -> S.pk) AND R.a IS NOT NULL
+  Given: FK(R.a \rightarrow S.pk) AND R.a IS NOT NULL
   Query: pi_{cols_from_R}(R join_{R.a = S.pk} S)
   Rewrite: pi_{cols_from_R}(R)
+$$
 
+$$
 Pattern 2: Semi-Join Elimination
-  Given: FK(R.a -> S.pk) AND R.a IS NOT NULL
+  Given: FK(R.a \rightarrow S.pk) AND R.a IS NOT NULL
   Query: R semi-join_{R.a = S.pk} S
-  Rewrite: R (the semi-join is always true)
+  Rewrite: R (the semi-\bowtie is always true)
+$$
 
+$$
 Pattern 3: Anti-Join Elimination
-  Given: FK(R.a -> S.pk) AND R.a IS NOT NULL
+  Given: FK(R.a \rightarrow S.pk) AND R.a IS NOT NULL
   Query: R anti-join_{R.a = S.pk} S
   Rewrite: empty (FK guarantees no non-matches)
+$$
 
+$$
 Pattern 4: Predicate Migration
-  Given: FK(R.a -> S.pk) AND CHECK(S.col > 0)
-  Query: sigma_{S.col > 0}(R join S)
-  Rewrite: R join S (predicate always satisfied by constraint)
+  Given: FK(R.a \rightarrow S.pk) AND CHECK(S.col > 0)
+  Query: sigma_{S.col > 0}(R \bowtie S)
+  Rewrite: R \bowtie S (predicate always satisfied by constraint)
+$$
+
 ```
 
 ## Implementation

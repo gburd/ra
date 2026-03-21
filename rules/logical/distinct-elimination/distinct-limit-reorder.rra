@@ -22,10 +22,13 @@ When DISTINCT is followed by a small LIMIT, reorder to apply LIMIT first (as a h
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Limit[N](Distinct(input))
-  -> Limit[N](Distinct_Streaming[N](input))
-  where N < streaming_threshold
+  \rightarrow Limit[N](Distinct_Streaming[N](input))
+  \text{where} N < streaming_threshold
+$$
+
 ```
 
 ## Implementation

@@ -24,16 +24,21 @@ for the exchange, and the aggregate function is decomposable.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
-sort[g](gamma[g, agg(a)](Exchange[range(g)](R)))
+$$
+sort[g](\gamma_{g, agg(a)}(Exchange[range(g)](R)))
+$$
 
 -- After
-sort[g](gamma[g, merge_agg(partial)](
+$$
+sort[g](\gamma_{g, merge_agg(partial)}(
     Exchange[range(g)](
-        gamma[g, partial_agg(a)](R)
+        \gamma_{g, partial_agg(a)}(R)
     )
 ))
+$$
+
 ```
 
 ## Test Cases

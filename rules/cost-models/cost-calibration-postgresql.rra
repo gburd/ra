@@ -38,23 +38,32 @@ environment.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 PostgreSQL cost formula:
   Cost(SeqScan(R)) = seq_page_cost * pages(R) + cpu_tuple_cost * rows(R)
+$$
 
+$$
   Cost(IndexScan(R, I, F)) =
     random_page_cost * index_pages(I, F)
     + seq_page_cost * heap_pages_fetched(R, F)
     + cpu_index_tuple_cost * index_tuples(I, F)
     + cpu_tuple_cost * rows_fetched(R, F)
+$$
 
+$$
   Cost(HashJoin(R, S)) =
     Cost(R) + Cost(S)
     + cpu_operator_cost * rows(R)  -- hash computation
     + cpu_tuple_cost * join_output_rows
+$$
 
+$$
   Cost(Parallel) =
     parallel_setup_cost + parallel_tuple_cost * rows / workers
+$$
+
 ```
 
 ## Implementation

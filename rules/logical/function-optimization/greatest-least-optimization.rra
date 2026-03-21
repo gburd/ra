@@ -24,13 +24,16 @@ arguments, or single arguments.
 
 ## Relational Algebra
 
-```algebra
-GREATEST(x)                -> x
-GREATEST(x, x)             -> x
-GREATEST(x, NULL)           -> x  (NULL-skipping semantics, PostgreSQL)
-GREATEST(const1, const2)    -> MAX(const1, const2)  -- constant fold
-LEAST(x)                   -> x
-GREATEST(GREATEST(a, b), c) -> GREATEST(a, b, c)  -- flatten
+```latex
+$$
+GREATEST(x)                \rightarrow x
+GREATEST(x, x)             \rightarrow x
+GREATEST(x, NULL)           \rightarrow \times (NULL-skipping semantics, PostgreSQL)
+GREATEST(const1, const2)    \rightarrow MAX(const1, const2)  -- constant fold
+LEAST(x)                   \rightarrow x
+GREATEST(GREATEST(a, b), c) \rightarrow GREATEST(a, b, c)  -- flatten
+$$
+
 ```
 
 ## Implementation

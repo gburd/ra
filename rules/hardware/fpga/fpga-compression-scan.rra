@@ -34,11 +34,14 @@ volume crosses the bus.
 
 ## Relational Algebra
 
-```algebra
-sigma[p](decompress(R)) -> fpga_decompress_filter[p](R)
-  where R is compressed
+```latex
+$$
+\sigma_{p}(decompress(R)) \rightarrow fpga_decompress_filter[p](R)
+  \text{where} R is compressed
     AND compression(R) in {LZ4, RLE, DELTA, DICT}
     AND p is fpga_synthesizable
+$$
+
 ```
 
 ## Implementation

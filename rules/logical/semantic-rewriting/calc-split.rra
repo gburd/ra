@@ -30,12 +30,17 @@ exposes these patterns for matching.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: combined Calc
+$$
 Calc[proj={a, b+1}, filter={c > 10}](R)
+$$
 
 -- After: separate Project and Filter
-pi[a, b+1](sigma[c > 10](R))
+$$
+\pi_{a, b+1}(\sigma_{c > 10}(R))
+$$
+
 ```
 
 ## Implementation

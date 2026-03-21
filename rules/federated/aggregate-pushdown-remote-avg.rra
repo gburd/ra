@@ -21,12 +21,15 @@ then compute AVG = SUM/COUNT locally.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Aggregate[AVG(col)](RemoteScan[table, endpoint])
 =>
 Project[partial_sum / partial_count AS avg](
   RemoteScan[table, endpoint,
     pushdown_agg=[SUM(col) AS partial_sum, COUNT(col) AS partial_count]])
+$$
+
 ```
 
 ## Before

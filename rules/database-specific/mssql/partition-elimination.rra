@@ -30,13 +30,18 @@ avoids reading their data pages entirely, proportionally reducing I/O.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: scan all partitions
-sigma[order_date >= '2025-01-01'](scan(orders, all_partitions))
+$$
+\sigma_{order_date >= '2025-01-01'}(scan(orders, all_partitions))
+$$
 
 -- After: partition elimination
-sigma[order_date >= '2025-01-01'](
+$$
+\sigma_{order_date >= '2025-01-01'}(
     scan(orders, partitions=[2025_Q1, 2025_Q2, ...]))
+$$
+
 ```
 
 ## Implementation

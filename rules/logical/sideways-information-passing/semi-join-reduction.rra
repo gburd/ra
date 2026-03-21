@@ -24,15 +24,18 @@ expensive and selectivity is low enough to justify the extra round-trip.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: ship R or S entirely
-R@site1 join[k] S@site2
+$$
+R@site1 \bowtie_{k} S@site2
+$$
 
 -- After: semi-join program
 -- Step 1: ship pi[k](R) to site2
 -- Step 2: S_reduced = S semijoin pi[k](R)
 -- Step 3: ship S_reduced to site1
 -- Step 4: R join S_reduced
+
 ```
 
 ## Implementation

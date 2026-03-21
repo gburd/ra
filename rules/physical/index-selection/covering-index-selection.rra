@@ -31,10 +31,13 @@ Selects index that includes all query columns, enabling index-only scan without 
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 project[cols](filter[pred](scan[T]))
-  -> index_only_scan[I](pred, cols)
-  where index_covers(I, cols ∪ columns(pred))
+  \rightarrow index_only_scan[I](pred, cols)
+  \text{where} index_covers(I, cols ∪ columns(pred))
+$$
+
 ```
 
 ## Implementation

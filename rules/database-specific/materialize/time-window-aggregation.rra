@@ -34,17 +34,22 @@ automatically as the system time advances.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: unbounded arrangement + late temporal filter
-gamma[count(*)](
-  sigma[ts > now() - 1h](
+$$
+\gamma_{count(*)}(
+  \sigma_{ts > now() - 1h}(
     arrangement(events)))
+$$
 
 -- After: temporally-bounded arrangement
-gamma[count(*)](
+$$
+\gamma_{count(*)}(
   temporal-arrangement(events, window=1h, key=ts))
+$$
 
 -- Arrangement size bounded by O(events_per_hour) instead of O(total_events)
+
 ```
 
 ## Implementation

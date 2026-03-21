@@ -33,12 +33,17 @@ the deduplication work across threads.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: explicit distinct
-delta(pi[a, b, c](R))
+$$
+delta(\pi_{a, b, c}(R))
+$$
 
 -- After: group by
-gamma[a, b, c](R)
+$$
+\gamma_{a, b, c}(R)
+$$
+
 ```
 
 ## Implementation

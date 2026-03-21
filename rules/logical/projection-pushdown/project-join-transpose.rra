@@ -29,16 +29,21 @@ for hash tables and sort buffers.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: wide project above join
-pi[L.a, R.x](L JOIN[L.k = R.k] R)
-  where L has columns {a, b, c, k}
+$$
+\pi_{L.a, R.x}(L JOIN[L.k = R.k] R)
+  \text{where} L has columns {a, b, c, k}
   and R has columns {x, y, z, k}
+$$
 
 -- After: narrow inputs to join
-pi[L.a, R.x](
-    pi[a, k](L) JOIN[k = k] pi[x, k](R)
+$$
+\pi_{L.a, R.x}(
+    \pi_{a, k}(L) JOIN[k = k] \pi_{x, k}(R)
 )
+$$
+
 ```
 
 ## Implementation

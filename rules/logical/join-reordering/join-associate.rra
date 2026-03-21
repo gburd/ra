@@ -27,8 +27,11 @@ Reorders joins associatively
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join(Join(R, S), T) <=> Join(R, Join(S, T))
+$$
+
 ```
 
 ## Implementation

@@ -32,12 +32,17 @@ first match, reducing I/O and memory.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: inner join with projection on left only
-pi[R.*](R join[R.k = S.k] S)
+$$
+\pi_{R.*}(R \bowtie_{R.k = S.k} S)
+$$
 
 -- After: semi-join
-R semi-join[R.k = S.k] S
+$$
+R semi-\bowtie_{R.k = S.k} S
+$$
+
 ```
 
 ## Implementation

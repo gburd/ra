@@ -32,14 +32,19 @@ temp table to eliminate duplicates after a regular join.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Semi-join with FirstMatch strategy
+$$
 outer firstmatch[o.id = i.fk] inner
+$$
 -- Stops scanning inner after first match per outer row
 
 -- Semi-join with LooseScan strategy
+$$
 outer loosescan[o.id = i.fk, index=idx_fk] inner
+$$
 -- Scans only distinct values from inner's index
+
 ```
 
 ## Implementation

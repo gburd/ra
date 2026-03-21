@@ -34,16 +34,21 @@ allocate resources to maximize overall utility.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Input: queue of queries with priorities/SLOs
+$$
 queue = [(Q1, SLO=100ms), (Q2, SLO=10s), (Q3, SLO=1s)]
+$$
 
 -- Scheduling decision:
+$$
 schedule(queue) = [
   (Q1, resources={cores: 1, memory: 64MB}, priority: high),
   (Q3, resources={cores: 2, memory: 256MB}, priority: medium),
   (Q2, resources={cores: 4, memory: 2GB}, priority: low, queue: true)
 ]
+$$
+
 ```
 
 ## Implementation

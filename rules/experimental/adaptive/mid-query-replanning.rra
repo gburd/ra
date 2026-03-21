@@ -35,18 +35,23 @@ they cascade.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Original plan: left-deep join tree
+$$
 scan(R) hash_join scan(S) hash_join scan(T) hash_join scan(U)
+$$
 
 -- With checkpoints:
+$$
 checkpoint[est=1000](
   scan(R) hash_join scan(S)
 ) hash_join scan(T) hash_join scan(U)
+$$
 
 -- If checkpoint observes 50000 rows (50x error):
 -- Re-optimize: scan(T) hash_join scan(U) hash_join materialized(50000)
 -- May choose different join order or algorithm
+
 ```
 
 ## Implementation

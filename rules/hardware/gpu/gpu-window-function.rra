@@ -34,11 +34,14 @@ functions use GPU sort followed by position assignment.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 window[partition_by; order_by; agg()](R)
-  -> gpu_window[partition_by; order_by; agg()](R)
-  where |R| > threshold
+  \rightarrow gpu_window[partition_by; order_by; agg()](R)
+  \text{where} |R| > threshold
     AND agg in {ROW_NUMBER, RANK, SUM, AVG, MIN, MAX, LEAD, LAG}
+$$
+
 ```
 
 ## Implementation

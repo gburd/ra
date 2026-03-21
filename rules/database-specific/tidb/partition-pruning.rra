@@ -24,10 +24,13 @@ range or hash partitioned tables.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Filter[pred](Scan[partitioned_table])
-  -> Filter[pred](Union(Scan[partition_1], ..., Scan[partition_k]))
-  where only k of n partitions satisfy pred
+  \rightarrow Filter[pred](Union(Scan[partition_1], ..., Scan[partition_k]))
+  \text{where} only k of n partitions satisfy pred
+$$
+
 ```
 
 ## Implementation

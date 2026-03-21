@@ -30,10 +30,13 @@ directly skips the decode step and reads the deltas as-is.
 
 ## Relational Algebra
 
-```algebra
-pi[ts, value - lag(value) OVER (ORDER BY ts)](scan(table))
-  -> delta_scan(table, column)
-  where column is delta-encoded in storage
+```latex
+$$
+\pi_{ts, value - lag(value) OVER (ORDER BY ts)}(scan(table))
+  \rightarrow delta_scan(table, column)
+  \text{where} column is delta-encoded in storage
+$$
+
 ```
 
 ## Implementation

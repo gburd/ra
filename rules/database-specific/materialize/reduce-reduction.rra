@@ -32,14 +32,19 @@ aggregations distributes work and reduces per-update latency.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: single global reduce
-gamma[; sum=SUM(a)](S)
+$$
+\gamma_{; sum=SUM(a)}(S)
+$$
 
 -- After: hierarchical reduction (2-level example)
-gamma[; sum=SUM(partial_sum)](
-    gamma[bucket; partial_sum=SUM(a)](
+$$
+\gamma_{; sum=SUM(partial_sum)}(
+    \gamma_{bucket; partial_sum=SUM(a)}(
         map[bucket = hash(key) % B](S)))
+$$
+
 ```
 
 ## Implementation

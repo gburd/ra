@@ -24,9 +24,12 @@ Removes DISTINCT operation when input is already unique on the projected columns
 
 ## Relational Algebra
 
-```algebra
-Distinct[cols](R) -> R
-  where cols ⊇ unique_key(R)
+```latex
+$$
+Distinct[cols](R) \rightarrow R
+  \text{where} cols ⊇ unique_key(R)
+$$
+
 ```
 
 ## Implementation

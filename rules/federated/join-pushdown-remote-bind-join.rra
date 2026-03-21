@@ -23,17 +23,22 @@ Also known as "dependent join" or "nested loop with pushdown".
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join[cond](LocalScan[t1], RemoteScan[t2, endpoint])
 =>
 BindJoin[batch_size=1000](
   LocalScan[t1],
   RemoteScan[t2, endpoint,
     parameterized_filter=cond])
+$$
 
+$$
 Preconditions:
   - Local table is small (< 10K rows)
   - Remote supports parameterized queries
+$$
+
 ```
 
 ## Before

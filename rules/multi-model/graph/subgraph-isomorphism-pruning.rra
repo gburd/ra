@@ -30,10 +30,13 @@ source.
 
 ## Relational Algebra
 
-```algebra
-match(a-[e1]->b-[e2]->c) with isomorphism
-  -> match(a-[e1]->b-[e2]->c) AND a != b AND b != c AND a != c
+```latex
+$$
+match(a-[e1]\rightarrowb-[e2]\rightarrowc) with isomorphism
+  \rightarrow match(a-[e1]\rightarrowb-[e2]\rightarrowc) AND a != b AND b != c AND a != c
+$$
   -- Inject inequality constraints at earliest possible point
+
 ```
 
 ## Implementation

@@ -32,10 +32,13 @@ pushing it below computes it once per input row. The alternative
 
 ## Relational Algebra
 
-```algebra
-pi[f(a), agg(b)](gamma[f(a)](R))
-  -> pi[fa, agg(b)](gamma[fa](pi[f(a) AS fa, b](R)))
-  where is_deterministic(f)
+```latex
+$$
+\pi_{f(a), agg(b)}(\gamma_{f(a)}(R))
+  \rightarrow \pi_{fa, agg(b)}(\gamma_{fa}(\pi_{f(a) AS fa, b}(R)))
+  \text{where} is_deterministic(f)
+$$
+
 ```
 
 ## Implementation

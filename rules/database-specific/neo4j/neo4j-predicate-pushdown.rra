@@ -20,12 +20,17 @@ Pushes WHERE clauses before graph pattern expansion.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
+$$
 (expand (filter (scan users) (age > 18)) :FOLLOWS)
+$$
 
 -- After
+$$
 (filter (expand (scan users) :FOLLOWS) (age > 18))
+$$
+
 ```
 
 ## Preconditions

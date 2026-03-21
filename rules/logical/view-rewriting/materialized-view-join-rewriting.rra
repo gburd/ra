@@ -30,13 +30,18 @@ join.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Query
-pi[a, b](R JOIN S ON R.id = S.rid WHERE R.x > 10)
+$$
+\pi_{a, b}(R JOIN S ON R.id = S.rid WHERE R.x > 10)
+$$
 
 -- Materialized View MV = R JOIN S ON R.id = S.rid
 -- Rewrite
-pi[a, b](sigma[x > 10](MV))
+$$
+\pi_{a, b}(\sigma_{x > 10}(MV))
+$$
+
 ```
 
 ## Implementation

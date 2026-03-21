@@ -43,12 +43,17 @@ that simpler algorithms cannot.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: arbitrary join order
+$$
 ((A JOIN B) JOIN C) JOIN D
+$$
 
 -- After: optimal join order (example)
+$$
 (A JOIN D) JOIN (B JOIN C)
+$$
+
 ```
 
 ## Implementation

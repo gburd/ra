@@ -31,13 +31,18 @@ strings have equal offsets, enabling integer-based comparison.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: string equality comparison
-sigma[name = 'Alice'](scan(users.name))
+$$
+\sigma_{name = 'Alice'}(scan(users.name))
+$$
 
 -- After: offset comparison (deduplicated heap)
+$$
 offset = heap_lookup('Alice')
-sigma[name_offset = offset](scan(users.name_offsets))
+\sigma_{name_offset = offset}(scan(users.name_offsets))
+$$
+
 ```
 
 ## Implementation

@@ -29,12 +29,17 @@ columns before the set op does not change semantics but reduces tuple width.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
-pi[c1, c3](R1 UNION R2)
+$$
+\pi_{c1, c3}(R1 UNION R2)
+$$
 
 -- After
-(pi[c1, c3](R1)) UNION (pi[c1, c3](R2))
+$$
+(\pi_{c1, c3}(R1)) UNION (\pi_{c1, c3}(R2))
+$$
+
 ```
 
 ## Implementation

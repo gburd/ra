@@ -31,12 +31,17 @@ grows and evicts, reducing memory and update cost.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: standard TopK
+$$
 topk[ORDER BY ts DESC LIMIT k](source_monotonic)
+$$
 
 -- After: monotonic TopK
+$$
 monotonic-topk[ORDER BY ts DESC LIMIT k](source_monotonic)
+$$
+
 ```
 
 ## Implementation

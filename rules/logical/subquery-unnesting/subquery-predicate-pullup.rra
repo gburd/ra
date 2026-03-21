@@ -22,10 +22,13 @@ Pulls filter predicates from inside a subquery to the outer query when the predi
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Filter[EXISTS(Filter[outer_pred AND inner_pred](sub))](input)
-  -> Filter[outer_pred](Filter[EXISTS(Filter[inner_pred](sub))](input))
-  where references_only_outer(outer_pred)
+  \rightarrow Filter[outer_pred](Filter[EXISTS(Filter[inner_pred](sub))](input))
+  \text{where} references_only_outer(outer_pred)
+$$
+
 ```
 
 ## Implementation

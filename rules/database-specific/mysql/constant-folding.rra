@@ -31,13 +31,18 @@ transitive closure.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: constant in equality chain
-sigma[a = 5 AND a = b](A join B)
+$$
+\sigma_{a = 5 AND a = b}(A \bowtie B)
+$$
 
 -- After: constant propagated
-sigma[a = 5 AND b = 5](A join B)
+$$
+\sigma_{a = 5 AND b = 5}(A \bowtie B)
+$$
 -- Enables index lookup on both a and b
+
 ```
 
 ## Implementation

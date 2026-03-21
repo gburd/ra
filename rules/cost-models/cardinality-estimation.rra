@@ -36,24 +36,43 @@ can propagate row counts through the plan tree.
 
 ## Relational Algebra
 
-```algebra
-Card(R) = |R|  (base table cardinality from catalog)
+```latex
+$$
+\text{Card}(R) = |R|  (base table cardinality from catalog)
+$$
 
-Card(sigma[p](R)) = Card(R) * selectivity(p)
+$$
+\text{Card}(\sigma_{p}(R)) = \text{Card}(R) * \text{selectivity}(p)
+$$
 
-Card(R x S) = Card(R) * Card(S)
+$$
+\text{Card}(R \times S) = \text{Card}(R) * \text{Card}(S)
+$$
 
-Card(R join[R.a = S.b] S) = Card(R) * Card(S) / max(NDV(R.a), NDV(S.b))
+$$
+\text{Card}(R \bowtie_{R.a = S.b} S) = \text{Card}(R) * \text{Card}(S) / \text{max}(\text{NDV}(R.a), \text{NDV}(S.b))
+$$
 
-Card(pi[cols](R)) = Card(R)  (projection does not change row count)
+$$
+\text{Card}(\pi_{cols}(R)) = \text{Card}(R)  (projection does not change row count)
+$$
 
-Card(gamma[G, agg](R)) = min(Card(R), product(NDV(g) for g in G))
+$$
+\text{Card}(\gamma_{G, agg}(R)) = \text{min}(\text{Card}(R), \text{product}(\text{NDV}(g) for g in G))
+$$
 
-Card(R union S) = Card(R) + Card(S)  (bag semantics)
+$$
+\text{Card}(R \cup S) = \text{Card}(R) + \text{Card}(S)  (bag semantics)
+$$
 
-Card(R intersect S) = min(Card(R), Card(S)) * estimated_overlap
+$$
+\text{Card}(R \cap S) = \text{min}(\text{Card}(R), \text{Card}(S)) * estimated_overlap
+$$
 
-Card(R except S) = Card(R) * (1 - estimated_overlap)
+$$
+\text{Card}(R \setminus S) = \text{Card}(R) * (1 - estimated_overlap)
+$$
+
 ```
 
 ## Implementation

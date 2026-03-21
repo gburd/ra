@@ -31,10 +31,13 @@ as outer, this is efficient for selective joins.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Index nested-loop join
+$$
 for each row r in outer:
     lookup(inner, index, r.join_key)
+$$
+
 ```
 
 ## Implementation

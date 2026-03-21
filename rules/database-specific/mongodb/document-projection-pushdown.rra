@@ -33,15 +33,20 @@ are read from storage.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: full document scan, late projection
-pi[name, email](sigma[status = "active"](scan(users)))
+$$
+\pi_{name, email}(\sigma_{status = "active"}(scan(users)))
+$$
 
 -- After: early projection pushed to scan
-pi[name, email](sigma[status = "active"](
+$$
+\pi_{name, email}(\sigma_{status = "active"}(
   scan(users, projection={name: 1, email: 1, status: 1})))
+$$
 
 -- status included because filter needs it, then dropped after filter
+
 ```
 
 ## Implementation

@@ -29,15 +29,20 @@ scan efficiently finds all matching rows.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 filter[col LIKE 'prefix%'](R)
-  -> filter[col >= 'prefix' AND col < successor('prefix')](R)
-  where successor('abc') = 'abd' (increment last character)
+  \rightarrow filter[col >= 'prefix' AND col < successor('prefix')](R)
+  \text{where} successor('abc') = 'abd' (increment last character)
+$$
 
+$$
 filter[col LIKE 'prefix_suffix%'](R)
-  -> filter[col >= 'prefix' AND col < successor('prefix')
+  \rightarrow filter[col >= 'prefix' AND col < successor('prefix')
             AND col LIKE 'prefix_suffix%'](R)
+$$
   -- Keep original LIKE for exact matching after range narrowing
+
 ```
 
 ## Implementation

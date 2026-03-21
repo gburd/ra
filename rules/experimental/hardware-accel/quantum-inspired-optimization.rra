@@ -56,23 +56,32 @@ quantum advantage for query optimization is likely 5-15 years away.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join ordering as optimization problem:
   Minimize: total_cost(join_order)
   Subject to: valid_join_tree(join_order, join_graph)
+$$
 
+$$
 QUBO formulation (for quantum annealing):
   Binary variables: x_{ij} = 1 if table i is joined at step j
-  Objective: minimize sum of estimated join costs
-  Constraints: each table joined exactly once, join graph respected
+  Objective: minimize sum of estimated \bowtie costs
+  Constraints: each table joined exactly once, \bowtie graph respected
+$$
 
+$$
   H = sum_j C(join_step_j) * x_{ij} * x_{kj}
     + lambda * penalty(constraints_violated)
+$$
 
+$$
 Grover's search:
   Oracle: f(join_order) = 1 if cost(join_order) < threshold
   Search space: N = n! (left-deep) or catalan(n) (bushy)
   Grover speedup: O(sqrt(N)) oracle calls vs O(N) classical
+$$
+
 ```
 
 ## Implementation

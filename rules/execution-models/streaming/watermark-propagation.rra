@@ -26,14 +26,19 @@ event-time skew, or operators waiting for watermark advancement.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: conservative watermark (min across all sources)
+$$
 W = MIN(W_source1, W_source2, ..., W_sourceN)
+$$
 
 -- After: per-partition watermarks with idle detection
+$$
 W = MIN(W_active_sources)
+$$
 -- Idle sources excluded from min computation
 -- Per-partition watermarks enable parallel window closing
+
 ```
 
 ## Implementation

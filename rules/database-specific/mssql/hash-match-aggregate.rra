@@ -32,14 +32,19 @@ hash table.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Stream aggregate (input pre-sorted)
+$$
 stream-aggregate[dept; SUM(sal)](
     index-scan(employees, ix_dept_sal))
+$$
 
 -- Hash aggregate (input unsorted)
+$$
 hash-aggregate[dept; SUM(sal)](
     scan(employees))
+$$
+
 ```
 
 ## Implementation

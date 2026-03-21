@@ -32,13 +32,16 @@ non-matching rows before the join materializes any intermediate result.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 InnerJoin[a.x = b.x AND a.x + a.y < 5](A, B)
-  -> InnerJoin[a.x = b.x](
-       sigma[a.x + a.y < 5](A),
-       sigma[b.x + b.y < 5](B)
+  \rightarrow InnerJoin[a.x = b.x](
+       \sigma_{a.x + a.y < 5}(A),
+       \sigma_{b.x + b.y < 5}(B)
      )
   using equivalence: a.x = b.x, a.y = b.y
+$$
+
 ```
 
 ## Implementation

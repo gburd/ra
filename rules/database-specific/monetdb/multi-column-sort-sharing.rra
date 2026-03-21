@@ -32,17 +32,22 @@ reuses the permutation vector at O(n) cost instead of re-sorting at O(n log n).
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: redundant sorts
+$$
 order-by[dept, salary](
   group-by[dept](
     sort[dept](scan(employees))))
+$$
 
 -- After: single sort, shared permutation
+$$
 let perm = sort[dept, salary](scan(employees)) in
 order-by[reuse-perm](
   group-by[dept](
     apply-perm(perm, scan(employees))))
+$$
+
 ```
 
 ## Implementation

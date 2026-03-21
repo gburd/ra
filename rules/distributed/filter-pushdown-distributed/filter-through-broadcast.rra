@@ -20,9 +20,12 @@ broadcasting full data then filtering.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Filter[p](Exchange[broadcast](R))
-  -> Exchange[broadcast](Filter[p](R))
+  \rightarrow Exchange[broadcast](Filter[p](R))
+$$
+
 ```
 
 ## Test Cases

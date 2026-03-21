@@ -24,12 +24,17 @@ builders) and can be simplified at compile time.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
-pi[price * 1 + 0 AS adjusted_price](products)
+$$
+\pi_{price * 1 + 0 AS adjusted_price}(products)
+$$
 
 -- After
-pi[price AS adjusted_price](products)
+$$
+\pi_{price AS adjusted_price}(products)
+$$
+
 ```
 
 ## Implementation

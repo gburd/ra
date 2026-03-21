@@ -24,7 +24,7 @@ only the view state and the change set.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Self-maintainable for INSERT on R:
 -- V = pi[R.a, S.b](R JOIN S ON R.id = S.rid)
 -- delta_R = {new rows}
@@ -35,6 +35,7 @@ only the view state and the change set.
 -- V contains R.a, can identify rows to remove
 -- V = sigma[x > 10](R)
 -- DELETE rows from R where x > 10: just remove matching V rows
+
 ```
 
 ## Implementation

@@ -20,8 +20,11 @@ Converts MIN/MAX agg to LIMIT
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 MIN/MAX => LIMIT 1
+$$
+
 ```
 
 ## Implementation

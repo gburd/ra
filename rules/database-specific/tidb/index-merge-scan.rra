@@ -32,15 +32,18 @@ the merged set.
 
 ## Relational Algebra
 
-```algebra
-sigma[a = 1 OR b = 2](Scan(T))
-  -> IndexMerge(
+```latex
+$$
+\sigma_{a = 1 OR b = 2}(Scan(T))
+  \rightarrow IndexMerge(
        Union(
          IndexRangeScan(T, idx_a, a = 1),
          IndexRangeScan(T, idx_b, b = 2)
        ),
        TableRowIDScan(T)
      )
+$$
+
 ```
 
 ## Implementation

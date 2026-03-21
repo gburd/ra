@@ -37,22 +37,31 @@ the matched language.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: duplicate branch
+$$
 Alternation([A, B, A])
+$$
 
 -- After: deduplicated
+$$
 Alternation([A, B])
+$$
 
 -- Before: branches with equivalent DEFINE
+$$
 Alternation([
   Var(X, define: price > 100),
   Var(Y, define: price > 100)
 ])
+$$
 -- where X and Y have identical conditions
 
 -- After: single branch
+$$
 Var(X, define: price > 100)
+$$
+
 ```
 
 ## Implementation

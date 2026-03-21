@@ -38,10 +38,13 @@ Uses composite index even when leading column not in WHERE clause; skips through
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 filter[col2 = value](scan[T])
-  -> index_skip_scan[I(col1, col2)](col2 = value)
-  where low_cardinality(col1) && has_index(I, [col1, col2])
+  \rightarrow index_skip_scan[I(col1, col2)](col2 = value)
+  \text{where} low_cardinality(col1) && has_index(I, [col1, col2])
+$$
+
 ```
 
 ## Implementation

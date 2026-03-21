@@ -20,8 +20,11 @@ Pushes filters through window functions
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 σ(Window(R)) => Window(σ(R))
+$$
+
 ```
 
 ## Implementation

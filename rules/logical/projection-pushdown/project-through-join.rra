@@ -26,12 +26,15 @@ output are dead after the join and can be pruned before the join executes.
 
 ## Relational Algebra
 
-```algebra
-pi[A](R join[c] S) -> pi[A]((pi[A_R union attrs(c)_R](R)) join[c] (pi[A_S union attrs(c)_S](S)))
-  where A_R = A intersect attrs(R)
-  where A_S = A intersect attrs(S)
-  where attrs(c)_R = attrs(c) intersect attrs(R)
-  where attrs(c)_S = attrs(c) intersect attrs(S)
+```latex
+$$
+\pi_{A}(R \bowtie_{c} S) \rightarrow \pi_{A}((\pi_{A_R \cup \text{attrs}(c)_R}(R)) \bowtie_{c} (\pi_{A_S \cup \text{attrs}(c)_S}(S)))
+  \text{where} A_R = A \cap \text{attrs}(R)
+  \text{where} A_S = A \cap \text{attrs}(S)
+  \text{where} \text{attrs}(c)_R = \text{attrs}(c) \cap \text{attrs}(R)
+  \text{where} \text{attrs}(c)_S = \text{attrs}(c) \cap \text{attrs}(S)
+$$
+
 ```
 
 ## Implementation

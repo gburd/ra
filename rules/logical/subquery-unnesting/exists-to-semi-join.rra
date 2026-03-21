@@ -26,12 +26,17 @@ efficient join algorithms (hash, merge).
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 filter[EXISTS(subquery)](R)
-  -> semi_join[join_condition](R, subquery)
+  \rightarrow semi_\bowtie_{join_condition}(R, subquery)
+$$
 
+$$
 EXISTS(SELECT * FROM S WHERE S.id = R.id AND S.active)
-  -> semi_join[R.id = S.id](R, filter[S.active](S))
+  \rightarrow semi_\bowtie_{R.id = S.id}(R, filter[S.active](S))
+$$
+
 ```
 
 ## Implementation

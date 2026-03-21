@@ -41,15 +41,18 @@ Broadcasts small table to all nodes, builds local hash table, probes with large 
 
 ## Relational Algebra
 
-```algebra
-join[R.key = S.key](large_table(R), small_table(S))
-  -> broadcast_phase:
+```latex
+$$
+\bowtie_{R.key = S.key}(large_table(R), small_table(S))
+  \rightarrow broadcast_phase:
        replicate S to all N nodes
      local_join_phase:
        for each node:
          build_hash_table(S)
          for each partition Pi of R:
            probe_hash_table(Pi, S)
+$$
+
 ```
 
 ## Implementation

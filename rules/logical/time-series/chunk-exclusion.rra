@@ -25,12 +25,17 @@ on the time column.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: scan all chunks
-sigma[ts > '2024-06-01'](Append(C_jan, C_feb, ..., C_jun, ...))
+$$
+\sigma_{ts > '2024-06-01'}(Append(C_jan, C_feb, ..., C_jun, ...))
+$$
 
 -- After: exclude non-overlapping chunks
-sigma[ts > '2024-06-01'](Append(C_jun, C_jul, ...))
+$$
+\sigma_{ts > '2024-06-01'}(Append(C_jun, C_jul, ...))
+$$
+
 ```
 
 ## Implementation

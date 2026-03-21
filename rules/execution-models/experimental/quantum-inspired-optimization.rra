@@ -61,29 +61,38 @@ than classical thermal hopping over them.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Join ordering as optimization problem:
+$$
 minimize Σ_{k=1}^{n} cost(
-  join(tables_joined_before_k, table_at_position_k)
+  \bowtie(tables_joined_before_k, table_at_position_k)
 )
+$$
 
+$$
 subject to:
   Each table appears exactly once in the ordering
   Join predicates are available at each step
+$$
 
 -- QUBO encoding:
+$$
 Variables: x_{i,k} ∈ {0,1} for i ∈ tables, k ∈ positions
 minimize:
-  Σ_{k} Σ_{i,j} cost(i,j) * x_{i,k} * x_{j,k+1}  // join cost
+  Σ_{k} Σ_{i,j} cost(i,j) * x_{i,k} * x_{j,k+1}  // \bowtie cost
   + λ * Σ_i (Σ_k x_{i,k} - 1)^2                     // each table once
   + λ * Σ_k (Σ_i x_{i,k} - 1)^2                     // one table per slot
+$$
 
 -- Quantum annealing:
+$$
 H(t) = (1 - s(t)) * H_driver + s(t) * H_problem
-  s(t): 0 -> 1 as t increases (annealing schedule)
+  s(t): 0 \rightarrow 1 as t increases (annealing schedule)
   H_driver: quantum tunneling (transverse field)
   H_problem: QUBO cost function
   Solution: ground state of H_problem when s(t) = 1
+$$
+
 ```
 
 ## Implementation

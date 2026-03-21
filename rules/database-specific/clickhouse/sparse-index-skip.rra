@@ -24,10 +24,13 @@ Uses MergeTree's sparse primary index to skip entire granules (groups of rows) t
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Filter[key IN range](Scan[MergeTree, pk=key](T))
-  -> Scan[MergeTree, pk=key, skip_granules](T)
-  where range allows_granule_skipping
+  \rightarrow Scan[MergeTree, pk=key, skip_granules](T)
+  \text{where} range allows_granule_skipping
+$$
+
 ```
 
 ## Implementation

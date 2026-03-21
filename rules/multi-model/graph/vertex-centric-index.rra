@@ -28,10 +28,13 @@ edges are visited, reducing cost to O(log(degree) + matches).
 
 ## Relational Algebra
 
-```algebra
-sigma[e.prop op value](expand(v, edge_type))
-  -> vertex_centric_scan(v, edge_type, prop, op, value)
-  where vertex_centric_index(edge_type, prop) exists
+```latex
+$$
+\sigma_{e.prop op value}(expand(v, edge_type))
+  \rightarrow vertex_centric_scan(v, edge_type, prop, op, value)
+  \text{where} vertex_centric_index(edge_type, prop) exists
+$$
+
 ```
 
 ## Implementation

@@ -40,12 +40,17 @@ O(m*n) to O(m'*n') where m' << m and n' << n.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: filter above join
-sigma[L.a > 5 AND R.b = 10 AND L.k = R.k](L CROSS JOIN R)
+$$
+\sigma_{L.a > 5 AND R.b = 10 AND L.k = R.k}(L CROSS JOIN R)
+$$
 
 -- After: predicates pushed to appropriate locations
-(sigma[L.a > 5](L)) JOIN[L.k = R.k] (sigma[R.b = 10](R))
+$$
+(\sigma_{L.a > 5}(L)) JOIN[L.k = R.k] (\sigma_{R.b = 10}(R))
+$$
+
 ```
 
 ## Implementation

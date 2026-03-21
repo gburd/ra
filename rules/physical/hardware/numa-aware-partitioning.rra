@@ -25,16 +25,21 @@ multi-socket NUMA systems where memory access patterns dominate cost.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: single partition, threads access remote memory
+$$
 HashJoin(R, S) on node 0
+$$
 
 -- After: partition by NUMA node, local processing
+$$
 NUMA_Merge(
     HashJoin(R_node0, S_node0) on node 0,
     HashJoin(R_node1, S_node1) on node 1,
     ...
 )
+$$
+
 ```
 
 ## Implementation

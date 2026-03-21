@@ -35,25 +35,34 @@ dollar cost.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Cloud cost model:
+$$
 dollar_cost(query, warehouse_size) =
   execution_time(query, warehouse_size) * price_per_second(warehouse_size)
+$$
 
 -- Execution time with scaling:
+$$
 execution_time(query, size) =
   serial_fraction(query) * base_time
   + parallel_fraction(query) * base_time / parallelism(size)
+$$
 
 -- Price per second (typical Snowflake):
+$$
 price_per_second(XS) = $0.0006  -- 1 credit/hour
 price_per_second(S)  = $0.0011  -- 2 credits/hour
 price_per_second(M)  = $0.0022  -- 4 credits/hour
 price_per_second(L)  = $0.0044  -- 8 credits/hour
+$$
 
 -- Optimal size minimizes dollar_cost subject to latency SLA:
+$$
 optimal_size(query, sla) =
-  min size where execution_time(query, size) <= sla
+  min size \text{where} execution_time(query, size) <= sla
+$$
+
 ```
 
 ## Implementation

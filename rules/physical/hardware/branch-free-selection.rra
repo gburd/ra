@@ -26,14 +26,19 @@ case for branch prediction), evaluated in tight scan loops.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: branching selection
+$$
 for each row:
     if pred(row): emit(row)      -- branch misprediction ~50%
+$$
 
 -- After: branch-free selection vector
+$$
 selection_vec = evaluate_pred_vectorized(batch)  -- no branches
 compact(batch, selection_vec)
+$$
+
 ```
 
 ## Implementation

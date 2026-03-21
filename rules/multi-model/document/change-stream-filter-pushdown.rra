@@ -30,10 +30,13 @@ and client processing. MongoDB 4.0+ supports pushing `$match` on
 
 ## Relational Algebra
 
-```algebra
-sigma[p](change_stream(collection))
-  -> change_stream_filtered(collection, p)
-  where p is pushable to the oplog cursor
+```latex
+$$
+\sigma_{p}(change_stream(collection))
+  \rightarrow change_stream_filtered(collection, p)
+  \text{where} p is pushable to the oplog cursor
+$$
+
 ```
 
 ## Implementation

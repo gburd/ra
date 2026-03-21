@@ -32,13 +32,18 @@ the plan.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: left-deep join tree
-(R join[p1] S) join[p2] T
+$$
+(R \bowtie_{p1} S) \bowtie_{p2} T
+$$
 
 -- After: reordered (when p2 references R and T)
-(R join[p2] T) join[p1'] S
-  where p1' adjusts column references for the new ordering
+$$
+(R \bowtie_{p2} T) \bowtie_{p1'} S
+  \text{where} p1' adjusts column references for the new ordering
+$$
+
 ```
 
 ## Implementation

@@ -25,18 +25,23 @@ functions.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: multiple DISTINCT aggregates
-gamma[dept; COUNT(DISTINCT job), SUM(DISTINCT salary)](emp)
+$$
+\gamma_{dept; COUNT(DISTINCT job), SUM(DISTINCT salary)}(emp)
+$$
 
 -- After: expand into separate queries, join results
-pi[dept, cd_job, sd_sal](
-    gamma[dept; COUNT(*) AS cd_job](
+$$
+\pi_{dept, cd_job, sd_sal}(
+    \gamma_{dept; COUNT(*) AS cd_job}(
         delta[dept, job](emp))
     JOIN
-    gamma[dept; SUM(salary) AS sd_sal](
+    \gamma_{dept; SUM(salary) AS sd_sal}(
         delta[dept, salary](emp))
 )
+$$
+
 ```
 
 ## Implementation

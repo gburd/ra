@@ -31,12 +31,17 @@ without touching the actual data.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: scan all, then filter
-sigma[a > 100](scan(T, parquet))
+$$
+\sigma_{a > 100}(scan(T, parquet))
+$$
 
 -- After: predicate pushed to Parquet reader
+$$
 scan(T, parquet, row_group_filter=[a > 100])
+$$
+
 ```
 
 ## Implementation

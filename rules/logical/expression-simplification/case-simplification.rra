@@ -23,18 +23,27 @@ conditions, or patterns matching simpler SQL constructs.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: CASE with constant TRUE condition
-CASE WHEN TRUE THEN x ELSE y END
+$$
+CASE WHEN TRUE THEN \times ELSE y END
+$$
 
 -- After
+$$
 x
+$$
 
 -- Before: CASE matching COALESCE pattern
+$$
 CASE WHEN a IS NOT NULL THEN a ELSE b END
+$$
 
 -- After
+$$
 COALESCE(a, b)
+$$
+
 ```
 
 ## Implementation

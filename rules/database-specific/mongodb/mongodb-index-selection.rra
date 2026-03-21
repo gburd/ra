@@ -20,12 +20,17 @@ Selects the most efficient index for query predicates.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
+$$
 (filter (scan orders) (and (eq status 'shipped') (gt total 100)))
+$$
 
 -- After
+$$
 (filter (index-scan orders idx_status_total) (and (eq status 'shipped') (gt total 100)))
+$$
+
 ```
 
 ## Preconditions

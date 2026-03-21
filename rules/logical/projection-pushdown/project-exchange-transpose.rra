@@ -24,12 +24,17 @@ needed by the distribution key or downstream operators.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
-pi[a, b](Exchange[hash(a)](R(a, b, c, d)))
+$$
+\pi_{a, b}(Exchange[hash(a)](R(a, b, c, d)))
+$$
 
 -- After
-Exchange[hash(a)](pi[a, b](R))
+$$
+Exchange[hash(a)](\pi_{a, b}(R))
+$$
+
 ```
 
 ## Implementation

@@ -31,12 +31,17 @@ cost to O(n+m).
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: correlated IN subquery
-sigma[o.id IN (SELECT order_id FROM returns)](orders)
+$$
+\sigma_{o.id IN (SELECT order_id FROM returns)}(orders)
+$$
 
 -- After: materialized lookup
-orders semi-join[hash] (materialize(pi[order_id](returns)))
+$$
+orders semi-\bowtie_{hash} (materialize(\pi_{order_id}(returns)))
+$$
+
 ```
 
 ## Implementation

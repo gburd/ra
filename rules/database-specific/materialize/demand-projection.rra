@@ -32,12 +32,17 @@ arrangements reduces memory proportionally.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: full schema flows through
-pi[a](sigma[b > 10](R(a, b, c, d, e)))
+$$
+\pi_{a}(\sigma_{b > 10}(R(a, b, c, d, e)))
+$$
 
 -- After: demand-driven projection
-pi[a](sigma[b > 10](pi[a, b](R(a, b, c, d, e))))
+$$
+\pi_{a}(\sigma_{b > 10}(\pi_{a, b}(R(a, b, c, d, e))))
+$$
+
 ```
 
 ## Implementation

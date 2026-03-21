@@ -30,18 +30,27 @@ the associated memory allocation.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: redundant sort
+$$
 sort[k ASC](sort[k ASC](R))
+$$
 
 -- After: single sort
+$$
 sort[k ASC](R)
+$$
 
 -- Before: sort matches index order
+$$
 sort[k ASC](scan(T, ordered_by=[k ASC]))
+$$
 
 -- After: sort removed
+$$
 scan(T, ordered_by=[k ASC])
+$$
+
 ```
 
 ## Implementation

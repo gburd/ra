@@ -36,19 +36,26 @@ materialization is amortized across all queries that reference it.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Full query caching
-Q(T) -> cache_lookup(hash(Q))
+$$
+Q(T) \rightarrow cache_lookup(hash(Q))
   if cache_hit: return cached_result
   if cache_miss: result = execute(Q); cache_store(hash(Q), result)
+$$
 
 -- Subexpression reuse
-Q1 = sigma[a > 5](Join(A, B))
-Q2 = sigma[a > 10](Join(A, B))
+$$
+Q1 = \sigma_{a > 5}(Join(A, B))
+Q2 = \sigma_{a > 10}(Join(A, B))
+$$
 -- Shared subexpression: Join(A, B)
 -- Materialize Join(A, B) as M
-Q1 = sigma[a > 5](M)
-Q2 = sigma[a > 10](M)
+$$
+Q1 = \sigma_{a > 5}(M)
+Q2 = \sigma_{a > 10}(M)
+$$
+
 ```
 
 ## Implementation

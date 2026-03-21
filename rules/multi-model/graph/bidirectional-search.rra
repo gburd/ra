@@ -28,10 +28,13 @@ search from a single source.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 shortest_path(source, target, max_depth)
-  -> bidirectional_bfs(source, target, max_depth / 2)
-  where source and target are both bound
+  \rightarrow bidirectional_bfs(source, target, max_depth / 2)
+  \text{where} source and target are both bound
+$$
+
 ```
 
 ## Implementation

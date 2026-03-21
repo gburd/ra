@@ -34,11 +34,14 @@ trivial comparisons.
 
 ## Relational Algebra
 
-```algebra
-sigma[p](R) -> gpu_filter[p](R)
-  where |R| > threshold
+```latex
+$$
+\sigma_{p}(R) \rightarrow gpu_filter[p](R)
+  \text{where} |R| > threshold
     AND complexity(p) > simple_comparison
     AND columns(p) are gpu_resident OR transfer_amortized
+$$
+
 ```
 
 ## Implementation

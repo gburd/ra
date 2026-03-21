@@ -24,13 +24,16 @@ indexes are selective.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Filter[pred1 OR pred2](Scan[table])
-  -> Union(
+  \rightarrow Union(
        IndexScan[idx1](Filter[pred1](table)),
        IndexScan[idx2](Filter[pred2](table))
      )
-  where has_index(pred1) AND has_index(pred2)
+  \text{where} has_index(pred1) AND has_index(pred2)
+$$
+
 ```
 
 ## Implementation

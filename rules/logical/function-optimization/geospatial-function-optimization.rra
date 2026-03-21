@@ -34,15 +34,20 @@ predicate (e.g., polygon intersection).
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Index match
-sigma[ST_Contains(a.geom, point)](R)
-  -> gist_index_scan[I_gist](a.geom, point)
+$$
+\sigma_{ST_Contains(a.geom, point)}(R)
+  \rightarrow gist_index_scan[I_gist](a.geom, point)
+$$
 
 -- Bounding-box pre-filter
-sigma[ST_Intersects(a.geom, b.geom)](R)
-  -> sigma[ST_Intersects(a.geom, b.geom)](
-       sigma[a.geom && b.geom](R))  -- bbox pre-filter
+$$
+\sigma_{ST_Intersects(a.geom, b.geom)}(R)
+  \rightarrow \sigma_{ST_Intersects(a.geom, b.geom)}(
+       \sigma_{a.geom && b.geom}(R))  -- bbox pre-filter
+$$
+
 ```
 
 ## Implementation

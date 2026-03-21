@@ -36,22 +36,33 @@ index scans, bitmap scans, and materialization strategies.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Cost_IO(Op) = f(pages, access_pattern, storage_type, buffer_pool)
+$$
 
+$$
 Sequential Scan(R):
   IO_cost = N_pages(R) * seq_page_cost
+$$
 
+$$
 Index Scan(R, I, selectivity F):
   IO_cost = index_pages(I, F) * random_page_cost
           + heap_pages(R, F, clustered?) * page_cost
+$$
 
+$$
 Bitmap Scan(R, I, selectivity F):
   IO_cost = index_pages(I, F) * random_page_cost
-          + min(F * N_pages(R), N_pages(R)) * seq_page_cost
+          + \text{min}(F * N_pages(R), N_pages(R)) * seq_page_cost
+$$
 
+$$
 Sort (external, B buffer pages):
   IO_cost = 2 * N_pages(R) * ceil(log_B(N_pages(R)/B)) * seq_page_cost
+$$
+
 ```
 
 ## Implementation

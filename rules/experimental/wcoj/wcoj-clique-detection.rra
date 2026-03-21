@@ -33,16 +33,19 @@ achieving the AGM bound of N^(k/2).
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- k-clique pattern: k nodes, k*(k-1)/2 edges
-join[e_ij.v2 = e_jk.v1 for all i<j<k](e_12, e_13, ..., e_{k-1,k})
-  -> wcoj_clique(
+$$
+\bowtie_{e_ij.v2 = e_jk.v1 for all i<j<k}(e_12, e_13, ..., e_{k-1,k})
+  \rightarrow wcoj_clique(
        k: clique_size,
        edge_relation: edges,
        variable_order: [v1, v2, ..., vk],
        algorithm: generic_join
      )
-  where is_clique_pattern(k)
+  \text{where} is_clique_pattern(k)
+$$
+
 ```
 
 ## Implementation

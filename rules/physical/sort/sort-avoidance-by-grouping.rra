@@ -24,12 +24,17 @@ and a sort-based aggregate strategy is used.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
+$$
 Sort[a](GroupBy[a, b; SUM(x)](R))  -- sort-based grouping
+$$
 
 -- After (sort removed because GroupBy already sorted)
+$$
 GroupBy[a, b; SUM(x)](R)  -- output already sorted by a, b
+$$
+
 ```
 
 ## Implementation

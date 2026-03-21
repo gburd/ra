@@ -24,10 +24,13 @@ Eliminates cross joins (cartesian products) when one table returns exactly one r
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 cross_join(R, single_row(S))
-  -> extend[S.cols](R)
-  where cardinality(S) = 1
+  \rightarrow extend[S.cols](R)
+  \text{where} cardinality(S) = 1
+$$
+
 ```
 
 ## Implementation

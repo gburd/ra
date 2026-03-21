@@ -20,8 +20,11 @@ Merges consecutive calculations
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Calc2(Calc1(R)) => Calc_merged(R)
+$$
+
 ```
 
 ## Implementation

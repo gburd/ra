@@ -20,13 +20,16 @@ is processed and applied before the probe side is shuffled.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 HashJoin[c](R, S)
-  -> HashJoin[c](
+  \rightarrow HashJoin[c](
       DynamicFilter(R, collected_keys(S)),
       S
      )
-  where |S| << |R|
+  \text{where} |S| << |R|
+$$
+
 ```
 
 ## Test Cases

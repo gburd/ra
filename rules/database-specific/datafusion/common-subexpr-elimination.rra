@@ -31,12 +31,17 @@ and memory allocation.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before CSE:
-pi[f(a) + 1, f(a) * 2](R)
+$$
+\pi_{f(a) + 1, f(a) * 2}(R)
+$$
 
 -- After CSE:
-let t = f(a) in pi[t + 1, t * 2](R)
+$$
+let t = f(a) in \pi_{t + 1, t * 2}(R)
+$$
+
 ```
 
 ## Implementation

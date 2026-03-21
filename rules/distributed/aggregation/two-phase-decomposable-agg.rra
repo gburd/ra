@@ -28,16 +28,21 @@ partial aggregates cross the network (where P is the number of partitions).
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before (single-phase)
-gamma[g, agg(a)](Exchange[hash(g)](R))
+$$
+\gamma_{g, agg(a)}(Exchange[hash(g)](R))
+$$
 
 -- After (two-phase)
-gamma[g, merge_agg(partial_a)](
+$$
+\gamma_{g, merge_agg(partial_a)}(
     Exchange[hash(g)](
-        gamma[g, partial_agg(a)](R)
+        \gamma_{g, partial_agg(a)}(R)
     )
 )
+$$
+
 ```
 
 ## Implementation

@@ -25,15 +25,20 @@ include the join key, allowing pre-aggregation on one side.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: join then aggregate
-gamma[d.region; SUM(f.amount)](
+$$
+\gamma_{d.region; SUM(f.amount)}(
     f JOIN d ON f.dim_id = d.id)
+$$
 
 -- After: pre-aggregate fact table, then join
-gamma[d.region; SUM(partial_sum)](
-    gamma[f.dim_id; SUM(f.amount) AS partial_sum](f)
+$$
+\gamma_{d.region; SUM(partial_sum)}(
+    \gamma_{f.dim_id; SUM(f.amount) AS partial_sum}(f)
     JOIN d ON f.dim_id = d.id)
+$$
+
 ```
 
 ## Implementation

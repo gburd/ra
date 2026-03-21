@@ -22,10 +22,13 @@ When DISTINCT is applied over a GROUP BY that already produces unique rows (the 
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Distinct(Aggregate[group_by=keys, aggs](input))
-  -> Aggregate[group_by=keys, aggs](input)
-  where output_is_unique_by(keys)
+  \rightarrow Aggregate[group_by=keys, aggs](input)
+  \text{where} output_is_unique_by(keys)
+$$
+
 ```
 
 ## Implementation

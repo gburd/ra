@@ -26,15 +26,20 @@ the hash table exceeds L2 cache.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: sequential hash probe (cache miss per lookup)
+$$
 for each row in probe:
     bucket = hash_table[hash(row.key)]  -- cache miss
+$$
 
 -- After: group prefetch
+$$
 for each batch of W rows in probe:
     for each row: prefetch(hash_table[hash(row.key)])
     for each row: bucket = hash_table[hash(row.key)]  -- cache hit
+$$
+
 ```
 
 ## Implementation

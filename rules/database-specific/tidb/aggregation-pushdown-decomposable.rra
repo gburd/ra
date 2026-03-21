@@ -33,18 +33,23 @@ on each TiKV node before joining.
 
 ## Relational Algebra
 
-```algebra
-Agg[F(col)](R join[pred] S)
-  -> Agg[F2(partial)](
-       Agg[F1(col) as partial](R) join[pred] S
+```latex
+$$
+Agg[F(col)](R \bowtie_{pred} S)
+  \rightarrow Agg[F2(partial)](
+       Agg[F1(col) as partial](R) \bowtie_{pred} S
      )
-  where is_decomposable(F)
+  \text{where} is_decomposable(F)
     AND col from R schema
+$$
 
+$$
 Examples:
 - MAX(S1 ∪ S2) = MAX(MAX(S1), MAX(S2))
 - SUM(S1 ∪ S2) = SUM(SUM(S1), SUM(S2))
 - COUNT(S1 ∪ S2) = SUM(COUNT(S1), COUNT(S2))
+$$
+
 ```
 
 ## Implementation

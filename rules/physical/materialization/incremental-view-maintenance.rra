@@ -24,14 +24,21 @@ Updates materialized view incrementally using only changed data (delta) instead 
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 matview = f(base_table)
+$$
 
+$$
 On base_table change delta:
   matview_new = matview + f(delta) - f(deleted)
+$$
 
+$$
 Instead of:
   matview_new = f(base_table_new)  // Full recomputation
+$$
+
 ```
 
 ## Implementation

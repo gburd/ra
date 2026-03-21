@@ -32,14 +32,19 @@ behaviorally identical to an INNER JOIN.
 
 ## Relational Algebra
 
-```algebra
-filter[S.col IS NOT NULL](left_join[cond](R, S))
-  -> join[cond](R, S)
+```latex
+$$
+filter[S.col IS NOT NULL](left_\bowtie_{cond}(R, S))
+  \rightarrow \bowtie_{cond}(R, S)
+$$
 
+$$
 Generalization to any null-rejecting predicate p:
-filter[p(S.col)](left_join[cond](R, S))
-  -> filter[p(S.col)](join[cond](R, S))
-  where p(NULL) = FALSE or p(NULL) = NULL
+filter[p(S.col)](left_\bowtie_{cond}(R, S))
+  \rightarrow filter[p(S.col)](\bowtie_{cond}(R, S))
+  \text{where} p(NULL) = FALSE or p(NULL) = NULL
+$$
+
 ```
 
 ## Implementation

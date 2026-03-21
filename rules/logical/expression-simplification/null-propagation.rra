@@ -26,10 +26,13 @@ Replacing the entire expression with NULL eliminates unnecessary evaluation.
 
 ## Relational Algebra
 
-```algebra
-sigma[NULL = e](R) -> sigma[NULL](R) -> empty_relation
-sigma[NULL AND p](R) -> sigma[NULL](R) -> empty_relation
-sigma[e IS NULL](R) -> sigma[e IS NULL](R)  (no change, IS NULL is special)
+```latex
+$$
+\sigma_{NULL = e}(R) \rightarrow \sigma_{NULL}(R) \rightarrow empty_relation
+\sigma_{NULL AND p}(R) \rightarrow \sigma_{NULL}(R) \rightarrow empty_relation
+\sigma_{e IS NULL}(R) \rightarrow \sigma_{e IS NULL}(R)  (no change, IS NULL is special)
+$$
+
 ```
 
 ## Implementation

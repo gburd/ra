@@ -20,12 +20,17 @@ Simplifies GROUP BY aggregates when grouping columns form a unique key.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
+$$
 (group-by [id] (count *) (scan users))
+$$
 
 -- After
+$$
 (project [id] (scan users))
+$$
+
 ```
 
 ## Preconditions

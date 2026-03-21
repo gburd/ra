@@ -33,15 +33,20 @@ than expanding all branches from each candidate hub.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: sequential expansion from center
+$$
 expand(expand(label-scan(:Hub, h), :REL_A, a), :REL_B, b)
+$$
 
 -- After: hash join on hub node
-hash-join[h](
+$$
+hash-\bowtie_{h}(
   expand(label-scan(:Hub, h), :REL_A, a),
   expand(label-scan(:Hub, h), :REL_B, b)
 )
+$$
+
 ```
 
 ## Implementation

@@ -43,27 +43,36 @@ network traffic in distributed settings.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Aggregation cost formulas:
+$$
 
+$$
 1. Hash Aggregation:
    C_cpu = |input| * (c_hash + c_agg_update)
    C_memory = |groups| * entry_size
    C_io = 0 (if fits in memory)
    C_io = 2 * P_groups * passes (if spills)
+$$
 
+$$
 2. Sort-Based Aggregation:
    C_cpu = sort_cpu(input) + |input| * c_agg_update
    C_io = sort_io(input) + P_input  (if not pre-sorted)
    C_io = P_input                   (if pre-sorted)
    C_memory = O(1) per group transition
+$$
 
+$$
 3. Partial Aggregation (two-phase):
    Phase 1 (local): C_local = |input| * c_hash + |local_groups| * c_agg_update
    Exchange: C_network = |local_groups| * row_size * c_network
    Phase 2 (global): C_global = |local_groups| * c_hash + |global_groups| * c_agg_finalize
    Reduction ratio: r = |local_groups| / |input|
+$$
 
+$$
 Where:
   |input| = number of input rows
   |groups| = number of distinct groups
@@ -73,6 +82,8 @@ Where:
   c_agg_update = per-tuple aggregate state update cost
   c_agg_finalize = per-group aggregate finalization cost
   entry_size = GROUP BY key size + aggregate state size
+$$
+
 ```
 
 ## Implementation

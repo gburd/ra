@@ -33,14 +33,17 @@ This is N independent local joins.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join[c](R_partitioned_by(k, N), S_partitioned_by(k, N))
-  -> Union(
+  \rightarrow Union(
        Join[c](R_partition_0, S_partition_0),
        Join[c](R_partition_1, S_partition_1),
        ...
        Join[c](R_partition_N-1, S_partition_N-1)
      )
+$$
+
 ```
 
 ## Implementation

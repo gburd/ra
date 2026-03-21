@@ -27,13 +27,18 @@ lookups, whereas naive subquery execution repeats the subquery for each outer ro
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 filter[col IN (subquery)](R)
-  -> semi_join[R.col = S.col](R, subquery as S)
+  \rightarrow semi_\bowtie_{R.col = S.col}(R, subquery as S)
+$$
 
+$$
 Example:
-filter[R.id IN (select S.id from S where S.active)](R)
-  -> semi_join[R.id = S.id](R, filter[S.active](S))
+filter[R.id IN (select S.id from S \text{where} S.active)](R)
+  \rightarrow semi_\bowtie_{R.id = S.id}(R, filter[S.active](S))
+$$
+
 ```
 
 ## Implementation

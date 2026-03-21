@@ -34,8 +34,9 @@ large joins.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Cache-aware cost model:
+$$
 cache_cost(op, data_size) =
   if data_size <= L1_SIZE:
     data_size / L1_BW  -- ~1ns per access
@@ -45,13 +46,17 @@ cache_cost(op, data_size) =
     data_size / L3_BW  -- ~15ns per access
   else:
     data_size / DRAM_BW -- ~100ns random, ~10ns sequential
+$$
 
 -- Radix partitioning cost:
+$$
 radix_partition_cost(R, bits_per_pass, num_passes) =
   num_passes * (TUPLES(R) * tuple_width / DRAM_BW)
   + TLB_miss_cost(2^bits_per_pass)
+$$
 
 -- Cache-conscious join selection:
+$$
 best_join_variant(R, S) =
   if BYTES(S) <= L2_SIZE:
     simple_hash_join     -- build side fits in L2
@@ -59,6 +64,8 @@ best_join_variant(R, S) =
     partitioned_hash_join(1_pass)  -- partition to fit L2
   else:
     radix_hash_join(multi_pass)    -- radix partition to L2
+$$
+
 ```
 
 ## Implementation

@@ -30,18 +30,27 @@ to n when there are at most n rows changes nothing.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: ORDER BY on single-row result
-tau[k](gamma[; MAX(x)](R))     -- Aggregation with no GROUP BY returns 1 row
+$$
+tau[k](\gamma_{; MAX(x)}(R))     -- Aggregation with no GROUP BY returns 1 row
+$$
 
 -- After: remove sort
-gamma[; MAX(x)](R)
+$$
+\gamma_{; MAX(x)}(R)
+$$
 
 -- Before: LIMIT >= max rows
-LIMIT 100(R)  where R has at most 50 rows
+$$
+LIMIT 100(R)  \text{where} R has at most 50 rows
+$$
 
 -- After: remove limit
+$$
 R
+$$
+
 ```
 
 ## Implementation

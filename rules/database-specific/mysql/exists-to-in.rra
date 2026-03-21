@@ -31,12 +31,17 @@ which evaluates the subquery only once.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: correlated EXISTS
-sigma[EXISTS(sigma[i.order_id = o.id](items))](orders o)
+$$
+\sigma_{EXISTS(sigma[i.order_id = o.id}(items))](orders o)
+$$
 
 -- After: IN form (enables semi-join strategies)
-sigma[o.id IN (pi[order_id](items))](orders o)
+$$
+\sigma_{o.id IN (\pi_{order_id}(items))}(orders o)
+$$
+
 ```
 
 ## Implementation

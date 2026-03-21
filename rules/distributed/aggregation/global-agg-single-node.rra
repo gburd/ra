@@ -24,16 +24,21 @@ input.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before (gather all rows)
-gamma[agg(a)](Exchange[gather](R))
+$$
+\gamma_{agg(a)}(Exchange[gather](R))
+$$
 
 -- After (partial + gather + final)
-gamma[merge_agg(partial)](
+$$
+\gamma_{merge_agg(partial)}(
     Exchange[gather](
-        gamma[partial_agg(a)](R)
+        \gamma_{partial_agg(a)}(R)
     )
 )
+$$
+
 ```
 
 ## Test Cases

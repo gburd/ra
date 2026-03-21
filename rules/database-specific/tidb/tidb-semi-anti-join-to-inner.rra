@@ -20,12 +20,17 @@ Optimizes semi/anti joins with proof of equivalence.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
-(semi-join orders items (on o.id = i.order_id))
+$$
+(semi-\bowtie orders items (on o.id = i.order_id))
+$$
 
 -- After
-(distinct (inner-join orders items (on o.id = i.order_id)) [on o.id])
+$$
+(distinct (inner-\bowtie orders items (on o.id = i.order_id)) [on o.id])
+$$
+
 ```
 
 ## Preconditions

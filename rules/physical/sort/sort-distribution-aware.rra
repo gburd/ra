@@ -23,14 +23,19 @@ or TimSort-like adaptive sorts are faster.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: generic sort
+$$
 Sort[key](R)
+$$
 
 -- After: algorithm selected based on stats
+$$
 RadixSort[key](R)     -- if integer keys, uniform distribution
 AdaptiveSort[key](R)  -- if nearly sorted
 ExternalSort[key](R)  -- if data exceeds memory
+$$
+
 ```
 
 ## Implementation

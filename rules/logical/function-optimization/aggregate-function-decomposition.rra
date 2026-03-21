@@ -26,11 +26,14 @@ or where partial aggregation enables pushdown through joins or unions.
 
 ## Relational Algebra
 
-```algebra
-AVG(x)      -> SUM(x) / COUNT(x)
-VARIANCE(x) -> (SUM(x*x) - SUM(x)*SUM(x)/COUNT(x)) / (COUNT(x) - 1)
-STDDEV(x)   -> SQRT(VARIANCE(x))
-COUNT(DISTINCT x) -> COUNT(x) after deduplication on x
+```latex
+$$
+AVG(x)      \rightarrow SUM(x) / COUNT(x)
+VARIANCE(x) \rightarrow (SUM(x*x) - SUM(x)*SUM(x)/COUNT(x)) / (COUNT(x) - 1)
+STDDEV(x)   \rightarrow SQRT(VARIANCE(x))
+COUNT(DISTINCT x) \rightarrow COUNT(x) after deduplication on x
+$$
+
 ```
 
 ## Implementation

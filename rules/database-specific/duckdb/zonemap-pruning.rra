@@ -33,13 +33,18 @@ this eliminates the majority of row groups.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: full column scan with filter
-sigma[price > 1000](column_scan(orders, price))
+$$
+\sigma_{price > 1000}(column_scan(orders, price))
+$$
 
 -- After: zone-map pruned scan
-sigma[price > 1000](
+$$
+\sigma_{price > 1000}(
     zonemap_pruned_scan(orders, price, price > 1000))
+$$
+
 ```
 
 ## Implementation

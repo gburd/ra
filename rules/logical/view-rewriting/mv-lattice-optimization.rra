@@ -24,7 +24,7 @@ different granularities over the same fact table.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Lattice for dimensions {A, B, C}:
 -- Level 3: {A,B,C} (base)
 -- Level 2: {A,B}, {A,C}, {B,C}
@@ -32,6 +32,7 @@ different granularities over the same fact table.
 -- Level 0: {} (grand total)
 
 -- Greedy: materialize views that provide maximum benefit per unit space
+
 ```
 
 ## Implementation

@@ -24,11 +24,12 @@ partitioning may be more efficient.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Estimated data size D, memory budget M
 -- If D <= M: in-memory quicksort
 -- If D <= M * B (B = merge fan-in): 2-phase external merge
 -- If D > M * B: multi-phase external merge or partition-sort
+
 ```
 
 ## Implementation

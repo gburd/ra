@@ -33,15 +33,20 @@ usage and duplicate update processing.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: two joins each build their own arrangement of S
-(R1 join[R1.k = S.k] S) union-all (R2 join[R2.k = S.k] S)
+$$
+(R1 \bowtie_{R1.k = S.k} S) \cup-all (R2 \bowtie_{R2.k = S.k} S)
+$$
 
 -- After: shared arrangement of S on key k
+$$
 let arr_S_k = arrange(S, k) in
-(R1 join[R1.k = S.k] arr_S_k)
-  union-all
-(R2 join[R2.k = S.k] arr_S_k)
+(R1 \bowtie_{R1.k = S.k} arr_S_k)
+  \cup-all
+(R2 \bowtie_{R2.k = S.k} arr_S_k)
+$$
+
 ```
 
 ## Implementation

@@ -20,12 +20,17 @@ Pushes ordering to index seek when possible.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
+$$
 (sort (index-scan users idx_email) BY updated_at DESC LIMIT 10)
+$$
 
 -- After
+$$
 (index-scan users idx_updated_at_desc LIMIT 10)
+$$
+
 ```
 
 ## Preconditions

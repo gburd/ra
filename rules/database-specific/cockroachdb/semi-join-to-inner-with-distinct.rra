@@ -24,10 +24,13 @@ Converts a semi-join into an inner join by applying a DistinctOn operator on the
 
 ## Relational Algebra
 
-```algebra
-SemiJoin[c](R, S) -> Project[R_cols](InnerJoin[c](R, DistinctOn[S_cols_in_c](S)))
-  where c is_simple_equality
-  where no_join_hints
+```latex
+$$
+SemiJoin[c](R, S) \rightarrow Project[R_cols](InnerJoin[c](R, DistinctOn[S_cols_in_c](S)))
+  \text{where} c is_simple_equality
+  \text{where} no_join_hints
+$$
+
 ```
 
 Where:

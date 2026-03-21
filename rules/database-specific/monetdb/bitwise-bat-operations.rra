@@ -34,18 +34,23 @@ faster than sorted list intersection for moderate selectivities.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: materialized OID list intersection
-intersect(
-  sigma[age > 21](scan(users)),     -- OID list: [1, 5, 7, 12, ...]
-  sigma[status = "active"](scan(users))  -- OID list: [1, 3, 5, 9, ...]
+$$
+\cap(
+  \sigma_{age > 21}(scan(users)),     -- OID list: [1, 5, 7, 12, ...]
+  \sigma_{status = "active"}(scan(users))  -- OID list: [1, 3, 5, 9, ...]
 )
+$$
 
 -- After: bitmap AND
+$$
 bitmap-and(
   bitmap-select[age > 21](scan(users)),     -- bitmap: 10001010001...
   bitmap-select[status = "active"](scan(users))  -- bitmap: 10101000010...
 ) -- result bitmap: 10001000000...
+$$
+
 ```
 
 ## Implementation

@@ -51,14 +51,17 @@ what a 64-core CPU can achieve. Key advantages:
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- CPU execution:
+$$
 result = Project(Filter(Scan(R), pred), cols)
+$$
   -- Sequential scan: 100 GB/s bandwidth
   -- Filter: SIMD on 64 cores
   -- Project: column extraction
 
 -- GPU execution:
+$$
 gpu_data = PCIeTransfer(R, host_to_device)
 gpu_result = GPU_Kernel {
   // Thousands of threads, each processes a chunk
@@ -69,6 +72,8 @@ gpu_result = GPU_Kernel {
     output[t] = projected
 }
 result = PCIeTransfer(gpu_result, device_to_host)
+$$
+
 ```
 
 ## Implementation

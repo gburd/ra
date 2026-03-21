@@ -27,10 +27,13 @@ unused columns across the network.
 
 ## Relational Algebra
 
-```algebra
-pi[a1, a2, ..., an](Exchange[d](R))
-  -> Exchange[d](pi[a1, a2, ..., an, d_keys](R))
-  where {a1..an} subset attrs(R)
+```latex
+$$
+\pi_{a1, a2, ..., an}(Exchange[d](R))
+  \rightarrow Exchange[d](\pi_{a1, a2, ..., an, d_keys}(R))
+  \text{where} {a1..an} \subseteq \text{attrs}(R)
+$$
+
 ```
 
 Note: if the exchange is hash-partitioned on keys not in the projection

@@ -32,12 +32,17 @@ faster. Eliminating the table lookup halves the I/O per row.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: index scan + table lookup
-pi[a, b](table_lookup(index_scan[idx_abc, a > 10](T)))
+$$
+\pi_{a, b}(table_lookup(index_scan[idx_abc, a > 10](T)))
+$$
 
 -- After: index-only scan
-pi[a, b](index_only_scan[idx_abc, a > 10](T))
+$$
+\pi_{a, b}(index_only_scan[idx_abc, a > 10](T))
+$$
+
 ```
 
 ## Implementation

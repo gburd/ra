@@ -30,12 +30,17 @@ DataFusion to use hash joins and process data in Arrow batches.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: correlated scalar subquery
-pi[a, (SELECT MAX(b) FROM S WHERE S.k = R.k)](R)
+$$
+\pi_{a, (SELECT MAX(b) FROM S WHERE S.k = R.k)}(R)
+$$
 
 -- After: left join with aggregate
-pi[a, max_b](R left-join (gamma[k; max_b=MAX(b)](S)) ON R.k = S.k)
+$$
+\pi_{a, max_b}(R left-\bowtie (\gamma_{k; max_b=MAX(b)}(S)) ON R.k = S.k)
+$$
+
 ```
 
 ## Implementation

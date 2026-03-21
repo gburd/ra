@@ -23,10 +23,11 @@ for most of the data while correctly handling the remainder.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- MV: sigma[year >= 2022](sales)
 -- Query: sigma[year >= 2020](sales)
 -- Rewrite: MV UNION ALL sigma[year >= 2020 AND year < 2022](sales)
+
 ```
 
 ## Implementation

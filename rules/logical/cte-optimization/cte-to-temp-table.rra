@@ -22,11 +22,14 @@ For CTEs referenced multiple times with expensive definitions, materialize as a 
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 CTE[name, def](body)
-  -> Materialize[name, def](body)
-  where ref_count(name, body) > 1
+  \rightarrow Materialize[name, def](body)
+  \text{where} ref_count(name, body) > 1
     and cost(def) > materialization_threshold
+$$
+
 ```
 
 ## Implementation

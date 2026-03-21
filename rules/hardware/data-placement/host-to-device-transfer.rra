@@ -35,15 +35,20 @@ PCIe bottleneck.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 gpu_op(transfer_to_gpu(R))
-  -> gpu_op(transfer_to_gpu(sigma[p](R)))
-  where sigma[p] is CPU-executable
-    AND selectivity(p) * size(R) << size(R)
+  \rightarrow gpu_op(transfer_to_gpu(\sigma_{p}(R)))
+  \text{where} \sigma_{p} is CPU-executable
+    AND \text{selectivity}(p) * size(R) << size(R)
+$$
 
+$$
 gpu_op1(transfer_to_host(transfer_to_gpu(gpu_op2(R))))
-  -> transfer_to_host(gpu_op1(gpu_op2(R)))
+  \rightarrow transfer_to_host(gpu_op1(gpu_op2(R)))
   // Eliminate round-trip by keeping both ops on device
+$$
+
 ```
 
 ## Implementation

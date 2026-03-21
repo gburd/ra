@@ -26,14 +26,19 @@ avoiding full table scan.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 aggregate[COUNT(*)](scan[T])
-  -> constant[table_row_count(T)]
-  where no_filter()
+  \rightarrow constant[table_row_count(T)]
+  \text{where} no_filter()
+$$
 
+$$
 aggregate[COUNT(*)](index_scan[I, cond](T))
-  -> index_count[I, cond]
-  where covering_index(I)
+  \rightarrow index_count[I, cond]
+  \text{where} covering_index(I)
+$$
+
 ```
 
 ## Implementation

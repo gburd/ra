@@ -21,10 +21,13 @@ transfer a single value.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Aggregate[COUNT(*)](RemoteScan[table, endpoint])
 =>
 RemoteScan[table, endpoint, pushdown_agg=COUNT(*)]
+$$
+
 ```
 
 ## Before

@@ -28,12 +28,15 @@ amounts of historical data.
 
 ## Relational Algebra
 
-```algebra
-sigma[ts >= t1 AND ts < t2](scan(hypertable))
-  -> union_all(
+```latex
+$$
+\sigma_{ts >= t1 AND ts < t2}(scan(hypertable))
+  \rightarrow union_all(
        scan(chunk_i) for each chunk_i
-       where chunk_i.max_time >= t1 AND chunk_i.min_time < t2
+       \text{where} chunk_i.max_time >= t1 AND chunk_i.min_time < t2
      )
+$$
+
 ```
 
 ## Implementation

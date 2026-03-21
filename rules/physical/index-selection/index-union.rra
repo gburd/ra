@@ -31,10 +31,13 @@ Combines multiple index scans with bitmap OR for disjunctive (OR) predicates.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 filter[col1=v1 OR col2=v2](scan[T])
-  -> bitmap_or(index_scan[I1](col1=v1),
+  \rightarrow bitmap_or(index_scan[I1](col1=v1),
                index_scan[I2](col2=v2))
+$$
+
 ```
 
 ## Implementation

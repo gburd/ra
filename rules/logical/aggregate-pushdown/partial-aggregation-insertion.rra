@@ -26,12 +26,15 @@ aggregation input size.
 
 ## Relational Algebra
 
-```algebra
-aggregate[group, agg_func](join[...](R, S))
-  -> aggregate[group, agg_func](
-       aggregate[group, partial_agg_func](join[...](R, S))
+```latex
+$$
+aggregate[group, agg_func](\bowtie_{...}(R, S))
+  \rightarrow aggregate[group, agg_func](
+       aggregate[group, partial_agg_func](\bowtie_{...}(R, S))
      )
-  where supports_partial_agg(agg_func)
+  \text{where} supports_partial_agg(agg_func)
+$$
+
 ```
 
 ## Implementation

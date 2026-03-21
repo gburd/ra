@@ -32,13 +32,18 @@ reducing the number of physical reads from spinning disks by up to
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: random ROWID access
+$$
 table-access-by-rowid(index-range-scan(T, idx, pred))
+$$
 
 -- After: batched sorted ROWID access
+$$
 table-access-by-rowid-batched(
     sort-by-block(index-range-scan(T, idx, pred)))
+$$
+
 ```
 
 ## Implementation

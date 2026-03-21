@@ -22,10 +22,13 @@ When a CTE definition produces only constant values (e.g., `SELECT 1 AS x`), rep
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 CTE[name, Values[rows]](body)
-  -> body[name := Values[rows]]
-  where is_constant_relation(Values[rows])
+  \rightarrow body[name := Values[rows]]
+  \text{where} is_constant_relation(Values[rows])
+$$
+
 ```
 
 ## Implementation

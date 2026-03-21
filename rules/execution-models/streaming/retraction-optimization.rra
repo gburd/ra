@@ -26,19 +26,28 @@ aggregations) that produce retractions on upstream changes.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: separate retract + insert for key update
+$$
 Retract(key=1, old_val=10)
 Insert(key=1, new_val=15)
+$$
 
 -- After: consolidated update message
+$$
 Update(key=1, old_val=10, new_val=15)
+$$
 
 -- Before: retract propagates through entire join tree
-Retract -> Join -> Aggregate -> Output
+$$
+Retract \rightarrow Join \rightarrow Aggregate \rightarrow Output
+$$
 
 -- After: retract resolved at earliest stateful operator
-Update -> Join(stateful, handles delta) -> Output
+$$
+Update \rightarrow Join(stateful, handles delta) \rightarrow Output
+$$
+
 ```
 
 ## Implementation

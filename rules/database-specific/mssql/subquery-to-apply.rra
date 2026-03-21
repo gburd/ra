@@ -32,13 +32,18 @@ efficient index seek rather than a full scan.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: correlated scalar subquery
-pi[R.*, (SELECT TOP 1 S.val FROM S WHERE S.k = R.k ORDER BY S.ts DESC)](R)
+$$
+\pi_{R.*, (SELECT TOP 1 S.val FROM S WHERE S.k = R.k ORDER BY S.ts DESC)}(R)
+$$
 
 -- After: OUTER APPLY with index seek
+$$
 R outer-apply (
     TOP 1 (index-seek(S, ix_k_ts, S.k = R.k) ORDER BY S.ts DESC))
+$$
+
 ```
 
 ## Implementation

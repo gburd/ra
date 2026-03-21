@@ -29,16 +29,23 @@ since rand() produces uniform random values in [0, 1).
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: TABLESAMPLE BERNOULLI(50)
+$$
 Sample[bernoulli, 0.5](R)
+$$
 
 -- After: filter with random
-sigma[rand() < 0.5](R)
+$$
+\sigma_{rand() < 0.5}(R)
+$$
 
 -- With REPEATABLE seed
+$$
 Sample[bernoulli, 0.5, seed=10](R)
+$$
 -- Becomes: sigma[rand(10) < 0.5](R)
+
 ```
 
 ## Implementation

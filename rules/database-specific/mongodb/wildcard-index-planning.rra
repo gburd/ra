@@ -32,16 +32,21 @@ for each query's field path, providing logarithmic lookup without per-field inde
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Traditional index: explicit field
-sigma[metadata.sensor_type = "temperature"](
+$$
+\sigma_{metadata.sensor_type = "temperature"}(
   index-scan(idx_metadata_sensor_type))
+$$
 
 -- Wildcard index: any field path
-sigma[metadata.sensor_type = "temperature"](
+$$
+\sigma_{metadata.sensor_type = "temperature"}(
   wildcard-index-scan($**, path="metadata.sensor_type"))
+$$
 
 -- Planner extracts field path from predicate, looks up wildcard index subtree
+
 ```
 
 ## Implementation

@@ -26,12 +26,17 @@ instead of random heap pages, providing 2-10x speedup.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
-pi[a, b](sigma[a > 10](TableScan(R)))
+$$
+\pi_{a, b}(\sigma_{a > 10}(TableScan(R)))
+$$
 
 -- After (index on (a) INCLUDE (b) exists)
+$$
 IndexOnlyScan(idx_a_b, a > 10)
+$$
+
 ```
 
 ## Implementation

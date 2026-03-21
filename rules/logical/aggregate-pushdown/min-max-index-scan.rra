@@ -24,14 +24,19 @@ Optimizes MIN/MAX aggregates by using index boundaries instead of full scans.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 aggregate[MIN(col)](scan[T])
-  -> index_first[idx on col](T)
-  where has_index(T, col)
+  \rightarrow index_first[idx on col](T)
+  \text{where} has_index(T, col)
+$$
 
+$$
 aggregate[MAX(col)](scan[T])
-  -> index_last[idx on col](T)
-  where has_index(T, col)
+  \rightarrow index_last[idx on col](T)
+  \text{where} has_index(T, col)
+$$
+
 ```
 
 ## Implementation

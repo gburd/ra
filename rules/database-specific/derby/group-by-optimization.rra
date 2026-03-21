@@ -30,12 +30,17 @@ Aggregation on pre-sorted data only needs to detect group boundaries.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: scan + sort + group
-gamma[dept; COUNT(*)](sort[dept](scan(employees)))
+$$
+\gamma_{dept; COUNT(*)}(sort[dept](scan(employees)))
+$$
 
 -- After: index scan + group (no sort)
-gamma[dept; COUNT(*)](index_scan[idx_dept](employees))
+$$
+\gamma_{dept; COUNT(*)}(index_scan[idx_dept](employees))
+$$
+
 ```
 
 ## Implementation

@@ -29,12 +29,17 @@ return left rows where no match exists on the right.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: set difference
+$$
 R EXCEPT S
+$$
 
 -- After: anti-join with distinct
-gamma[*](R ANTI JOIN[IS NOT DISTINCT FROM] S)
+$$
+\gamma_{*}(R ANTI JOIN[IS NOT DISTINCT FROM] S)
+$$
+
 ```
 
 ## Implementation

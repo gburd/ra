@@ -41,26 +41,39 @@ computation in the recursive evaluation.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 SIPS for rule: p^bf(X,Z) :- q(X,Y), r(W,Y), s(W,Z)
+$$
 
+$$
 Available SIPS (evaluation orders):
+$$
 
-SIPS 1: q -> r -> s
-  Bindings: {X} -> q(X,Y) -> {X,Y} -> r(W,Y) -> {X,Y,W} -> s(W,Z)
+$$
+SIPS 1: q \rightarrow r \rightarrow s
+  Bindings: {X} \rightarrow q(X,Y) \rightarrow {X,Y} \rightarrow r(W,Y) \rightarrow {X,Y,W} \rightarrow s(W,Z)
   All predicates receive at least one bound argument. Good!
+$$
 
-SIPS 2: r -> q -> s
-  Bindings: {} -> r(W,Y) -> {W,Y} -> q(X,Y) -> {X,Y,W} -> s(W,Z)
+$$
+SIPS 2: r \rightarrow q \rightarrow s
+  Bindings: {} \rightarrow r(W,Y) \rightarrow {W,Y} \rightarrow q(X,Y) \rightarrow {X,Y,W} \rightarrow s(W,Z)
   r starts with no bindings (cartesian). Bad!
+$$
 
-SIPS 3: s -> r -> q
-  Bindings: {} -> s(W,Z) -> {W,Z} -> r(W,Y) -> {W,Y,Z} -> q(X,Y)
+$$
+SIPS 3: s \rightarrow r \rightarrow q
+  Bindings: {} \rightarrow s(W,Z) \rightarrow {W,Z} \rightarrow r(W,Y) \rightarrow {W,Y,Z} \rightarrow q(X,Y)
   s starts with no bindings. Bad!
+$$
 
+$$
 Cost-based SIPS selection:
   For each ordering, estimate intermediate result sizes.
   Choose the ordering with smallest total intermediate size.
+$$
+
 ```
 
 ## Implementation

@@ -28,9 +28,12 @@ changes the deduplication boundary and must be handled carefully.
 
 ## Relational Algebra
 
-```algebra
-(R union_all S) union_all T -> R union_all S union_all T
-R union_all (S union_all T) -> R union_all S union_all T
+```latex
+$$
+(R union_all S) union_all T \rightarrow R union_all S union_all T
+R union_all (S union_all T) \rightarrow R union_all S union_all T
+$$
+
 ```
 
 ## Implementation

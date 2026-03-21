@@ -33,13 +33,18 @@ and can be eliminated, avoiding the join computation entirely.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: redundant join (only A's columns used)
-pi[A.cols](A join[A.fk = B.pk] B)
+$$
+\pi_{A.cols}(A \bowtie_{A.fk = B.pk} B)
+$$
 
 -- After: join eliminated
-pi[A.cols](A)
-  where FK(A.fk -> B.pk) is NOT NULL
+$$
+\pi_{A.cols}(A)
+  \text{where} FK(A.fk \rightarrow B.pk) is NOT NULL
+$$
+
 ```
 
 ## Implementation

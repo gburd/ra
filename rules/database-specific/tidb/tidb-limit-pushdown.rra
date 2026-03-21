@@ -20,12 +20,17 @@ Pushes LIMIT operators closer to data source to reduce processing.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
-(limit (sort (join a b)) 10)
+$$
+(limit (sort (\bowtie a b)) 10)
+$$
 
 -- After
-(sort (join (limit a 10) (limit b 10)))
+$$
+(sort (\bowtie (limit a 10) (limit b 10)))
+$$
+
 ```
 
 ## Preconditions

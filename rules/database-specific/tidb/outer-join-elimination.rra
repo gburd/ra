@@ -23,10 +23,13 @@ side guarantee that NULL-extended rows will be filtered out anyway.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Filter[pred on S](R LEFT JOIN S ON R.a = S.b)
-  -> Filter[pred](R INNER JOIN S ON R.a = S.b)
-  where pred rejects nulls
+  \rightarrow Filter[pred](R INNER JOIN S ON R.a = S.b)
+  \text{where} pred rejects nulls
+$$
+
 ```
 
 ## Implementation

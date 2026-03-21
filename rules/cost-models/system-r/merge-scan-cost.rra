@@ -38,22 +38,29 @@ Total cost is sub-quadratic, unlike nested-loop.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Sort-Merge Join cost:
+$$
 merge_join_cost(R, S, join_key) =
   sort_cost(R, join_key) + sort_cost(S, join_key)
   + PAGES(R) + PAGES(S)     -- merge pass
   + W * (TUPLES(R) + TUPLES(S))  -- CPU for merge
+$$
 
 -- If R is already sorted on join_key:
+$$
   sort_cost(R, join_key) = 0  -- avoid sort for sorted input
+$$
 
 -- External sort cost (multi-pass merge sort):
+$$
 sort_cost(R, key) =
   2 * PAGES(R) * ceil(log_B(PAGES(R) / B))
-  where B = buffer_pages available for sorting
+  \text{where} B = buffer_pages available for sorting
+$$
   -- Factor 2: each pass reads and writes all pages
   -- log_B passes: each pass merges B runs into 1
+
 ```
 
 ## Implementation

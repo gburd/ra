@@ -34,20 +34,29 @@ more expensive.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Given query: σ_p(R) ORDER BY a
+$$
 
+$$
 Without interesting orders:
 1. Scan(R) → filter → sort by a [cost: scan + filter + sort]
+$$
 
+$$
 With interesting orders:
 1. IndexScan(R, sorted by a) → filter [cost: index scan + filter]
    (no sort needed! Index scan provides useful order)
+$$
 
+$$
 The optimizer retains BOTH plans during search:
 - Plan A: cheap scan + expensive sort
 - Plan B: expensive index scan + free sort
 Winner depends on total cost including downstream operations
+$$
+
 ```
 
 ## Implementation

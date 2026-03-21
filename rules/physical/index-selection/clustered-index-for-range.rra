@@ -40,10 +40,13 @@ through a secondary index followed by heap fetches.
 
 ## Relational Algebra
 
-```algebra
-sigma[a BETWEEN v1 AND v2](R)
-  -> clustered_index_range_scan[I_clustered, a BETWEEN v1 AND v2](R)
-  where is_clustered(I) && leading_column(I) == a
+```latex
+$$
+\sigma_{a BETWEEN v1 AND v2}(R)
+  \rightarrow clustered_index_range_scan[I_clustered, a BETWEEN v1 AND v2](R)
+  \text{where} is_clustered(I) && leading_column(I) == a
+$$
+
 ```
 
 ## Implementation

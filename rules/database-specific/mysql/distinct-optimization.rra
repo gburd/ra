@@ -32,12 +32,17 @@ reduces to comparing adjacent rows (no hash table needed).
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: explicit deduplication
-delta(pi[id, name](scan(users)))
+$$
+delta(\pi_{id, name}(scan(users)))
+$$
 
 -- After: DISTINCT eliminated (id is primary key)
-pi[id, name](scan(users))
+$$
+\pi_{id, name}(scan(users))
+$$
+
 ```
 
 ## Implementation

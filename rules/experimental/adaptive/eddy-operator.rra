@@ -31,15 +31,20 @@ runtime query optimization without replanning overhead.
 
 ## Relational Algebra
 
-```algebra
-(join[p1] (join[p2] (filter[p3] R) S) T)
-  -> eddy({filter[p3], join[p1], join[p2]}, {R, S, T})
-  where has_uncertain_selectivity(p1, p2, p3)
+```latex
+$$
+(\bowtie_{p1} (\bowtie_{p2} (filter[p3] R) S) T)
+  \rightarrow eddy({filter[p3], \bowtie_{p1}, \bowtie_{p2}}, {R, S, T})
+  \text{where} has_uncertain_selectivity(p1, p2, p3)
+$$
 
+$$
 EDDY maintains:
 - Ready bitmap per tuple (which operators have processed it)
 - Operator selectivity estimates (updated online)
 - Routing lottery (probability of sending tuple to each operator)
+$$
+
 ```
 
 ## Implementation

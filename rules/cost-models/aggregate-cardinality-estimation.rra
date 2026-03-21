@@ -34,18 +34,25 @@ reduce this bound. Capping at input cardinality provides a safety bound.
 
 ## Relational Algebra
 
-```algebra
-Card(gamma[G, agg](R)):
-  Naive: product(NDV(g) for g in G)
-  Capped: min(product(NDV(g)), Card(R))
-  FD-aware: if G includes key -> Card(R)
-            if G includes FD source -> NDV(FD source)
+```latex
+$$
+\text{Card}(\gamma_{G, agg}(R)):
+  Naive: \text{product}(\text{NDV}(g) for g in G)
+  Capped: \text{min}(\text{product}(\text{NDV}(g)), \text{Card}(R))
+  FD-aware: if G includes key \rightarrow \text{Card}(R)
+            if G includes FD source \rightarrow \text{NDV}(FD source)
+$$
 
-Card(delta(R)):  -- DISTINCT
-  min(Card(R), product(NDV(c) for c in output_columns))
+$$
+\text{Card}(delta(R)):  -- DISTINCT
+  \text{min}(\text{Card}(R), \text{product}(\text{NDV}(c) for c in output_columns))
+$$
 
+$$
 Partial aggregation reduction:
-  reduction_ratio = Card(gamma(R)) / Card(R)
+  reduction_ratio = \text{Card}(gamma(R)) / \text{Card}(R)
+$$
+
 ```
 
 ## Implementation

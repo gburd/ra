@@ -31,10 +31,13 @@ O(N^ρ*) where ρ* is the fractional edge cover number.
 
 ## Relational Algebra
 
-```algebra
-(R join[R.a=S.a] S) join[S.b=T.b AND R.c=T.c] T
-  -> free_join[{R.a=S.a, S.b=T.b, R.c=T.c}](R, S, T)
-  where is_cyclic({R.a=S.a, S.b=T.b, R.c=T.c})
+```latex
+$$
+(R \bowtie_{R.a=S.a} S) \bowtie_{S.b=T.b AND R.c=T.c} T
+  \rightarrow free_\bowtie_{{R.a=S.a, S.b=T.b, R.c=T.c}}(R, S, T)
+  \text{where} is_cyclic({R.a=S.a, S.b=T.b, R.c=T.c})
+$$
+
 ```
 
 ## Implementation

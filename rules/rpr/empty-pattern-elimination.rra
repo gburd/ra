@@ -36,26 +36,35 @@ ever match. The RowPattern operator always produces zero output rows.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: pattern that matches nothing
+$$
 RowPattern(
   input: R,
   pattern: Sequence([]),  -- empty sequence
   ...
 )
+$$
 
 -- After: empty relation
+$$
 EmptyRelation(schema_of(measures))
+$$
 
 -- Before: all defines are false
+$$
 RowPattern(
   defines: { A: false, B: false },
   pattern: Sequence([A, B]),
   ...
 )
+$$
 
 -- After: empty relation
+$$
 EmptyRelation(schema_of(measures))
+$$
+
 ```
 
 ## Implementation

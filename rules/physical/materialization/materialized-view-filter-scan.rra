@@ -31,18 +31,25 @@ recomputing from the base table.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: filter on base table scan
-sigma[dept = 'SALES'](Scan(emp))
+$$
+\sigma_{dept = 'SALES'}(Scan(emp))
+$$
 
 -- After: scan materialized view
+$$
 Scan(mv_sales_emp)
+$$
 -- where mv_sales_emp is defined as
 -- SELECT * FROM emp WHERE dept = 'SALES'
 
 -- Or with compensating filter if view is broader:
-sigma[salary > 50000](Scan(mv_sales_emp))
+$$
+\sigma_{salary > 50000}(Scan(mv_sales_emp))
+$$
 -- if view covers dept='SALES' but not salary>50000
+
 ```
 
 ## Implementation

@@ -34,12 +34,17 @@ analytical workloads.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: rowstore scan with row mode execution
-sigma[region = 'US'](row-scan(sales))
+$$
+\sigma_{region = 'US'}(row-scan(sales))
+$$
 
 -- After: columnstore scan with batch mode
-sigma[region = 'US'](columnstore-scan(sales, batch_mode=true))
+$$
+\sigma_{region = 'US'}(columnstore-scan(sales, batch_mode=true))
+$$
+
 ```
 
 ## Implementation

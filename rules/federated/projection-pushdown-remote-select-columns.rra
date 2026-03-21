@@ -26,10 +26,13 @@ over the network.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Project[cols](RemoteScan[table, endpoint])
 =>
 RemoteScan[table, endpoint, pushdown_project=cols]
+$$
+
 ```
 
 ## Before

@@ -32,18 +32,25 @@ passing to propagate bindings backward through the rules.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Given query: Q(x) ← R(x, y), T*(y, z), z = 'target'
 And recursive rule: T*(x, y) ← T(x, y)
                     T*(x, z) ← T(x, y), T*(y, z)
+$$
 
+$$
 Magic sets rewrite:
 magic_T(z) ← z = 'target'
 magic_T(x) ← magic_T(y), T(x, y)
 T_magic(x, y) ← magic_T(x), T(x, y)
 T_magic(x, z) ← magic_T(x), T_magic(x, y), T_magic(y, z)
+$$
 
+$$
 Q(x) ← R(x, y), T_magic(y, z), z = 'target'
+$$
+
 ```
 
 ## Implementation

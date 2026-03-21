@@ -32,9 +32,12 @@ amount of data flowing through the correlation.
 
 ## Relational Algebra
 
-```algebra
-π_p(R ⋉_corr S) where p references R and simple S columns ->
+```latex
+$$
+π_p(R ⋉_corr S) \text{where} p references R and simple S columns \rightarrow
   π_p'(R ⋉_corr π_p''(S))
+$$
+
 ```
 
 ## Implementation

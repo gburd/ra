@@ -29,12 +29,15 @@ produces the correct result.
 
 ## Relational Algebra
 
-```algebra
-Join[c](R, S) -> Join[c](
+```latex
+$$
+Join[c](R, S) \rightarrow Join[c](
     Exchange[hash(join_key_R)](R),
     Exchange[hash(join_key_S)](S)
 )
-where R and S are not co-partitioned on join keys
+\text{where} R and S are not co-partitioned on \bowtie keys
+$$
+
 ```
 
 ## Implementation

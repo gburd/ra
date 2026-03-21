@@ -26,16 +26,21 @@ or count-based grouping semantics.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: batch-style window
-gamma[TUMBLE(ts, '5 min'); SUM(amount)](stream)
+$$
+\gamma_{TUMBLE(ts, '5 min'); SUM(amount)}(stream)
+$$
 
 -- After: incremental tumbling window
+$$
 IncrementalTumbleWindow(
     stream, interval='5 min',
     agg=SUM(amount),
     trigger=on_watermark,
     state=partial_sum)
+$$
+
 ```
 
 ## Implementation

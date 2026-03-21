@@ -27,8 +27,11 @@ Pushes filter through join
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 σ(Join(R, S)) => Join(σ(R), S)
+$$
+
 ```
 
 ## Implementation

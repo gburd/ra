@@ -30,9 +30,12 @@ for join colocation optimization.
 
 ## Relational Algebra
 
-```algebra
-EXCHANGE[k1, k2, c](R) where c is constant ->
+```latex
+$$
+EXCHANGE[k1, k2, c](R) \text{where} c is constant \rightarrow
   EXCHANGE[k1, k2](R)
+$$
+
 ```
 
 ## Implementation

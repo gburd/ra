@@ -22,11 +22,14 @@ When a CTE is joined with itself on the primary key and no columns from one side
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Project[L.*](Join[L.pk = R.pk](CTE_ref[name] as L, CTE_ref[name] as R))
-  -> CTE_ref[name]
-  where is_unique_key(pk, name)
+  \rightarrow CTE_ref[name]
+  \text{where} is_unique_key(pk, name)
     and output_cols subset_of L.*
+$$
+
 ```
 
 ## Implementation

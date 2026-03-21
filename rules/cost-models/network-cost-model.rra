@@ -34,20 +34,31 @@ distributed query execution.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Cost_Network(Op) = f(data_volume, num_messages, strategy, network)
+$$
 
+$$
 Broadcast(R, N nodes):
   cost = N * |R| / bandwidth + N * latency
+$$
 
+$$
 Hash Shuffle(R, N partitions):
   cost = |R| * (N-1)/N / bandwidth + N * latency + serialize(R)
+$$
 
+$$
 Co-located Join(R, S):
-  cost = 0  (data already partitioned on join key)
+  cost = 0  (data already partitioned on \bowtie key)
+$$
 
+$$
 Repartition(R, new_key):
   cost = |R| / bandwidth + N * latency + serialize(R) + deserialize(R)
+$$
+
 ```
 
 ## Implementation

@@ -34,10 +34,13 @@ limited only by the input data rate.
 
 ## Relational Algebra
 
-```algebra
-sigma[p](R) -> fpga_stream_filter[p](R)
-  where p is synthesizable
+```latex
+$$
+\sigma_{p}(R) \rightarrow fpga_stream_filter[p](R)
+  \text{where} p is synthesizable
     AND input_rate(R) > cpu_filter_throughput
+$$
+
 ```
 
 ## Implementation

@@ -24,10 +24,13 @@ Spools intermediate results to work table for operators needing multiple passes 
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 operator_requiring_rewind(input)
-  -> spool_to_worktable(input)
+  \rightarrow spool_to_worktable(input)
      operator(worktable)  // Can scan multiple times
+$$
+
 ```
 
 ## Implementation

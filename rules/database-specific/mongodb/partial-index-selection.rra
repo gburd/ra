@@ -31,17 +31,22 @@ for writes to documents outside the filter.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Full index scan (indexes all documents)
-sigma[status = "active" AND age > 21](
+$$
+\sigma_{status = "active" AND age > 21}(
   index-scan(idx_full, bounds(age > 21)))
+$$
 
 -- Partial index scan (indexes only active documents)
-sigma[status = "active" AND age > 21](
+$$
+\sigma_{status = "active" AND age > 21}(
   index-scan(idx_partial_active, bounds(age > 21)))
+$$
 
 -- idx_partial_active has partialFilterExpression: {status: "active"}
 -- Smaller index, same results for this query
+
 ```
 
 ## Implementation

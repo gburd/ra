@@ -31,15 +31,22 @@ of only K elements.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Limit through projection
-limit[n](pi[cols](R)) -> pi[cols](limit[n](R))
+$$
+limit[n](\pi_{cols}(R)) \rightarrow \pi_{cols}(limit[n](R))
+$$
 
 -- Limit into sort (TopN)
-limit[n](sort[keys](R)) -> topn[n, keys](R)
+$$
+limit[n](sort[keys](R)) \rightarrow topn[n, keys](R)
+$$
 
 -- Limit through union
-limit[n](R union-all S) -> limit[n](limit[n](R) union-all limit[n](S))
+$$
+limit[n](R \cup-all S) \rightarrow limit[n](limit[n](R) \cup-all limit[n](S))
+$$
+
 ```
 
 ## Implementation

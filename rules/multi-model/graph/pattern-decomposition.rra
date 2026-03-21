@@ -29,10 +29,13 @@ start with the most selective sub-patterns and prune early.
 
 ## Relational Algebra
 
-```algebra
-match(a-[e1]->b-[e2]->c-[e3]->d)
-  -> join(match(a-[e1]->b-[e2]->c), match(c-[e3]->d))
-  where decomposition reduces estimated intermediate cardinality
+```latex
+$$
+match(a-[e1]\rightarrowb-[e2]\rightarrowc-[e3]\rightarrowd)
+  \rightarrow \bowtie(match(a-[e1]\rightarrowb-[e2]\rightarrowc), match(c-[e3]\rightarrowd))
+  \text{where} decomposition reduces estimated intermediate cardinality
+$$
+
 ```
 
 ## Implementation

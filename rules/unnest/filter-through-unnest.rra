@@ -37,22 +37,32 @@ produces fewer rows in the unnest output.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: filter after unnest
-sigma[val > 10](unnest(arr) AS val)
+$$
+\sigma_{val > 10}(unnest(arr) AS val)
+$$
 
 -- After: filter pushed into array
-unnest(array_filter(arr, lambda x. x > 10)) AS val
+$$
+unnest(array_filter(arr, lambda x. \times > 10)) AS val
+$$
+
 ```
 
 ### Lateral variant
 
-```algebra
+```latex
 -- Before: filter on lateral unnest result
-sigma[u.elem > 10](R join_lateral unnest(R.arr) AS u(elem))
+$$
+\sigma_{u.elem > 10}(R join_lateral unnest(R.arr) AS u(elem))
+$$
 
 -- After: filter array before unnest
-R join_lateral unnest(array_filter(R.arr, lambda x. x > 10)) AS u(elem)
+$$
+R join_lateral unnest(array_filter(R.arr, lambda x. \times > 10)) AS u(elem)
+$$
+
 ```
 
 ## Implementation

@@ -32,12 +32,17 @@ deduplication.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: aggregates below union
-gamma[g](R) UNION gamma[g](S)
+$$
+\gamma_{g}(R) UNION \gamma_{g}(S)
+$$
 
 -- After: single aggregate on union-all
-gamma[g](R UNION ALL S)
+$$
+\gamma_{g}(R UNION ALL S)
+$$
+
 ```
 
 ## Implementation

@@ -25,16 +25,23 @@ plan time, enabling selection of type-specialized implementations.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Generic comparison -> specialized
-compare(int_col, int_literal) -> compare_int(int_col, int_literal)
+$$
+compare(int_col, int_literal) \rightarrow compare_int(int_col, int_literal)
+$$
 
 -- Polymorphic SUM -> typed SUM
-SUM(int_col) -> sum_int64(int_col)  -- no overflow check needed for int32 input
+$$
+SUM(int_col) \rightarrow sum_int64(int_col)  -- no overflow check needed for int32 input
+$$
 
 -- Mixed-type comparison -> cast + specialized
-int_col = float_literal -> float(int_col) = float_literal
+$$
+int_col = float_literal \rightarrow float(int_col) = float_literal
+$$
   -- or: int_col = int(float_literal) if lossless
+
 ```
 
 ## Implementation

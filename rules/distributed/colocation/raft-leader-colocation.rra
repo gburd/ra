@@ -33,12 +33,15 @@ operation.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join[cond](Scan(A), Scan(B))
-  -> DistributedJoin[node=leader_node](
+  \rightarrow DistributedJoin[node=leader_node](
        LocalScan(A, leader=node),
        LocalScan(B, leader=node))
-  where leader(A_range) == leader(B_range)
+  \text{where} leader(A_range) == leader(B_range)
+$$
+
 ```
 
 ## Implementation

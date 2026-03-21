@@ -27,8 +27,11 @@ Derives NOT NULL filter from join
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join(R, S) => Filter(Join(R, S))
+$$
+
 ```
 
 ## Implementation

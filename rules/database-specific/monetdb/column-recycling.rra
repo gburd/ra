@@ -32,13 +32,18 @@ intermediates with LRU eviction and invalidation on data changes.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Query 1: computes expensive filter
-T1 = sigma[date > '2024-01-01'](scan(events))
-gamma[type; COUNT(*)](T1)
+$$
+T1 = \sigma_{date > '2024-01-01'}(scan(events))
+\gamma_{type; COUNT(*)}(T1)
+$$
 
 -- Query 2: reuses cached T1
-pi[user_id](T1)  -- T1 from recycler cache
+$$
+\pi_{user_id}(T1)  -- T1 from recycler cache
+$$
+
 ```
 
 ## Implementation

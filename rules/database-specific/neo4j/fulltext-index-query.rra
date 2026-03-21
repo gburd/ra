@@ -32,15 +32,22 @@ Lucene.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: label scan + string filter (CONTAINS)
-sigma[name CONTAINS "smith"](label-scan(:Person))
+$$
+\sigma_{name CONTAINS "smith"}(label-scan(:Person))
+$$
 
 -- After: full-text index query
+$$
 fulltext-query("personNames", "smith")
+$$
 
 -- Fuzzy search:
+$$
 fulltext-query("personNames", "smith~2")  -- edit distance 2
+$$
+
 ```
 
 ## Implementation

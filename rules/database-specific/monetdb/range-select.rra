@@ -32,10 +32,13 @@ branch misprediction overhead.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Vectorized range select
+$$
 candidates = thetaselect(products.price, >, 100.0)
 result = semijoin(products.*, candidates)
+$$
+
 ```
 
 ## Implementation

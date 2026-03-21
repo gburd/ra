@@ -24,11 +24,16 @@ Fuses SORT and LIMIT operators into single Top-K operator for efficient executio
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 limit[K](sort[key, dir](R))
-  -> sort_limit[K, key, dir](R)
+  \rightarrow sort_limit[K, key, dir](R)
+$$
 
+$$
 Uses heap/priority queue of size K
+$$
+
 ```
 
 ## Implementation

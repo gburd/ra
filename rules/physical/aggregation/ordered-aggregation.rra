@@ -26,14 +26,19 @@ GROUP BY columns (an "interesting order" from System R terminology).
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: hash aggregate on sorted input (wastes the sort order)
+$$
 HashAggregate[dept; SUM(salary)](
     IndexScan(idx_dept_salary, employees))
+$$
 
 -- After: streaming aggregate (exploits sort order)
+$$
 StreamAggregate[dept; SUM(salary)](
     IndexScan(idx_dept_salary, employees))
+$$
+
 ```
 
 ## Implementation

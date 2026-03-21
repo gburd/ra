@@ -34,15 +34,20 @@ versions
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Query 1: crack at value 100
-sigma[x > 100](crack(column))
+$$
+\sigma_{x > 100}(crack(column))
+$$
 -- Column partitioned into [<=100, >100]
 
 -- Query 2: crack at value 50
-sigma[x > 50](crack(column))
+$$
+\sigma_{x > 50}(crack(column))
+$$
 -- Column refined: [<=50, 51..100, >100]
 -- Only scans [51..100, >100] partition
+
 ```
 
 ## Implementation

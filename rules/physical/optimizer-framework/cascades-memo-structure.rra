@@ -41,29 +41,42 @@ the number of interesting property combinations.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Memo structure:
+$$
 
+$$
 Group 0: {Scan(R1)}
-  Winners: {ANY -> SeqScan(R1, cost=100)}
+  Winners: {ANY \rightarrow SeqScan(R1, cost=100)}
+$$
 
+$$
 Group 1: {Scan(R2)}
-  Winners: {ANY -> SeqScan(R2, cost=50),
-            SORTED(a) -> IndexScan(R2, idx_a, cost=80)}
+  Winners: {ANY \rightarrow SeqScan(R2, cost=50),
+            SORTED(a) \rightarrow IndexScan(R2, idx_a, cost=80)}
+$$
 
+$$
 Group 2: {Join(G0, G1, R1.a = R2.a),
           Join(G1, G0, R2.a = R1.a)}  // commutativity
-  Winners: {ANY -> HashJoin(G0, G1, cost=200),
-            SORTED(a) -> MergeJoin(G0, G1, cost=250)}
+  Winners: {ANY \rightarrow HashJoin(G0, G1, cost=200),
+            SORTED(a) \rightarrow MergeJoin(G0, G1, cost=250)}
+$$
 
+$$
 Group 3: {Scan(R3)}
-  Winners: {ANY -> SeqScan(R3, cost=200)}
+  Winners: {ANY \rightarrow SeqScan(R3, cost=200)}
+$$
 
+$$
 Group 4: {Join(G2, G3, ...),
           Join(G3, G2, ...),
           Join(Join(G0, G3, ...), G1, ...),
-          ...}  // all equivalent multi-join orderings
-  Winners: {ANY -> HashJoin(G2, G3, cost=500)}
+          ...}  // all equivalent multi-\bowtie orderings
+  Winners: {ANY \rightarrow HashJoin(G2, G3, cost=500)}
+$$
+
 ```
 
 ## Implementation

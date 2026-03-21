@@ -35,23 +35,32 @@ plan and may enable further transformations like join conversion.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Static proof: aggregate without GROUP BY always returns one row
+$$
 scalar_subquery(aggregate[agg_func](S))
-  -> scalar_value(aggregate[agg_func](S))  -- no check needed
+  \rightarrow scalar_value(aggregate[agg_func](S))  -- no check needed
+$$
 
 -- Static proof: unique key with equality filter
+$$
 scalar_subquery(filter[S.pk = value](S))
-  -> scalar_value(filter[S.pk = value](S))
-  where S.pk is unique/primary key
+  \rightarrow scalar_value(filter[S.pk = value](S))
+  \text{where} S.pk is unique/primary key
+$$
 
 -- Static proof: LIMIT 1
+$$
 scalar_subquery(limit[1](S))
-  -> scalar_value(limit[1](S))  -- at most 1 by construction
+  \rightarrow scalar_value(limit[1](S))  -- at most 1 by construction
+$$
 
 -- Cannot prove: insert runtime check
+$$
 scalar_subquery(S)
-  -> assert_max_one_row(S)  -- runtime error if |S| > 1
+  \rightarrow assert_max_one_row(S)  -- runtime error if |S| > 1
+$$
+
 ```
 
 ## Implementation

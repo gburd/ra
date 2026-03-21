@@ -36,12 +36,17 @@ input, shrinking the intermediate join result and lowering I/O and CPU cost.
 
 ## Relational Algebra
 
-```algebra
-sigma[p](R join[c] S) -> (sigma[p](R)) join[c] S
-  where attrs(p) subset attrs(R)
+```latex
+$$
+\sigma_{p}(R \bowtie_{c} S) \rightarrow (\sigma_{p}(R)) \bowtie_{c} S
+  \text{where} \text{attrs}(p) \subseteq \text{attrs}(R)
+$$
 
-sigma[p](R join[c] S) -> R join[c] (sigma[p](S))
-  where attrs(p) subset attrs(S)
+$$
+\sigma_{p}(R \bowtie_{c} S) \rightarrow R \bowtie_{c} (\sigma_{p}(S))
+  \text{where} \text{attrs}(p) \subseteq \text{attrs}(S)
+$$
+
 ```
 
 ## Implementation

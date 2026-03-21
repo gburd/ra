@@ -22,10 +22,13 @@ Adds a hash-based memoization layer to the recursive step to avoid recomputing r
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 RecursiveCTE[name, base, recursive, body]
-  -> RecursiveCTE[name, base, Distinct(recursive), body]
-  where may_produce_duplicates(recursive, name)
+  \rightarrow RecursiveCTE[name, base, Distinct(recursive), body]
+  \text{where} may_produce_duplicates(recursive, name)
+$$
+
 ```
 
 ## Implementation

@@ -36,31 +36,40 @@ performance.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Tier-aware page access cost:
+$$
 page_cost(tier) =
   DRAM:  0.0001 ms  (100 ns)
   PMem:  0.001 ms   (1 us)
   NVMe:  0.01 ms    (10 us)
   SSD:   0.05 ms    (50 us)
   HDD:   10 ms      (10 ms)
+$$
 
 -- Effective page cost with buffer pool:
+$$
 effective_cost(page, bp_hit_rate) =
   bp_hit_rate * page_cost(DRAM)
   + (1 - bp_hit_rate) * page_cost(storage_tier)
+$$
 
 -- Buffer pool hit rate estimate (working set model):
+$$
 bp_hit_rate(table, bp_size) =
   if PAGES(table) <= bp_size:
     1.0  -- fully cached
   else:
-    min(1.0, bp_size / active_pages(table))
+    \text{min}(1.0, bp_size / active_pages(table))
+$$
 
 -- 5-minute rule threshold:
+$$
 cache_in_memory(page, access_freq, tier) =
   access_freq > cost_per_gb(DRAM) / cost_per_gb(tier)
                 * page_cost(tier) / page_cost(DRAM)
+$$
+
 ```
 
 ## Implementation

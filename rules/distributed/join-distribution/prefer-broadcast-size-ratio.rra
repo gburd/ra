@@ -20,11 +20,14 @@ regardless of absolute sizes, as long as the small side fits in memory.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join[c](R, S)
-  -> Join[c](R, Broadcast(S))
-  where |R| / |S| > size_ratio_threshold
-  where |S| < node_memory_limit
+  \rightarrow Join[c](R, Broadcast(S))
+  \text{where} |R| / |S| > size_ratio_threshold
+  \text{where} |S| < node_memory_limit
+$$
+
 ```
 
 ## Implementation

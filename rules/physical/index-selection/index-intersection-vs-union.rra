@@ -39,16 +39,21 @@ predicates favor intersection; low selectivity may favor full scan.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Index intersection for AND
+$$
 filter[p1 AND p2](scan[T])
-  -> index_intersect(index_scan[I1](p1), index_scan[I2](p2))
-  when selectivity(p1) * selectivity(p2) < scan_threshold
+  \rightarrow index_intersect(index_scan[I1](p1), index_scan[I2](p2))
+  when \text{selectivity}(p1) * \text{selectivity}(p2) < scan_threshold
+$$
 
 -- Index union for OR
+$$
 filter[p1 OR p2](scan[T])
-  -> index_union(index_scan[I1](p1), index_scan[I2](p2))
-  when selectivity(p1) + selectivity(p2) < scan_threshold
+  \rightarrow index_union(index_scan[I1](p1), index_scan[I2](p2))
+  when \text{selectivity}(p1) + \text{selectivity}(p2) < scan_threshold
+$$
+
 ```
 
 ## Implementation

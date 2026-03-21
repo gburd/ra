@@ -36,18 +36,23 @@ reducing computation by 99%.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Exact:
-gamma[g, SUM(x)](Join[cond](R, S))
+$$
+\gamma_{g, SUM(x)}(Join[cond](R, S))
+$$
 
 -- Approximate with sampling:
-gamma[g, SUM(x) * scale_factor](
+$$
+\gamma_{g, SUM(x) * scale_factor}(
     Join[cond](
         Sample[rate=p](R),
         S
     )
 )
-where scale_factor = 1/p
+\text{where} scale_factor = 1/p
+$$
+
 ```
 
 ## Implementation

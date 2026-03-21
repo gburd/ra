@@ -25,13 +25,18 @@ more literal characters followed by a wildcard.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
-sigma[name LIKE 'Smith%'](customers)
+$$
+\sigma_{name LIKE 'Smith%'}(customers)
+$$
 
 -- After
-sigma[name >= 'Smith' AND name < 'Smiti'](customers)
+$$
+\sigma_{name >= 'Smith' AND name < 'Smiti'}(customers)
+$$
 -- 'Smiti' is the successor of 'Smith' in collation order
+
 ```
 
 ## Implementation

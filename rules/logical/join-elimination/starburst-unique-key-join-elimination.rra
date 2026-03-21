@@ -37,23 +37,34 @@ only adds columns. If those columns are unused, the join has no effect.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Conditions for elimination of table S from: pi_A(R join_{R.a = S.pk} S)
+$$
 
+$$
 1. S.pk is UNIQUE (or PRIMARY KEY)
    => At most one S row matches each R row (no duplication)
+$$
 
+$$
 2. One of:
-   a. FK(R.a -> S.pk) AND R.a IS NOT NULL
+   a. FK(R.a \rightarrow S.pk) AND R.a IS NOT NULL
       => At least one S row matches each R row (no lost rows)
    b. It's a LEFT JOIN (R LEFT JOIN S)
       => No R rows are lost (NULLs for unmatched)
       AND no S columns are used (NULLs don't affect output)
+$$
 
-3. A subset of columns(R)
+$$
+3. A \subseteq of columns(R)
    => No columns from S needed in output
+$$
 
+$$
 When all three hold: pi_A(R join_{R.a = S.pk} S) = pi_A(R)
+$$
+
 ```
 
 ## Implementation

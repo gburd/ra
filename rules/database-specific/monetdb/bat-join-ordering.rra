@@ -33,12 +33,17 @@ pressure and improves cache utilization in subsequent joins.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: left-to-right join order
-(A join[A.x = B.y] B) join[B.z = C.w] C
+$$
+(A \bowtie_{A.x = B.y} B) \bowtie_{B.z = C.w} C
+$$
 
 -- After: reordered by estimated intermediate size
-(B join[B.z = C.w] C) join[A.x = B.y] A
+$$
+(B \bowtie_{B.z = C.w} C) \bowtie_{A.x = B.y} A
+$$
+
 ```
 
 ## Implementation

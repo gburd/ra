@@ -46,20 +46,27 @@ RAPIDS cuDF brings GPU acceleration to dataframe operations.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 GPU-offloadable operators:
-  sigma[p](R)     -> GPU_filter(R_gpu, p)     -- parallel filter
-  gamma[G, agg](R) -> GPU_aggregate(R_gpu, G, agg) -- parallel reduce
-  R join[a=b] S   -> GPU_hash_join(R_gpu, S_gpu)   -- parallel build+probe
-  tau[k](R)        -> GPU_radix_sort(R_gpu, k)      -- parallel sort
-  pi[cols](R)      -> GPU_project(R_gpu, cols)       -- parallel projection
+  \sigma_{p}(R)     \rightarrow GPU_filter(R_gpu, p)     -- parallel filter
+  \gamma_{G, agg}(R) \rightarrow GPU_aggregate(R_gpu, G, agg) -- parallel reduce
+  R \bowtie_{a=b} S   \rightarrow GPU_hash_join(R_gpu, S_gpu)   -- parallel build+probe
+  tau[k](R)        \rightarrow GPU_radix_sort(R_gpu, k)      -- parallel sort
+  \pi_{cols}(R)      \rightarrow GPU_project(R_gpu, cols)       -- parallel projection
+$$
 
+$$
 Offloading decision:
   GPU_benefit(op) > transfer_cost(data) + kernel_launch_overhead
+$$
 
+$$
 Transfer cost:
   H2D(data) = |data| / PCIe_bandwidth + latency
   D2H(result) = |result| / PCIe_bandwidth + latency
+$$
+
 ```
 
 ## Implementation

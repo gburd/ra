@@ -20,12 +20,17 @@ Removes unused columns from intermediate query results.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
-(project [a,b,c] (join (scan t1 [a,b,d]) (scan t2 [c])))
+$$
+(project [a,b,c] (\bowtie (scan t1 [a,b,d]) (scan t2 [c])))
+$$
 
 -- After
-(project [a,b,c] (join (scan t1 [a,b]) (scan t2 [c])))
+$$
+(project [a,b,c] (\bowtie (scan t1 [a,b]) (scan t2 [c])))
+$$
+
 ```
 
 ## Preconditions

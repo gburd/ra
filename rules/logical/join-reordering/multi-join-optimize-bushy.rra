@@ -42,13 +42,18 @@ with the smallest estimated join result at each step.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: left-deep join tree
+$$
 ((A JOIN B) JOIN C) JOIN D
+$$
 
 -- After: bushy join tree
+$$
 (A JOIN B) JOIN (C JOIN D)
+$$
 -- Both joins can execute in parallel
+
 ```
 
 ## Implementation

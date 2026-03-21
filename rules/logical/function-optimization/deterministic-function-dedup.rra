@@ -30,10 +30,13 @@ CPU work, which compounds with expensive functions.
 
 ## Relational Algebra
 
-```algebra
-pi[f(a), g(f(a))](sigma[f(a) > v](R))
-  -> let t = f(a) in pi[t, g(t)](sigma[t > v](R))
-  where is_deterministic(f)
+```latex
+$$
+\pi_{f(a), g(f(a))}(\sigma_{f(a) > v}(R))
+  \rightarrow let t = f(a) in \pi_{t, g(t)}(\sigma_{t > v}(R))
+  \text{where} is_deterministic(f)
+$$
+
 ```
 
 ## Implementation

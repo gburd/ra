@@ -47,19 +47,26 @@ for workload management. Operator-level prediction remains research.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Traditional cost model:
   Cost(plan) = sum(analytical_cost(op) for op in plan)
-  where analytical_cost uses fixed formulas
+  \text{where} analytical_cost uses fixed formulas
+$$
 
+$$
 Learned cost model:
   Cost(plan) = model.predict(featurize(plan))
-  where model trained on (plan, actual_time) pairs
+  \text{where} model trained on (plan, actual_time) pairs
+$$
 
+$$
 Bao-style steering:
   hints = model.select_hints(query)
   plan = optimizer.plan(query, hints)
+$$
   -- Learns which hint sets work for which query shapes
+
 ```
 
 ## Implementation

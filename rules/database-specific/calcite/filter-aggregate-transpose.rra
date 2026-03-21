@@ -32,13 +32,18 @@ and probe cost.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: filter above aggregate
-sigma[g > 10](gamma[g; SUM(x)](R))
-  where g is a grouping column
+$$
+\sigma_{g > 10}(\gamma_{g; SUM(x)}(R))
+  \text{where} g is a grouping column
+$$
 
 -- After: filter pushed below aggregate
-gamma[g; SUM(x)](sigma[g > 10](R))
+$$
+\gamma_{g; SUM(x)}(\sigma_{g > 10}(R))
+$$
+
 ```
 
 ## Implementation

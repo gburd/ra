@@ -31,15 +31,20 @@ the entire table.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: full table scan with compound filter
-sigma[a = 1 AND b = 2](T)
+$$
+\sigma_{a = 1 AND b = 2}(T)
+$$
 
 -- After: index merge intersection
-intersect(
+$$
+\cap(
     index_scan[idx_a](T, a = 1),
     index_scan[idx_b](T, b = 2)
 )
+$$
+
 ```
 
 ## Implementation

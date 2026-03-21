@@ -31,9 +31,12 @@ reducing the number of probes into the right-side hash table.
 
 ## Relational Algebra
 
-```algebra
-σ_p(R ⋉ S) where p references only R columns ->
+```latex
+$$
+σ_p(R ⋉ S) \text{where} p references only R columns \rightarrow
   σ_p(R) ⋉ S
+$$
+
 ```
 
 ## Implementation

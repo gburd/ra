@@ -31,12 +31,17 @@ instantly without rebuilding it.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: optimizer considers all indexes
+$$
 scan(table, available_indexes=[idx_a, idx_b_invisible])
+$$
 
 -- After: invisible index excluded
+$$
 scan(table, available_indexes=[idx_a])
+$$
+
 ```
 
 ## Implementation

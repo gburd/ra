@@ -33,20 +33,25 @@ exactly once.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Naive (single phase)
-gamma[g, COUNT(DISTINCT d)](R)
+$$
+\gamma_{g, COUNT(DISTINCT d)}(R)
+$$
 
 -- Three-phase
-gamma[g, COUNT(*)].final(
+$$
+\gamma_{g, COUNT(*)}.final(
     Exchange[hash(g)](
-        gamma[g, d, COUNT(*)].intermediate(
+        \gamma_{g, d, COUNT(*)}.intermediate(
             Exchange[hash(d)](
-                gamma[g, d].local_dedup(R)
+                \gamma_{g, d}.local_dedup(R)
             )
         )
     )
 )
+$$
+
 ```
 
 ## Implementation

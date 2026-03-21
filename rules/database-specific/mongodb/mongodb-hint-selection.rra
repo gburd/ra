@@ -20,12 +20,17 @@ Guides optimizer to use specific index via hint.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
+$$
 (filter (scan users) (eq email 'user@example.com'))
+$$
 
 -- After
+$$
 (filter (index-scan users idx_email (hint)) (eq email 'user@example.com'))
+$$
+
 ```
 
 ## Preconditions

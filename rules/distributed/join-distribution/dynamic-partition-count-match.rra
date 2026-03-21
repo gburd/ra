@@ -20,11 +20,14 @@ count. This enables partition-wise join without moving the larger dataset.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join[c](R[hash(k), N], S[hash(k), M])
-  -> PartitionWiseJoin[c](R[N], Exchange[hash(k), N](S))
-  where N != M
-  where |R| > |S| (repartition the smaller side)
+  \rightarrow PartitionWiseJoin[c](R[N], Exchange[hash(k), N](S))
+  \text{where} N != M
+  \text{where} |R| > |S| (repartition the smaller side)
+$$
+
 ```
 
 ## Test Cases

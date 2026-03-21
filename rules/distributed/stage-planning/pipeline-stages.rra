@@ -30,13 +30,18 @@ across stages.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Without pipelining (blocking):
+$$
 Stage_N+1(materialize(Stage_N(R)))
+$$
 
 -- With pipelining (streaming):
+$$
 Stage_N+1(stream(Stage_N(R)))
-  where Stage_N+1 does not require full input
+  \text{where} Stage_N+1 does not require full input
+$$
+
 ```
 
 ## Implementation

@@ -20,8 +20,11 @@ Transposes sort and join
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Sort(Join(R, S))
+$$
+
 ```
 
 ## Implementation

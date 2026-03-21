@@ -46,28 +46,39 @@ can reduce join input sizes by orders of magnitude.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Input predicates:
   A.x = B.y        (equijoin)
   B.y = C.z        (equijoin)
   C.z = 100        (constant selection)
+$$
 
+$$
 Equivalence class: {A.x, B.y, C.z}
 Constant propagation: {A.x, B.y, C.z} = 100
+$$
 
+$$
 Derived predicates:
   A.x = 100        (NEW - enables index on A.x)
   B.y = 100        (already known)
   C.z = 100        (already known)
-  A.x = C.z        (NEW - enables merge join between A and C)
+  A.x = C.z        (NEW - enables merge \bowtie between A and C)
+$$
 
+$$
 For range predicates:
   A.x = B.y AND B.y > 50
   Derives: A.x > 50
+$$
 
+$$
 For IN predicates:
   A.x = B.y AND B.y IN (1, 2, 3)
   Derives: A.x IN (1, 2, 3)
+$$
+
 ```
 
 ## Implementation

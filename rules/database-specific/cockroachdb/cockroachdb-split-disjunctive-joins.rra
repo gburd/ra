@@ -20,12 +20,17 @@ Transforms joins with OR conditions into UNION ALL of multiple joins.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
-(inner-join t1 t2 (or (eq a b) (eq c d)))
+$$
+(inner-\bowtie t1 t2 (or (eq a b) (eq c d)))
+$$
 
 -- After
-(union-all (inner-join t1 t2 (eq a b)) (inner-join t1 t2 (eq c d)))
+$$
+(\cup-all (inner-\bowtie t1 t2 (eq a b)) (inner-\bowtie t1 t2 (eq c d)))
+$$
+
 ```
 
 ## Preconditions

@@ -41,8 +41,9 @@ from nested-loop to hash join without restarting.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Pre-computed plan with embedded switch point
+$$
 AdaptiveJoin[
     if build_rows < threshold:
         NestLoopJoin[cond](probe, build)
@@ -52,6 +53,8 @@ AdaptiveJoin[
     Scan(probe_table),
     StatisticsCollector(Scan(build_table))
 )
+$$
+
 ```
 
 ## Implementation

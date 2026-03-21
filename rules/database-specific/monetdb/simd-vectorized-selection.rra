@@ -36,14 +36,19 @@ execution on AVX2+ CPUs
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Scalar selection (1 value per cycle):
-sigma[x > 100](R) -> for each row: if row.x > 100 then emit(row)
+$$
+\sigma_{x > 100}(R) \rightarrow for each row: if row.x > 100 then emit(row)
+$$
 
 -- SIMD selection (16 values per cycle with AVX-512):
-sigma[x > 100](R) -> for each 16-wide vector:
+$$
+\sigma_{x > 100}(R) \rightarrow for each 16-wide vector:
   mask = vpcmpd(vec, broadcast(100), GT)
-  compress(vec, mask) -> selection_vector
+  compress(vec, mask) \rightarrow selection_vector
+$$
+
 ```
 
 ## Implementation

@@ -24,13 +24,18 @@ supported by the remote database.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Project[computed_expr(col)](RemoteScan[table, endpoint])
 =>
 RemoteScan[table, endpoint, pushdown_project=computed_expr(col)]
+$$
 
+$$
 Preconditions:
   - All functions in computed_expr are in remote.supported_functions
+$$
+
 ```
 
 ## Before

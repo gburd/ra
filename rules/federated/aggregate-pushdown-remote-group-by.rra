@@ -21,12 +21,15 @@ for local merging.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Aggregate[GROUP BY keys, AGG(col)](RemoteScan[table, endpoint])
 =>
 Aggregate[GROUP BY keys, MERGE_AGG](
   RemoteScan[table, endpoint,
     pushdown_agg=[GROUP BY keys, PARTIAL_AGG(col)]])
+$$
+
 ```
 
 ## Before

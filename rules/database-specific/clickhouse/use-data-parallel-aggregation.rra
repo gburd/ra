@@ -24,11 +24,14 @@ Converts single-threaded aggregation to data-parallel aggregation by partitionin
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 GroupBy[keys, aggs](R)
-  -> MergeGroupBy[keys, aggs](
+  \rightarrow MergeGroupBy[keys, aggs](
        ∀t ∈ threads: GroupBy[keys, aggs](Partition_t(R))
      )
+$$
+
 ```
 
 ## Implementation

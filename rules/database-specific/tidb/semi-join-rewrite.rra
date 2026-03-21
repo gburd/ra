@@ -23,10 +23,13 @@ unique keys, allowing more efficient join algorithms and better optimization.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 R WHERE R.a IN (SELECT S.b FROM S)
-  -> R JOIN (SELECT DISTINCT S.b FROM S) ON R.a = S.b
-  where S.b is unique
+  \rightarrow R JOIN (SELECT DISTINCT S.b FROM S) ON R.a = S.b
+  \text{where} S.b is unique
+$$
+
 ```
 
 ## Implementation

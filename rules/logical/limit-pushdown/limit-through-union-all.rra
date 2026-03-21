@@ -31,22 +31,29 @@ the limit, with slowest branches potentially not executing at all.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 limit[N](union_all[R1, R2, ..., Rn])
-  -> limit[N](union_all[limit[N](R1), limit[N](R2), ..., limit[N](Rn)])
+  \rightarrow limit[N](union_all[limit[N](R1), limit[N](R2), ..., limit[N](Rn)])
+$$
 
+$$
 With ORDER BY:
 limit[N](sort[key](union_all[R1, R2, ..., Rn]))
-  -> limit[N](merge_sort[key](
+  \rightarrow limit[N](merge_sort[key](
        sort[key](limit[N](R1)),
        sort[key](limit[N](R2)),
        ...
      ))
+$$
 
+$$
 Conditions:
 - UNION ALL only (not UNION DISTINCT)
 - N must be constant (not parameterized)
 - Safe for any N >= 0
+$$
+
 ```
 
 ## Implementation

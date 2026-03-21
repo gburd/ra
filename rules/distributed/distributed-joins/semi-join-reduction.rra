@@ -32,11 +32,14 @@ small compared to the savings.
 
 ## Relational Algebra
 
-```algebra
-Join[c](R, S) ->
-  let bf = BloomFilter(pi[k_S](S))
-  Join[c](sigma[k_R IN bf](R), S)
-  where |S| << |R|
+```latex
+$$
+Join[c](R, S) \rightarrow
+  let bf = BloomFilter(\pi_{k_S}(S))
+  Join[c](\sigma_{k_R IN bf}(R), S)
+  \text{where} |S| << |R|
+$$
+
 ```
 
 ## Implementation

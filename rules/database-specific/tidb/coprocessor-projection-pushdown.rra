@@ -23,10 +23,13 @@ columns over the network instead of full rows.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Project[cols](Scan[table])
-  -> CopTask(Project[cols](Scan[table]))
-  where all_columns_pushable(cols)
+  \rightarrow CopTask(Project[cols](Scan[table]))
+  \text{where} all_columns_pushable(cols)
+$$
+
 ```
 
 ## Implementation

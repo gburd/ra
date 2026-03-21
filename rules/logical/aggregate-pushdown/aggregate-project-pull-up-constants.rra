@@ -31,18 +31,23 @@ the number of groups.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: constant in GROUP BY
-gamma[dept, 'active'; COUNT(*)](
-    sigma[status = 'active'](R)
+$$
+\gamma_{dept, 'active'; COUNT(*)}(
+    \sigma_{status = 'active'}(R)
 )
+$$
 
 -- After: constant removed from GROUP BY, added as literal above
-pi[dept, 'active' AS status, cnt](
-    gamma[dept; COUNT(*) AS cnt](
-        sigma[status = 'active'](R)
+$$
+\pi_{dept, 'active' AS status, cnt}(
+    \gamma_{dept; COUNT(*) AS cnt}(
+        \sigma_{status = 'active'}(R)
     )
 )
+$$
+
 ```
 
 ## Implementation

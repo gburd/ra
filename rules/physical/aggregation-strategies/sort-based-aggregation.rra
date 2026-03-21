@@ -32,9 +32,10 @@ Sorts input by group keys, then aggregates consecutive groups with streaming sca
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 aggregate[group_keys, agg_funcs](R)
-  -> sort_aggregate:
+  \rightarrow sort_aggregate:
        sorted = sort(R, group_keys)
        current_group = null
        current_aggs = null
@@ -46,6 +47,8 @@ aggregate[group_keys, agg_funcs](R)
          else:
            update_aggregates(current_aggs, r)
        emit (current_group, current_aggs)
+$$
+
 ```
 
 ## Implementation

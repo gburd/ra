@@ -20,12 +20,17 @@ Eliminates MergeTree partitions that cannot contain matching rows based on parti
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
+$$
 (filter (scan orders) (gt date '2024-01-01'))
+$$
 
 -- After
+$$
 (filter (scan orders_2024_01) (gt date '2024-01-01'))
+$$
+
 ```
 
 ## Preconditions

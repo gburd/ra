@@ -39,27 +39,42 @@ relation is computed and then filtered.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Magic predicate creation algorithm:
+$$
 
+$$
 Input: Adorned rule: p^bf(X,Z) :- q(X,Y), r(Y,W), p^bf(W,Z)
+$$
 
+$$
 Step 1: Create supplementary predicates for each body position
   sup_1(X)   = bound args at position 0 (from head)
-  sup_2(X,Y) = sup_1(X) join q(X,Y)  (after evaluating q)
-  sup_3(X,Y,W) = sup_2(X,Y) join r(Y,W)  (after evaluating r)
+  sup_2(X,Y) = sup_1(X) \bowtie q(X,Y)  (after evaluating q)
+  sup_3(X,Y,W) = sup_2(X,Y) \bowtie r(Y,W)  (after evaluating r)
+$$
 
+$$
 Step 2: Create magic predicate from supplementary at recursive call
   magic_p^bf(W) = pi_W(sup_3(X,Y,W))
+$$
 
+$$
 Step 3: Rewrite recursive rule to use magic predicate
   p^bf(X,Z) :- magic_p^bf(X), q(X,Y), r(Y,W), p^bf(W,Z)
+$$
 
+$$
 Step 4: Create magic seed from query
   magic_p^bf(john) :- true   (from query ?- p(john, X))
+$$
 
+$$
 Step 5: Create magic rule (propagates demand through recursion)
   magic_p^bf(W) :- magic_p^bf(X), q(X,Y), r(Y,W)
+$$
+
 ```
 
 ## Implementation

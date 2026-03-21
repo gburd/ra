@@ -35,28 +35,39 @@ the index lookup cost, rather than the product of both cardinalities.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join methods considered by System R:
+$$
 
+$$
 1. Nested-loop with sequential inner scan:
    For each tuple r in R (outer):
      For each tuple s in S (inner):
        If join_predicate(r, s): emit (r, s)
    Cost = N_pages(R) + N_tuples(R) * N_pages(S)
+$$
 
+$$
 2. Nested-loop with index on inner:
    For each tuple r in R (outer):
      Lookup join_key(r) in Index(S.join_col)
      For each matching s: emit (r, s)
    Cost = N_pages(R) + N_tuples(R) * (index_lookup_cost + matching_tuples_cost)
+$$
 
-3. Sort-merge join:
+$$
+3. Sort-merge \bowtie:
    Sort R by join_col (if not sorted)
    Sort S by join_col (if not sorted)
    Merge
    Cost = sort_cost(R) + sort_cost(S) + N_pages(R) + N_pages(S)
+$$
 
-Choose the join method with minimum total cost.
+$$
+Choose the \bowtie method with minimum total cost.
+$$
+
 ```
 
 ## Implementation

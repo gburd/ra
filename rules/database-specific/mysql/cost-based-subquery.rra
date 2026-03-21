@@ -31,16 +31,21 @@ of earlier MySQL versions that sometimes chose poorly.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Strategy 1: correlated execution
+$$
 for each row in outer:
     execute subquery
+$$
 
 -- Strategy 2: materialization
+$$
 mat = materialize(subquery)
-outer semi-join mat
+outer semi-\bowtie mat
+$$
 
 -- Optimizer picks based on estimated cost
+
 ```
 
 ## Implementation

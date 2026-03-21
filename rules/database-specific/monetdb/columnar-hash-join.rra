@@ -33,10 +33,13 @@ during the join phase.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Columnar hash join on BATs
+$$
 OID_pairs = hashjoin(orders.cust_id, customers.id)
 result = project(OID_pairs, [orders.total, customers.name])
+$$
+
 ```
 
 ## Implementation

@@ -24,12 +24,15 @@ equivalent COALESCE form.
 
 ## Relational Algebra
 
-```algebra
-IFNULL(a, b)     -> COALESCE(a, b)        -- MySQL/SQLite
-NVL(a, b)        -> COALESCE(a, b)        -- Oracle
-NVL2(a, b, c)    -> CASE WHEN a IS NOT NULL THEN b ELSE c END
-ISNULL(a, b)     -> COALESCE(a, b)        -- mssql
-IIF(cond, a, b)  -> CASE WHEN cond THEN a ELSE b END
+```latex
+$$
+IFNULL(a, b)     \rightarrow COALESCE(a, b)        -- MySQL/SQLite
+NVL(a, b)        \rightarrow COALESCE(a, b)        -- Oracle
+NVL2(a, b, c)    \rightarrow CASE WHEN a IS NOT NULL THEN b ELSE c END
+ISNULL(a, b)     \rightarrow COALESCE(a, b)        -- mssql
+IIF(cond, a, b)  \rightarrow CASE WHEN cond THEN a ELSE b END
+$$
+
 ```
 
 ## Implementation

@@ -36,17 +36,20 @@ valid statistical estimation of aggregates.
 
 ## Relational Algebra
 
-```algebra
-aggregate[SUM(x)](R join[R.a = S.a] S)
-  -> ripple_join_aggregate(
+```latex
+$$
+aggregate[SUM(x)](R \bowtie_{R.a = S.a} S)
+  \rightarrow ripple_join_aggregate(
        strategy: hash_ripple,
        confidence: 0.95,
        error_bound: 0.05,
        aggregate: SUM(x),
        inputs: (R, S)
      )
-  where is_aggregate_query()
-  where approximate_answer_acceptable()
+  \text{where} is_aggregate_query()
+  \text{where} approximate_answer_acceptable()
+$$
+
 ```
 
 ## Implementation

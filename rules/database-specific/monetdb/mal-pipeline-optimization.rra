@@ -32,14 +32,19 @@ locality and reducing memory traffic.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: materialized intermediates
-T1 = sigma[price > 100](scan(products))
-T2 = pi[name](T1)
+$$
+T1 = \sigma_{price > 100}(scan(products))
+T2 = \pi_{name}(T1)
+$$
 
 -- After: pipelined (no intermediate BAT for T1)
-pi[name](sigma[price > 100](scan(products)))
+$$
+\pi_{name}(\sigma_{price > 100}(scan(products)))
+$$
 -- executed as single pass
+
 ```
 
 ## Implementation

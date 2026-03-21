@@ -35,18 +35,23 @@ reducing network traffic from O(distinct values) to O(sketch size).
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Exact:
-gamma[g, COUNT(DISTINCT x)](R)
+$$
+\gamma_{g, COUNT(DISTINCT x)}(R)
+$$
 
 -- Approximate with HyperLogLog:
-gamma[g, HLL_MERGE(partial_hll)](
+$$
+\gamma_{g, HLL_MERGE(partial_hll)}(
     Exchange[hash(g)](
-        gamma[g, HLL_ADD(x) AS partial_hll](R_partition)
+        \gamma_{g, HLL_ADD(x) AS partial_hll}(R_partition)
     )
 )
+$$
 
 -- Sketch size: 2^p bytes (p=14 -> 16KB, 0.8% error)
+
 ```
 
 ## Implementation

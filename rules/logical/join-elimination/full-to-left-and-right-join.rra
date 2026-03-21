@@ -20,8 +20,11 @@ Simplifies FULL OUTER JOIN
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 FULL OUTER JOIN => LEFT + RIGHT
+$$
+
 ```
 
 ## Implementation

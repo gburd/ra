@@ -20,11 +20,14 @@ within the same datacenter rather than shuffling across datacenters.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join[c](R@dc1, S@dc2)
-  -> Join[c](R@dc1, Transfer(S, dc1))
-  where |S| < |R|
-  where cross_dc_cost(S) < cross_dc_cost(R)
+  \rightarrow Join[c](R@dc1, Transfer(S, dc1))
+  \text{where} |S| < |R|
+  \text{where} cross_dc_cost(S) < cross_dc_cost(R)
+$$
+
 ```
 
 ## Implementation

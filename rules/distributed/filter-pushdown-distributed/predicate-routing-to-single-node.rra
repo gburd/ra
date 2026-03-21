@@ -20,11 +20,14 @@ This is the fastest path for point queries in distributed databases.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Filter[k = v](Scan(R[hash(k)]))
-  -> SingleNodeScan(R, partition_for(v))
-  where k is the full partition key
-  where predicate is equality on k
+  \rightarrow SingleNodeScan(R, partition_for(v))
+  \text{where} k is the full partition key
+  \text{where} predicate is equality on k
+$$
+
 ```
 
 ## Test Cases

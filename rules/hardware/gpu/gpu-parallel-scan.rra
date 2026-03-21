@@ -32,10 +32,13 @@ faster despite the PCIe transfer cost.
 
 ## Relational Algebra
 
-```algebra
-scan(R) -> gpu_scan(R)
-  where |R| > crossover_threshold
+```latex
+$$
+scan(R) \rightarrow gpu_scan(R)
+  \text{where} |R| > crossover_threshold
     AND size(R) <= gpu_memory OR chunked_transfer_enabled
+$$
+
 ```
 
 ## Implementation

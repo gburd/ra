@@ -31,12 +31,17 @@ index range scans.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: full table scan
-pi[a, b](sigma[a > 10](scan(T)))
+$$
+\pi_{a, b}(\sigma_{a > 10}(scan(T)))
+$$
 
 -- After: index fast full scan (index covers a, b)
-pi[a, b](sigma[a > 10](index-fast-full-scan(T, idx_ab)))
+$$
+\pi_{a, b}(\sigma_{a > 10}(index-fast-full-scan(T, idx_ab)))
+$$
+
 ```
 
 ## Implementation

@@ -32,25 +32,32 @@ can use hash or merge joins instead of nested loops.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Apply operator (conceptual nested-loop correlated evaluation)
+$$
 apply[corr_col](R, S(corr_col))
-  -> join[R.corr_col = S.corr_col](R, S')
-  where S' = S with corr_col references replaced by S's own columns
+  \rightarrow \bowtie_{R.corr_col = S.corr_col}(R, S')
+  \text{where} S' = S with corr_col references replaced by S's own columns
+$$
 
 -- General decorrelation steps:
+$$
 1. Identify correlation predicates: S references R.col
 2. Extract equality predicates: R.col = S.col
 3. Move S outside of per-row context
-4. Add join on extracted equality
+4. Add \bowtie on extracted equality
 5. Handle non-equality correlations via magic sets or lateral
+$$
 
 -- Scalar subquery decorrelation:
+$$
 project[R.*, (SELECT f(S) FROM S WHERE S.fk = R.pk)](R)
-  -> project[R.*, T.result](
-       left_join[R.pk = T.fk](R, T)
+  \rightarrow project[R.*, T.result](
+       left_\bowtie_{R.pk = T.fk}(R, T)
      )
-  where T = derived query computing f(S) grouped by fk
+  \text{where} T = derived query computing f(S) grouped by fk
+$$
+
 ```
 
 ## Implementation

@@ -29,13 +29,18 @@ sort eliminates this cost entirely.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: redundant sort
+$$
 sort[a ASC](R)
-  where R already ordered by [a ASC]
+  \text{where} R already ordered by [a ASC]
+$$
 
 -- After: sort eliminated
+$$
 R
+$$
+
 ```
 
 ## Implementation

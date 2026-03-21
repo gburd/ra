@@ -32,21 +32,28 @@ reduce hash table sizes, sort key widths, and comparison costs.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- GROUP BY reduction via FD
+$$
 aggregate[group_by: {A, B}, SUM(C)](R)
-  -> aggregate[group_by: {A}, SUM(C)](R)
-  where FD: A -> B in R
+  \rightarrow aggregate[group_by: {A}, SUM(C)](R)
+  \text{where} FD: A \rightarrow B in R
+$$
 
 -- ORDER BY simplification
+$$
 sort[A, B](R)
-  -> sort[A](R)
-  where FD: A -> B in R
+  \rightarrow sort[A](R)
+  \text{where} FD: A \rightarrow B in R
+$$
 
 -- Join-derived FD propagation
-R join[R.id = S.rid] S
+$$
+R \bowtie_{R.id = S.rid} S
+$$
   -- Derives FD: S.rid -> R.* (from R.id being PK)
   -- Enables GROUP BY {S.rid, R.name} -> GROUP BY {S.rid}
+
 ```
 
 ## Implementation

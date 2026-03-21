@@ -34,16 +34,23 @@ plan for a set of tables uses optimal subplans for its subsets.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join_n(T1, T2, ..., Tn)
-  -> FindOptimalJoinOrder_DP({T1, T2, ..., Tn}, predicates)
+  \rightarrow FindOptimalJoinOrder_DP({T1, T2, ..., Tn}, predicates)
+$$
 
+$$
 DP recurrence (DPccp algorithm):
-For each subset S of tables:
-  For each connected complement pair (S1, S2) where S = S1 ∪ S2:
-    cost(S) = min(cost(S), cost(S1) + cost(S2) + join_cost(S1, S2))
+For each \subseteq S of tables:
+  For each connected complement pair (S1, S2) \text{where} S = S1 ∪ S2:
+    cost(S) = \text{min}(cost(S), cost(S1) + cost(S2) + join_cost(S1, S2))
+$$
 
-Returns: Optimal join tree with minimum total cost
+$$
+Returns: Optimal \bowtie tree with minimum total cost
+$$
+
 ```
 
 ## Implementation

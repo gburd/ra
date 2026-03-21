@@ -22,12 +22,17 @@ before the aggregation phase.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
-gamma[g, agg(a)](delta(R))  -- delta = DISTINCT
+$$
+\gamma_{g, agg(a)}(delta(R))  -- delta = DISTINCT
+$$
 
 -- After (when DISTINCT cols subset of group keys)
-gamma[g, agg(a)](R)
+$$
+\gamma_{g, agg(a)}(R)
+$$
+
 ```
 
 ## Test Cases

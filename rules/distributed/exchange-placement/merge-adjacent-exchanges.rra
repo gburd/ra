@@ -28,14 +28,21 @@ the intermediate distribution is never consumed by any operator.
 
 ## Relational Algebra
 
-```algebra
-Exchange[d1](Exchange[d2](R)) -> Exchange[d1](R)
+```latex
+$$
+Exchange[d1](Exchange[d2](R)) \rightarrow Exchange[d1](R)
+$$
 
 -- Special case: gather over any exchange
-Exchange[gather](Exchange[hash(k)](R)) -> Exchange[gather](R)
+$$
+Exchange[gather](Exchange[hash(k)](R)) \rightarrow Exchange[gather](R)
+$$
 
 -- Special case: two hash exchanges
-Exchange[hash(k1)](Exchange[hash(k2)](R)) -> Exchange[hash(k1)](R)
+$$
+Exchange[hash(k1)](Exchange[hash(k2)](R)) \rightarrow Exchange[hash(k1)](R)
+$$
+
 ```
 
 ## Implementation

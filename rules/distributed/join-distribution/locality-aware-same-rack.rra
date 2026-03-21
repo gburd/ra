@@ -20,11 +20,14 @@ lower than cross-rack transfers.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Exchange[hash(k)](R) to targets
-  -> Exchange[hash(k)](R) to same_rack_targets
-  where same_rack_targets covers all partitions
-  where intra_rack_cost < cross_rack_cost
+  \rightarrow Exchange[hash(k)](R) to same_rack_targets
+  \text{where} same_rack_targets covers all partitions
+  \text{where} intra_rack_cost < cross_rack_cost
+$$
+
 ```
 
 ## Implementation

@@ -30,12 +30,17 @@ duplicate-elimination or difference computation.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: filter above union
-sigma[p](R UNION ALL S)
+$$
+\sigma_{p}(R UNION ALL S)
+$$
 
 -- After: filter pushed to each branch
-sigma[p](R) UNION ALL sigma[p](S)
+$$
+\sigma_{p}(R) UNION ALL \sigma_{p}(S)
+$$
+
 ```
 
 ## Implementation

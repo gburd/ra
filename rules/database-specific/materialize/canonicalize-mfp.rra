@@ -31,16 +31,21 @@ and projections in a single function call per row.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: separate operators
-pi[a, c](sigma[b > 10](map[c = a + 1](R)))
+$$
+\pi_{a, c}(\sigma_{b > 10}(map[c = a + 1](R)))
+$$
 
 -- After: single MFP
+$$
 MFP {
     expressions: [c = a + 1],
     predicates: [b > 10],
     projection: [a, c],
 }(R)
+$$
+
 ```
 
 ## Implementation

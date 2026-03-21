@@ -25,13 +25,18 @@ where masked columns are used internally but not exposed in output.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: mask applied, then projected away
-pi[a](sigma[b > 10](mask[b -> '***'](R(a, b, c))))
+$$
+\pi_{a}(\sigma_{b > 10}(mask[b \rightarrow '***'](R(a, b, c))))
+$$
 
 -- After: mask deferred (b used for filter, not output)
-pi[a](sigma[b > 10](R))
+$$
+\pi_{a}(\sigma_{b > 10}(R))
+$$
 -- Masking on b unnecessary since b not in output
+
 ```
 
 ## Implementation

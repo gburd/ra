@@ -51,13 +51,14 @@ the instruction stream fits in L1 icache.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Pipeline identification:
 -- Plan: Project -> Filter -> HashJoin(build=Scan_dim, probe=Scan_fact)
 -- Pipeline 1 (build): Scan_dim -> HashBuild
 -- Pipeline 2 (probe): Scan_fact -> HashProbe -> Filter -> Project -> Emit
 
 -- Generated code for Pipeline 2:
+$$
 for page in fact_table.pages():
   for tuple in page.tuples():
     match = hash_table.probe(tuple.join_key)
@@ -66,6 +67,8 @@ for page in fact_table.pages():
       if eval_predicate(joined):
         result = project(joined, output_cols)
         output_buffer.append(result)
+$$
+
 ```
 
 ## Implementation

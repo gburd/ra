@@ -37,29 +37,40 @@ But LLVM compilation takes 10-100ms. The breakeven point is typically
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Total cost comparison:
+$$
 interpreted_total(query) = interpret_exec_time(query)
 compiled_total(query) = compile_time(query) + compiled_exec_time(query)
+$$
 
 -- Compile if:
+$$
 compiled_total(query) < interpreted_total(query)
 compile_time(query) + compiled_exec_time(query) < interpret_exec_time(query)
+$$
 
 -- With plan reuse (prepared statements):
+$$
 compiled_total_reuse(query, n) =
   compile_time(query) + n * compiled_exec_time(query)
+$$
 -- Always wins for large n
 
 -- Compilation cost model:
+$$
 compile_time(plan) =
   BASE_COMPILE_TIME
   + num_operators(plan) * PER_OPERATOR_COMPILE
   + num_expressions(plan) * PER_EXPRESSION_COMPILE
+$$
 
 -- Speedup model:
+$$
 speedup(plan) = interpret_time / compiled_time
+$$
   -- Typically 2-10x depending on operator mix
+
 ```
 
 ## Implementation

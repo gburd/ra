@@ -20,8 +20,11 @@ Pushes filters through set operations
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 σ(Union(R, S)) => Union(σ(R), σ(S))
+$$
+
 ```
 
 ## Implementation

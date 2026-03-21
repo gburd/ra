@@ -26,13 +26,18 @@ deduplication can happen incrementally.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 aggregate[COUNT(DISTINCT col)](R)
-  -> aggregate[COUNT(*)](aggregate[col](R))
+  \rightarrow aggregate[COUNT(*)](aggregate[col](R))
+$$
 
+$$
 With index:
 aggregate[COUNT(DISTINCT indexed_col)](R)
-  -> index_scan_distinct[index](R)
+  \rightarrow index_scan_distinct[index](R)
+$$
+
 ```
 
 ## Implementation

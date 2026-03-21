@@ -46,39 +46,48 @@ eliminates the sort entirely.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: explicit sort
+$$
 RowPattern(
   Sort(order_by: [trade_date], SeqScan(stock_prices)),
   partition: [symbol],
   order: [trade_date],
   ...
 )
+$$
 
 -- After: index scan (pre-sorted)
+$$
 RowPattern(
   IndexScan(stock_prices, idx_trade_date),
   partition: [symbol],
   order: [trade_date],
   ...
 )
+$$
 
 -- With composite index matching PARTITION + ORDER
 -- Before
+$$
 RowPattern(
   Sort(order_by: [trade_date],
     SeqScan(stock_prices)),
   partition: [symbol],
   order: [trade_date], ...
 )
+$$
 
 -- After (composite index covers both)
+$$
 RowPattern(
   IndexScan(stock_prices, idx_symbol_date,
     bounds: partition_ranges),
   partition: [symbol],
   order: [trade_date], ...
 )
+$$
+
 ```
 
 ## Implementation

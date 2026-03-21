@@ -24,11 +24,14 @@ Reorders joins in the recursive case to place the CTE reference on the probe sid
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 RecursiveCTE[name, base, Join(T, CTE_ref, cond)](body)
-  -> RecursiveCTE[name, base, Join(CTE_ref, T, cond')](body)
-  where is_inner_join(Join)
+  \rightarrow RecursiveCTE[name, base, Join(CTE_ref, T, cond')](body)
+  \text{where} is_inner_join(Join)
     and estimated_size(T) > estimated_size(CTE_ref)
+$$
+
 ```
 
 ## Implementation

@@ -30,18 +30,27 @@ their filter conditions. This eliminates the set operation entirely.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: UNION of same source
-sigma[p1](R) UNION sigma[p2](R)
+$$
+\sigma_{p1}(R) UNION \sigma_{p2}(R)
+$$
 
 -- After: single scan with combined filter
-gamma[*](sigma[p1 OR p2](R))
+$$
+\gamma_{*}(\sigma_{p1 OR p2}(R))
+$$
 
 -- Before: EXCEPT of same source
-sigma[p1](R) EXCEPT sigma[p2](R)
+$$
+\sigma_{p1}(R) EXCEPT \sigma_{p2}(R)
+$$
 
 -- After: single scan with negated filter
-gamma[*](sigma[p1 AND NOT p2](R))
+$$
+\gamma_{*}(\sigma_{p1 AND NOT p2}(R))
+$$
+
 ```
 
 ## Implementation

@@ -31,10 +31,13 @@ unnecessary overhead. Eliminating them avoids O(n) KV lookups.
 
 ## Relational Algebra
 
-```algebra
-gamma[g, agg(a)](IndexJoin(IndexScan(T, idx), T))
-  -> gamma[g, agg(a)](IndexScan(T, idx))
-  where g and a are all in idx columns
+```latex
+$$
+\gamma_{g, agg(a)}(IndexJoin(IndexScan(T, idx), T))
+  \rightarrow \gamma_{g, agg(a)}(IndexScan(T, idx))
+  \text{where} g and a are all in idx columns
+$$
+
 ```
 
 ## Implementation

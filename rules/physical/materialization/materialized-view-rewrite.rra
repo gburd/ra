@@ -24,10 +24,13 @@ Rewrites query to use pre-computed materialized view instead of base tables.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 SELECT agg(col) FROM T WHERE pred
-  -> SELECT agg FROM matview WHERE pred
-  where matview covers query
+  \rightarrow SELECT agg FROM matview WHERE pred
+  \text{where} matview covers query
+$$
+
 ```
 
 ## Implementation

@@ -30,13 +30,18 @@ instead of a full scan.
 
 ## Relational Algebra
 
-```algebra
-gamma[MIN(x)](Scan(T))
-  -> ConstAgg(Limit(1, Sort[x ASC](
-       sigma[x IS NOT NULL](Scan(T)))))
+```latex
+$$
+\gamma_{MIN(x)}(Scan(T))
+  \rightarrow ConstAgg(Limit(1, Sort[x ASC](
+       \sigma_{x IS NOT NULL}(Scan(T)))))
+$$
 
-gamma[MAX(x)](Scan(T))
-  -> ConstAgg(Limit(1, Sort[x DESC](Scan(T))))
+$$
+\gamma_{MAX(x)}(Scan(T))
+  \rightarrow ConstAgg(Limit(1, Sort[x DESC](Scan(T))))
+$$
+
 ```
 
 ## Implementation

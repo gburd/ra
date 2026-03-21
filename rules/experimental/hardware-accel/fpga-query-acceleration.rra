@@ -41,26 +41,35 @@ and branch-mispredict, FPGA pipelines deliver deterministic latency.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- FPGA streaming cost:
+$$
 fpga_filter_cost(R) =
   BYTES(R) / FPGA_THROUGHPUT + RECONFIGURATION_TIME
-  where FPGA_THROUGHPUT = DATAPATH_WIDTH * CLOCK_RATE
+  \text{where} FPGA_THROUGHPUT = DATAPATH_WIDTH * CLOCK_RATE
+$$
 
 -- CPU equivalent:
+$$
 cpu_filter_cost(R) =
   BYTES(R) / CPU_THROUGHPUT + branch_mispredict_overhead
+$$
 
 -- Near-data filtering:
 -- FPGA on storage path filters before data reaches CPU
+$$
 near_data_cost(R, selectivity) =
   BYTES(R) / STORAGE_BW           -- read from storage
   + selectivity * BYTES(R) / PCIE_BW  -- filtered to CPU
+$$
 
 -- Without near-data:
+$$
 standard_cost(R, selectivity) =
   BYTES(R) / PCIE_BW              -- all data to CPU
   + BYTES(R) / CPU_FILTER_RATE    -- CPU filters
+$$
+
 ```
 
 ## Implementation

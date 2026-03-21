@@ -30,12 +30,17 @@ optimization passes.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: two stacked projections
-pi[f(a) AS x](pi[g(b) AS a](R))
+$$
+\pi_{f(a) AS x}(\pi_{g(b) AS a}(R))
+$$
 
 -- After: single merged projection
-pi[f(g(b)) AS x](R)
+$$
+\pi_{f(g(b)) AS x}(R)
+$$
+
 ```
 
 ## Implementation

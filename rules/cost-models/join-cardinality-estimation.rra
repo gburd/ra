@@ -39,30 +39,45 @@ harder cases.
 
 ## Relational Algebra
 
-```algebra
-Equi-join:
-  Card(R join[a=b] S) = Card(R) * Card(S) / max(NDV(R.a), NDV(S.b))
+```latex
+$$
+Equi-\bowtie:
+  \text{Card}(R \bowtie_{a=b} S) = \text{Card}(R) * \text{Card}(S) / \text{max}(\text{NDV}(R.a), \text{NDV}(S.b))
+$$
 
-Multi-column equi-join:
-  Card(R join[a1=b1 AND a2=b2] S) =
-    Card(R) * Card(S) / (max(NDV(a1),NDV(b1)) * max(NDV(a2),NDV(b2)))
+$$
+Multi-column equi-\bowtie:
+  \text{Card}(R \bowtie_{a1=b1 AND a2=b2} S) =
+    \text{Card}(R) * \text{Card}(S) / (\text{max}(\text{NDV}(a1),\text{NDV}(b1)) * \text{max}(\text{NDV}(a2),\text{NDV}(b2)))
+$$
 
-Foreign key join (R.fk references S.pk):
-  Card(R join S) = Card(R)  (each R row matches exactly one S row)
+$$
+Foreign key \bowtie (R.fk references S.pk):
+  \text{Card}(R \bowtie S) = \text{Card}(R)  (each R row matches exactly one S row)
+$$
 
-Self-join:
-  Card(R join[a=b] R) = Card(R)^2 / NDV(R.a)  (if a and b same column)
+$$
+Self-\bowtie:
+  \text{Card}(R \bowtie_{a=b} R) = \text{Card}(R)^2 / \text{NDV}(R.a)  (if a and b same column)
+$$
 
-Semi-join:
-  Card(R semijoin[a=b] S) = Card(R) * (1 - (1 - 1/NDV(S.b))^NDV(R.a))
-  Approximation: Card(R) * min(NDV(R.a), NDV(S.b)) / NDV(R.a)
+$$
+Semi-\bowtie:
+  \text{Card}(R semi\bowtie_{a=b} S) = \text{Card}(R) * (1 - (1 - 1/\text{NDV}(S.b))^\text{NDV}(R.a))
+  Approximation: \text{Card}(R) * \text{min}(\text{NDV}(R.a), \text{NDV}(S.b)) / \text{NDV}(R.a)
+$$
 
-Anti-join:
-  Card(R antijoin[a=b] S) = Card(R) - Card(R semijoin S)
+$$
+Anti-\bowtie:
+  \text{Card}(R anti\bowtie_{a=b} S) = \text{Card}(R) - \text{Card}(R semijoin S)
+$$
 
-Theta-join:
-  Card(R join[a < b] S) = Card(R) * Card(S) * theta_selectivity
+$$
+Theta-\bowtie:
+  \text{Card}(R \bowtie_{a < b} S) = \text{Card}(R) * \text{Card}(S) * theta_selectivity
   Default theta_selectivity: 1/3 for inequality
+$$
+
 ```
 
 ## Implementation

@@ -20,12 +20,17 @@ Pushes WHERE predicates closer to the data source.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
-(filter (join (scan t1) (scan t2)) (and (eq t1.a 5) (eq t2.b 10)))
+$$
+(filter (\bowtie (scan t1) (scan t2)) (and (eq t1.a 5) (eq t2.b 10)))
+$$
 
 -- After
-(filter (join (filter (scan t1) (eq a 5)) (filter (scan t2) (eq b 10))))
+$$
+(filter (\bowtie (filter (scan t1) (eq a 5)) (filter (scan t2) (eq b 10))))
+$$
+
 ```
 
 ## Preconditions

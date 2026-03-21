@@ -31,21 +31,32 @@ memory allocation for that branch.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Filter contradiction
-sigma[false](R) -> empty(schema(R))
+$$
+\sigma_{false}(R) \rightarrow empty(schema(R))
+$$
 
 -- Project over empty
-pi[cols](empty) -> empty(schema(cols))
+$$
+\pi_{cols}(empty) \rightarrow empty(schema(cols))
+$$
 
 -- Inner join with empty side
-R inner-join empty -> empty(schema(R ++ S))
+$$
+R inner-\bowtie empty \rightarrow empty(schema(R ++ S))
+$$
 
 -- LIMIT 0
-limit[0](R) -> empty(schema(R))
+$$
+limit[0](R) \rightarrow empty(schema(R))
+$$
 
 -- Union with empty branch
-R union-all empty -> R
+$$
+R \cup-all empty \rightarrow R
+$$
+
 ```
 
 ## Implementation

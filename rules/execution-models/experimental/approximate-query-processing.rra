@@ -52,24 +52,31 @@ aggregates. Processing 10M rows instead of 1B gives a 100x speedup.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Exact query:
+$$
 result = Aggregate(Scan(R), SUM(col))
+$$
   -- Cost: O(|R|)
 
 -- Approximate query with sampling:
+$$
 sample = Sample(R, rate=0.01)  -- 1% sample
 approx_result = Aggregate(sample, SUM(col))
 scaled_result = approx_result / 0.01  -- scale to full table
 error = z_alpha * StdDev(sample.col) / sqrt(|sample|)
+$$
   -- Cost: O(0.01 * |R|) = O(|R| / 100)
 
 -- Stratified sampling for GROUP BY:
+$$
 for each group g in R:
-  sample_g = Sample(R[group=g], rate=max(0.01, k/|R[g]|))
+  sample_g = Sample(R[group=g], rate=\text{max}(0.01, k/|R[g]|))
   result_g = Aggregate(sample_g, SUM(col)) / sample_rate_g
   error_g = z * StdDev(sample_g.col) / sqrt(|sample_g|)
+$$
   -- Ensures each group has at least k samples
+
 ```
 
 ## Implementation

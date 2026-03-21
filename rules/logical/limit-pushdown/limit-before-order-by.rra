@@ -26,9 +26,12 @@ of O(N log N) for full sort.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 limit[K](sort[key](R))
-  -> top_k[K, key](R)
+  \rightarrow top_k[K, key](R)
+$$
+
 ```
 
 ## Implementation

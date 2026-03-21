@@ -41,11 +41,16 @@ the range predicate on date, losing the equality filter.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 filter[status = 'A' AND date > '2025-01-01'](scan[T])
-  -> index_scan[I_status_date](status = 'A' AND date > '2025-01-01')
+  \rightarrow index_scan[I_status_date](status = 'A' AND date > '2025-01-01')
+$$
   -- prefer I(status, date) over I(date, status)
-  where equality columns lead the index key
+$$
+  \text{where} equality columns lead the index key
+$$
+
 ```
 
 ## Implementation

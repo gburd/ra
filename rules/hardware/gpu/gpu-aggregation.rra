@@ -34,11 +34,14 @@ aggregation before a global merge step.
 
 ## Relational Algebra
 
-```algebra
-gamma[g; agg](R) -> gpu_aggregate[g; agg](R)
-  where |R| > threshold
+```latex
+$$
+\gamma_{g; agg}(R) \rightarrow gpu_aggregate[g; agg](R)
+  \text{where} |R| > threshold
     AND agg in {SUM, COUNT, MIN, MAX, AVG}
     AND hash_table(g) fits gpu_memory
+$$
+
 ```
 
 ## Implementation

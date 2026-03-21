@@ -31,18 +31,25 @@ aggregating potentially billions of base table rows.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Query:
-gamma[region; total=SUM(amount)](
-    sigma[year = 2025](sales join regions))
+$$
+\gamma_{region; total=SUM(amount)}(
+    \sigma_{year = 2025}(sales \bowtie regions))
+$$
 
 -- MV definition:
+$$
 CREATE MATERIALIZED VIEW mv_sales_summary AS
 SELECT region, year, SUM(amount) AS total
 FROM sales JOIN regions GROUP BY region, year;
+$$
 
 -- Rewritten:
-sigma[year = 2025](scan(mv_sales_summary))
+$$
+\sigma_{year = 2025}(scan(mv_sales_summary))
+$$
+
 ```
 
 ## Implementation

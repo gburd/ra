@@ -25,18 +25,25 @@ classification. Block transformations on volatile functions.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- VOLATILE: cannot optimize (RANDOM, NOW, NEXTVAL, clock_timestamp)
+$$
 filter[RANDOM() > 0.5](R)
-  -> KEEP AS-IS  -- must evaluate per row
+  \rightarrow KEEP AS-IS  -- must evaluate per row
+$$
 
 -- STABLE: can cache within statement (CURRENT_TIMESTAMP, current_user)
+$$
 filter[CURRENT_TIMESTAMP > col](R)
-  -> filter[const_ts > col](R)  -- evaluate once per statement
+  \rightarrow filter[const_ts > col](R)  -- evaluate once per statement
+$$
 
 -- IMMUTABLE: freely optimizable (UPPER, LENGTH, +, -, *, /)
+$$
 filter[LENGTH('hello') > 3](R)
-  -> filter[5 > 3](R) -> filter[TRUE](R) -> R
+  \rightarrow filter[5 > 3](R) \rightarrow filter[TRUE](R) \rightarrow R
+$$
+
 ```
 
 ## Implementation

@@ -22,11 +22,14 @@ Push DISTINCT through a join when only columns from one side are projected. The 
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Distinct(Project[L.*](Join[cond](L, R)))
-  -> Project[L.*](Join[cond](Distinct(L), R))
-  where projected_cols subset_of output(L)
+  \rightarrow Project[L.*](Join[cond](Distinct(L), R))
+  \text{where} projected_cols subset_of output(L)
     and join_type preserves uniqueness
+$$
+
 ```
 
 ## Implementation

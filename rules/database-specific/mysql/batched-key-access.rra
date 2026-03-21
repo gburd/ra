@@ -33,12 +33,17 @@ overhead.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: nested-loop with random index lookups
+$$
 outer NLJ[o.key = i.key] inner
+$$
 
 -- After: batched key access with sorted lookups
-outer BKA-join[o.key = i.key, batch_size=256] inner
+$$
+outer BKA-\bowtie_{o.key = i.key, batch_size=256} inner
+$$
+
 ```
 
 ## Implementation

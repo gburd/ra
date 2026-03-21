@@ -38,20 +38,25 @@ is exactly `price < LEAD(price, 1) OVER (ORDER BY ...)`.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: NEXT-based pattern
+$$
 RowPattern(
   input: R,
   order: [ts],
   pattern: Quantified(A, OneOrMore),
   defines: { A: Lt(col, Next(col, 1)) }
 )
+$$
 
 -- After: LEAD window function
+$$
 Filter(
   col < LEAD(col, 1) OVER (ORDER BY ts),
   R
 )
+$$
+
 ```
 
 ## Implementation

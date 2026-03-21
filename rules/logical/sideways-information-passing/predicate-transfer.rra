@@ -24,12 +24,17 @@ constrain join columns that determine values in another table.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
-sigma[R.a > 10](R join[R.a = S.b] S)
+$$
+\sigma_{R.a > 10}(R \bowtie_{R.a = S.b} S)
+$$
 
 -- After: transfer predicate to S
-sigma[R.a > 10](R) join[R.a = S.b] sigma[S.b > 10](S)
+$$
+\sigma_{R.a > 10}(R) \bowtie_{R.a = S.b} \sigma_{S.b > 10}(S)
+$$
+
 ```
 
 ## Implementation

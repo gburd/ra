@@ -25,16 +25,21 @@ high-cardinality columns.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before (exact)
-gamma[g, COUNT(DISTINCT x)](R)
+$$
+\gamma_{g, COUNT(DISTINCT x)}(R)
+$$
 
 -- After (approximate HLL)
-gamma[g, hll_merge(partial_hll)](
+$$
+\gamma_{g, hll_merge(partial_hll)}(
     Exchange[hash(g)](
-        gamma[g, hll_add(x) as partial_hll](R)
+        \gamma_{g, hll_add(x) as partial_hll}(R)
     )
 )
+$$
+
 ```
 
 ## Implementation

@@ -35,12 +35,17 @@ making the index-only scan nearly as fast as a pure index scan.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: index scan + heap fetch
-pi[a, b](heap_fetch(index_scan[idx_ab](T)))
+$$
+\pi_{a, b}(heap_fetch(index_scan[idx_ab](T)))
+$$
 
 -- After: index-only scan with visibility check
-pi[a, b](index_only_scan[idx_ab, vis_map](T))
+$$
+\pi_{a, b}(index_only_scan[idx_ab, vis_map](T))
+$$
+
 ```
 
 ## Implementation

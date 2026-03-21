@@ -24,10 +24,13 @@ Replaces a scalar GroupBy with multiple MIN/MAX aggregations over a simple scan 
 
 ## Relational Algebra
 
-```algebra
-ScalarGroupBy[min(a), max(b)](Scan(T))
-  -> (ScalarSubquery[min(a)], ScalarSubquery[max(b)])
-  where each subquery can use ReplaceScalarMinMaxWithLimit
+```latex
+$$
+ScalarGroupBy[\text{min}(a), \text{max}(b)](Scan(T))
+  \rightarrow (ScalarSubquery[\text{min}(a)], ScalarSubquery[\text{max}(b)])
+  \text{where} each subquery can use ReplaceScalarMinMaxWithLimit
+$$
+
 ```
 
 ## Implementation

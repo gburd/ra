@@ -30,14 +30,19 @@ eliminates one random I/O per row.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: index scan + heap fetch
-pi[name](sigma[dept = 5](
-    index_scan(emp, idx_dept) -> heap_fetch(emp)))
+$$
+\pi_{name}(\sigma_{dept = 5}(
+    index_scan(emp, idx_dept) \rightarrow heap_fetch(emp)))
+$$
 
 -- After: index-only scan
-pi[name](sigma[dept = 5](
+$$
+\pi_{name}(\sigma_{dept = 5}(
     index_only_scan(emp, idx_dept_name)))
+$$
+
 ```
 
 ## Implementation

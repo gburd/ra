@@ -30,17 +30,24 @@ document fetches (random I/O), often providing 10-100x speedup.
 
 ## Relational Algebra
 
-```algebra
-Given query: π_{a,b}(σ_{a=x}(R)) where index exists on (a, b)
+```latex
+$$
+Given query: π_{a,b}(σ_{a=x}(R)) \text{where} index exists on (a, b)
+$$
 
+$$
 Without covering:
 1. Index scan on (a, b) → get document IDs
 2. Fetch documents by ID → access full documents
 3. Project {a, b}
+$$
 
+$$
 With covering:
 1. Index scan on (a, b) → get (a, b) directly from index
 2. No document fetch needed!
+$$
+
 ```
 
 ## Implementation

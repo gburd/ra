@@ -31,11 +31,14 @@ Combines multiple single-column indexes using bitmap intersection; avoids need f
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 filter[col1=v1 AND col2=v2](scan[T])
-  -> bitmap_and(index_scan[I1](col1=v1),
+  \rightarrow bitmap_and(index_scan[I1](col1=v1),
                 index_scan[I2](col2=v2))
-  where has_index(I1, col1) && has_index(I2, col2)
+  \text{where} has_index(I1, col1) && has_index(I2, col2)
+$$
+
 ```
 
 ## Implementation

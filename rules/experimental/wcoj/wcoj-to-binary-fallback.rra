@@ -36,14 +36,17 @@ behavior and switching.
 
 ## Relational Algebra
 
-```algebra
-join[preds](R, S, T)
-  -> hybrid_join(
+```latex
+$$
+\bowtie_{preds}(R, S, T)
+  \rightarrow hybrid_join(
        wcoj_plan: generic_join(R, S, T),
        binary_plan: (R hash_join S) hash_join T,
        switch_predicate: runtime_cardinality_check,
        sampling_tuples: 1000
      )
+$$
+
 ```
 
 ## Implementation

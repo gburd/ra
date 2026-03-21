@@ -29,10 +29,13 @@ first to reduce the input to expensive filters.
 
 ## Relational Algebra
 
-```algebra
-sigma[P1 AND P2 AND P3](R)
-  -> sigma[P_cheapest_most_selective ... P_expensive_least_selective](R)
+```latex
+$$
+\sigma_{P1 AND P2 AND P3}(R)
+  \rightarrow \sigma_{P_cheapest_most_selective ... P_expensive_least_selective}(R)
+$$
   -- reorder by cost_effectiveness = cost / (1 - selectivity)
+
 ```
 
 ## Implementation

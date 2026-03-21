@@ -29,12 +29,17 @@ for empty groups) enables subsequent AggregateMergeRule applications.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: project drops unused aggregate
-pi[g, sum_x](gamma[g; SUM(x) AS sum_x, COUNT(y) AS cnt_y](R))
+$$
+\pi_{g, sum_x}(\gamma_{g; SUM(x) AS sum_x, COUNT(y) AS cnt_y}(R))
+$$
 
 -- After: unused COUNT removed
-pi[g, sum_x](gamma[g; SUM(x) AS sum_x](R))
+$$
+\pi_{g, sum_x}(\gamma_{g; SUM(x) AS sum_x}(R))
+$$
+
 ```
 
 ## Implementation

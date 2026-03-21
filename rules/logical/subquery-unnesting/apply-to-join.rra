@@ -34,29 +34,40 @@ of APPLY.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Cross Apply (inner join semantics)
+$$
 R CrossApply S(R.col)
-  -> join[R.col = S.corr_col](R, S)
-  where S uses R.col only in equality predicates
+  \rightarrow \bowtie_{R.col = S.corr_col}(R, S)
+  \text{where} S uses R.col only in equality predicates
+$$
 
 -- Outer Apply (left join semantics)
+$$
 R OuterApply S(R.col)
-  -> left_join[R.col = S.corr_col](R, S)
-  where S uses R.col only in equality predicates
+  \rightarrow left_\bowtie_{R.col = S.corr_col}(R, S)
+  \text{where} S uses R.col only in equality predicates
+$$
 
 -- Apply with filter extraction
+$$
 R CrossApply (filter[S.fk = R.pk AND S.status = 'active'](S))
-  -> filter[S.status = 'active'](join[R.pk = S.fk](R, S))
+  \rightarrow filter[S.status = 'active'](\bowtie_{R.pk = S.fk}(R, S))
+$$
 
 -- Apply with aggregation
+$$
 R CrossApply (aggregate[agg](filter[S.fk = R.pk](S)))
-  -> left_join[R.pk = T.fk](R, T)
-  where T = aggregate[agg GROUP BY fk](S)
+  \rightarrow left_\bowtie_{R.pk = T.fk}(R, T)
+  \text{where} T = aggregate[agg GROUP BY fk](S)
+$$
 
 -- Apply with project (remove unused outer columns)
+$$
 R CrossApply (project[inner_cols](S(R.col)))
-  -> project[R.*, inner_cols](join[R.col = S.corr_col](R, S))
+  \rightarrow project[R.*, inner_cols](\bowtie_{R.col = S.corr_col}(R, S))
+$$
+
 ```
 
 ## Implementation

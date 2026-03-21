@@ -35,15 +35,20 @@ that occurs when the wrong join strategy is chosen.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: static hash join (possibly wrong)
-hash_join[a.id = b.id](A, B)
+$$
+hash_\bowtie_{a.id = b.id}(A, B)
+$$
   -- but B might have only 10 rows
 
 -- After: adaptive join (decides at runtime)
-adaptive_join[a.id = b.id, threshold=T](A, B)
+$$
+adaptive_\bowtie_{a.id = b.id, threshold=T}(A, B)
+$$
   -- if |B| < T: nested-loop
   -- if |B| >= T: hash join
+
 ```
 
 ## Implementation

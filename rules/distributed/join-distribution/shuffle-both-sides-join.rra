@@ -27,11 +27,14 @@ either large table.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join[c](R, S)
-  -> Join[c](Exchange[hash(k1)](R), Exchange[hash(k2)](S))
-  where not colocated(R, S, k1, k2)
-  where |R| > broadcast_threshold AND |S| > broadcast_threshold
+  \rightarrow Join[c](Exchange[hash(k1)](R), Exchange[hash(k2)](S))
+  \text{where} not colocated(R, S, k1, k2)
+  \text{where} |R| > broadcast_threshold AND |S| > broadcast_threshold
+$$
+
 ```
 
 ## Implementation

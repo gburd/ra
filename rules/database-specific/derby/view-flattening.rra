@@ -31,12 +31,17 @@ pushdown and join reordering.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: opaque view reference
-orders join view_active_customers
+$$
+orders \bowtie view_active_customers
+$$
 
 -- After: flattened
-orders join sigma[active = true](customers)
+$$
+orders \bowtie \sigma_{active = true}(customers)
+$$
+
 ```
 
 ## Implementation

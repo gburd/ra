@@ -29,12 +29,17 @@ sorting and transferring the full dataset.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Limit[n](Sort[k](R))
-  -> Limit[n](MergeSortGather[k](TopN[n, k](R_partition)))
+  \rightarrow Limit[n](MergeSortGather[k](TopN[n, k](R_partition)))
+$$
 
 -- Per partition:
+$$
 TopN[n, k](R_i) uses a size-n heap, O(|R_i| * log n) time
+$$
+
 ```
 
 ## Implementation

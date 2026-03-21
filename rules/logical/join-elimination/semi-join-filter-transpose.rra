@@ -20,8 +20,11 @@ Transposes filter with semi-join
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 σ(SemiJoin(R, S)) => SemiJoin(σ(R), S)
+$$
+
 ```
 
 ## Implementation

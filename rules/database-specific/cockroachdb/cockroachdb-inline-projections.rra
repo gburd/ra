@@ -20,12 +20,17 @@ Pushes projections down through operators to reduce intermediate row complexity.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
+$$
 (project [a,b] (sort (scan table)))
+$$
 
 -- After
+$$
 (sort (project [a,b] (scan table)))
+$$
+
 ```
 
 ## Preconditions

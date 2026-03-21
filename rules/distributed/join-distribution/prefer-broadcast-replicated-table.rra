@@ -20,10 +20,13 @@ The join can execute locally on each node.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join[c](R, S)
-  -> LocalJoin[c](R, S)
-  where S.distribution == Replicated
+  \rightarrow LocalJoin[c](R, S)
+  \text{where} S.distribution == Replicated
+$$
+
 ```
 
 ## Implementation

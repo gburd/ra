@@ -33,20 +33,27 @@ with T can be eliminated.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Given:
-  J1 = join[R.pk = S.fk](R, S)  -- R.pk is unique
-  J2 = join[J1.fk2 = T.pk](J1, T) -- J1.fk2 unique via propagation
+  J1 = \bowtie_{R.pk = S.fk}(R, S)  -- R.pk is unique
+  J2 = \bowtie_{J1.fk2 = T.pk}(J1, T) -- J1.fk2 unique via propagation
+$$
 
+$$
 If J1 propagates uniqueness of R.pk to S.fk in the result,
 and S.fk determines S.fk2 (via functional dependency),
 then J2 can be eliminated if no T columns are needed.
+$$
 
-project[cols_from_J1](join[J1.key = T.pk](J1, T))
-  -> project[cols_from_J1](J1)
-  where key is unique in J1 (via propagation)
-  where T.pk is unique
-  where no columns from T needed
+$$
+project[cols_from_J1](\bowtie_{J1.key = T.pk}(J1, T))
+  \rightarrow project[cols_from_J1](J1)
+  \text{where} key is unique in J1 (via propagation)
+  \text{where} T.pk is unique
+  \text{where} no columns from T needed
+$$
+
 ```
 
 ## Implementation

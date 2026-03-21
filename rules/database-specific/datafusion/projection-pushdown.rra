@@ -30,9 +30,12 @@ will be discarded later.
 
 ## Relational Algebra
 
-```algebra
-pi[cols](Op(R)) -> Op'(pi[cols + required_by_Op](R))
-  where cols subset schema(R)
+```latex
+$$
+\pi_{cols}(Op(R)) \rightarrow Op'(\pi_{cols + required_by_Op}(R))
+  \text{where} cols \subseteq schema(R)
+$$
+
 ```
 
 ## Implementation

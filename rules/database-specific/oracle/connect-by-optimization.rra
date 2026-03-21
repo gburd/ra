@@ -31,16 +31,21 @@ number of parent rows, not the total table size.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: CONNECT BY with full scans per level
+$$
 connect-by[PRIOR id = parent_id](
     start-with[parent_id IS NULL](
         full-scan(employees)))
+$$
 
 -- After: index-based traversal
+$$
 connect-by-pump[PRIOR id = parent_id](
     start-with[parent_id IS NULL](
         index-scan(employees, idx_parent_id)))
+$$
+
 ```
 
 ## Implementation

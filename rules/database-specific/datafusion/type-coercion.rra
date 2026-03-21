@@ -31,14 +31,19 @@ overhead and preserves precision.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Implicit coercion: insert cast on narrower side
+$$
 expr(col_i32, col_i64)
-  -> expr(CAST(col_i32 AS Int64), col_i64)
+  \rightarrow expr(CAST(col_i32 AS Int64), col_i64)
+$$
 
 -- String coercion: unify Utf8 and LargeUtf8
+$$
 eq(col_utf8, col_largeutf8)
-  -> eq(CAST(col_utf8 AS LargeUtf8), col_largeutf8)
+  \rightarrow eq(CAST(col_utf8 AS LargeUtf8), col_largeutf8)
+$$
+
 ```
 
 ## Implementation

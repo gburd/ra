@@ -36,22 +36,32 @@ at plan time avoids runtime array construction and element extraction.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
+$$
 unnest(array[1, 2, 3]) AS t(val)
+$$
 
 -- After
+$$
 VALUES (1), (2), (3) AS t(val)
+$$
+
 ```
 
 ### With ordinality
 
-```algebra
+```latex
 -- Before
+$$
 unnest(array['a', 'b', 'c']) WITH ORDINALITY AS t(val, ord)
+$$
 
 -- After
+$$
 VALUES ('a', 1), ('b', 2), ('c', 3) AS t(val, ord)
+$$
+
 ```
 
 ## Implementation

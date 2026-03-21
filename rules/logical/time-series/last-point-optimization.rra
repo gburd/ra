@@ -25,12 +25,17 @@ is needed.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: full scan + group + max
-gamma[device_id; MAX(ts), LAST(value, ts)](sensor_data)
+$$
+\gamma_{device_id; MAX(ts), LAST(value, ts)}(sensor_data)
+$$
 
 -- After: index skip-scan on (device_id, ts DESC)
+$$
 SkipScan(idx_device_ts_desc, first_per_group=true)
+$$
+
 ```
 
 ## Implementation

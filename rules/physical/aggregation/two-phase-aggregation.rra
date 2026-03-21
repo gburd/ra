@@ -25,14 +25,19 @@ MIN, MAX, AVG via SUM+COUNT) on partitioned or parallelized data.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: single-phase aggregation
-gamma[dept; SUM(salary)](employees)
+$$
+\gamma_{dept; SUM(salary)}(employees)
+$$
 
 -- After: two-phase
+$$
 gamma_final[dept; SUM(partial_sum)](
     gamma_partial[dept; SUM(salary) AS partial_sum](employees)
 )
+$$
+
 ```
 
 ## Implementation

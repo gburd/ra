@@ -22,20 +22,25 @@ the global phase takes the extremum of the partial results.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- MIN decomposition
-gamma[g, MIN(partial_min)](
+$$
+\gamma_{g, MIN(partial_min)}(
     Exchange[hash(g)](
-        gamma[g, MIN(x) AS partial_min](R)
+        \gamma_{g, MIN(x) AS partial_min}(R)
     )
 )
+$$
 
 -- MAX decomposition
-gamma[g, MAX(partial_max)](
+$$
+\gamma_{g, MAX(partial_max)}(
     Exchange[hash(g)](
-        gamma[g, MAX(x) AS partial_max](R)
+        \gamma_{g, MAX(x) AS partial_max}(R)
     )
 )
+$$
+
 ```
 
 ## Test Cases

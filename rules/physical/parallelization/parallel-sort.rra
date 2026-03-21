@@ -24,12 +24,15 @@ Sorts data partitions in parallel, then merges sorted runs.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 sort[key](R)
-  -> merge_sorted(
+  \rightarrow merge_sorted(
        parallel_gather(
          sort[key](R_partition_i)
        ))
+$$
+
 ```
 
 ## Implementation

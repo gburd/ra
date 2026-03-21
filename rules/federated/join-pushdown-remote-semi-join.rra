@@ -24,16 +24,21 @@ distributed databases.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join[cond](LocalScan[t1], RemoteScan[t2, endpoint])
 =>
 Join[cond](LocalScan[t1],
   RemoteScan[t2, endpoint,
     pushdown_filter=(key IN (SELECT key FROM t1))])
+$$
 
+$$
 Preconditions:
   - Remote supports subquery / IN filter
   - Local table significantly smaller than remote
+$$
+
 ```
 
 ## Before

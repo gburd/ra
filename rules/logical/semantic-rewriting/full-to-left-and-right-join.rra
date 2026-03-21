@@ -30,14 +30,19 @@ right rows.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: FULL OUTER JOIN
+$$
 R FULL JOIN S ON R.k = S.k
+$$
 
 -- After: UNION ALL of LEFT and filtered RIGHT
+$$
 (R LEFT JOIN S ON R.k = S.k)
 UNION ALL
 (R RIGHT JOIN S ON R.k = S.k WHERE R.k IS NULL)
+$$
+
 ```
 
 ## Implementation

@@ -23,9 +23,12 @@ Describe what the rule does in plain English. Explain:
 
 ## Relational Algebra
 
-```algebra
-LHS_EXPRESSION -> RHS_EXPRESSION
-  where CONDITION
+```latex
+$$
+LHS_EXPRESSION \rightarrow RHS_EXPRESSION
+  \text{where} CONDITION
+$$
+
 ```
 
 Where:

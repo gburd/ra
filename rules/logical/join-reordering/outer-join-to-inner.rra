@@ -38,15 +38,22 @@ outer join equivalent to an inner join.
 
 ## Relational Algebra
 
-```algebra
-sigma[p](R left_join[c] S) -> sigma[p](R join[c] S)
-  where p is null-rejecting on attrs(S)
+```latex
+$$
+\sigma_{p}(R left_\bowtie_{c} S) \rightarrow \sigma_{p}(R \bowtie_{c} S)
+  \text{where} p is null-rejecting on \text{attrs}(S)
+$$
 
-sigma[p](R right_join[c] S) -> sigma[p](R join[c] S)
-  where p is null-rejecting on attrs(R)
+$$
+\sigma_{p}(R right_\bowtie_{c} S) \rightarrow \sigma_{p}(R \bowtie_{c} S)
+  \text{where} p is null-rejecting on \text{attrs}(R)
+$$
 
-sigma[p](R full_join[c] S) -> sigma[p](R join[c] S)
-  where p is null-rejecting on attrs(R) and attrs(S)
+$$
+\sigma_{p}(R full_\bowtie_{c} S) \rightarrow \sigma_{p}(R \bowtie_{c} S)
+  \text{where} p is null-rejecting on \text{attrs}(R) and \text{attrs}(S)
+$$
+
 ```
 
 ## Implementation

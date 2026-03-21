@@ -32,16 +32,23 @@ than full table scan for selective predicates.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- const access: PK = literal
-sigma[id = 42](scan(users))  -->  point_lookup(users, id=42)
+$$
+\sigma_{id = 42}(scan(users))  -\rightarrow  point_lookup(users, id=42)
+$$
 
 -- eq_ref: unique key join
-orders join[o.user_id = u.id] users  -->  orders eq_ref users
+$$
+orders \bowtie_{o.user_id = u.id} users  -\rightarrow  orders eq_ref users
+$$
 
 -- range: inequality
-sigma[price BETWEEN 10 AND 50](scan(products))
+$$
+\sigma_{price BETWEEN 10 AND 50}(scan(products))
+$$
     -->  range_scan(products, idx_price, [10, 50])
+
 ```
 
 ## Implementation

@@ -20,12 +20,17 @@ Converts OUTER JOIN to INNER JOIN when provably safe.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
-(left-join orders customers (on o.customer_id = c.id))
+$$
+(left-\bowtie orders customers (on o.customer_id = c.id))
+$$
 
 -- After
-(inner-join orders customers (on o.customer_id = c.id))
+$$
+(inner-\bowtie orders customers (on o.customer_id = c.id))
+$$
+
 ```
 
 ## Preconditions

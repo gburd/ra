@@ -28,11 +28,14 @@ Ship data when:
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 IF NOT can_execute_remotely(query)
    AND NOT can_plan_hybrid(query)
 THEN:
   ComplexOp(RemoteScan) => ComplexOp(ShipData(remote, table))
+$$
+
 ```
 
 ## Before

@@ -24,11 +24,14 @@ Detects when the recursive case only uses the most recent iteration's results (n
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 RecursiveCTE[name, base, rec](body)
-  -> TailRecursiveCTE[name, base, rec](body)
-  where is_linear_recursive(rec, name)
+  \rightarrow TailRecursiveCTE[name, base, rec](body)
+  \text{where} is_linear_recursive(rec, name)
     and body = Scan(name)
+$$
+
 ```
 
 ## Implementation

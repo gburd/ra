@@ -30,10 +30,13 @@ passes over the data.
 
 ## Relational Algebra
 
-```algebra
-sigma[p1](sigma[p2](R)) -> sigma[p1 AND p2](R)
-pi[c1](pi[c2](R)) -> pi[c1](R)  // outer subsumes inner
-sort[k1](sort[k2](R)) -> sort[k1](R)
+```latex
+$$
+\sigma_{p1}(\sigma_{p2}(R)) \rightarrow \sigma_{p1 AND p2}(R)
+\pi_{c1}(\pi_{c2}(R)) \rightarrow \pi_{c1}(R)  // outer subsumes inner
+sort[k1](sort[k2](R)) \rightarrow sort[k1](R)
+$$
+
 ```
 
 ## Implementation

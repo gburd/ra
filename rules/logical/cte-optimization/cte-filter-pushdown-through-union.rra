@@ -22,10 +22,13 @@ When a CTE body filters the CTE result and the CTE definition is a UNION, push t
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Filter[p](CTE[name, Union[left, right]](Scan[name]))
-  -> CTE[name, Union[Filter[p](left), Filter[p](right)]](Scan[name])
-  where predicate_references_only(p, output_cols(name))
+  \rightarrow CTE[name, Union[Filter[p](left), Filter[p](right)]](Scan[name])
+  \text{where} predicate_references_only(p, output_cols(name))
+$$
+
 ```
 
 ## Implementation

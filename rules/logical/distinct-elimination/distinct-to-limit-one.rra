@@ -24,12 +24,17 @@ When DISTINCT is applied to a scalar subquery or a single-row-guaranteed input (
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 distinct(limit[1](R))
-  -> limit[1](R)
+  \rightarrow limit[1](R)
+$$
 
+$$
 distinct(aggregate[](R))
-  -> aggregate[](R)
+  \rightarrow aggregate[](R)
+$$
+
 ```
 
 ## Implementation

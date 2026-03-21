@@ -34,12 +34,17 @@ process both sides as a single plan.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: correlated EXISTS subquery
-sigma[EXISTS(sigma[S.fk = O.id](S))](O)
+$$
+\sigma_{EXISTS(sigma[S.fk = O.id}(S))](O)
+$$
 
 -- After: semi-join
-O semi-join[O.id = S.fk] S
+$$
+O semi-\bowtie_{O.id = S.fk} S
+$$
+
 ```
 
 ## Implementation

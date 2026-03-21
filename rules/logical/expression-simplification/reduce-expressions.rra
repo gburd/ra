@@ -20,8 +20,11 @@ Reduces complex expressions
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Complex expr => simplified
+$$
+
 ```
 
 ## Implementation

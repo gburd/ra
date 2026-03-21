@@ -42,28 +42,43 @@ the bonus of producing sorted output.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Sort-Merge Join cost:
+$$
 
-sort_cost(R) = if R already sorted on join key: 0
+$$
+sort_cost(R) = if R already sorted on \bowtie key: 0
                else: 2 * N_pages(R) * ceil(log_B(N_pages(R)))
                (B = available buffer pages)
+$$
 
+$$
 merge_cost = N_pages(R) + N_pages(S)
              (single pass over both inputs)
+$$
 
+$$
 total_cost = sort_cost(R) + sort_cost(S) + merge_cost
+$$
 
-Output: sorted on join key (interesting order!)
+$$
+Output: sorted on \bowtie key (interesting order!)
+$$
 
+$$
 Compare with:
-- Hash join: N_pages(build) * 1.5 + N_pages(probe) (no output order)
+- Hash \bowtie: N_pages(build) * 1.5 + N_pages(probe) (no output order)
 - NL with index: N_tuples(outer) * (index_depth + matches)
+$$
 
+$$
 Choose sort-merge when:
   total_cost < hash_join_cost (direct cost comparison)
   OR total_cost + downstream_sort_savings < hash_join_cost + downstream_sort_cost
   (accounting for interesting orders)
+$$
+
 ```
 
 ## Implementation

@@ -30,13 +30,18 @@ probes for each outer row (O(n)).
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: repeated subquery execution
-sigma[id IN (SELECT fk FROM sub)](outer)
+$$
+\sigma_{id IN (SELECT fk FROM sub)}(outer)
+$$
 
 -- After: materialized subquery
-mat = materialize(pi[fk](sub))
-sigma[id IN mat](outer)
+$$
+mat = materialize(\pi_{fk}(sub))
+\sigma_{id IN mat}(outer)
+$$
+
 ```
 
 ## Implementation

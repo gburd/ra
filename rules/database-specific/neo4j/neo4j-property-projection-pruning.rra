@@ -20,12 +20,17 @@ Removes unused property accesses in projections.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
+$$
 (return u.name, u.email, u.phone, u.address)
+$$
 
 -- After
+$$
 (return u.name, u.email)
+$$
+
 ```
 
 ## Preconditions

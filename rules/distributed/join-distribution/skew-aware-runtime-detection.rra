@@ -20,11 +20,14 @@ it into sub-partitions and re-distribute.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Exchange[hash(k)](R) producing partitions P1..Pn
-  -> if size(Pi) > median(P) * skew_factor:
+  \rightarrow if size(Pi) > median(P) * skew_factor:
        Split(Pi) into Pi_1..Pi_m
        Broadcast matching S rows to new sub-partitions
+$$
+
 ```
 
 ## Test Cases

@@ -24,10 +24,13 @@ Converts anti-join to NOT EXISTS check for efficient filtering.
 
 ## Relational Algebra
 
-```algebra
-anti_join[cond](L, R)
-  -> filter[!exists(R where cond)](L)
-  where simple_condition(cond)
+```latex
+$$
+anti_\bowtie_{cond}(L, R)
+  \rightarrow filter[!exists(R \text{where} cond)](L)
+  \text{where} simple_condition(cond)
+$$
+
 ```
 
 ## Implementation

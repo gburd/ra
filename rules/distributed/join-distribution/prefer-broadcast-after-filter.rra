@@ -20,11 +20,14 @@ can turn a large table into a broadcast candidate.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join[c](R, Filter[p](S))
-  -> Join[c](R, Broadcast(Filter[p](S)))
-  where estimated_rows(Filter[p](S)) < broadcast_threshold
-  where selectivity(p) < 0.01
+  \rightarrow Join[c](R, Broadcast(Filter[p](S)))
+  \text{where} estimated_rows(Filter[p](S)) < broadcast_threshold
+  \text{where} \text{selectivity}(p) < 0.01
+$$
+
 ```
 
 ## Implementation

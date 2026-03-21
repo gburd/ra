@@ -32,15 +32,20 @@ duplicate computation and memory.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: duplicated subexpression
-union-all(
-    sigma[p1](join(R, S)),
-    sigma[p2](join(R, S)))
+$$
+\cup-all(
+    \sigma_{p1}(\bowtie(R, S)),
+    \sigma_{p2}(\bowtie(R, S)))
+$$
 
 -- After: hoisted into Let
-let common = join(R, S) in
-union-all(sigma[p1](common), sigma[p2](common))
+$$
+let common = \bowtie(R, S) in
+\cup-all(\sigma_{p1}(common), \sigma_{p2}(common))
+$$
+
 ```
 
 ## Implementation

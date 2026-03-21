@@ -32,12 +32,17 @@ leverage existing optimizations for joins and standard aggregates.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: COUNT(DISTINCT x) with GROUP BY g
-gamma[g; COUNT(DISTINCT x)](R)
+$$
+\gamma_{g; COUNT(DISTINCT x)}(R)
+$$
 
 -- After: expanded into sub-aggregate + outer aggregate
-gamma[g; COUNT(x)](gamma[g, x; ](R))
+$$
+\gamma_{g; COUNT(x)}(\gamma_{g, x; }(R))
+$$
+
 ```
 
 ## Implementation

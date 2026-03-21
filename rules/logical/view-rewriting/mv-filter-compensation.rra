@@ -24,10 +24,11 @@ the MV contains all needed rows and we just need to apply P_q - P_mv.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- MV: sigma[year >= 2020](sales)
 -- Query: sigma[year = 2024 AND region = 'US'](sales)
 -- Compensation: sigma[year = 2024 AND region = 'US'](MV)
+
 ```
 
 ## Implementation

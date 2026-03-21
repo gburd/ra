@@ -26,15 +26,18 @@ local reduction is small.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Three-phase SUM with repartition
-gamma[g, SUM(partial_sum)](
+$$
+\gamma_{g, SUM(partial_sum)}(
     Exchange[hash(g)](
-        gamma[g, SUM(a) as partial_sum](
+        \gamma_{g, SUM(a) as partial_sum}(
             Exchange[hash(salt(g))](R)  -- salt to redistribute
         )
     )
 )
+$$
+
 ```
 
 ## Test Cases

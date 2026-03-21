@@ -32,18 +32,25 @@ estimates closer to true cardinalities.
 
 ## Relational Algebra
 
-```algebra
-CardEst_traditional(join[R.a = S.b](filter[R.x > 10](R), S))
-  -> CardEst_learned(join[R.a = S.b](filter[R.x > 10](R), S))
-  where model_trained_on_workload()
+```latex
+$$
+CardEst_traditional(\bowtie_{R.a = S.b}(filter[R.x > 10](R), S))
+  \rightarrow CardEst_learned(\bowtie_{R.a = S.b}(filter[R.x > 10](R), S))
+  \text{where} model_trained_on_workload()
+$$
 
+$$
 Model inputs:
-- Query structure (join graph, predicates)
+- Query structure (\bowtie graph, predicates)
 - Table sizes, column statistics
 - Predicate values
+$$
 
+$$
 Model output:
 - Predicted cardinality with confidence interval
+$$
+
 ```
 
 ## Implementation

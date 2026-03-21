@@ -24,10 +24,13 @@ Converts ClickHouse's ANY JOIN or ANY LEFT JOIN to a semi-join or anti-join when
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Project[L_cols](Join[ANY, c](L, R))
-  -> SemiJoin[c](L, R)
-  where L_cols ⊆ columns(L)
+  \rightarrow SemiJoin[c](L, R)
+  \text{where} L_cols ⊆ columns(L)
+$$
+
 ```
 
 ## Implementation

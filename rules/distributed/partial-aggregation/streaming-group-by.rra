@@ -32,11 +32,16 @@ execution and early termination with LIMIT.
 
 ## Relational Algebra
 
-```algebra
-gamma[g, agg](R)
-  -> StreamingGroupBy[g, agg](Sort[g](R))
+```latex
+$$
+\gamma_{g, agg}(R)
+  \rightarrow StreamingGroupBy[g, agg](Sort[g](R))
+$$
   -- or if R is already ordered by g:
-  -> StreamingGroupBy[g, agg](R)
+$$
+  \rightarrow StreamingGroupBy[g, agg](R)
+$$
+
 ```
 
 ## Implementation

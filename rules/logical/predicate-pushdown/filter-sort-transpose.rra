@@ -35,12 +35,17 @@ preserved, so the sort still produces the correct output.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: filter above sort
-sigma[p](tau[k](R))
+$$
+\sigma_{p}(tau[k](R))
+$$
 
 -- After: sort above filter (fewer rows to sort)
-tau[k](sigma[p](R))
+$$
+tau[k](\sigma_{p}(R))
+$$
+
 ```
 
 ## Implementation

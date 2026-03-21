@@ -31,16 +31,23 @@ a large table or unnecessary shuffle of a small table.
 
 ## Relational Algebra
 
-```algebra
-Exchange[?](R) -> Exchange[broadcast](R)
-  where |R| < broadcast_threshold
-  where |R| * num_nodes < network_budget
+```latex
+$$
+Exchange[?](R) \rightarrow Exchange[broadcast](R)
+  \text{where} |R| < broadcast_threshold
+  \text{where} |R| * num_nodes < network_budget
+$$
 
-Exchange[?](R) -> Exchange[hash(k)](R)
-  where |R| >= broadcast_threshold
+$$
+Exchange[?](R) \rightarrow Exchange[hash(k)](R)
+  \text{where} |R| >= broadcast_threshold
+$$
 
-Exchange[?](R) -> Exchange[gather](R)
-  where output must be singleton
+$$
+Exchange[?](R) \rightarrow Exchange[gather](R)
+  \text{where} output must be singleton
+$$
+
 ```
 
 ## Implementation

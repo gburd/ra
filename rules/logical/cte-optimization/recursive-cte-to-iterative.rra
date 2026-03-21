@@ -24,9 +24,12 @@ Transforms a bounded recursive CTE into a finite chain of UNION ALL operations b
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 RecursiveCTE[name, base, rec, depth=N](body)
-  -> body[name := base UNION ALL sub(rec,base) UNION ALL sub(rec,sub(rec,base)) ... (N times)]
+  \rightarrow body[name := base UNION ALL sub(rec,base) UNION ALL sub(rec,sub(rec,base)) ... (N times)]
+$$
+
 ```
 
 ## Implementation

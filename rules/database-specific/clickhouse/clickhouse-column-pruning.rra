@@ -20,12 +20,17 @@ Eliminates unused columns from intermediate results in columnar storage.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
+$$
 (project [a,b,c,d] (scan table))
+$$
 
 -- After
+$$
 (project [a,b] (scan table))
+$$
+
 ```
 
 ## Preconditions

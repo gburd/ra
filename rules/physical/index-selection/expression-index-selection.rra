@@ -31,10 +31,13 @@ Uses index on expression/function result when query filters on same expression.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 filter[LOWER(name) = 'smith'](scan[T])
-  -> index_scan[I(LOWER(name))](LOWER(name) = 'smith')
-  where has_expression_index(I, LOWER(name))
+  \rightarrow index_scan[I(LOWER(name))](LOWER(name) = 'smith')
+  \text{where} has_expression_index(I, LOWER(name))
+$$
+
 ```
 
 ## Implementation

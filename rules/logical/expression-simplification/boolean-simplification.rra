@@ -26,14 +26,17 @@ optimizations.
 
 ## Relational Algebra
 
-```algebra
-sigma[p AND TRUE](R) -> sigma[p](R)
-sigma[p OR FALSE](R) -> sigma[p](R)
-sigma[p AND FALSE](R) -> empty_relation
-sigma[p OR TRUE](R) -> R
-sigma[NOT NOT p](R) -> sigma[p](R)
-sigma[p AND p](R) -> sigma[p](R)
-sigma[p OR p](R) -> sigma[p](R)
+```latex
+$$
+\sigma_{p AND TRUE}(R) \rightarrow \sigma_{p}(R)
+\sigma_{p OR FALSE}(R) \rightarrow \sigma_{p}(R)
+\sigma_{p AND FALSE}(R) \rightarrow empty_relation
+\sigma_{p OR TRUE}(R) \rightarrow R
+\sigma_{NOT NOT p}(R) \rightarrow \sigma_{p}(R)
+\sigma_{p AND p}(R) \rightarrow \sigma_{p}(R)
+\sigma_{p OR p}(R) \rightarrow \sigma_{p}(R)
+$$
+
 ```
 
 ## Implementation

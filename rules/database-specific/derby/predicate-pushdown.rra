@@ -31,12 +31,17 @@ an index, Derby can use an index scan instead of a full table scan.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: filter after join
-sigma[a.x = 5](A join[a.id = b.fk] B)
+$$
+\sigma_{a.x = 5}(A \bowtie_{a.id = b.fk} B)
+$$
 
 -- After: filter pushed to table A
-sigma[a.x = 5](A) join[a.id = b.fk] B
+$$
+\sigma_{a.x = 5}(A) \bowtie_{a.id = b.fk} B
+$$
+
 ```
 
 ## Implementation

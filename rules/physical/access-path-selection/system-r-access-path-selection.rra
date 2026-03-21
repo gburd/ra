@@ -37,27 +37,38 @@ the same page multiple times. The cost model captures these differences.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Given: sigma_{p1 AND p2 AND ... AND pn}(R)
 Available access paths: {SeqScan, IndexScan(I1), IndexScan(I2), ...}
+$$
 
+$$
 For each access path AP:
   matching_preds = predicates that AP can evaluate directly
   residual_preds = predicates applied as post-filter
   cost(AP) = W * pages_fetched(AP) + w * tuples_retrieved(AP)
+$$
 
+$$
   For SeqScan:
     pages_fetched = N_pages(R)
     tuples_retrieved = N_tuples(R)
+$$
 
+$$
   For IndexScan(I) on matching_preds with selectivity F:
     If I is clustered:
       pages_fetched = F * N_pages(R)
     Else:
       pages_fetched = F * N_tuples(R)  (worst case: one page per tuple)
     tuples_retrieved = F * N_tuples(R)
+$$
 
+$$
 Choose AP with minimum cost.
+$$
+
 ```
 
 ## Implementation

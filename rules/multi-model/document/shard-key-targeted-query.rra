@@ -29,10 +29,13 @@ one shard, eliminating network round-trips and merge overhead.
 
 ## Relational Algebra
 
-```algebra
-scatter_gather(sigma[p](shards(collection)))
-  -> targeted(shard_for(key), sigma[p](collection))
-  where p contains equality on shard_key
+```latex
+$$
+scatter_gather(\sigma_{p}(shards(collection)))
+  \rightarrow targeted(shard_for(key), \sigma_{p}(collection))
+  \text{where} p contains equality on shard_key
+$$
+
 ```
 
 ## Implementation

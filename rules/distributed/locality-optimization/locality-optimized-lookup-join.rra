@@ -31,13 +31,16 @@ don't match locally incur the additional remote lookup cost.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 LookupJoin[expr: k1=k2 AND region IN (local, remote1, remote2)](
     input, index)
-  -> LookupJoin[
+  \rightarrow LookupJoin[
        local_expr: k1=k2 AND region = local,
        remote_expr: k1=k2 AND region IN (remote1, remote2)
      ](input, index)
+$$
+
 ```
 
 ## Implementation

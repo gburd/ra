@@ -34,18 +34,23 @@ discarded, reducing arrangement size proportional to the key overlap ratio.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: full build-side arrangement
-hash-join(
+$$
+hash-\bowtie(
   arrange(dimension, key),      -- 10M rows, all maintained
   stream(fact_table))            -- only references 100K distinct keys
+$$
 
 -- After: bloom-filtered arrangement
-hash-join(
+$$
+hash-\bowtie(
   bloom-prune(
     arrange(dimension, key),
     bloom-filter(distinct-keys(fact_table))),  -- filter to ~100K keys
   stream(fact_table))
+$$
+
 ```
 
 ## Implementation

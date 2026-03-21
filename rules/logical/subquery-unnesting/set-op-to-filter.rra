@@ -20,8 +20,11 @@ Converts set operations to filter
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Set ops => filter-based
+$$
+
 ```
 
 ## Implementation

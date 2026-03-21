@@ -30,10 +30,13 @@ to the retention boundary avoids these wasted reads.
 
 ## Relational Algebra
 
-```algebra
-sigma[ts >= t1 AND ts < t2](scan(table))
-  -> sigma[ts >= max(t1, retention_start) AND ts < t2](scan(table))
-  where t1 < retention_start
+```latex
+$$
+\sigma_{ts >= t1 AND ts < t2}(scan(table))
+  \rightarrow \sigma_{ts >= \text{max}(t1, retention_start) AND ts < t2}(scan(table))
+  \text{where} t1 < retention_start
+$$
+
 ```
 
 ## Implementation

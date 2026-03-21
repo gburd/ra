@@ -30,8 +30,11 @@ Pushes joins through other joins
 
 ## Relational Algebra
 
-```algebra
-Reorder join operators
+```latex
+$$
+Reorder \bowtie operators
+$$
+
 ```
 
 ## Implementation

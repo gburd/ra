@@ -33,16 +33,21 @@ Choosing streaming alternatives when possible reduces peak memory.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Prefer streaming aggregate when possible
-gamma[GROUP BY g; SUM(a)](sort[g](R))
-  -> streaming-aggregate[g; SUM(a)](sort[g](R))
+$$
+\gamma_{GROUP BY g; SUM(a)}(sort[g](R))
+  \rightarrow streaming-aggregate[g; SUM(a)](sort[g](R))
+$$
   -- Uses pre-sorted input, streams output
 
 -- Prefer sort-merge join over hash join when inputs sorted
-hash-join[a.k = b.k](sort[a.k](A), sort[b.k](B))
-  -> sort-merge-join[a.k = b.k](sort[a.k](A), sort[b.k](B))
+$$
+hash-\bowtie_{a.k = b.k}(sort[a.k](A), sort[b.k](B))
+  \rightarrow sort-merge-\bowtie_{a.k = b.k}(sort[a.k](A), sort[b.k](B))
+$$
   -- Sort-merge streams; hash-join buffers build side
+
 ```
 
 ## Implementation

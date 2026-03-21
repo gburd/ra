@@ -37,12 +37,17 @@ Filtering the right input narrows each evaluation.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: filter above correlate
-sigma[L.a > 5 AND R.b < 10](L CORRELATE R)
+$$
+\sigma_{L.a > 5 AND R.b < 10}(L CORRELATE R)
+$$
 
 -- After: push predicates to respective sides
-(sigma[L.a > 5](L)) CORRELATE (sigma[R.b < 10](R))
+$$
+(\sigma_{L.a > 5}(L)) CORRELATE (\sigma_{R.b < 10}(R))
+$$
+
 ```
 
 ## Implementation

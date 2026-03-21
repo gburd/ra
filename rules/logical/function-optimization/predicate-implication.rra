@@ -25,12 +25,15 @@ another.
 
 ## Relational Algebra
 
-```algebra
-col > 10 AND col > 5     -> col > 10      (> 10 implies > 5)
-col = 5 AND col > 0      -> col = 5       (= 5 implies > 0)
-col IN (1,2) AND col > 0 -> col IN (1,2)  (IN implies > 0)
-col IS NOT NULL AND col > 0 -> col > 0    (> 0 implies IS NOT NULL)
-col = 'a' AND col LIKE 'a%' -> col = 'a'  (= implies LIKE prefix)
+```latex
+$$
+col > 10 AND col > 5     \rightarrow col > 10      (> 10 implies > 5)
+col = 5 AND col > 0      \rightarrow col = 5       (= 5 implies > 0)
+col IN (1,2) AND col > 0 \rightarrow col IN (1,2)  (IN implies > 0)
+col IS NOT NULL AND col > 0 \rightarrow col > 0    (> 0 implies IS NOT NULL)
+col = 'a' AND col LIKE 'a%' \rightarrow col = 'a'  (= implies LIKE prefix)
+$$
+
 ```
 
 ## Implementation

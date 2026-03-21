@@ -52,22 +52,31 @@ index if available), dramatically reducing the join input size.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Equijoin Transitivity:
   Given: sigma_{B.y = 100}(A join_{A.x = B.y} B)
   Derive: sigma_{A.x = 100}(A) join_{A.x = B.y} sigma_{B.y = 100}(B)
+$$
 
+$$
 Range Propagation:
   Given: sigma_{B.y > 100 AND B.y < 200}(A join_{A.x = B.y} B)
-  Derive: sigma_{A.x > 100 AND A.x < 200}(A) join sigma_{B.y > 100 AND B.y < 200}(B)
+  Derive: sigma_{A.x > 100 AND A.x < 200}(A) \bowtie sigma_{B.y > 100 AND B.y < 200}(B)
+$$
 
+$$
 Constraint Implication:
   Given: CHECK(R.col IN (1,2,3)) and WHERE R.col != 1 AND R.col != 2
   Derive: R.col = 3
+$$
 
+$$
 NOT NULL Propagation:
   Given: A.x = B.y (equijoin) and A.x IS NOT NULL
   Derive: B.y IS NOT NULL (on the joined result)
+$$
+
 ```
 
 ## Implementation

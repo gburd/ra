@@ -38,24 +38,33 @@ and alias differences.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Query embedding function:
-embed(query) -> R^d  where d = embedding dimension (64-256)
+$$
+embed(query) \rightarrow R^d  \text{where} d = embedding dimension (64-256)
+$$
 
 -- Similarity metric:
+$$
 similarity(q1, q2) = cosine(embed(q1), embed(q2))
+$$
 
 -- Plan reuse decision:
+$$
 reuse_plan(q_new, history) =
   let q_nearest = argmax_{q in history} similarity(q_new, q)
   if similarity(q_new, q_nearest) > THRESHOLD:
     return plan(q_nearest)  -- reuse cached plan
   else:
     return optimize(q_new)  -- full optimization
+$$
 
 -- Workload clustering:
+$$
 clusters = k_means(embed(q) for q in workload, k)
+$$
 -- Each cluster shares optimization insights
+
 ```
 
 ## Implementation

@@ -30,11 +30,14 @@ after cardinality-reducing joins saves CPU proportionally.
 
 ## Relational Algebra
 
-```algebra
-join[cond](pi[f(a), ...](R), S)
-  -> pi[f(a), ...](join[cond](R, S))
-  where is_expensive(f) && |join output| < |R|
+```latex
+$$
+\bowtie_{cond}(\pi_{f(a), ...}(R), S)
+  \rightarrow \pi_{f(a), ...}(\bowtie_{cond}(R, S))
+  \text{where} is_expensive(f) && |\bowtie output| < |R|
+$$
   -- f must not be used in join condition
+
 ```
 
 ## Implementation

@@ -36,18 +36,27 @@ during compilation, reducing both compile time and runtime branching.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- A{1} is just A
-PatternQuantified(A, Exactly(1)) -> A
+$$
+PatternQuantified(A, Exactly(1)) \rightarrow A
+$$
 
 -- A{0,1} is A?
-PatternQuantified(A, Range(0, 1)) -> PatternQuantified(A, ZeroOrOne)
+$$
+PatternQuantified(A, Range(0, 1)) \rightarrow PatternQuantified(A, ZeroOrOne)
+$$
 
 -- A{1,} is A+
-PatternQuantified(A, Range(1, None)) -> PatternQuantified(A, OneOrMore)
+$$
+PatternQuantified(A, Range(1, None)) \rightarrow PatternQuantified(A, OneOrMore)
+$$
 
 -- A{0,} is A*
-PatternQuantified(A, Range(0, None)) -> PatternQuantified(A, ZeroOrMore)
+$$
+PatternQuantified(A, Range(0, None)) \rightarrow PatternQuantified(A, ZeroOrMore)
+$$
+
 ```
 
 ## Implementation

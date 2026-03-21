@@ -31,9 +31,12 @@ the window's working set.
 
 ## Relational Algebra
 
-```algebra
-σ_p(WINDOW_f(R)) where p references only R columns ->
+```latex
+$$
+σ_p(WINDOW_f(R)) \text{where} p references only R columns \rightarrow
   WINDOW_f(σ_p(R))
+$$
+
 ```
 
 ## Implementation

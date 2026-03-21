@@ -32,16 +32,21 @@ reaching the join operator, reducing hash table probes and memory usage.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: fact table scanned fully, then joined
-hash-join(hash-join(fact, dim1), dim2)
+$$
+hash-\bowtie(hash-\bowtie(fact, dim1), dim2)
+$$
 
 -- After: bitmap filters from dims applied to fact scan
-hash-join(
-    hash-join(
+$$
+hash-\bowtie(
+    hash-\bowtie(
         bitmap-filter[dim1, dim2](scan(fact)),
         dim1),
     dim2)
+$$
+
 ```
 
 ## Implementation

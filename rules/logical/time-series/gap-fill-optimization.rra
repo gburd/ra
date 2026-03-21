@@ -26,18 +26,23 @@ generate_series + LEFT JOIN patterns for time series visualization.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: generate_series + LEFT JOIN
-pi[bucket, COALESCE(val, prev_val)](
+$$
+\pi_{bucket, COALESCE(val, prev_val)}(
     generate_series('2024-01-01', '2024-01-31', '1 hour') AS g(bucket)
     LEFT JOIN
-    gamma[time_bucket('1h', ts); AVG(val)](data) AS d
+    \gamma_{time_bucket('1h', ts); AVG(val)}(data) AS d
     ON g.bucket = d.bucket
 )
+$$
 
 -- After: fused gap-fill scan
+$$
 GapFillScan(data, '1 hour', '2024-01-01', '2024-01-31',
     agg=AVG(val), fill=LOCF)
+$$
+
 ```
 
 ## Implementation

@@ -25,11 +25,16 @@ of computing full join.
 
 ## Relational Algebra
 
-```algebra
-limit[K](sort[key](join[cond](R, S)))
-  -> top_k_join[K, key, cond](R, S)
+```latex
+$$
+limit[K](sort[key](\bowtie_{cond}(R, S)))
+  \rightarrow top_k_\bowtie_{K, key, cond}(R, S)
+$$
 
+$$
 Algorithm: Nested loop with early termination
+$$
+
 ```
 
 ## Implementation

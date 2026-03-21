@@ -34,10 +34,13 @@ what a CPU can achieve.
 
 ## Relational Algebra
 
-```algebra
-R join[equi(R.a = S.b)] S -> gpu_hash_join[equi(R.a = S.b)](R, S)
-  where size(build_side) <= gpu_memory
+```latex
+$$
+R \bowtie_{equi(R.a = S.b)} S \rightarrow gpu_hash_\bowtie_{equi(R.a = S.b)}(R, S)
+  \text{where} size(build_side) <= gpu_memory
     AND |probe_side| > threshold
+$$
+
 ```
 
 ## Implementation

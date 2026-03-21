@@ -36,11 +36,14 @@ the predicate directly instead of scanning the full cross product.
 
 ## Relational Algebra
 
-```algebra
-sigma[p](R join[c] S) -> R join[c AND p] S
-  where attrs(p) subset (attrs(R) union attrs(S))
-  where NOT (attrs(p) subset attrs(R))
-  where NOT (attrs(p) subset attrs(S))
+```latex
+$$
+\sigma_{p}(R \bowtie_{c} S) \rightarrow R \bowtie_{c AND p} S
+  \text{where} \text{attrs}(p) \subseteq (\text{attrs}(R) \cup \text{attrs}(S))
+  \text{where} NOT (\text{attrs}(p) \subseteq \text{attrs}(R))
+  \text{where} NOT (\text{attrs}(p) \subseteq \text{attrs}(S))
+$$
+
 ```
 
 ## Implementation

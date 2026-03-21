@@ -36,26 +36,35 @@ was designed specifically for NUMA-awareness.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- NUMA cost model:
+$$
 numa_cost(op, placement) =
   local_accesses(op, placement) * LOCAL_LATENCY
   + remote_accesses(op, placement) * REMOTE_LATENCY
+$$
 
 -- Bandwidth model:
+$$
 numa_bandwidth(op, placement) =
-  min(
+  \text{min}(
     local_bw * local_fraction + remote_bw * remote_fraction,
     interconnect_bw  -- UPI/IF bottleneck
   )
+$$
 
 -- Optimal placement: partition data across NUMA nodes
+$$
 partition_cost(R, num_nodes) =
   BYTES(R) / (num_nodes * local_bw)  -- ideal linear scaling
+$$
 
 -- Suboptimal: all data on one node, all nodes access it
+$$
 contended_cost(R, num_nodes) =
-  BYTES(R) / min(local_bw, interconnect_bw * (num_nodes - 1))
+  BYTES(R) / \text{min}(local_bw, interconnect_bw * (num_nodes - 1))
+$$
+
 ```
 
 ## Implementation

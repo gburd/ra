@@ -31,13 +31,18 @@ the join to produce results incrementally.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: sort above join
-tau[R.a ASC](R join[p] S)
+$$
+tau[R.a ASC](R \bowtie_{p} S)
+$$
 
 -- After: sort pushed below join (left side)
-(tau[a ASC](R)) join[p] S
-  where sort keys reference only R
+$$
+(tau[a ASC](R)) \bowtie_{p} S
+  \text{where} sort keys reference only R
+$$
+
 ```
 
 ## Implementation

@@ -40,8 +40,9 @@ directly without DFA overhead.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: RPR counting streak length
+$$
 RowPattern(
   input: R,
   partition: [symbol],
@@ -50,8 +51,10 @@ RowPattern(
   defines: { A: Gt(price, Prev(price, 1)) },
   measures: [(Count(A.*), "streak_length")]
 )
+$$
 
 -- After: window function with running group
+$$
 Project[*, streak_group_count AS streak_length](
   WindowAggregate(
     COUNT(*) OVER (
@@ -63,6 +66,8 @@ Project[*, streak_group_count AS streak_length](
       OVER (PARTITION BY symbol ORDER BY trade_date))
   )
 )
+$$
+
 ```
 
 ## Implementation

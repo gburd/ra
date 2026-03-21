@@ -31,13 +31,18 @@ that navigate directly to matching leaf pages.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: non-sargable (function on column)
-sigma[YEAR(order_date) = 2025](scan(orders))
+$$
+\sigma_{YEAR(order_date) = 2025}(scan(orders))
+$$
 
 -- After: sargable range predicate
-sigma[order_date >= '2025-01-01' AND order_date < '2026-01-01'](
+$$
+\sigma_{order_date >= '2025-01-01' AND order_date < '2026-01-01'}(
     index-seek(orders, ix_order_date))
+$$
+
 ```
 
 ## Implementation

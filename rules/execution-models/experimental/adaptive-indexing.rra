@@ -56,33 +56,46 @@ partitions, and lookups approach O(log n) binary search performance.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Standard index creation (upfront cost):
+$$
 CreateIndex(R.col)  -- O(n log n) sort
 RangeScan(R.col, lo, hi)  -- O(log n + |result|)
+$$
 
 -- Adaptive indexing (incremental refinement):
+$$
 CrackedScan(R.col, lo, hi):
   partition = cracker_index.find_covering(lo, hi)
+$$
   -- Refine partition: physically rearrange
+$$
   crack_in_three(partition, lo, hi)
   cracker_index.insert(lo, partition_lo)
   cracker_index.insert(hi, partition_hi)
   return partition[lo..hi]
+$$
 
 -- Progressive convergence:
+$$
 Query 1: SELECT * FROM R WHERE col BETWEEN 100 AND 200
+$$
   -- Full scan + partition around 100, 200
   -- Cracker: [<100 | 100-200 | >200]
 
+$$
 Query 2: SELECT * FROM R WHERE col BETWEEN 50 AND 150
+$$
   -- Scan [<100] partition around 50
   -- Scan [100-200] partition around 150
   -- Cracker: [<50 | 50-100 | 100-150 | 150-200 | >200]
 
+$$
 Query 3: SELECT * FROM R WHERE col > 180
+$$
   -- Only scan [150-200] partition around 180
   -- Cracker: [<50 | 50-100 | 100-150 | 150-180 | 180-200 | >200]
+
 ```
 
 ## Implementation

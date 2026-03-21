@@ -26,21 +26,28 @@ simplified.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Merge compatible windows (same partition + order)
+$$
 project[
   ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC),
   RANK() OVER (PARTITION BY dept ORDER BY salary DESC)
 ](R)
-  -> single_window_pass[PARTITION BY dept ORDER BY salary DESC](
+  \rightarrow single_window_pass[PARTITION BY dept ORDER BY salary DESC](
        ROW_NUMBER, RANK
      )(R)
+$$
 
 -- Degenerate window: no PARTITION BY, no ORDER BY
-SUM(col) OVER () -> scalar_subquery(SUM(col))
+$$
+SUM(col) OVER () \rightarrow scalar_subquery(SUM(col))
+$$
 
 -- Window with constant PARTITION BY
-ROW_NUMBER() OVER (PARTITION BY 'constant') -> ROW_NUMBER() OVER ()
+$$
+ROW_NUMBER() OVER (PARTITION BY 'constant') \rightarrow ROW_NUMBER() OVER ()
+$$
+
 ```
 
 ## Implementation

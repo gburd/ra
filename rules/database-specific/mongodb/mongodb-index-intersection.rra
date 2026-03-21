@@ -20,12 +20,17 @@ Combines multiple index scans for AND predicates.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
+$$
 (filter (scan orders) (and (eq status 'shipped') (eq region 'us-east')))
+$$
 
 -- After
+$$
 (filter (index-intersection (index-scan idx_status) (index-scan idx_region)))
+$$
+
 ```
 
 ## Preconditions

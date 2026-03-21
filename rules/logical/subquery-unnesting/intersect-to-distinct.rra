@@ -20,8 +20,11 @@ Converts INTERSECT to distinct
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 R INTERSECT S => optimized
+$$
+
 ```
 
 ## Implementation

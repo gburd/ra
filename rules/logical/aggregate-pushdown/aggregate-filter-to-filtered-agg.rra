@@ -20,8 +20,11 @@ Uses SQL FILTER clause for aggregates
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 COUNT(*) FILTER (WHERE cond)
+$$
+
 ```
 
 ## Implementation

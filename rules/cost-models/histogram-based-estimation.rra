@@ -38,17 +38,22 @@ of more storage and maintenance overhead.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 sel(col BETWEEN low, high) using histogram H:
   For each bucket b_i in H:
     if b_i fully contained in [low, high]: add count(b_i)
     if b_i partially overlaps: add count(b_i) * overlap_fraction
   sel = total_matched / total_rows
+$$
 
+$$
 Histogram types:
   Equi-width:  bucket_i = [min + i*w, min + (i+1)*w), w = (max-min)/B
   Equi-depth:  bucket_i has ~N/B rows, boundaries at quantiles
   Compressed:  MCV values get singleton buckets, rest equi-depth
+$$
+
 ```
 
 ## Implementation

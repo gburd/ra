@@ -24,9 +24,12 @@ Parallelizes single operator across multiple threads processing different data c
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 operator(data)
-  -> parallel_apply(operator, chunks(data, num_threads))
+  \rightarrow parallel_apply(operator, chunks(data, num_threads))
+$$
+
 ```
 
 ## Implementation

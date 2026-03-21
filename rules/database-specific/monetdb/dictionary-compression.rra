@@ -32,13 +32,18 @@ columns use less memory, fitting more data in CPU cache.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: string comparison
-sigma[country = 'Germany'](scan(customers.country))
+$$
+\sigma_{country = 'Germany'}(scan(customers.country))
+$$
 
 -- After: dictionary-encoded comparison
+$$
 code = dict_lookup('Germany')  -- O(1)
-sigma[country_code = code](scan(customers.country_codes))
+\sigma_{country_code = code}(scan(customers.country_codes))
+$$
+
 ```
 
 ## Implementation

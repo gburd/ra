@@ -37,12 +37,15 @@ reducing page fault overhead.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 gpu_op(explicit_transfer(R))
-  -> gpu_op(unified_memory(R))
-  where size(R) > gpu_memory
+  \rightarrow gpu_op(unified_memory(R))
+  \text{where} size(R) > gpu_memory
     AND working_set(R) <= gpu_memory
     AND access_pattern is sequential_or_partitioned
+$$
+
 ```
 
 ## Implementation

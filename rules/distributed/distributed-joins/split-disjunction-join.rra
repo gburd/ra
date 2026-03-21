@@ -29,14 +29,17 @@ The UNION ALL followed by deduplication ensures correctness.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Join[a = b OR c = d](L, R)
-  -> DistinctOn(pk,
+  \rightarrow DistinctOn(pk,
        UnionAll(
          Join[a = b](L, R),
          Join[c = d](L, R)
        )
      )
+$$
+
 ```
 
 ## Implementation

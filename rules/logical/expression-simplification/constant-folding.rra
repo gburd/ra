@@ -25,9 +25,12 @@ also known and can be materialized once instead of evaluated per row.
 
 ## Relational Algebra
 
-```algebra
-sigma[f(constants)](R) -> sigma[result_literal](R)
-pi[f(constants), ...](R) -> pi[result_literal, ...](R)
+```latex
+$$
+\sigma_{f(constants)}(R) \rightarrow \sigma_{result_literal}(R)
+\pi_{f(constants), ...}(R) \rightarrow \pi_{result_literal, ...}(R)
+$$
+
 ```
 
 ## Implementation

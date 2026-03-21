@@ -38,22 +38,29 @@ acceptable for n <= 10-15 relations typical in SQL queries.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Input: relations {R1, R2, ..., Rn} with join predicates
 -- Output: optimal join tree minimizing COST formula
 
+$$
 Algorithm:
 1. For each single relation Ri:
    opt_plan({Ri}) = best access path for Ri
+$$
 
+$$
 2. For subset_size = 2 to n:
-   For each subset S of size subset_size:
+   For each \subseteq S of size subset_size:
      For each relation Rj in S:
-       candidate = join(opt_plan(S \ {Rj}), access_path(Rj))
+       candidate = \bowtie(opt_plan(S \ {Rj}), access_path(Rj))
        if cost(candidate) < cost(opt_plan(S)):
          opt_plan(S) = candidate
+$$
 
+$$
 3. Return opt_plan({R1, ..., Rn})
+$$
+
 ```
 
 ## Implementation

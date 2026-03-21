@@ -43,10 +43,13 @@ lookups regardless of position.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 filter[body LIKE '%optimization%'](scan[T])
-  -> full_text_search[I](body, 'optimization')
-  where I is a full-text index on column body
+  \rightarrow full_text_search[I](body, 'optimization')
+  \text{where} I is a full-text index on column body
+$$
+
 ```
 
 ## Implementation

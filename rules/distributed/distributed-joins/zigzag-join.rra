@@ -31,14 +31,17 @@ materializing either full result set.
 
 ## Relational Algebra
 
-```algebra
-sigma[a = 1 AND b = 2](Scan(T))
-  -> ZigzagJoin(
+```latex
+$$
+\sigma_{a = 1 AND b = 2}(Scan(T))
+  \rightarrow ZigzagJoin(
        IndexScan(T, idx_a, a = 1),
        IndexScan(T, idx_b, b = 2)
      )
-  where idx_a has prefix column a
-  where idx_b has prefix column b
+  \text{where} idx_a has prefix column a
+  \text{where} idx_b has prefix column b
+$$
+
 ```
 
 ## Implementation

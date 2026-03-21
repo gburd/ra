@@ -37,11 +37,14 @@ instead of generating the full Cartesian product.
 
 ## Relational Algebra
 
-```algebra
-sigma[p](R cross S) -> R join[p] S
-  where attrs(p) subset (attrs(R) union attrs(S))
-  where attrs(p) intersects attrs(R)
-  where attrs(p) intersects attrs(S)
+```latex
+$$
+\sigma_{p}(R cross S) \rightarrow R \bowtie_{p} S
+  \text{where} \text{attrs}(p) \subseteq (\text{attrs}(R) \cup \text{attrs}(S))
+  \text{where} \text{attrs}(p) intersects \text{attrs}(R)
+  \text{where} \text{attrs}(p) intersects \text{attrs}(S)
+$$
+
 ```
 
 ## Implementation

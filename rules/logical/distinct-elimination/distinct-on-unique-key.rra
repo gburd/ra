@@ -24,10 +24,13 @@ Removes DISTINCT when the selected columns include a unique key or primary key, 
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 distinct(project[cols](R))
-  -> project[cols](R)
-  where unique_key(R) ⊆ cols
+  \rightarrow project[cols](R)
+  \text{where} unique_key(R) ⊆ cols
+$$
+
 ```
 
 ## Implementation

@@ -32,14 +32,19 @@ reality, eliminating spills and reducing memory waste.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: fixed memory grant (possibly wrong)
-hash-join[memory_grant=500MB](R, S)
+$$
+hash-\bowtie_{memory_grant=500MB}(R, S)
+$$
   -- actual use: 50MB, wastes 450MB
 
 -- After: adjusted memory grant
-hash-join[memory_grant=60MB](R, S)
+$$
+hash-\bowtie_{memory_grant=60MB}(R, S)
+$$
   -- grant adjusted based on feedback from previous execution
+
 ```
 
 ## Implementation

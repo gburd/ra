@@ -20,10 +20,13 @@ from the storage tier.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 Filter[p](RemoteScan(R@node_i))
-  -> RemoteScan(Filter[p](R)@node_i)
-  where p is evaluable on node_i
+  \rightarrow RemoteScan(Filter[p](R)@node_i)
+  \text{where} p is evaluable on node_i
+$$
+
 ```
 
 ## Test Cases

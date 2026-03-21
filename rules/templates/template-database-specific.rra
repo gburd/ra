@@ -27,9 +27,12 @@ format, index types, execution engine, etc.)
 
 ## Relational Algebra
 
-```algebra
-LHS_EXPRESSION -> RHS_EXPRESSION
-  where DATABASE_SPECIFIC_CONDITION
+```latex
+$$
+LHS_EXPRESSION \rightarrow RHS_EXPRESSION
+  \text{where} DATABASE_SPECIFIC_CONDITION
+$$
+
 ```
 
 Where:

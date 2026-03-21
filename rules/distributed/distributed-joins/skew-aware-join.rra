@@ -31,15 +31,18 @@ work is distributed evenly.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Split probe into hot and cold partitions
+$$
 Join[c](R, S)
-  -> Union(
-       Join[c](sigma[k IN hot_keys](R), Exchange[broadcast](S)),
-       Join[c](Exchange[hash(k)](sigma[k NOT IN hot_keys](R)),
+  \rightarrow Union(
+       Join[c](\sigma_{k IN hot_keys}(R), Exchange[broadcast](S)),
+       Join[c](Exchange[hash(k)](\sigma_{k NOT IN hot_keys}(R)),
                Exchange[hash(k)](S))
      )
-  where hot_keys = {k : freq(k, R) > skew_threshold}
+  \text{where} hot_keys = {k : freq(k, R) > skew_threshold}
+$$
+
 ```
 
 ## Implementation

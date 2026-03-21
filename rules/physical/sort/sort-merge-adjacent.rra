@@ -23,12 +23,17 @@ sort work is wasted.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before
+$$
 Sort[a, b](Sort[a](R))
+$$
 
 -- After
+$$
 Sort[a, b](R)
+$$
+
 ```
 
 ## Implementation

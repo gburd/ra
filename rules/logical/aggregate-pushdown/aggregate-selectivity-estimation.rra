@@ -25,13 +25,18 @@ size and choose optimal algorithm.
 
 ## Relational Algebra
 
-```algebra
+```latex
+$$
 aggregate[group_cols, agg](R)
-  -> cost_based_aggregate[algorithm, group_cols, agg](R)
-  where algorithm = choose_algorithm(NDV(group_cols), input_size)
+  \rightarrow cost_based_aggregate[algorithm, group_cols, agg](R)
+  \text{where} algorithm = choose_algorithm(\text{NDV}(group_cols), input_size)
+$$
 
-If NDV(group_cols) is small: streaming or sorting
-If NDV(group_cols) is large: hashing
+$$
+If \text{NDV}(group_cols) is small: streaming or sorting
+If \text{NDV}(group_cols) is large: hashing
+$$
+
 ```
 
 ## Implementation

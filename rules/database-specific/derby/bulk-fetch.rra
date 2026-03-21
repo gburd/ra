@@ -31,12 +31,17 @@ read-ahead.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: row-at-a-time scan
+$$
 scan(table, fetch_size=1)
+$$
 
 -- After: bulk fetch scan
+$$
 scan(table, fetch_size=16)
+$$
+
 ```
 
 ## Implementation

@@ -24,12 +24,15 @@ Partitions both inputs, builds hash tables in parallel, probes in parallel.
 
 ## Relational Algebra
 
-```algebra
-join[R.key = S.key](R, S)
-  -> parallel_gather(
+```latex
+$$
+\bowtie_{R.key = S.key}(R, S)
+  \rightarrow parallel_gather(
        for each worker w:
          hash_join(R_partition_w, S_partition_w)
      )
+$$
+
 ```
 
 ## Implementation

@@ -26,13 +26,16 @@ Replacing `x + 0` with `x` eliminates an addition per row.
 
 ## Relational Algebra
 
-```algebra
-pi[e + 0](R) -> pi[e](R)
-pi[e * 1](R) -> pi[e](R)
-pi[e * 0](R) -> pi[0](R)
-pi[e - e](R) -> pi[0](R)
-pi[e / 1](R) -> pi[e](R)
-pi[e - 0](R) -> pi[e](R)
+```latex
+$$
+\pi_{e + 0}(R) \rightarrow \pi_{e}(R)
+\pi_{e * 1}(R) \rightarrow \pi_{e}(R)
+\pi_{e * 0}(R) \rightarrow \pi_{0}(R)
+\pi_{e - e}(R) \rightarrow \pi_{0}(R)
+\pi_{e / 1}(R) \rightarrow \pi_{e}(R)
+\pi_{e - 0}(R) \rightarrow \pi_{e}(R)
+$$
+
 ```
 
 ## Implementation

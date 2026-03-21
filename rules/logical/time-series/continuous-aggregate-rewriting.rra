@@ -26,17 +26,22 @@ and aggregate functions match an existing continuous aggregate.
 
 ## Relational Algebra
 
-```algebra
+```latex
 -- Before: query raw data
-gamma[time_bucket('1h', ts), device_id; AVG(temp)](raw_data)
+$$
+\gamma_{time_bucket('1h', ts), device_id; AVG(temp)}(raw_data)
+$$
 
 -- After: read from continuous aggregate + unmaterialized delta
+$$
 UNION ALL(
     Scan(cagg_hourly_temp),           -- materialized portion
-    gamma[bucket, device_id; AVG(temp)](  -- real-time delta
-        sigma[ts > cagg_watermark](raw_data)
+    \gamma_{bucket, device_id; AVG(temp)}(  -- real-time delta
+        \sigma_{ts > cagg_watermark}(raw_data)
     )
 )
+$$
+
 ```
 
 ## Implementation
