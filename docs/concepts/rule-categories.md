@@ -3,6 +3,21 @@
 The RA optimizer organizes its 1,350+ transformation rules into
 categories based on the type of optimization they perform.
 
+```mermaid
+graph TD
+    Rules[1350+ Rules] --> Logical[Logical Rules]
+    Rules --> Physical[Physical Rules]
+    Rules --> Hardware[Hardware Rules]
+    Rules --> Distributed[Distributed Rules]
+    Rules --> MultiModel[Multi-Model Rules]
+    Rules --> DBSpecific[Database-Specific]
+
+    Logical --> LP[Predicate pushdown<br/>Join reorder<br/>Subquery unnesting]
+    Physical --> PP[Join algorithms<br/>Access methods<br/>Sort strategies]
+    Hardware --> HP[GPU offload<br/>FPGA streaming<br/>SIMD vectorization]
+    Distributed --> DP[Exchange operators<br/>Partition pruning<br/>Two-phase aggregation]
+```
+
 ## Logical Rules
 
 Transform relational algebra expressions while preserving semantics.

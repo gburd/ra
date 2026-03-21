@@ -7,6 +7,9 @@ export default defineConfig({
   base: '/ra/',  // Replace with your repo name for GitHub Pages
   ignoreDeadLinks: true,  // Temporarily ignore dead links during build
   head: [
+    ['link', { rel: 'icon', href: '/ra/favicon.ico' }],
+    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/ra/images/favicon.svg' }],
+    ['link', { rel: 'apple-touch-icon', sizes: '192x192', href: '/ra/images/logo-192.png' }],
     ['link', { rel: 'stylesheet', href: '/ra/static/css/ra-interactive.css' }],
     ['script', { type: 'module', src: '/ra/static/js/ra-interactive.js' }],
     [
@@ -45,6 +48,7 @@ export default defineConfig({
     }
   },
   themeConfig: {
+    logo: '/images/logo.svg',
     nav: [
       { text: 'Guide', link: '/GETTING_STARTED' },
       { text: 'Rules', link: '/rules/' },
@@ -108,6 +112,7 @@ export default defineConfig({
           text: 'Rules',
           items: [
             { text: 'Overview', link: '/rules/' },
+            { text: 'Dependency Graph', link: '/rules/dependency-graph' },
             { text: 'Aggregation', link: '/rules/aggregation' },
             { text: 'Distributed', link: '/rules/distributed' },
             { text: 'Join', link: '/rules/join' },
@@ -133,6 +138,7 @@ export default defineConfig({
             { text: 'Basic Queries', link: '/examples/basic-queries' },
             { text: 'Interactive SQL Demo', link: '/examples/interactive-sql-demo' },
             { text: 'Ledger Application', link: '/examples/ledger/' },
+            { text: 'Ledger Optimization Lab', link: '/examples/ledger/interactive' },
             { text: 'TPC-H Queries', link: '/examples/tpch' }
           ]
         },

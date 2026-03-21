@@ -26,6 +26,18 @@ $$
 
 ## How Ra Optimizes
 
+```mermaid
+graph TD
+    OLTP[OLTP Query] --> PK["Point Lookup<br/>(70%)"]
+    OLTP --> Range["Range Scan<br/>(20%)"]
+    OLTP --> Write["INSERT/UPDATE<br/>(5%)"]
+    OLTP --> SmallJoin["Small Joins<br/>(5%)"]
+
+    PK --> Index[B-tree / Hash Index]
+    Range --> Index
+    SmallJoin --> NL[Nested Loop Join]
+```
+
 ### 1. Index-Centric Execution
 
 **Rule:** `physical/oltp-index-preference`

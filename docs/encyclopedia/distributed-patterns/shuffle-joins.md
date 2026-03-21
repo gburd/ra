@@ -4,6 +4,31 @@
 
 Distributed join strategy where both input relations are repartitioned (shuffled) across nodes based on the join key. Required when neither relation is partitioned appropriately for a co-located join.
 
+```mermaid
+flowchart TD
+    R[Table R] --> HashR["Hash(join_key)"]
+    S[Table S] --> HashS["Hash(join_key)"]
+
+    HashR --> RP1[R Partition 1]
+    HashR --> RP2[R Partition 2]
+    HashR --> RP3[R Partition 3]
+
+    HashS --> SP1[S Partition 1]
+    HashS --> SP2[S Partition 2]
+    HashS --> SP3[S Partition 3]
+
+    RP1 --> J1[Join on Node 1]
+    SP1 --> J1
+    RP2 --> J2[Join on Node 2]
+    SP2 --> J2
+    RP3 --> J3[Join on Node 3]
+    SP3 --> J3
+
+    J1 --> Union[Union Results]
+    J2 --> Union
+    J3 --> Union
+```
+
 ## Use Cases
 
 - Large-to-large table joins

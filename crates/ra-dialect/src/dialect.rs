@@ -229,6 +229,8 @@ impl Dialect {
             Self::DuckDb => Box::new(sqlparser::dialect::DuckDbDialect {}),
             Self::MsSql => Box::new(sqlparser::dialect::MsSqlDialect {}),
             Self::Oracle => Box::new(sqlparser::dialect::GenericDialect {}),
+            #[cfg(feature = "polyglot-backend")]
+            _ => Box::new(sqlparser::dialect::GenericDialect {}), // Use generic for extended dialects
         }
     }
 
@@ -238,6 +240,8 @@ impl Dialect {
         match self {
             Self::MySql => '`',
             Self::PostgreSql | Self::Sqlite | Self::DuckDb | Self::Oracle | Self::MsSql => '"',
+            #[cfg(feature = "polyglot-backend")]
+            _ => '"', // Most extended dialects use double quotes
         }
     }
 
@@ -247,6 +251,8 @@ impl Dialect {
         match self {
             Self::PostgreSql | Self::MySql | Self::Sqlite | Self::DuckDb => true,
             Self::MsSql | Self::Oracle => false,
+            #[cfg(feature = "polyglot-backend")]
+            _ => true, // Most modern dialects support LIMIT
         }
     }
 
@@ -256,6 +262,8 @@ impl Dialect {
         match self {
             Self::PostgreSql | Self::MySql | Self::Sqlite | Self::DuckDb => true,
             Self::MsSql | Self::Oracle => false,
+            #[cfg(feature = "polyglot-backend")]
+            _ => true, // Most modern dialects support OFFSET
         }
     }
 
@@ -266,6 +274,8 @@ impl Dialect {
         match self {
             Self::PostgreSql | Self::DuckDb | Self::MsSql | Self::Oracle => true,
             Self::MySql | Self::Sqlite => false,
+            #[cfg(feature = "polyglot-backend")]
+            _ => false, // Most dialects prefer LIMIT over FETCH
         }
     }
 
@@ -276,6 +286,8 @@ impl Dialect {
         match self {
             Self::PostgreSql | Self::DuckDb | Self::MySql => true,
             Self::Sqlite | Self::MsSql | Self::Oracle => false,
+            #[cfg(feature = "polyglot-backend")]
+            _ => true, // Most modern dialects support boolean literals
         }
     }
 
@@ -286,20 +298,30 @@ impl Dialect {
         match self {
             Self::PostgreSql | Self::Sqlite | Self::DuckDb | Self::Oracle => true,
             Self::MySql | Self::MsSql => false,
+            #[cfg(feature = "polyglot-backend")]
+            _ => false, // Most dialects use CONCAT function
         }
     }
 
     /// Whether this dialect uses `+` for string concatenation.
     #[must_use]
     pub fn uses_plus_concat(self) -> bool {
-        matches!(self, Self::MsSql)
+        match self {
+            Self::MsSql => true,
+            _ => false,
+        }
     }
 
     /// Whether this dialect supports ILIKE for case-insensitive
     /// pattern matching.
     #[must_use]
     pub fn supports_ilike(self) -> bool {
-        matches!(self, Self::PostgreSql | Self::DuckDb)
+        match self {
+            Self::PostgreSql | Self::DuckDb => true,
+            #[cfg(feature = "polyglot-backend")]
+            Self::Snowflake | Self::Redshift => true,
+            _ => false,
+        }
     }
 
     /// Whether this dialect supports FULL OUTER JOIN.

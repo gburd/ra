@@ -36,6 +36,15 @@ Where $[l, u]$ defines the window frame (e.g., ROWS BETWEEN 2 PRECEDING AND CURR
 
 ## How Ra Optimizes
 
+```mermaid
+flowchart TD
+    Input[Input Rows] --> Sort["Sort by<br/>Partition + Order"]
+    Sort --> W1[Process Partition 1]
+    W1 --> W2[Process Partition 2]
+    W2 --> W3[Process Partition N]
+    W3 --> Output[Output with<br/>Window Values]
+```
+
 ### 1. Window Function Ordering
 
 **Rule:** `logical/window-reorder`

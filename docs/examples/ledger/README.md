@@ -29,6 +29,9 @@ Welcome to the interactive guide for RA, a pedagogical query optimizer that help
 9. [**Hardware Awareness**](09-hardware-awareness.md) - Adapting to your machine
 10. [**Advanced Features**](10-advanced-features.md) - Covering indexes, bitmap scans, and more
 
+### Interactive Lab
+- [**Query Optimization Lab**](interactive.md) - Hands-on WASM-powered query editor with adjustable statistics and index controls
+
 ## 🚀 Quick Start
 
 Each section includes interactive SQL examples. Try modifying them to see how RA responds:

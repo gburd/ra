@@ -11,6 +11,12 @@ This directory contains transformation rules in `.rra` (Relational Rule Algebra)
 - `cost-models/` - Cost estimation rules
 - `experimental/` - Research and experimental rules
 
+## Rule Dependency Graph
+
+See the [interactive rule dependency graph](../docs/rules/dependency-graph.md) showing how 1,327+ rules are organized across categories with cross-category dependencies.
+
+![Rule Categories](../docs/public/images/rule-dependency-graph.svg)
+
 ## Rule Format
 
 Each rule is a literate markdown file (`.rra`) with:

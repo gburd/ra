@@ -5,6 +5,17 @@ statements between different database dialects.
 
 ## Overview
 
+```mermaid
+flowchart LR
+    PG[PostgreSQL SQL] --> Parse[Parse]
+    Parse --> AST[Abstract Syntax Tree]
+    AST --> Transform[Apply Dialect Rules]
+    Transform --> Render[Render Target SQL]
+    Render --> MySQL[MySQL SQL]
+    Render --> SQLite[SQLite SQL]
+    Render --> DuckDB[DuckDB SQL]
+```
+
 Database systems implement SQL with varying syntax, function names,
 operators, and feature support. The dialect translator bridges these
 differences, enabling cross-database portability.

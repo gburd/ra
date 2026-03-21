@@ -6,6 +6,22 @@ This document describes different query execution models and how they influence 
 
 Query execution models define how operators process data at runtime. The choice of execution model significantly impacts which optimization rules are applicable and beneficial.
 
+```mermaid
+graph LR
+    subgraph Volcano["Volcano (Pull)"]
+        V1[1 tuple/call]
+    end
+    subgraph Vectorized["Vectorized (Pull)"]
+        V2[1024 tuples/call]
+    end
+    subgraph Compiled["Compiled (Push)"]
+        V3[Tight loop, no calls]
+    end
+
+    Volcano -->|"Batch for throughput"| Vectorized
+    Vectorized -->|"JIT for speed"| Compiled
+```
+
 ## Execution Models
 
 ### 1. Volcano / Iterator Model

@@ -17,25 +17,30 @@ WHERE c.country = 'USA'
 
 The naive execution plan scans all customers and orders, performs the join, then filters:
 
-```
-Filter(c.country = 'USA' AND o.status = 'shipped' AND o.total > 1000)
-  └── Join(c.customer_id = o.customer_id)
-      ├── Scan(customers c)  -- 1M rows
-      └── Scan(orders o)      -- 10M rows
+```mermaid
+graph TD
+    Filter["Filter<br/>country='USA' AND status='shipped'<br/>AND total > 1000"] --> Join["Join<br/>c.customer_id = o.customer_id"]
+    Join --> ScanC["Scan customers<br/>1M rows"]
+    Join --> ScanO["Scan orders<br/>10M rows"]
+
+    style Filter fill:#ffcdd2
 ```
 
-**Problem**: We join 1M × 10M rows before filtering, processing billions of intermediate tuples.
+**Problem**: We join 1M x 10M rows before filtering, processing billions of intermediate tuples.
 
 ## After Predicate Pushdown
 
 RA pushes predicates to the earliest possible point:
 
-```
-Join(c.customer_id = o.customer_id)
-  ├── Filter(c.country = 'USA')
-  │   └── Scan(customers c)  -- 1M rows → 50K rows
-  └── Filter(o.status = 'shipped' AND o.total > 1000)
-      └── Scan(orders o)      -- 10M rows → 100K rows
+```mermaid
+graph TD
+    Join["Join<br/>c.customer_id = o.customer_id"] --> FC["Filter country='USA'"]
+    Join --> FO["Filter status='shipped'<br/>AND total > 1000"]
+    FC --> ScanC["Scan customers<br/>1M → 50K rows"]
+    FO --> ScanO["Scan orders<br/>10M → 100K rows"]
+
+    style ScanC fill:#e8f5e9
+    style ScanO fill:#e8f5e9
 ```
 
 ## Optimization Steps

@@ -12,6 +12,17 @@ estimates.
 
 ## Components
 
+```mermaid
+flowchart TD
+    Exec[Execute Plan A] --> Monitor[Collect Runtime Stats]
+    Monitor --> Check{Cardinality<br/>diverged?}
+    Check -->|No| Exec
+    Check -->|Yes| Reopt[Reoptimize with<br/>actual stats]
+    Reopt --> Checkpoint[Checkpoint State]
+    Checkpoint --> Switch[Switch to Plan B]
+    Switch --> Exec2[Continue Execution]
+```
+
 - **Runtime statistics collection** -- Monitors row counts, execution
   time, and memory usage per operator
 - **Reoptimization triggers** -- Conditions that detect when the

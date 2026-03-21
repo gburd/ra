@@ -31,6 +31,15 @@ $$
 
 **Rule:** `physical/join-method-selection`
 
+```mermaid
+graph TD
+    Join["Join R ⋈ S"] --> Decision{Table sizes?}
+
+    Decision -->|"Small R, index on S"| NL["Nested Loop<br/>Cost: O(n * log m)"]
+    Decision -->|"Equi-join, fits memory"| Hash["Hash Join<br/>Cost: O(n + m)"]
+    Decision -->|"Both sorted"| Merge["Merge Join<br/>Cost: O(n + m)"]
+```
+
 Ra chooses join algorithm based on cost:
 
 | Method | When Used | Cost Formula |

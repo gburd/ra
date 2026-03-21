@@ -39,7 +39,7 @@ impl Backend for PolyglotBackend {
                 }
 
                 Ok(TranslationResult {
-                    sql: translated_sql,
+                    sql: translated_sql.join("\n"),
                     warnings,
                 })
             }

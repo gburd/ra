@@ -1,5 +1,208 @@
 # Changelog
 
+## [0.2.0] - 2026-03-21
+
+Phase 20: Documentation, SQL Coverage, and Engine Hardening
+
+38 commits (`a536fa8..a19a398`) spanning documentation infrastructure,
+SQL test coverage, engine compilation fixes, and deployment automation.
+
+### Added
+
+**SQL Query Encyclopedia** (`docs/`)
+- 30 encyclopedia pages covering query patterns (OLTP, OLAP, analytical,
+  joins, subqueries, recursive, temporal), schema patterns (star schema),
+  dataset characteristics (cardinality), workload patterns, distributed
+  patterns (shuffle joins), and index structures (B-tree)
+- Each page includes relational algebra notation (LaTeX), cost model
+  formulas, statistics API usage, Ra optimization rules, and performance
+  characteristics
+
+**SQL Test Suite** (`tests/`)
+- 251 total SQL queries tested against Ra's parser and optimizer
+- Book queries: 181 queries from 10 database textbooks (99.45% pass rate,
+  180/181); sources include SQL Performance Explained (Winand), High
+  Performance MySQL (Schwartz), Database System Concepts (Silberschatz),
+  Designing Data-Intensive Applications (Kleppmann), and 6 others
+- Real-world queries: 70+ queries from production codebases including
+  Django migrations, Rails ActiveRecord, dbt models, TimescaleDB
+  time-series, PostGIS geospatial, and Airflow ETL pipelines
+- Test runners in Python, Shell, and Rust for CI integration
+
+**LaTeX Math Rendering** (`docs/.vitepress/`)
+- KaTeX integration via `@mdit/plugin-katex` for inline and block math
+- Converted 1,096 `.rra` rule files from ASCII algebra to LaTeX notation
+- Automated conversion script (`scripts/convert_algebra_to_latex.py`)
+- LaTeX conversion candidates report identifying 400+ files with
+  mathematical formulas
+
+**Documentation Link Validation** (`crates/ra-test-utils/`)
+- Automated link validator scanning 2,854+ documentation files
+- Covers `docs/`, `rules/`, `research/`, root markdown, and Rust doc
+  comments
+- Regex-based extraction with relative/absolute path resolution
+- Line-number reporting for broken links
+- Dedicated GitHub Actions workflow for doc-change CI
+
+**Deployment Infrastructure**
+- GitHub Pages: automated VitePress + rustdoc deployment on push to main
+- Netlify: `netlify.toml` with Node 22, SPA routing, security headers,
+  aggressive caching, WASM content-type support
+- Codeberg Pages: Forgejo Actions workflow for VitePress + WASM + rustdoc
+
+**Cardinality-Aware Cost Model** (`ra-engine`)
+- `CardinalityAwareCostFn` using `ra-ml` `HeuristicEstimator`
+- Hardware-adjusted base costs per operator type
+- Staleness-aware confidence (Fresh=1.0, VeryStale=1.5, Unknown=2.0)
+- `extract_best_with_cardinality()` extraction function
+
+**Rule Pre-Condition Filtering** (`ra-engine`)
+- `.rra` YAML frontmatter parsing with `serde_yaml` and `walkdir`
+- Precondition types: pattern, predicate, hardware, database, feature
+- Runtime filtering via `Optimizer::optimize_with_facts()`
+
+**Polyglot SQL Transpiler** (`ra-dialect`)
+- Dual backend system (Native + Polyglot) via `Backend` trait
+- Polyglot backend integrates `polyglot-sql` for 32+ SQL dialects
+  (BigQuery, Snowflake, Databricks, Redshift, ClickHouse, Trino, etc.)
+- Feature-gated with `polyglot-backend`; 26 new dialect variants
+
+**Migration Validation** (`ra-engine`)
+- 821 lines of validation logic in `migrate_commands.rs`
+- Validates metadata identity, precondition safety, constraint narrowing
+- Actionable `ValidationError` messages with suggested fixes
+
+**Stoolap Adapter** (`ra-adapters`)
+- `stoolap` v0.3 dependency with feature flag
+- `StoolapFacts` with table/column stats and schema storage
+
+### Changed
+
+**E-Graph Integration** (`ra-engine`)
+- IndexScan and IndexOnlyScan fully integrated into e-graph
+- Added `index-scan` to `RelLang` enum, conversion/extraction functions
+- Updated `ra-pg-advisor`, `ra-wasm`, `ra-cli` pattern matches
+- All 870 `ra-engine` tests passing including 6/6 min_max_index tests
+
+**Large Join Optimizer** (`ra-engine`)
+- Fixed CTE/RecursiveCTE field names (`base_case`/`recursive_case`/`body`)
+- Added 8 bitmap/parallel operator variants to all match statements
+- Cost model switched from `IntegratedCostModel` to `HardwareCostModel`
+
+**Dependency Fixes**
+- Parquet downgraded to 53.4 (DataFusion compatibility)
+- Chrono downgraded to 0.4.38 (Arrow compatibility)
+- Added `anyhow` to `ra-engine`
+
+### Fixed
+
+- 7 broken documentation links updated for reorganized directory structure
+  (`guides/`, `features/`, `integrations/`)
+- Netlify build: excluded 15 unnest rule files causing Vue parser failures
+  on SQL patterns like `AS t(col)`
+- `HardwareProfile` field access corrected in `ra-test-utils`
+- `count_metadata` tests decoupled from `all_rules()` to avoid transitive
+  load of broken min_max_index rules
+- Duplicate `IndexScan`/`IndexOnlyScan` match arms removed from
+  `federated_optimizer.rs`, `memo.rs`, `estimator.rs`
+- Non-exhaustive pattern matches in `large_join.rs` (Unnest, MultiUnnest,
+  TableFunction, IncrementalSort, ParallelScan, ParallelHashJoin,
+  ParallelAggregate, Gather)
+
+### Documentation
+
+**Massive Documentation Restructure**
+- 1,335 individual rule documentation pages generated across 15 categories
+- INDEX.md (1,397 lines) cataloging all 1,327+ transformation rules
+- REFERENCES.md bibliography with research paper citations
+- Cucumber.io-style hierarchy: `guides/`, `features/`, `integrations/`
+- GETTING_STARTED.md (547 lines) covering all major features
+- New README.md (114 lines) with quick start
+
+**Implementation Architecture Guide** (`docs/`)
+- egg (e-graph equality saturation), sqlparser 0.52, DataFusion,
+  Cranelift/Wasmtime, Timely/Differential dataflow, proptest
+- Apache Calcite influence on rule organization and Volcano/Cascades
+
+**Ledger Example** (`docs/examples/ledger/`)
+- Progressive 7-part guide: introduction, schema, basic queries,
+  aggregations, statistics impact, dialect translation, hardware awareness
+
+**API Documentation** (`docs/`)
+- Statistics API: table, column, index, partition, distribution stats
+- Facts API: unified interface for statistics, schema, hardware, runtime
+- Cost model parameters, workload profiles, complete examples
+
+**RFC System** (`rfcs/`)
+- RFC process documentation and template
+- 3 new RFCs: Incremental View Maintenance (0022), Adaptive Query
+  Execution (0023), Query Result Caching (0024)
+- INDEX.md tracking all RFCs by status with lifecycle management
+
+**Research**
+- CMU Database Group and PostgreSQL optimization knowledge mining
+- 15 high-value missing optimization techniques identified
+- 5 new RFCs proposed (0035-0039): Genetic Query Optimizer, Multi-Query
+  Optimization, Interesting Orders, Loose Index Scan, Operator Class
+  Aware Indexing
+- Hybrid OLAP/OLTP hot/cold data tiering (Iceberg, Hudi, Delta Lake,
+  ClickHouse, TimescaleDB)
+- Columnar file format optimizations (Parquet, ORC, Arrow, Avro) with
+  RFC 0033
+- Database optimization shortcuts (COUNT(*), MIN/MAX, materialized views,
+  approximate query processing)
+- Distributed query patterns: 10 patterns documented with cost formulas
+- Production workload modeling guide (PostgreSQL, MySQL statistics to Ra
+  facts)
+
+### Test Coverage
+
+**Large Join Optimizer** (`large_join.rs`): 39 to 80 tests
+- `count_tables` coverage for RecursiveCTE, CTE, RowPattern,
+  BitmapIndexScan, BitmapAnd/Or, BitmapHeapScan, Unnest, MultiUnnest,
+  TableFunction, IncrementalSort, ParallelScan, ParallelHashJoin,
+  ParallelAggregate, Gather, IndexOnlyScan
+- `extract_joins` coverage for pass-through arms, set operators, CTE
+  variants, bitmap operators, parallel operators, leaf nodes
+- 4-table annealing test exercising inner loop
+
+**Cardinality Cost** (`cardinality_cost.rs`): 5 to 22 tests
+- Direct `CostFunction<RelLang>::cost` tests for Scan, ScanAlias, Filter,
+  Project, Join, Aggregate, Sort, IncrementalSort, Limit, Union, Window,
+  DistinctRel, IndexOnlyScan, BitmapIndexScan, BitmapHeapScan,
+  MetadataLookup
+
+**Rule Metadata** (`rule_metadata.rs`): 42 to 51 tests
+- `parse_rra_file` and `load_rules_from_directory` edge cases
+
+**Covering Index** (`facts.rs`): 3 new tests
+- Empty provider, key column match, INCLUDE-style column detection
+
+### Metrics
+
+| Metric                    | Value                              |
+|---------------------------|------------------------------------|
+| Commits                   | 38                                 |
+| Features                  | 11                                 |
+| Fixes                     | 10                                 |
+| Documentation commits     | 13                                 |
+| Test/CI commits           | 3                                  |
+| Research commits          | 1                                  |
+| Rule files converted      | 1,096 (to LaTeX)                   |
+| Rule docs generated       | 1,335 pages                        |
+| SQL queries tested        | 251 (99.6% pass rate)              |
+| Book query pass rate      | 180/181 (99.45%)                   |
+| Encyclopedia pages        | 30                                 |
+| Doc files validated       | 2,854+                             |
+| Broken links fixed        | 7                                  |
+| Deployment platforms      | 3 (GitHub Pages, Netlify, Codeberg)|
+| SQL dialects supported    | 32+ (via polyglot backend)         |
+| New test cases            | 60+ (across 4 modules)             |
+| Crates modified           | 8+                                 |
+| Breaking changes          | None                               |
+
+---
+
 ## Phase 19: Distributed Query Optimization
 
 ### Added

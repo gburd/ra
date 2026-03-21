@@ -26,6 +26,23 @@ WHERE c.id IN (
 
 ## Problem: Correlated Execution
 
+```mermaid
+flowchart LR
+    subgraph Before["Before: Correlated"]
+        B1["For each of 100K customers"] --> B2["Execute subquery<br/>(scan 2M orders)"]
+        B2 --> B3["200B row accesses"]
+    end
+
+    subgraph After["After: Unnested"]
+        A1["Scan orders once<br/>(2M rows)"] --> A2["Aggregate"]
+        A2 --> A3["Semi-join with<br/>customers"]
+        A3 --> A4["2.1M row accesses"]
+    end
+
+    style B3 fill:#ffcdd2
+    style A4 fill:#e8f5e9
+```
+
 Without unnesting, the subquery executes once per customer row:
 
 ```

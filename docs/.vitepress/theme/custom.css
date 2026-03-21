@@ -1,0 +1,5 @@
+/* Dark mode adjustments for embedded SVG graphs */
+.dark .dependency-graph-container object,
+.dark .dependency-graph-container img {
+  filter: invert(0.88) hue-rotate(180deg);
+}

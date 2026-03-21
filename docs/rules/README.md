@@ -35,6 +35,7 @@ Each rule file (`.rra` format) contains:
 
 ## Navigation
 
+- **[Dependency Graph](./dependency-graph)** - Visual map of rule categories and their relationships
 - **[Complete Rule Index](./INDEX.md)** - Alphabetical listing of all rules
 - **[By Category](./BY_CATEGORY.md)** - Rules grouped by category
 - **[By Database](./BY_DATABASE.md)** - Rules by database system support

@@ -1,30 +1,31 @@
 # pg_plan_advice: PostgreSQL v19 External Optimizer Integration
 
-**Date:** 2026-03-20
-**Status:** Active development (not yet committed to PostgreSQL 19)
+**Date:** 2026-03-21 (updated)
+**Status:** COMMITTED to PostgreSQL 19 (March 12, 2026)
 **Primary Author:** Robert Haas (robertmhaas@gmail.com)
 
 ---
 
 ## Executive Summary
 
-`pg_plan_advice` is a proposed contrib module for PostgreSQL 19 that
-allows external tools to influence query planning decisions without
-replacing the planner. It introduces a declarative mini-language for
-describing plan shapes (join order, join methods, scan types,
-parallelism) that can be captured from existing plans and replayed to
-constrain future planning.
+`pg_plan_advice` is a contrib module **committed to PostgreSQL 19**
+(March 12, 2026) that allows external tools to influence query planning
+decisions without replacing the planner. It introduces a declarative
+mini-language for describing plan shapes (join order, join methods,
+scan types, parallelism) that can be captured from existing plans and
+replayed to constrain future planning.
 
-The patch set builds on foundational infrastructure committed to
+The module builds on foundational infrastructure committed to
 PostgreSQL 19 in October 2025: extendable planner state
 (`extendplan.h`), new planner lifecycle hooks (`planner_setup_hook`,
-`planner_shutdown_hook`), and `ExplainState` extensibility. These
-pieces are already in PostgreSQL master and will ship with v19
-regardless of whether `pg_plan_advice` itself is accepted.
+`planner_shutdown_hook`), and `ExplainState` extensibility.
 
-**Key finding:** `pg_plan_advice` is NOT yet committed. It is an
-active proposal (178+ messages on pgsql-hackers, multiple patch
-revisions). The foundational hooks it depends on ARE committed.
+**Key finding (updated 2026-03-21):** `pg_plan_advice` IS NOW
+COMMITTED. Robert Haas committed the initial module on March 12,
+2026 (`5883ff30`), followed by multiple bug fixes and test
+infrastructure through March 19, 2026. The module is in active
+stabilization with contributions from Robert Haas, Michael Paquier,
+and Tom Lane.
 
 ---
 
@@ -142,7 +143,7 @@ planner_hook_type planner_hook;
 
 ---
 
-## 2. pg_plan_advice Proposal (Not Yet Committed)
+## 2. pg_plan_advice Module (Committed March 12, 2026)
 
 ### 2.1 Overview
 
@@ -223,16 +224,166 @@ Robert Haas emphasizes "separation of mechanism from policy":
 - The modules are designed to be replaceable -- alternative
   implementations can use the same infrastructure
 
-### 2.6 Patch Set Status
+### 2.6 Commit History and Status
 
 - **Initial proposal:** October 30, 2025
-- **Versions:** v1 through v4+ (ongoing)
-- **Mailing list:** 178+ messages on pgsql-hackers
-- **Reviewers:** Jakub Wartak, Alastair Turner, Hannu Krosing,
-  John Naylor, Matheus Alcantara, Jacob Champion, and others
+- **Versions:** v1 through v4+ on pgsql-hackers
+- **Mailing list:** 184+ messages on pgsql-hackers
+- **Reviewers:** Greg Burd, Jacob Champion, Jakub Wartak,
+  Lukas Fittl, Alastair Turner, and eight additional contributors
 - **Blog post:** March 4, 2026 by Robert Haas
-- **Status:** Under review, not committed. May ship with v19 or
-  be deferred.
+- **Status: COMMITTED to PostgreSQL 19**
+
+Commit timeline:
+
+| Date | Hash | Author | Description |
+|------|------|--------|-------------|
+| 2026-03-12 | `5883ff30` | Robert Haas | Add pg_plan_advice contrib module |
+| 2026-03-17 | `5e72ce24` | Robert Haas | Fix failures to accept identifier keywords |
+| 2026-03-17 | `7560995a` | Robert Haas | Fix variable type confusion |
+| 2026-03-18 | `59dcc19b` | Robert Haas | Always install pg_plan_advice.h |
+| 2026-03-18 | `e0e4c132` | Robert Haas | Test pg_plan_advice using test_plan_advice module |
+| 2026-03-18 | `01b02c0e` | Robert Haas | Avoid a crash under GEQO |
+| 2026-03-18 | `ab697307` | Robert Haas | test_plan_advice: Add .gitignore |
+| 2026-03-18 | `8df3c7a8` | Michael Paquier | Exclude pgpa_parser.h from headerscheck |
+| 2026-03-19 | `b335fe56` | Tom Lane | Fix multiple copy-and-paste-errors |
+| 2026-03-19 | `12444183` | Robert Haas | Set TAP test priority 50 in meson |
+
+### 2.7 External Advisor Hook API (NEW -- Critical for RA)
+
+The committed module exports a public C API for external plugins to
+supply advice programmatically, bypassing the GUC mechanism:
+
+```c
+/* pg_plan_advice.h -- installed header, available to extensions */
+
+/* Hook type: return an advice string for a query, or NULL to defer */
+typedef char *(*pg_plan_advice_advisor_hook) (
+    PlannerGlobal *glob,
+    Query *parse,
+    const char *query_string,
+    int cursorOptions,
+    ExplainState *es
+);
+
+/* Register/unregister an advisor hook (PGDLLEXPORT) */
+extern PGDLLEXPORT void pg_plan_advice_add_advisor(
+    pg_plan_advice_advisor_hook hook);
+extern PGDLLEXPORT void pg_plan_advice_remove_advisor(
+    pg_plan_advice_advisor_hook hook);
+
+/* Request that pg_plan_advice always generate advice strings */
+extern PGDLLEXPORT void pg_plan_advice_request_advice_generation(
+    bool activate);
+```
+
+**Integration pattern from test_plan_advice.c:**
+
+```c
+void _PG_init(void) {
+    void (*add_advisor_fn)(pg_plan_advice_advisor_hook hook);
+    add_advisor_fn = load_external_function(
+        "pg_plan_advice",
+        "pg_plan_advice_add_advisor", true, NULL);
+    (*add_advisor_fn)(my_advisor_callback);
+}
+
+static char *my_advisor_callback(
+    PlannerGlobal *glob, Query *parse,
+    const char *query_string, int cursorOptions,
+    ExplainState *es)
+{
+    /* Analyze the query, produce advice string */
+    /* Return NULL to defer to next advisor or GUC */
+    return "HASH_JOIN(t1) INDEX_SCAN(t2 idx_foo)";
+}
+```
+
+Multiple advisors can be registered; the first to return non-NULL wins.
+If all advisors return NULL, the `pg_plan_advice.advice` GUC is used.
+
+### 2.8 Planner Hook Architecture
+
+The module installs five planner hooks:
+
+```c
+void pgpa_planner_install_hooks(void) {
+    planner_setup_hook    = pgpa_planner_setup;
+    planner_shutdown_hook = pgpa_planner_shutdown;
+    build_simple_rel_hook = pgpa_build_simple_rel;
+    joinrel_setup_hook    = pgpa_joinrel_setup;
+    join_path_setup_hook  = pgpa_join_path_setup;
+}
+```
+
+- `planner_setup_hook`: Parses advice strings into a "trove"
+  (indexed advice structure) before planning begins
+- `build_simple_rel_hook`: Applies scan advice by modifying
+  `rel->pgs_mask` to constrain available scan methods
+- `joinrel_setup_hook`: Enforces GATHER, NO_GATHER,
+  PARTITIONWISE directives via `joinrel->pgs_mask`
+- `join_path_setup_hook`: Enforces join method restrictions
+  (HASH_JOIN, MERGE_JOIN, NESTED_LOOP) via `extra->pgs_mask`
+- `planner_shutdown_hook`: Post-planning analysis generating
+  advice strings and feedback
+
+### 2.9 Complete Advice Tag Taxonomy
+
+From the committed `pgpa_ast.h`, 19 advice tags are supported:
+
+**Scan advice:**
+- `SEQ_SCAN(rel)` -- Force sequential scan
+- `INDEX_SCAN(rel idx)` -- Force specific index scan
+- `INDEX_ONLY_SCAN(rel idx)` -- Force index-only scan
+- `BITMAP_HEAP_SCAN(rel)` -- Force bitmap heap scan
+- `TID_SCAN(rel)` -- Force TID scan
+- `FOREIGN_SCAN(rel)` -- Force foreign scan
+
+**Join method advice:**
+- `HASH_JOIN(rel)` -- Force hash join
+- `MERGE_JOIN(rel)` -- Force merge join
+- `MERGE_JOIN_MATERIALIZE(rel)` -- Force merge join with materialize
+- `NESTED_LOOP(rel)` -- Force nested loop (plain)
+- `NESTED_LOOP_MATERIALIZE(rel)` -- Force nested loop with materialize
+- `NESTED_LOOP_MEMOIZE(rel)` -- Force nested loop with memoize
+
+**Join order advice:**
+- `JOIN_ORDER(a b c)` -- Force join sequence (parenthesized = ordered)
+- `JOIN_ORDER({a b} c)` -- Braces = unordered group
+
+**Parallelism advice:**
+- `GATHER(rel ...)` -- Force Gather node
+- `GATHER_MERGE(rel ...)` -- Force Gather Merge node
+- `NO_GATHER(rel ...)` -- Suppress parallel execution
+
+**Partitionwise advice:**
+- `PARTITIONWISE(rel ...)` -- Enable partitionwise join
+
+**Semijoin advice:**
+- `SEMIJOIN_UNIQUE(rel)` -- Treat inner as unique for semijoin
+- `SEMIJOIN_NON_UNIQUE(rel)` -- Do not treat inner as unique
+
+### 2.10 Strategy Mask System
+
+The module uses `uint64` strategy masks (`pgs_mask`) attached to
+`RelOptInfo` and `JoinPathExtraData` to enable/disable specific
+scan and join algorithms at the per-relation level. This provides
+finer-grained control than the global `enable_*` GUCs.
+
+### 2.11 Trove Data Structure
+
+Parsed advice is stored in a "trove" indexed by advice type and
+relation identifiers. Lookup results carry status flags:
+
+- `PGPA_TE_MATCH_PARTIAL` (0x0001) -- Partial query match
+- `PGPA_TE_MATCH_FULL` (0x0002) -- Exact target match
+- `PGPA_TE_INAPPLICABLE` (0x0004) -- Advice doesn't apply
+- `PGPA_TE_CONFLICTING` (0x0008) -- Conflicts with other advice
+- `PGPA_TE_FAILED` (0x0010) -- Final plan didn't conform
+
+These flags enable the feedback loop: after planning, the module
+reports which advice was applied, which was inapplicable, and which
+conflicted, visible through `EXPLAIN (PLAN_ADVICE)`.
 
 ---
 
@@ -512,10 +663,14 @@ pub fn generate_advice(
 4. **Subquery naming**
    - Commit: `8c49a48` (Robert Haas, Tom Lane, 2025-10-07)
 
-### Proposed (Under Review)
+### Committed (March 12, 2026)
 
-5. **pg_plan_advice patch set**
-   - Thread: pgsql-hackers, starting 2025-10-30
+5. **pg_plan_advice contrib module**
+   - Commit: `5883ff30` (Robert Haas, 2026-03-12)
+   - Files: `contrib/pg_plan_advice/` (24 source files)
+   - Test module: `src/test/modules/test_plan_advice/`
+   - Installed header: `pg_plan_advice.h`
+   - Thread: pgsql-hackers, starting 2025-10-30 (184+ messages)
    - Message-ID: `CA+TgmoZ-Jh1T6QyWoCODMVQdhTUPYkaZjWztzP1En4=ZHoKPzw@mail.gmail.com`
    - Blog post: https://rhaas.blogspot.com/2026/03/pgplanadvice-plan-stability-and-user.html
 
@@ -528,23 +683,36 @@ pub fn generate_advice(
 
 ---
 
-## 6. Recommendations for RA
+## 6. Recommendations for RA (Updated 2026-03-21)
 
-1. **Immediate:** Build the pgrx extension (RFC 0002) targeting the
-   committed v19 hooks (`planner_setup_hook`, `planner_shutdown_hook`,
-   `set_rel_pathlist_hook`, `set_join_pathlist_hook`, extendable
-   planner state). These are stable API.
+Now that `pg_plan_advice` is committed, the integration path is clear:
 
-2. **Short-term:** Implement advice string generation that outputs
-   `pg_plan_advice` format. Even if the module is not committed,
-   the format is well-documented and can be used with `pg_hint_plan`
-   translation or direct hook injection.
+1. **Primary path: Advisor hook.** Implement a pgrx extension that
+   calls `pg_plan_advice_add_advisor()` to register RA as an advisor.
+   The advisor callback receives the full query context and returns
+   an advice string. This is the canonical integration mechanism --
+   `test_plan_advice.c` demonstrates the exact pattern.
 
-3. **Medium-term:** If `pg_plan_advice` ships with v19, implement
-   the `pg_stash_advice` integration path for automatic advice
-   application by query ID. This is the lowest-friction deployment
-   model.
+2. **Advice string generation.** Implement the `AdviceExtractor` that
+   walks RA's optimized `RelExpr` tree and emits advice in the
+   committed mini-language format (19 tag types). The advice format
+   is now stable since it's committed code.
 
-4. **Fallback:** Support `pg_hint_plan` for PostgreSQL 15-18 users.
-   The hint categories map closely to `pg_plan_advice` advice types.
-   Build an abstraction layer that emits either format.
+3. **Confidence-gated advice.** Only emit advice when RA's optimizer
+   has high confidence. Return NULL from the advisor callback to defer
+   to the GUC or other advisors. The multi-advisor chain makes this
+   safe.
+
+4. **Feedback loop.** Use `planner_shutdown_hook` to compare RA's
+   predictions with the final plan. The trove status flags
+   (`MATCH_FULL`, `INAPPLICABLE`, `CONFLICTING`, `FAILED`) provide
+   structured feedback for cost model calibration.
+
+5. **Deployment via pg_stash_advice.** For production, use
+   `pg_stash_advice` to automatically apply RA's advice by query ID
+   cluster-wide. RA's background worker writes to the stash; no
+   per-query function calls needed.
+
+6. **Fallback for PG 15-18.** Support `pg_hint_plan` with a thin
+   translation layer. The hint categories map directly to
+   `pg_plan_advice` tags.

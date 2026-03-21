@@ -367,6 +367,92 @@ document.addEventListener('DOMContentLoaded', async () => {
     initWasm().catch(console.error);
 });
 
+/**
+ * Wire up statistics sliders and index toggles on the interactive
+ * ledger page.  These controls feed into WasmOptimizer.addTableStats()
+ * when the full WASM build is available; otherwise they update a
+ * shared state object that the mock module reads.
+ */
+const interactiveStats = {
+    transactions: { row_count: 1000, category_cardinality: 20, date_range_days: 365, amount_skew: 'right-skew' },
+    accounts: { row_count: 100, type_cardinality: 5 },
+    indexes: {
+        txn_date: true,
+        txn_account: true,
+        txn_category: false,
+        txn_amount: false,
+        txn_date_cat: false,
+        acct_type: false,
+    },
+};
+
+function formatNumber(n) {
+    return Number(n).toLocaleString();
+}
+
+function bindSlider(inputId, outputId, statPath) {
+    const input = document.getElementById(inputId);
+    const output = document.getElementById(outputId);
+    if (!input || !output) return;
+
+    function update() {
+        output.textContent = formatNumber(input.value);
+        const keys = statPath.split('.');
+        let obj = interactiveStats;
+        for (let i = 0; i < keys.length - 1; i++) {
+            obj = obj[keys[i]];
+        }
+        obj[keys[keys.length - 1]] = Number(input.value);
+    }
+
+    input.addEventListener('input', update);
+    update();
+}
+
+function bindSelect(selectId, statPath) {
+    const el = document.getElementById(selectId);
+    if (!el) return;
+
+    el.addEventListener('change', () => {
+        const keys = statPath.split('.');
+        let obj = interactiveStats;
+        for (let i = 0; i < keys.length - 1; i++) {
+            obj = obj[keys[i]];
+        }
+        obj[keys[keys.length - 1]] = el.value;
+    });
+}
+
+function bindCheckbox(checkboxId, indexKey) {
+    const el = document.getElementById(checkboxId);
+    if (!el) return;
+
+    el.addEventListener('change', () => {
+        interactiveStats.indexes[indexKey] = el.checked;
+    });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    // Statistics sliders
+    bindSlider('stats-txn-rows', 'stats-txn-rows-val', 'transactions.row_count');
+    bindSlider('stats-cat-card', 'stats-cat-card-val', 'transactions.category_cardinality');
+    bindSlider('stats-date-range', 'stats-date-range-val', 'transactions.date_range_days');
+    bindSlider('stats-acct-rows', 'stats-acct-rows-val', 'accounts.row_count');
+    bindSlider('stats-type-card', 'stats-type-card-val', 'accounts.type_cardinality');
+
+    // Select controls
+    bindSelect('stats-amount-skew', 'transactions.amount_skew');
+
+    // Index toggles
+    bindCheckbox('idx-txn-date', 'txn_date');
+    bindCheckbox('idx-txn-account', 'txn_account');
+    bindCheckbox('idx-txn-category', 'txn_category');
+    bindCheckbox('idx-txn-amount', 'txn_amount');
+    bindCheckbox('idx-txn-date-cat', 'txn_date_cat');
+    bindCheckbox('idx-acct-type', 'acct_type');
+});
+
 // Export for use in other modules
 window.RaInteractiveEditor = RaInteractiveEditor;
 window.initRaWasm = initWasm;
+window.interactiveStats = interactiveStats;

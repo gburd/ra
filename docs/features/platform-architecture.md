@@ -45,6 +45,28 @@ translate SQL across database engines.
 
 ## Crate Dependency Graph
 
+```mermaid
+graph TD
+    Core[ra-core] --> Parser[ra-parser]
+    Core --> Compiler[ra-compiler]
+    Core --> Engine[ra-engine]
+    Core --> Codegen[ra-codegen]
+    Core --> Hardware[ra-hardware]
+    Core --> ML[ra-ml]
+    Core --> Adaptive[ra-adaptive]
+    Core --> Dialect[ra-dialect]
+    Core --> Wasm[ra-wasm]
+
+    Parser --> Compiler
+    Compiler --> Engine
+    Engine --> Adaptive
+
+    Engine --> CLI[ra-cli]
+    Dialect --> CLI
+    Engine --> Web[ra-web]
+    Wasm --> Web
+```
+
 ```
 ra-core          (foundation -- no internal deps)
   ^

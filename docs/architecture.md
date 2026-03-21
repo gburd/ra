@@ -141,41 +141,50 @@ Endpoints:
 
 ### Query Optimization Flow
 
-```
-SQL Query
-    ↓
-[Parse to RelExpr]
-    ↓
-[Build E-graph with rules]
-    ↓
-[Equality Saturation]
-    ↓
-[Cost-based Extraction]
-    ↓
-Optimized Physical Plan
-    ↓
-[Code Generation]
-    ↓
-Executable Code
+```mermaid
+flowchart TD
+    SQL[SQL Query] --> Parse[Parse to RelExpr]
+    Parse --> EGraph[Build E-graph with rules]
+    EGraph --> Saturate[Equality Saturation]
+    Saturate --> Extract[Cost-based Extraction]
+    Extract --> Physical[Optimized Physical Plan]
+    Physical --> Codegen[Code Generation]
+    Codegen --> Exec[Executable Code]
+
+    style SQL fill:#e1f5fe
+    style Exec fill:#e8f5e9
 ```
 
 ### Rule Update Flow (Incremental)
 
-```
-Rule Change
-    ↓
-[Parse and Validate]
-    ↓
-[Update Differential Collection]
-    ↓
-[Recompute Affected Plans]
-    ↓
-Updated Registry
+```mermaid
+flowchart TD
+    Change[Rule Change] --> Parse[Parse and Validate]
+    Parse --> Update[Update Differential Collection]
+    Update --> Recompute[Recompute Affected Plans]
+    Recompute --> Registry[Updated Registry]
+
+    style Change fill:#fff3e0
+    style Registry fill:#e8f5e9
 ```
 
 ## Equality Saturation with egg
 
 The optimization engine uses `egg` (e-graphs good) for equality saturation:
+
+```mermaid
+graph TD
+    Init[Initial Expression] --> Add[Add to E-graph]
+    Add --> Match[Match Rule Patterns]
+    Match --> Apply[Apply Transformations]
+    Apply --> Merge[Merge Equivalent Nodes]
+    Merge --> Saturated{Saturated?}
+    Saturated -->|No| Match
+    Saturated -->|Yes| Extract[Extract Optimal Plan]
+
+    style Init fill:#e1f5fe
+    style Extract fill:#e8f5e9
+```
 
 1. **E-graph Construction**: Convert query to e-graph representation
 2. **Rule Application**: Apply all rules exhaustively
@@ -205,6 +214,15 @@ Benefits:
 ## Cost Model
 
 Cost estimation considers:
+
+```mermaid
+graph LR
+    IO[I/O Cost<br/>Disk reads] --> Total[Total Cost]
+    CPU[CPU Cost<br/>Row processing] --> Total
+    Mem[Memory Cost<br/>Hash tables, sorts] --> Total
+    Net[Network Cost<br/>Data transfer] --> Total
+    Total --> Extract[Plan Extraction]
+```
 
 - **I/O Cost**: Disk reads, sequential vs random access
 - **CPU Cost**: Row processing, expression evaluation

@@ -16,6 +16,22 @@ adds distributed execution strategies needed for:
 
 ## Components
 
+```mermaid
+graph TD
+    Query[SQL Query] --> Planner[Distributed Planner]
+    Planner --> NetCost[Network Cost Model]
+    Planner --> Dist[Distribution Strategy]
+    Planner --> Agg[Distributed Aggregation]
+    Planner --> Fed[Federated Planning]
+
+    Dist --> Broadcast[Broadcast]
+    Dist --> Shuffle[Shuffle]
+    Dist --> CoLocated[Co-located]
+
+    Agg --> TwoPhase[Two-Phase]
+    Agg --> ThreePhase[Three-Phase]
+```
+
 ### 1. Network Cost Modeling
 
 Models network topology and estimates data transfer costs between nodes,

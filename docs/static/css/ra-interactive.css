@@ -429,3 +429,151 @@
         transform: rotate(360deg);
     }
 }
+
+/* ============================================================
+   Statistics & Index Control Panels (interactive.md)
+   ============================================================ */
+
+.ra-stats-panel {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+    margin: 1rem 0;
+}
+
+.ra-stats-group {
+    background: #f6f8fa;
+    border: 1px solid #e1e4e8;
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+}
+
+.ra-stats-group h4 {
+    margin: 0 0 0.75rem 0;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: #24292e;
+}
+
+.ra-stats-control {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.625rem;
+}
+
+.ra-stats-control label {
+    font-size: 0.8125rem;
+    color: #586069;
+    grid-column: 1 / -1;
+}
+
+.ra-stats-control input[type="range"] {
+    width: 100%;
+    accent-color: #0366d6;
+}
+
+.ra-stats-control output {
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: #0366d6;
+    min-width: 5rem;
+    text-align: right;
+}
+
+.ra-stats-control select {
+    width: 100%;
+    padding: 0.375rem 0.5rem;
+    font-size: 0.8125rem;
+    border: 1px solid #d1d5da;
+    border-radius: 6px;
+    background: #ffffff;
+    grid-column: 1 / -1;
+}
+
+/* Index toggles */
+.ra-index-panel {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+    margin: 1rem 0;
+    padding: 1rem 1.25rem;
+    background: #f6f8fa;
+    border: 1px solid #e1e4e8;
+    border-radius: 8px;
+}
+
+.ra-index-toggle {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    font-size: 0.8125rem;
+    color: #24292e;
+    padding: 0.25rem 0;
+}
+
+.ra-index-toggle input[type="checkbox"] {
+    accent-color: #0366d6;
+    margin-top: 0.125rem;
+}
+
+.ra-index-toggle code {
+    font-size: 0.75rem;
+    padding: 0.125rem 0.25rem;
+    background: #e1e4e8;
+    border-radius: 3px;
+}
+
+/* Responsive: stack on narrow screens */
+@media (max-width: 768px) {
+    .ra-stats-panel {
+        grid-template-columns: 1fr;
+    }
+
+    .ra-index-panel {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Dark mode for stats & index panels */
+@media (prefers-color-scheme: dark) {
+    .ra-stats-group {
+        background: #161b22;
+        border-color: #30363d;
+    }
+
+    .ra-stats-group h4 {
+        color: #c9d1d9;
+    }
+
+    .ra-stats-control label {
+        color: #8b949e;
+    }
+
+    .ra-stats-control output {
+        color: #58a6ff;
+    }
+
+    .ra-stats-control select {
+        background: #0d1117;
+        border-color: #30363d;
+        color: #c9d1d9;
+    }
+
+    .ra-index-panel {
+        background: #161b22;
+        border-color: #30363d;
+    }
+
+    .ra-index-toggle {
+        color: #c9d1d9;
+    }
+
+    .ra-index-toggle code {
+        background: #30363d;
+        color: #c9d1d9;
+    }
+}

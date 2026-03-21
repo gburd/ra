@@ -6,24 +6,47 @@ Data warehouse design with central fact table surrounded by dimension tables. Op
 
 ## Schema Structure
 
-```
-        ┌─────────────┐
-        │  dim_date   │
-        │  (small)    │
-        └──────┬──────┘
-               │
-    ┌──────────┼──────────┐
-    │          │          │
-┌───┴───┐  ┌──┴──────┐  ┌┴────────────┐
-│ dim_  │  │  fact_  │  │ dim_product │
-│store  ├──┤  sales  ├──┤  (medium)   │
-│(small)│  │ (huge)  │  └─────────────┘
-└───────┘  └──┬──────┘
-              │
-        ┌─────┴───────┐
-        │ dim_customer│
-        │  (large)    │
-        └─────────────┘
+```mermaid
+erDiagram
+    FACT_SALES ||--o{ DIM_DATE : "date_key"
+    FACT_SALES ||--o{ DIM_CUSTOMER : "customer_key"
+    FACT_SALES ||--o{ DIM_PRODUCT : "product_key"
+    FACT_SALES ||--o{ DIM_STORE : "store_key"
+
+    FACT_SALES {
+        int sale_id
+        date date_key
+        int customer_key
+        int product_key
+        int store_key
+        decimal amount
+        int quantity
+    }
+
+    DIM_DATE {
+        date date_key
+        int year
+        int quarter
+        int month
+    }
+
+    DIM_CUSTOMER {
+        int customer_key
+        string name
+        string country
+    }
+
+    DIM_PRODUCT {
+        int product_key
+        string name
+        string category
+    }
+
+    DIM_STORE {
+        int store_key
+        string name
+        string region
+    }
 ```
 
 ### Typical Sizes

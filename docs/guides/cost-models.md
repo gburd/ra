@@ -6,6 +6,18 @@ one.
 
 ## Cost Structure
 
+```mermaid
+graph LR
+    Plan[Plan Node] --> CPU["CPU Cost<br/>weight: 1.0"]
+    Plan --> IO["I/O Cost<br/>weight: 4.0"]
+    Plan --> Net["Network Cost<br/>weight: 2.0"]
+    Plan --> Mem["Memory Usage<br/>(bytes)"]
+
+    CPU --> Total["weighted_total()"]
+    IO --> Total
+    Net --> Total
+```
+
 Every plan node has a `Cost` with four components:
 
 ```rust

@@ -34,10 +34,13 @@ cargo run --bin ra-cli -- optimize \
 ```
 
 RA will:
-1. Parse SQL into relational algebra
-2. Apply transformation rules via equality saturation
-3. Extract the lowest-cost plan
-4. Show the optimized query
+
+```mermaid
+flowchart LR
+    A[1. Parse SQL] --> B[2. Apply Rules<br/>via E-graph]
+    B --> C[3. Extract<br/>Lowest-Cost Plan]
+    C --> D[4. Show<br/>Optimized Query]
+```
 
 ## Major Features
 

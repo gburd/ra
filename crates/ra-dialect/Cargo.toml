@@ -23,5 +23,9 @@ polyglot-backend = ["polyglot-sql"]
 proptest = { workspace = true }
 criterion = { workspace = true }
 
+[[bench]]
+name = "backend_comparison"
+harness = false
+
 [lints]
 workspace = true

@@ -31,6 +31,21 @@ Where subquery depends on $R$ columns.
 
 ## How Ra Optimizes
 
+```mermaid
+flowchart LR
+    subgraph Before["Before: Correlated"]
+        Outer[Outer Query R] --> Loop["For each row r"]
+        Loop --> Sub["Execute subquery<br/>referencing r"]
+    end
+
+    subgraph After["After: Unnested"]
+        R2[R] --> Join["Semi-Join ⋈"]
+        S2[S] --> Join
+    end
+
+    Before -->|Unnesting| After
+```
+
 ### 1. Subquery Unnesting
 
 **Rule:** `logical/subquery-unnesting`

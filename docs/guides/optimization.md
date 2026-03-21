@@ -5,18 +5,16 @@ optimization workflows, tuning cost models, and interpreting results.
 
 ## Query Optimization Workflow
 
-```
-SQL Query
-    |
-[Parse to RelExpr]
-    |
-[Build E-graph with rules]
-    |
-[Equality Saturation]
-    |
-[Cost-based Extraction]
-    |
-Optimized Physical Plan
+```mermaid
+flowchart TD
+    SQL[SQL Query] --> Parse[Parse to RelExpr]
+    Parse --> EGraph[Build E-graph with 1350+ rules]
+    EGraph --> Saturate[Equality Saturation]
+    Saturate --> Extract[Cost-based Extraction]
+    Extract --> Plan[Optimized Physical Plan]
+
+    style SQL fill:#e1f5fe
+    style Plan fill:#e8f5e9
 ```
 
 ## Running the Optimizer

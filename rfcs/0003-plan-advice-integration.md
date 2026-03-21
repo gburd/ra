@@ -132,10 +132,11 @@ enables transparent optimization without per-query function calls.
 
 ## Drawbacks
 
-- Requires PostgreSQL v19+ (not yet released as of 2026-03)
-- `pg_plan_advice` API may change before PostgreSQL v19 GA
+- Requires PostgreSQL v19+ (expected release late 2026)
+- `pg_plan_advice` is committed but may see API changes before
+  PostgreSQL v19 GA (it is still in active stabilization)
 - Advice is coarser than full plan replacement -- some optimizations
-  cannot be expressed as hints
+  cannot be expressed as hints (aggregation, sort, cost adjustments)
 - Background worker adds overhead to query monitoring
 
 ## Rationale and Alternatives
@@ -159,12 +160,14 @@ advice, graduate to full replacement for validated workloads.
 
 ## Unresolved Questions
 
-- `pg_plan_advice` is not yet committed to PostgreSQL v19. The
-  foundational hooks it depends on (planner_setup_hook,
-  planner_shutdown_hook, extendable planner state) ARE committed.
-  Should RA target the committed hooks directly as a fallback?
-- The advice mini-language syntax may change before final commit.
-  RA should generate advice through an abstraction layer.
+- ~~`pg_plan_advice` is not yet committed to PostgreSQL v19.~~
+  **Resolved (2026-03-21):** `pg_plan_advice` was committed on
+  March 12, 2026 (`5883ff30`). The API may still change before
+  v19 GA but is now stable enough to target.
+- ~~The advice mini-language syntax may change before final commit.~~
+  **Resolved:** The syntax is committed with 19 advice tag types.
+  RA should still generate advice through an abstraction layer
+  to support `pg_hint_plan` fallback for PG 15-18.
 - How should advice be scoped (session, database, cluster)?
   `pg_stash_advice` provides cluster-wide scoping via DSM, but
   RA may need finer-grained control.
@@ -172,24 +175,34 @@ advice, graduate to full replacement for validated workloads.
   on parameter values?
 - Should RA also support `pg_hint_plan` for PostgreSQL 15-18 users?
   The hint categories map closely to `pg_plan_advice` advice types.
+- **New:** The committed `pg_plan_advice_advisor_hook` API allows
+  multiple advisors in a chain. How should RA interact with other
+  advisors? First non-NULL return wins -- RA should return NULL
+  for queries outside its confidence threshold.
 
-## Research Findings (2026-03-20)
+## Research Findings (Updated 2026-03-21)
 
 See `research/pg_plan_advice-v19.md` for detailed findings. Key
 points:
 
-- **Committed to v19:** `extendplan.h` (private state in
-  PlannerGlobal, PlannerInfo, RelOptInfo), `planner_setup_hook`,
-  `planner_shutdown_hook`, ExplainState extensibility, subquery
-  naming.
-- **Proposed (under review):** `pg_plan_advice`, `pg_collect_advice`,
-  `pg_stash_advice` contrib modules by Robert Haas. 178+ messages
-  on pgsql-hackers, multiple patch revisions (v1-v4+).
-- **Advice format:** Declarative mini-language -- `JOIN_ORDER(a b)`,
-  `HASH_JOIN(rel)`, `SEQ_SCAN(rel)`, `INDEX_SCAN(rel idx)`,
-  `NO_GATHER(rel)`, `PARALLEL(rel N)`.
-- **Integration mechanism:** GUC `pg_plan_advice.advice` for
-  per-session, `pg_stash_advice` for per-query-id cluster-wide.
+- **Committed to v19:** All foundational infrastructure AND
+  `pg_plan_advice` itself (committed 2026-03-12, `5883ff30`).
+- **Module files:** 24 source files in `contrib/pg_plan_advice/`,
+  installed header `pg_plan_advice.h`, test module in
+  `src/test/modules/test_plan_advice/`.
+- **Advice format:** Declarative mini-language with 19 advice tag
+  types covering scans, joins, join order, parallelism,
+  partitionwise operations, and semijoin handling.
+- **External integration API:** `pg_plan_advice_add_advisor()` and
+  `pg_plan_advice_remove_advisor()` allow extensions to register
+  advisor callbacks that supply advice programmatically. This is
+  the canonical integration point for RA.
+- **Integration mechanism:** Three tiers:
+  1. Advisor hook (programmatic, per-query) -- **primary for RA**
+  2. GUC `pg_plan_advice.advice` (per-session)
+  3. `pg_stash_advice` (per-query-id, cluster-wide)
+- **Feedback:** Trove status flags report advice application
+  outcomes via `EXPLAIN (PLAN_ADVICE)`.
 
 ## Future Possibilities
 

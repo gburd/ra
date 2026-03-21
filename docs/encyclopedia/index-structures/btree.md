@@ -6,14 +6,30 @@ Balanced tree index structure supporting efficient range queries, point lookups,
 
 ## Structure
 
-```
-                 [50 | 100]
-                /     |     \
-         [20|30]   [70|80]   [120]
-         /  |  \    /  |  \    /  \
-    [10] [25] [35] [60] [75] [90] [110] [130]
-     |    |    |    |    |    |     |     |
-   [data][...][...]...
+```mermaid
+graph TD
+    Root["Root Node<br/>[50 | 100]"]
+    Root --> L1["[20 | 30]"]
+    Root --> M1["[70 | 80]"]
+    Root --> R1["[120]"]
+
+    L1 --> LL["[10..19]"]
+    L1 --> LM["[25..29]"]
+    L1 --> LR["[35..49]"]
+
+    M1 --> ML["[60..69]"]
+    M1 --> MM["[75..79]"]
+    M1 --> MR["[90..99]"]
+
+    R1 --> RL["[110..119]"]
+    R1 --> RR["[130..]"]
+
+    Search["Search: key = 30"] -.-> Root
+    Root -.-> L1
+    L1 -.-> LM
+
+    style LM fill:#c8e6c9
+    style Search fill:#e1f5fe
 ```
 
 **Properties:**

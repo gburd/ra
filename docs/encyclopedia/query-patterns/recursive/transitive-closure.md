@@ -37,6 +37,18 @@ $$
 
 ## How Ra Optimizes
 
+```mermaid
+graph TD
+    Base["Base Case R(0)"] --> Iter1["R(1) = R(0) ∪ (R(0) ⋈ R)"]
+    Iter1 --> Iter2["R(2) = R(1) ∪ (R(1) ⋈ R)"]
+    Iter2 --> Check{New rows?}
+    Check -->|Yes| IterN["R(i+1) = R(i) ∪ (R(i) ⋈ R)"]
+    IterN --> Check
+    Check -->|No| Done["Fixed Point: R+"]
+
+    style Done fill:#e8f5e9
+```
+
 ### 1. Iterative Execution
 
 **Rule:** `logical/recursive-cte-to-iteration`

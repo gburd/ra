@@ -1,172 +1,205 @@
 digraph rule_dependencies {
   rankdir=LR;
-  node [shape=box, style=filled, fillcolor=lightyellow];
+  fontname="Helvetica,Arial,sans-serif";
+  node [shape=box, style="filled,rounded", fillcolor=lightyellow,
+        fontname="Helvetica,Arial,sans-serif", fontsize=11,
+        target="_top"];
+  edge [color="#555555", penwidth=1.5, arrowsize=0.8,
+        fontname="Helvetica,Arial,sans-serif", fontsize=9];
 
   subgraph cluster_cost_models {
     label="cost-models (36 rules)";
-    style=filled;
+    style="filled,rounded";
     fillcolor="wheat";
+    color="#d4a574";
+    fontname="Helvetica,Arial,sans-serif";
+    fontsize=13;
     node [fillcolor=white];
-    cost_models_general [label="general\n(25)"];
-    cost_models_system_r [label="system-r\n(11)"];
+    cost_models_general [label="general\n(25)", URL="./rules/cost-models/"];
+    cost_models_system_r [label="system-r\n(11)", URL="./rules/cost-models/"];
   }
 
   subgraph cluster_database_specific {
     label="database-specific (357 rules)";
-    style=filled;
+    style="filled,rounded";
     fillcolor="lavender";
+    color="#9999cc";
+    fontname="Helvetica,Arial,sans-serif";
+    fontsize=13;
     node [fillcolor=white];
-    database_specific_SUBCATEGORY [label="SUBCATEGORY\n(1)"];
-    database_specific_calcite [label="calcite\n(47)"];
-    database_specific_clickhouse [label="clickhouse\n(37)"];
-    database_specific_cockroachdb [label="cockroachdb\n(19)"];
-    database_specific_datafusion [label="datafusion\n(20)"];
-    database_specific_derby [label="derby\n(22)"];
-    database_specific_drill [label="drill\n(4)"];
-    database_specific_duckdb [label="duckdb\n(2)"];
-    database_specific_flink [label="flink\n(7)"];
-    database_specific_greenplum [label="greenplum\n(2)"];
-    database_specific_hyper [label="hyper\n(3)"];
-    database_specific_impala [label="impala\n(4)"];
-    database_specific_materialize [label="materialize\n(21)"];
-    database_specific_monetdb [label="monetdb\n(28)"];
-    database_specific_mongodb [label="mongodb\n(19)"];
-    database_specific_mssql [label="mssql\n(20)"];
-    database_specific_mysql [label="mysql\n(25)"];
-    database_specific_neo4j [label="neo4j\n(17)"];
-    database_specific_oracle [label="oracle\n(20)"];
-    database_specific_postgresql [label="postgresql\n(2)"];
-    database_specific_predicate_pushdown [label="predicate-pushdown\n(1)"];
-    database_specific_presto [label="presto\n(3)"];
-    database_specific_sqlite [label="sqlite\n(2)"];
-    database_specific_tidb [label="tidb\n(19)"];
-    database_specific_timescaledb [label="timescaledb\n(3)"];
-    database_specific_trino [label="trino\n(6)"];
-    database_specific_voltdb [label="voltdb\n(3)"];
+    database_specific_calcite [label="calcite\n(47)", URL="./rules/database-specific/"];
+    database_specific_clickhouse [label="clickhouse\n(37)", URL="./rules/database-specific/"];
+    database_specific_cockroachdb [label="cockroachdb\n(19)", URL="./rules/database-specific/"];
+    database_specific_datafusion [label="datafusion\n(20)", URL="./rules/database-specific/"];
+    database_specific_derby [label="derby\n(22)", URL="./rules/database-specific/"];
+    database_specific_drill [label="drill\n(4)", URL="./rules/database-specific/"];
+    database_specific_duckdb [label="duckdb\n(2)", URL="./rules/database-specific/"];
+    database_specific_flink [label="flink\n(7)", URL="./rules/database-specific/"];
+    database_specific_greenplum [label="greenplum\n(2)", URL="./rules/database-specific/"];
+    database_specific_hyper [label="hyper\n(3)", URL="./rules/database-specific/"];
+    database_specific_impala [label="impala\n(4)", URL="./rules/database-specific/"];
+    database_specific_materialize [label="materialize\n(21)", URL="./rules/database-specific/"];
+    database_specific_monetdb [label="monetdb\n(28)", URL="./rules/database-specific/"];
+    database_specific_mongodb [label="mongodb\n(19)", URL="./rules/database-specific/"];
+    database_specific_mssql [label="mssql\n(20)", URL="./rules/database-specific/"];
+    database_specific_mysql [label="mysql\n(25)", URL="./rules/database-specific/"];
+    database_specific_neo4j [label="neo4j\n(17)", URL="./rules/database-specific/"];
+    database_specific_oracle [label="oracle\n(20)", URL="./rules/database-specific/"];
+    database_specific_postgresql [label="postgresql\n(2)", URL="./rules/database-specific/"];
+    database_specific_presto [label="presto\n(3)", URL="./rules/database-specific/"];
+    database_specific_sqlite [label="sqlite\n(2)", URL="./rules/database-specific/"];
+    database_specific_tidb [label="tidb\n(19)", URL="./rules/database-specific/"];
+    database_specific_timescaledb [label="timescaledb\n(3)", URL="./rules/database-specific/"];
+    database_specific_trino [label="trino\n(6)", URL="./rules/database-specific/"];
+    database_specific_voltdb [label="voltdb\n(3)", URL="./rules/database-specific/"];
   }
 
   subgraph cluster_distributed {
     label="distributed (58 rules)";
-    style=filled;
+    style="filled,rounded";
     fillcolor="lightsalmon";
+    color="#e08060";
+    fontname="Helvetica,Arial,sans-serif";
+    fontsize=13;
     node [fillcolor=white];
-    distributed_aggregation_strategies [label="aggregation-strategies\n(1)"];
-    distributed_colocation [label="colocation\n(6)"];
-    distributed_coprocessor_pushdown [label="coprocessor-pushdown\n(2)"];
-    distributed_data_movement [label="data-movement\n(6)"];
-    distributed_distributed_joins [label="distributed-joins\n(13)"];
-    distributed_distributed_sort [label="distributed-sort\n(4)"];
-    distributed_distributed_transactions [label="distributed-transactions\n(2)"];
-    distributed_exchange_placement [label="exchange-placement\n(5)"];
-    distributed_join_algorithms [label="join-algorithms\n(1)"];
-    distributed_locality_optimization [label="locality-optimization\n(4)"];
-    distributed_partial_aggregation [label="partial-aggregation\n(5)"];
-    distributed_partition_pruning [label="partition-pruning\n(5)"];
-    distributed_stage_planning [label="stage-planning\n(4)"];
+    distributed_aggregation_strategies [label="aggregation-strategies\n(1)", URL="./rules/distributed/"];
+    distributed_colocation [label="colocation\n(6)", URL="./rules/distributed/"];
+    distributed_coprocessor_pushdown [label="coprocessor-pushdown\n(2)", URL="./rules/distributed/"];
+    distributed_data_movement [label="data-movement\n(6)", URL="./rules/distributed/"];
+    distributed_distributed_joins [label="distributed-joins\n(13)", URL="./rules/distributed/"];
+    distributed_distributed_sort [label="distributed-sort\n(4)", URL="./rules/distributed/"];
+    distributed_distributed_transactions [label="distributed-transactions\n(2)", URL="./rules/distributed/"];
+    distributed_exchange_placement [label="exchange-placement\n(5)", URL="./rules/distributed/"];
+    distributed_join_algorithms [label="join-algorithms\n(1)", URL="./rules/distributed/"];
+    distributed_locality_optimization [label="locality-optimization\n(4)", URL="./rules/distributed/"];
+    distributed_partial_aggregation [label="partial-aggregation\n(5)", URL="./rules/distributed/"];
+    distributed_partition_pruning [label="partition-pruning\n(5)", URL="./rules/distributed/"];
+    distributed_stage_planning [label="stage-planning\n(4)", URL="./rules/distributed/"];
   }
 
   subgraph cluster_execution_models {
     label="execution-models (91 rules)";
-    style=filled;
+    style="filled,rounded";
     fillcolor="mistyrose";
+    color="#d4a0a0";
+    fontname="Helvetica,Arial,sans-serif";
+    fontsize=13;
     node [fillcolor=white];
-    execution_models_adaptive [label="adaptive\n(2)"];
-    execution_models_approximate [label="approximate\n(1)"];
-    execution_models_column_at_a_time [label="column-at-a-time\n(3)"];
-    execution_models_compilation [label="compilation\n(1)"];
-    execution_models_differential [label="differential\n(8)"];
-    execution_models_general [label="general\n(62)"];
-    execution_models_hardware_accel [label="hardware-accel\n(2)"];
-    execution_models_ml_guided [label="ml-guided\n(3)"];
-    execution_models_morsel_driven [label="morsel-driven\n(3)"];
-    execution_models_parallelization [label="parallelization\n(1)"];
-    execution_models_push_based [label="push-based\n(2)"];
-    execution_models_vectorized [label="vectorized\n(3)"];
+    execution_models_adaptive [label="adaptive\n(2)", URL="./rules/execution-models/"];
+    execution_models_approximate [label="approximate\n(1)", URL="./rules/execution-models/"];
+    execution_models_column_at_a_time [label="column-at-a-time\n(3)", URL="./rules/execution-models/"];
+    execution_models_compilation [label="compilation\n(1)", URL="./rules/execution-models/"];
+    execution_models_differential [label="differential\n(8)", URL="./rules/execution-models/"];
+    execution_models_general [label="general\n(62)", URL="./rules/execution-models/"];
+    execution_models_hardware_accel [label="hardware-accel\n(2)", URL="./rules/execution-models/"];
+    execution_models_ml_guided [label="ml-guided\n(3)", URL="./rules/execution-models/"];
+    execution_models_morsel_driven [label="morsel-driven\n(3)", URL="./rules/execution-models/"];
+    execution_models_parallelization [label="parallelization\n(1)", URL="./rules/execution-models/"];
+    execution_models_push_based [label="push-based\n(2)", URL="./rules/execution-models/"];
+    execution_models_vectorized [label="vectorized\n(3)", URL="./rules/execution-models/"];
   }
 
   subgraph cluster_experimental {
     label="experimental (46 rules)";
-    style=filled;
-    fillcolor="lightyellow";
+    style="filled,rounded";
+    fillcolor="#ffffdd";
+    color="#cccc88";
+    fontname="Helvetica,Arial,sans-serif";
+    fontsize=13;
     node [fillcolor=white];
-    experimental_adaptive [label="adaptive\n(12)"];
-    experimental_aggregation_strategies [label="aggregation-strategies\n(1)"];
-    experimental_approximate [label="approximate\n(3)"];
-    experimental_compilation [label="compilation\n(2)"];
-    experimental_hardware_accel [label="hardware-accel\n(2)"];
-    experimental_ml_guided [label="ml-guided\n(9)"];
-    experimental_semantic [label="semantic\n(7)"];
-    experimental_wcoj [label="wcoj\n(10)"];
+    experimental_adaptive [label="adaptive\n(12)", URL="./rules/experimental/"];
+    experimental_aggregation_strategies [label="aggregation-strategies\n(1)", URL="./rules/experimental/"];
+    experimental_approximate [label="approximate\n(3)", URL="./rules/experimental/"];
+    experimental_compilation [label="compilation\n(2)", URL="./rules/experimental/"];
+    experimental_hardware_accel [label="hardware-accel\n(2)", URL="./rules/experimental/"];
+    experimental_ml_guided [label="ml-guided\n(9)", URL="./rules/experimental/"];
+    experimental_semantic [label="semantic\n(7)", URL="./rules/experimental/"];
+    experimental_wcoj [label="wcoj\n(10)", URL="./rules/experimental/"];
   }
 
   subgraph cluster_hardware {
     label="hardware (22 rules)";
-    style=filled;
+    style="filled,rounded";
     fillcolor="lightcyan";
+    color="#80b0c0";
+    fontname="Helvetica,Arial,sans-serif";
+    fontsize=13;
     node [fillcolor=white];
-    hardware_SUBCATEGORY [label="SUBCATEGORY\n(1)"];
-    hardware_accelerator [label="accelerator\n(5)"];
-    hardware_data_placement [label="data-placement\n(4)"];
-    hardware_fpga [label="fpga\n(4)"];
-    hardware_gpu [label="gpu\n(8)"];
+    hardware_accelerator [label="accelerator\n(5)", URL="./rules/hardware/"];
+    hardware_data_placement [label="data-placement\n(4)", URL="./rules/hardware/"];
+    hardware_fpga [label="fpga\n(4)", URL="./rules/hardware/"];
+    hardware_gpu [label="gpu\n(8)", URL="./rules/hardware/"];
   }
 
   subgraph cluster_logical {
     label="logical (210 rules)";
-    style=filled;
+    style="filled,rounded";
     fillcolor="lightblue";
+    color="#6699cc";
+    fontname="Helvetica,Arial,sans-serif";
+    fontsize=13;
     node [fillcolor=white];
-    logical_SUBCATEGORY [label="SUBCATEGORY\n(1)"];
-    logical_aggregate_pushdown [label="aggregate-pushdown\n(22)"];
-    logical_cte_optimization [label="cte-optimization\n(5)"];
-    logical_distinct_elimination [label="distinct-elimination\n(5)"];
-    logical_expression_simplification [label="expression-simplification\n(10)"];
-    logical_function_optimization [label="function-optimization\n(58)"];
-    logical_join_elimination [label="join-elimination\n(19)"];
-    logical_join_reordering [label="join-reordering\n(9)"];
-    logical_limit_pushdown [label="limit-pushdown\n(12)"];
-    logical_predicate_pushdown [label="predicate-pushdown\n(17)"];
-    logical_projection_pushdown [label="projection-pushdown\n(7)"];
-    logical_semantic_rewriting [label="semantic-rewriting\n(8)"];
-    logical_set_operations [label="set-operations\n(10)"];
-    logical_sideways_information_passing [label="sideways-information-passing\n(3)"];
-    logical_subquery_unnesting [label="subquery-unnesting\n(17)"];
-    logical_timeseries [label="timeseries\n(1)"];
-    logical_view_rewriting [label="view-rewriting\n(2)"];
-    logical_window_pushdown [label="window-pushdown\n(4)"];
+    logical_aggregate_pushdown [label="aggregate-pushdown\n(22)", URL="./rules/logical/"];
+    logical_cte_optimization [label="cte-optimization\n(5)", URL="./rules/logical/"];
+    logical_distinct_elimination [label="distinct-elimination\n(5)", URL="./rules/logical/"];
+    logical_expression_simplification [label="expression-simplification\n(10)", URL="./rules/logical/"];
+    logical_function_optimization [label="function-optimization\n(58)", URL="./rules/logical/"];
+    logical_join_elimination [label="join-elimination\n(19)", URL="./rules/logical/"];
+    logical_join_reordering [label="join-reordering\n(9)", URL="./rules/logical/"];
+    logical_limit_pushdown [label="limit-pushdown\n(12)", URL="./rules/logical/"];
+    logical_predicate_pushdown [label="predicate-pushdown\n(17)", URL="./rules/logical/"];
+    logical_projection_pushdown [label="projection-pushdown\n(7)", URL="./rules/logical/"];
+    logical_semantic_rewriting [label="semantic-rewriting\n(8)", URL="./rules/logical/"];
+    logical_set_operations [label="set-operations\n(10)", URL="./rules/logical/"];
+    logical_sideways_information_passing [label="sideways-information-passing\n(3)", URL="./rules/logical/"];
+    logical_subquery_unnesting [label="subquery-unnesting\n(17)", URL="./rules/logical/"];
+    logical_timeseries [label="timeseries\n(1)", URL="./rules/logical/"];
+    logical_view_rewriting [label="view-rewriting\n(2)", URL="./rules/logical/"];
+    logical_window_pushdown [label="window-pushdown\n(4)", URL="./rules/logical/"];
   }
 
   subgraph cluster_multi_model {
     label="multi-model (30 rules)";
-    style=filled;
+    style="filled,rounded";
     fillcolor="honeydew";
+    color="#88bb88";
+    fontname="Helvetica,Arial,sans-serif";
+    fontsize=13;
     node [fillcolor=white];
-    multi_model_document [label="document\n(10)"];
-    multi_model_graph [label="graph\n(10)"];
-    multi_model_timeseries [label="timeseries\n(10)"];
+    multi_model_document [label="document\n(10)", URL="./rules/multi-model/"];
+    multi_model_graph [label="graph\n(10)", URL="./rules/multi-model/"];
+    multi_model_timeseries [label="timeseries\n(10)", URL="./rules/multi-model/"];
   }
 
   subgraph cluster_physical {
     label="physical (109 rules)";
-    style=filled;
+    style="filled,rounded";
     fillcolor="lightgreen";
+    color="#66aa66";
+    fontname="Helvetica,Arial,sans-serif";
+    fontsize=13;
     node [fillcolor=white];
-    physical_SUBCATEGORY [label="SUBCATEGORY\n(1)"];
-    physical_access_path_selection [label="access-path-selection\n(4)"];
-    physical_aggregation_strategies [label="aggregation-strategies\n(16)"];
-    physical_index_selection [label="index-selection\n(36)"];
-    physical_join_algorithms [label="join-algorithms\n(18)"];
-    physical_materialization [label="materialization\n(13)"];
-    physical_optimizer_framework [label="optimizer-framework\n(5)"];
-    physical_parallelization [label="parallelization\n(16)"];
+    physical_access_path_selection [label="access-path-selection\n(4)", URL="./rules/physical/"];
+    physical_aggregation_strategies [label="aggregation-strategies\n(16)", URL="./rules/physical/"];
+    physical_index_selection [label="index-selection\n(36)", URL="./rules/physical/"];
+    physical_join_algorithms [label="join-algorithms\n(18)", URL="./rules/physical/"];
+    physical_materialization [label="materialization\n(13)", URL="./rules/physical/"];
+    physical_optimizer_framework [label="optimizer-framework\n(5)", URL="./rules/physical/"];
+    physical_parallelization [label="parallelization\n(16)", URL="./rules/physical/"];
   }
 
-  // logical -> physical [plan selection]
-  // physical -> distributed [distribution]
-  // physical -> hardware [hw-aware]
-  // cost_models -> physical [cost estimation]
-  // cost_models -> logical [cost-based rewrites]
-  // experimental -> logical [new rewrites]
-  // experimental -> physical [new operators]
-  // multi_model -> logical [model-specific rewrites]
+  // Dependency edges between categories
+  logical_join_reordering -> physical_join_algorithms [label="plan\nselection", style=dashed];
+  logical_predicate_pushdown -> physical_access_path_selection [label="plan\nselection", style=dashed];
+  physical_parallelization -> distributed_exchange_placement [label="distribution", style=dashed];
+  physical_join_algorithms -> distributed_distributed_joins [label="distribution", style=dashed];
+  physical_access_path_selection -> hardware_gpu [label="hw-aware", style=dashed];
+  physical_materialization -> hardware_data_placement [label="hw-aware", style=dashed];
+  cost_models_general -> physical_index_selection [label="cost\nestimation", style=dashed];
+  cost_models_system_r -> physical_join_algorithms [label="cost\nestimation", style=dashed];
+  cost_models_general -> logical_join_reordering [label="cost-based\nrewrites", style=dashed];
+  experimental_adaptive -> logical_predicate_pushdown [label="new\nrewrites", style=dashed];
+  experimental_wcoj -> physical_join_algorithms [label="new\noperators", style=dashed];
+  multi_model_document -> logical_expression_simplification [label="model-specific\nrewrites", style=dashed];
+  multi_model_graph -> logical_join_reordering [label="model-specific\nrewrites", style=dashed];
 }

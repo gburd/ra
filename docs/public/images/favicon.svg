@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="fbg" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0d9488"/>
+      <stop offset="100%" stop-color="#1a6fa0"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#fbg)"/>
+  <path d="
+    M 14 16
+    L 14 48
+    L 22 48
+    L 22 38
+    L 26 38
+    L 34 48
+    L 44 48
+    L 34 36
+    C 39 34 42 30 42 25
+    C 42 20 38 16 30 16
+    Z
+    M 22 22
+    L 29 22
+    C 33 22 35 24 35 27
+    C 35 30 33 32 29 32
+    L 22 32
+    Z
+  " fill="#ffffff"/>
+  <text x="46" y="47" font-family="system-ui,sans-serif" font-size="16" font-weight="600" fill="#5eead4">a</text>
+</svg>
