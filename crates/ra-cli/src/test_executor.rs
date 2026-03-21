@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 
-use ra_engine::{Optimizer, OptimizerConfig};
+use ra_engine::{Optimizer, OptimizerConfig, egraph::ParallelConfig};
 use ra_parser::{
     TestCase, TestExpectation, parse_rule_file, parse_test_block,
     sql_to_relexpr,
@@ -84,6 +84,10 @@ pub fn run_tests(
         node_limit: 5_000,
         iter_limit: 2,
         time_limit_secs: 1,
+        large_join_threshold: 10,
+        large_join_strategy: ra_engine::large_join::LargeJoinStrategy::Greedy,
+        max_optimization_time_ms: 1000,
+        parallel: ParallelConfig::default(),
     };
     let optimizer = Optimizer::with_config(test_config);
     let start = Instant::now();
@@ -389,6 +393,10 @@ mod tests {
             node_limit: 5_000,
             iter_limit: 2,
             time_limit_secs: 1,
+            large_join_threshold: 10,
+            large_join_strategy: ra_engine::large_join::LargeJoinStrategy::Greedy,
+            max_optimization_time_ms: 1000,
+            parallel: ParallelConfig::default(),
         })
     }
 

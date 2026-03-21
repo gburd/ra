@@ -205,6 +205,36 @@ fn operator_label(expr: &RelExpr) -> String {
         RelExpr::RowPattern { .. } => {
             "MatchRecognize".to_owned()
         }
+        RelExpr::IndexScan { table, column, .. } => {
+            format!("IndexScan({table}.{column})")
+        }
+        RelExpr::BitmapIndexScan { table, index, .. } => {
+            format!("BitmapIndexScan({table}.{index})")
+        }
+        RelExpr::BitmapAnd { inputs } => {
+            format!("BitmapAnd({} inputs)", inputs.len())
+        }
+        RelExpr::BitmapOr { inputs } => {
+            format!("BitmapOr({} inputs)", inputs.len())
+        }
+        RelExpr::BitmapHeapScan { table, .. } => {
+            format!("BitmapHeapScan({table})")
+        }
+        RelExpr::IndexOnlyScan { table, index, .. } => {
+            format!("IndexOnlyScan({table}.{index})")
+        }
+        RelExpr::ParallelScan { table, .. } => {
+            format!("ParallelScan({table})")
+        }
+        RelExpr::ParallelHashJoin { join_type, .. } => {
+            format!("Parallel{join_type}Join")
+        }
+        RelExpr::ParallelAggregate { .. } => {
+            "ParallelAggregate".to_owned()
+        }
+        RelExpr::Gather { .. } => {
+            "Gather".to_owned()
+        }
     }
 }
 
