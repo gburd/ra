@@ -1,0 +1,111 @@
+# Calcite FilterTableScanRule
+
+**Rule ID:** `calcite-filter-table-scan`
+**Category:** logical/predicate-pushdown
+**Supported Databases:** calcite, postgresql, mysql, oracle
+**Tags:** logical, calcite, filter, table-scan, pushdown, index
+
+## Description
+
+
+# Calcite FilterTableScanRule
+
+## Description
+
+Pushes a filter predicate into a table scan, enabling the storage
+engine to apply the filter during scanning. This allows index scans,
+partition pruning, and predicate pushdown to the storage layer.
+
+**When to apply**: A filter sits above a table scan of a
+FilterableTable or ProjectableFilterableTable.
+
+**Why it works**: The storage engine can use indexes, bloom filters,
+or other access methods to skip rows that don't match the predicate,
+avoiding full table scans.
+
+**Calcite class**: `org.apache.calcite.rel.rules.FilterTableScanRule`
+
+## Relational Algebra
+
+```algebra
+-- Before: filter above table scan
+sigma[p](Scan(T))
+
+-- After: filtered table scan
+FilteredScan(T, p)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-filter-table-scan";
+    "(filter ?pred (table-scan ?table))" =>
+    "(filtered-table-scan ?table ?pred)"
+    if table_is_filterable("?table")
+),
+```
+
+## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
+
+```rust
+fn applicable(
+    table: &Table,
+) -> bool {
+    table.is_filterable()
+        || table.is_projectable_filterable()
+}
+```
+
+**Restrictions:**
+- Table must implement FilterableTable interface
+- Complex predicates may be partially pushed (sargable portion)
+- Non-sargable predicates remain as a filter above the scan
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    table_rows: f64,
+    selectivity: f64,
+    has_index: bool,
+) -> f64 {
+    if has_index {
+        // Index scan vs full scan
+        (table_rows - table_rows * selectivity) / table_rows
+    } else {
+        // Still beneficial: skip rows at storage layer
+        0.3 * (1.0 - selectivity)
+    }
+}
+```
+
+**Typical benefit**: 30-95% when indexes are available.
+
+## Test Cases
+
+```sql
+-- Expected: equality predicate for index scan
+-- When filter-table-scan is implemented, this pushes into the scan.
+SELECT * FROM emp WHERE empno = 7369;
+```
+
+```sql
+-- Expected: range predicate for range scan
+-- BETWEEN translates to a range scan on order_date.
+SELECT * FROM orders WHERE order_date BETWEEN '2024-01-01' AND '2024-12-31';
+```
+
+```sql
+-- Expected: table function not filterable
+-- generate_series is not a filterable table, so the filter stays above.
+SELECT * FROM generate_series(1, 100) WHERE value > 50;
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/FilterTableScanRule.java (commit af6367d)

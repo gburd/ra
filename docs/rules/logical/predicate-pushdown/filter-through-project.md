@@ -1,0 +1,115 @@
+# Filter Pushdown Through Projection
+
+**Rule ID:** `filter-through-project`
+**Category:** logical/predicate-pushdown
+**Supported Databases:** postgresql, mysql, duckdb, sqlite, oracle, mssql
+**Tags:** filter, projection, pushdown, core
+
+## Description
+
+
+# Filter Pushdown Through Projection
+
+## Description
+
+Pushes a selection below a projection when the filter predicate only
+references columns that survive the projection. Since the projection does
+not alter row values (only removes columns), the filter produces the same
+result whether applied above or below.
+
+**When to apply**: A filter sits above a projection and the filter predicate
+only uses columns that the projection outputs.
+
+**Why it works**: Applying the filter earlier reduces the number of rows the
+projection must process, and allows subsequent rules to push the filter even
+further down.
+
+## Relational Algebra
+
+```algebra
+sigma[p](pi[A](R)) -> pi[A](sigma[p](R))
+  where attrs(p) subset A
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("filter-through-project";
+    "(filter ?pred (project ?cols ?input))" =>
+    "(project ?cols (filter ?pred ?input))"
+    if references_subset("?pred", "?cols")
+),
+```
+
+## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
+
+```rust
+fn applicable(pred: &Expr, projection_cols: &[Column]) -> bool {
+    // All columns referenced by the predicate must be in the
+    // projection list
+    pred.referenced_columns()
+        .is_subset(&projection_cols.iter().collect())
+}
+```
+
+**Restrictions:**
+- Filter predicate must only reference columns in the projection list
+- Projection must not contain computed expressions that the filter depends on
+  (e.g., `WHERE total > 100` cannot push through `SELECT a + b AS total`)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    input_card: f64,
+    selectivity: f64,
+    num_cols_before: usize,
+    num_cols_after: usize,
+) -> f64 {
+    // Projection cost scales with column count and row count.
+    // Filtering first reduces rows for the projection.
+    let col_ratio = num_cols_after as f64 / num_cols_before as f64;
+    let rows_saved = input_card * (1.0 - selectivity);
+    rows_saved * col_ratio / input_card
+}
+```
+
+**Typical benefit**: 0.1-0.8 depending on selectivity; main value is
+enabling further pushdown past subsequent operators.
+
+## Test Cases
+
+```sql
+-- Positive: filter references projected column
+-- Before
+SELECT name, age FROM employees WHERE age > 30;
+
+-- Plan before: project[name,age](filter[age>30](scan(employees)))
+-- Plan after:  project[name,age](filter[age>30](scan(employees)))
+-- (Same in SQL, but in plan form the filter moves below project)
+```
+
+```sql
+-- Expected: filter on non-projected column still pushable
+-- age is not in SELECT but is available from the base table,
+-- so the filter can be pushed below the projection.
+SELECT name FROM employees WHERE age > 30;
+```
+
+```sql
+-- Expected: computed column blocks pushdown
+-- "total" is computed by the projection so the filter cannot be
+-- pushed below it. The optimizer may still apply other transforms.
+SELECT a + b AS total FROM t WHERE total > 100;
+```
+
+## References
+
+PostgreSQL: src/backend/optimizer/path/allpaths.c
+DuckDB: src/optimizer/filter_pushdown.cpp - PushdownFilter()
+Ramakrishnan & Gehrke "Database Management Systems" Chapter 15

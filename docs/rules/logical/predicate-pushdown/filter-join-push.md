@@ -1,0 +1,131 @@
+# Calcite FilterJoinRule
+
+**Rule ID:** `calcite-filter-join`
+**Category:** logical/predicate-pushdown
+**Supported Databases:** calcite, postgresql, mysql, oracle
+**Tags:** logical, calcite, filter, join, pushdown, decomposition
+
+## Description
+
+
+# Calcite FilterJoinRule
+
+## Description
+
+Pushes filter predicates into or past a join. Conjuncts that reference
+only the left input are pushed to the left, those referencing only the
+right are pushed to the right, and equi-join conditions are pushed into
+the join condition itself.
+
+**When to apply**: A filter sits above a join and its predicates can
+be decomposed by which join input they reference.
+
+**Why it works**: Filtering before the join reduces the number of rows
+that participate in the join, potentially reducing the join cost from
+O(m*n) to O(m'*n') where m' << m and n' << n.
+
+**Calcite class**: `org.apache.calcite.rel.rules.FilterJoinRule`
+
+## Relational Algebra
+
+```algebra
+-- Before: filter above join
+sigma[L.a > 5 AND R.b = 10 AND L.k = R.k](L CROSS JOIN R)
+
+-- After: predicates pushed to appropriate locations
+(sigma[L.a > 5](L)) JOIN[L.k = R.k] (sigma[R.b = 10](R))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-filter-into-join";
+    "(filter (and ?left_pred (and ?right_pred ?join_pred))
+        (join ?type true ?left ?right))" =>
+    "(join ?type ?join_pred
+        (filter ?left_pred ?left)
+        (filter ?right_pred ?right))"
+    if pred_references_only_left("?left_pred", "?left")
+    if pred_references_only_right("?right_pred", "?left", "?right")
+    if is_equi_condition("?join_pred")
+),
+```
+
+## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
+
+```rust
+fn applicable(filter: &Filter, join: &Join) -> bool {
+    let conjuncts = filter.condition().split_conjuncts();
+    let left_count = join.left().row_type().field_count();
+
+    conjuncts.iter().any(|c| {
+        let refs = c.referenced_columns();
+        refs.iter().all(|&r| r < left_count)
+            || refs.iter().all(|&r| r >= left_count)
+    })
+}
+```
+
+**Restrictions:**
+- For outer joins, only certain predicates can be pushed:
+  - LEFT JOIN: only left-side predicates to the left
+  - RIGHT JOIN: only right-side predicates to the right
+  - FULL JOIN: no predicates can be pushed to inputs
+- Predicates referencing both sides go into join condition
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    left_rows: f64,
+    right_rows: f64,
+    left_selectivity: f64,
+    right_selectivity: f64,
+) -> f64 {
+    let before = left_rows * right_rows;
+    let after = (left_rows * left_selectivity)
+        * (right_rows * right_selectivity);
+    if before > 0.0 { (before - after) / before } else { 0.0 }
+}
+```
+
+**Typical benefit**: 20-80% reduction in join input sizes.
+
+## Test Cases
+
+```sql
+-- Positive: filter decomposition
+SELECT * FROM emp e, dept d
+WHERE e.deptno = d.deptno
+AND e.salary > 50000
+AND d.location = 'NYC';
+-- e.salary > 50000 pushed to emp
+-- d.location = 'NYC' pushed to dept
+-- e.deptno = d.deptno becomes join condition
+```
+
+```sql
+-- Positive: left join with pushable predicate
+SELECT * FROM emp e
+LEFT JOIN dept d ON e.deptno = d.deptno
+WHERE e.salary > 50000;
+-- e.salary pushed to left input (safe for LEFT JOIN)
+```
+
+```sql
+-- Expected: FULL JOIN blocks predicate pushdown to inputs
+-- Pushing e.salary > 50000 below a FULL JOIN changes semantics,
+-- but the optimizer may convert FULL JOIN to other join types.
+SELECT * FROM emp e
+FULL JOIN dept d ON e.deptno = d.deptno
+WHERE e.salary > 50000;
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/FilterJoinRule.java (commit af6367d)

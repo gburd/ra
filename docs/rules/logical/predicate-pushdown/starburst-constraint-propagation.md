@@ -1,0 +1,334 @@
+# "Starburst Constraint-Based Predicate Propagation"
+
+**Rule ID:** `starburst-constraint-propagation`
+**Category:** logical/predicate-pushdown
+**Supported Databases:** postgresql, mysql, mssql, oracle, db2
+**Tags:** constraint-propagation, predicate-derivation, transitive-closure, starburst, classic
+
+## Description
+
+
+# Starburst Constraint-Based Predicate Propagation
+
+## Description
+
+Derives new predicates from the combination of query predicates and schema
+constraints (CHECK, UNIQUE, functional dependencies). The Starburst optimizer
+computes the transitive closure of known facts to discover implied predicates
+that can enable further optimizations like index usage, partition pruning,
+or early filtering.
+
+Three propagation mechanisms:
+1. **Equijoin transitivity**: If A.x = B.y and B.y = 100, then A.x = 100.
+   The derived predicate A.x = 100 can be pushed to table A's scan, enabling
+   index usage.
+2. **Constraint implication**: If CHECK(R.status IN ('active','inactive'))
+   and the query has WHERE R.status != 'active', derive R.status = 'inactive'.
+3. **Functional dependency exploitation**: If A -> B (A determines B) and
+   we know A = 'x', we can derive B's value from the constraint.
+
+**When to apply**: Queries with equijoins where predicates on one table can
+benefit the other, or where CHECK/UNIQUE constraints imply additional
+predicates.
+
+**Why it works**: A predicate that exists on table B but not on table A forces
+the optimizer to scan all of A and then filter during the join. By deriving
+the equivalent predicate for A, the optimizer can filter A early (using an
+index if available), dramatically reducing the join input size.
+
+## Relational Algebra
+
+```algebra
+Equijoin Transitivity:
+  Given: sigma_{B.y = 100}(A join_{A.x = B.y} B)
+  Derive: sigma_{A.x = 100}(A) join_{A.x = B.y} sigma_{B.y = 100}(B)
+
+Range Propagation:
+  Given: sigma_{B.y > 100 AND B.y < 200}(A join_{A.x = B.y} B)
+  Derive: sigma_{A.x > 100 AND A.x < 200}(A) join sigma_{B.y > 100 AND B.y < 200}(B)
+
+Constraint Implication:
+  Given: CHECK(R.col IN (1,2,3)) and WHERE R.col != 1 AND R.col != 2
+  Derive: R.col = 3
+
+NOT NULL Propagation:
+  Given: A.x = B.y (equijoin) and A.x IS NOT NULL
+  Derive: B.y IS NOT NULL (on the joined result)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+use std::collections::HashMap;
+
+// Starburst constraint propagation rewrites
+
+rw!("transitive-equality";
+    "(filter (= ?col_b ?const)
+       (join inner (= ?col_a ?col_b) ?left ?right))" =>
+    "(filter (= ?col_b ?const)
+       (join inner (= ?col_a ?col_b)
+         (filter (= ?col_a ?const) ?left)
+         ?right))"
+    if columns_from_different_tables("?col_a", "?col_b")
+),
+
+rw!("transitive-range";
+    "(filter (> ?col_b ?const)
+       (join inner (= ?col_a ?col_b) ?left ?right))" =>
+    "(filter (> ?col_b ?const)
+       (join inner (= ?col_a ?col_b)
+         (filter (> ?col_a ?const) ?left)
+         ?right))"
+    if columns_from_different_tables("?col_a", "?col_b")
+),
+
+rw!("constraint-complement";
+    "(filter (and (neq ?col ?v1) (neq ?col ?v2)) ?input)" =>
+    "(filter (= ?col ?v3) ?input)"
+    if check_constraint_complement("?col", "?v1", "?v2", "?v3")
+),
+
+// Full implementation
+
+struct ConstraintPropagator {
+    constraints: ConstraintCatalog,
+}
+
+impl ConstraintPropagator {
+    fn propagate(
+        &self,
+        plan: &mut PlanNode,
+    ) {
+        // Step 1: Collect all equijoin columns
+        let equalities = self.collect_equalities(plan);
+
+        // Step 2: Collect all predicates
+        let predicates = self.collect_predicates(plan);
+
+        // Step 3: Compute transitive closure
+        let derived = self.transitive_closure(
+            &equalities, &predicates,
+        );
+
+        // Step 4: Add derived predicates where beneficial
+        for (table, pred) in &derived {
+            if self.is_beneficial(table, pred) {
+                self.inject_predicate(plan, table, pred);
+            }
+        }
+    }
+
+    fn transitive_closure(
+        &self,
+        equalities: &[(Column, Column)],
+        predicates: &[(Column, Predicate)],
+    ) -> Vec<(TableRef, Predicate)> {
+        let mut derived = Vec::new();
+
+        // Build equivalence classes from equijoin columns
+        let mut eq_classes: UnionFind<Column> = UnionFind::new();
+        for (col_a, col_b) in equalities {
+            eq_classes.union(col_a, col_b);
+        }
+
+        // For each predicate, derive equivalents for all
+        // columns in the same equivalence class
+        for (col, pred) in predicates {
+            let class = eq_classes.find(col);
+            for equiv_col in eq_classes.members(&class) {
+                if equiv_col.table() != col.table() {
+                    let new_pred = pred.substitute(
+                        col, equiv_col,
+                    );
+                    derived.push((
+                        equiv_col.table().clone(),
+                        new_pred,
+                    ));
+                }
+            }
+        }
+
+        // Constraint-based derivation
+        for (col, pred) in predicates {
+            if let Some(implied) = self.constraints
+                .implied_predicates(col, pred)
+            {
+                for ip in implied {
+                    derived.push((col.table().clone(), ip));
+                }
+            }
+        }
+
+        derived
+    }
+
+    fn is_beneficial(
+        &self,
+        table: &TableRef,
+        pred: &Predicate,
+    ) -> bool {
+        // Derived predicate is beneficial if:
+        // 1. An index exists that matches the predicate
+        // 2. The predicate is selective (< 10%)
+        // 3. It enables partition pruning
+        self.constraints.has_matching_index(table, pred)
+            || pred.estimated_selectivity() < 0.1
+            || self.constraints.enables_partition_pruning(table, pred)
+    }
+}
+```
+
+## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    hw: &HardwareProfile,
+) -> bool {
+    // Must have equijoins to propagate through
+    stats.has_equijoins
+        // Must have predicates to propagate
+        && stats.has_selective_predicates
+        // Constraint catalog available
+        && (stats.has_check_constraints
+            || stats.has_functional_dependencies
+            || stats.has_equijoins)
+}
+```
+
+**Restrictions:**
+- Equijoin transitivity assumes exact equality (not applicable to inequality joins)
+- CHECK constraints must be enforced for correct derivation
+- Derived predicates may be redundant (already applied elsewhere)
+- Must avoid deriving contradictory predicates from stale constraints
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    // Benefit comes from enabling earlier filtering
+
+    // Without propagation: filter on one side, full scan on other
+    let full_scan_cost = stats.unfiltered_table_rows as f64 * 0.000001;
+    let join_cost = stats.unfiltered_table_rows as f64
+        * stats.filtered_table_rows as f64 * 0.0000001;
+
+    // With propagation: filter on both sides
+    let filtered_rows = stats.unfiltered_table_rows as f64
+        * stats.derived_predicate_selectivity;
+    let filtered_join_cost = filtered_rows
+        * stats.filtered_table_rows as f64 * 0.0000001;
+
+    let original = full_scan_cost + join_cost;
+    let optimized = filtered_rows * 0.000001 + filtered_join_cost;
+
+    if original > optimized {
+        (original - optimized) / original
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 20% to 5x when derived predicates enable index usage.
+
+## Test Cases
+
+### Positive: Equijoin transitivity enables index scan
+
+```sql
+-- Expected: transitive predicate derived from equijoin
+-- s.code = 'PENDING' and o.status_code = s.code implies
+-- o.status_code = 'PENDING', enabling index scan on orders.
+SELECT *
+FROM orders o
+JOIN order_status s ON o.status_code = s.code
+WHERE s.code = 'PENDING';
+```
+
+### Positive: Range propagation through equijoin
+
+```sql
+-- Index on employees.hire_date
+SELECT *
+FROM employees e
+JOIN departments d ON e.dept_id = d.id
+JOIN dept_start_dates sd ON d.id = sd.dept_id
+WHERE sd.start_date > '2020-01-01';
+
+-- If d.id = sd.dept_id is an equijoin:
+-- Derive: d.id corresponds to recent departments
+-- If dept_id determines start_date: push filter to departments
+```
+
+### Positive: CHECK constraint complement
+
+```sql
+-- CHECK(status IN ('draft', 'published', 'archived'))
+SELECT * FROM documents
+WHERE status != 'draft' AND status != 'published';
+
+-- Constraint propagation derives: status = 'archived'
+-- More selective, may enable index usage
+-- Before: two inequality checks (each ~67% selective)
+-- After: one equality check (~33% selective)
+```
+
+### Positive: Partition pruning via transitivity
+
+```sql
+-- orders partitioned by year
+-- order_items.order_id REFERENCES orders(id)
+SELECT * FROM orders o
+JOIN order_items oi ON o.id = oi.order_id
+WHERE oi.order_year = 2024;
+
+-- Derive: o.year = 2024 (via equijoin and partition key)
+-- Enables partition pruning: only scan 2024 partition of orders
+```
+
+### Negative: Inequality join prevents propagation
+
+```sql
+-- Theta join: cannot propagate equality predicates
+SELECT * FROM events e1
+JOIN events e2 ON e1.end_time < e2.start_time
+WHERE e2.location = 'NYC';
+
+-- Cannot derive e1.location = 'NYC' (no equality relationship)
+```
+
+## References
+
+**Original paper:**
+- Pirahesh, H., Hellerstein, J.M., Hasan, W., "Extensible/Rule Based Query Rewrite Optimization in Starburst", ACM SIGMOD 1992
+  - DOI: 10.1145/130283.130294
+  - Section 4.3: "Predicate transitive closure"
+  - Section 4.4: "Constraint-based optimization"
+
+**Foundational work:**
+- Chakravarthy, U.S., Grant, J., Minker, J., "Logic-Based Approach to Semantic Query Optimization", ACM TODS 1990
+  - DOI: 10.1145/78922.78924
+  - Formal framework for constraint-based predicate derivation
+
+- King, J.J., "QUIST: A System for Semantic Query Optimization in Relational Databases", VLDB 1981
+  - Early constraint propagation system
+
+**Modern implementations:**
+- Galindo-Legaria, C., Joshi, M., "Orthogonal Optimization of Subqueries and Aggregation", ACM SIGMOD 2001
+  - DOI: 10.1145/375663.375746
+  - Constraint propagation in mssql
+
+**Implementation in databases:**
+- PostgreSQL: `src/backend/optimizer/util/predtest.c` - predicate implication
+- PostgreSQL: `src/backend/optimizer/path/equivclass.c` - equivalence classes
+- Oracle: Transitive closure of join predicates
+- mssql: Predicate derivation from constraints
