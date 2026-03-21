@@ -1,71 +1,128 @@
-# RA RFC Process
+# RA Optimizer RFC Process
+
+This document describes the Request for Comments (RFC) process for proposing and implementing major features in the RA optimizer project.
 
 ## When to Write an RFC
 
-An RFC (Request for Comments) is required for:
+Write an RFC for:
+- **Major features** - New optimizer rules, execution strategies, or subsystems
+- **Breaking changes** - API changes, configuration format changes, removal of features
+- **Architecture decisions** - New dependencies, significant refactoring, system boundaries
+- **Performance trade-offs** - Changes that significantly impact memory usage or query optimization time
+- **Integration points** - New database dialect support, external system integrations
 
-- **Major features** estimated at >1000 lines of code
-- **Breaking changes** to public APIs, rule format, or configuration
-- **Architectural changes** affecting multiple crates or system boundaries
-- **New crates** added to the workspace
-- **New external dependencies** that affect build or runtime
-
-An RFC is *not* required for:
-
-- Bug fixes
-- Small features or enhancements contained within a single crate
+Skip the RFC for:
+- Bug fixes (unless they require architectural changes)
 - Documentation improvements
-- Performance optimizations that don't change APIs
-- Adding new optimization rules within existing categories
+- Performance optimizations that don't change interfaces
+- Adding tests or examples
+- Minor refactoring
 
 ## RFC Lifecycle
 
 ```
-Draft --> Discussion --> Decision --> Implementation --> Archive
+Draft → Discussion → Decision → Implementation → Archive
 ```
 
-1. **Draft**: Author writes the RFC using `TEMPLATE.md` and opens a PR
-   adding `rfcs/NNNN-short-name.md`. The status field is `Draft`.
+### 1. Draft
+- Fork the repository and create a new branch
+- Copy `TEMPLATE.md` to `text/NNNN-feature-name.md` (use next sequential number)
+- Fill out the template completely
+- Submit a pull request with `[RFC]` prefix in the title
 
-2. **Discussion**: Reviewers comment on the PR. The author revises
-   the RFC based on feedback. Significant alternatives should be
-   captured in the "Rationale and alternatives" section.
+### 2. Discussion
+- Community reviews and provides feedback via PR comments
+- Author iterates on the design based on feedback
+- Minimum discussion period: 7 days for standard RFCs, 14 days for breaking changes
 
-3. **Decision**: A maintainer approves or rejects the RFC.
-   - **Accepted**: Status changes to `Accepted`. The PR is merged.
-   - **Rejected**: Status changes to `Rejected`. The file moves to
-     `rfcs/_rejected/` and the PR is merged for historical record.
+### 3. Decision
+- Maintainers make final decision: Accept, Reject, or Request Changes
+- Accepted RFCs get Status changed to "Accepted" and merged to main
+- Rejected RFCs are moved to `_rejected/` with explanation
 
-4. **Implementation**: Work begins. The RFC status changes to
-   `Underway` while implementation is in progress, then to
-   `Implemented` once complete. Tracking issues or PRs are linked
-   in the RFC header.
+### 4. Implementation
+- Create tracking issue referencing the RFC
+- Implement the feature following the approved design
+- Update RFC status to "Implemented" when complete
 
-5. **Archive**: Completed RFCs are moved to `rfcs/_accepted/YYYY-MM/`
-   after a settling period following implementation.
+### 5. Archive
+- Implemented RFCs move to `_accepted/YYYY-MM/commit-NNNN-name.md`
+- Include the implementation commit SHA in the filename
+- Original RFC remains for historical reference
 
-## Numbering
+## RFC Numbering
 
-RFCs are numbered sequentially starting from 0001. The number is
-assigned when the draft PR is opened. Numbers are never reused,
-even for rejected RFCs.
+- Sequential numbering starting from 0001
+- No gaps in numbering (even for rejected RFCs)
+- Format: `NNNN-descriptive-name.md`
+- Leading zeros for consistent sorting
 
-File names follow the pattern: `NNNN-short-kebab-case-name.md`
+## How to Propose an RFC
 
-## Retroactive RFCs
+1. **Check existing RFCs** - Ensure your idea isn't already proposed or rejected
+2. **Discuss informally** - Open an issue for initial feedback before writing the full RFC
+3. **Write the RFC** - Use the template, be thorough but concise
+4. **Submit PR** - Title: `[RFC] NNNN: Feature Name`
+5. **Engage in discussion** - Respond to feedback, iterate on the design
+6. **Implementation** - Once accepted, implement following the approved design
 
-Features that were implemented before the RFC process was established
-may have retroactive RFCs written to document design decisions. These
-are marked with `Type: Retroactive` in their header and tend to be
-shorter since the implementation already exists.
+## How to Review RFCs
 
-## Status Values
+When reviewing an RFC, consider:
 
-| Status | Meaning |
-|--------|---------|
-| Draft | Under initial authoring |
-| Under Review | Open for discussion |
-| Accepted | Approved, not yet started |
-| Underway | Implementation in progress |
-| Implemented | Feature is complete and merged |
-| Rejected | Proposal was declined |
+- **Motivation** - Is the problem clearly stated? Is it worth solving?
+- **Design** - Is the solution well-thought-out? Are edge cases considered?
+- **Alternatives** - Have other approaches been fairly evaluated?
+- **Complexity** - Is the complexity justified by the benefits?
+- **Compatibility** - How does this affect existing users and systems?
+- **Implementation** - Is the implementation plan realistic?
+
+Provide constructive feedback focusing on:
+- Technical merit over style preferences
+- Specific concerns with examples
+- Suggestions for improvement
+- Recognition of good ideas
+
+## Template Usage
+
+The `TEMPLATE.md` file provides the standard structure for all RFCs. Every section should be addressed, even if briefly. Key sections:
+
+- **Summary** - One paragraph overview for quick understanding
+- **Motivation** - The "why" behind the proposal
+- **Guide-level explanation** - How users will interact with the feature
+- **Reference-level explanation** - Technical implementation details
+- **Drawbacks** - Honest assessment of downsides
+- **Rationale and alternatives** - Why this approach over others
+- **Prior art** - Learning from other systems
+- **Unresolved questions** - What still needs to be figured out
+- **Future possibilities** - Natural extensions (but not in initial scope)
+
+## Special RFC Categories
+
+### Retroactive RFCs
+For features already implemented before the RFC process was established. These document the rationale and design of existing features for historical context.
+
+### Security RFCs
+RFCs with security implications should be marked `[SECURITY]` and require additional review from security-focused contributors.
+
+### Performance RFCs
+RFCs focused on performance improvements should include:
+- Benchmark methodology
+- Expected improvements with specific metrics
+- Trade-offs in terms of memory, CPU, and complexity
+
+## RFC Status Definitions
+
+- **Draft** - Initial proposal, under active development
+- **Under Review** - Ready for community feedback
+- **Accepted** - Approved for implementation
+- **Rejected** - Not accepted (with documented reasons)
+- **Implemented** - Feature is complete and merged
+- **Withdrawn** - Author chose to withdraw the proposal
+
+## References
+
+This process is inspired by:
+- [Rust RFC Process](https://github.com/rust-lang/rfcs)
+- [React RFC Process](https://github.com/reactjs/rfcs)
+- [Ember RFC Process](https://github.com/emberjs/rfcs)
