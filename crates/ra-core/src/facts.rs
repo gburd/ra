@@ -24,6 +24,8 @@
 
 use std::time::Duration;
 
+use serde::{Deserialize, Serialize};
+
 /// Statistics for a single table
 #[derive(Debug, Clone)]
 pub struct TableStats {
@@ -105,7 +107,7 @@ impl std::fmt::Display for DataType {
 }
 
 /// Type of index
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IndexType {
     /// B-tree index
     BTree,
@@ -121,6 +123,8 @@ pub enum IndexType {
     Brin,
     /// Bitmap index
     Bitmap,
+    /// Unknown or unsupported index type
+    Unknown,
 }
 
 /// Table schema information

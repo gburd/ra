@@ -1,0 +1,18 @@
+# Cargo configuration for the RA project
+
+[alias]
+# Build tasks via xtask
+# Usage: cargo xtask <task>
+xtask = "run --package xtask --release --"
+
+# Build and serve documentation locally
+# Usage: cargo docs
+docs = "run --package xtask --release -- docs --serve"
+
+# Just build documentation without serving
+# Usage: cargo docs-build
+docs-build = "run --package xtask --release -- docs"
+
+# Run all workspace tests with nextest if available, otherwise use cargo test
+# Usage: cargo test-all
+test-all = "test --workspace --all-features"

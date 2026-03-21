@@ -19,6 +19,8 @@ pub struct Statistics {
     pub total_size: u64,
     /// Per-column statistics, keyed by column name.
     pub columns: HashMap<String, ColumnStats>,
+    /// Available indexes, keyed by index name.
+    pub indexes: HashMap<String, IndexStats>,
 }
 
 impl Statistics {
@@ -30,6 +32,7 @@ impl Statistics {
             avg_row_size: 0,
             total_size: 0,
             columns: HashMap::new(),
+            indexes: HashMap::new(),
         }
     }
 
@@ -58,6 +61,17 @@ pub struct ColumnStats {
     pub avg_length: Option<f64>,
     /// Optional histogram for value distribution.
     pub histogram: Option<Histogram>,
+    /// Statistical correlation between physical row ordering and
+    /// logical ordering of this column's values. Range: [-1.0, 1.0].
+    /// -1.0 = perfect reverse correlation, 0.0 = no correlation,
+    /// +1.0 = perfect correlation. Used for index scan cost estimation.
+    pub correlation: Option<f64>,
+    /// Most common values (MCVs) in this column, as string representations.
+    /// Paired with `most_common_freqs` - each MCV has a corresponding frequency.
+    pub most_common_values: Option<Vec<String>>,
+    /// Frequencies for each most common value, in [0.0, 1.0].
+    /// Paired with `most_common_values` - must have same length.
+    pub most_common_freqs: Option<Vec<f64>>,
 }
 
 impl ColumnStats {
@@ -71,6 +85,9 @@ impl ColumnStats {
             max_value: None,
             avg_length: None,
             histogram: None,
+            correlation: None,
+            most_common_values: None,
+            most_common_freqs: None,
         }
     }
 
@@ -123,6 +140,39 @@ pub struct HistogramBucket {
     pub row_count: f64,
     /// The number of distinct values in this bucket.
     pub distinct_count: f64,
+}
+
+/// Statistics for a database index.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IndexStats {
+    /// Columns covered by this index, in order.
+    pub columns: Vec<String>,
+    /// Whether this is a unique index.
+    pub is_unique: bool,
+    /// Whether this is a primary key index.
+    pub is_primary: bool,
+    /// Index type (btree, hash, gin, gist, etc.).
+    /// Imported from facts::IndexType.
+    pub index_type: crate::facts::IndexType,
+    /// Number of index tuples (rows).
+    pub tuple_count: f64,
+    /// Size of the index in bytes.
+    pub index_size: u64,
+}
+
+impl IndexStats {
+    /// Create index statistics with the given columns.
+    #[must_use]
+    pub fn new(columns: Vec<String>, index_type: crate::facts::IndexType) -> Self {
+        Self {
+            columns,
+            is_unique: false,
+            is_primary: false,
+            index_type,
+            tuple_count: 0.0,
+            index_size: 0,
+        }
+    }
 }
 
 #[cfg(test)]

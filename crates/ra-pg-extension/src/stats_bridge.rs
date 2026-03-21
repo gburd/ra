@@ -19,10 +19,11 @@ pub fn gather_table_stats(
     let row_count = estimate_row_count(schema, table)?;
     let mut stats = Statistics::new(row_count);
 
-    // Query pg_stats for column statistics
-    // Note: Correlation, MCVs, and histogram_bounds available but not yet parsed
+    // Query pg_stats for column statistics including advanced stats
     let query = format!(
-        "SELECT attname, n_distinct, null_frac, avg_width \
+        "SELECT attname, n_distinct, null_frac, avg_width, \
+                correlation, most_common_vals, most_common_freqs, \
+                histogram_bounds \
          FROM pg_stats \
          WHERE schemaname = '{}' AND tablename = '{}'",
         schema.replace('\'', "''"),
@@ -52,6 +53,18 @@ pub fn gather_table_stats(
             let avg_width: Option<i32> =
                 row.get_by_name("avg_width")
                     .unwrap_or(None);
+            let correlation: Option<f32> =
+                row.get_by_name("correlation")
+                    .unwrap_or(None);
+            let most_common_vals: Option<String> =
+                row.get_by_name("most_common_vals")
+                    .unwrap_or(None);
+            let most_common_freqs: Option<String> =
+                row.get_by_name("most_common_freqs")
+                    .unwrap_or(None);
+            let histogram_bounds: Option<String> =
+                row.get_by_name("histogram_bounds")
+                    .unwrap_or(None);
 
             if let Some(col_name) = attname {
                 let distinct = interpret_n_distinct(
@@ -64,8 +77,30 @@ pub fn gather_table_stats(
                 col_stats.avg_length =
                     avg_width.map(|w| f64::from(w));
 
-                // TODO: Parse correlation, most_common_vals, most_common_freqs,
-                // histogram_bounds - these require extending ColumnStats first
+                // Parse correlation
+                col_stats.correlation = correlation.map(f64::from);
+
+                // Parse most common values and frequencies
+                if let (Some(mcv_str), Some(mcf_str)) = (most_common_vals, most_common_freqs) {
+                    if let (Some(mcvs), Some(mcfs)) = (
+                        parse_pg_array(&mcv_str),
+                        parse_float_array(&mcf_str),
+                    ) {
+                        col_stats.most_common_values = Some(mcvs);
+                        col_stats.most_common_freqs = Some(mcfs);
+                    }
+                }
+
+                // Parse histogram bounds
+                if let Some(hist_str) = histogram_bounds {
+                    if let Some(bounds) = parse_pg_array(&hist_str) {
+                        col_stats.histogram = Some(create_equidepth_histogram(
+                            bounds,
+                            row_count,
+                            distinct,
+                        ));
+                    }
+                }
 
                 stats.columns.insert(col_name, col_stats);
             }
@@ -127,15 +162,20 @@ fn estimate_row_count(
 fn gather_index_stats(
     schema: &str,
     table: &str,
-    _stats: &mut Statistics,
+    stats: &mut Statistics,
 ) {
+    // Query pg_indexes and pg_index for index metadata
     let query = format!(
         "SELECT i.indexname, i.indexdef, \
                 ix.indisunique, ix.indisprimary, \
-                ix.indnatts \
+                ix.indnatts, \
+                am.amname AS index_type, \
+                COALESCE(pg_stat_get_numscans(c.oid), 0) AS num_scans, \
+                COALESCE(pg_relation_size(c.oid), 0) AS index_size \
          FROM pg_indexes i \
          JOIN pg_class c ON c.relname = i.indexname \
          JOIN pg_index ix ON ix.indexrelid = c.oid \
+         JOIN pg_am am ON am.oid = c.relam \
          WHERE i.schemaname = '{}' AND i.tablename = '{}' \
          ORDER BY i.indexname",
         schema.replace('\'', "''"),
@@ -143,7 +183,7 @@ fn gather_index_stats(
     );
 
     Spi::connect(|client| {
-        let _tup_table = match client.select(&query, None, &[]) {
+        let tup_table = match client.select(&query, None, &[]) {
             Ok(tup) => tup,
             Err(e) => {
                 pgrx::warning!(
@@ -153,8 +193,44 @@ fn gather_index_stats(
             }
         };
 
-        // TODO: Parse index information and store in Statistics
-        // Need to extend ra_core::Statistics with index metadata
+        for row in tup_table {
+            let indexname: Option<String> =
+                row.get_by_name("indexname")
+                    .unwrap_or(None);
+            let indexdef: Option<String> =
+                row.get_by_name("indexdef")
+                    .unwrap_or(None);
+            let is_unique: Option<bool> =
+                row.get_by_name("indisunique")
+                    .unwrap_or(None);
+            let is_primary: Option<bool> =
+                row.get_by_name("indisprimary")
+                    .unwrap_or(None);
+            let index_type_str: Option<String> =
+                row.get_by_name("index_type")
+                    .unwrap_or(None);
+            let index_size: Option<i64> =
+                row.get_by_name("index_size")
+                    .unwrap_or(None);
+
+            if let (Some(idx_name), Some(idx_def)) = (indexname, indexdef) {
+                // Parse column names from index definition
+                let columns = parse_index_columns(&idx_def);
+
+                // Parse index type
+                let index_type = index_type_str
+                    .as_deref()
+                    .and_then(parse_index_type)
+                    .unwrap_or(ra_core::IndexType::Unknown);
+
+                let mut idx_stats = ra_core::IndexStats::new(columns, index_type);
+                idx_stats.is_unique = is_unique.unwrap_or(false);
+                idx_stats.is_primary = is_primary.unwrap_or(false);
+                idx_stats.index_size = index_size.unwrap_or(0) as u64;
+
+                stats.indexes.insert(idx_name, idx_stats);
+            }
+        }
     });
 }
 
@@ -171,6 +247,186 @@ fn interpret_n_distinct(n_distinct: f32, row_count: f64) -> f64 {
     } else {
         0.0
     }
+}
+
+/// Parse a PostgreSQL array string like `{value1,value2,value3}`.
+///
+/// PostgreSQL arrays are formatted as text with curly braces. This
+/// parser handles basic arrays without nested structures or complex
+/// escaping. Returns `None` if parsing fails.
+fn parse_pg_array(array_str: &str) -> Option<Vec<String>> {
+    let trimmed = array_str.trim();
+    if !trimmed.starts_with('{') || !trimmed.ends_with('}') {
+        return None;
+    }
+
+    let content = &trimmed[1..trimmed.len() - 1];
+    if content.is_empty() {
+        return Some(Vec::new());
+    }
+
+    // Split by commas, handling quoted values
+    let mut values = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+    let mut escaped = false;
+
+    for ch in content.chars() {
+        if escaped {
+            current.push(ch);
+            escaped = false;
+        } else if ch == '\\' {
+            escaped = true;
+        } else if ch == '"' {
+            in_quotes = !in_quotes;
+        } else if ch == ',' && !in_quotes {
+            values.push(current.trim().to_string());
+            current.clear();
+        } else {
+            current.push(ch);
+        }
+    }
+
+    if !current.is_empty() {
+        values.push(current.trim().to_string());
+    }
+
+    Some(values)
+}
+
+/// Parse a PostgreSQL float array like `{0.1,0.2,0.3}`.
+///
+/// Returns `None` if parsing fails.
+fn parse_float_array(array_str: &str) -> Option<Vec<f64>> {
+    let strings = parse_pg_array(array_str)?;
+    let mut floats = Vec::with_capacity(strings.len());
+
+    for s in strings {
+        match s.parse::<f64>() {
+            Ok(f) => floats.push(f),
+            Err(_) => return None,
+        }
+    }
+
+    Some(floats)
+}
+
+/// Parse column names from a PostgreSQL index definition.
+///
+/// Extracts column names from CREATE INDEX DDL like:
+/// "CREATE INDEX idx_name ON table_name USING btree (col1, col2)"
+///
+/// Returns empty vector if parsing fails.
+fn parse_index_columns(index_def: &str) -> Vec<String> {
+    // Find the opening parenthesis after "ON table_name"
+    let start = match index_def.find('(') {
+        Some(pos) => pos + 1,
+        None => return Vec::new(),
+    };
+
+    // Find the matching closing parenthesis by counting
+    let mut depth = 0;
+    let mut end = None;
+    for (i, ch) in index_def[start..].chars().enumerate() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                if depth == 0 {
+                    end = Some(start + i);
+                    break;
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+    }
+
+    let end = match end {
+        Some(pos) => pos,
+        None => return Vec::new(),
+    };
+
+    // Extract column list
+    let col_list = &index_def[start..end];
+
+    // Split by commas and clean up
+    col_list
+        .split(',')
+        .map(|s| {
+            // Remove function calls like "lower(name)" → "name"
+            let trimmed = s.trim();
+            if let Some(paren_pos) = trimmed.find('(') {
+                // Extract the argument from a function call
+                if let Some(func_end) = trimmed.find(')') {
+                    trimmed[paren_pos + 1..func_end].trim().to_string()
+                } else {
+                    trimmed.to_string()
+                }
+            } else {
+                trimmed.to_string()
+            }
+        })
+        .collect()
+}
+
+/// Parse PostgreSQL index type name to IndexType enum.
+fn parse_index_type(type_name: &str) -> Option<ra_core::IndexType> {
+    match type_name.to_lowercase().as_str() {
+        "btree" => Some(ra_core::IndexType::BTree),
+        "hash" => Some(ra_core::IndexType::Hash),
+        "gin" => Some(ra_core::IndexType::Gin),
+        "gist" => Some(ra_core::IndexType::Gist),
+        "spgist" => Some(ra_core::IndexType::SpGist),
+        "brin" => Some(ra_core::IndexType::Brin),
+        _ => Some(ra_core::IndexType::Unknown),
+    }
+}
+
+/// Create an equi-depth histogram from PostgreSQL histogram bounds.
+///
+/// PostgreSQL stores histogram_bounds as an array of boundary values
+/// for equal-frequency buckets. We convert this to Ra's EquiDepthHistogram
+/// format.
+fn create_equidepth_histogram(
+    bounds: Vec<String>,
+    row_count: f64,
+    distinct_count: f64,
+) -> ra_core::Histogram {
+    use ra_core::{EquiDepthHistogram, Histogram, HistogramBucket};
+
+    if bounds.is_empty() {
+        // Empty histogram
+        return Histogram::EquiDepth(EquiDepthHistogram {
+            buckets: Vec::new(),
+            rows_per_bucket: 0.0,
+        });
+    }
+
+    // PostgreSQL histogram_bounds has n+1 values for n buckets
+    let num_buckets = bounds.len().saturating_sub(1);
+    if num_buckets == 0 {
+        return Histogram::EquiDepth(EquiDepthHistogram {
+            buckets: Vec::new(),
+            rows_per_bucket: 0.0,
+        });
+    }
+
+    let rows_per_bucket = row_count / num_buckets as f64;
+    let distinct_per_bucket = distinct_count / num_buckets as f64;
+
+    let mut buckets = Vec::with_capacity(num_buckets);
+    for i in 1..bounds.len() {
+        buckets.push(HistogramBucket {
+            upper_bound: bounds[i].clone(),
+            row_count: rows_per_bucket,
+            distinct_count: distinct_per_bucket,
+        });
+    }
+
+    Histogram::EquiDepth(EquiDepthHistogram {
+        buckets,
+        rows_per_bucket,
+    })
 }
 
 /// Gather statistics for all tables referenced in a query.
@@ -322,5 +578,143 @@ mod tests {
     fn n_distinct_negative_small_table() {
         let ndv = interpret_n_distinct(-0.001, 0.5);
         assert!(ndv >= 1.0);
+    }
+
+    #[test]
+    fn parse_simple_array() {
+        let result = parse_pg_array("{a,b,c}");
+        assert_eq!(result, Some(vec!["a".to_string(), "b".to_string(), "c".to_string()]));
+    }
+
+    #[test]
+    fn parse_empty_array() {
+        let result = parse_pg_array("{}");
+        assert_eq!(result, Some(Vec::new()));
+    }
+
+    #[test]
+    fn parse_quoted_array() {
+        let result = parse_pg_array(r#"{"hello world","test,value"}"#);
+        assert_eq!(result, Some(vec!["hello world".to_string(), "test,value".to_string()]));
+    }
+
+    #[test]
+    fn parse_invalid_array() {
+        let result = parse_pg_array("not an array");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn parse_simple_float_array() {
+        let result = parse_float_array("{0.1,0.2,0.3}");
+        assert_eq!(result, Some(vec![0.1, 0.2, 0.3]));
+    }
+
+    #[test]
+    fn parse_empty_float_array() {
+        let result = parse_float_array("{}");
+        assert_eq!(result, Some(Vec::new()));
+    }
+
+    #[test]
+    fn parse_invalid_float_array() {
+        let result = parse_float_array("{0.1,not_a_float,0.3}");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn histogram_from_bounds() {
+        let bounds = vec!["1".to_string(), "10".to_string(), "20".to_string(), "30".to_string()];
+        let hist = create_equidepth_histogram(bounds, 1000.0, 30.0);
+
+        match hist {
+            ra_core::Histogram::EquiDepth(h) => {
+                assert_eq!(h.buckets.len(), 3);
+                assert!((h.rows_per_bucket - 333.333).abs() < 1.0);
+                assert_eq!(h.buckets[0].upper_bound, "10");
+                assert_eq!(h.buckets[1].upper_bound, "20");
+                assert_eq!(h.buckets[2].upper_bound, "30");
+            }
+            _ => panic!("Expected EquiDepth histogram"),
+        }
+    }
+
+    #[test]
+    fn histogram_empty_bounds() {
+        let bounds = Vec::new();
+        let hist = create_equidepth_histogram(bounds, 1000.0, 30.0);
+
+        match hist {
+            ra_core::Histogram::EquiDepth(h) => {
+                assert_eq!(h.buckets.len(), 0);
+                assert!((h.rows_per_bucket - 0.0).abs() < f64::EPSILON);
+            }
+            _ => panic!("Expected EquiDepth histogram"),
+        }
+    }
+
+    #[test]
+    fn histogram_single_bound() {
+        let bounds = vec!["5".to_string()];
+        let hist = create_equidepth_histogram(bounds, 1000.0, 30.0);
+
+        match hist {
+            ra_core::Histogram::EquiDepth(h) => {
+                assert_eq!(h.buckets.len(), 0);
+            }
+            _ => panic!("Expected EquiDepth histogram"),
+        }
+    }
+
+    #[test]
+    fn parse_simple_index_def() {
+        let def = "CREATE INDEX idx_name ON table_name USING btree (col1, col2)";
+        let cols = parse_index_columns(def);
+        assert_eq!(cols, vec!["col1", "col2"]);
+    }
+
+    #[test]
+    fn parse_index_with_function() {
+        let def = "CREATE INDEX idx_name ON table_name USING btree (lower(name), age)";
+        let cols = parse_index_columns(def);
+        assert_eq!(cols, vec!["name", "age"]);
+    }
+
+    #[test]
+    fn parse_single_column_index() {
+        let def = "CREATE INDEX idx_name ON table_name USING btree (id)";
+        let cols = parse_index_columns(def);
+        assert_eq!(cols, vec!["id"]);
+    }
+
+    #[test]
+    fn parse_invalid_index_def() {
+        let def = "Not a valid index definition";
+        let cols = parse_index_columns(def);
+        assert!(cols.is_empty());
+    }
+
+    #[test]
+    fn parse_btree_index_type() {
+        let idx_type = parse_index_type("btree");
+        assert_eq!(idx_type, Some(ra_core::IndexType::BTree));
+    }
+
+    #[test]
+    fn parse_gin_index_type() {
+        let idx_type = parse_index_type("gin");
+        assert_eq!(idx_type, Some(ra_core::IndexType::Gin));
+    }
+
+    #[test]
+    fn parse_hash_index_type() {
+        let idx_type = parse_index_type("hash");
+        assert_eq!(idx_type, Some(ra_core::IndexType::Hash));
+    }
+
+    #[test]
+    fn parse_unknown_index_type() {
+        let idx_type = parse_index_type("custom_index");
+        assert_eq!(idx_type, Some(ra_core::IndexType::Unknown));
     }
 }
