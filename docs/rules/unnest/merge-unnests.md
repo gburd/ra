@@ -46,23 +46,23 @@ intermediate result.
 
 ```algebra
 -- Before: cross join of two unnests (O(n*m) intermediate rows)
-unnest(arr1) AS u1(a) CROSS JOIN unnest(arr2) AS u2(b)
+unnest(arr1) AS u1_alias (a) CROSS JOIN unnest(arr2) AS u2_alias (b)
   WHERE u1.ordinality = u2.ordinality
 
 -- After: single zip unnest (O(max(n,m)) rows)
-zip_unnest(arr1, arr2) AS t(a, b)
+zip_unnest(arr1, arr2) AS result (a, b)
 ```
 
 ### Lateral variant
 
 ```algebra
 -- Before: two lateral unnests from same input
-R join_lateral unnest(R.arr1) AS u1(a)
-  join_lateral unnest(R.arr2) AS u2(b)
+R join_lateral unnest(R.arr1) AS u1_alias (a)
+  join_lateral unnest(R.arr2) AS u2_alias (b)
   WHERE u1.ord = u2.ord
 
 -- After: single multi-column lateral unnest
-R join_lateral zip_unnest(R.arr1, R.arr2) AS t(a, b)
+R join_lateral zip_unnest(R.arr1, R.arr2) AS result (a, b)
 ```
 
 ## Implementation
@@ -154,13 +154,13 @@ N^2 - N intermediate rows from the cross product.
 ```sql
 -- Before
 SELECT u1.id, u2.name
-FROM unnest(array[1, 2, 3]) WITH ORDINALITY AS u1(id, ord1),
-     unnest(array['a', 'b', 'c']) WITH ORDINALITY AS u2(name, ord2)
+FROM unnest(ARRAY[1, 2, 3]) WITH ORDINALITY AS u1_alias (id, ord1),
+     unnest(ARRAY['a', 'b', 'c']) WITH ORDINALITY AS u2_alias (name, ord2)
 WHERE u1.ord1 = u2.ord2;
 
 -- After (PostgreSQL multi-arg UNNEST)
 SELECT id, name
-FROM unnest(array[1, 2, 3], array['a', 'b', 'c']) AS t(id, name);
+FROM unnest(ARRAY[1, 2, 3], ARRAY['a', 'b', 'c']) AS unnest_result (id, name);
 ```
 
 ### Positive: lateral parallel unnest from same row
@@ -169,14 +169,14 @@ FROM unnest(array[1, 2, 3], array['a', 'b', 'c']) AS t(id, name);
 -- Before
 SELECT p.name, u1.tag, u2.score
 FROM products p,
-  LATERAL unnest(p.tags) WITH ORDINALITY AS u1(tag, o1),
-  LATERAL unnest(p.scores) WITH ORDINALITY AS u2(score, o2)
+  LATERAL unnest(p.tags) WITH ORDINALITY AS u1_alias (tag, o1),
+  LATERAL unnest(p.scores) WITH ORDINALITY AS u2_alias (score, o2)
 WHERE u1.o1 = u2.o2;
 
 -- After
 SELECT p.name, t.tag, t.score
 FROM products p,
-  LATERAL unnest(p.tags, p.scores) AS t(tag, score);
+  LATERAL unnest(p.tags, p.scores) AS unnest_result (tag, score);
 ```
 
 ### Negative: arrays from different relations
@@ -184,23 +184,27 @@ FROM products p,
 ```sql
 -- Cannot merge: arrays come from different base tables
 SELECT u1.val, u2.val
-FROM table_a a, unnest(a.arr1) AS u1(val),
-     table_b b, unnest(b.arr2) AS u2(val);
+FROM table_a a, unnest(a.arr1) AS u1_alias (val),
+     table_b b, unnest(b.arr2) AS u2_alias (val);
 
 -- No common source, so zip semantics would be incorrect.
 ```
 
 ### Negative: join condition is not positional
 
+<div v-pre>
+
 ```sql
 -- Cannot merge: join is on value equality, not position
 SELECT u1.id, u2.name
-FROM unnest(array[1, 2, 3]) AS u1(id),
-     unnest(array['a', 'b', 'c']) AS u2(name)
+FROM unnest(ARRAY[1, 2, 3]) AS u1_alias (id),
+     unnest(ARRAY['a', 'b', 'c']) AS u2_alias (name)
 WHERE u1.id = length(u2.name);
 
 -- Arbitrary predicate, not positional alignment.
 ```
+
+</div>
 
 ## References
 

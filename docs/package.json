@@ -19,5 +19,9 @@
   "type": "module",
   "devDependencies": {
     "vitepress": "^1.6.4"
+  },
+  "dependencies": {
+    "@mdit/plugin-katex": "^0.25.1",
+    "katex": "^0.16.40"
   }
 }

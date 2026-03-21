@@ -1,12 +1,49 @@
-export default {
+import { defineConfig } from 'vitepress'
+import { katex } from '@mdit/plugin-katex'
+
+export default defineConfig({
   title: 'RA - Relational Algebra Optimizer',
   description: '1,327+ optimization rules for database query planning',
   base: '/ra/',  // Replace with your repo name for GitHub Pages
   ignoreDeadLinks: true,  // Temporarily ignore dead links during build
   head: [
     ['link', { rel: 'stylesheet', href: '/ra/static/css/ra-interactive.css' }],
-    ['script', { type: 'module', src: '/ra/static/js/ra-interactive.js' }]
+    ['script', { type: 'module', src: '/ra/static/js/ra-interactive.js' }],
+    [
+      'link',
+      {
+        rel: 'stylesheet',
+        href: 'https://cdn.jsdelivr.net/npm/katex@0.16.40/dist/katex.min.css',
+        integrity: 'sha384-vKruj+a13U8yHIkAyGgK1J3ArTLzrFGBbBc0tDp4ad/EyewESeXE/Iv67Aj8gKZ0',
+        crossorigin: 'anonymous'
+      }
+    ]
   ],
+  markdown: {
+    config: (md) => {
+      md.use(katex)
+
+      // Override fence renderer to prevent Vue template processing in code blocks
+      // This fixes Vue parser treating SQL patterns like "AS t(col)" as HTML tags
+      const defaultFence = md.renderer.rules.fence
+      md.renderer.rules.fence = (tokens, idx, options, env, self) => {
+        const token = tokens[idx]
+        const code = token.content
+        const lang = token.info.trim()
+
+        // Escape HTML and wrap in v-pre to disable Vue template compilation
+        const escapedCode = md.utils.escapeHtml(code)
+        return `<pre v-pre class="language-${lang}"><code>${escapedCode}</code></pre>\n`
+      }
+    }
+  },
+  vue: {
+    template: {
+      compilerOptions: {
+        isCustomElement: (tag) => ['t', 'r', 's', 'v', 'u', 'x', 'y', 'z', 'result', 'tbl', 'lateral', 'unnest_result'].includes(tag)
+      }
+    }
+  },
   themeConfig: {
     nav: [
       { text: 'Guide', link: '/GETTING_STARTED' },
@@ -126,4 +163,4 @@ export default {
       provider: 'local'
     }
   }
-}
+})
