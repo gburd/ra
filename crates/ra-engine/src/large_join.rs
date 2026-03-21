@@ -393,65 +393,689 @@ impl LargeJoinOptimizer {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use ra_core::expr::Expr;
+    use ra_core::cost::Cost;
+    use ra_core::expr::{Const, Expr};
+    use ra_core::statistics::Statistics;
+    use std::collections::HashMap;
+
+    #[derive(Debug)]
+    struct MockCostModel;
+
+    impl CostModel for MockCostModel {
+        fn estimate(
+            &self,
+            expr: &RelExpr,
+            _stats: &dyn StatisticsProvider,
+        ) -> Cost {
+            let tables =
+                LargeJoinOptimizer::count_tables(expr);
+            Cost::new(tables as f64 * 10.0, 0.0, 0.0, 0)
+        }
+    }
+
+    #[derive(Debug)]
+    struct MockStats {
+        stats: HashMap<String, Statistics>,
+    }
+
+    impl MockStats {
+        fn new(entries: &[(&str, f64)]) -> Self {
+            let mut stats = HashMap::new();
+            for &(name, rows) in entries {
+                stats.insert(
+                    name.to_string(),
+                    Statistics::new(rows),
+                );
+            }
+            Self { stats }
+        }
+    }
+
+    impl StatisticsProvider for MockStats {
+        fn get_statistics(
+            &self,
+            table: &str,
+        ) -> Option<&Statistics> {
+            self.stats.get(table)
+        }
+    }
+
+    fn make_optimizer(
+        strategy: LargeJoinStrategy,
+        table_rows: &[(&str, f64)],
+    ) -> LargeJoinOptimizer {
+        LargeJoinOptimizer::new(
+            strategy,
+            Arc::new(MockCostModel),
+            Arc::new(MockStats::new(table_rows)),
+        )
+    }
+
+    fn make_join_node(table: &str) -> JoinNode {
+        JoinNode {
+            table: table.to_string(),
+            alias: None,
+            condition: None,
+        }
+    }
+
+    fn true_expr() -> Expr {
+        Expr::Const(Const::Bool(true))
+    }
+
+    fn scan(table: &str) -> RelExpr {
+        RelExpr::Scan {
+            table: table.to_string(),
+            alias: None,
+        }
+    }
+
+    // ---- count_tables ----
 
     #[test]
-    fn test_count_tables() {
-        // Single table
-        let scan = RelExpr::Scan {
-            table: "users".to_string(),
-            alias: None,
-        };
-        assert_eq!(LargeJoinOptimizer::count_tables(&scan), 1);
-
-        // Join of two tables
-        let join = RelExpr::Join {
-            join_type: JoinType::Inner,
-            condition: Expr::Const(ra_core::expr::Const::Bool(true)),
-            left: Box::new(RelExpr::Scan {
-                table: "users".to_string(),
-                alias: None,
-            }),
-            right: Box::new(RelExpr::Scan {
-                table: "orders".to_string(),
-                alias: None,
-            }),
-        };
-        assert_eq!(LargeJoinOptimizer::count_tables(&join), 2);
-
-        // Complex query with filter and project
-        let complex = RelExpr::Project {
-            columns: vec![],
-            input: Box::new(RelExpr::Filter {
-                predicate: Expr::Const(ra_core::expr::Const::Bool(true)),
-                input: Box::new(join.clone()),
-            }),
-        };
-        assert_eq!(LargeJoinOptimizer::count_tables(&complex), 2);
+    fn count_tables_single_scan() {
+        assert_eq!(
+            LargeJoinOptimizer::count_tables(&scan("t")),
+            1,
+        );
     }
 
     #[test]
-    fn test_extract_joins() {
-        let join_expr = RelExpr::Join {
+    fn count_tables_two_table_join() {
+        let join = RelExpr::Join {
             join_type: JoinType::Inner,
-            condition: Expr::Const(ra_core::expr::Const::Bool(true)),
-            left: Box::new(RelExpr::Scan {
-                table: "users".to_string(),
-                alias: Some("u".to_string()),
+            condition: true_expr(),
+            left: Box::new(scan("a")),
+            right: Box::new(scan("b")),
+        };
+        assert_eq!(LargeJoinOptimizer::count_tables(&join), 2);
+    }
+
+    #[test]
+    fn count_tables_nested_join() {
+        let inner = RelExpr::Join {
+            join_type: JoinType::Inner,
+            condition: true_expr(),
+            left: Box::new(scan("a")),
+            right: Box::new(scan("b")),
+        };
+        let outer = RelExpr::Join {
+            join_type: JoinType::Inner,
+            condition: true_expr(),
+            left: Box::new(inner),
+            right: Box::new(scan("c")),
+        };
+        assert_eq!(
+            LargeJoinOptimizer::count_tables(&outer),
+            3,
+        );
+    }
+
+    #[test]
+    fn count_tables_through_filter_and_project() {
+        let join = RelExpr::Join {
+            join_type: JoinType::Inner,
+            condition: true_expr(),
+            left: Box::new(scan("a")),
+            right: Box::new(scan("b")),
+        };
+        let filtered = RelExpr::Filter {
+            predicate: true_expr(),
+            input: Box::new(join),
+        };
+        let projected = RelExpr::Project {
+            columns: vec![],
+            input: Box::new(filtered),
+        };
+        assert_eq!(
+            LargeJoinOptimizer::count_tables(&projected),
+            2,
+        );
+    }
+
+    #[test]
+    fn count_tables_aggregate() {
+        let agg = RelExpr::Aggregate {
+            group_by: vec![],
+            aggregates: vec![],
+            input: Box::new(scan("t")),
+        };
+        assert_eq!(LargeJoinOptimizer::count_tables(&agg), 1);
+    }
+
+    #[test]
+    fn count_tables_sort() {
+        let sorted = RelExpr::Sort {
+            keys: vec![],
+            input: Box::new(scan("t")),
+        };
+        assert_eq!(
+            LargeJoinOptimizer::count_tables(&sorted),
+            1,
+        );
+    }
+
+    #[test]
+    fn count_tables_limit() {
+        let limited = RelExpr::Limit {
+            count: 10,
+            offset: 0,
+            input: Box::new(scan("t")),
+        };
+        assert_eq!(
+            LargeJoinOptimizer::count_tables(&limited),
+            1,
+        );
+    }
+
+    #[test]
+    fn count_tables_union_takes_max() {
+        let u = RelExpr::Union {
+            left: Box::new(scan("a")),
+            right: Box::new(RelExpr::Join {
+                join_type: JoinType::Inner,
+                condition: true_expr(),
+                left: Box::new(scan("b")),
+                right: Box::new(scan("c")),
             }),
-            right: Box::new(RelExpr::Scan {
-                table: "orders".to_string(),
-                alias: Some("o".to_string()),
+            all: true,
+        };
+        assert_eq!(LargeJoinOptimizer::count_tables(&u), 2);
+    }
+
+    #[test]
+    fn count_tables_intersect_takes_max() {
+        let i = RelExpr::Intersect {
+            left: Box::new(scan("a")),
+            right: Box::new(scan("b")),
+            all: false,
+        };
+        assert_eq!(LargeJoinOptimizer::count_tables(&i), 1);
+    }
+
+    #[test]
+    fn count_tables_except_takes_max() {
+        let e = RelExpr::Except {
+            left: Box::new(scan("a")),
+            right: Box::new(scan("b")),
+            all: false,
+        };
+        assert_eq!(LargeJoinOptimizer::count_tables(&e), 1);
+    }
+
+    #[test]
+    fn count_tables_values_returns_zero() {
+        let v = RelExpr::Values { rows: vec![] };
+        assert_eq!(LargeJoinOptimizer::count_tables(&v), 0);
+    }
+
+    #[test]
+    fn count_tables_window() {
+        let w = RelExpr::Window {
+            functions: vec![],
+            input: Box::new(scan("t")),
+        };
+        assert_eq!(LargeJoinOptimizer::count_tables(&w), 1);
+    }
+
+    #[test]
+    fn count_tables_distinct() {
+        let d = RelExpr::Distinct {
+            input: Box::new(scan("t")),
+        };
+        assert_eq!(LargeJoinOptimizer::count_tables(&d), 1);
+    }
+
+    #[test]
+    fn count_tables_index_scan() {
+        let is = RelExpr::IndexScan {
+            table: "t".to_string(),
+            column: "id".to_string(),
+        };
+        assert_eq!(LargeJoinOptimizer::count_tables(&is), 1);
+    }
+
+    // ---- extract_joins ----
+
+    #[test]
+    fn extract_joins_single_scan() {
+        let joins =
+            LargeJoinOptimizer::extract_joins(&scan("t"));
+        assert_eq!(joins.len(), 1);
+        assert_eq!(joins[0].table, "t");
+        assert!(joins[0].alias.is_none());
+    }
+
+    #[test]
+    fn extract_joins_with_alias() {
+        let expr = RelExpr::Scan {
+            table: "users".to_string(),
+            alias: Some("u".to_string()),
+        };
+        let joins = LargeJoinOptimizer::extract_joins(&expr);
+        assert_eq!(joins.len(), 1);
+        assert_eq!(
+            joins[0].alias,
+            Some("u".to_string()),
+        );
+    }
+
+    #[test]
+    fn extract_joins_two_table_join() {
+        let join = RelExpr::Join {
+            join_type: JoinType::Inner,
+            condition: true_expr(),
+            left: Box::new(scan("a")),
+            right: Box::new(scan("b")),
+        };
+        let joins = LargeJoinOptimizer::extract_joins(&join);
+        assert_eq!(joins.len(), 2);
+        assert_eq!(joins[0].table, "a");
+        assert_eq!(joins[1].table, "b");
+    }
+
+    #[test]
+    fn extract_joins_through_filter() {
+        let filtered = RelExpr::Filter {
+            predicate: true_expr(),
+            input: Box::new(RelExpr::Join {
+                join_type: JoinType::Inner,
+                condition: true_expr(),
+                left: Box::new(scan("x")),
+                right: Box::new(scan("y")),
             }),
         };
-
-        let joins = LargeJoinOptimizer::extract_joins(&join_expr);
+        let joins =
+            LargeJoinOptimizer::extract_joins(&filtered);
         assert_eq!(joins.len(), 2);
-        assert_eq!(joins[0].table, "users");
-        assert_eq!(joins[0].alias, Some("u".to_string()));
-        assert_eq!(joins[1].table, "orders");
-        assert_eq!(joins[1].alias, Some("o".to_string()));
+    }
+
+    #[test]
+    fn extract_joins_three_way() {
+        let inner = RelExpr::Join {
+            join_type: JoinType::Inner,
+            condition: true_expr(),
+            left: Box::new(scan("a")),
+            right: Box::new(scan("b")),
+        };
+        let outer = RelExpr::Join {
+            join_type: JoinType::Inner,
+            condition: true_expr(),
+            left: Box::new(inner),
+            right: Box::new(scan("c")),
+        };
+        let joins =
+            LargeJoinOptimizer::extract_joins(&outer);
+        assert_eq!(joins.len(), 3);
+    }
+
+    #[test]
+    fn extract_joins_values_empty() {
+        let v = RelExpr::Values { rows: vec![] };
+        let joins = LargeJoinOptimizer::extract_joins(&v);
+        assert!(joins.is_empty());
+    }
+
+    // ---- JoinNode::to_scan ----
+
+    #[test]
+    fn join_node_to_scan_without_alias() {
+        let node = make_join_node("users");
+        let expr = node.to_scan();
+        match &expr {
+            RelExpr::Scan { table, alias } => {
+                assert_eq!(table, "users");
+                assert!(alias.is_none());
+            }
+            _ => panic!("Expected Scan"),
+        }
+    }
+
+    #[test]
+    fn join_node_to_scan_with_alias() {
+        let node = JoinNode {
+            table: "users".to_string(),
+            alias: Some("u".to_string()),
+            condition: None,
+        };
+        let expr = node.to_scan();
+        match &expr {
+            RelExpr::Scan { table, alias } => {
+                assert_eq!(table, "users");
+                assert_eq!(alias.as_deref(), Some("u"));
+            }
+            _ => panic!("Expected Scan"),
+        }
+    }
+
+    // ---- LargeJoinStrategy::default ----
+
+    #[test]
+    fn default_strategy_is_simulated_annealing() {
+        let strategy = LargeJoinStrategy::default();
+        match strategy {
+            LargeJoinStrategy::SimulatedAnnealing {
+                initial_temp,
+                cooling_rate,
+                max_iterations,
+            } => {
+                assert!(
+                    (initial_temp - 1000.0).abs()
+                        < f64::EPSILON,
+                );
+                assert!(
+                    (cooling_rate - 0.95).abs()
+                        < f64::EPSILON,
+                );
+                assert_eq!(max_iterations, 10000);
+            }
+            _ => panic!("Expected SimulatedAnnealing"),
+        }
+    }
+
+    // ---- Greedy optimization ----
+
+    #[test]
+    fn greedy_empty_joins_returns_error() {
+        let opt =
+            make_optimizer(LargeJoinStrategy::Greedy, &[]);
+        let result = opt.optimize(vec![]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn greedy_single_table_returns_scan() {
+        let opt = make_optimizer(
+            LargeJoinStrategy::Greedy,
+            &[("t", 100.0)],
+        );
+        let result =
+            opt.optimize(vec![make_join_node("t")]);
+        assert!(result.is_ok());
+        let expr = result.unwrap();
+        match &expr {
+            RelExpr::Scan { table, .. } => {
+                assert_eq!(table, "t");
+            }
+            _ => panic!("Expected Scan for single table"),
+        }
+    }
+
+    #[test]
+    fn greedy_two_tables_starts_with_smallest() {
+        let opt = make_optimizer(
+            LargeJoinStrategy::Greedy,
+            &[("big", 10000.0), ("small", 10.0)],
+        );
+        let joins = vec![
+            make_join_node("big"),
+            make_join_node("small"),
+        ];
+        let result = opt.optimize(joins).unwrap();
+        match &result {
+            RelExpr::Join { left, .. } => {
+                match left.as_ref() {
+                    RelExpr::Scan { table, .. } => {
+                        assert_eq!(table, "small");
+                    }
+                    _ => panic!(
+                        "Expected Scan as left child"
+                    ),
+                }
+            }
+            _ => panic!("Expected Join"),
+        }
+    }
+
+    #[test]
+    fn greedy_three_tables_produces_valid_plan() {
+        let opt = make_optimizer(
+            LargeJoinStrategy::Greedy,
+            &[
+                ("a", 100.0),
+                ("b", 200.0),
+                ("c", 50.0),
+            ],
+        );
+        let joins = vec![
+            make_join_node("a"),
+            make_join_node("b"),
+            make_join_node("c"),
+        ];
+        let result = opt.optimize(joins).unwrap();
+        assert_eq!(
+            LargeJoinOptimizer::count_tables(&result),
+            3,
+        );
+    }
+
+    #[test]
+    fn greedy_missing_stats_returns_error() {
+        let opt = make_optimizer(
+            LargeJoinStrategy::Greedy,
+            &[("a", 100.0)],
+        );
+        let joins = vec![
+            make_join_node("a"),
+            make_join_node("unknown"),
+        ];
+        let result = opt.optimize(joins);
+        assert!(result.is_err());
+    }
+
+    // ---- EGraph strategy ----
+
+    #[test]
+    fn egraph_strategy_returns_error() {
+        let opt = make_optimizer(
+            LargeJoinStrategy::EGraph,
+            &[("t", 100.0)],
+        );
+        let result =
+            opt.optimize(vec![make_join_node("t")]);
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("EGraph"));
+    }
+
+    // ---- Simulated annealing ----
+
+    #[test]
+    fn annealing_empty_joins_returns_error() {
+        let opt = make_optimizer(
+            LargeJoinStrategy::default(),
+            &[],
+        );
+        let result = opt.optimize(vec![]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn annealing_single_table() {
+        let opt = make_optimizer(
+            LargeJoinStrategy::SimulatedAnnealing {
+                initial_temp: 100.0,
+                cooling_rate: 0.9,
+                max_iterations: 10,
+            },
+            &[("t", 100.0)],
+        );
+        let result =
+            opt.optimize(vec![make_join_node("t")]);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn annealing_two_tables_returns_valid_plan() {
+        let opt = make_optimizer(
+            LargeJoinStrategy::SimulatedAnnealing {
+                initial_temp: 100.0,
+                cooling_rate: 0.9,
+                max_iterations: 50,
+            },
+            &[("a", 500.0), ("b", 100.0)],
+        );
+        let joins = vec![
+            make_join_node("a"),
+            make_join_node("b"),
+        ];
+        let result = opt.optimize(joins).unwrap();
+        assert_eq!(
+            LargeJoinOptimizer::count_tables(&result),
+            2,
+        );
+    }
+
+    #[test]
+    fn annealing_low_temp_terminates_early() {
+        let opt = make_optimizer(
+            LargeJoinStrategy::SimulatedAnnealing {
+                initial_temp: 0.0001,
+                cooling_rate: 0.5,
+                max_iterations: 100_000,
+            },
+            &[("a", 100.0), ("b", 200.0)],
+        );
+        let joins = vec![
+            make_join_node("a"),
+            make_join_node("b"),
+        ];
+        let result = opt.optimize(joins);
+        assert!(result.is_ok());
+    }
+
+    // ---- find_smallest_relation ----
+
+    #[test]
+    fn find_smallest_picks_smallest_cardinality() {
+        let opt = make_optimizer(
+            LargeJoinStrategy::Greedy,
+            &[
+                ("big", 10000.0),
+                ("mid", 500.0),
+                ("small", 10.0),
+            ],
+        );
+        let joins = vec![
+            make_join_node("big"),
+            make_join_node("mid"),
+            make_join_node("small"),
+        ];
+        let idx =
+            opt.find_smallest_relation(&joins).unwrap();
+        assert_eq!(joins[idx].table, "small");
+    }
+
+    // ---- create_join ----
+
+    #[test]
+    fn create_join_with_condition() {
+        let opt =
+            make_optimizer(LargeJoinStrategy::Greedy, &[]);
+        let cond = Expr::Const(Const::Bool(true));
+        let result = opt.create_join(
+            &scan("a"),
+            &scan("b"),
+            Some(&cond),
+        );
+        assert!(result.is_ok());
+        match result.unwrap() {
+            RelExpr::Join {
+                join_type,
+                condition,
+                ..
+            } => {
+                assert!(matches!(
+                    join_type,
+                    JoinType::Inner,
+                ));
+                assert!(matches!(
+                    condition,
+                    Expr::Const(Const::Bool(true)),
+                ));
+            }
+            _ => panic!("Expected Join"),
+        }
+    }
+
+    #[test]
+    fn create_join_without_condition_uses_true() {
+        let opt =
+            make_optimizer(LargeJoinStrategy::Greedy, &[]);
+        let result =
+            opt.create_join(&scan("a"), &scan("b"), None);
+        assert!(result.is_ok());
+        match result.unwrap() {
+            RelExpr::Join { condition, .. } => {
+                assert!(matches!(
+                    condition,
+                    Expr::Const(Const::Bool(true)),
+                ));
+            }
+            _ => panic!("Expected Join"),
+        }
+    }
+
+    // ---- Serialization ----
+
+    #[test]
+    fn strategy_serialization_roundtrip() {
+        let strategy =
+            LargeJoinStrategy::SimulatedAnnealing {
+                initial_temp: 500.0,
+                cooling_rate: 0.99,
+                max_iterations: 5000,
+            };
+        let json =
+            serde_json::to_string(&strategy).unwrap();
+        let restored: LargeJoinStrategy =
+            serde_json::from_str(&json).unwrap();
+        match restored {
+            LargeJoinStrategy::SimulatedAnnealing {
+                initial_temp,
+                cooling_rate,
+                max_iterations,
+            } => {
+                assert!(
+                    (initial_temp - 500.0).abs()
+                        < f64::EPSILON,
+                );
+                assert!(
+                    (cooling_rate - 0.99).abs()
+                        < f64::EPSILON,
+                );
+                assert_eq!(max_iterations, 5000);
+            }
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[test]
+    fn greedy_strategy_serialization() {
+        let strategy = LargeJoinStrategy::Greedy;
+        let json =
+            serde_json::to_string(&strategy).unwrap();
+        let restored: LargeJoinStrategy =
+            serde_json::from_str(&json).unwrap();
+        assert!(matches!(
+            restored,
+            LargeJoinStrategy::Greedy,
+        ));
+    }
+
+    #[test]
+    fn egraph_strategy_serialization() {
+        let strategy = LargeJoinStrategy::EGraph;
+        let json =
+            serde_json::to_string(&strategy).unwrap();
+        let restored: LargeJoinStrategy =
+            serde_json::from_str(&json).unwrap();
+        assert!(matches!(
+            restored,
+            LargeJoinStrategy::EGraph,
+        ));
     }
 }
