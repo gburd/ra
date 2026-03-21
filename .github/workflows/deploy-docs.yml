@@ -3,6 +3,11 @@ name: Deploy documentation
 on:
   push:
     branches: [main]
+    paths:
+      - 'docs/**'
+      - 'crates/**'
+      - 'rules/**'
+      - '.github/workflows/deploy-docs.yml'
 
 permissions:
   contents: read
@@ -22,19 +27,51 @@ jobs:
         with:
           persist-credentials: false
 
+      - uses: actions/setup-node@f0a29e3788db45e0f5e80deb2c08e8b8cc4e2ade  # v4.1.0
+        with:
+          node-version: 22
+
       - uses: DeterminateSystems/nix-installer-action@c5a866b6ab867e88becbed4467b93592bce69f8a  # v21
       - uses: DeterminateSystems/magic-nix-cache-action@565684385bcd71bad329742eefe8d12f2e765b39  # v13
+
+      - uses: dtolnay/rust-toolchain@b4406b2e3e89e93b13a5b0c9b6f2ee2c8fe9aa7f  # stable
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack
+
+      - name: Build WASM docs module
+        run: |
+          if [ -d "crates/ra-wasm-docs" ]; then
+            cd crates/ra-wasm-docs && wasm-pack build --target web
+          fi
+
+      - name: Build VitePress documentation
+        run: |
+          cd docs
+          npm ci
+          npm run build
 
       - name: Build rustdoc
         run: nix develop --command cargo doc --no-deps --all-features
 
-      - name: Add redirect to ra_core docs
-        run: echo '<meta http-equiv="refresh" content="0; url=ra_core">' > target/doc/index.html
+      - name: Combine documentation
+        run: |
+          mkdir -p combined-docs
+          # Copy VitePress output as main documentation
+          if [ -d "docs/.vitepress/dist" ]; then
+            cp -r docs/.vitepress/dist/* combined-docs/
+          fi
+          # Add Rust API docs under /api/rust/
+          mkdir -p combined-docs/api/rust
+          cp -r target/doc/* combined-docs/api/rust/
 
       - name: Upload pages artifact
         uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b  # v4.0.0
         with:
-          path: target/doc
+          path: combined-docs
 
   deploy:
     name: Deploy to GitHub Pages
