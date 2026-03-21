@@ -125,6 +125,7 @@ ra-pg-monitor = { path = "crates/ra-pg-monitor" }
 ra-pg-advisor = { path = "crates/ra-pg-advisor" }
 ra-test-utils = { path = "crates/ra-test-utils" }
 postgres = "0.19"
+stoolap = "0.3"
 toml = "0.8"
 crossterm = "0.29"
 ratatui = "0.30"

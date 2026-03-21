@@ -10,6 +10,7 @@ repository.workspace = true
 [features]
 default = []
 postgres = ["dep:postgres"]
+stoolap = ["dep:stoolap"]
 
 [dependencies]
 ra-core = { workspace = true }
@@ -20,6 +21,7 @@ tracing = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 postgres = { workspace = true, optional = true }
+stoolap = { workspace = true, optional = true }
 
 [lints]
 workspace = true
