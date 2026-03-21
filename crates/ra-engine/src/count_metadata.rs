@@ -148,7 +148,6 @@ fn is_all_flag(
 mod tests {
     use super::*;
     use crate::egraph::{to_rec_expr, RelLang};
-    use crate::rewrite::all_rules;
     use egg::Runner;
     use ra_core::algebra::{AggregateExpr, AggregateFunction, RelExpr};
     use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
@@ -158,9 +157,7 @@ mod tests {
     ) -> Runner<RelLang, RelAnalysis> {
         let rec =
             to_rec_expr(expr).expect("conversion should succeed");
-        let mut rules = count_metadata_rules();
-        // Include base rules so the e-graph stays well-formed
-        rules.extend(all_rules());
+        let rules = count_metadata_rules();
         Runner::default()
             .with_expr(&rec)
             .with_node_limit(50_000)
