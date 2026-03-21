@@ -84,9 +84,9 @@ All rules include:
 
 1. **README.md** - Project overview and quick start
 2. **docs/architecture.md** - System design and algorithms
-3. **docs/rule-authoring.md** - Complete guide for writing rules
+3. **docs/guides/rule-authoring.md** - Complete guide for writing rules
 4. **docs/api-reference.md** - Full API documentation
-5. **docs/execution-models.md** - 6 execution models (400+ lines)
+5. **docs/features/execution-models.md** - 6 execution models (400+ lines)
    - Volcano (Iterator)
    - Vectorized (Batch)
    - Push-Based (Compiled)
@@ -167,7 +167,7 @@ cargo run --bin ra-cli -- validate rules/
 
 # Read documentation
 cat docs/architecture.md
-cat docs/execution-models.md
+cat docs/features/execution-models.md
 ```
 
 ## Architecture Overview

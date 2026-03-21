@@ -14,7 +14,7 @@ The most valuable contributions are new rules or improvements to existing ones:
 - Improve rule documentation
 - Fix incorrect rules
 
-See [docs/rule-authoring.md](docs/rule-authoring.md) for the complete guide.
+See [docs/guides/rule-authoring.md](docs/guides/rule-authoring.md) for the complete guide.
 
 ### 2. Code Contributions
 
@@ -256,7 +256,7 @@ Before submitting, ensure:
    touch rules/logical/predicate-pushdown/my-new-rule.rra
    ```
 
-3. **Write the rule** following [docs/rule-authoring.md](docs/rule-authoring.md):
+3. **Write the rule** following [docs/guides/rule-authoring.md](docs/guides/rule-authoring.md):
    - Complete YAML frontmatter
    - Clear description
    - Formal relational algebra notation

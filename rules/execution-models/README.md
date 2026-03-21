@@ -69,7 +69,7 @@ Incremental computation using differential dataflow. Maintains materialized view
 - Delta query optimization
 - Arrangement sharing
 
-See [Materialize-specific optimizations](../../docs/execution-models.md#5-differential-dataflow--streaming-model).
+See [Materialize-specific optimizations](../../docs/features/execution-models.md#5-differential-dataflow--streaming-model).
 
 ### Column-at-a-Time (X100)
 **Databases:** MonetDB, VectorWise (Actian Vector)
@@ -83,7 +83,7 @@ Processes entire columns with late materialization. Works with positions rather 
 - Position-based joins
 - Aggressive column pruning
 
-See [MonetDB-specific optimizations](../../docs/execution-models.md#6-column-at-a-time--x100-model).
+See [MonetDB-specific optimizations](../../docs/features/execution-models.md#6-column-at-a-time--x100-model).
 
 ## When to Use
 
@@ -113,7 +113,7 @@ For hybrid systems, load rules from multiple directories and let the optimizer c
 
 ## References
 
-See [docs/execution-models.md](../../docs/execution-models.md) for detailed information about each execution model, including:
+See [docs/features/execution-models.md](../../docs/features/execution-models.md) for detailed information about each execution model, including:
 - Architecture and design principles
 - Advantages and trade-offs
 - Database-specific implementations

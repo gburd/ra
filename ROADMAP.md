@@ -134,7 +134,7 @@ All initial phases have been successfully completed through comprehensive expans
 - 734 passing (76.2% pass rate), 0 errors
 - CLI: `ra-cli test rules/ --filter <pattern> --verbose`
 - Smart error classification and SELECT extraction
-- Documentation: docs/test-format.md
+- Documentation: docs/guides/test-format.md
 
 ### Week 81-82: SQL Feature Expansion ✅
 **Delivered by:** sql-engineer
@@ -148,7 +148,7 @@ All initial phases have been successfully completed through comprehensive expans
   - VALUES clause
 - 36 new optimization rules (13 CTE + 12 window + 11 distinct)
 - **SQL coverage: 40% → 85%** 🚀
-- Documentation: docs/sql-coverage.md
+- Documentation: docs/features/sql-coverage.md
 
 ### Week 83-84: Database Metadata Integration ✅
 **Delivered by:** database-integrator
@@ -160,7 +160,7 @@ All initial phases have been successfully completed through comprehensive expans
 - 76 tests passing (60 unit + 16 integration)
 - CLI: `ra-cli gather-metadata`, `ra-cli compare`
 - Docker test infrastructure
-- Documentation: docs/database-integration.md
+- Documentation: docs/integrations/database-adapters.md
 
 ### Week 85: Index Types & Function Catalog ✅
 **Delivered by:** catalog-engineer
@@ -172,7 +172,7 @@ All initial phases have been successfully completed through comprehensive expans
 - Function properties: deterministic, pure, expensive, constant_foldable
 - 23 function-aware optimization rules
 - 74 integration tests (31 index + 43 function)
-- Documentation: docs/index-types.md, docs/function-catalog.md
+- Documentation: docs/features/index-types.md, docs/features/function-catalog.md
 
 ### Week 86: Final Integration & Documentation ✅
 **Delivered by:** test-engineer + catalog-engineer
@@ -219,11 +219,11 @@ All initial phases have been successfully completed through comprehensive expans
 - Extended `crates/ra-stats/` - Index types and cost modeling
 
 **New Documentation (Phase 16):**
-- docs/test-format.md
-- docs/sql-coverage.md
-- docs/database-integration.md
-- docs/index-types.md
-- docs/function-catalog.md
+- docs/guides/test-format.md
+- docs/features/sql-coverage.md
+- docs/integrations/database-adapters.md
+- docs/features/index-types.md
+- docs/features/function-catalog.md
 
 ---
 

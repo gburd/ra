@@ -52,7 +52,7 @@ Pushes selection predicates through join operators...
 
 ## Writing Rules
 
-See [docs/rule-authoring.md](../docs/rule-authoring.md) for the complete guide.
+See [docs/guides/rule-authoring.md](../docs/guides/rule-authoring.md) for the complete guide.
 
 ## Rule Index
 

@@ -32,7 +32,7 @@ Phase 16 successfully delivered production-ready features for the RA query optim
 - `crates/ra-parser/src/test_case.rs` - TestCase struct, TestExpectation enum (280 lines)
 - `crates/ra-cli/src/test_executor.rs` - Test execution engine (230 lines)
 - Updated `crates/ra-cli/src/main.rs` - cmd_test() now executes tests
-- `docs/test-format.md` - Test format documentation (149 lines)
+- `docs/guides/test-format.md` - Test format documentation (149 lines)
 
 **Features:**
 - Parses test cases from .rra markdown code blocks
@@ -92,7 +92,7 @@ Phase 16 successfully delivered production-ready features for the RA query optim
 - 58 SQL parser tests (53 new)
 
 **Documentation:**
-- `docs/sql-coverage.md` - Comprehensive feature matrix (154 lines)
+- `docs/features/sql-coverage.md` - Comprehensive feature matrix (154 lines)
 
 **Impact:**
 - **SQL coverage: 40% → 85%** 🚀
@@ -133,7 +133,7 @@ ra-cli compare --sql "SELECT ..." --db postgresql://localhost/test --schema sche
 - Docker test infrastructure (`docker-compose.yml` with test-db profile)
 
 **Documentation:**
-- `docs/database-integration.md` - Usage guide, connector API, EXPLAIN format details (158 lines)
+- `docs/integrations/database-adapters.md` - Usage guide, connector API, EXPLAIN format details (158 lines)
 
 **Impact:**
 - Enables validation against real database optimizers
@@ -181,7 +181,7 @@ ra-cli compare --sql "SELECT ..." --db postgresql://localhost/test --schema sche
 - 31 integration tests in `crates/ra-stats/tests/index_integration.rs`
 
 **Documentation:**
-- `docs/index-types.md` - Reference with cost model and selection algorithm (81 lines)
+- `docs/features/index-types.md` - Reference with cost model and selection algorithm (81 lines)
 
 #### Function Catalog
 
@@ -229,7 +229,7 @@ ra-cli compare --sql "SELECT ..." --db postgresql://localhost/test --schema sche
 - 43 integration tests + 4 doc-tests = 47 total
 
 **Documentation:**
-- `docs/function-catalog.md` - Catalog reference, properties, optimization (140 lines)
+- `docs/features/function-catalog.md` - Catalog reference, properties, optimization (140 lines)
 
 **Bug Fix:**
 - Fixed STRING_AGG incorrectly marked `constant_foldable: true` (should be `false` for aggregates)
@@ -264,11 +264,11 @@ ra-cli compare --sql "SELECT ..." --db postgresql://localhost/test --schema sche
 
 **Documentation Verification:**
 All 5 Phase 16 docs complete:
-- ✅ docs/test-format.md (149 lines)
-- ✅ docs/sql-coverage.md (154 lines)
-- ✅ docs/database-integration.md (158 lines)
-- ✅ docs/index-types.md (81 lines)
-- ✅ docs/function-catalog.md (140 lines)
+- ✅ docs/guides/test-format.md (149 lines)
+- ✅ docs/features/sql-coverage.md (154 lines)
+- ✅ docs/integrations/database-adapters.md (158 lines)
+- ✅ docs/features/index-types.md (81 lines)
+- ✅ docs/features/function-catalog.md (140 lines)
 
 **Total:** 682 lines of Phase 16 documentation
 
@@ -449,11 +449,11 @@ All 5 Phase 16 docs complete:
 ## References
 
 **Phase 16 Documentation:**
-- docs/test-format.md
-- docs/sql-coverage.md
-- docs/database-integration.md
-- docs/index-types.md
-- docs/function-catalog.md
+- docs/guides/test-format.md
+- docs/features/sql-coverage.md
+- docs/integrations/database-adapters.md
+- docs/features/index-types.md
+- docs/features/function-catalog.md
 
 **Updated Documentation:**
 - ROADMAP.md (updated March 18, 2026)
