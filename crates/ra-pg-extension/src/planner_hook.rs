@@ -248,11 +248,19 @@ unsafe fn parse_query_to_relexpr(
 
 /// Run RA optimizer on a RelExpr.
 fn optimize_relexpr(
-    _rel_expr: &ra_core::algebra::RelExpr,
-    _stats: &[(String, ra_core::Statistics)],
+    rel_expr: &ra_core::algebra::RelExpr,
+    stats: &[(String, ra_core::Statistics)],
 ) -> Result<ra_core::algebra::RelExpr, String> {
-    // TODO: Integrate with ra-engine optimizer.
-    Err("RA optimizer not yet integrated".to_string())
+    // Create optimizer with default configuration
+    let optimizer = ra_engine::Optimizer::new();
+
+    // Create a simple facts provider from statistics
+    let facts = SimpleFactsProvider::new(stats);
+
+    // Run optimization with facts
+    optimizer
+        .optimize_with_facts(rel_expr, &facts)
+        .map_err(|e| format!("Optimizer error: {}", e))
 }
 
 /// Estimate cost of a plan using RA's cost model.
@@ -503,6 +511,69 @@ fn truncate_sql(sql: &str, max_len: usize) -> String {
         sql.to_string()
     } else {
         format!("{}...", &sql[..max_len])
+    }
+}
+
+/// Simple FactsProvider implementation for PostgreSQL extension.
+///
+/// For MVP, we just use EmptyFactsProvider with defaults.
+/// Future enhancement: map pg_stats to TableStats and ColumnStats.
+struct SimpleFactsProvider {
+    /// Base empty provider with defaults
+    base: ra_core::EmptyFactsProvider,
+}
+
+impl SimpleFactsProvider {
+    fn new(_stats: &[(String, ra_core::Statistics)]) -> Self {
+        // For now, just use default EmptyFactsProvider
+        // TODO: Convert pg_stats data to TableStats/ColumnStats
+        // TODO: Integrate hardware profile from extension_state
+        Self {
+            base: ra_core::EmptyFactsProvider::new(),
+        }
+    }
+}
+
+// Delegate all FactsProvider methods to the base EmptyFactsProvider
+impl ra_core::FactsProvider for SimpleFactsProvider {
+    fn get_table_stats(&self, table: &str) -> Option<&ra_core::CoreTableStats> {
+        self.base.get_table_stats(table)
+    }
+
+    fn get_column_stats(&self, table: &str, column: &str) -> Option<&ra_core::ColumnStats> {
+        self.base.get_column_stats(table, column)
+    }
+
+    fn hardware_profile(&self) -> &ra_core::CoreHardwareProfile {
+        self.base.hardware_profile()
+    }
+
+    fn get_schema(&self, table: &str) -> Option<&ra_core::TableInfo> {
+        self.base.get_schema(table)
+    }
+
+    fn runtime_stats(&self, operator_id: &str) -> Option<&ra_core::OperatorStats> {
+        self.base.runtime_stats(operator_id)
+    }
+
+    fn database_name(&self) -> &str {
+        self.base.database_name()
+    }
+
+    fn supports_feature(&self, feature: &str) -> bool {
+        self.base.supports_feature(feature)
+    }
+
+    fn sql_dialect(&self) -> ra_core::SqlDialect {
+        self.base.sql_dialect()
+    }
+
+    fn memory_limit(&self) -> Option<u64> {
+        self.base.memory_limit()
+    }
+
+    fn optimizer_timeout(&self) -> std::time::Duration {
+        self.base.optimizer_timeout()
     }
 }
 
