@@ -1,0 +1,105 @@
+# Codeberg Pages Deployment Workflow
+#
+# This workflow automatically builds and deploys documentation to Codeberg Pages
+# when changes are pushed to the main branch.
+#
+# Setup required:
+# 1. Enable Actions in repository Settings → Units
+# 2. Create Codeberg access token with 'repository' scope
+# 3. Add token as secret: PAGES_TOKEN
+# 4. Workflow will automatically deploy to pages branch
+#
+# Documentation will be available at: https://[username].codeberg.page/ra/
+#
+# For setup instructions, see: .forgejo/workflows/README.md
+# For deployment guide, see: docs/deployment.md
+
+name: Deploy to Codeberg Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'crates/**'
+      - 'rules/**'
+      - '.forgejo/workflows/deploy-pages.yml'
+
+jobs:
+  build-and-deploy:
+    name: Build and deploy documentation
+    runs-on: docker
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack
+
+      - name: Build WASM docs module
+        run: |
+          if [ -d "crates/ra-wasm-docs" ]; then
+            cd crates/ra-wasm-docs && wasm-pack build --target web
+          fi
+
+      - name: Build VitePress documentation
+        run: |
+          cd docs
+          npm ci
+          npm run build
+
+      - name: Build rustdoc
+        run: cargo doc --no-deps --all-features
+
+      - name: Combine documentation
+        run: |
+          mkdir -p pages-output
+          # Copy VitePress output as main documentation
+          if [ -d "docs/.vitepress/dist" ]; then
+            cp -r docs/.vitepress/dist/* pages-output/
+          fi
+          # Add Rust API docs under /api/rust/
+          mkdir -p pages-output/api/rust
+          cp -r target/doc/* pages-output/api/rust/
+
+      - name: Deploy to pages branch
+        run: |
+          git config --global user.name "Forgejo Actions"
+          git config --global user.email "actions@codeberg.org"
+
+          # Clone pages branch (or create orphan if it doesn't exist)
+          if git ls-remote --heads origin pages | grep pages; then
+            git clone --single-branch --branch pages "https://${{ secrets.PAGES_TOKEN }}@codeberg.org/${{ github.repository }}.git" pages-branch
+            cd pages-branch
+            # Remove old content
+            git rm -rf . || true
+          else
+            mkdir pages-branch
+            cd pages-branch
+            git init
+            git checkout --orphan pages
+          fi
+
+          # Copy new content
+          cp -r ../pages-output/* .
+
+          # Create .domains file if custom domain is needed (optional)
+          # echo "docs.example.com" > .domains
+
+          # Commit and push
+          git add .
+          git commit -m "Deploy documentation from ${{ github.sha }}" || exit 0
+          git push "https://${{ secrets.PAGES_TOKEN }}@codeberg.org/${{ github.repository }}.git" pages --force

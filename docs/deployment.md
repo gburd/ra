@@ -1,6 +1,192 @@
 # Deployment Guide
 
-This guide covers deploying the RA Web Explorer in different environments.
+This guide covers deploying both the RA documentation site and the RA Web Explorer in different environments.
+
+## Documentation Deployment
+
+The RA documentation is built with VitePress and can be deployed to multiple platforms.
+
+### GitHub Pages (Automatic)
+
+Documentation is automatically deployed to GitHub Pages when changes are pushed to the `main` branch.
+
+**URL**: https://gregburd.github.io/ra/
+
+**Configuration**: `.github/workflows/deploy-docs.yml`
+
+The workflow automatically:
+1. Builds VitePress documentation
+2. Builds WASM docs module (if present)
+3. Builds Rust API documentation (rustdoc)
+4. Combines all documentation into a single site
+5. Deploys to GitHub Pages
+
+**Required settings**:
+- Repository Settings → Pages → Source: "GitHub Actions"
+
+### Codeberg Pages
+
+Codeberg Pages provides an alternative free static hosting platform.
+
+**URL**: https://[username].codeberg.page/ra/
+
+#### Initial Setup
+
+1. **Enable Forgejo Actions** (if using Actions-based deployment):
+   - Go to repository Settings → Units
+   - Enable "Actions" in the list
+   - Alternatively, use direct webhook method (see below)
+
+2. **Create Pages Access Token**:
+   - Go to your Codeberg user Settings → Applications
+   - Create a new token with `repository` scope
+   - Copy the token value
+
+3. **Add Token as Secret**:
+   - Go to repository Settings → Secrets and Variables → Actions
+   - Create a new secret named `PAGES_TOKEN`
+   - Paste the token value
+
+#### Deployment Methods
+
+**Method 1: Forgejo Actions (Recommended)**
+
+The workflow at `.forgejo/workflows/deploy-pages.yml` automatically builds and deploys on push to `main`.
+
+Features:
+- Builds VitePress documentation
+- Builds WASM docs module
+- Builds Rust API documentation
+- Deploys to `pages` branch
+- Automatic deployment on every push
+
+**Method 2: Direct Webhook**
+
+For simpler setup without CI runners:
+
+1. Build documentation locally:
+   ```bash
+   cd docs
+   npm ci
+   npm run build
+   ```
+
+2. Push to `pages` branch:
+   ```bash
+   # Create orphan pages branch (first time only)
+   git checkout --orphan pages
+   git rm -rf .
+   cp -r docs/.vitepress/dist/* .
+   git add .
+   git commit -m "Deploy documentation"
+   git push origin pages
+   ```
+
+3. Configure webhook:
+   - Go to repository Settings → Webhooks
+   - Add webhook with target URL
+   - Set branch filter to `pages`
+
+#### Custom Domain (Optional)
+
+To use a custom domain like `docs.example.com`:
+
+1. Create `.domains` file in `pages` branch:
+   ```bash
+   echo "docs.example.com" > .domains
+   git add .domains
+   git commit -m "Add custom domain"
+   git push origin pages
+   ```
+
+2. Configure DNS:
+   ```
+   CNAME docs.example.com -> [username].codeberg.page
+   ```
+
+3. Wait for DNS propagation (up to 24 hours)
+
+#### Troubleshooting Codeberg Pages
+
+**Pages not updating:**
+- Check workflow runs in Actions tab
+- Verify `PAGES_TOKEN` secret is set correctly
+- Ensure `pages` branch has content
+- Check webhook logs in Settings → Webhooks
+
+**Build failures:**
+- Check Actions logs for error messages
+- Verify Node.js 22 is available in runner
+- Ensure Rust toolchain with wasm32 target is installed
+
+**404 errors:**
+- Verify `pages` branch exists
+- Check file permissions in pages branch
+- Ensure index.html is in root of pages branch
+
+### Netlify (Alternative)
+
+For advanced features like preview deployments and form handling.
+
+#### Setup
+
+1. Connect repository to Netlify:
+   - Sign up at https://netlify.com
+   - Click "Add new site" → "Import an existing project"
+   - Connect to GitHub/Codeberg
+   - Select the ra repository
+
+2. Configure build settings:
+   ```
+   Base directory: docs
+   Build command: npm ci && npm run build
+   Publish directory: docs/.vitepress/dist
+   ```
+
+3. Deploy:
+   - Netlify automatically deploys on every push
+   - Get URL: https://[site-name].netlify.app
+
+#### Custom Domain on Netlify
+
+1. Add domain in Netlify dashboard
+2. Configure DNS:
+   ```
+   CNAME docs.example.com -> [site-name].netlify.app
+   ```
+
+### Local Preview
+
+Test documentation locally before deploying:
+
+```bash
+cd docs
+npm install
+npm run dev  # http://localhost:5173
+```
+
+Build production version:
+
+```bash
+npm run build
+npm run preview  # http://localhost:4173
+```
+
+### Documentation Structure
+
+The combined documentation includes:
+
+```
+/                       # VitePress documentation (main site)
+├── guides/            # User and developer guides
+├── concepts/          # Core concepts
+├── features/          # Feature documentation
+├── api-reference.html # API overview
+└── api/
+    └── rust/          # Rustdoc API documentation
+```
+
+## Web Application Deployment
 
 ## Quick Start
 

@@ -89,6 +89,23 @@ cargo run --bin ra-cli -- validate rules/
 - Place guides in `docs/guides/`, concepts in `docs/concepts/`,
   feature docs in `docs/features/`
 
+### Building Documentation Locally
+
+```bash
+cd docs
+npm install
+npm run dev  # Development server at http://localhost:5173
+npm run build  # Production build
+```
+
+### Documentation Deployment
+
+Documentation is automatically deployed to:
+- **GitHub Pages**: https://gregburd.github.io/ra/ (automatic on push to main)
+- **Codeberg Pages**: https://[username].codeberg.page/ra/ (requires setup, see [deployment.md](deployment.md))
+
+See [deployment.md](deployment.md) for detailed deployment configuration.
+
 ## Commit Standards
 
 - Imperative mood, 72-character subject line limit
