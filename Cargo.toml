@@ -10,6 +10,7 @@ members = [
     "crates/ra-cli",
     "crates/ra-web",
     "crates/ra-wasm",
+    "crates/ra-wasm-docs",
     "crates/ra-isolation",
     "crates/ra-adaptive",
     "crates/ra-synthesis",

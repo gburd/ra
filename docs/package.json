@@ -8,7 +8,9 @@
   },
   "scripts": {
     "dev": "vitepress dev",
-    "build": "vitepress build",
+    "build": "npm run build:wasm && vitepress build",
+    "build:wasm": "./build-wasm.sh",
+    "build:docs": "vitepress build",
     "preview": "vitepress preview"
   },
   "keywords": [],

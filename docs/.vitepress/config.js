@@ -3,6 +3,10 @@ export default {
   description: '1,327+ optimization rules for database query planning',
   base: '/ra/',  // Replace with your repo name for GitHub Pages
   ignoreDeadLinks: true,  // Temporarily ignore dead links during build
+  head: [
+    ['link', { rel: 'stylesheet', href: '/ra/static/css/ra-interactive.css' }],
+    ['script', { type: 'module', src: '/ra/static/js/ra-interactive.js' }]
+  ],
   themeConfig: {
     nav: [
       { text: 'Guide', link: '/GETTING_STARTED' },
@@ -90,6 +94,7 @@ export default {
           text: 'Examples',
           items: [
             { text: 'Basic Queries', link: '/examples/basic-queries' },
+            { text: 'Interactive SQL Demo', link: '/examples/interactive-sql-demo' },
             { text: 'Ledger Application', link: '/examples/ledger/' },
             { text: 'TPC-H Queries', link: '/examples/tpch' }
           ]
