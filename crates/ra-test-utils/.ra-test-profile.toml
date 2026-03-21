@@ -1,0 +1,20 @@
+[platform]
+id = "macos-aarch64-cores4"
+timestamp = "2026-03-21T16:24:27.843081Z"
+os = "macos aarch64"
+arch = "aarch64"
+cpu_model = "Auto-detected"
+cpu_cores = 4
+total_memory_gb = 16
+
+[calibration]
+simple_optimization_ms = 0.7086916666666666
+complex_optimization_ms = 0.6849646
+egraph_saturation_iters = 1
+int_ops_per_ms = 96150
+memory_bandwidth_mbps = 49
+
+[scale_factors]
+time_scale = 0.28347666666666665
+iteration_scale = 0.02
+memory_scale = 2.0
