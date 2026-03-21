@@ -46,7 +46,7 @@ pub struct StalenessInfo {
     pub modifications_since_analyze: u64,
     /// Live tuple count.
     pub live_tuples: u64,
-    /// Modification ratio (mods / live_tuples).
+    /// Modification ratio (mods / `live_tuples`).
     pub modification_ratio: f64,
     /// Unix timestamp of last analyze.
     pub last_analyze: Option<i64>,
@@ -75,17 +75,17 @@ impl fmt::Display for StalenessInfo {
 pub struct TableStatsInput {
     /// Table name.
     pub table: String,
-    /// Live tuples from pg_stat_user_tables.
+    /// Live tuples from `pg_stat_user_tables`.
     pub live_tuples: u64,
-    /// n_mod_since_analyze from pg_stat_user_tables.
+    /// `n_mod_since_analyze` from `pg_stat_user_tables`.
     pub modifications_since_analyze: u64,
     /// Unix timestamp of last manual ANALYZE.
     pub last_analyze: Option<i64>,
     /// Unix timestamp of last autoanalyze.
     pub last_autoanalyze: Option<i64>,
-    /// Current autovacuum_analyze_threshold setting.
+    /// Current `autovacuum_analyze_threshold` setting.
     pub analyze_threshold: u64,
-    /// Current autovacuum_analyze_scale_factor.
+    /// Current `autovacuum_analyze_scale_factor`.
     pub analyze_scale_factor: f64,
 }
 
@@ -223,6 +223,7 @@ impl StalenessChecker {
         }
     }
 
+    #[allow(clippy::unused_self)]
     fn check_autoanalyze_config(
         &self,
         input: &TableStatsInput,

@@ -1,4 +1,4 @@
-//! PostgreSQL configuration recommendations.
+//! `PostgreSQL` configuration recommendations.
 //!
 //! Analyzes memory settings, query planner parameters, and
 //! parallelism configuration against best practices and the
@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::recommendations::Severity;
 
-/// PostgreSQL configuration values collected from the server.
+/// `PostgreSQL` configuration values collected from the server.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PgConfig {
     // Memory settings
@@ -96,7 +96,7 @@ impl fmt::Display for ConfigIssue {
     }
 }
 
-/// Checks PostgreSQL configuration against best practices.
+/// Checks `PostgreSQL` configuration against best practices.
 pub struct ConfigChecker {
     config: Option<PgConfig>,
     issues: Vec<ConfigIssue>,
@@ -112,7 +112,7 @@ impl ConfigChecker {
         }
     }
 
-    /// Load a PostgreSQL configuration for analysis.
+    /// Load a `PostgreSQL` configuration for analysis.
     pub fn load_config(&mut self, config: PgConfig) {
         self.config = Some(config);
     }
@@ -419,7 +419,7 @@ mod tests {
     fn default_config_values() {
         let config = PgConfig::default();
         assert_eq!(config.shared_buffers, 128 * 1024 * 1024);
-        assert_eq!(config.random_page_cost, 4.0);
+        assert!((config.random_page_cost - 4.0).abs() < f64::EPSILON);
         assert!(config.is_ssd);
     }
 

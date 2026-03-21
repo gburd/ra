@@ -12,12 +12,17 @@ repository.workspace = true
 ra-core = { workspace = true }
 ra-stats = { workspace = true }
 anyhow = { workspace = true }
+clap = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
 crossterm = { workspace = true }
 ratatui = { workspace = true }
+
+[[bin]]
+name = "ra-pg-monitor"
+path = "src/bin/ra_pg_monitor.rs"
 
 [dev-dependencies]
 proptest = { workspace = true }

@@ -78,18 +78,16 @@ impl SchemaIssue {
     #[must_use]
     pub fn severity(&self) -> Severity {
         match self.kind {
-            SchemaIssueKind::UnusedIndex => Severity::Info,
-            SchemaIssueKind::DuplicateIndex => Severity::Info,
-            SchemaIssueKind::ColumnOrderingIssue => {
+            SchemaIssueKind::UnusedIndex
+            | SchemaIssueKind::DuplicateIndex
+            | SchemaIssueKind::ColumnOrderingIssue => {
                 Severity::Info
             }
-            SchemaIssueKind::MissingIndex => Severity::Warning,
-            SchemaIssueKind::WrongIndexType => Severity::Warning,
-            SchemaIssueKind::ForeignKeyWithoutIndex => {
-                Severity::Warning
-            }
+            SchemaIssueKind::MissingIndex
+            | SchemaIssueKind::WrongIndexType
+            | SchemaIssueKind::ForeignKeyWithoutIndex
+            | SchemaIssueKind::TableBloat => Severity::Warning,
             SchemaIssueKind::MissingPrimaryKey => Severity::Error,
-            SchemaIssueKind::TableBloat => Severity::Warning,
         }
     }
 }
@@ -100,7 +98,7 @@ impl fmt::Display for SchemaIssue {
     }
 }
 
-/// Index usage data collected from pg_stat_user_indexes.
+/// Index usage data collected from `pg_stat_user_indexes`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IndexUsage {
     /// Index name.
@@ -126,7 +124,7 @@ pub struct IndexUsage {
 pub struct ColumnTypeInfo {
     /// Column name.
     pub name: String,
-    /// PostgreSQL type name (e.g. "integer", "text", "jsonb").
+    /// `PostgreSQL` type name (e.g. "integer", "text", "jsonb").
     pub pg_type: String,
     /// Average column width in bytes.
     pub avg_width: u32,
@@ -491,15 +489,14 @@ impl Default for SchemaAnalyzer {
     }
 }
 
-/// Recommend the best index type for a PostgreSQL type.
+/// Recommend the best index type for a `PostgreSQL` type.
 fn recommended_index_type(pg_type: &str) -> Option<&'static str> {
     match pg_type {
-        "jsonb" | "json" => Some("gin"),
-        "tsvector" => Some("gin"),
+        "jsonb" | "json" | "tsvector" => Some("gin"),
         t if t.ends_with("[]") => Some("gin"),
         "point" | "box" | "circle" | "polygon"
-        | "inet" | "cidr" => Some("gist"),
-        "int4range" | "int8range" | "numrange"
+        | "inet" | "cidr"
+        | "int4range" | "int8range" | "numrange"
         | "tsrange" | "tstzrange" | "daterange" => {
             Some("gist")
         }

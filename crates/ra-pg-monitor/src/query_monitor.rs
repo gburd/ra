@@ -218,24 +218,24 @@ impl QueryMonitor {
         let mut suggestions = Vec::new();
 
         for node in &record.plan_nodes {
-            if node.node_type == PlanNodeType::SeqScan {
-                if node.estimated_rows > 10_000.0 {
-                    let table = node
-                        .relation
-                        .as_deref()
-                        .unwrap_or("unknown");
-                    suggestions.push(format!(
-                        "Add index on '{table}' to avoid sequential scan \
-                         ({:.0} rows)",
-                        node.estimated_rows,
-                    ));
-                }
+            if node.node_type == PlanNodeType::SeqScan
+                && node.estimated_rows > 10_000.0
+            {
+                let table = node
+                    .relation
+                    .as_deref()
+                    .unwrap_or("unknown");
+                suggestions.push(format!(
+                    "Add index on '{table}' to avoid sequential scan \
+                     ({:.0} rows)",
+                    node.estimated_rows,
+                ));
             }
 
             if let Some(actual) = node.actual_rows {
                 if node.estimated_rows > 0.0 {
                     let ratio = actual / node.estimated_rows;
-                    if ratio > 10.0 || ratio < 0.1 {
+                    if !(0.1..=10.0).contains(&ratio) {
                         suggestions.push(format!(
                             "Cardinality misestimate on {}: \
                              estimated {:.0}, actual {:.0}. \
@@ -406,7 +406,7 @@ mod tests {
         let last = monitor.records.last();
         assert!(last.is_some());
         assert!(
-            last.map_or(false, |r| r.is_regression),
+            last.is_some_and(|r| r.is_regression),
             "cost 500 > avg(100,100)*2 should be regression"
         );
     }

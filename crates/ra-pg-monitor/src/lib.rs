@@ -1,6 +1,6 @@
-//! PostgreSQL monitoring, schema analysis, and configuration advisory.
+//! `PostgreSQL` monitoring, schema analysis, and configuration advisory.
 //!
-//! Provides an OtterTune-like system for:
+//! Provides an `OtterTune`-like system for:
 //! - **Query monitoring**: track execution times, plans, costs, regressions
 //! - **Schema analysis**: unused/missing/duplicate indexes, bloat, FK issues
 //! - **Configuration tuning**: memory, planner, parallelism recommendations

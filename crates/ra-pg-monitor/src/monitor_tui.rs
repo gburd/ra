@@ -102,6 +102,10 @@ impl MonitorApp {
     }
 
     /// Run one render cycle without terminal setup (for testing).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if terminal drawing fails.
     pub fn render_once(
         &self,
         terminal: &mut Terminal<
@@ -195,6 +199,7 @@ impl MonitorApp {
         self.draw_status_bar(frame, chunks[2]);
     }
 
+    #[allow(clippy::unused_self)]
     fn draw_title_bar(
         &self,
         frame: &mut ratatui::Frame,
