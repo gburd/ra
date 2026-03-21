@@ -1,7 +1,9 @@
 # RFC 0039: Operator Class Aware Index Selection
 
-## Status
-PROPOSED
+- Start Date: 2026-03-21
+- Author: RA Contributors
+- Status: Proposed
+- Tracking Issue: TBD
 
 ## Summary
 Enhance index selection to understand operator classes, enabling proper use of specialized indexes like GiST, GIN, and custom operator classes for user-defined types.

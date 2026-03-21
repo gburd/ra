@@ -1,7 +1,9 @@
 # RFC 0035: Genetic Query Optimizer for Large Join Graphs
 
-## Status
-PROPOSED
+- Start Date: 2026-03-21
+- Author: RA Contributors
+- Status: Proposed
+- Tracking Issue: TBD
 
 ## Summary
 Implement a genetic algorithm-based query optimizer as a fallback for queries with 12+ table joins, where exhaustive dynamic programming becomes computationally infeasible.

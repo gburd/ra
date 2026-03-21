@@ -1,7 +1,9 @@
 # RFC 0036: Multi-Query Optimization
 
-## Status
-PROPOSED
+- Start Date: 2026-03-21
+- Author: RA Contributors
+- Status: Proposed
+- Tracking Issue: TBD
 
 ## Summary
 Implement multi-query optimization to identify and share common subexpressions across multiple queries executing concurrently, reducing redundant computation and I/O.

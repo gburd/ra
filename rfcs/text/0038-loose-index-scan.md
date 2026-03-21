@@ -1,7 +1,9 @@
 # RFC 0038: Loose Index Scan (Skip Scan)
 
-## Status
-PROPOSED
+- Start Date: 2026-03-21
+- Author: RA Contributors
+- Status: Proposed
+- Tracking Issue: TBD
 
 ## Summary
 Implement loose index scan optimization for efficiently executing DISTINCT queries and GROUP BY operations on low-cardinality indexed columns by skipping duplicate values in the index.

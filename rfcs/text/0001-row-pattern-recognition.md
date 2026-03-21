@@ -1,6 +1,6 @@
 # RFC 0001: Row Pattern Recognition
 
-- **Status:** Accepted
+- **Status:** Implemented
 - **Type:** Prospective
 - **Author:** RA Contributors
 - **Date:** 2025-03-19

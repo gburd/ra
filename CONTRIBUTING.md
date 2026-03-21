@@ -16,7 +16,19 @@ The most valuable contributions are new rules or improvements to existing ones:
 
 See [docs/guides/rule-authoring.md](docs/guides/rule-authoring.md) for the complete guide.
 
-### 2. Code Contributions
+### 2. Propose Major Features (RFC Process)
+
+Major features, breaking changes, and architectural decisions require an RFC (Request for Comments). See the [RFC Process Guide](rfcs/README.md) for full details.
+
+Quick steps:
+1. Copy `rfcs/TEMPLATE.md` to `rfcs/text/NNNN-feature-name.md`
+2. Fill out the template and submit a PR with `[RFC]` prefix
+3. Participate in discussion (minimum 7 days)
+4. Implement once accepted
+
+See the [RFC Index](rfcs/INDEX.md) for all existing RFCs.
+
+### 3. Code Contributions
 
 - Implement features from the [ROADMAP](ROADMAP.md)
 - Fix bugs
@@ -24,7 +36,7 @@ See [docs/guides/rule-authoring.md](docs/guides/rule-authoring.md) for the compl
 - Add tests
 - Improve documentation
 
-### 3. Documentation
+### 4. Documentation
 
 - Write tutorials
 - Create examples
@@ -32,7 +44,7 @@ See [docs/guides/rule-authoring.md](docs/guides/rule-authoring.md) for the compl
 - Translate documentation
 - Record video tutorials
 
-### 4. Testing and Verification
+### 5. Testing and Verification
 
 - Write property-based tests
 - Add integration tests
@@ -40,7 +52,7 @@ See [docs/guides/rule-authoring.md](docs/guides/rule-authoring.md) for the compl
 - Write TLA+ specifications
 - Perform differential testing
 
-### 5. Community Support
+### 6. Community Support
 
 - Answer questions in discussions
 - Review pull requests

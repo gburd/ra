@@ -1,7 +1,9 @@
 # RFC 0037: Interesting Orders Framework
 
-## Status
-PROPOSED
+- Start Date: 2026-03-21
+- Author: RA Contributors
+- Status: Proposed
+- Tracking Issue: TBD
 
 ## Summary
 Implement physical property tracking for sort orders throughout query plans, enabling the optimizer to avoid redundant sorts and choose optimal join algorithms based on available orderings.
