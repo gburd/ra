@@ -1,0 +1,53 @@
+name: Documentation Link Validation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**/*.md'
+      - 'research/**/*.md'
+      - 'rules/**/*.rra'
+      - 'rules/**/*.md'
+      - '*.md'
+      - 'crates/ra-test-utils/tests/link_validation.rs'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'docs/**/*.md'
+      - 'research/**/*.md'
+      - 'rules/**/*.rra'
+      - 'rules/**/*.md'
+      - '*.md'
+      - 'crates/ra-test-utils/tests/link_validation.rs'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-links:
+    name: Validate documentation links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: DeterminateSystems/nix-installer-action@c5a866b6ab867e88becbed4467b93592bce69f8a  # v21
+      - uses: DeterminateSystems/magic-nix-cache-action@565684385bcd71bad329742eefe8d12f2e765b39  # v13
+
+      - name: Run link validation test
+        run: |
+          nix develop --command cargo test \
+            --package ra-test-utils \
+            --test link_validation \
+            -- test_documentation_links \
+            --nocapture
+        continue-on-error: true
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "✓ Link validation completed. Check logs for any broken links."
+          echo "Note: Broken links generate warnings but do not fail the build."
