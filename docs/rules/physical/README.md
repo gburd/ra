@@ -1,0 +1,169 @@
+# physical Rules
+
+Total rules in this category:      145
+
+## Overview
+
+Physical optimization rules select specific algorithms and access methods for query execution. These include join algorithms, index selection, aggregation strategies, and parallelization techniques.
+
+## Subcategories
+
+- [access-path-selection](./access-path-selection/) -        8 rules
+- [aggregation-strategies](./aggregation-strategies/) -       16 rules
+- [aggregation](./aggregation/) -        7 rules
+- [distributed](./distributed/) -        4 rules
+- [hardware](./hardware/) -        7 rules
+- [index-selection](./index-selection/) -       36 rules
+- [join-algorithms](./join-algorithms/) -       25 rules
+- [materialization](./materialization/) -       13 rules
+- [optimizer-framework](./optimizer-framework/) -        5 rules
+- [parallelization](./parallelization/) -       16 rules
+- [sort](./sort/) -        8 rules
+
+## Rules
+
+- [Bitmap Index Combination (BitmapAnd/BitmapOr)](./bitmap-index-combination.md) - `bitmap-index-combination`
+- [Covering Index Scan Selection](./covering-index-scan.md) - `covering-index-scan`
+- [Index Condition Pushdown (ICP)](./index-condition-pushdown.md) - `index-condition-pushdown`
+- [Index Skip Scan for Non-Prefix Predicates](./index-skip-scan.md) - `index-skip-scan`
+- ["System R Access Path Selection"](./system-r-access-path-selection.md) - `system-r-access-path-selection`
+- ["System R Interesting Sort Orders"](./system-r-interesting-sort-orders.md) - `system-r-interesting-sort-orders`
+- ["System R Nested-Loop Join Selection"](./system-r-nested-loop-selection.md) - `system-r-nested-loop-selection`
+- ["System R Sort-Merge Join Selection"](./system-r-sort-merge-selection.md) - `system-r-sort-merge-selection`
+- [Adaptive Aggregation](./adaptive-aggregation.md) - `adaptive-aggregation`
+- ["Aggregation Pushdown Below Join"](./aggregation-pushdown.md) - `aggregation-pushdown`
+- ["Columnar Aggregation with Column-at-a-Time Processing"](./columnar-aggregation.md) - `columnar-aggregation`
+- [Distinct Aggregation Strategy](./distinct-aggregation-strategy.md) - `distinct-aggregation-strategy`
+- [Grouping Sets Expansion](./grouping-sets-expansion.md) - `grouping-sets-expansion`
+- [Hash Aggregation](./hash-aggregation.md) - `hash-aggregation`
+- [Hybrid Aggregation](./hybrid-aggregation.md) - `hybrid-aggregation`
+- ["Ordered Aggregation (Aggregation-in-Order)"](./ordered-aggregation.md) - `ordered-aggregation`
+- ["Partial Aggregation Cost Model (When to Pre-Aggregate)"](./partial-aggregation-cost-model.md) - `partial-aggregation-cost-model`
+- [Preaggregation](./preaggregation.md) - `preaggregation`
+- [Sort Aggregation](./sort-aggregation.md) - `sort-aggregation`
+- [Sort-Based Aggregation](./sort-based-aggregation.md) - `sort-based-aggregation`
+- [Streaming Aggregation](./streaming-aggregation.md) - `streaming-aggregation`
+- [Three-Phase Aggregation](./three-phase-aggregation.md) - `three-phase-aggregation`
+- [Two-Phase Aggregation](./two-phase-aggregation.md) - `two-phase-aggregation`
+- [Vectorized Aggregation](./vectorized-aggregation.md) - `vectorized-aggregation`
+- [Eager Aggregation Through Join](./aggregate-pushdown-through-join.md) - `aggregate-pushdown-through-join`
+- ["Cache-Aware Aggregation"](./cache-aware-aggregation.md) - `cache-aware-aggregation`
+- [Distinct Aggregation Optimization](./distinct-aggregation-optimization.md) - `distinct-aggregation-optimization`
+- [Hash vs Sort Aggregation Selection](./hash-vs-sort-aggregation.md) - `hash-vs-sort-aggregation`
+- ["Memory-Aware Hash Aggregate"](./memory-aware-hash-aggregate.md) - `memory-aware-hash-aggregate`
+- [Ordered (Streaming) Aggregation](./ordered-aggregation.md) - `ordered-aggregation`
+- [Two-Phase (Partial/Final) Aggregation](./two-phase-aggregation.md) - `two-phase-aggregation`
+- ["Broadcast Join Selection"](./broadcast-join-selection.md) - `broadcast-join-selection`
+- ["Repartition Pushdown"](./repartition-pushdown.md) - `repartition-pushdown`
+- ["Shuffle-Aware Join"](./shuffle-aware-join.md) - `shuffle-aware-join`
+- ["Skew-Aware Join"](./skew-aware-join.md) - `skew-aware-join`
+- [Branch-Free Predicate Evaluation](./branch-free-selection.md) - `branch-free-selection`
+- [Cache-Conscious Hash Join (Radix Partitioning)](./cache-conscious-join.md) - `cache-conscious-join`
+- ["GPU Acceleration Selection"](./gpu-acceleration-selection.md) - `gpu-acceleration-selection`
+- [NUMA-Aware Data Partitioning](./numa-aware-partitioning.md) - `numa-aware-partitioning`
+- [Software Prefetch for Hash Table Probing](./prefetch-optimization.md) - `prefetch-optimization`
+- ["SIMD Operation Selection"](./simd-operation-selection.md) - `simd-operation-selection`
+- [SIMD-Accelerated Scan and Filter](./simd-scan-filter.md) - `simd-scan-filter`
+- ["Adaptive Index Selection with Runtime Feedback"](./adaptive-index-selection.md) - `adaptive-index-selection`
+- [Bitmap Index Combining with AND/OR](./bitmap-index-combining.md) - `bitmap-index-combining`
+- [Bitmap Index Selection](./bitmap-index-selection.md) - `bitmap-index-selection`
+- [BRIN Index for Sequential/Temporal Data](./brin-index-for-sequential.md) - `brin-index-for-sequential`
+- [Clustered Index for Range Predicates](./clustered-index-for-range.md) - `clustered-index-for-range`
+- [Clustered Index Selection](./clustered-index-selection.md) - `clustered-index-selection`
+- [Columnstore Index for Aggregation Queries](./columnstore-for-aggregation.md) - `columnstore-for-aggregation`
+- [Composite Index Column Order Selection](./composite-index-column-order.md) - `composite-index-column-order`
+- [Covering Index Optimization](./covering-index-optimization.md) - `covering-index-optimization`
+- [Covering Index Selection](./covering-index-selection.md) - `covering-index-selection`
+- [Index Selection for Conjunctive Queries](./dbmin-index-selection.md) - `dbmin-index-selection`
+- [Expression Index Selection](./expression-index-selection.md) - `expression-index-selection`
+- [Filtered (Partial) Index Matching](./filtered-index-matching.md) - `filtered-index-matching`
+- [Full-Text Index for LIKE Patterns](./full-text-index-for-like.md) - `full-text-index-for-like`
+- [GIN Index for Array Operations](./gin-index-for-arrays.md) - `gin-index-for-arrays`
+- [GiST Index for Spatial and Range Types](./gist-index-for-spatial.md) - `gist-index-for-spatial`
+- [Hash Index for Equality Predicates](./hash-index-for-equality.md) - `hash-index-for-equality`
+- ["Hash Index Selection for Equality Lookups"](./hash-index-selection.md) - `hash-index-selection`
+- ["Index vs Sequential Scan Cost Comparison"](./index-cost-comparison.md) - `index-cost-comparison`
+- [Index Intersection vs Union Selection](./index-intersection-vs-union.md) - `index-intersection-vs-union`
+- [Index Intersection](./index-intersection.md) - `index-intersection`
+- [Index Join](./index-join.md) - `index-join`
+- [Index Merge Intersection](./index-merge-intersection.md) - `index-merge-intersection`
+- [Index-Only Scan Preference](./index-only-scan-preference.md) - `index-only-scan-preference`
+- [Index-Only Scan](./index-only-scan.md) - `index-only-scan`
+- [Index Scan](./index-scan.md) - `index-scan`
+- [Index Skip Scan](./index-skip-scan.md) - `index-skip-scan`
+- [Index Union](./index-union.md) - `index-union`
+- [Loose Index Scan](./loose-index-scan.md) - `loose-index-scan`
+- [Multi-Column Index Selection](./multi-column-index-selection.md) - `multi-column-index-selection`
+- [Partial Index Selection](./partial-index-selection.md) - `partial-index-selection`
+- ["Range Index Selection for Ordered Access"](./range-index-selection.md) - `range-index-selection`
+- [Reverse Index Scan](./reverse-index-scan.md) - `reverse-index-scan`
+- ["Sparse Index Scan (Granule-Level Pruning)"](./sparse-index-scan.md) - `sparse-index-scan`
+- [Spatial Index for Geometry Queries](./spatial-index-for-geometry.md) - `spatial-index-for-geometry`
+- [Unique Index for Equality Lookups](./unique-index-for-equality.md) - `unique-index-for-equality`
+- [Adaptive Hash Join](./adaptive-hash-join.md) - `adaptive-hash-join`
+- [Adaptive Join Algorithm](./adaptive-join-algorithm.md) - `adaptive-join-algorithm`
+- [Band Join](./band-join.md) - `band-join`
+- ["Bit Vector Filtering"](./bit-vector-filtering.md) - `bit-vector-filtering`
+- [Block Nested Loop Join](./block-nested-loop-join.md) - `block-nested-loop-join`
+- [Broadcast Hash Join](./broadcast-hash-join.md) - `broadcast-hash-join`
+- ["Cache-Conscious Join"](./cache-conscious-join.md) - `cache-conscious-join`
+- ["Free Join Algorithm"](./free-join-algorithm.md) - `free-join-algorithm`
+- [Grace Hash Join](./grace-hash-join.md) - `grace-hash-join`
+- [Hash Join with Bloom Filter](./hash-join-with-bloom-filter.md) - `hash-join-with-bloom-filter`
+- [Hash Join](./hash-join.md) - `hash-join`
+- ["HoneyComb WCOJ"](./honeycomb-wcoj.md) - `honeycomb-wcoj`
+- [Hybrid Hash Join](./hybrid-hash-join.md) - `hybrid-hash-join`
+- [Index Nested Loop Join](./index-nested-loop-join.md) - `index-nested-loop-join`
+- ["LevelHeaded WCOJ"](./levelheaded-wcoj.md) - `levelheaded-wcoj`
+- [Nested Loop Join](./nested-loop-join.md) - `nested-loop-join`
+- [Radix Hash Join](./radix-hash-join.md) - `radix-hash-join`
+- [Calcite SemiJoinJoinTransposeRule](./semi-join-join-transpose.md) - `calcite-semi-join-join-transpose`
+- [Calcite SemiJoinProjectTransposeRule](./semi-join-project-transpose.md) - `calcite-semi-join-project-transpose`
+- [Shapiro Symmetric Hash Join](./shapiro-symmetric-hash-join.md) - `shapiro-symmetric-hash-join`
+- [Shuffle Hash Join](./shuffle-hash-join.md) - `shuffle-hash-join`
+- [Sort-Merge Join](./sort-merge-join.md) - `sort-merge-join`
+- ["SortMerge"](./sort-merge.md) - `sort-merge`
+- ["Generic WCOJ Algorithm"](./wcoj-generic-join.md) - `wcoj-generic-join`
+- [Zigzag Join](./zigzag-join.md) - `zigzag-join`
+- ["Common Subexpression Materialization"](./common-subexpression-materialization.md) - `common-subexpression-materialization`
+- ["CTE Materialization Strategy Selection"](./cte-materialization-strategy.md) - `cte-materialization-strategy`
+- [Eager Materialization](./eager-materialization.md) - `eager-materialization`
+- [In-Memory Materialization](./in-memory-materialization.md) - `in-memory-materialization`
+- [Incremental View Maintenance](./incremental-view-maintenance.md) - `incremental-view-maintenance`
+- [Lazy Materialization](./lazy-materialization.md) - `lazy-materialization`
+- [Calcite MaterializedViewFilterScanRule](./materialized-view-filter-scan.md) - `calcite-materialized-view-filter-scan`
+- [Materialized View Rewrite](./materialized-view-rewrite.md) - `materialized-view-rewrite`
+- ["Pipeline Breaker Analysis and Minimization"](./pipeline-breaker-analysis.md) - `pipeline-breaker-analysis`
+- [Result Caching](./result-caching.md) - `result-caching`
+- [Temp Table Materialization](./temp-table-materialization.md) - `temp-table-materialization`
+- [Volcano Interesting Orders](./volcano-interesting-orders.md) - `volcano-interesting-orders`
+- [Work Table Spooling](./work-table-spooling.md) - `work-table-spooling`
+- ["Cascades Memo Structure and Group Optimization"](./cascades-memo-structure.md) - `cascades-memo-structure`
+- ["Volcano Branch-and-Bound Pruning"](./volcano-branch-and-bound.md) - `volcano-branch-and-bound`
+- ["Volcano Enforcer Placement"](./volcano-enforcer-placement.md) - `volcano-enforcer-placement`
+- ["Volcano Logical-to-Physical Transformation"](./volcano-logical-to-physical.md) - `volcano-logical-to-physical`
+- ["Volcano Logical Transformation Rules"](./volcano-transformation-rules.md) - `volcano-transformation-rules`
+- [Bushy Parallelism](./bushy-parallelism.md) - `bushy-parallelism`
+- [CPU Affinity Placement](./cpu-affinity-placement.md) - `cpu-affinity-placement`
+- [Degree of Parallelism Selection](./degree-of-parallelism-selection.md) - `degree-of-parallelism-selection`
+- [Inter-Operator Parallelism](./inter-operator-parallelism.md) - `inter-operator-parallelism`
+- [Intra-Operator Parallelism](./intra-operator-parallelism.md) - `intra-operator-parallelism`
+- [Morsel-Driven Parallelism](./morsel-driven-parallelism.md) - `morsel-driven-parallelism`
+- [NUMA-Aware Scheduling](./numa-aware-scheduling.md) - `numa-aware-scheduling`
+- [Parallel Aggregation](./parallel-aggregation.md) - `parallel-aggregation`
+- [Parallel Append](./parallel-append.md) - `parallel-append`
+- [Parallel Hash Join](./parallel-hash-join.md) - `parallel-hash-join`
+- [Parallel Index Scan](./parallel-index-scan.md) - `parallel-index-scan`
+- [Parallel Partition-Wise Join](./parallel-partition-wise-join.md) - `parallel-partition-wise-join`
+- [Parallel Scan](./parallel-scan.md) - `parallel-scan`
+- [Parallel Sort](./parallel-sort.md) - `parallel-sort`
+- [Parallel Union](./parallel-union.md) - `parallel-union`
+- [Work-Stealing Parallelism](./work-stealing-parallelism.md) - `work-stealing-parallelism`
+- ["Memory-Aware Sort"](./memory-aware-sort.md) - `memory-aware-sort`
+- [Sort Avoidance Through Aggregate Grouping](./sort-avoidance-by-grouping.md) - `sort-avoidance-by-grouping`
+- [Distribution-Aware Sort Selection](./sort-distribution-aware.md) - `sort-distribution-aware`
+- [Sort Elimination by Index Order](./sort-elimination-by-index.md) - `sort-elimination-by-index`
+- [Sort + Limit to Top-N Heap](./sort-limit-heap.md) - `sort-limit-to-heap`
+- [Adjacent Sort Merge](./sort-merge-adjacent.md) - `sort-merge-adjacent`
+- [Partial Order Exploitation](./sort-partial-order-exploitation.md) - `sort-partial-order-exploitation`
+- [External Sort with Spill Partitioning](./sort-spill-partitioning.md) - `sort-spill-partitioning`

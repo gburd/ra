@@ -1,0 +1,110 @@
+# Rule: Bidirectional Search Optimization
+
+**Category:** multi-model/graph
+**File:** `rules/multi-model/graph/bidirectional-search.rra`
+
+## Metadata
+
+- **ID:** `bidirectional-search`
+- **Version:** "1.0.0"
+- **Databases:** neo4j, janusgraph, neptune
+- **Tags:** graph, traversal, pathfinding, bidirectional
+- **SQL Standard:** "cypher:9"
+- **Authors:** "RA Contributors"
+
+
+# Bidirectional Search Optimization
+
+## Description
+
+Replaces a single-direction shortest-path search with a bidirectional
+search that expands from both endpoints simultaneously. The two search
+frontiers meet in the middle, reducing the explored subgraph from
+O(b^d) to O(b^(d/2)) where b is the branching factor and d is the
+path depth.
+
+**When to apply**: A shortest-path or reachability query specifies both
+a start and end node, and the graph has high branching factor.
+
+**Why it works**: Expanding from both ends keeps each frontier small.
+The total nodes visited drops exponentially compared to a unidirectional
+search from a single source.
+
+## Relational Algebra
+
+```algebra
+shortest_path(source, target, max_depth)
+  -> bidirectional_bfs(source, target, max_depth / 2)
+  where source and target are both bound
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("bidirectional-search";
+    "(shortest-path ?src ?dst ?depth)" =>
+    "(bidirectional-bfs ?src ?dst ?depth)"
+    if both_bound("?src", "?dst")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(src: &Expr, dst: &Expr) -> bool {
+    // Both endpoints must be bound (not free variables)
+    src.is_bound() && dst.is_bound()
+    // Edge weights must be non-negative (for BFS correctness)
+    // or uniform (for unweighted shortest path)
+}
+```
+
+**Restrictions:**
+- Both source and target must be known at plan time
+- Only valid for unweighted or uniform-weight shortest path
+- Directed graphs need forward and reverse adjacency lists
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    branching_factor: f64,
+    path_depth: u32,
+) -> f64 {
+    let unidirectional = branching_factor.powi(path_depth as i32);
+    let half_depth = (path_depth + 1) / 2;
+    let bidirectional =
+        2.0 * branching_factor.powi(half_depth as i32);
+    (unidirectional - bidirectional) / unidirectional
+}
+```
+
+**Typical benefit**: 0.8-0.99 for depths >= 4 with branching factor > 3.
+
+## Test Cases
+
+```cypher
+-- Positive: both endpoints bound
+MATCH path = shortestPath(
+  (a:Person {name: 'Alice'})-[*..6]-(b:Person {name: 'Bob'})
+)
+RETURN path;
+-- Optimizer converts to bidirectional BFS
+```
+
+```cypher
+-- Negative: target is unbound (all reachable nodes)
+MATCH path = shortestPath(
+  (a:Person {name: 'Alice'})-[*..6]-(b:Person)
+)
+RETURN path;
+-- Cannot use bidirectional: target is free
+```
+
+## References
+
+Neo4j: org.neo4j.cypher.internal.runtime.interpreted.pipes.ShortestPathPipe
+Pohl "Bi-directional Search" (Machine Intelligence 6, 1971)
+Goldberg, Harrelson "Computing the Shortest Path: A* Search Meets Graph Theory" (SODA 2005)

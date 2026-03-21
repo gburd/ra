@@ -1,0 +1,202 @@
+# Rule: Push Filter into DEFINE
+
+**Category:** logical/rpr
+**File:** `rules/rpr/push-filter-into-define.rra`
+
+## Metadata
+
+- **ID:** `rpr-push-filter-into-define`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, oracle, duckdb, generic
+- **Tags:** rpr, predicate-pushdown, define, filter
+- **Authors:** "RA Contributors"
+
+## Preconditions
+
+```yaml
+  - type: pattern
+    must_match: "(filter ?pred (row-pattern ?input ?partition ?order ?defines ?measures ?pattern))"
+  - type: predicate
+    condition: "predicate_references_pattern_variables(?pred)"
+    description: "Filter predicate references columns used in pattern DEFINE clauses"
+```
+
+
+# Push Filter into DEFINE
+
+## Description
+
+Pushes filter predicates on pattern-defined columns into the DEFINE
+conditions of the RowPattern operator. This causes the pattern
+matcher to reject rows earlier during DFA evaluation, reducing the
+number of candidate matches explored.
+
+**When to apply**: A filter sits on top of a RowPattern operator
+and its predicate references columns that appear in DEFINE
+conditions.
+
+**Why it works**: If the filter eliminates rows that would fail a
+DEFINE condition, adding the predicate to DEFINE causes the DFA
+to prune those rows during matching rather than producing them and
+discarding them afterward.
+
+## Relational Algebra
+
+```algebra
+-- Before: filter after pattern matching
+sigma[price > 100](
+  RowPattern[
+    DEFINE A AS price > PREV(price)
+  ](R)
+)
+
+-- After: filter absorbed into DEFINE
+RowPattern[
+  DEFINE A AS (price > PREV(price) AND price > 100)
+](R)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Push filter predicate into all applicable DEFINE conditions
+rw!("rpr-push-filter-into-define";
+    "(filter ?pred
+       (row-pattern ?input ?partition ?order
+         (defines ?defs) ?measures ?pattern))" =>
+    "(row-pattern ?input ?partition ?order
+       (defines (conjoin-all ?defs ?pred))
+       ?measures ?pattern)"
+    if predicate_references_pattern_variables("?pred", "?defs")
+),
+
+// Push filter predicate into specific pattern variable's DEFINE
+rw!("rpr-push-filter-into-specific-define";
+    "(filter (and ?pred_on_var ?other_preds)
+       (row-pattern ?input ?partition ?order
+         (defines ?defs) ?measures ?pattern))" =>
+    "(filter ?other_preds
+       (row-pattern ?input ?partition ?order
+         (defines (conjoin-specific ?defs ?pred_on_var))
+         ?measures ?pattern))"
+    if references_single_pattern_var("?pred_on_var")
+),
+```
+
+## Preconditions
+
+```rust
+fn predicate_references_pattern_variables(
+    pred: &Expr,
+    defs: &HashMap<Symbol, Expr>,
+) -> bool {
+    // The predicate must reference columns that are used within
+    // at least one DEFINE condition. This ensures the predicate
+    // is relevant to pattern matching.
+    let pred_cols = pred.column_references();
+    let define_cols: HashSet<_> = defs.values()
+        .flat_map(|d| d.column_references())
+        .collect();
+    pred_cols.iter().any(|c| define_cols.contains(c))
+}
+
+fn references_single_pattern_var(pred: &Expr) -> bool {
+    // Predicate must reference exactly one pattern variable,
+    // so it can be pushed into that specific DEFINE clause.
+    let vars = pred.pattern_variable_references();
+    vars.len() == 1
+}
+```
+
+**Restrictions:**
+- Predicate must reference columns that appear in DEFINE conditions.
+- Predicates referencing MEASURE outputs cannot be pushed (they are computed after matching).
+- Complex predicates involving multiple pattern variables are conjoined to all relevant DEFINEs.
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    input_card: f64,
+    selectivity: f64,
+    avg_pattern_length: f64,
+) -> f64 {
+    // Before: DFA processes all rows, filter removes
+    // (1 - selectivity) fraction of matches afterward.
+    let matches_before = input_card / avg_pattern_length;
+    let filter_cost = matches_before * (1.0 - selectivity);
+
+    // After: DFA rejects non-matching rows inline during
+    // pattern evaluation. Saves DFA transitions for
+    // partial matches that would have been discarded.
+    let saved_transitions = input_card * (1.0 - selectivity)
+        * avg_pattern_length * 0.5;
+
+    saved_transitions / (input_card * avg_pattern_length)
+}
+```
+
+**Typical benefit**: 10-50%. Depends on filter selectivity and
+average pattern match length. Highly selective filters provide
+the greatest savings.
+
+## Test Cases
+
+### Positive: filter on DEFINE column
+
+```sql
+-- Before
+SELECT * FROM (
+  SELECT * FROM stock_prices
+    MATCH_RECOGNIZE (
+      ORDER BY trade_date
+      PATTERN (A+ B+)
+      DEFINE
+        A AS price > PREV(price),
+        B AS price < PREV(price)
+    )
+) WHERE price > 100;
+
+-- After: price > 100 pushed into both DEFINE A and DEFINE B
+-- DEFINE A AS (price > PREV(price) AND price > 100)
+-- DEFINE B AS (price < PREV(price) AND price > 100)
+```
+
+### Positive: filter on specific pattern variable
+
+```sql
+-- Before
+SELECT * FROM stock_prices
+  MATCH_RECOGNIZE (
+    MEASURES LAST(B.volume) AS peak_volume
+    PATTERN (A+ B+ C+)
+    DEFINE
+      A AS price > PREV(price),
+      B AS price > PREV(price) AND volume > 500000,
+      C AS price < PREV(price)
+  )
+WHERE peak_volume > 1000000;
+
+-- After: Cannot push (peak_volume is a MEASURE, not a DEFINE column)
+-- Rule does NOT apply.
+```
+
+### Negative: filter on MEASURE output
+
+```sql
+-- Cannot push: start_price is a MEASURE computed after matching
+SELECT * FROM stock_prices
+  MATCH_RECOGNIZE (
+    MEASURES FIRST(A.price) AS start_price
+    PATTERN (A+ B+)
+    DEFINE A AS price > PREV(price), B AS price < PREV(price)
+  )
+WHERE start_price > 200;
+```
+
+## References
+
+- Zemke, F. et al. "Row Pattern Recognition in SQL" (2012)
+- Pirahesh et al. "Extensible/Rule Based Query Rewrite Optimization" SIGMOD (1992)

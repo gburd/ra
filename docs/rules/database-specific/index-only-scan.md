@@ -1,0 +1,124 @@
+# Rule: PostgreSQL Index-Only Scan
+
+**Category:** database-specific/postgresql
+**File:** `rules/database-specific/postgresql/index-only-scan.rra`
+
+## Metadata
+
+- **ID:** `postgresql-index-only-scan`
+- **Version:** "1.0.0"
+- **Databases:** postgresql
+- **Tags:** database-specific, postgresql, index-only-scan, visibility-map
+- **Authors:** "RA Contributors"
+
+
+# PostgreSQL Index-Only Scan
+
+## Description
+
+When all columns needed by a query are available in an index,
+PostgreSQL can satisfy the query from the index alone without
+visiting the heap (table) pages.  However, due to MVCC, PostgreSQL
+must check the visibility map to determine if all tuples on a heap
+page are visible to all transactions.  If a page is all-visible,
+the heap access is skipped; otherwise, a heap fetch is required to
+check tuple visibility.
+
+**When to apply**: All columns in the output, WHERE, ORDER BY, and
+GROUP BY are present in a single index, and the table has been
+recently vacuumed (so the visibility map is up to date).
+
+**Why it works**: The index is smaller than the heap, so scanning
+only the index reduces I/O.  The visibility map check is O(1) per
+heap page.  After VACUUM, most pages are marked all-visible,
+making the index-only scan nearly as fast as a pure index scan.
+
+**Database version**: PostgreSQL 9.2+
+
+## Relational Algebra
+
+```algebra
+-- Before: index scan + heap fetch
+pi[a, b](heap_fetch(index_scan[idx_ab](T)))
+
+-- After: index-only scan with visibility check
+pi[a, b](index_only_scan[idx_ab, vis_map](T))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("postgresql-index-only-scan";
+    "(project ?cols
+        (heap-fetch (index-scan ?table ?index ?pred)))" =>
+    "(project ?cols
+        (index-only-scan ?table ?index ?pred))"
+    if is_database("postgresql")
+    if index_covers_all_columns("?index", "?cols", "?pred")
+    if visibility_map_ratio_exceeds("?table", 0.5)
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    index: &Index,
+    referenced_columns: &[Column],
+    visibility_ratio: f64,
+) -> bool {
+    referenced_columns.iter().all(|c| {
+        index.columns().contains(c)
+    })
+    && visibility_ratio > 0.5
+}
+```
+
+**Restrictions:**
+- Requires all referenced columns to be in the index
+- Effectiveness depends on visibility map coverage (VACUUM)
+- INCLUDE columns (PostgreSQL 11+) help make more indexes
+  covering without adding to the B-tree key
+- Expression indexes also support index-only scans
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    heap_pages: f64,
+    visibility_ratio: f64,
+    index_pages: f64,
+) -> f64 {
+    let heap_fetches_saved =
+        heap_pages * visibility_ratio;
+    heap_fetches_saved - index_pages * 0.1
+}
+```
+
+**Typical benefit**: 50-90% reduction in I/O for well-vacuumed
+tables with covering indexes.
+
+## Test Cases
+
+```sql
+-- Positive: covering index, recently vacuumed
+CREATE INDEX idx_emp ON employees(dept_id, salary);
+VACUUM employees;
+SELECT dept_id, salary FROM employees WHERE dept_id = 5;
+-- Index-only scan, heap access skipped for all-visible pages
+```
+
+```sql
+-- Negative: column not in index
+SELECT dept_id, salary, name FROM employees
+WHERE dept_id = 5;
+-- Must access heap for 'name' column
+```
+
+## References
+
+PostgreSQL: Documentation, "Index-Only Scans and Covering Indexes"
+PostgreSQL: src/backend/executor/nodeIndexonlyscan.c
+PostgreSQL: Visibility Map, src/backend/access/heap/visibilitymap.c

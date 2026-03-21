@@ -1,0 +1,167 @@
+# Rule: Materialize Sink Projection Pushdown
+
+**Category:** database-specific/materialize
+**File:** `rules/database-specific/materialize/sink-projection-pushdown.rra`
+
+## Metadata
+
+- **ID:** `materialize-sink-projection-pushdown`
+- **Version:** "1.0.0"
+- **Databases:** materialize
+- **Tags:** projection, pushdown, sink, memory, arrangement, differential
+- **Authors:** "Materialize Inc."
+
+
+# Materialize Sink Projection Pushdown
+
+## Description
+
+Pushes column projections through the dataflow to reduce the width of maintained
+arrangements. When a materialized view only outputs a subset of columns from its
+source, the optimizer removes unused columns from intermediate arrangements,
+reducing per-row memory consumption throughout the dataflow.
+
+**When to apply**: Materialized views with SELECT clauses that project a subset
+of columns from the source or join result. The optimizer computes the demand set
+(columns actually needed by downstream operators) and inserts projections as
+early as possible in the dataflow.
+
+**Why it works**: Differential dataflow arrangements store full rows. If a view
+selects 5 columns from a 50-column source, the arrangement stores 10x more data
+than needed. By projecting early (demand-driven), arrangements store only the
+columns needed downstream, reducing memory proportionally to the projection ratio.
+
+## Relational Algebra
+
+```algebra
+-- Before: full-width arrangements throughout
+pi[name, email](
+  join(
+    arrange(users, all_columns),
+    arrange(orders, all_columns)))
+
+-- After: early projection, narrow arrangements
+pi[name, email](
+  join(
+    arrange(pi[id, name, email](users), narrow),
+    arrange(pi[user_id](orders), narrow)))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("materialize-demand-projection";
+    "(project ?output-cols
+       (join ?type ?pred ?left ?right))" =>
+    "(project ?output-cols
+       (join ?type ?pred
+          (project (demand-left ?output-cols ?pred) ?left)
+          (project (demand-right ?output-cols ?pred) ?right)))"
+    if projection_reduces_width("?output-cols", "?left", "?right")
+),
+
+rw!("materialize-early-project-into-get";
+    "(project ?cols
+       (get ?source))" =>
+    "(get-projected ?source ?cols)"
+    if is_source_wider("?source", "?cols")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> bool {
+    let demanded = stats.demanded_column_count as f64;
+    let total = stats.source_column_count as f64;
+    demanded < total * 0.8  // at least 20% column reduction
+        && stats.arrangement_rows > 1000
+}
+```
+
+**Restrictions:**
+- Cannot project away columns used in join predicates
+- Columns used by downstream operators (filters, aggregations) must be kept
+- Projections create new arrangement keys; shared arrangements may not benefit
+- Very narrow projections may increase key duplication in arrangements
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let rows = stats.arrangement_rows as f64;
+    let full_width = stats.full_row_bytes as f64;
+    let projected_width = stats.projected_row_bytes as f64;
+
+    let without = rows * full_width;
+    let with = rows * projected_width;
+
+    if without > with {
+        (without - with) / without
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 20% to 3x memory reduction, proportional to projection ratio.
+
+## Test Cases
+
+### Positive: Narrow view from wide source
+
+```sql
+-- Source has 50 columns, view only needs 3
+CREATE MATERIALIZED VIEW user_emails AS
+SELECT id, name, email
+FROM users
+WHERE status = 'active';
+
+-- Arrangement stores only (id, name, email, status) instead of all 50 columns
+-- status needed for filter, then dropped after
+-- ~94% width reduction
+```
+
+### Positive: Join with narrow output
+
+```sql
+CREATE MATERIALIZED VIEW order_names AS
+SELECT o.id, u.name
+FROM orders o JOIN users u ON o.user_id = u.id;
+
+-- Users arrangement: only (id, name) instead of full 50 columns
+-- Orders arrangement: only (id, user_id) instead of full 30 columns
+-- Massive memory savings for large tables
+```
+
+### Negative: SELECT * view
+
+```sql
+CREATE MATERIALIZED VIEW all_users AS
+SELECT * FROM users WHERE status = 'active';
+
+-- All columns demanded; no projection benefit
+-- Arrangement stores full-width rows
+```
+
+## References
+
+**Implementation:**
+- Materialize source: `src/transform/src/demand.rs`
+- Projection pushdown: `src/transform/src/projection_pushdown.rs`
+- Column demand analysis: `src/transform/src/analysis.rs`
+
+**Documentation:**
+- Materialize docs: "Query optimization"
+
+**Papers:**
+- McSherry, F., et al., "Shared Arrangements: practical inter-query sharing
+  for streaming dataflows", PVLDB 2020

@@ -1,0 +1,159 @@
+# Rule: Minimize Network Transfer via Operator Reordering
+
+**Category:** distributed/data-movement
+**File:** `rules/distributed/data-movement/minimize-network-transfer.rra`
+
+## Metadata
+
+- **ID:** `minimize-network-transfer`
+- **Version:** "1.0.0"
+- **Databases:** presto, trino, spark, cockroachdb, greenplum
+- **Tags:** distributed, data-movement, network, reordering, optimization
+- **Authors:** "RA Contributors"
+
+
+# Minimize Network Transfer via Operator Reordering
+
+## Description
+
+Reorders operators to minimize the volume of data that crosses exchange
+boundaries. Operators that reduce cardinality (filters, aggregations,
+projections) should execute before operators that require data movement
+(exchanges), while operators that expand data (unnest, cross join) should
+execute after exchanges when possible.
+
+**When to apply**: After exchange insertion, operators above or below
+exchanges can be moved to reduce network transfer.
+
+**Why it works**: Network transfer cost is proportional to bytes
+transferred. Any operator that reduces the byte volume should execute
+on the source side of an exchange.
+
+## Relational Algebra
+
+```algebra
+-- General principle: push reducing operators below exchange
+Op_reduce(Exchange[d](R)) -> Exchange[d](Op_reduce(R))
+  where Op_reduce in {filter, project, partial_agg, limit}
+
+-- General principle: pull expanding operators above exchange
+Exchange[d](Op_expand(R)) -> Op_expand(Exchange[d](R))
+  where Op_expand in {unnest, generate_series, cross_join}
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Composition of individual pushdown rules
+rw!("push-reducing-ops-below-exchange";
+    "(?reducing_op ?args (exchange ?type ?child))" =>
+    "(exchange ?type (?reducing_op ?args ?child))"
+    if is_reducing_operator("?reducing_op")
+    if operands_available_on_child("?args", "?child")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    operator: &Operator,
+    exchange: &Exchange,
+) -> bool {
+    match operator {
+        // Reducing operators: push below exchange
+        Operator::Filter(pred) => {
+            pred.is_deterministic()
+            && pred.references_subset_of(&exchange.child_columns())
+        }
+        Operator::Project(cols) => true, // always reducible
+        Operator::Limit(n) => {
+            matches!(exchange.dist, ExchangeType::Gather)
+        }
+        Operator::PartialAggregate(_, _) => true,
+        // Expanding operators: keep above exchange
+        Operator::Unnest(_) | Operator::CrossJoin(_, _) => false,
+        _ => false,
+    }
+}
+```
+
+**Restrictions:**
+- Non-deterministic operators cannot be pushed (different results on
+  each node)
+- Some operators depend on global state (e.g., window functions with
+  PARTITION BY the exchange key) and cannot be moved
+- Must preserve semantic correctness: moving operators across exchanges
+  must not change the query result
+
+## Cost Model
+
+```rust
+fn reorder_benefit(
+    original_bytes: f64,
+    reduced_bytes: f64,
+    num_nodes: u32,
+    network_bandwidth: f64,
+) -> f64 {
+    let shuffle_fraction =
+        (num_nodes - 1) as f64 / num_nodes as f64;
+    let original_cost =
+        original_bytes * shuffle_fraction / network_bandwidth;
+    let reduced_cost =
+        reduced_bytes * shuffle_fraction / network_bandwidth;
+    original_cost - reduced_cost
+}
+```
+
+**Typical benefit**: Depends on how much the reordered operator reduces
+data volume. A 10x reduction in cardinality before an exchange saves 90%
+of network cost for that exchange.
+
+## Test Cases
+
+```sql
+-- Positive: filter + project pushed below exchange
+-- Before:
+-- Project(id, name)
+--   Filter(status = 'active')
+--     Exchange[hash(region)]
+--       Scan(users)  -- 50 columns
+
+-- After:
+-- Exchange[hash(region)]
+--   Project(id, name, region)  -- keep region for exchange
+--     Filter(status = 'active')
+--       Scan(users)
+-- Much less data crosses the network
+```
+
+```sql
+-- Positive: unnest kept above exchange
+-- Before:
+-- Exchange[hash(user_id)]
+--   Unnest(tags)
+--     Scan(posts)  -- tags: array column, avg 5 elements
+
+-- After:
+-- Unnest(tags)
+--   Exchange[hash(user_id)]
+--     Scan(posts)
+-- Send 1 row per post instead of 5 rows per post
+```
+
+```sql
+-- Negative: non-deterministic filter cannot be pushed
+-- Filter(random() < 0.01)
+--   Exchange[hash(id)]
+--     Scan(events)
+-- random() would produce different samples on each node
+```
+
+## References
+
+Presto/Trino: presto-main/src/main/java/com/facebook/presto/sql/planner/iterative/ (various push-through rules)
+Spark SQL: sql/catalyst/src/main/scala/org/apache/spark/sql/catalyst/optimizer/Optimizer.scala
+CockroachDB: pkg/sql/opt/norm/rules/ (various pushdown rules)
+Chaudhuri, "An Overview of Query Optimization in Relational Systems" (PODS 1998)

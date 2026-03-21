@@ -1,0 +1,94 @@
+# Rule: Array Function Optimization
+
+**Category:** logical/function-optimization
+**File:** `rules/logical/function-optimization/array-function-optimization.rra`
+
+## Metadata
+
+- **ID:** `array-function-optimization`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, duckdb
+- **Tags:** function, array, gin, unnest, containment
+- **Authors:** "RA Contributors"
+
+
+# Array Function Optimization
+
+## Description
+
+Optimizes array operations by matching containment predicates to GIN
+indexes, rewriting UNNEST-then-aggregate patterns to direct array
+operations, and eliminating redundant array construction/deconstruction
+round-trips.
+
+**When to apply**: Array containment checks (`@>`, `&&`), UNNEST
+followed by re-aggregation, or nested array operations that can be
+simplified.
+
+**Why it works**: GIN indexes support efficient array containment
+lookups. Direct array functions avoid materializing the unnested set.
+Eliminating array round-trips saves allocation and per-element overhead.
+
+## Relational Algebra
+
+```algebra
+-- GIN index for array containment
+sigma[tags @> ARRAY['sql']](R)
+  -> gin_index_scan[I_gin](tags @> ARRAY['sql'])
+
+-- Simplify UNNEST + re-aggregate
+gamma[id, ARRAY_AGG(elem)](unnest(tags) AS elem, id)
+  -> pass-through(tags, id)
+  -- UNNEST then ARRAY_AGG on same array is identity
+```
+
+## Implementation
+
+```rust
+rw!("array-gin-containment";
+    "(filter (array-contains ?col ?val) (scan ?table))" =>
+    "(gin-index-scan ?idx ?col ?val)"
+    if has_gin_index("?table", "?col")
+),
+
+rw!("unnest-reagg-identity";
+    "(aggregate ?group_cols (array-agg ?elem)
+       (unnest ?arr ?elem ?child))" =>
+    "(project ?group_cols ?arr ?child)"
+    if same_source("?arr", "?elem")
+),
+```
+
+## Test Cases
+
+### Positive: GIN index for array overlap
+
+```sql
+-- GIN index on tags
+SELECT * FROM posts WHERE tags && ARRAY['database', 'optimization'];
+-- Uses GIN index scan for overlap check
+```
+
+### Positive: Eliminate UNNEST + ARRAY_AGG round-trip
+
+```sql
+-- Before
+SELECT id, ARRAY_AGG(elem)
+FROM (SELECT id, UNNEST(tags) AS elem FROM articles) sub
+GROUP BY id;
+-- After: just SELECT id, tags FROM articles
+```
+
+### Negative: Transform applied during UNNEST
+
+```sql
+SELECT id, ARRAY_AGG(UPPER(elem))
+FROM (SELECT id, UNNEST(tags) AS elem FROM articles) sub
+GROUP BY id;
+-- UPPER(elem) means this is not a simple round-trip
+```
+
+## References
+
+- PostgreSQL: GIN indexes for array operations
+- PostgreSQL: Array functions and operators

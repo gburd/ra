@@ -1,0 +1,136 @@
+# Rule: Remove Redundant Exchange
+
+**Category:** distributed/exchange-placement
+**File:** `rules/distributed/exchange-placement/remove-redundant-exchange.rra`
+
+## Metadata
+
+- **ID:** `remove-redundant-exchange`
+- **Version:** "1.0.0"
+- **Databases:** presto, trino, spark, greenplum, cockroachdb
+- **Tags:** distributed, exchange, elimination, optimization
+- **Authors:** "RA Contributors"
+
+
+# Remove Redundant Exchange
+
+## Description
+
+Eliminates exchange operators whose input already satisfies the required
+distribution. This commonly happens when two consecutive operators share
+the same partitioning key, or after rule-based transformations introduce
+exchanges that are provably unnecessary.
+
+**When to apply**: An exchange sits between operators where the child's
+output distribution already satisfies the parent's input requirement.
+
+**Why it works**: Each exchange costs a full network shuffle. Removing
+unnecessary shuffles directly reduces network I/O and latency.
+
+## Relational Algebra
+
+```algebra
+Exchange[hash(k)](R) -> R
+  where output_dist(R) = HashPartitioned(k)
+
+Exchange[gather](R) -> R
+  where output_dist(R) = Singleton
+
+Exchange[broadcast](R) -> R
+  where output_dist(R) = Replicated
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("remove-redundant-hash-exchange";
+    "(exchange hash_partition ?child ?keys)" =>
+    "?child"
+    if already_partitioned("?child", "?keys")
+),
+
+rw!("remove-redundant-gather";
+    "(exchange gather ?child)" =>
+    "?child"
+    if is_singleton("?child")
+),
+
+rw!("remove-redundant-broadcast";
+    "(exchange broadcast ?child)" =>
+    "?child"
+    if is_replicated("?child")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    exchange_type: ExchangeType,
+    child_dist: &Distribution,
+) -> bool {
+    match exchange_type {
+        ExchangeType::HashPartition(keys) => {
+            child_dist.is_hash_partitioned_on(keys)
+        }
+        ExchangeType::Gather => child_dist.is_singleton(),
+        ExchangeType::Broadcast => child_dist.is_replicated(),
+    }
+}
+```
+
+**Restrictions:**
+- Must verify that the child's actual distribution matches the exchange's
+  target distribution exactly (including key order for hash partitioning)
+- Functional dependencies may allow subsumption (partitioned on PK
+  satisfies partitioning on any key determined by PK)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    rows: f64,
+    row_bytes: f64,
+    num_nodes: u32,
+    network_bandwidth: f64,
+) -> f64 {
+    // Benefit = full cost of the eliminated exchange
+    let transfer_bytes = rows * row_bytes;
+    let network_cost = transfer_bytes / network_bandwidth;
+    let serialization_cost = transfer_bytes * 0.1;
+    network_cost + serialization_cost
+}
+```
+
+**Typical benefit**: 0.2-0.8 of query cost when a redundant shuffle of
+a large relation is eliminated.
+
+## Test Cases
+
+```sql
+-- Positive: table partitioned on join key, exchange is redundant
+-- Before plan:
+-- HashJoin(o.id = i.order_id)
+--   Exchange[hash(id)](Scan(orders))       -- orders already on id
+--   Exchange[hash(order_id)](Scan(items))
+
+-- After plan:
+-- HashJoin(o.id = i.order_id)
+--   Scan(orders)                           -- exchange removed
+--   Exchange[hash(order_id)](Scan(items))
+```
+
+```sql
+-- Negative: table partitioned on different key, exchange is needed
+-- orders partitioned on date, join on customer_id
+SELECT * FROM orders o JOIN customers c ON o.customer_id = c.id;
+-- Exchange[hash(customer_id)] on orders is NOT redundant
+```
+
+## References
+
+Presto/Trino: presto-main/src/main/java/com/facebook/presto/sql/planner/optimizations/AddExchanges.java - isDistributionSatisfied()
+Spark SQL: sql/catalyst/src/main/scala/org/apache/spark/sql/execution/exchange/EnsureRequirements.scala
+Greenplum: src/backend/cdb/cdbllize.c - is_motion_redundant()

@@ -1,0 +1,258 @@
+# Rule: Lateral Join Decorrelation
+
+**Category:** logical/subquery-unnesting
+**File:** `rules/logical/subquery-unnesting/lateral-join-decorrelation.rra`
+
+## Metadata
+
+- **ID:** `lateral-join-decorrelation`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, oracle, mssql, duckdb, cockroachdb
+- **Tags:** subquery, lateral, decorrelation, apply, dependent-join
+- **Authors:** "RA Contributors"
+
+
+# Lateral Join Decorrelation
+
+## Description
+
+Converts LATERAL joins (also known as APPLY in mssql, or dependent
+joins in relational algebra) into regular joins when the lateral reference
+can be replaced by an equi-join condition. LATERAL forces row-at-a-time
+evaluation because the right side depends on each left row. Decorrelation
+enables set-based hash or merge joins.
+
+**When to apply**: LATERAL/APPLY joins where:
+- The lateral reference is used only in equality predicates
+- The right side is a simple filter + project (no side effects)
+- The correlation can be expressed as a standard join condition
+
+**Why it works**: `R CROSS JOIN LATERAL (SELECT ... FROM S WHERE S.fk = R.pk)`
+is semantically identical to `R JOIN S ON S.fk = R.pk` when the lateral
+query is a simple filter. Removing the LATERAL keyword allows the optimizer
+to choose any join algorithm.
+
+## Relational Algebra
+
+```algebra
+-- Simple LATERAL with equality correlation
+lateral_join(R, filter[S.fk = R.pk](project[cols](S)))
+  -> join[R.pk = S.fk](R, project[cols](S))
+
+-- LATERAL with aggregate (group-by decorrelation)
+lateral_join(R, aggregate[agg](filter[S.fk = R.pk](S)))
+  -> left_join[R.pk = T.fk](R, T)
+  where T = aggregate[agg, GROUP BY fk](S)
+
+-- LATERAL with ORDER BY + LIMIT (top-N per group)
+lateral_join(R, limit[N](sort[key](filter[S.fk = R.pk](S))))
+  -> top_n_per_group[N, key, R.pk = S.fk](R, S)
+  -- Requires window function or specialized operator
+
+-- Non-decorrelatable LATERAL (must keep apply)
+lateral_join(R, f(R.col))
+  -> apply(R, f(R.col))
+  where f has side effects or non-equality reference
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Simple LATERAL filter -> regular join
+rw!("lateral-filter-to-join";
+    "(lateral-join ?left
+       (filter (= ?inner_col ?outer_ref) ?right))" =>
+    "(join (= ?outer_ref ?inner_col) ?left ?right)"
+    if is_outer_reference("?outer_ref", "?left")
+    if is_inner_column("?inner_col", "?right")
+),
+
+// LATERAL with project + filter -> join + project
+rw!("lateral-project-filter-to-join";
+    "(lateral-join ?left
+       (project ?cols (filter (= ?fk ?outer_ref) ?right)))" =>
+    "(project ?cols (join (= ?outer_ref ?fk) ?left ?right))"
+    if is_outer_reference("?outer_ref", "?left")
+),
+
+// LATERAL with aggregate -> left join + grouped aggregate
+rw!("lateral-aggregate-to-grouped-join";
+    "(lateral-join ?left
+       (aggregate ?agg (filter (= ?corr ?outer_ref) ?inner)))" =>
+    "(left-join (= ?outer_ref ?corr)
+       ?left
+       (aggregate (?agg group-by ?corr) ?inner))"
+    if is_outer_reference("?outer_ref", "?left")
+),
+
+// LATERAL with ORDER BY + LIMIT -> window function
+rw!("lateral-top-n-to-window";
+    "(lateral-join ?left
+       (limit ?n (sort ?key (filter (= ?corr ?outer_ref) ?inner))))" =>
+    "(filter (rn <= ?n)
+       (window (row-number partition-by ?corr order-by ?key)
+         (join (= ?outer_ref ?corr) ?left ?inner)))"
+    if is_outer_reference("?outer_ref", "?left")
+),
+```
+
+**Restrictions:**
+- LATERAL with table-valued functions cannot be decorrelated
+- Non-equality correlations (range, LIKE) remain as apply operators
+- LATERAL with INSERT/UPDATE/DELETE (side effects) must keep LATERAL
+- ORDER BY + LIMIT requires window function or specialized Top-N operator
+- Recursive LATERAL references cannot be decorrelated
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    outer_size: u64,
+    inner_size: u64,
+    lateral_type: LateralType,
+) -> f64 {
+    let nested_cost = outer_size as f64 * inner_size as f64;
+
+    let decorrelated_cost = match lateral_type {
+        LateralType::SimpleFilter => {
+            // Hash join: O(N + M)
+            (outer_size + inner_size) as f64
+        }
+        LateralType::Aggregate => {
+            // Group-by + hash join
+            inner_size as f64 * 1.5 + outer_size as f64
+        }
+        LateralType::TopN { n } => {
+            // Window function + filter
+            (outer_size + inner_size) as f64 * 1.2 + n as f64
+        }
+    };
+
+    (nested_cost - decorrelated_cost) / nested_cost
+}
+```
+
+**Typical benefit**: 50-95% for large inputs by enabling hash joins
+
+## Test Cases
+
+### Positive: Simple LATERAL with equality filter
+
+```sql
+SELECT c.name, o.total
+FROM customers c,
+LATERAL (
+  SELECT o.total FROM orders o
+  WHERE o.customer_id = c.id AND o.status = 'completed'
+) AS recent;
+
+-- Decorrelate to regular join:
+SELECT c.name, o.total
+FROM customers c
+JOIN orders o ON o.customer_id = c.id AND o.status = 'completed';
+```
+
+### Positive: LATERAL with aggregate
+
+```sql
+SELECT d.name, stats.avg_sal, stats.emp_count
+FROM departments d,
+LATERAL (
+  SELECT AVG(e.salary) AS avg_sal, COUNT(*) AS emp_count
+  FROM employees e
+  WHERE e.dept_id = d.id
+) AS stats;
+
+-- Decorrelate to LEFT JOIN + grouped aggregate:
+SELECT d.name, s.avg_sal, COALESCE(s.emp_count, 0)
+FROM departments d
+LEFT JOIN (
+  SELECT dept_id, AVG(salary) AS avg_sal, COUNT(*) AS emp_count
+  FROM employees GROUP BY dept_id
+) s ON d.id = s.dept_id;
+```
+
+### Positive: LATERAL with ORDER BY + LIMIT (Top-N per group)
+
+```sql
+-- Top 3 orders per customer
+SELECT c.name, t.order_id, t.total
+FROM customers c,
+LATERAL (
+  SELECT o.id AS order_id, o.total
+  FROM orders o
+  WHERE o.customer_id = c.id
+  ORDER BY o.total DESC
+  LIMIT 3
+) AS t;
+
+-- Decorrelate via window function:
+SELECT c.name, o.id AS order_id, o.total
+FROM customers c
+JOIN (
+  SELECT *, ROW_NUMBER() OVER (
+    PARTITION BY customer_id ORDER BY total DESC
+  ) AS rn
+  FROM orders
+) o ON c.id = o.customer_id AND o.rn <= 3;
+```
+
+### Positive: mssql CROSS APPLY
+
+```sql
+-- mssql syntax for LATERAL
+SELECT c.Name, a.MostRecent
+FROM Customers c
+CROSS APPLY (
+  SELECT TOP 1 o.OrderDate AS MostRecent
+  FROM Orders o
+  WHERE o.CustomerID = c.ID
+  ORDER BY o.OrderDate DESC
+) a;
+
+-- Same decorrelation applies: join + window/top-N
+```
+
+### Negative: LATERAL with table-valued function
+
+```sql
+SELECT t.id, f.*
+FROM transactions t,
+LATERAL parse_json(t.metadata) AS f;
+
+-- Table-valued function depends on each row
+-- Cannot decorrelate: function is opaque
+-- Must use apply/nested loop execution
+```
+
+### Negative: LATERAL with non-equality correlation
+
+```sql
+SELECT s.id, nearby.*
+FROM sensors s,
+LATERAL (
+  SELECT r.id, r.value
+  FROM readings r
+  WHERE r.location <-> s.location < 100  -- distance operator
+) AS nearby;
+
+-- Range/distance correlation, not equality
+-- Cannot convert to equi-join
+-- May use spatial index with nested loop
+```
+
+## References
+
+**Academic papers:**
+- Neumann & Kemper, "Unnesting Arbitrary Queries", BTW 2015
+- Galindo-Legaria & Joshi, "Orthogonal Optimization of Subqueries and Aggregation", SIGMOD 2001
+- Cao et al., "Optimization of Analytic Window Functions", PVLDB 2012
+
+**Implementation:**
+- PostgreSQL: LATERAL join support since 9.3, decorrelation in `pull_up_subqueries()`
+- Oracle: LATERAL inline views with decorrelation
+- mssql: CROSS/OUTER APPLY with apply elimination in optimizer
+- DuckDB: `Binder::DecorrelateLateral()` and `FlattenDependentJoin`
+- CockroachDB: `opt/xform/decorrelate.go` handles LATERAL

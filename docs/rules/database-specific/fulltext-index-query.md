@@ -1,0 +1,173 @@
+# Rule: Neo4j Full-Text Index Query Optimization
+
+**Category:** database-specific/neo4j
+**File:** `rules/database-specific/neo4j/fulltext-index-query.rra`
+
+## Metadata
+
+- **ID:** `neo4j-fulltext-index-query`
+- **Version:** "1.0.0"
+- **Databases:** neo4j
+- **Tags:** fulltext, lucene, text-search, index, cypher
+- **Authors:** "Neo4j Inc."
+
+
+# Neo4j Full-Text Index Query Optimization
+
+## Description
+
+Routes text search queries to Lucene-backed full-text indexes instead of
+property scans with string operations. Neo4j's full-text indexes support
+tokenized search, fuzzy matching, relevance scoring, and Boolean queries
+that cannot be efficiently served by standard B-tree property indexes.
+
+**When to apply**: Cypher queries using `db.index.fulltext.queryNodes()` or
+queries with CONTAINS/STARTS WITH on text properties where a full-text index
+exists. The optimizer selects the full-text index for these operations.
+
+**Why it works**: Standard B-tree indexes only support prefix search (STARTS WITH)
+efficiently. CONTAINS requires a full index scan. Lucene-backed full-text indexes
+use inverted indexes with tokenization, enabling O(log n) lookups for any token
+regardless of position. Fuzzy matching uses edit-distance algorithms built into
+Lucene.
+
+## Relational Algebra
+
+```algebra
+-- Before: label scan + string filter (CONTAINS)
+sigma[name CONTAINS "smith"](label-scan(:Person))
+
+-- After: full-text index query
+fulltext-query("personNames", "smith")
+
+-- Fuzzy search:
+fulltext-query("personNames", "smith~2")  -- edit distance 2
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("neo4j-contains-to-fulltext";
+    "(filter (contains (property ?var ?prop) ?term)
+       (label-scan ?label ?var))" =>
+    "(fulltext-query-nodes ?ft-index ?term ?var)"
+    if has_fulltext_index_on("?label", "?prop", "?ft-index")
+),
+
+rw!("neo4j-starts-with-prefer-btree";
+    "(filter (starts-with (property ?var ?prop) ?prefix)
+       (label-scan ?label ?var))" =>
+    "(index-seek ?label ?prop (prefix-range ?prefix) ?var)"
+    if has_property_index("?label", "?prop")
+    // B-tree index is preferred for STARTS WITH over full-text
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> bool {
+    stats.has_fulltext_index
+        && (stats.has_contains_predicate
+            || stats.has_fuzzy_search
+            || stats.has_multi_term_search)
+}
+```
+
+**Restrictions:**
+- Full-text indexes are not automatically used; require explicit `db.index.fulltext.queryNodes()`
+- Results include a relevance score; ordering differs from B-tree scans
+- Full-text indexes are eventually consistent (async updates by default)
+- Cannot combine full-text results with regular index seeks in a single plan step
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let label_count = stats.label_node_count as f64;
+    let result_count = stats.estimated_fulltext_results as f64;
+
+    // Label scan + CONTAINS: scan all nodes, check each string
+    let scan_cost = label_count * 0.005; // string comparison per node
+
+    // Full-text index: Lucene inverted index lookup
+    let ft_cost = result_count.log2().max(1.0) * 0.001
+        + result_count * 0.001; // fetch results
+
+    if scan_cost > ft_cost {
+        (scan_cost - ft_cost) / scan_cost
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 50% to 100x for CONTAINS queries on large label sets.
+
+## Test Cases
+
+### Positive: Full-text search with scoring
+
+```cypher
+// Create full-text index
+CREATE FULLTEXT INDEX personSearch FOR (p:Person) ON EACH [p.name, p.bio]
+
+// Full-text search with relevance scoring
+CALL db.index.fulltext.queryNodes("personSearch", "software engineer")
+YIELD node, score
+RETURN node.name, score
+ORDER BY score DESC
+LIMIT 10
+
+// Uses Lucene inverted index; tokenized search across name and bio
+// O(log n) per term, not O(n) scan
+```
+
+### Positive: Fuzzy matching
+
+```cypher
+// Fuzzy search for misspelled names
+CALL db.index.fulltext.queryNodes("personSearch", "Jhon~1")
+YIELD node, score
+RETURN node.name, score
+
+// Lucene edit-distance matching; finds "John", "Joan", etc.
+// Impossible with B-tree index
+```
+
+### Negative: STARTS WITH on B-tree index
+
+```cypher
+// STARTS WITH: B-tree index is more efficient
+CREATE INDEX FOR (p:Person) ON (p.name)
+
+MATCH (p:Person)
+WHERE p.name STARTS WITH "Ali"
+RETURN p
+
+// B-tree range scan: ["Ali", "Alj") is optimal
+// Full-text index would tokenize unnecessarily
+```
+
+## References
+
+**Implementation:**
+- Neo4j source: `org.neo4j.kernel.api.impl.fulltext.FulltextIndexProvider`
+- Lucene integration: `org.neo4j.kernel.api.impl.schema.LuceneSchemaIndex`
+- Query parsing: Lucene's `QueryParser` with Neo4j extensions
+
+**Documentation:**
+- Neo4j Manual: "Full-text Indexes"
+  - https://neo4j.com/docs/cypher-manual/current/indexes-for-full-text-search/
+
+**Papers:**
+- Manning, C.D., et al., "Introduction to Information Retrieval", Cambridge, 2008
+  - Inverted index theory underlying Lucene

@@ -1,0 +1,123 @@
+# Rule: "Vectorized Multi-Step PREWHERE Execution"
+
+**Category:** execution-models/vectorized
+**File:** `rules/execution-models/vectorized/vectorized-prewhere-chain.rra`
+
+## Metadata
+
+- **ID:** `vectorized-prewhere-chain`
+- **Version:** "1.0.0"
+- **Databases:** clickhouse
+- **Tags:** vectorized, prewhere, cascade, columnar, filter-chain
+- **Authors:** "RA Contributors"
+
+
+# Vectorized Multi-Step PREWHERE Execution
+
+## Metadata
+- **Rule ID**: `vectorized-prewhere-chain`
+- **Category**: Execution Models / Vectorized
+- **Source**: `src/Storages/MergeTree/MergeTreeSplitPrewhereIntoReadSteps.cpp`
+- **Complexity**: O(n) with cascading selectivity
+- **Prerequisites**: Multiple conjunctive filter conditions; columnar storage
+- **Alternatives**: Single-step PREWHERE; no PREWHERE
+
+## Description
+
+When PREWHERE contains multiple AND-connected conditions, ClickHouse
+splits them into a cascade of read steps. Each step reads only the
+columns needed for its condition, evaluates the predicate on a batch,
+builds a selection vector, and passes surviving row positions to the
+next step. This avoids reading columns for later conditions on rows
+that were already eliminated.
+
+The DAG for the PREWHERE expression is analyzed to determine column
+dependencies. Conditions are ordered by selectivity (most selective
+first) and column size (smallest first). Each step's output becomes
+the input filter for the next step.
+
+**When to apply:**
+- AND conditions referencing different column sets
+- Conditions with varying selectivity
+- Wide tables where column reads are expensive
+
+**Why it works for OLAP:**
+- Each cascade step eliminates rows before next column read
+- Multiplicative selectivity: 50% * 50% = 25% rows for step 3
+- Smallest/most-selective columns read first
+
+## Relational Algebra
+
+```
+prewhere[p1 AND p2 AND p3](scan[T])
+  -> read-step[p3, cols3](
+       read-step[p2, cols2](
+         read-step[p1, cols1](scan[T])))
+     where selectivity(p1) < selectivity(p2) < selectivity(p3)
+```
+
+## Implementation (egg rewrite rules)
+
+```lisp
+;; Split AND conditions into cascaded read steps
+(rewrite (prewhere (and ?p1 ?p2) ?scan)
+  (read-step ?p2 (prewhere ?p1 ?scan))
+  :if (independent-columns ?p1 ?p2)
+  :if (<= (selectivity ?p1) (selectivity ?p2)))
+
+;; Three-way split
+(rewrite (prewhere (and ?p1 (and ?p2 ?p3)) ?scan)
+  (read-step ?p3 (read-step ?p2 (prewhere ?p1 ?scan)))
+  :if (independent-columns ?p1 ?p2)
+  :if (independent-columns ?p2 ?p3)
+  :if (<= (selectivity ?p1) (selectivity ?p2))
+  :if (<= (selectivity ?p2) (selectivity ?p3)))
+```
+
+## Cost Model
+
+```rust
+pub fn cost_cascaded_prewhere(
+    rows: u64,
+    steps: &[(u64, f64)], // (column_bytes, selectivity)
+    hardware: &HardwareModel,
+) -> Cost {
+    let mut surviving = rows;
+    let mut total = Cost::zero();
+    for (col_bytes, selectivity) in steps {
+        let io = Cost::io(surviving as f64 * *col_bytes as f64 * hardware.seq_read_cost());
+        let cpu = Cost::cpu(surviving * 5);
+        total = total + io + cpu;
+        surviving = (surviving as f64 * selectivity) as u64;
+    }
+    total
+}
+```
+
+**Typical benefit**: 40-90% I/O reduction with cascading filters
+
+## Test Cases
+
+### Positive: Three independent conditions
+```sql
+SELECT * FROM user_events
+WHERE country = 'US'         -- 1 byte, 10% selectivity
+  AND age BETWEEN 18 AND 25  -- 1 byte, 15% selectivity
+  AND bio LIKE '%engineer%'; -- 1KB, 5% selectivity
+
+-- Step 1: read country (1B), filter -> 10% rows survive
+-- Step 2: read age (1B) for 10% rows, filter -> 1.5% survive
+-- Step 3: read bio (1KB) for 1.5% rows, filter -> 0.075%
+-- Without cascade: would read bio for 100% of rows
+```
+
+### Negative: Single condition
+```sql
+SELECT * FROM events WHERE date = today();
+-- Only one condition; no cascade benefit
+```
+
+## References
+
+- ClickHouse: `src/Storages/MergeTree/MergeTreeSplitPrewhereIntoReadSteps.cpp`
+- ClickHouse: `src/Storages/MergeTree/MergeTreeRangeReader.cpp`

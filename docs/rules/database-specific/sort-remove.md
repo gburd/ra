@@ -1,0 +1,104 @@
+# Rule: Calcite SortRemoveRule
+
+**Category:** database-specific/calcite
+**File:** `rules/database-specific/calcite/sort-remove.rra`
+
+## Metadata
+
+- **ID:** `calcite-sort-remove`
+- **Version:** "1.0.0"
+- **Databases:** calcite
+- **Tags:** database-specific, calcite, sort, remove, elimination
+- **Authors:** "RA Contributors"
+
+
+# Calcite SortRemoveRule
+
+## Description
+
+Removes a `LogicalSort` when the input already satisfies the
+required ordering through its physical properties (collation
+trait). This avoids redundant sorting when an index scan or
+merge join already produces ordered output.
+
+**When to apply**: A `Sort` node exists and the input's
+collation trait already satisfies the sort's requirements.
+
+**Why it works**: Sorting is `O(n log n)`. Removing a redundant
+sort eliminates this cost entirely.
+
+**Calcite class**: `org.apache.calcite.rel.rules.SortRemoveRule`
+
+## Relational Algebra
+
+```algebra
+-- Before: redundant sort
+sort[a ASC](R)
+  where R already ordered by [a ASC]
+
+-- After: sort eliminated
+R
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-sort-remove";
+    "(sort ?keys ?input)" =>
+    "?input"
+    if input_satisfies_ordering("?input", "?keys")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    required_ordering: &[SortKey],
+    input_collation: &Ordering,
+) -> bool {
+    let required = Ordering::new(
+        required_ordering.iter().map(|k| {
+            OrderingColumn {
+                column: k.column.clone(),
+                direction: k.direction,
+            }
+        }).collect()
+    );
+    required.is_prefix_of(input_collation)
+}
+```
+
+**Restrictions:**
+- The input's collation must be a prefix match or exact match
+- LIMIT inside the sort prevents removal (sort + limit = top-N)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(rows: f64) -> f64 {
+    rows * rows.log2() * 0.001
+}
+```
+
+**Typical benefit**: Full elimination of an O(n log n) sort.
+
+## Test Cases
+
+```sql
+-- Positive: index provides ordering
+SELECT * FROM emp ORDER BY empno;
+-- If empno has a B-tree index, the sort is redundant
+```
+
+```sql
+-- Negative: sort with LIMIT is a top-N, not removable
+SELECT * FROM emp ORDER BY sal DESC LIMIT 10;
+-- Even if input is ordered, LIMIT changes semantics
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/SortRemoveRule.java

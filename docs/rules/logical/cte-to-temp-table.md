@@ -1,0 +1,71 @@
+# Rule: CTE to Temporary Table
+
+**Category:** logical/cte-optimization
+**File:** `rules/logical/cte-optimization/cte-to-temp-table.rra`
+
+## Metadata
+
+- **ID:** `cte-to-temp-table`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, mssql, oracle
+- **Tags:** cte, materialization, temp-table
+- **Authors:** "RA Contributors"
+
+
+# CTE to Temporary Table
+
+## Description
+
+For CTEs referenced multiple times with expensive definitions, materialize as a temporary table. Avoids redundant computation of the CTE definition.
+
+**When to apply**: CTE is referenced more than once, and the definition has high cost (aggregation, join, or scan of large table).
+
+## Relational Algebra
+
+```algebra
+CTE[name, def](body)
+  -> Materialize[name, def](body)
+  where ref_count(name, body) > 1
+    and cost(def) > materialization_threshold
+```
+
+## Implementation
+
+```rust
+rw!("cte-to-temp-table";
+    "(cte ?name ?def ?body)" =>
+    "(materialize ?name ?def ?body)"
+    if multi_reference("?name", "?body")
+    if expensive_definition("?def")
+),
+```
+
+## Test Cases
+
+### Positive: Multi-use expensive CTE
+
+```sql
+WITH dept_stats AS (
+    SELECT dept_id, AVG(salary) as avg_sal, COUNT(*) as cnt
+    FROM employees GROUP BY dept_id
+)
+SELECT * FROM dept_stats d1
+JOIN dept_stats d2 ON d1.dept_id <> d2.dept_id
+WHERE d1.avg_sal > d2.avg_sal;
+
+-- Materialize dept_stats (used twice with aggregation)
+```
+
+### Negative: Single-use CTE
+
+```sql
+WITH simple AS (SELECT * FROM users)
+SELECT * FROM simple;
+
+-- Single use; inline instead
+```
+
+## References
+
+- PostgreSQL MATERIALIZED/NOT MATERIALIZED hints (PG 12+)
+- SQL Server CTE materialization heuristics

@@ -1,0 +1,64 @@
+# Rule: Recursive CTE Join Reordering
+
+**Category:** logical/cte-optimization
+**File:** `rules/logical/cte-optimization/recursive-cte-join-reorder.rra`
+
+## Metadata
+
+- **ID:** `recursive-cte-join-reorder`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, duckdb, sqlite
+- **Tags:** recursive, cte, join, reorder, optimization
+- **Authors:** "RA Contributors"
+
+
+# Recursive CTE Join Reordering
+
+## Description
+
+Reorders joins in the recursive case to place the CTE reference on the probe side of a hash join (the smaller side). Since the working table shrinks toward fixpoint, this ensures the build side is the base table and the probe side is the diminishing CTE reference.
+
+**When to apply**: The recursive case contains a Join where the CTE reference is on the build side (left for hash join).
+
+**Why it works**: Hash join performance depends on the build side being smaller. As recursion progresses, the working table typically gets smaller each iteration. Placing it on the probe side avoids rebuilding the hash table.
+
+## Relational Algebra
+
+```algebra
+RecursiveCTE[name, base, Join(T, CTE_ref, cond)](body)
+  -> RecursiveCTE[name, base, Join(CTE_ref, T, cond')](body)
+  where is_inner_join(Join)
+    and estimated_size(T) > estimated_size(CTE_ref)
+```
+
+## Implementation
+
+```rust
+rw!("recursive-cte-join-reorder";
+    "(recursive-cte ?name ?base (join inner ?cond ?left ?right) ?body)" =>
+    "(recursive-cte ?name ?base (join inner ?cond ?right ?left) ?body)"
+    if cte_reference_on_build_side("?name", "?left")
+),
+```
+
+## Test Cases
+
+```sql
+-- Before: large table on probe side
+WITH RECURSIVE reach AS (
+  SELECT id FROM nodes WHERE root = true
+  UNION ALL
+  SELECT e.dst
+  FROM edges e  -- large: millions of edges
+  JOIN reach r ON e.src = r.id  -- small: working table
+)
+SELECT * FROM reach;
+
+-- After: working table (CTE ref) on probe side
+-- Hash table built on 'edges' once, probed by shrinking 'reach'
+```
+
+## References
+
+- "Optimizing Recursive SQL Queries" (Ordonez & Chen, 2019)
+- PostgreSQL join order selection for recursive CTEs

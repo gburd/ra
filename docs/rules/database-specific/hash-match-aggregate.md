@@ -1,0 +1,129 @@
+# Rule: mssql Hash Match Aggregate
+
+**Category:** database-specific/mssql
+**File:** `rules/database-specific/mssql/hash-match-aggregate.rra`
+
+## Metadata
+
+- **ID:** `mssql-hash-match-aggregate`
+- **Version:** "1.0.0"
+- **Databases:** mssql
+- **Tags:** database-specific, mssql, hash, aggregate, group-by, stream
+- **Authors:** "RA Contributors"
+
+
+# mssql Hash Match Aggregate
+
+## Description
+
+Chooses between hash aggregate and stream aggregate based on input
+ordering and estimated group count.  mssql uses stream aggregate
+when the input is already sorted by GROUP BY columns, and hash
+aggregate otherwise.
+
+**When to apply**: An aggregate query must choose between hash-based
+and sort-based aggregation strategies.
+
+**Why it works**: Stream aggregate requires sorted input but processes
+rows with minimal memory (O(1) per group transition).  Hash aggregate
+handles unsorted input but needs O(groups) memory for the hash table.
+Choosing correctly avoids either an unnecessary sort or an expensive
+hash table.
+
+**Database version**: mssql 2000+
+
+## Relational Algebra
+
+```algebra
+-- Stream aggregate (input pre-sorted)
+stream-aggregate[dept; SUM(sal)](
+    index-scan(employees, ix_dept_sal))
+
+-- Hash aggregate (input unsorted)
+hash-aggregate[dept; SUM(sal)](
+    scan(employees))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mssql-prefer-stream-aggregate";
+    "(aggregate ?groups ?aggs (index-scan ?table ?idx))" =>
+    "(stream-aggregate ?groups ?aggs (index-scan ?table ?idx))"
+    if is_database("mssql")
+    if index_provides_ordering("?idx", "?groups")
+),
+
+rw!("mssql-prefer-hash-aggregate";
+    "(aggregate ?groups ?aggs (scan ?table))" =>
+    "(hash-aggregate ?groups ?aggs (scan ?table))"
+    if is_database("mssql")
+    if not_pre_sorted("?table", "?groups")
+    if groups_fit_in_memory("?groups", "?table")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    input_ordering: Option<&[Column]>,
+    group_columns: &[Column],
+    estimated_groups: f64,
+    memory_limit: f64,
+) -> bool {
+    if input_ordering.map_or(false, |o| covers_group_by(o, group_columns)) {
+        true // stream aggregate
+    } else {
+        estimated_groups * 100.0 < memory_limit // hash fits
+    }
+}
+```
+
+**Restrictions:**
+- Stream aggregate requires input sorted by all GROUP BY columns
+- Hash aggregate may spill to tempdb if groups exceed memory grant
+- Scalar aggregates (no GROUP BY) always use stream aggregate
+- Partial aggregate + stream aggregate may beat hash aggregate
+
+## Cost Model
+
+```rust
+fn aggregate_cost(
+    rows: f64,
+    groups: f64,
+    pre_sorted: bool,
+) -> f64 {
+    if pre_sorted {
+        rows * 0.001 // stream: scan cost only
+    } else {
+        rows * 0.005 + groups * 0.1 // hash: build + probe
+    }
+}
+```
+
+**Typical benefit**: Stream aggregate on pre-sorted input avoids
+hash table construction, saving O(groups) memory and build overhead.
+
+## Test Cases
+
+```sql
+-- Positive: index provides sort order for stream aggregate
+CREATE INDEX ix_dept ON employees(department_id);
+SELECT department_id, SUM(salary) FROM employees
+GROUP BY department_id;
+-- Stream aggregate using ix_dept ordering
+```
+
+```sql
+-- Positive: unsorted scan uses hash aggregate
+SELECT city, COUNT(*) FROM events GROUP BY city;
+-- No index on city; hash aggregate chosen
+```
+
+## References
+
+mssql: Hash Match Operator (Showplan)
+mssql: Stream Aggregate Operator (Showplan)

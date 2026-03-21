@@ -1,0 +1,126 @@
+# Rule: Locality-Optimized Lookup Join
+
+**Category:** database-specific/cockroachdb
+**File:** `rules/database-specific/cockroachdb/locality-optimized-lookup-join.rra`
+
+## Metadata
+
+- **ID:** `cockroachdb-locality-optimized-lookup-join`
+- **Version:** 1.0.0
+- **Databases:** cockroachdb
+- **Tags:** database-specific, cockroachdb, lookup-join, locality, multi-region
+- **Authors:** "RA Contributors"
+
+
+# Locality-Optimized Lookup Join
+
+## Description
+
+Optimizes lookup joins in multi-region deployments by attempting lookups in the local region first, and only querying remote regions if necessary. Similar to LocalityOptimizedScan but for joins.
+
+**When to apply**: Lookup join where lookup table is REGIONAL BY ROW and most lookups are expected to be local to the gateway region.
+
+**Why it works**: Local lookups have much lower latency than cross-region lookups. If most keys are in the local region, we avoid remote network hops for the majority of requests.
+
+**Database version**: CockroachDB v20.2+
+
+## Relational Algebra
+
+```algebra
+LookupJoin[k](Probe, Build[REGIONAL BY ROW])
+  -> LocalityOptimizedLookupJoin[k](
+       Probe,
+       Build[local_region],
+       Build[remote_regions]
+     )
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("cockroachdb-locality-optimized-lookup-join";
+    "(lookup_join ?probe ?build ?key)" =>
+    "(locality_optimized_lookup_join ?probe ?build ?key)"
+    if is_database("cockroachdb")
+    if is_regional_by_row("?build")
+    if locality_optimized_setting_enabled()
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    build_table: &TableRef,
+) -> bool {
+    // Build side must be REGIONAL BY ROW
+    build_table.locality() == TableLocality::RegionalByRow
+        // Setting must be enabled
+        && settings.locality_optimized_partitioned_index_scan
+}
+```
+
+**Restrictions:**
+- Only applies to CockroachDB
+- Build table must be REGIONAL BY ROW
+- Requires `locality_optimized_partitioned_index_scan` setting
+- Slight pessimization if keys are mostly remote
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    num_lookups: f64,
+    local_probability: f64,
+    local_latency_ms: f64,
+    remote_latency_ms: f64,
+) -> f64 {
+    // Normal lookup: all lookups to any region (parallel)
+    let normal_cost = num_lookups * local_latency_ms;
+
+    // Locality-optimized: try local first, remote on miss
+    let local_hits = num_lookups * local_probability;
+    let remote_hits = num_lookups * (1.0 - local_probability);
+    let opt_cost = local_hits * local_latency_ms
+                 + remote_hits * (local_latency_ms + remote_latency_ms);
+
+    if local_probability > 0.5 {
+        (normal_cost * 2.0 - opt_cost) / (normal_cost * 2.0)
+    } else {
+        -0.1  // Slight pessimization
+    }
+}
+```
+
+**Typical benefit**: 50-90% with high locality of access
+
+## Test Cases
+
+```sql
+CREATE TABLE orders (id INT PRIMARY KEY, ...);
+CREATE TABLE customers (
+  id INT PRIMARY KEY,
+  ...,
+  crdb_region crdb_internal_region NOT VISIBLE
+) LOCALITY REGIONAL BY ROW;
+
+-- Query from 'us-east1'
+SELECT o.*, c.name
+FROM orders o
+JOIN customers c ON o.customer_id = c.id;
+
+-- If customers are mostly in us-east1, locality-optimized lookup
+-- will try local region first for each lookup
+```
+
+## References
+
+**Source code:**
+- CockroachDB: `pkg/sql/opt/xform/`
+  - `GenerateLocalityOptimizedLookupJoin` logic
+  - Commit: 6e210ba6aa33cea5e27b1a8fae212c27941781f4
+
+**Documentation:**
+- Related to `GenerateLocalityOptimizedScan` and `GenerateLocalityOptimizedAntiJoin`

@@ -1,0 +1,30 @@
+-- Run benchmark
+SELECT run_accounting_benchmark(1000, 300, 1);
+
+-- Clean up test data afterwards
+SELECT cleanup_benchmark_data();
+
+-- View results
+SELECT * FROM get_benchmark_summary();
+
+-- Quick benchmark (small scale, 60 seconds, minimal output)
+SELECT run_accounting_benchmark(500, 60, 0);
+
+-- Standard benchmark (medium scale, 5 minutes, normal output)
+SELECT run_accounting_benchmark(2000, 300, 1);
+
+-- Intensive benchmark (large scale, 10 minutes, detailed output)
+SELECT run_accounting_benchmark(10000, 600, 2);
+
+-- View results
+SELECT * FROM get_benchmark_summary();
+
+-- Compare two runs
+SELECT * FROM compare_benchmark_runs('run-id-1', 'run-id-2');
+
+-- Clean up existing data first
+SELECT cleanup_benchmark_data();
+
+-- Force garbage collection
+VACUUM FULL;
+ANALYZE;

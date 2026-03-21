@@ -1,0 +1,202 @@
+# Rule: HoneyComb Distributed WCOJ
+
+**Category:** experimental/wcoj
+**File:** `rules/experimental/wcoj/honeycomb-join.rra`
+
+## Metadata
+
+- **ID:** `honeycomb-join`
+- **Version:** "1.0.0"
+- **Databases:** duckdb
+- **Tags:** wcoj, distributed, shares, honeycomb, parallel
+- **Authors:** "Chu et al. 2015", "RA Contributors"
+
+
+# HoneyComb Distributed WCOJ
+
+## Description
+
+HoneyComb parallelizes worst-case optimal joins across multiple workers using
+the Shares algorithm for data partitioning. Each relation is hash-partitioned
+across workers using a carefully chosen share allocation. The key insight is
+that a hypercube partitioning scheme can distribute the work evenly while
+ensuring that each worker independently computes a disjoint subset of the
+output without any communication during the join phase.
+
+**When to apply**: Large-scale cyclic join queries in distributed or
+parallel settings where single-node WCOJ is memory or compute bottlenecked.
+
+**Why it works**: The Shares algorithm partitions the variable domain into
+p^(1/d) shares per variable (for p workers and d variables). Each worker
+receives tuples matching its share assignment. The hypercube partitioning
+guarantees that each output tuple is produced by exactly one worker, and
+the total work across all workers matches the sequential AGM bound.
+
+## Relational Algebra
+
+```algebra
+join[R.a=S.a, S.b=T.b, R.c=T.c](R, S, T)
+  -> honeycomb_join(
+       shares: {a: p_a, b: p_b, c: p_c},
+       workers: p,
+       local_algorithm: generic_join,
+       relations: {R(a,c), S(a,b), T(b,c)}
+     )
+  where p_a * p_b * p_c = p
+  where is_parallel_execution()
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("honeycomb-join";
+    "(join ?pred1 (join ?pred2 ?r1 ?r2) ?r3)" =>
+    "(honeycomb_join
+       (shares (compute_optimal_shares ?r1 ?r2 ?r3))
+       (local_join generic_join)
+       (relations ?r1 ?r2 ?r3)
+       (predicates (merge_preds ?pred1 ?pred2)))"
+    if is_distributed_execution()
+    if relation_count_ge_3("?r1", "?r2", "?r3")
+    if data_exceeds_single_node_capacity()
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    query: &MultiWayJoin,
+    cluster: &ClusterInfo,
+) -> bool {
+    // Must be distributed execution
+    if cluster.num_workers() < 2 {
+        return false;
+    }
+
+    // Multi-way join with 3+ relations
+    if query.relations.len() < 3 {
+        return false;
+    }
+
+    // Data must be large enough to justify distribution overhead
+    let total_data: u64 = query.relations.iter()
+        .map(|r| r.estimated_size_bytes())
+        .sum();
+
+    total_data > cluster.single_node_memory() / 2
+}
+
+fn compute_optimal_shares(
+    variables: &[Variable],
+    relations: &[Relation],
+    num_workers: usize,
+) -> ShareAllocation {
+    // Solve optimization: minimize max load across workers
+    // Subject to: product of shares = num_workers
+    // Uses LP relaxation of the fractional edge cover
+    let rho_star = compute_fractional_edge_cover(relations);
+    let mut shares = vec![1usize; variables.len()];
+
+    // Allocate shares proportional to variable frequency
+    let freqs: Vec<f64> = variables.iter()
+        .map(|v| count_relations_containing(v, relations) as f64)
+        .collect();
+    let total_freq: f64 = freqs.iter().sum();
+
+    for (i, freq) in freqs.iter().enumerate() {
+        shares[i] = ((num_workers as f64).powf(
+            freq / total_freq
+        )).round() as usize;
+    }
+
+    ShareAllocation { shares }
+}
+```
+
+**Restrictions:**
+- Requires distributed execution environment with shuffle capability
+- Share allocation must divide workers evenly (p = product of shares)
+- Skewed data can cause load imbalance (mitigated by replication)
+- Communication cost for initial data shuffling
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    query: &MultiWayJoin,
+    cluster: &ClusterInfo,
+) -> f64 {
+    let p = cluster.num_workers() as f64;
+    let agm_bound = compute_agm_bound(query);
+
+    // Sequential cost
+    let seq_cost = agm_bound;
+
+    // Parallel cost: AGM/p + shuffle cost
+    let shuffle_cost: f64 = query.relations.iter()
+        .map(|r| r.estimated_size_bytes() as f64)
+        .sum::<f64>() / cluster.network_bandwidth();
+
+    let parallel_cost = agm_bound / p + shuffle_cost;
+
+    if seq_cost > parallel_cost {
+        (seq_cost - parallel_cost) / seq_cost
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: Near-linear speedup with p workers for large cyclic
+joins. Shuffle overhead amortized for queries with output >> input.
+
+## Test Cases
+
+### Positive: Large-scale triangle counting
+
+```sql
+-- Social network with 1B edges across 100 workers
+SELECT COUNT(*)
+FROM edges e1, edges e2, edges e3
+WHERE e1.dst = e2.src AND e2.dst = e3.src AND e3.dst = e1.src;
+
+-- Shares: {src: 10, mid: 10, dst: 1} for 100 workers
+-- Each worker processes ~1% of edge triples independently
+```
+
+### Positive: 4-path query on large graph
+
+```sql
+SELECT e1.src, e4.dst
+FROM edges e1, edges e2, edges e3, edges e4
+WHERE e1.dst = e2.src AND e2.dst = e3.src AND e3.dst = e4.src;
+
+-- Shares distributed across 4 join variables
+-- No inter-worker communication during join phase
+```
+
+### Negative: Small data that fits on single node
+
+```sql
+SELECT * FROM small_r r, small_s s, small_t t
+WHERE r.a = s.a AND s.b = t.b AND t.c = r.c;
+
+-- Shuffle cost exceeds single-node WCOJ cost
+-- Use local Generic Join instead
+```
+
+## References
+
+**Academic papers:**
+- Chu et al., "From Theory to Practice: Efficient Join Query Evaluation in a Parallel Environment", SIGMOD 2015
+- Beame et al., "Communication Steps for Parallel Query Processing", PODS 2017
+- Koutris, Suciu, "Parallel Evaluation of Conjunctive Queries", PODS 2011
+
+**Key insights:**
+- Shares algorithm achieves communication-optimal data distribution
+- Hypercube partitioning ensures zero communication during join phase
+- Load balancing requires careful share allocation (LP-based)
+- Combines with any local WCOJ algorithm (Generic Join, LeapFrog)

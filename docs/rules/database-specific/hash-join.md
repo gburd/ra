@@ -1,0 +1,112 @@
+# Rule: MySQL Hash Join
+
+**Category:** database-specific/mysql
+**File:** `rules/database-specific/mysql/hash-join.rra`
+
+## Metadata
+
+- **ID:** `mysql-hash-join`
+- **Version:** "1.0.0"
+- **Databases:** mysql
+- **Tags:** database-specific, mysql, hash-join, join, equi-join
+- **Authors:** "RA Contributors"
+
+
+# MySQL Hash Join
+
+## Description
+
+MySQL 8.0.18+ uses hash joins for equi-join queries where no suitable
+index exists on the inner table.  The optimizer builds an in-memory
+hash table on the smaller (build) side and probes it with rows from
+the larger (probe) side.  If the hash table exceeds `join_buffer_size`,
+it spills to disk using a grace hash join variant.
+
+**When to apply**: An equi-join has no usable index on the inner
+table, or a hash join is estimated to be cheaper than a nested-loop
+join with index lookups.
+
+**Why it works**: Hash join is O(n+m) versus O(n*m) for nested-loop
+without index.  Building a hash table on the smaller relation and
+probing with the larger avoids repeated scans.
+
+**Database version**: MySQL 8.0.18+
+
+## Relational Algebra
+
+```algebra
+-- Before: block nested-loop (no index)
+outer BNL[o.key = i.key] inner
+
+-- After: hash join
+outer hash-join[o.key = i.key] inner
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mysql-hash-join";
+    "(nested-loop-join ?pred ?outer ?inner)" =>
+    "(hash-join ?pred ?outer ?inner)"
+    if is_database("mysql")
+    if is_equi_join("?pred")
+    if no_usable_index("?inner", "?pred")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    join: &Join,
+    inner: &Table,
+) -> bool {
+    join.is_equi_join()
+    && !inner.has_usable_index(join.inner_columns())
+}
+```
+
+**Restrictions:**
+- Only equi-joins (no theta joins or cross joins)
+- Replaced Block Nested-Loop (BNL) in MySQL 8.0.20
+- `join_buffer_size` controls in-memory hash table size
+- Spill-to-disk for large build sides
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    outer_rows: f64,
+    inner_rows: f64,
+) -> f64 {
+    let bnl_cost = outer_rows * inner_rows * 0.001;
+    let build_side = outer_rows.min(inner_rows);
+    let probe_side = outer_rows.max(inner_rows);
+    let hash_cost = build_side * 0.005 + probe_side * 0.001;
+    bnl_cost - hash_cost
+}
+```
+
+**Typical benefit**: 10-1000x over BNL for medium-to-large tables
+without indexes.
+
+## Test Cases
+
+```sql
+-- Positive: equi-join without index
+SELECT * FROM t1 JOIN t2 ON t1.a = t2.a;
+-- No index on t2.a; MySQL uses hash join
+```
+
+```sql
+-- Negative: non-equi join
+SELECT * FROM t1 JOIN t2 ON t1.a > t2.a;
+-- Hash join not applicable to range conditions
+```
+
+## References
+
+MySQL: "Hash Join Optimization" in MySQL 8.0 Reference Manual
+Source: sql/iterators/hash_join_iterator.cc

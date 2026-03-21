@@ -1,0 +1,246 @@
+# Rule: LIMIT Through UNION ALL
+
+**Category:** logical/limit-pushdown
+**File:** `rules/logical/limit-pushdown/limit-through-union-all.rra`
+
+## Metadata
+
+- **ID:** `limit-through-union-all`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, duckdb, clickhouse
+- **Tags:** limit, union, pushdown, early-termination
+- **Authors:** "RA Contributors"
+
+
+# LIMIT Through UNION ALL
+
+## Description
+
+Pushes LIMIT through UNION ALL by applying LIMIT to each branch independently,
+enabling early termination and parallel execution. This is critical for queries
+over partitioned data where only a small fraction of total data is needed.
+
+**When to apply**: LIMIT clause over UNION ALL where:
+- LIMIT is small relative to total union size
+- Branches can execute independently
+- Early termination provides benefit
+
+**Why it works**: Each branch can stop after producing LIMIT rows, avoiding
+full scans of all partitions. In parallel execution, branches compete to fill
+the limit, with slowest branches potentially not executing at all.
+
+## Relational Algebra
+
+```algebra
+limit[N](union_all[R1, R2, ..., Rn])
+  -> limit[N](union_all[limit[N](R1), limit[N](R2), ..., limit[N](Rn)])
+
+With ORDER BY:
+limit[N](sort[key](union_all[R1, R2, ..., Rn]))
+  -> limit[N](merge_sort[key](
+       sort[key](limit[N](R1)),
+       sort[key](limit[N](R2)),
+       ...
+     ))
+
+Conditions:
+- UNION ALL only (not UNION DISTINCT)
+- N must be constant (not parameterized)
+- Safe for any N >= 0
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Basic LIMIT pushdown through UNION ALL
+rw!("limit-through-union-all";
+    "(limit ?n (union-all ?left ?right))" =>
+    "(limit ?n (union-all (limit ?n ?left) (limit ?n ?right)))"
+),
+
+// Recursive for N-way unions
+rw!("limit-through-union-all-recursive";
+    "(limit ?n (union-all ?branch ?rest))" =>
+    "(limit ?n (union-all (limit ?n ?branch) (limit ?n ?rest)))"
+),
+
+// Combined with ORDER BY (Top-K pattern)
+rw!("limit-sort-through-union";
+    "(limit ?n (sort ?key (union-all ?left ?right)))" =>
+    "(limit ?n (merge-sort ?key (sort ?key (limit ?n ?left)) (sort ?key (limit ?n ?right))))"
+),
+
+// Cost model for applicability
+fn should_apply_limit_pushdown(limit: u64, total_estimate: u64) -> bool {
+    // Only beneficial if limit is significantly smaller than total
+    limit < total_estimate / 10
+}
+```
+
+**Restrictions:**
+- Does not apply to UNION (with implicit DISTINCT)
+- With ORDER BY, requires merge-capable sort implementation
+- Offset requires special handling: push LIMIT + OFFSET to branches
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    branch_sizes: &[u64],
+    limit: u64,
+    parallel: bool,
+) -> f64 {
+    let total_rows: u64 = branch_sizes.iter().sum();
+
+    // Without pushdown: scan all branches, then limit
+    let sequential_scan_cost = total_rows as f64;
+
+    // With pushdown: each branch stops at LIMIT
+    if parallel {
+        // Parallel: time = max branch until limit filled
+        let max_per_branch = branch_sizes.iter()
+            .map(|&size| size.min(limit))
+            .max()
+            .unwrap_or(0);
+        let parallel_cost = max_per_branch as f64;
+
+        (sequential_scan_cost - parallel_cost) / sequential_scan_cost
+    } else {
+        // Sequential: sum of min(branch_size, limit)
+        let sequential_with_pushdown: u64 = branch_sizes.iter()
+            .map(|&size| size.min(limit))
+            .sum();
+        let pushdown_cost = sequential_with_pushdown as f64;
+
+        (sequential_scan_cost - pushdown_cost) / sequential_scan_cost
+    }
+}
+```
+
+**Assumptions:**
+- Each branch is independent (no correlation)
+- Limit stops scan immediately (no buffering delays)
+- Parallel execution: branches execute concurrently
+- Sequential execution: branches execute in order
+
+**Typical benefit**:
+- Sequential, small limit: 50-70% reduction
+- Parallel, small limit: 80-95% reduction (approaches 1 - limit/total)
+- With ORDER BY: Reduces sort input dramatically
+
+**Real-world impact:**
+Partitioned queries over time-series data: "Get last 100 events from 1000
+partitions" can reduce work from 1B rows to 100K rows (99.99% reduction).
+
+## Test Cases
+
+### Positive: Small limit over large partitions
+
+```sql
+SELECT * FROM (
+  SELECT * FROM logs_2023_01  -- 100M rows
+  UNION ALL
+  SELECT * FROM logs_2023_02  -- 100M rows
+  UNION ALL
+  SELECT * FROM logs_2023_03  -- 100M rows
+) LIMIT 100;
+
+-- Without pushdown: scan 300M rows, return 100
+-- With pushdown: each partition stops at 100 rows
+-- Parallel execution: potentially return after first partition
+-- Benefit: 99.9997% work avoided
+```
+
+### Positive: Top-K with ORDER BY
+
+```sql
+SELECT * FROM (
+  SELECT timestamp, event FROM logs_q1  -- 250M rows
+  UNION ALL
+  SELECT timestamp, event FROM logs_q2  -- 250M rows
+  UNION ALL
+  SELECT timestamp, event FROM logs_q3  -- 250M rows
+  UNION ALL
+  SELECT timestamp, event FROM logs_q4  -- 250M rows
+) ORDER BY timestamp DESC LIMIT 10;
+
+-- Each quarter: sort top 10 by timestamp
+-- Final: merge-sort 4x10 = 40 rows to get top 10
+-- Without: sort 1B rows
+-- Benefit: Massive reduction in sort input
+```
+
+### Positive: Partitioned table query
+
+```sql
+-- Physical partitioning by date range
+SELECT * FROM events  -- union of 365 daily partitions
+WHERE event_type = 'error'
+LIMIT 1000;
+
+-- Optimizer: push limit to each partition scan
+-- Stop after 1000 total errors found
+-- Likely only scans first few partitions
+```
+
+### Negative: Limit exceeds data size
+
+```sql
+SELECT * FROM (
+  SELECT * FROM small_table_1  -- 1K rows
+  UNION ALL
+  SELECT * FROM small_table_2  -- 1K rows
+) LIMIT 1000000;
+
+-- Limit > total data (2K rows)
+-- Pushdown adds overhead without benefit
+-- Cost: additional operators in plan
+```
+
+### Negative: UNION DISTINCT
+
+```sql
+SELECT * FROM (
+  SELECT name FROM employees_us
+  UNION  -- implicit DISTINCT
+  SELECT name FROM employees_eu
+) LIMIT 100;
+
+-- Cannot push limit before DISTINCT
+-- Must see all duplicates to eliminate them
+-- Would change semantics
+```
+
+### Negative: Complex predicates in branches
+
+```sql
+SELECT * FROM (
+  SELECT * FROM t1 WHERE expensive_udf(col) = true
+  UNION ALL
+  SELECT * FROM t2 WHERE expensive_udf(col) = true
+) LIMIT 10;
+
+-- Still beneficial, but UDF cost dominates
+-- Limit pushdown helps but savings are smaller
+```
+
+## References
+
+**Academic papers:**
+- Graefe, "The Cascades Framework for Query Optimization", IEEE Data Eng. Bull. 1995
+- Chaudhuri & Shim, "Optimization of Queries with User-Defined Predicates", ACM TODS 1999
+
+**Implementation:**
+- PostgreSQL: `grouping_planner()` with `limit_needed()` hint propagation
+  - Code: `src/backend/optimizer/plan/planner.c`
+  - Passes limit hint down through append nodes
+- DuckDB: Parallel UNION ALL with limit-aware scheduling
+  - Stops execution when limit satisfied
+  - Pull-based model: consumers stop pulling
+- ClickHouse: LIMIT optimization for MergeTree partitions
+  - `max_rows_to_read` per partition
+  - Short-circuits remaining partitions
+- Presto/Trino: `LimitPushDown` optimizer rule
+  - Handles partitioned tables automatically

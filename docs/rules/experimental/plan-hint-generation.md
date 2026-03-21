@@ -1,0 +1,284 @@
+# Rule: ML-Based Plan Hint Generation
+
+**Category:** experimental/ml-guided
+**File:** `rules/experimental/ml-guided/plan-hint-generation.rra`
+
+## Metadata
+
+- **ID:** `plan-hint-generation`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, oracle
+- **Tags:** ml, hints, plan-guidance, safe-optimization, steering
+- **Authors:** "Marcus et al. 2021", "Anneser et al. 2023", "RA Contributors"
+
+
+# ML-Based Plan Hint Generation
+
+## Description
+
+Instead of replacing the optimizer entirely, ML-based hint generation
+steers the existing optimizer toward better plans by generating hints
+(e.g., join method hints, index hints, join order hints). The ML model
+predicts which combination of hints will produce the best plan for a
+given query, and the optimizer's existing infrastructure handles the
+actual plan generation and execution. This is safer than full learned
+optimization because the optimizer still validates the hinted plan.
+
+**When to apply**: Queries where the optimizer's default plan is
+suboptimal but the optimizer can produce a good plan when given the
+right hints. Common for complex OLAP queries, queries with parameter
+sensitivity, or workloads where DBA-tuned hints exist but need
+automatic management.
+
+**Why it works**: Most optimizers can generate near-optimal plans when
+given correct join order or algorithm hints. The challenge is knowing
+which hints to apply. ML models learn from execution history which
+hint combinations produce the best plans for which query patterns,
+without requiring full optimizer replacement.
+
+## Relational Algebra
+
+```algebra
+-- Without hints:
+optimizer(Q) -> default_plan (possibly suboptimal)
+
+-- With ML-generated hints:
+optimizer(Q, hints=[HashJoin(R,S), NestLoop(T,U), IndexScan(T,idx1)])
+  -> hinted_plan (closer to optimal)
+
+-- Hint types:
+  - Join algorithm: HashJoin, MergeJoin, NestLoop
+  - Join order: Leading(R, S, T, U)
+  - Access method: IndexScan, SeqScan, IndexOnlyScan
+  - Parallelism: Parallel(degree=8)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("ml-hint-generation";
+    "?query" =>
+    "(with_hints
+       (hints (generate_hints ?query))
+       ?query)"
+    if hint_model_available()
+    if query_complexity_ge(3) // At least 3 operators
+    if default_plan_suboptimal_likelihood() > 0.5
+),
+
+struct HintGenerator {
+    // Model predicts useful hint combinations
+    model: HintPredictionModel,
+    // History of (query, hints, execution_time)
+    history: Vec<HintExperience>,
+    // Hint vocabulary
+    hint_space: HintSpace,
+}
+
+impl HintGenerator {
+    fn generate_hints(
+        &self,
+        query: &RelExpr,
+    ) -> Vec<PlanHint> {
+        let features = self.encode_query(query);
+
+        // Predict top-k hint combinations
+        let candidates = self.model.predict_top_k(
+            &features, 5,
+        );
+
+        // Validate each candidate with the optimizer
+        let mut best_hints = Vec::new();
+        let mut best_cost = f64::MAX;
+
+        for hints in &candidates {
+            let plan = optimizer_with_hints(query, hints);
+            let estimated_cost = plan.estimated_cost();
+
+            if estimated_cost < best_cost {
+                best_cost = estimated_cost;
+                best_hints = hints.clone();
+            }
+        }
+
+        // Safety check: only use hints if better than default
+        let default_plan = optimizer_default(query);
+        if best_cost < default_plan.estimated_cost() * 0.9 {
+            best_hints
+        } else {
+            Vec::new() // No hints, use default
+        }
+    }
+
+    fn encode_query(
+        &self,
+        query: &RelExpr,
+    ) -> QueryFeatures {
+        QueryFeatures {
+            tables: extract_table_features(query),
+            predicates: extract_predicate_features(query),
+            join_graph: extract_join_graph(query),
+            historical_performance: self.lookup_similar(query),
+        }
+    }
+
+    fn learn_from_execution(
+        &mut self,
+        query: &RelExpr,
+        hints: &[PlanHint],
+        execution_time: f64,
+    ) {
+        self.history.push(HintExperience {
+            query_features: self.encode_query(query),
+            hints: hints.to_vec(),
+            execution_time,
+        });
+
+        // Retrain periodically
+        if self.history.len() % 100 == 0 {
+            self.model.retrain(&self.history);
+        }
+    }
+}
+
+struct HintSpace {
+    join_algorithms: Vec<JoinAlgorithm>,
+    access_methods: Vec<AccessMethod>,
+    // Combinatorial: for 5 joins * 3 algorithms = 3^5 = 243 combos
+    max_combinations: usize,
+}
+
+impl HintSpace {
+    fn enumerate(
+        &self,
+        query: &RelExpr,
+    ) -> Vec<Vec<PlanHint>> {
+        // Smart enumeration: only viable combinations
+        let joins = extract_joins(query);
+        let mut combos = Vec::new();
+
+        // Single-hint variations (change one operator)
+        for (i, join) in joins.iter().enumerate() {
+            for algo in &self.join_algorithms {
+                let mut hints = Vec::new();
+                hints.push(PlanHint::JoinAlgorithm(
+                    join.clone(), algo.clone(),
+                ));
+                combos.push(hints);
+            }
+        }
+
+        combos
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(query: &RelExpr) -> bool {
+    // Query must be complex enough
+    let num_ops = count_operators(query);
+    if num_ops < 3 {
+        return false;
+    }
+
+    // Hint model must be trained
+    if !hint_model_available() {
+        return false;
+    }
+
+    // Must have hint infrastructure (pg_hint_plan, etc.)
+    if !hints_supported() {
+        return false;
+    }
+
+    true
+}
+```
+
+**Restrictions:**
+- Requires hint infrastructure in the database (pg_hint_plan, Oracle hints)
+- Hint space grows combinatorially (pruning needed for large queries)
+- Model training requires execution feedback (cold start problem)
+- Hints override optimizer decisions (safety validation needed)
+- Stale hints can be worse than no hints after data changes
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    default_plan_cost: f64,
+    hinted_plan_cost: f64,
+    hint_generation_time: f64,
+) -> f64 {
+    let total_hinted = hinted_plan_cost + hint_generation_time;
+
+    if default_plan_cost > total_hinted {
+        (default_plan_cost - total_hinted) / default_plan_cost
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 2-5x for queries where default plans are suboptimal.
+Bao (hint selection variant) shows median 2x improvement on complex
+workloads with safe fallback to default.
+
+## Test Cases
+
+### Positive: Index selection hint
+
+```sql
+-- Multiple indexes on orders: (customer_id), (date), (status, date)
+SELECT * FROM orders
+WHERE customer_id = 42
+  AND date > '2024-01-01'
+  AND status = 'shipped';
+
+-- Default: bitmap AND of individual indexes
+-- ML hint: use composite index (status, date) + filter customer_id
+-- Learned from past executions that composite index is faster
+```
+
+### Positive: Join algorithm override
+
+```sql
+SELECT * FROM large_table l
+JOIN medium_table m ON l.id = m.lid
+WHERE m.category = 'rare';
+
+-- Default: hash join (medium is build side)
+-- ML hint: NL join with index (category='rare' returns 10 rows)
+-- Cardinality estimate wrong, but ML learned the pattern
+```
+
+### Negative: Simple query
+
+```sql
+SELECT * FROM users WHERE id = 42;
+-- No hint space to explore, default plan is optimal
+```
+
+## References
+
+**Academic papers:**
+- Marcus et al., "Bao: Making Learned Query Optimization Practical", SIGMOD 2021
+- Anneser et al., "QO-Advisor: Machine Learning-Based Query Optimization Advisor", VLDB 2023
+- Zhu et al., "Learned Plan Stabilization", VLDB 2023
+
+**Implementation:**
+- pg_hint_plan: PostgreSQL hint infrastructure
+- Oracle: optimizer hints (/*+ FULL, INDEX, HASH_JOIN */)
+- MySQL: optimizer hints (since 5.7)
+- Bao: https://github.com/learnedsystems/BaoForPostgreSQL
+
+**Key insights:**
+- Hint-based approach is safer than full optimizer replacement
+- Model acts as "advisor" that the optimizer can override
+- Thompson sampling in Bao enables safe exploration of hint space
+- Validation step ensures hinted plan is not worse than default
+- Deployment: no optimizer code changes needed (just hint infrastructure)

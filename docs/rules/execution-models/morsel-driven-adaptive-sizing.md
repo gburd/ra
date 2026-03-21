@@ -1,0 +1,304 @@
+# Rule: Morsel-Driven Adaptive Morsel Sizing
+
+**Category:** execution-models
+**File:** `rules/execution-models/morsel-driven/morsel-driven-adaptive-sizing.rra`
+
+## Metadata
+
+- **ID:** `morsel-driven-adaptive-sizing`
+- **Version:** 1.0.0
+- **Databases:** HyPer, DuckDB, Umbra
+- **Tags:** execution, parallel, morsel, adaptive, sizing, tuning, cache
+- **SQL Standard:** HyPer morsel model
+- **Authors:** Viktor Leis, Thomas Neumann
+
+
+# Morsel-Driven Adaptive Morsel Sizing
+
+## Description
+
+Morsel size significantly affects execution performance. Too small and scheduling overhead dominates; too large and load balancing suffers. Adaptive morsel sizing dynamically adjusts the morsel size based on operator characteristics, pipeline complexity, NUMA topology, and runtime feedback. The goal is to keep each morsel's working set in the per-core L2 cache while generating enough morsels for good load balancing.
+
+**Factors influencing optimal morsel size:**
+- **Row width**: Wide rows need smaller morsels for cache fit
+- **Pipeline depth**: Deep pipelines amplify per-morsel state
+- **Operator type**: Hash probes benefit from smaller morsels
+- **Worker count**: More workers need more morsels for balance
+- **Cache size**: L2 cache dictates maximum morsel data size
+- **Memory bandwidth**: Large morsels improve bandwidth utilization
+
+**Typical ranges:**
+- Default: 100K tuples (Leis et al., 2014)
+- DuckDB: 2K-100K tuples (adaptive per pipeline)
+- Scan-heavy: 100K-1M tuples (sequential I/O benefit)
+- Hash probe-heavy: 10K-50K tuples (cache-friendly probing)
+
+**Key characteristics:**
+- **Per-pipeline tuning**: Different morsel sizes for different pipelines
+- **Runtime adaptation**: Adjust based on measured throughput
+- **Cache-aware**: Size morsel data to fit in L2 cache
+- **Balance-aware**: Ensure enough morsels for work-stealing
+
+**Trade-offs:**
+- Very small morsels: high scheduling overhead per morsel
+- Very large morsels: poor load balancing, cache thrashing
+- Dynamic resizing introduces monitoring overhead
+
+## Relational Algebra
+
+```
+Morsel size computation:
+
+optimal_morsel_size(pipeline, hardware):
+  // Cache constraint: morsel working set fits in L2
+  row_width = pipeline.bytes_per_row()
+  pipeline_state = pipeline.per_morsel_state_bytes()
+  l2_size = hardware.l2_cache_bytes
+
+  cache_limited = (l2_size - pipeline_state) / row_width
+
+  // Balance constraint: enough morsels for workers
+  total_rows = pipeline.estimated_input_rows()
+  min_morsels = hardware.num_cores * 10  // 10 morsels per core
+  balance_limited = total_rows / min_morsels
+
+  // Take the smaller of cache and balance constraints
+  return min(cache_limited, balance_limited)
+    .clamp(MIN_MORSEL, MAX_MORSEL)
+```
+
+## Implementation
+
+```rust
+/// Adaptive morsel size calculator
+pub struct AdaptiveMorselSizer {
+    min_morsel_size: usize,
+    max_morsel_size: usize,
+    l2_cache_bytes: usize,
+    num_workers: usize,
+    // Runtime feedback
+    throughput_ema: f64,
+    alpha: f64,
+}
+
+impl AdaptiveMorselSizer {
+    pub fn new(num_workers: usize) -> Self {
+        Self {
+            min_morsel_size: 1_000,
+            max_morsel_size: 1_000_000,
+            l2_cache_bytes: 256 * 1024, // 256 KB typical L2
+            num_workers,
+            throughput_ema: 0.0,
+            alpha: 0.3,
+        }
+    }
+
+    /// Compute optimal morsel size for a pipeline
+    pub fn compute_size(&self, pipeline: &Pipeline) -> usize {
+        // Cache constraint
+        let row_width = pipeline.bytes_per_row();
+        let pipeline_overhead = pipeline.per_morsel_state_bytes();
+        let available_cache = self.l2_cache_bytes
+            .saturating_sub(pipeline_overhead);
+
+        let cache_limited = if row_width > 0 {
+            available_cache / row_width
+        } else {
+            self.max_morsel_size
+        };
+
+        // Balance constraint
+        let total_rows = pipeline.estimated_input_rows();
+        let min_morsels = self.num_workers * 10;
+        let balance_limited = if min_morsels > 0 {
+            total_rows / min_morsels
+        } else {
+            self.max_morsel_size
+        };
+
+        // Operator-specific adjustments
+        let operator_factor = self.operator_size_factor(pipeline);
+
+        let base_size = cache_limited
+            .min(balance_limited)
+            .max(self.min_morsel_size)
+            .min(self.max_morsel_size);
+
+        ((base_size as f64 * operator_factor) as usize)
+            .max(self.min_morsel_size)
+            .min(self.max_morsel_size)
+    }
+
+    /// Per-operator size adjustment factor
+    fn operator_size_factor(&self, pipeline: &Pipeline) -> f64 {
+        let mut factor = 1.0;
+
+        for op in &pipeline.operators {
+            match op {
+                // Hash join probe: smaller morsels (random HT access)
+                Operator::HashJoinProbe { .. } => {
+                    factor *= 0.5;
+                }
+                // Sequential scan: larger morsels (prefetch benefit)
+                Operator::Scan { .. } => {
+                    factor *= 2.0;
+                }
+                // Aggregation: depends on group count
+                Operator::Aggregate { estimated_groups, .. } => {
+                    if *estimated_groups > 100_000 {
+                        factor *= 0.5; // Large HT: smaller morsels
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        factor.max(0.1).min(10.0) // Clamp adjustments
+    }
+
+    /// Update based on runtime throughput feedback
+    pub fn adapt(
+        &mut self,
+        morsel_size: usize,
+        processing_time_ns: u64,
+        rows_processed: usize,
+    ) -> usize {
+        let throughput = rows_processed as f64
+            / processing_time_ns as f64;
+
+        // Update EMA
+        if self.throughput_ema == 0.0 {
+            self.throughput_ema = throughput;
+        } else {
+            self.throughput_ema = self.alpha * throughput
+                + (1.0 - self.alpha) * self.throughput_ema;
+        }
+
+        // If throughput dropped significantly, reduce morsel size
+        // (likely cache thrashing)
+        if throughput < self.throughput_ema * 0.7 {
+            return (morsel_size * 3 / 4)
+                .max(self.min_morsel_size);
+        }
+
+        // If throughput is stable and scheduling overhead is visible,
+        // increase morsel size
+        if throughput > self.throughput_ema * 0.95
+            && morsel_size < self.max_morsel_size / 2
+        {
+            return (morsel_size * 5 / 4)
+                .min(self.max_morsel_size);
+        }
+
+        morsel_size // Keep current size
+    }
+}
+
+/// Morsel size recommendations by scenario
+pub fn recommended_morsel_size(
+    scenario: MorselScenario,
+) -> usize {
+    match scenario {
+        // Sequential scan: large morsels for I/O
+        MorselScenario::SequentialScan => 100_000,
+        // Hash join probe: smaller for cache
+        MorselScenario::HashJoinProbe => 20_000,
+        // Aggregation (low cardinality): medium
+        MorselScenario::LowCardAggregate => 50_000,
+        // Aggregation (high cardinality): small
+        MorselScenario::HighCardAggregate => 10_000,
+        // Sort: large (sequential access)
+        MorselScenario::Sort => 100_000,
+        // Nested loop join: small (random access)
+        MorselScenario::NestedLoopJoin => 5_000,
+    }
+}
+
+/// Cost model for morsel size impact
+pub fn morsel_size_cost(
+    total_rows: f64,
+    morsel_size: usize,
+    num_workers: usize,
+    per_morsel_overhead_ns: f64,
+) -> f64 {
+    let num_morsels = (total_rows / morsel_size as f64).ceil();
+
+    // Scheduling overhead
+    let sched_cost = num_morsels * per_morsel_overhead_ns * 1e-6;
+
+    // Imbalance cost (last batch of morsels)
+    let morsels_per_worker = num_morsels / num_workers as f64;
+    let imbalance = if morsels_per_worker > 1.0 {
+        1.0 / morsels_per_worker
+    } else {
+        0.5 // Half the workers idle for small inputs
+    };
+    let idle_cost = total_rows * 0.00001 * imbalance;
+
+    sched_cost + idle_cost
+}
+```
+
+## Cost Model
+
+**Morsel Size Impact:**
+
+| Morsel Size | Scheduling Overhead | Load Balance | Cache Fit | Best For |
+|------------|--------------------|--------------|-----------|---------|
+| 1K | Very high | Perfect | Always | Never (overhead) |
+| 10K | High | Excellent | Always | Hash probe |
+| 50K | Medium | Good | Usually | Aggregation |
+| 100K | Low | Good | Depends | Scans (default) |
+| 500K | Very low | Fair | Rarely | Sequential I/O |
+| 1M | Minimal | Poor | No | Bandwidth-bound |
+
+**Cache Fit Calculation:**
+- L2 = 256 KB, row_width = 64 bytes: max ~4000 rows/morsel
+- L2 = 256 KB, row_width = 8 bytes: max ~32000 rows/morsel
+- L3 = 8 MB, row_width = 64 bytes: max ~125000 rows/morsel
+
+**Scheduling Overhead:**
+- Per-morsel: ~100-500 ns (atomic counter + thread coordination)
+- 1M rows, morsel=1K: 1000 morsels x 500ns = 0.5ms overhead
+- 1M rows, morsel=100K: 10 morsels x 500ns = 0.005ms overhead
+
+## Test Cases
+
+```sql
+-- Test 1: Wide table scan (cache-limited)
+SELECT * FROM wide_table WHERE id > 1000;
+-- 200 columns x 8 bytes = 1600 bytes per row
+-- L2 fit: 256KB / 1600 = 160 rows per morsel (very small!)
+-- Expected: Adaptive sizer detects wide rows, reduces morsel
+
+-- Test 2: Narrow column aggregation (balance-limited)
+SELECT region, SUM(amount) FROM sales GROUP BY region;
+-- 2 columns x 8 bytes = 16 bytes per row
+-- L2 fit: 256KB / 16 = 16K rows
+-- Expected: Morsel size determined by balance (10x workers)
+
+-- Test 3: Hash probe pipeline (operator-adjusted)
+SELECT * FROM orders o JOIN customers c ON o.cust_id = c.id
+WHERE o.date > '2024-01-01';
+-- Hash probe has random access pattern
+-- Expected: Morsel size reduced by 0.5x for cache friendliness
+
+-- Test 4: Runtime adaptation (throughput feedback)
+SELECT * FROM events WHERE complex_predicate(data);
+-- Per-morsel cost varies significantly
+-- Expected: Adaptive sizing converges after 5-10 morsels
+```
+
+## References
+
+1. **Leis, Viktor et al**. "Morsel-Driven Parallelism." SIGMOD 2014.
+   - Original morsel size analysis and recommendations
+
+2. **Kersten, Timo et al**. "Everything You Always Wanted to Know About Compiled and Vectorized Queries." VLDB 2018.
+   - Batch/morsel size interaction with execution model
+
+3. **Raasveldt, Mark; Muhleisen, Hannes**. "DuckDB: an Embeddable Analytical Database." SIGMOD 2019.
+   - Adaptive morsel sizing in DuckDB
+
+4. **Menon, Prashanth et al**. "Relaxed Operator Fusion for In-Memory Databases." VLDB 2017.
+   - Materialization boundary and morsel size interaction

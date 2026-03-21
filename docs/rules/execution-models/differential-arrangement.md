@@ -1,0 +1,308 @@
+# Rule: Differential Arrangements (Indexed State)
+
+**Category:** execution-models
+**File:** `rules/execution-models/differential/differential-arrangement.rra`
+
+## Metadata
+
+- **ID:** `differential-arrangement`
+- **Version:** 1.0.0
+- **Databases:** Materialize, differential-dataflow
+- **Tags:** execution, differential, arrangement, index, state, incremental
+- **SQL Standard:** differential-dataflow
+- **Authors:** Frank McSherry
+
+
+# Differential Arrangements (Indexed State)
+
+## Description
+
+An arrangement is an indexed representation of a differential collection, organized by key for efficient lookup. Arrangements maintain a sorted, compacted trace of all changes to a collection, enabling O(log N) lookups by key. They serve as the shared state that multiple operators (joins, lookups, aggregations) can read from without duplicating data. Arrangements are the key innovation enabling efficient incremental joins and subqueries.
+
+**Key concepts:**
+- **Trace**: Append-only log of (key, value, time, diff) batches
+- **Compaction**: Merge old batches when frontier advances
+- **Sharing**: Multiple operators can read the same arrangement
+- **Cursor**: Iterator interface for scanning arrangement by key
+- **Physical plans**: Arrangements determine which join orders are efficient
+
+**Structure:**
+```
+Arrangement = sorted trace of batches:
+  Batch 1 (time T1): [(k1,v1,+1), (k2,v2,+1), ...]
+  Batch 2 (time T2): [(k1,v1,-1), (k1,v3,+1), ...]  // Update k1
+  Batch 3 (time T3): [(k3,v4,+1), ...]
+  ...
+  Compacted: Batch 1+2 merged when frontier passes T2
+```
+
+**Key characteristics:**
+- **Log-structured**: New changes appended as new batches
+- **Compactable**: Old batches merged to reduce lookup cost
+- **Shared**: One arrangement serves multiple downstream operators
+- **Indexed**: Sorted by key for O(log N) binary search
+- **Temporal**: Maintains full history until compaction frontier advances
+
+**Trade-offs:**
+- Memory proportional to active data (after compaction)
+- Compaction is CPU-intensive (merge sort)
+- Arrangement key must be chosen at creation time
+- Multiple access patterns require multiple arrangements (different keys)
+
+## Relational Algebra
+
+```
+Arrangement operations:
+
+arrange_by_key(collection, key_fn):
+  // Index collection by key for efficient lookup
+  For each change (data, time, diff):
+    key = key_fn(data)
+    value = data \ key  // Remaining columns
+    trace.append(key, value, time, diff)
+
+lookup(arrangement, probe_key, at_time):
+  // Find all values for a key at a specific time
+  cursor = arrangement.cursor()
+  cursor.seek(probe_key)
+  results = []
+  while cursor.key() == probe_key:
+    if cursor.time() <= at_time:
+      results.push((cursor.value(), cursor.diff()))
+    cursor.advance()
+  // Consolidate: sum diffs, remove zeros
+  return consolidate(results)
+
+compact(arrangement, frontier):
+  // Merge batches before frontier
+  old_batches = arrangement.batches_before(frontier)
+  merged = merge_sort(old_batches)
+  consolidated = consolidate(merged)  // Remove +1/-1 pairs
+  arrangement.replace(old_batches, consolidated)
+```
+
+## Implementation
+
+```rust
+/// Differential arrangement: indexed, compactable trace
+pub struct Arrangement<K: Ord, V> {
+    /// Sorted batches of changes
+    batches: Vec<Batch<K, V>>,
+    /// Compaction frontier: batches before this can be merged
+    compaction_frontier: Frontier,
+    /// Total logical entries (after compaction)
+    logical_size: usize,
+}
+
+/// A batch of sorted changes at specific times
+pub struct Batch<K: Ord, V> {
+    /// Sorted by (key, value, time)
+    entries: Vec<(K, V, Timestamp, Diff)>,
+    /// Time range this batch covers
+    lower: Frontier,
+    upper: Frontier,
+}
+
+impl<K: Ord, V> Arrangement<K, V> {
+    /// Append a new batch of changes
+    pub fn append(&mut self, changes: Vec<(K, V, Timestamp, Diff)>) {
+        let mut sorted = changes;
+        sorted.sort_by(|a, b| a.0.cmp(&b.0).then(a.2.cmp(&b.2)));
+
+        self.batches.push(Batch {
+            entries: sorted,
+            lower: Frontier::new(),
+            upper: Frontier::new(),
+        });
+    }
+
+    /// Look up all values for a key at a given time
+    pub fn lookup(
+        &self,
+        key: &K,
+        at_time: &Timestamp,
+    ) -> Vec<(V, Diff)>
+    where
+        V: Clone,
+    {
+        let mut results = Vec::new();
+
+        for batch in &self.batches {
+            // Binary search for key in sorted batch
+            let start = batch.entries.partition_point(|e| &e.0 < key);
+
+            for entry in &batch.entries[start..] {
+                if &entry.0 != key {
+                    break; // Past our key
+                }
+                if &entry.2 <= at_time {
+                    results.push((entry.1.clone(), entry.3));
+                }
+            }
+        }
+
+        // Consolidate: sum diffs, remove entries with diff=0
+        consolidate(&mut results);
+        results
+    }
+
+    /// Compact batches before the given frontier
+    pub fn compact(&mut self, frontier: &Frontier) {
+        // Find batches entirely before frontier
+        let (old, new): (Vec<_>, Vec<_>) = self.batches
+            .drain(..)
+            .partition(|b| b.upper.less_than(frontier));
+
+        if old.len() < 2 {
+            self.batches = old.into_iter().chain(new).collect();
+            return;
+        }
+
+        // Merge old batches
+        let mut merged: Vec<(K, V, Timestamp, Diff)> = old
+            .into_iter()
+            .flat_map(|b| b.entries)
+            .collect();
+
+        // Sort and consolidate
+        merged.sort_by(|a, b| a.0.cmp(&b.0).then(a.2.cmp(&b.2)));
+        consolidate_in_place(&mut merged);
+
+        // Remove entries with diff = 0
+        merged.retain(|e| e.3 != 0);
+
+        let compacted = Batch {
+            entries: merged,
+            lower: Frontier::minimum(),
+            upper: frontier.clone(),
+        };
+
+        self.batches = std::iter::once(compacted)
+            .chain(new)
+            .collect();
+    }
+
+    /// Create a cursor for scanning the arrangement
+    pub fn cursor(&self) -> ArrangementCursor<K, V> {
+        ArrangementCursor {
+            batch_cursors: self.batches.iter()
+                .map(|b| BatchCursor::new(b))
+                .collect(),
+        }
+    }
+}
+
+/// Consolidate changes: sum diffs for same (key, value)
+fn consolidate<V: Eq>(results: &mut Vec<(V, Diff)>) {
+    results.sort_by(|a, b| {
+        // Group by value
+        std::ptr::eq(&a.0, &b.0).cmp(&true)
+    });
+
+    let mut write = 0;
+    for read in 0..results.len() {
+        if write > 0 && results[write - 1].0 == results[read].0 {
+            results[write - 1].1 += results[read].1;
+        } else {
+            if write > 0 && results[write - 1].1 == 0 {
+                write -= 1; // Remove zero-diff entries
+            }
+            results[write] = results[read].clone();
+            write += 1;
+        }
+    }
+
+    results.truncate(write);
+    results.retain(|e| e.1 != 0);
+}
+
+/// Cost model for arrangement operations
+pub fn arrangement_cost(
+    total_entries: f64,
+    lookups_per_second: f64,
+    changes_per_second: f64,
+    compaction_interval_ms: f64,
+) -> f64 {
+    // Lookup cost: binary search per batch
+    let num_batches = (changes_per_second * compaction_interval_ms / 1000.0)
+        .max(1.0);
+    let lookup_cost = lookups_per_second
+        * num_batches
+        * total_entries.log2()
+        * 0.00001; // ~10ns per comparison
+
+    // Append cost
+    let append_cost = changes_per_second * 0.0001; // Sort + append
+
+    // Compaction cost (amortized)
+    let compaction_cost = total_entries * total_entries.log2()
+        * 0.000001
+        / (compaction_interval_ms / 1000.0);
+
+    lookup_cost + append_cost + compaction_cost
+}
+```
+
+## Cost Model
+
+**Lookup:**
+- Per-batch: O(log N) binary search on sorted keys
+- Total: O(B x log N) where B = number of uncompacted batches
+- After compaction: O(log N) single binary search
+- Typical: ~100-500 ns per lookup
+
+**Append:**
+- Sort new batch: O(K log K) where K = changes in batch
+- Append: O(1) (add to batch list)
+- Amortized: O(log K) per change
+
+**Compaction:**
+- Merge sort of B batches: O(N log B)
+- Consolidation: O(N) single pass
+- Triggered when: frontier advances or batch count exceeds threshold
+- Reclaims memory from retracted entries (+1/-1 cancellation)
+
+**Memory:**
+- Before compaction: all historical changes
+- After compaction: only live entries (net positive diffs)
+- Sharing: one arrangement serves N downstream operators
+
+## Test Cases
+
+```sql
+-- Test 1: Simple arrangement lookup
+CREATE INDEX users_by_id ON users (id);
+-- Arrangement keyed by id
+-- Lookup: O(log N) for single user by id
+-- INSERT: append to trace, compact periodically
+
+-- Test 2: Join using arrangement
+CREATE MATERIALIZED VIEW order_details AS
+SELECT o.*, c.name
+FROM orders o JOIN customers c ON o.cust_id = c.id;
+-- customers arranged by id
+-- Each new order probes customers arrangement: O(log N)
+
+-- Test 3: Compaction after updates
+UPDATE users SET email = 'new@email.com' WHERE id = 42;
+-- Trace: (42, old_email, t1, -1), (42, new_email, t2, +1)
+-- After compaction: (42, new_email, t2, +1) only
+
+-- Test 4: Shared arrangement
+-- Multiple views reference the same arrangement
+-- Memory: one copy of customers, used by 5 materialized views
+```
+
+## References
+
+1. **McSherry, Frank et al**. "differential-dataflow." CIDR 2013.
+   - Arrangement as indexed differential collection
+
+2. **McSherry, Frank**. "Arrangements" in differential-dataflow documentation.
+   - Detailed arrangement API and compaction semantics
+
+3. **Materialize Documentation**. "Arrangements and Indexes."
+   - Production arrangement management in Materialize
+
+4. **Murray, Derek G. et al**. "Naiad: A Timely Dataflow System." SOSP 2013.
+   - Timely dataflow substrate for arrangements

@@ -1,0 +1,64 @@
+# Rule: CTE Constant Folding
+
+**Category:** logical/cte-optimization
+**File:** `rules/logical/cte-optimization/cte-constant-folding.rra`
+
+## Metadata
+
+- **ID:** `cte-constant-folding`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, duckdb, sqlite
+- **Tags:** cte, constant-folding, simplification
+- **Authors:** "RA Contributors"
+
+
+# CTE Constant Folding
+
+## Description
+
+When a CTE definition produces only constant values (e.g., `SELECT 1 AS x`), replace references to the CTE with the constant values directly.
+
+**When to apply**: CTE definition is a VALUES or a SELECT of only constants with no FROM clause.
+
+## Relational Algebra
+
+```algebra
+CTE[name, Values[rows]](body)
+  -> body[name := Values[rows]]
+  where is_constant_relation(Values[rows])
+```
+
+## Implementation
+
+```rust
+rw!("cte-constant-folding";
+    "(cte ?name ?def ?body)" =>
+    "(substitute ?name ?def ?body)"
+    if is_constant_definition("?def")
+),
+```
+
+## Test Cases
+
+### Positive: Constant CTE
+
+```sql
+WITH params AS (SELECT 10 AS threshold, 'active' AS status)
+SELECT * FROM users, params WHERE users.score > params.threshold;
+
+-- Inline constants directly
+```
+
+### Negative: Non-constant CTE
+
+```sql
+WITH data AS (SELECT id FROM users)
+SELECT * FROM data;
+
+-- Not constant; do not fold
+```
+
+## References
+
+- Constant folding in compiler optimization
+- PostgreSQL constant expression evaluation

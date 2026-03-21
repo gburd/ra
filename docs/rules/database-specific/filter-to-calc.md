@@ -1,0 +1,87 @@
+# Rule: Calcite FilterToCalcRule
+
+**Category:** database-specific/calcite
+**File:** `rules/database-specific/calcite/filter-to-calc.rra`
+
+## Metadata
+
+- **ID:** `calcite-filter-to-calc`
+- **Version:** "1.0.0"
+- **Databases:** calcite
+- **Tags:** database-specific, calcite, filter, calc, conversion
+- **Authors:** "RA Contributors"
+
+
+# Calcite FilterToCalcRule
+
+## Description
+
+Converts a `LogicalFilter` into a `LogicalCalc`. The filter
+predicate becomes the Calc's condition, and all input columns
+pass through as the program. This enables merging with adjacent
+Calc nodes (from ProjectToCalcRule or other filters).
+
+**When to apply**: A `LogicalFilter` exists in the plan and the
+optimizer is using the Calc-based program model.
+
+**Why it works**: Like `ProjectToCalcRule`, this is a
+representation change that enables `CalcMergeRule` to fuse
+filter-project-filter chains into a single operator.
+
+**Calcite class**: `org.apache.calcite.rel.rules.FilterToCalcRule`
+
+## Relational Algebra
+
+```algebra
+-- Before: filter
+sigma[x > 10](R)
+
+-- After: calc with condition
+Calc[program: {*}, cond: x > 10](R)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-filter-to-calc";
+    "(filter ?pred ?input)" =>
+    "(calc (identity) ?pred ?input)"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable() -> bool {
+    // Always applicable: any filter can become a calc
+    true
+}
+```
+
+**Restrictions:**
+- This is a representation change, not a semantic optimization
+- Only useful in conjunction with CalcMergeRule
+
+## Cost Model
+
+```rust
+fn estimated_benefit(_rows: f64) -> f64 {
+    0.0
+}
+```
+
+**Typical benefit**: 1-10% indirectly, by enabling Calc merging.
+
+## Test Cases
+
+```sql
+-- Positive: simple filter
+SELECT * FROM emp WHERE sal > 5000;
+-- Filter(sal > 5000) -> Calc(program=[*], cond=sal > 5000)
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/FilterToCalcRule.java

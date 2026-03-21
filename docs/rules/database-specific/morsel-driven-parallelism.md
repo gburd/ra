@@ -1,0 +1,161 @@
+# Rule: Morsel-Driven Parallelism (HyPer)
+
+**Category:** database-specific/hyper
+**File:** `rules/database-specific/hyper/morsel-driven-parallelism.rra`
+
+## Metadata
+
+- **ID:** `hyper-morsel-driven-parallelism`
+- **Version:** "1.0.0"
+- **Databases:** hyper
+- **Tags:** database-specific
+- **Authors:** "RA Contributors"
+
+
+# Morsel-Driven Parallelism (HyPer)
+
+## Metadata
+- **Rule ID**: `hyper-morsel-driven-parallelism`
+- **Category**: Database-Specific / HyPer
+- **Source**: HyPer / Umbra
+- **Paper**: "Morsel-Driven Parallelism: A NUMA-Aware Query Evaluation Framework for the Many-Core Age" (SIGMOD 2014)
+- **DOI**: 10.1145/2588555.2610507
+
+## Description
+
+HyPer/Umbra use morsel-driven execution: divide input into small chunks (morsels) and process them with work-stealing parallelism on NUMA-aware worker threads.
+
+**Morsel**: ~10,000-100,000 tuples
+**Key features:**
+- Work-stealing parallelism
+- NUMA-aware scheduling
+- Cache-efficient processing
+- Elastic parallelism (adapts to load)
+
+## Relational Algebra
+
+```
+Scan(R)
+→ ParallelMorselScan(R, morsel_size=100K)
+  with work_stealing and numa_local_storage
+```
+
+## Implementation Pattern
+
+```cpp
+// HyPer MorselDrivenExecutor (conceptual)
+class MorselDrivenExecutor {
+    struct Morsel {
+        uint64_t start_row;
+        uint64_t end_row;
+        void* data_ptr;
+    };
+
+    void execute(QueryPlan plan) {
+        // Divide input into morsels
+        std::vector<Morsel> morsels = createMorsels(plan.scan_node, MORSEL_SIZE);
+
+        // Create NUMA-local work queues
+        std::vector<WorkQueue> numa_queues(numa_node_count);
+        for (Morsel& m : morsels) {
+            int numa_node = getNUMANode(m.data_ptr);
+            numa_queues[numa_node].push(m);
+        }
+
+        // Worker threads with work-stealing
+        std::vector<std::thread> workers;
+        for (int i = 0; i < thread_count; i++) {
+            workers.emplace_back([&, i]() {
+                int local_numa = i % numa_node_count;
+                while (true) {
+                    // Try local queue first
+                    Morsel m;
+                    if (numa_queues[local_numa].try_pop(m)) {
+                        processMorsel(m, plan);
+                    }
+                    // Steal from other queues
+                    else if (stealMorsel(numa_queues, local_numa, m)) {
+                        processMorsel(m, plan);
+                    }
+                    else {
+                        break; // No more work
+                    }
+                }
+            });
+        }
+
+        for (auto& w : workers) w.join();
+    }
+};
+```
+
+## Cost Model
+
+```rust
+pub fn cost_morsel_driven(
+    data_size: u64,
+    morsel_size: u64,
+    num_cores: usize,
+    numa_nodes: usize,
+) -> Cost {
+    let num_morsels = data_size / morsel_size;
+
+    // Ideal parallelism
+    let serial_cost = Cost::cpu(data_size * 10);
+    let parallel_cost = serial_cost / num_cores as u64;
+
+    // Work-stealing overhead
+    let stealing_overhead = Cost::cpu(num_morsels * 100); // Queue management
+
+    // NUMA locality benefit
+    let numa_benefit = if numa_nodes > 1 {
+        Cost::memory_bandwidth(data_size as f64 * 0.2) // 20% bandwidth savings
+    } else {
+        Cost::zero()
+    };
+
+    parallel_cost + stealing_overhead - numa_benefit
+}
+```
+
+## Test Cases
+
+### Test 1: Large scan with morsel parallelism
+```sql
+-- 1B row table on 64-core NUMA machine
+SELECT SUM(amount), AVG(price)
+FROM transactions
+WHERE date >= '2024-01-01';
+
+-- Execution:
+-- 1. Divide 1B rows into ~10,000 morsels (100K each)
+-- 2. Distribute to 4 NUMA-local queues
+-- 3. 64 worker threads process with work-stealing
+-- 4. Near-linear speedup (60x on 64 cores)
+```
+
+### Test 2: Adaptive parallelism
+```sql
+-- Small query (100K rows)
+SELECT * FROM small_table WHERE id < 1000;
+
+-- Morsel parallelism:
+-- Creates 1-2 morsels
+-- Uses 2-4 threads (doesn't waste resources)
+-- Elastic: adapts thread count to data size
+```
+
+## References
+
+1. **Paper**: "Morsel-Driven Parallelism: A NUMA-Aware Query Evaluation Framework for the Many-Core Age"
+   - Authors: Leis, Kundhikanjana, Kemper, Neumann
+   - DOI: 10.1145/2588555.2610507
+   - SIGMOD 2014
+
+2. **HyPer/Umbra Documentation**
+   - https://umbra-db.com/
+
+3. **Video**: "Morsel-Driven Parallelism" (Thomas Neumann)
+
+## Tags
+`database-specific`, `hyper`, `umbra`, `morsel-driven`, `parallelism`, `numa`, `work-stealing`, `many-core`

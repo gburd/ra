@@ -1,0 +1,83 @@
+# Rule: Window Function Merge
+
+**Category:** logical/window-pushdown
+**File:** `rules/logical/window-pushdown/window-merge.rra`
+
+## Metadata
+
+- **ID:** `window-merge`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, duckdb, oracle
+- **Tags:** window, merge, optimization, common-partition
+- **Authors:** "RA Contributors"
+
+
+# Window Function Merge
+
+## Description
+
+Merges multiple window functions that share the same PARTITION BY and ORDER BY specification into a single Window operator. Avoids redundant sorting and partitioning passes.
+
+**When to apply**: Multiple Window operators have identical partition/order specs.
+
+**Why it works**: A single sort and partition pass can compute all window functions sharing the same specification.
+
+## Relational Algebra
+
+```algebra
+window[W1 OVER (P ORDER BY O)](window[W2 OVER (P ORDER BY O)](R))
+  -> window[W1, W2 OVER (P ORDER BY O)](R)
+  where partition(W1) = partition(W2) AND order(W1) = order(W2)
+```
+
+## Implementation
+
+```rust
+rw!("window-merge";
+    "(window ?funcs1 (window ?funcs2 ?input))" =>
+    "(window (merge ?funcs1 ?funcs2) ?input)"
+    if same_window_spec("?funcs1", "?funcs2")
+),
+```
+
+## Cost Model
+
+```rust
+fn benefit(rows: u64, num_windows: u64) -> f64 {
+    let sort_cost = rows as f64 * (rows as f64).log2();
+    let saved = sort_cost * (num_windows - 1) as f64;
+    saved / (sort_cost * num_windows as f64)
+}
+```
+
+**Typical benefit**: 20-50% for multiple same-spec windows
+
+## Test Cases
+
+### Positive: Same partition and order
+
+```sql
+SELECT
+  dept_id,
+  ROW_NUMBER() OVER (PARTITION BY dept_id ORDER BY salary) as rn,
+  RANK() OVER (PARTITION BY dept_id ORDER BY salary) as rnk
+FROM employees;
+
+-- Merge into single window pass
+```
+
+### Negative: Different partition specs
+
+```sql
+SELECT
+  ROW_NUMBER() OVER (PARTITION BY dept_id ORDER BY salary) as rn,
+  ROW_NUMBER() OVER (PARTITION BY region ORDER BY salary) as rn2
+FROM employees;
+
+-- Different partitions; cannot merge
+```
+
+## References
+
+- PostgreSQL: Window function coalescing
+- Oracle: Common window sort elimination

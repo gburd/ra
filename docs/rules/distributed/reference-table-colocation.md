@@ -1,0 +1,130 @@
+# Rule: Reference Table Co-Location
+
+**Category:** distributed/colocation
+**File:** `rules/distributed/colocation/reference-table-colocation.rra`
+
+## Metadata
+
+- **ID:** `reference-table-colocation`
+- **Version:** "1.0.0"
+- **Databases:** citus, cockroachdb, yugabytedb, greenplum
+- **Tags:** distributed, colocation, reference-table, replicated, join
+- **Authors:** "RA Contributors"
+
+
+# Reference Table Co-Location
+
+## Description
+
+Eliminates exchange operators for joins involving reference (replicated)
+tables.  A reference table is fully replicated on every node, so a join
+between a distributed table and a reference table can always be executed
+locally without data movement.
+
+**When to apply**: One side of a join is a reference/replicated table and
+the other is hash-distributed.  The join can execute on each node using
+the local copy of the reference table.
+
+**Why it works**: Because the reference table exists in full on every
+node, the join condition can be evaluated without network transfer.  This
+eliminates both the exchange operator and the serialization overhead.
+
+## Relational Algebra
+
+```algebra
+-- Remove exchange when joining with a replicated table
+Join[c](Exchange[hash(k)](R), Exchange[broadcast](S_replicated))
+  -> Join[c](R, S_replicated)
+  where distribution(S_replicated) = Replicated
+
+-- Alternatively, if the planner inserted a broadcast:
+Join[c](R, Exchange[broadcast](S))
+  -> Join[c](R, S)
+  where distribution(S) = Replicated
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("eliminate-broadcast-for-reference-table";
+    "(join ?type ?cond ?left (exchange broadcast ?right))" =>
+    "(join ?type ?cond ?left ?right)"
+    if is_replicated("?right")
+),
+
+rw!("eliminate-exchange-for-reference-table-left";
+    "(join ?type ?cond (exchange broadcast ?left) ?right)" =>
+    "(join ?type ?cond ?left ?right)"
+    if is_replicated("?left")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(table: &RelNode) -> bool {
+    table.distribution() == Distribution::Replicated
+}
+```
+
+**Restrictions:**
+- Table must be declared as a reference/replicated table in the catalog
+- Reference tables must be kept in sync across all nodes (write
+  amplification trade-off)
+- Only practical for small, slowly-changing tables
+
+## Cost Model
+
+```rust
+fn reference_table_benefit(
+    rows: f64,
+    row_bytes: f64,
+    num_nodes: u32,
+) -> f64 {
+    // Savings: avoid broadcasting rows * row_bytes to all nodes
+    rows * row_bytes * num_nodes as f64
+}
+```
+
+**Typical benefit**: Eliminates all data movement for reference table
+joins.  For a 10KB reference table on 100 nodes, saves 1MB of network
+transfer per query.
+
+## Test Cases
+
+```sql
+-- Positive: countries is a reference table replicated on every node
+SELECT o.*, c.name
+FROM orders o                      -- hash-distributed on order_id
+JOIN countries c ON o.country = c.code;  -- replicated
+-- No exchange needed for countries
+
+-- Plan:
+-- HashJoin(o.country = c.code)
+--   Scan(orders)           -- local partition
+--   Scan(countries)        -- local replica
+```
+
+```sql
+-- Positive: configuration table is replicated
+SELECT u.*, cfg.max_retries
+FROM users u
+JOIN config cfg ON cfg.key = 'max_retries';
+-- No data movement for config table
+```
+
+```sql
+-- Negative: both tables are distributed, not replicated
+SELECT *
+FROM orders o JOIN customers c ON o.customer_id = c.id;
+-- Both hash-distributed, exchange still needed
+```
+
+## References
+
+Citus: src/backend/distributed/planner/multi_logical_planner.c - reference table handling
+CockroachDB: pkg/sql/catalog/descpb/structured.go - ReplicationConstraint
+YugabyteDB: docs/architecture/docdb-replication - Colocated tables
+Greenplum: src/backend/cdb/cdbmutate.c - replicated table motion elimination

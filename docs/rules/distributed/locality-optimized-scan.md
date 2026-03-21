@@ -1,0 +1,152 @@
+# Rule: Locality-Optimized Scan
+
+**Category:** distributed/locality-optimization
+**File:** `rules/distributed/locality-optimization/locality-optimized-scan.rra`
+
+## Metadata
+
+- **ID:** `locality-optimized-scan`
+- **Version:** "1.0.0"
+- **Databases:** cockroachdb
+- **Tags:** distributed, locality, scan, multi-region, latency
+- **Authors:** "RA Contributors"
+
+
+# Locality-Optimized Scan
+
+## Description
+
+Splits a multi-region scan into a local-first scan and a remote fallback
+scan, connected by a LocalityOptimizedSearch operator. The local scan
+targets partitions in the gateway region. If the local scan returns
+enough rows, the remote scan is never executed.
+
+**When to apply**: A scan on a REGIONAL BY ROW table touches multiple
+partitions across regions, and the scan has a hard limit or bounded
+cardinality such that local partitions alone might satisfy it.
+
+**Why it works**: In multi-region deployments, cross-region latency
+dominates query time. By scanning local partitions first, queries that
+find matching rows locally avoid any cross-region network round trips.
+
+## Relational Algebra
+
+```algebra
+Scan(T, spans=[local_spans ++ remote_spans])
+  -> LocalityOptimizedSearch(
+       Scan(T, spans=local_spans),
+       Scan(T, spans=remote_spans)
+     )
+  where T is REGIONAL BY ROW
+  where limit <= max_cardinality(local_spans)
+        OR max_cardinality(local_spans) >= max_cardinality(T)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("locality-optimized-scan";
+    "(scan ?table ?spans)" =>
+    "(locality_optimized_search
+        (scan ?table ?local_spans)
+        (scan ?table ?remote_spans))"
+    if is_regional_by_row("?table")
+    if can_split_local_remote("?spans", "?local_spans", "?remote_spans")
+    if local_may_satisfy_limit("?table", "?local_spans")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    table: &TableMeta,
+    scan_spans: &[Span],
+    gateway_region: &str,
+) -> bool {
+    // Table must be partitioned by region (REGIONAL BY ROW)
+    table.is_regional_by_row()
+    // Scan must touch multiple regions
+    && scan_spans.iter().any(|s| s.partition_region() == gateway_region)
+    && scan_spans.iter().any(|s| s.partition_region() != gateway_region)
+    // Must have a limit or bounded cardinality
+    && (table.has_limit()
+        || local_cardinality(scan_spans, gateway_region)
+           >= total_cardinality(scan_spans))
+}
+```
+
+**Restrictions:**
+- Only valid for tables with REGIONAL BY ROW locality
+- Without a limit, only applies when the local partition can satisfy
+  the full scan cardinality
+- If data is uniformly distributed across regions, this is a slight
+  pessimization for queries that need remote data
+- The remote scan adds overhead if local scan returns no rows
+
+## Cost Model
+
+```rust
+fn locality_scan_cost(
+    local_rows: f64,
+    remote_rows: f64,
+    local_latency_ms: f64,
+    remote_latency_ms: f64,
+    probability_local: f64,
+) -> f64 {
+    // Expected cost is weighted by probability of local satisfaction
+    let local_cost = local_rows * local_latency_ms;
+    let remote_cost = remote_rows * remote_latency_ms;
+    probability_local * local_cost
+        + (1.0 - probability_local) * (local_cost + remote_cost)
+}
+```
+
+**Typical benefit**: For point lookups on REGIONAL BY ROW tables where
+the gateway region holds the target row 90% of the time, this avoids
+cross-region latency (50-200ms) in 90% of queries.
+
+## Test Cases
+
+```sql
+-- Positive: point lookup on REGIONAL BY ROW table
+-- Table 'users' with regions us-east1, us-west1, europe-west1
+-- Query issued from us-east1
+SELECT * FROM users WHERE id = 42;
+
+-- Without optimization: scan all 3 region partitions
+-- Scan(users, [/eu/42, /us-east/42, /us-west/42])
+
+-- With optimization:
+-- LocalityOptimizedSearch
+--   Scan(users, [/us-east/42])      -- local first
+--   Scan(users, [/eu/42, /us-west/42])  -- remote fallback
+```
+
+```sql
+-- Positive: limited scan on REGIONAL BY ROW table
+SELECT * FROM orders WHERE customer_id = 100 LIMIT 5;
+-- If us-east1 partition has >= 5 rows for customer 100,
+-- remote partitions are never scanned
+```
+
+```sql
+-- Negative: full table scan without limit
+SELECT COUNT(*) FROM users;
+-- Must scan all regions regardless, no benefit from local-first
+```
+
+```sql
+-- Negative: table not partitioned by region
+SELECT * FROM settings WHERE key = 'theme';
+-- REGIONAL BY TABLE, not BY ROW; no partition splitting possible
+```
+
+## References
+
+CockroachDB: pkg/sql/opt/xform/rules/scan.opt:80 - GenerateLocalityOptimizedScan (commit 51e808c)
+CockroachDB: pkg/sql/opt/distribution/distribution.go:41 - LocalityOptimizedSearchExpr
+CockroachDB: pkg/sql/opt/partition/locality.go - local/remote prefix sorting
+CockroachDB docs: "Locality-Optimized Search" in multi-region documentation

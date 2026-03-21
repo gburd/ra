@@ -1,0 +1,130 @@
+# Rule: Merge Adjacent Exchanges
+
+**Category:** distributed/exchange-placement
+**File:** `rules/distributed/exchange-placement/merge-adjacent-exchanges.rra`
+
+## Metadata
+
+- **ID:** `merge-adjacent-exchanges`
+- **Version:** "1.0.0"
+- **Databases:** presto, trino, spark, greenplum
+- **Tags:** distributed, exchange, merge, optimization
+- **Authors:** "RA Contributors"
+
+
+# Merge Adjacent Exchanges
+
+## Description
+
+When two exchange operators appear in sequence (e.g., a hash repartition
+followed by a gather), the intermediate exchange is unnecessary. This rule
+merges them into a single exchange that achieves the outer operator's
+target distribution directly.
+
+**When to apply**: Two exchange operators are stacked with no intervening
+computation.
+
+**Why it works**: Each exchange involves serialization and network I/O.
+Two successive redistributions can always be collapsed into one because
+the intermediate distribution is never consumed by any operator.
+
+## Relational Algebra
+
+```algebra
+Exchange[d1](Exchange[d2](R)) -> Exchange[d1](R)
+
+-- Special case: gather over any exchange
+Exchange[gather](Exchange[hash(k)](R)) -> Exchange[gather](R)
+
+-- Special case: two hash exchanges
+Exchange[hash(k1)](Exchange[hash(k2)](R)) -> Exchange[hash(k1)](R)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("merge-adjacent-exchanges";
+    "(exchange ?type1 (exchange ?type2 ?child))" =>
+    "(exchange ?type1 ?child)"
+),
+
+rw!("merge-gather-over-exchange";
+    "(exchange gather (exchange ?any ?child))" =>
+    "(exchange gather ?child)"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable() -> bool {
+    // Always applicable when two exchanges are adjacent
+    // The inner exchange's distribution is never observed
+    true
+}
+```
+
+**Restrictions:**
+- Verify no operator sits between the two exchanges (otherwise the
+  intermediate distribution may be required)
+- In systems with ordered exchanges (e.g., merge-sort gather), merging
+  may lose ordering guarantees
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    rows: f64,
+    row_bytes: f64,
+    network_bandwidth: f64,
+) -> f64 {
+    // Saves the full cost of one network shuffle
+    let transfer_bytes = rows * row_bytes;
+    transfer_bytes / network_bandwidth + transfer_bytes * 0.1
+}
+```
+
+**Typical benefit**: Eliminates one full shuffle pass, saving 30-70% of
+data movement cost for the affected plan subtree.
+
+## Test Cases
+
+```sql
+-- Positive: repartition followed by gather collapses to gather
+-- Before plan:
+-- Exchange[gather]
+--   Exchange[hash(region)]
+--     Scan(orders)
+
+-- After plan:
+-- Exchange[gather]
+--   Scan(orders)
+```
+
+```sql
+-- Positive: two hash repartitions collapse
+-- Before plan:
+-- Exchange[hash(customer_id)]
+--   Exchange[hash(order_date)]
+--     Scan(orders)
+
+-- After plan:
+-- Exchange[hash(customer_id)]
+--   Scan(orders)
+```
+
+```sql
+-- Negative: operator between exchanges prevents merge
+-- Exchange[gather]
+--   Filter(amount > 100)
+--     Exchange[hash(customer_id)]
+--       Scan(orders)
+-- Filter consumes the hash-partitioned data, so both are needed
+```
+
+## References
+
+Presto/Trino: presto-main/src/main/java/com/facebook/presto/sql/planner/iterative/rule/RemoveRedundantExchange.java
+Spark SQL: sql/core/src/main/scala/org/apache/spark/sql/execution/exchange/EnsureRequirements.scala - removeRedundantShuffle()

@@ -1,0 +1,128 @@
+# Rule: Adaptive Partitioning (Trino)
+
+**Category:** database-specific/trino
+**File:** `rules/database-specific/trino/adaptive-partitioning.rra`
+
+## Metadata
+
+- **ID:** `trino-adaptive-partitioning`
+- **Version:** "1.0.0"
+- **Databases:** trino
+- **Tags:** database-specific
+- **Authors:** "RA Contributors"
+
+
+# Adaptive Partitioning (Trino)
+
+## Metadata
+- **Rule ID**: `trino-adaptive-partitioning`
+- **Category**: Database-Specific / Trino
+- **Complexity**: O(1) decision, runtime adjustment
+- **Source**: Trino AdaptivePartitioning.java
+- **GitHub**: https://github.com/trinodb/trino/blob/master/core/trino-main/src/main/java/io/trino/sql/planner/optimizations/AdaptivePartitioning.java
+
+## Description
+
+Trino dynamically adjusts partition count based on actual data size observed during query execution. Prevents over-partitioning for small datasets and under-partitioning for large ones.
+
+**Key features:**
+- Runtime detection of data size
+- Automatic writer scaling adjustment
+- Prevents resource waste on small queries
+- Ensures parallelism for large queries
+
+## Relational Algebra
+
+```
+Repartition(R, n_partitions_estimate)
+→ AdaptiveRepartition(R, initial_n, scale_factor)
+  where actual_n = adjust_at_runtime(data_size)
+```
+
+## Implementation Pattern
+
+```java
+// Trino AdaptivePartitioning.java
+public class AdaptivePartitioning implements PlanOptimizer {
+    @Override
+    public PlanNode optimize(PlanNode plan, Context context) {
+        return SimplePlanRewriter.rewriteWith(
+            new Rewriter(context.session()),
+            plan);
+    }
+
+    private static class Rewriter extends SimplePlanRewriter<Void> {
+        @Override
+        public PlanNode visitExchange(ExchangeNode node, RewriteContext<Void> context) {
+            if (node.getScope() == REMOTE && node.getType() == REPARTITION) {
+                // Enable adaptive partitioning
+                return node.withAdaptivePartitioningEnabled(true);
+            }
+            return node;
+        }
+
+        @Override
+        public PlanNode visitTableWriter(TableWriterNode node, RewriteContext<Void> context) {
+            // Enable adaptive writer scaling
+            return node.withAdaptiveWriterScaling(
+                getAdaptiveWriterScalingMinPartitions(session),
+                getAdaptiveWriterScalingMaxPartitions(session));
+        }
+    }
+}
+```
+
+## Cost Model
+
+```rust
+pub fn adaptive_partitioning_benefit(
+    estimated_size: u64,
+    static_partitions: usize,
+) -> f64 {
+    // Benefit from avoiding over-partitioning
+    let optimal_partitions = (estimated_size / 1_000_000).max(1) as usize; // 1MB per partition
+    let over_partition_penalty = if static_partitions > optimal_partitions {
+        (static_partitions - optimal_partitions) as f64 * 100.0 // Overhead per extra partition
+    } else {
+        0.0
+    };
+
+    over_partition_penalty
+}
+```
+
+## Test Cases
+
+### Test 1: Small query avoids over-partitioning
+```sql
+-- Small table (100 rows)
+CREATE TABLE small_data AS SELECT * FROM range(100);
+
+INSERT INTO target_table
+SELECT * FROM small_data;
+
+-- Without adaptive: Creates 100 writers (over-partitioned)
+-- With adaptive: Creates 1-4 writers (right-sized)
+```
+
+### Test 2: Large query scales up
+```sql
+-- Large table (1B rows)
+INSERT INTO partitioned_table
+SELECT * FROM billion_row_table;
+
+-- Adaptive partitioning starts with 10 writers
+-- Detects large data volume
+-- Scales to 100 writers dynamically
+```
+
+## References
+
+1. **Trino Source**: AdaptivePartitioning.java
+   - https://github.com/trinodb/trino
+
+2. **Trino Docs**: "Adaptive Writer Scaling"
+   - https://trino.io/docs/current/admin/properties-write.html
+
+## Tags
+`database-specific`, `trino`, `adaptive`, `partitioning`, `runtime`, `distributed`

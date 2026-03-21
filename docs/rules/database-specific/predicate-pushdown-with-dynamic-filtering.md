@@ -1,0 +1,207 @@
+# Rule: Predicate Pushdown with Dynamic Filtering (Trino)
+
+**Category:** database-specific/trino
+**File:** `rules/database-specific/trino/predicate-pushdown-with-dynamic-filtering.rra`
+
+## Metadata
+
+- **ID:** `trino-predicate-pushdown-dynamic-filtering`
+- **Version:** "1.0.0"
+- **Databases:** trino
+- **Tags:** database-specific, trino, predicate-pushdown, dynamic-filtering, distributed, runtime-optimization
+- **Authors:** "RA Contributors"
+
+
+# Predicate Pushdown with Dynamic Filtering (Trino)
+
+## Metadata
+- **Rule ID**: `trino-predicate-pushdown-dynamic-filtering`
+- **Category**: Database-Specific / Trino
+- **Complexity**: O(n) with runtime filter creation
+- **Source**: Trino PredicatePushDown.java
+- **GitHub**: https://github.com/trinodb/trino/blob/master/core/trino-main/src/main/java/io/trino/sql/planner/optimizations/PredicatePushDown.java
+- **Introduced**: Trino 300+ (2019+)
+
+## Description
+
+Trino's predicate pushdown combines traditional filter pushdown with dynamic filtering, which creates runtime filters from join build side to accelerate probe side table scans.
+
+**Key innovation**: Dynamic filters are created at join time and passed to table scans, even across exchange boundaries in distributed execution.
+
+**When to use:**
+- Join with selective build side
+- Large probe side table scan
+- Distributed execution with network exchanges
+- Supported comparison operators: =, >, >=, <, <=
+
+## Relational Algebra
+
+```
+σ_p(R ⋈_{R.a = S.b} S)
+→ σ_p(σ_{dynamic_filter(R.a, S.b)}(R) ⋈_{R.a = S.b} S)
+
+Where dynamic_filter(R.a, S.b) is created at runtime from S.b values
+```
+
+## Implementation Pattern
+
+```java
+// Trino PredicatePushDown.java (simplified)
+public class PredicatePushDown implements PlanOptimizer {
+    private static final Set<Operator> DYNAMIC_FILTERING_SUPPORTED =
+        ImmutableSet.of(EQUAL, GREATER_THAN, GREATER_THAN_OR_EQUAL,
+                       LESS_THAN, LESS_THAN_OR_EQUAL);
+
+    public PlanNode optimize(PlanNode plan, Context context) {
+        return SimplePlanRewriter.rewriteWith(
+            new Rewriter(..., dynamicFiltering),
+            plan,
+            TRUE);
+    }
+
+    private static class Rewriter extends SimplePlanRewriter<Expression> {
+        @Override
+        public PlanNode visitJoin(JoinNode node, RewriteContext<Expression> context) {
+            // Extract join equality predicates
+            List<EquiJoinClause> criteria = node.getCriteria();
+
+            // Create dynamic filters for probe side
+            List<DynamicFilterId> dynamicFilters = new ArrayList<>();
+            for (EquiJoinClause clause : criteria) {
+                if (supportsDynamicFilter(clause)) {
+                    DynamicFilterId filterId = createDynamicFilterId();
+                    dynamicFilters.add(filterId);
+
+                    // Add to probe side scan
+                    Expression dynamicFilter = createDynamicFilterExpression(
+                        session, filterId, clause.getLeft().type(),
+                        clause.getLeft());
+
+                    pushDownPredicate(node.getLeft(), dynamicFilter);
+                }
+            }
+
+            return node.withDynamicFilters(dynamicFilters);
+        }
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn can_apply_dynamic_filtering(
+    join: &JoinNode,
+    predicate: &Predicate,
+) -> bool {
+    // Must be equi-join or inequality join
+    let supported_ops = [Equal, GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual];
+
+    if !supported_ops.contains(&predicate.operator()) {
+        return false;
+    }
+
+    // Build side must be smaller (selective filter)
+    let build_card = join.build_side().cardinality();
+    let probe_card = join.probe_side().cardinality();
+
+    build_card < probe_card * 0.1 // Build side < 10% of probe
+}
+```
+
+## Cost Model
+
+```rust
+pub fn cost_dynamic_filtering(
+    probe_card: u64,
+    build_card: u64,
+    selectivity: f64,
+    hardware: &HardwareModel,
+) -> Cost {
+    // Cost to build dynamic filter from build side
+    let build_filter_cost = Cost::cpu(build_card * 5); // Hash set construction
+    let filter_memory = Cost::memory(build_card * 8); // Bloom filter or hash set
+
+    // Savings: Reduced probe side scan
+    let filtered_probe_rows = (probe_card as f64 * selectivity) as u64;
+    let scan_savings = Cost::io(
+        ((probe_card - filtered_probe_rows) as f64 / hardware.tuples_per_page())
+            * hardware.sequential_page_read_cost()
+    );
+
+    // Net benefit: savings - build cost
+    scan_savings - build_filter_cost - filter_memory
+}
+```
+
+## Test Cases
+
+### Test 1: Selective join with dynamic filter
+```sql
+-- Large fact table (1B rows) joined with small dimension (1000 rows)
+CREATE TABLE orders (order_id BIGINT, customer_id INT, amount DECIMAL);
+CREATE TABLE customers (id INT, name VARCHAR, region VARCHAR);
+
+-- Query: Join with selective filter
+SELECT o.order_id, c.name, o.amount
+FROM orders o
+JOIN customers c ON o.customer_id = c.id
+WHERE c.region = 'US';
+
+-- Expected optimization:
+-- 1. Filter customers: 1000 → 100 (US region)
+-- 2. Create dynamic filter from 100 customer IDs
+-- 3. Push dynamic filter to orders scan
+-- 4. Orders scan filters 1B → ~1M matching rows
+-- 5. Join 1M orders with 100 customers
+
+-- Without dynamic filter: Scan 1B orders, join all
+-- With dynamic filter: Scan ~1M orders (99.9% reduction)
+```
+
+### Test 2: Distributed query with exchange
+```sql
+-- Distributed setup: orders partitioned across 100 nodes
+SELECT o.*, p.name
+FROM distributed_orders o
+JOIN products p ON o.product_id = p.id
+WHERE p.category = 'Electronics';
+
+-- Optimization:
+-- 1. Filter products by category (local)
+-- 2. Create dynamic filter (Bloom filter)
+-- 3. Broadcast filter to all 100 nodes
+-- 4. Each node applies filter before reading orders
+-- 5. Reduced network traffic from probe side
+```
+
+### Test 3: Multiple join predicates
+```sql
+SELECT *
+FROM lineitem l
+JOIN orders o ON l.order_id = o.id
+WHERE o.order_date BETWEEN '2024-01-01' AND '2024-01-31';
+
+-- Dynamic filters created for:
+-- 1. order_date >= '2024-01-01' (pushdown to lineitem)
+-- 2. order_date <= '2024-01-31' (pushdown to lineitem)
+-- Both filters combined into single Bloom filter
+```
+
+## References
+
+1. **Trino Source Code**: PredicatePushDown.java
+   - URL: https://github.com/trinodb/trino/blob/master/core/trino-main/src/main/java/io/trino/sql/planner/optimizations/PredicatePushDown.java
+   - Lines: 1-2000+
+
+2. **Trino Documentation**: "Dynamic Filtering"
+   - URL: https://trino.io/docs/current/admin/dynamic-filtering.html
+
+3. **Trino Blog**: "Dynamic Filtering for Highly Selective Joins"
+   - URL: https://trino.io/blog/
+
+4. **Academic Background**: "Sideways Information Passing" (Magic Sets)
+   - DOI: 10.1145/6012.15399
+
+## Tags
+`database-specific`, `trino`, `predicate-pushdown`, `dynamic-filtering`, `distributed`, `runtime-optimization`

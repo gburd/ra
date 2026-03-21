@@ -1,0 +1,274 @@
+# Rule: Adaptive Memory Grant Feedback
+
+**Category:** execution-models
+**File:** `rules/execution-models/adaptive/adaptive-memory-grant.rra`
+
+## Metadata
+
+- **ID:** `adaptive-memory-grant`
+- **Version:** 1.0.0
+- **Databases:** mssql, Oracle, PostgreSQL
+- **Tags:** execution, adaptive, memory, spill, grant, feedback
+- **SQL Standard:** Memory grant feedback (MGF)
+- **Authors:** Joe Chang
+
+
+# Adaptive Memory Grant Feedback
+
+## Description
+
+Adaptive memory grant feedback adjusts operator memory allocations based on actual usage from previous executions. Traditional optimizers estimate memory needs (for hash tables, sort buffers, window functions) at compile time, often getting it wrong -- over-granting wastes memory that other queries could use, while under-granting forces expensive disk spills.
+
+Memory grant feedback tracks the actual peak memory usage of each memory-consuming operator and adjusts the grant for subsequent executions. mssql implements three generations: batch-mode MGF (2017), row-mode MGF (2019), and percentile-based MGF (2022) which uses a distribution of past executions rather than just the last one.
+
+**Key characteristics:**
+- **Per-operator tracking**: Each hash join, sort, and window function tracked independently
+- **Feedback loop**: actual_usage feeds back to next execution's grant
+- **Percentile-based**: Uses P90 of recent executions, not just last run
+- **Spill detection**: Automatically increases grant when spills are detected
+- **Over-grant detection**: Reduces grant when usage consistently below allocation
+
+**Trade-offs:**
+- First execution always uses optimizer estimate (no feedback yet)
+- Parameter-sensitive queries may oscillate between different optimal grants
+- Feedback is per-plan, not per-parameter-value
+- Requires plan cache stability (plan eviction resets feedback)
+
+## Relational Algebra
+
+```
+MemoryGrantFeedback(operator, plan_id) -> AdjustedGrant
+
+fn compute_grant(op, plan_id):
+  history = feedback_store.get(plan_id, op.id)
+  if history.is_empty():
+    return optimizer_estimate(op)
+
+  // Percentile-based: use P90 of recent observations
+  p90 = history.percentile(0.90)
+
+  // Add safety margin for spill prevention
+  grant = p90 * 1.1
+
+  // Bound by system limits
+  return clamp(grant, MIN_GRANT, MAX_GRANT)
+```
+
+## Implementation
+
+```rust
+use std::collections::VecDeque;
+
+/// Memory feedback history for one operator
+pub struct MemoryFeedback {
+    /// Recent memory usage observations (bytes)
+    observations: VecDeque<usize>,
+    /// Maximum history length
+    max_history: usize,
+    /// Number of spills observed
+    spill_count: usize,
+    /// Last optimizer estimate
+    last_estimate: usize,
+}
+
+impl MemoryFeedback {
+    pub fn new(max_history: usize) -> Self {
+        Self {
+            observations: VecDeque::with_capacity(max_history),
+            max_history,
+            spill_count: 0,
+            last_estimate: 0,
+        }
+    }
+
+    /// Record actual memory usage after execution
+    pub fn record(
+        &mut self,
+        actual_bytes: usize,
+        spilled: bool,
+    ) {
+        if self.observations.len() >= self.max_history {
+            self.observations.pop_front();
+        }
+        self.observations.push_back(actual_bytes);
+        if spilled {
+            self.spill_count += 1;
+        }
+    }
+
+    /// Compute adjusted grant for next execution
+    pub fn adjusted_grant(&self) -> Option<usize> {
+        if self.observations.len() < 2 {
+            return None; // Not enough history
+        }
+
+        let mut sorted: Vec<usize> =
+            self.observations.iter().copied().collect();
+        sorted.sort_unstable();
+
+        // P90 of observations
+        let p90_idx = (sorted.len() as f64 * 0.90) as usize;
+        let p90 = sorted[p90_idx.min(sorted.len() - 1)];
+
+        // Add safety margin (10% buffer)
+        let grant = (p90 as f64 * 1.1) as usize;
+
+        // If recent spills, increase more aggressively
+        let recent_spill_rate = self.recent_spill_rate();
+        let adjusted = if recent_spill_rate > 0.1 {
+            (grant as f64 * 1.5) as usize
+        } else {
+            grant
+        };
+
+        Some(adjusted)
+    }
+
+    fn recent_spill_rate(&self) -> f64 {
+        if self.observations.is_empty() {
+            return 0.0;
+        }
+        self.spill_count as f64 / self.observations.len() as f64
+    }
+
+    /// Check if grant should be decreased (over-granting)
+    pub fn is_over_granted(&self, current_grant: usize) -> bool {
+        if self.observations.len() < 3 {
+            return false;
+        }
+        let max_usage = self.observations.iter().max()
+            .copied().unwrap_or(0);
+        // Over-granted if max usage < 50% of grant
+        max_usage < current_grant / 2
+    }
+}
+
+/// System-wide memory grant feedback store
+pub struct MemoryGrantFeedbackStore {
+    /// Map from (plan_id, operator_id) -> feedback
+    feedback: HashMap<(PlanId, OperatorId), MemoryFeedback>,
+    /// Total memory budget for all concurrent grants
+    total_budget: usize,
+    /// Currently allocated grants
+    active_grants: usize,
+}
+
+impl MemoryGrantFeedbackStore {
+    /// Get memory grant for an operator
+    pub fn get_grant(
+        &self,
+        plan_id: PlanId,
+        op_id: OperatorId,
+        optimizer_estimate: usize,
+    ) -> usize {
+        let key = (plan_id, op_id);
+        match self.feedback.get(&key) {
+            Some(fb) => fb.adjusted_grant()
+                .unwrap_or(optimizer_estimate),
+            None => optimizer_estimate,
+        }
+    }
+
+    /// Report actual usage after execution
+    pub fn report_usage(
+        &mut self,
+        plan_id: PlanId,
+        op_id: OperatorId,
+        actual_bytes: usize,
+        spilled: bool,
+    ) {
+        let key = (plan_id, op_id);
+        let fb = self.feedback
+            .entry(key)
+            .or_insert_with(|| MemoryFeedback::new(20));
+        fb.record(actual_bytes, spilled);
+    }
+
+    /// Available memory for new grants
+    pub fn available_memory(&self) -> usize {
+        self.total_budget.saturating_sub(self.active_grants)
+    }
+}
+
+/// Cost of spilling vs. over-granting
+pub fn spill_cost(
+    data_size: usize,
+    available_memory: usize,
+) -> f64 {
+    if data_size <= available_memory {
+        return 0.0;
+    }
+
+    let spill_size = data_size - available_memory;
+    let passes = (data_size as f64
+        / available_memory as f64).ceil();
+
+    // Each spill pass: write + read back
+    let io_cost_per_byte = 0.000001; // SSD
+    spill_size as f64 * io_cost_per_byte * passes * 2.0
+}
+```
+
+## Cost Model
+
+**Spill cost:**
+- First spill pass: write N bytes + read N bytes back
+- Multi-pass: `ceil(data / memory) * 2 * IO_cost * data`
+- SSD: ~1 us/KB, HDD: ~10 us/KB
+- Sort spill: 2-pass external merge sort typical
+- Hash spill: partition to disk, rebuild hash tables
+
+**Over-grant cost:**
+- Opportunity cost: memory unavailable to concurrent queries
+- Memory pressure: OS paging if total exceeds physical RAM
+- No direct execution cost, but reduces system throughput
+
+**Feedback convergence:**
+- Converges within 3-5 executions for stable queries
+- Percentile-based: handles variance without oscillation
+- Parameter-sensitive: may not converge (needs per-parameter feedback)
+
+## Test Cases
+
+```sql
+-- Test 1: Sort spill -> feedback increases grant
+SELECT * FROM lineitem ORDER BY l_shipdate;
+-- First execution: optimizer estimates 50MB, actual needs 200MB
+-- Spills 3 partitions to disk, 4x slower
+-- Second execution: feedback grants 220MB, no spill
+
+-- Test 2: Over-granted hash join -> feedback decreases
+SELECT * FROM orders o
+JOIN small_lookup s ON o.status_id = s.id;
+-- Optimizer estimates 500MB for hash table
+-- Actual usage: 2MB (small lookup table)
+-- After 3 runs: feedback reduces grant to 5MB
+
+-- Test 3: Variable cardinality (percentile handling)
+SELECT customer_id, SUM(amount)
+FROM orders
+WHERE order_date BETWEEN ? AND ?
+GROUP BY customer_id;
+-- Date ranges vary: some touch 1K rows, some 1M
+-- P90 grant handles 90% of executions without spill
+
+-- Test 4: Concurrent query impact
+-- Query A granted 4GB for large sort
+-- Query B waits for memory (total budget 8GB)
+-- Feedback reduces Query A grant to 1GB after observing usage
+-- Both queries can now run concurrently
+```
+
+## References
+
+1. **mssql Documentation**. "Memory Grant Feedback." Microsoft Docs.
+   - Three generations: batch-mode (2017), row-mode (2019), percentile (2022)
+
+2. **Freedman, Craig et al**. "Compilation in the Microsoft mssql Hekaton Engine." IEEE Data Engineering Bulletin, 2014.
+   - Memory management for in-memory operators
+
+3. **Graefe, Goetz**. "Sort-Merge-Join: An Idea Whose Time Has(h) Passed?" ICDE 1994.
+   - Memory requirements for sort vs hash algorithms
+
+4. **Oracle Documentation**. "Adaptive Execution Plans." Oracle 12c.
+   - Runtime memory adjustment in Oracle's adaptive framework

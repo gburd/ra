@@ -1,0 +1,239 @@
+# Rule: Early Termination for ONE ROW PER MATCH
+
+**Category:** logical/rpr
+**File:** `rules/rpr/one-row-early-termination.rra`
+
+## Metadata
+
+- **ID:** `rpr-one-row-early-termination`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, oracle, duckdb, generic
+- **Tags:** rpr, early-termination, limit, one-row, optimization
+- **Authors:** "RA Contributors"
+
+## Preconditions
+
+```yaml
+  - type: pattern
+    must_match: "(row-pattern ?input ?partition ?order ?defines ?measures ?pattern (mode one-row))"
+  - type: predicate
+    condition: "has_skip_past_last_row(?skip_mode)"
+    description: "Skip mode is SKIP PAST LAST ROW (default)"
+```
+
+
+# Early Termination for ONE ROW PER MATCH
+
+## Description
+
+When MATCH_RECOGNIZE uses `ONE ROW PER MATCH` mode with
+`SKIP PAST LAST ROW`, the pattern matcher only needs to find the
+first complete match in each partition and then skip past the
+matched rows. If the query also has a LIMIT or only needs existence,
+scanning can stop after the first match.
+
+**When to apply**: The RowPattern is configured for ONE ROW PER MATCH
+with SKIP PAST LAST ROW (the default), and the query consumes only
+one match per partition.
+
+**Why it works**: In ONE ROW PER MATCH mode, each complete pattern
+match produces exactly one output row. With SKIP PAST LAST ROW, the
+matcher advances past the matched rows and continues scanning. If
+the consumer needs only the first match (LIMIT 1 or EXISTS context),
+the scan can stop immediately after the first match per partition.
+
+## Relational Algebra
+
+```algebra
+-- Before: full partition scan in ONE ROW mode
+Limit(1,
+  RowPattern(
+    input: Scan(T),
+    mode: ONE_ROW_PER_MATCH,
+    skip: SKIP_PAST_LAST_ROW,
+    ...
+  )
+)
+
+-- After: early-terminating pattern matcher
+RowPattern(
+  input: Scan(T),
+  mode: ONE_ROW_PER_MATCH,
+  skip: SKIP_PAST_LAST_ROW,
+  early_terminate: FIRST_MATCH,
+  ...
+)
+```
+
+### With partition-wise limit
+
+```algebra
+-- Before: LIMIT per partition using window function
+Filter(rn = 1,
+  Window(ROW_NUMBER() OVER (PARTITION BY ...),
+    RowPattern(mode: ONE_ROW, ...)
+  )
+)
+
+-- After: stop after first match per partition
+RowPattern(
+  mode: ONE_ROW,
+  early_terminate: FIRST_MATCH_PER_PARTITION,
+  ...
+)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// LIMIT 1 over ONE ROW mode -> early termination
+rw!("rpr-limit-one-early-terminate";
+    "(limit 1
+       (row-pattern ?input ?partition ?order ?defines ?measures
+         ?pattern (mode one-row) (skip past-last-row)))" =>
+    "(row-pattern ?input ?partition ?order ?defines ?measures
+       ?pattern (mode one-row) (skip past-last-row)
+       (early-terminate first-match))"
+),
+
+// EXISTS context -> early termination
+rw!("rpr-exists-early-terminate";
+    "(exists
+       (row-pattern ?input ?partition ?order ?defines ?measures
+         ?pattern (mode one-row) (skip past-last-row)))" =>
+    "(exists
+       (row-pattern ?input ?partition ?order ?defines ?measures
+         ?pattern (mode one-row) (skip past-last-row)
+         (early-terminate first-match)))"
+),
+
+// LIMIT N where N < partition_count -> limit partitions scanned
+rw!("rpr-limit-n-reduce-partitions";
+    "(limit ?n
+       (row-pattern ?input ?partition ?order ?defines ?measures
+         ?pattern (mode one-row) (skip past-last-row)))" =>
+    "(limit ?n
+       (row-pattern ?input ?partition ?order ?defines ?measures
+         ?pattern (mode one-row) (skip past-last-row)
+         (early-terminate first-match-per-partition)))"
+    if n_less_than_partition_count("?n", "?partition", "?input")
+),
+```
+
+## Preconditions
+
+```rust
+fn has_skip_past_last_row(skip: &SkipMode) -> bool {
+    matches!(skip, SkipMode::PastLastRow)
+}
+
+fn n_less_than_partition_count(
+    n: usize,
+    partition: &[Expr],
+    input: &RelExpr,
+) -> bool {
+    // Estimate partition count from statistics.
+    let distinct_count = estimate_distinct_count(input, partition);
+    n < distinct_count
+}
+```
+
+**Restrictions:**
+- Only applies to ONE ROW PER MATCH mode (ALL ROWS PER MATCH cannot use this).
+- Skip mode must be SKIP PAST LAST ROW (SKIP TO NEXT ROW may produce overlapping matches).
+- LIMIT must be on the direct output of the RowPattern (no intermediate operations).
+- For partitioned queries, the limit must be achievable by scanning fewer partitions.
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    partitions: f64,
+    rows_per_partition: f64,
+    avg_first_match_position: f64,
+) -> f64 {
+    // Before: scan all rows in all partitions
+    let total_rows = partitions * rows_per_partition;
+
+    // After: scan only up to first match position per partition
+    // (on average, first match at some fraction of the partition)
+    let scanned_rows = partitions * avg_first_match_position;
+
+    (total_rows - scanned_rows) / total_rows
+}
+```
+
+**Typical benefit**: 20-90%. If first match tends to appear early
+in the partition (e.g., first 10% of rows), 90% of scanning is
+avoided.
+
+## Test Cases
+
+### Positive: LIMIT 1 on pattern match
+
+```sql
+-- Before
+SELECT * FROM stock_prices
+  MATCH_RECOGNIZE (
+    PARTITION BY symbol
+    ORDER BY trade_date
+    ONE ROW PER MATCH
+    PATTERN (A+ B+)
+    DEFINE A AS price > PREV(price), B AS price < PREV(price)
+  )
+LIMIT 1;
+
+-- After: stop scanning after first complete match (any partition)
+```
+
+### Positive: EXISTS check on pattern
+
+```sql
+-- Before
+SELECT * FROM accounts a
+WHERE EXISTS (
+  SELECT 1 FROM transactions t
+    MATCH_RECOGNIZE (
+      PARTITION BY account_id
+      ORDER BY ts
+      ONE ROW PER MATCH
+      PATTERN (A+ B+)
+      DEFINE A AS amount > 10000, B AS amount > 10000
+    )
+  WHERE account_id = a.id
+);
+
+-- After: stop after first match per account_id partition
+```
+
+### Negative: ALL ROWS PER MATCH
+
+```sql
+-- Cannot apply: ALL ROWS mode needs all matched rows
+SELECT * FROM stock_prices
+  MATCH_RECOGNIZE (
+    ALL ROWS PER MATCH
+    PATTERN (A+ B+)
+    DEFINE A AS price > PREV(price), B AS price < PREV(price)
+  );
+```
+
+### Negative: SKIP TO NEXT ROW
+
+```sql
+-- Cannot apply: SKIP TO NEXT ROW may produce overlapping matches
+MATCH_RECOGNIZE (
+  ONE ROW PER MATCH
+  AFTER MATCH SKIP TO NEXT ROW
+  PATTERN (A+ B+)
+  ...
+)
+```
+
+## References
+
+- Zemke, F. "Row Pattern Recognition in SQL" ISO/IEC 19075-5:2016
+- Oracle Database: MATCH_RECOGNIZE Performance Guide
+- SQL:2016 Section 8.4 (Skip modes and match semantics)

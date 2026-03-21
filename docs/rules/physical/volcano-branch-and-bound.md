@@ -1,0 +1,330 @@
+# Rule: "Volcano Branch-and-Bound Pruning"
+
+**Category:** physical/optimizer-framework
+**File:** `rules/physical/optimizer-framework/volcano-branch-and-bound.rra`
+
+## Metadata
+
+- **ID:** `volcano-branch-and-bound`
+- **Version:** "1.0.0"
+- **Databases:** cockroachdb, mssql, greenplum
+- **Tags:** volcano, cascades, pruning, branch-and-bound, optimization-search, classic
+- **Authors:** "Goetz Graefe, William McKenna"
+
+
+# Volcano Branch-and-Bound Pruning
+
+## Description
+
+The Volcano optimizer uses top-down search with branch-and-bound pruning to
+avoid exploring the full plan space. Starting from the root of the query,
+it recursively optimizes subexpressions. As it finds complete plans, it uses
+the current best plan cost as an upper bound. Any partial plan whose cost
+already exceeds the upper bound is pruned -- its subtree is never explored.
+
+The key mechanism is passing a "cost limit" downward during the recursive
+FindBestPlan procedure. When optimizing a child expression, the optimizer
+computes the remaining budget (upper bound minus cost already committed by
+parent and siblings). If no plan for the child can be found within this
+budget, the parent alternative is pruned.
+
+This transforms an exponential search into something practical: most real
+queries can be optimized in milliseconds despite a combinatorial plan space.
+
+**When to apply**: During the Volcano/Cascades optimization search. Branch and
+bound activates automatically as the optimizer finds feasible plans.
+
+**Why it works**: Most plan alternatives are vastly more expensive than the
+optimal plan. Once a reasonable plan is found, its cost serves as a tight
+upper bound that eliminates the majority of alternatives without evaluating
+them. The pruning is exact -- no optimal plan is ever discarded.
+
+## Relational Algebra
+
+```algebra
+FindBestPlan(group G, required properties P, cost limit L):
+  If memo[G, P] exists and cost <= L:
+    return memo[G, P]
+
+  best = NULL, best_cost = INFINITY
+
+  For each logical expression E in G:
+    // Apply implementation rules
+    For each physical expression PhysE implementing E:
+      // Compute local cost (this operator only)
+      local_cost = cost(PhysE)
+      if local_cost >= L: continue  // PRUNE
+
+      // Remaining budget for children
+      remaining = L - local_cost
+
+      // Optimize children with decreasing budget
+      child_plans = []
+      total_child_cost = 0
+      pruned = false
+
+      For each child Ci of PhysE:
+        child_budget = remaining - total_child_cost
+        child_plan = FindBestPlan(
+          group(Ci),
+          required_props(PhysE, Ci),
+          child_budget
+        )
+        if child_plan is NULL: pruned = true; break  // PRUNE
+        child_plans.push(child_plan)
+        total_child_cost += cost(child_plan)
+
+      if pruned: continue
+
+      total = local_cost + total_child_cost
+      if total < best_cost:
+        best_cost = total
+        best = PhysicalPlan(PhysE, child_plans)
+        L = best_cost  // Tighten the bound!
+
+  memo[G, P] = (best, best_cost)
+  return best
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+use std::collections::HashMap;
+
+type GroupId = usize;
+
+#[derive(Clone, Debug)]
+struct MemoEntry {
+    best_plan: Option<PhysicalPlan>,
+    best_cost: f64,
+}
+
+struct VolcanoOptimizer {
+    memo: HashMap<(GroupId, PhysicalProperties), MemoEntry>,
+    stats: Statistics,
+}
+
+impl VolcanoOptimizer {
+    fn find_best_plan(
+        &mut self,
+        group: GroupId,
+        required: &PhysicalProperties,
+        cost_limit: f64,
+    ) -> Option<(PhysicalPlan, f64)> {
+        // Check memo
+        let key = (group, required.clone());
+        if let Some(entry) = self.memo.get(&key) {
+            if entry.best_cost <= cost_limit {
+                return entry.best_plan.clone()
+                    .map(|p| (p, entry.best_cost));
+            }
+            if entry.best_plan.is_some() {
+                return None; // Already found best, exceeds limit
+            }
+        }
+
+        let mut best_plan: Option<PhysicalPlan> = None;
+        let mut best_cost = cost_limit; // Start with limit as bound
+
+        let expressions = self.group_expressions(group);
+
+        for logical_expr in &expressions {
+            let implementations =
+                self.implementation_rules(logical_expr, required);
+
+            for phys_expr in implementations {
+                // Local cost of this operator
+                let local_cost = self.operator_cost(&phys_expr);
+
+                // PRUNE: local cost alone exceeds budget
+                if local_cost >= best_cost {
+                    continue;
+                }
+
+                // Optimize children with remaining budget
+                let mut remaining = best_cost - local_cost;
+                let mut child_plans = Vec::new();
+                let mut total_child_cost = 0.0;
+                let mut feasible = true;
+
+                let child_reqs =
+                    self.required_child_properties(
+                        &phys_expr, required,
+                    );
+
+                for (i, child_group) in
+                    phys_expr.children().iter().enumerate()
+                {
+                    let child_budget =
+                        remaining - total_child_cost;
+
+                    match self.find_best_plan(
+                        *child_group,
+                        &child_reqs[i],
+                        child_budget,
+                    ) {
+                        Some((plan, cost)) => {
+                            child_plans.push(plan);
+                            total_child_cost += cost;
+                        }
+                        None => {
+                            // PRUNE: no feasible child plan
+                            feasible = false;
+                            break;
+                        }
+                    }
+                }
+
+                if !feasible {
+                    continue;
+                }
+
+                let total = local_cost + total_child_cost;
+                if total < best_cost {
+                    best_cost = total;
+                    best_plan = Some(PhysicalPlan {
+                        operator: phys_expr.clone(),
+                        children: child_plans,
+                        cost: total,
+                    });
+                    // Tighten the bound for remaining alternatives
+                }
+            }
+        }
+
+        // Store in memo
+        self.memo.insert(key, MemoEntry {
+            best_plan: best_plan.clone(),
+            best_cost,
+        });
+
+        best_plan.map(|p| (p, best_cost))
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    hw: &HardwareProfile,
+) -> bool {
+    // Branch and bound is always applicable in Volcano/Cascades
+    // More effective with more alternatives to prune
+    stats.n_relations >= 2
+        && hw.optimizer_style == OptimizerStyle::Volcano
+}
+```
+
+**Restrictions:**
+- Requires a cost model that provides lower bounds (or exact costs)
+- Initial cost limit can be set to infinity or heuristically
+- Pruning effectiveness depends on order of alternative exploration
+- Memoization is required to avoid recomputing pruned subproblems
+
+## Cost Model
+
+```rust
+fn pruning_effectiveness(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let n = stats.n_relations as f64;
+
+    // Total plan space (rough estimate)
+    let total_plans = n.exp2() * 3.0_f64.powf(n); // joins * algorithms
+
+    // Plans actually explored with branch-and-bound
+    // Empirically, pruning eliminates 90-99% of the search space
+    let explored = total_plans * 0.05; // ~5% explored
+
+    // Speedup from pruning
+    if explored > 0.0 {
+        total_plans / explored
+    } else {
+        1.0
+    }
+}
+```
+
+**Assumptions:**
+- First feasible plan found quickly (greedy heuristic or random)
+- Pruning ratio improves as more plans are found
+- Children optimized in order of decreasing expected cost (optimization)
+- Memo prevents re-exploration of pruned subproblems
+
+**Typical pruning**: 90-99% of plan space eliminated.
+
+## Test Cases
+
+### Positive: Early pruning of expensive join order
+
+```sql
+-- 5-way join with varying table sizes
+SELECT *
+FROM A JOIN B ON ... JOIN C ON ... JOIN D ON ... JOIN E ON ...;
+
+-- Without pruning: explore all 2^5 * 3^5 = 7776 plans
+-- With pruning: find a reasonable plan (cost 1000)
+-- Prune all partial plans exceeding 1000
+-- Typically explore ~100 plans instead of ~8000
+```
+
+### Positive: Nested-loop join pruned when hash join is cheap
+
+```sql
+-- Large equijoin: 1M x 1M rows
+SELECT * FROM orders o JOIN lineitem l ON o.id = l.order_id;
+
+-- Hash join cost: ~3,000,000 (build + probe)
+-- Nested-loop cost: starts at 1M * ... (already exceeds hash join)
+-- NL pruned immediately by branch-and-bound
+```
+
+### Positive: Cost limit propagation to children
+
+```sql
+-- Three-way join: small x medium x large
+SELECT * FROM nations n
+JOIN customers c ON n.id = c.nation_id
+JOIN orders o ON c.id = o.customer_id;
+
+-- Upper bound from hash join plan: cost 50,000
+-- When trying merge join variant, sort(orders) alone costs 80,000
+-- Pruned: sort cost exceeds total budget, no need to optimize further
+```
+
+### Negative: Pathological case with similar costs
+
+```sql
+-- All join methods have similar cost (rare)
+-- No pruning opportunity: must evaluate all alternatives
+-- Branch-and-bound degrades to exhaustive search
+-- Still correct, just slower
+```
+
+## References
+
+**Original papers:**
+- Graefe, G., McKenna, W.J., "The Volcano Optimizer Generator: Extensibility and Efficient Search", IEEE Data Engineering 1993
+  - DOI: 10.1109/69.273032
+  - Section 4: "Search strategy" -- branch-and-bound with cost limits
+
+- Graefe, G., "The Cascades Framework for Query Optimization", IEEE Data Engineering Bulletin 1995
+  - DOI: 10.1109/69.469815
+  - Refined search with task-based scheduling and memoization
+
+**Analysis:**
+- Pellenkoft, A., Galindo-Legaria, C., Kersten, M., "The Complexity of Transformation-Based Join Enumeration", VLDB 1997
+  - Analysis of search space size and pruning effectiveness
+
+- Waas, F., Galindo-Legaria, C., "Counting, Enumerating, and Sampling of Execution Plans in a Cost-Based Query Optimizer", ACM SIGMOD 2000
+  - DOI: 10.1145/342009.335451
+  - Empirical analysis of plan space exploration
+
+**Implementation in databases:**
+- mssql: Cascades optimizer with branch-and-bound
+- CockroachDB: `pkg/sql/opt/memo/` - memo structure with cost tracking
+- Greenplum Orca: `libgpopt/src/engine/CEngine.cpp` - optimization engine

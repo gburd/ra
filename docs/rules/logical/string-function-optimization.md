@@ -1,0 +1,107 @@
+# Rule: String Function Optimization
+
+**Category:** logical/function-optimization
+**File:** `rules/logical/function-optimization/string-function-optimization.rra`
+
+## Metadata
+
+- **ID:** `string-function-optimization`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, oracle, mssql, duckdb
+- **Tags:** function, string, concat, length, optimization
+- **Authors:** "RA Contributors"
+
+
+# String Function Optimization
+
+## Description
+
+Optimizes common string function patterns including redundant operations,
+constant folding of string expressions, and predicate simplification using
+string properties.
+
+**When to apply**: String function calls that can be simplified or
+eliminated based on argument properties.
+
+## Relational Algebra
+
+```algebra
+LENGTH(literal_string)  -> constant
+CONCAT('', x)           -> x
+CONCAT(x, '')           -> x
+SUBSTRING(x, 1, LENGTH(x)) -> x    -- full string
+TRIM(TRIM(x))           -> TRIM(x)  -- idempotent
+UPPER(UPPER(x))         -> UPPER(x)
+LOWER(LOWER(x))         -> LOWER(x)
+REPLACE(x, '', y)       -> x        -- empty search string
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("concat-empty-left";
+    "(concat (literal '') ?x)" => "?x"
+),
+rw!("concat-empty-right";
+    "(concat ?x (literal ''))" => "?x"
+),
+rw!("trim-idempotent";
+    "(trim (trim ?x))" => "(trim ?x)"
+),
+rw!("upper-idempotent";
+    "(upper (upper ?x))" => "(upper ?x)"
+),
+rw!("lower-idempotent";
+    "(lower (lower ?x))" => "(lower ?x)"
+),
+rw!("substring-full";
+    "(substring ?x (literal 1) (length ?x))" => "?x"
+),
+```
+
+## Cost Model
+
+```rust
+fn estimated_benefit(func_cost: f64, num_rows: u64) -> f64 {
+    func_cost * num_rows as f64 * 0.5
+}
+```
+
+## Test Cases
+
+### Positive: Empty string concatenation
+
+```sql
+SELECT CONCAT('', name) FROM users;
+-- Rewrite to: SELECT name FROM users;
+```
+
+### Positive: Idempotent TRIM
+
+```sql
+SELECT TRIM(TRIM(description)) FROM products;
+-- Rewrite to: SELECT TRIM(description) FROM products;
+```
+
+### Positive: Full substring extraction
+
+```sql
+SELECT SUBSTRING(name, 1, LENGTH(name)) FROM users;
+-- Rewrite to: SELECT name FROM users;
+```
+
+### Negative: Non-trivial concatenation
+
+```sql
+SELECT CONCAT(first_name, ' ', last_name) FROM users;
+-- All arguments are non-empty and dynamic, no simplification
+```
+
+## References
+
+**Implementation:**
+- PostgreSQL: String function simplification in expression evaluator
+- DuckDB: String optimization passes
+- MySQL: Constant folding for string functions

@@ -1,0 +1,115 @@
+# Rule: MonetDB Intermediate Result Recycling
+
+**Category:** database-specific/monetdb
+**File:** `rules/database-specific/monetdb/column-recycling.rra`
+
+## Metadata
+
+- **ID:** `monetdb-column-recycling`
+- **Version:** "1.0.0"
+- **Databases:** monetdb
+- **Tags:** database-specific, monetdb, recycling, cache, intermediate, reuse
+- **Authors:** "RA Contributors"
+
+
+# MonetDB Intermediate Result Recycling
+
+## Description
+
+MonetDB's recycler optimizer caches intermediate BAT results from
+previous queries.  When a new query contains a sub-expression that
+matches a cached intermediate, the recycler reuses it instead of
+recomputing.  This is particularly effective for exploratory analytics
+where queries share common subexpressions.
+
+**When to apply**: A query contains a sub-expression (filter, join,
+aggregation) that was computed by a recent query and the underlying
+data has not changed.
+
+**Why it works**: Reusing a cached intermediate avoids re-scanning
+and re-computing the same result.  The recycler maintains a pool of
+intermediates with LRU eviction and invalidation on data changes.
+
+**Database version**: MonetDB 11.19+
+
+## Relational Algebra
+
+```algebra
+-- Query 1: computes expensive filter
+T1 = sigma[date > '2024-01-01'](scan(events))
+gamma[type; COUNT(*)](T1)
+
+-- Query 2: reuses cached T1
+pi[user_id](T1)  -- T1 from recycler cache
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("monetdb-recycle-intermediate";
+    "(filter ?pred (scan ?table))" =>
+    "(recycled-bat ?pred ?table)"
+    if is_database("monetdb")
+    if is_cached_intermediate("?pred", "?table")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    expression: &MalExpression,
+    cache: &RecyclerCache,
+) -> bool {
+    cache.contains(expression.signature())
+    && !expression.input_tables_modified_since(
+        cache.timestamp(expression.signature())
+    )
+}
+```
+
+**Restrictions:**
+- Cache is invalidated on INSERT, UPDATE, DELETE to source tables
+- Memory budget limits the number of cached intermediates
+- Only exact sub-expression matches are reused (no partial matching)
+- Non-deterministic expressions (RAND, NOW) are not cached
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    recompute_cost: f64,
+    cache_lookup_cost: f64,
+) -> f64 {
+    recompute_cost - cache_lookup_cost
+}
+```
+
+**Typical benefit**: 10-100x for repeated analytical queries on
+static data.
+
+## Test Cases
+
+```sql
+-- Positive: repeated subexpression
+-- Query 1:
+SELECT type, COUNT(*) FROM events
+WHERE date > '2024-01-01' GROUP BY type;
+-- Query 2 (benefits from recycling):
+SELECT user_id FROM events WHERE date > '2024-01-01';
+-- Cached filter result reused
+```
+
+```sql
+-- Negative: data modified between queries
+INSERT INTO events VALUES (...);
+SELECT * FROM events WHERE date > '2024-01-01';
+-- Cache invalidated by INSERT
+```
+
+## References
+
+Ivanova, M. et al. "Recycling in MonetDB" (CWI tech report)
+Source: monetdb5/optimizer/opt_recycler.c

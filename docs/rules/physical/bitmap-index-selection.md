@@ -1,0 +1,99 @@
+# Rule: Bitmap Index Selection
+
+**Category:** physical/index-selection
+**File:** `rules/physical/index-selection/bitmap-index-selection.rra`
+
+## Metadata
+
+- **ID:** `bitmap-index-selection`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, oracle
+- **Tags:** index, bitmap, low-cardinality
+- **Authors:** "RA Contributors"
+
+## Preconditions
+
+```yaml
+  - type: "pattern"
+    must_match: "(filter ?pred (scan ?table))"
+    description: "Filter on low-cardinality column with bitmap index"
+  - type: "predicate"
+    condition: "has_bitmap_index(?table, columns(?pred))"
+    description: "Bitmap index must exist on predicate column"
+  - type: "fact"
+    fact_type: "statistics.distinct_count"
+    table: "?table"
+    comparator: "<"
+    threshold: 1000
+    description: "Column cardinality should be low for bitmap efficiency"
+    optional: true
+```
+
+
+# Bitmap Index Selection
+
+## Description
+
+Uses bitmap indexes for low-cardinality columns; combines multiple bitmap indexes with AND/OR operations efficiently.
+
+**When to apply**: Low-cardinality columns (5-100 distinct values) with multiple predicates.
+
+**Why it works**: Bitmap operations (AND/OR/NOT) extremely fast; efficient for combining multiple conditions.
+
+## Relational Algebra
+
+```algebra
+filter[status='active' AND type='premium'](scan[T])
+  -> bitmap_and(bitmap_index_scan[I1](status='active'),
+                bitmap_index_scan[I2](type='premium'))
+```
+
+## Implementation
+
+```rust
+rw!("use-bitmap-indexes";
+    "(filter (and ?pred1 ?pred2) (scan ?table))" =>
+    "(bitmap-and (bitmap-index-scan ?idx1 ?pred1)
+                 (bitmap-index-scan ?idx2 ?pred2))"
+    if has_bitmap_index("?table", "?pred1") &&
+       has_bitmap_index("?table", "?pred2")
+),
+```
+
+## Cost Model
+
+```rust
+fn cost(bitmap1_size: u64, bitmap2_size: u64, table_size: u64) -> f64 {
+    let scan_bitmaps = (bitmap1_size + bitmap2_size) as f64;
+    let and_operation = (bitmap1_size.min(bitmap2_size) / 64) as f64; // 64-bit words
+    let table_access = (table_size as f64 * 0.1); // After filtering
+    scan_bitmaps + and_operation + table_access
+}
+```
+
+**Typical benefit**: 30-70% for multi-condition queries on low-cardinality columns
+
+## Test Cases
+
+### Positive: Multiple low-cardinality predicates
+
+```sql
+SELECT * FROM orders
+WHERE status = 'shipped' AND priority = 'high';
+
+-- Bitmap indexes on status (5 values) and priority (3 values)
+-- Fast bitmap AND operation
+```
+
+### Negative: High-cardinality column
+
+```sql
+SELECT * FROM users WHERE email = 'user@example.com';
+
+-- email has millions of distinct values: B-tree better than bitmap
+```
+
+## References
+
+- PostgreSQL: Bitmap index scans
+- Oracle: Bitmap indexes for data warehousing

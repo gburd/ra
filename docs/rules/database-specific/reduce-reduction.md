@@ -1,0 +1,132 @@
+# Rule: Materialize Reduce Reduction (Hierarchical Aggregation)
+
+**Category:** database-specific/materialize
+**File:** `rules/database-specific/materialize/reduce-reduction.rra`
+
+## Metadata
+
+- **ID:** `materialize-reduce-reduction`
+- **Version:** "1.0.0"
+- **Databases:** materialize
+- **Tags:** database-specific, materialize, reduce, hierarchical, aggregation, monotonic
+- **Authors:** "RA Contributors"
+
+
+# Materialize Reduce Reduction (Hierarchical Aggregation)
+
+## Description
+
+Converts a single global Reduce into a hierarchical multi-level
+reduction tree.  For monotonic inputs (append-only sources like Kafka),
+Materialize can use a tree of partial aggregations that reduces the
+worst-case update cost from O(n) to O(log n).
+
+**When to apply**: A Reduce aggregates over a monotonic (append-only)
+input source, and the aggregate function is decomposable (SUM, COUNT,
+MIN, MAX).
+
+**Why it works**: In differential dataflow, a single Reduce over all
+input rows retains the entire collection to handle retractions.  For
+monotonic inputs (no retractions), a hierarchical tree of partial
+aggregations distributes work and reduces per-update latency.
+
+**Database version**: Materialize 0.30+
+
+## Relational Algebra
+
+```algebra
+-- Before: single global reduce
+gamma[; sum=SUM(a)](S)
+
+-- After: hierarchical reduction (2-level example)
+gamma[; sum=SUM(partial_sum)](
+    gamma[bucket; partial_sum=SUM(a)](
+        map[bucket = hash(key) % B](S)))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("materialize-hierarchical-reduce";
+    "(reduce (list) ?aggs ?input)" =>
+    "(reduce (list) (finalize-aggs ?aggs)
+        (reduce (bucket-key ?levels) (partial-aggs ?aggs)
+            (map (add-bucket-key ?levels) ?input)))"
+    if is_database("materialize")
+    if is_monotonic("?input")
+    if aggs_are_decomposable("?aggs")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    input: &MirRelationExpr,
+    aggs: &[AggregateExpr],
+) -> bool {
+    input.is_monotonic()
+    && aggs.iter().all(|a| a.func.is_decomposable())
+}
+
+fn is_decomposable(func: &AggregateFunc) -> bool {
+    matches!(func,
+        AggregateFunc::SumInt32
+        | AggregateFunc::SumInt64
+        | AggregateFunc::Count
+        | AggregateFunc::Min
+        | AggregateFunc::Max
+    )
+}
+```
+
+**Restrictions:**
+- Input must be monotonic (append-only; no retractions)
+- Aggregate function must be decomposable (partial + finalize)
+- AVG requires decomposition into SUM + COUNT
+- Non-decomposable aggregates (MEDIAN, percentiles) cannot be hierarchicalized
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    rows: f64,
+    levels: usize,
+    updates_per_sec: f64,
+) -> f64 {
+    // Reduce worst-case update from O(n) to O(n^(1/levels))
+    let single_cost = rows;
+    let hierarchical_cost =
+        levels as f64 * rows.powf(1.0 / levels as f64);
+    (single_cost - hierarchical_cost) * updates_per_sec * 0.001
+}
+```
+
+**Typical benefit**: For 10M-row append-only source with 2 levels,
+reduces worst-case per-update cost from 10M to ~3162 operations.
+
+## Test Cases
+
+```sql
+-- Positive: monotonic source with SUM
+CREATE SOURCE events FROM KAFKA CONNECTION kafka_conn
+  (TOPIC 'events') FORMAT AVRO;
+CREATE MATERIALIZED VIEW total_revenue AS
+SELECT SUM(amount) FROM events;
+-- Hierarchical aggregation tree for monotonic Kafka source
+```
+
+```sql
+-- Negative: non-monotonic source
+CREATE MATERIALIZED VIEW total_salary AS
+SELECT SUM(salary) FROM employees;
+-- employees table has updates/deletes; cannot use hierarchical
+```
+
+## References
+
+Materialize: src/transform/src/monotonic.rs
+Materialize: src/transform/src/reduction.rs
+Materialize: src/compute/src/render/reduce.rs

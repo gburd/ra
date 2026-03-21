@@ -1,0 +1,339 @@
+# Rule: Morsel-Driven Work-Stealing Scheduler
+
+**Category:** execution-models
+**File:** `rules/execution-models/morsel-driven/morsel-driven-work-stealing.rra`
+
+## Metadata
+
+- **ID:** `morsel-driven-work-stealing`
+- **Version:** 1.0.0
+- **Databases:** HyPer, DuckDB, Umbra
+- **Tags:** execution, parallel, morsel, work-stealing, scheduling, load-balance
+- **SQL Standard:** HyPer morsel model
+- **Authors:** Viktor Leis, Thomas Neumann
+
+
+# Morsel-Driven Work-Stealing Scheduler
+
+## Description
+
+Work-stealing is the load-balancing mechanism that makes morsel-driven parallelism robust against uneven workloads. Each worker thread has a local double-ended queue (deque) of morsels. Workers pop morsels from their own deque (LIFO for cache locality). When a worker's deque is empty, it "steals" a morsel from another worker's deque (FIFO to steal the largest remaining work). This achieves near-optimal load balancing with minimal synchronization.
+
+**Work-stealing design:**
+- **Local deque per worker**: Push/pop from bottom (fast, no sync)
+- **Steal from top**: Thieves take from opposite end (minimal disruption)
+- **Randomized victim selection**: Steal from random worker (avoids convoy)
+- **Backoff on empty**: Exponential backoff when all deques empty
+- **NUMA-aware stealing**: Prefer stealing from same NUMA node
+
+**Key characteristics:**
+- **Self-balancing**: No central scheduler needed
+- **Low overhead**: Only atomic operations, no locks on fast path
+- **Cache-friendly**: LIFO pop keeps recently-used data hot
+- **Provably good**: O(T/P + D) expected time (T=work, P=processors, D=depth)
+
+**Trade-offs:**
+- Steal operations are more expensive than local pops
+- Random victim selection may cause cross-NUMA steals
+- Deque implementation requires careful memory ordering
+- Not optimal for very uniform workloads (simple round-robin suffices)
+
+## Relational Algebra
+
+```
+Work-stealing scheduler:
+
+initialize(morsels, num_workers):
+  // Distribute morsels evenly to worker deques
+  for i in 0..morsels.len():
+    worker = i % num_workers
+    deques[worker].push_bottom(morsels[i])
+
+worker_loop(my_id):
+  loop:
+    // Try local deque first (fast path)
+    morsel = deques[my_id].pop_bottom()
+    if morsel:
+      process(morsel)
+      continue
+
+    // Try stealing from random victim
+    victim = random_worker(exclude=my_id)
+    morsel = deques[victim].steal_top()
+    if morsel:
+      process(morsel)
+      continue
+
+    // All empty: check termination
+    if all_workers_idle():
+      break
+    else:
+      backoff()
+```
+
+## Implementation
+
+```rust
+use std::sync::atomic::{AtomicIsize, AtomicBool, Ordering};
+use std::cell::UnsafeCell;
+
+/// Chase-Lev work-stealing deque
+pub struct WorkStealingDeque<T> {
+    buffer: UnsafeCell<Vec<T>>,
+    bottom: AtomicIsize,  // Owner's end
+    top: AtomicIsize,     // Thieves' end
+}
+
+unsafe impl<T: Send> Send for WorkStealingDeque<T> {}
+unsafe impl<T: Send> Sync for WorkStealingDeque<T> {}
+
+impl<T> WorkStealingDeque<T> {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            buffer: UnsafeCell::new(Vec::with_capacity(capacity)),
+            bottom: AtomicIsize::new(0),
+            top: AtomicIsize::new(0),
+        }
+    }
+
+    /// Push to bottom (owner only, no sync needed)
+    pub fn push(&self, item: T) {
+        let b = self.bottom.load(Ordering::Relaxed);
+        unsafe {
+            (*self.buffer.get()).push(item);
+        }
+        // Release: make item visible to stealers
+        self.bottom.store(b + 1, Ordering::Release);
+    }
+
+    /// Pop from bottom (owner only)
+    pub fn pop(&self) -> Option<T> {
+        let b = self.bottom.load(Ordering::Relaxed) - 1;
+        self.bottom.store(b, Ordering::SeqCst);
+
+        let t = self.top.load(Ordering::SeqCst);
+
+        if t <= b {
+            // Non-empty: safe to pop
+            let item = unsafe {
+                (*self.buffer.get()).pop().unwrap()
+            };
+            Some(item)
+        } else {
+            // Deque might be empty or racing with stealer
+            self.bottom.store(b + 1, Ordering::Relaxed);
+            if t == b {
+                // One element: race with stealer
+                if self.top.compare_exchange(
+                    t, t + 1,
+                    Ordering::SeqCst,
+                    Ordering::Relaxed,
+                ).is_ok() {
+                    let item = unsafe {
+                        (*self.buffer.get()).pop().unwrap()
+                    };
+                    self.bottom.store(t + 1, Ordering::Relaxed);
+                    return Some(item);
+                }
+            }
+            None // Empty or lost race
+        }
+    }
+
+    /// Steal from top (called by thieves)
+    pub fn steal(&self) -> Option<T> {
+        let t = self.top.load(Ordering::Acquire);
+        let b = self.bottom.load(Ordering::Acquire);
+
+        if t >= b {
+            return None; // Empty
+        }
+
+        // Try to claim the top element
+        if self.top.compare_exchange(
+            t, t + 1,
+            Ordering::SeqCst,
+            Ordering::Relaxed,
+        ).is_ok() {
+            let item = unsafe {
+                let buf = &*self.buffer.get();
+                std::ptr::read(&buf[t as usize])
+            };
+            Some(item)
+        } else {
+            None // Lost race with another stealer
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        let b = self.bottom.load(Ordering::Relaxed);
+        let t = self.top.load(Ordering::Relaxed);
+        (b - t).max(0) as usize
+    }
+}
+
+/// Work-stealing scheduler for morsel-driven execution
+pub struct WorkStealingScheduler {
+    deques: Vec<WorkStealingDeque<Morsel>>,
+    num_workers: usize,
+    active: Vec<AtomicBool>,
+}
+
+impl WorkStealingScheduler {
+    /// Create scheduler with initial morsel distribution
+    pub fn new(
+        morsels: Vec<Morsel>,
+        num_workers: usize,
+    ) -> Self {
+        let deques: Vec<_> = (0..num_workers)
+            .map(|_| WorkStealingDeque::new(morsels.len() / num_workers + 1))
+            .collect();
+
+        // Round-robin initial distribution
+        for (i, morsel) in morsels.into_iter().enumerate() {
+            deques[i % num_workers].push(morsel);
+        }
+
+        let active = (0..num_workers)
+            .map(|_| AtomicBool::new(true))
+            .collect();
+
+        Self { deques, num_workers, active }
+    }
+
+    /// Get next morsel for a worker
+    pub fn get_morsel(&self, worker_id: usize) -> Option<Morsel> {
+        // Try local deque first (fast path)
+        if let Some(morsel) = self.deques[worker_id].pop() {
+            return Some(morsel);
+        }
+
+        // Try stealing from others
+        self.try_steal(worker_id)
+    }
+
+    /// Attempt to steal a morsel from another worker
+    fn try_steal(&self, worker_id: usize) -> Option<Morsel> {
+        let mut rng = FastRng::new(worker_id as u64);
+
+        for attempt in 0..self.num_workers * 2 {
+            let victim = rng.next_usize() % self.num_workers;
+            if victim == worker_id {
+                continue;
+            }
+
+            if let Some(morsel) = self.deques[victim].steal() {
+                return Some(morsel);
+            }
+        }
+
+        None // No work available anywhere
+    }
+
+    /// NUMA-aware stealing: prefer same NUMA node
+    fn try_steal_numa(
+        &self,
+        worker_id: usize,
+        numa_topology: &NumaTopology,
+    ) -> Option<Morsel> {
+        let my_node = numa_topology.node_of(worker_id);
+
+        // First: try workers on same NUMA node
+        for &peer in numa_topology.peers(my_node) {
+            if peer == worker_id { continue; }
+            if let Some(morsel) = self.deques[peer].steal() {
+                return Some(morsel);
+            }
+        }
+
+        // Then: try remote NUMA nodes
+        for &remote in numa_topology.remote_peers(my_node) {
+            if let Some(morsel) = self.deques[remote].steal() {
+                return Some(morsel);
+            }
+        }
+
+        None
+    }
+}
+
+/// Cost model for work-stealing overhead
+pub fn work_stealing_overhead(
+    total_morsels: usize,
+    num_workers: usize,
+    work_variance: f64,
+) -> f64 {
+    // Base scheduling: atomic fetch per morsel
+    let local_pop_cost = total_morsels as f64 * 0.00002; // ~20 ns
+
+    // Steal attempts (proportional to variance)
+    let expected_steals = (total_morsels as f64 * work_variance)
+        .sqrt();
+    let steal_cost = expected_steals * 0.0005; // ~500 ns per steal
+
+    // Idle time at end (tail effect)
+    let tail_cost = (num_workers as f64 - 1.0) * 0.001;
+
+    local_pop_cost + steal_cost + tail_cost
+}
+```
+
+## Cost Model
+
+**Fast Path (local pop):**
+- Cost: ~20 ns (atomic decrement + array access)
+- Frequency: majority of morsel assignments
+- Cache: LIFO ensures recently-used data is hot
+
+**Steal Operation:**
+- Cost: ~500 ns (CAS on remote cache line)
+- Frequency: proportional to workload imbalance
+- NUMA penalty: additional ~200 ns for cross-node steal
+
+**Overall Overhead:**
+- Uniform workload: ~0.1% overhead (few steals)
+- Skewed workload: ~2-5% overhead (many steals)
+- Highly skewed: ~5-10% overhead (constant stealing)
+
+**Theoretical Bound:**
+- Expected completion: O(T/P + D) where T=total work, P=processors, D=task graph depth
+- For morsel-driven: D = number of pipelines (small constant)
+- Near-optimal work distribution
+
+## Test Cases
+
+```sql
+-- Test 1: Uniform workload (minimal stealing)
+SELECT COUNT(*) FROM lineitem WHERE l_quantity < 25;
+-- Per-morsel cost is uniform: little stealing needed
+-- Expected: <0.5% scheduling overhead
+
+-- Test 2: Skewed filter (variable per-morsel cost)
+SELECT * FROM events WHERE expensive_regex(payload);
+-- Some morsels take 10x longer than others
+-- Expected: Work-stealing balances load across workers
+
+-- Test 3: Skewed join probe
+SELECT * FROM orders o JOIN customers c ON o.cust_id = c.id;
+-- Some morsels hit many matches, others few
+-- Expected: Stealing from workers with many remaining probe morsels
+
+-- Test 4: Multi-query fairness
+-- Q1 (long): SELECT SUM(amount) FROM lineitem;
+-- Q2 (short): SELECT * FROM orders WHERE id = 42;
+-- Expected: Q2 workers steal from Q1 pool, fast response
+```
+
+## References
+
+1. **Leis, Viktor et al**. "Morsel-Driven Parallelism." SIGMOD 2014.
+   - Work-stealing in morsel-driven query execution
+
+2. **Blumofe, Robert D.; Leiserson, Charles E**. "Scheduling Multithreaded Computations by Work Stealing." JACM 1999.
+   - Theoretical foundations of work-stealing schedulers
+
+3. **Chase, David; Lev, Yosef**. "Dynamic Circular Work-Stealing Deque." SPAA 2005.
+   - Chase-Lev lock-free deque implementation
+
+4. **Lea, Doug**. "A Java Fork/Join Framework." Java Grande 2000.
+   - Work-stealing in Java's ForkJoinPool (inspiration for DB engines)

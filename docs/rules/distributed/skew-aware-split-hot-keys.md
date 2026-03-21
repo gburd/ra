@@ -1,0 +1,66 @@
+# Rule: Split Hot Keys for Skew Handling
+
+**Category:** distributed/join-distribution
+**File:** `rules/distributed/join-distribution/skew-aware-split-hot-keys.rra`
+
+## Metadata
+
+- **ID:** `skew-aware-split-hot-keys`
+- **Version:** "1.0.0"
+- **Databases:** spark, presto, trino, cockroachdb
+- **Tags:** distributed, join, skew, hot-keys, load-balancing
+- **Authors:** "RA Contributors"
+
+
+# Split Hot Keys for Skew Handling
+
+## Description
+
+When a join key has highly skewed values (e.g., a popular product_id
+that appears in 30% of rows), a single node receives disproportionate
+load. Split the hot keys into multiple sub-partitions and broadcast the
+matching rows from the other side.
+
+## Relational Algebra
+
+```algebra
+Join[c](R, S) where key k is skewed
+  -> Union(
+      Join[c](R_hot, Broadcast(S_hot)),    -- hot key partition
+      Join[c](R_cold, Exchange[hash(k)](S_cold))  -- normal partition
+     )
+  where R_hot = Filter(R, k in hot_keys)
+  where R_cold = Filter(R, k not in hot_keys)
+```
+
+## Test Cases
+
+```sql
+-- Test 1: Popular product skew
+SELECT o.*, p.name
+FROM orders o           -- product_id=42 has 30% of rows
+JOIN products p ON o.product_id = p.id;
+-- Expected: Split product_id=42 rows, broadcast matching products
+```
+
+```sql
+-- Test 2: Null key skew
+SELECT l.*, r.*
+FROM left_table l
+JOIN right_table r ON l.key = r.key;
+-- 20% of left.key is NULL -> separate NULL handling
+```
+
+```sql
+-- Test 3: No significant skew
+SELECT o.*, c.name
+FROM orders o
+JOIN customers c ON o.cid = c.id;
+-- Uniform distribution -> standard shuffle, no split
+```
+
+## References
+
+Spark: AQE skew join optimization
+Presto: skewed join handling
+DeWitt et al., "Practical Skew Handling in Parallel Joins" (VLDB 1992)

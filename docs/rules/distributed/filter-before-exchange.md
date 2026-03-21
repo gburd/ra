@@ -1,0 +1,73 @@
+# Rule: Push Filter Before Exchange
+
+**Category:** distributed/filter-pushdown-distributed
+**File:** `rules/distributed/filter-pushdown-distributed/filter-before-exchange.rra`
+
+## Metadata
+
+- **ID:** `filter-before-exchange`
+- **Version:** "1.0.0"
+- **Databases:** spark, presto, trino, cockroachdb, citus
+- **Tags:** distributed, filter, pushdown, exchange, network-reduction
+- **Authors:** "RA Contributors"
+
+
+# Push Filter Before Exchange
+
+## Description
+
+Push selective filters below the exchange (shuffle/broadcast) operator
+to reduce the volume of data transferred over the network. Filtering
+locally before sending data is always cheaper.
+
+## Relational Algebra
+
+```algebra
+Filter[p](Exchange[hash(k)](R))
+  -> Exchange[hash(k)](Filter[p](R))
+  where p references only columns from R
+```
+
+## Implementation
+
+```rust
+rw!("filter-before-exchange";
+    "(filter ?pred (exchange ?type ?rel ?keys))" =>
+    "(exchange ?type (filter ?pred ?rel) ?keys)"
+    if filter_references_only("?pred", "?rel")
+),
+```
+
+## Test Cases
+
+```sql
+-- Test 1: Simple equality filter pushed below exchange
+SELECT o.*, c.name
+FROM orders o
+JOIN customers c ON o.cid = c.id
+WHERE o.status = 'active';
+-- Expected: Filter(status='active') applied before shuffle
+```
+
+```sql
+-- Test 2: Range filter reduces network transfer
+SELECT *
+FROM events e
+JOIN users u ON e.uid = u.id
+WHERE e.ts > '2024-01-01';
+-- Expected: Filter(ts > '2024-01-01') before exchange
+```
+
+```sql
+-- Test 3: Filter references both sides, cannot push
+SELECT o.*, c.name
+FROM orders o
+JOIN customers c ON o.cid = c.id
+WHERE o.total > c.credit_limit;
+-- Expected: Cannot push below exchange (references both tables)
+```
+
+## References
+
+Spark: PushDownPredicates.scala
+Presto: AddExchanges.java

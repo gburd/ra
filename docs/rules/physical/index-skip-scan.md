@@ -1,0 +1,111 @@
+# Rule: Index Skip Scan
+
+**Category:** physical/index-selection
+**File:** `rules/physical/index-selection/index-skip-scan.rra`
+
+## Metadata
+
+- **ID:** `index-skip-scan`
+- **Version:** "1.0.0"
+- **Databases:** oracle, postgresql, mysql
+- **Tags:** index, skip-scan, composite
+- **Authors:** "RA Contributors"
+
+## Preconditions
+
+```yaml
+  - type: "pattern"
+    must_match: "(filter ?pred (scan ?table))"
+    description: "Filter on non-prefix column of composite index"
+  - type: "predicate"
+    condition: "has_composite_index_with_skip(?table, columns(?pred))"
+    description: "Composite index exists where predicate column is not the prefix"
+  - type: "fact"
+    fact_type: "statistics.distinct_count"
+    table: "?table"
+    comparator: "<"
+    threshold: 100
+    optional: true
+    description: "Prefix column should have low cardinality for skip scan efficiency"
+```
+
+
+# Index Skip Scan
+
+## Description
+
+Uses composite index even when leading column not in WHERE clause; skips through distinct values of leading column.
+
+**When to apply**: Query filters on non-leading index columns with low leading column cardinality.
+
+**Why it works**: Skips through distinct leading values; efficient when leading column has few distinct values.
+
+## Relational Algebra
+
+```algebra
+filter[col2 = value](scan[T])
+  -> index_skip_scan[I(col1, col2)](col2 = value)
+  where low_cardinality(col1) && has_index(I, [col1, col2])
+```
+
+## Implementation
+
+```rust
+rw!("use-index-skip-scan";
+    "(filter (= ?col2 ?val) (scan ?table))" =>
+    "(index-skip-scan ?index ?col2 ?val)"
+    if has_composite_index("?table", [_, "?col2"]) &&
+       low_leading_cardinality("?index")
+),
+```
+
+## Cost Model
+
+```rust
+fn cost(distinct_leading: u64, index_height: usize, selectivity: f64) -> f64 {
+    let skips = distinct_leading as f64;
+    let lookups_per_skip = index_height as f64;
+    let scan_matching = selectivity * 1000.0; // Rows per distinct value
+    skips * (lookups_per_skip + scan_matching)
+}
+```
+
+**Typical benefit**: 30-60% vs full scan when leading column has <100 distinct values
+
+## Test Cases
+
+### Positive: Low cardinality leading column
+
+```sql
+CREATE INDEX idx_gender_age ON users(gender, age);
+
+SELECT * FROM users WHERE age > 30;
+
+-- Gender has 3 values: skip through Male/Female/Other, find age>30 in each
+```
+
+### Positive: Date-based composite index
+
+```sql
+CREATE INDEX idx_year_month_day ON events(year, month, day);
+
+SELECT * FROM events WHERE day = 15;
+
+-- Skip through years and months to find day=15
+```
+
+### Negative: High cardinality leading column
+
+```sql
+CREATE INDEX idx_user_date ON orders(user_id, date);
+
+SELECT * FROM orders WHERE date = '2025-01-15';
+
+-- user_id has millions of values: skip scan too expensive
+```
+
+## References
+
+- Oracle: Index skip scan optimization
+- PostgreSQL: Skip scan on composite indexes
+- MySQL: Loose index scan

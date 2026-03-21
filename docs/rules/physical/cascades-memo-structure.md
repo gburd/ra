@@ -1,0 +1,360 @@
+# Rule: "Cascades Memo Structure and Group Optimization"
+
+**Category:** physical/optimizer-framework
+**File:** `rules/physical/optimizer-framework/cascades-memo-structure.rra`
+
+## Metadata
+
+- **ID:** `cascades-memo-structure`
+- **Version:** "1.0.0"
+- **Databases:** cockroachdb, mssql, greenplum
+- **Tags:** cascades, memo, equivalence-groups, memoization, optimization-search, classic
+- **Authors:** "Goetz Graefe"
+
+
+# Cascades Memo Structure and Group Optimization
+
+## Description
+
+The Cascades memo (also called the search space or MEMO table) is a data
+structure that compactly represents the space of equivalent query plans.
+It organizes logical and physical expressions into equivalence groups (or
+"groups"), where each group contains all expressions that produce the same
+logical result. This avoids redundant optimization: once a subexpression is
+optimized, its result is shared across all plans that use it.
+
+The memo has two levels of deduplication:
+1. **Expression deduplication**: Identical expressions map to the same group
+2. **Property-based memoization**: For each group, optimization results are
+   cached per required physical properties
+
+This structure enables the exponential-to-polynomial speedup that makes
+cost-based optimization practical for complex queries.
+
+**When to apply**: The memo is the core data structure of any Cascades-style
+optimizer. It is used throughout the optimization process.
+
+**Why it works**: Without memoization, optimizing a 10-way join would require
+evaluating ~10! = 3.6M orderings, each with multiple physical implementations.
+With the memo, each subexpression (subset of relations) is optimized once per
+set of required properties. The memo reduces this to O(2^10 * k) where k is
+the number of interesting property combinations.
+
+## Relational Algebra
+
+```algebra
+Memo structure:
+
+Group 0: {Scan(R1)}
+  Winners: {ANY -> SeqScan(R1, cost=100)}
+
+Group 1: {Scan(R2)}
+  Winners: {ANY -> SeqScan(R2, cost=50),
+            SORTED(a) -> IndexScan(R2, idx_a, cost=80)}
+
+Group 2: {Join(G0, G1, R1.a = R2.a),
+          Join(G1, G0, R2.a = R1.a)}  // commutativity
+  Winners: {ANY -> HashJoin(G0, G1, cost=200),
+            SORTED(a) -> MergeJoin(G0, G1, cost=250)}
+
+Group 3: {Scan(R3)}
+  Winners: {ANY -> SeqScan(R3, cost=200)}
+
+Group 4: {Join(G2, G3, ...),
+          Join(G3, G2, ...),
+          Join(Join(G0, G3, ...), G1, ...),
+          ...}  // all equivalent multi-join orderings
+  Winners: {ANY -> HashJoin(G2, G3, cost=500)}
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+use std::collections::HashMap;
+
+type GroupId = u32;
+type ExprId = u32;
+
+#[derive(Clone, Debug)]
+struct MemoGroup {
+    id: GroupId,
+    /// All logically equivalent expressions
+    logical_exprs: Vec<LogicalExpr>,
+    /// Physical implementations explored
+    physical_exprs: Vec<PhysicalExpr>,
+    /// Best plan for each required property set
+    winners: HashMap<PhysicalProperties, Winner>,
+    /// Estimated cardinality (shared by all expressions in group)
+    cardinality: f64,
+    /// Has this group been fully explored?
+    explored: bool,
+}
+
+#[derive(Clone, Debug)]
+struct Winner {
+    plan: PhysicalPlan,
+    cost: f64,
+}
+
+#[derive(Clone, Debug)]
+struct LogicalExpr {
+    operator: LogicalOp,
+    /// Children are group references, not direct expressions
+    children: Vec<GroupId>,
+}
+
+struct CascadesMemo {
+    groups: Vec<MemoGroup>,
+    /// Map from expression fingerprint to group
+    expr_to_group: HashMap<ExprFingerprint, GroupId>,
+}
+
+impl CascadesMemo {
+    fn new() -> Self {
+        Self {
+            groups: Vec::new(),
+            expr_to_group: HashMap::new(),
+        }
+    }
+
+    /// Insert an expression, returning its group ID.
+    /// If an equivalent expression exists, returns the existing group.
+    fn insert(&mut self, expr: LogicalExpr) -> GroupId {
+        let fingerprint = self.fingerprint(&expr);
+
+        if let Some(&group_id) = self.expr_to_group.get(&fingerprint) {
+            // Expression already in memo, add to existing group
+            self.groups[group_id as usize]
+                .logical_exprs.push(expr);
+            return group_id;
+        }
+
+        // New group
+        let group_id = self.groups.len() as GroupId;
+        let group = MemoGroup {
+            id: group_id,
+            logical_exprs: vec![expr],
+            physical_exprs: Vec::new(),
+            winners: HashMap::new(),
+            cardinality: 0.0,
+            explored: false,
+        };
+        self.groups.push(group);
+        self.expr_to_group.insert(fingerprint, group_id);
+        group_id
+    }
+
+    /// Apply a transformation rule, potentially merging groups
+    fn apply_rule(
+        &mut self,
+        group_id: GroupId,
+        rule: &TransformationRule,
+    ) {
+        let group = &self.groups[group_id as usize];
+
+        for expr in group.logical_exprs.clone() {
+            if let Some(new_exprs) = rule.apply(&expr) {
+                for new_expr in new_exprs {
+                    let new_group = self.insert(new_expr);
+                    if new_group != group_id {
+                        // Merge groups: they are equivalent
+                        self.merge_groups(group_id, new_group);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Merge two groups that are discovered to be equivalent
+    fn merge_groups(&mut self, g1: GroupId, g2: GroupId) {
+        if g1 == g2 { return; }
+
+        let (keep, merge) = if g1 < g2 { (g1, g2) } else { (g2, g1) };
+
+        let merge_group =
+            self.groups[merge as usize].clone();
+
+        let keep_group =
+            &mut self.groups[keep as usize];
+        keep_group.logical_exprs
+            .extend(merge_group.logical_exprs);
+        keep_group.physical_exprs
+            .extend(merge_group.physical_exprs);
+
+        // Update all references from merge -> keep
+        for group in &mut self.groups {
+            for expr in &mut group.logical_exprs {
+                for child in &mut expr.children {
+                    if *child == merge {
+                        *child = keep;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Get the best plan for a group with given properties
+    fn best_plan(
+        &self,
+        group_id: GroupId,
+        props: &PhysicalProperties,
+    ) -> Option<&Winner> {
+        self.groups[group_id as usize].winners.get(props)
+    }
+
+    /// Record a winner for a group
+    fn record_winner(
+        &mut self,
+        group_id: GroupId,
+        props: PhysicalProperties,
+        plan: PhysicalPlan,
+        cost: f64,
+    ) {
+        let entry = self.groups[group_id as usize]
+            .winners
+            .entry(props)
+            .or_insert(Winner {
+                plan: plan.clone(),
+                cost: f64::INFINITY,
+            });
+
+        if cost < entry.cost {
+            entry.plan = plan;
+            entry.cost = cost;
+        }
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    hw: &HardwareProfile,
+) -> bool {
+    // Memo is beneficial when plan space is large enough
+    // to have redundant subexpressions
+    stats.n_relations >= 2
+        && hw.optimizer_style == OptimizerStyle::Cascades
+}
+```
+
+**Restrictions:**
+- Memory overhead: one group per equivalence class
+- Group merging is O(n) in the number of expressions
+- Expression fingerprinting must be order-independent for commutativity
+- Cardinality estimation is per-group, shared across equivalent expressions
+
+## Cost Model
+
+```rust
+fn memo_efficiency(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let n = stats.n_relations as f64;
+
+    // Without memo: each join ordering optimized independently
+    // Catalan number of binary trees * physical implementations
+    let without_memo = catalan(n as u64) as f64 * 3.0_f64.powf(n);
+
+    // With memo: each subset optimized once per property set
+    let n_subsets = 2.0_f64.powf(n);
+    let n_properties = 5.0; // Typical interesting property count
+    let with_memo = n_subsets * n_properties;
+
+    // Savings ratio
+    if with_memo > 0.0 {
+        without_memo / with_memo
+    } else {
+        1.0
+    }
+}
+```
+
+**Space complexity**: O(2^n * p) where n is relations and p is property sets.
+**Time savings**: From O(n! * k) to O(2^n * p * k) where k is implementations per operator.
+
+## Test Cases
+
+### Positive: Subexpression sharing in 4-way join
+
+```sql
+SELECT * FROM A JOIN B ON ... JOIN C ON ... JOIN D ON ...;
+
+-- Memo groups created:
+-- G0: {Scan(A)}
+-- G1: {Scan(B)}
+-- G2: {Scan(C)}
+-- G3: {Scan(D)}
+-- G4: {A join B, B join A}     -- shared by multiple orderings
+-- G5: {A join C, C join A}     -- shared by multiple orderings
+-- G6: {B join C, C join B}     -- shared by multiple orderings
+-- G7: {(AB) join C, C join (AB), A join (BC), ...}
+-- G8: {full 4-way join}
+--
+-- A join B (G4) is optimized ONCE, reused in:
+-- (A join B) join C, (A join B) join D, etc.
+```
+
+### Positive: Group merging from transformation rules
+
+```sql
+-- Join commutativity discovers equivalent expressions
+SELECT * FROM orders o JOIN customers c ON o.cust_id = c.id;
+
+-- Initially: Group{Join(orders, customers)}
+-- Apply commutativity: Group{Join(orders, customers), Join(customers, orders)}
+-- Both in same group: optimized together, best wins
+```
+
+### Positive: Property-based memoization
+
+```sql
+SELECT * FROM orders o
+JOIN customers c ON o.cust_id = c.id
+ORDER BY c.name;
+
+-- Group for (orders join customers) has two winners:
+-- Winner[ANY]: HashJoin, cost 5000
+-- Winner[SORTED(name)]: MergeJoin, cost 6000
+-- Parent chooses based on whether ORDER BY is needed
+-- Without memo: would optimize the join twice
+```
+
+### Negative: Single-table query (no sharing benefit)
+
+```sql
+SELECT * FROM orders WHERE total > 100 ORDER BY order_date;
+
+-- Only one group per operator, no subexpression sharing
+-- Memo overhead without benefit (but minimal)
+```
+
+## References
+
+**Original papers:**
+- Graefe, G., "The Cascades Framework for Query Optimization", IEEE Data Engineering Bulletin 1995
+  - DOI: 10.1109/69.469815
+  - Section 3: "Memo structure" -- groups, expressions, winners
+
+- Graefe, G., McKenna, W.J., "The Volcano Optimizer Generator: Extensibility and Efficient Search", IEEE Data Engineering 1993
+  - DOI: 10.1109/69.273032
+  - Section 2: "Search space representation"
+
+**Analysis and extensions:**
+- Moerkotte, G., Neumann, T., "Analysis of Two Existing and One New Dynamic Programming Algorithm for the Generation of Optimal Bushy Join Trees without Cross Products", VLDB 2006
+  - DOI: 10.14778/1182635.1164207
+  - Memo structure analysis for join enumeration
+
+- Zhou, J., et al., "Incorporating Partitioning and Parallel Plans into the SCOPE Optimizer", IEEE ICDE 2010
+  - DOI: 10.1109/ICDE.2010.5447828
+  - Extended memo for parallel plans
+
+**Implementation in databases:**
+- mssql: Cascades memo in query optimizer
+- CockroachDB: `pkg/sql/opt/memo/memo.go` - Memo structure
+- Greenplum Orca: `libgpopt/src/engine/CMemo.cpp` - MEMO implementation
+- Apache Calcite: `RelSet` + `RelSubset` (equivalent to groups + properties)

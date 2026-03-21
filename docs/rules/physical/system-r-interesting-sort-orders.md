@@ -1,0 +1,339 @@
+# Rule: "System R Interesting Sort Orders"
+
+**Category:** physical/access-path-selection
+**File:** `rules/physical/access-path-selection/system-r-interesting-sort-orders.rra`
+
+## Metadata
+
+- **ID:** `system-r-interesting-sort-orders`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, duckdb, cockroachdb, mssql, oracle
+- **Tags:** interesting-orders, sort-avoidance, system-r, cost-based, classic
+- **Authors:** "Selinger, Astrahan, Chamberlin, Lorie, Price - IBM Research"
+
+
+# System R Interesting Sort Orders
+
+## Description
+
+System R's mechanism for retaining suboptimal plans that produce tuples in a
+sort order useful for later operations. During join enumeration, the optimizer
+tracks "interesting orders" -- orderings required by GROUP BY, ORDER BY,
+DISTINCT, or merge-join. For each subexpression, the optimizer keeps not just
+the cheapest unordered plan, but also the cheapest plan for each interesting
+order. A more expensive plan that produces sorted output may yield a cheaper
+overall plan by avoiding a later sort.
+
+This is distinct from the Volcano/Cascades "interesting orders" (which is
+top-down and property-based). System R's approach is bottom-up: it
+enumerates interesting orders at the start, then during DP join enumeration
+retains multiple plans per subexpression.
+
+**When to apply**: Queries with ORDER BY, GROUP BY, DISTINCT, or merge-join
+opportunities where the join ordering decision interacts with sort order
+requirements.
+
+**Why it works**: The cheapest plan for a sub-join may not produce the globally
+cheapest plan. If a later operation requires sorted input (e.g., ORDER BY),
+a plan that produces sorted output during the join phase may eliminate an
+expensive top-level sort, reducing total cost.
+
+## Relational Algebra
+
+```algebra
+Given query: pi_{cols}(R1 join R2 join R3) ORDER BY a
+
+Interesting orders: {a}, plus any merge-join orders
+
+DP enumeration at each level stores:
+  best_plan[subset, NO_ORDER] = cheapest plan for subset
+  best_plan[subset, ORDER_a] = cheapest plan producing order a
+  ...one entry per interesting order
+
+Final plan cost:
+  min(
+    cost(best_plan[all, NO_ORDER]) + sort_cost(a),
+    cost(best_plan[all, ORDER_a])
+  )
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+use std::collections::HashMap;
+
+#[derive(Clone, Debug, Hash, Eq, PartialEq)]
+enum InterestingOrder {
+    Unordered,
+    SortedBy(Vec<Column>),
+}
+
+struct SystemRWithInterestingOrders {
+    // (relation_set, interesting_order) -> (cost, plan)
+    memo: HashMap<(BitSet, InterestingOrder), (f64, Plan)>,
+    interesting_orders: Vec<InterestingOrder>,
+}
+
+impl SystemRWithInterestingOrders {
+    fn collect_interesting_orders(
+        &mut self,
+        query: &Query,
+        join_graph: &JoinGraph,
+    ) {
+        self.interesting_orders
+            .push(InterestingOrder::Unordered);
+
+        // ORDER BY columns
+        if let Some(order_by) = &query.order_by {
+            self.interesting_orders.push(
+                InterestingOrder::SortedBy(order_by.clone()),
+            );
+        }
+
+        // GROUP BY columns (sort-based aggregation)
+        if let Some(group_by) = &query.group_by {
+            self.interesting_orders.push(
+                InterestingOrder::SortedBy(group_by.clone()),
+            );
+        }
+
+        // Merge-join columns for each join predicate
+        for edge in join_graph.edges() {
+            self.interesting_orders.push(
+                InterestingOrder::SortedBy(
+                    vec![edge.left_col.clone()]
+                ),
+            );
+            self.interesting_orders.push(
+                InterestingOrder::SortedBy(
+                    vec![edge.right_col.clone()]
+                ),
+            );
+        }
+
+        self.interesting_orders.dedup();
+    }
+
+    fn dp_join_ordering(&mut self, relations: &[Relation]) {
+        let n = relations.len();
+
+        // Base case: each relation with each interesting order
+        for (i, rel) in relations.iter().enumerate() {
+            let set = BitSet::singleton(i);
+
+            for order in &self.interesting_orders {
+                let (cost, plan) =
+                    self.best_single_access(rel, order);
+                self.memo.insert(
+                    (set, order.clone()),
+                    (cost, plan),
+                );
+            }
+        }
+
+        // DP: build up from pairs to full set
+        for size in 2..=n {
+            for subset in all_subsets_of_size(n, size) {
+                for order in &self.interesting_orders {
+                    self.find_best_join_with_order(
+                        subset, order, relations,
+                    );
+                }
+            }
+        }
+    }
+
+    fn find_best_join_with_order(
+        &mut self,
+        subset: BitSet,
+        required_order: &InterestingOrder,
+        relations: &[Relation],
+    ) {
+        let mut best_cost = f64::INFINITY;
+        let mut best_plan = None;
+
+        for left in subset.proper_subsets() {
+            let right = subset.difference(left);
+
+            // Hash join: produces no useful order
+            let lc = self.cheapest_cost(left);
+            let rc = self.cheapest_cost(right);
+            let hj_cost = lc + rc
+                + self.hash_join_cost(left, right);
+
+            let plan_cost = match required_order {
+                InterestingOrder::Unordered => hj_cost,
+                InterestingOrder::SortedBy(cols) => {
+                    // Option A: hash join + explicit sort
+                    let sort_cost =
+                        self.sort_cost(subset, cols);
+                    let option_a = hj_cost + sort_cost;
+
+                    // Option B: merge join (preserves order)
+                    let option_b = self.merge_join_cost(
+                        left, right, cols,
+                    );
+
+                    option_a.min(option_b)
+                }
+            };
+
+            if plan_cost < best_cost {
+                best_cost = plan_cost;
+                best_plan = Some(self.build_plan(
+                    left, right, required_order,
+                ));
+            }
+        }
+
+        if let Some(plan) = best_plan {
+            self.memo.insert(
+                (subset, required_order.clone()),
+                (best_cost, plan),
+            );
+        }
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    hw: &HardwareProfile,
+) -> bool {
+    // Query has operations benefiting from order
+    (stats.has_order_by
+        || stats.has_group_by
+        || stats.has_distinct
+        || stats.has_merge_join_opportunity)
+        // Multi-way join where order interacts with join choice
+        && stats.n_relations >= 2
+        // Cost-based optimization enabled
+        && hw.cost_based_optimization
+}
+```
+
+**Restrictions:**
+- Only tracks orderings identified as "interesting" at plan time
+- Number of interesting orders is bounded by query clauses and join edges
+- Memory overhead: stores one plan per (subset, order) pair
+- Does not consider partial orderings or order compatibility
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let total_rows = stats.estimated_output_rows as f64;
+
+    // Cost of explicit sort on final output
+    let sort_cost = total_rows * total_rows.log2() * 0.000002;
+
+    // If a join plan naturally provides the order, save this cost
+    let plan_cost_with_sort = stats.best_unordered_plan_cost + sort_cost;
+    let plan_cost_ordered = stats.best_ordered_plan_cost;
+
+    if plan_cost_with_sort > plan_cost_ordered {
+        (plan_cost_with_sort - plan_cost_ordered)
+            / plan_cost_with_sort
+    } else {
+        0.0
+    }
+}
+```
+
+**Assumptions:**
+- Sort cost: O(n log n) with ~2 microseconds per comparison
+- Merge join preserves input order on join key
+- Index scans can provide sorted output at higher per-tuple cost
+- The number of interesting orders is typically small (< 10 for most queries)
+
+**Typical benefit**: 20% to 5x when sort avoidance eliminates O(n log n) operations.
+
+## Test Cases
+
+### Positive: ORDER BY satisfied by merge join output
+
+```sql
+SELECT o.order_date, c.name, o.total
+FROM orders o
+JOIN customers c ON o.customer_id = c.customer_id
+ORDER BY o.customer_id;
+
+-- Interesting orders: {customer_id}
+-- Plan A: Hash join + sort by customer_id
+-- Plan B: Merge join on customer_id (output already sorted)
+-- If merge join cost + 0 < hash join cost + sort cost, Plan B wins
+```
+
+### Positive: GROUP BY and ORDER BY share the same order
+
+```sql
+SELECT department, AVG(salary)
+FROM employees
+GROUP BY department
+ORDER BY department;
+
+-- Interesting orders: {department}
+-- Sort for GROUP BY also satisfies ORDER BY
+-- One sort serves two purposes
+```
+
+### Positive: Index scan provides join order AND final sort
+
+```sql
+-- Clustered index on orders(customer_id)
+SELECT c.name, SUM(o.total)
+FROM customers c
+JOIN orders o ON c.id = o.customer_id
+GROUP BY c.name
+ORDER BY c.name;
+
+-- Interesting orders: {customer_id}, {name}
+-- Using customer_id index for join provides merge-join order
+-- If name correlates with customer_id (e.g., same table), may help GROUP BY
+```
+
+### Negative: No order overlap between operations
+
+```sql
+SELECT product_name, total
+FROM orders o
+JOIN products p ON o.product_id = p.id
+WHERE o.region = 'US'
+ORDER BY o.order_date;
+
+-- Interesting orders: {product_id} (join), {order_date} (ORDER BY)
+-- No overlap: must sort regardless of join method
+-- Interesting orders provide no benefit here
+```
+
+## References
+
+**Original paper:**
+- Selinger, P. Griffiths, et al., "Access Path Selection in a Relational Database Management System", ACM SIGMOD 1979
+  - DOI: 10.1145/582095.582099
+  - Section 6: "Computation of Costs" -- interesting sort orders concept
+  - "For each set of relations joined, the optimizer keeps the cheapest solution
+    for each interesting ordering"
+
+**Detailed analysis:**
+- Simmen, D.E., Shekita, E.J., Malkemus, T., "Fundamental Techniques for Order Optimization", ACM SIGMOD 1996
+  - DOI: 10.1145/233269.233320
+  - Formalized order optimization with functional dependencies
+  - Reduced orders and order equivalence classes
+
+**Extensions:**
+- Neumann, T., Moerkotte, G., "An Efficient Framework for Order Optimization", IEEE ICDE 2004
+  - DOI: 10.1109/ICDE.2004.1320011
+  - Efficient algorithm for tracking interesting orders
+
+**Implementation in databases:**
+- PostgreSQL: `src/backend/optimizer/path/pathkeys.c` - pathkey tracking
+- mssql: Interesting order tracking in Cascades optimizer
+- Oracle: Sort avoidance through index selection

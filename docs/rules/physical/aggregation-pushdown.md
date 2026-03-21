@@ -1,0 +1,198 @@
+# Rule: "Aggregation Pushdown Below Join"
+
+**Category:** physical/aggregation-strategies
+**File:** `rules/physical/aggregation-strategies/aggregation-pushdown.rra`
+
+## Metadata
+
+- **ID:** `aggregation-pushdown`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, clickhouse, spark, cockroachdb
+- **Tags:** aggregation, pushdown, join, eager, group-by
+- **Authors:** "RA Contributors"
+
+## Preconditions
+
+```yaml
+  - type: "pattern"
+    must_match: "(aggregate (join ?type ?cond ?left ?right) ?groups ?aggs)"
+    description: "Aggregation above a join"
+  - type: "predicate"
+    condition: "references_only(?groups, ?left) || references_only(?groups, ?right)"
+    description: "Grouping columns must come from one join side"
+  - type: "predicate"
+    condition: "all_decomposable(?aggs)"
+    description: "All aggregate functions must be decomposable (SUM, COUNT, MIN, MAX)"
+```
+
+
+# Aggregation Pushdown Below Join
+
+## Metadata
+- **Rule ID**: `aggregation-pushdown`
+- **Category**: Physical / Aggregation Strategies
+- **Complexity**: O(n) with reduced join input
+- **Prerequisites**: GROUP BY on one side of join; aggregates only on that side
+- **Alternatives**: Aggregate after join (standard plan)
+
+## Description
+
+Aggregation pushdown moves a GROUP BY operation below a join when the
+aggregation only references columns from one side of the join and the
+GROUP BY keys include the join key. This reduces the number of rows
+entering the join, often dramatically.
+
+The key insight is that if we GROUP BY (join_key, other_cols) with
+aggregates only on the side being pushed down, we can aggregate first
+and then join the reduced result set. The join sees fewer rows, reducing
+hash table size or sort volume.
+
+This optimization is also known as "eager aggregation" (Yan & Larson,
+1995). It is safe when:
+1. Aggregate functions are decomposable (SUM, COUNT, MIN, MAX)
+2. GROUP BY includes the join key from the aggregated side
+3. The join does not duplicate rows from the aggregated side
+
+**When to apply:**
+- Fact-dimension join with aggregation on fact side
+- GROUP BY includes the join key
+- Significant reduction expected from aggregation
+
+**Why it works:**
+- Reduces join input cardinality
+- Smaller hash tables for hash join
+- Less data shuffled in distributed queries
+
+## Relational Algebra
+
+```
+aggregate[groups, aggs](A JOIN B ON A.id = B.a_id)
+  -> (aggregate[groups_A, aggs](A)) JOIN B ON A.id = B.a_id
+     when groups = groups_A ∪ groups_B
+     and aggs reference only A columns
+```
+
+## Implementation (egg rewrite rules)
+
+```lisp
+;; Push aggregation below join (single-side aggregates)
+(rewrite (aggregate ?groups ?aggs
+           (join ?type ?cond ?left ?right))
+  (join ?type ?cond
+    (aggregate (intersect ?groups (cols ?left))
+      (filter-aggs ?aggs (cols ?left))
+      ?left)
+    ?right)
+  :if (all-from-one-side ?aggs ?left)
+  :if (contains ?groups (join-key-left ?cond))
+  :if (not (duplicates-rows ?type ?right)))
+
+;; Push aggregation to both sides when possible
+(rewrite (aggregate ?groups ?aggs
+           (join inner ?cond ?left ?right))
+  (join inner ?cond
+    (aggregate (left-groups ?groups ?cond) (left-aggs ?aggs) ?left)
+    (aggregate (right-groups ?groups ?cond) (right-aggs ?aggs) ?right))
+  :if (can-split-aggs ?aggs ?left ?right)
+  :if (all-decomposable ?aggs))
+
+;; Eager aggregation with compensation
+(rewrite (aggregate ?groups ?aggs
+           (join inner (= ?lk ?rk) ?left ?right))
+  (aggregate ?groups (compensate-aggs ?aggs)
+    (join inner (= ?lk ?rk)
+      (aggregate (union (list ?lk) (left-groups ?groups))
+        (partial-aggs ?aggs (cols ?left))
+        ?left)
+      ?right))
+  :if (not (all-from-one-side ?aggs ?left)))
+```
+
+## Cost Model
+
+```rust
+pub fn cost_agg_pushdown(
+    left_rows: u64,
+    right_rows: u64,
+    left_groups: u64,
+    join_selectivity: f64,
+    agg_count: usize,
+    hardware: &HardwareModel,
+) -> Cost {
+    let pre_agg = Cost::cpu(left_rows * (10 + agg_count as u64 * 4));
+    let join_cost = Cost::cpu(
+        left_groups as f64 * right_rows as f64 * join_selectivity * 15.0
+    );
+    pre_agg + join_cost
+}
+
+pub fn cost_no_pushdown(
+    left_rows: u64,
+    right_rows: u64,
+    join_selectivity: f64,
+    agg_count: usize,
+    hardware: &HardwareModel,
+) -> Cost {
+    let join_output = (left_rows as f64 * right_rows as f64 * join_selectivity) as u64;
+    let join_cost = Cost::cpu(
+        left_rows as f64 * right_rows as f64 * join_selectivity * 15.0
+    );
+    let agg_cost = Cost::cpu(join_output * (10 + agg_count as u64 * 4));
+    join_cost + agg_cost
+}
+```
+
+**Typical benefit**: 20-70% when aggregation significantly reduces join input
+
+## Test Cases
+
+### Positive: Fact-dimension with aggregation on fact
+```sql
+SELECT d.name, sum(f.amount), count(*)
+FROM fact_sales f
+JOIN dim_product d ON f.product_id = d.id
+GROUP BY d.name;
+
+-- Without pushdown: join 100M fact × 10K dim, then aggregate
+-- With pushdown: aggregate fact by product_id (10K groups),
+--   then join 10K × 10K
+-- 10000x reduction in join input
+```
+
+### Positive: Star schema with multiple dimensions
+```sql
+SELECT d1.region, d2.category, sum(f.revenue)
+FROM facts f
+JOIN dim_region d1 ON f.region_id = d1.id
+JOIN dim_category d2 ON f.cat_id = d2.id
+GROUP BY d1.region, d2.category;
+
+-- Pre-aggregate facts by (region_id, cat_id): ~5000 groups
+-- Then join with dimensions
+```
+
+### Negative: Aggregate references both sides
+```sql
+SELECT sum(f.amount * d.weight)
+FROM facts f JOIN dims d ON f.d_id = d.id;
+
+-- sum(f.amount * d.weight) requires both sides
+-- Cannot push aggregation below join without compensation
+```
+
+### Negative: No reduction from aggregation
+```sql
+SELECT f.id, d.name, sum(f.amount)
+FROM facts f JOIN dims d ON f.d_id = d.id
+GROUP BY f.id, d.name;
+
+-- GROUP BY includes f.id: no reduction (1:1 mapping)
+-- Pushdown adds overhead with no benefit
+```
+
+## References
+
+- Yan & Larson, "Eager Aggregation and Lazy Aggregation", VLDB 1995
+- Chaudhuri & Shim, "Including Group-By in Query Optimization", VLDB 1994
+- PostgreSQL: Aggregation pushdown in partitionwise aggregation
+- Spark: Push-down aggregation in Catalyst optimizer

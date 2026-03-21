@@ -1,0 +1,372 @@
+# Rule: "Sampling-Based Cardinality Estimation"
+
+**Category:** cost-models
+**File:** `rules/cost-models/sampling-based-estimation.rra`
+
+## Metadata
+
+- **ID:** `sampling-based-estimation`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, oracle, spark, duckdb, presto
+- **Tags:** cost, sampling, estimation, statistics, runtime, adaptive
+- **Authors:** "RA Contributors"
+
+
+# Sampling-Based Cardinality Estimation
+
+## Description
+
+Estimates cardinality by executing queries on a small random sample of the
+data. Sampling bypasses the limitations of stored statistics (histograms,
+MCVs) by directly observing predicate behavior on real data. This handles
+complex predicates (UDFs, correlated columns, expression predicates) that
+static statistics cannot model.
+
+Three sampling strategies: (1) ANALYZE-time sampling to build statistics,
+(2) Optimization-time sampling to estimate specific subquery cardinalities,
+(3) Runtime adaptive sampling to correct estimates during execution. Each
+trades accuracy for overhead differently.
+
+**When to apply**: Complex predicates involving UDFs, multi-column
+correlations, expression filters, or subqueries where static statistics
+are unreliable. Also used as a calibration check for histogram-based
+estimates.
+
+**Why it works**: A random sample of n rows provides an unbiased estimate
+with standard error proportional to 1/sqrt(n). A 10,000-row sample gives
+~1% standard error for moderate selectivities. For the cost of scanning
+a small fraction of data, sampling provides estimates that handle arbitrary
+predicate complexity.
+
+## Relational Algebra
+
+```algebra
+CardEst_sample(sigma[p](R)) =
+  |R| * (count(matches in sample) / sample_size)
+
+Confidence interval (95%):
+  estimate +/- 1.96 * sqrt(sel * (1 - sel) / sample_size) * |R|
+
+Sample size for target error e at confidence 1-alpha:
+  n >= (z_alpha/2)^2 * sel * (1 - sel) / e^2
+
+Stratified sampling:
+  CardEst_strat = sum(|stratum_i| * sel_i)
+  where sel_i estimated from stratum_i sample
+```
+
+## Implementation
+
+```rust
+use rand::seq::SliceRandom;
+use rand::Rng;
+
+struct SamplingEstimator {
+    default_sample_size: usize,
+    confidence_level: f64,
+    max_sampling_time_ms: u64,
+}
+
+impl SamplingEstimator {
+    fn new() -> Self {
+        Self {
+            default_sample_size: 10_000,
+            confidence_level: 0.95,
+            max_sampling_time_ms: 100,
+        }
+    }
+
+    fn estimate_selectivity(
+        &self,
+        table: &Table,
+        predicate: &Predicate,
+        sample_size: usize,
+    ) -> SamplingResult {
+        // Draw random sample (Bernoulli or reservoir)
+        let sample = self.draw_sample(table, sample_size);
+        let total_sampled = sample.len() as f64;
+
+        // Evaluate predicate on sample
+        let matches = sample
+            .iter()
+            .filter(|row| predicate.evaluate(row))
+            .count() as f64;
+
+        let selectivity = matches / total_sampled;
+
+        // Confidence interval using normal approximation
+        let z = self.z_score();
+        let se = (selectivity * (1.0 - selectivity) / total_sampled)
+            .sqrt();
+        let margin = z * se;
+
+        SamplingResult {
+            selectivity,
+            confidence_low: (selectivity - margin).max(0.0),
+            confidence_high: (selectivity + margin).min(1.0),
+            sample_size: sample_size as u64,
+            estimated_cardinality: selectivity * table.row_count as f64,
+        }
+    }
+
+    fn required_sample_size(
+        &self,
+        expected_selectivity: f64,
+        target_error: f64,
+    ) -> usize {
+        let z = self.z_score();
+        let sel = expected_selectivity.clamp(0.01, 0.99);
+        let n = (z * z * sel * (1.0 - sel))
+            / (target_error * target_error);
+        (n.ceil() as usize).max(100).min(1_000_000)
+    }
+
+    fn draw_sample(
+        &self,
+        table: &Table,
+        target_size: usize,
+    ) -> Vec<Row> {
+        // Bernoulli sampling: each row included independently
+        // Probability = target_size / table_size
+        let rate = target_size as f64 / table.row_count as f64;
+
+        if rate >= 1.0 {
+            return table.all_rows();
+        }
+
+        let mut rng = rand::thread_rng();
+        let mut sample = Vec::with_capacity(target_size);
+
+        // Page-level sampling for efficiency
+        for page in table.pages() {
+            if rng.gen::<f64>() < rate * page.row_count() as f64 {
+                // Include all rows from selected pages
+                // Then sub-sample within page
+                for row in page.rows() {
+                    if rng.gen::<f64>() < rate {
+                        sample.push(row.clone());
+                    }
+                }
+            }
+        }
+
+        sample
+    }
+
+    fn stratified_estimate(
+        &self,
+        table: &Table,
+        predicate: &Predicate,
+        strata_column: &str,
+        sample_per_stratum: usize,
+    ) -> SamplingResult {
+        let strata = table.partition_by(strata_column);
+        let mut total_estimate = 0.0;
+        let mut total_variance = 0.0;
+
+        for stratum in &strata {
+            let result = self.estimate_selectivity(
+                stratum,
+                predicate,
+                sample_per_stratum,
+            );
+            let weight =
+                stratum.row_count as f64 / table.row_count as f64;
+            total_estimate += weight * result.selectivity;
+
+            let se = (result.selectivity
+                * (1.0 - result.selectivity)
+                / sample_per_stratum as f64)
+                .sqrt();
+            total_variance += weight * weight * se * se;
+        }
+
+        let z = self.z_score();
+        let margin = z * total_variance.sqrt();
+
+        SamplingResult {
+            selectivity: total_estimate,
+            confidence_low: (total_estimate - margin).max(0.0),
+            confidence_high: (total_estimate + margin).min(1.0),
+            sample_size: (strata.len() * sample_per_stratum) as u64,
+            estimated_cardinality: total_estimate
+                * table.row_count as f64,
+        }
+    }
+
+    fn join_sample_estimate(
+        &self,
+        left: &Table,
+        right: &Table,
+        join_predicate: &JoinPredicate,
+        sample_size: usize,
+    ) -> SamplingResult {
+        // Sample both sides, compute join on samples
+        let left_sample = self.draw_sample(left, sample_size);
+        let right_sample = self.draw_sample(right, sample_size);
+
+        let left_rate = sample_size as f64 / left.row_count as f64;
+        let right_rate = sample_size as f64 / right.row_count as f64;
+
+        // Count join matches in sample
+        let mut matches = 0u64;
+        for l_row in &left_sample {
+            for r_row in &right_sample {
+                if join_predicate.matches(l_row, r_row) {
+                    matches += 1;
+                }
+            }
+        }
+
+        // Scale up: join_card = matches / (left_rate * right_rate)
+        let estimated_card =
+            matches as f64 / (left_rate * right_rate);
+        let total_possible =
+            left.row_count as f64 * right.row_count as f64;
+        let selectivity = estimated_card / total_possible;
+
+        SamplingResult {
+            selectivity,
+            confidence_low: selectivity * 0.5,
+            confidence_high: selectivity * 2.0,
+            sample_size: (left_sample.len() + right_sample.len())
+                as u64,
+            estimated_cardinality: estimated_card,
+        }
+    }
+
+    fn z_score(&self) -> f64 {
+        match self.confidence_level as u32 {
+            90 => 1.645,
+            95 => 1.960,
+            99 => 2.576,
+            _ => 1.960,
+        }
+    }
+}
+
+struct SamplingResult {
+    selectivity: f64,
+    confidence_low: f64,
+    confidence_high: f64,
+    sample_size: u64,
+    estimated_cardinality: f64,
+}
+```
+
+**Restrictions:**
+- Sampling overhead: reading sample pages + predicate evaluation
+- Low-selectivity predicates need large samples for accuracy
+- Join sampling has quadratic sample complexity
+- Biased for correlated or clustered data without stratification
+- Cannot sample from views or derived tables without materialization
+
+## Cost Model
+
+```rust
+fn sampling_overhead(
+    table_rows: f64,
+    sample_size: usize,
+    predicate_cost_ns: f64,
+) -> f64 {
+    // I/O: reading sampled pages
+    let page_size = 8192.0;
+    let row_size = 200.0;
+    let rows_per_page = page_size / row_size;
+    let pages_sampled = (sample_size as f64 / rows_per_page).ceil();
+    let io_cost_us = pages_sampled * 10.0; // 10us per page (SSD)
+
+    // CPU: evaluating predicate on each sample row
+    let cpu_cost_us =
+        sample_size as f64 * predicate_cost_ns / 1000.0;
+
+    io_cost_us + cpu_cost_us
+}
+
+fn sampling_vs_static_decision(
+    predicate_complexity: PredicateComplexity,
+    table_rows: f64,
+    static_estimate_confidence: f64,
+) -> bool {
+    // Use sampling when:
+    // 1. Predicate involves UDF or complex expression
+    // 2. Static estimate has low confidence (no histogram)
+    // 3. Table is large enough that wrong estimates are costly
+    let use_sampling = matches!(
+        predicate_complexity,
+        PredicateComplexity::Udf | PredicateComplexity::MultiColumn
+    ) || static_estimate_confidence < 0.5
+        && table_rows > 100_000.0;
+
+    use_sampling
+}
+```
+
+**Typical benefit**: Sampling provides 30-80% better estimates than static
+statistics for complex predicates, especially UDFs and correlated columns.
+The overhead is typically <100ms for a 10K sample.
+
+## Test Cases
+
+### Test 1: Simple filter sampling
+
+```sql
+SELECT * FROM orders WHERE complex_udf(data) = true;
+-- 1M rows, sample 10K, 450 match -> sel = 0.045
+-- 95% CI: [0.041, 0.049]
+-- Estimated card: 45,000 +/- 4,000
+-- Static fallback would use default 0.1 (2.2x overestimate)
+```
+
+### Test 2: Correlated columns
+
+```sql
+SELECT * FROM products WHERE category = 'electronics' AND price > 500;
+-- Static (independent): 0.005
+-- Sampling 10K: 310 match -> sel = 0.031
+-- True: 0.033 -> sampling is 6x more accurate
+```
+
+### Test 3: Required sample size for rare events
+
+```sql
+SELECT * FROM logs WHERE error_code = 'ORA-04031';
+-- Expected selectivity ~0.001, target error 0.0005
+-- Required sample: (1.96^2 * 0.001 * 0.999) / 0.0005^2 = 15,366
+-- Need ~15K samples to reliably detect 0.1% events
+```
+
+### Test 4: Stratified sampling for skewed data
+
+```sql
+SELECT * FROM sales WHERE amount > 10000;
+-- Data skewed by region (some regions have much higher amounts)
+-- Simple sampling: sel = 0.05, high variance
+-- Stratified by region (10 strata, 1K each): sel = 0.048
+-- Stratified reduces variance by 40% for skewed data
+```
+
+### Test 5: Join sampling
+
+```sql
+SELECT COUNT(*) FROM R JOIN S ON R.a = S.b WHERE R.x > 10;
+-- R: 1M rows, S: 500K rows
+-- Sample: 10K from each, 320 join matches
+-- Scale: 320 / (0.01 * 0.02) = 1,600,000 estimated join rows
+-- Wide confidence interval due to quadratic sample space
+```
+
+## References
+
+**Sampling theory:**
+- Lipton, Naughton, Schneider, "Practical Selectivity Estimation through Adaptive Sampling", SIGMOD 1990
+- Haas, Naughton, Seshadri, Stokes, "Sampling-Based Estimation of the Number of Distinct Values", VLDB 1995
+
+**Join sampling:**
+- Acharya, Gibbons, Poosala, Ramaswamy, "Join Synopses for Approximate Query Answering", SIGMOD 1999
+
+**Modern approaches:**
+- Oracle: dynamic sampling (optimizer_dynamic_sampling parameter)
+- PostgreSQL: ANALYZE sample rate, default_statistics_target
+- mssql: auto-create statistics with sampling
+- DuckDB: reservoir sampling for statistics collection

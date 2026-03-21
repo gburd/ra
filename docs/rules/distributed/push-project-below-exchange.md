@@ -1,0 +1,154 @@
+# Rule: Push Projection Below Exchange
+
+**Category:** distributed/data-movement
+**File:** `rules/distributed/data-movement/push-project-below-exchange.rra`
+
+## Metadata
+
+- **ID:** `push-project-below-exchange`
+- **Version:** "1.0.0"
+- **Databases:** presto, trino, spark, cockroachdb, greenplum, citus
+- **Tags:** distributed, projection, pushdown, data-movement, network
+- **Authors:** "RA Contributors"
+
+
+# Push Projection Below Exchange
+
+## Description
+
+Moves a projection below an exchange operator so that only the needed
+columns are serialized and transmitted. This reduces the per-row byte
+cost of network transfer.
+
+**When to apply**: A projection sits above an exchange and all projected
+expressions can be evaluated on the source node.
+
+**Why it works**: In wide tables (50+ columns), queries often use a
+fraction of the columns. Projecting before the exchange avoids sending
+unused columns across the network.
+
+## Relational Algebra
+
+```algebra
+pi[a1, a2, ..., an](Exchange[d](R))
+  -> Exchange[d](pi[a1, a2, ..., an, d_keys](R))
+  where {a1..an} subset attrs(R)
+```
+
+Note: if the exchange is hash-partitioned on keys not in the projection
+list, those keys must be retained through the exchange, then projected
+away afterward.
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("push-project-below-exchange";
+    "(project ?cols (exchange ?type ?child))" =>
+    "(exchange ?type (project ?cols_plus_dist_keys ?child))"
+    if project_cols_available("?cols", "?child")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    proj_cols: &[Column],
+    exchange: &Exchange,
+    child: &RelNode,
+) -> bool {
+    let needed = proj_cols.iter().collect::<HashSet<_>>();
+    // All projected columns must come from child
+    needed.is_subset(&child.output_columns())
+}
+
+fn adjusted_projection(
+    proj_cols: &[Column],
+    exchange: &Exchange,
+) -> Vec<Column> {
+    let mut cols = proj_cols.to_vec();
+    // Must keep distribution keys through the exchange
+    if let ExchangeType::HashPartition(keys) = &exchange.dist {
+        for k in keys {
+            if !cols.contains(k) {
+                cols.push(k.clone());
+            }
+        }
+    }
+    cols
+}
+```
+
+**Restrictions:**
+- Must retain exchange partitioning keys in the pushed-down projection
+- Expressions in the projection that reference columns not in the child
+  cannot be pushed
+- Consider adding a post-exchange projection to remove the extra
+  distribution key columns if they are not needed upstream
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    rows: f64,
+    original_row_bytes: f64,
+    projected_row_bytes: f64,
+    num_nodes: u32,
+    network_bandwidth: f64,
+) -> f64 {
+    let saved_per_row = original_row_bytes - projected_row_bytes;
+    let total_saved = rows * saved_per_row;
+    total_saved / network_bandwidth * (num_nodes - 1) as f64
+}
+```
+
+**Typical benefit**: Proportional to the fraction of columns eliminated.
+For a 100-column table where only 5 columns are needed, this saves ~95%
+of per-row transfer cost.
+
+## Test Cases
+
+```sql
+-- Positive: narrow projection on wide table
+-- Before plan:
+-- Project(id, name)
+--   Exchange[hash(id)]
+--     Scan(users)  -- 50 columns
+
+-- After plan:
+-- Exchange[hash(id)]
+--   Project(id, name)  -- id retained for hash partitioning
+--     Scan(users)
+-- Transfers 2 columns instead of 50
+```
+
+```sql
+-- Positive: projection with exchange key not in output
+-- Before plan:
+-- Project(name, email)
+--   Exchange[hash(region)]
+--     Scan(users)
+
+-- After plan:
+-- Project(name, email)
+--   Exchange[hash(region)]
+--     Project(name, email, region)  -- region kept for exchange
+--       Scan(users)
+```
+
+```sql
+-- Negative: computed expression depends on all columns
+-- Project(col1 + col2 + ... + col50 AS total)
+--   Exchange[hash(id)]
+--     Scan(wide_table)
+-- No column reduction possible
+```
+
+## References
+
+Presto/Trino: presto-main/src/main/java/com/facebook/presto/sql/planner/optimizations/PruneUnreferencedOutputs.java
+Spark SQL: sql/catalyst/src/main/scala/org/apache/spark/sql/catalyst/optimizer/ColumnPruning.scala
+CockroachDB: pkg/sql/opt/norm/rules/project.opt
+Greenplum: src/backend/optimizer/util/pathnode.c - add_motion_to_projection()

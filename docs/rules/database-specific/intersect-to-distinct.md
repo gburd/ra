@@ -1,0 +1,211 @@
+# Rule: Intersect to Distinct
+
+**Category:** database-specific/calcite
+**File:** `rules/database-specific/calcite/intersect-to-distinct.rra`
+
+## Metadata
+
+- **ID:** `intersect-to-distinct`
+- **Version:** "1.0.0"
+- **Databases:** calcite
+- **Tags:** intersect, set-operation, distinct, aggregate
+- **Authors:** "Apache Calcite Contributors"
+
+
+# Intersect to Distinct
+
+## Description
+
+Translates INTERSECT DISTINCT into a combination of UNION ALL, GROUP BY,
+and HAVING COUNT(*) = N where N is the number of inputs. This transformation
+enables the use of more efficient aggregation algorithms and allows for
+partial aggregation pushdown.
+
+**When to apply**: INTERSECT DISTINCT operation with all=false on multiple
+relations. The transformation is beneficial when hash-based aggregation is
+available and can leverage partial aggregation.
+
+**Why it works**: INTERSECT requires finding tuples that appear in all inputs.
+By unioning all inputs, grouping by all columns, and filtering for groups
+that appear exactly N times (once per input), we achieve the same semantics
+while enabling aggregation optimizations like partial aggregation pushdown.
+
+## Relational Algebra
+
+```algebra
+INTERSECT(R1, R2, ..., Rn) ->
+  π_cols(σ_count=n(γ_cols,COUNT(*)(UNION_ALL(R1, R2, ..., Rn))))
+
+where cols are all columns in the schema
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("intersect-to-distinct";
+    "(intersect (list ?r1 ?r2))" =>
+    "(project ?cols
+       (filter (= (count-star) 2)
+         (aggregate (list ?cols) (list (count-star))
+           (union-all (list ?r1 ?r2)))))"
+),
+
+// General case for N inputs
+rw!("intersect-n-to-distinct";
+    "(intersect ?inputs)" =>
+    "(project ?cols
+       (filter (= (count-star) (length ?inputs))
+         (aggregate (list ?cols) (list (count-star))
+           (union-all ?inputs))))"
+    if has-multiple-inputs("?inputs")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    hw: &HardwareProfile,
+) -> bool {
+    // Hash-based aggregation should be available
+    hw.supports_hash_aggregation
+        // Input relations should be reasonably small
+        // (intersect typically returns small result sets)
+        && stats.total_input_rows < 100_000_000
+}
+```
+
+**Restrictions:**
+- Only applicable to INTERSECT DISTINCT (not INTERSECT ALL)
+- All input relations must have the same schema
+- Hash-based aggregation should be supported
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    hw: &HardwareProfile,
+) -> f64 {
+    let n_inputs = stats.n_intersect_inputs as f64;
+    let rows_per_input = stats.total_input_rows / n_inputs as u64;
+
+    // Cost of naive intersect: O(n * m^2) for n inputs, m rows each
+    // - Scan first relation: m rows
+    // - For each subsequent relation, probe hash table: (n-1) * m probes
+    let naive_cost = rows_per_input as f64 * (1.0 + (n_inputs - 1.0));
+
+    // Cost of union + aggregate approach:
+    // - Union all: n * m rows
+    // - Hash aggregate: n * m rows with grouping
+    // - Partial aggregation reduces intermediate results
+    let union_cost = n_inputs * rows_per_input as f64;
+    let aggregate_cost = union_cost * 1.5; // Hash table overhead
+
+    // Benefit comes from partial aggregation pushdown
+    // which can reduce intermediate result size by selectivity^n
+    let pushdown_factor = stats.selectivity.powf(n_inputs - 1.0);
+    let effective_aggregate_cost = aggregate_cost * pushdown_factor;
+
+    if naive_cost > effective_aggregate_cost {
+        (naive_cost - effective_aggregate_cost) / naive_cost
+    } else {
+        0.0
+    }
+}
+```
+
+**Assumptions:**
+- Partial aggregation reduces intermediate results significantly
+- Hash-based aggregation is efficient (O(n) with good hash function)
+- INTERSECT typically has high selectivity (small result sets)
+
+**Typical benefit**: 10-40% for cases with partial aggregation pushdown.
+
+## Test Cases
+
+### Positive: Two-way intersect
+
+```sql
+-- Find products sold in both 2023 and 2024
+SELECT product_id
+FROM sales_2023
+INTERSECT
+SELECT product_id
+FROM sales_2024;
+
+-- Transformed to:
+-- SELECT product_id
+-- FROM (
+--   SELECT product_id FROM sales_2023
+--   UNION ALL
+--   SELECT product_id FROM sales_2024
+-- ) AS t
+-- GROUP BY product_id
+-- HAVING COUNT(*) = 2;
+```
+
+### Positive: Three-way intersect with partial aggregation
+
+```sql
+-- Find customers active in all three regions
+SELECT customer_id
+FROM region_us_customers
+INTERSECT
+SELECT customer_id
+FROM region_eu_customers
+INTERSECT
+SELECT customer_id
+FROM region_apac_customers;
+
+-- Transformed with partial aggregation pushdown:
+-- Each input can be pre-aggregated to deduplicate before union
+```
+
+### Negative: INTERSECT ALL not applicable
+
+```sql
+-- Preserve duplicate counts
+SELECT product_id
+FROM orders_jan
+INTERSECT ALL
+SELECT product_id
+FROM orders_feb;
+
+-- This rule does NOT apply to INTERSECT ALL
+-- Different semantics: min(count_R1, count_R2)
+```
+
+### Positive: Small result set with large inputs
+
+```sql
+-- Large tables but small intersection
+-- 1M products in each category, but only 100 in both
+SELECT product_id
+FROM electronics -- 1M rows
+INTERSECT
+SELECT product_id
+FROM discounted_items; -- 1M rows
+
+-- Partial aggregation reduces intermediate results significantly
+```
+
+## References
+
+**Implementation in databases:**
+- Apache Calcite: `IntersectToDistinctRule.java`
+- Apache Drill: Set operation rewriting
+- PostgreSQL: INTERSECT implementation via hashed subplan
+
+**Academic papers:**
+- Selinger et al., "Access Path Selection in a Relational Database", ACM SIGMOD 1979
+  - DOI: 10.1145/582095.582099
+  - Set operations in System R
+- Graefe, "Query Evaluation Techniques for Large Databases", ACM Computing Surveys 1993
+  - DOI: 10.1145/152610.152611
+  - Section 7.3: Set operations implementation strategies
+- Larson & Yang, "Computing Queries from Derived Relations", VLDB 1985
+  - Set operation optimization techniques

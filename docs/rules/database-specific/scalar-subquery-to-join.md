@@ -1,0 +1,115 @@
+# Rule: DataFusion Scalar Subquery to Join
+
+**Category:** database-specific/datafusion
+**File:** `rules/database-specific/datafusion/scalar-subquery-to-join.rra`
+
+## Metadata
+
+- **ID:** `datafusion-scalar-subquery-to-join`
+- **Version:** "1.0.0"
+- **Databases:** datafusion
+- **Tags:** database-specific, datafusion, subquery, decorrelation, join
+- **Authors:** "RA Contributors"
+
+
+# DataFusion Scalar Subquery to Join
+
+## Description
+
+Converts correlated scalar subqueries into left joins with aggregation.
+DataFusion's `ScalarSubqueryToJoin` optimizer pass decorrelates scalar
+subqueries so they can be executed as a single join rather than
+re-evaluated for every outer row.
+
+**When to apply**: A scalar subquery in a projection or filter
+references columns from the outer query.
+
+**Why it works**: Correlated subqueries cause nested-loop evaluation --
+one subquery execution per outer row.  Converting to a join allows
+DataFusion to use hash joins and process data in Arrow batches.
+
+**Database version**: DataFusion 25.0+
+
+## Relational Algebra
+
+```algebra
+-- Before: correlated scalar subquery
+pi[a, (SELECT MAX(b) FROM S WHERE S.k = R.k)](R)
+
+-- After: left join with aggregate
+pi[a, max_b](R left-join (gamma[k; max_b=MAX(b)](S)) ON R.k = S.k)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("datafusion-scalar-subquery-to-join";
+    "(project (list ?outer_cols (scalar-subquery
+        (aggregate ?agg_func (filter (eq ?s_col ?r_col) ?inner))))
+     ?outer)" =>
+    "(project (list ?outer_cols ?agg_alias)
+        (left-join (eq ?r_col ?group_col)
+            ?outer
+            (aggregate-with-group ?agg_func ?group_col ?inner)))"
+    if is_database("datafusion")
+    if is_correlated_scalar_subquery("?r_col", "?outer")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(subquery: &Expr, outer_schema: &Schema) -> bool {
+    subquery.is_scalar_subquery()
+    && has_correlation(subquery, outer_schema)
+    && subquery_returns_single_aggregate()
+}
+```
+
+**Restrictions:**
+- Subquery must return exactly one row (scalar)
+- Correlation must be on equality predicates for hash join
+- Non-equality correlations fall back to nested-loop
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    outer_rows: f64,
+    inner_rows: f64,
+    selectivity: f64,
+) -> f64 {
+    // Nested-loop: outer_rows * inner_scan
+    let nested_cost = outer_rows * inner_rows * selectivity;
+    // Join: one scan + hash build + probe
+    let join_cost = inner_rows + outer_rows;
+    nested_cost - join_cost
+}
+```
+
+**Typical benefit**: For 10K outer rows and 100K inner rows, converts
+O(10K * 100K) nested evaluation to O(100K + 10K) hash join.
+
+## Test Cases
+
+```sql
+-- Positive: correlated scalar subquery
+SELECT e.name,
+       (SELECT MAX(s.amount) FROM sales s WHERE s.emp_id = e.id)
+FROM employees e;
+-- Converted to LEFT JOIN with aggregate
+```
+
+```sql
+-- Negative: uncorrelated scalar subquery (already efficient)
+SELECT e.name, (SELECT COUNT(*) FROM departments) AS dept_count
+FROM employees e;
+-- No decorrelation needed
+```
+
+## References
+
+DataFusion: datafusion/optimizer/src/scalar_subquery_to_join.rs
+DataFusion: datafusion/optimizer/src/decorrelate_predicate_subquery.rs

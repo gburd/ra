@@ -1,0 +1,106 @@
+# Rule: NOT IN to Anti-Join
+
+**Category:** logical/subquery-unnesting
+**File:** `rules/logical/subquery-unnesting/not-in-to-anti-join.rra`
+
+## Metadata
+
+- **ID:** `not-in-to-anti-join`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, duckdb
+- **Tags:** subquery, unnesting, not-in, anti-join
+- **Authors:** "RA Contributors"
+
+
+# NOT IN to Anti-Join
+
+## Description
+
+Converts NOT IN subqueries to anti-joins for efficient execution.
+
+**When to apply**: WHERE col NOT IN (subquery) with non-nullable columns.
+
+**Why it works**: Anti-join can use hash tables or indexes; avoids materializing full subquery result.
+
+## Relational Algebra
+
+```algebra
+filter[A.x NOT IN (select S.y from S)](A)
+  -> anti_join[A.x = S.y](A, S)
+  where not_nullable(A.x) && not_nullable(S.y)
+```
+
+## Implementation
+
+```rust
+rw!("not-in-to-anti-join";
+    "(filter (not-in ?col ?subquery) ?input)" =>
+    "(anti-join (= ?col ?subquery.col) ?input ?subquery.from)"
+    if is_not_nullable("?col") && is_not_nullable("?subquery.col")
+),
+```
+
+## Cost Model
+
+```rust
+fn benefit(outer_size: u64, inner_size: u64) -> f64 {
+    let not_in = outer_size as f64 * inner_size as f64; // Check each against all
+    let anti_join = outer_size as f64 + inner_size as f64; // Hash anti-join
+    (not_in - anti_join) / not_in
+}
+```
+
+**Typical benefit**: 40-70% with hash anti-join
+
+## Test Cases
+
+### Positive: NOT IN with non-nullable columns
+
+```sql
+SELECT * FROM orders
+WHERE customer_id NOT IN (
+    SELECT id FROM deleted_customers
+);
+
+-- Convert to anti-join (assuming both columns NOT NULL)
+```
+
+### Positive: Correlated NOT IN
+
+```sql
+SELECT * FROM products p
+WHERE category_id NOT IN (
+    SELECT category_id FROM discontinued_categories
+    WHERE region = p.region
+);
+
+-- Convert to correlated anti-join
+```
+
+### Negative: Nullable columns (NULL semantics)
+
+```sql
+SELECT * FROM orders
+WHERE optional_promo_code NOT IN (
+    SELECT code FROM expired_promos
+);
+
+-- Cannot convert: NULL in subquery changes semantics
+```
+
+### Negative: NOT IN with complex expression
+
+```sql
+SELECT * FROM sales
+WHERE (product_id, region) NOT IN (
+    SELECT product_id, region FROM restricted_sales
+);
+
+-- Can convert but need tuple anti-join
+```
+
+## References
+
+- PostgreSQL: NOT IN to anti-join with NULL safety
+- MySQL: NOT IN subquery optimization
+- DuckDB: Anti-join for NOT IN predicates

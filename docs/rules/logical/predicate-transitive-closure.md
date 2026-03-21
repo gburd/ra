@@ -1,0 +1,349 @@
+# Rule: "Predicate Transitive Closure"
+
+**Category:** logical/predicate-pushdown
+**File:** `rules/logical/predicate-pushdown/predicate-transitive-closure.rra`
+
+## Metadata
+
+- **ID:** `predicate-transitive-closure`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, duckdb, cockroachdb, mssql, oracle
+- **Tags:** transitive-closure, equijoin-propagation, predicate-derivation, classic
+- **Authors:** "Selinger et al. (System R); Pirahesh et al. (Starburst)"
+
+## Preconditions
+
+```yaml
+  - type: "pattern"
+    must_match: "(filter ?pred (join inner ?cond ?left ?right))"
+    description: "Filter on join with transitive closure opportunity"
+  - type: "predicate"
+    condition: "has_equality_chain(?pred, ?cond)"
+    description: "Equality chain exists (a=b AND b=c implies a=c)"
+```
+
+
+# Predicate Transitive Closure
+
+## Description
+
+Computes the transitive closure of equality predicates across an equijoin graph
+to derive new selection predicates. If column A.x = B.y (equijoin) and
+B.y = 100 (constant), then A.x = 100 can be derived. This derived predicate
+enables earlier filtering of table A, potentially allowing index usage or
+reducing the join input size.
+
+This technique was described in the System R paper (1979) as part of selectivity
+estimation ("if col_a = col_b and col_b = constant, infer col_a = constant")
+and formalized in the Starburst rewrite system (1992) as a general predicate
+propagation rule. It is implemented in every modern database optimizer.
+
+The algorithm builds equivalence classes from equijoin predicates, then
+propagates range and constant predicates to all members of each class.
+
+**When to apply**: Multi-table equijoin queries where predicates on one table
+could benefit another table's access path selection (e.g., enable index usage).
+
+**Why it works**: Without transitive closure, a predicate on B.y = 100 only
+filters table B. With transitive closure and A.x = B.y, the optimizer derives
+A.x = 100 and can filter table A too, potentially using an index on A.x. This
+can reduce join input sizes by orders of magnitude.
+
+## Relational Algebra
+
+```algebra
+Input predicates:
+  A.x = B.y        (equijoin)
+  B.y = C.z        (equijoin)
+  C.z = 100        (constant selection)
+
+Equivalence class: {A.x, B.y, C.z}
+Constant propagation: {A.x, B.y, C.z} = 100
+
+Derived predicates:
+  A.x = 100        (NEW - enables index on A.x)
+  B.y = 100        (already known)
+  C.z = 100        (already known)
+  A.x = C.z        (NEW - enables merge join between A and C)
+
+For range predicates:
+  A.x = B.y AND B.y > 50
+  Derives: A.x > 50
+
+For IN predicates:
+  A.x = B.y AND B.y IN (1, 2, 3)
+  Derives: A.x IN (1, 2, 3)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+use std::collections::{HashMap, HashSet};
+
+rw!("transitive-eq-const";
+    "(join inner (= ?col_a ?col_b)
+       ?left
+       (filter (= ?col_b ?const) ?right))" =>
+    "(join inner (= ?col_a ?col_b)
+       (filter (= ?col_a ?const) ?left)
+       (filter (= ?col_b ?const) ?right))"
+),
+
+rw!("transitive-range-const";
+    "(join inner (= ?col_a ?col_b)
+       ?left
+       (filter (> ?col_b ?const) ?right))" =>
+    "(join inner (= ?col_a ?col_b)
+       (filter (> ?col_a ?const) ?left)
+       (filter (> ?col_b ?const) ?right))"
+),
+
+rw!("transitive-between";
+    "(join inner (= ?col_a ?col_b)
+       ?left
+       (filter (between ?col_b ?lo ?hi) ?right))" =>
+    "(join inner (= ?col_a ?col_b)
+       (filter (between ?col_a ?lo ?hi) ?left)
+       (filter (between ?col_b ?lo ?hi) ?right))"
+),
+
+// Full implementation with equivalence classes
+
+struct TransitiveClosureComputer;
+
+impl TransitiveClosureComputer {
+    fn compute(
+        &self,
+        equijoins: &[(Column, Column)],
+        selections: &[(Column, SelectionPredicate)],
+    ) -> Vec<(Column, SelectionPredicate)> {
+        // Build equivalence classes
+        let mut uf = UnionFind::new();
+        for (col_a, col_b) in equijoins {
+            uf.union(col_a, col_b);
+        }
+
+        let mut derived = Vec::new();
+
+        // For each selection predicate, propagate to equivalence class
+        for (col, pred) in selections {
+            let class_rep = uf.find(col);
+            for member in uf.class_members(&class_rep) {
+                if member != *col {
+                    // Create derived predicate for this class member
+                    let new_pred = pred.substitute_column(member);
+                    derived.push((member.clone(), new_pred));
+                }
+            }
+        }
+
+        // Also derive equality between non-adjacent class members
+        for class in uf.all_classes() {
+            let members: Vec<&Column> = class.iter().collect();
+            for i in 0..members.len() {
+                for j in (i + 1)..members.len() {
+                    // Check if this equality is already known
+                    let pair = (members[i].clone(), members[j].clone());
+                    if !equijoins.contains(&pair) {
+                        derived.push((
+                            members[i].clone(),
+                            SelectionPredicate::Eq(
+                                members[j].clone().into()
+                            ),
+                        ));
+                    }
+                }
+            }
+        }
+
+        derived
+    }
+
+    fn is_profitable(
+        &self,
+        derived_pred: &(Column, SelectionPredicate),
+        catalog: &Catalog,
+    ) -> bool {
+        let (col, pred) = derived_pred;
+
+        // Profitable if:
+        // 1. Index exists on the column
+        if catalog.has_index(col) {
+            return true;
+        }
+
+        // 2. Predicate is highly selective
+        if pred.estimated_selectivity(catalog) < 0.1 {
+            return true;
+        }
+
+        // 3. Column is a partition key
+        if catalog.is_partition_key(col) {
+            return true;
+        }
+
+        false
+    }
+}
+```
+
+## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    hw: &HardwareProfile,
+) -> bool {
+    // Must have equijoins to build equivalence classes
+    stats.has_equijoins
+        // Must have selection predicates to propagate
+        && stats.has_selection_predicates
+        // At least 2 tables (otherwise no equijoin to propagate through)
+        && stats.n_relations >= 2
+}
+```
+
+**Restrictions:**
+- Only works with equality joins (not theta-joins or inequality joins)
+- Assumes equijoin columns have compatible types
+- Propagated predicates may be redundant (optimizer should detect this)
+- Does not handle disjunctive predicates (OR)
+- NULL handling: if A.x = B.y and one is NULL, the equality fails;
+  propagated predicates must respect NULL semantics
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    // Benefit: derived predicate reduces input to join
+    let original_input_rows = stats.unfiltered_table_cardinality as f64;
+    let derived_selectivity = stats.derived_predicate_selectivity;
+    let filtered_rows = original_input_rows * derived_selectivity;
+
+    // Cost savings from reduced join input
+    let join_cost_reduction = (original_input_rows - filtered_rows)
+        * stats.per_row_join_cost;
+
+    // Additional benefit if index becomes usable
+    let index_benefit = if stats.derived_predicate_enables_index {
+        let seq_scan_cost = original_input_rows * stats.per_row_scan_cost;
+        let index_scan_cost = filtered_rows * stats.per_row_index_cost;
+        seq_scan_cost - index_scan_cost
+    } else {
+        0.0
+    };
+
+    let total_benefit = join_cost_reduction + index_benefit;
+    let total_cost = original_input_rows * stats.per_row_scan_cost;
+
+    if total_cost > 0.0 {
+        (total_benefit / total_cost).min(10.0)
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 2x-10x when derived predicates enable index usage on a large table.
+
+## Test Cases
+
+### Positive: Constant propagation enables index
+
+```sql
+-- Index on orders.status_code
+SELECT *
+FROM orders o
+JOIN order_status os ON o.status_code = os.code
+WHERE os.code = 'SHIPPED';
+
+-- Equivalence class: {o.status_code, os.code}
+-- Derives: o.status_code = 'SHIPPED'
+-- Before: SeqScan(orders) -> join -> filter
+-- After: IndexScan(orders, status_code='SHIPPED') -> join
+-- If 5% of orders are 'SHIPPED': 20x speedup on orders access
+```
+
+### Positive: Range propagation through chain
+
+```sql
+-- A -> B -> C equijoin chain with filter on C
+SELECT *
+FROM A JOIN B ON A.x = B.y
+     JOIN C ON B.y = C.z
+WHERE C.z BETWEEN 100 AND 200;
+
+-- Equivalence class: {A.x, B.y, C.z}
+-- Derives: A.x BETWEEN 100 AND 200, B.y BETWEEN 100 AND 200
+-- All three tables can use the range filter
+```
+
+### Positive: TPC-H style star join
+
+```sql
+-- TPC-H Query 5 pattern
+SELECT * FROM customer c
+JOIN orders o ON c.custkey = o.custkey
+JOIN nation n ON c.nationkey = n.nationkey
+JOIN region r ON n.regionkey = r.regionkey
+WHERE r.name = 'ASIA';
+
+-- Equivalence class: {n.regionkey, r.regionkey}
+-- Derives: n.regionkey = (regionkey for 'ASIA')
+-- Then: c.nationkey constrained to nations in ASIA
+-- Cascade of filtering from region -> nation -> customer -> orders
+```
+
+### Negative: No equijoin to propagate through
+
+```sql
+SELECT * FROM A JOIN B ON A.x > B.y
+WHERE B.y = 100;
+
+-- Inequality join: cannot derive A.x = 100
+-- Can only derive A.x > 100 (from A.x > B.y AND B.y = 100)
+-- Standard transitive closure doesn't handle this
+```
+
+### Positive: IS NOT NULL propagation
+
+```sql
+SELECT * FROM A JOIN B ON A.x = B.y
+WHERE A.x IS NOT NULL;
+
+-- Equivalence class: {A.x, B.y}
+-- Derives: B.y IS NOT NULL
+-- This is always true for equijoin (NULL = anything is NULL/false)
+-- But explicit IS NOT NULL on B.y may help optimizer statistics
+```
+
+## References
+
+**Original papers:**
+- Selinger, P. Griffiths, et al., "Access Path Selection in a Relational Database Management System", ACM SIGMOD 1979
+  - DOI: 10.1145/582095.582099
+  - Section 4: Selectivity estimation mentions transitive inference
+
+- Pirahesh, H., Hellerstein, J.M., Hasan, W., "Extensible/Rule Based Query Rewrite Optimization in Starburst", ACM SIGMOD 1992
+  - DOI: 10.1145/130283.130294
+  - Section 4.3: "Predicate transitive closure" formalized
+
+**Theoretical foundation:**
+- Levy, A.Y., Sagiv, Y., "Constraints and Redundancy in Datalog", ACM PODS 1992
+  - DOI: 10.1145/137097.137104
+  - Formal treatment of constraint propagation in queries
+
+**Implementation in databases:**
+- PostgreSQL: `src/backend/optimizer/path/equivclass.c`
+  - EquivalenceClass data structure for transitive closure
+  - `generate_implied_equalities()` function
+- MySQL: `sql/sql_optimizer.cc` - `substitute_for_best_equal_field()`
+- Oracle: "transitive closure" optimization pass
+- CockroachDB: `pkg/sql/opt/norm/` - equality constraint propagation

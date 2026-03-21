@@ -1,0 +1,163 @@
+# Rule: Arithmetic Expression Simplification
+
+**Category:** logical/expression-simplification
+**File:** `rules/logical/expression-simplification/arithmetic-simplification.rra`
+
+## Metadata
+
+- **ID:** `arithmetic-simplification`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, duckdb, sqlite, oracle, mssql
+- **Tags:** expression, arithmetic, simplification, core
+- **SQL Standard:** "sql:1992"
+- **Authors:** "RA Contributors"
+
+
+# Arithmetic Expression Simplification
+
+## Description
+
+Simplifies arithmetic expressions using algebraic identities: additive
+identity, multiplicative identity, multiplication by zero, and subtraction
+of self. These reduce per-row evaluation cost and can expose further
+optimization opportunities.
+
+**When to apply**: An arithmetic expression contains an identity element
+or can be reduced by algebraic identity.
+
+**Why it works**: Standard algebraic identities hold for all numeric types.
+Replacing `x + 0` with `x` eliminates an addition per row.
+
+## Relational Algebra
+
+```algebra
+pi[e + 0](R) -> pi[e](R)
+pi[e * 1](R) -> pi[e](R)
+pi[e * 0](R) -> pi[0](R)
+pi[e - e](R) -> pi[0](R)
+pi[e / 1](R) -> pi[e](R)
+pi[e - 0](R) -> pi[e](R)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Additive identity
+rw!("add-zero-right"; "(+ ?e 0)" => "?e"),
+rw!("add-zero-left"; "(+ 0 ?e)" => "?e"),
+rw!("sub-zero"; "(- ?e 0)" => "?e"),
+
+// Multiplicative identity
+rw!("mul-one-right"; "(* ?e 1)" => "?e"),
+rw!("mul-one-left"; "(* 1 ?e)" => "?e"),
+
+// Multiplication by zero
+rw!("mul-zero-right"; "(* ?e 0)" => "0"
+    if not_nullable("?e")
+),
+rw!("mul-zero-left"; "(* 0 ?e)" => "0"
+    if not_nullable("?e")
+),
+
+// Self-subtraction
+rw!("sub-self"; "(- ?e ?e)" => "0"
+    if not_nullable("?e")
+    if is_deterministic("?e")
+),
+
+// Division by one
+rw!("div-one"; "(/ ?e 1)" => "?e"),
+
+// Division by self
+rw!("div-self"; "(/ ?e ?e)" => "1"
+    if not_nullable("?e")
+    if not_zero("?e")
+    if is_deterministic("?e")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(expr: &Expr) -> bool {
+    // Must be an arithmetic operation with a constant operand
+    // that is an identity element, or both operands are identical.
+    expr.has_identity_operand() || expr.operands_identical()
+}
+```
+
+**Restrictions:**
+- `e * 0` requires `e` to be non-nullable (`NULL * 0 = NULL`, not `0`)
+- `e - e` requires `e` to be deterministic and non-nullable
+- `e / e` additionally requires `e != 0`
+- Floating-point edge cases: `NaN * 0 = NaN`, `Inf - Inf = NaN`
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    input_card: f64,
+    ops_eliminated: usize,
+) -> f64 {
+    let per_row_saving = ops_eliminated as f64 * ARITH_EVAL_COST;
+    per_row_saving * input_card
+}
+```
+
+**Typical benefit**: Small per-expression, but important as a building
+block for constant folding and further simplification passes.
+
+## Test Cases
+
+```sql
+-- Positive: add zero
+-- Before
+SELECT price + 0 FROM products;
+-- After
+SELECT price FROM products;
+```
+
+```sql
+-- Positive: multiply by one
+-- Before
+SELECT qty * 1 FROM items;
+-- After
+SELECT qty FROM items;
+```
+
+```sql
+-- Positive: multiply by zero (non-nullable column)
+-- Before
+SELECT amount * 0 FROM ledger WHERE amount IS NOT NULL;
+-- After
+SELECT 0 FROM ledger WHERE amount IS NOT NULL;
+```
+
+```sql
+-- Negative: multiply by zero with nullable column
+SELECT amount * 0 FROM ledger;
+-- Cannot simplify: NULL * 0 = NULL, not 0
+```
+
+```sql
+-- Positive: subtract self
+-- Before
+SELECT x - x FROM t WHERE x IS NOT NULL;
+-- After
+SELECT 0 FROM t WHERE x IS NOT NULL;
+```
+
+```sql
+-- Negative: subtract non-deterministic expression from self
+SELECT random() - random() FROM t;
+-- Cannot simplify: two calls to random() return different values
+```
+
+## References
+
+PostgreSQL: src/backend/optimizer/util/clauses.c - eval_const_expressions()
+DuckDB: src/optimizer/expression_rewriter.cpp
+MySQL: sql/item_func.cc - simplify_const_condition()
+Aho, Sethi, Ullman "Compilers: Principles, Techniques, and Tools" Section 8.5

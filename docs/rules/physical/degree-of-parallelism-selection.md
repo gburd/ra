@@ -1,0 +1,352 @@
+# Rule: Degree of Parallelism Selection
+
+**Category:** physical/parallelization
+**File:** `rules/physical/parallelization/degree-of-parallelism-selection.rra`
+
+## Metadata
+
+- **ID:** `degree-of-parallelism-selection`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, oracle, mssql, duckdb, clickhouse, cockroachdb
+- **Tags:** parallelization, dop, resource-management, concurrency, tuning
+- **Authors:** "RA Contributors"
+
+
+# Degree of Parallelism Selection
+
+## Metadata
+- **Rule ID**: `degree-of-parallelism-selection`
+- **Category**: Physical / Parallelization
+- **Complexity**: O(1) for DOP selection; affects operator cost as O(n/DOP)
+- **Introduced**: Oracle (parallel query hints), mssql (MAXDOP)
+- **Prerequisites**: Parallelizable query plan
+- **Alternatives**: Fixed DOP, manual hint-based parallelism
+
+## Description
+
+Degree of parallelism (DOP) selection determines the optimal number of
+worker threads for a parallel query. Too few workers under-utilizes
+available hardware; too many wastes resources on coordination overhead,
+causes contention, and starves concurrent queries.
+
+The optimizer considers: available CPU cores, data size, operator type,
+memory budget, concurrent workload, and I/O bandwidth to select a DOP
+that maximizes throughput (OLAP) or minimizes latency (interactive).
+
+**When to use:**
+- Every parallel query plan needs DOP selection
+- Different operators in the same plan may warrant different DOPs
+- Workload-dependent: OLAP (high DOP) vs OLTP (low/no DOP)
+- Resource-constrained environments
+
+**Advantages:**
+- Avoids over-parallelization overhead
+- Balances individual query speed vs system throughput
+- Adapts to current system load
+- Prevents resource starvation for concurrent queries
+
+**Disadvantages:**
+- Optimal DOP depends on runtime conditions (hard to predict)
+- Static selection may be wrong for varying workloads
+- Per-operator DOP increases plan complexity
+- Requires accurate cost model for parallelism overhead
+
+## Relational Algebra
+
+```
+ParallelPlan(operators, available_cores, memory, workload):
+  for each parallelizable operator:
+    dop = select_dop(operator, context)
+
+  DOP selection factors:
+    1. Data size / minimum partition size
+    2. Available cores (adjusted for concurrent queries)
+    3. Memory per worker
+    4. I/O bandwidth saturation
+    5. Coordination overhead
+```
+
+## Implementation (egg rewrite rules)
+
+```lisp
+;; Select DOP based on data size and available resources
+(rewrite (parallel ?op ?auto-dop)
+  (parallel ?op (select-dop ?op))
+  :if (= ?auto-dop auto))
+
+;; Cap DOP at available cores
+(rewrite (parallel ?op ?dop)
+  (parallel ?op (min ?dop (available-cores)))
+  :if (> ?dop (available-cores)))
+
+;; Reduce DOP when memory-constrained
+(rewrite (parallel ?op ?dop)
+  (parallel ?op (min ?dop (memory-limited-dop ?op)))
+  :if (> (* ?dop (per-worker-memory ?op)) (available-memory)))
+
+;; Single-threaded for small data
+(rewrite (parallel ?op ?dop)
+  ?op
+  :if (< (estimated-rows ?op) 10000)
+  :if (< (estimated-cost ?op) 1000))
+
+;; Reduce DOP under high concurrency
+(rewrite (parallel ?op ?dop)
+  (parallel ?op (max 1 (/ ?dop (concurrent-queries))))
+  :if (> (concurrent-queries) 4))
+```
+
+## DOP Selection Algorithm
+
+```rust
+pub fn select_dop(
+    operator: &Operator,
+    context: &ExecutionContext,
+) -> usize {
+    let max_cores = context.available_cores();
+    let data_size = operator.estimated_rows();
+    let memory_budget = context.query_memory_limit();
+
+    // Factor 1: Data-based DOP
+    // Minimum rows per worker for parallelism to be worthwhile
+    let min_rows_per_worker = 10_000;
+    let data_dop = (data_size / min_rows_per_worker).max(1) as usize;
+
+    // Factor 2: Memory-based DOP
+    let per_worker_memory = operator.memory_per_worker();
+    let memory_dop = if per_worker_memory > 0 {
+        (memory_budget / per_worker_memory) as usize
+    } else {
+        max_cores
+    };
+
+    // Factor 3: I/O-based DOP
+    let io_bandwidth = context.hardware().io_bandwidth_mbps();
+    let per_worker_io = operator.estimated_io_mbps();
+    let io_dop = if per_worker_io > 0.0 {
+        (io_bandwidth / per_worker_io) as usize
+    } else {
+        max_cores
+    };
+
+    // Factor 4: Concurrency adjustment
+    let concurrent = context.active_queries();
+    let fair_share = max_cores / concurrent.max(1);
+
+    // Take minimum of all constraints
+    let dop = data_dop
+        .min(memory_dop)
+        .min(io_dop)
+        .min(fair_share)
+        .min(max_cores)
+        .max(1);
+
+    dop
+}
+```
+
+## Implementation Pattern
+
+```rust
+pub struct DopSelector {
+    hardware: HardwareProfile,
+    workload: WorkloadMonitor,
+}
+
+impl DopSelector {
+    /// Select DOP for scan operator
+    fn scan_dop(&self, table_pages: u64) -> usize {
+        let min_pages_per_worker = 1000;
+        let data_dop = (table_pages / min_pages_per_worker)
+            .max(1) as usize;
+
+        // I/O bound: cap at storage bandwidth
+        let io_dop = (self.hardware.io_bandwidth_mbps()
+            / self.hardware.per_thread_io_mbps()) as usize;
+
+        data_dop.min(io_dop).min(self.available())
+    }
+
+    /// Select DOP for hash join
+    fn hash_join_dop(
+        &self,
+        build_size: u64,
+        probe_size: u64,
+    ) -> usize {
+        let per_worker_ht = build_size / self.available() as u64;
+        let memory_per_worker = per_worker_ht + 1024 * 1024;
+
+        let memory_dop = (self.hardware.query_memory()
+            / memory_per_worker) as usize;
+
+        let data_dop = (probe_size / 100_000).max(1) as usize;
+
+        data_dop.min(memory_dop).min(self.available())
+    }
+
+    /// Select DOP for aggregation
+    fn aggregation_dop(
+        &self,
+        input_rows: u64,
+        group_count: u64,
+    ) -> usize {
+        // Each worker needs its own hash table
+        let per_worker_groups = group_count; // Full duplicate
+        let bytes_per_group = 100;
+        let per_worker_mem = per_worker_groups * bytes_per_group;
+
+        let memory_dop = (self.hardware.query_memory()
+            / per_worker_mem) as usize;
+
+        let data_dop = (input_rows / 50_000).max(1) as usize;
+
+        data_dop.min(memory_dop).min(self.available())
+    }
+
+    fn available(&self) -> usize {
+        let total = self.hardware.cpu_cores();
+        let active = self.workload.active_parallel_queries();
+        (total / active.max(1)).max(1)
+    }
+}
+```
+
+## Cost Model
+
+```rust
+pub fn cost_at_dop(
+    sequential_cost: f64,
+    dop: usize,
+    coordination_overhead: f64,
+    startup_cost: f64,
+) -> f64 {
+    let parallel_work = sequential_cost / dop as f64;
+    let overhead = startup_cost
+        + coordination_overhead * dop as f64;
+    parallel_work + overhead
+}
+
+pub fn optimal_dop(
+    sequential_cost: f64,
+    coordination_per_worker: f64,
+    startup_cost: f64,
+    max_dop: usize,
+) -> usize {
+    // Optimal DOP minimizes: cost/dop + overhead*dop + startup
+    // Derivative = 0: -cost/dop^2 + overhead = 0
+    // dop_opt = sqrt(cost / overhead)
+    let theoretical = (sequential_cost / coordination_per_worker)
+        .sqrt() as usize;
+
+    theoretical.min(max_dop).max(1)
+}
+
+pub fn parallel_efficiency(
+    sequential_cost: f64,
+    parallel_cost: f64,
+    dop: usize,
+) -> f64 {
+    sequential_cost / (parallel_cost * dop as f64)
+}
+```
+
+## Test Cases
+
+### Test 1: Large OLAP scan -- high DOP
+```sql
+-- System: 32 cores, 1 concurrent query
+-- Table: 100M rows, 50GB
+
+SELECT region, SUM(sales)
+FROM huge_fact_table
+GROUP BY region;
+
+-- Expected DOP: ~24-28
+-- Data is large enough for high parallelism
+-- Reserve some cores for OS and background tasks
+-- Efficiency: ~85% at DOP 24
+```
+
+### Test 2: Small table -- no parallelism
+```sql
+-- System: 32 cores
+-- Table: 500 rows, 50KB
+
+SELECT * FROM lookup_table WHERE code = 'US';
+
+-- Expected DOP: 1 (serial)
+-- Parallelism overhead exceeds any benefit
+-- Sequential scan is sub-millisecond
+```
+
+### Test 3: High concurrency -- reduced DOP
+```sql
+-- System: 16 cores, 8 concurrent OLAP queries
+
+SELECT customer_id, COUNT(*)
+FROM orders
+GROUP BY customer_id;
+
+-- Expected DOP: 2 (16 cores / 8 queries)
+-- Fair sharing of resources
+-- Each query gets 2 cores
+-- Better throughput than each using 16 and contending
+```
+
+### Test 4: Memory-constrained hash join
+```sql
+-- System: 32 cores, 8GB query memory
+-- Build side: 4GB
+
+SELECT * FROM large_table a
+JOIN medium_table b ON a.key = b.key;
+
+-- Expected DOP: 2
+-- Each worker replicates build hash table (~4GB)
+-- 2 workers * 4GB = 8GB, fits memory budget
+-- DOP 4 would require 16GB (exceeds budget)
+```
+
+### Test 5: Operator-specific DOP in same plan
+```sql
+SELECT department, AVG(salary)
+FROM employees      -- 100M rows
+JOIN departments    -- 50 rows
+  ON employees.dept_id = departments.id
+GROUP BY department;
+
+-- Expected:
+--   Scan employees: DOP 16 (large I/O)
+--   Hash join build (departments): DOP 1 (tiny)
+--   Hash join probe: DOP 16 (large)
+--   Aggregation: DOP 8 (moderate groups)
+```
+
+## Performance Characteristics
+
+| DOP | Speedup (ideal) | Speedup (actual) | Efficiency |
+|-----|-----------------|-------------------|------------|
+| 1 | 1.0x | 1.0x | 100% |
+| 2 | 2.0x | 1.9x | 95% |
+| 4 | 4.0x | 3.6x | 90% |
+| 8 | 8.0x | 6.8x | 85% |
+| 16 | 16.0x | 12.0x | 75% |
+| 32 | 32.0x | 19.2x | 60% |
+| 64 | 64.0x | 25.6x | 40% |
+
+## References
+
+1. **Oracle**: Adaptive Degree of Parallelism
+   - https://docs.oracle.com/en/database/oracle/oracle-database/19/vldbg/degree-parallel.html
+
+2. **mssql**: MAXDOP configuration and recommendations
+   - https://learn.microsoft.com/en-us/sql/database-engine/configure-windows/configure-the-max-degree-of-parallelism-server-configuration-option
+
+3. **PostgreSQL**: max_parallel_workers_per_gather
+   - https://www.postgresql.org/docs/current/runtime-config-query.html
+
+4. **Amdahl's Law**: Theoretical speedup limits
+   - Fundamental constraint on parallel efficiency
+
+5. **Leis et al.**: "Morsel-Driven Parallelism"
+   - SIGMOD 2014, dynamic DOP in query execution

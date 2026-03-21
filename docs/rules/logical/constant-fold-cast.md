@@ -1,0 +1,57 @@
+# Rule: Constant Fold CAST Operations
+
+**Category:** logical/function-optimization
+**File:** `rules/logical/function-optimization/constant-fold-cast.rra`
+
+## Metadata
+
+- **ID:** `constant-fold-cast`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, oracle, mssql
+- **Tags:** logical, function, constant-folding, cast, type-conversion
+- **Authors:** "RA Contributors"
+
+
+# Constant Fold CAST Operations
+
+## Description
+
+Evaluates CAST operations on constant values at plan time. Replaces
+expressions like CAST('123' AS INTEGER) with the literal 123.
+
+**When to apply**: A CAST has a constant input and the conversion
+is guaranteed to succeed.
+
+## Implementation
+
+```rust
+rw!("constant-fold-cast";
+    "(cast ?val ?type)" => "(literal (eval-cast ?val ?type))"
+    if is_constant("?val")
+    if cast_is_safe("?val", "?type")
+),
+```
+
+## Test Cases
+
+```sql
+-- Positive: string to integer
+SELECT CAST('123' AS INTEGER);
+-- Folded to: 123
+
+-- Positive: integer to float
+SELECT CAST(42 AS DOUBLE PRECISION);
+-- Folded to: 42.0
+
+-- Negative: column cast
+SELECT CAST(price AS INTEGER) FROM products;
+-- Cannot fold: price is a column
+
+-- Negative: unsafe cast
+SELECT CAST('not-a-number' AS INTEGER);
+-- Cannot fold at plan time: may produce runtime error
+```
+
+## References
+
+- functions.toml: CAST marked constant_foldable = true

@@ -1,0 +1,130 @@
+# Rule: Adaptive Hash Join
+
+**Category:** physical/join-algorithms
+**File:** `rules/physical/join-algorithms/adaptive-hash-join.rra`
+
+## Metadata
+
+- **ID:** `adaptive-hash-join`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, oracle, duckdb
+- **Tags:** join, hash, adaptive, runtime
+- **Authors:** "RA Contributors"
+
+## Preconditions
+
+```yaml
+  - type: "pattern"
+    must_match: "(join inner (= ?lcol ?rcol) ?left ?right)"
+    description: "Equi-join with runtime adaptive strategy"
+  - type: "predicate"
+    condition: "is_equijoin(= ?lcol ?rcol)"
+    description: "Must be an equi-join for hash-based execution"
+  - type: "capability"
+    database: "current"
+    requires: "adaptive_execution"
+    description: "Database supports adaptive query execution"
+```
+
+
+# Adaptive Hash Join
+
+## Description
+
+Monitors memory usage during hash join; adaptively switches between in-memory and disk-based strategies.
+
+**When to apply**: Hash join with uncertain input sizes or memory availability.
+
+**Why it works**: Starts optimistic (in-memory), adapts to grace/hybrid if memory pressure detected.
+
+## Relational Algebra
+
+```algebra
+join[R.key = S.key](R, S)
+  -> adaptive_build_phase:
+       while building hash table for R:
+         if memory_exhausted():
+           switch to grace/hybrid strategy
+         else:
+           continue in-memory build
+     probe_phase:
+       adapt to chosen strategy
+```
+
+## Implementation
+
+```rust
+rw!("use-adaptive-hash-join";
+    "(join (= ?left_key ?right_key) ?left ?right)" =>
+    "(adaptive-hash-join ?left_key ?right_key ?left ?right)"
+    if uncertain_cardinality("?left") || uncertain_memory()
+),
+```
+
+## Cost Model
+
+```rust
+fn expected_cost(
+    left_size_estimate: u64,
+    right_size_estimate: u64,
+    memory: u64,
+    uncertainty: f64,
+) -> f64 {
+    let in_memory_prob = estimate_fits_probability(left_size_estimate, memory, uncertainty);
+
+    let in_memory_cost = (left_size_estimate + right_size_estimate) as f64;
+    let spill_cost = 3.0 * (left_size_estimate + right_size_estimate) as f64;
+
+    in_memory_prob * in_memory_cost + (1.0 - in_memory_prob) * spill_cost
+}
+```
+
+**Typical benefit**: 30-70% vs fixed strategy with estimation errors
+
+## Test Cases
+
+### Positive: Uncertain cardinality
+
+```sql
+SELECT * FROM orders o
+JOIN order_items oi ON o.id = oi.order_id
+WHERE o.date = ?;
+
+-- Unknown date selectivity: start in-memory, adapt if needed
+```
+
+### Positive: Variable memory availability
+
+```sql
+SELECT * FROM events e
+JOIN sessions s ON e.session_id = s.id;
+
+-- Concurrent queries: available memory varies
+-- Adaptive join monitors and adjusts strategy
+```
+
+### Negative: Accurate statistics available
+
+```sql
+SELECT * FROM products p
+JOIN inventory i ON p.sku = i.sku;
+
+-- Accurate stats: know hash join fits in memory
+-- Use simple hash join (no adaptation overhead)
+```
+
+### Negative: Always exceeds memory
+
+```sql
+SELECT * FROM large_table1 t1
+JOIN large_table2 t2 ON t1.key = t2.key;
+
+-- Both known to be huge: directly use grace hash join
+```
+
+## References
+
+- PostgreSQL: Adaptive hash join with work_mem monitoring
+- Oracle: Adaptive join methods
+- DuckDB: Runtime-adaptive hash join
+- "Robust Query Processing through Progressive Optimization" (Markl et al., 2004)

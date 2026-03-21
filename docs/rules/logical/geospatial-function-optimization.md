@@ -1,0 +1,126 @@
+# Rule: Geospatial Function Optimization
+
+**Category:** logical/function-optimization
+**File:** `rules/logical/function-optimization/geospatial-function-optimization.rra`
+
+## Metadata
+
+- **ID:** `geospatial-function-optimization`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, mssql, oracle
+- **Tags:** function, geospatial, spatial, postgis, gist, r-tree, bounding-box
+- **Authors:** "RA Contributors"
+
+
+# Geospatial Function Optimization
+
+## Description
+
+Optimizes geospatial predicates by matching them to spatial indexes
+(GiST, R-tree), adding bounding-box pre-filters to reduce expensive
+exact-geometry computations, and rewriting equivalent spatial functions
+to their index-compatible forms.
+
+**When to apply**: Spatial predicates (ST_Contains, ST_DWithin,
+ST_Intersects, ST_Distance) on columns with spatial indexes. Also
+applies bounding-box approximation when no index is available but
+the bbox check is much cheaper than the exact predicate.
+
+**Why it works**: Spatial indexes organize geometries by bounding box.
+A GiST index scan prunes most non-matching geometries in O(log n) time.
+For the remaining candidates, a bounding-box pre-filter (&&) eliminates
+geometries whose boxes don't overlap before running the expensive exact
+predicate (e.g., polygon intersection).
+
+## Relational Algebra
+
+```algebra
+-- Index match
+sigma[ST_Contains(a.geom, point)](R)
+  -> gist_index_scan[I_gist](a.geom, point)
+
+-- Bounding-box pre-filter
+sigma[ST_Intersects(a.geom, b.geom)](R)
+  -> sigma[ST_Intersects(a.geom, b.geom)](
+       sigma[a.geom && b.geom](R))  -- bbox pre-filter
+```
+
+## Implementation
+
+```rust
+rw!("spatial-gist-index";
+    "(filter (st-contains ?col ?val) (scan ?table))" =>
+    "(gist-index-scan ?idx ?col ?val)"
+    if has_gist_index("?table", "?col")
+),
+
+rw!("spatial-bbox-prefilter";
+    "(filter (st-intersects ?a ?b) ?child)" =>
+    "(filter (st-intersects ?a ?b) (filter (bbox-overlap ?a ?b) ?child))"
+    if no_spatial_index("?a") && is_complex_geometry("?a")
+),
+
+rw!("st-dwithin-to-index";
+    "(filter (< (st-distance ?col ?point) ?radius) (scan ?table))" =>
+    "(filter (st-dwithin ?col ?point ?radius) (scan ?table))"
+    if has_spatial_index("?table", "?col")
+    // ST_DWithin is index-compatible; ST_Distance < r is not
+),
+```
+
+## Cost Model
+
+```rust
+fn cost_exact_predicate(rows: u64, complexity: f64) -> f64 {
+    rows as f64 * complexity * GEOM_BASE_COST
+}
+
+fn cost_with_bbox_filter(rows: u64, bbox_selectivity: f64, complexity: f64) -> f64 {
+    let bbox_cost = rows as f64 * BBOX_COST;
+    let exact_cost = (rows as f64 * bbox_selectivity) * complexity * GEOM_BASE_COST;
+    bbox_cost + exact_cost
+}
+```
+
+**Typical benefit**: 30-95% depending on spatial selectivity and geometry complexity.
+
+## Test Cases
+
+### Positive: Point-in-polygon with GiST
+
+```sql
+-- GiST index on boundaries.geom
+SELECT name FROM boundaries WHERE ST_Contains(geom, ST_MakePoint(-73.9, 40.7));
+-- GiST index prunes to candidate polygons
+```
+
+### Positive: Distance rewrite
+
+```sql
+-- Before: not index-compatible
+SELECT * FROM stores WHERE ST_Distance(location, my_point) < 1000;
+-- After: index-compatible
+SELECT * FROM stores WHERE ST_DWithin(location, my_point, 1000);
+```
+
+### Positive: Bounding-box pre-filter
+
+```sql
+-- Complex polygon intersection without spatial index
+SELECT * FROM a, b WHERE ST_Intersects(a.geom, b.geom);
+-- Add bbox pre-filter: WHERE a.geom && b.geom AND ST_Intersects(a.geom, b.geom)
+```
+
+### Negative: Function on computed geometry
+
+```sql
+SELECT * FROM t WHERE ST_Contains(ST_Buffer(geom, 100), point);
+-- ST_Buffer(geom, 100) is not indexed; cannot use spatial index directly
+```
+
+## References
+
+- PostGIS: Spatial indexing with GiST
+- Oracle Spatial: R-tree indexes
+- mssql: Spatial indexes
+- de Berg et al., "Computational Geometry", Ch. 10 (R-trees)

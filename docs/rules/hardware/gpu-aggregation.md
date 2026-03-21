@@ -1,0 +1,191 @@
+# Rule: GPU Parallel Aggregation
+
+**Category:** hardware/gpu
+**File:** `rules/hardware/gpu/gpu-aggregation.rra`
+
+## Metadata
+
+- **ID:** `gpu-aggregation`
+- **Version:** "1.0.0"
+- **Databases:** heavydb, blazingsql, pg-strom, sqream
+- **Tags:** gpu, aggregation, group-by, parallel, reduction
+- **Authors:** "RA Contributors"
+
+
+# GPU Parallel Aggregation
+
+## Description
+
+Offloads GROUP BY aggregation to the GPU using a two-phase approach:
+local aggregation within thread blocks (shared memory), then global
+merge across blocks. The GPU excels at high-cardinality aggregations
+where many groups are processed in parallel, and at low-cardinality
+aggregations where atomic operations on shared memory converge fast.
+
+**When to apply**: Input cardinality is large (>100K rows) and the
+number of groups is either very small (reduction-style) or moderate
+(fits in GPU memory as a hash table). Aggregate functions must be
+GPU-compatible (SUM, COUNT, MIN, MAX, AVG).
+
+**Why it works**: The GPU performs parallel reduction (for few groups)
+or parallel hash aggregation (for many groups). Both exploit massive
+parallelism. Shared memory within a thread block enables fast local
+aggregation before a global merge step.
+
+## Relational Algebra
+
+```algebra
+gamma[g; agg](R) -> gpu_aggregate[g; agg](R)
+  where |R| > threshold
+    AND agg in {SUM, COUNT, MIN, MAX, AVG}
+    AND hash_table(g) fits gpu_memory
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("gpu-aggregation";
+    "(aggregate ?group_by ?agg_funcs ?input)" =>
+    "(gpu_aggregate ?group_by ?agg_funcs ?input)"
+    if input_exceeds_threshold("?input")
+    if agg_funcs_gpu_compatible("?agg_funcs")
+    if group_table_fits_gpu("?group_by", "?input")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    group_by_cols: &[&str],
+    agg_funcs: &[AggregateFunction],
+    hw: &HardwareProfile,
+) -> bool {
+    let gpu_compatible = agg_funcs.iter().all(|f| {
+        matches!(
+            f,
+            AggregateFunction::Sum
+                | AggregateFunction::Count
+                | AggregateFunction::Min
+                | AggregateFunction::Max
+                | AggregateFunction::Avg
+        )
+    });
+
+    if !gpu_compatible {
+        return false;
+    }
+
+    // Estimate group count from column distinct values
+    let group_count: f64 = group_by_cols
+        .iter()
+        .filter_map(|c| stats.columns.get(*c))
+        .map(|cs| cs.distinct_count)
+        .product();
+
+    let hash_table_bytes = (group_count as u64) * 64; // ~64 bytes/entry
+    stats.row_count > 100_000.0
+        && hash_table_bytes <= hw.gpu_memory_bytes
+}
+```
+
+**Restrictions:**
+- Aggregate functions must be commutative and associative (GPU-safe)
+- Group-by hash table must fit in GPU memory
+- String-keyed groups have higher overhead (hashing cost)
+- DISTINCT aggregates require deduplication passes
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    group_count: f64,
+    hw: &HardwareProfile,
+) -> f64 {
+    let n = stats.row_count;
+    let table_bytes = n as u64 * stats.avg_row_size;
+
+    // CPU: hash aggregate O(n) with cache misses
+    let cpu_ns = n * 80.0; // ~80ns per row (hash + update)
+
+    // GPU: transfer + local agg + global merge
+    let transfer_ns = table_bytes as f64
+        / (hw.pcie_bandwidth_gbps * 1e9) * 1e9;
+    let local_agg_ns = n * 80.0 / hw.gpu_sm_count as f64;
+    let global_merge_ns =
+        group_count * 100.0 * hw.gpu_sm_count as f64
+            / hw.gpu_sm_count as f64;
+    let gpu_ns = transfer_ns + local_agg_ns + global_merge_ns;
+
+    if cpu_ns > gpu_ns {
+        (cpu_ns - gpu_ns) / cpu_ns
+    } else {
+        0.0
+    }
+}
+```
+
+**Assumptions:**
+- Two-phase aggregation: block-local then global merge
+- Shared memory used for local hash tables within blocks
+- Atomic operations for concurrent group updates
+- Result transfer back is negligible (groups << input)
+
+**Typical benefit**: 5x-50x for large inputs with moderate group
+counts, less for high-cardinality grouping.
+
+## Test Cases
+
+### Positive: High-volume aggregation with few groups
+
+```sql
+-- lineitem: 600M rows, 7 distinct l_returnflag values
+SELECT l_returnflag, SUM(l_quantity), COUNT(*)
+FROM lineitem
+GROUP BY l_returnflag;
+
+-- Expected: GPU aggregation (few groups, large input)
+-- Plan: GpuAggregate(groups=[l_returnflag],
+--        aggs=[SUM(l_quantity), COUNT(*)], input=lineitem)
+```
+
+### Positive: Moderate group count aggregation
+
+```sql
+-- orders: 150M rows, ~10M distinct customers
+SELECT o_custkey, SUM(o_totalprice), COUNT(*)
+FROM orders
+GROUP BY o_custkey;
+
+-- Expected: GPU hash aggregation
+-- Plan: GpuAggregate(groups=[o_custkey],
+--        aggs=[SUM(o_totalprice), COUNT(*)])
+```
+
+### Negative: DISTINCT aggregate not GPU-friendly
+
+```sql
+SELECT department, COUNT(DISTINCT employee_id)
+FROM timesheets
+GROUP BY department;
+
+-- Expected: CPU aggregation (DISTINCT requires dedup)
+-- Plan: HashAggregate(groups=[department],
+--        aggs=[COUNT(DISTINCT employee_id)])
+```
+
+## References
+
+**Implementation in databases:**
+- HeavyDB: `QueryEngine/GroupByAndAggregate.cpp`
+- PG-Strom: `src/gpupreagg.c` - GPU pre-aggregation
+- SQream: GPU-native aggregation engine
+
+**Academic papers:**
+- Fang et al., "GPU-based Aggregation", DaMoN 2007
+- Wu et al., "Multi-GPU Aggregation and Join Processing", VLDB 2019
+- Chrysogelos et al., "Hardware-Conscious Hash-Joins on GPUs", ICDE 2019

@@ -1,0 +1,108 @@
+# Rule: MySQL LIMIT Query Optimization
+
+**Category:** database-specific/mysql
+**File:** `rules/database-specific/mysql/limit-optimization.rra`
+
+## Metadata
+
+- **ID:** `mysql-limit-optimization`
+- **Version:** "1.0.0"
+- **Databases:** mysql
+- **Tags:** database-specific, mysql, limit, early-termination, top-n
+- **Authors:** "RA Contributors"
+
+
+# MySQL LIMIT Query Optimization
+
+## Description
+
+MySQL optimizes LIMIT queries by terminating execution early once the
+required number of rows is produced.  Combined with an index that
+matches the ORDER BY, MySQL can satisfy `ORDER BY ... LIMIT N` by
+reading exactly N index entries, avoiding both filesort and full table
+scan.
+
+**When to apply**: A query has LIMIT (with or without ORDER BY), and
+an index can provide rows in the required order.
+
+**Why it works**: Without optimization, MySQL would sort all matching
+rows (O(n log n)) then discard all but N.  With index-ordered access,
+only N rows are read and the query terminates immediately.
+
+**Database version**: MySQL 5.0+
+
+## Relational Algebra
+
+```algebra
+-- Before: full scan + sort + limit
+limit[10](sort[created_at DESC](scan(events)))
+
+-- After: index scan with early termination
+limit[10](index_scan[idx_ts, DESC](events))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mysql-limit-index-optimization";
+    "(limit ?n (sort ?order (scan ?table)))" =>
+    "(limit ?n (index-ordered-scan ?table ?order))"
+    if is_database("mysql")
+    if has_matching_index("?table", "?order")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    order: &[OrderColumn],
+    table: &Table,
+    limit: u64,
+) -> bool {
+    table.has_index_matching_order(order)
+    && limit < table.estimated_rows() / 10
+}
+```
+
+**Restrictions:**
+- Most beneficial when LIMIT is small relative to table size
+- OFFSET + LIMIT still reads OFFSET rows (just doesn't return them)
+- Cannot optimize LIMIT on non-indexed ORDER BY expressions
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    total_rows: f64,
+    limit: f64,
+) -> f64 {
+    let sort_cost = total_rows * total_rows.log2() * 0.001;
+    let index_cost = limit * 0.005;
+    sort_cost - index_cost
+}
+```
+
+**Typical benefit**: 100-10000x for small LIMIT on large tables.
+
+## Test Cases
+
+```sql
+-- Positive: LIMIT with matching index
+CREATE INDEX idx_ts ON events(created_at);
+SELECT * FROM events ORDER BY created_at DESC LIMIT 10;
+-- Reads exactly 10 rows from index tail
+```
+
+```sql
+-- Negative: LIMIT with large OFFSET
+SELECT * FROM events ORDER BY created_at LIMIT 1000000, 10;
+-- Still reads 1000010 rows despite LIMIT 10
+```
+
+## References
+
+MySQL: "LIMIT Query Optimization" in MySQL Reference Manual
+Source: sql/sql_optimizer.cc

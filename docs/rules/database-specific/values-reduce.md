@@ -1,0 +1,182 @@
+# Rule: Values Reduce
+
+**Category:** database-specific/calcite
+**File:** `rules/database-specific/calcite/values-reduce.rra`
+
+## Metadata
+
+- **ID:** `values-reduce`
+- **Version:** "1.0.0"
+- **Databases:** calcite
+- **Tags:** values, constant-folding, simplification, logical
+- **Authors:** "Apache Calcite Contributors"
+
+
+# Values Reduce
+
+## Description
+
+Folds projections and filters into an underlying VALUES clause, computing
+constant expressions at optimization time. This eliminates unnecessary
+operators by pre-computing results for constant literal tuples.
+
+**When to apply**: A filter or project operates on a VALUES node containing
+constant literal tuples. The expressions can be fully evaluated at compile
+time without runtime data access.
+
+**Why it works**: Constant expressions over literal values can be computed
+during query compilation. This transforms runtime work into compile-time
+work, potentially eliminating entire operators from the physical plan.
+
+## Relational Algebra
+
+```algebra
+π_expr(VALUES(t1, t2, ...)) -> VALUES(eval(expr, t1), eval(expr, t2), ...)
+
+σ_pred(VALUES(t1, t2, ...)) -> VALUES({ti | eval(pred, ti) = true})
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("values-reduce-project";
+    "(project ?exprs (values ?tuples))" =>
+    "(values (eval-project ?exprs ?tuples))"
+    if can_eval_project("?exprs", "?tuples")
+),
+
+rw!("values-reduce-filter";
+    "(filter ?pred (values ?tuples))" =>
+    "(values (eval-filter ?pred ?tuples))"
+    if can_eval_filter("?pred", "?tuples")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> bool {
+    // Only beneficial for small VALUES clauses
+    // Large VALUES get materialized anyway
+    stats.row_count <= 1000
+        && stats.all_columns_constant
+}
+```
+
+**Restrictions:**
+- VALUES clause must contain only constant literals
+- All expressions in project/filter must be deterministic
+- No UDFs or volatile functions (RAND(), NOW(), etc.)
+- Result must fit in memory (typically < 1000 rows)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let rows = stats.row_count as f64;
+
+    // For filters that eliminate rows, benefit is high
+    if stats.selectivity < 0.5 {
+        // Eliminate filtered-out tuples entirely
+        return 0.8 + (0.2 * (1.0 - stats.selectivity));
+    }
+
+    // For projections, benefit depends on expression complexity
+    // Avoid repeated evaluation at runtime
+    let expr_complexity = stats.avg_expression_depth as f64;
+    let runtime_cost_per_row = expr_complexity * 0.000001;
+    let compile_time_cost = rows * 0.00001; // One-time cost
+
+    if runtime_cost_per_row * rows > compile_time_cost {
+        0.5 + ((runtime_cost_per_row * rows - compile_time_cost)
+            / (runtime_cost_per_row * rows))
+    } else {
+        0.0
+    }
+}
+```
+
+**Assumptions:**
+- Constant folding at compile time is essentially free
+- Small VALUES clauses (< 100 rows) benefit most
+- Eliminates operator overhead (filter/project setup, teardown)
+
+**Typical benefit**: 50-100% speedup for constant expressions over small VALUES.
+
+## Test Cases
+
+### Positive: Filter reduces VALUES tuples
+
+```sql
+-- Query with filter on VALUES
+SELECT a - b
+FROM (VALUES (1, 2), (3, 5), (7, 11)) AS t(a, b)
+WHERE a + b > 4;
+
+-- Before values-reduce:
+-- Project(a - b)
+--   Filter(a + b > 4)
+--     Values((1, 2), (3, 5), (7, 11))
+
+-- After values-reduce:
+-- Values((-2), (-4))
+-- (tuples (1,2) filtered out; expressions pre-computed)
+```
+
+### Positive: Project evaluates expressions
+
+```sql
+-- Query with arithmetic on constants
+SELECT x * 2 + 1
+FROM (VALUES (10), (20), (30)) AS t(x);
+
+-- After values-reduce:
+-- Values((21), (41), (61))
+```
+
+### Negative: Non-deterministic functions
+
+```sql
+-- Cannot pre-compute random values
+SELECT RANDOM()
+FROM (VALUES (1), (2), (3)) AS t(x);
+
+-- Stays as:
+-- Project(RANDOM())
+--   Values((1), (2), (3))
+```
+
+### Positive: Complex filter eliminates all rows
+
+```sql
+-- Filter that rejects all tuples
+SELECT *
+FROM (VALUES (1, 2), (3, 4)) AS t(a, b)
+WHERE a > b AND a < b;
+
+-- After values-reduce:
+-- Values() -- empty result set
+```
+
+## References
+
+**Implementation in databases:**
+- Apache Calcite: `ValuesReduceRule.java` - Full constant folding implementation
+- Apache Drill: Values optimization for constant expressions
+- PostgreSQL: Constant folding in planner (eval_const_expressions)
+
+**Academic papers:**
+- Graefe, "The Cascades Framework for Query Optimization", IEEE Data Engineering 1995
+  - DOI: 10.1109/69.469815
+  - Expression evaluation and constant folding
+- Chaudhuri, "An Overview of Query Optimization in Relational Systems", ACM PODS 1998
+  - DOI: 10.1145/275487.275492
+  - Section on constant propagation and folding

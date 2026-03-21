@@ -1,0 +1,103 @@
+# Rule: Calcite ProjectMergeRule
+
+**Category:** database-specific/calcite
+**File:** `rules/database-specific/calcite/project-merge.rra`
+
+## Metadata
+
+- **ID:** `calcite-project-merge`
+- **Version:** "1.0.0"
+- **Databases:** calcite
+- **Tags:** database-specific, calcite, project, merge, simplification
+- **Authors:** "RA Contributors"
+
+
+# Calcite ProjectMergeRule
+
+## Description
+
+Merges two adjacent projections into a single projection by
+composing the expressions. The outer projection's expressions
+are rewritten to substitute in the inner projection's
+expressions, eliminating the intermediate node.
+
+**When to apply**: A `LogicalProject` sits directly above
+another `LogicalProject`.
+
+**Why it works**: Eliminates an intermediate materialization
+point, reduces plan tree depth, and enables further
+optimization passes.
+
+**Calcite class**: `org.apache.calcite.rel.rules.ProjectMergeRule`
+
+## Relational Algebra
+
+```algebra
+-- Before: two stacked projections
+pi[f(a) AS x](pi[g(b) AS a](R))
+
+-- After: single merged projection
+pi[f(g(b)) AS x](R)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-project-merge";
+    "(project ?outer_exprs (project ?inner_exprs ?input))" =>
+    "(project (compose ?outer_exprs ?inner_exprs) ?input)"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    outer: &[ProjectionColumn],
+    inner: &[ProjectionColumn],
+) -> bool {
+    // Always applicable when two projects are adjacent.
+    // The merge may increase expression complexity, so
+    // a cost check prevents bloat.
+    let merged_complexity: usize = outer.iter()
+        .map(|pc| expression_depth(&pc.expr))
+        .sum();
+    merged_complexity < 100
+}
+```
+
+**Restrictions:**
+- May increase expression complexity in the merged projection
+- Calcite limits merge depth to prevent expression blowup
+
+## Cost Model
+
+```rust
+fn estimated_benefit(rows: f64) -> f64 {
+    // Eliminating an intermediate tuple materialization
+    rows * 0.01
+}
+```
+
+**Typical benefit**: 5-30% reduction in expression evaluation
+overhead.
+
+## Test Cases
+
+```sql
+-- Positive: two projections merged
+SELECT x + 1 FROM (SELECT a * 2 AS x FROM t);
+-- Becomes: SELECT (a * 2) + 1 FROM t
+```
+
+```sql
+-- Positive: rename chain collapsed
+SELECT y AS z FROM (SELECT x AS y FROM t);
+-- Becomes: SELECT x AS z FROM t
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/ProjectMergeRule.java

@@ -1,0 +1,118 @@
+# Rule: Graph Pattern Match Join Ordering
+
+**Category:** logical/graph
+**File:** `rules/logical/graph/pattern-match-optimization.rra`
+
+## Metadata
+
+- **ID:** `graph-pattern-match-optimization`
+- **Version:** "1.0.0"
+- **Databases:** neo4j, memgraph, tigergraph, agensgraph
+- **Tags:** logical, graph, pattern-matching, join-ordering, worst-case-optimal
+- **Authors:** "Aberger, Christopher", "Leis, Viktor"
+
+
+# Graph Pattern Match Join Ordering
+
+## Description
+
+Optimizes graph pattern matching queries (e.g., triangle queries, star
+patterns) by selecting the optimal join order for edge traversals.
+Traditional binary join plans can produce exponential intermediate
+results for cyclic patterns; worst-case optimal join algorithms
+(Leapfrog TrieJoin, Generic Join) process all relations simultaneously
+to avoid this blowup.
+
+**When to apply**: Multi-hop pattern matching queries, especially cyclic
+patterns like triangles, cliques, or complex subgraph isomorphism.
+
+## Relational Algebra
+
+```algebra
+-- Triangle query: find all (a,b,c) where a-b, b-c, c-a
+-- Before: binary join plan (may produce huge intermediates)
+(E(a,b) join E(b,c)) join E(c,a)
+
+-- After: worst-case optimal join
+WCOJ(E(a,b), E(b,c), E(c,a))  -- processes all three simultaneously
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("cyclic-pattern-to-wcoj";
+    "(join ?cond3 (join ?cond2 (edgescan ?e1) (edgescan ?e2)) (edgescan ?e3))" =>
+    "(wcoj ?e1 ?e2 ?e3)"
+    if is_cyclic_pattern("?e1", "?e2", "?e3")
+),
+
+rw!("star-pattern-reorder";
+    "(join ?c1 (edgescan ?center_out) (join ?c2 ?leaf1 ?leaf2))" =>
+    "(join ?c2 (join ?c1 (edgescan ?center_out) ?leaf1) ?leaf2)"
+    if center_is_selective("?center_out")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(pattern: &GraphPattern) -> bool {
+    // Cyclic patterns benefit most from WCOJ
+    pattern.is_cyclic()
+        // Or star patterns with selective center
+        || (pattern.is_star()
+            && pattern.center_selectivity() < 0.1)
+}
+```
+
+**Restrictions:**
+- WCOJ requires sorted/indexed edge relations
+- Binary plans may be faster for acyclic patterns
+- Memory overhead for trie construction
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    edges: f64,
+    pattern_type: PatternType,
+) -> f64 {
+    match pattern_type {
+        PatternType::Triangle => {
+            let binary_cost = edges * edges.sqrt(); // intermediate blowup
+            let wcoj_cost = edges.powf(1.5);
+            binary_cost - wcoj_cost
+        }
+        PatternType::Star { arms } => {
+            edges * (arms as f64 - 1.0) * 0.3
+        }
+        _ => 0.0,
+    }
+}
+```
+
+**Typical benefit**: 20-90% for cyclic patterns on dense graphs.
+
+## Test Cases
+
+```sql
+-- Positive: triangle counting
+SELECT COUNT(*) FROM edges e1
+  JOIN edges e2 ON e1.dst = e2.src
+  JOIN edges e3 ON e2.dst = e3.src AND e3.dst = e1.src;
+
+-- Positive: star pattern (friends of friends)
+SELECT DISTINCT f2.dst
+FROM edges f1 JOIN edges f2 ON f1.dst = f2.src
+WHERE f1.src = 'alice';
+
+-- Negative: simple path (acyclic, binary join is fine)
+SELECT * FROM edges WHERE src = 'alice';
+```
+
+## References
+
+- Ngo, H.Q. et al. "Worst-Case Optimal Join Algorithms" (PODS 2012)
+- Aberger, C. et al. "EmptyHeaded: A Relational Engine for Graph Processing" (SIGMOD 2017)

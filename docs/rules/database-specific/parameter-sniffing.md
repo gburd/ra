@@ -1,0 +1,120 @@
+# Rule: mssql Parameter Sensitivity Plan
+
+**Category:** database-specific/mssql
+**File:** `rules/database-specific/mssql/parameter-sniffing.rra`
+
+## Metadata
+
+- **ID:** `mssql-parameter-sniffing`
+- **Version:** "1.0.0"
+- **Databases:** mssql
+- **Tags:** database-specific, mssql, parameter, sensitivity, cardinality, plan-cache
+- **Authors:** "RA Contributors"
+
+
+# mssql Parameter Sensitivity Plan
+
+## Description
+
+Generates multiple cached plan variants for the same query based on
+parameter value ranges.  mssql 2022's Parameter Sensitivity Plan
+(PSP) optimization detects when a single plan is suboptimal for
+different parameter values and caches multiple plans keyed by value
+ranges.
+
+**When to apply**: A parameterized query has highly skewed data
+distribution, causing one plan to be optimal for some parameter
+values and another plan for other values.
+
+**Why it works**: Traditional parameter sniffing compiles the plan for
+the first parameter value seen and reuses it for all subsequent values.
+PSP identifies skew and creates boundary points, caching separate plans
+for different ranges so each execution uses the appropriate plan.
+
+**Database version**: mssql 2022+ (PSP), 2017+ (OPTIMIZE FOR hints)
+
+## Relational Algebra
+
+```algebra
+-- Single plan (parameter sniffing problem)
+plan_cached_for(@status = 'active'):
+    index-seek(orders, idx_status, @status)
+-- Bad for @status = 'active' which returns 90% of rows
+
+-- PSP: multiple plans based on parameter range
+plan_1 (@status IN high_frequency_values):
+    full-scan(orders) -> filter(@status)
+plan_2 (@status NOT IN high_frequency_values):
+    index-seek(orders, idx_status, @status)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mssql-parameter-sensitivity-plan";
+    "(filter (eq ?col (param ?p)) (scan ?table))" =>
+    "(psp-dispatch ?p
+        (full-scan-filter ?col ?p ?table)
+        (index-seek ?col ?p ?table))"
+    if is_database("mssql")
+    if has_skewed_distribution("?table", "?col")
+    if is_parameterized("?p")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    column: &Column,
+    histogram: &Histogram,
+) -> bool {
+    let skew = histogram.frequency_skew();
+    skew > 10.0 // top value is 10x more frequent than average
+}
+```
+
+**Restrictions:**
+- Requires mssql 2022+ with database compat level >= 160
+- Limited to equality predicates on single columns
+- OPTION(RECOMPILE) may still be needed for complex cases
+- PSP creates at most 3 plan variants per query
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    optimal_plan_cost: f64,
+    suboptimal_plan_cost: f64,
+    fraction_suboptimal: f64,
+) -> f64 {
+    fraction_suboptimal * (suboptimal_plan_cost - optimal_plan_cost)
+}
+```
+
+**Typical benefit**: For a query where 10% of executions use a
+suboptimal plan that is 100x slower, PSP improves average throughput
+by 10x for affected executions.
+
+## Test Cases
+
+```sql
+-- Positive: skewed status column
+-- 'active' = 90% of rows, 'deleted' = 0.1%
+SELECT * FROM orders WHERE status = @status;
+-- PSP: full scan for 'active', index seek for 'deleted'
+```
+
+```sql
+-- Negative: uniform distribution
+SELECT * FROM orders WHERE order_id = @id;
+-- Uniform distribution; single plan works for all values
+```
+
+## References
+
+mssql: Parameter Sensitivity Plan Optimization
+mssql: sys.query_store_plan_forcing_locations
+mssql: OPTIMIZE FOR / OPTIMIZE FOR UNKNOWN hints

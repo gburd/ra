@@ -1,0 +1,148 @@
+# Rule: DataFusion Hash Join vs Sort-Merge Join Selection
+
+**Category:** database-specific/datafusion
+**File:** `rules/database-specific/datafusion/hash-join-selection.rra`
+
+## Metadata
+
+- **ID:** `datafusion-hash-join-selection`
+- **Version:** "1.0.0"
+- **Databases:** datafusion
+- **Tags:** database-specific, datafusion, join, hash-join, sort-merge, physical
+- **Authors:** "RA Contributors"
+
+
+# DataFusion Hash Join vs Sort-Merge Join Selection
+
+## Description
+
+Selects between hash join and sort-merge join based on input sizes,
+available memory, and whether inputs are pre-sorted.  DataFusion's
+physical optimizer evaluates both strategies and picks the lower-cost
+alternative.
+
+**When to apply**: A logical join must be mapped to a physical join
+operator during physical planning.
+
+**Why it works**: Hash joins are optimal when the build side fits in
+memory and inputs are unsorted.  Sort-merge joins are preferred when
+inputs are already sorted on the join key or when memory is constrained,
+since they stream data without building a hash table.
+
+**Database version**: DataFusion 20.0+
+
+## Relational Algebra
+
+```algebra
+-- Hash join (build smaller side)
+R hash-join[R.k = S.k] S
+  where |S| < memory_threshold
+
+-- Sort-merge join (inputs pre-sorted or memory constrained)
+R sort-merge-join[R.k = S.k] S
+  where sorted(R, k) AND sorted(S, k)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("datafusion-prefer-hash-join";
+    "(join inner (eq ?lk ?rk) ?left ?right)" =>
+    "(hash-join inner (eq ?lk ?rk) ?left ?right)"
+    if is_database("datafusion")
+    if build_side_fits_memory("?right")
+    if not_pre_sorted("?left", "?lk")
+),
+
+rw!("datafusion-prefer-sort-merge-join";
+    "(join inner (eq ?lk ?rk) ?left ?right)" =>
+    "(sort-merge-join inner (eq ?lk ?rk) ?left ?right)"
+    if is_database("datafusion")
+    if is_pre_sorted("?left", "?lk")
+    if is_pre_sorted("?right", "?rk")
+),
+
+rw!("datafusion-hash-join-swap-build-side";
+    "(hash-join ?type ?cond ?left ?right)" =>
+    "(hash-join ?type (swap-cond ?cond) ?right ?left)"
+    if is_database("datafusion")
+    if smaller_than("?left", "?right")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    left_stats: &Statistics,
+    right_stats: &Statistics,
+    memory_limit: usize,
+) -> bool {
+    let build_size = right_stats.estimated_bytes();
+    build_size < memory_limit
+    || left_stats.is_sorted() && right_stats.is_sorted()
+}
+```
+
+**Restrictions:**
+- Hash join requires equi-join predicates
+- Build side must fit in available memory (or spill to disk)
+- Sort-merge join requires sortable join keys
+- Cross joins always use nested-loop
+
+## Cost Model
+
+```rust
+fn hash_join_cost(build_rows: f64, probe_rows: f64) -> f64 {
+    let build = build_rows * 1.5;   // hash + insert
+    let probe = probe_rows * 1.0;   // hash + lookup
+    build + probe
+}
+
+fn sort_merge_cost(
+    left_rows: f64,
+    right_rows: f64,
+    pre_sorted: bool,
+) -> f64 {
+    let sort_cost = if pre_sorted {
+        0.0
+    } else {
+        left_rows * left_rows.log2()
+        + right_rows * right_rows.log2()
+    };
+    sort_cost + left_rows + right_rows  // merge pass
+}
+```
+
+**Typical benefit**: Pre-sorted sort-merge join on 10M rows avoids
+building a hash table, saving ~2GB memory and ~30% CPU time.
+
+## Test Cases
+
+```sql
+-- Positive: small build side -> hash join
+SELECT * FROM large_table l
+JOIN small_lookup s ON l.key = s.key;
+-- small_lookup is build side of hash join
+```
+
+```sql
+-- Positive: pre-sorted inputs -> sort-merge join
+SELECT * FROM events_sorted_by_time e
+JOIN sessions_sorted_by_time s ON e.ts = s.ts;
+-- Both inputs already sorted on join key
+```
+
+```sql
+-- Negative: cross join (no equi-predicate)
+SELECT * FROM t1 CROSS JOIN t2;
+-- Nested-loop join required
+```
+
+## References
+
+DataFusion: datafusion/physical-plan/src/joins/hash_join.rs
+DataFusion: datafusion/physical-plan/src/joins/sort_merge_join.rs
+DataFusion: datafusion/physical-optimizer/src/join_selection.rs

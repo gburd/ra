@@ -1,0 +1,271 @@
+# Rule: Loose Index Scan
+
+**Category:** physical/index-selection
+**File:** `rules/physical/index-selection/loose-index-scan.rra`
+
+## Metadata
+
+- **ID:** `loose-index-scan`
+- **Version:** "1.0.0"
+- **Databases:** mysql, postgresql, oracle, cockroachdb
+- **Tags:** index, loose-scan, skip-scan, distinct, group-by
+- **Authors:** "RA Contributors"
+
+## Preconditions
+
+```yaml
+  - type: "pattern"
+    must_match: "(aggregate (filter ?pred (scan ?table)) ?groups ?aggs)"
+    description: "Aggregation with DISTINCT or GROUP BY on indexed column"
+  - type: "predicate"
+    condition: "has_index(?table, ?groups)"
+    description: "Index must exist on the grouping columns"
+  - type: "fact"
+    fact_type: "statistics.distinct_count"
+    table: "?table"
+    comparator: "<"
+    threshold: 10000
+    optional: true
+    description: "Few distinct values for efficient skip behavior"
+```
+
+
+# Loose Index Scan
+
+## Metadata
+- **Rule ID**: `loose-index-scan`
+- **Category**: Physical / Index Selection
+- **Complexity**: O(g * log n) where g = number of distinct groups
+- **Introduced**: MySQL 5.0 (loose index scan), Oracle (index skip scan)
+- **Prerequisites**: Composite index, query accesses prefix groups
+- **Alternatives**: index-skip-scan, full-index-scan, sort-aggregation
+
+## Description
+
+Loose index scan reads only the first entry for each distinct group in a
+composite index, skipping over duplicate group values. Instead of scanning
+every leaf entry, it performs one index seek per distinct value of the leading
+column(s), reading only group boundaries.
+
+This is particularly effective for GROUP BY queries and SELECT DISTINCT on
+the leading prefix of a composite index, where the number of distinct groups
+is much smaller than the total row count.
+
+**When to use:**
+- GROUP BY on leading prefix of composite index
+- SELECT DISTINCT on indexed column with few distinct values
+- MIN/MAX aggregation per group
+- Low cardinality grouping column with high cardinality table
+
+**Advantages:**
+- Reads g entries instead of n entries (g << n)
+- Each group located via single index seek
+- Ideal for MIN(col)/MAX(col) GROUP BY queries
+- Eliminates need for sort or hash aggregation
+
+**Disadvantages:**
+- Only works with specific query patterns (GROUP BY prefix)
+- Requires composite B-tree index
+- Cannot handle arbitrary WHERE clauses efficiently
+- Limited to single-table queries
+
+## Relational Algebra
+
+```
+gamma_{g; MIN(v)}(R)
+  where index I = (g, v, ...)
+-> LooseIndexScan(I, g):
+     for each distinct value of g in I:
+       seek to first entry with this g value
+       read MIN(v) from first entry (index is sorted)
+       skip to next distinct g value
+
+Reads: g seeks * log(n) per seek
+  vs tight scan: n leaf entries
+```
+
+## Implementation (egg rewrite rules)
+
+```lisp
+;; GROUP BY with MIN/MAX on composite index
+(rewrite (aggregate (min ?val) ?group (scan ?table))
+  (loose-index-scan ?index ?group (min ?val))
+  :if (has-composite-index ?table (?group ?val) ?index)
+  :if (< (distinct-count ?table ?group) (* 0.01 (cardinality ?table))))
+
+;; SELECT DISTINCT on index prefix
+(rewrite (distinct ?cols (scan ?table))
+  (loose-index-scan ?index ?cols nil)
+  :if (is-index-prefix ?table ?cols ?index)
+  :if (< (distinct-count ?table ?cols) (* 0.01 (cardinality ?table))))
+
+;; GROUP BY on index prefix (any aggregate)
+(rewrite (aggregate ?aggs ?groups (scan ?table))
+  (loose-index-aggregate ?index ?groups ?aggs)
+  :if (is-index-prefix ?table ?groups ?index)
+  :if (< (distinct-count ?table ?groups) 10000))
+```
+
+## Implementation Pattern
+
+```rust
+pub struct LooseIndexScan {
+    index: IndexRef,
+    group_cols: Vec<usize>,
+    agg_func: Option<AggregateFunction>,
+    current_group: Option<GroupKey>,
+    finished: bool,
+}
+
+impl Operator for LooseIndexScan {
+    fn next(&mut self) -> Option<Tuple> {
+        if self.finished {
+            return None;
+        }
+
+        loop {
+            let entry = match &self.current_group {
+                None => {
+                    // First call: seek to beginning of index
+                    self.index.seek_first()?
+                }
+                Some(group) => {
+                    // Seek past current group to next distinct value
+                    match self.index.seek_next_distinct(group) {
+                        Some(entry) => entry,
+                        None => {
+                            self.finished = true;
+                            return None;
+                        }
+                    }
+                }
+            };
+
+            let group_key = entry.extract_group(&self.group_cols);
+            self.current_group = Some(group_key.clone());
+
+            // For MIN: first entry in group is the minimum (index sorted)
+            // For MAX: seek to last entry in group
+            let agg_value = match &self.agg_func {
+                Some(AggregateFunction::Min) => entry.value(),
+                Some(AggregateFunction::Max) => {
+                    self.index.seek_last_in_group(&group_key)?.value()
+                }
+                None => Value::Null, // DISTINCT only
+                _ => unreachable!(),
+            };
+
+            return Some(Tuple::from_group_and_agg(group_key, agg_value));
+        }
+    }
+}
+```
+
+## Cost Model
+
+```rust
+pub fn cost_loose_index_scan(
+    table_card: u64,
+    distinct_groups: u64,
+    index_height: u64,
+    hardware: &HardwareModel,
+) -> Cost {
+    // One index seek per distinct group
+    let seek_cost = Cost::io(
+        distinct_groups as f64
+            * index_height as f64
+            * hardware.random_page_read_cost(),
+    );
+
+    // Each seek reads one leaf entry
+    let read_cost = Cost::cpu(distinct_groups * 5);
+
+    seek_cost + read_cost
+}
+
+pub fn benefit_over_full_scan(
+    table_card: u64,
+    distinct_groups: u64,
+) -> f64 {
+    // Ratio of work saved
+    1.0 - (distinct_groups as f64 / table_card as f64)
+}
+```
+
+## Test Cases
+
+### Test 1: MIN per group on composite index
+```sql
+CREATE TABLE sensor_readings (
+    sensor_id INT,
+    timestamp TIMESTAMP,
+    value DECIMAL
+);
+CREATE INDEX idx_sensor_ts ON sensor_readings(sensor_id, timestamp);
+
+SELECT sensor_id, MIN(timestamp) as first_reading
+FROM sensor_readings
+GROUP BY sensor_id;
+
+-- Expected: LooseIndexScan on idx_sensor_ts
+-- 100 sensors, 10M readings: reads 100 index entries, not 10M
+-- Each sensor's MIN(timestamp) is first entry in its group
+```
+
+### Test 2: SELECT DISTINCT on low-cardinality prefix
+```sql
+CREATE INDEX idx_dept ON employees(department, employee_id);
+
+SELECT DISTINCT department FROM employees;
+
+-- Expected: LooseIndexScan
+-- 20 departments, 50,000 employees
+-- 20 index seeks instead of scanning 50,000 entries
+```
+
+### Test 3: MAX per group
+```sql
+CREATE INDEX idx_account_date ON transactions(account_id, txn_date);
+
+SELECT account_id, MAX(txn_date) as last_transaction
+FROM transactions
+GROUP BY account_id;
+
+-- Expected: LooseIndexScan
+-- Seeks to last entry in each account_id group for MAX
+```
+
+### Test 4: Negative -- high cardinality grouping
+```sql
+SELECT user_id, MIN(login_time)
+FROM logins
+GROUP BY user_id;
+
+-- 5M users, 10M logins: 5M groups is NOT loose-scan friendly
+-- Standard hash or sort aggregation is better
+-- Loose scan does 5M seeks (each O(log n)), worse than single scan
+```
+
+## Performance Characteristics
+
+| Groups / Rows | Loose Scan | Full Index Scan | Hash Agg |
+|---------------|------------|-----------------|----------|
+| 10 / 1M | 10 seeks | 1M reads | 1M hash ops |
+| 1K / 1M | 1K seeks | 1M reads | 1M hash ops |
+| 100K / 1M | 100K seeks | 1M reads | 1M hash ops |
+| 500K / 1M | 500K seeks | 1M reads | 1M hash ops (better) |
+
+## References
+
+1. **MySQL Documentation**: "GROUP BY Optimization" -- Loose Index Scan
+   - https://dev.mysql.com/doc/refman/8.0/en/group-by-optimization.html
+
+2. **Oracle**: Index Skip Scan
+   - Similar concept for leading column skip in composite indexes
+   - https://docs.oracle.com/en/database/
+
+3. **PostgreSQL**: Index-only scan with skip support
+   - Index skip scan patch (under development)
+
+4. **Graefe**: "Implementing Sorting in Database Systems"
+   - ACM Computing Surveys, 2006

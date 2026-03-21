@@ -1,0 +1,191 @@
+# Rule: Exchange Remove Constant Keys
+
+**Category:** database-specific/calcite
+**File:** `rules/database-specific/calcite/exchange-remove-constant-keys.rra`
+
+## Metadata
+
+- **ID:** `exchange-remove-constant-keys`
+- **Version:** "1.0.0"
+- **Databases:** calcite, spark
+- **Tags:** exchange, partitioning, distributed, optimization
+- **Authors:** "Apache Calcite Contributors"
+
+
+# Exchange Remove Constant Keys
+
+## Description
+
+Removes constant columns from the partition key of an exchange operator
+(data shuffle). Constant columns do not affect partitioning since all rows
+have the same value, so including them wastes hash computation and adds
+unnecessary data to shuffle metadata.
+
+**When to apply**: An exchange operator has partition keys that include
+constant-valued columns determined by predicate pushdown or constant folding.
+
+**Why it works**: Partitioning on constant columns is redundant since all
+tuples have the same value. Removing them simplifies the partition key,
+reduces hash computation cost, and allows better partition key matching
+for join colocation optimization.
+
+## Relational Algebra
+
+```algebra
+EXCHANGE[k1, k2, c](R) where c is constant ->
+  EXCHANGE[k1, k2](R)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("exchange-remove-constant-keys";
+    "(exchange (partition-keys ?keys) ?input)" =>
+    "(exchange (partition-keys (remove-constants ?keys ?input)) ?input)"
+    if has-constant-keys("?keys", "?input")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> bool {
+    // Must have at least one constant partition key
+    stats.partition_keys.iter().any(|k| k.is_constant)
+        // Must retain at least one partition key
+        && stats.partition_keys.len() > stats.constant_key_count
+}
+```
+
+**Restrictions:**
+- At least one partition key must remain after removing constants
+- If all keys are constant, exchange can be replaced with broadcast
+- Constant determination must be sound (derived from predicates/stats)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let total_keys = stats.partition_keys.len() as f64;
+    let constant_keys = stats.constant_key_count as f64;
+    let rows = stats.row_count as f64;
+
+    // Benefit from reduced hash computation
+    // Hash cost per row: ~5ns per key
+    let hash_savings_per_row = constant_keys * 0.000000005; // 5ns
+    let total_hash_savings = hash_savings_per_row * rows;
+
+    // Benefit from simpler partition key matching in joins
+    // (enables colocation optimization more frequently)
+    let join_colocation_benefit = 0.1 * (constant_keys / total_keys);
+
+    // Normalize
+    let query_cost_estimate = rows * 0.00001; // 10μs per row
+    (total_hash_savings / query_cost_estimate) + join_colocation_benefit
+}
+```
+
+**Assumptions:**
+- Hash computation cost is ~5ns per key per row
+- Simpler partition keys enable better join colocation
+- Constant propagation has already determined constant columns
+
+**Typical benefit**: 15-35% reduction in exchange overhead for multi-key partitioning.
+
+## Test Cases
+
+### Positive: Remove constant from partition key
+
+```sql
+-- Query with constant predicate
+SELECT t1.id, t1.value, t2.data
+FROM table1 t1
+JOIN table2 t2
+  ON t1.id = t2.id AND t1.category = t2.category
+WHERE t1.category = 'electronics';
+
+-- Before optimization:
+-- Exchange[id, category] -- category is constant!
+--   Filter(category = 'electronics')
+--     Scan(table1)
+
+-- After exchange-remove-constant-keys:
+-- Exchange[id] -- category removed
+--   Filter(category = 'electronics')
+--     Scan(table1)
+```
+
+### Positive: Constant from constant folding
+
+```sql
+-- Computed constant in join key
+SELECT *
+FROM orders o
+JOIN shipments s
+  ON o.order_id = s.order_id
+  AND o.year = s.year
+WHERE o.year = 2024;
+
+-- Exchange key can drop 'year' after constant folding
+```
+
+### Negative: Cannot remove all keys
+
+```sql
+-- All partition keys are constant (rare)
+SELECT COUNT(*)
+FROM table1
+WHERE country = 'US' AND region = 'west'
+GROUP BY country, region;
+
+-- Cannot reduce to Exchange[] - would need broadcast instead
+-- This case should trigger a different rule
+```
+
+### Positive: Enable join colocation
+
+```sql
+-- Simplified partition keys match after optimization
+SELECT *
+FROM (
+  SELECT user_id, status, COUNT(*)
+  FROM events
+  WHERE status = 'active'
+  GROUP BY user_id, status
+) e1
+JOIN (
+  SELECT user_id, COUNT(*)
+  FROM profiles
+  GROUP BY user_id
+) p
+ON e1.user_id = p.user_id;
+
+-- After removing constant 'status' from e1's partition key,
+-- both sides partition on [user_id] -> enables colocation
+```
+
+## References
+
+**Implementation in databases:**
+- Apache Calcite: `ExchangeRemoveConstantKeysRule.java`
+- Apache Drill: Partition key simplification
+- Apache Spark: Constant key elimination in shuffle
+
+**Academic papers:**
+- Graefe, "Encapsulation of Parallelism in the Volcano Query Processing System", ACM SIGMOD 1990
+  - DOI: 10.1145/93597.98720
+  - Exchange operator design and optimization
+- DeWitt & Gray, "Parallel Database Systems: The Future of High Performance Database Systems", CACM 1992
+  - DOI: 10.1145/129888.129894
+  - Partitioning strategies in parallel databases
+- Melnik et al., "Dremel: Interactive Analysis of Web-Scale Datasets", VLDB 2010
+  - DOI: 10.14778/1920841.1920886
+  - Partition key optimization in distributed queries

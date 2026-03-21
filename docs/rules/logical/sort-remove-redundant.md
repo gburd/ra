@@ -1,0 +1,127 @@
+# Rule: Calcite SortRemoveRedundantRule
+
+**Category:** logical/limit-pushdown
+**File:** `rules/logical/limit-pushdown/sort-remove-redundant.rra`
+
+## Metadata
+
+- **ID:** `calcite-sort-remove-redundant`
+- **Version:** "1.0.0"
+- **Databases:** calcite, postgresql, mysql, oracle
+- **Tags:** logical, calcite, sort, remove, redundant, cardinality
+- **Authors:** "RA Contributors"
+
+
+# Calcite SortRemoveRedundantRule
+
+## Description
+
+Removes redundant ORDER BY or LIMIT when the input's maximum row
+count makes them unnecessary. An ORDER BY with no OFFSET is
+redundant when the input has at most 1 row (every 0-or-1-row
+relation is trivially sorted). A LIMIT n is redundant when the
+input has at most n rows.
+
+**When to apply**: A Sort's input has a known maximum row count
+that makes the sort/limit operation a no-op.
+
+**Why it works**: Sorting 0 or 1 rows is always a no-op. Limiting
+to n when there are at most n rows changes nothing.
+
+**Calcite class**: `org.apache.calcite.rel.rules.SortRemoveRedundantRule`
+
+## Relational Algebra
+
+```algebra
+-- Before: ORDER BY on single-row result
+tau[k](gamma[; MAX(x)](R))     -- Aggregation with no GROUP BY returns 1 row
+
+-- After: remove sort
+gamma[; MAX(x)](R)
+
+-- Before: LIMIT >= max rows
+LIMIT 100(R)  where R has at most 50 rows
+
+-- After: remove limit
+R
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-sort-remove-redundant-order";
+    "(sort ?keys ?input)" =>
+    "?input"
+    if max_row_count_lte_1("?input")
+    if has_no_offset("sort")
+),
+
+rw!("calcite-sort-remove-redundant-limit";
+    "(limit ?n ?input)" =>
+    "?input"
+    if max_row_count_lte("?input", "?n")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(sort: &Sort) -> bool {
+    let mq = sort.metadata_query();
+    let max_rows = mq.max_row_count(sort.input());
+
+    if let Some(max) = max_rows {
+        if sort.has_only_order_by() && max <= 1.0 {
+            return true; // 0 or 1 row: sort is no-op
+        }
+        if let Some(fetch) = sort.fetch {
+            return max <= fetch as f64;
+        }
+    }
+    false
+}
+```
+
+**Restrictions:**
+- Requires reliable max row count metadata
+- Does not remove ORDER BY with OFFSET (even on 1 row)
+- Conservative: only fires when metadata is certain
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    input_rows: f64,
+) -> f64 {
+    // Eliminates sort entirely
+    input_rows * input_rows.log2().max(1.0) * 0.001
+}
+```
+
+**Typical benefit**: 10-90% by eliminating unnecessary sort.
+
+## Test Cases
+
+```sql
+-- Positive: ORDER BY on aggregate (single row)
+SELECT MAX(totalprice) FROM orders ORDER BY 1;
+-- Single-row aggregate; ORDER BY removed
+```
+
+```sql
+-- Positive: redundant LIMIT
+SELECT COUNT(*) FROM orders LIMIT 100;
+-- COUNT(*) returns 1 row; LIMIT 100 is redundant
+```
+
+```sql
+-- Negative: ORDER BY on multi-row result
+SELECT * FROM orders ORDER BY order_date;
+-- Multiple rows; ORDER BY is necessary
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/SortRemoveRedundantRule.java (commit af6367d)

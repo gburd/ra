@@ -1,0 +1,58 @@
+# Rule: Subquery Predicate Pullup
+
+**Category:** logical/subquery-unnesting
+**File:** `rules/logical/subquery-unnesting/subquery-predicate-pullup.rra`
+
+## Metadata
+
+- **ID:** `subquery-predicate-pullup`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, duckdb, sqlite
+- **Tags:** subquery, predicate, pullup, optimization
+- **Authors:** "RA Contributors"
+
+
+# Subquery Predicate Pullup
+
+## Description
+
+Pulls filter predicates from inside a subquery to the outer query when the predicate references only outer columns. This allows the outer filter to reduce rows before the subquery is evaluated.
+
+**When to apply**: Subquery contains a filter on outer-only columns that can be applied earlier.
+
+## Relational Algebra
+
+```algebra
+Filter[EXISTS(Filter[outer_pred AND inner_pred](sub))](input)
+  -> Filter[outer_pred](Filter[EXISTS(Filter[inner_pred](sub))](input))
+  where references_only_outer(outer_pred)
+```
+
+## Implementation
+
+```rust
+rw!("subquery-predicate-pullup";
+    "(filter (exists (filter (and ?outer_pred ?inner_pred) ?sub)) ?input)" =>
+    "(filter ?outer_pred (filter (exists (filter ?inner_pred ?sub)) ?input))"
+    if references_only_outer("?outer_pred", "?input")
+),
+```
+
+## Test Cases
+
+### Positive: Outer predicate in subquery
+
+```sql
+SELECT * FROM orders o
+WHERE EXISTS (
+    SELECT 1 FROM returns r
+    WHERE r.order_id = o.id AND o.total > 100
+);
+
+-- Pull o.total > 100 to outer filter
+```
+
+## References
+
+- Predicate migration in SQL optimization
+- Correlated subquery optimization techniques

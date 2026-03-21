@@ -1,0 +1,147 @@
+# Rule: Locality-Optimized Lookup Join
+
+**Category:** distributed/locality-optimization
+**File:** `rules/distributed/locality-optimization/locality-optimized-lookup-join.rra`
+
+## Metadata
+
+- **ID:** `locality-optimized-lookup-join`
+- **Version:** "1.0.0"
+- **Databases:** cockroachdb
+- **Tags:** distributed, locality, join, lookup, multi-region, latency
+- **Authors:** "RA Contributors"
+
+
+# Locality-Optimized Lookup Join
+
+## Description
+
+Converts a lookup join on a REGIONAL BY ROW table into a
+locality-optimized lookup join with two sets of lookup conditions: one
+targeting local partitions and another targeting remote partitions. For
+each input row, the execution engine tries the local lookup first. If a
+match is found locally, the remote lookup is skipped entirely.
+
+**When to apply**: A lookup join probes a REGIONAL BY ROW index across
+multiple regions, each lookup is known to produce at most one row, and
+there is locality of access in the workload.
+
+**Why it works**: In workloads with locality of access, most lookups
+find their matching row in the local region. By trying local partitions
+first, cross-region RPCs are avoided for those rows. Only rows that
+don't match locally incur the additional remote lookup cost.
+
+## Relational Algebra
+
+```algebra
+LookupJoin[expr: k1=k2 AND region IN (local, remote1, remote2)](
+    input, index)
+  -> LookupJoin[
+       local_expr: k1=k2 AND region = local,
+       remote_expr: k1=k2 AND region IN (remote1, remote2)
+     ](input, index)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("locality-optimized-lookup-join";
+    "(lookup_join ?type ?input ?index ?lookup_expr ?on)" =>
+    "(locality_opt_lookup_join ?type ?input ?index
+        ?local_expr ?remote_expr ?on)"
+    if is_regional_by_row_index("?index")
+    if can_split_local_remote_expr("?lookup_expr",
+        "?local_expr", "?remote_expr")
+    if lookup_produces_at_most_one_row("?lookup_expr", "?index")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    lookup_expr: &Expr,
+    index: &IndexMeta,
+    gateway_region: &str,
+) -> bool {
+    // Index must be on a REGIONAL BY ROW table
+    index.table().is_regional_by_row()
+    // Lookup must span multiple regions
+    && lookup_expr.contains_multi_region_filter()
+    // Each lookup must produce at most one row
+    && index.is_unique_for(lookup_expr.equality_columns())
+    // Must not be an anti-join (handled separately)
+    && !is_anti_join()
+}
+```
+
+**Restrictions:**
+- Each lookup must produce at most one row (uniqueness requirement)
+- Anti-joins use a different nested-pair approach (see
+  locality-optimized-anti-join)
+- If the input scan is already known to read only remote rows, the
+  optimization is skipped (no point in trying local first)
+- A pessimization when workload has no locality of access
+
+## Cost Model
+
+```rust
+fn locality_lookup_cost(
+    input_rows: f64,
+    local_match_fraction: f64,
+    local_lookup_cost: f64,
+    remote_lookup_cost: f64,
+) -> f64 {
+    let always_local = input_rows * local_lookup_cost;
+    let remote_fallback =
+        input_rows * (1.0 - local_match_fraction) * remote_lookup_cost;
+    always_local + remote_fallback
+}
+```
+
+**Typical benefit**: With 80% locality of access, remote lookups are
+reduced by 80%, saving 50-200ms of cross-region latency per lookup.
+
+## Test Cases
+
+```sql
+-- Positive: foreign key lookup with locality
+-- parent and child are both REGIONAL BY ROW
+-- Query from us-east1
+SELECT p.*, c.*
+FROM child c
+INNER LOOKUP JOIN parent p ON c.p_id = p.id;
+
+-- Plan without optimization:
+-- LookupJoin(p.id = c.p_id AND region IN (eu, us-east, us-west))
+
+-- Plan with optimization:
+-- LookupJoin(
+--   local: p.id = c.p_id AND region = 'us-east1',
+--   remote: p.id = c.p_id AND region IN ('eu', 'us-west'))
+```
+
+```sql
+-- Positive: point lookup join with limit
+SELECT * FROM child
+INNER LOOKUP JOIN parent ON c_p_id = p_id
+LIMIT 3;
+
+-- Local lookups may satisfy the limit without remote access
+```
+
+```sql
+-- Negative: non-unique lookup (multiple rows per key)
+SELECT * FROM orders o
+INNER LOOKUP JOIN line_items li ON o.id = li.order_id;
+-- line_items may have multiple rows per order_id, violating
+-- the at-most-one-row requirement
+```
+
+## References
+
+CockroachDB: pkg/sql/opt/xform/rules/join.opt:732 - GenerateLocalityOptimizedLookupJoin (commit 51e808c)
+CockroachDB: pkg/sql/opt/xform/join_funcs.go - locality-aware join generation
+CockroachDB: pkg/sql/opt/distribution/distribution.go:53 - LookupJoinExpr locality

@@ -1,0 +1,119 @@
+# Rule: COALESCE Simplification
+
+**Category:** logical/function-optimization
+**File:** `rules/logical/function-optimization/coalesce-simplification.rra`
+
+## Metadata
+
+- **ID:** `coalesce-simplification`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, oracle, mssql, duckdb, sqlite
+- **Tags:** function, coalesce, null, simplification, short-circuit
+- **Authors:** "RA Contributors"
+
+
+# COALESCE Simplification
+
+## Description
+
+Simplifies COALESCE expressions by removing arguments that are provably
+non-NULL (making subsequent arguments unreachable) or provably NULL
+(making them no-ops).
+
+**When to apply**: COALESCE expressions where:
+- First argument is NOT NULL constrained (entire COALESCE is redundant)
+- An argument is a literal NULL (skip it)
+- Nested COALESCE can be flattened
+- All arguments are the same expression
+
+**Why it works**: COALESCE returns the first non-NULL argument. If we can
+statically determine an argument's nullability, we can prune the list.
+
+## Relational Algebra
+
+```algebra
+COALESCE(NOT_NULL_expr, ...) -> NOT_NULL_expr
+COALESCE(NULL, x, ...) -> COALESCE(x, ...)
+COALESCE(x) -> x
+COALESCE(x, x) -> x
+COALESCE(COALESCE(a, b), c) -> COALESCE(a, b, c)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("coalesce-not-null-first";
+    "(coalesce ?first ?rest)" => "?first"
+    if is_not_null("?first")
+),
+
+rw!("coalesce-skip-null";
+    "(coalesce (literal null) ?rest)" => "(coalesce ?rest)"
+),
+
+rw!("coalesce-single";
+    "(coalesce ?x)" => "?x"
+),
+
+rw!("coalesce-flatten";
+    "(coalesce (coalesce ?inner_args) ?outer_rest)" =>
+    "(coalesce ?inner_args ?outer_rest)"
+),
+
+rw!("coalesce-identical";
+    "(coalesce ?x ?x)" => "?x"
+),
+```
+
+## Cost Model
+
+```rust
+fn estimated_benefit(args_removed: usize, num_rows: u64) -> f64 {
+    let eval_cost_per_arg = 0.01;
+    let savings = args_removed as f64 * eval_cost_per_arg * num_rows as f64;
+    savings / (savings + num_rows as f64 * 0.1)
+}
+```
+
+**Typical benefit**: 5-30% for expression simplification
+
+## Test Cases
+
+### Positive: NOT NULL column as first argument
+
+```sql
+-- id is PRIMARY KEY (NOT NULL)
+SELECT COALESCE(id, -1) FROM users;
+-- id is never NULL -> COALESCE is redundant
+-- Rewrite to: SELECT id FROM users;
+```
+
+### Positive: Leading NULL literal
+
+```sql
+SELECT COALESCE(NULL, name, 'Unknown') FROM users;
+-- Skip NULL: COALESCE(name, 'Unknown')
+```
+
+### Positive: Nested COALESCE
+
+```sql
+SELECT COALESCE(COALESCE(a, b), c) FROM t;
+-- Flatten to: COALESCE(a, b, c)
+```
+
+### Negative: All arguments nullable
+
+```sql
+SELECT COALESCE(middle_name, nickname) FROM users;
+-- Both could be NULL, cannot simplify
+```
+
+## References
+
+**Implementation:**
+- PostgreSQL: `simplify_function()` in expression simplifier
+- DuckDB: COALESCE optimization in expression binder
+- MySQL: IFNULL/COALESCE simplification

@@ -1,0 +1,160 @@
+# Rule: FPGA Near-Storage Decompression Scan
+
+**Category:** hardware/fpga
+**File:** `rules/hardware/fpga/fpga-compression-scan.rra`
+
+## Metadata
+
+- **ID:** `fpga-compression-scan`
+- **Version:** "1.0.0"
+- **Databases:** ibm-netezza, xilinx-alveo
+- **Tags:** fpga, compression, scan, near-storage, decompression
+- **Authors:** "RA Contributors"
+
+
+# FPGA Near-Storage Decompression Scan
+
+## Description
+
+Places the FPGA between storage and CPU to decompress and filter data
+at the storage interface, reducing the data volume that traverses the
+memory bus. The FPGA decompresses column segments (LZ4, RLE, delta,
+dictionary) in hardware and applies predicates on the decompressed
+data before forwarding matching tuples to the CPU.
+
+**When to apply**: Data is compressed on storage and the query has
+selective predicates. The FPGA decompresses and filters near the
+storage device, sending only qualifying rows over the bus.
+
+**Why it works**: Storage bandwidth is the bottleneck for scan queries.
+By decompressing at wire speed and filtering before the data reaches
+the CPU, the FPGA eliminates redundant data movement. For a 10:1
+compression ratio with 10% selectivity, only 1% of the raw data
+volume crosses the bus.
+
+## Relational Algebra
+
+```algebra
+sigma[p](decompress(R)) -> fpga_decompress_filter[p](R)
+  where R is compressed
+    AND compression(R) in {LZ4, RLE, DELTA, DICT}
+    AND p is fpga_synthesizable
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("fpga-compression-scan";
+    "(filter ?pred (decompress ?input))" =>
+    "(fpga_decompress_filter ?pred ?input)"
+    if compression_fpga_supported("?input")
+    if predicate_synthesizable("?pred")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    compression: CompressionType,
+    pred: &Expr,
+    hw: &HardwareProfile,
+) -> bool {
+    let supported_compression = matches!(
+        compression,
+        CompressionType::Lz4
+            | CompressionType::Rle
+            | CompressionType::Delta
+            | CompressionType::Dictionary
+    );
+
+    supported_compression
+        && is_fpga_synthesizable(pred)
+        && hw.fpga_near_storage
+}
+```
+
+**Restrictions:**
+- Only supports specific compression codecs in hardware
+- FPGA must be physically near storage (SmartSSD, CSD)
+- Complex decompression (zstd, snappy) may exceed FPGA resources
+- Dictionary-encoded columns work best (compact lookup tables)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    compression_ratio: f64,
+    selectivity: f64,
+    hw: &HardwareProfile,
+) -> f64 {
+    let raw_bytes =
+        stats.row_count as u64 * stats.avg_row_size;
+    let compressed_bytes =
+        raw_bytes as f64 / compression_ratio;
+
+    // Without FPGA: read compressed, CPU decompress, CPU filter
+    let read_ns = compressed_bytes
+        / (hw.storage_bandwidth_gbps * 1e9) * 1e9;
+    let decompress_ns = raw_bytes as f64 * 0.5; // ~0.5 ns/byte
+    let filter_ns = stats.row_count * 10.0;
+    let cpu_total = read_ns + decompress_ns + filter_ns;
+
+    // With FPGA: read compressed, FPGA decompress+filter
+    let fpga_read_ns = read_ns; // same storage read
+    let result_bytes =
+        raw_bytes as f64 * selectivity;
+    let bus_transfer_ns = result_bytes
+        / (hw.pcie_bandwidth_gbps * 1e9) * 1e9;
+    let fpga_total = fpga_read_ns + bus_transfer_ns;
+
+    if cpu_total > fpga_total {
+        (cpu_total - fpga_total) / cpu_total
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 3x-10x for highly compressed, selectively
+filtered scans. Greatest benefit when compression ratio is high
+and selectivity is low.
+
+## Test Cases
+
+### Positive: Compressed columnar scan with selective predicate
+
+```sql
+-- sales: 2B rows, 8:1 compression, dictionary-encoded region
+-- Selectivity: ~5% for region='EMEA'
+SELECT * FROM sales WHERE region = 'EMEA' AND year = 2025;
+
+-- Expected: FPGA decompresses and filters at storage
+-- Plan: FpgaDecompressFilter(pred=region='EMEA' AND year=2025,
+--        input=sales, compression=dict+delta)
+```
+
+### Negative: Uncompressed data
+
+```sql
+-- Raw CSV import, no compression
+SELECT * FROM raw_imports WHERE status = 'active';
+
+-- Expected: CPU scan (no compression to exploit)
+-- Plan: Filter(pred=status='active', input=raw_imports)
+```
+
+## References
+
+**Implementation in databases:**
+- IBM Netezza: FPGA-based zone map filtering and decompression
+- Samsung SmartSSD: Near-storage FPGA processing
+- Xilinx Alveo: Column store acceleration
+
+**Academic papers:**
+- Sukhwani et al., "Database Analytics Acceleration using FPGAs", PACT 2012
+- Kara et al., "FPGA-Accelerated Dense Linear Machine Learning", FCCM 2017
+- Do et al., "Query Processing on Smart SSDs", ICDE 2013

@@ -1,0 +1,130 @@
+# Rule: Calcite JoinToSemiJoinRule
+
+**Category:** database-specific/calcite
+**File:** `rules/database-specific/calcite/join-to-semi-join.rra`
+
+## Metadata
+
+- **ID:** `calcite-join-to-semi-join`
+- **Version:** "1.0.0"
+- **Databases:** calcite
+- **Tags:** database-specific, calcite, join, semi-join, optimization
+- **Authors:** "RA Contributors"
+
+
+# Calcite JoinToSemiJoinRule
+
+## Description
+
+Converts an inner join to a semi-join when the query only
+references columns from one side of the join. A semi-join
+returns rows from the left input that have at least one match
+on the right, without duplicating rows for multiple matches.
+
+**When to apply**: A join's output is projected to only
+include columns from the left (or right) input, and the join
+is an inner join or the output uses only the preserved side
+of an outer join.
+
+**Why it works**: Semi-joins avoid producing duplicate rows
+from many-to-many matches and can stop probing after the
+first match, reducing I/O and memory.
+
+**Calcite class**: `org.apache.calcite.rel.rules.SemiJoinRule`
+
+## Relational Algebra
+
+```algebra
+-- Before: inner join with projection on left only
+pi[R.*](R join[R.k = S.k] S)
+
+-- After: semi-join
+R semi-join[R.k = S.k] S
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-join-to-semi-join";
+    "(project ?exprs (join inner ?cond ?left ?right))" =>
+    "(project ?exprs (semi-join ?cond ?left ?right))"
+    if exprs_reference_only_left("?exprs", "?left")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    project_exprs: &[Expr],
+    left_cols: &[Column],
+    right_cols: &[Column],
+) -> bool {
+    let refs = project_exprs.iter()
+        .flat_map(|e| e.referenced_columns())
+        .collect::<Vec<_>>();
+
+    // All projected columns must come from left only
+    refs.iter().all(|c| left_cols.contains(c))
+        && refs.iter().all(|c| !right_cols.contains(c))
+}
+```
+
+**Restrictions:**
+- Only applies when no columns from the eliminated side are
+  used in the output
+- Aggregate functions on the right side prevent conversion
+- The join condition must not be a cross join (must have a
+  valid equi-join predicate)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    left_rows: f64,
+    right_rows: f64,
+    avg_matches: f64,
+) -> f64 {
+    if avg_matches <= 1.0 {
+        return 0.0;
+    }
+    let join_output = left_rows * avg_matches;
+    let semi_output = left_rows;
+    (join_output - semi_output) / join_output
+}
+```
+
+**Typical benefit**: 20-80% when the right side has many
+matching rows per left row.
+
+## Test Cases
+
+```sql
+-- Positive: only left columns used
+SELECT e.name, e.sal FROM emp e
+JOIN dept d ON e.deptno = d.deptno;
+-- No dept columns in output -> semi-join candidate
+```
+
+```sql
+-- Negative: columns from both sides
+SELECT e.name, d.dname FROM emp e
+JOIN dept d ON e.deptno = d.deptno;
+-- d.dname referenced -> cannot convert to semi-join
+```
+
+```sql
+-- Positive: EXISTS subquery (natural semi-join)
+SELECT * FROM emp e
+WHERE EXISTS (
+    SELECT 1 FROM dept d WHERE d.deptno = e.deptno
+);
+-- Already a semi-join semantically
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/SemiJoinRule.java
+Bernstein & Goodman: "Power of Natural Semijoins" (1981)

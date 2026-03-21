@@ -1,0 +1,172 @@
+# Rule: Broadcast Join Selection
+
+**Category:** distributed/distributed-joins
+**File:** `rules/distributed/distributed-joins/broadcast-join.rra`
+
+## Metadata
+
+- **ID:** `broadcast-join`
+- **Version:** "1.0.0"
+- **Databases:** presto, trino, spark, cockroachdb, citus, greenplum
+- **Tags:** distributed, join, broadcast, replicate, data-movement
+- **Authors:** "RA Contributors"
+
+
+# Broadcast Join Selection
+
+## Description
+
+Replaces a shuffle-based distributed join with a broadcast join when one
+side of the join is small enough to be replicated to every node. The
+small side is sent in full to each node holding partitions of the large
+side, avoiding the expensive repartition of the large table.
+
+**When to apply**: One join input is small (below the broadcast threshold)
+and the other is large. The ratio should be at least 10:1 for meaningful
+benefit.
+
+**Why it works**: Broadcasting a small table costs
+`size(small) * num_nodes` bytes. A shuffle of the large table costs
+`size(large) * (num_nodes - 1) / num_nodes` bytes. When
+`size(small) * N < size(large)`, broadcast wins.
+
+## Relational Algebra
+
+```algebra
+-- Shuffle join -> Broadcast join
+Join[c](Exchange[hash(k1)](R), Exchange[hash(k2)](S))
+  -> Join[c](R, Exchange[broadcast](S))
+  where |S| < broadcast_threshold
+  where |S| * num_nodes < |R|
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("shuffle-to-broadcast-join-right";
+    "(join ?type ?cond
+        (exchange hash_partition ?left ?lkeys)
+        (exchange hash_partition ?right ?rkeys))" =>
+    "(join ?type ?cond
+        ?left
+        (exchange broadcast ?right))"
+    if is_small("?right", BROADCAST_THRESHOLD)
+),
+
+rw!("shuffle-to-broadcast-join-left";
+    "(join ?type ?cond
+        (exchange hash_partition ?left ?lkeys)
+        (exchange hash_partition ?right ?rkeys))" =>
+    "(join ?type ?cond
+        (exchange broadcast ?left)
+        ?right)"
+    if is_small("?left", BROADCAST_THRESHOLD)
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    small_side: &RelNode,
+    large_side: &RelNode,
+    num_nodes: u32,
+    broadcast_threshold: u64,
+) -> bool {
+    let small_size = small_side.estimated_size_bytes();
+    let large_size = large_side.estimated_size_bytes();
+    // Small side must fit in memory on each node
+    small_size < broadcast_threshold
+    // Broadcasting must be cheaper than shuffling the large side
+    && small_size * num_nodes as u64
+        < large_size * (num_nodes - 1) as u64 / num_nodes as u64
+}
+```
+
+**Restrictions:**
+- Small side must fit in memory on every node (typically 100MB-1GB
+  threshold depending on available memory)
+- Not beneficial if both sides are large
+- For FULL OUTER joins, broadcast is only valid for the right side in
+  some systems (implementation-dependent)
+- Cardinality estimates must be reasonably accurate; a wrong broadcast
+  decision on a large table causes OOM
+
+## Cost Model
+
+```rust
+fn broadcast_vs_shuffle_cost(
+    small_rows: f64,
+    small_bytes: f64,
+    large_rows: f64,
+    large_bytes: f64,
+    num_nodes: u32,
+    network_bandwidth: f64,
+) -> (f64, f64) {
+    // Broadcast cost: send small to all nodes
+    let broadcast_cost =
+        small_bytes * num_nodes as f64 / network_bandwidth;
+
+    // Shuffle cost: repartition both sides
+    let shuffle_fraction = (num_nodes - 1) as f64 / num_nodes as f64;
+    let shuffle_cost =
+        (small_bytes + large_bytes) * shuffle_fraction
+        / network_bandwidth;
+
+    (broadcast_cost, shuffle_cost)
+}
+```
+
+**Typical benefit**: For a 10MB dimension table joined with a 100GB fact
+table on 100 nodes, broadcast transfers 1GB vs shuffle transferring ~99GB.
+
+## Test Cases
+
+```sql
+-- Positive: small dimension broadcast to large fact table
+SELECT o.*, c.name
+FROM orders o          -- 100M rows, 50GB, hash-distributed
+JOIN countries c       -- 200 rows, 10KB
+  ON o.country_code = c.code;
+
+-- Plan: Broadcast countries to all nodes holding orders
+-- BroadcastHashJoin(o.country_code = c.code)
+--   Scan(orders)      -- stays in place
+--   Exchange[broadcast](Scan(countries))
+```
+
+```sql
+-- Positive: after filter makes one side small
+SELECT o.*, c.name
+FROM orders o
+JOIN customers c ON o.customer_id = c.id
+WHERE c.tier = 'platinum';
+-- After filter, customers has ~1000 rows -> broadcast
+
+-- Plan:
+-- BroadcastHashJoin(o.customer_id = c.id)
+--   Scan(orders)
+--   Exchange[broadcast]
+--     Filter(tier = 'platinum')
+--       Scan(customers)
+```
+
+```sql
+-- Negative: both sides large, broadcast would OOM
+SELECT *
+FROM orders o     -- 100M rows
+JOIN items i      -- 500M rows
+  ON o.id = i.order_id;
+-- Must use shuffle join
+```
+
+## References
+
+Presto/Trino: presto-main/src/main/java/com/facebook/presto/sql/planner/optimizations/DetermineJoinDistributionType.java
+Spark SQL: sql/core/src/main/scala/org/apache/spark/sql/execution/joins/BroadcastHashJoinExec.scala
+CockroachDB: pkg/sql/opt/xform/join_funcs.go - GenerateLookupJoins()
+Citus: src/backend/distributed/planner/multi_join_order.c
+Greenplum: src/backend/optimizer/path/joinpath.c - create_broadcast_join()
+Blanas et al., "A comparison of join algorithms for log processing in MapReduce" (SIGMOD 2010)

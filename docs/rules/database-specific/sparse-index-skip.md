@@ -1,0 +1,146 @@
+# Rule: Sparse Primary Index for Granule Skipping
+
+**Category:** database-specific/clickhouse
+**File:** `rules/database-specific/clickhouse/sparse-index-skip.rra`
+
+## Metadata
+
+- **ID:** `clickhouse-sparse-index-skip`
+- **Version:** 1.0.0
+- **Databases:** clickhouse
+- **Tags:** database-specific, clickhouse, index, sparse-index, granule, mergetree
+- **Authors:** "RA Contributors"
+
+
+# Sparse Primary Index for Granule Skipping
+
+## Description
+
+Uses MergeTree's sparse primary index to skip entire granules (groups of rows) that cannot contain matching data. The primary index stores min/max values for every Nth granule, allowing efficient range pruning without scanning data.
+
+**When to apply**: Range or equality predicates on primary key columns of MergeTree tables.
+
+**Why it works**: ClickHouse doesn't store an index entry for every row (like B-trees). Instead, it stores an entry every 8192 rows (default granularity). Using these sparse entries, it can skip entire granules, reducing I/O dramatically for selective queries.
+
+**Database version**: ClickHouse v1.0+ (core feature)
+
+## Relational Algebra
+
+```algebra
+Filter[key IN range](Scan[MergeTree, pk=key](T))
+  -> Scan[MergeTree, pk=key, skip_granules](T)
+  where range allows_granule_skipping
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("clickhouse-sparse-index-skip";
+    "(filter ?cond (scan ?table ?props))" =>
+    "(scan ?table (add_index_skip ?props ?cond))"
+    if is_database("clickhouse")
+    if is_mergetree_table("?table")
+    if predicate_on_primary_key("?cond", "?table")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    filter: &Expr,
+    table: &TableRef,
+) -> bool {
+    // Extract predicate columns
+    let pred_cols = extract_columns(filter);
+
+    // Must reference primary key columns
+    let pk_cols = table.primary_key();
+    if pred_cols.iter().any(|c| !pk_cols.contains(c)) {
+        return false;
+    }
+
+    // Predicate must allow range pruning
+    matches!(filter, Expr::Eq(_) | Expr::Range(_) | Expr::In(_))
+}
+```
+
+**Restrictions:**
+- Only applies to ClickHouse MergeTree family
+- Predicate must be on primary key columns
+- Most effective with range predicates or IN lists
+- Granule size affects efficiency (default: 8192 rows)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    total_granules: f64,
+    matching_granules: f64,
+    granule_size: f64,
+) -> f64 {
+    // Full scan cost
+    let full_scan_cost = total_granules * granule_size * 100.0;
+
+    // Sparse index: read index + matching granules
+    let index_lookup_cost = total_granules.log2() * 10.0;
+    let data_read_cost = matching_granules * granule_size * 100.0;
+    let sparse_index_cost = index_lookup_cost + data_read_cost;
+
+    (full_scan_cost - sparse_index_cost) / full_scan_cost
+}
+```
+
+**Typical benefit**: 50-95% I/O reduction for selective queries
+
+## Test Cases
+
+### Positive Case 1: Range Query on Primary Key
+
+```sql
+CREATE TABLE events (
+  timestamp DateTime,
+  user_id UInt64,
+  data String
+) ENGINE = MergeTree()
+ORDER BY (timestamp, user_id)
+SETTINGS index_granularity = 8192;
+
+SELECT * FROM events
+WHERE timestamp BETWEEN '2024-01-01' AND '2024-01-02';
+
+-- Sparse index skips granules outside the date range
+-- Example: 1M granules, only 100 match -> skip 999,900 granules
+```
+
+### Positive Case 2: IN List on Primary Key
+
+```sql
+SELECT * FROM events
+WHERE user_id IN (123, 456, 789);
+
+-- Index lookup for each user_id
+-- Skip granules not containing these IDs
+```
+
+### Negative Case 1: Predicate on Non-PK Column
+
+```sql
+SELECT * FROM events WHERE data LIKE '%error%';
+
+-- 'data' not in primary key - cannot use sparse index
+-- Full table scan required
+```
+
+## References
+
+**Source code:**
+- ClickHouse: `src/Storages/MergeTree/KeyCondition.cpp`
+- ClickHouse: `src/Storages/MergeTree/MergeTreeDataSelectExecutor.cpp`
+  - Commit: 35f2d31186cca2f8c50f7ba4bd93817da490da85
+
+**Documentation:**
+- Primary Keys: https://clickhouse.com/docs/en/engines/table-engines/mergetree-family/mergetree#primary-keys-and-indexes-in-queries
+- Sparse Indexes: https://clickhouse.com/docs/en/optimize/sparse-primary-indexes

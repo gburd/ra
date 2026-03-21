@@ -1,0 +1,239 @@
+# Rule: Adaptive Aggregation Strategy
+
+**Category:** experimental/adaptive
+**File:** `rules/experimental/adaptive/adaptive-aggregation.rra`
+
+## Metadata
+
+- **ID:** `adaptive-aggregation`
+- **Version:** "1.0.0"
+- **Databases:** duckdb, cockroachdb, postgresql
+- **Tags:** adaptive, aggregation, hash, sort, group-by, runtime
+- **Authors:** "Leis et al. 2015", "RA Contributors"
+
+
+# Adaptive Aggregation Strategy
+
+## Description
+
+Dynamically selects between hash-based and sort-based aggregation at
+runtime based on observed group count and memory consumption. When the
+number of distinct groups is small, hash aggregation is efficient (O(1)
+lookup per tuple). When groups are numerous and approach memory limits,
+sort-based aggregation with external merge is more predictable. The
+adaptive strategy starts with hash aggregation and falls back to
+sort-based when the hash table grows too large.
+
+**When to apply**: GROUP BY queries where the number of distinct groups
+is uncertain at optimization time. Common for queries grouping on
+user-provided columns, expressions, or high-cardinality attributes.
+
+**Why it works**: Hash aggregation has O(1) per-tuple cost but requires
+O(groups * value_size) memory. When groups exceed memory, hash tables
+spill to disk with severe performance degradation. Sort-based aggregation
+uses O(1) memory (streaming) but requires sorted input (O(n log n)
+sort cost). Adaptive selection avoids the worst case of either approach.
+
+## Relational Algebra
+
+```algebra
+aggregate[GROUP BY cols, agg_fns](R)
+  -> adaptive_aggregate(
+       initial: hash_aggregate,
+       fallback: sort_aggregate,
+       switch_condition: hash_table_size > memory_budget * 0.8,
+       group_by: cols,
+       agg_fns: agg_fns,
+       input: R
+     )
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("adaptive-aggregation";
+    "(aggregate ?group_by ?aggs ?input)" =>
+    "(adaptive_aggregate
+       (initial hash_aggregate)
+       (fallback sort_aggregate)
+       (memory_threshold 0.8)
+       (group_by ?group_by)
+       (aggs ?aggs)
+       (input ?input))"
+    if group_count_uncertain("?group_by", "?input")
+),
+
+struct AdaptiveAggregate {
+    hash_table: HashMap<GroupKey, AggState>,
+    memory_budget: usize,
+    switched_to_sort: bool,
+    sort_buffer: Option<ExternalSort>,
+}
+
+impl AdaptiveAggregate {
+    fn process_batch(&mut self, batch: &RecordBatch) {
+        if self.switched_to_sort {
+            self.sort_buffer.as_mut().unwrap()
+                .add_batch(batch);
+            return;
+        }
+
+        for row in batch.rows() {
+            let key = row.group_key();
+            let entry = self.hash_table
+                .entry(key)
+                .or_insert_with(AggState::new);
+            entry.update(&row);
+        }
+
+        // Check memory pressure
+        if self.hash_table_memory() >
+            self.memory_budget * 8 / 10
+        {
+            self.switch_to_sort();
+        }
+    }
+
+    fn switch_to_sort(&mut self) {
+        self.switched_to_sort = true;
+
+        // Drain hash table into sort buffer
+        let mut sort = ExternalSort::new(
+            self.memory_budget,
+        );
+
+        for (key, state) in self.hash_table.drain() {
+            sort.add_partial(key, state);
+        }
+
+        self.sort_buffer = Some(sort);
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    group_by: &[Column],
+    input_stats: &Statistics,
+) -> bool {
+    // Group count must be uncertain
+    let est_groups = estimate_distinct_groups(
+        group_by, input_stats,
+    );
+    let confidence = estimate_confidence(
+        group_by, input_stats,
+    );
+
+    // Low confidence in group count estimate
+    if confidence > 0.9 {
+        return false;
+    }
+
+    // Group count might exceed memory
+    let hash_table_est = est_groups as f64 * 200.0; // bytes per group
+    let memory_budget = available_memory() as f64;
+
+    // Must be in the "uncertain zone" (might or might not fit)
+    hash_table_est > memory_budget * 0.3
+        && hash_table_est < memory_budget * 3.0
+}
+```
+
+**Restrictions:**
+- Switch from hash to sort discards partial hash results (re-processing)
+- Some aggregates are harder to merge (e.g., MEDIAN)
+- Sort-based requires input re-scan or materialization
+- Monitor overhead per batch (~100ns)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    input_stats: &Statistics,
+    group_count_range: (f64, f64),
+) -> f64 {
+    let (min_groups, max_groups) = group_count_range;
+
+    // Hash cost: good if groups fit in memory
+    let hash_cost_best = input_stats.row_count as f64 * 0.1;
+    let hash_cost_spill = input_stats.row_count as f64 * 5.0;
+
+    // Sort cost: consistent regardless of group count
+    let n = input_stats.row_count as f64;
+    let sort_cost = n * n.log2() * 0.3 + n * 0.1;
+
+    // Adaptive: hash if fits, sort if doesn't
+    let adaptive_cost = if min_groups * 200.0 < available_memory() as f64 {
+        hash_cost_best
+    } else {
+        sort_cost
+    };
+    let switch_overhead = 1000.0;
+
+    let worst_static = hash_cost_spill.max(sort_cost);
+
+    if worst_static > adaptive_cost + switch_overhead {
+        (worst_static - adaptive_cost) / worst_static
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 2x-10x when hash aggregation would spill.
+Prevents catastrophic spilling behavior.
+
+## Test Cases
+
+### Positive: Uncertain group count
+
+```sql
+SELECT user_agent, COUNT(*) FROM access_log GROUP BY user_agent;
+
+-- Estimate: 500 user agents (fits in memory -> hash)
+-- Actual: 500K unique strings (doesn't fit -> should sort)
+-- Adaptive: starts hash, detects memory pressure, switches to sort
+```
+
+### Positive: Data-dependent group count
+
+```sql
+SELECT EXTRACT(HOUR FROM ts), location_id, COUNT(*)
+FROM events
+WHERE ts BETWEEN ? AND ?
+GROUP BY EXTRACT(HOUR FROM ts), location_id;
+
+-- 1-day range: 24 * 1000 locations = 24K groups (hash ok)
+-- 1-year range: 8760 * 1000 locations = 8.7M groups (sort needed)
+-- Adaptive handles both cases optimally
+```
+
+### Negative: Known small group count
+
+```sql
+SELECT status, COUNT(*) FROM orders GROUP BY status;
+-- status has ~5 distinct values, always fits in memory
+-- Hash aggregation is always correct, no adaptation needed
+```
+
+## References
+
+**Academic papers:**
+- Leis et al., "How Good Are Query Optimizers, Really?", VLDB 2015
+- Graefe, "Implementing Sorting in Database Systems", ACM Computing Surveys 2006
+- Larson et al., "mssql Column Store Indexes", SIGMOD 2011
+
+**Implementation:**
+- DuckDB: adaptive aggregation with hash-to-sort fallback
+- mssql: memory grant feedback for hash aggregation
+- CockroachDB: hash vs ordered aggregation selection
+
+**Key insights:**
+- Hash aggregation is 2-5x faster than sort when groups fit in memory
+- Spilling hash aggregation is 3-10x slower than streaming sort
+- The "crossover point" depends on available memory and group size
+- Adaptive strategy eliminates the risk of choosing wrong at plan time

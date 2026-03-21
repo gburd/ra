@@ -1,0 +1,48 @@
+# Rule: Two-Phase COUNT(*) Optimization
+
+**Category:** distributed/aggregation
+**File:** `rules/distributed/aggregation/two-phase-count-star.rra`
+
+## Metadata
+
+- **ID:** `two-phase-count-star`
+- **Version:** "1.0.0"
+- **Databases:** presto, trino, spark, cockroachdb, greenplum, citus
+- **Tags:** distributed, aggregation, two-phase, count, optimization
+- **Authors:** "RA Contributors"
+
+
+# Two-Phase COUNT(*) Optimization
+
+## Description
+
+Specialized two-phase decomposition for COUNT(*) which is the most
+common and most beneficial case. Local COUNT(*) per partition produces
+a single integer per group, and global SUM combines them.
+
+**When to apply**: Any COUNT(*) with GROUP BY on distributed data.
+
+## Relational Algebra
+
+```algebra
+-- Before
+gamma[g, COUNT(*)](R)
+
+-- After
+gamma[g, SUM(partial_count)](
+    Exchange[hash(g)](
+        gamma[g, COUNT(*) as partial_count](R)
+    )
+)
+```
+
+## Test Cases
+
+```sql
+-- Positive: simple count per group
+SELECT status, COUNT(*) FROM orders GROUP BY status;
+
+-- Positive: count with filter
+SELECT region, COUNT(*) FROM orders
+WHERE amount > 100 GROUP BY region;
+```

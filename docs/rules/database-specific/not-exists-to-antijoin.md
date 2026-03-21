@@ -1,0 +1,118 @@
+# Rule: Apache Derby NOT EXISTS to Anti-Join
+
+**Category:** database-specific/derby
+**File:** `rules/database-specific/derby/not-exists-to-antijoin.rra`
+
+## Metadata
+
+- **ID:** `derby-not-exists-to-antijoin`
+- **Version:** "1.0.0"
+- **Databases:** derby
+- **Tags:** database-specific, derby, not-exists, anti-join, subquery, flattening
+- **Authors:** "RA Contributors"
+
+
+# Apache Derby NOT EXISTS to Anti-Join
+
+## Description
+
+Derby flattens NOT EXISTS subqueries into anti-joins.  An anti-join
+returns outer rows that have no matching inner row, which is
+semantically equivalent to NOT EXISTS.  The anti-join allows the
+optimizer to choose efficient execution strategies (hash anti-join,
+index anti-join).
+
+**When to apply**: A NOT EXISTS subquery is correlated with the outer
+query on an equi-join condition, and the subquery does not contain
+aggregation or other non-flattenable constructs.
+
+**Why it works**: A correlated NOT EXISTS executes the subquery once
+per outer row (O(n*m)).  An anti-join processes both sides as a
+single operation with hash or nested-loop strategy (O(n+m) or O(n*k)).
+
+**Database version**: Apache Derby 10.1+
+
+## Relational Algebra
+
+```algebra
+-- Before: correlated NOT EXISTS
+sigma[NOT EXISTS(sigma[r.order_id = o.id](returns))](orders)
+
+-- After: anti-join
+orders anti-join[o.id = r.order_id] returns
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("derby-not-exists-to-antijoin";
+    "(filter (not-exists
+        (filter (= ?inner_col ?outer_col)
+            ?inner_rel))
+        ?outer_rel)" =>
+    "(anti-join (= ?outer_col ?inner_col)
+        ?outer_rel ?inner_rel)"
+    if is_database("derby")
+    if is_equi_correlation("?inner_col", "?outer_col")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(subquery: &Subquery) -> bool {
+    subquery.is_not_exists()
+    && subquery.correlation_is_equi_join()
+    && !subquery.has_aggregation()
+    && !subquery.has_distinct()
+}
+```
+
+**Restrictions:**
+- Same restrictions as EXISTS-to-semi-join
+- NOT IN with NULLs has different semantics than NOT EXISTS
+- Cannot flatten if subquery has GROUP BY or HAVING
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    outer_rows: f64,
+    inner_rows: f64,
+) -> f64 {
+    let correlated = outer_rows * inner_rows * 0.001;
+    let anti_join = outer_rows + inner_rows;
+    correlated - anti_join
+}
+```
+
+**Typical benefit**: 10-100x for NOT EXISTS against large tables.
+
+## Test Cases
+
+```sql
+-- Positive: correlated NOT EXISTS
+SELECT * FROM orders o
+WHERE NOT EXISTS (
+    SELECT 1 FROM returns r WHERE r.order_id = o.id
+);
+-- Anti-join: orders with no returns
+```
+
+```sql
+-- Negative: NOT EXISTS with aggregation
+SELECT * FROM orders o
+WHERE NOT EXISTS (
+    SELECT 1 FROM returns r WHERE r.order_id = o.id
+    GROUP BY r.reason HAVING COUNT(*) > 3
+);
+-- Cannot flatten due to HAVING
+```
+
+## References
+
+Apache Derby: "Subquery Flattening" optimizer documentation
+Source: org.apache.derby.impl.sql.compile.SubqueryNode,
+  `flattenToNotExistsJoin()`

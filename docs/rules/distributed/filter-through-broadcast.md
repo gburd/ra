@@ -1,0 +1,64 @@
+# Rule: Push Filter Through Broadcast Exchange
+
+**Category:** distributed/filter-pushdown-distributed
+**File:** `rules/distributed/filter-pushdown-distributed/filter-through-broadcast.rra`
+
+## Metadata
+
+- **ID:** `filter-through-broadcast`
+- **Version:** "1.0.0"
+- **Databases:** spark, presto, trino
+- **Tags:** distributed, filter, broadcast, pushdown, network
+- **Authors:** "RA Contributors"
+
+
+# Push Filter Through Broadcast Exchange
+
+## Description
+
+When a filter can be applied before broadcasting, apply it to reduce the
+broadcast data volume. Broadcasting filtered data is always cheaper than
+broadcasting full data then filtering.
+
+## Relational Algebra
+
+```algebra
+Filter[p](Exchange[broadcast](R))
+  -> Exchange[broadcast](Filter[p](R))
+```
+
+## Test Cases
+
+```sql
+-- Test 1: Filter on broadcast side
+SELECT o.*, d.name
+FROM orders o
+JOIN dim_products d ON o.pid = d.id
+WHERE d.category = 'electronics';
+-- Expected: Filter dim_products BEFORE broadcast
+-- (broadcast 1K rows instead of 100K)
+```
+
+```sql
+-- Test 2: Filter on non-broadcast side unaffected
+SELECT o.*, d.name
+FROM orders o
+JOIN dim_products d ON o.pid = d.id
+WHERE o.total > 100;
+-- Expected: Filter orders locally (not through broadcast)
+```
+
+```sql
+-- Test 3: Compound filter, partial pushdown
+SELECT o.*, d.name
+FROM orders o
+JOIN dim_products d ON o.pid = d.id
+WHERE d.category = 'electronics' AND o.total > 100;
+-- Expected: Push d.category filter below broadcast,
+-- apply o.total filter on orders side
+```
+
+## References
+
+Spark: PushDownPredicates through exchange
+Presto: PredicatePushDown

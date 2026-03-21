@@ -1,0 +1,276 @@
+# Rule: "Cache-Conscious Algorithm Selection Cost Model"
+
+**Category:** cost-models
+**File:** `rules/cost-models/cache-conscious-cost-model.rra`
+
+## Metadata
+
+- **ID:** `cache-conscious-cost-model`
+- **Version:** "1.0.0"
+- **Databases:** duckdb, umbra, hyper, clickhouse, singlestore
+- **Tags:** cost, cache, cache-conscious, cache-oblivious, partitioning, radix, TLB
+- **Authors:** "Manegold et al. 2000 - cache-conscious joins", "Ailamaki et al. 1999 - DBMSs on modern processors"
+
+
+# Cache-Conscious Algorithm Selection Cost Model
+
+## Description
+
+Selects between cache-conscious and cache-oblivious algorithm variants
+based on data size relative to CPU cache hierarchy levels. Traditional
+cost models count page I/Os but ignore the 100x latency gap between L1
+cache hits (1ns) and DRAM accesses (100ns). For in-memory databases,
+cache misses dominate execution time.
+
+**When to apply**: Algorithm selection for any operator where working
+set size may exceed cache capacity. Critical for hash joins, sorts,
+aggregations, and index lookups in memory-resident databases.
+
+**Why it works**: A radix-partitioned hash join that fits partitions
+in L2 cache avoids DRAM latency for the probe phase. Multi-pass radix
+partitioning ensures each partition fits in cache, converting random
+DRAM accesses into sequential cache hits with 10-50x speedup for
+large joins.
+
+## Relational Algebra
+
+```algebra
+-- Cache-aware cost model:
+cache_cost(op, data_size) =
+  if data_size <= L1_SIZE:
+    data_size / L1_BW  -- ~1ns per access
+  elif data_size <= L2_SIZE:
+    data_size / L2_BW  -- ~5ns per access
+  elif data_size <= L3_SIZE:
+    data_size / L3_BW  -- ~15ns per access
+  else:
+    data_size / DRAM_BW -- ~100ns random, ~10ns sequential
+
+-- Radix partitioning cost:
+radix_partition_cost(R, bits_per_pass, num_passes) =
+  num_passes * (TUPLES(R) * tuple_width / DRAM_BW)
+  + TLB_miss_cost(2^bits_per_pass)
+
+-- Cache-conscious join selection:
+best_join_variant(R, S) =
+  if BYTES(S) <= L2_SIZE:
+    simple_hash_join     -- build side fits in L2
+  elif BYTES(S) <= L3_SIZE:
+    partitioned_hash_join(1_pass)  -- partition to fit L2
+  else:
+    radix_hash_join(multi_pass)    -- radix partition to L2
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+struct CacheHierarchy {
+    l1_size: usize,
+    l1_latency_ns: f64,
+    l2_size: usize,
+    l2_latency_ns: f64,
+    l3_size: usize,
+    l3_latency_ns: f64,
+    dram_random_latency_ns: f64,
+    dram_seq_bw_gbps: f64,
+    cache_line_bytes: usize,
+    tlb_entries: usize,
+    page_size: usize,
+}
+
+impl CacheHierarchy {
+    fn access_latency(&self, working_set: usize) -> f64 {
+        if working_set <= self.l1_size {
+            self.l1_latency_ns
+        } else if working_set <= self.l2_size {
+            self.l2_latency_ns
+        } else if working_set <= self.l3_size {
+            self.l3_latency_ns
+        } else {
+            self.dram_random_latency_ns
+        }
+    }
+
+    fn hash_join_variant(
+        &self,
+        build_bytes: usize,
+        probe_tuples: usize,
+    ) -> HashJoinVariant {
+        if build_bytes <= self.l2_size {
+            // Hash table fits in L2: simple hash join
+            HashJoinVariant::Simple {
+                probe_latency: self.l2_latency_ns,
+            }
+        } else if build_bytes <= self.l3_size {
+            // Partition to fit in L2
+            let partitions =
+                (build_bytes / self.l2_size) + 1;
+            let bits = (partitions as f64).log2().ceil()
+                as usize;
+            HashJoinVariant::SinglePassRadix {
+                radix_bits: bits,
+                partition_cost: self.radix_pass_cost(
+                    build_bytes + probe_tuples * 8,
+                    bits,
+                ),
+            }
+        } else {
+            // Multi-pass radix to fit in L2
+            let total_bits = ((build_bytes as f64)
+                / (self.l2_size as f64))
+                .log2()
+                .ceil() as usize;
+            let bits_per_pass = self.optimal_bits_per_pass();
+            let passes =
+                (total_bits + bits_per_pass - 1) / bits_per_pass;
+            HashJoinVariant::MultiPassRadix {
+                passes,
+                bits_per_pass,
+                total_bits,
+            }
+        }
+    }
+
+    fn optimal_bits_per_pass(&self) -> usize {
+        // Bits per pass limited by TLB: 2^bits partitions
+        // must fit in TLB to avoid TLB thrashing
+        let max_partitions = self.tlb_entries / 2;
+        (max_partitions as f64).log2().floor() as usize
+    }
+
+    fn radix_pass_cost(
+        &self,
+        total_bytes: usize,
+        bits: usize,
+    ) -> f64 {
+        let partitions = 1usize << bits;
+        let read_cost =
+            total_bytes as f64 / (self.dram_seq_bw_gbps * 1e9)
+                * 1e9;
+        let write_cost = read_cost; // Sequential write ~= read
+
+        // TLB misses if partitions > TLB entries
+        let tlb_misses = if partitions > self.tlb_entries {
+            (total_bytes / self.page_size) as f64
+                * self.dram_random_latency_ns
+        } else {
+            0.0
+        };
+
+        read_cost + write_cost + tlb_misses
+    }
+
+    fn sort_variant(
+        &self,
+        data_bytes: usize,
+        num_tuples: usize,
+    ) -> SortVariant {
+        if data_bytes <= self.l2_size {
+            SortVariant::InCache
+        } else if data_bytes <= self.l3_size {
+            SortVariant::CacheOblivious
+        } else {
+            SortVariant::RadixSort {
+                passes: ((num_tuples as f64).log2() / 8.0)
+                    .ceil() as usize,
+            }
+        }
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(database: &DatabaseConfig) -> bool {
+    // Relevant for in-memory or large-buffer databases
+    database.is_in_memory()
+        || database.buffer_pool_size() > database.total_data_size() / 2
+}
+```
+
+**Restrictions:**
+- Cache sizes vary by CPU: Intel vs AMD vs ARM
+- Hyperthreading halves effective per-thread cache
+- NUMA effects can overshadow cache effects
+- Concurrent queries compete for shared L3 cache
+- Software prefetching can hide DRAM latency for sequential patterns
+
+## Cost Model
+
+```rust
+fn cache_miss_cost(
+    random_accesses: usize,
+    working_set: usize,
+    cache: &CacheHierarchy,
+) -> f64 {
+    let hit_rate = if working_set <= cache.l2_size {
+        0.95 // 95% L2 hit rate when fits
+    } else if working_set <= cache.l3_size {
+        0.85 // 85% L3 hit rate
+    } else {
+        // Approximate: inversely proportional to working set
+        (cache.l3_size as f64 / working_set as f64).min(0.5)
+    };
+
+    let misses = random_accesses as f64 * (1.0 - hit_rate);
+    misses * cache.dram_random_latency_ns
+}
+```
+
+**Typical improvements from cache-conscious algorithms:**
+- Hash join (build > L3): 3-10x with radix partitioning
+- Sort (data > L2): 2-5x with cache-oblivious mergesort
+- Aggregation (groups > L2): 2-4x with partitioned aggregation
+- Index lookup (tree > L3): 2-8x with CSS-trees
+
+## Test Cases
+
+### Positive: Large hash join benefits from radix partitioning
+
+```sql
+-- orders: 100M rows, 8 bytes key = 800 MB hash table
+-- L2: 256 KB, L3: 32 MB
+-- Simple hash join: 100M probes * 100ns DRAM = 10s
+-- Radix (14 bits, 16K partitions): 2 passes * 1s + probe in L2 = 2.5s
+-- 4x improvement from cache-conscious partitioning
+SELECT * FROM lineitem l JOIN orders o ON l.orderkey = o.orderkey;
+```
+
+### Positive: Small build side fits in cache
+
+```sql
+-- departments: 50 rows, 400 bytes = fits in L1
+-- No partitioning needed, simple hash join optimal
+SELECT * FROM employees e JOIN departments d ON e.dept_id = d.id;
+-- Every probe hits L1: 50M probes * 1ns = 50ms
+```
+
+### Negative: Sequential scan (already cache-friendly)
+
+```sql
+-- Sequential scan is already sequential access
+-- Cache-conscious partitioning adds overhead with no benefit
+SELECT SUM(amount) FROM transactions;
+-- Already achieves full DRAM bandwidth
+```
+
+## References
+
+**Cache-conscious query processing:**
+- Ailamaki et al., "DBMSs on a Modern Processor: Where Does Time Go?", VLDB 1999
+  - Seminal analysis: 90% of time in L2 cache stalls for OLTP
+- Manegold et al., "What Happens During a Join? Dissecting CPU and Memory Optimization Effects", VLDB 2000
+  - Radix hash join: partitioning for cache-consciousness
+
+**Radix join:**
+- Kim et al., "Sort vs. Hash Revisited: Fast Join Implementation on Modern Multi-Core CPUs", VLDB 2009
+  - Hardware-conscious radix join vs sort-merge on modern CPUs
+- Balkesen et al., "Main-Memory Hash Joins on Multi-Core CPUs", ICDE 2013
+  - Comprehensive comparison of hash join variants
+
+**Cache-oblivious algorithms:**
+- Frigo et al., "Cache-Oblivious Algorithms", FOCS 1999
+  - Algorithms that perform optimally without knowing cache parameters

@@ -1,0 +1,53 @@
+# Rule: Optimize Primary Key Condition with Limit
+
+**Category:** database-specific/clickhouse
+**File:** `rules/database-specific/clickhouse/primary-key-condition-limit.rra`
+
+## Metadata
+
+- **ID:** `clickhouse-primary-key-condition-limit`
+- **Version:** 1.0.0
+- **Databases:** clickhouse
+- **Tags:** database-specific, clickhouse, primary-key, limit, optimization
+- **Authors:** "RA Contributors"
+
+
+# Optimize Primary Key Condition with Limit
+
+## Description
+
+Optimizes queries with both primary key predicates and LIMIT by using the sparse primary index to seek directly to matching granules and stopping after finding LIMIT rows.
+
+**When to apply**: Filter on primary key columns with a LIMIT.
+
+**Why it works**: Combines sparse index granule skipping with early termination from LIMIT, minimizing both granules read and rows processed.
+
+**Database version**: ClickHouse v20.3+
+
+## Relational Algebra
+
+```algebra
+Limit[k](Filter[pk_pred](Scan[MergeTree](T)))
+  -> Scan[MergeTree, pk_pred, limit=k](T)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("clickhouse-primary-key-condition-limit";
+    "(limit ?k (filter ?pk_cond (scan ?table ?props)))" =>
+    "(scan ?table (add_pk_limit ?props ?pk_cond ?k))"
+    if is_database("clickhouse")
+    if predicate_on_primary_key("?pk_cond", "?table")
+),
+```
+
+**Typical benefit**: 60-90%
+
+## References
+
+**Source code:**
+- ClickHouse: `src/Processors/QueryPlan/Optimizations/optimizePrimaryKeyConditionAndLimit.cpp`
+  - Commit: 35f2d31186cca2f8c50f7ba4bd93817da490da85

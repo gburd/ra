@@ -1,0 +1,124 @@
+# Rule: BRIN Index for Sequential/Temporal Data
+
+**Category:** physical/index-selection
+**File:** `rules/physical/index-selection/brin-index-for-sequential.rra`
+
+## Metadata
+
+- **ID:** `brin-index-for-sequential`
+- **Version:** "1.0.0"
+- **Databases:** postgresql
+- **Tags:** index, brin, block-range, sequential, temporal, time-series
+- **Authors:** "RA Contributors"
+
+## Preconditions
+
+```yaml
+  - type: "pattern"
+    must_match: "(filter ?pred (scan ?table))"
+    description: "Range filter on physically ordered column"
+  - type: "predicate"
+    condition: "has_brin_index(?table, columns(?pred))"
+    description: "BRIN index must exist on predicate column"
+  - type: "predicate"
+    condition: "is_range_predicate(?pred)"
+    description: "Predicate must be a range comparison"
+  - type: "capability"
+    database: "current"
+    requires: "brin_index"
+    description: "Database supports BRIN indexes"
+```
+
+
+# BRIN Index for Sequential/Temporal Data
+
+## Description
+
+Selects a BRIN (Block Range INdex) when querying naturally ordered data
+such as timestamps or auto-incrementing IDs. BRIN indexes store min/max
+summaries per block range, making them tiny (often <1% of a B-tree) while
+still pruning large swaths of pages for range queries.
+
+**When to apply**: Range predicates on columns whose physical order
+closely correlates with logical order (high correlation coefficient).
+Typical for append-only time-series tables.
+
+**Why it works**: BRIN entries summarize contiguous page ranges. If the
+column is well-correlated with physical order, a range predicate can
+exclude most page ranges, reading only the few that might contain
+matching rows. The index itself is orders of magnitude smaller than a
+B-tree.
+
+## Relational Algebra
+
+```algebra
+sigma[ts BETWEEN v1 AND v2](R)
+  -> brin_scan[I_brin](ts BETWEEN v1 AND v2)
+  where has_brin_index(R, ts) && correlation(R, ts) > 0.9
+```
+
+## Implementation
+
+```rust
+rw!("brin-for-temporal-range";
+    "(filter (range ?col ?lo ?hi) (scan ?table))" =>
+    "(brin-index-scan ?brin_idx ?col ?lo ?hi)"
+    if has_brin_index("?table", "?col") &&
+       column_correlation("?table", "?col") > 0.9
+),
+```
+
+## Cost Model
+
+```rust
+fn cost(total_ranges: u64, matching_ranges: u64, pages_per_range: u32) -> f64 {
+    let index_scan = total_ranges as f64 * BRIN_ENTRY_COST;
+    let heap_scan = matching_ranges as f64 * pages_per_range as f64 * IO_COST;
+    index_scan + heap_scan
+}
+
+fn benefit_vs_seq_scan(total_pages: u64, matching_range_pages: u64) -> f64 {
+    let seq = total_pages as f64 * IO_COST;
+    let brin = matching_range_pages as f64 * IO_COST;
+    (seq - brin) / seq
+}
+```
+
+**Typical benefit**: 30-90% for selective time-range queries on large tables.
+Diminishes when the target range spans most of the table.
+
+## Test Cases
+
+### Positive: Time-series range query
+
+```sql
+-- BRIN on created_at, pages_per_range = 128
+SELECT * FROM sensor_readings
+WHERE created_at BETWEEN '2025-03-01' AND '2025-03-02';
+
+-- BRIN prunes to ~1/365 of pages
+```
+
+### Positive: Auto-increment ID range
+
+```sql
+-- BRIN on id (naturally ordered)
+SELECT * FROM events WHERE id BETWEEN 1000000 AND 1001000;
+
+-- Very few block ranges match
+```
+
+### Negative: Low-correlation column
+
+```sql
+-- BRIN on status (not correlated with physical order)
+SELECT * FROM orders WHERE status = 'pending';
+
+-- Most block ranges contain every status value; BRIN cannot prune
+```
+
+## References
+
+- PostgreSQL: BRIN indexes documentation
+- Alvaro Herrera, "Block Range Indexes", PostgreSQL Wiki
+- Time-series database design patterns

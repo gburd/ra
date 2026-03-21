@@ -1,0 +1,81 @@
+# Rule: Distinct Pushdown Through UNION
+
+**Category:** logical/distinct-elimination
+**File:** `rules/logical/distinct-elimination/distinct-pushdown-through-union.rra`
+
+## Metadata
+
+- **ID:** `distinct-pushdown-through-union`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, oracle, duckdb
+- **Tags:** distinct, union, pushdown, set-operations
+- **Authors:** "RA Contributors"
+
+
+# Distinct Pushdown Through UNION
+
+## Description
+
+Pushes DISTINCT below UNION ALL to reduce the number of rows before the union, then applies a final DISTINCT.
+
+**When to apply**: DISTINCT over UNION ALL where individual branches have many duplicates.
+
+**Why it works**: Reducing duplicates in each branch before union decreases the size of the final dedup pass.
+
+## Relational Algebra
+
+```algebra
+distinct(union_all(A, B))
+  -> distinct(union_all(distinct(A), distinct(B)))
+```
+
+## Implementation
+
+```rust
+rw!("distinct-pushdown-union";
+    "(distinct (union-all ?left ?right))" =>
+    "(distinct (union-all (distinct ?left) (distinct ?right)))"
+    if branches_have_duplicates("?left", "?right")
+),
+```
+
+## Cost Model
+
+```rust
+fn benefit(left_rows: u64, right_rows: u64, selectivity: f64) -> f64 {
+    let total = (left_rows + right_rows) as f64;
+    let reduced = total * selectivity;
+    (total - reduced) / total * 0.3
+}
+```
+
+**Typical benefit**: 10-50% when branches have many duplicates
+
+## Test Cases
+
+### Positive: UNION ALL with duplicates
+
+```sql
+SELECT DISTINCT status FROM (
+  SELECT status FROM orders_2023
+  UNION ALL
+  SELECT status FROM orders_2024
+);
+
+-- Push DISTINCT into each branch
+```
+
+### Negative: UNION (already distinct)
+
+```sql
+SELECT DISTINCT id FROM (
+  SELECT id FROM a UNION SELECT id FROM b
+);
+
+-- UNION already deduplicates
+```
+
+## References
+
+- PostgreSQL: Set operation optimization
+- Oracle: DISTINCT pushdown through UNION

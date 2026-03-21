@@ -1,0 +1,161 @@
+# Rule: Semi Join to Inner Join with Distinct (CockroachDB)
+
+**Category:** database-specific/cockroachdb
+**File:** `rules/database-specific/cockroachdb/semi-join-to-inner-with-distinct.rra`
+
+## Metadata
+
+- **ID:** `cockroachdb-semi-join-to-inner-with-distinct`
+- **Version:** 1.0.0
+- **Databases:** cockroachdb
+- **Tags:** database-specific, cockroachdb, semi-join, inner-join, join-reordering
+- **Authors:** "RA Contributors"
+
+
+# Semi Join to Inner Join with Distinct (CockroachDB)
+
+## Description
+
+Converts a semi-join into an inner join by applying a DistinctOn operator on the selected rows of the RHS. This relaxes the partial join order restriction imposed by semi-joins, allowing the optimizer to consider more join orders. This is particularly useful when it enables lookup join usage or when the RHS has much lower cardinality than the LHS.
+
+**When to apply**: Only when the ON conditions are simple equalities, ensuring that for each row in the LHS there is at most one unique matching row in the RHS.
+
+**Why it works**: Semi-joins impose a partial order on joining tables. Converting to inner join with distinct allows both join orders (A SemiJoin B) and (Distinct(B*) InnerJoin A) to be considered by the optimizer. A different join order may allow lookup joins when A has much higher cardinality than B.
+
+**Database version**: CockroachDB v20.1+
+
+## Relational Algebra
+
+```algebra
+SemiJoin[c](R, S) -> Project[R_cols](InnerJoin[c](R, DistinctOn[S_cols_in_c](S)))
+  where c is_simple_equality
+  where no_join_hints
+```
+
+Where:
+- `S_cols_in_c` are the columns of S used in the join condition c
+- `R_cols` are the output columns of R (semi-join only outputs LHS columns)
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("cockroachdb-semi-join-to-inner-with-distinct";
+    "(semi_join ?left ?right ?on ?private)" =>
+    "(project
+        (inner_join
+            ?left
+            (distinct_on ?right (cols_in_filter ?right ?on))
+            ?on
+            ?private)
+        (output_cols ?left))"
+    if is_database("cockroachdb")
+    if is_simple_equality("?on")
+    if no_join_hints("?private")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    on_condition: &Expr,
+    private: &JoinPrivate,
+) -> bool {
+    // ON conditions must be simple equalities only
+    is_simple_equality(on_condition)
+        // No join hints specified
+        && !private.has_join_hints()
+        // Should not have been reordered before
+        && !private.skip_reorder_joins
+}
+```
+
+**Restrictions:**
+- Only applies to CockroachDB
+- ON condition must consist only of equality predicates
+- No join hints can be present
+- Requires DistinctOn operator support
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    lhs_card: f64,
+    rhs_card: f64,
+    rhs_distinct_card: f64,
+    has_rhs_index: bool,
+) -> f64 {
+    // High benefit when LHS >> RHS and RHS has an index
+    if has_rhs_index && lhs_card > rhs_card * 10.0 {
+        return 0.6;
+    }
+    // Moderate benefit when distinct operation is cheap
+    if rhs_distinct_card < rhs_card * 0.1 {
+        return 0.4;
+    }
+    0.2
+}
+```
+
+**Assumptions:**
+- DistinctOn has cost O(n log n) for sorting or O(n) with hash aggregation
+- Inner join can leverage indexes that semi-join cannot
+- Join reordering benefits outweigh distinct overhead
+
+**Typical benefit**: 20-70% cost reduction when enabling lookup join
+
+## Test Cases
+
+### Positive Case 1: Small RHS with Index
+
+```sql
+-- Input
+SELECT o.order_id, o.amount
+FROM orders o
+WHERE EXISTS (
+  SELECT 1 FROM customers c
+  WHERE c.id = o.customer_id AND c.country = 'US'
+);
+
+-- Expected output (uses lookup join after transformation)
+-- Project[o.order_id, o.amount](
+--   InnerJoin[c.id = o.customer_id](
+--     Scan[orders],
+--     DistinctOn[c.id](Filter[country = 'US'](Scan[customers]))
+--   )
+-- )
+```
+
+### Positive Case 2: High Selectivity on RHS
+
+```sql
+-- Input
+SELECT t1.id FROM table1 t1
+WHERE t1.key IN (SELECT key FROM table2 WHERE filter_col = 'value');
+
+-- Transformed to inner join with distinct, allowing join order optimization
+```
+
+### Negative Case 1: Non-Equality Condition
+
+```sql
+-- Input (rule should NOT apply)
+SELECT * FROM lhs
+WHERE EXISTS (SELECT 1 FROM rhs WHERE lhs.a < rhs.b);
+
+-- Output (unchanged - non-equality condition)
+```
+
+## References
+
+**Source code:**
+- CockroachDB: `pkg/sql/opt/xform/rules/join.opt`
+  - Rule: `CommuteSemiJoin` (lines 65-92)
+  - Git: https://github.com/cockroachdb/cockroach
+  - Commit: 6e210ba6aa33cea5e27b1a8fae212c27941781f4 (2026-03-17)
+
+**Documentation:**
+- Citation [7] mentioned in source: see section 2.1.1
+- CockroachDB optimizer design: https://www.cockroachlabs.com/docs/stable/cost-based-optimizer.html

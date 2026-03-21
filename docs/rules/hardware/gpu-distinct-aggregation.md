@@ -1,0 +1,167 @@
+# Rule: GPU Two-Phase Distinct Aggregation
+
+**Category:** hardware/gpu
+**File:** `rules/hardware/gpu/gpu-distinct-aggregation.rra`
+
+## Metadata
+
+- **ID:** `gpu-distinct-aggregation`
+- **Version:** "1.0.0"
+- **Databases:** heavydb, sqream
+- **Tags:** gpu, distinct, aggregation, dedup, hash-set, two-phase
+- **Authors:** "RA Contributors"
+
+
+# GPU Two-Phase Distinct Aggregation
+
+## Description
+
+Implements COUNT(DISTINCT), SUM(DISTINCT), and similar distinct
+aggregates on the GPU using a two-phase approach: first deduplicate
+values per group using a GPU hash set, then apply the aggregate
+function on the deduplicated values. This avoids the CPU bottleneck
+of maintaining per-group hash sets sequentially.
+
+**When to apply**: A query uses DISTINCT aggregates on a column with
+moderate NDV (number of distinct values) that fits in GPU memory as
+a hash set, and the input is large.
+
+**Why it works**: The GPU builds per-group hash sets in parallel using
+atomic insertions. Block-local dedup in shared memory reduces
+contention on the global hash set. Once deduplication is complete,
+the aggregate (COUNT, SUM) is a simple parallel reduction over the
+hash set contents.
+
+## Relational Algebra
+
+```algebra
+gamma[g; COUNT(DISTINCT col)](R)
+  -> gpu_distinct_aggregate[g; COUNT(col)](gpu_dedup[g, col](R))
+  where |R| > threshold
+    AND ndv(col) * groups(g) fits gpu_memory
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("gpu-distinct-aggregation";
+    "(aggregate ?group_by (count_distinct ?col) ?input)" =>
+    "(gpu_aggregate ?group_by (count ?col)
+       (gpu_dedup ?group_by ?col ?input))"
+    if input_large_enough("?input")
+    if dedup_sets_fit_gpu("?group_by", "?col", "?input")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    col_name: &str,
+    group_by_cols: &[&str],
+    hw: &HardwareProfile,
+) -> bool {
+    let col_ndv = stats
+        .columns
+        .get(col_name)
+        .map(|c| c.distinct_count)
+        .unwrap_or(stats.row_count);
+
+    let group_count: f64 = group_by_cols
+        .iter()
+        .filter_map(|c| stats.columns.get(*c))
+        .map(|cs| cs.distinct_count)
+        .product();
+
+    // Each group needs a hash set of NDV entries
+    let hash_set_bytes =
+        (group_count * col_ndv * 16.0) as u64;
+
+    stats.row_count > 500_000.0
+        && hash_set_bytes <= hw.gpu_memory_bytes
+}
+```
+
+**Restrictions:**
+- Per-group hash set memory grows with NDV * group_count
+- Very high NDV columns may not fit in GPU memory
+- String columns require dictionary encoding for efficient GPU hashing
+- Floating-point DISTINCT has precision considerations
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    col_ndv: f64,
+    group_count: f64,
+    hw: &HardwareProfile,
+) -> f64 {
+    let n = stats.row_count;
+
+    // CPU: sequential hash set insert per group
+    let cpu_ns = n * 120.0; // ~120ns per insert (cache miss)
+
+    // GPU: parallel dedup + aggregate
+    let data_bytes = n as u64 * stats.avg_row_size;
+    let transfer_ns = data_bytes as f64
+        / (hw.pcie_bandwidth_gbps * 1e9) * 1e9;
+    let dedup_ns =
+        n * 120.0 / hw.gpu_sm_count as f64; // parallel insert
+    let agg_ns =
+        col_ndv * group_count * 10.0 / hw.gpu_sm_count as f64;
+    let gpu_ns = transfer_ns + dedup_ns + agg_ns;
+
+    if cpu_ns > gpu_ns {
+        (cpu_ns - gpu_ns) / cpu_ns
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 3x-8x for large inputs with moderate NDV. Less
+benefit when NDV approaches input cardinality (dedup does little).
+
+## Test Cases
+
+### Positive: COUNT(DISTINCT) on large table
+
+```sql
+-- orders: 150M rows, ~10M distinct customers
+SELECT o_orderstatus, COUNT(DISTINCT o_custkey)
+FROM orders
+GROUP BY o_orderstatus;
+
+-- Expected: GPU dedup + count (3 groups, 10M NDV per group)
+-- Plan: GpuAggregate(groups=[o_orderstatus], agg=COUNT,
+--        input=GpuDedup(groups=[o_orderstatus],
+--                       col=o_custkey, input=orders))
+```
+
+### Negative: NDV too high for GPU hash sets
+
+```sql
+-- lineitem: 600M rows, 600M distinct l_comment values
+-- Hash sets would be ~150 GB (does not fit in GPU)
+SELECT l_returnflag, COUNT(DISTINCT l_comment)
+FROM lineitem
+GROUP BY l_returnflag;
+
+-- Expected: CPU distinct aggregation
+-- Plan: HashAggregate(groups=[l_returnflag],
+--        aggs=[COUNT(DISTINCT l_comment)])
+```
+
+## References
+
+**Implementation in databases:**
+- HeavyDB: `GroupByAndAggregate.cpp` - distinct handling
+- SQream: GPU distinct aggregation
+
+**Academic papers:**
+- Wu et al., "Multi-GPU Aggregation", VLDB 2019
+- Fang et al., "GPU/CPU Heterogeneous Processing for Aggregation Operations", TODS 2020

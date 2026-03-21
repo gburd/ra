@@ -1,0 +1,91 @@
+# Rule: Semi-Join to Existence Check
+
+**Category:** logical/join-elimination
+**File:** `rules/logical/join-elimination/semi-join-to-existence-check.rra`
+
+## Metadata
+
+- **ID:** `semi-join-to-existence-check`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, duckdb
+- **Tags:** join, semi-join, existence
+- **Authors:** "RA Contributors"
+
+
+# Semi-Join to Existence Check
+
+## Description
+
+Converts semi-join to simple existence check when only testing for row existence.
+
+**When to apply**: Semi-join used only to filter left side based on right side existence.
+
+**Why it works**: Can use index lookup or bitmap instead of full join operation.
+
+## Relational Algebra
+
+```algebra
+semi_join[cond](L, R)
+  -> filter[exists(R where cond)](L)
+  where simple_condition(cond)
+```
+
+## Implementation
+
+```rust
+rw!("semi-join-to-exists";
+    "(semi-join ?cond ?left ?right)" =>
+    "(filter (exists (select ?right (where ?cond))) ?left)"
+    if can_use_index("?right", "?cond")
+),
+```
+
+## Cost Model
+
+```rust
+fn benefit(left_size: u64, right_size: u64, selectivity: f64) -> f64 {
+    let semi_join = left_size as f64 * right_size as f64 * selectivity;
+    let exists_check = left_size as f64 * 10.0; // Index lookups
+    (semi_join - exists_check) / semi_join
+}
+```
+
+**Typical benefit**: 20-40% with indexed lookups
+
+## Test Cases
+
+### Positive: EXISTS with index
+
+```sql
+SELECT * FROM customers
+WHERE EXISTS (SELECT 1 FROM orders WHERE orders.customer_id = customers.id);
+
+-- Use index on orders(customer_id) for existence checks
+```
+
+### Positive: IN subquery
+
+```sql
+SELECT * FROM products
+WHERE category_id IN (SELECT id FROM categories WHERE active = true);
+
+-- Convert to indexed lookups
+```
+
+### Negative: Complex join conditions
+
+```sql
+SELECT * FROM orders o
+WHERE EXISTS (
+    SELECT 1 FROM order_items oi
+    WHERE oi.order_id = o.id AND oi.quantity > o.total / 100
+);
+
+-- Cannot simplify: condition references both sides
+```
+
+## References
+
+- PostgreSQL: Semi-join to index scan
+- DuckDB: EXISTS optimization with bloom filters
+- MySQL: Semi-join materialization strategies

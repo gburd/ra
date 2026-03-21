@@ -1,0 +1,106 @@
+# Rule: Path Materialization for Repeated Traversals
+
+**Category:** multi-model/graph
+**File:** `rules/multi-model/graph/path-materialization.rra`
+
+## Metadata
+
+- **ID:** `path-materialization`
+- **Version:** "1.0.0"
+- **Databases:** neo4j, janusgraph, tigergraph
+- **Tags:** graph, path, materialization, caching
+- **SQL Standard:** "cypher:9"
+- **Authors:** "RA Contributors"
+
+
+# Path Materialization for Repeated Traversals
+
+## Description
+
+Materializes frequently traversed paths as precomputed edges (shortcuts)
+to avoid redundant multi-hop traversals. When the same path pattern is
+traversed repeatedly across different starting nodes, storing the
+transitive closure for that pattern reduces each query from O(hops) to
+O(1) per result.
+
+**When to apply**: A variable-length path pattern appears in a hot query
+and the underlying edge set changes infrequently.
+
+**Why it works**: Precomputing and caching path results amortizes
+traversal cost across queries. Each lookup hits the materialized edge
+directly instead of walking multiple hops.
+
+## Relational Algebra
+
+```algebra
+R -[*1..k]-> S
+  -> R -[:MATERIALIZED_PATH]-> S
+  where the path pattern (edge types, direction, depth) is
+  registered for materialization
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("path-materialization";
+    "(var-length-path ?src ?etype ?dst ?min ?max)" =>
+    "(traverse ?src materialized_?etype ?dst)"
+    if materialization_exists("?etype", "?min", "?max")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    edge_type: &str,
+    min_hops: u32,
+    max_hops: u32,
+    catalog: &MaterializationCatalog,
+) -> bool {
+    catalog.has_materialization(edge_type, min_hops, max_hops)
+    && !catalog.is_stale(edge_type)
+}
+```
+
+**Restrictions:**
+- Materialization must exist and be up to date
+- Only static or slowly changing graphs benefit
+- Memory overhead for storing materialized paths
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    avg_path_length: f64,
+    traversal_cost_per_hop: f64,
+    materialized_lookup_cost: f64,
+) -> f64 {
+    let original = avg_path_length * traversal_cost_per_hop;
+    (original - materialized_lookup_cost) / original
+}
+```
+
+**Typical benefit**: 0.6-0.95 for paths of length 3+.
+
+## Test Cases
+
+```cypher
+-- Positive: 2-hop friend-of-friend with materialized shortcut
+MATCH (a:Person)-[:KNOWS*2]->(b:Person)
+RETURN a.name, b.name;
+-- Rewritten to use materialized KNOWS_2HOP edge
+
+-- Negative: path depth exceeds materialization range
+MATCH (a:Person)-[:KNOWS*5..10]->(b:Person)
+RETURN a.name, b.name;
+-- No materialization registered for depth 5..10
+```
+
+## References
+
+Neo4j: APOC Procedures - apoc.path.expand
+Fan et al. "Graph Pattern Matching: From Intractable to Polynomial Time" (VLDB 2010)
+Yu, Cheng "Graph Reachability Queries: A Survey" (VLDB 2010)

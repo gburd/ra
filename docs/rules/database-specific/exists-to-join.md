@@ -1,0 +1,130 @@
+# Rule: Apache Derby EXISTS Subquery Flattening
+
+**Category:** database-specific/derby
+**File:** `rules/database-specific/derby/exists-to-join.rra`
+
+## Metadata
+
+- **ID:** `derby-exists-to-join`
+- **Version:** "1.0.0"
+- **Databases:** derby
+- **Tags:** database-specific, derby, subquery, exists, flattening, join
+- **Authors:** "RA Contributors"
+
+
+# Apache Derby EXISTS Subquery Flattening
+
+## Description
+
+Derby's optimizer flattens EXISTS subqueries into semi-joins when
+the subquery is correlated on an equi-join condition.  Instead of
+executing the subquery once per outer row, Derby rewrites it as a
+semi-join, which the optimizer can then order and execute using
+index lookups or hash strategies.
+
+**When to apply**: An EXISTS or IN subquery is correlated with the
+outer query on an equality condition, and the subquery does not
+contain aggregation, DISTINCT, or set operations that prevent
+flattening.
+
+**Why it works**: A correlated subquery executed per-row is O(n*m)
+in the worst case.  A semi-join allows the optimizer to choose the
+best join strategy (nested-loop with index, hash semi-join) and
+process both sides as a single plan.
+
+**Database version**: Apache Derby 10.1+
+
+## Relational Algebra
+
+```algebra
+-- Before: correlated EXISTS subquery
+sigma[EXISTS(sigma[S.fk = O.id](S))](O)
+
+-- After: semi-join
+O semi-join[O.id = S.fk] S
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("derby-exists-to-join";
+    "(filter (exists
+        (filter (= ?inner_col ?outer_col)
+            ?inner_rel))
+        ?outer_rel)" =>
+    "(semi-join (= ?outer_col ?inner_col)
+        ?outer_rel ?inner_rel)"
+    if is_database("derby")
+    if is_equi_correlation("?inner_col", "?outer_col")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    subquery: &Subquery,
+) -> bool {
+    subquery.is_exists_or_in()
+    && subquery.correlation_is_equi_join()
+    && !subquery.has_aggregation()
+    && !subquery.has_distinct()
+    && !subquery.has_union()
+}
+```
+
+**Restrictions:**
+- Cannot flatten subqueries with GROUP BY, HAVING, or aggregates
+- Cannot flatten if the subquery references outer tables other
+  than the immediate parent
+- NOT EXISTS is converted to anti-join instead of semi-join
+- Derby also flattens IN subqueries using the same mechanism
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    outer_rows: f64,
+    inner_rows: f64,
+    inner_selectivity: f64,
+) -> f64 {
+    // Correlated subquery cost
+    let correlated = outer_rows * inner_rows * inner_selectivity;
+    // Semi-join cost (hash or indexed)
+    let semi_join = outer_rows + inner_rows;
+    correlated - semi_join
+}
+```
+
+**Typical benefit**: 10-100x improvement for EXISTS subqueries
+against large tables.
+
+## Test Cases
+
+```sql
+-- Positive: correlated EXISTS with equi-join
+SELECT * FROM orders o
+WHERE EXISTS (
+    SELECT 1 FROM returns r WHERE r.order_id = o.id
+);
+-- Flattened to: orders SEMI-JOIN returns ON o.id = r.order_id
+```
+
+```sql
+-- Negative: subquery with aggregation
+SELECT * FROM orders o
+WHERE EXISTS (
+    SELECT 1 FROM returns r
+    WHERE r.order_id = o.id
+    GROUP BY r.reason HAVING COUNT(*) > 3
+);
+-- Cannot flatten due to GROUP BY/HAVING
+```
+
+## References
+
+Apache Derby: "Subquery Flattening" in optimizer documentation
+Source: org.apache.derby.impl.sql.compile.SubqueryNode
+Source: `flattenToExistsJoin()` method

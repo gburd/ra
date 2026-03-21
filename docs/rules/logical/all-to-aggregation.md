@@ -1,0 +1,110 @@
+# Rule: ALL Subquery to Aggregation
+
+**Category:** logical/subquery-unnesting
+**File:** `rules/logical/subquery-unnesting/all-to-aggregation.rra`
+
+## Metadata
+
+- **ID:** `all-to-aggregation`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, oracle
+- **Tags:** subquery, unnesting, all, aggregation
+- **Authors:** "RA Contributors"
+
+
+# ALL Subquery to Aggregation
+
+## Description
+
+Converts ALL subqueries to aggregations for more efficient evaluation.
+
+**When to apply**: WHERE col op ALL (subquery) can be rewritten using MIN/MAX.
+
+**Why it works**: Single aggregation cheaper than comparing against every subquery row.
+
+## Relational Algebra
+
+```algebra
+filter[A.x > ALL (select S.y from S)](A)
+  -> join[A.x > (select MAX(S.y) from S)](A, aggregate[MAX(y)](S))
+
+filter[A.x < ALL (select S.y from S)](A)
+  -> join[A.x < (select MIN(S.y) from S)](A, aggregate[MIN(y)](S))
+```
+
+## Implementation
+
+```rust
+rw!("all-greater-to-max";
+    "(filter (all > ?col ?subquery) ?input)" =>
+    "(filter (> ?col (max ?subquery)) ?input)"
+),
+
+rw!("all-less-to-min";
+    "(filter (all < ?col ?subquery) ?input)" =>
+    "(filter (< ?col (min ?subquery)) ?input)"
+),
+```
+
+## Cost Model
+
+```rust
+fn benefit(outer_size: u64, inner_size: u64) -> f64 {
+    let all_subquery = outer_size as f64 * inner_size as f64; // Compare all pairs
+    let aggregation = inner_size as f64 + outer_size as f64; // Aggregate + filter
+    (all_subquery - aggregation) / all_subquery
+}
+```
+
+**Typical benefit**: 30-60% by aggregating once
+
+## Test Cases
+
+### Positive: Greater than ALL
+
+```sql
+SELECT * FROM products
+WHERE price > ALL (
+    SELECT price FROM competitor_prices WHERE category = 'Electronics'
+);
+
+-- Rewrite to: price > (SELECT MAX(price) FROM ...)
+```
+
+### Positive: Less than ALL
+
+```sql
+SELECT * FROM employees
+WHERE salary < ALL (
+    SELECT salary FROM executives
+);
+
+-- Rewrite to: salary < (SELECT MIN(salary) FROM executives)
+```
+
+### Negative: Equality ALL (different semantics)
+
+```sql
+SELECT * FROM orders
+WHERE status = ALL (SELECT 'completed');
+
+-- Cannot convert: = ALL has different semantics
+```
+
+### Negative: Correlated ALL with complex condition
+
+```sql
+SELECT * FROM sales s1
+WHERE amount > ALL (
+    SELECT amount FROM sales s2
+    WHERE s2.region = s1.region AND s2.product_id <> s1.product_id
+);
+
+-- Complex correlation: keep as correlated subquery or convert to window function
+```
+
+## References
+
+- PostgreSQL: ALL subquery optimization
+- Oracle: Subquery transformation to aggregation
+- MySQL: ALL predicate simplification

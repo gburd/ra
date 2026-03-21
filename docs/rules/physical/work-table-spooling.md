@@ -1,0 +1,78 @@
+# Rule: Work Table Spooling
+
+**Category:** physical/materialization
+**File:** `rules/physical/materialization/work-table-spooling.rra`
+
+## Metadata
+
+- **ID:** `work-table-spooling`
+- **Version:** "1.0.0"
+- **Databases:** mssql, oracle
+- **Tags:** materialization, work-table, spool
+- **Authors:** "RA Contributors"
+
+
+# Work Table Spooling
+
+## Description
+
+Spools intermediate results to work table for operators needing multiple passes or blocking operations.
+
+**When to apply**: Blocking operators (sort, hash join) or operators requiring rewinding.
+
+**Why it works**: Enables multiple scans of intermediate data; supports sort/hash spilling.
+
+## Relational Algebra
+
+```algebra
+operator_requiring_rewind(input)
+  -> spool_to_worktable(input)
+     operator(worktable)  // Can scan multiple times
+```
+
+## Implementation
+
+```rust
+rw!("spool-to-worktable";
+    "(operator-needs-rewind ?input)" =>
+    "(let ?worktable (spool ?input)
+      (operator-with-rewind ?worktable))"
+    if needs_multiple_scans("?operator")
+),
+```
+
+## Cost Model
+
+```rust
+fn cost(data_size: u64, num_scans: usize) -> f64 {
+    let spool = data_size as f64 * 1.2; // Write
+    let scans = num_scans as f64 * data_size as f64 * 0.8; // Read multiple times
+    spool + scans
+}
+```
+
+**Typical benefit**: 30-60% for operators needing multiple passes
+
+## Test Cases
+
+### Positive: Nested loop requiring rewind
+
+```sql
+SELECT * FROM small_table st
+CROSS JOIN large_table lt;
+
+-- Spool small_table: scan once, reuse for each large_table row
+```
+
+### Negative: Single-pass operator
+
+```sql
+SELECT * FROM table WHERE condition;
+
+-- Filter is single-pass: no spooling needed
+```
+
+## References
+
+- mssql: Table spool operators
+- Oracle: Work area management

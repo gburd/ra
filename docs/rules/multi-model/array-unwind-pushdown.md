@@ -1,0 +1,113 @@
+# Rule: Array Unwind Pushdown
+
+**Category:** multi-model/document
+**File:** `rules/multi-model/document/array-unwind-pushdown.rra`
+
+## Metadata
+
+- **ID:** `array-unwind-pushdown`
+- **Version:** "1.0.0"
+- **Databases:** mongodb, couchbase, cosmosdb
+- **Tags:** document, array, unwind, pushdown, flatten
+- **SQL Standard:** "mql:5"
+- **Authors:** "RA Contributors"
+
+
+# Array Unwind Pushdown
+
+## Description
+
+Pushes filter predicates below array unwind (flatten) operations when
+the predicate can be evaluated on individual array elements before
+unnesting. This reduces the number of elements that enter the
+pipeline, avoiding expensive per-element processing on non-qualifying
+entries.
+
+**When to apply**: A filter sits above an unwind stage and the predicate
+references only the unwound field or fields available before unwind.
+
+**Why it works**: Unwind produces one output row per array element.
+Filtering before unwind (using `$elemMatch` or equivalent) eliminates
+entire documents whose arrays contain no qualifying elements, and within
+qualifying documents, only matching elements are emitted.
+
+## Relational Algebra
+
+```algebra
+sigma[p(elem)](unwind(doc, array_field))
+  -> unwind(sigma[$elemMatch(array_field, p)](doc), array_field)
+  where p references only the unwound element
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("array-unwind-pushdown";
+    "(filter ?pred (unwind ?doc ?field))" =>
+    "(unwind (filter (elem-match ?field ?pred) ?doc) ?field)"
+    if references_unwind_field_only("?pred", "?field")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(pred: &Expr, unwind_field: &str) -> bool {
+    let refs = pred.referenced_fields();
+    refs.iter().all(|f| f.starts_with(unwind_field))
+    && pred.is_deterministic()
+}
+```
+
+**Restrictions:**
+- Predicate must reference only the unwound field
+- Predicates on fields outside the array cannot be pushed into `$elemMatch`
+- Preserving null and empty arrays changes semantics
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    doc_count: f64,
+    avg_array_size: f64,
+    selectivity: f64,
+) -> f64 {
+    let unfiltered_rows = doc_count * avg_array_size;
+    let doc_matching = doc_count * selectivity;
+    let elem_matching = doc_matching * avg_array_size * selectivity;
+    (unfiltered_rows - elem_matching) / unfiltered_rows
+}
+```
+
+**Typical benefit**: 0.5-0.9 for selective array-element predicates.
+
+## Test Cases
+
+```javascript
+// Positive: filter on unwound element field
+db.orders.aggregate([
+  { $unwind: "$items" },
+  { $match: { "items.price": { $gt: 100 } } }
+]);
+// Rewritten to:
+db.orders.aggregate([
+  { $match: { items: { $elemMatch: { price: { $gt: 100 } } } } },
+  { $unwind: "$items" },
+  { $match: { "items.price": { $gt: 100 } } }
+]);
+
+// Negative: filter references field outside the array
+db.orders.aggregate([
+  { $unwind: "$items" },
+  { $match: { status: "shipped" } }
+]);
+// status is not in the items array; different pushdown rule
+```
+
+## References
+
+MongoDB: src/mongo/db/pipeline/pipeline_d.cpp
+MongoDB Aggregation Framework: docs.mongodb.com/manual/core/aggregation-pipeline-optimization
+Banker et al. "MongoDB in Action" (Manning, 2nd ed.) Chapter 6

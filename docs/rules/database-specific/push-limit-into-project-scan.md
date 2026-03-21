@@ -1,0 +1,100 @@
+# Rule: Push Limit Through Project Into Scan
+
+**Category:** database-specific/cockroachdb
+**File:** `rules/database-specific/cockroachdb/push-limit-into-project-scan.rra`
+
+## Metadata
+
+- **ID:** `cockroachdb-push-limit-into-project-scan`
+- **Version:** 1.0.0
+- **Databases:** cockroachdb
+- **Tags:** database-specific, cockroachdb, limit, pushdown, project, partial-index
+- **Authors:** "RA Contributors"
+
+
+# Push Limit Through Project Into Scan
+
+## Description
+
+Pushes a limit through a project operator into a filtered scan, specifically for partial index scans that produce constant columns via projection. This handles the case where GenerateConstrainedScans adds a project for partial index constant columns.
+
+**When to apply**: Limit over Project over partial index Scan.
+
+**Why it works**: Partial index scans can benefit from limits even with an intervening project. The project produces constants from the partial index predicate, which shouldn't prevent limit pushdown.
+
+**Database version**: CockroachDB v20.2+
+
+## Relational Algebra
+
+```algebra
+Limit[k](Project[cols+const](Scan[partial_index](T)))
+  -> Project[cols+const](Scan[partial_index, limit=k](T))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("cockroachdb-push-limit-into-project-scan";
+    "(limit ?k
+        (project ?projections ?passthrough
+            (scan ?private))
+        ?ordering)" =>
+    "(project ?projections ?passthrough
+        (scan (limit_scan_private ?private ?k ?ordering)))"
+    if is_database("cockroachdb")
+    if is_positive_int("?k")
+    if can_limit_filtered_scan("?private", "?ordering")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    scan: &ScanPrivate,
+    projections: &[Expr],
+) -> bool {
+    // Scan must be a partial index
+    scan.is_partial_index()
+        // Projections should be simple (constants from partial index predicate)
+        && projections.iter().all(|p| p.is_constant())
+}
+```
+
+**Restrictions:**
+- Only applies to CockroachDB partial index scans
+- Project must produce only constant columns
+- Enables limit pushdown that PushLimitIntoFilteredScan misses
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    scan_rows: f64,
+    limit: f64,
+) -> f64 {
+    (scan_rows - limit) / scan_rows
+}
+```
+
+**Typical benefit**: 50-90%
+
+## Test Cases
+
+```sql
+CREATE TABLE t (a INT, b INT, INDEX a_b_idx (a) WHERE b = 1);
+
+SELECT * FROM t WHERE a > 0 AND b = 1 LIMIT 1;
+
+-- Scan generates Project for b=1 (partial index constant)
+-- Push limit through project into scan
+```
+
+## References
+
+**Source code:**
+- CockroachDB: `pkg/sql/opt/xform/rules/limit.opt`
+  - Rule: `PushLimitIntoProjectFilteredScan` (lines 38-80)
+  - Commit: 6e210ba6aa33cea5e27b1a8fae212c27941781f4

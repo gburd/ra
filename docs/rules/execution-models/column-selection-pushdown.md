@@ -1,0 +1,225 @@
+# Rule: Column-at-a-Time Selection Vector Pushdown
+
+**Category:** execution-models/column-at-a-time
+**File:** `rules/execution-models/column-at-a-time/column-selection-pushdown.rra`
+
+## Metadata
+
+- **ID:** `column-selection-pushdown`
+- **Version:** "1.0.0"
+- **Databases:** monetdb, clickhouse, duckdb, vectorwise
+- **Tags:** execution, columnar, selection, pushdown, branch-free
+- **Authors:** "Peter Boncz", "Marcin Zukowski"
+
+
+# Column-at-a-Time Selection Vector Pushdown
+
+## Description
+
+Pushes selection vectors (bitmasks or position lists indicating which rows
+survive a filter) through downstream operators, allowing them to skip
+processing of eliminated rows. Instead of physically removing filtered rows
+from column vectors, the selection vector is passed as a side-channel that
+downstream operators consult to skip inactive positions.
+
+**Two selection vector representations:**
+- **Bit vector**: One bit per row (compact, good for low/high selectivity)
+- **Position list**: Array of active row indices (good for moderate selectivity)
+- Crossover point: ~50% selectivity (below: position list is smaller)
+
+**Why pushdown instead of materialization**: Creating a new, compact column
+vector after each filter requires copying all surviving values. With selection
+vector pushdown, no data is copied until the final output stage. This saves
+memory bandwidth proportional to the number of downstream operators.
+
+## Relational Algebra
+
+```
+Without selection pushdown (materialize after filter):
+  col_a = scan("table", "a")         -- N values
+  filtered = compact(col_a, pred)     -- copy selectivity*N values
+  result = aggregate(filtered)        -- process selectivity*N
+
+With selection pushdown:
+  col_a = scan("table", "a")         -- N values (no copy)
+  sel = evaluate(pred, col_a)        -- N bits or K positions
+  result = aggregate(col_a, sel)     -- skip non-selected positions
+  -- Zero copies; only selected values processed in aggregate
+```
+
+## Implementation
+
+```rust
+/// Selection vector with automatic format selection
+pub enum SelectionVector {
+    /// All rows active (no filtering)
+    All(usize),
+    /// Bit vector: 1 bit per row
+    Bitmap(Vec<u64>, usize),
+    /// Position list: indices of active rows
+    Positions(Vec<u32>),
+}
+
+impl SelectionVector {
+    /// Create from filter result, choosing optimal representation
+    pub fn from_filter(
+        results: &[bool],
+        total_rows: usize,
+    ) -> Self {
+        let active_count = results.iter().filter(|&&b| b).count();
+        let selectivity = active_count as f64 / total_rows as f64;
+
+        if selectivity > 0.99 {
+            Self::All(total_rows)
+        } else if selectivity < 0.5 {
+            // Position list is more compact
+            let positions: Vec<u32> = results.iter()
+                .enumerate()
+                .filter(|(_, &b)| b)
+                .map(|(i, _)| i as u32)
+                .collect();
+            Self::Positions(positions)
+        } else {
+            // Bitmap is more compact
+            let words = (total_rows + 63) / 64;
+            let mut bitmap = vec![0u64; words];
+            for (i, &active) in results.iter().enumerate() {
+                if active {
+                    bitmap[i / 64] |= 1u64 << (i % 64);
+                }
+            }
+            Self::Bitmap(bitmap, total_rows)
+        }
+    }
+
+    /// Intersect two selection vectors (AND)
+    pub fn intersect(&self, other: &Self) -> Self {
+        match (self, other) {
+            (Self::All(n), other) => other.clone(),
+            (me, Self::All(_)) => me.clone(),
+            (Self::Bitmap(a, n), Self::Bitmap(b, _)) => {
+                let result: Vec<u64> = a.iter()
+                    .zip(b.iter())
+                    .map(|(&x, &y)| x & y)
+                    .collect();
+                Self::Bitmap(result, *n)
+            }
+            _ => {
+                // Convert to bitmap for intersection
+                self.to_bitmap().intersect(&other.to_bitmap())
+            }
+        }
+    }
+
+    /// Count active rows
+    pub fn count(&self) -> usize {
+        match self {
+            Self::All(n) => *n,
+            Self::Bitmap(words, _) => {
+                words.iter().map(|w| w.count_ones() as usize).sum()
+            }
+            Self::Positions(pos) => pos.len(),
+        }
+    }
+
+    /// Iterate over active positions
+    pub fn iter_positions(&self) -> Box<dyn Iterator<Item = usize> + '_> {
+        match self {
+            Self::All(n) => Box::new(0..*n),
+            Self::Bitmap(words, _) => {
+                Box::new(words.iter().enumerate().flat_map(|(wi, &word)| {
+                    (0..64).filter(move |&bi| word & (1u64 << bi) != 0)
+                        .map(move |bi| wi * 64 + bi)
+                }))
+            }
+            Self::Positions(pos) => {
+                Box::new(pos.iter().map(|&p| p as usize))
+            }
+        }
+    }
+}
+
+/// Aggregate with selection vector pushdown
+pub fn sum_with_selection(
+    column: &[f64],
+    selection: &SelectionVector,
+) -> f64 {
+    match selection {
+        SelectionVector::All(_) => {
+            // No selection: sum entire column (auto-vectorizes)
+            column.iter().sum()
+        }
+        SelectionVector::Positions(positions) => {
+            // Gather from positions (may auto-vectorize with AVX2 gather)
+            positions.iter()
+                .map(|&pos| column[pos as usize])
+                .sum()
+        }
+        SelectionVector::Bitmap(bitmap, _) => {
+            // Iterate set bits
+            let mut sum = 0.0;
+            for (wi, &word) in bitmap.iter().enumerate() {
+                let mut w = word;
+                while w != 0 {
+                    let bit = w.trailing_zeros() as usize;
+                    sum += column[wi * 64 + bit];
+                    w &= w - 1; // clear lowest set bit
+                }
+            }
+            sum
+        }
+    }
+}
+```
+
+## Cost Model
+
+**Without pushdown (materialize):**
+- Filter: O(N) evaluate + O(S*N) copy selected values
+- Downstream: O(S*N) per operator on compacted data
+- Total: O(N) + O(S*N) * num_operators
+- Memory: S*N * value_bytes per materialization
+
+**With pushdown (selection vector):**
+- Filter: O(N) evaluate + O(N/64) create bitmap
+- Downstream: O(S*N) per operator (iterate selection)
+- Total: O(N) + O(S*N) * num_operators (same data processing)
+- Memory: O(N/64) for bitmap (no data copies)
+
+**Savings:** Eliminates O(S*N * value_bytes * num_operators) memory copies
+
+## Test Cases
+
+```sql
+-- Test 1: Multi-predicate filter with pushdown
+SELECT SUM(amount) FROM orders
+WHERE date > '2024-01-01' AND status = 'shipped' AND region = 'US';
+-- sel1 = evaluate(date > '2024-01-01')    -- bitmap
+-- sel2 = evaluate(status = 'shipped')      -- bitmap
+-- sel3 = evaluate(region = 'US')           -- bitmap
+-- combined = sel1 AND sel2 AND sel3        -- bitwise AND
+-- result = sum(amount, combined)           -- skip non-selected
+
+-- Test 2: Low selectivity (position list)
+SELECT * FROM events WHERE type = 'error';
+-- 0.1% selectivity: position list of ~1000 positions
+-- Downstream gathers from positions: efficient random access
+
+-- Test 3: High selectivity (bitmap or All)
+SELECT * FROM active_users WHERE last_login > NOW() - INTERVAL '1 day';
+-- 80% selectivity: bitmap representation
+-- Downstream processes most rows, bitmap overhead minimal
+```
+
+## References
+
+1. **Boncz, Peter et al**. "MonetDB/X100: Hyper-Pipelining Query Execution."
+   CIDR 2005.
+   - Selection vector design in vectorized execution
+
+2. **Zukowski, Marcin**. "Balancing Vectorized Query Execution with
+   Bandwidth-Optimized Storage." PhD Thesis, CWI, 2009.
+   - Selection vector format tradeoffs
+
+3. **Lang, Harald et al**. "Data Blocks: Hybrid OLTP and OLAP on Compressed
+   Storage using both Vectorization and Compilation." SIGMOD 2016.

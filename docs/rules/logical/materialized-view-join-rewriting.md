@@ -1,0 +1,109 @@
+# Rule: Materialized View Join Rewriting
+
+**Category:** logical/view-rewriting
+**File:** `rules/logical/view-rewriting/materialized-view-join-rewriting.rra`
+
+## Metadata
+
+- **ID:** `mv-join-rewriting`
+- **Version:** "1.0.0"
+- **Databases:** oracle, postgresql, mssql, snowflake
+- **Tags:** logical, materialized-view, join, rewriting, cost-based
+- **Authors:** "Goldstein & Larson, Microsoft Research"
+
+
+# Materialized View Join Rewriting
+
+## Description
+
+Rewrites a query to use a materialized view when the query joins are a
+subset of the view joins, the query predicates are derivable from the
+view predicates, and the required output columns are available. This
+can transform a multi-table join into a single scan of the precomputed
+view.
+
+**When to apply**: A materialized view exists whose join graph subsumes
+the query join graph.
+
+**Why it works**: The materialized view has already computed the join
+result. If the query needs a subset of that result, scanning the view
+(with additional filtering if needed) is cheaper than recomputing the
+join.
+
+## Relational Algebra
+
+```algebra
+-- Query
+pi[a, b](R JOIN S ON R.id = S.rid WHERE R.x > 10)
+
+-- Materialized View MV = R JOIN S ON R.id = S.rid
+-- Rewrite
+pi[a, b](sigma[x > 10](MV))
+```
+
+## Implementation
+
+```rust
+fn try_rewrite(query: &Plan, mv: &MaterializedView) -> Option<Plan> {
+    // 1. Check join compatibility
+    if \!mv.joins_subsume(&query.joins()) { return None; }
+    // 2. Check predicate derivability
+    let compensation = query.predicates().minus(&mv.predicates());
+    // 3. Check column availability
+    if \!mv.schema().contains_all(&query.required_columns()) { return None; }
+    // 4. Build rewritten plan
+    Some(Plan::project(
+        query.output_columns(),
+        Plan::filter(compensation, Plan::scan_mv(mv))
+    ))
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(query: &Query, mv: &MaterializedView) -> bool {
+    mv.joins_subsume(&query.joins())
+        && query.required_columns().is_subset(&mv.schema())
+        && mv.is_fresh_enough(query.staleness_tolerance())
+}
+```
+
+**Restrictions:**
+- MV must be fresh (or staleness must be acceptable)
+- Query output columns must exist in the MV schema
+- Compensation predicates must be evaluable on MV columns
+
+## Cost Model
+
+```rust
+fn estimated_benefit(query_cost: f64, mv_scan_cost: f64) -> f64 {
+    (query_cost - mv_scan_cost) / query_cost
+}
+```
+
+**Typical benefit**: 50-99% when MV eliminates multi-table join.
+
+## Test Cases
+
+```sql
+-- MV definition
+CREATE MATERIALIZED VIEW sales_summary AS
+SELECT p.category, s.region, SUM(s.amount) AS total, COUNT(*) AS cnt
+FROM sales s JOIN products p ON s.product_id = p.id
+GROUP BY p.category, s.region;
+
+-- Positive: query subsumable by MV
+SELECT category, SUM(total) FROM sales_summary
+WHERE region = 'US' GROUP BY category;
+
+-- Negative: query needs column not in MV
+SELECT p.supplier, SUM(s.amount) FROM sales s JOIN products p ON s.product_id = p.id
+GROUP BY p.supplier;
+-- supplier not in MV
+```
+
+## References
+
+- Goldstein, J. & Larson, P., "Optimizing Queries Using Materialized Views: A Practical, Scalable Solution", ACM SIGMOD 2001, DOI: 10.1145/375663.375706
+- Oracle: "Materialized View Query Rewrite", Oracle Documentation

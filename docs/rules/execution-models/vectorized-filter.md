@@ -1,0 +1,306 @@
+# Rule: Vectorized SIMD Filter
+
+**Category:** execution-models/vectorized
+**File:** `rules/execution-models/vectorized/vectorized-filter.rra`
+
+## Metadata
+
+- **ID:** `vectorized-filter`
+- **Version:** "1.0.0"
+- **Databases:** duckdb, clickhouse, monetdb, velox
+- **Tags:** execution, vectorized, filter, simd, selection-vector, batch
+- **Authors:** "RA Contributors"
+
+
+# Vectorized SIMD Filter
+
+## Description
+
+Evaluates filter predicates on entire batches of tuples using SIMD
+instructions, producing a selection vector that tracks which rows pass
+the predicate without copying or materializing filtered data. This is the
+fundamental operator in vectorized query engines.
+
+**When to apply**: Any filter (WHERE clause) in a vectorized execution
+engine. The batch-oriented approach amortizes function call overhead and
+enables SIMD parallelism.
+
+**Why it works**: Instead of evaluating a predicate one row at a time
+(Volcano model: ~20 CPU cycles per row due to virtual function dispatch),
+vectorized filter evaluates the predicate on a vector of values using SIMD
+instructions (e.g., AVX2 processes 8 int32 comparisons simultaneously).
+The result is a selection vector (bitmask or index list) that downstream
+operators use to skip filtered rows without data movement.
+
+**Key design decisions:**
+- **Selection vector vs. compaction**: Selection vectors avoid copying data;
+  compaction copies surviving rows into a dense array. Selection vectors are
+  cheaper for intermediate results; compaction is better before materialization.
+- **Bitmask vs. index list**: Bitmask uses 1 bit per row (cache-friendly for
+  low selectivity); index list stores positions of surviving rows (better for
+  high selectivity where most rows pass).
+- **Conjunctive evaluation**: For `p1 AND p2`, evaluate p1 first, then
+  evaluate p2 only on surviving rows (short-circuit at batch level).
+
+## Relational Algebra
+
+```algebra
+VectorizedFilter(input, predicate) -> Iterator<Batch>
+
+-- Batch-level operation:
+fn process_batch(batch: Batch, predicate: Expr) -> Batch:
+  // Evaluate predicate on all active rows
+  result_mask = simd_eval(predicate, batch.columns, batch.selection)
+
+  // Combine with existing selection (if any)
+  if batch.selection exists:
+    new_selection = intersect(batch.selection, result_mask)
+  else:
+    new_selection = result_mask
+
+  batch.selection = new_selection
+  return batch
+
+-- Conjunctive (AND) optimization:
+filter[p1 AND p2](batch)
+  -> filter[p2](filter[p1](batch))  // p1 first if more selective
+  -- p2 evaluates only on rows surviving p1
+```
+
+## Implementation
+
+```rust
+pub struct VectorizedFilterIterator {
+    input: Box<dyn VectorizedIterator>,
+    predicate: CompiledExpr,
+    /// Reusable buffer for predicate results
+    result_buffer: Vec<bool>,
+}
+
+impl VectorizedIterator for VectorizedFilterIterator {
+    fn next_batch(&mut self) -> Result<Option<Batch>> {
+        let mut batch = match self.input.next_batch()? {
+            None => return Ok(None),
+            Some(b) => b,
+        };
+
+        let active_count = batch.active_row_count();
+        if active_count == 0 {
+            return Ok(Some(batch)); // All rows already filtered
+        }
+
+        // Evaluate predicate using SIMD
+        self.result_buffer.resize(batch.capacity(), false);
+        self.predicate.eval_batch(
+            &batch.columns,
+            batch.selection.as_ref(),
+            &mut self.result_buffer,
+        )?;
+
+        // Build selection vector from results
+        let mut new_selection = Vec::with_capacity(active_count);
+        match &batch.selection {
+            Some(sel) => {
+                // Intersect with existing selection
+                for &idx in sel {
+                    if self.result_buffer[idx] {
+                        new_selection.push(idx);
+                    }
+                }
+            }
+            None => {
+                // Build from scratch
+                for i in 0..batch.capacity() {
+                    if self.result_buffer[i] {
+                        new_selection.push(i);
+                    }
+                }
+            }
+        }
+
+        batch.selection = Some(new_selection);
+        Ok(Some(batch))
+    }
+}
+
+/// SIMD-accelerated comparison for integer columns
+#[cfg(target_arch = "x86_64")]
+fn simd_compare_gt_i32(
+    column: &[i32],
+    threshold: i32,
+    selection: Option<&[usize]>,
+    result: &mut [bool],
+) {
+    use std::arch::x86_64::*;
+
+    unsafe {
+        let threshold_vec = _mm256_set1_epi32(threshold);
+        let chunks = column.len() / 8;
+
+        for chunk in 0..chunks {
+            let offset = chunk * 8;
+            let data = _mm256_loadu_si256(
+                column[offset..].as_ptr() as *const __m256i
+            );
+            let cmp = _mm256_cmpgt_epi32(data, threshold_vec);
+            let mask = _mm256_movemask_epi8(cmp) as u32;
+
+            // Unpack mask into result buffer
+            for bit in 0..8 {
+                result[offset + bit] = (mask >> (bit * 4)) & 0xF != 0;
+            }
+        }
+
+        // Handle remaining elements
+        for i in (chunks * 8)..column.len() {
+            result[i] = column[i] > threshold;
+        }
+    }
+}
+
+/// Fallback for non-SIMD platforms
+fn scalar_compare_gt_i32(
+    column: &[i32],
+    threshold: i32,
+    result: &mut [bool],
+) {
+    for (i, &val) in column.iter().enumerate() {
+        result[i] = val > threshold;
+    }
+}
+```
+
+**Restrictions:**
+- SIMD width depends on hardware (SSE: 4, AVX2: 8, AVX-512: 16 for i32)
+- String predicates (LIKE, regex) are harder to vectorize effectively
+- Nested OR predicates may require evaluating both branches
+- Selection vector overhead can exceed benefit for very small batches
+- Column alignment requirements for SIMD loads
+
+## Cost Model
+
+```rust
+fn vectorized_filter_cost(
+    num_rows: u64,
+    batch_size: usize,
+    simd_width: usize,
+    selectivity: f64,
+    predicate_complexity: f64, // 1.0 for simple comparison
+) -> CostEstimate {
+    let num_batches = (num_rows as f64 / batch_size as f64).ceil();
+
+    // Per-batch overhead: function call + selection vector setup
+    let batch_overhead = 50.0; // cycles
+
+    // Per-row SIMD cost: comparison + mask extraction
+    let simd_cost_per_row = predicate_complexity * 2.0 / simd_width as f64;
+
+    // Selection vector build cost
+    let selection_cost_per_row = 1.0; // branch per row
+
+    let total_cycles = num_batches * batch_overhead
+        + num_rows as f64 * (simd_cost_per_row + selection_cost_per_row);
+
+    // Compare with scalar (Volcano) cost
+    let volcano_cost = num_rows as f64 * 20.0; // ~20 cycles per row
+
+    CostEstimate {
+        cycles: total_cycles as u64,
+        speedup_vs_volcano: volcano_cost / total_cycles,
+        output_rows: (num_rows as f64 * selectivity) as u64,
+    }
+}
+```
+
+**Typical performance:**
+- Simple integer comparison: 4-8x speedup over scalar via SIMD
+- Compound AND predicate: Additional 2-3x from short-circuit evaluation
+- Overall vs Volcano: 10-30x speedup including amortized overhead
+- Batch size sweet spot: 1024-2048 rows (fits L1 cache for most column types)
+
+## Test Cases
+
+### Positive: Simple integer comparison with SIMD
+
+```sql
+SELECT * FROM sensor_data WHERE temperature > 100;
+
+-- 100M rows, batch_size=1024, AVX2 (8-wide i32)
+-- SIMD: 100M / 8 = 12.5M vector comparisons
+-- Scalar: 100M individual comparisons
+-- Speedup: ~6x for the comparison alone
+-- Selection vector: O(100M * selectivity) entries
+```
+
+### Positive: Conjunctive predicate with cascading selectivity
+
+```sql
+SELECT * FROM orders
+WHERE status = 'shipped'       -- 30% selectivity
+  AND total > 1000             -- 10% selectivity
+  AND customer_region = 'US';  -- 40% selectivity
+
+-- Evaluate most selective first: total > 1000 (10%)
+-- Then status = 'shipped' on 10% of rows (3% survive)
+-- Then customer_region on 3% of rows (1.2% survive)
+-- Total comparisons: 100% + 10% + 3% = 113% of rows
+-- Without ordering: 100% + 100% + 100% = 300% of rows
+```
+
+### Positive: Selection vector passthrough (no data copy)
+
+```sql
+SELECT customer_id, total
+FROM orders
+WHERE total > 1000    -- filter 1
+  AND date > '2024-01-01';  -- filter 2
+
+-- Filter 1: selection vector = [2, 5, 8, 12, ...]
+-- Filter 2: further narrows selection = [5, 12, ...]
+-- Project: reads only selected positions from columns
+-- No data movement until final materialization
+```
+
+### Negative: Very low selectivity (most rows pass)
+
+```sql
+SELECT * FROM users WHERE active = true;
+-- 95% of users are active
+-- Selection vector nearly full: 95% of positions included
+-- Overhead of building/checking selection exceeds benefit
+-- Compaction (copy surviving rows) may be cheaper than selection
+```
+
+### Negative: Complex string predicate
+
+```sql
+SELECT * FROM logs WHERE message LIKE '%error%connection%';
+-- Substring matching is hard to SIMD-vectorize
+-- Falls back to scalar evaluation per row
+-- Still benefits from batch amortization but not SIMD
+-- Consider: vectorized string contains for fixed patterns
+```
+
+### Negative: Very small table
+
+```sql
+SELECT * FROM config_params WHERE key = 'timeout';
+-- 50 rows: overhead of batch setup exceeds benefit
+-- Scalar evaluation is faster for tiny tables
+-- Threshold: vectorize only if rows > 2 * batch_size
+```
+
+## References
+
+**Academic papers:**
+- Boncz et al., "MonetDB/X100: Hyper-Pipelining Query Execution", CIDR 2005
+- Zhou & Ross, "Implementing Database Operations Using SIMD Instructions", SIGMOD 2002
+- Polychroniou et al., "Rethinking SIMD Vectorization for In-Memory Databases", SIGMOD 2015
+- Kersten et al., "Everything You Always Wanted to Know About Compiled and Vectorized Queries But Were Afraid to Ask", VLDB 2018
+
+**Implementation:**
+- DuckDB: `PhysicalFilter` with `ExpressionExecutor::SelectExpression()`
+- ClickHouse: `FilterTransform` with vectorized block filtering
+- Velox: `FilterProject` operator with SIMD evaluation
+- MonetDB: BAT algebra with selection BATs
+- Apache Arrow: `compute::filter` kernel with SIMD

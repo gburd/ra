@@ -1,0 +1,311 @@
+# Rule: "System R Access Path Enumeration Strategy"
+
+**Category:** cost-models/system-r
+**File:** `rules/cost-models/system-r/access-path-enumeration.rra`
+
+## Metadata
+
+- **ID:** `system-r-access-path-enumeration`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, duckdb, cockroachdb, mssql, oracle
+- **Tags:** access-path, enumeration, optimization, system-r, classic, architecture
+- **Authors:** "Selinger et al. 1979 - IBM Research"
+
+
+# System R Access Path Enumeration Strategy
+
+## Description
+
+The complete System R optimization algorithm ties together all the
+individual components: access path selection for base tables, join
+method selection (NL vs merge-scan), join ordering via DP, and
+interesting order tracking. This rule documents the overall architecture
+and enumeration strategy that became the blueprint for every subsequent
+cost-based optimizer.
+
+**When to apply**: This describes the overall optimizer architecture.
+Every query with 2+ tables passes through this algorithm.
+
+**Why it works**: System R's genius was combining four ideas into one
+coherent framework: (1) cost-based comparison of alternatives, (2)
+dynamic programming for optimal join ordering, (3) interesting orders
+to avoid redundant sorts, and (4) access path selection integrated
+with join ordering. This combination explores the space efficiently
+while finding provably optimal plans within the search restrictions.
+
+## Relational Algebra
+
+```algebra
+-- System R Optimizer Algorithm (simplified):
+
+OPTIMIZE(query):
+  1. Parse query into relational algebra tree
+  2. Collect statistics: TCARD, ICARD, page counts for all tables
+  3. Enumerate interesting orders from:
+     - ORDER BY, GROUP BY columns
+     - Join key columns (for merge-scan)
+  4. For each base table:
+     - Enumerate access paths: seq scan, each matching index
+     - Compute cost for each (path, interesting_order) pair
+     - Keep cheapest for each interesting order + unordered
+  5. DP join enumeration (left-deep only):
+     For subset_size = 2 to n:
+       For each connected subset S:
+         For each relation R in S as new inner:
+           For each interesting order O:
+             For each join method (NL, merge-scan):
+               candidate = join(best(S\R, O'), access_path(R))
+               if cost(candidate) < best(S, O):
+                 best(S, O) = candidate
+  6. For final result:
+     Choose min(
+       best(all_tables, unordered) + sort_cost,
+       best(all_tables, required_order)
+     )
+  7. Return cheapest complete plan
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+struct SystemROptimizer {
+    cost_model: SystemRCostModel,
+    selectivity_estimator: SystemRSelectivityEstimator,
+}
+
+impl SystemROptimizer {
+    fn optimize(&self, query: &Query) -> PhysicalPlan {
+        let tables = query.referenced_tables();
+        let predicates = query.all_predicates();
+        let join_preds = query.join_predicates();
+        let n = tables.len();
+
+        // Step 1: Collect interesting orders
+        let interesting_orders = self.collect_orders(query);
+        let num_orders = interesting_orders.len() + 1; // +1 for unordered
+
+        // Step 2: Base case -- single table access paths
+        // dp[(subset_mask, order_idx)] = (plan, cost)
+        let mut dp: HashMap<(u32, usize), (PhysicalPlan, f64)> =
+            HashMap::new();
+
+        for (i, table) in tables.iter().enumerate() {
+            let mask = 1u32 << i;
+            let local_preds =
+                self.local_predicates(&predicates, table);
+
+            // Enumerate access paths
+            let paths = self.enumerate_access_paths(
+                table, &local_preds,
+            );
+
+            for (order_idx, order) in
+                std::iter::once(SortOrder::None)
+                    .chain(interesting_orders.iter().cloned())
+                    .enumerate()
+            {
+                let mut best_cost = f64::MAX;
+                let mut best_plan = None;
+
+                for path in &paths {
+                    let output_order = path.output_order();
+                    let mut cost = self.cost_model.access_cost(path);
+
+                    // Add sort cost if order required but not produced
+                    if order != SortOrder::None
+                        && output_order != order
+                    {
+                        cost += self.cost_model.sort_cost(
+                            table.num_tuples() as f64,
+                            table.tuple_width(),
+                        );
+                    }
+
+                    if cost < best_cost {
+                        best_cost = cost;
+                        best_plan = Some(path.to_plan(order));
+                    }
+                }
+
+                if let Some(plan) = best_plan {
+                    dp.insert((mask, order_idx), (plan, best_cost));
+                }
+            }
+        }
+
+        // Step 3: Join enumeration (left-deep DP)
+        for size in 2..=n {
+            for subset in connected_subsets(n, size, &join_preds) {
+                for (oidx, order) in
+                    std::iter::once(SortOrder::None)
+                        .chain(interesting_orders.iter().cloned())
+                        .enumerate()
+                {
+                    let mut best_cost = f64::MAX;
+                    let mut best_plan = None;
+
+                    // Try each relation as new inner
+                    for j in 0..n {
+                        if subset & (1 << j) == 0 { continue; }
+                        let left = subset & !(1 << j);
+                        if left == 0 { continue; }
+
+                        // Try both join methods
+                        for method in [JoinMethod::NL,
+                                       JoinMethod::MergeScan]
+                        {
+                            // For merge-scan: need sorted inputs
+                            let left_oidx = match method {
+                                JoinMethod::MergeScan => {
+                                    self.find_merge_order(
+                                        &interesting_orders,
+                                        left, j, &join_preds,
+                                    )
+                                }
+                                JoinMethod::NL => {
+                                    // NL preserves outer order
+                                    oidx
+                                }
+                            };
+
+                            if let Some((lp, lc)) =
+                                dp.get(&(left, left_oidx))
+                            {
+                                let right_paths =
+                                    self.enumerate_access_paths(
+                                        &tables[j],
+                                        &self.local_predicates(
+                                            &predicates, &tables[j],
+                                        ),
+                                    );
+
+                                for rp in &right_paths {
+                                    let join_cost =
+                                        self.cost_model.join_cost(
+                                            method, lp, rp, lc,
+                                        );
+
+                                    if join_cost < best_cost {
+                                        best_cost = join_cost;
+                                        best_plan = Some(
+                                            PhysicalPlan::Join {
+                                                method,
+                                                left: Box::new(
+                                                    lp.clone(),
+                                                ),
+                                                right: Box::new(
+                                                    rp.to_plan(
+                                                        SortOrder::None,
+                                                    ),
+                                                ),
+                                            }
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if let Some(plan) = best_plan {
+                        dp.insert(
+                            (subset, oidx),
+                            (plan, best_cost),
+                        );
+                    }
+                }
+            }
+        }
+
+        // Step 4: Choose final plan
+        let full = (1u32 << n) - 1;
+        self.choose_final(&dp, full, query, &interesting_orders)
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(query: &Query) -> bool {
+    // Always applicable: this IS the optimizer
+    query.referenced_tables().len() >= 1
+}
+```
+
+**Restrictions (System R specific):**
+- Left-deep trees only (misses bushy plans)
+- Only NL and merge-scan join methods (no hash join)
+- Independence assumption for selectivity
+- No histogram-based estimation
+- No adaptive/runtime optimization
+- Practical for up to ~15 tables
+
+## Cost Model
+
+```rust
+fn optimization_time(
+    n_tables: usize,
+    n_indexes: usize,
+    n_interesting_orders: usize,
+) -> f64 {
+    // Subsets: 2^n
+    // Per subset: n * |orders| * |join_methods| * |access_paths|
+    let subsets = (1u64 << n_tables) as f64;
+    let per_subset = n_tables as f64
+        * (n_interesting_orders + 1) as f64
+        * 2.0 // NL + merge-scan
+        * n_indexes as f64;
+
+    subsets * per_subset * 0.001 // milliseconds per evaluation
+}
+```
+
+**System R performance:**
+- 4 tables, 2 indexes each: ~0.1ms optimization
+- 8 tables, 3 indexes each: ~10ms optimization
+- 15 tables, 5 indexes each: ~10s optimization
+
+## Test Cases
+
+### Positive: Complete TPC-H Q3 optimization
+
+```sql
+SELECT l.orderkey, SUM(l.extendedprice * (1 - l.discount)) AS revenue,
+       o.orderdate, o.shippriority
+FROM customer c, orders o, lineitem l
+WHERE c.mktsegment = 'BUILDING'
+  AND c.custkey = o.custkey
+  AND l.orderkey = o.orderkey
+  AND o.orderdate < DATE '1995-03-15'
+  AND l.shipdate > DATE '1995-03-15'
+GROUP BY l.orderkey, o.orderdate, o.shippriority
+ORDER BY revenue DESC, o.orderdate;
+
+-- System R optimizer:
+-- 1. Access paths: customer (seq scan, index on mktsegment),
+--    orders (seq scan, index on custkey), lineitem (index on orderkey)
+-- 2. Interesting orders: (custkey ASC), (orderkey ASC),
+--    (revenue DESC, orderdate ASC)
+-- 3. DP: 2^3 - 1 = 7 subsets * 4 orders * 2 methods
+-- 4. Optimal: customer(filter) NL-> orders(index) NL-> lineitem(index)
+--    with sort for GROUP BY + ORDER BY
+```
+
+## References
+
+**Original paper:**
+- Selinger et al., "Access Path Selection in a Relational Database Management System", SIGMOD 1979
+  - DOI: 10.1145/582095.582099
+  - The single most influential paper in query optimization
+
+**Successors:**
+- Graefe, Dewitt, "The EXODUS Optimizer Generator", SIGMOD 1987
+- Graefe, "The Cascades Framework for Query Optimization", IEEE DE Bulletin 1995
+- Soliman et al., "Orca: A Modular Query Optimizer Architecture for Big Data", SIGMOD 2014
+
+**Key legacy:**
+- Every major database optimizer is a direct descendant of System R
+- PostgreSQL, MySQL, Oracle, mssql, DB2 all use System R's DP approach
+- The paper has been cited 3000+ times and influenced 45 years of research

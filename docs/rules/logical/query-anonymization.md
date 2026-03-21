@@ -1,0 +1,107 @@
+# Rule: Differential Privacy Query Rewriting
+
+**Category:** logical/security
+**File:** `rules/logical/security/query-anonymization.rra`
+
+## Metadata
+
+- **ID:** `query-anonymization`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, spark, bigquery, pinot
+- **Tags:** logical, security, differential-privacy, anonymization, noise
+- **Authors:** "Dwork, Cynthia", "McSherry, Frank"
+
+
+# Differential Privacy Query Rewriting
+
+## Description
+
+Rewrites aggregate queries to inject calibrated noise for differential
+privacy guarantees. The optimizer determines the sensitivity of each
+aggregate expression and adds Laplace or Gaussian noise proportional
+to sensitivity/epsilon. This ensures that the presence or absence of
+any individual row cannot be detected from query results.
+
+**When to apply**: Aggregate queries on privacy-sensitive datasets where
+differential privacy budget (epsilon) is configured.
+
+## Relational Algebra
+
+```algebra
+-- Before: plain aggregate
+gamma[dept; COUNT(*), AVG(salary)](employees)
+
+-- After: noise-injected aggregates
+pi[dept,
+   count_noisy = count + laplace(1/epsilon),
+   avg_noisy = avg + laplace(sensitivity/epsilon)
+](gamma[dept; COUNT(*) as count, AVG(salary) as avg](employees))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("dp-count-noise";
+    "(aggregate ?groups (count) ?input)" =>
+    "(project (add-noise (count) (laplace-noise 1.0 ?epsilon))
+        (aggregate ?groups (count) ?input))"
+    if dp_enabled("?input")
+),
+
+rw!("dp-sum-noise";
+    "(aggregate ?groups (sum ?col) ?input)" =>
+    "(project (add-noise (sum ?col) (laplace-noise (sensitivity ?col) ?epsilon))
+        (aggregate ?groups (sum ?col) ?input))"
+    if dp_enabled("?input")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(agg: &Aggregate, config: &PrivacyConfig) -> bool {
+    config.dp_enabled()
+        && config.remaining_budget() > 0.0
+        && agg.is_supported_aggregate() // COUNT, SUM, AVG
+}
+```
+
+**Restrictions:**
+- Only supported for COUNT, SUM, AVG (not MIN/MAX without clamping)
+- Privacy budget is consumed per query (composition theorem)
+- Requires sensitivity bounds on numeric columns
+- Small groups may need suppression (k-anonymity threshold)
+
+## Cost Model
+
+```rust
+fn estimated_benefit() -> f64 {
+    // This is a correctness/privacy transformation
+    // No performance benefit; slight overhead from noise generation
+    0.0
+}
+```
+
+**Typical benefit**: None (privacy transformation, not optimization).
+
+## Test Cases
+
+```sql
+-- Positive: aggregate query with DP enabled
+-- epsilon = 1.0, salary range [0, 500000]
+SELECT dept, COUNT(*), AVG(salary) FROM employees GROUP BY dept;
+-- COUNT gets Laplace(1/1.0) noise
+-- AVG gets Laplace(500000/(n*1.0)) noise
+
+-- Negative: non-aggregate query
+SELECT * FROM employees WHERE dept = 'HR';
+-- DP noise injection not applicable to row-level queries
+```
+
+## References
+
+- Dwork, C. "Differential Privacy" (ICALP 2006)
+- McSherry, F. "Privacy Integrated Queries" (SIGMOD 2009)
+- Google DP library: differential-privacy/

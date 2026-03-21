@@ -1,0 +1,105 @@
+# Rule: Materialize Literal Lifting
+
+**Category:** database-specific/materialize
+**File:** `rules/database-specific/materialize/literal-lifting.rra`
+
+## Metadata
+
+- **ID:** `materialize-literal-lifting`
+- **Version:** "1.0.0"
+- **Databases:** materialize
+- **Tags:** database-specific, materialize, literal, lifting, constant, optimization
+- **Authors:** "RA Contributors"
+
+
+# Materialize Literal Lifting
+
+## Description
+
+Lifts literal (constant) columns out of differential dataflow
+operators by replacing them with a Map that appends the constant
+after the main computation.  This reduces the width of rows stored
+in arrangements and processed through joins.
+
+**When to apply**: A column in the dataflow is a constant across all
+rows (e.g., from a VALUES clause, a constant expression, or a filter
+that fixes a column to a single value).
+
+**Why it works**: Differential dataflow arrangements store (key, value)
+tuples.  A constant column adds bytes to every stored tuple without
+carrying information.  Lifting it out of the arrangement and appending
+it via a Map at the end reduces arrangement memory proportionally.
+
+**Database version**: Materialize 0.30+
+
+## Relational Algebra
+
+```algebra
+-- Before: constant column flows through join
+join(R, map[c = 42](S))
+
+-- After: constant lifted past join
+map[c = 42](join(R, S))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("materialize-lift-literal-through-join";
+    "(join ?type ?cond ?left (map (const ?val) ?right))" =>
+    "(map (const ?val) (join ?type ?cond ?left ?right))"
+    if is_database("materialize")
+    if literal_not_in_join_condition("?val", "?cond")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(expr: &MirScalarExpr) -> bool {
+    expr.is_literal() && !expr.is_null()
+}
+```
+
+**Restrictions:**
+- Cannot lift literals used in join conditions or filter predicates
+- NULL literals have special semantics and may not be liftable
+- Must adjust column references when lifting across operators
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    rows_in_arrangement: f64,
+    literal_bytes: f64,
+) -> f64 {
+    rows_in_arrangement * literal_bytes
+}
+```
+
+**Typical benefit**: For an 8-byte literal column in a 1M-row
+arrangement, saves 8MB of arrangement memory.
+
+## Test Cases
+
+```sql
+-- Positive: constant expression lifted
+CREATE MATERIALIZED VIEW v AS
+SELECT t.*, 'production' AS env FROM transactions t
+JOIN accounts a ON t.account_id = a.id;
+-- 'production' column lifted past the join
+```
+
+```sql
+-- Negative: column used in join condition
+SELECT * FROM t1 JOIN t2 ON t1.id = t2.ref_id
+WHERE t2.type = 'A';
+-- 'A' is a filter value, not a pure literal column
+```
+
+## References
+
+Materialize: src/transform/src/literal_lifting.rs
+Materialize: src/transform/src/literal_constraints.rs

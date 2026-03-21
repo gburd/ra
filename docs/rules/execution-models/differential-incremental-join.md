@@ -1,0 +1,225 @@
+# Rule: Differential Incremental Join
+
+**Category:** execution-models/differential
+**File:** `rules/execution-models/differential/differential-incremental-join.rra`
+
+## Metadata
+
+- **ID:** `differential-incremental-join`
+- **Version:** "1.0.0"
+- **Databases:** materialize, differential-dataflow
+- **Tags:** execution, differential, join, incremental, arrangement
+- **Authors:** "Frank McSherry"
+
+
+# Differential Incremental Join
+
+## Description
+
+Maintains a join result incrementally by processing only the changes to each
+input, probing the other input's arrangement for matches. When a new row arrives
+on the left input, it probes the right arrangement; when a row changes on the
+right, it probes the left arrangement. This avoids recomputing the full join
+from scratch on each update.
+
+**Join variants:**
+- **Linear join**: One input streams through, probes arrangement of the other
+- **Delta join**: For multi-way joins, each input's changes probe all other
+  arrangements (no intermediate arrangements needed)
+- **Half join**: For outer joins, tracks unmatched rows separately
+
+**Key insight**: The cost of an incremental join is proportional to the number
+of input changes times the number of matches per change, not the total size
+of the inputs.
+
+## Relational Algebra
+
+```
+Incremental join maintenance:
+  State: arrangement_L (left indexed by key), arrangement_R (right indexed by key)
+
+  On left change (key, val_L, time, diff):
+    for (val_R, time_R, diff_R) in arrangement_R.lookup(key):
+      emit (val_L, val_R, join(time, time_R), diff * diff_R)
+    arrangement_L.append(key, val_L, time, diff)
+
+  On right change (key, val_R, time, diff):
+    for (val_L, time_L, diff_L) in arrangement_L.lookup(key):
+      emit (val_L, val_R, join(time, time_L), diff * diff_L)
+    arrangement_R.append(key, val_R, time, diff)
+```
+
+## Implementation
+
+```rust
+/// Incremental join operator with two arrangements
+pub struct IncrementalJoin<T: Timestamp> {
+    left_arrangement: Arrangement<T>,
+    right_arrangement: Arrangement<T>,
+}
+
+impl<T: Timestamp> IncrementalJoin<T> {
+    /// Process changes from the left input
+    pub fn process_left(
+        &mut self,
+        changes: Vec<(Key, Value, T, Diff)>,
+    ) -> Vec<(JoinedRow, T, Diff)> {
+        let mut output = Vec::new();
+
+        for (key, val_l, time, diff) in &changes {
+            // Probe right arrangement for matches
+            for (val_r, time_r, diff_r) in
+                self.right_arrangement.lookup(key)
+            {
+                let out_time = time.join(&time_r);
+                let out_diff = diff * diff_r;
+                output.push((
+                    JoinedRow::new(val_l, &val_r),
+                    out_time,
+                    out_diff,
+                ));
+            }
+        }
+
+        // Update left arrangement with new changes
+        self.left_arrangement.append_batch(changes);
+
+        output
+    }
+
+    /// Process changes from the right input
+    pub fn process_right(
+        &mut self,
+        changes: Vec<(Key, Value, T, Diff)>,
+    ) -> Vec<(JoinedRow, T, Diff)> {
+        let mut output = Vec::new();
+
+        for (key, val_r, time, diff) in &changes {
+            // Probe left arrangement for matches
+            for (val_l, time_l, diff_l) in
+                self.left_arrangement.lookup(key)
+            {
+                let out_time = time.join(&time_l);
+                let out_diff = diff * diff_l;
+                output.push((
+                    JoinedRow::new(&val_l, val_r),
+                    out_time,
+                    out_diff,
+                ));
+            }
+        }
+
+        // Update right arrangement
+        self.right_arrangement.append_batch(changes);
+
+        output
+    }
+}
+
+/// Delta join for multi-way joins (3+ inputs)
+pub struct DeltaJoin<T: Timestamp> {
+    arrangements: Vec<Arrangement<T>>,
+    join_keys: Vec<(usize, usize)>,  // pairs of (input, key_col)
+}
+
+impl<T: Timestamp> DeltaJoin<T> {
+    /// Process changes from input i
+    pub fn process_input(
+        &mut self,
+        input_idx: usize,
+        changes: Vec<(Key, Value, T, Diff)>,
+    ) -> Vec<(JoinedRow, T, Diff)> {
+        let mut output = Vec::new();
+
+        for (key, val, time, diff) in &changes {
+            // Chain of lookups through all other arrangements
+            let mut partial_results = vec![(val.clone(), time.clone(), *diff)];
+
+            for (i, arr) in self.arrangements.iter().enumerate() {
+                if i == input_idx { continue; }
+
+                let mut next_results = Vec::new();
+                for (partial, partial_time, partial_diff) in &partial_results {
+                    let lookup_key = self.extract_join_key(partial, i);
+                    for (matched, m_time, m_diff) in arr.lookup(&lookup_key) {
+                        next_results.push((
+                            extend_row(partial, &matched),
+                            partial_time.join(&m_time),
+                            partial_diff * m_diff,
+                        ));
+                    }
+                }
+                partial_results = next_results;
+            }
+
+            for (row, out_time, out_diff) in partial_results {
+                output.push((JoinedRow::from(row), out_time, out_diff));
+            }
+        }
+
+        self.arrangements[input_idx].append_batch(changes);
+        output
+    }
+}
+```
+
+## Cost Model
+
+**Per-change cost:**
+- Arrangement lookup: O(log N) per arrangement probed
+- Output production: O(matches) per change
+- Total per change: O(log N + matches)
+
+**Binary join:**
+- Memory: O(|L| + |R|) for two arrangements
+- Update cost: O(changes * avg_matches * log N)
+
+**Delta join (k-way):**
+- Memory: O(sum of |input_i|) -- no intermediate arrangements
+- Update cost: O(changes * product_of_selectivities * sum(log |input_i|))
+- Paths: k paths, one per input
+
+**Comparison with recomputation:**
+- Full recomputation: O(|L| * |R| * selectivity)
+- Incremental: O(|changes| * avg_matches)
+- Speedup: |inputs| / |changes| (typically 1000x to 1000000x)
+
+## Test Cases
+
+```sql
+-- Test 1: High-throughput incremental join
+CREATE MATERIALIZED VIEW order_customers AS
+SELECT o.id, o.amount, c.name, c.region
+FROM orders o JOIN customers c ON o.customer_id = c.id;
+
+-- 1000 new orders/sec, 100K customers
+-- Each order probes customer arrangement: O(log 100K) = ~17 comparisons
+-- vs recomputation: scan 100K customers per order
+-- Speedup: ~6000x
+
+-- Test 2: Delta join (3-way)
+CREATE MATERIALIZED VIEW supply_chain AS
+SELECT o.id, c.name, p.description
+FROM orders o
+JOIN customers c ON o.customer_id = c.id
+JOIN products p ON o.product_id = p.id;
+
+-- New order: probe customers, then probe products
+-- No intermediate (orders JOIN customers) arrangement needed
+
+-- Test 3: Join with retractions (UPDATE)
+-- UPDATE customers SET name = 'Bob' WHERE id = 42;
+-- Retraction: probe orders for cid=42, retract all old joined rows
+-- Insertion: probe orders for cid=42, insert all new joined rows
+```
+
+## References
+
+1. **McSherry, Frank et al**. "differential-dataflow." CIDR 2013.
+   - Incremental join via arrangements
+
+2. **Koch, Christoph et al**. "DBToaster: Higher-Order Delta Processing." VLDB 2014.
+   - Delta query decomposition for multi-way joins
+
+3. **Materialize Documentation**. "Join Implementation."
+   - Linear vs delta join selection heuristics

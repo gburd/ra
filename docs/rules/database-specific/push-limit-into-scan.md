@@ -1,0 +1,152 @@
+# Rule: Push Limit Into Filtered Scan
+
+**Category:** database-specific/cockroachdb
+**File:** `rules/database-specific/cockroachdb/push-limit-into-scan.rra`
+
+## Metadata
+
+- **ID:** `cockroachdb-push-limit-into-scan`
+- **Version:** 1.0.0
+- **Databases:** cockroachdb
+- **Tags:** database-specific, cockroachdb, limit, scan, pushdown, index
+- **Authors:** "RA Contributors"
+
+
+# Push Limit Into Filtered Scan
+
+## Description
+
+Pushes a hard row limit into a Scan operator that already has constraints or scans a partial index. The scan applies the limit after filtering, preventing unnecessary rows from being fetched. This substantially reduces execution cost when limits are small relative to table size.
+
+**When to apply**: Limit operator over a Scan with constraints or partial index predicates.
+
+**Why it works**: By stopping the scan after N rows are found, we avoid reading and filtering the entire table. The storage layer can terminate early once the limit is reached.
+
+**Database version**: CockroachDB v19.2+
+
+## Relational Algebra
+
+```algebra
+Limit[n](Scan[constraints=c](T))
+  -> Scan[constraints=c, hard_limit=n](T)
+  where n > 0
+  where can_limit_filtered_scan
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("cockroachdb-push-limit-into-scan";
+    "(limit (scan ?private) ?n ?ordering)" =>
+    "(scan (limit_scan_private ?private ?n ?ordering))"
+    if is_database("cockroachdb")
+    if is_positive_int("?n")
+    if can_limit_filtered_scan("?private", "?ordering")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    scan: &ScanPrivate,
+    limit: u64,
+    ordering: &Ordering,
+) -> bool {
+    // Must have a positive limit
+    if limit == 0 {
+        return false;
+    }
+
+    // Scan must have constraints or be a partial index
+    if !scan.has_constraints() && !scan.is_partial_index() {
+        return false;
+    }
+
+    // Cannot push limit into inverted index scans
+    // (they may produce multiple rows per indexed row)
+    if scan.is_inverted_index() {
+        return false;
+    }
+
+    // Ordering must be compatible with scan
+    ordering.is_compatible_with_scan(scan)
+}
+```
+
+**Restrictions:**
+- Only applies to CockroachDB
+- Scan must have constraints or be a partial index
+- Limit must be a positive integer constant
+- Cannot be applied to inverted index scans
+- Ordering must be compatible with scan direction
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    table_rows: f64,
+    limit: f64,
+    constraint_selectivity: f64,
+) -> f64 {
+    // Rows that pass constraints
+    let filtered_rows = table_rows * constraint_selectivity;
+
+    // Without limit pushdown: scan filtered_rows
+    let normal_cost = filtered_rows * 100.0;
+
+    // With limit pushdown: scan until limit is reached
+    // Expected rows scanned: min(limit / selectivity, table_rows)
+    let expected_scan = (limit / constraint_selectivity).min(table_rows);
+    let optimized_cost = expected_scan * 100.0;
+
+    (normal_cost - optimized_cost) / normal_cost
+}
+```
+
+**Typical benefit**: 60-95% cost reduction with small limits
+
+## Test Cases
+
+### Positive Case 1: Limit on Filtered Scan
+
+```sql
+SELECT * FROM orders
+WHERE status = 'pending' AND created_at > '2024-01-01'
+ORDER BY created_at
+LIMIT 10;
+
+-- Push limit into scan: stop after finding 10 matching rows
+```
+
+### Positive Case 2: Partial Index Scan
+
+```sql
+CREATE INDEX active_users_idx ON users (email)
+WHERE active = true;
+
+SELECT * FROM users@active_users_idx
+LIMIT 100;
+
+-- Limit pushed into partial index scan
+```
+
+### Negative Case 1: Inverted Index
+
+```sql
+CREATE INVERTED INDEX ON documents USING GIN (tags);
+
+SELECT * FROM documents WHERE tags @> ARRAY['urgent']
+LIMIT 10;
+
+-- Rule should NOT apply to inverted index
+```
+
+## References
+
+**Source code:**
+- CockroachDB: `pkg/sql/opt/xform/rules/limit.opt`
+  - Rule: `PushLimitIntoFilteredScan` (lines 20-36)
+  - Commit: 6e210ba6aa33cea5e27b1a8fae212c27941781f4

@@ -1,0 +1,197 @@
+# Rule: FPGA Streaming Filter
+
+**Category:** hardware/fpga
+**File:** `rules/hardware/fpga/fpga-stream-filter.rra`
+
+## Metadata
+
+- **ID:** `fpga-stream-filter`
+- **Version:** "1.0.0"
+- **Databases:** ibm-netezza, xilinx-alveo, intel-pac
+- **Tags:** fpga, filter, streaming, line-rate, pipeline
+- **Authors:** "RA Contributors"
+
+
+# FPGA Streaming Filter
+
+## Description
+
+Implements selection predicates as FPGA streaming pipelines that
+filter data at memory bus or network line rate. The FPGA processes
+each tuple in a fixed number of clock cycles with deterministic
+latency, making it suited for predictable, high-throughput filtering.
+
+**When to apply**: The predicate is simple enough to synthesize into
+FPGA logic (comparisons, range checks, bitmask operations) and the
+input is streaming from storage or network at high bandwidth. The
+FPGA avoids the CPU entirely for the filtering stage.
+
+**Why it works**: FPGAs implement the predicate as custom hardware
+logic. Each clock cycle (2-5 ns) processes one or more tuples through
+a fully pipelined datapath. There are no cache misses, branch
+mispredictions, or instruction decode overhead. The throughput is
+limited only by the input data rate.
+
+## Relational Algebra
+
+```algebra
+sigma[p](R) -> fpga_stream_filter[p](R)
+  where p is synthesizable
+    AND input_rate(R) > cpu_filter_throughput
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("fpga-stream-filter";
+    "(filter ?pred ?input)" =>
+    "(fpga_stream_filter ?pred ?input)"
+    if predicate_synthesizable("?pred")
+    if input_is_streaming("?input")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    pred: &Expr,
+    hw: &HardwareProfile,
+) -> bool {
+    let synthesizable = is_fpga_synthesizable(pred);
+    let pipeline_stages = estimate_pipeline_depth(pred);
+
+    synthesizable
+        && pipeline_stages <= hw.fpga_max_pipeline_depth
+        && hw.fpga_available
+}
+
+fn is_fpga_synthesizable(pred: &Expr) -> bool {
+    match pred {
+        Expr::BinOp {
+            op:
+                BinOp::Eq
+                | BinOp::Lt
+                | BinOp::Gt
+                | BinOp::Le
+                | BinOp::Ge
+                | BinOp::Ne,
+            left,
+            right,
+            ..
+        } => {
+            is_fpga_synthesizable(left)
+                && is_fpga_synthesizable(right)
+        }
+        Expr::BinOp {
+            op: BinOp::And | BinOp::Or,
+            left,
+            right,
+            ..
+        } => {
+            is_fpga_synthesizable(left)
+                && is_fpga_synthesizable(right)
+        }
+        Expr::Column(_) | Expr::Const(_) => true,
+        Expr::BinOp {
+            op:
+                BinOp::Add
+                | BinOp::Sub
+                | BinOp::Mul,
+            left,
+            right,
+            ..
+        } => {
+            is_fpga_synthesizable(left)
+                && is_fpga_synthesizable(right)
+        }
+        // Division, modulo, string ops not synthesizable
+        _ => false,
+    }
+}
+```
+
+**Restrictions:**
+- Predicate must be synthesizable to hardware logic
+- No floating-point division (costly in FPGA LUTs)
+- No string LIKE/REGEXP (use GPU instead)
+- FPGA bitstream must be pre-compiled for the predicate pattern
+- Reconfiguration time (milliseconds) amortized over long queries
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    pred_depth: u32,
+    hw: &HardwareProfile,
+) -> f64 {
+    let n = stats.row_count;
+    let row_bytes = stats.avg_row_size;
+
+    // CPU filter: ~5-15 ns per row depending on predicate
+    let cpu_ns_per_row = 5.0 + pred_depth as f64 * 3.0;
+    let cpu_ns = n * cpu_ns_per_row;
+
+    // FPGA: clock period * pipeline initiation interval
+    let fpga_clock_ns = 1.0 / hw.fpga_clock_mhz as f64 * 1e3;
+    // One tuple per clock cycle (fully pipelined)
+    let fpga_ns = n * fpga_clock_ns;
+    // Add reconfiguration time if needed
+    let reconfig_ns = hw.fpga_reconfig_ms as f64 * 1e6;
+    let fpga_total = fpga_ns + reconfig_ns;
+
+    if cpu_ns > fpga_total {
+        (cpu_ns - fpga_total) / cpu_ns
+    } else {
+        0.0
+    }
+}
+```
+
+**Assumptions:**
+- FPGA clock: 200-300 MHz typical for database accelerator designs
+- One tuple per clock cycle throughput (pipelined)
+- Reconfiguration time: 10-100 ms (amortized)
+- Near-storage FPGA eliminates PCIe transfer for storage-attached designs
+
+**Typical benefit**: 2x-5x throughput at lower power consumption.
+Primary benefit is offloading CPU for other work.
+
+## Test Cases
+
+### Positive: Range filter on streaming data
+
+```sql
+-- sensor_data: 1B rows streaming from SSD
+-- Simple range predicate, synthesizable
+SELECT * FROM sensor_data
+WHERE temperature > 100.0 AND pressure < 50.0;
+
+-- Expected: FPGA streaming filter at line rate
+-- Plan: FpgaStreamFilter(pred=temp>100 AND press<50,
+--        input=sensor_data)
+```
+
+### Negative: String predicate not synthesizable
+
+```sql
+SELECT * FROM logs WHERE message LIKE '%error%';
+
+-- Expected: CPU or GPU filter (string ops not FPGA-friendly)
+-- Plan: Filter(like='%error%', col=message, input=logs)
+```
+
+## References
+
+**Implementation in databases:**
+- IBM Netezza (now IBM Performance Server): FPGA-based Zone Maps
+- Xilinx Alveo: Database acceleration reference designs
+- Intel PAC: SQL filter acceleration demos
+
+**Academic papers:**
+- Mueller et al., "Streams on Wires - A Query Compiler for FPGAs", VLDB 2009
+- Sidler et al., "Accelerating Pattern Matching Queries in Hybrid CPU-FPGA Architectures", SIGMOD 2017
+- Owaida et al., "Centaur: A Framework for Hybrid CPU-FPGA Databases", FCCM 2017

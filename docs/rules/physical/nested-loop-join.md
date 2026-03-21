@@ -1,0 +1,171 @@
+# Rule: Nested Loop Join
+
+**Category:** physical/join-algorithms
+**File:** `rules/physical/join-algorithms/nested-loop-join.rra`
+
+## Metadata
+
+- **ID:** `nested-loop-join`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, duckdb, sqlite, clickhouse, cockroachdb, mssql, oracle
+- **Tags:** join, nested-loop, basic, any-predicate
+- **Authors:** "Database Systems Textbooks"
+
+## Preconditions
+
+```yaml
+  - type: "pattern"
+    must_match: "(join ?type ?cond ?left ?right)"
+    description: "Join for nested loop execution (any predicate)"
+  - type: "predicate"
+    condition: "!is_equijoin(?cond) || cardinality(?left) < 1000"
+    description: "Preferred for non-equijoins or very small outer input"
+    optional: true
+```
+
+
+# Nested Loop Join
+
+## Description
+
+The simplest join algorithm: for each tuple in the outer relation, scan the
+inner relation to find matching tuples. Works with any join predicate (equality,
+inequality, complex expressions) but has O(n*m) cost, making it expensive for
+large inputs.
+
+**When to apply**: Small outer relation (<1000 rows), any join predicate type,
+or when no indexes exist. Often the fallback when hash/merge joins don't apply.
+
+**Why it works**: Conceptually simple, requires minimal memory (just current
+tuple from each relation). The only join algorithm guaranteed to work with
+any predicate, including inequalities and non-equijoins.
+
+## Implementation
+
+```rust
+struct NestedLoopJoin {
+    outer: Box<dyn Operator>,
+    inner: Box<dyn Operator>,
+    predicate: Expr,
+    current_outer: Option<Tuple>,
+}
+
+impl Operator for NestedLoopJoin {
+    fn next(&mut self) -> Option<Tuple> {
+        loop {
+            if self.current_outer.is_none() {
+                self.current_outer = self.outer.next();
+                if self.current_outer.is_none() {
+                    return None; // Outer exhausted
+                }
+                self.inner.reset(); // Restart inner for new outer tuple
+            }
+
+            if let Some(inner_tuple) = self.inner.next() {
+                let outer_tuple = self.current_outer.as_ref().unwrap();
+                if self.predicate.eval(outer_tuple, &inner_tuple) {
+                    return Some(outer_tuple.concat(&inner_tuple));
+                }
+            } else {
+                // Inner exhausted, get next outer
+                self.current_outer = None;
+            }
+        }
+    }
+}
+```
+
+## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> bool {
+    // Always applicable as fallback
+    // But preferred only when:
+    stats.outer_cardinality < 1000  // Small outer
+        || !stats.is_equijoin       // Non-equijoin
+        || !stats.has_memory_for_hash // Limited memory
+}
+```
+
+## Cost Model
+
+```rust
+fn estimated_cost(
+    stats: &Statistics,
+    hw: &HardwareProfile,
+) -> f64 {
+    let outer_rows = stats.outer_cardinality as f64;
+    let inner_rows = stats.inner_cardinality as f64;
+
+    // Cost: scan outer once, scan inner once per outer tuple
+    let scans = outer_rows * (1.0 + inner_rows);
+    let cost_per_tuple = hw.seq_scan_cost_per_tuple;
+
+    scans * cost_per_tuple
+}
+```
+
+**Assumptions:**
+- Inner relation re-scanned for each outer tuple
+- Sequential I/O (may benefit from caching on repeated scans)
+- Predicate evaluation: ~1μs per tuple pair
+
+**Typical use case:** Fallback when better algorithms unavailable, or outer < 100 rows.
+
+## Test Cases
+
+### Positive: Small outer, any predicate
+
+```sql
+-- Small countries table (200 rows), large cities (1M rows)
+SELECT c.name, ci.name
+FROM countries c
+JOIN cities ci ON c.id = ci.country_id
+WHERE c.population > 1000000;
+
+-- Nested loop optimal: 200 * 1M comparisons acceptable
+```
+
+### Positive: Non-equijoin (inequality)
+
+```sql
+-- Range join - hash/merge don't apply
+SELECT *
+FROM events e1
+JOIN events e2
+  ON e1.timestamp < e2.timestamp
+  AND e2.timestamp < e1.timestamp + INTERVAL '1 hour';
+
+-- Must use nested loop for inequality join
+```
+
+### Negative: Large outer and inner
+
+```sql
+-- Both tables large (1M rows each)
+SELECT *
+FROM orders o
+JOIN line_items li ON o.order_id = li.order_id;
+
+-- Nested loop: 1M * 1M = 1T comparisons!
+-- Hash join: 1M + 1M = 2M operations
+-- Use hash join instead
+```
+
+## References
+
+**Papers:**
+- Graefe, "Query Evaluation Techniques for Large Databases", ACM Computing Surveys 1993
+  - DOI: 10.1145/152610.152611
+- Ramakrishnan & Gehrke, "Database Management Systems", 3rd ed.
+  - Chapter 14: Join algorithms
+
+**Implementation:**
+- PostgreSQL: `src/backend/executor/nodeNestloop.c`
+- All databases implement nested loop as fallback

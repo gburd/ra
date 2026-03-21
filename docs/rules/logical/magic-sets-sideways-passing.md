@@ -1,0 +1,387 @@
+# Rule: "Sideways Information Passing Strategy (SIPS)"
+
+**Category:** logical/sideways-information-passing
+**File:** `rules/logical/sideways-information-passing/magic-sets-sideways-passing.rra`
+
+## Metadata
+
+- **ID:** `magic-sets-sideways-passing`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, oracle, monetdb, logicblox
+- **Tags:** sips, magic-sets, binding-propagation, evaluation-order, classic
+- **Authors:** "Bancilhon, Maier, Sagiv, Ullman; Beeri, Ramakrishnan"
+
+
+# Sideways Information Passing Strategy (SIPS)
+
+## Description
+
+A Sideways Information Passing Strategy (SIPS) determines the order in which
+body predicates are evaluated in a rule and how binding information flows
+between them. The SIPS choice directly affects the quality of the magic sets
+transformation: a good SIPS maximizes the bound arguments at each step,
+producing more selective magic predicates.
+
+Given a rule body with predicates p1, p2, ..., pn, the SIPS decides:
+1. Which predicate to evaluate first (using available bindings from the head)
+2. After evaluating p_i, which new variables become bound
+3. Which predicate to evaluate next using the accumulated bindings
+
+The optimal SIPS minimizes the intermediate result sizes, analogous to join
+ordering in relational optimization. In fact, SIPS selection for Datalog rules
+IS the join ordering problem applied to rule bodies.
+
+**When to apply**: During magic sets transformation, for each rule with
+multiple body predicates. The SIPS determines evaluation order and binding
+propagation.
+
+**Why it works**: Different evaluation orders produce different binding
+patterns at each step. An order that quickly binds the most variables
+produces the most restrictive magic predicates, minimizing unnecessary
+computation in the recursive evaluation.
+
+## Relational Algebra
+
+```algebra
+SIPS for rule: p^bf(X,Z) :- q(X,Y), r(W,Y), s(W,Z)
+
+Available SIPS (evaluation orders):
+
+SIPS 1: q -> r -> s
+  Bindings: {X} -> q(X,Y) -> {X,Y} -> r(W,Y) -> {X,Y,W} -> s(W,Z)
+  All predicates receive at least one bound argument. Good!
+
+SIPS 2: r -> q -> s
+  Bindings: {} -> r(W,Y) -> {W,Y} -> q(X,Y) -> {X,Y,W} -> s(W,Z)
+  r starts with no bindings (cartesian). Bad!
+
+SIPS 3: s -> r -> q
+  Bindings: {} -> s(W,Z) -> {W,Z} -> r(W,Y) -> {W,Y,Z} -> q(X,Y)
+  s starts with no bindings. Bad!
+
+Cost-based SIPS selection:
+  For each ordering, estimate intermediate result sizes.
+  Choose the ordering with smallest total intermediate size.
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+use std::collections::HashSet;
+
+#[derive(Clone, Debug)]
+struct SipsStrategy {
+    order: Vec<usize>,       // Body predicate evaluation order
+    bindings: Vec<HashSet<String>>, // Bound vars at each step
+}
+
+struct SipsSelector;
+
+impl SipsSelector {
+    /// Left-to-right SIPS (simplest strategy, used by original magic sets)
+    fn left_to_right(
+        &self,
+        rule: &AdornedRule,
+    ) -> SipsStrategy {
+        let n = rule.body.len();
+        let order: Vec<usize> = (0..n).collect();
+        let bindings = self.compute_bindings(rule, &order);
+        SipsStrategy { order, bindings }
+    }
+
+    /// Greedy SIPS: at each step, choose the predicate that receives
+    /// the most bound arguments
+    fn greedy_most_bound(
+        &self,
+        rule: &AdornedRule,
+    ) -> SipsStrategy {
+        let n = rule.body.len();
+        let mut order = Vec::with_capacity(n);
+        let mut used = vec![false; n];
+        let mut bound_vars = self.initial_bound_vars(rule);
+        let mut bindings = vec![bound_vars.clone()];
+
+        for _ in 0..n {
+            // Find predicate with most bound arguments
+            let best = (0..n)
+                .filter(|i| !used[*i])
+                .max_by_key(|i| {
+                    self.count_bound_args(
+                        &rule.body[*i], &bound_vars,
+                    )
+                });
+
+            if let Some(idx) = best {
+                used[idx] = true;
+                order.push(idx);
+
+                // Add free variables from this predicate to bound set
+                for arg in &rule.body[idx].arguments {
+                    if let Argument::Variable(v) = arg {
+                        bound_vars.insert(v.clone());
+                    }
+                }
+                bindings.push(bound_vars.clone());
+            }
+        }
+
+        SipsStrategy { order, bindings }
+    }
+
+    /// Cost-based SIPS: evaluate all orderings and pick the one
+    /// with minimum estimated intermediate result size
+    fn cost_based(
+        &self,
+        rule: &AdornedRule,
+        stats: &Statistics,
+    ) -> SipsStrategy {
+        let n = rule.body.len();
+
+        if n > 8 {
+            // Too many body predicates for exhaustive search
+            // Fall back to greedy
+            return self.greedy_most_bound(rule);
+        }
+
+        let mut best_strategy = None;
+        let mut best_cost = f64::INFINITY;
+
+        // Try all permutations
+        for perm in permutations(n) {
+            let bindings = self.compute_bindings(rule, &perm);
+            let cost = self.estimate_sips_cost(
+                rule, &perm, &bindings, stats,
+            );
+
+            if cost < best_cost {
+                best_cost = cost;
+                best_strategy = Some(SipsStrategy {
+                    order: perm,
+                    bindings,
+                });
+            }
+        }
+
+        best_strategy.unwrap_or_else(|| self.left_to_right(rule))
+    }
+
+    fn compute_bindings(
+        &self,
+        rule: &AdornedRule,
+        order: &[usize],
+    ) -> Vec<HashSet<String>> {
+        let mut bound = self.initial_bound_vars(rule);
+        let mut result = vec![bound.clone()];
+
+        for &idx in order {
+            for arg in &rule.body[idx].arguments {
+                if let Argument::Variable(v) = arg {
+                    bound.insert(v.clone());
+                }
+            }
+            result.push(bound.clone());
+        }
+
+        result
+    }
+
+    fn initial_bound_vars(
+        &self,
+        rule: &AdornedRule,
+    ) -> HashSet<String> {
+        rule.head.arguments.iter()
+            .zip(rule.head.adornment.0.iter())
+            .filter(|(_, s)| **s == BindingStatus::Bound)
+            .filter_map(|(arg, _)| match arg {
+                Argument::Variable(v) => Some(v.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn estimate_sips_cost(
+        &self,
+        rule: &AdornedRule,
+        order: &[usize],
+        bindings: &[HashSet<String>],
+        stats: &Statistics,
+    ) -> f64 {
+        let mut total_cost = 0.0;
+
+        for (step, &idx) in order.iter().enumerate() {
+            let pred = &rule.body[idx];
+            let bound_count = self.count_bound_args(
+                pred, &bindings[step],
+            );
+            let total_args = pred.arguments.len();
+
+            // Estimate selectivity based on binding ratio
+            let selectivity = if total_args > 0 {
+                let bound_ratio =
+                    bound_count as f64 / total_args as f64;
+                (1.0 - bound_ratio * 0.9).max(0.01)
+            } else {
+                1.0
+            };
+
+            let pred_size =
+                stats.predicate_cardinality(&pred.name) as f64;
+            total_cost += pred_size * selectivity;
+        }
+
+        total_cost
+    }
+
+    fn count_bound_args(
+        &self,
+        pred: &BodyPredicate,
+        bound_vars: &HashSet<String>,
+    ) -> usize {
+        pred.arguments.iter()
+            .filter(|arg| match arg {
+                Argument::Variable(v) => bound_vars.contains(v),
+                Argument::Constant(_) => true,
+            })
+            .count()
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    hw: &HardwareProfile,
+) -> bool {
+    // SIPS is relevant when rules have multiple body predicates
+    stats.has_multi_body_rules
+        // And when there are bound arguments to propagate
+        && stats.has_bound_arguments
+        // Cost-based SIPS needs statistics
+        && (stats.has_predicate_cardinalities
+            || !stats.use_cost_based_sips)
+}
+```
+
+**Restrictions:**
+- Exhaustive SIPS search is O(n!) in number of body predicates
+- Greedy SIPS is O(n^2), good approximation in practice
+- SIPS quality depends on accurate predicate cardinality estimates
+- Fixed SIPS (left-to-right) is used when statistics are unavailable
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    // Compare best vs. worst SIPS ordering
+    let best_sips_cost = stats.best_sips_intermediate_size as f64;
+    let worst_sips_cost = stats.worst_sips_intermediate_size as f64;
+
+    if worst_sips_cost > best_sips_cost && best_sips_cost > 0.0 {
+        (worst_sips_cost - best_sips_cost) / worst_sips_cost
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 2x-20x from choosing the right evaluation order.
+
+## Test Cases
+
+### Positive: Greedy SIPS maximizes bindings
+
+```
+# Rule: path^bf(X,Z) :- edge(X,Y), node_info(Y,Type), edge(Y,Z)
+# Head binding: X is bound
+
+# SIPS 1 (left-to-right): edge(X,Y), node_info(Y,Type), edge(Y,Z)
+#   Step 1: X bound -> edge(X,Y): selective (X bound)
+#   Step 2: Y bound -> node_info(Y,Type): selective (Y bound)
+#   Step 3: Y bound -> edge(Y,Z): selective (Y bound)
+#   Total cost: low (all steps have bindings)
+
+# SIPS 2 (bad order): node_info(Y,Type), edge(X,Y), edge(Y,Z)
+#   Step 1: nothing bound -> node_info(Y,Type): full scan!
+#   Step 2: Y bound, X bound -> edge(X,Y): selective
+#   Step 3: Y bound -> edge(Y,Z): selective
+#   Total cost: high (first step scans entire node_info)
+```
+
+### Positive: Cost-based SIPS with varying cardinalities
+
+```
+# Rule: result^bf(X,Z) :- big_table(X,Y), small_table(Y,Z)
+# big_table: 10M rows, small_table: 100 rows
+
+# SIPS 1: big_table -> small_table
+#   big_table(X,Y) with X bound: ~100 rows
+#   small_table(Y,Z) with Y bound: ~1 row
+#   Cost: 100 + 1 = 101
+
+# SIPS 2: small_table -> big_table
+#   small_table(Y,Z) with no binding: 100 rows (full scan)
+#   big_table(X,Y) with X and Y bound: ~1 row
+#   Cost: 100 + 1 = 101
+
+# Similar cost here, but SIPS 1 is preferred (earlier filtering)
+```
+
+### Positive: SQL query optimization analogy
+
+```sql
+-- SIPS is analogous to join ordering in SQL
+-- Rule body predicates = join inputs
+-- Binding propagation = predicate pushdown
+
+-- Good SIPS (selective first):
+SELECT * FROM orders o
+JOIN lineitem l ON o.id = l.order_id
+JOIN products p ON l.product_id = p.id
+WHERE o.customer_id = 42;
+-- Filter on orders first (most selective), then join
+
+-- Bad SIPS (unselective first):
+SELECT * FROM products p
+CROSS JOIN lineitem l  -- no binding!
+JOIN orders o ON l.order_id = o.id AND o.customer_id = 42;
+-- Products scanned without filter, huge intermediate
+```
+
+### Negative: Single body predicate (no ordering choice)
+
+```
+# Rule: parent^bf(X, Y) :- family(X, Y, 'parent').
+# Only one body predicate -- SIPS is trivial
+```
+
+## References
+
+**Original paper:**
+- Bancilhon, F., Maier, D., Sagiv, Y., Ullman, J.D., "Magic Sets and Other Strange Ways to Implement Logic Programs", ACM PODS 1986
+  - DOI: 10.1145/6012.15399
+  - Section 2: "Sideways Information Passing Strategies"
+  - Left-to-right SIPS as default strategy
+
+**SIPS theory and optimization:**
+- Beeri, C., Ramakrishnan, R., "On the Power of Magic", Journal of Logic Programming 1991
+  - DOI: 10.1016/0743-1066(91)90038-Q
+  - Formal treatment of SIPS and their effect on magic sets
+
+- Seshadri, P., et al., "Cost-Based Optimization for Magic: Algebra and Implementation", ACM SIGMOD 1996
+  - DOI: 10.1145/233269.233360
+  - Cost-based SIPS selection: when to use which strategy
+
+- Ramakrishnan, R., Ullman, J.D., "A Survey of Research on Deductive Database Systems", Journal of Logic Programming 1995
+  - DOI: 10.1016/0743-1066(95)00013-A
+  - Comprehensive survey including SIPS analysis
+
+**Implementation in databases:**
+- Souffl: Datalog compiler with automatic SIPS optimization
+- LogicBlox: Cost-based SIPS selection
+- Datomic: Query planner with binding analysis

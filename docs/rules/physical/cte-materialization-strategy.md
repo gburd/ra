@@ -1,0 +1,199 @@
+# Rule: "CTE Materialization Strategy Selection"
+
+**Category:** physical/materialization
+**File:** `rules/physical/materialization/cte-materialization-strategy.rra`
+
+## Metadata
+
+- **ID:** `cte-materialization-strategy`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mssql, oracle, duckdb, clickhouse
+- **Tags:** materialization, cte, inline, common-table-expression, recursive
+- **Authors:** "RA Contributors"
+
+
+# CTE Materialization Strategy Selection
+
+## Metadata
+- **Rule ID**: `cte-materialization-strategy`
+- **Category**: Physical / Materialization
+- **Complexity**: O(n) for materialization; O(1) for inlining
+- **Prerequisites**: Query with WITH clause (CTE)
+- **Alternatives**: Always inline; always materialize
+
+## Description
+
+Common Table Expressions (CTEs) can be executed in two ways:
+inlining (substituting the CTE body at each reference point) or
+materializing (computing the CTE once and storing the result).
+
+The optimal strategy depends on:
+- **Reference count**: Single-use CTEs should always be inlined
+- **Computation cost**: Expensive CTEs benefit from materialization
+- **Filter pushdown**: Inlining enables pushing WHERE conditions into the CTE
+- **Result size**: Small results make materialization cheap to read back
+- **Recursive CTEs**: Always require materialization (iterative computation)
+
+PostgreSQL 12+ defaults to inlining single-reference CTEs and
+materializing multi-reference CTEs (controllable with MATERIALIZED /
+NOT MATERIALIZED hints). This rule models the cost tradeoff.
+
+**When to materialize:**
+- CTE referenced > 1 time and computation cost is significant
+- Recursive CTEs (mandatory)
+- CTE result is small relative to base tables
+
+**When to inline:**
+- Single reference
+- Enables filter pushdown into CTE body
+- CTE is a simple scan or trivial expression
+
+## Relational Algebra
+
+```
+WITH cte AS (subquery)
+SELECT ... FROM cte WHERE pred  -- inline: pushes pred into subquery
+UNION ALL
+SELECT ... FROM cte WHERE pred2 -- materialize: avoids recomputing subquery
+
+Inline:
+  substitute(cte, subquery) in each reference
+
+Materialize:
+  T = execute(subquery)
+  scan(T) at each reference point
+```
+
+## Implementation (egg rewrite rules)
+
+```lisp
+;; Always inline single-reference CTEs
+(rewrite (with ?name ?subquery ?body)
+  (substitute ?name ?subquery ?body)
+  :if (= 1 (reference-count ?name ?body)))
+
+;; Materialize multi-reference CTEs with expensive computation
+(rewrite (with ?name ?subquery ?body)
+  (let-materialize ?name ?subquery ?body)
+  :if (> (reference-count ?name ?body) 1)
+  :if (> (cost ?subquery) (materialization-threshold)))
+
+;; Inline even multi-reference when filter pushdown is valuable
+(rewrite (with ?name ?subquery
+           (filter ?pred (ref ?name)))
+  (filter ?pred ?subquery)
+  :if (= 1 (reference-count ?name ?body))
+  :if (can-push-filter ?pred ?subquery)
+  :if (< (* (selectivity ?pred) (cost ?subquery))
+         (cost ?subquery)))
+
+;; Recursive CTE: must materialize with work table
+(rewrite (with-recursive ?name ?base ?recursive-step ?body)
+  (iterate-work-table ?name ?base ?recursive-step ?body))
+
+;; Choose memory vs disk for CTE materialization
+(rewrite (let-materialize ?name ?subquery ?body)
+  (let-memory-materialize ?name ?subquery ?body)
+  :if (< (estimated-bytes ?subquery) (cte-memory-budget)))
+
+(rewrite (let-materialize ?name ?subquery ?body)
+  (let-disk-materialize ?name ?subquery ?body)
+  :if (>= (estimated-bytes ?subquery) (cte-memory-budget)))
+```
+
+## Cost Model
+
+```rust
+pub fn cost_cte_inline(
+    subquery_cost: Cost,
+    num_references: usize,
+    filter_selectivities: &[f64],
+) -> Cost {
+    let mut total = Cost::zero();
+    for (i, &sel) in filter_selectivities.iter().enumerate() {
+        if sel < 1.0 {
+            total = total + subquery_cost * sel;
+        } else {
+            total = total + subquery_cost;
+        }
+    }
+    for _ in filter_selectivities.len()..num_references {
+        total = total + subquery_cost;
+    }
+    total
+}
+
+pub fn cost_cte_materialize(
+    subquery_cost: Cost,
+    result_rows: u64,
+    result_width: u64,
+    num_references: usize,
+    hardware: &HardwareModel,
+) -> Cost {
+    let compute = subquery_cost;
+    let write = Cost::io(
+        result_rows as f64 * result_width as f64 * hardware.seq_write_cost()
+    );
+    let reads = Cost::io(
+        num_references as f64 * result_rows as f64
+        * result_width as f64 * hardware.seq_read_cost()
+    );
+    compute + write + reads
+}
+```
+
+## Test Cases
+
+### Positive: Inline with filter pushdown
+```sql
+WITH all_orders AS (SELECT * FROM orders)
+SELECT * FROM all_orders WHERE status = 'pending';
+
+-- Single reference: inline
+-- Filter pushdown: SELECT * FROM orders WHERE status = 'pending'
+-- Index on status can be used
+```
+
+### Positive: Materialize expensive multi-ref CTE
+```sql
+WITH user_stats AS (
+    SELECT user_id, count(*) as orders, sum(amount) as total
+    FROM orders GROUP BY user_id
+)
+SELECT * FROM user_stats WHERE orders > 100
+UNION ALL
+SELECT * FROM user_stats WHERE total > 10000;
+
+-- Two references to expensive aggregation
+-- Materialize: compute aggregation once, scan result twice
+```
+
+### Positive: Recursive CTE (mandatory materialization)
+```sql
+WITH RECURSIVE org_tree AS (
+    SELECT id, name, manager_id, 0 as depth FROM employees WHERE manager_id IS NULL
+    UNION ALL
+    SELECT e.id, e.name, e.manager_id, ot.depth + 1
+    FROM employees e JOIN org_tree ot ON e.manager_id = ot.id
+)
+SELECT * FROM org_tree;
+
+-- Recursive: work table materialization required
+-- Each iteration reads previous work table, writes new rows
+```
+
+### Negative: Multi-ref but trivial CTE
+```sql
+WITH nums AS (SELECT 1 as n)
+SELECT * FROM t1, nums UNION ALL SELECT * FROM t2, nums;
+
+-- CTE is trivial (1 row constant); inline is cheaper
+-- No benefit from materializing a single-row result
+```
+
+## References
+
+- PostgreSQL: CTE inlining (PG 12+), MATERIALIZED hint
+- Neumann & Kemper, "Unnesting Arbitrary Queries", BTW 2015
+- mssql: Common Table Spool optimization
+- DuckDB: CTE materialization heuristics

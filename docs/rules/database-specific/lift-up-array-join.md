@@ -1,0 +1,54 @@
+# Rule: Lift ARRAY JOIN Above Filter
+
+**Category:** database-specific/clickhouse
+**File:** `rules/database-specific/clickhouse/lift-up-array-join.rra`
+
+## Metadata
+
+- **ID:** `clickhouse-lift-up-array-join`
+- **Version:** 1.0.0
+- **Databases:** clickhouse
+- **Tags:** database-specific, clickhouse, array-join, filter, lift
+- **Authors:** "RA Contributors"
+
+
+# Lift ARRAY JOIN Above Filter
+
+## Description
+
+Moves ARRAY JOIN above filters when the filter doesn't depend on the array-joined columns. This allows filtering before expansion, reducing the number of rows to expand.
+
+**When to apply**: Filter above ARRAY JOIN where filter doesn't reference array-joined columns.
+
+**Why it works**: Filtering N rows before expansion is cheaper than filtering N * avg_array_length expanded rows.
+
+**Database version**: ClickHouse v20.3+
+
+## Relational Algebra
+
+```algebra
+Filter[c](ArrayJoin[arr](R))
+  -> ArrayJoin[arr](Filter[c](R))
+  where c does not reference arr
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("clickhouse-lift-up-array-join";
+    "(filter ?cond (array_join ?arr ?input))" =>
+    "(array_join ?arr (filter ?cond ?input))"
+    if is_database("clickhouse")
+    if not(references_array_cols("?cond", "?arr"))
+),
+```
+
+**Typical benefit**: 30-60% when arrays are large
+
+## References
+
+**Source code:**
+- ClickHouse: `src/Processors/QueryPlan/Optimizations/liftUpArrayJoin.cpp`
+  - Commit: 35f2d31186cca2f8c50f7ba4bd93817da490da85

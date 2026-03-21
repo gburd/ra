@@ -1,0 +1,131 @@
+# Rule: Grace Hash Join
+
+**Category:** physical/join-algorithms
+**File:** `rules/physical/join-algorithms/grace-hash-join.rra`
+
+## Metadata
+
+- **ID:** `grace-hash-join`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, duckdb, clickhouse
+- **Tags:** join, hash, partition, out-of-core
+- **Authors:** "RA Contributors"
+
+## Preconditions
+
+```yaml
+  - type: "pattern"
+    must_match: "(join inner (= ?lcol ?rcol) ?left ?right)"
+    description: "Equi-join with Grace hash partitioning"
+  - type: "predicate"
+    condition: "is_equijoin(= ?lcol ?rcol)"
+    description: "Must be an equi-join"
+  - type: "fact"
+    fact_type: "statistics.size_bytes"
+    table: "smaller_input(?left, ?right)"
+    comparator: ">"
+    threshold: "available_memory()"
+    description: "Build input exceeds memory (triggers Grace partitioning)"
+    optional: true
+```
+
+
+# Grace Hash Join
+
+## Description
+
+Partitions both inputs on join key, then joins matching partitions; works with limited memory.
+
+**When to apply**: Hash join when input doesn't fit in memory.
+
+**Why it works**: Partition-based approach ensures each partition fits in memory; enables disk-based joins.
+
+## Relational Algebra
+
+```algebra
+join[R.key = S.key](R, S)
+  -> partition_phase:
+       partition(R, hash(key)) -> R1...Rn
+       partition(S, hash(key)) -> S1...Sn
+     join_phase:
+       for i in 1..n:
+         hash_join(Ri, Si)
+```
+
+## Implementation
+
+```rust
+rw!("use-grace-hash-join";
+    "(join (= ?left_key ?right_key) ?left ?right)" =>
+    "(grace-hash-join ?left_key ?right_key ?left ?right)"
+    if memory_limited() && large_inputs("?left", "?right")
+),
+```
+
+## Cost Model
+
+```rust
+fn cost(left_size: u64, right_size: u64, memory: u64) -> f64 {
+    let total_size = left_size + right_size;
+    let partitions = (total_size / memory).max(2);
+
+    // Partition phase: read + write both inputs
+    let partition = 2.0 * (left_size + right_size) as f64;
+
+    // Join phase: read partitions once
+    let join = (left_size + right_size) as f64;
+
+    partition + join
+}
+```
+
+**Typical benefit**: 30-70% vs in-memory when data exceeds RAM
+
+## Test Cases
+
+### Positive: Large tables with limited memory
+
+```sql
+SELECT * FROM large_table1 t1
+JOIN large_table2 t2 ON t1.key = t2.key;
+
+-- Tables: 100GB each, Memory: 8GB
+-- Grace: partition into 32 buckets, join each in memory
+```
+
+### Positive: Spillable hash join
+
+```sql
+SELECT * FROM orders o
+JOIN line_items li ON o.id = li.order_id
+WHERE o.year = 2025;
+
+-- Filtered orders still large: use grace hash join
+```
+
+### Negative: Small inputs
+
+```sql
+SELECT * FROM users u
+JOIN sessions s ON u.id = s.user_id
+WHERE u.active = true;
+
+-- Both fit in memory: use simple hash join
+```
+
+### Negative: Highly skewed distribution
+
+```sql
+SELECT * FROM products p
+JOIN reviews r ON p.id = r.product_id;
+
+-- Skewed: 90% of reviews on 10 products
+-- Grace partitioning won't help; use hybrid hash join
+```
+
+## References
+
+- PostgreSQL: Hash join with batching
+- DuckDB: Grace hash join for out-of-core processing
+- ClickHouse: Distributed grace hash join
+- "Grace Hash Join" paper (Kitsuregawa et al., 1983)

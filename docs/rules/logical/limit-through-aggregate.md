@@ -1,0 +1,95 @@
+# Rule: LIMIT Through Aggregate
+
+**Category:** logical/limit-pushdown
+**File:** `rules/logical/limit-pushdown/limit-through-aggregate.rra`
+
+## Metadata
+
+- **ID:** `limit-through-aggregate`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, duckdb
+- **Tags:** limit, aggregate, pushdown
+- **Authors:** "RA Contributors"
+
+
+# LIMIT Through Aggregate
+
+## Description
+
+In specific cases, pushes LIMIT through aggregation when only K groups are needed.
+
+**When to apply**: LIMIT over GROUP BY with ORDER BY on grouping key.
+
+**Why it works**: Can stop aggregation after producing K groups.
+
+## Relational Algebra
+
+```algebra
+limit[K](aggregate[group, agg](sort[group](R)))
+  -> aggregate[group, agg](limit[K * avg_group_size](sort[group](R)))
+
+Simplified for sorted inputs
+```
+
+## Implementation
+
+```rust
+rw!("limit-through-sorted-aggregate";
+    "(limit ?k (aggregate ?group ?agg (sort ?group ?input)))" =>
+    "(limit ?k (aggregate ?group ?agg ?input))"
+    if input_sorted_by("?input", "?group")
+),
+```
+
+## Cost Model
+
+```rust
+fn benefit(input_size: u64, k: u64, group_size: u64) -> f64 {
+    let full_agg = input_size; // Aggregate all
+    let limited = k * group_size; // Stop at K groups
+    (full_agg - limited) as f64 / full_agg as f64
+}
+```
+
+**Typical benefit**: 10-30% for sorted inputs
+
+## Test Cases
+
+### Positive: Sorted input
+
+```sql
+SELECT category, COUNT(*)
+FROM products_sorted_by_category
+GROUP BY category
+LIMIT 10;
+
+-- Stop after 10 categories
+```
+
+### Positive: Index scan provides sort
+
+```sql
+SELECT date, SUM(amount)
+FROM sales  -- index on (date)
+GROUP BY date
+ORDER BY date
+LIMIT 7;
+
+-- Use index, stop after 7 dates
+```
+
+### Negative: Unsorted input
+
+```sql
+SELECT country, AVG(salary)
+FROM employees
+GROUP BY country
+LIMIT 5;
+
+-- Must see all rows to compute correct aggregates
+```
+
+## References
+
+- PostgreSQL: Incremental sort with limit
+- DuckDB: Streaming aggregation with limit

@@ -1,0 +1,320 @@
+# Rule: "System R Access Path Selection"
+
+**Category:** physical/access-path-selection
+**File:** `rules/physical/access-path-selection/system-r-access-path-selection.rra`
+
+## Metadata
+
+- **ID:** `system-r-access-path-selection`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, duckdb, cockroachdb, mssql, oracle
+- **Tags:** access-path, system-r, cost-based, index-scan, sequential-scan, classic
+- **Authors:** "Selinger, Astrahan, Chamberlin, Lorie, Price - IBM Research"
+
+
+# System R Access Path Selection
+
+## Description
+
+The foundational access path selection algorithm from IBM's System R optimizer.
+For each table in a query, the optimizer enumerates all available access paths
+(sequential scan, each available index) and selects the cheapest based on a
+cost formula that combines I/O cost and CPU cost. The algorithm considers
+clustered vs. unclustered indexes, index-only scans, and the interaction
+between predicates and available indexes.
+
+This is the single-relation optimization component of the System R optimizer.
+It runs before join ordering: for each base relation, the optimizer determines
+the best way to access it given the applicable predicates.
+
+**When to apply**: Any single-table access with one or more predicates where
+indexes are available. The optimizer must choose between sequential scan and
+one or more index scans.
+
+**Why it works**: Different access paths have dramatically different costs
+depending on data distribution, predicate selectivity, and index clustering.
+A sequential scan reads every page once; an unclustered index scan may read
+the same page multiple times. The cost model captures these differences.
+
+## Relational Algebra
+
+```algebra
+Given: sigma_{p1 AND p2 AND ... AND pn}(R)
+Available access paths: {SeqScan, IndexScan(I1), IndexScan(I2), ...}
+
+For each access path AP:
+  matching_preds = predicates that AP can evaluate directly
+  residual_preds = predicates applied as post-filter
+  cost(AP) = W * pages_fetched(AP) + w * tuples_retrieved(AP)
+
+  For SeqScan:
+    pages_fetched = N_pages(R)
+    tuples_retrieved = N_tuples(R)
+
+  For IndexScan(I) on matching_preds with selectivity F:
+    If I is clustered:
+      pages_fetched = F * N_pages(R)
+    Else:
+      pages_fetched = F * N_tuples(R)  (worst case: one page per tuple)
+    tuples_retrieved = F * N_tuples(R)
+
+Choose AP with minimum cost.
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+#[derive(Clone, Debug)]
+struct AccessPath {
+    kind: AccessPathKind,
+    matching_predicates: Vec<Predicate>,
+    residual_predicates: Vec<Predicate>,
+}
+
+#[derive(Clone, Debug)]
+enum AccessPathKind {
+    SequentialScan,
+    ClusteredIndexScan { index: Index },
+    UnclusteredIndexScan { index: Index },
+    IndexOnlyScan { index: Index },
+}
+
+struct SystemRAccessPathSelector;
+
+impl SystemRAccessPathSelector {
+    fn select_access_path(
+        &self,
+        table: &Table,
+        predicates: &[Predicate],
+        catalog: &Catalog,
+    ) -> AccessPath {
+        let mut best_path = self.sequential_scan_path(predicates);
+        let mut best_cost = self.cost_sequential_scan(table, predicates);
+
+        for index in catalog.indexes_for(table) {
+            let (matching, residual) =
+                self.classify_predicates(predicates, &index);
+
+            if matching.is_empty() {
+                continue;
+            }
+
+            let selectivity =
+                self.combined_selectivity(&matching, table);
+
+            let cost = if index.is_clustered {
+                self.cost_clustered_index(
+                    table, &index, selectivity
+                )
+            } else {
+                self.cost_unclustered_index(
+                    table, &index, selectivity
+                )
+            };
+
+            // Also consider index-only scan
+            let index_only_cost = if index.covers_all_columns(
+                predicates, &[] // no projection yet
+            ) {
+                self.cost_index_only(table, &index, selectivity)
+            } else {
+                f64::INFINITY
+            };
+
+            let (path_cost, kind) =
+                if index_only_cost < cost {
+                    (index_only_cost,
+                     AccessPathKind::IndexOnlyScan {
+                         index: index.clone()
+                     })
+                } else if index.is_clustered {
+                    (cost,
+                     AccessPathKind::ClusteredIndexScan {
+                         index: index.clone()
+                     })
+                } else {
+                    (cost,
+                     AccessPathKind::UnclusteredIndexScan {
+                         index: index.clone()
+                     })
+                };
+
+            if path_cost < best_cost {
+                best_cost = path_cost;
+                best_path = AccessPath {
+                    kind,
+                    matching_predicates: matching,
+                    residual_predicates: residual,
+                };
+            }
+        }
+
+        best_path
+    }
+
+    /// System R cost formula: COST = PAGE_FETCHES + W * RSI_CALLS
+    /// W is the weighting factor between I/O and CPU
+    fn cost_sequential_scan(
+        &self,
+        table: &Table,
+        predicates: &[Predicate],
+    ) -> f64 {
+        let w = 0.05; // CPU weight relative to I/O
+        let pages = table.num_pages as f64;
+        let tuples = table.num_tuples as f64;
+        pages + w * tuples
+    }
+
+    fn cost_clustered_index(
+        &self,
+        table: &Table,
+        index: &Index,
+        selectivity: f64,
+    ) -> f64 {
+        let w = 0.05;
+        let pages = selectivity * table.num_pages as f64;
+        let tuples = selectivity * table.num_tuples as f64;
+        pages + w * tuples
+    }
+
+    fn cost_unclustered_index(
+        &self,
+        table: &Table,
+        index: &Index,
+        selectivity: f64,
+    ) -> f64 {
+        let w = 0.05;
+        // Worst case: each tuple on a different page
+        let pages = selectivity * table.num_tuples as f64;
+        let tuples = selectivity * table.num_tuples as f64;
+        pages + w * tuples
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    hw: &HardwareProfile,
+) -> bool {
+    // Must have statistics on the table
+    stats.has_table_statistics
+        // At least one predicate to evaluate
+        && !stats.predicates.is_empty()
+        // Cost-based optimization enabled
+        && hw.cost_based_optimization
+}
+```
+
+**Restrictions:**
+- Requires catalog statistics (row count, page count, distinct values)
+- Selectivity estimates may be inaccurate for correlated predicates
+- Does not consider multi-index access (bitmap scans are a later extension)
+- Original System R only considers single-index access per table
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    hw: &HardwareProfile,
+) -> f64 {
+    let table_pages = stats.num_pages as f64;
+    let table_rows = stats.num_tuples as f64;
+    let best_selectivity = stats.min_predicate_selectivity;
+
+    // Sequential scan cost
+    let seq_cost = table_pages + 0.05 * table_rows;
+
+    // Best index cost (clustered)
+    let idx_pages = best_selectivity * table_pages;
+    let idx_rows = best_selectivity * table_rows;
+    let clustered_cost = idx_pages + 0.05 * idx_rows;
+
+    // Benefit ratio
+    if seq_cost > clustered_cost && clustered_cost > 0.0 {
+        (seq_cost - clustered_cost) / seq_cost
+    } else {
+        0.0
+    }
+}
+```
+
+**Assumptions:**
+- W = 0.05 (System R's original weighting factor for CPU vs. I/O)
+- Clustered index: pages fetched proportional to selectivity * table pages
+- Unclustered index: pages fetched proportional to selectivity * table tuples
+- Index-only scan avoids table access entirely
+
+**Typical benefit**: 50% to 100x for selective queries with appropriate indexes.
+
+## Test Cases
+
+### Positive: Highly selective equality predicate with clustered index
+
+```sql
+-- Clustered index on customer_id
+-- 10M rows, selectivity 0.001% (100 rows)
+SELECT * FROM orders WHERE customer_id = 42;
+
+-- SeqScan cost: 100,000 pages + 0.05 * 10,000,000 = 600,000
+-- Clustered index: 0.001% * 100,000 + 0.05 * 100 = 6
+-- Index wins by ~100,000x
+```
+
+### Positive: Range predicate with unclustered index
+
+```sql
+-- Unclustered index on order_date
+-- 10M rows, selectivity 1% (100K rows)
+SELECT * FROM orders WHERE order_date > '2024-01-01';
+
+-- SeqScan cost: 100,000 + 0.05 * 10,000,000 = 600,000
+-- Unclustered index: 1% * 10,000,000 + 0.05 * 100,000 = 105,000
+-- Index wins by ~6x (but barely -- unclustered penalty)
+```
+
+### Negative: Low selectivity where sequential scan wins
+
+```sql
+-- Index on status, but 60% of rows are 'active'
+SELECT * FROM users WHERE status = 'active';
+
+-- SeqScan cost: 50,000 + 0.05 * 5,000,000 = 300,000
+-- Unclustered index: 60% * 5,000,000 + 0.05 * 3,000,000 = 3,150,000
+-- SeqScan wins by 10x
+```
+
+### Positive: Index-only scan avoids table access
+
+```sql
+-- Covering index on (department_id, salary)
+SELECT department_id, salary FROM employees
+WHERE department_id = 'ENG';
+
+-- Index-only: only access index pages, skip table entirely
+-- Benefit: eliminates random I/O to table heap
+```
+
+## References
+
+**Original paper:**
+- Selinger, P. Griffiths, Astrahan, M.M., Chamberlin, D.D., Lorie, R.A., Price, T.G., "Access Path Selection in a Relational Database Management System", ACM SIGMOD 1979
+  - DOI: 10.1145/582095.582099
+  - Section 4: "Single Relation Access Path Selection"
+  - The W = PAGE_FETCHES + w * RSI_CALLS cost formula
+  - Clustered vs. unclustered index cost distinction
+
+**Follow-up work:**
+- Mackert, L.F., Lohman, G.M., "R* Optimizer Validation and Performance Evaluation for Local Queries", ACM SIGMOD 1986
+  - DOI: 10.1145/16894.16908
+  - Refined cost formulas for distributed setting (R*)
+
+**Implementation in databases:**
+- PostgreSQL: `src/backend/optimizer/path/costsize.c` - cost_seqscan, cost_index
+- MySQL: `sql/sql_optimizer.cc` - test_quick_select
+- All major databases implement this fundamental algorithm

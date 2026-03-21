@@ -1,0 +1,112 @@
+# Rule: mssql Partition Elimination
+
+**Category:** database-specific/mssql
+**File:** `rules/database-specific/mssql/partition-elimination.rra`
+
+## Metadata
+
+- **ID:** `mssql-partition-elimination`
+- **Version:** "1.0.0"
+- **Databases:** mssql
+- **Tags:** database-specific, mssql, partition, elimination, pruning
+- **Authors:** "RA Contributors"
+
+
+# mssql Partition Elimination
+
+## Description
+
+Eliminates irrelevant partitions from table scans based on query
+predicates matching the partition function definition.  mssql
+identifies which partitions can contain matching rows and restricts
+the scan to only those partitions.
+
+**When to apply**: A query filters on the partitioning column of a
+partitioned table.
+
+**Why it works**: Each partition is a separate physical unit with its
+own data pages and potentially its own filegroup.  Skipping partitions
+avoids reading their data pages entirely, proportionally reducing I/O.
+
+**Database version**: mssql 2005+
+
+## Relational Algebra
+
+```algebra
+-- Before: scan all partitions
+sigma[order_date >= '2025-01-01'](scan(orders, all_partitions))
+
+-- After: partition elimination
+sigma[order_date >= '2025-01-01'](
+    scan(orders, partitions=[2025_Q1, 2025_Q2, ...]))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mssql-static-partition-elimination";
+    "(filter ?pred (scan ?table))" =>
+    "(filter ?pred (scan-partitions ?table
+        (eliminate-partitions ?table ?pred)))"
+    if is_database("mssql")
+    if is_partitioned("?table")
+    if predicate_on_partition_column("?pred", "?table")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    pred: &Expr,
+    partition_function: &PartitionFunction,
+) -> bool {
+    let partition_col = partition_function.column();
+    pred.column_refs().contains(&partition_col)
+    && pred.can_evaluate_against_boundaries()
+}
+```
+
+**Restrictions:**
+- Predicate must reference the partitioning column directly
+- Functions on the partitioning column prevent elimination (e.g., YEAR(date))
+- Dynamic partition elimination requires joins at runtime
+- PARAMETERIZATION FORCED may prevent elimination with parameters
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    total_partitions: usize,
+    accessed_partitions: usize,
+    avg_partition_pages: f64,
+) -> f64 {
+    let eliminated = total_partitions - accessed_partitions;
+    eliminated as f64 * avg_partition_pages * 8192.0
+}
+```
+
+**Typical benefit**: For 52 weekly partitions with a 1-week filter,
+eliminates 98% of data pages.
+
+## Test Cases
+
+```sql
+-- Positive: filter on partition column
+SELECT * FROM orders WHERE order_date >= '2025-01-01'
+AND order_date < '2025-04-01';
+-- Only Q1 2025 partition(s) scanned
+```
+
+```sql
+-- Negative: function on partition column
+SELECT * FROM orders WHERE YEAR(order_date) = 2025;
+-- YEAR() prevents static partition elimination
+```
+
+## References
+
+mssql: Partitioned Tables and Indexes, "Partition Elimination"
+mssql: sys.partitions, sys.partition_range_values

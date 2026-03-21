@@ -1,0 +1,198 @@
+# Rule: Project Correlate Transpose
+
+**Category:** database-specific/calcite
+**File:** `rules/database-specific/calcite/project-correlate-transpose.rra`
+
+## Metadata
+
+- **ID:** `project-correlate-transpose`
+- **Version:** "1.0.0"
+- **Databases:** calcite
+- **Tags:** project, correlate, transpose, optimization
+- **Authors:** "Apache Calcite Contributors"
+
+
+# Project Correlate Transpose
+
+## Description
+
+Pushes projections through correlate (correlated join) operations when
+the projection only references columns that are available before the
+correlation. This simplifies the correlate's input and can enable further
+optimizations like predicate pushdown.
+
+**When to apply**: A projection appears above a correlate operation, and
+the projected columns can be computed from the correlate's left input or
+the correlation output without requiring materialization of intermediate
+results.
+
+**Why it works**: Correlate operations (nested loop joins with correlation
+variables) preserve input schemas. Projections that don't depend on the
+full correlated result can be pushed down or simplified, reducing the
+amount of data flowing through the correlation.
+
+## Relational Algebra
+
+```algebra
+π_p(R ⋉_corr S) where p references R and simple S columns ->
+  π_p'(R ⋉_corr π_p''(S))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("project-correlate-transpose";
+    "(project ?exprs
+       (correlate ?var ?left ?right))" =>
+    "(project (outer-exprs ?exprs)
+       (correlate ?var
+         (project (left-exprs ?exprs) ?left)
+         (project (right-exprs ?exprs) ?right)))"
+    if can-split-project("?exprs", "?left", "?right")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> bool {
+    // Projection must be decomposable
+    stats.projection_is_decomposable
+        // Should reduce correlation complexity
+        && stats.correlation_complexity > 1
+        // Correlation is present
+        && stats.has_correlation
+}
+```
+
+**Restrictions:**
+- Projection expressions must be decomposable across correlate boundary
+- Cannot push projections that depend on full correlation result
+- Correlation variables must remain accessible
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let left_rows = stats.left_cardinality as f64;
+    let right_rows_per_correlation = stats.right_cardinality as f64;
+    let total_correlations = left_rows * right_rows_per_correlation;
+
+    // Benefit comes from:
+    // 1. Reducing columns in correlated subquery
+    let column_reduction = stats.eliminated_columns as f64 / stats.total_columns as f64;
+
+    // 2. Enabling further pushdown optimizations
+    let pushdown_potential = 0.15;
+
+    // Combined benefit
+    (column_reduction * 0.15) + pushdown_potential
+}
+```
+
+**Assumptions:**
+- Correlate cost is dominated by nested loop iteration
+- Simplifying projections enables further optimization
+- Reduced column count improves cache behavior
+
+**Typical benefit**: 10-30% from simplified correlations and enabled optimizations.
+
+## Test Cases
+
+### Positive: Push projection through correlate
+
+```sql
+-- Projection on correlated subquery
+SELECT o.order_id, o.total, (
+  SELECT SUM(quantity)
+  FROM order_items oi
+  WHERE oi.order_id = o.order_id
+) as total_quantity
+FROM orders o;
+
+-- Before:
+-- Project[order_id, total, total_quantity]
+--   Correlate[$cor0]
+--     Scan(orders as o)
+--     Aggregate[SUM(quantity)]
+--       Filter(oi.order_id = $cor0.order_id)
+--         Scan(order_items as oi)
+
+-- After project-correlate-transpose (simplified):
+-- Project[order_id, total, total_quantity]
+--   Correlate[$cor0]
+--     Project[order_id, total]
+--       Scan(orders as o)
+--     Aggregate[SUM(quantity)]
+--       Filter(oi.order_id = $cor0.order_id)
+--         Scan(order_items as oi)
+```
+
+### Positive: Eliminate unused correlation columns
+
+```sql
+-- Correlation only needs customer_id, not all customer columns
+SELECT c.customer_id, (
+  SELECT COUNT(*)
+  FROM orders o
+  WHERE o.customer_id = c.customer_id
+) as order_count
+FROM customers c;
+
+-- Push projection to only pass customer_id through correlation
+```
+
+### Negative: Complex expression on correlation result
+
+```sql
+-- Projection computes complex expression needing full result
+SELECT
+  c.customer_id,
+  c.name,
+  (SELECT SUM(total) FROM orders o WHERE o.customer_id = c.customer_id) +
+  (SELECT COUNT(*) FROM shipments s WHERE s.customer_id = c.customer_id) as combined
+FROM customers c;
+
+-- Cannot easily decompose the + operation across correlations
+```
+
+### Positive: Simplify nested correlation
+
+```sql
+-- Multiple levels of correlation
+SELECT
+  dept_id,
+  (SELECT COUNT(*)
+   FROM employees e
+   WHERE e.dept_id = d.dept_id) as emp_count
+FROM departments d;
+
+-- Pushing projection simplifies nested structure
+```
+
+## References
+
+**Implementation in databases:**
+- Apache Calcite: `ProjectCorrelateTransposeRule.java`
+- Correlated subquery optimization framework
+
+**Academic papers:**
+- Kim, "On Optimizing an SQL-like Nested Query", ACM TODS 1982
+  - DOI: 10.1145/319732.319745
+  - Original work on correlated subquery optimization
+- Galindo-Legaria & Joshi, "Orthogonal Optimization of Subqueries and Aggregation", ACM SIGMOD 2001
+  - DOI: 10.1145/375663.375746
+  - Advanced correlated subquery transformation
+- Neumann & Kemper, "Unnesting Arbitrary Queries", BTW 2015
+  - Modern techniques for correlated subquery unnesting
+- Elhemali et al., "Execution Strategies for SQL Subqueries", ACM SIGMOD 2007
+  - DOI: 10.1145/1247480.1247598
+  - Correlated subquery execution strategies

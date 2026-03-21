@@ -1,0 +1,68 @@
+# Rule: CTE Unnesting
+
+**Category:** logical/cte-optimization
+**File:** `rules/logical/cte-optimization/cte-unnesting.rra`
+
+## Metadata
+
+- **ID:** `cte-unnesting`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, duckdb, sqlite
+- **Tags:** cte, unnesting, flattening
+- **Authors:** "RA Contributors"
+
+
+# CTE Unnesting
+
+## Description
+
+Flattens nested CTEs when the inner CTE is only referenced by the outer CTE definition, not by the final body. This simplifies the query plan and enables further optimizations.
+
+**When to apply**: Inner CTE is only referenced within the outer CTE definition and nowhere else.
+
+## Relational Algebra
+
+```algebra
+CTE[outer, CTE[inner, inner_def](outer_def)](body)
+  -> CTE[outer, outer_def[inner := inner_def]](body)
+  where !references(body, inner)
+    and ref_count(inner, outer_def) = 1
+```
+
+## Implementation
+
+```rust
+rw!("cte-unnesting";
+    "(cte ?outer (cte ?inner ?inner_def ?outer_def) ?body)" =>
+    "(cte ?outer (substitute ?inner ?inner_def ?outer_def) ?body)"
+    if not_referenced_in_body("?inner", "?body")
+    if single_reference("?inner", "?outer_def")
+),
+```
+
+## Test Cases
+
+### Positive: Nested single-use CTE
+
+```sql
+WITH outer AS (
+    WITH inner AS (SELECT id FROM users WHERE active = true)
+    SELECT id, name FROM inner JOIN profiles ON inner.id = profiles.user_id
+)
+SELECT * FROM outer;
+```
+
+### Negative: Inner CTE used in body
+
+```sql
+WITH inner AS (SELECT id FROM users),
+     outer AS (SELECT * FROM inner)
+SELECT * FROM inner JOIN outer ON inner.id = outer.id;
+
+-- inner is used in body; cannot unnest
+```
+
+## References
+
+- CTE flattening in DuckDB optimizer
+- Query unnesting in database systems (Neumann & Kemper, 2015)

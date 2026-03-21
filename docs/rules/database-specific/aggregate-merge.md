@@ -1,0 +1,193 @@
+# Rule: Aggregate Merge
+
+**Category:** database-specific/calcite
+**File:** `rules/database-specific/calcite/aggregate-merge.rra`
+
+## Metadata
+
+- **ID:** `aggregate-merge`
+- **Version:** "1.0.0"
+- **Databases:** calcite, postgresql
+- **Tags:** aggregate, merge, simplification, logical
+- **Authors:** "Apache Calcite Contributors"
+
+
+# Aggregate Merge
+
+## Description
+
+Merges two consecutive aggregate operations into a single aggregate when
+the second aggregate groups on a superset of the first aggregate's grouping
+keys. This eliminates redundant grouping operations and intermediate
+materialization.
+
+**When to apply**: Two aggregates are stacked where the outer aggregate
+groups by columns that form a superset of the inner aggregate's group keys,
+and the aggregate functions are composable.
+
+**Why it works**: If the outer aggregate groups on {A, B} and the inner
+groups on {A}, we can combine them into a single aggregate on {A, B}. The
+intermediate grouping step is unnecessary since the outer aggregate will
+re-scan all groups anyway.
+
+## Relational Algebra
+
+```algebra
+γ_{g1, AGG1}(γ_{g2, AGG2}(R)) where g2 ⊆ g1 ->
+  γ_{g1, merge(AGG1, AGG2)}(R)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("aggregate-merge";
+    "(aggregate ?groups1 ?aggs1
+       (aggregate ?groups2 ?aggs2 ?input))" =>
+    "(aggregate (merge-groups ?groups1 ?groups2)
+                (merge-aggs ?aggs1 ?aggs2)
+                ?input)"
+    if can-merge-aggregates("?groups1", "?groups2", "?aggs1", "?aggs2")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> bool {
+    // Outer group keys must be superset of inner
+    stats.outer_group_keys.is_superset(&stats.inner_group_keys)
+        // Aggregate functions must be composable
+        && stats.aggregates_are_composable
+        // Must have at least some common grouping
+        && !stats.inner_group_keys.is_empty()
+}
+```
+
+**Restrictions:**
+- Outer aggregate groups on superset of inner aggregate keys
+- Aggregate functions must be decomposable (SUM, COUNT work; MEDIAN doesn't)
+- No DISTINCT aggregates (they require materialization of intermediate results)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let input_rows = stats.input_row_count as f64;
+    let inner_groups = stats.inner_group_count as f64;
+    let outer_groups = stats.outer_group_count as f64;
+
+    // Cost of two aggregates:
+    // - Inner: hash table with inner_groups entries, scan input_rows
+    // - Outer: hash table with outer_groups entries, scan inner_groups
+    let two_agg_cost = (input_rows * 1.5) + (inner_groups * 1.5);
+
+    // Cost of merged aggregate:
+    // - Single hash table with outer_groups entries, scan input_rows once
+    let merged_cost = input_rows * 1.5;
+
+    // Benefit: eliminate intermediate materialization and second hash table
+    if two_agg_cost > merged_cost {
+        (two_agg_cost - merged_cost) / two_agg_cost
+    } else {
+        0.0
+    }
+}
+```
+
+**Assumptions:**
+- Hash aggregation cost is ~1.5x input cardinality (hash probe + update)
+- Intermediate materialization adds memory pressure
+- Single aggregate with more groups is cheaper than two separate aggregates
+
+**Typical benefit**: 15-35% by eliminating intermediate aggregation.
+
+## Test Cases
+
+### Positive: Nested aggregates with superset groups
+
+```sql
+-- Redundant two-level aggregation
+SELECT category, brand, SUM(total_sales)
+FROM (
+  SELECT category, SUM(amount) as total_sales
+  FROM sales
+  GROUP BY category
+) t
+CROSS JOIN brands
+GROUP BY category, brand;
+
+-- Can be optimized when brand is a function of category
+-- Or when the outer aggregate actually needs finer grouping
+```
+
+### Positive: Composable aggregate functions
+
+```sql
+-- Inner and outer aggregates can be merged
+SELECT department, COUNT(*) as employee_count
+FROM (
+  SELECT department, COUNT(*) as dept_count
+  FROM employees
+  GROUP BY department
+) t
+GROUP BY department;
+
+-- Merges to:
+-- SELECT department, COUNT(*)
+-- FROM employees
+-- GROUP BY department
+```
+
+### Negative: Outer groups not superset
+
+```sql
+-- Outer groups on different columns
+SELECT region, SUM(total)
+FROM (
+  SELECT department, SUM(salary) as total
+  FROM employees
+  GROUP BY department
+) t
+GROUP BY region;
+
+-- Cannot merge: region is not in {department}
+```
+
+### Negative: DISTINCT aggregate
+
+```sql
+-- DISTINCT requires intermediate materialization
+SELECT category, COUNT(DISTINCT subcategory)
+FROM (
+  SELECT category, subcategory, SUM(amount)
+  FROM sales
+  GROUP BY category, subcategory
+) t
+GROUP BY category;
+
+-- Cannot merge: DISTINCT needs the intermediate subcategory list
+```
+
+## References
+
+**Implementation in databases:**
+- Apache Calcite: `AggregateMergeRule.java`
+- PostgreSQL: Aggregate merging in planner (subselect.c)
+- Presto: Partial aggregation fusion
+
+**Academic papers:**
+- Yan & Larson, "Eager Aggregation and Lazy Aggregation", VLDB 1995
+  - Multi-level aggregation optimization strategies
+- Chaudhuri & Shim, "Including Group-By in Query Optimization", VLDB 1994
+  - Aggregate placement and merging
+- Galindo-Legaria & Joshi, "Orthogonal Optimization of Subqueries and Aggregation", ACM SIGMOD 2001
+  - DOI: 10.1145/375663.375746
+  - Aggregate function decomposition and merging

@@ -1,0 +1,70 @@
+# Rule: Recursive CTE Cycle Detection Insertion
+
+**Category:** logical/cte-optimization
+**File:** `rules/logical/cte-optimization/recursive-cte-cycle-detection.rra`
+
+## Metadata
+
+- **ID:** `recursive-cte-cycle-detection`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, duckdb, sqlite
+- **Tags:** recursive, cte, cycle, detection, safety
+- **Authors:** "RA Contributors"
+
+
+# Recursive CTE Cycle Detection Insertion
+
+## Description
+
+Adds cycle detection to a recursive CTE that lacks it. Uses the SQL standard CYCLE clause semantics: track specified columns and mark rows that would revisit already-seen combinations.
+
+**When to apply**: RecursiveCTE has no cycle_detection configured and the recursive case references the CTE through a join on non-unique columns.
+
+**Why it works**: Prevents infinite loops at the cost of maintaining a hash set of seen tuples. Without this, graph traversal CTEs on cyclic data can run forever.
+
+## Relational Algebra
+
+```algebra
+RecursiveCTE[name, base, rec, cycle=None](body)
+  -> RecursiveCTE[name, base, rec, cycle=Default{max_depth=1000}](body)
+  where has_join_cycle_risk(rec, name)
+```
+
+## Implementation
+
+```rust
+rw!("recursive-cte-cycle-detection";
+    "(recursive-cte ?name ?base ?rec ?body)" =>
+    {
+        AddCycleDetection {
+            name: var("?name"),
+            base: var("?base"),
+            rec: var("?rec"),
+            body: var("?body"),
+            max_depth: 1000,
+        }
+    }
+    if missing_cycle_detection("?name")
+),
+```
+
+## Test Cases
+
+```sql
+-- Graph traversal on potentially cyclic data
+WITH RECURSIVE reachable AS (
+  SELECT src, dst FROM edges WHERE src = 1
+  UNION ALL
+  SELECT e.src, e.dst FROM edges e
+  JOIN reachable r ON e.src = r.dst
+)
+SELECT * FROM reachable;
+
+-- After: cycle detection added automatically
+-- Prevents infinite loop if edges contain cycles
+```
+
+## References
+
+- SQL standard CYCLE clause (ISO/IEC 9075-2:2023)
+- PostgreSQL CYCLE detection

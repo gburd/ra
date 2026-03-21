@@ -1,0 +1,107 @@
+# Rule: Expression Index Selection
+
+**Category:** physical/index-selection
+**File:** `rules/physical/index-selection/expression-index-selection.rra`
+
+## Metadata
+
+- **ID:** `expression-index-selection`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, oracle
+- **Tags:** index, expression, functional
+- **Authors:** "RA Contributors"
+
+## Preconditions
+
+```yaml
+  - type: "pattern"
+    must_match: "(filter (func ?fname ?args) (scan ?table))"
+    description: "Filter with expression matching an expression index"
+  - type: "predicate"
+    condition: "has_expression_index(?table, func(?fname, ?args))"
+    description: "Expression index must exist matching the filter expression"
+```
+
+
+# Expression Index Selection
+
+## Description
+
+Uses index on expression/function result when query filters on same expression.
+
+**When to apply**: Query predicates on expression that matches indexed expression.
+
+**Why it works**: Index pre-computes expression; avoids recalculating for every row.
+
+## Relational Algebra
+
+```algebra
+filter[LOWER(name) = 'smith'](scan[T])
+  -> index_scan[I(LOWER(name))](LOWER(name) = 'smith')
+  where has_expression_index(I, LOWER(name))
+```
+
+## Implementation
+
+```rust
+rw!("use-expression-index";
+    "(filter (= (apply ?func ?col) ?val) (scan ?table))" =>
+    "(index-scan ?expr_index (= (apply ?func ?col) ?val))"
+    if has_expression_index("?table", "?func", "?col")
+),
+```
+
+## Cost Model
+
+```rust
+fn cost(index_size: u64, selectivity: f64) -> f64 {
+    let index_lookup = (index_size as f64).log2();
+    let scan_matches = index_size as f64 * selectivity;
+    index_lookup + scan_matches
+}
+
+fn benefit_vs_seq_scan(table_size: u64, expr_cost: f64) -> f64 {
+    let seq_with_expr = table_size as f64 * expr_cost;
+    let idx = (table_size as f64).log2();
+    (seq_with_expr - idx) / seq_with_expr
+}
+```
+
+**Typical benefit**: 50-80% when expression is expensive
+
+## Test Cases
+
+### Positive: Case-insensitive search
+
+```sql
+CREATE INDEX idx_lower_email ON users(LOWER(email));
+
+SELECT * FROM users WHERE LOWER(email) = 'admin@example.com';
+
+-- Expression index used: pre-computed LOWER(email)
+```
+
+### Positive: Date extraction
+
+```sql
+CREATE INDEX idx_order_year ON orders(EXTRACT(YEAR FROM order_date));
+
+SELECT * FROM orders WHERE EXTRACT(YEAR FROM order_date) = 2025;
+
+-- Index on extracted year
+```
+
+### Negative: Different expression
+
+```sql
+CREATE INDEX idx_lower_name ON users(LOWER(name));
+
+SELECT * FROM users WHERE UPPER(name) = 'SMITH';
+
+-- UPPER != LOWER: cannot use index
+```
+
+## References
+
+- PostgreSQL: Indexes on expressions
+- Oracle: Function-based indexes

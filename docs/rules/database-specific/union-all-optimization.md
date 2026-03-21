@@ -1,0 +1,110 @@
+# Rule: Apache Derby UNION ALL vs UNION Optimization
+
+**Category:** database-specific/derby
+**File:** `rules/database-specific/derby/union-all-optimization.rra`
+
+## Metadata
+
+- **ID:** `derby-union-all-optimization`
+- **Version:** "1.0.0"
+- **Databases:** derby
+- **Tags:** database-specific, derby, union, union-all, distinct, set-operation
+- **Authors:** "RA Contributors"
+
+
+# Apache Derby UNION ALL vs UNION Optimization
+
+## Description
+
+Derby optimizes UNION operations by avoiding the deduplication step
+when UNION ALL is specified or when the optimizer can prove the
+branches produce disjoint result sets (e.g., due to mutually
+exclusive WHERE conditions).
+
+**When to apply**: A UNION operation has branches that produce
+provably disjoint rows, or the user has specified UNION ALL.
+
+**Why it works**: UNION requires sorting or hashing to remove
+duplicates (O(n log n)).  UNION ALL simply concatenates results (O(n)).
+When rows are guaranteed disjoint, UNION can be downgraded to UNION ALL.
+
+**Database version**: Apache Derby 10.1+
+
+## Relational Algebra
+
+```algebra
+-- Before: UNION with deduplication
+delta(
+    sigma[type = 'A'](T)
+    UNION
+    sigma[type = 'B'](T)
+)
+
+-- After: UNION ALL (disjoint branches)
+sigma[type = 'A'](T) UNION ALL sigma[type = 'B'](T)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("derby-union-to-union-all";
+    "(union ?left ?right)" =>
+    "(union-all ?left ?right)"
+    if is_database("derby")
+    if branches_disjoint("?left", "?right")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    left: &Relation,
+    right: &Relation,
+) -> bool {
+    left.guaranteed_disjoint_from(right)
+}
+```
+
+**Restrictions:**
+- Can only convert when disjointness is provable
+- Mutually exclusive predicates on the same column are the common case
+- Cannot convert if branches might share rows
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    total_rows: f64,
+) -> f64 {
+    total_rows * total_rows.log2() * 0.001
+}
+```
+
+**Typical benefit**: Eliminates sort/hash dedup for UNION with
+disjoint branches.
+
+## Test Cases
+
+```sql
+-- Positive: disjoint WHERE clauses
+SELECT * FROM orders WHERE status = 'pending'
+UNION
+SELECT * FROM orders WHERE status = 'shipped';
+-- Disjoint; converted to UNION ALL
+```
+
+```sql
+-- Negative: overlapping results
+SELECT city FROM users
+UNION
+SELECT city FROM stores;
+-- May overlap; deduplication required
+```
+
+## References
+
+Apache Derby: SQL Reference, "UNION and UNION ALL"
+Source: org.apache.derby.impl.sql.compile.UnionNode

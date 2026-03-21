@@ -1,0 +1,51 @@
+# Rule: Pre-Aggregation Filter Pushdown
+
+**Category:** distributed/aggregation
+**File:** `rules/distributed/aggregation/pre-aggregation-filter-pushdown.rra`
+
+## Metadata
+
+- **ID:** `pre-aggregation-filter-pushdown`
+- **Version:** "1.0.0"
+- **Databases:** presto, trino, spark, cockroachdb, greenplum
+- **Tags:** distributed, aggregation, pre-aggregation, filter, pushdown
+- **Authors:** "RA Contributors"
+
+
+# Pre-Aggregation Filter Pushdown
+
+## Description
+
+Push filters below the local aggregation phase to reduce the amount
+of data processed in the partial aggregation step. Filters on
+non-aggregate columns can be applied before any aggregation occurs.
+
+**When to apply**: A filter references only columns available before
+aggregation (group keys or base columns), and the aggregation uses
+two-phase decomposition.
+
+## Relational Algebra
+
+```algebra
+-- Before
+gamma[g, agg(a)](Exchange[hash(g)](sigma[p](R)))
+
+-- After (push filter below local agg)
+gamma[g, merge_agg(partial_a)](
+    Exchange[hash(g)](
+        gamma[g, partial_agg(a)](sigma[p](R))
+    )
+)
+```
+
+## Test Cases
+
+```sql
+-- Positive: filter on base column before aggregation
+SELECT region, SUM(amount) FROM orders
+WHERE order_date > '2024-01-01' GROUP BY region;
+
+-- Positive: filter on group key
+SELECT status, COUNT(*) FROM events
+WHERE status != 'deleted' GROUP BY status;
+```

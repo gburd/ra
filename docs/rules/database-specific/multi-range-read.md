@@ -1,0 +1,120 @@
+# Rule: MySQL Multi-Range Read (MRR)
+
+**Category:** database-specific/mysql
+**File:** `rules/database-specific/mysql/multi-range-read.rra`
+
+## Metadata
+
+- **ID:** `mysql-multi-range-read`
+- **Version:** "1.0.0"
+- **Databases:** mysql
+- **Tags:** database-specific, mysql, mrr, index, io-optimization
+- **Authors:** "RA Contributors"
+
+
+# MySQL Multi-Range Read (MRR)
+
+## Description
+
+Converts random disk reads from secondary index lookups into
+sequential reads by sorting the row IDs (primary keys) obtained
+from the index scan before fetching the actual rows.  For
+disk-based tables with non-covering secondary indexes, row fetches
+are effectively random I/O.  MRR batches the row IDs, sorts them,
+and reads them in primary key order, converting random I/O to
+sequential.
+
+**When to apply**: A secondary index range scan returns row IDs
+that are used to fetch base table rows, and the row count is large
+enough that sorting pays off.
+
+**Why it works**: Sequential disk reads are 10-100x faster than
+random reads on spinning disks and still faster on SSDs due to
+read-ahead and reduced seek overhead.
+
+**Database version**: MySQL 5.6+
+
+## Relational Algebra
+
+```algebra
+-- Before: random row fetches from index scan
+fetch_rows(index_range_scan[idx, a BETWEEN 10 AND 100](T))
+
+-- After: sort rowids, then sequential fetch
+sequential_fetch(sort_by_pk(
+    index_range_scan[idx, a BETWEEN 10 AND 100](T)))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mysql-multi-range-read";
+    "(row-fetch (index-range-scan ?table ?index ?pred))" =>
+    "(sequential-fetch (sort-by-pk
+        (index-range-scan ?table ?index ?pred)))"
+    if is_database("mysql")
+    if is_non_covering_index("?index", "?table")
+    if range_size_exceeds_threshold("?pred")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    index: &Index,
+    query_columns: &[Column],
+    estimated_rows: usize,
+) -> bool {
+    !index.covers(query_columns)
+    && estimated_rows > 100
+}
+```
+
+**Restrictions:**
+- Only beneficial for non-covering secondary indexes
+- Buffer size controlled by `read_rnd_buffer_size`
+- Not used for small result sets
+- Requires `optimizer_switch` flag `mrr=on`
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    rows: f64,
+    avg_seek_cost: f64,
+    sequential_read_cost: f64,
+) -> f64 {
+    let random_cost = rows * avg_seek_cost;
+    let sort_cost = rows * (rows.log2() * 0.00001);
+    let seq_cost = rows * sequential_read_cost;
+    random_cost - sort_cost - seq_cost
+}
+```
+
+**Typical benefit**: 2-10x speedup for large range scans on HDD,
+1.5-3x on SSD.
+
+## Test Cases
+
+```sql
+-- Positive: large range scan with non-covering index
+CREATE INDEX idx_age ON employees(age);
+SELECT * FROM employees WHERE age BETWEEN 25 AND 35;
+-- MRR sorts primary keys before fetching full rows
+```
+
+```sql
+-- Negative: covering index
+CREATE INDEX idx_age_name ON employees(age, name);
+SELECT name FROM employees WHERE age BETWEEN 25 AND 35;
+-- Index covers the query, no row fetch needed
+```
+
+## References
+
+MySQL: MySQL Reference Manual, "Multi-Range Read Optimization"
+MySQL: `optimizer_switch` flags `mrr=on`, `mrr_cost_based=on`
+Source: sql/handler.cc, `handler::multi_range_read_init()`

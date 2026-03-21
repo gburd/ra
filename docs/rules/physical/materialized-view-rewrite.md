@@ -1,0 +1,88 @@
+# Rule: Materialized View Rewrite
+
+**Category:** physical/materialization
+**File:** `rules/physical/materialization/materialized-view-rewrite.rra`
+
+## Metadata
+
+- **ID:** `materialized-view-rewrite`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, oracle, clickhouse
+- **Tags:** materialization, materialized-view, query-rewrite
+- **Authors:** "RA Contributors"
+
+
+# Materialized View Rewrite
+
+## Description
+
+Rewrites query to use pre-computed materialized view instead of base tables.
+
+**When to apply**: Query matches pattern covered by materialized view.
+
+**Why it works**: Reads pre-aggregated/pre-joined data; avoids expensive recomputation.
+
+## Relational Algebra
+
+```algebra
+SELECT agg(col) FROM T WHERE pred
+  -> SELECT agg FROM matview WHERE pred
+  where matview covers query
+```
+
+## Implementation
+
+```rust
+rw!("rewrite-to-matview";
+    "(aggregate ?aggs (filter ?pred (scan ?table)))" =>
+    "(filter ?rewritten_pred (scan ?matview))"
+    if has_materialized_view("?matview") &&
+       covers("?matview", "?table", "?aggs", "?pred")
+),
+```
+
+## Cost Model
+
+```rust
+fn cost(matview_size: u64) -> f64 {
+    matview_size as f64 * 0.1 // Scan pre-computed results
+}
+
+fn benefit(matview_size: u64, full_computation: f64) -> f64 {
+    (full_computation - matview_size as f64) / full_computation
+}
+```
+
+**Typical benefit**: 70-99% when view matches query perfectly
+
+## Test Cases
+
+### Positive: Aggregate query matches matview
+
+```sql
+CREATE MATERIALIZED VIEW daily_sales AS
+SELECT date, product_id, SUM(amount) as total
+FROM sales
+GROUP BY date, product_id;
+
+SELECT date, SUM(total) FROM daily_sales
+GROUP BY date;
+
+-- Rewrite to use matview: pre-aggregated data
+```
+
+### Negative: Query requires finer granularity
+
+```sql
+SELECT customer_id, SUM(amount)
+FROM sales
+GROUP BY customer_id;
+
+-- Matview only has product_id grouping: cannot use
+```
+
+## References
+
+- PostgreSQL: Materialized views
+- Oracle: Query rewrite with materialized views
+- ClickHouse: Materialized views for aggregations

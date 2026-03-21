@@ -1,0 +1,113 @@
+# Rule: MySQL DISTINCT Elimination and Optimization
+
+**Category:** database-specific/mysql
+**File:** `rules/database-specific/mysql/distinct-optimization.rra`
+
+## Metadata
+
+- **ID:** `mysql-distinct-optimization`
+- **Version:** "1.0.0"
+- **Databases:** mysql
+- **Tags:** database-specific, mysql, distinct, duplicate, elimination, unique
+- **Authors:** "RA Contributors"
+
+
+# MySQL DISTINCT Elimination and Optimization
+
+## Description
+
+MySQL eliminates DISTINCT when it can prove the result set is already
+unique (e.g., all columns of a unique index are in the SELECT list).
+When DISTINCT cannot be eliminated, MySQL satisfies it using either
+an index (if it matches the SELECT columns) or a temporary table with
+a hash for duplicate detection.
+
+**When to apply**: A SELECT DISTINCT query operates on columns that
+form a unique key, or an ordered index can provide duplicate-free
+traversal.
+
+**Why it works**: If the optimizer proves uniqueness, it removes the
+deduplication step entirely.  If an index provides order, DISTINCT
+reduces to comparing adjacent rows (no hash table needed).
+
+**Database version**: MySQL 5.0+
+
+## Relational Algebra
+
+```algebra
+-- Before: explicit deduplication
+delta(pi[id, name](scan(users)))
+
+-- After: DISTINCT eliminated (id is primary key)
+pi[id, name](scan(users))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mysql-distinct-elimination";
+    "(distinct (project ?cols (scan ?table)))" =>
+    "(project ?cols (scan ?table))"
+    if is_database("mysql")
+    if columns_include_unique_key("?cols", "?table")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    columns: &[Column],
+    table: &Table,
+) -> bool {
+    table.unique_keys().iter().any(|uk| {
+        uk.columns().iter().all(|c| columns.contains(c))
+    })
+}
+```
+
+**Restrictions:**
+- Only eliminates DISTINCT when a unique key is fully covered
+- For non-eliminable DISTINCT, index-ordered dedup requires an index
+  on exactly the SELECT columns
+- Expressions in SELECT list (e.g., `DISTINCT UPPER(name)`) prevent
+  key-based elimination
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    total_rows: f64,
+    eliminated: bool,
+) -> f64 {
+    if eliminated {
+        total_rows * 0.005 // dedup cost saved
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: Eliminates temp table and hashing overhead when
+unique key covers SELECT columns.
+
+## Test Cases
+
+```sql
+-- Positive: DISTINCT on unique key columns
+SELECT DISTINCT id, email FROM users;
+-- id is PK, DISTINCT eliminated
+```
+
+```sql
+-- Negative: DISTINCT on non-unique columns
+SELECT DISTINCT city FROM users;
+-- Cannot eliminate; uses temp table for dedup
+```
+
+## References
+
+MySQL: "DISTINCT Optimization" in MySQL Reference Manual
+Source: sql/sql_optimizer.cc, `remove_redundant_distinct()`

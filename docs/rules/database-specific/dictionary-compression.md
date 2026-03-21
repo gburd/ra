@@ -1,0 +1,117 @@
+# Rule: MonetDB Dictionary Encoded Operations
+
+**Category:** database-specific/monetdb
+**File:** `rules/database-specific/monetdb/dictionary-compression.rra`
+
+## Metadata
+
+- **ID:** `monetdb-dictionary-compression`
+- **Version:** "1.0.0"
+- **Databases:** monetdb
+- **Tags:** database-specific, monetdb, dictionary, compression, encoding, string
+- **Authors:** "RA Contributors"
+
+
+# MonetDB Dictionary Encoded Operations
+
+## Description
+
+MonetDB uses dictionary encoding for string columns, replacing
+variable-length strings with fixed-width integer codes.  Operations
+like filtering and grouping can operate on the integer codes directly
+without decompressing, significantly reducing memory bandwidth and
+improving cache utilization.
+
+**When to apply**: A string column has been dictionary-encoded and
+operations (equality, GROUP BY, JOIN) can be performed on codes
+instead of full strings.
+
+**Why it works**: Integer comparisons are faster than string
+comparisons (no variable-length, no collation).  Dictionary-encoded
+columns use less memory, fitting more data in CPU cache.
+
+**Database version**: MonetDB 11+ (automatic for string BATs)
+
+## Relational Algebra
+
+```algebra
+-- Before: string comparison
+sigma[country = 'Germany'](scan(customers.country))
+
+-- After: dictionary-encoded comparison
+code = dict_lookup('Germany')  -- O(1)
+sigma[country_code = code](scan(customers.country_codes))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("monetdb-dict-filter";
+    "(filter (= ?str_col ?literal) (scan ?table))" =>
+    "(filter (= (dict-code ?str_col) (dict-lookup ?literal))
+        (scan ?table))"
+    if is_database("monetdb")
+    if is_dict_encoded("?str_col")
+    if is_string_literal("?literal")
+),
+
+rw!("monetdb-dict-group";
+    "(aggregate ?group_col ?aggs (scan ?table))" =>
+    "(dict-decode-groups
+        (aggregate (dict-code ?group_col) ?aggs
+            (scan ?table)))"
+    if is_database("monetdb")
+    if is_dict_encoded("?group_col")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(column: &Column) -> bool {
+    column.is_dictionary_encoded()
+}
+```
+
+**Restrictions:**
+- LIKE patterns and substring operations may require decompression
+- Dictionary must fit in memory for fast code lookups
+- High-cardinality columns may not benefit from dictionary encoding
+- Order-preserving dictionaries enable range queries on codes
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    rows: f64,
+    avg_string_len: f64,
+) -> f64 {
+    let string_cost = rows * avg_string_len * 0.001;
+    let dict_cost = rows * 4.0 * 0.001; // 4 bytes per code
+    string_cost - dict_cost
+}
+```
+
+**Typical benefit**: 3-10x for string-heavy GROUP BY and filter
+operations.
+
+## Test Cases
+
+```sql
+-- Positive: equality on dictionary-encoded column
+SELECT * FROM customers WHERE country = 'Germany';
+-- Compares integer codes, not strings
+```
+
+```sql
+-- Negative: LIKE pattern requires decompression
+SELECT * FROM customers WHERE country LIKE '%land';
+-- Must decompress to evaluate suffix pattern
+```
+
+## References
+
+MonetDB: Column store compression documentation
+Source: monetdb5/modules/kernel/bat5.c (dictionary operations)

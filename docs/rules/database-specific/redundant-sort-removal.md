@@ -1,0 +1,122 @@
+# Rule: "ClickHouse Redundant Sort Removal"
+
+**Category:** database-specific/clickhouse
+**File:** `rules/database-specific/clickhouse/redundant-sort-removal.rra`
+
+## Metadata
+
+- **ID:** `clickhouse-redundant-sort-removal`
+- **Version:** "1.0.0"
+- **Databases:** clickhouse
+- **Tags:** sort, removal, redundant, optimization
+- **Authors:** "RA Contributors"
+
+
+# ClickHouse Redundant Sort Removal
+
+## Metadata
+- **Rule ID**: `clickhouse-redundant-sort-removal`
+- **Category**: Database-specific / ClickHouse
+- **Source**: `src/Processors/QueryPlan/Optimizations/removeRedundantSorting.cpp`
+- **Complexity**: O(1) plan transformation, saves O(n log n)
+- **Prerequisites**: Sorting step whose output order is not consumed
+- **Alternatives**: Execute the unnecessary sort
+
+## Description
+
+ClickHouse identifies and removes sorting steps whose output ordering
+is not required by any downstream operator. A sort is redundant when:
+(1) a later sort with a different key overwrites the ordering,
+(2) an operator that destroys ordering (hash aggregation, hash join)
+sits between the sort and its consumer, or
+(3) the input is already sorted in the required order.
+
+The optimizer also detects redundant DISTINCT steps when the input
+is already unique based on the distinct columns.
+
+**When to apply:**
+- Multiple ORDER BY in subqueries where only outer matters
+- Sort followed by hash aggregation (order destroyed)
+- Input already sorted by required key
+
+**Why it works for OLAP:**
+- Sorting is O(n log n) and a pipeline breaker
+- OLAP queries often have nested subqueries with ORDER BY
+- Removing unnecessary sorts saves CPU and memory
+
+## Relational Algebra
+
+```
+sort[k2](sort[k1](R))  ->  sort[k2](R)  when k1 unused
+sort[k](R)  ->  R  when R already sorted by k
+```
+
+## Implementation (egg rewrite rules)
+
+```lisp
+;; Remove inner sort when outer sort overwrites
+(rewrite (sort ?k2 (sort ?k1 ?input))
+  (sort ?k2 ?input))
+
+;; Remove sort when input already sorted
+(rewrite (sort ?keys ?input)
+  ?input
+  :if (already-sorted-by ?input ?keys))
+
+;; Remove sort before hash aggregation (order destroyed)
+(rewrite (hash-aggregate ?groups ?aggs (sort ?keys ?input))
+  (hash-aggregate ?groups ?aggs ?input))
+
+;; Remove redundant distinct when input already unique
+(rewrite (distinct ?keys ?input)
+  ?input
+  :if (already-unique-by ?input ?keys))
+```
+
+## Cost Model
+
+```rust
+pub fn cost_sort_removal(
+    rows: u64,
+    key_width: usize,
+) -> Cost {
+    let sort_cost_saved = Cost::cpu(
+        rows as f64 * (rows as f64).log2() * key_width as f64
+    );
+    let memory_saved = Cost::memory(rows * key_width as u64 * 8);
+    Cost::zero() - sort_cost_saved - memory_saved
+}
+```
+
+**Typical benefit**: 30-90% CPU savings per removed sort
+
+## Test Cases
+
+### Positive: Outer sort overwrites inner
+```sql
+SELECT * FROM (
+    SELECT * FROM events ORDER BY date
+) ORDER BY user_id LIMIT 100;
+-- Inner ORDER BY date is wasted; removed
+```
+
+### Positive: Sort before hash aggregation
+```sql
+SELECT date, count(*) FROM (
+    SELECT * FROM events ORDER BY date
+) GROUP BY date;
+-- Hash aggregation destroys date ordering; sort removed
+```
+
+### Negative: Sort consumed by merge join
+```sql
+SELECT * FROM a
+JOIN b ON a.id = b.id
+ORDER BY a.id;
+-- If merge join consumes the sort order, it is needed
+```
+
+## References
+
+- ClickHouse: `src/Processors/QueryPlan/Optimizations/removeRedundantSorting.cpp`
+- ClickHouse: `src/Processors/QueryPlan/Optimizations/removeRedundantDistinct.cpp`

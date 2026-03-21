@@ -1,0 +1,90 @@
+# Rule: External Sort with Spill Partitioning
+
+**Category:** physical/sort
+**File:** `rules/physical/sort/sort-spill-partitioning.rra`
+
+## Metadata
+
+- **ID:** `sort-spill-partitioning`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, oracle, duckdb
+- **Tags:** physical, sort, external, spill, partitioning
+- **Authors:** "Graefe, Goetz"
+
+
+# External Sort with Spill Partitioning
+
+## Description
+
+When sort input exceeds available memory, selects between different
+external sort strategies based on the ratio of data size to memory.
+For moderate spill (2-10x memory), a simple 2-phase external merge
+sort suffices. For larger ratios, multi-phase merge or hash-based
+partitioning may be more efficient.
+
+**When to apply**: Sort input exceeds available work_mem.
+
+## Relational Algebra
+
+```algebra
+-- Estimated data size D, memory budget M
+-- If D <= M: in-memory quicksort
+-- If D <= M * B (B = merge fan-in): 2-phase external merge
+-- If D > M * B: multi-phase external merge or partition-sort
+```
+
+## Implementation
+
+```rust
+fn select_external_sort(
+    data_size: usize,
+    memory: usize,
+    io_bandwidth: f64,
+) -> ExternalSortStrategy {
+    let ratio = data_size / memory;
+    if ratio <= 1 {
+        ExternalSortStrategy::InMemory
+    } else if ratio <= 128 { // typical merge fan-in
+        ExternalSortStrategy::TwoPhaseExternalMerge { runs: ratio }
+    } else {
+        ExternalSortStrategy::MultiPhaseExternalMerge {
+            phases: (ratio as f64).log(128.0).ceil() as usize,
+        }
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(sort: &Sort, hw: &HardwareProfile) -> bool {
+    sort.estimated_data_size() > hw.work_mem()
+}
+```
+
+## Cost Model
+
+```rust
+fn estimated_cost(n: f64, m: f64, io_cost: f64) -> f64 {
+    let passes = (n / m).log(128.0).ceil();
+    n * passes * 2.0 * io_cost // read + write per pass
+}
+```
+
+## Test Cases
+
+```sql
+-- In-memory: small sort
+SELECT * FROM small_table ORDER BY id; -- 1000 rows, fits in memory
+
+-- 2-phase: moderate data
+SELECT * FROM medium_table ORDER BY created_at; -- 10GB, 1GB work_mem
+
+-- Multi-phase: large data
+SELECT * FROM huge_table ORDER BY key; -- 1TB, 1GB work_mem
+```
+
+## References
+
+- Graefe, G., "Implementing Sorting in Database Systems", ACM Computing Surveys, 2006, DOI: 10.1145/1132960.1132964
+- Knuth, D.E., "The Art of Computer Programming, Vol. 3: Sorting and Searching", 1973

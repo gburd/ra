@@ -1,0 +1,64 @@
+# Rule: Match Partition Counts for Join Alignment
+
+**Category:** distributed/join-distribution
+**File:** `rules/distributed/join-distribution/dynamic-partition-count-match.rra`
+
+## Metadata
+
+- **ID:** `dynamic-partition-count-match`
+- **Version:** "1.0.0"
+- **Databases:** spark, cockroachdb, greenplum
+- **Tags:** distributed, join, partition-count, alignment, repartition
+- **Authors:** "RA Contributors"
+
+
+# Match Partition Counts for Join Alignment
+
+## Description
+
+When two inputs are hash-partitioned on the join key but with different
+partition counts, repartition the smaller one to match the larger one's
+count. This enables partition-wise join without moving the larger dataset.
+
+## Relational Algebra
+
+```algebra
+Join[c](R[hash(k), N], S[hash(k), M])
+  -> PartitionWiseJoin[c](R[N], Exchange[hash(k), N](S))
+  where N != M
+  where |R| > |S| (repartition the smaller side)
+```
+
+## Test Cases
+
+```sql
+-- Test 1: Different partition counts, align smaller
+SELECT o.*, c.name
+FROM orders o            -- hash(cid), 64 partitions, 100GB
+JOIN customers c         -- hash(id), 8 partitions, 1GB
+  ON o.cid = c.id;
+-- Expected: Repartition customers to 64 partitions
+```
+
+```sql
+-- Test 2: Equal counts, no repartition needed
+SELECT o.*, c.name
+FROM orders o            -- hash(cid), 16 partitions
+JOIN customers c         -- hash(id), 16 partitions
+  ON o.cid = c.id;
+-- Expected: Already aligned, partition-wise join
+```
+
+```sql
+-- Test 3: Larger table has fewer partitions
+SELECT l.*, o.status
+FROM line_items l        -- hash(order_id), 8 partitions, 500GB
+JOIN orders o            -- hash(id), 32 partitions, 100GB
+  ON l.order_id = o.id;
+-- Expected: Repartition orders to 8 (move 100GB, not 500GB)
+```
+
+## References
+
+Spark: EnsureRequirements.scala
+CockroachDB: DistSQLPhysicalPlanner

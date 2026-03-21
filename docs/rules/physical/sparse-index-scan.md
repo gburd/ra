@@ -1,0 +1,161 @@
+# Rule: "Sparse Index Scan (Granule-Level Pruning)"
+
+**Category:** physical/index-selection
+**File:** `rules/physical/index-selection/sparse-index-scan.rra`
+
+## Metadata
+
+- **ID:** `sparse-index-scan`
+- **Version:** "1.0.0"
+- **Databases:** clickhouse
+- **Tags:** index, sparse, granule, primary-key, mergetree, pruning
+- **Authors:** "RA Contributors"
+
+## Preconditions
+
+```yaml
+  - type: "pattern"
+    must_match: "(filter ?pred (scan ?table))"
+    description: "Filter using sparse index"
+  - type: "predicate"
+    condition: "has_sparse_index(?table, columns(?pred))"
+    description: "Sparse index must exist on the column"
+  - type: "predicate"
+    condition: "is_range_predicate(?pred)"
+    description: "Predicate should be range-based for sparse index"
+```
+
+
+# Sparse Index Scan (Granule-Level Pruning)
+
+## Metadata
+- **Rule ID**: `sparse-index-scan`
+- **Category**: Physical / Index Selection
+- **Source**: ClickHouse `src/Storages/MergeTree/KeyCondition.cpp`
+- **Complexity**: O(log n) index search + O(k) granule reads
+- **Prerequisites**: Sorted storage with granule-level min/max index
+- **Alternatives**: Full scan, B-tree index scan, skip index scan
+
+## Description
+
+Sparse indexes store one index entry per granule (block of N rows,
+typically 8192) rather than one per row. For sorted columnar storage,
+the sparse index records the first primary key value of each granule.
+Given a predicate on the sort key, binary search on the sparse index
+identifies the first and last granules that may contain matching rows.
+
+Unlike B-tree indexes (one entry per row, O(log n) per lookup),
+sparse indexes have a tiny memory footprint: for 1 billion rows with
+8192-row granules, the index has only ~122K entries. The entire index
+fits in L2 cache.
+
+The KeyCondition evaluator handles complex predicates including
+ranges, IN sets, monotonic functions, and space-filling curve
+decomposition for multi-dimensional range queries.
+
+**When to apply:**
+- Predicate on prefix columns of sort key
+- Point lookups, range scans, IN-list queries
+- Monotonic transformations of sort key (toDate, toMonth, etc.)
+
+**Why it works for OLAP:**
+- Index is ~1000x smaller than a B-tree index
+- Entire index cached in CPU cache
+- Granule-level pruning: skip thousands of rows at once
+
+## Relational Algebra
+
+```
+filter[pred](scan[T])
+  -> merge(read-granules[T, granule-range(pred, sparse-idx(T))])
+```
+
+## Implementation (egg rewrite rules)
+
+```lisp
+;; Sparse index scan for sort key prefix predicate
+(rewrite (filter ?pred (scan ?table))
+  (filter ?pred
+    (read-granules ?table
+      (binary-search (sparse-index ?table) ?pred)))
+  :if (has-sparse-index ?table)
+  :if (matches-sort-key-prefix ?pred (sort-key ?table)))
+
+;; Sparse index with IN-list
+(rewrite (filter (in ?col ?values) (scan ?table))
+  (filter (in ?col ?values)
+    (read-granules ?table
+      (union-ranges
+        (map ?values
+          (lambda (?v)
+            (binary-search (sparse-index ?table) (= ?col ?v)))))))
+  :if (is-sort-key-prefix ?col ?table))
+
+;; Sparse index with monotonic function
+(rewrite (filter (= (monotonic-fn ?col) ?val) (scan ?table))
+  (filter (= (monotonic-fn ?col) ?val)
+    (read-granules ?table
+      (binary-search (sparse-index ?table)
+        (range ?col (inverse-fn ?monotonic-fn ?val)))))
+  :if (is-sort-key-column ?col ?table))
+```
+
+## Cost Model
+
+```rust
+pub fn cost_sparse_index_scan(
+    total_rows: u64,
+    granule_size: u64,
+    matching_granules: u64,
+    col_bytes_per_row: u64,
+    hardware: &HardwareModel,
+) -> Cost {
+    let total_granules = total_rows / granule_size;
+    let index_search = Cost::cpu(
+        (total_granules as f64).log2() as u64 * 10
+    );
+    let granule_read = Cost::io(
+        matching_granules as f64 * granule_size as f64
+        * col_bytes_per_row as f64
+        * hardware.seq_read_cost()
+    );
+    index_search + granule_read
+}
+```
+
+**Typical benefit**: 50-99% for point/range queries on sorted data
+
+## Test Cases
+
+### Positive: Date range on time-series
+```sql
+CREATE TABLE metrics (
+    timestamp DateTime, host String, cpu Float64
+) ENGINE = MergeTree ORDER BY (timestamp, host);
+
+SELECT * FROM metrics
+WHERE timestamp BETWEEN '2024-03-01' AND '2024-03-02';
+-- Sparse index: binary search for start/end granules
+-- 1 day out of 365 = ~0.3% of granules read
+```
+
+### Positive: IN-list query
+```sql
+SELECT * FROM metrics
+WHERE host IN ('web-01', 'web-02', 'web-03');
+-- host is second in sort key; requires timestamp prefix
+-- Without timestamp filter: full scan (sparse index unhelpful)
+```
+
+### Negative: Non-prefix column
+```sql
+SELECT * FROM metrics WHERE cpu > 90.0;
+-- cpu not in sort key; sparse index cannot prune
+-- Need skip index (e.g., minmax) for cpu column
+```
+
+## References
+
+- ClickHouse: `src/Storages/MergeTree/KeyCondition.cpp`
+- ClickHouse: `src/Storages/MergeTree/MergeTreeDataSelectExecutor.cpp`
+- Yandex, "ClickHouse Internals: MergeTree"

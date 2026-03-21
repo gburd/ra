@@ -1,0 +1,125 @@
+# Rule: Materialize Arrangement Sharing
+
+**Category:** database-specific/materialize
+**File:** `rules/database-specific/materialize/arrangement-sharing.rra`
+
+## Metadata
+
+- **ID:** `materialize-arrangement-sharing`
+- **Version:** "1.0.0"
+- **Databases:** materialize
+- **Tags:** database-specific, materialize, arrangement, sharing, index, memory
+- **Authors:** "RA Contributors"
+
+
+# Materialize Arrangement Sharing
+
+## Description
+
+Identifies opportunities to share arrangements (indexed differential
+dataflow collections) across multiple dataflow operators and views.
+When multiple joins or lookups key on the same columns of the same
+collection, Materialize reuses a single arrangement rather than
+building duplicates.
+
+**When to apply**: Multiple operators in the same or different
+dataflows require an arrangement of the same collection on the same
+key columns.
+
+**Why it works**: Arrangements are the primary memory cost in
+Materialize.  Each arrangement stores a full copy of the collection
+indexed by key.  Sharing arrangements eliminates duplicate memory
+usage and duplicate update processing.
+
+**Database version**: Materialize 0.20+
+
+## Relational Algebra
+
+```algebra
+-- Before: two joins each build their own arrangement of S
+(R1 join[R1.k = S.k] S) union-all (R2 join[R2.k = S.k] S)
+
+-- After: shared arrangement of S on key k
+let arr_S_k = arrange(S, k) in
+(R1 join[R1.k = S.k] arr_S_k)
+  union-all
+(R2 join[R2.k = S.k] arr_S_k)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("materialize-share-arrangement";
+    "(join ?type1 (eq ?lk1 ?rk) ?left1
+        (join ?type2 (eq ?lk2 ?rk) ?left2 ?source)
+        ?source)" =>
+    "(let-arrange ?source ?rk
+        (join ?type1 (eq ?lk1 ?rk) ?left1
+            (join ?type2 (eq ?lk2 ?rk) ?left2
+                (use-arrangement ?source ?rk))
+            (use-arrangement ?source ?rk)))"
+    if is_database("materialize")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    uses: &[(DataflowId, &[Column])],
+) -> bool {
+    // Multiple uses of same collection on same key
+    uses.len() >= 2
+    && uses.windows(2).all(|w| w[0].1 == w[1].1)
+}
+```
+
+**Restrictions:**
+- Arrangements can only be shared within the same cluster
+- Different key orderings require separate arrangements
+- Shared arrangements increase coupling between dataflows
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    collection_rows: f64,
+    row_bytes: f64,
+    shared_count: usize,
+) -> f64 {
+    // Memory saved by eliminating duplicate arrangements
+    (shared_count - 1) as f64 * collection_rows * row_bytes
+}
+```
+
+**Typical benefit**: For a 1M-row table used in 5 views with the same
+join key, saves 4x the arrangement memory (~hundreds of MB).
+
+## Test Cases
+
+```sql
+-- Positive: two views join on same key
+CREATE INDEX idx_products_id ON products (id);
+CREATE MATERIALIZED VIEW v1 AS
+  SELECT * FROM orders o JOIN products p ON o.product_id = p.id;
+CREATE MATERIALIZED VIEW v2 AS
+  SELECT * FROM returns r JOIN products p ON r.product_id = p.id;
+-- Both views share the products(id) arrangement
+```
+
+```sql
+-- Negative: different key columns
+CREATE MATERIALIZED VIEW v1 AS
+  SELECT * FROM orders o JOIN products p ON o.product_id = p.id;
+CREATE MATERIALIZED VIEW v2 AS
+  SELECT * FROM catalog c JOIN products p ON c.sku = p.sku;
+-- Different keys (id vs sku); separate arrangements needed
+```
+
+## References
+
+Materialize: src/compute/src/render/join/linear_join.rs
+Materialize: src/transform/src/canonicalize_mfp.rs
+Materialize: src/compute-types/src/dataflows.rs

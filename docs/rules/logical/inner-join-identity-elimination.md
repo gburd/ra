@@ -1,0 +1,98 @@
+# Rule: Inner Join Identity Elimination
+
+**Category:** logical/join-elimination
+**File:** `rules/logical/join-elimination/inner-join-identity-elimination.rra`
+
+## Metadata
+
+- **ID:** `inner-join-identity-elimination`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, oracle, mssql
+- **Tags:** join, elimination, identity
+- **Authors:** "RA Contributors"
+
+
+# Inner Join Identity Elimination
+
+## Description
+
+Eliminates inner joins with tables that have exactly one row (identity joins).
+
+**When to apply**: INNER JOIN with table guaranteed to return exactly one row.
+
+**Why it works**: Joining with single-row table doesn't filter or multiply rows; just adds columns.
+
+## Relational Algebra
+
+```algebra
+join[cond](R, single_row(S))
+  -> extend[S.cols](R)
+  where cardinality(S) = 1
+```
+
+## Implementation
+
+```rust
+rw!("eliminate-identity-join";
+    "(join ?cond ?left ?right)" =>
+    "(extend ?left (project-cols ?right))"
+    if is_single_row_guaranteed("?right")
+),
+```
+
+## Cost Model
+
+```rust
+fn benefit(left_size: u64) -> f64 {
+    let with_join = left_size as f64 * 2.0; // Join overhead
+    let without = left_size as f64;
+    (with_join - without) / with_join
+}
+```
+
+**Typical benefit**: 60-90% by removing unnecessary join
+
+## Test Cases
+
+### Positive: Join with single-row configuration table
+
+```sql
+SELECT * FROM users
+JOIN system_config ON 1=1
+WHERE system_config.feature_flag = true;
+
+-- Eliminate: system_config has 1 row, just extend users
+```
+
+### Positive: Join with aggregation returning one row
+
+```sql
+SELECT orders.*, stats.total_orders FROM orders
+CROSS JOIN (SELECT COUNT(*) as total_orders FROM orders) stats;
+
+-- Simplify to scalar subquery in SELECT
+```
+
+### Negative: Multi-row table
+
+```sql
+SELECT * FROM orders
+JOIN customers ON orders.customer_id = customers.id;
+
+-- Cannot eliminate: customers has multiple rows
+```
+
+### Negative: Potentially empty table
+
+```sql
+SELECT * FROM products
+JOIN current_promotion ON products.id = current_promotion.product_id;
+
+-- Cannot eliminate: current_promotion might have 0 rows
+```
+
+## References
+
+- PostgreSQL: Constant relation join elimination
+- MySQL: Single-row table optimization
+- Oracle: Join cardinality analysis

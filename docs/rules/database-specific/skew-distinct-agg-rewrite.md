@@ -1,0 +1,177 @@
+# Rule: Skew-Aware Distinct Aggregation Rewrite
+
+**Category:** database-specific/tidb
+**File:** `rules/database-specific/tidb/skew-distinct-agg-rewrite.rra`
+
+## Metadata
+
+- **ID:** `tidb-skew-distinct-agg-rewrite`
+- **Version:** "1.0.0"
+- **Databases:** tidb
+- **Tags:** distributed, aggregation, distinct, skew, two-level, tidb
+- **Authors:** "RA Contributors"
+
+
+# Skew-Aware Distinct Aggregation Rewrite
+
+## Description
+
+Rewrites a group-distinct aggregation into a two-level aggregation to
+handle data skew. The bottom aggregation groups by both the original
+group key and the distinct key, eliminating duplicates at the finer
+granularity. The top aggregation then computes the final result using
+the pre-deduplicated groups.
+
+**When to apply**: A query has a GROUP BY with exactly one DISTINCT
+aggregate function (COUNT DISTINCT, SUM DISTINCT, or AVG DISTINCT),
+the group key is highly skewed, and the distinct key has high
+cardinality.
+
+**Why it works**: With a skewed group key, a few groups dominate the
+data. In a parallel execution, those hot groups create bottlenecks
+because all their rows end up on the same node. By adding the distinct
+key to the bottom GROUP BY, the work is distributed more evenly. The
+bottom aggregation also handles any non-distinct aggregations (like
+COUNT, SUM) by pre-computing them.
+
+## Relational Algebra
+
+```algebra
+gamma[g, COUNT(DISTINCT d), COUNT(x)](R)
+  -> gamma[g, COUNT(d), SUM(c)](
+       gamma[g, d, COUNT(x) AS c](R)
+     )
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("skew-distinct-agg-rewrite";
+    "(aggregate ?group_keys
+        [?non_distinct_aggs (count_distinct ?distinct_col)]
+        ?input)" =>
+    "(aggregate_top ?group_keys
+        [?rewritten_non_distinct (count ?distinct_col)]
+        (aggregate_bottom
+            (append ?group_keys [?distinct_col])
+            [?partial_non_distinct]
+            ?input))"
+    if has_exactly_one_distinct("?aggs")
+    if group_key_is_skewed("?group_keys")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(agg: &LogicalAggregation) -> bool {
+    // Must have at least one group-by column
+    !agg.group_by_items.is_empty()
+    // Exactly one distinct aggregate function
+    && agg.agg_funcs.iter()
+        .filter(|f| f.has_distinct).count() == 1
+    // All aggregate functions must be qualified for rewrite
+    && agg.agg_funcs.iter().all(|f| is_qualified_agg(f))
+}
+
+fn is_qualified_agg(agg: &AggFuncDesc) -> bool {
+    match agg.name {
+        // Distinct aggregates must be count, avg, or sum
+        Count | Avg | Sum if agg.has_distinct => true,
+        // Non-distinct aggregates must be decomposable
+        Count | Sum | Min | Max | FirstRow
+            if !agg.has_distinct => true,
+        _ => false,
+    }
+}
+```
+
+**Decomposition mapping:**
+| Original (top level) | Bottom agg | Top agg |
+|---------------------|------------|---------|
+| COUNT(DISTINCT d) | GROUP BY d | COUNT(d) |
+| SUM(DISTINCT d) | GROUP BY d | SUM(d) |
+| AVG(DISTINCT d) | GROUP BY d | AVG(d) |
+| COUNT(x) | COUNT(x) AS c | SUM(c) |
+| SUM(x) | SUM(x) AS s | SUM(s) |
+| MIN(x) | MIN(x) AS m | MIN(m) |
+| MAX(x) | MAX(x) AS m | MAX(m) |
+
+**Restrictions:**
+- Limited to exactly one distinct aggregate function
+- Multiple DQA (distinct qualified aggregation) on the same column
+  could theoretically be supported but is not implemented
+- The rule is disabled by default in TiDB; requires
+  `tidb_opt_skew_distinct_agg` variable
+- Adds overhead for non-skewed data (extra aggregation level)
+
+## Cost Model
+
+```rust
+fn skew_rewrite_benefit(
+    input_rows: f64,
+    group_key_skew: f64,      // Gini coefficient
+    distinct_key_cardinality: f64,
+    num_groups: f64,
+) -> f64 {
+    // Higher skew = more benefit from redistribution
+    // Higher distinct cardinality = more effective dedup at bottom
+    let bottom_output = num_groups * distinct_key_cardinality;
+    let skew_penalty = group_key_skew * input_rows;
+    skew_penalty - bottom_output.min(input_rows)
+}
+```
+
+## Test Cases
+
+```sql
+-- Positive: classic skewed COUNT DISTINCT
+-- S_NATIONKEY is highly skewed (25 nations, uneven distribution)
+SELECT S_NATIONKEY AS s,
+       COUNT(S_SUPPKEY),
+       COUNT(DISTINCT S_NAME)
+FROM supplier
+GROUP BY s;
+
+-- Rewritten to:
+SELECT S_NATIONKEY AS s,
+       SUM(c),
+       COUNT(S_NAME)
+FROM (
+    SELECT S_NATIONKEY, S_NAME, COUNT(S_SUPPKEY) c
+    FROM supplier
+    GROUP BY S_NATIONKEY, S_NAME
+) AS T
+GROUP BY s;
+```
+
+```sql
+-- Positive: SUM DISTINCT with skewed group key
+SELECT department_id, SUM(DISTINCT salary)
+FROM employees
+GROUP BY department_id;
+
+-- Bottom: GROUP BY department_id, salary
+-- Top: GROUP BY department_id, SUM(salary)
+```
+
+```sql
+-- Negative: multiple distinct aggregates
+SELECT region, COUNT(DISTINCT city), COUNT(DISTINCT state)
+FROM locations GROUP BY region;
+-- Two distinct aggregates; rule does not apply
+```
+
+```sql
+-- Negative: no group-by columns (scalar aggregation)
+SELECT COUNT(DISTINCT customer_id) FROM orders;
+-- Scalar aggregation; skew rewrite not applicable
+```
+
+## References
+
+TiDB: pkg/planner/core/rule_aggregation_skew_rewrite.go:29 - SkewDistinctAggRewriter (commit e2184a2)
+TiDB: pkg/planner/core/rule_aggregation_skew_rewrite.go:51 - rewriteSkewDistinctAgg
+TiDB session variable: tidb_opt_skew_distinct_agg

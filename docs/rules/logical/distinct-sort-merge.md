@@ -1,0 +1,62 @@
+# Rule: Distinct Sort Merge
+
+**Category:** logical/distinct-elimination
+**File:** `rules/logical/distinct-elimination/distinct-sort-merge.rra`
+
+## Metadata
+
+- **ID:** `distinct-sort-merge`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, duckdb, sqlite, mssql, oracle
+- **Tags:** distinct, sort, merge, streaming
+- **Authors:** "RA Contributors"
+
+
+# Distinct Sort Merge
+
+## Description
+
+When DISTINCT is followed by ORDER BY on the same columns, merge the two operations into a single sort-based distinct. The sort needed for ORDER BY naturally supports streaming deduplication.
+
+**When to apply**: Sort keys are a superset of the distinct columns.
+
+## Relational Algebra
+
+```algebra
+Sort[keys](Distinct(input))
+  -> SortDistinct[keys](input)
+  where distinct_cols subset_of keys
+```
+
+## Implementation
+
+```rust
+rw!("distinct-sort-merge";
+    "(sort ?keys (distinct ?input))" =>
+    "(sort-distinct ?keys ?input)"
+    if sort_covers_distinct("?keys", "?input")
+),
+```
+
+## Test Cases
+
+### Positive: Distinct with matching order
+
+```sql
+SELECT DISTINCT name FROM users ORDER BY name;
+
+-- Merge into a single sort-distinct operation
+```
+
+### Negative: Distinct with different order
+
+```sql
+SELECT DISTINCT name FROM users ORDER BY id;
+
+-- Cannot merge; sort key not in distinct columns
+```
+
+## References
+
+- Sort-based deduplication in database engines
+- Merge of physical operators for DISTINCT + ORDER BY

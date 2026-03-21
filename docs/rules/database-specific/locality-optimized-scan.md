@@ -1,0 +1,194 @@
+# Rule: Locality-Optimized Multi-Region Scan
+
+**Category:** database-specific/cockroachdb
+**File:** `rules/database-specific/cockroachdb/locality-optimized-scan.rra`
+
+## Metadata
+
+- **ID:** `cockroachdb-locality-optimized-scan`
+- **Version:** 1.0.0
+- **Databases:** cockroachdb
+- **Tags:** database-specific, cockroachdb, multi-region, locality, scan, partitioning
+- **Authors:** "RA Contributors"
+
+
+# Locality-Optimized Multi-Region Scan
+
+## Description
+
+Plans a LocalityOptimizedSearch operation that avoids communicating with remote nodes (relative to the gateway region) if possible. The scan is split into local and remote spans, with remote spans only executed if the local spans return no rows. This optimization exploits locality of access patterns in multi-region deployments.
+
+**When to apply**: Scan contains multiple spans targeting both local and remote partitions, AND either:
+- The scan has a hard limit ≤ max cardinality of local span, OR
+- Max cardinality of local span ≥ max cardinality of original scan
+
+**Why it works**: If rows tend to be accessed from the region where they are located (locality of access), the remote spans will rarely be needed, saving cross-region network latency. The optimization trades a potential slight pessimization (when data is in remote regions) for large wins when data is local.
+
+**Database version**: CockroachDB v20.2+ (REGIONAL BY ROW tables)
+
+## Relational Algebra
+
+```algebra
+Scan[constraints: local ∪ remote]
+  -> LocalityOptimizedSearch(
+       Scan[constraints: local],
+       Scan[constraints: remote]
+     )
+  where has_local_and_remote_constraints
+  where (has_limit && limit ≤ |local_max_card|)
+     || |local_max_card| ≥ |total_max_card|
+```
+
+Where:
+- `local` constraints target partitions in gateway region
+- `remote` constraints target partitions in other regions
+- Right child only executes if left child returns 0 rows
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("cockroachdb-locality-optimized-scan";
+    "(scan ?private)" =>
+    "(locality_optimized_search
+        (scan (local_spans ?private))
+        (scan (remote_spans ?private)))"
+    if is_database("cockroachdb")
+    if can_generate_locality_optimized_scan("?private")
+    if has_multi_region_constraints("?private")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    scan: &ScanPrivate,
+    gateway_region: &Region,
+    limit: Option<u64>,
+) -> bool {
+    let (local_spans, remote_spans) =
+        partition_by_region(scan.constraints, gateway_region);
+
+    // Must have both local and remote spans
+    if local_spans.is_empty() || remote_spans.is_empty() {
+        return false;
+    }
+
+    let local_max_card = estimate_max_cardinality(&local_spans);
+    let total_max_card = scan.estimated_cardinality();
+
+    // Benefit when limit can be satisfied by local data
+    if let Some(lim) = limit {
+        if lim <= local_max_card {
+            return true;
+        }
+    }
+
+    // Or when local spans cover most of the data
+    local_max_card >= total_max_card
+}
+```
+
+**Restrictions:**
+- Only applies to CockroachDB
+- Requires multi-region table with REGIONAL BY ROW
+- Session setting `locality_optimized_partitioned_index_scan` must be enabled
+- Table must be partitioned by region (crdb_region column)
+- Slight pessimization if data is in remote regions
+
+## Cost Model
+
+```rust
+fn locality_optimized_cost(
+    local_card: f64,
+    remote_card: f64,
+    local_latency_ms: f64,
+    remote_latency_ms: f64,
+    locality_prob: f64, // probability data is in local region
+) -> f64 {
+    // Normal scan: parallel access to all regions
+    let normal_cost = (local_card + remote_card) * local_latency_ms;
+
+    // Locality-optimized: local first, remote only if needed
+    let local_only_cost = local_card * local_latency_ms;
+    let fallback_cost = (local_card + remote_card) * remote_latency_ms;
+    let opt_cost = locality_prob * local_only_cost
+                 + (1.0 - locality_prob) * fallback_cost;
+
+    // Benefit when locality_prob is high
+    (normal_cost - opt_cost) / normal_cost
+}
+```
+
+**Assumptions:**
+- Locality of access: rows are usually in the gateway region
+- Remote region latency is 10-100x higher than local
+- Local spans are checked first (sequential dependency)
+
+**Typical benefit**: 50-95% latency reduction with high locality of access
+
+## Test Cases
+
+### Positive Case 1: Point Query with Limit
+
+```sql
+-- CockroachDB multi-region table with REGIONAL BY ROW
+CREATE TABLE tab (
+  k INT PRIMARY KEY,
+  v INT,
+  crdb_region crdb_internal_region NOT VISIBLE
+) LOCALITY REGIONAL BY ROW;
+
+-- Query from 'us-east1' gateway
+SET locality_optimized_partitioned_index_scan = true;
+SELECT * FROM tab WHERE k = 10;
+
+-- Plan (locality-optimized):
+-- LocalityOptimizedSearch
+--   Scan tab (constraint: crdb_region='us-east1', k=10)
+--   Scan tab (constraint: crdb_region IN ('us-west1', 'europe-west1'), k=10)
+```
+
+### Positive Case 2: Range Query with Limit
+
+```sql
+-- Query from 'us-east1'
+SELECT * FROM tab WHERE k BETWEEN 1 AND 100 LIMIT 10;
+
+-- If local span can satisfy limit, remote scan is skipped
+-- LocalityOptimizedSearch
+--   Scan tab (local: us-east1, k=[1,100]) LIMIT 10
+--   Scan tab (remote: others, k=[1,100])
+```
+
+### Negative Case 1: Single Region
+
+```sql
+-- Table not partitioned by region (rule should NOT apply)
+SELECT * FROM single_region_table WHERE id = 10;
+
+-- Output (unchanged - no multi-region partitioning)
+```
+
+### Negative Case 2: No Locality Benefit
+
+```sql
+-- Scan with no limit and uniform data distribution
+SELECT * FROM tab;
+
+-- If max_card(local) < max_card(total), rule doesn't apply
+```
+
+## References
+
+**Source code:**
+- CockroachDB: `pkg/sql/opt/xform/rules/scan.opt`
+  - Rule: `GenerateLocalityOptimizedScan` (lines 12-86)
+  - Git: https://github.com/cockroachdb/cockroach
+  - Commit: 6e210ba6aa33cea5e27b1a8fae212c27941781f4 (2026-03-17)
+
+**Documentation:**
+- CockroachDB multi-region: https://www.cockroachlabs.com/docs/stable/multiregion-overview.html
+- REGIONAL BY ROW tables: https://www.cockroachlabs.com/docs/stable/regional-tables.html#regional-by-row-tables

@@ -1,0 +1,105 @@
+# Rule: Index Join
+
+**Category:** physical/index-selection
+**File:** `rules/physical/index-selection/index-join.rra`
+
+## Metadata
+
+- **ID:** `index-join`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, oracle
+- **Tags:** index, join, nested-loop
+- **Authors:** "RA Contributors"
+
+## Preconditions
+
+```yaml
+  - type: "pattern"
+    must_match: "(join inner (= ?lcol ?rcol) ?left ?right)"
+    description: "Equi-join with index on join column"
+  - type: "predicate"
+    condition: "has_index(?right, ?rcol) || has_index(?left, ?lcol)"
+    description: "Index must exist on join column of at least one side"
+```
+
+
+# Index Join
+
+## Description
+
+Uses index on join column for efficient nested loop join; each outer row does index lookup in inner.
+
+**When to apply**: Join with small outer table and index on inner join column.
+
+**Why it works**: Index lookup O(log m) per outer row; much faster than scanning inner table.
+
+## Relational Algebra
+
+```algebra
+join[R.key = S.key](small(R), indexed(S))
+  -> index_nested_loop_join:
+       for r in R:
+         s_matches = index_lookup(S.index_key, r.key)
+         emit (r, s_matches)
+```
+
+## Implementation
+
+```rust
+rw!("use-index-join";
+    "(join (= ?outer_key ?inner_key) ?outer ?inner)" =>
+    "(index-join ?outer_key ?inner_key ?outer ?inner)"
+    if is_small("?outer") && has_index("?inner", "?inner_key")
+),
+```
+
+## Cost Model
+
+```rust
+fn cost(outer_size: u64, inner_size: u64, inner_index_height: usize, selectivity: f64) -> f64 {
+    let outer_scan = outer_size as f64;
+    let index_lookups = outer_size as f64 * inner_index_height as f64;
+    let matching_rows = outer_size as f64 * inner_size as f64 * selectivity;
+    outer_scan + index_lookups + matching_rows
+}
+```
+
+**Typical benefit**: 50-80% vs nested loop scan
+
+## Test Cases
+
+### Positive: Small outer, indexed inner
+
+```sql
+CREATE INDEX idx_customer_id ON orders(customer_id);
+
+SELECT * FROM recent_customers rc
+JOIN orders o ON rc.id = o.customer_id;
+
+-- 100 recent customers: 100 index lookups in orders
+```
+
+### Positive: Parameterized query
+
+```sql
+SELECT * FROM cart_items ci
+JOIN products p ON ci.product_id = p.id
+WHERE ci.cart_id = ?;
+
+-- Single cart: few index lookups
+```
+
+### Negative: Large outer table
+
+```sql
+SELECT * FROM all_orders o
+JOIN customers c ON o.customer_id = c.id;
+
+-- Millions of orders: hash join better
+```
+
+## References
+
+- PostgreSQL: Nested loop with inner index scan
+- MySQL: Index nested-loop join (ref access)
+- Oracle: Nested loops with index access

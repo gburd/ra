@@ -1,0 +1,126 @@
+# Rule: Calcite MultiJoinOptimizeBushyRule
+
+**Category:** logical/join-reordering
+**File:** `rules/logical/join-reordering/multi-join-optimize-bushy.rra`
+
+## Metadata
+
+- **ID:** `calcite-multi-join-optimize-bushy`
+- **Version:** "1.0.0"
+- **Databases:** calcite, postgresql
+- **Tags:** logical, calcite, join, reorder, bushy, heuristic, multi-join
+- **Authors:** "RA Contributors"
+
+## Preconditions
+
+```yaml
+  - type: "pattern"
+    must_match: "(project ?proj (multi-join ?inputs ?filters))"
+    description: "MultiJoin node with multiple inputs"
+  - type: "predicate"
+    condition: "count(?inputs) >= 3"
+    description: "At least 3 inputs for bushy optimization"
+  - type: "fact"
+    fact_type: "statistics.cardinality"
+    table: "?inputs"
+    comparator: "exists"
+    description: "Cardinality estimates needed for greedy pairing"
+```
+
+
+# Calcite MultiJoinOptimizeBushyRule
+
+## Description
+
+Finds an approximately optimal ordering for join operators using a
+heuristic algorithm that can produce bushy join trees. Unlike
+LoptOptimizeJoinRule which only produces left-deep trees, this rule
+explores bushy plans that can be better for parallel execution.
+
+**When to apply**: A MultiJoin node represents a flattened set of
+join inputs that need to be ordered.
+
+**Why it works**: Bushy join trees allow intermediate results to be
+computed in parallel. The heuristic greedily pairs the two relations
+with the smallest estimated join result at each step.
+
+**Calcite class**: `org.apache.calcite.rel.rules.MultiJoinOptimizeBushyRule`
+
+## Relational Algebra
+
+```algebra
+-- Before: left-deep join tree
+((A JOIN B) JOIN C) JOIN D
+
+-- After: bushy join tree
+(A JOIN B) JOIN (C JOIN D)
+-- Both joins can execute in parallel
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-multi-join-optimize-bushy";
+    "(project ?proj (multi-join ?inputs ?filters))" =>
+    "(project ?proj (bushy-join-order ?inputs ?filters))"
+    if has_multiple_inputs("?inputs")
+),
+```
+
+## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
+
+```rust
+fn applicable(multi_join: &MultiJoin) -> bool {
+    multi_join.inputs().len() >= 3
+}
+```
+
+**Restrictions:**
+- Heuristic; may not find the true optimal plan
+- Requires cardinality estimates
+- Preserves outer join constraints
+- Better than left-deep for parallel execution environments
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    left_deep_cost: f64,
+    bushy_cost: f64,
+) -> f64 {
+    if left_deep_cost > 0.0 {
+        (left_deep_cost - bushy_cost) / left_deep_cost
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 10-80% for queries with many joins.
+
+## Test Cases
+
+```sql
+-- Positive: 5-way join benefits from bushy plan
+SELECT * FROM A
+JOIN B ON A.k = B.k
+JOIN C ON B.k = C.k
+JOIN D ON C.k = D.k
+JOIN E ON D.k = E.k;
+-- Bushy tree: (A JOIN B) JOIN (C JOIN (D JOIN E))
+```
+
+```sql
+-- Negative: 2-way join
+SELECT * FROM A JOIN B ON A.k = B.k;
+-- Only 2 inputs; no bushy optimization possible
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/MultiJoinOptimizeBushyRule.java (commit af6367d)

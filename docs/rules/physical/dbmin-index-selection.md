@@ -1,0 +1,252 @@
+# Rule: Index Selection for Conjunctive Queries
+
+**Category:** physical/index-selection
+**File:** `rules/physical/index-selection/dbmin-index-selection.rra`
+
+## Metadata
+
+- **ID:** `dbmin-index-selection`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, duckdb, sqlite, clickhouse, cockroachdb, mssql, oracle
+- **Tags:** index-selection, access-path, classic
+- **Authors:** "Whang, Wiederhold, Sagalowicz"
+
+## Preconditions
+
+```yaml
+  - type: "pattern"
+    must_match: "(filter ?pred (scan ?table))"
+    description: "Filter for DBMIN index selection algorithm"
+  - type: "fact"
+    fact_type: "statistics.workload_history"
+    table: "?table"
+    comparator: "exists"
+    description: "Workload statistics needed for DBMIN algorithm"
+  - type: "predicate"
+    condition: "has_multiple_indexes(?table)"
+    description: "Multiple candidate indexes must exist for selection"
+```
+
+
+# Index Selection for Conjunctive Queries
+
+## Description
+
+Selects the optimal index for queries with conjunctive (AND) predicates by
+estimating the selectivity of each predicate and choosing the index that
+minimizes total access cost. This classic technique from the DBMIN system
+considers both index access cost and post-filtering cost.
+
+**When to apply**: Queries with multiple predicates (WHERE p1 AND p2 AND ...)
+where multiple indexes are available. The optimizer must choose which index
+to use and which predicates to evaluate as post-filters.
+
+**Why it works**: Using the most selective index minimizes I/O, but the
+"best" index depends on both selectivity and access cost. An index on a
+slightly less selective predicate might win if it's clustered (sequential
+I/O) versus non-clustered (random I/O).
+
+## Relational Algebra
+
+```algebra
+Given: σ_{p1 ∧ p2 ∧ ... ∧ pn}(R)
+With indexes: I1 on p1, I2 on p2, ...
+
+For each index Ii:
+  cost = index_access_cost(Ii) +
+         (rows_from_index(Ii) * post_filter_cost(remaining_predicates))
+
+Choose index with minimum total cost.
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+struct IndexSelector {
+    catalog: Catalog,
+}
+
+impl IndexSelector {
+    fn select_index(&self, predicates: &[Predicate], table: &Table) -> AccessPath {
+        let mut best_path = AccessPath::SeqScan(table.clone());
+        let mut best_cost = self.estimate_seq_scan_cost(table);
+
+        // Consider each available index
+        for index in self.catalog.indexes_for_table(table) {
+            // Which predicates can this index satisfy?
+            let (index_preds, post_filter_preds) =
+                self.partition_predicates(predicates, &index);
+
+            if index_preds.is_empty() {
+                continue; // Index not useful
+            }
+
+            // Estimate selectivity of index predicates
+            let index_selectivity = self.combined_selectivity(&index_preds);
+            let rows_from_index = table.row_count as f64 * index_selectivity;
+
+            // Index access cost
+            let index_cost = if index.is_clustered {
+                // Clustered: sequential I/O
+                (rows_from_index * self.page_size as f64 / table.avg_row_size as f64)
+                    * self.seq_io_cost
+            } else {
+                // Non-clustered: random I/O per row
+                rows_from_index * self.random_io_cost
+            };
+
+            // Post-filter cost
+            let post_filter_cost = rows_from_index
+                * self.per_row_cpu_cost
+                * post_filter_preds.len() as f64;
+
+            let total_cost = index_cost + post_filter_cost;
+
+            if total_cost < best_cost {
+                best_cost = total_cost;
+                best_path = AccessPath::IndexScan(index.clone(), post_filter_preds);
+            }
+        }
+
+        best_path
+    }
+}
+```
+
+## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    hw: &HardwareProfile,
+) -> bool {
+    // Must have conjunctive predicates
+    stats.has_conjunctive_predicates
+        // Must have indexes available
+        && !stats.available_indexes.is_empty()
+        // Selectivity estimates available
+        && stats.has_selectivity_estimates
+}
+```
+
+**Restrictions:**
+- Works for conjunctive (AND) predicates; OR requires union
+- Assumes independent predicates for selectivity estimation
+- Clustered vs. non-clustered distinction is critical
+- Composite indexes require range analysis
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    hw: &HardwareProfile,
+) -> f64 {
+    let table_rows = stats.table_cardinality as f64;
+    let selectivity = stats.min_predicate_selectivity;
+
+    // Cost of seq scan
+    let seq_scan_cost = table_rows * hw.seq_io_cost_per_row;
+
+    // Cost of best index scan
+    // Clustered index: sequential I/O for selected rows
+    let index_rows = table_rows * selectivity;
+    let clustered_index_cost = index_rows * hw.seq_io_cost_per_row;
+
+    // Non-clustered: random I/O per row
+    let nonclustered_index_cost = index_rows * hw.random_io_cost_per_row;
+
+    let best_index_cost = clustered_index_cost.min(nonclustered_index_cost);
+
+    // Benefit
+    if seq_scan_cost > best_index_cost {
+        (seq_scan_cost - best_index_cost) / seq_scan_cost
+    } else {
+        0.0
+    }
+}
+```
+
+**Assumptions:**
+- Sequential I/O: 1ms per page (100 MB/s)
+- Random I/O: 10ms per access (SSD: 0.1ms)
+- Selectivity < 10%: index usually wins
+- Selectivity > 20%: seq scan often wins (depends on clustering)
+
+**Typical benefit**: 50% to 100x for selective queries with appropriate indexes.
+
+## Test Cases
+
+### Positive: Selective index on primary predicate
+
+```sql
+-- Index on customer_id (clustered)
+SELECT * FROM orders
+WHERE customer_id = 12345 AND order_date > '2024-01-01';
+
+-- Index selection:
+-- - customer_id index: highly selective (0.001%)
+-- - order_date index: less selective (10%)
+-- Choose customer_id index, post-filter on order_date
+```
+
+### Positive: Composite index covers multiple predicates
+
+```sql
+-- Composite index on (category, price)
+SELECT * FROM products
+WHERE category = 'electronics' AND price > 100 AND price < 500;
+
+-- Composite index satisfies category (exact) and price (range)
+-- All predicates handled by index, no post-filtering
+```
+
+### Negative: Non-selective predicate (seq scan wins)
+
+```sql
+-- Index on status, but 80% of rows have status='active'
+SELECT * FROM users
+WHERE status = 'active';
+
+-- Selectivity 80%: index scan would access 80% of table randomly
+-- Sequential scan cheaper
+```
+
+### Positive: Clustered vs. non-clustered
+
+```sql
+-- Two indexes: clustered on order_date, non-clustered on product_id
+SELECT * FROM orders
+WHERE product_id = 456 AND order_date BETWEEN '2024-01-01' AND '2024-01-31';
+
+-- product_id: selectivity 1% (100 rows)
+-- order_date: selectivity 5% (500 rows)
+-- Non-clustered product_id: 100 random I/Os = 1000ms (10ms each)
+-- Clustered order_date: 500 sequential I/Os = 5ms (0.01ms each)
+-- Choose clustered order_date despite lower selectivity!
+```
+
+## References
+
+**Original papers:**
+- Whang, K.-Y., Wiederhold, G., Sagalowicz, D., "Separability: An Approach to Physical Database Design", IEEE Transactions on Computers 1984
+  - DOI: 10.1109/TC.1984.1676399
+  - Index selection in DBMIN system
+
+- Selinger et al., "Access Path Selection in a Relational Database", ACM SIGMOD 1979
+  - DOI: 10.1145/582095.582099
+  - System R's index selection algorithm
+
+**Follow-up work:**
+- Finkelstein, S., et al., "Physical Database Design for Relational Databases", ACM TODS 1988
+  - DOI: 10.1145/42201.42203
+  - Comprehensive treatment of index selection
+
+**Implementation:**
+- All major databases (PostgreSQL, MySQL, Oracle, mssql)
+- PostgreSQL: `src/backend/optimizer/path/indxpath.c`

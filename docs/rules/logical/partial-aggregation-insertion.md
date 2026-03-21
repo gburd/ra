@@ -1,0 +1,93 @@
+# Rule: Partial Aggregation Insertion
+
+**Category:** logical/aggregate-pushdown
+**File:** `rules/logical/aggregate-pushdown/partial-aggregation-insertion.rra`
+
+## Metadata
+
+- **ID:** `partial-aggregation-insertion`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, duckdb, spark
+- **Tags:** aggregation, partial, two-phase
+- **Authors:** "RA Contributors"
+
+
+# Partial Aggregation Insertion
+
+## Description
+
+Inserts partial aggregation before shuffle in distributed systems or before
+final aggregation to reduce data volume early.
+
+**When to apply**: Distributed aggregation with high cardinality.
+
+**Why it works**: Pre-aggregating locally reduces network transfer and final
+aggregation input size.
+
+## Relational Algebra
+
+```algebra
+aggregate[group, agg_func](join[...](R, S))
+  -> aggregate[group, agg_func](
+       aggregate[group, partial_agg_func](join[...](R, S))
+     )
+  where supports_partial_agg(agg_func)
+```
+
+## Implementation
+
+```rust
+rw!("partial-aggregation-insertion";
+    "(aggregate ?group ?agg ?input)" =>
+    "(aggregate ?group ?agg (aggregate ?group (partial ?agg) ?input))"
+    if is_distributive("?agg")
+    if high_cardinality("?group")
+),
+```
+
+## Cost Model
+
+```rust
+fn benefit(input_size: u64, cardinality: u64, reduction: f64) -> f64 {
+    let without = input_size; // Full data to final agg
+    let with = (input_size as f64 * reduction) as u64; // Reduced data
+    (without - with) as f64 / without as f64
+}
+```
+
+**Typical benefit**: 30-70% when achieving 2x-10x reduction
+
+## Test Cases
+
+### Positive: Distributed aggregation
+
+```sql
+SELECT dept_id, SUM(salary)
+FROM employees
+GROUP BY dept_id;
+
+-- Insert partial: local SUM per node, final SUM
+```
+
+### Positive: After expensive join
+
+```sql
+SELECT c.country, COUNT(*)
+FROM customers c JOIN orders o ON c.id = o.customer_id
+GROUP BY c.country;
+
+-- Partial COUNT after join, before shuffle
+```
+
+### Negative: Low cardinality
+
+```sql
+SELECT active, COUNT(*) FROM users GROUP BY active;
+
+-- Only 2 groups: partial aggregation adds overhead
+```
+
+## References
+
+- PostgreSQL: Parallel aggregation with partial/finalize
+- Spark: Two-phase aggregation in shuffle operations

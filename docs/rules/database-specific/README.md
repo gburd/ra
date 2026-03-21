@@ -1,0 +1,441 @@
+# database-specific Rules
+
+Total rules in this category:      403
+
+## Overview
+
+Database-specific rules capture optimizations unique to particular database systems like PostgreSQL, MySQL, DuckDB, Oracle, and others.
+
+## Subcategories
+
+- [calcite](./calcite/) -       48 rules
+- [clickhouse](./clickhouse/) -       47 rules
+- [cockroachdb](./cockroachdb/) -       31 rules
+- [datafusion](./datafusion/) -       20 rules
+- [derby](./derby/) -       22 rules
+- [drill](./drill/) -        4 rules
+- [duckdb](./duckdb/) -        2 rules
+- [flink](./flink/) -        7 rules
+- [greenplum](./greenplum/) -        2 rules
+- [hyper](./hyper/) -        3 rules
+- [impala](./impala/) -        4 rules
+- [materialize](./materialize/) -       21 rules
+- [monetdb](./monetdb/) -       28 rules
+- [mongodb](./mongodb/) -       27 rules
+- [mssql](./mssql/) -       20 rules
+- [mysql](./mysql/) -       25 rules
+- [neo4j](./neo4j/) -       24 rules
+- [oracle](./oracle/) -       20 rules
+- [postgresql](./postgresql/) -        2 rules
+- [presto](./presto/) -        3 rules
+- [sqlite](./sqlite/) -        2 rules
+- [tidb](./tidb/) -       29 rules
+- [timescaledb](./timescaledb/) -        3 rules
+- [trino](./trino/) -        6 rules
+- [voltdb](./voltdb/) -        3 rules
+
+## Rules
+
+- [Calcite AggregateExpandDistinctAggregatesRule](./aggregate-expand-distinct.md) - `calcite-aggregate-expand-distinct`
+- [Calcite AggregateJoinTransposeRule](./aggregate-join-transpose.md) - `calcite-aggregate-join-transpose`
+- [Aggregate Merge](./aggregate-merge.md) - `aggregate-merge`
+- [Calcite AggregateProjectMergeRule](./aggregate-project-merge.md) - `calcite-aggregate-project-merge`
+- [Aggregate Reduce Functions](./aggregate-reduce-functions.md) - `aggregate-reduce-functions`
+- [Calcite AggregateRemoveRule](./aggregate-remove.md) - `calcite-aggregate-remove`
+- [Calcite AggregateUnionTransposeRule](./aggregate-union-transpose.md) - `calcite-aggregate-union-transpose`
+- [Aggregate Values](./aggregate-values.md) - `aggregate-values`
+- [Calcite CalcMergeRule](./calc-merge.md) - `calcite-calc-merge`
+- [Exchange Remove Constant Keys](./exchange-remove-constant-keys.md) - `exchange-remove-constant-keys`
+- [Calcite FilterAggregateTransposeRule](./filter-aggregate-transpose.md) - `calcite-filter-aggregate-transpose`
+- [Calcite FilterJoinRule](./filter-into-join.md) - `calcite-filter-into-join`
+- [Filter Merge](./filter-merge.md) - `filter-merge`
+- [Calcite FilterProjectTransposeRule](./filter-project-transpose.md) - `calcite-filter-project-transpose`
+- [Filter Sample Transpose](./filter-sample-transpose.md) - `filter-sample-transpose`
+- [Calcite FilterSetOpTransposeRule](./filter-set-op-transpose.md) - `calcite-filter-set-op-transpose`
+- [Calcite FilterToCalcRule](./filter-to-calc.md) - `calcite-filter-to-calc`
+- [Filter Window Transpose](./filter-window-transpose.md) - `filter-window-transpose`
+- [Intersect to Distinct](./intersect-to-distinct.md) - `intersect-to-distinct`
+- [Intersect to Semi-Join](./intersect-to-semi-join.md) - `intersect-to-semi-join`
+- [Calcite JoinAssociateRule](./join-associate.md) - `calcite-join-associate`
+- [Calcite JoinCommuteRule](./join-commute.md) - `calcite-join-commute`
+- [Calcite JoinConditionPushRule](./join-condition-push.md) - `calcite-join-condition-push`
+- [Join Derive IsNotNull Filter](./join-derive-is-not-null-filter.md) - `join-derive-is-not-null-filter`
+- [Join Expand OR to Union](./join-expand-or-to-union.md) - `join-expand-or-to-union`
+- [Calcite JoinPushThroughJoinRule](./join-push-through-join.md) - `calcite-join-push-through-join`
+- [Join to MultiJoin](./join-to-multi-join.md) - `join-to-multi-join`
+- [Calcite JoinToSemiJoinRule](./join-to-semi-join.md) - `calcite-join-to-semi-join`
+- [Join Union Transpose](./join-union-transpose.md) - `join-union-transpose`
+- [Project Correlate Transpose](./project-correlate-transpose.md) - `project-correlate-transpose`
+- [Calcite ProjectMergeRule](./project-merge.md) - `calcite-project-merge`
+- [Calcite ProjectRemoveRule](./project-remove.md) - `calcite-project-remove`
+- [Calcite ProjectSetOpTransposeRule](./project-set-op-transpose.md) - `calcite-project-set-op-transpose`
+- [Calcite ProjectToCalcRule](./project-to-calc.md) - `calcite-project-to-calc`
+- [Project to Window](./project-to-window.md) - `project-to-window`
+- [Calcite ProjectWindowTransposeRule](./project-window-transpose.md) - `calcite-project-window-transpose`
+- [Calcite ReduceExpressionsRule](./reduce-expressions.md) - `calcite-reduce-expressions`
+- [Semi-Join Filter Transpose](./semi-join-filter-transpose.md) - `semi-join-filter-transpose`
+- [Calcite SortJoinTransposeRule](./sort-join-transpose.md) - `calcite-sort-join-transpose`
+- [Calcite SortProjectTransposeRule](./sort-project-transpose.md) - `calcite-sort-project-transpose`
+- [Sort Remove Duplicate Keys](./sort-remove-duplicate-keys.md) - `sort-remove-duplicate-keys`
+- [Calcite SortRemoveRule](./sort-remove.md) - `calcite-sort-remove`
+- [Calcite SortUnionTransposeRule](./sort-union-transpose.md) - `calcite-sort-union-transpose`
+- [Calcite SubQueryRemoveRule](./sub-query-remove.md) - `calcite-sub-query-remove`
+- [Union Eliminator](./union-eliminator.md) - `union-eliminator`
+- [Calcite UnionMergeRule](./union-merge.md) - `calcite-union-merge`
+- [Union Pull Up Constants](./union-pull-up-constants.md) - `union-pull-up-constants`
+- [Values Reduce](./values-reduce.md) - `values-reduce`
+- ["ClickHouse Aggregate Projection Rewrite"](./aggregate-projection-rewrite.md) - `clickhouse-aggregate-projection-rewrite`
+- [Use Aggregate Projection for GROUP BY](./aggregate-projection.md) - `clickhouse-aggregate-projection`
+- ["Array Join Specialization"](./clickhouse-array-join-optimization.md) - `clickhouse-array-join-optimization`
+- ["Column Pruning for Columnar Storage"](./clickhouse-column-pruning.md) - `clickhouse-column-pruning`
+- ["Common Expression Elimination"](./clickhouse-common-expression-elimination.md) - `clickhouse-common-expression-elimination`
+- ["Distributed Query Optimization"](./clickhouse-distributed-query-optimization.md) - `clickhouse-distributed-query-optimization`
+- ["FINAL Modifier Deduplication"](./clickhouse-final-modifier-optimization.md) - `clickhouse-final-modifier-optimization`
+- ["MergeTree Partition Pruning"](./clickhouse-partition-pruning.md) - `clickhouse-partition-pruning`
+- ["Predicate Pushdown Below Aggregates"](./clickhouse-predicate-pushdown.md) - `clickhouse-predicate-pushdown`
+- ["MergeTree Primary Key Index Selection"](./clickhouse-primary-key-selection.md) - `clickhouse-primary-key-selection`
+- ["Use Materialized Projections"](./clickhouse-projection-rewrite.md) - `clickhouse-projection-rewrite`
+- ["Segment Index Pruning"](./clickhouse-segment-index-pruning.md) - `clickhouse-segment-index-pruning`
+- ["ClickHouse Column Pruning and Unused Column Removal"](./column-pruning-unused-removal.md) - `clickhouse-column-pruning-unused-removal`
+- ["ClickHouse Deferred Function Execution After Sort"](./deferred-function-execution.md) - `clickhouse-deferred-function-execution`
+- [Direct Read from Text/Full-Text Index](./direct-text-index-read.md) - `clickhouse-direct-text-index-read`
+- [Push Filter Below Join](./filter-pushdown-through-join.md) - `clickhouse-filter-pushdown-through-join`
+- ["ClickHouse Filter Pushdown to Storage Layer"](./filter-pushdown-to-storage.md) - `clickhouse-filter-pushdown-to-storage`
+- ["ClickHouse JOIN to IN Subquery Conversion"](./join-to-in-conversion.md) - `clickhouse-join-to-in-conversion`
+- ["ClickHouse Lazy Column Materialization"](./lazy-materialization.md) - `clickhouse-lazy-materialization`
+- [Lift ARRAY JOIN Above Filter](./lift-up-array-join.md) - `clickhouse-lift-up-array-join`
+- [Lift Functions Above Aggregation](./lift-up-functions.md) - `clickhouse-lift-up-functions`
+- [Push LIMIT Below Remote Exchange](./limit-pushdown-distributed.md) - `clickhouse-limit-pushdown-distributed`
+- ["ClickHouse LIMIT Pushdown"](./limit-pushdown.md) - `clickhouse-limit-pushdown`
+- ["ClickHouse Expression and Filter Merging"](./merge-expressions.md) - `clickhouse-merge-expressions`
+- ["ClickHouse Normal Projection Rewrite"](./normal-projection-rewrite.md) - `clickhouse-normal-projection-rewrite`
+- [Use Normal Projection for Column Subset](./normal-projection-usage.md) - `clickhouse-normal-projection-usage`
+- [Convert ANY JOIN to Semi-Join](./optimize-join-to-semi.md) - `clickhouse-optimize-join-to-semi`
+- [Convert Outer Join to Inner Join](./outer-join-to-inner.md) - `clickhouse-outer-join-to-inner`
+- ["ClickHouse Outer JOIN to Inner JOIN Conversion"](./outer-to-inner-join-conversion.md) - `clickhouse-outer-to-inner-join-conversion`
+- ["ClickHouse Partition-Independent Aggregation"](./partition-independent-aggregation.md) - `clickhouse-partition-independent-aggregation`
+- ["ClickHouse Partition Pruning"](./partition-pruning.md) - `clickhouse-partition-pruning`
+- ["ClickHouse PREWHERE Filter Pushdown"](./prewhere-filter-pushdown.md) - `clickhouse-prewhere-filter-pushdown`
+- [Filter to PREWHERE Optimization](./prewhere-pushdown.md) - `clickhouse-prewhere-pushdown`
+- [Optimize Primary Key Condition with Limit](./primary-key-condition-limit.md) - `clickhouse-primary-key-condition-limit`
+- ["ClickHouse Read-in-Order Sort Elimination"](./read-in-order-sort-elimination.md) - `clickhouse-read-in-order-sort-elimination`
+- [Read-in-Order Optimization for Sorting](./read-in-order.md) - `clickhouse-read-in-order`
+- ["ClickHouse Redundant Sort Removal"](./redundant-sort-removal.md) - `clickhouse-redundant-sort-removal`
+- [Remove Redundant DISTINCT](./remove-redundant-distinct.md) - `clickhouse-remove-redundant-distinct`
+- [Remove Redundant Sorting](./remove-redundant-sorting.md) - `clickhouse-remove-redundant-sorting`
+- [Runtime Filter for Join Optimization](./runtime-filter-join.md) - `clickhouse-runtime-filter-join`
+- ["ClickHouse Runtime Join Bloom Filter"](./runtime-join-filter.md) - `clickhouse-runtime-join-filter`
+- ["ClickHouse Sparse Index Granule Pruning"](./sparse-index-granule-pruning.md) - `clickhouse-sparse-index-granule-pruning`
+- [Sparse Primary Index for Granule Skipping](./sparse-index-skip.md) - `clickhouse-sparse-index-skip`
+- [Split Conjunctive Filter Predicates](./split-filter.md) - `clickhouse-split-filter`
+- [Top-K Optimization with Priority Queue](./topk-optimization.md) - `clickhouse-topk-optimization`
+- ["ClickHouse Top-K Sort Optimization"](./topk-sort-optimization.md) - `clickhouse-topk-sort-optimization`
+- [Use Data-Parallel Aggregation](./use-data-parallel-aggregation.md) - `clickhouse-use-data-parallel-aggregation`
+- [Split Disjunctive Anti-Join into Intersection](./anti-join-disjunction-to-union.md) - `cockroachdb-anti-join-disjunction-to-union`
+- ["Constrain Index Selection via Predicates"](./cockroachdb-constraint-index-selection.md) - `cockroachdb-constraint-index-selection`
+- ["Elide Unnecessary Projections"](./cockroachdb-elide-projection.md) - `cockroachdb-elide-projection`
+- ["Eliminate Identity Projections"](./cockroachdb-eliminate-noop-project.md) - `cockroachdb-eliminate-noop-project`
+- ["CockroachDB Merge Join Generation with Ordering"](./cockroachdb-generate-merge-joins.md) - `cockroachdb-generate-merge-joins`
+- ["Inline Projections Through Operators"](./cockroachdb-inline-projections.md) - `cockroachdb-inline-projections`
+- ["CockroachDB Inverted Join"](./cockroachdb-inverted-join.md) - `cockroachdb-inverted-join`
+- ["CockroachDB Merge Join Generation"](./cockroachdb-join-merge-generation.md) - `cockroachdb-merge-join-generation`
+- ["Join Reorder via Graph"](./cockroachdb-join-reorder.md) - `cockroachdb-join-reorder`
+- ["Locality Optimized Search for Lookup Joins"](./cockroachdb-locality-optimized-lookup.md) - `cockroachdb-locality-optimized-lookup`
+- ["CockroachDB Lookup Join Generation"](./cockroachdb-lookup-join-generation.md) - `cockroachdb-lookup-join-generation`
+- ["Generate Partial Index Scans"](./cockroachdb-partial-index-scan.md) - `cockroachdb-partial-index-scan`
+- ["Split Joins with Disjunctive Predicates"](./cockroachdb-split-disjunctive-joins.md) - `cockroachdb-split-disjunctive-joins`
+- [Commute Left Join to Right Join](./commute-left-to-right-join.md) - `cockroachdb-commute-left-to-right-join`
+- [Convert Semi-Join to Inner (Non-Equality)](./convert-semi-to-inner-non-equality.md) - `cockroachdb-convert-semi-to-inner-non-equality`
+- [Filter Constraint Consolidation](./filter-consolidation.md) - `crdb-filter-consolidation`
+- [Generate Secondary Index Scans](./generate-index-scans.md) - `cockroachdb-generate-index-scans`
+- [Generate Inverted Index Scans (JSON/Array)](./generate-inverted-index-scans.md) - `cockroachdb-generate-inverted-index-scans`
+- [Generate Limited Index Scans](./generate-limited-index-scans.md) - `cockroachdb-generate-limited-index-scans`
+- [CockroachDB Join Reordering](./join-reorder-rule.md) - `crdb-join-reorder`
+- [Locality-Optimized Lookup Join](./locality-optimized-lookup-join.md) - `cockroachdb-locality-optimized-lookup-join`
+- [Locality-Optimized Multi-Region Scan](./locality-optimized-scan.md) - `cockroachdb-locality-optimized-scan`
+- [Lookup Join with Virtual Computed Columns](./lookup-join-with-virtual-cols.md) - `crdb-lookup-join-virtual-cols`
+- [Push Limit Through Project Into Scan](./push-limit-into-project-scan.md) - `cockroachdb-push-limit-into-project-scan`
+- [Push Limit Into Filtered Scan](./push-limit-into-scan.md) - `cockroachdb-push-limit-into-scan`
+- [Join Reordering (Bushy Plans)](./reorder-joins.md) - `cockroachdb-reorder-joins`
+- [Replace MIN GroupBy with Limit (0-1 Groups)](./replace-min-with-limit.md) - `cockroachdb-replace-min-with-limit`
+- [Scalar MIN/MAX Aggregation to Limit](./scalar-min-max-to-limit.md) - `cockroachdb-scalar-min-max-to-limit`
+- [Replace Multiple MIN/MAX with Scalar Subqueries](./scalar-min-max-to-subqueries.md) - `cockroachdb-scalar-min-max-to-subqueries`
+- [Semi Join to Inner Join with Distinct (CockroachDB)](./semi-join-to-inner-with-distinct.md) - `cockroachdb-semi-join-to-inner-with-distinct`
+- [Split Disjunctive Join Conditions into Union](./split-disjunction-join-to-union.md) - `cockroachdb-split-disjunction-join-to-union`
+- [DataFusion Aggregate Statistics Optimization](./aggregate-statistics.md) - `datafusion-aggregate-statistics`
+- [DataFusion Common Subexpression Elimination](./common-subexpr-elimination.md) - `datafusion-common-subexpr-elimination`
+- [DataFusion Decorrelate Predicate Subquery](./decorrelate-subquery.md) - `datafusion-decorrelate-subquery`
+- [DataFusion Eliminate Unnecessary Sort](./eliminate-unnecessary-sort.md) - `datafusion-eliminate-unnecessary-sort`
+- [DataFusion Filter Pushdown Through Join](./filter-pushdown-through-join.md) - `datafusion-filter-pushdown-through-join`
+- [DataFusion Hash Join vs Sort-Merge Join Selection](./hash-join-selection.md) - `datafusion-hash-join-selection`
+- [DataFusion Join Reordering](./join-reordering.md) - `datafusion-join-reordering`
+- [DataFusion Limit Pushdown](./limit-pushdown.md) - `datafusion-limit-pushdown`
+- [DataFusion Parquet Predicate Pushdown](./parquet-predicate-pushdown.md) - `datafusion-parquet-predicate-pushdown`
+- [DataFusion Pipeline Breaking Optimization](./pipeline-breaking-optimization.md) - `datafusion-pipeline-breaking-optimization`
+- [DataFusion Projection Pushdown](./projection-pushdown.md) - `datafusion-projection-pushdown`
+- [DataFusion Propagate Empty Relation](./propagate-empty-relation.md) - `datafusion-propagate-empty-relation`
+- [DataFusion Repartition Insertion](./repartition-insertion.md) - `datafusion-repartition-insertion`
+- [DataFusion Replace DISTINCT with Aggregate](./replace-distinct-aggregate.md) - `datafusion-replace-distinct-aggregate`
+- [DataFusion Scalar Subquery to Join](./scalar-subquery-to-join.md) - `datafusion-scalar-subquery-to-join`
+- [DataFusion Simplify Expressions](./simplify-expressions.md) - `datafusion-simplify-expressions`
+- [DataFusion Single Distinct Aggregation to Group By](./single-distinct-to-groupby.md) - `datafusion-single-distinct-to-groupby`
+- [DataFusion Type Coercion Optimization](./type-coercion.md) - `datafusion-type-coercion`
+- [DataFusion Unnest/Flatten Rewrite](./unnest-rewrite.md) - `datafusion-unnest-rewrite`
+- [DataFusion Window Function Optimization](./window-function-optimization.md) - `datafusion-window-function-optimization`
+- [Apache Derby Bulk Fetch Optimization](./bulk-fetch.md) - `derby-bulk-fetch`
+- [Apache Derby Constant Expression Evaluation](./constant-expression-evaluation.md) - `derby-constant-expression-evaluation`
+- [Apache Derby Constraint-Based Query Optimization](./constraint-based-optimization.md) - `derby-constraint-based-optimization`
+- [Apache Derby Covering Index Scan](./covering-index.md) - `derby-covering-index`
+- [Apache Derby DISTINCT Elimination](./distinct-elimination.md) - `derby-distinct-elimination`
+- [Apache Derby EXISTS Subquery Flattening](./exists-to-join.md) - `derby-exists-to-join`
+- [Apache Derby GROUP BY Sort Elimination](./group-by-optimization.md) - `derby-group-by-optimization`
+- [Apache Derby Hash Join Strategy](./hash-join.md) - `derby-hash-join`
+- [Apache Derby IN List Multi-Probe Index Scan](./in-list-multi-probe.md) - `derby-in-list-multi-probe`
+- [Apache Derby Cost-Based Index Selection](./index-selection.md) - `derby-index-selection`
+- [Apache Derby Cost-Based Join Ordering](./join-ordering.md) - `derby-join-ordering`
+- [Apache Derby Subquery Materialization](./materialized-subquery.md) - `derby-materialized-subquery`
+- [Apache Derby Index Nested-Loop Join](./nested-loop-join.md) - `derby-nested-loop-join`
+- [Apache Derby NOT EXISTS to Anti-Join](./not-exists-to-antijoin.md) - `derby-not-exists-to-antijoin`
+- [Apache Derby Outer-to-Inner Join Conversion](./outer-to-inner-join.md) - `derby-outer-to-inner-join`
+- [Apache Derby Predicate Pushdown](./predicate-pushdown.md) - `derby-predicate-pushdown`
+- [Apache Derby Scroll-Insensitive Result Set Optimization](./scroll-insensitive-optimization.md) - `derby-scroll-insensitive-optimization`
+- [Apache Derby Sort Avoidance via Index](./sort-avoidance.md) - `derby-sort-avoidance`
+- [Apache Derby Table Lock Escalation](./table-lock-escalation.md) - `derby-table-lock-escalation`
+- [Apache Derby Transitive Closure of Join Predicates](./transitive-closure.md) - `derby-transitive-closure`
+- [Apache Derby UNION ALL vs UNION Optimization](./union-all-optimization.md) - `derby-union-all-optimization`
+- [Apache Derby View Flattening](./view-flattening.md) - `derby-view-flattening`
+- [Dynamic UDF Optimization (Drill)](./dynamic-udf-optimization.md) - `drill-dynamic-udf-optimization`
+- [Late Materialization (Drill)](./late-materialization.md) - `drill-late-materialization`
+- [Schema Discovery Pushdown (Drill)](./schema-discovery-pushdown.md) - `drill-schema-discovery-pushdown`
+- [Schema Versioning (Drill)](./schema-versioning.md) - `drill-schema-versioning`
+- [DuckDB Adaptive Perfect Hash Aggregation](./adaptive-perfect-hash-group.md) - `duckdb-adaptive-perfect-hash-group`
+- [DuckDB Zone Map (Min/Max Index) Pruning](./zonemap-pruning.md) - `duckdb-zonemap-pruning`
+- [Deduplication on Changelog Stream (Flink)](./deduplication-on-changelog.md) - `flink-deduplication-on-changelog`
+- [Lookup Join Caching (Flink)](./lookup-join-caching.md) - `flink-lookup-join-caching`
+- [Mini-Batch Aggregation (Flink)](./minibatch-aggregation.md) - `flink-minibatch-aggregation`
+- [Retraction Optimization (Flink)](./retract-optimization.md) - `flink-retract-optimization`
+- [Stream-Table Join with Temporal Constraint (Flink)](./stream-table-join-temporal.md) - `flink-stream-table-join-temporal`
+- [Watermark Pushdown (Flink)](./watermark-pushdown.md) - `flink-watermark-pushdown`
+- [Window Aggregation Optimization (Flink)](./window-aggregation-optimization.md) - `flink-window-aggregation-optimization`
+- [External Table Pushdown (Greenplum)](./external-table-pushdown.md) - `greenplum-external-table-pushdown`
+- [Motion Node Optimization (Greenplum)](./motion-node-optimization.md) - `greenplum-motion-node-optimization`
+- [Adaptive Code Generation (HyPer)](./adaptive-code-generation.md) - `hyper-adaptive-code-generation`
+- [Morsel-Driven Parallelism (HyPer)](./morsel-driven-parallelism.md) - `hyper-morsel-driven-parallelism`
+- [Vectorized Interpretation (HyPer)](./vectorized-interpretation.md) - `hyper-vectorized-interpretation`
+- [Codegen Disabled Fallback (Impala)](./codegen-disabled-fallback.md) - `impala-codegen-disabled-fallback`
+- [HDFS Caching (Impala)](./hdfs-caching.md) - `impala-hdfs-caching`
+- [Parquet Predicate Pushdown (Impala)](./parquet-predicate-pushdown.md) - `impala-parquet-predicate-pushdown`
+- [Runtime Filter Propagation (Impala)](./runtime-filter-propagation.md) - `impala-runtime-filter-propagation`
+- [Materialize Arrangement Sharing](./arrangement-sharing.md) - `materialize-arrangement-sharing`
+- [Materialize Bloom Filter State Pruning](./bloom-filter-state-pruning.md) - `materialize-bloom-filter-state-pruning`
+- [Materialize Canonicalize MapFilterProject](./canonicalize-mfp.md) - `materialize-canonicalize-mfp`
+- [Materialize Column Knowledge Propagation](./column-knowledge.md) - `materialize-column-knowledge`
+- [Materialize Delta Join Planning](./delta-join-planning.md) - `materialize-delta-join-planning`
+- [Materialize Demand-Driven Projection](./demand-projection.md) - `materialize-demand-projection`
+- [Materialize Operator Fusion](./fusion.md) - `materialize-fusion`
+- [Materialize Join Implementation Selection](./join-implementation.md) - `materialize-join-implementation`
+- [Materialize Let Motion (Common Subexpression Hoisting)](./let-motion.md) - `materialize-let-motion`
+- [Materialize Literal Lifting](./literal-lifting.md) - `materialize-literal-lifting`
+- [Materialize Monotonic Join Optimization](./monotonic-join-optimization.md) - `materialize-monotonic-join-optimization`
+- [Materialize NonNull Requirements](./nonnull-requirements.md) - `materialize-nonnull-requirements`
+- [Materialize Predicate Pushdown Through Join](./predicate-pushdown-through-join.md) - `materialize-predicate-pushdown-through-join`
+- [Materialize Reduce Elision](./reduce-elision.md) - `materialize-reduce-elision`
+- [Materialize Reduce Reduction (Hierarchical Aggregation)](./reduce-reduction.md) - `materialize-reduce-reduction`
+- [Materialize Sink Projection Pushdown](./sink-projection-pushdown.md) - `materialize-sink-projection-pushdown`
+- [Materialize Temporal Filter Pushdown](./temporal-filter-pushdown.md) - `materialize-temporal-filter-pushdown`
+- [Materialize Threshold Elision](./threshold-elision.md) - `materialize-threshold-elision`
+- [Materialize Time-Window Aggregation](./time-window-aggregation.md) - `materialize-time-window-aggregation`
+- [Materialize Monotonic TopK](./topk-monotonic.md) - `materialize-topk-monotonic`
+- [Materialize Watermark-Based Frontier Propagation](./watermark-propagation.md) - `materialize-watermark-propagation`
+- [MonetDB Band Join (Theta Join Optimization)](./band-join.md) - `monetdb-band-join`
+- [MonetDB BAT Join Ordering](./bat-join-ordering.md) - `monetdb-bat-join-ordering`
+- [MonetDB Bitwise BAT Operations](./bitwise-bat-operations.md) - `monetdb-bitwise-bat-operations`
+- [MonetDB Bitwise Column Operations](./bitwise-operations.md) - `monetdb-bitwise-operations`
+- [MonetDB Candidate List Intersection](./cand-list-intersection.md) - `monetdb-cand-list-intersection`
+- [MonetDB Intermediate Result Recycling](./column-recycling.md) - `monetdb-column-recycling`
+- [MonetDB Columnar Hash Join](./columnar-hash-join.md) - `monetdb-columnar-hash-join`
+- [MonetDB Database Cracking (Adaptive Indexing)](./crackers-adaptive-index.md) - `monetdb-crackers-adaptive-index`
+- [MonetDB Dictionary Encoded Operations](./dictionary-compression.md) - `monetdb-dictionary-compression`
+- [MonetDB Column Imprints Scan](./imprints-scan.md) - `monetdb-imprints-scan`
+- [MonetDB Late Materialization](./late-materialization.md) - `monetdb-late-materialization`
+- [MonetDB MAL Pipeline Optimization](./mal-pipeline-optimization.md) - `monetdb-mal-pipeline-optimization`
+- [MonetDB Ordered Merge Join](./merge-join.md) - `monetdb-merge-join`
+- [MonetDB Mitosis Parallel Execution](./mitosis-parallelism.md) - `monetdb-mitosis-parallelism`
+- [MonetDB Multi-Column Sort Sharing](./multi-column-sort-sharing.md) - `monetdb-multi-column-sort-sharing`
+- [MonetDB Ordered Index (Persistent Sort)](./ordered-index-scan.md) - `monetdb-ordered-index-scan`
+- [MonetDB Partitioned Hash Group-By](./partitioned-hash-group.md) - `monetdb-partitioned-hash-group`
+- [MonetDB Columnar Projection Pushdown](./projection-pushdown.md) - `monetdb-projection-pushdown`
+- [MonetDB Vectorized Range Selection](./range-select.md) - `monetdb-range-select`
+- [MonetDB Run-Length Encoded Operations](./run-length-encoding.md) - `monetdb-run-length-encoding`
+- [MonetDB SIMD Vectorized Selection](./simd-vectorized-selection.md) - `monetdb-simd-vectorized-selection`
+- [MonetDB Stochastic Cracking](./stochastic-cracking.md) - `monetdb-stochastic-cracking`
+- [MonetDB Strimps String Filtering](./strimps-string-filter.md) - `monetdb-strimps-string-filter`
+- [MonetDB String Heap Optimization](./string-heap-optimization.md) - `monetdb-string-heap-optimization`
+- [MonetDB Tail Column Ordering for Joins](./tail-ordering.md) - `monetdb-tail-ordering`
+- [MonetDB Window Function Optimization](./window-function-optimization.md) - `monetdb-window-function-optimization`
+- [MonetDB Zone Map Scan Skipping](./zone-map-scan-skipping.md) - `monetdb-zone-map-scan-skipping`
+- [MonetDB Zone Map Data Skipping](./zonemap-skipping.md) - `monetdb-zonemap-skipping`
+- [MongoDB $bucketAuto Granularity Optimization](./bucket-auto-optimization.md) - `mongodb-bucket-auto-optimization`
+- [MongoDB Change Stream Resume Token Optimization](./change-stream-optimization.md) - `mongodb-change-stream-optimization`
+- [MongoDB Compound Index Selection](./compound-index-selection.md) - `mongodb-compound-index-selection`
+- [MongoDB Covered Query Optimization](./covered-query-optimization.md) - `mongodb-covered-query`
+- [MongoDB Document Projection Pushdown](./document-projection-pushdown.md) - `mongodb-document-projection-pushdown`
+- [MongoDB Document Validation Optimization](./document-validation-optimization.md) - `mongodb-document-validation`
+- [MongoDB Geospatial Index Optimization](./geospatial-index-optimization.md) - `mongodb-geospatial-index`
+- [MongoDB $graphLookup Recursive Traversal Optimization](./graphlookup-optimization.md) - `mongodb-graphlookup-optimization`
+- [MongoDB Hashed Shard Key Targeted Query](./hashed-sharding-targeted-query.md) - `mongodb-hashed-sharding-targeted-query`
+- [MongoDB Index Intersection](./index-intersection.md) - `mongodb-index-intersection`
+- [MongoDB $lookup Pipeline Optimization](./lookup-pipeline-optimization.md) - `mongodb-lookup-pipeline-optimization`
+- [MongoDB $merge Incremental Output Optimization](./merge-output-optimization.md) - `mongodb-merge-output-optimization`
+- ["Covering Index Query Optimization"](./mongodb-covering-index.md) - `mongodb-covering-index`
+- ["Grouping Pushdown to Pipeline"](./mongodb-grouping-pushdown.md) - `mongodb-grouping-pushdown`
+- ["Query Hint for Index Selection"](./mongodb-hint-selection.md) - `mongodb-hint-selection`
+- ["Index Intersection for AND Predicates"](./mongodb-index-intersection.md) - `mongodb-index-intersection`
+- ["Index Selection for Predicates"](./mongodb-index-selection.md) - `mongodb-index-selection`
+- ["Aggregation Pipeline Stage Reordering"](./mongodb-pipeline-optimization.md) - `mongodb-pipeline-optimization`
+- ["Sort Elimination via Index Ordering"](./mongodb-sort-elimination.md) - `mongodb-sort-elimination`
+- ["Sort Pushdown Through Index"](./mongodb-sort-pushdown.md) - `mongodb-sort-pushdown`
+- [MongoDB Multikey Index Bounds Tightening](./multikey-index-bounds.md) - `mongodb-multikey-index-bounds`
+- [MongoDB Partial Index Selection](./partial-index-selection.md) - `mongodb-partial-index-selection`
+- [MongoDB Aggregation Pipeline Stage Reordering](./pipeline-stage-reordering.md) - `mongodb-pipeline-stage-reordering`
+- [MongoDB Slot-Based Execution Engine (SBE)](./sbe-slot-based-execution.md) - `mongodb-sbe-slot-based-execution`
+- [MongoDB Sharded Aggregation Optimization](./sharded-aggregation-optimization.md) - `mongodb-sharded-aggregation`
+- [MongoDB Text Search Index Optimization](./text-search-index.md) - `mongodb-text-search-index`
+- [MongoDB Wildcard Index Query Planning](./wildcard-index-planning.md) - `mongodb-wildcard-index-planning`
+- [mssql Adaptive Join](./adaptive-join.md) - `mssql-adaptive-join`
+- [mssql Batch Mode Execution](./batch-mode-execution.md) - `mssql-batch-mode-execution`
+- [mssql Batch Mode on Rowstore](./batch-mode-on-rowstore.md) - `mssql-batch-mode-on-rowstore`
+- [mssql Columnstore Index Scan](./columnstore-scan.md) - `mssql-columnstore-scan`
+- [mssql Hash Match Aggregate](./hash-match-aggregate.md) - `mssql-hash-match-aggregate`
+- [mssql In-Memory OLTP (Hekaton) Optimization](./in-memory-oltp.md) - `mssql-in-memory-oltp`
+- [mssql Indexed View Matching](./indexed-view-matching.md) - `mssql-indexed-view-matching`
+- [mssql Memory Grant Feedback](./intelligent-query-processing.md) - `mssql-memory-grant-feedback`
+- [mssql Interleaved Execution](./interleaved-execution.md) - `mssql-interleaved-execution`
+- [mssql Key Lookup Elimination](./optimistic-cursor.md) - `mssql-key-lookup-elimination`
+- [mssql Parameter Sensitivity Plan](./parameter-sniffing.md) - `mssql-parameter-sniffing`
+- [mssql Partition Elimination](./partition-elimination.md) - `mssql-partition-elimination`
+- [mssql Filter Pushdown to Computed Columns](./predicate-pushdown-computed.md) - `mssql-predicate-pushdown-computed`
+- [mssql Query Store Plan Forcing](./query-store-forced-plan.md) - `mssql-query-store-forced-plan`
+- [mssql Index Seek Predicate Optimization](./seek-predicate-optimization.md) - `mssql-seek-predicate-optimization`
+- [mssql Spool Optimization](./spool-optimization.md) - `mssql-spool-optimization`
+- [mssql Star Join Optimization](./star-join-optimization.md) - `mssql-star-join-optimization`
+- [mssql Subquery to Apply (Lateral Join)](./subquery-to-apply.md) - `mssql-subquery-to-apply`
+- [mssql Trivial Plan Optimization](./trivial-plan.md) - `mssql-trivial-plan`
+- [mssql Window Function Optimization](./window-aggregate-pushdown.md) - `mssql-window-aggregate-pushdown`
+- [MySQL Batched Key Access (BKA)](./batched-key-access.md) - `mysql-batched-key-access`
+- [MySQL Condition Fanout Filter](./condition-fanout-filter.md) - `mysql-condition-fanout-filter`
+- [MySQL Constant Folding and Propagation](./constant-folding.md) - `mysql-constant-folding`
+- [MySQL Cost-Based Subquery Strategy Selection](./cost-based-subquery.md) - `mysql-cost-based-subquery`
+- [MySQL Covering Index Scan](./covering-index.md) - `mysql-covering-index`
+- [MySQL Derived Table Merge](./derived-table-merge.md) - `mysql-derived-table-merge`
+- [MySQL DISTINCT Elimination and Optimization](./distinct-optimization.md) - `mysql-distinct-optimization`
+- [MySQL Equality Range Index Access](./eq-range-index.md) - `mysql-eq-range-index`
+- [MySQL EXISTS-to-IN Transformation](./exists-to-in.md) - `mysql-exists-to-in`
+- [MySQL GROUP BY Index Optimization](./group-by-optimization.md) - `mysql-group-by-optimization`
+- [MySQL Hash Join](./hash-join.md) - `mysql-hash-join`
+- [MySQL Index Condition Pushdown (ICP)](./index-condition-pushdown.md) - `mysql-index-condition-pushdown`
+- [MySQL Index Merge Optimization](./index-merge.md) - `mysql-index-merge`
+- [MySQL Invisible Index](./invisible-index.md) - `mysql-invisible-index`
+- [MySQL Block Nested-Loop Join](./join-buffer-bnl.md) - `mysql-join-buffer-bnl`
+- [MySQL Join Elimination](./join-elimination.md) - `mysql-join-elimination`
+- [MySQL LIMIT Query Optimization](./limit-optimization.md) - `mysql-limit-optimization`
+- [MySQL Multi-Range Read (MRR)](./multi-range-read.md) - `mysql-multi-range-read`
+- [MySQL ORDER BY Index Optimization](./order-by-optimization.md) - `mysql-order-by-optimization`
+- [MySQL Partition Pruning](./partition-pruning.md) - `mysql-partition-pruning`
+- [MySQL Predicate Pushdown to Storage Engine](./predicate-pushdown.md) - `mysql-predicate-pushdown`
+- [MySQL Semi-Join Execution Strategies](./semi-join-strategies.md) - `mysql-semi-join-strategies`
+- [MySQL Skip Scan Range Access](./skip-scan.md) - `mysql-skip-scan`
+- [MySQL Subquery Materialization](./subquery-materialization.md) - `mysql-subquery-materialization`
+- [MySQL Window Function Optimization](./window-function-optimization.md) - `mysql-window-function-optimization`
+- [Neo4j Bidirectional BFS for Shortest Path](./bidirectional-bfs.md) - `neo4j-bidirectional-bfs`
+- [Neo4j Cypher Query Plan Cache](./cypher-query-plan-cache.md) - `neo4j-query-plan-cache`
+- [Neo4j Degree-Based Pruning for Variable-Length Paths](./degree-pruning.md) - `neo4j-degree-pruning`
+- [Neo4j Eager Aggregation Avoidance](./eager-aggregation-avoidance.md) - `neo4j-eager-aggregation-avoidance`
+- [Neo4j Expand Into vs Expand All](./expand-into-optimization.md) - `neo4j-expand-into`
+- [Neo4j Full-Text Index Query Optimization](./fulltext-index-query.md) - `neo4j-fulltext-index-query`
+- [Neo4j Index-Backed ORDER BY](./index-backed-order-by.md) - `neo4j-index-order-by`
+- [Neo4j Join Hint Directed Planning](./join-hint-directed-planning.md) - `neo4j-join-hint-directed-planning`
+- [Neo4j Label Scan Optimization](./label-scan-optimization.md) - `neo4j-label-scan`
+- ["Apply Strategy Selection (Eager vs Lazy)"](./neo4j-apply-strategy-selection.md) - `neo4j-apply-strategy-selection`
+- ["Label Scan Optimization"](./neo4j-label-scan-optimization.md) - `neo4j-label-scan-optimization`
+- ["Merge Cardinality Rules"](./neo4j-merge-cardinality.md) - `neo4j-merge-cardinality`
+- ["Pattern Expansion Reordering"](./neo4j-pattern-reorder.md) - `neo4j-pattern-reorder`
+- ["Predicate Pushdown Before Expansion"](./neo4j-predicate-pushdown.md) - `neo4j-predicate-pushdown`
+- ["Property Projection Pruning"](./neo4j-property-projection-pruning.md) - `neo4j-property-projection-pruning`
+- ["Relationship Index Scan"](./neo4j-relationship-index-scan.md) - `neo4j-relationship-index-scan`
+- [Neo4j Node Count from Store Statistics](./node-count-from-store.md) - `neo4j-node-count-from-store`
+- [Neo4j OPTIONAL MATCH to AntiSemiApply](./optional-match-to-anti-semi-apply.md) - `neo4j-optional-match-to-anti-semi-apply`
+- [Neo4j Pattern Comprehension Optimization](./pattern-comprehension-optimization.md) - `neo4j-pattern-comprehension-optimization`
+- [Neo4j Property Index Seek](./property-index-seek.md) - `neo4j-property-index-seek`
+- [Neo4j Relationship Index Usage](./relationship-index-usage.md) - `neo4j-relationship-index`
+- [Neo4j Relationship Type Filtering](./relationship-type-filtering.md) - `neo4j-rel-type-filter`
+- [Neo4j Shortest Path with Dijkstra](./shortest-path-dijkstra.md) - `neo4j-shortest-path-dijkstra`
+- [Neo4j Variable-Length Path Expansion Optimization](./variable-length-path-expansion.md) - `neo4j-var-length-expansion`
+- [Oracle Adaptive Query Plans](./adaptive-plans.md) - `oracle-adaptive-plans`
+- [Oracle Batched Table Access by ROWID](./batch-table-access.md) - `oracle-batch-table-access`
+- [Oracle Bloom Filter Join Optimization](./bloom-filter-join.md) - `oracle-bloom-filter-join`
+- [Oracle CONNECT BY Optimization](./connect-by-optimization.md) - `oracle-connect-by-optimization`
+- [Oracle Group By Placement](./group-by-placement.md) - `oracle-group-by-placement`
+- [Oracle Hash Group By](./hash-group-by.md) - `oracle-hash-group-by`
+- [Oracle In-Memory Column Store Scan](./in-memory-scan.md) - `oracle-in-memory-scan`
+- [Oracle Index Fast Full Scan](./index-fast-full-scan.md) - `oracle-index-fast-full-scan`
+- [Oracle Join Elimination](./join-elimination.md) - `oracle-join-elimination`
+- [Oracle Join Predicate Pushdown](./join-predicate-pushdown.md) - `oracle-join-predicate-pushdown`
+- [Oracle Materialized View Query Rewrite](./materialized-view-rewrite.md) - `oracle-materialized-view-rewrite`
+- [Oracle OR Expansion](./or-expansion.md) - `oracle-or-expansion`
+- [Oracle Parallel Execution Optimization](./parallel-execution.md) - `oracle-parallel-execution`
+- [Oracle Partition Pruning](./partition-pruning.md) - `oracle-partition-pruning`
+- [Oracle Predicate Move-Around](./predicate-move-around.md) - `oracle-predicate-move-around`
+- [Oracle Result Cache Optimization](./result-cache.md) - `oracle-result-cache`
+- [Oracle Star Transformation](./star-transformation.md) - `oracle-star-transformation`
+- [Oracle Subquery Unnesting](./subquery-unnesting.md) - `oracle-subquery-unnesting`
+- [Oracle Table Expansion](./table-expansion.md) - `oracle-table-expansion`
+- [Oracle View Merging](./view-merging.md) - `oracle-view-merging`
+- [PostgreSQL Hash Aggregate to Sort Aggregate](./hash-aggregate-to-sort-aggregate.md) - `postgresql-hash-to-sort-aggregate`
+- [PostgreSQL Index-Only Scan](./index-only-scan.md) - `postgresql-index-only-scan`
+- [Cost-Based Join Reordering (Presto)](./cost-based-join-reordering.md) - `presto-cost-based-join-reordering`
+- [Dynamic Partition Pruning (Presto)](./dynamic-partition-pruning.md) - `presto-dynamic-partition-pruning`
+- [Fragment Result Caching (Presto)](./fragment-result-caching.md) - `presto-fragment-result-caching`
+- [SQLite Automatic Index (Transient Index)](./automatic-index.md) - `sqlite-automatic-index`
+- [SQLite Covering Index Scan](./covering-index-scan.md) - `sqlite-covering-index-scan`
+- [TiDB Aggregation Elimination](./aggregation-elimination.md) - `tidb-aggregation-elimination`
+- [TiDB Aggregation Merge](./aggregation-merge.md) - `tidb-aggregation-merge`
+- [Aggregation Push Down Through Join](./aggregation-push-down-join.md) - `tidb-aggregation-push-down-join`
+- [TiDB Decomposable Aggregation Pushdown](./aggregation-pushdown-decomposable.md) - `tidb-aggregation-pushdown-decomposable`
+- [TiDB Coprocessor LIMIT Pushdown](./coprocessor-limit-pushdown.md) - `tidb-coprocessor-limit-pushdown`
+- [TiDB Coprocessor Predicate Pushdown](./coprocessor-predicate-pushdown.md) - `tidb-coprocessor-predicate-pushdown`
+- [TiDB Coprocessor Projection Pushdown](./coprocessor-projection-pushdown.md) - `tidb-coprocessor-projection-pushdown`
+- [TiDB Coprocessor TOP-N Pushdown](./coprocessor-topn-pushdown.md) - `tidb-coprocessor-topn-pushdown`
+- [Derive TopN from Window Function](./derive-topn-from-window.md) - `tidb-derive-topn-from-window`
+- [Index Merge Scan (Multi-Index OR)](./index-merge-scan.md) - `tidb-index-merge-scan`
+- [TiDB Index Merge](./index-merge.md) - `tidb-index-merge`
+- [TiDB Dynamic Programming Join Reordering](./join-reorder-dp.md) - `tidb-join-reorder-dp`
+- [TiDB Outer Join Elimination](./outer-join-elimination.md) - `tidb-outer-join-elimination`
+- [TiDB Partition Pruning](./partition-pruning.md) - `tidb-partition-pruning`
+- [Shard Index Predicate Prefix Addition](./predicate-push-down-shard-index.md) - `tidb-predicate-push-down-shard-index`
+- [Runtime Filter Generation for Hash Joins](./runtime-filter-generation.md) - `tidb-runtime-filter-generation`
+- [TiDB Semi-Join Rewrite](./semi-join-rewrite.md) - `tidb-semi-join-rewrite`
+- [Skew-Aware Distinct Aggregation Rewrite](./skew-distinct-agg-rewrite.md) - `tidb-skew-distinct-agg-rewrite`
+- ["Aggregate Function Elimination"](./tidb-aggregate-elimination.md) - `tidb-aggregate-elimination`
+- ["Column Pruning in Intermediate Steps"](./tidb-column-pruning.md) - `tidb-column-pruning`
+- ["DISTINCT Elimination via Uniqueness"](./tidb-distinct-elimination.md) - `tidb-distinct-elimination`
+- ["Join Reordering for Selectivity"](./tidb-join-reorder.md) - `tidb-join-reorder`
+- ["LIMIT Pushdown Through Operators"](./tidb-limit-pushdown.md) - `tidb-limit-pushdown`
+- ["MAX/MIN to Index Seek Conversion"](./tidb-max-min-to-index-seek.md) - `tidb-max-min-to-index-seek`
+- ["Convert OUTER JOIN to INNER JOIN"](./tidb-outer-join-elimination.md) - `tidb-outer-join-elimination`
+- ["Predicate Pushdown Through Operators"](./tidb-predicate-pushdown.md) - `tidb-predicate-pushdown`
+- ["Semi/Anti Join to Inner Join Conversion"](./tidb-semi-anti-join-to-inner.md) - `tidb-semi-anti-join-to-inner`
+- ["TOP-N Pushdown (ORDER BY LIMIT)"](./tidb-top-n-pushdown.md) - `tidb-top-n-pushdown`
+- [TopN and Limit Push Down](./topn-push-down.md) - `tidb-topn-push-down`
+- [Chunk Pruning (TimescaleDB)](./chunk-pruning.md) - `timescaledb-chunk-pruning`
+- [Continuous Aggregates (TimescaleDB)](./continuous-aggregates.md) - `timescaledb-continuous-aggregates`
+- [Time-Bucket Aggregation (TimescaleDB)](./time-bucket-aggregation.md) - `timescaledb-time-bucket-aggregation`
+- [Adaptive Partitioning (Trino)](./adaptive-partitioning.md) - `trino-adaptive-partitioning`
+- [Adaptive Plan Optimization (Trino)](./adaptive-plan-optimization.md) - `trino-adaptive-plan-optimization`
+- [Connector Pushdown Framework (Trino)](./connector-pushdown-framework.md) - `trino-connector-pushdown-framework`
+- [Index Join Optimizer (Trino)](./index-join-optimizer.md) - `trino-index-join-optimizer`
+- [Limit Pushdown (Trino)](./limit-pushdown.md) - `trino-limit-pushdown`
+- [Predicate Pushdown with Dynamic Filtering (Trino)](./predicate-pushdown-with-dynamic-filtering.md) - `trino-predicate-pushdown-dynamic-filtering`
+- [Deterministic Order Optimization (VoltDB)](./deterministic-order-optimization.md) - `voltdb-deterministic-order-optimization`
+- [Replicated Table Optimization (VoltDB)](./replicated-table-optimization.md) - `voltdb-replicated-table-optimization`
+- [Single-Partition Optimization (VoltDB)](./single-partition-optimization.md) - `voltdb-single-partition-optimization`

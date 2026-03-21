@@ -1,0 +1,112 @@
+# Rule: Aggregate Function Decomposition
+
+**Category:** logical/function-optimization
+**File:** `rules/logical/function-optimization/aggregate-function-decomposition.rra`
+
+## Metadata
+
+- **ID:** `aggregate-function-decomposition`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, oracle, mssql, duckdb
+- **Tags:** function, aggregate, decomposition, avg, variance, stddev
+- **Authors:** "RA Contributors"
+
+
+# Aggregate Function Decomposition
+
+## Description
+
+Decomposes complex aggregate functions into simpler primitives that enable
+partial aggregation and parallel execution. Non-distributive aggregates
+like AVG, VARIANCE, and STDDEV can be expressed as combinations of
+distributive aggregates (SUM, COUNT).
+
+**When to apply**: Aggregates that need parallel or two-phase execution,
+or where partial aggregation enables pushdown through joins or unions.
+
+## Relational Algebra
+
+```algebra
+AVG(x)      -> SUM(x) / COUNT(x)
+VARIANCE(x) -> (SUM(x*x) - SUM(x)*SUM(x)/COUNT(x)) / (COUNT(x) - 1)
+STDDEV(x)   -> SQRT(VARIANCE(x))
+COUNT(DISTINCT x) -> COUNT(x) after deduplication on x
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("avg-to-sum-count";
+    "(aggregate (avg ?col) ?input)" =>
+    "(/ (aggregate (sum ?col) ?input)
+        (aggregate (count ?col) ?input))"
+),
+
+rw!("variance-decomposition";
+    "(aggregate (variance ?col) ?input)" =>
+    "(/ (- (aggregate (sum (* ?col ?col)) ?input)
+           (/ (* (aggregate (sum ?col) ?input)
+                 (aggregate (sum ?col) ?input))
+              (aggregate (count ?col) ?input)))
+        (- (aggregate (count ?col) ?input) 1))"
+),
+
+rw!("stddev-to-variance";
+    "(aggregate (stddev ?col) ?input)" =>
+    "(sqrt (aggregate (variance ?col) ?input))"
+),
+```
+
+## Cost Model
+
+```rust
+fn estimated_benefit(enables_parallel: bool) -> f64 {
+    if enables_parallel { 0.6 } else { 0.2 }
+}
+```
+
+## Test Cases
+
+### Positive: AVG decomposition for parallel execution
+
+```sql
+SELECT AVG(salary) FROM employees;
+-- Decompose to: SUM(salary) / COUNT(salary)
+-- Each worker computes partial SUM and COUNT
+-- Final: total_sum / total_count
+```
+
+### Positive: VARIANCE for two-phase aggregation
+
+```sql
+SELECT VARIANCE(price) FROM products;
+-- Decompose to: (SUM(price^2) - SUM(price)^2/COUNT) / (COUNT-1)
+-- Partial aggregates: SUM(price), SUM(price^2), COUNT(price)
+```
+
+### Positive: STDDEV decomposition
+
+```sql
+SELECT STDDEV(score) FROM test_results GROUP BY subject;
+-- STDDEV -> SQRT(VARIANCE) -> SQRT((SUM(x^2) - ...) / (n-1))
+-- Enables parallel group-by with partial aggregates
+```
+
+### Negative: Already primitive aggregate
+
+```sql
+SELECT SUM(amount) FROM orders;
+-- SUM is already distributive, no decomposition needed
+```
+
+## References
+
+**Academic papers:**
+- Graefe, "Query Evaluation Techniques for Large Databases", ACM Computing Surveys 1993
+
+**Implementation:**
+- PostgreSQL: Partial aggregation with `aggtransfn` / `aggcombinefn`
+- DuckDB: Automatic AVG decomposition for parallel execution
+- Presto/Trino: Two-phase aggregation with partial/final split

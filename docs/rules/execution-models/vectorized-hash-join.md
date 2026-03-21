@@ -1,0 +1,146 @@
+# Rule: Vectorized Execution - Hash Join
+
+**Category:** execution-models
+**File:** `rules/execution-models/vectorized/vectorized-hash-join.rra`
+
+## Metadata
+
+- **ID:** `vectorized-hash-join`
+- **Version:** 1.0.0
+- **Databases:** DuckDB, ClickHouse
+- **Tags:** execution, vectorized, hash-join, batch
+- **Authors:** Peter Boncz
+
+
+# Vectorized Execution - Hash Join
+
+## Description
+
+Vectorized hash join processes batches of probe tuples simultaneously, using SIMD for hash computation and gather operations for looking up matching tuples. Significantly faster than tuple-at-a-time for large joins.
+
+**Key optimizations:**
+- SIMD hash computation on probe batches
+- Gather operations for hash table lookups
+- Batch-oriented tuple reconstruction
+- Cache-efficient hash table layout
+
+## Relational Algebra
+
+```
+VectorizedHashJoin(R, S, R.a = S.b) → Iterator<Batch>
+
+BuildPhase:
+  for batch in build_input:
+    for i in 0..batch.size:
+      key = extract_key(batch, i)
+      hash_table.insert(key, batch[i])
+
+ProbePhase:
+  for probe_batch in probe_input:
+    // SIMD hash computation
+    hashes = vectorized_hash(probe_batch.keys)
+
+    // Gather matching build tuples
+    matches = hash_table.gather(hashes)
+
+    // Reconstruct output batch
+    output_batch = merge_batches(probe_batch, matches)
+    emit(output_batch)
+```
+
+## Implementation
+
+```rust
+pub struct VectorizedHashJoinIterator {
+    build_input: Box<dyn VectorizedIterator>,
+    probe_input: Box<dyn VectorizedIterator>,
+    hash_table: VectorizedHashTable,
+    build_key_cols: Vec<usize>,
+    probe_key_cols: Vec<usize>,
+}
+
+impl VectorizedIterator for VectorizedHashJoinIterator {
+    fn next_batch(&mut self) -> Result<Option<Batch>> {
+        // Get next probe batch
+        let probe_batch = match self.probe_input.next_batch()? {
+            None => return Ok(None),
+            Some(b) => b,
+        };
+
+        // SIMD hash computation on probe keys
+        let hashes = simd_hash_batch(&probe_batch, &self.probe_key_cols)?;
+
+        // Gather build tuples from hash table
+        let build_rows = self.hash_table.gather(&hashes)?;
+
+        // Merge probe and build batches
+        let output = merge_join_batches(&probe_batch, &build_rows)?;
+
+        Ok(Some(output))
+    }
+}
+
+/// SIMD-accelerated hash computation
+fn simd_hash_batch(batch: &Batch, key_cols: &[usize]) -> Result<Vec<u64>> {
+    let mut hashes = vec![0u64; batch.size];
+
+    // Use SIMD instructions for hash computation
+    #[cfg(target_feature = "avx2")]
+    unsafe {
+        simd_hash_avx2(&batch.columns[key_cols[0]].data, &mut hashes);
+    }
+
+    #[cfg(not(target_feature = "avx2"))]
+    {
+        for i in 0..batch.size {
+            hashes[i] = hash_value(&batch.columns[key_cols[0]].data[i]);
+        }
+    }
+
+    Ok(hashes)
+}
+
+pub fn vectorized_hash_join_cost(
+    build_rows: f64,
+    probe_rows: f64,
+    batch_size: usize,
+    selectivity: f64,
+) -> f64 {
+    let num_probe_batches = (probe_rows / batch_size as f64).ceil();
+
+    // Build phase: similar to tuple-at-a-time
+    let build_cost = build_rows * 0.001;
+
+    // Probe phase: much faster due to SIMD and batching
+    let probe_cost_per_batch = 0.01; // Amortized overhead
+    let probe_cost_per_tuple = 0.00005; // SIMD speedup
+    let probe_cost = num_probe_batches * probe_cost_per_batch +
+                     probe_rows * probe_cost_per_tuple;
+
+    // Output materialization
+    let output_rows = probe_rows * selectivity;
+    let output_cost = output_rows * 0.0003;
+
+    build_cost + probe_cost + output_cost
+}
+```
+
+## Cost Model
+
+- **Build:** O(M) hash table construction
+- **Probe:** O(N / batch_size) batches × O(batch_size / SIMD_width) = O(N / SIMD_width)
+- **SIMD Speedup:** 4-8x for hash computation
+- **Memory:** O(M) hash table + O(batch_size) buffers
+
+## Test Cases
+
+```sql
+SELECT * FROM orders o JOIN customers c ON o.customer_id = c.id;
+SELECT * FROM large_fact f JOIN dim d ON f.dim_key = d.key;
+```
+
+## References
+
+1. Boncz et al., "MonetDB/X100", CIDR 2005
+2. Kim et al., "Sort vs. Hash Revisited", VLDB 2009
+3. Balkesen et al., "Main-Memory Hash Joins on Multi-Core CPUs", VLDB 2013

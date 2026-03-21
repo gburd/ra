@@ -1,0 +1,357 @@
+# Rule: Decomposed Storage Model Exploitation
+
+**Category:** execution-models
+**File:** `rules/execution-models/column-at-a-time/column-decomposed-storage.rra`
+
+## Metadata
+
+- **ID:** `column-decomposed-storage`
+- **Version:** 1.0.0
+- **Databases:** MonetDB, c-store, vertica, DuckDB, ClickHouse
+- **Tags:** execution, columnar, dsm, storage, nsm, pax, column-group, projection
+- **SQL Standard:** DSM (Decomposed Storage Model)
+- **Authors:** George Copeland, Stonebraker, Abadi
+
+
+# Decomposed Storage Model Exploitation
+
+## Description
+
+The Decomposed Storage Model (DSM) stores each column of a relation in a separate physical structure (file, page set, or memory region), as opposed to the N-ary Storage Model (NSM) which stores all columns of a row together in a single page. DSM exploitation refers to the execution engine's ability to leverage this physical layout for I/O reduction, compression, and cache efficiency.
+
+The key insight is that analytical queries typically access a small fraction of columns (5-20% for typical OLAP queries). Under DSM, only the accessed columns are read from storage, providing I/O savings proportional to the column selectivity. Under NSM, the entire row is read even if only one column is needed.
+
+**Storage model spectrum:**
+- **NSM (N-ary Storage Model)**: Row-oriented; all columns of a row on same page. PostgreSQL, MySQL, Oracle.
+- **DSM (Decomposed Storage Model)**: Each column stored independently. MonetDB, vertica.
+- **PAX (Partition Attributes Across)**: Hybrid; within each page, data is columnar. mssql columnstore.
+- **Column Groups**: Related columns stored together. c-store projections, vertica.
+- **Flexible Storage**: Runtime choice based on workload. H2O, Peloton (adaptive).
+
+**Key characteristics:**
+- **I/O proportional to query width**: Read only needed columns
+- **Compression affinity**: Same-type values compress much better together
+- **Sequential access**: Single-column scans are fully sequential
+- **Reconstruction cost**: Joining columns back requires positional alignment
+- **Update penalty**: Row update touches N separate column files
+
+**Trade-offs:**
+- Point lookups slower (need to read N separate column files)
+- Tuple reconstruction adds overhead at output time
+- Updates require write amplification across column files
+- Small scans on wide tables: DSM I/O approaches NSM when most columns needed
+- Virtual IDs (positional addressing) vs explicit row IDs add complexity
+
+## Relational Algebra
+
+```
+DSM Storage Layout:
+  Table R(a, b, c, d, e) stored as:
+    R.a = [a1, a2, ..., an]  -- column file
+    R.b = [b1, b2, ..., bn]  -- column file
+    R.c = [c1, c2, ..., cn]  -- column file
+    R.d = [d1, d2, ..., dn]  -- column file
+    R.e = [e1, e2, ..., en]  -- column file
+
+DSM Scan(R, {a, c}):  -- only reads columns a and c
+  for i in 0..n:
+    emit (R.a[i], R.c[i])
+
+NSM Scan(R, {a, c}):  -- reads entire rows
+  for page in R.pages:
+    for row in page:
+      emit (row.a, row.c)
+  -- reads all 5 columns even though only 2 needed
+
+I/O Comparison:
+  DSM: 2/5 * table_size = 40% of I/O
+  NSM: 5/5 * table_size = 100% of I/O
+  Savings: 60%
+```
+
+## Implementation
+
+```rust
+/// Column storage file for a single attribute
+pub struct ColumnFile {
+    pub column_id: ColumnId,
+    pub data_type: DataType,
+    pub num_rows: usize,
+    pub file_path: PathBuf,
+    pub compression: CompressionType,
+    pub min_value: Option<ScalarValue>,
+    pub max_value: Option<ScalarValue>,
+    pub null_count: usize,
+}
+
+/// Decomposed storage: table as collection of column files
+pub struct DsmTable {
+    pub table_name: String,
+    pub columns: Vec<ColumnFile>,
+    pub row_count: usize,
+}
+
+impl DsmTable {
+    /// Read only requested columns (DSM advantage)
+    pub fn scan(
+        &self,
+        requested: &[ColumnId],
+    ) -> Result<Vec<ColumnArray>> {
+        let mut result = Vec::with_capacity(requested.len());
+
+        for &col_id in requested {
+            let col_file = self.columns.iter()
+                .find(|c| c.column_id == col_id)
+                .ok_or_else(|| {
+                    Error::msg("column not found")
+                })?;
+            let data = read_column_file(col_file)?;
+            result.push(data);
+        }
+
+        Ok(result)
+    }
+
+    /// I/O cost: proportional to columns accessed
+    pub fn scan_io_bytes(
+        &self,
+        requested: &[ColumnId],
+    ) -> usize {
+        requested.iter()
+            .filter_map(|col_id| {
+                self.columns.iter()
+                    .find(|c| c.column_id == *col_id)
+            })
+            .map(|col| {
+                col.num_rows * col.data_type.width()
+            })
+            .sum()
+    }
+
+    /// NSM equivalent I/O: always reads everything
+    pub fn nsm_equivalent_io_bytes(&self) -> usize {
+        self.columns.iter()
+            .map(|col| col.num_rows * col.data_type.width())
+            .sum()
+    }
+
+    /// I/O savings ratio from DSM
+    pub fn io_savings_ratio(
+        &self,
+        requested: &[ColumnId],
+    ) -> f64 {
+        let dsm_bytes = self.scan_io_bytes(requested);
+        let nsm_bytes = self.nsm_equivalent_io_bytes();
+        if nsm_bytes == 0 {
+            return 1.0;
+        }
+        1.0 - (dsm_bytes as f64 / nsm_bytes as f64)
+    }
+}
+
+/// Column group: related columns stored together
+pub struct ColumnGroup {
+    pub group_id: usize,
+    pub column_ids: Vec<ColumnId>,
+    pub sort_key: Option<Vec<ColumnId>>,
+}
+
+/// c-store style projection: sorted column group
+pub struct Projection {
+    pub name: String,
+    pub columns: Vec<ColumnId>,
+    pub sort_key: Vec<ColumnId>,
+    /// Segment-level metadata for skip
+    pub segments: Vec<SegmentMetadata>,
+}
+
+pub struct SegmentMetadata {
+    pub segment_id: usize,
+    pub row_range: (usize, usize),
+    pub min_values: Vec<ScalarValue>,
+    pub max_values: Vec<ScalarValue>,
+    pub null_counts: Vec<usize>,
+}
+
+impl Projection {
+    /// Check if this projection can serve a query
+    pub fn covers_query(
+        &self,
+        needed_columns: &[ColumnId],
+        sort_requirement: Option<&[ColumnId]>,
+    ) -> bool {
+        // All needed columns present in projection
+        let columns_covered = needed_columns.iter()
+            .all(|c| self.columns.contains(c));
+
+        // Sort order matches if required
+        let sort_covered = match sort_requirement {
+            None => true,
+            Some(required_sort) => {
+                self.sort_key.starts_with(required_sort)
+            }
+        };
+
+        columns_covered && sort_covered
+    }
+
+    /// Segment elimination: skip segments based on metadata
+    pub fn qualifying_segments(
+        &self,
+        predicate: &Predicate,
+        pred_column_idx: usize,
+    ) -> Vec<usize> {
+        self.segments.iter()
+            .filter(|seg| {
+                predicate.may_match(
+                    &seg.min_values[pred_column_idx],
+                    &seg.max_values[pred_column_idx],
+                )
+            })
+            .map(|seg| seg.segment_id)
+            .collect()
+    }
+}
+
+/// Tuple reconstruction: combine columns into rows
+pub fn reconstruct_tuples(
+    columns: &[ColumnArray],
+    selection: &SelectionVector,
+) -> Vec<Row> {
+    let num_rows = selection.len();
+    let mut rows = Vec::with_capacity(num_rows);
+
+    for i in 0..num_rows {
+        let pos = selection.get(i);
+        let mut values = Vec::with_capacity(columns.len());
+        for col in columns {
+            values.push(col.get_value(pos));
+        }
+        rows.push(Row::from_values(values));
+    }
+
+    rows
+}
+
+/// Cost model: DSM vs NSM vs PAX
+pub fn storage_model_cost(
+    total_columns: usize,
+    accessed_columns: usize,
+    total_rows: usize,
+    avg_value_width: usize,
+    seq_io_cost_per_byte: f64,
+    rand_io_cost_per_byte: f64,
+    is_point_lookup: bool,
+) -> StorageModelCosts {
+    let total_bytes = total_columns * total_rows
+        * avg_value_width;
+    let accessed_bytes = accessed_columns * total_rows
+        * avg_value_width;
+
+    let dsm_cost = if is_point_lookup {
+        // Point lookup: N random reads (one per column)
+        accessed_columns as f64
+            * avg_value_width as f64
+            * rand_io_cost_per_byte
+    } else {
+        // Scan: sequential read of accessed columns
+        accessed_bytes as f64 * seq_io_cost_per_byte
+    };
+
+    let nsm_cost = if is_point_lookup {
+        // Point lookup: 1 random read (all columns together)
+        (total_columns * avg_value_width) as f64
+            * rand_io_cost_per_byte
+    } else {
+        // Scan: read entire rows
+        total_bytes as f64 * seq_io_cost_per_byte
+    };
+
+    StorageModelCosts { dsm_cost, nsm_cost }
+}
+
+pub struct StorageModelCosts {
+    pub dsm_cost: f64,
+    pub nsm_cost: f64,
+}
+```
+
+## Cost Model
+
+**DSM scan I/O:**
+- `accessed_columns / total_columns * table_size`
+- For TPC-H lineitem (16 columns), typical query accesses 4 columns: 25% I/O
+- For wide fact tables (100+ columns), typical query accesses 5-10: 5-10% I/O
+
+**NSM scan I/O:**
+- Always `table_size` regardless of columns accessed
+- No benefit from column selectivity
+
+**DSM point lookup I/O:**
+- `accessed_columns * random_IO` (one seek per column file)
+- Worse than NSM for point lookups (NSM: single random I/O)
+
+**Compression benefit:**
+- Same-type columns compress 2-10x better than mixed rows
+- Dictionary encoding: high compression for low-cardinality strings
+- RLE: excellent for sorted columns with long runs
+- Net effect: DSM reads 3-5x less data than NSM (I/O savings + compression)
+
+**Reconstruction cost:**
+- Per-row: ~10 ns to assemble from column arrays
+- Amortized in batch: ~2-3 ns per value
+- Negligible compared to I/O savings for analytical queries
+
+**DSM vs NSM crossover point:**
+- DSM wins when: `accessed/total < 1 - (reconstruction_overhead / io_savings)`
+- Typically: DSM wins when accessing < 60-70% of columns
+- For OLAP (5-20% of columns): DSM is 5-20x better
+- For OLTP (100% of columns, point lookups): NSM is 2-5x better
+
+## Test Cases
+
+```sql
+-- Test 1: Narrow analytical query on wide table
+SELECT SUM(amount), COUNT(*)
+FROM transactions
+WHERE status = 'completed';
+-- Table has 50 columns, query touches 2 (amount, status)
+-- DSM I/O: 2/50 = 4% of table
+-- NSM I/O: 100% of table
+-- Savings: 96% I/O reduction
+
+-- Test 2: SELECT * query (DSM worst case)
+SELECT * FROM orders WHERE order_id = 42;
+-- DSM: read all 16 column files (16 random I/Os)
+-- NSM: read 1 page (1 random I/O)
+-- NSM wins for point lookups on all columns
+
+-- Test 3: Column group optimization
+-- vertica projection: (customer_id, order_date, amount)
+-- sorted by customer_id
+SELECT customer_id, SUM(amount)
+FROM orders GROUP BY customer_id;
+-- Reads 2 of 3 columns from projection (skip order_date)
+-- Sort order matches GROUP BY: streaming aggregation
+
+-- Test 4: Segment elimination
+SELECT AVG(temperature) FROM sensor_data
+WHERE timestamp BETWEEN '2024-01-01' AND '2024-01-31';
+-- Projection sorted by timestamp
+-- Min/max metadata eliminates 11 of 12 monthly segments
+-- Reads 1/12 of data + DSM column selectivity
+```
+
+## References
+
+1. **Copeland, George P. and Khoshafian, Setrag N**. "A Decomposition Storage Model." SIGMOD 1985.
+   - Original DSM paper proposing per-column storage
+
+2. **Stonebraker, Michael et al**. "c-store: A Column-oriented DBMS." VLDB 2005.
+   - Column groups (projections) and segment-level metadata
+
+3. **Abadi, Daniel J. et al**. "Column-Oriented Database Systems." VLDB Tutorial, 2009.
+   - Comprehensive survey of columnar storage and execution
+
+4. **Ailamaki, Anastassia et al**. "Weaving Relations for Cache Performance." VLDB 2001.
+   - PAX layout: hybrid between NSM and DSM within pages

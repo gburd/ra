@@ -1,0 +1,122 @@
+# Rule: Distinct Aggregation Optimization
+
+**Category:** physical/aggregation
+**File:** `rules/physical/aggregation/distinct-aggregation-optimization.rra`
+
+## Metadata
+
+- **ID:** `distinct-aggregation-optimization`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, duckdb, clickhouse, spark
+- **Tags:** physical, aggregation, distinct, deduplication, multi-distinct
+- **Authors:** "Larson, Per-Ake"
+
+
+# Distinct Aggregation Optimization
+
+## Description
+
+Optimizes queries with DISTINCT aggregates (COUNT(DISTINCT x), SUM(DISTINCT x))
+by choosing between sorting-based deduplication, hash-based deduplication,
+or the multi-distinct expansion technique. For multiple DISTINCT aggregates
+on different columns, expands into separate GROUP BY queries combined
+with a final join, avoiding the expensive cross-product of distinct sets.
+
+**When to apply**: Aggregate queries with one or more DISTINCT aggregate
+functions.
+
+## Relational Algebra
+
+```algebra
+-- Before: multiple DISTINCT aggregates
+gamma[dept; COUNT(DISTINCT job), SUM(DISTINCT salary)](emp)
+
+-- After: expand into separate queries, join results
+pi[dept, cd_job, sd_sal](
+    gamma[dept; COUNT(*) AS cd_job](
+        delta[dept, job](emp))
+    JOIN
+    gamma[dept; SUM(salary) AS sd_sal](
+        delta[dept, salary](emp))
+)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("multi-distinct-expansion";
+    "(aggregate ?groups (multi-distinct ?d1 ?d2) ?input)" =>
+    "(join ?groups
+        (aggregate ?groups (single-distinct ?d1) ?input)
+        (aggregate ?groups (single-distinct ?d2) ?input))"
+    if has_multiple_distinct_cols("?d1", "?d2")
+),
+
+rw!("distinct-via-sort";
+    "(aggregate ?groups (count-distinct ?col) ?input)" =>
+    "(aggregate ?groups (count)
+        (distinct ?col (sort ?col ?input)))"
+    if input_sortable("?input", "?col")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(agg: &Aggregate) -> bool {
+    agg.has_distinct_aggregates()
+        && (agg.distinct_column_count() > 1
+            || agg.distinct_values_estimate() > 1000)
+}
+```
+
+**Restrictions:**
+- Multi-distinct expansion increases number of scans
+- Single DISTINCT with few values: hash dedup is simpler
+- HyperLogLog approximation may be preferred for COUNT(DISTINCT)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    rows: f64,
+    distinct_cols: usize,
+    distinct_values: f64,
+) -> f64 {
+    if distinct_cols > 1 {
+        // Multi-distinct expansion avoids cross-product
+        let cross_product = distinct_values.powi(distinct_cols as i32);
+        let expanded = distinct_cols as f64 * rows;
+        cross_product - expanded
+    } else {
+        // Sort-based vs hash-based dedup
+        rows * 0.1 // minor optimization
+    }
+}
+```
+
+**Typical benefit**: 10-60% for multiple DISTINCT aggregates.
+
+## Test Cases
+
+```sql
+-- Positive: multiple DISTINCT on different columns
+SELECT dept,
+       COUNT(DISTINCT job_title),
+       SUM(DISTINCT salary)
+FROM employees GROUP BY dept;
+
+-- Positive: single DISTINCT with sort-based dedup
+SELECT COUNT(DISTINCT customer_id) FROM orders;
+
+-- Negative: single DISTINCT, few values
+SELECT COUNT(DISTINCT status) FROM orders;
+-- Only ~5 values: hash dedup trivial
+```
+
+## References
+
+- Larson, P.A. "Data Reduction by Partial Preaggregation" (ICDE 2002)
+- DuckDB: Multi-Distinct Aggregation blog post

@@ -1,0 +1,108 @@
+# Rule: Calcite SortProjectTransposeRule
+
+**Category:** database-specific/calcite
+**File:** `rules/database-specific/calcite/sort-project-transpose.rra`
+
+## Metadata
+
+- **ID:** `calcite-sort-project-transpose`
+- **Version:** "1.0.0"
+- **Databases:** calcite
+- **Tags:** database-specific, calcite, sort, project, transpose
+- **Authors:** "RA Contributors"
+
+
+# Calcite SortProjectTransposeRule
+
+## Description
+
+Pushes a sort below a project when the sort keys can be expressed
+in terms of the project's input columns. This allows the sort to
+operate on wider rows before projection narrows them, which can
+enable index-based sort avoidance.
+
+**When to apply**: A `LogicalSort` sits above a `LogicalProject`
+and the sort keys are simple column references that pass through
+the projection.
+
+**Why it works**: Moving the sort below the project enables the
+physical optimizer to use existing indexes on the base table for
+ordering, avoiding an explicit sort operator entirely.
+
+**Calcite class**: `org.apache.calcite.rel.rules.SortProjectTransposeRule`
+
+## Relational Algebra
+
+```algebra
+-- Before: sort above project
+tau[a ASC](pi[a, b](R))
+
+-- After: sort below project
+pi[a, b](tau[a ASC](R))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-sort-project-transpose";
+    "(sort ?keys (project ?exprs ?input))" =>
+    "(project ?exprs (sort ?keys_mapped ?input))"
+    if sort_keys_are_simple_refs("?keys", "?exprs")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    sort_keys: &[SortKey],
+    project_exprs: &[ProjectionColumn],
+) -> bool {
+    // Each sort key must correspond to a simple column
+    // reference in the projection (not a computed expression)
+    sort_keys.iter().all(|sk| {
+        project_exprs.iter().any(|pe| {
+            matches!(&pe.expr, Expr::Column(c) if c == &sk.column)
+        })
+    })
+}
+```
+
+**Restrictions:**
+- Sort keys on computed expressions (e.g., `ORDER BY a + b`)
+  cannot be trivially pushed below the project
+- LIMIT with sort: the limit must also move below the project
+
+## Cost Model
+
+```rust
+fn estimated_benefit(rows: f64) -> f64 {
+    // Benefit comes from potential index usage, not
+    // from changing the sort itself
+    rows * 0.001
+}
+```
+
+**Typical benefit**: 5-30% when an index eliminates the sort.
+
+## Test Cases
+
+```sql
+-- Positive: sort on projected column
+SELECT name, sal FROM emp ORDER BY name;
+-- Sort on name pushed below project
+-- May use index on emp(name)
+```
+
+```sql
+-- Negative: sort on computed expression
+SELECT name, sal * 1.1 AS adj_sal FROM emp
+ORDER BY sal * 1.1;
+-- Cannot push: sort key is a computation
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/SortProjectTransposeRule.java

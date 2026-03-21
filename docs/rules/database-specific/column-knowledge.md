@@ -1,0 +1,122 @@
+# Rule: Materialize Column Knowledge Propagation
+
+**Category:** database-specific/materialize
+**File:** `rules/database-specific/materialize/column-knowledge.rra`
+
+## Metadata
+
+- **ID:** `materialize-column-knowledge`
+- **Version:** "1.0.0"
+- **Databases:** materialize
+- **Tags:** database-specific, materialize, column, knowledge, constraint, propagation
+- **Authors:** "RA Contributors"
+
+
+# Materialize Column Knowledge Propagation
+
+## Description
+
+Propagates knowledge about column values (constraints from equality
+predicates, non-nullability, literal values) through the plan to
+enable further optimizations.  When a filter establishes that a column
+equals a constant, this knowledge is propagated to sibling branches
+and downstream operators.
+
+**When to apply**: A filter or join condition constrains a column to
+a specific value or a narrow range, and downstream operators can
+benefit from this knowledge.
+
+**Why it works**: Column knowledge enables cascading optimizations:
+if x = 5, then expressions like x + 1 can be folded to 6, redundant
+filters like x > 0 become true and can be eliminated, and arrangement
+keys can be narrowed.
+
+**Database version**: Materialize 0.30+
+
+## Relational Algebra
+
+```algebra
+-- Before: redundant filter after equality constraint
+sigma[x > 0](sigma[x = 5](R))
+
+-- After: knowledge propagation eliminates redundant filter
+sigma[x = 5](R)
+  -- x > 0 is always true when x = 5
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("materialize-propagate-equality-knowledge";
+    "(filter ?pred2 (filter (eq ?col (const ?val)) ?input))" =>
+    "(filter (substitute ?pred2 ?col (const ?val))
+        (filter (eq ?col (const ?val)) ?input))"
+    if is_database("materialize")
+    if predicate_uses_column("?pred2", "?col")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    constraint: &MirScalarExpr,
+    downstream: &MirScalarExpr,
+) -> bool {
+    let known_values = extract_equalities(constraint);
+    let used_cols = downstream.support();
+    known_values.keys().any(|col| used_cols.contains(col))
+}
+```
+
+**Restrictions:**
+- Only equality predicates produce certain knowledge
+- Range predicates produce partial knowledge (useful for pruning)
+- Knowledge must be invalidated across outer joins (nullable side)
+- Disjunctions (OR) produce knowledge only if all branches agree
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    simplified_exprs: usize,
+    eliminated_filters: usize,
+    rows: f64,
+) -> f64 {
+    simplified_exprs as f64 * rows * 0.0001
+    + eliminated_filters as f64 * rows * 0.001
+}
+```
+
+**Typical benefit**: Eliminates 1-3 redundant predicates and simplifies
+expressions that reference constrained columns.
+
+## Test Cases
+
+```sql
+-- Positive: equality knowledge propagated
+SELECT * FROM events
+WHERE type = 'click' AND LENGTH(type) > 3;
+-- LENGTH('click') > 3 is always true; filter eliminated
+```
+
+```sql
+-- Positive: join equality enables simplification
+SELECT * FROM orders o
+JOIN order_items i ON o.id = i.order_id
+WHERE o.id = 1000;
+-- i.order_id = 1000 can be inferred and pushed to items scan
+```
+
+```sql
+-- Negative: inequality does not pin value
+SELECT * FROM events WHERE type != 'click' AND type = 'view';
+-- Both predicates needed; != does not narrow to single value
+```
+
+## References
+
+Materialize: src/transform/src/column_knowledge.rs
+Materialize: src/transform/src/predicate_pushdown.rs

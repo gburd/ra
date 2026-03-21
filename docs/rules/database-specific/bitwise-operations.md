@@ -1,0 +1,143 @@
+# Rule: MonetDB Bitwise Column Operations
+
+**Category:** database-specific/monetdb
+**File:** `rules/database-specific/monetdb/bitwise-operations.rra`
+
+## Metadata
+
+- **ID:** `monetdb-bitwise-operations`
+- **Version:** "1.0.0"
+- **Databases:** monetdb
+- **Tags:** database-specific, monetdb, bitwise, vectorized, predicate-evaluation
+- **Authors:** "Zukowski et al. 2012", "RA Contributors"
+
+
+# MonetDB Bitwise Column Operations
+
+## Description
+
+MonetDB evaluates predicates on compressed columns using bitwise
+operations on machine words rather than per-tuple comparisons.
+By encoding column values as bit-packed integers and predicates as
+bitmask operations, multiple values can be evaluated in a single CPU
+instruction. This exploits SIMD-like parallelism at the word level
+even without explicit SIMD instructions.
+
+**When to apply**: Predicates on narrow integer or enumerated columns
+where multiple values fit within a machine word (64 bits). Effective
+for dictionary-encoded columns with small dictionaries.
+
+**Why it works**: A 64-bit machine word holds 8 bytes. If column values
+are encoded in 4 bits (16 distinct values), one word holds 16 values.
+A range predicate can be evaluated on all 16 values simultaneously
+using bitwise AND/OR/XOR, achieving 16x throughput improvement over
+scalar comparison.
+
+**Database version**: MonetDB with vectorized execution
+
+## Relational Algebra
+
+```algebra
+-- Scalar evaluation (per-tuple):
+filter[col >= 5 AND col <= 10](scan(R))
+  -> for each row: compare(row.col, 5) AND compare(row.col, 10)
+
+-- Bitwise evaluation (per-word):
+filter[col >= 5 AND col <= 10](scan(R))
+  -> for each word: mask = ge_mask(word, 5) & le_mask(word, 10)
+  -- Processes 16 values per word operation (4-bit encoding)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("monetdb-bitwise-filter";
+    "(filter (and (>= ?col ?lo) (<= ?col ?hi)) (scan ?table))" =>
+    "(bitwise-range-filter ?col ?lo ?hi ?table)"
+    if is_database("monetdb")
+    if is_bit_packed("?col")
+    if bit_width("?col") <= 16
+),
+
+rw!("monetdb-bitwise-equality";
+    "(filter (= ?col ?val) (scan ?table))" =>
+    "(bitwise-eq-filter ?col ?val ?table)"
+    if is_database("monetdb")
+    if is_dictionary_encoded("?col")
+    if dictionary_size("?col") <= 256
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(column: &Column, predicate: &Predicate) -> bool {
+    // Column must be bit-packed or dictionary-encoded
+    let bit_width = column.encoding_bit_width();
+    if bit_width > 16 {
+        return false; // Too wide for bitwise benefit
+    }
+
+    // Predicate must be simple comparison or range
+    matches!(predicate, Predicate::Eq(..)
+        | Predicate::Range(..)
+        | Predicate::In(..))
+}
+```
+
+**Restrictions:**
+- Only effective for narrow encodings (1-16 bits per value)
+- Floating-point columns require special encoding for bitwise comparison
+- String columns need dictionary encoding first
+- Complex expressions (LIKE, UDF) cannot use bitwise evaluation
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    total_rows: f64,
+    bit_width: usize,
+    predicate_type: PredicateType,
+) -> f64 {
+    let values_per_word = 64 / bit_width;
+    let scalar_cost = total_rows * 2.0; // compare + branch per tuple
+    let bitwise_cost = (total_rows / values_per_word as f64) * 3.0;
+    // 3 ops per word: load + bitwise_op + extract
+
+    if scalar_cost > bitwise_cost {
+        (scalar_cost - bitwise_cost) / scalar_cost
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 4x-16x for 4-bit encoded columns, 2x-8x for
+8-bit encoded columns. Combines with SIMD for additional speedup.
+
+## Test Cases
+
+```sql
+-- Positive: dictionary-encoded status column (4 values = 2 bits)
+SELECT * FROM orders WHERE status IN ('open', 'shipped');
+-- Bitwise: mask word against {00, 01} pattern, process 32 values/word
+
+-- Positive: small integer column (0-255 = 8 bits)
+SELECT * FROM events WHERE priority >= 5 AND priority <= 8;
+-- Bitwise: range mask on 8-bit packed values, 8 values/word
+```
+
+```sql
+-- Negative: wide column (32-bit integer)
+SELECT * FROM measurements WHERE value > 1000;
+-- Only 2 values per 64-bit word, overhead exceeds benefit
+```
+
+## References
+
+Zukowski et al., "Vectorwise: A Vectorized Analytical DBMS", ICDE 2012
+Boncz et al., "MonetDB/X100: Hyper-Pipelining Query Execution", CIDR 2005
+Sidirourgos, Kersten, "Column Imprints: A Secondary Index Structure",
+SIGMOD 2013

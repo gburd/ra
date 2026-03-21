@@ -1,0 +1,100 @@
+# Rule: Cache Repeated Deterministic Function Calls
+
+**Category:** logical/function-optimization
+**File:** `rules/logical/function-optimization/deterministic-function-caching.rra`
+
+## Metadata
+
+- **ID:** `deterministic-function-caching`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, oracle, mssql
+- **Tags:** logical, function, caching, deterministic, deduplication
+- **Authors:** "RA Contributors"
+
+
+# Cache Repeated Deterministic Function Calls
+
+## Description
+
+Detects duplicate deterministic function calls within the same query
+scope and replaces repeated invocations with a single computed value.
+If UPPER(name) appears in both SELECT and WHERE, compute it once and
+reference the cached result.
+
+**When to apply**: The same deterministic function call (same function
+name, same arguments) appears multiple times in a query plan.
+
+**Why it works**: Deterministic functions always return the same output
+for the same input. Computing once and reusing eliminates redundant
+per-row evaluations.
+
+## Implementation
+
+```rust
+// Common sub-expression elimination for deterministic functions
+rw!("dedup-deterministic-func-select-where";
+    "(project [?pre.. (?f ?args) ?post..]
+       (filter (? ?op (?f ?args) ?val) ?input))" =>
+    "(project [?pre.. ?cached ?post..]
+       (filter (? ?op ?cached ?val)
+         (project [?all.. (?f ?args) as ?cached] ?input)))"
+    if is_deterministic("?f")
+),
+
+// Two identical function calls in projection
+rw!("dedup-deterministic-func-project";
+    "(project [?pre.. (?f ?args) ?mid.. (?f ?args) ?post..] ?input)" =>
+    "(project [?pre.. ?cached ?mid.. ?cached ?post..]
+       (project [?all.. (?f ?args) as ?cached] ?input))"
+    if is_deterministic("?f")
+),
+
+// Identical function in ORDER BY and SELECT
+rw!("dedup-deterministic-func-sort";
+    "(sort (?f ?args)
+       (project [?cols.. (?f ?args)] ?input))" =>
+    "(sort ?cached
+       (project [?cols.. (?f ?args) as ?cached] ?input))"
+    if is_deterministic("?f")
+),
+```
+
+## Preconditions
+
+- Function must be marked `deterministic = true` in catalog
+- Arguments must be structurally identical (same column refs, same literals)
+- Function must NOT be volatile (NOW(), RANDOM(), etc.)
+
+## Test Cases
+
+```sql
+-- Positive: same function in SELECT and WHERE
+SELECT UPPER(name), dept FROM emp
+WHERE UPPER(name) LIKE 'J%';
+-- Compute UPPER(name) once, reuse in both places
+
+-- Positive: same function in SELECT and ORDER BY
+SELECT LENGTH(description), title FROM products
+ORDER BY LENGTH(description);
+-- Compute LENGTH(description) once
+
+-- Positive: same expression in multiple columns
+SELECT EXTRACT(YEAR FROM hire_date),
+       EXTRACT(YEAR FROM hire_date) - 2000 AS years_since
+FROM emp;
+-- Compute EXTRACT once, reuse
+
+-- Negative: volatile function
+SELECT NOW(), id FROM events WHERE created_at < NOW();
+-- Cannot cache: NOW() may return different values
+
+-- Negative: different arguments
+SELECT UPPER(first_name), UPPER(last_name) FROM emp;
+-- Different arguments, no deduplication possible
+```
+
+## References
+
+- Common sub-expression elimination (CSE) in compiler optimization
+- functions.toml: deterministic property
+- PostgreSQL: common sub-expression factoring in planner

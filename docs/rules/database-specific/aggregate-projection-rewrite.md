@@ -1,0 +1,131 @@
+# Rule: "ClickHouse Aggregate Projection Rewrite"
+
+**Category:** database-specific/clickhouse
+**File:** `rules/database-specific/clickhouse/aggregate-projection-rewrite.rra`
+
+## Metadata
+
+- **ID:** `clickhouse-aggregate-projection-rewrite`
+- **Version:** "1.0.0"
+- **Databases:** clickhouse
+- **Tags:** projection, aggregation, materialized, precomputed
+- **Authors:** "RA Contributors"
+
+
+# ClickHouse Aggregate Projection Rewrite
+
+## Metadata
+- **Rule ID**: `clickhouse-aggregate-projection-rewrite`
+- **Category**: Database-specific / ClickHouse
+- **Source**: `src/Processors/QueryPlan/Optimizations/optimizeUseAggregateProjection.cpp`
+- **Complexity**: O(k) where k is number of groups in projection
+- **Prerequisites**: Matching aggregate projection defined on table
+- **Alternatives**: Full scan + aggregation
+
+## Description
+
+ClickHouse supports aggregate projections: precomputed materialized views
+stored alongside the base table data. When a query's GROUP BY keys and
+aggregate functions match a projection, the optimizer rewrites the query
+to read from the projection instead of scanning the base table.
+
+The optimizer matches the query's GROUP BY keys and aggregate functions
+against available projections by checking that the projection's keys
+are an injective function of the query's keys, and that the requested
+aggregates are available in the projection. Partition virtual columns
+can also serve as additional grouping keys since projections are stored
+per-part.
+
+**When to apply:**
+- Query GROUP BY keys subset of projection keys
+- Query aggregate functions available in projection
+- Projection covers the filter conditions
+
+**Why it works for OLAP:**
+- Pre-aggregated data is orders of magnitude smaller
+- Reads k groups instead of n raw rows
+- Maintained automatically on INSERT
+
+## Relational Algebra
+
+```
+aggregate[groups, aggs](filter[pred](scan[T]))
+  -> merge-aggregate[aggs](scan[T.projection_P])
+     where projection_P covers (groups, aggs, pred)
+```
+
+## Implementation (egg rewrite rules)
+
+```lisp
+;; Rewrite aggregation to use matching projection
+(rewrite (aggregate ?groups ?aggs
+           (filter ?pred (scan ?table)))
+  (merge-projection-aggregates ?aggs
+    (scan-projection ?table
+      (find-matching-projection ?table ?groups ?aggs ?pred)))
+  :if (has-matching-projection ?table ?groups ?aggs ?pred))
+
+;; Use projection even without filter
+(rewrite (aggregate ?groups ?aggs (scan ?table))
+  (merge-projection-aggregates ?aggs
+    (scan-projection ?table
+      (find-matching-projection ?table ?groups ?aggs nil)))
+  :if (has-matching-projection ?table ?groups ?aggs nil))
+```
+
+## Cost Model
+
+```rust
+pub fn cost_aggregate_projection(
+    projection_groups: u64,
+    num_parts: u64,
+    agg_count: usize,
+    hardware: &HardwareModel,
+) -> Cost {
+    let read_cost = Cost::io(
+        projection_groups as f64 * num_parts as f64
+        * agg_count as f64 * 8.0
+        * hardware.seq_read_cost()
+    );
+    let merge_cost = Cost::cpu(projection_groups * num_parts * agg_count as u64 * 5);
+    read_cost + merge_cost
+}
+```
+
+**Typical benefit**: 80-99% for dashboard queries matching projections
+
+## Test Cases
+
+### Positive: Exact projection match
+```sql
+CREATE TABLE hits (
+    date Date, country String, hits UInt64
+) ENGINE = MergeTree ORDER BY (date, country);
+
+ALTER TABLE hits ADD PROJECTION daily_country (
+    SELECT date, country, sum(hits), count()
+    GROUP BY date, country
+);
+
+SELECT date, country, sum(hits), count()
+FROM hits GROUP BY date, country;
+-- Reads from projection: ~1000x fewer rows
+```
+
+### Positive: Subset of projection keys
+```sql
+SELECT date, sum(hits) FROM hits GROUP BY date;
+-- Projection has (date, country); merge across countries
+```
+
+### Negative: Missing aggregate function
+```sql
+SELECT date, avg(hits) FROM hits GROUP BY date;
+-- avg not in projection (only sum, count); cannot use
+-- Note: optimizer could derive avg = sum/count but doesn't
+```
+
+## References
+
+- ClickHouse: `src/Processors/QueryPlan/Optimizations/optimizeUseAggregateProjection.cpp`
+- ClickHouse: `src/Storages/ProjectionsDescription.h`

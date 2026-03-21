@@ -1,0 +1,255 @@
+# Rule: Differential Frontier Advancement Protocol
+
+**Category:** execution-models/differential
+**File:** `rules/execution-models/differential/differential-frontier-advancement.rra`
+
+## Metadata
+
+- **ID:** `differential-frontier-advancement`
+- **Version:** "1.0.0"
+- **Databases:** materialize, differential-dataflow, timely-dataflow
+- **Tags:** execution, differential, frontier, progress, compaction, timely
+- **Authors:** "Frank McSherry", "Derek Murray"
+
+
+# Differential Frontier Advancement Protocol
+
+## Description
+
+Implements the progress tracking protocol that determines when operators can
+safely advance their output frontiers. The frontier of a collection represents
+the minimum time at which future changes may still arrive. When all upstream
+operators advance past a time T, downstream operators can compact their state
+at T and release associated memory.
+
+**Key concepts:**
+- **Frontier (antichain)**: Set of incomparable minimum times for future updates
+- **Capability**: Token held by an operator permitting output at a specific time
+- **Pointstamp**: (operator_id, time) pair tracking progress through the dataflow
+- **Progress message**: Notification that an operator has dropped a capability
+
+**Protocol:**
+1. Source operators hold capabilities at their current input times
+2. When a source finishes processing time T, it drops capability at T
+3. This generates a progress message propagated through the graph
+4. Downstream operators compute their new frontier from upstream frontiers
+5. Operators compact state at times below their new frontier
+
+## Relational Algebra
+
+```
+Frontier computation for operator O:
+  O.frontier = antichain(
+    for each input I of O:
+      for each time T in I.frontier:
+        for each path P from I to O:
+          advance(T, P.summary)
+  )
+
+Progress propagation:
+  When operator O drops capability at time T:
+    for each downstream D reachable from O:
+      update D.input_frontier
+      if D.frontier changed:
+        D.compact(D.frontier)
+        propagate D's frontier change downstream
+```
+
+## Implementation
+
+```rust
+use std::collections::BTreeSet;
+
+/// Antichain: set of incomparable timestamps
+pub struct Antichain<T: Timestamp> {
+    elements: BTreeSet<T>,
+}
+
+impl<T: Timestamp> Antichain<T> {
+    pub fn new() -> Self {
+        Self { elements: BTreeSet::new() }
+    }
+
+    /// Insert a time, maintaining antichain property
+    pub fn insert(&mut self, time: T) -> bool {
+        // Remove any times dominated by new time
+        // (new time is less_equal to them)
+        let dominated: Vec<T> = self.elements.iter()
+            .filter(|t| time.less_equal(t))
+            .cloned()
+            .collect();
+
+        // Don't insert if already dominated by existing
+        if self.elements.iter().any(|t| t.less_equal(&time)) {
+            return false;
+        }
+
+        for t in dominated {
+            self.elements.remove(&t);
+        }
+        self.elements.insert(time);
+        true
+    }
+
+    /// Check if time is beyond (not dominated by) this frontier
+    pub fn less_equal(&self, time: &T) -> bool {
+        self.elements.iter().any(|t| t.less_equal(time))
+    }
+}
+
+/// Progress tracker for the entire dataflow graph
+pub struct ProgressTracker<T: Timestamp> {
+    /// Per-operator frontier
+    operator_frontiers: Vec<Antichain<T>>,
+    /// Dataflow graph edges (operator -> [downstream operators])
+    graph: Vec<Vec<usize>>,
+    /// Path summaries for each edge
+    summaries: Vec<Vec<PathSummary<T>>>,
+    /// Pending progress updates
+    pending: Vec<(usize, ProgressUpdate<T>)>,
+}
+
+impl<T: Timestamp> ProgressTracker<T> {
+    /// Process a capability drop from an operator
+    pub fn drop_capability(
+        &mut self,
+        operator_id: usize,
+        time: T,
+    ) {
+        // Recompute frontier for all downstream operators
+        let mut worklist = vec![operator_id];
+
+        while let Some(op) = worklist.pop() {
+            let old_frontier = self.operator_frontiers[op].clone();
+
+            // Recompute frontier from upstream
+            let new_frontier = self.compute_frontier(op);
+
+            if new_frontier != old_frontier {
+                self.operator_frontiers[op] = new_frontier;
+
+                // Trigger compaction
+                self.pending.push((op, ProgressUpdate::Compact));
+
+                // Propagate to downstream
+                for &downstream in &self.graph[op] {
+                    worklist.push(downstream);
+                }
+            }
+        }
+    }
+
+    /// Compute operator frontier from input frontiers
+    fn compute_frontier(&self, op: usize) -> Antichain<T> {
+        let mut result = Antichain::new();
+
+        for (i, upstream_ops) in self.reverse_graph(op).iter().enumerate() {
+            for &upstream in upstream_ops {
+                let upstream_frontier = &self.operator_frontiers[upstream];
+                let summary = &self.summaries[upstream][i];
+
+                for time in &upstream_frontier.elements {
+                    let advanced = summary.advance(time);
+                    result.insert(advanced);
+                }
+            }
+        }
+
+        result
+    }
+
+    /// Advance frontier and trigger compaction for an operator
+    pub fn advance_and_compact(
+        &mut self,
+        operator_id: usize,
+    ) -> Option<Antichain<T>> {
+        let frontier = &self.operator_frontiers[operator_id];
+
+        // Return the frontier for compaction if it advanced
+        Some(frontier.clone())
+    }
+}
+
+/// Path summary: describes how times transform along a path
+pub struct PathSummary<T: Timestamp> {
+    /// Minimum time advancement along this path
+    summary: T,
+}
+
+impl<T: Timestamp> PathSummary<T> {
+    pub fn advance(&self, time: &T) -> T {
+        time.join(&self.summary)
+    }
+}
+
+/// Cost model for frontier tracking
+pub fn frontier_tracking_cost(
+    num_operators: usize,
+    avg_frontier_width: f64,
+    updates_per_second: f64,
+) -> f64 {
+    // Per-update: propagate through graph
+    let propagation_cost = updates_per_second
+        * num_operators as f64
+        * avg_frontier_width
+        * 0.0001; // antichain comparison
+
+    // Compaction cost (triggered by frontier advance)
+    let compaction_trigger_rate = updates_per_second * 0.1;
+    let compaction_cost = compaction_trigger_rate * 0.001;
+
+    propagation_cost + compaction_cost
+}
+```
+
+## Cost Model
+
+**Progress propagation:**
+- Per capability drop: O(D * A) where D = downstream operators, A = antichain width
+- For linear dataflows: O(N) per progress update (N = pipeline length)
+- For diamond/tree shapes: O(N) with memoization
+
+**Compaction triggered:**
+- Each frontier advance triggers compaction at affected operators
+- Compaction cost: O(entries * log entries) for merge sort
+- Frequency: proportional to source update rate
+
+**Memory reclaimed:**
+- Compaction removes entries at times below frontier
+- For steady-state workloads: memory stabilizes at O(active_data)
+- For bursty workloads: memory spikes, then compacts
+
+## Test Cases
+
+```
+-- Test 1: Linear pipeline frontier propagation
+-- Source -> Filter -> Join -> Aggregate -> Sink
+-- Source advances from time 100 to 101
+-- Filter frontier advances to 101 (no time modification)
+-- Join frontier advances to 101 (if other input also >= 101)
+-- Aggregate compacts state at time 100
+
+-- Test 2: Diamond dataflow
+-- Source -> A -> C
+-- Source -> B -> C
+-- C's frontier = min(A.frontier, B.frontier)
+-- If A at 100, B at 50: C's frontier is 50
+-- B must advance before C can compact
+
+-- Test 3: Iterative computation
+-- Loop body: frontier includes (epoch, iteration) pairs
+-- Inner frontier advances per iteration
+-- Outer frontier advances when loop converges
+-- State from converged iterations can be compacted
+```
+
+## References
+
+1. **Murray, Derek G. et al**. "Naiad: A Timely Dataflow System." SOSP 2013.
+   - Pointstamp protocol for distributed progress tracking
+
+2. **McSherry, Frank et al**. "differential-dataflow." CIDR 2013.
+   - Frontier-based compaction for differential collections
+
+3. **Abadi, Daniel et al**. "Materialize: Operational Simplicity." CIDR 2022.
+   - Production frontier tracking at scale

@@ -1,0 +1,109 @@
+# Rule: Calcite AggregateFilterToCaseRule
+
+**Category:** logical/aggregate-pushdown
+**File:** `rules/logical/aggregate-pushdown/aggregate-filter-to-case.rra`
+
+## Metadata
+
+- **ID:** `calcite-aggregate-filter-to-case`
+- **Version:** "1.0.0"
+- **Databases:** calcite, mysql, oracle
+- **Tags:** logical, calcite, aggregate, filter, case, compatibility
+- **Authors:** "RA Contributors"
+
+
+# Calcite AggregateFilterToCaseRule
+
+## Description
+
+Converts true filtered aggregates (FILTER WHERE syntax) into
+CASE-style filtered aggregates. This is the inverse of
+AggregateCaseToFilterRule, useful for databases that do not
+support the FILTER (WHERE ...) syntax.
+
+**When to apply**: An aggregate uses FILTER (WHERE ...) syntax
+and must be translated to CASE for execution on databases
+that lack native FILTER support (e.g., MySQL, Oracle).
+
+**Why it works**: `SUM(x) FILTER (WHERE p)` is semantically
+equivalent to `SUM(CASE WHEN p THEN x END)`. This transformation
+enables execution on a wider range of database backends.
+
+**Calcite class**: `org.apache.calcite.rel.rules.AggregateFilterToCaseRule`
+
+## Relational Algebra
+
+```algebra
+-- Before: filtered aggregate
+gamma[g; SUM(x) FILTER (WHERE p)](R)
+
+-- After: CASE inside aggregate
+gamma[g; SUM(CASE WHEN p THEN x ELSE NULL END)](R)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-aggregate-filter-to-case";
+    "(aggregate ?group (agg-call-filtered ?func ?val ?pred)
+        ?input)" =>
+    "(aggregate ?group (agg-call ?func (case ?pred ?val null))
+        ?input)"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(agg_call: &AggregateCall) -> bool {
+    agg_call.has_filter()
+}
+```
+
+**Restrictions:**
+- COUNT(*) FILTER (WHERE p) becomes COUNT(CASE WHEN p THEN 1 END)
+- The ELSE branch is always NULL for proper semantics
+- This rule undoes AggregateCaseToFilterRule; avoid cycles
+
+## Cost Model
+
+```rust
+fn estimated_benefit(_: f64) -> f64 {
+    // No performance benefit; enables compatibility
+    0.0
+}
+```
+
+**Typical benefit**: 0-10% (compatibility transformation, not optimization).
+
+## Test Cases
+
+```sql
+-- Positive: FILTER to CASE
+SELECT dept,
+    SUM(salary) FILTER (WHERE gender = 'F') AS female_sal
+FROM emp
+GROUP BY dept;
+-- Becomes: SUM(CASE WHEN gender = 'F' THEN salary END)
+```
+
+```sql
+-- Positive: COUNT with FILTER
+SELECT dept,
+    COUNT(*) FILTER (WHERE status = 'A') AS active_count
+FROM emp
+GROUP BY dept;
+-- Becomes: COUNT(CASE WHEN status = 'A' THEN 1 END)
+```
+
+```sql
+-- Negative: no FILTER clause
+SELECT dept, SUM(salary) FROM emp GROUP BY dept;
+-- No FILTER to convert
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/AggregateFilterToCaseRule.java (commit af6367d)

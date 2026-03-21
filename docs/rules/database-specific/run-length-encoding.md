@@ -1,0 +1,106 @@
+# Rule: MonetDB Run-Length Encoded Operations
+
+**Category:** database-specific/monetdb
+**File:** `rules/database-specific/monetdb/run-length-encoding.rra`
+
+## Metadata
+
+- **ID:** `monetdb-run-length-encoding`
+- **Version:** "1.0.0"
+- **Databases:** monetdb
+- **Tags:** database-specific, monetdb, RLE, compression, sorted, encoding
+- **Authors:** "RA Contributors"
+
+
+# MonetDB Run-Length Encoded Operations
+
+## Description
+
+MonetDB applies run-length encoding (RLE) to sorted columns where
+consecutive values repeat.  Operations like selection and aggregation
+can operate on the compressed representation, processing entire runs
+in O(1) instead of O(run_length).
+
+**When to apply**: A sorted column has long runs of repeated values
+(e.g., a date column in a time-ordered table, or a foreign key in a
+clustered table).
+
+**Why it works**: A column with N values but only R runs (R << N)
+can be processed in O(R) instead of O(N).  RLE is particularly
+effective for grouped aggregation where each run corresponds to one
+group.
+
+**Database version**: MonetDB 11+
+
+## Relational Algebra
+
+```algebra
+-- Before: scan all N values
+gamma[date; COUNT(*)](scan(events.date))  -- O(N)
+
+-- After: RLE-aware aggregation
+gamma[date; COUNT_RUNS()](rle_scan(events.date))  -- O(R)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("monetdb-rle-aggregation";
+    "(aggregate ?group_col ?aggs (scan ?table))" =>
+    "(rle-aggregate ?group_col ?aggs (rle-scan ?table))"
+    if is_database("monetdb")
+    if is_rle_encoded("?group_col")
+    if aggs_support_rle("?aggs")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(column: &Column) -> bool {
+    column.is_sorted()
+    && column.run_count() < column.row_count() / 10
+}
+```
+
+**Restrictions:**
+- Only effective when run count is significantly less than row count
+- Unsorted columns cannot be RLE-encoded
+- Updates may break run structure requiring re-encoding
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    total_rows: f64,
+    num_runs: f64,
+) -> f64 {
+    let uncompressed_cost = total_rows * 0.001;
+    let rle_cost = num_runs * 0.001;
+    uncompressed_cost - rle_cost
+}
+```
+
+**Typical benefit**: 10-100x for highly repetitive sorted columns.
+
+## Test Cases
+
+```sql
+-- Positive: sorted column with long runs
+SELECT date, COUNT(*) FROM daily_events GROUP BY date;
+-- RLE: each date is one run; O(365) not O(millions)
+```
+
+```sql
+-- Negative: high-cardinality unsorted column
+SELECT user_id, COUNT(*) FROM events GROUP BY user_id;
+-- Not sorted, not RLE-encodable
+```
+
+## References
+
+MonetDB: Column compression and encoding documentation
+Abadi, D. et al. "Integrating Compression and Execution in Column-
+Oriented Database Systems" (SIGMOD 2006)

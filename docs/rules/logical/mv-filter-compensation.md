@@ -1,0 +1,79 @@
+# Rule: Materialized View Filter Compensation
+
+**Category:** logical/view-rewriting
+**File:** `rules/logical/view-rewriting/mv-filter-compensation.rra`
+
+## Metadata
+
+- **ID:** `mv-filter-compensation`
+- **Version:** "1.0.0"
+- **Databases:** oracle, postgresql, mssql, snowflake
+- **Tags:** logical, materialized-view, filter, compensation, subsumption
+- **Authors:** "Larson & Yang, Microsoft Research"
+
+
+# Materialized View Filter Compensation
+
+## Description
+
+When a query has additional filter predicates beyond those in a
+materialized view, rewrites the query to scan the MV and apply a
+compensation filter. The key insight is predicate subsumption: if MV
+has predicate P_mv and query has P_q, and P_q implies P_mv, then
+the MV contains all needed rows and we just need to apply P_q - P_mv.
+
+**When to apply**: Query predicates are more restrictive than MV predicates.
+
+## Relational Algebra
+
+```algebra
+-- MV: sigma[year >= 2020](sales)
+-- Query: sigma[year = 2024 AND region = 'US'](sales)
+-- Compensation: sigma[year = 2024 AND region = 'US'](MV)
+```
+
+## Implementation
+
+```rust
+fn try_compensate(query: &Filter, mv: &MaterializedView) -> Option<Plan> {
+    if \!query.predicate().implies(&mv.predicate()) { return None; }
+    let compensation = query.predicate().subtract(&mv.predicate());
+    Some(Plan::filter(compensation, Plan::scan_mv(mv)))
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(query_pred: &Predicate, mv_pred: &Predicate) -> bool {
+    query_pred.implies(mv_pred)
+}
+```
+
+## Cost Model
+
+```rust
+fn estimated_benefit(mv_rows: f64, base_rows: f64) -> f64 {
+    1.0 - (mv_rows / base_rows)
+}
+```
+
+## Test Cases
+
+```sql
+-- MV: recent orders
+CREATE MATERIALIZED VIEW recent_orders AS
+SELECT * FROM orders WHERE order_date >= '2020-01-01';
+
+-- Positive: more restrictive filter
+SELECT * FROM orders WHERE order_date >= '2024-01-01' AND status = 'shipped';
+-- Rewrite: SELECT * FROM recent_orders WHERE order_date >= '2024-01-01' AND status = 'shipped';
+
+-- Negative: less restrictive filter
+SELECT * FROM orders WHERE order_date >= '2018-01-01';
+-- MV does not contain 2018-2019 data
+```
+
+## References
+
+- Larson, P. & Yang, H.Z., "Computing Queries from Derived Relations", VLDB 1985, DOI: 10.5555/1286760.1286806

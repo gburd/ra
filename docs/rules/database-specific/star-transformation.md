@@ -1,0 +1,135 @@
+# Rule: Oracle Star Transformation
+
+**Category:** database-specific/oracle
+**File:** `rules/database-specific/oracle/star-transformation.rra`
+
+## Metadata
+
+- **ID:** `oracle-star-transformation`
+- **Version:** "1.0.0"
+- **Databases:** oracle
+- **Tags:** database-specific, oracle, star, transformation, bitmap, data-warehouse
+- **Authors:** "RA Contributors"
+
+
+# Oracle Star Transformation
+
+## Description
+
+Rewrites star-schema joins by converting dimension table filters into
+bitmap semi-joins against the fact table's bitmap indexes.  Oracle's
+star transformation avoids full joins with dimension tables by using
+bitmap indexes on the fact table's foreign keys to identify matching
+rows before accessing the fact table data.
+
+**When to apply**: A fact table joins multiple dimension tables with
+filters on dimension columns, and bitmap indexes exist on the fact
+table's foreign key columns.
+
+**Why it works**: Instead of joining the full fact table with each
+dimension, Oracle uses dimension filters to generate row sets via
+bitmap indexes, ANDs the bitmaps together, and accesses only the
+matching fact rows.  This avoids reading and joining the vast majority
+of fact table data.
+
+**Database version**: Oracle 10g+
+
+## Relational Algebra
+
+```algebra
+-- Before: standard star join
+sigma[d1.region = 'US' AND d2.year = 2025](
+    F join[F.d1_id = D1.id] D1
+      join[F.d2_id = D2.id] D2)
+
+-- After: star transformation with bitmap semi-joins
+F bitmap-semi-join[F.d1_id IN
+    (SELECT id FROM D1 WHERE region = 'US')]
+  bitmap-semi-join[F.d2_id IN
+    (SELECT id FROM D2 WHERE year = 2025)]
+  join[F.d1_id = D1.id] D1
+  join[F.d2_id = D2.id] D2
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("oracle-star-transformation";
+    "(filter ?dim_pred
+        (join inner ?cond
+            ?fact
+            (filter ?dim_filter ?dim_table)))" =>
+    "(join inner ?cond
+        (bitmap-semi-join ?fact ?dim_table ?dim_filter ?cond)
+        (filter ?dim_filter ?dim_table))"
+    if is_database("oracle")
+    if has_bitmap_index_on_fk("?fact", "?cond")
+    if is_dimension_filter("?dim_filter", "?dim_table")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    fact_table: &Table,
+    dimension_joins: &[JoinInfo],
+) -> bool {
+    dimension_joins.len() >= 2
+    && dimension_joins.iter().all(|j| {
+        fact_table.has_bitmap_index(&j.fk_column)
+        && j.dimension.has_filter()
+    })
+}
+```
+
+**Restrictions:**
+- Requires bitmap indexes on fact table foreign keys
+- At least 2 dimension tables should have selective filters
+- The STAR_TRANSFORMATION_ENABLED parameter must be TRUE
+- Not beneficial for very small fact tables or non-selective filters
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    fact_rows: f64,
+    combined_selectivity: f64,
+    num_dimensions: usize,
+) -> f64 {
+    let rows_avoided = fact_rows * (1.0 - combined_selectivity);
+    let bitmap_cost = num_dimensions as f64 * fact_rows * 0.0001;
+    rows_avoided * 0.01 - bitmap_cost
+}
+```
+
+**Typical benefit**: For a 1B-row fact table with 3 selective dimension
+filters (combined selectivity 0.1%), avoids reading 99.9% of fact rows.
+
+## Test Cases
+
+```sql
+-- Positive: star schema with selective dimension filters
+SELECT SUM(f.amount)
+FROM sales f
+JOIN time_dim t ON f.time_id = t.id
+JOIN geo_dim g ON f.geo_id = g.id
+WHERE t.year = 2025 AND g.country = 'US';
+-- Bitmap indexes on sales(time_id) and sales(geo_id) used
+```
+
+```sql
+-- Negative: no bitmap indexes
+SELECT SUM(f.amount)
+FROM sales f JOIN time_dim t ON f.time_id = t.id
+WHERE t.year = 2025;
+-- Without bitmap index, standard hash join used
+```
+
+## References
+
+Oracle: Oracle Database SQL Tuning Guide, "Star Transformation"
+Oracle: STAR_TRANSFORMATION_ENABLED init parameter
+Patent: US6665684B2 "Method and apparatus for star transformation"

@@ -1,0 +1,183 @@
+# Rule: Delta WCOJ for Incremental Maintenance
+
+**Category:** experimental/wcoj
+**File:** `rules/experimental/wcoj/delta-wcoj.rra`
+
+## Metadata
+
+- **ID:** `delta-wcoj`
+- **Version:** "1.0.0"
+- **Databases:** duckdb, materialize
+- **Tags:** wcoj, incremental, delta-query, maintenance, streaming
+- **Authors:** "Kim et al. 2022", "RA Contributors"
+
+
+# Delta WCOJ for Incremental Maintenance
+
+## Description
+
+Extends worst-case optimal join algorithms to handle incremental updates.
+When a base relation changes by delta_R, rather than recomputing the full
+join, Delta WCOJ computes only the new/deleted output tuples. It decomposes
+the incremental query using the standard delta rule and applies WCOJ to
+each delta subquery, achieving worst-case optimal incremental complexity.
+
+**When to apply**: Materialized views or streaming queries involving
+multi-way joins (especially cyclic) where the underlying data changes
+incrementally. Common in graph databases maintaining triangle counts
+as edges are inserted/deleted.
+
+**Why it works**: The delta rule decomposes a change to one relation into
+a query involving the delta and the remaining base relations. Each delta
+subquery is itself a multi-way join that can be evaluated with WCOJ. The
+total incremental cost is bounded by the AGM bound applied to the delta
+input sizes.
+
+## Relational Algebra
+
+```algebra
+-- Original view: V = R join S join T
+-- Insert delta_R into R
+-- Delta query:
+delta_V = delta_R join S join T   (new tuples from delta_R)
+
+delta_R join[R.a=S.a, S.b=T.b, R.c=T.c] S join T
+  -> delta_wcoj(
+       delta_relation: delta_R,
+       base_relations: [S, T],
+       algorithm: generic_join,
+       mode: insert
+     )
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("delta-wcoj-insert";
+    "(join ?p1 (join ?p2 (delta_insert ?r1) ?r2) ?r3)" =>
+    "(delta_wcoj
+       (delta ?r1 insert)
+       (base_relations ?r2 ?r3)
+       (predicates (merge_preds ?p1 ?p2))
+       (algorithm generic_join))"
+    if has_materialized_view()
+    if delta_size_small_relative_to_base()
+),
+
+rw!("delta-wcoj-delete";
+    "(join ?p1 (join ?p2 (delta_delete ?r1) ?r2) ?r3)" =>
+    "(delta_wcoj
+       (delta ?r1 delete)
+       (base_relations ?r2 ?r3)
+       (predicates (merge_preds ?p1 ?p2))
+       (algorithm generic_join))"
+    if has_materialized_view()
+    if delta_size_small_relative_to_base()
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    delta: &DeltaRelation,
+    base_relations: &[RelExpr],
+    predicates: &[JoinPredicate],
+) -> bool {
+    // Must be incremental context (materialized view or stream)
+    if !delta.is_incremental_context() {
+        return false;
+    }
+
+    // Delta must be small relative to base
+    let delta_size = delta.estimated_size();
+    let base_size: u64 = base_relations.iter()
+        .map(|r| r.estimated_size())
+        .sum();
+
+    if delta_size as f64 > base_size as f64 * 0.1 {
+        return false; // Recompute from scratch
+    }
+
+    // Multi-way join (benefit over binary delta)
+    base_relations.len() >= 2
+}
+```
+
+**Restrictions:**
+- Delta must be small relative to base relations (< 10% typically)
+- Requires maintained indexes on base relations for WCOJ
+- Delete deltas need the original view to compute which tuples to remove
+- Each base relation change generates a separate delta query
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    delta_stats: &Statistics,
+    base_stats: &[Statistics],
+    predicates: &[JoinPredicate],
+) -> f64 {
+    // Full recomputation cost
+    let mut all_stats = base_stats.to_vec();
+    all_stats.push(delta_stats.clone());
+    let full_cost = compute_agm_bound(&all_stats, predicates);
+
+    // Delta WCOJ cost: AGM bound with delta as one input
+    let delta_agm = compute_agm_bound_with_delta(
+        delta_stats, base_stats, predicates,
+    );
+
+    if full_cost > delta_agm {
+        (full_cost - delta_agm) / full_cost
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 100x-10000x when delta is << base.
+Triangle maintenance: O(delta * sqrt(N)) per edge insert vs O(N^1.5) full recompute.
+
+## Test Cases
+
+### Positive: Triangle count maintenance
+
+```sql
+-- Materialized view: triangle count
+CREATE MATERIALIZED VIEW triangle_count AS
+SELECT COUNT(*) FROM edges e1, edges e2, edges e3
+WHERE e1.dst = e2.src AND e2.dst = e3.src AND e3.dst = e1.src;
+
+-- Insert one edge: (u, v)
+INSERT INTO edges VALUES (u, v);
+
+-- Delta query: new triangles containing (u, v)
+-- delta_wcoj: join delta_edge with edges twice
+-- Cost: O(deg(u) * deg(v)) instead of O(N^1.5)
+```
+
+### Negative: Bulk load (large delta)
+
+```sql
+-- Loading 50% of the edge table
+INSERT INTO edges SELECT * FROM new_edges; -- 500M rows
+
+-- Delta too large: full recompute is faster
+-- Fall back to standard WCOJ on full data
+```
+
+## References
+
+**Academic papers:**
+- Kim et al., "Incremental View Maintenance with Triple Lock Factorization", SIGMOD 2022
+- Koch et al., "DBToaster: Higher-order Delta Processing for Dynamic, Frequently Fresh Views", VLDBJ 2014
+- Idris et al., "Dynamic Yannakakis: Worst-Case Optimal Join Evaluation", SIGMOD 2017
+
+**Key insights:**
+- Delta rule + WCOJ = worst-case optimal incremental maintenance
+- IVM (Incremental View Maintenance) is critical for streaming systems
+- Materialize (database) uses this approach for streaming SQL
+- Higher-order deltas (DBToaster) can further reduce maintenance cost

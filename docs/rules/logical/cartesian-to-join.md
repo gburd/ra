@@ -1,0 +1,146 @@
+# Rule: Cartesian Product to Join Conversion
+
+**Category:** logical/join-reordering
+**File:** `rules/logical/join-reordering/cartesian-to-join.rra`
+
+## Metadata
+
+- **ID:** `cartesian-to-join`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, duckdb, sqlite, oracle, mssql
+- **Tags:** join, cartesian, cross, conversion, core
+- **SQL Standard:** "sql:1992"
+- **Authors:** "RA Contributors"
+
+## Preconditions
+
+```yaml
+  - type: "pattern"
+    must_match: "(filter ?pred (join cross true ?left ?right))"
+    description: "Filter above a cross product"
+  - type: "predicate"
+    condition: "references_both_sides(?pred, ?left, ?right)"
+    description: "Predicate must reference columns from both inputs"
+  - type: "predicate"
+    condition: "is_deterministic(?pred)"
+    description: "Predicate must be deterministic"
+```
+
+
+# Cartesian Product to Join Conversion
+
+## Description
+
+Converts a cross product followed by a filter into an equi-join (or
+theta-join) when the filter predicate compares columns from both sides.
+Cross products are extremely expensive (`O(n * m)`) and should be avoided
+whenever a join condition exists.
+
+**When to apply**: A filter sits above a cross product and the predicate
+references columns from both inputs.
+
+**Why it works**: `sigma[R.a = S.b](R cross S)` is semantically equivalent
+to `R join[R.a = S.b] S`, but the join can use hash or merge algorithms
+instead of generating the full Cartesian product.
+
+## Relational Algebra
+
+```algebra
+sigma[p](R cross S) -> R join[p] S
+  where attrs(p) subset (attrs(R) union attrs(S))
+  where attrs(p) intersects attrs(R)
+  where attrs(p) intersects attrs(S)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("cartesian-to-join";
+    "(filter ?pred (join cross true ?left ?right))" =>
+    "(join inner ?pred ?left ?right)"
+    if references_both_sides("?pred", "?left", "?right")
+),
+```
+
+## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
+
+```rust
+fn applicable(
+    pred: &Expr,
+    left: &Relation,
+    right: &Relation,
+) -> bool {
+    let refs = pred.referenced_columns();
+    let left_cols = left.output_columns();
+    let right_cols = right.output_columns();
+    // Predicate must reference at least one column from each side
+    refs.intersects(&left_cols) && refs.intersects(&right_cols)
+}
+```
+
+**Restrictions:**
+- Predicate must reference columns from both inputs
+- If predicate is only from one side, apply filter-pushdown instead
+- The join type becomes INNER
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    left_card: f64,
+    right_card: f64,
+    join_selectivity: f64,
+) -> f64 {
+    // Cross product: O(left * right)
+    let cross_cost = left_card * right_card;
+    // Hash join: O(left + right) build + O(right * selectivity) probe
+    let join_cost = left_card + right_card * join_selectivity;
+    (cross_cost - join_cost) / cross_cost
+}
+```
+
+**Typical benefit**: 0.9-0.999. Converting a cross product to a join is
+almost always a massive improvement.
+
+## Test Cases
+
+```sql
+-- Positive: implicit join in WHERE becomes explicit join
+-- Before
+SELECT * FROM orders o, customers c
+WHERE o.customer_id = c.id;
+
+-- After
+SELECT * FROM orders o
+JOIN customers c ON o.customer_id = c.id;
+```
+
+```sql
+-- Positive: theta-join conversion
+-- Before
+SELECT * FROM employees e, salary_ranges s
+WHERE e.salary BETWEEN s.min_salary AND s.max_salary;
+
+-- After
+SELECT * FROM employees e
+JOIN salary_ranges s
+ON e.salary BETWEEN s.min_salary AND s.max_salary;
+```
+
+```sql
+-- Negative: true cross product with no linking predicate
+SELECT * FROM colors, sizes;
+-- No join condition exists, must remain a cross product
+```
+
+## References
+
+PostgreSQL: src/backend/optimizer/plan/initsplan.c - deconstruct_jointree()
+DuckDB: src/optimizer/filter_pushdown.cpp
+MySQL: sql/sql_optimizer.cc - optimize_cond()
+Ramakrishnan & Gehrke "Database Management Systems" Chapter 15

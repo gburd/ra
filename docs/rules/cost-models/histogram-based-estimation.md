@@ -1,0 +1,343 @@
+# Rule: "Histogram-Based Cardinality Estimation"
+
+**Category:** cost-models
+**File:** `rules/cost-models/histogram-based-estimation.rra`
+
+## Metadata
+
+- **ID:** `histogram-based-estimation`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, oracle, duckdb, mssql, cockroachdb
+- **Tags:** cost, histogram, statistics, equi-depth, equi-width, compressed
+- **Authors:** "RA Contributors"
+
+
+# Histogram-Based Cardinality Estimation
+
+## Description
+
+Uses histograms of column value distributions for accurate range selectivity
+estimates. Histograms partition the domain into buckets and track the count
+or frequency of values in each bucket. They are the primary mechanism for
+range predicate estimation and the second most important statistic after
+distinct count.
+
+Three major histogram types: (1) Equi-width partitions the domain into
+equal-size ranges, (2) Equi-depth (equi-height) ensures each bucket holds
+the same number of rows, (3) Compressed (MaxDiff) places boundaries at the
+largest gaps in the value distribution. PostgreSQL uses equi-depth with
+separate MCV tracking. MySQL 8.0 uses equi-height with singleton buckets
+for frequent values.
+
+**When to apply**: Range predicates (BETWEEN, <, >, <=, >=), join
+cardinality estimation for range joins, and ORDER BY/LIMIT estimation.
+
+**Why it works**: Histograms approximate the cumulative distribution
+function (CDF) of column values. Within each bucket, values are assumed
+uniformly distributed. More buckets = better approximation, at the cost
+of more storage and maintenance overhead.
+
+## Relational Algebra
+
+```algebra
+sel(col BETWEEN low, high) using histogram H:
+  For each bucket b_i in H:
+    if b_i fully contained in [low, high]: add count(b_i)
+    if b_i partially overlaps: add count(b_i) * overlap_fraction
+  sel = total_matched / total_rows
+
+Histogram types:
+  Equi-width:  bucket_i = [min + i*w, min + (i+1)*w), w = (max-min)/B
+  Equi-depth:  bucket_i has ~N/B rows, boundaries at quantiles
+  Compressed:  MCV values get singleton buckets, rest equi-depth
+```
+
+## Implementation
+
+```rust
+struct EquiDepthHistogram {
+    boundaries: Vec<f64>,
+    frequencies: Vec<f64>,
+    distinct_per_bucket: Vec<u64>,
+    total_rows: f64,
+}
+
+impl EquiDepthHistogram {
+    fn build(values: &mut [f64], num_buckets: usize) -> Self {
+        values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let n = values.len();
+        let rows_per_bucket = n / num_buckets;
+
+        let mut boundaries = Vec::with_capacity(num_buckets + 1);
+        let mut frequencies = Vec::with_capacity(num_buckets);
+        let mut distinct_per_bucket = Vec::with_capacity(num_buckets);
+
+        boundaries.push(values[0]);
+
+        for i in 0..num_buckets {
+            let start = i * rows_per_bucket;
+            let end = if i == num_buckets - 1 {
+                n
+            } else {
+                (i + 1) * rows_per_bucket
+            };
+
+            boundaries.push(values[end - 1]);
+            frequencies.push((end - start) as f64);
+
+            let distinct = values[start..end]
+                .windows(2)
+                .filter(|w| (w[0] - w[1]).abs() > f64::EPSILON)
+                .count() as u64
+                + 1;
+            distinct_per_bucket.push(distinct);
+        }
+
+        Self {
+            boundaries,
+            frequencies,
+            distinct_per_bucket,
+            total_rows: n as f64,
+        }
+    }
+
+    fn range_selectivity(&self, low: f64, high: f64) -> f64 {
+        let mut matched = 0.0;
+
+        for i in 0..self.frequencies.len() {
+            let bucket_low = self.boundaries[i];
+            let bucket_high = self.boundaries[i + 1];
+
+            if high < bucket_low || low > bucket_high {
+                continue; // No overlap
+            }
+
+            if low <= bucket_low && high >= bucket_high {
+                // Bucket fully contained
+                matched += self.frequencies[i];
+            } else {
+                // Partial overlap: linear interpolation
+                let bucket_width = bucket_high - bucket_low;
+                if bucket_width <= 0.0 {
+                    matched += self.frequencies[i];
+                    continue;
+                }
+                let overlap_low = low.max(bucket_low);
+                let overlap_high = high.min(bucket_high);
+                let fraction =
+                    (overlap_high - overlap_low) / bucket_width;
+                matched += self.frequencies[i] * fraction;
+            }
+        }
+
+        (matched / self.total_rows).clamp(0.0, 1.0)
+    }
+
+    fn equality_selectivity(&self, value: f64) -> f64 {
+        // Find the bucket containing value
+        for i in 0..self.frequencies.len() {
+            let bucket_low = self.boundaries[i];
+            let bucket_high = self.boundaries[i + 1];
+
+            if value >= bucket_low && value <= bucket_high {
+                // Assume uniform within bucket
+                let ndv = self.distinct_per_bucket[i].max(1) as f64;
+                return (self.frequencies[i] / ndv) / self.total_rows;
+            }
+        }
+        0.0
+    }
+
+    fn point_estimate(&self, quantile: f64) -> f64 {
+        // Inverse CDF: given a quantile, find the value
+        let target_count = quantile * self.total_rows;
+        let mut cumulative = 0.0;
+
+        for i in 0..self.frequencies.len() {
+            cumulative += self.frequencies[i];
+            if cumulative >= target_count {
+                // Linear interpolation within bucket
+                let excess = cumulative - target_count;
+                let fraction = excess / self.frequencies[i];
+                let bucket_low = self.boundaries[i];
+                let bucket_high = self.boundaries[i + 1];
+                return bucket_high
+                    - fraction * (bucket_high - bucket_low);
+            }
+        }
+        *self.boundaries.last().unwrap_or(&0.0)
+    }
+}
+
+struct CompressedHistogram {
+    mcv_values: Vec<f64>,
+    mcv_frequencies: Vec<f64>,
+    equi_depth: EquiDepthHistogram,
+}
+
+impl CompressedHistogram {
+    fn selectivity(&self, pred: &Predicate) -> f64 {
+        match pred {
+            Predicate::Eq { value } => {
+                // Check MCV first
+                for (i, v) in self.mcv_values.iter().enumerate() {
+                    if (*v - value).abs() < f64::EPSILON {
+                        return self.mcv_frequencies[i];
+                    }
+                }
+                // Fall back to histogram
+                self.equi_depth.equality_selectivity(*value)
+            }
+            Predicate::Range { low, high } => {
+                // MCV contribution
+                let mcv_count: f64 = self
+                    .mcv_values
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, v)| **v >= *low && **v <= *high)
+                    .map(|(i, _)| self.mcv_frequencies[i])
+                    .sum();
+
+                // Histogram contribution (excludes MCV values)
+                let hist_sel =
+                    self.equi_depth.range_selectivity(*low, *high);
+                let mcv_total: f64 =
+                    self.mcv_frequencies.iter().sum();
+                let hist_contribution =
+                    hist_sel * (1.0 - mcv_total);
+
+                mcv_count + hist_contribution
+            }
+        }
+    }
+}
+
+struct MultiDimensionalHistogram {
+    dimensions: Vec<String>,
+    grid: Vec<Vec<f64>>,
+    counts: HashMap<Vec<usize>, f64>,
+    total_rows: f64,
+}
+
+impl MultiDimensionalHistogram {
+    fn joint_selectivity(
+        &self,
+        predicates: &[(usize, f64, f64)],
+    ) -> f64 {
+        let mut matched = 0.0;
+
+        for (cell_key, count) in &self.counts {
+            let all_match = predicates.iter().all(|(dim, low, high)| {
+                let bucket_idx = cell_key[*dim];
+                let bucket_low = self.grid[*dim][bucket_idx];
+                let bucket_high = self.grid[*dim][bucket_idx + 1];
+                bucket_low <= *high && bucket_high >= *low
+            });
+
+            if all_match {
+                matched += count;
+            }
+        }
+
+        matched / self.total_rows
+    }
+}
+```
+
+**Restrictions:**
+- Uniform distribution assumption within each bucket
+- Single-column histograms miss correlations between columns
+- Histogram maintenance requires periodic ANALYZE
+- Bucket count is a space/accuracy tradeoff (100-300 typical)
+- String histograms use prefix-based bucketing (lossy)
+
+## Cost Model
+
+```rust
+fn histogram_accuracy(
+    num_buckets: usize,
+    data_distribution: &Distribution,
+) -> f64 {
+    // More buckets = lower approximation error
+    // Equi-depth error: O(1/sqrt(B)) for smooth distributions
+    // Equi-depth error: O(1/B) for piecewise-linear distributions
+    let base_error = 1.0 / (num_buckets as f64).sqrt();
+
+    // Skewed distributions need more buckets
+    let skew_penalty = data_distribution.coefficient_of_variation();
+
+    base_error * skew_penalty
+}
+```
+
+**Typical benefit**: Histograms provide 30-70% improvement in selectivity
+estimation accuracy over default assumptions. Greatest benefit for range
+predicates on columns with non-uniform distributions.
+
+## Test Cases
+
+### Test 1: Equi-depth range query
+
+```sql
+SELECT * FROM sales WHERE amount BETWEEN 100 AND 500;
+-- 10 equi-depth buckets, 1M total rows
+-- Buckets: [0,50], [50,120], [120,200], [200,350], [350,600], ...
+-- Overlap: [120,200] full (100K), [50,120] partial 20/70 (28.6K),
+--          [200,350] full (100K), [350,600] partial 150/250 (60K)
+-- Total: 288,600 / 1M = 0.289 selectivity
+```
+
+### Test 2: Equality in equi-depth bucket
+
+```sql
+SELECT * FROM orders WHERE customer_id = 42;
+-- Bucket [30, 60] contains 10K rows, 30 distinct values
+-- sel = (10K / 30) / 1M = 0.000333
+-- Compare uniform NDV: 1/100K = 0.00001 (off by 33x)
+```
+
+### Test 3: Compressed histogram with MCV
+
+```sql
+SELECT * FROM orders WHERE status = 'pending';
+-- MCV: status='pending', frequency=0.25
+-- Direct lookup: sel = 0.25
+-- Without MCV (histogram only): 1/5 = 0.20 (underestimates)
+```
+
+### Test 4: Multi-dimensional correlation
+
+```sql
+SELECT * FROM products
+WHERE category = 'electronics' AND price > 500;
+-- 1D histograms: sel = sel(category) * sel(price) = 0.1 * 0.05 = 0.005
+-- 2D histogram: joint bucket shows 0.03 (6x more accurate)
+-- Multi-dimensional histograms capture correlations
+```
+
+### Test 5: Extreme skew handling
+
+```sql
+SELECT * FROM web_logs WHERE status_code BETWEEN 500 AND 599;
+-- Highly skewed: 95% of codes are 200, 3% are 404, 2% other
+-- Equi-depth: most buckets cover [200, 200], one covers [201, 599]
+-- Range [500,599] falls in tail bucket: ~0.5% of last bucket
+-- Compressed histogram with MCV for 200, 404 handles this
+```
+
+## References
+
+**Histogram types:**
+- Piatetsky-Shapiro & Connell, "Accurate Estimation of the Number of Tuples Satisfying a Condition", SIGMOD 1984
+- Poosala et al., "Selectivity Estimation Without the Attribute Value Independence Assumption", VLDB 1997
+- Ioannidis, "Universality of Serial Histograms", VLDB 1993
+
+**Multi-dimensional histograms:**
+- Gunopulos et al., "Selectivity Estimators for Multidimensional Range Queries over Real Attributes", VLDB 2005
+- Bruno, Chaudhuri, Gravano, "STHoles: A Multidimensional Workload-Aware Histogram", SIGMOD 2001
+
+**Modern implementations:**
+- PostgreSQL: `src/backend/commands/analyze.c` (equi-depth + MCV)
+- MySQL 8.0: `sql/histograms/` (equi-height + singleton)
+- Oracle: height-balanced with frequency (hybrid)
+- mssql: equi-height with density vector

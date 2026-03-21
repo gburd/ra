@@ -1,0 +1,87 @@
+# Rule: CTE Inlining
+
+**Category:** logical/cte-optimization
+**File:** `rules/logical/cte-optimization/cte-inlining.rra`
+
+## Metadata
+
+- **ID:** `cte-inlining`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, duckdb, sqlite
+- **Tags:** cte, inlining, with, common-table-expression
+- **Authors:** "RA Contributors"
+
+
+# CTE Inlining
+
+## Description
+
+Inlines a CTE definition into the body when the CTE is referenced only once. Eliminates materialization overhead for single-use CTEs.
+
+**When to apply**: CTE is referenced exactly once in the body.
+
+**Why it works**: Avoids materializing the CTE result when it is only used once; the optimizer can then push predicates and other transforms through the inlined subquery.
+
+## Relational Algebra
+
+```algebra
+CTE[name, def](body)
+  -> body[name := def]
+  where ref_count(name, body) = 1
+```
+
+## Implementation
+
+```rust
+rw!("cte-inlining";
+    "(cte ?name ?def ?body)" =>
+    "(substitute ?name ?def ?body)"
+    if single_reference("?name", "?body")
+),
+```
+
+## Cost Model
+
+```rust
+fn benefit(def_rows: u64) -> f64 {
+    let materialize_cost = def_rows as f64 * 0.01;
+    materialize_cost / (materialize_cost + 1.0)
+}
+```
+
+**Typical benefit**: 10-50% for small single-use CTEs
+
+## Test Cases
+
+### Positive: Single-use CTE
+
+```sql
+WITH active_users AS (SELECT * FROM users WHERE active = true)
+SELECT * FROM active_users WHERE age > 25;
+
+-- Inline to: SELECT * FROM users WHERE active = true AND age > 25
+```
+
+### Positive: CTE in subquery position
+
+```sql
+WITH totals AS (SELECT dept_id, SUM(salary) as total FROM emp GROUP BY dept_id)
+SELECT * FROM totals WHERE total > 100000;
+
+-- Inline and push filter
+```
+
+### Negative: Multi-reference CTE
+
+```sql
+WITH stats AS (SELECT dept_id, AVG(salary) as avg_sal FROM employees GROUP BY dept_id)
+SELECT * FROM stats s1 JOIN stats s2 ON s1.dept_id <> s2.dept_id;
+
+-- Referenced twice; do not inline
+```
+
+## References
+
+- PostgreSQL: CTE inlining (PG 12+, non-recursive CTEs)
+- DuckDB: Automatic CTE inlining
+- SQLite: CTE materialization control

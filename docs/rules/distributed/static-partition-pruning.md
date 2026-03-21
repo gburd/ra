@@ -1,0 +1,151 @@
+# Rule: Static Partition Pruning
+
+**Category:** distributed/partition-pruning
+**File:** `rules/distributed/partition-pruning/static-partition-pruning.rra`
+
+## Metadata
+
+- **ID:** `static-partition-pruning`
+- **Version:** "1.0.0"
+- **Databases:** presto, trino, spark, cockroachdb, citus, greenplum
+- **Tags:** distributed, partition, pruning, static, compile-time
+- **Authors:** "RA Contributors"
+
+
+# Static Partition Pruning
+
+## Description
+
+At query planning time, uses predicates on partition columns to eliminate
+entire partitions (shards, segments, ranges) from the scan. Only nodes
+holding relevant partitions participate in the query.
+
+**When to apply**: A filter predicate references a partition key column
+and the predicate value(s) can be evaluated at compile time.
+
+**Why it works**: Distributed tables are split into partitions by a key.
+If the query only needs rows where `date = '2024-01-01'` and the table
+is partitioned by date, only the partition for that date is scanned.
+All other nodes skip the scan entirely.
+
+## Relational Algebra
+
+```algebra
+sigma[partition_key = const](Scan(T))
+  -> Scan(T, partitions={p : p.range contains const})
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("static-partition-prune-eq";
+    "(filter (eq ?pcol ?const) (scan ?table))" =>
+    "(scan ?table (partition_filter (eq ?pcol ?const)))"
+    if is_partition_column("?pcol", "?table")
+    if is_constant("?const")
+),
+
+rw!("static-partition-prune-range";
+    "(filter (and (gte ?pcol ?lo) (lt ?pcol ?hi)) (scan ?table))" =>
+    "(scan ?table (partition_filter (range ?pcol ?lo ?hi)))"
+    if is_partition_column("?pcol", "?table")
+    if is_constant("?lo")
+    if is_constant("?hi")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    predicate: &Expr,
+    table: &TableRef,
+) -> bool {
+    let partition_cols = table.partition_columns();
+    let pred_cols = predicate.referenced_columns();
+    // Predicate must reference at least one partition column
+    !pred_cols.is_disjoint(&partition_cols)
+    // Values must be compile-time constants
+    && predicate.bound_values_are_constant()
+}
+```
+
+**Restrictions:**
+- Predicate values must be known at compile time (not subquery results)
+- For hash-partitioned tables, only equality predicates enable pruning
+- For range-partitioned tables, range predicates also enable pruning
+- Complex expressions (e.g., `YEAR(date_col) = 2024`) may not be
+  recognized unless the optimizer can invert them
+- Partition column type must match predicate type exactly
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    total_partitions: u32,
+    pruned_partitions: u32,
+    rows_per_partition: f64,
+    row_bytes: f64,
+) -> f64 {
+    let eliminated_rows =
+        pruned_partitions as f64 * rows_per_partition;
+    let total_rows =
+        total_partitions as f64 * rows_per_partition;
+    eliminated_rows / total_rows
+}
+```
+
+**Typical benefit**: For a table with 365 daily partitions and a
+single-day query, 364/365 = 99.7% of data is eliminated.
+
+## Test Cases
+
+```sql
+-- Positive: equality on partition key
+-- Table: orders PARTITIONED BY (order_date)
+SELECT * FROM orders WHERE order_date = '2024-06-15';
+-- Scans only the 2024-06-15 partition
+
+-- Plan:
+-- Scan(orders, partitions=[2024-06-15])
+```
+
+```sql
+-- Positive: range on partition key
+-- Table: events PARTITIONED BY RANGE (created_at)
+SELECT * FROM events
+WHERE created_at >= '2024-01-01' AND created_at < '2024-02-01';
+-- Scans only January 2024 partitions
+
+-- Plan:
+-- Scan(events, partitions=[2024-01-01..2024-02-01])
+```
+
+```sql
+-- Positive: IN list on partition key
+-- Table: sales DISTRIBUTED BY HASH(region)
+SELECT * FROM sales WHERE region IN ('US', 'EU');
+-- Scans only partitions for hash(US) and hash(EU)
+```
+
+```sql
+-- Negative: predicate on non-partition column
+SELECT * FROM orders WHERE amount > 1000;
+-- amount is not a partition key -> all partitions scanned
+```
+
+```sql
+-- Negative: dynamic value prevents static pruning
+SELECT * FROM orders WHERE order_date = (SELECT MAX(date) FROM dates);
+-- Subquery result unknown at compile time -> needs dynamic pruning
+```
+
+## References
+
+Presto/Trino: presto-main/src/main/java/com/facebook/presto/sql/planner/optimizations/MetadataQueryOptimizer.java
+Spark SQL: sql/catalyst/src/main/scala/org/apache/spark/sql/catalyst/catalog/ExternalCatalogUtils.scala - prunePartitions()
+CockroachDB: pkg/sql/opt/norm/rules/select.opt - ConstrainScan
+Citus: src/backend/distributed/planner/multi_physical_planner.c - ShardPruning()
+Greenplum: src/backend/optimizer/util/relnode.c - prune_append_rel()

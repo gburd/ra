@@ -1,0 +1,171 @@
+# Rule: Neo4j Join Hint Directed Planning
+
+**Category:** database-specific/neo4j
+**File:** `rules/database-specific/neo4j/join-hint-directed-planning.rra`
+
+## Metadata
+
+- **ID:** `neo4j-join-hint-directed-planning`
+- **Version:** "1.0.0"
+- **Databases:** neo4j
+- **Tags:** join, hint, planning, hash-join, cypher, optimization
+- **Authors:** "Neo4j Inc."
+
+
+# Neo4j Join Hint Directed Planning
+
+## Description
+
+Uses hash joins instead of expand-based traversal when Cypher planner hints
+(`USING JOIN ON`) are specified, or when the optimizer determines that a
+value-hash-join is more efficient than nested-loop expansion. This occurs when
+two subpatterns share a node variable but the optimal plan processes them
+independently and joins on the shared node's ID.
+
+**When to apply**: Complex Cypher patterns where two subpatterns connect at a
+node that would benefit from hash join rather than sequential expansion. Common
+in queries with multiple independent pattern branches meeting at a hub node.
+
+**Why it works**: Neo4j's default planning strategy expands relationships from
+one pattern to another (nested loop). For star-shaped queries where a central
+node connects to multiple independent branches, processing each branch
+independently and hash-joining on the hub node's ID can be dramatically faster
+than expanding all branches from each candidate hub.
+
+## Relational Algebra
+
+```algebra
+-- Before: sequential expansion from center
+expand(expand(label-scan(:Hub, h), :REL_A, a), :REL_B, b)
+
+-- After: hash join on hub node
+hash-join[h](
+  expand(label-scan(:Hub, h), :REL_A, a),
+  expand(label-scan(:Hub, h), :REL_B, b)
+)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("neo4j-expand-to-hash-join";
+    "(expand
+       (expand (scan ?hub) ?rel1 ?dir1 ?target1)
+       ?rel2 ?dir2 ?target2)" =>
+    "(node-hash-join ?hub
+       (expand (scan ?hub) ?rel1 ?dir1 ?target1)
+       (expand (scan ?hub) ?rel2 ?dir2 ?target2))"
+    if independent_branches("?rel1", "?target1", "?rel2", "?target2")
+    if hub_is_high_degree("?hub")
+),
+
+rw!("neo4j-value-hash-join";
+    "(filter (eq (property ?a ?prop) (property ?b ?prop))
+       (cartesian-product ?left ?right))" =>
+    "(value-hash-join (property ?a ?prop) (property ?b ?prop)
+       ?left ?right)"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> bool {
+    stats.has_multi_branch_pattern
+        && stats.hub_node_avg_degree > 50
+        && stats.branch_cardinalities_similar
+}
+```
+
+**Restrictions:**
+- Hash join requires memory for the hash table (smaller side should fit in memory)
+- Not beneficial when one branch is very small (nested loop is cheaper)
+- Node hash join only works on node identity (not property values without hint)
+- Value hash join on properties requires exact type match
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let hub_count = stats.hub_node_count as f64;
+    let branch_a_degree = stats.branch_a_avg_degree as f64;
+    let branch_b_degree = stats.branch_b_avg_degree as f64;
+
+    // Nested loop: for each hub, expand A, then for each A expand B
+    let nested_cost = hub_count * branch_a_degree * branch_b_degree * 0.001;
+
+    // Hash join: expand A independently, expand B independently, join
+    let hash_cost = hub_count * (branch_a_degree + branch_b_degree) * 0.001
+        + hub_count.min(hub_count * branch_a_degree) * 0.0001; // hash build
+
+    if nested_cost > hash_cost {
+        (nested_cost - hash_cost) / nested_cost
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 30% to 20x for star patterns with high-degree hubs.
+
+## Test Cases
+
+### Positive: Star pattern with hash join hint
+
+```cypher
+// Star pattern: person with friends and orders
+MATCH (p:Person)-[:KNOWS]->(friend:Person),
+      (p)-[:ORDERED]->(order:Order)
+USING JOIN ON p
+WHERE friend.age > 30 AND order.total > 100
+RETURN p.name, count(friend), count(order)
+
+// Hash join on p: process KNOWS and ORDERED branches independently
+// EXPLAIN shows: NodeHashJoin on p
+```
+
+### Positive: Value hash join on property
+
+```cypher
+// Join two independent patterns on property value
+MATCH (a:Employee), (b:Customer)
+WHERE a.email = b.email
+RETURN a.name, b.company
+
+// Value hash join on email property
+// EXPLAIN shows: ValueHashJoin
+```
+
+### Negative: Single branch pattern
+
+```cypher
+// Simple chain: hash join not needed
+MATCH (p:Person)-[:KNOWS]->(f:Person)-[:LIVES_IN]->(c:City)
+RETURN p.name, c.name
+
+// Sequential expansion is optimal for linear patterns
+// No branch point to join on
+```
+
+## References
+
+**Implementation:**
+- Neo4j source: `org.neo4j.cypher.internal.compiler.planner.logical.steps.NodeHashJoinComponentConnector`
+- Value hash join: `org.neo4j.cypher.internal.compiler.planner.logical.steps.ValueHashJoinStep`
+- Join hints: `org.neo4j.cypher.internal.ast.UsingJoinHint`
+
+**Documentation:**
+- Neo4j Manual: "Planner Hints and the USING Keyword"
+  - https://neo4j.com/docs/cypher-manual/current/query-tuning/using/
+
+**Papers:**
+- Mhedhbi, A., Salihoglu, S., "Optimizing Subgraph Queries by Combining
+  Binary and Worst-Case Optimal Joins", VLDB 2019

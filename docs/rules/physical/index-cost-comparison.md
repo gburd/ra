@@ -1,0 +1,206 @@
+# Rule: "Index vs Sequential Scan Cost Comparison"
+
+**Category:** physical/index-selection
+**File:** `rules/physical/index-selection/index-cost-comparison.rra`
+
+## Metadata
+
+- **ID:** `index-cost-comparison`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, oracle, mssql, clickhouse
+- **Tags:** index, scan, cost, comparison, selectivity, tipping-point
+- **Authors:** "RA Contributors"
+
+## Preconditions
+
+```yaml
+  - type: "pattern"
+    must_match: "(filter ?pred (scan ?table))"
+    description: "Filter with multiple candidate indexes"
+  - type: "predicate"
+    condition: "has_multiple_indexes(?table)"
+    description: "Multiple indexes must exist for cost comparison"
+  - type: "fact"
+    fact_type: "statistics.cardinality"
+    table: "?table"
+    comparator: "exists"
+    description: "Cardinality statistics needed for cost comparison"
+```
+
+
+# Index vs Sequential Scan Cost Comparison
+
+## Metadata
+- **Rule ID**: `index-cost-comparison`
+- **Category**: Physical / Index Selection
+- **Complexity**: Decision model; O(1) to evaluate
+- **Prerequisites**: At least one applicable index; filter predicate
+- **Alternatives**: Always use index; always use sequential scan
+
+## Description
+
+The fundamental index selection decision is whether an index scan is
+cheaper than a sequential scan for a given query. This depends on:
+
+1. **Selectivity**: What fraction of rows match the predicate
+2. **Clustering**: Is the index clustered (heap rows in index order)?
+3. **Random vs sequential I/O**: Index scan causes random heap access
+4. **Table size**: Small tables fit in cache; index overhead not worth it
+5. **Column coverage**: Index-only scan avoids heap access entirely
+
+The "tipping point" is the selectivity threshold where index scan
+becomes more expensive than sequential scan. For unclustered indexes,
+this is typically 5-15% selectivity. For clustered indexes, it can
+be 50%+. For index-only scans, the index is always preferred if
+it covers all needed columns.
+
+PostgreSQL's cost model uses `random_page_cost` and `seq_page_cost`
+to model this tradeoff. The ratio (default 4:1) captures that random
+I/O is ~4x more expensive than sequential I/O.
+
+**Decision factors:**
+- selectivity < tipping_point -> index scan
+- selectivity >= tipping_point -> sequential scan
+- index covers all columns -> index-only scan (always preferred)
+- table < buffer_pool -> lower tipping point (random I/O cached)
+
+## Relational Algebra
+
+```
+filter[pred](scan[T])
+  -> index-scan[I](pred) + heap-fetch  if sel < tipping_point
+  -> seq-scan[T] + filter[pred]        if sel >= tipping_point
+  -> index-only-scan[I](pred)          if I covers all columns
+```
+
+## Implementation (egg rewrite rules)
+
+```lisp
+;; Index scan when selective
+(rewrite (filter ?pred (scan ?table))
+  (heap-fetch ?table (index-scan (best-index ?table ?pred) ?pred))
+  :if (has-applicable-index ?table ?pred)
+  :if (< (selectivity ?pred) (tipping-point ?table ?pred)))
+
+;; Sequential scan when non-selective
+(rewrite (filter ?pred (scan ?table))
+  (seq-filter ?pred (seq-scan ?table))
+  :if (>= (selectivity ?pred) (tipping-point ?table ?pred)))
+
+;; Index-only scan when covering (always preferred)
+(rewrite (project ?cols (filter ?pred (scan ?table)))
+  (index-only-scan (covering-index ?table ?cols ?pred) ?pred)
+  :if (has-covering-index ?table ?cols ?pred))
+
+;; Prefer clustered index (higher tipping point)
+(rewrite (heap-fetch ?table (index-scan ?idx ?pred))
+  (clustered-index-scan ?idx ?pred)
+  :if (is-clustered ?idx))
+
+;; Small table: prefer sequential scan
+(rewrite (filter ?pred (scan ?table))
+  (seq-filter ?pred (seq-scan ?table))
+  :if (< (page-count ?table) 100))
+```
+
+## Cost Model
+
+```rust
+pub fn tipping_point(
+    table_pages: u64,
+    random_page_cost: f64,
+    seq_page_cost: f64,
+    cpu_index_cost: f64,
+    cpu_tuple_cost: f64,
+    is_clustered: bool,
+) -> f64 {
+    let seq_scan_cost = table_pages as f64 * seq_page_cost
+        + table_pages as f64 * 100.0 * cpu_tuple_cost;
+
+    if is_clustered {
+        let per_row_index = seq_page_cost + cpu_index_cost + cpu_tuple_cost;
+        seq_scan_cost / (table_pages as f64 * 100.0 * per_row_index)
+    } else {
+        let per_row_index = random_page_cost + cpu_index_cost + cpu_tuple_cost;
+        seq_scan_cost / (table_pages as f64 * 100.0 * per_row_index)
+    }
+}
+
+pub fn cost_index_scan(
+    selectivity: f64,
+    table_rows: u64,
+    table_pages: u64,
+    index_height: u64,
+    is_clustered: bool,
+    hardware: &HardwareModel,
+) -> Cost {
+    let matching_rows = (table_rows as f64 * selectivity) as u64;
+    let index_cost = Cost::io(
+        index_height as f64 * hardware.random_page_cost()
+    ) + Cost::cpu(matching_rows * 5);
+
+    let heap_cost = if is_clustered {
+        let pages = (matching_rows as f64 / 100.0).ceil();
+        Cost::io(pages * hardware.seq_page_cost())
+    } else {
+        Cost::io(matching_rows as f64 * hardware.random_page_cost())
+    };
+
+    index_cost + heap_cost
+}
+
+pub fn cost_seq_scan(
+    table_pages: u64,
+    table_rows: u64,
+    hardware: &HardwareModel,
+) -> Cost {
+    Cost::io(table_pages as f64 * hardware.seq_page_cost())
+    + Cost::cpu(table_rows * 2)
+}
+```
+
+## Test Cases
+
+### Positive: Highly selective query
+```sql
+SELECT * FROM orders WHERE order_id = 12345;
+-- Selectivity: 1/1M = 0.0001%
+-- Index scan: 3-4 page reads (tree + heap)
+-- Seq scan: 10000+ pages
+-- Index wins by 1000x+
+```
+
+### Positive: Index-only scan
+```sql
+CREATE INDEX idx_date_amount ON orders(date, amount);
+
+SELECT date, sum(amount) FROM orders
+WHERE date > '2024-01-01'
+GROUP BY date;
+-- Index covers date and amount: no heap access needed
+-- Preferred even at moderate selectivity
+```
+
+### Negative: Low selectivity, unclustered
+```sql
+SELECT * FROM orders WHERE status IN ('pending', 'processing', 'shipped');
+-- 80% of orders in these statuses
+-- Random heap access for 80% of rows worse than seq scan
+-- Sequential scan + filter is cheaper
+```
+
+### Edge case: Clustered vs unclustered tipping point
+```sql
+-- Clustered index on date: tipping point ~50%
+-- Unclustered index on status: tipping point ~5%
+SELECT * FROM orders WHERE date > '2024-06-01';  -- 50% -> clustered scan OK
+SELECT * FROM orders WHERE status = 'rare';       -- 1% -> unclustered scan OK
+SELECT * FROM orders WHERE status = 'common';     -- 40% -> seq scan preferred
+```
+
+## References
+
+- Selinger et al., "Access Path Selection in a Relational Database Management System", SIGMOD 1979
+- PostgreSQL: Cost-based optimizer (`costsize.c`)
+- MySQL: Optimizer cost model and index hints
+- Hellerstein, Stonebraker, Hamilton, "Architecture of a Database System"

@@ -1,0 +1,205 @@
+# Rule: MongoDB Covered Query Optimization
+
+**Category:** database-specific/mongodb
+**File:** `rules/database-specific/mongodb/covered-query-optimization.rra`
+
+## Metadata
+
+- **ID:** `mongodb-covered-query`
+- **Version:** "1.0.0"
+- **Databases:** mongodb
+- **Tags:** index, covered-query, projection, optimization
+- **Authors:** "MongoDB Inc."
+
+
+# MongoDB Covered Query Optimization
+
+## Description
+
+Optimizes queries to use "covered queries" where all requested fields are
+available in the index, eliminating the need to fetch actual documents from
+disk. MongoDB can satisfy the entire query using only the index, dramatically
+improving performance.
+
+**When to apply**: Queries where the projection includes only indexed fields
+and the filter uses those same indexes. The query can be satisfied entirely
+from the index without accessing collection documents.
+
+**Why it works**: Indexes are typically much smaller than full documents and
+more cache-friendly. A covered query does only index lookups (O(log n)) without
+document fetches (random I/O), often providing 10-100x speedup.
+
+## Relational Algebra
+
+```algebra
+Given query: π_{a,b}(σ_{a=x}(R)) where index exists on (a, b)
+
+Without covering:
+1. Index scan on (a, b) → get document IDs
+2. Fetch documents by ID → access full documents
+3. Project {a, b}
+
+With covering:
+1. Index scan on (a, b) → get (a, b) directly from index
+2. No document fetch needed!
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mongodb-use-covered-query";
+    "(project ?fields
+       (filter ?pred
+         (scan ?collection)))" =>
+    "(index-only-scan
+       (select-covering-index ?fields ?pred ?collection)
+       ?fields
+       ?pred)"
+    if has-covering-index("?fields", "?pred", "?collection")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> bool {
+    // Must have index covering all query fields
+    stats.has_covering_index
+        // Projection must not include _id (unless _id is in index)
+        && (stats.projection_excludes_id || stats.index_includes_id)
+        // Query returns small result set (covering benefit maximized)
+        && stats.selectivity < 0.1
+}
+```
+
+**Restrictions:**
+- All projected fields must be in the index
+- _id field must be explicitly excluded from projection (unless indexed)
+- Cannot use covered query for array fields or embedded documents
+- Index must be non-multikey for covering to apply
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    hw: &HardwareProfile,
+) -> f64 {
+    let result_docs = (stats.collection_size as f64 * stats.selectivity);
+
+    // Cost with document fetch:
+    // - Index lookup: log(n) * index_io_cost
+    // - Document fetch: n * random_io_cost
+    let index_lookup = result_docs.log2() * hw.seq_io_cost;
+    let doc_fetch = result_docs * hw.random_io_cost;
+    let with_fetch = index_lookup + doc_fetch;
+
+    // Cost with covered query (index only):
+    // - Index lookup: log(n) * index_io_cost (same)
+    // - Document fetch: 0 (eliminated!)
+    let covered = index_lookup;
+
+    if with_fetch > covered {
+        (with_fetch - covered) / with_fetch
+    } else {
+        0.0
+    }
+}
+```
+
+**Assumptions:**
+- Index I/O: Sequential scan of B-tree (0.1ms per page)
+- Document fetch: Random I/O (10ms per document on HDD, 0.1ms on SSD)
+- Covered query eliminates all document fetches
+- Most benefit when result set is large (many random I/Os avoided)
+
+**Typical benefit**: 80% to 10x for queries returning many documents.
+
+## Test Cases
+
+### Positive: Query covered by compound index
+
+```javascript
+// Index: {customer_id: 1, order_date: 1}
+db.orders.find(
+  {customer_id: 12345, order_date: {$gte: ISODate("2024-01-01")}},
+  {customer_id: 1, order_date: 1, _id: 0}  // Exclude _id!
+)
+
+// Covered query: All fields in index, _id excluded
+// explain() shows: "totalDocsExamined": 0
+```
+
+### Positive: Aggregation pipeline covered query
+
+```javascript
+// Index: {status: 1, total: 1}
+db.orders.aggregate([
+  {$match: {status: "completed"}},
+  {$project: {status: 1, total: 1, _id: 0}},
+  {$sort: {total: -1}}
+])
+
+// Covered: match, project, and sort all use index
+```
+
+### Negative: _id not excluded
+
+```javascript
+// Index: {customer_id: 1, total: 1}
+db.orders.find(
+  {customer_id: 12345},
+  {customer_id: 1, total: 1}  // _id implicitly included!
+)
+
+// NOT covered: Must fetch documents to get _id
+// Must explicitly exclude: {customer_id: 1, total: 1, _id: 0}
+```
+
+### Negative: Projection includes non-indexed field
+
+```javascript
+// Index: {customer_id: 1, order_date: 1}
+db.orders.find(
+  {customer_id: 12345},
+  {customer_id: 1, order_date: 1, shipping_address: 1, _id: 0}
+)
+
+// NOT covered: shipping_address not in index
+// Must fetch documents
+```
+
+### Positive: Counting with covered query
+
+```javascript
+// Index: {status: 1}
+db.orders.count({status: "pending"})
+
+// Covered: Can count using index only
+// explain() shows: "totalDocsExamined": 0
+```
+
+## References
+
+**Implementation:**
+- MongoDB source: `src/mongo/db/query/stage_builder.cpp`
+- Covered query detection: `QueryPlanner::planFromCache()`
+- Index-only scans: `IXSCAN` stage with `isCovered: true`
+
+**Documentation:**
+- MongoDB Manual: "Covered Queries"
+  - https://docs.mongodb.com/manual/core/query-optimization/#covered-query
+- Performance best practices for covered queries
+- Index design patterns for coverage
+
+**Related work:**
+- Graefe, G., "Modern B-Tree Techniques", 2011
+  - Index-only access methods
+- O'Neil, P., et al., "The Log-Structured Merge-Tree (LSM-Tree)", 1996
+  - DOI: 10.1007/s002360050048
+  - Index structures for document stores

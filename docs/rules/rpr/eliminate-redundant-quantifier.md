@@ -1,0 +1,165 @@
+# Rule: Eliminate Redundant Quantifiers
+
+**Category:** logical/rpr
+**File:** `rules/rpr/eliminate-redundant-quantifier.rra`
+
+## Metadata
+
+- **ID:** `rpr-eliminate-redundant-quantifier`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, oracle, duckdb, generic
+- **Tags:** rpr, pattern, simplification, quantifier
+- **Authors:** "RA Contributors"
+
+## Preconditions
+
+```yaml
+  - type: pattern
+    must_match: "(pattern-quantified ?var ?quant)"
+  - type: predicate
+    condition: "is_redundant_quantifier(?quant)"
+    description: "Quantifier is equivalent to a simpler form"
+```
+
+
+# Eliminate Redundant Quantifiers
+
+## Description
+
+Normalizes pattern quantifiers to their simplest equivalent form.
+A quantifier like `{1}` (exactly one) is redundant since it is the
+same as the bare variable. Similarly `{0,1}` is equivalent to `?`,
+and `{1,}` is equivalent to `+`.
+
+**When to apply**: Any pattern expression contains a quantifier that
+has a simpler equivalent representation.
+
+**Why it works**: These are direct algebraic equivalences in regular
+expression theory. Simpler quantifiers produce fewer DFA states
+during compilation, reducing both compile time and runtime branching.
+
+## Relational Algebra
+
+```algebra
+-- A{1} is just A
+PatternQuantified(A, Exactly(1)) -> A
+
+-- A{0,1} is A?
+PatternQuantified(A, Range(0, 1)) -> PatternQuantified(A, ZeroOrOne)
+
+-- A{1,} is A+
+PatternQuantified(A, Range(1, None)) -> PatternQuantified(A, OneOrMore)
+
+-- A{0,} is A*
+PatternQuantified(A, Range(0, None)) -> PatternQuantified(A, ZeroOrMore)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// {1} is identity
+rw!("rpr-eliminate-exactly-one";
+    "(pattern-quantified ?var (exactly 1))" => "?var"
+),
+
+// {0,1} normalizes to ?
+rw!("rpr-normalize-range-to-optional";
+    "(pattern-quantified ?var (range 0 1))" =>
+    "(pattern-quantified ?var zero-or-one)"
+),
+
+// {1,} normalizes to +
+rw!("rpr-normalize-range-to-one-or-more";
+    "(pattern-quantified ?var (range 1 unbounded))" =>
+    "(pattern-quantified ?var one-or-more)"
+),
+
+// {0,} normalizes to *
+rw!("rpr-normalize-range-to-zero-or-more";
+    "(pattern-quantified ?var (range 0 unbounded))" =>
+    "(pattern-quantified ?var zero-or-more)"
+),
+
+// {n,n} normalizes to {n}
+rw!("rpr-normalize-range-to-exact";
+    "(pattern-quantified ?var (range ?n ?n))" =>
+    "(pattern-quantified ?var (exactly ?n))"
+),
+```
+
+## Preconditions
+
+```rust
+fn is_redundant_quantifier(quant: &Quantifier) -> bool {
+    matches!(quant,
+        Quantifier::Exactly(1)
+        | Quantifier::Range(0, Some(1))
+        | Quantifier::Range(1, None)
+        | Quantifier::Range(0, None)
+        | Quantifier::Range(n, Some(m)) if n == m
+    )
+}
+```
+
+**Restrictions:**
+- None. These are pure equivalences in regular expression algebra.
+
+## Cost Model
+
+```rust
+fn estimated_benefit(quant: &Quantifier) -> f64 {
+    // Redundant quantifiers add 1-2 DFA states. Eliminating
+    // them reduces compile time and slightly reduces runtime.
+    match quant {
+        Quantifier::Exactly(1) => 0.3,  // Saves 2 states
+        Quantifier::Range(0, Some(1)) => 0.1,  // Normalizes
+        Quantifier::Range(n, Some(m)) if n == m => 0.2,
+        _ => 0.1,
+    }
+}
+```
+
+**Typical benefit**: 10-30%. Primarily reduces DFA state count
+by 1-2 states per simplified quantifier.
+
+## Test Cases
+
+### Positive: exactly-one elimination
+
+```sql
+-- Pattern: A{1} B+ C
+-- After:   A B+ C
+MATCH_RECOGNIZE (
+  PATTERN (A{1} B+ C)
+  DEFINE A AS price > 100, B AS price > PREV(price), C AS price < PREV(price)
+)
+```
+
+### Positive: range normalization
+
+```sql
+-- Pattern: A{0,1} B{1,} C{0,}
+-- After:   A? B+ C*
+MATCH_RECOGNIZE (
+  PATTERN (A{0,1} B{1,} C{0,})
+  DEFINE A AS price > 100, B AS price > PREV(price), C AS price < PREV(price)
+)
+```
+
+### Negative: non-redundant quantifier
+
+```sql
+-- Pattern: A{2,5} B+  -- {2,5} has no simpler form
+-- No transformation applies.
+MATCH_RECOGNIZE (
+  PATTERN (A{2,5} B+)
+  DEFINE A AS price > PREV(price), B AS price < PREV(price)
+)
+```
+
+## References
+
+- Hopcroft, Motwani, Ullman. "Introduction to Automata Theory" (2006), Ch. 3
+- Thompson, K. "Regular Expression Search Algorithm" (1968)

@@ -1,0 +1,84 @@
+# Rule: Sort-Limit Fusion
+
+**Category:** logical/limit-pushdown
+**File:** `rules/logical/limit-pushdown/sort-limit-fusion.rra`
+
+## Metadata
+
+- **ID:** `sort-limit-fusion`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, duckdb
+- **Tags:** sort, limit, fusion, top-k
+- **Authors:** "RA Contributors"
+
+
+# Sort-Limit Fusion
+
+## Description
+
+Fuses SORT and LIMIT operators into single Top-K operator for efficient execution.
+
+**When to apply**: SORT immediately followed by LIMIT.
+
+**Why it works**: Combined operator uses priority queue instead of full sort.
+
+## Relational Algebra
+
+```algebra
+limit[K](sort[key, dir](R))
+  -> sort_limit[K, key, dir](R)
+
+Uses heap/priority queue of size K
+```
+
+## Implementation
+
+```rust
+rw!("fuse-sort-limit";
+    "(limit ?k (sort ?key ?input))" =>
+    "(sort-limit ?k ?key ?input)"
+),
+```
+
+## Cost Model
+
+```rust
+fn benefit(n: u64, k: u64) -> f64 {
+    let separate = n as f64 * (n as f64).log2(); // Full sort
+    let fused = n as f64 + k as f64 * (k as f64).log2(); // Heap
+    (separate - fused) / separate
+}
+```
+
+**Typical benefit**: 50-80% for small K
+
+## Test Cases
+
+### Positive: Recent records
+
+```sql
+SELECT * FROM events ORDER BY timestamp DESC LIMIT 100;
+
+-- Fused top-100 operator
+```
+
+### Positive: Highest prices
+
+```sql
+SELECT * FROM products ORDER BY price DESC LIMIT 5;
+
+-- Min-heap of 5 elements
+```
+
+### Negative: No LIMIT
+
+```sql
+SELECT * FROM users ORDER BY name;
+
+-- Must fully sort
+```
+
+## References
+
+- PostgreSQL: Top-N heapsort in tuplesort.c
+- DuckDB: Parallel top-K with radix partitioning

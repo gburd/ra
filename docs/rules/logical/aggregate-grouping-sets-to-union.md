@@ -1,0 +1,116 @@
+# Rule: Calcite AggregateGroupingSetsToUnionRule
+
+**Category:** logical/aggregate-pushdown
+**File:** `rules/logical/aggregate-pushdown/aggregate-grouping-sets-to-union.rra`
+
+## Metadata
+
+- **ID:** `calcite-aggregate-grouping-sets-to-union`
+- **Version:** "1.0.0"
+- **Databases:** calcite, postgresql, mysql
+- **Tags:** logical, calcite, aggregate, grouping-sets, union, decomposition
+- **Authors:** "RA Contributors"
+
+
+# Calcite AggregateGroupingSetsToUnionRule
+
+## Description
+
+Converts an aggregate with GROUPING SETS into a UNION ALL of simpler
+aggregates, one per grouping set. Each branch groups by a single
+grouping set and pads with NULLs for the missing columns.
+
+**When to apply**: An aggregate uses GROUPING SETS, CUBE, or ROLLUP
+and the database backend benefits from simpler aggregate plans.
+
+**Why it works**: Some execution engines handle simple GROUP BY more
+efficiently than GROUPING SETS. The UNION ALL of simple aggregates
+can be parallelized and each branch can use different access paths.
+
+**Calcite class**: `org.apache.calcite.rel.rules.AggregateGroupingSetsToUnionRule`
+
+## Relational Algebra
+
+```algebra
+-- Before: GROUPING SETS
+gamma[GROUPING SETS ((a,b), (a,c)); SUM(x)](R)
+
+-- After: UNION ALL of simple aggregates
+gamma[a, b; SUM(x)](R) with c = NULL
+UNION ALL
+gamma[a, c; SUM(x)](R) with b = NULL
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-aggregate-grouping-sets-to-union";
+    "(aggregate (grouping-sets ?sets) ?aggs ?input)" =>
+    "(union-all
+        (for-each-set ?sets
+            (aggregate ?set ?aggs
+                (project (pad-nulls ?set) ?input))))"
+    if has_multiple_grouping_sets("?sets")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(agg: &Aggregate) -> bool {
+    agg.grouping_sets().len() > 1
+}
+```
+
+**Restrictions:**
+- Each branch must pad non-grouped columns with NULL
+- GROUPING() function calls require the grouping indicator column
+- CUBE(a, b, c) expands to 2^3 = 8 grouping sets
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    input_rows: f64,
+    num_sets: usize,
+    avg_selectivity: f64,
+) -> f64 {
+    // Parallelizable branches vs single multi-pass aggregate
+    let parallel_factor = 0.5;
+    let savings = parallel_factor * (num_sets as f64 - 1.0)
+        / num_sets as f64;
+    savings
+}
+```
+
+**Typical benefit**: 0-50% depending on parallelization opportunity.
+
+## Test Cases
+
+```sql
+-- Positive: GROUPING SETS to UNION
+SELECT a, b, c, SUM(x)
+FROM t
+GROUP BY GROUPING SETS ((a, b), (a, c));
+-- Becomes UNION ALL of two simple GROUP BYs
+```
+
+```sql
+-- Positive: ROLLUP decomposition
+SELECT dept, year, SUM(sales)
+FROM orders
+GROUP BY ROLLUP (dept, year);
+-- Becomes 3 branches: (dept, year), (dept), ()
+```
+
+```sql
+-- Negative: simple GROUP BY
+SELECT dept, SUM(sales) FROM orders GROUP BY dept;
+-- Not a GROUPING SETS; rule does not apply
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/AggregateGroupingSetsToUnionRule.java (commit af6367d)

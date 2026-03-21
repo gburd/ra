@@ -1,0 +1,399 @@
+# Rule: "DuckDB Cost Model Calibration"
+
+**Category:** cost-models
+**File:** `rules/cost-models/cost-calibration-duckdb.rra`
+
+## Metadata
+
+- **ID:** `cost-calibration-duckdb`
+- **Version:** "1.0.0"
+- **Databases:** duckdb
+- **Tags:** cost, calibration, duckdb, vectorized, columnar, analytical
+- **Authors:** "RA Contributors"
+
+
+# DuckDB Cost Model Calibration
+
+## Description
+
+Calibrates cost model parameters for DuckDB's vectorized columnar execution
+engine. DuckDB's cost model differs fundamentally from row-oriented databases:
+it is CPU and memory-bandwidth bound rather than I/O bound. The key cost
+factors are vector processing throughput, cache utilization, and morsel-driven
+parallelism overhead.
+
+DuckDB processes data in vectors of 2048 values, amortizing interpretation
+overhead. Its cost model prioritizes: (1) minimizing data volume through
+column pruning and predicate pushdown, (2) choosing hash join vs sort-merge
+based on build side cache fitness, (3) exploiting morsel-driven parallelism
+for multi-core scaling.
+
+**When to apply**: When generating cost estimates for analytical queries in
+DuckDB or DuckDB-like vectorized engines. Also applicable to systems like
+Velox, DataFusion, and Polars.
+
+**Why it works**: DuckDB's in-process execution and columnar storage make
+its performance characteristics predictable: CPU cycles per vector operation,
+memory bandwidth per column scan, and parallel scaling efficiency are all
+measurable and stable.
+
+## Relational Algebra
+
+```algebra
+DuckDB cost model:
+  Cost(ColumnScan(R, cols)) =
+    sum(column_bytes(c) for c in cols) / memory_bandwidth
+    + num_vectors * vector_processing_cost
+
+  Cost(Filter(R, p)) =
+    Cost(R) + num_vectors * predicate_eval_per_vector
+
+  Cost(HashJoin(build, probe)) =
+    Cost(build) + Cost(probe)
+    + build_vectors * hash_build_per_vector
+    + probe_vectors * hash_probe_per_vector
+    + cache_miss_penalty(build_size, L3_size)
+
+  Cost(Aggregate(R, G, agg)) =
+    Cost(R) + input_vectors * aggregate_per_vector
+    + hash_table_cost(num_groups)
+
+Vector overhead amortization:
+  Per-tuple cost = base_cost / vector_size (2048)
+  Much lower than Volcano per-tuple overhead
+```
+
+## Implementation
+
+```rust
+struct DuckDBCostParams {
+    // Vector processing costs (nanoseconds per vector of 2048 tuples)
+    vector_scan_ns: f64,
+    vector_filter_simple_ns: f64,
+    vector_filter_complex_ns: f64,
+    vector_hash_build_ns: f64,
+    vector_hash_probe_ns: f64,
+    vector_sort_comparison_ns: f64,
+    vector_aggregate_ns: f64,
+
+    // Memory bandwidth
+    memory_bandwidth_gb_s: f64,
+    l3_cache_bytes: u64,
+
+    // Parallelism
+    num_cores: u32,
+    morsel_size: u32,
+    parallel_efficiency: f64,
+}
+
+impl DuckDBCostParams {
+    fn for_laptop() -> Self {
+        // MacBook Pro M3, 8 cores, 36MB L3
+        Self {
+            vector_scan_ns: 500.0,
+            vector_filter_simple_ns: 200.0,
+            vector_filter_complex_ns: 1000.0,
+            vector_hash_build_ns: 3000.0,
+            vector_hash_probe_ns: 2000.0,
+            vector_sort_comparison_ns: 800.0,
+            vector_aggregate_ns: 1500.0,
+            memory_bandwidth_gb_s: 100.0,
+            l3_cache_bytes: 36 * 1024 * 1024,
+            num_cores: 8,
+            morsel_size: 10240,
+            parallel_efficiency: 0.85,
+        }
+    }
+
+    fn for_server() -> Self {
+        // Dual-socket Xeon, 64 cores, 128MB L3
+        Self {
+            vector_scan_ns: 400.0,
+            vector_filter_simple_ns: 150.0,
+            vector_filter_complex_ns: 800.0,
+            vector_hash_build_ns: 2500.0,
+            vector_hash_probe_ns: 1800.0,
+            vector_sort_comparison_ns: 600.0,
+            vector_aggregate_ns: 1200.0,
+            memory_bandwidth_gb_s: 200.0,
+            l3_cache_bytes: 128 * 1024 * 1024,
+            num_cores: 64,
+            morsel_size: 10240,
+            parallel_efficiency: 0.75,
+        }
+    }
+
+    fn column_scan_cost(
+        &self,
+        rows: f64,
+        column_widths: &[u32],
+    ) -> f64 {
+        let total_bytes: f64 = column_widths
+            .iter()
+            .map(|w| rows * *w as f64)
+            .sum();
+
+        // Memory bandwidth cost
+        let bandwidth_ns = total_bytes
+            / (self.memory_bandwidth_gb_s * 1e9)
+            * 1e9;
+
+        // Vector processing cost
+        let num_vectors = (rows / 2048.0).ceil();
+        let vector_cost = num_vectors * self.vector_scan_ns
+            * column_widths.len() as f64;
+
+        bandwidth_ns.max(vector_cost) // Bandwidth or compute bound
+    }
+
+    fn filter_cost(
+        &self,
+        input_rows: f64,
+        predicate_type: PredicateType,
+    ) -> f64 {
+        let num_vectors = (input_rows / 2048.0).ceil();
+        let per_vector = match predicate_type {
+            PredicateType::Simple => self.vector_filter_simple_ns,
+            PredicateType::Complex => self.vector_filter_complex_ns,
+            PredicateType::Conjunction(n) => {
+                self.vector_filter_simple_ns * n as f64 * 0.8
+            }
+        };
+        num_vectors * per_vector
+    }
+
+    fn hash_join_cost(
+        &self,
+        build_rows: f64,
+        probe_rows: f64,
+        build_key_width: u32,
+        build_payload_width: u32,
+    ) -> f64 {
+        let build_vectors = (build_rows / 2048.0).ceil();
+        let probe_vectors = (probe_rows / 2048.0).ceil();
+
+        // Build phase
+        let build_cost =
+            build_vectors * self.vector_hash_build_ns;
+
+        // Hash table size and cache fitness
+        let entry_size =
+            (build_key_width + build_payload_width + 8) as f64;
+        let ht_bytes = build_rows * entry_size * 2.0;
+
+        // Cache miss penalty for probe phase
+        let cache_penalty = if ht_bytes as u64 <= self.l3_cache_bytes {
+            1.0
+        } else {
+            // DRAM access: ~5x slower than L3
+            let overflow_fraction =
+                1.0 - (self.l3_cache_bytes as f64 / ht_bytes);
+            1.0 + overflow_fraction * 4.0
+        };
+
+        // Probe phase
+        let probe_cost = probe_vectors
+            * self.vector_hash_probe_ns
+            * cache_penalty;
+
+        build_cost + probe_cost
+    }
+
+    fn sort_cost(&self, rows: f64, key_width: u32) -> f64 {
+        let num_vectors = (rows / 2048.0).ceil();
+        let comparisons_per_vector =
+            2048.0 * (2048.0_f64).log2();
+
+        // Vectorized sort: radix sort for fixed-width keys
+        if key_width <= 8 {
+            // Radix sort: O(n * key_width) with vectorization
+            let radix_passes = (key_width as f64 / 2.0).ceil();
+            num_vectors * self.vector_scan_ns * radix_passes
+        } else {
+            // Comparison-based sort
+            let sort_vectors = num_vectors * rows.log2().max(1.0);
+            sort_vectors * self.vector_sort_comparison_ns
+        }
+    }
+
+    fn aggregate_cost(
+        &self,
+        input_rows: f64,
+        num_groups: f64,
+        num_aggregates: u32,
+    ) -> f64 {
+        let num_vectors = (input_rows / 2048.0).ceil();
+
+        // Hash table for groups
+        let ht_bytes = num_groups * 64.0 * num_aggregates as f64;
+        let cache_penalty = if ht_bytes as u64 <= self.l3_cache_bytes {
+            1.0
+        } else {
+            let overflow =
+                1.0 - (self.l3_cache_bytes as f64 / ht_bytes);
+            1.0 + overflow * 4.0
+        };
+
+        num_vectors
+            * self.vector_aggregate_ns
+            * num_aggregates as f64
+            * cache_penalty
+    }
+
+    fn parallel_speedup(&self, serial_cost: f64) -> f64 {
+        let ideal_speedup = self.num_cores as f64;
+        let actual_speedup =
+            ideal_speedup * self.parallel_efficiency;
+        serial_cost / actual_speedup
+    }
+
+    fn total_query_cost(&self, plan: &DuckDBPlan) -> f64 {
+        let serial_cost = self.serial_cost(plan);
+        if plan.is_parallelizable() {
+            self.parallel_speedup(serial_cost)
+        } else {
+            serial_cost
+        }
+    }
+}
+
+enum PredicateType {
+    Simple,
+    Complex,
+    Conjunction(u32),
+}
+```
+
+**Restrictions:**
+- Vector size (2048) is fixed; different sizes change amortization
+- Compression effects not modeled (DuckDB uses lightweight compression)
+- Adaptive pipeline breakers (e.g., bloom filter) not modeled
+- Zone maps and min/max pruning not explicitly in cost model
+- String operations significantly more expensive than numeric
+
+## Cost Model
+
+```rust
+fn duckdb_vs_postgresql_cost_comparison(
+    query: &Query,
+    duckdb_params: &DuckDBCostParams,
+    pg_params: &PostgreSQLCostParams,
+) -> CostComparison {
+    // DuckDB advantages:
+    // - Columnar: only reads needed columns
+    // - Vectorized: 10-100x lower per-tuple overhead
+    // - In-process: no client-server round trips
+
+    // PostgreSQL advantages:
+    // - Index support: B-tree, GiST, GIN for point queries
+    // - Buffer pool: hot data stays cached across queries
+    // - Concurrent writes: MVCC for OLTP workloads
+
+    let duckdb_cost = duckdb_params.total_query_cost(
+        &plan_for_duckdb(query),
+    );
+    let pg_cost = pg_params.total_cost(&plan_for_pg(query));
+
+    CostComparison {
+        duckdb_cost,
+        pg_cost,
+        winner: if duckdb_cost < pg_cost {
+            "DuckDB"
+        } else {
+            "PostgreSQL"
+        },
+    }
+}
+```
+
+**Typical benefit**: 30-70% more accurate cost predictions for analytical
+queries compared to using row-oriented cost assumptions.
+
+## Test Cases
+
+### Test 1: Columnar scan advantage
+
+```sql
+SELECT SUM(price), SUM(quantity) FROM lineitem;
+-- 60M rows, 16 columns, 200 bytes/row total
+-- price: 8 bytes, quantity: 4 bytes
+
+-- DuckDB (columnar): reads 60M * 12 bytes = 720MB
+--   Bandwidth: 720MB / 100GB/s = 7.2ms
+--   Vectors: 29,297 * 500ns * 2 cols = 29.3ms
+--   Total: ~30ms (single core), ~4ms (8 cores)
+
+-- PostgreSQL (row): reads 60M * 200 bytes = 12GB
+--   I/O: 12GB / 200MB/s = 60s (cold) or ~1.5s (cached)
+--   Much slower due to reading all columns
+```
+
+### Test 2: Hash join cache fitness
+
+```sql
+SELECT * FROM lineitem l JOIN part p ON l.partkey = p.partkey;
+-- part: 200K rows, 80 bytes/row -> hash table ~32MB (fits L3)
+-- lineitem: 60M rows
+
+-- DuckDB: build 98 vectors * 3us = 0.3ms
+--         probe 29,297 vectors * 2us * 1.0 penalty = 58.6ms
+--         Total: ~59ms serial, ~8ms parallel
+
+-- If part were 2M rows -> hash table 320MB (exceeds 36MB L3)
+--         probe penalty: 1.0 + 0.89 * 4.0 = 4.56x
+--         probe: 29,297 * 2us * 4.56 = 267ms serial
+```
+
+### Test 3: Morsel-driven parallelism
+
+```sql
+SELECT region, SUM(amount) FROM sales GROUP BY region;
+-- 100M rows, 50 regions, 8 cores
+
+-- Serial: scan(100M * 8B / 100GB/s) + agg(48,828 vecs * 1.5us)
+--       = 8ms + 73ms = 81ms
+-- Parallel (8 cores, 85% efficiency): 81 / 6.8 = 11.9ms
+-- Near-linear scaling for embarrassingly parallel aggregation
+```
+
+### Test 4: Sort with radix optimization
+
+```sql
+SELECT * FROM orders ORDER BY order_date;
+-- 10M rows, order_date: 4 bytes (integer encoding)
+
+-- Radix sort: 4-byte key -> 2 passes
+--   4,883 vectors * 500ns * 2 = 4.9ms
+-- Comparison sort: 4,883 * log2(10M) * 800ns = 92ms
+-- Radix sort 19x faster for narrow keys
+```
+
+### Test 5: Late materialization benefit
+
+```sql
+SELECT * FROM lineitem WHERE l_quantity > 40 ORDER BY l_extendedprice LIMIT 10;
+-- 60M rows, selectivity ~5% = 3M qualifying
+
+-- Early materialization: read all 16 columns for 60M rows (12GB)
+-- Late materialization: read quantity (480MB), filter, then
+--   read remaining columns only for 3M rows (600MB)
+-- Late materialization reads 1.08GB vs 12GB (11x less I/O)
+```
+
+## References
+
+**DuckDB internals:**
+- Raasveldt & Muehleisen, "DuckDB: an Embeddable Analytical Database", SIGMOD 2019
+- DuckDB documentation: "Execution Engine" (vectorized processing)
+- DuckDB blog: "Push-Based Execution in DuckDB"
+
+**Vectorized execution:**
+- Boncz, Zukowski, Nes, "MonetDB/X100: Hyper-Pipelining Query Execution", CIDR 2005
+- Kersten et al., "Everything You Always Wanted to Know About Compiled and Vectorized Queries But Were Afraid to Ask", VLDB 2018
+
+**Morsel-driven parallelism:**
+- Leis et al., "Morsel-Driven Parallelism: A NUMA-Aware Query Evaluation Framework", SIGMOD 2014
+
+**Cost modeling for columnar systems:**
+- Manegold et al., "Generic Database Cost Models for Hierarchical Memory Systems", VLDB 2002
+- Zukowski et al., "Vectorwise: A Vectorized Analytical DBMS", ICDE 2012

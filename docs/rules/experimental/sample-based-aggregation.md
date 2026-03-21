@@ -1,0 +1,111 @@
+# Rule: Sample-Based Approximate Aggregation
+
+**Category:** experimental/approximate
+**File:** `rules/experimental/approximate/sample-based-aggregation.rra`
+
+## Metadata
+
+- **ID:** `sample-based-aggregation`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, spark, presto, blinkdb
+- **Tags:** approximate, sampling, aggregation, confidence-interval, aqp
+- **Authors:** "Agarwal, Mozafari, Panda, Milner, Madden, Stoica"
+
+
+# Sample-Based Approximate Aggregation
+
+## Description
+
+Computes aggregate queries over a random sample of the data instead of
+the full dataset, returning approximate results with statistical error
+bounds (confidence intervals). Using a uniform or stratified sample of
+size s << n, aggregates like COUNT, SUM, AVG can be estimated with
+error proportional to 1/sqrt(s), independent of the full dataset size.
+
+**When to apply**: Exploratory analytics, dashboards, and interactive
+queries where fast approximate answers are preferred over slow exact ones.
+
+## Relational Algebra
+
+```algebra
+-- Before: full scan aggregation
+gamma[dept; AVG(salary)](employees)  -- scans 10M rows
+
+-- After: sample-based aggregation with error bounds
+gamma[dept; AVG(salary), ERROR_BOUND(0.95)](
+    SAMPLE(employees, rate=0.01))  -- scans 100K rows
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("sample-aggregate";
+    "(aggregate ?groups ?agg ?input)" =>
+    "(approximate-aggregate ?groups ?agg
+        (sample ?input (rate 0.01) (method bernoulli))
+        (confidence 0.95))"
+    if approximate_mode_enabled()
+    if input_is_large("?input")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(agg: &Aggregate, config: &QueryConfig) -> bool {
+    config.allows_approximate_results()
+        && agg.input_cardinality() > 100_000
+        // Must be a sampling-compatible aggregate
+        && agg.function().is_sample_estimable()
+        // GROUP BY groups must not be too small
+        && agg.min_group_size() > 30 // CLT requirement
+}
+```
+
+**Restrictions:**
+- MIN/MAX not estimable from samples (extreme values may be missed)
+- Small groups have high variance (need stratified sampling)
+- Rare predicates may have zero matches in sample
+- Error bounds require known or estimable population size
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    full_rows: f64,
+    sample_rate: f64,
+) -> f64 {
+    let sample_rows = full_rows * sample_rate;
+    let full_cost = full_rows * 8.0;
+    let sample_cost = sample_rows * 8.0 + 100.0; // sampling overhead
+    full_cost - sample_cost
+}
+```
+
+**Typical benefit**: 50-99% reduction in scan cost.
+
+## Test Cases
+
+```sql
+-- Positive: dashboard aggregate on large table
+SELECT region, AVG(order_amount), COUNT(*)
+FROM orders TABLESAMPLE BERNOULLI(1)
+GROUP BY region;
+-- 1% sample: 100x faster, ~10% error at 95% confidence
+
+-- Positive: interactive exploration
+SELECT category, SUM(revenue) FROM sales
+TABLESAMPLE SYSTEM(5) GROUP BY category;
+-- 5% sample for rapid exploration
+
+-- Negative: exact count required
+SELECT COUNT(*) FROM transactions WHERE status = 'fraud';
+-- Rare events: sampling may miss them entirely
+```
+
+## References
+
+- Agarwal, S. et al. "BlinkDB: Queries with Bounded Errors and Bounded Response Times on Very Large Data" (EuroSys 2013)
+- Chaudhuri, S. et al. "Optimized Stratified Sampling for Approximate Query Processing" (TODS 2007)

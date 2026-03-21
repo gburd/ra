@@ -1,0 +1,103 @@
+# Rule: Bloom Filter Pushdown for Join Reduction
+
+**Category:** logical/sideways-information-passing
+**File:** `rules/logical/sideways-information-passing/bloom-filter-pushdown.rra`
+
+## Metadata
+
+- **ID:** `bloom-filter-pushdown`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, duckdb, spark, presto, impala
+- **Tags:** logical, bloom-filter, join, pushdown, probabilistic
+- **Authors:** "Bloom, Burton H.", "Ramakrishnan, Gehrke"
+
+
+# Bloom Filter Pushdown for Join Reduction
+
+## Description
+
+Builds a Bloom filter on the join key from the smaller (build) side of a
+hash join, then pushes it down to the probe side's scan operator. Rows
+that fail the Bloom filter test are discarded before reaching the join,
+reducing I/O and network transfer in distributed settings.
+
+**When to apply**: Hash joins where the build side is significantly smaller
+than the probe side, especially in distributed or columnar engines.
+
+**Key insight**: A compact probabilistic filter eliminates most non-matching
+rows at scan time with near-zero false negatives.
+
+## Relational Algebra
+
+```algebra
+-- Before
+R join[R.k = S.k] S
+
+-- After (conceptual)
+R join[R.k = S.k] sigma[bloom(S.k, bf(R.k))](S)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("bloom-filter-pushdown";
+    "(hashjoin ?key ?build ?probe)" =>
+    "(hashjoin ?key ?build (bloom-filter ?key ?build ?probe))"
+    if build_is_smaller("?build", "?probe")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(join: &HashJoin) -> bool {
+    let build_card = join.build_side().cardinality();
+    let probe_card = join.probe_side().cardinality();
+    // Build side should be significantly smaller
+    build_card < probe_card * 0.3
+        // Join selectivity should be low (many probe rows rejected)
+        && join.estimated_selectivity() < 0.5
+}
+```
+
+**Restrictions:**
+- Only equi-joins (hash-based filter on exact key match)
+- False positive rate increases with build-side size
+- Not beneficial if most probe rows match
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    probe_rows: f64,
+    selectivity: f64,
+    false_positive_rate: f64,
+) -> f64 {
+    let rows_eliminated = probe_rows * (1.0 - selectivity);
+    let false_positives = rows_eliminated * false_positive_rate;
+    (rows_eliminated - false_positives) * 8.0 // bytes per row saved
+}
+```
+
+**Typical benefit**: 10-80% reduction in probe-side I/O.
+
+## Test Cases
+
+```sql
+-- Positive: small dimension table joined with large fact table
+SELECT f.amount
+FROM fact_sales f JOIN dim_store s ON f.store_id = s.id
+WHERE s.region = 'West';
+-- Bloom filter on dim_store.id pushed to fact_sales scan
+
+-- Negative: both sides similar size
+SELECT * FROM orders o JOIN customers c ON o.cust_id = c.id;
+```
+
+## References
+
+- Bloom, B.H. "Space/Time Trade-offs in Hash Coding with Allowable Errors" (1970)
+- Impala runtime filter documentation
+- Spark adaptive query execution: dynamic partition pruning via Bloom filters

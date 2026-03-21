@@ -1,0 +1,164 @@
+# Rule: Distributed Subquery Decorrelation
+
+**Category:** distributed/stage-planning
+**File:** `rules/distributed/stage-planning/distributed-subquery-decorrelation.rra`
+
+## Metadata
+
+- **ID:** `distributed-subquery-decorrelation`
+- **Version:** "1.0.0"
+- **Databases:** cockroachdb, tidb
+- **Tags:** distributed, subquery, decorrelation, apply, join, optimization
+- **Authors:** "RA Contributors"
+
+
+# Distributed Subquery Decorrelation
+
+## Description
+
+Decorrelates correlated subqueries (Apply operators) into joins for
+distributed execution. A correlated subquery executes the inner query
+once per outer row, which in a distributed system means one distributed
+query per outer row. Decorrelation transforms the Apply into a join,
+enabling set-oriented distributed execution with a single exchange.
+
+**When to apply**: A query contains a correlated subquery (EXISTS, IN,
+scalar subquery, or lateral join) that references columns from the
+outer query. The subquery can be decorrelated into an equivalent join.
+
+**Why it works**: In distributed execution, each correlated subquery
+invocation requires a separate distributed query (potentially hitting
+multiple nodes). After decorrelation, a single join with appropriate
+exchange operators handles all rows in one distributed operation,
+reducing the number of network round trips from O(n) to O(1).
+
+## Relational Algebra
+
+```algebra
+-- Correlated (Apply): N distributed queries
+Apply[exists](R, sigma[R.k = S.k](S))
+  -> SemiJoin[R.k = S.k](R, S)
+
+-- Scalar subquery decorrelation
+Project[a, (SELECT MAX(b) FROM S WHERE S.k = R.k)](R)
+  -> LeftJoin[R.k = S.k](R,
+       gamma[k, MAX(b)](S))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("decorrelate-exists-subquery";
+    "(apply exists ?outer
+        (filter [(eq ?outer_col ?inner_col)] (scan ?inner)))" =>
+    "(semi_join ?outer (scan ?inner) [(eq ?outer_col ?inner_col)])"
+),
+
+rw!("decorrelate-scalar-subquery";
+    "(apply scalar ?outer
+        (scalar_group_by
+            (filter [(eq ?outer_col ?inner_col)] (scan ?inner))
+            ?aggs))" =>
+    "(left_join ?outer
+        (group_by (scan ?inner) ?aggs ?inner_col)
+        [(eq ?outer_col ?inner_col)])"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    apply: &ApplyExpr,
+) -> bool {
+    // The correlation must be expressible as an equi-join condition
+    apply.correlation_is_equijoin()
+    // The inner query must not have side effects
+    && !apply.inner().has_side_effects()
+    // Must not have volatile functions that change per invocation
+    && !apply.inner().has_volatile()
+}
+```
+
+**Restrictions:**
+- Not all correlated subqueries can be decorrelated (e.g., those
+  with LIMIT in the inner query may not decorrelate cleanly)
+- Lateral joins with non-equi correlation require special handling
+- After decorrelation, the resulting join may need NULL handling
+  for LEFT OUTER semantics (scalar subqueries return NULL when no
+  match exists)
+- CockroachDB uses a multi-rule approach (TryDecorrelateSelect,
+  TryDecorrelateProject, etc.) for different decorrelation patterns
+
+## Cost Model
+
+```rust
+fn decorrelation_benefit(
+    outer_rows: f64,
+    inner_rows: f64,
+    distributed_query_cost: f64,
+    join_cost_per_row: f64,
+) -> f64 {
+    // Correlated: one distributed query per outer row
+    let correlated = outer_rows * distributed_query_cost;
+    // Decorrelated: single join
+    let decorrelated = (outer_rows + inner_rows) * join_cost_per_row;
+    correlated - decorrelated
+}
+```
+
+**Typical benefit**: For 100K outer rows, decorrelation reduces from
+100K distributed queries to 1 join, a 100Kx reduction in network
+round trips.
+
+## Test Cases
+
+```sql
+-- Positive: EXISTS decorrelation
+SELECT * FROM orders o WHERE EXISTS (
+    SELECT 1 FROM returns r WHERE r.order_id = o.id
+);
+
+-- Correlated: 1M Apply iterations
+-- Decorrelated: SemiJoin(o.id = r.order_id)
+--   Scan(orders)
+--   Scan(returns)
+```
+
+```sql
+-- Positive: scalar subquery decorrelation
+SELECT o.id,
+       (SELECT MAX(amount) FROM payments p WHERE p.order_id = o.id)
+FROM orders o;
+
+-- Decorrelated: LeftJoin(o.id = p.order_id)
+--   Scan(orders)
+--   GroupBy(order_id, MAX(amount))(Scan(payments))
+```
+
+```sql
+-- Positive: IN subquery decorrelation
+SELECT * FROM products WHERE category_id IN (
+    SELECT id FROM categories WHERE active = true
+);
+-- Decorrelated to SemiJoin
+```
+
+```sql
+-- Negative: correlated LIMIT subquery
+SELECT * FROM orders o WHERE (
+    SELECT price FROM items i
+    WHERE i.order_id = o.id
+    ORDER BY price DESC LIMIT 1
+) > 100;
+-- LIMIT in correlated subquery; may not decorrelate cleanly
+```
+
+## References
+
+CockroachDB: pkg/sql/opt/norm/rules/decorrelate.opt - decorrelation rules (commit 51e808c)
+TiDB: pkg/planner/core/rule_decorrelate.go - decorrelation optimizer
+Neumann & Kemper, "Unnesting Arbitrary Queries" (BTW 2015)
+Seshadri et al., "Cost-based Optimization for Magic" (SIGMOD 1996)

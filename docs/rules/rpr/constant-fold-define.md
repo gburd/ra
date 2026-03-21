@@ -1,0 +1,177 @@
+# Rule: Constant Fold DEFINE Expressions
+
+**Category:** logical/rpr
+**File:** `rules/rpr/constant-fold-define.rra`
+
+## Metadata
+
+- **ID:** `rpr-constant-fold-define`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, oracle, duckdb, generic
+- **Tags:** rpr, constant-folding, define, simplification
+- **Authors:** "RA Contributors"
+
+## Preconditions
+
+```yaml
+  - type: pattern
+    must_match: "(row-pattern ?input ?partition ?order ?defines ?measures ?pattern)"
+  - type: predicate
+    condition: "defines_have_constant_subexpressions(?defines)"
+    description: "DEFINE conditions contain evaluable constant subexpressions"
+```
+
+
+# Constant Fold DEFINE Expressions
+
+## Description
+
+Evaluates constant subexpressions in DEFINE conditions at plan time.
+Arithmetic, string operations, and boolean logic on constants can be
+computed once rather than per-row during DFA evaluation.
+
+**When to apply**: DEFINE conditions contain subexpressions where
+all operands are constants or have been replaced by constants via
+earlier propagation rules.
+
+**Why it works**: `DEFINE A AS price > (100 * 1.1)` evaluates
+`100 * 1.1 = 110` at plan time, producing the simpler
+`DEFINE A AS price > 110`. This saves one multiplication per row
+per DFA transition.
+
+## Relational Algebra
+
+```algebra
+-- Before: constant arithmetic in DEFINE
+defines: { A: Gt(price, Mul(100, 1.1)) }
+
+-- After: folded
+defines: { A: Gt(price, 110) }
+
+-- Before: constant boolean in DEFINE
+defines: { A: And(true, Gt(price, Prev(price))) }
+
+-- After: simplified
+defines: { A: Gt(price, Prev(price)) }
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Fold constant arithmetic in DEFINE
+rw!("rpr-fold-define-arithmetic";
+    "(defines (define ?var (compare ?op ?col (arith ?op2 ?a ?b))))" =>
+    "(defines (define ?var (compare ?op ?col (const (eval-arith ?op2 ?a ?b)))))"
+    if is_constant("?a")
+    if is_constant("?b")
+),
+
+// Simplify AND with true
+rw!("rpr-simplify-define-and-true";
+    "(defines (define ?var (and true ?expr)))" =>
+    "(defines (define ?var ?expr))"
+),
+
+rw!("rpr-simplify-define-and-true-right";
+    "(defines (define ?var (and ?expr true)))" =>
+    "(defines (define ?var ?expr))"
+),
+
+// Simplify AND with false
+rw!("rpr-simplify-define-and-false";
+    "(defines (define ?var (and false ?expr)))" =>
+    "(defines (define ?var false))"
+),
+
+// Simplify OR with true
+rw!("rpr-simplify-define-or-true";
+    "(defines (define ?var (or true ?expr)))" =>
+    "(defines (define ?var true))"
+),
+
+// Simplify OR with false
+rw!("rpr-simplify-define-or-false";
+    "(defines (define ?var (or false ?expr)))" =>
+    "(defines (define ?var ?expr))"
+),
+```
+
+## Preconditions
+
+```rust
+fn defines_have_constant_subexpressions(
+    defines: &HashMap<Symbol, Expr>,
+) -> bool {
+    defines.values().any(|d| d.has_constant_subexpr())
+}
+```
+
+**Restrictions:**
+- Only folds deterministic operations (no RANDOM(), CURRENT_TIMESTAMP, etc.).
+- PREV() and NEXT() calls are not constant even if their arguments are.
+- Type coercions must be preserved during folding.
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    folded_ops: usize,
+    input_card: f64,
+    avg_transitions_per_row: f64,
+) -> f64 {
+    // Each folded operation saves evaluation per row per transition.
+    let savings = folded_ops as f64 * input_card
+        * avg_transitions_per_row * 0.0001;
+    let total_cost = input_card * avg_transitions_per_row * 0.001;
+    (savings / total_cost).min(0.4)
+}
+```
+
+**Typical benefit**: 10-40%. Proportional to the number of constant
+subexpressions in DEFINE conditions.
+
+## Test Cases
+
+### Positive: arithmetic constant folding
+
+```sql
+-- Before: 100 * 1.1 evaluated per row
+MATCH_RECOGNIZE (
+  PATTERN (A+)
+  DEFINE A AS price > 100 * 1.1
+)
+
+-- After: 110 computed at plan time
+-- DEFINE A AS price > 110
+```
+
+### Positive: boolean simplification
+
+```sql
+-- Before: redundant AND true
+MATCH_RECOGNIZE (
+  PATTERN (A+)
+  DEFINE A AS price > PREV(price) AND true
+)
+
+-- After
+-- DEFINE A AS price > PREV(price)
+```
+
+### Negative: non-constant subexpression
+
+```sql
+-- Cannot fold: PREV(price) is not constant
+MATCH_RECOGNIZE (
+  PATTERN (A+)
+  DEFINE A AS price > PREV(price) + 10
+)
+-- PREV(price) + 10 cannot be folded (PREV is row-dependent)
+```
+
+## References
+
+- Aho, Sethi, Ullman. "Compilers" (1986), Section 9.6 (Constant Folding)
+- PostgreSQL: eval_const_expressions in optimizer/util/clauses.c

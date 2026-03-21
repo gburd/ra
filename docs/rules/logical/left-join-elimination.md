@@ -1,0 +1,98 @@
+# Rule: Left Join Elimination
+
+**Category:** logical/join-elimination
+**File:** `rules/logical/join-elimination/left-join-elimination.rra`
+
+## Metadata
+
+- **ID:** `left-join-elimination`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, oracle, mssql
+- **Tags:** join, elimination, outer-join
+- **Authors:** "RA Contributors"
+
+
+# Left Join Elimination
+
+## Description
+
+Eliminates LEFT JOIN when right table columns are not referenced and no filtering occurs.
+
+**When to apply**: LEFT JOIN where right table is never used in output or predicates.
+
+**Why it works**: LEFT JOIN preserves all left rows; if right columns unused, join has no effect.
+
+## Relational Algebra
+
+```algebra
+project[L.*](left_join[cond](L, R))
+  -> project[L.*](L)
+  where !references_columns(R)
+```
+
+## Implementation
+
+```rust
+rw!("eliminate-unused-left-join";
+    "(project ?cols (left-join ?cond ?left ?right))" =>
+    "(project ?cols ?left)"
+    if !uses_right_columns("?cols", "?right")
+),
+```
+
+## Cost Model
+
+```rust
+fn benefit(left_size: u64, right_size: u64) -> f64 {
+    let with_join = left_size as f64 * right_size as f64;
+    let without = left_size as f64;
+    (with_join - without) / with_join
+}
+```
+
+**Typical benefit**: 30-60% by removing join overhead
+
+## Test Cases
+
+### Positive: Unused LEFT JOIN
+
+```sql
+SELECT users.* FROM users
+LEFT JOIN orders ON users.id = orders.user_id;
+
+-- Eliminate: orders table not referenced
+```
+
+### Positive: Existence check removed by query rewrite
+
+```sql
+SELECT COUNT(*) FROM customers c
+LEFT JOIN orders o ON c.id = o.customer_id;
+
+-- Eliminate if counting customers only
+```
+
+### Negative: RIGHT table columns in SELECT
+
+```sql
+SELECT users.*, orders.total FROM users
+LEFT JOIN orders ON users.id = orders.user_id;
+
+-- Cannot eliminate: need orders.total
+```
+
+### Negative: RIGHT table in WHERE clause
+
+```sql
+SELECT users.* FROM users
+LEFT JOIN orders ON users.id = orders.user_id
+WHERE orders.total > 100;
+
+-- Cannot eliminate: filtering by orders column (becomes INNER JOIN)
+```
+
+## References
+
+- PostgreSQL: join_is_removable in optimizer
+- MySQL: Outer join simplification
+- mssql: Unnecessary outer join removal

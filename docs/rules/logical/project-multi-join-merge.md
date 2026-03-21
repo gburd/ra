@@ -1,0 +1,99 @@
+# Rule: Project Multi-Join Merge
+
+**Category:** logical/projection-pushdown
+**File:** `rules/logical/projection-pushdown/project-multi-join-merge.rra`
+
+## Metadata
+
+- **ID:** `calcite-project-multi-join-merge`
+- **Version:** "1.0.0"
+- **Databases:** calcite, postgresql, duckdb, cockroachdb
+- **Tags:** logical, calcite, projection, multi-join, pushdown
+- **Authors:** "Apache Calcite"
+
+
+# Project Multi-Join Merge
+
+## Description
+
+When a Project sits above a MultiJoin (flattened multi-way join), pushes
+column pruning into the multi-join so that each input relation only
+produces the columns needed for join predicates and the final output.
+This is critical for star-schema queries where dimension tables have
+many columns but only a few are selected.
+
+**When to apply**: A Project above a MultiJoin references fewer columns
+than the combined input schemas.
+
+## Relational Algebra
+
+```algebra
+-- Before
+pi[f.name, d.year](MultiJoin(fact(id, name, amt), dim(id, year, desc, region)))
+
+-- After
+MultiJoin(pi[id, name](fact), pi[id, year](dim))
+-- with output pi[name, year]
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw\!("project-multi-join-merge";
+    "(project ?cols (multi-join ?inputs ?predicates))" =>
+    "(multi-join
+        (prune-multi-join-inputs ?inputs ?predicates ?cols)
+        ?predicates)"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(project: &Project, mj: &MultiJoin) -> bool {
+    let needed = project.referenced_columns();
+    let join_cols = mj.join_predicate_columns();
+    let total_needed = needed.union(&join_cols);
+    total_needed.len() < mj.total_input_columns()
+}
+```
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    rows_per_input: &[f64],
+    cols_removed_per_input: &[usize],
+) -> f64 {
+    rows_per_input.iter().zip(cols_removed_per_input)
+        .map(|(r, c)| r * *c as f64 * 8.0)
+        .sum::<f64>()
+}
+```
+
+**Typical benefit**: 5-40% for star schema queries.
+
+## Test Cases
+
+```sql
+-- Positive: star schema with narrow select
+SELECT p.name, SUM(s.amount)
+FROM sales s
+JOIN products p ON s.product_id = p.id
+JOIN stores st ON s.store_id = st.id
+JOIN dates d ON s.date_id = d.id
+WHERE d.year = 2024
+GROUP BY p.name;
+-- Only need: s(product_id, store_id, date_id, amount),
+--            p(id, name), st(id), d(id, year)
+
+-- Negative: SELECT * with all columns needed
+SELECT * FROM t1 JOIN t2 ON t1.id = t2.fk;
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/ProjectMultiJoinMergeRule.java
+- Kimball, R., "The Data Warehouse Toolkit", 3rd Edition, 2013

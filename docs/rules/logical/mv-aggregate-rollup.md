@@ -1,0 +1,94 @@
+# Rule: Materialized View Aggregate Rollup
+
+**Category:** logical/view-rewriting
+**File:** `rules/logical/view-rewriting/mv-aggregate-rollup.rra`
+
+## Metadata
+
+- **ID:** `mv-aggregate-rollup`
+- **Version:** "1.0.0"
+- **Databases:** oracle, postgresql, snowflake, clickhouse
+- **Tags:** logical, materialized-view, aggregate, rollup, derivation
+- **Authors:** "Srivastava et al., Oracle"
+
+
+# Materialized View Aggregate Rollup
+
+## Description
+
+When a query computes an aggregation at a coarser granularity than an
+existing materialized view, derives the query result by rolling up the
+finer-grained MV aggregates. For example, SUM at the yearly level can
+be derived from a monthly SUM MV.
+
+**When to apply**: Query GROUP BY is a subset of MV GROUP BY, and the
+aggregate functions are rollup-compatible (SUM, COUNT, MIN, MAX but
+not AVG directly).
+
+## Relational Algebra
+
+```algebra
+-- MV: gamma[year, month; SUM(amt) AS total](sales)
+-- Query: gamma[year; SUM(amt)](sales)
+-- Rewrite: gamma[year; SUM(total)](MV)
+```
+
+## Implementation
+
+```rust
+fn try_rollup(query: &Aggregate, mv: &MaterializedView) -> Option<Plan> {
+    if \!query.group_by().is_subset(&mv.group_by()) { return None; }
+    let rolled_aggs = query.aggregates().iter()
+        .map(|a| a.derive_from_mv(mv))
+        .collect::<Option<Vec<_>>>()?;
+    Some(Plan::aggregate(query.group_by(), rolled_aggs, Plan::scan_mv(mv)))
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(query: &Aggregate, mv: &MaterializedView) -> bool {
+    query.group_by().is_subset(&mv.group_by())
+        && query.aggregates().iter().all(|a| a.is_rollup_compatible())
+}
+```
+
+**Restrictions:**
+- AVG requires both SUM and COUNT in the MV
+- DISTINCT aggregates generally not rollup-compatible
+- HAVING predicates must be applicable after rollup
+
+## Cost Model
+
+```rust
+fn estimated_benefit(mv_rows: f64, base_table_rows: f64) -> f64 {
+    1.0 - (mv_rows / base_table_rows)
+}
+```
+
+## Test Cases
+
+```sql
+-- MV: monthly sales
+CREATE MATERIALIZED VIEW monthly_sales AS
+SELECT year, month, region, SUM(amount) AS total, COUNT(*) AS cnt
+FROM sales GROUP BY year, month, region;
+
+-- Positive: yearly rollup
+SELECT year, SUM(amount) FROM sales GROUP BY year;
+-- Rewrite: SELECT year, SUM(total) FROM monthly_sales GROUP BY year;
+
+-- Positive: regional rollup
+SELECT region, SUM(amount) FROM sales GROUP BY region;
+-- Rewrite: SELECT region, SUM(total) FROM monthly_sales GROUP BY region;
+
+-- Negative: AVG without COUNT
+SELECT year, AVG(amount) FROM sales GROUP BY year;
+-- Only works if MV has both SUM and COUNT
+```
+
+## References
+
+- Srivastava, D. et al., "Answering Queries with Aggregation Using Views", VLDB 1996
+- Gray, J. et al., "Data Cube: A Relational Aggregation Operator", Data Mining and Knowledge Discovery, 1997

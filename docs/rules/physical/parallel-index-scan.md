@@ -1,0 +1,61 @@
+# Rule: Parallel Index Scan
+
+**Category:** physical/parallelization
+**File:** `rules/physical/parallelization/parallel-index-scan.rra`
+
+## Metadata
+
+- **ID:** `parallel-index-scan`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, oracle
+- **Tags:** parallelization, index, scan
+- **Authors:** "RA Contributors"
+
+
+# Parallel Index Scan
+
+## Description
+
+Divides index range into sub-ranges, scans each range in parallel.
+
+**When to apply**: Index range scans returning many rows.
+
+**Why it works**: Index naturally partitionable by key ranges.
+
+## Relational Algebra
+
+```algebra
+index_scan[I WHERE key BETWEEN a AND z]
+  -> parallel_union(
+       index_scan[I WHERE key BETWEEN a AND b],
+       index_scan[I WHERE key BETWEEN b+1 AND c],
+       ...
+     )
+```
+
+## Implementation
+
+```rust
+rw!("parallel-index-scan";
+    "(index-scan ?index ?range)" =>
+    "(parallel-gather
+       (map-workers ?w
+         (index-scan ?index (sub-range ?range ?w))))"
+    if large_result_set("?range")
+),
+```
+
+## Cost Model
+
+```rust
+fn cost(matching_rows: u64, workers: usize) -> f64 {
+    (matching_rows as f64 / workers as f64) + 10.0
+}
+```
+
+**Typical benefit**: 40-70% for large result sets
+
+## References
+
+- PostgreSQL: Parallel index scan
+- Oracle: Parallel index range scan

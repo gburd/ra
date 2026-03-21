@@ -1,0 +1,84 @@
+# Rule: Project Remove (Identity)
+
+**Category:** logical/projection-pushdown
+**File:** `rules/logical/projection-pushdown/project-remove-trivial.rra`
+
+## Metadata
+
+- **ID:** `calcite-project-remove`
+- **Version:** "1.0.0"
+- **Databases:** calcite, postgresql, mysql, duckdb, sqlite
+- **Tags:** logical, calcite, projection, identity, simplification
+- **Authors:** "Apache Calcite"
+
+
+# Project Remove (Identity Projection)
+
+## Description
+
+Removes a Project that is an identity transformation (outputs exactly
+the same columns in the same order as its input). Such projections are
+often introduced by earlier rewrites and serve no purpose.
+
+**When to apply**: A Project outputs all input columns unchanged.
+
+**Calcite class**: `org.apache.calcite.rel.rules.ProjectRemoveRule`
+
+## Relational Algebra
+
+```algebra
+-- Before
+pi[a, b, c](R(a, b, c))
+
+-- After
+R(a, b, c)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw\!("project-remove-identity";
+    "(project ?cols ?input)" =>
+    "?input"
+    if is_identity_project("?cols", "?input")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(project: &Project) -> bool {
+    let input_cols = project.input().schema().columns();
+    let output_cols = project.expressions();
+    output_cols.len() == input_cols.len()
+        && output_cols.iter().enumerate().all(|(i, e)| {
+            e.is_input_ref(i)
+        })
+}
+```
+
+## Cost Model
+
+```rust
+fn estimated_benefit(_rows: f64) -> f64 {
+    0.02 // Small fixed overhead of an extra operator
+}
+```
+
+## Test Cases
+
+```sql
+-- Positive: identity projection from subquery
+SELECT a, b, c FROM (SELECT a, b, c FROM t);
+-- Inner project is identity, removed
+
+-- Negative: reordering columns
+SELECT b, a FROM (SELECT a, b FROM t);
+-- Not identity: column order changed
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/ProjectRemoveRule.java

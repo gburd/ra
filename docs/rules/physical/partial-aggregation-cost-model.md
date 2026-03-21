@@ -1,0 +1,230 @@
+# Rule: "Partial Aggregation Cost Model (When to Pre-Aggregate)"
+
+**Category:** physical/aggregation-strategies
+**File:** `rules/physical/aggregation-strategies/partial-aggregation-cost-model.rra`
+
+## Metadata
+
+- **ID:** `partial-aggregation-cost-model`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, clickhouse, duckdb, cockroachdb, spark
+- **Tags:** aggregation, partial, cost-model, pre-aggregate, cardinality
+- **Authors:** "RA Contributors"
+
+## Preconditions
+
+```yaml
+  - type: "pattern"
+    must_match: "(aggregate ?input ?groups ?aggs)"
+    description: "Aggregation evaluating partial aggregation benefit"
+  - type: "predicate"
+    condition: "all_decomposable(?aggs)"
+    description: "All aggregate functions must be decomposable"
+  - type: "fact"
+    fact_type: "statistics.cardinality"
+    table: "?input"
+    comparator: ">"
+    threshold: 10000
+    optional: true
+    description: "Input must be large enough to benefit from partial aggregation"
+```
+
+
+# Partial Aggregation Cost Model (When to Pre-Aggregate)
+
+## Metadata
+- **Rule ID**: `partial-aggregation-cost-model`
+- **Category**: Physical / Aggregation Strategies
+- **Complexity**: O(n) with reduced data movement
+- **Prerequisites**: Aggregation query; estimate of group cardinality
+- **Alternatives**: Full aggregation without pre-aggregation step
+
+## Description
+
+Partial (or pre-) aggregation inserts a local aggregation step before a
+data shuffle or merge phase. The key decision is *when* partial
+aggregation is beneficial. If the GROUP BY cardinality is close to the
+input cardinality, partial aggregation provides no reduction and adds
+overhead for building and probing a hash table that never merges rows.
+
+The cost model compares the reduction ratio (output_groups / input_rows)
+against a threshold. When the ratio is low (high reduction), partial
+aggregation saves significant network/disk I/O in distributed or
+spill-to-disk scenarios. When the ratio is close to 1.0 (no reduction),
+skipping partial aggregation is cheaper.
+
+Systems like ClickHouse and DuckDB use adaptive approaches: start
+pre-aggregating, and if the hash table grows too fast relative to input
+consumed (indicating low reduction), abandon the partial aggregation and
+stream rows directly to the final aggregation.
+
+**When to apply:**
+- Distributed aggregation (reduces network shuffle)
+- Spill-to-disk aggregation (reduces spill volume)
+- Reduction ratio < 0.5 (group cardinality < 50% of input)
+
+**When to skip:**
+- Reduction ratio > 0.8 (nearly 1:1 mapping)
+- Memory-constrained environments (hash table overhead)
+- Already-sorted input (streaming aggregation cheaper)
+
+## Relational Algebra
+
+```
+aggregate[groups, aggs](R)
+  -> final-aggregate[groups, merge-aggs](
+       partial-aggregate[groups, aggs](R))
+     when reduction_ratio(R, groups) < threshold
+
+aggregate[groups, aggs](R)
+  -> full-aggregate[groups, aggs](R)
+     when reduction_ratio(R, groups) >= threshold
+```
+
+## Implementation (egg rewrite rules)
+
+```lisp
+;; Insert partial aggregation when reduction is significant
+(rewrite (aggregate ?groups ?aggs ?input)
+  (final-aggregate ?groups (merge-fns ?aggs)
+    (partial-aggregate ?groups ?aggs ?input))
+  :if (< (reduction-ratio ?input ?groups) 0.5)
+  :if (all-decomposable ?aggs))
+
+;; Skip partial aggregation when cardinality too high
+(rewrite (partial-aggregate ?groups ?aggs ?input)
+  ?input
+  :if (> (reduction-ratio ?input ?groups) 0.8))
+
+;; Adaptive: start partial, abandon if ratio exceeds threshold
+(rewrite (aggregate ?groups ?aggs ?input)
+  (adaptive-aggregate ?groups ?aggs ?input 0.7)
+  :if (unknown-reduction-ratio ?input ?groups)
+  :if (all-decomposable ?aggs))
+
+;; Partial aggregation for distributed shuffle
+(rewrite (exchange ?key
+           (aggregate ?groups ?aggs ?input))
+  (final-aggregate ?groups (merge-fns ?aggs)
+    (exchange ?key
+      (partial-aggregate ?groups ?aggs ?input)))
+  :if (< (reduction-ratio ?input ?groups) 0.5)
+  :if (all-decomposable ?aggs))
+```
+
+## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
+
+```rust
+fn can_use_partial_aggregation(
+    agg_funcs: &[AggFunc],
+    input_card: u64,
+    group_card: u64,
+) -> bool {
+    let all_decomposable = agg_funcs.iter().all(|f| match f {
+        AggFunc::Sum | AggFunc::Count | AggFunc::Min
+        | AggFunc::Max | AggFunc::Avg => true,
+        AggFunc::Median | AggFunc::Percentile => false,
+        AggFunc::CountDistinct => false,
+    });
+
+    let reduction_ratio = group_card as f64 / input_card as f64;
+
+    all_decomposable && reduction_ratio < 0.8
+}
+```
+
+## Cost Model
+
+```rust
+pub fn cost_with_partial_aggregation(
+    input_rows: u64,
+    group_card: u64,
+    agg_count: usize,
+    bytes_per_row: u64,
+    hardware: &HardwareModel,
+) -> Cost {
+    let reduction = group_card as f64 / input_rows as f64;
+
+    let partial_hash = Cost::cpu(input_rows * 10);
+    let partial_update = Cost::cpu(input_rows * agg_count as u64 * 4);
+    let partial_memory = Cost::memory(group_card * agg_count as u64 * 16);
+
+    let shuffle_savings = Cost::io(
+        (input_rows - group_card) as f64
+        * bytes_per_row as f64
+        * hardware.network_cost()
+    );
+
+    let final_cost = Cost::cpu(group_card * agg_count as u64 * 8);
+
+    partial_hash + partial_update + partial_memory + final_cost - shuffle_savings
+}
+
+pub fn cost_without_partial(
+    input_rows: u64,
+    agg_count: usize,
+    bytes_per_row: u64,
+    hardware: &HardwareModel,
+) -> Cost {
+    let shuffle = Cost::io(
+        input_rows as f64 * bytes_per_row as f64 * hardware.network_cost()
+    );
+    let final_hash = Cost::cpu(input_rows * 10);
+    let final_update = Cost::cpu(input_rows * agg_count as u64 * 4);
+    shuffle + final_hash + final_update
+}
+```
+
+**Decision rule**: Use partial aggregation when `cost_with_partial < cost_without_partial`
+
+## Test Cases
+
+### Positive: Low cardinality GROUP BY
+```sql
+SELECT country, count(*), sum(revenue)
+FROM sales  -- 100M rows
+GROUP BY country;  -- ~200 countries
+
+-- Reduction ratio: 200/100M ≈ 0.000002
+-- Partial aggregation: each node reduces 100M rows to 200 groups
+-- Network savings: ~99.9998%
+```
+
+### Positive: Medium cardinality with network
+```sql
+SELECT user_id, sum(amount) FROM transactions
+GROUP BY user_id;  -- 1M users from 100M transactions
+
+-- Reduction ratio: 0.01
+-- Partial aggregation reduces shuffle from 100M to 1M rows
+```
+
+### Negative: High cardinality (nearly unique)
+```sql
+SELECT transaction_id, sum(amount) FROM line_items
+GROUP BY transaction_id;  -- 90M transactions from 100M line items
+
+-- Reduction ratio: 0.9
+-- Partial aggregation wastes memory building 90M-entry hash table
+-- No meaningful reduction; skip pre-aggregation
+```
+
+### Edge case: Adaptive aggregation
+```sql
+SELECT ip_address, count(*) FROM web_logs
+GROUP BY ip_address;
+
+-- Unknown cardinality: could be 1000 or 10M
+-- Adaptive: start pre-aggregating, abandon if hash table
+-- growth rate > 70% of input consumption rate
+```
+
+## References
+
+- Larson, "Data Reduction by Partial Preaggregation", ICDE 2002
+- ClickHouse: Adaptive aggregation in `src/Interpreters/Aggregator.cpp`
+- DuckDB: "Adaptive Aggregation" in `src/execution/operator/aggregate`
+- Spark: Partial aggregation in shuffle-based aggregation plans

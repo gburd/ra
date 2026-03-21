@@ -1,0 +1,62 @@
+# Rule: Scale Up Partition Count for Large Data
+
+**Category:** distributed/join-distribution
+**File:** `rules/distributed/join-distribution/dynamic-partition-count-scale-up.rra`
+
+## Metadata
+
+- **ID:** `dynamic-partition-count-scale-up`
+- **Version:** "1.0.0"
+- **Databases:** spark, presto, trino, databricks
+- **Tags:** distributed, join, partition-count, scale-up, adaptive
+- **Authors:** "RA Contributors"
+
+
+# Scale Up Partition Count for Large Data
+
+## Description
+
+When the data volume exceeds a threshold per partition, increase the
+partition count to keep each partition's memory footprint manageable.
+This prevents OOM on individual nodes and improves parallelism.
+
+## Relational Algebra
+
+```algebra
+Exchange[hash(k), N partitions](R)
+  -> Exchange[hash(k), M partitions](R)
+  where M = max(N, ceil(|R| / target_partition_size))
+  where M <= max_partitions
+```
+
+## Test Cases
+
+```sql
+-- Test 1: Large data needs more partitions
+SELECT o.*, l.*
+FROM orders o           -- 1TB, 8 partitions -> 125GB each
+JOIN line_items l       -- 5TB
+  ON o.id = l.order_id;
+-- Expected: Scale to 128+ partitions (target ~10GB each)
+```
+
+```sql
+-- Test 2: Already sufficient partitions
+SELECT o.*, c.name
+FROM orders o           -- 10GB, 16 partitions -> 625MB each
+JOIN customers c ON o.cid = c.id;
+-- Expected: Keep 16 partitions (625MB is reasonable)
+```
+
+```sql
+-- Test 3: Very large data, cap at max
+SELECT *
+FROM logs l             -- 100TB
+JOIN events e ON l.eid = e.id;
+-- Expected: Scale to max_partitions (e.g., 10000)
+```
+
+## References
+
+Spark: spark.sql.adaptive.coalescePartitions
+Databricks: Auto Optimize partition sizing

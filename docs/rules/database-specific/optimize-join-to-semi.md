@@ -1,0 +1,108 @@
+# Rule: Convert ANY JOIN to Semi-Join
+
+**Category:** database-specific/clickhouse
+**File:** `rules/database-specific/clickhouse/optimize-join-to-semi.rra`
+
+## Metadata
+
+- **ID:** `clickhouse-optimize-join-to-semi`
+- **Version:** 1.0.0
+- **Databases:** clickhouse
+- **Tags:** database-specific, clickhouse, join, semi-join, any-join
+- **Authors:** "RA Contributors"
+
+
+# Convert ANY JOIN to Semi-Join
+
+## Description
+
+Converts ClickHouse's ANY JOIN or ANY LEFT JOIN to a semi-join or anti-join when the right side columns are not used in the output. ANY JOIN semantics match at most one row from the right side per left row, making it equivalent to a semi-join when right columns are projected away.
+
+**When to apply**: ANY JOIN or ANY LEFT JOIN where right-side columns are not needed in the result.
+
+**Why it works**: Semi-join can stop after finding the first match and doesn't need to output right-side columns, reducing I/O and memory usage. The IN to EXISTS transformation in standard SQL is analogous.
+
+**Database version**: ClickHouse v1.0+
+
+## Relational Algebra
+
+```algebra
+Project[L_cols](Join[ANY, c](L, R))
+  -> SemiJoin[c](L, R)
+  where L_cols ⊆ columns(L)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("clickhouse-optimize-join-to-semi";
+    "(project ?cols
+        (join any ?left ?right ?cond))" =>
+    "(semi_join ?left ?right ?cond)"
+    if is_database("clickhouse")
+    if only_uses_left_columns("?cols", "?left")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    project_cols: &[Column],
+    left: &RelNode,
+    right: &RelNode,
+    join_type: JoinType,
+) -> bool {
+    // Must be ANY or ANY LEFT join
+    matches!(join_type, JoinType::AnyInner | JoinType::AnyLeft)
+        // Projected columns must all come from left side
+        && project_cols.iter().all(|c| left.output_columns().contains(c))
+}
+```
+
+**Restrictions:**
+- Only applies to ClickHouse
+- Join must use ANY or ANY LEFT strictness
+- Right-side columns must not be referenced in output
+- Works for inner and left joins
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    right_row_size: f64,
+    join_cardinality: f64,
+) -> f64 {
+    // ANY JOIN still needs to match but outputs right columns
+    let any_join_cost = join_cardinality * right_row_size;
+
+    // Semi-join doesn't output right columns
+    let semi_join_cost = 0.0;
+
+    // Benefit from avoiding right column output
+    let benefit = any_join_cost / (join_cardinality * 100.0);
+    benefit.min(0.7)
+}
+```
+
+**Typical benefit**: 30-70% when right side has large columns
+
+## Test Cases
+
+### Positive Case 1: Existence Check
+
+```sql
+SELECT l.id, l.name
+FROM orders l
+ANY LEFT JOIN customers r ON l.customer_id = r.id;
+
+-- Right side not used - convert to semi-join
+```
+
+## References
+
+**Source code:**
+- ClickHouse: `src/Processors/QueryPlan/Optimizations/convertAnyJoinToSemiOrAntiJoin.cpp`
+  - Commit: 35f2d31186cca2f8c50f7ba4bd93817da490da85

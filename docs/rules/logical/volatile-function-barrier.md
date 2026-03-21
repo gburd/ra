@@ -1,0 +1,135 @@
+# Rule: Volatile Function Barrier
+
+**Category:** logical/function-optimization
+**File:** `rules/logical/function-optimization/volatile-function-barrier.rra`
+
+## Metadata
+
+- **ID:** `volatile-function-barrier`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, oracle, mssql, duckdb
+- **Tags:** function, volatile, barrier, optimization-fence, side-effect
+- **Authors:** "RA Contributors"
+
+
+# Volatile Function Barrier
+
+## Description
+
+Identifies volatile and side-effecting functions and prevents optimizations
+that would change their evaluation semantics. Volatile functions must be
+evaluated once per row and cannot be hoisted, cached, or eliminated.
+
+**When to apply**: Before any function optimization, check volatility
+classification. Block transformations on volatile functions.
+
+## Relational Algebra
+
+```algebra
+-- VOLATILE: cannot optimize (RANDOM, NOW, NEXTVAL, clock_timestamp)
+filter[RANDOM() > 0.5](R)
+  -> KEEP AS-IS  -- must evaluate per row
+
+-- STABLE: can cache within statement (CURRENT_TIMESTAMP, current_user)
+filter[CURRENT_TIMESTAMP > col](R)
+  -> filter[const_ts > col](R)  -- evaluate once per statement
+
+-- IMMUTABLE: freely optimizable (UPPER, LENGTH, +, -, *, /)
+filter[LENGTH('hello') > 3](R)
+  -> filter[5 > 3](R) -> filter[TRUE](R) -> R
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Mark volatile functions as optimization barriers
+fn is_optimizable(func: &str) -> Volatility {
+    match func {
+        "random" | "gen_random_uuid" | "nextval" |
+        "clock_timestamp" | "timeofday" => Volatility::Volatile,
+
+        "now" | "current_timestamp" | "current_user" |
+        "current_database" | "inet_client_addr" => Volatility::Stable,
+
+        _ => catalog::get_function_volatility(func)
+    }
+}
+
+// Prevent folding of volatile functions
+rw!("volatile-barrier";
+    "(call ?func ?args)" =>
+    "(volatile-call ?func ?args)"
+    if is_volatile("?func")
+    // Volatile-call node blocks all downstream optimizations
+),
+
+// Allow stable function caching within statement
+rw!("stable-function-cache";
+    "(call ?func ?args)" =>
+    "(cached-call ?func ?args)"
+    if is_stable("?func")
+    if all_args_constant_or_stable("?args")
+),
+```
+
+**Restrictions:**
+- Volatile functions MUST NOT be: folded, hoisted, cached, eliminated,
+  reordered with other volatile functions, or evaluated fewer times
+- Stable functions can be cached within a single statement/transaction
+- User-defined functions default to VOLATILE unless explicitly marked
+
+## Cost Model
+
+```rust
+fn estimated_benefit() -> f64 {
+    0.0 // This rule prevents optimization; no direct benefit
+    // Benefit is correctness: wrong optimization would give wrong results
+}
+```
+
+## Test Cases
+
+### Positive: Stable function caching
+
+```sql
+SELECT * FROM events WHERE created_at > NOW();
+-- NOW() is STABLE: evaluate once for entire query
+-- All rows compared against same timestamp
+```
+
+### Positive: Immutable function folding allowed
+
+```sql
+SELECT * FROM t WHERE LENGTH('hello') > col;
+-- LENGTH is IMMUTABLE: fold to 5
+-- Rewrite to: WHERE 5 > col
+```
+
+### Negative: Volatile function must not be folded
+
+```sql
+INSERT INTO t (id) VALUES (gen_random_uuid());
+-- gen_random_uuid() is VOLATILE: different value each call
+-- MUST NOT fold or cache
+```
+
+### Negative: Volatile function must not be hoisted
+
+```sql
+SELECT * FROM t WHERE RANDOM() > 0.5;
+-- RANDOM() must be evaluated per row
+-- Cannot hoist out of filter
+```
+
+## References
+
+**Academic papers:**
+- PostgreSQL documentation: Function Volatility Categories
+
+**Implementation:**
+- PostgreSQL: `func_volatile` classification (PROVOLATILE in pg_proc)
+- Oracle: DETERMINISTIC keyword for function caching
+- mssql: WITH SCHEMABINDING for deterministic marking
+- DuckDB: Function stability annotations in catalog

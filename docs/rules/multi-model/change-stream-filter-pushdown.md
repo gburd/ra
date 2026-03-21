@@ -1,0 +1,122 @@
+# Rule: Change Stream Filter Pushdown
+
+**Category:** multi-model/document
+**File:** `rules/multi-model/document/change-stream-filter-pushdown.rra`
+
+## Metadata
+
+- **ID:** `change-stream-filter-pushdown`
+- **Version:** "1.0.0"
+- **Databases:** mongodb, couchbase, cosmosdb
+- **Tags:** document, change-stream, filter, pushdown, realtime
+- **SQL Standard:** "mql:5"
+- **Authors:** "RA Contributors"
+
+
+# Change Stream Filter Pushdown
+
+## Description
+
+Pushes filter predicates into change stream (oplog tailing) operations
+so that the storage engine skips irrelevant change events at the oplog
+level. Without pushdown, the client receives all change events and
+filters locally; with pushdown, only matching events traverse the
+network.
+
+**When to apply**: A change stream has a `$match` stage that filters
+on operation type, namespace, or document fields, and the storage
+engine supports server-side filtering.
+
+**Why it works**: The oplog generates events for every write operation
+in the cluster. Filtering at the server reduces network bandwidth
+and client processing. MongoDB 4.0+ supports pushing `$match` on
+`operationType` and `fullDocument` fields into the oplog cursor.
+
+## Relational Algebra
+
+```algebra
+sigma[p](change_stream(collection))
+  -> change_stream_filtered(collection, p)
+  where p is pushable to the oplog cursor
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("change-stream-filter-pushdown";
+    "(filter ?pred (change-stream ?coll))" =>
+    "(change-stream-filtered ?coll ?pred)"
+    if is_pushable_change_pred("?pred")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(pred: &Expr) -> bool {
+    let refs = pred.referenced_fields();
+    refs.iter().all(|f| {
+        PUSHABLE_CHANGE_FIELDS.contains(f.as_str())
+    })
+}
+
+const PUSHABLE_CHANGE_FIELDS: &[&str] = &[
+    "operationType",
+    "fullDocument",
+    "ns.db",
+    "ns.coll",
+    "documentKey",
+];
+```
+
+**Restrictions:**
+- Only specific fields can be pushed into the oplog cursor
+- `$project` stages before `$match` may prevent pushdown
+- Resumability semantics must be preserved
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    events_per_sec: f64,
+    selectivity: f64,
+    network_cost_per_event: f64,
+) -> f64 {
+    let without_pushdown =
+        events_per_sec * network_cost_per_event;
+    let with_pushdown =
+        events_per_sec * selectivity * network_cost_per_event;
+    (without_pushdown - with_pushdown) / without_pushdown
+}
+```
+
+**Typical benefit**: 0.7-0.99 for selective change stream filters.
+
+## Test Cases
+
+```javascript
+// Positive: filter on operation type
+db.orders.watch([
+  { $match: { operationType: "insert" } }
+]);
+// Pushes operationType filter into oplog cursor
+
+// Positive: filter on document field
+db.orders.watch([
+  { $match: { "fullDocument.status": "urgent" } }
+]);
+// Pushes status filter server-side
+
+// Negative: filter uses $expr (not pushable)
+db.orders.watch([
+  { $match: { $expr: { $gt: ["$fullDocument.a", "$fullDocument.b"] } } }
+]);
+// Cannot push computed expression to oplog
+```
+
+## References
+
+MongoDB: src/mongo/db/pipeline/change_stream_filter_helpers.cpp
+MongoDB docs: "Modify Change Stream Output" - docs.mongodb.com/manual/changeStreams

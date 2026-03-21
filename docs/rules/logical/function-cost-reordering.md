@@ -1,0 +1,77 @@
+# Rule: Function Evaluation Cost Reordering
+
+**Category:** logical/function-optimization
+**File:** `rules/logical/function-optimization/function-cost-reordering.rra`
+
+## Metadata
+
+- **ID:** `function-cost-reordering`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, mssql, oracle, duckdb
+- **Tags:** function, cost, reorder, projection, evaluation-order
+- **Authors:** "RA Contributors"
+
+
+# Function Evaluation Cost Reordering
+
+## Description
+
+Reorders function evaluations in projection lists so that functions whose
+results are needed by other functions (dependency chain) are computed first,
+and independent expensive functions are deferred as late as possible in
+the pipeline. This minimizes total CPU work by computing expensive values
+only when necessary.
+
+**When to apply**: A projection contains multiple function calls with
+varying costs and dependencies between them.
+
+**Why it works**: Topological ordering by dependency ensures correctness.
+Among independent expressions, evaluating cheap ones first allows
+operators further up the plan tree (like filters) to potentially
+eliminate rows before the expensive functions run.
+
+## Relational Algebra
+
+```algebra
+pi[f1(a), f2(b), f3(f1(a))](R)
+  -> pi[t1, f2(b), f3(t1)](pi[f1(a) AS t1, b](R))
+  -- f1 computed first (dependency of f3), f2 independent
+```
+
+## Implementation
+
+```rust
+fn reorder_projections(exprs: &[Expr]) -> Vec<Expr> {
+    let graph = build_dependency_graph(exprs);
+    let topo = topological_sort(&graph);
+    // Within each topo level, sort by ascending cost
+    topo.iter()
+        .flat_map(|level| {
+            let mut level = level.clone();
+            level.sort_by(|a, b| a.cost().partial_cmp(&b.cost()).unwrap());
+            level
+        })
+        .collect()
+}
+```
+
+## Test Cases
+
+### Positive: Dependent chain
+
+```sql
+SELECT md5(LOWER(email)), LENGTH(LOWER(email)) FROM users;
+-- Compute LOWER(email) once, then md5 and LENGTH on the result
+```
+
+### Positive: Independent expensive functions
+
+```sql
+SELECT ST_Area(geom), regexp_replace(bio, 'Dr\.', 'Doctor')
+FROM faculty;
+-- Both are independent; order by cost (regexp first if cheaper)
+```
+
+## References
+
+- Graefe, "Query Evaluation Techniques for Large Databases", 1993

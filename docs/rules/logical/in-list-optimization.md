@@ -1,0 +1,107 @@
+# Rule: IN List Optimization
+
+**Category:** logical/function-optimization
+**File:** `rules/logical/function-optimization/in-list-optimization.rra`
+
+## Metadata
+
+- **ID:** `in-list-optimization`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, oracle, mssql, duckdb, sqlite
+- **Tags:** function, in-list, hash-set, range, optimization
+- **Authors:** "RA Contributors"
+
+
+# IN List Optimization
+
+## Description
+
+Optimizes IN list predicates by converting large lists to hash lookups,
+collapsing contiguous values into ranges, removing duplicates, and
+converting single-element IN to equality.
+
+**When to apply**: IN predicates where the list can be simplified or a
+more efficient execution strategy exists.
+
+## Relational Algebra
+
+```algebra
+col IN (1)              -> col = 1
+col IN (1, 1, 2, 2, 3) -> col IN (1, 2, 3)          -- deduplicate
+col IN (1, 2, 3, 4, 5) -> col BETWEEN 1 AND 5       -- contiguous range
+col IN (list > N)       -> col IN (hash_set(list))   -- hash lookup
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("in-single-to-equals";
+    "(in ?col (list ?val))" => "(= ?col ?val)"
+),
+
+rw!("in-list-deduplicate";
+    "(in ?col ?list)" =>
+    { DeduplicateInList { col: "?col", list: "?list" } }
+    if has_duplicates("?list")
+),
+
+rw!("in-contiguous-to-between";
+    "(in ?col ?list)" =>
+    "(between ?col ?min ?max)"
+    if is_contiguous_integer_range("?list")
+),
+```
+
+## Cost Model
+
+```rust
+fn estimated_benefit(list_size: usize) -> f64 {
+    match list_size {
+        1 => 0.3,       // Equality simpler than IN
+        2..=10 => 0.1,  // Small list: minimal benefit
+        11..=100 => 0.4, // Hash set avoids linear scan
+        _ => 0.7,        // Large list: hash or range critical
+    }
+}
+```
+
+## Test Cases
+
+### Positive: Single-element IN
+
+```sql
+SELECT * FROM users WHERE status IN ('active');
+-- Rewrite to: WHERE status = 'active'
+```
+
+### Positive: Contiguous integer range
+
+```sql
+SELECT * FROM orders WHERE month IN (1, 2, 3, 4, 5, 6);
+-- Rewrite to: WHERE month BETWEEN 1 AND 6
+-- Enables index range scan
+```
+
+### Positive: Duplicate elimination
+
+```sql
+SELECT * FROM t WHERE id IN (1, 2, 2, 3, 3, 3);
+-- Deduplicate to: WHERE id IN (1, 2, 3)
+```
+
+### Negative: Non-contiguous values
+
+```sql
+SELECT * FROM t WHERE id IN (1, 5, 17, 42);
+-- Not contiguous: cannot convert to BETWEEN
+-- Keep as IN list (hash lookup for large lists)
+```
+
+## References
+
+**Implementation:**
+- PostgreSQL: `ScalarArrayOpExpr` with hash table for large IN lists
+- MySQL: Range optimization for IN with sorted constants
+- DuckDB: IN filter with hash set

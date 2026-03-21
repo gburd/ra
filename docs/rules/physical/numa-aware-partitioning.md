@@ -1,0 +1,103 @@
+# Rule: NUMA-Aware Data Partitioning
+
+**Category:** physical/hardware
+**File:** `rules/physical/hardware/numa-aware-partitioning.rra`
+
+## Metadata
+
+- **ID:** `numa-aware-partitioning`
+- **Version:** "1.0.0"
+- **Databases:** hyper, sap-hana, monetdb, duckdb
+- **Tags:** physical, hardware, numa, partitioning, memory-locality
+- **Authors:** "Albutiu, Kemper, Neumann"
+
+
+# NUMA-Aware Data Partitioning
+
+## Description
+
+Partitions data across NUMA nodes to maximize memory locality during
+query execution. On multi-socket systems, remote memory access is 2-4x
+slower than local access. This rule co-locates data partitions with
+the threads that process them, using hash or range partitioning aligned
+with NUMA topology.
+
+**When to apply**: Large scans, hash joins, or aggregations on
+multi-socket NUMA systems where memory access patterns dominate cost.
+
+## Relational Algebra
+
+```algebra
+-- Before: single partition, threads access remote memory
+HashJoin(R, S) on node 0
+
+-- After: partition by NUMA node, local processing
+NUMA_Merge(
+    HashJoin(R_node0, S_node0) on node 0,
+    HashJoin(R_node1, S_node1) on node 1,
+    ...
+)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("numa-aware-hash-join";
+    "(hashjoin ?key ?build ?probe)" =>
+    "(numa-merge
+        (numa-local-hashjoin ?key
+            (numa-partition ?key ?build)
+            (numa-partition ?key ?probe)))"
+    if is_numa_system()
+    if data_exceeds_local_memory("?build", "?probe")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(plan: &Plan, system: &SystemInfo) -> bool {
+    system.numa_node_count() > 1
+        && plan.estimated_memory() > system.local_memory_per_node()
+}
+```
+
+**Restrictions:**
+- Partitioning overhead must be amortized over query execution
+- Only beneficial for large data sets that exceed L3 cache
+- Skewed partitions reduce benefit
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    data_size_bytes: f64,
+    numa_nodes: usize,
+    remote_access_ratio: f64,
+) -> f64 {
+    let remote_penalty = 2.5; // remote is 2.5x slower
+    let remote_accesses = data_size_bytes * remote_access_ratio;
+    remote_accesses * (remote_penalty - 1.0) / remote_penalty
+}
+```
+
+**Typical benefit**: 10-50% on multi-socket systems.
+
+## Test Cases
+
+```sql
+-- Positive: large hash join on 2-socket system
+SELECT * FROM orders o
+  JOIN lineitem l ON o.orderkey = l.orderkey;
+-- 100M+ rows: partition across NUMA nodes
+
+-- Negative: small table fits in L3 cache
+SELECT * FROM dim_status s JOIN orders o ON s.id = o.status_id;
+```
+
+## References
+
+- Albutiu, M.C. et al. "Massively Parallel Sort-Merge Joins in Main Memory Multi-Core Database Systems" (VLDB 2012)
+- Leis, V. et al. "Morsel-Driven Parallelism" (SIGMOD 2014)

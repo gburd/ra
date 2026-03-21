@@ -1,0 +1,304 @@
+# Rule: Learned Query Scheduling and Resource Allocation
+
+**Category:** experimental/ml-guided
+**File:** `rules/experimental/ml-guided/learned-query-scheduling.rra`
+
+## Metadata
+
+- **ID:** `learned-query-scheduling`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, cockroachdb, duckdb
+- **Tags:** ml, scheduling, resource-allocation, concurrency, SLO
+- **Authors:** "Chi et al. 2021", "Saxena et al. 2022", "RA Contributors"
+
+
+# Learned Query Scheduling and Resource Allocation
+
+## Description
+
+Uses a learned model to schedule concurrent queries and allocate resources
+(memory, CPU cores, I/O bandwidth) to optimize overall workload throughput
+or meet per-query SLOs (Service Level Objectives). The model predicts query
+resource requirements and execution time, enabling intelligent admission
+control and resource partitioning.
+
+**When to apply**: Mixed workloads with concurrent OLAP and OLTP queries,
+or when specific queries have latency SLOs. Critical for cloud database
+services where multiple tenants share resources.
+
+**Why it works**: Static resource allocation (equal sharing) wastes resources
+when queries have different profiles. A short OLTP query needs minimal memory
+but low latency, while a long OLAP query needs large memory grants but can
+tolerate queuing. ML models learn these profiles from execution history and
+allocate resources to maximize overall utility.
+
+## Relational Algebra
+
+```algebra
+-- Input: queue of queries with priorities/SLOs
+queue = [(Q1, SLO=100ms), (Q2, SLO=10s), (Q3, SLO=1s)]
+
+-- Scheduling decision:
+schedule(queue) = [
+  (Q1, resources={cores: 1, memory: 64MB}, priority: high),
+  (Q3, resources={cores: 2, memory: 256MB}, priority: medium),
+  (Q2, resources={cores: 4, memory: 2GB}, priority: low, queue: true)
+]
+```
+
+## Implementation
+
+```rust
+struct LearnedQueryScheduler {
+    // Predicts (execution_time, memory_peak, cpu_utilization)
+    resource_predictor: ResourcePredictionModel,
+    // Current resource state
+    resource_state: ResourceState,
+    // SLO tracking
+    slo_tracker: SLOTracker,
+}
+
+impl LearnedQueryScheduler {
+    fn schedule(
+        &mut self,
+        incoming: &Query,
+    ) -> SchedulingDecision {
+        // Predict resource requirements
+        let prediction = self.resource_predictor.predict(incoming);
+
+        // Check if resources are available
+        let available = self.resource_state.available();
+
+        // Priority based on SLO urgency
+        let urgency = if let Some(slo) = incoming.slo() {
+            let predicted_time = prediction.execution_time;
+            let slack = slo.deadline - predicted_time;
+            if slack < 0.0 {
+                Priority::Urgent // Already at risk
+            } else if slack < predicted_time * 0.5 {
+                Priority::High
+            } else {
+                Priority::Normal
+            }
+        } else {
+            Priority::Normal
+        };
+
+        // Allocate resources
+        let allocation = self.allocate(
+            &prediction, &available, urgency,
+        );
+
+        match allocation {
+            Some(resources) => {
+                self.resource_state.reserve(&resources);
+                SchedulingDecision::Execute {
+                    resources,
+                    priority: urgency,
+                }
+            }
+            None => SchedulingDecision::Queue {
+                estimated_wait: self.estimate_wait_time(
+                    &prediction,
+                ),
+                priority: urgency,
+            },
+        }
+    }
+
+    fn allocate(
+        &self,
+        prediction: &ResourcePrediction,
+        available: &ResourceBudget,
+        priority: Priority,
+    ) -> Option<ResourceAllocation> {
+        let memory_needed = prediction.memory_peak;
+        let cores_needed = prediction.optimal_parallelism;
+
+        // Check if we can fit this query
+        if memory_needed > available.memory {
+            return None;
+        }
+
+        let cores = cores_needed.min(available.cores);
+        let memory = memory_needed;
+
+        // Adjust based on priority
+        let (cores, memory) = match priority {
+            Priority::Urgent => (
+                cores.max(2), // At least 2 cores
+                memory * 1.2, // Extra memory headroom
+            ),
+            Priority::High => (cores, memory),
+            Priority::Normal => (
+                cores.min(available.cores / 2), // Cap at half
+                memory,
+            ),
+        };
+
+        Some(ResourceAllocation { cores, memory })
+    }
+
+    fn on_query_complete(
+        &mut self,
+        query: &Query,
+        actual_metrics: &ExecutionMetrics,
+    ) {
+        // Release resources
+        self.resource_state.release(
+            &actual_metrics.resources_used,
+        );
+
+        // Update model with actual vs predicted
+        self.resource_predictor.feedback(
+            query,
+            actual_metrics,
+        );
+
+        // Update SLO tracking
+        if let Some(slo) = query.slo() {
+            self.slo_tracker.record(
+                slo,
+                actual_metrics.execution_time,
+            );
+        }
+    }
+}
+
+struct ResourcePredictionModel {
+    // Plan-based features -> resource prediction
+    plan_encoder: TreeStructuredModel,
+    time_predictor: GradientBoostedRegression,
+    memory_predictor: GradientBoostedRegression,
+    parallelism_predictor: LinearRegression,
+}
+
+impl ResourcePredictionModel {
+    fn predict(
+        &self,
+        query: &Query,
+    ) -> ResourcePrediction {
+        let plan = query.explain_plan();
+        let features = self.plan_encoder.encode(&plan);
+
+        ResourcePrediction {
+            execution_time: self.time_predictor.predict(&features),
+            memory_peak: self.memory_predictor.predict(&features),
+            optimal_parallelism: self.parallelism_predictor
+                .predict(&features).round() as usize,
+        }
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(workload: &ConcurrentWorkload) -> bool {
+    // Must have concurrent queries
+    if workload.avg_concurrent_queries() < 3 {
+        return false;
+    }
+
+    // Must have resource contention
+    if workload.avg_resource_utilization() < 0.5 {
+        return false;
+    }
+
+    // Must have execution history for training
+    workload.completed_queries() >= 500
+}
+```
+
+**Restrictions:**
+- Requires query plan inspection before execution
+- Prediction errors can cause over/under-allocation
+- Dynamic workloads need continuous model updates
+- Admission control can increase latency for queued queries
+- Resource monitoring overhead (~1% CPU)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    workload: &ConcurrentWorkload,
+) -> f64 {
+    // Equal sharing baseline
+    let equal_throughput = workload.throughput_with_equal_sharing();
+
+    // Learned scheduling
+    let learned_throughput = workload.predicted_throughput_learned();
+
+    // SLO compliance
+    let equal_slo_rate = workload.slo_compliance_equal();
+    let learned_slo_rate = workload.slo_compliance_learned();
+
+    // Combined metric: throughput * SLO compliance
+    let equal_score = equal_throughput * equal_slo_rate;
+    let learned_score = learned_throughput * learned_slo_rate;
+
+    if learned_score > equal_score {
+        (learned_score - equal_score) / learned_score
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 20-50% throughput improvement, 30-60% SLO
+compliance improvement for mixed OLAP/OLTP workloads.
+
+## Test Cases
+
+### Positive: Mixed OLAP/OLTP workload
+
+```sql
+-- OLTP query (SLO: 10ms):
+SELECT balance FROM accounts WHERE id = ?;
+
+-- OLAP query (SLO: 30s):
+SELECT region, SUM(amount) FROM transactions
+WHERE date > '2024-01-01' GROUP BY region;
+
+-- Equal sharing: OLAP gets 50% resources (overkill for OLTP)
+-- Learned: OLTP gets 1 core + 64MB, OLAP gets 7 cores + 8GB
+-- Result: both meet SLOs instead of OLTP missing deadline
+```
+
+### Positive: Memory-intensive query admission
+
+```sql
+-- Query 1: hash join needing 4GB memory
+-- Query 2: hash join needing 4GB memory
+-- Available memory: 6GB
+
+-- Equal sharing: both get 3GB, both spill to disk (slow)
+-- Learned: run Query 1 with 4GB, queue Query 2
+-- Result: Query 1 finishes fast, then Query 2 runs with full memory
+```
+
+### Negative: Single-user system
+
+```sql
+-- Only one query running at a time
+-- No concurrency, no resource contention
+-- Scheduling adds overhead with no benefit
+```
+
+## References
+
+**Academic papers:**
+- Chi et al., "Learned Scheduling for Data Processing Clusters", MLSys 2021
+- Saxena et al., "Robust and Transferable Anomaly Detection in Log Data", VLDB 2022
+- Ma et al., "Query-aware Database Memory Allocation", SIGMOD 2018
+
+**Implementation:**
+- Amazon Aurora: adaptive query execution with resource limits
+- Snowflake: per-query resource allocation based on warehouse size
+- CockroachDB: admission control with priority queues
+
+**Key insights:**
+- Query execution time prediction enables proactive scheduling
+- Memory grant prediction prevents spilling (mssql memory grant feedback)
+- SLO-aware scheduling prioritizes latency-sensitive queries
+- Resource elasticity in cloud enables dynamic allocation

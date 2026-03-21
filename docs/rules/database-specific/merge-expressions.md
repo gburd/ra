@@ -1,0 +1,108 @@
+# Rule: "ClickHouse Expression and Filter Merging"
+
+**Category:** database-specific/clickhouse
+**File:** `rules/database-specific/clickhouse/merge-expressions.rra`
+
+## Metadata
+
+- **ID:** `clickhouse-merge-expressions`
+- **Version:** "1.0.0"
+- **Databases:** clickhouse
+- **Tags:** expression, merge, filter, optimization, dag
+- **Authors:** "RA Contributors"
+
+
+# ClickHouse Expression and Filter Merging
+
+## Metadata
+- **Rule ID**: `clickhouse-merge-expressions`
+- **Category**: Database-specific / ClickHouse
+- **Source**: `src/Processors/QueryPlan/Optimizations/mergeExpressions.cpp`
+- **Complexity**: O(1) plan transformation; saves per-batch overhead
+- **Prerequisites**: Adjacent ExpressionStep or FilterStep+ExpressionStep
+- **Alternatives**: Execute separate steps
+
+## Description
+
+ClickHouse merges adjacent expression steps and filter+expression
+step chains into single steps. This reduces the number of pipeline
+steps, eliminating per-batch overhead (function calls, block
+copying, pipeline scheduling) between them.
+
+Two ExpressionSteps are merged by composing their ActionsDAGs.
+A FilterStep followed by ExpressionStep merges into a single
+FilterStep with a combined DAG. This is particularly effective
+after other optimizations (filter pushdown, expression lifting)
+create chains of small expression steps.
+
+**When to apply:**
+- Chain of ExpressionStep -> ExpressionStep
+- Chain of FilterStep -> ExpressionStep
+- After other plan optimizations create fragmented expression chains
+
+**Why it works for OLAP:**
+- Reduces pipeline scheduling overhead
+- Single fused DAG enables better vectorized execution
+- Fewer block copies between operators
+
+## Relational Algebra
+
+```
+expr[E2](expr[E1](R))  ->  expr[E2 ∘ E1](R)
+expr[E](filter[F](R))  ->  filter[F ∘ E](R)
+```
+
+## Implementation (egg rewrite rules)
+
+```lisp
+;; Merge consecutive expressions
+(rewrite (expression ?e2 (expression ?e1 ?input))
+  (expression (compose-dag ?e2 ?e1) ?input))
+
+;; Merge expression into preceding filter
+(rewrite (expression ?e (filter ?f ?input))
+  (filter (compose-dag ?e ?f) ?input))
+
+;; Merge consecutive filters
+(rewrite (filter ?f2 (filter ?f1 ?input))
+  (filter (and-dag ?f2 ?f1) ?input))
+```
+
+## Cost Model
+
+```rust
+pub fn cost_merged_expressions(
+    rows: u64,
+    steps_merged: usize,
+    hardware: &HardwareModel,
+) -> Cost {
+    let overhead_per_step = 1000;
+    let batches = rows / hardware.batch_size() as u64;
+    let savings = Cost::cpu(
+        batches * (steps_merged - 1) as u64 * overhead_per_step
+    );
+    Cost::zero() - savings
+}
+```
+
+**Typical benefit**: 10-30% pipeline overhead reduction
+
+## Test Cases
+
+### Positive: Expression chain from pushdown
+```sql
+SELECT upper(name), age + 1 FROM users WHERE age > 18;
+
+-- After optimizations: ExpressionStep(age+1) -> ExpressionStep(upper)
+-- Merged into single ExpressionStep(upper, age+1)
+```
+
+### Negative: Steps with different inputs
+```sql
+SELECT * FROM (SELECT a FROM t1) JOIN (SELECT b FROM t2) ON a = b;
+-- Expression steps on different branches; cannot merge
+```
+
+## References
+
+- ClickHouse: `src/Processors/QueryPlan/Optimizations/mergeExpressions.cpp`

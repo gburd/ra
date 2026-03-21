@@ -1,0 +1,116 @@
+# Rule: DuckDB Adaptive Perfect Hash Aggregation
+
+**Category:** database-specific/duckdb
+**File:** `rules/database-specific/duckdb/adaptive-perfect-hash-group.rra`
+
+## Metadata
+
+- **ID:** `duckdb-adaptive-perfect-hash-group`
+- **Version:** "1.0.0"
+- **Databases:** duckdb
+- **Tags:** database-specific, duckdb, aggregation, hash, adaptive
+- **Authors:** "RA Contributors"
+
+
+# DuckDB Adaptive Perfect Hash Aggregation
+
+## Description
+
+DuckDB uses an adaptive strategy for hash aggregation.  When the
+number of distinct groups is small relative to the domain of the
+grouping key, it uses a perfect hash table (direct array indexing)
+instead of a standard hash table.  For small integer keys or
+enums, the perfect hash avoids hash collisions entirely and
+provides O(1) lookups with minimal overhead.
+
+If the number of groups grows beyond the array capacity, DuckDB
+falls back to a standard hash table at runtime.
+
+**When to apply**: GROUP BY on a small-cardinality integer column
+(boolean, tinyint, small enum) where the domain fits in a
+reasonably sized array.
+
+**Why it works**: Perfect hashing eliminates hash function
+computation, collision handling, and pointer chasing.  For
+array-indexable keys, each group lookup is a single array access.
+
+**Database version**: DuckDB 0.5.0+
+
+## Relational Algebra
+
+```algebra
+-- Before: standard hash aggregation
+gamma[status; SUM(amount)](orders)
+
+-- After: perfect hash aggregation (array-indexed)
+perfect_hash_gamma[status; SUM(amount)](orders)
+  where |domain(status)| <= 256
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("duckdb-adaptive-perfect-hash-group";
+    "(hash-aggregate ?group_cols ?agg_exprs ?input)" =>
+    "(perfect-hash-aggregate ?group_cols ?agg_exprs ?input)"
+    if is_database("duckdb")
+    if is_small_domain("?group_cols")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    group_columns: &[Column],
+    stats: &ColumnStats,
+) -> bool {
+    group_columns.len() == 1
+    && stats.distinct_count() <= 256
+    && group_columns[0].data_type().is_integer_like()
+}
+```
+
+**Restrictions:**
+- Works best for single-column grouping on small domains
+- Falls back to hash table if cardinality exceeds threshold
+- Not applicable for string or floating-point group keys
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    rows: f64,
+    hash_cost_per_row: f64,
+) -> f64 {
+    // Perfect hash saves hash computation and collision
+    // handling per row
+    rows * hash_cost_per_row * 0.3
+}
+```
+
+**Typical benefit**: 20-40% faster aggregation for low-cardinality
+grouping columns.
+
+## Test Cases
+
+```sql
+-- Positive: low-cardinality integer group
+SELECT status, COUNT(*) FROM orders GROUP BY status;
+-- status has ~5 distinct values, uses perfect hash
+```
+
+```sql
+-- Negative: high-cardinality group
+SELECT customer_id, SUM(amount) FROM orders
+GROUP BY customer_id;
+-- Millions of customers, standard hash table used
+```
+
+## References
+
+DuckDB: "Aggregation" internals documentation
+DuckDB: Blog post on vectorized aggregation strategies
+Source: src/execution/operator/aggregate/

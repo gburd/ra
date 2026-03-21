@@ -1,0 +1,279 @@
+# Rule: "System R Index vs Sequential Scan Selection"
+
+**Category:** cost-models/system-r
+**File:** `rules/cost-models/system-r/index-vs-scan-selection.rra`
+
+## Metadata
+
+- **ID:** `system-r-index-vs-scan`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, duckdb, cockroachdb, mssql, oracle
+- **Tags:** access-path, index-scan, sequential-scan, system-r, cost-based, classic
+- **Authors:** "Selinger et al. 1979 - IBM Research"
+
+
+# System R Index vs Sequential Scan Selection
+
+## Description
+
+For each base table access, the System R optimizer evaluates all available
+access paths (sequential scan, each available index) and selects the one
+with the lowest estimated cost. The decision depends on predicate
+selectivity, index clustering, and the I/O pattern (sequential vs random).
+
+System R's key insight: an index scan is cheaper than a sequential scan
+only when the selectivity is low enough that the number of pages fetched
+via the index is less than the total pages in the table. For an unclustered
+index, the crossover point is typically around 10-20% selectivity.
+
+**When to apply**: Every single-table access in a query. This is the
+first optimization decision the System R optimizer makes.
+
+**Why it works**: Sequential scans read pages in order (sequential I/O,
+cheap). Index scans follow index pointers (random I/O, expensive per page
+but fewer pages when selective). The cost model computes which pattern
+is cheaper given the expected number of qualifying rows.
+
+## Relational Algebra
+
+```algebra
+-- For relation R with predicate P and available indexes I1, I2:
+
+access_paths = [
+  seq_scan(R, P):
+    cost = PAGES(R) + W * TUPLES(R),
+
+  index_scan(R, I1, P):
+    if I1 is clustered:
+      cost = F * PAGES(R) + W * F * TUPLES(R)
+    else:
+      cost = F * TUPLES(R) + W * F * TUPLES(R)
+      -- Each tuple may require a separate page fetch
+
+  index_scan(R, I2, P):
+    (same formula with I2's matching columns)
+]
+
+best = argmin(access_paths, cost)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("system-r-access-path-selection";
+    "(filter ?pred (scan ?table))" =>
+    "(access_path_select ?pred ?table
+       (enumerate_access_paths ?table ?pred))"
+),
+
+struct AccessPathSelector {
+    cost_model: SystemRCostModel,
+}
+
+impl AccessPathSelector {
+    fn select_access_path(
+        &self,
+        table: &TableStats,
+        predicate: &Predicate,
+        indexes: &[IndexInfo],
+    ) -> AccessPath {
+        let mut best_path = AccessPath::SeqScan;
+        let mut best_cost = self.seq_scan_cost(table, predicate);
+
+        for index in indexes {
+            // Check if index matches predicate
+            let matching_cols = index.matching_columns(predicate);
+            if matching_cols == 0 {
+                continue;
+            }
+
+            let selectivity = self.estimate_selectivity(
+                predicate, table, index, matching_cols,
+            );
+
+            let cost = self.index_scan_cost(
+                table, index, selectivity,
+            );
+
+            if cost < best_cost {
+                best_cost = cost;
+                best_path = AccessPath::IndexScan {
+                    index: index.clone(),
+                    selectivity,
+                };
+            }
+        }
+
+        best_path
+    }
+
+    fn seq_scan_cost(
+        &self,
+        table: &TableStats,
+        predicate: &Predicate,
+    ) -> f64 {
+        // Read all pages sequentially + process all tuples
+        let pages = table.num_pages as f64;
+        let tuples = table.num_tuples as f64;
+        pages + self.cost_model.w * tuples
+    }
+
+    fn index_scan_cost(
+        &self,
+        table: &TableStats,
+        index: &IndexInfo,
+        selectivity: f64,
+    ) -> f64 {
+        let qualifying_tuples =
+            selectivity * table.num_tuples as f64;
+
+        let page_fetches = if index.is_clustered {
+            // Clustered: pages are contiguous, fetch proportional
+            selectivity * table.num_pages as f64
+        } else {
+            // Unclustered: one random page per tuple (worst case)
+            // Bounded by total pages (Cardenas formula)
+            let n = table.num_pages as f64;
+            let k = qualifying_tuples;
+            // Expected distinct pages: n * (1 - (1 - 1/n)^k)
+            n * (1.0 - (1.0 - 1.0 / n).powf(k))
+        };
+
+        // Index traversal cost: ~3-4 levels of B-tree
+        let index_levels = 3.0;
+        let index_traversal = index_levels;
+
+        index_traversal + page_fetches
+            + self.cost_model.w * qualifying_tuples
+    }
+
+    fn crossover_selectivity(
+        &self,
+        table: &TableStats,
+        index: &IndexInfo,
+    ) -> f64 {
+        // At what selectivity does index beat sequential scan?
+        // seq_cost = index_cost
+        // PAGES(R) + W * TUPLES(R)
+        //   = F * page_factor + W * F * TUPLES(R) + index_levels
+
+        let pages = table.num_pages as f64;
+        let tuples = table.num_tuples as f64;
+
+        if index.is_clustered {
+            // F * PAGES + W * F * TUPLES = PAGES + W * TUPLES
+            // F * (PAGES + W * TUPLES) = PAGES + W * TUPLES
+            // F = 1.0 (always use clustered index -- it's never worse)
+            1.0
+        } else {
+            // F * TUPLES + W * F * TUPLES = PAGES + W * TUPLES
+            // F * TUPLES * (1 + W) = PAGES + W * TUPLES
+            // F = (PAGES + W * TUPLES) / (TUPLES * (1 + W))
+            (pages + self.cost_model.w * tuples)
+                / (tuples * (1.0 + self.cost_model.w))
+        }
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    table: &TableStats,
+    predicate: &Predicate,
+) -> bool {
+    // Always applicable: every table access needs a path selection
+    // Even without predicates (seq_scan is the only option)
+    true
+}
+```
+
+**Restrictions:**
+- System R does not model buffer pool effects (hot pages in cache)
+- Unclustered index cost assumes worst-case random I/O
+- Multi-column indexes only partially match some predicates
+- Functional indexes (expression indexes) not in original System R
+- Statistics must be up-to-date for accurate selectivity
+
+## Cost Model
+
+```rust
+fn crossover_analysis() -> &'static str {
+    // Typical crossover selectivities (System R era, HDD):
+    // Clustered index: always better (reads fewer pages sequentially)
+    // Unclustered index: better when F < PAGES/TUPLES
+    //   = page_size / avg_tuple_width
+    //   Typically: 10-20% for narrow tuples, 50% for wide tuples
+
+    // Modern (SSD): unclustered crossover moves higher
+    // because random I/O is less penalized
+    // Typically: 30-50% for SSDs
+    "crossover_selectivity"
+}
+```
+
+**Typical crossover points:**
+- HDD, unclustered: F < 5-15%
+- SSD, unclustered: F < 20-50%
+- Clustered index: almost always better than seq scan
+- Index-only scan: always better when applicable
+
+## Test Cases
+
+### Positive: Highly selective index scan
+
+```sql
+-- orders: 1M rows, 100K pages
+-- Index on customer_id (unclustered), 100K distinct values
+SELECT * FROM orders WHERE customer_id = 42;
+
+-- Selectivity: 1/100000 = 0.00001
+-- Seq scan: 100K pages + 0.05 * 1M = 150K
+-- Index scan: 3 + 10 pages + 0.05 * 10 = 13.5
+-- Index scan is 11000x cheaper
+```
+
+### Positive: Low selectivity prefers seq scan
+
+```sql
+-- orders: 1M rows
+SELECT * FROM orders WHERE amount > 10;
+-- 80% of orders have amount > 10
+
+-- Selectivity: 0.8
+-- Seq scan: 100K + 0.05 * 1M = 150K
+-- Unclustered index: 0.8 * 1M + 0.05 * 0.8M = 840K
+-- Seq scan is 5.6x cheaper (fewer random I/Os)
+```
+
+### Positive: Clustered index always wins
+
+```sql
+-- orders: clustered index on order_date
+SELECT * FROM orders WHERE order_date > '2024-01-01';
+-- 10% selectivity
+
+-- Seq scan: 100K + 50K = 150K
+-- Clustered index: 0.1 * 100K + 0.05 * 0.1 * 1M = 15K
+-- Clustered index is 10x cheaper
+```
+
+## References
+
+**Original paper:**
+- Selinger et al., "Access Path Selection in a Relational Database Management System", SIGMOD 1979
+  - Section 5: "Single relation access path selection"
+  - Table of access path costs
+
+**Refinements:**
+- Mackert, Lohman, "Index Scans Using a Finite LRU Buffer: A Validated I/O Model", TODS 1989
+  - Buffer pool modeling for more accurate I/O cost
+- Cardenas, "Analysis of Retrieval via Index Scanning", CACM 1975
+  - Cardenas formula for distinct pages fetched
+
+**Modern implementations:**
+- PostgreSQL: cost_index() in costsize.c
+- MySQL: test_if_cheaper_ordering() in opt_range.cc

@@ -1,0 +1,248 @@
+# Rule: "System R Temporary Relation Materialization Cost"
+
+**Category:** cost-models/system-r
+**File:** `rules/cost-models/system-r/temp-materialization-cost.rra`
+
+## Metadata
+
+- **ID:** `system-r-temp-materialization`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, duckdb, cockroachdb, mssql, oracle
+- **Tags:** materialization, temp-table, sort, pipeline-breaker, system-r, classic
+- **Authors:** "Selinger et al. 1979 - IBM Research"
+
+
+# System R Temporary Relation Materialization Cost
+
+## Description
+
+Some operations in System R require materializing intermediate results
+to temporary relations: external sorts write sorted runs to temp files,
+sort-merge joins may materialize one input, and subqueries may be
+materialized for repeated access. The cost of materialization includes
+writing the intermediate result to disk (or buffer pool) and reading it
+back. System R's optimizer accounts for this cost to avoid plans with
+excessive materialization.
+
+**When to apply**: The optimizer adds materialization cost whenever a
+plan requires writing intermediate results: sorts, hash table builds
+(in modern systems), and any operation that cannot be fully pipelined.
+Understanding materialization cost is key to why System R preferred
+left-deep trees and pipelined execution.
+
+**Why it works**: Materialization is expensive: writing N pages and
+reading them back costs 2N page I/Os. For a 10M-row intermediate
+result (1M pages), materialization alone costs 2M page fetches.
+The optimizer avoids unnecessary materialization by preferring pipelined
+plans (left-deep trees with nested-loop joins).
+
+## Relational Algebra
+
+```algebra
+-- Materialization cost:
+materialize_cost(R) = PAGES(R) * 2  -- write + read back
+  + W * TUPLES(R)                    -- CPU for serialization
+
+-- Sort materialization (external sort):
+sort_materialize_cost(R) =
+  2 * PAGES(R) * ceil(log_B(PAGES(R)/B))  -- sort passes
+  -- Each pass reads and writes all pages
+
+-- Pipeline vs materialize decision:
+-- Pipeline: no extra I/O (tuples flow directly)
+-- Materialize: 2 * PAGES extra I/O
+-- Pipeline preferred unless:
+--   1. Input needed multiple times (e.g., repeated inner in NL)
+--   2. Sort required (pipeline breaker)
+--   3. Hash table build (modern, not in System R)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+struct MaterializationCostModel {
+    w: f64,
+    buffer_pages: usize,
+    temp_page_cost: f64, // May differ from regular page cost
+}
+
+impl MaterializationCostModel {
+    fn materialization_cost(
+        &self,
+        tuples: f64,
+        tuple_width: f64,
+    ) -> f64 {
+        let pages = (tuples * tuple_width / PAGE_SIZE).ceil();
+
+        // Write to temp: sequential write
+        let write_cost = pages * self.temp_page_cost;
+
+        // Read back: sequential read
+        let read_cost = pages * self.temp_page_cost;
+
+        // CPU: serialize/deserialize tuples
+        let cpu_cost = self.w * tuples * 2.0;
+
+        write_cost + read_cost + cpu_cost
+    }
+
+    fn is_pipeline_possible(
+        &self,
+        plan: &PlanNode,
+    ) -> bool {
+        // Pipeline is possible if no operator requires
+        // full input before producing output
+        match plan {
+            PlanNode::Sort { .. } => false,  // Pipeline breaker
+            PlanNode::HashBuild { .. } => false, // Pipeline breaker
+            PlanNode::Aggregate { .. } => false, // Pipeline breaker
+            PlanNode::Filter { input, .. } => {
+                self.is_pipeline_possible(input)
+            }
+            PlanNode::Project { input, .. } => {
+                self.is_pipeline_possible(input)
+            }
+            PlanNode::NestedLoop { outer, inner } => {
+                // Outer can be pipelined, inner must be rescanned
+                self.is_pipeline_possible(outer)
+            }
+            PlanNode::SeqScan { .. } => true,
+            PlanNode::IndexScan { .. } => true,
+        }
+    }
+
+    fn pipeline_breaker_overhead(
+        &self,
+        plan: &PlanNode,
+    ) -> f64 {
+        let mut total = 0.0;
+
+        match plan {
+            PlanNode::Sort { input } => {
+                let input_tuples = estimate_tuples(input);
+                let input_width = estimate_tuple_width(input);
+                total += self.materialization_cost(
+                    input_tuples, input_width,
+                );
+                total += self.pipeline_breaker_overhead(input);
+            }
+            PlanNode::NestedLoop { outer, inner } => {
+                // Inner is rescanned: materialization if not base table
+                if !is_base_table(inner) {
+                    let inner_tuples = estimate_tuples(inner);
+                    let inner_width = estimate_tuple_width(inner);
+                    total += self.materialization_cost(
+                        inner_tuples, inner_width,
+                    );
+                }
+                total += self.pipeline_breaker_overhead(outer);
+                total += self.pipeline_breaker_overhead(inner);
+            }
+            PlanNode::Filter { input, .. }
+            | PlanNode::Project { input, .. } => {
+                total += self.pipeline_breaker_overhead(input);
+            }
+            _ => {} // Base cases: no overhead
+        }
+
+        total
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(plan: &PlanNode) -> bool {
+    // Materialization cost applies whenever there's a pipeline breaker
+    has_pipeline_breakers(plan)
+}
+```
+
+**Restrictions:**
+- Temp file I/O may use different storage than data (SSD vs HDD)
+- Buffer pool can absorb materialization if temp fits in memory
+- Compression of temp data reduces I/O but adds CPU cost
+- System R did not have in-memory temp tables (always spills)
+- Modern systems (DuckDB) try to keep intermediates in memory
+
+## Cost Model
+
+```rust
+fn materialization_impact(
+    intermediate_rows: f64,
+    intermediate_width: f64,
+    storage_type: StorageType,
+) -> f64 {
+    let pages = (intermediate_rows * intermediate_width
+        / PAGE_SIZE).ceil();
+
+    let page_cost = match storage_type {
+        StorageType::HDD => 10.0,    // 10ms per page
+        StorageType::SSD => 0.05,    // 50us per page
+        StorageType::NVMe => 0.01,   // 10us per page
+        StorageType::Memory => 0.001, // 1us per page
+    };
+
+    // Total: 2 * pages * page_cost (write + read)
+    2.0 * pages * page_cost
+}
+```
+
+**Why System R preferred pipelined plans:**
+- 1979 hardware: 30ms per disk page, no SSD
+- 1M-page intermediate: 2M * 30ms = 16 hours of materialization I/O
+- Pipeline eliminates this entirely for suitable plans
+
+## Test Cases
+
+### Positive: Sort-merge with materialization
+
+```sql
+-- Both tables unsorted, need sort for merge join
+SELECT * FROM orders o
+JOIN customers c ON o.customer_id = c.id
+ORDER BY c.name;
+
+-- Sort orders (1M pages): 2 * 1M * 3 passes = 6M pages
+-- Sort customers (10K pages): 2 * 10K * 2 passes = 40K pages
+-- Merge: 1M + 10K = 1.01M pages
+-- Total materialization: ~7M page I/Os (the sort dominates)
+```
+
+### Positive: Pipelined NL avoids materialization
+
+```sql
+-- departments: 50 rows, fits in buffer
+-- employees: 1M rows, index on dept_id
+SELECT * FROM departments d
+JOIN employees e ON d.id = e.dept_id;
+
+-- Index NL: departments scanned once (5 pages), pipelined
+-- Each department tuple probes index directly
+-- No intermediate result materialized
+-- Total: ~200 pages (vs ~200K for sort-merge approach)
+```
+
+### Negative: Bushy tree forces materialization
+
+```sql
+-- Bushy plan: (R join S) join (T join U)
+-- Must materialize (T join U) before joining with (R join S)
+-- System R avoided this by restricting to left-deep trees
+```
+
+## References
+
+**Original paper:**
+- Selinger et al., "Access Path Selection", SIGMOD 1979
+  - Section 6: "temporary relations" cost in sort and merge operations
+  - Motivation for left-deep tree restriction (avoid materialization)
+
+**Pipeline breaker analysis:**
+- Neumann, "Efficiently Compiling Efficient Query Plans for Modern Hardware", VLDB 2011
+  - Morsel-driven parallelism: identifies pipeline breakers
+- Graefe, "Volcano -- An Extensible and Parallel Query Evaluation System", TKDE 1994
+  - Pipeline semantics in iterator model

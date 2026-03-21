@@ -1,0 +1,141 @@
+# Rule: Push Limit Below Exchange
+
+**Category:** distributed/data-movement
+**File:** `rules/distributed/data-movement/push-limit-below-exchange.rra`
+
+## Metadata
+
+- **ID:** `push-limit-below-exchange`
+- **Version:** "1.0.0"
+- **Databases:** presto, trino, spark, cockroachdb, greenplum, citus
+- **Tags:** distributed, limit, pushdown, data-movement, top-n
+- **Authors:** "RA Contributors"
+
+
+# Push Limit Below Exchange
+
+## Description
+
+Pushes a LIMIT (and optional ORDER BY for Top-N) below an exchange so
+that each node produces at most N rows before sending data over the
+network. The coordinator then applies the final limit on the merged
+results.
+
+**When to apply**: A Limit (or TopN) sits above a Gather exchange. The
+limit can be applied locally on each worker, reducing network traffic to
+at most `N * num_nodes` rows.
+
+**Why it works**: Without the push, each worker sends all its rows to
+the coordinator, which then discards most of them. With the push, each
+worker sends at most N rows, reducing network transfer by orders of
+magnitude for small limits.
+
+## Relational Algebra
+
+```algebra
+-- Simple limit
+Limit[n](Exchange[gather](R))
+  -> Limit[n](Exchange[gather](Limit[n](R)))
+
+-- Top-N (limit + sort)
+Limit[n](Sort[k](Exchange[gather](R)))
+  -> Limit[n](Sort[k](Exchange[gather](TopN[n, k](R))))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("push-limit-below-gather";
+    "(limit ?n (exchange gather ?child))" =>
+    "(limit ?n (exchange gather (limit ?n ?child)))"
+),
+
+rw!("push-topn-below-gather";
+    "(limit ?n (sort ?keys (exchange gather ?child)))" =>
+    "(limit ?n (sort ?keys (exchange gather (topn ?n ?keys ?child))))"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(exchange: &Exchange) -> bool {
+    // Only applies to gather exchanges (many-to-one)
+    matches!(exchange.dist_type, ExchangeType::Gather)
+}
+```
+
+**Restrictions:**
+- Only safe for Gather exchanges (data flows to a single node)
+- For hash-partition exchanges, pushing limit is incorrect because the
+  final limit depends on the merged result
+- The pushed limit must match the original (LIMIT + OFFSET combined)
+- For Top-N, the sort order must be pushed with the limit
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    total_rows: f64,
+    limit_n: u64,
+    num_nodes: u32,
+    row_bytes: f64,
+    network_bandwidth: f64,
+) -> f64 {
+    let rows_per_node = total_rows / num_nodes as f64;
+    let rows_before = total_rows;
+    let rows_after = (limit_n as f64) * num_nodes as f64;
+    let saved = (rows_before - rows_after).max(0.0) * row_bytes;
+    saved / network_bandwidth
+}
+```
+
+**Typical benefit**: For `LIMIT 10` on a 10M-row table across 100 nodes,
+this reduces network transfer from 10M rows to 1000 rows (99.99%).
+
+## Test Cases
+
+```sql
+-- Positive: LIMIT pushed below gather
+-- Before plan:
+-- Limit(10)
+--   Exchange[gather]
+--     Scan(events)  -- 10M rows across 100 nodes
+
+-- After plan:
+-- Limit(10)
+--   Exchange[gather]
+--     Limit(10)
+--       Scan(events)  -- each node sends at most 10 rows
+```
+
+```sql
+-- Positive: Top-N pushed below gather
+-- Before
+SELECT * FROM events ORDER BY timestamp DESC LIMIT 100;
+
+-- After plan:
+-- Limit(100)
+--   MergeSort(timestamp DESC)
+--     Exchange[gather]
+--       TopN(100, timestamp DESC)
+--         Scan(events)
+-- Each node sends its local top 100, coordinator merge-sorts
+```
+
+```sql
+-- Negative: LIMIT above hash-partition exchange
+-- Limit(10)
+--   Exchange[hash(user_id)]
+--     Scan(events)
+-- Cannot push: limit semantics require seeing all rows before deciding
+```
+
+## References
+
+Presto/Trino: presto-main/src/main/java/com/facebook/presto/sql/planner/iterative/rule/PushLimitThroughExchange.java
+Spark SQL: sql/catalyst/src/main/scala/org/apache/spark/sql/catalyst/optimizer/Optimizer.scala - LimitPushDown
+CockroachDB: pkg/sql/opt/norm/rules/limit.opt
+Greenplum: src/backend/optimizer/plan/createplan.c - create_motion_limit()

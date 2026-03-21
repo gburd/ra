@@ -1,0 +1,131 @@
+# Rule: Calcite JoinProjectTransposeRule
+
+**Category:** logical/projection-pushdown
+**File:** `rules/logical/projection-pushdown/join-project-transpose.rra`
+
+## Metadata
+
+- **ID:** `calcite-join-project-transpose`
+- **Version:** "1.0.0"
+- **Databases:** calcite, postgresql, mysql, oracle
+- **Tags:** logical, calcite, join, project, transpose, pullup
+- **Authors:** "RA Contributors"
+
+
+# Calcite JoinProjectTransposeRule
+
+## Description
+
+Pulls a projection from one input of a join up above the join. This
+is the inverse of ProjectJoinTransposeRule and is useful when the
+projection computes expressions needed by subsequent operators above
+the join.
+
+**When to apply**: A join has a project on one of its inputs, and
+that project is not from the null-generating side of an outer join.
+
+**Why it works**: Moving the projection above the join can expose
+the raw join inputs to physical join algorithm selection, and can
+enable further optimizations like join reordering.
+
+**Calcite class**: `org.apache.calcite.rel.rules.JoinProjectTransposeRule`
+
+## Relational Algebra
+
+```algebra
+-- Before: project below join
+(pi[a, b, a+1 AS c](R)) JOIN[c = S.k] S
+
+-- After: project above join
+pi[R.a, R.b, R.a+1 AS c, S.*](
+    R JOIN[R.a+1 = S.k] S
+)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-join-project-transpose-left";
+    "(join ?type ?cond
+        (project ?exprs ?left)
+        ?right)" =>
+    "(project ?new_exprs
+        (join ?type ?remapped_cond ?left ?right))"
+    if project_not_from_null_side("?type", "left")
+),
+
+rw!("calcite-join-project-transpose-right";
+    "(join ?type ?cond
+        ?left
+        (project ?exprs ?right))" =>
+    "(project ?new_exprs
+        (join ?type ?remapped_cond ?left ?right))"
+    if project_not_from_null_side("?type", "right")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    join: &Join,
+    project_side: Side,
+) -> bool {
+    let is_null_generating = match (join.join_type(), project_side) {
+        (JoinType::Left, Side::Right) => true,
+        (JoinType::Right, Side::Left) => true,
+        (JoinType::Full, _) => true,
+        _ => false,
+    };
+    !is_null_generating
+}
+```
+
+**Restrictions:**
+- Cannot pull up projection from the null-generating side of outer join
+- Join condition must be remapped to reference original columns
+- Configurable to include or exclude outer joins
+
+## Cost Model
+
+```rust
+fn estimated_benefit(input_rows: f64) -> f64 {
+    // Indirect benefit through enabling join reordering
+    0.01 * input_rows
+}
+```
+
+**Typical benefit**: 5-30% indirectly through enabling other optimizations.
+
+## Test Cases
+
+```sql
+-- Positive: project on left of inner join
+SELECT * FROM (
+    SELECT empno, ename, deptno + 1 AS deptno1 FROM emp
+) e JOIN dept d ON e.deptno1 = d.deptno;
+-- Pull project above join
+```
+
+```sql
+-- Negative: project on null-generating side of left join
+SELECT * FROM emp e
+LEFT JOIN (
+    SELECT deptno, dname || '!' AS dname1 FROM dept
+) d ON e.deptno = d.deptno;
+-- Cannot pull from right side of LEFT JOIN
+```
+
+```sql
+-- Positive: project on preserved side of left join
+SELECT * FROM (
+    SELECT empno, deptno * 10 AS deptno10 FROM emp
+) e LEFT JOIN dept d ON e.deptno10 = d.deptno;
+-- Can pull from left side of LEFT JOIN
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/JoinProjectTransposeRule.java (commit af6367d)

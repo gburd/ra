@@ -1,0 +1,212 @@
+# Rule: Index-Only Scan
+
+**Category:** physical/index-selection
+**File:** `rules/physical/index-selection/index-only-scan.rra`
+
+## Metadata
+
+- **ID:** `index-only-scan`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, oracle, mssql, sqlite, cockroachdb
+- **Tags:** index, covering, index-only, no-heap-access
+- **Authors:** "RA Contributors"
+
+## Preconditions
+
+```yaml
+  - type: "pattern"
+    must_match: "(project ?cols (filter ?pred (scan ?table)))"
+    description: "Query for index-only scan execution"
+  - type: "predicate"
+    condition: "exists_covering_index(?table, ?pred, ?cols)"
+    description: "All required columns must be in the index"
+```
+
+
+# Index-Only Scan
+
+## Metadata
+- **Rule ID**: `index-only-scan`
+- **Category**: Physical / Index Selection
+- **Complexity**: O(log n + k/b) where b = entries per leaf page
+- **Introduced**: DB2 V2 (1988), widespread since 1990s
+- **Prerequisites**: Index includes ALL columns referenced by query
+- **Alternatives**: index-scan (with heap fetch), covering-index-selection
+
+## Description
+
+Index-only scan (also called "covering index scan") retrieves all required
+data directly from the index without accessing the heap/table. This eliminates
+the most expensive part of an index scan -- the random heap tuple fetches.
+
+The index must "cover" the query: it must contain all columns used in
+predicates, projections, and any other clause (GROUP BY, ORDER BY, etc.).
+
+**When to use:**
+- All query columns exist in the index
+- Narrow queries (few columns) on wide tables
+- Aggregate queries (COUNT, MIN, MAX) on indexed columns
+- High-frequency queries worth a covering index
+
+**Advantages:**
+- Eliminates all heap I/O (the dominant cost of index scan)
+- Index pages are smaller and more cache-friendly than heap pages
+- Often 5-10x faster than index scan + heap fetch
+- Works regardless of table clustering/correlation
+
+**Disadvantages:**
+- Requires covering index (may need INCLUDE columns)
+- Wider indexes increase storage and write overhead
+- Visibility map must be current (PostgreSQL)
+- Cannot return columns not in the index
+
+## Relational Algebra
+
+```
+pi_{cols}(sigma_{pred}(R))
+  where index I covers (cols UNION columns(pred))
+-> IndexOnlyScan(I, pred, cols)
+
+No heap access needed -- all data from index leaf pages
+```
+
+## Implementation (egg rewrite rules)
+
+```lisp
+;; Convert to index-only scan when index covers all columns
+(rewrite (project ?cols (filter ?pred (scan ?table)))
+  (index-only-scan ?index ?pred ?cols)
+  :if (has-index ?table ?pred ?index)
+  :if (index-covers ?index (union ?cols (columns ?pred))))
+
+;; Aggregate on indexed column: index-only scan
+(rewrite (aggregate ?agg-func ?col (scan ?table))
+  (aggregate ?agg-func ?col (index-only-scan ?index true ?col))
+  :if (has-index ?table ?col ?index)
+  :if (is-min-max-count ?agg-func))
+
+;; Prefer index-only scan over index scan + heap fetch
+(rewrite (heap-fetch (index-scan ?index ?pred) ?cols)
+  (index-only-scan ?index ?pred ?cols)
+  :if (index-covers ?index (union ?cols (columns ?pred))))
+```
+
+## Cost Model
+
+```rust
+pub fn cost_index_only_scan(
+    table_card: u64,
+    selectivity: f64,
+    index_height: u64,
+    entries_per_leaf: u64,
+    hardware: &HardwareModel,
+) -> Cost {
+    let matching_rows = (table_card as f64 * selectivity) as u64;
+
+    // Index traversal: root to first matching leaf
+    let traversal_cost = Cost::io(
+        index_height as f64 * hardware.random_page_read_cost(),
+    );
+
+    // Scan matching leaf pages (sequential within index)
+    let leaf_pages = matching_rows / entries_per_leaf + 1;
+    let leaf_cost = Cost::io(
+        leaf_pages as f64 * hardware.sequential_page_read_cost(),
+    );
+
+    // No heap access -- this is the key advantage
+    let heap_cost = Cost::zero();
+
+    traversal_cost + leaf_cost + heap_cost
+}
+
+pub fn benefit_over_index_scan(
+    matching_rows: u64,
+    correlation: f64,
+    hardware: &HardwareModel,
+) -> f64 {
+    // Savings = eliminated heap fetches
+    let heap_cost = if correlation > 0.9 {
+        matching_rows as f64
+            / hardware.tuples_per_page()
+            * hardware.sequential_page_read_cost()
+    } else {
+        matching_rows as f64 * hardware.random_page_read_cost()
+    };
+
+    let index_only_cost = matching_rows as f64
+        / hardware.index_entries_per_page()
+        * hardware.sequential_page_read_cost();
+
+    (heap_cost - index_only_cost) / heap_cost
+}
+```
+
+## Test Cases
+
+### Test 1: COUNT(*) with covering index
+```sql
+CREATE INDEX idx_status ON orders(status);
+
+SELECT COUNT(*) FROM orders WHERE status = 'shipped';
+
+-- Expected: IndexOnlyScan on idx_status
+-- Only needs to count leaf entries; no heap access
+-- Much faster than full table scan for counting
+```
+
+### Test 2: Projection fully covered by index
+```sql
+CREATE INDEX idx_user_email_name ON users(email, name);
+
+SELECT email, name FROM users WHERE email LIKE 'admin%';
+
+-- Expected: IndexOnlyScan
+-- Both projected columns (email, name) in index
+-- Predicate column (email) in index
+-- Zero heap page reads
+```
+
+### Test 3: MIN/MAX on indexed column
+```sql
+CREATE INDEX idx_price ON products(price);
+
+SELECT MIN(price), MAX(price) FROM products;
+
+-- Expected: IndexOnlyScan
+-- MIN = first leaf entry, MAX = last leaf entry
+-- Two index page reads total
+```
+
+### Test 4: Negative -- column not in index
+```sql
+CREATE INDEX idx_email ON users(email);
+
+SELECT email, address FROM users WHERE email = 'test@example.com';
+
+-- NOT index-only: 'address' not in index
+-- Must use IndexScan + heap fetch for address column
+```
+
+## Performance Characteristics
+
+| Metric | Index-Only Scan | Index Scan + Heap | Sequential Scan |
+|--------|----------------|-------------------|-----------------|
+| I/O (1% selective) | ~10 pages | ~1010 pages | Full table |
+| I/O (10% selective) | ~100 pages | ~10100 pages | Full table |
+| Cache efficiency | High (compact) | Low (random heap) | Moderate |
+| Write overhead | Higher (wider index) | Lower | None |
+
+## References
+
+1. **PostgreSQL Documentation**: Index-Only Scans
+   - https://www.postgresql.org/docs/current/indexes-index-only-scans.html
+
+2. **MySQL Documentation**: Covering Indexes
+   - https://dev.mysql.com/doc/refman/8.0/en/glossary.html#glos_covering_index
+
+3. **Selinger et al.**: "Access Path Selection in a Relational Database Management System"
+   - System R optimizer, SIGMOD 1979
+
+4. **mssql**: Included columns in nonclustered indexes
+   - CREATE INDEX ... INCLUDE for covering without key expansion

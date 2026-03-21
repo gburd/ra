@@ -1,0 +1,176 @@
+# Rule: TopN and Limit Push Down
+
+**Category:** database-specific/tidb
+**File:** `rules/database-specific/tidb/topn-push-down.rra`
+
+## Metadata
+
+- **ID:** `tidb-topn-push-down`
+- **Version:** "1.0.0"
+- **Databases:** tidb
+- **Tags:** distributed, topn, limit, pushdown, coprocessor, tidb
+- **Authors:** "RA Contributors"
+
+
+# TopN and Limit Push Down
+
+## Description
+
+Pushes TopN (ORDER BY + LIMIT) and plain LIMIT operators down through
+the logical plan tree, as close to the data source as possible. In
+TiDB's distributed architecture, this means pushing TopN to the
+TiKV/TiFlash coprocessor, where it filters rows at the storage layer
+before sending them over the network.
+
+**When to apply**: A TopN or Limit operator sits above a data source,
+join, union, or projection that can accept a pushed-down limit. The
+pushed-down TopN processes rows at the storage layer and returns only
+the top-k rows.
+
+**Why it works**: Without pushdown, all matching rows travel from
+storage to the TiDB server, where TopN/Limit is applied. With pushdown,
+only the top-k rows per storage node cross the network. For LIMIT 10 on
+a 1B row table, this reduces network transfer from 1B rows to 10 rows
+per storage node.
+
+## Relational Algebra
+
+```algebra
+-- Limit through projection
+Limit[k](Project[exprs](R))
+  -> Project[exprs](Limit[k](R))
+
+-- TopN pushed to coprocessor
+TopN[k, order](TableScan(T))
+  -> CoprocessorTopN[k, order](TableScan(T))
+
+-- TopN through union: apply to each branch
+TopN[k, order](UnionAll(R1, R2))
+  -> TopN[k, order](UnionAll(TopN[k, order](R1), TopN[k, order](R2)))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("push-topn-through-projection";
+    "(topn ?k ?order (project ?exprs ?child))" =>
+    "(project ?exprs (topn ?k ?order ?child))"
+    if order_cols_not_in_projections("?order", "?exprs")
+),
+
+rw!("push-topn-to-coprocessor";
+    "(topn ?k ?order (table_scan ?table))" =>
+    "(cop_topn ?k ?order (table_scan ?table))"
+),
+
+rw!("push-topn-through-union";
+    "(topn ?k ?order (union_all ?left ?right))" =>
+    "(topn ?k ?order
+        (union_all
+            (topn ?k ?order ?left)
+            (topn ?k ?order ?right)))"
+),
+```
+
+## Preconditions
+
+```rust
+fn can_push_down(
+    topn: &LogicalTopN,
+    child: &LogicalPlan,
+) -> bool {
+    match child {
+        // Push through projection if order columns survive
+        Projection(p) => topn.order_cols_in(p.child_schema()),
+        // Push to table scan for coprocessor execution
+        DataSource(_) => true,
+        // Push into each union branch
+        UnionAll(_) => true,
+        // Cannot push through aggregation
+        Aggregation(_) => false,
+        // Cannot push through window functions
+        Window(_) => false,
+        _ => false,
+    }
+}
+```
+
+**Restrictions:**
+- Cannot push TopN through aggregation (changes semantics)
+- Cannot push through window functions (ordering dependency)
+- For joins, TopN can sometimes be pushed to the outer side if
+  it is preserved through the join
+- The coprocessor TopN returns top-k per region; the TiDB server
+  must merge and re-sort to get the global top-k
+- OFFSET is handled after the global merge
+
+## Cost Model
+
+```rust
+fn topn_pushdown_benefit(
+    total_rows: f64,
+    limit_k: f64,
+    num_storage_nodes: u32,
+    network_cost_per_row: f64,
+) -> f64 {
+    // Without pushdown: send all rows over network
+    let without = total_rows * network_cost_per_row;
+    // With pushdown: send k rows per node
+    let with = limit_k * num_storage_nodes as f64
+        * network_cost_per_row;
+    without - with
+}
+```
+
+**Typical benefit**: LIMIT 10 on 1B rows across 100 storage nodes:
+transfers 1000 rows instead of 1B (99.9999% reduction).
+
+## Test Cases
+
+```sql
+-- Positive: TopN pushed to TiKV coprocessor
+SELECT * FROM orders ORDER BY created_at DESC LIMIT 10;
+
+-- Plan:
+-- TopN(10, created_at DESC)   -- final merge
+--   TableReader
+--     CopTopN(10, created_at DESC)  -- pushed to each TiKV
+--       TableScan(orders)
+```
+
+```sql
+-- Positive: LIMIT pushed through projection
+SELECT name, amount * 1.1 AS adjusted
+FROM sales
+ORDER BY amount DESC
+LIMIT 5;
+
+-- TopN pushed below the projection to the scan
+```
+
+```sql
+-- Positive: TopN into union branches
+(SELECT * FROM orders_2023 ORDER BY amount DESC LIMIT 10)
+UNION ALL
+(SELECT * FROM orders_2024 ORDER BY amount DESC LIMIT 10)
+ORDER BY amount DESC LIMIT 10;
+-- TopN 10 pushed into each union branch
+```
+
+```sql
+-- Negative: TopN above aggregation
+SELECT region, SUM(amount) AS total
+FROM orders
+GROUP BY region
+ORDER BY total DESC
+LIMIT 5;
+-- Cannot push TopN below the aggregation
+```
+
+## References
+
+TiDB: pkg/planner/core/rule_topn_push_down.go:24 - PushDownTopNOptimizer (commit e2184a2)
+TiDB: coprocessor protocol - TopN request encoding
+TiDB docs: "Coprocessor pushdown" in performance documentation

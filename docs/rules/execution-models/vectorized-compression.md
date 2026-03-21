@@ -1,0 +1,337 @@
+# Rule: Vectorized Lightweight Column Compression
+
+**Category:** execution-models
+**File:** `rules/execution-models/vectorized/vectorized-compression.rra`
+
+## Metadata
+
+- **ID:** `vectorized-compression`
+- **Version:** 1.0.0
+- **Databases:** DuckDB, ClickHouse, Velox, MonetDB
+- **Tags:** execution, vectorized, compression, rle, dictionary, bitpacking, simd
+- **SQL Standard:** MonetDB X100
+- **Authors:** Zukowski et al., Polychroniou et al.
+
+
+# Vectorized Lightweight Column Compression
+
+## Description
+
+Lightweight compression in vectorized engines reduces memory bandwidth consumption while enabling SIMD-accelerated decompression. The key insight is that decompression can be integrated into the execution pipeline so that compressed data is decoded directly into vector buffers during scan, avoiding a separate decompression step. Some operations (filtering, aggregation) can even operate directly on compressed data, skipping decompression entirely.
+
+**Compression schemes:**
+- **Dictionary encoding**: Map values to small integer codes
+- **Run-length encoding (RLE)**: Consecutive equal values as (value, count)
+- **Bit-packing**: Store N-bit integers in minimal bits
+- **Frame-of-reference (FOR)**: Store offsets from a base value
+- **Delta encoding**: Store differences between consecutive values
+- **Constant encoding**: Entire column has one value
+
+**Key characteristics:**
+- **SIMD decompression**: Batch decode using SIMD gather/scatter
+- **Operate on compressed**: Filter/aggregate without full decompression
+- **Compression-aware scan**: Integrate decode into scan operator
+- **Adaptive encoding**: Choose encoding per column segment
+- **Minimal CPU overhead**: Decompression faster than I/O savings
+
+**Trade-offs:**
+- Encoding selection requires column statistics
+- Dictionary encoding limited by cardinality
+- RLE benefits depend on sort order / data distribution
+- Bit-packing requires known value range
+
+## Relational Algebra
+
+```
+Compressed scan with vectorized decompression:
+
+CompressedScan(table, columns) -> Iterator<Batch>:
+  for each segment in table:
+    encoding = segment.metadata.encoding
+
+    match encoding:
+      Dictionary:
+        // Decode: lookup dictionary[code] for each code
+        codes = read_codes(segment)  // SIMD load
+        values = simd_gather(dictionary, codes)  // SIMD gather
+        batch.add_column(values)
+
+      RLE:
+        // Expand runs into vector
+        runs = read_runs(segment)
+        values = simd_expand_runs(runs, batch_size)
+        batch.add_column(values)
+
+      BitPacked(bits):
+        // Unpack N-bit integers to native width
+        packed = read_bytes(segment)
+        values = simd_unpack(packed, bits)
+        batch.add_column(values)
+
+Operate-on-compressed (skip decompression):
+  FilterOnDict(dict_column, predicate):
+    // Evaluate predicate on dictionary entries (few values)
+    matching_codes = {}
+    for (code, value) in dictionary:
+      if eval(predicate, value):
+        matching_codes.add(code)
+    // Filter using code comparison (cheaper)
+    selection = simd_contains(codes, matching_codes)
+```
+
+## Implementation
+
+```rust
+use ra_core::algebra::RelExpr;
+
+/// Compression-aware vectorized scan
+pub struct CompressedVectorizedScan {
+    table: String,
+    columns: Vec<ColumnId>,
+    batch_size: usize,
+}
+
+impl CompressedVectorizedScan {
+    pub fn next_batch(&mut self) -> Result<Option<Batch>> {
+        let mut batch = Batch::new(self.batch_size);
+
+        for col_id in &self.columns {
+            let segment = self.current_segment(col_id)?;
+            let column = match segment.encoding() {
+                Encoding::Dictionary { dict, codes } => {
+                    self.decode_dictionary(dict, codes)?
+                }
+                Encoding::RLE { runs } => {
+                    self.decode_rle(runs)?
+                }
+                Encoding::BitPacked { data, bits } => {
+                    self.decode_bitpacked(data, *bits)?
+                }
+                Encoding::DeltaFOR { base, deltas, bits } => {
+                    self.decode_delta_for(*base, deltas, *bits)?
+                }
+                Encoding::Constant { value } => {
+                    Column::broadcast(value, self.batch_size)
+                }
+                Encoding::Uncompressed { data } => {
+                    Column::from_raw(data, self.batch_size)
+                }
+            };
+            batch.add_column(column);
+        }
+
+        Ok(Some(batch))
+    }
+
+    /// SIMD dictionary decode using gather instructions
+    fn decode_dictionary(
+        &self,
+        dict: &[Value],
+        codes: &[u16],
+    ) -> Result<Column> {
+        let mut result = vec![Value::default(); codes.len()];
+
+        #[cfg(target_feature = "avx2")]
+        unsafe {
+            // Use SIMD gather for integer dictionaries
+            let dict_ptr = dict.as_ptr() as *const i64;
+            for i in (0..codes.len()).step_by(4) {
+                let indices = _mm_loadu_si128(
+                    codes.as_ptr().add(i) as *const __m128i,
+                );
+                // Zero-extend u16 -> i32 for gather
+                let idx32 = _mm_cvtepu16_epi32(indices);
+                let gathered = _mm256_i32gather_epi64(
+                    dict_ptr, idx32, 8,
+                );
+                _mm256_storeu_si256(
+                    result.as_mut_ptr().add(i) as *mut __m256i,
+                    gathered,
+                );
+            }
+        }
+
+        Ok(Column::from_values(result))
+    }
+
+    /// SIMD RLE expansion
+    fn decode_rle(
+        &self,
+        runs: &[(Value, u32)],
+    ) -> Result<Column> {
+        let mut result = Vec::with_capacity(self.batch_size);
+
+        for (value, count) in runs {
+            let remaining = self.batch_size - result.len();
+            let expand_count = (*count as usize).min(remaining);
+
+            // SIMD fill: broadcast value and store
+            #[cfg(target_feature = "avx2")]
+            unsafe {
+                if let Value::Int64(v) = value {
+                    let broadcast = _mm256_set1_epi64x(*v);
+                    let mut i = 0;
+                    while i + 4 <= expand_count {
+                        _mm256_storeu_si256(
+                            result.as_mut_ptr()
+                                .add(result.len() + i)
+                                as *mut __m256i,
+                            broadcast,
+                        );
+                        i += 4;
+                    }
+                    result.set_len(result.len() + expand_count);
+                }
+            }
+
+            if result.len() >= self.batch_size {
+                break;
+            }
+        }
+
+        Ok(Column::from_values(result))
+    }
+
+    /// SIMD bit-unpacking
+    fn decode_bitpacked(
+        &self,
+        data: &[u8],
+        bits: u8,
+    ) -> Result<Column> {
+        let mut result = vec![0i64; self.batch_size];
+        let mask = (1i64 << bits) - 1;
+
+        // Unpack N-bit values to 64-bit
+        let mut bit_offset = 0usize;
+        for i in 0..self.batch_size {
+            let byte_idx = bit_offset / 8;
+            let bit_idx = bit_offset % 8;
+
+            // Read enough bytes and extract bits
+            let raw = read_u64_unaligned(&data[byte_idx..]);
+            result[i] = ((raw >> bit_idx) as i64) & mask;
+            bit_offset += bits as usize;
+        }
+
+        Ok(Column::from_i64(result))
+    }
+}
+
+/// Filter directly on compressed dictionary encoding
+pub fn filter_on_dictionary(
+    dict: &[Value],
+    codes: &[u16],
+    predicate: &Expr,
+) -> Result<Bitset> {
+    // Step 1: Evaluate predicate on dictionary (small)
+    let mut matching_codes = Bitset::new(dict.len());
+    for (code, value) in dict.iter().enumerate() {
+        if eval_predicate_scalar(predicate, value)? {
+            matching_codes.set(code);
+        }
+    }
+
+    // Step 2: Check codes against matching set (SIMD)
+    let mut result = Bitset::new(codes.len());
+    for (i, &code) in codes.iter().enumerate() {
+        if matching_codes.get(code as usize) {
+            result.set(i);
+        }
+    }
+
+    Ok(result)
+}
+
+/// Cost model for compressed scan
+pub fn compressed_scan_cost(
+    raw_bytes: f64,
+    compression_ratio: f64,
+    decompression_cpu_ns: f64,
+    io_bandwidth_gbps: f64,
+) -> f64 {
+    let compressed_bytes = raw_bytes / compression_ratio;
+
+    // I/O cost (reduced by compression)
+    let io_cost = compressed_bytes / (io_bandwidth_gbps * 1e9) * 1e3;
+
+    // Decompression CPU cost
+    let cpu_cost = raw_bytes * decompression_cpu_ns * 1e-9;
+
+    io_cost + cpu_cost
+}
+```
+
+## Cost Model
+
+**Compression Ratios (typical):**
+- Dictionary (low cardinality): 5-50x
+- RLE (sorted/clustered): 10-1000x
+- Bit-packing (small range): 2-8x
+- Delta + FOR: 3-10x
+- Constant: infinite
+
+**Decompression Throughput (SIMD):**
+- Dictionary (gather): ~2 GB/s decoded
+- RLE (broadcast): ~10 GB/s decoded
+- Bit-packing: ~5 GB/s decoded
+- Constant: infinite (broadcast)
+
+**Operate-on-Compressed Savings:**
+- Dictionary filter: evaluate on D entries instead of N rows
+- RLE aggregation: multiply by run count instead of iterating
+- Constant skip: zero cost (known result)
+- Savings: up to 100-1000x for high-compression columns
+
+## Test Cases
+
+```sql
+-- Test 1: Dictionary-encoded filter (operate on compressed)
+SELECT * FROM events WHERE event_type = 'click';
+-- event_type: 20 distinct values, dictionary encoded
+-- Expected: Evaluate 'click' on 20 dict entries, then code match
+-- Savings: 20 comparisons instead of millions
+
+-- Test 2: RLE scan (sorted column)
+SELECT COUNT(*) FROM logs WHERE date = '2024-03-15';
+-- date column: sorted, RLE encoded
+-- Expected: Binary search on runs, return run count
+-- Savings: O(log R) instead of O(N) where R = number of runs
+
+-- Test 3: Bit-packed integers
+SELECT * FROM sensor_data WHERE reading BETWEEN 0 AND 255;
+-- reading: 8-bit values, bit-packed to 1 byte each
+-- Expected: SIMD unpack + SIMD range comparison
+-- I/O: 8x less data read from storage
+
+-- Test 4: Mixed compression in multi-column query
+SELECT customer_id, SUM(amount)
+FROM transactions
+WHERE date > '2024-01-01'
+GROUP BY customer_id;
+-- date: delta-encoded, customer_id: dictionary, amount: bit-packed
+-- Each column decoded with appropriate SIMD kernel
+```
+
+## Comparison with Other Models
+
+| Aspect | Vectorized Compressed | Volcano (uncompressed) | Push-Based |
+|--------|----------------------|----------------------|------------|
+| I/O reduction | 5-50x | None | None |
+| Decompression | SIMD batch | Per-tuple | Inline |
+| Operate on compressed | Yes | No | No |
+| Encoding selection | Per-segment | N/A | N/A |
+| CPU overhead | Minimal | None | None |
+
+## References
+
+1. **Zukowski, Marcin et al**. "Super-Scalar RAM-CPU Cache Compression." ICDE 2006.
+   - Lightweight compression for vectorized execution
+
+2. **Polychroniou, Orestis; Ross, Kenneth A**. "Efficient Lightweight Compression Alongside Fast Scans." DaMoN 2015.
+   - SIMD decompression kernels for analytical databases
+
+3. **Abadi, Daniel J.; Madden, Samuel; Ferreira, Miguel**. "Integrating Compression and Execution in Column-Oriented Database Systems." SIGMOD 2006.
+   - Operating directly on compressed data
+
+4. **Lang, Harald et al**. "Data Blocks: Hybrid OLTP and OLAP on Compressed Storage using both Vectorization and Compilation." SIGMOD 2016.
+   - Combining compression with vectorized and compiled execution

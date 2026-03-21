@@ -1,0 +1,134 @@
+# Rule: CTE Inlining vs Materialization Decision
+
+**Category:** logical/cte-optimization
+**File:** `rules/logical/cte-optimization/cte-inline-vs-materialize.rra`
+
+## Metadata
+
+- **ID:** `cte-inline-vs-materialize`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, duckdb, mssql, oracle, cockroachdb
+- **Tags:** logical, cte, common-table-expression, inlining, materialization
+- **Authors:** "PostgreSQL 12+ Team"
+
+
+# CTE Inlining vs Materialization Decision
+
+## Description
+
+Decides whether a Common Table Expression (CTE) should be inlined
+(substituted into each reference like a view) or materialized (computed
+once and stored as a temp relation). Inlining enables predicate pushdown
+and join reordering across the CTE boundary. Materialization avoids
+redundant computation when the CTE is referenced multiple times or is
+expensive to recompute.
+
+**When to apply**: Any non-recursive CTE where the optimizer must
+choose between inlining and materializing.
+
+## Relational Algebra
+
+```algebra
+-- CTE referenced once: inline
+WITH cte AS (SELECT * FROM R WHERE pred)
+SELECT * FROM cte WHERE extra_pred;
+-- Inlined: SELECT * FROM R WHERE pred AND extra_pred
+
+-- CTE referenced multiple times: materialize
+WITH cte AS (expensive_query)
+SELECT * FROM cte c1 JOIN cte c2 ON c1.id = c2.parent_id;
+-- Materialize: compute once, scan twice
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("cte-inline";
+    "(cte-ref ?cte_name ?cte_body)" =>
+    "?cte_body"
+    if cte_referenced_once("?cte_name")
+    if not_marked_materialized("?cte_name")
+),
+
+rw!("cte-materialize";
+    "(join ?cond (cte-ref ?name ?body) (cte-ref ?name ?body))" =>
+    "(join ?cond
+        (mat-scan (materialize ?name ?body))
+        (mat-scan (materialize ?name ?body)))"
+    if cte_referenced_multiple("?name")
+),
+```
+
+## Preconditions
+
+```rust
+fn should_inline(cte: &CTE) -> bool {
+    cte.reference_count() == 1
+        && !cte.has_materialized_hint()
+        // Inlining enables further optimization
+        && cte.body().has_pushable_predicates()
+}
+
+fn should_materialize(cte: &CTE) -> bool {
+    cte.reference_count() > 1
+        && cte.body().estimated_cost() > 100.0
+        // Or explicitly marked
+        || cte.has_materialized_hint()
+}
+```
+
+**Restrictions:**
+- Recursive CTEs must always be materialized
+- Side-effecting CTEs (INSERT...RETURNING) must be materialized
+- PostgreSQL < 12 always materialized CTEs (no inlining)
+
+## Cost Model
+
+```rust
+fn materialization_benefit(
+    cte_cost: f64,
+    reference_count: usize,
+    inline_optimization_savings: f64,
+) -> f64 {
+    let materialize_cost = cte_cost + reference_count as f64 * 0.1;
+    let inline_cost = reference_count as f64 * cte_cost
+        - inline_optimization_savings;
+    inline_cost - materialize_cost
+}
+```
+
+**Typical benefit**: 10-80% depending on reference count and pushdown potential.
+
+## Test Cases
+
+```sql
+-- Positive: inline single-reference CTE for predicate pushdown
+WITH recent AS (SELECT * FROM orders WHERE status = 'pending')
+SELECT * FROM recent WHERE amount > 1000;
+-- Inline: SELECT * FROM orders WHERE status='pending' AND amount>1000
+
+-- Positive: materialize multi-reference CTE
+WITH dept_stats AS (
+    SELECT dept_id, AVG(salary) AS avg_sal, COUNT(*) AS cnt
+    FROM employees GROUP BY dept_id
+)
+SELECT * FROM dept_stats WHERE avg_sal > 100000
+UNION ALL
+SELECT * FROM dept_stats WHERE cnt > 50;
+-- Materialize: compute aggregation once
+
+-- Negative: recursive CTE (must materialize)
+WITH RECURSIVE subordinates AS (
+    SELECT * FROM employees WHERE manager_id IS NULL
+    UNION ALL
+    SELECT e.* FROM employees e JOIN subordinates s ON e.manager_id = s.id
+)
+SELECT * FROM subordinates;
+```
+
+## References
+
+- PostgreSQL 12: CTE inlining (auto-inlining of non-recursive CTEs)
+- SQL Server: CTE optimization hints (MATERIALIZED/NOT MATERIALIZED)

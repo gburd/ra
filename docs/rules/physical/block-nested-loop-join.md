@@ -1,0 +1,123 @@
+# Rule: Block Nested Loop Join
+
+**Category:** physical/join-algorithms
+**File:** `rules/physical/join-algorithms/block-nested-loop-join.rra`
+
+## Metadata
+
+- **ID:** `block-nested-loop-join`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, sqlite
+- **Tags:** join, nested-loop, blocking
+- **Authors:** "RA Contributors"
+
+## Preconditions
+
+```yaml
+  - type: "pattern"
+    must_match: "(join ?type ?cond ?left ?right)"
+    description: "Join using block nested loop strategy"
+  - type: "predicate"
+    condition: "!is_equijoin(?cond) || !has_memory_for_hash(?left)"
+    description: "Used when hash join not possible (non-equijoin or insufficient memory)"
+```
+
+
+# Block Nested Loop Join
+
+## Description
+
+Loads blocks of outer table into memory, scans inner once per block; reduces I/O vs tuple-at-a-time.
+
+**When to apply**: No indexes or hash tables available; need to minimize I/O.
+
+**Why it works**: Scans inner table once per outer block instead of once per outer tuple.
+
+## Relational Algebra
+
+```algebra
+join[R.key = S.key](R, S)
+  -> for each block B in R:
+       load B into memory
+       for each s in S:
+         for each r in B:
+           if r.key = s.key: emit (r, s)
+
+Cost: (|R| / block_size) * |S| + |R|
+```
+
+## Implementation
+
+```rust
+rw!("use-block-nested-loop";
+    "(join ?cond ?outer ?inner)" =>
+    "(block-nested-loop ?cond ?outer ?inner)"
+    if !has_index("?inner") && !can_hash("?outer", "?inner")
+),
+```
+
+## Cost Model
+
+```rust
+fn cost(outer_size: u64, inner_size: u64, block_size: u64) -> f64 {
+    let blocks = (outer_size as f64 / block_size as f64).ceil();
+    let outer_scans = outer_size as f64;
+    let inner_scans = blocks * inner_size as f64;
+    outer_scans + inner_scans
+}
+
+fn benefit_over_tuple_nested_loop(outer: u64, inner: u64, block: u64) -> f64 {
+    let tuple_cost = outer as f64 * inner as f64;
+    let block_cost = cost(outer, inner, block);
+    (tuple_cost - block_cost) / tuple_cost
+}
+```
+
+**Typical benefit**: 30-60% vs tuple-at-a-time nested loop
+
+## Test Cases
+
+### Positive: No index, small-to-medium tables
+
+```sql
+SELECT * FROM departments d
+JOIN employees e ON d.manager_id = e.id;
+
+-- No index on employees.id, departments fits in few blocks
+-- Block nested loop: 10 blocks * 10K employees = 100K comparisons
+-- vs tuple nested: 50 depts * 10K = 500K comparisons
+```
+
+### Positive: Memory-constrained environment
+
+```sql
+SELECT * FROM orders o
+JOIN shipments s ON o.id = s.order_id;
+
+-- Limited memory, can't build hash table
+-- Block nested loop better than tuple-at-a-time
+```
+
+### Negative: Index available
+
+```sql
+SELECT * FROM orders o
+JOIN customers c ON o.customer_id = c.id;
+
+-- Index on customers.id: use index nested loop instead
+```
+
+### Negative: Large memory for hash join
+
+```sql
+SELECT * FROM products p
+JOIN inventory i ON p.sku = i.sku;
+
+-- Sufficient memory: hash join faster than any nested loop
+```
+
+## References
+
+- PostgreSQL: Block-based nested loop optimization
+- MySQL: Block nested-loop join (BNL)
+- SQLite: Block-oriented nested loop

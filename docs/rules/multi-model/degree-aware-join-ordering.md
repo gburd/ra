@@ -1,0 +1,104 @@
+# Rule: Degree-Aware Join Ordering
+
+**Category:** multi-model/graph
+**File:** `rules/multi-model/graph/degree-aware-join-ordering.rra`
+
+## Metadata
+
+- **ID:** `degree-aware-join-ordering`
+- **Version:** "1.0.0"
+- **Databases:** neo4j, janusgraph, neptune, tigergraph
+- **Tags:** graph, join-ordering, degree, cardinality
+- **SQL Standard:** "cypher:9"
+- **Authors:** "RA Contributors"
+
+
+# Degree-Aware Join Ordering
+
+## Description
+
+Reorders graph pattern matching to start from the lowest-degree vertex
+in the pattern, propagating matches through progressively higher-degree
+joins. In graphs with skewed degree distributions, starting from a
+supernode expands the search space explosively, while starting from a
+low-degree node keeps intermediate results small.
+
+**When to apply**: A multi-edge graph pattern where vertices have
+significantly different degree distributions (power-law graphs).
+
+**Why it works**: Graph degree distributions are typically skewed. By
+starting from the most constrained (lowest expected cardinality) vertex
+and expanding outward, each intermediate result set stays small.
+
+## Relational Algebra
+
+```algebra
+match(a-[e1]->b-[e2]->c)  -- if degree(c) << degree(a)
+  -> match(c<-[e2]-b<-[e1]-a)
+  -- Start traversal from c instead of a
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("degree-aware-reorder-2hop";
+    "(match-path ?a ?e1 ?b ?e2 ?c)" =>
+    "(match-path-rev ?c ?e2 ?b ?e1 ?a)"
+    if lower_degree("?c", "?a")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    start: &str,
+    end: &str,
+    stats: &GraphStats,
+) -> bool {
+    let start_deg = stats.avg_degree(start);
+    let end_deg = stats.avg_degree(end);
+    end_deg < start_deg * 0.5
+}
+```
+
+**Restrictions:**
+- Requires degree statistics per label/type
+- Only applicable to patterns with free variable start and end
+- Direction must be reversible (edges stored bidirectionally)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    start_degree: f64,
+    end_degree: f64,
+    hops: u32,
+) -> f64 {
+    let forward_cost = start_degree.powi(hops as i32);
+    let reverse_cost = end_degree.powi(hops as i32);
+    (forward_cost - reverse_cost) / forward_cost
+}
+```
+
+**Typical benefit**: 0.5-0.99 on power-law graphs with high degree variance.
+
+## Test Cases
+
+```cypher
+-- Positive: start from low-degree label
+MATCH (c:City)<-[:LIVES_IN]-(p:Person)-[:FOLLOWS]->(i:Influencer)
+-- Influencer has fewer nodes than Person; start from Influencer
+-- Reordered to: (i:Influencer)<-[:FOLLOWS]-(p)-[:LIVES_IN]->(c)
+
+-- Negative: uniform degree distribution
+MATCH (a:Node)-[:EDGE]->(b:Node)-[:EDGE]->(c:Node)
+-- No benefit; all labels have similar degree
+```
+
+## References
+
+Neo4j: org.neo4j.cypher.internal.compiler.planner.logical.cardinality.CardinalityModel
+Mhedhbi, Salihoglu "Optimizing Subgraph Queries by Combining Binary and Worst-Case Optimal Joins" (VLDB 2019)

@@ -1,0 +1,107 @@
+# Rule: Label-Based Access Control (LBAC) Optimization
+
+**Category:** logical/security
+**File:** `rules/logical/security/label-based-access-control.rra`
+
+## Metadata
+
+- **ID:** `label-based-access-control`
+- **Version:** "1.0.0"
+- **Databases:** oracle, db2, mssql
+- **Tags:** logical, security, lbac, classification, mandatory-access
+- **Authors:** "Bell, LaPadula", "Oracle Label Security"
+
+
+# Label-Based Access Control (LBAC) Optimization
+
+## Description
+
+Optimizes queries on tables with mandatory access control labels by
+pushing label dominance checks to the earliest possible scan position
+and using label indexes for efficient filtering. Each row carries a
+security label; the user's clearance determines which rows are visible.
+
+**When to apply**: Tables with security labels (classification levels)
+where the user's session label is known at compile time.
+
+## Relational Algebra
+
+```algebra
+-- Before: label check after join
+sigma[dominates(session_label, row_label)](R join S)
+
+-- After: push label checks to base scans
+sigma[dominates(session_label, R.label)](R)
+  join
+sigma[dominates(session_label, S.label)](S)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("lbac-pushdown-through-join";
+    "(filter (label-check ?level) (join ?cond ?left ?right))" =>
+    "(join ?cond
+        (filter (label-check ?level) ?left)
+        (filter (label-check ?level) ?right))"
+    if both_sides_have_labels("?left", "?right")
+),
+
+rw!("lbac-use-label-index";
+    "(filter (label-check ?level) (tablescan ?table))" =>
+    "(index-scan (label-index ?table) (label-range ?level))"
+    if has_label_index("?table")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(table: &Table, session: &Session) -> bool {
+    table.has_security_labels()
+        && session.clearance_level().is_some()
+}
+```
+
+**Restrictions:**
+- Label hierarchy must be a lattice (partial order)
+- Compartments and groups add complexity beyond simple levels
+- Write-down controls may affect UPDATE/INSERT plans
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    rows: f64,
+    label_selectivity: f64,
+    has_label_index: bool,
+) -> f64 {
+    if has_label_index {
+        rows * (1.0 - label_selectivity) * 4.0
+    } else {
+        rows * (1.0 - label_selectivity) * 0.5
+    }
+}
+```
+
+**Typical benefit**: 0-15%, depends on clearance level breadth.
+
+## Test Cases
+
+```sql
+-- Positive: user with SECRET clearance
+-- Labels: UNCLASS < CONFID < SECRET < TOPSECRET
+SELECT * FROM documents WHERE topic = 'budget';
+-- Injects: AND label <= 'SECRET', pushed to scan
+
+-- Negative: user with TOPSECRET sees all rows
+SELECT * FROM documents;
+-- Label filter is trivially true, eliminated
+```
+
+## References
+
+- Bell, D.E., LaPadula, L.J. "Secure Computer Systems" (MITRE, 1973)
+- Oracle Label Security Administrator's Guide

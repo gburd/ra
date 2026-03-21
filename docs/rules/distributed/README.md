@@ -1,0 +1,145 @@
+# distributed Rules
+
+Total rules in this category:      118
+
+## Overview
+
+Distributed query optimization rules handle data distribution, network communication, and cross-node execution strategies for distributed database systems.
+
+## Subcategories
+
+- [aggregation](./aggregation/) -       25 rules
+- [colocation](./colocation/) -        7 rules
+- [coprocessor-pushdown](./coprocessor-pushdown/) -        2 rules
+- [data-movement](./data-movement/) -        6 rules
+- [distributed-joins](./distributed-joins/) -       14 rules
+- [distributed-sort](./distributed-sort/) -        4 rules
+- [distributed-transactions](./distributed-transactions/) -        2 rules
+- [exchange-placement](./exchange-placement/) -        5 rules
+- [filter-pushdown-distributed](./filter-pushdown-distributed/) -       10 rules
+- [join-distribution](./join-distribution/) -       24 rules
+- [locality-optimization](./locality-optimization/) -        4 rules
+- [partial-aggregation](./partial-aggregation/) -        6 rules
+- [partition-pruning](./partition-pruning/) -        5 rules
+- [stage-planning](./stage-planning/) -        4 rules
+
+## Rules
+
+- [Adaptive Two-to-Three-Phase Upgrade](./adaptive-two-to-three-phase.md) - `adaptive-two-to-three-phase`
+- [Aggregation Pushdown Before Broadcast](./agg-pushdown-before-broadcast.md) - `agg-pushdown-before-broadcast`
+- [Aggregation Pushdown Before Hash Shuffle](./agg-pushdown-before-hash-shuffle.md) - `agg-pushdown-before-hash-shuffle`
+- [Aggregation Pushdown Before Range Shuffle](./agg-pushdown-before-range-shuffle.md) - `agg-pushdown-before-range-shuffle`
+- [Co-located Aggregation Exchange Elimination](./colocated-agg-elimination.md) - `colocated-agg-elimination`
+- [Distributed Distinct Count via Bitmap](./distributed-distinct-count-bitmap.md) - `distributed-distinct-count-bitmap`
+- [Distributed Distinct Count via Count-Min Sketch](./distributed-distinct-count-cms.md) - `distributed-distinct-count-cms`
+- [Distributed Exact Distinct Count](./distributed-distinct-count-exact.md) - `distributed-distinct-count-exact`
+- [Distributed Distinct Count via HyperLogLog](./distributed-distinct-count-hll.md) - `distributed-distinct-count-hll`
+- [Global Aggregation to Single Node](./global-agg-single-node.md) - `global-agg-single-node`
+- [Pre-Aggregation Distinct Elimination](./pre-aggregation-distinct-elimination.md) - `pre-aggregation-distinct-elimination`
+- [Pre-Aggregation Filter Pushdown](./pre-aggregation-filter-pushdown.md) - `pre-aggregation-filter-pushdown`
+- [Pre-Aggregation Join Reorder](./pre-aggregation-join-reorder.md) - `pre-aggregation-join-reorder`
+- [Pre-Aggregation Limit Pushdown](./pre-aggregation-limit-pushdown.md) - `pre-aggregation-limit-pushdown`
+- [Pre-Aggregation Projection Pushdown](./pre-aggregation-projection-pushdown.md) - `pre-aggregation-projection-pushdown`
+- [Skew-Aware Aggregation](./skew-aware-aggregation.md) - `skew-aware-aggregation`
+- [Skew Mitigation via Salted Redistribution](./skew-salt-redistribute.md) - `skew-salt-redistribute`
+- [Three-Phase High Cardinality COUNT](./three-phase-high-cardinality-count.md) - `three-phase-high-cardinality-count`
+- [Three-Phase High Cardinality Mixed Aggregates](./three-phase-high-cardinality-mixed.md) - `three-phase-high-cardinality-mixed`
+- [Three-Phase High Cardinality SUM](./three-phase-high-cardinality-sum.md) - `three-phase-high-cardinality-sum`
+- [Two-Phase AVG Desugaring](./two-phase-avg-desugaring.md) - `two-phase-avg-desugaring`
+- [Two-Phase COUNT(*) Optimization](./two-phase-count-star.md) - `two-phase-count-star`
+- [Two-Phase Decomposable Aggregation](./two-phase-decomposable-agg.md) - `two-phase-decomposable-agg`
+- [Two-Phase MIN/MAX Optimization](./two-phase-min-max.md) - `two-phase-min-max`
+- [Two-Phase SUM with Overflow Protection](./two-phase-sum-overflow-safe.md) - `two-phase-sum-overflow-safe`
+- [Colocation-Aware Join Elimination](./colocation-aware-join.md) - `colocation-aware-join`
+- [Co-location Aware Table Placement](./colocation-aware-placement.md) - `colocation-aware-placement`
+- [Multi-Way Join Co-location](./multi-join-colocation.md) - `multi-join-colocation`
+- [Partition Key Co-Location Join](./partition-key-colocation.md) - `partition-key-colocation`
+- [Raft Leader Colocation for Joins](./raft-leader-colocation.md) - `raft-leader-colocation`
+- [Reference Table Co-Location](./reference-table-colocation.md) - `reference-table-colocation`
+- [Reference Table Join Optimization](./reference-table-join.md) - `reference-table-join`
+- [Coprocessor Filter and Aggregation Pushdown](./coprocessor-filter-agg-pushdown.md) - `coprocessor-filter-agg-pushdown`
+- [TiFlash MPP Execution Pushdown](./tiflash-mpp-pushdown.md) - `tiflash-mpp-pushdown`
+- [Minimize Network Transfer via Operator Reordering](./minimize-network-transfer.md) - `minimize-network-transfer`
+- [Push Filter Below Exchange](./push-filter-below-exchange.md) - `push-filter-below-exchange`
+- [Push Limit Below Exchange](./push-limit-below-exchange.md) - `push-limit-below-exchange`
+- [Push Filter Predicate Into Both Join Sides](./push-predicate-through-join.md) - `push-predicate-through-join`
+- [Push Projection Below Exchange](./push-project-below-exchange.md) - `push-project-below-exchange`
+- [Distributed UNION ALL Pushdown](./union-all-pushdown.md) - `union-all-pushdown`
+- [Asymmetric Repartition Join](./asymmetric-repartition-join.md) - `asymmetric-repartition-join`
+- [Broadcast Join Selection](./broadcast-join.md) - `broadcast-join`
+- [Co-located Join Elimination](./colocated-join.md) - `colocated-join`
+- [Hoist Project from Join for Lookup Join Generation](./hoist-project-from-join.md) - `hoist-project-from-join`
+- [Inverted Index Lookup Join](./inverted-index-join.md) - `inverted-index-join`
+- [Distributed Lookup Join](./lookup-join.md) - `lookup-join`
+- [Merge Join Generation from Interesting Orderings](./merge-join-generation.md) - `merge-join-generation`
+- [Push Join into Index Join](./push-join-into-index-join.md) - `push-join-into-index-join`
+- [Distributed Semi-Join Reduction](./semi-join-reduction.md) - `semi-join-reduction`
+- [Semi Join to Inner Join Conversion](./semi-join-to-inner-join.md) - `semi-join-to-inner-join`
+- [Shuffle (Repartition) Join](./shuffle-join.md) - `shuffle-join`
+- [Skew-Aware Join](./skew-aware-join.md) - `skew-aware-join`
+- [Split Disjunction of Join Terms](./split-disjunction-join.md) - `split-disjunction-join`
+- [Zigzag Join on Multiple Indexes](./zigzag-join.md) - `zigzag-join`
+- [Distributed TopN Push to Index Scan](./distributed-topn-push-to-scan.md) - `distributed-topn-push-to-scan`
+- [Distributed Top-N](./distributed-topn.md) - `distributed-topn`
+- [Distributed Window Function Execution](./distributed-window-function.md) - `distributed-window-function`
+- [Merge-Sort Gather for Distributed Order](./merge-sort-gather.md) - `merge-sort-gather`
+- [Follower Read Optimization](./follower-read-optimization.md) - `follower-read-optimization`
+- [Read Committed Isolation Pushdown](./read-committed-pushdown.md) - `read-committed-pushdown`
+- [Choose Optimal Exchange Type](./choose-exchange-type.md) - `choose-exchange-type`
+- [Distribute Operator Placement](./distribute-operator.md) - `distribute-operator`
+- [Exchange Operator Insertion](./insert-exchange.md) - `insert-exchange`
+- [Merge Adjacent Exchanges](./merge-adjacent-exchanges.md) - `merge-adjacent-exchanges`
+- [Remove Redundant Exchange](./remove-redundant-exchange.md) - `remove-redundant-exchange`
+- [Bloom Filter Pushdown for Semi-Join Reduction](./bloom-filter-pushdown.md) - `bloom-filter-pushdown`
+- [Dynamic Filter Generation from Join](./dynamic-filter-from-join.md) - `dynamic-filter-from-join`
+- [Push Filter Before Exchange](./filter-before-exchange.md) - `filter-before-exchange`
+- [Push Filter Through Broadcast Exchange](./filter-through-broadcast.md) - `filter-through-broadcast`
+- [Push Filter to Remote Scan Node](./filter-to-remote-scan.md) - `filter-to-remote-scan`
+- [Push Limit Before Exchange](./limit-before-exchange.md) - `limit-before-exchange`
+- [Partition Pruning via Filter Predicate](./partition-pruning-filter.md) - `partition-pruning-filter`
+- [Route Query to Single Node via Predicate](./predicate-routing-to-single-node.md) - `predicate-routing-to-single-node`
+- [Push Predicate Through Shuffle Exchange](./predicate-through-shuffle.md) - `predicate-through-shuffle`
+- [Push Projection Before Exchange](./project-before-exchange.md) - `project-before-exchange`
+- [Avoid Cross-Datacenter Broadcast](./avoid-cross-datacenter-broadcast.md) - `avoid-cross-datacenter-broadcast`
+- [Avoid Cross-Datacenter Shuffle](./avoid-cross-datacenter-shuffle.md) - `avoid-cross-datacenter-shuffle`
+- [Broadcast Small Table for Join](./broadcast-small-table-join.md) - `broadcast-small-table-join`
+- [Co-Located Join (No Data Movement)](./co-located-join.md) - `co-located-join`
+- [Match Partition Counts for Join Alignment](./dynamic-partition-count-match.md) - `dynamic-partition-count-match`
+- [Scale Down Partition Count for Small Data](./dynamic-partition-count-scale-down.md) - `dynamic-partition-count-scale-down`
+- [Scale Up Partition Count for Large Data](./dynamic-partition-count-scale-up.md) - `dynamic-partition-count-scale-up`
+- [Region-Affinity Join Execution](./locality-aware-region-affinity.md) - `locality-aware-region-affinity`
+- [Prefer Same-Datacenter Join Execution](./locality-aware-same-datacenter.md) - `locality-aware-same-datacenter`
+- [Prefer Same-Rack Data Movement](./locality-aware-same-rack.md) - `locality-aware-same-rack`
+- [Partition-Wise Aggregate Before Join](./partition-wise-aggregate-then-join.md) - `partition-wise-aggregate-then-join`
+- [Partition-Wise Hash Join](./partition-wise-hash-join.md) - `partition-wise-hash-join`
+- [Partition-Wise Multi-Way Join](./partition-wise-multi-join.md) - `partition-wise-multi-join`
+- [Repartition One Side for Partition-Wise Join](./partition-wise-repartition-one.md) - `partition-wise-repartition-one`
+- [Partition-Wise Join with Union Inputs](./partition-wise-union-join.md) - `partition-wise-union-join`
+- [Prefer Broadcast After Selective Filter](./prefer-broadcast-after-filter.md) - `prefer-broadcast-after-filter`
+- [Prefer Broadcast for Non-Equi Join (Nested Loop)](./prefer-broadcast-nested-loop.md) - `prefer-broadcast-nested-loop`
+- [Prefer Broadcast for Already-Replicated Tables](./prefer-broadcast-replicated-table.md) - `prefer-broadcast-replicated-table`
+- [Prefer Broadcast When Size Ratio Exceeds Threshold](./prefer-broadcast-size-ratio.md) - `prefer-broadcast-size-ratio`
+- [Shuffle Both Sides for Balanced Join](./shuffle-both-sides-join.md) - `shuffle-both-sides-join`
+- [Histogram-Guided Skew-Aware Distribution](./skew-aware-histogram-guided.md) - `skew-aware-histogram-guided`
+- [Runtime Skew Detection and Adaptive Split](./skew-aware-runtime-detection.md) - `skew-aware-runtime-detection`
+- [Salted Partition Key for Skew Mitigation](./skew-aware-salted-partition.md) - `skew-aware-salted-partition`
+- [Split Hot Keys for Skew Handling](./skew-aware-split-hot-keys.md) - `skew-aware-split-hot-keys`
+- [Locality-Optimized Anti Join](./locality-optimized-anti-join.md) - `locality-optimized-anti-join`
+- [Locality-Optimized Lookup Join](./locality-optimized-lookup-join.md) - `locality-optimized-lookup-join`
+- [Locality-Optimized Scan](./locality-optimized-scan.md) - `locality-optimized-scan`
+- [Locality-Optimized Search of Lookup Join](./locality-optimized-search-of-join.md) - `locality-optimized-search-of-join`
+- [Eliminate Index Join Inside Group By](./eliminate-index-join-inside-group-by.md) - `eliminate-index-join-inside-group-by`
+- [Replace Scalar MIN/MAX with LIMIT 1](./min-max-to-limit.md) - `min-max-to-limit`
+- [Push Partial Aggregation Below Exchange](./push-partial-agg-below-exchange.md) - `push-partial-agg-below-exchange`
+- [Streaming Group By with Interesting Orderings](./streaming-group-by.md) - `streaming-group-by`
+- [Three-Phase Distinct Aggregation](./three-phase-distinct-agg.md) - `three-phase-distinct-agg`
+- [Two-Phase Distributed Aggregation](./two-phase-aggregation.md) - `two-phase-aggregation`
+- [Dynamic Partition Pruning](./dynamic-partition-pruning.md) - `dynamic-partition-pruning`
+- [Partition-Wise Aggregation](./partition-wise-aggregate.md) - `partition-wise-aggregate`
+- [Partition-Wise Join](./partition-wise-join.md) - `partition-wise-join`
+- [Range Partition Pruning with Constraint Generation](./range-partition-pruning.md) - `range-partition-pruning`
+- [Static Partition Pruning](./static-partition-pruning.md) - `static-partition-pruning`
+- [Distributed Subquery Decorrelation](./distributed-subquery-decorrelation.md) - `distributed-subquery-decorrelation`
+- [Minimize Stage Count](./minimize-stage-count.md) - `minimize-stage-count`
+- [Pipeline Stage Execution](./pipeline-stages.md) - `pipeline-stages`
+- [Query Stage Decomposition](./stage-decomposition.md) - `stage-decomposition`

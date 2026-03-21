@@ -1,0 +1,210 @@
+# Rule: Specialize DFA for Constant Partition Values
+
+**Category:** physical/rpr
+**File:** `rules/rpr/specialize-dfa-for-partition.rra`
+
+## Metadata
+
+- **ID:** `rpr-specialize-dfa-for-partition`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, oracle, duckdb, generic
+- **Tags:** rpr, dfa, specialization, constant-propagation, partition
+- **Authors:** "RA Contributors"
+
+## Preconditions
+
+```yaml
+  - type: pattern
+    must_match: "(row-pattern (filter ?pred ?input) ?partition ?order ?defines ?measures ?pattern)"
+  - type: predicate
+    condition: "has_constant_partition_value(?pred, ?partition)"
+    description: "A PARTITION BY column is constrained to a constant value"
+```
+
+
+# Specialize DFA for Constant Partition Values
+
+## Description
+
+When a PARTITION BY column is constrained to a constant value by
+a pushed-down filter (e.g., `symbol = 'AAPL'`), specialize the
+compiled DFA by propagating that constant into DEFINE conditions.
+This enables further simplification of the DFA (dead state
+elimination, constant folding within conditions).
+
+**When to apply**: After partition filter pushdown, when a partition
+column is bound to a constant and that column appears in DEFINE
+conditions.
+
+**Why it works**: If `symbol = 'AAPL'` is guaranteed, any DEFINE
+condition referencing `symbol` can be evaluated at compile time.
+Conditions that become `true` or `false` after constant propagation
+allow entire DFA transitions to be removed (dead states) or
+short-circuited (always-true transitions).
+
+## Relational Algebra
+
+```algebra
+-- Before: DFA compiled for general case
+RowPattern(
+  Filter(symbol = 'AAPL', Scan(T)),
+  partition: [symbol],
+  order: [trade_date],
+  defines: {
+    A: price > PREV(price) AND symbol_category(symbol) = 'tech'
+  },
+  ...
+)
+
+-- After: constant propagation into DEFINE
+RowPattern(
+  Filter(symbol = 'AAPL', Scan(T)),
+  partition: [symbol],
+  order: [trade_date],
+  defines: {
+    A: price > PREV(price) AND true  -- symbol_category('AAPL') = 'tech' evaluated
+  },
+  ...
+)
+
+-- After simplification
+RowPattern(
+  ...,
+  defines: { A: price > PREV(price) },
+  ...
+)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Propagate constant partition value into DEFINE conditions
+rw!("rpr-specialize-dfa-constant-partition";
+    "(row-pattern
+       (filter (eq ?part_col ?const_val) ?input)
+       ?partition ?order
+       (defines ?defs) ?measures ?pattern)" =>
+    "(row-pattern
+       (filter (eq ?part_col ?const_val) ?input)
+       ?partition ?order
+       (defines (substitute-constant ?defs ?part_col ?const_val))
+       ?measures ?pattern)"
+    if is_partition_column("?part_col", "?partition")
+    if is_constant("?const_val")
+    if defines_reference_column("?defs", "?part_col")
+),
+
+// After constant propagation, simplify DEFINE conditions
+rw!("rpr-simplify-defines-after-specialization";
+    "(defines (define ?var (and ?pred true)))" =>
+    "(defines (define ?var ?pred))"
+),
+
+rw!("rpr-eliminate-false-define";
+    "(defines (define ?var false))" =>
+    "(defines (define ?var (always-false)))"
+    // Mark: DFA state for this variable is dead
+),
+```
+
+## Preconditions
+
+```rust
+fn has_constant_partition_value(
+    pred: &Expr,
+    partition: &[Expr],
+) -> bool {
+    match pred {
+        Expr::BinaryOp { left, op: Op::Eq, right } => {
+            let part_cols: HashSet<_> = partition.iter()
+                .filter_map(|e| e.as_column_ref())
+                .collect();
+            (left.as_column_ref().map(|c| part_cols.contains(&c))
+                .unwrap_or(false)
+                && right.is_constant())
+            || (right.as_column_ref().map(|c| part_cols.contains(&c))
+                .unwrap_or(false)
+                && left.is_constant())
+        }
+        _ => false,
+    }
+}
+
+fn defines_reference_column(
+    defs: &HashMap<Symbol, Expr>,
+    col: &Expr,
+) -> bool {
+    let col_ref = col.as_column_ref().expect("must be column");
+    defs.values().any(|d| d.references_column(col_ref))
+}
+```
+
+**Restrictions:**
+- Only applies when partition column is constrained to a single constant (not a range or IN-list).
+- DEFINE conditions must actually reference the constrained column for the rule to have effect.
+- Function calls on the constant value (e.g., `symbol_category('AAPL')`) require the function to be deterministic for compile-time evaluation.
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    original_define_complexity: usize,
+    simplified_define_complexity: usize,
+    input_card: f64,
+) -> f64 {
+    // Each simplified DEFINE condition saves evaluation cost
+    // per row per DFA transition.
+    let eval_savings_per_row = (original_define_complexity
+        - simplified_define_complexity) as f64 * 0.001;
+    let total_savings = eval_savings_per_row * input_card;
+    (total_savings / (input_card * original_define_complexity as f64
+        * 0.001)).min(0.3)
+}
+```
+
+**Typical benefit**: 10-30%. Depends on how many DEFINE conditions
+reference the constrained partition column.
+
+## Test Cases
+
+### Positive: partition column in DEFINE
+
+```sql
+-- symbol constrained to 'AAPL', and DEFINE references a symbol-dependent function
+SELECT * FROM stock_prices
+  MATCH_RECOGNIZE (
+    PARTITION BY symbol
+    ORDER BY trade_date
+    PATTERN (A+)
+    DEFINE A AS price > PREV(price) AND sector(symbol) = 'Technology'
+  )
+WHERE symbol = 'AAPL';
+
+-- After: sector('AAPL') = 'Technology' evaluated at compile time
+-- DEFINE A AS price > PREV(price) AND true
+-- Simplified: DEFINE A AS price > PREV(price)
+```
+
+### Positive: constant makes condition always false
+
+```sql
+-- If sector('XYZ') != 'Technology', condition becomes false
+-- and the pattern variable's DFA state is dead (unreachable).
+WHERE symbol = 'XYZ';
+-- DEFINE A becomes: price > PREV(price) AND false -> false
+-- Entire pattern match produces no results (short-circuit).
+```
+
+### Negative: partition value is not constant
+
+```sql
+-- IN-list: multiple partition values, cannot specialize
+WHERE symbol IN ('AAPL', 'GOOGL', 'MSFT');
+```
+
+## References
+
+- Muchnick, S. "Advanced Compiler Design and Implementation" (1997), Ch. 12 (Constant Propagation)
+- Zemke, F. "Row Pattern Recognition in SQL" ISO/IEC 19075-5:2016

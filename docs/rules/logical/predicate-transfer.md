@@ -1,0 +1,104 @@
+# Rule: Predicate Transfer via Functional Dependencies
+
+**Category:** logical/sideways-information-passing
+**File:** `rules/logical/sideways-information-passing/predicate-transfer.rra`
+
+## Metadata
+
+- **ID:** `predicate-transfer`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, oracle, mssql, cockroachdb
+- **Tags:** logical, predicate, transfer, functional-dependency, constraint
+- **Authors:** "Paulley, Glenn", "Simmen, David"
+
+
+# Predicate Transfer via Functional Dependencies
+
+## Description
+
+Uses functional dependencies and join conditions to derive new filter
+predicates on other relations. If `R.a = S.b` and there is a predicate
+`R.a > 10`, we can infer `S.b > 10` and push it down to S's scan.
+This propagates binding information "sideways" through the query graph.
+
+**When to apply**: Multi-table joins where predicates on one table
+constrain join columns that determine values in another table.
+
+## Relational Algebra
+
+```algebra
+-- Before
+sigma[R.a > 10](R join[R.a = S.b] S)
+
+-- After: transfer predicate to S
+sigma[R.a > 10](R) join[R.a = S.b] sigma[S.b > 10](S)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("predicate-transfer-equijoin";
+    "(filter ?pred (join (= ?col_l ?col_r) ?left ?right))" =>
+    "(join (= ?col_l ?col_r)
+        (filter ?pred ?left)
+        (filter (substitute ?pred ?col_l ?col_r) ?right))"
+    if pred_references_only("?pred", "?col_l")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(filter: &Filter, join: &Join) -> bool {
+    let pred_cols = filter.predicate().referenced_columns();
+    let join_equalities = join.equi_conditions();
+    // At least one predicate column appears in a join equality
+    pred_cols.iter().any(|c|
+        join_equalities.iter().any(|eq| eq.contains(c))
+    )
+}
+```
+
+**Restrictions:**
+- Only through equi-join conditions (not theta joins)
+- Transferred predicates must be semantically valid on target schema
+- NULL handling: transferred predicates inherit IS NOT NULL semantics
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    target_rows: f64,
+    transferred_selectivity: f64,
+) -> f64 {
+    target_rows * (1.0 - transferred_selectivity) * 8.0
+}
+```
+
+**Typical benefit**: 5-50% when predicates are selective on transferred side.
+
+## Test Cases
+
+```sql
+-- Positive: predicate transfers through equi-join
+SELECT * FROM orders o
+  JOIN customers c ON o.cust_id = c.id
+WHERE c.id BETWEEN 100 AND 200;
+-- Infer: o.cust_id BETWEEN 100 AND 200
+
+-- Positive: through functional dependency
+SELECT * FROM emp e
+  JOIN dept d ON e.dept_id = d.id
+WHERE d.name = 'Engineering';
+-- If dept.id -> dept.name (unique), transfer dept_id constraint
+
+-- Negative: non-equi join
+SELECT * FROM R JOIN S ON R.a > S.b WHERE R.a = 5;
+```
+
+## References
+
+- Paulley, G. "Exploiting Functional Dependence in Query Optimization" (PhD thesis, 2000)
+- Simmen, D. et al. "Fundamental Techniques for Order Optimization" (SIGMOD 1996)

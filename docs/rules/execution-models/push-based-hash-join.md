@@ -1,0 +1,263 @@
+# Rule: Push-Based Compiled Hash Join
+
+**Category:** execution-models
+**File:** `rules/execution-models/push-based/push-based-hash-join.rra`
+
+## Metadata
+
+- **ID:** `push-based-hash-join`
+- **Version:** 1.0.0
+- **Databases:** HyPer, Umbra, SingleStore
+- **Tags:** execution, push-based, compilation, hash-join, pipeline-breaker
+- **SQL Standard:** HyPer model
+- **Authors:** Thomas Neumann
+
+
+# Push-Based Compiled Hash Join
+
+## Description
+
+The hash join in push-based execution is the canonical example of a pipeline breaker. It splits execution into two pipelines: a build pipeline that materializes the inner relation into a hash table, and a probe pipeline where the outer scan probes the hash table inline. The probe side remains fully pipelined with no materialization -- matched tuples flow directly to downstream operators in registers.
+
+**Key characteristics:**
+- **Two-pipeline design**: Build pipeline materializes, probe pipeline is pipelined
+- **Concise hash table**: Compact, cache-friendly hash table layout
+- **Inline probing**: Hash lookup compiled as inline code
+- **No tuple reconstruction**: Join result stays in registers
+- **Pipeline breaker**: Build side forces materialization boundary
+
+**Trade-offs:**
+- Build side requires full materialization (memory)
+- Hash table layout must be decided at compile time
+- Skewed key distributions cause probe imbalance
+
+## Relational Algebra
+
+```
+HashJoin(R, S, R.a = S.b) in push-based compilation:
+
+Pipeline 1 (Build):
+  produce(Scan(S)):
+    for each tuple s in S:
+      key = hash(s.b)
+      ht.insert(key, s)    // Materialize into hash table
+
+Pipeline 2 (Probe):
+  produce(Scan(R)):
+    for each tuple r in R:
+      key = hash(r.a)
+      for match in ht.probe(key):
+        if r.a == match.b:  // Inlined equality check
+          consume(r, match) // Continue pipeline (pipelined)
+```
+
+## Implementation
+
+```rust
+use ra_core::algebra::RelExpr;
+
+/// Compiled hash join with separate build and probe pipelines
+pub struct CompiledHashJoin {
+    build_side: RelExpr,
+    probe_side: RelExpr,
+    build_key: ColumnId,
+    probe_key: ColumnId,
+}
+
+impl CompiledHashJoin {
+    /// Generate build pipeline code
+    pub fn compile_build(&self, codegen: &mut CodeGen) {
+        let ht = codegen.declare_hash_table(
+            "join_ht",
+            self.build_key.data_type(),
+        );
+
+        // Build pipeline: scan -> hash table insert
+        codegen.emit("// Pipeline 1: Build hash table");
+        codegen.emit(&format!(
+            "for page in {}.pages() {{", self.build_side.table()
+        ));
+        codegen.emit("  for row_idx in 0..page.num_rows() {");
+        codegen.emit(&format!(
+            "    let key = page.column({}).get(row_idx);",
+            self.build_key.index()
+        ));
+        codegen.emit(&format!(
+            "    let hash = hash_fn(key);",
+        ));
+        codegen.emit(&format!(
+            "    {}.insert(hash, row_idx, page);", ht
+        ));
+        codegen.emit("  }");
+        codegen.emit("}");
+    }
+
+    /// Generate probe pipeline code
+    pub fn compile_probe(&self, codegen: &mut CodeGen) {
+        codegen.emit("// Pipeline 2: Probe hash table");
+        codegen.emit(&format!(
+            "for page in {}.pages() {{", self.probe_side.table()
+        ));
+        codegen.emit("  for row_idx in 0..page.num_rows() {");
+
+        // Load probe key into register
+        codegen.emit(&format!(
+            "    let probe_key = page.column({}).get(row_idx);",
+            self.probe_key.index()
+        ));
+        codegen.emit("    let hash = hash_fn(probe_key);");
+
+        // Inline hash table probe
+        codegen.emit("    let mut entry = join_ht.lookup(hash);");
+        codegen.emit("    while entry.is_valid() {");
+        codegen.emit("      if entry.key() == probe_key {");
+
+        // Join result: combine probe + build columns in registers
+        codegen.emit("        // Matched: combine in registers");
+        codegen.emit_consume_call(); // Push to next operator
+        codegen.emit("      }");
+        codegen.emit("      entry = entry.next();");
+        codegen.emit("    }");
+
+        codegen.emit("  }");
+        codegen.emit("}");
+    }
+}
+
+/// Concise hash table for compiled joins
+pub struct ConciseHashTable {
+    /// Entries stored in contiguous array (cache-friendly)
+    entries: Vec<HashEntry>,
+    /// Directory: maps hash -> first entry index
+    directory: Vec<u32>,
+    mask: u32,
+}
+
+impl ConciseHashTable {
+    pub fn insert(&mut self, hash: u64, payload: Payload) {
+        let slot = (hash as u32) & self.mask;
+        let entry = HashEntry {
+            hash_prefix: (hash >> 32) as u32,
+            payload,
+            next: self.directory[slot as usize],
+        };
+        self.directory[slot as usize] = self.entries.len() as u32;
+        self.entries.push(entry);
+    }
+
+    pub fn probe(&self, hash: u64) -> ProbeIterator {
+        let slot = (hash as u32) & self.mask;
+        let prefix = (hash >> 32) as u32;
+        ProbeIterator {
+            table: self,
+            current: self.directory[slot as usize],
+            prefix,
+        }
+    }
+}
+
+/// Cost model for compiled hash join
+pub fn compiled_hash_join_cost(
+    build_rows: f64,
+    probe_rows: f64,
+    selectivity: f64,
+) -> f64 {
+    // Build phase: hash + insert per tuple
+    let build_hash_cost = build_rows * 0.00005; // ~50 ns
+    let build_insert_cost = build_rows * 0.00003; // ~30 ns
+
+    // Probe phase: hash + lookup per tuple (inline)
+    let probe_hash_cost = probe_rows * 0.00005;
+    let probe_lookup_cost = probe_rows * 0.00004; // ~40 ns
+
+    // Output: combine matched tuples (register ops)
+    let output_rows = probe_rows * selectivity;
+    let output_cost = output_rows * 0.00001;
+
+    // Compilation overhead
+    let compile_cost = 8.0; // ~8ms for join pipeline
+
+    compile_cost + build_hash_cost + build_insert_cost
+        + probe_hash_cost + probe_lookup_cost + output_cost
+}
+```
+
+## Cost Model
+
+**Build Phase:**
+- Hash computation: ~10-50 ns per tuple (depends on key width)
+- Hash table insert: ~30 ns per tuple (cache miss on large tables)
+- Total build: `build_rows x (hash_cost + insert_cost)`
+- Memory: `build_rows x (key_size + payload_size + 8 bytes overhead)`
+
+**Probe Phase:**
+- Hash computation: ~10-50 ns per tuple
+- Hash table lookup: ~40 ns per probe (1-2 cache misses)
+- Equality check: ~2 ns (inlined comparison)
+- Total probe: `probe_rows x (hash_cost + lookup_cost)`
+
+**Pipeline Structure:**
+- Build side: full pipeline (scan -> filter -> build HT)
+- Probe side: pipelined (scan -> probe HT -> downstream operators)
+- No materialization on probe side
+
+**vs. Volcano Hash Join:**
+- Build phase: similar cost (materialization required either way)
+- Probe phase: 5-10x faster (inline probing, no virtual dispatch)
+
+## Test Cases
+
+```sql
+-- Test 1: Standard equijoin
+SELECT o.order_id, c.name
+FROM orders o JOIN customers c ON o.customer_id = c.id;
+-- Expected: Build on customers (smaller), probe on orders
+-- Two compiled pipelines, probe side fully pipelined
+
+-- Test 2: Join with downstream filter
+SELECT o.order_id, c.name
+FROM orders o JOIN customers c ON o.customer_id = c.id
+WHERE o.amount > 1000;
+-- Expected: Filter inlined into probe pipeline
+-- Single compiled loop: scan orders -> filter -> probe -> emit
+
+-- Test 3: Multi-way join (pipeline chain)
+SELECT l.*, o.*, c.*
+FROM lineitem l
+JOIN orders o ON l.orderkey = o.orderkey
+JOIN customers c ON o.custkey = c.custkey;
+-- Expected: Three pipelines:
+--   P1: Build HT for customers
+--   P2: Build HT for orders (probe customers HT inline)
+--   P3: Scan lineitem, probe orders HT, continue pipeline
+
+-- Test 4: Build side selection
+SELECT * FROM large_table l
+JOIN small_lookup s ON l.key = s.key;
+-- Expected: Build on small_lookup (fewer rows)
+-- Probe on large_table (pipelined, fast iteration)
+```
+
+## Comparison with Other Models
+
+| Aspect | Push-Based Join | Volcano Join | Vectorized Join |
+|--------|----------------|-------------|-----------------|
+| Probe cost/tuple | ~50 ns | ~200 ns | ~80 ns (batched) |
+| Pipeline break | Build side only | Build side only | Build side only |
+| Hash table | Concise, inline | Generic HashMap | Batch-probed |
+| Join result | Registers | Tuple copy | Batch append |
+| Multi-way join | Pipeline chain | Nested iterators | Batch chain |
+
+## References
+
+1. **Neumann, Thomas**. "Efficiently Compiling Efficient Query Plans for Modern Hardware." VLDB 2011.
+   - Pipeline-breaking hash join design in HyPer
+
+2. **Balkesen, Cagri et al**. "Main-Memory Hash Joins on Multi-Core CPUs." ICDE 2013.
+   - Hash table designs for in-memory joins
+
+3. **Blanas, Spyros et al**. "Design and Evaluation of Main Memory Hash Join Algorithms for Multi-core CPUs." SIGMOD 2011.
+   - Comparison of hash join variants
+
+4. **Barber, Ronald et al**. "Memory-Efficient Hash Joins." VLDB 2014.
+   - Concise hash table design for compiled joins

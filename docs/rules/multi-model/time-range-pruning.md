@@ -1,0 +1,106 @@
+# Rule: Time Range Pruning
+
+**Category:** multi-model/timeseries
+**File:** `rules/multi-model/timeseries/time-range-pruning.rra`
+
+## Metadata
+
+- **ID:** `time-range-pruning`
+- **Version:** "1.0.0"
+- **Databases:** influxdb, timescaledb, questdb, clickhouse
+- **Tags:** timeseries, time-range, pruning, partition, chunk
+- **SQL Standard:** "flux:2"
+- **Authors:** "RA Contributors"
+
+
+# Time Range Pruning
+
+## Description
+
+Eliminates chunks (time-partitioned segments) that fall entirely outside
+the query's time range predicate. Time-series databases partition data
+by time intervals; when a query specifies a time range, chunks whose
+time bounds do not overlap the query range can be skipped entirely.
+
+**When to apply**: A query includes a predicate on the time column and
+the table is partitioned into time-based chunks.
+
+**Why it works**: Each chunk stores data for a known time interval.
+Comparing chunk boundaries against the query range is O(1) per chunk.
+Eliminating non-overlapping chunks avoids scanning potentially large
+amounts of historical data.
+
+## Relational Algebra
+
+```algebra
+sigma[ts >= t1 AND ts < t2](scan(hypertable))
+  -> union_all(
+       scan(chunk_i) for each chunk_i
+       where chunk_i.max_time >= t1 AND chunk_i.min_time < t2
+     )
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("time-range-pruning";
+    "(filter (and (ge ?ts ?t1) (lt ?ts ?t2)) \
+       (ts-scan ?table))" =>
+    "(ts-chunk-scan ?table ?ts ?t1 ?t2)"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    pred: &Expr,
+    table: &str,
+    schema: &TimeSeriesSchema,
+) -> bool {
+    schema.is_hypertable(table)
+    && pred.has_time_range_bounds()
+}
+```
+
+**Restrictions:**
+- Time column must be the partitioning dimension
+- Open-ended ranges (no lower or upper bound) prune in one direction
+- Chunks with overlapping ranges must still be scanned fully
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    total_chunks: f64,
+    matching_chunks: f64,
+) -> f64 {
+    (total_chunks - matching_chunks) / total_chunks
+}
+```
+
+**Typical benefit**: 0.8-0.99 for queries on recent data in large historical tables.
+
+## Test Cases
+
+```sql
+-- Positive: time range covers only recent chunks
+SELECT avg(temperature)
+FROM sensor_data
+WHERE time >= '2025-03-01' AND time < '2025-03-15'
+GROUP BY sensor_id;
+-- Prunes all chunks before March 2025
+
+-- Negative: no time predicate
+SELECT avg(temperature) FROM sensor_data
+GROUP BY sensor_id;
+-- Cannot prune; must scan all chunks
+```
+
+## References
+
+TimescaleDB: src/chunk_constraint.c - ts_chunk_constraint_scan_by_dimension_slice()
+InfluxDB: tsdb/engine/tsm1/engine.go - Engine.CreateIterator()
+Freedman et al. "TimescaleDB: SQL Made Scalable for Time-Series Data" (SIGMOD 2020 demo)

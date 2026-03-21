@@ -1,0 +1,123 @@
+# Rule: "Vectorized Top-K Dynamic Threshold Filter"
+
+**Category:** execution-models/vectorized
+**File:** `rules/execution-models/vectorized/vectorized-topk-filter.rra`
+
+## Metadata
+
+- **ID:** `vectorized-topk-filter`
+- **Version:** "1.0.0"
+- **Databases:** clickhouse
+- **Tags:** vectorized, topk, filter, threshold, dynamic
+- **Authors:** "RA Contributors"
+
+
+# Vectorized Top-K Dynamic Threshold Filter
+
+## Metadata
+- **Rule ID**: `vectorized-topk-filter`
+- **Category**: Execution Models / Vectorized
+- **Source**: `src/Processors/QueryPlan/Optimizations/optimizeTopK.cpp`
+- **Complexity**: O(n) single pass with early termination
+- **Prerequisites**: ORDER BY numeric column + LIMIT N on MergeTree
+- **Alternatives**: Full sort + limit; partial sort (std::partial_sort)
+
+## Description
+
+For ORDER BY ... LIMIT N queries, ClickHouse injects a vectorized
+threshold filter into the scan pipeline. A TopKThresholdTracker
+maintains the current N-th best value. Each batch of rows is compared
+against this threshold using vectorized comparison operations. Rows
+(and entire granules via skip indexes) that cannot improve the top-N
+are eliminated before they enter the sort operator.
+
+The threshold tracker is updated as better values are found, making
+the filter progressively more selective. With sorted MergeTree data,
+the threshold converges rapidly.
+
+**When to apply:**
+- Vectorized batch processing with top-K queries
+- Numeric, non-nullable sort column
+- Small K relative to table size
+
+**Why it works for OLAP:**
+- Dashboard "top 10" queries scan only a fraction of data
+- Vectorized comparison: SIMD-friendly batch filtering
+- Progressive threshold: later batches filtered more aggressively
+
+## Relational Algebra
+
+```
+limit[K](sort[col](batch-scan[T]))
+  -> topk-emit[K](
+       batch-threshold-filter[col, tracker](batch-scan[T]))
+```
+
+## Implementation (egg rewrite rules)
+
+```lisp
+;; Inject vectorized threshold filter for top-K
+(rewrite (limit ?k (sort ?col (vectorized-scan ?table ?batch-size)))
+  (topk-emit ?k
+    (vectorized-threshold-filter ?col ?k
+      (vectorized-scan ?table ?batch-size)))
+  :if (< ?k 10000)
+  :if (is-numeric-non-nullable ?col))
+
+;; Vectorized threshold filter processes batches
+(rewrite (vectorized-threshold-filter ?col ?k ?input)
+  (batch-map ?input
+    (lambda (?batch)
+      (select-rows ?batch
+        (simd-compare-gt ?col (threshold-value ?k))))))
+```
+
+## Cost Model
+
+```rust
+pub fn cost_vectorized_topk(
+    total_batches: u64,
+    batch_size: u64,
+    k: u64,
+    hardware: &HardwareModel,
+) -> Cost {
+    let threshold_compare = Cost::cpu(
+        total_batches * batch_size / hardware.simd_width() as u64
+    );
+    let tracker_update = Cost::cpu(total_batches * 20);
+    let fraction_scanned = (k as f64 / (total_batches * batch_size) as f64)
+        .sqrt().min(1.0);
+    let io = Cost::io(
+        total_batches as f64 * fraction_scanned
+        * batch_size as f64
+        * hardware.seq_read_cost()
+    );
+    threshold_compare + tracker_update + io
+}
+```
+
+**Typical benefit**: 50-95% for small K on large datasets
+
+## Test Cases
+
+### Positive: Top-10 on large table
+```sql
+SELECT product_id, revenue
+FROM sales
+ORDER BY revenue DESC
+LIMIT 10;
+
+-- After first batch: threshold = 10th highest revenue seen
+-- Subsequent batches: skip rows where revenue < threshold
+-- Vectorized comparison: 8 rows checked per SIMD instruction
+```
+
+### Negative: K close to table size
+```sql
+SELECT * FROM sales ORDER BY revenue DESC LIMIT 10000000;
+-- Threshold not selective; most batches pass filter
+```
+
+## References
+
+- ClickHouse: `src/Processors/QueryPlan/Optimizations/optimizeTopK.cpp`

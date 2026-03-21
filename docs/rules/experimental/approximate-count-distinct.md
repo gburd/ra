@@ -1,0 +1,105 @@
+# Rule: Approximate COUNT(DISTINCT) via HyperLogLog
+
+**Category:** experimental/approximate
+**File:** `rules/experimental/approximate/approximate-count-distinct.rra`
+
+## Metadata
+
+- **ID:** `approximate-count-distinct`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, clickhouse, duckdb, presto, spark
+- **Tags:** approximate, count-distinct, hyperloglog, sketch, probabilistic
+- **Authors:** "Flajolet, Philippe", "Fusy, Gandouet, Meunier"
+
+
+# Approximate COUNT(DISTINCT) via HyperLogLog
+
+## Description
+
+Replaces exact COUNT(DISTINCT x) with an approximate computation using
+HyperLogLog (HLL) sketches. HLL uses O(log log n) space to estimate
+cardinality with typical error of ~2%. For very large datasets where
+exact counting requires unbounded memory, HLL provides accurate estimates
+with constant memory (~1-2KB per counter).
+
+**When to apply**: COUNT(DISTINCT) on high-cardinality columns where
+approximate results are acceptable (dashboards, analytics, monitoring).
+
+## Relational Algebra
+
+```algebra
+-- Before: exact distinct count (requires sorting or hash set)
+gamma[; COUNT(DISTINCT user_id)](events)
+
+-- After: HyperLogLog approximation
+gamma[; APPROX_COUNT_DISTINCT(user_id, precision=14)](events)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("hll-count-distinct";
+    "(aggregate ?groups (count-distinct ?col) ?input)" =>
+    "(aggregate ?groups (hll-count ?col 14) ?input)"
+    if approximate_mode_enabled()
+    if high_cardinality("?col")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(agg: &Aggregate, config: &QueryConfig) -> bool {
+    config.allows_approximate_results()
+        && agg.has_count_distinct()
+        // Only beneficial for high cardinality
+        && agg.distinct_column_estimated_ndv() > 10000
+}
+```
+
+**Restrictions:**
+- Results are approximate (typical error ~1.6/sqrt(m) for m registers)
+- NOT suitable for exact billing or financial reporting
+- Mergeability enables distributed/parallel computation
+- Multiple distinct columns require separate HLL sketches
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    rows: f64,
+    distinct_values: f64,
+) -> f64 {
+    // Exact: O(distinct_values) memory, O(n) hash lookups
+    // HLL: O(1) memory (~1.5KB), O(n) bit operations
+    let exact_cost = rows * 1.0 + distinct_values * 8.0;
+    let hll_cost = rows * 0.3; // cheaper per-row operations
+    exact_cost - hll_cost
+}
+```
+
+**Typical benefit**: 50-99% memory reduction; 20-80% speed improvement.
+
+## Test Cases
+
+```sql
+-- Positive: high-cardinality approximate count
+SELECT APPROX_COUNT_DISTINCT(user_id) FROM page_views;
+-- Uses HLL: ~1.5KB memory vs potentially GB for exact
+
+-- Positive: distributed approximate count
+SELECT region, APPROX_COUNT_DISTINCT(ip_address)
+FROM access_logs GROUP BY region;
+-- HLL sketches can be merged across partitions
+
+-- Negative: low cardinality (exact is cheap)
+SELECT COUNT(DISTINCT status) FROM orders;
+-- Only ~5 values: exact counting is trivial
+```
+
+## References
+
+- Flajolet, P. et al. "HyperLogLog: the analysis of a near-optimal cardinality estimation algorithm" (2007)
+- Google: HyperLogLog in Practice (2013)

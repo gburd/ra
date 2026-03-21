@@ -1,0 +1,342 @@
+# Rule: Adaptive Data Skew Handling
+
+**Category:** execution-models
+**File:** `rules/execution-models/adaptive/adaptive-skew-handling.rra`
+
+## Metadata
+
+- **ID:** `adaptive-skew-handling`
+- **Version:** 1.0.0
+- **Databases:** Spark, Presto, CockroachDB, Snowflake
+- **Tags:** execution, adaptive, skew, partition, join, aggregation, load-balance
+- **SQL Standard:** Skew-aware query execution
+- **Authors:** DeWitt, Naughton, Schneider
+
+
+# Adaptive Data Skew Handling
+
+## Description
+
+Adaptive skew handling detects and mitigates data skew during query execution. Data skew occurs when hash partitioning produces partitions of vastly different sizes, causing some workers to process orders of magnitude more data than others. The slowest worker (processing the largest partition) determines total query runtime, negating the benefits of parallelism.
+
+The executor monitors partition sizes during hash redistribution (shuffle in Spark, exchange in mssql). When a partition exceeds a threshold (e.g., 5x the median partition size), the skewed partition is split using a secondary hash function or range-based sub-partitioning, and the sub-partitions are distributed across multiple workers.
+
+Spark AQE's skew join optimization is the most widely deployed implementation: it detects skewed partitions in the shuffle output and splits them, duplicating the corresponding partition from the other join side to all workers that receive a sub-partition.
+
+**Key characteristics:**
+- **Runtime detection**: Measure actual partition sizes after shuffle write
+- **Threshold-based**: Skew when partition_size > median * factor (default 5x)
+- **Split and replicate**: Split skewed partition, replicate matching build partition
+- **Per-partition decision**: Only skewed partitions are split, others unchanged
+- **Multi-level**: Recursive splitting for extreme skew
+
+**Trade-offs:**
+- Detection overhead: requires partition size statistics after shuffle
+- Replication cost: build-side partition duplicated to multiple workers
+- Network overhead: additional data movement for sub-partitions
+- Memory: each sub-worker needs copy of matching build partition
+- Doesn't help with single-value skew (all rows have same key)
+
+## Relational Algebra
+
+```
+SkewAwareJoin(left, right, condition) -> Result
+
+fn execute_skew_join(left, right, cond):
+  // Phase 1: Shuffle both sides by join key
+  left_parts = hash_partition(left, cond.left_key, N)
+  right_parts = hash_partition(right, cond.right_key, N)
+
+  // Phase 2: Detect skew
+  left_sizes = [p.size() for p in left_parts]
+  median_size = median(left_sizes)
+  skew_threshold = median_size * SKEW_FACTOR
+
+  // Phase 3: Handle each partition
+  results = []
+  for i in 0..N:
+    if left_sizes[i] > skew_threshold:
+      // Split skewed partition into sub-partitions
+      sub_parts = split_partition(left_parts[i], M)
+      for sub in sub_parts:
+        // Replicate matching right partition to each sub
+        r = join(sub, right_parts[i].clone(), cond)
+        results.extend(r)
+    else:
+      r = join(left_parts[i], right_parts[i], cond)
+      results.extend(r)
+
+  return results
+```
+
+## Implementation
+
+```rust
+/// Skew detection configuration
+pub struct SkewConfig {
+    /// Partition is skewed if size > median * factor
+    pub skew_factor: f64,
+    /// Minimum absolute size to consider skewing (bytes)
+    pub min_skew_size_bytes: usize,
+    /// Number of sub-partitions for skewed data
+    pub split_factor: usize,
+    /// Maximum recursion depth for nested skew
+    pub max_split_depth: usize,
+}
+
+impl Default for SkewConfig {
+    fn default() -> Self {
+        Self {
+            skew_factor: 5.0,
+            min_skew_size_bytes: 256 * 1024 * 1024,
+            split_factor: 4,
+            max_split_depth: 2,
+        }
+    }
+}
+
+/// Partition statistics collected after shuffle
+pub struct PartitionStats {
+    pub partition_id: usize,
+    pub row_count: usize,
+    pub size_bytes: usize,
+}
+
+/// Detect skewed partitions
+pub fn detect_skew(
+    stats: &[PartitionStats],
+    config: &SkewConfig,
+) -> Vec<usize> {
+    if stats.is_empty() {
+        return Vec::new();
+    }
+
+    let mut sizes: Vec<usize> = stats.iter()
+        .map(|s| s.size_bytes)
+        .collect();
+    sizes.sort_unstable();
+
+    let median = sizes[sizes.len() / 2];
+    let threshold = (median as f64 * config.skew_factor)
+        as usize;
+    let threshold = threshold.max(config.min_skew_size_bytes);
+
+    stats.iter()
+        .filter(|s| s.size_bytes > threshold)
+        .map(|s| s.partition_id)
+        .collect()
+}
+
+/// Split a skewed partition into sub-partitions
+pub fn split_skewed_partition(
+    partition: Vec<Row>,
+    join_key: &JoinKey,
+    split_factor: usize,
+) -> Vec<Vec<Row>> {
+    let mut sub_parts = vec\![Vec::new(); split_factor];
+
+    for row in partition {
+        // Use a different hash function for sub-partitioning
+        let key = join_key.extract(&row);
+        let sub_hash = secondary_hash(&key);
+        let sub_idx = sub_hash % split_factor;
+        sub_parts[sub_idx].push(row);
+    }
+
+    sub_parts
+}
+
+/// Handle single-value skew (all rows have same key)
+pub fn handle_single_value_skew(
+    skewed_partition: Vec<Row>,
+    build_partition: &[Row],
+    join_condition: &JoinCondition,
+) -> Vec<Row> {
+    // Range-partition the skewed side
+    // Each worker gets a range of rows
+    // Build side is broadcast to all workers
+    let num_workers = num_cpus::get();
+    let chunk_size = (skewed_partition.len() + num_workers - 1)
+        / num_workers;
+
+    let results: Vec<Vec<Row>> = skewed_partition
+        .chunks(chunk_size)
+        .map(|chunk| {
+            let mut local_results = Vec::new();
+            for probe_row in chunk {
+                for build_row in build_partition {
+                    if join_condition.matches(
+                        build_row, probe_row,
+                    ) {
+                        local_results.push(Row::join(
+                            build_row, probe_row,
+                        ));
+                    }
+                }
+            }
+            local_results
+        })
+        .collect();
+
+    results.into_iter().flatten().collect()
+}
+
+/// Skew-aware hash join executor
+pub struct SkewAwareHashJoin {
+    config: SkewConfig,
+    num_partitions: usize,
+}
+
+impl SkewAwareHashJoin {
+    pub fn execute(
+        &self,
+        build_partitions: Vec<Vec<Row>>,
+        probe_partitions: Vec<Vec<Row>>,
+        condition: &JoinCondition,
+    ) -> Result<Vec<Row>> {
+        let probe_stats: Vec<PartitionStats> =
+            probe_partitions.iter().enumerate()
+                .map(|(i, p)| PartitionStats {
+                    partition_id: i,
+                    row_count: p.len(),
+                    size_bytes: p.iter()
+                        .map(|r| r.size_bytes())
+                        .sum(),
+                })
+                .collect();
+
+        let skewed = detect_skew(
+            &probe_stats, &self.config,
+        );
+
+        let mut all_results = Vec::new();
+
+        for i in 0..self.num_partitions {
+            if skewed.contains(&i) {
+                // Split skewed probe partition
+                let sub_parts = split_skewed_partition(
+                    probe_partitions[i].clone(),
+                    &condition.probe_key,
+                    self.config.split_factor,
+                );
+
+                for sub_part in sub_parts {
+                    // Each sub-partition joins with
+                    // replicated build partition
+                    let results = hash_join_partition(
+                        &build_partitions[i],
+                        &sub_part,
+                        condition,
+                    )?;
+                    all_results.extend(results);
+                }
+            } else {
+                let results = hash_join_partition(
+                    &build_partitions[i],
+                    &probe_partitions[i],
+                    condition,
+                )?;
+                all_results.extend(results);
+            }
+        }
+
+        Ok(all_results)
+    }
+}
+
+fn hash_join_partition(
+    build: &[Row],
+    probe: &[Row],
+    condition: &JoinCondition,
+) -> Result<Vec<Row>> {
+    let mut ht = HashTable::new();
+    for row in build {
+        ht.insert(condition.build_key(row), row);
+    }
+
+    let mut results = Vec::new();
+    for row in probe {
+        let key = condition.probe_key(row);
+        for build_row in ht.lookup(key) {
+            results.push(Row::join(build_row, row));
+        }
+    }
+    Ok(results)
+}
+
+fn secondary_hash(key: &[u8]) -> usize {
+    // Different hash function from primary partitioning
+    let mut hash: u64 = 0x517CC1B727220A95;
+    for &byte in key {
+        hash = hash.wrapping_mul(0x100000001B3)
+            ^ (byte as u64);
+    }
+    hash as usize
+}
+```
+
+## Cost Model
+
+**Without skew handling:**
+- Runtime = max(partition_times) which is dominated by largest partition
+- With Zipf-distributed keys: largest partition can be 100-1000x median
+- Effective parallelism: ~1x (single worker bottleneck)
+
+**With skew handling:**
+- Runtime = max(sub_partition_times) ~ median * split_overhead
+- Replication cost: build_partition * split_factor (network + memory)
+- Net benefit: `largest_partition_time / split_factor - replication_cost`
+
+**Detection cost:**
+- Collect partition sizes: O(num_partitions) after shuffle write
+- Median computation: O(num_partitions log num_partitions)
+- Negligible compared to join execution
+
+**When beneficial:**
+- Skew factor > 5x: clear win
+- Skew factor 2-5x: depends on query runtime
+- Single-value skew: requires broadcast, less benefit
+
+## Test Cases
+
+```sql
+-- Test 1: Zipf-distributed join key
+SELECT * FROM orders o
+JOIN lineitem l ON o.order_id = l.order_id;
+-- Top 1% of orders have 50% of lineitems
+-- Partition for popular orders 50x larger than median
+-- Adaptive: split skewed partitions into 4 sub-partitions
+
+-- Test 2: Single hot key
+SELECT u.*, e.*
+FROM users u JOIN events e ON u.user_id = e.user_id;
+-- Bot user_id=0 has 10M events, others have ~100
+-- Adaptive: detect single-value skew, range-split + broadcast
+
+-- Test 3: Aggregation skew
+SELECT category, COUNT(*), AVG(price)
+FROM products GROUP BY category;
+-- 'Electronics' has 5M products, 'Luxury' has 50
+-- Skewed partition for 'Electronics' dominates runtime
+-- Adaptive: split skewed group across workers, merge partial aggs
+
+-- Test 4: No skew (uniform distribution)
+SELECT * FROM fact f JOIN dim d ON f.dim_key = d.key;
+-- Uniform FK distribution across dimension
+-- All partitions within 2x of median
+-- Adaptive: no intervention, standard parallel join
+```
+
+## References
+
+1. **DeWitt, David et al**. "Practical Skew Handling in Parallel Joins." VLDB 1992.
+   - Foundational work on skew detection and handling
+
+2. **Spark Documentation**. "Adaptive Query Execution: Skew Join Optimization." Spark 3.0+.
+   - Production implementation of adaptive skew handling
+
+3. **Xu, Yu et al**. "Handling Data Skew in Parallel Joins in Shared-Nothing Systems." SIGMOD 2008.
+   - Range-based and sampling-based skew mitigation
+
+4. **Bruno, Nicolas et al**. "Handling Data Skew in MapReduce." VLDB 2011.
+   - Skew handling in distributed data processing

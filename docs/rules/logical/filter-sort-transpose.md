@@ -1,0 +1,131 @@
+# Rule: Calcite FilterSortTransposeRule
+
+**Category:** logical/predicate-pushdown
+**File:** `rules/logical/predicate-pushdown/filter-sort-transpose.rra`
+
+## Metadata
+
+- **ID:** `calcite-filter-sort-transpose`
+- **Version:** "1.0.0"
+- **Databases:** calcite, postgresql, mysql, oracle
+- **Tags:** logical, calcite, filter, sort, transpose, pushdown
+- **Authors:** "RA Contributors"
+
+## Preconditions
+
+```yaml
+  - type: "pattern"
+    must_match: "(filter ?pred (sort ?order ?input))"
+    description: "Filter above a sort"
+  - type: "predicate"
+    condition: "is_deterministic(?pred)"
+    description: "Predicate must be deterministic"
+```
+
+
+# Calcite FilterSortTransposeRule
+
+## Description
+
+Pushes a filter below a sort (ORDER BY). Since filtering does not
+change row ordering, the filter can be applied before sorting,
+reducing the number of rows that need to be sorted.
+
+**When to apply**: A filter sits directly above a sort operator.
+
+**Why it works**: Sorting is O(n log n); reducing n before sorting
+is always beneficial. The relative order of remaining rows is
+preserved, so the sort still produces the correct output.
+
+**Calcite class**: `org.apache.calcite.rel.rules.FilterSortTransposeRule`
+
+## Relational Algebra
+
+```algebra
+-- Before: filter above sort
+sigma[p](tau[k](R))
+
+-- After: sort above filter (fewer rows to sort)
+tau[k](sigma[p](R))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-filter-sort-transpose";
+    "(filter ?pred (sort ?keys ?input))" =>
+    "(sort ?keys (filter ?pred ?input))"
+),
+```
+
+## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
+
+```rust
+fn applicable(
+    filter: &Filter,
+    sort: &Sort,
+) -> bool {
+    // Always applicable: filtering preserves order
+    true
+}
+```
+
+**Restrictions:**
+- If the sort has LIMIT/OFFSET, the filter must not be pushed below
+  (filtering after LIMIT changes semantics)
+- Only applies to pure ORDER BY without FETCH/OFFSET
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    input_rows: f64,
+    selectivity: f64,
+) -> f64 {
+    let before_sort_cost = input_rows * input_rows.log2();
+    let filtered_rows = input_rows * selectivity;
+    let after_sort_cost = filtered_rows * filtered_rows.log2();
+    if before_sort_cost > 0.0 {
+        (before_sort_cost - after_sort_cost) / before_sort_cost
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 10-70% reduction in sort cost.
+
+## Test Cases
+
+```sql
+-- Expected: filter-sort transpose reduces sort input
+-- Filter on deptno should be pushed below sort when implemented.
+SELECT * FROM emp
+WHERE deptno = 10
+ORDER BY salary DESC;
+```
+
+```sql
+-- Expected: compound predicate pushed below sort
+-- Both predicates should move below ORDER BY.
+SELECT * FROM orders
+WHERE status = 'SHIPPED' AND amount > 100
+ORDER BY order_date;
+```
+
+```sql
+-- Expected: LIMIT blocks filter pushdown through sort
+-- Filter cannot be pushed below LIMIT without changing semantics.
+SELECT * FROM (
+    SELECT * FROM emp ORDER BY salary DESC LIMIT 10
+) t WHERE deptno = 10;
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/FilterSortTransposeRule.java (commit af6367d)

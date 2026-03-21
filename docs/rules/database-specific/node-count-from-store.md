@@ -1,0 +1,156 @@
+# Rule: Neo4j Node Count from Store Statistics
+
+**Category:** database-specific/neo4j
+**File:** `rules/database-specific/neo4j/node-count-from-store.rra`
+
+## Metadata
+
+- **ID:** `neo4j-node-count-from-store`
+- **Version:** "1.0.0"
+- **Databases:** neo4j
+- **Tags:** count, statistics, store, optimization, aggregation
+- **Authors:** "Neo4j Inc."
+
+
+# Neo4j Node Count from Store Statistics
+
+## Description
+
+Resolves `count()` queries directly from stored graph statistics without scanning
+any nodes or relationships. Neo4j maintains per-label node counts and per-type
+relationship counts in the store metadata, allowing O(1) cardinality queries.
+
+**When to apply**: Cypher queries that compute `count(n)` for all nodes with a
+given label, or `count(r)` for all relationships of a given type, with no
+additional filtering predicates.
+
+**Why it works**: Neo4j's transaction log maintains exact counts for each label
+and relationship type. These counts are updated atomically with each transaction.
+A `count()` query on an unfiltered label scan can read the count directly from
+metadata instead of scanning potentially millions of nodes.
+
+## Relational Algebra
+
+```algebra
+-- Before: full label scan with count aggregation
+gamma[count(*)](label-scan(:Person))
+
+-- After: direct store statistics lookup
+store-count(:Person)  -- O(1) metadata read
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("neo4j-count-from-store-nodes";
+    "(aggregate (count ?var)
+       (label-scan ?label ?var))" =>
+    "(node-count-from-store ?label)"
+    if no_filter_predicates("?var")
+),
+
+rw!("neo4j-count-from-store-relationships";
+    "(aggregate (count ?rel)
+       (expand ?src ?rel-type ?dir ?rel))" =>
+    "(relationship-count-from-store ?rel-type)"
+    if is_unfiltered_expand("?src", "?rel")
+    if no_source_filter("?src")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> bool {
+    stats.is_count_aggregation
+        && stats.no_where_clause
+        && stats.label_or_type_specified
+}
+```
+
+**Restrictions:**
+- Only works for unfiltered counts (no WHERE clause)
+- DISTINCT count cannot use store statistics
+- Counts for combinations of labels require scan (no pre-computed cross-label counts)
+- In-transaction counts reflect committed + uncommitted changes
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let label_count = stats.label_node_count as f64;
+
+    // Full scan cost
+    let scan_cost = label_count * 0.001;
+
+    // Store lookup cost: essentially free
+    let store_cost = 0.001;
+
+    if scan_cost > store_cost {
+        (scan_cost - store_cost) / scan_cost
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 50% to 1000x; O(1) vs O(N) for large label sets.
+
+## Test Cases
+
+### Positive: Simple label count
+
+```cypher
+// Count all Person nodes
+MATCH (p:Person)
+RETURN count(p)
+
+// EXPLAIN shows: NodeCountFromCountStore
+// Returns immediately from store metadata
+// No node scanning required
+```
+
+### Positive: Relationship type count
+
+```cypher
+// Count all KNOWS relationships
+MATCH ()-[r:KNOWS]->()
+RETURN count(r)
+
+// EXPLAIN shows: RelationshipCountFromCountStore
+```
+
+### Negative: Filtered count
+
+```cypher
+// Cannot use store count with WHERE clause
+MATCH (p:Person)
+WHERE p.age > 21
+RETURN count(p)
+
+// Must scan and filter; no pre-computed count for age > 21
+// EXPLAIN shows: NodeByLabelScan + Filter + EagerAggregation
+```
+
+## References
+
+**Implementation:**
+- Neo4j source: `org.neo4j.cypher.internal.logical.plans.NodeCountFromCountStore`
+- Neo4j source: `org.neo4j.cypher.internal.logical.plans.RelationshipCountFromCountStore`
+- Count store: `org.neo4j.kernel.impl.store.counts.CountsTracker`
+
+**Documentation:**
+- Neo4j Manual: "Execution Plans" - Count store operations
+  - https://neo4j.com/docs/cypher-manual/current/execution-plans/
+
+**Papers:**
+- Francis, N., et al., "Cypher: An Evolving Query Language for Property Graphs",
+  SIGMOD 2018

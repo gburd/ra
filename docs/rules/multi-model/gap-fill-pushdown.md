@@ -1,0 +1,119 @@
+# Rule: Gap Fill Pushdown
+
+**Category:** multi-model/timeseries
+**File:** `rules/multi-model/timeseries/gap-fill-pushdown.rra`
+
+## Metadata
+
+- **ID:** `gap-fill-pushdown`
+- **Version:** "1.0.0"
+- **Databases:** timescaledb, questdb, influxdb
+- **Tags:** timeseries, gap-fill, interpolation, pushdown
+- **SQL Standard:** "flux:2"
+- **Authors:** "RA Contributors"
+
+
+# Gap Fill Pushdown
+
+## Description
+
+Pushes gap-filling (interpolation) operations into the time-bucketed
+aggregation step so that missing time buckets are generated during the
+scan/aggregate phase rather than in a separate post-processing pass.
+This avoids materializing the sparse intermediate result and then
+expanding it.
+
+**When to apply**: A time-bucketed aggregation is followed by a gap-fill
+or locf (last observation carried forward) operation, and the storage
+engine supports integrated gap generation.
+
+**Why it works**: Without pushdown, the engine materializes only buckets
+that have data, then a second pass generates empty bucket rows and
+interpolates values. By integrating gap-fill into the aggregation, the
+engine generates the complete timeline in a single pass.
+
+## Relational Algebra
+
+```algebra
+gap_fill(
+  gamma[time_bucket(interval, ts), agg(value)](R),
+  start, end, interval
+)
+  -> gamma_gap_filled[
+       time_bucket(interval, ts), agg(value)
+     ](R, start, end, interval)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("gap-fill-pushdown";
+    "(gap-fill ?start ?end ?interval \
+       (aggregate (list (func time_bucket ?interval ?ts)) \
+         ?aggs ?input))" =>
+    "(ts-aggregate-gap-filled ?input ?ts ?interval \
+       ?start ?end ?aggs)"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    interval: &str,
+    start: &Expr,
+    end: &Expr,
+) -> bool {
+    start.is_const() && end.is_const()
+    && parse_interval(interval).is_ok()
+}
+```
+
+**Restrictions:**
+- Start and end times must be known at plan time
+- Interval must match the time_bucket interval in the aggregation
+- Interpolation method (locf, linear, null) must be specified
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    data_buckets: f64,
+    total_buckets: f64,
+    materialization_cost: f64,
+) -> f64 {
+    let two_pass_cost =
+        data_buckets + total_buckets + materialization_cost;
+    let single_pass_cost = total_buckets;
+    (two_pass_cost - single_pass_cost) / two_pass_cost
+}
+```
+
+**Typical benefit**: 0.2-0.5 for sparse data with many gaps.
+
+## Test Cases
+
+```sql
+-- Positive: gap fill with time_bucket_gapfill
+SELECT time_bucket_gapfill('1 hour', time) AS hour,
+       locf(avg(temperature))
+FROM sensor_data
+WHERE time >= '2025-03-01' AND time < '2025-03-02'
+GROUP BY hour;
+-- Gap fill integrated into aggregation pass
+
+-- Negative: no gap fill function used
+SELECT time_bucket('1 hour', time) AS hour,
+       avg(temperature)
+FROM sensor_data
+GROUP BY hour;
+-- Standard aggregation; no gap fill needed
+```
+
+## References
+
+TimescaleDB: src/nodes/gapfill.c - gapfill_exec()
+InfluxDB: flux stdlib fill() function
+Freedman et al. "TimescaleDB: SQL Made Scalable for Time-Series Data" (SIGMOD 2020)

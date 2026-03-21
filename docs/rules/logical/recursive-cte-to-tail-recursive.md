@@ -1,0 +1,71 @@
+# Rule: Recursive CTE Tail Recursion Optimization
+
+**Category:** logical/cte-optimization
+**File:** `rules/logical/cte-optimization/recursive-cte-to-tail-recursive.rra`
+
+## Metadata
+
+- **ID:** `recursive-cte-to-tail-recursive`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, duckdb
+- **Tags:** recursive, cte, tail-recursion, optimization, memory
+- **Authors:** "RA Contributors"
+
+
+# Recursive CTE Tail Recursion Optimization
+
+## Description
+
+Detects when the recursive case only uses the most recent iteration's results (not the accumulated result set) and converts to a tail-recursive form that discards earlier iterations during execution, reducing peak memory usage from O(total_rows) to O(working_table_rows).
+
+**When to apply**: The recursive case references the CTE only in the FROM clause (not in subqueries or the right side of a non-equi-join), and the body performs a simple SELECT * without aggregation.
+
+**Why it works**: When only the last iteration's delta matters, there is no need to keep accumulated rows in memory during iteration. The final UNION ALL can be streamed rather than materialized.
+
+## Relational Algebra
+
+```algebra
+RecursiveCTE[name, base, rec](body)
+  -> TailRecursiveCTE[name, base, rec](body)
+  where is_linear_recursive(rec, name)
+    and body = Scan(name)
+```
+
+## Implementation
+
+```rust
+rw!("recursive-cte-to-tail-recursive";
+    "(recursive-cte ?name ?base ?rec ?body)" =>
+    {
+        ConvertToTailRecursive {
+            name: var("?name"),
+            base: var("?base"),
+            rec: var("?rec"),
+            body: var("?body"),
+        }
+    }
+    if is_tail_recursive("?rec", "?name")
+),
+```
+
+## Test Cases
+
+```sql
+-- Linear recursion: each step only uses previous step
+WITH RECURSIVE path AS (
+  SELECT 1 AS node, ARRAY[1] AS visited
+  UNION ALL
+  SELECT e.dst, p.visited || e.dst
+  FROM edges e JOIN path p ON e.src = p.node
+  WHERE NOT e.dst = ANY(p.visited)
+)
+SELECT * FROM path;
+
+-- Tail-recursive: can discard earlier iterations
+-- Memory: O(frontier_size) instead of O(total_visited)
+```
+
+## References
+
+- "Optimizing Recursive Queries with Monotonic Aggregation" (Abo Khamis et al., 2024)
+- DuckDB tail-recursive CTE optimization

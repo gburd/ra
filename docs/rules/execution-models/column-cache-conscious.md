@@ -1,0 +1,424 @@
+# Rule: Column-at-a-Time Cache-Conscious Processing
+
+**Category:** execution-models
+**File:** `rules/execution-models/column-at-a-time/column-cache-conscious.rra`
+
+## Metadata
+
+- **ID:** `column-cache-conscious`
+- **Version:** 1.0.0
+- **Databases:** MonetDB, ClickHouse, DuckDB, vectorwise
+- **Tags:** execution, columnar, cache-conscious, radix, partitioning, prefetch, memory-hierarchy, numa
+- **SQL Standard:** MonetDB X100
+- **Authors:** Stefan Manegold, Peter Boncz, Martin Kersten
+
+
+# Column-at-a-Time Cache-Conscious Processing
+
+## Description
+
+Cache-conscious processing designs algorithms around the CPU memory hierarchy (L1/L2/L3 caches, TLB) rather than assuming uniform memory access. In column-at-a-time execution, the primary concern is that column arrays often exceed cache size, causing cache misses that dominate execution time. Cache-conscious techniques include: radix partitioning to create cache-resident partitions, software prefetching to overlap computation with memory latency, cache-sized chunking to process data in L1/L2-resident blocks, and NUMA-aware data placement to minimize remote memory access.
+
+**Memory hierarchy latencies (typical Intel Xeon):**
+
+| Level | Size | Latency | Bandwidth |
+|-------|------|---------|-----------|
+| L1 data | 32 KB | 4 cycles (~1 ns) | 200 GB/s |
+| L2 | 256 KB | 12 cycles (~4 ns) | 80 GB/s |
+| L3 | 8-30 MB | 40 cycles (~13 ns) | 40 GB/s |
+| DRAM (local) | 32-512 GB | 100 cycles (~33 ns) | 40 GB/s |
+| DRAM (remote NUMA) | -- | 200 cycles (~66 ns) | 20 GB/s |
+| TLB miss + page walk | -- | 50-100 cycles | -- |
+
+**Cache-conscious techniques:**
+1. **Radix partitioning**: Split data into cache-sized partitions before processing
+2. **Software prefetching**: Issue prefetch instructions ahead of data access
+3. **Cache-sized chunking**: Process columns in L1/L2-sized chunks
+4. **Data layout optimization**: Column alignment, padding for cache lines
+5. **TLB-conscious access**: Limit active pages to avoid TLB thrashing
+6. **Temporal locality**: Process all operations on a chunk before moving to next
+
+**Key characteristics:**
+- **Radix partitioning for joins**: Hash table partitions fit in L2 cache
+- **Software prefetch for probing**: Prefetch hash table entry while processing current
+- **Chunk-at-a-time for aggregation**: Process 1024 values (8 KB) per chunk
+- **Cache-aligned allocation**: Column arrays start at 64-byte boundary
+- **Sequential access**: Column scans have perfect spatial locality
+
+**Trade-offs:**
+- Radix partitioning costs CPU time (scatter + partition) to save cache misses
+- Software prefetch requires pipeline depth knowledge (~20 entries ahead)
+- Chunking adds loop overhead but ensures cache residency
+- Cache-conscious algorithms are hardware-dependent (cache sizes vary)
+- TLB-conscious access limits parallelism in scatter operations
+
+## Relational Algebra
+
+```
+-- Cache-conscious hash join (radix partitioned):
+CacheJoin(R, S, R.a = S.b)
+  = partition_R = RadixPartition(R.a, bits=8)  -- 256 partitions
+    partition_S = RadixPartition(S.b, bits=8)
+    for p in 0..255:
+      output += HashJoin(partition_R[p], partition_S[p])
+      -- Each partition fits in L2 cache
+
+-- Cache-conscious aggregation (chunked):
+CacheAggregate(col, GROUP BY key)
+  = for chunk in col.chunks(1024):
+      update_hash_table(chunk)  -- chunk fits L1
+```
+
+## Implementation
+
+```rust
+/// Cache hierarchy parameters (auto-detected or configured)
+pub struct CacheConfig {
+    l1_size: usize,     // 32 KB typical
+    l2_size: usize,     // 256 KB typical
+    l3_size: usize,     // 8-30 MB typical
+    cache_line: usize,  // 64 bytes
+    tlb_entries: usize,  // 64-1024 entries
+    page_size: usize,    // 4 KB or 2 MB (huge pages)
+    prefetch_distance: usize, // entries ahead to prefetch
+}
+
+impl CacheConfig {
+    pub fn detect() -> Self {
+        // Read from /proc/cpuinfo or CPUID
+        Self {
+            l1_size: 32 * 1024,
+            l2_size: 256 * 1024,
+            l3_size: 16 * 1024 * 1024,
+            cache_line: 64,
+            tlb_entries: 512,
+            page_size: 4096,
+            prefetch_distance: 16,
+        }
+    }
+
+    /// Optimal chunk size for L1-resident processing
+    pub fn l1_chunk_size(&self, value_width: usize) -> usize {
+        // Use ~75% of L1 to leave room for other data
+        (self.l1_size * 3 / 4) / value_width
+    }
+
+    /// Number of radix bits for cache-fitting partitions
+    pub fn radix_bits_for_cache(
+        &self,
+        num_entries: usize,
+        entry_size: usize,
+        target_cache: usize,
+    ) -> u32 {
+        let partition_size = target_cache / entry_size;
+        let num_partitions = num_entries / partition_size + 1;
+        (num_partitions as f64).log2().ceil() as u32
+    }
+}
+
+/// Radix partitioning for cache-conscious joins
+pub struct RadixPartitioner {
+    radix_bits: u32,
+    num_partitions: usize,
+}
+
+impl RadixPartitioner {
+    pub fn new(
+        num_entries: usize,
+        entry_size: usize,
+        cache: &CacheConfig,
+    ) -> Self {
+        let bits = cache.radix_bits_for_cache(
+            num_entries, entry_size, cache.l2_size,
+        );
+        Self {
+            radix_bits: bits,
+            num_partitions: 1 << bits,
+        }
+    }
+
+    /// Partition column array by radix of hash values
+    /// Two-pass for TLB-consciousness:
+    ///   Pass 1: Count elements per partition
+    ///   Pass 2: Scatter to partition buffers
+    pub fn partition(
+        &self,
+        hashes: &[u64],
+        data: &ColumnArray,
+    ) -> Vec<ColumnPartition> {
+        let n = data.len;
+        let mask = (self.num_partitions - 1) as u64;
+
+        // Pass 1: Histogram (count per partition)
+        let mut counts = vec![0usize; self.num_partitions];
+        for i in 0..n {
+            let part = (hashes[i] & mask) as usize;
+            counts[part] += 1;
+        }
+
+        // Compute offsets (prefix sum)
+        let mut offsets = vec![0usize; self.num_partitions];
+        let mut total = 0;
+        for p in 0..self.num_partitions {
+            offsets[p] = total;
+            total += counts[p];
+        }
+
+        // Pass 2: Scatter data into partitions
+        let width = data.data_type.width();
+        let mut output = AlignedBuffer::new(n * width);
+        let mut positions = vec![0u32; n];
+        let mut write_pos = offsets.clone();
+
+        for i in 0..n {
+            let part = (hashes[i] & mask) as usize;
+            let dst = write_pos[part];
+            output.copy_from(
+                &data.data,
+                i * width,
+                dst * width,
+                width,
+            );
+            positions[dst] = i as u32;
+            write_pos[part] += 1;
+        }
+
+        // Build partition descriptors
+        let mut partitions = Vec::new();
+        for p in 0..self.num_partitions {
+            partitions.push(ColumnPartition {
+                data_offset: offsets[p],
+                len: counts[p],
+                partition_id: p,
+            });
+        }
+
+        partitions
+    }
+
+    /// Multi-pass radix for very large data
+    /// (TLB-conscious: limit fan-out per pass)
+    pub fn partition_multipass(
+        &self,
+        hashes: &[u64],
+        data: &ColumnArray,
+        cache: &CacheConfig,
+    ) -> Vec<ColumnPartition> {
+        // Max fan-out per pass: limited by TLB entries
+        let max_fanout = cache.tlb_entries / 2;
+        let bits_per_pass =
+            (max_fanout as f64).log2() as u32;
+
+        if self.radix_bits <= bits_per_pass {
+            return self.partition(hashes, data);
+        }
+
+        // Multi-pass: partition on low bits first,
+        // then re-partition on high bits
+        let pass1_bits = bits_per_pass;
+        let pass2_bits = self.radix_bits - pass1_bits;
+
+        let pass1 = RadixPartitioner {
+            radix_bits: pass1_bits,
+            num_partitions: 1 << pass1_bits,
+        };
+        let pass1_parts = pass1.partition(hashes, data);
+
+        // Re-partition each pass1 partition
+        let mut final_parts = Vec::new();
+        for p1 in &pass1_parts {
+            let sub_hashes: Vec<u64> = (p1.data_offset
+                ..p1.data_offset + p1.len)
+                .map(|i| hashes[i] >> pass1_bits)
+                .collect();
+            let sub_partitioner = RadixPartitioner {
+                radix_bits: pass2_bits,
+                num_partitions: 1 << pass2_bits,
+            };
+            let sub = sub_partitioner.partition_slice(
+                &sub_hashes,
+            );
+            final_parts.extend(sub);
+        }
+
+        final_parts
+    }
+}
+
+/// Software prefetching for hash table probing
+pub fn probe_with_prefetch(
+    hash_table: &HashTable,
+    probe_hashes: &[u64],
+    probe_keys: &ColumnArray,
+    n: usize,
+    prefetch_distance: usize,
+) -> Vec<u32> {
+    let mut matches = Vec::new();
+
+    for i in 0..n {
+        // Prefetch ahead: issue memory read for future entry
+        if i + prefetch_distance < n {
+            let future_hash = probe_hashes[
+                i + prefetch_distance
+            ];
+            let future_bucket = hash_table.bucket_addr(
+                future_hash,
+            );
+            unsafe {
+                std::arch::x86_64::_mm_prefetch::<3>(
+                    future_bucket as *const i8,
+                );
+            }
+        }
+
+        // Process current entry (data already prefetched)
+        let hash = probe_hashes[i];
+        if let Some(match_pos) =
+            hash_table.probe(hash, probe_keys, i)
+        {
+            matches.push(match_pos);
+        }
+    }
+
+    matches
+}
+
+/// Cache-sized chunk processing for aggregation
+pub fn chunked_aggregate(
+    key_col: &ColumnArray,
+    val_col: &ColumnArray,
+    cache: &CacheConfig,
+) -> HashMap<i64, f64> {
+    let chunk_size = cache.l1_chunk_size(16);
+    // 16 bytes per entry: 8 key + 8 value
+    let n = key_col.len;
+    let keys = key_col.data.as_i64_slice();
+    let vals = val_col.data.as_f64_slice();
+
+    let mut accum: HashMap<i64, f64> = HashMap::new();
+
+    for chunk_start in (0..n).step_by(chunk_size) {
+        let chunk_end = (chunk_start + chunk_size).min(n);
+
+        // Process chunk: all accesses within L1 cache
+        for i in chunk_start..chunk_end {
+            *accum.entry(keys[i]).or_default() += vals[i];
+        }
+    }
+
+    accum
+}
+
+/// Cache-aligned buffer allocation
+pub struct AlignedBuffer {
+    ptr: *mut u8,
+    len: usize,
+    capacity: usize,
+}
+
+impl AlignedBuffer {
+    pub fn new_aligned(
+        size: usize,
+        alignment: usize,
+    ) -> Self {
+        let layout = std::alloc::Layout::from_size_align(
+            size, alignment,
+        ).unwrap();
+        let ptr = unsafe { std::alloc::alloc(layout) };
+        Self {
+            ptr,
+            len: size,
+            capacity: size,
+        }
+    }
+
+    /// Allocate 64-byte aligned (cache line boundary)
+    pub fn new_cache_aligned(size: usize) -> Self {
+        Self::new_aligned(size, 64)
+    }
+
+    /// Allocate 4KB aligned (page boundary)
+    pub fn new_page_aligned(size: usize) -> Self {
+        Self::new_aligned(size, 4096)
+    }
+}
+```
+
+## Cost Model
+
+**Cache Miss Costs (per miss):**
+- L1 miss, L2 hit: ~4 ns (12 cycles)
+- L2 miss, L3 hit: ~13 ns (40 cycles)
+- L3 miss, DRAM: ~33 ns (100 cycles)
+- TLB miss: ~15-30 ns (50-100 cycles)
+
+**Radix Partitioning Cost:**
+- 2-pass partition: ~6 ns/entry (histogram + scatter)
+- Cache savings per join probe: 30-80 ns (L3 miss avoided)
+- Break-even: if >10% of probes would miss L3
+- Typical: partitioning 10M rows = ~60 ms, saves ~300 ms in join
+
+**Software Prefetch Benefit:**
+- Without prefetch: each HT probe pays full latency (~30-60 ns)
+- With prefetch (distance 16-20): overlap 16 memory loads
+- Effective probe cost: ~5-10 ns (computation dominates)
+- Speedup: 3-6x for hash table probing
+
+**Chunk Processing Benefit:**
+- Full column (1M values): working set = 8 MB (exceeds L2)
+- 1024-value chunks: working set = 8 KB (fits L1)
+- Aggregation speedup: 2-4x from cache residency
+
+**Alignment Impact:**
+- Unaligned SIMD load: +1-3 cycles per instruction
+- Cache-line split: +10-20 cycles per access
+- Page-aligned large buffers: avoid TLB contention
+
+## Test Cases
+
+```sql
+-- Test 1: Cache-conscious hash join (radix partitioned)
+SELECT * FROM lineitem l JOIN orders o ON l.orderkey = o.orderkey;
+-- orders: 1.5M rows x 16 bytes/entry = 24 MB (exceeds L2)
+-- Radix partition into 256 parts: 94 KB each (fits L2)
+-- Probe speedup: 3-5x from cache residency
+
+-- Test 2: Prefetch-enabled probe
+SELECT * FROM fact JOIN dim ON fact.dim_id = dim.id;
+-- dim hash table: 1M entries = 16 MB (in L3)
+-- Without prefetch: ~30 ns/probe (L3 latency)
+-- With prefetch (distance=20): ~8 ns/probe
+-- 3.75x speedup on probe phase
+
+-- Test 3: Chunked aggregation
+SELECT category, SUM(amount) FROM sales GROUP BY category;
+-- 10M rows, hash table for 1000 categories = 24 KB (L1)
+-- Process in 1024-row chunks: key+value = 16 KB (L1)
+-- Full column: 80 MB working set, constant L2/L3 misses
+-- Chunked: L1-resident, ~2x faster
+
+-- Test 4: NUMA-aware column scan
+SELECT SUM(col) FROM large_table;
+-- 100M rows across 2 NUMA nodes
+-- NUMA-local scan: 40 GB/s bandwidth per node
+-- Cross-NUMA scan: 20 GB/s bandwidth (2x slower)
+-- Pin threads to same node as data: full bandwidth
+```
+
+## Comparison
+
+| Technique | Target Cache | Benefit | Cost | Best For |
+|-----------|-------------|---------|------|----------|
+| Radix partitioning | L2 | 3-5x join speedup | ~6 ns/entry | Large hash joins |
+| Software prefetch | L3->L1 | 3-6x probe speedup | ~1 ns overhead | HT probing |
+| Chunked processing | L1 | 2-4x compute speedup | Loop overhead | Aggregation |
+| Cache alignment | L1 line | Avoid penalties | None | All operations |
+| Huge pages | TLB | Reduce TLB misses | Memory waste | Large datasets |
+| NUMA placement | DRAM | 2x bandwidth | Allocation policy | Multi-socket |
+
+## References
+
+1. **Manegold, Stefan; Boncz, Peter A.; Kersten, Martin L.**. "Optimizing Database Architecture for the New Bottleneck: Memory Access." VLDB Journal 2000.
+2. **Manegold, Stefan; Boncz, Peter; Nes, Niels**. "What Happens During a Join? Dissecting CPU and Memory Optimization Effects." VLDB 2000.
+3. **Boncz, Peter A.; Manegold, Stefan; Kersten, Martin L.**. "Database Architecture Optimized for the New Bottleneck: Memory Access." VLDB 1999.
+4. **Kim, Changkyu; Kaldewey, Tim; Lee, Victor; Sedlar, Eric; Nguyen, Anthony; Satish, Nadathur; Chhugani, Jatin; Di Blas, Andrea; Dubey, Pradeep**. "Sort vs. Hash Revisited: Fast Join Implementation on Modern Multi-Core CPUs." VLDB 2009.

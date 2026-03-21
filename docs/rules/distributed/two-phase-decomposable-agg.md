@@ -1,0 +1,167 @@
+# Rule: Two-Phase Decomposable Aggregation
+
+**Category:** distributed/aggregation
+**File:** `rules/distributed/aggregation/two-phase-decomposable-agg.rra`
+
+## Metadata
+
+- **ID:** `two-phase-decomposable-agg`
+- **Version:** "1.0.0"
+- **Databases:** presto, trino, spark, cockroachdb, greenplum, citus
+- **Tags:** distributed, aggregation, two-phase, decomposable, reduction
+- **Authors:** "RA Contributors"
+
+
+# Two-Phase Decomposable Aggregation
+
+## Description
+
+Transform single-phase aggregation to two-phase for decomposable functions.
+For distributed environments, pre-aggregate locally then finalize globally.
+Reduces data shuffled across the network.
+
+**When to apply**: A grouped aggregation uses a decomposable function
+(SUM, COUNT, MIN, MAX, AVG) on distributed data with high row-to-group
+ratio.
+
+**Why it works**: Local pre-aggregation reduces N input rows to at most
+K distinct groups per node. Instead of shuffling all rows, only K * P
+partial aggregates cross the network (where P is the number of partitions).
+
+## Relational Algebra
+
+```algebra
+-- Before (single-phase)
+gamma[g, agg(a)](Exchange[hash(g)](R))
+
+-- After (two-phase)
+gamma[g, merge_agg(partial_a)](
+    Exchange[hash(g)](
+        gamma[g, partial_agg(a)](R)
+    )
+)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("two-phase-decomposable-agg";
+    "(aggregate ?group_keys ?agg_fn (exchange hash_partition ?child ?keys))" =>
+    "(aggregate_final ?group_keys ?agg_fn
+        (exchange hash_partition
+            (aggregate_partial ?group_keys ?agg_fn ?child)
+            ?group_keys))"
+    if agg_is_decomposable("?agg_fn")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(agg_fn: &AggFunction, input_rows: u64, groups: u64) -> bool {
+    match agg_fn {
+        AggFunction::Count | AggFunction::Sum
+        | AggFunction::Min | AggFunction::Max
+        | AggFunction::Avg => true,
+        _ => false,
+    }
+    && input_rows > 1_000_000
+    && !already_two_phase(plan)
+}
+```
+
+**Decomposition rules:**
+| Function | Local (Partial) | Global (Final) |
+|----------|----------------|----------------|
+| COUNT(*) | COUNT(*) | SUM(partial_count) |
+| SUM(x) | SUM(x) | SUM(partial_sum) |
+| MIN(x) | MIN(x) | MIN(partial_min) |
+| MAX(x) | MAX(x) | MAX(partial_max) |
+| AVG(x) | (SUM(x), COUNT(x)) | SUM(p_sum) / SUM(p_count) |
+
+## Example
+
+```sql
+SELECT country, SUM(sales) FROM orders GROUP BY country;
+```
+
+Before:
+```
+(Aggregate
+  :input (Scan "orders")
+  :keys [country]
+  :aggs [SUM(sales)]
+)
+```
+
+After:
+```
+(Aggregate  ; Global phase
+  :input (Exchange :shuffle [country]
+           (Aggregate  ; Local pre-aggregation
+             :input (Scan "orders")
+             :keys [country]
+             :aggs [SUM(sales)]))
+  :keys [country]
+  :aggs [SUM(local_sum)]  ; Combine partial results
+)
+```
+
+## Conditions
+
+- aggregate_function in [SUM, COUNT, MIN, MAX]
+- input_rows > 1000000 (worthwhile for large datasets)
+- NOT already_two_phase
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    input_rows: f64,
+    distinct_groups: f64,
+    num_nodes: u32,
+    row_bytes: f64,
+    network_bandwidth: f64,
+) -> f64 {
+    let shuffle_fraction = (num_nodes - 1) as f64 / num_nodes as f64;
+    let cost_single = input_rows * row_bytes * shuffle_fraction
+        / network_bandwidth;
+    let partial_rows = distinct_groups * num_nodes as f64;
+    let cost_two_phase = partial_rows * row_bytes * shuffle_fraction
+        / network_bandwidth;
+    (cost_single - cost_two_phase) / cost_single
+}
+```
+
+## Test Cases
+
+```sql
+-- Positive: SUM with high reduction
+SELECT region, SUM(amount) FROM orders GROUP BY region;
+-- Expected: Two-phase with local SUM + global SUM
+
+-- Positive: COUNT decomposition
+SELECT region, COUNT(*) FROM lineitem GROUP BY region;
+-- Expected: Two-phase with local COUNT + global SUM
+
+-- Positive: AVG desugaring
+SELECT country, AVG(age) FROM users GROUP BY country;
+-- Expected: Two-phase with local (SUM, COUNT) + global SUM/SUM
+
+-- Negative: MEDIAN not decomposable
+SELECT region, MEDIAN(amount) FROM orders GROUP BY region;
+-- Must shuffle all rows
+
+-- Negative: COUNT(DISTINCT) not directly decomposable
+SELECT region, COUNT(DISTINCT customer_id) FROM orders GROUP BY region;
+-- Requires three-phase or HLL
+```
+
+## References
+
+Presto/Trino: AddExchanges.java - planAggregation()
+Spark SQL: Optimizer.scala - RewriteDistinctAggregates
+CockroachDB: pkg/sql/opt/norm/rules/agg.opt
+Gray et al., "Data Cube: A Relational Aggregation Operator" (ICDE 1996)

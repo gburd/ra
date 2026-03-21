@@ -1,0 +1,122 @@
+# Rule: "ClickHouse Normal Projection Rewrite"
+
+**Category:** database-specific/clickhouse
+**File:** `rules/database-specific/clickhouse/normal-projection-rewrite.rra`
+
+## Metadata
+
+- **ID:** `clickhouse-normal-projection-rewrite`
+- **Version:** "1.0.0"
+- **Databases:** clickhouse
+- **Tags:** projection, materialized, reorder, index, alternative-sort
+- **Authors:** "RA Contributors"
+
+
+# ClickHouse Normal Projection Rewrite
+
+## Metadata
+- **Rule ID**: `clickhouse-normal-projection-rewrite`
+- **Category**: Database-specific / ClickHouse
+- **Source**: `src/Processors/QueryPlan/Optimizations/optimizeUseNormalProjection.cpp`
+- **Complexity**: O(n) scan of projection (usually smaller/faster)
+- **Prerequisites**: Matching normal (non-aggregate) projection
+- **Alternatives**: Full scan of base table
+
+## Description
+
+Normal projections in ClickHouse are materialized copies of table data
+sorted in a different order. When a query's filter or ORDER BY matches
+the projection's sort key better than the base table's key, the
+optimizer rewrites the scan to read from the projection instead.
+
+This provides the benefit of a secondary index without the overhead of
+maintaining a separate index structure. The projection is a full copy
+of the selected columns, sorted differently.
+
+**When to apply:**
+- Query filters on columns that are not in the base table's sort key
+- Query ORDER BY matches projection's sort key
+- Projection covers all needed columns
+
+**Why it works for OLAP:**
+- Projections provide alternative sort orders
+- Sparse index on projection enables granule pruning
+- No join-back to base table needed (projection has all data)
+
+## Relational Algebra
+
+```
+filter[pred](scan[T])
+  -> filter[pred](scan[T.projection_P])
+     where P.sort_key covers pred better than T.sort_key
+```
+
+## Implementation (egg rewrite rules)
+
+```lisp
+;; Rewrite scan to use normal projection
+(rewrite (filter ?pred (scan ?table))
+  (filter ?pred (scan-projection ?table
+    (best-normal-projection ?table ?pred)))
+  :if (has-better-normal-projection ?table ?pred))
+
+;; Use projection for ORDER BY
+(rewrite (sort ?keys (scan ?table))
+  (merge-sorted (read-in-order
+    (scan-projection ?table
+      (find-projection-by-sort ?table ?keys))
+    ?keys))
+  :if (has-projection-with-sort ?table ?keys))
+```
+
+## Cost Model
+
+```rust
+pub fn cost_projection_scan(
+    projection_rows: u64,
+    matching_granules: u64,
+    granule_size: u64,
+    col_bytes: u64,
+    hardware: &HardwareModel,
+) -> Cost {
+    let io = Cost::io(
+        matching_granules as f64 * granule_size as f64
+        * col_bytes as f64 * hardware.seq_read_cost()
+    );
+    let index_cost = Cost::cpu(
+        (projection_rows / granule_size) as f64 * 10.0
+    );
+    io + index_cost
+}
+```
+
+**Typical benefit**: 30-90% for queries matching projection sort key
+
+## Test Cases
+
+### Positive: Query on non-primary-key column
+```sql
+CREATE TABLE events (
+    date Date, user_id UInt64, event_type String
+) ENGINE = MergeTree ORDER BY (date, user_id);
+
+ALTER TABLE events ADD PROJECTION by_event_type (
+    SELECT * ORDER BY event_type, date
+);
+
+SELECT * FROM events WHERE event_type = 'purchase';
+-- Base table sort: (date, user_id) - event_type not in prefix
+-- Projection sort: (event_type, date) - sparse index prunes
+```
+
+### Negative: No matching projection
+```sql
+SELECT * FROM events WHERE user_id = 12345;
+-- user_id is second in base key; need date prefix too
+-- No projection on user_id defined
+```
+
+## References
+
+- ClickHouse: `src/Processors/QueryPlan/Optimizations/optimizeUseNormalProjection.cpp`
+- ClickHouse: `src/Storages/ProjectionsDescription.h`

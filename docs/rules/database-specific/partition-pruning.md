@@ -1,0 +1,56 @@
+# Rule: TiDB Partition Pruning
+
+**Category:** database-specific/tidb
+**File:** `rules/database-specific/tidb/partition-pruning.rra`
+
+## Metadata
+
+- **ID:** `tidb-partition-pruning`
+- **Version:** "1.0.0"
+- **Databases:** tidb
+- **Tags:** partition, pruning, distributed, optimization
+- **Authors:** "PingCAP TiDB Team", "RA Contributors"
+
+
+# TiDB Partition Pruning
+
+## Description
+
+Eliminates unnecessary table partitions from scans by analyzing predicates
+against partition ranges, reducing I/O and improving query performance in
+range or hash partitioned tables.
+
+## Relational Algebra
+
+```algebra
+Filter[pred](Scan[partitioned_table])
+  -> Filter[pred](Union(Scan[partition_1], ..., Scan[partition_k]))
+  where only k of n partitions satisfy pred
+```
+
+## Implementation
+
+```rust
+fn prune_partitions(scan: &Scan, filter: &Filter) -> Vec<PartitionId> {
+    scan.table.partitions.iter()
+        .filter(|p| filter.may_match_partition(p))
+        .map(|p| p.id)
+        .collect()
+}
+```
+
+## Cost Model
+
+Accesses only matching partitions, typically 1-10% of total partitions.
+
+## Test Cases
+
+```sql
+-- Range partitioned by date
+SELECT * FROM sales_2024 WHERE sale_date BETWEEN '2024-03-01' AND '2024-03-31';
+-- Prunes: Access only March 2024 partition (1 of 12)
+```
+
+## References
+- Source: `pkg/planner/core/partition_pruning.go`
+- TiDB Docs: https://docs.pingcap.com/tidb/stable/partitioned-table

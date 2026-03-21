@@ -1,0 +1,125 @@
+# Rule: Calcite MaterializedViewFilterScanRule
+
+**Category:** physical/materialization
+**File:** `rules/physical/materialization/materialized-view-filter-scan.rra`
+
+## Metadata
+
+- **ID:** `calcite-materialized-view-filter-scan`
+- **Version:** "1.0.0"
+- **Databases:** calcite, postgresql, oracle
+- **Tags:** physical, calcite, materialized-view, filter, scan, rewriting
+- **Authors:** "RA Contributors"
+
+
+# Calcite MaterializedViewFilterScanRule
+
+## Description
+
+Replaces a filter on a table scan with a scan of a materialized
+view when the view covers the filter predicate. This redirects
+queries to pre-computed results, potentially orders of magnitude
+faster than scanning and filtering the base table.
+
+**When to apply**: A filter-scan pattern matches a materialized
+view definition that covers the query's predicates and columns.
+
+**Why it works**: A materialized view pre-computes and stores
+query results. If the view covers the current query (same or
+broader predicates), scanning the view is cheaper than
+recomputing from the base table.
+
+**Calcite class**: `org.apache.calcite.rel.rules.MaterializedViewFilterScanRule`
+
+## Relational Algebra
+
+```algebra
+-- Before: filter on base table scan
+sigma[dept = 'SALES'](Scan(emp))
+
+-- After: scan materialized view
+Scan(mv_sales_emp)
+-- where mv_sales_emp is defined as
+-- SELECT * FROM emp WHERE dept = 'SALES'
+
+-- Or with compensating filter if view is broader:
+sigma[salary > 50000](Scan(mv_sales_emp))
+-- if view covers dept='SALES' but not salary>50000
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-materialized-view-filter-scan";
+    "(filter ?pred (table-scan ?table))" =>
+    "(filter ?compensating_pred (table-scan ?view))"
+    if view_covers_query("?table", "?pred", "?view")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    table: &Table,
+    predicate: &Expr,
+    views: &[MaterializedView],
+) -> bool {
+    views.iter().any(|view| {
+        view.base_table() == table
+            && view.predicate().implies(predicate)
+    })
+}
+```
+
+**Restrictions:**
+- Materialized view must be registered and up-to-date
+- View definition must cover the query's columns
+- Compensating predicates are added for partial coverage
+- Stale views may return incorrect results
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    base_table_rows: f64,
+    view_rows: f64,
+) -> f64 {
+    if base_table_rows > 0.0 {
+        (base_table_rows - view_rows) / base_table_rows
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 50-99% by reading pre-filtered/pre-aggregated data.
+
+## Test Cases
+
+```sql
+-- Positive: query matches view exactly
+-- View: CREATE MATERIALIZED VIEW mv AS SELECT * FROM emp WHERE dept = 'SALES'
+SELECT * FROM emp WHERE dept = 'SALES';
+-- Redirected to mv scan
+```
+
+```sql
+-- Positive: query is subset of view
+-- View: CREATE MATERIALIZED VIEW mv AS SELECT * FROM emp WHERE dept = 'SALES'
+SELECT ename, salary FROM emp WHERE dept = 'SALES' AND salary > 50000;
+-- Redirected to mv with compensating filter salary > 50000
+```
+
+```sql
+-- Negative: query not covered by view
+-- View: CREATE MATERIALIZED VIEW mv AS SELECT * FROM emp WHERE dept = 'SALES'
+SELECT * FROM emp WHERE dept = 'ENGINEERING';
+-- Different predicate; view does not cover
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/MaterializedViewFilterScanRule.java (commit af6367d)

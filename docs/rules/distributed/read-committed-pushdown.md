@@ -1,0 +1,136 @@
+# Rule: Read Committed Isolation Pushdown
+
+**Category:** distributed/distributed-transactions
+**File:** `rules/distributed/distributed-transactions/read-committed-pushdown.rra`
+
+## Metadata
+
+- **ID:** `read-committed-pushdown`
+- **Version:** "1.0.0"
+- **Databases:** cockroachdb, tidb
+- **Tags:** distributed, transaction, isolation, read-committed, pushdown
+- **Authors:** "RA Contributors"
+
+
+# Read Committed Isolation Pushdown
+
+## Description
+
+Under Read Committed isolation, certain operations can be pushed down
+to storage nodes without acquiring long-lived locks. Unlike
+Serializable isolation where all reads must maintain a consistent
+snapshot, Read Committed allows each statement to see the latest
+committed data. This enables aggressive filter and aggregation pushdown
+because the storage node can evaluate predicates against the current
+committed state without coordinating with a transaction manager.
+
+**When to apply**: The transaction runs at Read Committed isolation
+level, and the query contains filter predicates, aggregations, or
+TopN operations that can be evaluated at the storage layer.
+
+**Why it works**: At Read Committed, each statement gets a fresh
+snapshot. Storage-layer evaluation of pushed-down operators produces
+the same result as evaluating them at the query layer. This avoids
+sending unneeded rows across the network and reduces lock contention
+since read locks are not held across statements.
+
+## Relational Algebra
+
+```algebra
+-- At Read Committed, filters can be pushed to storage
+sigma[p](DistributedScan(T))
+  -> DistributedScan(T, pushed_filter=p)
+  at isolation = READ_COMMITTED
+
+-- Aggregations can use local computation without lock coordination
+gamma[g, agg](DistributedScan(T))
+  -> MergeAgg(gamma[g, partial_agg](LocalScan(T, partition_i)))
+  at isolation = READ_COMMITTED
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("read-committed-filter-pushdown";
+    "(filter ?pred (distributed_scan ?table))" =>
+    "(distributed_scan ?table (pushed_filter ?pred))"
+    if isolation_is_read_committed()
+    if predicate_is_pushable("?pred")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    isolation: IsolationLevel,
+    operation: &RelExpr,
+) -> bool {
+    // Must be Read Committed isolation
+    isolation == ReadCommitted
+    // Operation must be pushable to storage
+    && operation.is_storage_pushable()
+    // No operations that require cross-node consistency
+    && !operation.requires_snapshot_consistency()
+}
+```
+
+**Restrictions:**
+- Only valid at Read Committed isolation level
+- Write operations still require distributed coordination
+- Phantom reads are possible (acceptable under RC)
+- Not applicable for Serializable or Snapshot isolation levels
+- Some operations (e.g., foreign key checks) still require
+  cross-range coordination even under RC
+
+## Cost Model
+
+```rust
+fn rc_pushdown_benefit(
+    rows_before_filter: f64,
+    rows_after_filter: f64,
+    network_cost_per_row: f64,
+    lock_cost_savings: f64,
+) -> f64 {
+    let network_savings =
+        (rows_before_filter - rows_after_filter)
+        * network_cost_per_row;
+    network_savings + lock_cost_savings
+}
+```
+
+## Test Cases
+
+```sql
+-- Positive: filter pushdown at Read Committed
+-- Session: SET TRANSACTION ISOLATION LEVEL READ COMMITTED
+SELECT * FROM orders WHERE status = 'pending';
+-- Filter pushed to each storage node; only matching rows returned
+
+-- At Serializable: filter still pushed but snapshot must be consistent
+-- At Read Committed: each node reads its own latest committed state
+```
+
+```sql
+-- Positive: aggregation at Read Committed
+SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
+SELECT region, COUNT(*) FROM orders GROUP BY region;
+-- Partial aggregation at each storage node, merge at query layer
+-- No cross-node snapshot coordination needed
+```
+
+```sql
+-- Negative: write operation
+UPDATE orders SET status = 'shipped' WHERE id = 42;
+-- Writes require distributed transaction coordination regardless
+-- of isolation level
+```
+
+## References
+
+CockroachDB: pkg/sql/opt/ - read committed optimization paths
+CockroachDB docs: "Read Committed Transactions" (added in v23.1)
+TiDB docs: "Transaction isolation levels" - RC mode
+Berenson et al., "A Critique of ANSI SQL Isolation Levels" (SIGMOD 1995)

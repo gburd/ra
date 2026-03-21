@@ -1,0 +1,139 @@
+# Rule: Eliminate Dead Pattern Variables
+
+**Category:** logical/rpr
+**File:** `rules/rpr/dead-variable-elimination.rra`
+
+## Metadata
+
+- **ID:** `rpr-dead-variable-elimination`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, oracle, duckdb, generic
+- **Tags:** rpr, pattern, simplification, dead-code, variables
+- **Authors:** "RA Contributors"
+
+## Preconditions
+
+```yaml
+  - type: pattern
+    must_match: "(row-pattern ?input ?partition ?order ?defines ?measures ?pattern)"
+  - type: predicate
+    condition: "has_unreferenced_defines(?defines, ?measures, ?pattern)"
+    description: "Some DEFINE variables are not referenced in PATTERN or MEASURES"
+```
+
+
+# Eliminate Dead Pattern Variables
+
+## Description
+
+Removes DEFINE conditions for pattern variables that are not
+referenced in the PATTERN clause or MEASURES expressions. Dead
+variables add DEFINE evaluation overhead without affecting match
+results.
+
+**When to apply**: A DEFINE clause defines a variable that does
+not appear in the PATTERN or is defined but never matched against.
+
+**Why it works**: If variable `X` has a DEFINE condition but `X`
+never appears in the PATTERN, the condition is never evaluated.
+Removing it simplifies the DEFINE map and reduces the DFA alphabet.
+
+## Relational Algebra
+
+```algebra
+-- Before: X is defined but not in PATTERN
+RowPattern(
+  defines: { A: ..., B: ..., X: price > 500 },
+  pattern: Sequence([A, B]),
+  measures: [FIRST(A.price), LAST(B.price)]
+)
+
+-- After: X removed from defines
+RowPattern(
+  defines: { A: ..., B: ... },
+  pattern: Sequence([A, B]),
+  measures: [FIRST(A.price), LAST(B.price)]
+)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Remove defines for variables not in pattern or measures
+rw!("rpr-dead-variable-elimination";
+    "(row-pattern ?input ?partition ?order
+       (defines ?defs) ?measures ?pattern)" =>
+    "(row-pattern ?input ?partition ?order
+       (defines (remove-unreferenced ?defs ?pattern ?measures))
+       ?measures ?pattern)"
+    if has_unreferenced_defines("?defs", "?pattern", "?measures")
+),
+```
+
+## Preconditions
+
+```rust
+fn has_unreferenced_defines(
+    defines: &HashMap<Symbol, Expr>,
+    measures: &[(Expr, String)],
+    pattern: &PatternExpr,
+) -> bool {
+    let pattern_vars = pattern.referenced_variables();
+    let measure_vars: HashSet<_> = measures.iter()
+        .flat_map(|(e, _)| e.pattern_variable_references())
+        .collect();
+    let used_vars: HashSet<_> = pattern_vars.union(&measure_vars)
+        .cloned().collect();
+    defines.keys().any(|k| !used_vars.contains(k))
+}
+```
+
+**Restrictions:**
+- A variable referenced in MEASURES but not in PATTERN is still considered "used" (it might be the implicit "other" in DEFINE).
+- The universal pattern variable (unqualified rows) should not be eliminated.
+
+## Cost Model
+
+```rust
+fn estimated_benefit(dead_count: usize, total_defines: usize) -> f64 {
+    dead_count as f64 / total_defines as f64 * 0.3
+}
+```
+
+**Typical benefit**: 10-30%. Each removed DEFINE saves condition
+evaluation per DFA transition.
+
+## Test Cases
+
+### Positive: unused variable in DEFINE
+
+```sql
+-- X is defined but never appears in PATTERN
+MATCH_RECOGNIZE (
+  PATTERN (A+ B+)
+  DEFINE
+    A AS price > PREV(price),
+    B AS price < PREV(price),
+    X AS volume > 1000000  -- never used
+)
+-- After: X removed from DEFINE
+```
+
+### Negative: all variables used
+
+```sql
+-- A and B both appear in PATTERN
+MATCH_RECOGNIZE (
+  PATTERN (A+ B+)
+  DEFINE
+    A AS price > PREV(price),
+    B AS price < PREV(price)
+)
+```
+
+## References
+
+- Aho, Sethi, Ullman. "Compilers" (1986), Section 10.7 (Dead Code Elimination)
+- Zemke, F. "Row Pattern Recognition in SQL" ISO/IEC 19075-5:2016

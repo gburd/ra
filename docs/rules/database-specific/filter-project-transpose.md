@@ -1,0 +1,109 @@
+# Rule: Calcite FilterProjectTransposeRule
+
+**Category:** database-specific/calcite
+**File:** `rules/database-specific/calcite/filter-project-transpose.rra`
+
+## Metadata
+
+- **ID:** `calcite-filter-project-transpose`
+- **Version:** "1.0.0"
+- **Databases:** calcite
+- **Tags:** database-specific, calcite, filter, project, transpose
+- **Authors:** "RA Contributors"
+
+
+# Calcite FilterProjectTransposeRule
+
+## Description
+
+Pushes a filter past a project by rewriting the filter predicate
+to reference the project's input columns instead of its output
+aliases. This allows the filter to be applied earlier in the plan.
+
+**When to apply**: A `LogicalFilter` sits above a `LogicalProject`
+and the filter predicate can be expressed in terms of the
+project's input columns.
+
+**Why it works**: Filtering before projection reduces the number of
+rows that undergo (potentially expensive) expression evaluation.
+
+**Calcite class**: `org.apache.calcite.rel.rules.FilterProjectTransposeRule`
+
+## Relational Algebra
+
+```algebra
+-- Before: filter above project
+sigma[p](pi[a AS x, b AS y](R))
+
+-- After: project above filter (predicate remapped)
+pi[a AS x, b AS y](sigma[p'](R))
+  where p' = remap(p, {x -> a, y -> b})
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-filter-project-transpose";
+    "(filter ?pred (project ?exprs ?input))" =>
+    "(project ?exprs (filter (remap ?pred ?exprs) ?input))"
+    if predicate_can_be_remapped("?pred", "?exprs")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    predicate: &Expr,
+    project_exprs: &[ProjectionColumn],
+) -> bool {
+    predicate.referenced_columns().iter().all(|col| {
+        project_exprs.iter().any(|pc| {
+            pc.alias.as_deref() == Some(&col.column)
+                && is_simple_column_ref(&pc.expr)
+        })
+    })
+}
+```
+
+**Restrictions:**
+- Only applies when all predicate column references can be
+  traced back through the projection to simple column refs
+- Does not apply when the projection computes expressions
+  that the filter depends on (e.g., `WHERE x + y > 10` when
+  `x + y` is computed in the projection)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    input_rows: f64,
+    selectivity: f64,
+    project_cost_per_row: f64,
+) -> f64 {
+    let rows_eliminated = input_rows * (1.0 - selectivity);
+    rows_eliminated * project_cost_per_row
+}
+```
+
+**Typical benefit**: 10-50% reduction in projection work.
+
+## Test Cases
+
+```sql
+-- Positive: filter references projected column alias
+SELECT a AS x, b AS y FROM t WHERE a > 10;
+-- Filter on 'a' pushed below project
+```
+
+```sql
+-- Negative: filter depends on computed expression
+SELECT a + b AS total FROM t WHERE total > 100;
+-- Cannot push 'total > 100' below the project
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/FilterProjectTransposeRule.java

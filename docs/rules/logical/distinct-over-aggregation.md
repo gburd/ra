@@ -1,0 +1,55 @@
+# Rule: Distinct Over Aggregation Elimination
+
+**Category:** logical/distinct-elimination
+**File:** `rules/logical/distinct-elimination/distinct-over-aggregation.rra`
+
+## Metadata
+
+- **ID:** `distinct-over-aggregation`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, duckdb, sqlite, mssql, oracle
+- **Tags:** distinct, aggregation, elimination
+- **Authors:** "RA Contributors"
+
+
+# Distinct Over Aggregation Elimination
+
+## Description
+
+When DISTINCT is applied over a GROUP BY that already produces unique rows (the GROUP BY keys match or contain the projected columns), the DISTINCT is redundant.
+
+**When to apply**: All projected columns are either GROUP BY keys or deterministic aggregates.
+
+## Relational Algebra
+
+```algebra
+Distinct(Aggregate[group_by=keys, aggs](input))
+  -> Aggregate[group_by=keys, aggs](input)
+  where output_is_unique_by(keys)
+```
+
+## Implementation
+
+```rust
+rw!("distinct-over-aggregation";
+    "(distinct (aggregate ?group_by ?aggs ?input))" =>
+    "(aggregate ?group_by ?aggs ?input)"
+),
+```
+
+## Test Cases
+
+### Positive: Distinct over GROUP BY
+
+```sql
+SELECT DISTINCT dept_id, COUNT(*)
+FROM employees
+GROUP BY dept_id;
+
+-- GROUP BY dept_id already unique; remove DISTINCT
+```
+
+## References
+
+- Aggregate uniqueness guarantees in SQL
+- Distinct elimination in Apache Calcite

@@ -1,0 +1,117 @@
+# Rule: Calcite AggregateFilterTransposeRule
+
+**Category:** logical/aggregate-pushdown
+**File:** `rules/logical/aggregate-pushdown/aggregate-filter-transpose.rra`
+
+## Metadata
+
+- **ID:** `calcite-aggregate-filter-transpose`
+- **Version:** "1.0.0"
+- **Databases:** calcite, postgresql, mysql, oracle
+- **Tags:** logical, calcite, aggregate, filter, transpose, pushdown
+- **Authors:** "RA Contributors"
+
+
+# Calcite AggregateFilterTransposeRule
+
+## Description
+
+Pushes a filter from above an aggregate into the aggregate as a
+FILTER clause, or converts the aggregate on a filtered input into
+a filtered aggregate without the separate filter operator. This
+enables materialized view matching and other downstream optimizations.
+
+**When to apply**: An aggregate sits on top of a filter, and the
+aggregate can incorporate the filter as FILTER clauses on its
+aggregate functions.
+
+**Why it works**: By absorbing the filter into the aggregate, the
+plan becomes simpler and matches patterns that materialized view
+rules can exploit. The semantics are preserved because filtering
+before aggregation is equivalent to filtered aggregation.
+
+**Calcite class**: `org.apache.calcite.rel.rules.AggregateFilterTransposeRule`
+
+## Relational Algebra
+
+```algebra
+-- Before: aggregate above filter
+gamma[g; SUM(x)](sigma[p](R))
+
+-- After: filtered aggregate (no separate filter)
+gamma[g; SUM(x) FILTER (WHERE p)](R)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-aggregate-filter-transpose";
+    "(aggregate ?group ?aggs (filter ?pred ?input))" =>
+    "(aggregate ?group (add-filter-to-aggs ?aggs ?pred)
+        ?input)"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    agg: &Aggregate,
+    filter: &Filter,
+) -> bool {
+    // All aggregate calls must be compatible with FILTER
+    agg.agg_calls().iter().all(|call| {
+        call.func.supports_filter()
+    })
+}
+```
+
+**Restrictions:**
+- Aggregate functions must support FILTER syntax
+- GROUP BY columns in the filter are handled by FilterAggregateTransposeRule
+- Predicates referencing aggregate results cannot be absorbed
+
+## Cost Model
+
+```rust
+fn estimated_benefit(input_rows: f64) -> f64 {
+    // Indirect benefit through view matching
+    0.01 * input_rows
+}
+```
+
+**Typical benefit**: 10-50% when materialized view rewriting applies.
+
+## Test Cases
+
+```sql
+-- Positive: filter absorbed into aggregate
+SELECT dept, SUM(salary)
+FROM emp
+WHERE deptno = 10
+GROUP BY dept;
+-- Filter becomes: SUM(salary) FILTER (WHERE deptno = 10)
+```
+
+```sql
+-- Positive: enables materialized view matching
+SELECT dept, SUM(salary) FILTER (WHERE deptno = 10)
+FROM emp
+GROUP BY dept;
+-- Can match a materialized view on emp grouped by dept
+```
+
+```sql
+-- Negative: HAVING on aggregate result
+SELECT dept, SUM(salary) AS total
+FROM emp
+GROUP BY dept
+HAVING SUM(salary) > 50000;
+-- HAVING references aggregate result; cannot absorb
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/AggregateFilterTransposeRule.java (commit af6367d)

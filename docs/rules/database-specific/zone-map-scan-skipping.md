@@ -1,0 +1,168 @@
+# Rule: MonetDB Zone Map Scan Skipping
+
+**Category:** database-specific/monetdb
+**File:** `rules/database-specific/monetdb/zone-map-scan-skipping.rra`
+
+## Metadata
+
+- **ID:** `monetdb-zone-map-scan-skipping`
+- **Version:** "1.0.0"
+- **Databases:** monetdb
+- **Tags:** zone-map, min-max, scan-skipping, lightweight-index, column-store
+- **Authors:** "CWI Amsterdam"
+
+
+# MonetDB Zone Map Scan Skipping
+
+## Description
+
+Uses lightweight zone maps (min/max metadata per column segment) to skip entire
+data segments that cannot contain qualifying rows. Each column segment stores its
+minimum and maximum values; if a query predicate falls outside the segment's
+[min, max] range, the entire segment is skipped without reading any data.
+
+**When to apply**: Range predicates on columns stored in segmented/partitioned
+format. Zone maps are maintained automatically during data loading and checked
+before scanning each segment. Most beneficial for sorted or clustered data where
+values are locally ordered within segments.
+
+**Why it works**: A query `WHERE x > 100` can skip any segment with max(x) <= 100
+without reading a single byte from that segment. For columnar data that is
+partially sorted (common after bulk loads), zone maps can skip 90%+ of segments,
+reducing I/O by an order of magnitude with negligible metadata overhead.
+
+## Relational Algebra
+
+```algebra
+-- Before: scan all segments
+sigma[x > 100](
+  union(segment_1, segment_2, ..., segment_z))
+
+-- After: zone-map-filtered scan
+sigma[x > 100](
+  union(
+    segment_3,   -- min=50, max=200: might contain matches
+    segment_7))  -- min=150, max=300: might contain matches
+-- Segments 1,2,4,5,6,8,...z skipped (max <= 100)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("monetdb-zone-map-skip";
+    "(filter (> ?col ?val)
+       (segment-scan ?table ?col))" =>
+    "(filter (> ?col ?val)
+       (zone-map-filtered-scan ?table ?col ?val))"
+    if has_zone_maps("?table", "?col")
+),
+
+rw!("monetdb-zone-map-between";
+    "(filter (between ?col ?lo ?hi)
+       (segment-scan ?table ?col))" =>
+    "(filter (between ?col ?lo ?hi)
+       (zone-map-range-scan ?table ?col ?lo ?hi))"
+    if has_zone_maps("?table", "?col")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> bool {
+    stats.has_zone_maps
+        && stats.num_segments > 1
+        && stats.zone_map_skip_estimate > 0.1  // expect to skip >10% segments
+}
+```
+
+**Restrictions:**
+- Zone maps only help for range predicates; equality on unsorted data may not skip
+- Randomly distributed data has wide min-max ranges per segment (no skipping)
+- Zone maps add metadata overhead (2 values per segment per column)
+- Updates within segments may widen zone map ranges, reducing effectiveness
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let total_segments = stats.num_segments as f64;
+    let skip_fraction = stats.zone_map_skip_estimate;
+    let scanned_segments = total_segments * (1.0 - skip_fraction);
+    let segment_scan_cost = stats.avg_segment_rows as f64 * 0.001;
+
+    let without = total_segments * segment_scan_cost;
+    let with = scanned_segments * segment_scan_cost
+        + total_segments * 0.0001; // zone map check cost
+
+    if without > with {
+        (without - with) / without
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 30% to 20x for range queries on partially sorted data.
+
+## Test Cases
+
+### Positive: Range query on sorted column
+
+```sql
+-- Data loaded in chronological order; zone maps reflect time ordering
+-- 100 segments, each covering ~1 day of data
+SELECT * FROM events
+WHERE event_date > '2024-06-01';
+
+-- Zone maps: segments 1-150 have max_date < '2024-06-01'
+-- Skip 150/365 segments (~41%) without reading data
+-- Only scan segments 151-365
+```
+
+### Positive: Point query on clustered data
+
+```sql
+-- Data clustered by region during ETL
+SELECT * FROM sales
+WHERE region = 'APAC' AND amount > 1000;
+
+-- Zone maps on region column:
+-- Segments 1-20: region in [AMER, AMER] -> skip
+-- Segments 21-35: region in [APAC, APAC] -> scan
+-- Segments 36-50: region in [EMEA, EMEA] -> skip
+-- Skip 60% of segments
+```
+
+### Negative: Random distribution
+
+```sql
+-- user_id randomly distributed across all segments
+SELECT * FROM clicks WHERE user_id = 12345;
+
+-- Every segment has min=1, max=10M
+-- Zone maps cannot skip any segment
+-- Falls back to full scan
+```
+
+## References
+
+**Implementation:**
+- MonetDB source: `gdk/gdk_bat.c` (BAT segment metadata)
+- Zone map checks: `gdk/gdk_select.c` (precheck before scan)
+- Imprints integration: `monetdb5/modules/kernel/bat5.c`
+
+**Papers:**
+- Idreos, S., et al., "MonetDB: Two Decades of Research in Column-oriented
+  Database Architectures", IEEE Data Eng. Bull. 2012
+- Sidirourgos, L., et al., "Column Imprints: A Secondary Index Structure",
+  SIGMOD 2013
+  - Zone maps as simplified version of imprints

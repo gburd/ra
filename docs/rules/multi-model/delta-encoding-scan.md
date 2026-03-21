@@ -1,0 +1,118 @@
+# Rule: Delta Encoding Aware Scan
+
+**Category:** multi-model/timeseries
+**File:** `rules/multi-model/timeseries/delta-encoding-scan.rra`
+
+## Metadata
+
+- **ID:** `delta-encoding-scan`
+- **Version:** "1.0.0"
+- **Databases:** influxdb, questdb, clickhouse
+- **Tags:** timeseries, delta, encoding, compression, scan
+- **SQL Standard:** "flux:2"
+- **Authors:** "RA Contributors"
+
+
+# Delta Encoding Aware Scan
+
+## Description
+
+Optimizes queries that compute differences between consecutive values
+(rate of change, delta) by operating directly on delta-encoded storage
+rather than decoding values first and then computing differences.
+Time-series databases commonly store timestamps and monotonic counters
+as delta-encoded sequences for compression.
+
+**When to apply**: A query computes `value[i] - value[i-1]` (or rate
+of change) on a column that is stored with delta encoding, and the
+storage engine exposes delta-encoded access.
+
+**Why it works**: Delta encoding stores `delta_i = value_i - value_{i-1}`
+directly. Computing differences on decoded values requires decoding
+the full column and then a subtraction pass. Operating on deltas
+directly skips the decode step and reads the deltas as-is.
+
+## Relational Algebra
+
+```algebra
+pi[ts, value - lag(value) OVER (ORDER BY ts)](scan(table))
+  -> delta_scan(table, column)
+  where column is delta-encoded in storage
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("delta-encoding-scan";
+    "(window nil (col ?ts) \
+       (sub (col ?val) (func lag (col ?val))) \
+       nil \
+       (ts-scan ?table))" =>
+    "(ts-delta-scan ?table ?val ?ts)"
+    if is_delta_encoded("?table", "?val")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    table: &str,
+    column: &str,
+    schema: &StorageSchema,
+) -> bool {
+    schema.encoding(table, column)
+        == Some(Encoding::DeltaOfDelta)
+    || schema.encoding(table, column)
+        == Some(Encoding::Delta)
+}
+```
+
+**Restrictions:**
+- Column must actually use delta encoding in storage
+- Only difference and rate operations benefit
+- Arbitrary arithmetic on the column still requires full decode
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    row_count: f64,
+    decode_cost_per_row: f64,
+) -> f64 {
+    let full_pipeline = row_count * (decode_cost_per_row + 1.0);
+    let delta_scan = row_count * 1.0;
+    (full_pipeline - delta_scan) / full_pipeline
+}
+```
+
+**Typical benefit**: 0.3-0.5 by skipping the decode step.
+
+## Test Cases
+
+```sql
+-- Positive: rate of change on monotonic counter
+SELECT time,
+       value - lag(value) OVER (ORDER BY time) AS delta
+FROM counters
+WHERE time >= '2025-03-01' AND time < '2025-03-02';
+-- Reads delta-encoded values directly
+
+-- Positive: InfluxDB derivative function
+from(bucket: "metrics")
+  |> range(start: -1h)
+  |> derivative(unit: 1s)
+-- Operates on delta-encoded TSM blocks
+
+-- Negative: absolute value query
+SELECT time, value FROM counters;
+-- Must decode deltas to produce absolute values
+```
+
+## References
+
+InfluxDB: tsdb/engine/tsm1/encoding.go - TimeDecoder (delta-of-delta)
+Gorilla: Pelkonen et al. "Gorilla: A Fast, Scalable, In-Memory Time Series Database" (VLDB 2015)
+Abadi et al. "Integrating Compression and Execution in Column-Oriented Database Systems" (SIGMOD 2006)

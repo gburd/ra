@@ -1,0 +1,271 @@
+# Rule: Work-Stealing Parallelism
+
+**Category:** physical/parallelization
+**File:** `rules/physical/parallelization/work-stealing-parallelism.rra`
+
+## Metadata
+
+- **ID:** `work-stealing-parallelism`
+- **Version:** "1.0.0"
+- **Databases:** duckdb, hyper, umbra, cockroachdb
+- **Tags:** parallelization, work-stealing, load-balancing, scheduling
+- **Authors:** "RA Contributors"
+
+
+# Work-Stealing Parallelism
+
+## Metadata
+- **Rule ID**: `work-stealing-parallelism`
+- **Category**: Physical / Parallelization
+- **Complexity**: O(n/p + log p) expected, where p = workers
+- **Introduced**: Cilk (1990s), adopted by HyPer/DuckDB for query execution
+- **Prerequisites**: Task-decomposable operator, multiple worker threads
+- **Alternatives**: static-partitioning, morsel-driven-parallelism
+
+## Description
+
+Work-stealing parallelism assigns each worker thread a local deque of tasks.
+When a worker exhausts its own tasks, it steals from the tail of another
+worker's deque. This provides automatic dynamic load balancing without
+centralized coordination.
+
+In query execution, tasks are typically morsels (batches of tuples) or
+sub-operator work units. Workers process their local tasks LIFO (for cache
+locality), while thieves steal FIFO (oldest/largest tasks) to minimize
+steal frequency.
+
+**When to use:**
+- Uneven work distribution across data partitions
+- Skewed data or UDF-heavy operators with variable per-tuple cost
+- Recursive/hierarchical query plans (CTE, graph traversal)
+- Systems with heterogeneous CPU core performance
+
+**Advantages:**
+- Automatic load balancing without centralized scheduler
+- Near-optimal parallel efficiency (provably O(n/p + depth) span)
+- Low overhead: only steals when idle (no coordination when balanced)
+- Cache-friendly: local tasks processed LIFO
+
+**Disadvantages:**
+- Steal operations are more expensive than local pops
+- Potential cache pollution when stealing remote data
+- Deque contention under high steal rates
+- Harder to reason about memory usage per worker
+
+## Relational Algebra
+
+```
+ParallelOp(data, workers):
+  partition data into tasks T1, T2, ..., Tk
+  assign tasks round-robin to worker deques
+
+  Worker i:
+    while local_deque not empty:
+      task = local_deque.pop_back()  // LIFO, cache-friendly
+      execute(task)
+    while global work remains:
+      victim = random_worker()
+      task = victim.deque.steal_front()  // FIFO, steal large
+      if task: execute(task)
+```
+
+## Implementation (egg rewrite rules)
+
+```lisp
+;; Apply work-stealing for operators with skewed data
+(rewrite (parallel-execute ?op ?partitions ?workers)
+  (work-stealing-execute ?op ?partitions ?workers
+    :initial-assignment round-robin
+    :steal-policy random-victim)
+  :if (is-skewed ?partitions)
+  :if (> (skew-factor ?partitions) 2.0))
+
+;; Prefer work-stealing over static partitioning for UDF operators
+(rewrite (static-parallel ?op ?partitions ?workers)
+  (work-stealing-execute ?op ?partitions ?workers
+    :initial-assignment round-robin
+    :steal-policy random-victim)
+  :if (has-udf ?op))
+
+;; Work-stealing for recursive CTE execution
+(rewrite (parallel-recursive-cte ?base ?step ?workers)
+  (work-stealing-recursive ?base ?step ?workers
+    :task-granularity morsel)
+  :if (> ?workers 1))
+```
+
+## Implementation Pattern
+
+```rust
+pub struct WorkStealingScheduler {
+    workers: Vec<WorkerThread>,
+    deques: Vec<ConcurrentDeque<Task>>,
+    global_done: AtomicBool,
+}
+
+struct WorkerThread {
+    id: usize,
+    local_deque: usize, // Index into deques
+    rng: ThreadRng,
+}
+
+impl WorkStealingScheduler {
+    fn run(&self) {
+        crossbeam::scope(|s| {
+            for worker in &self.workers {
+                s.spawn(move |_| {
+                    self.worker_loop(worker);
+                });
+            }
+        });
+    }
+
+    fn worker_loop(&self, worker: &WorkerThread) {
+        loop {
+            // Try local deque first (LIFO for cache locality)
+            if let Some(task) = self.deques[worker.local_deque]
+                .pop_back()
+            {
+                self.execute_task(task, worker);
+                continue;
+            }
+
+            // Local deque empty: try stealing
+            if self.global_done.load(Ordering::Relaxed) {
+                break;
+            }
+
+            let victim = worker.rng.gen_range(0..self.deques.len());
+            if victim == worker.local_deque {
+                continue;
+            }
+
+            if let Some(task) = self.deques[victim].steal_front() {
+                self.execute_task(task, worker);
+            } else {
+                std::thread::yield_now(); // No work available
+            }
+        }
+    }
+
+    fn execute_task(&self, task: Task, worker: &WorkerThread) {
+        // Task may spawn sub-tasks onto local deque
+        let sub_tasks = task.execute();
+        for sub in sub_tasks {
+            self.deques[worker.local_deque].push_back(sub);
+        }
+    }
+}
+```
+
+## Cost Model
+
+```rust
+pub fn cost_work_stealing(
+    total_work: u64,
+    num_workers: usize,
+    skew_factor: f64,
+    steal_overhead: f64,
+    hardware: &HardwareModel,
+) -> Cost {
+    // Ideal parallel time
+    let ideal = total_work as f64 / num_workers as f64;
+
+    // Expected steals: proportional to skew
+    let expected_steals = (num_workers as f64 - 1.0)
+        * skew_factor.ln().max(0.0);
+    let steal_cost = expected_steals * steal_overhead;
+
+    // Total parallel time
+    let parallel_time = ideal + steal_cost;
+
+    Cost::cpu(parallel_time as u64)
+}
+
+pub fn efficiency(
+    total_work: u64,
+    num_workers: usize,
+    actual_time: u64,
+) -> f64 {
+    let ideal = total_work as f64 / num_workers as f64;
+    ideal / actual_time as f64
+}
+```
+
+## Test Cases
+
+### Test 1: Skewed hash join partitions
+```sql
+CREATE TABLE orders (id INT, customer_id INT, amount DECIMAL);
+-- customer_id is highly skewed: 1% of customers have 50% of orders
+
+SELECT c.name, SUM(o.amount)
+FROM orders o JOIN customers c ON o.customer_id = c.id
+GROUP BY c.name;
+
+-- Expected: WorkStealingParallelism
+-- Hash partitions on customer_id are uneven
+-- Workers with popular customers finish later (without stealing)
+-- Work stealing: idle workers steal from overloaded partitions
+```
+
+### Test 2: UDF with variable execution time
+```sql
+SELECT id, expensive_nlp_udf(description) as sentiment
+FROM product_reviews;
+
+-- Expected: WorkStealingParallelism
+-- NLP processing varies by text length (10ms to 500ms per row)
+-- Static partitioning leads to stragglers
+-- Work stealing ensures balanced completion
+```
+
+### Test 3: Recursive CTE with uneven branching
+```sql
+WITH RECURSIVE org_tree AS (
+    SELECT id, name, manager_id, 1 as depth
+    FROM employees WHERE manager_id IS NULL
+    UNION ALL
+    SELECT e.id, e.name, e.manager_id, t.depth + 1
+    FROM employees e JOIN org_tree t ON e.manager_id = t.id
+)
+SELECT * FROM org_tree;
+
+-- Expected: WorkStealingParallelism for tree expansion
+-- Some branches deep (10+ levels), some shallow (2 levels)
+-- Workers steal unexpanded subtrees from busy workers
+```
+
+### Test 4: Negative -- uniform workload
+```sql
+SELECT id, col1 + col2 as total
+FROM uniformly_distributed_table;
+
+-- NOT ideal for work-stealing: all partitions have equal work
+-- Static partitioning is simpler with less overhead
+-- Stealing overhead wasted on already-balanced workload
+```
+
+## Performance Characteristics
+
+| Skew Factor | Static Partition | Work Stealing | Improvement |
+|-------------|-----------------|---------------|-------------|
+| 1.0 (uniform) | Optimal | ~Optimal (small overhead) | ~0% |
+| 2.0 (moderate) | 50% idle time | ~5% idle time | ~45% |
+| 5.0 (high) | 80% idle time | ~10% idle time | ~70% |
+| 10.0 (extreme) | 90% idle time | ~15% idle time | ~75% |
+
+## References
+
+1. **Blumofe & Leiserson**: "Scheduling Multithreaded Computations by Work Stealing"
+   - JACM 1999, DOI: 10.1145/324133.324234
+   - Foundational paper proving O(n/p + depth) bound
+
+2. **Leis et al.**: "Morsel-Driven Parallelism: A NUMA-Aware Query Evaluation Framework"
+   - SIGMOD 2014, work-stealing in query execution context
+
+3. **DuckDB**: Task-based parallel execution with work stealing
+   - https://duckdb.org/internals/overview
+
+4. **Intel TBB**: Work-stealing scheduler implementation
+   - Industry-standard parallel task library

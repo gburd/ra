@@ -1,0 +1,64 @@
+# Rule: Salted Partition Key for Skew Mitigation
+
+**Category:** distributed/join-distribution
+**File:** `rules/distributed/join-distribution/skew-aware-salted-partition.rra`
+
+## Metadata
+
+- **ID:** `skew-aware-salted-partition`
+- **Version:** "1.0.0"
+- **Databases:** spark, hive, databricks
+- **Tags:** distributed, join, skew, salting, load-balancing
+- **Authors:** "RA Contributors"
+
+
+# Salted Partition Key for Skew Mitigation
+
+## Description
+
+Add a random salt to the partition key of the skewed side and replicate
+the matching rows of the other side by the same salt factor. This
+distributes hot-key rows across multiple nodes.
+
+## Relational Algebra
+
+```algebra
+Join[c](R_skewed, S)
+  -> Join[c'](
+      AddSalt(R_skewed, salt_factor),
+      Replicate(S, salt_factor)
+     )
+  where c' = (R.key = S.key AND R.salt = S.salt)
+```
+
+## Test Cases
+
+```sql
+-- Test 1: Salt skewed orders by country_code
+SELECT o.*, c.name
+FROM orders o           -- country_code='US' has 60% of rows
+JOIN countries c ON o.cc = c.code;
+-- Expected: Salt orders.cc with factor 4, replicate countries 4x
+-- US rows split across 4 nodes instead of 1
+```
+
+```sql
+-- Test 2: Salt with configurable factor
+SELECT s.*, p.category
+FROM sales s            -- brand='Nike' has 25% of rows
+JOIN products p ON s.brand = p.brand;
+-- Expected: Salt factor = ceil(0.25 * num_nodes) = 2-4
+```
+
+```sql
+-- Test 3: No skew, salting adds overhead
+SELECT a.*, b.*
+FROM table_a a
+JOIN table_b b ON a.key = b.key;
+-- Uniform distribution -> NO salting (replication overhead > skew cost)
+```
+
+## References
+
+Hive: skew join optimization
+Databricks: Adaptive Query Execution skew handling

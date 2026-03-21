@@ -1,0 +1,79 @@
+# Rule: Sort + Limit to Top-N Heap
+
+**Category:** physical/sort
+**File:** `rules/physical/sort/sort-limit-heap.rra`
+
+## Metadata
+
+- **ID:** `sort-limit-to-heap`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, duckdb, oracle, mssql
+- **Tags:** physical, sort, limit, top-n, heap
+- **Authors:** "Graefe, Goetz"
+
+
+# Sort + Limit to Top-N Heap
+
+## Description
+
+When a Sort is followed by a Limit(k), replaces the full sort with a
+top-N heap selection. Instead of sorting all N rows in O(N log N), maintains
+a heap of k elements in O(N log k). For small k relative to N, this is
+dramatically faster and uses O(k) memory instead of O(N).
+
+**When to apply**: Sort immediately followed by Limit with small k.
+
+## Relational Algebra
+
+```algebra
+-- Before
+Limit[k](Sort[ORDER BY x](R))
+
+-- After
+TopN[k, ORDER BY x](R)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw\!("sort-limit-to-topn";
+    "(limit ?k (sort ?order ?input))" =>
+    "(topn ?k ?order ?input)"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(sort: &Sort, limit: &Limit) -> bool {
+    limit.count() <= sort.estimated_input_rows() / 10
+}
+```
+
+## Cost Model
+
+```rust
+fn estimated_benefit(n: f64, k: f64) -> f64 {
+    let full_sort = n * n.log2();
+    let topn = n * k.log2();
+    (full_sort - topn) / full_sort
+}
+```
+
+## Test Cases
+
+```sql
+-- Positive: small LIMIT
+SELECT * FROM orders ORDER BY total DESC LIMIT 10;
+-- 10M rows: heap of 10 vs full sort of 10M
+
+-- Negative: large LIMIT relative to table
+SELECT * FROM orders ORDER BY total DESC LIMIT 5000000;
+-- LIMIT is half the table, full sort may be similar cost
+```
+
+## References
+
+- Graefe, G., "Implementing Sorting in Database Systems", ACM Computing Surveys, 2006, DOI: 10.1145/1132960.1132964

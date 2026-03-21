@@ -1,0 +1,121 @@
+# Rule: MonetDB Column Imprints Scan
+
+**Category:** database-specific/monetdb
+**File:** `rules/database-specific/monetdb/imprints-scan.rra`
+
+## Metadata
+
+- **ID:** `monetdb-imprints-scan`
+- **Version:** "1.0.0"
+- **Databases:** monetdb
+- **Tags:** database-specific, monetdb, imprints, columnar, scan, index
+- **Authors:** "RA Contributors"
+
+
+# MonetDB Column Imprints Scan
+
+## Description
+
+MonetDB uses Column Imprints, a lightweight secondary index structure,
+to accelerate range scans on sorted or clustered columns.  An imprint
+is a cache-line-aligned bit vector that summarizes which value ranges
+appear in each block of a column.  During a scan, blocks whose
+imprints show no overlap with the query range are skipped entirely.
+
+**When to apply**: A selection predicate filters a column on a range
+or equality condition, and the column has an imprints index built.
+
+**Why it works**: Imprints are compact (typically 1-8 bits per
+cache-line-sized block) and fit in CPU cache.  Checking the imprint
+bit vector avoids reading data blocks that cannot contain qualifying
+values, reducing memory bandwidth by the fraction of blocks pruned.
+
+**Database version**: MonetDB 11.19+ (imprints introduced in 2014)
+
+## Relational Algebra
+
+```algebra
+-- Before: full column scan
+sigma[price > 100.0](scan(products.price))
+
+-- After: imprints-accelerated scan
+sigma[price > 100.0](imprints_scan(products.price))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("monetdb-imprints-scan";
+    "(filter ?pred (scan ?col))" =>
+    "(filter ?pred (imprints-scan ?col))"
+    if is_database("monetdb")
+    if has_imprints_index("?col")
+    if is_range_or_equality("?pred")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    column: &Column,
+    predicate: &Predicate,
+) -> bool {
+    column.has_imprints()
+    && predicate.is_range_or_equality()
+    && column.data_type().is_orderable()
+}
+```
+
+**Restrictions:**
+- Imprints are most effective on columns with some clustering or
+  partial ordering
+- Uniformly distributed random data yields ~0% pruning
+- Imprints are not maintained automatically on updates; they are
+  rebuilt lazily
+- Only works on fixed-width numeric types (int, float, decimal),
+  not on strings or BLOBs
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    total_blocks: f64,
+    pruned_fraction: f64,
+    block_read_cost: f64,
+) -> f64 {
+    let scan_cost = total_blocks * block_read_cost;
+    let imprints_cost =
+        total_blocks * (1.0 - pruned_fraction) * block_read_cost;
+    let imprint_check_cost = total_blocks * 0.001;
+    scan_cost - imprints_cost - imprint_check_cost
+}
+```
+
+**Typical benefit**: 5-50x speedup for selective range queries on
+partially ordered columns.  Near-zero benefit for unselective
+queries or random data distributions.
+
+## Test Cases
+
+```sql
+-- Positive: range scan on ordered numeric column
+SELECT * FROM sensor_data
+WHERE temperature > 35.0 AND temperature < 40.0;
+-- Imprints prune blocks outside [35.0, 40.0] range
+```
+
+```sql
+-- Negative: scan on string column
+SELECT * FROM logs WHERE message LIKE '%error%';
+-- Imprints not available for string/BLOB columns
+```
+
+## References
+
+Sidirourgos, L. and Kersten, M. "Column Imprints: A Secondary
+Index Structure" (SIGMOD 2013)
+Source: monetdb5/modules/mal/batcalc.c (imprints integration)
+MonetDB: Column store internals documentation

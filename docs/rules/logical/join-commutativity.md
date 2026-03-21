@@ -1,0 +1,127 @@
+# Rule: Join Commutativity
+
+**Category:** logical/join-reordering
+**File:** `rules/logical/join-reordering/join-commutativity.rra`
+
+## Metadata
+
+- **ID:** `join-commutativity`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, duckdb, sqlite, oracle, mssql
+- **Tags:** join, reordering, commutativity, core
+- **SQL Standard:** "sql:1992"
+- **Authors:** "RA Contributors"
+
+## Preconditions
+
+```yaml
+  - type: pattern
+    must_match: "(join inner ?cond ?left ?right)"
+    description: "Inner join only (cross join also valid)"
+  - type: fact
+    fact_type: statistics.cardinality
+    table: "?right"
+    comparator: "<"
+    threshold:
+      expression: "cardinality(?left)"
+    confidence: 0.7
+    description: "Right side should be smaller than left (optional optimization hint)"
+    optional: true
+```
+
+
+# Join Commutativity
+
+## Description
+
+Swaps the left and right inputs of an inner join. The result set is
+identical, but swapping determines which side is the build side (for hash
+join) or the outer loop (for nested-loop join), which can dramatically
+affect performance.
+
+**When to apply**: An inner join where swapping inputs would let the
+physical operator pick a smaller build side.
+
+**Why it works**: Inner join is commutative: `R join[c] S = S join[c] R`.
+
+## Relational Algebra
+
+```algebra
+R join[c] S -> S join[c] R
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("join-commutativity";
+    "(join inner ?cond ?left ?right)" =>
+    "(join inner ?cond ?right ?left)"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(join_type: JoinType) -> bool {
+    // Only inner and cross joins are commutative
+    matches!(
+        join_type,
+        JoinType::Inner | JoinType::Cross
+    )
+}
+```
+
+**Restrictions:**
+- Only applies to inner and cross joins
+- LEFT JOIN is not commutative (swapping gives RIGHT JOIN)
+- FULL OUTER JOIN is commutative but typically handled separately
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    left_card: f64,
+    right_card: f64,
+) -> f64 {
+    // For hash join, build the smaller side.
+    // Benefit is proportional to size difference.
+    if left_card <= right_card {
+        0.0 // already optimal
+    } else {
+        (left_card - right_card) / left_card
+    }
+}
+```
+
+**Typical benefit**: 0.0-0.5 for hash joins (build-side selection).
+For nested-loop joins the benefit can be much larger.
+
+## Test Cases
+
+```sql
+-- Positive: swap to put smaller table on build side
+-- Before (large orders table on left)
+SELECT * FROM orders o
+JOIN regions r ON o.region_id = r.id;
+
+-- After (small regions table on left = build side for hash join)
+SELECT * FROM regions r
+JOIN orders o ON o.region_id = r.id;
+```
+
+```sql
+-- Negative: LEFT JOIN is not commutative
+SELECT * FROM orders o
+LEFT JOIN customers c ON o.customer_id = c.id;
+-- Swapping would give:
+-- SELECT * FROM customers c RIGHT JOIN orders o ON ...
+-- which has different NULL behavior
+```
+
+## References
+
+PostgreSQL: src/backend/optimizer/path/joinpath.c
+DuckDB: src/optimizer/join_order/join_order_optimizer.cpp
+Ramakrishnan & Gehrke "Database Management Systems" Chapter 15.3

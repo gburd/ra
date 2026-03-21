@@ -1,0 +1,197 @@
+# Rule: Semi-Join Filter Transpose
+
+**Category:** database-specific/calcite
+**File:** `rules/database-specific/calcite/semi-join-filter-transpose.rra`
+
+## Metadata
+
+- **ID:** `semi-join-filter-transpose`
+- **Version:** "1.0.0"
+- **Databases:** calcite, postgresql
+- **Tags:** semi-join, filter, transpose, predicate-pushdown
+- **Authors:** "Apache Calcite Contributors"
+
+
+# Semi-Join Filter Transpose
+
+## Description
+
+Pushes filters down through semi-joins when the filter predicate only
+references columns from the left (primary) input. This enables earlier
+row elimination before the semi-join probe, reducing the semi-join's
+input cardinality.
+
+**When to apply**: A filter appears above a semi-join, and the filter
+predicate only references columns from the semi-join's left input. The
+filter can be safely pushed down to the left input.
+
+**Why it works**: Semi-joins preserve the schema of the left input (they
+only check for matching rows in the right input). Filters on left-side
+columns can be evaluated before the semi-join without affecting semantics,
+reducing the number of probes into the right-side hash table.
+
+## Relational Algebra
+
+```algebra
+σ_p(R ⋉ S) where p references only R columns ->
+  σ_p(R) ⋉ S
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("semi-join-filter-transpose-left";
+    "(filter ?pred (semi-join ?cond ?left ?right))" =>
+    "(semi-join ?cond
+       (filter ?pred ?left)
+       ?right)"
+    if filter-references-only-left("?pred", "?left")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> bool {
+    // Filter must reference only left input columns
+    stats.filter_columns.is_subset(&stats.left_schema)
+        // Semi-join must be present
+        && stats.join_type == JoinType::Semi
+        // Filter should be selective enough to benefit pushdown
+        && stats.filter_selectivity < 0.8
+}
+```
+
+**Restrictions:**
+- Filter predicate must reference only left input columns
+- Not applicable if filter references right input columns
+- Semi-join condition must not conflict with pushed filter
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let left_rows = stats.left_cardinality as f64;
+    let selectivity = stats.filter_selectivity;
+    let rows_eliminated = left_rows * (1.0 - selectivity);
+
+    // Semi-join cost is dominated by hash table probes
+    // Each probe: ~50ns
+    let probe_cost_per_row = 0.00000005;
+    let semi_join_savings = rows_eliminated * probe_cost_per_row;
+
+    // Filter evaluation cost (pushed down)
+    let filter_cost_per_row = 0.000001; // 1μs per row
+    let filter_cost = left_rows * filter_cost_per_row;
+
+    // Total query cost estimate
+    let query_cost = left_rows * (probe_cost_per_row + filter_cost_per_row);
+
+    // Benefit: avoid semi-join probes for filtered rows
+    (semi_join_savings / query_cost).min(0.45)
+}
+```
+
+**Assumptions:**
+- Semi-join implemented as hash semi-join (hash on right, probe from left)
+- Hash table probe cost: ~50ns per row
+- Filter evaluation: ~1μs per row (predicate-dependent)
+- Selective filters (< 50% selectivity) benefit most
+
+**Typical benefit**: 15-45% for selective filters on left input.
+
+## Test Cases
+
+### Positive: Filter on left side
+
+```sql
+-- Semi-join with filter on left input
+SELECT DISTINCT o.customer_id
+FROM orders o
+WHERE o.total > 1000
+  AND EXISTS (
+    SELECT 1 FROM products p
+    WHERE p.id = o.product_id AND p.category = 'electronics'
+  );
+
+-- Before:
+-- Filter(o.total > 1000)
+--   SemiJoin(o.product_id = p.id AND p.category = 'electronics')
+--     Scan(orders)
+--     Scan(products)
+
+-- After semi-join-filter-transpose:
+-- SemiJoin(o.product_id = p.id AND p.category = 'electronics')
+--   Filter(o.total > 1000)
+--     Scan(orders)
+--   Scan(products)
+```
+
+### Positive: Multiple filters on left
+
+```sql
+-- Multiple filters, all on left input
+SELECT *
+FROM customers c
+WHERE c.age > 25
+  AND c.country = 'USA'
+  AND EXISTS (
+    SELECT 1 FROM orders o
+    WHERE o.customer_id = c.id
+  );
+
+-- Both filters push through semi-join
+```
+
+### Negative: Filter references right side
+
+```sql
+-- Filter on right-side columns cannot push through
+SELECT *
+FROM customers c
+SEMI JOIN orders o ON c.id = o.customer_id
+WHERE o.order_date > '2024-01-01'; -- References right side!
+
+-- Filter must stay above semi-join or be pushed to right input separately
+```
+
+### Positive: Highly selective filter
+
+```sql
+-- Very selective filter eliminates 95% of rows
+SELECT *
+FROM events e
+WHERE e.user_id = 12345 -- Single user
+  AND EXISTS (
+    SELECT 1 FROM sessions s
+    WHERE s.event_id = e.id
+  );
+
+-- Pushing down single-user filter dramatically reduces semi-join cost
+```
+
+## References
+
+**Implementation in databases:**
+- Apache Calcite: `SemiJoinFilterTransposeRule.java`
+- PostgreSQL: Semi-join with filter pushdown (joinrels.c)
+- mssql: Exists subquery optimization
+
+**Academic papers:**
+- Pirahesh et al., "Extensible/Rule Based Query Rewrite Optimization in Starburst", ACM SIGMOD 1992
+  - DOI: 10.1145/130283.130294
+  - Predicate movement through semi-joins
+- Galindo-Legaria & Joshi, "Orthogonal Optimization of Subqueries and Aggregation", ACM SIGMOD 2001
+  - DOI: 10.1145/375663.375746
+  - Semi-join and exists subquery optimization
+- Kim, "On Optimizing an SQL-like Nested Query", ACM TODS 1982
+  - DOI: 10.1145/319732.319745
+  - Early work on semi-join optimization

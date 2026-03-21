@@ -1,0 +1,120 @@
+# Rule: Match Timezone Conversions for Index Use
+
+**Category:** logical/function-optimization
+**File:** `rules/logical/function-optimization/timezone-aware-index-use.rra`
+
+## Metadata
+
+- **ID:** `timezone-aware-index-use`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, oracle
+- **Tags:** logical, function, index, timezone, datetime, conversion
+- **Authors:** "RA Contributors"
+
+
+# Match Timezone Conversions for Index Use
+
+## Description
+
+Rewrites timezone conversion predicates to enable index use on
+timestamp columns. When a query applies AT TIME ZONE or CONVERT_TZ
+to an indexed timestamp column, the optimizer can instead transform
+the comparison values to the column's stored timezone, preserving
+index usability.
+
+**When to apply**: A filter applies a timezone conversion function
+to an indexed timestamp column, and the conversion can be inverted
+to transform the comparison value instead.
+
+**Why it works**: Applying a function to an indexed column prevents
+index use (not SARGable). By applying the inverse timezone conversion
+to the comparison value instead, the column remains bare and the
+index can be used.
+
+## Implementation
+
+```rust
+// Move timezone conversion from column to value
+rw!("tz-convert-to-value-eq";
+    "(filter (= (at-timezone ?col ?tz) ?val) (scan ?t))" =>
+    "(filter (= ?col (at-timezone ?val ?tz_inverse))
+       (index-scan ?t ?idx))"
+    if has_index("?t", "?col", "?idx")
+    if invert_timezone("?tz", "?tz_inverse")
+),
+
+// Timezone conversion with range predicate
+rw!("tz-convert-to-value-range";
+    "(filter (between (at-timezone ?col ?tz) ?lo ?hi) (scan ?t))" =>
+    "(filter (between ?col
+               (at-timezone ?lo ?tz_inverse)
+               (at-timezone ?hi ?tz_inverse))
+       (index-range-scan ?t ?idx))"
+    if has_index("?t", "?col", "?idx")
+    if invert_timezone("?tz", "?tz_inverse")
+),
+
+// CONVERT_TZ variant (MySQL)
+rw!("convert-tz-to-value";
+    "(filter (= (convert-tz ?col ?from_tz ?to_tz) ?val)
+       (scan ?t))" =>
+    "(filter (= ?col (convert-tz ?val ?to_tz ?from_tz))
+       (index-scan ?t ?idx))"
+    if has_index("?t", "?col", "?idx")
+),
+
+// Remove redundant timezone conversion when column stores UTC
+rw!("remove-utc-tz-convert";
+    "(at-timezone ?col 'UTC')" => "?col"
+    if column_stores_utc("?col")
+),
+```
+
+## Preconditions
+
+- Column must have a B-tree or comparable ordered index
+- Timezone conversion must be invertible (fixed offset or known zone)
+- DST transitions can make some timezone conversions non-invertible
+  for range predicates spanning DST boundaries
+- Column's stored timezone must be known to the optimizer
+
+## Test Cases
+
+```sql
+-- Setup: CREATE INDEX idx_ts ON events (created_at);
+--        created_at stored as UTC
+
+-- Positive: AT TIME ZONE moved to comparison value
+SELECT * FROM events
+WHERE created_at AT TIME ZONE 'US/Eastern' = '2024-01-15 09:00';
+-- Rewritten: WHERE created_at = '2024-01-15 14:00 UTC'
+-- Uses idx_ts index
+
+-- Positive: timezone range scan
+SELECT * FROM events
+WHERE created_at AT TIME ZONE 'Europe/London'
+      BETWEEN '2024-01-01' AND '2024-02-01';
+-- Rewritten: range on created_at with UTC-converted bounds
+
+-- Positive: MySQL CONVERT_TZ
+SELECT * FROM events
+WHERE CONVERT_TZ(created_at, 'UTC', 'US/Pacific') = '2024-01-15 06:00';
+-- Rewritten: WHERE created_at = CONVERT_TZ('...', 'US/Pacific', 'UTC')
+
+-- Negative: column not indexed
+SELECT * FROM logs
+WHERE created_at AT TIME ZONE 'UTC' > '2024-01-01';
+-- No index: keep function on column
+
+-- Negative: non-invertible across DST boundary
+SELECT * FROM events
+WHERE created_at AT TIME ZONE 'US/Eastern'
+      BETWEEN '2024-03-10 02:00' AND '2024-03-10 03:00';
+-- DST spring-forward gap: ambiguous conversion
+```
+
+## References
+
+- PostgreSQL: AT TIME ZONE and index usage
+- MySQL: CONVERT_TZ function
+- IANA Time Zone Database (tzdata)

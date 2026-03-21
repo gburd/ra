@@ -1,0 +1,218 @@
+# Rule: Parametric Query Optimization
+
+**Category:** experimental/adaptive
+**File:** `rules/experimental/adaptive/parametric-query-optimization.rra`
+
+## Metadata
+
+- **ID:** `parametric-query-optimization`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, oracle, cockroachdb
+- **Tags:** adaptive, parametric, prepared-statement, plan-space, robustness
+- **Authors:** "Ioannidis et al. 1992", "Hulgeri & Sudarshan 2002", "RA Contributors"
+
+
+# Parametric Query Optimization
+
+## Description
+
+Generates multiple query plans at preparation time, each optimal for a
+different range of parameter values. At execution time, the actual
+parameter values are used to select the best plan from the pre-computed
+set without re-optimizing. This avoids the "one plan fits all" problem
+of traditional prepared statements while eliminating per-execution
+optimization overhead.
+
+**When to apply**: Prepared statements and parameterized queries where
+the optimal plan varies significantly depending on parameter values.
+Common for queries with range predicates, IN lists, or LIKE patterns
+where selectivity varies dramatically.
+
+**Why it works**: The plan space for a parameterized query can be
+partitioned into regions where the same plan is optimal. By identifying
+these "plan switch points" during preparation, the optimizer generates
+a small set of plans (typically 2-5) that covers the entire parameter
+space. At execution time, evaluating which region the parameters fall
+into is O(1), much cheaper than re-optimization.
+
+## Relational Algebra
+
+```algebra
+-- Traditional: single plan for all parameter values
+Prepare(Q($p)) -> Plan_default
+
+-- Parametric: plan set indexed by parameter properties
+Prepare(Q($p)) -> {
+    Plan_A  when selectivity($p) < 0.01,
+    Plan_B  when 0.01 <= selectivity($p) < 0.3,
+    Plan_C  when selectivity($p) >= 0.3
+}
+
+-- At execution time:
+Execute(Q(42)) -> Plan_A   -- if selectivity(42) = 0.001
+Execute(Q(0))  -> Plan_C   -- if selectivity(0) = 0.5
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+struct ParametricPlan {
+    // Validity range for each parameter
+    ranges: Vec<ParameterRange>,
+    // The optimal plan for this range
+    plan: PhysicalPlan,
+    // Estimated cost within the range
+    cost_at_midpoint: f64,
+}
+
+struct ParameterRange {
+    param_id: usize,
+    selectivity_low: f64,
+    selectivity_high: f64,
+}
+
+fn parametric_optimize(
+    query: &LogicalPlan,
+    params: &[ParamMeta],
+) -> Vec<ParametricPlan> {
+    // Step 1: Sample the parameter space
+    let sample_points = generate_sample_points(params);
+
+    // Step 2: Optimize at each sample point
+    let plans: Vec<(f64, PhysicalPlan)> = sample_points
+        .iter()
+        .map(|p| {
+            let sel = estimate_selectivity(p);
+            let plan = optimize_with_selectivity(query, sel);
+            (sel, plan)
+        })
+        .collect();
+
+    // Step 3: Identify plan switch points
+    let switch_points = find_switch_points(&plans);
+
+    // Step 4: Build parametric plan set
+    build_parametric_plans(&plans, &switch_points)
+}
+
+fn find_switch_points(
+    plans: &[(f64, PhysicalPlan)],
+) -> Vec<f64> {
+    let mut switches = Vec::new();
+    for window in plans.windows(2) {
+        if window[0].1 != window[1].1 {
+            // Plan changes between these selectivities
+            let mid = (window[0].0 + window[1].0) / 2.0;
+            switches.push(binary_search_switch(
+                window[0].0, window[1].0,
+                &window[0].1, &window[1].1));
+        }
+    }
+    switches
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(query: &PreparedStatement) -> bool {
+    // Query must have parameters
+    !query.params().is_empty()
+    // At least one parameter affects selectivity significantly
+    && query.params().iter().any(|p|
+        p.selectivity_range().span() > 0.1)
+    // Plan space must have meaningful switch points
+    && has_plan_diversity(query)
+}
+
+fn has_plan_diversity(query: &PreparedStatement) -> bool {
+    // Optimize at extreme selectivities
+    let plan_low = optimize(query, selectivity=0.001);
+    let plan_high = optimize(query, selectivity=0.5);
+    // Different plans suggest parametric optimization is worthwhile
+    plan_low != plan_high
+}
+```
+
+**Restrictions:**
+- The number of pre-computed plans is bounded (typically 2-5) to
+  limit memory usage and plan cache size
+- Complex interactions between multiple parameters can create a
+  high-dimensional plan space that is expensive to explore
+- The selectivity-to-plan mapping assumes independence between
+  parameters
+- Plan switch points can be sensitive to cost model inaccuracies
+- PostgreSQL uses a simpler approach: choose generic plan when
+  custom plan cost exceeds generic plan cost by a threshold
+
+## Cost Model
+
+```rust
+fn parametric_benefit(
+    query_frequency: f64,
+    avg_reoptimize_cost_ms: f64,
+    plan_selection_cost_ms: f64,
+    suboptimality_of_single_plan: f64,
+) -> f64 {
+    // Cost of re-optimizing every execution
+    let reoptimize_total = query_frequency * avg_reoptimize_cost_ms;
+    // Cost of parametric: near-zero selection + optimal plan
+    let parametric_total =
+        query_frequency * plan_selection_cost_ms;
+    // Benefit from using the right plan each time
+    let plan_quality_benefit =
+        query_frequency * suboptimality_of_single_plan;
+    (reoptimize_total - parametric_total) + plan_quality_benefit
+}
+```
+
+**Typical benefit**: For a prepared statement executed 10K times/second
+where the generic plan is 3x slower for 20% of executions, parametric
+optimization provides ~60% throughput improvement for those executions.
+
+## Test Cases
+
+```sql
+-- Positive: range query with varying selectivity
+PREPARE get_orders AS
+    SELECT * FROM orders WHERE created_at > $1;
+
+-- $1 = '2024-01-01': selectivity ~0.001, use index scan
+-- $1 = '2020-01-01': selectivity ~0.5, use sequential scan
+-- Parametric plan set:
+--   Plan A (index scan): selectivity < 0.05
+--   Plan B (seq scan):   selectivity >= 0.05
+```
+
+```sql
+-- Positive: equality with skewed distribution
+PREPARE get_by_status AS
+    SELECT * FROM orders WHERE status = $1;
+
+-- $1 = 'pending': 0.1% of rows -> index scan
+-- $1 = 'completed': 85% of rows -> seq scan
+```
+
+```sql
+-- Negative: constant plan regardless of parameter
+PREPARE get_by_pk AS SELECT * FROM users WHERE id = $1;
+-- Always uses index scan; parametric optimization unnecessary
+```
+
+```sql
+-- Negative: too many interacting parameters
+PREPARE complex AS
+    SELECT * FROM t WHERE a > $1 AND b < $2 AND c = $3;
+-- 3D parameter space; exponential plan combinations
+-- May not be worth the exploration cost
+```
+
+## References
+
+Ioannidis, Ng, Shim, Sellis, "Parametric Query Optimization" (VLDB 1992)
+Hulgeri & Sudarshan, "Parametric Query Optimization for Linear and Piecewise Linear Cost Functions" (VLDB 2002)
+Bizarro, Bruno, DeWitt, "Progressive Parametric Query Optimization" (IEEE TKDE 2009)
+PostgreSQL: src/backend/utils/cache/plancache.c - choose_custom_plan()
+Oracle: "Adaptive Cursor Sharing" - production parametric optimization

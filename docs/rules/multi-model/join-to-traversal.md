@@ -1,0 +1,116 @@
+# Rule: Join to Graph Traversal Conversion
+
+**Category:** multi-model/graph
+**File:** `rules/multi-model/graph/join-to-traversal.rra`
+
+## Metadata
+
+- **ID:** `join-to-traversal`
+- **Version:** "1.0.0"
+- **Databases:** neo4j, janusgraph, tigergraph, neptune
+- **Tags:** graph, traversal, join, conversion, core
+- **SQL Standard:** "cypher:9"
+- **Authors:** "RA Contributors"
+
+
+# Join to Graph Traversal Conversion
+
+## Description
+
+Converts relational equi-joins between node and edge tables into graph
+traversal operations when the join keys correspond to edge endpoints.
+Graph databases execute traversals in O(k) per step (where k is the
+vertex degree) rather than O(n) for a hash or merge join over the full
+edge table.
+
+**When to apply**: A join on a foreign key corresponds to an edge
+relationship in the graph schema, and the underlying database supports
+native graph traversal.
+
+**Why it works**: Graph engines store adjacency lists per vertex.
+Traversing an edge from a known vertex accesses only that vertex's
+neighbors, avoiding a full table scan of the edge set.
+
+## Relational Algebra
+
+```algebra
+R join[R.id = E.src] E join[E.dst = S.id] S
+  -> traverse(R, edge_type, S)
+  where E represents an edge table with (src, dst) columns
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("join-to-traversal";
+    "(join inner (eq (qcol ?r ?id1) (qcol ?e ?src)) \
+       ?left \
+       (join inner (eq (qcol ?e ?dst) (qcol ?s ?id2)) \
+         (scan ?edge) ?right))" =>
+    "(traverse ?left ?edge ?right)"
+    if is_edge_table("?edge")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    edge_table: &str,
+    schema: &GraphSchema,
+) -> bool {
+    // Edge table must be registered in the graph schema
+    schema.is_edge_table(edge_table)
+    // Join keys must match the edge endpoint columns
+    && schema.has_src_dst_columns(edge_table)
+}
+```
+
+**Restrictions:**
+- Edge table must have source and destination columns in the schema
+- Only equi-joins on the exact endpoint columns qualify
+- Outer joins cannot be converted (they require NULL-filling semantics)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    left_card: f64,
+    edge_card: f64,
+    avg_degree: f64,
+) -> f64 {
+    let join_cost = left_card * edge_card.ln();
+    let traversal_cost = left_card * avg_degree;
+    (join_cost - traversal_cost) / join_cost
+}
+```
+
+**Typical benefit**: 0.7-0.99 for sparse graphs with low average degree.
+
+## Test Cases
+
+```cypher
+-- Before (relational)
+SELECT p1.name, p2.name
+FROM person p1
+JOIN knows k ON p1.id = k.src_id
+JOIN person p2 ON k.dst_id = p2.id;
+
+-- After (graph traversal)
+MATCH (p1:Person)-[:KNOWS]->(p2:Person)
+RETURN p1.name, p2.name;
+```
+
+```cypher
+-- Negative: non-equi join cannot be converted
+SELECT * FROM person p1
+JOIN knows k ON p1.id > k.src_id;
+```
+
+## References
+
+Neo4j: org.neo4j.cypher.internal.compiler.planner.logical.QueryPlanner
+JanusGraph: org.janusgraph.graphdb.query.vertex.BasicVertexCentricQueryBuilder
+Angles, Gutierrez "Survey of Graph Database Models" (ACM Computing Surveys 2008)

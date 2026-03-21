@@ -1,0 +1,75 @@
+# Rule: Prefer Broadcast When Size Ratio Exceeds Threshold
+
+**Category:** distributed/join-distribution
+**File:** `rules/distributed/join-distribution/prefer-broadcast-size-ratio.rra`
+
+## Metadata
+
+- **ID:** `prefer-broadcast-size-ratio`
+- **Version:** "1.0.0"
+- **Databases:** spark, presto, trino
+- **Tags:** distributed, join, broadcast, size-ratio, heuristic
+- **Authors:** "RA Contributors"
+
+
+# Prefer Broadcast When Size Ratio Exceeds Threshold
+
+## Description
+
+When the size ratio between two join inputs exceeds a configurable
+threshold (default 100:1), always prefer broadcast over shuffle
+regardless of absolute sizes, as long as the small side fits in memory.
+
+## Relational Algebra
+
+```algebra
+Join[c](R, S)
+  -> Join[c](R, Broadcast(S))
+  where |R| / |S| > size_ratio_threshold
+  where |S| < node_memory_limit
+```
+
+## Implementation
+
+```rust
+rw!("prefer-broadcast-size-ratio";
+    "(join ?type ?cond ?left ?right)" =>
+    "(join ?type ?cond ?left (exchange broadcast ?right))"
+    if size_ratio_exceeds("?left", "?right", 100.0)
+    if fits_in_memory("?right")
+),
+```
+
+## Test Cases
+
+```sql
+-- Test 1: 100:1 ratio triggers broadcast
+SELECT f.*, d.name
+FROM fact_table f    -- 1B rows, 500GB
+JOIN dim_dates d     -- 365 rows, 50KB
+  ON f.date_id = d.id;
+-- Expected: Broadcast dim_dates
+```
+
+```sql
+-- Test 2: 5:1 ratio does not trigger
+SELECT a.*, b.info
+FROM table_a a       -- 50M rows
+JOIN table_b b       -- 10M rows
+  ON a.id = b.a_id;
+-- Expected: Shuffle both, not broadcast
+```
+
+```sql
+-- Test 3: High ratio but small side too large for memory
+SELECT f.*, d.detail
+FROM fact_table f    -- 10B rows
+JOIN dim_large d     -- 100M rows, 50GB (exceeds memory)
+  ON f.dim_id = d.id;
+-- Expected: Shuffle both despite 100:1 ratio
+```
+
+## References
+
+Spark: spark.sql.autoBroadcastJoinThreshold
+Presto: join-distribution-type configuration

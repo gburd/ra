@@ -1,0 +1,72 @@
+# Rule: Hash Join
+
+**Category:** physical/join-algorithms
+**File:** `rules/physical/join-algorithms/hash-join.rra`
+
+## Metadata
+
+- **ID:** `hash-join`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, duckdb, sqlite, clickhouse, cockroachdb, mssql, oracle
+- **Tags:** join, hash, equijoin, O(n+m)
+- **Authors:** "Database Systems"
+
+## Preconditions
+
+```yaml
+  - type: "pattern"
+    must_match: "(join inner (= ?lcol ?rcol) ?left ?right)"
+    description: "Equi-join for hash join execution"
+  - type: "predicate"
+    condition: "is_equijoin(= ?lcol ?rcol)"
+    description: "Must be an equi-join (equality condition)"
+  - type: "fact"
+    fact_type: "hardware.memory"
+    comparator: ">="
+    threshold: "build_side_size(?left, ?right)"
+    description: "Sufficient memory to hold build side hash table"
+    optional: true
+```
+
+
+# Hash Join
+
+## Description
+
+Builds hash table on smaller relation (build phase), then probes with larger
+relation (probe phase). O(n+m) cost makes it optimal for equijoins when
+sufficient memory available.
+
+**When to apply:** Equijoins with sufficient memory for hash table on smaller input.
+
+**Why it works:** Single scan of each input (vs O(n*m) nested loop), O(1) hash lookup.
+
+## Cost Model
+
+```rust
+fn estimated_cost(stats: &Statistics, hw: &HardwareProfile) -> f64 {
+    let build_rows = stats.smaller_input as f64;
+    let probe_rows = stats.larger_input as f64;
+    
+    let build_cost = build_rows * 1.5; // Build hash table
+    let probe_cost = probe_rows * 1.0; // Probe
+    
+    build_cost + probe_cost
+}
+```
+
+**Memory required:** ~100 bytes per build tuple (hash table overhead)
+
+## Test Cases
+
+### Positive: Large equijoin
+
+```sql
+SELECT * FROM orders o JOIN customers c ON o.customer_id = c.id;
+-- Build on customers (smaller), probe with orders
+```
+
+## References
+
+- Graefe, "Query Evaluation Techniques", ACM Computing Surveys 1993
+- DOI: 10.1145/152610.152611

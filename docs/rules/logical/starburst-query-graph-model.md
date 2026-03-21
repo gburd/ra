@@ -1,0 +1,398 @@
+# Rule: "Starburst Query Graph Model (QGM)"
+
+**Category:** logical/view-rewriting
+**File:** `rules/logical/view-rewriting/starburst-query-graph-model.rra`
+
+## Metadata
+
+- **ID:** `starburst-query-graph-model`
+- **Version:** "1.0.0"
+- **Databases:** db2, mssql, greenplum
+- **Tags:** qgm, query-graph, intermediate-representation, starburst, classic
+- **Authors:** "Pirahesh, Hellerstein, Hasan - IBM Starburst"
+
+
+# Starburst Query Graph Model (QGM)
+
+## Description
+
+The Query Graph Model (QGM) is Starburst's intermediate representation for
+queries. It represents a query as a directed graph of "query boxes" connected
+by quantifiers. Each box represents a relational operation (SELECT, GROUP BY,
+set operations), and quantifiers describe how boxes relate to each other
+(existential for subqueries, universal for ALL, etc.).
+
+QGM enables powerful transformations by making the query structure explicit
+and manipulable. Rewrite rules operate on the graph structure: merging boxes,
+moving predicates between boxes, converting correlated subqueries to joins,
+and decorrelating nested queries.
+
+The key insight is that SQL's block-structured syntax (nested SELECT statements)
+is a poor representation for optimization. QGM normalizes queries into a
+graph form where transformations can be expressed as local graph operations.
+
+**When to apply**: During the rewrite phase of query optimization, before
+cost-based plan selection. QGM transformations normalize and simplify the
+query structure.
+
+**Why it works**: By representing queries as graphs rather than trees,
+QGM makes structural equivalences visible. A correlated subquery and its
+equivalent decorrelated join are different trees but map to the same (or
+similar) QGM graphs. This enables the optimizer to move between equivalent
+forms systematically.
+
+## Relational Algebra
+
+```algebra
+QGM Components:
+
+Box types:
+  SELECT box: pi, sigma, join operations
+  GROUPBY box: gamma (aggregation)
+  UNION/INTERSECT/EXCEPT box: set operations
+  BASE TABLE box: leaf (table scan)
+
+Quantifier types:
+  F (foreach/existential): normal FROM clause reference
+  E (exists): EXISTS subquery
+  A (all): ALL/ANY subquery
+  S (scalar): scalar subquery
+
+Example QGM for:
+  SELECT c.name FROM customers c
+  WHERE EXISTS (SELECT 1 FROM orders o WHERE o.cust_id = c.id)
+
+  Box B1 (SELECT): outputs c.name
+    Quantifier q1 (F): -> Box B2 (BASE: customers)
+    Quantifier q2 (E): -> Box B3
+  Box B3 (SELECT): outputs 1
+    Quantifier q3 (F): -> Box B4 (BASE: orders)
+    Predicate: o.cust_id = c.id (correlated)
+
+QGM transformation (decorrelation):
+  Box B1 (SELECT): outputs c.name
+    Quantifier q1 (F): -> Box B2 (BASE: customers)
+    SEMI-JOIN: c.id = o.cust_id
+    Quantifier q3 (F): -> Box B4 (BASE: orders)
+  (Boxes B3 and q2 eliminated, replaced by semi-join)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+use std::collections::HashMap;
+
+#[derive(Clone, Debug)]
+enum BoxType {
+    Select,
+    GroupBy { group_cols: Vec<Column>, aggs: Vec<Agg> },
+    Union,
+    Intersect,
+    Except,
+    BaseTable { table: Table },
+}
+
+#[derive(Clone, Debug)]
+enum QuantifierType {
+    ForEach,    // F: normal reference (FROM clause)
+    Exists,     // E: EXISTS subquery
+    All,        // A: ALL comparison
+    Scalar,     // S: scalar subquery (returns single value)
+}
+
+#[derive(Clone, Debug)]
+struct QGMBox {
+    id: BoxId,
+    box_type: BoxType,
+    output_columns: Vec<Column>,
+    predicates: Vec<Predicate>,
+    quantifiers: Vec<Quantifier>,
+}
+
+#[derive(Clone, Debug)]
+struct Quantifier {
+    qtype: QuantifierType,
+    target_box: BoxId,
+    columns: Vec<Column>,
+}
+
+struct QGMTransformer;
+
+impl QGMTransformer {
+    /// Decorrelate EXISTS subquery to semi-join
+    fn decorrelate_exists(
+        &self,
+        parent_box: &mut QGMBox,
+        exists_quantifier: &Quantifier,
+        subquery_box: &QGMBox,
+    ) -> bool {
+        // Find correlation predicates
+        let (correlated, local) =
+            self.partition_predicates(
+                &subquery_box.predicates,
+                parent_box,
+            );
+
+        if correlated.is_empty() {
+            return false; // Not correlated
+        }
+
+        // Convert EXISTS quantifier to FOREACH + SEMI-JOIN
+        // 1. Pull up subquery's FROM tables
+        for sq in &subquery_box.quantifiers {
+            if matches!(sq.qtype, QuantifierType::ForEach) {
+                parent_box.quantifiers.push(Quantifier {
+                    qtype: QuantifierType::ForEach,
+                    target_box: sq.target_box,
+                    columns: sq.columns.clone(),
+                });
+            }
+        }
+
+        // 2. Convert correlation predicate to semi-join
+        parent_box.predicates.extend(correlated);
+        // Mark as semi-join (only check existence)
+        parent_box.predicates.push(Predicate::SemiJoin {
+            inner_tables: subquery_box.from_tables(),
+        });
+
+        // 3. Move local predicates up
+        parent_box.predicates.extend(local);
+
+        // 4. Remove EXISTS quantifier
+        parent_box.quantifiers.retain(|q| {
+            q.target_box != exists_quantifier.target_box
+        });
+
+        true
+    }
+
+    /// Merge two SELECT boxes (view merging in QGM form)
+    fn merge_select_boxes(
+        &self,
+        outer: &mut QGMBox,
+        inner_quantifier: &Quantifier,
+        inner: &QGMBox,
+    ) -> bool {
+        // Can only merge SELECT boxes without merge barriers
+        if !matches!(inner.box_type, BoxType::Select) {
+            return false;
+        }
+
+        // Pull up inner's quantifiers
+        for iq in &inner.quantifiers {
+            outer.quantifiers.push(iq.clone());
+        }
+
+        // Pull up inner's predicates
+        outer.predicates.extend(inner.predicates.clone());
+
+        // Resolve column references
+        self.resolve_columns(
+            outer,
+            inner_quantifier,
+            inner,
+        );
+
+        // Remove the quantifier pointing to inner
+        outer.quantifiers.retain(|q| {
+            q.target_box != inner_quantifier.target_box
+        });
+
+        true
+    }
+
+    /// Convert scalar subquery to left outer join + aggregate
+    fn decorrelate_scalar(
+        &self,
+        parent_box: &mut QGMBox,
+        scalar_quantifier: &Quantifier,
+        subquery_box: &QGMBox,
+    ) -> bool {
+        let (correlated, _local) =
+            self.partition_predicates(
+                &subquery_box.predicates,
+                parent_box,
+            );
+
+        if correlated.is_empty() {
+            return false;
+        }
+
+        // Convert to LEFT OUTER JOIN
+        for sq in &subquery_box.quantifiers {
+            if matches!(sq.qtype, QuantifierType::ForEach) {
+                parent_box.quantifiers.push(Quantifier {
+                    qtype: QuantifierType::ForEach,
+                    target_box: sq.target_box,
+                    columns: sq.columns.clone(),
+                });
+            }
+        }
+
+        // Add join predicate from correlation
+        parent_box.predicates.extend(correlated);
+
+        // The scalar output becomes a column in the result
+        // Wrapped in an aggregate to handle the LOJ NULL case
+        true
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    hw: &HardwareProfile,
+) -> bool {
+    // QGM transformations apply to nested/correlated queries
+    stats.has_subqueries
+        || stats.has_views
+        || stats.has_ctes
+        || stats.has_correlated_predicates
+}
+```
+
+**Restrictions:**
+- QGM is an optimizer-internal representation, not user-facing
+- Some transformations (decorrelation) may change execution semantics
+  with NULL values if not handled carefully
+- GROUPBY boxes cannot be merged into SELECT boxes
+- Set operation boxes form merge barriers
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let mut benefit = 0.0;
+
+    // Decorrelation: correlated subquery -> join
+    if stats.has_correlated_subqueries {
+        let correlated_cost =
+            stats.outer_rows as f64 * stats.subquery_cost;
+        let join_cost =
+            stats.outer_rows as f64 + stats.inner_rows as f64;
+        benefit += (correlated_cost - join_cost)
+            .max(0.0) / correlated_cost;
+    }
+
+    // Box merging: enables cross-box optimization
+    if stats.has_mergeable_boxes {
+        benefit += 0.3;
+    }
+
+    benefit.min(5.0)
+}
+```
+
+**Typical benefit**: 30% to 5x from decorrelation and box merging.
+
+## Test Cases
+
+### Positive: EXISTS decorrelation
+
+```sql
+-- Correlated EXISTS subquery
+SELECT c.name
+FROM customers c
+WHERE EXISTS (
+  SELECT 1 FROM orders o
+  WHERE o.customer_id = c.id AND o.total > 1000
+);
+
+-- QGM transformation: EXISTS -> semi-join
+SELECT c.name
+FROM customers c
+SEMI JOIN orders o ON o.customer_id = c.id
+WHERE o.total > 1000;
+
+-- Before: for each customer, execute subquery (N * M cost)
+-- After: hash semi-join (N + M cost)
+```
+
+### Positive: Scalar subquery decorrelation
+
+```sql
+-- Correlated scalar subquery
+SELECT c.name,
+       (SELECT MAX(o.total) FROM orders o WHERE o.cust_id = c.id) AS max_order
+FROM customers c;
+
+-- QGM transformation: scalar -> left outer join + aggregate
+SELECT c.name, MAX(o.total) AS max_order
+FROM customers c
+LEFT JOIN orders o ON o.cust_id = c.id
+GROUP BY c.name;
+
+-- Before: N subquery executions
+-- After: single join + aggregation
+```
+
+### Positive: View box merging
+
+```sql
+CREATE VIEW high_value_orders AS
+  SELECT * FROM orders WHERE total > 10000;
+
+SELECT hvo.*, c.name
+FROM high_value_orders hvo
+JOIN customers c ON hvo.customer_id = c.id
+WHERE c.region = 'West';
+
+-- QGM: two SELECT boxes merged into one
+-- Predicates combined: total > 10000 AND region = 'West'
+-- Join reordering now possible across the view boundary
+```
+
+### Negative: GROUPBY box prevents merging
+
+```sql
+CREATE VIEW dept_stats AS
+  SELECT dept_id, AVG(salary) avg_sal
+  FROM employees
+  GROUP BY dept_id;
+
+SELECT ds.*, d.name
+FROM dept_stats ds
+JOIN departments d ON ds.dept_id = d.id
+WHERE ds.avg_sal > 100000;
+
+-- GROUPBY box cannot be merged into outer SELECT
+-- Filter on avg_sal must remain above the GROUP BY
+-- QGM preserves the box boundary
+```
+
+## References
+
+**Original paper:**
+- Pirahesh, H., Hellerstein, J.M., Hasan, W., "Extensible/Rule Based Query Rewrite Optimization in Starburst", ACM SIGMOD 1992
+  - DOI: 10.1145/130283.130294
+  - Section 2: "QGM: Query Graph Model"
+  - Section 3: "Rewrite rules on QGM"
+  - Box types, quantifier types, and graph transformation rules
+
+**Related QGM work:**
+- Haas, L.M., et al., "Extensible Query Processing in Starburst", ACM SIGMOD 1989
+  - DOI: 10.1145/67544.66962
+  - Original Starburst architecture and QGM design
+
+- Galindo-Legaria, C., Rosenthal, A., "How to Extend a Conventional Optimizer to Handle One- and Two-Sided Outerjoin", IEEE Data Engineering 1992
+  - DOI: 10.1109/ICDE.1992.213177
+  - QGM extensions for outer joins
+
+**Modern implementations:**
+- Elhemali, M., et al., "Execution Strategies for SQL Subqueries", ACM SIGMOD 2007
+  - DOI: 10.1145/1247480.1247598
+  - Modern decorrelation using QGM-like representations
+
+**Implementation in databases:**
+- IBM DB2: QGM-based optimizer (direct descendant of Starburst)
+- mssql: Similar graph representation in Cascades
+- Greenplum Orca: DXL (Data Exchange Language) as QGM successor
+- PostgreSQL: `src/backend/optimizer/plan/subselect.c` - subquery decorrelation

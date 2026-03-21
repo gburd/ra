@@ -1,0 +1,102 @@
+# Rule: Row-Level Security Predicate Pushdown
+
+**Category:** logical/security
+**File:** `rules/logical/security/row-level-security-pushdown.rra`
+
+## Metadata
+
+- **ID:** `row-level-security-pushdown`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mssql, oracle, cockroachdb
+- **Tags:** logical, security, rls, row-level, predicate, pushdown
+- **Authors:** "Stonebraker, Michael", "PostgreSQL Security Team"
+
+
+# Row-Level Security Predicate Pushdown
+
+## Description
+
+Pushes row-level security (RLS) policy predicates as close to the base
+table scan as possible, ensuring they are applied before any joins or
+aggregations. This prevents information leakage through side channels
+(timing, error messages) and ensures the security boundary is enforced
+at the earliest possible point in query execution.
+
+**When to apply**: Any query on a table with active RLS policies. The
+optimizer must inject the policy predicate and push it below joins.
+
+**Security requirement**: RLS predicates must be treated as mandatory
+filters that cannot be reordered above any operator that could leak
+information about filtered rows.
+
+## Relational Algebra
+
+```algebra
+-- Before: RLS predicate after join
+sigma[rls_policy(current_user)](R join S)
+
+-- After: push RLS to base table scan
+(sigma[rls_policy(current_user)](R)) join S
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("rls-pushdown-through-join";
+    "(filter ?rls (join ?cond ?left ?right))" =>
+    "(join ?cond (filter ?rls ?left) ?right)"
+    if is_rls_predicate("?rls")
+    if rls_references_only("?rls", "?left")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(filter: &Filter, plan: &Plan) -> bool {
+    filter.is_rls_policy()
+        && plan.has_pushable_position()
+        // Must not push below security-barrier views
+        && !plan.crosses_security_barrier()
+}
+```
+
+**Restrictions:**
+- Cannot push through security-barrier views or functions
+- Leakproof functions only in RLS predicates
+- Must apply before user-defined functions that could observe rows
+
+## Cost Model
+
+```rust
+fn estimated_benefit(rows: f64, selectivity: f64) -> f64 {
+    // Primary benefit is security, not performance
+    // But early filtering does reduce downstream work
+    rows * (1.0 - selectivity) * 0.5
+}
+```
+
+**Typical benefit**: Security correctness first; 0-10% performance.
+
+## Test Cases
+
+```sql
+-- Positive: RLS on multi-tenant table
+-- Policy: tenant_id = current_setting('app.tenant_id')
+SELECT o.*, c.name
+FROM orders o JOIN customers c ON o.cust_id = c.id;
+-- RLS predicate on orders pushed below the join
+
+-- Negative: security-barrier view blocks pushdown
+CREATE VIEW secure_v WITH (security_barrier) AS
+  SELECT * FROM secret WHERE allowed(current_user);
+SELECT * FROM secure_v WHERE id > 10;
+-- Cannot push id > 10 below the security barrier
+```
+
+## References
+
+- PostgreSQL Row Security Policies documentation
+- Stonebraker, M. "The Design of POSTGRES" (1986) - access control model

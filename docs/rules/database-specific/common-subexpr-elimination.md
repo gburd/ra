@@ -1,0 +1,118 @@
+# Rule: DataFusion Common Subexpression Elimination
+
+**Category:** database-specific/datafusion
+**File:** `rules/database-specific/datafusion/common-subexpr-elimination.rra`
+
+## Metadata
+
+- **ID:** `datafusion-common-subexpr-elimination`
+- **Version:** "1.0.0"
+- **Databases:** datafusion
+- **Tags:** database-specific, datafusion, cse, expression, optimization
+- **Authors:** "RA Contributors"
+
+
+# DataFusion Common Subexpression Elimination
+
+## Description
+
+Identifies identical subexpressions within a plan node and evaluates
+them once, storing the result in a temporary Arrow column that is
+referenced by all uses.  DataFusion's CSE pass operates at both the
+logical and physical plan levels.
+
+**When to apply**: The same expression appears multiple times in a
+single plan node (e.g., in a projection or filter).
+
+**Why it works**: Arrow's compute kernels have per-invocation overhead
+(null bitmap handling, buffer allocation).  Evaluating a complex
+expression once and reusing the result avoids redundant computation
+and memory allocation.
+
+**Database version**: DataFusion 28.0+
+
+## Relational Algebra
+
+```algebra
+-- Before CSE:
+pi[f(a) + 1, f(a) * 2](R)
+
+-- After CSE:
+let t = f(a) in pi[t + 1, t * 2](R)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// CSE is typically a plan pass, not a single rewrite rule.
+// Represented here as the conceptual transformation.
+
+rw!("datafusion-cse-project";
+    "(project (list (add (func ?f ?a) (const-int 1))
+                    (mul (func ?f ?a) (const-int 2))) ?input)" =>
+    "(project (list (add ?cse_ref (const-int 1))
+                    (mul ?cse_ref (const-int 2)))
+              (project-add-col (func ?f ?a) ?input))"
+    if is_database("datafusion")
+    if has_common_subexpr("?f", "?a")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(exprs: &[Expr]) -> bool {
+    let mut seen = HashMap::new();
+    for expr in exprs {
+        for sub in expr.subexpressions() {
+            if sub.is_deterministic() && !sub.is_column_ref() {
+                *seen.entry(sub.canonical()).or_insert(0) += 1;
+            }
+        }
+    }
+    seen.values().any(|&count| count > 1)
+}
+```
+
+**Restrictions:**
+- Only deterministic expressions qualify (no RANDOM(), NOW())
+- Trivial expressions (column references, constants) are not worth CSE
+- Must account for expression volatility markers
+
+## Cost Model
+
+```rust
+fn cse_benefit(
+    expr_cost: f64,
+    occurrences: usize,
+    rows: f64,
+) -> f64 {
+    // Save (occurrences - 1) evaluations
+    (occurrences - 1) as f64 * expr_cost * rows
+}
+```
+
+**Typical benefit**: For UDFs or complex math, 2x-5x reduction in
+expression evaluation time when the same expression appears 2-5 times.
+
+## Test Cases
+
+```sql
+-- Positive: UPPER(name) appears twice
+SELECT UPPER(name) AS display_name, LENGTH(UPPER(name)) AS name_len
+FROM users;
+-- UPPER(name) evaluated once, result reused
+```
+
+```sql
+-- Negative: each expression is unique
+SELECT a + 1, b + 2 FROM t;
+-- No common subexpression
+```
+
+## References
+
+DataFusion: datafusion/optimizer/src/common_subexpr_eliminate.rs
+DataFusion: datafusion/physical-expr/src/common_subexpr_eliminate.rs

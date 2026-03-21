@@ -1,0 +1,140 @@
+# Rule: MongoDB $lookup Pipeline Optimization
+
+**Category:** database-specific/mongodb
+**File:** `rules/database-specific/mongodb/lookup-pipeline-optimization.rra`
+
+## Metadata
+
+- **ID:** `mongodb-lookup-pipeline-optimization`
+- **Version:** "1.0.0"
+- **Databases:** mongodb
+- **Tags:** lookup, join, pipeline, optimization
+- **Authors:** "MongoDB Inc."
+
+
+# MongoDB $lookup Pipeline Optimization
+
+## Description
+
+Optimizes $lookup (join) operations by pushing filters and projections into
+the subpipeline, converting to index-backed lookups when possible, and choosing
+between nested loop and hash join strategies based on cardinality estimates.
+
+**When to apply**: $lookup operations where the foreign collection can benefit
+from index usage, filtering, or projection pushdown. MongoDB 3.6+ supports
+pipeline-based $lookup with optimization opportunities.
+
+**Why it works**: Standard $lookup performs a nested loop join. With pipeline
+optimization, filters push into the foreign collection (reducing documents
+processed), indexes satisfy lookups (avoiding collection scans), and projections
+limit data transfer.
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mongodb-lookup-use-index";
+    "(lookup ?from ?localField ?foreignField ?as)" =>
+    "(lookup-indexed ?from ?localField ?foreignField ?as
+       (find-index ?from ?foreignField))"
+    if has-index-on-foreign-field("?from", "?foreignField")
+),
+
+rw!("mongodb-lookup-push-filter";
+    "(pipeline (list
+       (lookup ?from ?localField ?foreignField ?as (pipeline ?subpipe))
+       (unwind ?as)
+       (match ?pred)))" =>
+    "(pipeline (list
+       (lookup ?from ?localField ?foreignField ?as
+         (pipeline (cons (match (extract-foreign-pred ?pred ?as)) ?subpipe)))
+       (unwind ?as)
+       (match (extract-local-pred ?pred))))"
+    if can-push-predicate-to-lookup("?pred", "?as")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> bool {
+    stats.has_lookup_stage
+        && (stats.has_index_on_foreign_key
+            || stats.has_pushable_predicates
+            || stats.foreign_collection_is_large)
+}
+```
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let local_docs = stats.local_count as f64;
+    let foreign_docs = stats.foreign_count as f64;
+
+    // Without optimization: nested loop on full foreign collection
+    let unoptimized = local_docs * foreign_docs * 0.000001;
+
+    // With index: index lookup per local document
+    let with_index = local_docs * foreign_docs.log2() * 0.000005;
+
+    if unoptimized > with_index {
+        (unoptimized - with_index) / unoptimized
+    } else {
+        0.3 // Minimum benefit from pipeline optimization
+    }
+}
+```
+
+## Test Cases
+
+### Positive: Index-backed $lookup
+
+```javascript
+// Index on orders.customer_id
+db.customers.aggregate([
+  {$lookup: {
+    from: "orders",
+    localField: "_id",
+    foreignField: "customer_id",  // Indexed!
+    as: "orders"
+  }}
+])
+// Uses index on customer_id instead of collection scan
+```
+
+### Positive: Filter pushdown into $lookup
+
+```javascript
+db.customers.aggregate([
+  {$lookup: {
+    from: "orders",
+    let: {cust_id: "$_id"},
+    pipeline: [
+      {$match: {
+        $expr: {$eq: ["$customer_id", "$$cust_id"]},
+        status: "completed",  // Pushed down!
+        total: {$gt: 100}
+      }}
+    ],
+    as: "orders"
+  }}
+])
+```
+
+## References
+
+**Implementation:**
+- MongoDB source: `src/mongo/db/pipeline/document_source_lookup.cpp`
+- Pipeline optimization: `DocumentSourceLookUp::optimize()`
+
+**Documentation:**
+- MongoDB Manual: "$lookup (aggregation)"
+- https://docs.mongodb.com/manual/reference/operator/aggregation/lookup/

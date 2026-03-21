@@ -1,0 +1,225 @@
+# Rule: LEO Learning Optimizer Statistics Feedback
+
+**Category:** experimental/adaptive
+**File:** `rules/experimental/adaptive/leo-statistics-feedback.rra`
+
+## Metadata
+
+- **ID:** `leo-statistics-feedback`
+- **Version:** "1.0.0"
+- **Databases:** db2, oracle, postgresql
+- **Tags:** adaptive, leo, learning, statistics, feedback, cardinality
+- **Authors:** "Stillger, Lohman, Markl, Kandil 2001", "RA Contributors"
+
+
+# LEO Learning Optimizer Statistics Feedback
+
+## Description
+
+Implements IBM DB2's LEarning Optimizer (LEO) approach: after each
+query execution, compares predicted cardinalities at each operator with
+actual cardinalities, and stores "adjustment factors" that correct
+persistent estimation biases. Unlike simple cardinality feedback that
+stores per-query corrections, LEO learns adjustment factors per
+predicate pattern and table combination, enabling corrections to
+generalize to new queries.
+
+**When to apply**: Databases where cardinality estimation errors are
+persistent and systematic (correlated columns, skewed distributions,
+out-of-date statistics). LEO is especially effective when ANALYZE
+cannot capture complex correlations but queries repeatedly expose the
+same estimation pattern.
+
+**Why it works**: Optimizer statistics capture single-column
+distributions but miss multi-column correlations, functional
+dependencies, and data skew patterns. LEO observes actual
+cardinalities during execution and learns correction factors that
+capture these hidden relationships. Over time, the optimizer's
+estimates converge toward actual cardinalities without manual
+intervention.
+
+## Relational Algebra
+
+```algebra
+-- Standard estimation:
+est_card(sigma[a=1 AND b=2](T)) = |T| * sel(a=1) * sel(b=2)
+  = 1000 * 0.1 * 0.01 = 1.0
+
+-- Actual execution produces 50 rows (a and b are correlated)
+
+-- LEO stores adjustment factor:
+factor(T, {a, b}, equality) = 50.0 / 1.0 = 50.0
+
+-- Next query with similar predicates:
+est_card(sigma[a=3 AND b=4](T))
+  = base_estimate * factor(T, {a, b}, equality)
+  = 0.8 * 50.0 = 40.0  -- much closer to reality
+```
+
+## Implementation
+
+```rust
+struct LeoFeedback {
+    // Key: (table, predicate_pattern, columns)
+    entries: HashMap<FeedbackKey, AdjustmentFactor>,
+}
+
+struct FeedbackKey {
+    table_id: TableId,
+    predicate_pattern: PredicatePattern,
+    columns: Vec<ColumnId>,
+}
+
+struct AdjustmentFactor {
+    // Exponential moving average of (actual / estimated)
+    ratio: f64,
+    // Number of observations
+    observations: u32,
+    // Confidence (higher = more observations, more stable)
+    confidence: f64,
+    last_updated: Timestamp,
+}
+
+#[derive(Hash, Eq, PartialEq)]
+enum PredicatePattern {
+    Equality,
+    Range,
+    Like,
+    In,
+    JoinEquality { other_table: TableId },
+    Composite { sub_patterns: Vec<PredicatePattern> },
+}
+
+fn record_feedback(
+    plan: &ExecutedPlan,
+    feedback: &mut LeoFeedback,
+) {
+    for operator in plan.operators() {
+        let estimated = operator.estimated_cardinality();
+        let actual = operator.actual_cardinality();
+
+        if estimated > 0.0 && actual > 0.0 {
+            let ratio = actual / estimated;
+            let key = extract_feedback_key(operator);
+
+            feedback.entries
+                .entry(key)
+                .and_modify(|f| {
+                    // Exponential moving average
+                    let alpha = 0.3;
+                    f.ratio = alpha * ratio + (1.0 - alpha) * f.ratio;
+                    f.observations += 1;
+                    f.confidence =
+                        1.0 - (1.0 / (1.0 + f.observations as f64));
+                })
+                .or_insert(AdjustmentFactor {
+                    ratio,
+                    observations: 1,
+                    confidence: 0.5,
+                    last_updated: now(),
+                });
+        }
+    }
+}
+
+fn apply_leo_adjustment(
+    base_estimate: f64,
+    operator: &LogicalOperator,
+    feedback: &LeoFeedback,
+) -> f64 {
+    let key = extract_feedback_key(operator);
+    if let Some(factor) = feedback.entries.get(&key) {
+        if factor.confidence > CONFIDENCE_THRESHOLD {
+            return base_estimate * factor.ratio;
+        }
+    }
+    base_estimate
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    system: &DatabaseSystem,
+    query: &ExecutedQuery,
+) -> bool {
+    // LEO feedback must be enabled
+    system.leo_feedback_enabled()
+    // Query must have been executed (not just planned)
+    && query.has_execution_stats()
+    // Must have meaningful cardinality differences
+    && query.operators().iter().any(|op| {
+        let ratio = op.actual_card() / op.estimated_card();
+        ratio > 2.0 || ratio < 0.5 // >2x error
+    })
+}
+```
+
+**Restrictions:**
+- LEO corrections are statistical approximations; they can
+  over-correct if early observations are unrepresentative
+- The exponential moving average decay rate must be tuned:
+  too fast forgets useful history, too slow adapts slowly
+- Corrections can interact: fixing one operator's estimate may
+  make a downstream operator's correction wrong
+- Schema changes (new indexes, added columns) may invalidate
+  stored feedback
+- Storage overhead for the feedback catalog scales with the
+  number of distinct predicate patterns
+
+## Cost Model
+
+```rust
+fn leo_convergence(
+    initial_error: f64,  // ratio of actual/estimated
+    alpha: f64,          // learning rate
+    executions: u32,
+) -> f64 {
+    // After n executions, error decays exponentially
+    let remaining_error = initial_error * (1.0 - alpha).powi(executions as i32);
+    remaining_error
+}
+```
+
+**Typical benefit**: After 10 executions with alpha=0.3, a 50x
+cardinality error is reduced to ~1.4x. This leads to correct
+join ordering and algorithm selection for subsequent queries.
+
+## Test Cases
+
+```sql
+-- Positive: correlated columns
+-- Table orders: status and region are correlated
+-- (most 'pending' orders are in 'us-east')
+SELECT * FROM orders WHERE status = 'pending' AND region = 'us-east';
+
+-- Optimizer estimates: 1000 * 0.05 * 0.33 = 16.5 rows
+-- Actual: 42 rows (correlation)
+-- LEO stores: factor(orders, {status, region}, equality) = 2.5
+-- Next query: 0.05 * 0.33 * 1000 * 2.5 = 41.25 (close to actual)
+```
+
+```sql
+-- Positive: join cardinality correction
+SELECT * FROM orders o JOIN returns r ON o.id = r.order_id;
+
+-- Optimizer estimates: 1M * 100K * (1/1M) = 100K join rows
+-- Actual: 5K rows (most orders have no return)
+-- LEO corrects join selectivity for this table pair
+```
+
+```sql
+-- Negative: highly variable data
+SELECT * FROM events WHERE type = $1 AND hour = $2;
+-- If data distribution changes hourly, LEO's historical
+-- adjustments become stale quickly
+```
+
+## References
+
+Stillger, Lohman, Markl, Kandil, "LEO - DB2's LEarning Optimizer" (VLDB 2001)
+Markl, Raman, Simmen, Lohman, Pirahesh, "Robust Query Processing through Progressive Optimization" (SIGMOD 2004)
+Oracle: "Adaptive Statistics" and "SQL Plan Directives"
+PostgreSQL: "Extended Statistics" (CREATE STATISTICS ... DEPENDENCIES)
+IBM DB2: LEO implementation in DB2 Universal Database

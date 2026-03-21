@@ -1,0 +1,385 @@
+# logical Rules
+
+Total rules in this category:      352
+
+## Overview
+
+Logical optimization rules transform query structure without changing semantics. These include predicate pushdown, join elimination, subquery unnesting, and other algebraic transformations.
+
+## Subcategories
+
+- [aggregate-pushdown](./aggregate-pushdown/) -       28 rules
+- [cte-optimization](./cte-optimization/) -       22 rules
+- [distinct-elimination](./distinct-elimination/) -       11 rules
+- [expression-simplification](./expression-simplification/) -       17 rules
+- [function-optimization](./function-optimization/) -       58 rules
+- [graph](./graph/) -        7 rules
+- [join-elimination](./join-elimination/) -       25 rules
+- [join-reordering](./join-reordering/) -       16 rules
+- [limit-pushdown](./limit-pushdown/) -       16 rules
+- [multi-model](./multi-model/) -        4 rules
+- [predicate-pushdown](./predicate-pushdown/) -       27 rules
+- [projection-pushdown](./projection-pushdown/) -       19 rules
+- [security](./security/) -        6 rules
+- [semantic-rewriting](./semantic-rewriting/) -       16 rules
+- [set-operations](./set-operations/) -       14 rules
+- [sideways-information-passing](./sideways-information-passing/) -       10 rules
+- [subquery-unnesting](./subquery-unnesting/) -       26 rules
+- [time-series](./time-series/) -        7 rules
+- [view-rewriting](./view-rewriting/) -       10 rules
+- [window-pushdown](./window-pushdown/) -       13 rules
+
+## Rules
+
+- [Calcite AggregateCaseToFilterRule](./aggregate-case-to-filter.md) - `calcite-aggregate-case-to-filter`
+- [Aggregate DISTINCT Optimization](./aggregate-distinct-optimization.md) - `aggregate-distinct-optimization`
+- ["AggregateExpandDistinctAggregates"](./aggregate-expand-distinct-aggregates.md) - `aggregate-expand-distinct-aggregates`
+- [Calcite AggregateExtractProjectRule](./aggregate-extract-project.md) - `calcite-aggregate-extract-project`
+- [Calcite AggregateFilterToCaseRule](./aggregate-filter-to-case.md) - `calcite-aggregate-filter-to-case`
+- ["Aggregate Filter to Filtered Aggregate"](./aggregate-filter-to-filtered-agg.md) - `aggregate-filter-to-filtered-agg`
+- [Calcite AggregateFilterToFilteredAggregateRule](./aggregate-filter-to-filtered-aggregate.md) - `calcite-aggregate-filter-to-filtered-aggregate`
+- [Calcite AggregateFilterTransposeRule](./aggregate-filter-transpose.md) - `calcite-aggregate-filter-transpose`
+- [Calcite AggregateGroupingSetsToUnionRule](./aggregate-grouping-sets-to-union.md) - `calcite-aggregate-grouping-sets-to-union`
+- ["AggregateMerge"](./aggregate-merge.md) - `aggregate-merge`
+- [Calcite AggregateMinMaxToLimitRule](./aggregate-min-max-to-limit.md) - `calcite-aggregate-min-max-to-limit`
+- [Aggregate Over Aggregate Fusion](./aggregate-over-aggregate-fusion.md) - `aggregate-over-aggregate-fusion`
+- ["AggregateProjectMerge"](./aggregate-project-merge.md) - `aggregate-project-merge`
+- [Calcite AggregateProjectPullUpConstantsRule](./aggregate-project-pull-up-constants.md) - `calcite-aggregate-project-pull-up-constants`
+- ["AggregateReduceFunctions"](./aggregate-reduce-functions.md) - `aggregate-reduce-functions`
+- [Aggregate Selectivity Estimation](./aggregate-selectivity-estimation.md) - `aggregate-selectivity-estimation`
+- [Aggregate Through Union](./aggregate-through-union.md) - `aggregate-through-union`
+- [Calcite AggregateUnionAggregateRule](./aggregate-union-aggregate.md) - `calcite-aggregate-union-aggregate`
+- ["Aggregate Values"](./aggregate-values.md) - `aggregate-values`
+- [Aggregate with Constant Elimination](./aggregate-with-constant-elimination.md) - `aggregate-with-constant-elimination`
+- [COUNT(*) Optimization](./count-star-optimization.md) - `count-star-optimization`
+- [DISTINCT to GROUP BY](./distinct-to-group-by.md) - `distinct-to-group-by`
+- [Eager Aggregation (Yan & Larson)](./eager-aggregation.md) - `eager-aggregation`
+- [Group-By Pushdown Through Join](./group-by-pushdown-through-join.md) - `group-by-pushdown-through-join`
+- [HAVING to Filter Separation](./having-to-filter-separation.md) - `having-to-filter-separation`
+- [MIN/MAX Index Scan](./min-max-index-scan.md) - `min-max-index-scan`
+- [Partial Aggregation Insertion](./partial-aggregation-insertion.md) - `partial-aggregation-insertion`
+- [Calcite ProjectAggregateMergeRule](./project-aggregate-merge.md) - `calcite-project-aggregate-merge`
+- ["CommonRelSubExprRegister"](./common-rel-sub-expr-register.md) - `common-rel-sub-expr-register`
+- [CTE Column Pruning](./cte-column-pruning.md) - `cte-column-pruning`
+- [CTE Constant Folding](./cte-constant-folding.md) - `cte-constant-folding`
+- [CTE Filter Pushdown Through Union](./cte-filter-pushdown-through-union.md) - `cte-filter-pushdown-through-union`
+- [CTE Inlining vs Materialization Decision](./cte-inline-vs-materialize.md) - `cte-inline-vs-materialize`
+- [CTE Inlining](./cte-inlining.md) - `cte-inlining`
+- [CTE Join Elimination](./cte-join-elimination.md) - `cte-join-elimination`
+- [CTE Materialization](./cte-materialization.md) - `cte-materialization`
+- [CTE Merge Duplicate Definitions](./cte-merge-duplicate.md) - `cte-merge-duplicate`
+- [CTE Predicate Pushdown](./cte-predicate-pushdown.md) - `cte-predicate-pushdown`
+- [CTE Projection Pushdown](./cte-projection-pushdown.md) - `cte-projection-pushdown`
+- [CTE to Temporary Table](./cte-to-temp-table.md) - `cte-to-temp-table`
+- [CTE Unnesting](./cte-unnesting.md) - `cte-unnesting`
+- [Recursive CTE Base Case Filter Pushdown](./recursive-cte-base-filter-pushdown.md) - `recursive-cte-base-filter-pushdown`
+- [Recursive CTE Cycle Detection Insertion](./recursive-cte-cycle-detection.md) - `recursive-cte-cycle-detection`
+- [Recursive CTE Depth Limit Pushdown](./recursive-cte-depth-limit-pushdown.md) - `recursive-cte-depth-limit-pushdown`
+- [Recursive CTE Join Reordering](./recursive-cte-join-reorder.md) - `recursive-cte-join-reorder`
+- [Recursive CTE Memoization](./recursive-cte-memoization.md) - `recursive-cte-memoization`
+- [Recursive CTE Projection Pushdown](./recursive-cte-projection-pushdown.md) - `recursive-cte-projection-pushdown`
+- [Recursive CTE Semi-Naive Evaluation](./recursive-cte-semi-naive-eval.md) - `recursive-cte-semi-naive-eval`
+- [Recursive CTE to Iterative Unrolling](./recursive-cte-to-iterative.md) - `recursive-cte-to-iterative`
+- [Recursive CTE Tail Recursion Optimization](./recursive-cte-to-tail-recursive.md) - `recursive-cte-to-tail-recursive`
+- [Distinct After GROUP BY Elimination](./distinct-after-group-by.md) - `distinct-after-group-by`
+- [Distinct Filter Reorder](./distinct-filter-reorder.md) - `distinct-filter-reorder`
+- [Distinct Limit Reorder](./distinct-limit-reorder.md) - `distinct-limit-reorder`
+- [Distinct on Unique Key Elimination](./distinct-on-unique-key.md) - `distinct-on-unique-key`
+- [Distinct Over Aggregation Elimination](./distinct-over-aggregation.md) - `distinct-over-aggregation`
+- [DISTINCT Elimination on Primary Key](./distinct-over-pk.md) - `distinct-over-pk`
+- [Distinct Over Primary Key Elimination](./distinct-over-primary-key.md) - `distinct-over-primary-key`
+- [Distinct Pushdown Through Join](./distinct-pushdown-through-join.md) - `distinct-pushdown-through-join`
+- [Distinct Pushdown Through UNION](./distinct-pushdown-through-union.md) - `distinct-pushdown-through-union`
+- [Distinct Sort Merge](./distinct-sort-merge.md) - `distinct-sort-merge`
+- [Distinct to Limit One](./distinct-to-limit-one.md) - `distinct-to-limit-one`
+- [Arithmetic Identity and Annihilator Simplification](./arithmetic-identity.md) - `arithmetic-identity`
+- [Arithmetic Expression Simplification](./arithmetic-simplification.md) - `arithmetic-simplification`
+- [Boolean Expression Simplification](./boolean-simplification.md) - `boolean-simplification`
+- ["CalcMerge"](./calc-merge.md) - `calc-merge`
+- ["CalcRemove"](./calc-remove.md) - `calc-remove`
+- [CASE Expression Simplification](./case-simplification.md) - `case-simplification`
+- [Codd's Relational Algebra Equivalences](./codd-relational-completeness.md) - `codd-relational-completeness`
+- [Common Subexpression Elimination](./common-subexpression-elimination.md) - `common-subexpression-elimination`
+- [Constant Folding](./constant-folding.md) - `constant-folding`
+- [Calcite FilterRemoveIsNotDistinctFromRule](./filter-remove-is-not-distinct-from.md) - `calcite-filter-remove-is-not-distinct-from`
+- [IN-List to Range/Join Optimization](./in-list-optimization.md) - `in-list-optimization`
+- [LIKE Prefix to Range Predicate Conversion](./like-to-range.md) - `like-to-range`
+- [NULL Propagation Simplification](./null-propagation.md) - `null-propagation`
+- [Calcite ProjectOverSumToSum0Rule](./project-over-sum-to-sum0.md) - `calcite-project-over-sum-to-sum0`
+- [Calcite ReduceDecimalsRule](./reduce-decimals.md) - `calcite-reduce-decimals`
+- ["ReduceExpressions"](./reduce-expressions.md) - `reduce-expressions`
+- ["Starburst Contradiction Detection and Unsatisfiable Query Elimination"](./starburst-contradiction-detection.md) - `starburst-contradiction-detection`
+- [Aggregate Function Decomposition](./aggregate-function-decomposition.md) - `aggregate-function-decomposition`
+- [Simplify Aggregate Function Expressions](./aggregate-function-simplification.md) - `aggregate-function-simplification`
+- [Array Function Optimization](./array-function-optimization.md) - `array-function-optimization`
+- [BETWEEN to Range Predicates](./between-to-range.md) - `between-to-range`
+- [CASE Expression Simplification](./case-simplification.md) - `case-simplification`
+- [Remove Casts That Prevent Index Usage](./cast-elimination-for-index.md) - `cast-elimination-for-index`
+- [Cast Elimination](./cast-elimination.md) - `cast-elimination`
+- [COALESCE Simplification](./coalesce-simplification.md) - `coalesce-simplification`
+- [Match Collation in String Index Comparisons](./collation-aware-index-use.md) - `collation-aware-index-use`
+- [Comparison Normalization](./comparison-normalization.md) - `comparison-normalization`
+- [Constant Fold Aggregate on Constants](./constant-fold-aggregate.md) - `constant-fold-aggregate`
+- [Constant Fold CAST Operations](./constant-fold-cast.md) - `constant-fold-cast`
+- [Constant Fold Comparison Operators](./constant-fold-comparison.md) - `constant-fold-comparison`
+- [Constant Fold Conditional Expressions](./constant-fold-conditional.md) - `constant-fold-conditional`
+- [Constant Fold DateTime Functions](./constant-fold-datetime.md) - `constant-fold-datetime`
+- [Constant Fold Logical Operators](./constant-fold-logical.md) - `constant-fold-logical`
+- [Constant Fold Math Functions](./constant-fold-math.md) - `constant-fold-math`
+- [Constant Fold Nested Function Calls](./constant-fold-nested.md) - `constant-fold-nested`
+- [Constant Fold NULL Expressions](./constant-fold-null.md) - `constant-fold-null`
+- [Constant Fold String Functions](./constant-fold-string.md) - `constant-fold-string`
+- [Constant Function Folding](./constant-function-folding.md) - `constant-function-folding`
+- [Date/Time Function Optimization](./date-function-optimization.md) - `date-function-optimization`
+- [Cache Repeated Deterministic Function Calls](./deterministic-function-caching.md) - `deterministic-function-caching`
+- [Deterministic Function Deduplication](./deterministic-function-dedup.md) - `deterministic-function-dedup`
+- [Expensive Function Above Join](./expensive-function-above-join.md) - `expensive-function-above-join`
+- [Expensive Function Result Caching](./expensive-function-caching.md) - `expensive-function-caching`
+- [Delay Expensive Function Evaluation](./expensive-function-late-eval.md) - `expensive-function-late-eval`
+- [Expensive Predicate Ordering](./expensive-predicate-ordering.md) - `expensive-predicate-ordering`
+- [Expression Index Matching](./expression-index-matching.md) - `expression-index-matching`
+- [Rewrite Expressions to Match Expression Indexes](./expression-index-rewrite.md) - `expression-index-rewrite`
+- [Use Function-Based Index for Matching Predicates](./function-based-index-scan.md) - `function-based-index-scan`
+- [Function Evaluation Cost Reordering](./function-cost-reordering.md) - `function-cost-reordering`
+- [Push Function Predicates Below Joins](./function-filter-pushdown.md) - `function-filter-pushdown`
+- [Function-Based Expression Index Matching](./function-index-matching-composite.md) - `function-index-matching-composite`
+- [Function Inlining](./function-inlining.md) - `function-inlining`
+- [Apply Function Inverse to Enable Index Use](./function-inverse-transform.md) - `function-inverse-transform`
+- [Prune Unused Function Calls from Projections](./function-projection-pruning.md) - `function-projection-pruning`
+- [Function Pushdown Past Aggregate](./function-pushdown-past-aggregate.md) - `function-pushdown-past-aggregate`
+- [Function Pushdown Past Join](./function-pushdown-past-join.md) - `function-pushdown-past-join`
+- [Geospatial Function Optimization](./geospatial-function-optimization.md) - `geospatial-function-optimization`
+- [GREATEST/LEAST Optimization](./greatest-least-optimization.md) - `greatest-least-optimization`
+- [IFNULL/NVL to COALESCE Normalization](./if-null-to-coalesce.md) - `if-null-to-coalesce`
+- [Resolve Implicit Casts to Enable Index Use](./implicit-cast-index-match.md) - `implicit-cast-index-match`
+- [IN List Optimization](./in-list-optimization.md) - `in-list-optimization`
+- [IS NULL/IS NOT NULL Optimization](./is-null-optimization.md) - `is-null-optimization`
+- [JSON Function Optimization](./json-function-optimization.md) - `json-function-optimization`
+- [LIKE to Range Conversion](./like-to-range.md) - `like-to-range`
+- [NOT Pushdown (De Morgan's Laws)](./not-pushdown.md) - `not-pushdown`
+- [NULLIF Simplification](./nullif-simplification.md) - `nullif-simplification`
+- [Match Function Predicates with Partial Indexes](./partial-index-predicate-match.md) - `partial-index-predicate-match`
+- [Predicate Implication Detection](./predicate-implication.md) - `predicate-implication`
+- [Pure Function Common Subexpression Elimination](./pure-function-cse.md) - `pure-function-cse`
+- [SARGable Function Rewrite](./sargable-function-rewrite.md) - `sargable-function-rewrite`
+- [String Function Optimization](./string-function-optimization.md) - `string-function-optimization`
+- [Match Timezone Conversions for Index Use](./timezone-aware-index-use.md) - `timezone-aware-index-use`
+- [Type Inference Optimization](./type-inference-optimization.md) - `type-inference-optimization`
+- [Volatile Function Barrier](./volatile-function-barrier.md) - `volatile-function-barrier`
+- [Window Function Optimization](./window-function-optimization.md) - `window-function-optimization`
+- [Community Detection Filter Pushdown](./community-detection-pushdown.md) - `community-detection-pushdown`
+- [Graph-Specific Index Exploitation](./graph-index-exploitation.md) - `graph-index-exploitation`
+- ["Graph Pattern Matching"](./graph-pattern-matching.md) - `graph-pattern-matching`
+- [Graph Pattern Match Join Ordering](./pattern-match-optimization.md) - `graph-pattern-match-optimization`
+- [Reachability via Transitive Closure Optimization](./reachability-transitive-closure.md) - `reachability-transitive-closure`
+- [Shortest Path Query Optimization](./shortest-path-optimization.md) - `shortest-path-optimization`
+- ["Transitive Closure Memoization"](./transitive-closure-memoization.md) - `transitive-closure-memoization`
+- [Calcite AggregateJoinJoinRemoveRule](./aggregate-join-join-remove.md) - `calcite-aggregate-join-join-remove`
+- [Calcite AggregateJoinRemoveRule](./aggregate-join-remove.md) - `calcite-aggregate-join-remove`
+- [Anti-Join Simplification](./anti-join-simplification.md) - `anti-join-simplification`
+- [Anti-Join to NOT EXISTS](./anti-join-to-not-exists.md) - `anti-join-to-not-exists`
+- [Cross Join Elimination](./cross-join-elimination.md) - `cross-join-elimination`
+- [Degenerate Join to Filter](./degenerate-join-to-filter.md) - `degenerate-join-to-filter`
+- [Foreign Key Join Elimination](./foreign-key-join-elimination.md) - `foreign-key-join-elimination`
+- ["FullToLeftAndRightJoin"](./full-to-left-and-right-join.md) - `full-to-left-and-right-join`
+- [Inner Join Identity Elimination](./inner-join-identity-elimination.md) - `inner-join-identity-elimination`
+- ["JoinAddRedundantSemiJoin"](./join-add-redundant-semi-join.md) - `join-add-redundant-semi-join`
+- [Key Propagation for Join Elimination](./key-propagation-for-join-elimination.md) - `key-propagation-for-join-elimination`
+- [Left Join Elimination](./left-join-elimination.md) - `left-join-elimination`
+- [LEFT JOIN Null Rejection](./left-join-null-rejection.md) - `left-join-null-rejection`
+- [Outer Join to Filter](./outer-join-to-filter.md) - `outer-join-to-filter`
+- [Outer Join to Inner Join Simplification](./outer-join-to-inner.md) - `outer-join-to-inner`
+- [Calcite ProjectJoinJoinRemoveRule](./project-join-join-remove.md) - `calcite-project-join-join-remove`
+- [Calcite ProjectJoinRemoveRule](./project-join-remove.md) - `calcite-project-join-remove`
+- [Redundant Join Elimination](./redundant-join-elimination.md) - `redundant-join-elimination`
+- [Self-Join Elimination](./self-join-elimination.md) - `self-join-elimination`
+- ["Semi Join Filter Transpose"](./semi-join-filter-transpose.md) - `semi-join-filter-transpose`
+- ["Semi Join Project Transpose"](./semi-join-project-transpose.md) - `semi-join-project-transpose`
+- ["SemiJoinRemove"](./semi-join-remove.md) - `semi-join-remove`
+- [Semi-Join to Existence Check](./semi-join-to-existence-check.md) - `semi-join-to-existence-check`
+- ["Unique Key Join Elimination"](./starburst-unique-key-join-elimination.md) - `starburst-unique-key-join-elimination`
+- [Unique Key Join Elimination](./unique-key-join-elimination.md) - `unique-key-join-elimination`
+- [Cartesian Product to Join Conversion](./cartesian-to-join.md) - `cartesian-to-join`
+- [Calcite DphypJoinReorderRule](./dphyp-join-reorder.md) - `calcite-dphyp-join-reorder`
+- ["JoinAssociate"](./join-associate.md) - `join-associate`
+- [Join Associativity](./join-associativity.md) - `join-associativity`
+- [Join Commutativity](./join-commutativity.md) - `join-commutativity`
+- ["JoinCommute"](./join-commute.md) - `join-commute`
+- ["JoinPushThroughJoin"](./join-push-through-join.md) - `join-push-through-join`
+- ["JoinToHyperGraph"](./join-to-hyper-graph.md) - `join-to-hyper-graph`
+- ["Join Union Transpose"](./join-union-transpose.md) - `join-union-transpose`
+- ["Learned Join Ordering"](./learned-join-order.md) - `learned-join-order`
+- [Left-Deep to Bushy Join Tree](./left-deep-to-bushy.md) - `left-deep-to-bushy`
+- [Calcite MultiJoinOptimizeBushyRule](./multi-join-optimize-bushy.md) - `calcite-multi-join-optimize-bushy`
+- [Outer Join to Inner Join Simplification](./outer-join-to-inner.md) - `outer-join-to-inner`
+- ["Sideways Information Passing"](./sideways-information-passing.md) - `sideways-information-passing`
+- [System R Dynamic Programming Join Ordering](./system-r-dynamic-programming.md) - `system-r-dynamic-programming`
+- ["System R Left-Deep Join Tree Enumeration"](./system-r-left-deep-enumeration.md) - `system-r-left-deep-enumeration`
+- ["AggregateMinMaxToLimit"](./aggregate-min-max-to-limit.md) - `aggregate-min-max-to-limit`
+- [LIMIT Before ORDER BY](./limit-before-order-by.md) - `limit-before-order-by`
+- [LIMIT Pushdown Through Join](./limit-join-pushdown.md) - `limit-join-pushdown`
+- [LIMIT 1 to EXISTS](./limit-one-to-exists.md) - `limit-one-to-exists`
+- [LIMIT Through Aggregate](./limit-through-aggregate.md) - `limit-through-aggregate`
+- [LIMIT Through Projection](./limit-through-projection.md) - `limit-through-projection`
+- [LIMIT Through UNION ALL](./limit-through-union-all.md) - `limit-through-union-all`
+- [LIMIT with Top-K Join](./limit-with-top-k-join.md) - `limit-with-top-k-join`
+- [OFFSET Zero Elimination](./offset-zero-elimination.md) - `offset-zero-elimination`
+- [Calcite SortJoinCopyRule](./sort-join-copy.md) - `calcite-sort-join-copy`
+- ["SortJoinTranspose"](./sort-join-transpose.md) - `sort-join-transpose`
+- [Sort-Limit Fusion](./sort-limit-fusion.md) - `sort-limit-fusion`
+- [Calcite SortMergeRule](./sort-merge.md) - `calcite-sort-merge`
+- [Calcite SortRemoveConstantKeysRule](./sort-remove-constant-keys.md) - `calcite-sort-remove-constant-keys`
+- [Calcite SortRemoveRedundantRule](./sort-remove-redundant.md) - `calcite-sort-remove-redundant`
+- ["SortRemove"](./sort-remove.md) - `sort-remove`
+- [Array UNNEST Position Optimization](./array-unnest-pushdown.md) - `array-unnest-pushdown`
+- ["JSON Path Optimization"](./json-path-optimization.md) - `json-path-optimization`
+- [JSON Path Expression Pushdown](./json-path-pushdown.md) - `json-path-pushdown`
+- ["XML Query Rewrite"](./xml-query-rewrite.md) - `xml-query-rewrite`
+- ["Expand Disjunction For Join"](./expand-disjunction-for-join.md) - `expand-disjunction-for-join`
+- ["FilterAggregateTranspose"](./filter-aggregate-transpose.md) - `filter-aggregate-transpose`
+- [Calcite FilterCorrelateRule](./filter-correlate.md) - `calcite-filter-correlate`
+- ["Filter Transpose Aggregate"](./filter-into-aggregate.md) - `filter-into-aggregate`
+- [Filter Absorption Into Join Condition](./filter-into-join-condition.md) - `filter-into-join-condition`
+- ["Filter Into Join"](./filter-into-join.md) - `filter-into-join`
+- [Calcite FilterJoinRule](./filter-join-push.md) - `calcite-filter-join`
+- ["FilterJoin"](./filter-join.md) - `filter-join`
+- [Filter Merge (Cascading Selections)](./filter-merge.md) - `filter-merge`
+- ["FilterProjectTranspose"](./filter-project-transpose.md) - `filter-project-transpose`
+- [Calcite FilterSortTransposeRule](./filter-sort-transpose.md) - `calcite-filter-sort-transpose`
+- [Calcite FilterTableFunctionTransposeRule](./filter-table-function-transpose.md) - `calcite-filter-table-function-transpose`
+- [Calcite FilterTableScanRule](./filter-table-scan.md) - `calcite-filter-table-scan`
+- [Filter Pushdown Through Join](./filter-through-join.md) - `filter-through-join`
+- [Filter Pushdown Through Projection](./filter-through-project.md) - `filter-through-project`
+- [Filter Pushdown Through Union](./filter-through-union.md) - `filter-through-union`
+- ["Function Push-Down"](./function-push-down.md) - `function-push-down`
+- ["JoinDeriveIsNotNullFilter"](./join-derive-is-not-null-filter.md) - `join-derive-is-not-null-filter`
+- [Calcite JoinExtractFilterRule](./join-extract-filter.md) - `calcite-join-extract-filter`
+- [Calcite JoinPushExpressionsRule](./join-push-expressions.md) - `calcite-join-push-expressions`
+- [Calcite JoinPushTransitivePredicatesRule](./join-push-transitive-predicates.md) - `calcite-join-push-transitive-predicates`
+- ["Partition Pushdown"](./partition-pushdown.md) - `partition-pushdown`
+- ["Predicate Transitive Closure"](./predicate-transitive-closure.md) - `predicate-transitive-closure`
+- ["Starburst Constraint-Based Predicate Propagation"](./starburst-constraint-propagation.md) - `starburst-constraint-propagation`
+- ["Starburst Referential Integrity Rewrite"](./starburst-referential-integrity-rewrite.md) - `starburst-referential-integrity-rewrite`
+- [Starburst Semantic Query Optimization](./starburst-semantic-optimization.md) - `starburst-semantic-optimization`
+- ["Storage Push-Down Aware"](./storage-push-down-aware.md) - `storage-push-down-aware`
+- [Column Pruning (Dead Column Elimination)](./column-pruning.md) - `column-pruning`
+- [Calcite JoinProjectTransposeRule](./join-project-transpose.md) - `calcite-join-project-transpose`
+- ["ProjectAggregateMerge"](./project-aggregate-merge.md) - `project-aggregate-merge`
+- [Project Calc Merge](./project-calc-merge.md) - `calcite-project-calc-merge`
+- [Calcite ProjectCorrelateTransposeRule](./project-correlate-transpose.md) - `calcite-project-correlate-transpose`
+- [Project Exchange Transpose](./project-exchange-transpose.md) - `calcite-project-exchange-transpose`
+- [Calcite ProjectFilterTransposeRule](./project-filter-transpose.md) - `calcite-project-filter-transpose`
+- [Calcite ProjectJoinTransposeRule](./project-join-transpose.md) - `calcite-project-join-transpose`
+- [Projection Merge](./project-merge.md) - `project-merge`
+- [Project Multi-Join Merge](./project-multi-join-merge.md) - `calcite-project-multi-join-merge`
+- [Project Remove (Identity)](./project-remove-trivial.md) - `calcite-project-remove`
+- [Calcite ProjectSetOpTransposeRule](./project-set-op-transpose.md) - `calcite-project-set-op-transpose`
+- [Calcite ProjectSortTransposeRule](./project-sort-transpose.md) - `calcite-project-sort-transpose`
+- [Project Subquery to Correlate](./project-subquery-remove.md) - `calcite-project-subquery-remove`
+- [Calcite ProjectTableScanRule](./project-table-scan.md) - `calcite-project-table-scan`
+- [Projection Pushdown Through Join](./project-through-join.md) - `project-through-join`
+- [Project Values Reduction](./project-values-reduction.md) - `calcite-project-values-reduction`
+- [Calcite ProjectWindowTransposeRule](./project-window-transpose.md) - `calcite-project-window-transpose`
+- ["Sort Project Merge"](./sort-project-merge.md) - `sort-project-merge`
+- [Audit Trail Predicate Injection](./audit-predicate-injection.md) - `audit-predicate-injection`
+- ["Column Level Security"](./column-level-security.md) - `column-level-security`
+- [Column Masking Projection Pushdown](./column-masking-pushdown.md) - `column-masking-pushdown`
+- [Label-Based Access Control (LBAC) Optimization](./label-based-access-control.md) - `label-based-access-control`
+- [Differential Privacy Query Rewriting](./query-anonymization.md) - `query-anonymization`
+- [Row-Level Security Predicate Pushdown](./row-level-security-pushdown.md) - `row-level-security-pushdown`
+- [Calcite CalcRemoveRule](./calc-remove.md) - `calcite-calc-remove`
+- [Calcite CalcSplitRule](./calc-split.md) - `calcite-calc-split`
+- ["Constraint Propagation"](./constraint-propagation.md) - `constraint-propagation`
+- ["Delta Query Optimization"](./delta-query-optimization.md) - `delta-query-optimization`
+- [Calcite FilterCalcMergeRule](./filter-calc-merge.md) - `calcite-filter-calc-merge`
+- [Calcite FullToLeftAndRightJoinRule](./full-to-left-and-right-join.md) - `calcite-full-to-left-and-right-join`
+- ["Function Dependency Elimination"](./function-dependency-elimination.md) - `function-dependency-elimination`
+- ["Hint-Guided Optimization"](./hint-guided-optimization.md) - `hint-guided-optimization`
+- ["HoTTSQL Proof-Based Rewrite"](./hottsql-proof-based.md) - `hottsql-proof-based`
+- ["Incremental View Maintenance"](./incremental-view-maintenance.md) - `incremental-view-maintenance`
+- [Calcite JoinToCorrelateRule](./join-to-correlate.md) - `calcite-join-to-correlate`
+- [Calcite MarkToSemiOrAntiJoinRule](./mark-to-semi-or-anti-join.md) - `calcite-mark-to-semi-or-anti-join`
+- ["Materialized View Scan"](./materialized-view-scan.md) - `materialized-view-scan`
+- [Calcite ProjectCalcMergeRule](./project-calc-merge.md) - `calcite-project-calc-merge`
+- [Calcite SampleToFilterRule](./sample-to-filter.md) - `calcite-sample-to-filter`
+- ["Starburst Semantic Rewrite"](./starburst-semantic.md) - `starburst-semantic`
+- ["AggregateUnionTranspose"](./aggregate-union-transpose.md) - `aggregate-union-transpose`
+- [EXCEPT to Anti-Join](./except-to-anti-join.md) - `except-to-anti-join`
+- ["Filter Set Op Transpose"](./filter-set-op-transpose.md) - `filter-set-op-transpose`
+- [Calcite IntersectReorderRule](./intersect-reorder.md) - `calcite-intersect-reorder`
+- [Calcite IntersectToExistsRule](./intersect-to-exists.md) - `calcite-intersect-to-exists`
+- [Intersect to Semi-Join Conversion](./intersect-to-join.md) - `intersect-to-join`
+- [Calcite MinusToAntiJoinRule](./minus-to-anti-join.md) - `calcite-minus-to-anti-join`
+- [Calcite MinusToDistinctRule](./minus-to-distinct.md) - `calcite-minus-to-distinct`
+- [Calcite SetOpToFilterRule](./set-op-to-filter.md) - `calcite-set-op-to-filter`
+- ["UnionEliminator"](./union-eliminator.md) - `union-eliminator`
+- [Union Merge (Flatten Nested Unions)](./union-merge.md) - `union-merge`
+- ["Union Pull Up Constants"](./union-pull-up-constants.md) - `union-pull-up-constants`
+- [Calcite UnionToDistinctRule](./union-to-distinct.md) - `calcite-union-to-distinct`
+- [Calcite UnionToValuesRule](./union-to-values.md) - `calcite-union-to-values`
+- [Bloom Filter Pushdown for Join Reduction](./bloom-filter-pushdown.md) - `bloom-filter-pushdown`
+- [Constraint Propagation for Query Simplification](./constraint-propagation.md) - `constraint-propagation`
+- [Demand Transformation (Generalized Magic Sets)](./demand-transformation.md) - `demand-transformation`
+- ["Magic Sets Adorned Predicate Generation"](./magic-sets-adorned-predicates.md) - `magic-sets-adorned-predicates`
+- [Magic Sets Adorned Program Transformation](./magic-sets-adorned-program.md) - `magic-sets-adorned-program`
+- ["Sideways Information Passing Strategy (SIPS)"](./magic-sets-sideways-passing.md) - `magic-sets-sideways-passing`
+- ["Magic Sets Supplementary Predicate Creation"](./magic-sets-supplementary-predicates.md) - `magic-sets-supplementary-predicates`
+- [Predicate Transfer via Functional Dependencies](./predicate-transfer.md) - `predicate-transfer`
+- [Semi-Join Reduction for Distributed Queries](./semi-join-reduction.md) - `semi-join-reduction`
+- [Yannakakis Algorithm for Acyclic Joins](./yannakakis-algorithm.md) - `yannakakis-algorithm`
+- [ALL Subquery to Aggregation](./all-to-aggregation.md) - `all-to-aggregation`
+- [ANY Subquery to Semi Join](./any-to-semi-join.md) - `any-to-semi-join`
+- [Apply to Join](./apply-to-join.md) - `apply-to-join`
+- [Correlated ANY to Semi-Join](./correlated-any-to-semi-join.md) - `correlated-any-to-semi-join`
+- [Correlated Subquery Decorrelation](./correlated-subquery-decorrelation.md) - `correlated-subquery-decorrelation`
+- [Double Negation Elimination](./double-negation-elimination.md) - `double-negation-elimination`
+- [EXISTS to Semi-Join](./exists-to-semi-join.md) - `exists-to-semi-join`
+- [IN List to VALUES Join](./in-list-to-values-join.md) - `in-list-to-values-join`
+- [IN Subquery to Semi-Join](./in-subquery-to-semi-join.md) - `in-subquery-to-semi-join`
+- ["IntersectToDistinct"](./intersect-to-distinct.md) - `intersect-to-distinct`
+- ["IntersectToSemiJoin"](./intersect-to-semi-join.md) - `intersect-to-semi-join`
+- [Lateral Join Decorrelation](./lateral-join-decorrelation.md) - `lateral-join-decorrelation`
+- [Magic Sets Rewriting](./magic-sets-rewriting.md) - `magic-sets-rewriting`
+- [Max-1-Row Subquery Check](./max-1-row-subquery-check.md) - `max-1-row-subquery-check`
+- ["MinusToAntiJoin"](./minus-to-anti-join.md) - `minus-to-anti-join`
+- [NOT EXISTS to Anti-Join](./not-exists-to-anti-join.md) - `not-exists-to-anti-join`
+- [NOT IN to Anti-Join](./not-in-to-anti-join.md) - `not-in-to-anti-join`
+- [Scalar Subquery to Join](./scalar-subquery-to-join.md) - `scalar-subquery-to-join`
+- ["SetOpToFilter"](./set-op-to-filter.md) - `set-op-to-filter`
+- [Subquery Deduplication](./subquery-deduplication.md) - `subquery-deduplication`
+- [Subquery Hoisting](./subquery-hoisting.md) - `subquery-hoisting`
+- [Subquery Predicate Pullup](./subquery-predicate-pullup.md) - `subquery-predicate-pullup`
+- [Subquery to Window Function](./subquery-to-window.md) - `subquery-to-window`
+- [Subquery with Aggregation Unnesting](./subquery-with-aggregation-unnesting.md) - `subquery-with-aggregation-unnesting`
+- [Uncorrelated Subquery to Join](./uncorrelated-subquery-to-join.md) - `uncorrelated-subquery-to-join`
+- [Calcite UnnestDecorrelateRule](./unnest-decorrelate.md) - `calcite-unnest-decorrelate`
+- [Time Partition Chunk Exclusion](./chunk-exclusion.md) - `chunk-exclusion`
+- [Continuous Aggregate Query Rewriting](./continuous-aggregate-rewriting.md) - `continuous-aggregate-rewriting`
+- [Time Series Gap Fill Optimization](./gap-fill-optimization.md) - `gap-fill-optimization`
+- [Last-Point Query Optimization](./last-point-optimization.md) - `last-point-optimization`
+- [Time Bucket Aggregation Pushdown](./time-bucket-pushdown.md) - `time-bucket-pushdown`
+- ["Time Series Aggregation Pushdown"](./time-series-aggregation-pushdown.md) - `time-series-aggregation-pushdown`
+- ["Time Series Range Optimization"](./time-series-range-optimization.md) - `time-series-range-optimization`
+- [Materialized View Join Rewriting](./materialized-view-join-rewriting.md) - `mv-join-rewriting`
+- [Materialized View Aggregate Rollup](./mv-aggregate-rollup.md) - `mv-aggregate-rollup`
+- [Materialized View Incremental Maintenance](./mv-delta-maintenance.md) - `mv-delta-maintenance`
+- [Materialized View Filter Compensation](./mv-filter-compensation.md) - `mv-filter-compensation`
+- [Materialized View Lattice Optimization](./mv-lattice-optimization.md) - `mv-lattice-optimization`
+- [Materialized View Outer Join Rewriting](./mv-outer-join-rewriting.md) - `mv-outer-join-rewriting`
+- [Self-Maintainable Materialized View](./mv-self-maintenance.md) - `mv-self-maintenance`
+- [Materialized View Union Rewriting](./mv-union-rewriting.md) - `mv-union-rewriting`
+- ["Starburst Query Graph Model (QGM)"](./starburst-query-graph-model.md) - `starburst-query-graph-model`
+- ["Starburst View Merging and Unfolding"](./starburst-view-merging.md) - `starburst-view-merging`
+- ["Filter Window Transpose"](./filter-window-transpose.md) - `filter-window-transpose`
+- ["ProjectToWindow"](./project-to-window.md) - `project-to-window`
+- ["ProjectWindowTranspose"](./project-window-transpose.md) - `project-window-transpose`
+- [Window Function Filter Pushdown](./window-filter-pushdown.md) - `window-filter-pushdown`
+- [Window Frame Optimization](./window-frame-optimization.md) - `window-frame-optimization`
+- [Window Function Filter Pushdown](./window-function-pushdown.md) - `window-function-pushdown`
+- [Window Limit Pushdown](./window-limit-pushdown.md) - `window-limit-pushdown`
+- [Window Function Merge](./window-merge.md) - `window-merge`
+- [Window Partition Elimination](./window-partition-elimination.md) - `window-partition-elimination`
+- [Window Partition Pruning](./window-partition-pruning.md) - `window-partition-pruning`
+- [Window Projection Pushdown](./window-projection-pushdown.md) - `window-projection-pushdown`
+- [Window Sort Elimination](./window-sort-elimination.md) - `window-sort-elimination`
+- [Window to Aggregate Conversion](./window-to-aggregate.md) - `window-to-aggregate`

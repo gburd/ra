@@ -1,0 +1,179 @@
+# Rule: Cache-Conscious Radix Partitioning
+
+**Category:** hardware/accelerator
+**File:** `rules/hardware/accelerator/cache-conscious-partitioning.rra`
+
+## Metadata
+
+- **ID:** `cache-conscious-partitioning`
+- **Version:** "1.0.0"
+- **Databases:** duckdb, hyper, umbra, monetdb
+- **Tags:** cache, radix, partitioning, hash-join, tlb, cpu
+- **Authors:** "RA Contributors"
+
+
+# Cache-Conscious Radix Partitioning
+
+## Description
+
+Adds a radix partitioning pass before hash join so that each
+partition fits in the CPU cache. Instead of one large hash table
+with random access patterns, the data is first partitioned into
+cache-sized chunks using radix bits of the hash value. Each chunk
+is then joined independently with near-zero cache misses.
+
+**When to apply**: Both sides of a hash join are too large for the
+cache. Radix partitioning splits both sides into matching partitions
+that individually fit in L2 or L3 cache.
+
+**Why it works**: Random access into a large hash table causes one
+cache miss per probe. By partitioning first, each partition's hash
+table fits in L2 (256KB-1MB), eliminating cache misses during the
+probe phase. The partitioning pass itself is sequential and
+cache-friendly (streaming writes to TLB-friendly output buffers).
+
+## Relational Algebra
+
+```algebra
+R hash_join[c] S
+  -> radix_partition(R, bits) hash_join[c] radix_partition(S, bits)
+  where min(size(R), size(S)) > L2_cache
+    AND partitions(bits) * bucket_size <= L2_cache
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("cache-conscious-partitioning";
+    "(hash_join ?cond ?left ?right)" =>
+    "(partitioned_hash_join ?cond
+       (radix_partition ?left) (radix_partition ?right))"
+    if both_sides_exceed_cache("?left", "?right")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    left_stats: &Statistics,
+    right_stats: &Statistics,
+    hw: &HardwareProfile,
+) -> bool {
+    let build = if left_stats.row_count
+        <= right_stats.row_count
+    {
+        left_stats
+    } else {
+        right_stats
+    };
+
+    let build_bytes =
+        build.row_count as u64 * build.avg_row_size * 2;
+    build_bytes > hw.l2_cache_bytes
+}
+
+fn compute_radix_bits(
+    build_stats: &Statistics,
+    hw: &HardwareProfile,
+) -> u32 {
+    let build_bytes =
+        build_stats.row_count as u64 * build_stats.avg_row_size * 2;
+    let partitions_needed =
+        (build_bytes / hw.l2_cache_bytes) + 1;
+    // Round up to power of 2
+    (partitions_needed as f64).log2().ceil() as u32
+}
+```
+
+**Restrictions:**
+- Partitioning pass adds O(n) work for each input
+- Number of partitions must not exceed TLB entries (~512-4096)
+- Multi-pass partitioning needed when single pass creates too many
+  partitions
+- Skewed data can cause partition imbalance
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    build_stats: &Statistics,
+    probe_stats: &Statistics,
+    hw: &HardwareProfile,
+) -> f64 {
+    let build_bytes =
+        build_stats.row_count as u64
+            * build_stats.avg_row_size
+            * 2;
+
+    if build_bytes <= hw.l2_cache_bytes {
+        return 0.0;
+    }
+
+    let probe_n = probe_stats.row_count;
+
+    // Without partitioning: cache miss per probe
+    let miss_cost = if build_bytes > hw.l3_cache_bytes {
+        hw.dram_latency_ns
+    } else {
+        hw.l3_latency_ns
+    };
+    let unpartitioned_ns = probe_n * (miss_cost + 10.0);
+
+    // With partitioning: partition cost + cache-local probes
+    let partition_cost_ns =
+        (build_stats.row_count + probe_n) * 5.0; // ~5ns/tuple
+    let local_probe_ns = probe_n * 15.0; // L2-local, ~15ns
+    let partitioned_ns = partition_cost_ns + local_probe_ns;
+
+    if unpartitioned_ns > partitioned_ns {
+        (unpartitioned_ns - partitioned_ns) / unpartitioned_ns
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 2x-3x for joins where hash table is in DRAM.
+Foundational technique in modern analytical join implementations.
+
+## Test Cases
+
+### Positive: Large-large join
+
+```sql
+-- lineitem: 600M rows, orders: 150M rows
+-- Both hash tables exceed L3 cache
+SELECT * FROM lineitem l
+JOIN orders o ON l.l_orderkey = o.o_orderkey;
+
+-- Expected: Radix-partitioned hash join
+-- Plan: PartitionedHashJoin(
+--        build=RadixPartition(orders, bits=8),
+--        probe=RadixPartition(lineitem, bits=8))
+```
+
+### Negative: Build side fits in L2
+
+```sql
+-- region: 5 rows, hash table ~200 bytes
+SELECT * FROM nation n
+JOIN region r ON n.n_regionkey = r.r_regionkey;
+
+-- Expected: Simple hash join (no partitioning needed)
+-- Plan: HashJoin(build=region, probe=nation)
+```
+
+## References
+
+**Implementation in databases:**
+- DuckDB: Radix-partitioned hash join
+- MonetDB: Original radix join implementation
+- Umbra: Cache-conscious join operators
+
+**Academic papers:**
+- Manegold et al., "Optimizing Main-Memory Join on Modern Hardware", TKDE 2002
+- Kim et al., "Sort vs. Hash Revisited: Fast Join Implementation on Modern Multi-Core CPUs", VLDB 2009
+- Balkesen et al., "Main-Memory Hash Joins on Multi-Core CPUs: Tuning to the Underlying Hardware", ICDE 2013

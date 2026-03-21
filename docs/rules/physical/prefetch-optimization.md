@@ -1,0 +1,98 @@
+# Rule: Software Prefetch for Hash Table Probing
+
+**Category:** physical/hardware
+**File:** `rules/physical/hardware/prefetch-optimization.rra`
+
+## Metadata
+
+- **ID:** `prefetch-optimization`
+- **Version:** "1.0.0"
+- **Databases:** hyper, monetdb, umbra
+- **Tags:** physical, hardware, prefetch, cache, hash-join, memory
+- **Authors:** "Chen, Ailamaki, DeWitt"
+
+
+# Software Prefetch for Hash Table Probing
+
+## Description
+
+Inserts software prefetch instructions ahead of hash table probes to
+hide memory latency. During hash join probing, each lookup follows a
+pointer to a random hash bucket, causing cache misses. Group prefetching
+computes hash values for a batch of probe tuples, issues prefetch
+instructions for all their bucket locations, then processes the batch,
+by which time the data is in cache.
+
+**When to apply**: Hash join probe phase or hash aggregate lookup when
+the hash table exceeds L2 cache.
+
+## Relational Algebra
+
+```algebra
+-- Before: sequential hash probe (cache miss per lookup)
+for each row in probe:
+    bucket = hash_table[hash(row.key)]  -- cache miss
+
+-- After: group prefetch
+for each batch of W rows in probe:
+    for each row: prefetch(hash_table[hash(row.key)])
+    for each row: bucket = hash_table[hash(row.key)]  -- cache hit
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("group-prefetch-hash-probe";
+    "(hash-probe ?ht ?probe_batch)" =>
+    "(prefetch-hash-probe ?ht ?probe_batch (prefetch-distance 8))"
+    if hash_table_exceeds_cache("?ht")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(hash_table: &HashTable, system: &SystemInfo) -> bool {
+    hash_table.estimated_size_bytes() > system.l2_cache_size()
+        // Prefetch distance must be tuned to memory latency
+        && system.supports_prefetch_instructions()
+}
+```
+
+**Restrictions:**
+- Prefetch distance must match memory latency (~200-400 cycles)
+- Batch size (prefetch window) needs tuning per architecture
+- Diminishing returns if hash table fits in L3
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    probe_rows: f64,
+    cache_miss_rate: f64,
+    memory_latency_cycles: f64,
+) -> f64 {
+    let misses_hidden = probe_rows * cache_miss_rate * 0.8;
+    misses_hidden * memory_latency_cycles
+}
+```
+
+**Typical benefit**: 10-40% for probe-heavy hash joins.
+
+## Test Cases
+
+```sql
+-- Positive: large hash join with random probes
+SELECT * FROM lineitem l JOIN orders o ON l.orderkey = o.orderkey;
+-- Hash table on orders: random access pattern benefits from prefetch
+
+-- Negative: hash table fits in cache
+SELECT * FROM orders o JOIN nation n ON o.nationkey = n.nationkey;
+```
+
+## References
+
+- Chen, S. et al. "Improving Hash Join Performance through Prefetching" (ICDE 2004)
+- Kocberber, O. et al. "Meet the Walkers: Accelerating Index Traversals for In-Memory Databases" (MICRO 2013)

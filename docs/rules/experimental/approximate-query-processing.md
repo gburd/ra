@@ -1,0 +1,393 @@
+# Rule: "Approximate Query Processing"
+
+**Category:** experimental/approximate
+**File:** `rules/experimental/approximate/approximate-query-processing.rra`
+
+## Metadata
+
+- **ID:** `approximate-query-processing`
+- **Version:** "1.0.0"
+- **Databases:** spark, presto, duckdb, clickhouse
+- **Tags:** aqp, approximate, sampling, sketches, synopsis, error-bounds
+- **Authors:** "RA Contributors"
+
+
+# Approximate Query Processing
+
+## Description
+
+Returns approximate answers to aggregate queries with bounded error and
+confidence guarantees, trading accuracy for orders-of-magnitude speedup.
+AQP techniques work by processing a small sample or compressed summary
+(synopsis) instead of the full dataset.
+
+Three main AQP approaches:
+1. **Online sampling**: Sample rows at query time, scale up results.
+   No preprocessing, works for any query, but limited to simple aggregates.
+2. **Precomputed synopses**: Build stratified samples, sketches, or
+   wavelets offline. Fast query time but limited query coverage.
+3. **Sketch-based**: Use probabilistic data structures (HyperLogLog,
+   Count-Min, t-digest) for specific aggregate types.
+
+AQP is particularly effective for exploratory analytics where exact answers
+are unnecessary: dashboards, trend analysis, anomaly detection, and
+interactive data exploration.
+
+**When to apply**: Aggregate queries (COUNT, SUM, AVG, DISTINCT) on large
+datasets where approximate results with error bounds are acceptable.
+
+**Why it works**: Statistical sampling theory guarantees that a random
+sample of n rows produces estimates with standard error O(1/sqrt(n)),
+independent of dataset size. A 10K sample gives ~1% error whether the
+dataset has 1M or 1T rows.
+
+**Research status**: Mature for simple aggregates. Active research for
+joins, subqueries, and rare-group aggregates. Production systems:
+Apache Spark (approximate APIs), Google BigQuery (APPROX functions),
+Snowflake (SAMPLE).
+
+## Relational Algebra
+
+```algebra
+Exact: gamma[G, SUM(x)](R)   -- processes all of R
+AQP:   gamma[G, SUM(x)](SAMPLE(R, rate)) * (1/rate)
+
+Error bounds (for SUM/AVG, 95% confidence):
+  estimate +/- 1.96 * stddev(sample) / sqrt(sample_size) * scaling_factor
+
+Sketch-based:
+  COUNT(DISTINCT col): HyperLogLog(col), error ~1.04/sqrt(m)
+  Quantile(col, p): t-digest(col), relative error ~1%
+  Heavy hitters: Count-Min Sketch, space O(1/epsilon * log(1/delta))
+
+Online aggregation:
+  Return running estimate with shrinking confidence interval
+  CI_width(t) ~ 1/sqrt(tuples_processed_so_far)
+```
+
+## Implementation
+
+```rust
+use rand::Rng;
+
+struct ApproximateQueryEngine {
+    default_confidence: f64,
+    default_error_bound: f64,
+    max_sample_size: usize,
+}
+
+impl ApproximateQueryEngine {
+    fn approximate_count(
+        &self,
+        table: &Table,
+        predicate: &Predicate,
+        target_error: f64,
+    ) -> ApproximateResult {
+        let sample_size = self.required_sample_size(
+            0.5, // Unknown selectivity, assume 0.5 for max variance
+            target_error,
+        );
+
+        let sample = table.bernoulli_sample(sample_size);
+        let matches = sample
+            .iter()
+            .filter(|row| predicate.evaluate(row))
+            .count() as f64;
+
+        let rate = sample.len() as f64 / table.row_count as f64;
+        let estimate = matches / rate;
+
+        let sel = matches / sample.len() as f64;
+        let se = (sel * (1.0 - sel) / sample.len() as f64).sqrt();
+        let margin = 1.96 * se * table.row_count as f64;
+
+        ApproximateResult {
+            estimate,
+            lower_bound: (estimate - margin).max(0.0),
+            upper_bound: estimate + margin,
+            confidence: 0.95,
+            relative_error: margin / estimate.max(1.0),
+            sample_size: sample.len(),
+        }
+    }
+
+    fn approximate_sum(
+        &self,
+        table: &Table,
+        column: &str,
+        predicate: &Predicate,
+        target_error: f64,
+    ) -> ApproximateResult {
+        let sample = table.bernoulli_sample(
+            self.max_sample_size.min(table.row_count / 10),
+        );
+        let rate = sample.len() as f64 / table.row_count as f64;
+
+        let qualifying: Vec<f64> = sample
+            .iter()
+            .filter(|row| predicate.evaluate(row))
+            .map(|row| row.get_f64(column))
+            .collect();
+
+        if qualifying.is_empty() {
+            return ApproximateResult::zero();
+        }
+
+        let sample_sum: f64 = qualifying.iter().sum();
+        let estimate = sample_sum / rate;
+
+        // Variance of sum estimate
+        let mean = sample_sum / qualifying.len() as f64;
+        let variance: f64 = qualifying
+            .iter()
+            .map(|x| (x - mean).powi(2))
+            .sum::<f64>()
+            / (qualifying.len() - 1).max(1) as f64;
+
+        let se = (variance * table.row_count as f64 / sample.len() as f64).sqrt();
+        let margin = 1.96 * se;
+
+        ApproximateResult {
+            estimate,
+            lower_bound: estimate - margin,
+            upper_bound: estimate + margin,
+            confidence: 0.95,
+            relative_error: margin / estimate.abs().max(1.0),
+            sample_size: sample.len(),
+        }
+    }
+
+    fn approximate_count_distinct(
+        &self,
+        table: &Table,
+        column: &str,
+    ) -> ApproximateResult {
+        // HyperLogLog: O(m) space, ~1.04/sqrt(m) relative error
+        let precision = 14; // 2^14 = 16384 registers
+        let mut hll = HyperLogLog::new(precision);
+
+        for row in table.scan() {
+            let value = row.get(column);
+            hll.add(value);
+        }
+
+        let estimate = hll.count();
+        let relative_error = 1.04 / (1 << precision) as f64;
+
+        ApproximateResult {
+            estimate,
+            lower_bound: estimate * (1.0 - 2.0 * relative_error),
+            upper_bound: estimate * (1.0 + 2.0 * relative_error),
+            confidence: 0.95,
+            relative_error,
+            sample_size: table.row_count,
+        }
+    }
+
+    fn approximate_quantile(
+        &self,
+        table: &Table,
+        column: &str,
+        quantile: f64,
+    ) -> ApproximateResult {
+        // t-digest: merge-friendly quantile sketch
+        let mut digest = TDigest::new(100.0); // compression
+
+        for row in table.scan() {
+            let value = row.get_f64(column);
+            digest.add(value);
+        }
+
+        let estimate = digest.quantile(quantile);
+
+        // t-digest error is relative to rank, not value
+        ApproximateResult {
+            estimate,
+            lower_bound: digest.quantile(
+                (quantile - 0.01).max(0.0),
+            ),
+            upper_bound: digest.quantile(
+                (quantile + 0.01).min(1.0),
+            ),
+            confidence: 0.95,
+            relative_error: 0.01,
+            sample_size: table.row_count,
+        }
+    }
+
+    fn stratified_approximate(
+        &self,
+        table: &Table,
+        group_column: &str,
+        agg_column: &str,
+        total_sample_size: usize,
+    ) -> Vec<(String, ApproximateResult)> {
+        // Allocate samples per stratum proportional to variance
+        let strata = table.partition_by(group_column);
+        let total_rows: f64 = strata
+            .iter()
+            .map(|s| s.row_count as f64)
+            .sum();
+
+        let mut results = Vec::new();
+
+        for stratum in &strata {
+            let allocation = (stratum.row_count as f64 / total_rows
+                * total_sample_size as f64)
+                .ceil() as usize;
+
+            let sample = stratum.bernoulli_sample(allocation);
+            let rate = sample.len() as f64
+                / stratum.row_count as f64;
+
+            let values: Vec<f64> = sample
+                .iter()
+                .map(|r| r.get_f64(agg_column))
+                .collect();
+
+            let sum: f64 = values.iter().sum();
+            let estimate = sum / rate;
+
+            results.push((
+                stratum.group_value.clone(),
+                ApproximateResult {
+                    estimate,
+                    lower_bound: 0.0,
+                    upper_bound: 0.0,
+                    confidence: 0.95,
+                    relative_error: 0.0,
+                    sample_size: sample.len(),
+                },
+            ));
+        }
+
+        results
+    }
+
+    fn required_sample_size(
+        &self,
+        expected_selectivity: f64,
+        target_relative_error: f64,
+    ) -> usize {
+        let z = 1.96; // 95% confidence
+        let sel = expected_selectivity.clamp(0.01, 0.99);
+        let n = (z * z * sel * (1.0 - sel))
+            / (target_relative_error * target_relative_error);
+        (n.ceil() as usize).clamp(100, self.max_sample_size)
+    }
+}
+
+struct ApproximateResult {
+    estimate: f64,
+    lower_bound: f64,
+    upper_bound: f64,
+    confidence: f64,
+    relative_error: f64,
+    sample_size: usize,
+}
+
+struct HyperLogLog {
+    registers: Vec<u8>,
+    precision: u32,
+}
+
+struct TDigest {
+    centroids: Vec<(f64, f64)>,
+    compression: f64,
+}
+```
+
+**Restrictions:**
+- Sampling-based AQP fails for rare groups (< 30 samples per group)
+- Cannot approximate MIN/MAX reliably from samples
+- JOIN approximation requires correlated samples
+- WHERE clause on non-sampled columns introduces bias
+- Sketch mergeability varies by type (HLL: mergeable, reservoir: not)
+- Users must understand and accept error bounds
+
+## Cost Model
+
+```rust
+fn aqp_speedup(
+    exact_cost_ms: f64,
+    sample_rate: f64,
+    sketch_overhead: f64,
+) -> f64 {
+    let approx_cost = exact_cost_ms * sample_rate + sketch_overhead;
+    exact_cost_ms / approx_cost
+}
+```
+
+**Typical benefit**: 50-99% reduction in query time. A 1% sample gives
+~100x speedup with ~10% relative error for most aggregates.
+
+## Test Cases
+
+### Test 1: COUNT with 1% sample
+
+```sql
+SELECT COUNT(*) FROM events WHERE type = 'click';
+-- 1B events, 300M clicks (30% selectivity)
+-- Exact: 45 seconds (full scan)
+-- AQP (1% sample = 10M): ~0.5 seconds
+-- Estimate: 301M +/- 2.8M (0.9% relative error)
+-- 90x speedup
+```
+
+### Test 2: SUM with error bounds
+
+```sql
+SELECT SUM(revenue) FROM sales WHERE region = 'US';
+-- 500M rows, sum = $45.2B
+-- AQP (0.1% sample = 500K):
+-- Estimate: $44.8B +/- $1.2B (2.7% relative error)
+-- 1000x speedup, acceptable for dashboard
+```
+
+### Test 3: COUNT DISTINCT with HyperLogLog
+
+```sql
+SELECT APPROX_COUNT_DISTINCT(user_id) FROM page_views;
+-- 10B page views, 500M distinct users
+-- HLL (16K registers): estimate 498M (0.4% error)
+-- Uses 16KB memory vs 4GB for exact sort-based
+-- Mergeable across partitions/time windows
+```
+
+### Test 4: Rare group failure
+
+```sql
+SELECT country, AVG(purchase_amount)
+FROM transactions
+GROUP BY country;
+-- Liechtenstein: 47 transactions total
+-- 1% sample: 0-1 rows (unusable)
+-- Need stratified sampling with minimum per group
+-- Or fall back to exact for small groups
+```
+
+### Test 5: Approximate median
+
+```sql
+SELECT APPROX_PERCENTILE(latency_ms, 0.99) FROM requests;
+-- 1B requests, exact p99 = 2,847ms
+-- t-digest: estimate 2,831ms (0.6% error)
+-- Single-pass, fixed memory (~10KB)
+```
+
+## References
+
+**Foundational:**
+- Hellerstein, Haas, Wang, "Online Aggregation", SIGMOD 1997
+- Agarwal et al., "BlinkDB: Queries with Bounded Errors on Very Large Data", EuroSys 2013
+
+**Synopses and sketches:**
+- Cormode et al., "Synopses for Massive Data", Foundations and Trends in Databases 2012
+- Flajolet et al., "HyperLogLog: The Analysis of a Near-Optimal Cardinality Estimation Algorithm", AofA 2007
+- Dunning & Ertl, "Computing Extremely Accurate Quantiles Using t-Digests", arXiv 2019
+
+**Production systems:**
+- Apache Spark: `approx_count_distinct`, `approx_percentile`
+- Google BigQuery: `APPROX_COUNT_DISTINCT`, `APPROX_QUANTILES`
+- ClickHouse: `uniq`, `quantileTDigest`
+- Snowflake: `APPROX_COUNT_DISTINCT`, `APPROXIMATE PERCENTILE`

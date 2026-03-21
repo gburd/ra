@@ -1,0 +1,94 @@
+# Rule: Time Partition Chunk Exclusion
+
+**Category:** logical/time-series
+**File:** `rules/logical/time-series/chunk-exclusion.rra`
+
+## Metadata
+
+- **ID:** `chunk-exclusion`
+- **Version:** "1.0.0"
+- **Databases:** timescaledb, clickhouse, questdb, influxdb
+- **Tags:** logical, time-series, partition-pruning, chunk-exclusion, predicate
+- **Authors:** "Timescale Inc."
+
+
+# Time Partition Chunk Exclusion
+
+## Description
+
+Eliminates entire time-partitioned chunks from a query plan based on
+time-range predicates. Each chunk covers a known [min_time, max_time]
+range; if the query's WHERE clause does not overlap a chunk's range,
+that chunk is excluded entirely from the scan. This is the time-series
+equivalent of partition pruning.
+
+**When to apply**: Any query on a time-partitioned table with a predicate
+on the time column.
+
+## Relational Algebra
+
+```algebra
+-- Before: scan all chunks
+sigma[ts > '2024-06-01'](Append(C_jan, C_feb, ..., C_jun, ...))
+
+-- After: exclude non-overlapping chunks
+sigma[ts > '2024-06-01'](Append(C_jun, C_jul, ...))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("chunk-exclusion";
+    "(filter ?time_pred (append ?chunks))" =>
+    "(filter ?time_pred (append (exclude-chunks ?time_pred ?chunks)))"
+    if is_time_predicate("?time_pred")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(pred: &Predicate, table: &TimeSeriesTable) -> bool {
+    pred.references_time_column(table.time_column())
+        && pred.is_range_predicate() // =, <, >, BETWEEN
+        && table.chunk_count() > 1
+}
+```
+
+**Restrictions:**
+- Predicate must be on the partitioning time column
+- Expression predicates (e.g., ts + interval) may not be prunable
+- Runtime parameters require deferred pruning at execution time
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    total_chunks: usize,
+    excluded_chunks: usize,
+    avg_chunk_rows: f64,
+) -> f64 {
+    excluded_chunks as f64 * avg_chunk_rows * 8.0
+}
+```
+
+**Typical benefit**: 50-99% for narrow time-range queries on large tables.
+
+## Test Cases
+
+```sql
+-- Positive: recent data query on year-long table
+SELECT * FROM metrics
+WHERE ts >= NOW() - INTERVAL '1 hour';
+-- Excludes all chunks except the current one
+
+-- Negative: full table scan (no time predicate)
+SELECT COUNT(*) FROM metrics;
+```
+
+## References
+
+- TimescaleDB: Chunk Exclusion documentation
+- PostgreSQL: Partition Pruning

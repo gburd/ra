@@ -1,0 +1,290 @@
+# Rule: Codd's Relational Algebra Equivalences
+
+**Category:** logical/expression-simplification
+**File:** `rules/logical/expression-simplification/codd-relational-completeness.rra`
+
+## Metadata
+
+- **ID:** `codd-relational-completeness`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, duckdb, sqlite, clickhouse, cockroachdb, mssql, oracle
+- **Tags:** relational-algebra, equivalence, normalization, foundational
+- **Authors:** "E.F. Codd"
+
+
+# Codd's Relational Algebra Equivalences
+
+## Description
+
+Applies fundamental equivalences from Codd's relational algebra, the theoretical
+foundation of all relational query optimization. These algebraic laws enable
+rewriting queries into equivalent forms, establishing the soundness of
+optimizations like predicate pushdown, join commutativity, and projection
+elimination.
+
+**When to apply**: These are foundational transformations used by all query
+optimizers. They don't directly optimize but enable other optimizations by
+proving query equivalence. Every optimizer implicitly uses these laws.
+
+**Why it works:** Codd's relational algebra is a complete, closed algebra
+with well-defined semantics. The equivalence laws are mathematically provable,
+ensuring that transformations preserve query results while enabling
+exploration of the optimization search space.
+
+## Relational Algebra
+
+```algebra
+1. Selection commutativity:
+   σ_p1(σ_p2(R)) ≡ σ_p2(σ_p1(R)) ≡ σ_{p1 ∧ p2}(R)
+
+2. Projection idempotence:
+   π_L1(π_L2(R)) ≡ π_L1(R) if L1 ⊆ L2
+
+3. Join commutativity:
+   R ⋈ S ≡ S ⋈ R
+
+4. Join associativity:
+   (R ⋈ S) ⋈ T ≡ R ⋈ (S ⋈ T)
+
+5. Selection pushdown through join:
+   σ_p(R ⋈ S) ≡ σ_p(R) ⋈ S        if p references only R
+   σ_p(R ⋈ S) ≡ R ⋈ σ_p(S)        if p references only S
+   σ_p(R ⋈ S) ≡ σ_p1(R) ⋈ σ_p2(S) if p = p1 ∧ p2
+
+6. Projection pushdown through join:
+   π_L(R ⋈ S) ≡ π_L(π_{L∪attrs(join)}(R) ⋈ π_{L∪attrs(join)}(S))
+
+7. Distributivity of selection over union:
+   σ_p(R ∪ S) ≡ σ_p(R) ∪ σ_p(S)
+
+8. Distributivity of projection over union:
+   π_L(R ∪ S) ≡ π_L(R) ∪ π_L(S)
+
+9. Selection distributivity over difference:
+   σ_p(R − S) ≡ σ_p(R) − σ_p(S)
+
+10. Set difference vs. join:
+    R − S ≡ R − (R ⋈ S) if join is on all attributes
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// These are the fundamental rewrite rules in egg
+
+rw!("select-commute";
+    "(filter ?p1 (filter ?p2 ?input))" <=>
+    "(filter ?p2 (filter ?p1 ?input))"
+),
+
+rw!("select-merge";
+    "(filter ?p1 (filter ?p2 ?input))" <=>
+    "(filter (and ?p1 ?p2) ?input)"
+),
+
+rw!("join-commute";
+    "(join ?type ?pred ?left ?right)" <=>
+    "(join ?type ?pred ?right ?left)"
+    if is-commutative-join("?type")
+),
+
+rw!("join-associate";
+    "(join ?t1 ?p1
+       (join ?t2 ?p2 ?r1 ?r2)
+       ?r3)" <=>
+    "(join ?t2 ?p2
+       ?r1
+       (join ?t1 ?p1 ?r2 ?r3))"
+    if can-associate-joins("?t1", "?t2", "?p1", "?p2")
+),
+
+rw!("select-pushdown-join";
+    "(filter ?pred (join ?type ?jpred ?left ?right))" =>
+    "(join ?type ?jpred
+       (filter (left-preds ?pred) ?left)
+       (filter (right-preds ?pred) ?right))"
+    if can-split-predicate("?pred", "?left", "?right")
+),
+
+rw!("project-pushdown-join";
+    "(project ?cols (join ?type ?pred ?left ?right))" =>
+    "(project ?cols
+       (join ?type ?pred
+         (project (left-cols ?cols ?pred) ?left)
+         (project (right-cols ?cols ?pred) ?right)))"
+),
+
+rw!("select-over-union";
+    "(filter ?pred (union ?all (list ?r1 ?r2)))" <=>
+    "(union ?all (list
+       (filter ?pred ?r1)
+       (filter ?pred ?r2)))"
+),
+
+rw!("project-over-union";
+    "(project ?cols (union ?all (list ?r1 ?r2)))" <=>
+    "(union ?all (list
+       (project ?cols ?r1)
+       (project ?cols ?r2)))"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    _stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> bool {
+    // These laws are always valid (mathematical equivalences)
+    // But specific applications may have preconditions
+    true
+}
+```
+
+**Restrictions:**
+- Join associativity only valid for inner joins (outer joins require care)
+- Join commutativity requires symmetric join types (not LEFT/RIGHT outer)
+- Set operations (UNION, INTERSECT, EXCEPT) have specific restrictions
+  - UNION and INTERSECT are commutative and associative
+  - EXCEPT (difference) is neither
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    // These rules don't directly optimize, they enable optimization
+    // Benefit comes from subsequent rules (e.g., filter pushdown)
+
+    // Selection pushdown benefit (enables early filtering)
+    if stats.is_selection_pushdown {
+        return 0.3; // 30% from early filtering
+    }
+
+    // Join reordering benefit (enables better join order)
+    if stats.is_join_reordering {
+        return 0.2; // 20% from better join order
+    }
+
+    // Otherwise, neutral transformation
+    0.0
+}
+```
+
+**Assumptions:**
+- Equivalences are cost-neutral themselves (no overhead)
+- Enable subsequent optimizations that provide the actual benefit
+- Fundamental to correctness of optimizer (prove transformations valid)
+
+**Typical benefit**: 0-30% directly; unlimited indirectly (enable all optimizations).
+
+## Test Cases
+
+### Positive: Selection commutativity enables merge
+
+```sql
+-- Two filters in sequence
+SELECT * FROM orders
+WHERE status = 'shipped'
+  AND order_date > '2024-01-01';
+
+-- Codd's law: σ_p1(σ_p2(R)) ≡ σ_{p1 ∧ p2}(R)
+-- Enables filter merge optimization
+```
+
+### Positive: Join commutativity enables better order
+
+```sql
+-- Original join order
+SELECT * FROM small_table s
+JOIN large_table l ON s.id = l.small_id;
+
+-- Codd's law: R ⋈ S ≡ S ⋈ R
+-- Optimizer can try both orders, choose better one
+```
+
+### Positive: Selection pushdown through join
+
+```sql
+-- Filter after join
+SELECT * FROM orders o
+JOIN customers c ON o.customer_id = c.id
+WHERE c.region = 'US';
+
+-- Codd's law: σ_p(R ⋈ S) ≡ R ⋈ σ_p(S)
+-- Push filter to customer scan, reduce join cardinality
+```
+
+### Positive: Projection pushdown
+
+```sql
+-- Only need a few columns
+SELECT o.order_id, c.name
+FROM orders o
+JOIN customers c ON o.customer_id = c.id;
+
+-- Codd's law enables projecting only needed columns early
+-- Reduces join intermediate result size
+```
+
+### Negative: Outer join commutativity (invalid!)
+
+```sql
+-- LEFT JOIN is NOT commutative
+SELECT * FROM orders o
+LEFT JOIN customers c ON o.customer_id = c.id;
+-- ≠
+SELECT * FROM customers c
+LEFT JOIN orders o ON o.customer_id = c.id;
+
+-- These produce different results!
+-- Codd's laws only apply to inner joins for commutativity
+```
+
+### Positive: Distributivity over union
+
+```sql
+-- Filter on union
+SELECT * FROM (
+  SELECT * FROM orders_2023
+  UNION ALL
+  SELECT * FROM orders_2024
+) WHERE region = 'US';
+
+-- Codd's law: σ_p(R ∪ S) ≡ σ_p(R) ∪ σ_p(S)
+-- Push filter into both union branches
+```
+
+## References
+
+**Original papers:**
+- Codd, E.F., "A Relational Model of Data for Large Shared Data Banks", CACM 1970
+  - DOI: 10.1145/362384.362685
+  - THE foundational paper defining relational model and algebra
+
+- Codd, E.F., "Relational Completeness of Data Base Sublanguages", Database Systems 1972
+  - Formal definition of relational algebra operations and equivalences
+
+- Ullman, J.D., "Principles of Database and Knowledge-Base Systems, Volume II", 1989
+  - ISBN: 0-7167-8162-X
+  - Comprehensive treatment of relational algebra equivalences
+
+**Extensions and proofs:**
+- Aho, A.V., Sagiv, Y., Ullman, J.D., "Equivalences Among Relational Expressions", SIAM Journal on Computing 1979
+  - DOI: 10.1137/0208024
+  - Formal proofs of equivalence laws
+
+- Galindo-Legaria, C., Rosenthal, A., "Outerjoin Simplification and Reordering for Query Optimization", ACM TODS 1997
+  - DOI: 10.1145/249903.249979
+  - Extending Codd's laws to outer joins
+
+**Implementation in databases:**
+- Every relational database optimizer uses these laws
+- PostgreSQL: `src/backend/optimizer/plan/initsplan.c` - relational algebra transformations
+- MySQL: `sql/sql_optimizer.cc` - join reordering using equivalences
+- Modern query compilers (Apache Spark, Presto) all implement these laws

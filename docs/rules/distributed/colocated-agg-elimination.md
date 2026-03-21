@@ -1,0 +1,59 @@
+# Rule: Co-located Aggregation Exchange Elimination
+
+**Category:** distributed/aggregation
+**File:** `rules/distributed/aggregation/colocated-agg-elimination.rra`
+
+## Metadata
+
+- **ID:** `colocated-agg-elimination`
+- **Version:** "1.0.0"
+- **Databases:** cockroachdb, citus, greenplum, yellowbrick
+- **Tags:** distributed, aggregation, colocation, exchange-elimination, partition
+- **Authors:** "RA Contributors"
+
+
+# Co-located Aggregation Exchange Elimination
+
+## Description
+
+When the table is already hash-partitioned on the GROUP BY keys, no
+exchange is needed at all. The aggregation can run entirely locally
+on each node, and the results are the final answers. This eliminates
+all network overhead.
+
+**When to apply**: Input data is hash-partitioned on the exact GROUP BY
+keys (or a superset), so all rows for a given group are already on the
+same node.
+
+## Relational Algebra
+
+```algebra
+-- Before (unnecessary exchange)
+gamma[g, agg(a)](Exchange[hash(g)](R))
+-- where R is already partitioned on g
+
+-- After (no exchange needed)
+gamma[g, agg(a)](R)
+```
+
+## Test Cases
+
+```sql
+-- Positive: table partitioned on group key
+SELECT tenant_id, COUNT(*) FROM events GROUP BY tenant_id;
+-- events is hash-partitioned on tenant_id
+
+-- Positive: multi-column match
+SELECT region, product_type, SUM(sales)
+FROM sales_partitioned GROUP BY region, product_type;
+-- table partitioned on (region, product_type)
+
+-- Negative: group key differs from partition key
+SELECT customer_id, SUM(amount) FROM orders GROUP BY customer_id;
+-- orders partitioned on order_id, not customer_id
+```
+
+## References
+
+CockroachDB: opt/norm/rules/agg.opt (EliminateAggDistinctForKeys)
+Citus: distributed_planner.c (check_partition_column_in_groupby)

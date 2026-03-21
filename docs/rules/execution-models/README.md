@@ -1,0 +1,150 @@
+# execution-models Rules
+
+Total rules in this category:      124
+
+## Overview
+
+Execution model rules define different paradigms for query execution including vectorized, compiled, streaming, and adaptive approaches.
+
+## Subcategories
+
+- [adaptive](./adaptive/) -       15 rules
+- [approximate](./approximate/) -        1 rules
+- [column-at-a-time](./column-at-a-time/) -       20 rules
+- [compilation](./compilation/) -        1 rules
+- [differential](./differential/) -       18 rules
+- [experimental](./experimental/) -        8 rules
+- [morsel-driven](./morsel-driven/) -       13 rules
+- [pipeline](./pipeline/) -        1 rules
+- [push-based](./push-based/) -       10 rules
+- [streaming](./streaming/) -        7 rules
+- [top-down](./top-down/) -        1 rules
+- [vectorized](./vectorized/) -       13 rules
+- [volcano](./volcano/) -       16 rules
+
+## Rules
+
+- [Adaptive Aggregation Strategy Switching](./adaptive-aggregation-switching.md) - `adaptive-aggregation-switching`
+- [Adaptive Batch Size Tuning](./adaptive-batch-sizing.md) - `adaptive-batch-sizing`
+- [Adaptive Runtime Bloom Filter](./adaptive-bloom-filter.md) - `adaptive-bloom-filter`
+- [Adaptive Index vs. Scan Routing](./adaptive-index-routing.md) - `adaptive-index-routing`
+- [Adaptive Runtime Join Selection](./adaptive-join-selection.md) - `adaptive-join-selection`
+- [Adaptive Memory Grant Feedback](./adaptive-memory-grant.md) - `adaptive-memory-grant`
+- [Adaptive Parallelism Scaling](./adaptive-parallelism-scaling.md) - `adaptive-parallelism-scaling`
+- [Adaptive Query Re-optimization](./adaptive-query-reoptimization.md) - `adaptive-query-reoptimization`
+- [Adaptive Data Skew Handling](./adaptive-skew-handling.md) - `adaptive-skew-handling`
+- [Adaptive Sort Strategy Selection](./adaptive-sort-strategy.md) - `adaptive-sort-strategy`
+- [Adaptive Spill-to-Disk Strategy](./adaptive-spill-strategy.md) - `adaptive-spill-strategy`
+- ["Dynamic Pipeline Optimization"](./dynamic-pipeline-optimization.md) - `dynamic-pipeline-optimization`
+- ["EDDY - Adaptive Query Execution"](./eddy-adaptive-execution.md) - `eddy-adaptive-execution`
+- ["Progressive Sampling"](./progressive-sampling.md) - `progressive-sampling`
+- ["Query Feedback Loop"](./query-feedback-loop.md) - `query-feedback-loop`
+- ["Approximate Query Processing"](./approximate-query-processing.md) - `approximate-query-processing`
+- [Column-at-a-Time Adaptive Execution](./column-adaptive-execution.md) - `column-adaptive-execution`
+- [Column-at-a-Time Aggregation](./column-aggregate.md) - `column-aggregate`
+- [Column-at-a-Time Batch Processing](./column-batch-processing.md) - `column-batch-processing`
+- [Column-at-a-Time Cache-Conscious Processing](./column-cache-conscious.md) - `column-cache-conscious`
+- [Column Chunk Size Selection](./column-chunk-sizing.md) - `column-chunk-sizing`
+- [Column-at-a-Time Compression-Aware Processing](./column-compression-aware.md) - `column-compression-aware`
+- [Column-at-a-Time Compression-Aware Execution](./column-compression.md) - `column-compression`
+- [Decomposed Storage Model Exploitation](./column-decomposed-storage.md) - `column-decomposed-storage`
+- [Column-at-a-Time Filter with Selection Vectors](./column-filter.md) - `column-filter`
+- [Column-at-a-Time Hash Join](./column-hash-join.md) - `column-hash-join`
+- ["Column-at-a-Time Late Materialization"](./column-late-materialization.md) - `column-late-materialization`
+- [Column-at-a-Time Late Tuple Reconstruction](./column-late-tuple-reconstruction.md) - `column-late-tuple-reconstruction`
+- [Column-at-a-Time Late Materialization](./column-materialization.md) - `column-materialization`
+- [Multi-Column Compound Operations](./column-multi-operation.md) - `column-multi-operation`
+- [Column-at-a-Time Projection and Expression Evaluation](./column-projection.md) - `column-projection`
+- [Column-at-a-Time Table Scan (MonetDB X100)](./column-scan.md) - `column-scan`
+- [Column-at-a-Time Selection Vector Pushdown](./column-selection-pushdown.md) - `column-selection-pushdown`
+- [Column-at-a-Time SWAR String Processing](./column-string-swar.md) - `column-string-swar`
+- [Column-at-a-Time Vectorized Expression Evaluation](./column-vectorized-expression.md) - `column-vectorized-expression`
+- [Column-at-a-Time SIMD Vectorized Primitives](./column-vectorized-ops.md) - `column-vectorized-ops`
+- ["Compilation to Native Code"](./compilation-to-native.md) - `compilation-to-native`
+- [Differential Arrangements (Indexed State)](./differential-arrangement.md) - `differential-arrangement`
+- [Differential Changelog Representation](./differential-changelog.md) - `differential-changelog`
+- [Differential Collection Operators](./differential-collection-operators.md) - `differential-collection-operators`
+- [Differential Collection Consolidation](./differential-consolidation.md) - `differential-consolidation`
+- [Differential Delta Query Processing](./differential-delta-query.md) - `differential-delta-query`
+- [Differential Frontier Advancement Protocol](./differential-frontier-advancement.md) - `differential-frontier-advancement`
+- [Differential Incremental Aggregation](./differential-incremental-aggregation.md) - `differential-incremental-aggregation`
+- [Differential Incremental Join](./differential-incremental-join.md) - `differential-incremental-join`
+- [Differential Incremental View Maintenance](./differential-incremental-view.md) - `differential-incremental-view`
+- [Differential Late-Arriving Data Handling](./differential-late-data.md) - `differential-late-data`
+- [Differential Monotonic Top-K](./differential-monotonic-topk.md) - `differential-monotonic-topk`
+- [Differential Retraction Handling](./differential-retraction-handling.md) - `differential-retraction-handling`
+- [Differential State Management and Compaction](./differential-state-management.md) - `differential-state-management`
+- [Differential Incremental Stream Aggregation](./differential-stream-aggregate.md) - `differential-stream-aggregate`
+- [Differential Incremental Stream Join](./differential-stream-join.md) - `differential-stream-join`
+- [Differential Time-Aware Operators](./differential-time-aware-operators.md) - `differential-time-aware-operators`
+- [Differential Timely Dataflow Execution](./differential-timely-dataflow.md) - `differential-timely-dataflow`
+- [Differential Watermark and Frontier Tracking](./differential-watermark.md) - `differential-watermark`
+- [Adaptive Indexing (Database Cracking)](./adaptive-indexing.md) - `adaptive-indexing`
+- [Approximate Query Processing (AQP)](./approximate-query-processing.md) - `approximate-query-processing`
+- [GPU-Accelerated Query Processing](./gpu-offloading.md) - `gpu-offloading`
+- [Learned Cost Models](./learned-cost-models.md) - `learned-cost-models`
+- [ML-Based Cardinality Estimation](./ml-cardinality-estimation.md) - `ml-cardinality-estimation`
+- [Quantum-Inspired Query Optimization](./quantum-inspired-optimization.md) - `quantum-inspired-optimization`
+- [Experimental Query Compilation Approaches](./query-compilation-jit.md) - `query-compilation-jit`
+- [Reinforcement Learning for Join Ordering](./rl-join-ordering.md) - `rl-join-ordering`
+- [Morsel-Driven Cache Locality Optimization](./morsel-cache-locality.md) - `morsel-cache-locality`
+- [Morsel-Driven Adaptive Morsel Sizing](./morsel-driven-adaptive-sizing.md) - `morsel-driven-adaptive-sizing`
+- [Morsel-Driven Parallel Aggregation](./morsel-driven-aggregate.md) - `morsel-driven-aggregate`
+- [Morsel-Driven Parallel Hash Join](./morsel-driven-hash-join.md) - `morsel-driven-hash-join`
+- [Morsel-Driven Lock-Free Data Structures](./morsel-driven-lock-free.md) - `morsel-driven-lock-free`
+- [Morsel-Driven NUMA-Aware Execution](./morsel-driven-numa-aware.md) - `morsel-driven-numa-aware`
+- [Morsel-Driven Parallel Execution Framework](./morsel-driven-parallelism.md) - `morsel-driven-parallelism`
+- [Morsel-Driven Pipeline Scheduling](./morsel-driven-pipeline.md) - `morsel-driven-pipeline`
+- [Morsel-Driven Parallel Table Scan](./morsel-driven-scan.md) - `morsel-driven-scan`
+- [Morsel-Driven Parallel Sort](./morsel-driven-sort.md) - `morsel-driven-sort`
+- [Morsel-Driven Work-Stealing Scheduler](./morsel-driven-work-stealing.md) - `morsel-driven-work-stealing`
+- [Morsel-Driven Memory Management](./morsel-memory-management.md) - `morsel-memory-management`
+- [Morsel-Driven Pipeline Breaker Handling](./morsel-pipeline-breakers.md) - `morsel-pipeline-breakers`
+- ["Volcano Iterator Model"](./volcano-iterator.md) - `volcano-iterator`
+- [Push-Based Adaptive Compilation Strategy](./push-based-adaptive-compilation.md) - `push-based-adaptive-compilation`
+- [Push-Based Compiled Aggregation](./push-based-aggregate.md) - `push-based-aggregate`
+- [Push-Based JIT Code Generation](./push-based-code-generation.md) - `push-based-code-generation`
+- [Push-Based Expression Fusion](./push-based-expression-fusion.md) - `push-based-expression-fusion`
+- [Push-Based Compiled Filter (Predicate Inlining)](./push-based-filter.md) - `push-based-filter`
+- [Push-Based Compiled Hash Join](./push-based-hash-join.md) - `push-based-hash-join`
+- [Push-Based LLVM Code Generation](./push-based-llvm-codegen.md) - `push-based-llvm-codegen`
+- [Push-Based Loop Fusion (Operator Fusion)](./push-based-loop-fusion.md) - `push-based-loop-fusion`
+- [Push-Based Data-Centric Execution Pipeline](./push-based-pipeline.md) - `push-based-pipeline`
+- [Push-Based Compiled Table Scan](./push-based-scan.md) - `push-based-scan`
+- [Streaming Operator Fusion](./operator-fusion.md) - `stream-operator-fusion`
+- [Retraction (Changelog) Optimization](./retraction-optimization.md) - `retraction-optimization`
+- ["Stream Join Optimization"](./stream-join-optimization.md) - `stream-join-optimization`
+- [Stream-Table Join Optimization](./stream-table-join.md) - `stream-table-join`
+- [Watermark Propagation Optimization](./watermark-propagation.md) - `watermark-propagation`
+- ["Window Aggregate Optimization"](./window-aggregate-optimization.md) - `window-aggregate-optimization`
+- [Window Function Over Stream Optimization](./window-over-stream.md) - `window-over-stream`
+- ["Cascades Memo Structure"](./cascades-memo.md) - `cascades-memo`
+- [Vectorized Adaptive Batch Sizing](./vectorized-adaptive-batching.md) - `vectorized-adaptive-batching`
+- [Vectorized Execution - Batch Aggregation](./vectorized-aggregate.md) - `vectorized-aggregate`
+- [Vectorized Lightweight Column Compression](./vectorized-compression.md) - `vectorized-compression`
+- ["Vectorized Execution"](./vectorized-execution.md) - `vectorized-execution`
+- [Vectorized SIMD Expression Evaluation](./vectorized-expression-eval.md) - `vectorized-expression-eval`
+- [Vectorized SIMD Filter](./vectorized-filter.md) - `vectorized-filter`
+- [Vectorized Execution - Hash Join](./vectorized-hash-join.md) - `vectorized-hash-join`
+- [Vectorized Predicate Pushdown into Scan](./vectorized-predicate-pushdown.md) - `vectorized-predicate-pushdown`
+- ["Vectorized Multi-Step PREWHERE Execution"](./vectorized-prewhere-chain.md) - `vectorized-prewhere-chain`
+- [Vectorized Execution - Batch Projection](./vectorized-projection.md) - `vectorized-projection`
+- [Vectorized Execution - Batch Table Scan](./vectorized-scan.md) - `vectorized-scan`
+- [Vectorized Execution - Cache-Conscious Radix Sort](./vectorized-sort.md) - `vectorized-sort`
+- ["Vectorized Top-K Dynamic Threshold Filter"](./vectorized-topk-filter.md) - `vectorized-topk-filter`
+- [Volcano Iterator Model - Hash Aggregation](./volcano-aggregate.md) - `volcano-aggregate`
+- [Volcano Iterator Model - Exchange Operator](./volcano-exchange-operator.md) - `volcano-exchange-operator`
+- [Volcano Iterator Model - Filter](./volcano-filter.md) - `volcano-filter`
+- [Volcano Iterator Model - Hash Join](./volcano-hash-join.md) - `volcano-hash-join`
+- [Volcano Iterator Model - Iterator Fusion](./volcano-iterator-fusion.md) - `volcano-iterator-fusion`
+- [Volcano Iterator Model - Iterator Protocol](./volcano-iterator-protocol.md) - `volcano-iterator-protocol`
+- [Volcano Iterator Model - Limit](./volcano-limit.md) - `volcano-limit`
+- [Volcano Iterator Model - Memory Management](./volcano-memory-management.md) - `volcano-memory-management`
+- [Volcano Iterator Model - Nested Loop Join](./volcano-nested-loop-join.md) - `volcano-nested-loop-join`
+- [Volcano Iterator Model - Pipeline Breakers](./volcano-pipeline-breakers.md) - `volcano-pipeline-breakers`
+- [Volcano Iterator Model - Projection](./volcano-projection.md) - `volcano-projection`
+- [Volcano Iterator Model - Table Scan](./volcano-scan.md) - `volcano-scan`
+- [Volcano Iterator Model - External Sort](./volcano-sort.md) - `volcano-sort`
+- [Volcano Iterator Model - Subquery Execution](./volcano-subquery-execution.md) - `volcano-subquery-execution`
+- [Volcano Iterator Model - Tuple-at-a-Time Materialization](./volcano-tuple-materialization.md) - `volcano-tuple-materialization`
+- [Volcano Iterator Model - Union](./volcano-union.md) - `volcano-union`

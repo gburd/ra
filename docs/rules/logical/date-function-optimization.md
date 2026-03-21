@@ -1,0 +1,121 @@
+# Rule: Date/Time Function Optimization
+
+**Category:** logical/function-optimization
+**File:** `rules/logical/function-optimization/date-function-optimization.rra`
+
+## Metadata
+
+- **ID:** `date-function-optimization`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, oracle, mssql, duckdb
+- **Tags:** function, date, time, timestamp, extraction, optimization
+- **Authors:** "RA Contributors"
+
+
+# Date/Time Function Optimization
+
+## Description
+
+Optimizes date and time function patterns by converting function-on-column
+predicates to range scans, folding constant date arithmetic, and
+simplifying redundant date operations.
+
+**When to apply**: Date/time expressions that prevent index usage or
+perform redundant computation.
+
+## Relational Algebra
+
+```algebra
+EXTRACT(YEAR FROM date_col) = 2024
+  -> date_col >= '2024-01-01' AND date_col < '2025-01-01'
+
+DATE_TRUNC('month', ts_col) = '2024-06-01'
+  -> ts_col >= '2024-06-01' AND ts_col < '2024-07-01'
+
+date_col + INTERVAL '0 days' -> date_col
+DATE(timestamp_col) = DATE(timestamp_col) -> TRUE (when NOT NULL)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("extract-year-to-range";
+    "(= (extract year ?col) (literal ?year))" =>
+    "(and (>= ?col (make-date ?year 1 1))
+          (< ?col (make-date (+ ?year 1) 1 1)))"
+),
+
+rw!("date-trunc-month-to-range";
+    "(= (date-trunc month ?col) (literal ?month_start))" =>
+    "(and (>= ?col (literal ?month_start))
+          (< ?col (add-interval (literal ?month_start) (interval 1 month))))"
+),
+
+rw!("date-add-zero-interval";
+    "(+ ?col (interval 0 ?unit))" => "?col"
+),
+
+rw!("extract-from-literal";
+    "(extract ?part (literal ?date))" =>
+    { EvalExtract { part: "?part", date: "?date" } }
+),
+```
+
+## Cost Model
+
+```rust
+fn estimated_benefit(table_size: u64, has_date_index: bool) -> f64 {
+    if has_date_index {
+        // Function prevents index use; range enables it
+        let scan_cost = table_size as f64;
+        let range_cost = table_size as f64 / 365.0; // ~1 year of daily data
+        (scan_cost - range_cost) / scan_cost
+    } else {
+        0.1 // Minor benefit from removing function call
+    }
+}
+```
+
+## Test Cases
+
+### Positive: EXTRACT YEAR to range
+
+```sql
+SELECT * FROM orders WHERE EXTRACT(YEAR FROM order_date) = 2024;
+-- Rewrite to: order_date >= '2024-01-01' AND order_date < '2025-01-01'
+-- Enables date index range scan
+```
+
+### Positive: DATE_TRUNC to range
+
+```sql
+SELECT * FROM events
+WHERE DATE_TRUNC('month', created_at) = '2024-06-01';
+-- Rewrite to: created_at >= '2024-06-01' AND created_at < '2024-07-01'
+```
+
+### Positive: Zero interval addition
+
+```sql
+SELECT order_date + INTERVAL '0 days' FROM orders;
+-- Rewrite to: SELECT order_date FROM orders;
+```
+
+### Negative: Complex date arithmetic with column
+
+```sql
+SELECT * FROM orders
+WHERE order_date + INTERVAL '30 days' > CURRENT_DATE;
+-- Cannot simplify: column arithmetic is necessary
+-- Could invert: order_date > CURRENT_DATE - INTERVAL '30 days'
+-- But CURRENT_DATE is STABLE, not IMMUTABLE
+```
+
+## References
+
+**Implementation:**
+- PostgreSQL: Date function support functions for index optimization
+- MySQL: Range optimization for date functions
+- Oracle: Date-based partition pruning

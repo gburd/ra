@@ -1,0 +1,120 @@
+# Rule: Calcite SemiJoinProjectTransposeRule
+
+**Category:** physical/join-algorithms
+**File:** `rules/physical/join-algorithms/semi-join-project-transpose.rra`
+
+## Metadata
+
+- **ID:** `calcite-semi-join-project-transpose`
+- **Version:** "1.0.0"
+- **Databases:** calcite, postgresql
+- **Tags:** physical, calcite, semi-join, project, transpose, pushdown
+- **Authors:** "RA Contributors"
+
+## Preconditions
+
+```yaml
+  - type: "pattern"
+    must_match: "(semi-join ?cond (project ?cols ?input) ?s)"
+    description: "Semi-join above a projection"
+  - type: "predicate"
+    condition: "references_subset(?cond, ?cols)"
+    description: "Semi-join columns must survive the projection"
+```
+
+
+# Calcite SemiJoinProjectTransposeRule
+
+## Description
+
+Pushes a semi-join down past a project on its left input. This
+exposes the base table to the semi-join, enabling index-based
+semi-join execution. The project is moved above the semi-join.
+
+**When to apply**: A semi-join's left input is a project, and all
+semi-join keys are simple column references in the project.
+
+**Why it works**: Moving the semi-join below the project allows
+it to filter rows at the base table level, where indexes may be
+available. The project above then operates on fewer rows.
+
+**Calcite class**: `org.apache.calcite.rel.rules.SemiJoinProjectTransposeRule`
+
+## Relational Algebra
+
+```algebra
+-- Before: semi-join on projected input
+SemiJoin[k](pi[a, b, k](X), Y)
+
+-- After: project above semi-join
+pi[a, b, k](SemiJoin[k](X, Y))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-semi-join-project-transpose";
+    "(semi-join ?cond (project ?exprs ?x) ?y)" =>
+    "(project ?exprs (semi-join ?remapped_cond ?x ?y))"
+    if all_semi_keys_are_input_refs("?cond", "?exprs")
+),
+```
+
+## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
+
+```rust
+fn applicable(
+    semi_join: &Join,
+    project: &Project,
+) -> bool {
+    semi_join.is_semi_join()
+        && semi_join.left_keys().iter().all(|&k| {
+            project.projects()[k].is_input_ref()
+        })
+}
+```
+
+**Restrictions:**
+- All semi-join keys must be simple column references (not expressions)
+- The semi-join condition must be remapped to reference original columns
+- Expressions in the project prevent pushdown of corresponding keys
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    x_rows: f64,
+    semi_selectivity: f64,
+    num_project_exprs: usize,
+) -> f64 {
+    let saved = x_rows * (1.0 - semi_selectivity);
+    saved * num_project_exprs as f64 * 0.001
+}
+```
+
+**Typical benefit**: 5-30% by filtering before computing projections.
+
+## Test Cases
+
+```sql
+-- Positive: semi-join pushed below project
+SELECT ename, deptno * 10 AS dept10 FROM emp
+WHERE empno IN (SELECT empno FROM bonus);
+-- Semi-join moved below the projection
+```
+
+```sql
+-- Negative: semi-join key is an expression
+SELECT empno + 1 AS emp1 FROM emp
+WHERE emp1 IN (SELECT bonus_id FROM bonus);
+-- emp1 is an expression; cannot remap semi-join key
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/SemiJoinProjectTransposeRule.java (commit af6367d)

@@ -1,0 +1,128 @@
+# Rule: mssql Adaptive Join
+
+**Category:** database-specific/mssql
+**File:** `rules/database-specific/mssql/adaptive-join.rra`
+
+## Metadata
+
+- **ID:** `mssql-adaptive-join`
+- **Version:** "1.0.0"
+- **Databases:** mssql
+- **Tags:** database-specific, mssql, adaptive-join, runtime, hash-join, nested-loop
+- **Authors:** "RA Contributors"
+
+
+# mssql Adaptive Join
+
+## Description
+
+mssql 2017+ introduces adaptive joins that defer the choice
+between nested-loop join and hash join until runtime.  The operator
+begins buffering rows from the build input.  If the actual row
+count stays below an adaptive threshold, it switches to nested-loop
+join (which is better for small inputs).  If the count exceeds the
+threshold, it uses the buffered rows to build a hash table and
+continues with hash join.
+
+**When to apply**: When the optimizer's cardinality estimate for
+the build side of a join is uncertain, and either nested-loop or
+hash join could be optimal depending on the actual row count.
+
+**Why it works**: Cardinality estimation errors are common,
+especially with parameter sniffing, correlated predicates, or
+multi-table joins.  Adaptive joins eliminate the performance cliff
+that occurs when the wrong join strategy is chosen.
+
+**Database version**: mssql 2017+ (compatibility level 140+)
+
+## Relational Algebra
+
+```algebra
+-- Before: static hash join (possibly wrong)
+hash_join[a.id = b.id](A, B)
+  -- but B might have only 10 rows
+
+-- After: adaptive join (decides at runtime)
+adaptive_join[a.id = b.id, threshold=T](A, B)
+  -- if |B| < T: nested-loop
+  -- if |B| >= T: hash join
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mssql-adaptive-join";
+    "(hash-join ?pred ?build ?probe)" =>
+    "(adaptive-join ?pred ?build ?probe)"
+    if is_database("mssql")
+    if cardinality_uncertain("?build")
+    if batch_mode_eligible("?build", "?probe")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    build_estimate: &CardinalityEstimate,
+    compat_level: u32,
+) -> bool {
+    compat_level >= 140
+    && build_estimate.confidence() < 0.8
+    && build_estimate.rows() > 1
+}
+```
+
+**Restrictions:**
+- Requires database compatibility level 140 or higher
+- Build input must be a single batch-mode eligible operator
+- Not used for outer joins or cross joins
+- Adaptive threshold is computed by the optimizer based on
+  memory grant and estimated costs
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    estimated_rows: f64,
+    actual_rows: f64,
+) -> f64 {
+    // Benefit comes from avoiding the wrong join type
+    let wrong_choice_penalty = if actual_rows < 100.0 {
+        // Hash join overhead for small input
+        actual_rows * 0.01
+    } else {
+        // Nested-loop overhead for large input
+        actual_rows * actual_rows * 0.0001
+    };
+    wrong_choice_penalty * 0.5
+}
+```
+
+**Typical benefit**: Eliminates 2-10x regressions caused by
+cardinality estimation errors on join inputs.
+
+## Test Cases
+
+```sql
+-- Positive: uncertain cardinality
+SELECT o.*, c.name
+FROM orders o JOIN customers c ON o.customer_id = c.id
+WHERE o.status = @status;
+-- Adaptive join: NL for selective @status, hash for broad
+```
+
+```sql
+-- Negative: cardinality is certain
+SELECT * FROM small_lookup l
+JOIN ref_table r ON l.code = r.code;
+-- Small lookup always uses nested-loop, no adaptation needed
+```
+
+## References
+
+Microsoft: "Adaptive Query Processing" documentation
+Microsoft: "Adaptive Joins" (mssql 2017+)
+Microsoft: sys.dm_exec_query_profiles (adaptive join statistics)

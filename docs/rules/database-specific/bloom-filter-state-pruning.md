@@ -1,0 +1,188 @@
+# Rule: Materialize Bloom Filter State Pruning
+
+**Category:** database-specific/materialize
+**File:** `rules/database-specific/materialize/bloom-filter-state-pruning.rra`
+
+## Metadata
+
+- **ID:** `materialize-bloom-filter-state-pruning`
+- **Version:** "1.0.0"
+- **Databases:** materialize
+- **Tags:** bloom-filter, state-pruning, join, memory, differential
+- **Authors:** "Materialize Inc."
+
+
+# Materialize Bloom Filter State Pruning
+
+## Description
+
+Uses bloom filters to prune arrangement state that will never be probed by join
+partners. When a join's probe side has a known key domain, a bloom filter built
+from probe keys can filter the build-side arrangement during compaction,
+discarding entries that will never match. This reduces arrangement memory for
+skewed joins where most build-side keys have no join partner.
+
+**When to apply**: Joins where the build-side arrangement is significantly
+larger than the probe side's key domain, and many build-side keys have no
+corresponding probe-side keys. Common in dimension-fact joins where the fact
+table references only a subset of dimension keys.
+
+**Why it works**: Without pruning, the build-side arrangement maintains all
+keys even if 90% will never be probed. A bloom filter built from the probe
+side's key set is O(n) to build and O(1) per membership test. During
+compaction, entries whose keys are definitely not in the bloom filter are
+discarded, reducing arrangement size proportional to the key overlap ratio.
+
+## Relational Algebra
+
+```algebra
+-- Before: full build-side arrangement
+hash-join(
+  arrange(dimension, key),      -- 10M rows, all maintained
+  stream(fact_table))            -- only references 100K distinct keys
+
+-- After: bloom-filtered arrangement
+hash-join(
+  bloom-prune(
+    arrange(dimension, key),
+    bloom-filter(distinct-keys(fact_table))),  -- filter to ~100K keys
+  stream(fact_table))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("materialize-bloom-prune-arrangement";
+    "(join ?type ?pred
+       (arrange ?build ?key)
+       ?probe)" =>
+    "(join ?type ?pred
+       (bloom-prune (arrange ?build ?key)
+          (bloom-build (distinct-keys ?probe ?key)))
+       ?probe)"
+    if build_much_larger_than_probe("?build", "?probe")
+    if join_is_equi("?pred")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> bool {
+    let build_keys = stats.build_side_distinct_keys as f64;
+    let probe_keys = stats.probe_side_distinct_keys as f64;
+    // Worth it when probe touches <50% of build keys
+    probe_keys < build_keys * 0.5
+        && build_keys > 10000  // overhead not worth for small arrangements
+}
+```
+
+**Restrictions:**
+- Bloom filters have false positive rate (~1-5%); some unneeded entries remain
+- Bloom filter must be rebuilt when probe-side key set changes significantly
+- Memory for bloom filter itself: ~10 bits per element at 1% FPR
+- Only applicable to equi-joins (cannot bloom-filter range predicates)
+- Probe-side key domain must be relatively stable
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let build_keys = stats.build_side_distinct_keys as f64;
+    let probe_keys = stats.probe_side_distinct_keys as f64;
+    let build_row_bytes = stats.build_avg_row_bytes as f64;
+    let fpr = 0.01; // 1% false positive rate
+
+    // Without pruning: all build keys maintained
+    let without = build_keys * build_row_bytes;
+
+    // With pruning: only matching keys + false positives
+    let matching_keys = probe_keys;
+    let false_positives = (build_keys - matching_keys) * fpr;
+    let with = (matching_keys + false_positives) * build_row_bytes;
+
+    // Bloom filter memory overhead
+    let bloom_bits = probe_keys * 10.0; // 10 bits/element for 1% FPR
+    let bloom_bytes = bloom_bits / 8.0;
+    let with_total = with + bloom_bytes;
+
+    if without > with_total {
+        (without - with_total) / without
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 20% to 5x memory reduction for selective joins.
+
+## Test Cases
+
+### Positive: Dimension-fact join with sparse reference
+
+```sql
+-- Products dimension: 1M products
+-- Recent orders fact: references only 50K products
+CREATE MATERIALIZED VIEW order_details AS
+SELECT o.id, o.amount, p.name, p.category
+FROM orders o
+JOIN products p ON o.product_id = p.id;
+
+-- Bloom filter built from orders.product_id (50K distinct)
+-- Products arrangement pruned from 1M to ~50K entries
+-- ~95% memory savings on products arrangement
+```
+
+### Positive: Multi-way join pruning
+
+```sql
+-- Three-way join: bloom filters cascade
+CREATE MATERIALIZED VIEW report AS
+SELECT c.name, o.amount, p.name AS product
+FROM customers c
+JOIN orders o ON c.id = o.customer_id
+JOIN products p ON o.product_id = p.id
+WHERE c.region = 'US';
+
+-- Filter on customers cascades:
+-- 1. Bloom filter from US customers prunes orders arrangement
+-- 2. Bloom filter from matching orders prunes products arrangement
+```
+
+### Negative: High overlap ratio
+
+```sql
+-- Nearly all build keys are referenced by probe side
+CREATE MATERIALIZED VIEW all_product_sales AS
+SELECT p.name, SUM(s.quantity)
+FROM products p
+JOIN sales s ON p.id = s.product_id
+GROUP BY p.name;
+
+-- If 95% of products have sales, bloom filter saves only 5%
+-- Overhead of bloom filter build/rebuild not justified
+```
+
+## References
+
+**Implementation:**
+- Materialize source: `src/compute/src/render/join/linear_join.rs`
+- Arrangement management: `src/compute/src/arrangement/manager.rs`
+
+**Documentation:**
+- Materialize blog: "How Materialize and differential-dataflow Work"
+
+**Papers:**
+- Bloom, B.H., "Space/Time Trade-offs in Hash Coding with Allowable Errors",
+  CACM 1970
+- McSherry, F., et al., "differential-dataflow", CIDR 2013
+- Zhu, S., et al., "Improving Join Performance in Streaming Systems with Bloom
+  Filters", EDBT 2019

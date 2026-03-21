@@ -1,0 +1,110 @@
+# Rule: MonetDB Vectorized Range Selection
+
+**Category:** database-specific/monetdb
+**File:** `rules/database-specific/monetdb/range-select.rra`
+
+## Metadata
+
+- **ID:** `monetdb-range-select`
+- **Version:** "1.0.0"
+- **Databases:** monetdb
+- **Tags:** database-specific, monetdb, range, selection, vectorized, SIMD
+- **Authors:** "RA Contributors"
+
+
+# MonetDB Vectorized Range Selection
+
+## Description
+
+MonetDB's BAT algebra implements range selection (`thetaselect`)
+using vectorized processing.  The selection operator scans a dense
+column array and produces a candidate OID list using SIMD
+instructions where available.  Branching is minimized through
+predication techniques.
+
+**When to apply**: A range predicate (>, <, BETWEEN) filters a
+numeric or date column.
+
+**Why it works**: Dense columnar arrays enable cache-line-aligned
+sequential scans.  SIMD instructions (SSE4/AVX2) compare 4-16
+values per instruction cycle.  Branchless predication avoids
+branch misprediction overhead.
+
+**Database version**: MonetDB 11+ (SIMD in MonetDB 11.30+)
+
+## Relational Algebra
+
+```algebra
+-- Vectorized range select
+candidates = thetaselect(products.price, >, 100.0)
+result = semijoin(products.*, candidates)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("monetdb-range-select";
+    "(filter (> ?col ?val) (scan ?table))" =>
+    "(fetch ?table
+        (theta-select ?col > ?val))"
+    if is_database("monetdb")
+    if is_numeric_or_date("?col")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    column: &Column,
+    predicate: &Predicate,
+) -> bool {
+    column.is_dense_bat()
+    && predicate.is_range()
+    && column.data_type().supports_simd()
+}
+```
+
+**Restrictions:**
+- SIMD acceleration requires fixed-width types (int, float, date)
+- String columns use different selection paths
+- Candidate lists are represented as OID BATs
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    rows: f64,
+    selectivity: f64,
+) -> f64 {
+    // Vectorized scan cost
+    let scan_cost = rows * 0.0001; // SIMD-accelerated
+    // Output OID list
+    let output_cost = rows * selectivity * 0.0005;
+    scan_cost + output_cost
+}
+```
+
+**Typical benefit**: 5-20x over row-at-a-time selection for
+numeric columns.
+
+## Test Cases
+
+```sql
+-- Positive: numeric range
+SELECT * FROM measurements WHERE value BETWEEN 0.5 AND 1.5;
+-- SIMD-vectorized scan of value column
+```
+
+```sql
+-- Negative: string predicate
+SELECT * FROM logs WHERE level = 'ERROR';
+-- Different selection path for strings
+```
+
+## References
+
+MonetDB: "MonetDB/X100: Hyper-Pipelining Query Execution" (CIDR 2005)
+Source: gdk/gdk_select.c, `BATthetaselect()`

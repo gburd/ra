@@ -1,0 +1,151 @@
+# Rule: GPU Parallel Table Scan
+
+**Category:** hardware/gpu
+**File:** `rules/hardware/gpu/gpu-parallel-scan.rra`
+
+## Metadata
+
+- **ID:** `gpu-parallel-scan`
+- **Version:** "1.0.0"
+- **Databases:** heavydb, blazingsql, pg-strom, sqream
+- **Tags:** gpu, scan, parallel, data-parallel
+- **Authors:** "RA Contributors"
+
+
+# GPU Parallel Table Scan
+
+## Description
+
+Offloads full table scans to the GPU when the table is large enough
+to amortize the PCIe data transfer overhead. The GPU processes tuples
+in massively parallel fashion using thousands of threads, achieving
+throughput that exceeds CPU scans for tables above the crossover size.
+
+**When to apply**: Table cardinality exceeds the GPU crossover threshold
+(typically 100K-1M rows depending on row width and GPU memory bandwidth).
+The table must fit in GPU memory or be streamable in chunks.
+
+**Why it works**: GPUs have hundreds of times more memory bandwidth than
+CPUs (e.g., 900 GB/s on A100 vs ~50 GB/s DDR5). For scan-heavy
+workloads that are memory-bandwidth bound, the GPU processes data
+faster despite the PCIe transfer cost.
+
+## Relational Algebra
+
+```algebra
+scan(R) -> gpu_scan(R)
+  where |R| > crossover_threshold
+    AND size(R) <= gpu_memory OR chunked_transfer_enabled
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("gpu-parallel-scan";
+    "(scan ?table)" =>
+    "(gpu_scan ?table)"
+    if table_exceeds_gpu_threshold("?table")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    hw: &HardwareProfile,
+) -> bool {
+    let table_rows = stats.row_count;
+    let row_bytes = stats.avg_row_size;
+    let table_bytes = table_rows as u64 * row_bytes;
+    let transfer_time_us =
+        table_bytes as f64 / hw.pcie_bandwidth_gbps / 1e3;
+    let gpu_scan_time_us =
+        table_bytes as f64 / hw.gpu_memory_bandwidth_gbps / 1e3;
+    let cpu_scan_time_us =
+        table_bytes as f64 / hw.cpu_memory_bandwidth_gbps / 1e3;
+
+    // GPU wins when scan time + transfer < CPU scan time
+    (gpu_scan_time_us + transfer_time_us) < cpu_scan_time_us
+        && (table_bytes <= hw.gpu_memory_bytes
+            || hw.chunked_transfer_enabled)
+}
+```
+
+**Restrictions:**
+- Table must exceed the crossover size where GPU throughput beats
+  PCIe transfer overhead
+- GPU memory must be large enough to hold the working set, or
+  chunked streaming must be supported
+- Row format must be convertible to columnar GPU representation
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    hw: &HardwareProfile,
+) -> f64 {
+    let table_bytes =
+        stats.row_count as u64 * stats.avg_row_size;
+    let pcie_transfer_s =
+        table_bytes as f64 / (hw.pcie_bandwidth_gbps * 1e9);
+    let gpu_scan_s =
+        table_bytes as f64 / (hw.gpu_memory_bandwidth_gbps * 1e9);
+    let cpu_scan_s =
+        table_bytes as f64 / (hw.cpu_memory_bandwidth_gbps * 1e9);
+
+    let gpu_total = pcie_transfer_s + gpu_scan_s;
+    if cpu_scan_s > gpu_total {
+        (cpu_scan_s - gpu_total) / cpu_scan_s
+    } else {
+        0.0
+    }
+}
+```
+
+**Assumptions:**
+- PCIe Gen4 x16: ~25 GB/s bidirectional
+- GPU HBM2e bandwidth: ~900 GB/s (A100), ~2 TB/s (H100)
+- CPU DDR5 bandwidth: ~50 GB/s per socket
+- Columnar layout assumed on GPU side
+
+**Typical benefit**: 5x-20x throughput improvement for tables > 1M rows.
+
+## Test Cases
+
+### Positive: Large table scan offload
+
+```sql
+-- Table: lineitem with 600M rows, ~120 bytes/row
+-- GPU memory: 80 GB (A100)
+-- Table size: ~72 GB, fits in GPU memory
+SELECT * FROM lineitem WHERE l_shipdate > '1995-01-01';
+
+-- Expected: GPU parallel scan with predicate evaluation
+-- Plan: GpuScan(lineitem, pred=l_shipdate > '1995-01-01')
+```
+
+### Negative: Small table not worth transferring
+
+```sql
+-- Table: regions with 5 rows
+SELECT * FROM regions;
+
+-- Expected: CPU scan (PCIe transfer overhead dominates)
+-- Plan: Scan(regions)
+```
+
+## References
+
+**Implementation in databases:**
+- HeavyDB (OmniSci): `QueryEngine/Execute.cpp` - GPU kernel dispatch
+- PG-Strom: `src/gpuscan.c` - GPU scan operator
+- BlazingSQL: GPU-native scan via cuDF
+
+**Academic papers:**
+- He et al., "Relational Joins on Graphics Processors", SIGMOD 2008
+- Bress et al., "GPU-Accelerated Database Systems: Survey and Open Challenges", TODS 2014
+- Shanbhag et al., "Efficient Top-K Query Processing on Massively Parallel Hardware", SIGMOD 2018

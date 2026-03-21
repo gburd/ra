@@ -1,0 +1,98 @@
+# Rule: COUNT(*) Optimization
+
+**Category:** logical/aggregate-pushdown
+**File:** `rules/logical/aggregate-pushdown/count-star-optimization.rra`
+
+## Metadata
+
+- **ID:** `count-star-optimization`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, oracle
+- **Tags:** aggregation, count, optimization
+- **Authors:** "RA Contributors"
+
+
+# COUNT(*) Optimization
+
+## Description
+
+Optimizes COUNT(*) queries by using index metadata or statistics instead of
+scanning table data.
+
+**When to apply**: COUNT(*) with no WHERE clause or with indexed predicates.
+
+**Why it works**: Row count is available in table statistics or index metadata,
+avoiding full table scan.
+
+## Relational Algebra
+
+```algebra
+aggregate[COUNT(*)](scan[T])
+  -> constant[table_row_count(T)]
+  where no_filter()
+
+aggregate[COUNT(*)](index_scan[I, cond](T))
+  -> index_count[I, cond]
+  where covering_index(I)
+```
+
+## Implementation
+
+```rust
+rw!("count-star-from-stats";
+    "(aggregate (count-star) (scan ?table))" =>
+    "(constant (table_row_count ?table))"
+    if no_concurrent_writes("?table")
+),
+
+rw!("count-star-from-index";
+    "(aggregate (count-star) (filter ?cond (scan ?table)))" =>
+    "(index_count ?index ?cond)"
+    if has_covering_index("?table", "?cond")
+),
+```
+
+## Cost Model
+
+```rust
+fn benefit(table_rows: u64, page_size: u64) -> f64 {
+    let scan_cost = table_rows; // Full table scan
+    let metadata_cost = 1.0; // Constant time lookup
+    (scan_cost as f64 - metadata_cost) / scan_cost as f64
+}
+```
+
+**Typical benefit**: 70-99% (avoids table scan entirely)
+
+## Test Cases
+
+### Positive: Simple COUNT(*)
+
+```sql
+SELECT COUNT(*) FROM users;
+
+-- Use table statistics: O(1) instead of O(N)
+```
+
+### Positive: COUNT(*) with indexed predicate
+
+```sql
+SELECT COUNT(*) FROM orders WHERE status = 'completed';
+
+-- Use index on status, count matching entries
+```
+
+### Negative: COUNT(*) with complex filter
+
+```sql
+SELECT COUNT(*) FROM products
+WHERE LOWER(name) LIKE '%phone%';
+
+-- Non-sargable predicate: must scan
+```
+
+## References
+
+- PostgreSQL: estimate_rel_size for COUNT(*) optimization
+- MySQL: InnoDB table statistics for fast COUNT(*)
+- Oracle: INDEX FAST FULL SCAN for COUNT(*)

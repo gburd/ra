@@ -1,0 +1,153 @@
+# Rule: Locality-Optimized Anti Join
+
+**Category:** distributed/locality-optimization
+**File:** `rules/distributed/locality-optimization/locality-optimized-anti-join.rra`
+
+## Metadata
+
+- **ID:** `locality-optimized-anti-join`
+- **Version:** "1.0.0"
+- **Databases:** cockroachdb
+- **Tags:** distributed, locality, anti-join, multi-region, nested
+- **Authors:** "RA Contributors"
+
+
+# Locality-Optimized Anti Join
+
+## Description
+
+Converts an anti lookup join on a REGIONAL BY ROW table into a nested
+pair of anti lookup joins. The inner anti join checks local partitions
+first. If a match is found locally, the row is eliminated and the outer
+anti join never executes for that row. Only rows that survive the local
+anti join (no local match) proceed to the remote anti join.
+
+**When to apply**: An anti join implemented as a lookup join spans
+multiple regions, and the table is REGIONAL BY ROW. The lookup scans
+multiple spans per input row, with some targeting local and some
+targeting remote partitions.
+
+**Why it works**: Anti joins return rows where no match exists. If a
+match is found in the local partition, the row is already eliminated --
+there is no need to check remote partitions. With locality of access,
+most matches are local, so most rows are eliminated without cross-region
+communication.
+
+## Relational Algebra
+
+```algebra
+AntiLookupJoin[expr: k1=k2 AND region IN (L, R1, R2)](input, index)
+  -> AntiLookupJoin[expr: k1=k2 AND region IN (R1, R2)](
+       AntiLookupJoin[expr: k1=k2 AND region = L](input, index),
+       index
+     )
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("locality-optimized-anti-join";
+    "(lookup_join anti ?input ?index ?lookup_expr ?on)" =>
+    "(lookup_join anti
+        (lookup_join anti ?input ?index ?local_expr ?on)
+        ?index ?remote_expr ?on)"
+    if is_anti_join()
+    if is_regional_by_row_index("?index")
+    if can_split_local_remote_expr("?lookup_expr",
+        "?local_expr", "?remote_expr")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    join_type: JoinType,
+    lookup_expr: &Expr,
+    index: &IndexMeta,
+    gateway_region: &str,
+) -> bool {
+    // Must be an anti join
+    join_type == JoinType::Anti
+    // Index must be REGIONAL BY ROW
+    && index.table().is_regional_by_row()
+    // Lookup spans multiple regions
+    && lookup_expr.contains_multi_region_filter()
+    // Can split into local and remote expressions
+    && can_split_by_locality(lookup_expr, gateway_region)
+}
+```
+
+**Restrictions:**
+- Only valid for anti joins (NOT EXISTS / NOT IN patterns)
+- The nested anti-join structure adds a constant overhead per row
+  for the additional operator
+- When no rows match locally, every row incurs both local and remote
+  lookup costs (slight pessimization)
+- The outer anti join is marked as "remote-only" which enables the
+  enforce_home_region error to fire if remote access is attempted
+
+## Cost Model
+
+```rust
+fn nested_anti_join_cost(
+    input_rows: f64,
+    local_match_fraction: f64,
+    local_lookup_cost: f64,
+    remote_lookup_cost: f64,
+) -> f64 {
+    // All rows do local lookup
+    let local_cost = input_rows * local_lookup_cost;
+    // Only rows without local match do remote lookup
+    let surviving_rows = input_rows * (1.0 - local_match_fraction);
+    let remote_cost = surviving_rows * remote_lookup_cost;
+    local_cost + remote_cost
+}
+```
+
+**Typical benefit**: For FK existence checks where 90% of referenced
+rows are in the local region, 90% of remote lookups are avoided.
+
+## Test Cases
+
+```sql
+-- Positive: NOT EXISTS with REGIONAL BY ROW tables
+-- Query from us-east1
+SELECT * FROM child WHERE NOT EXISTS (
+    SELECT * FROM parent WHERE p_id = c_p_id
+) AND c_id = 10;
+
+-- Without optimization:
+-- AntiLookupJoin(p_id=c_p_id AND region IN (eu, us-east, us-west))
+--   Scan(child)
+
+-- With optimization:
+-- AntiLookupJoin(p_id=c_p_id AND region IN (eu, us-west))  -- remote
+--   AntiLookupJoin(p_id=c_p_id AND region = us-east)       -- local
+--     Scan(child)
+```
+
+```sql
+-- Positive: orphan detection query
+SELECT c.id FROM child c
+WHERE NOT EXISTS (
+    SELECT 1 FROM parent p WHERE p.id = c.parent_id
+);
+-- If parent table is REGIONAL BY ROW, local check eliminates most rows
+```
+
+```sql
+-- Negative: table is REGIONAL BY TABLE (not BY ROW)
+SELECT * FROM child WHERE NOT EXISTS (
+    SELECT * FROM config WHERE config.id = child.config_id
+);
+-- config is REGIONAL BY TABLE, no local/remote split possible
+```
+
+## References
+
+CockroachDB: pkg/sql/opt/xform/rules/join.opt:620 - GenerateLocalityOptimizedAntiJoin (commit 51e808c)
+CockroachDB: pkg/sql/opt/xform/rules/join.opt:610 - CreateRemoteOnlyLookupJoinPrivate
+CockroachDB docs: "Multi-region anti-join optimization"

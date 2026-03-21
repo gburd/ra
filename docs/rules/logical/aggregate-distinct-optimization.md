@@ -1,0 +1,100 @@
+# Rule: Aggregate DISTINCT Optimization
+
+**Category:** logical/aggregate-pushdown
+**File:** `rules/logical/aggregate-pushdown/aggregate-distinct-optimization.rra`
+
+## Metadata
+
+- **ID:** `aggregate-distinct-optimization`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, duckdb
+- **Tags:** aggregation, distinct, optimization
+- **Authors:** "RA Contributors"
+
+
+# Aggregate DISTINCT Optimization
+
+## Description
+
+Optimizes COUNT(DISTINCT col) and similar aggregates by using indexes or
+pre-aggregation to eliminate duplicates early.
+
+**When to apply**: Aggregates with DISTINCT on indexed columns.
+
+**Why it works**: Index scans naturally return distinct values; hash-based
+deduplication can happen incrementally.
+
+## Relational Algebra
+
+```algebra
+aggregate[COUNT(DISTINCT col)](R)
+  -> aggregate[COUNT(*)](aggregate[col](R))
+
+With index:
+aggregate[COUNT(DISTINCT indexed_col)](R)
+  -> index_scan_distinct[index](R)
+```
+
+## Implementation
+
+```rust
+rw!("count-distinct-via-group";
+    "(aggregate (count-distinct ?col) ?input)" =>
+    "(aggregate (count-star) (aggregate (list ?col) (list) ?input))"
+),
+
+rw!("count-distinct-via-index";
+    "(aggregate (count-distinct ?col) (scan ?table))" =>
+    "(index-distinct-count ?index ?col)"
+    if has_index("?table", "?col")
+),
+```
+
+## Cost Model
+
+```rust
+fn benefit(input_size: u64, ndv: u64) -> f64 {
+    let scan_and_hash = input_size; // Hash all rows
+    let early_dedup = ndv; // Only process distinct values
+    (scan_and_hash - early_dedup) as f64 / scan_and_hash as f64
+}
+```
+
+**Typical benefit**: 30-60% when NDV << input size
+
+## Test Cases
+
+### Positive: COUNT(DISTINCT) on indexed column
+
+```sql
+SELECT COUNT(DISTINCT customer_id) FROM orders;
+
+-- Use index on customer_id for distinct scan
+```
+
+### Positive: Multiple DISTINCT aggregates
+
+```sql
+SELECT
+  COUNT(DISTINCT customer_id),
+  COUNT(DISTINCT product_id)
+FROM orders;
+
+-- Two-pass or combined hash deduplication
+```
+
+### Negative: DISTINCT with GROUP BY
+
+```sql
+SELECT category, COUNT(DISTINCT brand)
+FROM products
+GROUP BY category;
+
+-- Must deduplicate per group: standard approach
+```
+
+## References
+
+- PostgreSQL: Incremental sort for DISTINCT
+- MySQL: Loose Index Scan for DISTINCT
+- DuckDB: HyperLogLog for approximate COUNT(DISTINCT)

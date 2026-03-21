@@ -1,0 +1,169 @@
+# Rule: MonetDB Multi-Column Sort Sharing
+
+**Category:** database-specific/monetdb
+**File:** `rules/database-specific/monetdb/multi-column-sort-sharing.rra`
+
+## Metadata
+
+- **ID:** `monetdb-multi-column-sort-sharing`
+- **Version:** "1.0.0"
+- **Databases:** monetdb
+- **Tags:** sort, sharing, multi-column, interesting-orders, column-store
+- **Authors:** "CWI Amsterdam"
+
+
+# MonetDB Multi-Column Sort Sharing
+
+## Description
+
+Shares sort operations across multiple query operators that require the same
+or compatible orderings. In MonetDB's column-at-a-time model, sorting produces
+a permutation vector (OID ordering) that can be reused by multiple operators
+without re-sorting. The optimizer identifies shared sort requirements across
+joins, group-by, order-by, and window functions.
+
+**When to apply**: Queries where multiple operators require sorting on the same
+or prefix-compatible keys. Common patterns include GROUP BY + ORDER BY on the
+same columns, or sort-merge join followed by ordered output.
+
+**Why it works**: Sorting is O(n log n) and often dominates query cost. In
+columnar execution, a sort produces an OID permutation vector that reorders all
+columns simultaneously. If a downstream operator needs the same ordering, it
+reuses the permutation vector at O(n) cost instead of re-sorting at O(n log n).
+
+## Relational Algebra
+
+```algebra
+-- Before: redundant sorts
+order-by[dept, salary](
+  group-by[dept](
+    sort[dept](scan(employees))))
+
+-- After: single sort, shared permutation
+let perm = sort[dept, salary](scan(employees)) in
+order-by[reuse-perm](
+  group-by[dept](
+    apply-perm(perm, scan(employees))))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("monetdb-share-sort";
+    "(order-by ?keys1
+       (group-by ?keys2 ?agg
+          (sort ?keys2 ?source)))" =>
+    "(let-perm (sort ?keys1 ?source)
+       (order-by (reuse-perm)
+          (group-by ?keys2 ?agg
+             (apply-perm ?source))))"
+    if keys_are_prefix("?keys2", "?keys1")
+),
+
+rw!("monetdb-eliminate-redundant-sort";
+    "(sort ?keys (sort ?keys ?source))" =>
+    "(sort ?keys ?source)"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> bool {
+    stats.num_sort_operators > 1
+        && stats.sorts_share_prefix
+        && stats.total_rows > 10000  // sort sharing overhead for small data
+}
+```
+
+**Restrictions:**
+- Sort directions must match (ASC vs DESC)
+- Permutation vectors consume memory (one OID per row)
+- Only prefix-compatible sorts can be shared (e.g., [a,b] shares with [a,b,c])
+- Concurrent operators in different MAL pipelines may not share
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let n = stats.total_rows as f64;
+    let num_sorts = stats.num_shared_sorts as f64;
+
+    // Without sharing: sort for each operator
+    let without = num_sorts * n * n.log2() * 0.00001;
+
+    // With sharing: one sort + permutation reuse
+    let with = n * n.log2() * 0.00001  // one sort
+        + (num_sorts - 1.0) * n * 0.00001; // permutation application
+
+    if without > with {
+        (without - with) / without
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 30% to 5x when multiple operators share sort order.
+
+## Test Cases
+
+### Positive: GROUP BY + ORDER BY sharing
+
+```sql
+-- GROUP BY and ORDER BY on same columns
+SELECT department, AVG(salary) AS avg_sal
+FROM employees
+GROUP BY department
+ORDER BY department;
+
+-- Single sort on department; shared between group-by and order-by
+-- Permutation vector from sort reused for final ordering
+```
+
+### Positive: Window + ORDER BY sharing
+
+```sql
+SELECT department, salary,
+  RANK() OVER (ORDER BY salary DESC) AS rnk
+FROM employees
+ORDER BY salary DESC;
+
+-- Window function and final ORDER BY share the same sort
+-- Single sort on salary DESC, permutation reused
+```
+
+### Negative: Incompatible sort orders
+
+```sql
+SELECT department, salary
+FROM employees
+GROUP BY department  -- sort by department ASC
+ORDER BY salary DESC;  -- sort by salary DESC
+
+-- Different sort keys; cannot share
+-- Requires two separate sorts
+```
+
+## References
+
+**Implementation:**
+- MonetDB source: `sql/server/rel_optimizer.c` (sort sharing detection)
+- Permutation reuse: `gdk/gdk_bat.c` (BAT order operations)
+- MAL sort primitives: `monetdb5/modules/kernel/algebra.c`
+
+**Papers:**
+- Simmen, D.E., et al., "Fundamental Techniques for Order Optimization",
+  SIGMOD 1996
+- Neumann, T., Moerkotte, G., "An Efficient Framework for Order Optimization",
+  ICDE 2004
+- Boncz, P., et al., "MonetDB/X100: Hyper-Pipelining Query Execution",
+  CIDR 2005

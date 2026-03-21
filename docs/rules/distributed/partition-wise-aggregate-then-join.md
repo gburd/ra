@@ -1,0 +1,68 @@
+# Rule: Partition-Wise Aggregate Before Join
+
+**Category:** distributed/join-distribution
+**File:** `rules/distributed/join-distribution/partition-wise-aggregate-then-join.rra`
+
+## Metadata
+
+- **ID:** `partition-wise-aggregate-then-join`
+- **Version:** "1.0.0"
+- **Databases:** cockroachdb, greenplum, spark, presto
+- **Tags:** distributed, join, partition-wise, aggregate, pre-aggregation
+- **Authors:** "RA Contributors"
+
+
+# Partition-Wise Aggregate Before Join
+
+## Description
+
+When a join is followed by an aggregation on the partition key, push the
+aggregation down to execute locally before the join. This reduces the
+data volume before any network transfer.
+
+## Relational Algebra
+
+```algebra
+Aggregate[g](Join[c](R, S))
+  -> Join[c](Aggregate[g](R), S)
+  where g subset of R.columns
+  where R.hash_key contains g
+```
+
+## Test Cases
+
+```sql
+-- Test 1: Aggregate pushable to partitioned side
+SELECT c.name, SUM(o.total)
+FROM orders o            -- hash(customer_id)
+JOIN customers c         -- hash(id)
+  ON o.customer_id = c.id
+GROUP BY c.name;
+-- Expected: Pre-aggregate orders by customer_id locally,
+-- then partition-wise join with customers
+```
+
+```sql
+-- Test 2: Aggregate on non-partition key
+SELECT p.category, COUNT(*)
+FROM orders o            -- hash(order_id)
+JOIN products p          -- hash(product_id)
+  ON o.product_id = p.id
+GROUP BY p.category;
+-- Expected: Cannot pre-aggregate, shuffle first
+```
+
+```sql
+-- Test 3: Aggregate with HAVING after join
+SELECT c.tier, SUM(o.total) as total
+FROM orders o
+JOIN customers c ON o.cid = c.id
+GROUP BY c.tier
+HAVING SUM(o.total) > 1000;
+-- Expected: Pre-aggregate where possible, apply HAVING after
+```
+
+## References
+
+Spark: PushDownPredicatesAndPruneColumnsForCTEDef
+Greenplum: agg_costs.c

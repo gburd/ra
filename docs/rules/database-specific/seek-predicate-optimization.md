@@ -1,0 +1,127 @@
+# Rule: mssql Index Seek Predicate Optimization
+
+**Category:** database-specific/mssql
+**File:** `rules/database-specific/mssql/seek-predicate-optimization.rra`
+
+## Metadata
+
+- **ID:** `mssql-seek-predicate-optimization`
+- **Version:** "1.0.0"
+- **Databases:** mssql
+- **Tags:** database-specific, mssql, index, seek, predicate, sargable
+- **Authors:** "RA Contributors"
+
+
+# mssql Index Seek Predicate Optimization
+
+## Description
+
+Transforms non-sargable predicates into sargable (Search ARGument
+ABLE) predicates that can use index seeks.  mssql's optimizer
+attempts to rewrite expressions like YEAR(date_col) = 2025 into
+equivalent range predicates that allow B-tree index navigation.
+
+**When to apply**: A WHERE clause contains functions or expressions
+on indexed columns that prevent index seek operations.
+
+**Why it works**: B-tree indexes can only seek on the original column
+values.  Functions on columns force a full index scan with per-row
+evaluation.  Rewriting to range predicates enables seek operations
+that navigate directly to matching leaf pages.
+
+**Database version**: mssql 2000+
+
+## Relational Algebra
+
+```algebra
+-- Before: non-sargable (function on column)
+sigma[YEAR(order_date) = 2025](scan(orders))
+
+-- After: sargable range predicate
+sigma[order_date >= '2025-01-01' AND order_date < '2026-01-01'](
+    index-seek(orders, ix_order_date))
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mssql-sargable-year-to-range";
+    "(filter (eq (year-func ?col) (const-int ?year)) ?input)" =>
+    "(filter (and (gte ?col (year-start ?year))
+                  (lt ?col (year-start (add-int ?year 1))))
+        ?input)"
+    if is_database("mssql")
+    if column_is_date_type("?col")
+),
+
+rw!("mssql-sargable-like-prefix";
+    "(filter (like ?col (const-str ?pattern)) ?input)" =>
+    "(filter (and (gte ?col (like-prefix ?pattern))
+                  (lt ?col (like-prefix-next ?pattern)))
+        ?input)"
+    if is_database("mssql")
+    if is_prefix_like_pattern("?pattern")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(pred: &Expr, index: &Index) -> bool {
+    pred.has_function_on_column()
+    && index.leading_column() == pred.base_column()
+    && can_rewrite_to_range(pred)
+}
+```
+
+**Restrictions:**
+- Only certain function patterns can be rewritten (YEAR, MONTH, LEFT, etc.)
+- Non-deterministic functions cannot be rewritten
+- LIKE with leading wildcard (%foo%) cannot be made sargable
+- CAST/CONVERT must preserve ordering for range rewrite
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    table_rows: f64,
+    selectivity: f64,
+) -> f64 {
+    let scan_cost = table_rows * 0.01;
+    let seek_cost = table_rows * selectivity * 0.001
+        + 3.0; // seek overhead
+    scan_cost - seek_cost
+}
+```
+
+**Typical benefit**: For 1% selectivity on 10M rows, converts a 10M-row
+scan into a 100K-row index seek, ~100x faster.
+
+## Test Cases
+
+```sql
+-- Positive: YEAR function rewritten to range
+SELECT * FROM orders WHERE YEAR(order_date) = 2025;
+-- Rewritten: order_date >= '2025-01-01' AND order_date < '2026-01-01'
+-- Index seek on ix_order_date
+```
+
+```sql
+-- Positive: LIKE with prefix
+SELECT * FROM products WHERE name LIKE 'Widget%';
+-- Rewritten: name >= 'Widget' AND name < 'Widgeu'
+-- Index seek on product name index
+```
+
+```sql
+-- Negative: LIKE with leading wildcard
+SELECT * FROM products WHERE name LIKE '%Widget%';
+-- Cannot make sargable; full scan required
+```
+
+## References
+
+mssql: Index Seek vs Index Scan
+mssql: SARGable predicates and index usage

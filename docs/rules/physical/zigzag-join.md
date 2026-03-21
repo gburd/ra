@@ -1,0 +1,227 @@
+# Rule: Zigzag Join
+
+**Category:** physical/join-algorithms
+**File:** `rules/physical/join-algorithms/zigzag-join.rra`
+
+## Metadata
+
+- **ID:** `zigzag-join`
+- **Version:** "1.0.0"
+- **Databases:** cockroachdb, spanner
+- **Tags:** join, zigzag, index, multi-column, intersection
+- **Authors:** "RA Contributors"
+
+## Preconditions
+
+```yaml
+  - type: "pattern"
+    must_match: "(join inner ?cond ?left ?right)"
+    description: "Join using zigzag/leapfrog strategy"
+  - type: "predicate"
+    condition: "has_sorted_index(?left, join_cols(?cond)) && has_sorted_index(?right, join_cols(?cond))"
+    description: "Both inputs must have sorted indexes on join columns"
+```
+
+
+# Zigzag Join
+
+## Metadata
+- **Rule ID**: `zigzag-join`
+- **Category**: Physical / Join Algorithms
+- **Complexity**: O(k * log n) where k = result size, n = index size
+- **Introduced**: CockroachDB, Google Spanner
+- **Prerequisites**: Multiple indexes on same table with suitable columns
+- **Alternatives**: bitmap-index-scan, index-intersection
+
+## Description
+
+Zigzag join intersects two or more indexes on the same table by alternating
+index seeks between them. It advances through each index to the minimum key
+that could possibly match the other index, "zigzagging" between indexes to
+skip non-matching ranges efficiently.
+
+**When to use:**
+- Conjunctive predicates on columns covered by separate indexes
+- No single multi-column index covers all predicates
+- Result set is small relative to table size
+- Each predicate is moderately selective
+
+**Advantages:**
+- Avoids full table scan when no single index suffices
+- Skips large ranges of non-matching keys
+- Reads only qualifying rows from heap
+- Works with existing single-column indexes
+
+**Disadvantages:**
+- Performance degrades if predicates are not selective
+- Requires sorted/ordered indexes (B-tree)
+- Complex seek interleaving logic
+- Worst case degenerates to full index scans
+
+## Relational Algebra
+
+```
+sigma_{p1 AND p2}(R)
+  where index I1 covers p1, index I2 covers p2
+-> ZigzagJoin(I1, I2, p1, p2)
+
+Algorithm:
+  pos1 = seek(I1, start)
+  pos2 = seek(I2, start)
+  loop:
+    if I1[pos1].rowid == I2[pos2].rowid:
+      emit row; advance both
+    elif I1[pos1].rowid < I2[pos2].rowid:
+      pos1 = seek(I1, I2[pos2].rowid)  // zigzag forward
+    else:
+      pos2 = seek(I2, I1[pos1].rowid)  // zigzag forward
+```
+
+## Implementation (egg rewrite rules)
+
+```lisp
+;; Apply zigzag join for conjunctive predicates on separate indexes
+(rewrite (filter (and ?pred1 ?pred2) (scan ?table))
+  (zigzag-join ?table ?idx1 ?idx2 ?pred1 ?pred2)
+  :if (has-index ?table ?pred1 ?idx1)
+  :if (has-index ?table ?pred2 ?idx2)
+  :if (not (same-index ?idx1 ?idx2))
+  :if (selective ?pred1)
+  :if (selective ?pred2))
+
+;; Prefer zigzag over bitmap intersection when seek count is low
+(rewrite (bitmap-and (bitmap-index-scan ?idx1 ?pred1)
+                     (bitmap-index-scan ?idx2 ?pred2))
+  (zigzag-join ?table ?idx1 ?idx2 ?pred1 ?pred2)
+  :if (< (estimated-result-size ?pred1 ?pred2) 10000))
+```
+
+## Cost Model
+
+```rust
+pub fn cost_zigzag_join(
+    table_card: u64,
+    selectivity_1: f64,
+    selectivity_2: f64,
+    index_height: u64,
+    hardware: &HardwareModel,
+) -> Cost {
+    let result_estimate = (table_card as f64
+        * selectivity_1
+        * selectivity_2) as u64;
+
+    // Each zigzag step requires an index seek
+    let num_seeks = result_estimate * 2; // Alternating seeks
+    let seek_cost = Cost::io(
+        num_seeks as f64
+            * index_height as f64
+            * hardware.random_page_read_cost(),
+    );
+
+    // Fetch matching rows from heap
+    let fetch_cost = Cost::io(
+        result_estimate as f64
+            * hardware.random_page_read_cost(),
+    );
+
+    seek_cost + fetch_cost
+}
+```
+
+## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
+
+```rust
+fn can_use_zigzag_join(
+    table: &TableRef,
+    predicates: &[Predicate],
+    catalog: &Catalog,
+) -> bool {
+    // Need at least 2 conjunctive predicates on separate indexes
+    let indexes: Vec<_> = predicates.iter()
+        .filter_map(|p| catalog.find_index(table, p))
+        .collect();
+
+    if indexes.len() < 2 {
+        return false;
+    }
+
+    // Each predicate should be reasonably selective
+    predicates.iter().all(|p| p.selectivity() < 0.3)
+}
+```
+
+## Test Cases
+
+### Test 1: Two single-column indexes, conjunctive predicate
+```sql
+CREATE TABLE employees (
+    id INT PRIMARY KEY,
+    department TEXT,
+    location TEXT,
+    salary DECIMAL
+);
+CREATE INDEX idx_dept ON employees(department);
+CREATE INDEX idx_loc ON employees(location);
+
+SELECT * FROM employees
+WHERE department = 'Engineering' AND location = 'NYC';
+
+-- Expected: ZigzagJoin on idx_dept and idx_loc
+-- Zigzag seeks between department='Engineering' and location='NYC'
+-- Result: Only rows matching BOTH conditions fetched from heap
+```
+
+### Test 2: Three-way zigzag
+```sql
+CREATE INDEX idx_status ON orders(status);
+CREATE INDEX idx_priority ON orders(priority);
+CREATE INDEX idx_region ON orders(region);
+
+SELECT * FROM orders
+WHERE status = 'pending'
+  AND priority = 'high'
+  AND region = 'US';
+
+-- Expected: ZigzagJoin across three indexes
+-- Intersects row IDs from all three index scans
+```
+
+### Test 3: Negative -- low selectivity predicates
+```sql
+SELECT * FROM employees
+WHERE department IN ('Engineering', 'Sales', 'Marketing', 'HR', 'Finance')
+  AND location IN ('NYC', 'SF', 'LA', 'Chicago', 'Boston');
+
+-- NOT suitable: both predicates select large portions
+-- Full scan or bitmap intersection likely cheaper
+```
+
+### Test 4: Negative -- multi-column index exists
+```sql
+CREATE INDEX idx_dept_loc ON employees(department, location);
+
+SELECT * FROM employees
+WHERE department = 'Engineering' AND location = 'NYC';
+
+-- NOT suitable: single composite index serves this query directly
+-- Use index scan on idx_dept_loc instead
+```
+
+## Performance Characteristics
+
+| Scenario | Zigzag Join | Bitmap Intersection | Full Scan |
+|----------|-------------|---------------------|-----------|
+| Both 1% selective | Fast (few seeks) | Moderate | Slow |
+| Both 30% selective | Slow (many seeks) | Moderate | Comparable |
+| Result < 100 rows | Optimal | Overhead | Wasteful |
+| Result > 100K rows | Degraded | Better | Comparable |
+
+## References
+
+1. **CockroachDB Zigzag Joins**: Internal documentation on inverted index intersection
+2. **Google Spanner**: Multi-index intersection strategies
+3. **PostgreSQL BitmapAnd**: Similar concept using bitmap heap scans
+   - https://www.postgresql.org/docs/current/indexes-bitmap-scans.html

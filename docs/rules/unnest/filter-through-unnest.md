@@ -1,0 +1,187 @@
+# Rule: Push Filter Through Unnest
+
+**Category:** logical/unnest
+**File:** `rules/unnest/filter-through-unnest.rra`
+
+## Metadata
+
+- **ID:** `filter-through-unnest`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, duckdb, generic
+- **Tags:** unnest, filter, pushdown, array
+- **Authors:** "RA Contributors"
+
+## Preconditions
+
+```yaml
+  - type: pattern
+    must_match: "(filter ?pred (unnest ?arr))"
+  - type: predicate
+    condition: "is_simple_comparison(?pred)"
+    description: "Predicate is a simple comparison on the unnested value"
+```
+
+
+# Push Filter Through Unnest
+
+## Description
+
+Pushes predicates on unnested values back into the array source,
+filtering array elements before they are expanded into rows. This
+avoids materializing rows that will be immediately discarded.
+
+**When to apply**: A filter sits directly on top of an unnest
+operator and the predicate references only the unnested column
+(not correlated columns from an outer relation).
+
+**Why it works**: If `unnest(arr)` produces one row per element
+of `arr`, then `sigma[p](unnest(arr))` is equivalent to
+`unnest(array_filter(arr, p))`. Filtering the array first
+produces fewer rows in the unnest output.
+
+## Relational Algebra
+
+```algebra
+-- Before: filter after unnest
+sigma[val > 10](unnest(arr) AS val)
+
+-- After: filter pushed into array
+unnest(array_filter(arr, lambda x. x > 10)) AS val
+```
+
+### Lateral variant
+
+```algebra
+-- Before: filter on lateral unnest result
+sigma[u.elem > 10](R join_lateral unnest(R.arr) AS u(elem))
+
+-- After: filter array before unnest
+R join_lateral unnest(array_filter(R.arr, lambda x. x > 10)) AS u(elem)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Push simple predicate through unnest into array filter
+rw!("filter-through-unnest";
+    "(filter ?pred (unnest ?arr))" =>
+    "(unnest (array-filter ?arr ?pred))"
+    if is_array_filterable("?arr")
+    if pred_references_only_unnest_col("?pred")
+),
+
+// Variant for lateral unnest with filter on unnested column
+rw!("filter-through-lateral-unnest";
+    "(filter ?pred (lateral-join ?input (unnest ?arr)))" =>
+    "(lateral-join ?input (unnest (array-filter ?arr ?pred)))"
+    if pred_references_only_unnest_col("?pred")
+    if is_array_filterable("?arr")
+),
+```
+
+## Preconditions
+
+```rust
+fn is_array_filterable(arr: &Expr) -> bool {
+    // Array must be a literal, column reference, or
+    // function call that returns an array. It must not
+    // be a set-returning function (e.g., generate_series).
+    matches!(arr, Expr::Array(_) | Expr::Column(_))
+}
+
+fn pred_references_only_unnest_col(pred: &Expr) -> bool {
+    // The predicate must reference only the unnested column
+    // alias, not any outer/correlated columns. This ensures
+    // the filter can be evaluated per-element.
+    let refs = pred.column_references();
+    refs.len() == 1 && refs[0].is_unnest_alias()
+}
+```
+
+**Restrictions:**
+- Predicate must be a simple comparison (=, <, >, <=, >=, !=, IS NULL, IS NOT NULL).
+- Predicate must reference only the unnested value column, not correlated outer columns.
+- Array source must be filterable (literal array or column reference, not a set-returning function).
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    input_card: f64,
+    avg_array_length: f64,
+    selectivity: f64,
+) -> f64 {
+    // Before: unnest produces input_card * avg_array_length rows,
+    // then filter removes (1 - selectivity) fraction.
+    let rows_before = input_card * avg_array_length;
+    let rows_after_filter = rows_before * selectivity;
+
+    // After: filter array first, unnest produces fewer rows.
+    let filtered_array_len = avg_array_length * selectivity;
+    let rows_after = input_card * filtered_array_len;
+
+    // Benefit: saved row materializations
+    (rows_before - rows_after) / rows_before
+}
+```
+
+**Typical benefit**: 30-90% depending on filter selectivity. With
+a selective predicate (e.g., matching 1 of 100 elements), up to
+99% of unnest output rows are avoided.
+
+## Test Cases
+
+### Positive: filter on unnested literal array
+
+```sql
+-- Before
+SELECT val FROM unnest(array[1, 5, 10, 20, 50]) AS t(val)
+WHERE val > 10;
+
+-- After (internal representation)
+-- unnest(array_filter(array[1,5,10,20,50], lambda x. x > 10))
+-- Produces only: 20, 50
+```
+
+### Positive: filter on lateral unnest
+
+```sql
+-- Before
+SELECT o.id, u.item
+FROM orders o, LATERAL unnest(o.items) AS u(item)
+WHERE u.item > 100;
+
+-- After
+SELECT o.id, u.item
+FROM orders o, LATERAL unnest(array_filter(o.items, lambda x. x > 100)) AS u(item);
+```
+
+### Negative: predicate references outer column
+
+```sql
+-- Cannot push: predicate involves both unnested and outer columns
+SELECT o.id, u.item
+FROM orders o, LATERAL unnest(o.items) AS u(item)
+WHERE u.item = o.min_price;
+
+-- Predicate references o.min_price (outer), so it cannot be
+-- evaluated per-element without the outer row context.
+```
+
+### Negative: set-returning function source
+
+```sql
+-- Cannot push: generate_series is not an array
+SELECT val FROM generate_series(1, 100) AS t(val)
+WHERE val > 50;
+
+-- generate_series is a streaming SRF, not a filterable array.
+```
+
+## References
+
+- DuckDB: src/optimizer/unnest_rewriter.cpp
+- Gupta & Mumick, "Maintenance of Materialized Views" (1995)
+- PostgreSQL: cost_qual_eval for array operator costing

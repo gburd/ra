@@ -1,0 +1,139 @@
+# Rule: MonetDB Stochastic Cracking
+
+**Category:** database-specific/monetdb
+**File:** `rules/database-specific/monetdb/stochastic-cracking.rra`
+
+## Metadata
+
+- **ID:** `monetdb-stochastic-cracking`
+- **Version:** "1.0.0"
+- **Databases:** monetdb
+- **Tags:** database-specific, monetdb, cracking, stochastic, adaptive, convergence
+- **Authors:** "Halim et al. 2012", "RA Contributors"
+
+
+# MonetDB Stochastic Cracking
+
+## Description
+
+Extends standard database cracking with randomized auxiliary crack
+operations that accelerate convergence to sorted order. Standard
+cracking only partitions at query-specified bounds, leaving large
+uncracked regions between query ranges. Stochastic cracking adds
+random crack points during each query, ensuring the column converges
+to fully sorted order regardless of the workload pattern.
+
+**When to apply**: Columns queried with varied range predicates where
+standard cracking leaves large uncracked gaps. Particularly useful
+when the query workload does not uniformly cover the value domain.
+
+**Why it works**: Standard cracking converges slowly when queries
+cluster in one region. Stochastic cracking inserts O(1) random cracks
+per query, distributing partition refinements across the entire column.
+After O(n log n / n) queries, the column is effectively sorted, giving
+all subsequent queries O(log n) lookup time.
+
+**Database version**: MonetDB research prototype (Halim et al.)
+
+## Relational Algebra
+
+```algebra
+-- Standard crack: only partition at query bound
+sigma[x > 100](crack(column))
+-- Partitions: [<=100, >100]
+
+-- Stochastic crack: partition at query bound + random points
+sigma[x > 100](stochastic_crack(column, random_points=[42, 178, 255]))
+-- Partitions: [<=42, 43..100, 101..178, 179..255, >255]
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("monetdb-stochastic-crack";
+    "(filter (range_pred ?col ?lo ?hi) (scan ?table))" =>
+    "(stochastic-crack-select ?col ?lo ?hi ?table
+       (random_cracks 2))"
+    if is_database("monetdb")
+    if is_crackable("?col")
+    if cracking_convergence_slow("?col")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(column: &Column, crack_index: &CrackIndex) -> bool {
+    // Column must support cracking
+    if !column.data_type().is_orderable() {
+        return false;
+    }
+
+    // Convergence is slow: large uncracked regions remain
+    let max_partition_size = crack_index
+        .largest_partition_size();
+    let total_rows = column.row_count();
+
+    max_partition_size > total_rows / 10
+}
+```
+
+**Restrictions:**
+- Random cracks add overhead to each query (2 extra partitions)
+- Total crack cost per query increases by ~30%
+- Randomness source should be reproducible for debugging
+- Concurrent access requires latch-based synchronization
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    total_rows: f64,
+    num_queries: usize,
+    num_random_cracks_per_query: usize,
+) -> f64 {
+    // Standard cracking convergence: O(n * Q) where Q = queries
+    let standard_convergence = total_rows / (num_queries as f64 + 1.0);
+
+    // Stochastic: O(n / (Q * k)) where k = random cracks per query
+    let k = num_random_cracks_per_query as f64;
+    let stochastic_convergence =
+        total_rows / ((num_queries as f64 + 1.0) * (k + 1.0));
+
+    // Cost reduction from smaller partitions
+    let random_crack_overhead = k * total_rows * 0.0001;
+
+    (standard_convergence - stochastic_convergence) / standard_convergence
+}
+```
+
+**Typical benefit**: 2x-5x faster convergence to sorted order,
+30-70% faster individual queries after 10+ queries on a column.
+
+## Test Cases
+
+```sql
+-- Positive: clustered workload that misses regions
+-- Query 1: SELECT * FROM data WHERE x BETWEEN 0 AND 100;
+-- Query 2: SELECT * FROM data WHERE x BETWEEN 10 AND 90;
+-- Standard: only cracks near [0,100], middle unrefined
+-- Stochastic: random cracks at 500, 750 refine distant regions
+
+-- Query 3 (unexpected): SELECT * FROM data WHERE x > 600;
+-- Standard: huge uncracked partition [101, max]
+-- Stochastic: already cracked at 500, 750 -> small partition
+```
+
+```sql
+-- Negative: uniform workload covering entire domain
+SELECT * FROM data WHERE x BETWEEN ? AND ?;
+-- Random bounds already cover the domain
+-- Extra random cracks add overhead with minimal benefit
+```
+
+## References
+
+Halim et al., "Stochastic Database Cracking: Towards Robust Adaptive
+Indexing in Main-Memory Column-Stores", VLDB 2012

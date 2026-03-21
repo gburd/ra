@@ -1,0 +1,510 @@
+# Rule: "Aggregation Cost Modeling"
+
+**Category:** cost-models
+**File:** `rules/cost-models/aggregation-cost-formulas.rra`
+
+## Metadata
+
+- **ID:** `aggregation-cost-formulas`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, mysql, duckdb, cockroachdb, mssql, oracle, clickhouse
+- **Tags:** cost, aggregation, hash-aggregate, sort-aggregate, group-by, partial-agg, classic
+- **Authors:** "Graefe (Survey)", "Larson (Partial Aggregation)", "Yan & Larson (Eager Aggregation)"
+
+
+# Aggregation Cost Modeling
+
+## Description
+
+Cost formulas for aggregation operations: hash aggregation, sort-based
+aggregation, and partial (two-phase) aggregation. The optimizer selects the
+cheapest aggregation strategy based on the number of groups, available
+memory, input ordering, and downstream requirements.
+
+The three primary aggregation strategies are:
+1. **Hash aggregation**: Build a hash table keyed on GROUP BY columns. Each
+   input tuple hashes into a bucket and updates the aggregate state. O(n)
+   for n input rows, but requires memory proportional to the number of groups.
+2. **Sort-based aggregation**: Sort input on GROUP BY columns, then compute
+   aggregates in a single pass over the sorted data. O(n log n) for unsorted
+   input, but O(n) if input is pre-sorted and uses minimal memory.
+3. **Partial (two-phase) aggregation**: Pre-aggregate locally (reducing data
+   volume), shuffle/exchange by GROUP BY keys, then finalize globally. Critical
+   for distributed and parallel execution.
+
+**When to apply**: Every GROUP BY query, DISTINCT operation, or aggregate
+function. The optimizer must choose between hash and sort-based strategies.
+
+**Why it works**: Hash aggregation is faster when the hash table fits in
+memory. Sort-based aggregation is better when the input is already sorted
+(from an index or prior sort) or when the number of groups is so large
+that the hash table exceeds memory. Partial aggregation dramatically reduces
+network traffic in distributed settings.
+
+## Relational Algebra
+
+```algebra
+Aggregation cost formulas:
+
+1. Hash Aggregation:
+   C_cpu = |input| * (c_hash + c_agg_update)
+   C_memory = |groups| * entry_size
+   C_io = 0 (if fits in memory)
+   C_io = 2 * P_groups * passes (if spills)
+
+2. Sort-Based Aggregation:
+   C_cpu = sort_cpu(input) + |input| * c_agg_update
+   C_io = sort_io(input) + P_input  (if not pre-sorted)
+   C_io = P_input                   (if pre-sorted)
+   C_memory = O(1) per group transition
+
+3. Partial Aggregation (two-phase):
+   Phase 1 (local): C_local = |input| * c_hash + |local_groups| * c_agg_update
+   Exchange: C_network = |local_groups| * row_size * c_network
+   Phase 2 (global): C_global = |local_groups| * c_hash + |global_groups| * c_agg_finalize
+   Reduction ratio: r = |local_groups| / |input|
+
+Where:
+  |input| = number of input rows
+  |groups| = number of distinct groups
+  P_input = input pages
+  P_groups = pages for hash table
+  c_hash = per-tuple hash computation cost
+  c_agg_update = per-tuple aggregate state update cost
+  c_agg_finalize = per-group aggregate finalization cost
+  entry_size = GROUP BY key size + aggregate state size
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+struct AggregationCostEstimator {
+    seq_page_cost: f64,
+    cpu_tuple_cost: f64,
+    hash_cost: f64,
+    agg_update_cost: f64,
+    buffer_pages: usize,
+    page_size: usize,
+}
+
+impl AggregationCostEstimator {
+    fn hash_aggregate_cost(
+        &self,
+        input_rows: f64,
+        num_groups: f64,
+        group_key_size: u32,
+        agg_state_size: u32,
+    ) -> AggCost {
+        // CPU: hash each input tuple + update aggregate state
+        let cpu = input_rows
+            * (self.hash_cost + self.agg_update_cost);
+
+        // Memory: hash table for all groups
+        let entry_size =
+            (group_key_size + agg_state_size + 16) as f64;
+        let ht_bytes = num_groups * entry_size * 2.0; // load factor 0.5
+        let ht_pages =
+            (ht_bytes / self.page_size as f64).ceil();
+
+        // I/O: only if hash table spills
+        let io = if ht_pages <= self.buffer_pages as f64 {
+            0.0 // In-memory aggregation
+        } else {
+            // Spilling hash aggregation: partition and aggregate
+            let partitions =
+                (ht_pages / self.buffer_pages as f64).ceil();
+            let partition_io = 2.0
+                * (input_rows * entry_size / self.page_size as f64)
+                * self.seq_page_cost;
+            partition_io
+        };
+
+        AggCost {
+            io,
+            cpu,
+            memory_bytes: ht_bytes,
+            total: io + cpu,
+            output_sorted: false,
+            strategy: AggStrategy::Hash,
+        }
+    }
+
+    fn sort_aggregate_cost(
+        &self,
+        input_rows: f64,
+        input_pages: f64,
+        num_groups: f64,
+        input_sorted: bool,
+    ) -> AggCost {
+        // Sort cost (if needed)
+        let sort_io = if input_sorted {
+            0.0
+        } else {
+            self.sort_cost_io(input_pages)
+        };
+        let sort_cpu = if input_sorted {
+            0.0
+        } else {
+            input_rows
+                * input_rows.log2().max(1.0)
+                * self.cpu_tuple_cost
+        };
+
+        // Aggregation pass: sequential scan of sorted input
+        let agg_io = input_pages * self.seq_page_cost;
+        let agg_cpu = input_rows * self.agg_update_cost;
+
+        AggCost {
+            io: sort_io + agg_io,
+            cpu: sort_cpu + agg_cpu,
+            memory_bytes: 0.0, // Minimal memory (one group at a time)
+            total: sort_io + agg_io + sort_cpu + agg_cpu,
+            output_sorted: true, // Output sorted on GROUP BY keys
+            strategy: AggStrategy::Sort,
+        }
+    }
+
+    fn partial_aggregate_cost(
+        &self,
+        input_rows: f64,
+        num_local_groups: f64,
+        num_global_groups: f64,
+        group_key_size: u32,
+        agg_state_size: u32,
+        num_nodes: u32,
+    ) -> AggCost {
+        // Phase 1: Local hash aggregation
+        let local = self.hash_aggregate_cost(
+            input_rows / num_nodes as f64,
+            num_local_groups / num_nodes as f64,
+            group_key_size,
+            agg_state_size,
+        );
+
+        // Exchange: send local aggregates across network
+        let row_size =
+            (group_key_size + agg_state_size) as f64;
+        let exchange_bytes =
+            num_local_groups * row_size;
+        let network_cost =
+            exchange_bytes * 0.000001; // 1us per byte
+
+        // Phase 2: Global aggregation of partial results
+        let global = self.hash_aggregate_cost(
+            num_local_groups,
+            num_global_groups,
+            group_key_size,
+            agg_state_size,
+        );
+
+        // Reduction ratio: how much does partial agg reduce data?
+        let reduction = num_local_groups / input_rows;
+
+        AggCost {
+            io: local.io + global.io,
+            cpu: local.cpu + global.cpu,
+            memory_bytes: local.memory_bytes + global.memory_bytes,
+            total: local.total + network_cost + global.total,
+            output_sorted: false,
+            strategy: AggStrategy::Partial {
+                reduction_ratio: reduction,
+            },
+        }
+    }
+
+    fn select_best_aggregation(
+        &self,
+        input_rows: f64,
+        input_pages: f64,
+        num_groups: f64,
+        group_key_size: u32,
+        agg_state_size: u32,
+        input_sorted: bool,
+        downstream_needs_order: bool,
+    ) -> AggCost {
+        let hash = self.hash_aggregate_cost(
+            input_rows,
+            num_groups,
+            group_key_size,
+            agg_state_size,
+        );
+
+        let mut sort = self.sort_aggregate_cost(
+            input_rows,
+            input_pages,
+            num_groups,
+            input_sorted,
+        );
+
+        // Account for downstream sort savings
+        if downstream_needs_order && !input_sorted {
+            // Sort-based provides sorted output for free
+            // Hash would need an additional sort
+            let downstream_sort_cost = num_groups
+                * num_groups.log2().max(1.0)
+                * self.cpu_tuple_cost;
+            // hash effectively costs more
+            let hash_total = hash.total + downstream_sort_cost;
+            if sort.total < hash_total {
+                return sort;
+            }
+        }
+
+        // Group count heuristics
+        let group_ratio = num_groups / input_rows;
+
+        if group_ratio > 0.5 {
+            // Many groups: hash table large, sort may win
+            // Especially if input is nearly sorted
+            if input_sorted || sort.total < hash.total {
+                return sort;
+            }
+        }
+
+        if hash.memory_bytes
+            > (self.buffer_pages * self.page_size) as f64
+        {
+            // Hash table won't fit in memory: prefer sort
+            // (sort handles spilling more gracefully)
+            return sort;
+        }
+
+        // Default: hash aggregation (usually fastest in-memory)
+        if hash.total <= sort.total {
+            hash
+        } else {
+            sort
+        }
+    }
+
+    fn sort_cost_io(&self, pages: f64) -> f64 {
+        let m = self.buffer_pages as f64;
+        if pages <= m {
+            2.0 * pages * self.seq_page_cost
+        } else {
+            let passes =
+                ((pages / m).log2() / (m - 1.0).log2())
+                    .ceil()
+                    + 1.0;
+            2.0 * pages * passes * self.seq_page_cost
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct AggCost {
+    io: f64,
+    cpu: f64,
+    memory_bytes: f64,
+    total: f64,
+    output_sorted: bool,
+    strategy: AggStrategy,
+}
+
+#[derive(Clone, Debug)]
+enum AggStrategy {
+    Hash,
+    Sort,
+    Partial { reduction_ratio: f64 },
+}
+
+// Aggregate function state sizes (bytes)
+fn aggregate_state_size(agg_func: &str) -> u32 {
+    match agg_func {
+        "COUNT" => 8,           // Single int64
+        "SUM" => 16,            // Numeric accumulator
+        "AVG" => 24,            // Sum + count
+        "MIN" | "MAX" => 16,    // Single value
+        "COUNT_DISTINCT" => 64, // HyperLogLog or hash set ptr
+        "ARRAY_AGG" => 32,     // Dynamic array pointer + length
+        "STRING_AGG" => 32,    // Dynamic string pointer + length
+        "STDDEV" => 32,        // M2 + mean + count
+        "PERCENTILE" => 48,    // T-digest or sorted sample
+        _ => 32,               // Default
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    hw: &HardwareProfile,
+) -> bool {
+    // Always applicable for aggregation cost estimation
+    stats.has_aggregation || stats.has_distinct || stats.has_group_by
+}
+```
+
+**Restrictions:**
+- Group count estimate is critical: wrong estimate leads to wrong strategy
+- Hash aggregation assumes uniform hash distribution
+- Sort-based aggregation depends on sortability of GROUP BY columns
+- Partial aggregation only beneficial when reduction ratio < 0.5
+- DISTINCT aggregates (COUNT DISTINCT) have special cost characteristics
+
+## Cost Model
+
+```rust
+fn strategy_crossover(
+    stats: &Statistics,
+    hw: &HardwareProfile,
+) -> StrategyRegions {
+    let memory_pages = hw.available_memory_pages as f64;
+    let page_size = hw.page_size as f64;
+
+    // Hash aggregate: fits in memory?
+    let max_groups_in_memory =
+        (memory_pages * page_size)
+            / (stats.avg_group_entry_size as f64 * 2.0);
+
+    StrategyRegions {
+        // Hash wins when groups fit in memory and input unsorted
+        hash_max_groups: max_groups_in_memory,
+        // Sort wins when input sorted or groups exceed memory
+        sort_preferred_when_sorted: true,
+        sort_preferred_when_groups_exceed: max_groups_in_memory,
+        // Partial agg wins when reduction > 2x
+        partial_min_reduction: 2.0,
+    }
+}
+```
+
+**Typical crossover points:**
+- Hash agg: groups < memory / (2 * entry_size). Most common.
+- Sort agg: input pre-sorted on GROUP BY columns, or groups > memory.
+- Partial agg: reduction ratio > 2x (local aggregation halves data volume).
+
+## Test Cases
+
+### Positive: Hash aggregation for small group count
+
+```sql
+-- 10M orders, 50 distinct statuses
+SELECT status, COUNT(*), AVG(total)
+FROM orders GROUP BY status;
+
+-- Hash agg: 50 groups * 56 bytes = 2.8KB (trivially in memory)
+--   CPU: 10M * (30ns hash + 20ns update) = 500ms
+--   I/O: 0 (in-memory)
+-- Sort agg: sort 10M rows + scan = much more CPU
+-- Hash wins decisively for small group counts
+```
+
+### Positive: Sort aggregation when input pre-sorted
+
+```sql
+-- Clustered index on orders(customer_id)
+SELECT customer_id, SUM(total)
+FROM orders
+GROUP BY customer_id
+ORDER BY customer_id;
+
+-- Sort agg: input already sorted, just scan and aggregate
+--   CPU: 10M * 20ns = 200ms
+--   I/O: sequential scan = 100K pages
+--   Output sorted: ORDER BY satisfied for free
+-- Hash agg: 10M * 50ns = 500ms + sort for ORDER BY
+-- Sort wins: pre-sorted input + free output ordering
+```
+
+### Positive: Partial aggregation reduces network transfer
+
+```sql
+-- Distributed: 10 nodes, 100M rows total, 1000 regions
+SELECT region, SUM(revenue)
+FROM global_sales
+GROUP BY region;
+
+-- Without partial agg:
+--   Shuffle 100M rows (200 bytes each) = 20GB network
+--   Global hash agg: 100M * 50ns = 5s
+
+-- With partial agg:
+--   Local: 10M * 50ns = 500ms per node
+--   Each node produces ~1000 partial results
+--   Shuffle 10K rows (40 bytes each) = 400KB network
+--   Global: 10K * 50ns = 0.5ms
+--   Reduction: 10,000x less network traffic
+```
+
+### Positive: High group count forces sort aggregation
+
+```sql
+-- 10M rows, 8M distinct groups (nearly unique)
+SELECT user_id, MAX(login_time)
+FROM login_events
+GROUP BY user_id;
+
+-- Hash agg: 8M groups * 48 bytes * 2 = 768MB hash table
+--   If memory < 768MB: spill to disk, expensive
+-- Sort agg: sort 10M rows, sequential scan
+--   Handles arbitrarily many groups with O(1) memory
+-- Sort wins when hash table exceeds available memory
+```
+
+### Negative: Partial aggregation hurts when no reduction
+
+```sql
+-- 10M rows, all distinct user_ids (no duplicates to aggregate)
+SELECT user_id, SUM(amount)
+FROM transactions
+GROUP BY user_id;
+
+-- Partial agg: local phase produces 10M "groups" = no reduction
+-- Overhead: hash twice (local + global) instead of once
+-- Skip partial aggregation when group count ~ input count
+-- Reduction ratio: 10M / 10M = 1.0 (no benefit)
+```
+
+### Positive: Multiple aggregates share group-by cost
+
+```sql
+SELECT department,
+       COUNT(*) AS cnt,
+       AVG(salary) AS avg_sal,
+       MAX(salary) AS max_sal,
+       MIN(hire_date) AS earliest_hire,
+       SUM(bonus) AS total_bonus
+FROM employees
+GROUP BY department;
+
+-- 5 aggregates but only 1 hash table (keyed by department)
+-- Entry size: department(32) + count(8) + avg(24) + max(16) + min(16) + sum(16) = 112 bytes
+-- Cost per tuple: 1 hash + 5 agg updates
+-- Adding aggregates is cheap: marginal cost is just c_agg_update per tuple
+```
+
+## References
+
+**Foundational:**
+- Graefe, G., "Query Evaluation Techniques for Large Databases", ACM Computing Surveys 1993
+  - DOI: 10.1145/152610.152611
+  - Section 6: Aggregation algorithms and costs
+
+- Larson, P.-A., "Data Reduction by Partial Preaggregation", IEEE ICDE 2002
+  - DOI: 10.1109/ICDE.2002.994747
+  - When and how to apply partial aggregation
+
+**Eager aggregation (pushing GROUP BY below joins):**
+- Yan, W.P., Larson, P.-A., "Eager Aggregation and Lazy Aggregation", VLDB 1995
+  - DOI: 10.5555/645921.673164
+  - Cost model for deciding when to push aggregation below joins
+
+**Modern analysis:**
+- Mueller, I., Sanders, P., Arndt, R., et al., "Aggregation is Not a Solved Problem", SIGMOD 2020
+  - Analysis of modern aggregation strategies for in-memory databases
+
+- Balkesen, C., et al., "Multi-Core, Main-Memory Joins: Sort vs. Hash Revisited", VLDB 2013
+  - DOI: 10.14778/2732219.2732227
+  - Applicable to sort vs. hash aggregation crossover
+
+**Implementation in databases:**
+- PostgreSQL: `src/backend/executor/nodeAgg.c` - hash and sort aggregation
+  - `src/backend/optimizer/path/costsize.c` - cost_agg()
+- DuckDB: `src/execution/aggregate_hashtable.cpp` - vectorized hash agg
+- ClickHouse: `src/Processors/Transforms/AggregatingTransform.cpp`
+- CockroachDB: `pkg/sql/opt/memo/cost.go` - aggregation cost model

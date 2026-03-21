@@ -1,0 +1,113 @@
+# Rule: Calcite AggregateRemoveRule
+
+**Category:** database-specific/calcite
+**File:** `rules/database-specific/calcite/aggregate-remove.rra`
+
+## Metadata
+
+- **ID:** `calcite-aggregate-remove`
+- **Version:** "1.0.0"
+- **Databases:** calcite
+- **Tags:** database-specific, calcite, aggregate, remove, unique
+- **Authors:** "RA Contributors"
+
+
+# Calcite AggregateRemoveRule
+
+## Description
+
+Removes a `LogicalAggregate` when the grouping keys form a
+unique key of the input, making the aggregation a no-op
+(every group contains exactly one row). The aggregate functions
+are replaced with their trivial single-row equivalents.
+
+**When to apply**: The GROUP BY columns form a unique key
+(primary key or unique constraint) of the input relation.
+
+**Why it works**: Aggregation over unique keys produces exactly
+the input rows with no grouping, so the aggregate node adds
+overhead with no semantic effect.
+
+**Calcite class**: `org.apache.calcite.rel.rules.AggregateRemoveRule`
+
+## Relational Algebra
+
+```algebra
+-- Before: aggregate on unique key
+gamma[pk; COUNT(*), SUM(x)](R)
+  where {pk} is a unique key of R
+
+-- After: project with trivial replacements
+pi[pk, 1 AS count_star, x AS sum_x](R)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-aggregate-remove";
+    "(aggregate ?group_by ?aggs ?input)" =>
+    "(project (trivialize-aggs ?group_by ?aggs) ?input)"
+    if group_by_is_unique_key("?group_by", "?input")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    group_by: &[Expr],
+    input_unique_keys: &[Vec<Column>],
+) -> bool {
+    let group_cols: Vec<_> = group_by.iter()
+        .filter_map(|e| {
+            if let Expr::Column(c) = e {
+                Some(c)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    input_unique_keys.iter().any(|uk| {
+        uk.iter().all(|c| group_cols.contains(&c))
+    })
+}
+```
+
+**Restrictions:**
+- Requires knowledge of unique keys (metadata from catalog)
+- Aggregate functions must be replaceable: COUNT(*) -> 1,
+  SUM(x) -> x, MIN(x) -> x, MAX(x) -> x, AVG(x) -> x
+
+## Cost Model
+
+```rust
+fn estimated_benefit(rows: f64) -> f64 {
+    // Eliminates hash table build + probe
+    rows * 0.05
+}
+```
+
+**Typical benefit**: 30-100% elimination of aggregation cost.
+
+## Test Cases
+
+```sql
+-- Positive: GROUP BY primary key
+SELECT id, COUNT(*), SUM(amount)
+FROM orders GROUP BY id;
+-- id is PK, so each group has one row
+-- Becomes: SELECT id, 1, amount FROM orders
+```
+
+```sql
+-- Negative: GROUP BY non-unique column
+SELECT dept, COUNT(*) FROM emp GROUP BY dept;
+-- dept is not unique, aggregation is needed
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/AggregateRemoveRule.java

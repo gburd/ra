@@ -1,0 +1,126 @@
+# Rule: mssql Interleaved Execution
+
+**Category:** database-specific/mssql
+**File:** `rules/database-specific/mssql/interleaved-execution.rra`
+
+## Metadata
+
+- **ID:** `mssql-interleaved-execution`
+- **Version:** "1.0.0"
+- **Databases:** mssql
+- **Tags:** database-specific, mssql, interleaved, tvf, cardinality, adaptive
+- **Authors:** "RA Contributors"
+
+
+# mssql Interleaved Execution
+
+## Description
+
+Pauses query optimization to execute a multi-statement table-valued
+function (MSTVF) and obtain its actual cardinality before continuing
+with the rest of the plan optimization.  This replaces the fixed
+estimate of 100 rows that MSTVFs traditionally produced.
+
+**When to apply**: A query references a multi-statement TVF, and the
+TVF's actual output size significantly differs from the default
+estimate.
+
+**Why it works**: MSTVFs are opaque to the optimizer -- it cannot
+look inside to estimate output rows.  The default estimate (100 rows
+in older versions, 1 row in very old) causes downstream operators to
+choose wrong join types and memory grants.  Interleaved execution
+materializes the TVF first, counts actual rows, then optimizes the
+rest of the query with accurate cardinality.
+
+**Database version**: mssql 2017+ (compat level >= 140)
+
+## Relational Algebra
+
+```algebra
+-- Before: fixed cardinality estimate for TVF
+hash-join(TVF(param), large_table)
+  -- estimated 100 rows from TVF; actually 50,000
+
+-- After: interleaved execution
+-- Step 1: execute TVF, observe 50,000 rows
+-- Step 2: optimize join with actual cardinality
+hash-join(TVF_materialized[50000], large_table)
+  -- correct memory grant and join choice
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mssql-interleaved-execution-tvf";
+    "(join ?type ?cond (tvf ?name ?params) ?other)" =>
+    "(join ?type ?cond
+        (interleaved-tvf ?name ?params) ?other)"
+    if is_database("mssql")
+    if is_multi_statement_tvf("?name")
+    if cardinality_is_default_estimate("?name")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    tvf: &TableValuedFunction,
+    compat_level: u32,
+) -> bool {
+    tvf.is_multi_statement()
+    && compat_level >= 140
+}
+```
+
+**Restrictions:**
+- Only applies to multi-statement TVFs (inline TVFs are already expanded)
+- Adds latency for TVF execution before plan compilation completes
+- TVF must be deterministic for result caching
+- The materialized result is cached for the duration of the query
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    default_estimate: f64,
+    actual_rows: f64,
+    downstream_cost_error: f64,
+) -> f64 {
+    let estimate_error = (actual_rows / default_estimate).max(
+        default_estimate / actual_rows);
+    if estimate_error > 5.0 {
+        downstream_cost_error * 0.5
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: When a TVF returns 50K rows instead of estimated
+100, interleaved execution prevents hash join from using a 100-row
+memory grant (causing spill) and allocates correctly.
+
+## Test Cases
+
+```sql
+-- Positive: MSTVF with unknown cardinality
+SELECT t.*, o.amount
+FROM dbo.GetActiveCustomers() t
+JOIN orders o ON t.id = o.customer_id;
+-- Interleaved: execute GetActiveCustomers first, then optimize join
+```
+
+```sql
+-- Negative: inline TVF (already expanded by optimizer)
+SELECT * FROM dbo.InlineGetOrders(100) t
+JOIN products p ON t.product_id = p.id;
+-- Inline TVF expanded; cardinality estimated normally
+```
+
+## References
+
+mssql: Interleaved Execution for MSTVFs
+mssql: Adaptive Query Processing

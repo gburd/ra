@@ -1,0 +1,285 @@
+# Rule: Parallel Append
+
+**Category:** physical/parallelization
+**File:** `rules/physical/parallelization/parallel-append.rra`
+
+## Metadata
+
+- **ID:** `parallel-append`
+- **Version:** "1.0.0"
+- **Databases:** postgresql, cockroachdb, duckdb, clickhouse
+- **Tags:** parallelization, append, union, partition, gather
+- **Authors:** "RA Contributors"
+
+
+# Parallel Append
+
+## Metadata
+- **Rule ID**: `parallel-append`
+- **Category**: Physical / Parallelization
+- **Complexity**: O(n/p) where n = total rows across all children, p = workers
+- **Introduced**: PostgreSQL 11 (parallel append), CockroachDB
+- **Prerequisites**: Multiple independent child scans, parallel-safe operators
+- **Alternatives**: serial-append, parallel-union
+
+## Description
+
+Parallel append executes multiple child plans (typically partition scans or
+UNION ALL branches) concurrently across worker threads. Each worker picks
+the next unstarted child plan and executes it, dynamically distributing
+work. Once a worker finishes one child, it takes the next available one.
+
+This differs from parallel scan (which parallelizes a single table) by
+parallelizing across multiple independent data sources -- partitions of a
+partitioned table, branches of a UNION ALL, or inheritance children.
+
+**When to use:**
+- Partitioned table scans where multiple partitions need scanning
+- UNION ALL queries with independent branches
+- Inheritance/table hierarchy queries
+- Queries touching multiple related tables
+
+**Advantages:**
+- Workers dynamically claim children (automatic load balancing)
+- No data exchange between workers (each child is independent)
+- Can skip partitions via partition pruning before assigning
+- Combines with per-partition parallel scan for nested parallelism
+
+**Disadvantages:**
+- Overhead for very small child plans
+- Worker startup cost per child
+- Gather node must serialize results from multiple workers
+- Cannot maintain global sort order without merge step
+
+## Relational Algebra
+
+```
+Append(child_1, child_2, ..., child_k)
+-> ParallelAppend(child_1, child_2, ..., child_k, workers):
+     task_queue = [child_1, ..., child_k]
+     for each worker:
+       while task_queue not empty:
+         child = task_queue.pop()
+         results += execute(child)
+     Gather(results)
+```
+
+## Implementation (egg rewrite rules)
+
+```lisp
+;; Parallelize append over partitioned table
+(rewrite (append ?child1 ?child2 ?rest)
+  (parallel-append (list ?child1 ?child2 ?rest)
+    :workers (min (count-children ?child1 ?child2 ?rest)
+                  (available-workers)))
+  :if (> (count-children ?child1 ?child2 ?rest) 1)
+  :if (all-parallel-safe ?child1 ?child2 ?rest))
+
+;; Parallelize UNION ALL
+(rewrite (union-all ?branch1 ?branch2 ?rest)
+  (gather
+    (parallel-append (list ?branch1 ?branch2 ?rest)
+      :workers (available-workers)))
+  :if (> (count-children ?branch1 ?branch2 ?rest) 1)
+  :if (all-independent ?branch1 ?branch2 ?rest))
+
+;; Partition scan to parallel append
+(rewrite (scan-partitioned ?table ?pred)
+  (gather
+    (parallel-append
+      (partition-scans ?table ?pred)
+      :workers (min (partition-count ?table)
+                    (available-workers))))
+  :if (> (partition-count ?table) 1)
+  :if (> (surviving-partitions ?table ?pred) 1))
+
+;; Merge-append for sorted output
+(rewrite (sort ?key (parallel-append ?children ?workers))
+  (gather-merge ?key
+    (parallel-append
+      (map (partial sort ?key) ?children)
+      ?workers))
+  :if (requires-sorted-output))
+```
+
+## Implementation Pattern
+
+```rust
+pub struct ParallelAppend {
+    children: Vec<Box<dyn Operator>>,
+    task_queue: Arc<Mutex<VecDeque<usize>>>, // Child indices
+    results: Arc<Mutex<Vec<VecDeque<Tuple>>>>,
+    num_workers: usize,
+}
+
+impl ParallelAppend {
+    fn execute(&self) -> Vec<Tuple> {
+        let handles: Vec<_> = (0..self.num_workers)
+            .map(|worker_id| {
+                let queue = Arc::clone(&self.task_queue);
+                let results = Arc::clone(&self.results);
+
+                thread::spawn(move || {
+                    loop {
+                        let child_idx = {
+                            let mut q = queue.lock().unwrap();
+                            q.pop_front()
+                        };
+
+                        match child_idx {
+                            Some(idx) => {
+                                let child_results =
+                                    self.execute_child(idx);
+                                let mut r = results.lock().unwrap();
+                                r[worker_id].extend(child_results);
+                            }
+                            None => break, // No more work
+                        }
+                    }
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        // Gather results from all workers
+        self.gather_results()
+    }
+}
+```
+
+## Cost Model
+
+```rust
+pub fn cost_parallel_append(
+    children: &[ChildPlan],
+    num_workers: usize,
+    hardware: &HardwareModel,
+) -> Cost {
+    // Total work across all children
+    let total_work: f64 = children.iter()
+        .map(|c| c.estimated_cost)
+        .sum();
+
+    // Parallel execution time (dynamic assignment)
+    // Worst case: last child is the largest
+    let max_child = children.iter()
+        .map(|c| c.estimated_cost)
+        .fold(0.0f64, f64::max);
+
+    // Parallel time = max(total/workers, largest_child)
+    let parallel_time = (total_work / num_workers as f64)
+        .max(max_child);
+
+    // Worker startup and gather overhead
+    let overhead = Cost::cpu(
+        num_workers as u64 * 1000 // Thread coordination
+            + children.len() as u64 * 100, // Task dispatch
+    );
+
+    Cost::cpu(parallel_time as u64) + overhead
+}
+
+pub fn optimal_worker_count(
+    num_children: usize,
+    child_costs: &[f64],
+    max_workers: usize,
+) -> usize {
+    // No point having more workers than children
+    let upper = num_children.min(max_workers);
+
+    // Find worker count that minimizes parallel time
+    (1..=upper)
+        .min_by_key(|&w| {
+            let time = child_costs.iter().sum::<f64>() / w as f64;
+            (time * 1000.0) as u64
+        })
+        .unwrap_or(1)
+}
+```
+
+## Test Cases
+
+### Test 1: Partitioned table scan
+```sql
+CREATE TABLE sales (
+    id INT, amount DECIMAL, sale_date DATE
+) PARTITION BY RANGE (sale_date) (
+    PARTITION p2024q1 VALUES FROM ('2024-01-01') TO ('2024-04-01'),
+    PARTITION p2024q2 VALUES FROM ('2024-04-01') TO ('2024-07-01'),
+    PARTITION p2024q3 VALUES FROM ('2024-07-01') TO ('2024-10-01'),
+    PARTITION p2024q4 VALUES FROM ('2024-10-01') TO ('2025-01-01')
+);
+
+SELECT SUM(amount) FROM sales
+WHERE sale_date >= '2024-01-01';
+
+-- Expected: ParallelAppend over 4 partition scans
+-- 4 workers each take one partition
+-- Dynamic assignment if partitions have different sizes
+```
+
+### Test 2: UNION ALL with independent branches
+```sql
+SELECT id, name, 'customer' as source FROM customers WHERE active
+UNION ALL
+SELECT id, name, 'supplier' as source FROM suppliers WHERE active
+UNION ALL
+SELECT id, name, 'partner' as source FROM partners WHERE active;
+
+-- Expected: ParallelAppend with 3 workers
+-- Each branch scans a different table independently
+-- Gather combines results
+```
+
+### Test 3: Partition pruning reduces children
+```sql
+SELECT * FROM sales WHERE sale_date = '2024-06-15';
+
+-- Expected: Only p2024q2 survives partition pruning
+-- ParallelAppend with 1 child degenerates to single scan
+-- No parallelism overhead
+```
+
+### Test 4: Negative -- single partition
+```sql
+SELECT * FROM sales WHERE sale_date = '2024-03-01';
+
+-- Only one partition touched
+-- NOT suitable for parallel append (nothing to parallelize)
+-- Use parallel scan within the single partition instead
+```
+
+### Test 5: Merge-append for sorted output
+```sql
+SELECT * FROM sales ORDER BY sale_date, id;
+
+-- Expected: ParallelAppend with per-partition sort
+-- Each partition sorted independently
+-- GatherMerge combines sorted streams
+```
+
+## Performance Characteristics
+
+| Partitions | Workers | Speedup (uniform) | Speedup (skewed 10x) |
+|------------|---------|--------------------|-----------------------|
+| 4 | 4 | ~3.8x | ~2.5x (limited by large partition) |
+| 8 | 4 | ~3.9x | ~3.0x (better load balancing) |
+| 16 | 8 | ~7.5x | ~5.0x |
+| 100 | 8 | ~7.8x | ~6.0x (many small tasks balance well) |
+
+## References
+
+1. **PostgreSQL 11**: Parallel Append
+   - https://www.postgresql.org/docs/current/parallel-plans.html
+
+2. **CockroachDB**: Parallel UNION ALL execution
+   - Distributed append across ranges
+
+3. **Graefe**: "Encapsulation of Parallelism in the Volcano Query Processing System"
+   - SIGMOD 1990, Exchange operator model for parallel plans
+
+4. **DuckDB**: Parallel pipeline execution with append nodes
+   - https://duckdb.org/internals/overview

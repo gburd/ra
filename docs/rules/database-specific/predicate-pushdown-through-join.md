@@ -1,0 +1,125 @@
+# Rule: Materialize Predicate Pushdown Through Join
+
+**Category:** database-specific/materialize
+**File:** `rules/database-specific/materialize/predicate-pushdown-through-join.rra`
+
+## Metadata
+
+- **ID:** `materialize-predicate-pushdown-through-join`
+- **Version:** "1.0.0"
+- **Databases:** materialize
+- **Tags:** database-specific, materialize, predicate, pushdown, join, differential
+- **Authors:** "RA Contributors"
+
+
+# Materialize Predicate Pushdown Through Join
+
+## Description
+
+Pushes filter predicates below join operators in Materialize's MIR
+optimizer.  Unlike batch databases, pushdown in Materialize also
+reduces the size of differential dataflow arrangements maintained
+for incremental view maintenance.
+
+**When to apply**: A filter above a join references columns from only
+one side of the join.
+
+**Why it works**: In differential dataflow, joins maintain arrangements
+of both inputs for incremental updates.  Filtering before the join
+reduces the number of rows stored in these arrangements, saving memory
+proportional to the filter's selectivity, and reducing the cost of
+processing each update to either input.
+
+**Database version**: Materialize 0.20+
+
+## Relational Algebra
+
+```algebra
+sigma[p(R)](R join[c] S) -> sigma[p(R)](R) join[c] S
+  where attrs(p) subset attrs(R)
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("materialize-filter-pushdown-join-left";
+    "(filter ?pred (join ?type ?cond ?left ?right))" =>
+    "(join ?type ?cond (filter ?pred ?left) ?right)"
+    if is_database("materialize")
+    if predicate_references_only("?pred", "?left")
+),
+
+rw!("materialize-filter-pushdown-join-right";
+    "(filter ?pred (join ?type ?cond ?left ?right))" =>
+    "(join ?type ?cond ?left (filter ?pred ?right))"
+    if is_database("materialize")
+    if predicate_references_only("?pred", "?right")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    pred: &MirScalarExpr,
+    join_input: &MirRelationExpr,
+) -> bool {
+    let pred_cols = pred.support();
+    let input_arity = join_input.arity();
+    pred_cols.iter().all(|c| *c < input_arity)
+    && pred.is_deterministic()
+}
+```
+
+**Restrictions:**
+- Only deterministic predicates can be pushed down
+- Predicates referencing both sides stay above the join
+- Outer join semantics must be respected (preserved side only)
+- Temporal predicates (mz_now()) follow separate pushdown rules
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    selectivity: f64,
+    arrangement_rows: f64,
+    row_bytes: f64,
+    updates_per_sec: f64,
+) -> f64 {
+    // Memory: smaller arrangement
+    let memory = (1.0 - selectivity) * arrangement_rows * row_bytes;
+    // CPU: fewer update propagations
+    let cpu = (1.0 - selectivity) * updates_per_sec * 0.01;
+    memory + cpu
+}
+```
+
+**Typical benefit**: With 10% selectivity, reduces join arrangement
+by 90% and proportionally reduces per-update maintenance cost.
+
+## Test Cases
+
+```sql
+-- Positive: filter on one side pushed below join
+CREATE MATERIALIZED VIEW v AS
+SELECT o.id, c.name
+FROM orders o JOIN customers c ON o.customer_id = c.id
+WHERE o.status = 'completed';
+-- Filter pushed to orders side, reducing arrangement size
+```
+
+```sql
+-- Negative: filter references both sides
+CREATE MATERIALIZED VIEW v AS
+SELECT *
+FROM orders o JOIN customers c ON o.customer_id = c.id
+WHERE o.total > c.credit_limit;
+-- Cannot push: references both sides
+```
+
+## References
+
+Materialize: src/transform/src/predicate_pushdown.rs
+Materialize: src/transform/src/join_implementation.rs
