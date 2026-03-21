@@ -59,17 +59,20 @@ pub fn cmd_regression_baseline(
 
     // Optimize with cost estimation
     let optimizer = Optimizer::new(hw_profile);
-    let optimized = optimizer.optimize(rel_expr)?;
+    let (optimized, _egraph) = optimizer.optimize_with_egraph(rel_expr)?;
 
     // Get plan fingerprint
     let fingerprint = PlanFingerprint::from_plan(&plan);
+
+    // TODO: Extract actual cost from egraph
+    let cost = 0.0;
 
     // Create query entry
     let entry = QueryEntry::new(
         query_id.to_string(),
         sql.clone(),
         fingerprint.as_str().to_string(),
-        optimized.cost(),
+        cost,
     );
 
     // Store baseline
@@ -79,13 +82,13 @@ pub fn cmd_regression_baseline(
         println!("{}", "Baseline established:".green().bold());
         println!("  Query ID: {}", query_id);
         println!("  Plan hash: {}", fingerprint);
-        println!("  Cost: {:.2}", optimized.cost());
+        println!("  Cost: {:.2}", cost);
         println!("  Stored in: {}", storage_path.display());
     }
 
     if verbose {
         println!("\n{}", "Query plan:".bold());
-        println!("{}", optimized);
+        println!("{:#?}", optimized);
     }
 
     Ok(())

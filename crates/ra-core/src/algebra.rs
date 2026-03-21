@@ -224,6 +224,16 @@ pub enum RelExpr {
         input: Box<RelExpr>,
     },
 
+    /// Index scan: reads from a B-tree index to retrieve rows in
+    /// index order. Used for MIN/MAX index optimization where only
+    /// the first or last key is needed.
+    IndexScan {
+        /// Table name.
+        table: String,
+        /// Column covered by the index (first column in index).
+        column: String,
+    },
+
     /// Bitmap index scan: scans an index and produces a bitmap of
     /// matching heap pages. Used as input to BitmapAnd/BitmapOr.
     BitmapIndexScan {
@@ -258,6 +268,21 @@ pub enum RelExpr {
         bitmap: Box<RelExpr>,
         /// Optional condition to recheck on heap tuples.
         recheck_cond: Option<Expr>,
+    },
+
+    // ===== Covering Index (Index-Only Scan) =====
+
+    /// Index-only scan: reads all needed columns from a covering
+    /// index, avoiding heap fetches entirely.
+    IndexOnlyScan {
+        /// Table name.
+        table: String,
+        /// Index name (or "auto" for deferred resolution).
+        index: String,
+        /// Projected columns.
+        columns: Vec<ProjectionColumn>,
+        /// Filter predicate evaluated within the index.
+        predicate: Expr,
     },
 
     // ===== Parallel Query Execution Operators =====
@@ -640,6 +665,7 @@ impl RelExpr {
                 None => vec![],
             },
             Self::RowPattern { input, .. } => vec![input],
+            Self::IndexScan { .. } => vec![],
             Self::BitmapIndexScan { .. } => vec![],
             Self::BitmapAnd { inputs } | Self::BitmapOr { inputs } => {
                 inputs.iter().map(|b| b.as_ref()).collect()
@@ -648,6 +674,7 @@ impl RelExpr {
             Self::ParallelScan { .. } => vec![],
             Self::ParallelHashJoin { left, right, .. } => vec![left, right],
             Self::ParallelAggregate { input, .. } | Self::Gather { input, .. } => vec![input],
+            Self::IndexOnlyScan { .. } => vec![],
         }
     }
 
@@ -661,7 +688,10 @@ impl RelExpr {
 
     fn collect_columns(&self, out: &mut Vec<ColumnRef>) {
         match self {
-            Self::Scan { .. } => {}
+            Self::Scan { .. } | Self::IndexScan { .. } => {}
+            Self::IndexOnlyScan { predicate, .. } => {
+                collect_expr_columns(predicate, out);
+            }
             Self::Values { rows } => {
                 for row in rows {
                     for expr in row {
@@ -872,7 +902,9 @@ impl RelExpr {
     #[must_use]
     pub fn references_cte(&self, cte_name: &str) -> bool {
         match self {
-            Self::Scan { table, .. } => table == cte_name,
+            Self::Scan { table, .. }
+            | Self::IndexScan { table, .. }
+            | Self::IndexOnlyScan { table, .. } => table == cte_name,
             Self::Filter { input, .. }
             | Self::Project { input, .. }
             | Self::Aggregate { input, .. }

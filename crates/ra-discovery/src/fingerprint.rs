@@ -126,7 +126,7 @@ impl fmt::Display for Fingerprint {
 
 fn fingerprint_rel(expr: &RelExpr, out: &mut Vec<Token>) {
     match expr {
-        RelExpr::Scan { .. } => {
+        RelExpr::Scan { .. } | RelExpr::IndexScan { .. } | RelExpr::IndexOnlyScan { .. } => {
             out.push(Token::Scan);
         }
         RelExpr::Filter {

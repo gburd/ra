@@ -821,6 +821,7 @@ impl PostgresAdapter {
                         &idx.index_type,
                     ),
                     columns: idx.columns.clone(),
+                    included_columns: vec![],
                     is_unique: idx.unique,
                 })
                 .collect();

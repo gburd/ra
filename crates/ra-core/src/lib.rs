@@ -20,6 +20,7 @@ pub mod distribution;
 pub mod expr;
 pub mod facts;
 pub mod federated;
+pub mod formats;
 pub mod pattern;
 pub mod precondition;
 pub mod row_pattern;
@@ -27,6 +28,7 @@ pub mod physical_properties;
 pub mod properties;
 pub mod rule;
 pub mod statistics;
+pub mod table_formats;
 
 pub use algebra::*;
 pub use cost::*;

@@ -241,6 +241,9 @@ fn collect_join_order(expr: &RelExpr, out: &mut Vec<String>) {
                 alias.as_deref().unwrap_or(table).to_string()
             );
         }
+        RelExpr::IndexScan { table, .. } | RelExpr::IndexOnlyScan { table, .. } => {
+            out.push(table.clone());
+        }
         RelExpr::Join { left, right, .. }
         | RelExpr::Union { left, right, .. }
         | RelExpr::Intersect { left, right, .. }
@@ -269,7 +272,9 @@ fn collect_join_order(expr: &RelExpr, out: &mut Vec<String>) {
                 collect_join_order(inp, out);
             }
         }
-        RelExpr::BitmapIndexScan { .. }
+        RelExpr::IndexScan { .. }
+        | RelExpr::IndexOnlyScan { .. }
+        | RelExpr::BitmapIndexScan { .. }
         | RelExpr::BitmapHeapScan { .. }
         | RelExpr::ParallelScan { .. } => {}
         RelExpr::BitmapAnd { inputs }
@@ -347,7 +352,9 @@ fn collect_join_hints(expr: &RelExpr, out: &mut Vec<JoinHint>) {
                 collect_join_hints(inp, out);
             }
         }
-        RelExpr::BitmapIndexScan { .. }
+        RelExpr::IndexScan { .. }
+        | RelExpr::IndexOnlyScan { .. }
+        | RelExpr::BitmapIndexScan { .. }
         | RelExpr::BitmapHeapScan { .. }
         | RelExpr::ParallelScan { .. } => {}
         RelExpr::BitmapAnd { inputs }

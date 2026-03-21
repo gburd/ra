@@ -93,6 +93,9 @@ predicates = "3.1"
 tempfile = "3.27"
 pretty_assertions = "1.4"
 
+# File formats
+parquet = "53.4"
+
 # Data structures
 indexmap = "2.8"
 

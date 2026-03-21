@@ -33,6 +33,8 @@ pub mod cardinality_cost;
 // pub mod column_pruning; // TODO: incomplete, has invalid egg syntax
 pub mod constraint_optimizer;
 pub mod cost;
+pub mod count_metadata;
+pub mod covering_index;
 pub mod differential;
 pub mod distributed_optimizer;
 pub mod egraph;
@@ -48,12 +50,14 @@ pub mod federated_optimizer;
 pub mod memo;
 pub mod network_cost;
 pub mod null_simplification;
+pub mod parquet_pushdown;
 pub mod precondition_eval;
 pub mod recursive;
 // pub mod redundant_join; // TODO: incomplete, has invalid egg syntax
 pub mod resource_budget;
 pub mod resource_profiles;
 pub mod rewrite;
+pub mod shortcuts;
 pub mod rule_metadata;
 pub mod runtime_filters;
 // pub mod semi_join; // TODO: incomplete, has invalid egg syntax
@@ -126,10 +130,18 @@ pub use executors::{
     LateralJoinExecutor, MultiUnnestExecutor, TableFunctionExecutor,
     UnnestExecutor,
 };
+pub use parquet_pushdown::{
+    CompareOp, ParquetMetadataRegistry, PushdownPredicate,
+    RowGroupMatch, evaluate_predicate, filter_row_groups,
+    parquet_pushdown_rules, pruning_selectivity,
+};
 pub use runtime_filters::{
     BloomFilterState, FilterBuilder, FilterConfig, FilterEffectiveness,
     FilterOpportunity, FilterStrategy, InListFilterState,
     MinMaxFilterState, RuntimeFilter, RuntimeFilterCost,
     estimate_filter_cost, identify_filter_opportunities,
     should_apply_filter,
+};
+pub use covering_index::{
+    covering_index_rules, index_only_scan_cost_factor,
 };

@@ -54,6 +54,21 @@ pub fn all_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     rules.extend(
         crate::join_transformations::join_transformation_rules(),
     );
+
+    // File-format rules
+    rules.extend(crate::parquet_pushdown::parquet_pushdown_rules());
+
+    // Metadata shortcut rules
+    rules.extend(crate::count_metadata::count_metadata_rules());
+
+    // Covering index (index-only scan) rules
+    rules.extend(crate::covering_index::covering_index_rules());
+
+    // MIN/MAX index optimization rules
+    rules.extend(
+        crate::shortcuts::min_max_index::min_max_index_rules(),
+    );
+
     rules
 }
 
@@ -290,7 +305,7 @@ fn join_elimination_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 // Aggregate optimization rules
 // ---------------------------------------------------------------
 
-fn aggregate_optimization_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
+pub fn aggregate_optimization_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // Push filter below aggregate when filter only
         // references grouping keys

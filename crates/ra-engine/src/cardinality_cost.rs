@@ -125,9 +125,14 @@ impl CostFunction<RelLang> for CardinalityAwareCostFn {
                 let cache_factor = 16.0 / cache_mb.max(1.0);
                 150.0 * cache_factor
             }
+            RelLang::IndexOnlyScan(_) => 5.0,
             RelLang::BitmapIndexScan(_) => 30.0,
             RelLang::BitmapHeapScan(_) => 40.0,
             RelLang::BitmapAnd(_) | RelLang::BitmapOr(_) => 10.0,
+            RelLang::MetadataLookup(_) => {
+                // O(1) metadata lookup, cheaper than any scan
+                return 1.0;
+            }
             _ => 0.1,
         };
 
@@ -141,6 +146,7 @@ impl CostFunction<RelLang> for CardinalityAwareCostFn {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ra_core::algebra::RelExpr;
     use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
 
     #[test]
@@ -159,7 +165,6 @@ mod tests {
             staleness,
         );
 
-        // Verify estimator works
         let scan = RelExpr::scan("users");
         let filter = scan.filter(Expr::BinOp {
             op: BinOp::Gt,
@@ -167,8 +172,12 @@ mod tests {
             right: Box::new(Expr::Const(Const::Int(18))),
         });
 
-        let scan_estimate = cost_fn.estimator.estimate(&scan, cost_fn.stats_provider.as_ref());
-        let filter_estimate = cost_fn.estimator.estimate(&filter, cost_fn.stats_provider.as_ref());
+        let scan_estimate = cost_fn
+            .estimator
+            .estimate(&RelExpr::scan("users"), cost_fn.stats_provider.as_ref());
+        let filter_estimate = cost_fn
+            .estimator
+            .estimate(&filter, cost_fn.stats_provider.as_ref());
 
         // Filter should reduce cardinality
         assert!(
@@ -178,19 +187,64 @@ mod tests {
     }
 
     #[test]
-    fn staleness_factor_calculation() {
-        let hardware = HardwareProfile::cpu_only();
-        let table_stats = HashMap::new();
+    fn staleness_factor_fresh() {
+        let cost_fn = make_cost_fn(HashMap::new(), HashMap::new());
+        assert_eq!(cost_fn.staleness_factor("any_table"), 1.0);
+    }
+
+    #[test]
+    fn staleness_factor_all_levels() {
+        let mut staleness = HashMap::new();
+        staleness.insert("fresh".to_string(), Staleness::Fresh);
+        staleness.insert("slight".to_string(), Staleness::SlightlyStale);
+        staleness.insert("moderate".to_string(), Staleness::ModeratelyStale);
+        staleness.insert("very".to_string(), Staleness::VeryStale);
+        staleness.insert("unknown".to_string(), Staleness::Unknown);
+
+        let cost_fn = make_cost_fn(HashMap::new(), staleness);
+
+        assert_eq!(cost_fn.staleness_factor("fresh"), 1.0);
+        assert_eq!(cost_fn.staleness_factor("slight"), 1.05);
+        assert_eq!(cost_fn.staleness_factor("moderate"), 1.2);
+        assert_eq!(cost_fn.staleness_factor("very"), 1.5);
+        assert_eq!(cost_fn.staleness_factor("unknown"), 2.0);
+    }
+
+    #[test]
+    fn staleness_factor_missing_table_defaults_to_one() {
         let mut staleness = HashMap::new();
         staleness.insert("users".to_string(), Staleness::ModeratelyStale);
-
-        let cost_fn = CardinalityAwareCostFn::new(
-            hardware,
-            table_stats,
-            staleness,
-        );
+        let cost_fn = make_cost_fn(HashMap::new(), staleness);
 
         assert_eq!(cost_fn.staleness_factor("users"), 1.2);
-        assert_eq!(cost_fn.staleness_factor("unknown"), 1.0);
+        assert_eq!(cost_fn.staleness_factor("not_present"), 1.0);
+    }
+
+    #[test]
+    fn cost_fn_with_zero_row_table() {
+        let mut table_stats = HashMap::new();
+        table_stats.insert(
+            "empty_table".to_string(),
+            Statistics::new(0.0),
+        );
+
+        let cost_fn = make_cost_fn(table_stats, HashMap::new());
+
+        let scan = RelExpr::scan("empty_table");
+        let estimate = cost_fn
+            .estimator
+            .estimate(&scan, cost_fn.stats_provider.as_ref());
+        assert!(estimate.rows >= 0.0);
+    }
+
+    fn make_cost_fn(
+        table_stats: HashMap<String, Statistics>,
+        staleness: HashMap<String, Staleness>,
+    ) -> CardinalityAwareCostFn {
+        CardinalityAwareCostFn::new(
+            HardwareProfile::cpu_only(),
+            table_stats,
+            staleness,
+        )
     }
 }

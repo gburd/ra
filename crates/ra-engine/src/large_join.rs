@@ -304,6 +304,7 @@ impl LargeJoinOptimizer {
             RelExpr::ParallelAggregate { input, .. } | RelExpr::Gather { input, .. } => {
                 Self::count_tables(input)
             }
+            RelExpr::IndexScan { .. } | RelExpr::IndexOnlyScan { .. } => 1,
         }
     }
 
@@ -371,8 +372,8 @@ impl LargeJoinOptimizer {
                     Self::extract_joins_recursive(input, joins);
                 }
             }
-            RelExpr::Values { .. } | RelExpr::BitmapIndexScan { .. } | RelExpr::MultiUnnest { .. } | RelExpr::ParallelScan { .. } => {
-                // No tables to extract
+            RelExpr::Values { .. } | RelExpr::BitmapIndexScan { .. } | RelExpr::MultiUnnest { .. } | RelExpr::ParallelScan { .. } | RelExpr::IndexScan { .. } | RelExpr::IndexOnlyScan { .. } => {
+                // Leaf nodes, no joins to extract
             }
             RelExpr::Unnest { input, .. } | RelExpr::TableFunction { input, .. } => {
                 if let Some(inp) = input {
@@ -393,7 +394,7 @@ impl LargeJoinOptimizer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ra_core::expr::{ColumnRef, Expr};
+    use ra_core::expr::Expr;
 
     #[test]
     fn test_count_tables() {

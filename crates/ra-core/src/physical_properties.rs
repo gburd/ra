@@ -34,6 +34,8 @@ pub fn derive_properties(
 ) -> PropertySet {
     match expr {
         RelExpr::Scan { .. }
+        | RelExpr::IndexScan { .. }
+        | RelExpr::IndexOnlyScan { .. }
         | RelExpr::Values { .. }
         | RelExpr::MultiUnnest { .. }
         | RelExpr::Unnest { .. }

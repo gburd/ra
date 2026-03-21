@@ -62,7 +62,7 @@ fn estimate_heuristic(
     stats: &dyn StatisticsProvider,
 ) -> f64 {
     match expr {
-        RelExpr::Scan { table, .. } => stats
+        RelExpr::Scan { table, .. } | RelExpr::IndexOnlyScan { table, .. } => stats
             .get_statistics(table)
             .map_or(1000.0, |s| s.row_count),
         RelExpr::Filter { input, .. } => {
@@ -196,6 +196,10 @@ fn estimate_heuristic(
         RelExpr::Gather { input, .. } => {
             estimate_heuristic(input, stats)
         }
+        RelExpr::IndexScan { table, .. }
+        | RelExpr::IndexOnlyScan { table, .. } => stats
+            .get_statistics(table)
+            .map_or(1.0, |s| s.row_count),
     }
 }
 
@@ -312,7 +316,9 @@ fn collect_tables_recursive(
     map: &mut HashMap<String, Statistics>,
 ) {
     match expr {
-        RelExpr::Scan { table, .. } => {
+        RelExpr::Scan { table, .. }
+        | RelExpr::IndexScan { table, .. }
+        | RelExpr::IndexOnlyScan { table, .. } => {
             if let Some(s) = provider.get_statistics(table) {
                 map.insert(table.clone(), s.clone());
             }

@@ -90,7 +90,9 @@ impl FeatureSchema {
         features: &mut [f64],
     ) {
         match expr {
-            RelExpr::Scan { table, .. } => {
+            RelExpr::Scan { table, .. }
+            | RelExpr::IndexScan { table, .. }
+            | RelExpr::IndexOnlyScan { table, .. } => {
                 features[OP_TYPE_OFFSET] = 1.0;
                 self.encode_table(table, stats, features);
             }

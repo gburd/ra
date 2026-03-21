@@ -156,8 +156,10 @@ pub struct IndexInfo {
     pub name: String,
     /// Index type
     pub index_type: IndexType,
-    /// Indexed columns
+    /// Indexed columns (key columns)
     pub columns: Vec<String>,
+    /// Included (non-key) columns (SQL Server INCLUDE style)
+    pub included_columns: Vec<String>,
     /// Whether the index is unique
     pub is_unique: bool,
 }
@@ -310,6 +312,40 @@ pub trait FactsProvider: Send + Sync {
     fn foreign_keys(&self, table: &str) -> Vec<&ForeignKey> {
         self.get_schema(table)
             .map_or_else(Vec::new, |schema| schema.foreign_keys.iter().collect())
+    }
+
+    /// Get indexes that cover all the requested columns.
+    ///
+    /// A covering index includes all `needed_columns` in either its
+    /// key columns or its included columns, allowing an index-only
+    /// scan without heap access.
+    fn get_covering_indexes(
+        &self,
+        table: &str,
+        needed_columns: &[&str],
+    ) -> Vec<&IndexInfo> {
+        let Some(schema) = self.get_schema(table) else {
+            return Vec::new();
+        };
+        schema
+            .indexes
+            .iter()
+            .filter(|idx| {
+                needed_columns.iter().all(|col| {
+                    idx.columns.iter().any(|c| c == col)
+                        || idx.included_columns.iter().any(|c| c == col)
+                })
+            })
+            .collect()
+    }
+
+    /// Check whether a covering index exists for the given columns.
+    fn has_covering_index(
+        &self,
+        table: &str,
+        needed_columns: &[&str],
+    ) -> bool {
+        !self.get_covering_indexes(table, needed_columns).is_empty()
     }
 
     /// Get runtime statistics for an operator

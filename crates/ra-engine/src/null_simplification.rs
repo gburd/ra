@@ -312,14 +312,14 @@ mod tests {
     fn arithmetic_with_null_simplifies_to_null() {
         // ADD(NULL, 5) -> NULL
         let expr = RelExpr::scan("t").project(vec![
-            (
-                "result".to_string(),
-                Expr::BinOp {
+            ra_core::algebra::ProjectionColumn {
+                expr: Expr::BinOp {
                     op: BinOp::Add,
                     left: Box::new(Expr::Const(Const::Null)),
                     right: Box::new(Expr::Const(Const::Int(5))),
                 },
-            )
+                alias: Some("result".to_string()),
+            }
         ]);
 
         let runner = run_null_simplification(&expr);

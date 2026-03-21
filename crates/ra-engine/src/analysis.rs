@@ -34,7 +34,9 @@ impl Analysis<RelLang> for RelAnalysis {
         let mut data = RelData::default();
 
         match enode {
-            RelLang::Scan([table_id]) | RelLang::ScanAlias([table_id, _]) => {
+            RelLang::Scan([table_id])
+            | RelLang::ScanAlias([table_id, _])
+            | RelLang::IndexOnlyScan([table_id, _, _, _]) => {
                 data.is_relational = true;
                 if let Some(sym) = get_symbol(egraph, *table_id) {
                     data.tables.insert(sym);
@@ -49,6 +51,12 @@ impl Analysis<RelLang> for RelAnalysis {
             RelLang::Aggregate([_, _, input_id]) | RelLang::Limit([_, _, input_id]) => {
                 data.is_relational = true;
                 merge_child_tables(&mut data.tables, egraph, *input_id);
+            }
+            RelLang::MetadataLookup([table_id, _]) => {
+                data.is_relational = true;
+                if let Some(sym) = get_symbol(egraph, *table_id) {
+                    data.tables.insert(sym);
+                }
             }
             RelLang::Join([_, _, left_id, right_id])
             | RelLang::Union([_, left_id, right_id])

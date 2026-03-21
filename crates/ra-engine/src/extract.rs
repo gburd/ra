@@ -53,6 +53,13 @@ impl egg::CostFunction<RelLang> for RelCostFn {
                 let storage_factor = 100.0 / self.hardware.storage_bandwidth_gbps;
                 return costs(*table_id) + costs(*alias_id) + (100.0 * storage_factor);
             }
+            RelLang::IndexOnlyScan([table_id, _index_id, cols_id, pred_id]) => {
+                // Index-only scan: O(log n) -- much cheaper than full table scan.
+                // Models B-tree traversal to first/last key.
+                let storage_factor = 100.0 / self.hardware.storage_bandwidth_gbps;
+                return costs(*table_id) + costs(*cols_id) + costs(*pred_id)
+                    + (5.0 * storage_factor);
+            }
             RelLang::Filter(_) | RelLang::Project(_) => {
                 // Filter/project cost depends on SIMD width
                 // Wider SIMD = lower per-row cost
@@ -107,6 +114,10 @@ impl egg::CostFunction<RelLang> for RelCostFn {
                 150.0 * cache_factor
             }
             RelLang::Values(_) => 1.0,
+            RelLang::MetadataLookup(_) => {
+                // O(1) metadata lookup, much cheaper than any scan
+                return 1.0;
+            }
             _ => 0.1,
         };
 
@@ -322,6 +333,43 @@ fn convert_node(nodes: &[RelLang], idx: usize) -> Result<RelExpr, EGraphError> {
                 )?);
             }
             Ok(RelExpr::Values { rows })
+        }
+        RelLang::MetadataLookup([table_id, _kind_id]) => {
+            let table = get_symbol(nodes, id(*table_id))?;
+            // Represent as a single-row aggregate over the table scan,
+            // preserving the semantic that execution resolves the count
+            // from cached metadata rather than scanning.
+            Ok(RelExpr::Aggregate {
+                group_by: vec![],
+                aggregates: vec![ra_core::algebra::AggregateExpr {
+                    function: ra_core::algebra::AggregateFunction::Count,
+                    arg: None,
+                    distinct: false,
+                    alias: Some("count".to_string()),
+                }],
+                input: Box::new(RelExpr::Scan { table, alias: None }),
+            })
+        }
+        RelLang::IndexOnlyScan([
+            table_id,
+            index_id,
+            cols_id,
+            pred_id,
+        ]) => {
+            let table =
+                get_symbol(nodes, id(*table_id))?;
+            let index =
+                get_symbol(nodes, id(*index_id))?;
+            let columns =
+                convert_projection_list(nodes, id(*cols_id))?;
+            let predicate =
+                convert_scalar(nodes, id(*pred_id))?;
+            Ok(RelExpr::IndexOnlyScan {
+                table,
+                index,
+                columns,
+                predicate,
+            })
         }
         RelLang::Func(ids) if !ids.is_empty() => {
             convert_func_as_relational(nodes, ids)

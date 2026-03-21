@@ -431,11 +431,6 @@ impl IndexAdvisor {
                 let rows = self.stats.get_table_rows(table).unwrap_or(1000.0);
                 Ok(rows * 1.0) // 1 cost unit per row
             }
-            RelExpr::IndexScan { table, .. } => {
-                // Lower cost for index scan
-                let rows = self.stats.get_table_rows(table).unwrap_or(1000.0);
-                Ok(rows * 0.1) // 0.1 cost unit per row (10x faster than table scan)
-            }
             RelExpr::Filter { input, predicate } => {
                 let input_cost = self.estimate_plan_cost(input)?;
                 let selectivity = self.estimate_selectivity(predicate)?;

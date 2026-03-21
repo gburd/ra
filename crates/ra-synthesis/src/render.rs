@@ -95,6 +95,13 @@ fn render_expr(expr: &RelExpr, ctx: &mut RenderContext) {
                 None => table.clone(),
             };
         }
+        RelExpr::IndexScan { table, column } => {
+            ctx.from = format!("-- Index Scan on {table} ({column})");
+        }
+        RelExpr::IndexOnlyScan { table, index, predicate, .. } => {
+            ctx.from = format!("-- Index-Only Scan on {table} using {index}");
+            ctx.where_clauses.push(render_scalar(predicate));
+        }
         RelExpr::Filter {
             predicate, input, ..
         } => {

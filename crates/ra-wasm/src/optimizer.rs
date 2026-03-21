@@ -232,6 +232,10 @@ impl WasmOptimizer {
             node_limit: self.inner.config.node_limit,
             iter_limit: self.inner.config.max_iterations,
             time_limit_secs: self.inner.config.time_limit_ms / 1000,
+            large_join_threshold: 12,
+            large_join_strategy: ra_engine::large_join::LargeJoinStrategy::Greedy,
+            max_optimization_time_ms: self.inner.config.time_limit_ms,
+            parallel: ra_engine::egraph::ParallelConfig::default(),
         };
         let mut optimizer =
             ra_engine::Optimizer::with_config(engine_config);
@@ -378,6 +382,26 @@ fn estimate_cost(plan: &RelExpr) -> f64 {
         },
         RelExpr::RowPattern { input, .. } => {
             estimate_cost(input) * 5.0
+        }
+        RelExpr::BitmapIndexScan { .. } => 20.0,
+        RelExpr::BitmapAnd { inputs } => {
+            inputs.iter().map(|i| estimate_cost(i)).sum::<f64>() * 0.8
+        }
+        RelExpr::BitmapOr { inputs } => {
+            inputs.iter().map(|i| estimate_cost(i)).sum::<f64>() * 0.9
+        }
+        RelExpr::BitmapHeapScan { bitmap, .. } => {
+            estimate_cost(bitmap) + 50.0
+        }
+        RelExpr::ParallelScan { .. } => 80.0,
+        RelExpr::ParallelHashJoin { left, right, .. } => {
+            (estimate_cost(left) + estimate_cost(right)) * 0.5
+        }
+        RelExpr::ParallelAggregate { input, .. } => {
+            estimate_cost(input) * 1.2
+        }
+        RelExpr::Gather { input, .. } => {
+            estimate_cost(input) + 10.0
         }
     }
 }

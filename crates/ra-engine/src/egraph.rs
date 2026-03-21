@@ -51,6 +51,14 @@ define_language! {
         "values" = Values(Box<[Id]>),
         "values-row" = ValuesRow(Box<[Id]>),
 
+        // -- Metadata shortcut operators --
+        "metadata-lookup" = MetadataLookup([Id; 2]),
+        "row-count" = RowCount,
+
+        // -- Index-only scan (covering index) --
+        // Children: [table, index_name, projected_cols, predicate]
+        "index-only-scan" = IndexOnlyScan([Id; 4]),
+
         // -- Bitmap index operators --
         "bitmap-index-scan" = BitmapIndexScan([Id; 3]),
         "bitmap-and" = BitmapAnd(Box<[Id]>),
@@ -1128,6 +1136,32 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
             };
             Ok(rec.add(RelLang::BitmapHeapScan([table_id, bitmap_id, recheck_id])))
         }
+        RelExpr::IndexScan { table, column } => {
+            // Encode index scan as a Func node tagged "index_scan"
+            let tag_id = add_symbol(rec, "index_scan");
+            let table_id = add_symbol(rec, table);
+            let col_id = add_symbol(rec, column);
+            let ids = vec![tag_id, table_id, col_id];
+            Ok(rec.add(
+                RelLang::Func(ids.into_boxed_slice()),
+            ))
+        }
+        RelExpr::IndexOnlyScan {
+            table,
+            index,
+            columns,
+            predicate,
+        } => {
+            let table_id = add_symbol(rec, table);
+            let index_id = add_symbol(rec, index);
+            let cols_id =
+                add_projection_list(rec, columns)?;
+            let pred_id =
+                add_scalar_expr(rec, predicate)?;
+            Ok(rec.add(RelLang::IndexOnlyScan([
+                table_id, index_id, cols_id, pred_id,
+            ])))
+        }
         RelExpr::RowPattern { input, pattern, .. } => {
             let tag_id = add_symbol(rec, "MATCH_RECOGNIZE");
             let pattern_id = add_symbol(rec, &pattern.to_string());
@@ -1177,6 +1211,13 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
             let input_id = add_rel_expr(rec, input)?;
             let workers_id = add_symbol(rec, &workers.to_string());
             let ids = vec![tag_id, input_id, workers_id];
+            Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
+        }
+        RelExpr::IndexScan { table, column } => {
+            let tag_id = add_symbol(rec, "index_scan");
+            let table_id = add_symbol(rec, table);
+            let col_id = add_symbol(rec, column);
+            let ids = vec![tag_id, table_id, col_id];
             Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
         }
     }
@@ -1772,6 +1813,19 @@ fn from_node(
                 table,
                 bitmap: Box::new(bitmap),
                 recheck_cond,
+            })
+        }
+        RelLang::MetadataLookup([table_id, _kind_id]) => {
+            let table = extract_symbol(egraph, *table_id)?;
+            Ok(RelExpr::Aggregate {
+                group_by: vec![],
+                aggregates: vec![AggregateExpr {
+                    function: AggregateFunction::Count,
+                    arg: None,
+                    distinct: false,
+                    alias: Some("count".to_string()),
+                }],
+                input: Box::new(RelExpr::Scan { table, alias: None }),
             })
         }
         other => Err(EGraphError::ExtractionError(format!(

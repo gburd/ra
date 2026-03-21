@@ -183,7 +183,7 @@ fn is_rule_applicable(metadata: &RuleMetadata, facts: &dyn FactsProvider) -> boo
     if !metadata.databases.is_empty() {
         let db_name = facts.database_name();
         let db_matches = metadata.databases.iter().any(|db| {
-            db.eq_ignore_ascii_case(&db_name) || db == "all"
+            db.eq_ignore_ascii_case(db_name) || db == "all"
         });
         if !db_matches {
             debug!(
@@ -226,7 +226,7 @@ fn evaluate_precondition(precond: &Precondition, facts: &dyn FactsProvider) -> b
         }
         Precondition::Database { system, .. } => {
             let db_name = facts.database_name();
-            system.eq_ignore_ascii_case(&db_name)
+            system.eq_ignore_ascii_case(db_name)
         }
         Precondition::Feature { flag, .. } => {
             // Feature flags evaluation
@@ -349,75 +349,500 @@ pub fn build_metadata_index(rules: &[ParsedRule]) -> HashMap<String, RuleMetadat
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use ra_core::facts::StaticFacts;
-    use ra_core::SQLDialect;
+    use ra_core::facts::{
+        FactsProvider, HardwareProfile as CoreHardwareProfile, SqlDialect,
+        TableInfo, TableStats as CoreTableStats,
+    };
+    use ra_core::statistics::ColumnStats;
+    use std::time::Duration;
+
+    /// Configurable facts provider for testing rule_metadata.
+    struct TestFacts {
+        db_name: String,
+        hw: CoreHardwareProfile,
+    }
+
+    impl TestFacts {
+        fn new(db_name: &str, cpu: u32, memory: u64, gpu: bool) -> Self {
+            Self {
+                db_name: db_name.to_string(),
+                hw: CoreHardwareProfile {
+                    cpu_cores: cpu,
+                    available_memory: memory,
+                    total_memory: memory,
+                    simd_width: 256,
+                    has_gpu: gpu,
+                    gpu_memory: None,
+                    l1_cache_size: 32 * 1024,
+                    l2_cache_size: 256 * 1024,
+                    l3_cache_size: 8 * 1024 * 1024,
+                },
+            }
+        }
+    }
+
+    impl FactsProvider for TestFacts {
+        fn get_table_stats(&self, _table: &str) -> Option<&CoreTableStats> {
+            None
+        }
+        fn get_column_stats(
+            &self,
+            _table: &str,
+            _column: &str,
+        ) -> Option<&ColumnStats> {
+            None
+        }
+        fn hardware_profile(&self) -> &CoreHardwareProfile {
+            &self.hw
+        }
+        fn get_schema(&self, _table: &str) -> Option<&TableInfo> {
+            None
+        }
+        fn runtime_stats(
+            &self,
+            _id: &str,
+        ) -> Option<&ra_core::facts::OperatorStats> {
+            None
+        }
+        fn database_name(&self) -> &str {
+            &self.db_name
+        }
+        fn supports_feature(&self, _feature: &str) -> bool {
+            true
+        }
+        fn sql_dialect(&self) -> SqlDialect {
+            SqlDialect::Generic
+        }
+        fn memory_limit(&self) -> Option<u64> {
+            None
+        }
+        fn optimizer_timeout(&self) -> Duration {
+            Duration::from_secs(60)
+        }
+    }
+
+    fn make_metadata(
+        id: &str,
+        databases: Vec<&str>,
+        preconditions: Vec<Precondition>,
+    ) -> RuleMetadata {
+        RuleMetadata {
+            id: id.to_string(),
+            name: format!("Rule {id}"),
+            category: "logical".to_string(),
+            databases: databases.into_iter().map(String::from).collect(),
+            standard: None,
+            version: "1.0.0".to_string(),
+            authors: vec![],
+            tags: vec![],
+            preconditions,
+        }
+    }
+
+    // ---- parse_comparison tests ----
 
     #[test]
-    fn test_parse_comparison() {
+    fn parse_comparison_gte() {
         assert_eq!(
             parse_comparison("cpu_cores() >= 4"),
-            Some(("cpu_cores()".to_string(), ">=".to_string(), "4".to_string()))
-        );
-        assert_eq!(
-            parse_comparison("available_memory() > 8000000000"),
             Some((
-                "available_memory()".to_string(),
-                ">".to_string(),
-                "8000000000".to_string()
+                "cpu_cores()".to_string(),
+                ">=".to_string(),
+                "4".to_string(),
             ))
         );
     }
 
     #[test]
-    fn test_evaluate_comparison() {
-        let facts = StaticFacts::new(
-            "test".to_string(),
-            SQLDialect::PostgreSQL,
-            4,
-            8_000_000_000,
-            false,
-            false,
+    fn parse_comparison_gt() {
+        assert_eq!(
+            parse_comparison("available_memory() > 8000000000"),
+            Some((
+                "available_memory()".to_string(),
+                ">".to_string(),
+                "8000000000".to_string(),
+            ))
         );
-
-        assert!(evaluate_comparison("cpu_cores()", ">=", "4", &facts));
-        assert!(!evaluate_comparison("cpu_cores()", ">", "4", &facts));
-        assert!(evaluate_comparison("available_memory()", ">=", "8000000000", &facts));
     }
 
     #[test]
-    fn test_filter_by_database() {
-        let metadata = RuleMetadata {
-            id: "test-rule".to_string(),
-            name: "Test Rule".to_string(),
-            category: "logical".to_string(),
-            databases: vec!["postgresql".to_string()],
-            standard: None,
-            version: "1.0.0".to_string(),
-            authors: vec![],
-            tags: vec![],
-            preconditions: vec![],
+    fn parse_comparison_lte() {
+        assert_eq!(
+            parse_comparison("cpu_cores() <= 16"),
+            Some((
+                "cpu_cores()".to_string(),
+                "<=".to_string(),
+                "16".to_string(),
+            ))
+        );
+    }
+
+    #[test]
+    fn parse_comparison_eq() {
+        assert_eq!(
+            parse_comparison("cpu_cores() == 8"),
+            Some((
+                "cpu_cores()".to_string(),
+                "==".to_string(),
+                "8".to_string(),
+            ))
+        );
+    }
+
+    #[test]
+    fn parse_comparison_neq() {
+        assert_eq!(
+            parse_comparison("cpu_cores() != 0"),
+            Some((
+                "cpu_cores()".to_string(),
+                "!=".to_string(),
+                "0".to_string(),
+            ))
+        );
+    }
+
+    #[test]
+    fn parse_comparison_lt() {
+        assert_eq!(
+            parse_comparison("available_memory() < 4000000000"),
+            Some((
+                "available_memory()".to_string(),
+                "<".to_string(),
+                "4000000000".to_string(),
+            ))
+        );
+    }
+
+    #[test]
+    fn parse_comparison_no_operator_returns_none() {
+        assert_eq!(parse_comparison("has_gpu()"), None);
+    }
+
+    // ---- evaluate_comparison tests ----
+
+    #[test]
+    fn evaluate_comparison_cpu_gte() {
+        let facts = TestFacts::new("test", 4, 8_000_000_000, false);
+        assert!(evaluate_comparison("cpu_cores()", ">=", "4", &facts));
+        assert!(!evaluate_comparison("cpu_cores()", ">", "4", &facts));
+    }
+
+    #[test]
+    fn evaluate_comparison_memory_gte() {
+        let facts = TestFacts::new("test", 4, 8_000_000_000, false);
+        assert!(evaluate_comparison(
+            "available_memory()",
+            ">=",
+            "8000000000",
+            &facts,
+        ));
+    }
+
+    #[test]
+    fn evaluate_comparison_cpu_eq() {
+        let facts = TestFacts::new("test", 4, 8_000_000_000, false);
+        assert!(evaluate_comparison("cpu_cores()", "==", "4", &facts));
+        assert!(!evaluate_comparison("cpu_cores()", "==", "5", &facts));
+    }
+
+    #[test]
+    fn evaluate_comparison_cpu_neq() {
+        let facts = TestFacts::new("test", 4, 8_000_000_000, false);
+        assert!(evaluate_comparison("cpu_cores()", "!=", "5", &facts));
+        assert!(!evaluate_comparison("cpu_cores()", "!=", "4", &facts));
+    }
+
+    #[test]
+    fn evaluate_comparison_cpu_lt() {
+        let facts = TestFacts::new("test", 4, 8_000_000_000, false);
+        assert!(evaluate_comparison("cpu_cores()", "<", "5", &facts));
+        assert!(!evaluate_comparison("cpu_cores()", "<", "4", &facts));
+    }
+
+    #[test]
+    fn evaluate_comparison_cpu_lte() {
+        let facts = TestFacts::new("test", 4, 8_000_000_000, false);
+        assert!(evaluate_comparison("cpu_cores()", "<=", "4", &facts));
+        assert!(evaluate_comparison("cpu_cores()", "<=", "5", &facts));
+        assert!(!evaluate_comparison("cpu_cores()", "<=", "3", &facts));
+    }
+
+    #[test]
+    fn evaluate_comparison_unknown_function_returns_true() {
+        let facts = TestFacts::new("test", 4, 8_000_000_000, false);
+        assert!(evaluate_comparison("disk_speed()", ">", "100", &facts));
+    }
+
+    #[test]
+    fn evaluate_comparison_invalid_value_returns_true() {
+        let facts = TestFacts::new("test", 4, 8_000_000_000, false);
+        assert!(evaluate_comparison("cpu_cores()", ">", "abc", &facts));
+    }
+
+    #[test]
+    fn evaluate_comparison_unknown_operator_returns_true() {
+        let facts = TestFacts::new("test", 4, 8_000_000_000, false);
+        assert!(evaluate_comparison("cpu_cores()", "~=", "4", &facts));
+    }
+
+    // ---- evaluate_predicate_condition tests ----
+
+    #[test]
+    fn predicate_has_gpu_true() {
+        let facts = TestFacts::new("test", 4, 8_000_000_000, true);
+        assert!(evaluate_predicate_condition("has_gpu()", &facts));
+    }
+
+    #[test]
+    fn predicate_has_gpu_false() {
+        let facts = TestFacts::new("test", 4, 8_000_000_000, false);
+        assert!(!evaluate_predicate_condition("has_gpu()", &facts));
+    }
+
+    #[test]
+    fn predicate_has_fpga_always_false() {
+        let facts = TestFacts::new("test", 4, 8_000_000_000, true);
+        assert!(!evaluate_predicate_condition("has_fpga()", &facts));
+    }
+
+    #[test]
+    fn predicate_comparison_expression() {
+        let facts = TestFacts::new("test", 8, 16_000_000_000, false);
+        assert!(evaluate_predicate_condition(
+            "cpu_cores() >= 4",
+            &facts,
+        ));
+    }
+
+    #[test]
+    fn predicate_unknown_returns_true() {
+        let facts = TestFacts::new("test", 4, 8_000_000_000, false);
+        assert!(evaluate_predicate_condition(
+            "some_unknown_check()",
+            &facts,
+        ));
+    }
+
+    // ---- evaluate_hardware_requirement tests ----
+
+    #[test]
+    fn hardware_gpu_required_present() {
+        let facts = TestFacts::new("test", 4, 8_000_000_000, true);
+        assert!(evaluate_hardware_requirement("GPU acceleration", &facts));
+    }
+
+    #[test]
+    fn hardware_gpu_required_absent() {
+        let facts = TestFacts::new("test", 4, 8_000_000_000, false);
+        assert!(!evaluate_hardware_requirement("GPU acceleration", &facts));
+    }
+
+    #[test]
+    fn hardware_fpga_always_false() {
+        let facts = TestFacts::new("test", 4, 8_000_000_000, true);
+        assert!(!evaluate_hardware_requirement("FPGA required", &facts));
+    }
+
+    #[test]
+    fn hardware_cpu_always_true() {
+        let facts = TestFacts::new("test", 1, 1_000_000, false);
+        assert!(evaluate_hardware_requirement("CPU only", &facts));
+    }
+
+    #[test]
+    fn hardware_unknown_returns_true() {
+        let facts = TestFacts::new("test", 4, 8_000_000_000, false);
+        assert!(evaluate_hardware_requirement("quantum coprocessor", &facts));
+    }
+
+    // ---- evaluate_feature_flag tests ----
+
+    #[test]
+    fn feature_flag_always_true() {
+        let facts = TestFacts::new("test", 4, 8_000_000_000, false);
+        assert!(evaluate_feature_flag("any_flag", &facts));
+    }
+
+    // ---- evaluate_precondition tests ----
+
+    #[test]
+    fn precondition_pattern_always_passes() {
+        let facts = TestFacts::new("test", 4, 8_000_000_000, false);
+        let pc = Precondition::Pattern {
+            must_match: "some pattern".to_string(),
+            description: "desc".to_string(),
         };
+        assert!(evaluate_precondition(&pc, &facts));
+    }
 
-        let facts_pg = StaticFacts::new(
-            "PostgreSQL".to_string(),
-            SQLDialect::PostgreSQL,
-            4,
-            8_000_000_000,
-            false,
-            false,
-        );
-        assert!(is_rule_applicable(&metadata, &facts_pg));
+    #[test]
+    fn precondition_database_match() {
+        let facts = TestFacts::new("PostgreSQL", 4, 8_000_000_000, false);
+        let pc = Precondition::Database {
+            system: "postgresql".to_string(),
+            description: "desc".to_string(),
+        };
+        assert!(evaluate_precondition(&pc, &facts));
+    }
 
-        let facts_mysql = StaticFacts::new(
-            "MySQL".to_string(),
-            SQLDialect::MySQL,
-            4,
-            8_000_000_000,
-            false,
-            false,
+    #[test]
+    fn precondition_database_no_match() {
+        let facts = TestFacts::new("MySQL", 4, 8_000_000_000, false);
+        let pc = Precondition::Database {
+            system: "postgresql".to_string(),
+            description: "desc".to_string(),
+        };
+        assert!(!evaluate_precondition(&pc, &facts));
+    }
+
+    #[test]
+    fn precondition_hardware_gpu() {
+        let facts_gpu = TestFacts::new("test", 4, 8_000_000_000, true);
+        let facts_no_gpu = TestFacts::new("test", 4, 8_000_000_000, false);
+        let pc = Precondition::Hardware {
+            requirement: "GPU required".to_string(),
+            description: "desc".to_string(),
+        };
+        assert!(evaluate_precondition(&pc, &facts_gpu));
+        assert!(!evaluate_precondition(&pc, &facts_no_gpu));
+    }
+
+    #[test]
+    fn precondition_predicate_comparison() {
+        let facts = TestFacts::new("test", 8, 16_000_000_000, false);
+        let pc = Precondition::Predicate {
+            condition: "cpu_cores() >= 4".to_string(),
+            description: "desc".to_string(),
+        };
+        assert!(evaluate_precondition(&pc, &facts));
+    }
+
+    #[test]
+    fn precondition_feature_flag() {
+        let facts = TestFacts::new("test", 4, 8_000_000_000, false);
+        let pc = Precondition::Feature {
+            flag: "vectorized_exec".to_string(),
+            description: "desc".to_string(),
+        };
+        assert!(evaluate_precondition(&pc, &facts));
+    }
+
+    // ---- is_rule_applicable tests ----
+
+    #[test]
+    fn rule_applicable_matching_database() {
+        let metadata = make_metadata("r1", vec!["postgresql"], vec![]);
+        let facts = TestFacts::new("PostgreSQL", 4, 8_000_000_000, false);
+        assert!(is_rule_applicable(&metadata, &facts));
+    }
+
+    #[test]
+    fn rule_not_applicable_wrong_database() {
+        let metadata = make_metadata("r1", vec!["postgresql"], vec![]);
+        let facts = TestFacts::new("MySQL", 4, 8_000_000_000, false);
+        assert!(!is_rule_applicable(&metadata, &facts));
+    }
+
+    #[test]
+    fn rule_applicable_all_databases() {
+        let metadata = make_metadata("r1", vec!["all"], vec![]);
+        let facts = TestFacts::new("MySQL", 4, 8_000_000_000, false);
+        assert!(is_rule_applicable(&metadata, &facts));
+    }
+
+    #[test]
+    fn rule_applicable_empty_databases_list() {
+        let metadata = make_metadata("r1", vec![], vec![]);
+        let facts = TestFacts::new("MySQL", 4, 8_000_000_000, false);
+        assert!(is_rule_applicable(&metadata, &facts));
+    }
+
+    #[test]
+    fn rule_not_applicable_precondition_fails() {
+        let metadata = make_metadata(
+            "r1",
+            vec![],
+            vec![Precondition::Hardware {
+                requirement: "GPU required".to_string(),
+                description: "needs GPU".to_string(),
+            }],
         );
-        assert!(!is_rule_applicable(&metadata, &facts_mysql));
+        let facts = TestFacts::new("test", 4, 8_000_000_000, false);
+        assert!(!is_rule_applicable(&metadata, &facts));
+    }
+
+    #[test]
+    fn rule_applicable_all_preconditions_pass() {
+        let metadata = make_metadata(
+            "r1",
+            vec![],
+            vec![
+                Precondition::Hardware {
+                    requirement: "CPU only".to_string(),
+                    description: "needs CPU".to_string(),
+                },
+                Precondition::Predicate {
+                    condition: "cpu_cores() >= 2".to_string(),
+                    description: "needs 2+ cores".to_string(),
+                },
+            ],
+        );
+        let facts = TestFacts::new("test", 4, 8_000_000_000, false);
+        assert!(is_rule_applicable(&metadata, &facts));
+    }
+
+    // ---- filter_rules_by_preconditions tests ----
+
+    #[test]
+    fn filter_rules_selects_applicable() {
+        let rules = vec![
+            ParsedRule {
+                metadata: make_metadata("r1", vec!["postgresql"], vec![]),
+                content: "rule 1".to_string(),
+            },
+            ParsedRule {
+                metadata: make_metadata("r2", vec!["mysql"], vec![]),
+                content: "rule 2".to_string(),
+            },
+            ParsedRule {
+                metadata: make_metadata("r3", vec![], vec![]),
+                content: "rule 3".to_string(),
+            },
+        ];
+
+        let facts = TestFacts::new("PostgreSQL", 4, 8_000_000_000, false);
+        let result = filter_rules_by_preconditions(&rules, &facts);
+        assert_eq!(result, vec!["r1", "r3"]);
+    }
+
+    #[test]
+    fn filter_rules_empty_input() {
+        let rules: Vec<ParsedRule> = vec![];
+        let facts = TestFacts::new("test", 4, 8_000_000_000, false);
+        let result = filter_rules_by_preconditions(&rules, &facts);
+        assert!(result.is_empty());
+    }
+
+    // ---- build_metadata_index tests ----
+
+    #[test]
+    fn build_metadata_index_maps_by_id() {
+        let rules = vec![
+            ParsedRule {
+                metadata: make_metadata("r1", vec![], vec![]),
+                content: String::new(),
+            },
+            ParsedRule {
+                metadata: make_metadata("r2", vec![], vec![]),
+                content: String::new(),
+            },
+        ];
+        let index = build_metadata_index(&rules);
+        assert_eq!(index.len(), 2);
+        assert!(index.contains_key("r1"));
+        assert!(index.contains_key("r2"));
     }
 }

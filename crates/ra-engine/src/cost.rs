@@ -294,6 +294,15 @@ impl IntegratedCostModel {
         cost * disc
     }
 
+    /// Estimate cost for a covering index (index-only) scan.
+    ///
+    /// Eliminates heap fetches by reading all needed columns from the
+    /// index.  Cost is approximately 30% of a regular scan.
+    #[must_use]
+    pub fn covering_index_scan_cost(&self, table: &str) -> f64 {
+        self.scan_cost(table) * 0.3
+    }
+
     /// Estimate cost for a bitmap index scan.
     ///
     /// Cost includes:
@@ -397,6 +406,24 @@ impl IntegratedCostModel {
         let heap_cost = self.bitmap_heap_scan_cost(table, combined_sel);
 
         index_costs + combine_cost + heap_cost
+    }
+
+    /// Estimate cost for a Parquet scan with row group pruning.
+    ///
+    /// The `pruning_selectivity` is the fraction of row groups that
+    /// survive predicate pushdown (0.0 = all pruned, 1.0 = full
+    /// scan). This discounts the base scan cost proportionally.
+    #[must_use]
+    pub fn parquet_scan_cost(
+        &self,
+        table: &str,
+        pruning_selectivity: f64,
+    ) -> f64 {
+        let base = self.scan_cost(table);
+        let sel = pruning_selectivity.clamp(0.0, 1.0);
+        // Even with full pruning there's a small metadata cost
+        let metadata_overhead = base * 0.01;
+        base * sel + metadata_overhead
     }
 
     /// Compute the confidence discount for a table.
@@ -983,6 +1010,18 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
                 let storage_factor =
                     100.0 / self.hardware.storage_bandwidth_gbps;
                 5.0 * storage_factor
+            }
+            RelLang::MetadataLookup(_) => {
+                // O(1) metadata lookup, cheaper than any scan
+                return 1.0;
+            }
+            RelLang::IndexOnlyScan([table_id, _, _, _]) => {
+                // Index-only scan: ~30% of full scan cost (no heap
+                // fetch).
+                let child_cost = costs(*table_id);
+                let storage_factor =
+                    100.0 / self.hardware.storage_bandwidth_gbps;
+                return child_cost + (30.0 * storage_factor);
             }
             _ => 0.1,
         };
