@@ -81,7 +81,6 @@ mod tests {
     use super::*;
     use crate::analysis::RelAnalysis;
     use crate::egraph::{to_rec_expr, RelLang};
-    use crate::rewrite::all_rules;
     use egg::Runner;
     use ra_core::algebra::{ProjectionColumn, RelExpr};
     use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
@@ -91,8 +90,7 @@ mod tests {
     ) -> Runner<RelLang, RelAnalysis> {
         let rec =
             to_rec_expr(expr).expect("conversion should succeed");
-        let mut rules = all_rules();
-        rules.extend(covering_index_rules());
+        let rules = covering_index_rules();
         Runner::default()
             .with_expr(&rec)
             .with_node_limit(50_000)

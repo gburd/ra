@@ -203,7 +203,7 @@ impl FederatedOptimizer {
         capabilities: &QueryCapabilities,
     ) -> bool {
         match plan {
-            RelExpr::Scan { .. } => true,
+            RelExpr::Scan { .. } | RelExpr::IndexScan { .. } | RelExpr::IndexOnlyScan { .. } => true,
             RelExpr::Filter { input, .. } => {
                 capabilities.supports_filter_pushdown
                     && self.can_ship_query(input, capabilities)
@@ -259,7 +259,9 @@ impl FederatedOptimizer {
             | RelExpr::ParallelScan { .. }
             | RelExpr::ParallelHashJoin { .. }
             | RelExpr::ParallelAggregate { .. }
-            | RelExpr::Gather { .. } => false,
+            | RelExpr::Gather { .. }
+            | RelExpr::IndexScan { .. }
+            | RelExpr::IndexOnlyScan { .. } => false,
         }
     }
 

@@ -258,7 +258,9 @@ impl LargeJoinOptimizer {
     /// Count the number of tables in a relational expression.
     pub fn count_tables(expr: &RelExpr) -> usize {
         match expr {
-            RelExpr::Scan { .. } => 1,
+            RelExpr::Scan { .. }
+            | RelExpr::IndexScan { .. }
+            | RelExpr::IndexOnlyScan { .. } => 1,
             RelExpr::Filter { input, .. } => Self::count_tables(input),
             RelExpr::Project { input, .. } => Self::count_tables(input),
             RelExpr::Join { left, right, .. } => {
@@ -304,7 +306,6 @@ impl LargeJoinOptimizer {
             RelExpr::ParallelAggregate { input, .. } | RelExpr::Gather { input, .. } => {
                 Self::count_tables(input)
             }
-            RelExpr::IndexScan { .. } | RelExpr::IndexOnlyScan { .. } => 1,
         }
     }
 

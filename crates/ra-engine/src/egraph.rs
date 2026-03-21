@@ -1137,7 +1137,6 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
             Ok(rec.add(RelLang::BitmapHeapScan([table_id, bitmap_id, recheck_id])))
         }
         RelExpr::IndexScan { table, column } => {
-            // Encode index scan as a Func node tagged "index_scan"
             let tag_id = add_symbol(rec, "index_scan");
             let table_id = add_symbol(rec, table);
             let col_id = add_symbol(rec, column);
@@ -1211,13 +1210,6 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
             let input_id = add_rel_expr(rec, input)?;
             let workers_id = add_symbol(rec, &workers.to_string());
             let ids = vec![tag_id, input_id, workers_id];
-            Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
-        }
-        RelExpr::IndexScan { table, column } => {
-            let tag_id = add_symbol(rec, "index_scan");
-            let table_id = add_symbol(rec, table);
-            let col_id = add_symbol(rec, column);
-            let ids = vec![tag_id, table_id, col_id];
             Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
         }
     }
