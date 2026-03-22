@@ -16,3 +16,9 @@ docs-build = "run --package xtask --release -- docs"
 # Run all workspace tests with nextest if available, otherwise use cargo test
 # Usage: cargo test-all
 test-all = "test --workspace --all-features"
+
+# Run a workspace binary directly
+# Usage: cargo bin <binary-name> [args...]
+# Example: cargo bin ra-cli -- optimize --explain-format postgresql 'SELECT...'
+# Note: The '--' is required to separate cargo arguments from binary arguments
+bin = "run --bin"
