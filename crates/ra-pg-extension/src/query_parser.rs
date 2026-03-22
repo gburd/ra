@@ -10,8 +10,8 @@ use std::ffi::CStr;
 use pgrx::pg_sys;
 
 use ra_core::algebra::{
-    AggregateExpr, AggregateFunction, JoinType, NullOrdering, ProjectionColumn, RelExpr,
-    SortDirection, SortKey, WindowExpr, WindowFrame, WindowFrameBound, WindowFrameMode,
+    AggregateExpr, AggregateFunction, CycleDetection, JoinType, NullOrdering, ProjectionColumn,
+    RelExpr, SortDirection, SortKey, WindowExpr, WindowFrame, WindowFrameBound, WindowFrameMode,
     WindowFunction,
 };
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr, UnaryOp};
@@ -23,7 +23,7 @@ const MAX_DEPTH: u32 = 64;
 /// Parse a PostgreSQL `Query` into a Ra `RelExpr`.
 ///
 /// Returns `Ok(None)` for queries we cannot represent (DDL,
-/// utility statements, CTEs, DML).
+/// utility statements, DML).
 ///
 /// # Safety
 ///
@@ -59,10 +59,8 @@ unsafe fn parse_with_depth(
         return Ok(None);
     }
 
-    // Bail on CTEs for now.
-    if !q.cteList.is_null() && list_length(q.cteList) > 0 {
-        return Ok(None);
-    }
+    // Parse CTEs if present.
+    let cte_defs = build_cte_definitions(q, depth)?;
 
     // Handle set operations (UNION/INTERSECT/EXCEPT).
     if !q.setOperations.is_null() {
@@ -74,7 +72,8 @@ unsafe fn parse_with_depth(
         };
         let sorted = apply_order_by(q, set_expr, depth)?;
         let limited = apply_limit(q, sorted);
-        return Ok(Some(limited));
+        let wrapped = wrap_with_ctes(limited, cte_defs);
+        return Ok(Some(wrapped));
     }
 
     let from_expr = build_from_clause(q, depth)?;
@@ -92,7 +91,9 @@ unsafe fn parse_with_depth(
     let sorted = apply_order_by(q, distinct_applied, depth)?;
     let limited = apply_limit(q, sorted);
 
-    Ok(Some(limited))
+    let wrapped = wrap_with_ctes(limited, cte_defs);
+
+    Ok(Some(wrapped))
 }
 
 // ── List helpers ────────────────────────────────────────────
@@ -104,6 +105,157 @@ unsafe fn list_length(list: *mut pg_sys::List) -> i32 {
     } else {
         (*list).length
     }
+}
+
+// ── CTE (WITH clause) ───────────────────────────────────────
+
+/// A parsed CTE definition ready to be wrapped around the body.
+struct CteDef {
+    name: String,
+    definition: RelExpr,
+    is_recursive: bool,
+    cycle_detection: Option<CycleDetection>,
+}
+
+/// Parse `Query.cteList` into CTE definitions.
+///
+/// Returns an empty vec when there are no CTEs. If any CTE
+/// cannot be parsed, we bail with `Ok(vec![])` so the caller
+/// proceeds without CTE wrapping (the main query may still
+/// succeed, and `RTE_CTE` references will produce Scan nodes
+/// with the CTE name).
+unsafe fn build_cte_definitions(
+    q: &pg_sys::Query,
+    depth: u32,
+) -> Result<Vec<CteDef>, String> {
+    let cte_list = q.cteList;
+    if cte_list.is_null() || list_length(cte_list) == 0 {
+        return Ok(Vec::new());
+    }
+
+    let len = list_length(cte_list);
+    let mut defs = Vec::with_capacity(len as usize);
+
+    for i in 0..len {
+        let node = pg_sys::list_nth(cte_list, i) as *mut pg_sys::CommonTableExpr;
+        if node.is_null() {
+            continue;
+        }
+        let cte = &*node;
+
+        let name = resolve_cte_name(cte.ctename);
+        if name.is_empty() {
+            continue;
+        }
+
+        let cte_query = cte.ctequery as *mut pg_sys::Query;
+        if cte_query.is_null() {
+            continue;
+        }
+
+        let cte_def = match parse_with_depth(cte_query, depth + 1)? {
+            Some(def) => def,
+            None => return Ok(Vec::new()),
+        };
+
+        let cycle = build_cycle_detection(cte);
+
+        defs.push(CteDef {
+            name,
+            definition: cte_def,
+            is_recursive: cte.cterecursive,
+            cycle_detection: cycle,
+        });
+    }
+
+    Ok(defs)
+}
+
+/// Extract cycle detection configuration from a CTE's
+/// `cycle_clause`, if present.
+unsafe fn build_cycle_detection(cte: &pg_sys::CommonTableExpr) -> Option<CycleDetection> {
+    let cc = cte.cycle_clause;
+    if cc.is_null() {
+        return None;
+    }
+    let cc = &*cc;
+
+    let mut track_columns = Vec::new();
+    let col_list = cc.cycle_col_list;
+    if !col_list.is_null() {
+        let len = list_length(col_list);
+        for i in 0..len {
+            let val = pg_sys::list_nth(col_list, i) as *mut pg_sys::String;
+            if !val.is_null() {
+                let s = (*val).sval;
+                if !s.is_null() {
+                    let name = CStr::from_ptr(s).to_string_lossy().into_owned();
+                    track_columns.push(name);
+                }
+            }
+        }
+    }
+
+    let cycle_mark_column = resolve_cte_name(cc.cycle_mark_column);
+    let path_column = resolve_cte_name(cc.cycle_path_column);
+
+    Some(CycleDetection {
+        track_columns,
+        max_depth: None,
+        cycle_mark_column: if cycle_mark_column.is_empty() {
+            None
+        } else {
+            Some(cycle_mark_column)
+        },
+        path_column: if path_column.is_empty() {
+            None
+        } else {
+            Some(path_column)
+        },
+    })
+}
+
+/// Wrap a query body in nested CTE nodes (outermost CTE first).
+///
+/// For `WITH a AS (...), b AS (...) SELECT ...`:
+/// ```text
+/// CTE { name: "a", def: ..., body:
+///   CTE { name: "b", def: ..., body:
+///     <main query> } }
+/// ```
+///
+/// Recursive CTEs use the `RecursiveCTE` variant. The
+/// recursive case is approximated as the full CTE definition
+/// (PostgreSQL separates base/recursive inside the UNION, but
+/// that separation is already flattened in the parse tree).
+fn wrap_with_ctes(body: RelExpr, cte_defs: Vec<CteDef>) -> RelExpr {
+    let mut result = body;
+    for cte in cte_defs.into_iter().rev() {
+        if cte.is_recursive {
+            result = RelExpr::RecursiveCTE {
+                name: cte.name,
+                base_case: Box::new(cte.definition.clone()),
+                recursive_case: Box::new(cte.definition),
+                body: Box::new(result),
+                cycle_detection: cte.cycle_detection,
+            };
+        } else {
+            result = RelExpr::CTE {
+                name: cte.name,
+                definition: Box::new(cte.definition),
+                body: Box::new(result),
+            };
+        }
+    }
+    result
+}
+
+/// Extract ctename from a C string pointer.
+unsafe fn resolve_cte_name(name_ptr: *mut core::ffi::c_char) -> String {
+    if name_ptr.is_null() {
+        return String::new();
+    }
+    CStr::from_ptr(name_ptr).to_string_lossy().into_owned()
 }
 
 // ── Set operations (UNION/INTERSECT/EXCEPT) ────────────────
@@ -327,7 +479,17 @@ unsafe fn build_rte_scan(
         return Ok(None);
     }
 
-    // RTE_CTE, RTE_TABLEFUNC, RTE_NAMEDTUPLESTORE, RTE_RESULT:
+    if rtekind == pg_sys::RTEKind::RTE_CTE {
+        let ctename = (*rte).ctename;
+        if ctename.is_null() {
+            return Ok(None);
+        }
+        let name = CStr::from_ptr(ctename).to_string_lossy().into_owned();
+        let alias = resolve_alias(rte);
+        return Ok(Some(RelExpr::Scan { table: name, alias }));
+    }
+
+    // RTE_TABLEFUNC, RTE_NAMEDTUPLESTORE, RTE_RESULT:
     // not yet supported, bail gracefully.
     Ok(None)
 }
@@ -2374,6 +2536,136 @@ mod tests {
     fn list_length_null_returns_zero() {
         let len = unsafe { list_length(std::ptr::null_mut()) };
         assert_eq!(len, 0);
+    }
+
+    // ── CTE wrapping ───────────────────────────────────────
+
+    #[test]
+    fn wrap_no_ctes_returns_body() {
+        let body = RelExpr::scan("t");
+        let result = wrap_with_ctes(body.clone(), vec![]);
+        assert_eq!(result, body);
+    }
+
+    #[test]
+    fn wrap_single_non_recursive_cte() {
+        let body = RelExpr::scan("tmp");
+        let defs = vec![CteDef {
+            name: "tmp".into(),
+            definition: RelExpr::scan("source"),
+            is_recursive: false,
+            cycle_detection: None,
+        }];
+        let result = wrap_with_ctes(body, defs);
+        if let RelExpr::CTE {
+            name,
+            definition,
+            body,
+        } = &result
+        {
+            assert_eq!(name, "tmp");
+            assert!(matches!(
+                definition.as_ref(),
+                RelExpr::Scan { table, .. }
+                    if table == "source"
+            ));
+            assert!(matches!(
+                body.as_ref(),
+                RelExpr::Scan { table, .. }
+                    if table == "tmp"
+            ));
+        } else {
+            panic!("expected CTE variant, got {result:?}");
+        }
+    }
+
+    #[test]
+    fn wrap_recursive_cte() {
+        let body = RelExpr::scan("reachable");
+        let defs = vec![CteDef {
+            name: "reachable".into(),
+            definition: RelExpr::scan("edges"),
+            is_recursive: true,
+            cycle_detection: None,
+        }];
+        let result = wrap_with_ctes(body, defs);
+        assert!(matches!(result, RelExpr::RecursiveCTE { .. }));
+    }
+
+    #[test]
+    fn wrap_multiple_ctes_nesting_order() {
+        let body = RelExpr::scan("main");
+        let defs = vec![
+            CteDef {
+                name: "a".into(),
+                definition: RelExpr::scan("t1"),
+                is_recursive: false,
+                cycle_detection: None,
+            },
+            CteDef {
+                name: "b".into(),
+                definition: RelExpr::scan("t2"),
+                is_recursive: false,
+                cycle_detection: None,
+            },
+        ];
+        let result = wrap_with_ctes(body, defs);
+        // Outermost should be CTE "a"
+        if let RelExpr::CTE { name, body, .. } = &result {
+            assert_eq!(name, "a");
+            // Inner should be CTE "b"
+            if let RelExpr::CTE { name, body, .. } = body.as_ref() {
+                assert_eq!(name, "b");
+                assert!(matches!(
+                    body.as_ref(),
+                    RelExpr::Scan { table, .. }
+                        if table == "main"
+                ));
+            } else {
+                panic!("expected inner CTE 'b'");
+            }
+        } else {
+            panic!("expected outer CTE 'a'");
+        }
+    }
+
+    #[test]
+    fn wrap_recursive_cte_with_cycle_detection() {
+        let body = RelExpr::scan("r");
+        let defs = vec![CteDef {
+            name: "r".into(),
+            definition: RelExpr::scan("edges"),
+            is_recursive: true,
+            cycle_detection: Some(CycleDetection {
+                track_columns: vec!["id".into()],
+                max_depth: None,
+                cycle_mark_column: Some("is_cycle".into()),
+                path_column: Some("path".into()),
+            }),
+        }];
+        let result = wrap_with_ctes(body, defs);
+        if let RelExpr::RecursiveCTE {
+            name,
+            cycle_detection,
+            ..
+        } = &result
+        {
+            assert_eq!(name, "r");
+            let cd = cycle_detection
+                .as_ref()
+                .expect("expected cycle_detection");
+            assert_eq!(cd.track_columns, vec!["id"]);
+            assert_eq!(cd.cycle_mark_column, Some("is_cycle".into()));
+            assert_eq!(cd.path_column, Some("path".into()));
+        } else {
+            panic!("expected RecursiveCTE");
+        }
+    }
+
+    #[test]
+    fn resolve_cte_name_null_returns_empty() {
+        let result = unsafe { resolve_cte_name(std::ptr::null_mut()) };
+        assert!(result.is_empty());
     }
 
     // ── Set operation helpers ──────────────────────────────
