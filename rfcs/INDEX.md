@@ -67,6 +67,10 @@ This index tracks all RFCs in the RA optimizer project by status. See [README.md
 | [0039](text/0039-operator-class-aware-indexing.md) | Operator Class Aware Index Selection | 2026-03-21 | CMU research |
 | [0040](text/0040-predicate-inference.md) | Predicate Inference and Transitivity Closure | 2026-03-21 | CMU research |
 | [0041](text/0041-query-compilation.md) | Query Compilation and Code Generation | 2026-03-21 | CMU research |
+| [0042](text/0042-magic-sets-recursive-queries.md) | Magic Sets for Recursive Queries | 2026-03-22 | Gap analysis |
+| [0043](text/0043-groupjoin-eager-aggregation.md) | GroupJoin - Eager Aggregation Before Join | 2026-03-22 | Gap analysis |
+| [0044](text/0044-sideways-information-passing.md) | Sideways Information Passing (SIP) | 2026-03-22 | Gap analysis |
+| [0045](text/0045-runtime-filter-pushdown.md) | Runtime Filter Pushdown with Bloom Filters | 2026-03-22 | Gap analysis |
 
 ## Rejected
 
@@ -76,12 +80,12 @@ This index tracks all RFCs in the RA optimizer project by status. See [README.md
 
 ## Statistics
 
-- **Total RFCs**: 41
-- **Implemented**: 14 (34%)
-- **Underway**: 2 (5%)
-- **Accepted**: 12 (29%)
-- **Under Review**: 6 (15%)
-- **Proposed**: 7 (17%)
+- **Total RFCs**: 45
+- **Implemented**: 14 (31%)
+- **Underway**: 2 (4%)
+- **Accepted**: 12 (27%)
+- **Under Review**: 6 (13%)
+- **Proposed**: 11 (24%)
 - **Rejected**: 0 (0%)
 
-## Last Updated: 2026-03-21
+## Last Updated: 2026-03-22
