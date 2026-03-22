@@ -55,5 +55,9 @@ harness = false
 name = "tpch_all22"
 harness = false
 
+[[bench]]
+name = "job_benchmark"
+harness = false
+
 [lints]
 workspace = true
