@@ -18,7 +18,7 @@ use ra_core::algebra::{
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr, UnaryOp};
 use ra_engine::{
     all_rules, extract_best, rec_expr_to_rel_expr, structural_hash, to_rec_expr, Optimizer,
-    OptimizerConfig,
+    OptimizerConfig, egraph::ParallelConfig,
 };
 
 // ---------------------------------------------------------------
@@ -287,6 +287,10 @@ proptest! {
             node_limit: 10_000,
             iter_limit: 5,
             time_limit_secs: 2,
+            large_join_threshold: 10,
+            large_join_strategy: ra_engine::large_join::LargeJoinStrategy::Greedy,
+            max_optimization_time_ms: 2000,
+            parallel: ParallelConfig::default(),
         };
         let optimizer = Optimizer::with_config(config);
         // It's OK if optimization returns an error (e.g., for
@@ -305,6 +309,10 @@ proptest! {
             node_limit: 10_000,
             iter_limit: 5,
             time_limit_secs: 2,
+            large_join_threshold: 10,
+            large_join_strategy: ra_engine::large_join::LargeJoinStrategy::Greedy,
+            max_optimization_time_ms: 2000,
+            parallel: ParallelConfig::default(),
         };
         let optimizer = Optimizer::with_config(config);
         if let Ok(optimized) = optimizer.optimize(&expr) {
@@ -335,6 +343,10 @@ proptest! {
             node_limit: 10_000,
             iter_limit: 5,
             time_limit_secs: 2,
+            large_join_threshold: 10,
+            large_join_strategy: ra_engine::large_join::LargeJoinStrategy::Greedy,
+            max_optimization_time_ms: 2000,
+            parallel: ParallelConfig::default(),
         };
         let optimizer = Optimizer::with_config(config);
         if let Ok(first) = optimizer.optimize(&expr) {
@@ -454,6 +466,10 @@ proptest! {
             node_limit: 10_000,
             iter_limit: 5,
             time_limit_secs: 2,
+            large_join_threshold: 10,
+            large_join_strategy: ra_engine::large_join::LargeJoinStrategy::Greedy,
+            max_optimization_time_ms: 2000,
+            parallel: ParallelConfig::default(),
         };
         let optimizer = Optimizer::with_config(config);
 

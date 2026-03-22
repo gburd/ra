@@ -11,7 +11,7 @@ use ra_core::algebra::{
     SortDirection, SortKey,
 };
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
-use ra_engine::{rec_expr_to_rel_expr, to_rec_expr, Optimizer, OptimizerConfig};
+use ra_engine::{rec_expr_to_rel_expr, to_rec_expr, Optimizer, OptimizerConfig, egraph::ParallelConfig};
 
 fn simple_scan() -> RelExpr {
     RelExpr::scan("users")
@@ -167,6 +167,10 @@ fn bench_optimization(c: &mut Criterion) {
         node_limit: 100_000,
         iter_limit: 30,
         time_limit_secs: 10,
+        large_join_threshold: 10,
+        large_join_strategy: ra_engine::large_join::LargeJoinStrategy::Greedy,
+        max_optimization_time_ms: 10_000,
+        parallel: ParallelConfig::default(),
     });
 
     let mut group = c.benchmark_group("optimize");

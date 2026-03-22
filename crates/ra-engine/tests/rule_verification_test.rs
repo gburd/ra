@@ -16,6 +16,7 @@ use ra_core::algebra::{
 use ra_core::expr::{BinOp, Const, Expr, UnaryOp};
 use ra_engine::{
     rec_expr_to_rel_expr, to_rec_expr, Optimizer, OptimizerConfig,
+    egraph::ParallelConfig,
 };
 
 // ── Helpers ─────────────────────────────────────────────────────
@@ -25,6 +26,10 @@ fn optimize(expr: &RelExpr) -> RelExpr {
         node_limit: 50_000,
         iter_limit: 10,
         time_limit_secs: 5,
+        large_join_threshold: 10,
+        large_join_strategy: ra_engine::large_join::LargeJoinStrategy::Greedy,
+        max_optimization_time_ms: 5000,
+        parallel: ParallelConfig::default(),
     });
     opt.optimize(expr).expect("optimization should succeed")
 }

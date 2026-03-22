@@ -51,5 +51,9 @@ harness = false
 name = "unnest_bench"
 harness = false
 
+[[bench]]
+name = "tpch_all22"
+harness = false
+
 [lints]
 workspace = true
