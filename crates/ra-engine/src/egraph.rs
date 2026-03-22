@@ -301,6 +301,11 @@ impl Optimizer {
     /// Returns an error if the expression cannot be converted to
     /// the e-graph representation or if extraction fails.
     pub fn optimize(&self, expr: &RelExpr) -> Result<RelExpr, EGraphError> {
+        use std::time::Instant;
+        use tracing::{debug, info};
+
+        let total_start = Instant::now();
+
         // Check if we should use large join optimization
         let table_count = crate::large_join::LargeJoinOptimizer::count_tables(expr);
 
@@ -333,18 +338,45 @@ impl Optimizer {
             }
         }
 
-        // Standard e-graph optimization
+        // Standard e-graph optimization with timing
+        info!("Starting e-graph optimization for {}-table query", table_count);
+
+        let to_rec_start = Instant::now();
         let rec_expr = to_rec_expr(expr)?;
+        let to_rec_elapsed = to_rec_start.elapsed();
+        debug!("to_rec_expr: {:?}", to_rec_elapsed);
+
+        let runner_start = Instant::now();
         let runner: Runner<RelLang, RelAnalysis> = Runner::default()
             .with_expr(&rec_expr)
             .with_node_limit(self.config.node_limit)
             .with_iter_limit(self.config.iter_limit)
             .with_time_limit(std::time::Duration::from_secs(self.config.time_limit_secs))
             .run(&all_rules());
+        let runner_elapsed = runner_start.elapsed();
 
+        let iterations = runner.iterations.len();
+        let egraph_nodes = runner.egraph.total_size();
+        let egraph_classes = runner.egraph.number_of_classes();
+
+        info!(
+            "E-graph saturation: {:?} ({} iterations, {} nodes, {} classes)",
+            runner_elapsed, iterations, egraph_nodes, egraph_classes
+        );
+
+        let extract_start = Instant::now();
         let root = runner.roots[0];
         let hardware = self.hardware_profile();
         let result = extract_best(&runner.egraph, root, &self.table_stats, &hardware)?;
+        let extract_elapsed = extract_start.elapsed();
+        debug!("extract_best: {:?}", extract_elapsed);
+
+        let total_elapsed = total_start.elapsed();
+        info!(
+            "Total optimization: {:?} (to_rec={:?}, egraph={:?}, extract={:?})",
+            total_elapsed, to_rec_elapsed, runner_elapsed, extract_elapsed
+        );
+
         Ok(result)
     }
 
