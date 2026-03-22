@@ -268,6 +268,7 @@ impl JoinGraphStats {
 mod tests {
     use super::*;
     use ra_core::algebra::JoinType;
+    use ra_core::expr::ColumnRef;
 
     fn col(name: &str) -> Expr {
         Expr::Column(ColumnRef::qualified("table", name))

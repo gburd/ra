@@ -53,6 +53,7 @@ pub mod network_cost;
 pub mod null_simplification;
 pub mod parquet_pushdown;
 pub mod query_complexity;
+pub mod beam_search;
 pub mod convergence;
 pub mod cost_pruning;
 pub mod join_graph;
@@ -155,5 +156,6 @@ pub use query_complexity::QueryComplexity;
 pub use convergence::{
     ConvergenceDetector, ConvergenceStats, IterationMetrics, TerminationDecision,
 };
+pub use beam_search::{BeamSearchConfig, BeamSearchStats, BeamSearchTracker};
 pub use cost_pruning::{CostPruner, PruningStats};
 pub use join_graph::{JoinGraph, JoinGraphStats};

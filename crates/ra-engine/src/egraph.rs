@@ -187,6 +187,9 @@ pub struct OptimizerConfig {
     pub cost_pruning_threshold: f64,
     /// Enable join graph filtering to prune invalid join combinations.
     pub use_join_graph_filtering: bool,
+    /// Beam search configuration for managing search space size.
+    /// Set to None to disable beam search.
+    pub beam_search_config: Option<crate::beam_search::BeamSearchConfig>,
 }
 
 /// Configuration for parallel query execution.
@@ -230,6 +233,7 @@ impl Default for OptimizerConfig {
             use_cost_pruning: true,  // Enable cost pruning by default
             cost_pruning_threshold: 1.5,  // Prune plans >50% worse than best
             use_join_graph_filtering: true,  // Enable join graph filtering by default
+            beam_search_config: None,  // Disabled by default (can be enabled for complex queries)
         }
     }
 }
@@ -401,6 +405,13 @@ impl Optimizer {
             None
         };
 
+        // Create beam search tracker (if enabled)
+        let mut beam_search_tracker = if let Some(ref beam_config) = self.config.beam_search_config {
+            Some(crate::beam_search::BeamSearchTracker::new(beam_config.clone()))
+        } else {
+            None
+        };
+
         // Build join graph (if enabled)
         if self.config.use_join_graph_filtering {
             let join_graph = crate::join_graph::JoinGraph::from_expr(expr);
@@ -464,34 +475,59 @@ impl Optimizer {
                 total_classes: curr_classes,
             });
 
-            // Track cost improvement (if cost pruning enabled)
-            if let Some(pruner) = cost_pruner.as_mut() {
-                // Extract current best cost
+            // Track cost improvement (if cost pruning or beam search enabled)
+            let current_cost = if cost_pruner.is_some() || beam_search_tracker.is_some() {
                 let hardware = self.hardware_profile();
                 let cost_fn = crate::extract::RelCostFn::new(hardware);
                 let extractor = egg::Extractor::new(&egraph, cost_fn);
-                let (current_cost, _) = extractor.find_best(root);
+                let (cost, _) = extractor.find_best(root);
+                Some(cost)
+            } else {
+                None
+            };
 
-                pruner.record_cost(root, current_cost);
+            // Cost pruning
+            if let Some(pruner) = cost_pruner.as_mut() {
+                if let Some(cost) = current_cost {
+                    pruner.record_cost(root, cost);
 
-                // Check if cost improved significantly
-                let improvement_threshold = 0.01; // 1% improvement
-                if current_cost < best_cost * (1.0 - improvement_threshold) {
-                    // Significant improvement
-                    best_cost = current_cost;
-                    cost_improvement_stalled = 0;
-                } else {
-                    // No significant improvement
-                    cost_improvement_stalled += 1;
+                    // Check if cost improved significantly
+                    let improvement_threshold = 0.01; // 1% improvement
+                    if cost < best_cost * (1.0 - improvement_threshold) {
+                        // Significant improvement
+                        best_cost = cost;
+                        cost_improvement_stalled = 0;
+                    } else {
+                        // No significant improvement
+                        cost_improvement_stalled += 1;
 
-                    // Terminate if cost hasn't improved for 3 consecutive iterations
-                    if cost_improvement_stalled >= 3 {
-                        termination_reason = "cost_stagnant";
+                        // Terminate if cost hasn't improved for 3 consecutive iterations
+                        if cost_improvement_stalled >= 3 {
+                            termination_reason = "cost_stagnant";
+                            debug!(
+                                "Early termination: cost stagnant for 3 iterations (best: {:.2})",
+                                best_cost
+                            );
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Beam search: record plan costs and prune
+            if let Some(tracker) = beam_search_tracker.as_mut() {
+                if let Some(cost) = current_cost {
+                    tracker.start_iteration(iteration);
+                    tracker.record_plan(root, cost);
+                    let pruned = tracker.prune();
+
+                    if pruned > 0 {
                         debug!(
-                            "Early termination: cost stagnant for 3 iterations (best: {:.2})",
-                            best_cost
+                            "Beam search: pruned {} plans at iteration {} (kept top {})",
+                            pruned,
+                            iteration,
+                            tracker.stats().plans_kept
                         );
-                        break;
                     }
                 }
             }
@@ -529,6 +565,21 @@ impl Optimizer {
                     stats.global_best_cost.unwrap_or(f64::INFINITY),
                     stats.classes_evaluated,
                     stats.classes_pruned,
+                    stats.pruning_rate()
+                );
+            }
+        }
+
+        // Log beam search statistics if beam search was enabled
+        if let Some(tracker) = beam_search_tracker.as_ref() {
+            let stats = tracker.stats();
+            if stats.is_active() && stats.plans_pruned > 0 {
+                info!(
+                    "Beam search: beam_width={}, total_plans={}, kept={}, pruned={} ({:.1}% reduction)",
+                    stats.beam_width,
+                    stats.total_plans,
+                    stats.plans_kept,
+                    stats.plans_pruned,
                     stats.pruning_rate()
                 );
             }

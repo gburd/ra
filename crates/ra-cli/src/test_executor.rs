@@ -92,6 +92,7 @@ pub fn run_tests(
         use_cost_pruning: false,  // Disable for deterministic testing
         cost_pruning_threshold: 1.5,
         use_join_graph_filtering: false,  // Disable for deterministic testing
+        beam_search_config: None,  // Disable for deterministic testing
     };
     let optimizer = Optimizer::with_config(test_config);
     let start = Instant::now();
@@ -401,6 +402,11 @@ mod tests {
             large_join_strategy: ra_engine::large_join::LargeJoinStrategy::Greedy,
             max_optimization_time_ms: 1000,
             parallel: ParallelConfig::default(),
+            use_adaptive_limits: false,
+            use_cost_pruning: false,
+            cost_pruning_threshold: 1.5,
+            use_join_graph_filtering: false,
+            beam_search_config: None,
         })
     }
 
