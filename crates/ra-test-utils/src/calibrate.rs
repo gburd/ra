@@ -103,13 +103,17 @@ pub fn calibrate() -> anyhow::Result<TestProfile> {
 #[cfg(test)]
 fn benchmark_simple_optimization(iterations: usize) -> anyhow::Result<f64> {
     use ra_core::algebra::{RelExpr, JoinType};
-    use ra_core::Expr;
+    use ra_core::{Expr, ColumnRef, BinOp};
     use ra_engine::Optimizer;
 
     // Create a simple 2-table join plan
     let plan = RelExpr::Join {
         join_type: JoinType::Inner,
-        condition: Expr::eq(Expr::col("id"), Expr::col("id")),
+        condition: Expr::BinOp {
+            op: BinOp::Eq,
+            left: Box::new(Expr::Column(ColumnRef::new("id"))),
+            right: Box::new(Expr::Column(ColumnRef::new("id"))),
+        },
         left: Box::new(RelExpr::scan("table1")),
         right: Box::new(RelExpr::scan("table2")),
     };
@@ -186,27 +190,39 @@ fn simulate_join_optimization(left: &[(usize, usize, usize)], right: &[(usize, u
 #[cfg(test)]
 fn benchmark_complex_optimization(iterations: usize) -> anyhow::Result<f64> {
     use ra_core::algebra::{RelExpr, JoinType};
-    use ra_core::Expr;
+    use ra_core::{Expr, ColumnRef, BinOp};
     use ra_engine::Optimizer;
 
     // Create a complex 4-table join plan: (t1 ⋈ t2) ⋈ (t3 ⋈ t4)
     let j1 = RelExpr::Join {
         join_type: JoinType::Inner,
-        condition: Expr::eq(Expr::col("id"), Expr::col("id")),
+        condition: Expr::BinOp {
+            op: BinOp::Eq,
+            left: Box::new(Expr::Column(ColumnRef::new("id"))),
+            right: Box::new(Expr::Column(ColumnRef::new("id"))),
+        },
         left: Box::new(RelExpr::scan("table1")),
         right: Box::new(RelExpr::scan("table2")),
     };
 
     let j2 = RelExpr::Join {
         join_type: JoinType::Inner,
-        condition: Expr::eq(Expr::col("id"), Expr::col("id")),
+        condition: Expr::BinOp {
+            op: BinOp::Eq,
+            left: Box::new(Expr::Column(ColumnRef::new("id"))),
+            right: Box::new(Expr::Column(ColumnRef::new("id"))),
+        },
         left: Box::new(RelExpr::scan("table3")),
         right: Box::new(RelExpr::scan("table4")),
     };
 
     let plan = RelExpr::Join {
         join_type: JoinType::Inner,
-        condition: Expr::eq(Expr::col("id"), Expr::col("id")),
+        condition: Expr::BinOp {
+            op: BinOp::Eq,
+            left: Box::new(Expr::Column(ColumnRef::new("id"))),
+            right: Box::new(Expr::Column(ColumnRef::new("id"))),
+        },
         left: Box::new(j1),
         right: Box::new(j2),
     };
