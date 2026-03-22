@@ -185,6 +185,8 @@ pub struct OptimizerConfig {
     pub use_cost_pruning: bool,
     /// Cost pruning threshold (e.g., 1.5 = prune plans >50% worse than best).
     pub cost_pruning_threshold: f64,
+    /// Enable join graph filtering to prune invalid join combinations.
+    pub use_join_graph_filtering: bool,
 }
 
 /// Configuration for parallel query execution.
@@ -227,6 +229,7 @@ impl Default for OptimizerConfig {
             use_adaptive_limits: true,  // Enable adaptive limits by default
             use_cost_pruning: true,  // Enable cost pruning by default
             cost_pruning_threshold: 1.5,  // Prune plans >50% worse than best
+            use_join_graph_filtering: true,  // Enable join graph filtering by default
         }
     }
 }
@@ -397,6 +400,21 @@ impl Optimizer {
         } else {
             None
         };
+
+        // Build join graph (if enabled)
+        if self.config.use_join_graph_filtering {
+            let join_graph = crate::join_graph::JoinGraph::from_expr(expr);
+            let stats = join_graph.stats();
+            if stats.table_count > 2 {
+                debug!(
+                    "Join graph: {} tables, {} edges, density={:.2}, estimated reduction={:.1}%",
+                    stats.table_count,
+                    stats.edge_count,
+                    stats.density(),
+                    stats.estimated_reduction_factor() * 100.0
+                );
+            }
+        }
 
         // Initialize e-graph with the expression
         let mut egraph: EGraph<RelLang, RelAnalysis> = EGraph::default();

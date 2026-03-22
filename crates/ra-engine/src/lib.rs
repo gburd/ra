@@ -55,6 +55,7 @@ pub mod parquet_pushdown;
 pub mod query_complexity;
 pub mod convergence;
 pub mod cost_pruning;
+pub mod join_graph;
 pub mod precondition_eval;
 pub mod recursive;
 // pub mod redundant_join; // TODO: incomplete, has invalid egg syntax
@@ -155,3 +156,4 @@ pub use convergence::{
     ConvergenceDetector, ConvergenceStats, IterationMetrics, TerminationDecision,
 };
 pub use cost_pruning::{CostPruner, PruningStats};
+pub use join_graph::{JoinGraph, JoinGraphStats};
