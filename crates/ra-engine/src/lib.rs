@@ -52,6 +52,7 @@ pub mod memo;
 pub mod network_cost;
 pub mod null_simplification;
 pub mod parquet_pushdown;
+pub mod query_complexity;
 pub mod precondition_eval;
 pub mod recursive;
 // pub mod redundant_join; // TODO: incomplete, has invalid egg syntax

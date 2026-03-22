@@ -179,6 +179,8 @@ pub struct OptimizerConfig {
     pub max_optimization_time_ms: u64,
     /// Parallel query execution configuration.
     pub parallel: ParallelConfig,
+    /// Enable adaptive iteration limits based on query complexity.
+    pub use_adaptive_limits: bool,
 }
 
 /// Configuration for parallel query execution.
@@ -212,12 +214,13 @@ impl Default for OptimizerConfig {
     fn default() -> Self {
         Self {
             node_limit: 100_000,
-            iter_limit: 30,
+            iter_limit: 30,  // Fallback when use_adaptive_limits = false
             time_limit_secs: 10,
             large_join_threshold: 10,
             large_join_strategy: crate::large_join::LargeJoinStrategy::default(),
             max_optimization_time_ms: 30000,
             parallel: ParallelConfig::default(),
+            use_adaptive_limits: true,  // Enable adaptive limits by default
         }
     }
 }
@@ -338,8 +341,37 @@ impl Optimizer {
             }
         }
 
+        // Calculate adaptive iteration limit based on query complexity
+        let complexity = if self.config.use_adaptive_limits {
+            crate::query_complexity::QueryComplexity::from_expr(expr)
+        } else {
+            // Fallback: classify by table count only
+            match table_count {
+                0..=1 => crate::query_complexity::QueryComplexity::Trivial,
+                2..=4 => crate::query_complexity::QueryComplexity::Simple,
+                5..=7 => crate::query_complexity::QueryComplexity::Medium,
+                8..=9 => crate::query_complexity::QueryComplexity::Complex,
+                _ => crate::query_complexity::QueryComplexity::VeryComplex,
+            }
+        };
+
+        let iter_limit = if self.config.use_adaptive_limits {
+            complexity.default_iter_limit()
+        } else {
+            self.config.iter_limit
+        };
+
+        let timeout_ms = if self.config.use_adaptive_limits {
+            complexity.default_timeout_ms()
+        } else {
+            self.config.time_limit_secs * 1000
+        };
+
         // Standard e-graph optimization with timing
-        info!("Starting e-graph optimization for {}-table query", table_count);
+        info!(
+            "Starting e-graph optimization: {} tables, complexity={:?}, iter_limit={}, timeout={}ms",
+            table_count, complexity, iter_limit, timeout_ms
+        );
 
         let to_rec_start = Instant::now();
         let rec_expr = to_rec_expr(expr)?;
@@ -350,8 +382,8 @@ impl Optimizer {
         let runner: Runner<RelLang, RelAnalysis> = Runner::default()
             .with_expr(&rec_expr)
             .with_node_limit(self.config.node_limit)
-            .with_iter_limit(self.config.iter_limit)
-            .with_time_limit(std::time::Duration::from_secs(self.config.time_limit_secs))
+            .with_iter_limit(iter_limit)
+            .with_time_limit(std::time::Duration::from_millis(timeout_ms))
             .run(&all_rules());
         let runner_elapsed = runner_start.elapsed();
 
