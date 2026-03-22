@@ -53,6 +53,7 @@ pub mod network_cost;
 pub mod null_simplification;
 pub mod parquet_pushdown;
 pub mod query_complexity;
+pub mod convergence;
 pub mod precondition_eval;
 pub mod recursive;
 // pub mod redundant_join; // TODO: incomplete, has invalid egg syntax
@@ -147,4 +148,8 @@ pub use runtime_filters::{
 };
 pub use covering_index::{
     covering_index_rules, index_only_scan_cost_factor,
+};
+pub use query_complexity::QueryComplexity;
+pub use convergence::{
+    ConvergenceDetector, ConvergenceStats, IterationMetrics, TerminationDecision,
 };

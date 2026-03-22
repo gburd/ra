@@ -379,27 +379,90 @@ impl Optimizer {
         debug!("to_rec_expr: {:?}", to_rec_elapsed);
 
         let runner_start = Instant::now();
-        let runner: Runner<RelLang, RelAnalysis> = Runner::default()
-            .with_expr(&rec_expr)
-            .with_node_limit(self.config.node_limit)
-            .with_iter_limit(iter_limit)
-            .with_time_limit(std::time::Duration::from_millis(timeout_ms))
-            .run(&all_rules());
-        let runner_elapsed = runner_start.elapsed();
+        let timeout = std::time::Duration::from_millis(timeout_ms);
+        let rules = all_rules();
 
-        let iterations = runner.iterations.len();
-        let egraph_nodes = runner.egraph.total_size();
-        let egraph_classes = runner.egraph.number_of_classes();
+        // Create convergence detector (window size: 3, min growth rate: 5%)
+        let mut convergence_detector = crate::convergence::ConvergenceDetector::default_settings();
+
+        // Initialize e-graph with the expression
+        let mut egraph: EGraph<RelLang, RelAnalysis> = EGraph::default();
+        let root = egraph.add_expr(&rec_expr);
+
+        let mut termination_reason = "iteration_limit";
+        let mut actual_iterations = 0;
+
+        // Run iterations one at a time to enable convergence detection
+        for iteration in 0..iter_limit {
+            // Check timeout
+            if runner_start.elapsed() >= timeout {
+                termination_reason = "timeout";
+                break;
+            }
+
+            let prev_classes = egraph.number_of_classes();
+
+            // Run one iteration
+            let runner: Runner<RelLang, RelAnalysis> = Runner::default()
+                .with_egraph(egraph)
+                .with_node_limit(self.config.node_limit)
+                .with_iter_limit(1)
+                .with_time_limit(timeout.saturating_sub(runner_start.elapsed()))
+                .run(&rules);
+
+            egraph = runner.egraph;
+            actual_iterations = iteration + 1;
+
+            // Calculate new equivalences found
+            let curr_nodes = egraph.total_size();
+            let curr_classes = egraph.number_of_classes();
+            let unions = if iteration > 0 {
+                // Approximate unions by change in classes
+                prev_classes.saturating_sub(curr_classes)
+            } else {
+                curr_classes // First iteration creates all initial classes
+            };
+
+            // Record metrics for convergence detection
+            convergence_detector.record(crate::convergence::IterationMetrics {
+                iteration,
+                unions,
+                total_nodes: curr_nodes,
+                total_classes: curr_classes,
+            });
+
+            // Check for convergence
+            if convergence_detector.should_terminate() == crate::convergence::TerminationDecision::Converged {
+                termination_reason = "converged";
+                debug!(
+                    "Early termination: converged at iteration {} (stats: {:?})",
+                    iteration,
+                    convergence_detector.stats()
+                );
+                break;
+            }
+
+            // Check for egg saturation
+            if let Some(stop_reason) = runner.stop_reason.as_ref() {
+                if matches!(stop_reason, egg::StopReason::Saturated) {
+                    termination_reason = "saturated";
+                    break;
+                }
+            }
+        }
+
+        let runner_elapsed = runner_start.elapsed();
+        let egraph_nodes = egraph.total_size();
+        let egraph_classes = egraph.number_of_classes();
 
         info!(
-            "E-graph saturation: {:?} ({} iterations, {} nodes, {} classes)",
-            runner_elapsed, iterations, egraph_nodes, egraph_classes
+            "E-graph saturation: {:?} ({} iterations, {} nodes, {} classes, reason: {})",
+            runner_elapsed, actual_iterations, egraph_nodes, egraph_classes, termination_reason
         );
 
         let extract_start = Instant::now();
-        let root = runner.roots[0];
         let hardware = self.hardware_profile();
-        let result = extract_best(&runner.egraph, root, &self.table_stats, &hardware)?;
+        let result = extract_best(&egraph, root, &self.table_stats, &hardware)?;
         let extract_elapsed = extract_start.elapsed();
         debug!("extract_best: {:?}", extract_elapsed);
 
