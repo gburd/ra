@@ -18,6 +18,39 @@ use pgrx::pg_sys;
 
 use ra_core::{ColumnStats, Statistics};
 
+// PostgreSQL C macros re-implemented in Rust. These are not exposed
+// by pgrx because they are preprocessor macros in arrayutils.h /
+// array.h.
+
+/// Equivalent to C macro `DatumGetArrayTypeP(d)`.
+#[allow(clippy::cast_ptr_alignment)]
+unsafe fn datum_get_array_type_p(
+    datum: pg_sys::Datum,
+) -> *mut pg_sys::ArrayType {
+    // For non-toasted arrays the datum IS the pointer. For toasted
+    // arrays we must detoast first via `pg_detoast_datum`.
+    let raw = datum.cast_mut_ptr::<pg_sys::varlena>();
+    pg_sys::pg_detoast_datum(raw) as *mut pg_sys::ArrayType
+}
+
+/// Equivalent to C macro `ARR_NDIM(a)`.
+unsafe fn arr_ndim(a: *mut pg_sys::ArrayType) -> i32 {
+    (*a).ndim
+}
+
+/// Equivalent to C macro `ARR_DIMS(a)`.
+#[allow(clippy::cast_ptr_alignment)]
+unsafe fn arr_dims(a: *mut pg_sys::ArrayType) -> *mut i32 {
+    // dims start right after the ArrayType header
+    (a as *mut u8).add(std::mem::size_of::<pg_sys::ArrayType>())
+        as *mut i32
+}
+
+/// Equivalent to C macro `ARR_ELEMTYPE(a)`.
+unsafe fn arr_elemtype(a: *mut pg_sys::ArrayType) -> pg_sys::Oid {
+    (*a).elemtype
+}
+
 /// PostgreSQL-specific MVCC and HOT update statistics.
 ///
 /// These metrics are critical for understanding heap-only tuple behavior:
@@ -372,8 +405,9 @@ unsafe fn read_stanumbers(
 ) -> Option<Vec<f64>> {
     // stanumbers1..stanumbers5 are at attribute numbers
     // Anum_pg_statistic_stanumbers1 + slot_idx
-    let attnum = pg_sys::Anum_pg_statistic_stanumbers1 as i32
-        + slot_idx as i32;
+    #[allow(clippy::cast_possible_truncation)]
+    let attnum = (pg_sys::Anum_pg_statistic_stanumbers1 as i32
+        + slot_idx as i32) as i16;
 
     let mut is_null = false;
     let datum = pg_sys::SysCacheGetAttr(
@@ -388,7 +422,7 @@ unsafe fn read_stanumbers(
     }
 
     // Datum is a float4[] (ArrayType). Use deconstruct_array for safety.
-    let array = pg_sys::DatumGetArrayTypeP(datum);
+    let array = datum_get_array_type_p(datum);
     if array.is_null() {
         return None;
     }
@@ -449,8 +483,9 @@ unsafe fn read_stavalues_as_strings(
 ) -> Option<Vec<String>> {
     // stavalues1..stavalues5 are at attribute numbers
     // Anum_pg_statistic_stavalues1 + slot_idx
-    let attnum = pg_sys::Anum_pg_statistic_stavalues1 as i32
-        + slot_idx as i32;
+    #[allow(clippy::cast_possible_truncation)]
+    let attnum = (pg_sys::Anum_pg_statistic_stavalues1 as i32
+        + slot_idx as i32) as i16;
 
     let mut is_null = false;
     let datum = pg_sys::SysCacheGetAttr(
@@ -465,24 +500,24 @@ unsafe fn read_stavalues_as_strings(
     }
 
     // stavalues is an anyarray. Deconstruct it.
-    let array = pg_sys::DatumGetArrayTypeP(datum);
+    let array = datum_get_array_type_p(datum);
     if array.is_null() {
         return None;
     }
 
     let nelems = pg_sys::ArrayGetNItems(
-        pg_sys::ARR_NDIM(array),
-        pg_sys::ARR_DIMS(array),
+        arr_ndim(array),
+        arr_dims(array),
     );
     if nelems <= 0 {
         return Some(Vec::new());
     }
 
     // Get the element type and its type info from the catalog
-    let elem_type = pg_sys::ARR_ELEMTYPE(array);
+    let elem_type = arr_elemtype(array);
     let mut typoutput: pg_sys::Oid = pg_sys::InvalidOid;
-    let mut typioparam: pg_sys::Oid = pg_sys::InvalidOid;
-    pg_sys::getTypeOutputInfo(elem_type, &mut typoutput, &mut typioparam);
+    let mut typ_is_varlena: bool = false;
+    pg_sys::getTypeOutputInfo(elem_type, &mut typoutput, &mut typ_is_varlena);
 
     // Look up the element type's typlen, typbyval, typalign
     let mut typlen: i16 = 0;
@@ -698,7 +733,7 @@ unsafe fn read_single_index(
     // Read indexed column names
     let mut columns = Vec::with_capacity(natts);
     for i in 0..natts {
-        let attnum = (*idx_form).indkey.values[i];
+        let attnum = (*idx_form).indkey.values.as_slice(natts)[i];
         if attnum > 0 {
             // Regular column
             if let Some(name) = read_attname(indrelid, attnum) {
@@ -866,154 +901,20 @@ unsafe fn estimate_bloat(
 
 /// Gather foreign key relationships for join optimization.
 ///
-/// Uses `systable_beginscan` on `pg_constraint` instead of SPI.
-///
 /// Returns a list of `(from_table, from_column, to_table, to_column)`
 /// tuples representing foreign key constraints.
+///
+/// The pg_constraint catalog structs (`FormData_pg_constraint`,
+/// `ConstraintRelationId`, etc.) are not exposed by pgrx for PG17.
+/// FK detection is deferred until pgrx adds these bindings.
+/// The optimizer still works correctly without FK info; it
+/// just cannot infer implicit join predicates from FK relationships.
 pub fn gather_foreign_keys(
-    schema: &str,
-    table: &str,
+    _schema: &str,
+    _table: &str,
 ) -> Vec<(String, String, String, String)> {
-    let mut fks = Vec::new();
-
-    unsafe {
-        let rel_oid = match resolve_relation_oid(schema, table) {
-            Some(oid) => oid,
-            None => return fks,
-        };
-
-        // Open pg_constraint catalog
-        let conrel = pg_sys::table_open(
-            pg_sys::ConstraintRelationId,
-            pg_sys::AccessShareLock as pg_sys::LOCKMODE,
-        );
-        if conrel.is_null() {
-            return fks;
-        }
-
-        // Scan for foreign key constraints on this relation
-        let scan = pg_sys::systable_beginscan(
-            conrel,
-            pg_sys::ConstraintRelidTypidNameIndexId,
-            true,  // indexOK
-            std::ptr::null_mut(), // snapshot (use current)
-            0,     // nkeys
-            std::ptr::null_mut(), // scankeys
-        );
-
-        loop {
-            let tup = pg_sys::systable_getnext(scan);
-            if tup.is_null() {
-                break;
-            }
-
-            let con_form = pg_sys::GETSTRUCT(tup)
-                as *mut pg_sys::FormData_pg_constraint;
-
-            // Only foreign key constraints on our table
-            if (*con_form).contype != pg_sys::CONSTRAINT_FOREIGN as i8 {
-                continue;
-            }
-            if (*con_form).conrelid != rel_oid {
-                continue;
-            }
-
-            let fk_relid = (*con_form).confrelid;
-
-            // Get FK column attnums from conkey (from) and confkey (to).
-            // These are stored as int2vector attributes.
-            let conkey = read_constraint_attnums(
-                tup, conrel, pg_sys::Anum_pg_constraint_conkey as i32,
-            );
-            let confkey = read_constraint_attnums(
-                tup, conrel, pg_sys::Anum_pg_constraint_confkey as i32,
-            );
-
-            if let (Some(from_attnums), Some(to_attnums)) = (conkey, confkey) {
-                for (from_att, to_att) in from_attnums.iter().zip(to_attnums.iter()) {
-                    let from_col = read_attname(rel_oid, *from_att);
-                    let to_col = read_attname(fk_relid, *to_att);
-                    let to_table_name = get_rel_name_safe(fk_relid);
-
-                    if let (Some(fc), Some(tt), Some(tc)) =
-                        (from_col, to_table_name, to_col)
-                    {
-                        fks.push((table.to_string(), fc, tt, tc));
-                    }
-                }
-            }
-        }
-
-        pg_sys::systable_endscan(scan);
-        pg_sys::table_close(
-            conrel,
-            pg_sys::AccessShareLock as pg_sys::LOCKMODE,
-        );
-    }
-
-    fks
-}
-
-/// Read attribute number array from a pg_constraint tuple.
-///
-/// # Safety
-///
-/// Must be called with valid tuple and relation pointers.
-unsafe fn read_constraint_attnums(
-    tup: pg_sys::HeapTuple,
-    rel: pg_sys::Relation,
-    attnum: i32,
-) -> Option<Vec<i16>> {
-    let mut is_null = false;
-    let datum = pg_sys::heap_getattr(
-        tup,
-        attnum,
-        (*rel).rd_att,
-        &mut is_null,
-    );
-
-    if is_null {
-        return None;
-    }
-
-    let array = pg_sys::DatumGetArrayTypeP(datum);
-    if array.is_null() {
-        return None;
-    }
-
-    let nelems = pg_sys::ArrayGetNItems(
-        pg_sys::ARR_NDIM(array),
-        pg_sys::ARR_DIMS(array),
-    );
-    if nelems <= 0 {
-        return Some(Vec::new());
-    }
-
-    let mut elems: *mut pg_sys::Datum = std::ptr::null_mut();
-    let mut nulls: *mut bool = std::ptr::null_mut();
-    let mut n: i32 = 0;
-    pg_sys::deconstruct_array(
-        array,
-        pg_sys::INT2OID,
-        2,    // int2 is 2 bytes
-        true, // int2 is passed by value
-        pg_sys::TYPALIGN_SHORT as i8,
-        &mut elems,
-        &mut nulls,
-        &mut n,
-    );
-
-    let mut result = Vec::with_capacity(n as usize);
-    for i in 0..n as usize {
-        if !(*nulls.add(i)) {
-            result.push((*elems.add(i)).value() as i16);
-        }
-    }
-
-    pg_sys::pfree(elems as *mut std::ffi::c_void);
-    pg_sys::pfree(nulls as *mut std::ffi::c_void);
-
-    Some(result)
+    // Constraint catalog structures unavailable in pgrx PG17 bindings.
+    Vec::new()
 }
 
 /// Get a relation name by OID (safe wrapper).
