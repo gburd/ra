@@ -71,6 +71,10 @@ This index tracks all RFCs in the RA optimizer project by status. See [README.md
 | [0043](text/0043-groupjoin-eager-aggregation.md) | GroupJoin - Eager Aggregation Before Join | 2026-03-22 | Gap analysis |
 | [0044](text/0044-sideways-information-passing.md) | Sideways Information Passing (SIP) | 2026-03-22 | Gap analysis |
 | [0045](text/0045-runtime-filter-pushdown.md) | Runtime Filter Pushdown with Bloom Filters | 2026-03-22 | Gap analysis |
+| [0047](text/0047-semi-join-reduction.md) | Semi-Join Reduction | 2026-03-22 | Gap analysis |
+| [0048](text/0048-distinct-aggregation-rewrite.md) | Distinct Aggregation Rewrite | 2026-03-22 | Gap analysis |
+| [0049](text/0049-partial-aggregation.md) | Partial Aggregation (Two-Phase) | 2026-03-22 | Gap analysis |
+| [0050](text/0050-decorrelation-improvements.md) | Decorrelation Improvements | 2026-03-22 | Gap analysis |
 
 ## Rejected
 
@@ -80,12 +84,12 @@ This index tracks all RFCs in the RA optimizer project by status. See [README.md
 
 ## Statistics
 
-- **Total RFCs**: 45
-- **Implemented**: 14 (31%)
+- **Total RFCs**: 49
+- **Implemented**: 14 (29%)
 - **Underway**: 2 (4%)
-- **Accepted**: 12 (27%)
-- **Under Review**: 6 (13%)
-- **Proposed**: 11 (24%)
+- **Accepted**: 12 (24%)
+- **Under Review**: 6 (12%)
+- **Proposed**: 15 (31%)
 - **Rejected**: 0 (0%)
 
 ## Last Updated: 2026-03-22

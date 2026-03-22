@@ -62,6 +62,73 @@ unsafe extern "C-unwind" fn ra_planner_hook(
         );
     }
 
+    // Fast path: skip non-SELECT queries (INSERT, UPDATE, DELETE,
+    // utility). Only SELECT queries benefit from RA optimization.
+    if !parse.is_null()
+        && (*parse).commandType
+            != pg_sys::CmdType::CMD_SELECT
+    {
+        return call_prev_planner(
+            parse,
+            query_string,
+            cursor_options,
+            bound_params,
+        );
+    }
+
+    // Skip utility statements that somehow reach the planner.
+    if !parse.is_null() && !(*parse).utilityStmt.is_null() {
+        return call_prev_planner(
+            parse,
+            query_string,
+            cursor_options,
+            bound_params,
+        );
+    }
+
+    // Delegate to the inner implementation, catching any panics
+    // to prevent crashing the PostgreSQL backend process.
+    let result = std::panic::catch_unwind(
+        std::panic::AssertUnwindSafe(|| {
+            ra_planner_hook_inner(
+                parse,
+                query_string,
+                cursor_options,
+                bound_params,
+            )
+        }),
+    );
+
+    match result {
+        Ok(plan) => plan,
+        Err(_) => {
+            pgrx::warning!(
+                "ra_planner: caught panic in planner hook, \
+                 falling back to standard planner"
+            );
+            call_prev_planner(
+                parse,
+                query_string,
+                cursor_options,
+                bound_params,
+            )
+        }
+    }
+}
+
+/// Inner planner hook implementation.
+///
+/// Separated from the outer hook so panics can be caught.
+///
+/// # Safety
+///
+/// Same requirements as `ra_planner_hook`.
+unsafe fn ra_planner_hook_inner(
+    parse: *mut pg_sys::Query,
+    query_string: *const std::ffi::c_char,
+    cursor_options: i32,
+    bound_params: *mut pg_sys::ParamListInfoData,
+) -> *mut pg_sys::PlannedStmt {
     let sql = if query_string.is_null() {
         String::new()
     } else {
@@ -95,92 +162,22 @@ unsafe extern "C-unwind" fn ra_planner_hook(
         );
     }
 
-    // Gather statistics for referenced tables.
-    let table_names = extract_rtable_names(parse);
-    let stats = stats_bridge::gather_all_stats(
-        &table_names
-            .iter()
-            .map(|t| ("public".to_string(), t.clone()))
-            .collect::<Vec<_>>(),
-    );
-
-    // MVCC/HOT Update Considerations:
-    // Statistics now include hot_update_ratio, dead_tuple_ratio, and bloat_factor.
-    // These inform:
-    // - Sequential scan costs (dead tuples must be skipped)
-    // - Index scan costs (bitmap filtering overhead)
-    // - UPDATE planning (HOT updates avoid index maintenance)
+    // Log the query if requested. The hook is active and filtering
+    // queries, but optimization is delegated to the standard planner
+    // for now. SPI cannot be used inside the planner hook (causes
+    // SIGABRT from nested SPI), and the query parser + optimizer
+    // need further hardening before they can be safely invoked here.
     //
-    // For UPDATE queries:
-    // - High HOT ratio (>0.8): favor in-place updates, no index rebuild
-    // - Low HOT ratio (<0.3): expect index maintenance overhead
-    // - High dead tuple ratio (>0.1): scan costs 2-5x higher
-    // - High bloat (>2.0): sequential scans heavily penalized
-    //
-    // Future enhancement: Detect UPDATE on indexed vs non-indexed columns
-    // to predict HOT eligibility and adjust cost accordingly.
-
-    // Log the analysis if requested.
+    // TODO(phase5): Enable RA optimization once:
+    // 1. query_parser::parse is fully hardened against all Query shapes
+    // 2. Stats gathering uses direct catalog access (no SPI)
+    // 3. plan_converter produces valid PlannedStmt nodes
     if RA_LOG_DECISIONS.get() {
         pgrx::log!(
-            "ra_planner: analyzing query with {} relations, \
-             {} stats available: {}",
+            "ra_planner: intercepted SELECT with {} relations: {}",
             relation_count,
-            stats.len(),
             truncate_sql(&sql, 200)
         );
-    }
-
-    // Attempt to optimize with RA.
-    let min_confidence = RA_MIN_CONFIDENCE.get();
-    let calibration = CostCalibration::default_calibration();
-
-    // Try to convert Query → RelExpr and optimize.
-    match try_optimize_query(parse, &sql, stats.as_slice(), &calibration) {
-        Ok(Some(optimized_plan)) => {
-            // Check confidence threshold.
-            if optimized_plan.confidence >= min_confidence {
-                if RA_LOG_DECISIONS.get() {
-                    pgrx::log!(
-                        "ra_planner: using RA-optimized plan (confidence: {:.2}): {}",
-                        optimized_plan.confidence,
-                        truncate_sql(&sql, 100)
-                    );
-                }
-                // Return the RA-optimized PlannedStmt.
-                return optimized_plan.plan;
-            } else {
-                if RA_LOG_DECISIONS.get() {
-                    pgrx::log!(
-                        "ra_planner: RA plan confidence too low ({:.2} < {:.2}), \
-                         falling back to standard planner: {}",
-                        optimized_plan.confidence,
-                        min_confidence,
-                        truncate_sql(&sql, 100)
-                    );
-                }
-            }
-        }
-        Ok(None) => {
-            // No optimization possible (e.g., unsupported query type).
-            if RA_LOG_DECISIONS.get() {
-                pgrx::log!(
-                    "ra_planner: query not optimizable by RA: {}",
-                    truncate_sql(&sql, 100)
-                );
-            }
-        }
-        Err(e) => {
-            // Optimization failed - log error and fall back.
-            if RA_LOG_DECISIONS.get() {
-                pgrx::warning!(
-                    "ra_planner: optimization failed ({}), \
-                     falling back to standard planner: {}",
-                    e,
-                    truncate_sql(&sql, 100)
-                );
-            }
-        }
     }
 
     // Fall back to standard planner.

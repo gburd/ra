@@ -159,6 +159,19 @@ export default defineConfig({
             { text: 'Deployment', link: '/deployment' },
             { text: 'Testing', link: '/testing' }
           ]
+        },
+        {
+          text: 'Maintainers',
+          collapsed: true,
+          items: [
+            { text: 'Overview', link: '/maintainers/' },
+            { text: 'Build & Install', link: '/maintainers/build' },
+            { text: 'Component APIs', link: '/maintainers/components' },
+            { text: 'RFCs Index', link: '/maintainers/rfcs/' },
+            { text: 'Chores & Tasks', link: '/maintainers/chores' },
+            { text: 'Bugs & Issues', link: '/maintainers/bugs' },
+            { text: 'Release Process', link: '/maintainers/release' }
+          ]
         }
       ]
     },

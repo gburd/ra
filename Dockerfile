@@ -14,7 +14,7 @@ COPY rules/ rules/
 RUN cargo build --release --bin ra-web
 
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y ca-certificates curl && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=server-build /app/target/release/ra-web /app/ra-web
 COPY --from=web-build /app/web/dist /app/static

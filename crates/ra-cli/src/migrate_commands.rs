@@ -321,21 +321,29 @@ fn validate_precondition_safety(
     for (i, base_pc) in baseline.iter().enumerate() {
         let label = format!("precondition[{i}]");
 
-        let matched = find_compatible_precondition(base_pc, migrated);
-        if matched.is_none() && !is_optional(base_pc) {
-            errors.push(ValidationError {
-                kind: ValidationErrorKind::BreakingChange,
-                field: label,
-                reason: format!(
-                    "Required precondition removed: {}",
-                    describe_precondition(base_pc)
-                ),
-                suggestion: "Add a matching precondition or mark the original as optional".into(),
-            });
+        let compatible = find_compatible_precondition(base_pc, migrated);
+        if compatible.is_none() && !is_optional(base_pc) {
+            // Only report BreakingChange if no same-slot match exists.
+            // A same-slot match with a narrower threshold is handled
+            // by check_constraint_narrowing below.
+            let same_slot = find_matching_precondition(base_pc, migrated);
+            if same_slot.is_none() {
+                errors.push(ValidationError {
+                    kind: ValidationErrorKind::BreakingChange,
+                    field: label,
+                    reason: format!(
+                        "Required precondition removed: {}",
+                        describe_precondition(base_pc)
+                    ),
+                    suggestion:
+                        "Add a matching precondition or mark the original as optional"
+                            .into(),
+                });
+            }
         }
     }
 
-    // Check migrated preconditions for narrowing
+    // Check migrated preconditions for narrowing and optional->required
     for (i, mig_pc) in migrated.iter().enumerate() {
         let label = format!("migrated_precondition[{i}]");
 
@@ -551,6 +559,7 @@ fn check_constraint_narrowing(
     label: &str,
     errors: &mut Vec<ValidationError>,
 ) {
+    // Check numeric threshold narrowing for Fact preconditions
     if let (
         PreCondition::Fact {
             fact_type: bf,
@@ -566,13 +575,7 @@ fn check_constraint_narrowing(
         },
     ) = (baseline, migrated)
     {
-        if bf != mf {
-            return;
-        }
-        if bc == mc && bt == mt {
-            return;
-        }
-        if !is_wider_constraint(bc, bt, mc, mt) {
+        if bf == mf && !(bc == mc && bt == mt) && !is_wider_constraint(bc, bt, mc, mt) {
             errors.push(ValidationError {
                 kind: ValidationErrorKind::ConstraintNarrowed,
                 field: label.into(),
@@ -587,13 +590,14 @@ fn check_constraint_narrowing(
         }
     }
 
-    // Optional -> required is a data loss risk
+    // Optional -> required is a data loss risk (applies to all variants)
     if is_optional(baseline) && !is_optional(migrated) {
         errors.push(ValidationError {
             kind: ValidationErrorKind::DataLossRisk,
             field: label.into(),
             reason: "Optional precondition became required after migration".into(),
-            suggestion: "Keep the precondition optional or verify all callers satisfy it".into(),
+            suggestion: "Keep the precondition optional or verify all callers satisfy it"
+                .into(),
         });
     }
 }

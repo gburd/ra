@@ -13,7 +13,7 @@ mod websocket;
 use std::path::PathBuf;
 
 use ra_synthesis::synthesizer::{SynthesisRequest, Synthesizer};
-use rocket::fs::FileServer;
+use rocket::fs::{FileServer, NamedFile};
 use rocket::serde::json::Json;
 use rocket::{get, launch, options, post, routes};
 use serde::Serialize;
@@ -71,6 +71,19 @@ fn synthesize(
             error: e.to_string(),
         })),
     }
+}
+
+/// SPA fallback: serve `index.html` for any path not matched by
+/// API routes or static files.  This allows client-side routing
+/// (preact-router) to handle navigation paths like `/editor`,
+/// `/compare`, `/visualize`, etc.
+#[get("/<_path..>", rank = 100)]
+async fn spa_fallback(
+    _path: std::path::PathBuf,
+) -> Option<NamedFile> {
+    NamedFile::open(static_dir().join("index.html"))
+        .await
+        .ok()
 }
 
 /// Resolve the directory for serving static files.
@@ -136,6 +149,7 @@ fn build_rocket() -> rocket::Rocket<rocket::Build> {
             ],
         )
         .mount("/", FileServer::from(static_path))
+        .mount("/", routes![spa_fallback])
 }
 
 #[launch]
@@ -168,6 +182,30 @@ mod tests {
         assert_eq!(response.status(), Status::Ok);
         let body = response.into_string().unwrap();
         assert!(body.contains("RA"));
+    }
+
+    #[test]
+    fn test_spa_fallback_editor() {
+        let client = client();
+        let response = client.get("/editor").dispatch();
+        assert_eq!(response.status(), Status::Ok);
+        let body = response.into_string().unwrap();
+        assert!(
+            body.contains("RA"),
+            "SPA fallback should serve index.html for /editor"
+        );
+    }
+
+    #[test]
+    fn test_spa_fallback_compare() {
+        let client = client();
+        let response = client.get("/compare").dispatch();
+        assert_eq!(response.status(), Status::Ok);
+        let body = response.into_string().unwrap();
+        assert!(
+            body.contains("RA"),
+            "SPA fallback should serve index.html for /compare"
+        );
     }
 
     #[test]
@@ -491,6 +529,7 @@ mod tests {
                 ],
             )
             .mount("/", FileServer::from(static_dir()))
+            .mount("/", routes![spa_fallback])
     }
 
     #[test]

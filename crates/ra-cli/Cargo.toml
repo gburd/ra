@@ -26,6 +26,7 @@ ra-tui = { workspace = true }
 ra-pg-monitor = { workspace = true }
 ra-regression = { path = "../ra-regression" }
 clap = { workspace = true }
+clap_complete = { workspace = true }
 colored = { workspace = true }
 atty = { workspace = true }
 libc = { workspace = true }
