@@ -10,8 +10,9 @@ use std::ffi::CStr;
 use pgrx::pg_sys;
 
 use ra_core::algebra::{
-    AggregateExpr, AggregateFunction, JoinType, NullOrdering,
-    ProjectionColumn, RelExpr, SortDirection, SortKey,
+    AggregateExpr, AggregateFunction, JoinType, NullOrdering, ProjectionColumn, RelExpr,
+    SortDirection, SortKey, WindowExpr, WindowFrame, WindowFrameBound, WindowFrameMode,
+    WindowFunction,
 };
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr, UnaryOp};
 
@@ -22,15 +23,13 @@ const MAX_DEPTH: u32 = 64;
 /// Parse a PostgreSQL `Query` into a Ra `RelExpr`.
 ///
 /// Returns `Ok(None)` for queries we cannot represent (DDL,
-/// utility statements, CTEs, window functions, DML).
+/// utility statements, CTEs, DML).
 ///
 /// # Safety
 ///
 /// Caller must pass a valid, non-null `Query` pointer that
 /// remains live for the duration of this call.
-pub unsafe fn parse(
-    query: *mut pg_sys::Query,
-) -> Result<Option<RelExpr>, String> {
+pub unsafe fn parse(query: *mut pg_sys::Query) -> Result<Option<RelExpr>, String> {
     parse_with_depth(query, 0)
 }
 
@@ -61,16 +60,7 @@ unsafe fn parse_with_depth(
     }
 
     // Bail on CTEs for now.
-    if !q.cteList.is_null()
-        && list_length(q.cteList) > 0
-    {
-        return Ok(None);
-    }
-
-    // Bail on window functions.
-    if !q.windowClause.is_null()
-        && list_length(q.windowClause) > 0
-    {
+    if !q.cteList.is_null() && list_length(q.cteList) > 0 {
         return Ok(None);
     }
 
@@ -97,7 +87,8 @@ unsafe fn parse_with_depth(
     let aggregated = apply_group_by(q, filtered, depth)?;
     let having_filtered = apply_having(q, aggregated, depth)?;
     let projected = apply_projection(q, having_filtered, depth)?;
-    let distinct_applied = apply_distinct(q, projected);
+    let windowed = apply_window(q, projected, depth)?;
+    let distinct_applied = apply_distinct(q, windowed);
     let sorted = apply_order_by(q, distinct_applied, depth)?;
     let limited = apply_limit(q, sorted);
 
@@ -230,10 +221,7 @@ unsafe fn parse_set_operation_leaf(
 
 // ── FROM clause ─────────────────────────────────────────────
 
-unsafe fn build_from_clause(
-    q: &pg_sys::Query,
-    depth: u32,
-) -> Result<Option<RelExpr>, String> {
+unsafe fn build_from_clause(q: &pg_sys::Query, depth: u32) -> Result<Option<RelExpr>, String> {
     let jointree = q.jointree;
     if jointree.is_null() {
         return Ok(None);
@@ -247,8 +235,7 @@ unsafe fn build_from_clause(
     let mut result: Option<RelExpr> = None;
 
     for i in 0..length {
-        let node = pg_sys::list_nth(fromlist, i)
-            as *mut pg_sys::Node;
+        let node = pg_sys::list_nth(fromlist, i) as *mut pg_sys::Node;
         if node.is_null() {
             continue;
         }
@@ -311,9 +298,8 @@ unsafe fn build_rte_scan(
 
     if rtekind == pg_sys::RTEKind::RTE_RELATION {
         let relid = (*rte).relid;
-        let table = resolve_rel_name(relid).ok_or_else(|| {
-            format!("cannot resolve OID {}", relid.to_u32())
-        })?;
+        let table = resolve_rel_name(relid)
+            .ok_or_else(|| format!("cannot resolve OID {}", relid.to_u32()))?;
         let alias = resolve_alias(rte);
         return Ok(Some(RelExpr::Scan { table, alias }));
     }
@@ -347,9 +333,7 @@ unsafe fn build_rte_scan(
 }
 
 /// Build a RelExpr for a function RTE (e.g., `generate_series`).
-unsafe fn build_rte_function(
-    rte: *mut pg_sys::RangeTblEntry,
-) -> Result<Option<RelExpr>, String> {
+unsafe fn build_rte_function(rte: *mut pg_sys::RangeTblEntry) -> Result<Option<RelExpr>, String> {
     if rte.is_null() {
         return Ok(None);
     }
@@ -363,9 +347,9 @@ unsafe fn build_rte_function(
     // function name and args from RangeTblFunction, which
     // varies by PostgreSQL version.
     let alias = resolve_alias(rte);
-    let table = alias.clone().unwrap_or_else(|| {
-        format!("__func_rte_{}", list_length(functions))
-    });
+    let table = alias
+        .clone()
+        .unwrap_or_else(|| format!("__func_rte_{}", list_length(functions)));
     Ok(Some(RelExpr::Scan { table, alias }))
 }
 
@@ -378,9 +362,7 @@ unsafe fn build_rte_values(
         return Ok(None);
     }
     let values_lists = (*rte).values_lists;
-    if values_lists.is_null()
-        || list_length(values_lists) == 0
-    {
+    if values_lists.is_null() || list_length(values_lists) == 0 {
         return Ok(None);
     }
 
@@ -388,16 +370,14 @@ unsafe fn build_rte_values(
     let mut rows = Vec::with_capacity(num_rows as usize);
 
     for i in 0..num_rows {
-        let row_list = pg_sys::list_nth(values_lists, i)
-            as *mut pg_sys::List;
+        let row_list = pg_sys::list_nth(values_lists, i) as *mut pg_sys::List;
         if row_list.is_null() {
             continue;
         }
         let num_cols = list_length(row_list);
         let mut row = Vec::with_capacity(num_cols as usize);
         for j in 0..num_cols {
-            let node = pg_sys::list_nth(row_list, j)
-                as *mut pg_sys::Node;
+            let node = pg_sys::list_nth(row_list, j) as *mut pg_sys::Node;
             row.push(convert_expr_depth(node, depth)?);
         }
         rows.push(row);
@@ -422,16 +402,8 @@ unsafe fn build_join_expr(
         return Ok(None);
     }
 
-    let left = build_from_node(
-        larg as *mut pg_sys::Node,
-        q,
-        depth,
-    )?;
-    let right = build_from_node(
-        rarg as *mut pg_sys::Node,
-        q,
-        depth,
-    )?;
+    let left = build_from_node(larg as *mut pg_sys::Node, q, depth)?;
+    let right = build_from_node(rarg as *mut pg_sys::Node, q, depth)?;
 
     let (left, right) = match (left, right) {
         (Some(l), Some(r)) => (l, r),
@@ -478,13 +450,8 @@ unsafe fn apply_where_clause(
 
 // ── GROUP BY + aggregates ───────────────────────────────────
 
-unsafe fn apply_group_by(
-    q: &pg_sys::Query,
-    input: RelExpr,
-    depth: u32,
-) -> Result<RelExpr, String> {
-    let has_group_by = !q.groupClause.is_null()
-        && list_length(q.groupClause) > 0;
+unsafe fn apply_group_by(q: &pg_sys::Query, input: RelExpr, depth: u32) -> Result<RelExpr, String> {
+    let has_group_by = !q.groupClause.is_null() && list_length(q.groupClause) > 0;
     let has_aggs = q.hasAggs;
 
     if !has_group_by && !has_aggs {
@@ -501,10 +468,7 @@ unsafe fn apply_group_by(
     })
 }
 
-unsafe fn extract_group_by_exprs(
-    q: &pg_sys::Query,
-    depth: u32,
-) -> Result<Vec<Expr>, String> {
+unsafe fn extract_group_by_exprs(q: &pg_sys::Query, depth: u32) -> Result<Vec<Expr>, String> {
     let mut exprs = Vec::new();
     let gc = q.groupClause;
     if gc.is_null() {
@@ -514,25 +478,19 @@ unsafe fn extract_group_by_exprs(
 
     let len = list_length(gc);
     for i in 0..len {
-        let sgc = pg_sys::list_nth(gc, i)
-            as *mut pg_sys::SortGroupClause;
+        let sgc = pg_sys::list_nth(gc, i) as *mut pg_sys::SortGroupClause;
         if sgc.is_null() {
             continue;
         }
         let tle_ref = (*sgc).tleSortGroupRef;
-        if let Some(expr) =
-            find_target_entry_by_ref(tlist, tle_ref, depth)
-        {
+        if let Some(expr) = find_target_entry_by_ref(tlist, tle_ref, depth) {
             exprs.push(expr);
         }
     }
     Ok(exprs)
 }
 
-unsafe fn extract_aggregates(
-    q: &pg_sys::Query,
-    depth: u32,
-) -> Result<Vec<AggregateExpr>, String> {
+unsafe fn extract_aggregates(q: &pg_sys::Query, depth: u32) -> Result<Vec<AggregateExpr>, String> {
     let mut aggs = Vec::new();
     let tlist = q.targetList;
     if tlist.is_null() {
@@ -541,17 +499,14 @@ unsafe fn extract_aggregates(
 
     let len = list_length(tlist);
     for i in 0..len {
-        let tle = pg_sys::list_nth(tlist, i)
-            as *mut pg_sys::TargetEntry;
+        let tle = pg_sys::list_nth(tlist, i) as *mut pg_sys::TargetEntry;
         if tle.is_null() || (*tle).expr.is_null() {
             continue;
         }
         let node = (*tle).expr as *mut pg_sys::Node;
         if (*node).type_ == pg_sys::NodeTag::T_Aggref {
             let aggref = node as *mut pg_sys::Aggref;
-            if let Some(agg) =
-                convert_aggref(aggref, tle, depth)?
-            {
+            if let Some(agg) = convert_aggref(aggref, tle, depth)? {
                 aggs.push(agg);
             }
         }
@@ -595,37 +550,375 @@ unsafe fn extract_first_agg_arg(
     if args.is_null() || list_length(args) == 0 {
         return Ok(None);
     }
-    let first_tle = pg_sys::list_nth(args, 0)
-        as *mut pg_sys::TargetEntry;
+    let first_tle = pg_sys::list_nth(args, 0) as *mut pg_sys::TargetEntry;
     if first_tle.is_null() || (*first_tle).expr.is_null() {
         return Ok(None);
     }
-    let expr = convert_expr_depth(
-        (*first_tle).expr as *mut pg_sys::Node,
-        depth,
-    )?;
+    let expr = convert_expr_depth((*first_tle).expr as *mut pg_sys::Node, depth)?;
     Ok(Some(expr))
 }
 
 // ── HAVING ──────────────────────────────────────────────────
 
-unsafe fn apply_having(
-    q: &pg_sys::Query,
-    input: RelExpr,
-    depth: u32,
-) -> Result<RelExpr, String> {
+unsafe fn apply_having(q: &pg_sys::Query, input: RelExpr, depth: u32) -> Result<RelExpr, String> {
     let having = q.havingQual;
     if having.is_null() {
         return Ok(input);
     }
-    let predicate = convert_expr_depth(
-        having as *mut pg_sys::Node,
-        depth,
-    )?;
+    let predicate = convert_expr_depth(having as *mut pg_sys::Node, depth)?;
     Ok(RelExpr::Filter {
         predicate,
         input: Box::new(input),
     })
+}
+
+// ── Window functions ────────────────────────────────────────
+
+unsafe fn apply_window(q: &pg_sys::Query, input: RelExpr, depth: u32) -> Result<RelExpr, String> {
+    if !q.hasWindowFuncs {
+        return Ok(input);
+    }
+
+    let tlist = q.targetList;
+    if tlist.is_null() {
+        return Ok(input);
+    }
+
+    let window_clause_list = q.windowClause;
+    let mut functions = Vec::new();
+    let tlist_len = list_length(tlist);
+
+    for i in 0..tlist_len {
+        let tle = pg_sys::list_nth(tlist, i) as *mut pg_sys::TargetEntry;
+        if tle.is_null() || (*tle).expr.is_null() {
+            continue;
+        }
+        let node = (*tle).expr as *mut pg_sys::Node;
+        if (*node).type_ != pg_sys::NodeTag::T_WindowFunc {
+            continue;
+        }
+        let wfunc = node as *mut pg_sys::WindowFunc;
+        if let Some(wexpr) = convert_window_func(wfunc, tle, window_clause_list, q, depth)? {
+            functions.push(wexpr);
+        }
+    }
+
+    if functions.is_empty() {
+        return Ok(input);
+    }
+
+    Ok(RelExpr::Window {
+        functions,
+        input: Box::new(input),
+    })
+}
+
+/// Convert a single `WindowFunc` node into a `WindowExpr`.
+unsafe fn convert_window_func(
+    wfunc: *mut pg_sys::WindowFunc,
+    tle: *mut pg_sys::TargetEntry,
+    window_clause_list: *mut pg_sys::List,
+    q: &pg_sys::Query,
+    depth: u32,
+) -> Result<Option<WindowExpr>, String> {
+    if wfunc.is_null() {
+        return Ok(None);
+    }
+
+    let func_oid = (*wfunc).winfnoid;
+    let function = map_window_func_oid(func_oid);
+
+    let arg = extract_first_wfunc_arg(wfunc, depth)?;
+    let alias = resolve_tle_alias(tle);
+
+    let winref = (*wfunc).winref;
+    let (partition_by, order_by, frame) =
+        extract_window_clause(window_clause_list, winref, q, depth)?;
+
+    Ok(Some(WindowExpr {
+        function,
+        arg,
+        partition_by,
+        order_by,
+        frame,
+        alias,
+    }))
+}
+
+/// Extract the first argument from a WindowFunc's args list.
+unsafe fn extract_first_wfunc_arg(
+    wfunc: *mut pg_sys::WindowFunc,
+    depth: u32,
+) -> Result<Option<Expr>, String> {
+    let args = (*wfunc).args;
+    if args.is_null() || list_length(args) == 0 {
+        return Ok(None);
+    }
+    let first_node = pg_sys::list_nth(args, 0) as *mut pg_sys::Node;
+    if first_node.is_null() {
+        return Ok(None);
+    }
+    // WindowFunc args can be plain expressions or TargetEntries
+    // depending on context. Check if it's a TargetEntry first.
+    if (*first_node).type_ == pg_sys::NodeTag::T_TargetEntry {
+        let tle = first_node as *mut pg_sys::TargetEntry;
+        if (*tle).expr.is_null() {
+            return Ok(None);
+        }
+        let expr = convert_expr_depth((*tle).expr as *mut pg_sys::Node, depth)?;
+        return Ok(Some(expr));
+    }
+    let expr = convert_expr_depth(first_node, depth)?;
+    Ok(Some(expr))
+}
+
+/// Find the WindowClause matching `winref` and extract
+/// partition_by, order_by, and frame specification.
+unsafe fn extract_window_clause(
+    wc_list: *mut pg_sys::List,
+    winref: pg_sys::Index,
+    q: &pg_sys::Query,
+    depth: u32,
+) -> Result<(Vec<Expr>, Vec<SortKey>, Option<WindowFrame>), String> {
+    if wc_list.is_null() {
+        return Ok((vec![], vec![], None));
+    }
+
+    let len = list_length(wc_list);
+    for i in 0..len {
+        let wc = pg_sys::list_nth(wc_list, i) as *mut pg_sys::WindowClause;
+        if wc.is_null() {
+            continue;
+        }
+        if (*wc).winref != winref {
+            continue;
+        }
+
+        let partition_by = extract_sort_group_exprs((*wc).partitionClause, q.targetList, depth)?;
+
+        let order_by = extract_sort_keys((*wc).orderClause, q.targetList, depth)?;
+
+        let frame = extract_window_frame(wc);
+
+        return Ok((partition_by, order_by, frame));
+    }
+
+    Ok((vec![], vec![], None))
+}
+
+/// Extract expressions from a SortGroupClause list
+/// (used for PARTITION BY).
+unsafe fn extract_sort_group_exprs(
+    clause_list: *mut pg_sys::List,
+    tlist: *mut pg_sys::List,
+    depth: u32,
+) -> Result<Vec<Expr>, String> {
+    let mut exprs = Vec::new();
+    if clause_list.is_null() {
+        return Ok(exprs);
+    }
+
+    let len = list_length(clause_list);
+    for i in 0..len {
+        let sgc = pg_sys::list_nth(clause_list, i) as *mut pg_sys::SortGroupClause;
+        if sgc.is_null() {
+            continue;
+        }
+        let tle_ref = (*sgc).tleSortGroupRef;
+        if let Some(expr) = find_target_entry_by_ref(tlist, tle_ref, depth) {
+            exprs.push(expr);
+        }
+    }
+    Ok(exprs)
+}
+
+/// Extract sort keys from a SortGroupClause list
+/// (used for ORDER BY within window).
+unsafe fn extract_sort_keys(
+    clause_list: *mut pg_sys::List,
+    tlist: *mut pg_sys::List,
+    depth: u32,
+) -> Result<Vec<SortKey>, String> {
+    let mut keys = Vec::new();
+    if clause_list.is_null() {
+        return Ok(keys);
+    }
+
+    let len = list_length(clause_list);
+    for i in 0..len {
+        let sgc = pg_sys::list_nth(clause_list, i) as *mut pg_sys::SortGroupClause;
+        if sgc.is_null() {
+            continue;
+        }
+        let tle_ref = (*sgc).tleSortGroupRef;
+        let expr =
+            find_target_entry_by_ref(tlist, tle_ref, depth).unwrap_or(Expr::Const(Const::Null));
+
+        let direction = infer_sort_direction((*sgc).sortop);
+        let nulls = if (*sgc).nulls_first {
+            NullOrdering::First
+        } else {
+            NullOrdering::Last
+        };
+
+        keys.push(SortKey {
+            expr,
+            direction,
+            nulls,
+        });
+    }
+    Ok(keys)
+}
+
+/// Extract window frame specification from a WindowClause.
+unsafe fn extract_window_frame(wc: *mut pg_sys::WindowClause) -> Option<WindowFrame> {
+    if wc.is_null() {
+        return None;
+    }
+
+    let opts = (*wc).frameOptions;
+
+    // PostgreSQL FRAMEOPTION constants (from windowapi.h).
+    const FRAMEOPTION_RANGE: i32 = 0x0002;
+    const FRAMEOPTION_ROWS: i32 = 0x0004;
+    const FRAMEOPTION_GROUPS: i32 = 0x0008;
+    const FRAMEOPTION_START_UNBOUNDED_PRECEDING: i32 = 0x0020;
+    const FRAMEOPTION_START_CURRENT_ROW: i32 = 0x0200;
+    const FRAMEOPTION_START_OFFSET_PRECEDING: i32 = 0x0800;
+    const FRAMEOPTION_START_OFFSET_FOLLOWING: i32 = 0x2000;
+    const FRAMEOPTION_END_UNBOUNDED_FOLLOWING: i32 = 0x0100;
+    const FRAMEOPTION_END_CURRENT_ROW: i32 = 0x0400;
+    const FRAMEOPTION_END_OFFSET_PRECEDING: i32 = 0x1000;
+    const FRAMEOPTION_END_OFFSET_FOLLOWING: i32 = 0x4000;
+
+    let mode = if opts & FRAMEOPTION_ROWS != 0 {
+        WindowFrameMode::Rows
+    } else if opts & FRAMEOPTION_GROUPS != 0 {
+        WindowFrameMode::Groups
+    } else if opts & FRAMEOPTION_RANGE != 0 {
+        WindowFrameMode::Range
+    } else {
+        WindowFrameMode::Range
+    };
+
+    let start_offset = extract_frame_offset((*wc).startOffset);
+    let end_offset = extract_frame_offset((*wc).endOffset);
+
+    let start = if opts & FRAMEOPTION_START_UNBOUNDED_PRECEDING != 0 {
+        WindowFrameBound::UnboundedPreceding
+    } else if opts & FRAMEOPTION_START_CURRENT_ROW != 0 {
+        WindowFrameBound::CurrentRow
+    } else if opts & FRAMEOPTION_START_OFFSET_PRECEDING != 0 {
+        WindowFrameBound::Preceding(start_offset)
+    } else if opts & FRAMEOPTION_START_OFFSET_FOLLOWING != 0 {
+        WindowFrameBound::Following(start_offset)
+    } else {
+        WindowFrameBound::UnboundedPreceding
+    };
+
+    let end = if opts & FRAMEOPTION_END_UNBOUNDED_FOLLOWING != 0 {
+        WindowFrameBound::UnboundedFollowing
+    } else if opts & FRAMEOPTION_END_CURRENT_ROW != 0 {
+        WindowFrameBound::CurrentRow
+    } else if opts & FRAMEOPTION_END_OFFSET_PRECEDING != 0 {
+        WindowFrameBound::Preceding(end_offset)
+    } else if opts & FRAMEOPTION_END_OFFSET_FOLLOWING != 0 {
+        WindowFrameBound::Following(end_offset)
+    } else {
+        WindowFrameBound::CurrentRow
+    };
+
+    Some(WindowFrame { mode, start, end })
+}
+
+/// Extract a frame offset value from a Node pointer.
+/// Returns 0 if the node is null or not a constant.
+unsafe fn extract_frame_offset(node: *mut pg_sys::Node) -> u64 {
+    extract_const_u64(node).unwrap_or(0)
+}
+
+/// Convert a WindowFunc expression node into a scalar Expr
+/// (used when window functions appear in expression context).
+unsafe fn convert_windowfunc_as_expr(
+    wfunc: *mut pg_sys::WindowFunc,
+    depth: u32,
+) -> Result<Expr, String> {
+    if wfunc.is_null() {
+        return Ok(Expr::Const(Const::Null));
+    }
+    let func = map_window_func_oid((*wfunc).winfnoid);
+    let name = format!("{func}");
+
+    let mut args_out = Vec::new();
+    let args = (*wfunc).args;
+    if !args.is_null() {
+        let len = list_length(args);
+        for i in 0..len {
+            let node = pg_sys::list_nth(args, i) as *mut pg_sys::Node;
+            if node.is_null() {
+                continue;
+            }
+            if (*node).type_ == pg_sys::NodeTag::T_TargetEntry {
+                let tle = node as *mut pg_sys::TargetEntry;
+                if !(*tle).expr.is_null() {
+                    args_out.push(convert_expr_inner((*tle).expr as *mut pg_sys::Node, depth)?);
+                }
+            } else {
+                args_out.push(convert_expr_inner(node, depth)?);
+            }
+        }
+    }
+
+    Ok(Expr::Function {
+        name,
+        args: args_out,
+    })
+}
+
+/// Map a window function OID to Ra's `WindowFunction`.
+///
+/// Window functions in PostgreSQL are identified by OID.
+/// This maps the standard built-in window function OIDs
+/// plus aggregate functions used as window functions.
+fn map_window_func_oid(funcoid: pg_sys::Oid) -> WindowFunction {
+    match funcoid.to_u32() {
+        // row_number
+        3100 => WindowFunction::RowNumber,
+        // rank
+        3101 => WindowFunction::Rank,
+        // dense_rank
+        3102 => WindowFunction::DenseRank,
+        // percent_rank
+        3103 => WindowFunction::PercentRank,
+        // cume_dist (map to PercentRank as closest)
+        3104 => WindowFunction::PercentRank,
+        // ntile
+        3105 => WindowFunction::Ntile,
+        // lag
+        3106 | 3107 | 3108 => WindowFunction::Lag,
+        // lead
+        3109 | 3110 | 3111 => WindowFunction::Lead,
+        // first_value
+        3112 => WindowFunction::FirstValue,
+        // last_value
+        3113 => WindowFunction::LastValue,
+        // nth_value
+        3114 => WindowFunction::NthValue,
+        // Aggregate functions used as window functions:
+        // sum
+        2108 | 2109 | 2110 | 2111 | 2112 | 2113 | 2114 => WindowFunction::Sum,
+        // avg
+        2100 | 2101 | 2102 | 2103 | 2104 | 2105 | 2106 => WindowFunction::Avg,
+        // count
+        2803 | 2147 | 2146 => WindowFunction::Count,
+        // min
+        2131 | 2132 | 2133 | 2134 | 2135 | 2136 | 2137 | 2138 | 2139 | 2245 => WindowFunction::Min,
+        // max
+        2115 | 2116 | 2117 | 2118 | 2119 | 2120 | 2121 | 2122 | 2123 | 2126 | 2244 => {
+            WindowFunction::Max
+        }
+        _ => WindowFunction::RowNumber,
+    }
 }
 
 // ── Projection (targetList) ─────────────────────────────────
@@ -644,8 +937,7 @@ unsafe fn apply_projection(
     let len = list_length(tlist);
 
     for i in 0..len {
-        let tle = pg_sys::list_nth(tlist, i)
-            as *mut pg_sys::TargetEntry;
+        let tle = pg_sys::list_nth(tlist, i) as *mut pg_sys::TargetEntry;
         if tle.is_null() {
             continue;
         }
@@ -660,6 +952,11 @@ unsafe fn apply_projection(
 
         // Skip aggregates; handled in Aggregate node.
         if (*node).type_ == pg_sys::NodeTag::T_Aggref {
+            continue;
+        }
+
+        // Skip window functions; handled in Window node.
+        if (*node).type_ == pg_sys::NodeTag::T_WindowFunc {
             continue;
         }
 
@@ -680,10 +977,7 @@ unsafe fn apply_projection(
 
 // ── DISTINCT ────────────────────────────────────────────────
 
-unsafe fn apply_distinct(
-    q: &pg_sys::Query,
-    input: RelExpr,
-) -> RelExpr {
+unsafe fn apply_distinct(q: &pg_sys::Query, input: RelExpr) -> RelExpr {
     let dc = q.distinctClause;
     if dc.is_null() || list_length(dc) == 0 {
         return input;
@@ -695,11 +989,7 @@ unsafe fn apply_distinct(
 
 // ── ORDER BY ────────────────────────────────────────────────
 
-unsafe fn apply_order_by(
-    q: &pg_sys::Query,
-    input: RelExpr,
-    depth: u32,
-) -> Result<RelExpr, String> {
+unsafe fn apply_order_by(q: &pg_sys::Query, input: RelExpr, depth: u32) -> Result<RelExpr, String> {
     let sc = q.sortClause;
     if sc.is_null() || list_length(sc) == 0 {
         return Ok(input);
@@ -710,15 +1000,13 @@ unsafe fn apply_order_by(
     let len = list_length(sc);
 
     for i in 0..len {
-        let sgc = pg_sys::list_nth(sc, i)
-            as *mut pg_sys::SortGroupClause;
+        let sgc = pg_sys::list_nth(sc, i) as *mut pg_sys::SortGroupClause;
         if sgc.is_null() {
             continue;
         }
         let tle_ref = (*sgc).tleSortGroupRef;
         let expr =
-            find_target_entry_by_ref(tlist, tle_ref, depth)
-                .unwrap_or(Expr::Const(Const::Null));
+            find_target_entry_by_ref(tlist, tle_ref, depth).unwrap_or(Expr::Const(Const::Null));
 
         let direction = infer_sort_direction((*sgc).sortop);
         let nulls = if (*sgc).nulls_first {
@@ -771,10 +1059,7 @@ fn infer_sort_direction(sortop: pg_sys::Oid) -> SortDirection {
 
 // ── LIMIT / OFFSET ──────────────────────────────────────────
 
-unsafe fn apply_limit(
-    q: &pg_sys::Query,
-    input: RelExpr,
-) -> RelExpr {
+unsafe fn apply_limit(q: &pg_sys::Query, input: RelExpr) -> RelExpr {
     let limit_node = q.limitCount;
     let offset_node = q.limitOffset;
 
@@ -782,10 +1067,8 @@ unsafe fn apply_limit(
         return input;
     }
 
-    let count =
-        extract_const_u64(limit_node).unwrap_or(u64::MAX);
-    let offset =
-        extract_const_u64(offset_node).unwrap_or(0);
+    let count = extract_const_u64(limit_node).unwrap_or(u64::MAX);
+    let offset = extract_const_u64(offset_node).unwrap_or(0);
 
     RelExpr::Limit {
         count,
@@ -794,9 +1077,7 @@ unsafe fn apply_limit(
     }
 }
 
-unsafe fn extract_const_u64(
-    node: *mut pg_sys::Node,
-) -> Option<u64> {
+unsafe fn extract_const_u64(node: *mut pg_sys::Node) -> Option<u64> {
     if node.is_null() {
         return None;
     }
@@ -819,10 +1100,7 @@ unsafe fn extract_const_u64(
 // ── Expression conversion ───────────────────────────────────
 
 /// Top-level expression conversion with depth tracking.
-unsafe fn convert_expr_depth(
-    node: *mut pg_sys::Node,
-    depth: u32,
-) -> Result<Expr, String> {
+unsafe fn convert_expr_depth(node: *mut pg_sys::Node, depth: u32) -> Result<Expr, String> {
     if depth > MAX_DEPTH {
         return Err(format!(
             "expression depth {depth} exceeds limit {MAX_DEPTH}"
@@ -831,10 +1109,7 @@ unsafe fn convert_expr_depth(
     convert_expr_inner(node, depth + 1)
 }
 
-unsafe fn convert_expr_inner(
-    node: *mut pg_sys::Node,
-    depth: u32,
-) -> Result<Expr, String> {
+unsafe fn convert_expr_inner(node: *mut pg_sys::Node, depth: u32) -> Result<Expr, String> {
     if node.is_null() {
         return Ok(Expr::Const(Const::Null));
     }
@@ -848,64 +1123,37 @@ unsafe fn convert_expr_inner(
         return convert_pg_const(node as *mut pg_sys::Const);
     }
     if tag == pg_sys::NodeTag::T_OpExpr {
-        return convert_opexpr(
-            node as *mut pg_sys::OpExpr,
-            depth,
-        );
+        return convert_opexpr(node as *mut pg_sys::OpExpr, depth);
     }
     if tag == pg_sys::NodeTag::T_BoolExpr {
-        return convert_boolexpr(
-            node as *mut pg_sys::BoolExpr,
-            depth,
-        );
+        return convert_boolexpr(node as *mut pg_sys::BoolExpr, depth);
     }
     if tag == pg_sys::NodeTag::T_NullTest {
-        return convert_nulltest(
-            node as *mut pg_sys::NullTest,
-            depth,
-        );
+        return convert_nulltest(node as *mut pg_sys::NullTest, depth);
     }
     if tag == pg_sys::NodeTag::T_BooleanTest {
-        return convert_booleantest(
-            node as *mut pg_sys::BooleanTest,
-            depth,
-        );
+        return convert_booleantest(node as *mut pg_sys::BooleanTest, depth);
     }
     if tag == pg_sys::NodeTag::T_FuncExpr {
-        return convert_funcexpr(
-            node as *mut pg_sys::FuncExpr,
-            depth,
-        );
+        return convert_funcexpr(node as *mut pg_sys::FuncExpr, depth);
     }
     if tag == pg_sys::NodeTag::T_Aggref {
-        return convert_aggref_as_expr(
-            node as *mut pg_sys::Aggref,
-            depth,
-        );
+        return convert_aggref_as_expr(node as *mut pg_sys::Aggref, depth);
+    }
+    if tag == pg_sys::NodeTag::T_WindowFunc {
+        return convert_windowfunc_as_expr(node as *mut pg_sys::WindowFunc, depth);
     }
     if tag == pg_sys::NodeTag::T_CaseExpr {
-        return convert_caseexpr(
-            node as *mut pg_sys::CaseExpr,
-            depth,
-        );
+        return convert_caseexpr(node as *mut pg_sys::CaseExpr, depth);
     }
     if tag == pg_sys::NodeTag::T_CoalesceExpr {
-        return convert_coalesce(
-            node as *mut pg_sys::CoalesceExpr,
-            depth,
-        );
+        return convert_coalesce(node as *mut pg_sys::CoalesceExpr, depth);
     }
     if tag == pg_sys::NodeTag::T_ScalarArrayOpExpr {
-        return convert_scalar_array_op(
-            node as *mut pg_sys::ScalarArrayOpExpr,
-            depth,
-        );
+        return convert_scalar_array_op(node as *mut pg_sys::ScalarArrayOpExpr, depth);
     }
     if tag == pg_sys::NodeTag::T_SubLink {
-        return convert_sublink(
-            node as *mut pg_sys::SubLink,
-            depth,
-        );
+        return convert_sublink(node as *mut pg_sys::SubLink, depth);
     }
     if tag == pg_sys::NodeTag::T_RelabelType {
         let rt = node as *mut pg_sys::RelabelType;
@@ -913,10 +1161,7 @@ unsafe fn convert_expr_inner(
         if arg.is_null() {
             return Ok(Expr::Const(Const::Null));
         }
-        return convert_expr_inner(
-            arg as *mut pg_sys::Node,
-            depth,
-        );
+        return convert_expr_inner(arg as *mut pg_sys::Node, depth);
     }
     if tag == pg_sys::NodeTag::T_CoerceViaIO {
         let cio = node as *mut pg_sys::CoerceViaIO;
@@ -924,10 +1169,7 @@ unsafe fn convert_expr_inner(
         if arg.is_null() {
             return Ok(Expr::Const(Const::Null));
         }
-        return convert_expr_inner(
-            arg as *mut pg_sys::Node,
-            depth,
-        );
+        return convert_expr_inner(arg as *mut pg_sys::Node, depth);
     }
     if tag == pg_sys::NodeTag::T_CoerceToDomain {
         let ctd = node as *mut pg_sys::CoerceToDomain;
@@ -935,30 +1177,19 @@ unsafe fn convert_expr_inner(
         if arg.is_null() {
             return Ok(Expr::Const(Const::Null));
         }
-        return convert_expr_inner(
-            arg as *mut pg_sys::Node,
-            depth,
-        );
+        return convert_expr_inner(arg as *mut pg_sys::Node, depth);
     }
     if tag == pg_sys::NodeTag::T_ArrayExpr {
-        return convert_array_expr(
-            node as *mut pg_sys::ArrayExpr,
-            depth,
-        );
+        return convert_array_expr(node as *mut pg_sys::ArrayExpr, depth);
     }
     if tag == pg_sys::NodeTag::T_RowExpr {
-        return convert_row_expr(
-            node as *mut pg_sys::RowExpr,
-            depth,
-        );
+        return convert_row_expr(node as *mut pg_sys::RowExpr, depth);
     }
     if tag == pg_sys::NodeTag::T_Param {
         return convert_param(node as *mut pg_sys::Param);
     }
     if tag == pg_sys::NodeTag::T_SQLValueFunction {
-        return convert_sql_value_function(
-            node as *mut pg_sys::SQLValueFunction,
-        );
+        return convert_sql_value_function(node as *mut pg_sys::SQLValueFunction);
     }
     if tag == pg_sys::NodeTag::T_FieldSelect {
         let fs = node as *mut pg_sys::FieldSelect;
@@ -968,36 +1199,23 @@ unsafe fn convert_expr_inner(
         }
         // Represent as the base expression; field access
         // info is lost but we don't crash.
-        return convert_expr_inner(
-            arg as *mut pg_sys::Node,
-            depth,
-        );
+        return convert_expr_inner(arg as *mut pg_sys::Node, depth);
     }
     if tag == pg_sys::NodeTag::T_MinMaxExpr {
-        return convert_minmax_expr(
-            node as *mut pg_sys::MinMaxExpr,
-            depth,
-        );
+        return convert_minmax_expr(node as *mut pg_sys::MinMaxExpr, depth);
     }
     if tag == pg_sys::NodeTag::T_DistinctExpr {
         // DistinctExpr is structurally identical to OpExpr
         // but represents `IS DISTINCT FROM`.
-        return convert_opexpr(
-            node as *mut pg_sys::OpExpr,
-            depth,
-        );
+        return convert_opexpr(node as *mut pg_sys::OpExpr, depth);
     }
 
     // Unknown node type: produce a sentinel column reference
     // so downstream can identify it without crashing.
-    Ok(Expr::Column(ColumnRef::new(format!(
-        "__pg_node_{tag:?}"
-    ))))
+    Ok(Expr::Column(ColumnRef::new(format!("__pg_node_{tag:?}"))))
 }
 
-unsafe fn convert_var(
-    var: *mut pg_sys::Var,
-) -> Result<Expr, String> {
+unsafe fn convert_var(var: *mut pg_sys::Var) -> Result<Expr, String> {
     if var.is_null() {
         return Ok(Expr::Const(Const::Null));
     }
@@ -1016,9 +1234,7 @@ unsafe fn convert_var(
     }))
 }
 
-unsafe fn convert_pg_const(
-    con: *mut pg_sys::Const,
-) -> Result<Expr, String> {
+unsafe fn convert_pg_const(con: *mut pg_sys::Const) -> Result<Expr, String> {
     if con.is_null() || (*con).constisnull {
         return Ok(Expr::Const(Const::Null));
     }
@@ -1055,9 +1271,7 @@ unsafe fn convert_pg_const(
             } else {
                 let vl = datum_val as *const u8;
                 let text_ptr = vl.add(4) as *const i8;
-                let s = CStr::from_ptr(text_ptr)
-                    .to_string_lossy()
-                    .into_owned();
+                let s = CStr::from_ptr(text_ptr).to_string_lossy().into_owned();
                 Const::String(s)
             }
         }
@@ -1072,10 +1286,7 @@ unsafe fn convert_pg_const(
     Ok(Expr::Const(val))
 }
 
-unsafe fn convert_opexpr(
-    opexpr: *mut pg_sys::OpExpr,
-    depth: u32,
-) -> Result<Expr, String> {
+unsafe fn convert_opexpr(opexpr: *mut pg_sys::OpExpr, depth: u32) -> Result<Expr, String> {
     if opexpr.is_null() {
         return Ok(Expr::Const(Const::Null));
     }
@@ -1088,20 +1299,16 @@ unsafe fn convert_opexpr(
 
     // Unary operator (e.g., unary minus `-x`).
     if arg_count == 1 {
-        let operand_node =
-            pg_sys::list_nth(args, 0) as *mut pg_sys::Node;
-        let operand =
-            convert_expr_inner(operand_node, depth)?;
+        let operand_node = pg_sys::list_nth(args, 0) as *mut pg_sys::Node;
+        let operand = convert_expr_inner(operand_node, depth)?;
         return Ok(Expr::UnaryOp {
             op: UnaryOp::Neg,
             operand: Box::new(operand),
         });
     }
 
-    let left_node =
-        pg_sys::list_nth(args, 0) as *mut pg_sys::Node;
-    let right_node =
-        pg_sys::list_nth(args, 1) as *mut pg_sys::Node;
+    let left_node = pg_sys::list_nth(args, 0) as *mut pg_sys::Node;
+    let right_node = pg_sys::list_nth(args, 1) as *mut pg_sys::Node;
 
     let left = convert_expr_inner(left_node, depth)?;
     let right = convert_expr_inner(right_node, depth)?;
@@ -1114,10 +1321,7 @@ unsafe fn convert_opexpr(
     })
 }
 
-unsafe fn convert_boolexpr(
-    bexpr: *mut pg_sys::BoolExpr,
-    depth: u32,
-) -> Result<Expr, String> {
+unsafe fn convert_boolexpr(bexpr: *mut pg_sys::BoolExpr, depth: u32) -> Result<Expr, String> {
     if bexpr.is_null() {
         return Ok(Expr::Const(Const::Null));
     }
@@ -1129,8 +1333,7 @@ unsafe fn convert_boolexpr(
     }
 
     if boolop == pg_sys::BoolExprType::NOT_EXPR {
-        let child =
-            pg_sys::list_nth(args, 0) as *mut pg_sys::Node;
+        let child = pg_sys::list_nth(args, 0) as *mut pg_sys::Node;
         let operand = convert_expr_inner(child, depth)?;
         return Ok(Expr::UnaryOp {
             op: UnaryOp::Not,
@@ -1145,13 +1348,11 @@ unsafe fn convert_boolexpr(
     };
 
     let len = list_length(args);
-    let first =
-        pg_sys::list_nth(args, 0) as *mut pg_sys::Node;
+    let first = pg_sys::list_nth(args, 0) as *mut pg_sys::Node;
     let mut acc = convert_expr_inner(first, depth)?;
 
     for i in 1..len {
-        let next =
-            pg_sys::list_nth(args, i) as *mut pg_sys::Node;
+        let next = pg_sys::list_nth(args, i) as *mut pg_sys::Node;
         let rhs = convert_expr_inner(next, depth)?;
         acc = Expr::BinOp {
             op: binop,
@@ -1163,10 +1364,7 @@ unsafe fn convert_boolexpr(
     Ok(acc)
 }
 
-unsafe fn convert_nulltest(
-    nt: *mut pg_sys::NullTest,
-    depth: u32,
-) -> Result<Expr, String> {
+unsafe fn convert_nulltest(nt: *mut pg_sys::NullTest, depth: u32) -> Result<Expr, String> {
     if nt.is_null() {
         return Ok(Expr::Const(Const::Null));
     }
@@ -1174,13 +1372,8 @@ unsafe fn convert_nulltest(
     if arg_ptr.is_null() {
         return Ok(Expr::Const(Const::Null));
     }
-    let arg = convert_expr_inner(
-        arg_ptr as *mut pg_sys::Node,
-        depth,
-    )?;
-    let op = if (*nt).nulltesttype
-        == pg_sys::NullTestType::IS_NULL
-    {
+    let arg = convert_expr_inner(arg_ptr as *mut pg_sys::Node, depth)?;
+    let op = if (*nt).nulltesttype == pg_sys::NullTestType::IS_NULL {
         UnaryOp::IsNull
     } else {
         UnaryOp::IsNotNull
@@ -1192,10 +1385,7 @@ unsafe fn convert_nulltest(
 }
 
 /// Convert `IS TRUE`, `IS FALSE`, `IS NOT TRUE`, etc.
-unsafe fn convert_booleantest(
-    bt: *mut pg_sys::BooleanTest,
-    depth: u32,
-) -> Result<Expr, String> {
+unsafe fn convert_booleantest(bt: *mut pg_sys::BooleanTest, depth: u32) -> Result<Expr, String> {
     if bt.is_null() {
         return Ok(Expr::Const(Const::Null));
     }
@@ -1203,10 +1393,7 @@ unsafe fn convert_booleantest(
     if arg_ptr.is_null() {
         return Ok(Expr::Const(Const::Null));
     }
-    let arg = convert_expr_inner(
-        arg_ptr as *mut pg_sys::Node,
-        depth,
-    )?;
+    let arg = convert_expr_inner(arg_ptr as *mut pg_sys::Node, depth)?;
 
     let test_type = (*bt).booltesttype;
 
@@ -1223,37 +1410,27 @@ unsafe fn convert_booleantest(
             left: Box::new(arg),
             right: Box::new(Expr::Const(Const::Bool(false))),
         }),
-        pg_sys::BoolTestType::IS_NOT_TRUE => {
-            Ok(Expr::UnaryOp {
-                op: UnaryOp::Not,
-                operand: Box::new(Expr::BinOp {
-                    op: BinOp::Eq,
-                    left: Box::new(arg),
-                    right: Box::new(Expr::Const(
-                        Const::Bool(true),
-                    )),
-                }),
-            })
-        }
-        pg_sys::BoolTestType::IS_NOT_FALSE => {
-            Ok(Expr::UnaryOp {
-                op: UnaryOp::Not,
-                operand: Box::new(Expr::BinOp {
-                    op: BinOp::Eq,
-                    left: Box::new(arg),
-                    right: Box::new(Expr::Const(
-                        Const::Bool(false),
-                    )),
-                }),
-            })
-        }
+        pg_sys::BoolTestType::IS_NOT_TRUE => Ok(Expr::UnaryOp {
+            op: UnaryOp::Not,
+            operand: Box::new(Expr::BinOp {
+                op: BinOp::Eq,
+                left: Box::new(arg),
+                right: Box::new(Expr::Const(Const::Bool(true))),
+            }),
+        }),
+        pg_sys::BoolTestType::IS_NOT_FALSE => Ok(Expr::UnaryOp {
+            op: UnaryOp::Not,
+            operand: Box::new(Expr::BinOp {
+                op: BinOp::Eq,
+                left: Box::new(arg),
+                right: Box::new(Expr::Const(Const::Bool(false))),
+            }),
+        }),
         // IS UNKNOWN / IS NOT UNKNOWN -> IS NULL / IS NOT NULL
-        pg_sys::BoolTestType::IS_UNKNOWN => {
-            Ok(Expr::UnaryOp {
-                op: UnaryOp::IsNull,
-                operand: Box::new(arg),
-            })
-        }
+        pg_sys::BoolTestType::IS_UNKNOWN => Ok(Expr::UnaryOp {
+            op: UnaryOp::IsNull,
+            operand: Box::new(arg),
+        }),
         _ => Ok(Expr::UnaryOp {
             op: UnaryOp::IsNotNull,
             operand: Box::new(arg),
@@ -1261,10 +1438,7 @@ unsafe fn convert_booleantest(
     }
 }
 
-unsafe fn convert_funcexpr(
-    funcexpr: *mut pg_sys::FuncExpr,
-    depth: u32,
-) -> Result<Expr, String> {
+unsafe fn convert_funcexpr(funcexpr: *mut pg_sys::FuncExpr, depth: u32) -> Result<Expr, String> {
     if funcexpr.is_null() {
         return Ok(Expr::Const(Const::Null));
     }
@@ -1276,8 +1450,7 @@ unsafe fn convert_funcexpr(
     if !args.is_null() {
         let len = list_length(args);
         for i in 0..len {
-            let node = pg_sys::list_nth(args, i)
-                as *mut pg_sys::Node;
+            let node = pg_sys::list_nth(args, i) as *mut pg_sys::Node;
             args_out.push(convert_expr_inner(node, depth)?);
         }
     }
@@ -1288,10 +1461,7 @@ unsafe fn convert_funcexpr(
     })
 }
 
-unsafe fn convert_aggref_as_expr(
-    aggref: *mut pg_sys::Aggref,
-    depth: u32,
-) -> Result<Expr, String> {
+unsafe fn convert_aggref_as_expr(aggref: *mut pg_sys::Aggref, depth: u32) -> Result<Expr, String> {
     if aggref.is_null() {
         return Ok(Expr::Const(Const::Null));
     }
@@ -1303,13 +1473,9 @@ unsafe fn convert_aggref_as_expr(
     if !args.is_null() {
         let len = list_length(args);
         for i in 0..len {
-            let tle = pg_sys::list_nth(args, i)
-                as *mut pg_sys::TargetEntry;
+            let tle = pg_sys::list_nth(args, i) as *mut pg_sys::TargetEntry;
             if !tle.is_null() && !(*tle).expr.is_null() {
-                args_out.push(convert_expr_inner(
-                    (*tle).expr as *mut pg_sys::Node,
-                    depth,
-                )?);
+                args_out.push(convert_expr_inner((*tle).expr as *mut pg_sys::Node, depth)?);
             }
         }
     }
@@ -1321,10 +1487,7 @@ unsafe fn convert_aggref_as_expr(
 }
 
 /// Convert a CASE expression.
-unsafe fn convert_caseexpr(
-    caseexpr: *mut pg_sys::CaseExpr,
-    depth: u32,
-) -> Result<Expr, String> {
+unsafe fn convert_caseexpr(caseexpr: *mut pg_sys::CaseExpr, depth: u32) -> Result<Expr, String> {
     if caseexpr.is_null() {
         return Ok(Expr::Const(Const::Null));
     }
@@ -1344,26 +1507,19 @@ unsafe fn convert_caseexpr(
     if !args.is_null() {
         let len = list_length(args);
         for i in 0..len {
-            let cw = pg_sys::list_nth(args, i)
-                as *mut pg_sys::CaseWhen;
+            let cw = pg_sys::list_nth(args, i) as *mut pg_sys::CaseWhen;
             if cw.is_null() {
                 continue;
             }
             let condition = if (*cw).expr.is_null() {
                 Expr::Const(Const::Bool(true))
             } else {
-                convert_expr_inner(
-                    (*cw).expr as *mut pg_sys::Node,
-                    depth,
-                )?
+                convert_expr_inner((*cw).expr as *mut pg_sys::Node, depth)?
             };
             let result = if (*cw).result.is_null() {
                 Expr::Const(Const::Null)
             } else {
-                convert_expr_inner(
-                    (*cw).result as *mut pg_sys::Node,
-                    depth,
-                )?
+                convert_expr_inner((*cw).result as *mut pg_sys::Node, depth)?
             };
             when_clauses.push((condition, result));
         }
@@ -1386,10 +1542,7 @@ unsafe fn convert_caseexpr(
 }
 
 /// Convert COALESCE(a, b, ...) to a function call.
-unsafe fn convert_coalesce(
-    ce: *mut pg_sys::CoalesceExpr,
-    depth: u32,
-) -> Result<Expr, String> {
+unsafe fn convert_coalesce(ce: *mut pg_sys::CoalesceExpr, depth: u32) -> Result<Expr, String> {
     if ce.is_null() {
         return Ok(Expr::Const(Const::Null));
     }
@@ -1398,8 +1551,7 @@ unsafe fn convert_coalesce(
     if !args_list.is_null() {
         let len = list_length(args_list);
         for i in 0..len {
-            let node = pg_sys::list_nth(args_list, i)
-                as *mut pg_sys::Node;
+            let node = pg_sys::list_nth(args_list, i) as *mut pg_sys::Node;
             args_out.push(convert_expr_inner(node, depth)?);
         }
     }
@@ -1422,20 +1574,14 @@ unsafe fn convert_scalar_array_op(
         return Ok(Expr::Const(Const::Null));
     }
 
-    let left_node =
-        pg_sys::list_nth(args, 0) as *mut pg_sys::Node;
-    let right_node =
-        pg_sys::list_nth(args, 1) as *mut pg_sys::Node;
+    let left_node = pg_sys::list_nth(args, 0) as *mut pg_sys::Node;
+    let right_node = pg_sys::list_nth(args, 1) as *mut pg_sys::Node;
 
     let left = convert_expr_inner(left_node, depth)?;
     let right = convert_expr_inner(right_node, depth)?;
 
     // useOr=true means ANY (like IN), useOr=false means ALL.
-    let name = if (*saop).useOr {
-        "ANY"
-    } else {
-        "ALL"
-    };
+    let name = if (*saop).useOr { "ANY" } else { "ALL" };
 
     Ok(Expr::Function {
         name: name.into(),
@@ -1446,10 +1592,7 @@ unsafe fn convert_scalar_array_op(
 /// Convert a SubLink (subquery in an expression).
 /// We represent these as function placeholders since we cannot
 /// inline-expand correlated subqueries into RelExpr.
-unsafe fn convert_sublink(
-    sl: *mut pg_sys::SubLink,
-    _depth: u32,
-) -> Result<Expr, String> {
+unsafe fn convert_sublink(sl: *mut pg_sys::SubLink, _depth: u32) -> Result<Expr, String> {
     if sl.is_null() {
         return Ok(Expr::Const(Const::Null));
     }
@@ -1458,18 +1601,10 @@ unsafe fn convert_sublink(
     // Map sublink types to descriptive names.
     #[allow(non_upper_case_globals)]
     let name = match sublink_type {
-        pg_sys::SubLinkType::EXISTS_SUBLINK => {
-            "__sublink_exists"
-        }
-        pg_sys::SubLinkType::ANY_SUBLINK => {
-            "__sublink_any"
-        }
-        pg_sys::SubLinkType::ALL_SUBLINK => {
-            "__sublink_all"
-        }
-        pg_sys::SubLinkType::EXPR_SUBLINK => {
-            "__sublink_expr"
-        }
+        pg_sys::SubLinkType::EXISTS_SUBLINK => "__sublink_exists",
+        pg_sys::SubLinkType::ANY_SUBLINK => "__sublink_any",
+        pg_sys::SubLinkType::ALL_SUBLINK => "__sublink_all",
+        pg_sys::SubLinkType::EXPR_SUBLINK => "__sublink_expr",
         _ => "__sublink_unknown",
     };
 
@@ -1480,10 +1615,7 @@ unsafe fn convert_sublink(
 }
 
 /// Convert an ARRAY[...] constructor.
-unsafe fn convert_array_expr(
-    ae: *mut pg_sys::ArrayExpr,
-    depth: u32,
-) -> Result<Expr, String> {
+unsafe fn convert_array_expr(ae: *mut pg_sys::ArrayExpr, depth: u32) -> Result<Expr, String> {
     if ae.is_null() {
         return Ok(Expr::Const(Const::Null));
     }
@@ -1492,8 +1624,7 @@ unsafe fn convert_array_expr(
     if !elements.is_null() {
         let len = list_length(elements);
         for i in 0..len {
-            let node = pg_sys::list_nth(elements, i)
-                as *mut pg_sys::Node;
+            let node = pg_sys::list_nth(elements, i) as *mut pg_sys::Node;
             elems.push(convert_expr_inner(node, depth)?);
         }
     }
@@ -1501,10 +1632,7 @@ unsafe fn convert_array_expr(
 }
 
 /// Convert a ROW(...) constructor to a function call.
-unsafe fn convert_row_expr(
-    re: *mut pg_sys::RowExpr,
-    depth: u32,
-) -> Result<Expr, String> {
+unsafe fn convert_row_expr(re: *mut pg_sys::RowExpr, depth: u32) -> Result<Expr, String> {
     if re.is_null() {
         return Ok(Expr::Const(Const::Null));
     }
@@ -1513,8 +1641,7 @@ unsafe fn convert_row_expr(
     if !args_list.is_null() {
         let len = list_length(args_list);
         for i in 0..len {
-            let node = pg_sys::list_nth(args_list, i)
-                as *mut pg_sys::Node;
+            let node = pg_sys::list_nth(args_list, i) as *mut pg_sys::Node;
             args_out.push(convert_expr_inner(node, depth)?);
         }
     }
@@ -1525,22 +1652,16 @@ unsafe fn convert_row_expr(
 }
 
 /// Convert a Param node ($1, $2, etc.) to a placeholder column.
-unsafe fn convert_param(
-    param: *mut pg_sys::Param,
-) -> Result<Expr, String> {
+unsafe fn convert_param(param: *mut pg_sys::Param) -> Result<Expr, String> {
     if param.is_null() {
         return Ok(Expr::Const(Const::Null));
     }
     let paramid = (*param).paramid;
-    Ok(Expr::Column(ColumnRef::new(format!(
-        "__param_{paramid}"
-    ))))
+    Ok(Expr::Column(ColumnRef::new(format!("__param_{paramid}"))))
 }
 
 /// Convert SQLValueFunction (CURRENT_DATE, CURRENT_USER, etc.).
-unsafe fn convert_sql_value_function(
-    svf: *mut pg_sys::SQLValueFunction,
-) -> Result<Expr, String> {
+unsafe fn convert_sql_value_function(svf: *mut pg_sys::SQLValueFunction) -> Result<Expr, String> {
     if svf.is_null() {
         return Ok(Expr::Const(Const::Null));
     }
@@ -1548,41 +1669,21 @@ unsafe fn convert_sql_value_function(
 
     #[allow(non_upper_case_globals)]
     let name = match op {
-        pg_sys::SQLValueFunctionOp::SVFOP_CURRENT_DATE => {
-            "CURRENT_DATE"
-        }
+        pg_sys::SQLValueFunctionOp::SVFOP_CURRENT_DATE => "CURRENT_DATE",
         pg_sys::SQLValueFunctionOp::SVFOP_CURRENT_TIME
-        | pg_sys::SQLValueFunctionOp::SVFOP_CURRENT_TIME_N => {
-            "CURRENT_TIME"
-        }
+        | pg_sys::SQLValueFunctionOp::SVFOP_CURRENT_TIME_N => "CURRENT_TIME",
         pg_sys::SQLValueFunctionOp::SVFOP_CURRENT_TIMESTAMP
-        | pg_sys::SQLValueFunctionOp::SVFOP_CURRENT_TIMESTAMP_N => {
-            "CURRENT_TIMESTAMP"
-        }
+        | pg_sys::SQLValueFunctionOp::SVFOP_CURRENT_TIMESTAMP_N => "CURRENT_TIMESTAMP",
         pg_sys::SQLValueFunctionOp::SVFOP_LOCALTIME
-        | pg_sys::SQLValueFunctionOp::SVFOP_LOCALTIME_N => {
-            "LOCALTIME"
-        }
+        | pg_sys::SQLValueFunctionOp::SVFOP_LOCALTIME_N => "LOCALTIME",
         pg_sys::SQLValueFunctionOp::SVFOP_LOCALTIMESTAMP
-        | pg_sys::SQLValueFunctionOp::SVFOP_LOCALTIMESTAMP_N => {
-            "LOCALTIMESTAMP"
-        }
-        pg_sys::SQLValueFunctionOp::SVFOP_CURRENT_ROLE => {
-            "CURRENT_ROLE"
-        }
-        pg_sys::SQLValueFunctionOp::SVFOP_CURRENT_USER => {
-            "CURRENT_USER"
-        }
-        pg_sys::SQLValueFunctionOp::SVFOP_SESSION_USER => {
-            "SESSION_USER"
-        }
+        | pg_sys::SQLValueFunctionOp::SVFOP_LOCALTIMESTAMP_N => "LOCALTIMESTAMP",
+        pg_sys::SQLValueFunctionOp::SVFOP_CURRENT_ROLE => "CURRENT_ROLE",
+        pg_sys::SQLValueFunctionOp::SVFOP_CURRENT_USER => "CURRENT_USER",
+        pg_sys::SQLValueFunctionOp::SVFOP_SESSION_USER => "SESSION_USER",
         pg_sys::SQLValueFunctionOp::SVFOP_USER => "USER",
-        pg_sys::SQLValueFunctionOp::SVFOP_CURRENT_CATALOG => {
-            "CURRENT_CATALOG"
-        }
-        pg_sys::SQLValueFunctionOp::SVFOP_CURRENT_SCHEMA => {
-            "CURRENT_SCHEMA"
-        }
+        pg_sys::SQLValueFunctionOp::SVFOP_CURRENT_CATALOG => "CURRENT_CATALOG",
+        pg_sys::SQLValueFunctionOp::SVFOP_CURRENT_SCHEMA => "CURRENT_SCHEMA",
         _ => "__sql_value_fn",
     };
 
@@ -1593,10 +1694,7 @@ unsafe fn convert_sql_value_function(
 }
 
 /// Convert GREATEST/LEAST (MinMaxExpr).
-unsafe fn convert_minmax_expr(
-    mme: *mut pg_sys::MinMaxExpr,
-    depth: u32,
-) -> Result<Expr, String> {
+unsafe fn convert_minmax_expr(mme: *mut pg_sys::MinMaxExpr, depth: u32) -> Result<Expr, String> {
     if mme.is_null() {
         return Ok(Expr::Const(Const::Null));
     }
@@ -1605,15 +1703,12 @@ unsafe fn convert_minmax_expr(
     if !args_list.is_null() {
         let len = list_length(args_list);
         for i in 0..len {
-            let node = pg_sys::list_nth(args_list, i)
-                as *mut pg_sys::Node;
+            let node = pg_sys::list_nth(args_list, i) as *mut pg_sys::Node;
             args_out.push(convert_expr_inner(node, depth)?);
         }
     }
 
-    let name = if (*mme).op
-        == pg_sys::MinMaxOp::IS_GREATEST
-    {
+    let name = if (*mme).op == pg_sys::MinMaxOp::IS_GREATEST {
         "GREATEST"
     } else {
         "LEAST"
@@ -1639,31 +1734,22 @@ unsafe fn get_rte(
     if rtindex < 1 || rtindex > len {
         return Ok(None);
     }
-    let rte = pg_sys::list_nth(rtable, rtindex - 1)
-        as *mut pg_sys::RangeTblEntry;
+    let rte = pg_sys::list_nth(rtable, rtindex - 1) as *mut pg_sys::RangeTblEntry;
     if rte.is_null() {
         return Ok(None);
     }
     Ok(Some(rte))
 }
 
-unsafe fn resolve_rel_name(
-    relid: pg_sys::Oid,
-) -> Option<String> {
+unsafe fn resolve_rel_name(relid: pg_sys::Oid) -> Option<String> {
     let name_ptr = pg_sys::get_rel_name(relid);
     if name_ptr.is_null() {
         return None;
     }
-    Some(
-        CStr::from_ptr(name_ptr)
-            .to_string_lossy()
-            .into_owned(),
-    )
+    Some(CStr::from_ptr(name_ptr).to_string_lossy().into_owned())
 }
 
-unsafe fn resolve_alias(
-    rte: *mut pg_sys::RangeTblEntry,
-) -> Option<String> {
+unsafe fn resolve_alias(rte: *mut pg_sys::RangeTblEntry) -> Option<String> {
     if rte.is_null() {
         return None;
     }
@@ -1675,16 +1761,10 @@ unsafe fn resolve_alias(
     if aliasname.is_null() {
         return None;
     }
-    Some(
-        CStr::from_ptr(aliasname)
-            .to_string_lossy()
-            .into_owned(),
-    )
+    Some(CStr::from_ptr(aliasname).to_string_lossy().into_owned())
 }
 
-unsafe fn resolve_tle_alias(
-    tle: *mut pg_sys::TargetEntry,
-) -> Option<String> {
+unsafe fn resolve_tle_alias(tle: *mut pg_sys::TargetEntry) -> Option<String> {
     if tle.is_null() {
         return None;
     }
@@ -1705,8 +1785,7 @@ unsafe fn find_target_entry_by_ref(
     }
     let len = list_length(tlist);
     for i in 0..len {
-        let tle = pg_sys::list_nth(tlist, i)
-            as *mut pg_sys::TargetEntry;
+        let tle = pg_sys::list_nth(tlist, i) as *mut pg_sys::TargetEntry;
         if tle.is_null() {
             continue;
         }
@@ -1750,23 +1829,17 @@ fn map_operator_oid(opno: pg_sys::Oid) -> BinOp {
     match opno.to_u32() {
         // Equality: int4, int2, float8, text, numeric, oid,
         //           date, timestamp, timestamptz
-        96 | 94 | 670 | 98 | 1752 | 607 | 1093 | 2060
-        | 1320 => BinOp::Eq,
+        96 | 94 | 670 | 98 | 1752 | 607 | 1093 | 2060 | 1320 => BinOp::Eq,
         // Less-than
-        97 | 95 | 672 | 664 | 1754 | 609 | 1095 | 2062
-        | 1322 => BinOp::Lt,
+        97 | 95 | 672 | 664 | 1754 | 609 | 1095 | 2062 | 1322 => BinOp::Lt,
         // Greater-than
-        518 | 520 | 674 | 666 | 1756 | 610 | 1097 | 2064
-        | 1324 => BinOp::Gt,
+        518 | 520 | 674 | 666 | 1756 | 610 | 1097 | 2064 | 1324 => BinOp::Gt,
         // Not-equal
-        519 | 517 | 671 | 531 | 1753 | 608 | 1094 | 2061
-        | 1321 => BinOp::Ne,
+        519 | 517 | 671 | 531 | 1753 | 608 | 1094 | 2061 | 1321 => BinOp::Ne,
         // Less-than-or-equal
-        521 | 522 | 673 | 665 | 1755 | 611 | 1096 | 2063
-        | 1323 => BinOp::Le,
+        521 | 522 | 673 | 665 | 1755 | 611 | 1096 | 2063 | 1323 => BinOp::Le,
         // Greater-than-or-equal
-        524 | 523 | 675 | 667 | 1757 | 612 | 1098 | 2065
-        | 1325 => BinOp::Ge,
+        524 | 523 | 675 | 667 | 1757 | 612 | 1098 | 2065 | 1325 => BinOp::Ge,
         // Arithmetic
         551 | 550 | 591 | 584 => BinOp::Add,
         555 | 558 | 593 | 586 => BinOp::Sub,
@@ -1788,35 +1861,25 @@ fn map_agg_oid(funcoid: pg_sys::Oid) -> AggregateFunction {
         // count(*) and count(expr)
         2803 | 2147 | 2146 => AggregateFunction::Count,
         // sum
-        2108 | 2109 | 2110 | 2111 | 2112 | 2113 | 2114 => {
-            AggregateFunction::Sum
-        }
+        2108 | 2109 | 2110 | 2111 | 2112 | 2113 | 2114 => AggregateFunction::Sum,
         // avg
-        2100 | 2101 | 2102 | 2103 | 2104 | 2105 | 2106 => {
-            AggregateFunction::Avg
-        }
+        2100 | 2101 | 2102 | 2103 | 2104 | 2105 | 2106 => AggregateFunction::Avg,
         // min
-        2131 | 2132 | 2133 | 2134 | 2135 | 2136 | 2137
-        | 2138 | 2139 | 2245 => AggregateFunction::Min,
+        2131 | 2132 | 2133 | 2134 | 2135 | 2136 | 2137 | 2138 | 2139 | 2245 => {
+            AggregateFunction::Min
+        }
         // max
-        2115 | 2116 | 2117 | 2118 | 2119 | 2120 | 2121
-        | 2122 | 2123 | 2126 | 2244 => {
+        2115 | 2116 | 2117 | 2118 | 2119 | 2120 | 2121 | 2122 | 2123 | 2126 | 2244 => {
             AggregateFunction::Max
         }
         // stddev
-        2154 | 2155 | 2156 | 2157 | 2158 | 2159 => {
-            AggregateFunction::StdDev
-        }
+        2154 | 2155 | 2156 | 2157 | 2158 | 2159 => AggregateFunction::StdDev,
         // variance
-        2148 | 2149 | 2150 | 2151 | 2152 | 2153 => {
-            AggregateFunction::Variance
-        }
+        2148 | 2149 | 2150 | 2151 | 2152 | 2153 => AggregateFunction::Variance,
         // string_agg
         3538 | 3543 => AggregateFunction::StringAgg,
         // array_agg
-        2335 | 4051 | 4052 | 4053 => {
-            AggregateFunction::ArrayAgg
-        }
+        2335 | 4051 | 4052 | 4053 => AggregateFunction::ArrayAgg,
         _ => AggregateFunction::Count,
     }
 }
@@ -1829,158 +1892,101 @@ mod tests {
 
     #[test]
     fn operator_oid_eq() {
-        assert_eq!(
-            map_operator_oid(pg_sys::Oid::from(96_u32)),
-            BinOp::Eq,
-        );
+        assert_eq!(map_operator_oid(pg_sys::Oid::from(96_u32)), BinOp::Eq,);
     }
 
     #[test]
     fn operator_oid_lt() {
-        assert_eq!(
-            map_operator_oid(pg_sys::Oid::from(97_u32)),
-            BinOp::Lt,
-        );
+        assert_eq!(map_operator_oid(pg_sys::Oid::from(97_u32)), BinOp::Lt,);
     }
 
     #[test]
     fn operator_oid_gt() {
-        assert_eq!(
-            map_operator_oid(pg_sys::Oid::from(518_u32)),
-            BinOp::Gt,
-        );
+        assert_eq!(map_operator_oid(pg_sys::Oid::from(518_u32)), BinOp::Gt,);
     }
 
     #[test]
     fn operator_oid_ne() {
-        assert_eq!(
-            map_operator_oid(pg_sys::Oid::from(519_u32)),
-            BinOp::Ne,
-        );
+        assert_eq!(map_operator_oid(pg_sys::Oid::from(519_u32)), BinOp::Ne,);
     }
 
     #[test]
     fn operator_oid_le() {
-        assert_eq!(
-            map_operator_oid(pg_sys::Oid::from(521_u32)),
-            BinOp::Le,
-        );
+        assert_eq!(map_operator_oid(pg_sys::Oid::from(521_u32)), BinOp::Le,);
     }
 
     #[test]
     fn operator_oid_ge() {
-        assert_eq!(
-            map_operator_oid(pg_sys::Oid::from(524_u32)),
-            BinOp::Ge,
-        );
+        assert_eq!(map_operator_oid(pg_sys::Oid::from(524_u32)), BinOp::Ge,);
     }
 
     #[test]
     fn operator_oid_add() {
-        assert_eq!(
-            map_operator_oid(pg_sys::Oid::from(551_u32)),
-            BinOp::Add,
-        );
+        assert_eq!(map_operator_oid(pg_sys::Oid::from(551_u32)), BinOp::Add,);
     }
 
     #[test]
     fn operator_oid_sub() {
-        assert_eq!(
-            map_operator_oid(pg_sys::Oid::from(555_u32)),
-            BinOp::Sub,
-        );
+        assert_eq!(map_operator_oid(pg_sys::Oid::from(555_u32)), BinOp::Sub,);
     }
 
     #[test]
     fn operator_oid_mul() {
-        assert_eq!(
-            map_operator_oid(pg_sys::Oid::from(514_u32)),
-            BinOp::Mul,
-        );
+        assert_eq!(map_operator_oid(pg_sys::Oid::from(514_u32)), BinOp::Mul,);
     }
 
     #[test]
     fn operator_oid_div() {
-        assert_eq!(
-            map_operator_oid(pg_sys::Oid::from(528_u32)),
-            BinOp::Div,
-        );
+        assert_eq!(map_operator_oid(pg_sys::Oid::from(528_u32)), BinOp::Div,);
     }
 
     #[test]
     fn operator_oid_mod() {
-        assert_eq!(
-            map_operator_oid(pg_sys::Oid::from(530_u32)),
-            BinOp::Mod,
-        );
+        assert_eq!(map_operator_oid(pg_sys::Oid::from(530_u32)), BinOp::Mod,);
     }
 
     #[test]
     fn operator_oid_concat() {
-        assert_eq!(
-            map_operator_oid(pg_sys::Oid::from(654_u32)),
-            BinOp::Concat,
-        );
+        assert_eq!(map_operator_oid(pg_sys::Oid::from(654_u32)), BinOp::Concat,);
     }
 
     #[test]
     fn operator_oid_unknown_defaults_eq() {
-        assert_eq!(
-            map_operator_oid(pg_sys::Oid::from(999_999_u32)),
-            BinOp::Eq,
-        );
+        assert_eq!(map_operator_oid(pg_sys::Oid::from(999_999_u32)), BinOp::Eq,);
     }
 
     // ── Date/timestamp operators ────────────────────────────
 
     #[test]
     fn operator_oid_date_eq() {
-        assert_eq!(
-            map_operator_oid(pg_sys::Oid::from(1093_u32)),
-            BinOp::Eq,
-        );
+        assert_eq!(map_operator_oid(pg_sys::Oid::from(1093_u32)), BinOp::Eq,);
     }
 
     #[test]
     fn operator_oid_date_lt() {
-        assert_eq!(
-            map_operator_oid(pg_sys::Oid::from(1095_u32)),
-            BinOp::Lt,
-        );
+        assert_eq!(map_operator_oid(pg_sys::Oid::from(1095_u32)), BinOp::Lt,);
     }
 
     #[test]
     fn operator_oid_timestamp_eq() {
-        assert_eq!(
-            map_operator_oid(pg_sys::Oid::from(2060_u32)),
-            BinOp::Eq,
-        );
+        assert_eq!(map_operator_oid(pg_sys::Oid::from(2060_u32)), BinOp::Eq,);
     }
 
     #[test]
     fn operator_oid_timestamptz_gt() {
-        assert_eq!(
-            map_operator_oid(pg_sys::Oid::from(1324_u32)),
-            BinOp::Gt,
-        );
+        assert_eq!(map_operator_oid(pg_sys::Oid::from(1324_u32)), BinOp::Gt,);
     }
 
     // ── Int2 operators ──────────────────────────────────────
 
     #[test]
     fn operator_oid_int2_eq() {
-        assert_eq!(
-            map_operator_oid(pg_sys::Oid::from(94_u32)),
-            BinOp::Eq,
-        );
+        assert_eq!(map_operator_oid(pg_sys::Oid::from(94_u32)), BinOp::Eq,);
     }
 
     #[test]
     fn operator_oid_int2_lt() {
-        assert_eq!(
-            map_operator_oid(pg_sys::Oid::from(95_u32)),
-            BinOp::Lt,
-        );
+        assert_eq!(map_operator_oid(pg_sys::Oid::from(95_u32)), BinOp::Lt,);
     }
 
     // ── Arithmetic int8/float variants ──────────────────────
@@ -2046,10 +2052,7 @@ mod tests {
 
     #[test]
     fn join_type_unknown_defaults_inner() {
-        assert_eq!(
-            convert_join_type(99),
-            JoinType::Inner,
-        );
+        assert_eq!(convert_join_type(99), JoinType::Inner,);
     }
 
     // ── Aggregate OID mapping ───────────────────────────────
@@ -2154,62 +2157,207 @@ mod tests {
 
     #[test]
     fn sort_direction_asc_for_lt_op() {
-        let dir =
-            infer_sort_direction(pg_sys::Oid::from(97_u32));
+        let dir = infer_sort_direction(pg_sys::Oid::from(97_u32));
         assert_eq!(dir, SortDirection::Asc);
     }
 
     #[test]
     fn sort_direction_desc_for_gt_op() {
-        let dir =
-            infer_sort_direction(pg_sys::Oid::from(518_u32));
+        let dir = infer_sort_direction(pg_sys::Oid::from(518_u32));
         assert_eq!(dir, SortDirection::Desc);
     }
 
     #[test]
     fn sort_direction_desc_for_numeric_gt() {
-        let dir = infer_sort_direction(
-            pg_sys::Oid::from(1756_u32),
-        );
+        let dir = infer_sort_direction(pg_sys::Oid::from(1756_u32));
         assert_eq!(dir, SortDirection::Desc);
     }
 
     #[test]
     fn sort_direction_desc_for_date_gt() {
-        let dir = infer_sort_direction(
-            pg_sys::Oid::from(1097_u32),
-        );
+        let dir = infer_sort_direction(pg_sys::Oid::from(1097_u32));
         assert_eq!(dir, SortDirection::Desc);
     }
 
     #[test]
     fn sort_direction_desc_for_timestamptz_gt() {
-        let dir = infer_sort_direction(
-            pg_sys::Oid::from(1324_u32),
-        );
+        let dir = infer_sort_direction(pg_sys::Oid::from(1324_u32));
         assert_eq!(dir, SortDirection::Desc);
     }
 
     #[test]
     fn sort_direction_asc_for_unknown_op() {
-        let dir = infer_sort_direction(
-            pg_sys::Oid::from(999_999_u32),
-        );
+        let dir = infer_sort_direction(pg_sys::Oid::from(999_999_u32));
         assert_eq!(dir, SortDirection::Asc);
+    }
+
+    // ── Window function OID mapping ────────────────────────
+
+    #[test]
+    fn window_oid_row_number() {
+        assert_eq!(
+            map_window_func_oid(pg_sys::Oid::from(3100_u32)),
+            WindowFunction::RowNumber,
+        );
+    }
+
+    #[test]
+    fn window_oid_rank() {
+        assert_eq!(
+            map_window_func_oid(pg_sys::Oid::from(3101_u32)),
+            WindowFunction::Rank,
+        );
+    }
+
+    #[test]
+    fn window_oid_dense_rank() {
+        assert_eq!(
+            map_window_func_oid(pg_sys::Oid::from(3102_u32)),
+            WindowFunction::DenseRank,
+        );
+    }
+
+    #[test]
+    fn window_oid_percent_rank() {
+        assert_eq!(
+            map_window_func_oid(pg_sys::Oid::from(3103_u32)),
+            WindowFunction::PercentRank,
+        );
+    }
+
+    #[test]
+    fn window_oid_ntile() {
+        assert_eq!(
+            map_window_func_oid(pg_sys::Oid::from(3105_u32)),
+            WindowFunction::Ntile,
+        );
+    }
+
+    #[test]
+    fn window_oid_lag() {
+        assert_eq!(
+            map_window_func_oid(pg_sys::Oid::from(3106_u32)),
+            WindowFunction::Lag,
+        );
+    }
+
+    #[test]
+    fn window_oid_lag_variant() {
+        assert_eq!(
+            map_window_func_oid(pg_sys::Oid::from(3107_u32)),
+            WindowFunction::Lag,
+        );
+    }
+
+    #[test]
+    fn window_oid_lead() {
+        assert_eq!(
+            map_window_func_oid(pg_sys::Oid::from(3109_u32)),
+            WindowFunction::Lead,
+        );
+    }
+
+    #[test]
+    fn window_oid_lead_variant() {
+        assert_eq!(
+            map_window_func_oid(pg_sys::Oid::from(3110_u32)),
+            WindowFunction::Lead,
+        );
+    }
+
+    #[test]
+    fn window_oid_first_value() {
+        assert_eq!(
+            map_window_func_oid(pg_sys::Oid::from(3112_u32)),
+            WindowFunction::FirstValue,
+        );
+    }
+
+    #[test]
+    fn window_oid_last_value() {
+        assert_eq!(
+            map_window_func_oid(pg_sys::Oid::from(3113_u32)),
+            WindowFunction::LastValue,
+        );
+    }
+
+    #[test]
+    fn window_oid_nth_value() {
+        assert_eq!(
+            map_window_func_oid(pg_sys::Oid::from(3114_u32)),
+            WindowFunction::NthValue,
+        );
+    }
+
+    #[test]
+    fn window_oid_agg_sum_as_window() {
+        assert_eq!(
+            map_window_func_oid(pg_sys::Oid::from(2108_u32)),
+            WindowFunction::Sum,
+        );
+    }
+
+    #[test]
+    fn window_oid_agg_avg_as_window() {
+        assert_eq!(
+            map_window_func_oid(pg_sys::Oid::from(2100_u32)),
+            WindowFunction::Avg,
+        );
+    }
+
+    #[test]
+    fn window_oid_agg_count_as_window() {
+        assert_eq!(
+            map_window_func_oid(pg_sys::Oid::from(2803_u32)),
+            WindowFunction::Count,
+        );
+    }
+
+    #[test]
+    fn window_oid_agg_min_as_window() {
+        assert_eq!(
+            map_window_func_oid(pg_sys::Oid::from(2131_u32)),
+            WindowFunction::Min,
+        );
+    }
+
+    #[test]
+    fn window_oid_agg_max_as_window() {
+        assert_eq!(
+            map_window_func_oid(pg_sys::Oid::from(2115_u32)),
+            WindowFunction::Max,
+        );
+    }
+
+    #[test]
+    fn window_oid_unknown_defaults_row_number() {
+        assert_eq!(
+            map_window_func_oid(pg_sys::Oid::from(999_999_u32)),
+            WindowFunction::RowNumber,
+        );
+    }
+
+    // ── Window frame extraction (null safety) ──────────────
+
+    #[test]
+    fn extract_window_frame_null_returns_none() {
+        let frame = unsafe { extract_window_frame(std::ptr::null_mut()) };
+        assert!(frame.is_none());
+    }
+
+    #[test]
+    fn extract_frame_offset_null_returns_zero() {
+        let offset = unsafe { extract_frame_offset(std::ptr::null_mut()) };
+        assert_eq!(offset, 0);
     }
 
     // ── Null pointer safety (parse) ─────────────────────────
 
     #[test]
     fn parse_null_query_returns_error() {
-        let result =
-            unsafe { parse(std::ptr::null_mut()) };
+        let result = unsafe { parse(std::ptr::null_mut()) };
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .contains("null Query pointer")
-        );
+        assert!(result.unwrap_err().contains("null Query pointer"));
     }
 
     // ── Max depth constant ──────────────────────────────────
@@ -2224,8 +2372,7 @@ mod tests {
 
     #[test]
     fn list_length_null_returns_zero() {
-        let len =
-            unsafe { list_length(std::ptr::null_mut()) };
+        let len = unsafe { list_length(std::ptr::null_mut()) };
         assert_eq!(len, 0);
     }
 
