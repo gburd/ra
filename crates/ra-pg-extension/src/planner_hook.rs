@@ -5,15 +5,12 @@
 //!
 //! 1. Check if the extension is enabled (GUC).
 //! 2. Count base relations; bail if above threshold.
-//! 3. Gather statistics from `pg_stats`.
-//! 4. Build a `RelExpr` from the query string.
-//! 5. (Future) Run the RA optimizer.
+//! 3. Parse the query into an RA `RelExpr` tree.
+//! 4. Gather statistics from PostgreSQL catalogs (no SPI).
+//! 5. Run the RA optimizer (e-graph based).
 //! 6. If confident, apply advice via cost manipulation.
-//! 7. Otherwise, fall back to the standard planner.
-//!
-//! Currently implements a conservative strategy: always falls back
-//! to the standard PostgreSQL planner but logs its analysis. Full
-//! RA optimization requires the `ra-compiler` crate integration.
+//! 7. If the query is unsupported by the parser, fall back to
+//!    the standard planner.
 
 use std::ffi::CStr;
 
@@ -118,7 +115,14 @@ unsafe extern "C-unwind" fn ra_planner_hook(
 
 /// Inner planner hook implementation.
 ///
-/// Separated from the outer hook so panics can be caught.
+/// Runs the full RA optimization pipeline:
+/// 1. Parse query to RelExpr
+/// 2. Gather stats via catalog access (no SPI)
+/// 3. Optimize with e-graph
+/// 4. Apply advice via cost manipulation
+///
+/// Falls back to PostgreSQL planner only for unsupported query
+/// types (CTEs, window functions, set operations, DML).
 ///
 /// # Safety
 ///
@@ -137,10 +141,9 @@ unsafe fn ra_planner_hook_inner(
             .into_owned()
     };
 
-    let _state = RaOptimizerState::new(sql.clone());
+    let mut state = RaOptimizerState::new(sql.clone());
 
-    // Parse the query to determine relation count.
-    // For now, we use a heuristic: count rtable entries.
+    // Count relations and bail if above threshold.
     let relation_count = count_rtable_entries(parse);
     let max_rels = RA_MAX_RELATIONS.get() as usize;
 
@@ -162,31 +165,94 @@ unsafe fn ra_planner_hook_inner(
         );
     }
 
-    // Log the query if requested. The hook is active and filtering
-    // queries, but optimization is delegated to the standard planner
-    // for now. SPI cannot be used inside the planner hook (causes
-    // SIGABRT from nested SPI), and the query parser + optimizer
-    // need further hardening before they can be safely invoked here.
-    //
-    // TODO(phase5): Enable RA optimization once:
-    // 1. query_parser::parse is fully hardened against all Query shapes
-    // 2. Stats gathering uses direct catalog access (no SPI)
-    // 3. plan_converter produces valid PlannedStmt nodes
-    if RA_LOG_DECISIONS.get() {
-        pgrx::log!(
-            "ra_planner: intercepted SELECT with {} relations: {}",
-            relation_count,
-            truncate_sql(&sql, 200)
-        );
-    }
+    // Gather statistics from catalog (safe inside planner hook).
+    let table_names: Vec<(String, String)> = extract_rtable_names(parse)
+        .into_iter()
+        .map(|name| ("public".to_string(), name))
+        .collect();
+    let stats = stats_bridge::gather_all_stats(&table_names);
+    state.statistics = stats.clone();
 
-    // Fall back to standard planner.
-    call_prev_planner(
+    // Run the full optimization pipeline.
+    let calibration = CostCalibration::default_calibration();
+
+    let result = try_optimize_query(
         parse,
-        query_string,
-        cursor_options,
-        bound_params,
-    )
+        &sql,
+        &stats,
+        &calibration,
+    );
+
+    match result {
+        Ok(Some(optimized)) => {
+            let min_conf = RA_MIN_CONFIDENCE.get();
+
+            if optimized.confidence >= min_conf {
+                state.plan_applied = true;
+                state.confidence = optimized.confidence;
+
+                if RA_LOG_DECISIONS.get() {
+                    pgrx::log!(
+                        "ra_planner: applied RA plan \
+                         (confidence: {:.2}, relations: {}): {}",
+                        optimized.confidence,
+                        relation_count,
+                        truncate_sql(&sql, 200)
+                    );
+                }
+
+                return optimized.plan;
+            }
+
+            // Confidence too low: fall back to PG planner.
+            if RA_LOG_DECISIONS.get() {
+                pgrx::log!(
+                    "ra_planner: low confidence {:.2} < {:.2}, \
+                     using PG planner: {}",
+                    optimized.confidence,
+                    min_conf,
+                    truncate_sql(&sql, 100)
+                );
+            }
+            call_prev_planner(
+                parse,
+                query_string,
+                cursor_options,
+                bound_params,
+            )
+        }
+        Ok(None) => {
+            // Unsupported query type (CTE, window, set op, DML).
+            if RA_LOG_DECISIONS.get() {
+                pgrx::log!(
+                    "ra_planner: unsupported query shape, \
+                     using PG planner: {}",
+                    truncate_sql(&sql, 100)
+                );
+            }
+            call_prev_planner(
+                parse,
+                query_string,
+                cursor_options,
+                bound_params,
+            )
+        }
+        Err(e) => {
+            // Optimization error: log and fall back.
+            pgrx::warning!(
+                "ra_planner: optimization failed ({}), \
+                 using PG planner: {}",
+                e,
+                truncate_sql(&sql, 100)
+            );
+            call_prev_planner(
+                parse,
+                query_string,
+                cursor_options,
+                bound_params,
+            )
+        }
+    }
 }
 
 /// Result of RA optimization with confidence score.
