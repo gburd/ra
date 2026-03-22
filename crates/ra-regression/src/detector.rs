@@ -343,11 +343,14 @@ mod tests {
         ));
 
         let fingerprint = PlanFingerprint::from_plan(
-            &datafusion::prelude::SessionContext::new()
-                .sql("SELECT * FROM t")
-                .await
-                .unwrap()
-                .into_unoptimized_plan(),
+            &datafusion::logical_expr::LogicalPlan::EmptyRelation(
+                datafusion::logical_expr::EmptyRelation {
+                    produce_one_row: false,
+                    schema: std::sync::Arc::new(
+                        datafusion::common::DFSchema::empty(),
+                    ),
+                },
+            ),
         );
 
         let report = detector.detect("q1", 250.0, &fingerprint, &history);

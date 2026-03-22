@@ -28,7 +28,7 @@ mod integration_tests {
         let fingerprint = PlanFingerprint::from_plan(&datafusion::logical_expr::LogicalPlan::EmptyRelation(
             datafusion::logical_expr::EmptyRelation {
                 produce_one_row: false,
-                schema: std::sync::Arc::new(datafusion::arrow::datatypes::Schema::empty()),
+                schema: std::sync::Arc::new(datafusion::common::DFSchema::empty()),
             },
         ));
 
@@ -81,7 +81,7 @@ mod integration_tests {
                 input: std::sync::Arc::new(datafusion::logical_expr::LogicalPlan::EmptyRelation(
                     datafusion::logical_expr::EmptyRelation {
                         produce_one_row: false,
-                        schema: std::sync::Arc::new(datafusion::arrow::datatypes::Schema::empty()),
+                        schema: std::sync::Arc::new(datafusion::common::DFSchema::empty()),
                     },
                 )),
                 fetch: None,
@@ -114,7 +114,7 @@ mod integration_tests {
         let fingerprint = PlanFingerprint::from_plan(&datafusion::logical_expr::LogicalPlan::EmptyRelation(
             datafusion::logical_expr::EmptyRelation {
                 produce_one_row: false,
-                schema: std::sync::Arc::new(datafusion::arrow::datatypes::Schema::empty()),
+                schema: std::sync::Arc::new(datafusion::common::DFSchema::empty()),
             },
         ));
 

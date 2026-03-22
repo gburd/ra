@@ -211,6 +211,9 @@ impl PostgresAdapter {
             max_value: None,
             avg_length: Some(stats.avg_width),
             histogram: None,
+            correlation: None,
+            most_common_values: None,
+            most_common_freqs: None,
         }
     }
 

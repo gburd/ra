@@ -107,14 +107,14 @@ impl fmt::Display for PlanFingerprint {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use datafusion::arrow::datatypes::Schema;
+    use datafusion::common::DFSchema;
     use datafusion::logical_expr::{EmptyRelation, LogicalPlan};
     use std::sync::Arc;
 
     #[test]
     fn test_fingerprint_generation() {
         // Test that fingerprints can be generated for different plan types
-        let schema = Arc::new(Schema::empty());
+        let schema = Arc::new(DFSchema::empty());
 
         let plan1 = LogicalPlan::EmptyRelation(EmptyRelation {
             produce_one_row: false,
@@ -140,7 +140,7 @@ mod tests {
 
     #[test]
     fn test_fingerprint_equality() {
-        let schema = Arc::new(Schema::empty());
+        let schema = Arc::new(DFSchema::empty());
 
         // Same plans should produce same fingerprints
         let plan1 = LogicalPlan::EmptyRelation(EmptyRelation {

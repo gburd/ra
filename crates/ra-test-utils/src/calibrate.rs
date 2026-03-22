@@ -102,16 +102,17 @@ pub fn calibrate() -> anyhow::Result<TestProfile> {
 /// Benchmark simple optimization using actual optimizer (simulates 2-table join).
 #[cfg(test)]
 fn benchmark_simple_optimization(iterations: usize) -> anyhow::Result<f64> {
-    use ra_core::algebra::{RelExpr, JoinType, Expr};
+    use ra_core::algebra::{RelExpr, JoinType};
+    use ra_core::Expr;
     use ra_engine::Optimizer;
 
     // Create a simple 2-table join plan
-    let plan = RelExpr::join(
-        JoinType::Inner,
-        Expr::eq(Expr::col("id"), Expr::col("id")),
-        RelExpr::scan("table1"),
-        RelExpr::scan("table2"),
-    );
+    let plan = RelExpr::Join {
+        join_type: JoinType::Inner,
+        condition: Expr::eq(Expr::col("id"), Expr::col("id")),
+        left: Box::new(RelExpr::scan("table1")),
+        right: Box::new(RelExpr::scan("table2")),
+    };
 
     let optimizer = Optimizer::default();
 
@@ -184,30 +185,31 @@ fn simulate_join_optimization(left: &[(usize, usize, usize)], right: &[(usize, u
 /// Benchmark complex optimization using actual optimizer (simulates 4-table join).
 #[cfg(test)]
 fn benchmark_complex_optimization(iterations: usize) -> anyhow::Result<f64> {
-    use ra_core::algebra::{RelExpr, JoinType, Expr};
+    use ra_core::algebra::{RelExpr, JoinType};
+    use ra_core::Expr;
     use ra_engine::Optimizer;
 
     // Create a complex 4-table join plan: (t1 ⋈ t2) ⋈ (t3 ⋈ t4)
-    let j1 = RelExpr::join(
-        JoinType::Inner,
-        Expr::eq(Expr::col("id"), Expr::col("id")),
-        RelExpr::scan("table1"),
-        RelExpr::scan("table2"),
-    );
+    let j1 = RelExpr::Join {
+        join_type: JoinType::Inner,
+        condition: Expr::eq(Expr::col("id"), Expr::col("id")),
+        left: Box::new(RelExpr::scan("table1")),
+        right: Box::new(RelExpr::scan("table2")),
+    };
 
-    let j2 = RelExpr::join(
-        JoinType::Inner,
-        Expr::eq(Expr::col("id"), Expr::col("id")),
-        RelExpr::scan("table3"),
-        RelExpr::scan("table4"),
-    );
+    let j2 = RelExpr::Join {
+        join_type: JoinType::Inner,
+        condition: Expr::eq(Expr::col("id"), Expr::col("id")),
+        left: Box::new(RelExpr::scan("table3")),
+        right: Box::new(RelExpr::scan("table4")),
+    };
 
-    let plan = RelExpr::join(
-        JoinType::Inner,
-        Expr::eq(Expr::col("id"), Expr::col("id")),
-        j1,
-        j2,
-    );
+    let plan = RelExpr::Join {
+        join_type: JoinType::Inner,
+        condition: Expr::eq(Expr::col("id"), Expr::col("id")),
+        left: Box::new(j1),
+        right: Box::new(j2),
+    };
 
     let optimizer = Optimizer::default();
 
@@ -271,7 +273,7 @@ fn simulate_complex_join(tables: &[Vec<(usize, usize, usize)>]) -> usize {
 /// Benchmark e-graph saturation iterations using actual egg::Runner.
 #[cfg(test)]
 fn benchmark_egraph_saturation(iterations: usize) -> anyhow::Result<u64> {
-    use egg::{Runner, RecExpr, SymbolLang, rewrite, pattern, Rewrite};
+    use egg::{Runner, RecExpr, SymbolLang, rewrite, Rewrite};
 
     // Create a simple expression manually using SymbolLang for simplicity
     // This represents: filter(eq(col("x"), lit(42)), scan("t1"))
