@@ -1,13 +1,20 @@
-//! Statistics bridge: reads `pg_stats` and converts to RA format.
+//! Statistics bridge: reads PostgreSQL catalogs and converts to RA format.
 //!
-//! Queries PostgreSQL catalog views to populate `ra_core::Statistics`
-//! and `ra_core::ColumnStats` structs. Statistics are cached for
+//! Uses direct PostgreSQL catalog C API access (syscache lookups,
+//! catalog scans) instead of SPI to avoid nested SPI crashes when
+//! called from planner hooks. SPI opens a new connection, which
+//! PostgreSQL forbids inside planner callbacks.
+//!
+//! Statistics are populated into `ra_core::Statistics` and
+//! `ra_core::ColumnStats` structs. Statistics are cached for
 //! the duration of a single planning cycle.
 //!
 //! PostgreSQL-specific MVCC statistics (HOT updates, bloat) are tracked
 //! separately as they don't apply to other database systems.
 
-use pgrx::prelude::*;
+use std::ffi::CStr;
+
+use pgrx::pg_sys;
 
 use ra_core::{ColumnStats, Statistics};
 
@@ -95,7 +102,442 @@ pub struct PostgresTableStats {
     pub mvcc: PostgresMvccStats,
 }
 
-/// Gather statistics for a single table from `pg_stats`.
+// ---------------------------------------------------------------
+// Catalog access helpers (no SPI -- safe inside planner hooks)
+// ---------------------------------------------------------------
+
+/// Resolve a schema name to its namespace OID.
+///
+/// # Safety
+///
+/// Must be called within a PostgreSQL backend process with valid
+/// memory context.
+unsafe fn resolve_namespace_oid(schema: &str) -> Option<pg_sys::Oid> {
+    let c_schema = std::ffi::CString::new(schema).ok()?;
+    let ns_oid = pg_sys::get_namespace_oid(
+        c_schema.as_ptr(),
+        true, // missing_ok
+    );
+    if ns_oid == pg_sys::InvalidOid {
+        None
+    } else {
+        Some(ns_oid)
+    }
+}
+
+/// Resolve a table name + schema to its relation OID.
+///
+/// # Safety
+///
+/// Must be called within a PostgreSQL backend process.
+unsafe fn resolve_relation_oid(
+    schema: &str,
+    table: &str,
+) -> Option<pg_sys::Oid> {
+    let ns_oid = resolve_namespace_oid(schema)?;
+    let c_table = std::ffi::CString::new(table).ok()?;
+    let rel_oid = pg_sys::get_relname_relid(
+        c_table.as_ptr(),
+        ns_oid,
+    );
+    if rel_oid == pg_sys::InvalidOid {
+        None
+    } else {
+        Some(rel_oid)
+    }
+}
+
+/// Read a `pg_class` tuple from syscache and extract `reltuples`.
+///
+/// # Safety
+///
+/// Must be called within a PostgreSQL backend process.
+unsafe fn read_reltuples(rel_oid: pg_sys::Oid) -> Option<f32> {
+    let tuple = pg_sys::SearchSysCache1(
+        pg_sys::SysCacheIdentifier::RELOID as i32,
+        pg_sys::Datum::from(rel_oid),
+    );
+    if tuple.is_null() {
+        return None;
+    }
+
+    let class_form =
+        pg_sys::GETSTRUCT(tuple) as *mut pg_sys::FormData_pg_class;
+    let reltuples = (*class_form).reltuples;
+
+    pg_sys::ReleaseSysCache(tuple);
+
+    Some(reltuples)
+}
+
+/// Read the number of user attributes for a relation from `pg_class`.
+///
+/// # Safety
+///
+/// Must be called within a PostgreSQL backend process.
+unsafe fn read_relnatts(rel_oid: pg_sys::Oid) -> Option<i16> {
+    let tuple = pg_sys::SearchSysCache1(
+        pg_sys::SysCacheIdentifier::RELOID as i32,
+        pg_sys::Datum::from(rel_oid),
+    );
+    if tuple.is_null() {
+        return None;
+    }
+
+    let class_form =
+        pg_sys::GETSTRUCT(tuple) as *mut pg_sys::FormData_pg_class;
+    let natts = (*class_form).relnatts;
+
+    pg_sys::ReleaseSysCache(tuple);
+
+    Some(natts)
+}
+
+/// Read the attribute name for (relation, attnum) from syscache.
+///
+/// # Safety
+///
+/// Must be called within a PostgreSQL backend process.
+unsafe fn read_attname(
+    rel_oid: pg_sys::Oid,
+    attnum: i16,
+) -> Option<String> {
+    let tuple = pg_sys::SearchSysCache2(
+        pg_sys::SysCacheIdentifier::ATTNUM as i32,
+        pg_sys::Datum::from(rel_oid),
+        pg_sys::Datum::from(attnum as i32),
+    );
+    if tuple.is_null() {
+        return None;
+    }
+
+    let att_form =
+        pg_sys::GETSTRUCT(tuple) as *mut pg_sys::FormData_pg_attribute;
+
+    // Skip dropped attributes
+    if (*att_form).attisdropped {
+        pg_sys::ReleaseSysCache(tuple);
+        return None;
+    }
+
+    let name = CStr::from_ptr((*att_form).attname.data.as_ptr())
+        .to_string_lossy()
+        .into_owned();
+
+    pg_sys::ReleaseSysCache(tuple);
+
+    Some(name)
+}
+
+/// Read `pg_statistic` entry for a single column.
+///
+/// Reads stadistinct, stanullfrac, stawidth, and stakind/stavalues/stanumbers
+/// arrays from the `pg_statistic` catalog via syscache.
+///
+/// # Safety
+///
+/// Must be called within a PostgreSQL backend process.
+unsafe fn read_column_stats(
+    rel_oid: pg_sys::Oid,
+    attnum: i16,
+    row_count: f64,
+) -> Option<ColumnStats> {
+    // STATRELATTINH: (starelid, staattnum, stainherit)
+    let tuple = pg_sys::SearchSysCache3(
+        pg_sys::SysCacheIdentifier::STATRELATTINH as i32,
+        pg_sys::Datum::from(rel_oid),
+        pg_sys::Datum::from(attnum as i32),
+        pg_sys::Datum::from(false), // stainherit = false
+    );
+    if tuple.is_null() {
+        return None;
+    }
+
+    let stat_form =
+        pg_sys::GETSTRUCT(tuple) as *mut pg_sys::FormData_pg_statistic;
+
+    // Extract basic stats from the fixed-length portion
+    let n_distinct = (*stat_form).stadistinct;
+    let null_frac = (*stat_form).stanullfrac;
+    let avg_width = (*stat_form).stawidth;
+    let correlation = read_stat_correlation(tuple);
+
+    let distinct = interpret_n_distinct(n_distinct, row_count);
+    let mut col_stats = ColumnStats::new(distinct);
+    col_stats.null_fraction = f64::from(null_frac);
+    col_stats.avg_length = Some(f64::from(avg_width));
+    col_stats.correlation = correlation.map(f64::from);
+
+    // Read MCV and histogram from stakind/stavalues/stanumbers slots.
+    // pg_statistic has 5 "slots" (stakind1..stakind5) that can hold
+    // different kinds of statistics. We look for:
+    // - STATISTIC_KIND_MCV (1): most common values + frequencies
+    // - STATISTIC_KIND_HISTOGRAM (2): histogram bounds
+    // - STATISTIC_KIND_CORRELATION (3): correlation (already in fixed part)
+    read_stat_slots(tuple, &mut col_stats, row_count, distinct);
+
+    pg_sys::ReleaseSysCache(tuple);
+
+    Some(col_stats)
+}
+
+/// Read correlation from pg_statistic stakind slots.
+///
+/// pg_statistic stores correlation in a slot with
+/// stakind = STATISTIC_KIND_CORRELATION (3).
+///
+/// # Safety
+///
+/// Must be called with a valid pg_statistic HeapTuple.
+unsafe fn read_stat_correlation(
+    tuple: pg_sys::HeapTuple,
+) -> Option<f32> {
+    let stat_form =
+        pg_sys::GETSTRUCT(tuple) as *mut pg_sys::FormData_pg_statistic;
+
+    // Scan the 5 stakind slots for CORRELATION (kind = 3)
+    let stakinds = [
+        (*stat_form).stakind1,
+        (*stat_form).stakind2,
+        (*stat_form).stakind3,
+        (*stat_form).stakind4,
+        (*stat_form).stakind5,
+    ];
+
+    for (slot_idx, &kind) in stakinds.iter().enumerate() {
+        if kind == pg_sys::STATISTIC_KIND_CORRELATION as i16 {
+            // Correlation is stored in stanumbers[slot] as a single float
+            return read_stanumbers_first(tuple, slot_idx);
+        }
+    }
+
+    None
+}
+
+/// Read MCV values/frequencies and histogram bounds from
+/// pg_statistic's variable-length slots.
+///
+/// # Safety
+///
+/// Must be called with a valid pg_statistic HeapTuple.
+unsafe fn read_stat_slots(
+    tuple: pg_sys::HeapTuple,
+    col_stats: &mut ColumnStats,
+    row_count: f64,
+    distinct: f64,
+) {
+    let stat_form =
+        pg_sys::GETSTRUCT(tuple) as *mut pg_sys::FormData_pg_statistic;
+
+    let stakinds = [
+        (*stat_form).stakind1,
+        (*stat_form).stakind2,
+        (*stat_form).stakind3,
+        (*stat_form).stakind4,
+        (*stat_form).stakind5,
+    ];
+
+    for (slot_idx, &kind) in stakinds.iter().enumerate() {
+        if kind == pg_sys::STATISTIC_KIND_MCV as i16 {
+            // MCV: stavalues has the values, stanumbers has frequencies
+            if let Some(freqs) = read_stanumbers(tuple, slot_idx) {
+                if let Some(vals) = read_stavalues_as_strings(tuple, slot_idx) {
+                    col_stats.most_common_values = Some(vals);
+                    col_stats.most_common_freqs = Some(freqs);
+                }
+            }
+        } else if kind == pg_sys::STATISTIC_KIND_HISTOGRAM as i16 {
+            // Histogram bounds are stored in stavalues
+            if let Some(bounds) = read_stavalues_as_strings(tuple, slot_idx) {
+                col_stats.histogram = Some(create_equidepth_histogram(
+                    bounds,
+                    row_count,
+                    distinct,
+                ));
+            }
+        }
+    }
+}
+
+/// Read stanumbers array from a pg_statistic slot.
+///
+/// Returns the float4[] values as Vec<f64>.
+///
+/// # Safety
+///
+/// Must be called with a valid pg_statistic HeapTuple.
+unsafe fn read_stanumbers(
+    tuple: pg_sys::HeapTuple,
+    slot_idx: usize,
+) -> Option<Vec<f64>> {
+    // stanumbers1..stanumbers5 are at attribute numbers
+    // Anum_pg_statistic_stanumbers1 + slot_idx
+    let attnum = pg_sys::Anum_pg_statistic_stanumbers1 as i32
+        + slot_idx as i32;
+
+    let mut is_null = false;
+    let datum = pg_sys::SysCacheGetAttr(
+        pg_sys::SysCacheIdentifier::STATRELATTINH as i32,
+        tuple,
+        attnum,
+        &mut is_null,
+    );
+
+    if is_null {
+        return None;
+    }
+
+    // Datum is a float4[] (ArrayType). Use deconstruct_array for safety.
+    let array = pg_sys::DatumGetArrayTypeP(datum);
+    if array.is_null() {
+        return None;
+    }
+
+    let mut elems: *mut pg_sys::Datum = std::ptr::null_mut();
+    let mut nulls: *mut bool = std::ptr::null_mut();
+    let mut n: i32 = 0;
+
+    pg_sys::deconstruct_array(
+        array,
+        pg_sys::FLOAT4OID,
+        4,    // float4 = 4 bytes
+        true, // float4 passed by value
+        pg_sys::TYPALIGN_INT as i8,
+        &mut elems,
+        &mut nulls,
+        &mut n,
+    );
+
+    let mut result = Vec::with_capacity(n as usize);
+    for i in 0..n as usize {
+        if !(*nulls.add(i)) {
+            let f = f32::from_bits((*elems.add(i)).value() as u32);
+            result.push(f64::from(f));
+        }
+    }
+
+    pg_sys::pfree(elems as *mut std::ffi::c_void);
+    pg_sys::pfree(nulls as *mut std::ffi::c_void);
+
+    Some(result)
+}
+
+/// Read the first value from a stanumbers slot (for correlation).
+///
+/// # Safety
+///
+/// Must be called with a valid pg_statistic HeapTuple.
+unsafe fn read_stanumbers_first(
+    tuple: pg_sys::HeapTuple,
+    slot_idx: usize,
+) -> Option<f32> {
+    let numbers = read_stanumbers(tuple, slot_idx)?;
+    numbers.first().map(|&f| f as f32)
+}
+
+/// Read stavalues from a pg_statistic slot as string representations.
+///
+/// Uses `pg_sys::OidOutputFunctionCall` to convert each array element
+/// to its text representation.
+///
+/// # Safety
+///
+/// Must be called with a valid pg_statistic HeapTuple.
+unsafe fn read_stavalues_as_strings(
+    tuple: pg_sys::HeapTuple,
+    slot_idx: usize,
+) -> Option<Vec<String>> {
+    // stavalues1..stavalues5 are at attribute numbers
+    // Anum_pg_statistic_stavalues1 + slot_idx
+    let attnum = pg_sys::Anum_pg_statistic_stavalues1 as i32
+        + slot_idx as i32;
+
+    let mut is_null = false;
+    let datum = pg_sys::SysCacheGetAttr(
+        pg_sys::SysCacheIdentifier::STATRELATTINH as i32,
+        tuple,
+        attnum,
+        &mut is_null,
+    );
+
+    if is_null {
+        return None;
+    }
+
+    // stavalues is an anyarray. Deconstruct it.
+    let array = pg_sys::DatumGetArrayTypeP(datum);
+    if array.is_null() {
+        return None;
+    }
+
+    let nelems = pg_sys::ArrayGetNItems(
+        pg_sys::ARR_NDIM(array),
+        pg_sys::ARR_DIMS(array),
+    );
+    if nelems <= 0 {
+        return Some(Vec::new());
+    }
+
+    // Get the element type and its type info from the catalog
+    let elem_type = pg_sys::ARR_ELEMTYPE(array);
+    let mut typoutput: pg_sys::Oid = pg_sys::InvalidOid;
+    let mut typioparam: pg_sys::Oid = pg_sys::InvalidOid;
+    pg_sys::getTypeOutputInfo(elem_type, &mut typoutput, &mut typioparam);
+
+    // Look up the element type's typlen, typbyval, typalign
+    let mut typlen: i16 = 0;
+    let mut typbyval: bool = false;
+    let mut typalign: i8 = 0;
+    pg_sys::get_typlenbyvalalign(
+        elem_type, &mut typlen, &mut typbyval, &mut typalign,
+    );
+
+    // Deconstruct the array into datums
+    let mut elems: *mut pg_sys::Datum = std::ptr::null_mut();
+    let mut nulls: *mut bool = std::ptr::null_mut();
+    let mut n: i32 = 0;
+    pg_sys::deconstruct_array(
+        array,
+        elem_type,
+        typlen as i32,
+        typbyval,
+        typalign,
+        &mut elems,
+        &mut nulls,
+        &mut n,
+    );
+
+    let mut result = Vec::with_capacity(n as usize);
+    for i in 0..n as usize {
+        if !(*nulls.add(i)) {
+            let text_ptr = pg_sys::OidOutputFunctionCall(
+                typoutput,
+                *elems.add(i),
+            );
+            if !text_ptr.is_null() {
+                let s = CStr::from_ptr(text_ptr)
+                    .to_string_lossy()
+                    .into_owned();
+                result.push(s);
+                pg_sys::pfree(text_ptr as *mut std::ffi::c_void);
+            }
+        }
+    }
+
+    pg_sys::pfree(elems as *mut std::ffi::c_void);
+    pg_sys::pfree(nulls as *mut std::ffi::c_void);
+
+    Some(result)
+}
+
+// ---------------------------------------------------------------
+// Public API: statistics gathering (planner-safe, no SPI)
+// ---------------------------------------------------------------
+
+/// Gather statistics for a single table from PostgreSQL catalogs.
+///
+/// Uses direct syscache lookups on `pg_class` and `pg_statistic`
+/// instead of SPI, making it safe to call from planner hooks.
 ///
 /// Returns `None` if the table has no statistics (unanalyzed) or
 /// does not exist.
@@ -106,94 +548,25 @@ pub fn gather_table_stats(
     let row_count = estimate_row_count(schema, table)?;
     let mut stats = Statistics::new(row_count);
 
-    // Query pg_stats for column statistics including advanced stats
-    let query = format!(
-        "SELECT attname, n_distinct, null_frac, avg_width, \
-                correlation, most_common_vals, most_common_freqs, \
-                histogram_bounds \
-         FROM pg_stats \
-         WHERE schemaname = '{}' AND tablename = '{}'",
-        schema.replace('\'', "''"),
-        table.replace('\'', "''")
-    );
+    // Read column statistics from pg_statistic via syscache
+    unsafe {
+        let rel_oid = resolve_relation_oid(schema, table)?;
+        let natts = read_relnatts(rel_oid)?;
 
-    Spi::connect(|client| {
-        let tup_table = match client.select(&query, None, &[]) {
-            Ok(tup) => tup,
-            Err(e) => {
-                pgrx::warning!(
-                    "ra_planner: pg_stats query failed: {e}"
-                );
-                return;
-            }
-        };
+        // Iterate user attributes (1-based, positive attnum)
+        for attnum in 1..=natts {
+            let col_name = match read_attname(rel_oid, attnum) {
+                Some(name) => name,
+                None => continue, // dropped column
+            };
 
-        for row in tup_table {
-            let attname: Option<String> =
-                row.get_by_name("attname")
-                    .unwrap_or(None);
-            let n_distinct: Option<f32> =
-                row.get_by_name("n_distinct")
-                    .unwrap_or(None);
-            let null_frac: Option<f32> =
-                row.get_by_name("null_frac")
-                    .unwrap_or(None);
-            let avg_width: Option<i32> =
-                row.get_by_name("avg_width")
-                    .unwrap_or(None);
-            let correlation: Option<f32> =
-                row.get_by_name("correlation")
-                    .unwrap_or(None);
-            let most_common_vals: Option<String> =
-                row.get_by_name("most_common_vals")
-                    .unwrap_or(None);
-            let most_common_freqs: Option<String> =
-                row.get_by_name("most_common_freqs")
-                    .unwrap_or(None);
-            let histogram_bounds: Option<String> =
-                row.get_by_name("histogram_bounds")
-                    .unwrap_or(None);
-
-            if let Some(col_name) = attname {
-                let distinct = interpret_n_distinct(
-                    n_distinct.unwrap_or(0.0),
-                    row_count,
-                );
-                let mut col_stats = ColumnStats::new(distinct);
-                col_stats.null_fraction =
-                    f64::from(null_frac.unwrap_or(0.0));
-                col_stats.avg_length =
-                    avg_width.map(|w| f64::from(w));
-
-                // Parse correlation
-                col_stats.correlation = correlation.map(f64::from);
-
-                // Parse most common values and frequencies
-                if let (Some(mcv_str), Some(mcf_str)) = (most_common_vals, most_common_freqs) {
-                    if let (Some(mcvs), Some(mcfs)) = (
-                        parse_pg_array(&mcv_str),
-                        parse_float_array(&mcf_str),
-                    ) {
-                        col_stats.most_common_values = Some(mcvs);
-                        col_stats.most_common_freqs = Some(mcfs);
-                    }
-                }
-
-                // Parse histogram bounds
-                if let Some(hist_str) = histogram_bounds {
-                    if let Some(bounds) = parse_pg_array(&hist_str) {
-                        col_stats.histogram = Some(create_equidepth_histogram(
-                            bounds,
-                            row_count,
-                            distinct,
-                        ));
-                    }
-                }
-
+            if let Some(col_stats) =
+                read_column_stats(rel_oid, attnum, row_count)
+            {
                 stats.columns.insert(col_name, col_stats);
             }
         }
-    });
+    }
 
     // Gather index statistics for index-aware optimization
     gather_index_stats(schema, table, &mut stats);
@@ -203,125 +576,502 @@ pub fn gather_table_stats(
 
 /// Estimate the row count for a table from `pg_class.reltuples`.
 ///
+/// Uses syscache lookup on `pg_class` (RELOID) instead of SPI.
+///
 /// Returns `None` if the table does not exist or has never been
 /// analyzed (`reltuples` == -1).
 fn estimate_row_count(
     schema: &str,
     table: &str,
 ) -> Option<f64> {
-    let query = format!(
-        "SELECT c.reltuples, c.relpages \
-         FROM pg_class c \
-         JOIN pg_namespace n ON n.oid = c.relnamespace \
-         WHERE n.nspname = '{}' AND c.relname = '{}'",
-        schema.replace('\'', "''"),
-        table.replace('\'', "''")
-    );
+    unsafe {
+        let rel_oid = resolve_relation_oid(schema, table)?;
+        let reltuples = read_reltuples(rel_oid)?;
 
-    Spi::connect(|client| {
-        let tup_table = match client.select(&query, None, &[]) {
-            Ok(tup) => tup,
-            Err(e) => {
-                pgrx::warning!(
-                    "ra_planner: row count query failed: {e}"
-                );
-                return None;
-            }
-        };
-
-        for row in tup_table {
-            let reltuples: Option<f32> =
-                row.get_by_name("reltuples")
-                    .unwrap_or(None);
-
-            if let Some(rt) = reltuples {
-                if rt >= 0.0 {
-                    return Some(f64::from(rt));
-                }
-            }
+        if reltuples >= 0.0 {
+            Some(f64::from(reltuples))
+        } else {
+            None
         }
-        None
-    })
+    }
 }
 
 /// Gather index statistics for a table.
 ///
-/// Populates information about available indexes for index-aware
-/// optimization decisions.
+/// Uses `RelationGetIndexList` and syscache lookups on `pg_index`
+/// and `pg_class` instead of SPI.
 fn gather_index_stats(
     schema: &str,
     table: &str,
     stats: &mut Statistics,
 ) {
-    // Query pg_indexes and pg_index for index metadata
-    let query = format!(
-        "SELECT i.indexname, i.indexdef, \
-                ix.indisunique, ix.indisprimary, \
-                ix.indnatts, \
-                am.amname AS index_type, \
-                COALESCE(pg_stat_get_numscans(c.oid), 0) AS num_scans, \
-                COALESCE(pg_relation_size(c.oid), 0) AS index_size \
-         FROM pg_indexes i \
-         JOIN pg_class c ON c.relname = i.indexname \
-         JOIN pg_index ix ON ix.indexrelid = c.oid \
-         JOIN pg_am am ON am.oid = c.relam \
-         WHERE i.schemaname = '{}' AND i.tablename = '{}' \
-         ORDER BY i.indexname",
-        schema.replace('\'', "''"),
-        table.replace('\'', "''")
-    );
-
-    Spi::connect(|client| {
-        let tup_table = match client.select(&query, None, &[]) {
-            Ok(tup) => tup,
-            Err(e) => {
-                pgrx::warning!(
-                    "ra_planner: index stats query failed: {e}"
-                );
-                return;
-            }
+    unsafe {
+        let rel_oid = match resolve_relation_oid(schema, table) {
+            Some(oid) => oid,
+            None => return,
         };
 
-        for row in tup_table {
-            let indexname: Option<String> =
-                row.get_by_name("indexname")
-                    .unwrap_or(None);
-            let indexdef: Option<String> =
-                row.get_by_name("indexdef")
-                    .unwrap_or(None);
-            let is_unique: Option<bool> =
-                row.get_by_name("indisunique")
-                    .unwrap_or(None);
-            let is_primary: Option<bool> =
-                row.get_by_name("indisprimary")
-                    .unwrap_or(None);
-            let index_type_str: Option<String> =
-                row.get_by_name("index_type")
-                    .unwrap_or(None);
-            let index_size: Option<i64> =
-                row.get_by_name("index_size")
-                    .unwrap_or(None);
+        // Open the relation to get its index list.
+        // AccessShareLock is sufficient for reading metadata.
+        let rel = pg_sys::table_open(
+            rel_oid,
+            pg_sys::AccessShareLock as pg_sys::LOCKMODE,
+        );
+        if rel.is_null() {
+            return;
+        }
 
-            if let (Some(idx_name), Some(idx_def)) = (indexname, indexdef) {
-                // Parse column names from index definition
-                let columns = parse_index_columns(&idx_def);
+        let index_list = pg_sys::RelationGetIndexList(rel);
 
-                // Parse index type
-                let index_type = index_type_str
-                    .as_deref()
-                    .and_then(parse_index_type)
-                    .unwrap_or(ra_core::IndexType::Unknown);
+        // Iterate the index OID list using list_nth (PG 13+ uses
+        // array-based Lists, not linked lists).
+        let n_indexes = (*index_list).length;
+        for i in 0..n_indexes {
+            let cell = pg_sys::list_nth(index_list, i);
+            let idx_oid = pg_sys::Oid::from(cell as u32);
 
-                let mut idx_stats = ra_core::IndexStats::new(columns, index_type);
-                idx_stats.is_unique = is_unique.unwrap_or(false);
-                idx_stats.is_primary = is_primary.unwrap_or(false);
-                idx_stats.index_size = index_size.unwrap_or(0) as u64;
-
-                stats.indexes.insert(idx_name, idx_stats);
+            if let Some((name, idx_stats)) = read_single_index(idx_oid) {
+                stats.indexes.insert(name, idx_stats);
             }
         }
-    });
+
+        pg_sys::list_free(index_list);
+        pg_sys::table_close(
+            rel,
+            pg_sys::AccessShareLock as pg_sys::LOCKMODE,
+        );
+    }
 }
+
+/// Read metadata for a single index from syscache.
+///
+/// # Safety
+///
+/// Must be called within a PostgreSQL backend process.
+unsafe fn read_single_index(
+    idx_oid: pg_sys::Oid,
+) -> Option<(String, ra_core::IndexStats)> {
+    // Look up pg_class entry for the index
+    let class_tuple = pg_sys::SearchSysCache1(
+        pg_sys::SysCacheIdentifier::RELOID as i32,
+        pg_sys::Datum::from(idx_oid),
+    );
+    if class_tuple.is_null() {
+        return None;
+    }
+
+    let class_form =
+        pg_sys::GETSTRUCT(class_tuple) as *mut pg_sys::FormData_pg_class;
+
+    let idx_name = CStr::from_ptr(
+        (*class_form).relname.data.as_ptr(),
+    )
+    .to_string_lossy()
+    .into_owned();
+
+    let index_size = (*class_form).relpages as u64
+        * pg_sys::BLCKSZ as u64;
+
+    // Get the access method name for index type
+    let am_oid = (*class_form).relam;
+    pg_sys::ReleaseSysCache(class_tuple);
+
+    let index_type = resolve_am_type(am_oid);
+
+    // Look up pg_index entry via INDEXRELID syscache
+    let idx_tuple = pg_sys::SearchSysCache1(
+        pg_sys::SysCacheIdentifier::INDEXRELID as i32,
+        pg_sys::Datum::from(idx_oid),
+    );
+    if idx_tuple.is_null() {
+        return None;
+    }
+
+    let idx_form =
+        pg_sys::GETSTRUCT(idx_tuple) as *mut pg_sys::FormData_pg_index;
+
+    let is_unique = (*idx_form).indisunique;
+    let is_primary = (*idx_form).indisprimary;
+    let indrelid = (*idx_form).indrelid;
+    let natts = (*idx_form).indnatts as usize;
+
+    // Read indexed column names
+    let mut columns = Vec::with_capacity(natts);
+    for i in 0..natts {
+        let attnum = (*idx_form).indkey.values[i];
+        if attnum > 0 {
+            // Regular column
+            if let Some(name) = read_attname(indrelid, attnum) {
+                columns.push(name);
+            }
+        } else {
+            // Expression index -- use placeholder
+            columns.push(format!("expr_{i}"));
+        }
+    }
+
+    pg_sys::ReleaseSysCache(idx_tuple);
+
+    let mut idx_stats = ra_core::IndexStats::new(columns, index_type);
+    idx_stats.is_unique = is_unique;
+    idx_stats.is_primary = is_primary;
+    idx_stats.index_size = index_size;
+
+    Some((idx_name, idx_stats))
+}
+
+/// Resolve a pg_am OID to an `IndexType`.
+unsafe fn resolve_am_type(am_oid: pg_sys::Oid) -> ra_core::IndexType {
+    if am_oid == pg_sys::InvalidOid {
+        return ra_core::IndexType::Unknown;
+    }
+
+    let am_name_ptr = pg_sys::get_am_name(am_oid);
+    if am_name_ptr.is_null() {
+        return ra_core::IndexType::Unknown;
+    }
+
+    let name = CStr::from_ptr(am_name_ptr)
+        .to_string_lossy();
+
+    let result = parse_index_type(&name)
+        .unwrap_or(ra_core::IndexType::Unknown);
+
+    pg_sys::pfree(am_name_ptr as *mut std::ffi::c_void);
+
+    result
+}
+
+/// Gather statistics for all tables referenced in a query.
+///
+/// `table_names` should be a list of `(schema, table)` pairs.
+/// Tables with no statistics are silently skipped.
+pub fn gather_all_stats(
+    table_names: &[(String, String)],
+) -> Vec<(String, Statistics)> {
+    let mut result = Vec::with_capacity(table_names.len());
+    for (schema, table) in table_names {
+        if let Some(stats) = gather_table_stats(schema, table) {
+            result.push((table.clone(), stats));
+        }
+    }
+    result
+}
+
+/// Gather PostgreSQL MVCC and HOT update statistics.
+///
+/// Uses `pg_class` syscache for bloat estimation. MVCC counters
+/// (HOT updates, dead tuples) are estimated from `pg_class` metadata
+/// since the pgstat struct layout varies across PostgreSQL versions.
+///
+/// Safe to call from planner hooks (no SPI).
+///
+/// Returns `None` if the table has no statistics.
+pub fn gather_mvcc_stats(
+    schema: &str,
+    table: &str,
+    base_stats: &Statistics,
+) -> Option<PostgresMvccStats> {
+    unsafe {
+        let rel_oid = resolve_relation_oid(schema, table)?;
+
+        // Estimate bloat from pg_class.relpages vs expected size
+        let bloat = estimate_bloat(rel_oid, base_stats);
+
+        // Read pg_class for allvisible pages to estimate dead tuples.
+        // A low allvisible/relpages ratio suggests many dead tuples.
+        let dead_ratio = estimate_dead_ratio(rel_oid);
+
+        Some(PostgresMvccStats {
+            hot_update_ratio: 0.0,
+            dead_tuple_ratio: dead_ratio,
+            bloat_factor: bloat,
+            last_analyze: None,
+            last_vacuum: None,
+        })
+    }
+}
+
+/// Estimate dead tuple ratio from pg_class visibility map info.
+///
+/// # Safety
+///
+/// Must be called within a PostgreSQL backend process.
+unsafe fn estimate_dead_ratio(rel_oid: pg_sys::Oid) -> f64 {
+    let class_tuple = pg_sys::SearchSysCache1(
+        pg_sys::SysCacheIdentifier::RELOID as i32,
+        pg_sys::Datum::from(rel_oid),
+    );
+    if class_tuple.is_null() {
+        return 0.0;
+    }
+
+    let class_form = pg_sys::GETSTRUCT(class_tuple)
+        as *mut pg_sys::FormData_pg_class;
+    let relpages = (*class_form).relpages;
+    let relallvisible = (*class_form).relallvisible;
+    pg_sys::ReleaseSysCache(class_tuple);
+
+    if relpages <= 0 {
+        return 0.0;
+    }
+
+    // Pages not all-visible may contain dead tuples.
+    // This is a rough estimate: (non-visible pages) / total pages.
+    let non_visible = relpages - relallvisible;
+    if non_visible <= 0 {
+        0.0
+    } else {
+        (non_visible as f64 / relpages as f64).min(1.0)
+    }
+}
+
+/// Estimate bloat factor from pg_class.relpages.
+///
+/// # Safety
+///
+/// Must be called within a PostgreSQL backend process.
+unsafe fn estimate_bloat(
+    rel_oid: pg_sys::Oid,
+    base_stats: &Statistics,
+) -> f64 {
+    let class_tuple = pg_sys::SearchSysCache1(
+        pg_sys::SysCacheIdentifier::RELOID as i32,
+        pg_sys::Datum::from(rel_oid),
+    );
+    if class_tuple.is_null() {
+        return 1.0;
+    }
+
+    let class_form = pg_sys::GETSTRUCT(class_tuple)
+        as *mut pg_sys::FormData_pg_class;
+    let relpages = (*class_form).relpages;
+    let reltuples = (*class_form).reltuples;
+    pg_sys::ReleaseSysCache(class_tuple);
+
+    if reltuples <= 0.0 || relpages <= 0 {
+        return 1.0;
+    }
+
+    let table_size = relpages as f64 * pg_sys::BLCKSZ as f64;
+    let expected_size =
+        base_stats.row_count * base_stats.avg_row_size as f64;
+
+    if expected_size > 0.0 {
+        (table_size / expected_size).max(1.0)
+    } else {
+        1.0
+    }
+}
+
+/// Gather foreign key relationships for join optimization.
+///
+/// Uses `systable_beginscan` on `pg_constraint` instead of SPI.
+///
+/// Returns a list of `(from_table, from_column, to_table, to_column)`
+/// tuples representing foreign key constraints.
+pub fn gather_foreign_keys(
+    schema: &str,
+    table: &str,
+) -> Vec<(String, String, String, String)> {
+    let mut fks = Vec::new();
+
+    unsafe {
+        let rel_oid = match resolve_relation_oid(schema, table) {
+            Some(oid) => oid,
+            None => return fks,
+        };
+
+        // Open pg_constraint catalog
+        let conrel = pg_sys::table_open(
+            pg_sys::ConstraintRelationId,
+            pg_sys::AccessShareLock as pg_sys::LOCKMODE,
+        );
+        if conrel.is_null() {
+            return fks;
+        }
+
+        // Scan for foreign key constraints on this relation
+        let scan = pg_sys::systable_beginscan(
+            conrel,
+            pg_sys::ConstraintRelidTypidNameIndexId,
+            true,  // indexOK
+            std::ptr::null_mut(), // snapshot (use current)
+            0,     // nkeys
+            std::ptr::null_mut(), // scankeys
+        );
+
+        loop {
+            let tup = pg_sys::systable_getnext(scan);
+            if tup.is_null() {
+                break;
+            }
+
+            let con_form = pg_sys::GETSTRUCT(tup)
+                as *mut pg_sys::FormData_pg_constraint;
+
+            // Only foreign key constraints on our table
+            if (*con_form).contype != pg_sys::CONSTRAINT_FOREIGN as i8 {
+                continue;
+            }
+            if (*con_form).conrelid != rel_oid {
+                continue;
+            }
+
+            let fk_relid = (*con_form).confrelid;
+
+            // Get FK column attnums from conkey (from) and confkey (to).
+            // These are stored as int2vector attributes.
+            let conkey = read_constraint_attnums(
+                tup, conrel, pg_sys::Anum_pg_constraint_conkey as i32,
+            );
+            let confkey = read_constraint_attnums(
+                tup, conrel, pg_sys::Anum_pg_constraint_confkey as i32,
+            );
+
+            if let (Some(from_attnums), Some(to_attnums)) = (conkey, confkey) {
+                for (from_att, to_att) in from_attnums.iter().zip(to_attnums.iter()) {
+                    let from_col = read_attname(rel_oid, *from_att);
+                    let to_col = read_attname(fk_relid, *to_att);
+                    let to_table_name = get_rel_name_safe(fk_relid);
+
+                    if let (Some(fc), Some(tt), Some(tc)) =
+                        (from_col, to_table_name, to_col)
+                    {
+                        fks.push((table.to_string(), fc, tt, tc));
+                    }
+                }
+            }
+        }
+
+        pg_sys::systable_endscan(scan);
+        pg_sys::table_close(
+            conrel,
+            pg_sys::AccessShareLock as pg_sys::LOCKMODE,
+        );
+    }
+
+    fks
+}
+
+/// Read attribute number array from a pg_constraint tuple.
+///
+/// # Safety
+///
+/// Must be called with valid tuple and relation pointers.
+unsafe fn read_constraint_attnums(
+    tup: pg_sys::HeapTuple,
+    rel: pg_sys::Relation,
+    attnum: i32,
+) -> Option<Vec<i16>> {
+    let mut is_null = false;
+    let datum = pg_sys::heap_getattr(
+        tup,
+        attnum,
+        (*rel).rd_att,
+        &mut is_null,
+    );
+
+    if is_null {
+        return None;
+    }
+
+    let array = pg_sys::DatumGetArrayTypeP(datum);
+    if array.is_null() {
+        return None;
+    }
+
+    let nelems = pg_sys::ArrayGetNItems(
+        pg_sys::ARR_NDIM(array),
+        pg_sys::ARR_DIMS(array),
+    );
+    if nelems <= 0 {
+        return Some(Vec::new());
+    }
+
+    let mut elems: *mut pg_sys::Datum = std::ptr::null_mut();
+    let mut nulls: *mut bool = std::ptr::null_mut();
+    let mut n: i32 = 0;
+    pg_sys::deconstruct_array(
+        array,
+        pg_sys::INT2OID,
+        2,    // int2 is 2 bytes
+        true, // int2 is passed by value
+        pg_sys::TYPALIGN_SHORT as i8,
+        &mut elems,
+        &mut nulls,
+        &mut n,
+    );
+
+    let mut result = Vec::with_capacity(n as usize);
+    for i in 0..n as usize {
+        if !(*nulls.add(i)) {
+            result.push((*elems.add(i)).value() as i16);
+        }
+    }
+
+    pg_sys::pfree(elems as *mut std::ffi::c_void);
+    pg_sys::pfree(nulls as *mut std::ffi::c_void);
+
+    Some(result)
+}
+
+/// Get a relation name by OID (safe wrapper).
+unsafe fn get_rel_name_safe(relid: pg_sys::Oid) -> Option<String> {
+    let name_ptr = pg_sys::get_rel_name(relid);
+    if name_ptr.is_null() {
+        return None;
+    }
+    let s = CStr::from_ptr(name_ptr)
+        .to_string_lossy()
+        .into_owned();
+    pg_sys::pfree(name_ptr as *mut std::ffi::c_void);
+    Some(s)
+}
+
+/// Check if a table has been recently analyzed.
+///
+/// Infers analysis status from `pg_class`: if `reltuples >= 0` and
+/// `relallvisible > 0`, the table has likely been analyzed. This is
+/// a heuristic since direct timestamp access requires version-dependent
+/// pgstat struct access.
+///
+/// Safe to call from planner hooks (no SPI).
+///
+/// Returns a placeholder timestamp string if analyzed, or None if
+/// the table appears unanalyzed.
+pub fn last_analyze_time(
+    schema: &str,
+    table: &str,
+) -> Option<String> {
+    unsafe {
+        let rel_oid = resolve_relation_oid(schema, table)?;
+
+        let class_tuple = pg_sys::SearchSysCache1(
+            pg_sys::SysCacheIdentifier::RELOID as i32,
+            pg_sys::Datum::from(rel_oid),
+        );
+        if class_tuple.is_null() {
+            return None;
+        }
+
+        let class_form = pg_sys::GETSTRUCT(class_tuple)
+            as *mut pg_sys::FormData_pg_class;
+        let reltuples = (*class_form).reltuples;
+        pg_sys::ReleaseSysCache(class_tuple);
+
+        // reltuples == -1 means never analyzed
+        if reltuples >= 0.0 {
+            Some("analyzed".to_string())
+        } else {
+            None
+        }
+    }
+}
+
+// ---------------------------------------------------------------
+// Pure helper functions (no PG catalog access, testable)
+// ---------------------------------------------------------------
 
 /// Interpret PostgreSQL's `n_distinct` encoding.
 ///
@@ -442,7 +1192,7 @@ fn parse_index_columns(index_def: &str) -> Vec<String> {
     col_list
         .split(',')
         .map(|s| {
-            // Remove function calls like "lower(name)" → "name"
+            // Remove function calls like "lower(name)" -> "name"
             let trimmed = s.trim();
             if let Some(paren_pos) = trimmed.find('(') {
                 // Extract the argument from a function call
@@ -515,232 +1265,6 @@ fn create_equidepth_histogram(
     Histogram::EquiDepth(EquiDepthHistogram {
         buckets,
         rows_per_bucket,
-    })
-}
-
-/// Gather statistics for all tables referenced in a query.
-///
-/// `table_names` should be a list of `(schema, table)` pairs.
-/// Tables with no statistics are silently skipped.
-pub fn gather_all_stats(
-    table_names: &[(String, String)],
-) -> Vec<(String, Statistics)> {
-    let mut result = Vec::with_capacity(table_names.len());
-    for (schema, table) in table_names {
-        if let Some(stats) = gather_table_stats(schema, table) {
-            result.push((table.clone(), stats));
-        }
-    }
-    result
-}
-
-/// Gather PostgreSQL MVCC and HOT update statistics.
-///
-/// Queries `pg_stat_user_tables` for:
-/// - HOT update ratio (critical for UPDATE planning)
-/// - Dead tuple ratio (affects scan performance)
-/// - Bloat estimation
-/// - Last ANALYZE/VACUUM timestamps
-///
-/// Returns `None` if the table has no statistics.
-pub fn gather_mvcc_stats(
-    schema: &str,
-    table: &str,
-    base_stats: &Statistics,
-) -> Option<PostgresMvccStats> {
-    let query = format!(
-        "SELECT \
-           n_tup_upd, n_tup_hot_upd, n_dead_tup, n_live_tup, \
-           last_analyze, last_vacuum, \
-           pg_relation_size(c.oid) as table_size \
-         FROM pg_stat_user_tables s \
-         JOIN pg_class c ON c.relname = s.relname \
-         JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = s.schemaname \
-         WHERE s.schemaname = '{}' AND s.relname = '{}'",
-        schema.replace('\'', "''"),
-        table.replace('\'', "''")
-    );
-
-    Spi::connect(|client| {
-        let tup_table = match client.select(&query, None, &[]) {
-            Ok(tup) => tup,
-            Err(e) => {
-                pgrx::warning!(
-                    "ra_planner: mvcc stats query failed: {e}"
-                );
-                return None;
-            }
-        };
-
-        for row in tup_table {
-            let n_tup_upd: Option<i64> =
-                row.get_by_name("n_tup_upd")
-                    .unwrap_or(None);
-            let n_tup_hot_upd: Option<i64> =
-                row.get_by_name("n_tup_hot_upd")
-                    .unwrap_or(None);
-            let n_dead_tup: Option<i64> =
-                row.get_by_name("n_dead_tup")
-                    .unwrap_or(None);
-            let n_live_tup: Option<i64> =
-                row.get_by_name("n_live_tup")
-                    .unwrap_or(None);
-            let last_analyze: Option<String> =
-                row.get_by_name("last_analyze")
-                    .unwrap_or(None);
-            let last_vacuum: Option<String> =
-                row.get_by_name("last_vacuum")
-                    .unwrap_or(None);
-            let table_size: Option<i64> =
-                row.get_by_name("table_size")
-                    .unwrap_or(None);
-
-            // Calculate HOT update ratio
-            let hot_ratio = if let (Some(upd), Some(hot)) = (n_tup_upd, n_tup_hot_upd) {
-                if upd > 0 {
-                    hot as f64 / upd as f64
-                } else {
-                    0.0
-                }
-            } else {
-                0.0
-            };
-
-            // Calculate dead tuple ratio
-            let dead_ratio = if let (Some(dead), Some(live)) = (n_dead_tup, n_live_tup) {
-                let total = dead + live;
-                if total > 0 {
-                    dead as f64 / total as f64
-                } else {
-                    0.0
-                }
-            } else {
-                0.0
-            };
-
-            // Estimate bloat factor (simple heuristic: actual_size / expected_size)
-            // In production, use pgstattuple or more sophisticated bloat detection
-            let bloat = if let Some(size) = table_size {
-                let expected_size = base_stats.row_count * base_stats.avg_row_size as f64;
-                if expected_size > 0.0 {
-                    (size as f64 / expected_size).max(1.0)
-                } else {
-                    1.0
-                }
-            } else {
-                1.0
-            };
-
-            return Some(PostgresMvccStats {
-                hot_update_ratio: hot_ratio,
-                dead_tuple_ratio: dead_ratio,
-                bloat_factor: bloat,
-                last_analyze,
-                last_vacuum,
-            });
-        }
-        None
-    })
-}
-
-/// Gather foreign key relationships for join optimization.
-///
-/// Returns a list of `(from_table, from_column, to_table, to_column)` tuples
-/// representing foreign key constraints.
-pub fn gather_foreign_keys(
-    schema: &str,
-    table: &str,
-) -> Vec<(String, String, String, String)> {
-    let query = format!(
-        "SELECT \
-           kcu.column_name AS from_column, \
-           ccu.table_name AS to_table, \
-           ccu.column_name AS to_column \
-         FROM information_schema.table_constraints AS tc \
-         JOIN information_schema.key_column_usage AS kcu \
-           ON tc.constraint_name = kcu.constraint_name \
-           AND tc.table_schema = kcu.table_schema \
-         JOIN information_schema.constraint_column_usage AS ccu \
-           ON ccu.constraint_name = tc.constraint_name \
-           AND ccu.table_schema = tc.table_schema \
-         WHERE tc.constraint_type = 'FOREIGN KEY' \
-           AND tc.table_schema = '{}' \
-           AND tc.table_name = '{}'",
-        schema.replace('\'', "''"),
-        table.replace('\'', "''")
-    );
-
-    let mut fks = Vec::new();
-
-    Spi::connect(|client| {
-        let tup_table = match client.select(&query, None, &[]) {
-            Ok(tup) => tup,
-            Err(e) => {
-                pgrx::warning!(
-                    "ra_planner: foreign key query failed: {e}"
-                );
-                return;
-            }
-        };
-
-        for row in tup_table {
-            let from_col: Option<String> =
-                row.get_by_name("from_column")
-                    .unwrap_or(None);
-            let to_table: Option<String> =
-                row.get_by_name("to_table")
-                    .unwrap_or(None);
-            let to_col: Option<String> =
-                row.get_by_name("to_column")
-                    .unwrap_or(None);
-
-            if let (Some(fc), Some(tt), Some(tc)) = (from_col, to_table, to_col) {
-                fks.push((table.to_string(), fc, tt, tc));
-            }
-        }
-    });
-
-    fks
-}
-
-/// Check if a table has been recently analyzed.
-///
-/// Returns the timestamp of the last ANALYZE, or None if never analyzed.
-pub fn last_analyze_time(
-    schema: &str,
-    table: &str,
-) -> Option<String> {
-    let query = format!(
-        "SELECT last_analyze, last_autoanalyze \
-         FROM pg_stat_user_tables \
-         WHERE schemaname = '{}' AND relname = '{}'",
-        schema.replace('\'', "''"),
-        table.replace('\'', "''")
-    );
-
-    Spi::connect(|client| {
-        let tup_table = match client.select(&query, None, &[]) {
-            Ok(tup) => tup,
-            Err(e) => {
-                pgrx::warning!(
-                    "ra_planner: last_analyze query failed: {e}"
-                );
-                return None;
-            }
-        };
-
-        for row in tup_table {
-            let last_analyze: Option<String> =
-                row.get_by_name("last_analyze")
-                    .unwrap_or(None);
-            let last_autoanalyze: Option<String> =
-                row.get_by_name("last_autoanalyze")
-                    .unwrap_or(None);
-
-            // Return the most recent of manual or auto-analyze
-            return last_analyze.or(last_autoanalyze);
-        }
-        None
     })
 }
 

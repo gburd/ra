@@ -164,13 +164,12 @@ unsafe fn ra_planner_hook_inner(
 
     // Log the query if requested. The hook is active and filtering
     // queries, but optimization is delegated to the standard planner
-    // for now. SPI cannot be used inside the planner hook (causes
-    // SIGABRT from nested SPI), and the query parser + optimizer
-    // need further hardening before they can be safely invoked here.
+    // for now. Stats gathering now uses direct catalog access (no SPI),
+    // but the query parser and optimizer still need hardening.
     //
     // TODO(phase5): Enable RA optimization once:
     // 1. query_parser::parse is fully hardened against all Query shapes
-    // 2. Stats gathering uses direct catalog access (no SPI)
+    // 2. Stats gathering uses direct catalog access (no SPI) [DONE]
     // 3. plan_converter produces valid PlannedStmt nodes
     if RA_LOG_DECISIONS.get() {
         pgrx::log!(

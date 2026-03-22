@@ -426,6 +426,38 @@ impl IntegratedCostModel {
         base * sel + metadata_overhead
     }
 
+    /// Adjust an operator cost for startup cost optimization when
+    /// LIMIT is present.
+    ///
+    /// When a query has `LIMIT n`, we only need a prefix of the
+    /// output. Plans with low startup cost (streaming operators)
+    /// should be preferred over plans with high startup cost
+    /// (blocking operators like sort or hash join build).
+    ///
+    /// `total_cost`: the full cost of the child plan.
+    /// `limit_rows`: the LIMIT value.
+    /// `estimated_total_rows`: estimated total rows without LIMIT.
+    ///
+    /// Returns the adjusted cost accounting for early termination.
+    #[must_use]
+    pub fn limit_adjusted_cost(
+        &self,
+        total_cost: f64,
+        limit_rows: f64,
+        estimated_total_rows: f64,
+    ) -> f64 {
+        if estimated_total_rows <= 0.0 || limit_rows <= 0.0 {
+            return total_cost;
+        }
+        let fraction =
+            (limit_rows / estimated_total_rows).clamp(0.0, 1.0);
+        // Even with a tiny LIMIT, there is a minimum startup cost
+        // of ~10% of the total (hash table build, sort init, etc.)
+        let startup_floor = 0.1;
+        let effective_fraction = fraction.max(startup_floor);
+        total_cost * effective_fraction
+    }
+
     /// Compute the confidence discount for a table.
     fn confidence_for_table(&self, table: &str) -> f64 {
         self.adapter
@@ -986,7 +1018,23 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
                     8.0 / f64::from(self.hardware.cpu_cores);
                 60.0 * par_factor.max(0.5)
             }
-            RelLang::Limit(_) => 0.5,
+            RelLang::Limit([n_id, _off_id, child_id]) => {
+                // Startup cost optimization: when LIMIT is present
+                // we only need a prefix of the child output. Plans
+                // with low startup cost (streaming operators like
+                // index scans, nested-loop joins) are preferred over
+                // plans with high startup cost (sort, hash join build).
+                //
+                // Model: effective_cost = limit_overhead + n_cost
+                //        + child_cost * startup_fraction
+                //
+                // The 0.3 fraction means LIMIT pays ~30% of the full
+                // child cost, biasing toward cheaper-to-start plans.
+                let child_cost = costs(*child_id);
+                let n_cost = costs(*n_id);
+                let startup_fraction = 0.3;
+                return 0.5 + n_cost + child_cost * startup_fraction;
+            }
             RelLang::Union(_)
             | RelLang::Intersect(_)
             | RelLang::Except(_) => 50.0,

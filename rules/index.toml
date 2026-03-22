@@ -1,6 +1,6 @@
 version = "1.0.0"
-total_rules = 263
-last_updated = "2026-03-17"
+total_rules = 266
+last_updated = "2026-03-22"
 
 [categories.logical]
 description = "Logical transformations that preserve query semantics"
@@ -13,6 +13,8 @@ rules = [
     "filter-through-union",
     "filter-into-join-condition",
     "filter-merge",
+    "extract-equijoin-predicate",
+    "filter-null-join-keys",
 ]
 
 [categories.logical.join-reordering]
@@ -53,6 +55,7 @@ rules = [
     "arithmetic-simplification",
     "null-propagation",
     "common-subexpression-elimination",
+    "propagate-empty-relation",
 ]
 
 [categories.logical.limit-pushdown]

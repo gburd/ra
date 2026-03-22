@@ -10,7 +10,7 @@ use std::fs::File;
 use std::path::Path;
 use std::time::SystemTime;
 
-use parquet::basic::{Repetition, Type as PhysicalType};
+use parquet::basic::{Encoding, Repetition, Type as PhysicalType};
 use parquet::file::metadata::RowGroupMetaData;
 use parquet::file::reader::{FileReader, SerializedFileReader};
 use parquet::file::statistics::Statistics as ParquetStatistics;
@@ -19,9 +19,9 @@ use parquet::schema::types::Type as SchemaType;
 use crate::facts::DataType;
 
 use super::{
-    Field, FileColumnStats, FileFormat, FileMetadata,
-    FormatCapabilities, FormatError, RowGroupMeta, ScalarValue,
-    Schema,
+    ColumnEncoding, ColumnEncodingInfo, CompressionCodec, Field,
+    FileColumnStats, FileFormat, FileMetadata, FormatCapabilities,
+    FormatError, RowGroupMeta, ScalarValue, Schema,
 };
 
 /// Parquet file format implementation.
@@ -107,6 +107,9 @@ impl FileFormat for ParquetFormat {
             column_statistics: true,
             bloom_filters: true,
             nested_columns: true,
+            dictionary_encoding: true,
+            late_materialization: true,
+            encoding_metadata: true,
         }
     }
 
@@ -195,13 +198,17 @@ fn extract_row_group_meta(
     rg: &RowGroupMetaData,
 ) -> RowGroupMeta {
     let mut column_stats = HashMap::new();
+    let mut column_encodings = HashMap::new();
 
     for col in rg.columns() {
         let col_path = col.column_path().string();
         if let Some(stats) = col.statistics() {
             column_stats
-                .insert(col_path, convert_statistics(stats));
+                .insert(col_path.clone(), convert_statistics(stats));
         }
+
+        let encoding_info = extract_column_encoding(col);
+        column_encodings.insert(col_path, encoding_info);
     }
 
     let num_rows =
@@ -230,6 +237,87 @@ fn extract_row_group_meta(
         column_stats,
         compressed_size,
         uncompressed_size,
+        column_encodings,
+    }
+}
+
+fn extract_column_encoding(
+    col: &parquet::file::metadata::ColumnChunkMetaData,
+) -> ColumnEncodingInfo {
+    let encodings = col.encodings();
+    let is_dict = encodings.iter().any(|e| {
+        *e == Encoding::PLAIN_DICTIONARY
+            || *e == Encoding::RLE_DICTIONARY
+    });
+
+    let encoding = if is_dict {
+        ColumnEncoding::Dictionary
+    } else if encodings.contains(&Encoding::DELTA_BINARY_PACKED)
+        || encodings
+            .contains(&Encoding::DELTA_LENGTH_BYTE_ARRAY)
+        || encodings.contains(&Encoding::DELTA_BYTE_ARRAY)
+    {
+        ColumnEncoding::DeltaEncoding
+    } else if encodings.contains(&Encoding::RLE) {
+        ColumnEncoding::RunLength
+    } else if encodings.contains(&Encoding::BYTE_STREAM_SPLIT) {
+        ColumnEncoding::ByteStreamSplit
+    } else if encodings.contains(&Encoding::BIT_PACKED) {
+        ColumnEncoding::BitPacked
+    } else {
+        ColumnEncoding::Plain
+    };
+
+    let compression = convert_compression(col.compression());
+
+    let compressed_bytes =
+        u64::try_from(col.compressed_size()).unwrap_or(0);
+    let uncompressed_bytes =
+        u64::try_from(col.uncompressed_size()).unwrap_or(0);
+
+    // Parquet doesn't directly expose dictionary size in column
+    // chunk metadata, but we can estimate from distinct_count
+    // in statistics if available.
+    let dictionary_size = if is_dict {
+        col.statistics()
+            .and_then(|s| s.distinct_count_opt())
+    } else {
+        None
+    };
+
+    ColumnEncodingInfo {
+        encoding,
+        compression,
+        dictionary_size,
+        compressed_bytes,
+        uncompressed_bytes,
+    }
+}
+
+fn convert_compression(
+    c: parquet::basic::Compression,
+) -> CompressionCodec {
+    match c {
+        parquet::basic::Compression::UNCOMPRESSED => {
+            CompressionCodec::Uncompressed
+        }
+        parquet::basic::Compression::SNAPPY => {
+            CompressionCodec::Snappy
+        }
+        parquet::basic::Compression::GZIP(_) => {
+            CompressionCodec::Gzip
+        }
+        parquet::basic::Compression::LZO => CompressionCodec::Lzo,
+        parquet::basic::Compression::BROTLI(_) => {
+            CompressionCodec::Brotli
+        }
+        parquet::basic::Compression::LZ4 => CompressionCodec::Lz4,
+        parquet::basic::Compression::ZSTD(_) => {
+            CompressionCodec::Zstd
+        }
+        parquet::basic::Compression::LZ4_RAW => {
+            CompressionCodec::Lz4Raw
+        }
     }
 }
 
@@ -928,6 +1016,7 @@ mod tests {
             )]),
             compressed_size: 100,
             uncompressed_size: 200,
+            column_encodings: HashMap::new(),
         };
 
         let rg2 = RowGroupMeta {
@@ -945,6 +1034,7 @@ mod tests {
             )]),
             compressed_size: 100,
             uncompressed_size: 200,
+            column_encodings: HashMap::new(),
         };
 
         let agg = aggregate_stats(&[rg1, rg2]);
@@ -953,5 +1043,169 @@ mod tests {
         assert_eq!(x.max, Some(ScalarValue::Int64(20)));
         assert_eq!(x.null_count, 5);
         assert_eq!(x.distinct_count, Some(10));
+    }
+
+    // ---- Format-aware: encoding extraction tests ----
+
+    #[test]
+    fn parquet_format_new_capabilities() {
+        let fmt = ParquetFormat::new();
+        let caps = fmt.capabilities();
+        assert!(caps.dictionary_encoding);
+        assert!(caps.late_materialization);
+        assert!(caps.encoding_metadata);
+    }
+
+    #[test]
+    fn read_metadata_has_encoding_info() {
+        let dir =
+            tempfile::tempdir().expect("should create temp dir");
+        let path = dir.path().join("encoding.parquet");
+        write_test_parquet(&path, 50);
+
+        let fmt = ParquetFormat::new();
+        let meta = fmt
+            .read_metadata(&path)
+            .expect("should read metadata");
+
+        let rg = &meta.row_groups[0];
+        // Every column should have encoding info
+        assert!(
+            !rg.column_encodings.is_empty(),
+            "should have encoding info for columns"
+        );
+
+        // id column should have encoding info
+        let id_enc = rg
+            .column_encodings
+            .get("id")
+            .expect("id encoding should exist");
+        assert_eq!(id_enc.compression, CompressionCodec::Snappy);
+        assert!(id_enc.compressed_bytes > 0);
+        assert!(id_enc.uncompressed_bytes > 0);
+    }
+
+    #[test]
+    fn read_metadata_compression_ratio() {
+        let dir =
+            tempfile::tempdir().expect("should create temp dir");
+        let path = dir.path().join("ratio.parquet");
+        write_test_parquet(&path, 100);
+
+        let fmt = ParquetFormat::new();
+        let meta = fmt
+            .read_metadata(&path)
+            .expect("should read metadata");
+
+        let ratio = meta.avg_compression_ratio();
+        assert!(
+            ratio >= 1.0,
+            "compression ratio should be >= 1.0, got {ratio}"
+        );
+    }
+
+    #[test]
+    fn zone_map_pruning_on_parquet() {
+        let dir =
+            tempfile::tempdir().expect("should create temp dir");
+        let path = dir.path().join("zonemap.parquet");
+        write_multi_row_group_parquet(&path, 100, 3);
+
+        let fmt = ParquetFormat::new();
+        let meta = fmt
+            .read_metadata(&path)
+            .expect("should read metadata");
+
+        // Row groups: [0..99], [100..199], [200..299]
+        // Looking for id=50: only row group 0 survives
+        let surviving = meta.surviving_row_groups(
+            "id",
+            &ScalarValue::Int64(50),
+        );
+        assert_eq!(surviving, vec![0]);
+
+        let pruned = meta.prunable_row_groups(
+            "id",
+            &ScalarValue::Int64(50),
+        );
+        assert_eq!(pruned, vec![1, 2]);
+    }
+
+    #[test]
+    fn write_dict_encoded_parquet_and_read_encoding() {
+        let dir =
+            tempfile::tempdir().expect("should create temp dir");
+        let path = dir.path().join("dict.parquet");
+
+        // Write a parquet file with dictionary encoding enabled
+        let schema_str = "
+            message dict_schema {
+                REQUIRED BYTE_ARRAY status (UTF8);
+            }
+        ";
+        let schema = Arc::new(
+            parse_message_type(schema_str)
+                .expect("should parse schema"),
+        );
+
+        let props = WriterProperties::builder()
+            .set_dictionary_enabled(true)
+            .set_compression(Compression::SNAPPY)
+            .build();
+
+        let file =
+            File::create(&path).expect("should create file");
+        let mut writer = SerializedFileWriter::new(
+            file,
+            schema,
+            Arc::new(props),
+        )
+        .expect("should create writer");
+
+        let mut rg_writer = writer
+            .next_row_group()
+            .expect("should create row group");
+        {
+            let mut col = rg_writer
+                .next_column()
+                .expect("should get column writer")
+                .expect("column writer should exist");
+            // Write low-cardinality values to trigger dictionary encoding
+            let values: Vec<ByteArray> = (0..1000)
+                .map(|i| {
+                    let status = match i % 4 {
+                        0 => "pending",
+                        1 => "shipped",
+                        2 => "delivered",
+                        _ => "cancelled",
+                    };
+                    ByteArray::from(status)
+                })
+                .collect();
+            col.typed::<parquet::data_type::ByteArrayType>()
+                .write_batch(&values, None, None)
+                .expect("should write status");
+            col.close().expect("should close");
+        }
+        rg_writer.close().expect("should close row group");
+        writer.close().expect("should close writer");
+
+        // Read back and verify encoding
+        let fmt = ParquetFormat::new();
+        let meta = fmt
+            .read_metadata(&path)
+            .expect("should read metadata");
+
+        let rg = &meta.row_groups[0];
+        let status_enc = rg
+            .column_encodings
+            .get("status")
+            .expect("status encoding should exist");
+        assert_eq!(
+            status_enc.encoding,
+            ColumnEncoding::Dictionary,
+            "low-cardinality column should be dictionary-encoded"
+        );
+        assert!(rg.is_dictionary_encoded("status"));
     }
 }

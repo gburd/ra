@@ -1,0 +1,220 @@
+---
+id: late-materialization
+name: "Late Materialization"
+category: physical
+databases: []
+execution_models: [column-at-a-time, vectorized]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [columnar, late-materialization, deferred-read, position-list, parquet]
+complexity: "O(n)"
+benefit_range: [1.5, 5.0]
+---
+
+# Late Materialization
+
+## Metadata
+- **Rule ID**: `late-materialization`
+- **Category**: Physical
+- **Source**: CMU 15-721 Lectures 2-3; Abadi et al. ICDE 2007
+- **Complexity**: O(n) with I/O proportional to selectivity
+- **Prerequisites**: Columnar storage; filter present; output columns differ from filter columns
+- **Alternatives**: Early materialization (reconstruct tuples before filtering)
+
+## Description
+
+Late materialization defers row reconstruction until after predicate
+evaluation. In columnar storage, this means reading only the columns
+needed for filtering, building a selection vector (bitmap or position
+list) of qualifying rows, and then fetching the remaining output
+columns only for those qualifying rows.
+
+The key insight is that in analytical queries, filters typically
+eliminate 50-99% of rows. By delaying the read of output-only columns
+until after filtering, we avoid reading data that would be discarded.
+
+**Pipeline:**
+1. Read filter columns only (narrow scan)
+2. Evaluate predicates to produce a selection vector
+3. For qualifying rows only, read remaining output columns
+4. Assemble final result tuples
+
+For Parquet files, this maps directly to the row group structure:
+- Phase 1: Read column chunks for predicate columns
+- Phase 2: Use row-level positions to read remaining column chunks
+  (only for qualifying row groups after zone map pruning)
+
+**When to apply:**
+- Selectivity < 50% (filters eliminate most rows)
+- Output columns are wider than filter columns
+- Number of output-only columns > number of filter columns
+
+**Why it works:**
+- Analytical queries on wide tables (50-500 columns)
+- Filters on 1-3 narrow columns (status, date, region)
+- Output includes wide columns (text, JSON, arrays)
+- I/O savings proportional to (1 - selectivity) * output_column_bytes
+
+## Relational Algebra
+
+```
+Early materialization:
+  project[C_out](filter[pred](scan[T, all_cols]))
+
+Late materialization:
+  project[C_out](
+    lookup[T, C_out - C_pred](
+      filter[pred](scan[T, C_pred])))
+
+Where:
+  C_pred = columns referenced by pred
+  C_out  = columns in the output projection
+  C_out - C_pred = columns to fetch in the lookup phase
+```
+
+## Implementation (egg rewrite rules)
+
+```lisp
+;; Basic late materialization: filter before materializing output columns
+(rewrite (project ?out-cols
+           (filter ?pred (scan ?table ?all-cols)))
+  (position-lookup ?table (diff ?out-cols (pred-cols ?pred))
+    (filter ?pred (scan ?table (pred-cols ?pred))))
+  :if (< (selectivity ?pred) 0.5)
+  :if (> (col-bytes (diff ?out-cols (pred-cols ?pred)))
+         (col-bytes (pred-cols ?pred))))
+
+;; Late materialization with zone map pre-filter
+(rewrite (project ?out-cols
+           (filter ?pred (scan ?table ?all-cols)))
+  (position-lookup ?table (diff ?out-cols (pred-cols ?pred))
+    (filter ?pred
+      (zone-map-filter ?pred
+        (scan ?table (pred-cols ?pred)))))
+  :if (< (selectivity ?pred) 0.5)
+  :if (has-zone-maps ?table))
+
+;; Late materialization through aggregation
+(rewrite (aggregate ?groups ?aggs
+           (filter ?pred (scan ?table ?all-cols)))
+  (aggregate ?groups ?aggs
+    (position-project (union ?groups (agg-cols ?aggs))
+      (filter ?pred (scan ?table (pred-cols ?pred)))))
+  :if (< (selectivity ?pred) 0.5)
+  :if (is-subset (union ?groups (agg-cols ?aggs)) (pred-cols ?pred)))
+```
+
+## Cost Model
+
+```rust
+/// Compare early vs. late materialization cost.
+pub fn cost_late_materialization(
+    rows: u64,
+    pred_col_bytes: u64,
+    output_col_bytes: u64,
+    selectivity: f64,
+    seq_read_cost: f64,
+    random_read_cost: f64,
+) -> (Cost, Cost) {
+    // Early materialization: read all columns, then filter
+    let all_bytes = pred_col_bytes + output_col_bytes;
+    let early_io = rows as f64 * all_bytes as f64 * seq_read_cost;
+    let early_cpu = rows as f64 * 5.0;
+    let early = Cost::new(early_cpu, early_io, 0.0, 0);
+
+    // Late materialization: read filter cols, then lookup output cols
+    let phase1_io = rows as f64
+        * pred_col_bytes as f64
+        * seq_read_cost;
+    let phase1_cpu = rows as f64 * 5.0;
+    let surviving = rows as f64 * selectivity;
+
+    // Phase 2: random reads for low selectivity, sequential for moderate
+    let phase2_io = if selectivity < 0.01 {
+        surviving * output_col_bytes as f64 * random_read_cost
+    } else {
+        rows as f64
+            * output_col_bytes as f64
+            * selectivity
+            * seq_read_cost
+    };
+    let phase2_cpu = surviving * 3.0;
+
+    let late = Cost::new(
+        phase1_cpu + phase2_cpu,
+        phase1_io + phase2_io,
+        0.0,
+        0,
+    );
+    (early, late)
+}
+```
+
+**Break-even point**: Late materialization is cheaper when
+`selectivity < pred_col_bytes / (pred_col_bytes + output_col_bytes)`.
+For typical OLAP queries (5 filter bytes, 200 output bytes), this
+is `selectivity < 0.024` -- almost always beneficial.
+
+## Test Cases
+
+### Positive: Selective filter on wide table
+```sql
+SELECT name, email, address, phone, bio
+FROM customers
+WHERE loyalty_tier = 'platinum';
+
+-- 2% of customers are platinum
+-- Filter columns: loyalty_tier (1 byte code)
+-- Output columns: name, email, address, phone, bio (~500 bytes avg)
+-- Early: read 501 bytes/row for 1M rows = 501 MB
+-- Late: read 1 byte/row for 1M rows + 500 bytes/row for 20K rows = 11 MB
+-- 45x I/O reduction
+```
+
+### Positive: Aggregation with selective filter
+```sql
+SELECT region, SUM(amount)
+FROM sales
+WHERE date BETWEEN '2024-01-01' AND '2024-01-31'
+GROUP BY region;
+
+-- 1/12 of data matches (monthly partition of yearly data)
+-- Filter on date (8 bytes), aggregate on region (2 bytes) + amount (8 bytes)
+-- No need to materialize other columns at all
+```
+
+### Positive: ORDER BY LIMIT on wide table
+```sql
+SELECT * FROM products ORDER BY price DESC LIMIT 10;
+
+-- Phase 1: read price column only, sort, take top 10 positions
+-- Phase 2: materialize all columns for just 10 rows
+-- Near-zero I/O for output columns
+```
+
+### Negative: Non-selective filter
+```sql
+SELECT * FROM events WHERE year = 2024;
+
+-- If 80% of data is from 2024, late materialization adds overhead
+-- Phase 2 random I/O for 80% of rows is worse than sequential scan
+-- Early materialization is cheaper
+```
+
+### Negative: Filter columns are the output columns
+```sql
+SELECT status, COUNT(*) FROM orders GROUP BY status;
+
+-- Only column needed is 'status' (both filter and output)
+-- No deferred columns to read, late materialization has no benefit
+```
+
+## References
+
+1. **Abadi, Daniel et al.** "Materialization Strategies in a Column-Oriented
+   DBMS." ICDE 2007.
+2. **CMU 15-721 Lecture 3**: Storage Models and Data Layout (2024)
+3. **Boncz, Peter et al.** "MonetDB/X100: Hyper-Pipelining Query Execution."
+   CIDR 2005.
+4. **Apache Parquet**: Row group and column chunk structure

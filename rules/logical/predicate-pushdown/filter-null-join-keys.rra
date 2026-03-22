@@ -1,0 +1,123 @@
+---
+id: filter-null-join-keys
+name: "FilterNullJoinKeys"
+category: logical/predicate-pushdown
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite, datafusion]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [join, null, filter, equijoin, consensus]
+complexity: "O(1)"
+benefit_range: [0.05, 0.5]
+preconditions:
+  - type: "pattern"
+    must_match: "(join inner (eq ?lk ?rk) ?left ?right)"
+    description: "Inner join with equality condition on key columns"
+  - type: "predicate"
+    condition: "columns_nullable(?lk, ?rk)"
+    description: "Join key columns may contain NULL values"
+---
+
+# FilterNullJoinKeys
+
+## Description
+
+Adds IS NOT NULL filters on join key columns before an equijoin.
+NULL values never match in equijoins (NULL = NULL is NULL, not TRUE),
+so rows with NULL join keys can never produce output. Filtering them
+early reduces the build and probe side sizes of hash joins, and
+reduces the number of comparisons in merge joins.
+
+**When to apply**: Any inner equijoin where key columns are nullable.
+
+**Why it works**: In SQL semantics, NULL = NULL evaluates to NULL
+(not TRUE), so NULL-keyed rows are guaranteed to be filtered out by
+the join condition. By adding explicit IS NOT NULL filters before the
+join, the optimizer can:
+1. Reduce hash table build size
+2. Reduce probe-side rows
+3. Improve hash table cache locality (fewer entries)
+4. Enable better cardinality estimates
+
+**Impact**: 5-50% depending on NULL frequency in join keys.
+
+## Relational Algebra
+
+```latex
+-- Before: inner equijoin with nullable keys
+$$
+R \Join_{R.k = S.k} S
+$$
+
+-- After: IS NOT NULL filters added before join
+$$
+\sigma_{R.k \text{ IS NOT NULL}}(R) \Join_{R.k = S.k} \sigma_{S.k \text{ IS NOT NULL}}(S)
+$$
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Add IS NOT NULL filter on left join key
+rw!("filter-null-join-key-left";
+    "(join inner (eq ?lk ?rk) ?left ?right)" =>
+    "(join inner (eq ?lk ?rk) (filter (is-not-null ?lk) ?left) ?right)"
+),
+
+// Add IS NOT NULL filter on right join key
+rw!("filter-null-join-key-right";
+    "(join inner (eq ?lk ?rk) ?left ?right)" =>
+    "(join inner (eq ?lk ?rk) ?left (filter (is-not-null ?rk) ?right))"
+),
+```
+
+## Preconditions
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
+
+**Restrictions:**
+- Only applies to inner equijoins (outer joins preserve NULLs)
+- Key columns must be nullable (no benefit for NOT NULL columns)
+- Should not be applied redundantly (check for existing IS NOT NULL)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(null_fraction: f64) -> f64 {
+    // Benefit is proportional to the fraction of NULL values
+    // in the join key columns
+    null_fraction.clamp(0.0, 0.5)
+}
+```
+
+**Typical benefit**: 5-50% depending on NULL frequency.
+
+## Test Cases
+
+```sql
+-- Expected: IS NOT NULL added on both sides
+SELECT * FROM orders o
+JOIN customers c ON o.customer_id = c.id;
+```
+
+```sql
+-- Expected: filter already present, no redundant addition
+SELECT * FROM orders o
+JOIN customers c ON o.customer_id = c.id
+WHERE o.customer_id IS NOT NULL;
+```
+
+```sql
+-- Expected: no change for LEFT JOIN (NULLs are preserved)
+SELECT * FROM orders o
+LEFT JOIN customers c ON o.customer_id = c.id;
+```
+
+## References
+
+- DataFusion: `datafusion/optimizer/src/filter_null_join_keys.rs`
+- Calcite: Implicit in join processing (JoinInfo)
+- PostgreSQL: `src/backend/optimizer/plan/createplan.c`

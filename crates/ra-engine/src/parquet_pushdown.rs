@@ -359,6 +359,7 @@ mod tests {
             column_stats: stats,
             compressed_size: 4096,
             uncompressed_size: 8192,
+            column_encodings: HashMap::new(),
         }
     }
 

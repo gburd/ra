@@ -31,6 +31,7 @@ pub mod adaptive_calibration;
 pub mod analysis;
 pub mod cardinality_cost;
 // pub mod column_pruning; // TODO: incomplete, has invalid egg syntax
+pub mod consensus_rules;
 pub mod constraint_optimizer;
 pub mod cost;
 pub mod count_metadata;
@@ -115,6 +116,7 @@ pub use join_transformations::{
 pub use large_join::{
     JoinNode, LargeJoinOptimizer, LargeJoinStrategy,
 };
+pub use consensus_rules::consensus_rules;
 pub use rewrite::all_rules;
 pub use rule_metadata::{
     filter_rules_by_preconditions, load_rules_from_directory, parse_rra_file, ParsedRule,

@@ -47,6 +47,9 @@ pub fn all_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     // rules.extend(crate::semi_join::semi_join_reduction_rules());
     // rules.extend(crate::column_pruning::column_pruning_rules());
 
+    // Consensus rules (DataFusion + Calcite)
+    rules.extend(crate::consensus_rules::consensus_rules());
+
     // Database-inspired rules
     rules.extend(duckdb_inspired_rules());
     rules.extend(sqlite_inspired_rules());
