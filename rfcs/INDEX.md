@@ -77,6 +77,11 @@ This index tracks all RFCs in the RA optimizer project by status. See [README.md
 | [0050](text/0050-decorrelation-improvements.md) | Decorrelation Improvements | 2026-03-22 | Gap analysis |
 | [0051](text/0051-materialized-view-matching.md) | Materialized View Matching and Rewriting | 2026-03-22 | High-priority optimization |
 | [0052](text/0052-progressive-reoptimization.md) | Progressive Re-Optimization (Plan Stitch) | 2026-03-22 | High-priority optimization |
+| [0053](text/0053-stored-procedure-dialect-support.md) | Stored Procedure Dialect Support | 2026-03-22 | Extended roadmap |
+| [0054](text/0054-streaming-plan-adjustments.md) | Streaming Plan Adjustments for Pre-compiled Plans | 2026-03-22 | Extended roadmap |
+| [0055](text/0055-rdbms-specific-type-support.md) | RDBMS-Specific Type Support and Optimizations | 2026-03-22 | Extended roadmap |
+| [0056](text/0056-postgresql-type-optimizations.md) | PostgreSQL Type-Specific Optimizations (JSONB, XML, TOAST) | 2026-03-22 | Extended roadmap |
+| [0057](text/0057-cross-database-type-adaptation.md) | Cross-Database Type Storage Adaptation | 2026-03-22 | Extended roadmap |
 
 ## Rejected
 
@@ -86,12 +91,12 @@ This index tracks all RFCs in the RA optimizer project by status. See [README.md
 
 ## Statistics
 
-- **Total RFCs**: 51
-- **Implemented**: 14 (27%)
+- **Total RFCs**: 56
+- **Implemented**: 14 (25%)
 - **Underway**: 2 (4%)
-- **Accepted**: 12 (24%)
-- **Under Review**: 6 (12%)
-- **Proposed**: 17 (33%)
+- **Accepted**: 12 (21%)
+- **Under Review**: 6 (11%)
+- **Proposed**: 22 (39%)
 - **Rejected**: 0 (0%)
 
 ## Last Updated: 2026-03-22
