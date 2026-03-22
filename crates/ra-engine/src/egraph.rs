@@ -181,6 +181,10 @@ pub struct OptimizerConfig {
     pub parallel: ParallelConfig,
     /// Enable adaptive iteration limits based on query complexity.
     pub use_adaptive_limits: bool,
+    /// Enable cost-based pruning during optimization.
+    pub use_cost_pruning: bool,
+    /// Cost pruning threshold (e.g., 1.5 = prune plans >50% worse than best).
+    pub cost_pruning_threshold: f64,
 }
 
 /// Configuration for parallel query execution.
@@ -221,6 +225,8 @@ impl Default for OptimizerConfig {
             max_optimization_time_ms: 30000,
             parallel: ParallelConfig::default(),
             use_adaptive_limits: true,  // Enable adaptive limits by default
+            use_cost_pruning: true,  // Enable cost pruning by default
+            cost_pruning_threshold: 1.5,  // Prune plans >50% worse than best
         }
     }
 }
@@ -385,12 +391,21 @@ impl Optimizer {
         // Create convergence detector (window size: 3, min growth rate: 5%)
         let mut convergence_detector = crate::convergence::ConvergenceDetector::default_settings();
 
+        // Create cost pruner (if enabled)
+        let mut cost_pruner = if self.config.use_cost_pruning {
+            Some(crate::cost_pruning::CostPruner::new(self.config.cost_pruning_threshold))
+        } else {
+            None
+        };
+
         // Initialize e-graph with the expression
         let mut egraph: EGraph<RelLang, RelAnalysis> = EGraph::default();
         let root = egraph.add_expr(&rec_expr);
 
         let mut termination_reason = "iteration_limit";
         let mut actual_iterations = 0;
+        let mut best_cost = f64::INFINITY;
+        let mut cost_improvement_stalled = 0;
 
         // Run iterations one at a time to enable convergence detection
         for iteration in 0..iter_limit {
@@ -431,6 +446,38 @@ impl Optimizer {
                 total_classes: curr_classes,
             });
 
+            // Track cost improvement (if cost pruning enabled)
+            if let Some(pruner) = cost_pruner.as_mut() {
+                // Extract current best cost
+                let hardware = self.hardware_profile();
+                let cost_fn = crate::extract::RelCostFn::new(hardware);
+                let extractor = egg::Extractor::new(&egraph, cost_fn);
+                let (current_cost, _) = extractor.find_best(root);
+
+                pruner.record_cost(root, current_cost);
+
+                // Check if cost improved significantly
+                let improvement_threshold = 0.01; // 1% improvement
+                if current_cost < best_cost * (1.0 - improvement_threshold) {
+                    // Significant improvement
+                    best_cost = current_cost;
+                    cost_improvement_stalled = 0;
+                } else {
+                    // No significant improvement
+                    cost_improvement_stalled += 1;
+
+                    // Terminate if cost hasn't improved for 3 consecutive iterations
+                    if cost_improvement_stalled >= 3 {
+                        termination_reason = "cost_stagnant";
+                        debug!(
+                            "Early termination: cost stagnant for 3 iterations (best: {:.2})",
+                            best_cost
+                        );
+                        break;
+                    }
+                }
+            }
+
             // Check for convergence
             if convergence_detector.should_terminate() == crate::convergence::TerminationDecision::Converged {
                 termination_reason = "converged";
@@ -454,6 +501,20 @@ impl Optimizer {
         let runner_elapsed = runner_start.elapsed();
         let egraph_nodes = egraph.total_size();
         let egraph_classes = egraph.number_of_classes();
+
+        // Log pruning statistics if cost pruning was enabled
+        if let Some(pruner) = cost_pruner.as_ref() {
+            let stats = pruner.stats();
+            if stats.classes_evaluated > 0 {
+                debug!(
+                    "Cost pruning: best_cost={:.2}, evaluated={}, pruned={} ({:.1}% pruning rate)",
+                    stats.global_best_cost.unwrap_or(f64::INFINITY),
+                    stats.classes_evaluated,
+                    stats.classes_pruned,
+                    stats.pruning_rate()
+                );
+            }
+        }
 
         info!(
             "E-graph saturation: {:?} ({} iterations, {} nodes, {} classes, reason: {})",
