@@ -899,22 +899,247 @@ unsafe fn estimate_bloat(
     }
 }
 
-/// Gather foreign key relationships for join optimization.
+/// Foreign key relationship discovered from pg_constraint.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ForeignKeyInfo {
+    /// Columns in the referencing (child) table.
+    pub columns: Vec<String>,
+    /// Referenced (parent) table name.
+    pub referenced_table: String,
+    /// Columns in the referenced (parent) table.
+    pub referenced_columns: Vec<String>,
+}
+
+// pg_constraint catalog constants not exposed by pgrx.
+// Values from PostgreSQL src/include/catalog/pg_constraint.h.
+
+/// OID of the pg_constraint catalog relation.
+const CONSTRAINT_RELATION_ID: pg_sys::Oid = pg_sys::Oid::from_u32(2606);
+
+/// pg_constraint attribute numbers (1-based).
+/// contype is attribute 4 (char: 'f' for foreign key).
+const ANUM_CONTYPE: i16 = 4;
+/// conrelid is attribute 8 (OID of the constrained table).
+const ANUM_CONRELID: i16 = 8;
+/// confrelid is attribute 12 (OID of the referenced table).
+const ANUM_CONFRELID: i16 = 12;
+/// conkey is attribute 13 (int2[] of constrained column attnums).
+const ANUM_CONKEY: i16 = 13;
+/// confkey is attribute 14 (int2[] of referenced column attnums).
+const ANUM_CONFKEY: i16 = 14;
+/// Total number of attributes in pg_constraint (PG14-PG17).
+const NATTS_PG_CONSTRAINT: usize = 26;
+
+/// Gather foreign key relationships for a table.
 ///
-/// Returns a list of `(from_table, from_column, to_table, to_column)`
-/// tuples representing foreign key constraints.
+/// Scans the `pg_constraint` catalog directly (no SPI) to find
+/// foreign key constraints where `conrelid` matches the given table.
+/// Safe to call from planner hooks.
 ///
-/// The pg_constraint catalog structs (`FormData_pg_constraint`,
-/// `ConstraintRelationId`, etc.) are not exposed by pgrx for PG17.
-/// FK detection is deferred until pgrx adds these bindings.
-/// The optimizer still works correctly without FK info; it
-/// just cannot infer implicit join predicates from FK relationships.
+/// Returns one `ForeignKeyInfo` per foreign key constraint found.
 pub fn gather_foreign_keys(
-    _schema: &str,
-    _table: &str,
-) -> Vec<(String, String, String, String)> {
-    // Constraint catalog structures unavailable in pgrx PG17 bindings.
-    Vec::new()
+    schema: &str,
+    table: &str,
+) -> Vec<ForeignKeyInfo> {
+    unsafe { gather_foreign_keys_inner(schema, table) }
+}
+
+/// Inner implementation that performs the pg_constraint catalog scan.
+///
+/// # Safety
+///
+/// Must be called within a PostgreSQL backend process with valid
+/// memory context.
+unsafe fn gather_foreign_keys_inner(
+    schema: &str,
+    table: &str,
+) -> Vec<ForeignKeyInfo> {
+    let rel_oid = match resolve_relation_oid(schema, table) {
+        Some(oid) => oid,
+        None => return Vec::new(),
+    };
+
+    // Open pg_constraint catalog with AccessShareLock.
+    let con_rel = pg_sys::table_open(
+        CONSTRAINT_RELATION_ID,
+        pg_sys::AccessShareLock as pg_sys::LOCKMODE,
+    );
+    if con_rel.is_null() {
+        return Vec::new();
+    }
+
+    // Build scan key: conrelid = rel_oid (attribute 8).
+    let mut scan_key = pg_sys::ScanKeyData::default();
+    pg_sys::ScanKeyInit(
+        &mut scan_key,
+        ANUM_CONRELID,
+        pg_sys::BTEqualStrategyNumber as u16,
+        pg_sys::F_OIDEQ.into(),
+        pg_sys::Datum::from(rel_oid),
+    );
+
+    // Sequential scan (no index -- pgrx doesn't expose the
+    // constraint indexes, and the catalog is typically small).
+    let scan = pg_sys::systable_beginscan(
+        con_rel,
+        pg_sys::InvalidOid, // no index
+        false,              // no index scan
+        std::ptr::null_mut(), // snapshot (current)
+        1,                  // number of scan keys
+        &mut scan_key,
+    );
+
+    let tupdesc = (*con_rel).rd_att;
+    let mut result = Vec::new();
+
+    loop {
+        let tuple = pg_sys::systable_getnext(scan);
+        if tuple.is_null() {
+            break;
+        }
+
+        if let Some(fk) = extract_foreign_key(tuple, tupdesc) {
+            result.push(fk);
+        }
+    }
+
+    pg_sys::systable_endscan(scan);
+    pg_sys::table_close(
+        con_rel,
+        pg_sys::AccessShareLock as pg_sys::LOCKMODE,
+    );
+
+    result
+}
+
+/// Extract a foreign key from a pg_constraint HeapTuple.
+///
+/// Returns `None` if the constraint is not a foreign key or if
+/// any required attribute is NULL.
+///
+/// # Safety
+///
+/// Must be called with a valid HeapTuple from pg_constraint.
+unsafe fn extract_foreign_key(
+    tuple: pg_sys::HeapTuple,
+    tupdesc: pg_sys::TupleDesc,
+) -> Option<ForeignKeyInfo> {
+    let mut values =
+        vec![pg_sys::Datum::from(0usize); NATTS_PG_CONSTRAINT];
+    let mut nulls = vec![false; NATTS_PG_CONSTRAINT];
+
+    pg_sys::heap_deform_tuple(
+        tuple,
+        tupdesc,
+        values.as_mut_ptr(),
+        nulls.as_mut_ptr(),
+    );
+
+    // contype is attribute 4 (index 3). Check for 'f' (foreign key).
+    if nulls[ANUM_CONTYPE as usize - 1] {
+        return None;
+    }
+    let contype = values[ANUM_CONTYPE as usize - 1].value() as u8;
+    if contype != b'f' {
+        return None;
+    }
+
+    // confrelid: attribute 12 (index 11)
+    if nulls[ANUM_CONFRELID as usize - 1] {
+        return None;
+    }
+    let confrelid =
+        pg_sys::Oid::from(values[ANUM_CONFRELID as usize - 1].value() as u32);
+
+    // conkey: attribute 13 (index 12) -- int2[] of local column attnums
+    if nulls[ANUM_CONKEY as usize - 1] {
+        return None;
+    }
+    let conkey_datum = values[ANUM_CONKEY as usize - 1];
+
+    // confkey: attribute 14 (index 13) -- int2[] of referenced column attnums
+    if nulls[ANUM_CONFKEY as usize - 1] {
+        return None;
+    }
+    let confkey_datum = values[ANUM_CONFKEY as usize - 1];
+
+    // Get conrelid for resolving local column names.
+    if nulls[ANUM_CONRELID as usize - 1] {
+        return None;
+    }
+    let conrelid =
+        pg_sys::Oid::from(values[ANUM_CONRELID as usize - 1].value() as u32);
+
+    // Resolve referenced table name.
+    let ref_table = get_rel_name_safe(confrelid)?;
+
+    // Decode conkey int2 array to column names.
+    let columns = decode_attnum_array(conkey_datum, conrelid)?;
+
+    // Decode confkey int2 array to column names.
+    let referenced_columns =
+        decode_attnum_array(confkey_datum, confrelid)?;
+
+    Some(ForeignKeyInfo {
+        columns,
+        referenced_table: ref_table,
+        referenced_columns,
+    })
+}
+
+/// Decode an int2[] datum (column attnum array) into column names.
+///
+/// Used for pg_constraint.conkey and pg_constraint.confkey.
+///
+/// # Safety
+///
+/// Must be called with a valid int2[] Datum within a PG backend.
+unsafe fn decode_attnum_array(
+    datum: pg_sys::Datum,
+    rel_oid: pg_sys::Oid,
+) -> Option<Vec<String>> {
+    let array = datum_get_array_type_p(datum);
+    if array.is_null() {
+        return None;
+    }
+
+    let mut elems: *mut pg_sys::Datum = std::ptr::null_mut();
+    let mut elem_nulls: *mut bool = std::ptr::null_mut();
+    let mut nelems: i32 = 0;
+
+    pg_sys::deconstruct_array(
+        array,
+        pg_sys::INT2OID,
+        2,     // int2 = 2 bytes
+        true,  // pass by value
+        pg_sys::TYPALIGN_SHORT as i8,
+        &mut elems,
+        &mut elem_nulls,
+        &mut nelems,
+    );
+
+    let mut names = Vec::with_capacity(nelems as usize);
+    let mut failed = false;
+
+    for i in 0..nelems as usize {
+        if *elem_nulls.add(i) {
+            failed = true;
+            break;
+        }
+        let attnum = (*elems.add(i)).value() as i16;
+        match read_attname(rel_oid, attnum) {
+            Some(name) => names.push(name),
+            None => {
+                failed = true;
+                break;
+            }
+        }
+    }
+
+    pg_sys::pfree(elems as *mut std::ffi::c_void);
+    pg_sys::pfree(elem_nulls as *mut std::ffi::c_void);
+
+    if failed { None } else { Some(names) }
 }
 
 /// Get a relation name by OID (safe wrapper).
@@ -1403,5 +1628,61 @@ mod tests {
 
         // Note: is_stale() is simplified - just checks presence
         assert!(!mvcc_recent.is_stale());
+    }
+
+    #[test]
+    fn foreign_key_info_single_column() {
+        let fk = ForeignKeyInfo {
+            columns: vec!["user_id".to_string()],
+            referenced_table: "users".to_string(),
+            referenced_columns: vec!["id".to_string()],
+        };
+
+        assert_eq!(fk.columns, vec!["user_id"]);
+        assert_eq!(fk.referenced_table, "users");
+        assert_eq!(fk.referenced_columns, vec!["id"]);
+    }
+
+    #[test]
+    fn foreign_key_info_composite() {
+        let fk = ForeignKeyInfo {
+            columns: vec![
+                "tenant_id".to_string(),
+                "order_id".to_string(),
+            ],
+            referenced_table: "orders".to_string(),
+            referenced_columns: vec![
+                "tenant_id".to_string(),
+                "id".to_string(),
+            ],
+        };
+
+        assert_eq!(fk.columns.len(), 2);
+        assert_eq!(fk.referenced_columns.len(), 2);
+        assert_eq!(fk.referenced_table, "orders");
+    }
+
+    #[test]
+    fn foreign_key_info_equality() {
+        let fk1 = ForeignKeyInfo {
+            columns: vec!["a".to_string()],
+            referenced_table: "t".to_string(),
+            referenced_columns: vec!["b".to_string()],
+        };
+        let fk2 = fk1.clone();
+        assert_eq!(fk1, fk2);
+    }
+
+    #[test]
+    fn constraint_catalog_constants() {
+        // pg_constraint OID is stable across PG versions.
+        assert_eq!(u32::from(CONSTRAINT_RELATION_ID), 2606);
+        // Attribute numbers match PostgreSQL pg_constraint.h.
+        assert_eq!(ANUM_CONTYPE, 4);
+        assert_eq!(ANUM_CONRELID, 8);
+        assert_eq!(ANUM_CONFRELID, 12);
+        assert_eq!(ANUM_CONKEY, 13);
+        assert_eq!(ANUM_CONFKEY, 14);
+        assert_eq!(NATTS_PG_CONSTRAINT, 26);
     }
 }
