@@ -75,6 +75,8 @@ This index tracks all RFCs in the RA optimizer project by status. See [README.md
 | [0048](text/0048-distinct-aggregation-rewrite.md) | Distinct Aggregation Rewrite | 2026-03-22 | Gap analysis |
 | [0049](text/0049-partial-aggregation.md) | Partial Aggregation (Two-Phase) | 2026-03-22 | Gap analysis |
 | [0050](text/0050-decorrelation-improvements.md) | Decorrelation Improvements | 2026-03-22 | Gap analysis |
+| [0051](text/0051-materialized-view-matching.md) | Materialized View Matching and Rewriting | 2026-03-22 | High-priority optimization |
+| [0052](text/0052-progressive-reoptimization.md) | Progressive Re-Optimization (Plan Stitch) | 2026-03-22 | High-priority optimization |
 
 ## Rejected
 
@@ -84,12 +86,12 @@ This index tracks all RFCs in the RA optimizer project by status. See [README.md
 
 ## Statistics
 
-- **Total RFCs**: 49
-- **Implemented**: 14 (29%)
+- **Total RFCs**: 51
+- **Implemented**: 14 (27%)
 - **Underway**: 2 (4%)
 - **Accepted**: 12 (24%)
 - **Under Review**: 6 (12%)
-- **Proposed**: 15 (31%)
+- **Proposed**: 17 (33%)
 - **Rejected**: 0 (0%)
 
 ## Last Updated: 2026-03-22
