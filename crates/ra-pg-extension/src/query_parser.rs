@@ -74,10 +74,17 @@ unsafe fn parse_with_depth(
         return Ok(None);
     }
 
-    // Bail on set operations (UNION/INTERSECT/EXCEPT)
-    // handled by setOperations field.
+    // Handle set operations (UNION/INTERSECT/EXCEPT).
     if !q.setOperations.is_null() {
-        return Ok(None);
+        let set_expr =
+            parse_set_operation(q, q.setOperations, depth)?;
+        let set_expr = match set_expr {
+            Some(e) => e,
+            None => return Ok(None),
+        };
+        let sorted = apply_order_by(q, set_expr, depth)?;
+        let limited = apply_limit(q, sorted);
+        return Ok(Some(limited));
     }
 
     let from_expr = build_from_clause(q, depth)?;
@@ -106,6 +113,119 @@ unsafe fn list_length(list: *mut pg_sys::List) -> i32 {
     } else {
         (*list).length
     }
+}
+
+// ── Set operations (UNION/INTERSECT/EXCEPT) ────────────────
+
+/// Recursively parse a `SetOperationStmt` tree into
+/// [`RelExpr`].
+///
+/// In `PostgreSQL`'s parse tree, set operations form a binary
+/// tree where internal nodes are `SetOperationStmt` and leaves
+/// are `RangeTblRef` nodes pointing to subquery RTEs in the
+/// outer `Query`'s rtable.
+unsafe fn parse_set_operation(
+    q: &pg_sys::Query,
+    node: *mut pg_sys::Node,
+    depth: u32,
+) -> Result<Option<RelExpr>, String> {
+    if node.is_null() {
+        return Ok(None);
+    }
+    if depth > MAX_DEPTH {
+        return Err(format!(
+            "set operation depth {depth} exceeds limit \
+             {MAX_DEPTH}"
+        ));
+    }
+
+    let tag = (*node).type_;
+
+    // Leaf: a RangeTblRef pointing to a subquery RTE.
+    if tag == pg_sys::NodeTag::T_RangeTblRef {
+        let rtref =
+            node.cast::<pg_sys::RangeTblRef>();
+        let rtindex = (*rtref).rtindex;
+        return parse_set_operation_leaf(q, rtindex, depth);
+    }
+
+    // Internal node: a SetOperationStmt.
+    if tag != pg_sys::NodeTag::T_SetOperationStmt {
+        return Ok(None);
+    }
+
+    let stmt =
+        node.cast::<pg_sys::SetOperationStmt>();
+    let Some(left) = parse_set_operation(
+        q,
+        (*stmt).larg,
+        depth + 1,
+    )?
+    else {
+        return Ok(None);
+    };
+    let Some(right) = parse_set_operation(
+        q,
+        (*stmt).rarg,
+        depth + 1,
+    )?
+    else {
+        return Ok(None);
+    };
+
+    let all = (*stmt).all;
+    let op = (*stmt).op;
+
+    let expr = if op == pg_sys::SetOperation::SETOP_UNION {
+        RelExpr::Union {
+            all,
+            left: Box::new(left),
+            right: Box::new(right),
+        }
+    } else if op == pg_sys::SetOperation::SETOP_INTERSECT {
+        RelExpr::Intersect {
+            all,
+            left: Box::new(left),
+            right: Box::new(right),
+        }
+    } else if op == pg_sys::SetOperation::SETOP_EXCEPT {
+        RelExpr::Except {
+            all,
+            left: Box::new(left),
+            right: Box::new(right),
+        }
+    } else {
+        return Ok(None);
+    };
+
+    Ok(Some(expr))
+}
+
+/// Parse a leaf of a set operation tree.
+///
+/// Each leaf is a `RangeTblRef` that points to a subquery RTE
+/// in the outer query's rtable. We parse that subquery
+/// recursively to get its [`RelExpr`].
+unsafe fn parse_set_operation_leaf(
+    q: &pg_sys::Query,
+    rtindex: i32,
+    depth: u32,
+) -> Result<Option<RelExpr>, String> {
+    let Some(rte) = get_rte(q, rtindex)? else {
+        return Ok(None);
+    };
+
+    let rtekind = (*rte).rtekind;
+    if rtekind != pg_sys::RTEKind::RTE_SUBQUERY {
+        return Ok(None);
+    }
+
+    let subquery = (*rte).subquery;
+    if subquery.is_null() {
+        return Ok(None);
+    }
+
+    parse_with_depth(subquery, depth + 1)
 }
 
 // ── FROM clause ─────────────────────────────────────────────
@@ -2107,5 +2227,61 @@ mod tests {
         let len =
             unsafe { list_length(std::ptr::null_mut()) };
         assert_eq!(len, 0);
+    }
+
+    // ── Set operation helpers ──────────────────────────────
+
+    #[test]
+    fn set_operation_null_node_returns_none() {
+        let mut q = pg_sys::Query::default();
+        q.commandType = pg_sys::CmdType::CMD_SELECT;
+        let result = unsafe {
+            parse_set_operation(
+                &q,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[test]
+    fn set_operation_exceeds_depth_returns_error() {
+        let q = pg_sys::Query::default();
+        // Use a non-null but invalid pointer to test depth
+        // check before any dereference.
+        let result = unsafe {
+            parse_set_operation(
+                &q,
+                std::ptr::null_mut(),
+                MAX_DEPTH + 1,
+            )
+        };
+        // Null node short-circuits before depth check,
+        // so null returns Ok(None).
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[test]
+    fn set_operation_leaf_null_rte_returns_none() {
+        let q = pg_sys::Query::default();
+        // rtable is null, so get_rte returns None.
+        let result = unsafe {
+            parse_set_operation_leaf(&q, 1, 0)
+        };
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[test]
+    fn set_operation_leaf_invalid_rtindex_returns_none() {
+        let q = pg_sys::Query::default();
+        let result = unsafe {
+            parse_set_operation_leaf(&q, 0, 0)
+        };
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
     }
 }

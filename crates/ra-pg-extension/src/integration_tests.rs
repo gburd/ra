@@ -340,6 +340,189 @@ mod tests {
         Spi::run("DROP TABLE test_limit CASCADE").unwrap();
     }
 
+    /// Test UNION set operation.
+    #[pg_test]
+    fn test_union() {
+        Spi::run("CREATE TABLE set_a (id INT, value TEXT)").unwrap();
+        Spi::run("CREATE TABLE set_b (id INT, value TEXT)").unwrap();
+        Spi::run(
+            "INSERT INTO set_a VALUES (1, 'a'), (2, 'b'), (3, 'c')",
+        )
+        .unwrap();
+        Spi::run(
+            "INSERT INTO set_b VALUES (2, 'b'), (3, 'c'), (4, 'd')",
+        )
+        .unwrap();
+        Spi::run("ANALYZE set_a").unwrap();
+        Spi::run("ANALYZE set_b").unwrap();
+
+        let result = Spi::get_one::<i64>(
+            "SELECT COUNT(*) FROM (\
+             SELECT id, value FROM set_a \
+             UNION \
+             SELECT id, value FROM set_b\
+             ) t",
+        )
+        .unwrap();
+        assert_eq!(result, Some(4), "UNION should remove duplicates");
+
+        Spi::run("DROP TABLE set_a CASCADE").unwrap();
+        Spi::run("DROP TABLE set_b CASCADE").unwrap();
+    }
+
+    /// Test UNION ALL set operation.
+    #[pg_test]
+    fn test_union_all() {
+        Spi::run("CREATE TABLE ua_a (id INT)").unwrap();
+        Spi::run("CREATE TABLE ua_b (id INT)").unwrap();
+        Spi::run("INSERT INTO ua_a VALUES (1), (2), (3)").unwrap();
+        Spi::run("INSERT INTO ua_b VALUES (2), (3), (4)").unwrap();
+        Spi::run("ANALYZE ua_a").unwrap();
+        Spi::run("ANALYZE ua_b").unwrap();
+
+        let result = Spi::get_one::<i64>(
+            "SELECT COUNT(*) FROM (\
+             SELECT id FROM ua_a \
+             UNION ALL \
+             SELECT id FROM ua_b\
+             ) t",
+        )
+        .unwrap();
+        assert_eq!(
+            result,
+            Some(6),
+            "UNION ALL should keep duplicates"
+        );
+
+        Spi::run("DROP TABLE ua_a CASCADE").unwrap();
+        Spi::run("DROP TABLE ua_b CASCADE").unwrap();
+    }
+
+    /// Test INTERSECT set operation.
+    #[pg_test]
+    fn test_intersect() {
+        Spi::run("CREATE TABLE int_a (id INT)").unwrap();
+        Spi::run("CREATE TABLE int_b (id INT)").unwrap();
+        Spi::run("INSERT INTO int_a VALUES (1), (2), (3)").unwrap();
+        Spi::run("INSERT INTO int_b VALUES (2), (3), (4)").unwrap();
+        Spi::run("ANALYZE int_a").unwrap();
+        Spi::run("ANALYZE int_b").unwrap();
+
+        let result = Spi::get_one::<i64>(
+            "SELECT COUNT(*) FROM (\
+             SELECT id FROM int_a \
+             INTERSECT \
+             SELECT id FROM int_b\
+             ) t",
+        )
+        .unwrap();
+        assert_eq!(
+            result,
+            Some(2),
+            "INTERSECT should return common rows"
+        );
+
+        Spi::run("DROP TABLE int_a CASCADE").unwrap();
+        Spi::run("DROP TABLE int_b CASCADE").unwrap();
+    }
+
+    /// Test EXCEPT set operation.
+    #[pg_test]
+    fn test_except() {
+        Spi::run("CREATE TABLE exc_a (id INT)").unwrap();
+        Spi::run("CREATE TABLE exc_b (id INT)").unwrap();
+        Spi::run("INSERT INTO exc_a VALUES (1), (2), (3)").unwrap();
+        Spi::run("INSERT INTO exc_b VALUES (2), (3), (4)").unwrap();
+        Spi::run("ANALYZE exc_a").unwrap();
+        Spi::run("ANALYZE exc_b").unwrap();
+
+        let result = Spi::get_one::<i64>(
+            "SELECT COUNT(*) FROM (\
+             SELECT id FROM exc_a \
+             EXCEPT \
+             SELECT id FROM exc_b\
+             ) t",
+        )
+        .unwrap();
+        assert_eq!(
+            result,
+            Some(1),
+            "EXCEPT should return rows only in first set"
+        );
+
+        Spi::run("DROP TABLE exc_a CASCADE").unwrap();
+        Spi::run("DROP TABLE exc_b CASCADE").unwrap();
+    }
+
+    /// Test nested set operations.
+    #[pg_test]
+    fn test_nested_set_operations() {
+        Spi::run("CREATE TABLE ns_a (id INT)").unwrap();
+        Spi::run("CREATE TABLE ns_b (id INT)").unwrap();
+        Spi::run("CREATE TABLE ns_c (id INT)").unwrap();
+        Spi::run("INSERT INTO ns_a VALUES (1), (2), (3)").unwrap();
+        Spi::run("INSERT INTO ns_b VALUES (3), (4), (5)").unwrap();
+        Spi::run("INSERT INTO ns_c VALUES (1), (5), (6)").unwrap();
+        Spi::run("ANALYZE ns_a").unwrap();
+        Spi::run("ANALYZE ns_b").unwrap();
+        Spi::run("ANALYZE ns_c").unwrap();
+
+        let result = Spi::get_one::<i64>(
+            "SELECT COUNT(*) FROM (\
+             SELECT id FROM ns_a \
+             UNION \
+             SELECT id FROM ns_b \
+             UNION \
+             SELECT id FROM ns_c\
+             ) t",
+        )
+        .unwrap();
+        assert_eq!(
+            result,
+            Some(6),
+            "Nested UNION should combine all unique values"
+        );
+
+        Spi::run("DROP TABLE ns_a CASCADE").unwrap();
+        Spi::run("DROP TABLE ns_b CASCADE").unwrap();
+        Spi::run("DROP TABLE ns_c CASCADE").unwrap();
+    }
+
+    /// Test set operations with ORDER BY and LIMIT.
+    #[pg_test]
+    fn test_set_operation_with_order_limit() {
+        Spi::run("CREATE TABLE sol_a (id INT)").unwrap();
+        Spi::run("CREATE TABLE sol_b (id INT)").unwrap();
+        Spi::run(
+            "INSERT INTO sol_a SELECT i FROM generate_series(1, 10) i",
+        )
+        .unwrap();
+        Spi::run(
+            "INSERT INTO sol_b SELECT i FROM generate_series(5, 15) i",
+        )
+        .unwrap();
+        Spi::run("ANALYZE sol_a").unwrap();
+        Spi::run("ANALYZE sol_b").unwrap();
+
+        let result = Spi::get_one::<i64>(
+            "SELECT COUNT(*) FROM (\
+             SELECT id FROM sol_a \
+             UNION ALL \
+             SELECT id FROM sol_b \
+             ORDER BY id LIMIT 5\
+             ) t",
+        )
+        .unwrap();
+        assert_eq!(
+            result,
+            Some(5),
+            "UNION ALL with LIMIT should return 5 rows"
+        );
+
+        Spi::run("DROP TABLE sol_a CASCADE").unwrap();
+        Spi::run("DROP TABLE sol_b CASCADE").unwrap();
+    }
+
     /// Test empty table statistics.
     #[pg_test]
     fn test_empty_table_statistics() {
