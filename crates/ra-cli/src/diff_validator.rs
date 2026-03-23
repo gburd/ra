@@ -166,7 +166,8 @@ fn compare_node(
         | RelExpr::ParallelScan { .. }
         | RelExpr::ParallelHashJoin { .. }
         | RelExpr::ParallelAggregate { .. }
-        | RelExpr::Gather { .. } => {}
+        | RelExpr::Gather { .. }
+        | RelExpr::MvScan { .. } => {}
     }
 }
 

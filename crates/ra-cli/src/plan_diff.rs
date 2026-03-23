@@ -235,6 +235,9 @@ fn operator_label(expr: &RelExpr) -> String {
         RelExpr::Gather { .. } => {
             "Gather".to_owned()
         }
+        RelExpr::MvScan { view_name, .. } => {
+            format!("MvScan({view_name})")
+        }
     }
 }
 

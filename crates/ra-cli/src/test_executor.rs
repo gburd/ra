@@ -93,6 +93,7 @@ pub fn run_tests(
         cost_pruning_threshold: 1.5,
         use_join_graph_filtering: false,  // Disable for deterministic testing
         beam_search_config: None,  // Disable for deterministic testing
+        transaction_context: None,
     };
     let optimizer = Optimizer::with_config(test_config);
     let start = Instant::now();

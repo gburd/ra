@@ -379,6 +379,12 @@ fn render_expr(expr: &RelExpr, ctx: &mut RenderContext) {
             render_expr(input, ctx);
             ctx.from = format!("{} -- Gather (workers={workers})", ctx.from);
         }
+        RelExpr::MvScan { view_name, alias } => {
+            ctx.from = match alias {
+                Some(a) => format!("{view_name} AS {a} -- MV Scan"),
+                None => format!("{view_name} -- MV Scan"),
+            };
+        }
     }
 }
 

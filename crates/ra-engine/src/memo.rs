@@ -276,6 +276,10 @@ fn hash_rel_expr(expr: &RelExpr, hasher: &mut impl std::hash::Hasher) {
             hash_rel_expr(input, hasher);
             workers.hash(hasher);
         }
+        RelExpr::MvScan { view_name, alias } => {
+            view_name.hash(hasher);
+            alias.hash(hasher);
+        }
     }
 }
 

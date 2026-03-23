@@ -306,6 +306,7 @@ impl LargeJoinOptimizer {
             RelExpr::ParallelAggregate { input, .. } | RelExpr::Gather { input, .. } => {
                 Self::count_tables(input)
             }
+            RelExpr::MvScan { .. } => 1,
         }
     }
 
@@ -373,7 +374,7 @@ impl LargeJoinOptimizer {
                     Self::extract_joins_recursive(input, joins);
                 }
             }
-            RelExpr::Values { .. } | RelExpr::BitmapIndexScan { .. } | RelExpr::MultiUnnest { .. } | RelExpr::ParallelScan { .. } | RelExpr::IndexScan { .. } | RelExpr::IndexOnlyScan { .. } => {
+            RelExpr::Values { .. } | RelExpr::BitmapIndexScan { .. } | RelExpr::MultiUnnest { .. } | RelExpr::ParallelScan { .. } | RelExpr::IndexScan { .. } | RelExpr::IndexOnlyScan { .. } | RelExpr::MvScan { .. } => {
                 // Leaf nodes, no joins to extract
             }
             RelExpr::Unnest { input, .. } | RelExpr::TableFunction { input, .. } => {

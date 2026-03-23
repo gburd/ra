@@ -199,6 +199,9 @@ fn estimate_heuristic(
         RelExpr::IndexScan { table, .. } => stats
             .get_statistics(table)
             .map_or(1.0, |s| s.row_count),
+        RelExpr::MvScan { view_name, .. } => stats
+            .get_statistics(view_name)
+            .map_or(1.0, |s| s.row_count),
     }
 }
 
@@ -393,6 +396,11 @@ fn collect_tables_recursive(
         }
         RelExpr::ParallelAggregate { input, .. } | RelExpr::Gather { input, .. } => {
             collect_tables_recursive(input, provider, map);
+        }
+        RelExpr::MvScan { view_name, .. } => {
+            if let Some(s) = provider.get_statistics(view_name) {
+                map.insert(view_name.clone(), s.clone());
+            }
         }
     }
 }

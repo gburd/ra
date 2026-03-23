@@ -285,6 +285,9 @@ fn fingerprint_rel(expr: &RelExpr, out: &mut Vec<Token>) {
         RelExpr::Gather { input, .. } => {
             fingerprint_rel(input, out);
         }
+        RelExpr::MvScan { .. } => {
+            out.push(Token::Scan);
+        }
     }
 }
 

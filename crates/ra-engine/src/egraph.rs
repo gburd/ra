@@ -63,6 +63,10 @@ define_language! {
         // Children: [table, index_name, projected_cols, predicate]
         "index-only-scan" = IndexOnlyScan([Id; 4]),
 
+        // -- Materialized view scan --
+        // Children: [view_name, alias, group_by_list, agg_list]
+        "mv-scan" = MvScan([Id; 4]),
+
         // -- Bitmap index operators --
         "bitmap-index-scan" = BitmapIndexScan([Id; 3]),
         "bitmap-and" = BitmapAnd(Box<[Id]>),
@@ -1517,6 +1521,16 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
             let workers_id = add_symbol(rec, &workers.to_string());
             let ids = vec![tag_id, input_id, workers_id];
             Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
+        }
+        RelExpr::MvScan { view_name, alias } => {
+            let view_id = add_symbol(rec, view_name);
+            let alias_id =
+                add_symbol(rec, alias.as_deref().unwrap_or("auto"));
+            let nil_g = rec.add(RelLang::Nil);
+            let nil_a = rec.add(RelLang::Nil);
+            Ok(rec.add(RelLang::MvScan([
+                view_id, alias_id, nil_g, nil_a,
+            ])))
         }
     }
 }

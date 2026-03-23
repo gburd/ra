@@ -118,6 +118,13 @@ impl egg::CostFunction<RelLang> for RelCostFn {
                 // O(1) metadata lookup, much cheaper than any scan
                 return 1.0;
             }
+            RelLang::MvScan(_) => {
+                // MV scan reads pre-computed, pre-joined data.
+                let storage_factor =
+                    100.0 / self.hardware.storage_bandwidth_gbps;
+                return costs(enode.children()[0])
+                    + (15.0 * storage_factor);
+            }
             _ => 0.1,
         };
 
@@ -373,6 +380,18 @@ fn convert_node(nodes: &[RelLang], idx: usize) -> Result<RelExpr, EGraphError> {
                 columns,
                 predicate,
             })
+        }
+        RelLang::MvScan([view_id, alias_id, _, _]) => {
+            let view_name =
+                get_symbol(nodes, id(*view_id))?;
+            let alias_str =
+                get_symbol(nodes, id(*alias_id))?;
+            let alias = if alias_str == "auto" || alias_str.is_empty() {
+                None
+            } else {
+                Some(alias_str)
+            };
+            Ok(RelExpr::MvScan { view_name, alias })
         }
         RelLang::Func(ids) if !ids.is_empty() => {
             convert_func_as_relational(nodes, ids)
