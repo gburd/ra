@@ -308,6 +308,7 @@ fn collect_tables_recursive(
         | ra_core::algebra::RelExpr::Unnest { .. }
         | ra_core::algebra::RelExpr::MultiUnnest { .. }
         | ra_core::algebra::RelExpr::TableFunction { .. }
-        | ra_core::algebra::RelExpr::RowPattern { .. } => {}
+        | ra_core::algebra::RelExpr::RowPattern { .. }
+        | ra_core::algebra::RelExpr::MvScan { .. } => {}
     }
 }

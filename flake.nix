@@ -2,7 +2,7 @@
   description = "Relational Algebra Rule System";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11";
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -55,9 +55,6 @@
             # Web development
             nodejs_20
             nodePackages.pnpm
-
-            # Deployment
-            flyctl
           ] ++ lib.optionals stdenv.isDarwin [
             # Darwin-specific system libraries and frameworks
             libiconv

@@ -116,7 +116,8 @@ pub fn derive_properties(
         RelExpr::ParallelScan { .. }
         | RelExpr::ParallelHashJoin { .. }
         | RelExpr::ParallelAggregate { .. }
-        | RelExpr::Gather { .. } => PropertySet::new(),
+        | RelExpr::Gather { .. }
+        | RelExpr::MvScan { .. } => PropertySet::new(),
     }
 }
 

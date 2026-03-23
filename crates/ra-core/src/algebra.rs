@@ -332,6 +332,18 @@ pub enum RelExpr {
         /// Number of parallel workers to gather from.
         workers: usize,
     },
+
+    // ===== Materialized View Scan =====
+
+    /// Scan a materialized view instead of re-computing from base
+    /// tables. The optimizer rewrites eligible sub-trees into this
+    /// node when an MV is cheaper than the original plan.
+    MvScan {
+        /// Materialized view name (the scan target).
+        view_name: String,
+        /// Optional alias for the MV scan.
+        alias: Option<String>,
+    },
 }
 
 /// Configuration for cycle detection in recursive CTEs.
@@ -675,6 +687,7 @@ impl RelExpr {
             Self::ParallelHashJoin { left, right, .. } => vec![left, right],
             Self::ParallelAggregate { input, .. } | Self::Gather { input, .. } => vec![input],
             Self::IndexOnlyScan { .. } => vec![],
+            Self::MvScan { .. } => vec![],
         }
     }
 
@@ -893,6 +906,7 @@ impl RelExpr {
             Self::Gather { input, .. } => {
                 input.collect_columns(out);
             }
+            Self::MvScan { .. } => {}
         }
     }
 }
@@ -961,6 +975,7 @@ impl RelExpr {
             Self::ParallelAggregate { input, .. } | Self::Gather { input, .. } => {
                 input.references_cte(cte_name)
             }
+            Self::MvScan { view_name, .. } => view_name == cte_name,
         }
     }
 }

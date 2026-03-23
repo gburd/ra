@@ -236,6 +236,12 @@ impl WasmOptimizer {
             large_join_strategy: ra_engine::large_join::LargeJoinStrategy::Greedy,
             max_optimization_time_ms: self.inner.config.time_limit_ms,
             parallel: ra_engine::egraph::ParallelConfig::default(),
+            use_adaptive_limits: true,
+            use_cost_pruning: true,
+            cost_pruning_threshold: 1.5,
+            use_join_graph_filtering: true,
+            beam_search_config: None,
+            transaction_context: None,
         };
         let mut optimizer =
             ra_engine::Optimizer::with_config(engine_config);
@@ -405,6 +411,7 @@ fn estimate_cost(plan: &RelExpr) -> f64 {
         RelExpr::Gather { input, .. } => {
             estimate_cost(input) + 10.0
         }
+        RelExpr::MvScan { .. } => 15.0,
     }
 }
 

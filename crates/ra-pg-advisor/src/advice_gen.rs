@@ -291,7 +291,7 @@ fn collect_join_order(expr: &RelExpr, out: &mut Vec<String>) {
         | RelExpr::Gather { input, .. } => {
             collect_join_order(input, out);
         }
-        RelExpr::Values { .. } | RelExpr::MultiUnnest { .. } => {}
+        RelExpr::Values { .. } | RelExpr::MultiUnnest { .. } | RelExpr::MvScan { .. } => {}
     }
 }
 
@@ -385,7 +385,8 @@ fn collect_join_hints(expr: &RelExpr, out: &mut Vec<JoinHint>) {
         }
         RelExpr::Scan { .. }
         | RelExpr::Values { .. }
-        | RelExpr::MultiUnnest { .. } => {}
+        | RelExpr::MultiUnnest { .. }
+        | RelExpr::MvScan { .. } => {}
     }
 }
 
@@ -487,7 +488,8 @@ fn collect_scan_hints(expr: &RelExpr, out: &mut Vec<ScanHint>) {
             collect_scan_hints(input, out);
         }
         RelExpr::Values { .. }
-        | RelExpr::MultiUnnest { .. } => {}
+        | RelExpr::MultiUnnest { .. }
+        | RelExpr::MvScan { .. } => {}
     }
 }
 

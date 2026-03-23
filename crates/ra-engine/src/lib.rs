@@ -53,6 +53,8 @@ pub mod federated_cost;
 pub mod federated_optimizer;
 pub mod genetic_fingerprint;
 pub mod memo;
+pub mod mv_matching;
+pub mod mv_rewrite;
 pub mod network_cost;
 pub mod null_simplification;
 pub mod parquet_pushdown;
@@ -102,6 +104,11 @@ pub use egraph::{
 };
 pub use extract::{extract_best, extract_best_with_staleness, extract_best_with_cardinality, rec_expr_to_rel_expr, RelCostFn};
 pub use memo::{structural_hash, MemoTable};
+pub use mv_matching::{
+    MaterializedViewInfo, MatchType, MvCatalog, MvMatch,
+    match_query_with_mv, view_benefit,
+};
+pub use mv_rewrite::{mv_rewrite_rules, mv_scan_cost_factor};
 pub use network_cost::{
     DistributionStrategy, JoinSides, NetworkCostEstimate, NetworkCostModel,
 };

@@ -261,6 +261,10 @@ impl FeatureSchema {
             RelExpr::Gather { input, .. } => {
                 self.encode_expr(input, stats, features);
             }
+            RelExpr::MvScan { view_name, .. } => {
+                features[OP_TYPE_OFFSET] = 1.0;
+                self.encode_table(view_name, stats, features);
+            }
         }
     }
 
