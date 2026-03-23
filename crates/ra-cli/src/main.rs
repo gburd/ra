@@ -1742,7 +1742,12 @@ fn print_plan_output(
         let diff_output =
             plan_diff::render_diff(original, optimized, fmt);
         eprintln!("{diff_output}");
+    } else if original == optimized {
+        // Plans are identical - show only once
+        eprintln!("{}", "Original Plan Unchanged After Optimization:".bold());
+        eprintln!("{}", format_plan_tree(original));
     } else {
+        // Plans differ - show both
         eprintln!("{}", "Original Plan:".bold());
         eprintln!("{}", format_plan_tree(original));
         eprintln!();
