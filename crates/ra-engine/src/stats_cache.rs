@@ -45,24 +45,28 @@ impl StatsCache {
     /// Get statistics for a table.
     ///
     /// Returns None if the table is not registered.
+    #[inline]
     #[must_use]
     pub fn get(&self, table: &str) -> Option<&Statistics> {
         self.inner.get(table)
     }
 
     /// Check if a table has statistics registered.
+    #[inline]
     #[must_use]
     pub fn contains_key(&self, table: &str) -> bool {
         self.inner.contains_key(table)
     }
 
     /// Check if the cache is empty.
+    #[inline]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
 
     /// Get the number of tables with statistics.
+    #[inline]
     #[must_use]
     pub fn len(&self) -> usize {
         self.inner.len()
@@ -72,6 +76,7 @@ impl StatsCache {
     ///
     /// This allows passing the stats to functions that expect HashMap.
     /// Since the HashMap is Arc-wrapped, this is a cheap operation.
+    #[inline]
     #[must_use]
     pub fn as_map(&self) -> &HashMap<String, Statistics> {
         &self.inner

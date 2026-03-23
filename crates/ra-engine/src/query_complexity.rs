@@ -45,6 +45,7 @@ impl QueryComplexity {
     }
 
     /// Get recommended iteration limit for this complexity level.
+    #[inline]
     pub fn default_iter_limit(self) -> usize {
         match self {
             Self::Trivial => 3,
@@ -56,6 +57,7 @@ impl QueryComplexity {
     }
 
     /// Get recommended timeout in milliseconds.
+    #[inline]
     pub fn default_timeout_ms(self) -> u64 {
         match self {
             Self::Trivial => 10,

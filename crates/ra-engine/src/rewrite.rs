@@ -26,7 +26,9 @@ use crate::egraph::RelLang;
 /// them in each iteration until saturation or a limit is reached.
 #[must_use]
 pub fn all_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
-    let mut rules = Vec::new();
+    // Pre-allocate capacity to avoid reallocations
+    // Typical total: ~200 rules across all categories
+    let mut rules = Vec::with_capacity(200);
     // High priority rules - null simplification first (fixes proptest issues)
     rules.extend(crate::null_simplification::null_simplification_rules());
 

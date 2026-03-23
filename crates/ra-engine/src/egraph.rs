@@ -440,6 +440,13 @@ impl Optimizer {
         let mut best_cost = f64::INFINITY;
         let mut cost_improvement_stalled = 0;
 
+        // Cache hardware profile outside loop to avoid repeated clones
+        let hardware_cached = if cost_pruner.is_some() || beam_search_tracker.is_some() {
+            Some(self.hardware_profile())
+        } else {
+            None
+        };
+
         // Run iterations one at a time to enable convergence detection
         for iteration in 0..iter_limit {
             // Check timeout
@@ -480,9 +487,8 @@ impl Optimizer {
             });
 
             // Track cost improvement (if cost pruning or beam search enabled)
-            let current_cost = if cost_pruner.is_some() || beam_search_tracker.is_some() {
-                let hardware = self.hardware_profile();
-                let cost_fn = crate::extract::RelCostFn::new(hardware);
+            let current_cost = if let Some(ref hardware) = hardware_cached {
+                let cost_fn = crate::extract::RelCostFn::new(hardware.clone());
                 let extractor = egg::Extractor::new(&egraph, cost_fn);
                 let (cost, _) = extractor.find_best(root);
                 Some(cost)
