@@ -190,6 +190,11 @@ pub struct OptimizerConfig {
     /// Beam search configuration for managing search space size.
     /// Set to None to disable beam search.
     pub beam_search_config: Option<crate::beam_search::BeamSearchConfig>,
+    /// Transaction isolation context for isolation-aware cost adjustments.
+    /// When set, the optimizer applies penalties for lock footprint,
+    /// snapshot bloat, SubXID overflow, and MultiXact pressure.
+    /// When `None`, all isolation penalties are zero.
+    pub transaction_context: Option<ra_core::isolation::TransactionContext>,
 }
 
 /// Configuration for parallel query execution.
@@ -234,6 +239,7 @@ impl Default for OptimizerConfig {
             cost_pruning_threshold: 1.5,  // Prune plans >50% worse than best
             use_join_graph_filtering: true,  // Enable join graph filtering by default
             beam_search_config: None,  // Disabled by default (can be enabled for complex queries)
+            transaction_context: None,  // No isolation awareness by default
         }
     }
 }

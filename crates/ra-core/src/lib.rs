@@ -20,6 +20,7 @@ pub mod distribution;
 pub mod expr;
 pub mod facts;
 pub mod federated;
+pub mod isolation;
 pub mod formats;
 pub mod pattern;
 pub mod precondition;
@@ -42,6 +43,10 @@ pub use facts::{
     TableStats as CoreTableStats,
 };
 pub use federated::*;
+pub use isolation::{
+    BackendKind, IsolationLevel, MultiXactPressure,
+    TransactionContext,
+};
 pub use pattern::*;
 pub use precondition::*;
 pub use row_pattern::*;
