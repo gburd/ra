@@ -386,6 +386,10 @@ impl Optimizer {
             table_count, complexity, iter_limit, timeout_ms
         );
 
+        // Convert table stats to Arc-wrapped cache for cheap sharing
+        // This avoids repeated clones during cost extraction
+        let stats_cache = crate::stats_cache::StatsCache::from_map(self.table_stats.clone());
+
         let to_rec_start = Instant::now();
         let rec_expr = to_rec_expr(expr)?;
         let to_rec_elapsed = to_rec_start.elapsed();
@@ -592,7 +596,7 @@ impl Optimizer {
 
         let extract_start = Instant::now();
         let hardware = self.hardware_profile();
-        let result = extract_best(&egraph, root, &self.table_stats, &hardware)?;
+        let result = extract_best(&egraph, root, stats_cache.as_map(), &hardware)?;
         let extract_elapsed = extract_start.elapsed();
         debug!("extract_best: {:?}", extract_elapsed);
 

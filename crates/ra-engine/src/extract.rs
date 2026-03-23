@@ -149,14 +149,17 @@ pub fn extract_best<S: BuildHasher>(
         let (_, best_expr) = extractor.find_best(root);
         rec_expr_to_rel_expr(&best_expr)
     } else {
-        let stats: HashMap<String, Statistics> = table_stats
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
+        // Clone once to create owned HashMap (unavoidable)
+        let stats: HashMap<String, Statistics> = table_stats.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+
+        // Create staleness map (all Fresh by default)
         let staleness_map: HashMap<String, Staleness> = stats
             .keys()
             .map(|k| (k.clone(), Staleness::Fresh))
             .collect();
+
+        // IntegratedCostFn::new wraps these in Arc internally, so subsequent
+        // clones of IntegratedCostFn are cheap (just Arc reference count increments)
         let cost_fn = IntegratedCostFn::new(
             hardware.clone(),
             stats,

@@ -888,11 +888,11 @@ impl CostCalibration {
 ///
 /// Replaces the basic `RelCostFn` when full stats/hardware integration
 /// is desired.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct IntegratedCostFn {
     hardware: HardwareProfile,
-    table_stats: HashMap<String, Statistics>,
-    staleness_map: HashMap<String, Staleness>,
+    table_stats: std::sync::Arc<HashMap<String, Statistics>>,
+    staleness_map: std::sync::Arc<HashMap<String, Staleness>>,
 }
 
 impl IntegratedCostFn {
@@ -905,8 +905,8 @@ impl IntegratedCostFn {
     ) -> Self {
         Self {
             hardware,
-            table_stats,
-            staleness_map,
+            table_stats: std::sync::Arc::new(table_stats),
+            staleness_map: std::sync::Arc::new(staleness_map),
         }
     }
 
@@ -932,8 +932,8 @@ impl IntegratedCostFn {
 
         Self {
             hardware: model.hardware().clone(),
-            table_stats,
-            staleness_map,
+            table_stats: std::sync::Arc::new(table_stats),
+            staleness_map: std::sync::Arc::new(staleness_map),
         }
     }
 
