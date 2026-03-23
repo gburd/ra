@@ -46,6 +46,7 @@ pub mod facts_context;
 pub mod incremental_sort;
 pub mod join_transformations;
 pub mod large_join;
+pub mod left_deep;
 pub mod federated_cost;
 pub mod federated_optimizer;
 pub mod memo;
@@ -122,6 +123,7 @@ pub use join_transformations::{
 pub use large_join::{
     JoinNode, LargeJoinOptimizer, LargeJoinStrategy,
 };
+pub use left_deep::{LeftDeepBuilder, can_use_left_deep};
 pub use consensus_rules::consensus_rules;
 pub use rewrite::all_rules;
 pub use rule_metadata::{
