@@ -82,6 +82,7 @@ This index tracks all RFCs in the RA optimizer project by status. See [README.md
 | [0055](text/0055-rdbms-specific-type-support.md) | RDBMS-Specific Type Support and Optimizations | 2026-03-22 | Extended roadmap |
 | [0056](text/0056-postgresql-type-optimizations.md) | PostgreSQL Type-Specific Optimizations (JSONB, XML, TOAST) | 2026-03-22 | Extended roadmap |
 | [0057](text/0057-cross-database-type-adaptation.md) | Cross-Database Type Storage Adaptation | 2026-03-22 | Extended roadmap |
+| [0058](text/0058-opentracing-instrumentation.md) | OpenTracing Instrumentation for Query Planner | 2026-03-23 | Observability |
 
 ## Rejected
 
@@ -91,12 +92,12 @@ This index tracks all RFCs in the RA optimizer project by status. See [README.md
 
 ## Statistics
 
-- **Total RFCs**: 56
+- **Total RFCs**: 57
 - **Implemented**: 14 (25%)
 - **Underway**: 2 (4%)
 - **Accepted**: 12 (21%)
 - **Under Review**: 6 (11%)
-- **Proposed**: 22 (39%)
+- **Proposed**: 23 (40%)
 - **Rejected**: 0 (0%)
 
-## Last Updated: 2026-03-22
+## Last Updated: 2026-03-23
