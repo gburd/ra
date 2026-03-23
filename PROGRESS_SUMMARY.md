@@ -136,7 +136,7 @@ We're at step 3. The benchmark is doing its job\!
 
 - `benchmarks/job/README.md` - Usage guide
 - `JOB_BENCHMARK_FINDINGS.md` - Detailed analysis
-- `rfcs/text/0053-0057-*.md` - 5 new RFCs for future work
+- `rfcs/0053-0057-*.md` - 5 new RFCs for future work
 
 ---
 

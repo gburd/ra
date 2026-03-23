@@ -726,7 +726,7 @@ Package the extension for distribution via:
   analysis, committed infrastructure, advisor hook API
 - `research/postgres-planner-gaps.md` -- Gap analysis between
   PostgreSQL planner features and Ra's rule set
-- `rfcs/text/0003-plan-advice-integration.md` -- Companion RFC for
+- `rfcs/0003-plan-advice-integration.md` -- Companion RFC for
   `pg_plan_advice` integration
 - pgrx documentation: https://github.com/pgcentralfoundation/pgrx
 - PostgreSQL planner hooks: `src/include/optimizer/planner.h`,
