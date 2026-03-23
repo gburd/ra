@@ -29,6 +29,7 @@
 
 pub mod adaptive_calibration;
 pub mod analysis;
+pub mod bayesian_pruning;
 pub mod cardinality_cost;
 // pub mod column_pruning; // TODO: incomplete, has invalid egg syntax
 pub mod consensus_rules;
@@ -54,6 +55,7 @@ pub mod memo;
 pub mod network_cost;
 pub mod null_simplification;
 pub mod parquet_pushdown;
+pub mod pattern_fingerprint;
 pub mod plan_stitch;
 pub mod progressive_reopt;
 pub mod query_complexity;
@@ -181,3 +183,8 @@ pub use plan_stitch::{
     OperatorState, StitchResult, count_stitch_points,
     find_deepest_join, stitch_plans,
 };
+pub use bayesian_pruning::{
+    BayesianPruner, BucketStats, PruningConfig, PruningOutcome,
+    PruningSummary,
+};
+pub use pattern_fingerprint::PlanFingerprint;
