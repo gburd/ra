@@ -12,6 +12,8 @@ use ra_core::algebra::{
 };
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
 use ra_engine::{rec_expr_to_rel_expr, to_rec_expr, Optimizer, OptimizerConfig, egraph::ParallelConfig};
+use ra_parser::sql_to_relexpr;
+use std::path::PathBuf;
 
 fn simple_scan() -> RelExpr {
     RelExpr::scan("users")
@@ -171,6 +173,7 @@ fn bench_optimization(c: &mut Criterion) {
         large_join_strategy: ra_engine::large_join::LargeJoinStrategy::Greedy,
         max_optimization_time_ms: 10_000,
         parallel: ParallelConfig::default(),
+        ..OptimizerConfig::default()
     });
 
     let mut group = c.benchmark_group("optimize");
@@ -252,125 +255,25 @@ fn bench_optimization(c: &mut Criterion) {
 
 // ── TPC-H Subset Queries ────────────────────────────────────────────
 
-/// TPC-H Q1: Pricing Summary Report
-fn tpch_q1() -> RelExpr {
-    // SELECT l_returnflag, l_linestatus, sum(l_quantity), sum(l_extendedprice)
-    // FROM lineitem
-    // WHERE l_shipdate <= date '1998-12-01' - interval '90' day
-    // GROUP BY l_returnflag, l_linestatus
-    RelExpr::Aggregate {
-        group_by: vec![
-            Expr::Column(ColumnRef::new("l_returnflag")),
-            Expr::Column(ColumnRef::new("l_linestatus")),
-        ],
-        aggregates: vec![
-            AggregateExpr {
-                function: AggregateFunction::Sum,
-                arg: Some(Expr::Column(ColumnRef::new("l_quantity"))),
-                distinct: false,
-                alias: Some("sum_qty".to_owned()),
-            },
-            AggregateExpr {
-                function: AggregateFunction::Sum,
-                arg: Some(Expr::Column(ColumnRef::new("l_extendedprice"))),
-                distinct: false,
-                alias: Some("sum_price".to_owned()),
-            },
-        ],
-        input: Box::new(RelExpr::scan("lineitem").filter(Expr::BinOp {
-            op: BinOp::Le,
-            left: Box::new(Expr::Column(ColumnRef::new("l_shipdate"))),
-            right: Box::new(Expr::Const(Const::String("1998-09-02".to_owned()))),
-        })),
-    }
+fn tpch_queries_dir() -> PathBuf {
+    let mut dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    dir.pop(); // crates/
+    dir.pop(); // project root
+    dir.push("benchmarks/tpch/queries");
+    dir
 }
 
-/// TPC-H Q3: Shipping Priority
-fn tpch_q3() -> RelExpr {
-    // SELECT l_orderkey, sum(l_extendedprice * (1 - l_discount))
-    // FROM customer, orders, lineitem
-    // WHERE c_custkey = o_custkey AND l_orderkey = o_orderkey
-    //   AND c_mktsegment = 'BUILDING' AND o_orderdate < '1995-03-15'
-    // GROUP BY l_orderkey
-    RelExpr::Aggregate {
-        group_by: vec![Expr::Column(ColumnRef::new("l_orderkey"))],
-        aggregates: vec![AggregateExpr {
-            function: AggregateFunction::Sum,
-            arg: Some(Expr::Column(ColumnRef::new("l_extendedprice"))),
-            distinct: false,
-            alias: Some("revenue".to_owned()),
-        }],
-        input: Box::new(
-            RelExpr::Join {
-                join_type: JoinType::Inner,
-                condition: Expr::BinOp {
-                    op: BinOp::Eq,
-                    left: Box::new(Expr::Column(ColumnRef::new("l_orderkey"))),
-                    right: Box::new(Expr::Column(ColumnRef::new("o_orderkey"))),
-                },
-                left: Box::new(
-                    RelExpr::Join {
-                        join_type: JoinType::Inner,
-                        condition: Expr::BinOp {
-                            op: BinOp::Eq,
-                            left: Box::new(Expr::Column(ColumnRef::new("c_custkey"))),
-                            right: Box::new(Expr::Column(ColumnRef::new("o_custkey"))),
-                        },
-                        left: Box::new(RelExpr::scan("customer").filter(Expr::BinOp {
-                            op: BinOp::Eq,
-                            left: Box::new(Expr::Column(ColumnRef::new("c_mktsegment"))),
-                            right: Box::new(Expr::Const(Const::String("BUILDING".to_owned()))),
-                        })),
-                        right: Box::new(RelExpr::scan("orders").filter(Expr::BinOp {
-                            op: BinOp::Lt,
-                            left: Box::new(Expr::Column(ColumnRef::new("o_orderdate"))),
-                            right: Box::new(Expr::Const(Const::String("1995-03-15".to_owned()))),
-                        })),
-                    }
-                ),
-                right: Box::new(RelExpr::scan("lineitem")),
-            }
-        ),
-    }
+fn load_tpch_query(name: &str) -> RelExpr {
+    let path = tpch_queries_dir().join(name);
+    let sql = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    sql_to_relexpr(&sql)
+        .unwrap_or_else(|e| panic!("parse {name}: {e}"))
 }
 
-/// TPC-H Q6: Forecasting Revenue Change
-fn tpch_q6() -> RelExpr {
-    // SELECT sum(l_extendedprice * l_discount)
-    // FROM lineitem
-    // WHERE l_shipdate >= '1994-01-01' AND l_shipdate < '1995-01-01'
-    //   AND l_discount BETWEEN 0.05 AND 0.07 AND l_quantity < 24
-    RelExpr::Aggregate {
-        group_by: vec![],
-        aggregates: vec![AggregateExpr {
-            function: AggregateFunction::Sum,
-            arg: Some(Expr::Column(ColumnRef::new("l_extendedprice"))),
-            distinct: false,
-            alias: Some("revenue".to_owned()),
-        }],
-        input: Box::new(RelExpr::scan("lineitem").filter(Expr::BinOp {
-            op: BinOp::And,
-            left: Box::new(Expr::BinOp {
-                op: BinOp::And,
-                left: Box::new(Expr::BinOp {
-                    op: BinOp::Ge,
-                    left: Box::new(Expr::Column(ColumnRef::new("l_shipdate"))),
-                    right: Box::new(Expr::Const(Const::String("1994-01-01".to_owned()))),
-                }),
-                right: Box::new(Expr::BinOp {
-                    op: BinOp::Lt,
-                    left: Box::new(Expr::Column(ColumnRef::new("l_shipdate"))),
-                    right: Box::new(Expr::Const(Const::String("1995-01-01".to_owned()))),
-                }),
-            }),
-            right: Box::new(Expr::BinOp {
-                op: BinOp::Lt,
-                left: Box::new(Expr::Column(ColumnRef::new("l_quantity"))),
-                right: Box::new(Expr::Const(Const::Int(24))),
-            }),
-        })),
-    }
-}
+fn tpch_q1() -> RelExpr { load_tpch_query("q1.sql") }
+fn tpch_q3() -> RelExpr { load_tpch_query("q3.sql") }
+fn tpch_q6() -> RelExpr { load_tpch_query("q6.sql") }
 
 // ── Hardware-specific benchmarks ────────────────────────────────────
 

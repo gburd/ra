@@ -1,6 +1,8 @@
 //! POST /api/visualize - Build a positioned plan tree for visualization.
 //! POST /api/compare-plans - Compare plan trees across optimizers.
 
+use ra_core::algebra::RelExpr;
+use ra_parser::sql_to_relexpr;
 use rocket::serde::json::Json;
 use serde::{Deserialize, Serialize};
 
@@ -251,67 +253,222 @@ fn build_plan_from_sql(
     sql: &str,
     _hardware_profile: Option<&String>,
 ) -> VisualPlanNode {
-    let sql_lower = sql.to_lowercase();
-    let has_join = sql_lower.contains("join");
-    let has_where = sql_lower.contains("where");
-    let has_group = sql_lower.contains("group by");
-    let has_order = sql_lower.contains("order by");
-
-    let mut id_counter = 0_u32;
-    let mut next_id = || {
-        id_counter += 1;
-        format!("ra-{id_counter}")
-    };
-
-    let scan = make_node(
-        next_id(), "SeqScan", 120.0, 10000,
-        vec![PlanDetail { key: "table".to_owned(), value: extract_table(sql) }],
-        vec![],
-    );
-    let mut current = scan;
-
-    if has_join {
-        let right_scan = make_node(
-            next_id(), "IdxScan", 45.0, 500,
-            vec![PlanDetail { key: "index".to_owned(), value: "pk_idx".to_owned() }],
+    let rel_expr = match sql_to_relexpr(sql) {
+        Ok(expr) => expr,
+        Err(_) => return make_node(
+            "ra-1".to_owned(), "Error", 0.0, 0,
+            vec![PlanDetail {
+                key: "error".to_owned(),
+                value: "Failed to parse SQL".to_owned(),
+            }],
             vec![],
-        );
-        current = make_node(
-            next_id(), "HashJoin", 350.0, 2500,
-            vec![PlanDetail { key: "condition".to_owned(), value: "a.id = b.id".to_owned() }],
-            vec![current, right_scan],
-        );
-    }
+        ),
+    };
+    let mut counter = 0_u32;
+    relexpr_to_visual(&rel_expr, &mut counter)
+}
 
-    if has_where {
-        current = make_node(
-            next_id(), "Filter", 80.0, current.rows / 4,
-            vec![PlanDetail { key: "predicate".to_owned(), value: extract_predicate(sql) }],
-            vec![current],
-        );
+fn relexpr_to_visual(
+    expr: &RelExpr,
+    counter: &mut u32,
+) -> VisualPlanNode {
+    *counter += 1;
+    let id = format!("ra-{counter}");
+    match expr {
+        RelExpr::Scan { table, alias } => {
+            let mut details = vec![PlanDetail {
+                key: "table".to_owned(),
+                value: table.clone(),
+            }];
+            if let Some(a) = alias {
+                details.push(PlanDetail {
+                    key: "alias".to_owned(),
+                    value: a.clone(),
+                });
+            }
+            make_node(id, "SeqScan", 100.0, 10000, details, vec![])
+        }
+        RelExpr::Filter { predicate, input } => {
+            let child = relexpr_to_visual(input, counter);
+            let rows = child.rows / 4;
+            make_node(id, "Filter", 50.0, rows, vec![PlanDetail {
+                key: "predicate".to_owned(),
+                value: format!("{predicate:?}"),
+            }], vec![child])
+        }
+        RelExpr::Project { columns, input } => {
+            let child = relexpr_to_visual(input, counter);
+            let col_names: Vec<String> = columns
+                .iter()
+                .map(|c| {
+                    c.alias.clone().unwrap_or_else(|| {
+                        format!("{:?}", c.expr)
+                    })
+                })
+                .collect();
+            make_node(
+                id, "Project", 10.0, child.rows,
+                vec![PlanDetail {
+                    key: "columns".to_owned(),
+                    value: col_names.join(", "),
+                }],
+                vec![child],
+            )
+        }
+        RelExpr::Join {
+            join_type,
+            condition,
+            left,
+            right,
+        } => {
+            let left_child = relexpr_to_visual(left, counter);
+            let right_child = relexpr_to_visual(right, counter);
+            let rows = (left_child.rows + right_child.rows) / 2;
+            make_node(
+                id, "HashJoin", 300.0, rows,
+                vec![
+                    PlanDetail {
+                        key: "join_type".to_owned(),
+                        value: format!("{join_type:?}"),
+                    },
+                    PlanDetail {
+                        key: "condition".to_owned(),
+                        value: format!("{condition:?}"),
+                    },
+                ],
+                vec![left_child, right_child],
+            )
+        }
+        RelExpr::Aggregate {
+            group_by,
+            aggregates,
+            input,
+        } => {
+            let child = relexpr_to_visual(input, counter);
+            let rows = if group_by.is_empty() {
+                1
+            } else {
+                child.rows / 10
+            };
+            make_node(
+                id, "HashAggregate", 200.0, rows,
+                vec![
+                    PlanDetail {
+                        key: "group_by".to_owned(),
+                        value: format!("{} key(s)", group_by.len()),
+                    },
+                    PlanDetail {
+                        key: "aggregates".to_owned(),
+                        value: format!("{} function(s)", aggregates.len()),
+                    },
+                ],
+                vec![child],
+            )
+        }
+        RelExpr::Sort { keys, input } => {
+            let child = relexpr_to_visual(input, counter);
+            make_node(
+                id, "Sort", 150.0, child.rows,
+                vec![PlanDetail {
+                    key: "keys".to_owned(),
+                    value: format!("{} key(s)", keys.len()),
+                }],
+                vec![child],
+            )
+        }
+        RelExpr::Limit { count, offset, input } => {
+            let child = relexpr_to_visual(input, counter);
+            let rows = (*count).min(child.rows);
+            make_node(
+                id, "Limit", 5.0, rows,
+                vec![
+                    PlanDetail {
+                        key: "count".to_owned(),
+                        value: count.to_string(),
+                    },
+                    PlanDetail {
+                        key: "offset".to_owned(),
+                        value: offset.to_string(),
+                    },
+                ],
+                vec![child],
+            )
+        }
+        RelExpr::Distinct { input } => {
+            let child = relexpr_to_visual(input, counter);
+            make_node(
+                id, "Distinct", 120.0, child.rows,
+                vec![], vec![child],
+            )
+        }
+        RelExpr::Union { all, left, right }
+        | RelExpr::Intersect { all, left, right }
+        | RelExpr::Except { all, left, right } => {
+            let op = match expr {
+                RelExpr::Union { .. } => "Union",
+                RelExpr::Intersect { .. } => "Intersect",
+                _ => "Except",
+            };
+            let left_child = relexpr_to_visual(left, counter);
+            let right_child = relexpr_to_visual(right, counter);
+            let rows = left_child.rows + right_child.rows;
+            make_node(
+                id, op, 80.0, rows,
+                vec![PlanDetail {
+                    key: "all".to_owned(),
+                    value: all.to_string(),
+                }],
+                vec![left_child, right_child],
+            )
+        }
+        RelExpr::CTE {
+            name,
+            definition,
+            body,
+        } => {
+            let def_child = relexpr_to_visual(definition, counter);
+            let body_child = relexpr_to_visual(body, counter);
+            make_node(
+                id, "CTE", 10.0, body_child.rows,
+                vec![PlanDetail {
+                    key: "name".to_owned(),
+                    value: name.clone(),
+                }],
+                vec![def_child, body_child],
+            )
+        }
+        RelExpr::Window { functions, input } => {
+            let child = relexpr_to_visual(input, counter);
+            make_node(
+                id, "WindowAgg", 180.0, child.rows,
+                vec![PlanDetail {
+                    key: "functions".to_owned(),
+                    value: format!("{} function(s)", functions.len()),
+                }],
+                vec![child],
+            )
+        }
+        other => {
+            let children: Vec<VisualPlanNode> = other
+                .children()
+                .into_iter()
+                .map(|c| relexpr_to_visual(c, counter))
+                .collect();
+            let rows = children.first().map_or(1000, |c| c.rows);
+            let label = format!("{other:?}");
+            let op_name = label
+                .find(|c: char| c == ' ' || c == '{' || c == '(')
+                .map_or(label.as_str(), |pos| &label[..pos]);
+            make_node(
+                id,
+                op_name,
+                50.0,
+                rows,
+                vec![],
+                children,
+            )
+        }
     }
-
-    if has_group {
-        current = make_node(
-            next_id(), "HashAggregate", 200.0, current.rows / 10,
-            vec![PlanDetail { key: "strategy".to_owned(), value: "hash".to_owned() }],
-            vec![current],
-        );
-    }
-
-    if has_order {
-        current = make_node(
-            next_id(), "Sort", 150.0, current.rows,
-            vec![PlanDetail { key: "method".to_owned(), value: "quicksort".to_owned() }],
-            vec![current],
-        );
-    }
-
-    make_node(
-        next_id(), "Project", 10.0, current.rows,
-        vec![PlanDetail { key: "columns".to_owned(), value: "*".to_owned() }],
-        vec![current],
-    )
 }
 
 fn build_pg_plan(sql: &str) -> VisualPlanNode {
@@ -438,27 +595,3 @@ fn extract_table(sql: &str) -> String {
     }
 }
 
-fn extract_predicate(sql: &str) -> String {
-    let lower = sql.to_lowercase();
-    let where_pos = lower.find("where ");
-    match where_pos {
-        Some(pos) => {
-            let rest = &sql[pos + 6..];
-            let trimmed = rest.trim_start();
-            let end = trimmed
-                .find([';', ')'])
-                .or_else(|| {
-                    let l = trimmed.to_lowercase();
-                    l.find("group ").or_else(|| {
-                        l.find("order ").or_else(|| {
-                            l.find("limit ")
-                                .or_else(|| l.find("having "))
-                        })
-                    })
-                })
-                .unwrap_or(trimmed.len());
-            trimmed[..end].trim().to_owned()
-        }
-        None => "true".to_owned(),
-    }
-}

@@ -9,17 +9,16 @@
 #![allow(clippy::cast_precision_loss)]
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use criterion::{
     black_box, criterion_group, criterion_main, BenchmarkId,
     Criterion,
 };
 
-use ra_core::algebra::{
-    AggregateExpr, AggregateFunction, JoinType, RelExpr,
-};
+use ra_core::algebra::RelExpr;
 use ra_core::distribution::{DataDistribution, NodeId};
-use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
+use ra_core::expr::{ColumnRef, Expr};
 use ra_core::statistics::Statistics;
 use ra_engine::distributed_optimizer::{
     ClusterTopology, DistributedOptimizer,
@@ -27,80 +26,12 @@ use ra_engine::distributed_optimizer::{
 };
 use ra_engine::network_cost::NetworkCostModel;
 use ra_hardware::network::NetworkTopology;
+use ra_parser::sql_to_relexpr;
 
-// ── expression helpers ───────────────────────────────────────────
+// ── helpers ──────────────────────────────────────────────────────
 
 fn col(name: &str) -> Expr {
     Expr::Column(ColumnRef::new(name))
-}
-
-fn eq(left: Expr, right: Expr) -> Expr {
-    Expr::BinOp {
-        op: BinOp::Eq,
-        left: Box::new(left),
-        right: Box::new(right),
-    }
-}
-
-fn gt(left: Expr, right: Expr) -> Expr {
-    Expr::BinOp {
-        op: BinOp::Gt,
-        left: Box::new(left),
-        right: Box::new(right),
-    }
-}
-
-fn lt(left: Expr, right: Expr) -> Expr {
-    Expr::BinOp {
-        op: BinOp::Lt,
-        left: Box::new(left),
-        right: Box::new(right),
-    }
-}
-
-fn and(left: Expr, right: Expr) -> Expr {
-    Expr::BinOp {
-        op: BinOp::And,
-        left: Box::new(left),
-        right: Box::new(right),
-    }
-}
-
-fn mul(left: Expr, right: Expr) -> Expr {
-    Expr::BinOp {
-        op: BinOp::Mul,
-        left: Box::new(left),
-        right: Box::new(right),
-    }
-}
-
-fn sub(left: Expr, right: Expr) -> Expr {
-    Expr::BinOp {
-        op: BinOp::Sub,
-        left: Box::new(left),
-        right: Box::new(right),
-    }
-}
-
-fn int(v: i64) -> Expr {
-    Expr::Const(Const::Int(v))
-}
-
-fn float(v: f64) -> Expr {
-    Expr::Const(Const::Float(v))
-}
-
-fn str_const(v: &str) -> Expr {
-    Expr::Const(Const::String(v.into()))
-}
-
-fn agg(func: AggregateFunction, arg: Expr) -> AggregateExpr {
-    AggregateExpr {
-        function: func,
-        arg: Some(arg),
-        distinct: false,
-        alias: None,
-    }
 }
 
 fn hw_node(id: u32) -> ra_hardware::network::NodeId {
@@ -127,278 +58,31 @@ fn register_tpch_stats(opt: &mut DistributedOptimizer) {
     opt.register_stats("partsupp", make_stats(800_000.0, 144));
 }
 
-// ── TPC-H queries ────────────────────────────────────────────────
+// ── TPC-H queries (loaded from SQL files) ────────────────────────
 
-/// Q1: Pricing summary report (aggregation with filter).
-fn tpch_q1() -> RelExpr {
-    let scan = RelExpr::scan("lineitem").filter(lt(
-        col("l_shipdate"),
-        str_const("1998-09-02"),
-    ));
-    RelExpr::Aggregate {
-        input: Box::new(scan),
-        group_by: vec![col("l_returnflag"), col("l_linestatus")],
-        aggregates: vec![
-            agg(AggregateFunction::Sum, col("l_quantity")),
-            agg(
-                AggregateFunction::Sum,
-                col("l_extendedprice"),
-            ),
-            agg(
-                AggregateFunction::Sum,
-                mul(
-                    col("l_extendedprice"),
-                    sub(int(1), col("l_discount")),
-                ),
-            ),
-            agg(AggregateFunction::Count, col("l_orderkey")),
-        ],
-    }
+fn tpch_queries_dir() -> PathBuf {
+    let mut dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    dir.pop(); // crates/
+    dir.pop(); // project root
+    dir.push("benchmarks/tpch/queries");
+    dir
 }
 
-/// Q3: Shipping priority (join + aggregation).
-fn tpch_q3() -> RelExpr {
-    let cust =
-        RelExpr::scan("customer").filter(eq(
-            col("c_mktsegment"),
-            str_const("BUILDING"),
-        ));
-    let orders = RelExpr::scan("orders").filter(lt(
-        col("o_orderdate"),
-        str_const("1995-03-15"),
-    ));
-    let lineitem = RelExpr::scan("lineitem").filter(gt(
-        col("l_shipdate"),
-        str_const("1995-03-15"),
-    ));
-    let co_join = RelExpr::Join {
-        join_type: JoinType::Inner,
-        condition: eq(col("c_custkey"), col("o_custkey")),
-        left: Box::new(cust),
-        right: Box::new(orders),
-    };
-    let col_join = RelExpr::Join {
-        join_type: JoinType::Inner,
-        condition: eq(col("l_orderkey"), col("o_orderkey")),
-        left: Box::new(co_join),
-        right: Box::new(lineitem),
-    };
-    RelExpr::Aggregate {
-        input: Box::new(col_join),
-        group_by: vec![
-            col("l_orderkey"),
-            col("o_orderdate"),
-            col("o_shippriority"),
-        ],
-        aggregates: vec![agg(
-            AggregateFunction::Sum,
-            mul(
-                col("l_extendedprice"),
-                sub(int(1), col("l_discount")),
-            ),
-        )],
-    }
+fn load_tpch_query(name: &str) -> RelExpr {
+    let path = tpch_queries_dir().join(name);
+    let sql = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    sql_to_relexpr(&sql)
+        .unwrap_or_else(|e| panic!("parse {name}: {e}"))
 }
 
-/// Q5: Local supplier volume (multi-table join).
-fn tpch_q5() -> RelExpr {
-    let region = RelExpr::scan("region").filter(eq(
-        col("r_name"),
-        str_const("ASIA"),
-    ));
-    let nr_join = RelExpr::Join {
-        join_type: JoinType::Inner,
-        condition: eq(col("n_regionkey"), col("r_regionkey")),
-        left: Box::new(RelExpr::scan("nation")),
-        right: Box::new(region),
-    };
-    let cn_join = RelExpr::Join {
-        join_type: JoinType::Inner,
-        condition: eq(col("c_nationkey"), col("n_nationkey")),
-        left: Box::new(RelExpr::scan("customer")),
-        right: Box::new(nr_join),
-    };
-    let oc_join = RelExpr::Join {
-        join_type: JoinType::Inner,
-        condition: eq(col("o_custkey"), col("c_custkey")),
-        left: Box::new(RelExpr::scan("orders")),
-        right: Box::new(cn_join),
-    };
-    let lo_join = RelExpr::Join {
-        join_type: JoinType::Inner,
-        condition: eq(col("l_orderkey"), col("o_orderkey")),
-        left: Box::new(RelExpr::scan("lineitem")),
-        right: Box::new(oc_join),
-    };
-    let ls_join = RelExpr::Join {
-        join_type: JoinType::Inner,
-        condition: and(
-            eq(col("l_suppkey"), col("s_suppkey")),
-            eq(col("s_nationkey"), col("c_nationkey")),
-        ),
-        left: Box::new(lo_join),
-        right: Box::new(RelExpr::scan("supplier")),
-    };
-    RelExpr::Aggregate {
-        input: Box::new(ls_join),
-        group_by: vec![col("n_name")],
-        aggregates: vec![agg(
-            AggregateFunction::Sum,
-            mul(
-                col("l_extendedprice"),
-                sub(int(1), col("l_discount")),
-            ),
-        )],
-    }
-}
-
-/// Q6: Forecasting revenue change (simple filter + aggregation).
-fn tpch_q6() -> RelExpr {
-    let scan = RelExpr::scan("lineitem").filter(and(
-        and(
-            gt(col("l_shipdate"), str_const("1994-01-01")),
-            lt(col("l_shipdate"), str_const("1995-01-01")),
-        ),
-        and(
-            gt(col("l_discount"), float(0.05)),
-            lt(col("l_quantity"), int(24)),
-        ),
-    ));
-    RelExpr::Aggregate {
-        input: Box::new(scan),
-        group_by: vec![],
-        aggregates: vec![agg(
-            AggregateFunction::Sum,
-            mul(col("l_extendedprice"), col("l_discount")),
-        )],
-    }
-}
-
-/// Q8: National market share (8-table join).
-fn tpch_q8() -> RelExpr {
-    let region = RelExpr::scan("region").filter(eq(
-        col("r_name"),
-        str_const("AMERICA"),
-    ));
-    let nr_join = RelExpr::Join {
-        join_type: JoinType::Inner,
-        condition: eq(col("n_regionkey"), col("r_regionkey")),
-        left: Box::new(RelExpr::scan("nation")),
-        right: Box::new(region),
-    };
-    let cn_join = RelExpr::Join {
-        join_type: JoinType::Inner,
-        condition: eq(col("c_nationkey"), col("n_nationkey")),
-        left: Box::new(RelExpr::scan("customer")),
-        right: Box::new(nr_join),
-    };
-    let oc_join = RelExpr::Join {
-        join_type: JoinType::Inner,
-        condition: eq(col("o_custkey"), col("c_custkey")),
-        left: Box::new(
-            RelExpr::scan("orders").filter(and(
-                gt(col("o_orderdate"), str_const("1995-01-01")),
-                lt(col("o_orderdate"), str_const("1996-12-31")),
-            )),
-        ),
-        right: Box::new(cn_join),
-    };
-    let lo_join = RelExpr::Join {
-        join_type: JoinType::Inner,
-        condition: eq(col("l_orderkey"), col("o_orderkey")),
-        left: Box::new(RelExpr::scan("lineitem")),
-        right: Box::new(oc_join),
-    };
-    let ps_join = RelExpr::Join {
-        join_type: JoinType::Inner,
-        condition: eq(col("l_suppkey"), col("s_suppkey")),
-        left: Box::new(lo_join),
-        right: Box::new(RelExpr::scan("supplier")),
-    };
-    let part = RelExpr::scan("part").filter(eq(
-        col("p_type"),
-        str_const("ECONOMY ANODIZED STEEL"),
-    ));
-    let lp_join = RelExpr::Join {
-        join_type: JoinType::Inner,
-        condition: eq(col("l_partkey"), col("p_partkey")),
-        left: Box::new(ps_join),
-        right: Box::new(part),
-    };
-    RelExpr::Aggregate {
-        input: Box::new(lp_join),
-        group_by: vec![col("o_year")],
-        aggregates: vec![agg(
-            AggregateFunction::Sum,
-            col("volume"),
-        )],
-    }
-}
-
-/// Q13: Customer distribution (left outer join).
-fn tpch_q13() -> RelExpr {
-    let co_join = RelExpr::Join {
-        join_type: JoinType::LeftOuter,
-        condition: eq(col("c_custkey"), col("o_custkey")),
-        left: Box::new(RelExpr::scan("customer")),
-        right: Box::new(RelExpr::scan("orders")),
-    };
-    let inner = RelExpr::Aggregate {
-        input: Box::new(co_join),
-        group_by: vec![col("c_custkey")],
-        aggregates: vec![agg(
-            AggregateFunction::Count,
-            col("o_orderkey"),
-        )],
-    };
-    RelExpr::Aggregate {
-        input: Box::new(inner),
-        group_by: vec![col("c_count")],
-        aggregates: vec![agg(
-            AggregateFunction::Count,
-            col("c_custkey"),
-        )],
-    }
-}
-
-/// Q18: Large volume customer (group by + having equivalent).
-fn tpch_q18() -> RelExpr {
-    let sub_agg = RelExpr::Aggregate {
-        input: Box::new(RelExpr::scan("lineitem")),
-        group_by: vec![col("l_orderkey")],
-        aggregates: vec![agg(
-            AggregateFunction::Sum,
-            col("l_quantity"),
-        )],
-    };
-    let sub_filter = sub_agg.filter(gt(col("sum_qty"), int(300)));
-    let co_join = RelExpr::Join {
-        join_type: JoinType::Inner,
-        condition: eq(col("c_custkey"), col("o_custkey")),
-        left: Box::new(RelExpr::scan("customer")),
-        right: Box::new(RelExpr::scan("orders")),
-    };
-    let main_join = RelExpr::Join {
-        join_type: JoinType::Inner,
-        condition: eq(col("o_orderkey"), col("l_orderkey")),
-        left: Box::new(co_join),
-        right: Box::new(sub_filter),
-    };
-    RelExpr::Aggregate {
-        input: Box::new(main_join),
-        group_by: vec![
-            col("c_name"),
-            col("c_custkey"),
-            col("o_orderkey"),
-            col("o_orderdate"),
-            col("o_totalprice"),
-        ],
-        aggregates: vec![agg(
-            AggregateFunction::Sum,
-            col("l_quantity"),
-        )],
-    }
-}
+fn tpch_q1() -> RelExpr { load_tpch_query("q1.sql") }
+fn tpch_q3() -> RelExpr { load_tpch_query("q3.sql") }
+fn tpch_q5() -> RelExpr { load_tpch_query("q5.sql") }
+fn tpch_q6() -> RelExpr { load_tpch_query("q6.sql") }
+fn tpch_q8() -> RelExpr { load_tpch_query("q8.sql") }
+fn tpch_q13() -> RelExpr { load_tpch_query("q13.sql") }
+fn tpch_q18() -> RelExpr { load_tpch_query("q18.sql") }
 
 // ── topology builders ────────────────────────────────────────────
 

@@ -3,74 +3,11 @@
 //! Run with:
 //!   RUST_LOG=ra_engine=info cargo run --release --example profile_job_query
 
-use ra_core::algebra::{AggregateExpr, AggregateFunction, JoinType, RelExpr};
-use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
+#![allow(clippy::expect_used)]
+
 use ra_core::statistics::Statistics;
 use ra_engine::Optimizer;
-
-fn col(name: &str) -> Expr {
-    Expr::Column(ColumnRef::new(name))
-}
-
-fn eq(left: Expr, right: Expr) -> Expr {
-    Expr::BinOp {
-        op: BinOp::Eq,
-        left: Box::new(left),
-        right: Box::new(right),
-    }
-}
-
-fn and(left: Expr, right: Expr) -> Expr {
-    Expr::BinOp {
-        op: BinOp::And,
-        left: Box::new(left),
-        right: Box::new(right),
-    }
-}
-
-fn str_const(v: &str) -> Expr {
-    Expr::Const(Const::String(v.into()))
-}
-
-fn agg(func: AggregateFunction, arg: Expr) -> AggregateExpr {
-    AggregateExpr {
-        function: func,
-        arg: Some(arg),
-        distinct: false,
-        alias: None,
-    }
-}
-
-fn scan(name: &str) -> RelExpr {
-    RelExpr::Scan {
-        table: name.to_string(),
-        alias: None,
-    }
-}
-
-fn join(left: RelExpr, right: RelExpr, cond: Expr) -> RelExpr {
-    RelExpr::Join {
-        join_type: JoinType::Inner,
-        condition: cond,
-        left: Box::new(left),
-        right: Box::new(right),
-    }
-}
-
-fn filter(input: RelExpr, pred: Expr) -> RelExpr {
-    RelExpr::Filter {
-        predicate: pred,
-        input: Box::new(input),
-    }
-}
-
-fn aggregate(input: RelExpr, group_by: Vec<Expr>, aggs: Vec<AggregateExpr>) -> RelExpr {
-    RelExpr::Aggregate {
-        group_by,
-        aggregates: aggs,
-        input: Box::new(input),
-    }
-}
+use ra_parser::sql_to_relexpr;
 
 fn make_stats(rows: f64, avg_row_size: u64) -> Statistics {
     let mut s = Statistics::new(rows);
@@ -111,91 +48,37 @@ fn make_optimizer() -> Optimizer {
     opt
 }
 
-/// JOB Query 13a: 7-way join with ratings
-fn job_q13a() -> RelExpr {
-    let cn_filtered = filter(
-        scan("company_name"),
-        eq(col("country_code"), str_const("[us]")),
-    );
-
-    let ct_filtered = filter(
-        scan("company_type"),
-        eq(col("kind"), str_const("production companies")),
-    );
-
-    let it_filtered = filter(scan("info_type"), eq(col("info"), str_const("rating")));
-
-    let kt_filtered = filter(scan("kind_type"), eq(col("kind"), str_const("movie")));
-
-    let cn_mc = join(
-        cn_filtered,
-        scan("movie_companies"),
-        eq(col("cn.id"), col("mc.company_id")),
-    );
-
-    let cn_mc_ct = join(
-        cn_mc,
-        ct_filtered,
-        eq(col("mc.company_type_id"), col("ct.id")),
-    );
-
-    let cn_mc_ct_t = join(
-        cn_mc_ct,
-        scan("title"),
-        eq(col("mc.movie_id"), col("t.id")),
-    );
-
-    let cn_mc_ct_t_kt = join(
-        cn_mc_ct_t,
-        kt_filtered,
-        eq(col("t.kind_id"), col("kt.id")),
-    );
-
-    let cn_mc_ct_t_kt_miidx = join(
-        cn_mc_ct_t_kt,
-        scan("movie_info_idx"),
-        eq(col("t.id"), col("miidx.movie_id")),
-    );
-
-    let full_join = join(
-        cn_mc_ct_t_kt_miidx,
-        it_filtered,
-        eq(col("miidx.info_type_id"), col("it.id")),
-    );
-
-    aggregate(
-        full_join,
-        vec![],
-        vec![
-            agg(AggregateFunction::Min, col("cn.name")),
-            agg(AggregateFunction::Min, col("miidx.info")),
-            agg(AggregateFunction::Min, col("t.title")),
-        ],
-    )
-}
-
 fn main() {
-    // Initialize tracing
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::INFO)
         .init();
 
-    println!("Profiling JOB Query 13a (7-way join)");
-    println!("=====================================\n");
+    println!("Profiling JOB Query 13a (multi-table join)");
+    println!("==========================================\n");
+
+    let mut query_path =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    query_path.pop(); // crates/
+    query_path.pop(); // project root
+    query_path.push("benchmarks/job/queries/13a.sql");
+
+    let sql = std::fs::read_to_string(&query_path)
+        .expect("JOB 13a SQL file not found");
+    let query = sql_to_relexpr(&sql)
+        .expect("Failed to parse JOB 13a");
 
     let optimizer = make_optimizer();
-    let query = job_q13a();
 
-    println!("Running optimization (this will take ~1 second)...\n");
+    println!("Running optimization...\n");
 
     let start = std::time::Instant::now();
     match optimizer.optimize(&query) {
         Ok(_optimized) => {
             let elapsed = start.elapsed();
-            println!("\n✓ Optimization complete in {:?}", elapsed);
+            println!("\nOptimization complete in {elapsed:?}");
         }
         Err(e) => {
-            eprintln!("✗ Optimization failed: {}", e);
+            eprintln!("Optimization failed: {e}");
             std::process::exit(1);
         }
     }
