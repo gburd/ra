@@ -53,6 +53,8 @@ pub mod memo;
 pub mod network_cost;
 pub mod null_simplification;
 pub mod parquet_pushdown;
+pub mod plan_stitch;
+pub mod progressive_reopt;
 pub mod query_complexity;
 pub mod beam_search;
 pub mod convergence;
@@ -164,3 +166,14 @@ pub use beam_search::{BeamSearchConfig, BeamSearchStats, BeamSearchTracker};
 pub use cost_pruning::{CostPruner, PruningStats};
 pub use join_graph::{JoinGraph, JoinGraphStats};
 pub use stats_cache::{StatsCache, StatsCacheBuilder};
+pub use progressive_reopt::{
+    DivergenceInfo, ReoptConfig, ReoptDecision, RuntimeStatistics,
+    StitchPointKind, StitchPointMeta, StitchTransferKind, JoinImplKind,
+    divergence_factor, estimate_remaining_cost, estimate_stitch_cost,
+    evaluate_reopt_decision, insert_stitch_points, is_switch_worthwhile,
+    join_transfer_kind, should_reoptimize,
+};
+pub use plan_stitch::{
+    OperatorState, StitchResult, count_stitch_points,
+    find_deepest_join, stitch_plans,
+};
