@@ -1,50 +1,86 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Downloads the IMDB dataset (CSV files) and JOB query files.
+#
+# CSV data: May 2013 snapshot from CWI (~1.2 GB compressed)
+# Queries:  113 SQL queries from the JOB repository
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DATA_DIR="${SCRIPT_DIR}/data"
+QUERIES_DIR="${SCRIPT_DIR}/queries"
+
+DATA_URL="http://event.cwi.nl/da/job/imdb.tgz"
 REPO_URL="https://github.com/gregrahn/join-order-benchmark.git"
-DATA_DIR="benchmarks/job/data"
-QUERIES_DIR="benchmarks/job/queries"
+TMP_DIR="${TMPDIR:-/tmp}/job-download-$$"
 
-echo "Downloading Join Order Benchmark..."
-git clone --depth 1 "$REPO_URL" /tmp/job-repo
+cleanup() {
+    rm -rf "$TMP_DIR"
+}
+trap cleanup EXIT
 
-echo "Copying data files..."
-mkdir -p "$DATA_DIR"
-# Try multiple locations where CSV files might be
-if compgen -G "/tmp/job-repo/*.csv" > /dev/null; then
-    cp /tmp/job-repo/*.csv "$DATA_DIR/"
+mkdir -p "$TMP_DIR"
+
+# -- Download CSV data from CWI archive --
+if [ -d "$DATA_DIR" ] && ls "$DATA_DIR"/*.csv >/dev/null 2>&1; then
+    csv_count=$(find "$DATA_DIR" -maxdepth 1 -name "*.csv" | wc -l | tr -d ' ')
+    echo "Data directory already has $csv_count CSV files, skipping download."
+    echo "  (Delete $DATA_DIR to force re-download)"
+else
+    mkdir -p "$DATA_DIR"
+    echo "Downloading IMDB CSV data from CWI archive..."
+    echo "  URL: $DATA_URL"
+    echo "  This is ~1.2 GB and may take a while."
+
+    if command -v curl >/dev/null 2>&1; then
+        curl -L --progress-bar -o "$TMP_DIR/imdb.tgz" "$DATA_URL"
+    elif command -v wget >/dev/null 2>&1; then
+        wget --show-progress -O "$TMP_DIR/imdb.tgz" "$DATA_URL"
+    else
+        echo "Error: curl or wget required" >&2
+        exit 1
+    fi
+
+    echo "Extracting CSV files..."
+    tar -xzf "$TMP_DIR/imdb.tgz" -C "$DATA_DIR"
+
+    csv_count=$(find "$DATA_DIR" -maxdepth 1 -name "*.csv" | wc -l | tr -d ' ')
+    echo "Extracted $csv_count CSV files to $DATA_DIR"
 fi
-if compgen -G "/tmp/job-repo/data/*.csv" > /dev/null; then
-    cp /tmp/job-repo/data/*.csv "$DATA_DIR/"
+
+# -- Download JOB queries from GitHub --
+if [ -d "$QUERIES_DIR" ] && ls "$QUERIES_DIR"/*.sql >/dev/null 2>&1; then
+    sql_count=$(find "$QUERIES_DIR" -maxdepth 1 -name "*.sql" | wc -l | tr -d ' ')
+    echo "Queries directory already has $sql_count SQL files, skipping download."
+    echo "  (Delete $QUERIES_DIR to force re-download)"
+else
+    mkdir -p "$QUERIES_DIR"
+    echo "Cloning JOB query repository..."
+
+    git clone --depth 1 "$REPO_URL" "$TMP_DIR/job-repo"
+
+    # Copy only numbered query files (e.g., 1a.sql through 33c.sql)
+    query_count=0
+    for sql_file in "$TMP_DIR/job-repo"/[0-9]*.sql; do
+        if [ -f "$sql_file" ]; then
+            cp "$sql_file" "$QUERIES_DIR/"
+            query_count=$((query_count + 1))
+        fi
+    done
+
+    echo "Copied $query_count query files to $QUERIES_DIR"
 fi
-find /tmp/job-repo -name "*.csv" -type f -exec cp {} "$DATA_DIR/" \; 2>/dev/null || true
 
-echo "Copying query files..."
-mkdir -p "$QUERIES_DIR"
-# Try multiple locations where SQL files might be
-if compgen -G "/tmp/job-repo/*.sql" > /dev/null; then
-    cp /tmp/job-repo/*.sql "$QUERIES_DIR/"
-fi
-if compgen -G "/tmp/job-repo/queries/*.sql" > /dev/null; then
-    cp /tmp/job-repo/queries/*.sql "$QUERIES_DIR/"
-fi
-find /tmp/job-repo -name "*.sql" -type f -exec cp {} "$QUERIES_DIR/" \; 2>/dev/null || true
-
-echo "Cleaning up..."
-rm -rf /tmp/job-repo
-
-csv_count=$(find "$DATA_DIR" -name "*.csv" -type f | wc -l | tr -d ' ')
-sql_count=$(find "$QUERIES_DIR" -name "*.sql" -type f | wc -l | tr -d ' ')
-
-echo "✓ Downloaded $csv_count CSV files"
-echo "✓ Downloaded $sql_count SQL query files"
+echo ""
+echo "=== Download Summary ==="
+csv_count=$(find "$DATA_DIR" -maxdepth 1 -name "*.csv" 2>/dev/null | wc -l | tr -d ' ')
+sql_count=$(find "$QUERIES_DIR" -maxdepth 1 -name "*.sql" 2>/dev/null | wc -l | tr -d ' ')
+echo "  CSV data files: $csv_count (expected: 21)"
+echo "  SQL query files: $sql_count (expected: 113)"
 
 if [ "$csv_count" -eq 0 ]; then
-    echo "⚠ No CSV files found. You may need to download them separately from:"
-    echo "  https://github.com/gregrahn/join-order-benchmark"
-fi
-
-if [ "$sql_count" -eq 0 ]; then
-    echo "⚠ No SQL files found. You may need to download them separately from:"
-    echo "  https://github.com/gregrahn/join-order-benchmark"
+    echo ""
+    echo "WARNING: No CSV files found. The CWI archive may be unavailable."
+    echo "  Alternative: export from a PostgreSQL IMDB database."
+    echo "  See: https://github.com/gregrahn/join-order-benchmark#readme"
 fi
