@@ -22,7 +22,7 @@ The workflow automatically:
 5. Deploys to GitHub Pages
 
 **Required settings**:
-- Repository Settings → Pages → Source: "GitHub Actions"
+- Repository Settings -> Pages -> Source: "GitHub Actions"
 
 ### Netlify
 
@@ -37,7 +37,7 @@ Netlify provides continuous deployment with automatic builds from Git.
    - Sign up with GitHub, GitLab, Bitbucket, or email
 
 2. **Connect Repository**:
-   - Click "Add new site" → "Import an existing project"
+   - Click "Add new site" -> "Import an existing project"
    - Choose your Git provider (GitHub, GitLab, Bitbucket, Codeberg)
    - Authorize Netlify to access your repositories
    - Select the `ra` repository
@@ -57,7 +57,7 @@ Netlify provides continuous deployment with automatic builds from Git.
 #### Custom Domain
 
 1. **Add Custom Domain**:
-   - Go to Site settings → Domain management
+   - Go to Site settings -> Domain management
    - Click "Add custom domain"
    - Enter your domain (e.g., `docs.ra-optimizer.org`)
 
@@ -82,7 +82,7 @@ Netlify automatically creates preview deployments for pull requests:
 
 #### Build Notifications
 
-Configure notifications in Site settings → Build & deploy → Deploy notifications:
+Configure notifications in Site settings -> Build & deploy -> Deploy notifications:
 - Email notifications for build success/failure
 - Slack webhook integration
 - GitHub commit status checks
@@ -109,17 +109,17 @@ Codeberg Pages provides an alternative free static hosting platform.
 #### Initial Setup
 
 1. **Enable Forgejo Actions** (if using Actions-based deployment):
-   - Go to repository Settings → Units
+   - Go to repository Settings -> Units
    - Enable "Actions" in the list
    - Alternatively, use direct webhook method (see below)
 
 2. **Create Pages Access Token**:
-   - Go to your Codeberg user Settings → Applications
+   - Go to your Codeberg user Settings -> Applications
    - Create a new token with `repository` scope
    - Copy the token value
 
 3. **Add Token as Secret**:
-   - Go to repository Settings → Secrets and Variables → Actions
+   - Go to repository Settings -> Secrets and Variables -> Actions
    - Create a new secret named `PAGES_TOKEN`
    - Paste the token value
 
@@ -159,7 +159,7 @@ For simpler setup without CI runners:
    ```
 
 3. Configure webhook:
-   - Go to repository Settings → Webhooks
+   - Go to repository Settings -> Webhooks
    - Add webhook with target URL
    - Set branch filter to `pages`
 
@@ -188,7 +188,7 @@ To use a custom domain like `docs.example.com`:
 - Check workflow runs in Actions tab
 - Verify `PAGES_TOKEN` secret is set correctly
 - Ensure `pages` branch has content
-- Check webhook logs in Settings → Webhooks
+- Check webhook logs in Settings -> Webhooks
 
 **Build failures:**
 - Check Actions logs for error messages
@@ -208,7 +208,7 @@ For advanced features like preview deployments and form handling.
 
 1. Connect repository to Netlify:
    - Sign up at https://netlify.com
-   - Click "Add new site" → "Import an existing project"
+   - Click "Add new site" -> "Import an existing project"
    - Connect to GitHub/Codeberg
    - Select the ra repository
 
@@ -254,12 +254,12 @@ The combined documentation includes:
 
 ```
 /                       # VitePress documentation (main site)
-├── guides/            # User and developer guides
-├── concepts/          # Core concepts
-├── features/          # Feature documentation
-├── api-reference.html # API overview
-└── api/
-    └── rust/          # Rustdoc API documentation
+|---- guides/            # User and developer guides
+|---- concepts/          # Core concepts
+|---- features/          # Feature documentation
+|---- api-reference.html # API overview
+`---- api/
+    `---- rust/          # Rustdoc API documentation
 ```
 
 ## Web Application Deployment
@@ -908,7 +908,7 @@ docker exec ra-web env | grep STATIC_DIR
 
 - **DigitalOcean**: $6-12/month (1-2GB RAM)
 - **Linode**: $5-10/month (1-2GB RAM)
-- **Hetzner**: €4-8/month (2-4GB RAM)
+- **Hetzner**: EUR4-8/month (2-4GB RAM)
 
 ## Next Steps
 

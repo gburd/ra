@@ -150,7 +150,7 @@ optimizer.config.broadcast_max_ratio = 0.01; // Small table < 1% of large
 
 ## Examples
 
-### Star Schema: Fact ⋈ Dimensions
+### Star Schema: Fact $\bowtie$ Dimensions
 
 ```sql
 -- Fact table: 1B rows, 200GB
@@ -177,7 +177,7 @@ WHERE d.year = 2024;
 **Network cost:**
 - Broadcast: $50\text{MB} \times 100\text{ nodes} = 5\text{GB}$
 - Shuffle alternative: $200\text{GB} \times 2 = 400\text{GB}$ (fact + dims)
-- **Savings: 395GB network transfer → 80x reduction**
+- **Savings: 395GB network transfer -> 80x reduction**
 
 ### Lookup Table Join
 
@@ -220,7 +220,7 @@ GROUP BY p.product_name, c.category_name, b.brand_name;
 1. Broadcast `categories` (100KB) and `brands` (500KB) to all nodes
 2. Broadcast `products` (25MB) to all nodes
 3. Each node joins local `order_items` partition
-4. Total broadcast: 26MB → much smaller than 100GB shuffle
+4. Total broadcast: 26MB -> much smaller than 100GB shuffle
 
 ## Broadcast vs Shuffle Decision Tree
 
@@ -247,7 +247,7 @@ flowchart TD
 | 100MB | 1TB | 50 | 20s | 1800s | **90x** |
 | 500MB | 1TB | 50 | 100s | 1800s | **18x** |
 
-**Crossover point:** When small table × nodes ≈ large table size, shuffle becomes better.
+**Crossover point:** When small table $\times$ nodes $\approx$ large table size, shuffle becomes better.
 
 ## Broadcast Strategies
 
@@ -291,7 +291,7 @@ Ra supports all three strategies via configuration.
 
 ## Common Pitfalls
 
-### ❌ Broadcasting Large Tables
+### [FAIL] Broadcasting Large Tables
 
 ```sql
 -- customers: 10M rows, 5GB (TOO LARGE)
@@ -301,7 +301,7 @@ JOIN customers c ON o.customer_id = c.customer_id;
 
 **Fix:** Use shuffle join or partition both tables on join key.
 
-### ❌ Broadcasting Both Tables
+### [FAIL] Broadcasting Both Tables
 
 ```sql
 -- Both tables small
@@ -313,7 +313,7 @@ Ra might broadcast both, causing redundant network traffic.
 
 **Fix:** Only broadcast one table, collect the other to coordinator.
 
-### ❌ Broadcast + Large Result Set
+### [FAIL] Broadcast + Large Result Set
 
 ```sql
 -- Broadcast products, but Cartesian product result is huge
@@ -339,7 +339,7 @@ WHERE c.status = 'active'
 ```
 
 **Optimization:**
-1. Filter `customers` to only `status='active'` (reduces 10K → 8K rows)
+1. Filter `customers` to only `status='active'` (reduces 10K -> 8K rows)
 2. Broadcast filtered customers (20% smaller)
 3. Filter `orders` locally on each node
 4. Execute join

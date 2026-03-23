@@ -172,7 +172,7 @@ fn validation_error_names_the_field() {
     );
 }
 
-// ── Round-trip (parse metadata → verify fields) ─────────────
+// ── Round-trip (parse metadata -> verify fields) ─────────────
 
 #[test]
 fn metadata_round_trip_for_all_valid_fixtures() {

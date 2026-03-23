@@ -43,7 +43,7 @@ read instead of a leaf-page read plus a random heap-page read.
 ```algebra
 pi[cols](sigma[pred](R))
   -> index_only_scan[I_covering](pred)
-  where is_covering(I, cols ∪ pred_columns)
+  where is_covering(I, cols $\cup$ pred_columns)
 ```
 
 ## Implementation

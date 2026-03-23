@@ -44,7 +44,7 @@ ratio), this eliminates the visibility check overhead as well.
 ```algebra
 pi[cols](sigma[pred](R))
   -> index_only_scan[I](pred)
-  where covers(I, cols ∪ pred_cols)
+  where covers(I, cols $\cup$ pred_cols)
     AND all_visible_ratio(R) > 0.9
 ```
 

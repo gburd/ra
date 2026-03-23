@@ -33,8 +33,8 @@ self-joins or subqueries.
 ## Relational Algebra
 
 ```algebra
-π_[col1, AGG(col2)](R) where no GROUP BY ->
-  π_[col1, AGG(col2) OVER()](R)
+$\pi$_[col1, AGG(col2)](R) where no GROUP BY ->
+  $\pi$_[col1, AGG(col2) OVER()](R)
 ```
 
 ## Implementation
@@ -84,8 +84,8 @@ fn estimated_benefit(
     // Cost: O(n^2) due to correlated subquery
 
     // Window function cost: O(n) for full partition aggregates
-    let window_cost = rows * 0.00001; // 10μs per row
-    let subquery_cost = rows * rows * 0.000001; // 1μs per pair
+    let window_cost = rows * 0.00001; // 10$\mu$s per row
+    let subquery_cost = rows * rows * 0.000001; // 1$\mu$s per pair
 
     if subquery_cost > window_cost {
         (subquery_cost - window_cost) / subquery_cost

@@ -49,7 +49,7 @@ fn print_help() {
 }
 
 fn docs_build() {
-    println!("📚 Building documentation...");
+    println!(" Building documentation...");
 
     let docs_dir = project_root().join("docs");
 
@@ -62,12 +62,12 @@ fn docs_build() {
 
     // Install dependencies if node_modules doesn't exist
     if !docs_dir.join("node_modules").exists() {
-        println!("📦 Installing npm dependencies...");
+        println!(" Installing npm dependencies...");
         run_command("npm", &["install"], &docs_dir);
     }
 
     // Build docs
-    println!("🔨 Building VitePress site...");
+    println!(" Building VitePress site...");
     run_command("npm", &["run", "build:docs"], &docs_dir);
 
     println!("✅ Documentation built successfully!");
@@ -78,7 +78,7 @@ fn docs_build() {
 }
 
 fn docs_serve() {
-    println!("📚 Building and serving documentation...");
+    println!(" Building and serving documentation...");
 
     let docs_dir = project_root().join("docs");
 
@@ -91,12 +91,12 @@ fn docs_serve() {
 
     // Install dependencies if node_modules doesn't exist
     if !docs_dir.join("node_modules").exists() {
-        println!("📦 Installing npm dependencies...");
+        println!(" Installing npm dependencies...");
         run_command("npm", &["install"], &docs_dir);
     }
 
     // Run VitePress dev server
-    println!("🚀 Starting VitePress dev server...");
+    println!(" Starting VitePress dev server...");
     println!();
     println!("Documentation will be available at:");
     println!("   http://localhost:5173");

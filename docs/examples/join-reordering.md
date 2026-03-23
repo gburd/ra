@@ -19,16 +19,16 @@ Left-deep join tree in query order:
 
 ```
 Join(p.supplier_id = s.id)
-  ├── Join(o.product_id = p.id)
-  │   ├── Join(o.customer_id = c.id)
-  │   │   ├── Scan(orders)      -- 10M rows
-  │   │   └── Scan(customers)   -- 1M rows
-  │   └── Scan(products)         -- 100K rows
-  └── Filter(country = 'USA')
-      └── Scan(suppliers)        -- 10K rows → 500 rows
+  |---- Join(o.product_id = p.id)
+  |   |---- Join(o.customer_id = c.id)
+  |   |   |---- Scan(orders)      -- 10M rows
+  |   |   `---- Scan(customers)   -- 1M rows
+  |   `---- Scan(products)         -- 100K rows
+  `---- Filter(country = 'USA')
+      `---- Scan(suppliers)        -- 10K rows -> 500 rows
 ```
 
-**Problem**: Creates huge intermediate results (10M × 1M) before filtering.
+**Problem**: Creates huge intermediate results (10M $\times$ 1M) before filtering.
 
 ## After Join Reordering
 
@@ -36,13 +36,13 @@ Optimal join order based on selectivity:
 
 ```
 Join(o.customer_id = c.id)
-  ├── Join(o.product_id = p.id)
-  │   ├── Scan(orders)          -- 10M rows
-  │   └── Join(p.supplier_id = s.id)
-  │       ├── Scan(products)    -- 100K rows
-  │       └── Filter(country = 'USA')
-  │           └── Scan(suppliers) -- 10K rows → 500 rows
-  └── Scan(customers)            -- 1M rows
+  |---- Join(o.product_id = p.id)
+  |   |---- Scan(orders)          -- 10M rows
+  |   `---- Join(p.supplier_id = s.id)
+  |       |---- Scan(products)    -- 100K rows
+  |       `---- Filter(country = 'USA')
+  |           `---- Scan(suppliers) -- 10K rows -> 500 rows
+  `---- Scan(customers)            -- 1M rows
 ```
 
 ## Optimization Process
@@ -50,9 +50,9 @@ Join(o.customer_id = c.id)
 ### 1. Cardinality Estimation
 
 RA estimates result sizes for each join:
-- orders ⋈ customers: 10M rows (many-to-one)
-- orders ⋈ products: 10M rows (many-to-one)
-- products ⋈ suppliers: 100K rows (many-to-one)
+- orders $\bowtie$ customers: 10M rows (many-to-one)
+- orders $\bowtie$ products: 10M rows (many-to-one)
+- products $\bowtie$ suppliers: 100K rows (many-to-one)
 - With filter on suppliers: 5K rows
 
 ### 2. Join Graph Analysis

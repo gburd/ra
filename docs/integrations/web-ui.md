@@ -11,28 +11,28 @@ The web UI consists of three layers:
 3. **Backend**: RA optimizer, parser, and engine libraries
 
 ```
-┌─────────────────────────────────────────┐
-│  Browser (http://localhost:8000)        │
-├─────────────────────────────────────────┤
-│  Static Files (HTML/CSS/JS)             │
-│  - index.html                           │
-│  - Demo pages (staleness, join, etc.)  │
-├─────────────────────────────────────────┤
-│  REST API (Rocket)                      │
-│  - /health                              │
-│  - /api/optimize                        │
-│  - /api/visualize                       │
-│  - /api/compare                         │
-│  - /api/execute                         │
-│  - /api/translate                       │
-│  - /api/explain                         │
-├─────────────────────────────────────────┤
-│  RA Engine                              │
-│  - Optimizer                            │
-│  - Parser                               │
-│  - Cost Model                           │
-│  - Rule Engine                          │
-└─────────────────────────────────────────┘
+,-------------------------------------------,
+|  Browser (http://localhost:8000)        |
+|--------------------------------------------|
+|  Static Files (HTML/CSS/JS)             |
+|  - index.html                           |
+|  - Demo pages (staleness, join, etc.)  |
+|--------------------------------------------|
+|  REST API (Rocket)                      |
+|  - /health                              |
+|  - /api/optimize                        |
+|  - /api/visualize                       |
+|  - /api/compare                         |
+|  - /api/execute                         |
+|  - /api/translate                       |
+|  - /api/explain                         |
+|--------------------------------------------|
+|  RA Engine                              |
+|  - Optimizer                            |
+|  - Parser                               |
+|  - Cost Model                           |
+|  - Rule Engine                          |
+`--------------------------------------------'
 ```
 
 ## Setup
@@ -320,7 +320,7 @@ Content-Type: application/json
 {
   "engine": "duckdb",
   "analyzed": true,
-  "plan": "┌─────────────────────────────┐\n│         PROJECTION          │\n└─────────────────────────────┘\n",
+  "plan": ",-------------------------------,\n|         PROJECTION          |\n`--------------------------------'\n",
   "execution_time_ms": 2.45
 }
 ```

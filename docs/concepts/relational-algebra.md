@@ -13,7 +13,7 @@ graph LR
     subgraph "Core Operations"
         Sel["Selection (sigma)<br/>Filter rows"]
         Proj["Projection (pi)<br/>Select columns"]
-        Join["Join (⋈)<br/>Combine relations"]
+        Join["Join ($\bowtie$)<br/>Combine relations"]
         Agg["Aggregation (gamma)<br/>Group and summarize"]
     end
     R --> Sel --> Proj --> Join --> Agg

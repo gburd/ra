@@ -50,12 +50,12 @@ Distinct aggregation eliminates duplicates before aggregation (COUNT(DISTINCT), 
 ## Relational Algebra
 
 ```
-γ_{g; COUNT(DISTINCT v)}(R)
-→ γ_{g; COUNT(*)}(δ(π_{g,v}(R)))
-  where δ = duplicate elimination
+$\gamma$_{g; COUNT(DISTINCT v)}(R)
+-> $\gamma$_{g; COUNT(*)}($\delta$($\pi$_{g,v}(R)))
+  where $\delta$ = duplicate elimination
 
 Alternative:
-→ HashDistinctAgg(R, g, v)
+-> HashDistinctAgg(R, g, v)
   // Hash set per group
 ```
 

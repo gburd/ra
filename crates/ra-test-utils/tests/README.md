@@ -56,7 +56,7 @@ The test generates warnings but does not fail the build when broken links are fo
 When broken links are found, the test outputs:
 
 ```
-⚠ Found X broken links in Y files:
+WARNING: Found X broken links in Y files:
 ================================================================================
 
 path/to/file.md:

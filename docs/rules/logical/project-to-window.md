@@ -21,7 +21,7 @@ Converts projection to window function
 ## Relational Algebra
 
 ```algebra
-π(R) => Window(R)
+$\pi$(R) => Window(R)
 ```
 
 ## Implementation

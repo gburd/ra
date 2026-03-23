@@ -38,7 +38,7 @@ Join_n(T1, T2, ..., Tn)
 
 DP recurrence (DPccp algorithm):
 For each subset S of tables:
-  For each connected complement pair (S1, S2) where S = S1 ∪ S2:
+  For each connected complement pair (S1, S2) where S = S1 $\cup$ S2:
     cost(S) = min(cost(S), cost(S1) + cost(S2) + join_cost(S1, S2))
 
 Returns: Optimal join tree with minimum total cost
@@ -53,7 +53,7 @@ rw!("tidb-join-reorder-dp";
     "(join* ?tables)" =>
     "(join_tree_optimal (dp_reorder ?tables))"
     if table_count("?tables") >= 3
-    if table_count("?tables") <= 10  // DP feasible for ≤10 tables
+    if table_count("?tables") <= 10  // DP feasible for $\leq$10 tables
     if is_connected_join_graph("?tables")
 ),
 
@@ -240,7 +240,7 @@ fn estimated_benefit(
 ```
 
 **Assumptions:**
-- DP optimization time acceptable for ≤10 tables (~20ms for 10 tables)
+- DP optimization time acceptable for $\leq$10 tables (~20ms for 10 tables)
 - Cardinality estimates guide correct cost comparisons
 - Optimal join order provides 2-10x improvement over greedy worst case
 - DPccp efficiently prunes invalid join trees
@@ -263,7 +263,7 @@ WHERE c.mktsegment = 'BUILDING'
   AND l.shipdate > '1995-03-15'
 GROUP BY l.orderkey;
 
--- Greedy might join: customer ⨝ orders (large), then ⨝ lineitem
+-- Greedy might join: customer $\bowtie$ orders (large), then $\bowtie$ lineitem
 -- DP finds: Filter lineitem & orders first, then join with customer
 -- Benefit: 5-10x reduction in intermediate result sizes
 ```
@@ -275,8 +275,8 @@ GROUP BY l.orderkey;
 SELECT * FROM A, B, C
 WHERE A.x = B.x AND B.y = C.y AND A.z = C.z;
 
--- Greedy: Linear chain (A ⨝ B) ⨝ C
--- DP explores: A ⨝ (B ⨝ C) or (A ⨝ C) ⨝ B
+-- Greedy: Linear chain (A $\bowtie$ B) $\bowtie$ C
+-- DP explores: A $\bowtie$ (B $\bowtie$ C) or (A $\bowtie$ C) $\bowtie$ B
 -- Finds optimal based on selectivities
 ```
 

@@ -204,14 +204,14 @@ Project [id, name]
 
 ### 1. Function on Indexed Column
 
-❌ **Bad:**
+[FAIL] **Bad:**
 ```sql
 SELECT * FROM users WHERE UPPER(email) = 'USER@EXAMPLE.COM';
 ```
 
 The function prevents index usage.
 
-✅ **Good:**
+[x] **Good:**
 ```sql
 -- Create functional index
 CREATE INDEX users_email_upper_idx ON users(UPPER(email));
@@ -221,7 +221,7 @@ SELECT * FROM users WHERE email = 'user@example.com';
 
 ### 2. Type Mismatch
 
-❌ **Bad:**
+[FAIL] **Bad:**
 ```sql
 -- If id is integer
 SELECT * FROM users WHERE id = '12345';  -- String literal
@@ -229,21 +229,21 @@ SELECT * FROM users WHERE id = '12345';  -- String literal
 
 Implicit cast may prevent index usage.
 
-✅ **Good:**
+[x] **Good:**
 ```sql
 SELECT * FROM users WHERE id = 12345;  -- Correct type
 ```
 
 ### 3. OR with Non-indexed Columns
 
-❌ **Bad:**
+[FAIL] **Bad:**
 ```sql
 SELECT * FROM users WHERE id = 123 OR name = 'Alice';
 ```
 
 Forces sequential scan if `name` isn't indexed.
 
-✅ **Good:**
+[x] **Good:**
 ```sql
 -- Use UNION ALL with two separate lookups
 SELECT * FROM users WHERE id = 123

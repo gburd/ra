@@ -37,13 +37,13 @@ Flink optimizes stream-table joins by adding temporal constraints, converting un
 
 ```
 // Unbounded join (infinite state)
-StreamR ⋈ StreamS
+StreamR $\bowtie$ StreamS
 
 // Temporal join (bounded state)
-StreamR ⋈_{R.time = S.time AND R.time BETWEEN S.start AND S.end} StreamS
+StreamR $\bowtie$_{R.time = S.time AND R.time BETWEEN S.start AND S.end} StreamS
 
 // Lookup join (no state)
-StreamR ⋈_{lookup(S, R.key)} ExternalTableS
+StreamR $\bowtie$_{lookup(S, R.key)} ExternalTableS
 ```
 
 ## Implementation Pattern

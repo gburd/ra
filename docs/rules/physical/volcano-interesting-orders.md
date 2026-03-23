@@ -36,13 +36,13 @@ more expensive.
 ## Relational Algebra
 
 ```algebra
-Given query: σ_p(R) ORDER BY a
+Given query: $\sigma$_p(R) ORDER BY a
 
 Without interesting orders:
-1. Scan(R) → filter → sort by a [cost: scan + filter + sort]
+1. Scan(R) -> filter -> sort by a [cost: scan + filter + sort]
 
 With interesting orders:
-1. IndexScan(R, sorted by a) → filter [cost: index scan + filter]
+1. IndexScan(R, sorted by a) -> filter [cost: index scan + filter]
    (no sort needed! Index scan provides useful order)
 
 The optimizer retains BOTH plans during search:
@@ -67,7 +67,7 @@ enum PhysicalProperty {
 }
 
 struct VolcanoOptimizer {
-    // Memoization table: (logical expr, required properties) → best physical plan
+    // Memoization table: (logical expr, required properties) -> best physical plan
     memo: HashMap<(LogicalExpr, PhysicalProperty), PhysicalPlan>,
 }
 
@@ -176,11 +176,11 @@ fn estimated_benefit(
     let rows = stats.row_count as f64;
 
     // Cost of sort operation (if needed)
-    let sort_cost = rows * rows.log2() * 0.000001; // 1μs per comparison
+    let sort_cost = rows * rows.log2() * 0.000001; // 1$\mu$s per comparison
 
     // Cost difference between scan methods
-    let seq_scan_cost = rows * 0.000001; // 1μs per row
-    let index_scan_cost = rows * 0.000005; // 5μs per row (random access)
+    let seq_scan_cost = rows * 0.000001; // 1$\mu$s per row
+    let index_scan_cost = rows * 0.000005; // 5$\mu$s per row (random access)
     let scan_cost_diff = index_scan_cost - seq_scan_cost;
 
     // Benefit: avoid sort by using index scan
@@ -196,9 +196,9 @@ fn estimated_benefit(
 ```
 
 **Assumptions:**
-- Sort cost: O(n log n) with ~1μs per comparison
-- Sequential scan: ~1μs per row
-- Index scan: ~5μs per row (random I/O)
+- Sort cost: O(n log n) with ~1$\mu$s per comparison
+- Sequential scan: ~1$\mu$s per row
+- Index scan: ~5$\mu$s per row (random I/O)
 - Interesting orders eliminate entire sort operations
 - Multiple uses of same order (GROUP BY + ORDER BY) amplify benefit
 
@@ -240,7 +240,7 @@ ORDER BY category;
 
 -- With interesting orders:
 -- Aggregate requests sorted input
--- → Sort before aggregate: Sort(category) → Aggregate
+-- -> Sort before aggregate: Sort(category) -> Aggregate
 -- This sort also satisfies ORDER BY! One sort, two benefits
 ```
 

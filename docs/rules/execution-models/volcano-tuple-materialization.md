@@ -49,31 +49,31 @@ must wait at barriers).
 Materialization taxonomy:
 
 Pipelined operators (no materialization):
-  Filter(R, p)       — evaluates p per tuple, passes or skips
-  Project(R, cols)    — transforms tuple, passes immediately
-  NLJ_probe(R, S)    — for each outer tuple, scans inner
-  Limit(R, n)         — passes first n tuples, then stops
-  UnionAll(R, S)      — concatenates streams
+  Filter(R, p)       - evaluates p per tuple, passes or skips
+  Project(R, cols)    - transforms tuple, passes immediately
+  NLJ_probe(R, S)    - for each outer tuple, scans inner
+  Limit(R, n)         - passes first n tuples, then stops
+  UnionAll(R, S)      - concatenates streams
 
 Full materializers (buffer all input):
-  Sort(R, key)        — must see all tuples to determine order
-  HashAgg(R, g, agg)  — must see all groups before output
-  HashJoin_build(S)   — must build complete hash table
-  Distinct(R)         — must see all tuples (hash or sort)
+  Sort(R, key)        - must see all tuples to determine order
+  HashAgg(R, g, agg)  - must see all groups before output
+  HashJoin_build(S)   - must build complete hash table
+  Distinct(R)         - must see all tuples (hash or sort)
 
 Partial materializers (bounded buffering):
   WindowFunc(R, partition, frame)
-    — buffers one partition at a time
-    — memory = max(partition_size) not sum(all)
+    - buffers one partition at a time
+    - memory = max(partition_size) not sum(all)
 
   MergeJoin(R, S)
-    — buffers duplicate keys only
-    — memory = max(duplicate_run) not N
+    - buffers duplicate keys only
+    - memory = max(duplicate_run) not N
 
 Spool materializers (cache for reuse):
   CTE_spool(query)
-    — materializes once, reads many times
-    — avoids recomputation
+    - materializes once, reads many times
+    - avoids recomputation
 
 Pipeline structure:
   A query plan is split into pipeline segments at
@@ -81,11 +81,11 @@ Pipeline structure:
 
   Example: SELECT * FROM R JOIN S ON ... ORDER BY ...
 
-  Pipeline 1: Scan(R) → Filter → [HashJoin build]  ← materializes
-  Pipeline 2: Scan(S) → [HashJoin probe] → Project  ← pipelined
-  Pipeline 3: [Sort input] → [Sort output]           ← materializes
-              ↓
-  Pipeline 4: Sort output → Limit → Result           ← pipelined
+  Pipeline 1: Scan(R) -> Filter -> [HashJoin build]  <- materializes
+  Pipeline 2: Scan(S) -> [HashJoin probe] -> Project  <- pipelined
+  Pipeline 3: [Sort input] -> [Sort output]           <- materializes
+              down
+  Pipeline 4: Sort output -> Limit -> Result           <- pipelined
 ```
 
 ## Implementation
@@ -295,22 +295,22 @@ pub struct MemoryEstimate {
 ```sql
 -- Test 1: Pipelined query (no materialization)
 SELECT name FROM users WHERE active = true;
--- Expected: Scan → Filter → Project, all pipelined
+-- Expected: Scan -> Filter -> Project, all pipelined
 -- Memory: O(1), single tuple in flight
 -- Materialization points: 0
 
 -- Test 2: Single materializer (sort)
 SELECT * FROM orders ORDER BY created_at;
--- Expected: Scan (pipelined) → Sort (materializes all)
+-- Expected: Scan (pipelined) -> Sort (materializes all)
 -- Memory: O(N) for sort buffer
--- Pipeline segments: 2 (scan→sort input, sort output→result)
+-- Pipeline segments: 2 (scan->sort input, sort output->result)
 
 -- Test 3: Cascading materializers
 SELECT region, SUM(amount)
 FROM orders
 GROUP BY region
 ORDER BY SUM(amount) DESC;
--- Expected: Scan → Aggregate (materializes) → Sort (materializes)
+-- Expected: Scan -> Aggregate (materializes) -> Sort (materializes)
 -- Memory: O(groups) + O(groups) = O(groups) sequentially
 -- Pipeline segments: 3
 

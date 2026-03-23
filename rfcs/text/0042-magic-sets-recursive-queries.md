@@ -110,7 +110,7 @@ Magic Sets transformation has three phases:
 #### Phase 1: Adorned Rule Generation
 
 1. **Identify binding patterns**: Which columns are bound (filtered) in outer query?
-   - Example: `WHERE child_id = 'Bob'` → child_id is bound
+   - Example: `WHERE child_id = 'Bob'` -> child_id is bound
 2. **Create adornment**: Mark bound columns with `b`, free columns with `f`
    - ancestors(child_id^b, parent_id^f)
 3. **Generate adorned rules**: Rewrite recursive rules to propagate bindings
@@ -432,7 +432,7 @@ WITH RECURSIVE ancestors AS (
 
 **Graph Query Integration**:
 - Magic Sets as foundation for property graph queries
-- MATCH (a)-[:KNOWS*]->(b) WHERE b.name = 'Alice' → Magic Sets pushdown
+- MATCH (a)-[:KNOWS*]->(b) WHERE b.name = 'Alice' -> Magic Sets pushdown
 - Integration with future graph query RFC
 
 **Distributed Recursive Queries**:
@@ -441,7 +441,7 @@ WITH RECURSIVE ancestors AS (
 
 **Cost Model Calibration**:
 - Learn when Magic Sets helps via query feedback
-- Build ML model: (query, filter selectivity, recursion depth) → benefit estimate
+- Build ML model: (query, filter selectivity, recursion depth) -> benefit estimate
 - Auto-tune decision threshold
 
 ---

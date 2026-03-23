@@ -4,16 +4,16 @@
 
 ## Key Features
 
-- **🚀 1,327+ Transformation Rules** - Comprehensive rule library covering logical, physical, hardware, distributed, and multi-model optimizations
-- **🌐 20+ Database Dialects** - Seamless SQL translation between PostgreSQL, MySQL, Oracle, SQL Server, SQLite, DuckDB, and more
-- **⚡ Hardware-Aware Optimization** - Adaptive plans for CPU (SIMD), GPU, FPGA, and heterogeneous systems
-- **📊 Cost-Based Optimization** - Calibratable cost models with cardinality estimation and statistics management
-- **🔄 Equality Saturation** - Explores all equivalent plans simultaneously via e-graphs
-- **📈 Performance Shortcuts** - MIN/MAX metadata lookups, COUNT(*) shortcuts, covering indexes, bitmap scans
-- **🔧 Distributed Execution** - Partition-aware optimization, co-location awareness, minimal data movement
-- **📦 Columnar Format Support** - Parquet predicate pushdown, row group filtering, column pruning
-- **🌍 WASM Integration** - Run queries in WebAssembly environments
-- **🎯 Formal Verification** - Mathematically proven correctness of transformation rules
+- ** 1,327+ Transformation Rules** - Comprehensive rule library covering logical, physical, hardware, distributed, and multi-model optimizations
+- ** 20+ Database Dialects** - Seamless SQL translation between PostgreSQL, MySQL, Oracle, SQL Server, SQLite, DuckDB, and more
+- ** Hardware-Aware Optimization** - Adaptive plans for CPU (SIMD), GPU, FPGA, and heterogeneous systems
+- ** Cost-Based Optimization** - Calibratable cost models with cardinality estimation and statistics management
+- ** Equality Saturation** - Explores all equivalent plans simultaneously via e-graphs
+- ** Performance Shortcuts** - MIN/MAX metadata lookups, COUNT(*) shortcuts, covering indexes, bitmap scans
+- ** Distributed Execution** - Partition-aware optimization, co-location awareness, minimal data movement
+- ** Columnar Format Support** - Parquet predicate pushdown, row group filtering, column pruning
+- ** WASM Integration** - Run queries in WebAssembly environments
+- ** Formal Verification** - Mathematically proven correctness of transformation rules
 
 ## Quick Start
 
@@ -36,7 +36,7 @@ cargo run --bin ra-cli -- translate --from postgres --to mysql \
 
 ## Documentation Structure
 
-### 📚 Core Documentation
+###  Core Documentation
 
 - **[Getting Started](GETTING_STARTED.md)** - Installation, quick examples of ALL major features
 - **[Architecture](architecture.md)** - System design, components, and data flow
@@ -44,7 +44,7 @@ cargo run --bin ra-cli -- translate --from postgres --to mysql \
 - **[Contributing](CONTRIBUTING.md)** - Development standards and contribution guidelines
 - **[Deployment](deployment.md)** - Docker, Kubernetes, cloud deployment
 
-### 📖 Guides
+###  Guides
 
 Step-by-step instructions for specific tasks:
 
@@ -55,7 +55,7 @@ Step-by-step instructions for specific tasks:
 - **[Testing](guides/testing.md)** - Test strategies and framework usage
 - **[Test Format](guides/test-format.md)** - Literate test format specification
 
-### 💡 Concepts
+###  Concepts
 
 Fundamental concepts and theory:
 
@@ -64,7 +64,7 @@ Fundamental concepts and theory:
 - **[Facts Provider](concepts/facts-provider.md)** - Unified system facts interface
 - **[Rule Categories](concepts/rule-categories.md)** - Taxonomy of transformation rules
 
-### ⚡ Features
+###  Features
 
 Deep dives into major capabilities:
 
@@ -86,7 +86,7 @@ Deep dives into major capabilities:
 - **[Unnest Implementation](features/unnest-implementation.md)** - Array and nested data handling
 - **[WASM Databases](features/wasm-databases.md)** - WebAssembly database integration
 
-### 🔌 Integrations
+###  Integrations
 
 Database and system integrations:
 
@@ -94,7 +94,7 @@ Database and system integrations:
 - **[Database Adapters](integrations/database-adapters.md)** - Connecting to various databases
 - **[Web UI](integrations/web-ui.md)** - Interactive query visualization
 
-### 📖 Encyclopedia
+###  Encyclopedia
 
 Comprehensive reference for SQL patterns, schemas, and optimization:
 
@@ -106,7 +106,7 @@ Comprehensive reference for SQL patterns, schemas, and optimization:
   - **[Distributed Patterns](encyclopedia/distributed-patterns/)** - Shuffle joins, broadcast, co-located joins
   - **[Index Structures](encyclopedia/index-structures/)** - B-tree, hash, bitmap, covering indexes
 
-### 📝 Examples
+###  Examples
 
 Practical demonstrations:
 
@@ -119,7 +119,7 @@ Practical demonstrations:
 - **[Distributed Join Strategies](examples/distributed-join-strategies.md)** - Network-aware joins
 - **[Subquery Unnesting](examples/subquery-unnesting.md)** - Nested query optimization
 
-### 🔬 Research
+###  Research
 
 Academic foundations and papers:
 
@@ -128,23 +128,23 @@ Academic foundations and papers:
 ## System Overview
 
 ```
-┌─────────────┐     ┌──────────────┐     ┌───────────────┐
-│   SQL Query │ ──> │    Parser    │ ──> │   Relational  │
-└─────────────┘     └──────────────┘     │    Algebra    │
-                                          └───────────────┘
-                                                  │
-                                                  ▼
-┌─────────────┐     ┌──────────────┐     ┌───────────────┐
-│  Optimized  │ <── │   Extractor  │ <── │    E-Graph    │
-│    Plan     │     │ (Cost-based) │     │  (egg crate)  │
-└─────────────┘     └──────────────┘     └───────────────┘
-                                                  ▲
-                                                  │
-                                          ┌───────────────┐
-                                          │ Transformation│
-                                          │     Rules     │
-                                          │   (1,327+)    │
-                                          └───────────────┘
+,---------------,     ,----------------,     ,-----------------,
+|   SQL Query | --> |    Parser    | --> |   Relational  |
+`----------------'     `-----------------'     |    Algebra    |
+                                          `------------------'
+                                                  |
+                                                  v
+,---------------,     ,----------------,     ,-----------------,
+|  Optimized  | <-- |   Extractor  | <-- |    E-Graph    |
+|    Plan     |     | (Cost-based) |     |  (egg crate)  |
+`----------------'     `-----------------'     `------------------'
+                                                  ^
+                                                  |
+                                          ,-----------------,
+                                          | Transformation|
+                                          |     Rules     |
+                                          |   (1,327+)    |
+                                          `------------------'
 ```
 
 ## Performance Highlights

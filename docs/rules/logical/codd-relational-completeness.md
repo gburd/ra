@@ -35,36 +35,36 @@ exploration of the optimization search space.
 
 ```algebra
 1. Selection commutativity:
-   σ_p1(σ_p2(R)) ≡ σ_p2(σ_p1(R)) ≡ σ_{p1 ∧ p2}(R)
+   $\sigma$_p1($\sigma$_p2(R)) $\equiv$ $\sigma$_p2($\sigma$_p1(R)) $\equiv$ $\sigma$_{p1 $\land$ p2}(R)
 
 2. Projection idempotence:
-   π_L1(π_L2(R)) ≡ π_L1(R) if L1 ⊆ L2
+   $\pi$_L1($\pi$_L2(R)) $\equiv$ $\pi$_L1(R) if L1 $\subseteq$ L2
 
 3. Join commutativity:
-   R ⋈ S ≡ S ⋈ R
+   R $\bowtie$ S $\equiv$ S $\bowtie$ R
 
 4. Join associativity:
-   (R ⋈ S) ⋈ T ≡ R ⋈ (S ⋈ T)
+   (R $\bowtie$ S) $\bowtie$ T $\equiv$ R $\bowtie$ (S $\bowtie$ T)
 
 5. Selection pushdown through join:
-   σ_p(R ⋈ S) ≡ σ_p(R) ⋈ S        if p references only R
-   σ_p(R ⋈ S) ≡ R ⋈ σ_p(S)        if p references only S
-   σ_p(R ⋈ S) ≡ σ_p1(R) ⋈ σ_p2(S) if p = p1 ∧ p2
+   $\sigma$_p(R $\bowtie$ S) $\equiv$ $\sigma$_p(R) $\bowtie$ S        if p references only R
+   $\sigma$_p(R $\bowtie$ S) $\equiv$ R $\bowtie$ $\sigma$_p(S)        if p references only S
+   $\sigma$_p(R $\bowtie$ S) $\equiv$ $\sigma$_p1(R) $\bowtie$ $\sigma$_p2(S) if p = p1 $\land$ p2
 
 6. Projection pushdown through join:
-   π_L(R ⋈ S) ≡ π_L(π_{L∪attrs(join)}(R) ⋈ π_{L∪attrs(join)}(S))
+   $\pi$_L(R $\bowtie$ S) $\equiv$ $\pi$_L($\pi$_{L$\cup$attrs(join)}(R) $\bowtie$ $\pi$_{L$\cup$attrs(join)}(S))
 
 7. Distributivity of selection over union:
-   σ_p(R ∪ S) ≡ σ_p(R) ∪ σ_p(S)
+   $\sigma$_p(R $\cup$ S) $\equiv$ $\sigma$_p(R) $\cup$ $\sigma$_p(S)
 
 8. Distributivity of projection over union:
-   π_L(R ∪ S) ≡ π_L(R) ∪ π_L(S)
+   $\pi$_L(R $\cup$ S) $\equiv$ $\pi$_L(R) $\cup$ $\pi$_L(S)
 
 9. Selection distributivity over difference:
-   σ_p(R − S) ≡ σ_p(R) − σ_p(S)
+   $\sigma$_p(R - S) $\equiv$ $\sigma$_p(R) - $\sigma$_p(S)
 
 10. Set difference vs. join:
-    R − S ≡ R − (R ⋈ S) if join is on all attributes
+    R - S $\equiv$ R - (R $\bowtie$ S) if join is on all attributes
 ```
 
 ## Implementation
@@ -193,7 +193,7 @@ SELECT * FROM orders
 WHERE status = 'shipped'
   AND order_date > '2024-01-01';
 
--- Codd's law: σ_p1(σ_p2(R)) ≡ σ_{p1 ∧ p2}(R)
+-- Codd's law: $\sigma$_p1($\sigma$_p2(R)) $\equiv$ $\sigma$_{p1 $\land$ p2}(R)
 -- Enables filter merge optimization
 ```
 
@@ -204,7 +204,7 @@ WHERE status = 'shipped'
 SELECT * FROM small_table s
 JOIN large_table l ON s.id = l.small_id;
 
--- Codd's law: R ⋈ S ≡ S ⋈ R
+-- Codd's law: R $\bowtie$ S $\equiv$ S $\bowtie$ R
 -- Optimizer can try both orders, choose better one
 ```
 
@@ -216,7 +216,7 @@ SELECT * FROM orders o
 JOIN customers c ON o.customer_id = c.id
 WHERE c.region = 'US';
 
--- Codd's law: σ_p(R ⋈ S) ≡ R ⋈ σ_p(S)
+-- Codd's law: $\sigma$_p(R $\bowtie$ S) $\equiv$ R $\bowtie$ $\sigma$_p(S)
 -- Push filter to customer scan, reduce join cardinality
 ```
 
@@ -238,7 +238,7 @@ JOIN customers c ON o.customer_id = c.id;
 -- LEFT JOIN is NOT commutative
 SELECT * FROM orders o
 LEFT JOIN customers c ON o.customer_id = c.id;
--- ≠
+-- $\neq$
 SELECT * FROM customers c
 LEFT JOIN orders o ON o.customer_id = c.id;
 
@@ -256,7 +256,7 @@ SELECT * FROM (
   SELECT * FROM orders_2024
 ) WHERE region = 'US';
 
--- Codd's law: σ_p(R ∪ S) ≡ σ_p(R) ∪ σ_p(S)
+-- Codd's law: $\sigma$_p(R $\cup$ S) $\equiv$ $\sigma$_p(R) $\cup$ $\sigma$_p(S)
 -- Push filter into both union branches
 ```
 

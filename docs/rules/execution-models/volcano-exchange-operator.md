@@ -39,7 +39,7 @@ redistribution between producer and consumer threads using queues.
   the top of parallel regions to collect results.
 - **Scatter/Repartition (N:M)**: Redistribute data by hash, range,
   or round-robin. Used between parallel pipeline stages that need
-  different partitioning (e.g., hash join → hash aggregate on
+  different partitioning (e.g., hash join -> hash aggregate on
   different keys).
 - **Broadcast (1:N)**: One producer sends to all consumers. Used
   for small dimension tables in parallel joins.
@@ -49,18 +49,18 @@ redistribution between producer and consumer threads using queues.
 ```
 Exchange operator types:
 
-Gather(N → 1):
-  Producer_1 ──┐
-  Producer_2 ──┼──→ Consumer
-  Producer_N ──┘
+Gather(N -> 1):
+  Producer_1 ---,
+  Producer_2 ---+----> Consumer
+  Producer_N ---'
   Uses: merge queue, round-robin, or ordered merge
 
-Scatter(N → M, partition_fn):
-  Producer_i → partition_fn(tuple) → Queue_j → Consumer_j
+Scatter(N -> M, partition_fn):
+  Producer_i -> partition_fn(tuple) -> Queue_j -> Consumer_j
   partition_fn: hash(key) mod M, range, round-robin
 
-Broadcast(1 → N):
-  Producer → copy to all → Consumer_1, ..., Consumer_N
+Broadcast(1 -> N):
+  Producer -> copy to all -> Consumer_1, ..., Consumer_N
 
 Parallel query plan structure:
 
@@ -336,8 +336,8 @@ JOIN customers c ON o.cust_id = c.id;
 SELECT region, COUNT(*)
 FROM orders
 GROUP BY region;
--- Expected: parallel scan → partial agg per worker
---   → repartition by region → final agg
+-- Expected: parallel scan -> partial agg per worker
+--   -> repartition by region -> final agg
 -- Verify: "Partial HashAggregate" + "Finalize HashAggregate"
 
 -- Test 4: Gather merge (preserving order)

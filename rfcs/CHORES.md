@@ -143,7 +143,7 @@ Tasks too small for an RFC but necessary for project completion, organized by su
 ## ra-dialect (Dialect Translation)
 
 ### P0 - Critical
-- [ ] Test translation round-trips (PostgreSQL → RA → MySQL → RA → PostgreSQL)
+- [ ] Test translation round-trips (PostgreSQL -> RA -> MySQL -> RA -> PostgreSQL)
 - [ ] Verify all function mappings are correct
 - [ ] Add validation tests for unsupported features
 
@@ -297,7 +297,7 @@ Tasks too small for an RFC but necessary for project completion, organized by su
 ### P0 - Critical
 - [ ] Set up continuous benchmarking (track performance over time)
 - [ ] Add coverage tracking (aim for >80% coverage)
-- [ ] Set up automated releases (tag → build → publish)
+- [ ] Set up automated releases (tag -> build -> publish)
 
 ### P1 - High Priority
 - [ ] Add cargo-deny to CI (check dependencies for vulnerabilities)
@@ -396,7 +396,7 @@ These gaps need RFCs (not small chores):
    - Verify gap #10 (nested aggregates), may need RFC
 
 6. **CMU Video Research Extraction**
-   - Create RFCs from Andy Pavlo lectures (20-30 notes → 5-10 RFCs)
+   - Create RFCs from Andy Pavlo lectures (20-30 notes -> 5-10 RFCs)
 
 7. **pg_plan_advice Integration** (RFC 0003 exists, needs implementation plan)
 

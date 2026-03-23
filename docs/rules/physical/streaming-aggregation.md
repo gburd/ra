@@ -56,8 +56,8 @@ Streaming aggregation assumes input is pre-sorted by GROUP BY columns, allowing 
 ## Relational Algebra
 
 ```
-γ_{group_cols; agg_funcs}(R)
-→ StreamingAggregation(R, group_cols, agg_funcs)
+$\gamma$_{group_cols; agg_funcs}(R)
+-> StreamingAggregation(R, group_cols, agg_funcs)
   :if Sorted(R, group_cols)
 
 Cost = n * (compare + update)

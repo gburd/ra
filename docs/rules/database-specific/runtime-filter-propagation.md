@@ -32,8 +32,8 @@ Impala generates Bloom filters at join build time and broadcasts them to scan no
 ## Relational Algebra
 
 ```
-Scan(R) ⋈ Scan(S)
-→ Scan_with_runtime_filter(R, bloom(S.key)) ⋈ Scan(S)
+Scan(R) $\bowtie$ Scan(S)
+-> Scan_with_runtime_filter(R, bloom(S.key)) $\bowtie$ Scan(S)
   where bloom filter propagated across network
 ```
 
@@ -97,8 +97,8 @@ WHERE d.region = 'US';  -- Filters to 100 rows
 -- Optimization:
 -- 1. Build Bloom filter from 100 US dimension IDs
 -- 2. Broadcast 1KB filter to all 100 nodes
--- 3. Each node filters 10M fact rows → ~100K matching
--- 4. Network traffic: 1B rows → 10M rows (99% reduction)
+-- 3. Each node filters 10M fact rows -> ~100K matching
+-- 4. Network traffic: 1B rows -> 10M rows (99% reduction)
 ```
 
 ### Test 2: Multiple runtime filters
@@ -110,8 +110,8 @@ JOIN customer c ON o.customer_id = c.id
 WHERE c.nation = 'USA';
 
 -- Runtime filters:
--- 1. customer IDs → filter orders
--- 2. order IDs → filter lineitem
+-- 1. customer IDs -> filter orders
+-- 2. order IDs -> filter lineitem
 -- Cascading filters dramatically reduce scan volume
 ```
 

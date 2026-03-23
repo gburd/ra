@@ -24,7 +24,7 @@ words, dramatically outperforming regex scans on large text fields.
 fields. Text indexes enable linguistic search (stemming, case-insensitive)
 with ranking by relevance score.
 
-**Why it works**: Text indexes use inverted index structure (word → document IDs)
+**Why it works**: Text indexes use inverted index structure (word -> document IDs)
 allowing fast lookups of documents containing search terms. Regex on unindexed
 fields requires scanning all documents.
 

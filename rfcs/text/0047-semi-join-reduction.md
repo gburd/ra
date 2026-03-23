@@ -108,7 +108,7 @@ function generate_semi_join_program(join_graph, statistics):
         best_reduction = 0
         best_semi_join = null
         for each edge (R, S, condition) in join_graph:
-            for direction in [R ⋉ S, S ⋉ R]:
+            for direction in [R $\ltimes$ S, S $\ltimes$ R]:
                 reduction = estimate_reduction(direction, statistics)
                 cost = estimate_semi_join_cost(direction)
                 benefit = reduction * estimated_row_size - cost

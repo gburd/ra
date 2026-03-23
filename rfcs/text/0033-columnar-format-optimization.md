@@ -55,7 +55,7 @@ Modern data lakes use Parquet/ORC for storage. These formats embed:
    ```
    Files: sales_2023-01-01.parquet, sales_2023-01-02.parquet, ...
    Query: WHERE date = '2023-01-15'
-   → Skip 364/365 files (99.7% less I/O)
+   -> Skip 364/365 files (99.7% less I/O)
    ```
 
 ---
@@ -112,25 +112,25 @@ let plan = optimizer.optimize("SELECT * FROM 'data.parquet' WHERE x > 100")?;
 ### Architecture
 
 ```
-┌─────────────────────────────────────────────────────┐
-│  ra-core/formats/                                   │
-│    ├─ mod.rs        (FileFormat trait)              │
-│    ├─ parquet.rs    (ParquetFormat impl)            │
-│    ├─ orc.rs        (ORCFormat impl)                │
-│    └─ arrow.rs      (ArrowIPCFormat impl)           │
-└─────────────────────────────────────────────────────┘
-           ↓
-┌─────────────────────────────────────────────────────┐
-│  ra-stats/                                          │
-│    ├─ file_stats.rs (Populate from file metadata)   │
-│    └─ staleness.rs  (File mtime = last_analyzed)    │
-└─────────────────────────────────────────────────────┘
-           ↓
-┌─────────────────────────────────────────────────────┐
-│  ra-engine/rewrite/                                 │
-│    ├─ column_pruning.rs                             │
-│    └─ predicate_pushdown.rs                         │
-└─────────────────────────────────────────────────────┘
+,-------------------------------------------------------,
+|  ra-core/formats/                                   |
+|    |--- mod.rs        (FileFormat trait)              |
+|    |--- parquet.rs    (ParquetFormat impl)            |
+|    |--- orc.rs        (ORCFormat impl)                |
+|    `--- arrow.rs      (ArrowIPCFormat impl)           |
+`--------------------------------------------------------'
+           down
+,-------------------------------------------------------,
+|  ra-stats/                                          |
+|    |--- file_stats.rs (Populate from file metadata)   |
+|    `--- staleness.rs  (File mtime = last_analyzed)    |
+`--------------------------------------------------------'
+           down
+,-------------------------------------------------------,
+|  ra-engine/rewrite/                                 |
+|    |--- column_pruning.rs                             |
+|    `--- predicate_pushdown.rs                         |
+`--------------------------------------------------------'
 ```
 
 ### FileFormat Trait
@@ -448,7 +448,7 @@ preconditions:
   - type: pattern
     must_match: "(project ?out_cols (filter ?pred (scan ?table)))"
   - type: predicate
-    condition: "predicate_cols(?pred) ∩ ?out_cols = ∅"
+    condition: "predicate_cols(?pred) $\cap$ ?out_cols = $\emptyset$"
 ---
 ```
 
@@ -459,8 +459,8 @@ preconditions:
 SELECT name, email FROM users WHERE age > 50;
 -- Predicate cols: {age}
 -- Output cols: {name, email}
--- Disjoint? Yes → Apply late materialization
--- Read {age} → filter → read {name, email} for survivors
+-- Disjoint? Yes -> Apply late materialization
+-- Read {age} -> filter -> read {name, email} for survivors
 ```
 
 ### Cost Model Adjustments
@@ -496,7 +496,7 @@ impl CostModel {
         let cpu_cost = surviving_rows as f64 * projection.len() as f64 * 0.001;
 
         // 4. Memory cost (row batch size)
-        let memory_cost = 1024.0 * projection.len() as f64 * 8.0; // 1024 rows × cols × 8 bytes
+        let memory_cost = 1024.0 * projection.len() as f64 * 8.0; // 1024 rows $\times$ cols $\times$ 8 bytes
 
         Cost { io: io_cost, cpu: cpu_cost, memory: memory_cost }
     }
@@ -529,7 +529,7 @@ impl CostModel {
             }
             Expr::BinaryOp { op: BinOp::Eq, left, right } => {
                 // col = value: Check bloom filter if available
-                // Otherwise, check if value ∈ [min, max]
+                // Otherwise, check if value $\in$ [min, max]
                 if let (Expr::Column(col), Expr::Const(val)) = (&**left, &**right) {
                     if let Some(stats) = rg.column_stats.get(col.name) {
                         let in_range = stats.min.as_ref().map_or(true, |min| val >= min)
@@ -637,7 +637,7 @@ Files: s3://bucket/sales/date=2023-01-01/part-0001.parquet
        s3://bucket/sales/date=2023-01-02/part-0002.parquet
 
 Query: SELECT * FROM sales WHERE date = '2023-01-15'
-→ Skip directories where date != '2023-01-15' (0 S3 API calls)
+-> Skip directories where date != '2023-01-15' (0 S3 API calls)
 ```
 
 ### Phase 3: Iceberg/Delta Lake Integration

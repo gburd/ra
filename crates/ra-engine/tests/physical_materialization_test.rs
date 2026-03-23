@@ -66,7 +66,7 @@ fn test_recursive_cte_materialization() {
 
 #[test]
 fn test_temp_table_for_large_intermediate() {
-    // Large intermediate used multiple times → temp table
+    // Large intermediate used multiple times -> temp table
     let agg = RelExpr::Aggregate {
         group_by: vec![col("region")],
         aggregates: vec![],
@@ -77,7 +77,7 @@ fn test_temp_table_for_large_intermediate() {
 
 #[test]
 fn test_temp_table_vs_subquery() {
-    // Complex subquery repeated → temp table
+    // Complex subquery repeated -> temp table
     let _complex = filtered_scan("complex_computation", "expensive", 1);
     let j1 = two_table_join("orders", "complex_computation", "key", "key");
     assert_cost_calculated(j1);

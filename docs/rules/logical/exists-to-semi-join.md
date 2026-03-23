@@ -49,7 +49,7 @@ rw!("exists-to-semi-join";
 ## Cost Model
 
 ```rust
-// Nested: O(N × M), Semi-join: O(N + M)
+// Nested: O(N $\times$ M), Semi-join: O(N + M)
 fn benefit(outer: u64, inner: u64) -> f64 {
     let nested = outer * inner;
     let semi_join = outer + inner;

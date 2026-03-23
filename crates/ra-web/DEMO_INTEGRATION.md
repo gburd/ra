@@ -61,8 +61,8 @@ Updated `/Users/gregburd/src/ra/crates/ra-web/src/main.rs`:
 - Updated both `build_rocket()` and test function `build_rate_limited_rocket()`
 
 ### 4. Compilation Verification
-- `cargo check -p ra-wasm`: ✓ Passes (1 minor warning about `mut` keyword)
-- `cargo check -p ra-web`: ✓ Passes (2 warnings about unused demo storage methods)
+- `cargo check -p ra-wasm`: [x] Passes (1 minor warning about `mut` keyword)
+- `cargo check -p ra-web`: [x] Passes (2 warnings about unused demo storage methods)
 
 ## Remaining Work
 
@@ -165,17 +165,17 @@ Test on:
 ## API Endpoints Status
 
 All 10 demo endpoints implemented and working:
-- ✓ `/api/demos` - List all demos
-- ✓ `/api/demos/staleness-impact` - Statistics staleness
-- ✓ `/api/demos/hardware-plan` - Hardware-specific plans
-- ✓ `/api/demos/join-algorithm` - Join algorithm selection
-- ✓ `/api/demos/aggregation-strategy` - Aggregation strategies
-- ✓ `/api/demos/index-selection` - Index selection
-- ✓ `/api/demos/subquery-unnesting` - Subquery unnesting
-- ✓ `/api/demos/parallel-query` - Parallel execution
-- ✓ `/api/demos/gpu-offloading` - GPU offloading decisions
-- ✓ `/api/demos/distributed-query` - Distributed planning
-- ✓ `/api/demos/cost-calibration` - Cost calibration
+- [x] `/api/demos` - List all demos
+- [x] `/api/demos/staleness-impact` - Statistics staleness
+- [x] `/api/demos/hardware-plan` - Hardware-specific plans
+- [x] `/api/demos/join-algorithm` - Join algorithm selection
+- [x] `/api/demos/aggregation-strategy` - Aggregation strategies
+- [x] `/api/demos/index-selection` - Index selection
+- [x] `/api/demos/subquery-unnesting` - Subquery unnesting
+- [x] `/api/demos/parallel-query` - Parallel execution
+- [x] `/api/demos/gpu-offloading` - GPU offloading decisions
+- [x] `/api/demos/distributed-query` - Distributed planning
+- [x] `/api/demos/cost-calibration` - Cost calibration
 
 ## Running the Demos
 
@@ -220,9 +220,9 @@ Browser (HTML/JS)
 ## Next Steps
 
 Priority order:
-1. ✓ WASM optimizer bindings (DONE)
-2. ✓ 2 demo HTML pages (DONE)
-3. ✓ Static file serving (DONE)
+1. [x] WASM optimizer bindings (DONE)
+2. [x] 2 demo HTML pages (DONE)
+3. [x] Static file serving (DONE)
 4. Install WASM tooling and build binary
 5. Create remaining 7 HTML demo pages
 6. Connect backend demos to real optimizer
@@ -232,9 +232,9 @@ Priority order:
 
 ## Completion Estimate
 
-- ✓ WASM optimizer bindings (DONE)
-- ✓ 5 HTML demo pages created (DONE)
-- ✓ Static file serving (DONE)
+- [x] WASM optimizer bindings (DONE)
+- [x] 5 HTML demo pages created (DONE)
+- [x] Static file serving (DONE)
 - WASM setup: 30 minutes (tooling installation + first build)
 - Remaining HTML pages: 1.5 hours (5 pages, reuse existing templates)
 - Backend integration: 1 hour (replace mock calculations)

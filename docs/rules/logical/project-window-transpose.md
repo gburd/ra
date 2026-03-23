@@ -21,7 +21,7 @@ Transposes projection and window
 ## Relational Algebra
 
 ```algebra
-π(Window(R)) => optimization
+$\pi$(Window(R)) => optimization
 ```
 
 ## Implementation

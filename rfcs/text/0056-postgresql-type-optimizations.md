@@ -22,7 +22,7 @@ PostgreSQL has the most advanced type system among open-source databases, featur
 
 **These types have unique optimization opportunities:**
 
-1. **JSONB containment rewrites**: `data->>'key' = 'value'` → `data @> '{"key": "value"}'` (indexable)
+1. **JSONB containment rewrites**: `data->>'key' = 'value'` -> `data @> '{"key": "value"}'` (indexable)
 2. **GIN index selection**: Automatically suggest GIN for JSONB/array containment queries
 3. **TOAST awareness**: Avoid fetching large columns unless needed, adjust cost model
 4. **Partial indexes**: Create indexes on JSONB subsets for common filters
@@ -157,7 +157,7 @@ pub fn jsonb_extraction_to_containment(expr: &Expr) -> Option<Expr> {
             })
         }
 
-        // Multiple ANDed conditions → single containment
+        // Multiple ANDed conditions -> single containment
         Expr::BinOp {
             op: Op::And,
             left: box json_eq1,
@@ -165,7 +165,7 @@ pub fn jsonb_extraction_to_containment(expr: &Expr) -> Option<Expr> {
         } => {
             // Combine into single @> operator
             // data->>'k1' = 'v1' AND data->>'k2' = 'v2'
-            // → data @> '{"k1": "v1", "k2": "v2"}'
+            // -> data @> '{"k1": "v1", "k2": "v2"}'
             combine_json_conditions(json_eq1, json_eq2)
         }
 
@@ -482,7 +482,7 @@ pub enum PostgreSQLOptimizationError {
 
 - Adds join overhead
 - Benefit: Avoid reading large TOAST values
-- Net win if: (rows before filter × TOAST cost) > (rows after filter × join cost)
+- Net win if: (rows before filter $\times$ TOAST cost) > (rows after filter $\times$ join cost)
 
 ## Drawbacks
 

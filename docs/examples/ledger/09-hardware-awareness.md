@@ -81,10 +81,10 @@ ORDER BY total DESC;
 **Plan with 4MB work_mem**:
 ```
 Sort (External Merge Disk)  -- Spills to disk!
-  └── HashAggregate (Disk-based)  -- Also spills!
-      └── Hash Join
-          ├── Hash (In-memory: 150 rows fit)
-          └── Seq Scan (ledger_transactions)
+  `---- HashAggregate (Disk-based)  -- Also spills!
+      `---- Hash Join
+          |---- Hash (In-memory: 150 rows fit)
+          `---- Seq Scan (ledger_transactions)
 ```
 
 ### Cloud VM (32GB RAM)
@@ -106,10 +106,10 @@ ORDER BY total DESC;
 **Plan with 256MB work_mem**:
 ```
 Sort (In-memory Quicksort)  -- Everything in RAM!
-  └── HashAggregate (In-memory)
-      └── Hash Join (In-memory)
-          ├── Hash (In-memory)
-          └── Seq Scan (ledger_transactions)
+  `---- HashAggregate (In-memory)
+      `---- Hash Join (In-memory)
+          |---- Hash (In-memory)
+          `---- Seq Scan (ledger_transactions)
 ```
 
 **Performance Impact**:
@@ -135,7 +135,7 @@ GROUP BY DATE_TRUNC('month', transaction_date);
 **Sequential Plan**:
 ```
 HashAggregate
-  └── Seq Scan (ledger_transactions)
+  `---- Seq Scan (ledger_transactions)
       Workers: 0
       Time: 423ms
 ```
@@ -157,10 +157,10 @@ GROUP BY DATE_TRUNC('month', transaction_date);
 **Parallel Plan**:
 ```
 Finalize HashAggregate
-  └── Gather
+  `---- Gather
       Workers Planned: 4
-      └── Partial HashAggregate
-          └── Parallel Seq Scan
+      `---- Partial HashAggregate
+          `---- Parallel Seq Scan
               Workers: 4
               Time: 127ms (3.3x speedup)
 ```
@@ -183,7 +183,7 @@ ORDER BY transaction_date;
 **Plan for slow random I/O**:
 ```
 Sort
-  └── Seq Scan  -- Avoids index due to random I/O cost!
+  `---- Seq Scan  -- Avoids index due to random I/O cost!
       Filter: debit_account_code IN (...)
 ```
 
@@ -203,7 +203,7 @@ ORDER BY transaction_date;
 **Plan for fast random I/O**:
 ```
 Index Scan  -- Now index is worth it!
-  └── Index: idx_account_date
+  `---- Index: idx_account_date
       Filter: debit_account_code IN (...)
 ```
 
@@ -546,4 +546,4 @@ We've covered individual optimization techniques. Now let's explore advanced fea
 
 ---
 
-*⚡ Performance Tip: The fastest I/O is no I/O. Use covering indexes and increase memory to avoid disk access entirely. When you must read from disk, sequential is 10-100x faster than random on HDDs.*
+* Performance Tip: The fastest I/O is no I/O. Use covering indexes and increase memory to avoid disk access entirely. When you must read from disk, sequential is 10-100x faster than random on HDDs.*

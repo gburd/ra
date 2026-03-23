@@ -35,12 +35,12 @@ The Volcano iterator model implements table scanning using the classic `open()`,
 ## Relational Algebra
 
 ```
-Scan(table) → Iterator<Tuple>
+Scan(table) -> Iterator<Tuple>
 
 interface Iterator {
-  open() → void
-  next() → Tuple | None
-  close() → void
+  open() -> void
+  next() -> Tuple | None
+  close() -> void
 }
 
 ScanIterator implements Iterator {
@@ -50,7 +50,7 @@ ScanIterator implements Iterator {
     cursor = table.begin()
   }
 
-  fn next() → Tuple | None {
+  fn next() -> Tuple | None {
     if cursor.valid() {
       tuple = cursor.current()
       cursor.advance()
@@ -154,13 +154,13 @@ pub fn volcano_scan_cost(
 - Iterator state management: `O(1)` per next() call
 - Function call overhead: ~1-10 ns per tuple
 - Predicate evaluation (if filter): 10-100 ns per tuple
-- Total CPU: `row_count × (call_overhead + predicate_cost)`
+- Total CPU: `row_count $\times$ (call_overhead + predicate_cost)`
 
 **I/O Cost:**
 - Sequential scan: read every page once
 - Page reads: `⌈row_count / tuples_per_page⌉`
 - Random access penalty if not sequential
-- Total I/O: `num_pages × page_read_latency`
+- Total I/O: `num_pages $\times$ page_read_latency`
 
 **Memory:**
 - Iterator state: O(1) - just cursor position
@@ -175,7 +175,7 @@ pub fn volcano_scan_cost(
 -- Test 1: Simple scan
 SELECT * FROM orders;
 -- Expected: Sequential scan, all tuples returned
--- Cost: row_count × tuple_cost + page_count × io_cost
+-- Cost: row_count $\times$ tuple_cost + page_count $\times$ io_cost
 
 -- Test 2: Scan with filter
 SELECT * FROM orders WHERE amount > 1000;

@@ -54,20 +54,20 @@ Memory zones in a Volcano execution:
    - Allocated once per operator
 
 2. Operator state (O(1) to O(N)):
-   - Pipelined: O(1) — cursor, predicate
-   - Sort: O(N) — sort buffer
-   - Hash Join: O(build_side) — hash table
-   - Hash Agg: O(groups) — hash table
-   - Window: O(partition) — partition buffer
+   - Pipelined: O(1) - cursor, predicate
+   - Sort: O(N) - sort buffer
+   - Hash Join: O(build_side) - hash table
+   - Hash Agg: O(groups) - hash table
+   - Window: O(partition) - partition buffer
 
 3. Expression evaluation (O(1)):
    - Intermediate computation buffers
    - Reused per tuple
 
 Memory lifecycle:
-  open()  — allocate operator buffers
-  next()  — fill/consume tuple buffers
-  close() — deallocate all buffers
+  open()  - allocate operator buffers
+  next()  - fill/consume tuple buffers
+  close() - deallocate all buffers
 
 Spill decision:
   if used_memory > work_mem_limit:
@@ -76,9 +76,9 @@ Spill decision:
     merge results
 
 Memory budget allocation for plan with N materializers:
-  Strategy 1: Equal split — work_mem / N per operator
-  Strategy 2: Proportional — based on estimated cardinality
-  Strategy 3: Adaptive — start equal, redistribute on demand
+  Strategy 1: Equal split - work_mem / N per operator
+  Strategy 2: Proportional - based on estimated cardinality
+  Strategy 3: Adaptive - start equal, redistribute on demand
 ```
 
 ## Implementation
@@ -389,8 +389,8 @@ impl SortIterator {
 - Number of partitions: `ceil(build_size / work_mem)`
 
 **Memory budget impact on plan choice:**
-- Small work_mem → nested loop join preferred (O(1) memory)
-- Large work_mem → hash join preferred (O(build) memory, O(N+M) time)
+- Small work_mem -> nested loop join preferred (O(1) memory)
+- Large work_mem -> hash join preferred (O(build) memory, O(N+M) time)
 - Optimizer must consider memory in cost model
 
 **Tuple lifetime and reuse:**

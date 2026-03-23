@@ -21,7 +21,7 @@ Union operator returns tuples from both inputs. UNION (distinct) requires dedupl
 ## Relational Algebra
 
 ```
-Union(left, right, all) → Iterator<Tuple>
+Union(left, right, all) -> Iterator<Tuple>
 
 UnionIterator {
   left: Iterator
@@ -30,7 +30,7 @@ UnionIterator {
   seen: HashSet<Tuple>  // For UNION (distinct)
   all: bool
 
-  fn next() → Tuple | None {
+  fn next() -> Tuple | None {
     loop {
       tuple = if current_input == Left {
         left.next()

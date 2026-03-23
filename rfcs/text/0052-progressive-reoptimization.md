@@ -59,19 +59,19 @@ Monitor execution and re-optimize when estimates diverge from reality:
 Progressive re-optimization adds **monitoring points** to the execution plan. At each point, Ra compares estimated vs actual cardinalities and decides whether to continue or switch plans.
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  Initial Plan (based on estimates)                      │
-│                                                          │
-│  Scan(orders) ──► Hash Join ──► Project ──► Output     │
-│                   ▲ Stitch Point                        │
-│                   │ Monitor: Actual rows >> Estimated   │
-│                   │ Decision: Re-optimize               │
-│                   ▼                                      │
-│  New Plan (based on actuals)                            │
-│                                                          │
-│  Scan(orders) ──► Merge Join ──► Project ──► Output    │
-│                   ▲ Transfer partial results            │
-└─────────────────────────────────────────────────────────┘
+,-----------------------------------------------------------,
+|  Initial Plan (based on estimates)                      |
+|                                                          |
+|  Scan(orders) --> Hash Join --> Project --> Output     |
+|                   ^ Stitch Point                        |
+|                   | Monitor: Actual rows >> Estimated   |
+|                   | Decision: Re-optimize               |
+|                   v                                      |
+|  New Plan (based on actuals)                            |
+|                                                          |
+|  Scan(orders) --> Merge Join --> Project --> Output    |
+|                   ^ Transfer partial results            |
+`------------------------------------------------------------'
 ```
 
 ### Monitoring Points (Stitch Points)
@@ -153,39 +153,39 @@ Re-optimize only if:
 ### Architecture
 
 ```
-┌────────────────────────────────────────────────────────┐
-│         Execution Engine                               │
-│                                                         │
-│  ┌──────────┐  Monitor  ┌───────────────────┐        │
-│  │ Operator ├──────────►│ Stitch Coordinator│        │
-│  └──────────┘           └─────────┬─────────┘        │
-│                                    │                   │
-│                         Check Divergence               │
-│                                    │                   │
-│                                    ▼                   │
-│                         ┌─────────────────┐           │
-│                         │  Re-Optimizer   │           │
-│                         │ (with actuals)  │           │
-│                         └─────────┬───────┘           │
-│                                    │                   │
-│                         Generate Alternative Plan      │
-│                                    │                   │
-│                                    ▼                   │
-│                         ┌─────────────────┐           │
-│                         │ Cost Comparator │           │
-│                         └─────────┬───────┘           │
-│                                    │                   │
-│                           Decision: Switch?            │
-│                                    │                   │
-│                                    ▼                   │
-│                         ┌─────────────────┐           │
-│                         │ State Transfer  │           │
-│                         └─────────┬───────┘           │
-│                                    │                   │
-│                         ┌──────────▼──────────┐       │
-│                         │   New Operator Tree │       │
-│                         └─────────────────────┘       │
-└────────────────────────────────────────────────────────┘
+,----------------------------------------------------------,
+|         Execution Engine                               |
+|                                                         |
+|  ,------------,  Monitor  ,---------------------,        |
+|  | Operator |------------>| Stitch Coordinator|        |
+|  `-------------'           `------------+-----------'        |
+|                                    |                   |
+|                         Check Divergence               |
+|                                    |                   |
+|                                    v                   |
+|                         ,-------------------,           |
+|                         |  Re-Optimizer   |           |
+|                         | (with actuals)  |           |
+|                         `------------+---------'           |
+|                                    |                   |
+|                         Generate Alternative Plan      |
+|                                    |                   |
+|                                    v                   |
+|                         ,-------------------,           |
+|                         | Cost Comparator |           |
+|                         `------------+---------'           |
+|                                    |                   |
+|                           Decision: Switch?            |
+|                                    |                   |
+|                                    v                   |
+|                         ,-------------------,           |
+|                         | State Transfer  |           |
+|                         `------------+---------'           |
+|                                    |                   |
+|                         ,-----------v-----------,       |
+|                         |   New Operator Tree |       |
+|                         `------------------------'       |
+`-----------------------------------------------------------'
 ```
 
 ### Stitch Point API
@@ -320,7 +320,7 @@ const SWITCH_THRESHOLD: f64 = 0.8;  // Switch if 20%+ savings
 
 Different operators require different state transfer approaches:
 
-#### Hash Join → Merge Join
+#### Hash Join -> Merge Join
 ```rust
 pub fn transfer_hash_to_merge_join(
     hash_state: HashJoinState,
@@ -341,7 +341,7 @@ pub fn transfer_hash_to_merge_join(
 }
 ```
 
-#### Nested Loop → Hash Join
+#### Nested Loop -> Hash Join
 ```rust
 pub fn transfer_nested_loop_to_hash_join(
     nl_state: NestedLoopState,
@@ -372,12 +372,12 @@ pub fn estimate_stitch_cost(
 ) -> f64 {
     match (old_operator, new_operator) {
         (RelExpr::Join { .. }, RelExpr::Join { .. }) => {
-            // Join → Join: Minimal state transfer
+            // Join -> Join: Minimal state transfer
             state.row_count() as f64 * COPY_COST
         }
         (RelExpr::Join { join_type: JoinType::Nested, .. },
          RelExpr::Join { join_type: JoinType::Hash, .. }) => {
-            // Nested Loop → Hash Join: Build hash table
+            // Nested Loop -> Hash Join: Build hash table
             state.row_count() as f64 * HASH_BUILD_COST
         }
         (RelExpr::Aggregate { .. }, RelExpr::Aggregate { .. }) => {
@@ -497,12 +497,12 @@ pub fn estimate_stitch_cost(
 - Test state transfer correctness
 
 ### Phase 4: Join Stitching (2 weeks)
-- Implement Hash Join ↔ Nested Loop switching
-- Implement Merge Join ↔ Hash Join switching
+- Implement Hash Join <-> Nested Loop switching
+- Implement Merge Join <-> Hash Join switching
 - Test with TPC-H queries 5, 8, 17
 
 ### Phase 5: Aggregation Stitching (2 weeks)
-- Implement Hash Aggregate ↔ Sort Aggregate switching
+- Implement Hash Aggregate <-> Sort Aggregate switching
 - Test with TPC-H queries 1, 7, 18
 
 ### Phase 6: End-to-End Testing (2 weeks)

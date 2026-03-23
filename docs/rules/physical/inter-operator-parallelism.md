@@ -27,7 +27,7 @@ Executes different operators in parallel in pipeline fashion; producer-consumer 
 ```algebra
 operator3(operator2(operator1(data)))
   -> concurrent_pipeline:
-       operator1 produces → operator2 processes → operator3 consumes
+       operator1 produces -> operator2 processes -> operator3 consumes
 ```
 
 ## Implementation

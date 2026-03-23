@@ -33,8 +33,8 @@ reducing the number of probes into the right-side hash table.
 ## Relational Algebra
 
 ```algebra
-σ_p(R ⋉ S) where p references only R columns ->
-  σ_p(R) ⋉ S
+$\sigma$_p(R $\ltimes$ S) where p references only R columns ->
+  $\sigma$_p(R) $\ltimes$ S
 ```
 
 ## Implementation
@@ -89,7 +89,7 @@ fn estimated_benefit(
     let semi_join_savings = rows_eliminated * probe_cost_per_row;
 
     // Filter evaluation cost (pushed down)
-    let filter_cost_per_row = 0.000001; // 1μs per row
+    let filter_cost_per_row = 0.000001; // 1$\mu$s per row
     let filter_cost = left_rows * filter_cost_per_row;
 
     // Total query cost estimate
@@ -103,7 +103,7 @@ fn estimated_benefit(
 **Assumptions:**
 - Semi-join implemented as hash semi-join (hash on right, probe from left)
 - Hash table probe cost: ~50ns per row
-- Filter evaluation: ~1μs per row (predicate-dependent)
+- Filter evaluation: ~1$\mu$s per row (predicate-dependent)
 - Selective filters (< 50% selectivity) benefit most
 
 **Typical benefit**: 15-45% for selective filters on left input.

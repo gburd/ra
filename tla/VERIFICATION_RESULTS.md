@@ -6,9 +6,9 @@ This document records the formal verification results for the RA optimizer's cor
 
 | Specification | Status | States Explored | Properties Verified | Time |
 |--------------|--------|-----------------|---------------------|------|
-| RuleComposition | ✓ Pass | ~10,000 | 6 | ~30s |
-| CostMonotonicity | ✓ Pass | ~5,000 | 5 | ~15s |
-| Equivalence | ✓ Pass | ~50,000 | 11 | ~2m |
+| RuleComposition | [x] Pass | ~10,000 | 6 | ~30s |
+| CostMonotonicity | [x] Pass | ~5,000 | 5 | ~15s |
+| Equivalence | [x] Pass | ~50,000 | 11 | ~2m |
 
 **Total**: 22 properties formally verified across 3 specifications
 
@@ -20,12 +20,12 @@ This document records the formal verification results for the RA optimizer's cor
 
 **Verified Properties**:
 
-1. ✓ **TypeOK**: All variables maintain correct types throughout execution
-2. ✓ **CardinalityBounded**: E-graph never exceeds `MaxNodes = 1000`
-3. ✓ **IterationBounded**: Never exceeds `MaxIterations = 100`
-4. ✓ **EClassSizeBounded**: No equivalence class exceeds `MaxEClassSize = 50`
-5. ✓ **Termination**: System eventually reaches a terminal state (saturated, max iterations, or max nodes)
-6. ✓ **MonotonicGrowth**: E-graph cardinality never decreases
+1. [x] **TypeOK**: All variables maintain correct types throughout execution
+2. [x] **CardinalityBounded**: E-graph never exceeds `MaxNodes = 1000`
+3. [x] **IterationBounded**: Never exceeds `MaxIterations = 100`
+4. [x] **EClassSizeBounded**: No equivalence class exceeds `MaxEClassSize = 50`
+5. [x] **Termination**: System eventually reaches a terminal state (saturated, max iterations, or max nodes)
+6. [x] **MonotonicGrowth**: E-graph cardinality never decreases
 
 **Model Checking Statistics**:
 - Initial states: 3 (empty graph, single node, two nodes)
@@ -53,11 +53,11 @@ This document records the formal verification results for the RA optimizer's cor
 
 **Verified Properties**:
 
-1. ✓ **TypeOK**: Cost is always a non-negative real number
-2. ✓ **CostNonNegative**: Cost ≥ 0 in all states
-3. ✓ **LogicalNeverIncreases**: Logical rule applications: `cost' ≤ cost`
-4. ✓ **PhysicalMayIncrease**: Physical rules may increase cost (expected)
-5. ✓ **EventualOptimality**: System reaches local minimum where no logical rule reduces cost
+1. [x] **TypeOK**: Cost is always a non-negative real number
+2. [x] **CostNonNegative**: Cost $\geq$ 0 in all states
+3. [x] **LogicalNeverIncreases**: Logical rule applications: `cost' $\leq$ cost`
+4. [x] **PhysicalMayIncrease**: Physical rules may increase cost (expected)
+5. [x] **EventualOptimality**: System reaches local minimum where no logical rule reduces cost
 
 **Model Checking Statistics**:
 - Initial states: 1 (cost = 5000)
@@ -95,17 +95,17 @@ State 8: cost = 287   (saturated, no further reductions)
 
 **Verified Properties**:
 
-1. ✓ **TypeOK**: Database, plans, and results maintain correct types
-2. ✓ **Inv1 (TypeOK)**: Refinement of main type invariant
-3. ✓ **Inv2 (Determinism)**: Same plan + same data → same results
-4. ✓ **Inv3 (Reflexive)**: A plan is equivalent to itself
-5. ✓ **Inv4 (Symmetric)**: If plan1 = plan2, then plan2 = plan1
-6. ✓ **Inv5 (Transitive)**: If plan1 = plan2 and plan2 = plan3, then plan1 = plan3
-7. ✓ **SemanticEquivalence**: Transformed plan produces same results as original
-8. ✓ **FilterPushdownCorrect**: Pushing filters through joins preserves semantics
-9. ✓ **JoinCommutative**: `A ⋈ B = B ⋈ A`
-10. ✓ **JoinAssociative**: `(A ⋈ B) ⋈ C = A ⋈ (B ⋈ C)`
-11. ✓ **ProjectFusion**: Consecutive projections can be merged
+1. [x] **TypeOK**: Database, plans, and results maintain correct types
+2. [x] **Inv1 (TypeOK)**: Refinement of main type invariant
+3. [x] **Inv2 (Determinism)**: Same plan + same data -> same results
+4. [x] **Inv3 (Reflexive)**: A plan is equivalent to itself
+5. [x] **Inv4 (Symmetric)**: If plan1 = plan2, then plan2 = plan1
+6. [x] **Inv5 (Transitive)**: If plan1 = plan2 and plan2 = plan3, then plan1 = plan3
+7. [x] **SemanticEquivalence**: Transformed plan produces same results as original
+8. [x] **FilterPushdownCorrect**: Pushing filters through joins preserves semantics
+9. [x] **JoinCommutative**: `A $\bowtie$ B = B $\bowtie$ A`
+10. [x] **JoinAssociative**: `(A $\bowtie$ B) $\bowtie$ C = A $\bowtie$ (B $\bowtie$ C)`
+11. [x] **ProjectFusion**: Consecutive projections can be merged
 
 **Model Checking Statistics**:
 - Initial states: 8 (various database configurations)
@@ -126,7 +126,7 @@ WHERE amount > 1000;
 SELECT * FROM (SELECT * FROM orders WHERE amount > 1000) AS o
 JOIN customers ON o.oid = customers.cid;
 
-Verification: ✓ Same results for all test databases
+Verification: [x] Same results for all test databases
 ```
 
 Example 2: Join Commutativity
@@ -137,7 +137,7 @@ SELECT * FROM orders JOIN customers ON oid = cid;
 -- Transformed (equivalent)
 SELECT * FROM customers JOIN orders ON cid = oid;
 
-Verification: ✓ Same results for all test databases
+Verification: [x] Same results for all test databases
 ```
 
 Example 3: Project Fusion
@@ -148,7 +148,7 @@ SELECT id, amount FROM (SELECT id, amount, date FROM orders);
 -- Transformed (equivalent)
 SELECT id, amount FROM orders;
 
-Verification: ✓ Same results for all test databases
+Verification: [x] Same results for all test databases
 ```
 
 **Key Insights**:
@@ -272,9 +272,9 @@ The remaining 5% risk comes from:
 
 Formal verification with TLA+ provides high confidence in the correctness of the RA optimizer's core algorithms:
 
-1. ✓ **Termination guaranteed**: The optimizer will never hang
-2. ✓ **Cost monotonicity proven**: Logical rules are always beneficial
-3. ✓ **Semantic equivalence verified**: Optimizations preserve query results
+1. [x] **Termination guaranteed**: The optimizer will never hang
+2. [x] **Cost monotonicity proven**: Logical rules are always beneficial
+3. [x] **Semantic equivalence verified**: Optimizations preserve query results
 
 These properties, combined with extensive testing (727 tests) and differential testing against production databases, provide strong evidence that the system is correct and reliable.
 

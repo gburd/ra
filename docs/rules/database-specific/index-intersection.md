@@ -33,13 +33,13 @@ overhead.
 ## Relational Algebra
 
 ```algebra
-σ_{p1 ∧ p2}(R) with Index(p1) and Index(p2)
+$\sigma$_{p1 $\land$ p2}(R) with Index(p1) and Index(p2)
 
 Without intersection:
-SeqScan(R) → filter p1 AND p2
+SeqScan(R) -> filter p1 AND p2
 
 With intersection:
-IndexScan(I1, p1) ∩ IndexScan(I2, p2) → fetch matched documents
+IndexScan(I1, p1) $\cap$ IndexScan(I2, p2) -> fetch matched documents
 ```
 
 ## Implementation
@@ -96,13 +96,13 @@ fn estimated_benefit(
     let combined_sel = sel1 * sel2;
 
     // Cost of collection scan
-    let scan_cost = total_docs * 0.000001; // 1μs per doc
+    let scan_cost = total_docs * 0.000001; // 1$\mu$s per doc
 
     // Cost of index intersection
-    let index1_scan = total_docs * sel1 * 0.000005; // 5μs per index entry
+    let index1_scan = total_docs * sel1 * 0.000005; // 5$\mu$s per index entry
     let index2_scan = total_docs * sel2 * 0.000005;
     let intersection = (total_docs * sel1).min(total_docs * sel2) * 0.000001;
-    let doc_fetch = total_docs * combined_sel * 0.00001; // 10μs per fetch
+    let doc_fetch = total_docs * combined_sel * 0.00001; // 10$\mu$s per fetch
     let intersection_cost = index1_scan + index2_scan + intersection + doc_fetch;
 
     if scan_cost > intersection_cost {
@@ -114,10 +114,10 @@ fn estimated_benefit(
 ```
 
 **Assumptions:**
-- Collection scan: 1μs per document
-- Index scan: 5μs per index entry
-- Intersection: 1μs per comparison
-- Document fetch: 10μs per document (random I/O)
+- Collection scan: 1$\mu$s per document
+- Index scan: 5$\mu$s per index entry
+- Intersection: 1$\mu$s per comparison
+- Document fetch: 10$\mu$s per document (random I/O)
 - Beneficial when combined selectivity < 10%
 
 **Typical benefit**: 40% to 3x for moderately selective multi-predicate queries.
@@ -134,9 +134,9 @@ db.users.find({
 })
 
 // Index intersection:
-// 1. Scan {age: 1} index → 10% of users
-// 2. Scan {city: 1} index → 5% of users
-// 3. Intersect → 0.5% of users (age AND city)
+// 1. Scan {age: 1} index -> 10% of users
+// 2. Scan {city: 1} index -> 5% of users
+// 3. Intersect -> 0.5% of users (age AND city)
 // 4. Fetch those documents
 // explain() shows: "stage": "AND_SORTED"
 ```
@@ -151,9 +151,9 @@ db.tickets.find({
 })
 
 // Options:
-// 1. Use status index: scan 30%, filter priority → 6%
-// 2. Use priority index: scan 20%, filter status → 6%
-// 3. Intersection: scan both, intersect → 6% (similar final result)
+// 1. Use status index: scan 30%, filter priority -> 6%
+// 2. Use priority index: scan 20%, filter status -> 6%
+// 3. Intersection: scan both, intersect -> 6% (similar final result)
 // Intersection may win if indexes fit in cache
 ```
 

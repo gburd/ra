@@ -70,7 +70,7 @@ overhead.
 ```
 aggregate[groups, aggs](column-scan[T])
   -> columnar-hash-aggregate[groups, aggs](
-       column-vectors(T, groups ∪ agg_cols))
+       column-vectors(T, groups $\cup$ agg_cols))
 ```
 
 ## Implementation (egg rewrite rules)

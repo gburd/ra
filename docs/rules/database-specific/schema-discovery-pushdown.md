@@ -30,7 +30,7 @@ Drill defers schema discovery until runtime and pushes schema inference into sto
 
 ```
 Scan(schemaless_source)
-→ Scan_with_schema_discovery(source, infer_at_runtime)
+-> Scan_with_schema_discovery(source, infer_at_runtime)
 ```
 
 ## Test Cases

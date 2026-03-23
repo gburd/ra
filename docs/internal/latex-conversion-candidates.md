@@ -236,11 +236,11 @@ With correlation correction factor when columns are not independent.
 
 Multiple files use set notation that should be LaTeX:
 
-- **Union**: `∪` → `$\cup$`
-- **Intersection**: `∩` → `$\cap$`
-- **Element of**: `∈` → `$\in$`
-- **Inequalities**: `≤`, `≥` → `$\leq$`, `$\geq$`
-- **Implies**: `->` → `$\Rightarrow$`
+- **Union**: `$\cup$` -> `$\cup$`
+- **Intersection**: `$\cap$` -> `$\cap$`
+- **Element of**: `$\in$` -> `$\in$`
+- **Inequalities**: `$\leq$`, `$\geq$` -> `$\leq$`, `$\geq$`
+- **Implies**: `->` -> `$\Rightarrow$`
 
 ---
 
@@ -295,7 +295,7 @@ Files in `rules/physical/hardware/` with cache formulas:
 
 - Use `\text{}` for multi-letter variable names: `$\text{cost}$` not `$cost$`
 - Use `\times` for multiplication, not `*` in display math
-- Use `\cdot` for dot product or when `×` is too heavy
+- Use `\cdot` for dot product or when `$\times$` is too heavy
 - Subscripts should use `\text{}` for words: `$C_{\text{cpu}}$`
 
 ---

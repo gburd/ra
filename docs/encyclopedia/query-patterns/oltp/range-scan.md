@@ -154,9 +154,9 @@ Project [order_id, total, customer_id]
 ```
 
 **Cost Estimate:**
-- Rows: 10M × (31 days / 1826 days) = ~170K rows
+- Rows: 10M $\times$ (31 days / 1826 days) = ~170K rows
 - Selectivity: 1.7%
-- I/Os: log(10M) + 170K ≈ 170K (mostly heap fetches)
+- I/Os: log(10M) + 170K $\approx$ 170K (mostly heap fetches)
 
 ### Numeric Range
 
@@ -259,7 +259,7 @@ Limit (20) Offset (100)
 
 ### 1. Implicit Type Conversion
 
-❌ **Bad:**
+[FAIL] **Bad:**
 ```sql
 -- If created_at is DATE
 SELECT * FROM orders WHERE created_at BETWEEN '2024-01-01 00:00:00' AND '2024-01-31 23:59:59';
@@ -267,19 +267,19 @@ SELECT * FROM orders WHERE created_at BETWEEN '2024-01-01 00:00:00' AND '2024-01
 
 Timestamp strings on DATE column may prevent index usage.
 
-✅ **Good:**
+[x] **Good:**
 ```sql
 SELECT * FROM orders WHERE created_at BETWEEN '2024-01-01' AND '2024-01-31';
 ```
 
 ### 2. Function on Indexed Column
 
-❌ **Bad:**
+[FAIL] **Bad:**
 ```sql
 SELECT * FROM orders WHERE DATE(created_at) = '2024-01-15';
 ```
 
-✅ **Good:**
+[x] **Good:**
 ```sql
 SELECT * FROM orders
 WHERE created_at >= '2024-01-15' AND created_at < '2024-01-16';
@@ -287,7 +287,7 @@ WHERE created_at >= '2024-01-15' AND created_at < '2024-01-16';
 
 ### 3. Inefficient Pagination
 
-❌ **Bad:**
+[FAIL] **Bad:**
 ```sql
 -- For large offsets (e.g., OFFSET 100000)
 SELECT * FROM orders ORDER BY created_at LIMIT 20 OFFSET 100000;
@@ -295,7 +295,7 @@ SELECT * FROM orders ORDER BY created_at LIMIT 20 OFFSET 100000;
 
 Cost grows linearly with offset.
 
-✅ **Good:**
+[x] **Good:**
 ```sql
 -- Keyset pagination
 SELECT * FROM orders
@@ -309,8 +309,8 @@ LIMIT 20;
 | Selectivity | Preferred Method | Expected Cost |
 |-------------|-----------------|---------------|
 | < 0.01% | Index scan | ~log(N) |
-| 0.01% - 5% | Index range scan | log(N) + sel×N |
-| 5% - 20% | Bitmap scan | log(N) + sel×N (clustered) |
+| 0.01% - 5% | Index range scan | log(N) + sel$\times$N |
+| 5% - 20% | Bitmap scan | log(N) + sel$\times$N (clustered) |
 | > 20% | Sequential scan | N |
 
 ## See Also

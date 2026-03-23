@@ -16,24 +16,24 @@ Welcome to the RA optimizer maintainer documentation. This section is for contri
 
 ```
 ra/
-├── crates/              # Rust crates (20+ components)
-│   ├── ra-core/         # Core types (RelExpr, Statistics)
-│   ├── ra-engine/       # Optimization engine (e-graph)
-│   ├── ra-parser/       # SQL parser
-│   ├── ra-dialect/      # Multi-database SQL translation
-│   ├── ra-stats/        # Statistics system
-│   ├── ra-hardware/     # Hardware detection
-│   ├── ra-cli/          # Command-line interface
-│   ├── ra-tui/          # Terminal UI
-│   ├── ra-web/          # Web UI
-│   ├── ra-pg-extension/ # PostgreSQL pgrx extension
-│   └── ...
-├── rules/               # 1,354+ optimization rules
-├── docs/                # Documentation (VitePress)
-├── rfcs/                # Request for Comments (45+ RFCs)
-├── research/            # Research notes and gap analysis
-├── examples/            # Example queries and applications
-└── tests/               # Integration and regression tests
+|---- crates/              # Rust crates (20+ components)
+|   |---- ra-core/         # Core types (RelExpr, Statistics)
+|   |---- ra-engine/       # Optimization engine (e-graph)
+|   |---- ra-parser/       # SQL parser
+|   |---- ra-dialect/      # Multi-database SQL translation
+|   |---- ra-stats/        # Statistics system
+|   |---- ra-hardware/     # Hardware detection
+|   |---- ra-cli/          # Command-line interface
+|   |---- ra-tui/          # Terminal UI
+|   |---- ra-web/          # Web UI
+|   |---- ra-pg-extension/ # PostgreSQL pgrx extension
+|   `---- ...
+|---- rules/               # 1,354+ optimization rules
+|---- docs/                # Documentation (VitePress)
+|---- rfcs/                # Request for Comments (45+ RFCs)
+|---- research/            # Research notes and gap analysis
+|---- examples/            # Example queries and applications
+`---- tests/               # Integration and regression tests
 ```
 
 ## Major Components

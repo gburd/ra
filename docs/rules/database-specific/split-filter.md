@@ -27,7 +27,7 @@ Splits a single Filter with conjunctive (AND) predicates into multiple consecuti
 ## Relational Algebra
 
 ```algebra
-Filter[c1 ∧ c2](R) -> Filter[c2](Filter[c1](R))
+Filter[c1 $\land$ c2](R) -> Filter[c2](Filter[c1](R))
 ```
 
 ## Implementation

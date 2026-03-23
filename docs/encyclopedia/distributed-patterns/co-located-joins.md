@@ -73,11 +73,11 @@ $$
 
 Both tables must be partitioned on the join column:
 ```sql
--- ✓ Co-located: both on customer_id
+-- [x] Co-located: both on customer_id
 PARTITION orders BY HASH(customer_id);
 PARTITION customers BY HASH(customer_id);
 
--- ✗ Not co-located: different keys
+-- [FAIL] Not co-located: different keys
 PARTITION orders BY HASH(order_id);
 PARTITION customers BY HASH(customer_id);
 ```
@@ -86,11 +86,11 @@ PARTITION customers BY HASH(customer_id);
 
 Both tables must have the same number of partitions:
 ```sql
--- ✓ Co-located: both have 16 partitions
+-- [x] Co-located: both have 16 partitions
 PARTITION orders BY HASH(customer_id) PARTITIONS 16;
 PARTITION customers BY HASH(customer_id) PARTITIONS 16;
 
--- ✗ Not co-located: different partition counts
+-- [FAIL] Not co-located: different partition counts
 PARTITION orders BY HASH(customer_id) PARTITIONS 32;
 PARTITION customers BY HASH(customer_id) PARTITIONS 16;
 ```
@@ -99,7 +99,7 @@ PARTITION customers BY HASH(customer_id) PARTITIONS 16;
 
 Both tables must use identical hash functions:
 ```sql
--- ✓ Co-located: same hash function
+-- [x] Co-located: same hash function
 CREATE TABLE orders (...) USING HASH(customer_id) WITH (hash_fn = 'murmur3');
 CREATE TABLE customers (...) USING HASH(customer_id) WITH (hash_fn = 'murmur3');
 ```
@@ -160,11 +160,11 @@ $$
 
 **Savings:** $(|R| + |S|) \times \text{size}_{\text{tuple}} \times C_{\text{network}}$
 
-For 1M rows × 1KB average = 1GB network transfer eliminated per table.
+For 1M rows $\times$ 1KB average = 1GB network transfer eliminated per table.
 
 ## Examples
 
-### E-commerce: Orders ⋈ Customers
+### E-commerce: Orders $\bowtie$ Customers
 
 ```sql
 -- Schema: orders(order_id, customer_id, total, order_date)
@@ -179,9 +179,9 @@ GROUP BY c.name;
 ```
 
 **Without co-location:**
-- Scan 1M customers → shuffle across network
-- Scan 10M orders → shuffle across network
-- 11M rows × 500 bytes = **5.5GB network transfer**
+- Scan 1M customers -> shuffle across network
+- Scan 10M orders -> shuffle across network
+- 11M rows $\times$ 500 bytes = **5.5GB network transfer**
 
 **With co-location:**
 - Each of 32 nodes scans local partitions
@@ -221,11 +221,11 @@ JOIN reviews r ON p.product_id = r.product_id;
 ```
 
 **Co-location analysis:**
-- `customers ⋈ orders`: ✓ Co-located on `customer_id`
-- `orders ⋈ order_items`: ✓ If `order_items` partitioned by `customer_id` (inherited)
-- `products`, `reviews`: ✗ Different partition key
+- `customers $\bowtie$ orders`: [x] Co-located on `customer_id`
+- `orders $\bowtie$ order_items`: [x] If `order_items` partitioned by `customer_id` (inherited)
+- `products`, `reviews`: [FAIL] Different partition key
 
-Ra optimizes: `(customers ⋈ orders ⋈ order_items)` locally, then shuffle for products join.
+Ra optimizes: `(customers $\bowtie$ orders $\bowtie$ order_items)` locally, then shuffle for products join.
 
 ## Partial Co-location
 
@@ -271,7 +271,7 @@ For safety, validate at runtime:
 
 ## Common Pitfalls
 
-### ❌ Join on Non-Partition Key
+### [FAIL] Join on Non-Partition Key
 
 ```sql
 -- orders partitioned by customer_id
@@ -282,7 +282,7 @@ JOIN orders o2 ON o1.order_date = o2.order_date;
 
 **Fix:** Materialize result if this is a hot query, or use temporal partitioning.
 
-### ❌ Partition Count Mismatch
+### [FAIL] Partition Count Mismatch
 
 ```sql
 -- orders: 32 partitions
@@ -292,11 +292,11 @@ JOIN orders o2 ON o1.order_date = o2.order_date;
 
 **Fix:** Re-partition one table to match, or accept shuffle cost.
 
-### ❌ Data Skew
+### [FAIL] Data Skew
 
 Even with co-location, skewed data causes imbalance:
 - Most tenants small (fast local joins)
-- One "whale" tenant → one node does 80% of work
+- One "whale" tenant -> one node does 80% of work
 
 **Fix:** Use [composite partitioning](../../features/composite-partitioning.md) or split hot partitions.
 
@@ -329,9 +329,9 @@ fn test_co_located_join_detection() {
 
 | Dataset Size | Shuffle Join Time | Co-located Join Time | Speedup |
 |--------------|-------------------|----------------------|---------|
-| 1M × 1M rows | 45 sec | 4 sec | **11x** |
-| 10M × 10M rows | 8 min | 28 sec | **17x** |
-| 100M × 100M rows | 2 hours | 6 min | **20x** |
+| 1M $\times$ 1M rows | 45 sec | 4 sec | **11x** |
+| 10M $\times$ 10M rows | 8 min | 28 sec | **17x** |
+| 100M $\times$ 100M rows | 2 hours | 6 min | **20x** |
 
 Speedup increases with data size due to network cost dominating.
 

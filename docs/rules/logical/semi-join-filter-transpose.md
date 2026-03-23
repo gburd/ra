@@ -21,7 +21,7 @@ Transposes filter with semi-join
 ## Relational Algebra
 
 ```algebra
-σ(SemiJoin(R, S)) => SemiJoin(σ(R), S)
+$\sigma$(SemiJoin(R, S)) => SemiJoin($\sigma$(R), S)
 ```
 
 ## Implementation

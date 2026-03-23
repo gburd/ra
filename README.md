@@ -118,34 +118,34 @@ See [Deployment Guide](docs/deployment.md) for full details on Docker, Kubernete
 
 ```
 ra/
-├── crates/                  # Rust crates (16 crates)
-│   ├── ra-core/             # Core types: RelExpr, Expr, Cost, Rule
-│   ├── ra-parser/           # .rra literate format parser
-│   ├── ra-compiler/         # Rule compilation and indexing
-│   ├── ra-engine/           # Optimization engine (egg + differential)
-│   ├── ra-codegen/          # Code generation (Cranelift, WASM, bytecode)
-│   ├── ra-hardware/         # GPU/FPGA/SIMD/NUMA + network cost models
-│   ├── ra-ml/               # ML cardinality estimation
-│   ├── ra-adaptive/         # Runtime reoptimization
-│   ├── ra-dialect/          # SQL dialect translation (6 dialects)
-│   ├── ra-isolation/        # Cross-database isolation testing
-│   ├── ra-wasm/             # WASM database adapters
-│   ├── ra-synthesis/        # Natural language to SQL
-│   ├── ra-discovery/        # Automatic rule mining from logs
-│   ├── ra-multimodel/       # Graph, document, time-series rules
-│   ├── ra-cli/              # Command-line interface
-│   └── ra-web/              # Web explorer backend (Rocket.rs)
-├── rules/                   # 147 rule definitions (.rra files)
-│   ├── logical/             # Predicate pushdown, join reordering, ...
-│   ├── physical/            # Join algorithms, index selection, ...
-│   ├── hardware/            # GPU, FPGA, SIMD, NUMA, data placement
-│   ├── distributed/         # Exchange, broadcast join, partition pruning
-│   ├── multi-model/         # Graph, document, time-series
-│   └── database-specific/   # Engine-specific optimizations
-├── web/                     # Web explorer frontend (Preact)
-├── tla/                     # TLA+ formal specifications
-├── docs/                    # Documentation
-└── tests/                   # Integration and property tests
+|---- crates/                  # Rust crates (16 crates)
+|   |---- ra-core/             # Core types: RelExpr, Expr, Cost, Rule
+|   |---- ra-parser/           # .rra literate format parser
+|   |---- ra-compiler/         # Rule compilation and indexing
+|   |---- ra-engine/           # Optimization engine (egg + differential)
+|   |---- ra-codegen/          # Code generation (Cranelift, WASM, bytecode)
+|   |---- ra-hardware/         # GPU/FPGA/SIMD/NUMA + network cost models
+|   |---- ra-ml/               # ML cardinality estimation
+|   |---- ra-adaptive/         # Runtime reoptimization
+|   |---- ra-dialect/          # SQL dialect translation (6 dialects)
+|   |---- ra-isolation/        # Cross-database isolation testing
+|   |---- ra-wasm/             # WASM database adapters
+|   |---- ra-synthesis/        # Natural language to SQL
+|   |---- ra-discovery/        # Automatic rule mining from logs
+|   |---- ra-multimodel/       # Graph, document, time-series rules
+|   |---- ra-cli/              # Command-line interface
+|   `---- ra-web/              # Web explorer backend (Rocket.rs)
+|---- rules/                   # 147 rule definitions (.rra files)
+|   |---- logical/             # Predicate pushdown, join reordering, ...
+|   |---- physical/            # Join algorithms, index selection, ...
+|   |---- hardware/            # GPU, FPGA, SIMD, NUMA, data placement
+|   |---- distributed/         # Exchange, broadcast join, partition pruning
+|   |---- multi-model/         # Graph, document, time-series
+|   `---- database-specific/   # Engine-specific optimizations
+|---- web/                     # Web explorer frontend (Preact)
+|---- tla/                     # TLA+ formal specifications
+|---- docs/                    # Documentation
+`---- tests/                   # Integration and property tests
 ```
 
 ## Rule Format

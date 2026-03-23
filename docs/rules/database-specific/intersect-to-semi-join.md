@@ -26,16 +26,16 @@ semi-join transformation enables hash-based execution and can leverage
 specialized semi-join optimizations like bloom filters and early termination.
 
 **Why it works**: INTERSECT finds rows from R that also appear in S. A semi-join
-R ⋉ S finds rows from R where a matching row exists in S - semantically
+R $\ltimes$ S finds rows from R where a matching row exists in S - semantically
 equivalent for INTERSECT. Semi-joins are optimized extensively in modern
 databases and avoid the overhead of explicit distinct elimination.
 
 ## Relational Algebra
 
 ```algebra
-INTERSECT(R, S) -> DISTINCT(R ⋉_R=S S)
+INTERSECT(R, S) -> DISTINCT(R $\ltimes$_R=S S)
 or with implicit deduplication:
-INTERSECT(R, S) -> R ⋉_R=S DISTINCT(S)
+INTERSECT(R, S) -> R $\ltimes$_R=S DISTINCT(S)
 ```
 
 ## Implementation

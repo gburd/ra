@@ -21,7 +21,7 @@ External merge sort for ORDER BY. Materializes input, sorts (possibly spilling t
 ## Relational Algebra
 
 ```
-Sort(input, keys) → Iterator<Tuple>
+Sort(input, keys) -> Iterator<Tuple>
 
 SortIterator {
   input: Iterator
@@ -35,7 +35,7 @@ SortIterator {
     position = 0
   }
 
-  fn next() → Tuple | None {
+  fn next() -> Tuple | None {
     if position < sorted_tuples.len() {
       return sorted_tuples[position++]
     }

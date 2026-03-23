@@ -1,7 +1,7 @@
 //! End-to-end discovery pipeline.
 //!
-//! Orchestrates the full cycle: collect logs → mine patterns →
-//! synthesize candidate rules → validate → output accepted rules.
+//! Orchestrates the full cycle: collect logs -> mine patterns ->
+//! synthesize candidate rules -> validate -> output accepted rules.
 //! The pipeline can run iteratively, discovering new rules as more
 //! execution data accumulates.
 

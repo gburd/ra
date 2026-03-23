@@ -45,7 +45,7 @@ shuffle_cost(R, nodes) =
 
 colocated_cost(R) = 0  -- data already on correct node
 
--- Strategy selection for join R ⋈ S:
+-- Strategy selection for join R $\bowtie$ S:
 best_strategy(R, S, nodes) =
   if partition_key(R) == join_key AND partition_key(S) == join_key:
     colocated_join                    -- no movement

@@ -33,8 +33,8 @@ sampling faster and reducing memory pressure.
 ## Relational Algebra
 
 ```algebra
-σ_p(SAMPLE_k(R)) where p is independent of sampling ->
-  SAMPLE_k(σ_p(R))
+$\sigma$_p(SAMPLE_k(R)) where p is independent of sampling ->
+  SAMPLE_k($\sigma$_p(R))
 ```
 
 ## Implementation

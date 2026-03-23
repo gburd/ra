@@ -356,7 +356,7 @@ Insert cycle checks when recursion depth exceeds threshold or explicit CYCLE cla
 #### **recursive-cte-linear-recursion.rra**
 Optimize linear recursion (tail-recursive queries) into simple iteration without full materialization.
 
-**Estimated**: 600 lines total (6 rules × ~100 lines each)
+**Estimated**: 600 lines total (6 rules $\times$ ~100 lines each)
 
 ### 5. Cost Model Extensions (`crates/ra-engine/src/cost.rs`)
 
@@ -373,7 +373,7 @@ impl CostModel {
     ) -> Cost {
         let base_cost = self.expr_cost_with_rows(base_rows);
 
-        // Geometric series for total work: base_rows * (1 + b + b² + ... + b^n)
+        // Geometric series for total work: base_rows * (1 + b + b$^2$ + ... + b^n)
         let total_rows = if recursive_branching < 1.0 {
             // Converging series
             base_rows as f64 * (1.0 - recursive_branching.powi(expected_depth as i32))
@@ -564,14 +564,14 @@ fn test_max_iterations_limit() {
 
 ## Success Criteria
 
-- ✅ Parser accepts `WITH RECURSIVE` without error
-- ✅ User's example query (running totals) parses and optimizes correctly
-- ✅ Fixpoint iteration executes with termination guarantees
-- ✅ Cycle detection prevents infinite loops
-- ✅ 70+ tests covering recursive patterns (transitive closure, hierarchies, running totals, BOM)
-- ✅ Cost model accounts for iteration depth and branching factor
-- ✅ 6 recursive-specific optimization rules functional
-- ✅ Performance within 2x of PostgreSQL recursive CTE implementation
+- [x] Parser accepts `WITH RECURSIVE` without error
+- [x] User's example query (running totals) parses and optimizes correctly
+- [x] Fixpoint iteration executes with termination guarantees
+- [x] Cycle detection prevents infinite loops
+- [x] 70+ tests covering recursive patterns (transitive closure, hierarchies, running totals, BOM)
+- [x] Cost model accounts for iteration depth and branching factor
+- [x] 6 recursive-specific optimization rules functional
+- [x] Performance within 2x of PostgreSQL recursive CTE implementation
 
 ## Timeline
 

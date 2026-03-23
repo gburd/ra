@@ -27,7 +27,7 @@ Pushes filters below window function operators when the filter predicate does no
 ```algebra
 filter[P](window[W](R))
   -> window[W](filter[P](R))
-  where columns(P) ∩ output_cols(W) = ∅
+  where columns(P) $\cap$ output_cols(W) = $\emptyset$
 ```
 
 ## Implementation

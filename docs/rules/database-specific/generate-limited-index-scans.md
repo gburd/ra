@@ -28,7 +28,7 @@ Generates a set of limited Scan operators (one per index) when a LIMIT is presen
 
 ```algebra
 Limit[k, order](Scan(T))
-  -> {LimitedScan[idx, k, order](T) | idx ∈ indexes(T)}
+  -> {LimitedScan[idx, k, order](T) | idx $\in$ indexes(T)}
   where k > 0
 ```
 

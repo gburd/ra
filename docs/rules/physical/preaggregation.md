@@ -60,8 +60,8 @@ Preaggregation performs partial aggregation early in the query plan (before join
 ## Relational Algebra
 
 ```
-γ_{g; AGG(v)}(R ⋈ S)
-→ γ_{g; FINAL_AGG(p)}(γ_{g; PARTIAL_AGG(v)}(R) ⋈ S)
+$\gamma$_{g; AGG(v)}(R $\bowtie$ S)
+-> $\gamma$_{g; FINAL_AGG(p)}($\gamma$_{g; PARTIAL_AGG(v)}(R) $\bowtie$ S)
   :if R.g = join_key and reduction_factor > 0.5
 
 Cost savings = |R| * (1 - reduction_factor) * join_cost
@@ -128,16 +128,16 @@ pub fn benefit_of_preaggregation(
 ### Test 1: Aggregate before join
 ```sql
 -- Without preaggregation:
--- 1M sales ⋈ 100 products → 1M rows → aggregate → 100 groups
+-- 1M sales $\bowtie$ 100 products -> 1M rows -> aggregate -> 100 groups
 
 -- With preaggregation:
--- 1M sales → aggregate → 100 groups ⋈ 100 products → 100 rows
+-- 1M sales -> aggregate -> 100 groups $\bowtie$ 100 products -> 100 rows
 
 SELECT p.name, SUM(s.amount)
 FROM sales s JOIN products p ON s.product_id = p.id
 GROUP BY p.name;
 
--- Reduction: 1M → 100 (99.99% reduction)
+-- Reduction: 1M -> 100 (99.99% reduction)
 ```
 
 ### Test 2: Distributed query with network shuffle

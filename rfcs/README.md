@@ -21,7 +21,7 @@ Skip the RFC for:
 ## RFC Lifecycle
 
 ```
-Draft → Discussion → Decision → Implementation → Archive
+Draft -> Discussion -> Decision -> Implementation -> Archive
 ```
 
 ### 1. Draft

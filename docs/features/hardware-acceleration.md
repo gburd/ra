@@ -24,23 +24,23 @@ specialized hardware beyond the CPU. The `ra-hardware` crate and
                     Query Plan
                         |
                         v
-            ┌───────────────────────┐
-            │   Hardware Cost Model  │
-            │  (ra-hardware crate)   │
-            └───────┬───────┬───────┘
+            ,-------------------------,
+            |   Hardware Cost Model  |
+            |  (ra-hardware crate)   |
+            `----------+---------+---------'
                     |       |
-          ┌─────────┘       └─────────┐
+          ,-----------'       `------------,
           v                           v
-   ┌─────────────┐           ┌──────────────┐
-   │  CPU Cost    │           │ Device Cost   │
-   │  (baseline)  │           │ + Transfer    │
-   └──────┬──────┘           └───────┬──────┘
+   ,---------------,           ,----------------,
+   |  CPU Cost    |           | Device Cost   |
+   |  (baseline)  |           | + Transfer    |
+   `---------+--------'           `----------+--------'
           |                          |
           v                          v
-   ┌─────────────────────────────────────────┐
-   │         Operator Placement Decision      │
-   │  (choose cheapest: CPU / GPU / FPGA)     │
-   └─────────────────────────────────────────┘
+   ,-------------------------------------------,
+   |         Operator Placement Decision      |
+   |  (choose cheapest: CPU / GPU / FPGA)     |
+   `--------------------------------------------'
 ```
 
 ## When Hardware Acceleration Helps

@@ -21,7 +21,7 @@ Transposes projection with semi-join
 ## Relational Algebra
 
 ```algebra
-π(SemiJoin(R, S)) => optimization
+$\pi$(SemiJoin(R, S)) => optimization
 ```
 
 ## Implementation

@@ -25,16 +25,16 @@ partition pruning.
 join can be distributed across the union branches, creating separate joins
 that are then combined via union.
 
-**Why it works**: Join distributes over union: (R ∪ S) ⋈ T = (R ⋈ T) ∪ (S ⋈ T).
+**Why it works**: Join distributes over union: (R $\cup$ S) $\bowtie$ T = (R $\bowtie$ T) $\cup$ (S $\bowtie$ T).
 This transformation can enable partition-wise processing, better parallelization,
 and allows each branch to use specialized indexes or partition pruning.
 
 ## Relational Algebra
 
 ```algebra
-(R1 ∪ R2) ⋈ S -> (R1 ⋈ S) ∪ (R2 ⋈ S)
+(R1 $\cup$ R2) $\bowtie$ S -> (R1 $\bowtie$ S) $\cup$ (R2 $\bowtie$ S)
 
-S ⋈ (R1 ∪ R2) -> (S ⋈ R1) ∪ (S ⋈ R2)
+S $\bowtie$ (R1 $\cup$ R2) -> (S $\bowtie$ R1) $\cup$ (S $\bowtie$ R2)
 ```
 
 ## Implementation

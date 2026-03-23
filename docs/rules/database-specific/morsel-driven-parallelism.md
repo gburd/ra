@@ -36,7 +36,7 @@ HyPer/Umbra use morsel-driven execution: divide input into small chunks (morsels
 
 ```
 Scan(R)
-→ ParallelMorselScan(R, morsel_size=100K)
+-> ParallelMorselScan(R, morsel_size=100K)
   with work_stealing and numa_local_storage
 ```
 

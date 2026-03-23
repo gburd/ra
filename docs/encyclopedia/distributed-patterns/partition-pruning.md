@@ -92,7 +92,7 @@ let partitions = PartitionInfo {
     strategy: PartitionStrategy::Range {
         column: "order_date".into(),
     },
-    partition_count: 48, // 4 years × 12 months
+    partition_count: 48, // 4 years $\times$ 12 months
     partitions: vec![
         PartitionBounds::Range {
             id: "orders_2024_01",
@@ -129,7 +129,7 @@ WHERE reading_time >= '2025-12-01'
 GROUP BY sensor_id;
 ```
 
-**Pruning:** Scans 1 partition instead of 60 → **60x speedup**
+**Pruning:** Scans 1 partition instead of 60 -> **60x speedup**
 
 ### Multi-Tenant SaaS
 
@@ -140,7 +140,7 @@ WHERE tenant_id = 'acme-corp'
   AND event_type = 'login';
 ```
 
-With 100 partitions, hash-based pruning scans 1 partition → **100x speedup**
+With 100 partitions, hash-based pruning scans 1 partition -> **100x speedup**
 
 ### List Partitioning
 
@@ -151,7 +151,7 @@ FROM orders
 WHERE region IN ('US', 'APAC');
 ```
 
-Scans 2 of 4 partitions → **2x speedup**
+Scans 2 of 4 partitions -> **2x speedup**
 
 ## Partition Strategy Comparison
 
@@ -163,7 +163,7 @@ Scans 2 of 4 partitions → **2x speedup**
 
 ## Common Pitfalls
 
-### ❌ Non-Sargable Predicates
+### [FAIL] Non-Sargable Predicates
 
 ```sql
 -- Cannot prune: function on partition key
@@ -178,7 +178,7 @@ WHERE order_date >= '2024-01-01'
   AND order_date < '2025-01-01';
 ```
 
-### ❌ OR Conditions Across Partitions
+### [FAIL] OR Conditions Across Partitions
 
 ```sql
 -- Requires union of multiple partition sets
@@ -189,7 +189,7 @@ WHERE order_date = '2024-01-15'
 
 Ra still prunes, but must scan 2 partitions. Decompose to UNION if selectivity is very low.
 
-### ❌ Implicit Type Conversions
+### [FAIL] Implicit Type Conversions
 
 ```sql
 -- String comparison forces scan of all partitions

@@ -30,7 +30,7 @@ Flink pushes watermark generation as close to sources as possible to enable earl
 
 ```
 Window(Filter(Source_with_watermark(S)))
-→ Window(Source_with_watermark(Filter(S)))
+-> Window(Source_with_watermark(Filter(S)))
 ```
 
 ## Test Cases

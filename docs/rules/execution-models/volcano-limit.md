@@ -21,7 +21,7 @@ Limit operator restricts output to N tuples with optional offset. Enables early 
 ## Relational Algebra
 
 ```
-Limit(input, count, offset) → Iterator<Tuple>
+Limit(input, count, offset) -> Iterator<Tuple>
 
 LimitIterator {
   input: Iterator
@@ -29,7 +29,7 @@ LimitIterator {
   offset: usize
   emitted: usize
 
-  fn next() → Tuple | None {
+  fn next() -> Tuple | None {
     // Skip offset tuples
     while offset > 0 {
       input.next()

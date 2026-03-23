@@ -36,8 +36,8 @@ RA pushes predicates to the earliest possible point:
 graph TD
     Join["Join<br/>c.customer_id = o.customer_id"] --> FC["Filter country='USA'"]
     Join --> FO["Filter status='shipped'<br/>AND total > 1000"]
-    FC --> ScanC["Scan customers<br/>1M → 50K rows"]
-    FO --> ScanO["Scan orders<br/>10M → 100K rows"]
+    FC --> ScanC["Scan customers<br/>1M -> 50K rows"]
+    FO --> ScanO["Scan orders<br/>10M -> 100K rows"]
 
     style ScanC fill:#e8f5e9
     style ScanO fill:#e8f5e9

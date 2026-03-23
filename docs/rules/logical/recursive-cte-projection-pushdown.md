@@ -27,7 +27,7 @@ Pushes a projection into both the base case and recursive case of a recursive CT
 ```algebra
 Project[cols](RecursiveCTE[name, base, rec](body))
   -> RecursiveCTE[name, Project[cols](base), Project[cols_with_join_keys](rec)](Project[cols](body))
-  where cols ⊆ output_columns(base)
+  where cols $\subseteq$ output_columns(base)
 ```
 
 ## Implementation

@@ -27,7 +27,7 @@ Identifies and merges identical subqueries to avoid redundant execution.
 ```algebra
 project[A.*, (subquery S1), (subquery S2)](A)
   -> project[A.*, result.val, result.val](join(A, execute_once(S1)))
-  where S1 ≡ S2
+  where S1 $\equiv$ S2
 ```
 
 ## Implementation

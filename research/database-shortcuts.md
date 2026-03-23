@@ -41,7 +41,7 @@ SELECT COUNT(*) FROM users;
 SELECT n_live_tup FROM pg_stat_user_tables WHERE relname = 'users';
 ```
 - **Safety**: Stale after many INSERTs/DELETEs between ANALYZE runs
-- **Staleness bound**: Can be off by ±10% on high-churn tables
+- **Staleness bound**: Can be off by $\pm$10% on high-churn tables
 
 #### MongoDB
 - **Method**: `collection.estimatedDocumentCount()` (cached metadata)
@@ -60,7 +60,7 @@ db.users.countDocuments({status: 'active'})
 
 #### MySQL (InnoDB)
 - **Method**: `information_schema.TABLES.TABLE_ROWS` (estimated from index statistics)
-- **Accuracy**: Rough estimate (±30-50%)
+- **Accuracy**: Rough estimate ($\pm$30-50%)
 - **Speed**: Instant (metadata)
 - **When used**: Never automatically, user must query information_schema
 - **Example**:
@@ -123,12 +123,12 @@ SELECT COUNT(*) FROM 'data.parquet';
 ### RA Modeling
 
 **Rules to add**:
-1. **count-star-to-metadata**: `agg[count(*)](scan[T]) → metadata_lookup[T.row_count]`
+1. **count-star-to-metadata**: `agg[count(*)](scan[T]) -> metadata_lookup[T.row_count]`
    - Precondition: `supports_count_metadata(database)` AND `staleness[T] < threshold`
    - Cost: O(1) vs O(n) for full scan
    - Safety: Check staleness_acceptable(staleness, query_context)
 
-2. **count-predicate-to-index**: `agg[count(*)](filter[P](scan[T])) → index_count[I, P]` when covering index exists
+2. **count-predicate-to-index**: `agg[count(*)](filter[P](scan[T])) -> index_count[I, P]` when covering index exists
    - Precondition: `exists_covering_index(T, P)` AND `P` is index-sargable
    - Cost: O(log n + k) where k = matched rows
 
@@ -190,15 +190,15 @@ SELECT MAX(salary) FROM employees;
 **Rules to add**:
 1. **min-max-index-rewrite**:
 ```
-agg[min(C)](scan[T]) →
+agg[min(C)](scan[T]) ->
   limit[1](sort[C asc](index_scan[T, C]))
 ```
 - Precondition: `exists_index(T, C)` AND `C` is first column in index
-- Cost reduction: O(n) → O(log n)
+- Cost reduction: O(n) -> O(log n)
 
 2. **min-max-index-only**:
 ```
-agg[max(C)](filter[P](scan[T])) →
+agg[max(C)](filter[P](scan[T])) ->
   limit[1](sort[C desc](index_scan[T, C, P]))
 ```
 - Precondition: `covering_index(T, [C] + referenced_cols(P))`
@@ -276,7 +276,7 @@ CREATE UNIQUE CLUSTERED INDEX idx ON sales_summary(product_id);
 **Rules to add**:
 1. **materialized-view-substitution**:
 ```
-agg[F](join[C](scan[T1], scan[T2])) →
+agg[F](join[C](scan[T1], scan[T2])) ->
   scan[MV] WHERE equivalent(MV.definition, original_query)
 ```
 - Precondition: `exists_materialized_view(MV)` AND `staleness_acceptable(MV)`
@@ -284,12 +284,12 @@ agg[F](join[C](scan[T1], scan[T2])) →
 
 2. **partial-materialized-view**:
 ```
-agg[F](filter[P2](scan[T])) →
+agg[F](filter[P2](scan[T])) ->
   agg[F](filter[P2](scan[MV]))
   WHERE MV.definition = agg[G](filter[P1](scan[T]))
   AND P1 is superset of P2
 ```
-- Example: MV has `GROUP BY product_id, region`, query wants `GROUP BY product_id` → aggregate MV
+- Example: MV has `GROUP BY product_id, region`, query wants `GROUP BY product_id` -> aggregate MV
 
 **Facts needed**:
 - `materialized_views: Vec<MVMetadata>` with definition, staleness
@@ -312,7 +312,7 @@ Exact aggregates on huge datasets take too long. Users often accept approximate 
 
 #### PostgreSQL (HyperLogLog extension)
 - **Method**: `pg_hll` extension for cardinality estimation
-- **Accuracy**: ±2% with 99% confidence (configurable)
+- **Accuracy**: $\pm$2% with 99% confidence (configurable)
 - **Speed**: O(1) lookup vs O(n) distinct scan
 - **Example**:
 ```sql
@@ -326,7 +326,7 @@ SELECT hll_cardinality(hll_agg(user_id)) FROM page_views;
 
 #### Redshift (Approximate COUNT DISTINCT)
 - **Method**: `APPROXIMATE COUNT(DISTINCT col)`
-- **Accuracy**: ±2-3%
+- **Accuracy**: $\pm$2-3%
 - **Speed**: 10-100x faster than exact
 - **Example**:
 ```sql
@@ -335,7 +335,7 @@ SELECT APPROXIMATE COUNT(DISTINCT user_id) FROM events;
 
 #### Snowflake (HyperLogLog)
 - **Method**: `HLL()` aggregate function
-- **Accuracy**: ±1-2%
+- **Accuracy**: $\pm$1-2%
 - **Speed**: O(1) merge of sketches
 - **Example**:
 ```sql
@@ -363,16 +363,16 @@ SELECT AVG(price) FROM sales WITH ERROR 5% CONFIDENCE 95%;
 **Rules to add**:
 1. **count-distinct-to-hll**:
 ```
-agg[count(distinct C)](scan[T]) →
+agg[count(distinct C)](scan[T]) ->
   agg[hll_estimate](scan[hll_sketch_table[T, C]])
 ```
 - Precondition: `exists_hll_sketch(T, C)` OR `supports_hll(database)` AND `accuracy_acceptable(query)`
 - Cost: O(1) vs O(n)
-- Error bound: ±2% with 99% confidence
+- Error bound: $\pm$2% with 99% confidence
 
 2. **aggregate-to-sample**:
 ```
-agg[avg(C)](filter[P](scan[T])) →
+agg[avg(C)](filter[P](scan[T])) ->
   agg[avg(C)](filter[P](scan[sample[T, ratio]]))
   WITH error_bound(ratio, confidence)
 ```
@@ -424,7 +424,7 @@ Identical queries executed repeatedly waste resources.
 **Rules to add**:
 1. **query-result-cache-lookup**:
 ```
-query[Q] →
+query[Q] ->
   if cache.contains(hash(Q)) AND cache[Q].is_fresh()
   then return cache[Q].result
   else execute(Q) AND cache[Q] = result
@@ -505,16 +505,16 @@ SELECT email, name FROM users WHERE email = 'foo@bar.com';
 **Rules to add**:
 1. **project-to-covering-index**:
 ```
-project[C1, C2](filter[P](scan[T])) →
+project[C1, C2](filter[P](scan[T])) ->
   project[C1, C2](index_scan[I])
-  WHERE I covers {C1, C2} ∪ cols(P)
+  WHERE I covers {C1, C2} $\cup$ cols(P)
 ```
-- Precondition: `exists_covering_index(T, {C1, C2} ∪ cols(P))`
+- Precondition: `exists_covering_index(T, {C1, C2} $\cup$ cols(P))`
 - Cost: Eliminates heap fetch (2-10x faster)
 
 2. **join-to-covering-index**:
 ```
-join[T1.id = T2.fk](scan[T1], scan[T2]) →
+join[T1.id = T2.fk](scan[T1], scan[T2]) ->
   join[T1.id = T2.fk](scan[T1], index_scan[T2, covering_idx])
 ```
 - Precondition: `covering_index(T2, {fk, output_cols})`
@@ -573,17 +573,17 @@ SELECT 42 AS answer;
 **Rules to add**:
 1. **filter-false-to-empty**:
 ```
-filter[false](scan[T]) → empty_relation
+filter[false](scan[T]) -> empty_relation
 ```
 
 2. **limit-zero-to-schema**:
 ```
-limit[0](scan[T]) → schema[T]
+limit[0](scan[T]) -> schema[T]
 ```
 
 3. **exists-to-limit-one**:
 ```
-exists(filter[P](scan[T])) → limit[1](filter[P](scan[T]))
+exists(filter[P](scan[T])) -> limit[1](filter[P](scan[T]))
 ```
 - Cost: O(1) vs O(n) (stop at first match)
 
@@ -630,7 +630,7 @@ SELECT * FROM events WHERE date = '2023-01-01' AND user_id = 123;
 **Rules to add**:
 1. **predicate-pushdown-parquet**:
 ```
-filter[P](scan[parquet_file]) →
+filter[P](scan[parquet_file]) ->
   scan[parquet_file, pushed_predicate=P]
 ```
 - Precondition: `P` is sargable (>, <, =, IN)
@@ -638,7 +638,7 @@ filter[P](scan[parquet_file]) →
 
 2. **jsonb-predicate-to-gin**:
 ```
-filter[data->>'k' = v](scan[T]) →
+filter[data->>'k' = v](scan[T]) ->
   index_scan[gin_index, data @> {"k": v}]
 ```
 - Precondition: `exists_gin_index(T, data)`
@@ -674,7 +674,7 @@ SELECT * FROM orders o JOIN customers c ON o.customer_id = c.id;
 **Rules to add**:
 1. **join-bloom-filter**:
 ```
-join[T1.k = T2.fk](scan[T1], scan[T2]) →
+join[T1.k = T2.fk](scan[T1], scan[T2]) ->
   join[T1.k = T2.fk](
     scan[T1],
     filter[bloom_test(fk, bloom[T1.k])](scan[T2])
@@ -783,8 +783,8 @@ impl CostModel {
 | MIN/MAX index scan | All | Always safe | **High** |
 | Covering index | All | Always safe | **High** |
 | Materialized views | PostgreSQL, Oracle, SQL Server | Staleness-bounded | **High** |
-| EXISTS → LIMIT 1 | All | Always safe | **High** |
-| WHERE 1=0 → empty | All | Always safe | **Medium** |
+| EXISTS -> LIMIT 1 | All | Always safe | **High** |
+| WHERE 1=0 -> empty | All | Always safe | **Medium** |
 | HyperLogLog COUNT DISTINCT | PostgreSQL (extension), Redshift, Snowflake | Accuracy-bounded | **Medium** |
 | Result caching | Redshift, Snowflake | Staleness-bounded | **Medium** |
 | Bloom filter joins | PostgreSQL, Oracle, Spark | Always safe | **Low** |

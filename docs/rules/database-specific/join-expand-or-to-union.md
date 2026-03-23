@@ -33,7 +33,7 @@ use efficient join algorithms, and the union deduplicates results.
 ## Relational Algebra
 
 ```algebra
-R ⋈_{p1 ∨ p2} S -> (R ⋈_{p1} S) ∪ (R ⋈_{p2} S)
+R $\bowtie$_{p1 $\lor$ p2} S -> (R $\bowtie$_{p1} S) $\cup$ (R $\bowtie$_{p2} S)
 ```
 
 ## Implementation
@@ -87,7 +87,7 @@ fn estimated_benefit(
 
     // Cost of nested loop join with OR condition:
     // - Must evaluate complex OR for every pair
-    let nested_loop_cost = left_rows * right_rows * 0.00001; // 10μs per pair
+    let nested_loop_cost = left_rows * right_rows * 0.00001; // 10$\mu$s per pair
 
     // Cost of expanded UNION approach:
     // - Build hash table per branch: n_branches * right_rows * 1.5

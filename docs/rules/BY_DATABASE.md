@@ -165,11 +165,11 @@ Rules that apply across multiple systems:
 
 | Feature | PostgreSQL | MySQL | DuckDB | Oracle | SQL Server | ClickHouse |
 |---------|------------|-------|--------|--------|------------|------------|
-| Parallel Query | ✓ | ✓ (8.0+) | ✓ | ✓ | ✓ | ✓ |
-| Vectorized Execution | Partial | - | ✓ | - | ✓ | ✓ |
-| Columnar Storage | Extension | - | ✓ | ✓ | ✓ | ✓ |
-| Adaptive Optimization | ✓ | Limited | ✓ | ✓ | ✓ | - |
-| Cost-Based Optimizer | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Parallel Query | [x] | [x] (8.0+) | [x] | [x] | [x] | [x] |
+| Vectorized Execution | Partial | - | [x] | - | [x] | [x] |
+| Columnar Storage | Extension | - | [x] | [x] | [x] | [x] |
+| Adaptive Optimization | [x] | Limited | [x] | [x] | [x] | - |
+| Cost-Based Optimizer | [x] | [x] | [x] | [x] | [x] | [x] |
 | Join Algorithms | 3 types | 3 types | 4 types | 5 types | 4 types | 3 types |
 | Index Types | 7+ | 4 | 2 | 8+ | 6+ | 5+ |
 

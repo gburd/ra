@@ -89,7 +89,7 @@ JOIN customers c ON o.customer_id = c.id
 WHERE o.date > CURRENT_DATE - 7;
 
 -- 100 recent orders, index on customers(id)
--- Cost: 100 * log(1M) ≈ 2000 operations
+-- Cost: 100 * log(1M) $\approx$ 2000 operations
 ```
 
 ### Positive: Parameterized query

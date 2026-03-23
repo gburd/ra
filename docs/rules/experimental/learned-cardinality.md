@@ -254,7 +254,7 @@ fn estimated_benefit(
 ### Positive: Correlated columns
 
 ```sql
--- Traditional stats assume independence: price ⊥ category
+-- Traditional stats assume independence: price $\bot$ category
 -- Reality: electronics more expensive than books
 SELECT COUNT(*)
 FROM products

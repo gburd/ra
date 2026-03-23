@@ -75,7 +75,7 @@ SELECT * FROM users ORDER BY created_at LIMIT 20 OFFSET 0;
 ```sql
 SELECT * FROM logs ORDER BY timestamp LIMIT 10000000;
 
--- K ≈ N: no benefit from Top-K
+-- K $\approx$ N: no benefit from Top-K
 ```
 
 ## References

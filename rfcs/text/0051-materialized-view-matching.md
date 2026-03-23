@@ -102,9 +102,9 @@ No code changes required. Ra handles detection, rewriting, and cost-based select
 
 Ra uses three matching strategies:
 
-1. **Exact Match**: Query identical to MV definition → direct scan
-2. **Query Subsumption**: Query is more general than MV (fewer filters) → use MV + compensation
-3. **View Subsumption**: Query is more specific than MV (extra filters) → use MV + additional filtering
+1. **Exact Match**: Query identical to MV definition -> direct scan
+2. **Query Subsumption**: Query is more general than MV (fewer filters) -> use MV + compensation
+3. **View Subsumption**: Query is more specific than MV (extra filters) -> use MV + additional filtering
 
 ### Cost-Based Selection
 
@@ -130,43 +130,43 @@ MV2: SELECT c_custkey, COUNT(*), o_orderdate FROM customer JOIN orders ... (100M
 ### Architecture
 
 ```
-┌──────────────────────────────────────────────────┐
-│          Incoming Query (RelExpr)                │
-└──────────────┬───────────────────────────────────┘
-               │
-               ▼
-┌──────────────────────────────────────────────────┐
-│      MV Catalog (metadata provider)              │
-│  - MV definitions (RelExpr)                      │
-│  - Statistics (row count, freshness)             │
-│  - Dependencies (base tables, columns)           │
-└──────────────┬───────────────────────────────────┘
-               │
-               ▼
-┌──────────────────────────────────────────────────┐
-│       Pattern Matcher                            │
-│  - Structural equivalence check                  │
-│  - Subsumption detection (lattice)               │
-│  - Compensation predicate extraction             │
-└──────────────┬───────────────────────────────────┘
-               │
-               ▼
-┌──────────────────────────────────────────────────┐
-│      Rewrite Candidates                          │
-│  - Original plan                                 │
-│  - MV-based plan(s)                              │
-│  - Hybrid plans (MV + delta)                     │
-└──────────────┬───────────────────────────────────┘
-               │
-               ▼
-┌──────────────────────────────────────────────────┐
-│       Cost Model                                 │
-│  - Estimate each candidate                       │
-│  - Account for staleness penalty                 │
-│  - Choose lowest-cost plan                       │
-└──────────────┬───────────────────────────────────┘
-               │
-               ▼
+,----------------------------------------------------,
+|          Incoming Query (RelExpr)                |
+`-----------------+-------------------------------------'
+               |
+               v
+,----------------------------------------------------,
+|      MV Catalog (metadata provider)              |
+|  - MV definitions (RelExpr)                      |
+|  - Statistics (row count, freshness)             |
+|  - Dependencies (base tables, columns)           |
+`-----------------+-------------------------------------'
+               |
+               v
+,----------------------------------------------------,
+|       Pattern Matcher                            |
+|  - Structural equivalence check                  |
+|  - Subsumption detection (lattice)               |
+|  - Compensation predicate extraction             |
+`-----------------+-------------------------------------'
+               |
+               v
+,----------------------------------------------------,
+|      Rewrite Candidates                          |
+|  - Original plan                                 |
+|  - MV-based plan(s)                              |
+|  - Hybrid plans (MV + delta)                     |
+`-----------------+-------------------------------------'
+               |
+               v
+,----------------------------------------------------,
+|       Cost Model                                 |
+|  - Estimate each candidate                       |
+|  - Account for staleness penalty                 |
+|  - Choose lowest-cost plan                       |
+`-----------------+-------------------------------------'
+               |
+               v
         Optimized Plan
 ```
 
@@ -198,8 +198,8 @@ Matching uses structural comparison of `RelExpr` trees:
 ```rust
 pub enum MatchType {
     Exact,           // Query == MV
-    QuerySubsumes,   // Query ⊇ MV (query more general)
-    ViewSubsumes,    // MV ⊇ Query (MV more general)
+    QuerySubsumes,   // Query $\supseteq$ MV (query more general)
+    ViewSubsumes,    // MV $\supseteq$ Query (MV more general)
     NoMatch,
 }
 

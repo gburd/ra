@@ -17,7 +17,7 @@
 ## Description
 
 Replaces full joins with a sequence of semi-join reductions that pre-filter
-relations before the actual join. A semi-join R ⋉ S returns only the rows
+relations before the actual join. A semi-join R $\ltimes$ S returns only the rows
 of R that have a matching row in S, without producing the join result.
 By applying semi-joins first, each relation is reduced to only the rows
 that will contribute to the final join, dramatically reducing the cost
@@ -28,7 +28,7 @@ reduced relations is cheaper than shipping full relations. Also beneficial
 in single-node settings when semi-joins use bloom filters to reduce probe
 input to hash joins.
 
-**Why it works**: A semi-join R ⋉ S ships only the distinct join key
+**Why it works**: A semi-join R $\ltimes$ S ships only the distinct join key
 values of S (or a bloom filter), which is much smaller than S itself.
 Applying this to R filters out non-matching rows early. In a multi-way
 join, a sequence of semi-joins can cascade reductions across all relations.
@@ -37,8 +37,8 @@ join, a sequence of semi-joins can cascade reductions across all relations.
 
 ```algebra
 R join[R.a = S.a] S join[S.b = T.b] T
-  -> (R ⋉[a] S') join[R.a = S'.a] S' join[S'.b = T'.b] T'
-  where S' = S ⋉[b] T, T' = T ⋉[b] S
+  -> (R $\ltimes$[a] S') join[R.a = S'.a] S' join[S'.b = T'.b] T'
+  where S' = S $\ltimes$[b] T, T' = T $\ltimes$[b] S
 
 -- Bloom filter variant:
 R join[R.a = S.a] S

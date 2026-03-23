@@ -29,9 +29,9 @@ Modern databases support advanced data types beyond traditional SQL (INTEGER, VA
 **This RFC enables:**
 
 - Parsing and representing database-specific types in Ra's type system
-- Type-aware optimization rules (JSONB containment → GIN index)
+- Type-aware optimization rules (JSONB containment -> GIN index)
 - Type-specific cost model adjustments (TOAST overhead, XML parsing cost)
-- Cross-database type mapping (Oracle JSON → PostgreSQL JSONB)
+- Cross-database type mapping (Oracle JSON -> PostgreSQL JSONB)
 
 ## Guide-level explanation
 
@@ -347,24 +347,24 @@ pub fn map_type_across_databases(
     source_type: &Type,
 ) -> Result<Type, TypeMappingError> {
     match (source_db, target_db, source_type) {
-        // Oracle JSON → PostgreSQL JSONB
+        // Oracle JSON -> PostgreSQL JSONB
         (Database::Oracle, Database::PostgreSQL, Type::Oracle(OracleType::Json)) => {
             Ok(Type::PostgreSQL(PostgreSQLType::Jsonb))
         }
 
-        // MySQL JSON → PostgreSQL JSONB
+        // MySQL JSON -> PostgreSQL JSONB
         (Database::MySQL, Database::PostgreSQL, Type::MySQL(MySQLType::Json)) => {
             Ok(Type::PostgreSQL(PostgreSQLType::Jsonb))
         }
 
-        // PostgreSQL JSONB → Oracle JSON (with warning)
+        // PostgreSQL JSONB -> Oracle JSON (with warning)
         (Database::PostgreSQL, Database::Oracle, Type::PostgreSQL(PostgreSQLType::Jsonb)) => {
             // Oracle stores JSON as CLOB, less efficient
-            eprintln!("Warning: PostgreSQL JSONB → Oracle JSON (CLOB-based, slower)");
+            eprintln!("Warning: PostgreSQL JSONB -> Oracle JSON (CLOB-based, slower)");
             Ok(Type::Oracle(OracleType::Json))
         }
 
-        // PostgreSQL Array → Oracle VARRAY
+        // PostgreSQL Array -> Oracle VARRAY
         (Database::PostgreSQL, Database::Oracle, Type::PostgreSQL(PostgreSQLType::Array(elem_type))) => {
             let mapped_elem = map_type_across_databases(source_db, target_db, elem_type)?;
             Ok(Type::Oracle(OracleType::VArray(Box::new(mapped_elem))))
@@ -615,14 +615,14 @@ pub enum TypeError {
 **Design Questions:**
 
 1. Should Ra support user-defined types (CREATE TYPE)? (Initial: No, future work)
-2. How to handle type coercion between database-specific types? (e.g., PostgreSQL JSON → JSONB)
+2. How to handle type coercion between database-specific types? (e.g., PostgreSQL JSON -> JSONB)
 3. Should type-specific optimizations be opt-in or automatic?
 
 **Implementation Questions:**
 
 1. Which types should be implemented first? (Recommendation: PostgreSQL JSONB, Oracle CLOB)
 2. How to collect type-specific statistics? (Extend Statistics struct or separate?)
-3. Should type mapping be bidirectional (Oracle → PostgreSQL and PostgreSQL → Oracle)?
+3. Should type mapping be bidirectional (Oracle -> PostgreSQL and PostgreSQL -> Oracle)?
 
 **Integration Questions:**
 
@@ -659,7 +659,7 @@ pub enum TypeError {
 
 **4. Cross-Database Type Migration:**
 
-- Automatic schema conversion (Oracle → PostgreSQL)
+- Automatic schema conversion (Oracle -> PostgreSQL)
 - Data migration scripts with type mapping
 
 **5. Type-Specific Compression:**

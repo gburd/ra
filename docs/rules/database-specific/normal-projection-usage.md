@@ -29,7 +29,7 @@ Uses a normal (non-aggregate) projection that stores a subset of columns in a di
 ```algebra
 Scan[MergeTree, cols](T)
   -> Scan[Projection[cols'], sort_order'](T)
-  where cols ⊆ cols'
+  where cols $\subseteq$ cols'
   where sort_order' benefits_query
 ```
 

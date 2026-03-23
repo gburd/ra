@@ -152,14 +152,14 @@ Links to related patterns.
 
 | SQL Feature | Pattern Category |
 |-------------|-----------------|
-| `SELECT * FROM table WHERE id = ?` | [OLTP → Point Lookup](oltp/point-lookup.md) |
-| `SELECT COUNT(*), AVG(amount) FROM orders GROUP BY region` | [OLAP → Full Table Aggregation](olap/full-table-aggregation.md) |
-| `SELECT *, ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary)` | [Analytical → Window Functions](analytical/window-functions.md) |
-| `WITH RECURSIVE cte AS (...) SELECT ...` | [Recursive → Transitive Closure](recursive/transitive-closure.md) |
-| `SELECT * FROM orders WHERE date BETWEEN ? AND ?` | [Temporal → Date Range Filters](temporal/date-range-filters.md) |
-| `SELECT * FROM a UNION SELECT * FROM b` | [Set Operations → UNION](set-operations/union.md) |
-| `SELECT * FROM orders WHERE customer_id IN (SELECT ...)` | [Subqueries → IN Subquery](subqueries/in-subquery.md) |
-| `SELECT * FROM a JOIN b ON a.id = b.a_id` | [Joins → Inner Join](joins/inner-join.md) |
+| `SELECT * FROM table WHERE id = ?` | [OLTP -> Point Lookup](oltp/point-lookup.md) |
+| `SELECT COUNT(*), AVG(amount) FROM orders GROUP BY region` | [OLAP -> Full Table Aggregation](olap/full-table-aggregation.md) |
+| `SELECT *, ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary)` | [Analytical -> Window Functions](analytical/window-functions.md) |
+| `WITH RECURSIVE cte AS (...) SELECT ...` | [Recursive -> Transitive Closure](recursive/transitive-closure.md) |
+| `SELECT * FROM orders WHERE date BETWEEN ? AND ?` | [Temporal -> Date Range Filters](temporal/date-range-filters.md) |
+| `SELECT * FROM a UNION SELECT * FROM b` | [Set Operations -> UNION](set-operations/union.md) |
+| `SELECT * FROM orders WHERE customer_id IN (SELECT ...)` | [Subqueries -> IN Subquery](subqueries/in-subquery.md) |
+| `SELECT * FROM a JOIN b ON a.id = b.a_id` | [Joins -> Inner Join](joins/inner-join.md) |
 
 ### By Performance Goal
 

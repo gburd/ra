@@ -99,8 +99,8 @@ FROM customers c
 JOIN orders o ON c.id = o.customer_id
 GROUP BY c.customer_id;
 
--- Before: Join 1M customers × 100M orders, then group
--- After: Group orders (100M → 1M groups), then join
+-- Before: Join 1M customers $\times$ 100M orders, then group
+-- After: Group orders (100M -> 1M groups), then join
 -- Benefit: 100x fewer join inputs
 ```
 

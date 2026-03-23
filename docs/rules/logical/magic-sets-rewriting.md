@@ -34,17 +34,17 @@ passing to propagate bindings backward through the rules.
 ## Relational Algebra
 
 ```algebra
-Given query: Q(x) ← R(x, y), T*(y, z), z = 'target'
-And recursive rule: T*(x, y) ← T(x, y)
-                    T*(x, z) ← T(x, y), T*(y, z)
+Given query: Q(x) <- R(x, y), T*(y, z), z = 'target'
+And recursive rule: T*(x, y) <- T(x, y)
+                    T*(x, z) <- T(x, y), T*(y, z)
 
 Magic sets rewrite:
-magic_T(z) ← z = 'target'
-magic_T(x) ← magic_T(y), T(x, y)
-T_magic(x, y) ← magic_T(x), T(x, y)
-T_magic(x, z) ← magic_T(x), T_magic(x, y), T_magic(y, z)
+magic_T(z) <- z = 'target'
+magic_T(x) <- magic_T(y), T(x, y)
+T_magic(x, y) <- magic_T(x), T(x, y)
+T_magic(x, z) <- magic_T(x), T_magic(x, y), T_magic(y, z)
 
-Q(x) ← R(x, y), T_magic(y, z), z = 'target'
+Q(x) <- R(x, y), T_magic(y, z), z = 'target'
 ```
 
 ## Implementation
@@ -56,7 +56,7 @@ use egg::{rewrite as rw, *};
 // Full implementation requires adorned predicate generation
 
 rw!("magic-sets-base";
-    // For each recursive predicate P with selection σ_c
+    // For each recursive predicate P with selection $\sigma$_c
     "(recursive ?name
        (rules ?base-case ?recursive-case)
        (query (filter ?const (apply ?name ?args))))" =>
@@ -127,7 +127,7 @@ fn estimated_benefit(
 ```
 
 **Assumptions:**
-- Transitive closure size can be much larger than base relation (O(n²) in worst case)
+- Transitive closure size can be much larger than base relation (O(n$^2$) in worst case)
 - Magic sets limits computation to "relevant" tuples (those reachable from constants)
 - Sideways information passing overhead is negligible compared to savings
 - Most effective when selectivity < 10%

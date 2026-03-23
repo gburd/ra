@@ -46,12 +46,12 @@ GROUP BY account_type;
 ```
 HashAggregate
   Group Key: account_type
-  └── SeqScan (chart_of_accounts)
+  `---- SeqScan (chart_of_accounts)
 ```
 
 **Cost Model**:
 - Build hash table: O(n)
-- Memory needed: groups × tuple_size
+- Memory needed: groups $\times$ tuple_size
 - Good for: < 10,000 groups
 
 ### Strategy 2: Sort Aggregation
@@ -73,9 +73,9 @@ ORDER BY transaction_date;
 ```
 GroupAggregate
   Group Key: transaction_date
-  └── Sort
+  `---- Sort
       Sort Key: transaction_date
-      └── SeqScan (ledger_transactions)
+      `---- SeqScan (ledger_transactions)
 ```
 
 ### Strategy 3: Index-Aided Aggregation
@@ -98,7 +98,7 @@ ORDER BY transaction_date;
 ```
 GroupAggregate
   Group Key: transaction_date
-  └── IndexScan (idx_transaction_date)  -- Already sorted!
+  `---- IndexScan (idx_transaction_date)  -- Already sorted!
 ```
 
 ## Aggregate Pushdown
@@ -165,12 +165,12 @@ ORDER BY account_type NULLS LAST, month NULLS LAST;
 **RA's Optimization**:
 ```
 Sort
-  └── MixedAggregate  -- Multiple grouping sets
-      ├── GroupingSet: (account_type, month)
-      ├── GroupingSet: (account_type)
-      └── GroupingSet: ()
-      └── Join
-          └── ...
+  `---- MixedAggregate  -- Multiple grouping sets
+      |---- GroupingSet: (account_type, month)
+      |---- GroupingSet: (account_type)
+      `---- GroupingSet: ()
+      `---- Join
+          `---- ...
 ```
 
 ## Distinct Optimization
@@ -268,10 +268,10 @@ GROUP BY DATE_TRUNC('month', transaction_date), account_type;
 **Parallel Plan**:
 ```
 Finalize HashAggregate
-  └── Gather
+  `---- Gather
       Workers Planned: 4
-      └── Partial HashAggregate  -- Each worker aggregates subset
-          └── Parallel SeqScan
+      `---- Partial HashAggregate  -- Each worker aggregates subset
+          `---- Parallel SeqScan
 ```
 
 ## Window Functions vs Aggregations
@@ -483,4 +483,4 @@ Aggregations summarize data, but window functions provide even more analytical p
 
 ---
 
-*💡 Performance Tip: Pre-aggregate frequently used summaries in materialized views. Trading storage for speed is often worth it for dashboards and reports.*
+* Performance Tip: Pre-aggregate frequently used summaries in materialized views. Trading storage for speed is often worth it for dashboards and reports.*

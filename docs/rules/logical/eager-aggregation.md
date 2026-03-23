@@ -26,7 +26,7 @@ as eager aggregation on the "many" side reduces rows before joining.
 - Pre-aggregation reduces cardinality significantly
 - Join condition includes the GROUP BY columns
 
-**Why it works**: Joins often increase cardinality (e.g., customer → orders
+**Why it works**: Joins often increase cardinality (e.g., customer -> orders
 is 1:N). If we aggregate orders by customer_id before joining with customers,
 we join N orders per customer down to 1 summary row per customer, dramatically
 reducing join cost.
@@ -35,10 +35,10 @@ reducing join cost.
 
 ```algebra
 Traditional (lazy aggregation):
-γ_{c.id, SUM(o.total)}((Customer ⋈ Order))
+$\gamma$_{c.id, SUM(o.total)}((Customer $\bowtie$ Order))
 
 Eager aggregation:
-γ_{c.id, SUM(agg_total)}(Customer ⋈ γ_{customer_id, SUM(total) as agg_total}(Order))
+$\gamma$_{c.id, SUM(agg_total)}(Customer $\bowtie$ $\gamma$_{customer_id, SUM(total) as agg_total}(Order))
 
 Where the inner aggregation reduces Order cardinality before the join.
 ```
@@ -110,7 +110,7 @@ fn estimated_benefit(
     let lazy_total = lazy_join_cost + lazy_agg_cost;
 
     // Cost with eager aggregation:
-    // - Pre-aggregate right: right_rows * 1.5 → pre_agg_groups rows
+    // - Pre-aggregate right: right_rows * 1.5 -> pre_agg_groups rows
     // - Join: left_rows * pre_agg_groups (much smaller!)
     // - Final aggregate: (left_rows * pre_agg_groups * join_selectivity) * 1.5
     let eager_pre_agg = right_rows * 1.5;
@@ -147,13 +147,13 @@ JOIN orders o ON c.id = o.customer_id
 GROUP BY c.id, c.name;
 
 -- Lazy aggregation:
--- - Join customers (10K) with orders (1M) → 1M rows
--- - Aggregate 1M rows → 10K groups
+-- - Join customers (10K) with orders (1M) -> 1M rows
+-- - Aggregate 1M rows -> 10K groups
 
 -- Eager aggregation:
--- - Pre-aggregate orders by customer_id: 1M rows → 10K groups (one per customer)
--- - Join customers (10K) with aggregated orders (10K) → 10K rows
--- - Final aggregate: 10K rows → 10K groups
+-- - Pre-aggregate orders by customer_id: 1M rows -> 10K groups (one per customer)
+-- - Join customers (10K) with aggregated orders (10K) -> 10K rows
+-- - Final aggregate: 10K rows -> 10K groups
 -- Speedup: ~100x less join work!
 ```
 
@@ -193,7 +193,7 @@ JOIN orders o ON c.id = o.customer_id
 GROUP BY c.id;
 
 -- Cannot compute median in two phases
--- MEDIAN(partial_medians) ≠ MEDIAN(all_values)
+-- MEDIAN(partial_medians) $\neq$ MEDIAN(all_values)
 ```
 
 ### Positive: TPC-H Query 5
@@ -215,7 +215,7 @@ GROUP BY n.name;
 ## References
 
 **Original paper:**
-- Yan, W.P., Larson, P.-Å., "Eager Aggregation and Lazy Aggregation", VLDB 1995
+- Yan, W.P., Larson, P.-A., "Eager Aggregation and Lazy Aggregation", VLDB 1995
   - The foundational paper on eager vs. lazy aggregation
   - Analysis of when to push aggregation below joins
   - Cost models for two-phase aggregation

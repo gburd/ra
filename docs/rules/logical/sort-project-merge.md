@@ -21,7 +21,7 @@ Merges sort and project operations
 ## Relational Algebra
 
 ```algebra
-Sort(π(R)) => optimization
+Sort($\pi$(R)) => optimization
 ```
 
 ## Implementation

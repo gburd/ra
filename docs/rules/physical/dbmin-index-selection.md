@@ -49,7 +49,7 @@ I/O) versus non-clustered (random I/O).
 ## Relational Algebra
 
 ```algebra
-Given: σ_{p1 ∧ p2 ∧ ... ∧ pn}(R)
+Given: $\sigma$_{p1 $\land$ p2 $\land$ ... $\land$ pn}(R)
 With indexes: I1 on p1, I2 on p2, ...
 
 For each index Ii:

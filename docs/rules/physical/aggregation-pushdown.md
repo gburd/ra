@@ -68,7 +68,7 @@ This optimization is also known as "eager aggregation" (Yan & Larson,
 ```
 aggregate[groups, aggs](A JOIN B ON A.id = B.a_id)
   -> (aggregate[groups_A, aggs](A)) JOIN B ON A.id = B.a_id
-     when groups = groups_A ∪ groups_B
+     when groups = groups_A $\cup$ groups_B
      and aggs reference only A columns
 ```
 
@@ -153,9 +153,9 @@ FROM fact_sales f
 JOIN dim_product d ON f.product_id = d.id
 GROUP BY d.name;
 
--- Without pushdown: join 100M fact × 10K dim, then aggregate
+-- Without pushdown: join 100M fact $\times$ 10K dim, then aggregate
 -- With pushdown: aggregate fact by product_id (10K groups),
---   then join 10K × 10K
+--   then join 10K $\times$ 10K
 -- 10000x reduction in join input
 ```
 

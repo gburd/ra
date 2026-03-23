@@ -58,20 +58,20 @@ RA estimates cost for different index strategies:
 
 ```yaml
 Strategy 1: Individual indexes
-  1. idx_orders_status → 10K rows
-  2. idx_orders_date → 50K rows
-  3. Intersect results → 500 rows
-  4. Fetch from heap → 500 seeks
+  1. idx_orders_status -> 10K rows
+  2. idx_orders_date -> 50K rows
+  3. Intersect results -> 500 rows
+  4. Fetch from heap -> 500 seeks
   Total Cost: 525 units
 
 Strategy 2: Covering index
-  1. idx_orders_covering (status, order_date) → 500 rows
+  1. idx_orders_covering (status, order_date) -> 500 rows
   2. Index-only scan (no heap access needed)
-  Total Cost: 50 units  ← WINNER
+  Total Cost: 50 units  <- WINNER
 
 Strategy 3: Table scan with filter
-  1. Scan orders → 1M rows
-  2. Apply filters → 500 rows
+  1. Scan orders -> 1M rows
+  2. Apply filters -> 500 rows
   Total Cost: 10,000 units
 ```
 
@@ -98,12 +98,12 @@ RA chooses: Nested Loop with index
 
 ```
 Limit(100)
-  └── Sort(o.order_date DESC)
-      └── NestedLoopJoin(o.customer_id = c.id)
-          ├── IndexOnlyScan(idx_orders_covering)
-          │   └── Conditions: status='pending' AND date>='2024-01-01'
-          └── IndexSeek(idx_customers_pk)
-              └── Filter(country = 'USA')
+  `---- Sort(o.order_date DESC)
+      `---- NestedLoopJoin(o.customer_id = c.id)
+          |---- IndexOnlyScan(idx_orders_covering)
+          |   `---- Conditions: status='pending' AND date>='2024-01-01'
+          `---- IndexSeek(idx_customers_pk)
+              `---- Filter(country = 'USA')
 ```
 
 ## Running the Example
@@ -155,9 +155,9 @@ WHERE color = 'red'
 
 -- RA combines bitmap indexes:
 BitmapOr
-  ├── BitmapIndexScan(idx_color)
-  ├── BitmapIndexScan(idx_size)
-  └── BitmapIndexScan(idx_category)
+  |---- BitmapIndexScan(idx_color)
+  |---- BitmapIndexScan(idx_size)
+  `---- BitmapIndexScan(idx_category)
 ```
 
 ### Partial Index Usage
@@ -219,9 +219,9 @@ WHERE status = 'pending'
 
 -- RA intersects multiple indexes
 IndexIntersection
-  ├── IndexScan(idx_status)
-  ├── IndexScan(idx_priority)
-  └── IndexScan(idx_region)
+  |---- IndexScan(idx_status)
+  |---- IndexScan(idx_priority)
+  `---- IndexScan(idx_region)
 ```
 
 ### Function-Based Indexes

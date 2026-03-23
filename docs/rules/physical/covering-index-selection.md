@@ -38,7 +38,7 @@ Selects index that includes all query columns, enabling index-only scan without 
 ```algebra
 project[cols](filter[pred](scan[T]))
   -> index_only_scan[I](pred, cols)
-  where index_covers(I, cols ∪ columns(pred))
+  where index_covers(I, cols $\cup$ columns(pred))
 ```
 
 ## Implementation

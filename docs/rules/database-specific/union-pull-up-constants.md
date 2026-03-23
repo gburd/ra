@@ -33,8 +33,8 @@ the union, eliminating redundant computation.
 ## Relational Algebra
 
 ```algebra
-UNION(π_[a, k](R1), π_[b, k](R2)) where k is constant ->
-  π_[col, k](UNION(π_[a](R1), π_[b](R2)))
+UNION($\pi$_[a, k](R1), $\pi$_[b, k](R2)) where k is constant ->
+  $\pi$_[col, k](UNION($\pi$_[a](R1), $\pi$_[b](R2)))
 ```
 
 ## Implementation
@@ -88,7 +88,7 @@ fn estimated_benefit(
 
     // Cost of computing constant in each branch:
     // - Each row evaluates the constant expression
-    let redundant_cost = total_rows * n_constants * 0.000001; // 1μs per eval
+    let redundant_cost = total_rows * n_constants * 0.000001; // 1$\mu$s per eval
 
     // Cost after pull-up:
     // - Compute constant once per output row (same total_rows)

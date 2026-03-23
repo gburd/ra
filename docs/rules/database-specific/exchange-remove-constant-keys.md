@@ -88,7 +88,7 @@ fn estimated_benefit(
     let join_colocation_benefit = 0.1 * (constant_keys / total_keys);
 
     // Normalize
-    let query_cost_estimate = rows * 0.00001; // 10μs per row
+    let query_cost_estimate = rows * 0.00001; // 10$\mu$s per row
     (total_hash_savings / query_cost_estimate) + join_colocation_benefit
 }
 ```

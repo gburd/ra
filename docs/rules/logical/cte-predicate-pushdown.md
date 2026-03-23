@@ -27,7 +27,7 @@ Pushes predicates from the CTE body into the CTE definition when the CTE is inli
 ```algebra
 filter[P](CTE[name, def](scan(name)))
   -> CTE[name, filter[P](def)](scan(name))
-  where columns(P) ⊆ output(def)
+  where columns(P) $\subseteq$ output(def)
 ```
 
 ## Implementation

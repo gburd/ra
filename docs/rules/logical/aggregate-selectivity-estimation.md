@@ -66,7 +66,7 @@ fn benefit() -> f64 {
 
 ## Test Cases
 
-### Positive: Low NDV → Streaming
+### Positive: Low NDV -> Streaming
 
 ```sql
 SELECT status, COUNT(*) FROM orders GROUP BY status;
@@ -75,7 +75,7 @@ SELECT status, COUNT(*) FROM orders GROUP BY status;
 -- Use streaming aggregation
 ```
 
-### Positive: High NDV → Hash
+### Positive: High NDV -> Hash
 
 ```sql
 SELECT user_id, COUNT(*) FROM events GROUP BY user_id;
@@ -84,7 +84,7 @@ SELECT user_id, COUNT(*) FROM events GROUP BY user_id;
 -- Use hash aggregation if memory allows
 ```
 
-### Positive: Very high NDV → Sort
+### Positive: Very high NDV -> Sort
 
 ```sql
 SELECT session_id, MAX(timestamp) FROM logs GROUP BY session_id;

@@ -2,7 +2,7 @@
 
 Welcome to the interactive guide for RA, a pedagogical query optimizer that helps you understand how databases transform SQL queries into efficient execution plans. Through the story of Alice's growing accounting business, you'll learn how query optimization works from the ground up.
 
-## 🎯 What You'll Learn
+##  What You'll Learn
 
 - **Query Planning**: How SQL queries become execution plans
 - **Cost Models**: Why databases choose one plan over another
@@ -11,7 +11,7 @@ Welcome to the interactive guide for RA, a pedagogical query optimizer that help
 - **Hardware Awareness**: How CPU and memory influence plans
 - **Dialect Translation**: Adapting queries for different databases
 
-## 📚 Guide Structure
+##  Guide Structure
 
 ### Part 1: Getting Started
 1. [**Introduction**](01-introduction.md) - Meet Alice and her ledger system
@@ -32,7 +32,7 @@ Welcome to the interactive guide for RA, a pedagogical query optimizer that help
 ### Interactive Lab
 - [**Query Optimization Lab**](interactive.md) - Hands-on WASM-powered query editor with adjustable statistics and index controls
 
-## 🚀 Quick Start
+##  Quick Start
 
 Each section includes interactive SQL examples. Try modifying them to see how RA responds:
 
@@ -53,7 +53,7 @@ WHERE a.account_code = '1010'  -- Cash account
 GROUP BY a.account_code, a.account_name;
 ```
 
-## 🎮 Interactive Features
+##  Interactive Features
 
 ### Statistics Editor
 Adjust table statistics and watch plans change in real-time:
@@ -73,7 +73,7 @@ Control which optimization rules apply:
 - Cost breakdown charts
 - Optimization timeline
 
-## 📖 The Story
+##  The Story
 
 Follow Alice as her business grows from a small shop to a thriving enterprise:
 
@@ -84,7 +84,7 @@ Follow Alice as her business grows from a small shop to a thriving enterprise:
 5. **Year 3**: Multi-currency challenges
 6. **Today**: Enterprise-scale optimization
 
-## 🛠️ How to Use This Guide
+##  How to Use This Guide
 
 ### For Learning
 - Start at the beginning and follow Alice's journey
@@ -98,7 +98,7 @@ Follow Alice as her business grows from a small shop to a thriving enterprise:
 - Check optimization patterns
 - Review cost model calculations
 
-## 🔬 Under the Hood
+##  Under the Hood
 
 RA demonstrates real optimization techniques:
 - **Cascades Framework**: Top-down cost-based optimization
@@ -106,7 +106,7 @@ RA demonstrates real optimization techniques:
 - **Cost Estimation**: Cardinality and selectivity calculations
 - **Physical Properties**: Ordering, distribution, and indexing
 
-## 💡 Key Concepts
+##  Key Concepts
 
 ### Query Plans
 - **Logical Plans**: What to compute
@@ -123,28 +123,28 @@ RA demonstrates real optimization techniques:
 - **Selectivity**: Filter effectiveness
 - **Cost Units**: CPU, I/O, memory, network
 
-## 🎯 Learning Objectives
+##  Learning Objectives
 
 By the end of this guide, you'll understand:
 
-1. ✅ How query optimizers make decisions
-2. ✅ Why indexes dramatically improve performance
-3. ✅ How statistics influence plan selection
-4. ✅ When rules fire and why they matter
-5. ✅ How to read and interpret query plans
-6. ✅ Cost model calculations and tradeoffs
-7. ✅ Hardware's role in optimization
-8. ✅ Cross-database query translation
+1. [x] How query optimizers make decisions
+2. [x] Why indexes dramatically improve performance
+3. [x] How statistics influence plan selection
+4. [x] When rules fire and why they matter
+5. [x] How to read and interpret query plans
+6. [x] Cost model calculations and tradeoffs
+7. [x] Hardware's role in optimization
+8. [x] Cross-database query translation
 
-## 📝 Prerequisites
+##  Prerequisites
 
 - Basic SQL knowledge
 - Familiarity with database concepts
 - No optimization experience required!
 
-## 🚦 Ready to Start?
+##  Ready to Start?
 
-Begin your journey with [Chapter 1: Introduction](01-introduction.md) →
+Begin your journey with [Chapter 1: Introduction](01-introduction.md) ->
 
 ---
 

@@ -39,7 +39,7 @@ flowchart LR
     end
 
     subgraph After["After: Unnested"]
-        R2[R] --> Join["Semi-Join ⋈"]
+        R2[R] --> Join["Semi-Join $\bowtie$"]
         S2[S] --> Join
     end
 
@@ -116,7 +116,7 @@ optimizer.add_column_stats("salaries", "employee_id", ColumnStatistics {
 
 ### Scalar Correlated Subquery
 
-❌ **Original (Inefficient):**
+[FAIL] **Original (Inefficient):**
 
 ```sql
 SELECT
@@ -130,7 +130,7 @@ FROM employees e;
 
 **Naive Execution:** Subquery runs 10,000 times.
 
-✅ **Ra Optimized Plan:**
+[x] **Ra Optimized Plan:**
 
 ```
 Project [name, salary, dept_avg]
@@ -151,7 +151,7 @@ $$
 
 ### EXISTS Correlated Subquery
 
-❌ **Original:**
+[FAIL] **Original:**
 
 ```sql
 SELECT c.name
@@ -166,7 +166,7 @@ WHERE EXISTS (
 
 **Naive Cost:** $|C| \times \text{Cost}(\text{subquery})$
 
-✅ **Ra Optimized Plan:**
+[x] **Ra Optimized Plan:**
 
 ```
 Project [name]
@@ -215,7 +215,7 @@ Where $\triangleright$ is anti-join (returns rows from left with no match in rig
 
 ### Correlated Subquery with Aggregate
 
-❌ **Original:**
+[FAIL] **Original:**
 
 ```sql
 SELECT e.name, e.salary
@@ -227,7 +227,7 @@ WHERE e.salary > (
 );
 ```
 
-✅ **Ra Plan:**
+[x] **Ra Plan:**
 
 ```
 Filter (salary > dept_avg)
@@ -301,11 +301,11 @@ NestedLoopJoin [LATERAL]
 
 Ra can decorrelate when:
 
-1. ✅ Subquery is simple aggregation
-2. ✅ EXISTS/NOT EXISTS without complex logic
-3. ✅ Scalar subquery with aggregates
-4. ❌ Subquery has LIMIT/TOP-N
-5. ❌ Subquery has complex conditionals
+1. [x] Subquery is simple aggregation
+2. [x] EXISTS/NOT EXISTS without complex logic
+3. [x] Scalar subquery with aggregates
+4. [FAIL] Subquery has LIMIT/TOP-N
+5. [FAIL] Subquery has complex conditionals
 
 ## Performance Impact
 
@@ -319,7 +319,7 @@ Ra can decorrelate when:
 
 ### 1. Unnecessary Correlation
 
-❌ **Bad:**
+[FAIL] **Bad:**
 ```sql
 SELECT e.name,
        (SELECT d.department_name FROM departments d WHERE d.id = e.department_id)
@@ -328,7 +328,7 @@ FROM employees e;
 
 Better written as explicit join.
 
-✅ **Good:**
+[x] **Good:**
 ```sql
 SELECT e.name, d.department_name
 FROM employees e
@@ -337,7 +337,7 @@ JOIN departments d ON d.id = e.department_id;
 
 ### 2. Multiple Identical Subqueries
 
-❌ **Bad:**
+[FAIL] **Bad:**
 ```sql
 SELECT
   name,
@@ -348,7 +348,7 @@ FROM employees;
 
 Ra will optimize this, but better to compute once:
 
-✅ **Good:**
+[x] **Good:**
 ```sql
 WITH avg_sal AS (SELECT AVG(salary) as avg FROM employees)
 SELECT

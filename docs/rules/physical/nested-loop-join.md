@@ -114,7 +114,7 @@ fn estimated_cost(
 **Assumptions:**
 - Inner relation re-scanned for each outer tuple
 - Sequential I/O (may benefit from caching on repeated scans)
-- Predicate evaluation: ~1μs per tuple pair
+- Predicate evaluation: ~1$\mu$s per tuple pair
 
 **Typical use case:** Fallback when better algorithms unavailable, or outer < 100 rows.
 

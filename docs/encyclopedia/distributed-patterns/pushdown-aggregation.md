@@ -94,8 +94,8 @@ Need additional information for global aggregation:
 | Function | Local Phase | Global Phase | Extra Data |
 |----------|-------------|--------------|------------|
 | `AVG(x)` | `SUM(x), COUNT(*)` | `SUM(partial_sum) / SUM(partial_count)` | Sum + Count |
-| `STDDEV(x)` | `SUM(x), SUM(x²), COUNT(*)` | Calculate from sums | Sum, Sum of squares, Count |
-| `VARIANCE(x)` | `SUM(x), SUM(x²), COUNT(*)` | $(n \sum x^2 - (\sum x)^2) / n(n-1)$ | Same as STDDEV |
+| `STDDEV(x)` | `SUM(x), SUM(x$^2$), COUNT(*)` | Calculate from sums | Sum, Sum of squares, Count |
+| `VARIANCE(x)` | `SUM(x), SUM(x$^2$), COUNT(*)` | $(n \sum x^2 - (\sum x)^2) / n(n-1)$ | Same as STDDEV |
 
 ### Holistic Functions (Cannot Push-down Perfectly)
 
@@ -116,7 +116,7 @@ $$
 \text{Cost}_{\text{shuffle}} = |R| \times \text{size}_{\text{tuple}} \times C_{\text{network}}
 $$
 
-For 100M rows × 100 bytes = 10GB network transfer.
+For 100M rows $\times$ 100 bytes = 10GB network transfer.
 
 ### Push-down Aggregation
 
@@ -124,7 +124,7 @@ $$
 \text{Cost}_{\text{pushdown}} = |\text{distinct}(G)| \times \text{size}_{\text{agg}} \times C_{\text{network}}
 $$
 
-For 10K distinct groups × 20 bytes = 200KB network transfer.
+For 10K distinct groups $\times$ 20 bytes = 200KB network transfer.
 
 **Reduction factor:**
 $$
@@ -168,7 +168,7 @@ GROUP BY region;
 - Node 2: `{region: 'US', count: 25M}, {region: 'EU', count: 15M}`
 - Node 3: `{region: 'EU', count: 20M}, {region: 'APAC', count: 10M}`
 
-**Network:** 5 rows instead of 100M → **20,000,000x reduction**
+**Network:** 5 rows instead of 100M -> **20,000,000x reduction**
 
 ### SUM with GROUP BY
 
@@ -181,7 +181,7 @@ GROUP BY product_id;
 Local phase: Each node computes partial sums per product.
 Global phase: Coordinator sums partial results per product.
 
-**Network:** 50K products × 16 bytes = 800KB instead of 1B rows × 20 bytes = 20GB → **25,000x reduction**
+**Network:** 50K products $\times$ 16 bytes = 800KB instead of 1B rows $\times$ 20 bytes = 20GB -> **25,000x reduction**
 
 ### AVG Decomposition
 
@@ -216,9 +216,9 @@ GROUP BY country, product_category;
 **Local phase:** Partial aggregates per (country, category) on each node.
 **Global phase:** Combine partial results.
 
-With 200 countries × 50 categories = 10K groups:
-- Without push-down: 1B rows × 50 bytes = 50GB
-- With push-down: 10K groups × 40 bytes = 400KB
+With 200 countries $\times$ 50 categories = 10K groups:
+- Without push-down: 1B rows $\times$ 50 bytes = 50GB
+- With push-down: 10K groups $\times$ 40 bytes = 400KB
 - **Reduction: 125,000x**
 
 ## Three-Phase Aggregation
@@ -259,7 +259,7 @@ SELECT COUNT(DISTINCT user_id) FROM events;
 SELECT APPROX_COUNT_DISTINCT(user_id) FROM events;
 ```
 
-**Network:** 1KB per node vs 8GB for exact → **8,000,000x reduction**
+**Network:** 1KB per node vs 8GB for exact -> **8,000,000x reduction**
 
 Ra supports:
 - **HyperLogLog** for COUNT(DISTINCT)
@@ -277,12 +277,12 @@ fn should_pushdown(group_cardinality: usize, total_rows: usize) -> bool {
 }
 ```
 
-**Push down:** `GROUP BY customer_id` (10K groups, 100M rows) ✓
-**Don't push down:** `GROUP BY user_agent` (1M groups, 1M rows) ✗ - no benefit
+**Push down:** `GROUP BY customer_id` (10K groups, 100M rows) [x]
+**Don't push down:** `GROUP BY user_agent` (1M groups, 1M rows) [FAIL] - no benefit
 
 ## Common Pitfalls
 
-### ❌ High Cardinality GROUP BY
+### [FAIL] High Cardinality GROUP BY
 
 ```sql
 -- user_id has 50M distinct values out of 100M rows
@@ -293,7 +293,7 @@ Push-down provides no benefit (50% reduction vs overhead).
 
 **Fix:** Use sampling or approximate aggregation.
 
-### ❌ Non-Decomposable DISTINCT
+### [FAIL] Non-Decomposable DISTINCT
 
 ```sql
 -- Requires exact distinct set - cannot decompose perfectly
@@ -302,7 +302,7 @@ SELECT category, COUNT(DISTINCT user_id) FROM events GROUP BY category;
 
 Ra uses HyperLogLog approximation or falls back to shuffle.
 
-### ❌ Correlated Subquery Aggregation
+### [FAIL] Correlated Subquery Aggregation
 
 ```sql
 -- Aggregation depends on outer query values
@@ -355,7 +355,7 @@ fn test_two_phase_aggregation() {
 
     // Verify network transfer is based on distinct count, not total rows
     let network_rows = plan.estimate_network_rows();
-    assert!(network_rows < 20_000); // 10K groups × some duplication
+    assert!(network_rows < 20_000); // 10K groups $\times$ some duplication
 }
 ```
 

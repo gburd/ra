@@ -44,10 +44,10 @@
 Adaptive aggregation monitors runtime characteristics (cardinality, memory usage, skew) and dynamically adjusts strategy. May switch from hash to sort, enable spilling, or trigger repartitioning mid-execution.
 
 **Adaptation triggers:**
-- Memory pressure → spill to disk
-- Cardinality exceeds estimate → switch to sort
-- Data skew detected → repartition
-- Early termination possible → streaming
+- Memory pressure -> spill to disk
+- Cardinality exceeds estimate -> switch to sort
+- Data skew detected -> repartition
+- Early termination possible -> streaming
 
 **When to use:**
 - Highly variable workloads
@@ -58,8 +58,8 @@ Adaptive aggregation monitors runtime characteristics (cardinality, memory usage
 ## Relational Algebra
 
 ```
-γ_{g; AGG(v)}(R)
-→ AdaptiveAggregation(R, g, AGG, initial_strategy)
+$\gamma$_{g; AGG(v)}(R)
+-> AdaptiveAggregation(R, g, AGG, initial_strategy)
   where strategy adapts based on runtime feedback
 ```
 

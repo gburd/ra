@@ -35,7 +35,7 @@ Pushes predicates into join operands
 ## Relational Algebra
 
 ```algebra
-σ(Join) => Join(σ(R), σ(S))
+$\sigma$(Join) => Join($\sigma$(R), $\sigma$(S))
 ```
 
 ## Implementation

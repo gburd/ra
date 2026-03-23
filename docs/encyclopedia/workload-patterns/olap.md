@@ -192,7 +192,7 @@ Push filters to storage layer:
 -- Filter applied during Parquet/ORC file scan
 SELECT product_id, SUM(amount)
 FROM sales
-WHERE amount > 100  -- ← Pushed to file reader
+WHERE amount > 100  -- <- Pushed to file reader
 GROUP BY product_id;
 ```
 
@@ -348,7 +348,7 @@ optimizer.config.hash_table_memory = 128 * 1024 * 1024 * 1024;  // 128GB
 
 ## Common Pitfalls
 
-### ❌ Using Row-Based Storage
+### [FAIL] Using Row-Based Storage
 
 ```sql
 -- Reads all 50 columns even though query only needs 3
@@ -360,7 +360,7 @@ FROM sales_row_based;
 
 **Speedup:** 5-10x
 
-### ❌ No Partition Pruning
+### [FAIL] No Partition Pruning
 
 ```sql
 -- Scans all 60 months when only Q1 2024 needed
@@ -370,16 +370,16 @@ SELECT SUM(amount) FROM sales WHERE order_date >= '2024-01-01';
 
 **Fix:** Add upper bound to enable partition pruning.
 
-### ❌ Too Many Small Partitions
+### [FAIL] Too Many Small Partitions
 
 ```sql
--- 5 years × 365 days = 1825 partitions
+-- 5 years $\times$ 365 days = 1825 partitions
 -- Metadata overhead kills performance
 ```
 
 **Fix:** Use monthly or weekly partitions instead.
 
-### ❌ Normalized Schema for OLAP
+### [FAIL] Normalized Schema for OLAP
 
 ```sql
 -- 3NF schema with 15 joins - slow for analytical queries

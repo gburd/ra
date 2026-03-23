@@ -1,9 +1,9 @@
 //! Rule synthesis from mined patterns.
 //!
-//! Takes frequent pattern pairs (from → to transformations observed
+//! Takes frequent pattern pairs (from -> to transformations observed
 //! in execution logs) and synthesizes candidate [`ra_core::rule::Rule`]
 //! implementations.  Candidate rules are structural rewrites
-//! expressed as pattern → replacement pairs.
+//! expressed as pattern -> replacement pairs.
 
 use serde::{Deserialize, Serialize};
 

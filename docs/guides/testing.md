@@ -108,10 +108,10 @@ This creates `.ra-test-profile.toml` with your platform's performance profile. T
 Instead of hard-coding performance expectations:
 
 ```rust
-// ❌ Bad: Fails on slower hardware
+// [FAIL] Bad: Fails on slower hardware
 assert!(duration.as_millis() < 1000);
 
-// ✅ Good: Scales to platform performance
+// [x] Good: Scales to platform performance
 use ra_test_utils::TestProfile;
 
 let profile = TestProfile::current();
@@ -276,7 +276,7 @@ proptest! {
         b in arb_rel_expr(),
         c in arb_rel_expr()
     ) {
-        // (a ⋈ b) ⋈ c ≡ a ⋈ (b ⋈ c)
+        // (a $\bowtie$ b) $\bowtie$ c $\equiv$ a $\bowtie$ (b $\bowtie$ c)
         let left = join(join(a.clone(), b.clone()), c.clone());
         let right = join(a, join(b, c));
         assert_equivalent(left, right);

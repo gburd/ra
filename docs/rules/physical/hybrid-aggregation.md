@@ -56,8 +56,8 @@ Hybrid aggregation starts with hash-based aggregation and dynamically switches t
 ## Relational Algebra
 
 ```
-γ_{g; AGG(v)}(R)
-→ HybridAggregation(R, g, AGG)
+$\gamma$_{g; AGG(v)}(R)
+-> HybridAggregation(R, g, AGG)
   where strategy = if memory_ok then Hash else Sort
 ```
 

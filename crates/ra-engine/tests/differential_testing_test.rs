@@ -236,7 +236,7 @@ fn test_postgres_left_outer_join() {
 
 #[test]
 fn test_postgres_semi_join() {
-    // PostgreSQL: EXISTS → semi-join transformation
+    // PostgreSQL: EXISTS -> semi-join transformation
     let query = RelExpr::Join {
         join_type: JoinType::Semi,
         condition: eq(col("customer_id"), col("id")),
@@ -248,7 +248,7 @@ fn test_postgres_semi_join() {
 
 #[test]
 fn test_postgres_anti_join() {
-    // PostgreSQL: NOT EXISTS → anti-join transformation
+    // PostgreSQL: NOT EXISTS -> anti-join transformation
     let query = RelExpr::Join {
         join_type: JoinType::Anti,
         condition: eq(col("id"), col("blacklist_id")),
@@ -293,7 +293,7 @@ fn test_postgres_aggregate_with_filter() {
 
 #[test]
 fn test_postgres_subquery_unnesting() {
-    // PostgreSQL: Scalar subquery → left join
+    // PostgreSQL: Scalar subquery -> left join
     let query = RelExpr::Join {
         join_type: JoinType::LeftOuter,
         condition: eq(col("customer_id"), col("id")),

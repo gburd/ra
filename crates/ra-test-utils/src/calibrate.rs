@@ -193,7 +193,7 @@ fn benchmark_complex_optimization(iterations: usize) -> anyhow::Result<f64> {
     use ra_core::{Expr, ColumnRef, BinOp};
     use ra_engine::Optimizer;
 
-    // Create a complex 4-table join plan: (t1 ⋈ t2) ⋈ (t3 ⋈ t4)
+    // Create a complex 4-table join plan: (t1 JOIN t2) JOIN (t3 JOIN t4)
     let j1 = RelExpr::Join {
         join_type: JoinType::Inner,
         condition: Expr::BinOp {

@@ -19,10 +19,10 @@ WHERE account_code = '1010';
 
 ```
 Scan (account_balances)
-  ├── Filter: account_code = '1010'
-  ├── Cost: 10.5 units
-  ├── Rows: 1 (estimated)
-  └── Width: 48 bytes
+  |---- Filter: account_code = '1010'
+  |---- Cost: 10.5 units
+  |---- Rows: 1 (estimated)
+  `---- Width: 48 bytes
 ```
 
 Each node shows:
@@ -51,8 +51,8 @@ GROUP BY account_name;
 **RA's Initial Plan**:
 ```
 Aggregate
-  └── Filter (OR condition)
-      └── SeqScan (ledger_transactions)
+  `---- Filter (OR condition)
+      `---- SeqScan (ledger_transactions)
 ```
 
 **Cost Breakdown**:
@@ -82,9 +82,9 @@ GROUP BY account_name;
 **RA's Optimized Plan**:
 ```
 Aggregate
-  └── BitmapOr
-      ├── BitmapIndexScan (idx_debit_account)
-      └── BitmapIndexScan (idx_credit_account)
+  `---- BitmapOr
+      |---- BitmapIndexScan (idx_debit_account)
+      `---- BitmapIndexScan (idx_credit_account)
 ```
 
 **Cost Breakdown**:
@@ -114,7 +114,7 @@ GROUP BY account_name;
 **RA's Best Plan**:
 ```
 Aggregate
-  └── IndexOnlyScan (idx_debit_covering)
+  `---- IndexOnlyScan (idx_debit_covering)
 ```
 
 **Cost Breakdown**:
@@ -142,9 +142,9 @@ WHERE t.transaction_date = CURRENT_DATE;
 **Initial Plan**:
 ```
 NestedLoopJoin
-  ├── SeqScan (chart_of_accounts)
-  └── SeqScan (ledger_transactions)
-      └── Filter: transaction_date = CURRENT_DATE
+  |---- SeqScan (chart_of_accounts)
+  `---- SeqScan (ledger_transactions)
+      `---- Filter: transaction_date = CURRENT_DATE
 ```
 
 ### Join Order Matters
@@ -153,8 +153,8 @@ RA tries different join orders:
 
 ```sql-interactive
 -- RA considers both options:
--- Option 1: Accounts → Transactions
--- Option 2: Transactions → Accounts
+-- Option 1: Accounts -> Transactions
+-- Option 2: Transactions -> Accounts
 
 -- Let's hint at the better order
 SELECT /*+ LEADING(t a) */
@@ -169,10 +169,10 @@ WHERE t.transaction_date = CURRENT_DATE;
 **Optimized Plan**:
 ```
 HashJoin
-  ├── Filter: transaction_date = CURRENT_DATE
-  │   └── IndexScan (ledger_transactions)
-  └── Hash
-      └── SeqScan (chart_of_accounts)
+  |---- Filter: transaction_date = CURRENT_DATE
+  |   `---- IndexScan (ledger_transactions)
+  `---- Hash
+      `---- SeqScan (chart_of_accounts)
 ```
 
 Why is this better?
@@ -202,19 +202,19 @@ WHERE total > 1000;
 **Before Pushdown**:
 ```
 Filter: total > 1000
-  └── Aggregate
-      └── Join
-          ├── Scan (ledger_transactions)
-          └── Scan (chart_of_accounts)
+  `---- Aggregate
+      `---- Join
+          |---- Scan (ledger_transactions)
+          `---- Scan (chart_of_accounts)
 ```
 
 **After Pushdown**:
 ```
 Aggregate
-  └── Join
-      ├── Scan (ledger_transactions)
-      │   └── Filter: debit_amount > 0  -- Partial pushdown
-      └── Scan (chart_of_accounts)
+  `---- Join
+      |---- Scan (ledger_transactions)
+      |   `---- Filter: debit_amount > 0  -- Partial pushdown
+      `---- Scan (chart_of_accounts)
 Having: SUM(debit_amount) > 1000
 ```
 
@@ -296,7 +296,7 @@ Adjust parameters and see how RA chooses different plans!
 
 ## Common Patterns and Anti-Patterns
 
-### ✅ Good: Sargable Predicates
+### [x] Good: Sargable Predicates
 
 ```sql-interactive
 -- Searchable argument - can use index
@@ -304,7 +304,7 @@ SELECT * FROM ledger_transactions
 WHERE transaction_date = '2024-01-15';
 ```
 
-### ❌ Bad: Non-Sargable Predicates
+### [FAIL] Bad: Non-Sargable Predicates
 
 ```sql-interactive
 -- Function on column prevents index use
@@ -314,7 +314,7 @@ WHERE DATE_TRUNC('month', transaction_date) = '2024-01-01';
 -- RA cannot optimize this effectively
 ```
 
-### ✅ Better: Rewrite for Sargability
+### [x] Better: Rewrite for Sargability
 
 ```sql-interactive
 -- Range condition allows index use
@@ -379,7 +379,7 @@ GROUP BY a.account_name;
 **Rules Applied**:
 1. `PushFilterBeforeJoin`: Move date filter to transactions
 2. `UseIndexForEquality`: Use account_code index
-3. `ChooseJoinAlgorithm`: HashJoin for small×large
+3. `ChooseJoinAlgorithm`: HashJoin for small$\times$large
 4. `PushdownProjection`: Only read needed columns
 
 ## Practice Exercises
@@ -461,9 +461,9 @@ FROM chart_of_accounts;
    - But keep columns until needed
 
 4. **Subqueries often need rewriting**
-   - Correlated → Join
-   - EXISTS → Semi-join
-   - IN → Hash lookup
+   - Correlated -> Join
+   - EXISTS -> Semi-join
+   - IN -> Hash lookup
 
 5. **Cost models are estimates**
    - Based on statistics
@@ -475,4 +475,4 @@ Basic queries are the foundation, but Alice's business needs summaries and repor
 
 ---
 
-*💡 Pro Tip: Watch the cost numbers! A 10x cost difference usually means 10x performance difference in practice.*
+* Pro Tip: Watch the cost numbers! A 10x cost difference usually means 10x performance difference in practice.*

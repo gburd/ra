@@ -194,15 +194,15 @@ FROM ledger_transactions t1;
 ```feature-matrix
 | Feature | PostgreSQL | MySQL 8+ | SQLite 3.35+ | SQL Server | DuckDB |
 |---------|------------|----------|--------------|------------|---------|
-| CTEs | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Recursive CTEs | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Window Functions | ✅ | ✅ | ✅ | ✅ | ✅ |
-| LATERAL joins | ✅ | ✅ (8.0.14+) | ❌ | ✅ (APPLY) | ✅ |
-| Arrays | ✅ | ✅ (JSON) | ❌ | ❌ | ✅ |
-| Full Outer Join | ✅ | ❌ | ❌ | ✅ | ✅ |
-| EXCEPT ALL | ✅ | ❌ | ❌ | ✅ | ✅ |
-| Materialized Views | ✅ | ❌ | ❌ | ✅ (Indexed) | ❌ |
-| Partial Indexes | ✅ | ❌ | ✅ | ✅ (Filtered) | ❌ |
+| CTEs | [x] | [x] | [x] | [x] | [x] |
+| Recursive CTEs | [x] | [x] | [x] | [x] | [x] |
+| Window Functions | [x] | [x] | [x] | [x] | [x] |
+| LATERAL joins | [x] | [x] (8.0.14+) | [FAIL] | [x] (APPLY) | [x] |
+| Arrays | [x] | [x] (JSON) | [FAIL] | [FAIL] | [x] |
+| Full Outer Join | [x] | [FAIL] | [FAIL] | [x] | [x] |
+| EXCEPT ALL | [x] | [FAIL] | [FAIL] | [x] | [x] |
+| Materialized Views | [x] | [FAIL] | [FAIL] | [x] (Indexed) | [FAIL] |
+| Partial Indexes | [x] | [FAIL] | [x] | [x] (Filtered) | [FAIL] |
 ```
 
 ## Handling Missing Features
@@ -627,4 +627,4 @@ Different databases run on different hardware. How does RA adapt to available re
 
 ---
 
-*🌐 Compatibility Tip: When writing cross-database SQL, stick to SQL-92 features for maximum portability. Use database-specific features only when the performance gain justifies the complexity.*
+* Compatibility Tip: When writing cross-database SQL, stick to SQL-92 features for maximum portability. Use database-specific features only when the performance gain justifies the complexity.*

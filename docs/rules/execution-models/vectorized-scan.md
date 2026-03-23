@@ -33,7 +33,7 @@ Vectorized table scan processes data in batches (vectors) of tuples instead of o
 ## Relational Algebra
 
 ```
-VectorizedScan(table) → Iterator<Batch>
+VectorizedScan(table) -> Iterator<Batch>
 
 Batch = {
   columns: Vec<Column>  // Columnar layout
@@ -50,7 +50,7 @@ VectorizedScanIterator {
   cursor: TableCursor
   batch_size: usize
 
-  fn next_batch() → Batch | None {
+  fn next_batch() -> Batch | None {
     batch = Batch::new(batch_size)
 
     for col in table.columns {
@@ -183,7 +183,7 @@ pub fn vectorized_scan_cost(
 - **Function call overhead:** O(N / batch_size) - 1000x reduction
 - **SIMD speedup:** 4-8x for arithmetic, comparisons
 - **Cache efficiency:** ~2x improvement from locality
-- **Total CPU:** `(row_count / batch_size) × batch_overhead + row_count × per_tuple_cost / SIMD_width`
+- **Total CPU:** `(row_count / batch_size) $\times$ batch_overhead + row_count $\times$ per_tuple_cost / SIMD_width`
 
 **I/O Cost:**
 - Similar to tuple-at-a-time for sequential scans
@@ -191,7 +191,7 @@ pub fn vectorized_scan_cost(
 - Columnar storage: read only needed columns
 
 **Memory:**
-- **Batch buffers:** `batch_size × row_size × num_columns`
+- **Batch buffers:** `batch_size $\times$ row_size $\times$ num_columns`
 - Typically 1-8 MB per batch
 - Multiple batches in flight for pipelining
 

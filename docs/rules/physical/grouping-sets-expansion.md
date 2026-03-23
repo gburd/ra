@@ -55,10 +55,10 @@ Grouping sets compute multiple GROUP BY aggregations in a single pass. CUBE gene
 
 ```
 GROUPING SETS ((g1, g2), (g1), ())
-→ γ_{g1,g2; AGG}(R) ∪ γ_{g1; AGG}(R) ∪ γ_{; AGG}(R)
+-> $\gamma$_{g1,g2; AGG}(R) $\cup$ $\gamma$_{g1; AGG}(R) $\cup$ $\gamma$_{; AGG}(R)
 
 Optimized:
-→ GroupingSetsAgg(R, [(g1,g2), (g1), ()], AGG)
+-> GroupingSetsAgg(R, [(g1,g2), (g1), ()], AGG)
   // Single scan, multiple hash tables
 ```
 

@@ -105,8 +105,8 @@ JOIN dim1 d1 ON f.dim1_id = d1.id
 JOIN dim2 d2 ON f.dim2_id = d2.id
 JOIN dim3 d3 ON f.dim3_id = d3.id;
 
--- May reorder to: (fact ⋈ small_dim) ⋈ other_dims
--- Instead of left-deep: ((fact ⋈ dim1) ⋈ dim2) ⋈ dim3
+-- May reorder to: (fact $\bowtie$ small_dim) $\bowtie$ other_dims
+-- Instead of left-deep: ((fact $\bowtie$ dim1) $\bowtie$ dim2) $\bowtie$ dim3
 ```
 
 ### Positive Case 2: Chain Join with Selectivity

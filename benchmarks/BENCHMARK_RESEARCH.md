@@ -28,7 +28,7 @@ docker run -it hammerdb/hammerdb hammerdbcli
 # Run TPROC-C or TPROC-H workloads
 ```
 
-## TPC-H ✅
+## TPC-H [x]
 
 **Status**: Already implemented in Ra
 
@@ -38,7 +38,7 @@ docker run -it hammerdb/hammerdb hammerdbcli
 - **Dataset**: Scalable (SF1=1GB, SF10=10GB, SF100=100GB)
 - **Complexity**: Moderate - tests optimizer basics
 
-## Join Order Benchmark (JOB) ⭐⭐⭐⭐⭐
+## Join Order Benchmark (JOB) *****
 
 **Priority**: MUST HAVE - Highest value for testing join optimization
 
@@ -101,14 +101,14 @@ WHERE kt.kind = 'movie'
 **Deliverables**:
 ```
 benchmarks/job/
-├── README.md              # JOB documentation
-├── schema.sql             # 21-table IMDB schema
-├── data/                  # CSV files or download script
-├── queries/               # 113 .sql files (1a.sql, 1b.sql, ...)
-├── run_job_benchmark.sh   # Automated test script
-└── results/
-    ├── ra_results.json    # Ra execution times + plans
-    └── pg_results.json    # PostgreSQL execution times + plans
+|---- README.md              # JOB documentation
+|---- schema.sql             # 21-table IMDB schema
+|---- data/                  # CSV files or download script
+|---- queries/               # 113 .sql files (1a.sql, 1b.sql, ...)
+|---- run_job_benchmark.sh   # Automated test script
+`---- results/
+    |---- ra_results.json    # Ra execution times + plans
+    `---- pg_results.json    # PostgreSQL execution times + plans
 ```
 
 ### Success Metrics
@@ -117,7 +117,7 @@ benchmarks/job/
 - **Join Orders**: Ra chooses optimal join order vs PostgreSQL's suboptimal choices
 - **Regression Detection**: No query slower than PostgreSQL by >2x
 
-## TPC-DS ⭐⭐⭐⭐
+## TPC-DS ****
 
 **Priority**: HIGH - Most comprehensive SQL feature coverage
 
@@ -144,9 +144,9 @@ benchmarks/job/
 3. **Industry Standard**: Used by major vendors (Oracle, SQL Server, Teradata) to demonstrate performance
 
 4. **Ra Feature Testing**: Perfect for validating recently merged features:
-   - CTEs ✅ (merged today)
-   - Window functions ✅ (merged today)
-   - Set operations ✅ (merged today)
+   - CTEs [x] (merged today)
+   - Window functions [x] (merged today)
+   - Set operations [x] (merged today)
 
 ### Example Query Complexity
 ```sql
@@ -188,12 +188,12 @@ SELECT * FROM results WHERE rk <= 100;
 **Deliverables**:
 ```
 benchmarks/tpcds/
-├── README.md
-├── schema.sql             # 24 tables
-├── dbgen/                 # TPC-DS data generator
-├── queries/               # 99 .sql files
-├── run_tpcds_benchmark.sh
-└── results/
+|---- README.md
+|---- schema.sql             # 24 tables
+|---- dbgen/                 # TPC-DS data generator
+|---- queries/               # 99 .sql files
+|---- run_tpcds_benchmark.sh
+`---- results/
 ```
 
 ### Success Metrics
@@ -202,7 +202,7 @@ benchmarks/tpcds/
 - **Feature Coverage**: Window functions, CTEs, set ops all validated
 - **Optimizer Stress Test**: Handle complex multi-way joins
 
-## Star Schema Benchmark (SSB) ⭐⭐⭐
+## Star Schema Benchmark (SSB) ***
 
 **Priority**: MEDIUM - Good for specific optimization patterns
 
@@ -249,7 +249,7 @@ WHERE lo_orderdate = d_datekey
 - **Performance**: Match or beat PostgreSQL
 - **Star Join Detection**: Ra recognizes star schema patterns
 
-## HammerDB TPROC-C ⭐⭐⭐
+## HammerDB TPROC-C ***
 
 **Priority**: MEDIUM - OLTP workload (different focus)
 
@@ -286,22 +286,22 @@ TPROC-C is less relevant for Ra's query optimization focus (it's about transacti
 
 ## Lower Priority Benchmarks
 
-### LinkBench (⭐⭐)
+### LinkBench (**)
 - **Type**: Social graph workload (Facebook)
 - **Use Case**: Graph traversals, range queries
 - **Relevance**: Specialized, less relevant for general query optimization
 
-### YCSB (⭐)
+### YCSB (*)
 - **Type**: Key-value / NoSQL benchmark
 - **Use Case**: Simple operations (insert, update, read)
 - **Relevance**: Not relevant for relational query optimization
 
 ## Benchmark Implementation Priority
 
-### Phase 1: Immediate (Q1 2026) ✅
+### Phase 1: Immediate (Q1 2026) [x]
 - [x] TPC-H (already implemented)
 
-### Phase 2: Next (Q2 2026) 🎯
+### Phase 2: Next (Q2 2026) 
 1. **Join Order Benchmark (JOB)** - 2 weeks
    - Best ROI for join optimization testing
    - Real-world data exposes optimizer weaknesses
@@ -321,29 +321,29 @@ TPROC-C is less relevant for Ra's query optimization focus (it's about transacti
 ### Directory Structure
 ```
 benchmarks/
-├── README.md              # Overview of all benchmarks
-├── runner/                # Shared benchmark infrastructure
-│   ├── lib.rs            # Rust benchmark framework
-│   ├── config.toml       # Benchmark configuration
-│   └── differential.rs   # Ra vs PostgreSQL comparison
-├── tpch/                 # ✅ Existing
-│   ├── schema.sql
-│   ├── queries/          # 22 queries
-│   └── results/
-├── job/                  # 🎯 Next priority
-│   ├── README.md
-│   ├── schema.sql        # 21 IMDB tables
-│   ├── data/             # CSV files
-│   ├── queries/          # 113 queries
-│   └── results/
-├── tpcds/                # 🎯 High priority
-│   ├── schema.sql        # 24 tables
-│   ├── queries/          # 99 queries
-│   └── results/
-├── ssb/                  # Later
-│   └── ...
-└── hammerdb/             # Later
-    └── ...
+|---- README.md              # Overview of all benchmarks
+|---- runner/                # Shared benchmark infrastructure
+|   |---- lib.rs            # Rust benchmark framework
+|   |---- config.toml       # Benchmark configuration
+|   `---- differential.rs   # Ra vs PostgreSQL comparison
+|---- tpch/                 # [x] Existing
+|   |---- schema.sql
+|   |---- queries/          # 22 queries
+|   `---- results/
+|---- job/                  #  Next priority
+|   |---- README.md
+|   |---- schema.sql        # 21 IMDB tables
+|   |---- data/             # CSV files
+|   |---- queries/          # 113 queries
+|   `---- results/
+|---- tpcds/                #  High priority
+|   |---- schema.sql        # 24 tables
+|   |---- queries/          # 99 queries
+|   `---- results/
+|---- ssb/                  # Later
+|   `---- ...
+`---- hammerdb/             # Later
+    `---- ...
 ```
 
 ### Benchmark Runner API

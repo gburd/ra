@@ -10,32 +10,32 @@ This directory contains real-world SQL queries extracted from common application
 
 ```
 tests/realworld-queries/
-├── README.md                           # This file
-├── DISTRIBUTED_PATTERNS.md             # Analysis of distributed query patterns
-├── SCHEMA_PATTERNS.md                  # Schema statistics and facts
-├── WORKLOAD_CHARACTERISTICS.md         # Workload analysis
-├── RESULTS.md                          # Test results and gap analysis
-├── github/
-│   ├── django-migrations/              # Django ORM patterns
-│   │   ├── 001_initial_user_model.sql
-│   │   └── 002_ecommerce_orders.sql
-│   ├── rails-activerecord/             # Rails ActiveRecord patterns
-│   │   ├── 001_blog_posts_comments.sql
-│   │   └── 002_multi_tenant_saas.sql
-│   ├── dbt-models/                     # Data warehouse transformations
-│   │   ├── 001_customer_lifetime_value.sql
-│   │   ├── 002_daily_metrics_rollup.sql
-│   │   └── 003_funnel_analysis.sql
-│   ├── postgres-extensions/            # PostgreSQL extensions
-│   │   ├── 001_timescaledb_iot_data.sql
-│   │   └── 002_postgis_geospatial.sql
-│   └── airflow-dags/                   # ETL pipelines
-│       ├── 001_etl_pipeline.sql
-│       └── 002_data_quality_checks.sql
-├── codeberg/
-│   ├── gitea_repository_analytics.sql  # Git forge analytics
-│   └── forum_activity.sql              # Forum/discussion patterns
-└── gitea/                              # (Reserved for future)
+|---- README.md                           # This file
+|---- DISTRIBUTED_PATTERNS.md             # Analysis of distributed query patterns
+|---- SCHEMA_PATTERNS.md                  # Schema statistics and facts
+|---- WORKLOAD_CHARACTERISTICS.md         # Workload analysis
+|---- RESULTS.md                          # Test results and gap analysis
+|---- github/
+|   |---- django-migrations/              # Django ORM patterns
+|   |   |---- 001_initial_user_model.sql
+|   |   `---- 002_ecommerce_orders.sql
+|   |---- rails-activerecord/             # Rails ActiveRecord patterns
+|   |   |---- 001_blog_posts_comments.sql
+|   |   `---- 002_multi_tenant_saas.sql
+|   |---- dbt-models/                     # Data warehouse transformations
+|   |   |---- 001_customer_lifetime_value.sql
+|   |   |---- 002_daily_metrics_rollup.sql
+|   |   `---- 003_funnel_analysis.sql
+|   |---- postgres-extensions/            # PostgreSQL extensions
+|   |   |---- 001_timescaledb_iot_data.sql
+|   |   `---- 002_postgis_geospatial.sql
+|   `---- airflow-dags/                   # ETL pipelines
+|       |---- 001_etl_pipeline.sql
+|       `---- 002_data_quality_checks.sql
+|---- codeberg/
+|   |---- gitea_repository_analytics.sql  # Git forge analytics
+|   `---- forum_activity.sql              # Forum/discussion patterns
+`---- gitea/                              # (Reserved for future)
 ```
 
 ## Query Categories
@@ -116,15 +116,15 @@ tests/realworld-queries/
 ## SQL Features Covered
 
 ### Standard SQL
-- ✅ SELECT, FROM, WHERE, JOIN
-- ✅ GROUP BY, HAVING
-- ✅ ORDER BY, LIMIT, OFFSET
-- ✅ UNION, UNION ALL
-- ✅ Subqueries (scalar, correlated)
-- ✅ CTEs (WITH clause)
-- ✅ Window functions (OVER, PARTITION BY)
-- ✅ CASE expressions
-- ✅ Aggregate functions (COUNT, SUM, AVG, MIN, MAX)
+- [x] SELECT, FROM, WHERE, JOIN
+- [x] GROUP BY, HAVING
+- [x] ORDER BY, LIMIT, OFFSET
+- [x] UNION, UNION ALL
+- [x] Subqueries (scalar, correlated)
+- [x] CTEs (WITH clause)
+- [x] Window functions (OVER, PARTITION BY)
+- [x] CASE expressions
+- [x] Aggregate functions (COUNT, SUM, AVG, MIN, MAX)
 
 ### PostgreSQL Extensions
 - FILTER clause

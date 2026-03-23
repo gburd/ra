@@ -42,9 +42,9 @@ result_customer = gather(customer_col, positions) // [2, 3]
 ### 3. Cache-Conscious Operators
 
 Operators process entire columns that fit in CPU cache:
-- L1 cache: 32-64 KB → ~4K-8K i32 values
-- L2 cache: 256-512 KB → ~32K-64K i32 values
-- L3 cache: 8-32 MB → ~1M-4M i32 values
+- L1 cache: 32-64 KB -> ~4K-8K i32 values
+- L2 cache: 256-512 KB -> ~32K-64K i32 values
+- L3 cache: 8-32 MB -> ~1M-4M i32 values
 
 Sequential access patterns enable excellent prefetching.
 
@@ -92,8 +92,8 @@ Eliminate unused columns early - critical for columnar:
 -- Query only needs 2 columns
 SELECT customer_id, amount FROM orders
 
--- Bad: Read all columns (8 columns × 1M rows)
--- Good: Read only customer_id, amount (2 columns × 1M rows)
+-- Bad: Read all columns (8 columns $\times$ 1M rows)
+-- Good: Read only customer_id, amount (2 columns $\times$ 1M rows)
 -- Savings: 6M column reads avoided
 ```
 
@@ -151,7 +151,7 @@ SELECT * FROM orders WHERE region = 'US'
 -- MonetDB cracks the region column:
 Before: [EU, US, EU, US, EU, US, EU, US]
 After:  [US, US, US, US | EU, EU, EU, EU]
-         ↑ US partition | EU partition ↑
+         up US partition | EU partition up
 
 -- Remembers crack boundaries for future queries
 -- Next query on region='US' only scans US partition
@@ -171,8 +171,8 @@ Cache line (64 bytes = 16 i32 values):
   imprint: [min=100, max=2000, bit_vector=0b1010...]
 
 Query: amount > 1000
-  → Check imprint: max >= 1000? Yes, scan this cache line
-  → Check next imprint: max < 1000? No, skip entire cache line
+  -> Check imprint: max >= 1000? Yes, scan this cache line
+  -> Check next imprint: max < 1000? No, skip entire cache line
 ```
 
 **Benefit:** Fast elimination of irrelevant cache lines.

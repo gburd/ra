@@ -58,8 +58,8 @@ Sort aggregation first sorts input by GROUP BY columns, then sequentially scans 
 ## Relational Algebra
 
 ```
-γ_{group_cols; agg_funcs}(R)
-→ SortAggregation(Sort(R, group_cols), group_cols, agg_funcs)
+$\gamma$_{group_cols; agg_funcs}(R)
+-> SortAggregation(Sort(R, group_cols), group_cols, agg_funcs)
 
 Cost = n log n * (compare + move) + n * (check + update)
 ```

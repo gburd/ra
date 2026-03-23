@@ -54,11 +54,11 @@ exhaustive enumeration through memoization.
 ```algebra
 Given relations {R1, R2, ..., Rn} with join predicates:
 
-For each subset S ⊆ {R1, ..., Rn}, |S| = k:
+For each subset S $\subseteq$ {R1, ..., Rn}, |S| = k:
   For each partition (S1, S2) of S where |S1| < k:
-    cost = cost(S1) + cost(S2) + cost(S1 ⋈ S2)
+    cost = cost(S1) + cost(S2) + cost(S1 $\bowtie$ S2)
     if cost < best_cost(S):
-      best_plan(S) = S1 ⋈ S2
+      best_plan(S) = S1 $\bowtie$ S2
       best_cost(S) = cost
 ```
 
@@ -189,7 +189,7 @@ fn estimated_benefit(
 
 **Assumptions:**
 - Join cost is sum of: left cost + right cost + join processing cost
-- Join processing cost ∝ |left| * |right| * selectivity
+- Join processing cost $\propto$ |left| * |right| * selectivity
 - Optimal substructure: best plan for S uses best plans for subsets
 - No interesting orders (extensions like Volcano consider sort orders)
 
@@ -213,22 +213,22 @@ WHERE c.custkey = o.custkey
   AND n.regionkey = r.regionkey
   AND r.name = 'ASIA';
 
--- Bad order: customer ⋈ orders (large), then ⋈ lineitem (huge)
--- Good order: region σ ⋈ nation (tiny), then ⋈ customer ⋈ orders ⋈ lineitem
+-- Bad order: customer $\bowtie$ orders (large), then $\bowtie$ lineitem (huge)
+-- Good order: region $\sigma$ $\bowtie$ nation (tiny), then $\bowtie$ customer $\bowtie$ orders $\bowtie$ lineitem
 -- DP finds optimal order considering cardinalities
 ```
 
 ### Positive: Chain join with varying selectivities
 
 ```sql
--- A ⋈ B ⋈ C ⋈ D where selectivities vary
+-- A $\bowtie$ B $\bowtie$ C $\bowtie$ D where selectivities vary
 SELECT *
 FROM t1, t2, t3, t4
 WHERE t1.id = t2.t1_id  -- selectivity 0.1
   AND t2.id = t3.t2_id  -- selectivity 0.5
   AND t3.id = t4.t3_id; -- selectivity 0.01
 
--- Optimal: (t1 ⋈ t2) gives small intermediate (10% of t1)
+-- Optimal: (t1 $\bowtie$ t2) gives small intermediate (10% of t1)
 --          Join with t3 next (50% selectivity)
 --          Finally t4 (1% selectivity on already-reduced set)
 ```

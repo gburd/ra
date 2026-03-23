@@ -28,9 +28,9 @@ GROUP BY n.name
 
 **Data sizes**:
 - nation: 25 rows
-- customer: 150K rows → 6K rows after filter
-- orders: 1.5M rows → 90K rows after join
-- lineitem: 6M rows → 360K rows after join
+- customer: 150K rows -> 6K rows after filter
+- orders: 1.5M rows -> 90K rows after join
+- lineitem: 6M rows -> 360K rows after join
 
 **Current execution** (no runtime filters):
 1. Scan nation (25 rows), filter to 'GERMANY' (1 row)
@@ -41,13 +41,13 @@ GROUP BY n.name
 **Total I/O**: 7.65M rows read
 
 **With runtime filter pushdown**:
-1. Scan nation, filter to 'GERMANY' → 1 row
+1. Scan nation, filter to 'GERMANY' -> 1 row
 2. **Build bloom filter BF1 from nationkey (1 value)**
-3. **Push BF1 to customer scan** → scan 150K rows, filter to 6K (same as before)
+3. **Push BF1 to customer scan** -> scan 150K rows, filter to 6K (same as before)
 4. **Build bloom filter BF2 from custkey (6K values)**
-5. **Push BF2 to orders scan** → scan only ~100K rows (filtered), output 90K
+5. **Push BF2 to orders scan** -> scan only ~100K rows (filtered), output 90K
 6. **Build bloom filter BF3 from orderkey (90K values)**
-7. **Push BF3 to lineitem scan** → scan only ~400K rows (filtered), output 360K
+7. **Push BF3 to lineitem scan** -> scan only ~400K rows (filtered), output 360K
 
 **Total I/O**: ~650K rows read (11x reduction!)
 
@@ -107,10 +107,10 @@ WHERE o.orderdate = $1;  -- Unknown at plan time
 **Static filter**: Can't create bloom filter (don't know which orderdates)
 
 **Runtime filter**:
-1. Execute: `SELECT orderkey FROM orders WHERE orderdate = '2023-01-15'` → 1000 rows
+1. Execute: `SELECT orderkey FROM orders WHERE orderdate = '2023-01-15'` -> 1000 rows
 2. Build bloom filter from 1000 orderkeys
 3. Push to lineitem scan
-4. Scan lineitem (6M rows) with filter → only ~6K rows read
+4. Scan lineitem (6M rows) with filter -> only ~6K rows read
 
 **Speedup**: 1000x reduction in lineitem scan!
 
@@ -517,14 +517,14 @@ pattern:
 - **Already selective joins**: Minimal benefit (< 2x)
 
 **Overhead**:
-- Filter creation: ~0.5 μs per key (100K keys = 50 ms)
+- Filter creation: ~0.5 $\mu$s per key (100K keys = 50 ms)
 - Filter broadcast: ~1 ms per MB (10 MB filter = 10 ms)
-- Filter check: ~0.05 μs per tuple (vectorized)
+- Filter check: ~0.05 $\mu$s per tuple (vectorized)
 - Memory: ~10-15 bits per key (100K keys = 120 KB)
 
 **Trade-offs**:
-- **Best case**: Small dimension, large fact, selective join → 100x speedup
-- **Worst case**: Large dimension or non-selective join → slight overhead
+- **Best case**: Small dimension, large fact, selective join -> 100x speedup
+- **Worst case**: Large dimension or non-selective join -> slight overhead
 - **Solution**: Cost-based decision, disable if not beneficial
 
 ## Drawbacks
@@ -708,7 +708,7 @@ pattern:
 **Learned Filter Sizing**:
 - Track filter effectiveness across queries
 - Learn optimal FPR for different query patterns
-- Auto-tune: (query pattern, data skew) → optimal FPR
+- Auto-tune: (query pattern, data skew) -> optimal FPR
 
 **Cross-Query Filter Reuse**:
 - Cache runtime filters for common query patterns

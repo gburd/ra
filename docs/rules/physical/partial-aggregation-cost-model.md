@@ -188,7 +188,7 @@ SELECT country, count(*), sum(revenue)
 FROM sales  -- 100M rows
 GROUP BY country;  -- ~200 countries
 
--- Reduction ratio: 200/100M ≈ 0.000002
+-- Reduction ratio: 200/100M $\approx$ 0.000002
 -- Partial aggregation: each node reduces 100M rows to 200 groups
 -- Network savings: ~99.9998%
 ```

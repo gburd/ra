@@ -39,9 +39,9 @@ Apply rewrite rules until fixpoint: E_saturated
 Extract optimal plan: P_opt = extract_best(E_saturated, cost_model)
 
 Example rewrite rules in E-graph:
-- Filter pushdown: (filter p (join R S)) ≡ (join (filter p R) S)
-- Join commutativity: (join R S) ≡ (join S R)
-- Predicate merging: (filter p1 (filter p2 R)) ≡ (filter (and p1 p2) R)
+- Filter pushdown: (filter p (join R S)) $\equiv$ (join (filter p R) S)
+- Join commutativity: (join R S) $\equiv$ (join S R)
+- Predicate merging: (filter p1 (filter p2 R)) $\equiv$ (filter (and p1 p2) R)
 ```
 
 ## Implementation
@@ -206,11 +206,11 @@ WHERE R.x > 10 AND S.y < 20 AND T.z = 5;
 -- 1. Push R.x > 10 down to R
 -- 2. Push S.y < 20 down to S
 -- 3. Push T.z = 5 down to T
--- 4. Reorder joins: (R ⨝ S) ⨝ T vs R ⨝ (S ⨝ T) vs (T ⨝ S) ⨝ R
+-- 4. Reorder joins: (R $\bowtie$ S) $\bowtie$ T vs R $\bowtie$ (S $\bowtie$ T) vs (T $\bowtie$ S) $\bowtie$ R
 -- 5. Merge filter predicates
 
 -- Best plan extracted:
--- (filter[R.x>10](R) ⨝ filter[S.y<20](S)) ⨝ filter[T.z=5](T)
+-- (filter[R.x>10](R) $\bowtie$ filter[S.y<20](S)) $\bowtie$ filter[T.z=5](T)
 ```
 
 ### Positive: Predicate simplification and merging

@@ -15,16 +15,16 @@ WHERE o.amount > 1000;
 
 ```
 Project [c.name, c.email]
-  └─ Filter [o.amount > 1000]
-      └─ Join [c.id = o.customer_id]
-          ├─ Scan [customers] → 10,000 rows
-          └─ Scan [orders] → 100,000 rows
+  `--- Filter [o.amount > 1000]
+      `--- Join [c.id = o.customer_id]
+          |--- Scan [customers] -> 10,000 rows
+          `--- Scan [orders] -> 100,000 rows
 ```
 
 **Cost Analysis:**
 - Scan customers: 10,000 rows
 - Scan orders: 100,000 rows
-- Join: 10,000 × 100,000 = 1,000,000,000 tuple comparisons
+- Join: 10,000 $\times$ 100,000 = 1,000,000,000 tuple comparisons
 - Filter: 1,000,000 result rows (assuming 1% join selectivity)
 - Project: 1,000,000 rows
 
@@ -40,10 +40,10 @@ The filter `o.amount > 1000` only references the `orders` table, so we can push 
 
 ```
 Project [c.name, c.email]
-  └─ Join [c.id = o.customer_id]
-      ├─ Scan [customers] → 10,000 rows
-      └─ Filter [o.amount > 1000]
-          └─ Scan [orders] → 100,000 rows
+  `--- Join [c.id = o.customer_id]
+      |--- Scan [customers] -> 10,000 rows
+      `--- Filter [o.amount > 1000]
+          `--- Scan [orders] -> 100,000 rows
 ```
 
 Now the filter is applied immediately after scanning orders.
@@ -56,9 +56,9 @@ We can push the filter into the scan itself (using an index or storage-level fil
 
 ```
 Project [c.name, c.email]
-  └─ Join [c.id = o.customer_id]
-      ├─ Scan [customers] → 10,000 rows
-      └─ Scan [orders WHERE amount > 1000] → 5,000 rows
+  `--- Join [c.id = o.customer_id]
+      |--- Scan [customers] -> 10,000 rows
+      `--- Scan [orders WHERE amount > 1000] -> 5,000 rows
 ```
 
 ### Step 3: Column Pruning
@@ -69,28 +69,28 @@ We only need `customer_id` and `amount` from orders, not all columns:
 
 ```
 Project [c.name, c.email]
-  └─ Join [c.id = o.customer_id]
-      ├─ Project [c.id, c.name, c.email]
-      │   └─ Scan [customers] → 10,000 rows
-      └─ Project [o.customer_id]
-          └─ Scan [orders WHERE amount > 1000] → 5,000 rows
+  `--- Join [c.id = o.customer_id]
+      |--- Project [c.id, c.name, c.email]
+      |   `--- Scan [customers] -> 10,000 rows
+      `--- Project [o.customer_id]
+          `--- Scan [orders WHERE amount > 1000] -> 5,000 rows
 ```
 
 ## Final Optimized Plan
 
 ```
 Project [c.name, c.email]
-  └─ Join [c.id = o.customer_id]
-      ├─ Project [c.id, c.name, c.email]
-      │   └─ Scan [customers] → 10,000 rows
-      └─ Project [o.customer_id]
-          └─ Scan [orders WHERE amount > 1000] → 5,000 rows
+  `--- Join [c.id = o.customer_id]
+      |--- Project [c.id, c.name, c.email]
+      |   `--- Scan [customers] -> 10,000 rows
+      `--- Project [o.customer_id]
+          `--- Scan [orders WHERE amount > 1000] -> 5,000 rows
 ```
 
 **Cost Analysis:**
 - Scan orders (filtered): 5,000 rows (90% filtered out)
 - Scan customers: 10,000 rows
-- Join: 10,000 × 5,000 = 50,000,000 tuple comparisons
+- Join: 10,000 $\times$ 5,000 = 50,000,000 tuple comparisons
 - Project: ~5,000 result rows (assuming 50% customers have high-value orders)
 
 **Estimated Cost:** ~50,015,000 operations

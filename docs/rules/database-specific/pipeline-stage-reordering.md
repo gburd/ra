@@ -34,16 +34,16 @@ $lookup reduces join cardinality dramatically.
 
 ```algebra
 MongoDB pipeline stages map to relational operators:
-$match → σ (selection/filter)
-$project → π (projection)
-$lookup → ⋈ (join)
-$group → γ (aggregation)
-$unwind → unnest
-$limit → LIMIT
+$match -> $\sigma$ (selection/filter)
+$project -> $\pi$ (projection)
+$lookup -> $\bowtie$ (join)
+$group -> $\gamma$ (aggregation)
+$unwind -> unnest
+$limit -> LIMIT
 
 Reordering:
-[$lookup, $match] → [$match_pushed, $lookup, $match_remaining]
-[$group, $limit] → [$limit_pushed, $group, $limit]
+[$lookup, $match] -> [$match_pushed, $lookup, $match_remaining]
+[$group, $limit] -> [$limit_pushed, $group, $limit]
 ```
 
 ## Implementation
@@ -133,10 +133,10 @@ fn estimated_benefit(
 ```
 
 **Assumptions:**
-- $match cost: ~1μs per document
+- $match cost: ~1$\mu$s per document
 - $lookup cost: ~1ms per document (depends on index)
-- $group cost: ~10μs per document
-- $unwind cost: ~5μs per document per array element
+- $group cost: ~10$\mu$s per document
+- $unwind cost: ~5$\mu$s per document per array element
 
 **Typical benefit**: 30% to 5x for selective $match before expensive stages.
 

@@ -27,7 +27,7 @@ Removes DISTINCT when the selected columns include a unique key or primary key, 
 ```algebra
 distinct(project[cols](R))
   -> project[cols](R)
-  where unique_key(R) ⊆ cols
+  where unique_key(R) $\subseteq$ cols
 ```
 
 ## Implementation

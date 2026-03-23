@@ -61,7 +61,7 @@ Ra's optimizer spends **95.8% of time** in e-graph equality saturation, running 
 
 **Branch-and-Bound Pruning**:
 - Tracks best plan cost found so far
-- Prunes search branches with cost > best_cost × threshold
+- Prunes search branches with cost > best_cost $\times$ threshold
 - Typical threshold: 1.5x (prune plans >50% worse than best)
 
 **Importance Pruning**:
@@ -303,7 +303,7 @@ impl TimeoutConfig {
 3. Update `Optimizer::optimize()` to use adaptive limits
 4. Test with JOB benchmark
 
-**Expected Impact**: 2.5x speedup (770ms → ~300ms for q13a)
+**Expected Impact**: 2.5x speedup (770ms -> ~300ms for q13a)
 
 ### Phase 2: Early Termination (Task #244)
 
@@ -313,7 +313,7 @@ impl TimeoutConfig {
 3. Alternative: Check convergence after every 3 iterations
 4. Test with all 5 JOB queries
 
-**Expected Impact**: Additional 1.5x speedup (~300ms → ~200ms)
+**Expected Impact**: Additional 1.5x speedup (~300ms -> ~200ms)
 
 ### Phase 3: Timeout Mechanism (Task #242)
 
@@ -380,13 +380,13 @@ impl TimeoutConfig {
 **Conservative Estimate**:
 - Adaptive limits: 2.5x
 - Early termination: 1.5x
-- **Total**: 2.5 × 1.5 = **3.75x speedup**
+- **Total**: 2.5 $\times$ 1.5 = **3.75x speedup**
 
 **Optimistic Estimate** (with cost pruning):
 - Adaptive limits: 2.5x
 - Early termination: 1.5x
 - Cost pruning: 2x
-- **Total**: 2.5 × 1.5 × 2 = **7.5x speedup**
+- **Total**: 2.5 $\times$ 1.5 $\times$ 2 = **7.5x speedup**
 
 ### Target Achievement
 
@@ -394,7 +394,7 @@ impl TimeoutConfig {
 **With Phase 1-2**: 770ms / 3.75 = **205ms**
 **With Phase 1-3 + pruning**: 770ms / 7.5 = **103ms**
 
-**Target**: <100ms ✅ Achievable with all phases
+**Target**: <100ms [x] Achievable with all phases
 
 ---
 
@@ -624,22 +624,22 @@ let optimizer = Optimizer::with_config(config);
 
 ### Must Have (Phase 1-2)
 
-- ✅ JOB q13a (7 tables): <200ms (currently 770ms)
-- ✅ Simple queries (2-4 tables): <50ms (currently ~1000ms)
-- ✅ Plan quality: Within 5% of exhaustive search
-- ✅ All 113 JOB queries produce correct results
+- [x] JOB q13a (7 tables): <200ms (currently 770ms)
+- [x] Simple queries (2-4 tables): <50ms (currently ~1000ms)
+- [x] Plan quality: Within 5% of exhaustive search
+- [x] All 113 JOB queries produce correct results
 
 ### Should Have (Phase 3)
 
-- ✅ Timeout prevents hangs (no query >500ms)
-- ✅ Metrics logged for analysis
-- ✅ Configurable via OptimizerConfig
+- [x] Timeout prevents hangs (no query >500ms)
+- [x] Metrics logged for analysis
+- [x] Configurable via OptimizerConfig
 
 ### Nice to Have (Phase 4)
 
-- ✅ Cost-based pruning reduces search space 60%+
-- ✅ Achieve target <100ms for medium queries
-- ✅ Adaptive strategy matches PostgreSQL performance
+- [x] Cost-based pruning reduces search space 60%+
+- [x] Achieve target <100ms for medium queries
+- [x] Adaptive strategy matches PostgreSQL performance
 
 ---
 
@@ -670,7 +670,7 @@ E-graph iterations:
 - Iterations 19-29: Wasted (0 unions, no progress)
 - Each late iteration: ~45ms
 
-Waste: 11 iterations × 45ms = 495ms
+Waste: 11 iterations $\times$ 45ms = 495ms
 ```
 
 **Conclusion**: Fixed 30-iteration limit is the bottleneck.

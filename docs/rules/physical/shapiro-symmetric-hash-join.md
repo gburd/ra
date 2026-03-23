@@ -51,14 +51,14 @@ response time and enabling better parallelism.
 ```algebra
 Traditional hash join (build-probe):
 1. Build phase: Insert all of R into hash table H_R
-2. Probe phase: For each s ∈ S, probe H_R for matches
+2. Probe phase: For each s $\in$ S, probe H_R for matches
 
 Symmetric hash join:
 1. Maintain H_R and H_S (hash tables on both sides)
-2. For each arriving r ∈ R:
+2. For each arriving r $\in$ R:
      - Probe H_S for matches, output results
      - Insert r into H_R
-3. For each arriving s ∈ S:
+3. For each arriving s $\in$ S:
      - Probe H_R for matches, output results
      - Insert s into H_S
 ```

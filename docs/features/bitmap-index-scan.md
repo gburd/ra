@@ -80,7 +80,7 @@ pub fn bitmap_heap_scan_cost(&self, table: &str, combined_selectivity: f64) -> f
 ```rust
 pub fn full_bitmap_scan_cost(&self, table: &str, selectivities: &[f64]) -> f64
 ```
-Total cost = Σ(index costs) + combine cost + heap cost
+Total cost = $\Sigma$(index costs) + combine cost + heap cost
 
 ## Optimization Rules
 

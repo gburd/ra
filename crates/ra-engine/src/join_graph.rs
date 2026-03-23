@@ -409,7 +409,7 @@ mod tests {
         assert_eq!(stats.edge_count, 2);
         assert_eq!(stats.total_predicates, 2);
 
-        // Density = 2 / (3 * 2 / 2) = 2/3 ≈ 0.67
+        // Density = 2 / (3 * 2 / 2) = 2/3 ~= 0.67
         assert!((stats.density() - 0.666).abs() < 0.01);
     }
 

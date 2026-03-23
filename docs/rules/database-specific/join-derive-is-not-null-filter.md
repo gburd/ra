@@ -33,8 +33,8 @@ use NOT NULL indexes, and reduce join cardinality early.
 ## Relational Algebra
 
 ```algebra
-R ⨝_{R.a = S.b} S ->
-  σ_{R.a IS NOT NULL}(R) ⨝_{R.a = S.b} σ_{S.b IS NOT NULL}(S)
+R $\bowtie$_{R.a = S.b} S ->
+  $\sigma$_{R.a IS NOT NULL}(R) $\bowtie$_{R.a = S.b} $\sigma$_{S.b IS NOT NULL}(S)
 ```
 
 ## Implementation
@@ -101,7 +101,7 @@ fn estimated_benefit(
 
     // 2. Join cost is typically O(n log m) for hash join
     //    Reducing n by null_percentage saves:
-    let join_cost_per_row = 0.00001; // 10μs per row
+    let join_cost_per_row = 0.00001; // 10$\mu$s per row
     let join_savings = rows_eliminated * join_cost_per_row;
 
     // 3. Enable index usage if column has NOT NULL index

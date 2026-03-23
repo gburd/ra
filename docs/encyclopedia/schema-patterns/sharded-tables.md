@@ -116,7 +116,7 @@ Only query shards where predicate $p$ might match.
 -- Only queries 1 of 16 shards
 SELECT * FROM customers
 WHERE customer_id = 12345;
--- shard_id = hash(12345) % 16 = 7 → query only shard 7
+-- shard_id = hash(12345) % 16 = 7 -> query only shard 7
 ```
 
 ### Cross-Shard Joins
@@ -245,13 +245,13 @@ WHERE customer_id = 12345;
 
 ```sql
 -- customers: sharded by customer_id (hash)
--- orders: sharded by customer_id (same hash) ✓
--- products: sharded by product_id (different hash) ✗
+-- orders: sharded by customer_id (same hash) [x]
+-- products: sharded by product_id (different hash) [FAIL]
 
 SELECT c.name, p.product_name, o.order_date
 FROM customers c
-JOIN orders o ON c.customer_id = o.customer_id  -- ✓ Co-located
-JOIN products p ON o.product_id = p.product_id  -- ✗ Cross-shard
+JOIN orders o ON c.customer_id = o.customer_id  -- [x] Co-located
+JOIN products p ON o.product_id = p.product_id  -- [FAIL] Cross-shard
 ```
 
 **Solution:**
@@ -307,7 +307,7 @@ new_shard = hash(key) % 32
 Use more virtual shards than physical:
 
 ```python
-# 256 virtual shards → 16 physical shards
+# 256 virtual shards -> 16 physical shards
 virtual_shard = hash(key) % 256
 physical_shard = virtual_shard_mapping[virtual_shard]
 
@@ -355,7 +355,7 @@ $$
 
 ## Common Pitfalls
 
-### ❌ Wrong Shard Key
+### [FAIL] Wrong Shard Key
 
 ```sql
 -- Sharded by customer_id, but queries filter on order_date
@@ -365,7 +365,7 @@ SELECT * FROM orders WHERE order_date >= '2024-01-01';
 
 **Fix:** Shard by most commonly filtered column, or use composite sharding.
 
-### ❌ Hotspot Shards
+### [FAIL] Hotspot Shards
 
 ```sql
 -- Celebrity user with 10M followers on one shard
@@ -374,7 +374,7 @@ SELECT * FROM orders WHERE order_date >= '2024-01-01';
 
 **Fix:** Use sub-sharding or split hot keys.
 
-### ❌ Cross-Shard Transactions
+### [FAIL] Cross-Shard Transactions
 
 ```sql
 -- Transaction spanning multiple shards

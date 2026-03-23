@@ -53,7 +53,7 @@ aggregate[groups, aggs](scan[T])
        aggregate[groups, aggs](scan[T, partition_1]),
        aggregate[groups, aggs](scan[T, partition_2]),
        ...)
-     where partition_key ⊆ groups
+     where partition_key $\subseteq$ groups
 ```
 
 ## Implementation (egg rewrite rules)

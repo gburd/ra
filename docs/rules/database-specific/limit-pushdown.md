@@ -34,9 +34,9 @@ Trino pushes LIMIT through various operators (joins, aggregations, unions) to re
 ## Relational Algebra
 
 ```
-LIMIT_n(R ∪ S) → LIMIT_n(LIMIT_n(R) ∪ LIMIT_n(S))
-LIMIT_n(Sort(R)) → TopN_n(R)
-LIMIT_n(R ⋉ S) → LIMIT_n(R) ⋉ S  // Semi-join probe side
+LIMIT_n(R $\cup$ S) -> LIMIT_n(LIMIT_n(R) $\cup$ LIMIT_n(S))
+LIMIT_n(Sort(R)) -> TopN_n(R)
+LIMIT_n(R $\ltimes$ S) -> LIMIT_n(R) $\ltimes$ S  // Semi-join probe side
 ```
 
 ## Implementation Pattern

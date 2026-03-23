@@ -30,7 +30,7 @@ overhead and simplifies the plan for subsequent optimizations.
 ## Relational Algebra
 
 ```algebra
-σ_p1(σ_p2(R)) -> σ_(p1 ∧ p2)(R)
+$\sigma$_p1($\sigma$_p2(R)) -> $\sigma$_(p1 $\land$ p2)(R)
 ```
 
 ## Implementation

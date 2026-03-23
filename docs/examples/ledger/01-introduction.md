@@ -101,14 +101,14 @@ GROUP BY je.entry_date, je.description;
 
 ## Interactive Elements
 
-### 🎮 Try It Yourself
+###  Try It Yourself
 
 Modify the query above to:
 1. Look at last week instead of yesterday
 2. Include both sales (4010) and service revenue (4020)
 3. Add the entry_number to the output
 
-### 📊 Statistics Impact
+###  Statistics Impact
 
 ```statistics-editor
 {
@@ -127,7 +127,7 @@ Modify the query above to:
 
 Toggle the `has_account_index` to see how the plan changes!
 
-### 🔧 Facts Configuration
+###  Facts Configuration
 
 ```facts-editor
 {
@@ -202,4 +202,4 @@ Now that you understand the basics, let's explore Alice's schema in detail. In [
 
 ---
 
-*💡 Remember: The goal isn't to memorize rules, but to understand the reasoning. RA shows you the "why" behind every optimization decision.*
+* Remember: The goal isn't to memorize rules, but to understand the reasoning. RA shows you the "why" behind every optimization decision.*

@@ -60,7 +60,7 @@ fn benefit(table_rows: u64) -> f64 {
 }
 ```
 
-**Typical benefit**: 90-99% (O(N) → O(1))
+**Typical benefit**: 90-99% (O(N) -> O(1))
 
 ## Test Cases
 

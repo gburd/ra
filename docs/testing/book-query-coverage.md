@@ -68,18 +68,18 @@ The query collection draws patterns from these authoritative database resources:
 
 | Category | Count | Percentage | Status |
 |----------|-------|------------|--------|
-| Simple SELECT/WHERE/ORDER BY | 61 | 33.7% | ✓ Full Support |
-| Window Functions | 28 | 15.5% | ✓ Full Support |
-| Aggregations (GROUP BY, HAVING) | 25 | 13.8% | ✓ Full Support |
-| Common Table Expressions (CTEs) | 22 | 12.2% | ✓ Full Support |
-| Set Operations (UNION, INTERSECT) | 16 | 8.8% | ⚠ 94% Support |
-| Subqueries | 14 | 7.7% | ✓ Full Support |
-| JOINs (all types) | 11 | 6.1% | ✓ Full Support |
-| Recursive CTEs | 4 | 2.2% | ✓ Full Support |
+| Simple SELECT/WHERE/ORDER BY | 61 | 33.7% | [x] Full Support |
+| Window Functions | 28 | 15.5% | [x] Full Support |
+| Aggregations (GROUP BY, HAVING) | 25 | 13.8% | [x] Full Support |
+| Common Table Expressions (CTEs) | 22 | 12.2% | [x] Full Support |
+| Set Operations (UNION, INTERSECT) | 16 | 8.8% | WARNING: 94% Support |
+| Subqueries | 14 | 7.7% | [x] Full Support |
+| JOINs (all types) | 11 | 6.1% | [x] Full Support |
+| Recursive CTEs | 4 | 2.2% | [x] Full Support |
 
 ## Feature Coverage Analysis
 
-### ✓ Full Support (100%)
+### [x] Full Support (100%)
 
 #### Basic Queries
 - SELECT with column list
@@ -142,58 +142,58 @@ The query collection draws patterns from these authoritative database resources:
 - Organizational depth/path tracking
 - Bills of materials patterns
 
-### ⚠ Partial Support (94%)
+### WARNING: Partial Support (94%)
 
 #### Set Operations
-- UNION (removes duplicates) ✓
-- UNION ALL (keeps duplicates) ✓
-- INTERSECT ✓
-- EXCEPT/MINUS ✓
-- Set operations with ORDER BY ✓
-- Multiple UNIONs ✓
-- Parenthesized set operations ✗ (1 failure)
+- UNION (removes duplicates) [x]
+- UNION ALL (keeps duplicates) [x]
+- INTERSECT [x]
+- EXCEPT/MINUS [x]
+- Set operations with ORDER BY [x]
+- Multiple UNIONs [x]
+- Parenthesized set operations [FAIL] (1 failure)
 
 **Known Issue**: Query starting with parenthesized set expression fails simple validation.
 
 ### Advanced Features
 
 #### Performance Patterns (100%)
-- Index-friendly range queries ✓
-- Multi-column index usage ✓
-- Covering index patterns ✓
-- Index-only scans ✓
-- Partial index usage ✓
-- Batch processing patterns ✓
-- Anti-joins with NOT EXISTS ✓
-- LATERAL joins ✓
+- Index-friendly range queries [x]
+- Multi-column index usage [x]
+- Covering index patterns [x]
+- Index-only scans [x]
+- Partial index usage [x]
+- Batch processing patterns [x]
+- Anti-joins with NOT EXISTS [x]
+- LATERAL joins [x]
 
 #### Analytical Patterns (100%)
-- Running totals ✓
-- Year-over-year comparisons ✓
-- Cohort analysis ✓
-- Moving averages ✓
-- Percentile calculations ✓
-- RFM analysis ✓
-- Gap and island problems ✓
-- Funnel analysis ✓
-- Session windowing ✓
-- Top-N per group ✓
-- Cumulative distributions ✓
-- Market basket analysis ✓
-- Churn analysis ✓
+- Running totals [x]
+- Year-over-year comparisons [x]
+- Cohort analysis [x]
+- Moving averages [x]
+- Percentile calculations [x]
+- RFM analysis [x]
+- Gap and island problems [x]
+- Funnel analysis [x]
+- Session windowing [x]
+- Top-N per group [x]
+- Cumulative distributions [x]
+- Market basket analysis [x]
+- Churn analysis [x]
 
 #### SQL Cookbook Patterns (100%)
-- Pivoting (rows to columns) ✓
-- Unpivoting (columns to rows) ✓
-- Finding duplicates ✓
-- Running totals by group ✓
-- Finding max/min per group ✓
-- Missing sequence detection ✓
-- Ranking with ties ✓
-- Overlapping time ranges ✓
-- Comparing adjacent rows ✓
-- Median calculation ✓
-- First/last value per group ✓
+- Pivoting (rows to columns) [x]
+- Unpivoting (columns to rows) [x]
+- Finding duplicates [x]
+- Running totals by group [x]
+- Finding max/min per group [x]
+- Missing sequence detection [x]
+- Ranking with ties [x]
+- Overlapping time ranges [x]
+- Comparing adjacent rows [x]
+- Median calculation [x]
+- First/last value per group [x]
 
 ## Gap Analysis
 
@@ -249,7 +249,7 @@ These features are commonly found in modern SQL databases but were not included 
 ## Recommendations
 
 ### Priority 1: Fix Known Issues
-1. ✅ Support parenthesized set operation expressions
+1. [x] Support parenthesized set operation expressions
 2. Add test case to regression suite
 
 ### Priority 2: Expand Core SQL Support

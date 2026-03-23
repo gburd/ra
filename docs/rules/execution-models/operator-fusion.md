@@ -9,7 +9,7 @@
 - **Version:** "1.0.0"
 - **Databases:** flink, spark-streaming, dataflow, risingwave
 - **Tags:** streaming, operator-fusion, pipeline, compilation, performance
-- **Authors:** "Hirzel, Soulé, Schneider, Gedik, Grimm"
+- **Authors:** "Hirzel, Soule, Schneider, Gedik, Grimm"
 
 
 # Streaming Operator Fusion

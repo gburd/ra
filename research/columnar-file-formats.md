@@ -25,25 +25,25 @@ This document analyzes file format capabilities and proposes how RA should model
 ### Architecture
 
 ```
-┌────────────────────────────────┐
-│  Parquet File                   │
-├────────────────────────────────┤
-│  Row Group 1 (128MB)           │
-│    ├─ Column Chunk: col_a      │
-│    │    ├─ Data Pages          │
-│    │    └─ Metadata (min/max)  │
-│    ├─ Column Chunk: col_b      │
-│    └─ ...                       │
-├────────────────────────────────┤
-│  Row Group 2 (128MB)           │
-│    └─ ...                       │
-├────────────────────────────────┤
-│  Footer (metadata):            │
-│    ├─ Schema                   │
-│    ├─ Row Group Locations      │
-│    ├─ Column Statistics        │
-│    └─ Bloom Filters (optional) │
-└────────────────────────────────┘
+,----------------------------------,
+|  Parquet File                   |
+|-----------------------------------|
+|  Row Group 1 (128MB)           |
+|    |--- Column Chunk: col_a      |
+|    |    |--- Data Pages          |
+|    |    `--- Metadata (min/max)  |
+|    |--- Column Chunk: col_b      |
+|    `--- ...                       |
+|-----------------------------------|
+|  Row Group 2 (128MB)           |
+|    `--- ...                       |
+|-----------------------------------|
+|  Footer (metadata):            |
+|    |--- Schema                   |
+|    |--- Row Group Locations      |
+|    |--- Column Statistics        |
+|    `--- Bloom Filters (optional) |
+`-----------------------------------'
 ```
 
 ### Key Metadata
@@ -60,11 +60,11 @@ struct ColumnStats {
 }
 ```
 
-**Example**: Query `WHERE age > 50` on row group with `min=25, max=45` → skip entire row group (128MB) without reading.
+**Example**: Query `WHERE age > 50` on row group with `min=25, max=45` -> skip entire row group (128MB) without reading.
 
 #### Bloom Filters (optional, per column)
 - **Purpose**: Fast set membership test (false positive rate ~1%)
-- **Use case**: `WHERE email = 'john@example.com'` → check bloom filter before reading row group
+- **Use case**: `WHERE email = 'john@example.com'` -> check bloom filter before reading row group
 - **Size**: ~1-10KB per column per row group (configurable)
 - **Speed**: O(1) membership test vs O(n) scan
 
@@ -111,7 +111,7 @@ SELECT user_id, name FROM users;
 **RA Integration**:
 ```rust
 // Rewrite rule
-project[C1, C2](scan[parquet_file]) →
+project[C1, C2](scan[parquet_file]) ->
   scan[parquet_file, columns={C1, C2}]
 ```
 
@@ -125,10 +125,10 @@ project[C1, C2](scan[parquet_file]) →
 SELECT * FROM sales WHERE date = '2023-01-15';
 
 -- File has 100 row groups
--- Row group 1: min(date)='2023-01-01', max(date)='2023-01-10' → SKIP
--- Row group 2: min(date)='2023-01-11', max(date)='2023-01-20' → READ
+-- Row group 1: min(date)='2023-01-01', max(date)='2023-01-10' -> SKIP
+-- Row group 2: min(date)='2023-01-11', max(date)='2023-01-20' -> READ
 -- ...
--- Skip 95/100 row groups → 95% less data read
+-- Skip 95/100 row groups -> 95% less data read
 ```
 
 **Speedup**: 10-100x fewer rows scanned
@@ -136,7 +136,7 @@ SELECT * FROM sales WHERE date = '2023-01-15';
 **RA Integration**:
 ```rust
 // Rewrite rule
-filter[P](scan[parquet_file]) →
+filter[P](scan[parquet_file]) ->
   scan[parquet_file, predicate_pushdown=P]
   WHERE applicable_to_stats(P)
 ```
@@ -164,8 +164,8 @@ filter[P](scan[parquet_file]) →
 ```sql
 SELECT name, email FROM users WHERE age > 50;
 
--- Traditional: Read (id, name, email, age, ...) → filter → project
--- Late materialization: Read (age) → filter → read (name, email) for survivors
+-- Traditional: Read (id, name, email, age, ...) -> filter -> project
+-- Late materialization: Read (age) -> filter -> read (name, email) for survivors
 ```
 
 **Speedup**: 2-5x less memory bandwidth
@@ -208,24 +208,24 @@ SELECT * FROM events WHERE country IN ('US', 'UK', 'CA');
 ### Architecture
 
 ```
-┌────────────────────────────────┐
-│  ORC File                       │
-├────────────────────────────────┤
-│  Stripe 1 (64-128MB)           │
-│    ├─ Index Data (statistics)  │
-│    ├─ Row Data (compressed)    │
-│    └─ Stripe Footer            │
-├────────────────────────────────┤
-│  Stripe 2                       │
-│    └─ ...                       │
-├────────────────────────────────┤
-│  File Footer:                  │
-│    ├─ Schema (Protocol Buffers)│
-│    ├─ Stripe Locations         │
-│    ├─ Column Statistics        │
-│    ├─ Bloom Filters (optional) │
-│    └─ User Metadata            │
-└────────────────────────────────┘
+,----------------------------------,
+|  ORC File                       |
+|-----------------------------------|
+|  Stripe 1 (64-128MB)           |
+|    |--- Index Data (statistics)  |
+|    |--- Row Data (compressed)    |
+|    `--- Stripe Footer            |
+|-----------------------------------|
+|  Stripe 2                       |
+|    `--- ...                       |
+|-----------------------------------|
+|  File Footer:                  |
+|    |--- Schema (Protocol Buffers)|
+|    |--- Stripe Locations         |
+|    |--- Column Statistics        |
+|    |--- Bloom Filters (optional) |
+|    `--- User Metadata            |
+`-----------------------------------'
 ```
 
 ### Key Differences from Parquet
@@ -254,7 +254,7 @@ Stripe (100M rows):
   Rows 90000-99999: min(age)=65, max(age)=85
 
 Query: WHERE age > 60
-→ Skip first 8 index groups, only scan last 20K rows
+-> Skip first 8 index groups, only scan last 20K rows
 ```
 
 **Speedup**: 5x better than Parquet for range queries
@@ -277,23 +277,23 @@ ORC files can be part of ACID tables, with delta files for updates/deletes.
 ### Architecture
 
 ```
-┌────────────────────────────────┐
-│  Avro File (Row-Oriented)       │
-├────────────────────────────────┤
-│  Header:                       │
-│    ├─ Magic Bytes              │
-│    ├─ Schema (JSON)            │
-│    └─ Codec (compression)      │
-├────────────────────────────────┤
-│  Data Block 1 (compressed)     │
-│    ├─ Row 1                    │
-│    ├─ Row 2                    │
-│    └─ ...                       │
-│  Sync Marker                   │
-├────────────────────────────────┤
-│  Data Block 2                   │
-│    └─ ...                       │
-└────────────────────────────────┘
+,----------------------------------,
+|  Avro File (Row-Oriented)       |
+|-----------------------------------|
+|  Header:                       |
+|    |--- Magic Bytes              |
+|    |--- Schema (JSON)            |
+|    `--- Codec (compression)      |
+|-----------------------------------|
+|  Data Block 1 (compressed)     |
+|    |--- Row 1                    |
+|    |--- Row 2                    |
+|    `--- ...                       |
+|  Sync Marker                   |
+|-----------------------------------|
+|  Data Block 2                   |
+|    `--- ...                       |
+`-----------------------------------'
 ```
 
 ### Key Characteristics
@@ -305,10 +305,10 @@ ORC files can be part of ACID tables, with delta files for updates/deletes.
 
 ### Limited Optimization Potential
 
-❌ **No column pruning benefit** (must read entire row)
-❌ **No predicate pushdown** (no min/max stats)
-❌ **No late materialization**
-✅ **Schema filtering**: Can skip blocks with old schema versions
+[FAIL] **No column pruning benefit** (must read entire row)
+[FAIL] **No predicate pushdown** (no min/max stats)
+[FAIL] **No late materialization**
+[x] **Schema filtering**: Can skip blocks with old schema versions
 
 **Use Case**: Kafka streams, schema-evolving datasets
 
@@ -323,19 +323,19 @@ ORC files can be part of ACID tables, with delta files for updates/deletes.
 Arrow is an **in-memory** columnar format, but can be serialized to disk (Arrow IPC / Feather).
 
 ```
-┌────────────────────────────────┐
-│  Arrow IPC File                │
-├────────────────────────────────┤
-│  Schema (Flatbuffers)          │
-├────────────────────────────────┤
-│  Record Batch 1                │
-│    ├─ Column 1 (contiguous)    │
-│    ├─ Column 2                 │
-│    └─ ...                       │
-├────────────────────────────────┤
-│  Record Batch 2                │
-│    └─ ...                       │
-└────────────────────────────────┘
+,----------------------------------,
+|  Arrow IPC File                |
+|-----------------------------------|
+|  Schema (Flatbuffers)          |
+|-----------------------------------|
+|  Record Batch 1                |
+|    |--- Column 1 (contiguous)    |
+|    |--- Column 2                 |
+|    `--- ...                       |
+|-----------------------------------|
+|  Record Batch 2                |
+|    `--- ...                       |
+`-----------------------------------'
 ```
 
 ### Key Characteristics
@@ -347,10 +347,10 @@ Arrow is an **in-memory** columnar format, but can be serialized to disk (Arrow 
 
 ### Optimization Potential
 
-✅ **Column pruning**: Select columns without deserialization
-❌ **No predicate pushdown** (no embedded stats)
-✅ **Vectorized reads**: Native SIMD-friendly format
-✅ **Zero-copy**: Fastest read path
+[x] **Column pruning**: Select columns without deserialization
+[FAIL] **No predicate pushdown** (no embedded stats)
+[x] **Vectorized reads**: Native SIMD-friendly format
+[x] **Zero-copy**: Fastest read path
 
 **RA Strategy**: Use Arrow IPC for cached/intermediate results, not primary storage.
 
@@ -364,19 +364,19 @@ DuckDB is the gold standard for Parquet query optimization. Let's analyze how it
 
 ```
 1. **Footer Read**: Read last 4KB of file to get metadata
-   ↓
+   down
 2. **Schema Projection**: Determine needed columns
-   ↓
+   down
 3. **Row Group Filtering**: Apply predicates to min/max stats
-   ↓
+   down
 4. **Bloom Filter Check**: Test predicates against bloom filters
-   ↓
+   down
 5. **Parallel Read**: Read row groups in parallel threads
-   ↓
+   down
 6. **Late Materialization**: Read predicate columns first
-   ↓
+   down
 7. **Filter**: Apply predicate, get row indices
-   ↓
+   down
 8. **Project**: Read selected columns for surviving rows
 ```
 
@@ -392,15 +392,15 @@ WHERE age > 50 AND country = 'US';
 1. Read footer: 4KB (schema + stats)
 2. Row group filtering:
    - 100 row groups total
-   - Filter by `age > 50`: Keep groups where max(age) > 50 → 60 groups remain
-   - Check bloom filter for `country = 'US'`: → 10 groups remain
+   - Filter by `age > 50`: Keep groups where max(age) > 50 -> 60 groups remain
+   - Check bloom filter for `country = 'US'`: -> 10 groups remain
 3. Read columns `age`, `country` from 10 groups (parallelized)
-4. Apply predicate: `age > 50 AND country = 'US'` → 50K rows survive (from 1M)
+4. Apply predicate: `age > 50 AND country = 'US'` -> 50K rows survive (from 1M)
 5. Read columns `name`, `email` for 50K surviving rows
 
 **Performance**:
-- Without optimization: Read 1M rows × 20 columns = 20M values
-- With optimization: Read 10 row groups × 2 columns (predicate) + 50K rows × 2 columns (project) = 1.3M values
+- Without optimization: Read 1M rows $\times$ 20 columns = 20M values
+- With optimization: Read 10 row groups $\times$ 2 columns (predicate) + 50K rows $\times$ 2 columns (project) = 1.3M values
 - **Speedup: 15x**
 
 ### DuckDB Parquet Pushdown Rules
@@ -441,8 +441,8 @@ DuckDB **propagates statistics** from Parquet to query planner:
 
 ```
 Parquet row group: min(age)=25, max(age)=65, distinct_count(age)=40
-→ TableScan statistics: cardinality=100K, min(age)=25, max(age)=65, NDV(age)=40
-→ Planner cost model: Estimate join cardinality, filter selectivity
+-> TableScan statistics: cardinality=100K, min(age)=25, max(age)=65, NDV(age)=40
+-> Planner cost model: Estimate join cardinality, filter selectivity
 ```
 
 **RA Integration Opportunity**: Populate `ra-stats` from Parquet metadata, avoid ANALYZE.
@@ -590,7 +590,7 @@ preconditions:
   - type: predicate
     condition: "is_parquet_file(?table)"
 ---
-(project ?cols (scan ?table)) →
+(project ?cols (scan ?table)) ->
   (scan[parquet] ?table columns=?cols)
 ```
 
@@ -605,7 +605,7 @@ preconditions:
   - type: predicate
     condition: "is_parquet_file(?table) AND is_pushdown_safe(?pred)"
 ---
-(filter ?pred (scan ?table)) →
+(filter ?pred (scan ?table)) ->
   (scan[parquet] ?table predicate=?pred)
 ```
 
@@ -620,12 +620,12 @@ preconditions:
   - type: pattern
     must_match: "(project ?out_cols (filter ?pred (scan ?table)))"
   - type: predicate
-    condition: "is_parquet_file(?table) AND predicate_cols(?pred) ∩ ?out_cols = ∅"
+    condition: "is_parquet_file(?table) AND predicate_cols(?pred) $\cap$ ?out_cols = $\emptyset$"
 ---
-(project ?out_cols (filter ?pred (scan ?table))) →
+(project ?out_cols (filter ?pred (scan ?table))) ->
   (project ?out_cols
     (filter ?pred
-      (scan[parquet] ?table columns=(predicate_cols(?pred) ∪ ?out_cols))))
+      (scan[parquet] ?table columns=(predicate_cols(?pred) $\cup$ ?out_cols))))
 ```
 
 **Cost Model**:
@@ -681,7 +681,7 @@ fn cost_parquet_scan(
 9. **Bloom filter support**
 10. **Late materialization**
 11. **Nested column projection** (`address.city`)
-12. **Partition pruning** (e.g., `WHERE date='2023-01-15'` → skip date=2023-01-14 files)
+12. **Partition pruning** (e.g., `WHERE date='2023-01-15'` -> skip date=2023-01-14 files)
 
 **Deliverable**: 10-100x speedup on TPC-H queries over Parquet.
 
@@ -716,36 +716,36 @@ WHERE l_shipdate >= DATE '1994-01-01'
 #### Step 1: Partition Pruning
 ```
 WHERE l_shipdate >= '1994-01-01' AND l_shipdate < '1995-01-01'
-→ Only read files lineitem_1994-01-01.parquet to lineitem_1994-12-31.parquet
-→ Skip 2000 files, read 365 files
-→ 6GB (from 100GB)
+-> Only read files lineitem_1994-01-01.parquet to lineitem_1994-12-31.parquet
+-> Skip 2000 files, read 365 files
+-> 6GB (from 100GB)
 ```
 
 #### Step 2: Column Pruning
 ```
 Needed columns: l_extendedprice, l_discount, l_shipdate, l_quantity
-→ Read 4 of 16 columns
-→ 1.5GB (from 6GB)
+-> Read 4 of 16 columns
+-> 1.5GB (from 6GB)
 ```
 
 #### Step 3: Row Group Filtering (Predicate Pushdown)
 ```
 WHERE l_quantity < 24
-→ Row group stats: min(l_quantity)=1, max(l_quantity)=50
-→ Can't skip any row groups (all have rows with l_quantity < 24)
+-> Row group stats: min(l_quantity)=1, max(l_quantity)=50
+-> Can't skip any row groups (all have rows with l_quantity < 24)
 
 WHERE l_discount BETWEEN 0.05 AND 0.07
-→ Row group stats: min(l_discount)=0.00, max(l_discount)=0.10
-→ Can't skip (all overlap [0.05, 0.07])
+-> Row group stats: min(l_discount)=0.00, max(l_discount)=0.10
+-> Can't skip (all overlap [0.05, 0.07])
 
-Result: Must scan all 365 × 30 = 10,950 row groups (can't skip)
+Result: Must scan all 365 $\times$ 30 = 10,950 row groups (can't skip)
 ```
 
 #### Step 4: Late Materialization
 ```
-1. Read l_shipdate, l_discount, l_quantity (predicate columns) → 750MB
-2. Apply filter → 5% survive (300M rows)
-3. Read l_extendedprice for survivors → 2.4GB
+1. Read l_shipdate, l_discount, l_quantity (predicate columns) -> 750MB
+2. Apply filter -> 5% survive (300M rows)
+3. Read l_extendedprice for survivors -> 2.4GB
 Total I/O: 3.15GB (vs 1.5GB reading all 4 columns upfront)
 
 In this case, late materialization is WORSE because predicate selectivity is low (5%).
@@ -783,24 +783,24 @@ RA currently treats all tables as opaque, requiring ANALYZE for statistics. Colu
 ### Proposed Architecture
 
 ```
-┌──────────────────────────────────────────────────┐
-│  RA Optimizer                                    │
-├──────────────────────────────────────────────────┤
-│  Logical Plan:                                   │
-│    Project[name, email]                          │
-│      Filter[age > 50]                            │
-│        Scan[users.parquet]                       │
-│                                                   │
-│  ↓ Rewrite Rules                                 │
-│                                                   │
-│  Physical Plan:                                  │
-│    ParquetScan[                                  │
-│      file="users.parquet",                       │
-│      columns=[name, email, age],                 │
-│      predicate=(age > 50),                       │
-│      row_groups=[2, 5, 7, 9]  ← Filtered by stats│
-│    ]                                             │
-└──────────────────────────────────────────────────┘
+,----------------------------------------------------,
+|  RA Optimizer                                    |
+|-----------------------------------------------------|
+|  Logical Plan:                                   |
+|    Project[name, email]                          |
+|      Filter[age > 50]                            |
+|        Scan[users.parquet]                       |
+|                                                   |
+|  down Rewrite Rules                                 |
+|                                                   |
+|  Physical Plan:                                  |
+|    ParquetScan[                                  |
+|      file="users.parquet",                       |
+|      columns=[name, email, age],                 |
+|      predicate=(age > 50),                       |
+|      row_groups=[2, 5, 7, 9]  <- Filtered by stats|
+|    ]                                             |
+`-----------------------------------------------------'
 ```
 
 ### API Design
@@ -845,7 +845,7 @@ pub struct ScanOptions {
 
 ## Next Steps
 
-1. ✅ Create this research document
+1. [x] Create this research document
 2. Create RFC 0033: Columnar Format Optimization System
 3. Implement `FileFormat` trait and `ParquetFormat`
 4. Add column pruning rewrite rule

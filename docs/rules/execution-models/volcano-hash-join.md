@@ -22,7 +22,7 @@ Hash join builds a hash table from the inner relation during `open()`, then prob
 ## Relational Algebra
 
 ```
-HashJoin(R, S, R.a = S.b) → Iterator<Tuple>
+HashJoin(R, S, R.a = S.b) -> Iterator<Tuple>
 
 HashJoinIterator {
   build_input: Iterator  // Inner (smaller)
@@ -41,7 +41,7 @@ HashJoinIterator {
     probe_input.open()
   }
 
-  fn next() → Tuple | None {
+  fn next() -> Tuple | None {
     // Return buffered matches first
     if !current_matches.empty() {
       return current_matches.pop()

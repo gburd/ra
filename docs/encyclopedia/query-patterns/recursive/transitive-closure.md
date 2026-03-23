@@ -39,10 +39,10 @@ $$
 
 ```mermaid
 graph TD
-    Base["Base Case R(0)"] --> Iter1["R(1) = R(0) ∪ (R(0) ⋈ R)"]
-    Iter1 --> Iter2["R(2) = R(1) ∪ (R(1) ⋈ R)"]
+    Base["Base Case R(0)"] --> Iter1["R(1) = R(0) $\cup$ (R(0) $\bowtie$ R)"]
+    Iter1 --> Iter2["R(2) = R(1) $\cup$ (R(1) $\bowtie$ R)"]
     Iter2 --> Check{New rows?}
-    Check -->|Yes| IterN["R(i+1) = R(i) ∪ (R(i) ⋈ R)"]
+    Check -->|Yes| IterN["R(i+1) = R(i) $\cup$ (R(i) $\bowtie$ R)"]
     IterN --> Check
     Check -->|No| Done["Fixed Point: R+"]
 
@@ -196,7 +196,7 @@ HashAggregate [DISTINCT friend_id]
 
 **Execution:**
 - Iteration 1: 50 direct friends
-- Iteration 2: 50 × 50 = 2,500 friends-of-friends (with duplicates)
+- Iteration 2: 50 $\times$ 50 = 2,500 friends-of-friends (with duplicates)
 - Total: ~500 unique second-degree friends
 
 ### Organizational Hierarchy (All Reports)
@@ -283,8 +283,8 @@ RecursiveCTE [reachable]
 ```
 
 **Delta Optimization:**
-- Iteration 1: Join 1 node with edges → 10 new nodes
-- Iteration 2: Join 10 new nodes with edges → 100 new nodes
+- Iteration 1: Join 1 node with edges -> 10 new nodes
+- Iteration 2: Join 10 new nodes with edges -> 100 new nodes
 - Without delta: Join all 111 nodes with edges
 - With delta: Join only 10 new nodes
 

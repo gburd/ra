@@ -28,16 +28,16 @@ Both tables repartitioned by join key (custkey):
 
 ```
 Limit [10]
-  └─ MergeSort [SUM(o_totalprice) DESC]
-      └─ Exchange [gather]
-          └─ TopN [10, SUM DESC]
-              └─ HashAggregate [c_name, SUM(o_totalprice)]
-                  └─ HashJoin [o_custkey = c_custkey]
-                      ├─ Exchange [hash on o_custkey]   -- 150M rows shuffled
-                      │   └─ Scan [orders]
-                      └─ Exchange [hash on c_custkey]   -- 3M rows shuffled
-                          └─ Filter [c_mktsegment = 'BUILDING']
-                              └─ Scan [customer]
+  `--- MergeSort [SUM(o_totalprice) DESC]
+      `--- Exchange [gather]
+          `--- TopN [10, SUM DESC]
+              `--- HashAggregate [c_name, SUM(o_totalprice)]
+                  `--- HashJoin [o_custkey = c_custkey]
+                      |--- Exchange [hash on o_custkey]   -- 150M rows shuffled
+                      |   `--- Scan [orders]
+                      `--- Exchange [hash on c_custkey]   -- 3M rows shuffled
+                          `--- Filter [c_mktsegment = 'BUILDING']
+                              `--- Scan [customer]
 ```
 
 **Network cost:** 150M + 3M = 153M rows shuffled across network.
@@ -49,15 +49,15 @@ The `broadcast-join` rule detects that the filtered customer table
 
 ```
 Limit [10]
-  └─ MergeSort [SUM(o_totalprice) DESC]
-      └─ Exchange [gather]
-          └─ TopN [10, SUM DESC]
-              └─ HashAggregate [c_name, SUM(o_totalprice)]
-                  └─ HashJoin [o_custkey = c_custkey]
-                      ├─ Scan [orders]          -- no shuffle needed
-                      └─ Exchange [broadcast]   -- 3M rows * 4 nodes = 12M
-                          └─ Filter [c_mktsegment = 'BUILDING']
-                              └─ Scan [customer]
+  `--- MergeSort [SUM(o_totalprice) DESC]
+      `--- Exchange [gather]
+          `--- TopN [10, SUM DESC]
+              `--- HashAggregate [c_name, SUM(o_totalprice)]
+                  `--- HashJoin [o_custkey = c_custkey]
+                      |--- Scan [orders]          -- no shuffle needed
+                      `--- Exchange [broadcast]   -- 3M rows * 4 nodes = 12M
+                          `--- Filter [c_mktsegment = 'BUILDING']
+                              `--- Scan [customer]
 ```
 
 **Network cost:** 3M * 4 = 12M rows broadcast (12x less than shuffle).
@@ -71,15 +71,15 @@ broadcast. The `distributed-topn` rule adds local TopN before gather:
 
 ```
 Limit [10]
-  └─ MergeSort [SUM(o_totalprice) DESC]
-      └─ Exchange [gather]                   -- 4 * 10 = 40 rows
-          └─ TopN [10, SUM DESC]             -- local top-10 per node
-              └─ HashAggregate [c_name, SUM(o_totalprice)]
-                  └─ HashJoin [o_custkey = c_custkey]
-                      ├─ Scan [orders]
-                      └─ Exchange [broadcast]  -- 3M rows * 4 = 12M
-                          └─ Filter [c_mktsegment = 'BUILDING']
-                              └─ Scan [customer]
+  `--- MergeSort [SUM(o_totalprice) DESC]
+      `--- Exchange [gather]                   -- 4 * 10 = 40 rows
+          `--- TopN [10, SUM DESC]             -- local top-10 per node
+              `--- HashAggregate [c_name, SUM(o_totalprice)]
+                  `--- HashJoin [o_custkey = c_custkey]
+                      |--- Scan [orders]
+                      `--- Exchange [broadcast]  -- 3M rows * 4 = 12M
+                          `--- Filter [c_mktsegment = 'BUILDING']
+                              `--- Scan [customer]
 ```
 
 **Network cost:**
@@ -94,11 +94,11 @@ For cases where the broadcast side is too large, the
 
 ```
 HashJoin [o_custkey = c_custkey]
-  ├─ SemiJoinFilter [o_custkey IN bloom_filter]
-  │   └─ Scan [orders]
-  └─ Exchange [broadcast]
-      └─ Filter [c_mktsegment = 'BUILDING']
-          └─ Scan [customer]
+  |--- SemiJoinFilter [o_custkey IN bloom_filter]
+  |   `--- Scan [orders]
+  `--- Exchange [broadcast]
+      `--- Filter [c_mktsegment = 'BUILDING']
+          `--- Scan [customer]
 ```
 
 The semi-join filter uses a Bloom filter of qualifying custkeys

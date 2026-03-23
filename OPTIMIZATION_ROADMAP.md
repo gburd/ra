@@ -24,7 +24,7 @@
 **Goal**: Identify where Ra is spending time
 
 **Tasks**:
-1. **#241: Profile with flamegraph** 🔥 (PRIORITY 1)
+1. **#241: Profile with flamegraph**  (PRIORITY 1)
    - Run: `cargo flamegraph --bench job_benchmark -- --bench`
    - Identify top 5 hot paths
    - Document findings
@@ -89,7 +89,7 @@
 
 3. **#245: Greedy fallback (RFC 0017)**
    - For 8+ table joins
-   - O(n²) vs exponential
+   - O(n$^2$) vs exponential
    - Expected: **10-100x speedup** for large joins
 
 4. **#253: Optimize hot paths**
@@ -149,28 +149,28 @@
 ## Task Dependency Graph
 
 ```
-#241 (Profile) ──┬──> #243 (Cache stats)
-                 ├──> #244 (Pruning)
-                 └──> #253 (Optimize hot paths) ──> #255 (Document)
+#241 (Profile) ---+---> #243 (Cache stats)
+                 |----> #244 (Pruning)
+                 `----> #253 (Optimize hot paths) --> #255 (Document)
 
-#242 (Timeout) ──────────────────────> [Production safety]
+#242 (Timeout) ----------------------> [Production safety]
 
-#248 (Left-deep) ──┐
-#245 (Greedy)      ├──> #252 (CI integration)
-#243 (Cache)       │
-#244 (Pruning) ────┘
+#248 (Left-deep) ---,
+#245 (Greedy)      |----> #252 (CI integration)
+#243 (Cache)       |
+#244 (Pruning) -----'
 
-#247 (Test 113 queries) ──> [Correctness validation]
+#247 (Test 113 queries) --> [Correctness validation]
 
-#254 (Classifier) ──> [Enables adaptive strategy]
+#254 (Classifier) --> [Enables adaptive strategy]
 
-#246 (Iterations) ──> [E-graph optimization]
+#246 (Iterations) --> [E-graph optimization]
 
-#249 (Metrics) ──> [Observability]
+#249 (Metrics) --> [Observability]
 
-#250 (Progressive) ──> [Advanced feature]
+#250 (Progressive) --> [Advanced feature]
 
-#251 (Expand benchmark) ──> [Better coverage]
+#251 (Expand benchmark) --> [Better coverage]
 ```
 
 ---
@@ -196,22 +196,22 @@
 
 ### Minimum Viable (Phase 2 End)
 
-- ✅ Simple queries: <200ms (10x improvement from ~1s)
-- ✅ Timeout prevents runaway optimization
-- ✅ No correctness regressions
+- [x] Simple queries: <200ms (10x improvement from ~1s)
+- [x] Timeout prevents runaway optimization
+- [x] No correctness regressions
 
 ### Target (Phase 3 End)
 
-- ✅ Simple queries: <100ms (11x improvement)
-- ✅ Complex queries: <500ms (2.4x improvement)
-- ✅ All 113 JOB queries pass
+- [x] Simple queries: <100ms (11x improvement)
+- [x] Complex queries: <500ms (2.4x improvement)
+- [x] All 113 JOB queries pass
 
 ### Stretch (Phase 4 End)
 
-- ✅ Simple queries: <50ms (20x improvement)
-- ✅ Complex queries: <200ms (6x improvement)
-- ✅ Progressive optimization working
-- ✅ CI integration complete
+- [x] Simple queries: <50ms (20x improvement)
+- [x] Complex queries: <200ms (6x improvement)
+- [x] Progressive optimization working
+- [x] CI integration complete
 
 ---
 
@@ -291,7 +291,7 @@
 
 ## Next Action
 
-🔥 **START HERE**: Task #241 - Profile Ra optimizer
+ **START HERE**: Task #241 - Profile Ra optimizer
 
 ```bash
 cargo install flamegraph

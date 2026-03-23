@@ -36,13 +36,13 @@ graph LR
 
 **Characteristics:**
 ```
-┌─────────────┐
-│   Filter    │ next() → one tuple
-└──────┬──────┘
-       │ next()
-┌──────▼──────┐
-│    Scan     │ read one row
-└─────────────┘
+,---------------,
+|   Filter    | next() -> one tuple
+`---------+--------'
+       | next()
+,-------v-------,
+|    Scan     | read one row
+`----------------'
 ```
 
 **Advantages:**
@@ -82,13 +82,13 @@ graph LR
 
 **Characteristics:**
 ```
-┌─────────────┐
-│   Filter    │ next() → vector of tuples
-└──────┬──────┘
-       │ next()
-┌──────▼──────┐
-│    Scan     │ read batch of rows
-└─────────────┘
+,---------------,
+|   Filter    | next() -> vector of tuples
+`---------+--------'
+       | next()
+,-------v-------,
+|    Scan     | read batch of rows
+`----------------'
 ```
 
 **Advantages:**
@@ -134,17 +134,17 @@ graph LR
 
 **Characteristics:**
 ```
-┌─────────────┐
-│    Scan     │ push tuples
-└──────┬──────┘
-       ↓ for each tuple
-┌──────▼──────┐
-│   Filter    │ if (predicate) push
-└──────┬──────┘
-       ↓
-┌──────▼──────┐
-│  Aggregate  │
-└─────────────┘
+,---------------,
+|    Scan     | push tuples
+`---------+--------'
+       down for each tuple
+,-------v-------,
+|   Filter    | if (predicate) push
+`---------+--------'
+       down
+,-------v-------,
+|  Aggregate  |
+`----------------'
 ```
 
 **Generated Code Example:**
@@ -194,10 +194,10 @@ for row in table_scan() {
 
 **Characteristics:**
 ```
-Thread 1: Morsel 1 → Filter → Aggregate
-Thread 2: Morsel 2 → Filter → Aggregate
-Thread 3: Morsel 3 → Filter → Aggregate
-         ↓ merge results
+Thread 1: Morsel 1 -> Filter -> Aggregate
+Thread 2: Morsel 2 -> Filter -> Aggregate
+Thread 3: Morsel 3 -> Filter -> Aggregate
+         down merge results
     Final Aggregate
 ```
 
@@ -238,7 +238,7 @@ Thread 3: Morsel 3 → Filter → Aggregate
 
 **Characteristics:**
 ```
-Input Changes (Δ):
+Input Changes ($\Delta$):
   +1 row: (order_id=123, amount=1500)
   -1 row: (order_id=100, amount=500)
 
@@ -247,8 +247,8 @@ Materialized View:
          FROM orders GROUP BY customer_id
 
 Incremental Update:
-  customer_1: Δ amount = +1500 - 500 = +1000
-  → Update view with delta, not full recomputation
+  customer_1: $\Delta$ amount = +1500 - 500 = +1000
+  -> Update view with delta, not full recomputation
 ```
 
 **Core Concepts:**
@@ -298,7 +298,7 @@ GROUP BY customer_id
 -- Optimizer decides which arrangements to maintain:
 Option A: Arrange orders by customer_id, apply filter after
 Option B: Arrange filtered orders (amount > 1000) by customer_id
-          → Better: smaller arrangement
+          -> Better: smaller arrangement
 ```
 
 **2. Join Ordering for Incrementality:**
@@ -322,7 +322,7 @@ WHERE order_time > NOW() - INTERVAL '1 hour'
 SELECT COUNT(*) FROM orders  -- Full recomputation
 
 // Materialize maintains:
-previous_count + Δ count  // Incremental update
+previous_count + $\Delta$ count  // Incremental update
 ```
 
 **Example Rules Specific to Differential:**
@@ -356,9 +356,9 @@ previous_count + Δ count  // Incremental update
 Column-at-a-Time Execution:
 
 orders.amount = [100, 1500, 200, 2000, 300]
-                     ↓ filter > 1000
+                     down filter > 1000
 positions       = [1, 3]  (not full tuples!)
-                     ↓ late materialization
+                     down late materialization
 result.amount   = [1500, 2000]
 result.customer = [C2, C4]  (looked up by positions)
 ```
@@ -470,7 +470,7 @@ Benchmark: Scan 100M rows, filter 1%, project 2 columns
 
 Tuple-at-a-time:  12,000 ms
 Vectorized (1K):   3,500 ms
-Column-at-a-time:    800 ms  ← 15x faster than tuple-at-a-time
+Column-at-a-time:    800 ms  <- 15x faster than tuple-at-a-time
 ```
 
 ---
@@ -511,14 +511,14 @@ Modern systems often combine multiple models:
 
 | Optimization | Volcano | Vectorized | Push-Based | Morsel | Differential | Column |
 |--------------|---------|------------|------------|--------|--------------|--------|
-| Predicate Pushdown | ✅✅✅ | ✅✅✅ | ✅✅✅ | ✅✅✅ | ✅✅✅ | ✅✅✅ |
-| Join Reordering | ✅✅✅ | ✅✅✅ | ✅✅✅ | ✅✅ | ✅✅✅ | ✅✅ |
-| Late Materialization | ✅ | ✅✅ | ✅✅ | ✅✅ | ✅ | ✅✅✅ |
-| Pipeline Fusion | ✅ | ✅ | ✅✅✅ | ✅✅✅ | ✅✅ | ✅ |
-| Vectorization | ❌ | ✅✅✅ | ✅✅ | ✅✅✅ | ✅✅ | ✅✅✅ |
-| Parallelization | ✅ | ✅✅ | ✅✅ | ✅✅✅ | ✅✅✅ | ✅✅ |
-| Incremental | ❌ | ❌ | ❌ | ❌ | ✅✅✅ | ❌ |
-| Column Cracking | ❌ | ❌ | ❌ | ❌ | ❌ | ✅✅✅ |
+| Predicate Pushdown | [x][x][x] | [x][x][x] | [x][x][x] | [x][x][x] | [x][x][x] | [x][x][x] |
+| Join Reordering | [x][x][x] | [x][x][x] | [x][x][x] | [x][x] | [x][x][x] | [x][x] |
+| Late Materialization | [x] | [x][x] | [x][x] | [x][x] | [x] | [x][x][x] |
+| Pipeline Fusion | [x] | [x] | [x][x][x] | [x][x][x] | [x][x] | [x] |
+| Vectorization | [FAIL] | [x][x][x] | [x][x] | [x][x][x] | [x][x] | [x][x][x] |
+| Parallelization | [x] | [x][x] | [x][x] | [x][x][x] | [x][x][x] | [x][x] |
+| Incremental | [FAIL] | [FAIL] | [FAIL] | [FAIL] | [x][x][x] | [FAIL] |
+| Column Cracking | [FAIL] | [FAIL] | [FAIL] | [FAIL] | [FAIL] | [x][x][x] |
 
 ## References
 

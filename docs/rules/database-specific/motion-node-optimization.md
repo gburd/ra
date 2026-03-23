@@ -32,16 +32,16 @@ Greenplum minimizes data movement (Motion nodes) between segments by choosing op
 
 ```
 // Small table broadcast
-R ⋈ S where |S| << |R|
-→ Broadcast(S) ⋈ R
+R $\bowtie$ S where |S| << |R|
+-> Broadcast(S) $\bowtie$ R
 
 // Large tables redistribute
-R ⋈ S where |R| ≈ |S|
-→ Redistribute(R, key) ⋈ Redistribute(S, key)
+R $\bowtie$ S where |R| $\approx$ |S|
+-> Redistribute(R, key) $\bowtie$ Redistribute(S, key)
 
 // Co-located join (no motion)
-R ⋈ S where distributed_by(R) = distributed_by(S) = join_key
-→ Direct_Join(R, S)  // No Motion node
+R $\bowtie$ S where distributed_by(R) = distributed_by(S) = join_key
+-> Direct_Join(R, S)  // No Motion node
 ```
 
 ## Test Cases

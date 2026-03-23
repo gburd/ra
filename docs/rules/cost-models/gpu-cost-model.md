@@ -220,6 +220,6 @@ SELECT * FROM departments WHERE id = 42;
 - Paul et al., "GPU Join Processing Revisited", DaMoN 2016
 
 **Cost models for heterogeneous systems:**
-- Breß et al., "Robust Query Processing in Co-Processor-accelerated Databases", SIGMOD 2016
+- Bress et al., "Robust Query Processing in Co-Processor-accelerated Databases", SIGMOD 2016
   - Formal cost model for CPU/GPU placement decisions
 - Roofline model: Williams et al., "Roofline: An Insightful Visual Performance Model", CACM 2009

@@ -54,7 +54,7 @@ View it directly for the most up-to-date status.
 | [RFC 0020](https://codeberg.org/gregburd/ra/src/branch/main/rfcs/text/0020-parallel-query-execution.md) | Parallel Query Execution | Execution engine |
 | [RFC 0033](https://codeberg.org/gregburd/ra/src/branch/main/rfcs/text/0033-columnar-format-optimization.md) | Columnar Format Optimization | Storage layer |
 
-[View all implemented RFCs →](https://codeberg.org/gregburd/ra/src/branch/main/rfcs/INDEX.md#implemented)
+[View all implemented RFCs ->](https://codeberg.org/gregburd/ra/src/branch/main/rfcs/INDEX.md#implemented)
 
 ---
 
@@ -76,7 +76,7 @@ View it directly for the most up-to-date status.
 | [RFC 0025](https://codeberg.org/gregburd/ra/src/branch/main/rfcs/text/0025-physical-property-tracking.md) | Physical Property Tracking Framework |
 | [RFC 0026](https://codeberg.org/gregburd/ra/src/branch/main/rfcs/text/0026-adaptive-cost-calibration.md) | Adaptive Cost Model Calibration |
 
-[View all accepted RFCs →](https://codeberg.org/gregburd/ra/src/branch/main/rfcs/INDEX.md#accepted-approved-not-yet-implemented)
+[View all accepted RFCs ->](https://codeberg.org/gregburd/ra/src/branch/main/rfcs/INDEX.md#accepted-approved-not-yet-implemented)
 
 ---
 
@@ -91,7 +91,7 @@ High-priority proposed RFCs from gap analysis (expected 10x-100x performance imp
 | [RFC 0044](https://codeberg.org/gregburd/ra/src/branch/main/rfcs/text/0044-sideways-information-passing.md) | Sideways Information Passing (SIP) | 4-6 weeks | High |
 | [RFC 0045](https://codeberg.org/gregburd/ra/src/branch/main/rfcs/text/0045-runtime-filter-pushdown.md) | Runtime Filter Pushdown with Bloom Filters | 2-3 weeks | High |
 
-[View all proposed RFCs →](https://codeberg.org/gregburd/ra/src/branch/main/rfcs/INDEX.md#proposed-awaiting-review)
+[View all proposed RFCs ->](https://codeberg.org/gregburd/ra/src/branch/main/rfcs/INDEX.md#proposed-awaiting-review)
 
 ---
 

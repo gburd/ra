@@ -33,8 +33,8 @@ re-scan all groups anyway.
 ## Relational Algebra
 
 ```algebra
-γ_{g1, AGG1}(γ_{g2, AGG2}(R)) where g2 ⊆ g1 ->
-  γ_{g1, merge(AGG1, AGG2)}(R)
+$\gamma$_{g1, AGG1}($\gamma$_{g2, AGG2}(R)) where g2 $\subseteq$ g1 ->
+  $\gamma$_{g1, merge(AGG1, AGG2)}(R)
 ```
 
 ## Implementation

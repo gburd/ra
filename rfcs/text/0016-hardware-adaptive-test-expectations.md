@@ -93,37 +93,37 @@ Tests "just work" on any platform. Slower machines get appropriate timeouts auto
 ### Architecture
 
 ```
-┌─────────────────────────────────────────────────┐
-│ Test Suite                                      │
-│  - integration_optimizer_test.rs                │
-│  - proptest_optimization.rs                     │
-│  - execution_*_test.rs                          │
-└──────────────────┬──────────────────────────────┘
-                   │ uses
-                   ▼
-┌─────────────────────────────────────────────────┐
-│ TestProfile::current()                          │
-│  - Loads .ra-test-profile.toml                  │
-│  - Falls back to baseline if missing            │
-│  - Caches in memory for test run               │
-└──────────────────┬──────────────────────────────┘
-                   │ reads
-                   ▼
-┌─────────────────────────────────────────────────┐
-│ .ra-test-profile.toml                           │
-│  [platform]                                     │
-│  [calibration]                                  │
-│  [scale_factors]                                │
-└─────────────────────────────────────────────────┘
-                   ▲
-                   │ written by
-┌─────────────────────────────────────────────────┐
-│ cargo test --calibrate                          │
-│  - Runs micro-benchmarks                        │
-│  - Measures optimizer performance               │
-│  - Compares to baseline                         │
-│  - Writes profile                               │
-└─────────────────────────────────────────────────┘
+,---------------------------------------------------,
+| Test Suite                                      |
+|  - integration_optimizer_test.rs                |
+|  - proptest_optimization.rs                     |
+|  - execution_*_test.rs                          |
+`---------------------+--------------------------------'
+                   | uses
+                   v
+,---------------------------------------------------,
+| TestProfile::current()                          |
+|  - Loads .ra-test-profile.toml                  |
+|  - Falls back to baseline if missing            |
+|  - Caches in memory for test run               |
+`---------------------+--------------------------------'
+                   | reads
+                   v
+,---------------------------------------------------,
+| .ra-test-profile.toml                           |
+|  [platform]                                     |
+|  [calibration]                                  |
+|  [scale_factors]                                |
+`----------------------------------------------------'
+                   ^
+                   | written by
+,---------------------------------------------------,
+| cargo test --calibrate                          |
+|  - Runs micro-benchmarks                        |
+|  - Measures optimizer performance               |
+|  - Compares to baseline                         |
+|  - Writes profile                               |
+`----------------------------------------------------'
 ```
 
 ### Data Structures

@@ -27,7 +27,7 @@ Detects and merges CTEs with identical definitions. When two CTEs compute the sa
 ```algebra
 CTE[a, def1](CTE[b, def2](body))
   -> CTE[a, def1](body[b := a])
-  where def1 ≡ def2
+  where def1 $\equiv$ def2
 ```
 
 ## Implementation

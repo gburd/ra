@@ -27,8 +27,8 @@ Presto uses table statistics and cost estimates to reorder joins, choosing the o
 ## Relational Algebra
 
 ```
-(R ⋈ S) ⋈ T
-→ (R ⋈ T) ⋈ S  if cost((R ⋈ T) ⋈ S) < cost((R ⋈ S) ⋈ T)
+(R $\bowtie$ S) $\bowtie$ T
+-> (R $\bowtie$ T) $\bowtie$ S  if cost((R $\bowtie$ T) $\bowtie$ S) < cost((R $\bowtie$ S) $\bowtie$ T)
 ```
 
 ## References

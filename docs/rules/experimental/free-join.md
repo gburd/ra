@@ -27,7 +27,7 @@ traditional binary join ordering has high intermediate result sizes.
 **Why it works**: Binary join plans can produce intermediate results exponentially
 larger than the final output. WCOJ algorithms like Free Join enumerate output
 tuples directly by computing attribute intersections in worst-case optimal time
-O(N^ρ*) where ρ* is the fractional edge cover number.
+O(N^$\rho$*) where $\rho$* is the fractional edge cover number.
 
 ## Relational Algebra
 
@@ -124,7 +124,7 @@ fn compute_agm_bound(
     relations: &[Statistics],
     predicates: &[JoinPredicate],
 ) -> f64 {
-    // AGM bound: N^ρ* where ρ* is fractional edge cover
+    // AGM bound: N^$\rho$* where $\rho$* is fractional edge cover
     let n = relations
         .iter()
         .map(|r| r.row_count)
@@ -139,7 +139,7 @@ fn compute_agm_bound(
 **Assumptions:**
 - Input relations have indexes on join attributes
 - Intersection operations use hash-based set intersection
-- ρ* (fractional edge cover) is computed via linear programming
+- $\rho$* (fractional edge cover) is computed via linear programming
 - Galloping intersection when one attribute is significantly smaller
 
 **Typical benefit**: 5x-100x for triangle queries and cyclic patterns with
@@ -200,6 +200,6 @@ JOIN customer c ON o.custkey = c.custkey;
 - EmptyHeaded: Graph pattern matching engine
 
 **Key insights:**
-- AGM bound provides tight worst-case complexity: O(N^ρ*)
-- ρ* ≤ (number of relations - 1) / 2 for cyclic queries
-- Triangle queries: ρ* = 1.5, so O(N^1.5) vs O(N^2) for binary joins
+- AGM bound provides tight worst-case complexity: O(N^$\rho$*)
+- $\rho$* $\leq$ (number of relations - 1) / 2 for cyclic queries
+- Triangle queries: $\rho$* = 1.5, so O(N^1.5) vs O(N^2) for binary joins

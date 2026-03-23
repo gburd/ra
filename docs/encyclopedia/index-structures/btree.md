@@ -394,7 +394,7 @@ $$
 
 ### Fragmentation
 
-Over time, logical order ≠ physical order.
+Over time, logical order $\neq$ physical order.
 
 **Metric:**
 

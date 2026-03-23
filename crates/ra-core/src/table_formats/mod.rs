@@ -10,9 +10,9 @@
 //!
 //! ```text
 //! TableFormat (Iceberg / Hudi / Delta)
-//!   └─ manages ─→ DataFile[]
-//!       └─ each file has ─→ FileStats (min/max/null/row counts)
-//!                          ─→ PartitionSpec (partition columns)
+//!   └─ manages ─-> DataFile[]
+//!       └─ each file has ─-> FileStats (min/max/null/row counts)
+//!                          ─-> PartitionSpec (partition columns)
 //! ```
 
 pub mod iceberg;

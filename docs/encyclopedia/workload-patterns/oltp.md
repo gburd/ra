@@ -262,14 +262,14 @@ WHERE status IN ('pending', 'processing', 'shipped');
 
 ### 1. Sequential Scans in Hot Path
 
-❌ **Bad:**
+[FAIL] **Bad:**
 ```sql
 SELECT * FROM users WHERE LOWER(email) = 'user@example.com';
 ```
 
 Function prevents index usage.
 
-✅ **Good:**
+[x] **Good:**
 ```sql
 -- Store normalized: email always lowercase
 SELECT * FROM users WHERE email = 'user@example.com';
@@ -277,7 +277,7 @@ SELECT * FROM users WHERE email = 'user@example.com';
 
 ### 2. N+1 Query Problem
 
-❌ **Bad:**
+[FAIL] **Bad:**
 ```python
 orders = db.query("SELECT * FROM orders WHERE customer_id = ?", customer_id)
 for order in orders:
@@ -286,7 +286,7 @@ for order in orders:
 
 **Cost:** $1 + n$ queries.
 
-✅ **Good:**
+[x] **Good:**
 ```python
 # Single query with join
 results = db.query("""
@@ -299,14 +299,14 @@ results = db.query("""
 
 ### 3. Large OFFSET Pagination
 
-❌ **Bad:**
+[FAIL] **Bad:**
 ```sql
 SELECT * FROM orders ORDER BY created_at LIMIT 20 OFFSET 100000;
 ```
 
 **Cost:** Must scan 100,020 rows.
 
-✅ **Good (Keyset Pagination):**
+[x] **Good (Keyset Pagination):**
 ```sql
 SELECT * FROM orders
 WHERE created_at > '2024-01-15 10:30:00'  -- Last seen

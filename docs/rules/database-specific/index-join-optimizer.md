@@ -26,7 +26,7 @@
 Trino converts cross joins with post-filters into index joins when connector supports index lookups. Leverages connector-specific indexes.
 
 **Key features:**
-- Cross join + filter → Index join
+- Cross join + filter -> Index join
 - Connector-agnostic (uses IndexSource interface)
 - Supports multi-column indexes
 - Cost-based decision
@@ -34,8 +34,8 @@ Trino converts cross joins with post-filters into index joins when connector sup
 ## Relational Algebra
 
 ```
-σ_θ(R × S) → R ⋈_{index} S
-  where θ = equality predicate on indexed columns
+$\sigma$_$\theta$(R $\times$ S) -> R $\bowtie$_{index} S
+  where $\theta$ = equality predicate on indexed columns
 ```
 
 ## Implementation Pattern

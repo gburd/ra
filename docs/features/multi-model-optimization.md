@@ -25,24 +25,24 @@ crate and `rules/multi-model/` directory provide:
                     Query Plan (RelExpr)
                            |
                            v
-              ┌────────────────────────┐
-              │  Multi-Model Cost Model │
-              │   (ra-multimodel crate) │
-              └────┬───────┬───────┬───┘
+              ,--------------------------,
+              |  Multi-Model Cost Model |
+              |   (ra-multimodel crate) |
+              `-------+---------+---------+-----'
                    |       |       |
-         ┌─────────┘       |       └─────────┐
+         ,-----------'       |       `------------,
          v                 v                 v
-  ┌────────────┐   ┌─────────────┐   ┌────────────┐
-  │  Graph      │   │  Document   │   │ TimeSeries │
-  │  Operators  │   │  Operators  │   │ Operators  │
-  └──────┬─────┘   └──────┬──────┘   └─────┬──────┘
+  ,--------------,   ,---------------,   ,--------------,
+  |  Graph      |   |  Document   |   | TimeSeries |
+  |  Operators  |   |  Operators  |   | Operators  |
+  `---------+-------'   `---------+--------'   `--------+--------'
          |                |                 |
          v                v                 v
-  ┌────────────┐   ┌─────────────┐   ┌────────────┐
-  │ Neo4j      │   │ MongoDB     │   │ TimescaleDB│
-  │ JanusGraph │   │ Couchbase   │   │ InfluxDB   │
-  │ Neptune    │   │ CosmosDB    │   │ QuestDB    │
-  └────────────┘   └─────────────┘   └────────────┘
+  ,--------------,   ,---------------,   ,--------------,
+  | Neo4j      |   | MongoDB     |   | TimescaleDB|
+  | JanusGraph |   | Couchbase   |   | InfluxDB   |
+  | Neptune    |   | CosmosDB    |   | QuestDB    |
+  `---------------'   `----------------'   `---------------'
 ```
 
 ## Data Models

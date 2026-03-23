@@ -7,7 +7,7 @@ Cardinality measures the number of distinct values in a column. One of the most 
 ## Categories
 
 ### High Cardinality
-- **Definition:** Distinct values ≈ row count
+- **Definition:** Distinct values $\approx$ row count
 - **Examples:** Primary keys, UUIDs, email addresses, URLs
 - **Ratio:** $\frac{\text{distinct}}{\text{total}} > 0.9$
 
@@ -31,9 +31,9 @@ $$
 
 | Cardinality | B-tree Index | Hash Index | Bitmap Index |
 |-------------|--------------|-----------|--------------|
-| High | ✅ Excellent | ✅ Excellent | ❌ Too large |
-| Medium | ✅ Good | ✅ Good | ⚠️ Situational |
-| Low | ⚠️ Situational | ❌ Poor | ✅ Excellent |
+| High | [x] Excellent | [x] Excellent | [FAIL] Too large |
+| Medium | [x] Good | [x] Good | WARNING: Situational |
+| Low | WARNING: Situational | [FAIL] Poor | [x] Excellent |
 
 **Rule:** `physical/index-type-selection`
 

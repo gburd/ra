@@ -37,7 +37,7 @@ When documenting a new optimization rule:
 1. **Create a note** in `optimization-rules/RULE_NAME.md`
 2. **Include**:
    - Rule name and description
-   - Pattern: before → after transformation
+   - Pattern: before -> after transformation
    - Preconditions for applicability
    - Cost impact
    - Examples from real queries

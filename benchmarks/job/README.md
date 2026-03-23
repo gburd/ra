@@ -114,10 +114,10 @@ Performance comparison results are written to `results/job-ra-vs-pg.md`.
 
 ## Success Criteria
 
-- ✅ **Correctness**: 100% of 113 queries return correct results
-- 🎯 **Performance**: Ra matches or beats PostgreSQL on 80%+ of queries
-- 📊 **Join Ordering**: Analysis of join order decisions (Ra vs PostgreSQL)
-- ⏱️ **Optimization Time**: <5 seconds for complex queries (10+ tables)
+- [x] **Correctness**: 100% of 113 queries return correct results
+-  **Performance**: Ra matches or beats PostgreSQL on 80%+ of queries
+-  **Join Ordering**: Analysis of join order decisions (Ra vs PostgreSQL)
+-  **Optimization Time**: <5 seconds for complex queries (10+ tables)
 
 ## References
 

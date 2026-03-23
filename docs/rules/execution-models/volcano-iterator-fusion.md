@@ -54,7 +54,7 @@ Project(cols,
     Scan(table)))
 
 // Each next() call chain:
-//   project.next() → filter.next() → scan.next()
+//   project.next() -> filter.next() -> scan.next()
 //   3 virtual calls per tuple
 //   filter may loop multiple times per output tuple
 
@@ -67,13 +67,13 @@ ScanFilterProject(table, pred, cols)
 //   predicate and projection inlined
 
 Fusible operator chains:
-  Scan → Filter           → ScanFilter
-  Filter → Project        → FilterProject
-  Scan → Filter → Project → ScanFilterProject
-  Filter → Filter         → Filter(p1 AND p2)
-  Project → Project       → Project(compose(cols1, cols2))
-  Limit → Filter          → FilterWithLimit
-  Scan → Limit            → ScanWithLimit
+  Scan -> Filter           -> ScanFilter
+  Filter -> Project        -> FilterProject
+  Scan -> Filter -> Project -> ScanFilterProject
+  Filter -> Filter         -> Filter(p1 AND p2)
+  Project -> Project       -> Project(compose(cols1, cols2))
+  Limit -> Filter          -> FilterWithLimit
+  Scan -> Limit            -> ScanWithLimit
 
 Non-fusible boundaries:
   Sort (must materialize)
@@ -274,7 +274,7 @@ pub fn estimate_fusion_benefit(
 - Each eliminated operator level saves ~5-10 ns per tuple
 - Scan-Filter fusion: saves 1 virtual call per tuple examined
 - Scan-Filter-Project: saves 2 virtual calls per output tuple
-- Full pipeline (depth D → 1): saves (D-1) calls per tuple
+- Full pipeline (depth D -> 1): saves (D-1) calls per tuple
 
 **Example: 10M row scan, depth-4 pipeline:**
 - Unfused: 10M x 4 calls x 8ns = 320 ms overhead
@@ -304,13 +304,13 @@ pub fn estimate_fusion_benefit(
 ```sql
 -- Test 1: Scan-Filter fusion
 SELECT * FROM orders WHERE status = 'shipped';
--- Before: Scan.next() → Filter.next(), 2 calls per tuple
+-- Before: Scan.next() -> Filter.next(), 2 calls per tuple
 -- After: ScanFilter.next(), 1 call per tuple
 -- Speedup: ~2x on protocol overhead
 
 -- Test 2: Scan-Filter-Project fusion
 SELECT order_id, total FROM orders WHERE total > 100;
--- Before: Scan → Filter → Project, 3 calls per output tuple
+-- Before: Scan -> Filter -> Project, 3 calls per output tuple
 -- After: ScanFilterProject, 1 call per output tuple
 -- Verify: same results, fewer function calls
 
@@ -329,8 +329,8 @@ SELECT * FROM orders
 WHERE status = 'shipped'
 ORDER BY created_at;
 -- Scan-Filter fuses, but Sort is a boundary
--- Pipeline 1: ScanFilter (fused) → Sort input
--- Pipeline 2: Sort output → Result
+-- Pipeline 1: ScanFilter (fused) -> Sort input
+-- Pipeline 2: Sort output -> Result
 -- Verify: fusion applied within pipeline, not across Sort
 
 -- Test 5: No fusion across join

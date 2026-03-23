@@ -71,7 +71,7 @@ fn generate_lookup_joins(
 
 ## Cost Model
 
-Lookup join cost = outer_cardinality × (index_lookup_cost + inner_filter_cost)
+Lookup join cost = outer_cardinality $\times$ (index_lookup_cost + inner_filter_cost)
 
 Typical index lookup cost: 1-10x cheaper than nested loop join for selective predicates.
 

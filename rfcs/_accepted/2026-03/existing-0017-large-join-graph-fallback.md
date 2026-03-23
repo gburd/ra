@@ -39,7 +39,7 @@ let optimizer = Optimizer::default();
 let plan = optimizer.optimize(&query)?;
 ```
 
-**Heuristic Mode (≥ 10 tables):**
+**Heuristic Mode ($\geq$ 10 tables):**
 ```rust
 // Automatically uses simulated annealing
 let optimizer = Optimizer::with_config(OptimizerConfig {
@@ -76,25 +76,25 @@ Estimated cost: 1,234,567 (within 15% of optimal based on sampling)
 ### Architecture
 
 ```
-┌─────────────────────────────────────────────────┐
-│ Optimizer::optimize(&query)                    │
-└──────────────────┬──────────────────────────────┘
-                   │
-                   ▼
-           ┌───────────────┐
-           │ Count tables  │
-           └───────┬───────┘
-                   │
-         ┌─────────▼──────────┐
-         │ < threshold?       │
-         └─────────┬──────────┘
-           YES ↙    ↘ NO
-    ┌──────────┐    ┌─────────────────────┐
-    │ E-graph  │    │ Heuristic fallback  │
-    │ equality │    │  - Simulated        │
-    │ satur.   │    │    annealing        │
-    └──────────┘    │  - Greedy           │
-                    └─────────────────────┘
+,---------------------------------------------------,
+| Optimizer::optimize(&query)                    |
+`---------------------+--------------------------------'
+                   |
+                   v
+           ,-----------------,
+           | Count tables  |
+           `----------+---------'
+                   |
+         ,----------v-----------,
+         | < threshold?       |
+         `------------+------------'
+           YES down-left    down-right NO
+    ,------------,    ,-----------------------,
+    | E-graph  |    | Heuristic fallback  |
+    | equality |    |  - Simulated        |
+    | satur.   |    |    annealing        |
+    `-------------'    |  - Greedy           |
+                    `------------------------'
 ```
 
 ### Data Structures

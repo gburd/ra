@@ -19,8 +19,8 @@
 Plans a LocalityOptimizedSearch operation that avoids communicating with remote nodes (relative to the gateway region) if possible. The scan is split into local and remote spans, with remote spans only executed if the local spans return no rows. This optimization exploits locality of access patterns in multi-region deployments.
 
 **When to apply**: Scan contains multiple spans targeting both local and remote partitions, AND either:
-- The scan has a hard limit ≤ max cardinality of local span, OR
-- Max cardinality of local span ≥ max cardinality of original scan
+- The scan has a hard limit $\leq$ max cardinality of local span, OR
+- Max cardinality of local span $\geq$ max cardinality of original scan
 
 **Why it works**: If rows tend to be accessed from the region where they are located (locality of access), the remote spans will rarely be needed, saving cross-region network latency. The optimization trades a potential slight pessimization (when data is in remote regions) for large wins when data is local.
 
@@ -29,14 +29,14 @@ Plans a LocalityOptimizedSearch operation that avoids communicating with remote 
 ## Relational Algebra
 
 ```algebra
-Scan[constraints: local ∪ remote]
+Scan[constraints: local $\cup$ remote]
   -> LocalityOptimizedSearch(
        Scan[constraints: local],
        Scan[constraints: remote]
      )
   where has_local_and_remote_constraints
-  where (has_limit && limit ≤ |local_max_card|)
-     || |local_max_card| ≥ |total_max_card|
+  where (has_limit && limit $\leq$ |local_max_card|)
+     || |local_max_card| $\geq$ |total_max_card|
 ```
 
 Where:

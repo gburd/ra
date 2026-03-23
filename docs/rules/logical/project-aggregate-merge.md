@@ -21,7 +21,7 @@ Merges projection into aggregate
 ## Relational Algebra
 
 ```algebra
-π(Agg(R)) => Agg with projection
+$\pi$(Agg(R)) => Agg with projection
 ```
 
 ## Implementation

@@ -23,7 +23,7 @@ pub enum TokenKind {
     Operator(String),
     /// Identifier (relation name, attribute name).
     Ident(String),
-    /// Arrow: `->` or `→`.
+    /// Arrow: `->` or `->`.
     Arrow,
     /// Left bracket `[`.
     LBracket,
@@ -33,19 +33,19 @@ pub enum TokenKind {
     LParen,
     /// Right parenthesis `)`.
     RParen,
-    /// Join symbol: `join`, `⋈`.
+    /// Join symbol: `join`, `JOIN`.
     Join,
-    /// Cross product: `cross`, `×`.
+    /// Cross product: `cross`, `x`.
     Cross,
-    /// Union: `union`, `∪`.
+    /// Union: `union`, `UNION`.
     Union,
-    /// Intersection: `intersect`, `∩`.
+    /// Intersection: `intersect`, `INTERSECT`.
     Intersect,
-    /// Difference: `minus`, `−`, `\`.
+    /// Difference: `minus`, `-`, `\`.
     Difference,
     /// `where` keyword.
     Where,
-    /// `subset` or `⊆` keyword.
+    /// `subset` or `SUBSETEQ` keyword.
     Subset,
     /// Comma.
     Comma,
@@ -187,17 +187,17 @@ fn lex_arrow_or_unknown(
 fn is_unicode_symbol(ch: char) -> bool {
     matches!(
         ch,
-        '\u{2192}' // →
-        | '\u{22C8}' // ⋈
-        | '\u{00D7}' // ×
-        | '\u{222A}' // ∪
-        | '\u{2229}' // ∩
-        | '\u{2212}' // −
-        | '\u{2286}' // ⊆
-        | '\u{03C3}' // σ
-        | '\u{03C0}' // π
-        | '\u{03C1}' // ρ
-        | '\u{03B3}' // γ
+        '\u{2192}' // ->
+        | '\u{22C8}' // JOIN
+        | '\u{00D7}' // x
+        | '\u{222A}' // UNION
+        | '\u{2229}' // INTERSECT
+        | '\u{2212}' // -
+        | '\u{2286}' // SUBSETEQ
+        | '\u{03C3}' // sigma
+        | '\u{03C0}' // pi
+        | '\u{03C1}' // rho
+        | '\u{03B3}' // gamma
     )
 }
 

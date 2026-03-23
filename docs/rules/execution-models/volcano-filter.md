@@ -22,13 +22,13 @@ Filter operator in Volcano model evaluates predicates tuple-by-tuple. Only tuple
 ## Relational Algebra
 
 ```
-Filter(input, predicate) → Iterator<Tuple>
+Filter(input, predicate) -> Iterator<Tuple>
 
 FilterIterator implements Iterator {
   input: Iterator
   predicate: Expr
 
-  fn next() → Tuple | None {
+  fn next() -> Tuple | None {
     loop {
       tuple = input.next()
       if tuple == None { return None }
@@ -72,10 +72,10 @@ pub fn filter_cost(input_rows: f64, selectivity: f64) -> f64 {
 
 ## Cost Model
 
-- **CPU:** `input_rows × predicate_complexity`
+- **CPU:** `input_rows $\times$ predicate_complexity`
 - **I/O:** Zero (pipelined from child)
 - **Memory:** O(1)
-- **Output:** `input_rows × selectivity`
+- **Output:** `input_rows $\times$ selectivity`
 
 ## Test Cases
 

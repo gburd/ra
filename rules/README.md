@@ -47,7 +47,7 @@ standard: sql:1992
 Pushes selection predicates through join operators...
 
 ## Relational Algebra
-σ[p](R ⋈[c] S) → (σ[p](R)) ⋈[c] S  where attrs(p) ⊆ attrs(R)
+$\sigma$[p](R $\bowtie$[c] S) -> ($\sigma$[p](R)) $\bowtie$[c] S  where attrs(p) $\subseteq$ attrs(R)
 
 ## Implementation
 [Rust code]

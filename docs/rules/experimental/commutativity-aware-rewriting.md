@@ -37,8 +37,8 @@ exhaustive search in polynomial time.
 ## Relational Algebra
 
 ```algebra
--- Commutativity: R join S ≡ S join R
--- Associativity: (R join S) join T ≡ R join (S join T)
+-- Commutativity: R join S $\equiv$ S join R
+-- Associativity: (R join S) join T $\equiv$ R join (S join T)
 -- Together: all 12 binary trees for 4-way join are equivalent
 
 -- Structural encoding: multi-way join as unordered set

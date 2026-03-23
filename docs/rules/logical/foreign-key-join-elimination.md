@@ -27,7 +27,7 @@ Eliminates joins to tables when foreign key guarantees existence and no columns 
 ```algebra
 project[A.*](join[A.fk = B.pk](A, B))
   -> project[A.*](A)
-  where foreign_key(A.fk → B.pk) && !references_columns(B)
+  where foreign_key(A.fk -> B.pk) && !references_columns(B)
 ```
 
 ## Implementation

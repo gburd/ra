@@ -34,7 +34,7 @@ while enabling aggregation optimizations like partial aggregation pushdown.
 
 ```algebra
 INTERSECT(R1, R2, ..., Rn) ->
-  π_cols(σ_count=n(γ_cols,COUNT(*)(UNION_ALL(R1, R2, ..., Rn))))
+  $\pi$_cols($\sigma$_count=n($\gamma$_cols,COUNT(*)(UNION_ALL(R1, R2, ..., Rn))))
 
 where cols are all columns in the schema
 ```

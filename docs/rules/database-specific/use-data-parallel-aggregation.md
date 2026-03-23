@@ -29,7 +29,7 @@ Converts single-threaded aggregation to data-parallel aggregation by partitionin
 ```algebra
 GroupBy[keys, aggs](R)
   -> MergeGroupBy[keys, aggs](
-       ∀t ∈ threads: GroupBy[keys, aggs](Partition_t(R))
+       $\forall$t $\in$ threads: GroupBy[keys, aggs](Partition_t(R))
      )
 ```
 

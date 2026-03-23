@@ -21,7 +21,7 @@ Pulls up constant expressions in union
 ## Relational Algebra
 
 ```algebra
-Union(π_const(R), π_const(S))
+Union($\pi$_const(R), $\pi$_const(S))
 ```
 
 ## Implementation

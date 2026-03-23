@@ -26,8 +26,8 @@ Pushes column pruning below window functions to reduce the width of rows flowing
 
 ```algebra
 project[cols](window[W](R))
-  -> project[cols](window[W](project[cols ∪ window_deps(W)](R)))
-  where cols ∪ window_deps(W) ⊂ output(R)
+  -> project[cols](window[W](project[cols $\cup$ window_deps(W)](R)))
+  where cols $\cup$ window_deps(W) $\subset$ output(R)
 ```
 
 ## Implementation

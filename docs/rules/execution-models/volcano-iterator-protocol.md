@@ -53,9 +53,9 @@ rearrange operators without changing their implementations.
 
 ```
 interface Iterator<T> {
-  open()  → void          // Initialize state, acquire resources
-  next()  → T | None      // Produce next tuple or signal exhaustion
-  close() → void          // Release resources, finalize
+  open()  -> void          // Initialize state, acquire resources
+  next()  -> T | None      // Produce next tuple or signal exhaustion
+  close() -> void          // Release resources, finalize
 
   // Invariants:
   // 1. open() called exactly once before first next()
@@ -67,24 +67,24 @@ interface Iterator<T> {
 // Query plan is a tree of iterators:
 //
 //   Root(next)
-//     ↑ pulls from
+//     up pulls from
 //   Join(next)
-//     ↑          ↑
+//     up          up
 //   Scan(A)    Filter(next)
-//                ↑
+//                up
 //              Scan(B)
 //
 // Execution trace for SELECT * FROM A JOIN B ON ... WHERE ...:
 //
-//   root.open()           → join.open()  → scanA.open(), filter.open() → scanB.open()
-//   root.next()           → join.next()  → scanA.next(), filter.next() → scanB.next()
+//   root.open()           -> join.open()  -> scanA.open(), filter.open() -> scanB.open()
+//   root.next()           -> join.next()  -> scanA.next(), filter.next() -> scanB.next()
 //   ... repeats until None ...
-//   root.close()          → join.close() → scanA.close(), filter.close() → scanB.close()
+//   root.close()          -> join.close() -> scanA.close(), filter.close() -> scanB.close()
 
 // State machine per operator:
-//   CREATED → [open()] → OPENED → [next()→Some]* → [next()→None] → EXHAUSTED → [close()] → CLOSED
-//                                                                                            ↓
-//                                                                                      [open()] → OPENED (rescan)
+//   CREATED -> [open()] -> OPENED -> [next()->Some]* -> [next()->None] -> EXHAUSTED -> [close()] -> CLOSED
+//                                                                                            down
+//                                                                                      [open()] -> OPENED (rescan)
 ```
 
 ## Implementation
@@ -303,8 +303,8 @@ pub fn execute_plan(
 - **Total per-tuple overhead: ~8-10 ns**
 
 **For a plan with depth D and N tuples passing through:**
-- Total `next()` calls: `N × D` (each tuple traverses D operators)
-- Total protocol overhead: `N × D × 10 ns`
+- Total `next()` calls: `N $\times$ D` (each tuple traverses D operators)
+- Total protocol overhead: `N $\times$ D $\times$ 10 ns`
 - For 1M rows, depth 5: ~50 ms of pure protocol overhead
 
 **Comparison to alternatives:**
@@ -328,10 +328,10 @@ pub fn execute_plan(
 -- Test 1: Protocol lifecycle - simple query
 SELECT name FROM users WHERE age > 30;
 -- Expected execution trace:
---   project.open() → filter.open() → scan.open()
---   project.next() → filter.next() → scan.next() [loops until match]
+--   project.open() -> filter.open() -> scan.open()
+--   project.next() -> filter.next() -> scan.next() [loops until match]
 --   ... repeat until scan exhausted ...
---   project.close() → filter.close() → scan.close()
+--   project.close() -> filter.close() -> scan.close()
 -- Verify: open/close called exactly once each
 
 -- Test 2: Protocol with pipeline breaker

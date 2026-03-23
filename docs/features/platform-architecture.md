@@ -11,36 +11,36 @@ single system that can parse, validate, optimize, execute, and
 translate SQL across database engines.
 
 ```
-                    ┌──────────────────────────────────┐
-                    │          User Interfaces          │
-                    │  CLI (ra-cli) · Web (ra-web)     │
-                    │  WASM Playground (ra-wasm)        │
-                    └───────┬──────────┬───────┬───────┘
-                            │          │       │
-              ┌─────────────┘          │       └─────────────┐
+                    ,------------------------------------,
+                    |          User Interfaces          |
+                    |  CLI (ra-cli) * Web (ra-web)     |
+                    |  WASM Playground (ra-wasm)        |
+                    `----------+------------+---------+---------'
+                            |          |       |
+              ,---------------'          |       `----------------,
               v                        v                     v
-    ┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐
-    │ Query Optimization│   │ Dialect Translation│   │ Isolation Testing │
-    │   (ra-engine)    │   │   (ra-dialect)     │   │  (ra-isolation)   │
-    └────────┬─────────┘   └──────────────────┘   └──────────────────┘
-             │
-    ┌────────┴─────────────────────────────────────────┐
-    │                  Rule Pipeline                     │
-    │  Parser (ra-parser) → Compiler (ra-compiler)      │
-    │  147 rules: logical · physical · hardware ·        │
-    │  distributed · multi-model                         │
-    └────────┬─────────────────────────────────────────┘
-             │
-    ┌────────┴─────────────────────────────────────────┐
-    │               Core Types (ra-core)                 │
-    │  RelExpr · Expr · Rule · Cost · Statistics         │
-    └────────┬────────┬────────┬────────┬──────────────┘
-             │        │        │        │
-    ┌────────┴──┐ ┌───┴───┐ ┌─┴──────┐ ┌┴────────────┐
-    │ra-hardware│ │ ra-ml │ │ra-adapt│ │ra-codegen   │
-    │GPU / FPGA │ │ML cost│ │Runtime │ │Cranelift    │
-    │cost model │ │estim. │ │reopt   │ │WASM / JIT   │
-    └───────────┘ └───────┘ └────────┘ └─────────────┘
+    ,--------------------,   ,--------------------,   ,--------------------,
+    | Query Optimization|   | Dialect Translation|   | Isolation Testing |
+    |   (ra-engine)    |   |   (ra-dialect)     |   |  (ra-isolation)   |
+    `-----------+-----------'   `---------------------'   `---------------------'
+             |
+    ,----------+-------------------------------------------,
+    |                  Rule Pipeline                     |
+    |  Parser (ra-parser) -> Compiler (ra-compiler)      |
+    |  147 rules: logical * physical * hardware *        |
+    |  distributed * multi-model                         |
+    `-----------+-------------------------------------------'
+             |
+    ,----------+-------------------------------------------,
+    |               Core Types (ra-core)                 |
+    |  RelExpr * Expr * Rule * Cost * Statistics         |
+    `-----------+----------+----------+----------+----------------'
+             |        |        |        |
+    ,----------+----, ,-----+-----, ,---+--------, ,--+--------------,
+    |ra-hardware| | ra-ml | |ra-adapt| |ra-codegen   |
+    |GPU / FPGA | |ML cost| |Runtime | |Cranelift    |
+    |cost model | |estim. | |reopt   | |WASM / JIT   |
+    `--------------' `----------' `-----------' `----------------'
 ```
 
 ## Crate Dependency Graph

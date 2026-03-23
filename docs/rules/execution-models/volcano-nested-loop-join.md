@@ -17,14 +17,14 @@
 
 ## Description
 
-Nested loop join in the Volcano iterator model implements the classic doubly-nested loop algorithm using the iterator interface. For each tuple from the outer relation, it scans the entire inner relation to find matching tuples. This simple algorithm works for all join types and conditions but has O(N×M) complexity.
+Nested loop join in the Volcano iterator model implements the classic doubly-nested loop algorithm using the iterator interface. For each tuple from the outer relation, it scans the entire inner relation to find matching tuples. This simple algorithm works for all join types and conditions but has O(N$\times$M) complexity.
 
 **Algorithm:**
 ```
 for each outer_tuple in outer_relation:
     for each inner_tuple in inner_relation:
         if join_condition(outer_tuple, inner_tuple):
-            emit(outer_tuple ⋈ inner_tuple)
+            emit(outer_tuple $\bowtie$ inner_tuple)
 ```
 
 **Advantages:**
@@ -35,7 +35,7 @@ for each outer_tuple in outer_relation:
 - Can stop early (useful for LIMIT)
 
 **Disadvantages:**
-- O(N×M) tuple comparisons
+- O(N$\times$M) tuple comparisons
 - Poor performance for large relations
 - Inner relation scanned repeatedly
 - High I/O cost if inner not cached
@@ -43,7 +43,7 @@ for each outer_tuple in outer_relation:
 ## Relational Algebra
 
 ```
-NestedLoopJoin(R, S, θ) → Iterator<Tuple>
+NestedLoopJoin(R, S, $\theta$) -> Iterator<Tuple>
 
 NestedLoopIterator implements Iterator {
   outer: Iterator
@@ -59,7 +59,7 @@ NestedLoopIterator implements Iterator {
     }
   }
 
-  fn next() → Tuple | None {
+  fn next() -> Tuple | None {
     loop {
       if current_outer == None {
         return None
@@ -206,16 +206,16 @@ pub fn nested_loop_join_cost(
 ## Cost Model
 
 **CPU Cost:**
-- Tuple comparisons: `outer_rows × inner_rows × comparison_cost`
+- Tuple comparisons: `outer_rows $\times$ inner_rows $\times$ comparison_cost`
 - Predicate evaluation: depends on condition complexity
-- Tuple merging: `output_rows × merge_cost`
-- **Total CPU:** `O(N × M)`
+- Tuple merging: `output_rows $\times$ merge_cost`
+- **Total CPU:** `O(N $\times$ M)`
 
 **I/O Cost:**
 - Outer scan: `outer_pages` (once)
-- Inner scan: `inner_pages × outer_rows` (repeated)
+- Inner scan: `inner_pages $\times$ outer_rows` (repeated)
 - Cache behavior critical - inner should fit in buffer pool
-- **Total I/O:** `O(N) × O(M)` if uncached
+- **Total I/O:** `O(N) $\times$ O(M)` if uncached
 
 **Memory:**
 - O(1) - only current tuples
@@ -240,19 +240,19 @@ SELECT * FROM orders o
 JOIN customers c ON o.customer_id = c.id
 WHERE c.region = 'US';
 -- Expected: Nested loop if customers is small
--- Cost: O(orders × customers_in_US)
+-- Cost: O(orders $\times$ customers_in_US)
 
 -- Test 2: Index nested loop
 SELECT * FROM orders o
 JOIN products p ON o.product_id = p.id;
 -- Expected: Use index on products.id for inner lookups
--- Cost: O(orders × log(products))
+-- Cost: O(orders $\times$ log(products))
 
 -- Test 3: Non-equijoin
 SELECT * FROM events e1
 JOIN events e2 ON e1.timestamp < e2.timestamp AND e1.user = e2.user;
 -- Expected: Nested loop (can't use hash join)
--- Cost: O(events²) - expensive!
+-- Cost: O(events$^2$) - expensive!
 
 -- Test 4: Cross join with limit
 SELECT * FROM a CROSS JOIN b LIMIT 10;

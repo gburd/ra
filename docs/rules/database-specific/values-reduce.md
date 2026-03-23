@@ -31,9 +31,9 @@ work, potentially eliminating entire operators from the physical plan.
 ## Relational Algebra
 
 ```algebra
-π_expr(VALUES(t1, t2, ...)) -> VALUES(eval(expr, t1), eval(expr, t2), ...)
+$\pi$_expr(VALUES(t1, t2, ...)) -> VALUES(eval(expr, t1), eval(expr, t2), ...)
 
-σ_pred(VALUES(t1, t2, ...)) -> VALUES({ti | eval(pred, ti) = true})
+$\sigma$_pred(VALUES(t1, t2, ...)) -> VALUES({ti | eval(pred, ti) = true})
 ```
 
 ## Implementation

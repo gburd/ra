@@ -67,11 +67,11 @@ arrange(orders).by(customer_id)  // Thousand keys
 Prefer to join small delta against large stable collection:
 
 ```
-Bad:  delta(large_table) ⋈ stable(small_table)
-      → Large delta, expensive to process
+Bad:  delta(large_table) $\bowtie$ stable(small_table)
+      -> Large delta, expensive to process
 
-Good: delta(small_table) ⋈ stable(large_table)
-      → Small delta, cheap updates
+Good: delta(small_table) $\bowtie$ stable(large_table)
+      -> Small delta, cheap updates
 ```
 
 ### 3. Temporal Filter Pushdown
@@ -97,10 +97,10 @@ Special join implementation that processes deltas efficiently:
 
 ```
 Standard Join:
-  Output = Left ⋈ Right  // Full recomputation
+  Output = Left $\bowtie$ Right  // Full recomputation
 
 Differential Join:
-  Δ Output = (Δ Left ⋈ Right) ∪ (Left ⋈ Δ Right)
+  $\Delta$ Output = ($\Delta$ Left $\bowtie$ Right) $\cup$ (Left $\bowtie$ $\Delta$ Right)
   // Only process changes
 ```
 
@@ -148,8 +148,8 @@ FROM orders
 GROUP BY customer_id
 
 -- Update rule:
-Δ count = +1 for new order
-Δ count = -1 for deleted order
+$\Delta$ count = +1 for new order
+$\Delta$ count = -1 for deleted order
 // No full recount needed
 ```
 
@@ -221,7 +221,7 @@ Arrangements add memory overhead but enable incremental updates.
 **Update Latency:**
 ```
 Traditional: O(n) full recomputation
-Differential: O(Δ) process only changes
+Differential: O($\Delta$) process only changes
 ```
 
 For small deltas, differential is orders of magnitude faster.

@@ -145,12 +145,12 @@ GROUP BY tag, val
 
 **Pattern**:
 ```
--- Query: R1 ⨝ R2 ⨝ R3
+-- Query: R1 $\bowtie$ R2 $\bowtie$ R3
 -- Execution:
 -- 1. Start scan of R1
 -- 2. Build bloom filter B1 from R1.join_key
 -- 3. While scanning R2, filter using B1 (SIP)
--- 4. Build bloom filter B2 from (R1 ⨝ R2).join_key
+-- 4. Build bloom filter B2 from (R1 $\bowtie$ R2).join_key
 -- 5. While scanning R3, filter using B2 (SIP)
 ```
 
@@ -170,13 +170,13 @@ GROUP BY tag, val
 ```
 -- Before: Global hash aggregation
 Aggregate(SUM(amount) GROUP BY category)
-  ├─ ParallelScan(orders)
+  |--- ParallelScan(orders)
 
 -- After: Two-phase aggregation
 Aggregate(SUM(partial_sum) GROUP BY category)  -- Global phase
-  ├─ Gather
-      ├─ Aggregate(SUM(amount) AS partial_sum GROUP BY category)  -- Local phase
-          ├─ ParallelScan(orders)
+  |--- Gather
+      |--- Aggregate(SUM(amount) AS partial_sum GROUP BY category)  -- Local phase
+          |--- ParallelScan(orders)
 ```
 
 **Status**: Checked `rules/parallel/` - has ParallelAggregate but not explicit two-phase
@@ -202,9 +202,9 @@ Aggregate(SUM(partial_sum) GROUP BY category)  -- Global phase
 
 -- Better: Bitmap intersection
 BitmapHeapScan
-  ├─ BitmapAnd
-      ├─ BitmapIndexScan(idx_age)
-      ├─ BitmapIndexScan(idx_city)
+  |--- BitmapAnd
+      |--- BitmapIndexScan(idx_age)
+      |--- BitmapIndexScan(idx_city)
 ```
 
 **Status**: Found `BitmapAnd` in algebra.rs, likely implemented

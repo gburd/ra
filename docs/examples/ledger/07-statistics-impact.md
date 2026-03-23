@@ -101,8 +101,8 @@ WHERE t.transaction_date = '2024-01-15';
 **Plan with 100 rows**:
 ```
 NestedLoopJoin  -- Good for small tables
-  ├── SeqScan (ledger_transactions)
-  └── IndexSeek (chart_of_accounts)
+  |---- SeqScan (ledger_transactions)
+  `---- IndexSeek (chart_of_accounts)
 ```
 
 ### Large Table Reality
@@ -122,9 +122,9 @@ WHERE t.transaction_date = '2024-01-15';
 **Plan with 50,000 rows**:
 ```
 HashJoin  -- Better for large tables
-  ├── IndexScan (ledger_transactions)
-  └── Hash
-      └── SeqScan (chart_of_accounts)
+  |---- IndexScan (ledger_transactions)
+  `---- Hash
+      `---- SeqScan (chart_of_accounts)
 ```
 
 ## Scenario 2: Cardinality Impact
@@ -143,7 +143,7 @@ WHERE debit_account_code = '1010';
 **Plan with low cardinality**:
 ```
 SeqScan  -- Index not worth it for 20% of table
-  └── Filter: debit_account_code = '1010'
+  `---- Filter: debit_account_code = '1010'
 Expected rows: 10,000 (20% selectivity)
 ```
 
@@ -161,7 +161,7 @@ WHERE debit_account_code = '1010';
 **Plan with high cardinality**:
 ```
 IndexScan  -- Index very selective
-  └── Index: idx_debit_account
+  `---- Index: idx_debit_account
 Expected rows: 10 (0.02% selectivity)
 ```
 
@@ -184,7 +184,7 @@ ORDER BY transaction_date;
 **Plan with high correlation**:
 ```
 IndexScan  -- Sequential I/O, fast!
-  └── Index: idx_transaction_date
+  `---- Index: idx_transaction_date
 Cost: 150 (low because of sequential reads)
 ```
 
@@ -203,8 +203,8 @@ ORDER BY transaction_date;
 **Plan with low correlation**:
 ```
 Sort  -- Index would cause random I/O
-  └── SeqScan
-      └── Filter: date BETWEEN ...
+  `---- SeqScan
+      `---- Filter: date BETWEEN ...
 Cost: 500 (high because must sort)
 ```
 
@@ -525,7 +525,7 @@ WHERE transaction_date >= CURRENT_DATE - 7
 ## Key Takeaways
 
 1. **Statistics drive optimization decisions**
-   - Wrong statistics → wrong plans
+   - Wrong statistics -> wrong plans
    - Regular ANALYZE is critical
 
 2. **Cardinality estimates cascade**
@@ -533,8 +533,8 @@ WHERE transaction_date >= CURRENT_DATE - 7
    - Join estimates multiply errors
 
 3. **Correlation matters for index scans**
-   - High correlation → index preferred
-   - Low correlation → sequential scan
+   - High correlation -> index preferred
+   - Low correlation -> sequential scan
 
 4. **Histograms improve range estimates**
    - Default assumes uniform distribution
@@ -551,4 +551,4 @@ Statistics work within a single database. But what if you need to run the same q
 
 ---
 
-*📊 Pro Tip: If EXPLAIN ANALYZE shows large row estimate errors (off by 10x+), update statistics immediately. Bad statistics are the #1 cause of poor query performance.*
+* Pro Tip: If EXPLAIN ANALYZE shows large row estimate errors (off by 10x+), update statistics immediately. Bad statistics are the #1 cause of poor query performance.*

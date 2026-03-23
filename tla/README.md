@@ -37,7 +37,7 @@ TLA+ (Temporal Logic of Actions) is a formal specification language for concurre
 **Key Properties**:
 - **Semantic Equivalence**: The optimized plan always produces the same results as the original plan
 - **Rule Correctness**: Every individual transformation rule preserves semantics
-- **Determinism**: Query evaluation is deterministic (same inputs → same outputs)
+- **Determinism**: Query evaluation is deterministic (same inputs -> same outputs)
 - **Specific Rule Properties**:
   - Filter pushdown through joins
   - Join commutativity and associativity
@@ -106,9 +106,9 @@ tlc -workers auto -config models/Equivalence.cfg Equivalence.tla
 ### TLA+ Toolbox (GUI)
 
 1. Open TLA+ Toolbox
-2. File → Open Spec → Add Existing Spec
+2. File -> Open Spec -> Add Existing Spec
 3. Select a `.tla` file
-4. TLC Model Checker → New Model
+4. TLC Model Checker -> New Model
 5. Load corresponding `.cfg` from `models/`
 6. Run TLC
 
@@ -213,14 +213,14 @@ java -Xmx16G -XX:+UseParallelGC -cp tla2tools.jar tlc2.TLC spec.tla
 ### Current Scope
 
 Our TLA+ specifications verify:
-- ✓ Core optimization algorithms (termination, monotonicity, equivalence)
-- ✓ Properties hold for small, bounded models
-- ✓ Counterexample-driven debugging
+- [x] Core optimization algorithms (termination, monotonicity, equivalence)
+- [x] Properties hold for small, bounded models
+- [x] Counterexample-driven debugging
 
 They do NOT verify:
-- ✗ Full implementation correctness (Rust code)
-- ✗ Properties for unbounded systems (infinite graphs, queries)
-- ✗ Liveness properties requiring fairness assumptions
+- [FAIL] Full implementation correctness (Rust code)
+- [FAIL] Properties for unbounded systems (infinite graphs, queries)
+- [FAIL] Liveness properties requiring fairness assumptions
 
 ### Bridging the Gap
 

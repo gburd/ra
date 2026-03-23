@@ -37,8 +37,8 @@ Trino's predicate pushdown combines traditional filter pushdown with dynamic fil
 ## Relational Algebra
 
 ```
-σ_p(R ⋈_{R.a = S.b} S)
-→ σ_p(σ_{dynamic_filter(R.a, S.b)}(R) ⋈_{R.a = S.b} S)
+$\sigma$_p(R $\bowtie$_{R.a = S.b} S)
+-> $\sigma$_p($\sigma$_{dynamic_filter(R.a, S.b)}(R) $\bowtie$_{R.a = S.b} S)
 
 Where dynamic_filter(R.a, S.b) is created at runtime from S.b values
 ```
@@ -149,10 +149,10 @@ JOIN customers c ON o.customer_id = c.id
 WHERE c.region = 'US';
 
 -- Expected optimization:
--- 1. Filter customers: 1000 → 100 (US region)
+-- 1. Filter customers: 1000 -> 100 (US region)
 -- 2. Create dynamic filter from 100 customer IDs
 -- 3. Push dynamic filter to orders scan
--- 4. Orders scan filters 1B → ~1M matching rows
+-- 4. Orders scan filters 1B -> ~1M matching rows
 -- 5. Join 1M orders with 100 customers
 
 -- Without dynamic filter: Scan 1B orders, join all

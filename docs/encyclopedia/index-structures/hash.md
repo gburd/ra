@@ -16,7 +16,7 @@ flowchart LR
     Hash --> Mod["mod B"]
     Mod --> B0["Bucket 0"]
     Mod --> B1["Bucket 1"]
-    Mod --> B2["Bucket 2<br/>→ Row ptr"]
+    Mod --> B2["Bucket 2<br/>-> Row ptr"]
     Mod --> BN["Bucket N"]
 
     style B2 fill:#c8e6c9
@@ -131,13 +131,13 @@ WHERE email = 'alice@example.com';
 **Execution plan:**
 ```
 HashIndexLookup(users, email='alice@example.com')
-  → Cost: 1 hash computation + 1 disk read
+  -> Cost: 1 hash computation + 1 disk read
 ```
 
 **vs Table Scan:**
 ```
 TableScan(users) + Filter(email='alice@example.com')
-  → Cost: 10M rows scanned
+  -> Cost: 10M rows scanned
 ```
 
 **Speedup:** ~10,000,000x
@@ -180,13 +180,13 @@ WHERE token = 'abc123...xyz';
 | Feature | Hash Index | B-tree Index |
 |---------|------------|--------------|
 | **Equality lookups** | O(1) | O(log n) |
-| **Range queries** | ❌ Not supported | ✓ O(log n + k) |
-| **Sorting** | ❌ No | ✓ Returns sorted |
-| **Prefix matching** | ❌ No | ✓ LIKE 'abc%' |
-| **Min/Max** | ❌ No | ✓ O(log n) |
-| **NULL handling** | ✓ Yes | ✓ Yes |
-| **Partial indexes** | ✓ Yes | ✓ Yes |
-| **Index-only scans** | ❌ Rare | ✓ Common |
+| **Range queries** | [FAIL] Not supported | [x] O(log n + k) |
+| **Sorting** | [FAIL] No | [x] Returns sorted |
+| **Prefix matching** | [FAIL] No | [x] LIKE 'abc%' |
+| **Min/Max** | [FAIL] No | [x] O(log n) |
+| **NULL handling** | [x] Yes | [x] Yes |
+| **Partial indexes** | [x] Yes | [x] Yes |
+| **Index-only scans** | [FAIL] Rare | [x] Common |
 | **Write cost** | Low | Medium |
 | **Storage** | Low | Medium |
 
@@ -194,7 +194,7 @@ WHERE token = 'abc123...xyz';
 
 ## When to Use Hash Indexes
 
-### ✓ Good Use Cases
+### [x] Good Use Cases
 
 1. **Primary key lookups (non-sequential)**
    ```sql
@@ -217,7 +217,7 @@ WHERE token = 'abc123...xyz';
    SELECT * FROM orders WHERE customer_id = 12345;
    ```
 
-### ✗ Bad Use Cases
+### [FAIL] Bad Use Cases
 
 1. **Range queries**
    ```sql
@@ -269,8 +269,8 @@ Ra defaults to MurmurHash3.
 Each bucket is a linked list of entries:
 
 ```
-Bucket 5: → Entry(key1, ptr1) → Entry(key2, ptr2) → NULL
-Bucket 7: → Entry(key3, ptr3) → NULL
+Bucket 5: -> Entry(key1, ptr1) -> Entry(key2, ptr2) -> NULL
+Bucket 7: -> Entry(key3, ptr3) -> NULL
 ```
 
 **Cost with collisions:** $O(c)$ where $c$ = chain length (average 1-2).
@@ -281,7 +281,7 @@ On collision, probe for next empty bucket:
 
 ```
 Bucket 5: Entry(key1, ptr1)
-Bucket 6: Entry(key2, ptr2)  ← Collision, stored in next bucket
+Bucket 6: Entry(key2, ptr2)  <- Collision, stored in next bucket
 Bucket 7: Entry(key3, ptr3)
 ```
 
@@ -368,7 +368,7 @@ fn test_hash_index_not_used_for_range() {
 
 ## Common Pitfalls
 
-### ❌ Using Hash Index for Range Queries
+### [FAIL] Using Hash Index for Range Queries
 
 ```sql
 CREATE INDEX idx_orders_date_hash ON orders USING HASH (order_date);
@@ -379,18 +379,18 @@ SELECT * FROM orders WHERE order_date >= '2024-01-01';
 
 **Fix:** Use B-tree index instead.
 
-### ❌ Hash Index on Low-Cardinality Column
+### [FAIL] Hash Index on Low-Cardinality Column
 
 ```sql
 -- status has only 3 values: 'active', 'inactive', 'suspended'
 CREATE INDEX idx_users_status_hash ON users USING HASH (status);
 ```
 
-**Problem:** Few distinct values → many collisions → slow lookups.
+**Problem:** Few distinct values -> many collisions -> slow lookups.
 
 **Fix:** Use bitmap index instead.
 
-### ❌ Hash Index on Sorted Access
+### [FAIL] Hash Index on Sorted Access
 
 ```sql
 -- Users ordered by email

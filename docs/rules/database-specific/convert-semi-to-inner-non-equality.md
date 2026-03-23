@@ -29,7 +29,7 @@ Converts a semi-join with non-equality ON conditions to an inner join with Disti
 ```algebra
 SemiJoin[c](L, R)
   -> Project[L_cols](DistinctOn[L.key](InnerJoin[c](EnsureKey(L), R)))
-  where ¬is_simple_equality(c)
+  where $\neg$is_simple_equality(c)
 ```
 
 ## Implementation

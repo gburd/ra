@@ -487,7 +487,7 @@ proptest! {
             if let Ok(optimized_cost) = estimate_cost(&optimized) {
                 prop_assert!(
                     optimized_cost <= original_cost * 1.01,
-                    "Optimization increased cost: {:.2} → {:.2} ({:.1}% increase)\n\
+                    "Optimization increased cost: {:.2} -> {:.2} ({:.1}% increase)\n\
                      Original expr: {:?}\n\
                      Optimized expr: {:?}",
                     original_cost,

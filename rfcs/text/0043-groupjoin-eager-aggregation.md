@@ -20,27 +20,27 @@ GROUP BY products.category
 ```
 
 **Current execution** (lazy aggregation):
-1. Join sales ⨝ products: 10M rows
-2. Aggregate: 10M rows → 5 categories
+1. Join sales $\bowtie$ products: 10M rows
+2. Aggregate: 10M rows -> 5 categories
 
 **Problem**: Join produces 10M intermediate rows, most of which get aggregated away.
 
 **Optimal execution** (eager aggregation):
-1. Pre-aggregate sales: 10M rows → 1000 products
-2. Join aggregated_sales ⨝ products: 1000 rows
-3. Final aggregate: 1000 rows → 5 categories
+1. Pre-aggregate sales: 10M rows -> 1000 products
+2. Join aggregated_sales $\bowtie$ products: 1000 rows
+3. Final aggregate: 1000 rows -> 5 categories
 
 **Benefit**: 10,000x fewer rows in join intermediate result.
 
 ### Use Cases
 
 1. **Sales Analytics**: "Total revenue per product category"
-2. **Event Analytics**: "Count events per user region" (join events → users → regions)
+2. **Event Analytics**: "Count events per user region" (join events -> users -> regions)
 3. **Supply Chain**: "Total inventory cost per warehouse region"
-4. **Ad Analytics**: "Total clicks per advertiser country" (clicks → ads → advertisers → countries)
+4. **Ad Analytics**: "Total clicks per advertiser country" (clicks -> ads -> advertisers -> countries)
 5. **IoT Metrics**: "Average sensor value per device manufacturer"
 
-All follow the pattern: **Aggregate fact table → Join dimension → Final aggregate**
+All follow the pattern: **Aggregate fact table -> Join dimension -> Final aggregate**
 
 ## Guide-level explanation
 
@@ -58,9 +58,9 @@ GROUP BY products.category;
 **Execution Plan**:
 ```
 Aggregate(category, SUM(amount))
-  ├─ HashJoin(sales.product_id = products.id)
-      ├─ Scan(sales)        -- 10M rows
-      ├─ Scan(products)     -- 1K rows
+  |--- HashJoin(sales.product_id = products.id)
+      |--- Scan(sales)        -- 10M rows
+      |--- Scan(products)     -- 1K rows
 ```
 
 **Cost**: 10M row join, then aggregate
@@ -83,10 +83,10 @@ GROUP BY products.category;
 **Execution Plan**:
 ```
 Aggregate(category, SUM(amount_sum))
-  ├─ HashJoin(aggregated_sales.product_id = products.id)
-      ├─ Aggregate(product_id, SUM(amount) AS amount_sum)
-      │   ├─ Scan(sales)   -- 10M rows → 1K groups
-      ├─ Scan(products)    -- 1K rows
+  |--- HashJoin(aggregated_sales.product_id = products.id)
+      |--- Aggregate(product_id, SUM(amount) AS amount_sum)
+      |   |--- Scan(sales)   -- 10M rows -> 1K groups
+      |--- Scan(products)    -- 1K rows
 ```
 
 **Cost**: 1K row join, much cheaper!
@@ -94,21 +94,21 @@ Aggregate(category, SUM(amount_sum))
 ### Decomposable Aggregates
 
 GroupJoin only works for **decomposable** aggregate functions:
-- `SUM(x)`: `SUM(SUM(x))` = `SUM(x)` ✅
-- `COUNT(*)`: `SUM(COUNT(*))` = `COUNT(*)` ✅
-- `MIN(x)`: `MIN(MIN(x))` = `MIN(x)` ✅
-- `MAX(x)`: `MAX(MAX(x))` = `MAX(x)` ✅
-- `AVG(x)`: `SUM(sum_x) / SUM(count_x)` = `AVG(x)` ✅ (requires rewriting)
-- `COUNT(DISTINCT x)`: ❌ NOT decomposable (requires full data)
-- `MEDIAN(x)`: ❌ NOT decomposable
+- `SUM(x)`: `SUM(SUM(x))` = `SUM(x)` [x]
+- `COUNT(*)`: `SUM(COUNT(*))` = `COUNT(*)` [x]
+- `MIN(x)`: `MIN(MIN(x))` = `MIN(x)` [x]
+- `MAX(x)`: `MAX(MAX(x))` = `MAX(x)` [x]
+- `AVG(x)`: `SUM(sum_x) / SUM(count_x)` = `AVG(x)` [x] (requires rewriting)
+- `COUNT(DISTINCT x)`: [FAIL] NOT decomposable (requires full data)
+- `MEDIAN(x)`: [FAIL] NOT decomposable
 
 ### Preconditions
 
 GroupJoin applies when:
 1. **Aggregate function is decomposable**: SUM, COUNT, MIN, MAX, AVG
 2. **Grouping keys include join keys**: `GROUP BY product_id, category` (includes product_id)
-3. **Join is many-to-one or one-to-one**: sales → products (many sales per product)
-4. **Pre-aggregation reduces cardinality**: 10M sales → 1K products
+3. **Join is many-to-one or one-to-one**: sales -> products (many sales per product)
+4. **Pre-aggregation reduces cardinality**: 10M sales -> 1K products
 
 ## Reference-level explanation
 
@@ -119,22 +119,22 @@ GroupJoin applies when:
 Detect the pattern:
 ```
 Aggregate(G, F)
-  ├─ Join(R ⨝ S on R.k = S.k)
+  |--- Join(R $\bowtie$ S on R.k = S.k)
 ```
 
 Where:
 - `G` = grouping columns
 - `F` = aggregate functions
-- `R.k` ∈ G (join key is in grouping columns)
+- `R.k` $\in$ G (join key is in grouping columns)
 
 #### Phase 2: Decomposability Check
 
 For each aggregate function `F`, verify it's decomposable:
-- `SUM(expr)` → `SUM(SUM(expr))`
-- `COUNT(*)` → `SUM(COUNT(*))`
-- `MIN(expr)` → `MIN(MIN(expr))`
-- `MAX(expr)` → `MAX(MAX(expr))`
-- `AVG(expr)` → rewrite to `SUM(expr) / COUNT(expr)`, then apply SUM/COUNT rules
+- `SUM(expr)` -> `SUM(SUM(expr))`
+- `COUNT(*)` -> `SUM(COUNT(*))`
+- `MIN(expr)` -> `MIN(MIN(expr))`
+- `MAX(expr)` -> `MAX(MAX(expr))`
+- `AVG(expr)` -> rewrite to `SUM(expr) / COUNT(expr)`, then apply SUM/COUNT rules
 
 Reject if:
 - `COUNT(DISTINCT ...)`: Not decomposable
@@ -144,8 +144,8 @@ Reject if:
 #### Phase 3: Cardinality Estimation
 
 Estimate benefit:
-1. **Without GroupJoin**: Join cardinality × aggregate cost
-2. **With GroupJoin**: Pre-aggregate cardinality × join cardinality × final aggregate cost
+1. **Without GroupJoin**: Join cardinality $\times$ aggregate cost
+2. **With GroupJoin**: Pre-aggregate cardinality $\times$ join cardinality $\times$ final aggregate cost
 
 Apply transformation only if **benefit > overhead**.
 
@@ -155,14 +155,14 @@ Apply transformation only if **benefit > overhead**.
 - Join output: 10M rows
 
 **Cost without GroupJoin**:
-- Join: 10M × 1K (hash table size) = 10B cost units
-- Aggregate: 10M rows → 5 categories = 10M cost units
+- Join: 10M $\times$ 1K (hash table size) = 10B cost units
+- Aggregate: 10M rows -> 5 categories = 10M cost units
 - **Total**: 10.01B cost units
 
 **Cost with GroupJoin**:
-- Pre-aggregate: 10M rows → 1K groups = 10M cost units
-- Join: 1K × 1K = 1M cost units
-- Final aggregate: 1K rows → 5 categories = 1K cost units
+- Pre-aggregate: 10M rows -> 1K groups = 10M cost units
+- Join: 1K $\times$ 1K = 1M cost units
+- Final aggregate: 1K rows -> 5 categories = 1K cost units
 - **Total**: 11M cost units
 
 **Speedup**: ~1000x
@@ -174,18 +174,18 @@ Rewrite the query:
 **Input**:
 ```
 Aggregate(category, SUM(amount))
-  ├─ Join(sales.product_id = products.id)
-      ├─ Scan(sales)
-      ├─ Scan(products)
+  |--- Join(sales.product_id = products.id)
+      |--- Scan(sales)
+      |--- Scan(products)
 ```
 
 **Output**:
 ```
 Aggregate(category, SUM(partial_sum))
-  ├─ Join(agg_sales.product_id = products.id)
-      ├─ Aggregate(product_id, SUM(amount) AS partial_sum)
-      │   ├─ Scan(sales)
-      ├─ Scan(products)
+  |--- Join(agg_sales.product_id = products.id)
+      |--- Aggregate(product_id, SUM(amount) AS partial_sum)
+      |   |--- Scan(sales)
+      |--- Scan(products)
 ```
 
 **Steps**:
@@ -224,9 +224,9 @@ pub struct GroupJoinCandidate {
 pub struct DecomposedAggregate {
     /// Original aggregate function (SUM, AVG, etc.)
     original: AggregateFunction,
-    /// Partial aggregate (SUM → SUM, AVG → SUM + COUNT)
+    /// Partial aggregate (SUM -> SUM, AVG -> SUM + COUNT)
     partial: Vec<AggregateFunction>,
-    /// Combiner aggregate (SUM → SUM, AVG → SUM/SUM)
+    /// Combiner aggregate (SUM -> SUM, AVG -> SUM/SUM)
     combiner: AggregateFunction,
 }
 ```
@@ -332,9 +332,9 @@ pub struct DecomposedAggregate {
 ### Performance Considerations
 
 **Expected Speedup**:
-- **High reduction factor** (10M → 1K): 100x-1000x faster
-- **Medium reduction factor** (10M → 100K): 10x-50x faster
-- **Low reduction factor** (10M → 5M): 2x-5x faster
+- **High reduction factor** (10M -> 1K): 100x-1000x faster
+- **Medium reduction factor** (10M -> 100K): 10x-50x faster
+- **Low reduction factor** (10M -> 5M): 2x-5x faster
 - **No reduction** (already unique on join key): Slight overhead
 
 **Space Overhead**:
@@ -482,7 +482,7 @@ pub struct DecomposedAggregate {
 2. **AVG is complex**: Requires SUM+COUNT decomposition and careful rewriting
 3. **Multi-way joins**: Can apply GroupJoin at multiple levels (cascade)
 4. **Explain plan clarity**: Users should see "Pre-Aggregation" in plan
-5. **Statistics quality matters**: Bad NDV estimates → wrong decision
+5. **Statistics quality matters**: Bad NDV estimates -> wrong decision
 
 **Calcite lesson**: Implement as modular rule (easy to enable/disable).
 
@@ -515,7 +515,7 @@ pub struct DecomposedAggregate {
 
 #### 1. Multi-Level GroupJoin
 - Apply GroupJoin to multi-way joins
-- Example: sales → products → categories
+- Example: sales -> products -> categories
 - Pre-aggregate at each level
 
 #### 2. GroupJoin + Semi-Join Reduction
@@ -580,7 +580,7 @@ pub struct DecomposedAggregate {
 
 ## References
 
-- Yan, W. P., & Larson, P.-Å. (1995). *Eager aggregation and lazy aggregation*. VLDB '95.
+- Yan, W. P., & Larson, P.-A. (1995). *Eager aggregation and lazy aggregation*. VLDB '95.
 - Chaudhuri, S., & Shim, K. (1994). *Including group-by in query optimization*. VLDB '94.
 - Apache Calcite: [AggregateJoinTransposeRule](https://calcite.apache.org/javadocAggregate/org/apache/calcite/rel/rules/AggregateJoinTransposeRule.html)
 - SQL Server: [Execution Plan Basics](https://docs.microsoft.com/en-us/sql/relational-databases/performance/execution-plans)

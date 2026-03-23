@@ -38,7 +38,7 @@
 ## Metadata
 - **Rule ID**: `hash-aggregation`
 - **Category**: Physical / Aggregation Strategies
-- **Complexity**: O(n) average, O(n²) worst-case with hash collisions
+- **Complexity**: O(n) average, O(n$^2$) worst-case with hash collisions
 - **Introduced**: Early 1980s (various systems)
 - **Prerequisites**: Sufficient memory for hash table
 - **Alternatives**: sort-aggregation, streaming-aggregation
@@ -68,8 +68,8 @@ Hash aggregation builds an in-memory hash table keyed by GROUP BY columns, accum
 ## Relational Algebra
 
 ```
-γ_{group_cols; agg_funcs}(R)
-→ HashAggregation(R, group_cols, agg_funcs)
+$\gamma$_{group_cols; agg_funcs}(R)
+-> HashAggregation(R, group_cols, agg_funcs)
 
 Cost = n * (hash + update) + |groups| * emit
   where n = |R|

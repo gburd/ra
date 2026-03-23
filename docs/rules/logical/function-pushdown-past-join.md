@@ -33,7 +33,7 @@ comparisons (and hash table entries, or sort runs). Cheap functions
 ```algebra
 sigma[f(a) = v](R join S)
   -> (sigma[f(a) = v](R)) join S
-  where a ∈ columns(R) && is_cheap(f)
+  where a $\in$ columns(R) && is_cheap(f)
 ```
 
 ## Implementation

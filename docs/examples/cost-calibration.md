@@ -29,12 +29,12 @@ cargo run --bin ra-cli -- calibrate \
 
 # Output:
 # Running calibration benchmarks...
-# ✓ Sequential scan: 0.8 units/page (baseline: 1.0)
-# ✓ Random I/O: 1.2 units/page (baseline: 4.0)
-# ✓ CPU tuple cost: 0.005 units (baseline: 0.01)
-# ✓ Hash join: 0.02 units/tuple
-# ✓ Sort: 0.03 units/tuple
-# ✓ Network transfer: 2.0 units/MB
+# [x] Sequential scan: 0.8 units/page (baseline: 1.0)
+# [x] Random I/O: 1.2 units/page (baseline: 4.0)
+# [x] CPU tuple cost: 0.005 units (baseline: 0.01)
+# [x] Hash join: 0.02 units/tuple
+# [x] Sort: 0.03 units/tuple
+# [x] Network transfer: 2.0 units/MB
 # Calibration saved to my-hardware.json
 ```
 
@@ -135,7 +135,7 @@ cargo run --bin ra-cli -- calibrate \
 
 # Produces GPU-specific costs:
 {
-  "gpu_transfer_cost": 5.0,      // CPU→GPU transfer
+  "gpu_transfer_cost": 5.0,      // CPU->GPU transfer
   "gpu_scan_cost": 0.001,         // Parallel scan
   "gpu_filter_cost": 0.0005,      // Parallel filter
   "gpu_hash_join_cost": 0.002,    // GPU hash join

@@ -119,7 +119,7 @@ optimizer.set_statistics("sales", TableStatistics {
     },
 });
 
-// Ra estimates group count: 50 × 10 = 500 groups
+// Ra estimates group count: 50 $\times$ 10 = 500 groups
 // Chooses hash aggregation (fits easily in memory)
 ```
 
@@ -158,8 +158,8 @@ $$
 |\text{groups}| \approx \frac{|\text{distinct}(c_1)| \times |\text{distinct}(c_2)| \times |\text{distinct}(c_3)|}{\text{correlation\_factor}}
 $$
 
-With 20 categories × 100 subcategories × 500 brands = 1M potential groups.
-With correlation factor (not all combinations exist) → ~50K actual groups.
+With 20 categories $\times$ 100 subcategories $\times$ 500 brands = 1M potential groups.
+With correlation factor (not all combinations exist) -> ~50K actual groups.
 
 ### Aggregation with Complex Expressions
 
@@ -245,13 +245,13 @@ Aggregate $R$ first, then join with $S$ (fewer rows).
 
 **Example:**
 ```sql
--- Before: Join 100M orders × 10K customers, then aggregate
+-- Before: Join 100M orders $\times$ 10K customers, then aggregate
 SELECT c.customer_name, COUNT(*) as order_count
 FROM orders o
 JOIN customers c ON o.customer_id = c.customer_id
 GROUP BY c.customer_name;
 
--- After: Aggregate orders (100M → 10K), then join
+-- After: Aggregate orders (100M -> 10K), then join
 SELECT c.customer_name, o.order_count
 FROM (
     SELECT customer_id, COUNT(*) as order_count
@@ -335,7 +335,7 @@ GROUP BY customer_id;
 
 ## Common Pitfalls
 
-### ❌ High Cardinality GROUP BY
+### [FAIL] High Cardinality GROUP BY
 
 ```sql
 -- user_agent has millions of distinct values
@@ -348,7 +348,7 @@ GROUP BY user_agent;
 
 **Fix:** Use approximate aggregation, sampling, or pre-aggregate.
 
-### ❌ Unnecessary GROUP BY
+### [FAIL] Unnecessary GROUP BY
 
 ```sql
 -- All rows have same customer_id (filtered)
@@ -363,7 +363,7 @@ GROUP BY customer_id;
 SELECT 12345 as customer_id, COUNT(*) FROM orders WHERE customer_id = 12345;
 ```
 
-### ❌ Expensive Aggregate Functions
+### [FAIL] Expensive Aggregate Functions
 
 ```sql
 -- STRING_AGG concatenates all values (memory intensive)

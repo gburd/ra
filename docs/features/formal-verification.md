@@ -7,28 +7,28 @@ This document explains the formal verification approach used in the RA optimizer
 Formal verification provides mathematical proofs that critical properties hold. We use a multi-layered approach:
 
 ```
-┌─────────────────────────────────────────────────────┐
-│ TLA+ Specifications (Mathematical Proofs)           │
-│ - Termination, Monotonicity, Equivalence            │
-└──────────────────┬──────────────────────────────────┘
-                   ↓
-┌─────────────────────────────────────────────────────┐
-│ Property-Based Testing (Random Test Generation)     │
-│ - proptest: Generates random queries                │
-│ - Checks properties hold for all inputs             │
-└──────────────────┬──────────────────────────────────┘
-                   ↓
-┌─────────────────────────────────────────────────────┐
-│ Differential Testing (Compare vs Reference)         │
-│ - Execute on PostgreSQL, DuckDB, SQLite             │
-│ - Verify same results as production databases       │
-└──────────────────┬──────────────────────────────────┘
-                   ↓
-┌─────────────────────────────────────────────────────┐
-│ Static Analysis (Compile-Time Checks)               │
-│ - Rust type system prevents many bugs               │
-│ - Clippy catches common errors                      │
-└─────────────────────────────────────────────────────┘
+,-------------------------------------------------------,
+| TLA+ Specifications (Mathematical Proofs)           |
+| - Termination, Monotonicity, Equivalence            |
+`---------------------+------------------------------------'
+                   down
+,-------------------------------------------------------,
+| Property-Based Testing (Random Test Generation)     |
+| - proptest: Generates random queries                |
+| - Checks properties hold for all inputs             |
+`---------------------+------------------------------------'
+                   down
+,-------------------------------------------------------,
+| Differential Testing (Compare vs Reference)         |
+| - Execute on PostgreSQL, DuckDB, SQLite             |
+| - Verify same results as production databases       |
+`---------------------+------------------------------------'
+                   down
+,-------------------------------------------------------,
+| Static Analysis (Compile-Time Checks)               |
+| - Rust type system prevents many bugs               |
+| - Clippy catches common errors                      |
+`--------------------------------------------------------'
 ```
 
 Each layer catches different types of bugs:
@@ -46,17 +46,17 @@ See [`tla/README.md`](../tla/README.md) for complete documentation.
 1. **Termination** (`RuleComposition.tla`)
    - The optimizer always finishes in bounded time
    - No infinite loops or unbounded memory growth
-   - Guarantees: `∀ query. Eventually(Optimized(query) ∨ Timeout)`
+   - Guarantees: `$\forall$ query. Eventually(Optimized(query) $\lor$ Timeout)`
 
 2. **Cost Monotonicity** (`CostMonotonicity.tla`)
    - Logical rules never increase query cost
    - Cost model is consistent across all rules
-   - Guarantees: `∀ rule ∈ LogicalRules. cost' ≤ cost`
+   - Guarantees: `$\forall$ rule $\in$ LogicalRules. cost' $\leq$ cost`
 
 3. **Semantic Equivalence** (`Equivalence.tla`)
    - Optimized plans produce identical results
    - All transformation rules preserve semantics
-   - Guarantees: `∀ plan1, plan2. Transform(plan1) = plan2 ⇒ Eval(plan1) = Eval(plan2)`
+   - Guarantees: `$\forall$ plan1, plan2. Transform(plan1) = plan2 => Eval(plan1) = Eval(plan2)`
 
 ### Running TLA+ Model Checker
 
@@ -431,13 +431,13 @@ cargo test
 
 | Property | TLA+ | Property Tests | Differential | Static |
 |----------|------|----------------|--------------|--------|
-| Termination | ✓ Proven | ✓ 10K cases | ✓ 250+ queries | ✓ Timeout types |
-| Cost Monotonicity | ✓ Proven | ✓ 10K cases | ✓ vs PostgreSQL | ✓ Cost types |
-| Semantic Equivalence | ✓ Proven | ✓ 10K cases | ✓ 1M+ test cases | ✓ Type safety |
-| Memory Safety | N/A | N/A | N/A | ✓ Rust guarantees |
-| Thread Safety | N/A | N/A | N/A | ✓ Send/Sync |
-| No Null Deref | ✓ Modeled | ✓ Tested | ✓ Compared | ✓ Option type |
-| No Panics | N/A | ✓ Tested | N/A | ✓ Result type |
+| Termination | [x] Proven | [x] 10K cases | [x] 250+ queries | [x] Timeout types |
+| Cost Monotonicity | [x] Proven | [x] 10K cases | [x] vs PostgreSQL | [x] Cost types |
+| Semantic Equivalence | [x] Proven | [x] 10K cases | [x] 1M+ test cases | [x] Type safety |
+| Memory Safety | N/A | N/A | N/A | [x] Rust guarantees |
+| Thread Safety | N/A | N/A | N/A | [x] Send/Sync |
+| No Null Deref | [x] Modeled | [x] Tested | [x] Compared | [x] Option type |
+| No Panics | N/A | [x] Tested | N/A | [x] Result type |
 
 ## Confidence Levels
 
@@ -480,7 +480,7 @@ Based on combined verification approaches:
 
 ### Short Term
 
-- [ ] Increase TLA+ model size (MaxTuples: 10 → 50)
+- [ ] Increase TLA+ model size (MaxTuples: 10 -> 50)
 - [ ] Add more property test generators (window functions, CTEs)
 - [ ] Expand differential test suite (SQLite's 6M+ tests)
 - [ ] Set up continuous mutation testing in CI

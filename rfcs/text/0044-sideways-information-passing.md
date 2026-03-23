@@ -27,7 +27,7 @@ GROUP BY n.name
 ```
 
 **Current execution**:
-1. Scan nation (25 rows) → filter to 'FRANCE' (1 row)
+1. Scan nation (25 rows) -> filter to 'FRANCE' (1 row)
 2. Build hash table: nation (1 row)
 3. Scan customer (150K rows), probe hash, output matches (~6K rows)
 4. Build hash table: matched customers (6K rows)
@@ -38,10 +38,10 @@ GROUP BY n.name
 **Problem**: lineitem scan reads 6M rows, but only 360K match. We knew orderkeys after step 5, why scan all lineitem?
 
 **With SIP**:
-1. After completing nation ⨝ customer, create bloom filter BF_customer from matched custkeys
-2. **Pass BF_customer to orders scan** → scan orders, filter using bloom filter (~60K rows read vs 1.5M)
+1. After completing nation $\bowtie$ customer, create bloom filter BF_customer from matched custkeys
+2. **Pass BF_customer to orders scan** -> scan orders, filter using bloom filter (~60K rows read vs 1.5M)
 3. After completing orders, create bloom filter BF_orders from matched orderkeys
-4. **Pass BF_orders to lineitem scan** → scan lineitem, filter using bloom filter (~360K rows read vs 6M)
+4. **Pass BF_orders to lineitem scan** -> scan lineitem, filter using bloom filter (~360K rows read vs 6M)
 
 **Benefit**: 10x reduction in I/O, 10x reduction in rows processed.
 
@@ -69,21 +69,21 @@ WHERE A.category = 'X'
 
 **Without SIP**:
 ```
-1. Scan A, filter to category='X' → 100 rows
-2. Join with B (scan all 1M rows) → 500 matching rows
-3. Join with C (scan all 10M rows) → 2K matching rows
+1. Scan A, filter to category='X' -> 100 rows
+2. Join with B (scan all 1M rows) -> 500 matching rows
+3. Join with C (scan all 10M rows) -> 2K matching rows
 ```
 **Total I/O**: 1M + 10M = 11M rows
 
 **With SIP**:
 ```
-1. Scan A, filter to category='X' → 100 rows
+1. Scan A, filter to category='X' -> 100 rows
 2. Build bloom filter BF_A from A.id (100 values)
-3. Scan B with bloom filter BF_A → ~500 rows (filtered at scan, not join)
-4. Join A ⨝ B → 500 rows
+3. Scan B with bloom filter BF_A -> ~500 rows (filtered at scan, not join)
+4. Join A $\bowtie$ B -> 500 rows
 5. Build bloom filter BF_B from B.id (500 values)
-6. Scan C with bloom filter BF_B → ~2K rows (filtered at scan)
-7. Join (A ⨝ B) ⨝ C → 2K rows
+6. Scan C with bloom filter BF_B -> ~2K rows (filtered at scan)
+7. Join (A $\bowtie$ B) $\bowtie$ C -> 2K rows
 ```
 **Total I/O**: 500 + 2K = ~2.5K rows
 
@@ -327,7 +327,7 @@ fn should_apply_sip(
 
 **Failures**:
 - Out of memory: Skip filter creation, continue without SIP
-- Filter too large: Use cheaper filter (bloom → bitmap → none)
+- Filter too large: Use cheaper filter (bloom -> bitmap -> none)
 
 ### Performance Considerations
 
@@ -337,10 +337,10 @@ fn should_apply_sip(
 - **Low selectivity** (50%+ selectivity): Minimal benefit or overhead
 
 **Overhead**:
-- Bloom filter creation: ~0.5 μs per key
-- Bloom filter check: ~0.05 μs per tuple
-- Bitmap creation: ~0.1 μs per key
-- Bitmap check: ~0.01 μs per tuple
+- Bloom filter creation: ~0.5 $\mu$s per key
+- Bloom filter check: ~0.05 $\mu$s per tuple
+- Bitmap creation: ~0.1 $\mu$s per key
+- Bitmap check: ~0.01 $\mu$s per tuple
 
 **Memory**:
 - Bloom filter: ~10-15 bits per key
@@ -534,7 +534,7 @@ fn should_apply_sip(
 
 **Cross-Query Optimization**:
 - Reuse SIP filters across concurrent queries
-- Example: 10 users query same date range → share filter
+- Example: 10 users query same date range -> share filter
 - Requires shared filter cache
 
 ---

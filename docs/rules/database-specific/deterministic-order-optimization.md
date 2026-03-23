@@ -30,7 +30,7 @@ VoltDB enforces deterministic query execution for replication consistency. Autom
 
 ```
 SELECT * FROM R WHERE p
-→ SELECT * FROM R WHERE p ORDER BY primary_key
+-> SELECT * FROM R WHERE p ORDER BY primary_key
 
 // Ensures deterministic result ordering
 ```

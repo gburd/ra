@@ -64,7 +64,7 @@ fn estimated_benefit(
     inner_rows: u64,
     inner_distinct: u64,
 ) -> f64 {
-    // Nested loop execution: O(outer × inner)
+    // Nested loop execution: O(outer $\times$ inner)
     let nested_cost = outer_rows * inner_rows;
 
     // Hash semi-join: Build hash table on inner, probe with outer
@@ -93,7 +93,7 @@ WHERE country_id IN (SELECT id FROM countries WHERE region = 'EU');
 
 -- Before: For each customer, scan countries table
 -- After: Hash semi-join (build hash on countries, probe with customers)
--- Benefit: O(N×M) → O(N+M)
+-- Benefit: O(N$\times$M) -> O(N+M)
 ```
 
 ### Positive: IN with filtered subquery

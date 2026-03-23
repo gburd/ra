@@ -213,11 +213,11 @@ HashJoin [o.order_id = r.order_id]
 ```
 
 **Network Transfer:**
-- Orders: 4 GB (40M rows × 100 bytes avg)
-- Returns: 500 MB (5M rows × 100 bytes avg)
+- Orders: 4 GB (40M rows $\times$ 100 bytes avg)
+- Returns: 500 MB (5M rows $\times$ 100 bytes avg)
 - Total: 4.5 GB shuffled
 
-**Parallelism:** 100 partitions × 10 nodes = 10 partitions/node.
+**Parallelism:** 100 partitions $\times$ 10 nodes = 10 partitions/node.
 
 ### Skewed Shuffle Join
 
@@ -292,7 +292,7 @@ FinalHashAggregate [country]
 
 **Network Traffic:**
 - First shuffle: Orders (10 GB) + Customers (2 GB) = 12 GB
-- Second shuffle: ~1 MB (100 countries × ~10 KB per country)
+- Second shuffle: ~1 MB (100 countries $\times$ ~10 KB per country)
 
 ### Cascading Shuffles
 

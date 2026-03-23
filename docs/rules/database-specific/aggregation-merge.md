@@ -24,7 +24,7 @@ grouping columns are a subset of the inner aggregation's grouping columns.
 ```algebra
 Agg[outer_groups, outer_aggs](Agg[inner_groups, inner_aggs](R))
   -> Agg[outer_groups, merged_aggs](R)
-  where outer_groups ⊆ inner_groups
+  where outer_groups $\subseteq$ inner_groups
 ```
 
 ## Implementation

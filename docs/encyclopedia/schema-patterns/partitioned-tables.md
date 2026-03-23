@@ -119,7 +119,7 @@ SUBPARTITION BY HASH (sensor_id) SUBPARTITIONS 4 (
 );
 ```
 
-**Result:** 12 months × 4 hash partitions = 48 total partitions
+**Result:** 12 months $\times$ 4 hash partitions = 48 total partitions
 
 **Best for:**
 - Multi-tenant time-series
@@ -306,7 +306,7 @@ Ra can query archived partitions if metadata retained.
 - Coordinator bottleneck
 - Excessive parallelism
 
-**Fix:** Consolidate partitions (e.g., daily → weekly)
+**Fix:** Consolidate partitions (e.g., daily -> weekly)
 
 ### Too Large (few big partitions)
 
@@ -315,7 +315,7 @@ Ra can query archived partitions if metadata retained.
 - Limited parallelism
 - Slow partition scans
 
-**Fix:** Split partitions (e.g., monthly → weekly)
+**Fix:** Split partitions (e.g., monthly -> weekly)
 
 ### Optimal Size
 
@@ -379,7 +379,7 @@ Where $W$ = worker count.
 
 ## Common Pitfalls
 
-### ❌ Wrong Partition Key
+### [FAIL] Wrong Partition Key
 
 ```sql
 -- Partitioned by customer_id, but queries filter on order_date
@@ -391,7 +391,7 @@ SELECT * FROM orders WHERE order_date >= '2024-01-01';
 
 **Fix:** Partition by the most commonly filtered column.
 
-### ❌ Too Many Partitions
+### [FAIL] Too Many Partitions
 
 ```sql
 -- Daily partitions for 10 years = 3650 partitions
@@ -402,7 +402,7 @@ PARTITION BY RANGE (created_at) INTERVAL '1 day';
 
 **Fix:** Use monthly or weekly partitions for long retention.
 
-### ❌ Non-Aligned Partition Boundaries
+### [FAIL] Non-Aligned Partition Boundaries
 
 ```sql
 -- orders: monthly partitions

@@ -42,7 +42,7 @@ Table: user_events (1 trillion rows, 100TB)
 - Historical (cold): 100TB, 1B rows, 10 queries/day
 
 Query: SELECT COUNT(*) FROM user_events WHERE event_time > NOW() - INTERVAL '7 days'
-→ Should read 1GB (hot), not 100TB (cold)
+-> Should read 1GB (hot), not 100TB (cold)
 ```
 
 ---
@@ -52,7 +52,7 @@ Query: SELECT COUNT(*) FROM user_events WHERE event_time > NOW() - INTERVAL '7 d
 ### Architecture
 
 Iceberg is a **table format** (not a database engine) that provides:
-- **Metadata layers**: Snapshot → Manifest List → Manifest Files → Data Files
+- **Metadata layers**: Snapshot -> Manifest List -> Manifest Files -> Data Files
 - **ACID transactions**: Optimistic concurrency via metadata updates
 - **Schema evolution**: Add/rename/delete columns without rewriting data
 - **Hidden partitioning**: Partition by date without users specifying it in queries
@@ -60,22 +60,22 @@ Iceberg is a **table format** (not a database engine) that provides:
 - **File-level statistics**: Min/max per file for predicate pushdown
 
 ```
-┌─────────────────────────────────────────────────┐
-│  Iceberg Table                                  │
-├─────────────────────────────────────────────────┤
-│  Metadata:                                      │
-│    └─ metadata/v123.metadata.json               │
-│         ├─ Schema                               │
-│         ├─ Partition Spec                       │
-│         ├─ Snapshot 123                         │
-│         │    └─ manifest-list-123.avro          │
-│         │         ├─ manifest-001.avro          │
-│         │         │    ├─ data-001.parquet      │
-│         │         │    │    (file-level stats)  │
-│         │         │    └─ data-002.parquet      │
-│         │         └─ manifest-002.avro          │
-│         └─ Previous Snapshots (time travel)     │
-└─────────────────────────────────────────────────┘
+,---------------------------------------------------,
+|  Iceberg Table                                  |
+|----------------------------------------------------|
+|  Metadata:                                      |
+|    `--- metadata/v123.metadata.json               |
+|         |--- Schema                               |
+|         |--- Partition Spec                       |
+|         |--- Snapshot 123                         |
+|         |    `--- manifest-list-123.avro          |
+|         |         |--- manifest-001.avro          |
+|         |         |    |--- data-001.parquet      |
+|         |         |    |    (file-level stats)  |
+|         |         |    `--- data-002.parquet      |
+|         |         `--- manifest-002.avro          |
+|         `--- Previous Snapshots (time travel)     |
+`----------------------------------------------------'
 ```
 
 ### File-Level Statistics
@@ -138,21 +138,21 @@ Hot tier (S3 Intelligent-Tiering, frequent access):
   s3://bucket/events/date=2024-03-13/
   s3://bucket/events/date=2024-03-14/
   s3://bucket/events/date=2024-03-15/
-  → Last 3 days, 1GB
+  -> Last 3 days, 1GB
 
 Cold tier (S3 Glacier Deep Archive):
   s3://bucket/events/date=2023-01-01/
   s3://bucket/events/date=2023-01-02/
   ...
   s3://bucket/events/date=2024-03-10/
-  → Historical, 100TB
+  -> Historical, 100TB
 ```
 
 **Query Optimization**:
 ```sql
 SELECT * FROM events WHERE date = '2024-03-15'
-→ Read only hot tier (1 day, ~300MB)
-→ Skip 365 days of cold tier (100TB)
+-> Read only hot tier (1 day, ~300MB)
+-> Skip 365 days of cold tier (100TB)
 ```
 
 ---
@@ -166,21 +166,21 @@ Hudi provides two storage types:
 2. **Merge-on-Read (MoR)**: Fast writes, merge delta logs on read
 
 ```
-┌─────────────────────────────────────────────────┐
-│  Hudi Table (Merge-on-Read)                    │
-├─────────────────────────────────────────────────┤
-│  Base Files (Parquet, read-optimized):         │
-│    data-001.parquet (timestamp: 2024-03-01)    │
-│    data-002.parquet (timestamp: 2024-03-01)    │
-│                                                 │
-│  Delta Logs (Avro, recent updates):            │
-│    .data-001.log (updates since 2024-03-01)    │
-│    .data-002.log                                │
-│                                                 │
-│  Timeline (commit metadata):                   │
-│    .hoodie/20240301120000.commit                │
-│    .hoodie/20240315080000.commit                │
-└─────────────────────────────────────────────────┘
+,---------------------------------------------------,
+|  Hudi Table (Merge-on-Read)                    |
+|----------------------------------------------------|
+|  Base Files (Parquet, read-optimized):         |
+|    data-001.parquet (timestamp: 2024-03-01)    |
+|    data-002.parquet (timestamp: 2024-03-01)    |
+|                                                 |
+|  Delta Logs (Avro, recent updates):            |
+|    .data-001.log (updates since 2024-03-01)    |
+|    .data-002.log                                |
+|                                                 |
+|  Timeline (commit metadata):                   |
+|    .hoodie/20240301120000.commit                |
+|    .hoodie/20240315080000.commit                |
+`----------------------------------------------------'
 ```
 
 ### Read Optimization Views
@@ -193,11 +193,11 @@ Hudi provides two query views:
 ```sql
 -- Snapshot query (latest data)
 SELECT * FROM events_snapshot WHERE id = 123;
-→ Read base file + merge delta log (10ms)
+-> Read base file + merge delta log (10ms)
 
 -- Read-optimized query (fast, may be stale)
 SELECT * FROM events_ro WHERE id = 123;
-→ Read only base file (1ms)
+-> Read only base file (1ms)
 ```
 
 **Use Case**: Dashboards can use read-optimized view (5-minute stale OK), critical queries use snapshot.
@@ -220,10 +220,10 @@ LIMIT 1000000;
 Hudi automatically **compacts** delta logs into base files:
 
 ```
-Time 0: Write 1M records → delta log (fast)
-Time 1: Write 1M records → delta log
-Time 2: Write 1M records → delta log
-Time 3: Compaction → Merge 3 delta logs into base file
+Time 0: Write 1M records -> delta log (fast)
+Time 1: Write 1M records -> delta log
+Time 2: Write 1M records -> delta log
+Time 3: Compaction -> Merge 3 delta logs into base file
 ```
 
 **Tiering Strategy**: Keep recent delta logs in hot tier (SSD), compact old data to cold tier (S3).
@@ -237,20 +237,20 @@ Time 3: Compaction → Merge 3 delta logs into base file
 Delta Lake uses a **transaction log** (JSON files) for ACID:
 
 ```
-┌─────────────────────────────────────────────────┐
-│  Delta Lake Table                               │
-├─────────────────────────────────────────────────┤
-│  Transaction Log (_delta_log/):                 │
-│    00000000000000000000.json  (metadata)        │
-│    00000000000000000001.json  (add file X)      │
-│    00000000000000000002.json  (remove file Y)   │
-│    00000000000000000003.checkpoint.parquet      │
-│                                                 │
-│  Data Files:                                    │
-│    part-00000-xyz.snappy.parquet                │
-│    part-00001-xyz.snappy.parquet                │
-│    ...                                          │
-└─────────────────────────────────────────────────┘
+,---------------------------------------------------,
+|  Delta Lake Table                               |
+|----------------------------------------------------|
+|  Transaction Log (_delta_log/):                 |
+|    00000000000000000000.json  (metadata)        |
+|    00000000000000000001.json  (add file X)      |
+|    00000000000000000002.json  (remove file Y)   |
+|    00000000000000000003.checkpoint.parquet      |
+|                                                 |
+|  Data Files:                                    |
+|    part-00000-xyz.snappy.parquet                |
+|    part-00001-xyz.snappy.parquet                |
+|    ...                                          |
+`----------------------------------------------------'
 ```
 
 ### Transaction Log Entry
@@ -283,7 +283,7 @@ OPTIMIZE events ZORDER BY (user_id, event_type);
 **Query Benefit**:
 ```sql
 SELECT * FROM events WHERE user_id = 12345 AND event_type = 'click';
-→ Skip 95% of files (don't match user_id range)
+-> Skip 95% of files (don't match user_id range)
 ```
 
 **Speedup**: 10-100x for selective predicates.
@@ -389,13 +389,13 @@ ClickHouse automatically routes queries to appropriate tiers:
 
 ```sql
 SELECT COUNT(*) FROM events WHERE event_time > NOW() - INTERVAL 3 DAY;
-→ Query only hot disk (NVMe, 1ms latency)
+-> Query only hot disk (NVMe, 1ms latency)
 
 SELECT COUNT(*) FROM events WHERE toYear(event_time) = 2023;
-→ Query only cold disk (S3, 50ms latency)
+-> Query only cold disk (S3, 50ms latency)
 
 SELECT COUNT(*) FROM events;
-→ Query both disks, combine results
+-> Query both disks, combine results
 ```
 
 **Transparent**: No user code changes needed.
@@ -485,7 +485,7 @@ Planner:
    cold_plan = ParquetScan(s3://sales/cold) WHERE date < '2024-03-15'
 
 3. Combine:
-   Union(hot_plan, cold_plan) → Aggregate(AVG)
+   Union(hot_plan, cold_plan) -> Aggregate(AVG)
 
 Optimization: Compute partial aggregates on each tier, combine at end.
 ```
@@ -498,17 +498,17 @@ Optimization: Compute partial aggregates on each tier, combine at end.
 ```rust
 fn route_query(query: &Query, tiers: &[Tier]) -> ExecutionPlan {
     match query.predicate {
-        // Recent data only → hot tier
+        // Recent data only -> hot tier
         Filter::DateRange { start, end } if start > hot_threshold => {
             scan_tier(&tiers[TierType::Hot], query)
         }
 
-        // Historical aggregates → cold tier with caching
+        // Historical aggregates -> cold tier with caching
         Aggregate { .. } if cache.contains(query) => {
             cached_result(query)
         }
 
-        // Mixed → hybrid plan
+        // Mixed -> hybrid plan
         _ => {
             hybrid_plan(query, tiers)
         }
@@ -525,7 +525,7 @@ fn route_query(query: &Query, tiers: &[Tier]) -> ExecutionPlan {
 SELECT COUNT(*) FROM events WHERE event_time >= '2023-01-01';
 
 Traditional plan:
-  Scan 1 year of data (100TB) → COUNT → 10M rows
+  Scan 1 year of data (100TB) -> COUNT -> 10M rows
 
 Incremental plan:
   base_count = cached_result("SELECT COUNT(*) FROM events WHERE date < '2024-03-15'")
@@ -1022,7 +1022,7 @@ Cache now invalid!
 
 ## Next Steps
 
-1. ✅ Create this research document
+1. [x] Create this research document
 2. Create RFC 0034: Hot/Cold Data Tiering System
 3. Implement `TableFormat` trait (Iceberg, Delta)
 4. Add `TieringFacts` to FactsProvider

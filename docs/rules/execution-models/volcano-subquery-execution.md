@@ -55,7 +55,7 @@ Subquery execution strategies:
        emit(outer_tuple)
 
    Cost: O(|R| x cost(subquery))
-   Each iteration: open → next* → close on inner plan
+   Each iteration: open -> next* -> close on inner plan
 
 2. Decorrelation to join:
    -- Correlated:
@@ -64,7 +64,7 @@ Subquery execution strategies:
    )
 
    -- Decorrelated to semi-join:
-   R ⋉ (σ_{x>10}(S))
+   R $\ltimes$ ($\sigma$_{x>10}(S))
 
    Cost: O(|R| + |S|) with hash semi-join
 
@@ -75,7 +75,7 @@ Subquery execution strategies:
    FROM customers c
 
    -- Decorrelated to left outer join + aggregate:
-   customers ⟕ (GROUP BY cust_id: SUM(amount) FROM orders)
+   customers  (GROUP BY cust_id: SUM(amount) FROM orders)
 
 4. Result caching (memoization):
    Cache subquery results keyed by correlation parameters.
@@ -92,10 +92,10 @@ Subquery execution strategies:
        cache[key] = result
 
 5. Semi-join / Anti-semi-join transformation:
-   EXISTS → SemiJoin
-   NOT EXISTS → AntiSemiJoin
-   IN → SemiJoin (with null handling)
-   NOT IN → AntiSemiJoin (with null handling)
+   EXISTS -> SemiJoin
+   NOT EXISTS -> AntiSemiJoin
+   IN -> SemiJoin (with null handling)
+   NOT IN -> AntiSemiJoin (with null handling)
 ```
 
 ## Implementation
@@ -375,7 +375,7 @@ WHERE EXISTS (
   WHERE o.cust_id = c.id AND o.amount > 1000
 );
 -- Naive: rescan orders for each customer
--- Decorrelated: hash semi-join customers ⋉ orders
+-- Decorrelated: hash semi-join customers $\ltimes$ orders
 -- Verify: same results, O(N+M) instead of O(N*M)
 
 -- Test 2: NOT EXISTS to anti-semi-join
@@ -383,7 +383,7 @@ SELECT * FROM customers c
 WHERE NOT EXISTS (
   SELECT 1 FROM orders o WHERE o.cust_id = c.id
 );
--- Decorrelated: anti-semi-join customers ▷ orders
+-- Decorrelated: anti-semi-join customers > orders
 -- Returns customers with no orders
 
 -- Test 3: Scalar subquery decorrelation
@@ -400,7 +400,7 @@ FROM customers c;
 SELECT * FROM products
 WHERE id IN (SELECT product_id FROM order_items
              WHERE quantity > 10);
--- Decorrelated: semi-join products ⋉ order_items
+-- Decorrelated: semi-join products $\ltimes$ order_items
 -- Verify: handles NULL product_id correctly
 
 -- Test 5: Memoization benefit
@@ -459,4 +459,4 @@ WHERE id NOT IN (SELECT product_id FROM order_items);
    - Systematic decorrelation rules
 
 6. **MySQL Source**: `sql/sql_optimizer.cc`
-   - `Item_subselect::select_transformer()` for IN→semi-join
+   - `Item_subselect::select_transformer()` for IN->semi-join

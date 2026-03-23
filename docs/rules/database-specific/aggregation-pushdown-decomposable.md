@@ -18,7 +18,7 @@
 
 Pushes decomposable aggregate functions (MAX, MIN, SUM, COUNT) below joins
 by splitting them into partial aggregations on each side. An aggregation
-function F is decomposable if F(S1 ∪ S2) = F2(F1(S1), F1(S2)), allowing
+function F is decomposable if F(S1 $\cup$ S2) = F2(F1(S1), F1(S2)), allowing
 distributed computation.
 
 **When to apply**: Aggregation over join results where aggregate functions
@@ -26,7 +26,7 @@ are decomposable and arguments come from one side of the join.
 
 **Why it works**: By computing partial aggregations before the join, TiDB
 reduces the amount of data transferred across TiKV nodes. For example,
-SUM(a) over (R ⨝ S) becomes SUM(partial_sum) where partial sums are computed
+SUM(a) over (R $\bowtie$ S) becomes SUM(partial_sum) where partial sums are computed
 on each TiKV node before joining.
 
 ## Relational Algebra
@@ -40,9 +40,9 @@ Agg[F(col)](R join[pred] S)
     AND col from R schema
 
 Examples:
-- MAX(S1 ∪ S2) = MAX(MAX(S1), MAX(S2))
-- SUM(S1 ∪ S2) = SUM(SUM(S1), SUM(S2))
-- COUNT(S1 ∪ S2) = SUM(COUNT(S1), COUNT(S2))
+- MAX(S1 $\cup$ S2) = MAX(MAX(S1), MAX(S2))
+- SUM(S1 $\cup$ S2) = SUM(SUM(S1), SUM(S2))
+- COUNT(S1 $\cup$ S2) = SUM(COUNT(S1), COUNT(S2))
 ```
 
 ## Implementation

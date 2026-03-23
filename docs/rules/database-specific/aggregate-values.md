@@ -31,7 +31,7 @@ entirely, replacing it with a simple VALUES clause containing the result.
 ## Relational Algebra
 
 ```algebra
-γ_{g, AGG(c)}(VALUES(t1, t2, ...)) where ti are constants ->
+$\gamma$_{g, AGG(c)}(VALUES(t1, t2, ...)) where ti are constants ->
   VALUES(eval_aggregate(g, AGG(c), [t1, t2, ...]))
 ```
 

@@ -12,7 +12,7 @@ This encyclopedia serves three audiences:
 
 ## Structure
 
-### 📊 [Query Patterns](query-patterns/)
+###  [Query Patterns](query-patterns/)
 
 50+ SQL query patterns organized by category:
 
@@ -33,7 +33,7 @@ Each pattern includes:
 - API usage for providing statistics
 - Code examples with expected plans
 
-### 🗄️ [Schema Patterns](schema-patterns/)
+###  [Schema Patterns](schema-patterns/)
 
 Database schema designs and how Ra handles them:
 
@@ -45,7 +45,7 @@ Database schema designs and how Ra handles them:
 - **[Partitioned Tables](schema-patterns/partitioned-tables.md)** - Range, hash, list partitioning
 - **[Sharded Tables](schema-patterns/sharded-tables.md)** - Multi-node distribution
 
-### 📈 [Dataset Characteristics](dataset-characteristics/)
+###  [Dataset Characteristics](dataset-characteristics/)
 
 How data properties affect optimization:
 
@@ -57,7 +57,7 @@ How data properties affect optimization:
 - **[String Patterns](dataset-characteristics/string-patterns.md)** - Short vs long strings
 - **[Numeric Ranges](dataset-characteristics/numeric-ranges.md)** - Bounded vs unbounded
 
-### ⚙️ [Workload Patterns](workload-patterns/)
+###  [Workload Patterns](workload-patterns/)
 
 Query workload characteristics:
 
@@ -70,7 +70,7 @@ Query workload characteristics:
 - **[Real-Time](workload-patterns/real-time.md)** - Streaming, sub-second latency
 - **[Ad-Hoc](workload-patterns/ad-hoc.md)** - Unpredictable query patterns
 
-### 🌐 [Distributed Patterns](distributed-patterns/)
+###  [Distributed Patterns](distributed-patterns/)
 
 Multi-node query execution:
 
@@ -81,7 +81,7 @@ Multi-node query execution:
 - **[Push-down Aggregation](distributed-patterns/pushdown-aggregation.md)** - Pre-aggregation
 - **[Union Over Partitions](distributed-patterns/union-over-partitions.md)** - Parallel scan
 
-### 🔍 [Index Structures](index-structures/)
+###  [Index Structures](index-structures/)
 
 Index types and selection:
 
@@ -98,22 +98,22 @@ Index types and selection:
 ### By Use Case
 
 **"I need to optimize a specific query"**
-→ Start with [Query Patterns](query-patterns/) matching your query structure
+-> Start with [Query Patterns](query-patterns/) matching your query structure
 
 **"My queries are slow on this schema"**
-→ Check [Schema Patterns](schema-patterns/) for your design
+-> Check [Schema Patterns](schema-patterns/) for your design
 
 **"My data has unusual characteristics"**
-→ Read [Dataset Characteristics](dataset-characteristics/)
+-> Read [Dataset Characteristics](dataset-characteristics/)
 
 **"I'm tuning for a specific workload"**
-→ See [Workload Patterns](workload-patterns/)
+-> See [Workload Patterns](workload-patterns/)
 
 **"I'm deploying distributed queries"**
-→ Study [Distributed Patterns](distributed-patterns/)
+-> Study [Distributed Patterns](distributed-patterns/)
 
 **"Ra isn't using my indexes"**
-→ Review [Index Structures](index-structures/)
+-> Review [Index Structures](index-structures/)
 
 ### By Role
 
@@ -175,10 +175,10 @@ This encyclopedia uses standard database notation:
 
 Links throughout this encyclopedia:
 
-- **[Rule Name]** → Links to `/docs/rules/` for specific transformation rules
-- **[Feature Name]** → Links to `/docs/features/` for capability deep-dives
-- **[Example]** → Links to `/docs/examples/` for working code
-- **[API]** → Links to `/docs/api-reference.md` for programmatic usage
+- **[Rule Name]** -> Links to `/docs/rules/` for specific transformation rules
+- **[Feature Name]** -> Links to `/docs/features/` for capability deep-dives
+- **[Example]** -> Links to `/docs/examples/` for working code
+- **[API]** -> Links to `/docs/api-reference.md` for programmatic usage
 
 ## Contributing
 

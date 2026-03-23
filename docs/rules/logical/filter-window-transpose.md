@@ -21,7 +21,7 @@ Pushes filters through window functions
 ## Relational Algebra
 
 ```algebra
-σ(Window(R)) => Window(σ(R))
+$\sigma$(Window(R)) => Window($\sigma$(R))
 ```
 
 ## Implementation

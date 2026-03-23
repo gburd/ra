@@ -102,12 +102,12 @@ cargo test
 
 ```
 ra/
-├── crates/         # Rust crates
-├── rules/          # Rule definitions (.rra files)
-├── docs/           # Documentation
-├── tests/          # Integration tests
-├── web/            # Web explorer frontend
-└── tla/            # TLA+ specifications
+|---- crates/         # Rust crates
+|---- rules/          # Rule definitions (.rra files)
+|---- docs/           # Documentation
+|---- tests/          # Integration tests
+|---- web/            # Web explorer frontend
+`---- tla/            # TLA+ specifications
 ```
 
 ## Development Workflow
@@ -296,16 +296,16 @@ Before submitting, ensure:
 ### Rule Quality Standards
 
 Your rule should:
-- ✅ Have complete frontmatter
-- ✅ Include clear description
-- ✅ Use correct mathematical notation
-- ✅ Have working Rust implementation
-- ✅ Include preconditions
-- ✅ Have cost model
-- ✅ Include positive and negative test cases
-- ✅ Reference source implementations
-- ✅ Follow naming conventions
-- ✅ Pass validation
+- [x] Have complete frontmatter
+- [x] Include clear description
+- [x] Use correct mathematical notation
+- [x] Have working Rust implementation
+- [x] Include preconditions
+- [x] Have cost model
+- [x] Include positive and negative test cases
+- [x] Reference source implementations
+- [x] Follow naming conventions
+- [x] Pass validation
 
 ## Code Review Guidelines
 

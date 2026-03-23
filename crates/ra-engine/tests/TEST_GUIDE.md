@@ -179,20 +179,20 @@ proptest! {
 
 ```
 ra-engine/tests/
-├── helpers.rs              - Shared test utilities (this module)
-├── TEST_GUIDE.md          - This guide
-├── rules/                 - Rule-specific tests
-│   ├── predicate_pushdown.rs
-│   ├── filter_merge.rs
-│   └── join_reorder.rs
-├── cost/                  - Cost model tests
-│   ├── hardware_aware.rs
-│   └── cost_consistency.rs
-├── integration/           - End-to-end tests
-│   ├── tpch_queries.rs
-│   └── complex_queries.rs
-└── property/              - Property-based tests
-    └── optimization.rs
+|---- helpers.rs              - Shared test utilities (this module)
+|---- TEST_GUIDE.md          - This guide
+|---- rules/                 - Rule-specific tests
+|   |---- predicate_pushdown.rs
+|   |---- filter_merge.rs
+|   `---- join_reorder.rs
+|---- cost/                  - Cost model tests
+|   |---- hardware_aware.rs
+|   `---- cost_consistency.rs
+|---- integration/           - End-to-end tests
+|   |---- tpch_queries.rs
+|   `---- complex_queries.rs
+`---- property/              - Property-based tests
+    `---- optimization.rs
 ```
 
 ## Best Practices

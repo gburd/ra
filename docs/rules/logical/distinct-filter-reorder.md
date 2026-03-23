@@ -27,7 +27,7 @@ Reorders DISTINCT and Filter so that the filter is applied before DISTINCT, redu
 ```algebra
 filter[P](distinct(R))
   -> distinct(filter[P](R))
-  where columns(P) ⊆ output(R)
+  where columns(P) $\subseteq$ output(R)
 ```
 
 ## Implementation

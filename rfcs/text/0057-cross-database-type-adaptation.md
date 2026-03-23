@@ -298,7 +298,7 @@ pub struct QueryTranslator {
 impl QueryTranslator {
     pub fn translate_json_predicate(&self, expr: &Expr) -> Result<Expr, TranslationError> {
         match (self.source_db, self.target_db, expr) {
-            // PostgreSQL → Oracle
+            // PostgreSQL -> Oracle
             (Database::PostgreSQL, Database::Oracle, Expr::BinOp {
                 op: Op::JsonContains,
                 left: col,
@@ -315,7 +315,7 @@ impl QueryTranslator {
                 })
             }
 
-            // Oracle → PostgreSQL
+            // Oracle -> PostgreSQL
             (Database::Oracle, Database::PostgreSQL, Expr::Function {
                 name: "JSON_VALUE",
                 args: vec![col, path],
@@ -328,7 +328,7 @@ impl QueryTranslator {
                 })
             }
 
-            // MySQL → PostgreSQL
+            // MySQL -> PostgreSQL
             (Database::MySQL, Database::PostgreSQL, Expr::Function {
                 name: "JSON_CONTAINS",
                 ..
@@ -384,19 +384,19 @@ impl MigrationAnalyzer {
 
         let warnings = match (source_db, target_db) {
             (Database::PostgreSQL, Database::Oracle) => vec![
-                "PostgreSQL JSONB → Oracle JSON (CLOB): 10x performance degradation expected".to_string(),
-                "GIN indexes → function-based indexes: manual conversion required".to_string(),
-                "Containment operators (@>) → JSON_EXISTS(): syntax rewrite needed".to_string(),
+                "PostgreSQL JSONB -> Oracle JSON (CLOB): 10x performance degradation expected".to_string(),
+                "GIN indexes -> function-based indexes: manual conversion required".to_string(),
+                "Containment operators (@>) -> JSON_EXISTS(): syntax rewrite needed".to_string(),
             ],
             (Database::Oracle, Database::PostgreSQL) => vec![
-                "Oracle JSON (CLOB) → PostgreSQL JSONB: 10x performance improvement expected".to_string(),
-                "Function-based indexes → GIN indexes: recommend creating GIN indexes".to_string(),
-                "JSON_VALUE() → ->> operator: automatic conversion possible".to_string(),
+                "Oracle JSON (CLOB) -> PostgreSQL JSONB: 10x performance improvement expected".to_string(),
+                "Function-based indexes -> GIN indexes: recommend creating GIN indexes".to_string(),
+                "JSON_VALUE() -> ->> operator: automatic conversion possible".to_string(),
             ],
             (Database::MySQL, Database::PostgreSQL) => vec![
-                "MySQL JSON → PostgreSQL JSONB: 2x performance improvement expected".to_string(),
-                "Multi-valued indexes → GIN indexes: recommend GIN indexes".to_string(),
-                "JSON_CONTAINS() → @> operator: automatic conversion".to_string(),
+                "MySQL JSON -> PostgreSQL JSONB: 2x performance improvement expected".to_string(),
+                "Multi-valued indexes -> GIN indexes: recommend GIN indexes".to_string(),
+                "JSON_CONTAINS() -> @> operator: automatic conversion".to_string(),
             ],
             _ => vec![],
         };
@@ -440,7 +440,7 @@ Handle type-specific operators in stored procedures during cross-database analys
 ```rust
 #[derive(Debug, Error)]
 pub enum StorageAdaptationError {
-    #[error("Unsupported type conversion: {source_type} ({source_db}) → {target_type} ({target_db})")]
+    #[error("Unsupported type conversion: {source_type} ({source_db}) -> {target_type} ({target_db})")]
     UnsupportedConversion {
         source_type: Type,
         source_db: Database,
@@ -568,20 +568,20 @@ pub enum StorageAdaptationError {
 
 **AWS Database Migration Service (DMS):**
 
-- Handles type conversions (Oracle → PostgreSQL)
+- Handles type conversions (Oracle -> PostgreSQL)
 - Schema Conversion Tool provides warnings
 - Does not optimize queries, only converts schema
 
 **Azure Data Migration Assistant:**
 
-- Analyzes SQL Server → Azure SQL migrations
+- Analyzes SQL Server -> Azure SQL migrations
 - Identifies incompatibilities
 - Does not provide performance estimates
 
 **Ispirer SQLWays:**
 
 - Converts queries between databases
-- Handles type mapping (CLOB → TEXT)
+- Handles type mapping (CLOB -> TEXT)
 - Limited optimization, mostly syntax translation
 
 **Oracle GoldenGate:**

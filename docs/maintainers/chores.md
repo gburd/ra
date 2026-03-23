@@ -78,7 +78,7 @@ View it directly for the most up-to-date task list.
 ### Rules & Optimizations
 - 3 P0 items, 4 P1, 3 P2, 3 P3
 
-[View detailed chore list →](https://codeberg.org/gregburd/ra/src/branch/main/rfcs/CHORES.md)
+[View detailed chore list ->](https://codeberg.org/gregburd/ra/src/branch/main/rfcs/CHORES.md)
 
 ---
 
@@ -95,7 +95,7 @@ Some gaps identified in research need RFCs (too large for chores):
 4. **Decorrelation Improvements** (Gap #10) - verify & RFC if needed
 5. **CMU Video Research** - Extract 5-10 RFCs from lectures
 
-[View gap analysis →](https://codeberg.org/gregburd/ra/src/branch/main/research/gap-analysis/missing-optimizations.md)
+[View gap analysis ->](https://codeberg.org/gregburd/ra/src/branch/main/research/gap-analysis/missing-optimizations.md)
 
 ---
 

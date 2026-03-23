@@ -26,8 +26,8 @@ Pushes projection (column pruning) from the CTE body into the CTE definition, re
 
 ```algebra
 project[cols](CTE[name, def](body))
-  -> CTE[name, project[cols ∩ output(def)](def)](body)
-  where cols ⊂ output(def)
+  -> CTE[name, project[cols $\cap$ output(def)](def)](body)
+  where cols $\subset$ output(def)
 ```
 
 ## Implementation

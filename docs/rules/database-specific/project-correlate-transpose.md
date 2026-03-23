@@ -34,8 +34,8 @@ amount of data flowing through the correlation.
 ## Relational Algebra
 
 ```algebra
-π_p(R ⋉_corr S) where p references R and simple S columns ->
-  π_p'(R ⋉_corr π_p''(S))
+$\pi$_p(R $\ltimes$_corr S) where p references R and simple S columns ->
+  $\pi$_p'(R $\ltimes$_corr $\pi$_p''(S))
 ```
 
 ## Implementation

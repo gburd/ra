@@ -17,7 +17,7 @@ Transposes filters through aggregation
 ## Relational Algebra
 
 ```algebra
-σ(Agg(R)) => Agg(σ(R))
+$\sigma$(Agg(R)) => Agg($\sigma$(R))
 ```
 
 ## Implementation

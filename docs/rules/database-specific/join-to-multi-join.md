@@ -33,7 +33,7 @@ or bushy join enumeration, finding lower-cost plans.
 ## Relational Algebra
 
 ```algebra
-(R1 ⨝_{p1} R2) ⨝_{p2} R3 ->
+(R1 $\bowtie$_{p1} R2) $\bowtie$_{p2} R3 ->
   MultiJoin([R1, R2, R3], [p1, p2])
 ```
 

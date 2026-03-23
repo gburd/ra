@@ -33,13 +33,13 @@ result without executing. Foreign keys enable join elimination.
 Given constraints C and query Q:
 
 1. Predicate derivation:
-   If C ⊢ P1 → P2 and Q contains P1, add P2 to Q
+   If C $\vdash$ P1 -> P2 and Q contains P1, add P2 to Q
 
 2. Join elimination:
-   If FK(R.a → S.pk) and Q projects only R columns, remove join with S
+   If FK(R.a -> S.pk) and Q projects only R columns, remove join with S
 
 3. Unsatisfiability detection:
-   If Q contains P and C ⊢ ¬P, return ∅
+   If Q contains P and C $\vdash$ $\neg$P, return $\emptyset$
 
 4. Transitive closure of constraints:
    If R.a = S.b and S.b > 100, derive R.a > 100
@@ -200,8 +200,8 @@ WHERE e.salary > 100000;
 
 -- Semantic optimization derives:
 -- d.manager_id exists in employees (FK)
--- → d.manager's salary > 0 (CHECK constraint)
--- → Can use index on employees(salary) if available
+-- -> d.manager's salary > 0 (CHECK constraint)
+-- -> Can use index on employees(salary) if available
 ```
 
 ### Positive: Contradiction detection
@@ -243,7 +243,7 @@ WHERE year = 2024;
 
 -- Semantic optimization:
 -- sales_2023.year = 2023 (always) contradicts year = 2024
--- → Eliminate sales_2023 scan entirely
+-- -> Eliminate sales_2023 scan entirely
 ```
 
 ## References

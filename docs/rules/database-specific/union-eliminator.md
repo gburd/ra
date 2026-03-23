@@ -32,10 +32,10 @@ is unnecessary and can be eliminated or simplified.
 ## Relational Algebra
 
 ```algebra
-UNION(R, ∅) -> R
-UNION(∅, ∅) -> ∅
+UNION(R, $\emptyset$) -> R
+UNION($\emptyset$, $\emptyset$) -> $\emptyset$
 UNION(R, R) -> R
-UNION_ALL(R, ∅) -> R
+UNION_ALL(R, $\emptyset$) -> R
 ```
 
 ## Implementation

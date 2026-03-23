@@ -27,8 +27,8 @@ Without hardware awareness, the optimizer produces a standard plan:
 
 ```
 HashAggregate [groups=l_returnflag, agg=SUM(price*discount)]
-  └─ Filter [shipdate BETWEEN ... AND discount BETWEEN ... AND qty < 24]
-      └─ Scan [lineitem, 600M rows]
+  `--- Filter [shipdate BETWEEN ... AND discount BETWEEN ... AND qty < 24]
+      `--- Scan [lineitem, 600M rows]
 ```
 
 **CPU cost estimate:**
@@ -76,10 +76,10 @@ The `heterogeneous-operator-placement` rule assigns operators:
 
 ```
 TransferToHost
-  └─ GpuAggregate [groups=l_returnflag, agg=SUM(price*discount)]
-      └─ GpuFilter [shipdate BETWEEN ... AND discount BETWEEN ... AND qty < 24]
-          └─ TransferToGpu
-              └─ Scan [lineitem, 600M rows]
+  `--- GpuAggregate [groups=l_returnflag, agg=SUM(price*discount)]
+      `--- GpuFilter [shipdate BETWEEN ... AND discount BETWEEN ... AND qty < 24]
+          `--- TransferToGpu
+              `--- Scan [lineitem, 600M rows]
 ```
 
 Then `host-to-device-transfer` pushes the column projection before
@@ -87,11 +87,11 @@ the GPU transfer to reduce PCIe data volume:
 
 ```
 TransferToHost                          -- 3 rows * 24 bytes
-  └─ GpuAggregate [l_returnflag, SUM]
-      └─ GpuFilter [compound predicate]
-          └─ TransferToGpu              -- 24 GB (4 columns, not all 16)
-              └─ Project [l_shipdate, l_discount, l_quantity, l_extendedprice, l_returnflag]
-                  └─ Scan [lineitem]
+  `--- GpuAggregate [l_returnflag, SUM]
+      `--- GpuFilter [compound predicate]
+          `--- TransferToGpu              -- 24 GB (4 columns, not all 16)
+              `--- Project [l_shipdate, l_discount, l_quantity, l_extendedprice, l_returnflag]
+                  `--- Scan [lineitem]
 ```
 
 **Hardware-aware cost:**
@@ -110,9 +110,9 @@ If lineitem is already cached on the GPU from a previous query
 
 ```
 TransferToHost
-  └─ GpuAggregate [l_returnflag, SUM]
-      └─ GpuFilter [compound predicate]
-          └─ DeviceCached [lineitem]    -- already on GPU, 0 transfer
+  `--- GpuAggregate [l_returnflag, SUM]
+      `--- GpuFilter [compound predicate]
+          `--- DeviceCached [lineitem]    -- already on GPU, 0 transfer
 ```
 
 **Cached cost:**

@@ -32,70 +32,70 @@ Analysis of Ra's coverage for real-world SQL patterns.
 
 | Feature | Coverage | Notes |
 |---------|----------|-------|
-| SELECT/FROM/WHERE | ✅ Full | Basic query structure |
-| JOINs (INNER, LEFT, FULL) | ✅ Full | All join types present |
-| GROUP BY | ✅ Full | Simple and complex grouping |
-| HAVING | ✅ Full | Post-aggregation filtering |
-| ORDER BY | ✅ Full | Single and multi-column |
-| LIMIT/OFFSET | ✅ Full | Pagination patterns |
-| UNION/UNION ALL | ✅ Partial | Present in funnel queries |
-| Subqueries | ✅ Full | Scalar, correlated, IN |
-| CTEs (WITH) | ✅ Full | Common in analytics queries |
-| CASE expressions | ✅ Full | Segmentation, bucketing |
+| SELECT/FROM/WHERE | [x] Full | Basic query structure |
+| JOINs (INNER, LEFT, FULL) | [x] Full | All join types present |
+| GROUP BY | [x] Full | Simple and complex grouping |
+| HAVING | [x] Full | Post-aggregation filtering |
+| ORDER BY | [x] Full | Single and multi-column |
+| LIMIT/OFFSET | [x] Full | Pagination patterns |
+| UNION/UNION ALL | [x] Partial | Present in funnel queries |
+| Subqueries | [x] Full | Scalar, correlated, IN |
+| CTEs (WITH) | [x] Full | Common in analytics queries |
+| CASE expressions | [x] Full | Segmentation, bucketing |
 
 ### Aggregates
 
 | Function | Coverage | Queries Using |
 |----------|----------|---------------|
-| COUNT(*), COUNT(col) | ✅ Full | 80% of queries |
-| SUM | ✅ Full | 60% of queries |
-| AVG | ✅ Full | 50% of queries |
-| MIN/MAX | ✅ Full | 40% of queries |
-| STRING_AGG | ⚠️ Partial | PostgreSQL-specific |
-| ARRAY_AGG | ⚠️ Partial | PostgreSQL-specific |
-| PERCENTILE_CONT | ❌ Missing | Used in dbt, Airflow queries |
-| STDDEV | ⚠️ Partial | Statistical queries |
+| COUNT(*), COUNT(col) | [x] Full | 80% of queries |
+| SUM | [x] Full | 60% of queries |
+| AVG | [x] Full | 50% of queries |
+| MIN/MAX | [x] Full | 40% of queries |
+| STRING_AGG | WARNING: Partial | PostgreSQL-specific |
+| ARRAY_AGG | WARNING: Partial | PostgreSQL-specific |
+| PERCENTILE_CONT | [FAIL] Missing | Used in dbt, Airflow queries |
+| STDDEV | WARNING: Partial | Statistical queries |
 
 ### Window Functions
 
 | Feature | Coverage | Queries Using |
 |---------|----------|---------------|
-| ROW_NUMBER() | ✅ Full | Ranking, deduplication |
-| RANK(), DENSE_RANK() | ✅ Full | Leaderboards |
-| LAG, LEAD | ✅ Full | Time-series comparisons |
-| AVG/SUM OVER | ✅ Full | Moving averages |
-| PARTITION BY | ✅ Full | Per-group windows |
-| ORDER BY (in window) | ✅ Full | Ordering within partitions |
-| ROWS/RANGE frames | ⚠️ Partial | Complex frame clauses |
-| QUALIFY clause | ❌ Missing | PostgreSQL extension for filtering window results |
+| ROW_NUMBER() | [x] Full | Ranking, deduplication |
+| RANK(), DENSE_RANK() | [x] Full | Leaderboards |
+| LAG, LEAD | [x] Full | Time-series comparisons |
+| AVG/SUM OVER | [x] Full | Moving averages |
+| PARTITION BY | [x] Full | Per-group windows |
+| ORDER BY (in window) | [x] Full | Ordering within partitions |
+| ROWS/RANGE frames | WARNING: Partial | Complex frame clauses |
+| QUALIFY clause | [FAIL] Missing | PostgreSQL extension for filtering window results |
 
 ### PostgreSQL-Specific
 
 | Feature | Coverage | Importance | Queries Using |
 |---------|----------|------------|---------------|
-| INTERVAL arithmetic | ⚠️ Partial | High | 40+ queries |
-| EXTRACT(field FROM date) | ⚠️ Partial | High | 30+ queries |
-| DATE_TRUNC | ❌ Missing | High | 20+ queries |
-| FILTER clause | ❌ Missing | Medium | 15+ queries |
-| LATERAL joins | ❌ Missing | Medium | 5+ queries |
-| time_bucket() (TimescaleDB) | ❌ Missing | Medium | Time-series queries |
-| PostGIS functions | ❌ Missing | Low | Geospatial queries |
-| MERGE statement | ❌ Missing | Medium | ETL queries |
-| ARRAY operations | ⚠️ Partial | Medium | Forum queries |
-| JSONB operations | ❌ Missing | Medium | Not in current corpus |
+| INTERVAL arithmetic | WARNING: Partial | High | 40+ queries |
+| EXTRACT(field FROM date) | WARNING: Partial | High | 30+ queries |
+| DATE_TRUNC | [FAIL] Missing | High | 20+ queries |
+| FILTER clause | [FAIL] Missing | Medium | 15+ queries |
+| LATERAL joins | [FAIL] Missing | Medium | 5+ queries |
+| time_bucket() (TimescaleDB) | [FAIL] Missing | Medium | Time-series queries |
+| PostGIS functions | [FAIL] Missing | Low | Geospatial queries |
+| MERGE statement | [FAIL] Missing | Medium | ETL queries |
+| ARRAY operations | WARNING: Partial | Medium | Forum queries |
+| JSONB operations | [FAIL] Missing | Medium | Not in current corpus |
 
 ### Advanced Features
 
 | Feature | Coverage | Notes |
 |---------|----------|-------|
-| Recursive CTEs | ❌ Missing | Not in current corpus |
-| GROUPING SETS | ❌ Missing | Not in current corpus |
-| CUBE, ROLLUP | ❌ Missing | Not in current corpus |
-| PIVOT/UNPIVOT | ❌ Missing | Not in current corpus |
+| Recursive CTEs | [FAIL] Missing | Not in current corpus |
+| GROUPING SETS | [FAIL] Missing | Not in current corpus |
+| CUBE, ROLLUP | [FAIL] Missing | Not in current corpus |
+| PIVOT/UNPIVOT | [FAIL] Missing | Not in current corpus |
 
 ## Distributed Query Pattern Coverage
 
-### 1. Single-Shard Routing ⭐⭐⭐
+### 1. Single-Shard Routing ***
 
 **Frequency**: Very Common (80% of queries)
 
@@ -105,7 +105,7 @@ WHERE tenant_id = 123  -- Route to specific shard
 WHERE user_id = 456    -- Hash to shard
 ```
 
-**Ra Support**: ❌ Not implemented
+**Ra Support**: [FAIL] Not implemented
 - Need shard key annotation
 - Need predicate analysis for routing
 
@@ -113,7 +113,7 @@ WHERE user_id = 456    -- Hash to shard
 
 ---
 
-### 2. Partition Pruning ⭐⭐⭐
+### 2. Partition Pruning ***
 
 **Frequency**: Very Common (70% of queries)
 
@@ -122,7 +122,7 @@ WHERE user_id = 456    -- Hash to shard
 WHERE created_at >= NOW() - INTERVAL '30 days'
 ```
 
-**Ra Support**: ⚠️ Partial
+**Ra Support**: WARNING: Partial
 - Can analyze time predicates
 - Need partition metadata integration
 
@@ -130,7 +130,7 @@ WHERE created_at >= NOW() - INTERVAL '30 days'
 
 ---
 
-### 3. Co-located Joins ⭐⭐⭐
+### 3. Co-located Joins ***
 
 **Frequency**: Common (40% of queries)
 
@@ -142,15 +142,15 @@ JOIN order_items oi ON o.id = oi.order_id
 WHERE o.user_id = 123  -- Implies single-shard execution
 ```
 
-**Ra Support**: ❌ Not implemented
-- Need FK → shard key inference
+**Ra Support**: [FAIL] Not implemented
+- Need FK -> shard key inference
 - Need co-location metadata
 
 **Impact**: High for avoiding reshuffles
 
 ---
 
-### 4. Broadcast Joins ⭐⭐⭐
+### 4. Broadcast Joins ***
 
 **Frequency**: Very Common (50% of queries)
 
@@ -161,7 +161,7 @@ FROM orders o  -- 50M rows, sharded
 JOIN products p ON o.product_id = p.id  -- 50K rows, replicated
 ```
 
-**Ra Support**: ❌ Not implemented
+**Ra Support**: [FAIL] Not implemented
 - Need table size heuristics
 - Need broadcast join planning
 
@@ -169,7 +169,7 @@ JOIN products p ON o.product_id = p.id  -- 50K rows, replicated
 
 ---
 
-### 5. Aggregation Pushdown ⭐⭐⭐
+### 5. Aggregation Pushdown ***
 
 **Frequency**: Very Common (60% of queries)
 
@@ -183,7 +183,7 @@ FROM orders
 GROUP BY day
 ```
 
-**Ra Support**: ⚠️ Partial
+**Ra Support**: WARNING: Partial
 - Can recognize distributive aggregates
 - Need two-phase planning
 
@@ -191,7 +191,7 @@ GROUP BY day
 
 ---
 
-### 6. Window Function Distribution ⭐⭐
+### 6. Window Function Distribution **
 
 **Frequency**: Medium (20% of queries)
 
@@ -209,7 +209,7 @@ FROM metrics
 PARTITION BY metric_id  -- If aligned with shard key
 ```
 
-**Ra Support**: ❌ Not implemented
+**Ra Support**: [FAIL] Not implemented
 - Need shard-aligned window detection
 - Need coordinator window planning
 
@@ -217,7 +217,7 @@ PARTITION BY metric_id  -- If aligned with shard key
 
 ---
 
-### 7. Shuffle Joins ⭐
+### 7. Shuffle Joins *
 
 **Frequency**: Low (10% of queries)
 
@@ -228,7 +228,7 @@ FROM orders o  -- Sharded by user_id
 JOIN products p ON o.product_id = p.id  -- Sharded by id
 ```
 
-**Ra Support**: ❌ Not implemented
+**Ra Support**: [FAIL] Not implemented
 - Need repartitioning logic
 - Need cost-based shuffle decisions
 
@@ -242,11 +242,11 @@ JOIN products p ON o.product_id = p.id  -- Sharded by id
 
 | Pattern | Frequency | Ra Support | Impact |
 |---------|-----------|------------|--------|
-| Point lookup by PK | Very High | ✅ Full | Critical |
-| Index range scan | High | ✅ Full | Critical |
-| FK join (2-3 tables) | High | ✅ Full | High |
-| Single-user queries | Very High | ⚠️ Partial | Critical |
-| Multi-tenant isolation | Very High | ❌ Missing | Critical |
+| Point lookup by PK | Very High | [x] Full | Critical |
+| Index range scan | High | [x] Full | Critical |
+| FK join (2-3 tables) | High | [x] Full | High |
+| Single-user queries | Very High | WARNING: Partial | Critical |
+| Multi-tenant isolation | Very High | [FAIL] Missing | Critical |
 
 **Overall OLTP Coverage**: 60%
 
@@ -254,12 +254,12 @@ JOIN products p ON o.product_id = p.id  -- Sharded by id
 
 | Pattern | Frequency | Ra Support | Impact |
 |---------|-----------|------------|--------|
-| Large aggregations | Very High | ⚠️ Partial | Critical |
-| Multi-table star joins | High | ⚠️ Partial | High |
-| Window functions | High | ⚠️ Partial | High |
-| CTEs (multi-stage) | High | ✅ Full | Medium |
-| Date-based filtering | Very High | ⚠️ Partial | Critical |
-| Time bucketing | High | ❌ Missing | High |
+| Large aggregations | Very High | WARNING: Partial | Critical |
+| Multi-table star joins | High | WARNING: Partial | High |
+| Window functions | High | WARNING: Partial | High |
+| CTEs (multi-stage) | High | [x] Full | Medium |
+| Date-based filtering | Very High | WARNING: Partial | Critical |
+| Time bucketing | High | [FAIL] Missing | High |
 
 **Overall OLAP Coverage**: 50%
 
@@ -267,11 +267,11 @@ JOIN products p ON o.product_id = p.id  -- Sharded by id
 
 | Pattern | Frequency | Ra Support | Impact |
 |---------|-----------|------------|--------|
-| Recent data queries | Very High | ⚠️ Partial | Critical |
-| Downsampling | High | ❌ Missing | High |
-| Gap detection | Medium | ⚠️ Partial | Medium |
-| Anomaly detection | Medium | ⚠️ Partial | Medium |
-| Time-based partitioning | Very High | ❌ Missing | Critical |
+| Recent data queries | Very High | WARNING: Partial | Critical |
+| Downsampling | High | [FAIL] Missing | High |
+| Gap detection | Medium | WARNING: Partial | Medium |
+| Anomaly detection | Medium | WARNING: Partial | Medium |
+| Time-based partitioning | Very High | [FAIL] Missing | Critical |
 
 **Overall Time-Series Coverage**: 30%
 
@@ -279,10 +279,10 @@ JOIN products p ON o.product_id = p.id  -- Sharded by id
 
 | Pattern | Frequency | Ra Support | Impact |
 |---------|-----------|------------|--------|
-| Distance calculations | High | ❌ Missing | High |
-| Within/Contains | High | ❌ Missing | High |
-| Nearest neighbor | High | ❌ Missing | High |
-| Spatial indexes | High | ❌ Missing | High |
+| Distance calculations | High | [FAIL] Missing | High |
+| Within/Contains | High | [FAIL] Missing | High |
+| Nearest neighbor | High | [FAIL] Missing | High |
+| Spatial indexes | High | [FAIL] Missing | High |
 
 **Overall Geospatial Coverage**: 0%
 
@@ -290,10 +290,10 @@ JOIN products p ON o.product_id = p.id  -- Sharded by id
 
 | Pattern | Frequency | Ra Support | Impact |
 |---------|-----------|------------|--------|
-| Batch aggregations | Very High | ⚠️ Partial | High |
-| MERGE/UPSERT | Medium | ❌ Missing | Medium |
-| Data quality checks | High | ⚠️ Partial | Medium |
-| Statistical validation | Medium | ⚠️ Partial | Low |
+| Batch aggregations | Very High | WARNING: Partial | High |
+| MERGE/UPSERT | Medium | [FAIL] Missing | Medium |
+| Data quality checks | High | WARNING: Partial | Medium |
+| Statistical validation | Medium | WARNING: Partial | Low |
 
 **Overall ETL Coverage**: 40%
 
@@ -329,7 +329,7 @@ JOIN products p ON o.product_id = p.id  -- Sharded by id
    - Replication decisions
 
 6. **Co-located join detection** (40% of queries affected)
-   - FK → shard key inference
+   - FK -> shard key inference
    - Co-location metadata
    - Shuffle avoidance
 

@@ -21,7 +21,7 @@ Hash-based GROUP BY aggregation. Materializes input into hash table keyed by gro
 ## Relational Algebra
 
 ```
-Aggregate(input, group_keys, agg_funcs) → Iterator<Tuple>
+Aggregate(input, group_keys, agg_funcs) -> Iterator<Tuple>
 
 AggregateIterator {
   input: Iterator
@@ -37,7 +37,7 @@ AggregateIterator {
     result_iter = agg_table.values().iter()
   }
 
-  fn next() → Tuple | None {
+  fn next() -> Tuple | None {
     result_iter.next()
   }
 }

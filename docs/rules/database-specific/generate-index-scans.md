@@ -28,7 +28,7 @@ Creates alternate Scan expressions for each secondary index on the scanned table
 
 ```algebra
 Scan[primary_index](T)
-  -> {Scan[idx](T) | idx ∈ indexes(T)}
+  -> {Scan[idx](T) | idx $\in$ indexes(T)}
   where is_canonical_scan
 ```
 

@@ -35,7 +35,7 @@ Trino dynamically adjusts partition count based on actual data size observed dur
 
 ```
 Repartition(R, n_partitions_estimate)
-→ AdaptiveRepartition(R, initial_n, scale_factor)
+-> AdaptiveRepartition(R, initial_n, scale_factor)
   where actual_n = adjust_at_runtime(data_size)
 ```
 

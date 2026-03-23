@@ -207,12 +207,12 @@ Most impactful for index scan vs seq scan decisions on SSDs.
 
 ```sql
 -- Default: random_page_cost = 4.0 (HDD assumption)
--- SSD reality: random_page_cost ≈ 1.1
+-- SSD reality: random_page_cost $\approx$ 1.1
 
 SELECT * FROM orders WHERE customer_id = 42;
 
 -- Default model: prefers seq_scan (random pages too expensive)
--- Learned model: prefers index_scan (SSD random ≈ sequential)
+-- Learned model: prefers index_scan (SSD random $\approx$ sequential)
 -- Learned model selects correct plan for SSD
 ```
 

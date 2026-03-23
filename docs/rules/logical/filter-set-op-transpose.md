@@ -21,7 +21,7 @@ Pushes filters through set operations
 ## Relational Algebra
 
 ```algebra
-σ(Union(R, S)) => Union(σ(R), σ(S))
+$\sigma$(Union(R, S)) => Union($\sigma$(R), $\sigma$(S))
 ```
 
 ## Implementation

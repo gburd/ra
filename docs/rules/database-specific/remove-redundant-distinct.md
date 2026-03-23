@@ -28,7 +28,7 @@ Removes DISTINCT operation when input is already unique on the projected columns
 
 ```algebra
 Distinct[cols](R) -> R
-  where cols ⊇ unique_key(R)
+  where cols $\supseteq$ unique_key(R)
 ```
 
 ## Implementation

@@ -57,15 +57,15 @@ than classical thermal hopping over them.
 
 **QUBO encoding for join ordering:**
 - Binary variables x_{i,k} = 1 if table i is the k-th table joined
-- Cost terms: Σ cost(join_step_k) based on x assignments
+- Cost terms: $\Sigma$ cost(join_step_k) based on x assignments
 - Constraint: exactly one table per position, each table used once
-- Penalty: λ * (Σ_k x_{i,k} - 1)^2 for each table i
+- Penalty: $\lambda$ * ($\Sigma$_k x_{i,k} - 1)^2 for each table i
 
 ## Relational Algebra
 
 ```algebra
 -- Join ordering as optimization problem:
-minimize Σ_{k=1}^{n} cost(
+minimize $\Sigma$_{k=1}^{n} cost(
   join(tables_joined_before_k, table_at_position_k)
 )
 
@@ -74,11 +74,11 @@ subject to:
   Join predicates are available at each step
 
 -- QUBO encoding:
-Variables: x_{i,k} ∈ {0,1} for i ∈ tables, k ∈ positions
+Variables: x_{i,k} $\in$ {0,1} for i $\in$ tables, k $\in$ positions
 minimize:
-  Σ_{k} Σ_{i,j} cost(i,j) * x_{i,k} * x_{j,k+1}  // join cost
-  + λ * Σ_i (Σ_k x_{i,k} - 1)^2                     // each table once
-  + λ * Σ_k (Σ_i x_{i,k} - 1)^2                     // one table per slot
+  $\Sigma$_{k} $\Sigma$_{i,j} cost(i,j) * x_{i,k} * x_{j,k+1}  // join cost
+  + $\lambda$ * $\Sigma$_i ($\Sigma$_k x_{i,k} - 1)^2                     // each table once
+  + $\lambda$ * $\Sigma$_k ($\Sigma$_i x_{i,k} - 1)^2                     // one table per slot
 
 -- Quantum annealing:
 H(t) = (1 - s(t)) * H_driver + s(t) * H_problem
@@ -165,9 +165,9 @@ impl QUBOFormulation {
                 .sum::<f64>();
 
         for i in 0..n {
-            // (Σ_k x_{i,k} - 1)^2 =
-            //   Σ_k x_{i,k}^2 - 2*Σ_k x_{i,k} + 1
-            //   = Σ_k x_{i,k} - 2*Σ_k x_{i,k} + 1
+            // ($\Sigma$_k x_{i,k} - 1)^2 =
+            //   $\Sigma$_k x_{i,k}^2 - 2*$\Sigma$_k x_{i,k} + 1
+            //   = $\Sigma$_k x_{i,k} - 2*$\Sigma$_k x_{i,k} + 1
             //   (since x^2 = x for binary)
             for k in 0..n {
                 let var = var_map[&(i, k)];

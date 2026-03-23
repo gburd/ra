@@ -73,7 +73,7 @@ pub fn all_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 
 ### 3. Reuse statistics cache (already implemented in Task #243)
 
-Statistics wrapped in Arc, cheap to share. ✅
+Statistics wrapped in Arc, cheap to share. [x]
 
 ### 4. Inline small hot functions
 
@@ -119,7 +119,7 @@ RelAnalysis is not thread-safe (uses HashMap).
 JOB query 13a (7-way join):
 - Adaptive limits: 10 iterations
 - Time: 1850ms
-- Cost extractions: 30 (3 per iteration × 10)
+- Cost extractions: 30 (3 per iteration $\times$ 10)
 
 ### After optimizations (Tasks #243 + #253)
 
@@ -133,10 +133,10 @@ JOB query 13a (7-way join):
 ## Summary
 
 Applied 4 targeted micro-optimizations:
-1. ✅ Cache hardware profile in iteration loop
-2. ✅ Pre-allocate rule vector capacity
-3. ✅ Statistics caching with Arc (Task #243)
-4. ✅ Inline small hot functions
+1. [x] Cache hardware profile in iteration loop
+2. [x] Pre-allocate rule vector capacity
+3. [x] Statistics caching with Arc (Task #243)
+4. [x] Inline small hot functions
 
 **Total impact:** 10-15% speedup on complex queries
 **Effort:** Low (simple changes, no architectural complexity)

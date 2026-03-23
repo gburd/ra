@@ -11,7 +11,7 @@ Analysis of schema design patterns and required statistics for query optimizatio
 #### orders
 - **Row count**: 10M - 100M (typical mid-size store)
 - **Growth rate**: ~1000-10000 orders/day
-- **Size**: ~500 bytes/row → 5GB - 50GB
+- **Size**: ~500 bytes/row -> 5GB - 50GB
 - **Distribution**:
   - 70% completed, 20% pending, 5% processing, 5% canceled
   - Power law on user_id (top 10% users = 50% orders)
@@ -24,17 +24,17 @@ Analysis of schema design patterns and required statistics for query optimizatio
 
 #### order_items
 - **Row count**: 25M - 250M (avg 2.5 items/order)
-- **Size**: ~200 bytes/row → 5GB - 50GB
-- **FK Cardinality**: order_id → orders (many-to-one, avg 2.5)
+- **Size**: ~200 bytes/row -> 5GB - 50GB
+- **FK Cardinality**: order_id -> orders (many-to-one, avg 2.5)
 - **Distribution**:
   - Top 20% products = 80% of items (Pareto)
 - **Join patterns**:
-  - order_items → orders: Nearly always co-queried
-  - order_items → products: Dimension join
+  - order_items -> orders: Nearly always co-queried
+  - order_items -> products: Dimension join
 
 #### products
 - **Row count**: 10K - 100K (catalog size)
-- **Size**: ~1KB/row → 10MB - 100MB (small enough to broadcast)
+- **Size**: ~1KB/row -> 10MB - 100MB (small enough to broadcast)
 - **Update frequency**: High (price, stock changes)
 - **Join patterns**: Always via product_id FK
 
@@ -258,7 +258,7 @@ Analysis of schema design patterns and required statistics for query optimizatio
 - Window functions common
 
 **Join patterns**:
-- Star schema: fact table → dimension tables
+- Star schema: fact table -> dimension tables
 - Dimension tables replicated
 
 ### Facts for Ra

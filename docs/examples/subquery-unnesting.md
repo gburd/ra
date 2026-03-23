@@ -47,13 +47,13 @@ Without unnesting, the subquery executes once per customer row:
 
 ```
 Project [c.name, c.email]
-  └─ Filter [c.id IN (subquery)]
-      └─ Scan [customers, 100K rows]
-          └─ (for each row) SubqueryScan
-              └─ Filter [SUM(amount) > 10000]
-                  └─ Aggregate [customer_id, SUM(amount)]
-                      └─ Filter [o.customer_id = c.id]
-                          └─ Scan [orders, 2M rows]
+  `--- Filter [c.id IN (subquery)]
+      `--- Scan [customers, 100K rows]
+          `--- (for each row) SubqueryScan
+              `--- Filter [SUM(amount) > 10000]
+                  `--- Aggregate [customer_id, SUM(amount)]
+                      `--- Filter [o.customer_id = c.id]
+                          `--- Scan [orders, 2M rows]
 ```
 
 **Cost:** 100,000 subquery executions, each scanning up to 2M rows.
@@ -67,11 +67,11 @@ Convert the `IN (subquery)` to a semi-join:
 
 ```
 Project [c.name, c.email]
-  └─ SemiJoin [c.id = agg.customer_id]
-      ├─ Scan [customers, 100K rows]
-      └─ Filter [total > 10000]
-          └─ Aggregate [customer_id, SUM(amount) AS total]
-              └─ Scan [orders, 2M rows]
+  `--- SemiJoin [c.id = agg.customer_id]
+      |--- Scan [customers, 100K rows]
+      `--- Filter [total > 10000]
+          `--- Aggregate [customer_id, SUM(amount) AS total]
+              `--- Scan [orders, 2M rows]
 ```
 
 The subquery now executes once and produces a result set. The
@@ -88,11 +88,11 @@ be converted to an inner join:
 
 ```
 Project [c.name, c.email]
-  └─ Join [c.id = agg.customer_id]  -- inner join
-      ├─ Scan [customers, 100K rows]
-      └─ Filter [total > 10000]
-          └─ Aggregate [customer_id, SUM(amount) AS total]
-              └─ Scan [orders, 2M rows]
+  `--- Join [c.id = agg.customer_id]  -- inner join
+      |--- Scan [customers, 100K rows]
+      `--- Filter [total > 10000]
+          `--- Aggregate [customer_id, SUM(amount) AS total]
+              `--- Scan [orders, 2M rows]
 ```
 
 ## Step 3: Join Reordering
@@ -104,22 +104,22 @@ Build the hash table on the smaller side:
 
 ```
 Project [c.name, c.email]
-  └─ HashJoin [c.id = agg.customer_id]
-      ├─ Filter [total > 10000]         -- 5,000 rows (build side)
-      │   └─ Aggregate [customer_id, SUM(amount)]
-      │       └─ Scan [orders, 2M rows]
-      └─ Scan [customers, 100K rows]    -- probe side
+  `--- HashJoin [c.id = agg.customer_id]
+      |--- Filter [total > 10000]         -- 5,000 rows (build side)
+      |   `--- Aggregate [customer_id, SUM(amount)]
+      |       `--- Scan [orders, 2M rows]
+      `--- Scan [customers, 100K rows]    -- probe side
 ```
 
 ## Final Optimized Plan
 
 ```
 Project [c.name, c.email]
-  └─ HashJoin [c.id = agg.customer_id]
-      ├─ Filter [total > 10000]
-      │   └─ HashAggregate [customer_id, SUM(amount) AS total]
-      │       └─ Scan [orders, 2M rows]
-      └─ Scan [customers, 100K rows]
+  `--- HashJoin [c.id = agg.customer_id]
+      |--- Filter [total > 10000]
+      |   `--- HashAggregate [customer_id, SUM(amount) AS total]
+      |       `--- Scan [orders, 2M rows]
+      `--- Scan [customers, 100K rows]
 ```
 
 **Cost analysis:**

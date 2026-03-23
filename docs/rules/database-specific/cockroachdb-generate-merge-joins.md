@@ -95,7 +95,7 @@ Where:
   sort_cost(input) = 0 if already sorted, else O(n log n) comparison cost
   merge_cost = O(n + m) where n, m are input cardinalities
 
-Comparison with nested loop: ε × (n × m) where ε is small constant
+Comparison with nested loop: $\varepsilon$ $\times$ (n $\times$ m) where $\varepsilon$ is small constant
 Comparison with hash join: + sort overhead, but saves hash table memory
 ```
 
@@ -135,8 +135,8 @@ LEFT JOIN customers c ON o.customer_id = c.id
 
 ## Performance Impact
 
-- **Best case**: Both inputs already sorted → avoid sort cost, O(n+m) merge pass
-- **Typical case**: One input sorted → sort one side + O(n+m) merge
+- **Best case**: Both inputs already sorted -> avoid sort cost, O(n+m) merge pass
+- **Typical case**: One input sorted -> sort one side + O(n+m) merge
 - **Benefit magnitude**: 2-30x improvement vs nested loop for tables >10k rows
 - **Memory efficiency**: Low memory overhead (constant, not proportional to input size)
 - **Cache locality**: Sequential scan pattern excellent for CPU cache

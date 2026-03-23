@@ -32,7 +32,7 @@ Pushes filter through join
 ## Relational Algebra
 
 ```algebra
-σ(Join(R, S)) => Join(σ(R), S)
+$\sigma$(Join(R, S)) => Join($\sigma$(R), S)
 ```
 
 ## Implementation

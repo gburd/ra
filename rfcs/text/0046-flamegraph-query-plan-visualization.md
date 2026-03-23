@@ -99,11 +99,11 @@ The TUI flamegraph uses color intensity to represent time proportion
 rather than bar width, since terminal cells are coarse-grained.
 
 ```
- ┌─────────────── HashJoin (342ms) ───────────────┐
- │ ┌── SeqScan orders (198ms) ──┐┌ IdxScan (12ms)┐│
- │ │                             ││               ││
- │ └─────────────────────────────┘└───────────────┘│
- └─────────────────────────────────────────────────┘
+ ,---------------- HashJoin (342ms) ----------------,
+ | ,--- SeqScan orders (198ms) ---,,- IdxScan (12ms)-,|
+ | |                             ||               ||
+ | `--------------------------------'`------------------'|
+ `----------------------------------------------------'
 ```
 
 Operator bars are drawn proportional to their inclusive time. Pressing
@@ -126,23 +126,23 @@ profiles and view a diff flamegraph showing where time increased
 ### Architecture
 
 ```
-                  ┌─────────────┐
-                  │  PlanProfiler│
-                  │  (ra-engine) │
-                  └──────┬──────┘
-                         │ OperatorTimings
-                         ▼
-                ┌────────────────┐
-                │ FoldedStackEmitter│
-                │   (ra-engine)    │
-                └────────┬────────┘
-                         │ folded stack lines
-              ┌──────────┼──────────┐
-              ▼          ▼          ▼
-        ┌──────────┐ ┌────────┐ ┌────────┐
-        │  inferno  │ │ ra-tui │ │ ra-web │
-        │  (SVG)    │ │(block) │ │ (SVG)  │
-        └──────────┘ └────────┘ └────────┘
+                  ,---------------,
+                  |  PlanProfiler|
+                  |  (ra-engine) |
+                  `---------+--------'
+                         | OperatorTimings
+                         v
+                ,------------------,
+                | FoldedStackEmitter|
+                |   (ra-engine)    |
+                `-----------+----------'
+                         | folded stack lines
+              ,------------+------------,
+              v          v          v
+        ,------------, ,----------, ,----------,
+        |  inferno  | | ra-tui | | ra-web |
+        |  (SVG)    | |(block) | | (SVG)  |
+        `-------------' `-----------' `-----------'
 ```
 
 ### Implementation Details

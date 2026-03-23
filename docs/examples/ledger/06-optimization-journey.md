@@ -72,15 +72,15 @@ The initial logical plan (before optimization):
 
 ```
 LogicalSort
-  └── LogicalFilter (HAVING clause)
-      └── LogicalAggregate
-          └── LogicalJoin (LEFT)
-              ├── LogicalFilter (is_leaf = true)
-              │   └── LogicalScan (chart_of_accounts)
-              └── LogicalScan (ledger_transactions)
+  `---- LogicalFilter (HAVING clause)
+      `---- LogicalAggregate
+          `---- LogicalJoin (LEFT)
+              |---- LogicalFilter (is_leaf = true)
+              |   `---- LogicalScan (chart_of_accounts)
+              `---- LogicalScan (ledger_transactions)
 ```
 
-**Cost Estimate**: 50,000 (table scan) × 150 (accounts) = 7,500,000 operations 😱
+**Cost Estimate**: 50,000 (table scan) $\times$ 150 (accounts) = 7,500,000 operations 
 
 ## Step 3: Rule-Based Transformations
 
@@ -166,8 +166,8 @@ Detected indexes:
 ```
 Physical Plan After Index Selection:
 UnionAll
-  ├── IndexSeek (idx_debit_account_date)
-  └── IndexSeek (idx_credit_account_date)
+  |---- IndexSeek (idx_debit_account_date)
+  `---- IndexSeek (idx_credit_account_date)
 ```
 
 **Impact**: Index seeks reduce I/O by 95%
@@ -184,13 +184,13 @@ Decision: HashJoin (build on smaller side)
 
 ```
 HashJoin
-  ├── Build: Hash(account_code)
-  │   └── Filter (is_leaf = true)
-  │       └── SeqScan (chart_of_accounts)
-  └── Probe: transactions_for_accounts
+  |---- Build: Hash(account_code)
+  |   `---- Filter (is_leaf = true)
+  |       `---- SeqScan (chart_of_accounts)
+  `---- Probe: transactions_for_accounts
 ```
 
-**Impact**: O(n+m) hash join vs O(n×m) nested loop
+**Impact**: O(n+m) hash join vs O(n$\times$m) nested loop
 
 ### Transformation 5: Aggregate Pushdown
 
@@ -258,16 +258,16 @@ Selected: Plan A (lowest cost)
 
 ```
 Sort (ORDER BY clause)
-  └── Filter (net_amount != 0)
-      └── HashJoin (LEFT)
-          ├── Build: Filter (is_leaf = true)
-          │   └── SeqScan (chart_of_accounts)
-          └── Probe: HashAggregate
-              └── Append
-                  ├── IndexSeek (idx_debit_account_date)
-                  │   └── Range: [2024-01-01, 2024-02-01)
-                  └── IndexSeek (idx_credit_account_date)
-                      └── Range: [2024-01-01, 2024-02-01)
+  `---- Filter (net_amount != 0)
+      `---- HashJoin (LEFT)
+          |---- Build: Filter (is_leaf = true)
+          |   `---- SeqScan (chart_of_accounts)
+          `---- Probe: HashAggregate
+              `---- Append
+                  |---- IndexSeek (idx_debit_account_date)
+                  |   `---- Range: [2024-01-01, 2024-02-01)
+                  `---- IndexSeek (idx_credit_account_date)
+                      `---- Range: [2024-01-01, 2024-02-01)
 ```
 
 ## Performance Comparison
@@ -296,7 +296,7 @@ I/O Operations: 85
   "rules_applied": [
     {
       "name": "PushFilterThroughJoin",
-      "impact": "7.5M → 240K row reduction",
+      "impact": "7.5M -> 240K row reduction",
       "cost_before": 7500000,
       "cost_after": 240000
     },
@@ -308,13 +308,13 @@ I/O Operations: 85
     },
     {
       "name": "UseIndexSeek",
-      "impact": "Sequential → Index access",
+      "impact": "Sequential -> Index access",
       "cost_before": 8000,
       "cost_after": 400
     },
     {
       "name": "PushAggregateBeforeJoin",
-      "impact": "4000 → 120 join rows",
+      "impact": "4000 -> 120 join rows",
       "cost_before": 400,
       "cost_after": 250
     }
@@ -346,7 +346,7 @@ I/O Operations: 85
 - **Savings**: 97% less memory for join
 
 ### 5. Join Algorithm
-- **Without**: Nested loop (O(n²))
+- **Without**: Nested loop (O(n$^2$))
 - **With**: Hash join (O(n+m))
 - **Savings**: Linear vs quadratic complexity
 
@@ -404,7 +404,7 @@ EXPLAIN (ANALYZE, BUFFERS, VERBOSE) SELECT ...;
   Decision: APPLY (enables index usage)
 
 [TRACE] Cost estimation for HashJoin:
-  Build side: 120 rows × 64 bytes = 7.5KB
+  Build side: 120 rows $\times$ 64 bytes = 7.5KB
   Probe side: 4,000 rows
   Memory needed: 7.5KB + overhead = ~10KB
   Estimated cost: 250 units
@@ -530,4 +530,4 @@ We've seen how RA optimizes. Now let's explore how changing statistics affects t
 
 ---
 
-*🔍 Debug Tip: Use EXPLAIN (ANALYZE, BUFFERS) to see actual vs estimated rows. Large discrepancies indicate stale or incorrect statistics.*
+* Debug Tip: Use EXPLAIN (ANALYZE, BUFFERS) to see actual vs estimated rows. Large discrepancies indicate stale or incorrect statistics.*

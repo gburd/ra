@@ -39,13 +39,13 @@ Rewrites proven in HoTTSQL are correct by construction.
 ```algebra
 -- Example: DISTINCT pushdown through UNION (proven in HoTTSQL)
 DISTINCT(R UNION ALL S)
-  ≡ DISTINCT(DISTINCT(R) UNION ALL DISTINCT(S))
+  $\equiv$ DISTINCT(DISTINCT(R) UNION ALL DISTINCT(S))
   -- Proof: bags form a commutative monoid under union;
   -- DISTINCT is idempotent projection to sets
 
 -- Example: Subquery decorrelation (proven in HoTTSQL)
 SELECT * FROM R WHERE EXISTS (SELECT 1 FROM S WHERE S.a = R.a)
-  ≡ SELECT DISTINCT R.* FROM R SEMI JOIN S ON R.a = S.a
+  $\equiv$ SELECT DISTINCT R.* FROM R SEMI JOIN S ON R.a = S.a
   -- Proof: existential quantification = non-empty fiber in HoTT
 ```
 

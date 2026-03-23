@@ -169,7 +169,7 @@ SELECT * FROM small_table; -- 10K rows, 100 bytes/row = 1MB
 
 -- Expected CPU cost:
 -- Cache: Fits in L3 (1MB < 64MB)
--- Cost: 10K * 20ns = 200μs (no cache miss penalty)
+-- Cost: 10K * 20ns = 200$\mu$s (no cache miss penalty)
 ```
 
 ### Test 2: Large table scan (exceeds cache)

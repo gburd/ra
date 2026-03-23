@@ -79,16 +79,16 @@ WHERE (debit_account_code = '1010' AND transaction_date = '2024-01-15')
 **Bitmap Execution Plan**:
 ```
 Bitmap Heap Scan
-  └── BitmapOr
-      ├── BitmapAnd
-      │   ├── Bitmap Index Scan (debit_account_code = '1010')
-      │   └── Bitmap Index Scan (transaction_date = '2024-01-15')
-      ├── BitmapAnd
-      │   ├── Bitmap Index Scan (debit_account_code = '5010')
-      │   └── Bitmap Index Scan (debit_amount > 1000)
-      └── BitmapAnd
-          ├── Bitmap Index Scan (credit_account_code = '4010')
-          └── Bitmap Index Scan (credit_amount > 500)
+  `---- BitmapOr
+      |---- BitmapAnd
+      |   |---- Bitmap Index Scan (debit_account_code = '1010')
+      |   `---- Bitmap Index Scan (transaction_date = '2024-01-15')
+      |---- BitmapAnd
+      |   |---- Bitmap Index Scan (debit_account_code = '5010')
+      |   `---- Bitmap Index Scan (debit_amount > 1000)
+      `---- BitmapAnd
+          |---- Bitmap Index Scan (credit_account_code = '4010')
+          `---- Bitmap Index Scan (credit_amount > 500)
 ```
 
 ### Bitmap vs Regular Index Scan
@@ -139,7 +139,7 @@ WHERE transaction_date = '2024-01-15';
 
 -- Plan: Only scans January partition!
 Append
-  └── Seq Scan on ledger_transactions_2024_01
+  `---- Seq Scan on ledger_transactions_2024_01
       -- Other partitions pruned!
 ```
 
@@ -157,11 +157,11 @@ WHERE o.order_date >= '2024-01-01'
 
 -- RA performs join per partition!
 Append
-  ├── Hash Join
-  │   ├── Seq Scan on orders_2024_01
-  │   └── Hash
-  │       └── Seq Scan on payments_2024_01
-  └── (Other months pruned)
+  |---- Hash Join
+  |   |---- Seq Scan on orders_2024_01
+  |   `---- Hash
+  |       `---- Seq Scan on payments_2024_01
+  `---- (Other months pruned)
 ```
 
 ## Adaptive Query Execution
@@ -299,9 +299,9 @@ GROUP BY debit_account_code, EXTRACT(YEAR FROM transaction_date);
 
 -- Plan:
 Finalize HashAggregate
-  └── Gather Merge
-      └── Partial HashAggregate  -- Each worker aggregates
-          └── Parallel Seq Scan
+  `---- Gather Merge
+      `---- Partial HashAggregate  -- Each worker aggregates
+          `---- Parallel Seq Scan
               Workers: 4
 ```
 
@@ -406,8 +406,8 @@ ORDER BY transaction_date;
 -- RA uses Merge Append:
 -- Maintains sort order without re-sorting!
 MergeAppend
-  ├── Index Scan on transactions_2024_01
-  └── Index Scan on transactions_2024_02
+  |---- Index Scan on transactions_2024_01
+  `---- Index Scan on transactions_2024_02
 ```
 
 ## Advanced Statistics
@@ -550,13 +550,13 @@ ORDER BY ma.month;
 
 You've completed the RA Query Optimizer interactive guide! Through Alice's ledger system, you've learned:
 
-- ✅ How query optimizers transform SQL into efficient plans
-- ✅ The role of statistics in optimization decisions
-- ✅ Cost-based optimization principles
-- ✅ Rule-based transformations
-- ✅ Hardware-aware planning
-- ✅ Cross-database translation
-- ✅ Advanced optimization techniques
+- [x] How query optimizers transform SQL into efficient plans
+- [x] The role of statistics in optimization decisions
+- [x] Cost-based optimization principles
+- [x] Rule-based transformations
+- [x] Hardware-aware planning
+- [x] Cross-database translation
+- [x] Advanced optimization techniques
 
 ## Your Optimization Toolkit
 
@@ -570,11 +570,11 @@ You now have the knowledge to:
 
 ## Next Steps
 
-- 📚 Explore RA's source code
-- 🔬 Experiment with your own queries
-- 🎯 Apply these techniques to real databases
-- 🤝 Contribute to RA's development
+-  Explore RA's source code
+-  Experiment with your own queries
+-  Apply these techniques to real databases
+-  Contribute to RA's development
 
 ---
 
-*🎉 Congratulations! You've mastered query optimization with RA. Remember: optimization is both art and science. Keep experimenting, measuring, and learning. Happy optimizing!*
+* Congratulations! You've mastered query optimization with RA. Remember: optimization is both art and science. Keep experimenting, measuring, and learning. Happy optimizing!*

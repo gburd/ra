@@ -57,10 +57,10 @@ Three-phase aggregation adds a redistribution phase between partial and final ag
 ## Relational Algebra
 
 ```
-γ_{g; AGG(v)}(R)
-→ γ_{g; FINAL(p2)}(
+$\gamma$_{g; AGG(v)}(R)
+-> $\gamma$_{g; FINAL(p2)}(
     Redistribute(
-      γ_{g; PARTIAL(v)}(R),
+      $\gamma$_{g; PARTIAL(v)}(R),
       g
     )
   )
@@ -114,7 +114,7 @@ SELECT product, SUM(amount)
 FROM distributed_sales
 GROUP BY product;
 
--- Phase 1: Each node aggregates 10M rows → ~100K groups
+-- Phase 1: Each node aggregates 10M rows -> ~100K groups
 -- Phase 2: Redistribute 10M groups across 100 nodes
 -- Phase 3: Each node finalizes ~100K groups
 ```

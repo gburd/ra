@@ -99,7 +99,7 @@ RowPattern(
 
 **Algebra notation:**
 ```
-ρ[PATTERN p, DEFINE d, MEASURES m](π[partition], σ[order](R))
+$\rho$[PATTERN p, DEFINE d, MEASURES m]($\pi$[partition], $\sigma$[order](R))
 ```
 
 #### 2. PatternExpr (Nested AST)
@@ -183,12 +183,12 @@ pub enum Expr {
 **Name:** `rpr-eliminate-redundant-quantifier`
 
 ```rust
-// A{1} → A
+// A{1} -> A
 rewrite!("rpr-eliminate-redundant-quantifier";
     "(pattern-quantified ?var (exactly 1))" => "?var"
 )
 
-// A{0,1} → A?
+// A{0,1} -> A?
 rewrite!("rpr-normalize-range-to-optional";
     "(pattern-quantified ?var (range 0 1))" =>
     "(pattern-quantified ?var zero-or-one)"
@@ -202,7 +202,7 @@ rewrite!("rpr-normalize-range-to-optional";
 **Name:** `rpr-flatten-sequence`
 
 ```rust
-// (A B) C → A B C
+// (A B) C -> A B C
 rewrite!("rpr-flatten-sequence";
     "(pattern-sequence (pattern-sequence ?inner) ?rest)" =>
     "(pattern-sequence (append ?inner ?rest))"
@@ -216,7 +216,7 @@ rewrite!("rpr-flatten-sequence";
 **Name:** `rpr-factor-common-prefix`
 
 ```rust
-// (A B C) | (A B D) → A B (C | D)
+// (A B C) | (A B D) -> A B (C | D)
 rewrite!("rpr-factor-common-prefix";
     "(pattern-alternation
        (pattern-sequence ?prefix ?x)
@@ -236,7 +236,7 @@ rewrite!("rpr-factor-common-prefix";
 
 ```algebra
 -- Before
-σ[price > 100](RowPattern[DEFINE A AS price > 0](R))
+$\sigma$[price > 100](RowPattern[DEFINE A AS price > 0](R))
 
 -- After
 RowPattern[DEFINE A AS (price > 0 AND price > 100)](R)
@@ -269,10 +269,10 @@ rewrite!("rpr-push-filter-into-define";
 
 ```algebra
 -- Before
-σ[symbol = 'AAPL'](RowPattern[PARTITION BY symbol](R))
+$\sigma$[symbol = 'AAPL'](RowPattern[PARTITION BY symbol](R))
 
 -- After
-RowPattern[PARTITION BY symbol](σ[symbol = 'AAPL'](R))
+RowPattern[PARTITION BY symbol]($\sigma$[symbol = 'AAPL'](R))
 ```
 
 ```rust
@@ -387,7 +387,7 @@ RowPattern(Sort(SeqScan(R)), ...)
 RowPattern(IndexScan(R, idx_order), ...)
 ```
 
-**Benefit:** Eliminates expensive sort (O(n log n) → O(n))
+**Benefit:** Eliminates expensive sort (O(n log n) -> O(n))
 
 ### Category 5: Early Termination
 
@@ -421,8 +421,8 @@ SELECT * FROM (
 ```
 DFA states with identical out-transitions can be merged:
 
-State A: [input 'x' → State C]
-State B: [input 'x' → State C]
+State A: [input 'x' -> State C]
+State B: [input 'x' -> State C]
 
 Merge A and B if they have same DEFINE conditions.
 ```
@@ -521,8 +521,8 @@ pub fn compare_rpr_vs_window(pattern: &PatternExpr) -> Option<f64> {
 - Deliverable: Parser support in `ra-parser/src/match_recognize.rs` (800 lines)
 
 **Week 3: DFA Compiler**
-- Task 3.1: Implement pattern → NFA conversion
-- Task 3.2: NFA → DFA conversion (subset construction)
+- Task 3.1: Implement pattern -> NFA conversion
+- Task 3.2: NFA -> DFA conversion (subset construction)
 - Task 3.3: DFA minimization (Hopcroft's algorithm)
 - Task 3.4: Unit tests for pattern compilation
 - Deliverable: DFA compiler in `ra-engine/src/pattern_dfa.rs` (600 lines)
@@ -765,7 +765,7 @@ RowPattern(
 
 | Metric | Target | Timeline |
 |--------|--------|----------|
-| Pattern → DFA compilation time | <10ms | Week 3 |
+| Pattern -> DFA compilation time | <10ms | Week 3 |
 | Simple patterns translated to window functions | 60%+ | Week 6 |
 | RPR execution overhead vs hand-coded | <20% | Week 9 |
 | PostgreSQL plan equivalence | 95%+ | Week 12 |

@@ -117,32 +117,32 @@ Use mathematical notation to formally specify the transformation:
 ## Relational Algebra
 
 \`\`\`algebra
-σ[p](R ⋈[c] S) → (σ[p](R)) ⋈[c] S
-  where attrs(p) ⊆ attrs(R)
+$\sigma$[p](R $\bowtie$[c] S) -> ($\sigma$[p](R)) $\bowtie$[c] S
+  where attrs(p) $\subseteq$ attrs(R)
 
-σ[p](R ⋈[c] S) → R ⋈[c] (σ[p](S))
-  where attrs(p) ⊆ attrs(S)
+$\sigma$[p](R $\bowtie$[c] S) -> R $\bowtie$[c] ($\sigma$[p](S))
+  where attrs(p) $\subseteq$ attrs(S)
 \`\`\`
 
 Where:
-- σ[p] is selection with predicate p
-- ⋈[c] is join with condition c
+- $\sigma$[p] is selection with predicate p
+- $\bowtie$[c] is join with condition c
 - R, S are relations
 - attrs(p) returns the set of attributes referenced by p
-- ⊆ means "is a subset of"
+- $\subseteq$ means "is a subset of"
 ```
 
 Notation guide:
-- `σ[p]` - Selection (filter)
-- `π[A]` - Projection
-- `⋈[c]` - Join
-- `⋉` - Semi-join
-- `⋊` - Anti-join
-- `γ[G,A]` - Aggregation (group by G, aggregates A)
-- `τ[O]` - Sort (order by O)
-- `∪` - Union
-- `∩` - Intersect
-- `−` - Except/difference
+- `$\sigma$[p]` - Selection (filter)
+- `$\pi$[A]` - Projection
+- `$\bowtie$[c]` - Join
+- `$\ltimes$` - Semi-join
+- `$\rtimes$` - Anti-join
+- `$\gamma$[G,A]` - Aggregation (group by G, aggregates A)
+- `$\tau$[O]` - Sort (order by O)
+- `$\cup$` - Union
+- `$\cap$` - Intersect
+- `-` - Except/difference
 
 ## Implementation Section
 

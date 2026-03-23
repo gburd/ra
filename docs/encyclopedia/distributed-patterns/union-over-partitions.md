@@ -223,7 +223,7 @@ When partitions have unequal sizes, parallelism is limited by the largest partit
 ```
 Partition 1: 100K rows (1 second)
 Partition 2: 500K rows (5 seconds)
-Partition 3: 10M rows (100 seconds)  ← bottleneck
+Partition 3: 10M rows (100 seconds)  <- bottleneck
 ```
 
 **Total time:** 100 seconds (limited by largest partition)
@@ -333,7 +333,7 @@ fn test_partition_union_parallelism() {
 
 ## Common Pitfalls
 
-### ❌ Too Many Partitions
+### [FAIL] Too Many Partitions
 
 ```sql
 -- 10,000 partitions, each with 100 rows
@@ -344,7 +344,7 @@ Coordination overhead dominates. Too much parallelism for small data.
 
 **Fix:** Use fewer partitions or sequential scan.
 
-### ❌ Insufficient Workers
+### [FAIL] Insufficient Workers
 
 ```sql
 -- 100 partitions, 4 workers
@@ -355,7 +355,7 @@ Only 4 partitions scanned at a time. Still 25x slower than full parallelism.
 
 **Fix:** Increase worker count or use partition grouping.
 
-### ❌ No Partition Pruning
+### [FAIL] No Partition Pruning
 
 ```sql
 -- Scans all 120 partitions when only 1 needed

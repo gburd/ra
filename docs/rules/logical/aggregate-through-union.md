@@ -23,7 +23,7 @@ of aggregates and can reduce the amount of data flowing through the union.
 **When to apply**: Queries with aggregates over UNION ALL where the aggregate
 function is distributive (SUM, COUNT, MIN, MAX).
 
-**Why it works**: Distributive aggregates can be decomposed: AGG(A ∪ B) =
+**Why it works**: Distributive aggregates can be decomposed: AGG(A $\cup$ B) =
 AGG(AGG(A), AGG(B)). This allows independent computation on each branch,
 enabling parallelism and reducing intermediate result size.
 
@@ -142,7 +142,7 @@ SELECT AVG(price) FROM (
   SELECT price FROM products_eu
 );
 
--- AVG is not distributive: AVG(A ∪ B) ≠ AVG(AVG(A), AVG(B))
+-- AVG is not distributive: AVG(A $\cup$ B) $\neq$ AVG(AVG(A), AVG(B))
 -- Requires two-phase: push SUM and COUNT, then divide
 -- This rule does not apply directly
 ```

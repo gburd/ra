@@ -18,7 +18,7 @@ Ra takes **0.8-1.5 seconds** to optimize 5-7 table joins, while PostgreSQL optim
 
 ## Implementation Status
 
-### ✅ Completed (Week 1 + Week 2)
+### [x] Completed (Week 1 + Week 2)
 
 1. **JOB Infrastructure** (Week 1)
    - Dataset download scripts
@@ -32,7 +32,7 @@ Ra takes **0.8-1.5 seconds** to optimize 5-7 table joins, while PostgreSQL optim
    - Criterion benchmark framework
    - Compiles and runs successfully
 
-### 📊 Benchmark Results
+###  Benchmark Results
 
 **Hardware**: Not specified (user's machine)
 **Mode**: Quick mode (reduced iterations)
@@ -82,7 +82,7 @@ Based on the results, potential bottlenecks:
 
 ### Immediate (This Week)
 
-1. **Profile the Optimizer** 🔥
+1. **Profile the Optimizer** 
    - Use `cargo flamegraph` to identify hot paths
    - Measure time spent in each optimization phase
    - Identify which rules are slowest
@@ -136,14 +136,14 @@ Based on the results, potential bottlenecks:
 
 ## Success Criteria (Updated)
 
-### ✅ Achieved
+### [x] Achieved
 
 - JOB infrastructure complete
 - Benchmark harness functional
 - Real IMDB statistics integrated
 - Identified critical performance issue
 
-### 🎯 Next Targets
+###  Next Targets
 
 - **Performance**: Optimize 5-table joins in <100ms (currently ~1s)
 - **Correctness**: 100% of JOB queries return correct results (not yet tested)
@@ -157,23 +157,23 @@ Based on the results, potential bottlenecks:
 ### Week 1 (Infrastructure)
 ```
 benchmarks/job/
-├── README.md                      # Documentation
-├── schema.sql                     # 21-table IMDB schema
-├── download_imdb.sh              # Dataset download
-├── load_data.sh                  # Data loading
-├── validate_data.sh              # Data validation
-├── run_job_comparison.sh         # Differential testing
-├── validate_results.sh           # Result validation
-├── data/                         # CSV files (empty)
-├── queries/                      # SQL files (empty)
-└── results/                      # Results (empty)
+|---- README.md                      # Documentation
+|---- schema.sql                     # 21-table IMDB schema
+|---- download_imdb.sh              # Dataset download
+|---- load_data.sh                  # Data loading
+|---- validate_data.sh              # Data validation
+|---- run_job_comparison.sh         # Differential testing
+|---- validate_results.sh           # Result validation
+|---- data/                         # CSV files (empty)
+|---- queries/                      # SQL files (empty)
+`---- results/                      # Results (empty)
 ```
 
 ### Week 2 (Benchmark Harness)
 ```
 crates/ra-engine/
-├── benches/job_benchmark.rs      # 591 lines, 5 queries
-└── Cargo.toml                    # Added [[bench]] entry
+|---- benches/job_benchmark.rs      # 591 lines, 5 queries
+`---- Cargo.toml                    # Added [[bench]] entry
 ```
 
 ---
@@ -209,7 +209,7 @@ job_complex/q13a        time:   [778 ms]
 
 ### For Ra Development Team
 
-1. **Prioritize Optimizer Performance** 🔥
+1. **Prioritize Optimizer Performance** 
    - This is now the #1 blocker for production use
    - Target: <100ms for simple queries, <500ms for complex
 

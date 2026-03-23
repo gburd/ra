@@ -103,7 +103,7 @@ optimizer.add_table_stats("events", Statistics {
 });
 
 optimizer.add_column_stats("events", "timestamp", ColumnStatistics {
-    distinct_count: 86_400_000,  // ~1000 days × 86400 seconds/day
+    distinct_count: 86_400_000,  // ~1000 days $\times$ 86400 seconds/day
     null_fraction: 0.0,
     min_value: Some("2022-01-01 00:00:00"),
     max_value: Some("2024-12-31 23:59:59"),
@@ -377,14 +377,14 @@ IndexScan [subscriptions.period_gist_idx]
 
 ### 1. Function on Indexed Column
 
-❌ **Bad:**
+[FAIL] **Bad:**
 ```sql
 WHERE DATE(timestamp_column) = '2024-03-15'
 ```
 
 Function prevents index usage.
 
-✅ **Good:**
+[x] **Good:**
 ```sql
 WHERE timestamp_column >= '2024-03-15 00:00:00'
   AND timestamp_column < '2024-03-16 00:00:00'
@@ -392,14 +392,14 @@ WHERE timestamp_column >= '2024-03-15 00:00:00'
 
 ### 2. OR with Non-Temporal Predicates
 
-❌ **Bad:**
+[FAIL] **Bad:**
 ```sql
 WHERE created_at < '2024-01-01' OR status = 'archived'
 ```
 
 Forces sequential scan.
 
-✅ **Good:**
+[x] **Good:**
 ```sql
 -- Split into UNION
 SELECT * FROM table WHERE created_at < '2024-01-01'
@@ -409,13 +409,13 @@ SELECT * FROM table WHERE status = 'archived' AND created_at >= '2024-01-01';
 
 ### 3. Implicit Type Conversion
 
-❌ **Bad:**
+[FAIL] **Bad:**
 ```sql
 -- If timestamp column
 WHERE timestamp_column = '2024-03-15'  -- Implicit conversion
 ```
 
-✅ **Good:**
+[x] **Good:**
 ```sql
 WHERE timestamp_column >= '2024-03-15 00:00:00'
   AND timestamp_column < '2024-03-16 00:00:00'

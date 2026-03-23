@@ -24,7 +24,7 @@ Equality saturation applies rewrite rules exhaustively until saturation (no new 
 
 - **E-nodes:** Individual expression nodes (operators with children)
 - **E-classes:** Equivalence classes grouping semantically equivalent e-nodes
-- **Rewrite rules:** Pattern-based transformations (`(filter ?p (filter ?q ?input))` → `(filter (and ?p ?q) ?input)`)
+- **Rewrite rules:** Pattern-based transformations (`(filter ?p (filter ?q ?input))` -> `(filter (and ?p ?q) ?input)`)
 - **Extraction:** Cost-based selection of the best expression from an e-class
 
 #### Why We Chose It
@@ -89,7 +89,7 @@ Sqlparser supports multiple SQL dialects (PostgreSQL, MySQL, SQLite, ClickHouse)
 **SQL to RelExpr** (`ra-parser`): Converts sqlparser AST to Ra's `RelExpr` (relational algebra):
 
 ```
-SQL string → sqlparser::Statement → ra_core::RelExpr → ra-engine e-graph
+SQL string -> sqlparser::Statement -> ra_core::RelExpr -> ra-engine e-graph
 ```
 
 **Dialect Extensions** (`ra-dialect`): Extends sqlparser for dialect-specific syntax (PostgreSQL `LATERAL`, MySQL optimizer hints).
@@ -293,9 +293,9 @@ Ra prefers libraries that are:
 - **Supply-chain vetted:** Use `cargo deny` to audit dependencies
 
 **Avoided Dependencies:**
-- LLVM (too large, slow compile times) → Cranelift instead
-- Python bindings (FFI complexity) → Pure Rust
-- Database-specific clients (tight coupling) → Generic traits
+- LLVM (too large, slow compile times) -> Cranelift instead
+- Python bindings (FFI complexity) -> Pure Rust
+- Database-specific clients (tight coupling) -> Generic traits
 
 ## References
 

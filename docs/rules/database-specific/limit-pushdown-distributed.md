@@ -28,7 +28,7 @@ Pushes a LIMIT operator below a remote read/exchange to reduce data transfer fro
 
 ```algebra
 Limit[k](RemoteRead[nodes](R))
-  -> MergeLimit[k](∀n ∈ nodes: Limit[k](Read_n(R)))
+  -> MergeLimit[k]($\forall$n $\in$ nodes: Limit[k](Read_n(R)))
 ```
 
 ## Implementation

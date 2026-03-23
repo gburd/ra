@@ -21,13 +21,13 @@ WHERE o.amount > 1000
 
 -- Path 1: Hash Join
 HashJoin
-  ├─ SeqScan(orders) WHERE amount > 1000
-  ├─ SeqScan(customers)
+  |--- SeqScan(orders) WHERE amount > 1000
+  |--- SeqScan(customers)
 
 -- Path 2: Parameterized Nested Loop
 NestLoop
-  ├─ SeqScan(orders) WHERE amount > 1000
-  ├─ IndexScan(customers, idx_customer_id)  -- Parameterized by o.customer_id
+  |--- SeqScan(orders) WHERE amount > 1000
+  |--- IndexScan(customers, idx_customer_id)  -- Parameterized by o.customer_id
 ```
 
 **Benefit**: Inner index scan can be cheaper than hash join when outer is small.
@@ -78,7 +78,7 @@ ORDER BY category, date
 
 -- Plan:
 IncrementalSort (sort by date within each category)
-  ├─ IndexScan(idx_category_date)  -- Already sorted by category
+  |--- IndexScan(idx_category_date)  -- Already sorted by category
 ```
 
 **RA Status**: RA has `IncrementalSort` in algebra.rs - verify grouping integration.
@@ -252,13 +252,13 @@ WHERE NOT EXISTS (SELECT 1 FROM competitors WHERE competitors.price >= products.
 
 **Types**:
 - **n_distinct**: COUNT(DISTINCT a, b)
-- **dependencies**: Functional dependency a → b
+- **dependencies**: Functional dependency a -> b
 - **mcv**: Most common value combinations
 
 **Example**:
 ```sql
 CREATE STATISTICS city_zip_stats (dependencies) ON city, zipcode FROM addresses;
--- PostgreSQL learns: city → zipcode (functional dependency)
+-- PostgreSQL learns: city -> zipcode (functional dependency)
 
 -- Query: WHERE city = 'NYC' AND zipcode = '10001'
 -- Cardinality: Uses dependency instead of independence assumption

@@ -29,7 +29,7 @@ Converts ClickHouse's ANY JOIN or ANY LEFT JOIN to a semi-join or anti-join when
 ```algebra
 Project[L_cols](Join[ANY, c](L, R))
   -> SemiJoin[c](L, R)
-  where L_cols ⊆ columns(L)
+  where L_cols $\subseteq$ columns(L)
 ```
 
 ## Implementation

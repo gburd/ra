@@ -33,8 +33,8 @@ the window's working set.
 ## Relational Algebra
 
 ```algebra
-σ_p(WINDOW_f(R)) where p references only R columns ->
-  WINDOW_f(σ_p(R))
+$\sigma$_p(WINDOW_f(R)) where p references only R columns ->
+  WINDOW_f($\sigma$_p(R))
 ```
 
 ## Implementation
@@ -86,16 +86,16 @@ fn estimated_benefit(
     // Window function cost is typically O(n log n) for sorting
     // or O(n) for simple aggregates within partitions
     let window_cost_per_row = if stats.window_needs_sort {
-        0.00001 // 10μs per row for sort-based window
+        0.00001 // 10$\mu$s per row for sort-based window
     } else {
-        0.000005 // 5μs per row for partition-based window
+        0.000005 // 5$\mu$s per row for partition-based window
     };
 
     // Cost savings from smaller window input
     let window_savings = rows_eliminated * window_cost_per_row;
 
     // Filter evaluation cost
-    let filter_cost_per_row = 0.000001; // 1μs per row
+    let filter_cost_per_row = 0.000001; // 1$\mu$s per row
     let filter_cost = input_rows * filter_cost_per_row;
 
     // Normalize
@@ -107,7 +107,7 @@ fn estimated_benefit(
 **Assumptions:**
 - Window functions with ORDER BY require sorting: O(n log n)
 - Window functions with PARTITION BY only: O(n)
-- Filter evaluation: ~1μs per row
+- Filter evaluation: ~1$\mu$s per row
 - Selective filters significantly reduce window working set
 
 **Typical benefit**: 20-55% for selective filters on large window inputs.

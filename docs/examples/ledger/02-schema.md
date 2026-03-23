@@ -372,26 +372,26 @@ const queries = [
 ### Decision 1: Single vs Multi-Row Transactions
 
 Alice chose single-row because:
-- ✅ Guarantees debit = credit in one row
-- ✅ Simpler balance calculations
-- ❌ Complex account filtering (needs OR)
-- ❌ Difficult to index efficiently
+- [x] Guarantees debit = credit in one row
+- [x] Simpler balance calculations
+- [FAIL] Complex account filtering (needs OR)
+- [FAIL] Difficult to index efficiently
 
 ### Decision 2: UUID vs Sequential IDs
 
 Alice chose UUIDs because:
-- ✅ No coordination needed for ID generation
-- ✅ Easier data migration and merging
-- ❌ Larger index size
-- ❌ Poor locality of reference
+- [x] No coordination needed for ID generation
+- [x] Easier data migration and merging
+- [FAIL] Larger index size
+- [FAIL] Poor locality of reference
 
 ### Decision 3: Materialized View Strategy
 
 Alice materialized account_balances because:
-- ✅ Fast balance lookups
-- ✅ Reduces complex joins
-- ❌ Refresh overhead
-- ❌ Storage duplication
+- [x] Fast balance lookups
+- [x] Reduces complex joins
+- [FAIL] Refresh overhead
+- [FAIL] Storage duplication
 
 ## Optimization Opportunities
 
@@ -456,4 +456,4 @@ Now that you understand the schema, let's start optimizing queries! In [Chapter 
 
 ---
 
-*🎓 Learning Note: Good schema design is the foundation of performance. No optimizer can fully compensate for poor design choices.*
+* Learning Note: Good schema design is the foundation of performance. No optimizer can fully compensate for poor design choices.*

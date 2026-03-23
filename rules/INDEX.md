@@ -988,16 +988,16 @@ Experimental and research rules.
 
 | Rule ID | Name | Complexity |
 |---------|------|------------|
-| `delta-wcoj` | Delta WCOJ for Incremental Maintenance | O(delta_N^(ρ*)) |
+| `delta-wcoj` | Delta WCOJ for Incremental Maintenance | O(delta_N^($\rho$*)) |
 | `factorized-join` | Factorized Join Representation | O(N^(fhtw)) |
-| `free-join` | Free Join (Worst-Case Optimal Join) | O(N^(ρ*)) |
-| `generic-join` | Generic Join (Ngo-Porat-Re-Rudra) | O(N^(ρ*)) |
-| `honeycomb-join` | HoneyComb Distributed WCOJ | O(N^(ρ*) / p) |
-| `leapfrog-triejoin` | LeapFrog TrieJoin | O(N^(ρ*)) |
-| `level-headed-join` | LevelHeaded Join Algorithm | O(N^(ρ*) * w) |
+| `free-join` | Free Join (Worst-Case Optimal Join) | O(N^($\rho$*)) |
+| `generic-join` | Generic Join (Ngo-Porat-Re-Rudra) | O(N^($\rho$*)) |
+| `honeycomb-join` | HoneyComb Distributed WCOJ | O(N^($\rho$*) / p) |
+| `leapfrog-triejoin` | LeapFrog TrieJoin | O(N^($\rho$*)) |
+| `level-headed-join` | LevelHeaded Join Algorithm | O(N^($\rho$*) * w) |
 | `wcoj-clique-detection` | WCOJ for Clique Detection Patterns | O(N^(k/2)) |
 | `wcoj-star-pattern` | WCOJ for Star Join Patterns | O(N * sqrt(N)) |
-| `wcoj-to-binary-fallback` | WCOJ to Binary Join Fallback | O(min(N^ρ*, binary_plan)) |
+| `wcoj-to-binary-fallback` | WCOJ to Binary Join Fallback | O(min(N^$\rho$*, binary_plan)) |
 
 ### hardware/ (21 rules)
 
@@ -1315,7 +1315,7 @@ Logical query rewrite rules.
 | `not-exists-to-anti-join` | NOT EXISTS to Anti-Join | O(1) |
 | `not-in-to-anti-join` | NOT IN to Anti-Join | O(1) |
 | `scalar-subquery-to-join` | Scalar Subquery to Join | O(1) |
-| `subquery-deduplication` | Subquery Deduplication | O(n²) |
+| `subquery-deduplication` | Subquery Deduplication | O(n$^2$) |
 | `subquery-hoisting` | Subquery Hoisting | O(n) |
 | `subquery-with-aggregation-unnesting` | Subquery with Aggregation Unnesting | O(n) |
 | `uncorrelated-subquery-to-join` | Uncorrelated Subquery to Join | O(1) |

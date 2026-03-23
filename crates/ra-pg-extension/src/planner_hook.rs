@@ -272,7 +272,7 @@ unsafe fn try_optimize_query(
     stats: &[(String, ra_core::Statistics)],
     calibration: &CostCalibration,
 ) -> Result<Option<OptimizedPlan>, String> {
-    // Step 1: Convert PostgreSQL Query → RA RelExpr.
+    // Step 1: Convert PostgreSQL Query -> RA RelExpr.
     let rel_expr = match parse_query_to_relexpr(parse, sql) {
         Ok(Some(expr)) => expr,
         Ok(None) => return Ok(None), // Unsupported query type
@@ -298,7 +298,7 @@ unsafe fn try_optimize_query(
     let stats_coverage = calculate_stats_coverage(&rel_expr, stats);
     let confidence = (improvement_ratio * 0.7 + stats_coverage * 0.3).clamp(0.0, 1.0);
 
-    // Step 4: Convert optimized RelExpr → PostgreSQL PlannedStmt.
+    // Step 4: Convert optimized RelExpr -> PostgreSQL PlannedStmt.
     let planned_stmt = match plan_converter::convert_to_planned_stmt(
         &optimized_expr,
         parse,

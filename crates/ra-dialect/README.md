@@ -114,8 +114,8 @@ let result = translator
 The native backend is generally faster for simple translations due to its focused scope. The polyglot backend provides more comprehensive translation at the cost of slightly higher latency.
 
 Benchmark results (example):
-- Native backend: ~50μs for simple SELECT
-- Polyglot backend: ~200μs for simple SELECT
+- Native backend: ~50$\mu$s for simple SELECT
+- Polyglot backend: ~200$\mu$s for simple SELECT
 - Both backends handle complex queries in 1-5ms
 
 ## Migration Guide

@@ -17,7 +17,7 @@ Transposes filter and projection
 ## Relational Algebra
 
 ```algebra
-σ(π(R)) => π(σ(R))
+$\sigma$($\pi$(R)) => $\pi$($\sigma$(R))
 ```
 
 ## Implementation

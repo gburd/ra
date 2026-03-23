@@ -27,7 +27,7 @@ Pushes a filter from the body of a recursive CTE into the base case when the fil
 ```algebra
 Filter[p](RecursiveCTE[name, base, rec](body))
   -> RecursiveCTE[name, Filter[p](base), rec](body)
-  where columns(p) ⊆ columns(base)
+  where columns(p) $\subseteq$ columns(base)
     and not references_cte(p, name)
 ```
 

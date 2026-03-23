@@ -12,7 +12,7 @@
 
 The optimizer spends **95.8% of time** (738ms) in e-graph equality saturation, with only **4.2%** (32ms) in plan extraction. The e-graph runs for the full 30 iteration limit even though it stops making progress after iteration 18.
 
-**Wasted work**: ~11 iterations × 45ms = **495ms of unnecessary computation**
+**Wasted work**: ~11 iterations $\times$ 45ms = **495ms of unnecessary computation**
 
 ---
 
@@ -20,9 +20,9 @@ The optimizer spends **95.8% of time** (738ms) in e-graph equality saturation, w
 
 | Phase | Time | % of Total | Status |
 |-------|------|------------|--------|
-| to_rec_expr (query → e-graph) | 54µs | 0.007% | ✅ Not a problem |
-| E-graph saturation | 738ms | 95.8% | 🔥 **BOTTLENECK** |
-| extract_best (plan extraction) | 32ms | 4.2% | ⚠️ Minor issue |
+| to_rec_expr (query -> e-graph) | 54µs | 0.007% | [x] Not a problem |
+| E-graph saturation | 738ms | 95.8% |  **BOTTLENECK** |
+| extract_best (plan extraction) | 32ms | 4.2% | WARNING: Minor issue |
 | **Total** | **771ms** | **100%** | Target: <100ms |
 
 ---
@@ -35,10 +35,10 @@ The optimizer spends **95.8% of time** (738ms) in e-graph equality saturation, w
 
 | Iteration Range | Per-Iteration Time | E-Graph Size | Progress |
 |-----------------|-------------------|--------------|----------|
-| 0-5 | 0.04-7ms | 88 → 6,678 nodes | 🟢 Rapid growth |
-| 6-11 | 7-23ms | 6,694 → 14,120 nodes | 🟢 Significant changes |
-| 12-18 | 20-24ms | 14,133 → 15,377 nodes | 🟡 Slowing down |
-| 19-29 | 40-50ms each | 15,377 → 30,322 nodes | 🔴 **Wasted cycles** |
+| 0-5 | 0.04-7ms | 88 -> 6,678 nodes | [OK] Rapid growth |
+| 6-11 | 7-23ms | 6,694 -> 14,120 nodes | [OK] Significant changes |
+| 12-18 | 20-24ms | 14,133 -> 15,377 nodes | [WARN] Slowing down |
+| 19-29 | 40-50ms each | 15,377 -> 30,322 nodes | [ERROR] **Wasted cycles** |
 
 ### Key Observations
 
@@ -99,7 +99,7 @@ iter_limit: 30  // OptimizerConfig default
 - Query saturated at iteration 18
 - Iterations 19-29 found nothing (0 unions, minimal changes)
 - Each wasted iteration costs ~45ms
-- Total waste: 11 × 45ms = **495ms**
+- Total waste: 11 $\times$ 45ms = **495ms**
 
 ### 2. No Early Termination
 
@@ -112,7 +112,7 @@ iter_limit: 30  // OptimizerConfig default
 
 **Evidence**:
 ```
-Iteration 18-29: Size barely changed (15k → 30k nodes, but similar class counts)
+Iteration 18-29: Size barely changed (15k -> 30k nodes, but similar class counts)
 Multiple iterations with "0 unions, 0 trimmed nodes"
 ```
 
@@ -139,11 +139,11 @@ As e-graph grows, each iteration takes longer:
 
 | Query Type | Tables | Current Limit | Proposed Limit | Expected Savings |
 |------------|--------|---------------|----------------|------------------|
-| Simple | 2-4 | 30 | 5-10 | ~20ms → ~5ms (4x faster) |
-| Medium | 5-7 | 30 | 10-15 | ~770ms → ~300ms (2.5x faster) |
+| Simple | 2-4 | 30 | 5-10 | ~20ms -> ~5ms (4x faster) |
+| Medium | 5-7 | 30 | 10-15 | ~770ms -> ~300ms (2.5x faster) |
 | Complex | 8+ | 30 | 20-25 | Varies |
 
-**Expected impact for q13a**: 770ms → **~300ms** (2.5x speedup)
+**Expected impact for q13a**: 770ms -> **~300ms** (2.5x speedup)
 
 **Implementation**:
 ```rust
@@ -167,7 +167,7 @@ let iter_limit = match table_count {
 2. Node growth <5% (`(new_size - old_size) / old_size < 0.05`)
 3. No successful rule applications in last iteration
 
-**Expected impact for q13a**: 770ms → **~300ms** (stop at iteration 18 instead of 30)
+**Expected impact for q13a**: 770ms -> **~300ms** (stop at iteration 18 instead of 30)
 
 **Implementation**: Check stopping criteria in `Runner` loop after each iteration.
 
@@ -206,7 +206,7 @@ let iter_limit = match table_count {
 3. Repeat
 
 **Expected impact**:
-- Simple queries: ~100ms → **<10ms** (10x+ speedup)
+- Simple queries: ~100ms -> **<10ms** (10x+ speedup)
 - Bypasses e-graph completely
 
 **Confidence**: High (PostgreSQL uses this for simple queries)
@@ -217,7 +217,7 @@ let iter_limit = match table_count {
 
 ### Immediate (This Week)
 
-1. ✅ **Profile optimizer** (Task #241) - DONE
+1. [x] **Profile optimizer** (Task #241) - DONE
 2. **Implement adaptive iteration limits** (Task #246)
    - Simple: 5 iterations
    - Medium: 10 iterations

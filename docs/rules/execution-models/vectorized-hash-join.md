@@ -27,7 +27,7 @@ Vectorized hash join processes batches of probe tuples simultaneously, using SIM
 ## Relational Algebra
 
 ```
-VectorizedHashJoin(R, S, R.a = S.b) → Iterator<Batch>
+VectorizedHashJoin(R, S, R.a = S.b) -> Iterator<Batch>
 
 BuildPhase:
   for batch in build_input:
@@ -128,7 +128,7 @@ pub fn vectorized_hash_join_cost(
 ## Cost Model
 
 - **Build:** O(M) hash table construction
-- **Probe:** O(N / batch_size) batches × O(batch_size / SIMD_width) = O(N / SIMD_width)
+- **Probe:** O(N / batch_size) batches $\times$ O(batch_size / SIMD_width) = O(N / SIMD_width)
 - **SIMD Speedup:** 4-8x for hash computation
 - **Memory:** O(M) hash table + O(batch_size) buffers
 

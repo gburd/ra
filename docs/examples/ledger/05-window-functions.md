@@ -42,11 +42,11 @@ WHERE debit_account_code = '5010';
 **Execution Plan**:
 ```
 WindowAgg
-  └── Sort (transaction_date)
-      └── WindowAgg
-          └── Sort (debit_amount DESC)
-              └── SeqScan
-                  └── Filter: debit_account_code = '5010'
+  `---- Sort (transaction_date)
+      `---- WindowAgg
+          `---- Sort (debit_amount DESC)
+              `---- SeqScan
+                  `---- Filter: debit_account_code = '5010'
 ```
 
 Notice: Multiple sorts for different windows!
@@ -71,8 +71,8 @@ ORDER BY transaction_date;
 **Optimized Plan**:
 ```
 WindowAgg (all three functions)
-  └── Sort (transaction_date)  -- Single sort!
-      └── SeqScan
+  `---- Sort (transaction_date)  -- Single sort!
+      `---- SeqScan
 ```
 
 ## Common Window Patterns
@@ -426,7 +426,7 @@ ORDER BY a.transaction_date;
 
 **Cost Analysis**:
 - Window: O(n log n) for sort + O(n) for window
-- Self-Join: O(n²) for join + O(n log n) for group
+- Self-Join: O(n$^2$) for join + O(n log n) for group
 
 ## Common Pitfalls
 
@@ -525,7 +525,7 @@ ORDER BY a.account_code, a.transaction_date;
 ## Key Takeaways
 
 1. **Window functions avoid expensive self-joins**
-   - O(n log n) vs O(n²) complexity
+   - O(n log n) vs O(n$^2$) complexity
    - Single table scan vs multiple
 
 2. **Frame specifications matter**
@@ -551,4 +551,4 @@ We've seen individual optimizations. Now let's watch RA optimize a complex query
 
 ---
 
-*🎯 Pro Tip: When multiple window functions need different sorts, consider if you can restructure to share sorting costs. Even partial sort sharing significantly improves performance.*
+* Pro Tip: When multiple window functions need different sorts, consider if you can restructure to share sorting costs. Even partial sort sharing significantly improves performance.*

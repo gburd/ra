@@ -21,13 +21,13 @@ Project operator selects and computes output columns. Evaluates expressions per 
 ## Relational Algebra
 
 ```
-Project(input, expressions) → Iterator<Tuple>
+Project(input, expressions) -> Iterator<Tuple>
 
 ProjectIterator {
   input: Iterator
   exprs: Vec<Expr>
 
-  fn next() → Tuple | None {
+  fn next() -> Tuple | None {
     tuple = input.next()
     if tuple == None { return None }
 
@@ -71,7 +71,7 @@ pub fn projection_cost(rows: f64, num_exprs: usize) -> f64 {
 
 ## Cost Model
 
-- **CPU:** O(N × E) where E = number of expressions
+- **CPU:** O(N $\times$ E) where E = number of expressions
 - **Memory:** O(1)
 - **Pipelined:** Yes
 

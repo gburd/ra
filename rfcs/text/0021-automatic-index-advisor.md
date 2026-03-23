@@ -41,45 +41,45 @@ ra-cli advisor analyze --workload queries.sql --stats stats.toml
 ### Architecture
 
 ```
-┌─────────────────────────────────────┐
-│ Workload Analysis                   │
-│  - Parse queries from log           │
-│  - Extract table scans + filters    │
-│  - Count query frequencies          │
-└──────────────┬──────────────────────┘
-               │
-               ▼
-┌─────────────────────────────────────┐
-│ Index Candidate Generation          │
-│  - Columns in WHERE clauses         │
-│  - Columns in JOIN conditions       │
-│  - Columns in ORDER BY/GROUP BY     │
-│  - Composite index combinations     │
-└──────────────┬──────────────────────┘
-               │
-               ▼
-┌─────────────────────────────────────┐
-│ Benefit Estimation                  │
-│  - Optimize with hypothetical index │
-│  - Compare cost: with vs without    │
-│  - Aggregate across all queries     │
-└──────────────┬──────────────────────┘
-               │
-               ▼
-┌─────────────────────────────────────┐
-│ Cost Estimation                     │
-│  - Storage overhead (index size)    │
-│  - Write overhead (INSERT/UPDATE)   │
-│  - Build time                       │
-└──────────────┬──────────────────────┘
-               │
-               ▼
-┌─────────────────────────────────────┐
-│ Recommendation Ranking              │
-│  - Benefit/cost ratio               │
-│  - Remove redundant indexes         │
-│  - Top N recommendations            │
-└─────────────────────────────────────┘
+,---------------------------------------,
+| Workload Analysis                   |
+|  - Parse queries from log           |
+|  - Extract table scans + filters    |
+|  - Count query frequencies          |
+`-----------------+------------------------'
+               |
+               v
+,---------------------------------------,
+| Index Candidate Generation          |
+|  - Columns in WHERE clauses         |
+|  - Columns in JOIN conditions       |
+|  - Columns in ORDER BY/GROUP BY     |
+|  - Composite index combinations     |
+`-----------------+------------------------'
+               |
+               v
+,---------------------------------------,
+| Benefit Estimation                  |
+|  - Optimize with hypothetical index |
+|  - Compare cost: with vs without    |
+|  - Aggregate across all queries     |
+`-----------------+------------------------'
+               |
+               v
+,---------------------------------------,
+| Cost Estimation                     |
+|  - Storage overhead (index size)    |
+|  - Write overhead (INSERT/UPDATE)   |
+|  - Build time                       |
+`-----------------+------------------------'
+               |
+               v
+,---------------------------------------,
+| Recommendation Ranking              |
+|  - Benefit/cost ratio               |
+|  - Remove redundant indexes         |
+|  - Top N recommendations            |
+`----------------------------------------'
 ```
 
 ### Data Structures

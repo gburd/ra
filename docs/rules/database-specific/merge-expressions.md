@@ -48,8 +48,8 @@ create chains of small expression steps.
 ## Relational Algebra
 
 ```
-expr[E2](expr[E1](R))  ->  expr[E2 ∘ E1](R)
-expr[E](filter[F](R))  ->  filter[F ∘ E](R)
+expr[E2](expr[E1](R))  ->  expr[E2 $\circ$ E1](R)
+expr[E](filter[F](R))  ->  filter[F $\circ$ E](R)
 ```
 
 ## Implementation (egg rewrite rules)

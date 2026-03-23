@@ -345,7 +345,7 @@ For distributed databases, specify which tables are co-located:
     {
       "tables": ["orders", "order_items"],
       "key": "user_id",
-      "reason": "FK: order_items.order_id → orders.id implies same user_id"
+      "reason": "FK: order_items.order_id -> orders.id implies same user_id"
     }
   ]
 }

@@ -111,7 +111,7 @@ for query in queries {
 // Detect anti-patterns
 let issues = procedure.detect_antipatterns();
 for issue in issues {
-    println!("⚠ {}: {}", issue.severity, issue.message);
+    println!("WARNING: {}: {}", issue.severity, issue.message);
 }
 ```
 
@@ -597,7 +597,7 @@ Ra becomes a **universal stored procedure analyzer** that can:
 
 This positions Ra as a key tool for:
 
-- **Database migration projects** (Oracle → PostgreSQL, SQL Server → PostgreSQL)
+- **Database migration projects** (Oracle -> PostgreSQL, SQL Server -> PostgreSQL)
 - **Performance tuning** (identify slow procedures, suggest optimizations)
 - **Code quality** (enforce best practices, detect anti-patterns)
 - **Documentation** (extract dependencies, generate call graphs)

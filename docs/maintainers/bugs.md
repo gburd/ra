@@ -6,7 +6,7 @@ Track known bugs, issues, and their resolution status.
 
 All bugs and issues are tracked on Codeberg:
 
-**[→ View Open Issues](https://codeberg.org/gregburd/ra/issues)**
+**[-> View Open Issues](https://codeberg.org/gregburd/ra/issues)**
 
 ---
 

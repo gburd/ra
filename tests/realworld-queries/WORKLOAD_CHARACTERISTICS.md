@@ -307,9 +307,9 @@ Nearly all workloads have power law distributions:
 
 ### 4. Co-location Patterns
 Most schemas have parent-child relationships:
-- orders → order_items
-- topics → posts
-- projects → tasks
+- orders -> order_items
+- topics -> posts
+- projects -> tasks
 
 **Implication**: Co-located joins should be optimized
 
