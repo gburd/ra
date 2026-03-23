@@ -27,7 +27,7 @@ info() {
 
 # Check directory structure
 if [[ ! -d "${TEXT_DIR}" ]]; then
-    error "Missing rfcs/text/ directory"
+    error "Missing rfcs/ directory"
 fi
 if [[ ! -d "${RFC_DIR}/_accepted" ]]; then
     error "Missing rfcs/_accepted/ directory"

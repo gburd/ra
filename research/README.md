@@ -46,7 +46,7 @@ When documenting a new optimization rule:
    ```bash
    grep -r "rule_name" rules/
    ```
-4. **If missing**: Create an RFC in `rfcs/text/` for implementation
+4. **If missing**: Create an RFC in `rfcs/` for implementation
 
 ## Research Progress
 

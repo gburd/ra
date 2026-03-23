@@ -21,7 +21,7 @@ See [docs/guides/rule-authoring.md](docs/guides/rule-authoring.md) for the compl
 Major features, breaking changes, and architectural decisions require an RFC (Request for Comments). See the [RFC Process Guide](rfcs/README.md) for full details.
 
 Quick steps:
-1. Copy `rfcs/TEMPLATE.md` to `rfcs/text/NNNN-feature-name.md`
+1. Copy `rfcs/TEMPLATE.md` to `rfcs/NNNN-feature-name.md`
 2. Fill out the template and submit a PR with `[RFC]` prefix
 3. Participate in discussion (minimum 7 days)
 4. Implement once accepted

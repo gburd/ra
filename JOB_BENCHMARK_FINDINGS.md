@@ -253,8 +253,8 @@ This is exactly the value of benchmarking: **measure, find issues, fix, repeat**
 
 - [JOB Paper](https://db.in.tum.de/~leis/papers/jobench.pdf) - "How Good Are Query Optimizers, Really?"
 - [JOB Repository](https://github.com/gregrahn/join-order-benchmark) - Official benchmark
-- [RFC 0017](../rfcs/text/0017-large-join-graph-fallback.md) - Large Join Graph Optimization Fallback
-- [RFC 0052](../rfcs/text/0052-progressive-reoptimization.md) - Progressive Re-Optimization
+- [RFC 0017](../rfcs/0017-large-join-graph-fallback.md) - Large Join Graph Optimization Fallback
+- [RFC 0052](../rfcs/0052-progressive-reoptimization.md) - Progressive Re-Optimization
 
 ---
 
