@@ -67,6 +67,7 @@ pub mod resource_profiles;
 pub mod rewrite;
 pub mod shortcuts;
 pub mod rule_metadata;
+pub mod rule_registry;
 pub mod runtime_filters;
 // pub mod semi_join; // TODO: incomplete, has invalid egg syntax
 pub mod timely;

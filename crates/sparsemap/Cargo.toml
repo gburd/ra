@@ -1,0 +1,12 @@
+[package]
+name = "sparsemap"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Sparse bitmap implementation for efficient set operations"
+authors = ["Gregory Burd <greg@burd.me>"]
+
+[dependencies]
+
+[dev-dependencies]
+criterion = "0.5"

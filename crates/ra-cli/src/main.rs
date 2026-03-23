@@ -208,6 +208,12 @@ enum Commands {
         /// Show optimizer trace information (iteration details, search/apply times).
         #[arg(long)]
         trace: bool,
+        /// Show optimization statistics (planning time, iterations, nodes explored, etc.).
+        #[arg(long)]
+        stats: bool,
+        /// Show rules applied during optimization.
+        #[arg(long)]
+        rules: bool,
     },
     /// Gather database metadata and write to a JSON file.
     GatherMetadata {
@@ -623,6 +629,8 @@ fn main() -> Result<()> {
             overflow_strategy,
             explain_format,
             trace: _,
+            stats,
+            rules,
         } => {
             let resolved = resolve_query(
                 &query, use_stdin,
@@ -641,6 +649,8 @@ fn main() -> Result<()> {
                 no_color,
                 budget.as_ref(),
                 explain_format.as_deref(),
+                stats,
+                rules,
                 cli.verbose,
                 cli.quiet,
             )
@@ -1613,6 +1623,8 @@ fn cmd_optimize(
     no_color: bool,
     budget: Option<&ra_engine::ResourceBudget>,
     explain_format: Option<&str>,
+    show_stats: bool,
+    show_rules: bool,
     verbose: bool,
     quiet: bool,
 ) -> Result<()> {
@@ -1639,12 +1651,12 @@ fn cmd_optimize(
     if budget.is_some() {
         optimize_bounded(
             &optimizer, &plan, &hardware, diff_format,
-            explain_format, verbose, quiet, query,
+            explain_format, show_stats, show_rules, verbose, quiet, query,
         )
     } else {
         optimize_unbounded(
             &optimizer, &plan, &hardware, diff_format,
-            explain_format, verbose, quiet, query,
+            explain_format, show_stats, show_rules, verbose, quiet, query,
         )
     }
 }
@@ -1655,6 +1667,8 @@ fn optimize_bounded(
     hardware: &ra_hardware::HardwareProfile,
     diff_format: Option<&str>,
     explain_format: Option<&str>,
+    show_stats: bool,
+    show_rules: bool,
     verbose: bool,
     quiet: bool,
     query: &str,
@@ -1675,6 +1689,17 @@ fn optimize_bounded(
             verbose,
         );
         print_resource_usage(&result, verbose);
+
+        if show_stats {
+            eprintln!();
+            print_optimization_stats(&result.resource_usage);
+        }
+
+        if show_rules {
+            eprintln!();
+            print_applied_rules(optimizer);
+        }
+
         eprintln!();
         print_plan_output(plan, &result.plan, diff_format)?;
     }
@@ -1687,13 +1712,19 @@ fn optimize_unbounded(
     hardware: &ra_hardware::HardwareProfile,
     diff_format: Option<&str>,
     explain_format: Option<&str>,
+    show_stats: bool,
+    show_rules: bool,
     verbose: bool,
     quiet: bool,
     query: &str,
 ) -> Result<()> {
+    use std::time::Instant;
+
+    let start = Instant::now();
     let optimized = optimizer.optimize(plan).with_context(|| {
         format!("failed to optimize query: {query}")
     })?;
+    let elapsed = start.elapsed();
 
     if let Some(fmt) = explain_format {
         return print_explain_output(&optimized, fmt);
@@ -1706,6 +1737,17 @@ fn optimize_unbounded(
             hardware,
             verbose,
         );
+
+        if show_stats {
+            print_unbounded_stats(elapsed);
+            eprintln!();
+        }
+
+        if show_rules {
+            print_applied_rules(optimizer);
+            eprintln!();
+        }
+
         print_plan_output(plan, &optimized, diff_format)?;
     }
     Ok(())
@@ -2667,6 +2709,59 @@ fn print_resource_usage(
             result.cost,
         );
     }
+}
+
+fn print_optimization_stats(
+    usage: &ra_engine::ResourceUsageReport,
+) {
+    eprintln!("{}", "Optimization Statistics:".bold());
+    eprintln!(
+        "  {}: {:.1}ms",
+        "Planning time".bold(),
+        usage.elapsed_time.as_secs_f64() * 1000.0,
+    );
+    eprintln!(
+        "  {}: {}",
+        "Iterations used".bold(),
+        usage.iterations_used,
+    );
+    eprintln!(
+        "  {}: {}",
+        "Peak e-graph nodes".bold(),
+        usage.peak_egraph_nodes,
+    );
+    #[allow(clippy::cast_precision_loss)]
+    let mem_mb = usage.peak_memory_estimate as f64 / (1024.0 * 1024.0);
+    eprintln!(
+        "  {}: {mem_mb:.2} MB",
+        "Peak memory".bold(),
+    );
+    if let Some(ref exceeded) = usage.budget_exceeded {
+        eprintln!(
+            "  {}: {exceeded}",
+            "Budget exceeded".bold().yellow(),
+        );
+    }
+}
+
+fn print_unbounded_stats(elapsed: std::time::Duration) {
+    eprintln!("{}", "Optimization Statistics:".bold());
+    eprintln!(
+        "  {}: {:.1}ms",
+        "Planning time".bold(),
+        elapsed.as_secs_f64() * 1000.0,
+    );
+}
+
+fn print_applied_rules(_optimizer: &Optimizer) {
+    eprintln!("{}", "Rules Applied:".bold());
+    eprintln!(
+        "  {}",
+        "(Rule tracking not yet implemented)".yellow(),
+    );
+    // TODO: Modify Optimizer to track which rules were applied during optimization.
+    // This would require adding a Vec<String> field to OptimizationResult or
+    // ResourceUsageReport to collect rule names as they fire during e-graph rewriting.
 }
 
 // ── Output formatting ───────────────────────────────────────

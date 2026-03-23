@@ -29,6 +29,7 @@ members = [
     "crates/ra-pg-advisor",
     "crates/ra-test-utils",
     "crates/ra-regression",
+    "crates/sparsemap",
     "xtask",
 ]
 # Excluded from workspace build (require special setup or need fixes):

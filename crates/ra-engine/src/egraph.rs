@@ -880,6 +880,7 @@ impl Optimizer {
                 cost: best_cost,
                 status,
                 resource_usage: report,
+                applied_rules: None,
             }),
             None => Err(EGraphError::ExtractionError(
                 "no plan could be extracted".to_owned(),
@@ -1077,12 +1078,14 @@ fn handle_overflow(
                     cost: best_cost,
                     status: OptimizationStatus::Incomplete,
                     resource_usage: report,
+                    applied_rules: None,
                 }),
                 None => Ok(OptimizationResult {
                     plan: original.clone(),
                     cost: f64::INFINITY,
                     status: OptimizationStatus::Incomplete,
                     resource_usage: report,
+                    applied_rules: None,
                 }),
             }
         }
@@ -1091,6 +1094,7 @@ fn handle_overflow(
             cost: f64::INFINITY,
             status: OptimizationStatus::Incomplete,
             resource_usage: report,
+            applied_rules: None,
         }),
         OverflowStrategy::Fail => {
             let exceeded = report.budget_exceeded.map_or(
@@ -1119,6 +1123,9 @@ pub struct OptimizationResult {
     pub status: OptimizationStatus,
     /// Detailed resource usage report.
     pub resource_usage: ResourceUsageReport,
+    /// Rules applied during optimization (only populated if tracking enabled).
+    /// Zero overhead when None.
+    pub applied_rules: Option<crate::rule_registry::RuleSet>,
 }
 
 /// Whether optimization completed within its budget.
