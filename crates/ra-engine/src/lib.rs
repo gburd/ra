@@ -51,11 +51,13 @@ pub mod large_join;
 pub mod left_deep;
 pub mod federated_cost;
 pub mod federated_optimizer;
+pub mod genetic_fingerprint;
 pub mod memo;
 pub mod network_cost;
 pub mod null_simplification;
 pub mod parquet_pushdown;
 pub mod pattern_fingerprint;
+pub mod plan_cache;
 pub mod plan_stitch;
 pub mod progressive_reopt;
 pub mod query_complexity;
@@ -187,4 +189,9 @@ pub use bayesian_pruning::{
     BayesianPruner, BucketStats, PruningConfig, PruningOutcome,
     PruningSummary,
 };
+pub use genetic_fingerprint::QueryFingerprint;
 pub use pattern_fingerprint::PlanFingerprint;
+pub use plan_cache::{
+    CacheLookupResult, CacheMatchType, PlanCache, PlanCacheConfig,
+    PlanCacheStats,
+};
