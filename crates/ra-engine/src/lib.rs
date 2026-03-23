@@ -44,6 +44,7 @@ pub mod extract;
 pub mod facts_context;
 // pub mod functional_deps; // TODO: incomplete, has invalid egg syntax
 pub mod incremental_sort;
+pub mod isolation_cost;
 pub mod join_transformations;
 pub mod large_join;
 pub mod left_deep;
@@ -157,6 +158,9 @@ pub use runtime_filters::{
 };
 pub use covering_index::{
     covering_index_rules, index_only_scan_cost_factor,
+};
+pub use isolation_cost::{
+    IsolationCostConfig, PlanEstimates, isolation_cost_adjustment,
 };
 pub use query_complexity::QueryComplexity;
 pub use convergence::{
