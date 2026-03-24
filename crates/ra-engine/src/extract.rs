@@ -393,6 +393,59 @@ fn convert_node(nodes: &[RelLang], idx: usize) -> Result<RelExpr, EGraphError> {
             };
             Ok(RelExpr::MvScan { view_name, alias })
         }
+        RelLang::BitmapIndexScan([table_id, index_id, pred_id]) => {
+            let table = get_symbol(nodes, id(*table_id))?;
+            let index = get_symbol(nodes, id(*index_id))?;
+            let predicate =
+                convert_scalar(nodes, id(*pred_id))?;
+            Ok(RelExpr::BitmapIndexScan {
+                table,
+                index,
+                predicate,
+            })
+        }
+        RelLang::BitmapAnd(input_ids) => {
+            let mut inputs =
+                Vec::with_capacity(input_ids.len());
+            for &input_id in input_ids.iter() {
+                inputs.push(Box::new(
+                    convert_node(nodes, id(input_id))?,
+                ));
+            }
+            Ok(RelExpr::BitmapAnd { inputs })
+        }
+        RelLang::BitmapOr(input_ids) => {
+            let mut inputs =
+                Vec::with_capacity(input_ids.len());
+            for &input_id in input_ids.iter() {
+                inputs.push(Box::new(
+                    convert_node(nodes, id(input_id))?,
+                ));
+            }
+            Ok(RelExpr::BitmapOr { inputs })
+        }
+        RelLang::BitmapHeapScan([table_id, bitmap_id, recheck_id]) => {
+            let table =
+                get_symbol(nodes, id(*table_id))?;
+            let bitmap =
+                convert_node(nodes, id(*bitmap_id))?;
+            let recheck_cond =
+                if get_symbol(nodes, id(*recheck_id))
+                    .map_or(false, |s| s.is_empty())
+                {
+                    None
+                } else {
+                    Some(convert_scalar(
+                        nodes,
+                        id(*recheck_id),
+                    )?)
+                };
+            Ok(RelExpr::BitmapHeapScan {
+                table,
+                bitmap: Box::new(bitmap),
+                recheck_cond,
+            })
+        }
         RelLang::Func(ids) if !ids.is_empty() => {
             convert_func_as_relational(nodes, ids)
         }
