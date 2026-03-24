@@ -53,14 +53,14 @@ graph TD
 
 ```bash
 # See the optimization in action
-cargo run --bin ra-cli -- optimize \
+ra-cli optimize \
   "SELECT c.name, o.order_id, o.total \
    FROM customers c \
    JOIN orders o ON c.customer_id = o.customer_id \
    WHERE c.country = 'USA' AND o.status = 'shipped' AND o.total > 1000"
 
 # Explain the transformation steps
-cargo run --bin ra-cli -- explain --verbose \
+ra-cli explain --verbose \
   "SELECT c.name, o.order_id, o.total \
    FROM customers c \
    JOIN orders o ON c.customer_id = o.customer_id \

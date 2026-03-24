@@ -20,27 +20,21 @@ specialized hardware beyond the CPU. The `ra-hardware` crate and
 
 ## Architecture
 
-```
-                    Query Plan
-                        |
-                        v
-            ,-------------------------,
-            |   Hardware Cost Model  |
-            |  (ra-hardware crate)   |
-            `----------+---------+---------'
-                    |       |
-          ,-----------'       `------------,
-          v                           v
-   ,---------------,           ,----------------,
-   |  CPU Cost    |           | Device Cost   |
-   |  (baseline)  |           | + Transfer    |
-   `---------+--------'           `----------+--------'
-          |                          |
-          v                          v
-   ,-------------------------------------------,
-   |         Operator Placement Decision      |
-   |  (choose cheapest: CPU / GPU / FPGA)     |
-   `--------------------------------------------'
+```mermaid
+graph TD
+    QP["Query Plan"] --> HCM["Hardware Cost Model<br/>(ra-hardware crate)"]
+
+    HCM --> CPU["CPU Cost<br/>(baseline)"]
+    HCM --> Device["Device Cost<br/>+ Transfer"]
+
+    CPU --> Decision["Operator Placement Decision<br/>(choose cheapest: CPU / GPU / FPGA)"]
+    Device --> Decision
+
+    style QP fill:#e1f5fe
+    style HCM fill:#fff3e0
+    style CPU fill:#e8f5e9
+    style Device fill:#f3e5f5
+    style Decision fill:#fce4ec
 ```
 
 ## When Hardware Acceleration Helps

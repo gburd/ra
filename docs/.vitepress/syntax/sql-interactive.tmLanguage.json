@@ -1,0 +1,49 @@
+{
+  "name": "SQL Interactive",
+  "scopeName": "source.sql-interactive",
+  "fileTypes": ["sql-interactive"],
+  "patterns": [
+    {
+      "include": "source.sql"
+    },
+    {
+      "include": "#annotations"
+    },
+    {
+      "include": "#results"
+    }
+  ],
+  "repository": {
+    "annotations": {
+      "patterns": [
+        {
+          "name": "comment.line.annotation.sql-interactive",
+          "match": "^--\\s*(Input|Output|Expected|Result|Plan|Cost):\\s*.*$"
+        },
+        {
+          "name": "markup.inserted.sql-interactive",
+          "match": "^\\+\\s+.*$"
+        },
+        {
+          "name": "markup.deleted.sql-interactive",
+          "match": "^-\\s+.*$"
+        }
+      ]
+    },
+    "results": {
+      "patterns": [
+        {
+          "name": "string.unquoted.result.sql-interactive",
+          "begin": "^Results?:",
+          "end": "^\\s*$",
+          "patterns": [
+            {
+              "name": "constant.numeric.sql-interactive",
+              "match": "\\b\\d+\\b"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

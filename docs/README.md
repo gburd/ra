@@ -4,16 +4,16 @@
 
 ## Key Features
 
-- ** 1,327+ Transformation Rules** - Comprehensive rule library covering logical, physical, hardware, distributed, and multi-model optimizations
-- ** 20+ Database Dialects** - Seamless SQL translation between PostgreSQL, MySQL, Oracle, SQL Server, SQLite, DuckDB, and more
-- ** Hardware-Aware Optimization** - Adaptive plans for CPU (SIMD), GPU, FPGA, and heterogeneous systems
-- ** Cost-Based Optimization** - Calibratable cost models with cardinality estimation and statistics management
-- ** Equality Saturation** - Explores all equivalent plans simultaneously via e-graphs
-- ** Performance Shortcuts** - MIN/MAX metadata lookups, COUNT(*) shortcuts, covering indexes, bitmap scans
-- ** Distributed Execution** - Partition-aware optimization, co-location awareness, minimal data movement
-- ** Columnar Format Support** - Parquet predicate pushdown, row group filtering, column pruning
-- ** WASM Integration** - Run queries in WebAssembly environments
-- ** Formal Verification** - Mathematically proven correctness of transformation rules
+- **1,327+ Transformation Rules** - Comprehensive rule library covering logical, physical, hardware, distributed, and multi-model optimizations
+- **20+ Database Dialects** - Seamless SQL translation between PostgreSQL, MySQL, Oracle, SQL Server, SQLite, DuckDB, and more
+- **Hardware-Aware Optimization** - Adaptive plans for CPU (SIMD), GPU, FPGA, and heterogeneous systems
+- **Cost-Based Optimization** - Calibratable cost models with cardinality estimation and statistics management
+- **Equality Saturation** - Explores all equivalent plans simultaneously via e-graphs
+- **Performance Shortcuts** - MIN/MAX metadata lookups, COUNT(*) shortcuts, covering indexes, bitmap scans
+- **Distributed Execution** - Partition-aware optimization, co-location awareness, minimal data movement
+- **Columnar Format Support** - Parquet predicate pushdown, row group filtering, column pruning
+- **WASM Integration** - Run queries in WebAssembly environments
+- **Formal Verification** - Mathematically proven correctness of transformation rules
 
 ## Quick Start
 
@@ -22,11 +22,11 @@
 cargo build --release
 
 # Optimize your first query
-cargo run --bin ra-cli -- optimize \
+ra-cli optimize \
   "SELECT * FROM orders WHERE amount > 1000 AND status = 'active'"
 
 # Translate between databases
-cargo run --bin ra-cli -- translate --from postgres --to mysql \
+ra-cli translate --from postgres --to mysql \
   "SELECT * FROM orders WHERE created_at > NOW() - INTERVAL '7 days'"
 
 # Launch web UI
@@ -38,10 +38,10 @@ cargo run --bin ra-cli -- translate --from postgres --to mysql \
 
 ###  Core Documentation
 
-- **[Getting Started](GETTING_STARTED.md)** - Installation, quick examples of ALL major features
+- **[Getting Started](getting-started.md)** - Installation, quick examples of ALL major features
 - **[Architecture](architecture.md)** - System design, components, and data flow
 - **[API Reference](api-reference.md)** - Programmatic usage and integration
-- **[Contributing](CONTRIBUTING.md)** - Development standards and contribution guidelines
+- **[Contributing](contributing.md)** - Development standards and contribution guidelines
 - **[Deployment](deployment.md)** - Docker, Kubernetes, cloud deployment
 
 ###  Guides
@@ -127,24 +127,22 @@ Academic foundations and papers:
 
 ## System Overview
 
-```
-,---------------,     ,----------------,     ,-----------------,
-|   SQL Query | --> |    Parser    | --> |   Relational  |
-`----------------'     `-----------------'     |    Algebra    |
-                                          `------------------'
-                                                  |
-                                                  v
-,---------------,     ,----------------,     ,-----------------,
-|  Optimized  | <-- |   Extractor  | <-- |    E-Graph    |
-|    Plan     |     | (Cost-based) |     |  (egg crate)  |
-`----------------'     `-----------------'     `------------------'
-                                                  ^
-                                                  |
-                                          ,-----------------,
-                                          | Transformation|
-                                          |     Rules     |
-                                          |   (1,327+)    |
-                                          `------------------'
+```mermaid
+graph LR
+    SQL["SQL Query"] --> Parser["Parser"]
+    Parser --> RA["Relational<br/>Algebra"]
+    RA --> EGraph["E-Graph<br/>(egg crate)"]
+    Rules["Transformation<br/>Rules (1,327+)"] --> EGraph
+    EGraph --> Extractor["Extractor<br/>(Cost-based)"]
+    Extractor --> Plan["Optimized<br/>Plan"]
+
+    style SQL fill:#e1f5fe
+    style Parser fill:#e1f5fe
+    style RA fill:#e1f5fe
+    style EGraph fill:#fff3e0
+    style Rules fill:#f3e5f5
+    style Extractor fill:#e8f5e9
+    style Plan fill:#e8f5e9
 ```
 
 ## Performance Highlights
@@ -155,6 +153,48 @@ Academic foundations and papers:
 - **Predicate Pushdown**: 95% data skip with Parquet row group filtering
 - **Join Reordering**: 10-100x improvement on star schema queries
 - **Hardware Adaptation**: 2-5x speedup with SIMD/GPU awareness
+
+## Building Documentation
+
+Multiple ways to build and serve the Ra documentation:
+
+### Using Cargo (Recommended)
+
+```bash
+# Serve documentation locally (opens at http://localhost:5173/ra/)
+cargo docs
+
+# Just build without serving
+cargo docs-build
+```
+
+### Using Nix
+
+```bash
+# Serve documentation locally
+nix run .#docs
+
+# Build static site for deployment
+nix run .#docs-build
+```
+
+### Using npm Directly
+
+```bash
+cd docs
+
+# Install dependencies (first time only)
+npm install
+
+# Serve locally at http://localhost:5173/ra/
+npm run dev
+
+# Build for production
+npm run build:docs
+
+# Preview production build
+npm run preview
+```
 
 ## Development
 
@@ -168,12 +208,16 @@ cargo bench
 # Check code quality
 cargo clippy --all-targets --all-features -- -D warnings
 
-# Generate documentation
+# Generate Rust API documentation
 cargo doc --all-features --open
 
 # Run web UI locally
 cargo run --bin ra-web-ui
 ```
+
+## Security
+
+See [security.md](security.md) for information about npm dependency vulnerabilities and production deployment best practices.
 
 ## Architecture Highlights
 
@@ -185,7 +229,7 @@ cargo run --bin ra-web-ui
 
 ## Contributing
 
-We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for:
+We welcome contributions! Please see our [Contributing Guide](contributing.md) for:
 - Development standards and practices
 - How to write and test transformation rules
 - Code review process
@@ -193,7 +237,7 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 
 ## Support
 
-- **Documentation Issues**: [GitHub Issues](https://github.com/your-org/ra/issues)
+- **Documentation Issues**: [Issues](https://codeberg.org/gregburd/ra/issues)
 - **Discord Community**: [Join our Discord](https://discord.gg/ra-optimizer)
 - **Commercial Support**: contact@ra-optimizer.com
 
@@ -207,4 +251,4 @@ RA builds on decades of database research. See our [Research Paper](research/pap
 
 ---
 
-**Ready to optimize?** Start with [Getting Started](GETTING_STARTED.md) or explore [Examples](examples/) to see RA in action!
+**Ready to optimize?** Start with [Getting Started](getting-started.md) or explore [Examples](examples/) to see RA in action!

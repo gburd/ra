@@ -17,31 +17,54 @@ flowchart TD
     style Plan fill:#e8f5e9
 ```
 
+A SQL query like `SELECT * FROM t1 WHERE x > 10` is first parsed into
+a relational algebra expression: {{sigma[x > 10](t1)}}
+(i.e., $\sigma_{x > 10}(\text{t1})$). The optimizer then explores
+equivalent expressions using rewrite rules.
+
 ## Running the Optimizer
 
 ### Basic Optimization
 
 ```bash
-cargo run --bin ra-cli -- optimize "SELECT * FROM t1 WHERE x > 10"
+ra-cli optimize "SELECT * FROM t1 WHERE x > 10"
 ```
 
 ### With Explanation
 
 ```bash
-cargo run --bin ra-cli -- explain \
+ra-cli explain \
   "SELECT c.name FROM customers c JOIN orders o ON c.id = o.cid"
 ```
+
+This query becomes {{pi[c.name](customers join[c.id = o.cid] orders)}}
+and the optimizer applies rules like predicate pushdown and join
+reordering to find the lowest-cost plan.
 
 ### With Resource Budgets
 
 Predefined profiles control time, memory, and iteration limits:
 
 ```bash
-cargo run --bin ra-cli -- optimize "SELECT * FROM t1" \
+ra-cli optimize "SELECT * FROM t1" \
   --resource-budget interactive
 ```
 
 See [Resource Budgets](../features/resource-budgets.md) for details.
+
+## Key Transformations
+
+The optimizer applies hundreds of transformation rules. Some
+frequently triggered ones:
+
+| Transformation | Before | After |
+|----------------|--------|-------|
+| Predicate pushdown | {{sigma[p](R join S)}} | {{sigma[p](R) join S}} |
+| Join commutativity | {{R join S}} | {{S join R}} |
+| Projection pushdown | {{pi[a](R join S)}} | {{pi[a](pi[a,k](R) join pi[a,k](S))}} |
+
+See [Relational Algebra](../concepts/relational-algebra.md) for the
+full operator reference.
 
 ## Cost Model Tuning
 
@@ -54,7 +77,7 @@ full framework.
 Use `--diff` to compare the original and optimized plans:
 
 ```bash
-cargo run --bin ra-cli -- optimize "SELECT * FROM t1" \
+ra-cli optimize "SELECT * FROM t1" \
   --diff side-by-side
 ```
 

@@ -3,13 +3,21 @@
 //! Detects CPU, memory, storage, and accelerator properties to create
 //! an appropriate [`HardwareProfile`] for cost-based optimization.
 
+use std::sync::OnceLock;
+
 use crate::profile::HardwareProfile;
+
+/// Cached hardware profile, detected once on first call.
+static CACHED_PROFILE: OnceLock<HardwareProfile> = OnceLock::new();
 
 /// Detect hardware characteristics of the local system.
 ///
 /// Returns a [`HardwareProfile`] based on detected CPU, memory, storage,
 /// and accelerator properties. Falls back to reasonable defaults if
 /// detection fails.
+///
+/// The result is cached after the first call, so subsequent calls
+/// return a clone of the cached profile without re-running detection.
 ///
 /// # Platform Support
 ///
@@ -27,6 +35,11 @@ use crate::profile::HardwareProfile;
 /// ```
 #[must_use]
 pub fn detect_hardware() -> HardwareProfile {
+    CACHED_PROFILE.get_or_init(detect_hardware_inner).clone()
+}
+
+/// Perform actual hardware detection (uncached).
+fn detect_hardware_inner() -> HardwareProfile {
     HardwareProfile {
         name: "Auto-detected".into(),
         cpu_available: true,

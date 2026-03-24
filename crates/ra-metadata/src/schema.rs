@@ -68,6 +68,14 @@ pub enum DatabaseKind {
     MySQL,
     /// `SQLite` (3.x).
     SQLite,
+    /// `DuckDB` (0.9+).
+    DuckDB,
+    /// Microsoft SQL Server (2016+).
+    SqlServer,
+    /// Oracle Database (12c+).
+    Oracle,
+    /// `MonetDB` (11.x+).
+    MonetDB,
 }
 
 impl std::fmt::Display for DatabaseKind {
@@ -76,6 +84,10 @@ impl std::fmt::Display for DatabaseKind {
             Self::PostgreSQL => write!(f, "PostgreSQL"),
             Self::MySQL => write!(f, "MySQL"),
             Self::SQLite => write!(f, "SQLite"),
+            Self::DuckDB => write!(f, "DuckDB"),
+            Self::SqlServer => write!(f, "SQL Server"),
+            Self::Oracle => write!(f, "Oracle"),
+            Self::MonetDB => write!(f, "MonetDB"),
         }
     }
 }
@@ -442,6 +454,13 @@ mod tests {
         );
         assert_eq!(DatabaseKind::MySQL.to_string(), "MySQL");
         assert_eq!(DatabaseKind::SQLite.to_string(), "SQLite");
+        assert_eq!(DatabaseKind::DuckDB.to_string(), "DuckDB");
+        assert_eq!(
+            DatabaseKind::SqlServer.to_string(),
+            "SQL Server"
+        );
+        assert_eq!(DatabaseKind::Oracle.to_string(), "Oracle");
+        assert_eq!(DatabaseKind::MonetDB.to_string(), "MonetDB");
     }
 
     #[test]

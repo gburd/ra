@@ -11,55 +11,62 @@ graph LR
         R[Relation R]
     end
     subgraph "Core Operations"
-        Sel["Selection (sigma)<br/>Filter rows"]
-        Proj["Projection (pi)<br/>Select columns"]
-        Join["Join ($\bowtie$)<br/>Combine relations"]
-        Agg["Aggregation (gamma)<br/>Group and summarize"]
+        Sel["Selection (&sigma;)<br/>Filter rows"]
+        Proj["Projection (&pi;)<br/>Select columns"]
+        Join["Join (&bowtie;)<br/>Combine relations"]
+        Agg["Aggregation (&gamma;)<br/>Group and summarize"]
     end
     R --> Sel --> Proj --> Join --> Agg
 ```
 
-### Selection (sigma)
+### Selection ($\sigma$)
 
-Filters rows matching a predicate:
+Filters rows matching a predicate. {{sigma[p](R)}} selects rows
+from $R$ where predicate $p$ holds.
 
-```
-sigma[p](R) -- select rows from R where predicate p holds
-```
+$$\sigma_{p}(R)$$
 
-### Projection (pi)
+**Text notation:** `sigma[p](R)`
 
-Selects a subset of columns:
+### Projection ($\pi$)
 
-```
-pi[A1, A2, ...](R) -- project columns A1, A2, ... from R
-```
+Selects a subset of columns. {{pi[A1, A2](R)}} projects columns
+$A_1, A_2$ from $R$.
 
-### Join
+$$\pi_{A_1, A_2, \ldots}(R)$$
+
+**Text notation:** `pi[A1, A2, ...](R)`
+
+### Join ($\bowtie$)
 
 Combines rows from two relations:
 
-```
-R join[c] S -- join R and S on condition c
-R cross S   -- Cartesian product
-R natural S -- natural join (on shared column names)
-```
-
-Join types: inner, left outer, right outer, full outer, semi, anti.
+| Operation | Notation | Symbol |
+|-----------|----------|--------|
+| Inner join | {{R join[c] S}} | $R \bowtie_{c} S$ |
+| Cross product | {{R cross S}} | $R \times S$ |
+| Natural join | {{R natural S}} | $R \bowtie S$ |
+| Left outer join | {{R leftjoin S}} | $R \mathbin{\ojoin\bowtie} S$ |
+| Right outer join | {{R rightjoin S}} | $R \mathbin{\bowtie\ojoin} S$ |
+| Semijoin | {{R semijoin S}} | $R \ltimes S$ |
+| Antijoin | {{R antijoin S}} | $R \rhd S$ |
 
 ### Set Operations
 
-```
-R union S      -- all rows in R or S (deduplicated)
-R intersect S  -- rows in both R and S
-R except S     -- rows in R but not in S
-```
+| Operation | Notation | Symbol |
+|-----------|----------|--------|
+| Union | {{R union S}} | $R \cup S$ |
+| Intersection | {{R intersect S}} | $R \cap S$ |
+| Difference | {{R except S}} | $R - S$ |
 
-### Aggregation
+### Aggregation ($\gamma$)
 
-```
-gamma[G; agg(A)](R) -- group by G, aggregate A
-```
+Groups and summarizes data. {{gamma[G; agg(A)](R)}} groups $R$ by
+$G$ and computes aggregate $\text{agg}(A)$.
+
+$$\gamma_{G;\; \text{agg}(A)}(R)$$
+
+**Text notation:** `gamma[G; agg(A)](R)`
 
 ## Equivalence Rules
 
@@ -67,17 +74,31 @@ The optimizer uses equivalence rules to transform one relational
 algebra expression into another that produces the same result but
 may have lower cost. Examples:
 
-- **Predicate pushdown**: `sigma[p](R join[c] S)` becomes
-  `(sigma[p](R)) join[c] S` when `p` references only `R`
-- **Join commutativity**: `R join S` is equivalent to `S join R`
-- **Join associativity**: `(R join S) join T` is equivalent to
-  `R join (S join T)`
+- **Predicate pushdown**: {{sigma[p](R join[c] S)}} becomes
+  {{sigma[p](R) join[c] S}} when $p$ references only $R$
+
+  $$\sigma_{p}(R \bowtie_{c} S) \Rightarrow \sigma_{p}(R) \bowtie_{c} S$$
+
+- **Join commutativity**: {{R join S}} is equivalent to {{S join R}}
+
+  $$R \bowtie S \equiv S \bowtie R$$
+
+- **Join associativity**: {{(R join S) join T}} is equivalent to
+  {{R join (S join T)}}
+
+  $$\left(R \bowtie S\right) \bowtie T \equiv R \bowtie \left(S \bowtie T\right)$$
 
 ## Notation in RA
 
 Rule files use a text-based notation for relational algebra. The
 [Rule Authoring Guide](../guides/rule-authoring.md) documents the
-full syntax.
+full syntax. In this documentation, relational algebra expressions
+can be written as:
+
+- **KaTeX math**: `$\sigma_{p}(R)$` renders as $\sigma_{p}(R)$
+- **Inline plugin**: `{{sigma[p](R)}}` renders as {{sigma[p](R)}}
+- **Vue component**: `<RelAlgebra expr="sigma[p](R)" />` renders
+  with hover tooltips
 
 ## Further Reading
 

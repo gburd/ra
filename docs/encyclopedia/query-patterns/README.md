@@ -191,4 +191,4 @@ To add a pattern:
 6. Cross-reference related patterns
 7. Update this README
 
-See [Contributing Guide](../../CONTRIBUTING.md) for standards.
+See [Contributing Guide](../../contributing.md) for standards.

@@ -54,7 +54,7 @@ The dashed edges in the graph show how rule categories depend on each other:
 
 ## Source
 
-The dependency graph is generated from [`rules/DEPENDENCY_GRAPH.dot`](https://codeberg.org/gregburd/ra/src/branch/main/rules/DEPENDENCY_GRAPH.dot) using Graphviz:
+The dependency graph is generated from [`rules/DEPENDENCY_GRAPH.dot`](https://codeberg.org/gregburd/ra/src/tag/v0.1.0/rules/DEPENDENCY_GRAPH.dot) using Graphviz:
 
 ```bash
 dot -Tsvg rules/DEPENDENCY_GRAPH.dot -o docs/public/images/rule-dependency-graph.svg

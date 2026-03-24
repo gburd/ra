@@ -64,9 +64,14 @@ execution_models: [volcano, vectorized] # Applicable execution models
 version: 1.0.0                          # Rule version
 authors: ["Name", "Database Team"]      # Authors/contributors
 tags: [optimization, join, filter]      # Tags for searching
-complexity: O(1)                        # Time complexity
-benefit_range: [0.1, 0.9]               # Min/max benefit (0-1 scale)
 ```
+
+**Reserved (Future Use):**
+- `complexity` - Time complexity of rule application (e.g., "O(1)", "O(n)")
+- `benefit_range` - Min/max estimated benefit as [min, max] tuple (0-1 scale)
+
+These fields are parsed for documentation purposes but not currently used by the optimizer.
+See [RFC 0058](../../../rfcs/text/0058-rule-complexity-prioritization.md) for planned support.
 
 Valid categories:
 - `logical/predicate-pushdown`
@@ -406,4 +411,4 @@ When adding rules:
 5. Submit a pull request
 6. Reference issues or discussions
 
-See [CONTRIBUTING.md](../CONTRIBUTING.md) for details.
+See [contributing.md](../contributing.md) for details.

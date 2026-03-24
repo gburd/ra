@@ -7,6 +7,19 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+default = []
+duckdb-support = ["duckdb"]
+sqlserver-support = ["tiberius", "tokio", "tokio-util", "futures-util"]
+oracle-support = ["oracle"]
+monetdb-support = ["odbc-api"]
+all-databases = [
+    "duckdb-support",
+    "sqlserver-support",
+    "oracle-support",
+    "monetdb-support",
+]
+
 [dependencies]
 ra-core = { workspace = true }
 serde = { workspace = true }
@@ -16,6 +29,15 @@ tracing = { workspace = true }
 postgres = "0.19"
 mysql = "28"
 rusqlite = { version = "0.39", features = ["bundled"] }
+
+# Optional database backends
+duckdb = { version = "1.1", optional = true, features = ["bundled"] }
+tiberius = { version = "0.12.3", optional = true, default-features = false, features = ["tds73", "rustls"] }
+tokio = { version = "1", optional = true, features = ["rt-multi-thread", "net"] }
+futures-util = { version = "0.3", optional = true }
+tokio-util = { version = "0.7", optional = true, features = ["compat"] }
+oracle = { version = "0.6.3", optional = true }
+odbc-api = { version = "9", optional = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

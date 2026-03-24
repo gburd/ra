@@ -226,8 +226,8 @@ GROUP BY p.product_name, c.category_name, b.brand_name;
 
 ```mermaid
 flowchart TD
-    Start{Join Type?} -->|Inner / Left| SizeCheck{Small table<br/>< 10MB?}
-    Start -->|Right / Full| SizeBoth{Both tables<br/>small?}
+    Start{"Join Type?"} -->|Inner / Left| SizeCheck{"Small table<br/>< 10MB?"}
+    Start -->|Right / Full| SizeBoth{"Both tables<br/>small?"}
     SizeCheck -->|Yes| Broadcast[Broadcast Join]
     SizeCheck -->|No| Shuffle1[Shuffle Join]
     SizeBoth -->|Yes| Broadcast

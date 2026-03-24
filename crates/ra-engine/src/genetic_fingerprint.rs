@@ -305,7 +305,8 @@ impl FingerprintCollector {
             }
             RelExpr::Values { .. }
             | RelExpr::MultiUnnest { .. }
-            | RelExpr::RowPattern { .. } => {}
+            | RelExpr::RowPattern { .. }
+            | RelExpr::MvScan { .. } => {}
         }
     }
 

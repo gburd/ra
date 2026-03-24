@@ -1,0 +1,12 @@
+{
+  "repo": {
+    "host": "codeberg.org",
+    "owner": "gregburd",
+    "name": "ra",
+    "release_tag": "v0.1.0",
+    "branch": "main"
+  },
+  "docs": {
+    "url": "https://codeberg.org/gregburd/ra/pages"
+  }
+}

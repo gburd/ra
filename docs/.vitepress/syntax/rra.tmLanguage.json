@@ -1,0 +1,79 @@
+{
+  "name": "Ra Rule Language",
+  "scopeName": "source.rra",
+  "fileTypes": ["rra"],
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#metadata"
+    },
+    {
+      "include": "#patterns"
+    },
+    {
+      "include": "#operators"
+    },
+    {
+      "include": "#strings"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.number-sign.rra",
+          "match": "#.*$"
+        }
+      ]
+    },
+    "metadata": {
+      "patterns": [
+        {
+          "name": "keyword.control.metadata.rra",
+          "match": "\\b(name|category|complexity|benefit_range|databases|requires|conflicts|description|tags|before|after)\\b"
+        }
+      ]
+    },
+    "patterns": {
+      "patterns": [
+        {
+          "name": "keyword.operator.pattern.rra",
+          "match": "\\b(pattern|rewrite|precondition|cost_model)\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.relational.rra",
+          "match": "\\b(Scan|Project|Filter|Join|Aggregate|Sort|Limit|Union|Intersect|Except|Window)\\b"
+        },
+        {
+          "name": "keyword.operator.logical.rra",
+          "match": "\\b(and|or|not|exists|forall)\\b"
+        },
+        {
+          "name": "keyword.operator.arrow.rra",
+          "match": "=>|->|<-"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.rra",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.rra",
+              "match": "\\\\."
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

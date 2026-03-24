@@ -10,37 +10,54 @@ The platform codifies database query optimization knowledge into a
 single system that can parse, validate, optimize, execute, and
 translate SQL across database engines.
 
-```
-                    ,------------------------------------,
-                    |          User Interfaces          |
-                    |  CLI (ra-cli) * Web (ra-web)     |
-                    |  WASM Playground (ra-wasm)        |
-                    `----------+------------+---------+---------'
-                            |          |       |
-              ,---------------'          |       `----------------,
-              v                        v                     v
-    ,--------------------,   ,--------------------,   ,--------------------,
-    | Query Optimization|   | Dialect Translation|   | Isolation Testing |
-    |   (ra-engine)    |   |   (ra-dialect)     |   |  (ra-isolation)   |
-    `-----------+-----------'   `---------------------'   `---------------------'
-             |
-    ,----------+-------------------------------------------,
-    |                  Rule Pipeline                     |
-    |  Parser (ra-parser) -> Compiler (ra-compiler)      |
-    |  147 rules: logical * physical * hardware *        |
-    |  distributed * multi-model                         |
-    `-----------+-------------------------------------------'
-             |
-    ,----------+-------------------------------------------,
-    |               Core Types (ra-core)                 |
-    |  RelExpr * Expr * Rule * Cost * Statistics         |
-    `-----------+----------+----------+----------+----------------'
-             |        |        |        |
-    ,----------+----, ,-----+-----, ,---+--------, ,--+--------------,
-    |ra-hardware| | ra-ml | |ra-adapt| |ra-codegen   |
-    |GPU / FPGA | |ML cost| |Runtime | |Cranelift    |
-    |cost model | |estim. | |reopt   | |WASM / JIT   |
-    `--------------' `----------' `-----------' `----------------'
+```mermaid
+graph TD
+    CLI["CLI (ra-cli)"]
+    Web["Web (ra-web)"]
+    WASM["WASM Playground<br/>(ra-wasm)"]
+
+    Engine["Query Optimization<br/>(ra-engine)"]
+    Dialect["Dialect Translation<br/>(ra-dialect)"]
+    Isolation["Isolation Testing<br/>(ra-isolation)"]
+
+    PipelineDesc["Parser (ra-parser) → Compiler (ra-compiler)<br/>147 rules: logical, physical, hardware,<br/>distributed, multi-model"]
+
+    CoreDesc["RelExpr, Expr, Rule, Cost, Statistics"]
+
+    HW["ra-hardware<br/>GPU / FPGA<br/>cost model"]
+    ML["ra-ml<br/>ML cost<br/>estimation"]
+    Adapt["ra-adaptive<br/>Runtime<br/>reoptimization"]
+    Codegen["ra-codegen<br/>Cranelift<br/>WASM / JIT"]
+
+    PGExt["PostgreSQL Extension<br/>(ra-pg-extension)"]
+
+    CLI --> Engine
+    CLI --> Dialect
+    Web --> Engine
+    Web --> Isolation
+    WASM --> Engine
+    PGExt --> Engine
+    PGExt --> HW
+    Engine --> PipelineDesc
+    PipelineDesc --> CoreDesc
+    CoreDesc --> HW
+    CoreDesc --> ML
+    CoreDesc --> Adapt
+    CoreDesc --> Codegen
+
+    style CLI fill:#e1f5fe
+    style Web fill:#e1f5fe
+    style WASM fill:#e1f5fe
+    style PGExt fill:#e1f5fe
+    style Engine fill:#fff3e0
+    style Dialect fill:#fff3e0
+    style Isolation fill:#fff3e0
+    style PipelineDesc fill:#f3e5f5
+    style CoreDesc fill:#e8f5e9
+    style HW fill:#fce4ec
+    style ML fill:#fce4ec
+    style Adapt fill:#fce4ec
+    style Codegen fill:#fce4ec
 ```
 
 ## Crate Dependency Graph
@@ -67,106 +84,152 @@ graph TD
     Wasm --> Web
 ```
 
-```
-ra-core          (foundation -- no internal deps)
-  ^
-  |-- ra-parser
-  |-- ra-compiler (depends on ra-parser)
-  |-- ra-engine   (depends on ra-compiler)
-  |-- ra-codegen
-  |-- ra-hardware
-  |-- ra-ml
-  |-- ra-adaptive (depends on ra-engine)
-  |-- ra-dialect
-  |-- ra-wasm
-  |-- ra-isolation (depends on ra-wasm optionally)
-  |-- ra-synthesis (depends on ra-core)
-  |-- ra-discovery (depends on ra-core)
-  |-- ra-multimodel (depends on ra-core)
-  |-- ra-cli      (depends on most crates)
-  |-- ra-web      (depends on most crates)
+```mermaid
+graph BT
+    Core["ra-core<br/>(foundation)"]
+    Parser["ra-parser"] --> Core
+    Compiler["ra-compiler"] --> Core
+    Compiler --> Parser
+    Engine["ra-engine"] --> Compiler
+    Codegen["ra-codegen"] --> Core
+    Hardware["ra-hardware"] --> Core
+    ML["ra-ml"] --> Core
+    Adaptive["ra-adaptive"] --> Engine
+    Dialect["ra-dialect"] --> Core
+    WasmCrate["ra-wasm"] --> Core
+    Isolation["ra-isolation"] -.-> WasmCrate
+    Synthesis["ra-synthesis"] --> Core
+    Discovery["ra-discovery"] --> Core
+    Multimodel["ra-multimodel"] --> Core
+    PGExt["ra-pg-extension"] --> Engine
+    PGExt --> Hardware
+    PGExt --> Core
+    CLI["ra-cli"] --> Engine
+    CLI --> Dialect
+    WebCrate["ra-web"] --> Engine
+    WebCrate --> WasmCrate
+
+    style Core fill:#e8f5e9
+    style CLI fill:#e1f5fe
+    style WebCrate fill:#e1f5fe
+    style PGExt fill:#e1f5fe
 ```
 
 ## Data Flow: Query Optimization
 
 A SQL query flows through the system as follows:
 
-```
-1. SQL text
-      |
-      v
-2. [SQL parser] --> RelExpr (logical plan)
-      |
-      v
-3. [ra-parser]  --> Load .rra rule files
-      |
-      v
-4. [ra-compiler] --> Compile rules into egg rewrites
-      |
-      v
-5. [ra-engine: e-graph]
-      |-- Add logical plan to e-graph
-      |-- Apply all rules (equality saturation)
-      |-- Saturate until fixed point or timeout
-      |
-      v
-6. [ra-engine: extract] --> Lowest-cost physical plan
-      |
-      |-- ra-hardware: hardware-aware cost model
-      |-- ra-ml: ML cardinality estimation
-      |
-      v
-7. [ra-codegen] --> Executable code (JIT / WASM / bytecode)
-      |
-      v
-8. [Execute against database]
+```mermaid
+graph TD
+    S1["1. SQL text"] --> S2["2. SQL parser"]
+    S2 -->|"RelExpr (logical plan)"| S3["3. ra-parser"]
+    S3 -->|"Load .rra rule files"| S4["4. ra-compiler"]
+    S4 -->|"Compile rules into egg rewrites"| S5["5. ra-engine: e-graph"]
+    S5 -->|"Add logical plan<br/>Apply all rules (equality saturation)<br/>Saturate until fixed point or timeout"| S6["6. ra-engine: extract"]
+    HW["ra-hardware<br/>hardware-aware cost model"] --> S6
+    MLCost["ra-ml<br/>ML cardinality estimation"] --> S6
+    S6 -->|"Lowest-cost physical plan"| S7["7. ra-codegen"]
+    S7 -->|"Executable code<br/>(JIT / WASM / bytecode)"| S8["8. Execute against database"]
+
+    style S1 fill:#e1f5fe
+    style S2 fill:#e1f5fe
+    style S3 fill:#f3e5f5
+    style S4 fill:#f3e5f5
+    style S5 fill:#fff3e0
+    style S6 fill:#fff3e0
+    style HW fill:#fce4ec
+    style MLCost fill:#fce4ec
+    style S7 fill:#e8f5e9
+    style S8 fill:#e8f5e9
 ```
 
 ## Data Flow: Dialect Translation
 
-```
-1. SQL text (source dialect)
-      |
-      v
-2. [sqlparser: parse] --> AST
-      |
-      v
-3. [ra-dialect: rewrite passes]
-      |-- Function rewriting (CONCAT vs ||)
-      |-- Operator rewriting (:: vs CAST)
-      |-- LIMIT/OFFSET syntax
-      |-- Date/time functions
-      |-- Type mappings
-      |
-      v
-4. [sqlparser: render] --> SQL text (target dialect)
-      |
-      v
-5. Warnings about semantic differences
+```mermaid
+graph TD
+    D1["1. SQL text<br/>(source dialect)"] --> D2["2. sqlparser: parse"]
+    D2 -->|AST| D3["3. ra-dialect: rewrite passes"]
+    D3 -->|"Function rewriting (CONCAT vs &#124;&#124;)<br/>Operator rewriting (:: vs CAST)<br/>LIMIT/OFFSET syntax<br/>Date/time functions<br/>Type mappings"| D4["4. sqlparser: render"]
+    D4 -->|"SQL text (target dialect)"| D5["5. Warnings about<br/>semantic differences"]
+
+    style D1 fill:#e1f5fe
+    style D2 fill:#e1f5fe
+    style D3 fill:#fff3e0
+    style D4 fill:#e8f5e9
+    style D5 fill:#fce4ec
 ```
 
 ## Data Flow: Isolation Testing
 
+```mermaid
+graph TD
+    I1["1. .spec file"] --> I2["2. spec_parser"]
+    I2 -->|SpecFile| I3["3. scheduler"]
+    I3 -->|"Generate step orderings<br/>(permutations)"| I4["4. For each permutation"]
+
+    I4 --> SM["session manager<br/>Open N database sessions"]
+    I4 --> EX["executor<br/>Execute steps in scheduled order"]
+    I4 --> LM["lock monitor<br/>Track locks, detect deadlocks"]
+    I4 --> SN["snapshot<br/>Verify visibility rules"]
+    I4 --> EV["events<br/>Record what happened"]
+
+    SM --> I5["5. TestResult<br/>anomalies detected,<br/>pass/fail per permutation"]
+    EX --> I5
+    LM --> I5
+    SN --> I5
+    EV --> I5
+
+    style I1 fill:#e1f5fe
+    style I2 fill:#e1f5fe
+    style I3 fill:#fff3e0
+    style I4 fill:#f3e5f5
+    style SM fill:#fce4ec
+    style EX fill:#fce4ec
+    style LM fill:#fce4ec
+    style SN fill:#fce4ec
+    style EV fill:#fce4ec
+    style I5 fill:#e8f5e9
 ```
-1. .spec file
-      |
-      v
-2. [spec_parser] --> SpecFile
-      |
-      v
-3. [scheduler] --> Generate step orderings (permutations)
-      |
-      v
-4. For each permutation:
-      |-- [session manager] --> Open N database sessions
-      |-- [executor] --> Execute steps in scheduled order
-      |-- [lock monitor] --> Track locks, detect deadlocks
-      |-- [snapshot] --> Verify visibility rules
-      |-- [events] --> Record what happened
-      |
-      v
-5. TestResult: anomalies detected, pass/fail per permutation
+
+## Data Flow: PostgreSQL Planner Hook
+
+When loaded as a PostgreSQL extension via `shared_preload_libraries`,
+Ra intercepts SELECT queries through the planner hook mechanism:
+
+```mermaid
+graph TD
+    PG1["1. PostgreSQL receives SQL"] --> PG2["2. Parse/Analyze<br/>(standard PostgreSQL)"]
+    PG2 -->|"Query parse tree"| PG3["3. planner_hook<br/>(ra_planner_hook)"]
+
+    PG3 -->|"SELECT with ≤12 relations"| RA1["4. query_parser<br/>Query → RelExpr"]
+    PG3 -->|"DML / utility / too many relations"| PGSTD["standard_planner()"]
+
+    RA1 --> RA2["5. stats_bridge<br/>pg_class, pg_statistic,<br/>pg_constraint → Statistics"]
+    RA2 --> RA3["6. ra-engine<br/>e-graph optimization"]
+    RA3 --> RA4["7. plan_converter<br/>RelExpr → PlanAdviceSet"]
+    RA4 --> RA5["8. cost_mapper<br/>Ra Cost → PG Cost"]
+    RA5 -->|"confidence ≥ threshold"| RA6["9. Apply advice via GUCs<br/>enable_hashjoin, random_page_cost, ..."]
+    RA5 -->|"confidence < threshold"| PGSTD
+    RA6 --> PGSTD
+    PGSTD --> PG4["10. PlannedStmt<br/>returned to executor"]
+
+    style PG1 fill:#e1f5fe
+    style PG2 fill:#e1f5fe
+    style PG3 fill:#f3e5f5
+    style RA1 fill:#fff3e0
+    style RA2 fill:#fff3e0
+    style RA3 fill:#fff3e0
+    style RA4 fill:#fff3e0
+    style RA5 fill:#fce4ec
+    style RA6 fill:#fce4ec
+    style PGSTD fill:#e8f5e9
+    style PG4 fill:#e8f5e9
 ```
+
+The extension reads PostgreSQL catalog statistics (via syscache, not
+SPI) and uses hardware detection to tune cost parameters. On any error,
+it falls back to the standard planner. See
+[PostgreSQL Integration](../integrations/postgresql.md) for full details.
 
 ## Crate Summaries
 
@@ -206,10 +269,11 @@ A SQL query flows through the system as follows:
 
 ### Applications
 
-| Crate  | Purpose                                      |
-|--------|----------------------------------------------|
-| ra-cli | Command-line interface                       |
-| ra-web | Web explorer backend (Rocket.rs)             |
+| Crate             | Purpose                                      |
+|-------------------|----------------------------------------------|
+| ra-cli            | Command-line interface                       |
+| ra-web            | Web explorer backend (Rocket.rs)             |
+| ra-pg-extension   | PostgreSQL planner hook (pgrx, PG 13--18)    |
 
 ## Rule Categories
 
@@ -297,3 +361,4 @@ Preset hardware profiles configure cost models:
 - [Isolation testing](isolation-testing.md)
 - [WASM databases](wasm-databases.md)
 - [Execution models](execution-models.md)
+- [PostgreSQL integration](../integrations/postgresql.md)

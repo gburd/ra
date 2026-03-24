@@ -332,9 +332,9 @@ impl Optimizer {
 
         let total_start = Instant::now();
 
-        // Fast path: Use left-deep tree for simple queries (2-4 tables)
+        // Fast path: Use left-deep tree for queries with 2-7 tables
         if crate::left_deep::can_use_left_deep(expr) {
-            debug!("Using left-deep tree optimization for simple query");
+            debug!("Using left-deep tree optimization");
             let cost_model: Arc<dyn ra_core::cost::CostModel> = Arc::new(ra_hardware::HardwareCostModel::new(
                 self.hardware_profile(),
             ));
@@ -343,15 +343,18 @@ impl Optimizer {
             });
 
             let builder = crate::left_deep::LeftDeepBuilder::new(cost_model, stats_provider);
-            if let Ok(optimized) = builder.build(expr) {
-                info!(
-                    "Left-deep optimization completed in {:?}",
-                    total_start.elapsed()
-                );
-                return Ok(optimized);
+            match builder.build(expr) {
+                Ok(optimized) => {
+                    info!(
+                        "Left-deep optimization completed in {:?}",
+                        total_start.elapsed()
+                    );
+                    return Ok(optimized);
+                }
+                Err(e) => {
+                    debug!("Left-deep failed ({}), falling back to e-graph", e);
+                }
             }
-            // If left-deep fails, fall through to e-graph optimization
-            debug!("Left-deep optimization failed, falling back to e-graph");
         }
 
         // Check if we should use large join optimization

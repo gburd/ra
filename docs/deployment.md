@@ -6,23 +6,18 @@ This guide covers deploying both the RA documentation site and the RA Web Explor
 
 The RA documentation is built with VitePress and can be deployed to multiple platforms.
 
-### GitHub Pages (Automatic)
+### Codeberg Pages (Automatic)
 
-Documentation is automatically deployed to GitHub Pages when changes are pushed to the `main` branch.
+Documentation is automatically deployed to Codeberg Pages when changes are pushed to the `main` branch.
 
-**URL**: https://gregburd.github.io/ra/
+**URL**: https://codeberg.org/gregburd/ra/pages
 
-**Configuration**: `.github/workflows/deploy-docs.yml`
-
-The workflow automatically:
+The CI workflow automatically:
 1. Builds VitePress documentation
 2. Builds WASM docs module (if present)
 3. Builds Rust API documentation (rustdoc)
 4. Combines all documentation into a single site
-5. Deploys to GitHub Pages
-
-**Required settings**:
-- Repository Settings -> Pages -> Source: "GitHub Actions"
+5. Deploys to Codeberg Pages
 
 ### Netlify
 
@@ -920,7 +915,7 @@ docker exec ra-web env | grep STATIC_DIR
 
 ## Support
 
-- **Issues**: https://github.com/gregburd/ra/issues
+- **Issues**: https://codeberg.org/gregburd/ra/issues
 - **Documentation**: https://ra-optimizer.org/docs
 - **Fly.io Help**: https://community.fly.io
 - **Docker Help**: https://docs.docker.com

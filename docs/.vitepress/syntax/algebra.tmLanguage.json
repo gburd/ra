@@ -1,0 +1,76 @@
+{
+  "name": "Relational Algebra",
+  "scopeName": "source.algebra",
+  "fileTypes": ["algebra"],
+  "patterns": [
+    {
+      "include": "#operators"
+    },
+    {
+      "include": "#functions"
+    },
+    {
+      "include": "#relations"
+    },
+    {
+      "include": "#predicates"
+    },
+    {
+      "include": "#symbols"
+    }
+  ],
+  "repository": {
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.relational.algebra",
+          "match": "\\b(sigma|π|pi|rho|τ|tau|δ|delta|γ|gamma)\\b"
+        },
+        {
+          "name": "keyword.operator.set.algebra",
+          "match": "\\b(union|intersect|difference|product|join|semijoin|antijoin|outerjoin)\\b"
+        }
+      ]
+    },
+    "functions": {
+      "patterns": [
+        {
+          "name": "entity.name.function.algebra",
+          "match": "\\b(count|sum|avg|min|max|group)\\b"
+        }
+      ]
+    },
+    "relations": {
+      "patterns": [
+        {
+          "name": "variable.other.relation.algebra",
+          "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
+        }
+      ]
+    },
+    "predicates": {
+      "patterns": [
+        {
+          "name": "keyword.operator.logical.algebra",
+          "match": "\\b(and|or|not|AND|OR|NOT)\\b|&&|\\|\\||!"
+        },
+        {
+          "name": "keyword.operator.comparison.algebra",
+          "match": "==|!=|<=|>=|<|>|="
+        }
+      ]
+    },
+    "symbols": {
+      "patterns": [
+        {
+          "name": "keyword.operator.symbol.algebra",
+          "match": "σ|π|ρ|⨝|⋈|∪|∩|−|×|⋉|⋊|⟕|⟖|⟗"
+        },
+        {
+          "name": "punctuation.algebra",
+          "match": "[\\[\\](){}]"
+        }
+      ]
+    }
+  }
+}

@@ -732,6 +732,192 @@ systemctl reload ra-optimizer
 0 */6 * * * /usr/local/bin/collect_stats.sh
 ```
 
+## 11. Additional Database Backends
+
+Ra supports metadata collection from several databases beyond PostgreSQL. Each requires an optional Cargo feature.
+
+### DuckDB
+
+Enable with `--features duckdb-support`. DuckDB is an embedded analytical database.
+
+**Connection**:
+```rust
+use ra_metadata::duckdb::DuckDBConnector;
+
+// File-based
+let conn = DuckDBConnector::connect("/path/to/data.duckdb")?;
+// In-memory
+let conn = DuckDBConnector::open_in_memory()?;
+// Via factory
+let conn = ra_metadata::connect("duckdb://:memory:")?;
+```
+
+**Metadata queries used**:
+```sql
+-- Table listing
+SELECT table_name FROM information_schema.tables
+WHERE table_schema = 'main' AND table_type = 'BASE TABLE';
+
+-- Column info
+SELECT column_name, data_type, is_nullable, ordinal_position, column_default
+FROM information_schema.columns WHERE table_schema = 'main' AND table_name = ?;
+
+-- Row estimates
+SELECT estimated_size FROM duckdb_tables()
+WHERE schema_name = 'main' AND table_name = ?;
+
+-- NDV (number of distinct values)
+SELECT approx_count_distinct(column_name) FROM table_name;
+```
+
+**Special considerations**:
+- DuckDB is columnar; statistics come from `duckdb_tables()` and `duckdb_columns()` functions
+- Indexes use Adaptive Radix Tree (ART), not B-tree
+- DuckDB does not support triggers
+- `approx_count_distinct` provides fast NDV estimates
+
+### SQL Server
+
+Enable with `--features sqlserver-support`. Uses the `tiberius` async TDS driver.
+
+**Connection**:
+```rust
+use ra_metadata::sqlserver::SqlServerConnector;
+
+let conn = SqlServerConnector::connect(
+    "sqlserver://sa:password@localhost:1433/mydb"
+)?;
+// Also supports mssql:// scheme
+```
+
+**Metadata queries used**:
+```sql
+-- Table listing
+SELECT t.name FROM sys.tables t WHERE t.is_ms_shipped = 0;
+
+-- Column info
+SELECT c.name, t.name AS type_name, c.is_nullable, c.column_id
+FROM sys.columns c JOIN sys.types t ON c.user_type_id = t.user_type_id
+WHERE c.object_id = OBJECT_ID('table_name');
+
+-- Row counts and sizes
+SELECT SUM(p.rows), SUM(a.total_pages) * 8 * 1024
+FROM sys.tables t
+JOIN sys.partitions p ON t.object_id = p.object_id
+JOIN sys.allocation_units a ON p.partition_id = a.container_id
+WHERE t.object_id = OBJECT_ID('table_name') AND p.index_id IN (0, 1);
+
+-- Index info (includes columnstore indexes)
+SELECT i.name, i.is_unique, i.type_desc, STRING_AGG(col.name, ',')
+FROM sys.indexes i JOIN sys.index_columns ic ...
+WHERE i.object_id = OBJECT_ID('table_name');
+```
+
+**Special considerations**:
+- Uses async I/O internally; methods block on a tokio runtime
+- Supports clustered, nonclustered, and columnstore index types
+- `SET SHOWPLAN_TEXT ON` is used for EXPLAIN output
+- Foreign keys queried via `sys.foreign_keys` / `sys.foreign_key_columns`
+
+### Oracle
+
+Enable with `--features oracle-support`. Uses the `oracle` crate (OCI bindings).
+
+**Connection**:
+```rust
+use ra_metadata::oracle::OracleConnector;
+
+let conn = OracleConnector::connect(
+    "oracle://scott:tiger@dbhost:1521/ORCL"
+)?;
+```
+
+**Metadata queries used**:
+```sql
+-- Table listing
+SELECT table_name FROM all_tables WHERE owner = :schema;
+
+-- Column info
+SELECT column_name, data_type, nullable, column_id, data_default
+FROM all_tab_columns WHERE owner = :schema AND table_name = :table;
+
+-- Row counts
+SELECT NVL(num_rows, 0) FROM all_tables
+WHERE owner = :schema AND table_name = :table;
+
+-- Column statistics with NDV and histograms
+SELECT column_name, num_distinct, num_nulls, avg_col_len
+FROM all_tab_col_statistics WHERE owner = :schema AND table_name = :table;
+
+-- Histogram bounds
+SELECT column_name, endpoint_value FROM all_tab_histograms
+WHERE owner = :schema AND table_name = :table;
+```
+
+**Special considerations**:
+- Schema/owner defaults to the connection username (uppercased)
+- `EXPLAIN PLAN` output read from `PLAN_TABLE`
+- Histogram data available from `all_tab_histograms`
+- Constraint types: P=primary, R=foreign, U=unique, C=check
+- Requires Oracle client libraries installed
+
+### MonetDB
+
+Enable with `--features monetdb-support`. Uses ODBC via the `odbc-api` crate.
+
+**Connection**:
+```rust
+use ra_metadata::monetdb::MonetDBConnector;
+
+// URL form (converted to ODBC connection string internally)
+let conn = MonetDBConnector::connect(
+    "monetdb://monetdb:monetdb@localhost:50000/demo"
+)?;
+// Raw ODBC DSN also supported
+let conn = MonetDBConnector::connect(
+    "DRIVER={MonetDB};HOST=localhost;PORT=50000;DATABASE=demo;UID=monetdb;PWD=monetdb"
+)?;
+```
+
+**Metadata queries used**:
+```sql
+-- Table listing
+SELECT name FROM sys.tables
+WHERE schema_id = (SELECT id FROM sys.schemas WHERE name = ?)
+AND type = 0;
+
+-- Column info
+SELECT c.name, c.type, c."null", c.number, c."default"
+FROM sys.columns c JOIN sys.tables t ON c.table_id = t.id
+JOIN sys.schemas s ON t.schema_id = s.id
+WHERE s.name = ? AND t.name = ?;
+
+-- Row counts and sizes from storage metadata
+SELECT SUM(count), SUM(columnsize) FROM sys.storage()
+WHERE schema = ? AND table = ?;
+```
+
+**Special considerations**:
+- MonetDB is a column-store database; storage statistics reflect columnar layout
+- Requires MonetDB ODBC driver installed
+- Key types in `sys.keys`: 0=primary, 1=unique, 2=foreign
+- `EXPLAIN` produces MAL (MonetDB Assembly Language) output
+- MonetDB does not use traditional B-tree indexes
+
+### Feature Combinations
+
+```toml
+# Enable one backend
+[dependencies]
+ra-metadata = { version = "0.1", features = ["duckdb-support"] }
+
+# Enable multiple backends
+ra-metadata = { version = "0.1", features = ["duckdb-support", "oracle-support"] }
+
+# Enable all optional backends
+ra-metadata = { version = "0.1", features = ["all-databases"] }
+```
+
 ## Summary
 
 Key statistics for Ra optimization:
@@ -743,5 +929,7 @@ Key statistics for Ra optimization:
 5. **Distribution**: Shard keys, partition boundaries
 6. **Workload**: OLTP/OLAP mix, access patterns
 7. **Skew**: Hot partitions, tenant distribution
+
+Supported databases: PostgreSQL, MySQL, SQLite (built-in), DuckDB, SQL Server, Oracle, MonetDB (optional features).
 
 Collect regularly (every 6-24 hours) and provide to Ra for optimal query planning.

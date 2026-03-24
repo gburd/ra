@@ -7,7 +7,7 @@ testing requirements, and the contribution workflow.
 
 ```bash
 # Clone and build
-git clone https://github.com/gregburd/ra.git
+git clone https://codeberg.org/gregburd/ra.git
 cd ra
 cargo build
 cargo test --all-features
@@ -69,7 +69,7 @@ cargo test -p ra-core
 cargo bench
 
 # Validate all rules
-cargo run --bin ra-cli -- validate rules/
+ra-cli validate rules/
 
 # Run TLA+ formal verification
 ./scripts/run-tla.sh
@@ -85,7 +85,7 @@ cargo run --bin ra-cli -- validate rules/
 ## Documentation
 
 - Update docs when changing public APIs or adding features
-- Follow the documentation structure in [docs/README.md](README.md)
+- Follow the documentation structure in [docs/readme.md](readme.md)
 - Place guides in `docs/guides/`, concepts in `docs/concepts/`,
   feature docs in `docs/features/`
 
@@ -101,8 +101,7 @@ npm run build  # Production build
 ### Documentation Deployment
 
 Documentation is automatically deployed to:
-- **GitHub Pages**: https://gregburd.github.io/ra/ (automatic on push to main)
-- **Codeberg Pages**: https://[username].codeberg.page/ra/ (requires setup, see [deployment.md](deployment.md))
+- **Codeberg Pages**: https://codeberg.org/gregburd/ra/pages (automatic on push to main)
 
 See [deployment.md](deployment.md) for detailed deployment configuration.
 
@@ -112,6 +111,18 @@ See [deployment.md](deployment.md) for detailed deployment configuration.
 - One logical change per commit
 - Use feature branches and pull requests
 - Never push directly to main
+
+## Contributor License Agreement
+
+All contributors must acknowledge the
+[Contributor License Agreement](/CONTRIBUTOR_AGREEMENT.md) before their
+first contribution can be merged. The CLA confirms that your
+contribution is your original work and that you grant the project a
+license to use it under the project's dual license (MIT OR Apache-2.0).
+
+You can acknowledge the CLA by checking the box in the pull request
+template, adding a comment to your PR, or using signed commits
+(`git commit -s`). You only need to do this once.
 
 ## License
 

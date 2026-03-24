@@ -1,0 +1,39 @@
+{
+  "name": "Cron",
+  "scopeName": "source.cron",
+  "fileTypes": ["cron"],
+  "patterns": [
+    {
+      "include": "#cron-expression"
+    },
+    {
+      "include": "#comments"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.number-sign.cron",
+          "match": "#.*$"
+        }
+      ]
+    },
+    "cron-expression": {
+      "patterns": [
+        {
+          "name": "constant.numeric.cron",
+          "match": "\\b(\\d+|\\*|\\*/\\d+|\\d+-\\d+)\\b"
+        },
+        {
+          "name": "keyword.operator.cron",
+          "match": "[,/\\-*]"
+        },
+        {
+          "name": "entity.name.function.cron",
+          "match": "\\b(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC|MON|TUE|WED|THU|FRI|SAT|SUN)\\b"
+        }
+      ]
+    }
+  }
+}

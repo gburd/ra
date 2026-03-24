@@ -8,14 +8,22 @@ echo "Building Ra WASM documentation module..."
 # Check if wasm-pack is installed
 if ! command -v wasm-pack &> /dev/null; then
     echo "Error: wasm-pack is not installed"
-    echo "Please install it with: cargo install wasm-pack"
+    echo "Install with: cargo install wasm-pack"
     exit 1
 fi
 
-# Check if wasm32-unknown-unknown target is installed
-if ! rustup target list --installed | grep -q "wasm32-unknown-unknown"; then
-    echo "Installing wasm32-unknown-unknown target..."
-    rustup target add wasm32-unknown-unknown
+# Ensure wasm32-unknown-unknown target is available.
+# In nix, the toolchain is managed without rustup -- the flake
+# already includes the wasm32 target, so skip the rustup check.
+if [ -n "${IN_NIX_SHELL:-}" ] || [ -n "${NIX_BUILD_TOP:-}" ]; then
+    echo "Nix environment detected, skipping rustup target check"
+elif command -v rustup &> /dev/null; then
+    if ! rustup target list --installed | grep -q "wasm32-unknown-unknown"; then
+        echo "Installing wasm32-unknown-unknown target..."
+        rustup target add wasm32-unknown-unknown
+    fi
+else
+    echo "Warning: rustup not found; assuming wasm32-unknown-unknown is available"
 fi
 
 # Build the WASM module

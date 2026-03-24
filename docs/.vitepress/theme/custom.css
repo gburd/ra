@@ -3,3 +3,19 @@
 .dark .dependency-graph-container img {
   filter: invert(0.88) hue-rotate(180deg);
 }
+
+/* Relational algebra notation styling (markdown-it plugin) */
+.rel-algebra {
+  font-family: 'KaTeX_Main', 'Times New Roman', serif;
+  font-size: 1.1em;
+  white-space: nowrap;
+}
+.rel-algebra .ra-op {
+  color: var(--vp-c-brand-1);
+  cursor: help;
+  font-weight: 500;
+}
+.rel-algebra .ra-sub {
+  font-size: 0.75em;
+  color: var(--vp-c-text-2);
+}

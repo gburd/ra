@@ -364,7 +364,7 @@ Statistics flow:
 
 ```mermaid
 flowchart LR
-    Ext[External Source<br/>pg_stats / TOML / JSON] --> Parse[Parse statistics]
+    Ext["External Source<br/>pg_stats / TOML / JSON"] --> Parse[Parse statistics]
     Parse --> Timeline[Timeline storage]
     Timeline --> Interpolate[Interpolate to query time]
     Interpolate --> Engine[Optimization engine]

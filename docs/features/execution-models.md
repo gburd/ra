@@ -35,14 +35,12 @@ graph LR
 - Control flow passes up through operator tree
 
 **Characteristics:**
-```
-,---------------,
-|   Filter    | next() -> one tuple
-`---------+--------'
-       | next()
-,-------v-------,
-|    Scan     | read one row
-`----------------'
+```mermaid
+graph TD
+    Filter["Filter<br/>next() → one tuple"] -->|"next()"| Scan["Scan<br/>read one row"]
+
+    style Filter fill:#e1f5fe
+    style Scan fill:#e8f5e9
 ```
 
 **Advantages:**
@@ -81,14 +79,12 @@ graph LR
 - Enables SIMD vectorization
 
 **Characteristics:**
-```
-,---------------,
-|   Filter    | next() -> vector of tuples
-`---------+--------'
-       | next()
-,-------v-------,
-|    Scan     | read batch of rows
-`----------------'
+```mermaid
+graph TD
+    Filter["Filter<br/>next() → vector of tuples"] -->|"next()"| Scan["Scan<br/>read batch of rows"]
+
+    style Filter fill:#fff3e0
+    style Scan fill:#e8f5e9
 ```
 
 **Advantages:**
@@ -133,18 +129,14 @@ graph LR
 - Minimal interpretation overhead
 
 **Characteristics:**
-```
-,---------------,
-|    Scan     | push tuples
-`---------+--------'
-       down for each tuple
-,-------v-------,
-|   Filter    | if (predicate) push
-`---------+--------'
-       down
-,-------v-------,
-|  Aggregate  |
-`----------------'
+```mermaid
+graph TD
+    Scan["Scan<br/>push tuples"] -->|"for each tuple"| Filter["Filter<br/>if (predicate) push"]
+    Filter --> Aggregate["Aggregate"]
+
+    style Scan fill:#e8f5e9
+    style Filter fill:#f3e5f5
+    style Aggregate fill:#fce4ec
 ```
 
 **Generated Code Example:**
@@ -193,12 +185,26 @@ for row in table_scan() {
 - Work stealing for load balancing
 
 **Characteristics:**
-```
-Thread 1: Morsel 1 -> Filter -> Aggregate
-Thread 2: Morsel 2 -> Filter -> Aggregate
-Thread 3: Morsel 3 -> Filter -> Aggregate
-         down merge results
-    Final Aggregate
+```mermaid
+graph TD
+    T1["Thread 1: Morsel 1"] --> F1["Filter"] --> A1["Aggregate"]
+    T2["Thread 2: Morsel 2"] --> F2["Filter"] --> A2["Aggregate"]
+    T3["Thread 3: Morsel 3"] --> F3["Filter"] --> A3["Aggregate"]
+
+    A1 -->|"merge results"| Final["Final Aggregate"]
+    A2 --> Final
+    A3 --> Final
+
+    style T1 fill:#e1f5fe
+    style T2 fill:#e1f5fe
+    style T3 fill:#e1f5fe
+    style F1 fill:#fff3e0
+    style F2 fill:#fff3e0
+    style F3 fill:#fff3e0
+    style A1 fill:#f3e5f5
+    style A2 fill:#f3e5f5
+    style A3 fill:#f3e5f5
+    style Final fill:#e8f5e9
 ```
 
 **Advantages:**
@@ -352,15 +358,15 @@ previous_count + $\Delta$ count  // Incremental update
 - Cache-conscious operators
 
 **Characteristics:**
-```
-Column-at-a-Time Execution:
+```mermaid
+graph TD
+    Col["orders.amount<br/>[100, 1500, 200, 2000, 300]"]
+    Col -->|"filter > 1000"| Pos["positions = [1, 3]<br/>(not full tuples!)"]
+    Pos -->|"late materialization"| Res["result.amount = [1500, 2000]<br/>result.customer = [C2, C4]<br/>(looked up by positions)"]
 
-orders.amount = [100, 1500, 200, 2000, 300]
-                     down filter > 1000
-positions       = [1, 3]  (not full tuples!)
-                     down late materialization
-result.amount   = [1500, 2000]
-result.customer = [C2, C4]  (looked up by positions)
+    style Col fill:#e1f5fe
+    style Pos fill:#fff3e0
+    style Res fill:#e8f5e9
 ```
 
 **Core Concepts:**

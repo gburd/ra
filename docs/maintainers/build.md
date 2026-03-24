@@ -172,6 +172,16 @@ cargo build --release --bin ra-cli
 ./target/release/ra-cli --help
 ```
 
+::: tip Running ra-cli
+Documentation examples use the short form `ra-cli <args>`, which assumes the
+binary is on your `PATH` (e.g. via `cargo install --path crates/ra-cli`).
+
+During development you can run directly from the workspace with:
+```bash
+cargo run --bin ra-cli -- <args>
+```
+:::
+
 ### TUI (`ra-tui`)
 
 ```bash
@@ -283,10 +293,10 @@ cargo bench -p ra-engine --bench optimizer
 
 ```bash
 # Validate all .rra rule files
-cargo run --bin ra-cli -- validate rules/
+ra-cli validate rules/
 
 # Run rule test cases
-cargo run --bin ra-cli -- test rules/
+ra-cli test rules/
 ```
 
 ### Code Coverage
@@ -416,5 +426,5 @@ cargo pgrx test pg17 -- --nocapture
 
 - **[Component APIs](./components.md)** - How major subsystems interact
 - **[Release Process](./release.md)** - Cutting releases
-- **[Contributing](../CONTRIBUTING.md)** - Contribution guidelines
+- **[Contributing](../contributing.md)** - Contribution guidelines
 - **[Architecture](../architecture.md)** - System architecture overview

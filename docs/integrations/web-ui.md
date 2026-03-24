@@ -10,29 +10,26 @@ The web UI consists of three layers:
 2. **REST API**: Rocket-based HTTP server on port 8000
 3. **Backend**: RA optimizer, parser, and engine libraries
 
-```
-,-------------------------------------------,
-|  Browser (http://localhost:8000)        |
-|--------------------------------------------|
-|  Static Files (HTML/CSS/JS)             |
-|  - index.html                           |
-|  - Demo pages (staleness, join, etc.)  |
-|--------------------------------------------|
-|  REST API (Rocket)                      |
-|  - /health                              |
-|  - /api/optimize                        |
-|  - /api/visualize                       |
-|  - /api/compare                         |
-|  - /api/execute                         |
-|  - /api/translate                       |
-|  - /api/explain                         |
-|--------------------------------------------|
-|  RA Engine                              |
-|  - Optimizer                            |
-|  - Parser                               |
-|  - Cost Model                           |
-|  - Rule Engine                          |
-`--------------------------------------------'
+```mermaid
+graph TD
+    subgraph Browser["Browser (http://localhost:8000)"]
+        Static["Static Files (HTML/CSS/JS)<br/>index.html<br/>Demo pages (staleness, join, etc.)"]
+    end
+
+    subgraph API["REST API (Rocket)"]
+        Endpoints["/health<br/>/api/optimize<br/>/api/visualize<br/>/api/compare<br/>/api/execute<br/>/api/translate<br/>/api/explain"]
+    end
+
+    subgraph Engine["RA Engine"]
+        Components["Optimizer<br/>Parser<br/>Cost Model<br/>Rule Engine"]
+    end
+
+    Browser --> API
+    API --> Engine
+
+    style Browser fill:#e1f5fe
+    style API fill:#fff3e0
+    style Engine fill:#e8f5e9
 ```
 
 ## Setup
@@ -63,7 +60,13 @@ Build and run without Docker:
 # Build frontend (if exists)
 cd web && npm install && npm run build && cd ..
 
-# Build and run backend
+# Build backend
+cargo build --release --bin ra-web
+
+# Run backend
+ra-web
+
+# Or for development:
 cargo run --bin ra-web
 ```
 
@@ -744,6 +747,6 @@ To add new API endpoints:
 
 ## Support
 
-- GitHub Issues: https://github.com/gregburd/ra/issues
-- Documentation: docs/README.md
+- Issues: https://codeberg.org/gregburd/ra/issues
+- Documentation: docs/readme.md
 - API Reference: docs/api-reference.md

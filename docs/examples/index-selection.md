@@ -110,7 +110,7 @@ Limit(100)
 
 ```bash
 # Analyze index usage
-cargo run --bin ra-cli -- analyze-indexes \
+ra-cli analyze-indexes \
   "SELECT o.order_id, o.order_date, c.name, c.email \
    FROM orders o JOIN customers c ON o.customer_id = c.id \
    WHERE o.status = 'pending' AND o.order_date >= '2024-01-01' \
@@ -118,12 +118,12 @@ cargo run --bin ra-cli -- analyze-indexes \
    ORDER BY o.order_date DESC LIMIT 100"
 
 # Suggest missing indexes
-cargo run --bin ra-cli -- suggest-indexes \
+ra-cli suggest-indexes \
   --workload queries.sql \
   --output suggested_indexes.sql
 
 # Compare plans with/without indexes
-cargo run --bin ra-cli -- compare \
+ra-cli compare \
   --with-indexes \
   --without-indexes \
   "YOUR_QUERY"
@@ -196,7 +196,7 @@ RA can suggest new indexes based on workload:
 
 ```bash
 # Analyze query workload
-cargo run --bin ra-cli -- advisor \
+ra-cli advisor \
   --workload production_queries.log \
   --constraints "max_indexes=10,max_space=1GB"
 

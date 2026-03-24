@@ -21,7 +21,7 @@ Your hardware might be very different:
 
 ```bash
 # Run comprehensive calibration suite
-cargo run --bin ra-cli -- calibrate \
+ra-cli calibrate \
   --workload tpch \
   --scale-factor 10 \
   --iterations 5 \
@@ -42,7 +42,7 @@ cargo run --bin ra-cli -- calibrate \
 
 ```bash
 # Calibrate using your actual queries
-cargo run --bin ra-cli -- calibrate \
+ra-cli calibrate \
   --workload-file production_queries.sql \
   --statistics current_stats.json \
   --runtime-samples query_times.csv \
@@ -53,7 +53,7 @@ cargo run --bin ra-cli -- calibrate \
 
 ```bash
 # Compare predicted vs actual costs
-cargo run --bin ra-cli -- validate-costs \
+ra-cli validate-costs \
   --model my-hardware.json \
   --queries test_queries.sql \
   --actual-times measured_times.csv
@@ -127,7 +127,7 @@ SELECT category, SUM(amount) FROM sales GROUP BY category;
 ### GPU Calibration
 
 ```bash
-cargo run --bin ra-cli -- calibrate \
+ra-cli calibrate \
   --hardware gpu \
   --gpu-model "RTX 4090" \
   --gpu-memory 24GB \
@@ -146,7 +146,7 @@ cargo run --bin ra-cli -- calibrate \
 ### SIMD Calibration
 
 ```bash
-cargo run --bin ra-cli -- calibrate \
+ra-cli calibrate \
   --hardware cpu \
   --simd avx512 \
   --operations "scan,filter,arithmetic"
@@ -164,7 +164,7 @@ cargo run --bin ra-cli -- calibrate \
 ### Apply to Single Query
 
 ```bash
-cargo run --bin ra-cli -- optimize \
+ra-cli optimize \
   --cost-model my-hardware.json \
   "SELECT * FROM orders WHERE status = 'pending'"
 ```
@@ -185,7 +185,7 @@ default = "my-hardware.json"
 
 ```bash
 # Compare plans with different cost models
-cargo run --bin ra-cli -- compare-models \
+ra-cli compare-models \
   --model1 default \
   --model2 my-hardware.json \
   --queries workload.sql
@@ -236,7 +236,7 @@ cargo run --bin ra-cli -- compare-models \
 
 ```bash
 # Enable learning mode
-cargo run --bin ra-cli -- monitor \
+ra-cli monitor \
   --learn-costs \
   --feedback-log query_performance.log \
   --update-interval daily
@@ -246,7 +246,7 @@ cargo run --bin ra-cli -- monitor \
 
 ```bash
 # Detect when calibration is outdated
-cargo run --bin ra-cli -- detect-drift \
+ra-cli detect-drift \
   --model my-hardware.json \
   --recent-queries last_7_days.log
 

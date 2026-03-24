@@ -1,11 +1,16 @@
-//! Left-deep join tree construction for simple queries.
+//! Left-deep join tree construction for queries with moderate join counts.
 //!
-//! For simple queries (2-4 tables), constructing a left-deep join tree
+//! For queries with 2-7 tables, constructing a left-deep join tree
 //! directly is much faster than running e-graph equality saturation.
-//! This provides a 10-50x speedup by avoiding the full search space exploration.
+//! This provides a 10-50x speedup by avoiding the full search space
+//! exploration.
 //!
 //! A left-deep tree has the form: ((T1 JOIN T2) JOIN T3) JOIN T4
 //! where all joins are left-associated, forming a linear chain.
+//!
+//! Operators that sit above the join tree (Aggregate, Sort, Project,
+//! Window) do not affect join ordering, so we optimise the join
+//! subtree and preserve the outer operators.
 
 use std::sync::Arc;
 
@@ -46,27 +51,39 @@ impl LeftDeepBuilder {
     /// Build a left-deep join tree from a query.
     ///
     /// Extracts all scan nodes and join conditions from the query,
-    /// then constructs an optimal left-deep tree.
+    /// constructs an optimal left-deep tree, then re-wraps it with
+    /// any outer operators (Aggregate, Sort, Project, etc.) that sat
+    /// above the join tree.
     pub fn build(&self, expr: &RelExpr) -> Result<RelExpr> {
-        // Extract all tables and conditions from the query
+        // Collect outer operators that sit above the join tree
+        let mut outer_ops: Vec<OuterOp> = Vec::new();
+        let join_subtree = peel_outer_ops(expr, &mut outer_ops);
+
+        // Extract all tables and conditions from the join subtree
         let mut tables = Vec::new();
         let mut conditions = Vec::new();
-        self.extract_tables_and_conditions(expr, &mut tables, &mut conditions)?;
+        self.extract_tables_and_conditions(
+            join_subtree, &mut tables, &mut conditions,
+        )?;
 
         if tables.is_empty() {
             return Err(anyhow!("No tables found in query"));
         }
 
         if tables.len() == 1 {
-            // Single table - just return it
-            return Ok(tables.into_iter().next().unwrap());
+            let result = tables.into_iter().next().unwrap();
+            return Ok(reapply_outer_ops(result, outer_ops));
         }
 
         // Sort tables by cardinality (smallest first)
         tables.sort_by(|a, b| {
-            let a_rows = self.get_cardinality(a).unwrap_or(f64::MAX);
-            let b_rows = self.get_cardinality(b).unwrap_or(f64::MAX);
-            a_rows.partial_cmp(&b_rows).unwrap_or(std::cmp::Ordering::Equal)
+            let a_rows = self.get_cardinality(a)
+                .unwrap_or(f64::MAX);
+            let b_rows = self.get_cardinality(b)
+                .unwrap_or(f64::MAX);
+            a_rows
+                .partial_cmp(&b_rows)
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
 
         // Build left-deep tree
@@ -74,9 +91,13 @@ impl LeftDeepBuilder {
         let mut current = tables_iter.next().unwrap();
 
         for table in tables_iter {
-            // Find applicable join condition
-            let condition = self.find_join_condition(&current, &table, &conditions)
-                .unwrap_or_else(|| Expr::Const(ra_core::expr::Const::Bool(true)));
+            let condition = self
+                .find_join_condition(
+                    &current, &table, &conditions,
+                )
+                .unwrap_or_else(|| {
+                    Expr::Const(ra_core::expr::Const::Bool(true))
+                });
 
             current = RelExpr::Join {
                 join_type: JoinType::Inner,
@@ -86,7 +107,7 @@ impl LeftDeepBuilder {
             };
         }
 
-        Ok(current)
+        Ok(reapply_outer_ops(current, outer_ops))
     }
 
     /// Extract all scan nodes and join conditions from an expression.
@@ -159,24 +180,151 @@ impl LeftDeepBuilder {
     }
 }
 
+/// An operator that sits above the join tree and can be re-applied
+/// after join reordering.
+#[derive(Clone)]
+enum OuterOp {
+    Aggregate {
+        group_by: Vec<Expr>,
+        aggregates: Vec<ra_core::algebra::AggregateExpr>,
+    },
+    Project {
+        columns: Vec<ra_core::algebra::ProjectionColumn>,
+    },
+    Sort {
+        keys: Vec<ra_core::algebra::SortKey>,
+    },
+    Limit {
+        count: u64,
+        offset: u64,
+    },
+    Window {
+        functions: Vec<ra_core::algebra::WindowExpr>,
+    },
+    Distinct,
+}
+
+/// Peel outer operators off the expression, collecting them in order
+/// (outermost first), and return the inner join subtree.
+fn peel_outer_ops<'a>(
+    expr: &'a RelExpr,
+    ops: &mut Vec<OuterOp>,
+) -> &'a RelExpr {
+    match expr {
+        RelExpr::Aggregate {
+            group_by,
+            aggregates,
+            input,
+        } => {
+            ops.push(OuterOp::Aggregate {
+                group_by: group_by.clone(),
+                aggregates: aggregates.clone(),
+            });
+            peel_outer_ops(input, ops)
+        }
+        RelExpr::Project { columns, input } => {
+            ops.push(OuterOp::Project {
+                columns: columns.clone(),
+            });
+            peel_outer_ops(input, ops)
+        }
+        RelExpr::Sort { keys, input } => {
+            ops.push(OuterOp::Sort {
+                keys: keys.clone(),
+            });
+            peel_outer_ops(input, ops)
+        }
+        RelExpr::Limit {
+            count,
+            offset,
+            input,
+        } => {
+            ops.push(OuterOp::Limit {
+                count: *count,
+                offset: *offset,
+            });
+            peel_outer_ops(input, ops)
+        }
+        RelExpr::Window {
+            functions, input,
+        } => {
+            ops.push(OuterOp::Window {
+                functions: functions.clone(),
+            });
+            peel_outer_ops(input, ops)
+        }
+        RelExpr::Distinct { input } => {
+            ops.push(OuterOp::Distinct);
+            peel_outer_ops(input, ops)
+        }
+        // Filter is part of the join tree, stop peeling
+        _ => expr,
+    }
+}
+
+/// Re-apply outer operators on top of the optimised join tree.
+/// Operators are stored outermost-first, so we apply in reverse.
+fn reapply_outer_ops(
+    mut result: RelExpr,
+    ops: Vec<OuterOp>,
+) -> RelExpr {
+    for op in ops.into_iter().rev() {
+        result = match op {
+            OuterOp::Aggregate {
+                group_by,
+                aggregates,
+            } => RelExpr::Aggregate {
+                group_by,
+                aggregates,
+                input: Box::new(result),
+            },
+            OuterOp::Project { columns } => RelExpr::Project {
+                columns,
+                input: Box::new(result),
+            },
+            OuterOp::Sort { keys } => RelExpr::Sort {
+                keys,
+                input: Box::new(result),
+            },
+            OuterOp::Limit { count, offset } => RelExpr::Limit {
+                count,
+                offset,
+                input: Box::new(result),
+            },
+            OuterOp::Window { functions } => RelExpr::Window {
+                functions,
+                input: Box::new(result),
+            },
+            OuterOp::Distinct => RelExpr::Distinct {
+                input: Box::new(result),
+            },
+        };
+    }
+    result
+}
+
 /// Check if a query is suitable for left-deep optimization.
 ///
 /// Returns true if the query:
-/// - Has 2-4 tables
-/// - Contains only scans, joins, filters, and projections
-/// - Has no complex operators (aggregates, windows, CTEs, etc.)
+/// - Has 2-7 tables
+/// - Contains only operators that preserve or sit above the join
+///   tree (scans, joins, filters, projections, aggregates, sorts,
+///   windows, limits, distinct)
+/// - Has no CTEs, set operations, or recursive queries
 pub fn can_use_left_deep(expr: &RelExpr) -> bool {
     let table_count = count_tables(expr);
 
-    if table_count < 2 || table_count > 4 {
+    if table_count < 2 || table_count > 7 {
         return false;
     }
 
-    // Check if query uses only simple operators
-    is_simple_query(expr)
+    is_left_deep_eligible(expr)
 }
 
 /// Count the number of tables in a query.
+///
+/// Traverses through all operators that sit above or within the join
+/// tree, including aggregates and windows.
 fn count_tables(expr: &RelExpr) -> usize {
     match expr {
         RelExpr::Scan { .. } => 1,
@@ -185,29 +333,40 @@ fn count_tables(expr: &RelExpr) -> usize {
         }
         RelExpr::Filter { input, .. }
         | RelExpr::Project { input, .. }
+        | RelExpr::Aggregate { input, .. }
         | RelExpr::Sort { input, .. }
         | RelExpr::Limit { input, .. }
+        | RelExpr::Window { input, .. }
         | RelExpr::Distinct { input } => count_tables(input),
         _ => 0,
     }
 }
 
-/// Check if a query uses only simple operators suitable for left-deep optimization.
-fn is_simple_query(expr: &RelExpr) -> bool {
+/// Check if all operators in the query are compatible with left-deep
+/// join reordering.
+///
+/// Operators that sit above the join tree (Aggregate, Sort, Window,
+/// Project, Limit, Distinct) are fine -- they don't change which
+/// join orderings are valid. CTEs, set operations, and recursive
+/// queries require full e-graph optimization.
+fn is_left_deep_eligible(expr: &RelExpr) -> bool {
     match expr {
         RelExpr::Scan { .. } => true,
         RelExpr::Join { left, right, .. } => {
-            is_simple_query(left) && is_simple_query(right)
+            is_left_deep_eligible(left)
+                && is_left_deep_eligible(right)
         }
         RelExpr::Filter { input, .. }
         | RelExpr::Project { input, .. }
+        | RelExpr::Aggregate { input, .. }
         | RelExpr::Sort { input, .. }
         | RelExpr::Limit { input, .. }
-        | RelExpr::Distinct { input } => is_simple_query(input),
-        // Complex operators not supported
-        RelExpr::Aggregate { .. }
-        | RelExpr::Window { .. }
-        | RelExpr::CTE { .. }
+        | RelExpr::Window { input, .. }
+        | RelExpr::Distinct { input } => {
+            is_left_deep_eligible(input)
+        }
+        // CTEs, set ops, and recursive queries need full e-graph
+        RelExpr::CTE { .. }
         | RelExpr::RecursiveCTE { .. }
         | RelExpr::Union { .. }
         | RelExpr::Intersect { .. }
@@ -315,7 +474,7 @@ mod tests {
     }
 
     #[test]
-    fn test_cannot_use_left_deep_too_many_tables() {
+    fn test_can_use_left_deep_five_tables() {
         let query = join(
             join(
                 join(
@@ -329,17 +488,27 @@ mod tests {
             scan("e"),
             eq_col("d.id", "e.id"),
         );
-        assert!(!can_use_left_deep(&query)); // 5 tables
+        assert!(can_use_left_deep(&query)); // 5 tables within threshold
     }
 
     #[test]
-    fn test_cannot_use_left_deep_with_aggregate() {
+    fn test_cannot_use_left_deep_too_many_tables() {
+        // Build an 8-table join (exceeds the 7-table threshold)
+        let mut query = join(scan("a"), scan("b"), eq_col("a.id", "b.id"));
+        for name in ["c", "d", "e", "f", "g", "h"] {
+            query = join(query, scan(name), eq_col("a.id", "b.id"));
+        }
+        assert!(!can_use_left_deep(&query)); // 8 tables
+    }
+
+    #[test]
+    fn test_can_use_left_deep_with_aggregate() {
         let query = RelExpr::Aggregate {
             group_by: vec![],
             aggregates: vec![],
             input: Box::new(join(scan("a"), scan("b"), eq_col("a.id", "b.id"))),
         };
-        assert!(!can_use_left_deep(&query));
+        assert!(can_use_left_deep(&query));
     }
 
     #[test]

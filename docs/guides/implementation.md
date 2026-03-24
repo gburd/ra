@@ -233,7 +233,7 @@ From `/Users/gregburd/src/ra/docs/research/paper.md:26`:
 
 **Metadata Propagation:** Calcite's RelMetadataProvider pattern inspired Ra's e-graph analysis system for tracking table statistics.
 
-**References:** 55 rules in Ra's documentation reference Calcite implementations (`docs/rules/REFERENCES.md:74`). These are inspirational - Ra doesn't use Calcite code but documents where similar optimizations exist.
+**References:** 55 rules in Ra's documentation reference Calcite implementations (`docs/rules/references.md:74`). These are inspirational - Ra doesn't use Calcite code but documents where similar optimizations exist.
 
 ## Supporting Libraries
 

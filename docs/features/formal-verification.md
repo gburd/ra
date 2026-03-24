@@ -6,29 +6,21 @@ This document explains the formal verification approach used in the RA optimizer
 
 Formal verification provides mathematical proofs that critical properties hold. We use a multi-layered approach:
 
-```
-,-------------------------------------------------------,
-| TLA+ Specifications (Mathematical Proofs)           |
-| - Termination, Monotonicity, Equivalence            |
-`---------------------+------------------------------------'
-                   down
-,-------------------------------------------------------,
-| Property-Based Testing (Random Test Generation)     |
-| - proptest: Generates random queries                |
-| - Checks properties hold for all inputs             |
-`---------------------+------------------------------------'
-                   down
-,-------------------------------------------------------,
-| Differential Testing (Compare vs Reference)         |
-| - Execute on PostgreSQL, DuckDB, SQLite             |
-| - Verify same results as production databases       |
-`---------------------+------------------------------------'
-                   down
-,-------------------------------------------------------,
-| Static Analysis (Compile-Time Checks)               |
-| - Rust type system prevents many bugs               |
-| - Clippy catches common errors                      |
-`--------------------------------------------------------'
+```mermaid
+graph TD
+    TLA["TLA+ Specifications<br/>(Mathematical Proofs)<br/>Termination, Monotonicity, Equivalence"]
+    PBT["Property-Based Testing<br/>(Random Test Generation)<br/>proptest: Generates random queries<br/>Checks properties hold for all inputs"]
+    DT["Differential Testing<br/>(Compare vs Reference)<br/>Execute on PostgreSQL, DuckDB, SQLite<br/>Verify same results as production databases"]
+    SA["Static Analysis<br/>(Compile-Time Checks)<br/>Rust type system prevents many bugs<br/>Clippy catches common errors"]
+
+    TLA --> PBT
+    PBT --> DT
+    DT --> SA
+
+    style TLA fill:#e8f5e9
+    style PBT fill:#e1f5fe
+    style DT fill:#fff3e0
+    style SA fill:#f3e5f5
 ```
 
 Each layer catches different types of bugs:

@@ -21,28 +21,26 @@ crate and `rules/multi-model/` directory provide:
 
 ## Architecture
 
-```
-                    Query Plan (RelExpr)
-                           |
-                           v
-              ,--------------------------,
-              |  Multi-Model Cost Model |
-              |   (ra-multimodel crate) |
-              `-------+---------+---------+-----'
-                   |       |       |
-         ,-----------'       |       `------------,
-         v                 v                 v
-  ,--------------,   ,---------------,   ,--------------,
-  |  Graph      |   |  Document   |   | TimeSeries |
-  |  Operators  |   |  Operators  |   | Operators  |
-  `---------+-------'   `---------+--------'   `--------+--------'
-         |                |                 |
-         v                v                 v
-  ,--------------,   ,---------------,   ,--------------,
-  | Neo4j      |   | MongoDB     |   | TimescaleDB|
-  | JanusGraph |   | Couchbase   |   | InfluxDB   |
-  | Neptune    |   | CosmosDB    |   | QuestDB    |
-  `---------------'   `----------------'   `---------------'
+```mermaid
+graph TD
+    QP["Query Plan (RelExpr)"] --> CM["Multi-Model Cost Model<br/>(ra-multimodel crate)"]
+
+    CM --> GraphOps["Graph<br/>Operators"]
+    CM --> DocOps["Document<br/>Operators"]
+    CM --> TSOps["TimeSeries<br/>Operators"]
+
+    GraphOps --> GraphDBs["Neo4j<br/>JanusGraph<br/>Neptune"]
+    DocOps --> DocDBs["MongoDB<br/>Couchbase<br/>CosmosDB"]
+    TSOps --> TSDBs["TimescaleDB<br/>InfluxDB<br/>QuestDB"]
+
+    style QP fill:#e1f5fe
+    style CM fill:#fff3e0
+    style GraphOps fill:#e8f5e9
+    style DocOps fill:#e8f5e9
+    style TSOps fill:#e8f5e9
+    style GraphDBs fill:#f3e5f5
+    style DocDBs fill:#f3e5f5
+    style TSDBs fill:#f3e5f5
 ```
 
 ## Data Models

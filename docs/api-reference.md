@@ -1255,6 +1255,6 @@ fn test_plan_selection_by_cardinality() {
 
 ## Support
 
-- GitHub Issues: https://github.com/gregburd/ra/issues
-- Discussions: https://github.com/gregburd/ra/discussions
+- Issues: https://codeberg.org/gregburd/ra/issues
+- Discussions: https://codeberg.org/gregburd/ra/issues
 - Documentation: https://docs.rs/ra-core

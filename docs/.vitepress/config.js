@@ -1,17 +1,20 @@
 import { defineConfig } from 'vitepress'
 import { katex } from '@mdit/plugin-katex'
+import { withMermaid } from 'vitepress-plugin-mermaid'
+import { algebraPlugin } from './plugins/algebra-plugin.js'
 
-export default defineConfig({
-  title: 'RA - Relational Algebra Optimizer',
+export default withMermaid(defineConfig({
+  title: 'Ra Optimizer',
   description: '1,327+ optimization rules for database query planning',
-  base: '/ra/',  // Replace with your repo name for GitHub Pages
-  ignoreDeadLinks: true,  // Temporarily ignore dead links during build
+  base: '/ra/',
+  ignoreDeadLinks: false,  // Catch broken links
   head: [
     ['link', { rel: 'icon', href: '/ra/favicon.ico' }],
     ['link', { rel: 'icon', type: 'image/svg+xml', href: '/ra/images/favicon.svg' }],
     ['link', { rel: 'apple-touch-icon', sizes: '192x192', href: '/ra/images/logo-192.png' }],
-    ['link', { rel: 'stylesheet', href: '/ra/static/css/ra-interactive.css' }],
-    ['script', { type: 'module', src: '/ra/static/js/ra-interactive.js' }],
+    // Temporarily disabled until WASM module is built
+    // ['link', { rel: 'stylesheet', href: '/ra/static/css/ra-interactive.css' }],
+    // ['script', { type: 'module', src: '/ra/static/js/ra-interactive.js' }],
     [
       'link',
       {
@@ -25,20 +28,11 @@ export default defineConfig({
   markdown: {
     config: (md) => {
       md.use(katex)
-
-      // Override fence renderer to prevent Vue template processing in code blocks
-      // This fixes Vue parser treating SQL patterns like "AS t(col)" as HTML tags
-      const defaultFence = md.renderer.rules.fence
-      md.renderer.rules.fence = (tokens, idx, options, env, self) => {
-        const token = tokens[idx]
-        const code = token.content
-        const lang = token.info.trim()
-
-        // Escape HTML and wrap in v-pre to disable Vue template compilation
-        const escapedCode = md.utils.escapeHtml(code)
-        return `<pre v-pre class="language-${lang}"><code>${escapedCode}</code></pre>\n`
-      }
+      md.use(algebraPlugin)
     }
+    // Note: Custom syntax highlighting for rra, algebra, sql-interactive, cron
+    // falls back to txt - see .vitepress/syntax/ for grammar definitions
+    // These can be properly integrated with a VitePress plugin later
   },
   vue: {
     template: {
@@ -50,122 +44,124 @@ export default defineConfig({
   themeConfig: {
     logo: '/images/logo.svg',
     nav: [
-      { text: 'Guide', link: '/GETTING_STARTED' },
+      { text: 'Guide', link: '/getting-started' },
       { text: 'Rules', link: '/rules/' },
       { text: 'API', link: '/api-reference' },
       { text: 'Architecture', link: '/architecture' }
     ],
+    outline: [2, 3],
     sidebar: {
       '/': [
         {
           text: 'Getting Started',
           items: [
-            { text: 'Introduction', link: '/README' },
-            { text: 'Quick Start', link: '/GETTING_STARTED' },
-            { text: 'Contributing', link: '/CONTRIBUTING' }
+            { text: 'Introduction', link: '/readme' },
+            { text: 'Quick Start', link: '/getting-started' },
+            { text: 'Architecture', link: '/architecture' },
+            { text: 'Contributing', link: '/contributing' }
           ]
         },
         {
           text: 'Guides',
           items: [
-            { text: 'CTE Materialization', link: '/guides/cte-materialization' },
-            { text: 'Development', link: '/guides/development' },
-            { text: 'File Format Integration', link: '/guides/file-format-integration' },
-            { text: 'Ledger Example', link: '/guides/ledger' },
-            { text: 'MVs & Caching', link: '/guides/mvs-caching' },
-            { text: 'Query Planner', link: '/guides/query-planner' },
-            { text: 'Rule Mining', link: '/guides/rule-mining' },
-            { text: 'SQL Compatibility', link: '/guides/sql-compatibility' }
+            { text: 'Implementation', link: '/guides/implementation' },
+            { text: 'Optimization', link: '/guides/optimization' },
+            { text: 'Rule Authoring', link: '/guides/rule-authoring' },
+            { text: 'Dialect Translation', link: '/guides/dialect-translation' },
+            { text: 'Cost Models', link: '/guides/cost-models' },
+            { text: 'Testing', link: '/guides/testing' },
+            { text: 'Test Format', link: '/guides/test-format' },
+            { text: 'Production Workloads', link: '/guides/modeling-production-workloads' }
           ]
         },
         {
           text: 'Concepts',
+          collapsed: true,
           items: [
-            { text: 'Adaptive Optimization', link: '/concepts/adaptive-optimization' },
-            { text: 'Algebraic Rewrites', link: '/concepts/algebraic-rewrites' },
-            { text: 'Cardinality', link: '/concepts/cardinality' },
-            { text: 'CBO Architecture', link: '/concepts/cbo-architecture' },
-            { text: 'Distributed Query', link: '/concepts/distributed-query' },
-            { text: 'Equality Saturation', link: '/concepts/equality-saturation' },
-            { text: 'Federated Query', link: '/concepts/federated-query' },
-            { text: 'Functional Dependencies', link: '/concepts/functional-dependencies' },
-            { text: 'Physical Properties', link: '/concepts/physical-properties' },
-            { text: 'Predicate Pushdown', link: '/concepts/predicate-pushdown' },
-            { text: 'Row Pattern Recognition', link: '/concepts/row-pattern-recognition' },
-            { text: 'Simplification Rules', link: '/concepts/simplification-rules' },
-            { text: 'Statistical Estimation', link: '/concepts/statistical-estimation' }
+            { text: 'Relational Algebra', link: '/concepts/relational-algebra' },
+            { text: 'Pre-Conditions', link: '/concepts/pre-conditions' },
+            { text: 'Facts Provider', link: '/concepts/facts-provider' },
+            { text: 'Rule Categories', link: '/concepts/rule-categories' }
           ]
         },
         {
           text: 'Features',
+          collapsed: true,
           items: [
             { text: 'Adaptive Execution', link: '/features/adaptive-execution' },
-            { text: 'Distributed Query', link: '/features/distributed-query' },
-            { text: 'Federated Query', link: '/features/federated-query' },
-            { text: 'Index Advisor', link: '/features/index-advisor' },
-            { text: 'Live Re-optimization', link: '/features/live-reoptimization' },
-            { text: 'Row Pattern Recognition', link: '/features/row-pattern-recognition' },
-            { text: 'Web UI', link: '/features/web-ui' }
+            { text: 'Bitmap Index Scan', link: '/features/bitmap-index-scan' },
+            { text: 'Distributed Optimization', link: '/features/distributed-optimization' },
+            { text: 'Execution Models', link: '/features/execution-models' },
+            { text: 'Federated Queries', link: '/features/federated-queries' },
+            { text: 'Formal Verification', link: '/features/formal-verification' },
+            { text: 'Function Catalog', link: '/features/function-catalog' },
+            { text: 'Hardware Acceleration', link: '/features/hardware-acceleration' },
+            { text: 'Index Types', link: '/features/index-types' },
+            { text: 'ML Cardinality', link: '/features/ml-cardinality' },
+            { text: 'Multi-Model Optimization', link: '/features/multi-model-optimization' },
+            { text: 'Network Modeling', link: '/features/network-modeling' },
+            { text: 'Plan Visualization', link: '/features/plan-visualization' },
+            { text: 'Platform Architecture', link: '/features/platform-architecture' },
+            { text: 'Resource Budgets', link: '/features/resource-budgets' },
+            { text: 'SQL Coverage', link: '/features/sql-coverage' },
+            { text: 'Statistics Timeline', link: '/features/statistics-timeline-format' },
+            { text: 'WASM Databases', link: '/features/wasm-databases' }
           ]
         },
         {
           text: 'Rules',
+          collapsed: true,
           items: [
             { text: 'Overview', link: '/rules/' },
+            { text: 'Index', link: '/rules/rule-index' },
+            { text: 'By Category', link: '/rules/by-category' },
+            { text: 'By Database', link: '/rules/by-database' },
             { text: 'Dependency Graph', link: '/rules/dependency-graph' },
-            { text: 'Aggregation', link: '/rules/aggregation' },
-            { text: 'Distributed', link: '/rules/distributed' },
-            { text: 'Join', link: '/rules/join' },
-            { text: 'Logical', link: '/rules/logical' },
-            { text: 'Physical', link: '/rules/physical' },
-            { text: 'Predicate', link: '/rules/predicate' },
-            { text: 'Project', link: '/rules/project' },
-            { text: 'Simplification', link: '/rules/simplification' },
-            { text: 'Subquery', link: '/rules/subquery' }
-          ]
-        },
-        {
-          text: 'Research',
-          items: [
-            { text: 'Papers', link: '/research/papers' },
-            { text: 'Database Mining', link: '/research/database-mining' },
-            { text: 'Rule Discovery', link: '/research/rule-discovery' }
+            { text: 'References', link: '/rules/references' }
           ]
         },
         {
           text: 'Examples',
+          collapsed: true,
           items: [
-            { text: 'Basic Queries', link: '/examples/basic-queries' },
+            { text: 'Simple Optimization', link: '/examples/simple-optimization' },
+            { text: 'Predicate Pushdown', link: '/examples/predicate-pushdown' },
+            { text: 'Join Reordering', link: '/examples/join-reordering' },
+            { text: 'Index Selection', link: '/examples/index-selection' },
+            { text: 'Cost Calibration', link: '/examples/cost-calibration' },
+            { text: 'Hardware-Aware', link: '/examples/hardware-aware-optimization' },
+            { text: 'Distributed Joins', link: '/examples/distributed-join-strategies' },
+            { text: 'Subquery Unnesting', link: '/examples/subquery-unnesting' },
             { text: 'Interactive SQL Demo', link: '/examples/interactive-sql-demo' },
-            { text: 'Ledger Application', link: '/examples/ledger/' },
-            { text: 'Ledger Optimization Lab', link: '/examples/ledger/interactive' },
-            { text: 'TPC-H Queries', link: '/examples/tpch' }
+            { text: 'Ledger Application', link: '/examples/ledger/' }
           ]
         },
         {
           text: 'Integrations',
+          collapsed: true,
           items: [
-            { text: 'Apache Arrow', link: '/integrations/arrow' },
-            { text: 'PostgreSQL', link: '/integrations/postgres' },
-            { text: 'SQLite', link: '/integrations/sqlite' },
-            { text: 'DataFusion', link: '/integrations/datafusion' }
+            { text: 'Database Adapters', link: '/integrations/database-adapters' },
+            { text: 'PostgreSQL', link: '/integrations/postgresql' },
+            { text: 'Web UI', link: '/integrations/web-ui' }
           ]
         },
         {
           text: 'Reference',
+          collapsed: true,
           items: [
             { text: 'API Reference', link: '/api-reference' },
-            { text: 'Architecture', link: '/architecture' },
-            { text: 'Deployment', link: '/deployment' },
-            { text: 'Testing', link: '/testing' }
+            { text: 'SQL Glossary', link: '/reference/sql-glossary' },
+            { text: 'Deployment', link: '/deployment' }
           ]
         },
         {
           text: 'Maintainers',
           collapsed: true,
           items: [
-            { text: 'Overview', link: '/maintainers/' },
+            { text: 'Overview', link: '/maintainers/index' },
             { text: 'Build & Install', link: '/maintainers/build' },
+            { text: 'Building Docs', link: '/building' },
+            { text: 'CLI Reference', link: '/maintainers/cli-reference' },
             { text: 'Component APIs', link: '/maintainers/components' },
             { text: 'RFCs Index', link: '/maintainers/rfcs/' },
             { text: 'Chores & Tasks', link: '/maintainers/chores' },
@@ -181,5 +177,14 @@ export default defineConfig({
     search: {
       provider: 'local'
     }
+  },
+  mermaid: {
+    // Mermaid configuration
+    theme: 'default',
+    securityLevel: 'loose',
+    flowchart: {
+      useMaxWidth: true,
+      htmlLabels: true
+    }
   }
-})
+}))

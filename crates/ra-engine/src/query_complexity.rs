@@ -57,14 +57,18 @@ impl QueryComplexity {
     }
 
     /// Get recommended timeout in milliseconds.
+    ///
+    /// Values are calibrated so that even with ~170 rewrite rules,
+    /// the optimizer completes at least 2-3 meaningful iterations
+    /// before timing out.
     #[inline]
     pub fn default_timeout_ms(self) -> u64 {
         match self {
-            Self::Trivial => 10,
-            Self::Simple => 50,
-            Self::Medium => 100,
-            Self::Complex => 300,
-            Self::VeryComplex => 500,
+            Self::Trivial => 50,
+            Self::Simple => 200,
+            Self::Medium => 500,
+            Self::Complex => 2000,
+            Self::VeryComplex => 5000,
         }
     }
 }
@@ -214,11 +218,14 @@ mod tests {
 
     #[test]
     fn test_medium_complexity() {
+        // 5 tables -> Medium
         let expr = join(
-            join(scan("users"), scan("orders")),
-            join(scan("products"), scan("categories")),
+            join(
+                join(scan("users"), scan("orders")),
+                scan("products"),
+            ),
+            join(scan("categories"), scan("tags")),
         );
-        // 4 tables with 3 joins
         assert_eq!(QueryComplexity::from_expr(&expr), QueryComplexity::Medium);
         assert_eq!(QueryComplexity::Medium.default_iter_limit(), 10);
     }
@@ -264,10 +271,10 @@ mod tests {
 
     #[test]
     fn test_timeout_values() {
-        assert_eq!(QueryComplexity::Trivial.default_timeout_ms(), 10);
-        assert_eq!(QueryComplexity::Simple.default_timeout_ms(), 50);
-        assert_eq!(QueryComplexity::Medium.default_timeout_ms(), 100);
-        assert_eq!(QueryComplexity::Complex.default_timeout_ms(), 300);
-        assert_eq!(QueryComplexity::VeryComplex.default_timeout_ms(), 500);
+        assert_eq!(QueryComplexity::Trivial.default_timeout_ms(), 50);
+        assert_eq!(QueryComplexity::Simple.default_timeout_ms(), 200);
+        assert_eq!(QueryComplexity::Medium.default_timeout_ms(), 500);
+        assert_eq!(QueryComplexity::Complex.default_timeout_ms(), 2000);
+        assert_eq!(QueryComplexity::VeryComplex.default_timeout_ms(), 5000);
     }
 }

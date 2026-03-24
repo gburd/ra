@@ -12,10 +12,10 @@ graph TD
     Rules --> MultiModel[Multi-Model Rules]
     Rules --> DBSpecific[Database-Specific]
 
-    Logical --> LP[Predicate pushdown<br/>Join reorder<br/>Subquery unnesting]
-    Physical --> PP[Join algorithms<br/>Access methods<br/>Sort strategies]
-    Hardware --> HP[GPU offload<br/>FPGA streaming<br/>SIMD vectorization]
-    Distributed --> DP[Exchange operators<br/>Partition pruning<br/>Two-phase aggregation]
+    Logical --> LP["Predicate pushdown<br/>Join reorder<br/>Subquery unnesting"]
+    Physical --> PP["Join algorithms<br/>Access methods<br/>Sort strategies"]
+    Hardware --> HP["GPU offload<br/>FPGA streaming<br/>SIMD vectorization"]
+    Distributed --> DP["Exchange operators<br/>Partition pruning<br/>Two-phase aggregation"]
 ```
 
 ## Logical Rules

@@ -494,23 +494,31 @@ Good questions include:
 
 ## Legal
 
+### Contributor License Agreement
+
+All contributors must acknowledge the
+[Contributor License Agreement](CONTRIBUTOR_AGREEMENT.md) before their
+first contribution can be merged. The CLA confirms that:
+
+1. Your contribution is your original work (or you have the right to
+   submit it)
+2. You grant the project a license to use your contribution under the
+   project's dual license (MIT OR Apache-2.0)
+3. You are not violating any third party's intellectual property rights
+
+You can acknowledge the CLA by any of these methods:
+
+- **PR checkbox**: Check the CLA box in the pull request template
+- **PR comment**: Add a comment stating you agree to the CLA
+- **Signed commits**: Use `git commit -s` to add a DCO sign-off
+
+You only need to acknowledge the CLA once. It applies to all future
+contributions.
+
 ### License
 
 By contributing, you agree that your contributions will be licensed under
 the same terms as the project (MIT OR Apache-2.0).
-
-### Developer Certificate of Origin
-
-We use the Developer Certificate of Origin (DCO). By contributing, you certify that:
-
-1. You have the right to submit the contribution
-2. You understand it will be distributed under the project license
-3. You are not violating anyone else's rights
-
-Add this to your commits:
-```bash
-git commit -s -m "Your commit message"
-```
 
 ## Recognition
 
