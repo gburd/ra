@@ -66,3 +66,4 @@ PRECONDITION_SYSTEM_STATUS.md
 /docs/.vitepress/cache/
 /docs/node_modules/
 
+/tmp/
