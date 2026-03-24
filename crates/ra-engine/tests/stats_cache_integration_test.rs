@@ -50,6 +50,9 @@ fn make_optimizer_with_stats(table_names: &[&str]) -> Optimizer {
         cost_pruning_threshold: 1.5,
         use_join_graph_filtering: false,
         beam_search_config: None,
+        enable_plan_cache: false,
+        plan_cache_config: ra_engine::PlanCacheConfig::default(),
+        transaction_context: None,
     });
 
     // Add statistics for all tables
@@ -176,6 +179,9 @@ fn test_stats_cache_no_stats() {
         cost_pruning_threshold: 1.5,
         use_join_graph_filtering: false,
         beam_search_config: None,
+        enable_plan_cache: false,
+        plan_cache_config: ra_engine::PlanCacheConfig::default(),
+        transaction_context: None,
     });
 
     let result = optimizer.optimize(&query);

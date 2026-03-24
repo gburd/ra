@@ -50,6 +50,7 @@ impl MockStatsProvider {
                 avg_row_size: 100,
                 total_size: 100_000,
                 columns: HashMap::new(),
+                indexes: HashMap::new(),
             },
         );
 
@@ -60,6 +61,7 @@ impl MockStatsProvider {
                 avg_row_size: 200,
                 total_size: 2_000_000,
                 columns: HashMap::new(),
+                indexes: HashMap::new(),
             },
         );
 
@@ -70,6 +72,7 @@ impl MockStatsProvider {
                 avg_row_size: 150,
                 total_size: 75_000,
                 columns: HashMap::new(),
+                indexes: HashMap::new(),
             },
         );
 
@@ -80,6 +83,7 @@ impl MockStatsProvider {
                 avg_row_size: 50,
                 total_size: 2_500_000,
                 columns: HashMap::new(),
+                indexes: HashMap::new(),
             },
         );
 
@@ -92,6 +96,7 @@ impl MockStatsProvider {
                     avg_row_size: 100,
                     total_size: i as u64 * 100_000,
                     columns: HashMap::new(),
+                    indexes: HashMap::new(),
                 },
             );
         }
@@ -171,7 +176,7 @@ fn test_greedy_join_order_two_tables() {
 
     // Should start with smallest table (products)
     if let RelExpr::Join { left, .. } = result {
-        assert!(matches!(&**left, RelExpr::Scan { table, .. } if table == "products"));
+        assert!(matches!(&*left, RelExpr::Scan { table, .. } if table == "products"));
     }
 }
 

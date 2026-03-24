@@ -18,6 +18,11 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "streaming_bench"
+harness = false
 
 [lints]
 workspace = true

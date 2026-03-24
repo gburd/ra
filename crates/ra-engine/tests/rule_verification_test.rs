@@ -30,6 +30,14 @@ fn optimize(expr: &RelExpr) -> RelExpr {
         large_join_strategy: ra_engine::large_join::LargeJoinStrategy::Greedy,
         max_optimization_time_ms: 5000,
         parallel: ParallelConfig::default(),
+        use_adaptive_limits: false,
+        use_cost_pruning: false,
+        cost_pruning_threshold: 1.5,
+        use_join_graph_filtering: false,
+        beam_search_config: None,
+        enable_plan_cache: false,
+        plan_cache_config: ra_engine::PlanCacheConfig::default(),
+        transaction_context: None,
     });
     opt.optimize(expr).expect("optimization should succeed")
 }
@@ -87,6 +95,31 @@ fn collect_tables_rec(expr: &RelExpr, out: &mut Vec<String>) {
         RelExpr::RowPattern { input, .. } => {
             collect_tables_rec(input, out);
         }
+        RelExpr::IndexScan { table, .. }
+        | RelExpr::BitmapIndexScan { table, .. }
+        | RelExpr::IndexOnlyScan { table, .. }
+        | RelExpr::ParallelScan { table, .. }
+        | RelExpr::MvScan { view_name: table, .. } => {
+            out.push(table.clone());
+        }
+        RelExpr::BitmapHeapScan { table, bitmap, .. } => {
+            out.push(table.clone());
+            collect_tables_rec(bitmap, out);
+        }
+        RelExpr::BitmapAnd { inputs }
+        | RelExpr::BitmapOr { inputs } => {
+            for inp in inputs {
+                collect_tables_rec(inp, out);
+            }
+        }
+        RelExpr::ParallelHashJoin { left, right, .. } => {
+            collect_tables_rec(left, out);
+            collect_tables_rec(right, out);
+        }
+        RelExpr::ParallelAggregate { input, .. }
+        | RelExpr::Gather { input, .. } => {
+            collect_tables_rec(input, out);
+        }
     }
 }
 
@@ -127,6 +160,21 @@ fn depth(expr: &RelExpr) -> usize {
         },
         RelExpr::MultiUnnest { .. } => 1,
         RelExpr::RowPattern { input, .. } => 1 + depth(input),
+        RelExpr::IndexScan { .. }
+        | RelExpr::BitmapIndexScan { .. }
+        | RelExpr::ParallelScan { .. }
+        | RelExpr::MvScan { .. } => 1,
+        RelExpr::BitmapAnd { inputs }
+        | RelExpr::BitmapOr { inputs } => {
+            1 + inputs.iter().map(|i| depth(i)).max().unwrap_or(0)
+        }
+        RelExpr::BitmapHeapScan { bitmap, .. } => 1 + depth(bitmap),
+        RelExpr::IndexOnlyScan { .. } => 1,
+        RelExpr::ParallelHashJoin { left, right, .. } => {
+            1 + depth(left).max(depth(right))
+        }
+        RelExpr::ParallelAggregate { input, .. }
+        | RelExpr::Gather { input, .. } => 1 + depth(input),
     }
 }
 

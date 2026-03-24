@@ -50,6 +50,9 @@ fn make_optimizer_with_beam_search(beam_config: BeamSearchConfig) -> Optimizer {
         cost_pruning_threshold: 1.5,
         use_join_graph_filtering: false,
         beam_search_config: Some(beam_config),
+        enable_plan_cache: false,
+        plan_cache_config: ra_engine::PlanCacheConfig::default(),
+        transaction_context: None,
     });
 
     // Add realistic statistics
