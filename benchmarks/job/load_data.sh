@@ -52,8 +52,8 @@ loaded=0
 for table in "${TABLES[@]}"; do
     csv="$DATA_DIR/${table}.csv"
     printf "  %-25s" "$table..."
-    # JOB CSV files: no header, comma-delimited, unquoted
-    psql -d "$DB_NAME" -c "\\COPY $table FROM '$csv' WITH (FORMAT csv, DELIMITER ',', NULL '')" -q
+    # JOB CSV files: no header, comma-delimited, backslash-escaped quotes
+    psql -d "$DB_NAME" -c "\\COPY $table FROM '$csv' WITH (FORMAT csv, DELIMITER ',', NULL '', ESCAPE E'\\\\');" -q
     rows=$(psql -d "$DB_NAME" -t -A -c "SELECT COUNT(*) FROM $table")
     echo "$rows rows"
     loaded=$((loaded + 1))

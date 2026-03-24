@@ -61,3 +61,8 @@ tla/states/
 **/*_STATUS.md
 PROJECT_STATUS.md
 PRECONDITION_SYSTEM_STATUS.md
+
+/benchmarks/job/data/
+/docs/.vitepress/cache/
+/docs/node_modules/
+
