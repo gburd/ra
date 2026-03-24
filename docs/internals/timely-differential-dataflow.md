@@ -12,6 +12,13 @@ affected by a rule change and reoptimizes only those.
 This page describes the architecture, data flow, and implementation details
 of the incremental optimization subsystem.
 
+::: warning Scope
+Differential dataflow is used exclusively in the **batch optimizer** for
+incremental rule and statistics change propagation. It is **not** used for
+streaming query execution. Ra's execution model is plan-at-a-time; timely
+provides the change-tracking substrate, not a runtime execution engine.
+:::
+
 ### Why incremental?
 
 A batch optimizer re-plans every query when the rule set changes. For a system
@@ -556,6 +563,112 @@ Full reoptimization is recommended when:
 
 Otherwise, the incremental optimizer handles the changes efficiently.
 
+### Statistics-driven incremental optimization
+
+The batch optimizer in `egraph.rs` has a second incremental path driven by
+`DeltaSet` rather than rule changes. When statistics change by a small amount,
+it scales down the egg iteration budget proportionally.
+
+**Source:** `crates/ra-engine/src/egraph.rs:1022-1087`
+
+```rust
+pub fn optimize_incremental(
+    &mut self,
+    expr: &RelExpr,
+    stats_delta: &DeltaSet,
+) -> Result<(RelExpr, IncrementalStats), EGraphError> {
+    let start = std::time::Instant::now();
+
+    // Apply deltas to internal table stats
+    let tables_updated = self.apply_stats_delta(stats_delta);
+
+    // Scale iteration budget by change magnitude
+    let (iter_limit, is_full) =
+        if stats_delta.needs_full_reoptimization() {
+            (self.config.iter_limit, true)
+        } else {
+            let pct = stats_delta.row_count_change_pct();
+            let fraction = (pct / 100.0).clamp(0.05, 1.0);
+            let iters = ((self.config.iter_limit as f64) * fraction)
+                .ceil() as usize;
+            (iters.max(1), false)
+        };
+
+    // Run egg with the scaled budget
+    let runner: Runner<RelLang, RelAnalysis> = Runner::default()
+        .with_expr(&rec_expr)
+        .with_node_limit(self.config.node_limit)
+        .with_iter_limit(iter_limit)
+        .with_time_limit(/* ... */)
+        .run(&rules);
+
+    // Extract best plan and report stats
+    Ok((result, stats))
+}
+```
+
+**Iteration scaling logic:**
+
+| Row count change | Fraction of max iterations | Example (max=10) |
+|---|---|---|
+| 1% | 0.05 (clamped minimum) | 1 iteration |
+| 5% | 0.05 | 1 iteration |
+| 10% | 0.10 | 1 iteration |
+| 25% | 0.25 | 3 iterations |
+| 50% | 0.50 | 5 iterations |
+| > 50% | 1.00 (full reopt) | 10 iterations |
+
+A 1% statistics change runs 10x fewer iterations than a full reoptimization,
+translating directly to proportional speedup.
+
+### IncrementalStats
+
+Returned by `optimize_incremental()` to report what happened during the run.
+
+**Source:** `crates/ra-engine/src/egraph.rs:1263-1297`
+
+```rust
+pub struct IncrementalStats {
+    /// Number of rewrite rules evaluated.
+    pub rules_evaluated: usize,
+    /// Number of e-graph iterations actually used.
+    pub iterations_used: usize,
+    /// Maximum iterations configured.
+    pub max_iterations: usize,
+    /// Number of nodes in the final e-graph.
+    pub nodes_in_egraph: usize,
+    /// Number of tables whose stats were updated.
+    pub tables_updated: usize,
+    /// Number of individual deltas processed.
+    pub delta_count: usize,
+    /// Maximum row count change percentage.
+    pub row_change_pct: f64,
+    /// Whether full reoptimization was used (delta was too large).
+    pub used_full_reoptimization: bool,
+    /// Wall-clock time for the incremental optimization.
+    pub elapsed: Duration,
+}
+
+impl IncrementalStats {
+    /// Estimated speedup factor vs full optimization.
+    /// Based on the ratio of iterations used vs max configured.
+    /// Returns 1.0 when full reoptimization was used.
+    pub fn speedup_factor(&self) -> f64 {
+        if self.used_full_reoptimization
+            || self.iterations_used == 0
+        {
+            return 1.0;
+        }
+        self.max_iterations as f64
+            / self.iterations_used as f64
+    }
+}
+```
+
+The `speedup_factor()` is the ratio of max iterations to actual iterations used.
+A value of 10.0 means the incremental path used 1/10th the iterations of a full
+run.
+
 ### Change magnitude
 
 Each delta has a `magnitude()` method that quantifies the size of the change.
@@ -618,7 +731,7 @@ The primary memory consumers are:
 - **Differential dataflow**: Temporary allocations during `compute_affected_queries`,
   freed after the function returns
 
-### Benchmark data
+### Benchmark data: rule-change path
 
 Measured on a single core (Apple M1):
 
@@ -632,6 +745,104 @@ Measured on a single core (Apple M1):
 The conservative dependency model means incremental performance matches full
 reoptimization. With finer-grained tracking, the "1 rule change" case could
 be reduced to O(affected queries) rather than O(all queries).
+
+### Benchmark data: statistics-change path
+
+The `differential_timeline` benchmark measures full vs incremental optimization
+on a join query (`users JOIN orders ON users.id = orders.user_id` with a filter
+on `users.age`).
+
+**Source:** `crates/ra-engine/benches/differential_timeline.rs`
+
+```rust
+fn bench_full_vs_incremental(c: &mut Criterion) {
+    let base = make_snapshot(0, 100_000, 100_000);
+    let query = join_query();
+
+    // Small change: 1% row count increase
+    let small_next = make_snapshot(60, 101_000, 101_000);
+    let small_delta = DeltaSet::compute(&base, &small_next);
+
+    // Medium change: 10% row count increase
+    let medium_next = make_snapshot(120, 110_000, 110_000);
+    let medium_delta = DeltaSet::compute(&base, &medium_next);
+
+    // Large change: 50% row count increase
+    let large_next = make_snapshot(180, 150_000, 150_000);
+    let large_delta = DeltaSet::compute(&base, &large_next);
+
+    group.bench_function("full_optimization", |b| {
+        b.iter(|| {
+            let optimizer = Optimizer::with_config(config.clone());
+            optimizer.optimize(black_box(&query)).expect("optimize");
+        });
+    });
+
+    for (label, delta) in [
+        ("incremental_1pct", &small_delta),
+        ("incremental_10pct", &medium_delta),
+        ("incremental_50pct", &large_delta),
+    ] {
+        group.bench_function(BenchmarkId::from_parameter(label), |b| {
+            b.iter(|| {
+                let mut optimizer = Optimizer::with_config(config.clone());
+                optimizer
+                    .optimize_incremental(
+                        black_box(&query),
+                        black_box(delta),
+                    )
+                    .expect("incremental");
+            });
+        });
+    }
+}
+```
+
+The benchmark also measures `DeltaSet::compute()` cost at different change
+percentages (1%, 5%, 10%, 25%, 50%):
+
+```rust
+fn bench_delta_computation(c: &mut Criterion) {
+    let base = make_snapshot(0, 100_000, 100_000);
+
+    for pct in [1, 5, 10, 25, 50] {
+        let new_rows = 100_000 + (100_000 * pct / 100);
+        let next = make_snapshot(60, new_rows, new_rows);
+
+        group.bench_with_input(
+            BenchmarkId::from_parameter(format!("{pct}pct")),
+            &pct,
+            |b, _| {
+                b.iter(|| {
+                    DeltaSet::compute(
+                        black_box(&base),
+                        black_box(&next),
+                    )
+                });
+            },
+        );
+    }
+}
+```
+
+**Expected speedups:**
+
+| Change size | Iterations used (of 10) | Speedup vs full |
+|---|---|---|
+| 1% | 1 | ~10x |
+| 10% | 1 | ~10x |
+| 25% | 3 | ~3.3x |
+| 50% | 10 (falls back) | 1x |
+
+Delta computation (`DeltaSet::compute`) is constant-time for the benchmark's
+2-table, 3-column schema and adds negligible overhead regardless of change
+percentage.
+
+To run the benchmarks:
+
+```bash
+cargo bench --bench differential_timeline -p ra-engine
+```
 
 ---
 
@@ -660,7 +871,9 @@ pub enum IncrementalError {
 
 ---
 
-## Usage example
+## Usage examples
+
+### Rule-change-driven incremental optimization
 
 ```rust
 use ra_engine::differential::{IncrementalOptimizer, RuleId};
@@ -694,6 +907,118 @@ if let Some(plan) = opt.get_optimized(q1)? {
 }
 ```
 
+### Statistics-driven incremental optimization
+
+```rust
+use ra_engine::Optimizer;
+use ra_stats::delta::DeltaSet;
+use ra_stats::timeline::{Snapshot, TableSnapshot, ColumnSnapshot};
+
+// Two statistics snapshots from different points in time
+let snap_before = Snapshot {
+    time_offset: 0,
+    label: None,
+    tables: vec![TableSnapshot {
+        name: "orders".into(),
+        row_count: 100_000,
+        page_count: None,
+        avg_row_size: None,
+        table_size_bytes: None,
+        columns: vec![ColumnSnapshot {
+            name: "id".into(),
+            ndv: 100_000,
+            null_fraction: 0.0,
+            avg_width: 8.0,
+            correlation: Some(1.0),
+            min_value: None,
+            max_value: None,
+        }],
+    }],
+};
+
+let snap_after = Snapshot {
+    time_offset: 3600,
+    label: Some("after bulk insert".into()),
+    tables: vec![TableSnapshot {
+        name: "orders".into(),
+        row_count: 105_000,  // 5% increase
+        page_count: None,
+        avg_row_size: None,
+        table_size_bytes: None,
+        columns: vec![ColumnSnapshot {
+            name: "id".into(),
+            ndv: 105_000,
+            null_fraction: 0.0,
+            avg_width: 8.0,
+            correlation: Some(1.0),
+            min_value: None,
+            max_value: None,
+        }],
+    }],
+};
+
+// Compute the delta
+let delta = DeltaSet::compute(&snap_before, &snap_after);
+assert!(!delta.needs_full_reoptimization()); // 5% is small
+
+// Run incremental optimization
+let mut optimizer = Optimizer::new();
+let (plan, stats) = optimizer.optimize_incremental(
+    &query, &delta,
+)?;
+
+println!(
+    "iterations: {}/{}, speedup: {:.1}x, full_reopt: {}",
+    stats.iterations_used,
+    stats.max_iterations,
+    stats.speedup_factor(),
+    stats.used_full_reoptimization,
+);
+// Output: iterations: 1/10, speedup: 10.0x, full_reopt: false
+```
+
+---
+
+## Design decisions
+
+### Why not use differential dataflow for query execution?
+
+Differential dataflow is a powerful framework for incremental computation, but
+Ra uses it narrowly for change propagation in the optimizer, not for query
+execution. The reasons:
+
+1. **Ra is a plan optimizer, not a query engine.** Its output is an optimized
+   `RelExpr` plan tree, not query results. The execution happens in the target
+   database (PostgreSQL, DuckDB, etc.).
+
+2. **Equality saturation is inherently batch.** The egg library explores the full
+   equivalence class space in iterations. Differential dataflow helps *around*
+   egg (deciding when to run it and with what budget) but not *inside* it.
+
+3. **The change granularity is coarse.** Rule changes and statistics refreshes
+   happen at human timescales (minutes to hours), not at row-level streaming
+   speeds. The overhead of a timely worker is justified only when it saves
+   expensive egg runs.
+
+### Why conservative dependency tracking?
+
+The current implementation links every query to every rule. This means any rule
+change marks all queries as stale. This is correct because egg's equality
+saturation applies all rules to all equivalence classes -- there is no way to
+know a priori which rules will fire for which queries.
+
+The `compute_affected_queries()` method exists as infrastructure for when Ra
+gains finer-grained tracking (e.g., recording which rules actually fired during
+optimization). At that point, the dependency edges become sparse and the
+differential join provides real pruning.
+
+### Why generation-based staleness?
+
+Each query records the generation at which it was last optimized. This is simpler
+and cheaper than maintaining per-query-per-rule dependency graphs. The tradeoff:
+more queries get reoptimized than strictly necessary, but each reoptimization is
+fast thanks to the memo cache.
+
 ---
 
 ## Future work
@@ -716,6 +1041,16 @@ if let Some(plan) = opt.get_optimized(q1)? {
 
 ---
 
+## Dependencies
+
+| Crate | Version | Purpose |
+|---|---|---|
+| `timely` | 0.12 | Dataflow worker runtime |
+| `differential-dataflow` | 0.12 | Incremental collection operators (Join, etc.) |
+| `egg` | (via ra-engine) | Equality saturation optimizer |
+
+---
+
 ## Source file index
 
 | File | Lines | Description |
@@ -725,3 +1060,4 @@ if let Some(plan) = opt.get_optimized(q1)? {
 | [`crates/ra-engine/src/memo.rs`](../../crates/ra-engine/src/memo.rs) | -- | Structural-hash memo table |
 | [`crates/ra-stats/src/delta.rs`](../../crates/ra-stats/src/delta.rs) | 888 | Statistics delta computation |
 | [`crates/ra-stats/src/timeline.rs`](../../crates/ra-stats/src/timeline.rs) | 800+ | Timeline format and playback engine |
+| [`crates/ra-engine/benches/differential_timeline.rs`](../../crates/ra-engine/benches/differential_timeline.rs) | 188 | Full vs incremental benchmarks |
