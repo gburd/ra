@@ -291,6 +291,14 @@ proptest! {
             large_join_strategy: ra_engine::large_join::LargeJoinStrategy::Greedy,
             max_optimization_time_ms: 2000,
             parallel: ParallelConfig::default(),
+            use_adaptive_limits: false,
+            use_cost_pruning: false,
+            cost_pruning_threshold: 1.5,
+            use_join_graph_filtering: false,
+            beam_search_config: None,
+            enable_plan_cache: false,
+            plan_cache_config: ra_engine::PlanCacheConfig::default(),
+            transaction_context: None,
         };
         let optimizer = Optimizer::with_config(config);
         // It's OK if optimization returns an error (e.g., for
@@ -313,6 +321,14 @@ proptest! {
             large_join_strategy: ra_engine::large_join::LargeJoinStrategy::Greedy,
             max_optimization_time_ms: 2000,
             parallel: ParallelConfig::default(),
+            use_adaptive_limits: false,
+            use_cost_pruning: false,
+            cost_pruning_threshold: 1.5,
+            use_join_graph_filtering: false,
+            beam_search_config: None,
+            enable_plan_cache: false,
+            plan_cache_config: ra_engine::PlanCacheConfig::default(),
+            transaction_context: None,
         };
         let optimizer = Optimizer::with_config(config);
         if let Ok(optimized) = optimizer.optimize(&expr) {
@@ -347,6 +363,14 @@ proptest! {
             large_join_strategy: ra_engine::large_join::LargeJoinStrategy::Greedy,
             max_optimization_time_ms: 2000,
             parallel: ParallelConfig::default(),
+            use_adaptive_limits: false,
+            use_cost_pruning: false,
+            cost_pruning_threshold: 1.5,
+            use_join_graph_filtering: false,
+            beam_search_config: None,
+            enable_plan_cache: false,
+            plan_cache_config: ra_engine::PlanCacheConfig::default(),
+            transaction_context: None,
         };
         let optimizer = Optimizer::with_config(config);
         if let Ok(first) = optimizer.optimize(&expr) {
@@ -470,6 +494,14 @@ proptest! {
             large_join_strategy: ra_engine::large_join::LargeJoinStrategy::Greedy,
             max_optimization_time_ms: 2000,
             parallel: ParallelConfig::default(),
+            use_adaptive_limits: false,
+            use_cost_pruning: false,
+            cost_pruning_threshold: 1.5,
+            use_join_graph_filtering: false,
+            beam_search_config: None,
+            enable_plan_cache: false,
+            plan_cache_config: ra_engine::PlanCacheConfig::default(),
+            transaction_context: None,
         };
         let optimizer = Optimizer::with_config(config);
 
@@ -651,6 +683,19 @@ fn contains_joins(expr: &RelExpr) -> bool {
         RelExpr::RowPattern { input, .. } => {
             contains_joins(input)
         }
+        RelExpr::IndexScan { .. }
+        | RelExpr::BitmapIndexScan { .. }
+        | RelExpr::IndexOnlyScan { .. }
+        | RelExpr::ParallelScan { .. }
+        | RelExpr::MvScan { .. } => false,
+        RelExpr::BitmapAnd { inputs }
+        | RelExpr::BitmapOr { inputs } => {
+            inputs.iter().any(|i| contains_joins(i))
+        }
+        RelExpr::BitmapHeapScan { bitmap, .. } => contains_joins(bitmap),
+        RelExpr::ParallelHashJoin { .. } => true,
+        RelExpr::ParallelAggregate { input, .. }
+        | RelExpr::Gather { input, .. } => contains_joins(input),
     }
 }
 
@@ -832,6 +877,31 @@ fn collect_tables_rec(expr: &RelExpr, out: &mut std::collections::HashSet<String
             }
         }
         RelExpr::RowPattern { input, .. } => {
+            collect_tables_rec(input, out);
+        }
+        RelExpr::IndexScan { table, .. }
+        | RelExpr::BitmapIndexScan { table, .. }
+        | RelExpr::IndexOnlyScan { table, .. }
+        | RelExpr::ParallelScan { table, .. }
+        | RelExpr::MvScan { view_name: table, .. } => {
+            out.insert(table.clone());
+        }
+        RelExpr::BitmapHeapScan { table, bitmap, .. } => {
+            out.insert(table.clone());
+            collect_tables_rec(bitmap, out);
+        }
+        RelExpr::BitmapAnd { inputs }
+        | RelExpr::BitmapOr { inputs } => {
+            for inp in inputs {
+                collect_tables_rec(inp, out);
+            }
+        }
+        RelExpr::ParallelHashJoin { left, right, .. } => {
+            collect_tables_rec(left, out);
+            collect_tables_rec(right, out);
+        }
+        RelExpr::ParallelAggregate { input, .. }
+        | RelExpr::Gather { input, .. } => {
             collect_tables_rec(input, out);
         }
     }
