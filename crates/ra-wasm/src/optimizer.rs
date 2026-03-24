@@ -242,6 +242,8 @@ impl WasmOptimizer {
             use_join_graph_filtering: true,
             beam_search_config: None,
             transaction_context: None,
+            enable_plan_cache: false,
+            plan_cache_config: ra_engine::plan_cache::PlanCacheConfig::default(),
         };
         let mut optimizer =
             ra_engine::Optimizer::with_config(engine_config);
