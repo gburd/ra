@@ -83,6 +83,7 @@ This index tracks all RFCs in the RA optimizer project by status. See [README.md
 | [0056](text/0056-postgresql-type-optimizations.md) | PostgreSQL Type-Specific Optimizations | 2026-03-24 | Phase 2 extended roadmap |
 | [0057](text/0057-cross-database-type-adaptation.md) | Cross-Database Type Storage Adaptation | 2026-03-24 | Phase 2 extended roadmap |
 | [0058](text/0058-opentracing-instrumentation.md) | OpenTracing Instrumentation for Query Planner | 2026-03-23 | Observability |
+| [0059](text/0059-statistics-based-plan-cache-invalidation.md) | Statistics-Based Plan Cache Invalidation | 2026-03-24 | Phase 5 differential dataflow |
 | [0061](text/0061-postgresql-extension-aware-optimization.md) | PostgreSQL Extension-Aware Optimization | 2026-03-24 | Phase 5 PostgreSQL extensions |
 
 ## Rejected
@@ -93,12 +94,12 @@ This index tracks all RFCs in the RA optimizer project by status. See [README.md
 
 ## Statistics
 
-- **Total RFCs**: 58
+- **Total RFCs**: 59
 - **Implemented**: 14 (24%)
 - **Underway**: 2 (3%)
-- **Accepted**: 12 (21%)
+- **Accepted**: 12 (20%)
 - **Under Review**: 6 (10%)
-- **Proposed**: 24 (41%)
+- **Proposed**: 25 (42%)
 - **Rejected**: 0 (0%)
 
 ## Last Updated: 2026-03-24
