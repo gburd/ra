@@ -179,6 +179,7 @@ unsafe fn ra_planner_hook_inner(
     let result = try_optimize_query(
         parse,
         &sql,
+        &table_names,
         &stats,
         &calibration,
     );
@@ -269,6 +270,7 @@ struct OptimizedPlan {
 unsafe fn try_optimize_query(
     parse: *mut pg_sys::Query,
     sql: &str,
+    table_names: &[(String, String)],
     stats: &[(String, ra_core::Statistics)],
     calibration: &CostCalibration,
 ) -> Result<Option<OptimizedPlan>, String> {
@@ -280,7 +282,7 @@ unsafe fn try_optimize_query(
     };
 
     // Step 2: Build facts provider and run RA optimizer.
-    let facts = SimpleFactsProvider::new(stats);
+    let facts = SimpleFactsProvider::new(table_names, stats);
     let optimized_expr = match optimize_relexpr(&rel_expr, &facts) {
         Ok(expr) => expr,
         Err(e) => return Err(format!("Optimization failed: {}", e)),
@@ -611,10 +613,20 @@ struct SimpleFactsProvider {
 }
 
 impl SimpleFactsProvider {
-    fn new(stats: &[(String, ra_core::Statistics)]) -> Self {
+    fn new(
+        table_names: &[(String, String)],
+        stats: &[(String, ra_core::Statistics)],
+    ) -> Self {
         let mut table_stats = std::collections::HashMap::new();
         let mut column_stats = std::collections::HashMap::new();
         let mut schemas = std::collections::HashMap::new();
+
+        // Build a schema lookup from table_names for FK gathering
+        let schema_for: std::collections::HashMap<&str, &str> =
+            table_names
+                .iter()
+                .map(|(s, t)| (t.as_str(), s.as_str()))
+                .collect();
 
         for (table_name, stat) in stats {
             // Convert Statistics -> CoreTableStats
@@ -678,13 +690,29 @@ impl SimpleFactsProvider {
                 .map(|idx| idx.columns.clone())
                 .unwrap_or_default();
 
+            // Gather foreign keys from pg_constraint
+            let schema = schema_for
+                .get(table_name.as_str())
+                .copied()
+                .unwrap_or("public");
+            let fk_infos =
+                stats_bridge::gather_foreign_keys(schema, table_name);
+            let foreign_keys: Vec<ra_core::ForeignKey> = fk_infos
+                .into_iter()
+                .map(|fk| ra_core::ForeignKey {
+                    columns: fk.columns,
+                    referenced_table: fk.referenced_table,
+                    referenced_columns: fk.referenced_columns,
+                })
+                .collect();
+
             schemas.insert(
                 table_name.clone(),
                 ra_core::TableInfo {
                     name: table_name.clone(),
                     columns,
                     primary_key,
-                    foreign_keys: Vec::new(),
+                    foreign_keys,
                     indexes,
                 },
             );

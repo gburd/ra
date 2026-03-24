@@ -180,12 +180,21 @@ unsafe fn resolve_relation_oid(
     }
 }
 
-/// Read a `pg_class` tuple from syscache and extract `reltuples`.
+/// Core metadata from `pg_class` needed for statistics.
+struct RelClassInfo {
+    reltuples: f32,
+    relpages: i32,
+}
+
+/// Read `pg_class` core metadata (reltuples, relpages) in a
+/// single syscache lookup.
 ///
 /// # Safety
 ///
 /// Must be called within a PostgreSQL backend process.
-unsafe fn read_reltuples(rel_oid: pg_sys::Oid) -> Option<f32> {
+unsafe fn read_relclass_info(
+    rel_oid: pg_sys::Oid,
+) -> Option<RelClassInfo> {
     let tuple = pg_sys::SearchSysCache1(
         pg_sys::SysCacheIdentifier::RELOID as i32,
         pg_sys::Datum::from(rel_oid),
@@ -196,11 +205,14 @@ unsafe fn read_reltuples(rel_oid: pg_sys::Oid) -> Option<f32> {
 
     let class_form =
         pg_sys::GETSTRUCT(tuple) as *mut pg_sys::FormData_pg_class;
-    let reltuples = (*class_form).reltuples;
+    let info = RelClassInfo {
+        reltuples: (*class_form).reltuples,
+        relpages: (*class_form).relpages,
+    };
 
     pg_sys::ReleaseSysCache(tuple);
 
-    Some(reltuples)
+    Some(info)
 }
 
 /// Read the number of user attributes for a relation from `pg_class`.
@@ -580,12 +592,23 @@ pub fn gather_table_stats(
     schema: &str,
     table: &str,
 ) -> Option<Statistics> {
-    let row_count = estimate_row_count(schema, table)?;
-    let mut stats = Statistics::new(row_count);
-
-    // Read column statistics from pg_statistic via syscache
     unsafe {
         let rel_oid = resolve_relation_oid(schema, table)?;
+        let class_info = read_relclass_info(rel_oid)?;
+
+        // reltuples == -1 means never analyzed
+        if class_info.reltuples < 0.0 {
+            return None;
+        }
+
+        let row_count = f64::from(class_info.reltuples);
+        let mut stats = Statistics::new(row_count);
+
+        // Populate page-level size from pg_class.relpages
+        let page_count = class_info.relpages.max(0) as u64;
+        stats.total_size =
+            page_count * pg_sys::BLCKSZ as u64;
+
         let natts = read_relnatts(rel_oid)?;
 
         // Iterate user attributes (1-based, positive attnum)
@@ -601,33 +624,16 @@ pub fn gather_table_stats(
                 stats.columns.insert(col_name, col_stats);
             }
         }
-    }
 
-    // Gather index statistics for index-aware optimization
-    gather_index_stats(schema, table, &mut stats);
+        // Derive avg_row_size from column avg_length or from
+        // total_size / row_count.
+        stats.avg_row_size =
+            compute_avg_row_size(&stats, page_count) as u64;
 
-    Some(stats)
-}
+        // Gather index statistics for index-aware optimization
+        gather_index_stats(schema, table, &mut stats);
 
-/// Estimate the row count for a table from `pg_class.reltuples`.
-///
-/// Uses syscache lookup on `pg_class` (RELOID) instead of SPI.
-///
-/// Returns `None` if the table does not exist or has never been
-/// analyzed (`reltuples` == -1).
-fn estimate_row_count(
-    schema: &str,
-    table: &str,
-) -> Option<f64> {
-    unsafe {
-        let rel_oid = resolve_relation_oid(schema, table)?;
-        let reltuples = read_reltuples(rel_oid)?;
-
-        if reltuples >= 0.0 {
-            Some(f64::from(reltuples))
-        } else {
-            None
-        }
+        Some(stats)
     }
 }
 
@@ -1199,6 +1205,35 @@ pub fn last_analyze_time(
 // Pure helper functions (no PG catalog access, testable)
 // ---------------------------------------------------------------
 
+/// Compute average row size from column stats or page-level data.
+///
+/// Prefers summing per-column `avg_width` from `pg_statistic`.
+/// Falls back to `total_size / row_count` when column-level data
+/// is incomplete.
+fn compute_avg_row_size(stats: &Statistics, page_count: u64) -> f64 {
+    // Try summing column widths (23 bytes for tuple header).
+    if !stats.columns.is_empty() {
+        let width_sum: f64 = stats
+            .columns
+            .values()
+            .map(|cs| cs.avg_length.unwrap_or(8.0))
+            .sum();
+        let from_columns = width_sum + 23.0;
+        if from_columns > 24.0 {
+            return from_columns;
+        }
+    }
+
+    // Fall back to total_size / row_count.
+    if stats.row_count > 0.0 && page_count > 0 {
+        let total = page_count as f64 * 8192.0;
+        return total / stats.row_count;
+    }
+
+    // Default: 100 bytes per row (PostgreSQL's typical default).
+    100.0
+}
+
 /// Interpret PostgreSQL's `n_distinct` encoding.
 ///
 /// Positive values are absolute NDV counts.
@@ -1684,5 +1719,35 @@ mod tests {
         assert_eq!(ANUM_CONKEY, 13);
         assert_eq!(ANUM_CONFKEY, 14);
         assert_eq!(NATTS_PG_CONSTRAINT, 26);
+    }
+
+    #[test]
+    fn avg_row_size_from_columns() {
+        let mut stats = Statistics::new(1000.0);
+        let mut cs1 = ColumnStats::new(100.0);
+        cs1.avg_length = Some(8.0);
+        stats.columns.insert("id".into(), cs1);
+        let mut cs2 = ColumnStats::new(50.0);
+        cs2.avg_length = Some(32.0);
+        stats.columns.insert("name".into(), cs2);
+
+        // 8 + 32 + 23 (header) = 63
+        let size = compute_avg_row_size(&stats, 0);
+        assert!((size - 63.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn avg_row_size_from_pages() {
+        let stats = Statistics::new(100.0);
+        // 2 pages * 8192 = 16384 bytes / 100 rows = 163.84
+        let size = compute_avg_row_size(&stats, 2);
+        assert!((size - 163.84).abs() < 0.01);
+    }
+
+    #[test]
+    fn avg_row_size_default() {
+        let stats = Statistics::new(0.0);
+        let size = compute_avg_row_size(&stats, 0);
+        assert!((size - 100.0).abs() < f64::EPSILON);
     }
 }
