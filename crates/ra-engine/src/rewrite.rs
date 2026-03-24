@@ -20,16 +20,26 @@ use egg::{rewrite, Rewrite};
 use crate::analysis::RelAnalysis;
 use crate::egraph::RelLang;
 
-/// Return all optimization rewrite rules.
+/// Return all optimization rewrite rules sorted by priority.
 ///
-/// Rules are returned in priority order. The e-graph engine applies
-/// them in each iteration until saturation or a limit is reached.
+/// Rules are sorted using RFC 0058 complexity-based prioritization:
+/// high-benefit, low-complexity rules come first. The e-graph engine
+/// applies them in each iteration until saturation or a limit is
+/// reached.
 #[must_use]
 pub fn all_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
+    crate::rule_priority::sort_rules_by_priority(all_rules_unsorted())
+}
+
+/// Return all optimization rewrite rules without priority sorting.
+///
+/// Used for benchmarking the impact of priority sorting.
+#[must_use]
+pub fn all_rules_unsorted() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     // Pre-allocate capacity to avoid reallocations
     // Typical total: ~200 rules across all categories
     let mut rules = Vec::with_capacity(200);
-    // High priority rules - null simplification first (fixes proptest issues)
+    // Null simplification rules
     rules.extend(crate::null_simplification::null_simplification_rules());
 
     // Standard optimization rules

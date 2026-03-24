@@ -8,7 +8,7 @@ This guide covers building RA from source on Linux, macOS, and Windows, includin
 
 | Dependency | Version | Purpose |
 |------------|---------|---------|
-| Rust | 1.75+ (stable) | Core language |
+| Rust | 1.85+ (stable) | Core language |
 | Cargo | (bundled with Rust) | Build system |
 | pkg-config | any | Native dependency resolution |
 | OpenSSL | 1.1+ or 3.x | TLS for web components |

@@ -62,5 +62,13 @@ harness = false
 name = "job_benchmark"
 harness = false
 
+[[bench]]
+name = "rule_priority_bench"
+harness = false
+
+[[bench]]
+name = "plan_cache_bench"
+harness = false
+
 [lints]
 workspace = true

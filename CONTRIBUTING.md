@@ -64,7 +64,7 @@ See the [RFC Index](rfcs/INDEX.md) for all existing RFCs.
 
 ### Prerequisites
 
-- Rust 1.75+ (or use Nix for automatic setup)
+- Rust 1.85+ (or use Nix for automatic setup)
 - Git
 - Basic understanding of relational algebra
 

@@ -6,7 +6,7 @@ This guide demonstrates RA's major features through practical examples. RA is a 
 
 ### Prerequisites
 
-- Rust 1.75+ with cargo
+- Rust 1.85+ with cargo
 - (Optional) Nix for reproducible builds
 - (Optional) Docker for web UI
 

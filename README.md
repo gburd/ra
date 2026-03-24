@@ -60,7 +60,7 @@ cargo test
 
 ### Without Nix
 
-Requirements: Rust 1.75+ with cargo
+Requirements: Rust 1.85+ with cargo
 
 ```bash
 cargo build

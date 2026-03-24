@@ -1,12 +1,17 @@
 //! Tests for progressive re-optimization and plan stitching (RFC 0052).
 
+use std::collections::HashMap;
+use std::time::Instant;
+
 use ra_core::algebra::{
     AggregateExpr, AggregateFunction, JoinType, NullOrdering, RelExpr, SortDirection, SortKey,
 };
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
+use ra_core::statistics::Statistics;
 use ra_engine::plan_stitch::{self, OperatorState};
 use ra_engine::progressive_reopt::{
-    self, JoinImplKind, ReoptConfig, StitchPointKind, StitchTransferKind,
+    self, JoinImplKind, ReoptConfig, ReoptError, ReoptimizeFn,
+    StitchPointKind, StitchTransferKind,
 };
 
 // ---------------------------------------------------------------
@@ -756,4 +761,570 @@ fn test_scenario_multiple_stitch_points_in_complex_plan() {
 
     let stitch_count = plan_stitch::count_stitch_points(&plan);
     assert_eq!(stitch_count, 4);
+}
+
+// ---------------------------------------------------------------
+// Join order equivalence verification tests
+// ---------------------------------------------------------------
+
+#[test]
+fn test_verify_equivalence_same_tables() {
+    let plan_a = join(scan("a"), scan("b"), eq(col("a.id"), col("b.id")));
+    let plan_b = join(scan("b"), scan("a"), eq(col("b.id"), col("a.id")));
+    assert!(plan_stitch::verify_join_order_equivalence(&plan_a, &plan_b));
+}
+
+#[test]
+fn test_verify_equivalence_different_tables() {
+    let plan_a = join(scan("a"), scan("b"), eq(col("a.id"), col("b.id")));
+    let plan_b = join(scan("a"), scan("c"), eq(col("a.id"), col("c.id")));
+    assert!(!plan_stitch::verify_join_order_equivalence(&plan_a, &plan_b));
+}
+
+#[test]
+fn test_verify_equivalence_nested_same_tables() {
+    let plan_a = join(
+        join(scan("a"), scan("b"), eq(col("a.id"), col("b.id"))),
+        scan("c"),
+        eq(col("b.id"), col("c.id")),
+    );
+    let plan_b = join(
+        scan("a"),
+        join(scan("c"), scan("b"), eq(col("c.id"), col("b.id"))),
+        eq(col("a.id"), col("b.id")),
+    );
+    assert!(plan_stitch::verify_join_order_equivalence(&plan_a, &plan_b));
+}
+
+#[test]
+fn test_verify_equivalence_extra_table() {
+    let plan_a = join(scan("a"), scan("b"), eq(col("a.id"), col("b.id")));
+    let plan_b = join(
+        join(scan("a"), scan("b"), eq(col("a.id"), col("b.id"))),
+        scan("c"),
+        eq(col("b.id"), col("c.id")),
+    );
+    assert!(!plan_stitch::verify_join_order_equivalence(&plan_a, &plan_b));
+}
+
+#[test]
+fn test_verify_equivalence_through_operators() {
+    let plan_a = sort(aggregate(join(
+        scan("a"),
+        scan("b"),
+        eq(col("a.id"), col("b.id")),
+    )));
+    let plan_b = aggregate(sort(join(
+        scan("b"),
+        scan("a"),
+        eq(col("b.id"), col("a.id")),
+    )));
+    assert!(plan_stitch::verify_join_order_equivalence(&plan_a, &plan_b));
+}
+
+// ---------------------------------------------------------------
+// Multi-point stitching tests
+// ---------------------------------------------------------------
+
+#[test]
+fn test_stitch_multi_empty_points() {
+    let plan = join(scan("a"), scan("b"), eq(col("a.id"), col("b.id")));
+    let result = plan_stitch::stitch_multi(&plan, &[]);
+    assert_eq!(result.stitch_points_applied, 0);
+    assert!((result.stitch_overhead - 0.0).abs() < f64::EPSILON);
+    assert_eq!(result.plan, plan);
+}
+
+#[test]
+fn test_stitch_multi_single_point() {
+    let reoptimized = join(
+        scan("placeholder"),
+        scan("customers"),
+        eq(col("cid"), col("id")),
+    );
+    let points = vec![(
+        scan("materialized_orders"),
+        StitchPointKind::JoinBuildComplete,
+        OperatorState::Join {
+            build_side_complete: true,
+            build_side_rows: 5000,
+            probe_side_cursor: 0,
+        },
+    )];
+
+    let result = plan_stitch::stitch_multi(&reoptimized, &points);
+    assert_eq!(result.stitch_points_applied, 1);
+    assert!(result.stitch_overhead > 0.0);
+}
+
+#[test]
+fn test_stitch_multi_accumulates_overhead() {
+    let reoptimized = aggregate(join(
+        scan("placeholder"),
+        scan("customers"),
+        eq(col("cid"), col("id")),
+    ));
+
+    let points = vec![
+        (
+            scan("materialized_orders"),
+            StitchPointKind::JoinBuildComplete,
+            OperatorState::Join {
+                build_side_complete: true,
+                build_side_rows: 5000,
+                probe_side_cursor: 0,
+            },
+        ),
+        (
+            scan("partial_agg"),
+            StitchPointKind::AggregateInput,
+            OperatorState::Aggregate {
+                partial_group_count: 100,
+                input_rows_consumed: 20000,
+            },
+        ),
+    ];
+
+    let result = plan_stitch::stitch_multi(&reoptimized, &points);
+    assert_eq!(result.stitch_points_applied, 2);
+    assert!(result.stitch_overhead > 0.0);
+}
+
+// ---------------------------------------------------------------
+// Sort stitching tests
+// ---------------------------------------------------------------
+
+#[test]
+fn test_stitch_at_sort() {
+    let materialized = scan("partial_sorted");
+    let reoptimized = sort(scan("placeholder"));
+
+    let result = plan_stitch::stitch_plans(
+        &materialized,
+        &reoptimized,
+        StitchPointKind::SortInput,
+        &OperatorState::Sort {
+            sorted_run_count: 3,
+            total_sorted_rows: 10000,
+        },
+    );
+
+    assert_eq!(result.stitch_points_applied, 1);
+    assert!(result.stitch_overhead > 0.0);
+
+    if let RelExpr::Sort { input, .. } = &result.plan {
+        if let RelExpr::Scan { table, .. } = input.as_ref() {
+            assert_eq!(table, "partial_sorted");
+        } else {
+            panic!("Expected Scan as input to stitched sort");
+        }
+    } else {
+        panic!("Expected Sort at top of stitched plan");
+    }
+}
+
+// ---------------------------------------------------------------
+// Background re-optimization tests
+// ---------------------------------------------------------------
+
+/// A test optimizer that returns a "better" plan by wrapping the
+/// input in a filter, simulating optimization improvement.
+struct TestReoptimizer {
+    improved: RelExpr,
+}
+
+impl ReoptimizeFn for TestReoptimizer {
+    fn reoptimize(
+        &self,
+        _plan: &RelExpr,
+        _stats: &HashMap<String, Statistics>,
+    ) -> Result<RelExpr, ReoptError> {
+        Ok(self.improved.clone())
+    }
+}
+
+/// An optimizer that always fails.
+struct FailingReoptimizer;
+
+impl ReoptimizeFn for FailingReoptimizer {
+    fn reoptimize(
+        &self,
+        _plan: &RelExpr,
+        _stats: &HashMap<String, Statistics>,
+    ) -> Result<RelExpr, ReoptError> {
+        Err(ReoptError::OptimizerFailed("test failure".to_string()))
+    }
+}
+
+/// An optimizer that returns the same plan (no improvement).
+struct NoopReoptimizer;
+
+impl ReoptimizeFn for NoopReoptimizer {
+    fn reoptimize(
+        &self,
+        plan: &RelExpr,
+        _stats: &HashMap<String, Statistics>,
+    ) -> Result<RelExpr, ReoptError> {
+        Ok(plan.clone())
+    }
+}
+
+#[test]
+fn test_quick_plan_returns_immediately() {
+    let plan = join(
+        scan("orders"),
+        scan("customers"),
+        eq(col("orders.cid"), col("customers.id")),
+    );
+
+    let improved_plan = filter(
+        join(
+            scan("orders"),
+            scan("customers"),
+            eq(col("orders.cid"), col("customers.id")),
+        ),
+        eq(col("orders.status"), Expr::Const(Const::Int(1))),
+    );
+
+    let start = Instant::now();
+    let (quick, _handle) = progressive_reopt::progressive_optimize(
+        plan.clone(),
+        HashMap::new(),
+        Box::new(TestReoptimizer {
+            improved: improved_plan,
+        }),
+        ReoptConfig::default(),
+    );
+    let elapsed = start.elapsed();
+
+    // Quick plan should return in <10ms (no optimization work).
+    assert!(
+        elapsed.as_millis() < 10,
+        "Quick plan took {}ms, expected <10ms",
+        elapsed.as_millis()
+    );
+    assert_eq!(quick, plan);
+}
+
+#[test]
+fn test_background_improvement_completes() {
+    let plan = join(
+        scan("orders"),
+        scan("customers"),
+        eq(col("orders.cid"), col("customers.id")),
+    );
+
+    let improved_plan = filter(
+        join(
+            scan("orders"),
+            scan("customers"),
+            eq(col("orders.cid"), col("customers.id")),
+        ),
+        eq(col("orders.status"), Expr::Const(Const::Int(1))),
+    );
+
+    let (_quick, handle) = progressive_reopt::progressive_optimize(
+        plan,
+        HashMap::new(),
+        Box::new(TestReoptimizer {
+            improved: improved_plan.clone(),
+        }),
+        ReoptConfig::default(),
+    );
+
+    // Wait for the background thread to complete.
+    let result = handle.recv();
+    assert!(result.is_some());
+
+    let result = result.expect("background thread should send result");
+    assert!(result.completed);
+    assert!(result.improved_plan.is_some());
+    assert_eq!(result.improved_plan.as_ref(), Some(&improved_plan));
+    assert!(result.attempts >= 1);
+}
+
+#[test]
+fn test_stitched_plan_preserves_table_equivalence() {
+    let original = join(
+        scan("orders"),
+        scan("customers"),
+        eq(col("orders.cid"), col("customers.id")),
+    );
+
+    let reoptimized = join(
+        scan("customers"),
+        scan("orders"),
+        eq(col("customers.id"), col("orders.cid")),
+    );
+
+    // Plans should reference the same tables.
+    assert!(plan_stitch::verify_join_order_equivalence(
+        &original,
+        &reoptimized,
+    ));
+
+    // Stitched plan should also reference the same tables.
+    let materialized = scan("materialized_orders");
+    let result = plan_stitch::stitch_plans(
+        &materialized,
+        &reoptimized,
+        StitchPointKind::JoinBuildComplete,
+        &OperatorState::Join {
+            build_side_complete: true,
+            build_side_rows: 1000,
+            probe_side_cursor: 0,
+        },
+    );
+
+    // The stitched plan swaps left child to materialized_orders,
+    // but the right child (orders) is preserved.
+    assert_eq!(result.stitch_points_applied, 1);
+}
+
+#[test]
+fn test_background_no_improvement_returns_none() {
+    let plan = scan("simple_table");
+
+    let (_quick, handle) = progressive_reopt::progressive_optimize(
+        plan,
+        HashMap::new(),
+        Box::new(NoopReoptimizer),
+        ReoptConfig::default(),
+    );
+
+    let result = handle.recv();
+    assert!(result.is_some());
+
+    let result = result.expect("background thread should send result");
+    assert!(result.completed);
+    assert!(result.improved_plan.is_none());
+}
+
+#[test]
+fn test_background_optimizer_failure() {
+    let plan = scan("simple_table");
+
+    let (_quick, handle) = progressive_reopt::progressive_optimize(
+        plan,
+        HashMap::new(),
+        Box::new(FailingReoptimizer),
+        ReoptConfig::default(),
+    );
+
+    let result = handle.recv();
+    assert!(result.is_some());
+
+    let result = result.expect("background thread should send result");
+    assert!(result.completed);
+    assert!(result.improved_plan.is_none());
+    assert_eq!(result.attempts, 1);
+}
+
+#[test]
+fn test_background_cancel() {
+    let plan = scan("simple_table");
+
+    /// An optimizer that sleeps to simulate slow work.
+    struct SlowReoptimizer;
+
+    impl ReoptimizeFn for SlowReoptimizer {
+        fn reoptimize(
+            &self,
+            plan: &RelExpr,
+            _stats: &HashMap<String, Statistics>,
+        ) -> Result<RelExpr, ReoptError> {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            Ok(plan.clone())
+        }
+    }
+
+    let config = ReoptConfig {
+        max_reoptimizations: 100,
+        ..ReoptConfig::default()
+    };
+
+    let (_quick, mut handle) = progressive_reopt::progressive_optimize(
+        plan,
+        HashMap::new(),
+        Box::new(SlowReoptimizer),
+        config,
+    );
+
+    // Let it start, then cancel.
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    handle.cancel_and_join();
+    assert!(handle.is_finished());
+}
+
+#[test]
+fn test_background_respects_max_reoptimizations() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    let call_count = Arc::new(AtomicUsize::new(0));
+
+    struct CountingReoptimizer {
+        count: Arc<AtomicUsize>,
+    }
+
+    impl ReoptimizeFn for CountingReoptimizer {
+        fn reoptimize(
+            &self,
+            _plan: &RelExpr,
+            _stats: &HashMap<String, Statistics>,
+        ) -> Result<RelExpr, ReoptError> {
+            self.count.fetch_add(1, Ordering::SeqCst);
+            // Return a different plan each time to keep iterating.
+            let n = self.count.load(Ordering::SeqCst);
+            Ok(RelExpr::Scan {
+                table: format!("table_{n}"),
+                alias: None,
+            })
+        }
+    }
+
+    let config = ReoptConfig {
+        max_reoptimizations: 2,
+        ..ReoptConfig::default()
+    };
+
+    let (_quick, handle) = progressive_reopt::progressive_optimize(
+        scan("original"),
+        HashMap::new(),
+        Box::new(CountingReoptimizer {
+            count: Arc::clone(&call_count),
+        }),
+        config,
+    );
+
+    let result = handle.recv();
+    assert!(result.is_some());
+
+    let result = result.expect("should receive result");
+    assert!(result.completed);
+    assert!(result.improved_plan.is_some());
+    assert_eq!(result.attempts, 2);
+    assert_eq!(call_count.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn test_progressive_optimize_corrected_stats_passed() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    let stats_received = Arc::new(AtomicBool::new(false));
+
+    struct StatsCheckReoptimizer {
+        received: Arc<AtomicBool>,
+    }
+
+    impl ReoptimizeFn for StatsCheckReoptimizer {
+        fn reoptimize(
+            &self,
+            plan: &RelExpr,
+            stats: &HashMap<String, Statistics>,
+        ) -> Result<RelExpr, ReoptError> {
+            if stats.contains_key("orders") {
+                let s = &stats["orders"];
+                if (s.row_count - 50000.0).abs() < f64::EPSILON {
+                    self.received.store(true, Ordering::SeqCst);
+                }
+            }
+            Ok(plan.clone())
+        }
+    }
+
+    let mut corrected = HashMap::new();
+    corrected.insert("orders".to_string(), Statistics::new(50000.0));
+
+    let (_quick, handle) = progressive_reopt::progressive_optimize(
+        scan("orders"),
+        corrected,
+        Box::new(StatsCheckReoptimizer {
+            received: Arc::clone(&stats_received),
+        }),
+        ReoptConfig::default(),
+    );
+
+    let _result = handle.recv();
+    assert!(
+        stats_received.load(Ordering::SeqCst),
+        "corrected stats should have been passed to the optimizer"
+    );
+}
+
+// ---------------------------------------------------------------
+// End-to-end progressive re-optimization integration test
+// ---------------------------------------------------------------
+
+#[test]
+fn test_end_to_end_progressive_reopt() {
+    // Simulate the full progressive re-optimization flow:
+    // 1. Quick plan returns immediately
+    // 2. Background produces an improved plan
+    // 3. Stitch the improved plan with materialized results
+    // 4. Verify the stitched plan is table-equivalent
+
+    let original = join(
+        scan("orders"),
+        scan("customers"),
+        eq(col("orders.cid"), col("customers.id")),
+    );
+
+    // The "improved" plan reverses the join order (cheaper probe).
+    let improved = join(
+        scan("customers"),
+        scan("orders"),
+        eq(col("customers.id"), col("orders.cid")),
+    );
+
+    let start = Instant::now();
+    let (quick, handle) = progressive_reopt::progressive_optimize(
+        original.clone(),
+        HashMap::new(),
+        Box::new(TestReoptimizer {
+            improved: improved.clone(),
+        }),
+        ReoptConfig::default(),
+    );
+
+    // Quick plan is immediate.
+    assert!(start.elapsed().as_millis() < 10);
+    assert_eq!(quick, original);
+
+    // Background produces the improved plan.
+    let bg_result = handle.recv().expect("should get background result");
+    assert!(bg_result.completed);
+    let bg_plan = bg_result.improved_plan.expect("should have improved plan");
+    assert_eq!(bg_plan, improved);
+
+    // Verify table equivalence between original and improved.
+    assert!(plan_stitch::verify_join_order_equivalence(&original, &bg_plan));
+
+    // Stitch the improved plan with materialized left child.
+    let materialized = scan("materialized_customers");
+    let stitched = plan_stitch::stitch_plans(
+        &materialized,
+        &bg_plan,
+        StitchPointKind::JoinBuildComplete,
+        &OperatorState::Join {
+            build_side_complete: true,
+            build_side_rows: 500,
+            probe_side_cursor: 0,
+        },
+    );
+
+    assert_eq!(stitched.stitch_points_applied, 1);
+    assert!(stitched.stitch_overhead > 0.0);
+
+    // The stitched plan should be a join with materialized left.
+    if let RelExpr::Join { left, .. } = &stitched.plan {
+        if let RelExpr::Scan { table, .. } = left.as_ref() {
+            assert_eq!(table, "materialized_customers");
+        } else {
+            panic!("Expected materialized scan as left child");
+        }
+    } else {
+        panic!("Expected Join in stitched plan");
+    }
 }

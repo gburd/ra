@@ -8,6 +8,7 @@
 #![allow(clippy::cast_precision_loss)]
 
 use std::fmt::Write;
+use std::io::IsTerminal;
 
 use colored::{ColoredString, Colorize};
 use ra_core::algebra::RelExpr;
@@ -121,7 +122,7 @@ pub fn detect_color_support() -> bool {
         }
     }
     // Check if stderr is a TTY (we write to stderr)
-    atty::is(atty::Stream::Stderr)
+    std::io::stderr().is_terminal()
 }
 
 /// Apply the color mode, configuring the `colored` crate.

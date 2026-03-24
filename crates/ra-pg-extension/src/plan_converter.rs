@@ -341,6 +341,14 @@ fn collect_advice(
         }
         RelExpr::Values { .. }
         | RelExpr::MultiUnnest { .. } => {}
+        RelExpr::MvScan { view_name, alias, .. } => {
+            let name = alias.as_deref().unwrap_or(view_name).to_string();
+            join_order.push(name.clone());
+            scan_methods.push(ScanAdvice {
+                relation: name,
+                method: ScanMethod::Sequential,
+            });
+        }
     }
 }
 
@@ -440,6 +448,7 @@ pub fn count_relations(expr: &RelExpr) -> usize {
         }
         RelExpr::Values { .. }
         | RelExpr::MultiUnnest { .. } => 0,
+        RelExpr::MvScan { .. } => 1,
     }
 }
 
@@ -542,6 +551,9 @@ fn collect_table_names(
         }
         RelExpr::Values { .. }
         | RelExpr::MultiUnnest { .. } => {}
+        RelExpr::MvScan { view_name, .. } => {
+            out.push(view_name.clone());
+        }
     }
 }
 
@@ -591,14 +603,55 @@ pub unsafe fn convert_to_planned_stmt(
 ///
 /// Returns a multiplier indicating how much better RA's plan is expected
 /// to be (e.g., 0.5 = 2x faster, 0.2 = 5x faster).
+///
+/// Uses statistics coverage to scale the improvement estimate:
+/// - High coverage (>80%): trust the RA plan more, allow larger improvements
+/// - Low coverage (<50%): conservative, assume minimal improvement
 fn estimate_improvement_factor(
-    _expr: &ra_core::algebra::RelExpr,
-    _stats: &[(String, ra_core::Statistics)],
+    expr: &ra_core::algebra::RelExpr,
+    stats: &[(String, ra_core::Statistics)],
     _calibration: &crate::cost_mapper::CostCalibration,
 ) -> f64 {
-    // TODO: Implement actual cost estimation
-    // For now, assume RA plans are modestly better
-    0.8 // Assume 20% improvement
+    let table_names = extract_table_names(expr);
+    if table_names.is_empty() {
+        return 1.0;
+    }
+
+    // Calculate statistics coverage
+    let covered = table_names
+        .iter()
+        .filter(|t| stats.iter().any(|(name, _)| name == *t))
+        .count();
+    let coverage = covered as f64 / table_names.len() as f64;
+
+    // Calculate column-level stats quality
+    let col_quality: f64 = stats
+        .iter()
+        .map(|(_, s)| {
+            if s.columns.is_empty() {
+                0.0
+            } else {
+                let has_hist = s
+                    .columns
+                    .values()
+                    .filter(|c| c.histogram.is_some())
+                    .count();
+                has_hist as f64 / s.columns.len() as f64
+            }
+        })
+        .sum::<f64>()
+        / stats.len().max(1) as f64;
+
+    // Base improvement: conservative 20%
+    let base_improvement = 0.8;
+
+    // Scale improvement by stats quality:
+    // Good stats -> more aggressive (down to 0.5 = 2x improvement)
+    // Poor stats -> conservative (stay near 1.0)
+    let stats_factor = coverage * 0.5 + col_quality * 0.5;
+    let improvement = base_improvement - (0.3 * stats_factor);
+
+    improvement.clamp(0.5, 1.0)
 }
 
 /// Apply plan advice by manipulating PostgreSQL's cost model.

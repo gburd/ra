@@ -43,7 +43,7 @@ exclude = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.75.0"
+rust-version = "1.85.0"
 authors = ["RA Contributors"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/gregburd/ra"
@@ -80,7 +80,6 @@ wasmtime = "25.0"
 clap = { version = "4.5", features = ["derive", "cargo"] }
 clap_complete = "4.6"
 colored = "2.1"
-atty = "0.2"
 libc = "0.2"
 
 # Web

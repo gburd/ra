@@ -1,7 +1,7 @@
 //! Test profile definitions and scaling methods.
 
 use chrono::{DateTime, Utc};
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
@@ -63,7 +63,7 @@ pub struct ScaleFactors {
 }
 
 /// Cached current profile loaded once per test run.
-static CURRENT_PROFILE: Lazy<TestProfile> = Lazy::new(|| {
+static CURRENT_PROFILE: LazyLock<TestProfile> = LazyLock::new(|| {
     // Try to load from .ra-test-profile.toml, fall back to baseline
     if Path::new(".ra-test-profile.toml").exists() {
         match fs::read_to_string(".ra-test-profile.toml") {

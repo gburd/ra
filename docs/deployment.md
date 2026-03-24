@@ -584,7 +584,7 @@ For self-hosting on your own server.
 
 #### Prerequisites
 
-- Rust 1.75+ with cargo
+- Rust 1.85+ with cargo
 - Node.js 22+ with pnpm
 - nginx or caddy (for reverse proxy)
 

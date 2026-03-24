@@ -6,7 +6,7 @@
 //! the [`Optimizer`] that drives equality saturation.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use egg::{define_language, EGraph, Id, RecExpr, Runner};
 use ra_core::algebra::{
@@ -20,6 +20,8 @@ use tracing::warn;
 
 use crate::analysis::RelAnalysis;
 use crate::extract::extract_best;
+use crate::genetic_fingerprint::QueryFingerprint;
+use crate::plan_cache::{PlanCache, PlanCacheConfig, PlanCacheStats};
 use crate::resource_budget::{
     OverflowStrategy, ResourceBudget, ResourceTracker, ResourceUsageReport,
 };
@@ -199,6 +201,11 @@ pub struct OptimizerConfig {
     /// snapshot bloat, SubXID overflow, and MultiXact pressure.
     /// When `None`, all isolation penalties are zero.
     pub transaction_context: Option<ra_core::isolation::TransactionContext>,
+    /// Enable the fingerprint-based plan cache.
+    /// Default: false (must be opted in).
+    pub enable_plan_cache: bool,
+    /// Configuration for the plan cache (used when `enable_plan_cache` is true).
+    pub plan_cache_config: PlanCacheConfig,
 }
 
 /// Configuration for parallel query execution.
@@ -244,6 +251,8 @@ impl Default for OptimizerConfig {
             use_join_graph_filtering: true,  // Enable join graph filtering by default
             beam_search_config: None,  // Disabled by default (can be enabled for complex queries)
             transaction_context: None,  // No isolation awareness by default
+            enable_plan_cache: false,
+            plan_cache_config: PlanCacheConfig::default(),
         }
     }
 }
@@ -252,12 +261,18 @@ impl Default for OptimizerConfig {
 ///
 /// Converts a [`RelExpr`] into an e-graph, runs equality saturation
 /// with rewrite rules, then extracts the lowest-cost plan.
+///
+/// When plan caching is enabled, the optimizer computes a genetic
+/// fingerprint of each query and checks the cache before running
+/// equality saturation. Structurally identical queries (differing
+/// only in literal values) reuse cached plans.
 #[derive(Debug)]
 pub struct Optimizer {
     config: OptimizerConfig,
     table_stats: HashMap<String, ra_core::statistics::Statistics>,
     hardware_profile: Option<ra_hardware::HardwareProfile>,
     resource_budget: Option<ResourceBudget>,
+    plan_cache: Option<Mutex<PlanCache>>,
 }
 
 impl Optimizer {
@@ -269,17 +284,55 @@ impl Optimizer {
             table_stats: HashMap::new(),
             hardware_profile: None,
             resource_budget: None,
+            plan_cache: None,
         }
     }
 
     /// Create an optimizer with custom configuration.
     #[must_use]
     pub fn with_config(config: OptimizerConfig) -> Self {
+        let plan_cache = if config.enable_plan_cache {
+            Some(Mutex::new(PlanCache::new(
+                config.plan_cache_config.clone(),
+            )))
+        } else {
+            None
+        };
         Self {
             config,
             table_stats: HashMap::new(),
             hardware_profile: None,
             resource_budget: None,
+            plan_cache,
+        }
+    }
+
+    /// Enable the plan cache with the given configuration.
+    #[must_use]
+    pub fn with_plan_cache(mut self, config: PlanCacheConfig) -> Self {
+        self.config.enable_plan_cache = true;
+        self.config.plan_cache_config = config.clone();
+        self.plan_cache = Some(Mutex::new(PlanCache::new(config)));
+        self
+    }
+
+    /// Return a snapshot of plan cache statistics.
+    ///
+    /// Returns `None` if caching is not enabled.
+    #[must_use]
+    pub fn cache_stats(&self) -> Option<PlanCacheStats> {
+        self.plan_cache.as_ref().map(|m| {
+            let cache = m.lock().unwrap_or_else(|e| e.into_inner());
+            cache.stats().clone()
+        })
+    }
+
+    /// Clear the plan cache.
+    pub fn clear_cache(&self) {
+        if let Some(m) = self.plan_cache.as_ref() {
+            let mut cache =
+                m.lock().unwrap_or_else(|e| e.into_inner());
+            cache.clear();
         }
     }
 
@@ -332,6 +385,30 @@ impl Optimizer {
 
         let total_start = Instant::now();
 
+        // Plan cache fast path: check if we have a cached plan for
+        // a structurally equivalent query.
+        let fingerprint = if self.plan_cache.is_some() {
+            let fp = QueryFingerprint::from_rel_expr(expr);
+            if let Some(ref mutex) = self.plan_cache {
+                let mut cache =
+                    mutex.lock().unwrap_or_else(|e| e.into_inner());
+                if let Some(hit) = cache.lookup(&fp) {
+                    info!(
+                        "Plan cache hit ({:?}, similarity={:.2}) \
+                         in {:?}",
+                        hit.match_type,
+                        hit.similarity,
+                        total_start.elapsed()
+                    );
+                    return Ok(hit.plan);
+                }
+                debug!("Plan cache miss");
+            }
+            Some(fp)
+        } else {
+            None
+        };
+
         // Fast path: Use left-deep tree for queries with 2-7 tables
         if crate::left_deep::can_use_left_deep(expr) {
             debug!("Using left-deep tree optimization");
@@ -348,6 +425,10 @@ impl Optimizer {
                     info!(
                         "Left-deep optimization completed in {:?}",
                         total_start.elapsed()
+                    );
+                    self.insert_into_cache(
+                        &fingerprint,
+                        &optimized,
                     );
                     return Ok(optimized);
                 }
@@ -382,8 +463,13 @@ impl Optimizer {
 
                     let joins = crate::large_join::LargeJoinOptimizer::extract_joins(expr);
                     if !joins.is_empty() {
-                        return large_optimizer.optimize(joins)
-                            .map_err(|e| EGraphError::ExtractionError(e.to_string()));
+                        let result = large_optimizer.optimize(joins)
+                            .map_err(|e| EGraphError::ExtractionError(e.to_string()))?;
+                        self.insert_into_cache(
+                            &fingerprint,
+                            &result,
+                        );
+                        return Ok(result);
                     }
                 }
             }
@@ -647,7 +733,23 @@ impl Optimizer {
             total_elapsed, to_rec_elapsed, runner_elapsed, extract_elapsed
         );
 
+        self.insert_into_cache(&fingerprint, &result);
         Ok(result)
+    }
+
+    /// Insert a plan into the cache if caching is enabled.
+    fn insert_into_cache(
+        &self,
+        fingerprint: &Option<QueryFingerprint>,
+        plan: &RelExpr,
+    ) {
+        if let Some(fp) = fingerprint {
+            if let Some(ref mutex) = self.plan_cache {
+                let mut cache =
+                    mutex.lock().unwrap_or_else(|e| e.into_inner());
+                cache.insert(fp.clone(), plan.clone());
+            }
+        }
     }
 
     /// Optimize using pre-condition-filtered rules based on available system facts.
@@ -3492,6 +3594,196 @@ mod tests {
         // Should produce an optimized plan
         // (actual plan may vary, but should not error)
         assert!(matches!(result, RelExpr::Join { .. }) || matches!(result, RelExpr::Scan { .. }));
+    }
+
+    // ── Plan cache integration tests ────────────────────────────
+
+    fn cached_optimizer() -> Optimizer {
+        Optimizer::new().with_plan_cache(PlanCacheConfig {
+            max_entries: 64,
+            similarity_threshold: 0.9,
+            enable_fuzzy_matching: true,
+        })
+    }
+
+    #[test]
+    fn plan_cache_miss_then_hit() {
+        let opt = cached_optimizer();
+        let q1 = RelExpr::scan("users").filter(Expr::BinOp {
+            op: BinOp::Eq,
+            left: Box::new(Expr::Column(ColumnRef::new("id"))),
+            right: Box::new(Expr::Const(Const::Int(42))),
+        });
+        // First call: cache miss, runs optimization
+        let _ = opt.optimize(&q1).expect("should succeed");
+        let stats = opt.cache_stats().expect("cache enabled");
+        assert_eq!(stats.misses, 1);
+        assert_eq!(stats.exact_hits, 0);
+
+        // Same query again: cache hit
+        let _ = opt.optimize(&q1).expect("should succeed");
+        let stats = opt.cache_stats().expect("cache enabled");
+        assert_eq!(stats.exact_hits, 1);
+    }
+
+    #[test]
+    fn plan_cache_parameter_variation_hits() {
+        let opt = cached_optimizer();
+        let q1 = RelExpr::scan("users").filter(Expr::BinOp {
+            op: BinOp::Gt,
+            left: Box::new(Expr::Column(ColumnRef::new("age"))),
+            right: Box::new(Expr::Const(Const::Int(18))),
+        });
+        let _ = opt.optimize(&q1).expect("should succeed");
+
+        // Different constant value, same structure
+        let q2 = RelExpr::scan("users").filter(Expr::BinOp {
+            op: BinOp::Gt,
+            left: Box::new(Expr::Column(ColumnRef::new("age"))),
+            right: Box::new(Expr::Const(Const::Int(65))),
+        });
+        let _ = opt.optimize(&q2).expect("should succeed");
+
+        let stats = opt.cache_stats().expect("cache enabled");
+        assert_eq!(stats.exact_hits, 1, "parameter variation should be exact hit");
+        assert_eq!(stats.misses, 1, "only the first query should miss");
+    }
+
+    #[test]
+    fn plan_cache_disabled_by_default() {
+        let opt = Optimizer::new();
+        assert!(opt.cache_stats().is_none());
+    }
+
+    #[test]
+    fn plan_cache_clear() {
+        let opt = cached_optimizer();
+        let q = RelExpr::scan("users");
+        let _ = opt.optimize(&q).expect("should succeed");
+        assert_eq!(
+            opt.cache_stats().expect("cache enabled").current_entries,
+            1
+        );
+
+        opt.clear_cache();
+        assert_eq!(
+            opt.cache_stats().expect("cache enabled").current_entries,
+            0
+        );
+    }
+
+    #[test]
+    fn plan_cache_oltp_hit_rate_above_90_pct() {
+        let opt = cached_optimizer();
+
+        // 5 templates, 20 parameter variations each = 100 queries
+        let total = 100_u32;
+
+        for i in 0..20_i64 {
+            let _ = opt.optimize(&RelExpr::scan("users").filter(
+                Expr::BinOp {
+                    op: BinOp::Eq,
+                    left: Box::new(Expr::Column(
+                        ColumnRef::new("id"),
+                    )),
+                    right: Box::new(Expr::Const(Const::Int(i))),
+                },
+            ));
+        }
+        for i in 0..20_i64 {
+            let _ = opt.optimize(&RelExpr::scan("orders").filter(
+                Expr::BinOp {
+                    op: BinOp::Gt,
+                    left: Box::new(Expr::Column(
+                        ColumnRef::new("amount"),
+                    )),
+                    right: Box::new(Expr::Const(Const::Int(
+                        i * 100,
+                    ))),
+                },
+            ));
+        }
+        for i in 0..20_i64 {
+            let _ = opt.optimize(&RelExpr::Join {
+                join_type: JoinType::Inner,
+                condition: Expr::BinOp {
+                    op: BinOp::Eq,
+                    left: Box::new(Expr::Column(
+                        ColumnRef::qualified("u", "id"),
+                    )),
+                    right: Box::new(Expr::Column(
+                        ColumnRef::qualified("o", "uid"),
+                    )),
+                },
+                left: Box::new(
+                    RelExpr::scan("users").filter(Expr::BinOp {
+                        op: BinOp::Gt,
+                        left: Box::new(Expr::Column(
+                            ColumnRef::new("age"),
+                        )),
+                        right: Box::new(Expr::Const(
+                            Const::Int(18 + i),
+                        )),
+                    }),
+                ),
+                right: Box::new(RelExpr::scan("orders")),
+            });
+        }
+        for i in 0..20_i64 {
+            let _ = opt.optimize(&RelExpr::Aggregate {
+                group_by: vec![Expr::Column(
+                    ColumnRef::new("dept"),
+                )],
+                aggregates: vec![AggregateExpr {
+                    function: AggregateFunction::Count,
+                    arg: None,
+                    distinct: false,
+                    alias: None,
+                }],
+                input: Box::new(
+                    RelExpr::scan("employees").filter(
+                        Expr::BinOp {
+                            op: BinOp::Gt,
+                            left: Box::new(Expr::Column(
+                                ColumnRef::new("salary"),
+                            )),
+                            right: Box::new(Expr::Const(
+                                Const::Int(50000 + i * 1000),
+                            )),
+                        },
+                    ),
+                ),
+            });
+        }
+        for i in 0..20_i64 {
+            let _ = opt.optimize(&RelExpr::scan("products").filter(
+                Expr::BinOp {
+                    op: BinOp::Gt,
+                    left: Box::new(Expr::Column(
+                        ColumnRef::new("price"),
+                    )),
+                    right: Box::new(Expr::Const(Const::Int(
+                        i * 10,
+                    ))),
+                },
+            ));
+        }
+
+        let stats = opt.cache_stats().expect("cache enabled");
+        #[allow(clippy::cast_possible_truncation)]
+        let hit_count =
+            (stats.exact_hits + stats.fuzzy_hits) as u32;
+
+        // 5 cold misses + 95 hits = 95% hit rate
+        let hit_rate = f64::from(hit_count) / f64::from(total);
+        assert!(
+            hit_rate >= 0.9,
+            "expected >90% hit rate, got {:.1}% ({} hits / {} total, stats: {:?})",
+            hit_rate * 100.0,
+            hit_count,
+            total,
+            stats
+        );
     }
 }
 

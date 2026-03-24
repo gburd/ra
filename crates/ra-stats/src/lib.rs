@@ -88,17 +88,23 @@
 #![cfg_attr(test, allow(clippy::float_cmp))]
 
 pub mod accuracy;
+pub mod adapters;
 pub mod delta;
 pub mod feedback;
 pub mod gathering_cost;
 pub mod index_types;
 pub mod integration;
+pub mod percentiles;
 pub mod profiles;
+pub mod ring_buffer;
 pub mod skew;
+pub mod smoother;
+pub mod streaming;
 pub mod timeline;
 pub mod types;
 
 pub use accuracy::{QualityMetrics, RefreshThreshold, Staleness, StatisticsSource, StatisticsState};
+pub use adapters::MonitoringAdapter;
 pub use delta::{DeltaSet, StatisticsDelta};
 pub use feedback::{
     CardinalityError, CardinalityErrorTracker, ErrorRecommendation, ErrorSeverity, OperatorKind,
@@ -106,7 +112,13 @@ pub use feedback::{
 };
 pub use gathering_cost::{CostEstimator, GatheringCost, GatheringMethod, GatheringPriority};
 pub use index_types::{IndexCostFactors, IndexMetadata, IndexType};
+pub use percentiles::{PercentileSummary, PercentileTracker, TDigest};
 pub use profiles::{ProfileSelector, StatisticsProfile};
+pub use ring_buffer::RingBuffer;
+pub use smoother::{Ewma, SmootherSet};
+pub use streaming::{
+    ChangeThresholds, CostModelUpdate, MetricKind, StreamingPipeline,
+};
 pub use timeline::{
     PlaybackState, Timeline, TimelineError, TimelineEvent, TimelinePlayer,
 };

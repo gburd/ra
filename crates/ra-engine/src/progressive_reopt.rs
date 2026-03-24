@@ -3,11 +3,20 @@
 //! Monitors execution cardinalities at stitch points and triggers
 //! re-optimization when actual values diverge significantly from
 //! estimates. Based on the Plan Stitch technique (RFC 0052).
+//!
+//! The [`BackgroundReoptimizer`] spawns a worker thread that
+//! re-optimizes queries in the background while the initial "quick"
+//! plan is executing. When a better plan is found, it is sent back
+//! through an MPSC channel so the executor can atomically switch.
 
 use std::collections::HashMap;
+use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 use ra_core::algebra::RelExpr;
 use ra_core::statistics::Statistics;
+use tracing::{debug, warn};
 
 /// Default divergence threshold: re-optimize when actual/estimated
 /// exceeds this ratio (or its reciprocal).
@@ -361,4 +370,222 @@ pub fn evaluate_reopt_decision(
         alternative_total_cost: total_alt,
         savings_fraction: savings.max(0.0),
     }
+}
+
+// -----------------------------------------------------------------
+// Background re-optimization
+// -----------------------------------------------------------------
+
+/// A function that re-optimizes a plan given corrected statistics.
+/// The optimizer is abstracted behind this trait so the background
+/// thread does not depend on a concrete `Optimizer` type.
+pub trait ReoptimizeFn: Send + 'static {
+    /// Re-optimize `plan` using the corrected `stats` and return
+    /// the improved plan.
+    fn reoptimize(
+        &self,
+        plan: &RelExpr,
+        stats: &HashMap<String, Statistics>,
+    ) -> Result<RelExpr, ReoptError>;
+}
+
+/// Errors from background re-optimization.
+#[derive(Debug, Clone)]
+pub enum ReoptError {
+    /// The optimizer failed internally.
+    OptimizerFailed(String),
+    /// The background thread was cancelled.
+    Cancelled,
+}
+
+impl std::fmt::Display for ReoptError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::OptimizerFailed(msg) => write!(f, "optimizer failed: {msg}"),
+            Self::Cancelled => write!(f, "reoptimization cancelled"),
+        }
+    }
+}
+
+impl std::error::Error for ReoptError {}
+
+/// Result sent from the background thread when re-optimization
+/// completes.
+#[derive(Debug, Clone)]
+pub struct ReoptResult {
+    /// The improved plan (or `None` if no improvement was found).
+    pub improved_plan: Option<RelExpr>,
+    /// Number of reoptimization attempts made.
+    pub attempts: usize,
+    /// Whether the background thread completed normally.
+    pub completed: bool,
+}
+
+/// Handle to a running background re-optimization thread.
+pub struct BackgroundReoptimizer {
+    /// Receive improved plans from the background thread.
+    receiver: mpsc::Receiver<ReoptResult>,
+    /// Signal the background thread to stop.
+    cancel: Arc<Mutex<bool>>,
+    /// Join handle for the worker thread.
+    handle: Option<thread::JoinHandle<()>>,
+}
+
+impl BackgroundReoptimizer {
+    /// Spawn a background re-optimization thread.
+    ///
+    /// `quick_plan` is the initial plan returned to the executor.
+    /// `corrected_stats` are runtime-observed statistics.
+    /// `optimizer_fn` performs the actual re-optimization.
+    /// `config` controls divergence thresholds and max attempts.
+    pub fn spawn(
+        quick_plan: RelExpr,
+        corrected_stats: HashMap<String, Statistics>,
+        optimizer_fn: Box<dyn ReoptimizeFn>,
+        config: ReoptConfig,
+    ) -> Self {
+        let (tx, rx) = mpsc::channel();
+        let cancel = Arc::new(Mutex::new(false));
+        let cancel_flag = Arc::clone(&cancel);
+
+        let handle = thread::spawn(move || {
+            background_worker(
+                quick_plan,
+                corrected_stats,
+                optimizer_fn,
+                config,
+                tx,
+                cancel_flag,
+            );
+        });
+
+        Self {
+            receiver: rx,
+            cancel,
+            handle: Some(handle),
+        }
+    }
+
+    /// Try to receive a completed re-optimization result without
+    /// blocking. Returns `None` if the background thread hasn't
+    /// finished yet.
+    #[must_use]
+    pub fn try_recv(&self) -> Option<ReoptResult> {
+        self.receiver.try_recv().ok()
+    }
+
+    /// Block until the background thread produces a result.
+    /// Returns `None` if the channel was disconnected.
+    #[must_use]
+    pub fn recv(&self) -> Option<ReoptResult> {
+        self.receiver.recv().ok()
+    }
+
+    /// Signal the background thread to stop and wait for it to
+    /// finish.
+    pub fn cancel_and_join(&mut self) {
+        if let Ok(mut flag) = self.cancel.lock() {
+            *flag = true;
+        }
+        if let Some(handle) = self.handle.take() {
+            // Intentionally ignore join errors from panicked threads.
+            let _result = handle.join();
+        }
+    }
+
+    /// Check whether the background thread is still running.
+    #[must_use]
+    pub fn is_finished(&self) -> bool {
+        self.handle
+            .as_ref()
+            .map_or(true, thread::JoinHandle::is_finished)
+    }
+}
+
+impl Drop for BackgroundReoptimizer {
+    fn drop(&mut self) {
+        self.cancel_and_join();
+    }
+}
+
+/// The background worker loop. Runs up to `max_reoptimizations`
+/// rounds, sending any improved plan back through `tx`.
+fn background_worker(
+    plan: RelExpr,
+    stats: HashMap<String, Statistics>,
+    optimizer_fn: Box<dyn ReoptimizeFn>,
+    config: ReoptConfig,
+    tx: mpsc::Sender<ReoptResult>,
+    cancel: Arc<Mutex<bool>>,
+) {
+    let mut best_plan = plan;
+    let mut attempts = 0_usize;
+    let mut improved = false;
+
+    for _ in 0..config.max_reoptimizations {
+        if cancel.lock().map_or(false, |f| *f) {
+            debug!("background reoptimization cancelled");
+            let _send = tx.send(ReoptResult {
+                improved_plan: None,
+                attempts,
+                completed: false,
+            });
+            return;
+        }
+
+        attempts += 1;
+        match optimizer_fn.reoptimize(&best_plan, &stats) {
+            Ok(new_plan) => {
+                if new_plan != best_plan {
+                    debug!(
+                        "background reopt attempt {attempts}: \
+                         found improved plan"
+                    );
+                    best_plan = new_plan;
+                    improved = true;
+                } else {
+                    debug!(
+                        "background reopt attempt {attempts}: \
+                         no improvement, stopping"
+                    );
+                    break;
+                }
+            }
+            Err(e) => {
+                warn!(
+                    "background reopt attempt {attempts} failed: {e}"
+                );
+                break;
+            }
+        }
+    }
+
+    let result = ReoptResult {
+        improved_plan: if improved { Some(best_plan) } else { None },
+        attempts,
+        completed: true,
+    };
+    let _send = tx.send(result);
+}
+
+/// Convenience: produce a quick plan immediately and start
+/// background re-optimization. Returns `(quick_plan, handle)`.
+///
+/// The quick plan is the input plan unchanged (representing the
+/// initial fast path). The handle allows polling for an improved
+/// plan from the background thread.
+pub fn progressive_optimize(
+    plan: RelExpr,
+    corrected_stats: HashMap<String, Statistics>,
+    optimizer_fn: Box<dyn ReoptimizeFn>,
+    config: ReoptConfig,
+) -> (RelExpr, BackgroundReoptimizer) {
+    let quick_plan = plan.clone();
+    let handle = BackgroundReoptimizer::spawn(
+        plan,
+        corrected_stats,
+        optimizer_fn,
+        config,
+    );
+    (quick_plan, handle)
 }

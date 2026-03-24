@@ -279,24 +279,34 @@ unsafe fn try_optimize_query(
         Err(e) => return Err(format!("Failed to parse query: {}", e)),
     };
 
-    // Step 2: Run RA optimizer.
-    let optimized_expr = match optimize_relexpr(&rel_expr, stats) {
+    // Step 2: Build facts provider and run RA optimizer.
+    let facts = SimpleFactsProvider::new(stats);
+    let optimized_expr = match optimize_relexpr(&rel_expr, &facts) {
         Ok(expr) => expr,
         Err(e) => return Err(format!("Optimization failed: {}", e)),
     };
 
-    // Step 3: Estimate confidence based on cost improvement.
+    // Step 3: Estimate confidence based on cost improvement and stats quality.
     let original_cost = estimate_plan_cost(&rel_expr, stats, calibration);
     let optimized_cost = estimate_plan_cost(&optimized_expr, stats, calibration);
     let improvement_ratio = if original_cost > 0.0 {
-        1.0 - (optimized_cost / original_cost)
+        (1.0 - (optimized_cost / original_cost)).max(0.0)
     } else {
         0.0
     };
 
-    // Confidence is based on improvement ratio and statistics availability.
-    let stats_coverage = calculate_stats_coverage(&rel_expr, stats);
-    let confidence = (improvement_ratio * 0.7 + stats_coverage * 0.3).clamp(0.0, 1.0);
+    // Confidence is based on:
+    // - 40% statistics coverage quality (column-level detail)
+    // - 30% cost improvement ratio
+    // - 30% table-level coverage (all referenced tables have stats)
+    let detailed_coverage = facts.stats_coverage();
+    let table_coverage = calculate_stats_coverage(&rel_expr, stats);
+    let confidence = (
+        improvement_ratio * 0.3
+            + detailed_coverage * 0.4
+            + table_coverage * 0.3
+    )
+    .clamp(0.0, 1.0);
 
     // Step 4: Convert optimized RelExpr -> PostgreSQL PlannedStmt.
     let planned_stmt = match plan_converter::convert_to_planned_stmt(
@@ -328,17 +338,11 @@ unsafe fn parse_query_to_relexpr(
 /// Run RA optimizer on a RelExpr.
 fn optimize_relexpr(
     rel_expr: &ra_core::algebra::RelExpr,
-    stats: &[(String, ra_core::Statistics)],
+    facts: &dyn ra_core::FactsProvider,
 ) -> Result<ra_core::algebra::RelExpr, String> {
-    // Create optimizer with default configuration
     let optimizer = ra_engine::Optimizer::new();
-
-    // Create a simple facts provider from statistics
-    let facts = SimpleFactsProvider::new(stats);
-
-    // Run optimization with facts
     optimizer
-        .optimize_with_facts(rel_expr, &facts)
+        .optimize_with_facts(rel_expr, facts)
         .map_err(|e| format!("Optimizer error: {}", e))
 }
 
@@ -593,72 +597,303 @@ fn truncate_sql(sql: &str, max_len: usize) -> String {
     }
 }
 
-/// Simple FactsProvider implementation for PostgreSQL extension.
+/// FactsProvider backed by PostgreSQL catalog statistics.
 ///
-/// For MVP, we just use EmptyFactsProvider with defaults.
-/// Future enhancement: map pg_stats to TableStats and ColumnStats.
+/// Converts `ra_core::Statistics` (gathered from pg_class/pg_statistic)
+/// into the `CoreTableStats`/`ColumnStats` that the RA optimizer's
+/// pre-condition system expects. Integrates the detected hardware
+/// profile from `extension_state`.
 struct SimpleFactsProvider {
-    /// Base empty provider with defaults
-    base: ra_core::EmptyFactsProvider,
+    table_stats: std::collections::HashMap<String, ra_core::CoreTableStats>,
+    column_stats: std::collections::HashMap<String, std::collections::HashMap<String, ra_core::ColumnStats>>,
+    schemas: std::collections::HashMap<String, ra_core::TableInfo>,
+    hardware: ra_core::CoreHardwareProfile,
 }
 
 impl SimpleFactsProvider {
-    fn new(_stats: &[(String, ra_core::Statistics)]) -> Self {
-        // For now, just use default EmptyFactsProvider
-        // TODO: Convert pg_stats data to TableStats/ColumnStats
-        // TODO: Integrate hardware profile from extension_state
-        Self {
-            base: ra_core::EmptyFactsProvider::new(),
+    fn new(stats: &[(String, ra_core::Statistics)]) -> Self {
+        let mut table_stats = std::collections::HashMap::new();
+        let mut column_stats = std::collections::HashMap::new();
+        let mut schemas = std::collections::HashMap::new();
+
+        for (table_name, stat) in stats {
+            // Convert Statistics -> CoreTableStats
+            let avg_row_size = if stat.avg_row_size > 0 {
+                stat.avg_row_size as f64
+            } else {
+                estimate_avg_row_size(stat)
+            };
+            let table_size = if stat.total_size > 0 {
+                stat.total_size
+            } else {
+                (stat.row_count * avg_row_size) as u64
+            };
+            let page_count = (table_size / 8192).max(1);
+
+            table_stats.insert(
+                table_name.clone(),
+                ra_core::CoreTableStats {
+                    row_count: stat.row_count,
+                    page_count,
+                    average_row_size: avg_row_size,
+                    table_size_bytes: table_size,
+                    live_tuples: Some(stat.row_count),
+                    dead_tuples: None,
+                    last_analyzed: None,
+                    confidence: compute_stats_confidence(stat),
+                },
+            );
+
+            // Store column stats directly (same type)
+            let mut cols = std::collections::HashMap::new();
+            for (col_name, col_stat) in &stat.columns {
+                cols.insert(col_name.clone(), col_stat.clone());
+            }
+            column_stats.insert(table_name.clone(), cols);
+
+            // Build TableInfo for schema queries
+            let columns: Vec<(String, ra_core::DataType)> = stat
+                .columns
+                .keys()
+                .map(|col| (col.clone(), ra_core::DataType::Other("unknown".into())))
+                .collect();
+
+            let indexes: Vec<ra_core::IndexInfo> = stat
+                .indexes
+                .iter()
+                .map(|(idx_name, idx_stat)| ra_core::IndexInfo {
+                    name: idx_name.clone(),
+                    index_type: idx_stat.index_type,
+                    columns: idx_stat.columns.clone(),
+                    included_columns: Vec::new(),
+                    is_unique: idx_stat.is_unique,
+                })
+                .collect();
+
+            // Detect primary key from indexes
+            let primary_key: Vec<String> = stat
+                .indexes
+                .values()
+                .find(|idx| idx.is_primary)
+                .map(|idx| idx.columns.clone())
+                .unwrap_or_default();
+
+            schemas.insert(
+                table_name.clone(),
+                ra_core::TableInfo {
+                    name: table_name.clone(),
+                    columns,
+                    primary_key,
+                    foreign_keys: Vec::new(),
+                    indexes,
+                },
+            );
         }
+
+        // Convert ra_hardware::HardwareProfile -> CoreHardwareProfile
+        let hw = crate::extension_state::hardware_profile();
+        let hardware = ra_core::CoreHardwareProfile {
+            cpu_cores: hw.cpu_cores,
+            available_memory: (hw.l3_cache_bytes * 64).max(8 * 1024 * 1024 * 1024),
+            total_memory: (hw.l3_cache_bytes * 64).max(16 * 1024 * 1024 * 1024),
+            simd_width: hw.simd_width_bits,
+            has_gpu: hw.gpu_available,
+            gpu_memory: if hw.gpu_available {
+                Some(hw.available_gpu_memory_bytes())
+            } else {
+                None
+            },
+            l1_cache_size: 32 * 1024,
+            l2_cache_size: hw.l2_cache_bytes,
+            l3_cache_size: hw.l3_cache_bytes,
+        };
+
+        Self {
+            table_stats,
+            column_stats,
+            schemas,
+            hardware,
+        }
+    }
+
+    /// Calculate overall statistics coverage for confidence scoring.
+    ///
+    /// Returns a value in [0.0, 1.0] representing what fraction of
+    /// tables have usable statistics with column-level detail.
+    fn stats_coverage(&self) -> f64 {
+        if self.table_stats.is_empty() {
+            return 0.0;
+        }
+
+        let mut score = 0.0;
+        let count = self.table_stats.len() as f64;
+
+        for (table, ts) in &self.table_stats {
+            // Base: table exists with row count
+            let mut table_score = 0.5;
+
+            // Bonus for column-level stats
+            if let Some(cols) = self.column_stats.get(table) {
+                if !cols.is_empty() {
+                    // Scale by ratio of columns with stats
+                    let col_coverage = if let Some(schema) = self.schemas.get(table) {
+                        if schema.columns.is_empty() {
+                            1.0
+                        } else {
+                            cols.len() as f64 / schema.columns.len() as f64
+                        }
+                    } else {
+                        0.5
+                    };
+                    table_score += 0.3 * col_coverage;
+                }
+            }
+
+            // Bonus for index information
+            if let Some(schema) = self.schemas.get(table) {
+                if !schema.indexes.is_empty() {
+                    table_score += 0.2;
+                }
+            }
+
+            // Use the stats confidence directly
+            table_score *= ts.confidence;
+
+            score += table_score;
+        }
+
+        score / count
     }
 }
 
-// Delegate all FactsProvider methods to the base EmptyFactsProvider
-impl ra_core::FactsProvider for SimpleFactsProvider {
-    fn get_table_stats(&self, table: &str) -> Option<&ra_core::CoreTableStats> {
-        self.base.get_table_stats(table)
+/// Estimate average row size from column statistics.
+fn estimate_avg_row_size(stat: &ra_core::Statistics) -> f64 {
+    if stat.columns.is_empty() {
+        return crate::pg_constants::estimation::BYTES_PER_ROW;
     }
 
-    fn get_column_stats(&self, table: &str, column: &str) -> Option<&ra_core::ColumnStats> {
-        self.base.get_column_stats(table, column)
+    let total: f64 = stat
+        .columns
+        .values()
+        .map(|cs| cs.avg_length.unwrap_or(8.0))
+        .sum();
+
+    // Add 23 bytes for tuple header overhead
+    (total + 23.0).max(24.0)
+}
+
+/// Compute confidence in statistics based on data quality.
+///
+/// Higher confidence when:
+/// - Row count is positive (table has been analyzed)
+/// - Column statistics are present
+/// - Histograms and MCVs are available
+fn compute_stats_confidence(stat: &ra_core::Statistics) -> f64 {
+    if stat.row_count <= 0.0 {
+        return 0.0;
+    }
+
+    let mut confidence = 0.6; // Base confidence for having row count
+
+    if stat.columns.is_empty() {
+        return confidence;
+    }
+
+    let mut hist_count = 0;
+    let mut mcv_count = 0;
+    let total_cols = stat.columns.len() as f64;
+
+    for cs in stat.columns.values() {
+        if cs.histogram.is_some() {
+            hist_count += 1;
+        }
+        if cs.most_common_values.is_some() {
+            mcv_count += 1;
+        }
+    }
+
+    // Bonus for histogram coverage
+    confidence += 0.2 * (hist_count as f64 / total_cols);
+
+    // Bonus for MCV coverage
+    confidence += 0.2 * (mcv_count as f64 / total_cols);
+
+    confidence.min(1.0)
+}
+
+impl ra_core::FactsProvider for SimpleFactsProvider {
+    fn get_table_stats(
+        &self,
+        table: &str,
+    ) -> Option<&ra_core::CoreTableStats> {
+        self.table_stats.get(table)
+    }
+
+    fn get_column_stats(
+        &self,
+        table: &str,
+        column: &str,
+    ) -> Option<&ra_core::ColumnStats> {
+        self.column_stats
+            .get(table)
+            .and_then(|cols| cols.get(column))
     }
 
     fn hardware_profile(&self) -> &ra_core::CoreHardwareProfile {
-        self.base.hardware_profile()
+        &self.hardware
     }
 
-    fn get_schema(&self, table: &str) -> Option<&ra_core::TableInfo> {
-        self.base.get_schema(table)
+    fn get_schema(
+        &self,
+        table: &str,
+    ) -> Option<&ra_core::TableInfo> {
+        self.schemas.get(table)
     }
 
-    fn runtime_stats(&self, operator_id: &str) -> Option<&ra_core::OperatorStats> {
-        self.base.runtime_stats(operator_id)
+    fn runtime_stats(
+        &self,
+        _operator_id: &str,
+    ) -> Option<&ra_core::OperatorStats> {
+        None
     }
 
     fn database_name(&self) -> &str {
-        self.base.database_name()
+        "postgresql"
     }
 
     fn supports_feature(&self, feature: &str) -> bool {
-        self.base.supports_feature(feature)
+        matches!(
+            feature,
+            "lateral_join"
+                | "cte_recursive"
+                | "window_functions"
+                | "partial_index"
+                | "index_only_scan"
+                | "bitmap_scan"
+                | "parallel_query"
+                | "hash_join"
+                | "merge_join"
+                | "nested_loop"
+        )
     }
 
     fn sql_dialect(&self) -> ra_core::SqlDialect {
-        self.base.sql_dialect()
+        ra_core::SqlDialect::Postgres
     }
 
     fn memory_limit(&self) -> Option<u64> {
-        self.base.memory_limit()
+        Some(self.hardware.available_memory)
     }
 
     fn optimizer_timeout(&self) -> std::time::Duration {
-        self.base.optimizer_timeout()
+        std::time::Duration::from_secs(5)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ra_core::Statistics;
 
     #[test]
     fn truncate_short_string() {
@@ -677,5 +912,118 @@ mod tests {
     fn truncate_exact_boundary() {
         let s = truncate_sql("12345", 5);
         assert_eq!(s, "12345");
+    }
+
+    #[test]
+    fn confidence_zero_rows() {
+        let stats = Statistics::new(0.0);
+        assert!((compute_stats_confidence(&stats) - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn confidence_row_count_only() {
+        let stats = Statistics::new(1000.0);
+        let conf = compute_stats_confidence(&stats);
+        assert!((conf - 0.6).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn confidence_with_histograms() {
+        let mut stats = Statistics::new(1000.0);
+        let mut cs = ra_core::ColumnStats::new(100.0);
+        cs.histogram = Some(ra_core::Histogram::EquiDepth(
+            ra_core::EquiDepthHistogram {
+                buckets: vec![],
+                rows_per_bucket: 0.0,
+            },
+        ));
+        cs.most_common_values = Some(vec!["a".into()]);
+        cs.most_common_freqs = Some(vec![0.1]);
+        stats.columns.insert("id".into(), cs);
+
+        let conf = compute_stats_confidence(&stats);
+        // 0.6 base + 0.2 (histogram) + 0.2 (MCV) = 1.0
+        assert!((conf - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn confidence_partial_columns() {
+        let mut stats = Statistics::new(1000.0);
+        stats
+            .columns
+            .insert("id".into(), ra_core::ColumnStats::new(100.0));
+        let mut cs = ra_core::ColumnStats::new(50.0);
+        cs.histogram = Some(ra_core::Histogram::EquiDepth(
+            ra_core::EquiDepthHistogram {
+                buckets: vec![],
+                rows_per_bucket: 0.0,
+            },
+        ));
+        stats.columns.insert("name".into(), cs);
+
+        let conf = compute_stats_confidence(&stats);
+        // 0.6 + 0.2*(1/2) + 0.0 = 0.7
+        assert!(conf > 0.6);
+        assert!(conf < 1.0);
+    }
+
+    #[test]
+    fn estimate_avg_row_size_no_columns() {
+        let stats = Statistics::new(100.0);
+        let size = estimate_avg_row_size(&stats);
+        assert!((size - estimation::BYTES_PER_ROW).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn estimate_avg_row_size_with_columns() {
+        let mut stats = Statistics::new(100.0);
+        let mut cs = ra_core::ColumnStats::new(10.0);
+        cs.avg_length = Some(16.0);
+        stats.columns.insert("col1".into(), cs);
+
+        let size = estimate_avg_row_size(&stats);
+        // 16.0 + 23.0 = 39.0
+        assert!((size - 39.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn calculate_stats_coverage_full() {
+        let stats = vec![
+            ("t1".into(), Statistics::new(100.0)),
+            ("t2".into(), Statistics::new(200.0)),
+        ];
+        let expr = ra_core::algebra::RelExpr::Join {
+            join_type: ra_core::JoinType::Inner,
+            condition: ra_core::Expr::Const(ra_core::Const::Bool(true)),
+            left: Box::new(ra_core::algebra::RelExpr::Scan {
+                table: "t1".into(),
+                alias: None,
+            }),
+            right: Box::new(ra_core::algebra::RelExpr::Scan {
+                table: "t2".into(),
+                alias: None,
+            }),
+        };
+        let coverage = calculate_stats_coverage(&expr, &stats);
+        assert!((coverage - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn calculate_stats_coverage_partial() {
+        let stats = vec![("t1".into(), Statistics::new(100.0))];
+        let expr = ra_core::algebra::RelExpr::Join {
+            join_type: ra_core::JoinType::Inner,
+            condition: ra_core::Expr::Const(ra_core::Const::Bool(true)),
+            left: Box::new(ra_core::algebra::RelExpr::Scan {
+                table: "t1".into(),
+                alias: None,
+            }),
+            right: Box::new(ra_core::algebra::RelExpr::Scan {
+                table: "t2".into(),
+                alias: None,
+            }),
+        };
+        let coverage = calculate_stats_coverage(&expr, &stats);
+        assert!((coverage - 0.5).abs() < f64::EPSILON);
     }
 }

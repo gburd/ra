@@ -28,7 +28,6 @@ ra-regression = { path = "../ra-regression" }
 clap = { workspace = true }
 clap_complete = { workspace = true }
 colored = { workspace = true }
-atty = { workspace = true }
 libc = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }

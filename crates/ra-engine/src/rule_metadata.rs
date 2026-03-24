@@ -7,9 +7,87 @@ use anyhow::{anyhow, Context, Result};
 use ra_core::facts::FactsProvider;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt;
 use std::fs;
 use std::path::Path;
 use tracing::{debug, warn};
+
+/// Algorithmic complexity class for a rewrite rule.
+///
+/// Used to weight rule application priority: cheaper rules
+/// should fire before expensive ones when both have similar
+/// expected benefit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Serialize, Deserialize)]
+pub enum ComplexityClass {
+    /// Constant-time pattern match and rewrite.
+    #[serde(rename = "O(1)")]
+    O1,
+    /// Linear in the number of matched nodes.
+    #[serde(rename = "O(n)")]
+    On,
+    /// Quadratic (e.g., nested join reordering).
+    #[serde(rename = "O(n^2)")]
+    On2,
+    /// Exponential (e.g., full enumeration).
+    #[serde(rename = "O(exp)")]
+    Oexp,
+}
+
+impl ComplexityClass {
+    /// Numeric weight for priority scoring.
+    /// Lower complexity gets lower weight, yielding higher priority
+    /// when used as the denominator in `benefit / weight`.
+    #[must_use]
+    pub fn weight(self) -> f64 {
+        match self {
+            Self::O1 => 1.0,
+            Self::On => 2.0,
+            Self::On2 => 4.0,
+            Self::Oexp => 8.0,
+        }
+    }
+}
+
+impl fmt::Display for ComplexityClass {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::O1 => write!(f, "O(1)"),
+            Self::On => write!(f, "O(n)"),
+            Self::On2 => write!(f, "O(n^2)"),
+            Self::Oexp => write!(f, "O(exp)"),
+        }
+    }
+}
+
+/// Expected benefit range `(min, max)` on a 0.0..=1.0 scale.
+///
+/// - 0.0 = no improvement expected
+/// - 1.0 = order-of-magnitude improvement possible
+///
+/// The midpoint `(min + max) / 2` is used for priority scoring.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct BenefitRange {
+    pub min: f64,
+    pub max: f64,
+}
+
+impl BenefitRange {
+    /// Create a new benefit range, clamping to `[0.0, 1.0]`.
+    #[must_use]
+    pub fn new(min: f64, max: f64) -> Self {
+        Self {
+            min: min.clamp(0.0, 1.0),
+            max: max.clamp(0.0, 1.0),
+        }
+    }
+
+    /// Expected benefit (midpoint of range).
+    #[must_use]
+    pub fn expected(&self) -> f64 {
+        (self.min + self.max) / 2.0
+    }
+}
 
 /// Metadata for a rewrite rule from .rra file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,6 +116,12 @@ pub struct RuleMetadata {
     /// Pre-conditions that must be satisfied
     #[serde(default)]
     pub preconditions: Vec<Precondition>,
+    /// Algorithmic complexity of applying this rule
+    #[serde(default)]
+    pub complexity: Option<ComplexityClass>,
+    /// Expected benefit range [min, max] on a 0.0..=1.0 scale
+    #[serde(default)]
+    pub benefit_range: Option<BenefitRange>,
 }
 
 /// A precondition that must be satisfied for a rule to apply.
@@ -439,6 +523,8 @@ mod tests {
             authors: vec![],
             tags: vec![],
             preconditions,
+            complexity: None,
+            benefit_range: None,
         }
     }
 

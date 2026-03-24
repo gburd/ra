@@ -2,6 +2,11 @@ import { defineConfig } from 'vitepress'
 import { katex } from '@mdit/plugin-katex'
 import { withMermaid } from 'vitepress-plugin-mermaid'
 import { algebraPlugin } from './plugins/algebra-plugin.js'
+import { tryItPlugin } from './plugins/try-it-plugin.js'
+import algebraGrammar from './syntax/algebra.tmLanguage.json'
+import rraGrammar from './syntax/rra.tmLanguage.json'
+import sqlInteractiveGrammar from './syntax/sql-interactive.tmLanguage.json'
+import cronGrammar from './syntax/cron.tmLanguage.json'
 
 export default withMermaid(defineConfig({
   title: 'Ra Optimizer',
@@ -26,13 +31,17 @@ export default withMermaid(defineConfig({
     ]
   ],
   markdown: {
+    languages: [
+      { ...algebraGrammar, name: 'algebra' },
+      { ...rraGrammar, name: 'rra' },
+      { ...sqlInteractiveGrammar, name: 'sql-interactive' },
+      { ...cronGrammar, name: 'cron' },
+    ],
     config: (md) => {
       md.use(katex)
       md.use(algebraPlugin)
+      md.use(tryItPlugin)
     }
-    // Note: Custom syntax highlighting for rra, algebra, sql-interactive, cron
-    // falls back to txt - see .vitepress/syntax/ for grammar definitions
-    // These can be properly integrated with a VitePress plugin later
   },
   vue: {
     template: {
@@ -143,6 +152,15 @@ export default withMermaid(defineConfig({
             { text: 'Database Adapters', link: '/integrations/database-adapters' },
             { text: 'PostgreSQL', link: '/integrations/postgresql' },
             { text: 'Web UI', link: '/integrations/web-ui' }
+          ]
+        },
+        {
+          text: 'Internals',
+          collapsed: true,
+          items: [
+            { text: 'Timely/Differential Dataflow', link: '/internals/timely-differential-dataflow' },
+            { text: 'Genetic Fingerprinting', link: '/internals/genetic-fingerprinting' },
+            { text: 'Streaming Statistics', link: '/internals/streaming-statistics' }
           ]
         },
         {

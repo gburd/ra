@@ -19,3 +19,33 @@
   font-size: 0.75em;
   color: var(--vp-c-text-2);
 }
+
+/* "Try it!" button in code blocks (try-it-plugin) */
+.try-it-link {
+  position: absolute;
+  top: 12px;
+  right: 65px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 8px;
+  height: 28px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 28px;
+  color: var(--vp-c-brand-1);
+  background: var(--vp-code-block-bg);
+  border: 1px solid var(--vp-c-brand-1);
+  border-radius: 4px;
+  cursor: pointer;
+  text-decoration: none;
+  opacity: 0;
+  transition: color 0.25s, background-color 0.25s, opacity 0.25s;
+}
+div[class*="language-"]:hover .try-it-link {
+  opacity: 1;
+}
+.try-it-link:hover {
+  color: var(--vp-c-white);
+  background-color: var(--vp-c-brand-1);
+}

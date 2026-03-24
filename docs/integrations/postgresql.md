@@ -185,7 +185,7 @@ absolute percentage error, enabling future self-tuning.
 ### Prerequisites
 
 - PostgreSQL 13--18 (development headers required)
-- Rust toolchain (1.75.0+)
+- Rust toolchain (1.85.0+)
 - pgrx 0.17.0 (`cargo install cargo-pgrx --version 0.17.0`)
 
 ### Build

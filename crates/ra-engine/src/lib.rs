@@ -76,6 +76,7 @@ pub mod resource_profiles;
 pub mod rewrite;
 pub mod shortcuts;
 pub mod rule_metadata;
+pub mod rule_priority;
 pub mod rule_registry;
 pub mod runtime_filters;
 // pub mod semi_join; // TODO: incomplete, has invalid egg syntax
@@ -140,10 +141,13 @@ pub use large_join::{
 };
 pub use left_deep::{LeftDeepBuilder, can_use_left_deep};
 pub use consensus_rules::consensus_rules;
-pub use rewrite::all_rules;
+pub use rewrite::{all_rules, all_rules_unsorted};
 pub use rule_metadata::{
-    filter_rules_by_preconditions, load_rules_from_directory, parse_rra_file, ParsedRule,
-    Precondition, RuleMetadata,
+    filter_rules_by_preconditions, load_rules_from_directory, parse_rra_file,
+    BenefitRange, ComplexityClass, ParsedRule, Precondition, RuleMetadata,
+};
+pub use rule_priority::{
+    compute_priority, sort_rules_by_priority, RulePriority,
 };
 pub use precondition_eval::{EvaluationError, PreConditionEvaluator};
 pub use timely::{ComputationStats, TimelyConfig};
@@ -182,15 +186,18 @@ pub use cost_pruning::{CostPruner, PruningStats};
 pub use join_graph::{JoinGraph, JoinGraphStats};
 pub use stats_cache::{StatsCache, StatsCacheBuilder};
 pub use progressive_reopt::{
-    DivergenceInfo, ReoptConfig, ReoptDecision, RuntimeStatistics,
-    StitchPointKind, StitchPointMeta, StitchTransferKind, JoinImplKind,
-    divergence_factor, estimate_remaining_cost, estimate_stitch_cost,
-    evaluate_reopt_decision, insert_stitch_points, is_switch_worthwhile,
-    join_transfer_kind, should_reoptimize,
+    BackgroundReoptimizer, DivergenceInfo, JoinImplKind, ReoptConfig,
+    ReoptDecision, ReoptError, ReoptResult, ReoptimizeFn,
+    RuntimeStatistics, StitchPointKind, StitchPointMeta,
+    StitchTransferKind, divergence_factor, estimate_remaining_cost,
+    estimate_stitch_cost, evaluate_reopt_decision, insert_stitch_points,
+    is_switch_worthwhile, join_transfer_kind, progressive_optimize,
+    should_reoptimize,
 };
 pub use plan_stitch::{
     OperatorState, StitchResult, count_stitch_points,
-    find_deepest_join, stitch_plans,
+    find_deepest_join, stitch_multi, stitch_plans,
+    verify_join_order_equivalence,
 };
 pub use bayesian_pruning::{
     BayesianPruner, BucketStats, PruningConfig, PruningOutcome,

@@ -143,9 +143,8 @@ fn apply_stitch(materialized: &RelExpr, reoptimized: &RelExpr, kind: StitchPoint
     match kind {
         StitchPointKind::JoinBuildComplete => stitch_at_join(materialized, reoptimized),
         StitchPointKind::AggregateInput => stitch_at_aggregate(materialized, reoptimized),
-        StitchPointKind::SortInput | StitchPointKind::SubqueryBoundary => {
-            stitch_passthrough(materialized, reoptimized)
-        }
+        StitchPointKind::SortInput => stitch_at_sort(materialized, reoptimized),
+        StitchPointKind::SubqueryBoundary => stitch_passthrough(materialized, reoptimized),
     }
 }
 
@@ -187,10 +186,97 @@ fn stitch_at_aggregate(materialized: &RelExpr, reoptimized: &RelExpr) -> RelExpr
     }
 }
 
+/// Stitch at a sort boundary: the materialized (partially sorted)
+/// input feeds into the re-optimized sort.
+fn stitch_at_sort(materialized: &RelExpr, reoptimized: &RelExpr) -> RelExpr {
+    match reoptimized {
+        RelExpr::Sort { keys, input: _ } => RelExpr::Sort {
+            keys: keys.clone(),
+            input: Box::new(materialized.clone()),
+        },
+        other => stitch_passthrough(materialized, other),
+    }
+}
+
 /// Default stitching: prefer the re-optimized plan but ensure the
 /// materialized rows are consumed via a CTE-like pattern.
 fn stitch_passthrough(_materialized: &RelExpr, reoptimized: &RelExpr) -> RelExpr {
     reoptimized.clone()
+}
+
+/// Collect the set of base table names referenced by a plan tree.
+fn collect_table_names(plan: &RelExpr, out: &mut Vec<String>) {
+    match plan {
+        RelExpr::Scan { table, .. } => out.push(table.clone()),
+        RelExpr::Join { left, right, .. }
+        | RelExpr::Union { left, right, .. }
+        | RelExpr::Intersect { left, right, .. }
+        | RelExpr::Except { left, right, .. } => {
+            collect_table_names(left, out);
+            collect_table_names(right, out);
+        }
+        RelExpr::Filter { input, .. }
+        | RelExpr::Project { input, .. }
+        | RelExpr::Aggregate { input, .. }
+        | RelExpr::Sort { input, .. }
+        | RelExpr::Limit { input, .. }
+        | RelExpr::Distinct { input, .. }
+        | RelExpr::Window { input, .. } => {
+            collect_table_names(input, out);
+        }
+        _ => {}
+    }
+}
+
+/// Verify that two plans reference the same set of base tables,
+/// regardless of join order. This is a necessary (not sufficient)
+/// condition for plan equivalence.
+#[must_use]
+pub fn verify_join_order_equivalence(
+    old_plan: &RelExpr,
+    new_plan: &RelExpr,
+) -> bool {
+    let mut old_tables = Vec::new();
+    let mut new_tables = Vec::new();
+    collect_table_names(old_plan, &mut old_tables);
+    collect_table_names(new_plan, &mut new_tables);
+    old_tables.sort();
+    new_tables.sort();
+    old_tables == new_tables
+}
+
+/// Stitch at multiple points in a plan tree. Each stitch point
+/// is described by a `(materialized, kind, state)` triple. Points
+/// are applied bottom-up so that inner stitches take effect before
+/// outer ones.
+pub fn stitch_multi(
+    reoptimized: &RelExpr,
+    points: &[(RelExpr, StitchPointKind, OperatorState)],
+) -> StitchResult {
+    if points.is_empty() {
+        return StitchResult {
+            plan: reoptimized.clone(),
+            stitch_points_applied: 0,
+            stitch_overhead: 0.0,
+        };
+    }
+
+    let mut plan = reoptimized.clone();
+    let mut total_overhead = 0.0;
+    let mut applied = 0_usize;
+
+    for (materialized, kind, state) in points {
+        let single = stitch_plans(materialized, &plan, *kind, state);
+        plan = single.plan;
+        total_overhead += single.stitch_overhead;
+        applied += single.stitch_points_applied;
+    }
+
+    StitchResult {
+        plan,
+        stitch_points_applied: applied,
+        stitch_overhead: total_overhead,
+    }
 }
 
 /// Count the number of potential stitch points in a plan.

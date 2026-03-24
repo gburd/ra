@@ -17,7 +17,7 @@ cargo test --all-features
 
 ### Rust Style
 
-- Rust 1.75+ with edition 2021
+- Rust 1.85+ with edition 2021
 - Zero warnings: `cargo clippy --all-targets --all-features -- -D warnings`
 - Format: `cargo fmt`
 - Functions under 100 lines, cyclomatic complexity under 8
