@@ -20,6 +20,7 @@ This index tracks all RFCs in the RA optimizer project by status. See [README.md
 | [0020](text/0020-parallel-query-execution.md) | Parallel Query Execution | 2026-03-20 | Execution engine |
 | [0021](text/0021-automatic-index-advisor.md) | Automatic Index Advisor | 2026-03-20 | Advisory system |
 | [0033](text/0033-columnar-format-optimization.md) | Columnar Format Optimization | 2026-03-20 | Storage layer |
+| [0060](_accepted/0060-genetic-fingerprinting.md) | Genetic Fingerprinting for Query Plan Cache | 2026-03-23 | Plan cache system |
 
 ## Underway (In Development)
 
@@ -94,8 +95,8 @@ This index tracks all RFCs in the RA optimizer project by status. See [README.md
 
 ## Statistics
 
-- **Total RFCs**: 59
-- **Implemented**: 14 (24%)
+- **Total RFCs**: 60
+- **Implemented**: 15 (25%)
 - **Underway**: 2 (3%)
 - **Accepted**: 12 (20%)
 - **Under Review**: 6 (10%)
