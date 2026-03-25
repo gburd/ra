@@ -470,7 +470,8 @@ fn predicate_fields(pred: &DocPredicate) -> Vec<&FieldPath> {
 }
 
 /// Check whether a predicate references only the given field paths.
-fn predicate_references_only(
+#[must_use]
+pub fn predicate_references_only(
     pred: &DocPredicate,
     allowed: &[&FieldPath],
 ) -> bool {
@@ -689,7 +690,7 @@ fn push_match_before_lookup(
 // Proof: AddFields adds a new field f. If phi does not reference f,
 // [[phi]](D) = [[phi]](D + {f: e(D)}).
 
-/// Push Match before AddFields when predicate does not reference
+/// Push `Match` before `AddFields` when predicate does not reference
 /// the added fields.
 fn push_match_before_addfields(
     pipeline: &DocPipeline,
@@ -936,7 +937,7 @@ pub struct ToastInfo {
     pub strategy: ToastStrategy,
 }
 
-/// PostgreSQL TOAST storage strategies.
+/// `PostgreSQL` TOAST storage strategies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ToastStrategy {
     /// No TOAST (value always stored inline).
@@ -977,7 +978,7 @@ impl HotEligibility {
 
 /// Estimate additional I/O cost for accessing a toasted column.
 ///
-/// When a column value exceeds ~2kB, PostgreSQL stores it out-of-line
+/// When a column value exceeds ~2kB, `PostgreSQL` stores it out-of-line
 /// in a TOAST table. Each detoast operation requires a separate heap
 /// fetch, roughly doubling the I/O cost for that column access.
 ///
@@ -1027,6 +1028,7 @@ pub fn estimate_hot_update_savings(
 
 /// Estimate the cost of a document pipeline stage.
 #[must_use]
+#[allow(clippy::cast_precision_loss)]
 pub fn estimate_stage_cost(
     stage: &DocOperator,
     input_count: f64,
@@ -1114,21 +1116,23 @@ pub fn estimate_pipeline_cost(
 
 /// Estimate the output document count for a stage.
 #[must_use]
+#[allow(clippy::cast_precision_loss)]
 fn estimate_output_count(stage: &DocOperator, input: f64) -> f64 {
     match stage {
-        DocOperator::Scan { .. } => input,
         DocOperator::Match { .. } => input * 0.3,
-        DocOperator::Project { .. } => input,
         DocOperator::Unwind { .. } => input * 5.0,
         DocOperator::Group { .. } => (input * 0.1).max(1.0),
-        DocOperator::Lookup { .. } => input,
-        DocOperator::AddFields { .. } => input,
-        DocOperator::Sort { .. } => input,
         DocOperator::Limit { count } => input.min(*count as f64),
         DocOperator::Skip { count } => {
             (input - *count as f64).max(0.0)
         }
         DocOperator::Count { .. } => 1.0,
+        // Passthrough: scan, project, lookup, addfields, sort
+        DocOperator::Scan { .. }
+        | DocOperator::Project { .. }
+        | DocOperator::Lookup { .. }
+        | DocOperator::AddFields { .. }
+        | DocOperator::Sort { .. } => input,
     }
 }
 

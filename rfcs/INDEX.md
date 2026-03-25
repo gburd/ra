@@ -27,6 +27,7 @@ This index tracks all RFCs in the RA optimizer project by status. See [README.md
 | [0066](_accepted/0066-advanced-index-aware-planning.md) | Advanced Index-Aware Planning (BRIN) | 2026-03-25 | BRIN index advisor |
 | [0068](_accepted/0068-hardware-calibrated-cost-model.md) | Hardware-Calibrated Cost Model | 2026-03-25 | Hardware calibration |
 | [0078](_accepted/0078-remove-bayesian-pruning.md) | Remove Bayesian Adaptive Search Space Pruning | 2026-03-25 | Commit 32f9902f |
+| [0082](text/0082-mongodb-formal-semantics-toast-hot.md) | MongoDB Formal Query Semantics + TOAST/HOT | 2026-03-25 | `document_algebra.rs` |
 
 ## Underway (In Development)
 

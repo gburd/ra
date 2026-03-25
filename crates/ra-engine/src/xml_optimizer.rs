@@ -1388,8 +1388,7 @@ pub enum XmlOptimizerError {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
-    use crate::analysis::RelAnalysis;
-    use crate::egraph::{to_rec_expr, RelLang};
+    use crate::egraph::to_rec_expr;
     use crate::rewrite::all_rules;
     use egg::Runner;
     use ra_core::algebra::{JoinType, RelExpr};
@@ -1658,9 +1657,11 @@ mod tests {
             estimated_entries: Some(1000),
             avg_entry_bytes: Some(50),
         };
+        // Value index path matches the XPath simple_path (the
+        // element path, not the attribute path inside predicates)
         let value_index = XmlIndexInfo {
             index_type: XmlIndexType::Value,
-            paths: vec!["/doc/item/@price".to_string()],
+            paths: vec!["/doc/item".to_string()],
             value_type: Some(XmlValueType::Numeric),
             estimated_entries: Some(1000),
             avg_entry_bytes: Some(8),

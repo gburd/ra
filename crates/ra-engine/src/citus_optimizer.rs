@@ -1081,6 +1081,9 @@ impl CitusOptimizedPlan {
 // ------------------------------------------------------------------
 
 /// Extract the base table name from a plan tree.
+///
+/// For joins, returns the left side's table name (the primary
+/// distributed table in most Citus query patterns).
 fn extract_table_name(plan: &RelExpr) -> Option<String> {
     match plan {
         RelExpr::Scan { table, .. } => Some(table.clone()),
@@ -1091,6 +1094,10 @@ fn extract_table_name(plan: &RelExpr) -> Option<String> {
         | RelExpr::Limit { input, .. }
         | RelExpr::Aggregate { input, .. } => {
             extract_table_name(input)
+        }
+        RelExpr::Join { left, right, .. } => {
+            extract_table_name(left)
+                .or_else(|| extract_table_name(right))
         }
         _ => None,
     }

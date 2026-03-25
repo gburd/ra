@@ -184,13 +184,20 @@ pub use covering_index::{
     covering_index_rules, index_only_scan_cost_factor,
 };
 pub use documentdb_optimizer::{
-    BsonOperator, BsonPredicate, DocumentDbError,
-    GinBsonCostParams, GinIndexRecommendation, QueryPattern,
+    BsonOperator, BsonPredicate, BsonRumOpfamily, DocumentDbError,
+    DocumentDbRumError, GinBsonCostParams, GinIndexRecommendation,
+    QueryPattern, RumBsonCostParams, RumBsonIndexRecommendation,
     SelectivityEstimate, SelectivitySource,
+    bson_op_benefits_from_rum, bson_op_to_rum_opfamily,
     combine_selectivities, compound_gin_scan_cost,
     documentdb_rewrite_rules, estimate_selectivity,
-    gin_bson_scan_cost_factor, gin_scan_cost, gin_vs_sequential_ratio,
-    recommend_gin_indexes, sequential_scan_cost,
+    evaluate_rum_bson_recommendation,
+    gin_bson_equivalent_cost, gin_bson_scan_cost_factor,
+    gin_scan_cost, gin_vs_sequential_ratio,
+    recommend_gin_indexes, rum_bson_array_scan_cost,
+    rum_bson_near_scan_cost, rum_bson_scan_cost_factor,
+    rum_bson_text_scan_cost, rum_vs_gin_bson_near_ratio,
+    rum_vs_gin_bson_text_ratio, sequential_scan_cost,
 };
 pub use isolation_cost::{
     IsolationCostConfig, PlanEstimates, isolation_cost_adjustment,

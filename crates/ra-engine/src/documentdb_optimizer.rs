@@ -773,6 +773,512 @@ pub fn gin_bson_scan_cost_factor() -> f64 {
 }
 
 // ------------------------------------------------------------------
+// DocumentDB extended RUM (BSON-aware) optimization
+// ------------------------------------------------------------------
+// See: `rfcs/text/0080-documentdb-rum-bson-optimization.md`
+
+/// DocumentDB's four RUM operator families for BSON indexing.
+///
+/// These correspond to the operator families registered by
+/// `pg_documentdb_extended_rum` and determine which scan
+/// strategy the index provides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BsonRumOpfamily {
+    /// `bson_extended_rum_single_path_ops` -- single JSON path
+    /// with distance ordering. Used for `$text`, `$regex`, and
+    /// single-field ordered scans.
+    SinglePath,
+    /// `bson_extended_rum_composite_path_ops` -- multiple paths
+    /// plus the `|-<>` distance operator. Used for `$near`,
+    /// compound queries, and `$text` with `$sort`.
+    CompositePath,
+    /// `documentdb_extended_rum_hashed_ops` -- hash-based
+    /// equality. Used for high-cardinality `$eq` and `_id`
+    /// lookups.
+    Hashed,
+    /// `bson_extended_rum_unique_shard_path_ops` -- unique
+    /// constraint enforcement on shard keys.
+    UniqueShard,
+}
+
+impl BsonRumOpfamily {
+    /// Parse an operator family name string.
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "bson_extended_rum_single_path_ops" => {
+                Some(Self::SinglePath)
+            }
+            "bson_extended_rum_composite_path_ops" => {
+                Some(Self::CompositePath)
+            }
+            "documentdb_extended_rum_hashed_ops" => {
+                Some(Self::Hashed)
+            }
+            "bson_extended_rum_unique_shard_path_ops" => {
+                Some(Self::UniqueShard)
+            }
+            _ => None,
+        }
+    }
+
+    /// Whether this operator family supports distance ordering.
+    #[must_use]
+    pub fn supports_ordering(self) -> bool {
+        match self {
+            Self::SinglePath | Self::CompositePath => true,
+            Self::Hashed | Self::UniqueShard => false,
+        }
+    }
+
+    /// Whether this operator family supports compound path scans.
+    #[must_use]
+    pub fn supports_compound(self) -> bool {
+        self == Self::CompositePath
+    }
+}
+
+impl std::fmt::Display for BsonRumOpfamily {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        match self {
+            Self::SinglePath => {
+                write!(f, "bson_extended_rum_single_path_ops")
+            }
+            Self::CompositePath => {
+                write!(f, "bson_extended_rum_composite_path_ops")
+            }
+            Self::Hashed => {
+                write!(f, "documentdb_extended_rum_hashed_ops")
+            }
+            Self::UniqueShard => {
+                write!(f, "bson_extended_rum_unique_shard_path_ops")
+            }
+        }
+    }
+}
+
+/// Map a BSON operator to its preferred RUM operator family.
+///
+/// Returns `None` for operators that do not benefit from RUM
+/// (e.g., `$ne`, `$nin`, `$exists`).
+#[must_use]
+pub fn bson_op_to_rum_opfamily(
+    op: BsonOperator,
+) -> Option<BsonRumOpfamily> {
+    match op {
+        BsonOperator::Eq => Some(BsonRumOpfamily::Hashed),
+        BsonOperator::Gt
+        | BsonOperator::Gte
+        | BsonOperator::Lt
+        | BsonOperator::Lte => Some(BsonRumOpfamily::SinglePath),
+        BsonOperator::In => Some(BsonRumOpfamily::SinglePath),
+        BsonOperator::All
+        | BsonOperator::ElemMatch => {
+            Some(BsonRumOpfamily::SinglePath)
+        }
+        BsonOperator::Regex => Some(BsonRumOpfamily::SinglePath),
+        BsonOperator::Ne
+        | BsonOperator::Nin
+        | BsonOperator::Exists => None,
+    }
+}
+
+/// Whether a BSON operator benefits from RUM over GIN.
+///
+/// RUM provides advantages for operators that need ordering or
+/// in-index position verification. Pure containment checks
+/// are handled equally well by GIN.
+#[must_use]
+pub fn bson_op_benefits_from_rum(op: BsonOperator) -> bool {
+    match op {
+        // $text-related: RUM provides in-index phrase verification
+        // and distance ordering, avoiding heap recheck.
+        BsonOperator::Regex => true,
+        // Array ops: RUM can provide ordered array scans.
+        BsonOperator::All | BsonOperator::ElemMatch => true,
+        // Range ops: RUM provides boundary-qualified scans.
+        BsonOperator::Gt
+        | BsonOperator::Gte
+        | BsonOperator::Lt
+        | BsonOperator::Lte => true,
+        // Equality: hashed RUM is comparable to GIN.
+        BsonOperator::Eq | BsonOperator::In => false,
+        // Not indexable by either.
+        BsonOperator::Ne
+        | BsonOperator::Nin
+        | BsonOperator::Exists => false,
+    }
+}
+
+// ------------------------------------------------------------------
+// RUM BSON cost model
+// ------------------------------------------------------------------
+
+/// Cost parameters for RUM index scans on BSON documents.
+///
+/// RUM posting entries are wider than GIN (positional data, addon
+/// fields), so per-entry costs are higher. However, ordered scans
+/// and boundary qualification reduce total work for many query
+/// patterns.
+#[derive(Debug, Clone)]
+pub struct RumBsonCostParams {
+    /// Cost per posting list term lookup (higher than GIN's 3.0).
+    pub term_lookup_cost: f64,
+    /// Cost for boundary qualifier evaluation.
+    pub boundary_cost: f64,
+    /// Cost per result for distance computation during ordered scan.
+    pub distance_compute_cost: f64,
+    /// Cost per result for heap fetch.
+    pub heap_fetch_cost: f64,
+    /// Cost per result for in-index phrase verification.
+    pub phrase_verify_cost: f64,
+    /// Cost per result for BSON recheck (when needed).
+    pub recheck_cost: f64,
+}
+
+impl Default for RumBsonCostParams {
+    fn default() -> Self {
+        Self {
+            term_lookup_cost: 3.5,
+            boundary_cost: 1.0,
+            distance_compute_cost: 0.3,
+            heap_fetch_cost: 1.5,
+            phrase_verify_cost: 0.1,
+            recheck_cost: 2.0,
+        }
+    }
+}
+
+/// Estimate the cost of a RUM index scan for a BSON `$text` query.
+///
+/// `$text` queries translated by DocumentDB use RUM's distance-ordered
+/// scan. With a LIMIT, only ~k entries are visited (plus 20%
+/// overfetch buffer). Without a LIMIT, all matches are scanned.
+#[must_use]
+pub fn rum_bson_text_scan_cost(
+    total_rows: f64,
+    selectivity: f64,
+    limit: Option<u64>,
+    params: &RumBsonCostParams,
+) -> f64 {
+    let matching = (total_rows * selectivity).max(1.0);
+    match limit {
+        Some(k) => {
+            let visit = k as f64 * 1.2;
+            params.term_lookup_cost
+                + params.boundary_cost
+                + visit
+                    * (params.phrase_verify_cost
+                        + params.heap_fetch_cost)
+        }
+        None => {
+            params.term_lookup_cost
+                + params.boundary_cost
+                + matching
+                    * (params.phrase_verify_cost
+                        + params.heap_fetch_cost)
+        }
+    }
+}
+
+/// Estimate the cost of a RUM index scan for a BSON `$near` query.
+///
+/// `$near` queries use RUM's KNN ordered scan via the `|-<>`
+/// distance operator. Always used with a limit.
+#[must_use]
+pub fn rum_bson_near_scan_cost(
+    total_rows: f64,
+    limit: Option<u64>,
+    params: &RumBsonCostParams,
+) -> f64 {
+    let effective_limit = limit.unwrap_or(100) as f64;
+    let visit = effective_limit * 1.2;
+    let _ = total_rows; // used for future distance histogram estimation
+    params.term_lookup_cost
+        + params.boundary_cost
+        + visit
+            * (params.distance_compute_cost + params.heap_fetch_cost)
+}
+
+/// Estimate the cost of a RUM index scan for a BSON array
+/// containment query ($all, $elemMatch).
+///
+/// RUM can verify array containment with optional ordering.
+/// Without ordering, cost is similar to GIN but with wider
+/// posting entries.
+#[must_use]
+pub fn rum_bson_array_scan_cost(
+    total_rows: f64,
+    selectivity: f64,
+    n_terms: u32,
+    params: &RumBsonCostParams,
+) -> f64 {
+    let matching = (total_rows * selectivity).max(1.0);
+    let lookup = f64::from(n_terms) * params.term_lookup_cost;
+    let fetch = matching * (params.recheck_cost + params.heap_fetch_cost);
+    lookup + params.boundary_cost + fetch
+}
+
+/// Estimate GIN cost for the same BSON query (for comparison).
+///
+/// GIN requires heap recheck and external sort for ordered queries.
+#[must_use]
+pub fn gin_bson_equivalent_cost(
+    total_rows: f64,
+    selectivity: f64,
+    needs_ordering: bool,
+    limit: Option<u64>,
+) -> f64 {
+    let gin_params = GinBsonCostParams::default();
+    let matching = (total_rows * selectivity).max(1.0);
+    let scan = gin_scan_cost(total_rows, selectivity, 1, &gin_params);
+
+    if needs_ordering {
+        let sort_cost =
+            matching * matching.log2().max(1.0) * 0.01;
+        let limit_savings = match limit {
+            Some(k) if matching > k as f64 * 10.0 => {
+                sort_cost * 0.5
+            }
+            _ => 0.0,
+        };
+        // GIN: scan + heap recheck + external sort
+        let recheck = matching * gin_params.heap_fetch_cost;
+        scan + recheck + sort_cost - limit_savings
+    } else {
+        scan
+    }
+}
+
+/// Compare RUM BSON scan vs GIN BSON scan for a `$text` query.
+///
+/// Returns ratio < 1.0 when RUM is cheaper.
+#[must_use]
+pub fn rum_vs_gin_bson_text_ratio(
+    total_rows: f64,
+    selectivity: f64,
+    limit: Option<u64>,
+) -> f64 {
+    let rum_params = RumBsonCostParams::default();
+    let rum = rum_bson_text_scan_cost(
+        total_rows, selectivity, limit, &rum_params,
+    );
+    let gin = gin_bson_equivalent_cost(
+        total_rows, selectivity, true, limit,
+    );
+    if gin <= 0.0 {
+        return 1.0;
+    }
+    rum / gin
+}
+
+/// Compare RUM BSON scan vs GIN BSON scan for a `$near` query.
+///
+/// Returns ratio < 1.0 when RUM is cheaper.
+#[must_use]
+pub fn rum_vs_gin_bson_near_ratio(
+    total_rows: f64,
+    selectivity: f64,
+    limit: Option<u64>,
+) -> f64 {
+    let rum_params = RumBsonCostParams::default();
+    let rum = rum_bson_near_scan_cost(
+        total_rows, limit, &rum_params,
+    );
+    let gin = gin_bson_equivalent_cost(
+        total_rows, selectivity, true, limit,
+    );
+    if gin <= 0.0 {
+        return 1.0;
+    }
+    rum / gin
+}
+
+// ------------------------------------------------------------------
+// RUM BSON index recommendation
+// ------------------------------------------------------------------
+
+/// A recommendation to use RUM instead of GIN for a BSON collection.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RumBsonIndexRecommendation {
+    /// Collection name.
+    pub collection: String,
+    /// BSON paths that should be indexed.
+    pub paths: Vec<String>,
+    /// Recommended RUM operator family.
+    pub opfamily: BsonRumOpfamily,
+    /// The BSON operators that benefit from RUM.
+    pub operators: Vec<BsonOperator>,
+    /// Estimated improvement ratio over GIN (> 1.0 means faster).
+    pub estimated_improvement: f64,
+    /// Whether this replaces an existing GIN index.
+    pub replaces_gin: bool,
+}
+
+impl RumBsonIndexRecommendation {
+    /// Generate the documentdb CREATE INDEX command for a RUM index.
+    #[must_use]
+    pub fn to_create_index_command(
+        &self,
+        db_name: &str,
+    ) -> String {
+        let key_entries: Vec<String> = self
+            .paths
+            .iter()
+            .map(|p| format!("\"{p}\": 1"))
+            .collect();
+        let key_json = key_entries.join(", ");
+        let idx_name = format!(
+            "idx_rum_{}",
+            self.paths.join("_").replace('.', "_")
+        );
+
+        format!(
+            "SELECT documentdb_api_internal.\
+             create_indexes_non_concurrently(\
+             '{db_name}', \
+             '{{\"createIndexes\": \"{collection}\", \
+             \"indexes\": [{{\"key\": {{{key_json}}}, \
+             \"name\": \"{idx_name}\"}}]}}'::bson);",
+            collection = self.collection,
+        )
+    }
+}
+
+/// Evaluate whether RUM provides a benefit over GIN for a set of
+/// BSON query patterns on a collection.
+///
+/// Returns a recommendation if any operator benefits from RUM
+/// with at least 2x improvement.
+#[must_use]
+pub fn evaluate_rum_bson_recommendation(
+    collection: &str,
+    paths: &[String],
+    total_rows: f64,
+    selectivity: f64,
+    operators: &[BsonOperator],
+    has_gin_index: bool,
+) -> Option<RumBsonIndexRecommendation> {
+    if operators.is_empty() || paths.is_empty() {
+        return None;
+    }
+
+    let mut beneficial_ops = Vec::new();
+    let mut best_improvement = 0.0_f64;
+
+    for &op in operators {
+        if !bson_op_benefits_from_rum(op) {
+            continue;
+        }
+
+        let limit = Some(10_u64);
+        let ratio = match op {
+            BsonOperator::Regex => rum_vs_gin_bson_text_ratio(
+                total_rows, selectivity, limit,
+            ),
+            BsonOperator::All
+            | BsonOperator::ElemMatch => {
+                let rum_params = RumBsonCostParams::default();
+                let rum = rum_bson_array_scan_cost(
+                    total_rows, selectivity, 2, &rum_params,
+                );
+                let gin = gin_bson_equivalent_cost(
+                    total_rows, selectivity, true, limit,
+                );
+                if gin > 0.0 { rum / gin } else { 1.0 }
+            }
+            _ => {
+                let rum_params = RumBsonCostParams::default();
+                let rum = rum_bson_text_scan_cost(
+                    total_rows, selectivity, limit, &rum_params,
+                );
+                let gin = gin_bson_equivalent_cost(
+                    total_rows, selectivity, true, limit,
+                );
+                if gin > 0.0 { rum / gin } else { 1.0 }
+            }
+        };
+
+        if ratio < 1.0 {
+            let improvement = 1.0 / ratio;
+            beneficial_ops.push(op);
+            best_improvement = best_improvement.max(improvement);
+        }
+    }
+
+    if beneficial_ops.is_empty() || best_improvement < 2.0 {
+        return None;
+    }
+
+    let opfamily = if paths.len() >= 2 {
+        BsonRumOpfamily::CompositePath
+    } else {
+        BsonRumOpfamily::SinglePath
+    };
+
+    Some(RumBsonIndexRecommendation {
+        collection: collection.to_string(),
+        paths: paths.to_vec(),
+        opfamily,
+        operators: beneficial_ops,
+        estimated_improvement: best_improvement,
+        replaces_gin: has_gin_index,
+    })
+}
+
+/// Cost factor for a RUM BSON scan relative to a sequential scan.
+///
+/// For ordered BSON queries (text search, geospatial), RUM is
+/// typically 8-12% of the cost of a full sequential scan.
+#[must_use]
+pub fn rum_bson_scan_cost_factor() -> f64 {
+    0.10
+}
+
+// ------------------------------------------------------------------
+// Errors specific to DocumentDB RUM optimization
+// ------------------------------------------------------------------
+
+/// Errors specific to DocumentDB RUM optimization.
+///
+/// All errors are non-fatal: the optimizer falls back to GIN-based
+/// cost modeling.
+#[derive(Debug, thiserror::Error)]
+pub enum DocumentDbRumError {
+    /// DocumentDB extended RUM is not installed.
+    #[error(
+        "DocumentDB extended RUM not installed; \
+         using GIN cost model instead"
+    )]
+    RumNotInstalled,
+
+    /// BSON operator cannot be mapped to a RUM operator family.
+    #[error(
+        "BSON operator '{operator}' not mappable to RUM opfamily; \
+         falling back to GIN scan"
+    )]
+    OperatorNotMappable {
+        /// The operator that could not be mapped.
+        operator: String,
+    },
+
+    /// Unknown RUM operator family on a collection.
+    #[error(
+        "RUM index on collection '{collection}' uses unknown \
+         opfamily '{opfamily}'; skipping RUM optimization"
+    )]
+    UnknownOpfamily {
+        /// The collection name.
+        collection: String,
+        /// The unrecognized operator family.
+        opfamily: String,
+    },
+}
+
+// ------------------------------------------------------------------
 // Tests
 // ------------------------------------------------------------------
 
@@ -1389,5 +1895,361 @@ mod tests {
             factor > 0.0 && factor < 1.0,
             "GIN BSON scan should be cheaper than seq scan"
         );
+    }
+
+    // ============================================================
+    // BSON-aware RUM optimization tests (RFC 0080)
+    // ============================================================
+
+    // -- BsonRumOpfamily tests --
+
+    #[test]
+    fn rum_opfamily_from_name() {
+        assert_eq!(
+            BsonRumOpfamily::from_name(
+                "bson_extended_rum_single_path_ops"
+            ),
+            Some(BsonRumOpfamily::SinglePath)
+        );
+        assert_eq!(
+            BsonRumOpfamily::from_name(
+                "bson_extended_rum_composite_path_ops"
+            ),
+            Some(BsonRumOpfamily::CompositePath)
+        );
+        assert_eq!(
+            BsonRumOpfamily::from_name(
+                "documentdb_extended_rum_hashed_ops"
+            ),
+            Some(BsonRumOpfamily::Hashed)
+        );
+        assert_eq!(
+            BsonRumOpfamily::from_name(
+                "bson_extended_rum_unique_shard_path_ops"
+            ),
+            Some(BsonRumOpfamily::UniqueShard)
+        );
+        assert_eq!(
+            BsonRumOpfamily::from_name("gin_ops"),
+            None
+        );
+        assert_eq!(
+            BsonRumOpfamily::from_name(""),
+            None
+        );
+    }
+
+    #[test]
+    fn rum_opfamily_ordering_support() {
+        assert!(BsonRumOpfamily::SinglePath.supports_ordering());
+        assert!(BsonRumOpfamily::CompositePath.supports_ordering());
+        assert!(!BsonRumOpfamily::Hashed.supports_ordering());
+        assert!(!BsonRumOpfamily::UniqueShard.supports_ordering());
+    }
+
+    #[test]
+    fn rum_opfamily_compound_support() {
+        assert!(BsonRumOpfamily::CompositePath.supports_compound());
+        assert!(!BsonRumOpfamily::SinglePath.supports_compound());
+        assert!(!BsonRumOpfamily::Hashed.supports_compound());
+        assert!(!BsonRumOpfamily::UniqueShard.supports_compound());
+    }
+
+    #[test]
+    fn rum_opfamily_display() {
+        assert_eq!(
+            BsonRumOpfamily::SinglePath.to_string(),
+            "bson_extended_rum_single_path_ops"
+        );
+        assert_eq!(
+            BsonRumOpfamily::CompositePath.to_string(),
+            "bson_extended_rum_composite_path_ops"
+        );
+        assert_eq!(
+            BsonRumOpfamily::Hashed.to_string(),
+            "documentdb_extended_rum_hashed_ops"
+        );
+    }
+
+    // -- BSON operator to RUM mapping tests --
+
+    #[test]
+    fn bson_op_rum_mapping() {
+        assert_eq!(
+            bson_op_to_rum_opfamily(BsonOperator::Eq),
+            Some(BsonRumOpfamily::Hashed)
+        );
+        assert_eq!(
+            bson_op_to_rum_opfamily(BsonOperator::Gt),
+            Some(BsonRumOpfamily::SinglePath)
+        );
+        assert_eq!(
+            bson_op_to_rum_opfamily(BsonOperator::Regex),
+            Some(BsonRumOpfamily::SinglePath)
+        );
+        assert_eq!(
+            bson_op_to_rum_opfamily(BsonOperator::All),
+            Some(BsonRumOpfamily::SinglePath)
+        );
+        assert_eq!(
+            bson_op_to_rum_opfamily(BsonOperator::ElemMatch),
+            Some(BsonRumOpfamily::SinglePath)
+        );
+        assert_eq!(
+            bson_op_to_rum_opfamily(BsonOperator::Ne),
+            None
+        );
+        assert_eq!(
+            bson_op_to_rum_opfamily(BsonOperator::Nin),
+            None
+        );
+        assert_eq!(
+            bson_op_to_rum_opfamily(BsonOperator::Exists),
+            None
+        );
+    }
+
+    #[test]
+    fn bson_op_rum_benefits() {
+        assert!(bson_op_benefits_from_rum(BsonOperator::Regex));
+        assert!(bson_op_benefits_from_rum(BsonOperator::All));
+        assert!(bson_op_benefits_from_rum(BsonOperator::ElemMatch));
+        assert!(bson_op_benefits_from_rum(BsonOperator::Gt));
+        assert!(bson_op_benefits_from_rum(BsonOperator::Lte));
+        assert!(!bson_op_benefits_from_rum(BsonOperator::Eq));
+        assert!(!bson_op_benefits_from_rum(BsonOperator::In));
+        assert!(!bson_op_benefits_from_rum(BsonOperator::Ne));
+    }
+
+    // -- RUM BSON cost model tests --
+
+    #[test]
+    fn rum_bson_text_cheaper_than_gin_with_limit() {
+        let rum_params = RumBsonCostParams::default();
+        let rum = rum_bson_text_scan_cost(
+            100_000.0, 0.1, Some(10), &rum_params,
+        );
+        let gin = gin_bson_equivalent_cost(
+            100_000.0, 0.1, true, Some(10),
+        );
+        assert!(
+            rum < gin,
+            "RUM $text with limit should beat GIN: \
+             rum={rum:.1}, gin={gin:.1}"
+        );
+    }
+
+    #[test]
+    fn rum_bson_text_without_limit_still_cheaper_for_ordered() {
+        let rum_params = RumBsonCostParams::default();
+        let rum = rum_bson_text_scan_cost(
+            100_000.0, 0.01, None, &rum_params,
+        );
+        let gin = gin_bson_equivalent_cost(
+            100_000.0, 0.01, true, None,
+        );
+        assert!(
+            rum < gin,
+            "RUM $text without limit should still beat GIN \
+             for ordered: rum={rum:.1}, gin={gin:.1}"
+        );
+    }
+
+    #[test]
+    fn rum_bson_near_very_cheap_with_limit() {
+        let rum_params = RumBsonCostParams::default();
+        let rum = rum_bson_near_scan_cost(
+            1_000_000.0, Some(10), &rum_params,
+        );
+        // $near via GIN requires scanning all rows + sort
+        let gin = gin_bson_equivalent_cost(
+            1_000_000.0, 0.1, true, Some(10),
+        );
+        assert!(
+            rum < gin * 0.01,
+            "RUM $near with limit 10 should be 100x+ cheaper: \
+             rum={rum:.1}, gin={gin:.1}"
+        );
+    }
+
+    #[test]
+    fn rum_bson_array_cost_reasonable() {
+        let rum_params = RumBsonCostParams::default();
+        let cost = rum_bson_array_scan_cost(
+            100_000.0, 0.001, 3, &rum_params,
+        );
+        assert!(
+            cost > 0.0 && cost < 100_000.0,
+            "RUM array cost should be between 0 and seq scan: \
+             cost={cost:.1}"
+        );
+    }
+
+    #[test]
+    fn rum_vs_gin_text_ratio_with_limit() {
+        let ratio = rum_vs_gin_bson_text_ratio(
+            100_000.0, 0.1, Some(10),
+        );
+        assert!(
+            ratio < 0.5,
+            "RUM should be 2x+ cheaper for $text with limit: \
+             ratio={ratio:.3}"
+        );
+    }
+
+    #[test]
+    fn rum_vs_gin_near_ratio_with_limit() {
+        let ratio = rum_vs_gin_bson_near_ratio(
+            1_000_000.0, 0.01, Some(10),
+        );
+        assert!(
+            ratio < 0.1,
+            "RUM should be 10x+ cheaper for $near with limit: \
+             ratio={ratio:.3}"
+        );
+    }
+
+    // -- RUM BSON recommendation tests --
+
+    #[test]
+    fn recommend_rum_for_regex_queries() {
+        let rec = evaluate_rum_bson_recommendation(
+            "articles",
+            &["content".to_string()],
+            500_000.0,
+            0.05,
+            &[BsonOperator::Regex],
+            true,
+        );
+        assert!(
+            rec.is_some(),
+            "should recommend RUM for $regex queries"
+        );
+        let rec = rec.unwrap_or_else(|| unreachable!());
+        assert_eq!(rec.collection, "articles");
+        assert_eq!(rec.opfamily, BsonRumOpfamily::SinglePath);
+        assert!(rec.estimated_improvement >= 2.0);
+        assert!(rec.replaces_gin);
+    }
+
+    #[test]
+    fn recommend_rum_composite_for_multi_path() {
+        let rec = evaluate_rum_bson_recommendation(
+            "orders",
+            &[
+                "status".to_string(),
+                "total".to_string(),
+            ],
+            1_000_000.0,
+            0.01,
+            &[BsonOperator::Gt, BsonOperator::Lte],
+            true,
+        );
+        assert!(
+            rec.is_some(),
+            "should recommend RUM for multi-path range"
+        );
+        let rec = rec.unwrap_or_else(|| unreachable!());
+        assert_eq!(rec.opfamily, BsonRumOpfamily::CompositePath);
+        assert_eq!(rec.paths.len(), 2);
+    }
+
+    #[test]
+    fn no_rum_recommendation_for_equality_only() {
+        let rec = evaluate_rum_bson_recommendation(
+            "users",
+            &["email".to_string()],
+            100_000.0,
+            0.001,
+            &[BsonOperator::Eq],
+            true,
+        );
+        assert!(
+            rec.is_none(),
+            "should not recommend RUM for $eq (GIN is sufficient)"
+        );
+    }
+
+    #[test]
+    fn no_rum_recommendation_for_empty_operators() {
+        let rec = evaluate_rum_bson_recommendation(
+            "test",
+            &["field".to_string()],
+            100_000.0,
+            0.01,
+            &[],
+            false,
+        );
+        assert!(rec.is_none());
+    }
+
+    #[test]
+    fn no_rum_recommendation_for_empty_paths() {
+        let rec = evaluate_rum_bson_recommendation(
+            "test",
+            &[],
+            100_000.0,
+            0.01,
+            &[BsonOperator::Regex],
+            false,
+        );
+        assert!(rec.is_none());
+    }
+
+    #[test]
+    fn rum_bson_create_index_command_format() {
+        let rec = RumBsonIndexRecommendation {
+            collection: "articles".to_string(),
+            paths: vec!["content".to_string()],
+            opfamily: BsonRumOpfamily::SinglePath,
+            operators: vec![BsonOperator::Regex],
+            estimated_improvement: 5.0,
+            replaces_gin: true,
+        };
+        let cmd = rec.to_create_index_command("mydb");
+        assert!(cmd.contains("create_indexes_non_concurrently"));
+        assert!(cmd.contains("mydb"));
+        assert!(cmd.contains("articles"));
+        assert!(cmd.contains("\"content\": 1"));
+        assert!(cmd.contains("idx_rum_content"));
+    }
+
+    // -- RUM BSON cost factor test --
+
+    #[test]
+    fn rum_bson_cost_factor_is_reasonable() {
+        let factor = rum_bson_scan_cost_factor();
+        assert!(
+            factor > 0.0 && factor < gin_bson_scan_cost_factor(),
+            "RUM BSON scan factor should be lower than GIN: \
+             rum={factor}, gin={}",
+            gin_bson_scan_cost_factor()
+        );
+    }
+
+    // -- DocumentDbRumError tests --
+
+    #[test]
+    fn rum_error_messages_are_actionable() {
+        let err = DocumentDbRumError::RumNotInstalled;
+        let msg = err.to_string();
+        assert!(msg.contains("not installed"));
+        assert!(msg.contains("GIN"));
+
+        let err = DocumentDbRumError::OperatorNotMappable {
+            operator: "$geoWithin".to_string(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("$geoWithin"));
+        assert!(msg.contains("falling back"));
+
+        let err = DocumentDbRumError::UnknownOpfamily {
+            collection: "users".to_string(),
+            opfamily: "bson_custom_rum_ops".to_string(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("users"));
+        assert!(msg.contains("bson_custom_rum_ops"));
+        assert!(msg.contains("skipping"));
     }
 }
