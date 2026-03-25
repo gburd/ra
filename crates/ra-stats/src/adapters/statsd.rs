@@ -331,7 +331,7 @@ impl StatsdParser {
 }
 
 #[cfg(test)]
-#[allow(clippy::float_cmp)]
+#[expect(clippy::float_cmp, clippy::unwrap_used)]
 mod tests {
     use super::*;
 

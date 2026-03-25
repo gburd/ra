@@ -291,9 +291,10 @@ fn exceeds_threshold(old: f64, new: f64, threshold: f64) -> bool {
 }
 
 #[cfg(test)]
-#[allow(
+#[expect(
     clippy::float_cmp,
     clippy::expect_used,
+    clippy::unwrap_used,
     clippy::cast_lossless
 )]
 mod tests {
