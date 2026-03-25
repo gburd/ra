@@ -195,8 +195,9 @@ pub use progressive_reopt::{
     should_reoptimize,
 };
 pub use plan_stitch::{
-    OperatorState, StitchResult, count_stitch_points,
-    find_deepest_join, stitch_multi, stitch_plans,
+    DifferentialResult, OperatorState, StitchResult,
+    count_stitch_points, differential_verify, find_deepest_join,
+    replace_subtree, stitch_multi, stitch_plans,
     verify_join_order_equivalence,
 };
 pub use bayesian_pruning::{

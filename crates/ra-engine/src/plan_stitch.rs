@@ -301,6 +301,171 @@ pub fn count_stitch_points(plan: &RelExpr) -> usize {
     }
 }
 
+/// Replace the first subtree matching `target` with `replacement`.
+/// Returns the modified plan and `true` if a replacement was made.
+#[must_use]
+pub fn replace_subtree(
+    plan: &RelExpr,
+    target: &RelExpr,
+    replacement: &RelExpr,
+) -> (RelExpr, bool) {
+    if plan == target {
+        return (replacement.clone(), true);
+    }
+    match plan {
+        RelExpr::Join {
+            join_type,
+            condition,
+            left,
+            right,
+        } => {
+            let (new_left, replaced) =
+                replace_subtree(left, target, replacement);
+            if replaced {
+                return (
+                    RelExpr::Join {
+                        join_type: *join_type,
+                        condition: condition.clone(),
+                        left: Box::new(new_left),
+                        right: right.clone(),
+                    },
+                    true,
+                );
+            }
+            let (new_right, replaced) =
+                replace_subtree(right, target, replacement);
+            (
+                RelExpr::Join {
+                    join_type: *join_type,
+                    condition: condition.clone(),
+                    left: left.clone(),
+                    right: Box::new(new_right),
+                },
+                replaced,
+            )
+        }
+        RelExpr::Filter { predicate, input } => {
+            let (new_input, replaced) =
+                replace_subtree(input, target, replacement);
+            (
+                RelExpr::Filter {
+                    predicate: predicate.clone(),
+                    input: Box::new(new_input),
+                },
+                replaced,
+            )
+        }
+        RelExpr::Project { columns, input } => {
+            let (new_input, replaced) =
+                replace_subtree(input, target, replacement);
+            (
+                RelExpr::Project {
+                    columns: columns.clone(),
+                    input: Box::new(new_input),
+                },
+                replaced,
+            )
+        }
+        RelExpr::Aggregate {
+            group_by,
+            aggregates,
+            input,
+        } => {
+            let (new_input, replaced) =
+                replace_subtree(input, target, replacement);
+            (
+                RelExpr::Aggregate {
+                    group_by: group_by.clone(),
+                    aggregates: aggregates.clone(),
+                    input: Box::new(new_input),
+                },
+                replaced,
+            )
+        }
+        RelExpr::Sort { keys, input } => {
+            let (new_input, replaced) =
+                replace_subtree(input, target, replacement);
+            (
+                RelExpr::Sort {
+                    keys: keys.clone(),
+                    input: Box::new(new_input),
+                },
+                replaced,
+            )
+        }
+        RelExpr::Limit {
+            count,
+            offset,
+            input,
+        } => {
+            let (new_input, replaced) =
+                replace_subtree(input, target, replacement);
+            (
+                RelExpr::Limit {
+                    count: *count,
+                    offset: *offset,
+                    input: Box::new(new_input),
+                },
+                replaced,
+            )
+        }
+        RelExpr::Distinct { input } => {
+            let (new_input, replaced) =
+                replace_subtree(input, target, replacement);
+            (
+                RelExpr::Distinct {
+                    input: Box::new(new_input),
+                },
+                replaced,
+            )
+        }
+        RelExpr::Window { functions, input } => {
+            let (new_input, replaced) =
+                replace_subtree(input, target, replacement);
+            (
+                RelExpr::Window {
+                    functions: functions.clone(),
+                    input: Box::new(new_input),
+                },
+                replaced,
+            )
+        }
+        other => (other.clone(), false),
+    }
+}
+
+/// Verify that replacing a subtree in `old_plan` with `replacement`
+/// preserves the set of base tables (a necessary condition for
+/// semantic equivalence).
+#[must_use]
+pub fn differential_verify(
+    old_plan: &RelExpr,
+    new_plan: &RelExpr,
+) -> DifferentialResult {
+    let tables_match =
+        verify_join_order_equivalence(old_plan, new_plan);
+
+    let old_stitch_count = count_stitch_points(old_plan);
+    let new_stitch_count = count_stitch_points(new_plan);
+
+    DifferentialResult {
+        tables_equivalent: tables_match,
+        old_stitch_points: old_stitch_count,
+        new_stitch_points: new_stitch_count,
+    }
+}
+
+/// Result of a differential verification between old and new plans.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DifferentialResult {
+    /// Whether both plans reference the same set of base tables.
+    pub tables_equivalent: bool,
+    /// Number of stitch points in the old plan.
+    pub old_stitch_points: usize,
+    /// Number of stitch points in the new plan.
+    pub new_stitch_points: usize,
+}
+
 /// Find the deepest join in a plan tree (useful for determining
 /// which join to stitch at first).
 #[must_use]

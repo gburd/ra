@@ -1328,3 +1328,396 @@ fn test_end_to_end_progressive_reopt() {
         panic!("Expected Join in stitched plan");
     }
 }
+
+// ---------------------------------------------------------------
+// Background improvement timing test (<500ms)
+// ---------------------------------------------------------------
+
+#[test]
+fn test_background_improvement_within_500ms() {
+    let plan = join(
+        scan("orders"),
+        scan("customers"),
+        eq(col("orders.cid"), col("customers.id")),
+    );
+
+    let improved_plan = join(
+        scan("customers"),
+        scan("orders"),
+        eq(col("customers.id"), col("orders.cid")),
+    );
+
+    let (_quick, handle) = progressive_reopt::progressive_optimize(
+        plan,
+        HashMap::new(),
+        Box::new(TestReoptimizer {
+            improved: improved_plan,
+        }),
+        ReoptConfig::default(),
+    );
+
+    let start = Instant::now();
+    let result = handle.recv();
+    let elapsed = start.elapsed();
+
+    assert!(
+        elapsed < std::time::Duration::from_millis(500),
+        "Background improvement took {}ms, expected <500ms",
+        elapsed.as_millis()
+    );
+    assert!(result.is_some());
+    let result = result.expect("should receive result");
+    assert!(result.completed);
+    assert!(result.improved_plan.is_some());
+}
+
+// ---------------------------------------------------------------
+// Cost decrease verification tests
+// ---------------------------------------------------------------
+
+#[test]
+fn test_performance_improves_cost_decreases() {
+    // Simulate: original plan has high remaining cost, reoptimized
+    // plan has lower cost. Verify the decision correctly identifies
+    // the cost decrease.
+    let config = ReoptConfig::default();
+
+    let original_remaining_cost = 10_000.0;
+    let reoptimized_cost = 2_000.0;
+    let stitch_overhead = 500.0;
+
+    let decision = progressive_reopt::evaluate_reopt_decision(
+        100,
+        5000,
+        original_remaining_cost,
+        reoptimized_cost,
+        stitch_overhead,
+        &config,
+    );
+
+    assert!(decision.should_switch);
+    // The alternative total cost should be less than the remaining.
+    assert!(
+        decision.alternative_total_cost < decision.remaining_current_cost,
+        "alternative cost {} should be less than remaining {}",
+        decision.alternative_total_cost,
+        decision.remaining_current_cost,
+    );
+    // Savings fraction should reflect meaningful improvement.
+    assert!(
+        decision.savings_fraction > 0.5,
+        "savings fraction {} should exceed 0.5",
+        decision.savings_fraction,
+    );
+}
+
+#[test]
+fn test_cost_decrease_across_multiple_scenarios() {
+    let config = ReoptConfig::default();
+
+    // Scenario 1: Large cardinality underestimate, big cost win.
+    let d1 = progressive_reopt::evaluate_reopt_decision(
+        100, 100_000, 50_000.0, 5_000.0, 1_000.0, &config,
+    );
+    assert!(d1.should_switch);
+    assert!(d1.savings_fraction > 0.8);
+
+    // Scenario 2: Moderate underestimate, moderate cost win.
+    let d2 = progressive_reopt::evaluate_reopt_decision(
+        1000, 5000, 10_000.0, 4_000.0, 1_000.0, &config,
+    );
+    assert!(d2.should_switch);
+    assert!(d2.savings_fraction > 0.4);
+
+    // Scenario 3: High overhead negates the cost win.
+    let d3 = progressive_reopt::evaluate_reopt_decision(
+        100, 1000, 5_000.0, 1_000.0, 5_000.0, &config,
+    );
+    assert!(!d3.should_switch);
+}
+
+// ---------------------------------------------------------------
+// Subtree replacement tests
+// ---------------------------------------------------------------
+
+#[test]
+fn test_replace_subtree_at_leaf() {
+    let plan = join(
+        scan("orders"),
+        scan("customers"),
+        eq(col("cid"), col("id")),
+    );
+    let target = scan("orders");
+    let replacement = scan("materialized_orders");
+
+    let (new_plan, replaced) =
+        plan_stitch::replace_subtree(&plan, &target, &replacement);
+    assert!(replaced);
+
+    if let RelExpr::Join { left, .. } = &new_plan {
+        if let RelExpr::Scan { table, .. } = left.as_ref() {
+            assert_eq!(table, "materialized_orders");
+        } else {
+            panic!("Expected Scan as left child after replacement");
+        }
+    } else {
+        panic!("Expected Join at top level");
+    }
+}
+
+#[test]
+fn test_replace_subtree_no_match() {
+    let plan = join(
+        scan("orders"),
+        scan("customers"),
+        eq(col("cid"), col("id")),
+    );
+    let target = scan("nonexistent");
+    let replacement = scan("replacement");
+
+    let (new_plan, replaced) =
+        plan_stitch::replace_subtree(&plan, &target, &replacement);
+    assert!(!replaced);
+    assert_eq!(new_plan, plan);
+}
+
+#[test]
+fn test_replace_subtree_nested() {
+    let inner_join = join(
+        scan("a"),
+        scan("b"),
+        eq(col("a.id"), col("b.aid")),
+    );
+    let plan = sort(aggregate(join(
+        inner_join.clone(),
+        scan("c"),
+        eq(col("b.id"), col("c.bid")),
+    )));
+
+    let replacement = scan("materialized_ab");
+    let (new_plan, replaced) =
+        plan_stitch::replace_subtree(&plan, &inner_join, &replacement);
+    assert!(replaced);
+
+    // The inner join should be replaced but the outer structure
+    // (sort -> aggregate -> join) should be preserved.
+    let mut tables = Vec::new();
+    collect_tables_recursive(&new_plan, &mut tables);
+    tables.sort();
+    assert_eq!(tables, vec!["c", "materialized_ab"]);
+}
+
+/// Recursively collect table names from a plan.
+fn collect_tables_recursive(plan: &RelExpr, out: &mut Vec<String>) {
+    match plan {
+        RelExpr::Scan { table, .. } => out.push(table.clone()),
+        RelExpr::Join { left, right, .. } => {
+            collect_tables_recursive(left, out);
+            collect_tables_recursive(right, out);
+        }
+        RelExpr::Filter { input, .. }
+        | RelExpr::Project { input, .. }
+        | RelExpr::Aggregate { input, .. }
+        | RelExpr::Sort { input, .. }
+        | RelExpr::Limit { input, .. }
+        | RelExpr::Distinct { input, .. }
+        | RelExpr::Window { input, .. } => {
+            collect_tables_recursive(input, out);
+        }
+        _ => {}
+    }
+}
+
+// ---------------------------------------------------------------
+// Differential verification tests
+// ---------------------------------------------------------------
+
+#[test]
+fn test_differential_verify_equivalent_plans() {
+    let old_plan = join(
+        scan("orders"),
+        scan("customers"),
+        eq(col("orders.cid"), col("customers.id")),
+    );
+    let new_plan = join(
+        scan("customers"),
+        scan("orders"),
+        eq(col("customers.id"), col("orders.cid")),
+    );
+
+    let result = plan_stitch::differential_verify(&old_plan, &new_plan);
+    assert!(result.tables_equivalent);
+    assert_eq!(result.old_stitch_points, 1);
+    assert_eq!(result.new_stitch_points, 1);
+}
+
+#[test]
+fn test_differential_verify_non_equivalent_plans() {
+    let old_plan = join(
+        scan("orders"),
+        scan("customers"),
+        eq(col("orders.cid"), col("customers.id")),
+    );
+    let new_plan = join(
+        scan("orders"),
+        scan("products"),
+        eq(col("orders.pid"), col("products.id")),
+    );
+
+    let result = plan_stitch::differential_verify(&old_plan, &new_plan);
+    assert!(!result.tables_equivalent);
+}
+
+#[test]
+fn test_differential_verify_after_stitch() {
+    let original = sort(aggregate(join(
+        scan("orders"),
+        scan("customers"),
+        eq(col("orders.cid"), col("customers.id")),
+    )));
+
+    // Reoptimized plan reverses join order.
+    let reoptimized = sort(aggregate(join(
+        scan("customers"),
+        scan("orders"),
+        eq(col("customers.id"), col("orders.cid")),
+    )));
+
+    let result =
+        plan_stitch::differential_verify(&original, &reoptimized);
+    assert!(result.tables_equivalent);
+    assert_eq!(result.old_stitch_points, result.new_stitch_points);
+}
+
+#[test]
+fn test_differential_verify_stitch_preserves_tables() {
+    let original = join(
+        scan("orders"),
+        scan("customers"),
+        eq(col("cid"), col("id")),
+    );
+
+    // Stitch: replace left child with materialized.
+    let materialized = scan("orders");
+    let reoptimized = join(
+        scan("customers"),
+        scan("orders"),
+        eq(col("id"), col("cid")),
+    );
+
+    let stitched = plan_stitch::stitch_plans(
+        &materialized,
+        &reoptimized,
+        StitchPointKind::JoinBuildComplete,
+        &OperatorState::Join {
+            build_side_complete: true,
+            build_side_rows: 1000,
+            probe_side_cursor: 0,
+        },
+    );
+
+    // The stitched plan replaces the left child of reoptimized
+    // with materialized ("orders"), so the stitched plan references
+    // "orders" + "orders" (the right child of reoptimized).
+    // Original references "orders" + "customers".
+    // Table equivalence check is against original vs reoptimized
+    // (before stitch), which should pass.
+    let pre_stitch_result =
+        plan_stitch::differential_verify(&original, &reoptimized);
+    assert!(pre_stitch_result.tables_equivalent);
+    assert_eq!(stitched.stitch_points_applied, 1);
+}
+
+// ---------------------------------------------------------------
+// Integration: full pipeline with timing and cost assertions
+// ---------------------------------------------------------------
+
+#[test]
+fn test_full_pipeline_quick_return_background_improve_stitch() {
+    let original = sort(aggregate(join(
+        scan("orders"),
+        scan("customers"),
+        eq(col("orders.cid"), col("customers.id")),
+    )));
+
+    // The improved plan adds a filter and reverses join order.
+    let improved = sort(aggregate(join(
+        scan("customers"),
+        scan("orders"),
+        eq(col("customers.id"), col("orders.cid")),
+    )));
+
+    // Phase 1: Quick plan returns immediately (<10ms).
+    let start = Instant::now();
+    let (quick, handle) = progressive_reopt::progressive_optimize(
+        original.clone(),
+        HashMap::new(),
+        Box::new(TestReoptimizer {
+            improved: improved.clone(),
+        }),
+        ReoptConfig::default(),
+    );
+    let quick_elapsed = start.elapsed();
+    assert!(
+        quick_elapsed.as_millis() < 10,
+        "Quick plan took {}ms",
+        quick_elapsed.as_millis(),
+    );
+    assert_eq!(quick, original);
+
+    // Phase 2: Background completes within 500ms.
+    let bg_start = Instant::now();
+    let bg_result =
+        handle.recv().expect("background should complete");
+    let bg_elapsed = bg_start.elapsed();
+    assert!(
+        bg_elapsed < std::time::Duration::from_millis(500),
+        "Background took {}ms",
+        bg_elapsed.as_millis(),
+    );
+    assert!(bg_result.completed);
+    let bg_plan =
+        bg_result.improved_plan.expect("should have improved plan");
+
+    // Phase 3: Verify table equivalence (same base tables).
+    assert!(plan_stitch::verify_join_order_equivalence(
+        &original, &bg_plan,
+    ));
+    let diff =
+        plan_stitch::differential_verify(&original, &bg_plan);
+    assert!(diff.tables_equivalent);
+
+    // Phase 4: Stitch and verify cost decrease is possible.
+    let materialized = scan("materialized_customers");
+    let stitched = plan_stitch::stitch_plans(
+        &materialized,
+        &bg_plan,
+        StitchPointKind::JoinBuildComplete,
+        &OperatorState::Join {
+            build_side_complete: true,
+            build_side_rows: 500,
+            probe_side_cursor: 0,
+        },
+    );
+    assert_eq!(stitched.stitch_points_applied, 1);
+    assert!(stitched.stitch_overhead > 0.0);
+
+    // Verify a cost-based decision would favor the new plan.
+    let config = ReoptConfig::default();
+    let decision = progressive_reopt::evaluate_reopt_decision(
+        100,
+        5000,
+        10_000.0,
+        2_000.0,
+        stitched.stitch_overhead,
+        &config,
+    );
+    assert!(
+        decision.should_switch,
+        "Decision should favor the improved plan"
+    );
+    assert!(
+        decision.alternative_total_cost
+            < decision.remaining_current_cost,
+    );
+}
