@@ -12,12 +12,16 @@
 //!   and FPGA streaming operators.
 //! - Detailed hardware models for CPU, memory, storage, and GPU components.
 //! - 20+ predefined hardware profiles for various workloads.
+//! - [`benchmark`] module for hardware microbenchmarks (RFC 0068).
+//! - [`calibration`] module converting measurements into cost coefficients.
 
 #![warn(missing_docs)]
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 #![allow(clippy::similar_names)]
 
+pub mod benchmark;
+pub mod calibration;
 pub mod cost;
 pub mod cpu;
 pub mod detection;
@@ -30,6 +34,8 @@ pub mod profile;
 pub mod profiles;
 pub mod storage;
 
+pub use benchmark::{BenchmarkConfig, HardwareMeasurements};
+pub use calibration::CalibratedCostModel;
 pub use cost::HardwareCostModel;
 pub use cpu::{CacheHierarchy, CpuArchitecture, CpuModel, SimdCapability};
 pub use detection::detect_hardware;
