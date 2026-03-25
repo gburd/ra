@@ -62,6 +62,7 @@ impl DialectVersion {
             Dialect::MsSql => (16, 0),
             Dialect::Oracle => (23, 0),
             Dialect::DuckDb => (1, 1),
+            #[cfg(feature = "polyglot-backend")]
             _ => (1, 0), // Default version for unknown dialects
         };
         Self {
@@ -81,6 +82,7 @@ impl DialectVersion {
             Dialect::MsSql => true, // OUTPUT clause
             Dialect::Oracle => self.major >= 12,
             Dialect::DuckDb => true,
+            #[cfg(feature = "polyglot-backend")]
             _ => false, // Conservative default for unknown dialects
         }
     }
@@ -95,6 +97,7 @@ impl DialectVersion {
             Dialect::MsSql => true,
             Dialect::Oracle => true,
             Dialect::DuckDb => true,
+            #[cfg(feature = "polyglot-backend")]
             _ => true, // Most modern databases support CTE
         }
     }
@@ -109,6 +112,7 @@ impl DialectVersion {
             Dialect::MsSql => true,
             Dialect::Oracle => true,
             Dialect::DuckDb => true,
+            #[cfg(feature = "polyglot-backend")]
             _ => true, // Most modern databases support window functions
         }
     }
@@ -722,6 +726,7 @@ impl DialectTranslator {
                 });
                 make_concat_call(left, right)
             }
+            #[cfg(feature = "polyglot-backend")]
             _ => {
                 // Default to || operator for unknown dialects
                 Expr::BinaryOp {

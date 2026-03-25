@@ -214,10 +214,6 @@ impl Dialect {
         Self::Dune,
     ];
 
-    /// All supported dialects.
-    #[cfg(not(feature = "polyglot-backend"))]
-    pub const ALL: [Self; 6] = Self::ALL_CORE;
-
     /// Returns the `sqlparser` dialect implementation for
     /// parsing.
     #[must_use]
@@ -330,6 +326,7 @@ impl Dialect {
         match self {
             Self::PostgreSql | Self::DuckDb | Self::MsSql | Self::Oracle => true,
             Self::MySql | Self::Sqlite => false,
+            #[cfg(feature = "polyglot-backend")]
             _ => true, // Most modern databases support FULL OUTER JOIN
         }
     }
@@ -373,6 +370,7 @@ impl Dialect {
         match self {
             Self::PostgreSql | Self::MySql | Self::DuckDb => true,
             Self::Sqlite | Self::MsSql | Self::Oracle => false,
+            #[cfg(feature = "polyglot-backend")]
             _ => false, // Conservative default for unknown dialects
         }
     }
@@ -384,6 +382,7 @@ impl Dialect {
         match self {
             Self::PostgreSql | Self::DuckDb | Self::Sqlite => true,
             Self::MySql | Self::MsSql | Self::Oracle => false,
+            #[cfg(feature = "polyglot-backend")]
             _ => false, // Conservative default for unknown dialects
         }
     }
@@ -409,6 +408,7 @@ impl Dialect {
         match self {
             Self::PostgreSql | Self::DuckDb | Self::Oracle => true,
             Self::MySql | Self::Sqlite | Self::MsSql => false,
+            #[cfg(feature = "polyglot-backend")]
             _ => true, // Most modern databases support NULLS FIRST/LAST
         }
     }
@@ -429,6 +429,7 @@ impl Dialect {
             Self::MySql | Self::MsSql => false,
             Self::Sqlite => true, // since 3.35
             Self::Oracle => true, // since 12c
+            #[cfg(feature = "polyglot-backend")]
             _ => false, // Conservative default for unknown dialects
         }
     }

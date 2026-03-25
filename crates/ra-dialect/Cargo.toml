@@ -16,7 +16,7 @@ tracing = { workspace = true }
 polyglot-sql = { version = "0.2.0", optional = true }
 
 [features]
-default = []
+default = ["polyglot-backend"]
 polyglot-backend = ["polyglot-sql"]
 
 [dev-dependencies]

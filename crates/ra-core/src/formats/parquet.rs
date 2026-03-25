@@ -262,9 +262,8 @@ fn extract_column_encoding(
         ColumnEncoding::RunLength
     } else if encodings.contains(&Encoding::BYTE_STREAM_SPLIT) {
         ColumnEncoding::ByteStreamSplit
-    } else if encodings.contains(&Encoding::BIT_PACKED) {
-        ColumnEncoding::BitPacked
     } else {
+        // Note: BIT_PACKED is deprecated - RLE hybrid handles bit-packing
         ColumnEncoding::Plain
     };
 

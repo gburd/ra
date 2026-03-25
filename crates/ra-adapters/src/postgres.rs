@@ -17,13 +17,34 @@ type PgVersion = (u32, u32, u32);
 ///
 /// Connects to `PostgreSQL` databases to gather statistics from
 /// `pg_stats`, `pg_class`, and `information_schema` tables.
-#[derive(Debug)]
 pub struct PostgresAdapter {
     connection_string: Option<String>,
     #[cfg(feature = "postgres")]
-    client: Option<Client>,
+    client: Option<std::sync::Mutex<Client>>,
     version: Option<PgVersion>,
     facts: PostgresFacts,
+}
+
+impl std::fmt::Debug for PostgresAdapter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        #[cfg(feature = "postgres")]
+        {
+            f.debug_struct("PostgresAdapter")
+                .field("connection_string", &self.connection_string)
+                .field("client", &self.client.as_ref().map(|_| "<connected>"))
+                .field("version", &self.version)
+                .field("facts", &self.facts)
+                .finish()
+        }
+        #[cfg(not(feature = "postgres"))]
+        {
+            f.debug_struct("PostgresAdapter")
+                .field("connection_string", &self.connection_string)
+                .field("version", &self.version)
+                .field("facts", &self.facts)
+                .finish()
+        }
+    }
 }
 
 /// Internal storage for gathered facts, enabling `FactsProvider`
@@ -349,7 +370,7 @@ impl PostgresAdapter {
                     ))
                 })?;
 
-        self.client = Some(client);
+        self.client = Some(std::sync::Mutex::new(client));
         self.connection_string =
             Some(connection_string.to_string());
 
@@ -373,12 +394,13 @@ impl PostgresAdapter {
     fn query_version(
         &mut self,
     ) -> Result<String, AdapterError> {
-        let client =
-            self.client.as_mut().ok_or_else(|| {
+        let client_mutex =
+            self.client.as_ref().ok_or_else(|| {
                 AdapterError::ConnectionError(
                     "Not connected".into(),
                 )
             })?;
+        let mut client = client_mutex.lock().unwrap();
         let row = client
             .query_one("SELECT version()", &[])
             .map_err(|e| {
@@ -391,12 +413,13 @@ impl PostgresAdapter {
     }
 
     fn ping(&mut self) -> Result<(), AdapterError> {
-        let client =
-            self.client.as_mut().ok_or_else(|| {
+        let client_mutex =
+            self.client.as_ref().ok_or_else(|| {
                 AdapterError::ConnectionError(
                     "Not connected".into(),
                 )
             })?;
+        let mut client = client_mutex.lock().unwrap();
         client.query_one("SELECT 1", &[]).map_err(|e| {
             AdapterError::ConnectionError(format!(
                 "Connection check failed: {e}"
@@ -409,12 +432,13 @@ impl PostgresAdapter {
         &mut self,
     ) -> Result<HashMap<String, TableStats>, AdapterError>
     {
-        let client =
-            self.client.as_mut().ok_or_else(|| {
+        let client_mutex =
+            self.client.as_ref().ok_or_else(|| {
                 AdapterError::ConnectionError(
                     "Not connected".into(),
                 )
             })?;
+        let mut client = client_mutex.lock().unwrap();
 
         let rows = client
             .query(
@@ -494,12 +518,13 @@ impl PostgresAdapter {
         table: &str,
     ) -> Result<HashMap<String, ColumnStats>, AdapterError>
     {
-        let client =
-            self.client.as_mut().ok_or_else(|| {
+        let client_mutex =
+            self.client.as_ref().ok_or_else(|| {
                 AdapterError::ConnectionError(
                     "Not connected".into(),
                 )
             })?;
+        let mut client = client_mutex.lock().unwrap();
 
         let rows = client
             .query(
@@ -575,12 +600,13 @@ impl PostgresAdapter {
     fn get_schema_info_real(
         &mut self,
     ) -> Result<SchemaInfo, AdapterError> {
-        let client =
-            self.client.as_mut().ok_or_else(|| {
+        let client_mutex =
+            self.client.as_ref().ok_or_else(|| {
                 AdapterError::ConnectionError(
                     "Not connected".into(),
                 )
             })?;
+        let mut client = client_mutex.lock().unwrap();
 
         // 1. Columns
         let col_rows = client

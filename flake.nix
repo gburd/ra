@@ -90,12 +90,13 @@
             echo "  cargo test           - Run tests"
             echo "  cargo clippy         - Run linter"
             echo "  cargo fmt            - Format code"
-            echo "  cargo docs           - Serve documentation locally"
             echo "  cargo run --bin ra-cli -- <args>"
             echo ""
-            echo "Documentation:"
-            echo "  cargo docs           - Serve docs at http://localhost:5173"
-            echo "  nix run .#docs       - Alternative using nix"
+            echo "Web & Documentation:"
+            echo "  nix run .#web        - Start ra-web demo server (http://localhost:8000)"
+            echo "  nix run .#web-dev    - Start ra-web with auto-reload"
+            echo "  nix run .#docs       - Serve docs (http://localhost:5173/ra/)"
+            echo "  nix run .#docs-build - Build docs for deployment"
             echo ""
           '';
 
@@ -127,13 +128,17 @@
             type = "app";
             program = toString (pkgs.writeShellScript "serve-docs" ''
               set -e
-              cd ${./.}/docs
+              cd docs
 
-              # Install npm dependencies if needed
-              if [ ! -d node_modules ]; then
-                echo "📦 Installing npm dependencies..."
-                ${pkgs.nodejs_20}/bin/npm install
+              # Clean and reinstall to avoid rollup native module issues
+              if [ -d node_modules ]; then
+                echo "🧹 Cleaning old node_modules..."
+                rm -rf node_modules package-lock.json
               fi
+
+              echo "📦 Installing dependencies with pnpm..."
+              ${pkgs.nodePackages.pnpm}/bin/pnpm install --frozen-lockfile || \
+                ${pkgs.nodePackages.pnpm}/bin/pnpm install
 
               echo "📚 Starting documentation server..."
               echo ""
@@ -143,7 +148,7 @@
               echo "Press Ctrl+C to stop the server"
               echo ""
 
-              exec ${pkgs.nodejs_20}/bin/npm run dev
+              exec ${pkgs.nodePackages.pnpm}/bin/pnpm run dev
             '');
           };
 
@@ -153,19 +158,65 @@
             type = "app";
             program = toString (pkgs.writeShellScript "build-docs" ''
               set -e
-              cd ${./.}/docs
+              cd docs
 
-              # Install npm dependencies if needed
+              # Install pnpm dependencies if needed
               if [ ! -d node_modules ]; then
-                echo "📦 Installing npm dependencies..."
-                ${pkgs.nodejs_20}/bin/npm install
+                echo "📦 Installing pnpm dependencies..."
+                ${pkgs.nodePackages.pnpm}/bin/pnpm install
               fi
 
               echo "📚 Building documentation..."
-              ${pkgs.nodejs_20}/bin/npm run build:docs
+              ${pkgs.nodePackages.pnpm}/bin/pnpm run build:docs
 
               echo "✅ Documentation built successfully!"
               echo "   Output: docs/.vitepress/dist/"
+            '');
+          };
+
+          # Serve ra-web demo server
+          # Usage: nix run .#web
+          web = {
+            type = "app";
+            program = toString (pkgs.writeShellScript "serve-web" ''
+              set -e
+
+              echo "🌐 Building ra-web server..."
+              ${rustToolchain}/bin/cargo build --release --bin ra-web
+
+              echo ""
+              echo "🚀 Starting ra-web server..."
+              echo ""
+              echo "Demo interface will be available at:"
+              echo "   http://localhost:8000/"
+              echo ""
+              echo "API endpoints:"
+              echo "   POST /api/optimize     - Optimize SQL query"
+              echo "   POST /api/translate    - Translate between SQL dialects"
+              echo "   GET  /api/health       - Health check"
+              echo ""
+              echo "Press Ctrl+C to stop the server"
+              echo ""
+
+              exec ${rustToolchain}/bin/cargo run --release --bin ra-web
+            '');
+          };
+
+          # Build and run ra-web in development mode
+          # Usage: nix run .#web-dev
+          web-dev = {
+            type = "app";
+            program = toString (pkgs.writeShellScript "serve-web-dev" ''
+              set -e
+
+              echo "🌐 Starting ra-web in development mode..."
+              echo ""
+              echo "Demo interface: http://localhost:8000/"
+              echo ""
+              echo "Press Ctrl+C to stop"
+              echo ""
+
+              exec ${rustToolchain}/bin/cargo watch -x "run --bin ra-web"
             '');
           };
         };

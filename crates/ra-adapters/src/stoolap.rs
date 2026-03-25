@@ -141,12 +141,31 @@ impl FactsProvider for StoolapFacts {
 ///   connections via the stoolap crate
 /// - Without: stores the connection string but cannot
 ///   gather live statistics
-#[derive(Debug)]
 pub struct StoolapAdapter {
     connection_string: Option<String>,
     #[cfg(feature = "stoolap")]
     db: Option<Database>,
     facts: StoolapFacts,
+}
+
+impl std::fmt::Debug for StoolapAdapter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        #[cfg(feature = "stoolap")]
+        {
+            f.debug_struct("StoolapAdapter")
+                .field("connection_string", &self.connection_string)
+                .field("db", &self.db.as_ref().map(|_| "<connected>"))
+                .field("facts", &self.facts)
+                .finish()
+        }
+        #[cfg(not(feature = "stoolap"))]
+        {
+            f.debug_struct("StoolapAdapter")
+                .field("connection_string", &self.connection_string)
+                .field("facts", &self.facts)
+                .finish()
+        }
+    }
 }
 
 impl StoolapAdapter {

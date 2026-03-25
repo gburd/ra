@@ -52,6 +52,7 @@ pub fn build_function_map(target: Dialect) -> HashMap<String, FunctionMapping> {
         Dialect::Oracle => {
             build_oracle_functions(&mut map);
         }
+        #[cfg(feature = "polyglot-backend")]
         _ => {
             // Unknown dialects use PostgreSQL-compatible function names
         }
@@ -163,6 +164,7 @@ pub fn concat_operator(target: Dialect) -> &'static str {
         Dialect::PostgreSql | Dialect::Sqlite | Dialect::DuckDb | Dialect::Oracle => "||",
         Dialect::MsSql => "+",
         Dialect::MySql => "CONCAT",
+        #[cfg(feature = "polyglot-backend")]
         _ => "||", // SQL standard
     }
 }
@@ -175,6 +177,7 @@ pub fn current_timestamp_expr(target: Dialect) -> &'static str {
         Dialect::MySql => "NOW()",
         Dialect::MsSql => "GETDATE()",
         Dialect::Oracle => "SYSDATE",
+        #[cfg(feature = "polyglot-backend")]
         _ => "CURRENT_TIMESTAMP", // SQL standard
     }
 }
@@ -189,6 +192,7 @@ pub fn length_function(target: Dialect) -> &'static str {
         | Dialect::DuckDb
         | Dialect::Oracle => "LENGTH",
         Dialect::MsSql => "LEN",
+        #[cfg(feature = "polyglot-backend")]
         _ => "LENGTH", // SQL standard
     }
 }
