@@ -30,19 +30,20 @@
 pub mod adaptive_calibration;
 pub mod analysis;
 pub mod cardinality_cost;
-// pub mod column_pruning; // TODO: incomplete, has invalid egg syntax
+// pub mod column_pruning; // TODO: Fix ProjectionColumn type errors
 pub mod consensus_rules;
 pub mod constraint_optimizer;
 pub mod cost;
 pub mod count_metadata;
 pub mod covering_index;
+pub mod documentdb_optimizer;
 pub mod differential;
 pub mod distributed_optimizer;
 pub mod egraph;
 pub mod executors;
 pub mod extract;
 pub mod facts_context;
-// pub mod functional_deps; // TODO: incomplete, has invalid egg syntax
+// pub mod functional_deps; // TODO: Fix egg syntax issues
 pub mod incremental_sort;
 pub mod isolation_cost;
 pub mod join_transformations;
@@ -69,7 +70,7 @@ pub mod join_graph;
 pub mod precondition_eval;
 pub mod stats_cache;
 pub mod recursive;
-// pub mod redundant_join; // TODO: incomplete, has invalid egg syntax
+// pub mod redundant_join; // TODO: Fix egg syntax conditionals
 pub mod resource_budget;
 pub mod resource_profiles;
 pub mod rewrite;
@@ -78,7 +79,7 @@ pub mod rule_metadata;
 pub mod rule_priority;
 pub mod rule_registry;
 pub mod runtime_filters;
-// pub mod semi_join; // TODO: incomplete, has invalid egg syntax
+// pub mod semi_join; // TODO: Fix egg syntax for conditional patterns
 pub mod timely;
 pub mod trigger_optimizer;
 
@@ -177,6 +178,15 @@ pub use runtime_filters::{
 };
 pub use covering_index::{
     covering_index_rules, index_only_scan_cost_factor,
+};
+pub use documentdb_optimizer::{
+    BsonOperator, BsonPredicate, DocumentDbError,
+    GinBsonCostParams, GinIndexRecommendation, QueryPattern,
+    SelectivityEstimate, SelectivitySource,
+    combine_selectivities, compound_gin_scan_cost,
+    documentdb_rewrite_rules, estimate_selectivity,
+    gin_bson_scan_cost_factor, gin_scan_cost, gin_vs_sequential_ratio,
+    recommend_gin_indexes, sequential_scan_cost,
 };
 pub use isolation_cost::{
     IsolationCostConfig, PlanEstimates, isolation_cost_adjustment,

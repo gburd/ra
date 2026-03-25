@@ -84,6 +84,11 @@ pub fn all_rules_unsorted() -> Vec<Rewrite<RelLang, RelAnalysis>> {
         crate::shortcuts::min_max_index::min_max_index_rules(),
     );
 
+    // DocumentDB / BSON query optimization rules (RFC 0062)
+    rules.extend(
+        crate::documentdb_optimizer::documentdb_rewrite_rules(),
+    );
+
     rules
 }
 
