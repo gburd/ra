@@ -34,6 +34,9 @@ pub enum IndexType {
     GiST,
     /// BRIN index (block range index, for large sorted tables).
     BRIN,
+    /// RUM index (GIN extension with distance ordering for ranked
+    /// text search and KNN).
+    RUM,
 }
 
 impl std::fmt::Display for IndexType {
@@ -44,6 +47,7 @@ impl std::fmt::Display for IndexType {
             Self::GIN => write!(f, "GIN"),
             Self::GiST => write!(f, "GiST"),
             Self::BRIN => write!(f, "BRIN"),
+            Self::RUM => write!(f, "RUM"),
         }
     }
 }
@@ -96,6 +100,7 @@ impl IndexCandidate {
             IndexType::Hash => "_hash",
             IndexType::GIN => "_gin",
             IndexType::GiST => "_gist",
+            IndexType::RUM => "_rum",
             IndexType::BTree => "",
         };
         format!("idx_{}_{}{}", self.table, self.columns.join("_"), suffix)
@@ -121,6 +126,7 @@ impl IndexCandidate {
             IndexType::GIN => sql.push_str(" USING GIN"),
             IndexType::GiST => sql.push_str(" USING GIST"),
             IndexType::BRIN => sql.push_str(" USING BRIN"),
+            IndexType::RUM => sql.push_str(" USING RUM"),
         }
 
         sql.push('(');
