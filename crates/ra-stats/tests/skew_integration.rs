@@ -173,7 +173,7 @@ fn active_inactive_status_skew() {
         },
     ]);
     let d = SkewDetector::default();
-    let analysis = d.analyze("status", &h);
+    let _analysis = d.analyze("status", &h);
 
     // 'active' at 9M vs avg ~2.5M = ratio ~3.6
     // With threshold 10.0, this may not be detected
@@ -349,7 +349,7 @@ fn two_values_extremely_skewed() {
         },
     ]);
     let d = SkewDetector::default();
-    let analysis = d.analyze("binary_col", &h);
+    let _analysis = d.analyze("binary_col", &h);
     // avg = 50M, threshold 10x = 500M, common at ~100M < 500M
     // But with only 2 values, the avg is dominated by common
     // This is actually expected behavior: with 2 values, the hot

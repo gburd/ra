@@ -9,7 +9,7 @@
 use ra_core::statistics::Statistics;
 use ra_engine::egraph::{to_rec_expr, OptimizerConfig, RelLang};
 use ra_engine::analysis::RelAnalysis;
-use ra_engine::extract::{extract_best, RelCostFn};
+use ra_engine::extract::extract_best;
 use ra_engine::rewrite::all_rules;
 use ra_engine::stats_cache::StatsCache;
 use ra_parser::sql_to_relexpr;
