@@ -330,6 +330,7 @@ impl Dialect {
         match self {
             Self::PostgreSql | Self::DuckDb | Self::MsSql | Self::Oracle => true,
             Self::MySql | Self::Sqlite => false,
+            _ => true, // Most modern databases support FULL OUTER JOIN
         }
     }
 
@@ -372,6 +373,7 @@ impl Dialect {
         match self {
             Self::PostgreSql | Self::MySql | Self::DuckDb => true,
             Self::Sqlite | Self::MsSql | Self::Oracle => false,
+            _ => false, // Conservative default for unknown dialects
         }
     }
 
@@ -382,6 +384,7 @@ impl Dialect {
         match self {
             Self::PostgreSql | Self::DuckDb | Self::Sqlite => true,
             Self::MySql | Self::MsSql | Self::Oracle => false,
+            _ => false, // Conservative default for unknown dialects
         }
     }
 
@@ -406,6 +409,7 @@ impl Dialect {
         match self {
             Self::PostgreSql | Self::DuckDb | Self::Oracle => true,
             Self::MySql | Self::Sqlite | Self::MsSql => false,
+            _ => true, // Most modern databases support NULLS FIRST/LAST
         }
     }
 

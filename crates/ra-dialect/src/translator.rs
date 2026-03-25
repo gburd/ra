@@ -93,6 +93,7 @@ impl DialectVersion {
             Dialect::MsSql => true,
             Dialect::Oracle => true,
             Dialect::DuckDb => true,
+            _ => true, // Most modern databases support CTE
         }
     }
 
@@ -106,6 +107,7 @@ impl DialectVersion {
             Dialect::MsSql => true,
             Dialect::Oracle => true,
             Dialect::DuckDb => true,
+            _ => true, // Most modern databases support window functions
         }
     }
 }
@@ -717,6 +719,14 @@ impl DialectTranslator {
                     hint: None,
                 });
                 make_concat_call(left, right)
+            }
+            _ => {
+                // Default to || operator for unknown dialects
+                Expr::BinaryOp {
+                    left: Box::new(left),
+                    op: ast::BinaryOperator::StringConcat,
+                    right: Box::new(right),
+                }
             }
         }
     }
