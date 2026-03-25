@@ -33,7 +33,9 @@ pub use eviction::EvictionPolicy;
 pub use key::QueryKey;
 pub use metrics::CacheMetrics;
 pub use plan::CachedPlan;
-pub use validity::{DriftReport, DriftStatus, TableDrift};
+pub use validity::{
+    DriftDimension, DriftReport, DriftStatus, PlanDrift, TableDrift,
+};
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

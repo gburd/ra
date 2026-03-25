@@ -98,7 +98,12 @@ pub use federated_cost::FederatedCostModel;
 pub use federated_optimizer::{
     FederatedAnalysis, FederatedError, FederatedOptimizer,
 };
-pub use differential::{IncrementalError, IncrementalOptimizer, RuleChange, RuleId};
+pub use differential::{
+    ChangeSource, FactChange, HistogramDigest, IncrementalError,
+    IncrementalOptimizer, IndexChange, PlanDependencies, ResourceId,
+    RuleChange, RuleId, StalenessThresholds, StatisticsChange,
+    change_ratio,
+};
 pub use egraph::{
     to_rec_expr, EGraphError, IncrementalStats, OptimizationResult,
     OptimizationStatus, Optimizer, OptimizerConfig, RelLang,

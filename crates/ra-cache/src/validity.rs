@@ -1,6 +1,11 @@
 //! Statistics drift detection for cached plans.
+//!
+//! Supports multi-dimensional drift detection (RFC 0059):
+//! row counts, column distinct counts, histogram shapes,
+//! and index presence.
 
 use ra_core::cost::StatisticsProvider;
+use ra_core::statistics::Histogram;
 
 use crate::plan::CachedPlan;
 
@@ -11,9 +16,57 @@ pub enum DriftStatus {
     Fresh,
     /// At least one table has drifted beyond the threshold.
     Stale,
-    /// Statistics are missing for a referenced table (conservative:
-    /// treat as stale).
+    /// Statistics are missing for a referenced table.
     Unknown,
+}
+
+/// Which dimension of statistics drifted (RFC 0059).
+#[derive(Debug, Clone, PartialEq)]
+pub enum DriftDimension {
+    /// Table row count changed.
+    RowCount {
+        /// Table name.
+        table: String,
+        /// Cached row count.
+        old_count: f64,
+        /// Current row count.
+        new_count: f64,
+        /// Fractional drift.
+        drift: f64,
+    },
+    /// Column distinct count changed.
+    DistinctCount {
+        /// Table name.
+        table: String,
+        /// Column name.
+        column: String,
+        /// Cached NDV.
+        old_ndv: f64,
+        /// Current NDV.
+        new_ndv: f64,
+        /// Fractional drift.
+        drift: f64,
+    },
+    /// Histogram shape changed (different bucket count).
+    HistogramShape {
+        /// Table name.
+        table: String,
+        /// Column name.
+        column: String,
+        /// Cached bucket count.
+        old_buckets: usize,
+        /// Current bucket count.
+        new_buckets: usize,
+    },
+    /// Index was added or dropped.
+    IndexPresence {
+        /// Table name.
+        table: String,
+        /// Index name.
+        index_name: String,
+        /// Whether the index was added (true) or dropped.
+        added: bool,
+    },
 }
 
 /// Drift information for a single table.
@@ -27,6 +80,8 @@ pub struct TableDrift {
     pub current_row_count: Option<f64>,
     /// Absolute fractional drift: `|current - cached| / cached`.
     pub drift_fraction: Option<f64>,
+    /// Which dimensions drifted (RFC 0059).
+    pub drifted_dimensions: Vec<DriftDimension>,
 }
 
 /// Aggregated drift report for a plan.
@@ -38,6 +93,8 @@ pub struct PlanDrift {
     pub table_drifts: Vec<TableDrift>,
     /// Maximum drift fraction observed.
     pub max_drift: f64,
+    /// All dimensions that drifted (RFC 0059).
+    pub dimensions: Vec<DriftDimension>,
 }
 
 /// Drift report across all cached plans.
@@ -64,45 +121,149 @@ impl Default for DriftReport {
     }
 }
 
+/// Compute fractional drift between two positive values.
+fn fractional_drift(cached: f64, current: f64) -> f64 {
+    if cached.abs() < f64::EPSILON {
+        if current.abs() < f64::EPSILON {
+            0.0
+        } else {
+            1.0
+        }
+    } else {
+        ((current - cached) / cached).abs()
+    }
+}
+
+/// Count histogram buckets.
+fn bucket_count(hist: &Histogram) -> usize {
+    match hist {
+        Histogram::EquiWidth(h) => h.buckets.len(),
+        Histogram::EquiDepth(h) => h.buckets.len(),
+    }
+}
+
 /// Check whether a cached plan's statistics have drifted.
+///
+/// Now checks row counts, column NDVs, histogram shapes,
+/// and index presence (RFC 0059).
 pub(crate) fn check_plan_drift(
     plan: &CachedPlan,
     current_stats: &dyn StatisticsProvider,
     threshold: f64,
 ) -> PlanDrift {
     let mut table_drifts = Vec::new();
+    let mut all_dimensions = Vec::new();
     let mut max_drift: f64 = 0.0;
     let mut any_stale = false;
     let mut any_unknown = false;
 
     for (table, cached_stats) in &plan.statistics_snapshot {
         let cached_rows = cached_stats.row_count;
+        let mut dims = Vec::new();
 
-        if let Some(current) = current_stats.get_statistics(table)
+        if let Some(current) =
+            current_stats.get_statistics(table)
         {
+            // Row count drift
             let current_rows = current.row_count;
-            let drift = if cached_rows.abs() < f64::EPSILON {
-                if current_rows.abs() < f64::EPSILON {
-                    0.0
-                } else {
-                    1.0
-                }
-            } else {
-                ((current_rows - cached_rows) / cached_rows).abs()
-            };
+            let drift =
+                fractional_drift(cached_rows, current_rows);
 
             if drift > max_drift {
                 max_drift = drift;
             }
             if drift > threshold {
                 any_stale = true;
+                dims.push(DriftDimension::RowCount {
+                    table: table.clone(),
+                    old_count: cached_rows,
+                    new_count: current_rows,
+                    drift,
+                });
             }
+
+            // Column distinct count drift
+            for (col, cached_col) in &cached_stats.columns {
+                if let Some(current_col) =
+                    current.columns.get(col)
+                {
+                    let ndv_drift = fractional_drift(
+                        cached_col.distinct_count,
+                        current_col.distinct_count,
+                    );
+                    if ndv_drift > max_drift {
+                        max_drift = ndv_drift;
+                    }
+                    if ndv_drift > threshold {
+                        any_stale = true;
+                        dims.push(
+                            DriftDimension::DistinctCount {
+                                table: table.clone(),
+                                column: col.clone(),
+                                old_ndv: cached_col
+                                    .distinct_count,
+                                new_ndv: current_col
+                                    .distinct_count,
+                                drift: ndv_drift,
+                            },
+                        );
+                    }
+
+                    // Histogram shape change
+                    if let (Some(old_h), Some(new_h)) = (
+                        &cached_col.histogram,
+                        &current_col.histogram,
+                    ) {
+                        let old_bc = bucket_count(old_h);
+                        let new_bc = bucket_count(new_h);
+                        if old_bc != new_bc {
+                            any_stale = true;
+                            dims.push(
+                                DriftDimension::HistogramShape {
+                                    table: table.clone(),
+                                    column: col.clone(),
+                                    old_buckets: old_bc,
+                                    new_buckets: new_bc,
+                                },
+                            );
+                        }
+                    }
+                }
+            }
+
+            // Index presence changes
+            for idx_name in current.indexes.keys() {
+                if !cached_stats
+                    .indexes
+                    .contains_key(idx_name)
+                {
+                    any_stale = true;
+                    dims.push(DriftDimension::IndexPresence {
+                        table: table.clone(),
+                        index_name: idx_name.clone(),
+                        added: true,
+                    });
+                }
+            }
+            for idx_name in cached_stats.indexes.keys() {
+                if !current.indexes.contains_key(idx_name) {
+                    any_stale = true;
+                    dims.push(DriftDimension::IndexPresence {
+                        table: table.clone(),
+                        index_name: idx_name.clone(),
+                        added: false,
+                    });
+                }
+            }
+
+            all_dimensions.extend(dims.iter().cloned());
 
             table_drifts.push(TableDrift {
                 table: table.clone(),
                 cached_row_count: cached_rows,
                 current_row_count: Some(current_rows),
                 drift_fraction: Some(drift),
+                drifted_dimensions: dims,
             });
         } else {
             any_unknown = true;
@@ -111,6 +272,7 @@ pub(crate) fn check_plan_drift(
                 cached_row_count: cached_rows,
                 current_row_count: None,
                 drift_fraction: None,
+                drifted_dimensions: Vec::new(),
             });
         }
     }
@@ -127,14 +289,22 @@ pub(crate) fn check_plan_drift(
         status,
         table_drifts,
         max_drift,
+        dimensions: all_dimensions,
     }
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::float_cmp)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::float_cmp
+)]
 mod tests {
     use super::*;
-    use ra_core::statistics::Statistics;
+    use ra_core::statistics::{
+        ColumnStats, EquiWidthHistogram, Histogram,
+        HistogramBucket, IndexStats, Statistics,
+    };
     use std::collections::HashMap;
 
     #[derive(Debug)]
@@ -185,26 +355,33 @@ mod tests {
     #[test]
     fn fresh_within_threshold() {
         let plan = make_plan(&[("users", 1000.0)]);
-        let provider = make_provider(&[("users", 1100.0)]);
-        let drift = check_plan_drift(&plan, &provider, 0.2);
+        let provider =
+            make_provider(&[("users", 1100.0)]);
+        let drift =
+            check_plan_drift(&plan, &provider, 0.2);
         assert_eq!(drift.status, DriftStatus::Fresh);
         assert!(drift.max_drift < 0.2);
+        assert!(drift.dimensions.is_empty());
     }
 
     #[test]
     fn stale_beyond_threshold() {
         let plan = make_plan(&[("users", 1000.0)]);
-        let provider = make_provider(&[("users", 1500.0)]);
-        let drift = check_plan_drift(&plan, &provider, 0.2);
+        let provider =
+            make_provider(&[("users", 1500.0)]);
+        let drift =
+            check_plan_drift(&plan, &provider, 0.2);
         assert_eq!(drift.status, DriftStatus::Stale);
         assert!(drift.max_drift >= 0.2);
+        assert!(!drift.dimensions.is_empty());
     }
 
     #[test]
     fn unknown_missing_stats() {
         let plan = make_plan(&[("users", 1000.0)]);
         let provider = make_provider(&[]);
-        let drift = check_plan_drift(&plan, &provider, 0.2);
+        let drift =
+            check_plan_drift(&plan, &provider, 0.2);
         assert_eq!(drift.status, DriftStatus::Unknown);
     }
 
@@ -218,17 +395,19 @@ mod tests {
             ("users", 1050.0),
             ("orders", 10000.0),
         ]);
-        let drift = check_plan_drift(&plan, &provider, 0.2);
+        let drift =
+            check_plan_drift(&plan, &provider, 0.2);
         assert_eq!(drift.status, DriftStatus::Stale);
-        // orders drifted 100%
         assert!(drift.max_drift >= 0.9);
     }
 
     #[test]
     fn zero_cached_rows_current_nonzero() {
         let plan = make_plan(&[("empty", 0.0)]);
-        let provider = make_provider(&[("empty", 100.0)]);
-        let drift = check_plan_drift(&plan, &provider, 0.2);
+        let provider =
+            make_provider(&[("empty", 100.0)]);
+        let drift =
+            check_plan_drift(&plan, &provider, 0.2);
         assert_eq!(drift.status, DriftStatus::Stale);
     }
 
@@ -236,21 +415,204 @@ mod tests {
     fn zero_cached_rows_current_zero() {
         let plan = make_plan(&[("empty", 0.0)]);
         let provider = make_provider(&[("empty", 0.0)]);
-        let drift = check_plan_drift(&plan, &provider, 0.2);
+        let drift =
+            check_plan_drift(&plan, &provider, 0.2);
         assert_eq!(drift.status, DriftStatus::Fresh);
     }
 
     #[test]
     fn table_drift_details() {
         let plan = make_plan(&[("users", 1000.0)]);
-        let provider = make_provider(&[("users", 1300.0)]);
-        let drift = check_plan_drift(&plan, &provider, 0.2);
+        let provider =
+            make_provider(&[("users", 1300.0)]);
+        let drift =
+            check_plan_drift(&plan, &provider, 0.2);
         assert_eq!(drift.table_drifts.len(), 1);
         let td = &drift.table_drifts[0];
         assert_eq!(td.table, "users");
         assert_eq!(td.cached_row_count, 1000.0);
-        assert_eq!(td.current_row_count, Some(1300.0));
-        let frac = td.drift_fraction.expect("should have drift");
+        assert_eq!(
+            td.current_row_count,
+            Some(1300.0)
+        );
+        let frac = td
+            .drift_fraction
+            .expect("should have drift");
         assert!((frac - 0.3).abs() < 1e-10);
+    }
+
+    // ── RFC 0059: Multi-dimensional drift tests ─────────
+
+    #[test]
+    fn ndv_drift_detected() {
+        let mut snapshot = HashMap::new();
+        let mut stats = Statistics::new(1000.0);
+        stats.columns.insert(
+            "city".into(),
+            ColumnStats::new(100.0),
+        );
+        snapshot.insert("users".to_owned(), stats);
+
+        let plan = CachedPlan::new(
+            ra_core::algebra::RelExpr::scan("users"),
+            ra_core::cost::Cost::ZERO,
+            snapshot,
+            "SELECT 1".to_owned(),
+        );
+
+        let mut current_stats = Statistics::new(1000.0);
+        current_stats.columns.insert(
+            "city".into(),
+            ColumnStats::new(500.0),
+        );
+        let provider = TestProvider {
+            tables: [("users".into(), current_stats)]
+                .into_iter()
+                .collect(),
+        };
+
+        let drift =
+            check_plan_drift(&plan, &provider, 0.2);
+        assert_eq!(drift.status, DriftStatus::Stale);
+        assert!(drift.dimensions.iter().any(|d| matches!(
+            d,
+            DriftDimension::DistinctCount {
+                column, ..
+            } if column == "city"
+        )));
+    }
+
+    #[test]
+    fn histogram_shape_drift_detected() {
+        let mut snapshot = HashMap::new();
+        let mut stats = Statistics::new(1000.0);
+        let mut col = ColumnStats::new(100.0);
+        col.histogram =
+            Some(Histogram::EquiWidth(EquiWidthHistogram {
+                buckets: vec![
+                    HistogramBucket {
+                        upper_bound: "50".into(),
+                        row_count: 500.0,
+                        distinct_count: 50.0,
+                    },
+                    HistogramBucket {
+                        upper_bound: "100".into(),
+                        row_count: 500.0,
+                        distinct_count: 50.0,
+                    },
+                ],
+            }));
+        stats.columns.insert("age".into(), col);
+        snapshot.insert("users".to_owned(), stats);
+
+        let plan = CachedPlan::new(
+            ra_core::algebra::RelExpr::scan("users"),
+            ra_core::cost::Cost::ZERO,
+            snapshot,
+            "SELECT 1".to_owned(),
+        );
+
+        let mut current_stats = Statistics::new(1000.0);
+        let mut curr_col = ColumnStats::new(100.0);
+        curr_col.histogram =
+            Some(Histogram::EquiWidth(EquiWidthHistogram {
+                buckets: vec![
+                    HistogramBucket {
+                        upper_bound: "33".into(),
+                        row_count: 333.0,
+                        distinct_count: 33.0,
+                    },
+                    HistogramBucket {
+                        upper_bound: "66".into(),
+                        row_count: 333.0,
+                        distinct_count: 33.0,
+                    },
+                    HistogramBucket {
+                        upper_bound: "100".into(),
+                        row_count: 334.0,
+                        distinct_count: 34.0,
+                    },
+                ],
+            }));
+        current_stats
+            .columns
+            .insert("age".into(), curr_col);
+        let provider = TestProvider {
+            tables: [("users".into(), current_stats)]
+                .into_iter()
+                .collect(),
+        };
+
+        let drift =
+            check_plan_drift(&plan, &provider, 0.2);
+        assert_eq!(drift.status, DriftStatus::Stale);
+        assert!(drift.dimensions.iter().any(|d| matches!(
+            d,
+            DriftDimension::HistogramShape { .. }
+        )));
+    }
+
+    #[test]
+    fn index_added_detected() {
+        let plan = make_plan(&[("orders", 5000.0)]);
+
+        let mut current_stats = Statistics::new(5000.0);
+        current_stats.indexes.insert(
+            "idx_orders_date".into(),
+            IndexStats::new(
+                vec!["order_date".into()],
+                ra_core::facts::IndexType::BTree,
+            ),
+        );
+        let provider = TestProvider {
+            tables: [("orders".into(), current_stats)]
+                .into_iter()
+                .collect(),
+        };
+
+        let drift =
+            check_plan_drift(&plan, &provider, 0.2);
+        assert_eq!(drift.status, DriftStatus::Stale);
+        assert!(drift.dimensions.iter().any(|d| matches!(
+            d,
+            DriftDimension::IndexPresence {
+                added: true,
+                ..
+            }
+        )));
+    }
+
+    #[test]
+    fn index_dropped_detected() {
+        let mut snapshot = HashMap::new();
+        let mut stats = Statistics::new(5000.0);
+        stats.indexes.insert(
+            "idx_orders_date".into(),
+            IndexStats::new(
+                vec!["order_date".into()],
+                ra_core::facts::IndexType::BTree,
+            ),
+        );
+        snapshot.insert("orders".to_owned(), stats);
+
+        let plan = CachedPlan::new(
+            ra_core::algebra::RelExpr::scan("orders"),
+            ra_core::cost::Cost::ZERO,
+            snapshot,
+            "SELECT 1".to_owned(),
+        );
+
+        let provider =
+            make_provider(&[("orders", 5000.0)]);
+        let drift =
+            check_plan_drift(&plan, &provider, 0.2);
+        assert_eq!(drift.status, DriftStatus::Stale);
+        assert!(drift.dimensions.iter().any(|d| matches!(
+            d,
+            DriftDimension::IndexPresence {
+                added: false,
+                ..
+            }
+        )));
     }
 }

@@ -192,6 +192,7 @@ fn bench_oltp_with_cache(c: &mut Criterion) {
             max_entries: 1024,
             similarity_threshold: 0.9,
             enable_fuzzy_matching: true,
+            ..PlanCacheConfig::default()
         },
         ..OptimizerConfig::default()
     };

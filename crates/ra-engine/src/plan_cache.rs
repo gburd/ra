@@ -9,11 +9,16 @@
 //! cache is full, the least-recently-used entry is evicted. Lookup
 //! supports both exact fingerprint matches and fuzzy similarity
 //! matches above a configurable threshold.
+//!
+//! RFC 0059 adds event-driven invalidation: plans can be
+//! hard-evicted or soft-invalidated (marked stale) when statistics
+//! change, without per-access staleness checking.
 
 use std::collections::HashMap;
 
 use ra_core::algebra::RelExpr;
 
+use crate::differential::PlanDependencies;
 use crate::genetic_fingerprint::QueryFingerprint;
 
 /// Configuration for the plan cache.
@@ -27,6 +32,10 @@ pub struct PlanCacheConfig {
     /// Whether to enable fuzzy (similarity-based) matching
     /// in addition to exact fingerprint matching.
     pub enable_fuzzy_matching: bool,
+    /// Hit count threshold above which soft invalidation
+    /// (mark stale) is preferred over hard eviction.
+    /// Default: 100.
+    pub soft_invalidation_hit_threshold: u64,
 }
 
 impl Default for PlanCacheConfig {
@@ -35,6 +44,7 @@ impl Default for PlanCacheConfig {
             max_entries: 1024,
             similarity_threshold: 0.9,
             enable_fuzzy_matching: true,
+            soft_invalidation_hit_threshold: 100,
         }
     }
 }
@@ -50,6 +60,10 @@ struct CacheEntry {
     last_access: u64,
     /// Number of cache hits for this entry.
     hit_count: u64,
+    /// Statistics dependencies for this plan (RFC 0059).
+    dependencies: Option<PlanDependencies>,
+    /// Whether this entry has been soft-invalidated (RFC 0059).
+    stale: bool,
 }
 
 /// Result of a plan cache lookup.
@@ -66,11 +80,13 @@ pub struct CacheLookupResult {
 /// How a cache hit was matched.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CacheMatchType {
-    /// Exact fingerprint match (join graph, predicate, aggregation
-    /// all identical).
+    /// Exact fingerprint match.
     Exact,
     /// Fuzzy match above the similarity threshold.
     Fuzzy,
+    /// Entry found but soft-invalidated (RFC 0059). The caller
+    /// should attempt streaming adjustment before using the plan.
+    Stale,
 }
 
 /// Cache statistics for monitoring.
@@ -88,6 +104,10 @@ pub struct PlanCacheStats {
     pub evictions: u64,
     /// Current number of entries in the cache.
     pub current_entries: usize,
+    /// Plans evicted by differential invalidation (RFC 0059).
+    pub hard_invalidations: u64,
+    /// Plans marked stale for adjustment (RFC 0059).
+    pub soft_invalidations: u64,
 }
 
 impl PlanCacheStats {
@@ -98,7 +118,8 @@ impl PlanCacheStats {
             return 0.0;
         }
         #[allow(clippy::cast_precision_loss)]
-        let hits = (self.exact_hits + self.fuzzy_hits) as f64;
+        let hits =
+            (self.exact_hits + self.fuzzy_hits) as f64;
         #[allow(clippy::cast_precision_loss)]
         let total = self.lookups as f64;
         hits / total
@@ -123,7 +144,9 @@ impl PlanCache {
     #[must_use]
     pub fn new(config: PlanCacheConfig) -> Self {
         Self {
-            exact_index: HashMap::with_capacity(config.max_entries),
+            exact_index: HashMap::with_capacity(
+                config.max_entries,
+            ),
             entries: Vec::with_capacity(config.max_entries),
             access_counter: 0,
             stats: PlanCacheStats::default(),
@@ -139,28 +162,34 @@ impl PlanCache {
 
     /// Look up a plan by fingerprint.
     ///
-    /// Tries exact match first, then fuzzy match if enabled.
-    /// Returns `None` on cache miss.
+    /// Returns `None` on cache miss. If the entry is
+    /// soft-invalidated, returns `CacheMatchType::Stale`.
     pub fn lookup(
         &mut self,
         fingerprint: &QueryFingerprint,
     ) -> Option<CacheLookupResult> {
         self.stats.lookups += 1;
 
-        // Try exact match first
-        if let Some(&idx) = self.exact_index.get(fingerprint) {
+        if let Some(&idx) =
+            self.exact_index.get(fingerprint)
+        {
             self.access_counter += 1;
-            self.entries[idx].last_access = self.access_counter;
+            self.entries[idx].last_access =
+                self.access_counter;
             self.entries[idx].hit_count += 1;
+            let match_type = if self.entries[idx].stale {
+                CacheMatchType::Stale
+            } else {
+                CacheMatchType::Exact
+            };
             self.stats.exact_hits += 1;
             return Some(CacheLookupResult {
                 plan: self.entries[idx].plan.clone(),
-                match_type: CacheMatchType::Exact,
+                match_type,
                 similarity: 1.0,
             });
         }
 
-        // Try fuzzy match if enabled
         if self.config.enable_fuzzy_matching {
             if let Some(result) =
                 self.fuzzy_lookup(fingerprint)
@@ -175,37 +204,140 @@ impl PlanCache {
     }
 
     /// Insert a plan into the cache.
-    ///
-    /// If the fingerprint already exists, the plan is updated.
-    /// If the cache is full, the least-recently-used entry is evicted.
     pub fn insert(
         &mut self,
         fingerprint: QueryFingerprint,
         plan: RelExpr,
     ) {
-        // Update existing entry
-        if let Some(&idx) = self.exact_index.get(&fingerprint) {
+        if let Some(&idx) =
+            self.exact_index.get(&fingerprint)
+        {
             self.access_counter += 1;
             self.entries[idx].plan = plan;
-            self.entries[idx].last_access = self.access_counter;
+            self.entries[idx].last_access =
+                self.access_counter;
+            self.entries[idx].stale = false;
             return;
         }
 
-        // Evict if at capacity
         if self.entries.len() >= self.config.max_entries {
             self.evict_lru();
         }
 
         self.access_counter += 1;
         let idx = self.entries.len();
-        self.exact_index.insert(fingerprint.clone(), idx);
+        self.exact_index
+            .insert(fingerprint.clone(), idx);
         self.entries.push(CacheEntry {
             fingerprint,
             plan,
             last_access: self.access_counter,
             hit_count: 0,
+            dependencies: None,
+            stale: false,
         });
         self.stats.current_entries = self.entries.len();
+    }
+
+    /// Insert a plan with its statistics dependencies (RFC 0059).
+    pub fn insert_with_deps(
+        &mut self,
+        fingerprint: QueryFingerprint,
+        plan: RelExpr,
+        deps: PlanDependencies,
+    ) {
+        if let Some(&idx) =
+            self.exact_index.get(&fingerprint)
+        {
+            self.access_counter += 1;
+            self.entries[idx].plan = plan;
+            self.entries[idx].last_access =
+                self.access_counter;
+            self.entries[idx].dependencies = Some(deps);
+            self.entries[idx].stale = false;
+            return;
+        }
+
+        if self.entries.len() >= self.config.max_entries {
+            self.evict_lru();
+        }
+
+        self.access_counter += 1;
+        let idx = self.entries.len();
+        self.exact_index
+            .insert(fingerprint.clone(), idx);
+        self.entries.push(CacheEntry {
+            fingerprint,
+            plan,
+            last_access: self.access_counter,
+            hit_count: 0,
+            dependencies: Some(deps),
+            stale: false,
+        });
+        self.stats.current_entries = self.entries.len();
+    }
+
+    /// Invalidate specific plans by fingerprint (RFC 0059).
+    ///
+    /// Hot entries (high hit count) are soft-invalidated;
+    /// cold entries are hard-evicted.
+    pub fn invalidate(
+        &mut self,
+        fingerprints: &[QueryFingerprint],
+    ) {
+        let threshold =
+            self.config.soft_invalidation_hit_threshold;
+        for fp in fingerprints {
+            if let Some(&idx) = self.exact_index.get(fp) {
+                if self.entries[idx].hit_count >= threshold {
+                    self.entries[idx].stale = true;
+                    self.stats.soft_invalidations += 1;
+                } else {
+                    self.evict_entry(fp);
+                    self.stats.hard_invalidations += 1;
+                }
+            }
+        }
+    }
+
+    /// Invalidate all plans that depend on a table (RFC 0059).
+    pub fn invalidate_for_table(&mut self, table: &str) {
+        let affected: Vec<QueryFingerprint> = self
+            .entries
+            .iter()
+            .filter(|e| {
+                e.dependencies.as_ref().is_some_and(|d| {
+                    d.table_cardinalities.contains_key(table)
+                })
+            })
+            .map(|e| e.fingerprint.clone())
+            .collect();
+        self.invalidate(&affected);
+    }
+
+    /// Get the dependencies for a cached entry.
+    #[must_use]
+    pub fn get_dependencies(
+        &self,
+        fingerprint: &QueryFingerprint,
+    ) -> Option<&PlanDependencies> {
+        self.exact_index
+            .get(fingerprint)
+            .and_then(|&idx| {
+                self.entries[idx].dependencies.as_ref()
+            })
+    }
+
+    /// Mark a stale entry as fresh again.
+    pub fn mark_fresh(
+        &mut self,
+        fingerprint: &QueryFingerprint,
+    ) {
+        if let Some(&idx) =
+            self.exact_index.get(fingerprint)
+        {
+            self.entries[idx].stale = false;
+        }
     }
 
     /// Remove all entries from the cache.
@@ -233,6 +365,25 @@ impl PlanCache {
         self.entries.is_empty()
     }
 
+    fn evict_entry(
+        &mut self,
+        fingerprint: &QueryFingerprint,
+    ) {
+        if let Some(&idx) =
+            self.exact_index.get(fingerprint)
+        {
+            self.exact_index.remove(fingerprint);
+            self.entries.swap_remove(idx);
+            if idx < self.entries.len() {
+                let moved_fp =
+                    self.entries[idx].fingerprint.clone();
+                self.exact_index.insert(moved_fp, idx);
+            }
+            self.stats.evictions += 1;
+            self.stats.current_entries = self.entries.len();
+        }
+    }
+
     fn fuzzy_lookup(
         &mut self,
         fingerprint: &QueryFingerprint,
@@ -253,7 +404,8 @@ impl PlanCache {
 
         if let Some(idx) = best_idx {
             self.access_counter += 1;
-            self.entries[idx].last_access = self.access_counter;
+            self.entries[idx].last_access =
+                self.access_counter;
             self.entries[idx].hit_count += 1;
             Some(CacheLookupResult {
                 plan: self.entries[idx].plan.clone(),
@@ -270,7 +422,6 @@ impl PlanCache {
             return;
         }
 
-        // Find the entry with the smallest last_access
         let lru_idx = self
             .entries
             .iter()
@@ -279,16 +430,11 @@ impl PlanCache {
             .map(|(i, _)| i)
             .expect("entries is non-empty");
 
-        // Remove from exact index
         self.exact_index
             .remove(&self.entries[lru_idx].fingerprint);
-
-        // Swap-remove from entries vec and fix up the index
-        // for the entry that was moved into the vacated slot
         self.entries.swap_remove(lru_idx);
 
         if lru_idx < self.entries.len() {
-            // The entry that was at the end is now at lru_idx
             let moved_fp =
                 self.entries[lru_idx].fingerprint.clone();
             self.exact_index.insert(moved_fp, lru_idx);
@@ -325,7 +471,9 @@ mod tests {
     ) -> RelExpr {
         RelExpr::scan(table).filter(Expr::BinOp {
             op: BinOp::Gt,
-            left: Box::new(Expr::Column(ColumnRef::new(col))),
+            left: Box::new(Expr::Column(ColumnRef::new(
+                col,
+            ))),
             right: Box::new(Expr::Const(Const::Int(value))),
         })
     }
@@ -342,12 +490,14 @@ mod tests {
                     ColumnRef::qualified("o", "uid"),
                 )),
             },
-            left: Box::new(make_scan_filter("users", "age", value)),
+            left: Box::new(make_scan_filter(
+                "users", "age", value,
+            )),
             right: Box::new(RelExpr::scan("orders")),
         }
     }
 
-    // ── Basic cache operations ───────────────────────────────────
+    // ── Basic cache operations ──────────────────────────────
 
     #[test]
     fn insert_and_exact_lookup() {
@@ -360,8 +510,13 @@ mod tests {
 
         assert!(result.is_some());
         let hit = result.expect("cache should hit");
-        assert_eq!(hit.match_type, CacheMatchType::Exact);
-        assert!((hit.similarity - 1.0).abs() < f64::EPSILON);
+        assert_eq!(
+            hit.match_type,
+            CacheMatchType::Exact
+        );
+        assert!(
+            (hit.similarity - 1.0).abs() < f64::EPSILON
+        );
         assert_eq!(hit.plan, plan);
     }
 
@@ -376,23 +531,24 @@ mod tests {
     #[test]
     fn parameter_variation_hits_cache() {
         let mut cache = PlanCache::with_defaults();
-
-        // Insert plan with value=18
         let plan1 = make_scan_filter("users", "age", 18);
         let fp1 = QueryFingerprint::from_rel_expr(&plan1);
-        cache.insert(fp1, plan1.clone());
+        cache.insert(fp1, plan1);
 
-        // Look up with value=65 -- same fingerprint
         let plan2 = make_scan_filter("users", "age", 65);
         let fp2 = QueryFingerprint::from_rel_expr(&plan2);
         let result = cache.lookup(&fp2);
 
         assert!(result.is_some());
-        let hit = result.expect("parameter variation should hit");
-        assert_eq!(hit.match_type, CacheMatchType::Exact);
+        let hit = result
+            .expect("parameter variation should hit");
+        assert_eq!(
+            hit.match_type,
+            CacheMatchType::Exact
+        );
     }
 
-    // ── LRU eviction ─────────────────────────────────────────────
+    // ── LRU eviction ────────────────────────────────────────
 
     #[test]
     fn lru_eviction_at_capacity() {
@@ -402,15 +558,14 @@ mod tests {
         };
         let mut cache = PlanCache::new(config);
 
-        // Insert 3 entries
         for table in &["t1", "t2", "t3"] {
             let plan = RelExpr::scan(*table);
-            let fp = QueryFingerprint::from_rel_expr(&plan);
+            let fp =
+                QueryFingerprint::from_rel_expr(&plan);
             cache.insert(fp, plan);
         }
         assert_eq!(cache.len(), 3);
 
-        // Access t2 and t3 to make t1 the LRU
         let fp2 = QueryFingerprint::from_rel_expr(
             &RelExpr::scan("t2"),
         );
@@ -420,7 +575,6 @@ mod tests {
         let _ = cache.lookup(&fp2);
         let _ = cache.lookup(&fp3);
 
-        // Insert a 4th entry -> should evict t1
         let plan4 = RelExpr::scan("t4");
         let fp4 = QueryFingerprint::from_rel_expr(&plan4);
         cache.insert(fp4.clone(), plan4);
@@ -428,17 +582,14 @@ mod tests {
         assert_eq!(cache.len(), 3);
         assert!(cache.stats().evictions >= 1);
 
-        // t1 should be gone
         let fp1 = QueryFingerprint::from_rel_expr(
             &RelExpr::scan("t1"),
         );
         assert!(cache.lookup(&fp1).is_none());
-
-        // t4 should be present
         assert!(cache.lookup(&fp4).is_some());
     }
 
-    // ── Statistics tracking ──────────────────────────────────────
+    // ── Statistics tracking ─────────────────────────────────
 
     #[test]
     fn stats_tracking() {
@@ -446,12 +597,10 @@ mod tests {
         let plan = make_scan_filter("users", "age", 18);
         let fp = QueryFingerprint::from_rel_expr(&plan);
 
-        // Miss
         let _ = cache.lookup(&fp);
         assert_eq!(cache.stats().lookups, 1);
         assert_eq!(cache.stats().misses, 1);
 
-        // Insert and hit
         cache.insert(fp.clone(), plan);
         let _ = cache.lookup(&fp);
         assert_eq!(cache.stats().lookups, 2);
@@ -467,9 +616,9 @@ mod tests {
 
         cache.insert(fp.clone(), plan);
 
-        // 1 miss + 3 hits = 75% hit rate
         let different = RelExpr::scan("nonexistent");
-        let dfp = QueryFingerprint::from_rel_expr(&different);
+        let dfp =
+            QueryFingerprint::from_rel_expr(&different);
         let _ = cache.lookup(&dfp);
         let _ = cache.lookup(&fp);
         let _ = cache.lookup(&fp);
@@ -479,17 +628,15 @@ mod tests {
         assert!((rate - 0.75).abs() < f64::EPSILON);
     }
 
-    // ── Update existing entry ────────────────────────────────────
+    // ── Update existing entry ───────────────────────────────
 
     #[test]
     fn insert_same_fingerprint_updates_plan() {
         let mut cache = PlanCache::with_defaults();
-
         let plan1 = make_scan_filter("users", "age", 18);
         let fp = QueryFingerprint::from_rel_expr(&plan1);
         cache.insert(fp.clone(), plan1);
 
-        // Insert a different plan with the same fingerprint
         let plan2 = make_scan_filter("users", "age", 99);
         cache.insert(fp.clone(), plan2.clone());
 
@@ -498,7 +645,7 @@ mod tests {
         assert_eq!(hit.plan, plan2);
     }
 
-    // ── Clear ────────────────────────────────────────────────────
+    // ── Clear ───────────────────────────────────────────────
 
     #[test]
     fn clear_empties_cache() {
@@ -513,29 +660,162 @@ mod tests {
         assert_eq!(cache.len(), 0);
     }
 
-    // ── Cache hit rate on parameter workload ─────────────────────
+    // ── Workload test ───────────────────────────────────────
 
     #[test]
     fn workload_with_parameter_variations_high_hit_rate() {
         let mut cache = PlanCache::with_defaults();
-
-        // Simulate a workload: same query structure, varying params
         let base = make_join_query(1000);
         let fp = QueryFingerprint::from_rel_expr(&base);
         cache.insert(fp, base);
 
-        // 20 queries with different parameter values
         let mut hits = 0_u32;
         for i in 0..20 {
             let q = make_join_query(i * 100 + 50);
-            let qfp = QueryFingerprint::from_rel_expr(&q);
+            let qfp =
+                QueryFingerprint::from_rel_expr(&q);
             if cache.lookup(&qfp).is_some() {
                 hits += 1;
             }
         }
 
-        // All 20 should hit since only the constant differs
         assert_eq!(hits, 20);
         assert!(cache.stats().hit_rate() > 0.9);
+    }
+
+    // ── RFC 0059: Invalidation tests ────────────────────────
+
+    #[test]
+    fn hard_invalidation_evicts_cold_entry() {
+        let mut cache = PlanCache::with_defaults();
+        let plan = RelExpr::scan("orders");
+        let fp = QueryFingerprint::from_rel_expr(&plan);
+        cache.insert(fp.clone(), plan);
+
+        cache.invalidate(&[fp.clone()]);
+        assert!(cache.lookup(&fp).is_none());
+        assert_eq!(cache.stats().hard_invalidations, 1);
+    }
+
+    #[test]
+    fn soft_invalidation_marks_hot_entry_stale() {
+        let config = PlanCacheConfig {
+            soft_invalidation_hit_threshold: 3,
+            ..PlanCacheConfig::default()
+        };
+        let mut cache = PlanCache::new(config);
+        let plan = RelExpr::scan("users");
+        let fp = QueryFingerprint::from_rel_expr(&plan);
+        cache.insert(fp.clone(), plan);
+
+        // Build up hit count above threshold
+        let _ = cache.lookup(&fp);
+        let _ = cache.lookup(&fp);
+        let _ = cache.lookup(&fp);
+
+        cache.invalidate(&[fp.clone()]);
+
+        // Entry still exists but marked stale
+        let result =
+            cache.lookup(&fp).expect("should still hit");
+        assert_eq!(result.match_type, CacheMatchType::Stale);
+        assert_eq!(cache.stats().soft_invalidations, 1);
+    }
+
+    #[test]
+    fn mark_fresh_clears_stale() {
+        let config = PlanCacheConfig {
+            soft_invalidation_hit_threshold: 1,
+            ..PlanCacheConfig::default()
+        };
+        let mut cache = PlanCache::new(config);
+        let plan = RelExpr::scan("users");
+        let fp = QueryFingerprint::from_rel_expr(&plan);
+        cache.insert(fp.clone(), plan);
+        let _ = cache.lookup(&fp);
+
+        cache.invalidate(&[fp.clone()]);
+        let r1 = cache.lookup(&fp).expect("hit");
+        assert_eq!(r1.match_type, CacheMatchType::Stale);
+
+        cache.mark_fresh(&fp);
+        let r2 = cache.lookup(&fp).expect("hit");
+        assert_eq!(r2.match_type, CacheMatchType::Exact);
+    }
+
+    #[test]
+    fn insert_with_deps_stores_dependencies() {
+        use std::collections::{HashMap, HashSet};
+
+        let mut cache = PlanCache::with_defaults();
+        let plan = RelExpr::scan("orders");
+        let fp = QueryFingerprint::from_rel_expr(&plan);
+        let deps = PlanDependencies {
+            table_cardinalities: [(
+                "orders".into(),
+                5000.0,
+            )]
+            .into_iter()
+            .collect(),
+            indexes: HashSet::new(),
+            distinct_counts: HashMap::new(),
+            histogram_digests: HashMap::new(),
+            facts: HashSet::new(),
+        };
+
+        cache.insert_with_deps(
+            fp.clone(),
+            plan,
+            deps,
+        );
+        assert!(cache.get_dependencies(&fp).is_some());
+        let d = cache.get_dependencies(&fp).expect("deps");
+        assert!(d.table_cardinalities.contains_key("orders"));
+    }
+
+    #[test]
+    fn invalidate_for_table_targets_correct_entries() {
+        use std::collections::{HashMap, HashSet};
+
+        let mut cache = PlanCache::with_defaults();
+
+        let p1 = RelExpr::scan("users");
+        let fp1 = QueryFingerprint::from_rel_expr(&p1);
+        let d1 = PlanDependencies {
+            table_cardinalities: [(
+                "users".into(),
+                1000.0,
+            )]
+            .into_iter()
+            .collect(),
+            indexes: HashSet::new(),
+            distinct_counts: HashMap::new(),
+            histogram_digests: HashMap::new(),
+            facts: HashSet::new(),
+        };
+
+        let p2 = RelExpr::scan("orders");
+        let fp2 = QueryFingerprint::from_rel_expr(&p2);
+        let d2 = PlanDependencies {
+            table_cardinalities: [(
+                "orders".into(),
+                5000.0,
+            )]
+            .into_iter()
+            .collect(),
+            indexes: HashSet::new(),
+            distinct_counts: HashMap::new(),
+            histogram_digests: HashMap::new(),
+            facts: HashSet::new(),
+        };
+
+        cache.insert_with_deps(fp1.clone(), p1, d1);
+        cache.insert_with_deps(fp2.clone(), p2, d2);
+
+        cache.invalidate_for_table("users");
+
+        // users entry evicted, orders entry remains
+        assert!(cache.lookup(&fp1).is_none());
+        assert!(cache.lookup(&fp2).is_some());
     }
 }

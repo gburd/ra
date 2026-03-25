@@ -3603,6 +3603,7 @@ mod tests {
             max_entries: 64,
             similarity_threshold: 0.9,
             enable_fuzzy_matching: true,
+            ..PlanCacheConfig::default()
         })
     }
 

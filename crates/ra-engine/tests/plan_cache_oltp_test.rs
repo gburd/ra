@@ -193,6 +193,7 @@ fn cached_optimizer() -> Optimizer {
         max_entries: 1024,
         similarity_threshold: 0.9,
         enable_fuzzy_matching: true,
+        ..PlanCacheConfig::default()
     })
 }
 
@@ -535,6 +536,7 @@ fn mixed_workload_write_plans_dont_evict_reads() {
         max_entries: 10,
         similarity_threshold: 0.9,
         enable_fuzzy_matching: true,
+        ..PlanCacheConfig::default()
     });
 
     // Warm read templates
@@ -724,6 +726,7 @@ fn memory_overhead_bounded_by_max_entries() {
         max_entries: 16,
         similarity_threshold: 0.9,
         enable_fuzzy_matching: true,
+        ..PlanCacheConfig::default()
     });
 
     // Insert 100 distinct templates (simple scans of distinct
@@ -752,6 +755,7 @@ fn memory_stable_under_sustained_workload() {
         max_entries: 8,
         similarity_threshold: 0.9,
         enable_fuzzy_matching: true,
+        ..PlanCacheConfig::default()
     });
 
     // Run 1000 queries across 5 templates (fits in cache=8)

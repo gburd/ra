@@ -164,6 +164,7 @@ fn cached_optimizer() -> Optimizer {
         max_entries: 1024,
         similarity_threshold: 0.9,
         enable_fuzzy_matching: true,
+        ..PlanCacheConfig::default()
     })
 }
 
@@ -172,6 +173,7 @@ fn cached_optimizer_small(max_entries: usize) -> Optimizer {
         max_entries,
         similarity_threshold: 0.9,
         enable_fuzzy_matching: true,
+        ..PlanCacheConfig::default()
     })
 }
 
@@ -439,6 +441,7 @@ fn fuzzy_matching_disabled_only_exact_hits() {
         max_entries: 1024,
         similarity_threshold: 0.9,
         enable_fuzzy_matching: false,
+        ..PlanCacheConfig::default()
     });
 
     let workload = oltp_workload();
@@ -462,6 +465,7 @@ fn fuzzy_threshold_affects_hit_rate() {
             max_entries: 1024,
             similarity_threshold: 0.99,
             enable_fuzzy_matching: true,
+            ..PlanCacheConfig::default()
         });
     // With a lower threshold (0.5), more fuzzy matches
     let opt_loose =
@@ -469,6 +473,7 @@ fn fuzzy_threshold_affects_hit_rate() {
             max_entries: 1024,
             similarity_threshold: 0.5,
             enable_fuzzy_matching: true,
+            ..PlanCacheConfig::default()
         });
 
     let workload = oltp_workload();
