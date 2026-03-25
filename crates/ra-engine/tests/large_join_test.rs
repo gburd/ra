@@ -6,8 +6,8 @@ use std::sync::Arc;
 use ra_core::{
     algebra::{JoinType, RelExpr},
     cost::{Cost, CostModel, StatisticsProvider},
-    expr::{ColumnRef, Const, Expr},
-    statistics::{ColumnStats, Statistics},
+    expr::{Const, Expr},
+    statistics::Statistics,
 };
 use ra_engine::large_join::{JoinNode, LargeJoinOptimizer, LargeJoinStrategy};
 

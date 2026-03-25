@@ -130,7 +130,7 @@ mod tests {
         let runner = run_with_min_max_rules(&expr);
 
         // The e-graph should contain the index-scan alternative
-        let root = runner.roots[0];
+        let _root = runner.roots[0];
         let class_count = runner.egraph.number_of_classes();
         // Rewrite rules should have expanded the e-graph
         assert!(

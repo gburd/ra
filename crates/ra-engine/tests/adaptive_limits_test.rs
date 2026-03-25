@@ -1,7 +1,7 @@
 //! Tests for adaptive iteration limits (Task #246).
 
-use ra_core::algebra::{AggregateExpr, AggregateFunction, JoinType, RelExpr};
-use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
+use ra_core::algebra::{JoinType, RelExpr};
+use ra_core::expr::{BinOp, ColumnRef, Expr};
 use ra_core::statistics::Statistics;
 use ra_engine::{Optimizer, OptimizerConfig};
 use std::time::Instant;

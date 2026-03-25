@@ -106,14 +106,6 @@ fn sub(left: Expr, right: Expr) -> Expr {
     }
 }
 
-fn add(left: Expr, right: Expr) -> Expr {
-    Expr::BinOp {
-        op: BinOp::Add,
-        left: Box::new(left),
-        right: Box::new(right),
-    }
-}
-
 fn int(v: i64) -> Expr {
     Expr::Const(Const::Int(v))
 }

@@ -10,11 +10,11 @@ mod helpers;
 use std::collections::HashSet;
 
 use ra_core::algebra::{CycleDetection, RelExpr};
-use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
+use ra_core::expr::{Const, Expr};
 use ra_core::pattern::Pattern;
 use ra_engine::{
     ExecutionContext, ExecutionError, ExprEvaluator,
-    RecursiveCTEConfig, RecursiveCTEExecutor, RecursionResult,
+    RecursiveCTEConfig, RecursiveCTEExecutor,
     Row, TerminationReason,
 };
 use ra_engine::{structural_hash, to_rec_expr};
@@ -287,8 +287,8 @@ fn structural_hash_differs_by_cycle_detection() {
 
 #[test]
 fn structural_hash_with_vs_without_cycle_detection() {
-    let without = make_recursive_cte("r", "base", "r", "r");
-    let with_cd = make_recursive_cte_with_cycle("r", 1000);
+    let _without = make_recursive_cte("r", "base", "r", "r");
+    let _with_cd = make_recursive_cte_with_cycle("r", 1000);
     // These differ because base_case/recursive_case/body tables
     // differ ("base" vs "base", "r" vs "rec", "r" vs "r"),
     // plus cycle_detection presence. Build matching structures:
