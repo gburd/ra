@@ -69,3 +69,5 @@ PRECONDITION_SYSTEM_STATUS.md
 /tmp/
 .DS_Store
 cargo-flamegraph.trace/
+*.profraw
+*.profdata

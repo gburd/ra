@@ -2149,4 +2149,261 @@ mod tests {
             CitusStrategy::DistributedAggregation,
         );
     }
+
+    // ------ Columnar scan annotation tests ------
+
+    #[test]
+    fn scan_columnar_distributed_table_has_adjustment() {
+        let config = CitusOptimizerConfig::default();
+        let metadata = sample_metadata_with_columnar();
+        let opt = CitusOptimizer::new(config, metadata);
+        let plan = RelExpr::scan("events");
+        let result = opt.optimize(&plan).expect("should succeed");
+        assert!(
+            result.columnar_adjustment.is_some(),
+            "columnar table scan should have adjustment"
+        );
+        assert!(
+            result.columnar_adjustment.unwrap() < 1.0,
+            "columnar adjustment should indicate savings"
+        );
+    }
+
+    #[test]
+    fn scan_non_columnar_table_has_no_adjustment() {
+        let opt = make_optimizer();
+        let plan = RelExpr::scan("orders");
+        let result = opt.optimize(&plan).expect("should succeed");
+        assert!(
+            result.columnar_adjustment.is_none(),
+            "non-columnar table should have no adjustment"
+        );
+    }
+
+    // ------ Project annotation tests ------
+
+    #[test]
+    fn project_on_columnar_table_has_adjustment() {
+        use ra_core::algebra::ProjectionColumn;
+        use ra_core::expr::ColumnRef;
+
+        let config = CitusOptimizerConfig::default();
+        let metadata = sample_metadata_with_columnar();
+        let opt = CitusOptimizer::new(config, metadata);
+        let plan = RelExpr::Project {
+            columns: vec![
+                ProjectionColumn {
+                    expr: Expr::Column(ColumnRef::new("col_a")),
+                    alias: None,
+                },
+                ProjectionColumn {
+                    expr: Expr::Column(ColumnRef::new("col_b")),
+                    alias: None,
+                },
+            ],
+            input: Box::new(RelExpr::scan("events")),
+        };
+        let result = opt.optimize(&plan).expect("should succeed");
+        assert!(
+            result.columnar_adjustment.is_some(),
+            "project on columnar table should have adjustment"
+        );
+    }
+
+    #[test]
+    fn project_on_non_columnar_table_no_adjustment() {
+        use ra_core::algebra::ProjectionColumn;
+        use ra_core::expr::ColumnRef;
+
+        let opt = make_optimizer();
+        let plan = RelExpr::Project {
+            columns: vec![ProjectionColumn {
+                expr: Expr::Column(ColumnRef::new("status")),
+                alias: None,
+            }],
+            input: Box::new(RelExpr::scan("orders")),
+        };
+        let result = opt.optimize(&plan).expect("should succeed");
+        assert!(
+            result.columnar_adjustment.is_none(),
+            "project on non-columnar table should have no \
+             adjustment"
+        );
+    }
+
+    // ------ Metadata accessor test ------
+
+    #[test]
+    fn metadata_accessor_returns_metadata() {
+        let opt = make_optimizer();
+        assert!(opt.metadata().is_distributed("orders"));
+        assert!(!opt.metadata().is_distributed("nonexistent"));
+    }
+
+    // ------ Additional cost estimation tests ------
+
+    #[test]
+    fn cost_single_shard_query_is_cheap() {
+        let opt = make_optimizer();
+        let plan = CitusOptimizedPlan {
+            plan: RelExpr::scan("orders"),
+            distribution: DataDistribution::Arbitrary,
+            strategy: CitusStrategy::SingleShardQuery,
+            shard_pruning: None,
+            columnar_adjustment: None,
+            execution: ExecutionLocation::SingleWorker,
+        };
+        let cost = opt.estimate_cost(&plan);
+        assert!(cost.cpu > 0.0);
+        assert!(cost.io > 0.0);
+        assert!(cost.network > 0.0);
+    }
+
+    #[test]
+    fn cost_generic_distributed_is_expensive() {
+        let opt = make_optimizer();
+        let plan = CitusOptimizedPlan {
+            plan: RelExpr::scan("orders"),
+            distribution: DataDistribution::Arbitrary,
+            strategy: CitusStrategy::GenericDistributed,
+            shard_pruning: None,
+            columnar_adjustment: None,
+            execution: ExecutionLocation::Workers,
+        };
+        let cost = opt.estimate_cost(&plan);
+        assert!(cost.cpu >= 100.0);
+        assert!(cost.network >= 10.0);
+    }
+
+    #[test]
+    fn cost_local_scan_no_network() {
+        let opt = make_optimizer();
+        let plan = CitusOptimizedPlan {
+            plan: RelExpr::scan("orders"),
+            distribution: DataDistribution::Arbitrary,
+            strategy: CitusStrategy::LocalScan,
+            shard_pruning: None,
+            columnar_adjustment: None,
+            execution: ExecutionLocation::Workers,
+        };
+        let cost = opt.estimate_cost(&plan);
+        assert_eq!(cost.network, 0.0);
+        assert!(cost.cpu > 0.0);
+    }
+
+    // ------ Strategy label completeness test ------
+
+    #[test]
+    fn all_strategy_labels_non_empty() {
+        let strategies = [
+            CitusStrategy::ColocatedJoin,
+            CitusStrategy::ReferenceJoin,
+            CitusStrategy::DistributedAggregation,
+            CitusStrategy::SingleShardQuery,
+            CitusStrategy::ShardPruned,
+            CitusStrategy::LocalScan,
+            CitusStrategy::GenericDistributed,
+        ];
+        for s in &strategies {
+            assert!(
+                !s.label().is_empty(),
+                "strategy label should be non-empty"
+            );
+        }
+    }
+
+    // ------ Extract table name edge cases ------
+
+    #[test]
+    fn extract_table_name_from_join() {
+        let plan = RelExpr::Join {
+            join_type: JoinType::Inner,
+            condition: Expr::Const(Const::Bool(true)),
+            left: Box::new(RelExpr::scan("left_t")),
+            right: Box::new(RelExpr::scan("right_t")),
+        };
+        let name = extract_table_name(&plan);
+        assert_eq!(
+            name,
+            Some("left_t".to_owned()),
+            "should extract left side of join"
+        );
+    }
+
+    #[test]
+    fn extract_table_name_from_aggregate() {
+        let plan = RelExpr::Aggregate {
+            group_by: vec![],
+            aggregates: vec![],
+            input: Box::new(RelExpr::scan("t")),
+        };
+        let name = extract_table_name(&plan);
+        assert_eq!(name, Some("t".to_owned()));
+    }
+
+    #[test]
+    fn extract_table_name_unknown_returns_none() {
+        let plan = RelExpr::Values { rows: vec![] };
+        let name = extract_table_name(&plan);
+        assert!(name.is_none());
+    }
+
+    // ------ Shard pruning AND with two ranges ------
+
+    #[test]
+    fn shard_pruning_and_two_ranges_takes_minimum() {
+        let pred = and(
+            gt(col("customer_id"), Expr::Const(Const::Int(100))),
+            gt(col("customer_id"), Expr::Const(Const::Int(200))),
+        );
+        let result =
+            analyze_shard_pruning(&pred, "customer_id", 32);
+        assert!(!result.is_single_shard);
+        assert_eq!(
+            result.shards_remaining, 16,
+            "AND of two range predicates should take minimum"
+        );
+    }
+
+    // ------ Error display tests ------
+
+    #[test]
+    fn error_display_messages() {
+        let err = CitusOptimizerError::NoCitusExtension;
+        assert!(err.to_string().contains("citus extension"));
+
+        let err = CitusOptimizerError::NoWorkerNodes;
+        assert!(err.to_string().contains("no active worker"));
+
+        let err = CitusOptimizerError::TableNotFound(
+            "missing_table".to_owned(),
+        );
+        assert!(err.to_string().contains("missing_table"));
+    }
+
+    // ------ ColumnarTableInfo default test ------
+
+    #[test]
+    fn columnar_table_info_default() {
+        let info = ColumnarTableInfo::default();
+        assert_eq!(info.total_columns, 10);
+        assert!((info.compression_ratio - 3.0).abs() < f64::EPSILON);
+        assert_eq!(info.stripe_row_count, 150_000);
+        assert_eq!(info.chunk_group_row_count, 10_000);
+    }
+
+    // ------ CitusOptimizerConfig default test ------
+
+    #[test]
+    fn citus_optimizer_config_default() {
+        let config = CitusOptimizerConfig::default();
+        assert!(
+            (config.coordinator_network_factor - 1.0).abs()
+                < f64::EPSILON
+        );
+        assert!(
+            (config.worker_network_factor - 2.0).abs()
+                < f64::EPSILON
+        );
+    }
 }

@@ -2055,4 +2055,408 @@ mod tests {
     fn axis_parse_unknown_returns_none() {
         assert!(XPathAxis::parse("invalid").is_none());
     }
+
+    // -- Position predicate tests --
+
+    #[test]
+    fn parse_position_based_predicate() {
+        let expr =
+            parse_xpath("/doc/items[position() > 3]").unwrap();
+        assert_eq!(expr.steps[1].predicates.len(), 1);
+        assert_eq!(
+            expr.steps[1].predicates[0],
+            XPathPredicate::Position(PositionPredicate::Computed)
+        );
+    }
+
+    #[test]
+    fn position_predicate_not_value_indexable() {
+        let pred = XPathPredicate::Position(
+            PositionPredicate::Computed,
+        );
+        assert!(!pred.supports_value_index());
+
+        let pred =
+            XPathPredicate::Position(PositionPredicate::Last);
+        assert!(!pred.supports_value_index());
+    }
+
+    // -- Function predicate tests --
+
+    #[test]
+    fn function_predicate_contains_is_indexable() {
+        let pred = XPathPredicate::Function {
+            name: "contains".to_string(),
+            args: vec![".".to_string(), "'x'".to_string()],
+        };
+        assert!(pred.supports_value_index());
+    }
+
+    #[test]
+    fn function_predicate_starts_with_is_indexable() {
+        let pred = XPathPredicate::Function {
+            name: "starts-with".to_string(),
+            args: vec![".".to_string(), "'abc'".to_string()],
+        };
+        assert!(pred.supports_value_index());
+    }
+
+    #[test]
+    fn function_predicate_unknown_not_indexable() {
+        let pred = XPathPredicate::Function {
+            name: "normalize-space".to_string(),
+            args: vec![".".to_string()],
+        };
+        assert!(!pred.supports_value_index());
+    }
+
+    // -- XmlIndexType display test --
+
+    #[test]
+    fn xml_index_type_display() {
+        assert_eq!(format!("{}", XmlIndexType::Path), "PATH");
+        assert_eq!(format!("{}", XmlIndexType::Value), "VALUE");
+        assert_eq!(
+            format!("{}", XmlIndexType::Presence),
+            "PRESENCE"
+        );
+        assert_eq!(
+            format!("{}", XmlIndexType::FullText),
+            "FULLTEXT"
+        );
+        assert_eq!(
+            format!("{}", XmlIndexType::Property),
+            "PROPERTY"
+        );
+    }
+
+    // -- Presence index coverage test --
+
+    #[test]
+    fn presence_index_covers_simple_path() {
+        let xpath = parse_xpath("/doc/item").unwrap();
+        let index = XmlIndexInfo {
+            index_type: XmlIndexType::Presence,
+            paths: vec!["/doc/item".to_string()],
+            value_type: None,
+            estimated_entries: None,
+            avg_entry_bytes: None,
+        };
+        assert!(index.covers_xpath(&xpath));
+    }
+
+    #[test]
+    fn presence_index_does_not_cover_wildcard() {
+        let xpath = parse_xpath("/doc/*/item").unwrap();
+        let index = XmlIndexInfo {
+            index_type: XmlIndexType::Presence,
+            paths: vec!["/doc/item".to_string()],
+            value_type: None,
+            estimated_entries: None,
+            avg_entry_bytes: None,
+        };
+        // Wildcard returns None for simple_path()
+        assert!(!index.covers_xpath(&xpath));
+    }
+
+    // -- Property index test --
+
+    #[test]
+    fn property_index_needs_exact_match() {
+        let xpath =
+            parse_xpath("/doc/item[@price = 100]").unwrap();
+        let index = XmlIndexInfo {
+            index_type: XmlIndexType::Property,
+            paths: vec!["/doc/item".to_string()],
+            value_type: Some(XmlValueType::Numeric),
+            estimated_entries: Some(5000),
+            avg_entry_bytes: Some(8),
+        };
+        assert!(index.covers_xpath(&xpath));
+
+        let wrong_index = XmlIndexInfo {
+            index_type: XmlIndexType::Property,
+            paths: vec!["/doc/other".to_string()],
+            value_type: Some(XmlValueType::Numeric),
+            estimated_entries: Some(5000),
+            avg_entry_bytes: Some(8),
+        };
+        assert!(!wrong_index.covers_xpath(&xpath));
+    }
+
+    // -- Selectivity edge cases --
+
+    #[test]
+    fn combine_selectivities_empty_is_one() {
+        let combined = combine_selectivities(&[]);
+        assert!((combined - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn combine_selectivities_single() {
+        let combined = combine_selectivities(&[0.42]);
+        assert!((combined - 0.42).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn combine_selectivities_clamps_to_minimum() {
+        // Many very selective predicates should not go below
+        // the minimum clamp value
+        let sels = vec![0.0001; 10];
+        let combined = combine_selectivities(&sels);
+        assert!(
+            combined >= 0.000_001,
+            "combined selectivity should be clamped"
+        );
+    }
+
+    // -- Cost estimation edge cases --
+
+    #[test]
+    fn xpath_cost_with_fulltext_index() {
+        let xpath =
+            parse_xpath("/doc/name[contains(., 'Corp')]").unwrap();
+        let params = XmlCostParams::default();
+
+        let ft_index = XmlIndexInfo {
+            index_type: XmlIndexType::FullText,
+            paths: vec!["/doc/name".to_string()],
+            value_type: None,
+            estimated_entries: Some(10_000),
+            avg_entry_bytes: Some(200),
+        };
+
+        let cost_no_index =
+            estimate_xpath_cost(&xpath, 5000.0, &[], &params);
+        let cost_with_ft = estimate_xpath_cost(
+            &xpath,
+            5000.0,
+            &[ft_index],
+            &params,
+        );
+        // Full-text index doesn't affect path navigation cost,
+        // but the function is covered as a code path
+        assert!(cost_with_ft > 0.0);
+        assert!(cost_no_index > 0.0);
+    }
+
+    // -- Oracle function classification tests --
+
+    #[test]
+    fn classify_all_oracle_functions() {
+        assert_eq!(
+            classify_xml_function("xmlquery"),
+            Some((XmlPlatform::Oracle, XmlFunctionKind::Query))
+        );
+        assert_eq!(
+            classify_xml_function("xml_table"),
+            Some((XmlPlatform::Oracle, XmlFunctionKind::Table))
+        );
+    }
+
+    #[test]
+    fn classify_all_sqlserver_functions() {
+        assert_eq!(
+            classify_xml_function("xmlvalue"),
+            Some((
+                XmlPlatform::SqlServer,
+                XmlFunctionKind::Value
+            ))
+        );
+        assert_eq!(
+            classify_xml_function("xmlquery_ss"),
+            Some((
+                XmlPlatform::SqlServer,
+                XmlFunctionKind::Query
+            ))
+        );
+        assert_eq!(
+            classify_xml_function("xmlexist"),
+            Some((
+                XmlPlatform::SqlServer,
+                XmlFunctionKind::Exists
+            ))
+        );
+        assert_eq!(
+            classify_xml_function("xml_nodes"),
+            Some((
+                XmlPlatform::SqlServer,
+                XmlFunctionKind::Table
+            ))
+        );
+        assert_eq!(
+            classify_xml_function("xmlnodes"),
+            Some((
+                XmlPlatform::SqlServer,
+                XmlFunctionKind::Table
+            ))
+        );
+    }
+
+    #[test]
+    fn classify_postgresql_xmltable() {
+        assert_eq!(
+            classify_xml_function("xmltable"),
+            Some((
+                XmlPlatform::PostgreSQL,
+                XmlFunctionKind::Table
+            ))
+        );
+    }
+
+    // -- Case insensitivity test --
+
+    #[test]
+    fn classify_case_insensitive() {
+        assert_eq!(
+            classify_xml_function("XPATH"),
+            Some((XmlPlatform::PostgreSQL, XmlFunctionKind::Query))
+        );
+        assert_eq!(
+            classify_xml_function("XmlExists"),
+            Some((
+                XmlPlatform::PostgreSQL,
+                XmlFunctionKind::Exists
+            ))
+        );
+    }
+
+    // -- XPathExpr is_index_coverable edge cases --
+
+    #[test]
+    fn index_coverable_with_existence_predicate() {
+        let expr = parse_xpath("/doc/item[@id]").unwrap();
+        assert!(expr.is_index_coverable());
+    }
+
+    #[test]
+    fn index_coverable_with_contains_function() {
+        let expr =
+            parse_xpath("/doc/name[contains(., 'x')]").unwrap();
+        assert!(
+            expr.is_index_coverable(),
+            "contains() supports value index"
+        );
+    }
+
+    #[test]
+    fn not_index_coverable_with_computed_position() {
+        let expr =
+            parse_xpath("/doc/item[position() > 2]").unwrap();
+        assert!(!expr.is_index_coverable());
+    }
+
+    // -- XmlCostParams default test --
+
+    #[test]
+    fn xml_cost_params_default() {
+        let params = XmlCostParams::default();
+        assert!(params.parse_cost_per_byte > 0.0);
+        assert!(params.function_call_overhead > 0.0);
+        assert!(
+            params.path_index_discount > 0.0
+                && params.path_index_discount < 1.0
+        );
+        assert!(
+            params.value_index_discount > 0.0
+                && params.value_index_discount < 1.0
+        );
+    }
+
+    // -- XmlOptimizerError additional test --
+
+    #[test]
+    fn error_display_xpath_parse_failed() {
+        let err = XmlOptimizerError::XPathParseFailed {
+            xpath: "/broken[".to_string(),
+            reason: "unmatched bracket".to_string(),
+        };
+        let msg = format!("{err}");
+        assert!(msg.contains("/broken["));
+        assert!(msg.contains("unmatched bracket"));
+    }
+
+    #[test]
+    fn error_display_index_metadata_unavailable() {
+        let err = XmlOptimizerError::IndexMetadataUnavailable {
+            table: "docs".to_string(),
+            reason: "no catalog access".to_string(),
+        };
+        let msg = format!("{err}");
+        assert!(msg.contains("docs"));
+        assert!(msg.contains("no catalog access"));
+    }
+
+    // -- Simplify no-op test --
+
+    #[test]
+    fn simplify_already_simple_path_unchanged() {
+        let expr = parse_xpath("/doc/item/name").unwrap();
+        let simplified = simplify_xpath(&expr);
+        assert_eq!(simplified.steps.len(), expr.steps.len());
+        assert_eq!(
+            simplified.steps[0].node_test,
+            expr.steps[0].node_test
+        );
+    }
+
+    // -- XPath Display with relative path --
+
+    #[test]
+    fn display_relative_path() {
+        let expr = parse_xpath("items/item").unwrap();
+        let displayed = format!("{expr}");
+        assert!(!displayed.starts_with('/'));
+        assert!(displayed.contains("items"));
+    }
+
+    // -- Nested predicate parsing --
+
+    #[test]
+    fn parse_le_and_ge_predicates() {
+        let expr =
+            parse_xpath("/doc/item[@price <= 100]").unwrap();
+        match &expr.steps[1].predicates[0] {
+            XPathPredicate::Comparison { op, .. } => {
+                assert_eq!(*op, XPathCompareOp::Le);
+            }
+            other => panic!("expected Comparison, got {other:?}"),
+        }
+
+        let expr =
+            parse_xpath("/doc/item[@price >= 50]").unwrap();
+        match &expr.steps[1].predicates[0] {
+            XPathPredicate::Comparison { op, .. } => {
+                assert_eq!(*op, XPathCompareOp::Ge);
+            }
+            other => panic!("expected Comparison, got {other:?}"),
+        }
+    }
+
+    // -- Node test parsing --
+
+    #[test]
+    fn parse_comment_node_test() {
+        let expr =
+            parse_xpath("/doc/comment()").unwrap();
+        assert_eq!(expr.steps[1].node_test, NodeTest::Comment);
+    }
+
+    #[test]
+    fn parse_processing_instruction_node_test() {
+        let expr = parse_xpath(
+            "/doc/processing-instruction()",
+        )
+        .unwrap();
+        assert_eq!(
+            expr.steps[1].node_test,
+            NodeTest::ProcessingInstruction
+        );
+    }
+
+    #[test]
+    fn parse_node_test() {
+        let expr = parse_xpath("/doc/node()").unwrap();
+        assert_eq!(expr.steps[1].node_test, NodeTest::AnyNode);
+    }
 }

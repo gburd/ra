@@ -2252,4 +2252,251 @@ mod tests {
         assert!(msg.contains("bson_custom_rum_ops"));
         assert!(msg.contains("skipping"));
     }
+
+    // -- combine_selectivities edge cases --
+
+    #[test]
+    fn combine_selectivities_empty_is_one() {
+        let combined = combine_selectivities(&[]);
+        assert!((combined - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn combine_selectivities_single_value() {
+        let combined = combine_selectivities(&[0.05]);
+        assert!((combined - 0.05).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn combine_selectivities_damping_applied() {
+        let sel_eq = BsonOperator::Eq.default_selectivity();
+        let sel_gt = BsonOperator::Gt.default_selectivity();
+        let combined = combine_selectivities(
+            &[sel_eq, sel_gt],
+        );
+        // With damping, combined > pure product
+        assert!(
+            combined > sel_eq * sel_gt,
+            "damping should prevent combined from being pure product"
+        );
+        // But combined < most selective
+        assert!(
+            combined < sel_gt,
+            "combined should be more selective than range alone"
+        );
+    }
+
+    // -- Sequential scan cost --
+
+    #[test]
+    fn sequential_scan_cost_proportional() {
+        let small = sequential_scan_cost(100.0);
+        let large = sequential_scan_cost(100_000.0);
+        assert!(large > small * 900.0);
+    }
+
+    #[test]
+    fn sequential_scan_cost_zero_rows() {
+        let cost = sequential_scan_cost(0.0);
+        assert!(cost.abs() < f64::EPSILON);
+    }
+
+    // -- GIN scan cost tests --
+
+    #[test]
+    fn gin_scan_cost_scales_with_selectivity() {
+        let params = GinBsonCostParams::default();
+        let selective =
+            gin_scan_cost(1_000_000.0, 0.001, 1, &params);
+        let broad =
+            gin_scan_cost(1_000_000.0, 0.5, 1, &params);
+        assert!(
+            selective < broad,
+            "more selective scan should be cheaper"
+        );
+    }
+
+    #[test]
+    fn gin_scan_cheaper_than_sequential() {
+        let params = GinBsonCostParams::default();
+        let gin = gin_scan_cost(100_000.0, 0.01, 1, &params);
+        let seq = sequential_scan_cost(100_000.0);
+        assert!(
+            gin < seq,
+            "GIN scan for selective query should be \
+             cheaper: gin={gin:.1}, seq={seq:.1}"
+        );
+    }
+
+    // -- GIN vs sequential ratio --
+
+    #[test]
+    fn gin_vs_sequential_ratio_below_one_for_selective() {
+        let params = GinBsonCostParams::default();
+        let ratio = gin_vs_sequential_ratio(
+            100_000.0, 0.001, 1, &params,
+        );
+        assert!(
+            ratio < 1.0,
+            "GIN should be cheaper for selective queries: {ratio}"
+        );
+    }
+
+    #[test]
+    fn gin_vs_sequential_ratio_above_one_for_broad() {
+        let params = GinBsonCostParams::default();
+        let ratio = gin_vs_sequential_ratio(
+            100_000.0, 0.99, 1, &params,
+        );
+        assert!(
+            ratio > 0.5,
+            "GIN should not help much for broad scans: {ratio}"
+        );
+    }
+
+    // -- Compound GIN scan cost --
+
+    #[test]
+    fn compound_gin_cheaper_than_multiple_single() {
+        let params = GinBsonCostParams::default();
+        let compound = compound_gin_scan_cost(
+            100_000.0, 0.01, 3, &params,
+        );
+        let single =
+            gin_scan_cost(100_000.0, 0.01, 1, &params);
+        assert!(
+            compound < single * 3.0,
+            "compound GIN should be cheaper than 3x single"
+        );
+    }
+
+    // -- BsonOperator additional tests --
+
+    #[test]
+    fn gin_support_for_all_operators() {
+        assert!(BsonOperator::Eq.supports_gin_index());
+        assert!(BsonOperator::Gt.supports_gin_index());
+        assert!(BsonOperator::Lt.supports_gin_index());
+        assert!(BsonOperator::In.supports_gin_index());
+        assert!(BsonOperator::All.supports_gin_index());
+        assert!(BsonOperator::Regex.supports_gin_index());
+        assert!(!BsonOperator::Ne.supports_gin_index());
+        assert!(!BsonOperator::Nin.supports_gin_index());
+    }
+
+    // -- Recommend GIN indexes edge cases --
+
+    #[test]
+    fn recommend_gin_indexes_empty_patterns() {
+        let recs = recommend_gin_indexes(&[], 10);
+        assert!(recs.is_empty());
+    }
+
+    #[test]
+    fn recommend_gin_indexes_single_pattern() {
+        let patterns = vec![QueryPattern {
+            collection: "users".to_string(),
+            predicates: vec![BsonPredicate {
+                path: "email".to_string(),
+                operator: BsonOperator::Eq,
+                literal_hint: None,
+            }],
+            frequency: 100,
+        }];
+        let recs = recommend_gin_indexes(&patterns, 10);
+        assert!(
+            !recs.is_empty(),
+            "should recommend index for frequent pattern"
+        );
+    }
+
+    // -- GinBsonCostParams default --
+
+    #[test]
+    fn gin_bson_cost_params_default() {
+        let params = GinBsonCostParams::default();
+        assert!(params.term_lookup_cost > 0.0);
+        assert!(params.recheck_cost > 0.0);
+        assert!(params.heap_fetch_cost > 0.0);
+    }
+
+    // -- RumBsonCostParams default --
+
+    #[test]
+    fn rum_bson_cost_params_default() {
+        let params = RumBsonCostParams::default();
+        assert!(params.term_lookup_cost > 0.0);
+        assert!(params.boundary_cost > 0.0);
+        assert!(params.distance_compute_cost > 0.0);
+        assert!(params.heap_fetch_cost > 0.0);
+        assert!(params.phrase_verify_cost > 0.0);
+        assert!(params.recheck_cost > 0.0);
+    }
+
+    // -- SelectivitySource test --
+
+    #[test]
+    fn selectivity_estimate_from_operator_heuristic() {
+        let est = estimate_selectivity(
+            BsonOperator::Eq,
+            None,
+            None,
+        );
+        assert!(
+            est.selectivity > 0.0 && est.selectivity < 1.0
+        );
+        assert_eq!(
+            est.source,
+            SelectivitySource::OperatorHeuristic
+        );
+    }
+
+    #[test]
+    fn selectivity_estimate_from_index_stats() {
+        let est = estimate_selectivity(
+            BsonOperator::Eq,
+            Some(1000),
+            None,
+        );
+        assert!(
+            (est.selectivity - 0.001).abs() < 0.0001,
+            "1/1000 ndistinct should give ~0.001"
+        );
+        assert_eq!(
+            est.source,
+            SelectivitySource::IndexStats
+        );
+    }
+
+    #[test]
+    fn selectivity_in_operator_with_array_length() {
+        let est = estimate_selectivity(
+            BsonOperator::In,
+            Some(100),
+            Some(5),
+        );
+        // 1/100 * 5 = 0.05
+        assert!(
+            (est.selectivity - 0.05).abs() < 0.01
+        );
+    }
+
+    #[test]
+    fn selectivity_all_operator_very_selective() {
+        let est = estimate_selectivity(
+            BsonOperator::All,
+            Some(100),
+            Some(3),
+        );
+        // (1/100)^3 = 0.000001, clamped to 0.000001
+        assert!(est.selectivity <= 0.001);
+    }
+
+    // -- parse_pg_operator edge cases --
+
+    #[test]
+    fn parse_unknown_pg_operator() {
+        assert!(BsonOperator::from_pg_operator("??").is_none());
+        assert!(BsonOperator::from_pg_operator("").is_none());
+    }
 }

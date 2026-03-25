@@ -1880,4 +1880,252 @@ mod tests {
         );
         assert!(count < 1000.0);
     }
+
+    // -- Stage cost for uncovered operator types --
+
+    #[test]
+    fn project_cost_is_cpu_only() {
+        let cost = estimate_stage_cost(
+            &DocOperator::Project {
+                fields: vec![
+                    FieldPath::new("name"),
+                    FieldPath::new("age"),
+                ],
+                inclusion: true,
+            },
+            1000.0,
+            512,
+        );
+        assert!(cost.cpu > 0.0);
+        assert_eq!(cost.io, 0.0);
+    }
+
+    #[test]
+    fn unwind_cost_allocates_memory() {
+        let cost = estimate_stage_cost(
+            &DocOperator::Unwind {
+                field: FieldPath::new("tags"),
+                preserve_null: false,
+            },
+            1000.0,
+            256,
+        );
+        assert!(cost.cpu > 0.0);
+        assert!(cost.memory > 0);
+    }
+
+    #[test]
+    fn group_cost_uses_startup() {
+        let cost = estimate_stage_cost(
+            &DocOperator::Group {
+                key: Some(vec![FieldPath::new("cat")]),
+                accumulators: vec![],
+            },
+            10000.0,
+            512,
+        );
+        assert!(cost.startup_cpu > 0.0);
+    }
+
+    #[test]
+    fn lookup_cost_has_io() {
+        let cost = estimate_stage_cost(
+            &DocOperator::Lookup {
+                from: "other".into(),
+                local_field: FieldPath::new("ref_id"),
+                foreign_field: FieldPath::new("_id"),
+                output_as: "joined".into(),
+            },
+            100.0,
+            256,
+        );
+        assert!(cost.io > 0.0);
+        assert!(cost.memory > 0);
+    }
+
+    #[test]
+    fn addfields_cost_cpu_only() {
+        let cost = estimate_stage_cost(
+            &DocOperator::AddFields {
+                fields: vec![(
+                    FieldPath::new("computed"),
+                    DocExpr::Literal(DocValue::Int(42)),
+                )],
+            },
+            1000.0,
+            128,
+        );
+        assert!(cost.cpu > 0.0);
+        assert_eq!(cost.io, 0.0);
+    }
+
+    #[test]
+    fn skip_cost_proportional_to_skip_count() {
+        let cost = estimate_stage_cost(
+            &DocOperator::Skip { count: 100 },
+            10000.0,
+            128,
+        );
+        assert!(cost.cpu > 0.0);
+    }
+
+    #[test]
+    fn count_cost_proportional_to_input() {
+        let cost = estimate_stage_cost(
+            &DocOperator::Count {
+                field: "total".into(),
+            },
+            10000.0,
+            128,
+        );
+        assert!(cost.cpu > 0.0);
+        assert_eq!(cost.io, 0.0);
+    }
+
+    // -- Sort with single element edge case --
+
+    #[test]
+    fn sort_cost_with_single_element() {
+        let cost = estimate_stage_cost(
+            &DocOperator::Sort {
+                keys: vec![(FieldPath::new("ts"), false)],
+            },
+            1.0,
+            128,
+        );
+        assert!(cost.cpu >= 0.0);
+    }
+
+    // -- Output count passthrough tests --
+
+    #[test]
+    fn output_count_scan_passes_through() {
+        let count = estimate_output_count(
+            &DocOperator::Scan {
+                collection: "c".into(),
+            },
+            500.0,
+        );
+        assert_eq!(count, 500.0);
+    }
+
+    #[test]
+    fn output_count_project_passes_through() {
+        let count = estimate_output_count(
+            &DocOperator::Project {
+                fields: vec![FieldPath::new("name")],
+                inclusion: true,
+            },
+            750.0,
+        );
+        assert_eq!(count, 750.0);
+    }
+
+    #[test]
+    fn output_count_sort_passes_through() {
+        let count = estimate_output_count(
+            &DocOperator::Sort {
+                keys: vec![(FieldPath::new("ts"), true)],
+            },
+            300.0,
+        );
+        assert_eq!(count, 300.0);
+    }
+
+    #[test]
+    fn output_count_addfields_passes_through() {
+        let count = estimate_output_count(
+            &DocOperator::AddFields {
+                fields: vec![(
+                    FieldPath::new("x"),
+                    DocExpr::Literal(DocValue::Int(1)),
+                )],
+            },
+            200.0,
+        );
+        assert_eq!(count, 200.0);
+    }
+
+    #[test]
+    fn output_count_lookup_passes_through() {
+        let count = estimate_output_count(
+            &DocOperator::Lookup {
+                from: "other".into(),
+                local_field: FieldPath::new("ref"),
+                foreign_field: FieldPath::new("_id"),
+                output_as: "joined".into(),
+            },
+            100.0,
+        );
+        assert_eq!(count, 100.0);
+    }
+
+    // -- Skip with more than input --
+
+    #[test]
+    fn output_count_skip_clamped_at_zero() {
+        let count = estimate_output_count(
+            &DocOperator::Skip { count: 200 },
+            100.0,
+        );
+        assert_eq!(count, 0.0);
+    }
+
+    // -- Limit with input less than count --
+
+    #[test]
+    fn output_count_limit_passes_when_input_smaller() {
+        let count = estimate_output_count(
+            &DocOperator::Limit { count: 1000 },
+            50.0,
+        );
+        assert_eq!(count, 50.0);
+    }
+
+    // -- f64_to_mem edge cases --
+
+    #[test]
+    fn f64_to_mem_negative_is_zero() {
+        assert_eq!(f64_to_mem(-100.0), 0);
+    }
+
+    #[test]
+    fn f64_to_mem_very_large_is_max() {
+        assert_eq!(f64_to_mem(f64::MAX), u64::MAX);
+    }
+
+    #[test]
+    fn f64_to_mem_normal_value() {
+        assert_eq!(f64_to_mem(1024.0), 1024);
+    }
+
+    // -- Pipeline optimization edge case: no optimization needed --
+
+    #[test]
+    fn optimize_scan_only_pipeline() {
+        let p = DocPipeline::new("users");
+        let opt = p.optimize();
+        assert_eq!(opt.len(), 1);
+        assert!(matches!(opt.stages[0], DocOperator::Scan { .. }));
+    }
+
+    // -- DocPredicate Or variant --
+
+    #[test]
+    fn predicate_fields_or() {
+        let pred = DocPredicate::Or(vec![
+            DocPredicate::Eq(FieldPath::new("a"), DocValue::Int(1)),
+            DocPredicate::Eq(FieldPath::new("b"), DocValue::Int(2)),
+        ]);
+        let fields = predicate_fields(&pred);
+        assert_eq!(fields.len(), 2);
+    }
+
+    // -- Empty pipeline is_empty --
+
+    #[test]
+    fn pipeline_is_empty_after_scan() {
+        let p = DocPipeline::new("c");
+        assert!(!p.is_empty());
+    }
 }

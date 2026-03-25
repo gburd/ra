@@ -1437,4 +1437,161 @@ mod tests {
             "high join cost should favor document path"
         );
     }
+
+    // -- Eliminable joins with nested field access --
+
+    #[test]
+    fn eliminable_joins_keeps_needed_nested_table() {
+        let view = sample_orders_view();
+        let eliminated = eliminable_joins(
+            &view,
+            &[
+                "_id".to_string(),
+                "customer".to_string(),
+            ],
+        );
+        // Customers table is needed for "customer" field
+        assert!(
+            !eliminated.contains(&"customers".to_string()),
+            "customers should not be eliminated"
+        );
+        // But order_items is not needed
+        assert!(
+            eliminated.contains(&"order_items".to_string()),
+            "order_items should be eliminable"
+        );
+    }
+
+    // -- Eliminable joins with only items accessed --
+
+    #[test]
+    fn eliminable_joins_keeps_array_table() {
+        let view = sample_orders_view();
+        let eliminated = eliminable_joins(
+            &view,
+            &["_id".to_string(), "items".to_string()],
+        );
+        assert!(
+            !eliminated.contains(&"order_items".to_string()),
+            "order_items should not be eliminated"
+        );
+        assert!(
+            eliminated.contains(&"customers".to_string()),
+            "customers should be eliminable"
+        );
+    }
+
+    // -- Join elimination savings for empty list --
+
+    #[test]
+    fn join_elimination_savings_zero_for_empty() {
+        let counts = sample_row_counts();
+        let params = DualityCostParams::default();
+        let savings =
+            join_elimination_savings(&[], &counts, &params);
+        assert!(
+            savings.abs() < f64::EPSILON,
+            "no eliminated tables should mean zero savings"
+        );
+    }
+
+    // -- Predicate target on array field --
+
+    #[test]
+    fn array_field_pushes_to_json() {
+        let view = sample_orders_view();
+        let target =
+            predicate_target(&view, "items", false);
+        assert_eq!(target, PredicateTarget::JsonPath);
+    }
+
+    // -- Cost ratio < 1.0 means document is cheaper --
+
+    #[test]
+    fn cost_ratio_below_one_means_document_wins() {
+        let view = sample_orders_view();
+        let counts = sample_row_counts();
+        let params = DualityCostParams::default();
+
+        let decision = choose_access_path(
+            &view, &counts, 1.0, 6, 0, &params,
+        );
+
+        if decision.path == AccessPath::Document {
+            assert!(
+                decision.cost_ratio <= 1.0,
+                "cost_ratio should be <= 1.0 when document wins"
+            );
+        } else {
+            assert!(
+                decision.cost_ratio > 1.0,
+                "cost_ratio should be > 1.0 when relational wins"
+            );
+        }
+    }
+
+    // -- Zero relational cost edge case --
+
+    #[test]
+    fn access_path_with_empty_row_counts() {
+        let view = sample_orders_view();
+        let counts = HashMap::new();
+        let params = DualityCostParams::default();
+
+        let decision = choose_access_path(
+            &view, &counts, 0.5, 3, 1, &params,
+        );
+        // Should not panic; uses default of 1000.0
+        assert!(decision.document_cost > 0.0);
+        assert!(decision.relational_cost > 0.0);
+    }
+
+    // -- Document cost zero predicates --
+
+    #[test]
+    fn document_cost_zero_predicates_no_scan() {
+        let params = DualityCostParams::default();
+        let cost = estimate_document_cost(
+            100_000.0, 1.0, 6, 0, &params,
+        );
+        // No predicate scan cost, only fetch + extract
+        let expected_per_row = params.document_fetch_cost
+            + 6.0 * params.json_field_extract_cost;
+        assert!(
+            (cost - 100_000.0 * expected_per_row).abs()
+                < 1.0,
+            "cost without predicates should be \
+             rows * (fetch + extract)"
+        );
+    }
+
+    // -- Relational cost with empty table row counts --
+
+    #[test]
+    fn relational_cost_empty_tables_defaults() {
+        let params = DualityCostParams::default();
+        let cost = estimate_relational_cost(
+            &[], 0.5, 0, 3, 6, &params,
+        );
+        // Empty table list -> no scan cost, but assembly
+        // uses default 1000 for root
+        assert!(
+            cost > 0.0,
+            "cost should be positive even with empty tables"
+        );
+    }
+
+    // -- DualityCostParams default values test --
+
+    #[test]
+    fn duality_cost_params_default_values() {
+        let params = DualityCostParams::default();
+        assert!((params.document_fetch_cost - 5.0).abs() < f64::EPSILON);
+        assert!((params.json_field_extract_cost - 0.2).abs() < f64::EPSILON);
+        assert!((params.json_predicate_cost - 0.8).abs() < f64::EPSILON);
+        assert!((params.relational_join_cost - 3.0).abs() < f64::EPSILON);
+        assert!((params.partial_assembly_cost - 1.5).abs() < f64::EPSILON);
+        assert!((params.update_fanout_cost - 2.0).abs() < f64::EPSILON);
+        assert!((params.relational_scan_cost_per_row - 1.0).abs() < f64::EPSILON);
+    }
 }
