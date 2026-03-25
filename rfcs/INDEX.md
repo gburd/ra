@@ -22,7 +22,6 @@ This index tracks all RFCs in the RA optimizer project by status. See [README.md
 | [0033](text/0033-columnar-format-optimization.md) | Columnar Format Optimization | 2026-03-20 | Storage layer |
 | [0052](_accepted/0052-progressive-reoptimization.md) | Progressive Re-Optimization (Plan Stitch) | 2026-03-22 | Commit 3246500a |
 | [0058](_accepted/0058-rule-complexity-prioritization.md) | Rule Complexity Prioritization | 2026-03-24 | Commit 848aadaf |
-| [0059](_accepted/0059-bayesian-pruning.md) | Bayesian Adaptive Search Space Pruning | 2026-03-23 | Commit a46de517 |
 | [0060](_accepted/0060-genetic-fingerprinting.md) | Genetic Fingerprinting for Query Plan Cache | 2026-03-23 | Plan cache system |
 
 ## Underway (In Development)
@@ -104,21 +103,22 @@ This index tracks all RFCs in the RA optimizer project by status. See [README.md
 | [0075](text/0075-multi-objective-cost-model.md) | Multi-Objective Cost Model | 2026-03-25 | Adaptive optimization |
 | [0076](text/0076-adaptive-mid-query-reoptimization.md) | Adaptive Mid-Query Re-Optimization | 2026-03-25 | Adaptive optimization |
 | [0077](text/0077-numa-aware-execution.md) | NUMA-Aware Execution | 2026-03-25 | Adaptive optimization |
+| [0078](text/0078-remove-bayesian-pruning.md) | Remove Bayesian Adaptive Search Space Pruning | 2026-03-25 | Cleanup / Refactoring |
 
 ## Rejected
 
 | RFC | Title | Date | Reason |
 |-----|-------|------|--------|
-| (none) | | | |
+| [0059](_rejected/0059-bayesian-pruning.md) | Bayesian Adaptive Search Space Pruning (v1) | 2026-03-23 | Not integrated, learning failed (0% cross-query learning), fingerprint collisions |
 
 ## Statistics
 
-- **Total RFCs**: 78
-- **Implemented**: 18 (23%)
+- **Total RFCs**: 79
+- **Implemented**: 17 (22%)
 - **Underway**: 2 (3%)
 - **Accepted**: 12 (15%)
 - **Under Review**: 6 (8%)
-- **Proposed**: 40 (51%)
-- **Rejected**: 0 (0%)
+- **Proposed**: 41 (52%)
+- **Rejected**: 1 (1%)
 
 ## Last Updated: 2026-03-25

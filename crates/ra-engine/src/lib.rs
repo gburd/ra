@@ -29,7 +29,6 @@
 
 pub mod adaptive_calibration;
 pub mod analysis;
-pub mod bayesian_pruning;
 pub mod cardinality_cost;
 // pub mod column_pruning; // TODO: incomplete, has invalid egg syntax
 pub mod consensus_rules;
@@ -204,10 +203,6 @@ pub use plan_stitch::{
     count_stitch_points, differential_verify, find_deepest_join,
     replace_subtree, stitch_multi, stitch_plans,
     verify_join_order_equivalence,
-};
-pub use bayesian_pruning::{
-    BayesianPruner, BucketStats, PruningConfig, PruningOutcome,
-    PruningSummary,
 };
 pub use genetic_fingerprint::QueryFingerprint;
 pub use pattern_fingerprint::PlanFingerprint;
