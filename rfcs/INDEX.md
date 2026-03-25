@@ -20,6 +20,9 @@ This index tracks all RFCs in the RA optimizer project by status. See [README.md
 | [0020](text/0020-parallel-query-execution.md) | Parallel Query Execution | 2026-03-20 | Execution engine |
 | [0021](text/0021-automatic-index-advisor.md) | Automatic Index Advisor | 2026-03-20 | Advisory system |
 | [0033](text/0033-columnar-format-optimization.md) | Columnar Format Optimization | 2026-03-20 | Storage layer |
+| [0052](_accepted/0052-progressive-reoptimization.md) | Progressive Re-Optimization (Plan Stitch) | 2026-03-22 | Commit 3246500a |
+| [0058](_accepted/0058-rule-complexity-prioritization.md) | Rule Complexity Prioritization | 2026-03-24 | Commit 848aadaf |
+| [0059](_accepted/0059-bayesian-pruning.md) | Bayesian Adaptive Search Space Pruning | 2026-03-23 | Commit a46de517 |
 | [0060](_accepted/0060-genetic-fingerprinting.md) | Genetic Fingerprinting for Query Plan Cache | 2026-03-23 | Plan cache system |
 
 ## Underway (In Development)
@@ -77,7 +80,6 @@ This index tracks all RFCs in the RA optimizer project by status. See [README.md
 | [0049](text/0049-partial-aggregation.md) | Partial Aggregation (Two-Phase) | 2026-03-22 | Gap analysis |
 | [0050](text/0050-decorrelation-improvements.md) | Decorrelation Improvements | 2026-03-22 | Gap analysis |
 | [0051](text/0051-materialized-view-matching.md) | Materialized View Matching and Rewriting | 2026-03-22 | High-priority optimization |
-| [0052](text/0052-progressive-reoptimization.md) | Progressive Re-Optimization (Plan Stitch) | 2026-03-22 | High-priority optimization |
 | [0053](text/0053-stored-procedure-dialect-support.md) | Stored Procedure Dialect Support | 2026-03-24 | Phase 2 extended roadmap |
 | [0054](text/0054-streaming-plan-adjustments.md) | Streaming Plan Adjustments for Pre-compiled Plans | 2026-03-24 | Phase 2 extended roadmap |
 | [0055](text/0055-rdbms-specific-type-support.md) | RDBMS-Specific Type Support | 2026-03-24 | Phase 2 extended roadmap |
@@ -95,12 +97,12 @@ This index tracks all RFCs in the RA optimizer project by status. See [README.md
 
 ## Statistics
 
-- **Total RFCs**: 60
-- **Implemented**: 15 (25%)
+- **Total RFCs**: 62
+- **Implemented**: 18 (29%)
 - **Underway**: 2 (3%)
-- **Accepted**: 12 (20%)
+- **Accepted**: 12 (19%)
 - **Under Review**: 6 (10%)
-- **Proposed**: 25 (42%)
+- **Proposed**: 24 (39%)
 - **Rejected**: 0 (0%)
 
 ## Last Updated: 2026-03-24
