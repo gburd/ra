@@ -67,3 +67,5 @@ PRECONDITION_SYSTEM_STATUS.md
 /docs/node_modules/
 
 /tmp/
+.DS_Store
+cargo-flamegraph.trace/
