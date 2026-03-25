@@ -1,12 +1,18 @@
 //! Functional dependency exploitation rules.
 //!
 //! Uses functional dependencies from unique constraints and keys
-//! to simplify GROUP BY clauses and eliminate redundant columns.
+//! to simplify GROUP BY clauses and eliminate redundant operations.
 //!
-//! Key optimizations:
-//! - Eliminate DISTINCT after GROUP BY (always produces unique groups)
-//! - Simplify MIN/MAX when grouping by the same column
-//! - Convert COUNT(DISTINCT) patterns
+//! Currently enabled (unconditional) rules:
+//! - DISTINCT after GROUP BY elimination
+//! - Double DISTINCT elimination
+//! - Sort after sort elimination
+//! - DISTINCT/sort reordering
+//!
+//! Future work (requires analysis infrastructure):
+//! - MIN/MAX simplification when grouping by same column
+//! - COUNT(*) with unique key optimization
+//! - Aggregate-to-DISTINCT conversion
 
 use egg::{rewrite, Rewrite};
 
@@ -15,74 +21,31 @@ use crate::egraph::RelLang;
 
 /// Return functional dependency exploitation rules.
 ///
-/// These rules use knowledge about functional dependencies
-/// (typically from primary keys and unique constraints) to
-/// simplify queries.
+/// These rules use properties of relational operators (GROUP BY
+/// produces unique groups, DISTINCT is idempotent) to eliminate
+/// redundant operations. Only unconditional rules are included.
 #[must_use]
-pub fn functional_dependency_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
+pub fn functional_dependency_rules(
+) -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
-        // ---------------------------------------------------------------
-        // DISTINCT elimination patterns (always valid)
-        // ---------------------------------------------------------------
-
-        // DISTINCT after GROUP BY is redundant (GROUP BY already produces unique groups)
+        // GROUP BY already produces unique groups, so DISTINCT is redundant
         rewrite!("eliminate-distinct-after-groupby";
             "(distinct-rel (aggregate ?groups ?aggs ?input))" =>
             "(aggregate ?groups ?aggs ?input)"
         ),
-
-        // ---------------------------------------------------------------
-        // Aggregate simplification patterns
-        // ---------------------------------------------------------------
-
-        // MIN(col) when grouping by col -> just project col
-        // The minimum value in a group where all values are the same is that value
-        rewrite!("min-same-when-grouping-by-col";
-            "(aggregate (list ?col) (list (agg-expr ?d (min ?col) ?alias)) ?input)" =>
-            "(project (list (proj-alias ?col ?alias)) ?input)"
-        ),
-
-        // MAX(col) when grouping by col -> just project col
-        rewrite!("max-same-when-grouping-by-col";
-            "(aggregate (list ?col) (list (agg-expr ?d (max ?col) ?alias)) ?input)" =>
-            "(project (list (proj-alias ?col ?alias)) ?input)"
-        ),
-
-        // COUNT(*) when grouping by unique key -> always 1
-        // Each group has exactly one row when grouping by unique key
-        rewrite!("count-star-unique-group";
-            "(aggregate (list ?pk) (list (agg-expr ?d (count ?star) ?alias)) (scan ?table))" =>
-            "(project (list (proj-alias (const-int 1) ?alias)) (scan ?table))"
-        ),
-
-        // ---------------------------------------------------------------
-        // Redundant aggregate elimination
-        // ---------------------------------------------------------------
-
-        // Aggregate with no aggregates and no GROUP BY -> DISTINCT
-        rewrite!("aggregate-no-aggs-no-groups-to-distinct";
-            "(aggregate nil nil ?input)" =>
-            "(distinct-rel ?input)"
-        ),
-
-        // Double DISTINCT elimination
+        // Double DISTINCT is redundant
         rewrite!("double-distinct-elimination";
             "(distinct-rel (distinct-rel ?input))" =>
             "(distinct-rel ?input)"
         ),
-
-        // ---------------------------------------------------------------
-        // ORDER BY simplification patterns
-        // ---------------------------------------------------------------
-
-        // ORDER BY after ORDER BY - keep only the outer sort
+        // Sort after sort: only the outer sort matters
         rewrite!("sort-after-sort";
             "(sort ?keys1 (sort ?keys2 ?input))" =>
             "(sort ?keys1 ?input)"
         ),
-
-        // DISTINCT after ORDER BY may lose ordering
-        // but ORDER BY after DISTINCT is preserved
+        // DISTINCT after sort can be reordered: sort after distinct
+        // preserves the ordering while potentially reducing the
+        // number of rows sorted
         rewrite!("distinct-sort-reorder";
             "(distinct-rel (sort ?keys ?input))" =>
             "(sort ?keys (distinct-rel ?input))"
@@ -91,15 +54,22 @@ pub fn functional_dependency_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
     use crate::egraph::{to_rec_expr, RelLang};
     use egg::Runner;
-    use ra_core::algebra::RelExpr;
-    use ra_core::expr::{AggFunc, ColumnRef, Expr};
+    use ra_core::algebra::{
+        AggregateExpr, AggregateFunction, NullOrdering, RelExpr,
+        SortDirection, SortKey,
+    };
+    use ra_core::expr::{ColumnRef, Expr};
 
-    fn run_functional_deps(expr: &RelExpr) -> Runner<RelLang, RelAnalysis> {
-        let rec = to_rec_expr(expr).expect("conversion should succeed");
+    fn run_functional_deps(
+        expr: &RelExpr,
+    ) -> Runner<RelLang, RelAnalysis> {
+        let rec =
+            to_rec_expr(expr).expect("conversion should succeed");
         Runner::default()
             .with_expr(&rec)
             .with_node_limit(10_000)
@@ -109,39 +79,17 @@ mod tests {
 
     #[test]
     fn distinct_after_groupby_eliminated() {
-        // DISTINCT after GROUP BY is redundant
-        let expr = RelExpr::scan("t")
-            .aggregate(
-                vec!["dept".to_string()],
-                vec![("count".to_string(), AggFunc::Count(Box::new(Expr::Column(ColumnRef::new("id")))))],
-            )
-            .distinct();
-
-        let runner = run_functional_deps(&expr);
-        assert!(runner.egraph.number_of_classes() > 1);
-    }
-
-    #[test]
-    fn min_grouping_by_same_column_simplified() {
-        // MIN(col) when grouping by col -> just project col
-        let expr = RelExpr::scan("t")
-            .aggregate(
-                vec!["id".to_string()],
-                vec![("min_id".to_string(), AggFunc::Min(Box::new(Expr::Column(ColumnRef::new("id")))))],
-            );
-
-        let runner = run_functional_deps(&expr);
-        assert!(runner.egraph.number_of_classes() > 1);
-    }
-
-    #[test]
-    fn max_grouping_by_same_column_simplified() {
-        // MAX(col) when grouping by col -> just project col
-        let expr = RelExpr::scan("t")
-            .aggregate(
-                vec!["id".to_string()],
-                vec![("max_id".to_string(), AggFunc::Max(Box::new(Expr::Column(ColumnRef::new("id")))))],
-            );
+        let expr = RelExpr::Aggregate {
+            group_by: vec![Expr::Column(ColumnRef::new("dept"))],
+            aggregates: vec![AggregateExpr {
+                function: AggregateFunction::Count,
+                arg: Some(Expr::Column(ColumnRef::new("id"))),
+                distinct: false,
+                alias: Some("count".into()),
+            }],
+            input: Box::new(RelExpr::scan("t")),
+        }
+        .distinct();
 
         let runner = run_functional_deps(&expr);
         assert!(runner.egraph.number_of_classes() > 1);
@@ -149,8 +97,45 @@ mod tests {
 
     #[test]
     fn double_distinct_eliminated() {
-        // Double DISTINCT should be simplified to single DISTINCT
         let expr = RelExpr::scan("t").distinct().distinct();
+
+        let runner = run_functional_deps(&expr);
+        assert!(runner.egraph.number_of_classes() > 1);
+    }
+
+    #[test]
+    fn sort_after_sort_simplified() {
+        let expr = RelExpr::Sort {
+            keys: vec![SortKey {
+                expr: Expr::Column(ColumnRef::new("b")),
+                direction: SortDirection::Desc,
+                nulls: NullOrdering::First,
+            }],
+            input: Box::new(RelExpr::Sort {
+                keys: vec![SortKey {
+                    expr: Expr::Column(ColumnRef::new("a")),
+                    direction: SortDirection::Asc,
+                    nulls: NullOrdering::Last,
+                }],
+                input: Box::new(RelExpr::scan("t")),
+            }),
+        };
+
+        let runner = run_functional_deps(&expr);
+        assert!(runner.egraph.number_of_classes() > 1);
+    }
+
+    #[test]
+    fn distinct_sort_reordered() {
+        let expr = RelExpr::Sort {
+            keys: vec![SortKey {
+                expr: Expr::Column(ColumnRef::new("a")),
+                direction: SortDirection::Asc,
+                nulls: NullOrdering::Last,
+            }],
+            input: Box::new(RelExpr::scan("t")),
+        }
+        .distinct();
 
         let runner = run_functional_deps(&expr);
         assert!(runner.egraph.number_of_classes() > 1);

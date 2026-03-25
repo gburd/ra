@@ -30,7 +30,7 @@
 pub mod adaptive_calibration;
 pub mod analysis;
 pub mod cardinality_cost;
-// pub mod column_pruning; // TODO: Fix ProjectionColumn type errors
+pub mod column_pruning;
 pub mod consensus_rules;
 pub mod constraint_optimizer;
 pub mod cost;
@@ -43,7 +43,7 @@ pub mod egraph;
 pub mod executors;
 pub mod extract;
 pub mod facts_context;
-// pub mod functional_deps; // TODO: Fix egg syntax issues
+pub mod functional_deps;
 pub mod incremental_sort;
 pub mod isolation_cost;
 pub mod join_transformations;
@@ -70,7 +70,7 @@ pub mod join_graph;
 pub mod precondition_eval;
 pub mod stats_cache;
 pub mod recursive;
-// pub mod redundant_join; // TODO: Fix egg syntax conditionals
+pub mod redundant_join;
 pub mod resource_budget;
 pub mod resource_profiles;
 pub mod rewrite;
@@ -79,7 +79,7 @@ pub mod rule_metadata;
 pub mod rule_priority;
 pub mod rule_registry;
 pub mod runtime_filters;
-// pub mod semi_join; // TODO: Fix egg syntax for conditional patterns
+pub mod semi_join;
 pub mod timely;
 pub mod trigger_optimizer;
 

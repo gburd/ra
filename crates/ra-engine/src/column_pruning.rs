@@ -4,9 +4,13 @@
 //! to reduce memory usage and I/O costs.
 //!
 //! Key optimizations:
-//! - Merge adjacent projections
-//! - Push projections through set operations
-//! - Minimize columns in semi/anti joins
+//! - Push projections through set operations (intersect, except)
+//! - Push projections through limits
+//! - Eliminate redundant projections over values
+//! - Idempotent projection elimination
+//!
+//! Note: `project-merge` and `project-through-union` are already
+//! defined in rewrite.rs and are not duplicated here.
 
 use egg::{rewrite, Rewrite};
 
@@ -15,34 +19,13 @@ use crate::egraph::RelLang;
 
 /// Return column pruning rules.
 ///
-/// These rules identify and remove columns that are not needed
-/// for the final query result, pushing projections down to eliminate
-/// them as early as possible.
+/// These rules push projections down through operators to eliminate
+/// unused columns as early as possible. Only rules not already
+/// present in rewrite.rs are included.
 #[must_use]
-pub fn column_pruning_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
+pub fn column_pruning_rules(
+) -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
-        // ---------------------------------------------------------------
-        // Projection merging - always valid
-        // ---------------------------------------------------------------
-
-        // Merge adjacent projections, keeping only outer columns
-        rewrite!("project-merge";
-            "(project ?cols1 (project ?cols2 ?input))" =>
-            "(project ?cols1 ?input)"
-        ),
-
-        // ---------------------------------------------------------------
-        // Column pruning through set operations - always valid
-        // ---------------------------------------------------------------
-
-        // Push projection through union - both sides get same projection
-        rewrite!("project-through-union";
-            "(project ?cols (union ?all ?left ?right))" =>
-            "(union ?all
-                (project ?cols ?left)
-                (project ?cols ?right))"
-        ),
-
         // Push projection through intersect
         rewrite!("project-through-intersect";
             "(project ?cols (intersect ?all ?left ?right))" =>
@@ -50,7 +33,6 @@ pub fn column_pruning_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
                 (project ?cols ?left)
                 (project ?cols ?right))"
         ),
-
         // Push projection through except
         rewrite!("project-through-except";
             "(project ?cols (except ?all ?left ?right))" =>
@@ -58,29 +40,17 @@ pub fn column_pruning_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
                 (project ?cols ?left)
                 (project ?cols ?right))"
         ),
-
-        // ---------------------------------------------------------------
-        // Column pruning through limit - always valid
-        // ---------------------------------------------------------------
-
         // Push projection through limit (limit doesn't use columns)
         rewrite!("project-through-limit";
             "(project ?cols (limit ?n ?offset ?input))" =>
             "(limit ?n ?offset (project ?cols ?input))"
         ),
-
-        // ---------------------------------------------------------------
-        // Simple projection elimination patterns
-        // ---------------------------------------------------------------
-
-        // Eliminate projection of all columns from values
         // VALUES already has exactly the columns it produces
         rewrite!("project-values-all";
             "(project ?cols (values ?rows))" =>
             "(values ?rows)"
         ),
-
-        // Project after project with same columns (idempotent)
+        // Projection with same columns is idempotent
         rewrite!("project-idempotent";
             "(project ?cols (project ?cols ?input))" =>
             "(project ?cols ?input)"
@@ -89,15 +59,19 @@ pub fn column_pruning_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
     use crate::egraph::{to_rec_expr, RelLang};
     use egg::Runner;
-    use ra_core::algebra::RelExpr;
+    use ra_core::algebra::{ProjectionColumn, RelExpr};
     use ra_core::expr::{ColumnRef, Expr};
 
-    fn run_column_pruning(expr: &RelExpr) -> Runner<RelLang, RelAnalysis> {
-        let rec = to_rec_expr(expr).expect("conversion should succeed");
+    fn run_column_pruning(
+        expr: &RelExpr,
+    ) -> Runner<RelLang, RelAnalysis> {
+        let rec =
+            to_rec_expr(expr).expect("conversion should succeed");
         Runner::default()
             .with_expr(&rec)
             .with_node_limit(10_000)
@@ -105,49 +79,55 @@ mod tests {
             .run(&column_pruning_rules())
     }
 
-    #[test]
-    fn projection_merge() {
-        // Adjacent projections should be merged
-        let expr = RelExpr::scan("t")
-            .project(vec![
-                ("a".to_string(), Expr::Column(ColumnRef::new("a"))),
-                ("b".to_string(), Expr::Column(ColumnRef::new("b"))),
-                ("c".to_string(), Expr::Column(ColumnRef::new("c"))),
-            ])
-            .project(vec![
-                ("a".to_string(), Expr::Column(ColumnRef::new("a"))),
-                ("b".to_string(), Expr::Column(ColumnRef::new("b"))),
-            ]);
-
-        let runner = run_column_pruning(&expr);
-        assert!(runner.egraph.number_of_classes() > 1);
-    }
-
-    #[test]
-    fn projection_through_union() {
-        // Projection pushed through union
-        let left = RelExpr::scan("t1");
-        let right = RelExpr::scan("t2");
-        let expr = RelExpr::Union {
-            all: true,
-            left: Box::new(left),
-            right: Box::new(right),
-        }.project(vec![
-            ("col1".to_string(), Expr::Column(ColumnRef::new("col1"))),
-        ]);
-
-        let runner = run_column_pruning(&expr);
-        assert!(runner.egraph.number_of_classes() > 1);
+    fn pcol(name: &str) -> ProjectionColumn {
+        ProjectionColumn {
+            expr: Expr::Column(ColumnRef::new(name)),
+            alias: None,
+        }
     }
 
     #[test]
     fn projection_through_limit() {
-        // Projection can be pushed through limit
         let expr = RelExpr::scan("t")
             .limit(10, 0)
-            .project(vec![
-                ("a".to_string(), Expr::Column(ColumnRef::new("a"))),
-            ]);
+            .project(vec![pcol("a")]);
+
+        let runner = run_column_pruning(&expr);
+        assert!(runner.egraph.number_of_classes() > 1);
+    }
+
+    #[test]
+    fn projection_idempotent() {
+        let cols = vec![pcol("a"), pcol("b")];
+        let expr = RelExpr::scan("t")
+            .project(cols.clone())
+            .project(cols);
+
+        let runner = run_column_pruning(&expr);
+        assert!(runner.egraph.number_of_classes() > 1);
+    }
+
+    #[test]
+    fn projection_through_intersect() {
+        let expr = RelExpr::Intersect {
+            all: false,
+            left: Box::new(RelExpr::scan("t1")),
+            right: Box::new(RelExpr::scan("t2")),
+        }
+        .project(vec![pcol("col1")]);
+
+        let runner = run_column_pruning(&expr);
+        assert!(runner.egraph.number_of_classes() > 1);
+    }
+
+    #[test]
+    fn projection_through_except() {
+        let expr = RelExpr::Except {
+            all: false,
+            left: Box::new(RelExpr::scan("t1")),
+            right: Box::new(RelExpr::scan("t2")),
+        }
+        .project(vec![pcol("col1")]);
 
         let runner = run_column_pruning(&expr);
         assert!(runner.egraph.number_of_classes() > 1);

@@ -9,6 +9,7 @@ use std::hash::BuildHasher;
 
 use egg::Language;
 use ra_core::statistics::Statistics;
+use ra_hardware::calibration::CalibratedCostModel;
 use ra_hardware::HardwareProfile;
 use ra_stats::accuracy::{QualityMetrics, Staleness, StatisticsState};
 use ra_stats::integration::{ManagedTableStats, StatisticsAdapter};

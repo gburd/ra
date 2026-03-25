@@ -53,11 +53,17 @@ pub fn all_rules_unsorted() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     rules.extend(set_operation_rules());
     rules.extend(subquery_optimization_rules());
 
-    // New optimization rules (TODO: incomplete, commented out)
-    // rules.extend(crate::redundant_join::redundant_join_elimination_rules());
-    // rules.extend(crate::functional_deps::functional_dependency_rules());
-    // rules.extend(crate::semi_join::semi_join_reduction_rules());
-    // rules.extend(crate::column_pruning::column_pruning_rules());
+    // Column pruning rules (project through intersect/except/limit, etc.)
+    rules.extend(crate::column_pruning::column_pruning_rules());
+
+    // Functional dependency rules (distinct/sort elimination)
+    rules.extend(crate::functional_deps::functional_dependency_rules());
+
+    // Semi-join reduction rules (distinct elimination, filter merging)
+    rules.extend(crate::semi_join::semi_join_reduction_rules());
+
+    // Redundant join elimination rules (cross/inner/anti join patterns)
+    rules.extend(crate::redundant_join::redundant_join_elimination_rules());
 
     // Consensus rules (DataFusion + Calcite)
     rules.extend(crate::consensus_rules::consensus_rules());
