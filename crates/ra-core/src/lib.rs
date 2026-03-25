@@ -16,6 +16,7 @@
 pub mod algebra;
 pub mod cost;
 pub mod distributed_agg;
+pub mod document_algebra;
 pub mod distribution;
 pub mod expr;
 pub mod facts;

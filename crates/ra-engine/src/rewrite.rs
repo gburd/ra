@@ -95,6 +95,16 @@ pub fn all_rules_unsorted() -> Vec<Rewrite<RelLang, RelAnalysis>> {
         crate::documentdb_optimizer::documentdb_rewrite_rules(),
     );
 
+    // Oracle JSON Relational Duality view rules (RFC 0084)
+    rules.extend(
+        crate::oracle_json_duality::duality_rewrite_rules(),
+    );
+
+    // XPath/XQuery optimization rules (RFC 0083)
+    rules.extend(
+        crate::xml_optimizer::xml_optimization_rules(),
+    );
+
     rules
 }
 

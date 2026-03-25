@@ -83,6 +83,18 @@ unsafe extern "C-unwind" fn ra_planner_hook(
         );
     }
 
+    // Skip queries that reference system catalogs (pg_catalog,
+    // information_schema). RA should never attempt to optimize
+    // queries against PostgreSQL's internal metadata tables.
+    if !parse.is_null() && references_system_catalogs(parse) {
+        return call_prev_planner(
+            parse,
+            query_string,
+            cursor_options,
+            bound_params,
+        );
+    }
+
     // Delegate to the inner implementation, catching any panics
     // to prevent crashing the PostgreSQL backend process.
     let result = std::panic::catch_unwind(
@@ -166,10 +178,8 @@ unsafe fn ra_planner_hook_inner(
     }
 
     // Gather statistics from catalog (safe inside planner hook).
-    let table_names: Vec<(String, String)> = extract_rtable_names(parse)
-        .into_iter()
-        .map(|name| ("public".to_string(), name))
-        .collect();
+    let table_names: Vec<(String, String)> =
+        extract_rtable_schema_names(parse);
     let stats = stats_bridge::gather_all_stats(&table_names);
     state.statistics = stats.clone();
 
@@ -575,6 +585,138 @@ unsafe fn extract_rtable_names(
         }
     }
     names
+}
+
+/// Extract `(schema, table)` pairs from the Query's range table.
+///
+/// Resolves each relation's namespace OID to a schema name using
+/// `get_namespace_name`. Falls back to `"public"` when resolution
+/// fails.
+///
+/// # Safety
+///
+/// Caller must pass a valid `Query` pointer.
+unsafe fn extract_rtable_schema_names(
+    parse: *mut pg_sys::Query,
+) -> Vec<(String, String)> {
+    let mut pairs = Vec::new();
+    if parse.is_null() {
+        return pairs;
+    }
+    let rtable = (*parse).rtable;
+    if rtable.is_null() {
+        return pairs;
+    }
+
+    let length = (*rtable).length as i32;
+    for i in 0..length {
+        let rte = pg_sys::list_nth(rtable, i)
+            as *mut pg_sys::RangeTblEntry;
+        if rte.is_null() {
+            continue;
+        }
+        if (*rte).rtekind != pg_sys::RTEKind::RTE_RELATION {
+            continue;
+        }
+        let relid = (*rte).relid;
+        let rel_name = get_rel_name(relid);
+        let schema_name = get_rel_schema_name(relid);
+        if let Some(name) = rel_name {
+            pairs.push((
+                schema_name.unwrap_or_else(|| "public".to_string()),
+                name,
+            ));
+        }
+    }
+    pairs
+}
+
+/// Look up a relation's schema name by its OID.
+unsafe fn get_rel_schema_name(
+    relid: pg_sys::Oid,
+) -> Option<String> {
+    let ns_oid = get_rel_namespace(relid);
+    if ns_oid == pg_sys::InvalidOid {
+        return None;
+    }
+    let name_ptr = pg_sys::get_namespace_name(ns_oid);
+    if name_ptr.is_null() {
+        return None;
+    }
+    Some(
+        CStr::from_ptr(name_ptr)
+            .to_string_lossy()
+            .into_owned(),
+    )
+}
+
+/// Check if any relation in the query belongs to a system catalog.
+///
+/// Returns true if any `RTE_RELATION` entry in the range table has
+/// a namespace OID matching `pg_catalog` or `information_schema`.
+/// These are PostgreSQL's internal schemas and should always be
+/// planned by the standard planner.
+///
+/// # Safety
+///
+/// Caller must pass a valid `Query` pointer.
+unsafe fn references_system_catalogs(
+    parse: *mut pg_sys::Query,
+) -> bool {
+    if parse.is_null() {
+        return false;
+    }
+    let rtable = (*parse).rtable;
+    if rtable.is_null() {
+        return false;
+    }
+
+    // Resolve the well-known system namespace OIDs.
+    let pg_catalog_oid = pg_sys::LookupExplicitNamespace(
+        c"pg_catalog".as_ptr(),
+        true, // missing_ok
+    );
+    let info_schema_oid = pg_sys::LookupExplicitNamespace(
+        c"information_schema".as_ptr(),
+        true, // missing_ok
+    );
+
+    let length = (*rtable).length as i32;
+    for i in 0..length {
+        let rte = pg_sys::list_nth(rtable, i)
+            as *mut pg_sys::RangeTblEntry;
+        if rte.is_null() {
+            continue;
+        }
+        if (*rte).rtekind != pg_sys::RTEKind::RTE_RELATION {
+            continue;
+        }
+        let rel_ns = get_rel_namespace((*rte).relid);
+        if rel_ns == pg_catalog_oid
+            || rel_ns == info_schema_oid
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// Look up the namespace OID of a relation.
+unsafe fn get_rel_namespace(
+    relid: pg_sys::Oid,
+) -> pg_sys::Oid {
+    let tuple = pg_sys::SearchSysCache1(
+        pg_sys::SysCacheIdentifier::RELOID as _,
+        pg_sys::ObjectIdGetDatum(relid),
+    );
+    if tuple.is_null() {
+        return pg_sys::InvalidOid;
+    }
+    let rel_form =
+        pg_sys::GETSTRUCT(tuple) as pg_sys::Form_pg_class;
+    let ns_oid = (*rel_form).relnamespace;
+    pg_sys::ReleaseSysCache(tuple);
+    ns_oid
 }
 
 /// Look up a relation name by OID.

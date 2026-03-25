@@ -30,6 +30,7 @@
 pub mod adaptive_calibration;
 pub mod analysis;
 pub mod cardinality_cost;
+pub mod citus_optimizer;
 pub mod column_pruning;
 pub mod consensus_rules;
 pub mod constraint_optimizer;
@@ -78,10 +79,13 @@ pub mod shortcuts;
 pub mod rule_metadata;
 pub mod rule_priority;
 pub mod rule_registry;
+pub mod rum_index;
 pub mod runtime_filters;
 pub mod semi_join;
 pub mod timely;
+pub mod oracle_json_duality;
 pub mod trigger_optimizer;
+pub mod xml_optimizer;
 
 pub use adaptive_calibration::{
     AdaptiveCalibrator, CalibrationConfig, CalibrationState,
@@ -190,6 +194,39 @@ pub use documentdb_optimizer::{
 };
 pub use isolation_cost::{
     IsolationCostConfig, PlanEstimates, isolation_cost_adjustment,
+};
+pub use rum_index::{
+    RumCostParams, RumError, RumIndexRecommendation, RumOpclass,
+    RumQueryType, evaluate_rum_recommendation, rum_boolean_cost_factor_vs_gin,
+    rum_phrase_scan_cost, rum_ranked_scan_cost, rum_rewrite_rules,
+    rum_scan_cost, rum_scan_cost_factor, rum_vs_gin_ratio,
+    rum_vs_sequential_ratio,
+};
+pub use oracle_json_duality::{
+    AccessPath, AccessPathDecision, DualityCostParams, DualityError,
+    DualityField, DualityFieldMapping, DualityView, PredicateTarget,
+    Updatability, benchmark_access_patterns, choose_access_path,
+    duality_document_scan_cost_factor, duality_rewrite_rules,
+    eliminable_joins, estimate_document_cost, estimate_relational_cost,
+    estimate_update_cost, join_elimination_savings,
+    predicate_target, pushdown_selectivity_benefit,
+};
+pub use citus_optimizer::{
+    CitusMetadata, CitusOptimizedPlan, CitusOptimizer,
+    CitusOptimizerConfig, CitusOptimizerError, CitusStrategy,
+    CitusWorkerNode, ColumnarCostParams, ColumnarTableInfo,
+    DistributedTableInfo, DistributionMethod,
+    ExecutionLocation as CitusExecutionLocation,
+    ShardPruningResult, StorageType,
+    analyze_shard_pruning, columnar_scan_cost_factor,
+};
+pub use xml_optimizer::{
+    NodeTest, PositionPredicate, XPathAxis, XPathCompareOp,
+    XPathExpr, XPathPredicate, XPathStep, XmlCostParams,
+    XmlFunctionCall, XmlFunctionKind, XmlIndexInfo, XmlIndexType,
+    XmlOptimizerError, XmlPlatform, XmlValueType,
+    classify_xml_function, estimate_xpath_cost, parse_xpath,
+    simplify_xpath, xml_optimization_rules,
 };
 pub use query_complexity::QueryComplexity;
 pub use convergence::{
