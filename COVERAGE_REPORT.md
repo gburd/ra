@@ -99,4 +99,99 @@ Based on complexity and current gaps:
 - Use of helper functions and mocks
 
 ### Areas for Improvement
-1. **Property-based testing**: Add `proptest` for algebr
+1. **Property-based testing**: Add `proptest` for algebraic transformations
+2. **Error injection**: Test error paths systematically
+3. **Edge cases**: Boundary values, empty inputs, maximum values
+4. **Mutation testing**: Use `cargo-mutants` to verify test quality
+
+## Files Without Tests (Priority Order)
+
+### High Priority (Core Functionality)
+1. `crates/ra-engine/src/extract.rs` (2,581 lines) - E-graph extraction
+2. `crates/ra-engine/src/cardinality_cost.rs` - Cardinality estimation
+3. `crates/ra-engine/src/analysis.rs` - Analysis framework
+4. `crates/ra-engine/src/cost.rs` - Cost model implementation
+5. `crates/ra-engine/src/federated_cost.rs` - Federated query costs
+
+### Medium Priority (Optimization)
+6. `crates/ra-engine/src/distributed_optimizer.rs` - Distributed optimization
+7. `crates/ra-engine/src/column_pruning.rs` - Column pruning rules
+8. `crates/ra-engine/src/functional_deps.rs` - Functional dependencies
+9. `crates/ra-engine/src/incremental_sort.rs` - Incremental sort
+10. `crates/ra-engine/src/covering_index.rs` - Index selection
+
+### Low Priority (Specialized)
+11. `crates/ra-engine/src/citus_optimizer.rs` - Citus-specific rules
+12. `crates/ra-engine/src/documentdb_optimizer.rs` - DocumentDB rules
+13. `crates/ra-engine/src/federated_optimizer.rs` - Federation rules
+14. `crates/ra-engine/src/adaptive_calibration.rs` - Adaptive tuning
+
+Total: 49 of 58 files in ra-engine/src lack tests (84%)
+
+## Next Steps
+
+### Immediate Actions
+1. Run coverage with HTML output for detailed analysis
+2. Add basic unit tests to high-priority files
+3. Focus on testable pure functions first
+4. Mock complex dependencies
+
+### Test Writing Guide
+
+#### For Pure Functions
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_function_name() {
+        let input = create_test_input();
+        let result = function_under_test(input);
+        assert_eq!(result, expected_output());
+    }
+
+    #[test]
+    fn test_error_case() {
+        let result = function_that_fails();
+        assert!(result.is_err());
+    }
+}
+```
+
+#### For Trait Implementations
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug)]
+    struct MockDependency;
+
+    impl Trait for MockDependency {
+        fn method(&self) -> Output {
+            // Mock implementation
+        }
+    }
+
+    #[test]
+    fn test_with_mock() {
+        let mock = MockDependency;
+        let result = use_dependency(&mock);
+        assert!(result.is_ok());
+    }
+}
+```
+
+## Conclusion
+
+Current coverage of 57.06% indicates a solid foundation with comprehensive tests in core modules (ra-dialect, ra-core). However, ra-engine has significant gaps with 49 of 58 files untested (84%).
+
+To reach 90% coverage:
+1. Add 5,600 lines of tested code (current: 9,756 tested, need: 15,388 tested)
+2. Focus on ra-engine high-priority files
+3. Test error paths in existing modules
+4. Use property-based testing for complex algorithms
+5. Add integration tests for end-to-end workflows
+
+Estimated effort: 40-60 hours of focused test writing
