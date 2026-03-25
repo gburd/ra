@@ -55,6 +55,7 @@ fn confidence_discount(confidence: f64) -> f64 {
 pub struct IntegratedCostModel {
     adapter: StatisticsAdapter,
     hardware: HardwareProfile,
+    calibration: CalibratedCostModel,
 }
 
 impl IntegratedCostModel {
@@ -64,10 +65,32 @@ impl IntegratedCostModel {
         profile: StatisticsProfile,
         hardware: HardwareProfile,
     ) -> Self {
+        let calibration = CalibratedCostModel::from_profile(&hardware);
         Self {
             adapter: StatisticsAdapter::new(profile),
             hardware,
+            calibration,
         }
+    }
+
+    /// Create with explicit calibration from hardware benchmarks.
+    #[must_use]
+    pub fn with_calibration(
+        profile: StatisticsProfile,
+        hardware: HardwareProfile,
+        calibration: CalibratedCostModel,
+    ) -> Self {
+        Self {
+            adapter: StatisticsAdapter::new(profile),
+            hardware,
+            calibration,
+        }
+    }
+
+    /// Get the calibrated cost model.
+    #[must_use]
+    pub fn calibration(&self) -> &CalibratedCostModel {
+        &self.calibration
     }
 
     /// Register managed statistics for a table.
@@ -139,12 +162,27 @@ impl IntegratedCostModel {
         let row_count = stats.row_count;
         let avg_size = stats.avg_row_size.max(1) as f64;
 
-        let storage_factor = 100.0 / self.hardware.storage_bandwidth_gbps;
         let base = row_count * avg_size / (1024.0 * 1024.0);
-        let cost = base * storage_factor;
+        let cost = base * self.calibration.seq_page_cost();
 
         let disc = self.confidence_for_table(table);
         cost * disc
+    }
+
+    /// Estimate cost for an index scan operator (RFC 0068).
+    #[must_use]
+    #[allow(clippy::cast_precision_loss)]
+    pub fn index_scan_cost(
+        &self,
+        table: &str,
+        selectivity: f64,
+    ) -> f64 {
+        let stats = self.effective_statistics(table);
+        let selected = stats.row_count * selectivity.clamp(0.0, 1.0);
+        let random_io = selected * self.calibration.rand_page_cost();
+        let cpu = selected * self.calibration.tuple_cost() * 0.01;
+        let disc = self.confidence_for_table(table);
+        (random_io + cpu) * disc
     }
 
     /// Estimate cost for a filter operator.
@@ -153,13 +191,15 @@ impl IntegratedCostModel {
         let stats = self.effective_statistics(table);
         let simd_factor =
             256.0 / f64::from(self.hardware.simd_width_bits);
-        let cost = stats.row_count * 0.001 * simd_factor;
+        let cost = stats.row_count * 0.001
+            * simd_factor
+            * self.calibration.tuple_cost();
 
         let disc = self.confidence_for_table(table);
         cost * disc
     }
 
-    /// Estimate cost for a join operator.
+    /// Estimate cost for a join operator (calibrated, RFC 0068).
     #[must_use]
     #[allow(clippy::cast_precision_loss)]
     pub fn join_cost(
@@ -170,15 +210,22 @@ impl IntegratedCostModel {
         let left_stats = self.effective_statistics(left_table);
         let right_stats = self.effective_statistics(right_table);
 
-        let cache_mb =
-            self.hardware.l3_cache_bytes as f64 / (1024.0 * 1024.0);
-        let cache_factor = 16.0 / cache_mb.max(1.0);
-
         let build_rows = left_stats.row_count.min(right_stats.row_count);
         let probe_rows = left_stats.row_count.max(right_stats.row_count);
 
+        let ht_bytes = (build_rows * 200.0) as u64;
+        let spill_factor = self.calibration.hash_table_cache_factor(
+            ht_bytes,
+            self.hardware.l3_cache_bytes,
+        );
+        let cache_mb =
+            self.hardware.l3_cache_bytes as f64 / (1024.0 * 1024.0);
+        let cache_size_factor = 16.0 / cache_mb.max(1.0);
+
         let cost = (build_rows * 100e-6 + probe_rows * 50e-6)
-            * cache_factor;
+            * spill_factor
+            * cache_size_factor
+            * self.calibration.tuple_cost();
 
         let disc_left = self.confidence_for_table(left_table);
         let disc_right = self.confidence_for_table(right_table);
@@ -203,24 +250,30 @@ impl IntegratedCostModel {
         let build_stats = self.effective_statistics(build_table);
         let probe_stats = self.effective_statistics(probe_table);
 
-        let cache_mb =
-            self.hardware.l3_cache_bytes as f64 / (1024.0 * 1024.0);
-        let cache_factor = 16.0 / cache_mb.max(1.0);
-
         let build_rows = build_stats.row_count;
         let probe_rows = probe_stats.row_count;
 
-        // Filter build cost: proportional to build side
-        let filter_build_cost = build_rows * 10e-9;
-        // Filter apply cost: per probe row
-        let filter_apply_cost = probe_rows * 20e-9;
-        // Effective probe rows after filtering
+        let ht_bytes = (build_rows * 200.0) as u64;
+        let spill_factor = self.calibration.hash_table_cache_factor(
+            ht_bytes,
+            self.hardware.l3_cache_bytes,
+        );
+        let cache_mb =
+            self.hardware.l3_cache_bytes as f64 / (1024.0 * 1024.0);
+        let cache_size_factor = 16.0 / cache_mb.max(1.0);
+
+        let filter_build_cost =
+            build_rows * 10e-9 * self.calibration.tuple_cost();
+        let filter_apply_cost =
+            probe_rows * 20e-9 * self.calibration.tuple_cost();
         let sel = filter_selectivity.clamp(0.0, 1.0);
         let effective_probe = probe_rows * sel;
 
         let join_cost = (build_rows * 100e-6
             + effective_probe * 50e-6)
-            * cache_factor;
+            * spill_factor
+            * cache_size_factor
+            * self.calibration.tuple_cost();
 
         let total = join_cost + filter_build_cost + filter_apply_cost;
 
