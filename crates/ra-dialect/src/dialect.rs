@@ -429,6 +429,7 @@ impl Dialect {
             Self::MySql | Self::MsSql => false,
             Self::Sqlite => true, // since 3.35
             Self::Oracle => true, // since 12c
+            _ => false, // Conservative default for unknown dialects
         }
     }
 }
