@@ -1,6 +1,6 @@
 [package]
 name = "ra-advisor"
-description = "Automatic index advisor for workload analysis and optimization"
+description = "Automatic index advisor with BRIN recommendation for correlated columns"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,20 +10,11 @@ repository.workspace = true
 
 [dependencies]
 ra-core = { workspace = true }
-ra-engine = { workspace = true }
-ra-parser = { workspace = true }
-ra-stats = { workspace = true }
-ra-metadata = { workspace = true }
-anyhow = { workspace = true }
-thiserror = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 tracing = { workspace = true }
-indexmap = { workspace = true }
 
 [dev-dependencies]
-proptest = { workspace = true }
-tempfile = { workspace = true }
 pretty_assertions = { workspace = true }
 
 [lints]
