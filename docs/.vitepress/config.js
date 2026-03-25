@@ -158,9 +158,13 @@ export default withMermaid(defineConfig({
           text: 'Internals',
           collapsed: true,
           items: [
-            { text: 'Timely/Differential Dataflow', link: '/internals/timely-differential-dataflow' },
+            { text: 'Optimizer Architecture', link: '/internals/optimizer-architecture' },
+            { text: 'E-Graph Equality Saturation', link: '/internals/egraph' },
+            { text: 'Cost Model', link: '/internals/cost-model' },
+            { text: 'Plan Cache', link: '/internals/plan-cache' },
+            { text: 'Streaming Statistics', link: '/internals/streaming-statistics' },
             { text: 'Genetic Fingerprinting', link: '/internals/genetic-fingerprinting' },
-            { text: 'Streaming Statistics', link: '/internals/streaming-statistics' }
+            { text: 'Timely/Differential Dataflow', link: '/internals/timely-differential-dataflow' }
           ]
         },
         {
