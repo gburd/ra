@@ -88,12 +88,12 @@ This index tracks all RFCs in the RA optimizer project by status. See [README.md
 | [0058](text/0058-opentracing-instrumentation.md) | OpenTracing Instrumentation for Query Planner | 2026-03-23 | Observability |
 | [0059](text/0059-statistics-based-plan-cache-invalidation.md) | Statistics-Based Plan Cache Invalidation | 2026-03-24 | Phase 5 differential dataflow |
 | [0061](text/0061-postgresql-extension-aware-optimization.md) | PostgreSQL Extension-Aware Optimization | 2026-03-24 | Phase 5 PostgreSQL extensions |
-| [0062](0062-documentdb-query-optimization.md) | DocumentDB / MongoDB Query Optimization | 2026-03-25 | Extension research |
-| [0063](0063-spatial-query-optimization.md) | Spatial Query Optimization | 2026-03-25 | Extension research |
-| [0064](0064-vector-similarity-search-optimization.md) | Vector Similarity Search Optimization | 2026-03-25 | Extension research |
-| [0065](0065-time-series-query-optimization.md) | Time-Series Query Optimization | 2026-03-25 | Extension research |
-| [0066](0066-advanced-index-aware-planning.md) | Advanced Index-Aware Planning | 2026-03-25 | Extension research |
-| [0067](0067-full-text-search-optimization.md) | Full-Text Search Optimization | 2026-03-25 | Extension research |
+| [0062](text/0062-documentdb-query-optimization.md) | DocumentDB / MongoDB Query Optimization | 2026-03-25 | Extension research |
+| [0063](text/0063-spatial-query-optimization.md) | Spatial Query Optimization | 2026-03-25 | Extension research |
+| [0064](text/0064-vector-similarity-search-optimization.md) | Vector Similarity Search Optimization | 2026-03-25 | Extension research |
+| [0065](text/0065-time-series-query-optimization.md) | Time-Series Query Optimization | 2026-03-25 | Extension research |
+| [0066](text/0066-advanced-index-aware-planning.md) | Advanced Index-Aware Planning | 2026-03-25 | Extension research |
+| [0067](text/0067-full-text-search-optimization.md) | Full-Text Search Optimization | 2026-03-25 | Extension research |
 | [0068](text/0068-hardware-calibrated-cost-model.md) | Hardware-Calibrated Cost Model | 2026-03-25 | Adaptive optimization |
 | [0069](text/0069-execution-feedback-loop.md) | Execution Feedback Loop | 2026-03-25 | Adaptive optimization |
 | [0070](text/0070-memory-pressure-aware-joins.md) | Memory-Pressure-Aware Joins | 2026-03-25 | Adaptive optimization |
