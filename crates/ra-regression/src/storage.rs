@@ -288,20 +288,23 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    fn make_entry(id: &str, sql: &str, hash: &str, cost: f64) -> QueryEntry {
+        QueryEntry::new(
+            id.to_string(),
+            sql.to_string(),
+            hash.to_string(),
+            cost,
+        )
+    }
+
     #[test]
     fn test_sqlite_storage() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("test.db");
         let storage = SqliteStorage::new(&path);
 
-        let entry = QueryEntry::new(
-            "q1".to_string(),
-            "SELECT * FROM t".to_string(),
-            "hash1".to_string(),
-            100.0,
-        );
-
-        storage.add_entry(entry.clone()).unwrap();
+        let entry = make_entry("q1", "SELECT * FROM t", "hash1", 100.0);
+        storage.add_entry(entry).unwrap();
 
         let entries = storage.get_entries("q1").unwrap();
         assert_eq!(entries.len(), 1);
@@ -315,18 +318,169 @@ mod tests {
         let path = dir.path().join("test.toml");
         let storage = TomlStorage::new(&path);
 
-        let entry = QueryEntry::new(
-            "q1".to_string(),
-            "SELECT * FROM t".to_string(),
-            "hash1".to_string(),
-            100.0,
-        );
-
-        storage.add_entry(entry.clone()).unwrap();
+        let entry = make_entry("q1", "SELECT * FROM t", "hash1", 100.0);
+        storage.add_entry(entry).unwrap();
 
         let entries = storage.get_entries("q1").unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].query_id, "q1");
         assert_eq!(entries[0].cost, 100.0);
+    }
+
+    // -- Error types --
+
+    #[test]
+    fn storage_error_io_display() {
+        let io_err = std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "file missing",
+        );
+        let err: StorageError = io_err.into();
+        let msg = format!("{err}");
+        assert!(msg.contains("IO error"));
+    }
+
+    #[test]
+    fn storage_error_not_found_display() {
+        let err = StorageError::NotFound(PathBuf::from("/tmp/missing"));
+        let msg = format!("{err}");
+        assert!(msg.contains("Storage not found"));
+        assert!(msg.contains("missing"));
+    }
+
+    // -- TOML: load from nonexistent returns empty --
+
+    #[test]
+    fn toml_load_nonexistent_returns_empty() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("nonexistent.toml");
+        let storage = TomlStorage::new(&path);
+
+        let history = storage.load().unwrap();
+        assert!(history.query_ids().is_empty());
+    }
+
+    // -- TOML: multiple entries for same query --
+
+    #[test]
+    fn toml_multiple_entries_same_query() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("multi.toml");
+        let storage = TomlStorage::new(&path);
+
+        storage.add_entry(make_entry("q1", "SELECT 1", "h1", 10.0)).unwrap();
+        storage.add_entry(make_entry("q1", "SELECT 1", "h2", 20.0)).unwrap();
+        storage.add_entry(make_entry("q1", "SELECT 1", "h3", 30.0)).unwrap();
+
+        let entries = storage.get_entries("q1").unwrap();
+        assert_eq!(entries.len(), 3);
+    }
+
+    // -- TOML: multiple different queries --
+
+    #[test]
+    fn toml_multiple_queries() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("multi_q.toml");
+        let storage = TomlStorage::new(&path);
+
+        storage.add_entry(make_entry("q1", "SELECT 1", "h1", 10.0)).unwrap();
+        storage.add_entry(make_entry("q2", "SELECT 2", "h2", 20.0)).unwrap();
+
+        let history = storage.load().unwrap();
+        assert_eq!(history.query_ids().len(), 2);
+    }
+
+    // -- TOML: get_entries for missing query returns empty --
+
+    #[test]
+    fn toml_get_entries_missing_query() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("empty_get.toml");
+        let storage = TomlStorage::new(&path);
+
+        let entries = storage.get_entries("no_such_query").unwrap();
+        assert!(entries.is_empty());
+    }
+
+    // -- TOML: save and load round-trip --
+
+    #[test]
+    fn toml_save_load_roundtrip() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("roundtrip.toml");
+        let storage = TomlStorage::new(&path);
+
+        let mut history = CostHistory::new();
+        history.add_entry(make_entry("q1", "SELECT 1", "h1", 10.0));
+        history.add_entry(make_entry("q2", "SELECT 2", "h2", 20.0));
+        storage.save(&history).unwrap();
+
+        let loaded = storage.load().unwrap();
+        let q1 = loaded.get_entries("q1").unwrap();
+        assert_eq!(q1.len(), 1);
+        assert!((q1[0].cost - 10.0).abs() < f64::EPSILON);
+
+        let q2 = loaded.get_entries("q2").unwrap();
+        assert_eq!(q2.len(), 1);
+        assert!((q2[0].cost - 20.0).abs() < f64::EPSILON);
+    }
+
+    // -- TOML: entry with metadata --
+
+    #[test]
+    fn toml_entry_with_metadata() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("meta.toml");
+        let storage = TomlStorage::new(&path);
+
+        let mut entry = make_entry("q1", "SELECT 1", "h1", 10.0);
+        entry.metadata.insert("optimizer".into(), "Ra".into());
+        entry.metadata.insert("version".into(), "0.1".into());
+        storage.add_entry(entry).unwrap();
+
+        let entries = storage.get_entries("q1").unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].metadata.get("optimizer").unwrap(), "Ra");
+        assert_eq!(entries[0].metadata.get("version").unwrap(), "0.1");
+    }
+
+    // -- TOML: save overwrites previous content --
+
+    #[test]
+    fn toml_save_overwrites() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("overwrite.toml");
+        let storage = TomlStorage::new(&path);
+
+        let mut h1 = CostHistory::new();
+        h1.add_entry(make_entry("old", "SELECT old", "h", 1.0));
+        storage.save(&h1).unwrap();
+
+        let mut h2 = CostHistory::new();
+        h2.add_entry(make_entry("new", "SELECT new", "h", 2.0));
+        storage.save(&h2).unwrap();
+
+        let loaded = storage.load().unwrap();
+        assert!(loaded.get_entries("old").is_none());
+        assert!(loaded.get_entries("new").is_some());
+    }
+
+    // -- QueryEntry: new sets timestamp --
+
+    #[test]
+    fn query_entry_new_has_timestamp() {
+        let entry = make_entry("q", "sql", "h", 1.0);
+        let now = Utc::now();
+        let diff = now - entry.timestamp;
+        assert!(diff.num_seconds() < 2);
+    }
+
+    // -- QueryEntry: metadata starts empty --
+
+    #[test]
+    fn query_entry_new_metadata_empty() {
+        let entry = make_entry("q", "sql", "h", 1.0);
+        assert!(entry.metadata.is_empty());
     }
 }

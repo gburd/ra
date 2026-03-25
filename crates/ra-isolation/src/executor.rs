@@ -469,4 +469,285 @@ session "s2"
         assert_eq!(result.permutation_results.len(), 2);
         assert!(result.passed);
     }
+
+    // -- Error display tests --
+
+    #[test]
+    fn executor_error_setup_failed_display() {
+        let err = ExecutorError::SetupFailed("table exists".into());
+        let msg = format!("{err}");
+        assert!(msg.contains("setup failed"));
+        assert!(msg.contains("table exists"));
+    }
+
+    #[test]
+    fn executor_error_teardown_failed_display() {
+        let err = ExecutorError::TeardownFailed("permission denied".into());
+        let msg = format!("{err}");
+        assert!(msg.contains("teardown failed"));
+    }
+
+    #[test]
+    fn executor_error_session_not_found_display() {
+        let err = ExecutorError::SessionNotFound("s99".into());
+        let msg = format!("{err}");
+        assert!(msg.contains("session not found"));
+        assert!(msg.contains("s99"));
+    }
+
+    #[test]
+    fn executor_error_step_not_found_display() {
+        let err = ExecutorError::StepNotFound("s1".into(), "step_x".into());
+        let msg = format!("{err}");
+        assert!(msg.contains("step not found"));
+        assert!(msg.contains("s1:step_x"));
+    }
+
+    #[test]
+    fn executor_error_from_adapter_error() {
+        let adapter_err = AdapterError::QueryError {
+            message: "broken".into(),
+        };
+        let exec_err: ExecutorError = adapter_err.into();
+        let msg = format!("{exec_err}");
+        assert!(msg.contains("adapter error"));
+    }
+
+    // -- TestResult / PermutationResult / StepResult --
+
+    #[test]
+    fn step_result_fields() {
+        let sr = StepResult {
+            session: "s1".into(),
+            step: "read".into(),
+            result: Some(QueryResult {
+                columns: vec!["id".into()],
+                rows: vec![vec!["1".into()]],
+                rows_affected: 0,
+            }),
+            error: None,
+            was_blocked: false,
+        };
+        assert_eq!(sr.session, "s1");
+        assert_eq!(sr.step, "read");
+        assert!(sr.result.is_some());
+        assert!(sr.error.is_none());
+        assert!(!sr.was_blocked);
+    }
+
+    #[test]
+    fn step_result_with_error() {
+        let sr = StepResult {
+            session: "s2".into(),
+            step: "write".into(),
+            result: None,
+            error: Some("timeout".into()),
+            was_blocked: true,
+        };
+        assert!(sr.result.is_none());
+        assert_eq!(sr.error.as_deref(), Some("timeout"));
+        assert!(sr.was_blocked);
+    }
+
+    #[test]
+    fn permutation_result_passed_no_errors() {
+        let pr = PermutationResult {
+            index: 0,
+            step_descriptions: vec!["s1:a".into()],
+            passed: true,
+            step_results: vec![],
+            deadlocks: vec![],
+            errors: vec![],
+        };
+        assert!(pr.passed);
+        assert!(pr.deadlocks.is_empty());
+        assert!(pr.errors.is_empty());
+    }
+
+    #[test]
+    fn permutation_result_failed_with_deadlock() {
+        let pr = PermutationResult {
+            index: 1,
+            step_descriptions: vec!["s1:a".into(), "s2:b".into()],
+            passed: false,
+            step_results: vec![],
+            deadlocks: vec![vec!["s1".into(), "s2".into()]],
+            errors: vec!["s1:a: deadlock detected".into()],
+        };
+        assert!(!pr.passed);
+        assert_eq!(pr.deadlocks.len(), 1);
+        assert_eq!(pr.errors.len(), 1);
+    }
+
+    #[test]
+    fn test_result_all_permutations_pass() {
+        let tr = TestResult {
+            passed: true,
+            permutation_results: vec![
+                PermutationResult {
+                    index: 0,
+                    step_descriptions: vec![],
+                    passed: true,
+                    step_results: vec![],
+                    deadlocks: vec![],
+                    errors: vec![],
+                },
+            ],
+            event_log: TestEventLog::new(),
+        };
+        assert!(tr.passed);
+    }
+
+    // -- Event log access --
+
+    #[test]
+    fn executor_event_log_empty_before_run() {
+        let input = r#"
+session "s1"
+{
+    step "a"
+    {
+        SELECT 1;
+    }
+}
+"#;
+        let spec = must_parse(input);
+        let executor = TestExecutor::new(spec);
+        assert!(executor.event_log().is_empty());
+    }
+
+    #[test]
+    fn executor_event_log_populated_after_run() {
+        let input = r#"
+session "s1"
+{
+    step "a"
+    {
+        SELECT 1;
+    }
+}
+"#;
+        let spec = must_parse(input);
+        let mut executor = TestExecutor::new(spec);
+        executor.run(&mock_factory()).unwrap();
+        assert!(!executor.event_log().is_empty());
+    }
+
+    // -- Setup and teardown execution --
+
+    #[test]
+    fn executor_runs_setup_and_teardown() {
+        let input = r#"
+setup
+{
+    CREATE TABLE test_tbl (id INT);
+    INSERT INTO test_tbl VALUES (1);
+}
+
+teardown
+{
+    DROP TABLE test_tbl;
+}
+
+session "s1"
+{
+    step "read"
+    {
+        SELECT * FROM test_tbl;
+    }
+}
+
+permutation
+{
+    s1:read
+}
+"#;
+        let spec = must_parse(input);
+        let mut executor = TestExecutor::new(spec);
+        let result = executor.run(&mock_factory()).unwrap();
+        assert!(result.passed);
+
+        let events = executor.event_log().events();
+        let setup_events: Vec<_> = events
+            .iter()
+            .filter(|e| matches!(e, TestEvent::SetupExecuted { .. }))
+            .collect();
+        assert_eq!(setup_events.len(), 2);
+
+        let teardown_events: Vec<_> = events
+            .iter()
+            .filter(|e| matches!(e, TestEvent::TeardownExecuted { .. }))
+            .collect();
+        assert_eq!(teardown_events.len(), 1);
+    }
+
+    // -- Markers --
+
+    #[test]
+    fn executor_with_markers() {
+        let input = r#"
+session "s1"
+{
+    step "write" @signal(done)
+    {
+        INSERT INTO t VALUES (1);
+    }
+}
+
+session "s2"
+{
+    step "read" @wait(done)
+    {
+        SELECT * FROM t;
+    }
+}
+
+permutation
+{
+    s1:write
+    s2:read
+}
+"#;
+        let spec = must_parse(input);
+        let mut executor = TestExecutor::new(spec);
+        let result = executor.run(&mock_factory()).unwrap();
+        // The permutation should complete (mock adapter returns ok)
+        assert_eq!(result.permutation_results.len(), 1);
+        let perm = &result.permutation_results[0];
+        assert_eq!(perm.step_results.len(), 2);
+    }
+
+    // -- Single permutation step results --
+
+    #[test]
+    fn permutation_records_step_results() {
+        let input = r#"
+session "s1"
+{
+    step "a"
+    {
+        SELECT 1;
+    }
+    step "b"
+    {
+        SELECT 2;
+    }
+}
+
+permutation
+{
+    s1:a
+    s1:b
+}
+"#;
+        let spec = must_parse(input);
+        let mut executor = TestExecutor::new(spec);
+        let result = executor.run(&mock_factory()).unwrap();
+        assert!(result.passed);
+        let perm = &result.permutation_results[0];
+        assert_eq!(perm.step_results.len(), 2);
+        assert_eq!(perm.step_results[0].session, "s1");
+        assert_eq!(perm.step_results[0].step, "a");
+        assert_eq!(perm.step_results[1].step, "b");
+    }
 }

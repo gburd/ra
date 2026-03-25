@@ -300,20 +300,370 @@ mod tests {
     }
 
     #[test]
+    fn default_is_empty() {
+        let registry = RuleRegistry::default();
+        assert_eq!(registry.total_count, 0);
+        assert!(registry.get("anything").is_none());
+        assert_eq!(registry.all_rules().count(), 0);
+    }
+
+    #[test]
     fn load_example_rules() {
-        // Try to load from rules directory if it exists
         if Path::new("rules").exists() {
             let result = RuleRegistry::load_from_directory("rules");
             match result {
                 Ok(registry) => {
                     assert!(registry.total_count > 0, "Should load some rules");
                     let stats = registry.stats();
-                    println!("{}", stats);
+                    // Verify Display impl produces content
+                    let display = format!("{stats}");
+                    assert!(display.contains("Total rules:"));
                 }
                 Err(e) => {
-                    println!("Note: Failed to load rules (this is OK in tests): {}", e);
+                    eprintln!("Note: Failed to load rules (OK in tests): {e}");
                 }
             }
         }
+    }
+
+    #[test]
+    fn convert_metadata_logical() {
+        let parser_meta = RuleMetadata {
+            id: "test-rule".into(),
+            name: "Test Rule".into(),
+            category: "logical/pushdown".into(),
+            databases: vec!["postgresql".into()],
+            standard: None,
+            execution_models: vec![],
+            version: "0.1.0".into(),
+            authors: vec![],
+            tags: vec![],
+            preconditions: vec![],
+        };
+        let core = RuleRegistry::convert_metadata(&parser_meta);
+        assert_eq!(core.id, "test-rule");
+        assert_eq!(core.name, "Test Rule");
+        assert_eq!(core.category, RuleCategory::Logical);
+        assert_eq!(core.databases, vec!["postgresql".to_string()]);
+        assert_eq!(core.priority, 0);
+    }
+
+    #[test]
+    fn convert_metadata_physical() {
+        let parser_meta = RuleMetadata {
+            id: "phys-rule".into(),
+            name: "Physical".into(),
+            category: "physical/join".into(),
+            databases: vec![],
+            standard: None,
+            execution_models: vec![],
+            version: "0.1.0".into(),
+            authors: vec![],
+            tags: vec![],
+            preconditions: vec![],
+        };
+        let core = RuleRegistry::convert_metadata(&parser_meta);
+        assert_eq!(core.category, RuleCategory::Physical);
+    }
+
+    #[test]
+    fn convert_metadata_implementation() {
+        let parser_meta = RuleMetadata {
+            id: "impl-rule".into(),
+            name: "Impl".into(),
+            category: "vendor/custom".into(),
+            databases: vec![],
+            standard: None,
+            execution_models: vec![],
+            version: "0.1.0".into(),
+            authors: vec![],
+            tags: vec![],
+            preconditions: vec![],
+        };
+        let core = RuleRegistry::convert_metadata(&parser_meta);
+        assert_eq!(core.category, RuleCategory::Implementation);
+    }
+
+    #[test]
+    fn stats_empty_registry() {
+        let registry = RuleRegistry::new();
+        let stats = registry.stats();
+        assert_eq!(stats.total_rules, 0);
+        assert_eq!(stats.rules_with_preconditions, 0);
+        assert!(stats.by_category.is_empty());
+        assert!(stats.by_database.is_empty());
+    }
+
+    #[test]
+    fn load_from_nonexistent_directory() {
+        let result = RuleRegistry::load_from_directory("/nonexistent/path");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("Failed to read directory"));
+    }
+
+    #[test]
+    fn load_from_empty_directory() {
+        let dir = std::env::temp_dir().join("ra_test_empty_rules");
+        let _ = fs::create_dir_all(&dir);
+        let result = RuleRegistry::load_from_directory(&dir);
+        assert!(result.is_ok());
+        let registry = result.unwrap();
+        assert_eq!(registry.total_count, 0);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn registry_error_display() {
+        let err = RegistryError::DuplicateRuleId {
+            id: "join-commute".into(),
+            path1: PathBuf::from("a.rra"),
+            path2: PathBuf::from("b.rra"),
+        };
+        let msg = format!("{err}");
+        assert!(msg.contains("Duplicate rule ID"));
+        assert!(msg.contains("join-commute"));
+    }
+
+    #[test]
+    fn rules_for_database_filters_correctly() {
+        let mut registry = RuleRegistry::new();
+
+        // Insert a universal rule (no databases)
+        let universal = RuleEntry {
+            metadata: CoreRuleMetadata {
+                id: "universal-1".into(),
+                name: "Universal".into(),
+                description: String::new(),
+                category: RuleCategory::Logical,
+                databases: vec![],
+                priority: 0,
+                preconditions: vec![],
+            },
+            source_path: PathBuf::from("u.rra"),
+            has_preconditions: false,
+        };
+        registry.rules.insert("universal-1".into(), universal);
+        registry.total_count += 1;
+
+        // Insert a postgres-only rule
+        let pg_only = RuleEntry {
+            metadata: CoreRuleMetadata {
+                id: "pg-1".into(),
+                name: "PG Only".into(),
+                description: String::new(),
+                category: RuleCategory::Physical,
+                databases: vec!["postgresql".into()],
+                priority: 0,
+                preconditions: vec![],
+            },
+            source_path: PathBuf::from("pg.rra"),
+            has_preconditions: false,
+        };
+        registry.rules.insert("pg-1".into(), pg_only);
+        registry.total_count += 1;
+
+        // Insert a mysql-only rule
+        let mysql_only = RuleEntry {
+            metadata: CoreRuleMetadata {
+                id: "mysql-1".into(),
+                name: "MySQL Only".into(),
+                description: String::new(),
+                category: RuleCategory::Implementation,
+                databases: vec!["mysql".into()],
+                priority: 0,
+                preconditions: vec![],
+            },
+            source_path: PathBuf::from("my.rra"),
+            has_preconditions: false,
+        };
+        registry.rules.insert("mysql-1".into(), mysql_only);
+        registry.total_count += 1;
+
+        // PostgreSQL query: should get universal + pg-1
+        let pg_rules: Vec<_> = registry.rules_for_database("postgresql").collect();
+        assert_eq!(pg_rules.len(), 2);
+
+        // MySQL query: should get universal + mysql-1
+        let mysql_rules: Vec<_> = registry.rules_for_database("mysql").collect();
+        assert_eq!(mysql_rules.len(), 2);
+
+        // SQLite query: should get universal only
+        let sqlite_rules: Vec<_> = registry.rules_for_database("sqlite").collect();
+        assert_eq!(sqlite_rules.len(), 1);
+        assert_eq!(sqlite_rules[0].metadata.id, "universal-1");
+    }
+
+    #[test]
+    fn rules_with_preconditions_filter() {
+        let mut registry = RuleRegistry::new();
+
+        let without = RuleEntry {
+            metadata: CoreRuleMetadata {
+                id: "no-pre".into(),
+                name: "No Pre".into(),
+                description: String::new(),
+                category: RuleCategory::Logical,
+                databases: vec![],
+                priority: 0,
+                preconditions: vec![],
+            },
+            source_path: PathBuf::from("a.rra"),
+            has_preconditions: false,
+        };
+        registry.rules.insert("no-pre".into(), without);
+        registry.total_count += 1;
+
+        let with = RuleEntry {
+            metadata: CoreRuleMetadata {
+                id: "has-pre".into(),
+                name: "Has Pre".into(),
+                description: String::new(),
+                category: RuleCategory::Physical,
+                databases: vec![],
+                priority: 0,
+                preconditions: vec![ra_core::PreCondition::Pattern {
+                    must_match: Some("row_count > 1000".into()),
+                    must_not_match: None,
+                    description: None,
+                    optional: false,
+                }],
+            },
+            source_path: PathBuf::from("b.rra"),
+            has_preconditions: true,
+        };
+        registry.rules.insert("has-pre".into(), with);
+        registry.total_count += 1;
+        registry.with_preconditions_count += 1;
+
+        let pre_rules: Vec<_> = registry.rules_with_preconditions().collect();
+        assert_eq!(pre_rules.len(), 1);
+        assert_eq!(pre_rules[0].metadata.id, "has-pre");
+    }
+
+    #[test]
+    fn get_returns_inserted_rule() {
+        let mut registry = RuleRegistry::new();
+        let entry = RuleEntry {
+            metadata: CoreRuleMetadata {
+                id: "test-get".into(),
+                name: "Test Get".into(),
+                description: String::new(),
+                category: RuleCategory::Logical,
+                databases: vec![],
+                priority: 0,
+                preconditions: vec![],
+            },
+            source_path: PathBuf::from("test.rra"),
+            has_preconditions: false,
+        };
+        registry.rules.insert("test-get".into(), entry);
+        registry.total_count += 1;
+
+        assert!(registry.get("test-get").is_some());
+        assert_eq!(registry.get("test-get").unwrap().metadata.name, "Test Get");
+        assert!(registry.get("nonexistent").is_none());
+    }
+
+    #[test]
+    fn all_rules_returns_all() {
+        let mut registry = RuleRegistry::new();
+        for i in 0..5 {
+            let entry = RuleEntry {
+                metadata: CoreRuleMetadata {
+                    id: format!("rule-{i}"),
+                    name: format!("Rule {i}"),
+                    description: String::new(),
+                    category: RuleCategory::Logical,
+                    databases: vec![],
+                    priority: 0,
+                    preconditions: vec![],
+                },
+                source_path: PathBuf::from(format!("{i}.rra")),
+                has_preconditions: false,
+            };
+            registry.rules.insert(format!("rule-{i}"), entry);
+            registry.total_count += 1;
+        }
+        assert_eq!(registry.all_rules().count(), 5);
+    }
+
+    #[test]
+    fn stats_counts_categories_and_databases() {
+        let mut registry = RuleRegistry::new();
+
+        let e1 = RuleEntry {
+            metadata: CoreRuleMetadata {
+                id: "r1".into(),
+                name: "R1".into(),
+                description: String::new(),
+                category: RuleCategory::Logical,
+                databases: vec![],
+                priority: 0,
+                preconditions: vec![],
+            },
+            source_path: PathBuf::from("r1.rra"),
+            has_preconditions: false,
+        };
+        registry.rules.insert("r1".into(), e1);
+        registry.total_count += 1;
+
+        let e2 = RuleEntry {
+            metadata: CoreRuleMetadata {
+                id: "r2".into(),
+                name: "R2".into(),
+                description: String::new(),
+                category: RuleCategory::Physical,
+                databases: vec!["postgresql".into(), "mysql".into()],
+                priority: 0,
+                preconditions: vec![ra_core::PreCondition::Pattern {
+                    must_match: Some("has_index".into()),
+                    must_not_match: None,
+                    description: None,
+                    optional: false,
+                }],
+            },
+            source_path: PathBuf::from("r2.rra"),
+            has_preconditions: true,
+        };
+        registry.rules.insert("r2".into(), e2);
+        registry.total_count += 1;
+        registry.with_preconditions_count += 1;
+
+        let stats = registry.stats();
+        assert_eq!(stats.total_rules, 2);
+        assert_eq!(stats.rules_with_preconditions, 1);
+        assert_eq!(stats.by_category[&RuleCategory::Logical], 1);
+        assert_eq!(stats.by_category[&RuleCategory::Physical], 1);
+        assert_eq!(stats.by_database["universal"], 1);
+        assert_eq!(stats.by_database["postgresql"], 1);
+        assert_eq!(stats.by_database["mysql"], 1);
+    }
+
+    #[test]
+    fn registry_stats_display_contains_info() {
+        let mut registry = RuleRegistry::new();
+        let e = RuleEntry {
+            metadata: CoreRuleMetadata {
+                id: "disp-test".into(),
+                name: "Disp".into(),
+                description: String::new(),
+                category: RuleCategory::Logical,
+                databases: vec![],
+                priority: 0,
+                preconditions: vec![],
+            },
+            source_path: PathBuf::from("d.rra"),
+            has_preconditions: false,
+        };
+        registry.rules.insert("disp-test".into(), e);
+        registry.total_count += 1;
+
+        let stats = registry.stats();
+        let output = format!("{stats}");
+        assert!(output.contains("Total rules: 1"));
+        assert!(output.contains("By category:"));
+        assert!(output.contains("By database"));
     }
 }
