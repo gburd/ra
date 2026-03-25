@@ -144,6 +144,8 @@ export default withMermaid(defineConfig({
             { text: 'Hardware-Aware', link: '/examples/hardware-aware-optimization' },
             { text: 'Distributed Joins', link: '/examples/distributed-join-strategies' },
             { text: 'Subquery Unnesting', link: '/examples/subquery-unnesting' },
+            { text: 'RUM Index Optimization', link: '/examples/rum-index-optimization' },
+            { text: 'Citus Distributed Optimization', link: '/examples/citus-distributed-optimization' },
             { text: 'Interactive SQL Demo', link: '/examples/interactive-sql-demo' },
             { text: 'Ledger Application', link: '/examples/ledger/' }
           ]
