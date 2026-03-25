@@ -62,6 +62,7 @@ impl DialectVersion {
             Dialect::MsSql => (16, 0),
             Dialect::Oracle => (23, 0),
             Dialect::DuckDb => (1, 1),
+            _ => (1, 0), // Default version for unknown dialects
         };
         Self {
             dialect,
@@ -80,6 +81,7 @@ impl DialectVersion {
             Dialect::MsSql => true, // OUTPUT clause
             Dialect::Oracle => self.major >= 12,
             Dialect::DuckDb => true,
+            _ => false, // Conservative default for unknown dialects
         }
     }
 
