@@ -2,7 +2,7 @@
 //!
 //! Measures actual hardware performance characteristics at startup
 //! to replace static cost constants. Addresses the 100x variance
-//! between HDD and NVMe that static models cannot capture.
+//! between HDD and `NVMe` that static models cannot capture.
 
 use std::hint::black_box;
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -55,7 +55,7 @@ impl HardwareMeasurements {
     /// Ratio of random to sequential I/O cost.
     ///
     /// Higher values mean random I/O is relatively more expensive
-    /// (typical for HDD: 300:1, NVMe: 1.2:1).
+    /// (typical for HDD: 300:1, `NVMe`: 1.2:1).
     #[must_use]
     pub fn random_io_ratio(&self) -> f64 {
         if self.random_read_mbps <= 0.0 {
@@ -91,7 +91,7 @@ impl HardwareMeasurements {
         (self.dram_latency_ns / self.l3_latency_ns).max(1.0)
     }
 
-    /// Default measurements for a typical NVMe SSD server.
+    /// Default measurements for a typical `NVMe` SSD server.
     ///
     /// Used as fallback when benchmarks cannot run or are disabled.
     #[must_use]
@@ -297,18 +297,17 @@ fn benchmark_sequential_io() -> f64 {
         let mut total_read = 0usize;
         loop {
             match file.read(&mut buf) {
-                Ok(0) => break,
+                Ok(0) | Err(_) => break,
                 Ok(n) => {
                     black_box(buf[0]);
                     total_read += n;
                 }
-                Err(_) => break,
             }
         }
         let elapsed = start.elapsed();
 
         if elapsed.as_nanos() > 0 && total_read > 0 {
-            #[allow(clippy::cast_precision_loss)]
+            #[expect(clippy::cast_precision_loss)]
             let mbps = total_read as f64
                 / (1024.0 * 1024.0)
                 / elapsed.as_secs_f64();
@@ -344,7 +343,7 @@ fn benchmark_random_io() -> f64 {
             continue;
         };
 
-        let mut rng_state: u64 = 0x5DEE_CE66_D_u64
+        let mut rng_state: u64 = 0x0005_DEEC_E66D_u64
             .wrapping_add(iter as u64);
 
         let start = Instant::now();
@@ -360,18 +359,15 @@ fn benchmark_random_io() -> f64 {
             if file.seek(SeekFrom::Start(offset)).is_err() {
                 continue;
             }
-            match file.read(&mut buf) {
-                Ok(n) => {
-                    black_box(buf[0]);
-                    total_read += n;
-                }
-                Err(_) => continue,
+            if let Ok(n) = file.read(&mut buf) {
+                black_box(buf[0]);
+                total_read += n;
             }
         }
         let elapsed = start.elapsed();
 
         if elapsed.as_nanos() > 0 && total_read > 0 {
-            #[allow(clippy::cast_precision_loss)]
+            #[expect(clippy::cast_precision_loss)]
             let mbps = total_read as f64
                 / (1024.0 * 1024.0)
                 / elapsed.as_secs_f64();
@@ -390,6 +386,7 @@ fn benchmark_cpu_tuple() -> f64 {
     let mut results = Vec::with_capacity(BENCHMARK_ITERATIONS);
 
     // Allocate tuples: (id: i64, value: i64, flag: i64)
+    #[expect(clippy::cast_possible_wrap)]
     let tuples: Vec<[i64; 3]> = (0..CPU_TUPLE_COUNT as i64)
         .map(|i| [i, i.wrapping_mul(17), i % 7])
         .collect();
@@ -407,7 +404,7 @@ fn benchmark_cpu_tuple() -> f64 {
         black_box(sum);
         let elapsed = start.elapsed();
 
-        #[allow(clippy::cast_precision_loss)]
+        #[expect(clippy::cast_precision_loss)]
         let ns_per_tuple =
             elapsed.as_nanos() as f64 / CPU_TUPLE_COUNT as f64;
         results.push(ns_per_tuple);
@@ -421,7 +418,7 @@ fn benchmark_cpu_tuple() -> f64 {
 /// Uses pointer-chasing with different working set sizes to
 /// measure L1, L2, L3, and DRAM access latencies.
 ///
-/// Returns (l1_ns, l2_ns, l3_ns, dram_ns).
+/// Returns (`l1_ns`, `l2_ns`, `l3_ns`, `dram_ns`).
 fn benchmark_cache_hierarchy(deadline: Instant) -> (f64, f64, f64, f64) {
     if Instant::now() >= deadline {
         return (1.0, 4.0, 12.0, 80.0);
@@ -464,7 +461,7 @@ fn cache_latency_ns(working_set_bytes: usize) -> f64 {
         rng_state = rng_state
             .wrapping_mul(6_364_136_223_846_793_005)
             .wrapping_add(1);
-        #[allow(clippy::cast_possible_truncation)]
+        #[expect(clippy::cast_possible_truncation)]
         let j = (rng_state as usize) % (i + 1);
         array.swap(i, j);
     }
@@ -492,7 +489,7 @@ fn cache_latency_ns(working_set_bytes: usize) -> f64 {
     black_box(idx);
     let elapsed = start.elapsed();
 
-    #[allow(clippy::cast_precision_loss)]
+    #[expect(clippy::cast_precision_loss)]
     let ns = elapsed.as_nanos() as f64 / iterations as f64;
     ns.max(0.5) // Floor at 0.5 ns
 }
@@ -522,13 +519,15 @@ fn median(values: &mut [f64]) -> Option<f64> {
     values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let mid = values.len() / 2;
     if values.len() % 2 == 0 {
-        Some((values[mid - 1] + values[mid]) / 2.0)
+        Some(values[mid - 1].midpoint(values[mid]))
     } else {
         Some(values[mid])
     }
 }
 
 #[cfg(test)]
+#[expect(clippy::float_cmp)]
+#[expect(clippy::expect_used)]
 mod tests {
     use super::*;
 

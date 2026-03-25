@@ -291,7 +291,9 @@ impl IntegratedCostModel {
 
         let par_factor =
             8.0 / f64::from(self.hardware.cpu_cores).max(1.0);
-        let cost = n_log_n * 200e-9 * par_factor.max(0.5);
+        let cost = n_log_n * 200e-9
+            * par_factor.max(0.5)
+            * self.calibration.tuple_cost();
 
         let disc = self.confidence_for_table(table);
         cost * disc
@@ -321,7 +323,9 @@ impl IntegratedCostModel {
 
         let par_factor =
             8.0 / f64::from(self.hardware.cpu_cores).max(1.0);
-        let cost = total * 200e-9 * par_factor.max(0.5);
+        let cost = total * 200e-9
+            * par_factor.max(0.5)
+            * self.calibration.tuple_cost();
 
         let disc = self.confidence_for_table(table);
         cost * disc
@@ -336,13 +340,21 @@ impl IntegratedCostModel {
         group_count: f64,
     ) -> f64 {
         let stats = self.effective_statistics(table);
+
+        let ht_bytes = (group_count * 64.0) as u64;
+        let spill_factor = self.calibration.hash_table_cache_factor(
+            ht_bytes,
+            self.hardware.l3_cache_bytes,
+        );
         let cache_mb =
             self.hardware.l3_cache_bytes as f64 / (1024.0 * 1024.0);
-        let cache_factor = 16.0 / cache_mb.max(1.0);
+        let cache_size_factor = 16.0 / cache_mb.max(1.0);
 
         let cost = (stats.row_count * 80e-9
-            + group_count * 64.0 * cache_factor * 1e-9)
-            * cache_factor;
+            + group_count * 64.0 * spill_factor * 1e-9)
+            * spill_factor
+            * cache_size_factor
+            * self.calibration.tuple_cost();
 
         let disc = self.confidence_for_table(table);
         cost * disc
@@ -370,14 +382,13 @@ impl IntegratedCostModel {
         selectivity: f64,
     ) -> f64 {
         let stats = self.effective_statistics(table);
-        let storage_factor = 100.0 / self.hardware.storage_bandwidth_gbps;
 
-        // Index scan cost (random I/O)
         let index_pages = (stats.row_count * selectivity / 100.0).max(1.0);
-        let index_cost = index_pages * storage_factor * 0.3;
+        let index_cost =
+            index_pages * self.calibration.rand_page_cost() * 0.3;
 
-        // Bitmap construction (CPU cost, very cheap)
-        let bitmap_cost = stats.row_count / 64.0 * 1e-9;
+        let bitmap_cost =
+            stats.row_count / 64.0 * 1e-9 * self.calibration.tuple_cost();
 
         let disc = self.confidence_for_table(table);
         (index_cost + bitmap_cost) * disc
@@ -414,15 +425,13 @@ impl IntegratedCostModel {
     ) -> f64 {
         let stats = self.effective_statistics(table);
 
-        // Sequential page cost (much cheaper than random)
         let pages_accessed = (stats.row_count * combined_selectivity / 100.0).max(1.0);
-        let storage_factor = 100.0 / self.hardware.storage_bandwidth_gbps;
+        let heap_cost =
+            pages_accessed * self.calibration.seq_page_cost() * 0.25;
 
-        // Sequential access is ~4x faster than random
-        let heap_cost = pages_accessed * storage_factor * 0.25;
-
-        // Recheck condition overhead (CPU)
-        let recheck_cost = stats.row_count * combined_selectivity * 5e-9;
+        let recheck_cost = stats.row_count * combined_selectivity
+            * 5e-9
+            * self.calibration.tuple_cost();
 
         let disc = self.confidence_for_table(table);
         (heap_cost + recheck_cost) * disc
@@ -909,6 +918,28 @@ impl CostCalibration {
         }
     }
 
+    /// Create from a `CalibratedCostModel` (benchmark-based, RFC 0068).
+    #[must_use]
+    pub fn from_calibrated(
+        cal: &CalibratedCostModel,
+        hw: &HardwareProfile,
+    ) -> Self {
+        let ref_simd_bits = 256.0;
+        let ref_cores = 8.0;
+        let simd_bits = f64::from(hw.simd_width_bits).max(1.0);
+        let cores = f64::from(hw.cpu_cores).max(1.0);
+
+        Self {
+            scan_factor: cal.seq_page_cost(),
+            filter_factor: ref_simd_bits / simd_bits,
+            join_factor: cal.tuple_cost(),
+            sort_factor: (ref_cores / cores).max(0.5) * cal.tuple_cost(),
+            aggregate_factor: cal.tuple_cost(),
+            gpu_available: hw.gpu_available,
+            fpga_available: hw.fpga_available,
+        }
+    }
+
     /// Return calibration for the reference machine (all factors 1.0).
     #[must_use]
     pub fn reference() -> Self {
@@ -945,6 +976,7 @@ impl CostCalibration {
 #[derive(Debug, Clone)]
 pub struct IntegratedCostFn {
     hardware: HardwareProfile,
+    calibration: CalibratedCostModel,
     table_stats: std::sync::Arc<HashMap<String, Statistics>>,
     staleness_map: std::sync::Arc<HashMap<String, Staleness>>,
 }
@@ -957,8 +989,10 @@ impl IntegratedCostFn {
         table_stats: HashMap<String, Statistics>,
         staleness_map: HashMap<String, Staleness>,
     ) -> Self {
+        let calibration = CalibratedCostModel::from_profile(&hardware);
         Self {
             hardware,
+            calibration,
             table_stats: std::sync::Arc::new(table_stats),
             staleness_map: std::sync::Arc::new(staleness_map),
         }
@@ -986,6 +1020,7 @@ impl IntegratedCostFn {
 
         Self {
             hardware: model.hardware().clone(),
+            calibration: model.calibration().clone(),
             table_stats: std::sync::Arc::new(table_stats),
             staleness_map: std::sync::Arc::new(staleness_map),
         }
@@ -1032,45 +1067,37 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
         let base_cost = match enode {
             RelLang::Scan([table_id]) => {
                 let child_cost = costs(*table_id);
-                let storage_factor =
-                    100.0 / self.hardware.storage_bandwidth_gbps;
-                return child_cost + (100.0 * storage_factor);
+                let seq_cost = 100.0 * self.calibration.seq_page_cost();
+                return child_cost + seq_cost;
             }
             RelLang::ScanAlias([table_id, alias_id]) => {
-                let storage_factor =
-                    100.0 / self.hardware.storage_bandwidth_gbps;
+                let seq_cost = 100.0 * self.calibration.seq_page_cost();
                 return costs(*table_id)
                     + costs(*alias_id)
-                    + (100.0 * storage_factor);
+                    + seq_cost;
             }
             RelLang::Filter(_) | RelLang::Project(_) => {
                 let simd_factor = 256.0
                     / f64::from(self.hardware.simd_width_bits);
-                1.0 * simd_factor
+                1.0 * simd_factor * self.calibration.tuple_cost()
             }
             RelLang::Join(_) => {
-                #[allow(clippy::cast_precision_loss)]
-                let cache_mb = self.hardware.l3_cache_bytes as f64
-                    / (1024.0 * 1024.0);
-                let cache_factor = 16.0 / cache_mb.max(1.0);
-                500.0 * cache_factor
+                500.0 * self.calibration.tuple_cost()
             }
             RelLang::Aggregate(_) => {
-                #[allow(clippy::cast_precision_loss)]
-                let cache_mb = self.hardware.l3_cache_bytes as f64
-                    / (1024.0 * 1024.0);
-                let cache_factor = 16.0 / cache_mb.max(1.0);
-                200.0 * cache_factor
+                200.0 * self.calibration.tuple_cost()
             }
             RelLang::Sort(_) => {
                 let par_factor =
                     8.0 / f64::from(self.hardware.cpu_cores);
                 150.0 * par_factor.max(0.5)
+                    * self.calibration.tuple_cost()
             }
             RelLang::IncrementalSort(_) => {
                 let par_factor =
                     8.0 / f64::from(self.hardware.cpu_cores);
                 60.0 * par_factor.max(0.5)
+                    * self.calibration.tuple_cost()
             }
             RelLang::Limit([n_id, _off_id, child_id]) => {
                 // Startup cost optimization: when LIMIT is present
@@ -1093,37 +1120,25 @@ impl egg::CostFunction<crate::egraph::RelLang> for IntegratedCostFn {
             | RelLang::Intersect(_)
             | RelLang::Except(_) => 50.0,
             RelLang::RecursiveCTE(_) => {
-                #[allow(clippy::cast_precision_loss)]
-                let cache_mb = self.hardware.l3_cache_bytes as f64
-                    / (1024.0 * 1024.0);
-                let cache_factor = 16.0 / cache_mb.max(1.0);
-                1000.0 * cache_factor
+                1000.0 * self.calibration.tuple_cost()
             }
             RelLang::BitmapIndexScan(_) => {
-                // Index scan cost (random I/O, cheaper than full index)
-                10.0
+                10.0 * self.calibration.rand_page_cost()
             }
             RelLang::BitmapAnd(_) | RelLang::BitmapOr(_) => {
-                // Bitwise operations are extremely cheap
                 0.1
             }
             RelLang::BitmapHeapScan(_) => {
-                // Sequential heap access
-                let storage_factor =
-                    100.0 / self.hardware.storage_bandwidth_gbps;
-                5.0 * storage_factor
+                5.0 * self.calibration.seq_page_cost()
             }
             RelLang::MetadataLookup(_) => {
                 // O(1) metadata lookup, cheaper than any scan
                 return 1.0;
             }
             RelLang::IndexOnlyScan([table_id, _, _, _]) => {
-                // Index-only scan: ~30% of full scan cost (no heap
-                // fetch).
                 let child_cost = costs(*table_id);
-                let storage_factor =
-                    100.0 / self.hardware.storage_bandwidth_gbps;
-                return child_cost + (30.0 * storage_factor);
+                let seq_cost = 30.0 * self.calibration.seq_page_cost();
+                return child_cost + seq_cost;
             }
             _ => 0.1,
         };

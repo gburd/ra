@@ -32,7 +32,7 @@ const REF_DRAM_LATENCY_NS: f64 = 80.0;
 ///
 /// Replaces static cost constants with values derived from actual
 /// hardware measurements. Each field is a cost multiplier relative
-/// to a reference NVMe-equipped server.
+/// to a reference `NVMe`-equipped server.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CalibratedCostModel {
     /// Sequential I/O cost per MB (relative to reference).
@@ -40,11 +40,11 @@ pub struct CalibratedCostModel {
     pub sequential_io_cost: f64,
 
     /// Random I/O cost per operation (relative to reference).
-    /// Lower = faster random access (NVMe vs HDD).
+    /// Lower = faster random access (`NVMe` vs HDD).
     pub random_io_cost: f64,
 
     /// Ratio of random to sequential I/O cost.
-    /// NVMe: ~1.2, SATA SSD: ~1.4, HDD: ~300.
+    /// `NVMe`: ~1.2, SATA SSD: ~1.4, HDD: ~300.
     pub random_io_ratio: f64,
 
     /// CPU cost per tuple (relative to reference).
@@ -97,7 +97,7 @@ impl CalibratedCostModel {
         } else if hw.storage_bandwidth_gbps < 1.0 {
             seq_bw / 1.4 // SATA SSD
         } else {
-            seq_bw / 1.2 // NVMe
+            seq_bw / 1.2 // `NVMe`
         };
 
         let m = HardwareMeasurements {
@@ -139,7 +139,7 @@ impl CalibratedCostModel {
     /// Cost of random page access (index scan).
     ///
     /// Accounts for actual random I/O throughput. On HDD this will
-    /// be ~300x the sequential cost; on NVMe ~1.2x.
+    /// be ~300x the sequential cost; on `NVMe` ~1.2x.
     #[must_use]
     pub fn rand_page_cost(&self) -> f64 {
         self.random_io_cost
@@ -162,9 +162,9 @@ impl CalibratedCostModel {
         hash_table_bytes: u64,
         l3_cache_bytes: u64,
     ) -> f64 {
-        #[allow(clippy::cast_precision_loss)]
+        #[expect(clippy::cast_precision_loss)]
         let ht_mb = hash_table_bytes as f64 / (1024.0 * 1024.0);
-        #[allow(clippy::cast_precision_loss)]
+        #[expect(clippy::cast_precision_loss)]
         let l3_mb = (l3_cache_bytes as f64 / (1024.0 * 1024.0)).max(1.0);
 
         if ht_mb <= l3_mb {
@@ -197,7 +197,7 @@ pub fn calibrate(config: &BenchmarkConfig) -> CalibratedCostModel {
 }
 
 #[cfg(test)]
-#[allow(clippy::float_cmp)]
+#[expect(clippy::expect_used)]
 mod tests {
     use super::*;
 
@@ -214,7 +214,7 @@ mod tests {
         let m = HardwareMeasurements::default_nvme();
         let model = CalibratedCostModel::from_measurements(&m);
 
-        // NVMe: sequential and random close to reference
+        // `NVMe`: sequential and random close to reference
         assert!(model.sequential_io_cost < 1.5);
         assert!(model.random_io_cost < 1.5);
         // Low random/sequential ratio
@@ -226,9 +226,9 @@ mod tests {
         let m = HardwareMeasurements::default_hdd();
         let model = CalibratedCostModel::from_measurements(&m);
 
-        // HDD: sequential is ~23x slower than reference NVMe
+        // HDD: sequential is ~23x slower than reference `NVMe`
         assert!(model.sequential_io_cost > 20.0);
-        // HDD: random is ~6000x slower than reference NVMe
+        // HDD: random is ~6000x slower than reference `NVMe`
         assert!(model.random_io_cost > 5000.0);
         // Very high ratio
         assert!(model.random_io_ratio > 100.0);
@@ -239,7 +239,7 @@ mod tests {
         let m = HardwareMeasurements::default_sata_ssd();
         let model = CalibratedCostModel::from_measurements(&m);
 
-        // SATA: ~6x slower sequential than NVMe
+        // SATA: ~6x slower sequential than `NVMe`
         assert!(model.sequential_io_cost > 5.0);
         assert!(model.sequential_io_cost < 10.0);
         // Moderate random/sequential ratio
@@ -273,7 +273,7 @@ mod tests {
         let seq_cost = 1000.0 * nvme.seq_page_cost();
         // 10 random lookups (1% selectivity)
         let idx_cost = 10.0 * nvme.rand_page_cost();
-        // On NVMe, 10 random lookups should be cheaper than
+        // On `NVMe`, 10 random lookups should be cheaper than
         // scanning 1000 pages
         assert!(
             idx_cost < seq_cost,
@@ -302,7 +302,7 @@ mod tests {
         let hw = HardwareProfile::cpu_only(); // 7 GB/s storage
         let model = CalibratedCostModel::from_profile(&hw);
         assert!(model.sequential_io_cost < 1.0); // Faster than ref
-        assert!(model.random_io_ratio < 2.0); // NVMe-like
+        assert!(model.random_io_ratio < 2.0); // `NVMe`-like
     }
 
     #[test]
@@ -335,7 +335,7 @@ mod tests {
             &HardwareMeasurements::default_hdd(),
         );
 
-        // Sequential cost should increase: NVMe < SATA < HDD
+        // Sequential cost should increase: `NVMe` < SATA < HDD
         assert!(nvme.sequential_io_cost < sata.sequential_io_cost);
         assert!(sata.sequential_io_cost < hdd.sequential_io_cost);
 
