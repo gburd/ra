@@ -83,6 +83,7 @@ Deep dives into major capabilities:
 - **[Multi-Model Optimization](features/multi-model-optimization.md)** - Graph, document, time-series support
 - **[Network Modeling](features/network-modeling.md)** - Network-aware distributed execution
 - **[Platform Architecture](features/platform-architecture.md)** - System design details
+- **[Platform-Specific Optimizations](features/platform-optimizations.md)** - RUM indexes, Citus, DocumentDB, Oracle Duality, XPath/XQuery
 - **[Resource Budgets](features/resource-budgets.md)** - Time and memory constraints
 - **[Statistics Timeline](features/statistics-timeline-format.md)** - Time-aware statistics
 - **[Unnest Implementation](features/unnest-implementation.md)** - Array and nested data handling

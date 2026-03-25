@@ -93,6 +93,10 @@ The foundation layer providing core types and traits:
 - **Cost**: Cost model traits and types
 - **Statistics**: Cardinality, selectivity, histograms
 - **Properties**: Physical properties (ordering, partitioning)
+- **document_algebra.rs**: Document-oriented algebra extensions (RFC 0082)
+  - `DocumentScan`, `DocumentFilter`, `DocumentProject`
+  - `DocumentUnwind`, `DocumentGroup`, `DocumentLookup`
+  - MongoDB formal semantics with TOAST/HOT awareness
 
 All types are designed to be:
 - Serializable (for network transport and caching)
@@ -134,10 +138,18 @@ The optimization engine:
 - **differential.rs**: Differential dataflow for incremental updates
 - **timely_integration.rs**: Timely dataflow integration
 
+**Platform-specific optimizers**:
+- **rum_index.rs**: PostgreSQL RUM index optimization (RFC 0079)
+- **citus_optimizer.rs**: CitusDB distributed query rules (RFC 0081)
+- **documentdb_optimizer.rs**: DocumentDB BSON query optimization (RFC 0062, 0080)
+- **oracle_json_duality.rs**: Oracle JSON Relational Duality (RFC 0084)
+- **xml_optimizer.rs**: XPath/XQuery optimization (RFC 0083)
+
 Key algorithms:
 1. **Equality Saturation**: Uses egg's e-graph to explore equivalent plans
 2. **Cost-Based Extraction**: Finds lowest-cost plan from e-graph
 3. **Incremental Maintenance**: Differential dataflow for efficient updates
+4. **Platform Detection**: Conditional rule loading based on database features
 
 ### ra-codegen {#ra-codegen}
 

@@ -1253,8 +1253,152 @@ fn test_plan_selection_by_cardinality() {
 - [Cost Model](./cost-model.md) - How costs are computed from statistics
 - [Facts Provider Guide](./concepts/facts-provider.md) - Implementing custom fact providers
 
+## Platform-Specific APIs
+
+### PostgreSQL RUM Index Detection
+
+```rust
+use ra_engine::rum_index::{RumQueryType, RumOpclass, detect_rum};
+
+// Detect if RUM is available
+let has_rum = detect_rum(&connection)?;
+
+// Classify query for RUM optimization
+let query_type = RumQueryType::classify(&query)?;
+if query_type.benefits_from_rum() {
+    println!("RUM index recommended for {} query", query_type.label());
+}
+
+// Estimate RUM index cost
+let cost = rum_index_cost(
+    RumQueryType::RankedRetrieval,
+    RumOpclass::TsvectorOps,
+    0.01,  // selectivity
+    Some(10),  // limit
+);
+```
+
+### Citus Distributed Optimization
+
+```rust
+use ra_engine::citus_optimizer::{
+    CitusMetadata, DistributedTableInfo, detect_citus
+};
+
+// Detect Citus and load metadata
+let metadata = detect_citus(&connection)?;
+
+// Check if tables are co-located
+let tables = vec!["orders", "shipments"];
+if metadata.are_colocated(&tables) {
+    // Apply co-located join optimization
+    let optimized = optimize_colocated_join(query, &metadata)?;
+}
+
+// Estimate columnar scan cost
+let cost = columnar_scan_cost(
+    10,   // total columns
+    3,    // projected columns
+    3.0,  // compression ratio
+    1_000_000,  // row count
+);
+```
+
+### DocumentDB BSON Optimization
+
+```rust
+use ra_engine::documentdb_optimizer::{
+    BsonOperator, detect_documentdb, bson_selectivity
+};
+
+// Detect DocumentDB extension
+let has_documentdb = detect_documentdb(&connection)?;
+
+// Get operator-specific selectivity
+let op = BsonOperator::from_pg_operator("@=")?;
+let selectivity = op.default_selectivity();  // 0.005 instead of 0.01
+
+// Recommend GIN index for multi-path query
+let recommendations = recommend_bson_indexes(&query, &metadata)?;
+```
+
+### Oracle JSON Duality
+
+```rust
+use ra_engine::oracle_json_duality::{
+    DualityView, detect_duality_views
+};
+
+// Load duality view definitions
+let views = detect_duality_views(&connection)?;
+
+// Choose access path (document vs relational)
+let access_path = choose_duality_access_path(
+    &view,
+    &predicate,
+    &metadata,
+)?;
+
+match access_path {
+    AccessPath::DocumentFetch => {
+        // Single document fetch by primary key
+    }
+    AccessPath::RelationalDecomposition => {
+        // Join across base tables
+    }
+}
+```
+
+### XPath/XQuery Optimization
+
+```rust
+use ra_engine::xml_optimizer::{
+    XPathAxis, parse_xpath, xpath_cost
+};
+
+// Parse XPath expression
+let xpath = parse_xpath("/order/customer[@id='12345']")?;
+
+// Estimate traversal cost
+let cost = xpath.axes().iter()
+    .map(|axis| axis.navigation_cost())
+    .sum();
+
+// Check if path index can optimize
+if xpath.can_use_path_index() {
+    // Apply path index optimization
+}
+```
+
+### Document Algebra
+
+```rust
+use ra_core::document_algebra::{
+    DocPredicate, DocumentScan, DocumentFilter, DocumentUnwind
+};
+
+// Build document query
+let query = DocumentFilter {
+    predicate: DocPredicate::Eq(
+        FieldPath::new("status"),
+        DocValue::String("active".to_string()),
+    ),
+    input: Box::new(DocumentScan {
+        collection: "orders".to_string(),
+    }),
+};
+
+// Check TOAST cost
+let field_size = estimate_field_size(&collection, &field_path);
+if field_size > TOAST_THRESHOLD {
+    // Adjust cost for TOAST fetch
+    let toast_cost = toast_aware_scan_cost(field_size, TOAST_THRESHOLD);
+}
+```
+
 ## Support
 
 - Issues: https://codeberg.org/gregburd/ra/issues
 - Discussions: https://codeberg.org/gregburd/ra/issues
 - Documentation: https://docs.rs/ra-core
+- Platform Optimizations: [Platform-Specific Optimizations](features/platform-optimizations.md)

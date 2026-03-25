@@ -113,6 +113,7 @@ export default withMermaid(defineConfig({
             { text: 'Network Modeling', link: '/features/network-modeling' },
             { text: 'Plan Visualization', link: '/features/plan-visualization' },
             { text: 'Platform Architecture', link: '/features/platform-architecture' },
+            { text: 'Platform-Specific Optimizations', link: '/features/platform-optimizations' },
             { text: 'Resource Budgets', link: '/features/resource-budgets' },
             { text: 'SQL Coverage', link: '/features/sql-coverage' },
             { text: 'Statistics Timeline', link: '/features/statistics-timeline-format' },

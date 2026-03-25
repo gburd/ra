@@ -566,6 +566,40 @@ optimizes queries at plan time. See the
 [PostgreSQL Extension guide](postgresql-extension.md) for installation
 and configuration.
 
+### Platform-Specific Optimizations
+
+Ra automatically detects and optimizes for database-specific features:
+
+```bash
+# PostgreSQL RUM indexes for full-text search
+ra-cli optimize \
+  --detect-platform \
+  "SELECT title FROM articles WHERE tsv @@ 'optimization' ORDER BY ts_rank(tsv, 'optimization') LIMIT 10"
+
+# Citus distributed query optimization
+ra-cli optimize \
+  --detect-platform \
+  "SELECT customer_id, SUM(total) FROM orders GROUP BY customer_id"
+
+# DocumentDB BSON query optimization
+ra-cli optimize \
+  --detect-platform \
+  "SELECT * FROM collection WHERE data @= '{\"status\": \"active\"}'"
+
+# Oracle JSON Duality views
+ra-cli optimize \
+  --detect-platform \
+  "SELECT * FROM orders_dv WHERE JSON_VALUE(doc, '$.customer.name') = 'Acme'"
+```
+
+Supported platforms:
+- **PostgreSQL**: RUM indexes, Citus distribution, TOAST/HOT awareness
+- **Oracle**: JSON Relational Duality, XMLType optimization
+- **SQL Server**: XML indexes (PATH, VALUE, PROPERTY)
+- **DocumentDB**: BSON operator selectivity, extended RUM indexes
+
+See [Platform-Specific Optimizations](features/platform-optimizations.md) for detailed documentation.
+
 ## Next Steps
 
 - **[Architecture](architecture.md)** -- System internals
@@ -577,3 +611,4 @@ and configuration.
 - **[Testing Guide](guides/testing.md)** -- Test your optimizations
 - **[API Reference](api-reference.md)** -- Programmatic usage
 - **[Examples](examples/)** -- Complete worked examples
+- **[Platform Optimizations](features/platform-optimizations.md)** -- Database-specific features

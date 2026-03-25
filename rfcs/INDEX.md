@@ -27,7 +27,13 @@ This index tracks all RFCs in the RA optimizer project by status. See [README.md
 | [0066](_accepted/0066-advanced-index-aware-planning.md) | Advanced Index-Aware Planning (BRIN) | 2026-03-25 | BRIN index advisor |
 | [0068](_accepted/0068-hardware-calibrated-cost-model.md) | Hardware-Calibrated Cost Model | 2026-03-25 | Hardware calibration |
 | [0078](_accepted/0078-remove-bayesian-pruning.md) | Remove Bayesian Adaptive Search Space Pruning | 2026-03-25 | Commit 32f9902f |
+| [0079](text/0079-postgresql-rum-index.md) | PostgreSQL RUM Index Optimization | 2026-03-25 | `rum_index.rs` |
+| [0080](text/0080-documentdb-rum-bson-optimization.md) | DocumentDB RUM Fork for BSON Optimization | 2026-03-25 | `documentdb_optimizer.rs` |
+| [0081](text/0081-citusdb-distributed-query-rules.md) | CitusDB Distributed Query Rules | 2026-03-25 | `citus_optimizer.rs` |
 | [0082](text/0082-mongodb-formal-semantics-toast-hot.md) | MongoDB Formal Query Semantics + TOAST/HOT | 2026-03-25 | `document_algebra.rs` |
+| [0083](text/0083-xpath-xquery-optimization.md) | XPath/XQuery Optimization | 2026-03-25 | `xml_optimizer.rs` |
+| [0084](text/0084-oracle-json-relational-duality-optimization.md) | Oracle JSON Relational Duality Optimization | 2026-03-25 | `oracle_json_duality.rs` |
+| [0085](text/0085-platform-specific-rule-architecture.md) | Platform-Specific Rule Architecture | 2026-03-25 | Platform module design |
 
 ## Underway (In Development)
 
@@ -114,12 +120,12 @@ This index tracks all RFCs in the RA optimizer project by status. See [README.md
 
 ## Statistics
 
-- **Total RFCs**: 79
-- **Implemented**: 21 (27%)
-- **Underway**: 2 (3%)
-- **Accepted**: 12 (15%)
-- **Under Review**: 6 (8%)
-- **Proposed**: 37 (47%)
+- **Total RFCs**: 85
+- **Implemented**: 27 (32%)
+- **Underway**: 2 (2%)
+- **Accepted**: 12 (14%)
+- **Under Review**: 6 (7%)
+- **Proposed**: 37 (44%)
 - **Rejected**: 1 (1%)
 
 ## Last Updated: 2026-03-25
