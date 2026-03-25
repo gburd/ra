@@ -1,6 +1,6 @@
 # RFC 0078: Remove Bayesian Adaptive Search Space Pruning
 
-- **Status**: Proposed
+- **Status**: Implemented
 - **Priority**: Critical (Technical Debt)
 - **Impact**: Code cleanup, remove ~500 LOC dead code
 - **Category**: Refactoring / Cleanup
@@ -158,3 +158,23 @@ impl Optimizer {
 
 - RFC 0059 v2: Differential Cache Invalidation (unaffected, remains valid)
 - RFC 0068: Hardware-Calibrated Cost Model (complementary, addresses real performance issues)
+
+## Implementation Notes
+
+**Status**: Implemented in Ra v0.1.0
+
+**Removed Files:**
+- `crates/ra-engine/src/bayesian_pruning.rs` (367 lines removed)
+- `crates/ra-engine/examples/validate_bayesian_pruning.rs` (165 lines removed)
+- 42 unit tests removed (tested dead code)
+
+**Changes:**
+- Removed `pub mod bayesian_pruning` from `crates/ra-engine/src/lib.rs`
+- Original RFC 0059 v1 moved to `rfcs/_rejected/0059-bayesian-pruning.md`
+
+**Impact:**
+- -500 LOC dead code
+- No performance regression (module was never integrated into optimizer)
+- All tests continue to pass
+
+**Commit:** `32f9902f` (refactor: Remove Bayesian pruning module)

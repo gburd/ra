@@ -1,6 +1,6 @@
 # RFC 0068: Hardware-Calibrated Cost Model
 
-- **Status**: Proposed
+- **Status**: Implemented
 - **Priority**: Quick Win (1-2 weeks)
 - **Impact**: 2-5x improvement on diverse hardware
 - **Category**: Cost Model / Hardware-Aware
@@ -375,3 +375,42 @@ fn hash_join_cost(&self, build: &RelExpr, probe: &RelExpr) -> f64 {
 - RFC 0069: Execution Feedback Loop (runtime adaptation, complementary)
 - RFC 0073: Buffer Pool-Aware Planning (cache awareness, complementary)
 - RFC 0077: NUMA-Aware Execution (multi-socket systems, complementary)
+
+## Implementation
+
+**Status**: Implemented in Ra v0.1.0
+
+**Files:**
+- `crates/ra-hardware/src/benchmark.rs` (669 lines, 17 tests)
+- `crates/ra-hardware/src/calibration.rs` (346 lines, 12 tests)
+- `crates/ra-hardware/src/cpu.rs` (26 tests)
+- `crates/ra-hardware/src/memory.rs` (14 tests)
+- `crates/ra-hardware/src/storage.rs` (27 tests)
+- `crates/ra-hardware/src/gpu.rs` (15 tests)
+- `crates/ra-hardware/src/network.rs` (56 tests)
+- `crates/ra-hardware/src/profiles.rs` (24 tests)
+- `crates/ra-hardware/src/network_profiles.rs` (25 tests)
+- `crates/ra-hardware/src/cost.rs` (15 tests)
+- `crates/ra-hardware/src/detection.rs` (5 tests)
+- `crates/ra-hardware/src/profile.rs` (5 tests)
+- `crates/ra-hardware/src/device.rs` (7 tests)
+- `crates/ra-hardware/src/lib.rs` (53 lines)
+- Total: ~1068 lines in benchmark+calibration, 248 tests across all modules
+
+**Key Features:**
+- Sequential and random I/O microbenchmarks with median-of-5 stability
+- CPU tuple processing benchmarks
+- Cache hierarchy latency measurement (L1/L2/L3/DRAM)
+- OnceLock-based result caching (run once per system lifetime)
+- CalibratedCostModel with hardware-relative cost coefficients
+- Reference machine normalization for cross-hardware cost comparison
+- Cache-aware hash join costing (L3 size threshold)
+- Configurable benchmark with manual override support
+- 20+ predefined hardware profiles for various workloads
+
+**Tests:**
+- 248 tests across 13 source files in `crates/ra-hardware/`
+
+**Commits:**
+- `18fa0bdc` (feat: Integrate hardware calibration into cost model)
+- `fb844554` (chore: Complete hardware calibration integration)

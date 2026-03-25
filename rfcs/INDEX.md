@@ -23,6 +23,10 @@ This index tracks all RFCs in the RA optimizer project by status. See [README.md
 | [0052](_accepted/0052-progressive-reoptimization.md) | Progressive Re-Optimization (Plan Stitch) | 2026-03-22 | Commit 3246500a |
 | [0058](_accepted/0058-rule-complexity-prioritization.md) | Rule Complexity Prioritization | 2026-03-24 | Commit 848aadaf |
 | [0060](_accepted/0060-genetic-fingerprinting.md) | Genetic Fingerprinting for Query Plan Cache | 2026-03-23 | Plan cache system |
+| [0062](_accepted/0062-documentdb-query-optimization.md) | DocumentDB / MongoDB Query Optimization | 2026-03-25 | DocumentDB optimizer |
+| [0066](_accepted/0066-advanced-index-aware-planning.md) | Advanced Index-Aware Planning (BRIN) | 2026-03-25 | BRIN index advisor |
+| [0068](_accepted/0068-hardware-calibrated-cost-model.md) | Hardware-Calibrated Cost Model | 2026-03-25 | Hardware calibration |
+| [0078](_accepted/0078-remove-bayesian-pruning.md) | Remove Bayesian Adaptive Search Space Pruning | 2026-03-25 | Commit 32f9902f |
 
 ## Underway (In Development)
 
@@ -87,13 +91,10 @@ This index tracks all RFCs in the RA optimizer project by status. See [README.md
 | [0058](text/0058-opentracing-instrumentation.md) | OpenTracing Instrumentation for Query Planner | 2026-03-23 | Observability |
 | [0059](text/0059-statistics-based-plan-cache-invalidation.md) | Statistics-Based Plan Cache Invalidation | 2026-03-24 | Phase 5 differential dataflow |
 | [0061](text/0061-postgresql-extension-aware-optimization.md) | PostgreSQL Extension-Aware Optimization | 2026-03-24 | Phase 5 PostgreSQL extensions |
-| [0062](text/0062-documentdb-query-optimization.md) | DocumentDB / MongoDB Query Optimization | 2026-03-25 | Extension research |
 | [0063](text/0063-spatial-query-optimization.md) | Spatial Query Optimization | 2026-03-25 | Extension research |
 | [0064](text/0064-vector-similarity-search-optimization.md) | Vector Similarity Search Optimization | 2026-03-25 | Extension research |
 | [0065](text/0065-time-series-query-optimization.md) | Time-Series Query Optimization | 2026-03-25 | Extension research |
-| [0066](text/0066-advanced-index-aware-planning.md) | Advanced Index-Aware Planning | 2026-03-25 | Extension research |
 | [0067](text/0067-full-text-search-optimization.md) | Full-Text Search Optimization | 2026-03-25 | Extension research |
-| [0068](text/0068-hardware-calibrated-cost-model.md) | Hardware-Calibrated Cost Model | 2026-03-25 | Adaptive optimization |
 | [0069](text/0069-execution-feedback-loop.md) | Execution Feedback Loop | 2026-03-25 | Adaptive optimization |
 | [0070](text/0070-memory-pressure-aware-joins.md) | Memory-Pressure-Aware Joins | 2026-03-25 | Adaptive optimization |
 | [0071](text/0071-workload-classification.md) | Workload Classification | 2026-03-25 | Adaptive optimization |
@@ -103,7 +104,6 @@ This index tracks all RFCs in the RA optimizer project by status. See [README.md
 | [0075](text/0075-multi-objective-cost-model.md) | Multi-Objective Cost Model | 2026-03-25 | Adaptive optimization |
 | [0076](text/0076-adaptive-mid-query-reoptimization.md) | Adaptive Mid-Query Re-Optimization | 2026-03-25 | Adaptive optimization |
 | [0077](text/0077-numa-aware-execution.md) | NUMA-Aware Execution | 2026-03-25 | Adaptive optimization |
-| [0078](text/0078-remove-bayesian-pruning.md) | Remove Bayesian Adaptive Search Space Pruning | 2026-03-25 | Cleanup / Refactoring |
 
 ## Rejected
 
@@ -114,11 +114,11 @@ This index tracks all RFCs in the RA optimizer project by status. See [README.md
 ## Statistics
 
 - **Total RFCs**: 79
-- **Implemented**: 17 (22%)
+- **Implemented**: 21 (27%)
 - **Underway**: 2 (3%)
 - **Accepted**: 12 (15%)
 - **Under Review**: 6 (8%)
-- **Proposed**: 41 (52%)
+- **Proposed**: 37 (47%)
 - **Rejected**: 1 (1%)
 
 ## Last Updated: 2026-03-25

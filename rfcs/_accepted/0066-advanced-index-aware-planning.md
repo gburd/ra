@@ -2,7 +2,7 @@
 
 - Start Date: 2026-03-25
 - Author: Ra Research Team
-- Status: Proposed
+- Status: Implemented
 - Tracking Issue: TBD
 
 ## Summary
@@ -416,3 +416,30 @@ recommendations independently. This was rejected because:
   columns.
 - **Workload-aware index selection**: Use pg_stat_statements to track
   which queries benefit from which indexes and adjust recommendations.
+
+## Implementation
+
+**Status**: Implemented in Ra v0.1.0 (BRIN index recommendation subset)
+
+**Files:**
+- `crates/ra-advisor/src/lib.rs` (732 lines, 16 tests)
+- `crates/ra-advisor/src/cost.rs` (344 lines, 12 tests)
+- `crates/ra-advisor/src/candidate.rs` (227 lines, 8 tests)
+- `crates/ra-stats/src/index_types.rs` (558 lines, 25 tests)
+- Total: ~1861 lines, 36 tests in ra-advisor + 25 tests in index_types
+
+**Key Features:**
+- BRIN index detection based on pg_stats correlation (|correlation| > 0.9 threshold)
+- BRIN effectiveness estimation accounting for physical correlation and pages-per-range
+- Index type cost model with profiles for B-tree, BRIN, GIN, GiST, SP-GiST, and Bloom
+- Covering index analysis for index-only scan opportunities
+- Partial index candidate detection from repeated WHERE clause patterns
+- Bitmap AND/OR strategy evaluation for multi-index queries
+- GIN operator class recommendation (jsonb_ops vs jsonb_path_ops)
+- Integration with ra-core statistics framework
+
+**Tests:**
+- 36 tests in `crates/ra-advisor/` (inline `#[cfg(test)]` modules)
+- 25 tests in `crates/ra-stats/src/index_types.rs`
+
+**Commit:** `7e574c13` (feat: Implement RFC 0066 BRIN Index Recommendations)

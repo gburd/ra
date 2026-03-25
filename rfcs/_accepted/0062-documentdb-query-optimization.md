@@ -2,7 +2,7 @@
 
 - Start Date: 2026-03-25
 - Author: Ra Research Team
-- Status: Proposed
+- Status: Implemented
 - Tracking Issue: TBD
 
 ## Summary
@@ -417,3 +417,25 @@ recommend co-located storage or materialized views.
 For workloads that would benefit from normalized schema, Ra could
 recommend migrating specific document patterns to relational tables
 with foreign keys.
+
+## Implementation
+
+**Status**: Implemented in Ra v0.1.0
+
+**Files:**
+- `crates/ra-engine/src/documentdb_optimizer.rs` (1393 lines, 26 tests)
+
+**Key Features:**
+- BSON operator recognition (`@=`, `@>`, `@<`, `@*=`, `@~`, etc.)
+- Operator-specific selectivity estimation (per-operator defaults and GIN-aware estimates)
+- GIN index scan cost modeling with compound index support
+- GIN index recommendation engine for multi-path queries
+- 5 e-graph rewrite rules for DocumentDB query patterns
+- $match pushdown below aggregation
+- Error handling with graceful fallback to standard PostgreSQL behavior
+
+**Tests:**
+- 26 unit tests covering operator parsing, selectivity, cost modeling, rewrite rules, and error messages
+- Tests in `crates/ra-engine/src/documentdb_optimizer.rs` (inline `#[cfg(test)]` module)
+
+**Commit:** `f685f077` (feat: Implement RFC 0062)
