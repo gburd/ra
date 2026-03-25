@@ -40,6 +40,8 @@ ra-cli translate --from postgres --to mysql \
 
 - **[Getting Started](getting-started.md)** - Installation, quick examples of ALL major features
 - **[Architecture](architecture.md)** - System design, components, and data flow
+- **[Benchmarks](benchmarks.md)** - JOB and TPC-H benchmark results, plan cache performance
+- **[PostgreSQL Extension](postgresql-extension.md)** - Native PostgreSQL integration guide
 - **[API Reference](api-reference.md)** - Programmatic usage and integration
 - **[Contributing](contributing.md)** - Development standards and contribution guidelines
 - **[Deployment](deployment.md)** - Docker, Kubernetes, cloud deployment
@@ -147,6 +149,8 @@ graph LR
 
 ## Performance Highlights
 
+- **Plan Cache**: 37x OLTP speedup with template-based caching (97.5% hit rate)
+- **Rule Prioritization**: 20-27% faster optimization from cost-to-benefit rule ordering
 - **Query Optimization**: Up to 1000x speedup on complex analytical queries
 - **Index Selection**: 85% I/O reduction with automatic covering index detection
 - **Metadata Shortcuts**: O(1) MIN/MAX/COUNT operations on billion-row tables

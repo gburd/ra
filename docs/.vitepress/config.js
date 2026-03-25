@@ -67,6 +67,8 @@ export default withMermaid(defineConfig({
             { text: 'Introduction', link: '/readme' },
             { text: 'Quick Start', link: '/getting-started' },
             { text: 'Architecture', link: '/architecture' },
+            { text: 'Benchmarks', link: '/benchmarks' },
+            { text: 'PostgreSQL Extension', link: '/postgresql-extension' },
             { text: 'Contributing', link: '/contributing' }
           ]
         },

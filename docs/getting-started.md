@@ -531,41 +531,49 @@ ra-cli validate "YOUR_QUERY"
 ra-cli check-rules --query "YOUR_QUERY"
 ```
 
+## Recent Performance Features
+
+### Plan Cache
+
+Ra caches optimized plans by query template, delivering 37x speedup
+for OLTP workloads with repeated query patterns:
+
+- Cold start: ~325 us per query (full optimization)
+- Cached lookup: ~0.46 us per query (706x faster)
+- Hit rate: 97.5% with 5 query templates
+
+### Rule Complexity Prioritization
+
+Rules are sorted by cost-to-benefit ratio before each e-graph
+saturation iteration (RFC 0058). High-benefit, low-complexity rules
+run first, yielding 20-27% faster optimization on complex queries
+without sacrificing plan quality.
+
+### Streaming Statistics
+
+Lock-free ring buffer pipeline for computing running statistics
+(mean, variance, percentiles) over query execution metrics. Includes
+monitoring adapters for exporting to external observability systems:
+
+- **OpenTelemetry** -- OTLP-compatible metric export
+- **Prometheus** -- Exposition format for scraping
+- **StatsD** -- UDP protocol for DogStatsD and compatible collectors
+
+### PostgreSQL Extension
+
+Native PostgreSQL integration via `ra_pg_extension` that transparently
+optimizes queries at plan time. See the
+[PostgreSQL Extension guide](postgresql-extension.md) for installation
+and configuration.
+
 ## Next Steps
 
-- **[Architecture](architecture.md)** - Understand system internals
-- **[Rule Authoring Guide](guides/rule-authoring.md)** - Write custom transformation rules
-- **[Cost Models](guides/cost-models.md)** - Customize cost estimation
-- **[Dialect Translation](guides/dialect-translation.md)** - Cross-database SQL translation
-- **[Testing Guide](guides/testing.md)** - Test your optimizations
-- **[API Reference](api-reference.md)** - Programmatic usage
-- **[Examples](examples/)** - Complete worked examples
-
-## Performance Tips
-
-1. **Pre-compile rules** for production:
-   ```bash
-   ra-cli compile-rules --output rules.bin
-   ```
-
-2. **Cache optimization results** for repeated queries:
-   ```bash
-   ra-cli optimize --cache redis://localhost "QUERY"
-   ```
-
-3. **Profile rule performance** to identify bottlenecks:
-   ```bash
-   ra-cli profile-rules "QUERY"
-   ```
-
-4. **Use incremental statistics** for large tables:
-   ```bash
-   ra-cli stats update --incremental --table orders
-   ```
-
-5. **Batch optimize** multiple queries:
-   ```bash
-   ra-cli batch-optimize queries.sql --output optimized/
-   ```
-
-Ready to optimize your queries? Start with basic optimization and explore the advanced features as needed. The RA optimizer adapts to your workload, hardware, and performance requirements.
+- **[Architecture](architecture.md)** -- System internals
+- **[Benchmarks](benchmarks.md)** -- JOB and TPC-H performance data
+- **[PostgreSQL Extension](postgresql-extension.md)** -- Native PostgreSQL integration
+- **[Rule Authoring Guide](guides/rule-authoring.md)** -- Write custom transformation rules
+- **[Cost Models](guides/cost-models.md)** -- Customize cost estimation
+- **[Dialect Translation](guides/dialect-translation.md)** -- Cross-database SQL translation
+- **[Testing Guide](guides/testing.md)** -- Test your optimizations
+- **[API Reference](api-reference.md)** -- Programmatic usage
+- **[Examples](examples/)** -- Complete worked examples
