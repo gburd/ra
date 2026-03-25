@@ -28,6 +28,10 @@
             # Shell (use bash 5+ to avoid syntax errors)
             bash
 
+            # Development tools
+            nix-direnv
+            direnv
+
             # Rust toolchain
             rustToolchain
             cargo-watch
