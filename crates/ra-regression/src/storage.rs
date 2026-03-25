@@ -61,12 +61,21 @@ impl SqliteStorage {
                 plan_hash TEXT NOT NULL,
                 cost REAL NOT NULL,
                 timestamp TEXT NOT NULL,
-                metadata TEXT,
-                INDEX idx_query_id (query_id),
-                INDEX idx_timestamp (timestamp)
+                metadata TEXT
             )",
             [],
         )?;
+
+        // Create indexes separately (SQLite doesn't support inline INDEX in CREATE TABLE)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_query_id ON query_history (query_id)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_timestamp ON query_history (timestamp)",
+            [],
+        )?;
+
         Ok(())
     }
 
