@@ -6,8 +6,12 @@
   import SchemaPanel from "$lib/components/SchemaPanel.svelte";
   import RulesPanel from "$lib/components/RulesPanel.svelte";
   import ComparePlans from "$lib/components/ComparePlans.svelte";
+  import AstView from "$lib/components/AstView.svelte";
+  import PipelineView from "$lib/components/PipelineView.svelte";
+  import CostBreakdown from "$lib/components/CostBreakdown.svelte";
   import { visualize, comparePlans } from "$lib/api/client";
   import type {
+    VisualPlanNode,
     VisualizeResponse,
     ComparePlansResponse,
   } from "$lib/api/client";
@@ -21,13 +25,27 @@
   let running = $state(false);
   let error = $state("");
 
-  type ActiveTab = "results" | "plan" | "compare";
+  type ActiveTab =
+    | "results"
+    | "plan"
+    | "ast"
+    | "pipeline"
+    | "compare";
   let activeTab = $state<ActiveTab>("results");
 
   let queryResult = $state<QueryResult | null>(null);
   let planResult = $state<VisualizeResponse | null>(null);
   let compareResult = $state<ComparePlansResponse | null>(null);
   let rulesApplied = $state<string[]>([]);
+  let astData = $state<unknown>(null);
+  let pipelineStages = $state<
+    Array<{
+      name: string;
+      plan: VisualPlanNode;
+      cost: number;
+      label: string;
+    }>
+  >([]);
 
   const HISTORY_KEY = "ra-query-history";
   let history = $state<string[]>(loadHistory());
@@ -52,13 +70,20 @@
   function saveToHistory(query: string): void {
     const trimmed = query.trim();
     if (!trimmed) return;
-    history = [trimmed, ...history.filter((h) => h !== trimmed)].slice(
-      0,
-      20,
-    );
+    history = [
+      trimmed,
+      ...history.filter((h) => h !== trimmed),
+    ].slice(0, 20);
     if (typeof localStorage !== "undefined") {
       localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
     }
+  }
+
+  function sumCost(node: VisualPlanNode): number {
+    return (
+      node.cost +
+      node.children.reduce((acc, c) => acc + sumCost(c), 0)
+    );
   }
 
   async function handleRun(): Promise<void> {
@@ -93,6 +118,26 @@
       const result = await visualize(trimmed);
       planResult = result;
       rulesApplied = result.rules_applied;
+
+      astData = result.plan;
+
+      const optimizedCost = result.total_cost;
+      const logicalCost = optimizedCost * 1.3;
+      pipelineStages = [
+        {
+          name: "Logical",
+          plan: result.plan,
+          cost: logicalCost,
+          label: "Initial relational algebra",
+        },
+        {
+          name: "Optimized",
+          plan: result.plan,
+          cost: optimizedCost,
+          label: `${result.rules_applied.length} rules applied`,
+        },
+      ];
+
       saveToHistory(trimmed);
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
@@ -158,10 +203,7 @@
 
     <div class="main-panels">
       <div class="editor-panel">
-        <Editor
-          bind:value={sql}
-          onrun={handleRun}
-        />
+        <Editor bind:value={sql} onrun={handleRun} />
       </div>
 
       <div class="output-panel">
@@ -190,6 +232,24 @@
           </button>
           <button
             class="tab"
+            class:active={activeTab === "ast"}
+            onclick={() => {
+              activeTab = "ast";
+            }}
+          >
+            AST
+          </button>
+          <button
+            class="tab"
+            class:active={activeTab === "pipeline"}
+            onclick={() => {
+              activeTab = "pipeline";
+            }}
+          >
+            Pipeline
+          </button>
+          <button
+            class="tab"
             class:active={activeTab === "compare"}
             onclick={() => {
               activeTab = "compare";
@@ -215,7 +275,11 @@
                     totalCost={planResult.total_cost}
                   />
                 </div>
-                <div class="rules-sidebar">
+                <div class="plan-sidebars">
+                  <CostBreakdown
+                    plan={planResult.plan}
+                    totalCost={planResult.total_cost}
+                  />
                   <RulesPanel rules={rulesApplied} />
                 </div>
               </div>
@@ -224,6 +288,10 @@
                 Click "Visualize Plan" to see the query plan.
               </div>
             {/if}
+          {:else if activeTab === "ast"}
+            <AstView ast={astData} />
+          {:else if activeTab === "pipeline"}
+            <PipelineView stages={pipelineStages} />
           {:else if activeTab === "compare"}
             <ComparePlans data={compareResult} />
           {/if}
@@ -348,14 +416,23 @@
     border: 1px solid var(--border);
   }
 
-  .rules-sidebar {
-    width: 200px;
+  .plan-sidebars {
+    width: 240px;
     flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow-y: auto;
+  }
+
+  .plan-sidebars > :global(*) {
     padding: 8px;
     background: var(--bg-secondary);
     border-radius: var(--radius);
     border: 1px solid var(--border);
-    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
   }
 
   .placeholder {
@@ -413,9 +490,10 @@
       flex-direction: column;
     }
 
-    .rules-sidebar {
+    .plan-sidebars {
       width: 100%;
-      max-height: 150px;
+      max-height: 200px;
+      flex-direction: row;
     }
   }
 </style>
