@@ -88,6 +88,7 @@
 #![cfg_attr(test, allow(clippy::float_cmp))]
 
 pub mod accuracy;
+pub mod adaptive;
 pub mod adapters;
 pub mod delta;
 pub mod feedback;
@@ -104,6 +105,7 @@ pub mod timeline;
 pub mod types;
 
 pub use accuracy::{QualityMetrics, RefreshThreshold, Staleness, StatisticsSource, StatisticsState};
+pub use adaptive::{AdaptiveConfig, AdaptiveCostDriver, ResourceSnapshot, UpdateTrigger};
 pub use adapters::MonitoringAdapter;
 pub use delta::{DeltaSet, StatisticsDelta};
 pub use feedback::{
