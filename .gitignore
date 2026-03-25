@@ -71,3 +71,5 @@ PRECONDITION_SYSTEM_STATUS.md
 cargo-flamegraph.trace/
 *.profraw
 *.profdata
+docs/.vitepress/dist
+docs/.vitepress/cache
