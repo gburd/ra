@@ -57,9 +57,7 @@ pub struct IndexRecommendation {
 }
 
 /// Priority level for index recommendations.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Priority {
     /// Score > 10000: Very high benefit relative to cost.
     High,
@@ -71,9 +69,8 @@ pub enum Priority {
 
 impl IndexAdvisor {
     /// Create a new index advisor with the given table statistics.
-    pub fn new(
-        table_stats: HashMap<String, Statistics>,
-    ) -> Self {
+    #[must_use]
+    pub fn new(table_stats: HashMap<String, Statistics>) -> Self {
         Self { table_stats }
     }
 
@@ -84,9 +81,7 @@ impl IndexAdvisor {
     /// For each table, checks every column's correlation with
     /// physical row order. When |correlation| > 0.9 and the table
     /// is large enough, recommends BRIN instead of B-tree.
-    pub fn recommend_brin_indexes(
-        &self,
-    ) -> Vec<IndexRecommendation> {
+    pub fn recommend_brin_indexes(&self) -> Vec<IndexRecommendation> {
         let mut recommendations = Vec::new();
 
         for (table, stats) in &self.table_stats {
@@ -94,7 +89,10 @@ impl IndexAdvisor {
 
             for (col_name, col_stats) in &stats.columns {
                 if let Some(rec) = self.evaluate_brin_candidate(
-                    table, col_name, col_stats, table_size,
+                    table,
+                    col_name,
+                    col_stats,
+                    table_size,
                     stats.row_count,
                 ) {
                     recommendations.push(rec);
@@ -108,10 +106,7 @@ impl IndexAdvisor {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
-        info!(
-            "Generated {} BRIN recommendations",
-            recommendations.len()
-        );
+        info!("Generated {} BRIN recommendations", recommendations.len());
         recommendations
     }
 
@@ -147,15 +142,11 @@ impl IndexAdvisor {
 
         // Check if a BRIN index already exists on this column
         if self.has_brin_index(table, column) {
-            debug!(
-                "{table}.{column}: BRIN index already exists"
-            );
+            debug!("{table}.{column}: BRIN index already exists");
             return None;
         }
 
-        let candidate = IndexCandidate::brin(
-            table, column, correlation,
-        );
+        let candidate = IndexCandidate::brin(table, column, correlation);
 
         // Estimate benefit: BRIN saves storage and scan cost
         let table_pages = table_size / 8192; // 8 KB pages
@@ -166,13 +157,11 @@ impl IndexAdvisor {
             0.1, // Assume 10% average selectivity
         );
 
-        let storage_savings =
-            cost::brin_storage_savings(table_size);
+        let storage_savings = cost::brin_storage_savings(table_size);
 
         // Benefit from scan cost reduction + storage savings
-        let total_cost_saved =
-            row_count * effectiveness * 0.01 // scan savings
-            + storage_savings * 10.0;        // storage savings
+        let total_cost_saved = row_count * effectiveness * 0.01 // scan savings
+            + storage_savings * 10.0; // storage savings
 
         let benefit = IndexBenefit::new(
             vec![format!("{table}_range_scans")],
@@ -180,12 +169,7 @@ impl IndexAdvisor {
             total_cost_saved,
         );
 
-        let cost = IndexCost::estimate(
-            IndexType::BRIN,
-            table_size,
-            row_count,
-            1,
-        );
+        let cost = IndexCost::estimate(IndexType::BRIN, table_size, row_count, 1);
 
         let score = if cost.total() > 0.0 {
             benefit.total_cost_saved / cost.total()
@@ -217,11 +201,7 @@ impl IndexAdvisor {
     }
 
     /// Check if a BRIN index already exists on a table column.
-    fn has_brin_index(
-        &self,
-        table: &str,
-        column: &str,
-    ) -> bool {
+    fn has_brin_index(&self, table: &str, column: &str) -> bool {
         let Some(stats) = self.table_stats.get(table) else {
             return false;
         };
@@ -235,12 +215,10 @@ impl IndexAdvisor {
     /// Analyze a query plan and generate index candidates for
     /// columns used in predicates. Applies BRIN recommendations
     /// when column correlation is high.
-    pub fn analyze_plan(
-        &self,
-        plan: &RelExpr,
-    ) -> Vec<IndexRecommendation> {
+    #[must_use]
+    pub fn analyze_plan(&self, plan: &RelExpr) -> Vec<IndexRecommendation> {
         let mut columns = Vec::new();
-        self.collect_filter_columns(plan, &mut columns);
+        collect_filter_columns(plan, &mut columns);
 
         let mut recommendations = Vec::new();
         let mut seen = std::collections::HashSet::new();
@@ -254,46 +232,31 @@ impl IndexAdvisor {
                 continue;
             }
 
-            let Some(stats) = self.table_stats.get(table.as_str())
-            else {
+            let Some(stats) = self.table_stats.get(table.as_str()) else {
                 continue;
             };
 
             let table_size = stats.total_size;
             let row_count = stats.row_count;
 
-            if let Some(col_stats) =
-                stats.columns.get(&col_ref.column)
-            {
+            if let Some(col_stats) = stats.columns.get(&col_ref.column) {
                 // Try BRIN first for correlated columns
-                if let Some(brin_rec) =
-                    self.evaluate_brin_candidate(
-                        table,
-                        &col_ref.column,
-                        col_stats,
-                        table_size,
-                        row_count,
-                    )
-                {
+                if let Some(brin_rec) = self.evaluate_brin_candidate(
+                    table,
+                    &col_ref.column,
+                    col_stats,
+                    table_size,
+                    row_count,
+                ) {
                     recommendations.push(brin_rec);
                     continue;
                 }
             }
 
             // Fall back to B-tree recommendation
-            let candidate =
-                IndexCandidate::btree(table.clone(), col_ref.column.clone());
-            let cost = IndexCost::estimate(
-                IndexType::BTree,
-                stats.total_size,
-                row_count,
-                1,
-            );
-            let benefit = IndexBenefit::new(
-                vec!["filter_scan".to_string()],
-                2.0,
-                row_count * 0.1,
-            );
+            let candidate = IndexCandidate::btree(table.clone(), col_ref.column.clone());
+            let cost = IndexCost::estimate(IndexType::BTree, stats.total_size, row_count, 1);
+            let benefit = IndexBenefit::new(vec!["filter_scan".to_string()], 2.0, row_count * 0.1);
 
             let score = if cost.total() > 0.0 {
                 benefit.total_cost_saved / cost.total()
@@ -325,79 +288,13 @@ impl IndexAdvisor {
         recommendations
     }
 
-    /// Collect column references used in filter predicates.
-    fn collect_filter_columns(
-        &self,
-        plan: &RelExpr,
-        columns: &mut Vec<ColumnRef>,
-    ) {
-        match plan {
-            RelExpr::Filter { predicate, input } => {
-                self.collect_columns_from_expr(
-                    predicate, columns,
-                );
-                self.collect_filter_columns(input, columns);
-            }
-            RelExpr::Join {
-                condition,
-                left,
-                right,
-                ..
-            } => {
-                self.collect_columns_from_expr(
-                    condition, columns,
-                );
-                self.collect_filter_columns(left, columns);
-                self.collect_filter_columns(right, columns);
-            }
-            other => {
-                for child in other.children() {
-                    self.collect_filter_columns(child, columns);
-                }
-            }
-        }
-    }
-
-    /// Extract column references from a scalar expression.
-    fn collect_columns_from_expr(
-        &self,
-        expr: &Expr,
-        columns: &mut Vec<ColumnRef>,
-    ) {
-        match expr {
-            Expr::Column(col_ref) => {
-                columns.push(col_ref.clone());
-            }
-            Expr::BinOp { left, right, .. } => {
-                self.collect_columns_from_expr(left, columns);
-                self.collect_columns_from_expr(right, columns);
-            }
-            Expr::UnaryOp { operand, .. } => {
-                self.collect_columns_from_expr(
-                    operand, columns,
-                );
-            }
-            Expr::Function { args, .. } => {
-                for arg in args {
-                    self.collect_columns_from_expr(arg, columns);
-                }
-            }
-            _ => {}
-        }
-    }
-
     /// Check if a column has range predicates in the given
     /// expression, which makes it a better BRIN candidate.
+    #[must_use]
     pub fn has_range_predicate(expr: &Expr, column: &str) -> bool {
         match expr {
             Expr::BinOp { op, left, right } => {
-                let is_range_op = matches!(
-                    op,
-                    BinOp::Lt
-                        | BinOp::Le
-                        | BinOp::Gt
-                        | BinOp::Ge
-                );
+                let is_range_op = matches!(op, BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge);
 
                 if is_range_op {
                     let left_matches = matches!(
@@ -414,22 +311,65 @@ impl IndexAdvisor {
                 }
 
                 // Recurse through AND/OR
-                Self::has_range_predicate(left, column)
-                    || Self::has_range_predicate(right, column)
+                Self::has_range_predicate(left, column) || Self::has_range_predicate(right, column)
             }
             _ => false,
         }
     }
 }
 
+/// Collect column references used in filter predicates.
+fn collect_filter_columns(plan: &RelExpr, columns: &mut Vec<ColumnRef>) {
+    match plan {
+        RelExpr::Filter { predicate, input } => {
+            collect_columns_from_expr(predicate, columns);
+            collect_filter_columns(input, columns);
+        }
+        RelExpr::Join {
+            condition,
+            left,
+            right,
+            ..
+        } => {
+            collect_columns_from_expr(condition, columns);
+            collect_filter_columns(left, columns);
+            collect_filter_columns(right, columns);
+        }
+        other => {
+            for child in other.children() {
+                collect_filter_columns(child, columns);
+            }
+        }
+    }
+}
+
+/// Extract column references from a scalar expression.
+fn collect_columns_from_expr(expr: &Expr, columns: &mut Vec<ColumnRef>) {
+    match expr {
+        Expr::Column(col_ref) => {
+            columns.push(col_ref.clone());
+        }
+        Expr::BinOp { left, right, .. } => {
+            collect_columns_from_expr(left, columns);
+            collect_columns_from_expr(right, columns);
+        }
+        Expr::UnaryOp { operand, .. } => {
+            collect_columns_from_expr(operand, columns);
+        }
+        Expr::Function { args, .. } => {
+            for arg in args {
+                collect_columns_from_expr(arg, columns);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Determine whether BRIN is preferable to B-tree for a given column
 /// based on correlation, table size, and access pattern.
-pub fn should_recommend_brin(
-    correlation: f64,
-    table_size_bytes: u64,
-) -> bool {
-    correlation.abs() > BRIN_CORRELATION_THRESHOLD
-        && table_size_bytes >= BRIN_MIN_TABLE_SIZE
+#[must_use]
+pub fn should_recommend_brin(correlation: f64, table_size_bytes: u64) -> bool {
+    correlation.abs() > BRIN_CORRELATION_THRESHOLD && table_size_bytes >= BRIN_MIN_TABLE_SIZE
 }
 
 #[cfg(test)]
@@ -476,10 +416,7 @@ mod tests {
         // correlation)
         assert_eq!(recs.len(), 1);
         assert_eq!(recs[0].candidate.columns, vec!["created_at"]);
-        assert_eq!(
-            recs[0].candidate.index_type,
-            IndexType::BRIN
-        );
+        assert_eq!(recs[0].candidate.index_type, IndexType::BRIN);
         assert!(recs[0].candidate.reason.is_some());
     }
 
@@ -491,10 +428,7 @@ mod tests {
             make_stats(
                 1_000_000.0,
                 500_000_000,
-                vec![
-                    ("email", Some(0.1)),
-                    ("name", Some(0.3)),
-                ],
+                vec![("email", Some(0.1)), ("name", Some(0.3))],
             ),
         );
 
@@ -525,11 +459,7 @@ mod tests {
         let mut table_stats = HashMap::new();
         table_stats.insert(
             "logs".to_string(),
-            make_stats(
-                5_000_000.0,
-                500_000_000,
-                vec![("reverse_ts", Some(-0.95))],
-            ),
+            make_stats(5_000_000.0, 500_000_000, vec![("reverse_ts", Some(-0.95))]),
         );
 
         let advisor = IndexAdvisor::new(table_stats);
@@ -537,10 +467,7 @@ mod tests {
 
         // Negative correlation is equally useful
         assert_eq!(recs.len(), 1);
-        assert_eq!(
-            recs[0].candidate.index_type,
-            IndexType::BRIN
-        );
+        assert_eq!(recs[0].candidate.index_type, IndexType::BRIN);
     }
 
     #[test]
@@ -548,11 +475,7 @@ mod tests {
         let mut table_stats = HashMap::new();
         table_stats.insert(
             "data".to_string(),
-            make_stats(
-                10_000_000.0,
-                1_000_000_000,
-                vec![("payload", None)],
-            ),
+            make_stats(10_000_000.0, 1_000_000_000, vec![("payload", None)]),
         );
 
         let advisor = IndexAdvisor::new(table_stats);
@@ -565,11 +488,7 @@ mod tests {
         let mut table_stats = HashMap::new();
         table_stats.insert(
             "events".to_string(),
-            make_stats(
-                10_000_000.0,
-                1_000_000_000,
-                vec![("ts", Some(0.99))],
-            ),
+            make_stats(10_000_000.0, 1_000_000_000, vec![("ts", Some(0.99))]),
         );
         table_stats.insert(
             "metrics".to_string(),
@@ -594,10 +513,7 @@ mod tests {
         // events.ts and metrics.recorded_at, not users.id (too
         // small)
         assert_eq!(recs.len(), 2);
-        let tables: Vec<&str> = recs
-            .iter()
-            .map(|r| r.candidate.table.as_str())
-            .collect();
+        let tables: Vec<&str> = recs.iter().map(|r| r.candidate.table.as_str()).collect();
         assert!(tables.contains(&"events"));
         assert!(tables.contains(&"metrics"));
     }
@@ -656,10 +572,7 @@ mod tests {
             make_stats(
                 10_000_000.0,
                 1_000_000_000,
-                vec![
-                    ("created_at", Some(0.98)),
-                    ("user_id", Some(0.05)),
-                ],
+                vec![("created_at", Some(0.98)), ("user_id", Some(0.05))],
             ),
         );
 
@@ -669,12 +582,8 @@ mod tests {
         let plan = RelExpr::Filter {
             predicate: Expr::BinOp {
                 op: BinOp::Gt,
-                left: Box::new(Expr::Column(
-                    ColumnRef::qualified("events", "created_at"),
-                )),
-                right: Box::new(Expr::Const(
-                    Const::String("2024-01-01".to_string()),
-                )),
+                left: Box::new(Expr::Column(ColumnRef::qualified("events", "created_at"))),
+                right: Box::new(Expr::Const(Const::String("2024-01-01".to_string()))),
             },
             input: Box::new(RelExpr::Scan {
                 table: "events".to_string(),
@@ -688,15 +597,10 @@ mod tests {
         assert!(!recs.is_empty());
         let brin_recs: Vec<_> = recs
             .iter()
-            .filter(|r| {
-                r.candidate.index_type == IndexType::BRIN
-            })
+            .filter(|r| r.candidate.index_type == IndexType::BRIN)
             .collect();
         assert_eq!(brin_recs.len(), 1);
-        assert_eq!(
-            brin_recs[0].candidate.columns,
-            vec!["created_at"]
-        );
+        assert_eq!(brin_recs[0].candidate.columns, vec!["created_at"]);
     }
 
     #[test]
@@ -704,11 +608,7 @@ mod tests {
         let mut table_stats = HashMap::new();
         table_stats.insert(
             "users".to_string(),
-            make_stats(
-                1_000_000.0,
-                500_000_000,
-                vec![("email", Some(0.05))],
-            ),
+            make_stats(1_000_000.0, 500_000_000, vec![("email", Some(0.05))]),
         );
 
         let advisor = IndexAdvisor::new(table_stats);
@@ -717,12 +617,8 @@ mod tests {
         let plan = RelExpr::Filter {
             predicate: Expr::BinOp {
                 op: BinOp::Eq,
-                left: Box::new(Expr::Column(
-                    ColumnRef::qualified("users", "email"),
-                )),
-                right: Box::new(Expr::Const(Const::String(
-                    "test@example.com".to_string(),
-                ))),
+                left: Box::new(Expr::Column(ColumnRef::qualified("users", "email"))),
+                right: Box::new(Expr::Const(Const::String("test@example.com".to_string()))),
             },
             input: Box::new(RelExpr::Scan {
                 table: "users".to_string(),
@@ -734,10 +630,7 @@ mod tests {
 
         // Should fall back to B-tree for uncorrelated column
         assert!(!recs.is_empty());
-        assert_eq!(
-            recs[0].candidate.index_type,
-            IndexType::BTree
-        );
+        assert_eq!(recs[0].candidate.index_type, IndexType::BTree);
     }
 
     #[test]
@@ -748,9 +641,7 @@ mod tests {
             right: Box::new(Expr::Const(Const::Int(100))),
         };
         assert!(IndexAdvisor::has_range_predicate(&expr, "ts"));
-        assert!(!IndexAdvisor::has_range_predicate(
-            &expr, "other"
-        ));
+        assert!(!IndexAdvisor::has_range_predicate(&expr, "other"));
     }
 
     #[test]
@@ -759,16 +650,12 @@ mod tests {
             op: BinOp::And,
             left: Box::new(Expr::BinOp {
                 op: BinOp::Ge,
-                left: Box::new(Expr::Column(
-                    ColumnRef::new("ts"),
-                )),
+                left: Box::new(Expr::Column(ColumnRef::new("ts"))),
                 right: Box::new(Expr::Const(Const::Int(100))),
             }),
             right: Box::new(Expr::BinOp {
                 op: BinOp::Le,
-                left: Box::new(Expr::Column(
-                    ColumnRef::new("ts"),
-                )),
+                left: Box::new(Expr::Column(ColumnRef::new("ts"))),
                 right: Box::new(Expr::Const(Const::Int(200))),
             }),
         };
@@ -789,10 +676,7 @@ mod tests {
     fn should_recommend_brin_threshold() {
         // At the boundary
         assert!(!should_recommend_brin(0.9, BRIN_MIN_TABLE_SIZE));
-        assert!(should_recommend_brin(
-            0.91,
-            BRIN_MIN_TABLE_SIZE
-        ));
+        assert!(should_recommend_brin(0.91, BRIN_MIN_TABLE_SIZE));
         // Below min size
         assert!(!should_recommend_brin(0.99, 1024));
         // Both conditions met
@@ -803,11 +687,7 @@ mod tests {
 
     #[test]
     fn skip_existing_brin_index() {
-        let mut stats = make_stats(
-            10_000_000.0,
-            1_000_000_000,
-            vec![("ts", Some(0.99))],
-        );
+        let mut stats = make_stats(10_000_000.0, 1_000_000_000, vec![("ts", Some(0.99))]);
 
         // Add an existing BRIN index
         stats.indexes.insert(
@@ -831,11 +711,7 @@ mod tests {
         let mut table_stats = HashMap::new();
         table_stats.insert(
             "timeseries".to_string(),
-            make_stats(
-                10_000_000.0,
-                1_000_000_000,
-                vec![("ts", Some(0.99))],
-            ),
+            make_stats(10_000_000.0, 1_000_000_000, vec![("ts", Some(0.99))]),
         );
 
         let advisor = IndexAdvisor::new(table_stats);

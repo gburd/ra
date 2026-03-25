@@ -49,11 +49,7 @@ const HASH_WRITE_OVERHEAD: f64 = 0.03;
 impl IndexBenefit {
     /// Create a new benefit estimation.
     #[must_use]
-    pub fn new(
-        affected_queries: Vec<String>,
-        avg_speedup: f64,
-        total_cost_saved: f64,
-    ) -> Self {
+    pub fn new(affected_queries: Vec<String>, avg_speedup: f64, total_cost_saved: f64) -> Self {
         Self {
             affected_queries,
             avg_speedup,
@@ -64,8 +60,7 @@ impl IndexBenefit {
     /// Check if this index provides any benefit.
     #[must_use]
     pub fn has_benefit(&self) -> bool {
-        !self.affected_queries.is_empty()
-            && self.total_cost_saved > 0.0
+        !self.affected_queries.is_empty() && self.total_cost_saved > 0.0
     }
 
     /// Format benefit as human-readable string.
@@ -84,11 +79,7 @@ impl IndexBenefit {
 impl IndexCost {
     /// Create a new cost estimation.
     #[must_use]
-    pub fn new(
-        storage_bytes: u64,
-        write_overhead: f64,
-        build_time_secs: f64,
-    ) -> Self {
+    pub fn new(storage_bytes: u64, write_overhead: f64, build_time_secs: f64) -> Self {
         Self {
             storage_bytes,
             write_overhead,
@@ -120,9 +111,7 @@ impl IndexCost {
             IndexType::Hash => HASH_WRITE_OVERHEAD,
         };
 
-        let storage_bytes =
-            (table_size_bytes as f64 * size_ratio * num_columns as f64)
-                as u64;
+        let storage_bytes = (table_size_bytes as f64 * size_ratio * num_columns as f64) as u64;
 
         // Build time: proportional to row count and index complexity
         let build_cost_factor = match index_type {
@@ -132,8 +121,7 @@ impl IndexCost {
             IndexType::GiST => 4.0,
             IndexType::Hash => 2.0,
         };
-        let build_time_secs =
-            row_count / 100_000.0 * build_cost_factor;
+        let build_time_secs = row_count / 100_000.0 * build_cost_factor;
 
         Self {
             storage_bytes,
@@ -145,8 +133,7 @@ impl IndexCost {
     /// Get total cost as a single normalized value.
     #[must_use]
     pub fn total(&self) -> f64 {
-        let storage_cost =
-            self.storage_bytes as f64 / (1024.0 * 1024.0);
+        let storage_cost = self.storage_bytes as f64 / (1024.0 * 1024.0);
         let write_cost = self.write_overhead * 1000.0;
         let build_cost = self.build_time_secs * 10.0;
         storage_cost + write_cost + build_cost
@@ -158,20 +145,13 @@ impl IndexCost {
         if self.storage_bytes < 1024 {
             format!("{} B", self.storage_bytes)
         } else if self.storage_bytes < 1024 * 1024 {
-            format!(
-                "{:.1} KB",
-                self.storage_bytes as f64 / 1024.0
-            )
+            format!("{:.1} KB", self.storage_bytes as f64 / 1024.0)
         } else if self.storage_bytes < 1024 * 1024 * 1024 {
-            format!(
-                "{:.1} MB",
-                self.storage_bytes as f64 / (1024.0 * 1024.0)
-            )
+            format!("{:.1} MB", self.storage_bytes as f64 / (1024.0 * 1024.0))
         } else {
             format!(
                 "{:.1} GB",
-                self.storage_bytes as f64
-                    / (1024.0 * 1024.0 * 1024.0)
+                self.storage_bytes as f64 / (1024.0 * 1024.0 * 1024.0)
             )
         }
     }
@@ -222,7 +202,7 @@ pub fn estimate_brin_effectiveness(
         return 0.0;
     }
 
-    let n_ranges = table_pages / pages_per_range as u64;
+    let n_ranges = table_pages / u64::from(pages_per_range);
     if n_ranges == 0 {
         return 0.0;
     }
@@ -230,13 +210,10 @@ pub fn estimate_brin_effectiveness(
     // With perfect correlation, selectivity directly maps to ranges
     // scanned. With no correlation, all ranges must be scanned.
     let abs_corr = correlation.abs();
-    let range_selectivity =
-        selectivity * abs_corr + (1.0 - abs_corr);
+    let range_selectivity = selectivity * abs_corr + (1.0 - abs_corr);
 
-    let scanned_ranges =
-        (n_ranges as f64 * range_selectivity).ceil() as u64;
-    let scanned_pages =
-        scanned_ranges.min(table_pages) * pages_per_range as u64;
+    let scanned_ranges = (n_ranges as f64 * range_selectivity).ceil() as u64;
+    let scanned_pages = scanned_ranges.min(table_pages) * u64::from(pages_per_range);
 
     // Effectiveness = fraction of table NOT scanned
     1.0 - (scanned_pages as f64 / table_pages as f64).min(1.0)
@@ -257,17 +234,12 @@ pub fn brin_storage_savings(table_size_bytes: u64) -> f64 {
 }
 
 #[cfg(test)]
-#[allow(clippy::float_cmp)]
 mod tests {
     use super::*;
 
     #[test]
     fn benefit_calculation() {
-        let benefit = IndexBenefit::new(
-            vec!["q1".into(), "q2".into()],
-            5.0,
-            1000.0,
-        );
+        let benefit = IndexBenefit::new(vec!["q1".into(), "q2".into()], 5.0, 1000.0);
         assert!(benefit.has_benefit());
         assert_eq!(benefit.affected_queries.len(), 2);
         assert!((benefit.avg_speedup - 5.0).abs() < f64::EPSILON);
@@ -281,11 +253,7 @@ mod tests {
 
     #[test]
     fn cost_calculation() {
-        let cost = IndexCost::new(
-            10 * 1024 * 1024,
-            0.05,
-            2.5,
-        );
+        let cost = IndexCost::new(10 * 1024 * 1024, 0.05, 2.5);
         assert_eq!(cost.format_storage(), "10.0 MB");
         assert_eq!(cost.format_write_overhead(), "5.0%");
         assert_eq!(cost.format_build_time(), "2.5 s");
@@ -295,44 +263,24 @@ mod tests {
 
     #[test]
     fn format_sizes() {
+        assert_eq!(IndexCost::new(500, 0.0, 0.0).format_storage(), "500 B");
+        assert_eq!(IndexCost::new(2048, 0.0, 0.0).format_storage(), "2.0 KB");
         assert_eq!(
-            IndexCost::new(500, 0.0, 0.0).format_storage(),
-            "500 B"
-        );
-        assert_eq!(
-            IndexCost::new(2048, 0.0, 0.0).format_storage(),
-            "2.0 KB"
-        );
-        assert_eq!(
-            IndexCost::new(5 * 1024 * 1024, 0.0, 0.0)
-                .format_storage(),
+            IndexCost::new(5 * 1024 * 1024, 0.0, 0.0).format_storage(),
             "5.0 MB"
         );
         assert_eq!(
-            IndexCost::new(2 * 1024 * 1024 * 1024, 0.0, 0.0)
-                .format_storage(),
+            IndexCost::new(2 * 1024 * 1024 * 1024, 0.0, 0.0).format_storage(),
             "2.0 GB"
         );
     }
 
     #[test]
     fn format_times() {
-        assert_eq!(
-            IndexCost::new(0, 0.0, 0.5).format_build_time(),
-            "500 ms"
-        );
-        assert_eq!(
-            IndexCost::new(0, 0.0, 30.0).format_build_time(),
-            "30.0 s"
-        );
-        assert_eq!(
-            IndexCost::new(0, 0.0, 120.0).format_build_time(),
-            "2.0 min"
-        );
-        assert_eq!(
-            IndexCost::new(0, 0.0, 7200.0).format_build_time(),
-            "2.0 h"
-        );
+        assert_eq!(IndexCost::new(0, 0.0, 0.5).format_build_time(), "500 ms");
+        assert_eq!(IndexCost::new(0, 0.0, 30.0).format_build_time(), "30.0 s");
+        assert_eq!(IndexCost::new(0, 0.0, 120.0).format_build_time(), "2.0 min");
+        assert_eq!(IndexCost::new(0, 0.0, 7200.0).format_build_time(), "2.0 h");
     }
 
     #[test]
@@ -340,30 +288,20 @@ mod tests {
         let table_size = 1_000_000_000; // 1 GB table
         let row_count = 10_000_000.0;
 
-        let btree_cost = IndexCost::estimate(
-            IndexType::BTree, table_size, row_count, 1,
-        );
-        let brin_cost = IndexCost::estimate(
-            IndexType::BRIN, table_size, row_count, 1,
-        );
+        let btree_cost = IndexCost::estimate(IndexType::BTree, table_size, row_count, 1);
+        let brin_cost = IndexCost::estimate(IndexType::BRIN, table_size, row_count, 1);
 
         // BRIN storage should be ~300x smaller
-        assert!(
-            btree_cost.storage_bytes > brin_cost.storage_bytes * 100
-        );
+        assert!(btree_cost.storage_bytes > brin_cost.storage_bytes * 100);
         // BRIN write overhead should be much lower
         assert!(btree_cost.write_overhead > brin_cost.write_overhead);
         // BRIN build time should be faster
-        assert!(
-            btree_cost.build_time_secs > brin_cost.build_time_secs
-        );
+        assert!(btree_cost.build_time_secs > brin_cost.build_time_secs);
     }
 
     #[test]
     fn brin_effectiveness_perfect_correlation() {
-        let eff = estimate_brin_effectiveness(
-            1.0, 10_000, 128, 0.01,
-        );
+        let eff = estimate_brin_effectiveness(1.0, 10_000, 128, 0.01);
         // With perfect correlation and 1% selectivity, should skip
         // ~99% of ranges
         assert!(eff > 0.95);
@@ -371,27 +309,21 @@ mod tests {
 
     #[test]
     fn brin_effectiveness_no_correlation() {
-        let eff = estimate_brin_effectiveness(
-            0.0, 10_000, 128, 0.01,
-        );
+        let eff = estimate_brin_effectiveness(0.0, 10_000, 128, 0.01);
         // With no correlation, BRIN provides no benefit
         assert!(eff < 0.01);
     }
 
     #[test]
     fn brin_effectiveness_high_correlation() {
-        let eff = estimate_brin_effectiveness(
-            0.95, 10_000, 128, 0.10,
-        );
+        let eff = estimate_brin_effectiveness(0.95, 10_000, 128, 0.10);
         // With 0.95 correlation and 10% selectivity, good benefit
         assert!(eff > 0.5);
     }
 
     #[test]
     fn brin_effectiveness_negative_correlation() {
-        let eff = estimate_brin_effectiveness(
-            -0.98, 10_000, 128, 0.05,
-        );
+        let eff = estimate_brin_effectiveness(-0.98, 10_000, 128, 0.05);
         // Negative correlation is equally useful for BRIN
         assert!(eff > 0.8);
     }

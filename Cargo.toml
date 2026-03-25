@@ -27,6 +27,7 @@ members = [
     "crates/ra-adapters",
     "crates/ra-pg-monitor",
     "crates/ra-pg-advisor",
+    "crates/ra-advisor",
     "crates/ra-test-utils",
     "crates/ra-regression",
     "crates/sparsemap",
@@ -34,10 +35,8 @@ members = [
 ]
 # Excluded from workspace build (require special setup or need fixes):
 # - ra-pg-extension: requires pg_config and PostgreSQL headers
-# - ra-advisor: has API mismatches (needs update to current ra-core API)
 exclude = [
     "crates/ra-pg-extension",
-    "crates/ra-advisor",
 ]
 
 [workspace.package]

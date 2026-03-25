@@ -20,10 +20,7 @@ pub struct IndexCandidate {
 }
 
 /// Type of index structure.
-#[derive(
-    Debug, Clone, Copy, Default, PartialEq, Eq, Hash,
-    Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum IndexType {
     /// B-Tree index (default, good for range queries and equality).
     #[default]
@@ -53,10 +50,7 @@ impl std::fmt::Display for IndexType {
 
 impl IndexCandidate {
     /// Create a simple single-column B-Tree index.
-    pub fn btree(
-        table: impl Into<String>,
-        column: impl Into<String>,
-    ) -> Self {
+    pub fn btree(table: impl Into<String>, column: impl Into<String>) -> Self {
         Self {
             table: table.into(),
             columns: vec![column.into()],
@@ -68,11 +62,7 @@ impl IndexCandidate {
     }
 
     /// Create a BRIN index candidate for a correlated column.
-    pub fn brin(
-        table: impl Into<String>,
-        column: impl Into<String>,
-        correlation: f64,
-    ) -> Self {
+    pub fn brin(table: impl Into<String>, column: impl Into<String>, correlation: f64) -> Self {
         Self {
             table: table.into(),
             columns: vec![column.into()],
@@ -87,10 +77,7 @@ impl IndexCandidate {
     }
 
     /// Create a composite B-Tree index.
-    pub fn composite(
-        table: impl Into<String>,
-        columns: Vec<String>,
-    ) -> Self {
+    pub fn composite(table: impl Into<String>, columns: Vec<String>) -> Self {
         Self {
             table: table.into(),
             columns,
@@ -111,12 +98,7 @@ impl IndexCandidate {
             IndexType::GiST => "_gist",
             IndexType::BTree => "",
         };
-        format!(
-            "idx_{}_{}{}",
-            self.table,
-            self.columns.join("_"),
-            suffix
-        )
+        format!("idx_{}_{}{}", self.table, self.columns.join("_"), suffix)
     }
 
     /// Generate CREATE INDEX SQL statement.
@@ -156,7 +138,6 @@ impl IndexCandidate {
 }
 
 #[cfg(test)]
-#[allow(clippy::float_cmp)]
 mod tests {
     use super::*;
 
@@ -174,10 +155,7 @@ mod tests {
 
     #[test]
     fn composite_index() {
-        let idx = IndexCandidate::composite(
-            "orders",
-            vec!["user_id".into(), "created_at".into()],
-        );
+        let idx = IndexCandidate::composite("orders", vec!["user_id".into(), "created_at".into()]);
         assert_eq!(idx.index_name(), "idx_orders_user_id_created_at");
         assert_eq!(
             idx.to_sql(),
@@ -239,8 +217,7 @@ mod tests {
     #[test]
     fn partial_index_sql() {
         let mut idx = IndexCandidate::btree("orders", "customer_id");
-        idx.partial_predicate =
-            Some("status = 'active'".to_string());
+        idx.partial_predicate = Some("status = 'active'".to_string());
         assert_eq!(
             idx.to_sql(),
             "CREATE INDEX idx_orders_customer_id \
