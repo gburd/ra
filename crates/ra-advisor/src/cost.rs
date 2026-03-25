@@ -38,6 +38,7 @@ const BRIN_SIZE_RATIO: f64 = 0.001;
 const GIN_SIZE_RATIO: f64 = 1.0;
 const GIST_SIZE_RATIO: f64 = 0.4;
 const HASH_SIZE_RATIO: f64 = 0.25;
+const RUM_SIZE_RATIO: f64 = 1.3;
 
 /// Write overhead per operation for different index types.
 const BTREE_WRITE_OVERHEAD: f64 = 0.05;
@@ -45,6 +46,7 @@ const BRIN_WRITE_OVERHEAD: f64 = 0.005;
 const GIN_WRITE_OVERHEAD: f64 = 0.10;
 const GIST_WRITE_OVERHEAD: f64 = 0.08;
 const HASH_WRITE_OVERHEAD: f64 = 0.03;
+const RUM_WRITE_OVERHEAD: f64 = 0.14;
 
 impl IndexBenefit {
     /// Create a new benefit estimation.
@@ -101,6 +103,7 @@ impl IndexCost {
             IndexType::GIN => GIN_SIZE_RATIO,
             IndexType::GiST => GIST_SIZE_RATIO,
             IndexType::Hash => HASH_SIZE_RATIO,
+            IndexType::RUM => RUM_SIZE_RATIO,
         };
 
         let write_overhead = match index_type {
@@ -109,6 +112,7 @@ impl IndexCost {
             IndexType::GIN => GIN_WRITE_OVERHEAD,
             IndexType::GiST => GIST_WRITE_OVERHEAD,
             IndexType::Hash => HASH_WRITE_OVERHEAD,
+            IndexType::RUM => RUM_WRITE_OVERHEAD,
         };
 
         let storage_bytes = (table_size_bytes as f64 * size_ratio * num_columns as f64) as u64;
@@ -120,6 +124,7 @@ impl IndexCost {
             IndexType::GIN => 5.0,
             IndexType::GiST => 4.0,
             IndexType::Hash => 2.0,
+            IndexType::RUM => 7.0,
         };
         let build_time_secs = row_count / 100_000.0 * build_cost_factor;
 
