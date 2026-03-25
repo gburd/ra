@@ -25,6 +25,9 @@
       {
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
+            # Shell (use bash 5+ to avoid syntax errors)
+            bash
+
             # Rust toolchain
             rustToolchain
             cargo-watch
@@ -66,6 +69,9 @@
           ];
 
           shellHook = ''
+            # Use nix-provided bash to avoid compatibility issues
+            export SHELL="${pkgs.bash}/bin/bash"
+
             export RUST_BACKTRACE=1
             export RUST_LOG=info
             export DATABASE_URL="postgres://localhost/ra_dev"
