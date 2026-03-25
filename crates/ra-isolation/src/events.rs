@@ -207,3 +207,161 @@ impl fmt::Display for TestEventLog {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_query_result() -> QueryResult {
+        QueryResult {
+            columns: vec!["id".into()],
+            rows: vec![vec!["1".into()]],
+            rows_affected: 0,
+        }
+    }
+
+    #[test]
+    fn test_event_display_setup() {
+        let e = TestEvent::SetupExecuted {
+            sql: "CREATE TABLE t (id INT)".into(),
+        };
+        assert_eq!(format!("{e}"), "SETUP: CREATE TABLE t (id INT)");
+    }
+
+    #[test]
+    fn test_event_display_teardown() {
+        let e = TestEvent::TeardownExecuted {
+            sql: "DROP TABLE t".into(),
+        };
+        assert_eq!(format!("{e}"), "TEARDOWN: DROP TABLE t");
+    }
+
+    #[test]
+    fn test_event_display_step_started() {
+        let e = TestEvent::StepStarted {
+            session: "s1".into(),
+            step: "read".into(),
+        };
+        assert_eq!(format!("{e}"), "START s1:read");
+    }
+
+    #[test]
+    fn test_event_display_step_completed() {
+        let e = TestEvent::StepCompleted {
+            session: "s1".into(),
+            step: "read".into(),
+            result: sample_query_result(),
+        };
+        let s = format!("{e}");
+        assert!(s.starts_with("COMPLETE s1:read"));
+    }
+
+    #[test]
+    fn test_event_display_step_failed() {
+        let e = TestEvent::StepFailed {
+            session: "s1".into(),
+            step: "write".into(),
+            error: "lock timeout".into(),
+        };
+        assert_eq!(format!("{e}"), "FAIL s1:write: lock timeout");
+    }
+
+    #[test]
+    fn test_event_display_session_blocked() {
+        let e = TestEvent::SessionBlocked {
+            session: "s1".into(),
+            step: "update".into(),
+        };
+        assert_eq!(format!("{e}"), "BLOCKED s1:update");
+    }
+
+    #[test]
+    fn test_event_display_deadlock() {
+        let e = TestEvent::DeadlockDetected {
+            sessions: vec!["s1".into(), "s2".into()],
+        };
+        assert_eq!(format!("{e}"), "DEADLOCK: s1, s2");
+    }
+
+    #[test]
+    fn test_event_display_marker_signaled() {
+        let e = TestEvent::MarkerSignaled {
+            session: "s1".into(),
+            marker: "ready".into(),
+        };
+        assert_eq!(format!("{e}"), "SIGNAL s1:@ready");
+    }
+
+    #[test]
+    fn test_event_display_marker_waited() {
+        let e = TestEvent::MarkerWaited {
+            session: "s1".into(),
+            marker: "ready".into(),
+        };
+        assert_eq!(format!("{e}"), "WAIT s1:@ready");
+    }
+
+    #[test]
+    fn test_event_display_permutation_started() {
+        let e = TestEvent::PermutationStarted {
+            index: 0,
+            steps: vec!["s1:a".into(), "s2:b".into()],
+        };
+        assert_eq!(format!("{e}"), "PERMUTATION #0: s1:a -> s2:b");
+    }
+
+    #[test]
+    fn test_event_display_permutation_completed() {
+        let e = TestEvent::PermutationCompleted { index: 2 };
+        assert_eq!(format!("{e}"), "PERMUTATION #2 DONE");
+    }
+
+    #[test]
+    fn test_event_log_new_is_empty() {
+        let log = TestEventLog::new();
+        assert!(log.is_empty());
+        assert_eq!(log.len(), 0);
+        assert!(log.events().is_empty());
+    }
+
+    #[test]
+    fn test_event_log_record_and_retrieve() {
+        let mut log = TestEventLog::new();
+        log.record(TestEvent::SetupExecuted {
+            sql: "SELECT 1".into(),
+        });
+        assert!(!log.is_empty());
+        assert_eq!(log.len(), 1);
+        assert_eq!(log.events().len(), 1);
+    }
+
+    #[test]
+    fn test_event_log_drain() {
+        let mut log = TestEventLog::new();
+        log.record(TestEvent::SetupExecuted {
+            sql: "SELECT 1".into(),
+        });
+        log.record(TestEvent::TeardownExecuted {
+            sql: "DROP TABLE t".into(),
+        });
+        let events = log.drain();
+        assert_eq!(events.len(), 2);
+        assert!(log.is_empty());
+    }
+
+    #[test]
+    fn test_event_log_display() {
+        let mut log = TestEventLog::new();
+        log.record(TestEvent::SetupExecuted {
+            sql: "SELECT 1".into(),
+        });
+        let display = format!("{log}");
+        assert!(display.contains("SETUP: SELECT 1"));
+    }
+
+    #[test]
+    fn test_event_log_default() {
+        let log = TestEventLog::default();
+        assert!(log.is_empty());
+    }
+}

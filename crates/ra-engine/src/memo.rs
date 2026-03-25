@@ -336,4 +336,154 @@ mod tests {
         });
         assert_eq!(structural_hash(&expr), structural_hash(&expr));
     }
+
+    #[test]
+    fn structural_hash_filter_different_expr_kinds() {
+        // hash_scalar_expr only hashes discriminant, so two BinOps
+        // with different operators hash the same. But a BinOp vs a
+        // Column should differ.
+        let e1 = RelExpr::scan("t").filter(Expr::BinOp {
+            op: BinOp::Eq,
+            left: Box::new(Expr::Column(ColumnRef::new("a"))),
+            right: Box::new(Expr::Const(Const::Int(1))),
+        });
+        let e2 = RelExpr::scan("t").filter(Expr::Column(
+            ColumnRef::new("flag"),
+        ));
+        assert_ne!(structural_hash(&e1), structural_hash(&e2));
+    }
+
+    #[test]
+    fn structural_hash_join() {
+        let cond = Expr::BinOp {
+            op: BinOp::Eq,
+            left: Box::new(Expr::Column(ColumnRef::new("id"))),
+            right: Box::new(Expr::Column(ColumnRef::new("id"))),
+        };
+        let plan = RelExpr::Join {
+            join_type: ra_core::algebra::JoinType::Inner,
+            condition: cond,
+            left: Box::new(RelExpr::scan("a")),
+            right: Box::new(RelExpr::scan("b")),
+        };
+        let h1 = structural_hash(&plan);
+        let h2 = structural_hash(&plan);
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn structural_hash_aggregate() {
+        let plan = RelExpr::Aggregate {
+            group_by: vec![],
+            aggregates: vec![],
+            input: Box::new(RelExpr::scan("t")),
+        };
+        let h = structural_hash(&plan);
+        assert_ne!(h, structural_hash(&RelExpr::scan("t")));
+    }
+
+    #[test]
+    fn structural_hash_sort() {
+        let plan = RelExpr::Sort {
+            keys: vec![],
+            input: Box::new(RelExpr::scan("t")),
+        };
+        let h = structural_hash(&plan);
+        assert_ne!(h, structural_hash(&RelExpr::scan("t")));
+    }
+
+    #[test]
+    fn structural_hash_limit() {
+        let plan1 = RelExpr::scan("t").limit(10, 0);
+        let plan2 = RelExpr::scan("t").limit(20, 0);
+        assert_ne!(structural_hash(&plan1), structural_hash(&plan2));
+    }
+
+    #[test]
+    fn structural_hash_distinct() {
+        let plan = RelExpr::scan("t").distinct();
+        let h = structural_hash(&plan);
+        assert_ne!(h, structural_hash(&RelExpr::scan("t")));
+    }
+
+    #[test]
+    fn structural_hash_union() {
+        let plan = RelExpr::Union {
+            all: true,
+            left: Box::new(RelExpr::scan("a")),
+            right: Box::new(RelExpr::scan("b")),
+        };
+        let h = structural_hash(&plan);
+        assert_ne!(h, structural_hash(&RelExpr::scan("a")));
+    }
+
+    #[test]
+    fn structural_hash_cte() {
+        let plan = RelExpr::CTE {
+            name: "x".into(),
+            definition: Box::new(RelExpr::scan("t")),
+            body: Box::new(RelExpr::scan("x")),
+        };
+        let h = structural_hash(&plan);
+        assert_ne!(h, 0);
+    }
+
+    #[test]
+    fn structural_hash_values() {
+        let plan = RelExpr::Values {
+            rows: vec![vec![Expr::Const(Const::Int(1))]],
+        };
+        let h = structural_hash(&plan);
+        assert_ne!(h, 0);
+    }
+
+    #[test]
+    fn structural_hash_index_scan() {
+        let plan = RelExpr::IndexScan {
+            table: "t".into(),
+            column: "id".into(),
+        };
+        let h = structural_hash(&plan);
+        assert_ne!(h, structural_hash(&RelExpr::scan("t")));
+    }
+
+    #[test]
+    fn structural_hash_recursive_cte() {
+        let plan = RelExpr::RecursiveCTE {
+            name: "r".into(),
+            base_case: Box::new(RelExpr::scan("t")),
+            recursive_case: Box::new(RelExpr::scan("r")),
+            body: Box::new(RelExpr::scan("r")),
+            cycle_detection: None,
+        };
+        let h = structural_hash(&plan);
+        assert_ne!(h, 0);
+    }
+
+    #[test]
+    fn structural_hash_window() {
+        let plan = RelExpr::Window {
+            functions: vec![],
+            input: Box::new(RelExpr::scan("t")),
+        };
+        let h = structural_hash(&plan);
+        assert_ne!(h, structural_hash(&RelExpr::scan("t")));
+    }
+
+    #[test]
+    fn memo_table_overwrite() {
+        let mut memo = MemoTable::new();
+        let e1 = RelExpr::scan("a");
+        let e2 = RelExpr::scan("b");
+        memo.insert(42, e1);
+        memo.insert(42, e2.clone());
+        assert_eq!(memo.get(42), Some(&e2));
+        assert_eq!(memo.len(), 1);
+    }
+
+    #[test]
+    fn memo_table_get_missing() {
+        let memo = MemoTable::new();
+        assert!(memo.get(999).is_none());
+    }
 }

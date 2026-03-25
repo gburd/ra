@@ -489,3 +489,563 @@ pub fn find_deepest_join(plan: &RelExpr) -> Option<&RelExpr> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ra_core::algebra::{
+        AggregateExpr, AggregateFunction, JoinType, NullOrdering,
+        SortDirection, SortKey,
+    };
+    use ra_core::expr::{BinOp, ColumnRef, Expr};
+
+    fn eq_cond() -> Expr {
+        Expr::BinOp {
+            op: BinOp::Eq,
+            left: Box::new(Expr::Column(ColumnRef::new("id"))),
+            right: Box::new(Expr::Column(ColumnRef::new("id"))),
+        }
+    }
+
+    fn make_join(left: RelExpr, right: RelExpr) -> RelExpr {
+        RelExpr::Join {
+            join_type: JoinType::Inner,
+            condition: eq_cond(),
+            left: Box::new(left),
+            right: Box::new(right),
+        }
+    }
+
+    fn make_aggregate(input: RelExpr) -> RelExpr {
+        RelExpr::Aggregate {
+            group_by: vec![Expr::Column(ColumnRef::new("g"))],
+            aggregates: vec![AggregateExpr {
+                function: AggregateFunction::Count,
+                arg: None,
+                distinct: false,
+                alias: Some("cnt".to_string()),
+            }],
+            input: Box::new(input),
+        }
+    }
+
+    fn make_sort(input: RelExpr) -> RelExpr {
+        RelExpr::Sort {
+            keys: vec![SortKey {
+                expr: Expr::Column(ColumnRef::new("a")),
+                direction: SortDirection::Asc,
+                nulls: NullOrdering::Last,
+            }],
+            input: Box::new(input),
+        }
+    }
+
+    // -- OperatorState tests --
+
+    #[test]
+    fn operator_state_scan_row_count() {
+        let state = OperatorState::Scan {
+            cursor_position: 10,
+            buffered_row_count: 500,
+        };
+        assert_eq!(state.row_count(), 500);
+    }
+
+    #[test]
+    fn operator_state_join_row_count() {
+        let state = OperatorState::Join {
+            build_side_complete: true,
+            build_side_rows: 1000,
+            probe_side_cursor: 50,
+        };
+        assert_eq!(state.row_count(), 1000);
+    }
+
+    #[test]
+    fn operator_state_aggregate_row_count() {
+        let state = OperatorState::Aggregate {
+            partial_group_count: 20,
+            input_rows_consumed: 5000,
+        };
+        assert_eq!(state.row_count(), 5000);
+    }
+
+    #[test]
+    fn operator_state_sort_row_count() {
+        let state = OperatorState::Sort {
+            sorted_run_count: 3,
+            total_sorted_rows: 2000,
+        };
+        assert_eq!(state.row_count(), 2000);
+    }
+
+    // -- stitch_plans tests --
+
+    #[test]
+    fn stitch_plans_at_join() {
+        let materialized = RelExpr::scan("mat_a");
+        let reoptimized = make_join(RelExpr::scan("old_a"), RelExpr::scan("b"));
+        let state = OperatorState::Join {
+            build_side_complete: true,
+            build_side_rows: 100,
+            probe_side_cursor: 0,
+        };
+        let result = stitch_plans(
+            &materialized,
+            &reoptimized,
+            StitchPointKind::JoinBuildComplete,
+            &state,
+        );
+        assert_eq!(result.stitch_points_applied, 1);
+        assert!(result.stitch_overhead > 0.0);
+        // Verify the left side was replaced with materialized
+        if let RelExpr::Join { left, right, .. } = &result.plan {
+            assert_eq!(**left, materialized);
+            assert_eq!(**right, RelExpr::scan("b"));
+        } else {
+            panic!("Expected Join");
+        }
+    }
+
+    #[test]
+    fn stitch_plans_at_aggregate() {
+        let materialized = RelExpr::scan("mat_t");
+        let reoptimized = make_aggregate(RelExpr::scan("old_t"));
+        let state = OperatorState::Aggregate {
+            partial_group_count: 10,
+            input_rows_consumed: 500,
+        };
+        let result = stitch_plans(
+            &materialized,
+            &reoptimized,
+            StitchPointKind::AggregateInput,
+            &state,
+        );
+        assert_eq!(result.stitch_points_applied, 1);
+        if let RelExpr::Aggregate { input, .. } = &result.plan {
+            assert_eq!(**input, materialized);
+        } else {
+            panic!("Expected Aggregate");
+        }
+    }
+
+    #[test]
+    fn stitch_plans_at_sort() {
+        let materialized = RelExpr::scan("mat_t");
+        let reoptimized = make_sort(RelExpr::scan("old_t"));
+        let state = OperatorState::Sort {
+            sorted_run_count: 2,
+            total_sorted_rows: 300,
+        };
+        let result = stitch_plans(
+            &materialized,
+            &reoptimized,
+            StitchPointKind::SortInput,
+            &state,
+        );
+        assert_eq!(result.stitch_points_applied, 1);
+        if let RelExpr::Sort { input, .. } = &result.plan {
+            assert_eq!(**input, materialized);
+        } else {
+            panic!("Expected Sort");
+        }
+    }
+
+    #[test]
+    fn stitch_plans_at_subquery_boundary() {
+        let materialized = RelExpr::scan("mat_t");
+        let reoptimized = RelExpr::scan("new_t");
+        let state = OperatorState::Scan {
+            cursor_position: 0,
+            buffered_row_count: 100,
+        };
+        let result = stitch_plans(
+            &materialized,
+            &reoptimized,
+            StitchPointKind::SubqueryBoundary,
+            &state,
+        );
+        assert_eq!(result.plan, reoptimized);
+    }
+
+    #[test]
+    fn stitch_at_join_passthrough_when_not_join() {
+        let materialized = RelExpr::scan("mat");
+        let reoptimized = RelExpr::scan("new");
+        let state = OperatorState::Join {
+            build_side_complete: true,
+            build_side_rows: 10,
+            probe_side_cursor: 0,
+        };
+        let result = stitch_plans(
+            &materialized,
+            &reoptimized,
+            StitchPointKind::JoinBuildComplete,
+            &state,
+        );
+        assert_eq!(result.plan, reoptimized);
+    }
+
+    // -- verify_join_order_equivalence tests --
+
+    #[test]
+    fn verify_join_order_equivalence_same_tables() {
+        let plan1 = make_join(RelExpr::scan("a"), RelExpr::scan("b"));
+        let plan2 = make_join(RelExpr::scan("b"), RelExpr::scan("a"));
+        assert!(verify_join_order_equivalence(&plan1, &plan2));
+    }
+
+    #[test]
+    fn verify_join_order_equivalence_different_tables() {
+        let plan1 = make_join(RelExpr::scan("a"), RelExpr::scan("b"));
+        let plan2 = make_join(RelExpr::scan("a"), RelExpr::scan("c"));
+        assert!(!verify_join_order_equivalence(&plan1, &plan2));
+    }
+
+    #[test]
+    fn verify_join_order_single_table() {
+        let plan1 = RelExpr::scan("a");
+        let plan2 = RelExpr::scan("a");
+        assert!(verify_join_order_equivalence(&plan1, &plan2));
+    }
+
+    // -- count_stitch_points tests --
+
+    #[test]
+    fn count_stitch_points_leaf() {
+        assert_eq!(count_stitch_points(&RelExpr::scan("t")), 0);
+    }
+
+    #[test]
+    fn count_stitch_points_join() {
+        let plan = make_join(RelExpr::scan("a"), RelExpr::scan("b"));
+        assert_eq!(count_stitch_points(&plan), 1);
+    }
+
+    #[test]
+    fn count_stitch_points_nested_joins() {
+        let inner = make_join(RelExpr::scan("a"), RelExpr::scan("b"));
+        let outer = make_join(inner, RelExpr::scan("c"));
+        assert_eq!(count_stitch_points(&outer), 2);
+    }
+
+    #[test]
+    fn count_stitch_points_aggregate() {
+        let plan = make_aggregate(RelExpr::scan("t"));
+        assert_eq!(count_stitch_points(&plan), 1);
+    }
+
+    #[test]
+    fn count_stitch_points_sort() {
+        let plan = make_sort(RelExpr::scan("t"));
+        assert_eq!(count_stitch_points(&plan), 1);
+    }
+
+    #[test]
+    fn count_stitch_points_filter_passthrough() {
+        let plan = RelExpr::Filter {
+            predicate: Expr::Const(ra_core::expr::Const::Bool(true)),
+            input: Box::new(make_join(RelExpr::scan("a"), RelExpr::scan("b"))),
+        };
+        assert_eq!(count_stitch_points(&plan), 1);
+    }
+
+    #[test]
+    fn count_stitch_points_union() {
+        let plan = RelExpr::Union {
+            all: true,
+            left: Box::new(make_join(RelExpr::scan("a"), RelExpr::scan("b"))),
+            right: Box::new(make_sort(RelExpr::scan("c"))),
+        };
+        assert_eq!(count_stitch_points(&plan), 2);
+    }
+
+    // -- replace_subtree tests --
+
+    #[test]
+    fn replace_subtree_match_at_root() {
+        let plan = RelExpr::scan("old");
+        let replacement = RelExpr::scan("new");
+        let (result, replaced) = replace_subtree(&plan, &plan, &replacement);
+        assert!(replaced);
+        assert_eq!(result, replacement);
+    }
+
+    #[test]
+    fn replace_subtree_no_match() {
+        let plan = RelExpr::scan("a");
+        let target = RelExpr::scan("b");
+        let replacement = RelExpr::scan("c");
+        let (result, replaced) = replace_subtree(&plan, &target, &replacement);
+        assert!(!replaced);
+        assert_eq!(result, plan);
+    }
+
+    #[test]
+    fn replace_subtree_in_join_left() {
+        let plan = make_join(RelExpr::scan("a"), RelExpr::scan("b"));
+        let target = RelExpr::scan("a");
+        let replacement = RelExpr::scan("new_a");
+        let (result, replaced) = replace_subtree(&plan, &target, &replacement);
+        assert!(replaced);
+        if let RelExpr::Join { left, right, .. } = &result {
+            assert_eq!(**left, replacement);
+            assert_eq!(**right, RelExpr::scan("b"));
+        } else {
+            panic!("Expected Join");
+        }
+    }
+
+    #[test]
+    fn replace_subtree_in_join_right() {
+        let plan = make_join(RelExpr::scan("a"), RelExpr::scan("b"));
+        let target = RelExpr::scan("b");
+        let replacement = RelExpr::scan("new_b");
+        let (result, replaced) = replace_subtree(&plan, &target, &replacement);
+        assert!(replaced);
+        if let RelExpr::Join { right, .. } = &result {
+            assert_eq!(**right, replacement);
+        } else {
+            panic!("Expected Join");
+        }
+    }
+
+    #[test]
+    fn replace_subtree_in_filter() {
+        let plan = RelExpr::Filter {
+            predicate: Expr::Const(ra_core::expr::Const::Bool(true)),
+            input: Box::new(RelExpr::scan("old")),
+        };
+        let target = RelExpr::scan("old");
+        let replacement = RelExpr::scan("new");
+        let (result, replaced) = replace_subtree(&plan, &target, &replacement);
+        assert!(replaced);
+        if let RelExpr::Filter { input, .. } = &result {
+            assert_eq!(**input, replacement);
+        } else {
+            panic!("Expected Filter");
+        }
+    }
+
+    #[test]
+    fn replace_subtree_in_project() {
+        let plan = RelExpr::Project {
+            columns: vec![],
+            input: Box::new(RelExpr::scan("old")),
+        };
+        let (result, replaced) =
+            replace_subtree(&plan, &RelExpr::scan("old"), &RelExpr::scan("new"));
+        assert!(replaced);
+        if let RelExpr::Project { input, .. } = &result {
+            assert_eq!(**input, RelExpr::scan("new"));
+        } else {
+            panic!("Expected Project");
+        }
+    }
+
+    #[test]
+    fn replace_subtree_in_aggregate() {
+        let plan = make_aggregate(RelExpr::scan("old"));
+        let (result, replaced) =
+            replace_subtree(&plan, &RelExpr::scan("old"), &RelExpr::scan("new"));
+        assert!(replaced);
+        if let RelExpr::Aggregate { input, .. } = &result {
+            assert_eq!(**input, RelExpr::scan("new"));
+        } else {
+            panic!("Expected Aggregate");
+        }
+    }
+
+    #[test]
+    fn replace_subtree_in_sort() {
+        let plan = make_sort(RelExpr::scan("old"));
+        let (result, replaced) =
+            replace_subtree(&plan, &RelExpr::scan("old"), &RelExpr::scan("new"));
+        assert!(replaced);
+        if let RelExpr::Sort { input, .. } = &result {
+            assert_eq!(**input, RelExpr::scan("new"));
+        } else {
+            panic!("Expected Sort");
+        }
+    }
+
+    #[test]
+    fn replace_subtree_in_limit() {
+        let plan = RelExpr::Limit {
+            count: 10,
+            offset: 0,
+            input: Box::new(RelExpr::scan("old")),
+        };
+        let (result, replaced) =
+            replace_subtree(&plan, &RelExpr::scan("old"), &RelExpr::scan("new"));
+        assert!(replaced);
+        if let RelExpr::Limit { input, .. } = &result {
+            assert_eq!(**input, RelExpr::scan("new"));
+        } else {
+            panic!("Expected Limit");
+        }
+    }
+
+    #[test]
+    fn replace_subtree_in_distinct() {
+        let plan = RelExpr::Distinct {
+            input: Box::new(RelExpr::scan("old")),
+        };
+        let (result, replaced) =
+            replace_subtree(&plan, &RelExpr::scan("old"), &RelExpr::scan("new"));
+        assert!(replaced);
+        if let RelExpr::Distinct { input } = &result {
+            assert_eq!(**input, RelExpr::scan("new"));
+        } else {
+            panic!("Expected Distinct");
+        }
+    }
+
+    // -- differential_verify tests --
+
+    #[test]
+    fn differential_verify_same_plan() {
+        let plan = make_join(RelExpr::scan("a"), RelExpr::scan("b"));
+        let result = differential_verify(&plan, &plan);
+        assert!(result.tables_equivalent);
+        assert_eq!(result.old_stitch_points, result.new_stitch_points);
+    }
+
+    #[test]
+    fn differential_verify_different_tables() {
+        let old = make_join(RelExpr::scan("a"), RelExpr::scan("b"));
+        let new = make_join(RelExpr::scan("a"), RelExpr::scan("c"));
+        let result = differential_verify(&old, &new);
+        assert!(!result.tables_equivalent);
+    }
+
+    // -- stitch_multi tests --
+
+    #[test]
+    fn stitch_multi_empty_points() {
+        let plan = RelExpr::scan("t");
+        let result = stitch_multi(&plan, &[]);
+        assert_eq!(result.stitch_points_applied, 0);
+        assert!(result.stitch_overhead.abs() < f64::EPSILON);
+        assert_eq!(result.plan, plan);
+    }
+
+    #[test]
+    fn stitch_multi_single_point() {
+        let reoptimized = make_join(RelExpr::scan("old"), RelExpr::scan("b"));
+        let materialized = RelExpr::scan("mat");
+        let state = OperatorState::Join {
+            build_side_complete: true,
+            build_side_rows: 50,
+            probe_side_cursor: 0,
+        };
+        let points = vec![(materialized.clone(), StitchPointKind::JoinBuildComplete, state)];
+        let result = stitch_multi(&reoptimized, &points);
+        assert_eq!(result.stitch_points_applied, 1);
+        assert!(result.stitch_overhead > 0.0);
+    }
+
+    // -- find_deepest_join tests --
+
+    #[test]
+    fn find_deepest_join_no_joins() {
+        assert!(find_deepest_join(&RelExpr::scan("t")).is_none());
+    }
+
+    #[test]
+    fn find_deepest_join_single_join() {
+        let plan = make_join(RelExpr::scan("a"), RelExpr::scan("b"));
+        assert!(find_deepest_join(&plan).is_some());
+    }
+
+    #[test]
+    fn find_deepest_join_nested() {
+        let inner = make_join(RelExpr::scan("a"), RelExpr::scan("b"));
+        let outer = make_join(inner.clone(), RelExpr::scan("c"));
+        let deepest = find_deepest_join(&outer);
+        assert!(deepest.is_some());
+        assert_eq!(*deepest.unwrap(), inner);
+    }
+
+    #[test]
+    fn find_deepest_join_through_filter() {
+        let plan = RelExpr::Filter {
+            predicate: Expr::Const(ra_core::expr::Const::Bool(true)),
+            input: Box::new(make_join(RelExpr::scan("a"), RelExpr::scan("b"))),
+        };
+        assert!(find_deepest_join(&plan).is_some());
+    }
+
+    #[test]
+    fn find_deepest_join_through_sort() {
+        let plan = make_sort(make_join(RelExpr::scan("a"), RelExpr::scan("b")));
+        assert!(find_deepest_join(&plan).is_some());
+    }
+
+    // -- compute_stitch_overhead tests --
+
+    #[test]
+    fn stitch_overhead_join_build() {
+        let state = OperatorState::Join {
+            build_side_complete: true,
+            build_side_rows: 100,
+            probe_side_cursor: 0,
+        };
+        let result = stitch_plans(
+            &RelExpr::scan("m"),
+            &make_join(RelExpr::scan("a"), RelExpr::scan("b")),
+            StitchPointKind::JoinBuildComplete,
+            &state,
+        );
+        // 100 rows * 0.05 = 5.0
+        assert!((result.stitch_overhead - 5.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn stitch_overhead_aggregate_uses_group_count() {
+        let state = OperatorState::Aggregate {
+            partial_group_count: 50,
+            input_rows_consumed: 1000,
+        };
+        let result = stitch_plans(
+            &RelExpr::scan("m"),
+            &make_aggregate(RelExpr::scan("t")),
+            StitchPointKind::AggregateInput,
+            &state,
+        );
+        // 50 groups * 0.02 = 1.0
+        assert!((result.stitch_overhead - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn stitch_overhead_sort_uses_rows() {
+        let state = OperatorState::Sort {
+            sorted_run_count: 2,
+            total_sorted_rows: 200,
+        };
+        let result = stitch_plans(
+            &RelExpr::scan("m"),
+            &make_sort(RelExpr::scan("t")),
+            StitchPointKind::SortInput,
+            &state,
+        );
+        // 200 rows * 0.03 = 6.0
+        assert!((result.stitch_overhead - 6.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn stitch_overhead_subquery_boundary() {
+        let state = OperatorState::Scan {
+            cursor_position: 0,
+            buffered_row_count: 100,
+        };
+        let result = stitch_plans(
+            &RelExpr::scan("m"),
+            &RelExpr::scan("new"),
+            StitchPointKind::SubqueryBoundary,
+            &state,
+        );
+        // 100 rows * 0.01 = 1.0
+        assert!((result.stitch_overhead - 1.0).abs() < f64::EPSILON);
+    }
+}

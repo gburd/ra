@@ -589,3 +589,451 @@ pub fn progressive_optimize(
     );
     (quick_plan, handle)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ra_core::algebra::{JoinType, RelExpr};
+    use ra_core::expr::{BinOp, ColumnRef, Expr};
+
+    #[test]
+    fn should_reoptimize_both_zero() {
+        assert!(!should_reoptimize(0, 0, 2.0));
+    }
+
+    #[test]
+    fn should_reoptimize_estimated_zero_actual_nonzero() {
+        assert!(should_reoptimize(0, 100, 2.0));
+    }
+
+    #[test]
+    fn should_reoptimize_within_threshold() {
+        assert!(!should_reoptimize(100, 150, 2.0));
+    }
+
+    #[test]
+    fn should_reoptimize_exceeds_threshold_overestimate() {
+        assert!(should_reoptimize(100, 300, 2.0));
+    }
+
+    #[test]
+    fn should_reoptimize_exceeds_threshold_underestimate() {
+        assert!(should_reoptimize(300, 100, 2.0));
+    }
+
+    #[test]
+    fn should_reoptimize_exact_threshold_boundary() {
+        assert!(!should_reoptimize(100, 200, 2.0));
+    }
+
+    #[test]
+    fn should_reoptimize_just_above_threshold() {
+        assert!(should_reoptimize(100, 201, 2.0));
+    }
+
+    #[test]
+    fn divergence_factor_both_zero() {
+        let f = divergence_factor(0, 0);
+        assert!((f - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn divergence_factor_estimated_zero() {
+        let f = divergence_factor(0, 100);
+        assert_eq!(f, f64::MAX);
+    }
+
+    #[test]
+    fn divergence_factor_normal() {
+        let f = divergence_factor(100, 300);
+        assert!((f - 3.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn divergence_factor_underestimate() {
+        let f = divergence_factor(200, 50);
+        assert!((f - 0.25).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn estimate_stitch_cost_copy() {
+        let cost = estimate_stitch_cost(1000, StitchTransferKind::Copy);
+        assert!((cost - 10.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn estimate_stitch_cost_hash_build() {
+        let cost = estimate_stitch_cost(1000, StitchTransferKind::HashBuild);
+        assert!((cost - 50.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn estimate_stitch_cost_sort() {
+        let cost = estimate_stitch_cost(1000, StitchTransferKind::Sort);
+        assert!((cost - 100.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn estimate_stitch_cost_discard() {
+        let cost = estimate_stitch_cost(1000, StitchTransferKind::Discard);
+        assert!(cost.abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn estimate_stitch_cost_zero_rows() {
+        let cost = estimate_stitch_cost(0, StitchTransferKind::Sort);
+        assert!(cost.abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn join_transfer_kind_hash_to_merge() {
+        assert_eq!(
+            join_transfer_kind(JoinImplKind::Hash, JoinImplKind::Merge),
+            StitchTransferKind::Sort,
+        );
+    }
+
+    #[test]
+    fn join_transfer_kind_hash_to_nested_loop() {
+        assert_eq!(
+            join_transfer_kind(JoinImplKind::Hash, JoinImplKind::NestedLoop),
+            StitchTransferKind::Discard,
+        );
+    }
+
+    #[test]
+    fn join_transfer_kind_nested_loop_to_hash() {
+        assert_eq!(
+            join_transfer_kind(JoinImplKind::NestedLoop, JoinImplKind::Hash),
+            StitchTransferKind::HashBuild,
+        );
+    }
+
+    #[test]
+    fn join_transfer_kind_same_impl() {
+        assert_eq!(
+            join_transfer_kind(JoinImplKind::Hash, JoinImplKind::Hash),
+            StitchTransferKind::Copy,
+        );
+        assert_eq!(
+            join_transfer_kind(JoinImplKind::Merge, JoinImplKind::Merge),
+            StitchTransferKind::Copy,
+        );
+    }
+
+    #[test]
+    fn join_transfer_kind_merge_to_hash() {
+        assert_eq!(
+            join_transfer_kind(JoinImplKind::Merge, JoinImplKind::Hash),
+            StitchTransferKind::HashBuild,
+        );
+    }
+
+    #[test]
+    fn join_transfer_kind_merge_to_nested_loop() {
+        assert_eq!(
+            join_transfer_kind(JoinImplKind::Merge, JoinImplKind::NestedLoop),
+            StitchTransferKind::Discard,
+        );
+    }
+
+    #[test]
+    fn is_switch_worthwhile_yes() {
+        assert!(is_switch_worthwhile(100.0, 50.0, 10.0, 0.8));
+    }
+
+    #[test]
+    fn is_switch_worthwhile_no_too_expensive() {
+        assert!(!is_switch_worthwhile(100.0, 90.0, 10.0, 0.8));
+    }
+
+    #[test]
+    fn is_switch_worthwhile_zero_remaining() {
+        assert!(!is_switch_worthwhile(0.0, 10.0, 5.0, 0.8));
+    }
+
+    #[test]
+    fn estimate_remaining_cost_full() {
+        let r = estimate_remaining_cost(100.0, 0.0);
+        assert!((r - 100.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn estimate_remaining_cost_half_done() {
+        let r = estimate_remaining_cost(100.0, 0.5);
+        assert!((r - 50.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn estimate_remaining_cost_complete() {
+        let r = estimate_remaining_cost(100.0, 1.0);
+        assert!(r.abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn estimate_remaining_cost_clamps_below_zero() {
+        let r = estimate_remaining_cost(100.0, -0.5);
+        assert!((r - 100.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn estimate_remaining_cost_clamps_above_one() {
+        let r = estimate_remaining_cost(100.0, 1.5);
+        assert!(r.abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn reopt_config_default() {
+        let cfg = ReoptConfig::default();
+        assert!(
+            (cfg.divergence_threshold - DIVERGENCE_THRESHOLD).abs()
+                < f64::EPSILON
+        );
+        assert!(
+            (cfg.switch_threshold - SWITCH_THRESHOLD).abs()
+                < f64::EPSILON
+        );
+        assert_eq!(cfg.max_reoptimizations, 3);
+    }
+
+    #[test]
+    fn evaluate_reopt_decision_no_divergence() {
+        let cfg = ReoptConfig::default();
+        let decision =
+            evaluate_reopt_decision(100, 150, 50.0, 30.0, 5.0, &cfg);
+        assert!(!decision.should_switch);
+        assert!(decision.savings_fraction.abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn evaluate_reopt_decision_divergence_and_switch() {
+        let cfg = ReoptConfig::default();
+        let decision =
+            evaluate_reopt_decision(100, 500, 100.0, 30.0, 5.0, &cfg);
+        assert!(decision.should_switch);
+        assert!(decision.savings_fraction > 0.0);
+    }
+
+    #[test]
+    fn evaluate_reopt_decision_divergence_but_no_savings() {
+        let cfg = ReoptConfig::default();
+        let decision =
+            evaluate_reopt_decision(100, 500, 100.0, 95.0, 10.0, &cfg);
+        assert!(!decision.should_switch);
+    }
+
+    #[test]
+    fn evaluate_reopt_decision_zero_remaining_cost() {
+        let cfg = ReoptConfig::default();
+        let decision =
+            evaluate_reopt_decision(100, 500, 0.0, 10.0, 5.0, &cfg);
+        assert!(!decision.should_switch);
+        assert!(decision.savings_fraction.abs() < f64::EPSILON);
+    }
+
+    fn make_join_plan() -> RelExpr {
+        RelExpr::Join {
+            join_type: JoinType::Inner,
+            condition: Expr::BinOp {
+                op: BinOp::Eq,
+                left: Box::new(Expr::Column(ColumnRef::new("id"))),
+                right: Box::new(Expr::Column(ColumnRef::new("id"))),
+            },
+            left: Box::new(RelExpr::scan("a")),
+            right: Box::new(RelExpr::scan("b")),
+        }
+    }
+
+    #[test]
+    fn insert_stitch_points_on_join() {
+        let plan = make_join_plan();
+        let (_annotated, metas) = insert_stitch_points(&plan);
+        assert_eq!(metas.len(), 1);
+        assert_eq!(metas[0].kind, StitchPointKind::JoinBuildComplete);
+    }
+
+    #[test]
+    fn insert_stitch_points_on_aggregate() {
+        let plan = RelExpr::Aggregate {
+            group_by: vec![],
+            aggregates: vec![],
+            input: Box::new(RelExpr::scan("t")),
+        };
+        let (_annotated, metas) = insert_stitch_points(&plan);
+        assert_eq!(metas.len(), 1);
+        assert_eq!(metas[0].kind, StitchPointKind::AggregateInput);
+    }
+
+    #[test]
+    fn insert_stitch_points_on_sort() {
+        let plan = RelExpr::Sort {
+            keys: vec![],
+            input: Box::new(RelExpr::scan("t")),
+        };
+        let (_annotated, metas) = insert_stitch_points(&plan);
+        assert_eq!(metas.len(), 1);
+        assert_eq!(metas[0].kind, StitchPointKind::SortInput);
+    }
+
+    #[test]
+    fn insert_stitch_points_nested() {
+        let plan = RelExpr::Aggregate {
+            group_by: vec![],
+            aggregates: vec![],
+            input: Box::new(make_join_plan()),
+        };
+        let (_annotated, metas) = insert_stitch_points(&plan);
+        assert_eq!(metas.len(), 2);
+    }
+
+    #[test]
+    fn insert_stitch_points_filter_passes_through() {
+        let plan = RelExpr::Filter {
+            predicate: Expr::Const(ra_core::expr::Const::Bool(true)),
+            input: Box::new(make_join_plan()),
+        };
+        let (_annotated, metas) = insert_stitch_points(&plan);
+        assert_eq!(metas.len(), 1);
+    }
+
+    #[test]
+    fn insert_stitch_points_leaf_node() {
+        let plan = RelExpr::scan("t");
+        let (annotated, metas) = insert_stitch_points(&plan);
+        assert!(metas.is_empty());
+        assert_eq!(annotated, plan);
+    }
+
+    #[test]
+    fn runtime_statistics_default() {
+        let stats = RuntimeStatistics::default();
+        assert!(stats.actual_row_counts.is_empty());
+        assert!(stats.corrected_table_stats.is_empty());
+    }
+
+    #[test]
+    fn reopt_error_display() {
+        let e = ReoptError::OptimizerFailed("bad plan".to_string());
+        assert_eq!(e.to_string(), "optimizer failed: bad plan");
+
+        let e2 = ReoptError::Cancelled;
+        assert_eq!(e2.to_string(), "reoptimization cancelled");
+    }
+
+    struct NoopOptimizer;
+    impl ReoptimizeFn for NoopOptimizer {
+        fn reoptimize(
+            &self,
+            plan: &RelExpr,
+            _stats: &HashMap<String, Statistics>,
+        ) -> Result<RelExpr, ReoptError> {
+            Ok(plan.clone())
+        }
+    }
+
+    struct ImprovingOptimizer;
+    impl ReoptimizeFn for ImprovingOptimizer {
+        fn reoptimize(
+            &self,
+            _plan: &RelExpr,
+            _stats: &HashMap<String, Statistics>,
+        ) -> Result<RelExpr, ReoptError> {
+            Ok(RelExpr::scan("optimized"))
+        }
+    }
+
+    struct FailingOptimizer;
+    impl ReoptimizeFn for FailingOptimizer {
+        fn reoptimize(
+            &self,
+            _plan: &RelExpr,
+            _stats: &HashMap<String, Statistics>,
+        ) -> Result<RelExpr, ReoptError> {
+            Err(ReoptError::OptimizerFailed("fail".into()))
+        }
+    }
+
+    #[test]
+    fn background_reoptimizer_no_improvement() {
+        let plan = RelExpr::scan("t");
+        let handle = BackgroundReoptimizer::spawn(
+            plan,
+            HashMap::new(),
+            Box::new(NoopOptimizer),
+            ReoptConfig::default(),
+        );
+        let result = handle.recv();
+        assert!(result.is_some());
+        let r = result.expect("recv returned None");
+        assert!(r.improved_plan.is_none());
+        assert!(r.completed);
+        assert_eq!(r.attempts, 1);
+    }
+
+    #[test]
+    fn background_reoptimizer_with_improvement() {
+        let plan = RelExpr::scan("t");
+        let handle = BackgroundReoptimizer::spawn(
+            plan,
+            HashMap::new(),
+            Box::new(ImprovingOptimizer),
+            ReoptConfig {
+                max_reoptimizations: 1,
+                ..ReoptConfig::default()
+            },
+        );
+        let result = handle.recv();
+        assert!(result.is_some());
+        let r = result.expect("recv returned None");
+        assert!(r.improved_plan.is_some());
+        assert_eq!(
+            r.improved_plan.expect("no improved plan"),
+            RelExpr::scan("optimized")
+        );
+        assert!(r.completed);
+    }
+
+    #[test]
+    fn background_reoptimizer_failure() {
+        let plan = RelExpr::scan("t");
+        let handle = BackgroundReoptimizer::spawn(
+            plan,
+            HashMap::new(),
+            Box::new(FailingOptimizer),
+            ReoptConfig::default(),
+        );
+        let result = handle.recv();
+        assert!(result.is_some());
+        let r = result.expect("recv returned None");
+        assert!(r.improved_plan.is_none());
+        assert!(r.completed);
+        assert_eq!(r.attempts, 1);
+    }
+
+    #[test]
+    fn background_reoptimizer_cancel() {
+        let plan = RelExpr::scan("t");
+        let mut handle = BackgroundReoptimizer::spawn(
+            plan,
+            HashMap::new(),
+            Box::new(NoopOptimizer),
+            ReoptConfig::default(),
+        );
+        handle.cancel_and_join();
+        assert!(handle.is_finished());
+    }
+
+    #[test]
+    fn progressive_optimize_returns_quick_plan() {
+        let plan = RelExpr::scan("t");
+        let (quick, handle) = progressive_optimize(
+            plan.clone(),
+            HashMap::new(),
+            Box::new(NoopOptimizer),
+            ReoptConfig::default(),
+        );
+        assert_eq!(quick, plan);
+        let result = handle.recv();
+        assert!(result.is_some());
+    }
+}

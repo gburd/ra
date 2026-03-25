@@ -110,3 +110,99 @@ impl Session {
         &*self.adapter
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::adapter::{MockAdapter, QueryResult};
+
+    fn mock_results() -> Vec<QueryResult> {
+        vec![
+            QueryResult {
+                columns: vec!["id".into()],
+                rows: vec![vec!["1".into()]],
+                rows_affected: 0,
+            },
+            QueryResult {
+                columns: vec![],
+                rows: vec![],
+                rows_affected: 1,
+            },
+        ]
+    }
+
+    #[test]
+    fn session_name() {
+        let adapter = MockAdapter::new("test", vec![]);
+        let session = Session::new("s1", Box::new(adapter));
+        assert_eq!(session.name(), "s1");
+    }
+
+    #[test]
+    fn session_initial_steps_executed() {
+        let adapter = MockAdapter::new("test", vec![]);
+        let session = Session::new("s1", Box::new(adapter));
+        assert_eq!(session.steps_executed(), 0);
+    }
+
+    #[test]
+    fn session_is_blocked_delegates() {
+        let mut adapter = MockAdapter::new("test", vec![]);
+        adapter.set_blocked(true);
+        let session = Session::new("s1", Box::new(adapter));
+        assert!(session.is_blocked());
+    }
+
+    #[test]
+    fn session_backend_name() {
+        let adapter = MockAdapter::new("sqlite", vec![]);
+        let session = Session::new("s1", Box::new(adapter));
+        assert_eq!(session.backend_name(), "sqlite");
+    }
+
+    #[test]
+    fn session_execute_step_success() {
+        let adapter = MockAdapter::new("test", mock_results());
+        let mut session = Session::new("s1", Box::new(adapter));
+        let mut log = TestEventLog::new();
+        let step = StepDef {
+            name: "read_data".into(),
+            sql: "SELECT * FROM t".into(),
+            markers: vec![],
+        };
+        let result = session.execute_step(&step, &mut log);
+        assert!(result.is_ok());
+        assert_eq!(session.steps_executed(), 1);
+        assert_eq!(log.len(), 2); // StepStarted + StepCompleted
+    }
+
+    #[test]
+    fn session_execute_step_increments_counter() {
+        let adapter = MockAdapter::new("test", mock_results());
+        let mut session = Session::new("s1", Box::new(adapter));
+        let mut log = TestEventLog::new();
+        let step = StepDef {
+            name: "s".into(),
+            sql: "SELECT 1".into(),
+            markers: vec![],
+        };
+        let _ = session.execute_step(&step, &mut log);
+        let _ = session.execute_step(&step, &mut log);
+        assert_eq!(session.steps_executed(), 2);
+    }
+
+    #[test]
+    fn session_execute_sql() {
+        let adapter = MockAdapter::new("test", mock_results());
+        let mut session = Session::new("s1", Box::new(adapter));
+        let result = session.execute_sql("SELECT 1");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn session_adapter_returns_ref() {
+        let adapter = MockAdapter::new("test_backend", vec![]);
+        let session = Session::new("s1", Box::new(adapter));
+        assert_eq!(session.adapter().backend_name(), "test_backend");
+    }
+}

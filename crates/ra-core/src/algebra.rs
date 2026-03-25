@@ -1316,4 +1316,230 @@ mod tests {
         assert_eq!(cols.len(), 1);
         assert_eq!(cols[0].column, "x");
     }
+
+    // -- Additional children() coverage --
+
+    #[test]
+    fn children_project_one() {
+        let plan = RelExpr::Project {
+            columns: vec![],
+            input: Box::new(RelExpr::scan("t")),
+        };
+        assert_eq!(plan.children().len(), 1);
+    }
+
+    #[test]
+    fn children_aggregate_one() {
+        let plan = RelExpr::Aggregate {
+            group_by: vec![],
+            aggregates: vec![],
+            input: Box::new(RelExpr::scan("t")),
+        };
+        assert_eq!(plan.children().len(), 1);
+    }
+
+    #[test]
+    fn children_sort_one() {
+        let plan = RelExpr::Sort {
+            keys: vec![],
+            input: Box::new(RelExpr::scan("t")),
+        };
+        assert_eq!(plan.children().len(), 1);
+    }
+
+    #[test]
+    fn children_limit_one() {
+        let plan = RelExpr::scan("t").limit(10, 0);
+        assert_eq!(plan.children().len(), 1);
+    }
+
+    #[test]
+    fn children_union_two() {
+        let plan = RelExpr::Union {
+            all: true,
+            left: Box::new(RelExpr::scan("a")),
+            right: Box::new(RelExpr::scan("b")),
+        };
+        assert_eq!(plan.children().len(), 2);
+    }
+
+    #[test]
+    fn children_intersect_two() {
+        let plan = RelExpr::Intersect {
+            all: false,
+            left: Box::new(RelExpr::scan("a")),
+            right: Box::new(RelExpr::scan("b")),
+        };
+        assert_eq!(plan.children().len(), 2);
+    }
+
+    #[test]
+    fn children_except_two() {
+        let plan = RelExpr::Except {
+            all: false,
+            left: Box::new(RelExpr::scan("a")),
+            right: Box::new(RelExpr::scan("b")),
+        };
+        assert_eq!(plan.children().len(), 2);
+    }
+
+    #[test]
+    fn children_index_scan_empty() {
+        let plan = RelExpr::IndexScan {
+            table: "t".into(),
+            column: "id".into(),
+        };
+        assert!(plan.children().is_empty());
+    }
+
+    #[test]
+    fn children_unnest_with_input() {
+        let plan = RelExpr::Unnest {
+            expr: Expr::Column(ColumnRef::new("arr")),
+            alias: None,
+            input: Some(Box::new(RelExpr::scan("t"))),
+            with_ordinality: false,
+        };
+        assert_eq!(plan.children().len(), 1);
+    }
+
+    #[test]
+    fn children_unnest_without_input() {
+        let plan = RelExpr::Unnest {
+            expr: Expr::Column(ColumnRef::new("arr")),
+            alias: None,
+            input: None,
+            with_ordinality: false,
+        };
+        assert!(plan.children().is_empty());
+    }
+
+    #[test]
+    fn children_mv_scan_empty() {
+        let plan = RelExpr::MvScan {
+            view_name: "mv".into(),
+            alias: None,
+        };
+        assert!(plan.children().is_empty());
+    }
+
+    // -- Additional referenced_columns coverage --
+
+    #[test]
+    fn referenced_columns_scan_empty() {
+        let cols = RelExpr::scan("t").referenced_columns();
+        assert!(cols.is_empty());
+    }
+
+    #[test]
+    fn referenced_columns_join_condition() {
+        let plan = RelExpr::Join {
+            join_type: JoinType::Inner,
+            condition: Expr::BinOp {
+                op: ExprBinOp::Eq,
+                left: Box::new(Expr::Column(ColumnRef::new("x"))),
+                right: Box::new(Expr::Column(ColumnRef::new("y"))),
+            },
+            left: Box::new(RelExpr::scan("a")),
+            right: Box::new(RelExpr::scan("b")),
+        };
+        let cols = plan.referenced_columns();
+        assert_eq!(cols.len(), 2);
+    }
+
+    #[test]
+    fn referenced_columns_values() {
+        let plan = RelExpr::Values {
+            rows: vec![vec![
+                Expr::Column(ColumnRef::new("c1")),
+                Expr::Const(Const::Int(1)),
+            ]],
+        };
+        let cols = plan.referenced_columns();
+        assert_eq!(cols.len(), 1);
+        assert_eq!(cols[0].column, "c1");
+    }
+
+    // -- Additional references_cte coverage --
+
+    #[test]
+    fn references_cte_scan_match() {
+        assert!(RelExpr::scan("my_cte").references_cte("my_cte"));
+    }
+
+    #[test]
+    fn references_cte_scan_no_match() {
+        assert!(!RelExpr::scan("other").references_cte("my_cte"));
+    }
+
+    #[test]
+    fn references_cte_through_filter() {
+        let plan = RelExpr::scan("cte1")
+            .filter(Expr::Const(Const::Bool(true)));
+        assert!(plan.references_cte("cte1"));
+    }
+
+    #[test]
+    fn references_cte_through_union() {
+        let plan = RelExpr::Union {
+            all: true,
+            left: Box::new(RelExpr::scan("a")),
+            right: Box::new(RelExpr::scan("cte1")),
+        };
+        assert!(plan.references_cte("cte1"));
+        assert!(!plan.references_cte("missing"));
+    }
+
+    // -- Additional builder tests --
+
+    #[test]
+    fn scan_creates_scan_node() {
+        let plan = RelExpr::scan("users");
+        if let RelExpr::Scan { table, alias } = &plan {
+            assert_eq!(table, "users");
+            assert!(alias.is_none());
+        } else {
+            panic!("expected Scan");
+        }
+    }
+
+    #[test]
+    fn filter_chains_correctly() {
+        let plan = RelExpr::scan("t")
+            .filter(Expr::Const(Const::Bool(true)))
+            .filter(Expr::Const(Const::Bool(false)));
+        if let RelExpr::Filter { input, .. } = &plan {
+            assert!(matches!(input.as_ref(), RelExpr::Filter { .. }));
+        } else {
+            panic!("expected nested Filter");
+        }
+    }
+
+    #[test]
+    fn limit_builder_values() {
+        let plan = RelExpr::scan("t").limit(5, 10);
+        if let RelExpr::Limit { count, offset, .. } = &plan {
+            assert_eq!(*count, 5);
+            assert_eq!(*offset, 10);
+        } else {
+            panic!("expected Limit");
+        }
+    }
+
+    #[test]
+    fn join_type_display_all_variants() {
+        assert_eq!(JoinType::Inner.to_string(), "INNER");
+        assert_eq!(JoinType::LeftOuter.to_string(), "LEFT OUTER");
+        assert_eq!(JoinType::RightOuter.to_string(), "RIGHT OUTER");
+        assert_eq!(JoinType::FullOuter.to_string(), "FULL OUTER");
+        assert_eq!(JoinType::Cross.to_string(), "CROSS");
+        assert_eq!(JoinType::Semi.to_string(), "SEMI");
+        assert_eq!(JoinType::Anti.to_string(), "ANTI");
+    }
+
+    #[test]
+    fn sort_direction_display_variants() {
+        assert_eq!(SortDirection::Asc.to_string(), "ASC");
+        assert_eq!(SortDirection::Desc.to_string(), "DESC");
+    }
 }

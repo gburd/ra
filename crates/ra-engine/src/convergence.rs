@@ -303,4 +303,135 @@ mod tests {
         assert_eq!(stats.samples_collected, 2);
         assert!((stats.avg_unions_per_iteration - 7.5).abs() < 0.01);
     }
+
+    #[test]
+    fn default_settings() {
+        let detector = ConvergenceDetector::default_settings();
+        let stats = detector.stats();
+        assert_eq!(stats.window_size, 3);
+        assert_eq!(stats.samples_collected, 0);
+    }
+
+    #[test]
+    fn not_enough_data_continues() {
+        let mut detector = ConvergenceDetector::new(3, 0.05);
+        detector.record(IterationMetrics {
+            iteration: 0,
+            unions: 0,
+            total_nodes: 100,
+            total_classes: 50,
+        });
+        // Only 1 sample, window_size=3, should continue
+        assert_eq!(
+            detector.should_terminate(),
+            TerminationDecision::Continue
+        );
+    }
+
+    #[test]
+    fn window_evicts_old_samples() {
+        let mut detector = ConvergenceDetector::new(2, 0.05);
+        // Record 4 iterations: window should keep last 2
+        for i in 0..4 {
+            detector.record(IterationMetrics {
+                iteration: i,
+                unions: 10,
+                total_nodes: 100 + i * 50,
+                total_classes: 50,
+            });
+        }
+        let stats = detector.stats();
+        assert_eq!(stats.samples_collected, 2);
+    }
+
+    #[test]
+    fn stats_empty_detector() {
+        let detector = ConvergenceDetector::new(3, 0.05);
+        let stats = detector.stats();
+        assert_eq!(stats.samples_collected, 0);
+        assert!(stats.avg_unions_per_iteration.abs() < f64::EPSILON);
+        assert!(stats.avg_growth_rate.abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn mixed_progress_then_stall() {
+        let mut detector = ConvergenceDetector::new(2, 0.05);
+        // Good progress
+        detector.record(IterationMetrics {
+            iteration: 0,
+            unions: 20,
+            total_nodes: 100,
+            total_classes: 50,
+        });
+        detector.record(IterationMetrics {
+            iteration: 1,
+            unions: 15,
+            total_nodes: 200,
+            total_classes: 80,
+        });
+        assert_eq!(
+            detector.should_terminate(),
+            TerminationDecision::Continue
+        );
+
+        // Then stall
+        detector.record(IterationMetrics {
+            iteration: 2,
+            unions: 0,
+            total_nodes: 200,
+            total_classes: 80,
+        });
+        detector.record(IterationMetrics {
+            iteration: 3,
+            unions: 0,
+            total_nodes: 200,
+            total_classes: 80,
+        });
+        assert_eq!(
+            detector.should_terminate(),
+            TerminationDecision::Converged
+        );
+    }
+
+    #[test]
+    fn growth_with_zero_prev_nodes_skipped() {
+        let mut detector = ConvergenceDetector::new(2, 0.05);
+        detector.record(IterationMetrics {
+            iteration: 0,
+            unions: 5,
+            total_nodes: 0,
+            total_classes: 0,
+        });
+        detector.record(IterationMetrics {
+            iteration: 1,
+            unions: 5,
+            total_nodes: 100,
+            total_classes: 50,
+        });
+        // prev_nodes=0 should be skipped in growth calculation
+        assert_eq!(
+            detector.should_terminate(),
+            TerminationDecision::Continue
+        );
+    }
+
+    #[test]
+    fn convergence_stats_growth_rate() {
+        let mut detector = ConvergenceDetector::new(3, 0.05);
+        detector.record(IterationMetrics {
+            iteration: 0,
+            unions: 10,
+            total_nodes: 100,
+            total_classes: 50,
+        });
+        detector.record(IterationMetrics {
+            iteration: 1,
+            unions: 10,
+            total_nodes: 200,
+            total_classes: 80,
+        });
+        let stats = detector.stats();
+        // 100% growth from 100 to 200
+        assert!((stats.avg_growth_rate - 1.0).abs() < 0.01);
+    }
 }

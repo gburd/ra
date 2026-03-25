@@ -253,3 +253,420 @@ fn has_agg_below_join_rec(plan: &RelExpr, inside_join: bool) -> bool {
         _ => false,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ra_core::algebra::{AggregateExpr, AggregateFunction, JoinType};
+    use ra_core::expr::{BinOp, ColumnRef, Const};
+
+    fn eq_cond() -> Expr {
+        Expr::BinOp {
+            op: BinOp::Eq,
+            left: Box::new(Expr::Column(ColumnRef::new("id"))),
+            right: Box::new(Expr::Column(ColumnRef::new("id"))),
+        }
+    }
+
+    fn make_join(left: RelExpr, right: RelExpr, jt: JoinType) -> RelExpr {
+        RelExpr::Join {
+            join_type: jt,
+            condition: eq_cond(),
+            left: Box::new(left),
+            right: Box::new(right),
+        }
+    }
+
+    fn make_inner_join(left: RelExpr, right: RelExpr) -> RelExpr {
+        make_join(left, right, JoinType::Inner)
+    }
+
+    fn make_aggregate(input: RelExpr) -> RelExpr {
+        RelExpr::Aggregate {
+            group_by: vec![],
+            aggregates: vec![AggregateExpr {
+                function: AggregateFunction::Count,
+                arg: None,
+                distinct: false,
+                alias: Some("c".into()),
+            }],
+            input: Box::new(input),
+        }
+    }
+
+    // -- count_tables --
+
+    #[test]
+    fn count_tables_single_scan() {
+        assert_eq!(count_tables(&RelExpr::scan("t")), 1);
+    }
+
+    #[test]
+    fn count_tables_join() {
+        let plan = make_inner_join(RelExpr::scan("a"), RelExpr::scan("b"));
+        assert_eq!(count_tables(&plan), 2);
+    }
+
+    #[test]
+    fn count_tables_nested_joins() {
+        let inner = make_inner_join(RelExpr::scan("a"), RelExpr::scan("b"));
+        let outer = make_inner_join(inner, RelExpr::scan("c"));
+        assert_eq!(count_tables(&outer), 3);
+    }
+
+    #[test]
+    fn count_tables_through_filter() {
+        let plan = RelExpr::Filter {
+            predicate: Expr::Const(Const::Bool(true)),
+            input: Box::new(RelExpr::scan("t")),
+        };
+        assert_eq!(count_tables(&plan), 1);
+    }
+
+    #[test]
+    fn count_tables_union() {
+        let plan = RelExpr::Union {
+            all: true,
+            left: Box::new(RelExpr::scan("a")),
+            right: Box::new(RelExpr::scan("b")),
+        };
+        assert_eq!(count_tables(&plan), 2);
+    }
+
+    #[test]
+    fn count_tables_values_is_zero() {
+        let plan = RelExpr::Values {
+            rows: vec![vec![Expr::Const(Const::Int(1))]],
+        };
+        assert_eq!(count_tables(&plan), 0);
+    }
+
+    #[test]
+    fn count_tables_index_scan() {
+        let plan = RelExpr::IndexScan {
+            table: "t".into(),
+            column: "id".into(),
+        };
+        assert_eq!(count_tables(&plan), 1);
+    }
+
+    // -- count_joins --
+
+    #[test]
+    fn count_joins_no_joins() {
+        assert_eq!(count_joins(&RelExpr::scan("t")), 0);
+    }
+
+    #[test]
+    fn count_joins_single_join() {
+        let plan = make_inner_join(RelExpr::scan("a"), RelExpr::scan("b"));
+        assert_eq!(count_joins(&plan), 1);
+    }
+
+    #[test]
+    fn count_joins_nested() {
+        let inner = make_inner_join(RelExpr::scan("a"), RelExpr::scan("b"));
+        let outer = make_inner_join(inner, RelExpr::scan("c"));
+        assert_eq!(count_joins(&outer), 2);
+    }
+
+    #[test]
+    fn count_joins_through_filter_and_project() {
+        let plan = RelExpr::Filter {
+            predicate: Expr::Const(Const::Bool(true)),
+            input: Box::new(RelExpr::Project {
+                columns: vec![],
+                input: Box::new(make_inner_join(RelExpr::scan("a"), RelExpr::scan("b"))),
+            }),
+        };
+        assert_eq!(count_joins(&plan), 1);
+    }
+
+    // -- predicate_complexity --
+
+    #[test]
+    fn predicate_complexity_no_predicates() {
+        assert_eq!(predicate_complexity(&RelExpr::scan("t")), 0);
+    }
+
+    #[test]
+    fn predicate_complexity_simple_filter() {
+        let plan = RelExpr::Filter {
+            predicate: Expr::BinOp {
+                op: BinOp::Eq,
+                left: Box::new(Expr::Column(ColumnRef::new("a"))),
+                right: Box::new(Expr::Const(Const::Int(1))),
+            },
+            input: Box::new(RelExpr::scan("t")),
+        };
+        assert_eq!(predicate_complexity(&plan), 3); // binop + col + const
+    }
+
+    #[test]
+    fn predicate_complexity_join_condition() {
+        let plan = make_inner_join(RelExpr::scan("a"), RelExpr::scan("b"));
+        assert_eq!(predicate_complexity(&plan), 3); // binop + 2 columns
+    }
+
+    #[test]
+    fn predicate_complexity_nested() {
+        let inner = RelExpr::Filter {
+            predicate: Expr::Column(ColumnRef::new("x")),
+            input: Box::new(RelExpr::scan("t")),
+        };
+        let outer = RelExpr::Filter {
+            predicate: Expr::Column(ColumnRef::new("y")),
+            input: Box::new(inner),
+        };
+        assert_eq!(predicate_complexity(&outer), 2); // 1 + 1
+    }
+
+    // -- expr_complexity --
+
+    #[test]
+    fn expr_complexity_column() {
+        assert_eq!(
+            expr_complexity(&Expr::Column(ColumnRef::new("a"))),
+            1
+        );
+    }
+
+    #[test]
+    fn expr_complexity_const() {
+        assert_eq!(expr_complexity(&Expr::Const(Const::Int(42))), 1);
+    }
+
+    #[test]
+    fn expr_complexity_binop() {
+        let e = Expr::BinOp {
+            op: BinOp::Add,
+            left: Box::new(Expr::Const(Const::Int(1))),
+            right: Box::new(Expr::Const(Const::Int(2))),
+        };
+        assert_eq!(expr_complexity(&e), 3);
+    }
+
+    #[test]
+    fn expr_complexity_function() {
+        let e = Expr::Function {
+            name: "upper".into(),
+            args: vec![Expr::Column(ColumnRef::new("x"))],
+        };
+        assert_eq!(expr_complexity(&e), 2);
+    }
+
+    #[test]
+    fn expr_complexity_case() {
+        let e = Expr::Case {
+            operand: None,
+            when_clauses: vec![(
+                Expr::Const(Const::Bool(true)),
+                Expr::Const(Const::Int(1)),
+            )],
+            else_result: Some(Box::new(Expr::Const(Const::Int(0)))),
+        };
+        // 1 (case) + 1 + 1 (when clause) + 1 (else) = 4
+        assert_eq!(expr_complexity(&e), 4);
+    }
+
+    #[test]
+    fn expr_complexity_cast() {
+        let e = Expr::Cast {
+            expr: Box::new(Expr::Const(Const::Int(1))),
+            target_type: "text".into(),
+        };
+        assert_eq!(expr_complexity(&e), 2);
+    }
+
+    #[test]
+    fn expr_complexity_array() {
+        let e = Expr::Array(vec![
+            Expr::Const(Const::Int(1)),
+            Expr::Const(Const::Int(2)),
+        ]);
+        assert_eq!(expr_complexity(&e), 3);
+    }
+
+    #[test]
+    fn expr_complexity_array_index() {
+        let e = Expr::ArrayIndex(
+            Box::new(Expr::Column(ColumnRef::new("a"))),
+            Box::new(Expr::Const(Const::Int(0))),
+        );
+        assert_eq!(expr_complexity(&e), 3);
+    }
+
+    // -- contains_cross_join --
+
+    #[test]
+    fn contains_cross_join_yes() {
+        let plan = make_join(RelExpr::scan("a"), RelExpr::scan("b"), JoinType::Cross);
+        assert!(contains_cross_join(&plan));
+    }
+
+    #[test]
+    fn contains_cross_join_no() {
+        let plan = make_inner_join(RelExpr::scan("a"), RelExpr::scan("b"));
+        assert!(!contains_cross_join(&plan));
+    }
+
+    #[test]
+    fn contains_cross_join_nested() {
+        let inner = make_join(RelExpr::scan("a"), RelExpr::scan("b"), JoinType::Cross);
+        let outer = make_inner_join(inner, RelExpr::scan("c"));
+        assert!(contains_cross_join(&outer));
+    }
+
+    #[test]
+    fn contains_cross_join_through_filter() {
+        let plan = RelExpr::Filter {
+            predicate: Expr::Const(Const::Bool(true)),
+            input: Box::new(make_join(
+                RelExpr::scan("a"),
+                RelExpr::scan("b"),
+                JoinType::Cross,
+            )),
+        };
+        assert!(contains_cross_join(&plan));
+    }
+
+    // -- contains_correlated --
+
+    #[test]
+    fn contains_correlated_recursive_cte() {
+        let plan = RelExpr::RecursiveCTE {
+            name: "r".into(),
+            base_case: Box::new(RelExpr::scan("t")),
+            recursive_case: Box::new(RelExpr::scan("r")),
+            body: Box::new(RelExpr::scan("r")),
+            cycle_detection: None,
+        };
+        assert!(contains_correlated(&plan));
+    }
+
+    #[test]
+    fn contains_correlated_no() {
+        assert!(!contains_correlated(&RelExpr::scan("t")));
+    }
+
+    #[test]
+    fn contains_correlated_through_join() {
+        let plan = make_inner_join(
+            RelExpr::RecursiveCTE {
+                name: "r".into(),
+                base_case: Box::new(RelExpr::scan("t")),
+                recursive_case: Box::new(RelExpr::scan("r")),
+                body: Box::new(RelExpr::scan("r")),
+                cycle_detection: None,
+            },
+            RelExpr::scan("b"),
+        );
+        assert!(contains_correlated(&plan));
+    }
+
+    // -- has_agg_below_join --
+
+    #[test]
+    fn has_agg_below_join_yes() {
+        let plan = make_inner_join(
+            make_aggregate(RelExpr::scan("a")),
+            RelExpr::scan("b"),
+        );
+        assert!(has_agg_below_join(&plan));
+    }
+
+    #[test]
+    fn has_agg_below_join_no_agg_above_join() {
+        let plan = make_aggregate(make_inner_join(
+            RelExpr::scan("a"),
+            RelExpr::scan("b"),
+        ));
+        assert!(!has_agg_below_join(&plan));
+    }
+
+    #[test]
+    fn has_agg_below_join_no_join() {
+        let plan = make_aggregate(RelExpr::scan("t"));
+        assert!(!has_agg_below_join(&plan));
+    }
+
+    // -- PlanFingerprint --
+
+    #[test]
+    fn fingerprint_single_scan() {
+        let fp = PlanFingerprint::from_plan(&RelExpr::scan("t"));
+        assert_eq!(fp.table_bucket, 0); // 0-1 bucket
+        assert_eq!(fp.join_bucket, 0);
+        assert_eq!(fp.predicate_complexity, 0);
+        assert!(!fp.has_cross_join);
+        assert!(!fp.has_correlated_subquery);
+        assert!(!fp.has_early_aggregation);
+    }
+
+    #[test]
+    fn fingerprint_two_table_join() {
+        let plan = make_inner_join(RelExpr::scan("a"), RelExpr::scan("b"));
+        let fp = PlanFingerprint::from_plan(&plan);
+        assert_eq!(fp.table_bucket, 1); // 2-3 bucket
+        assert_eq!(fp.join_bucket, 1); // 1-2 bucket
+    }
+
+    #[test]
+    fn fingerprint_many_tables() {
+        let j1 = make_inner_join(RelExpr::scan("a"), RelExpr::scan("b"));
+        let j2 = make_inner_join(j1, RelExpr::scan("c"));
+        let j3 = make_inner_join(j2, RelExpr::scan("d"));
+        let j4 = make_inner_join(j3, RelExpr::scan("e"));
+        let j5 = make_inner_join(j4, RelExpr::scan("f"));
+        let j6 = make_inner_join(j5, RelExpr::scan("g"));
+        let plan = make_inner_join(j6, RelExpr::scan("h"));
+        let fp = PlanFingerprint::from_plan(&plan);
+        assert_eq!(fp.table_bucket, 3); // 7+ bucket
+        assert_eq!(fp.join_bucket, 3); // 6+ bucket
+    }
+
+    #[test]
+    fn fingerprint_with_cross_join() {
+        let plan = make_join(RelExpr::scan("a"), RelExpr::scan("b"), JoinType::Cross);
+        let fp = PlanFingerprint::from_plan(&plan);
+        assert!(fp.has_cross_join);
+    }
+
+    #[test]
+    fn fingerprint_with_early_aggregation() {
+        let plan = make_inner_join(
+            make_aggregate(RelExpr::scan("a")),
+            RelExpr::scan("b"),
+        );
+        let fp = PlanFingerprint::from_plan(&plan);
+        assert!(fp.has_early_aggregation);
+    }
+
+    #[test]
+    fn fingerprint_equality_same_structure() {
+        let plan = make_inner_join(RelExpr::scan("a"), RelExpr::scan("b"));
+        let fp1 = PlanFingerprint::from_plan(&plan);
+        let fp2 = PlanFingerprint::from_plan(&plan);
+        assert_eq!(fp1, fp2);
+    }
+
+    #[test]
+    fn fingerprint_hashable() {
+        use std::collections::HashSet;
+        let plan = make_inner_join(RelExpr::scan("a"), RelExpr::scan("b"));
+        let fp = PlanFingerprint::from_plan(&plan);
+        let mut set = HashSet::new();
+        set.insert(fp.clone());
+        assert!(set.contains(&fp));
+    }
+
+    #[test]
+    fn fingerprint_four_to_six_tables() {
+        let j1 = make_inner_join(RelExpr::scan("a"), RelExpr::scan("b"));
+        let j2 = make_inner_join(j1, RelExpr::scan("c"));
+        let j3 = make_inner_join(j2, RelExpr::scan("d"));
+        let plan = make_inner_join(j3, RelExpr::scan("e"));
+        let fp = PlanFingerprint::from_plan(&plan);
+        assert_eq!(fp.table_bucket, 2); // 4-6 bucket
+    }
+}
