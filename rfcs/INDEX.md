@@ -94,6 +94,16 @@ This index tracks all RFCs in the RA optimizer project by status. See [README.md
 | [0065](0065-time-series-query-optimization.md) | Time-Series Query Optimization | 2026-03-25 | Extension research |
 | [0066](0066-advanced-index-aware-planning.md) | Advanced Index-Aware Planning | 2026-03-25 | Extension research |
 | [0067](0067-full-text-search-optimization.md) | Full-Text Search Optimization | 2026-03-25 | Extension research |
+| [0068](text/0068-hardware-calibrated-cost-model.md) | Hardware-Calibrated Cost Model | 2026-03-25 | Adaptive optimization |
+| [0069](text/0069-execution-feedback-loop.md) | Execution Feedback Loop | 2026-03-25 | Adaptive optimization |
+| [0070](text/0070-memory-pressure-aware-joins.md) | Memory-Pressure-Aware Joins | 2026-03-25 | Adaptive optimization |
+| [0071](text/0071-workload-classification.md) | Workload Classification | 2026-03-25 | Adaptive optimization |
+| [0072](text/0072-adaptive-parallelism.md) | Adaptive Parallelism | 2026-03-25 | Adaptive optimization |
+| [0073](text/0073-buffer-pool-aware-planning.md) | Buffer Pool-Aware Planning | 2026-03-25 | Adaptive optimization |
+| [0074](text/0074-resource-aware-scheduling.md) | Resource-Aware Scheduling | 2026-03-25 | Adaptive optimization |
+| [0075](text/0075-multi-objective-cost-model.md) | Multi-Objective Cost Model | 2026-03-25 | Adaptive optimization |
+| [0076](text/0076-adaptive-mid-query-reoptimization.md) | Adaptive Mid-Query Re-Optimization | 2026-03-25 | Adaptive optimization |
+| [0077](text/0077-numa-aware-execution.md) | NUMA-Aware Execution | 2026-03-25 | Adaptive optimization |
 
 ## Rejected
 
@@ -103,12 +113,12 @@ This index tracks all RFCs in the RA optimizer project by status. See [README.md
 
 ## Statistics
 
-- **Total RFCs**: 68
-- **Implemented**: 18 (26%)
+- **Total RFCs**: 78
+- **Implemented**: 18 (23%)
 - **Underway**: 2 (3%)
-- **Accepted**: 12 (18%)
-- **Under Review**: 6 (9%)
-- **Proposed**: 30 (44%)
+- **Accepted**: 12 (15%)
+- **Under Review**: 6 (8%)
+- **Proposed**: 40 (51%)
 - **Rejected**: 0 (0%)
 
 ## Last Updated: 2026-03-25
