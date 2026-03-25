@@ -1378,6 +1378,7 @@ fn parse_index_type(type_name: &str) -> Option<ra_core::IndexType> {
         "gist" => Some(ra_core::IndexType::Gist),
         "spgist" => Some(ra_core::IndexType::SpGist),
         "brin" => Some(ra_core::IndexType::Brin),
+        "rum" => Some(ra_core::IndexType::Rum),
         _ => Some(ra_core::IndexType::Unknown),
     }
 }

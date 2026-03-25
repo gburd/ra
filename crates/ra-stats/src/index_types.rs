@@ -92,6 +92,17 @@ pub enum IndexType {
         /// Number of pages summarized per range entry.
         pages_per_range: u32,
     },
+    /// PostgreSQL RUM index (GIN extension with distance ordering).
+    RUM {
+        /// Indexed column (typically tsvector).
+        column: String,
+        /// Operator class (e.g. "rum_tsvector_ops",
+        /// "rum_tsvector_addon_ops").
+        opclass: String,
+        /// Optional addon column for combined ordering
+        /// (used with rum_tsvector_addon_ops).
+        addon_column: Option<String>,
+    },
     /// Bitmap index for low-cardinality columns.
     Bitmap {
         /// Indexed columns.
@@ -122,7 +133,8 @@ impl IndexType {
             Self::Spatial { column, .. }
             | Self::GIN { column, .. }
             | Self::GiST { column, .. }
-            | Self::BRIN { column, .. } => {
+            | Self::BRIN { column, .. }
+            | Self::RUM { column, .. } => {
                 std::slice::from_ref(column)
             }
             Self::Expression { backing_type, .. } => {
@@ -232,6 +244,20 @@ impl IndexCostFactors {
             lookup_cost: 3.0,
             range_scan_cost: 0.5,
             tuple_fetch_cost: 2.0,
+            covering: false,
+        }
+    }
+
+    /// Default cost factors for a RUM index.
+    ///
+    /// RUM extends GIN with distance ordering capability. Lookup cost
+    /// is slightly higher (wider posting entries), but range scan cost
+    /// is lower for ordered retrieval since results come pre-sorted.
+    pub fn rum_default() -> Self {
+        Self {
+            lookup_cost: 3.5,
+            range_scan_cost: 0.3,
+            tuple_fetch_cost: 1.8,
             covering: false,
         }
     }

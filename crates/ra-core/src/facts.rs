@@ -121,6 +121,8 @@ pub enum IndexType {
     SpGist,
     /// BRIN (Block Range Index)
     Brin,
+    /// RUM (GIN extension with distance ordering)
+    Rum,
     /// Bitmap index
     Bitmap,
     /// Unknown or unsupported index type
