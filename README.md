@@ -72,7 +72,7 @@ cargo test --all-features
 
 ### Without Nix
 
-Requirements: Rust 1.85+ with cargo
+Requirements: Rust 1.88+ with cargo
 
 ```bash
 cargo build --release
