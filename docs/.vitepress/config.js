@@ -64,7 +64,11 @@ export default withMermaid(defineConfig({
       'aggregation-analyzer': 'sql',
       'dialect-translator': 'sql',
       'window-explorer': 'sql',
-      'feature-matrix': 'markdown'
+      'feature-matrix': 'markdown',
+      // Query language aliases (not natively supported by shiki)
+      'promql': 'yaml',    // Prometheus Query Language - YAML-like syntax
+      'flux': 'sql',       // InfluxDB Flux - SQL-like syntax
+      'gremlin': 'groovy'  // Apache TinkerPop Gremlin - Groovy-based
     },
     config: (md) => {
       md.use(katex)
