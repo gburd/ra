@@ -731,6 +731,7 @@ impl DatabaseAdapter for StoolapAdapter {
             // only write to our own facts cache which has no
             // invariants beyond HashMap correctness.
             #[allow(clippy::cast_ref_to_mut)]
+            #[allow(invalid_reference_casting)]
             let this = unsafe {
                 &mut *(std::ptr::from_ref(self)
                     as *mut Self)
@@ -756,6 +757,7 @@ impl DatabaseAdapter for StoolapAdapter {
         #[cfg(feature = "stoolap")]
         {
             #[allow(clippy::cast_ref_to_mut)]
+            #[allow(invalid_reference_casting)]
             let this = unsafe {
                 &mut *(std::ptr::from_ref(self)
                     as *mut Self)
@@ -780,6 +782,7 @@ impl DatabaseAdapter for StoolapAdapter {
         #[cfg(feature = "stoolap")]
         {
             #[allow(clippy::cast_ref_to_mut)]
+            #[allow(invalid_reference_casting)]
             let this = unsafe {
                 &mut *(std::ptr::from_ref(self)
                     as *mut Self)

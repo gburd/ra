@@ -945,6 +945,7 @@ impl DatabaseAdapter for PostgresAdapter {
         #[cfg(feature = "postgres")]
         {
             #[allow(clippy::cast_ref_to_mut)]
+            #[allow(invalid_reference_casting)]
             let this = unsafe {
                 &mut *(std::ptr::from_ref(self)
                     as *mut Self)
@@ -969,6 +970,7 @@ impl DatabaseAdapter for PostgresAdapter {
         #[cfg(feature = "postgres")]
         {
             #[allow(clippy::cast_ref_to_mut)]
+            #[allow(invalid_reference_casting)]
             let this = unsafe {
                 &mut *(std::ptr::from_ref(self)
                     as *mut Self)

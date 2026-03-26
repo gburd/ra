@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 
-use odbc_api::{Connection, ConnectionOptions, Cursor, Environment};
+use odbc_api::{Connection, ConnectionOptions, Cursor, Environment, IntoParameter};
 
 use crate::connector::{DatabaseConnector, MetadataResult};
 use crate::error::MetadataError;
@@ -16,8 +16,8 @@ use crate::explain::{
     ExplainNode, ExplainPlan, NodeType,
 };
 use crate::schema::{
-    ColumnInfo, ColumnStatistics, ConstraintInfo, ConstraintKind,
-    DatabaseKind, IndexInfo, SchemaInfo, TableInfo, TableStats,
+    ColumnInfo, ConstraintInfo, ConstraintKind,
+    DatabaseKind, SchemaInfo, TableInfo, TableStats,
 };
 
 /// `MonetDB` connector using the `odbc-api` crate.
@@ -114,7 +114,7 @@ impl MonetDBConnector {
              ORDER BY name";
 
         let mut cursor = conn
-            .execute(sql, &self.schema.as_str().into())
+            .execute(sql, &self.schema.as_str().into_parameter())
             .map_err(|e| MetadataError::Query {
                 message: format!(
                     "failed to list tables: {e}"
@@ -136,15 +136,12 @@ impl MonetDBConnector {
             })?
         {
             buf.clear();
-            if let Some(name) = row
-                .get_text(1, &mut buf)
-                .ok()
-                .flatten()
-            {
+            if row.get_text(1, &mut buf).ok() == Some(true) {
                 tables.push(
-                    String::from_utf8_lossy(name).to_string(),
+                    String::from_utf8_lossy(&buf).to_string(),
                 );
             }
+            buf.clear();
         }
         Ok(tables)
     }
@@ -164,13 +161,11 @@ impl MonetDBConnector {
              WHERE s.name = ? AND t.name = ? \
              ORDER BY c.number";
 
-        let params = (
-            self.schema.as_str().into(),
-            table.into(),
-        );
-
         let mut cursor = conn
-            .execute(sql, &params)
+            .execute(sql, (
+                    &self.schema.as_str().into_parameter(),
+                    &table.into_parameter(),
+                ))
             .map_err(|e| MetadataError::Query {
                 message: format!(
                     "failed to query columns for {table}: {e}"
@@ -193,53 +188,48 @@ impl MonetDBConnector {
             })?
         {
             buf.clear();
-            let name = row
-                .get_text(1, &mut buf)
-                .ok()
-                .flatten()
-                .map(|b| {
-                    String::from_utf8_lossy(b).to_string()
-                })
+            buf.clear();
+                let name = if row.get_text(1, &mut buf).ok() == Some(true) {
+                    Some(String::from_utf8_lossy(&buf).to_string())
+                } else {
+                    None
+                }
                 .unwrap_or_default();
 
             buf.clear();
-            let data_type = row
-                .get_text(2, &mut buf)
-                .ok()
-                .flatten()
-                .map(|b| {
-                    String::from_utf8_lossy(b).to_string()
-                })
+            buf.clear();
+                let data_type = if row.get_text(2, &mut buf).ok() == Some(true) {
+                    Some(String::from_utf8_lossy(&buf).to_string())
+                } else {
+                    None
+                }
                 .unwrap_or_default();
 
             buf.clear();
-            let nullable_str = row
-                .get_text(3, &mut buf)
-                .ok()
-                .flatten()
-                .map(|b| {
-                    String::from_utf8_lossy(b).to_string()
-                })
+            buf.clear();
+                let nullable_str = if row.get_text(3, &mut buf).ok() == Some(true) {
+                    Some(String::from_utf8_lossy(&buf).to_string())
+                } else {
+                    None
+                }
                 .unwrap_or_default();
 
             buf.clear();
-            let number_str = row
-                .get_text(4, &mut buf)
-                .ok()
-                .flatten()
-                .map(|b| {
-                    String::from_utf8_lossy(b).to_string()
-                })
+            buf.clear();
+                let number_str = if row.get_text(4, &mut buf).ok() == Some(true) {
+                    Some(String::from_utf8_lossy(&buf).to_string())
+                } else {
+                    None
+                }
                 .unwrap_or_default();
 
             buf.clear();
-            let default_value = row
-                .get_text(5, &mut buf)
-                .ok()
-                .flatten()
-                .map(|b| {
-                    String::from_utf8_lossy(b).to_string()
-                });
+            buf.clear();
+                let default_value = if row.get_text(5, &mut buf).ok() == Some(true) {
+                    Some(String::from_utf8_lossy(&buf).to_string())
+                } else {
+                    None
+                };
 
             let ordinal: u32 =
                 number_str.parse().unwrap_or(0);
@@ -272,13 +262,12 @@ impl MonetDBConnector {
              WHERE s.name = ? AND t.name = ? \
              GROUP BY k.name, k.type";
 
-        let params = (
-            self.schema.as_str().into(),
-            table.into(),
-        );
 
         let result = conn
-            .execute(sql, &params)
+            .execute(sql, (
+                    &self.schema.as_str().into_parameter(),
+                    &table.into_parameter(),
+                ))
             .map_err(|e| MetadataError::Query {
                 message: format!(
                     "failed to query keys for {table}: {e}"
@@ -300,33 +289,30 @@ impl MonetDBConnector {
             })?
         {
             buf.clear();
-            let name = row
-                .get_text(1, &mut buf)
-                .ok()
-                .flatten()
-                .map(|b| {
-                    String::from_utf8_lossy(b).to_string()
-                })
+            buf.clear();
+                let name = if row.get_text(1, &mut buf).ok() == Some(true) {
+                    Some(String::from_utf8_lossy(&buf).to_string())
+                } else {
+                    None
+                }
                 .unwrap_or_default();
 
             buf.clear();
-            let key_type = row
-                .get_text(2, &mut buf)
-                .ok()
-                .flatten()
-                .map(|b| {
-                    String::from_utf8_lossy(b).to_string()
-                })
+            buf.clear();
+                let key_type = if row.get_text(2, &mut buf).ok() == Some(true) {
+                    Some(String::from_utf8_lossy(&buf).to_string())
+                } else {
+                    None
+                }
                 .unwrap_or_default();
 
             buf.clear();
-            let cols_str = row
-                .get_text(3, &mut buf)
-                .ok()
-                .flatten()
-                .map(|b| {
-                    String::from_utf8_lossy(b).to_string()
-                })
+            buf.clear();
+                let cols_str = if row.get_text(3, &mut buf).ok() == Some(true) {
+                    Some(String::from_utf8_lossy(&buf).to_string())
+                } else {
+                    None
+                }
                 .unwrap_or_default();
 
             // MonetDB key types: 0=pkey, 1=unique, 2=fkey
@@ -368,13 +354,12 @@ impl MonetDBConnector {
              WHERE schema = ? AND table = ? \
              GROUP BY schema, \"table\"";
 
-        let params = (
-            self.schema.as_str().into(),
-            table.into(),
-        );
 
         let result = conn
-            .execute(sql, &params)
+            .execute(sql, (
+                    &self.schema.as_str().into_parameter(),
+                    &table.into_parameter(),
+                ))
             .map_err(|e| MetadataError::Query {
                 message: format!(
                     "failed to query stats for {table}: {e}"
@@ -395,23 +380,21 @@ impl MonetDBConnector {
             })?
         {
             buf.clear();
-            let count_str = row
-                .get_text(1, &mut buf)
-                .ok()
-                .flatten()
-                .map(|b| {
-                    String::from_utf8_lossy(b).to_string()
-                })
+            buf.clear();
+                let count_str = if row.get_text(1, &mut buf).ok() == Some(true) {
+                    Some(String::from_utf8_lossy(&buf).to_string())
+                } else {
+                    None
+                }
                 .unwrap_or_default();
 
             buf.clear();
-            let size_str = row
-                .get_text(2, &mut buf)
-                .ok()
-                .flatten()
-                .map(|b| {
-                    String::from_utf8_lossy(b).to_string()
-                })
+            buf.clear();
+                let size_str = if row.get_text(2, &mut buf).ok() == Some(true) {
+                    Some(String::from_utf8_lossy(&buf).to_string())
+                } else {
+                    None
+                }
                 .unwrap_or_default();
 
             let rows: f64 =
@@ -517,13 +500,10 @@ impl MonetDBConnector {
             })?
         {
             buf.clear();
-            if let Some(text) = row
-                .get_text(1, &mut buf)
-                .ok()
-                .flatten()
-            {
+            buf.clear();
+            if row.get_text(1, &mut buf).ok() == Some(true) {
                 lines.push(
-                    String::from_utf8_lossy(text).to_string(),
+                    String::from_utf8_lossy(&buf).to_string(),
                 );
             }
         }

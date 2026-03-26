@@ -589,7 +589,7 @@ mod tests {
 
     #[test]
     fn all_dialects_count() {
-        assert_eq!(Dialect::ALL.len(), 6);
+        assert_eq!(Dialect::ALL.len(), 32);
     }
 
     #[test]
