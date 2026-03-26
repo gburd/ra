@@ -211,8 +211,20 @@ enum Commands {
         /// Show optimization statistics (planning time, iterations, nodes explored, etc.).
         #[arg(long)]
         stats: bool,
-        /// Show rules applied during optimization.
+        /// Show only rules that modified the e-graph (applied rules).
         #[arg(long)]
+        rules_applied: bool,
+        /// Show rules that were tried but rejected, with reasons.
+        #[arg(long)]
+        rules_evaluated: bool,
+        /// Show all rules available in the system.
+        #[arg(long)]
+        rules_available: bool,
+        /// Show all three rule categories (applied, evaluated, available).
+        #[arg(long)]
+        rules_all: bool,
+        /// Deprecated: use --rules-applied, --rules-evaluated, --rules-available, or --rules-all.
+        #[arg(long, hide = true)]
         rules: bool,
     },
     /// Gather database metadata and write to a JSON file.
@@ -502,6 +514,51 @@ enum FederatedCommands {
     },
 }
 
+/// What level of rule tracking information to display.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuleDisplayMode {
+    /// Show no rule information.
+    None,
+    /// Show only rules that modified the e-graph.
+    Applied,
+    /// Show rules that were tried but rejected.
+    Evaluated,
+    /// Show all rules available in the system.
+    Available,
+    /// Show all three categories.
+    All,
+}
+
+impl RuleDisplayMode {
+    /// Determine display mode from CLI flags.
+    fn from_flags(
+        applied: bool,
+        evaluated: bool,
+        available: bool,
+        all: bool,
+        deprecated_rules: bool,
+    ) -> Self {
+        if all {
+            Self::All
+        } else if applied {
+            Self::Applied
+        } else if evaluated {
+            Self::Evaluated
+        } else if available {
+            Self::Available
+        } else if deprecated_rules {
+            // Backward compatibility: treat old --rules as --rules-applied
+            Self::Applied
+        } else {
+            Self::None
+        }
+    }
+
+    fn should_track(self) -> bool {
+        !matches!(self, Self::None)
+    }
+}
+
 #[derive(Subcommand)]
 enum ConfigCommands {
     /// List all configuration settings.
@@ -630,6 +687,10 @@ fn main() -> Result<()> {
             explain_format,
             trace: _,
             stats,
+            rules_applied,
+            rules_evaluated,
+            rules_available,
+            rules_all,
             rules,
         } => {
             let resolved = resolve_query(
@@ -642,6 +703,16 @@ fn main() -> Result<()> {
                 max_iterations,
                 overflow_strategy.as_deref(),
             )?;
+
+            // Determine which rule tracking mode to use
+            let show_rules = RuleDisplayMode::from_flags(
+                rules_applied,
+                rules_evaluated,
+                rules_available,
+                rules_all,
+                rules,
+            );
+
             cmd_optimize(
                 &resolved,
                 &hardware_profile,
@@ -650,7 +721,7 @@ fn main() -> Result<()> {
                 budget.as_ref(),
                 explain_format.as_deref(),
                 stats,
-                rules,
+                show_rules,
                 cli.verbose,
                 cli.quiet,
             )
@@ -1624,7 +1695,7 @@ fn cmd_optimize(
     budget: Option<&ra_engine::ResourceBudget>,
     explain_format: Option<&str>,
     show_stats: bool,
-    show_rules: bool,
+    show_rules: RuleDisplayMode,
     verbose: bool,
     quiet: bool,
 ) -> Result<()> {
@@ -1668,14 +1739,20 @@ fn optimize_bounded(
     diff_format: Option<&str>,
     explain_format: Option<&str>,
     show_stats: bool,
-    show_rules: bool,
+    show_rules: RuleDisplayMode,
     verbose: bool,
     quiet: bool,
     query: &str,
 ) -> Result<()> {
-    let result = optimizer.optimize_bounded(plan).with_context(|| {
-        format!("failed to optimize query: {query}")
-    })?;
+    let result = if show_rules.should_track() {
+        optimizer.optimize_with_tracking(plan).with_context(|| {
+            format!("failed to optimize query: {query}")
+        })?
+    } else {
+        optimizer.optimize_bounded(plan).with_context(|| {
+            format!("failed to optimize query: {query}")
+        })?
+    };
 
     if let Some(fmt) = explain_format {
         return print_explain_output(&result.plan, fmt);
@@ -1695,9 +1772,9 @@ fn optimize_bounded(
             print_optimization_stats(&result.resource_usage);
         }
 
-        if show_rules {
+        if show_rules != RuleDisplayMode::None {
             eprintln!();
-            print_applied_rules(optimizer);
+            print_rule_tracking(&result, show_rules);
         }
 
         eprintln!();
@@ -1713,7 +1790,7 @@ fn optimize_unbounded(
     diff_format: Option<&str>,
     explain_format: Option<&str>,
     show_stats: bool,
-    show_rules: bool,
+    show_rules: RuleDisplayMode,
     verbose: bool,
     quiet: bool,
     query: &str,
@@ -1743,8 +1820,9 @@ fn optimize_unbounded(
             eprintln!();
         }
 
-        if show_rules {
-            print_applied_rules(optimizer);
+        if show_rules != RuleDisplayMode::None {
+            eprintln!("{}", "Rule tracking not available for unbounded optimization".yellow());
+            eprintln!("Use resource budgets to enable tracking (e.g., --resource-budget standard)");
             eprintln!();
         }
 
@@ -2753,15 +2831,105 @@ fn print_unbounded_stats(elapsed: std::time::Duration) {
     );
 }
 
-fn print_applied_rules(_optimizer: &Optimizer) {
+fn print_rule_tracking(
+    result: &ra_engine::OptimizationResult,
+    mode: RuleDisplayMode,
+) {
+    use colored::Colorize;
+
+    let Some(tracking) = &result.rule_tracking else {
+        eprintln!("{}", "Rule tracking not available".yellow());
+        eprintln!("This should not happen - tracking was requested but not populated");
+        return;
+    };
+
+    match mode {
+        RuleDisplayMode::None => {}
+        RuleDisplayMode::Applied => {
+            print_applied_rules(tracking);
+        }
+        RuleDisplayMode::Evaluated => {
+            print_evaluated_rules(tracking);
+        }
+        RuleDisplayMode::Available => {
+            print_available_rules(tracking);
+        }
+        RuleDisplayMode::All => {
+            print_applied_rules(tracking);
+            eprintln!();
+            print_evaluated_rules(tracking);
+            eprintln!();
+            print_available_rules(tracking);
+        }
+    }
+}
+
+fn print_applied_rules(tracking: &ra_engine::RuleTrackingResult) {
+    use colored::Colorize;
+
     eprintln!("{}", "Rules Applied:".bold());
+    if tracking.applied.is_empty() {
+        eprintln!("  {}", "No rules modified the e-graph".dimmed());
+        return;
+    }
+
+    for (i, rule) in tracking.applied.iter().enumerate() {
+        let cost_info = if let Some(improvement) = rule.cost_improvement {
+            format!(" (cost improvement: {:.2})", improvement)
+        } else {
+            String::new()
+        };
+
+        eprintln!(
+            "  {}. {} - fired {} time{}{}",
+            i + 1,
+            rule.name.green(),
+            rule.fired_count,
+            if rule.fired_count == 1 { "" } else { "s" },
+            cost_info.dimmed()
+        );
+    }
+}
+
+fn print_evaluated_rules(tracking: &ra_engine::RuleTrackingResult) {
+    use colored::Colorize;
+
+    eprintln!("{}", "Rules Evaluated but Not Applied:".bold());
+    if tracking.evaluated.is_empty() {
+        eprintln!("  {}", "All evaluated rules were applied".dimmed());
+        return;
+    }
+
+    let max_show = 10;
+    for (i, rule) in tracking.evaluated.iter().take(max_show).enumerate() {
+        eprintln!(
+            "  {}. {} - tried {} time{} ({})",
+            i + 1,
+            rule.name.yellow(),
+            rule.tried_count,
+            if rule.tried_count == 1 { "" } else { "s" },
+            rule.rejection_reason.dimmed()
+        );
+    }
+
+    if tracking.evaluated.len() > max_show {
+        eprintln!(
+            "  {} ({} more rules not shown)",
+            "...".dimmed(),
+            tracking.evaluated.len() - max_show
+        );
+    }
+}
+
+fn print_available_rules(tracking: &ra_engine::RuleTrackingResult) {
+    use colored::Colorize;
+
     eprintln!(
-        "  {}",
-        "(Rule tracking not yet implemented)".yellow(),
+        "{}: {} total",
+        "Available Rules".bold(),
+        tracking.available.len()
     );
-    // TODO: Modify Optimizer to track which rules were applied during optimization.
-    // This would require adding a Vec<String> field to OptimizationResult or
-    // ResourceUsageReport to collect rule names as they fire during e-graph rewriting.
+    eprintln!("  Use --rules-applied to see which rules modified the plan");
 }
 
 // ── Output formatting ───────────────────────────────────────

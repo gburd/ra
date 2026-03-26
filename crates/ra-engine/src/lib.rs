@@ -111,6 +111,7 @@ pub use differential::{
 pub use egraph::{
     to_rec_expr, EGraphError, IncrementalStats, OptimizationResult,
     OptimizationStatus, Optimizer, OptimizerConfig, RelLang,
+    RuleApplication, RuleEvaluation, RuleTrackingResult,
 };
 pub use extract::{extract_best, extract_best_with_staleness, extract_best_with_cardinality, rec_expr_to_rel_expr, RelCostFn};
 pub use memo::{structural_hash, MemoTable};
