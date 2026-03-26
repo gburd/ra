@@ -1,0 +1,291 @@
+---
+id: inverted-index-for-fulltext
+name: Inverted Index for Full-Text Search
+category: physical/index-selection
+databases: [postgresql, documentdb]
+execution_models: [volcano]
+hardware: [cpu]
+version: "2.0.0"
+authors: ["RA Contributors"]
+tags: [index, inverted, fulltext, search, ranking, generic]
+complexity: "O(log n + k)"
+benefit_range: [0.5, 0.99]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter (text-search ?col ?query) (scan ?table))"
+    description: "Full-text search with inverted index"
+  - type: "predicate"
+    condition: "has_index_supporting(?table, ?col, 'full_text_search')"
+    description: "Any inverted index supporting full-text (GIN, RUM)"
+  - type: "capability"
+    database: "current"
+    requires: "fulltext_index"
+    description: "Database supports full-text indexes"
+---
+
+# Inverted Index for Full-Text Search
+
+## Description
+
+Uses a database-agnostic inverted index for full-text search operations.
+The optimizer automatically selects the best available index type based
+on query characteristics (boolean match, ranked retrieval, phrase search).
+
+**Database Support:**
+- PostgreSQL GIN: Boolean matches, no ordering
+- PostgreSQL RUM: Ranked retrieval, phrase search, distance ordering
+- DocumentDB RUM: $text search with BSON integration
+
+**When to apply**: A query uses text search operators (@@, to_tsquery,
+$text) on a column with a full-text index.
+
+**Why it works**: Full-text indexes tokenize documents and build posting
+lists mapping terms to documents. Query evaluation intersects posting
+lists instead of scanning all documents.
+
+## Query Type Classification
+
+The optimizer classifies full-text queries to choose the best index:
+
+1. **Boolean Match**: `tsvector @@ tsquery` without ORDER BY
+   - **Best**: GIN (narrower postings)
+   - **Fallback**: RUM (slightly slower due to wider postings)
+
+2. **Ranked Retrieval**: Boolean match with ORDER BY ts_rank
+   - **Best**: RUM (distance-ordered scan avoids external sort)
+   - **Fallback**: GIN + sort (10x-100x slower for top-K queries)
+
+3. **Phrase Search**: Query uses <-> proximity operator
+   - **Best**: RUM (in-index position verification)
+   - **Fallback**: GIN (requires heap recheck for every candidate)
+
+4. **Timestamp-Ordered**: Text search with ORDER BY timestamp
+   - **Best**: RUM with addon ops (single scan for both)
+   - **Fallback**: GIN + sort
+
+## Relational Algebra
+
+```latex
+$$
+filter[tsv @@ query](scan[T])
+  \rightarrow inverted_index_scan[I](tsv, @@, query)
+  \text{where} I is any full-text index on column tsv
+$$
+
+$$
+sort[ts_rank(tsv, query)](filter[tsv @@ query](scan[T])) LIMIT k
+  \rightarrow inverted_index_ranked_scan[I](tsv, query, k)
+  \text{if} I supports distance ordering (RUM)
+$$
+
+```
+
+## Implementation
+
+```rust
+use ra_stats::index_metadata::{find_indexes_supporting, IndexOperation};
+
+// Generic rule: discovers index type at runtime
+rw!("inverted-index-for-fulltext-boolean";
+    "(filter (text-search ?col ?query) (scan ?table))" =>
+    "(index-scan ?index ?col text-search ?query)"
+    if has_index_supporting("?table", "?col", IndexOperation::FullTextSearch)
+),
+
+rw!("inverted-index-for-fulltext-ranked";
+    "(limit ?k (sort (ts-rank ?col ?query)
+        (filter (text-search ?col ?query) (scan ?table))))" =>
+    "(inverted-index-ranked-scan ?index ?col ?query ?k)"
+    if has_index_supporting("?table", "?col", IndexOperation::FullTextSearch)
+    if index_supports_distance_ordering("?index")
+),
+
+rw!("inverted-index-for-phrase-search";
+    "(filter (phrase-search ?col ?phrase) (scan ?table))" =>
+    "(index-scan ?index ?col phrase-search ?phrase)"
+    if has_index_supporting("?table", "?col", IndexOperation::PhraseSearch)
+),
+```
+
+## Cost Model
+
+Cost models differ based on query type and available index:
+
+```rust
+let indexes = find_indexes_supporting(table, col, IndexOperation::FullTextSearch);
+
+// For boolean matches
+if query.is_boolean_match() {
+    // GIN is slightly faster (narrower postings)
+    let gin_cost = 3.0 + matching_rows * 2.5;
+    let rum_cost = 3.5 + matching_rows * 2.8;
+    return gin_cost; // Prefer GIN if available
+}
+
+// For ranked retrieval with LIMIT
+if query.is_ranked_retrieval() && query.has_limit() {
+    match best_index.access_method {
+        IndexAccessMethod::GIN => {
+            // GIN: scan all matches + compute rank + sort + limit
+            let scan = 3.0 + matching_rows * 2.5;
+            let rank = matching_rows * 0.1;
+            let sort = matching_rows * log2(matching_rows) * 0.01;
+            scan + rank + sort
+        }
+        IndexAccessMethod::RUM => {
+            // RUM: distance-ordered scan visits ~k entries
+            let k = query.limit.unwrap() as f64;
+            let visit = k * 1.2; // Overfetch buffer
+            3.5 + visit * 1.8
+        }
+    }
+}
+
+// For phrase search
+if query.is_phrase_search() {
+    match best_index.access_method {
+        IndexAccessMethod::GIN => {
+            // GIN: scan + heap recheck for each candidate
+            3.0 + matching_rows * 3.5
+        }
+        IndexAccessMethod::RUM => {
+            // RUM: in-index phrase verification
+            3.5 + matching_rows * 0.1
+        }
+    }
+}
+```
+
+## Test Cases
+
+### Positive: Boolean match (PostgreSQL GIN)
+
+```sql
+CREATE INDEX idx_articles_tsv ON articles USING GIN(body_tsv);
+
+SELECT * FROM articles WHERE body_tsv @@ to_tsquery('postgresql & optimization');
+
+-- GIN is optimal for pure boolean matches
+```
+
+### Positive: Ranked retrieval (PostgreSQL RUM)
+
+```sql
+CREATE INDEX idx_articles_tsv_rum ON articles
+USING RUM(body_tsv rum_tsvector_ops);
+
+SELECT title, ts_rank(body_tsv, query) AS rank
+FROM articles, to_tsquery('postgresql & optimization') query
+WHERE body_tsv @@ query
+ORDER BY rank DESC
+LIMIT 10;
+
+-- RUM provides distance-ordered scan, avoiding external sort
+-- 10-100x faster than GIN for top-K queries
+```
+
+### Positive: Phrase search (PostgreSQL RUM)
+
+```sql
+CREATE INDEX idx_articles_tsv_rum ON articles
+USING RUM(body_tsv rum_tsvector_ops);
+
+SELECT * FROM articles
+WHERE body_tsv @@ to_tsquery('query <-> optimization');
+
+-- RUM verifies phrase positions in-index
+-- GIN requires heap recheck for every candidate
+```
+
+### Positive: Timestamp-ordered text search (PostgreSQL RUM addon)
+
+```sql
+CREATE INDEX idx_articles_tsv_rum_addon ON articles
+USING RUM(body_tsv rum_tsvector_addon_ops, created_at)
+WITH (attach = 'created_at', to = 'body_tsv');
+
+SELECT * FROM articles
+WHERE body_tsv @@ to_tsquery('postgresql')
+ORDER BY created_at DESC
+LIMIT 20;
+
+-- RUM addon provides both text search and timestamp ordering
+-- Single index scan, no sort step needed
+```
+
+### Positive: DocumentDB $text search
+
+```sql
+-- DocumentDB automatically uses RUM fork for $text
+db.articles.createIndex({ content: "text" });
+
+db.articles.find(
+  { $text: { $search: "database optimization" } },
+  { score: { $meta: "textScore" } }
+).sort({ score: { $meta: "textScore" } }).limit(10);
+
+-- DocumentDB RUM fork provides ranked retrieval
+```
+
+## Automatic Index Selection
+
+The optimizer automatically selects the best index for the query:
+
+| Query Type | Available Indexes | Selection |
+|------------|-------------------|-----------|
+| Boolean match | GIN, RUM | GIN (10-20% faster) |
+| Ranked top-K | GIN, RUM | RUM (10-100x faster) |
+| Phrase search | GIN, RUM | RUM (5-50x faster) |
+| Boolean match | RUM only | RUM (acceptable) |
+| Ranked top-K | GIN only | GIN + sort (degraded) |
+| Timestamp-ordered | RUM addon | RUM addon (optimal) |
+| Timestamp-ordered | GIN, RUM | RUM + sort (acceptable) |
+
+## Migration from GIN/RUM-specific Rules
+
+**Old (hardcoded)**:
+```rust
+// gin-index-for-fulltext.rra
+rw!("gin-index-for-text-search";
+    "(filter (text-search ?col ?query) (scan ?table))" =>
+    "(gin-index-scan ?index ?col text-search ?query)"
+    if has_gin_index_on("?table", "?col")
+),
+
+// rum-index-for-fulltext.rra
+rw!("rum-index-for-ranked-search";
+    "(limit ?k (sort (ts-rank ?col ?query) ...))" =>
+    "(rum-ranked-scan ?index ?col ?query ?k)"
+    if has_rum_index_on("?table", "?col")
+),
+```
+
+**New (generic)**:
+```rust
+rw!("inverted-index-for-fulltext-boolean";
+    "(filter (text-search ?col ?query) (scan ?table))" =>
+    "(index-scan ?index ?col text-search ?query)"
+    if has_index_supporting("?table", "?col", IndexOperation::FullTextSearch)
+),
+
+rw!("inverted-index-for-fulltext-ranked";
+    "(limit ?k (sort (ts-rank ?col ?query) ...))" =>
+    "(inverted-index-ranked-scan ?index ?col ?query ?k)"
+    if has_index_supporting("?table", "?col", IndexOperation::FullTextSearch)
+    if index_supports_distance_ordering("?index")
+),
+```
+
+The rules automatically:
+1. Discover which index types are installed
+2. Check capabilities (ordering, phrase search, etc.)
+3. Select the best index for the specific query pattern
+4. Use database-specific cost models
+
+## References
+
+- RFC 0082: Index Access Method Abstraction
+- PostgreSQL: GIN vs RUM for full-text search
+- DocumentDB: Extended RUM for $text search
+- IndexOperation::FullTextSearch, PhraseSearch
+- IndexCapabilities::supports_phrase_search
