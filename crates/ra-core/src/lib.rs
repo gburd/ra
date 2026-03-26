@@ -1,3 +1,4 @@
+#![allow(clippy::doc_markdown)]
 //! Core types and traits for the relational algebra system.
 //!
 //! This crate provides the fundamental building blocks:

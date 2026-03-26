@@ -1,3 +1,5 @@
+#![allow(clippy::doc_markdown)]
+#![allow(clippy::doc_markdown)]
 //! Statistics types for cost estimation.
 //!
 //! Statistics describe the data distribution and cardinality of

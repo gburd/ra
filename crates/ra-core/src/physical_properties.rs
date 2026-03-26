@@ -1,3 +1,6 @@
+#![allow(clippy::match_same_arms)]
+#![allow(clippy::doc_markdown)]
+#![allow(clippy::doc_markdown)]
 //! Physical property propagation through relational expression trees.
 //!
 //! This module derives the output physical properties of a `RelExpr`

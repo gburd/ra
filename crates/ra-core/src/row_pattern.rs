@@ -1,3 +1,4 @@
+#![allow(clippy::doc_markdown)]
 //! Row Pattern Recognition (RPR) types for SQL:2016 MATCH_RECOGNIZE.
 //!
 //! This module defines the core algebra types for row pattern
