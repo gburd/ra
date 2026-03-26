@@ -93,6 +93,7 @@ pub mod adapters;
 pub mod delta;
 pub mod feedback;
 pub mod gathering_cost;
+pub mod index_metadata;
 pub mod index_types;
 pub mod integration;
 pub mod percentiles;
@@ -113,6 +114,10 @@ pub use feedback::{
     RecommendationEngine, RecommendationKind,
 };
 pub use gathering_cost::{CostEstimator, GatheringCost, GatheringMethod, GatheringPriority};
+pub use index_metadata::{
+    IndexAccessMethod, IndexCapabilities, IndexMetadata as IndexMetadataV2, IndexOperation,
+    discover_indexes_for_table, find_indexes_supporting,
+};
 pub use index_types::{IndexCostFactors, IndexMetadata, IndexType};
 pub use percentiles::{PercentileSummary, PercentileTracker, TDigest};
 pub use profiles::{ProfileSelector, StatisticsProfile};
