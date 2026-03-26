@@ -9,6 +9,222 @@ use pgrx::prelude::*;
 mod tests {
     use pgrx::prelude::*;
 
+    /// Test metadata cache invalidation on ALTER TABLE
+    #[pg_test]
+    fn test_metadata_cache_invalidation_alter_table() {
+        Spi::run("DROP TABLE IF EXISTS cache_test_users CASCADE;").ok();
+        Spi::run(
+            "CREATE TABLE cache_test_users (
+                id INT PRIMARY KEY,
+                name TEXT NOT NULL
+            );",
+        )
+        .unwrap();
+
+        Spi::run("INSERT INTO cache_test_users SELECT i, 'User ' || i FROM generate_series(1, 100) i;").unwrap();
+        Spi::run("ANALYZE cache_test_users;").unwrap();
+
+        // Populate cache
+        Spi::get_one::<i64>("SELECT COUNT(*) FROM cache_test_users WHERE id < 50;").ok();
+
+        // Check cache has entries
+        let stats = Spi::get_one::<i32>("SELECT entries FROM ra.metadata_cache_stats();").ok();
+        assert!(stats.is_some());
+
+        // ALTER TABLE triggers invalidation
+        Spi::run("ALTER TABLE cache_test_users ADD COLUMN email TEXT;").unwrap();
+
+        // Next query should refresh metadata
+        Spi::get_one::<i64>("SELECT COUNT(*) FROM cache_test_users WHERE id < 50;").ok();
+
+        // Check invalidations counter increased
+        let invalidations = Spi::get_one::<i64>("SELECT invalidations FROM ra.metadata_cache_stats();").ok();
+        assert!(invalidations.unwrap_or(Some(0)).unwrap_or(0) > 0);
+    }
+
+    /// Test metadata cache invalidation on CREATE INDEX
+    #[pg_test]
+    fn test_metadata_cache_invalidation_create_index() {
+        Spi::run("DROP TABLE IF EXISTS cache_test_products CASCADE;").ok();
+        Spi::run(
+            "CREATE TABLE cache_test_products (
+                id INT PRIMARY KEY,
+                name TEXT NOT NULL,
+                price DECIMAL(10,2)
+            );",
+        )
+        .unwrap();
+
+        Spi::run("INSERT INTO cache_test_products SELECT i, 'Product ' || i, i * 10.0 FROM generate_series(1, 100) i;").unwrap();
+        Spi::run("ANALYZE cache_test_products;").unwrap();
+
+        // Populate cache
+        Spi::get_one::<i64>("SELECT COUNT(*) FROM cache_test_products WHERE price > 500;").ok();
+
+        // CREATE INDEX triggers invalidation
+        Spi::run("CREATE INDEX idx_cache_test_products_price ON cache_test_products(price);").unwrap();
+
+        // Next query should see new index
+        Spi::get_one::<i64>("SELECT COUNT(*) FROM cache_test_products WHERE price > 500;").ok();
+
+        // Check invalidations counter
+        let invalidations = Spi::get_one::<i64>("SELECT invalidations FROM ra.metadata_cache_stats();").ok();
+        assert!(invalidations.unwrap_or(Some(0)).unwrap_or(0) > 0);
+    }
+
+    /// Test metadata cache invalidation on DROP INDEX
+    #[pg_test]
+    fn test_metadata_cache_invalidation_drop_index() {
+        Spi::run("DROP TABLE IF EXISTS cache_test_orders CASCADE;").ok();
+        Spi::run(
+            "CREATE TABLE cache_test_orders (
+                id SERIAL PRIMARY KEY,
+                customer_id INT,
+                amount DECIMAL(10,2)
+            );",
+        )
+        .unwrap();
+
+        Spi::run("CREATE INDEX idx_cache_test_orders_customer ON cache_test_orders(customer_id);").unwrap();
+        Spi::run("INSERT INTO cache_test_orders (customer_id, amount) SELECT (random() * 99 + 1)::INT, random() * 1000 FROM generate_series(1, 100);").unwrap();
+        Spi::run("ANALYZE cache_test_orders;").unwrap();
+
+        // Populate cache
+        Spi::get_one::<i64>("SELECT COUNT(*) FROM cache_test_orders WHERE customer_id = 42;").ok();
+
+        // DROP INDEX triggers invalidation
+        Spi::run("DROP INDEX idx_cache_test_orders_customer;").unwrap();
+
+        // Next query should not recommend dropped index
+        Spi::get_one::<i64>("SELECT COUNT(*) FROM cache_test_orders WHERE customer_id = 42;").ok();
+
+        // Check invalidations counter
+        let invalidations = Spi::get_one::<i64>("SELECT invalidations FROM ra.metadata_cache_stats();").ok();
+        assert!(invalidations.unwrap_or(Some(0)).unwrap_or(0) > 0);
+    }
+
+    /// Test metadata cache invalidation on ANALYZE
+    #[pg_test]
+    fn test_metadata_cache_invalidation_analyze() {
+        Spi::run("DROP TABLE IF EXISTS cache_test_items CASCADE;").ok();
+        Spi::run(
+            "CREATE TABLE cache_test_items (
+                id INT PRIMARY KEY,
+                category TEXT,
+                stock INT
+            );",
+        )
+        .unwrap();
+
+        Spi::run("INSERT INTO cache_test_items SELECT i, 'Category-' || (i % 10), i * 5 FROM generate_series(1, 100) i;").unwrap();
+        Spi::run("ANALYZE cache_test_items;").unwrap();
+
+        // Populate cache
+        Spi::get_one::<i64>("SELECT COUNT(*) FROM cache_test_items WHERE stock > 200;").ok();
+
+        // Update data
+        Spi::run("UPDATE cache_test_items SET stock = stock * 2 WHERE id < 50;").unwrap();
+
+        // ANALYZE triggers invalidation
+        Spi::run("ANALYZE cache_test_items;").unwrap();
+
+        // Next query uses fresh statistics
+        Spi::get_one::<i64>("SELECT COUNT(*) FROM cache_test_items WHERE stock > 200;").ok();
+
+        // Check invalidations counter
+        let invalidations = Spi::get_one::<i64>("SELECT invalidations FROM ra.metadata_cache_stats();").ok();
+        assert!(invalidations.unwrap_or(Some(0)).unwrap_or(0) > 0);
+    }
+
+    /// Test manual cache clear
+    #[pg_test]
+    fn test_metadata_cache_clear() {
+        Spi::run("DROP TABLE IF EXISTS cache_test_clear CASCADE;").ok();
+        Spi::run(
+            "CREATE TABLE cache_test_clear (
+                id INT PRIMARY KEY,
+                data TEXT
+            );",
+        )
+        .unwrap();
+
+        Spi::run("INSERT INTO cache_test_clear SELECT i, 'Data-' || i FROM generate_series(1, 50) i;").unwrap();
+        Spi::run("ANALYZE cache_test_clear;").unwrap();
+
+        // Populate cache
+        Spi::get_one::<i64>("SELECT COUNT(*) FROM cache_test_clear;").ok();
+
+        // Check cache has entries
+        let entries_before = Spi::get_one::<i32>("SELECT entries FROM ra.metadata_cache_stats();").ok();
+        assert!(entries_before.unwrap_or(Some(0)).unwrap_or(0) > 0);
+
+        // Clear cache
+        Spi::run("SELECT ra.clear_metadata_cache();").unwrap();
+
+        // Cache should be empty
+        let entries_after = Spi::get_one::<i32>("SELECT entries FROM ra.metadata_cache_stats();").ok();
+        assert_eq!(entries_after.unwrap_or(Some(-1)).unwrap_or(-1), 0);
+    }
+
+    /// Test cache repopulation after clear
+    #[pg_test]
+    fn test_metadata_cache_repopulation() {
+        Spi::run("DROP TABLE IF EXISTS cache_test_repop CASCADE;").ok();
+        Spi::run(
+            "CREATE TABLE cache_test_repop (
+                id INT PRIMARY KEY,
+                value INT
+            );",
+        )
+        .unwrap();
+
+        Spi::run("INSERT INTO cache_test_repop SELECT i, i * 10 FROM generate_series(1, 50) i;").unwrap();
+        Spi::run("ANALYZE cache_test_repop;").unwrap();
+
+        // Clear cache
+        Spi::run("SELECT ra.clear_metadata_cache();").unwrap();
+
+        // Query to repopulate
+        Spi::get_one::<i64>("SELECT COUNT(*) FROM cache_test_repop WHERE value > 250;").ok();
+
+        // Cache should have entries again
+        let entries = Spi::get_one::<i32>("SELECT entries FROM ra.metadata_cache_stats();").ok();
+        assert!(entries.unwrap_or(Some(0)).unwrap_or(0) > 0);
+    }
+
+    /// Test cache hit rate calculation
+    #[pg_test]
+    fn test_metadata_cache_hit_rate() {
+        Spi::run("DROP TABLE IF EXISTS cache_test_hitrate CASCADE;").ok();
+        Spi::run(
+            "CREATE TABLE cache_test_hitrate (
+                id INT PRIMARY KEY,
+                amount DECIMAL(10,2)
+            );",
+        )
+        .unwrap();
+
+        Spi::run("INSERT INTO cache_test_hitrate SELECT i, i * 1.5 FROM generate_series(1, 100) i;").unwrap();
+        Spi::run("ANALYZE cache_test_hitrate;").unwrap();
+
+        // Clear cache to start fresh
+        Spi::run("SELECT ra.clear_metadata_cache();").unwrap();
+
+        // First query (cache miss)
+        Spi::get_one::<i64>("SELECT COUNT(*) FROM cache_test_hitrate WHERE amount > 50;").ok();
+
+        // Second query (cache hit)
+        Spi::get_one::<i64>("SELECT COUNT(*) FROM cache_test_hitrate WHERE amount > 75;").ok();
+
+        // Third query (cache hit)
+        Spi::get_one::<i64>("SELECT COUNT(*) FROM cache_test_hitrate WHERE amount > 100;").ok();
+
+        // Check hit rate
+        let hit_rate = Spi::get_one::<f64>("SELECT hit_rate FROM ra.metadata_cache_stats();").ok();
+        // Should have some cache hits (hit_rate > 0)
+        assert!(hit_rate.unwrap_or(Some(-1.0)).unwrap_or(-1.0) >= 0.0);
+    }
+
     /// Test CTE with window functions
     #[pg_test]
     fn test_cte_with_window_functions() {

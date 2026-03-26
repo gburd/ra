@@ -594,6 +594,19 @@ pub fn gather_table_stats(
 ) -> Option<Statistics> {
     unsafe {
         let rel_oid = resolve_relation_oid(schema, table)?;
+        gather_table_stats_by_oid(rel_oid)
+    }
+}
+
+/// Gather statistics by relation OID (for metadata cache refresh).
+///
+/// Uses direct syscache lookups on `pg_class` and `pg_statistic`
+/// instead of SPI, making it safe to call from planner hooks.
+///
+/// Returns `None` if the table has no statistics (unanalyzed) or
+/// does not exist.
+pub fn gather_table_stats_by_oid(rel_oid: pg_sys::Oid) -> Option<Statistics> {
+    unsafe {
         let class_info = read_relclass_info(rel_oid)?;
 
         // reltuples == -1 means never analyzed
@@ -631,13 +644,13 @@ pub fn gather_table_stats(
             compute_avg_row_size(&stats, page_count) as u64;
 
         // Gather index statistics for index-aware optimization
-        gather_index_stats(schema, table, &mut stats);
+        gather_index_stats_by_oid(rel_oid, &mut stats);
 
         Some(stats)
     }
 }
 
-/// Gather index statistics for a table.
+/// Gather index statistics for a table (by schema and table name).
 ///
 /// Uses `RelationGetIndexList` and syscache lookups on `pg_index`
 /// and `pg_class` instead of SPI.
@@ -652,6 +665,19 @@ fn gather_index_stats(
             None => return,
         };
 
+        gather_index_stats_by_oid(rel_oid, stats);
+    }
+}
+
+/// Gather index statistics for a table (by relation OID).
+///
+/// Uses `RelationGetIndexList` and syscache lookups on `pg_index`
+/// and `pg_class` instead of SPI.
+fn gather_index_stats_by_oid(
+    rel_oid: pg_sys::Oid,
+    stats: &mut Statistics,
+) {
+    unsafe {
         // Open the relation to get its index list.
         // AccessShareLock is sufficient for reading metadata.
         let rel = pg_sys::table_open(
