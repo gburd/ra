@@ -270,7 +270,7 @@ impl SparseMap {
         self.chunks
             .get(chunk_idx)
             .and_then(|c| c.as_ref())
-            .map_or(false, |chunk| chunk.is_set(bit_idx))
+            .is_some_and(|chunk| chunk.is_set(bit_idx))
     }
 
     /// Count total set bits.
@@ -322,7 +322,7 @@ impl SparseMap {
                     }
                 } else {
                     // Other doesn't have this chunk, result is all zeros
-                    *self_chunk = Box::new(Chunk::new());
+                    **self_chunk = Chunk::new();
                 }
             }
         }
