@@ -12,7 +12,9 @@
     "build:full": "npm run build:wasm && vitepress build",
     "build:wasm": "./build-wasm.sh",
     "build:docs": "vitepress build",
-    "preview": "vitepress preview"
+    "validate": "./scripts/validate-docs.sh",
+    "preview": "vitepress preview",
+    "ci": "npm run validate && npm run build:docs"
   },
   "keywords": [],
   "author": "",
