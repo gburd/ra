@@ -17,6 +17,15 @@ maintainable, formally verified framework.
   and test cases
 - **Equality Saturation** -- Uses the `egg` library for e-graph-based
   optimization that explores all equivalent plans simultaneously
+- **Three-Tier Rule Tracking** -- Inspect which rules applied, which
+  were evaluated but didn't match, and which are available in the
+  system for debugging and optimization analysis
+- **Index Access Method Abstraction** -- Database-agnostic index
+  capability discovery that automatically detects and uses GIN, RUM,
+  GiST, BRIN, and custom index types without hardcoding
+- **PostgreSQL Metadata Cache** -- Automatic relcache invalidation
+  tracking that refreshes cached table statistics when schema changes
+  occur (ALTER TABLE, CREATE INDEX, ANALYZE)
 - **Progressive Re-Optimization** -- Mid-execution plan switching
   when runtime statistics diverge from estimates (RFC 0052)
 - **Rule Complexity Prioritization** -- Intelligent rule ordering by

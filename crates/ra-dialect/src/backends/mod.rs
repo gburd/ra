@@ -77,3 +77,71 @@ pub trait Backend {
         target: Dialect,
     ) -> Result<TranslationResult, TranslationError>;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn translation_backend_default() {
+        let backend = TranslationBackend::default();
+        assert_eq!(backend, TranslationBackend::Native);
+    }
+
+    #[test]
+    fn translation_backend_name() {
+        assert_eq!(TranslationBackend::Native.name(), "native");
+
+        #[cfg(feature = "polyglot-backend")]
+        assert_eq!(TranslationBackend::Polyglot.name(), "polyglot");
+    }
+
+    #[test]
+    fn native_backend_supports_standard_dialects() {
+        let backend = TranslationBackend::Native;
+
+        assert!(backend.supports_dialect_pair(Dialect::PostgreSql, Dialect::MySql));
+        assert!(backend.supports_dialect_pair(Dialect::MySql, Dialect::Sqlite));
+        assert!(backend.supports_dialect_pair(Dialect::Sqlite, Dialect::DuckDb));
+        assert!(backend.supports_dialect_pair(Dialect::DuckDb, Dialect::MsSql));
+        assert!(backend.supports_dialect_pair(Dialect::MsSql, Dialect::Oracle));
+        assert!(backend.supports_dialect_pair(Dialect::Oracle, Dialect::PostgreSql));
+    }
+
+    #[test]
+    fn backend_equality() {
+        assert_eq!(TranslationBackend::Native, TranslationBackend::Native);
+
+        #[cfg(feature = "polyglot-backend")]
+        {
+            assert_eq!(TranslationBackend::Polyglot, TranslationBackend::Polyglot);
+            assert_ne!(TranslationBackend::Native, TranslationBackend::Polyglot);
+        }
+    }
+
+    #[test]
+    fn backend_debug_format() {
+        let backend = TranslationBackend::Native;
+        let debug_str = format!("{:?}", backend);
+        assert!(debug_str.contains("Native"));
+    }
+
+    #[test]
+    fn backend_clone() {
+        let backend = TranslationBackend::Native;
+        let cloned = backend;
+        assert_eq!(backend, cloned);
+    }
+
+    #[cfg(feature = "polyglot-backend")]
+    #[test]
+    fn polyglot_backend_supports_all_dialects() {
+        let backend = TranslationBackend::Polyglot;
+
+        // Standard dialects
+        assert!(backend.supports_dialect_pair(Dialect::PostgreSql, Dialect::MySql));
+
+        // Polyglot backend should support all dialect pairs
+        assert!(backend.supports_dialect_pair(Dialect::DuckDb, Dialect::DuckDb));
+    }
+}

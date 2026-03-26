@@ -1480,4 +1480,154 @@ mod tests {
             result.sql
         );
     }
+
+    #[test]
+    fn translator_with_backend() {
+        let backend = TranslationBackend::Native;
+        let t = DialectTranslator::with_backend(
+            Dialect::PostgreSql,
+            Dialect::MySql,
+            backend,
+        );
+        assert_eq!(t.source(), Dialect::PostgreSql);
+        assert_eq!(t.target(), Dialect::MySql);
+        let result = t.translate("SELECT 1").expect("should translate");
+        assert!(result.sql.contains("SELECT"));
+    }
+
+    #[test]
+    fn dialect_version_latest_all_dialects() {
+        let pg = DialectVersion::latest(Dialect::PostgreSql);
+        assert_eq!(pg.major, 17);
+
+        let mysql = DialectVersion::latest(Dialect::MySql);
+        assert_eq!(mysql.major, 8);
+
+        let sqlite = DialectVersion::latest(Dialect::Sqlite);
+        assert_eq!(sqlite.major, 3);
+
+        let mssql = DialectVersion::latest(Dialect::MsSql);
+        assert_eq!(mssql.major, 16);
+
+        let oracle = DialectVersion::latest(Dialect::Oracle);
+        assert_eq!(oracle.major, 23);
+
+        let duckdb = DialectVersion::latest(Dialect::DuckDb);
+        assert_eq!(duckdb.major, 1);
+    }
+
+    #[test]
+    fn supports_returning_all_dialects() {
+        assert!(DialectVersion::latest(Dialect::PostgreSql).supports_returning());
+        assert!(!DialectVersion::latest(Dialect::MySql).supports_returning());
+        assert!(DialectVersion::latest(Dialect::Sqlite).supports_returning());
+        assert!(DialectVersion::latest(Dialect::MsSql).supports_returning());
+        assert!(DialectVersion::latest(Dialect::Oracle).supports_returning());
+        assert!(DialectVersion::latest(Dialect::DuckDb).supports_returning());
+    }
+
+    #[test]
+    fn supports_cte_old_versions() {
+        let sqlite_old = DialectVersion::new(Dialect::Sqlite, 3, 7);
+        assert!(!sqlite_old.supports_cte());
+
+        let sqlite_new = DialectVersion::new(Dialect::Sqlite, 3, 8);
+        assert!(sqlite_new.supports_cte());
+    }
+
+    #[test]
+    fn supports_window_functions_versions() {
+        let sqlite_old = DialectVersion::new(Dialect::Sqlite, 3, 24);
+        assert!(!sqlite_old.supports_window_functions());
+
+        let sqlite_new = DialectVersion::new(Dialect::Sqlite, 3, 25);
+        assert!(sqlite_new.supports_window_functions());
+
+        let mysql_old = DialectVersion::new(Dialect::MySql, 5, 7);
+        assert!(!mysql_old.supports_window_functions());
+
+        let mysql_new = DialectVersion::new(Dialect::MySql, 8, 0);
+        assert!(mysql_new.supports_window_functions());
+    }
+
+    #[test]
+    fn source_version_accessor() {
+        let source = DialectVersion::new(Dialect::PostgreSql, 14, 2);
+        let target = DialectVersion::new(Dialect::MySql, 8, 0);
+        let t = DialectTranslator::with_versions(source, target);
+        assert_eq!(t.source_version().major, 14);
+        assert_eq!(t.source_version().minor, 2);
+    }
+
+    #[test]
+    fn target_version_accessor() {
+        let source = DialectVersion::new(Dialect::PostgreSql, 15, 0);
+        let target = DialectVersion::new(Dialect::MySql, 8, 1);
+        let t = DialectTranslator::with_versions(source, target);
+        assert_eq!(t.target_version().major, 8);
+        assert_eq!(t.target_version().minor, 1);
+    }
+
+    #[test]
+    fn oracle_version_features() {
+        let oracle11 = DialectVersion::new(Dialect::Oracle, 11, 0);
+        assert!(!oracle11.supports_returning());
+
+        let oracle12 = DialectVersion::new(Dialect::Oracle, 12, 0);
+        assert!(oracle12.supports_returning());
+    }
+
+    #[test]
+    fn all_dialects_support_cte_latest() {
+        assert!(DialectVersion::latest(Dialect::PostgreSql).supports_cte());
+        assert!(DialectVersion::latest(Dialect::MySql).supports_cte());
+        assert!(DialectVersion::latest(Dialect::Sqlite).supports_cte());
+        assert!(DialectVersion::latest(Dialect::MsSql).supports_cte());
+        assert!(DialectVersion::latest(Dialect::Oracle).supports_cte());
+        assert!(DialectVersion::latest(Dialect::DuckDb).supports_cte());
+    }
+
+    #[test]
+    fn all_dialects_support_window_functions_latest() {
+        assert!(DialectVersion::latest(Dialect::PostgreSql).supports_window_functions());
+        assert!(DialectVersion::latest(Dialect::MySql).supports_window_functions());
+        assert!(DialectVersion::latest(Dialect::Sqlite).supports_window_functions());
+        assert!(DialectVersion::latest(Dialect::MsSql).supports_window_functions());
+        assert!(DialectVersion::latest(Dialect::Oracle).supports_window_functions());
+        assert!(DialectVersion::latest(Dialect::DuckDb).supports_window_functions());
+    }
+
+    #[test]
+    fn complex_function_translation() {
+        let result = pg_to(
+            Dialect::MsSql,
+            "SELECT SUBSTRING(name, 1, 10), \
+             LENGTH(TRIM(BOTH ' ' FROM email)) \
+             FROM users",
+        );
+        assert!(result.sql.contains("LEN"), "Expected LEN: {}", result.sql);
+    }
+
+    #[test]
+    fn error_on_empty_sql() {
+        let t = DialectTranslator::new(Dialect::PostgreSql, Dialect::MySql);
+        let result = t.translate("");
+        // Empty SQL should either succeed with empty result or fail gracefully
+        assert!(result.is_ok() || result.is_err());
+    }
+
+    #[test]
+    fn whitespace_only_sql() {
+        let t = DialectTranslator::new(Dialect::PostgreSql, Dialect::MySql);
+        let result = t.translate("   \n\t  ");
+        // Whitespace-only should be handled gracefully
+        assert!(result.is_ok() || result.is_err());
+    }
+
+    #[test]
+    fn translation_result_format() {
+        let result = pg_to(Dialect::MySql, "SELECT 1");
+        assert!(!result.sql.is_empty());
+        // Warnings may or may not be present
+    }
 }

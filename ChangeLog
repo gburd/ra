@@ -1,0 +1,162 @@
+2026-03-26  Greg Burd  <greg@burd.me>
+
+	* crates/ra-engine/src/egraph.rs (optimize_with_tracking): Add
+	three-tier rule tracking system showing applied, evaluated, and
+	available rules.
+	(RuleTrackingResult): New struct for tracking results with
+	applied, evaluated, and available rule lists.
+	(RuleApplication, RuleEvaluation): New types for detailed rule
+	execution statistics.
+	* crates/ra-cli/src/main.rs (main): Add --rules-applied,
+	--rules-evaluated, --rules-available CLI flags for rule
+	introspection.
+	* docs/rule-tracking.md: New file documenting three-tier rule
+	tracking system usage and architecture.
+
+	* crates/ra-stats/src/index_metadata.rs: New file implementing
+	index access method abstraction layer.
+	(IndexAccessMethod): Database-agnostic taxonomy of index types
+	(B-tree, GIN, RUM, GiST, BRIN, etc.).
+	(IndexOperation): Generic operations that indexes support
+	(ArrayContainment, FullTextSearch, SpatialContainment, etc.).
+	(IndexMetadata): Runtime-discovered index capabilities and cost
+	models.
+	* crates/ra-stats/src/index_types.rs (IndexType): Extend with
+	capability detection from operator families.
+	* rules/physical/index-selection/inverted-index-for-arrays.rra:
+	Refactor from gin-index-for-arrays.rra to use generic
+	capability-based matching.
+	* rules/physical/index-selection/inverted-index-for-fulltext.rra:
+	Refactor from rum-index-for-fulltext.rra for cross-database
+	compatibility.
+	* rfcs/0082-index-access-method-abstraction.md: New RFC
+	documenting index abstraction architecture.
+
+	* crates/ra-pg-extension/src/metadata_cache.rs: New file
+	implementing PostgreSQL metadata cache with relcache
+	invalidation tracking.
+	(MetadataCache): Global cache with lazy refresh on
+	invalidation.
+	(CachedTableMetadata): Cached statistics with validity
+	tracking.
+	(invalidate_table): C FFI callback for relcache
+	invalidations.
+	* crates/ra-pg-extension/src/lib.rs (_PG_init): Register
+	relcache callback using CacheRegisterRelcacheCallback.
+	(ra_relcache_callback): Callback invoked by PostgreSQL on
+	schema changes.
+	* crates/ra-pg-extension/src/stats_bridge.rs
+	(gather_table_stats_by_oid): New function for OID-based
+	metadata queries.
+	* rfcs/0083-relcache-invalidation-tracking.md: New RFC
+	documenting metadata cache architecture.
+	* docs/relcache-invalidation-architecture.md: Architecture
+	documentation for relcache integration.
+	* docs/metadata-cache-best-practices.md: Best practices guide
+	for metadata caching.
+
+	* crates/ra-engine/src/rule_registry.rs: Expand rule registry
+	with comprehensive rule set from all optimization categories.
+	* crates/ra-engine/src/rewrite.rs (all_rules): Register
+	expanded rule set including hardware, distributed, and
+	multi-model rules.
+
+	* docs/.vitepress/config.mts (themeConfig.sidebar): Integrate
+	RFC documents into documentation site with cross-linking.
+	* docs/rfcs/index.md: Auto-generated RFC index with
+	categories and status tracking.
+	* rfcs/.gitignore: Add generated RFC files to ignore list.
+	* docs/getting-started.md: Enhanced with rule tracking and
+	metadata cache examples.
+
+	* Cargo.toml (rust-version): Update minimum Rust version to
+	1.88.0 for time crate compatibility.
+	* crates/*/Cargo.toml (rust-version): Update across all
+	workspace crates.
+
+	* crates/ra-dialect/src/adapters/monetdb.rs: Update MonetDB
+	ODBC API usage for compatibility with latest version.
+	* crates/ra-dialect/tests/dialect_test.rs: Fix MonetDB
+	dialect tests.
+
+2026-03-25  Greg Burd  <gregburd@amazon.com>
+
+	* docs/architecture.md: Add platform-specific optimization
+	documentation.
+	* docs/examples/hardware-aware-optimization.md: Add
+	comprehensive examples for CPU/GPU/FPGA optimization.
+	* rfcs/0085-platform-specific-rule-architecture.md: New RFC for
+	platform-specific rule organization.
+
+	* rfcs/0080-documentdb-rum-fork.md: New RFC for DocumentDB RUM
+	index optimization.
+	* rfcs/0082-mongodb-formal-semantics.md: New RFC for MongoDB
+	formal semantics with TOAST/HOT support.
+	* rfcs/0083-xpath-xquery-optimization.md: New RFC for XPath and
+	XQuery optimization.
+	* rfcs/0084-oracle-json-relational-duality.md: New RFC for
+	Oracle JSON Relational Duality optimization.
+
+	* crates/ra-web-ui/: New SvelteKit-based web UI for query
+	optimization visualization.
+	* crates/ra-web/src/api/: Enhanced API endpoints for web UI
+	integration.
+	* docs/integrations/web-ui.md: Documentation for web UI
+	features.
+
+	* crates/ra-engine/tests/: Add 220 comprehensive tests for
+	engine components.
+	* crates/ra-stats/tests/: Add tests for streaming statistics
+	and index metadata.
+	* crates/ra-cache/tests/: Add plan cache integration tests.
+
+	* crates/ra-hardware/src/calibration.rs: Integrate
+	hardware-calibrated cost model (RFC 0068).
+	* crates/ra-advisor/src/brin_recommendations.rs: Implement
+	BRIN index recommendations (RFC 0066).
+	* crates/ra-multimodel/src/documentdb.rs: Implement DocumentDB
+	query optimization (RFC 0062).
+
+	* rfcs/0062-documentdb-optimization.md through
+	rfcs/0079-incremental-optimization.md: Add 18 adaptive
+	optimization RFCs.
+	* rfcs/research-survey.md: Survey of adaptive optimization
+	research.
+
+	* benchmarks/plan_cache_benchmark.rs: Add plan cache
+	benchmarks showing 37x speedup and 97.5% hit rate.
+	* benchmarks/genetic_fingerprint_benchmark.rs: Validate
+	genetic fingerprinting performance.
+
+2026-03-24  Greg Burd  <gregburd@amazon.com>
+
+	* crates/ra-cache/src/plan_cache.rs: Complete RFC 0052
+	progressive re-optimization with plan stitching.
+	* crates/ra-stats/src/streaming.rs: Implement streaming
+	statistics with adaptive cost model.
+	* crates/ra-adapters/src/monitoring.rs: Add monitoring
+	adapters for OpenTelemetry, Prometheus, and StatsD.
+
+	* crates/ra-pg-extension/src/facts_provider.rs: Complete
+	PostgreSQL FactsProvider with pg_class pages and foreign key
+	mapping.
+
+	* docs/internals/timely-differential.md: Add Timely/Differential
+	Dataflow internals documentation.
+	* docs/architecture-differential-cache-invalidation.md:
+	Document differential dataflow plan cache invalidation.
+
+	* rfcs/0059-differential-cache-invalidation.md: Revise RFC for
+	differential dataflow invalidation.
+	* rfcs/0060-plan-cache.md: Complete plan cache RFC.
+	* rfcs/0061-postgresql-extension-optimization.md: New RFC for
+	PostgreSQL extension-aware optimization.
+
+	* tests/integration/: Add comprehensive OLTP workload tests
+	for plan cache.
+	* tests/integration/bitmap_scan_test.rs: Update bitmap scan
+	tests for current APIs.
+
+	* benchmarks/imdb/: Add PostgreSQL baseline runner for IMDB
+	benchmarks.
+	* docs/benchmarks.md: Add plan cache benchmark results.
