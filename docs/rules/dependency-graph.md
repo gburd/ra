@@ -2,11 +2,7 @@
 
 This graph shows the 1,327+ transformation rules organized by category, with dependency edges showing how rule categories interact during query optimization.
 
-<div class="dependency-graph-container">
-  <object type="image/svg+xml" data="/ra/images/rule-dependency-graph.svg" class="dependency-graph">
-    <img src="/ra/images/rule-dependency-graph.svg" alt="Rule Dependency Graph" />
-  </object>
-</div>
+![Rule Dependency Graph](/images/rule-dependency-graph.svg)
 
 <style>
 .dependency-graph-container {
