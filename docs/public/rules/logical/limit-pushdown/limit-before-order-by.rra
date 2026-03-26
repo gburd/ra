@@ -1,0 +1,88 @@
+---
+id: limit-before-order-by
+name: LIMIT Before ORDER BY
+category: logical/limit-pushdown
+databases: [postgresql, mysql, duckdb]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [limit, order-by, top-k]
+complexity: "O(1)"
+benefit_range: [0.6, 0.9]
+---
+
+# LIMIT Before ORDER BY
+
+## Description
+
+Transforms LIMIT + ORDER BY into Top-K algorithm, which maintains only K elements
+during sorting instead of sorting all rows.
+
+**When to apply**: Any ORDER BY with LIMIT.
+
+**Why it works**: Top-K algorithms (heap, quick-select) are O(N + K log K) instead
+of O(N log N) for full sort.
+
+## Relational Algebra
+
+```latex
+$$
+limit[K](sort[key](R))
+  \rightarrow top_k[K, key](R)
+$$
+
+```
+
+## Implementation
+
+```rust
+rw!("limit-sort-to-top-k";
+    "(limit ?k (sort ?key ?input))" =>
+    "(top-k ?k ?key ?input)"
+),
+```
+
+## Cost Model
+
+```rust
+fn benefit(input_size: u64, k: u64) -> f64 {
+    let full_sort = input_size as f64 * (input_size as f64).log2();
+    let top_k = input_size as f64 + k as f64 * (k as f64).log2();
+    (full_sort - top_k) / full_sort
+}
+```
+
+**Typical benefit**: 60-90% when K << N
+
+## Test Cases
+
+### Positive: Top-10 query
+
+```sql
+SELECT * FROM products ORDER BY price DESC LIMIT 10;
+
+-- Use min-heap of size 10 instead of full sort
+```
+
+### Positive: Paginated results
+
+```sql
+SELECT * FROM users ORDER BY created_at LIMIT 20 OFFSET 0;
+
+-- Top-20 algorithm
+```
+
+### Negative: Large LIMIT
+
+```sql
+SELECT * FROM logs ORDER BY timestamp LIMIT 10000000;
+
+-- K ≈ N: no benefit from Top-K
+```
+
+## References
+
+- PostgreSQL: Top-N heap sort optimization
+- DuckDB: Parallel Top-K with tournament trees
+- MySQL: Filesort with LIMIT optimization

@@ -1,0 +1,48 @@
+---
+id: cockroachdb-inverted-join
+name: "CockroachDB Inverted Join"
+category: physical/join-selection
+databases: [cockroachdb]
+version: "1.0.0"
+authors: ["Database Contributors", "RA Contributors"]
+tags: [database-mining, cockroachdb, optimization]
+complexity: "O(n)"
+benefit_range: [1.0, 10.0]
+---
+
+# CockroachDB Inverted Join
+
+## Description
+
+Generates lookup joins using inverted indexes for geospatial (ST_DWithin) and JSON containment predicates.
+
+**When to apply**: During query optimization phase.
+
+## Relational Algebra
+
+```latex
+-- Before
+$$
+(inner-\bowtie (scan docs) (scan regions) (st-dwithin location bounds))
+$$
+
+-- After
+$$
+(inverted-\bowtie (scan docs) (inverted-index-scan regions))
+$$
+
+```
+
+## Preconditions
+
+- Inverted index exists on JSON/geospatial column
+
+## Test Cases
+
+```sql
+SELECT * FROM table WHERE condition;
+```
+
+## References
+
+- Database documentation

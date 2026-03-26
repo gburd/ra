@@ -1,0 +1,70 @@
+---
+id: cte-column-pruning
+name: CTE Column Pruning
+category: logical/cte-optimization
+databases: [postgresql, mysql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [cte, column-pruning, projection]
+complexity: "O(n)"
+benefit_range: [0.05, 0.3]
+---
+
+# CTE Column Pruning
+
+## Description
+
+Removes unused columns from a CTE definition by pushing a projection into it. Reduces materialization cost by narrowing the intermediate result.
+
+**When to apply**: The body references only a subset of columns produced by the CTE definition.
+
+**Why it works**: Fewer columns means less memory for materialization, less I/O, and smaller hash tables if the CTE is used in joins.
+
+## Relational Algebra
+
+```latex
+$$
+CTE[name, def](body)
+  \rightarrow CTE[name, Project[used_cols](def)](body)
+  \text{where} used_cols = referenced_columns(name, body)
+    and |used_cols| < |output_cols(def)|
+$$
+
+```
+
+## Implementation
+
+```rust
+rw!("cte-column-pruning";
+    "(cte ?name ?def ?body)" =>
+    "(cte ?name (project ?used_cols ?def) ?body)"
+    if columns_can_be_pruned("?name", "?def", "?body")
+),
+```
+
+## Test Cases
+
+### Positive: Only id used from wide CTE
+
+```sql
+WITH wide AS (SELECT id, name, email, age, dept FROM users)
+SELECT id FROM wide WHERE id > 10;
+
+-- Prune to: WITH wide AS (SELECT id FROM users) ...
+```
+
+### Negative: All columns used
+
+```sql
+WITH all_cols AS (SELECT id, name FROM users)
+SELECT id, name FROM all_cols;
+
+-- No pruning needed
+```
+
+## References
+
+- Column pruning in Apache Spark Catalyst
+- PostgreSQL CTE optimization (PG 12+)

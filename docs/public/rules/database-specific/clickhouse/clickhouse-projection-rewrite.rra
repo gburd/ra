@@ -1,0 +1,48 @@
+---
+id: clickhouse-projection-rewrite
+name: "Use Materialized Projections"
+category: logical/materialized-view
+databases: [clickhouse]
+version: "1.0.0"
+authors: ["Database Contributors", "RA Contributors"]
+tags: [database-mining, clickhouse, optimization]
+complexity: "O(n)"
+benefit_range: [1.0, 10.0]
+---
+
+# Use Materialized Projections
+
+## Description
+
+Rewrites queries to use precomputed projections with different primary keys.
+
+**When to apply**: During query optimization phase.
+
+## Relational Algebra
+
+```latex
+-- Before
+$$
+(group-by [col1] (sum col2) (scan orders))
+$$
+
+-- After
+$$
+(scan orders_by_col1_sum)
+$$
+
+```
+
+## Preconditions
+
+- Projection exists matching aggregation
+
+## Test Cases
+
+```sql
+SELECT * FROM table WHERE condition;
+```
+
+## References
+
+- Database documentation

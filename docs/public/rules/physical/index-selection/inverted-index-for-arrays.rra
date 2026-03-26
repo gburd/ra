@@ -1,0 +1,221 @@
+---
+id: inverted-index-for-arrays
+name: Inverted Index for Array Operations
+category: physical/index-selection
+databases: [postgresql, documentdb]
+execution_models: [volcano]
+hardware: [cpu]
+version: "2.0.0"
+authors: ["RA Contributors"]
+tags: [index, inverted, array, containment, generic]
+complexity: "O(log n + k)"
+benefit_range: [0.5, 0.95]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter (contains ?col ?val) (scan ?table))"
+    description: "Array/JSONB containment filter with inverted index"
+  - type: "predicate"
+    condition: "has_index_supporting(?table, ?col, 'array_containment')"
+    description: "Any inverted index supporting containment (GIN, RUM, DocumentDB RUM)"
+  - type: "capability"
+    database: "current"
+    requires: "inverted_index"
+    description: "Database supports inverted indexes"
+---
+
+# Inverted Index for Array Operations
+
+## Description
+
+Uses a database-agnostic inverted index for array containment, overlap,
+and JSONB operations. Inverted indexes decompose composite values into
+individual elements and build a posting list mapping each element to
+rows containing it.
+
+**Database Support:**
+- PostgreSQL: GIN indexes
+- PostgreSQL with RUM: RUM indexes (supports distance ordering)
+- DocumentDB: RUM fork indexes (BSON-specific)
+
+**When to apply**: A query uses containment operators (@>, &&, <@) or
+JSONB containment (@>) on a column with any inverted index.
+
+**Why it works**: Inverted indexes break arrays/JSONB into individual
+keys and map each key to the set of rows containing it. Checking
+containment becomes an intersection of posting lists rather than
+scanning every row.
+
+## Relational Algebra
+
+```latex
+$$
+filter[tags @> ARRAY['rust']](scan[T])
+  \rightarrow inverted_index_scan[I](tags, @>, ARRAY['rust'])
+  \text{where} I is any inverted index on column tags
+$$
+
+```
+
+## Implementation
+
+```rust
+use ra_stats::index_metadata::{find_indexes_supporting, IndexOperation};
+
+// Generic rule: discovers index type at runtime
+rw!("inverted-index-for-array-contains";
+    "(filter (array-contains ?col ?elements) (scan ?table))" =>
+    "(index-scan ?index ?col array-contains ?elements)"
+    if has_index_supporting("?table", "?col", IndexOperation::ArrayContainment)
+),
+
+rw!("inverted-index-for-jsonb-contains";
+    "(filter (jsonb-contains ?col ?pattern) (scan ?table))" =>
+    "(index-scan ?index ?col jsonb-contains ?pattern)"
+    if has_index_supporting("?table", "?col", IndexOperation::JsonContainment)
+),
+
+// Implementation of has_index_supporting:
+fn has_index_supporting(
+    table: &str,
+    column: &str,
+    operation: IndexOperation,
+) -> bool {
+    let indexes = find_indexes_supporting(
+        &connection_string,
+        table,
+        column,
+        &operation,
+    );
+    !indexes.is_empty()
+}
+```
+
+## Cost Model
+
+Cost models are **index-type-specific** and discovered at runtime:
+
+```rust
+// The optimizer discovers which index type is available
+let indexes = find_indexes_supporting(table, col, IndexOperation::ArrayContainment);
+let best_index = indexes.iter()
+    .min_by_key(|idx| idx.estimate_scan_cost(selectivity, table_rows, limit));
+
+// Each index type has its own cost model:
+match best_index.access_method {
+    IndexAccessMethod::GIN => {
+        // Standard GIN: narrower postings, no ordering
+        let posting_scan = selectivity * table_rows * 0.5;
+        posting_scan + tuple_fetch
+    }
+    IndexAccessMethod::RUM => {
+        // PostgreSQL RUM: wider postings, supports ordering
+        let posting_scan = selectivity * table_rows * 0.7;
+        let ordering_benefit = if query.has_order_by() { 0.3 } else { 1.0 };
+        (posting_scan + tuple_fetch) * ordering_benefit
+    }
+    IndexAccessMethod::DocumentDBRUM => {
+        // DocumentDB RUM: BSON-specific, supports $text and $near
+        let posting_scan = selectivity * table_rows * 0.7;
+        let bson_benefit = if query.has_bson_ops() { 0.8 } else { 1.0 };
+        (posting_scan + tuple_fetch) * bson_benefit
+    }
+}
+```
+
+**Typical benefit**: 50-95% for selective containment queries.
+
+## Test Cases
+
+### Positive: Array containment (PostgreSQL GIN)
+
+```sql
+CREATE INDEX idx_articles_tags ON articles USING GIN(tags);
+
+SELECT * FROM articles WHERE tags @> ARRAY['database', 'optimization'];
+
+-- GIN intersects posting lists for 'database' and 'optimization'
+```
+
+### Positive: Array containment (PostgreSQL RUM)
+
+```sql
+CREATE INDEX idx_articles_tags_rum ON articles USING RUM(tags rum_anyarray_ops);
+
+SELECT * FROM articles
+WHERE tags @> ARRAY['database']
+ORDER BY created_at DESC;
+
+-- RUM provides containment + ordering in one scan
+```
+
+### Positive: JSONB containment (DocumentDB RUM)
+
+```sql
+-- DocumentDB automatically creates RUM indexes
+db.articles.createIndex({ "metadata": 1 });
+
+db.articles.find({ "metadata.type": "article", "metadata.status": "published" });
+
+-- DocumentDB RUM fork handles BSON path queries efficiently
+```
+
+### Negative: Equality on scalar (B-tree better)
+
+```sql
+SELECT * FROM users WHERE id = 42;
+
+-- Scalar equality: B-tree index is more efficient
+```
+
+## Database-Specific Behavior
+
+### PostgreSQL GIN
+
+- **Operator families**: `array_ops`, `jsonb_ops`, `jsonb_path_ops`, `gin_trgm_ops`
+- **Advantages**: Narrower posting entries, slightly faster for pure containment
+- **Limitations**: No ordering support, requires heap recheck for phrases
+
+### PostgreSQL RUM
+
+- **Operator families**: `rum_anyarray_ops`, `rum_tsvector_ops`, `rum_tsvector_addon_ops`
+- **Advantages**: Distance ordering, in-index phrase verification, addon column ordering
+- **Limitations**: Wider posting entries (10-40% more space)
+
+### DocumentDB RUM
+
+- **Operator families**: `bson_extended_rum_single_path_ops`, `bson_extended_rum_composite_path_ops`
+- **Advantages**: BSON-aware, supports $text, $near, and compound path queries
+- **Limitations**: Specific to DocumentDB's BSON implementation
+
+## Migration from GIN-specific Rules
+
+**Old (hardcoded GIN)**:
+```rust
+rw!("gin-index-for-array-contains";
+    "(filter (array-contains ?col ?elements) (scan ?table))" =>
+    "(gin-index-scan ?index ?col array-contains ?elements)"
+    if has_gin_index_on("?table", "?col")
+),
+```
+
+**New (generic inverted index)**:
+```rust
+rw!("inverted-index-for-array-contains";
+    "(filter (array-contains ?col ?elements) (scan ?table))" =>
+    "(index-scan ?index ?col array-contains ?elements)"
+    if has_index_supporting("?table", "?col", IndexOperation::ArrayContainment)
+),
+```
+
+The rule automatically uses:
+- GIN if that's what's installed
+- RUM if available (and better for the query)
+- DocumentDB RUM if running on DocumentDB
+
+## References
+
+- RFC 0082: Index Access Method Abstraction
+- PostgreSQL: GIN and RUM indexes
+- DocumentDB: Extended RUM for BSON
+- IndexAccessMethod in ra-stats/src/index_metadata.rs
+- IndexOperation::ArrayContainment

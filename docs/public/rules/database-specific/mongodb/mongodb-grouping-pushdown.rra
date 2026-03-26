@@ -1,0 +1,48 @@
+---
+id: mongodb-grouping-pushdown
+name: "Grouping Pushdown to Pipeline"
+category: logical/aggregation
+databases: [mongodb]
+version: "1.0.0"
+authors: ["Database Contributors", "RA Contributors"]
+tags: [database-mining, mongodb, optimization]
+complexity: "O(n)"
+benefit_range: [1.0, 10.0]
+---
+
+# Grouping Pushdown to Pipeline
+
+## Description
+
+Pushes GROUP BY into aggregation pipeline stages.
+
+**When to apply**: During query optimization phase.
+
+## Relational Algebra
+
+```latex
+-- Before
+$$
+(group-by [status] (count *) (filter (scan orders) (gt total 100)))
+$$
+
+-- After
+$$
+(aggregation-pipeline [: {total: {: 100}}, : {_id: status}])
+$$
+
+```
+
+## Preconditions
+
+- Aggregation can be expressed as pipeline stages
+
+## Test Cases
+
+```sql
+SELECT * FROM table WHERE condition;
+```
+
+## References
+
+- Database documentation

@@ -1,0 +1,47 @@
+---
+id: join-commute
+name: "JoinCommute"
+category: logical/join-reordering
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [academic, calcite]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+preconditions:
+  - type: "pattern"
+    must_match: "(join inner ?cond ?left ?right)"
+    description: "Inner join with two inputs"
+  - type: "predicate"
+    condition: "is_inner_or_cross(?type)"
+    description: "Only inner and cross joins are commutative"
+---
+
+# JoinCommute
+
+## Description
+
+Commutes join operands for optimization
+
+## Relational Algebra
+
+```latex
+$$
+Join(R, S) => Join(S, R)
+$$
+
+```
+
+## Implementation
+
+```
+Implement rule transformation for calcite optimization
+```
+
+## Tests
+
+Add test cases for this rule
+
+## References

@@ -1,0 +1,190 @@
+---
+id: ordered-aggregation
+name: "Ordered Aggregation (Aggregation-in-Order)"
+category: physical/aggregation-strategies
+databases: [postgresql, clickhouse, oracle, mssql]
+execution_models: [volcano, vectorized, push-based]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [aggregation, ordered, sort-key, streaming, in-order]
+complexity: "O(n)"
+benefit_range: [0.3, 0.8]
+preconditions:
+  - type: "pattern"
+    must_match: "(aggregate ?input ?groups ?aggs)"
+    description: "Aggregation on pre-sorted input"
+  - type: "predicate"
+    condition: "is_sorted_by(?input, ?groups)"
+    description: "Input must already be sorted by grouping columns"
+---
+
+# Ordered Aggregation (Aggregation-in-Order)
+
+## Metadata
+- **Rule ID**: `ordered-aggregation`
+- **Category**: Physical / Aggregation Strategies
+- **Complexity**: O(n) single-pass, constant memory per group
+- **Prerequisites**: Input sorted by GROUP BY key (or prefix)
+- **Alternatives**: Hash aggregation, sort + stream aggregation
+
+## Description
+
+When input data is already sorted by the GROUP BY key columns, the
+aggregation can proceed as a streaming single-pass operation with O(1)
+memory per group. As rows arrive in group order, the aggregator
+maintains state for the current group only, emitting the completed
+group when the key changes.
+
+This avoids the hash table entirely, eliminating hash computation,
+hash collisions, and the memory overhead of maintaining state for
+all groups simultaneously. It also produces sorted output, which may
+satisfy downstream ORDER BY requirements.
+
+ClickHouse implements this as "aggregation in order" when the sort key
+of a MergeTree table matches the GROUP BY columns. PostgreSQL uses
+GroupAggregate when the planner detects sorted input (from an index
+scan or explicit sort).
+
+**When to apply:**
+- Input sorted by GROUP BY key (index, MergeTree sort key, prior sort)
+- Low-memory environments
+- Downstream requires sorted group output
+- Very high group cardinality (hash table would not fit in memory)
+
+**Why it works:**
+- O(1) memory: only one group active at a time
+- No hash computation or table probing
+- Produces sorted output (eliminates downstream sort)
+- Cache-friendly: sequential scan of sorted data
+
+## Relational Algebra
+
+```
+aggregate[groups, aggs](sorted-input[groups])
+  -> ordered-aggregate[groups, aggs](sorted-input)
+
+Cost = n * agg_update + |groups| * agg_emit
+Memory = O(1) per group state
+```
+
+## Implementation (egg rewrite rules)
+
+```lisp
+;; Use ordered aggregation when input is sorted by group key
+(rewrite (aggregate ?groups ?aggs ?input)
+  (ordered-aggregate ?groups ?aggs ?input)
+  :if (sorted-by ?input ?groups))
+
+;; Prefer ordered over hash when input is sorted
+(rewrite (hash-aggregate ?groups ?aggs ?input)
+  (ordered-aggregate ?groups ?aggs ?input)
+  :if (sorted-by ?input ?groups))
+
+;; Insert sort + ordered-agg when cheaper than hash for high cardinality
+(rewrite (aggregate ?groups ?aggs ?input)
+  (ordered-aggregate ?groups ?aggs
+    (sort ?groups ?input))
+  :if (> (group-cardinality ?input ?groups) (available-memory-groups))
+  :if (not (sorted-by ?input ?groups)))
+
+;; Exploit MergeTree sort key for aggregation in order
+(rewrite (aggregate ?groups ?aggs (scan ?table))
+  (ordered-aggregate ?groups ?aggs
+    (merge-sorted (read-in-order ?table ?groups)))
+  :if (is-prefix-of ?groups (sort-key ?table)))
+```
+
+## Cost Model
+
+```rust
+pub fn cost_ordered_aggregation(
+    input_rows: u64,
+    group_card: u64,
+    agg_count: usize,
+    already_sorted: bool,
+    hardware: &HardwareModel,
+) -> Cost {
+    let sort_cost = if already_sorted {
+        Cost::zero()
+    } else {
+        Cost::cpu(
+            input_rows as f64 * (input_rows as f64).log2() * 10.0
+        )
+    };
+
+    let scan_cost = Cost::cpu(input_rows * 3);
+    let agg_update = Cost::cpu(input_rows * agg_count as u64 * 4);
+    let emit_cost = Cost::cpu(group_card * agg_count as u64 * 8);
+    let memory = Cost::memory(agg_count as u64 * 64);
+
+    sort_cost + scan_cost + agg_update + emit_cost + memory
+}
+
+pub fn compare_hash_vs_ordered(
+    input_rows: u64,
+    group_card: u64,
+    agg_count: usize,
+    already_sorted: bool,
+    hardware: &HardwareModel,
+) -> AggStrategy {
+    let hash_cost = cost_hash_aggregation(input_rows, group_card, agg_count, hardware);
+    let ordered_cost = cost_ordered_aggregation(
+        input_rows, group_card, agg_count, already_sorted, hardware
+    );
+    if ordered_cost < hash_cost {
+        AggStrategy::Ordered
+    } else {
+        AggStrategy::Hash
+    }
+}
+```
+
+**Typical benefit**: 30-80% over hash aggregation when input is sorted
+
+## Test Cases
+
+### Positive: MergeTree sort key matches GROUP BY
+```sql
+CREATE TABLE events (
+    date Date, user_id UInt64, event String
+) ENGINE = MergeTree ORDER BY (date, user_id);
+
+SELECT date, count(*), sum(user_id) FROM events
+GROUP BY date;
+-- date is prefix of sort key; ordered aggregation
+-- Each date group emitted when key changes
+-- O(1) memory regardless of table size
+```
+
+### Positive: Index-ordered input in PostgreSQL
+```sql
+CREATE INDEX idx_orders_date ON orders(date);
+
+SELECT date, count(*), sum(amount) FROM orders
+GROUP BY date;
+-- GroupAggregate using index scan on idx_orders_date
+-- Sequential scan in date order; streaming aggregation
+```
+
+### Positive: High cardinality that exceeds memory
+```sql
+SELECT user_id, count(*) FROM events GROUP BY user_id;
+-- 100M distinct users: hash table would need ~4GB
+-- Sort + ordered aggregation: O(1) memory per group
+-- Spill-free aggregation after external sort
+```
+
+### Negative: Unsorted input with low cardinality
+```sql
+SELECT status, count(*) FROM orders GROUP BY status;
+-- 5 status values; hash table trivially fits in cache
+-- Hash aggregation faster (no sort needed)
+```
+
+## References
+
+- PostgreSQL: GroupAggregate node in executor
+- ClickHouse: `optimizeAggregationInOrder` in Optimizations.h
+- Oracle: SORT GROUP BY vs HASH GROUP BY cost model
+- Graefe, "Volcano: An Extensible and Parallel Query Evaluation System"

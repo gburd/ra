@@ -1,0 +1,120 @@
+---
+id: calcite-project-join-join-remove
+name: Calcite ProjectJoinJoinRemoveRule
+category: logical/join-elimination
+databases: [calcite, postgresql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [logical, calcite, project, join, elimination, chain]
+complexity: O(n)
+benefit_range: [0.3, 0.9]
+---
+
+# Calcite ProjectJoinJoinRemoveRule
+
+## Description
+
+Removes the inner left join from a chain of two left joins when a
+projection above only references columns from the outer right side
+and the inner left side is not needed. Extends ProjectJoinRemoveRule
+to handle cascading join chains.
+
+**When to apply**: A project over a left join whose left input is
+itself a left join, and the inner left relation is unreferenced.
+
+**Why it works**: If the output only needs columns from S and T
+(not R), and the join keys allow safe removal, the inner join
+between R and S is redundant.
+
+**Calcite class**: `org.apache.calcite.rel.rules.ProjectJoinJoinRemoveRule`
+
+## Relational Algebra
+
+```latex
+-- Before: project over chained left joins
+$$
+\pi_{S.a, T.b}(
+    (R LEFT JOIN S ON R.k = S.k) LEFT JOIN T ON S.k = T.k
+)
+$$
+
+-- After: remove R, simplify
+$$
+\pi_{S.a, T.b}(S LEFT JOIN T ON S.k = T.k)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-project-join-join-remove";
+    "(project ?cols
+        (left-join ?cond2
+            (left-join ?cond1 ?r ?s)
+            ?t))" =>
+    "(project ?cols
+        (left-join ?cond2 ?s ?t))"
+    if project_does_not_reference_r("?cols", "?r")
+    if inner_join_keys_allow_removal("?cond1", "?r", "?s")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    project: &Project,
+    outer_join: &Join,
+    inner_join: &Join,
+) -> bool {
+    outer_join.join_type() == JoinType::Left
+        && inner_join.join_type() == JoinType::Left
+        && !project.references_input(inner_join.left())
+}
+```
+
+**Restrictions:**
+- Both joins must be LEFT joins
+- The innermost left relation must be fully unreferenced
+- Join key uniqueness constraints must hold
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    r_rows: f64,
+    s_rows: f64,
+) -> f64 {
+    let join_cost = r_rows * s_rows.log2();
+    if join_cost > 0.0 { join_cost / (join_cost + s_rows) } else { 0.0 }
+}
+```
+
+**Typical benefit**: 30-90% by removing an entire join from the chain.
+
+## Test Cases
+
+```sql
+-- Positive: inner table unreferenced
+SELECT s.product_id, pc.category
+FROM sales AS s
+LEFT JOIN product AS p ON s.product_id = p.product_id
+LEFT JOIN product_class AS pc ON s.product_id = pc.product_id;
+-- product is not projected; can be removed
+```
+
+```sql
+-- Negative: inner table referenced
+SELECT p.name, pc.category
+FROM sales AS s
+LEFT JOIN product AS p ON s.product_id = p.product_id
+LEFT JOIN product_class AS pc ON p.class_id = pc.class_id;
+-- p.name is used; cannot remove
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/ProjectJoinJoinRemoveRule.java (commit af6367d)

@@ -1,0 +1,49 @@
+---
+id: timescaledb-time-bucket-aggregation
+name: Time-Bucket Aggregation (TimescaleDB)
+category: database-specific/timescaledb
+databases: [timescaledb]
+execution_models: [volcano, vectorized, push-based]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# Time-Bucket Aggregation (TimescaleDB)
+
+## Metadata
+- **Rule ID**: `timescaledb-time-bucket-aggregation`
+- **Category**: Database-Specific / TimescaleDB
+- **Source**: TimescaleDB (PostgreSQL extension)
+- **Docs**: https://docs.timescale.com/
+
+## Description
+
+TimescaleDB's `time_bucket()` function optimizes time-series aggregations by leveraging chunk-based storage and parallel aggregation across time partitions.
+
+## Test Cases
+
+### Test 1: Time-series downsampling
+```sql
+SELECT time_bucket('1 hour', time) AS hour,
+       AVG(temperature),
+       MAX(humidity)
+FROM sensor_data
+WHERE time >= NOW() - INTERVAL '7 days'
+GROUP BY hour
+ORDER BY hour;
+
+-- Optimization:
+-- 1. Chunk exclusion: Skip chunks outside 7-day window
+-- 2. Parallel aggregation: Each chunk aggregated in parallel
+-- 3. Partial aggregates combined
+```
+
+## References
+1. **TimescaleDB Docs**: "time_bucket() function"
+
+## Tags
+`database-specific`, `timescaledb`, `time-series`, `aggregation`, `chunks`

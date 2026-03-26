@@ -1,0 +1,118 @@
+---
+id: mssql-key-lookup-elimination
+name: mssql Key Lookup Elimination
+category: database-specific/mssql
+databases: [mssql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, mssql, key-lookup, covering, include, index]
+complexity: O(n)
+benefit_range: [0.2, 0.7]
+---
+
+# mssql Key Lookup Elimination
+
+## Description
+
+Eliminates key lookups (bookmark lookups) by recommending or utilizing
+covering indexes that include all columns needed by the query.  A key
+lookup occurs when a nonclustered index satisfies the WHERE clause but
+the SELECT list requires columns not in the index, forcing a separate
+clustered index lookup per row.
+
+**When to apply**: A nonclustered index seek is followed by a key
+lookup to the clustered index for additional columns.
+
+**Why it works**: Each key lookup is a random I/O operation on the
+clustered index.  For queries returning many rows, the cumulative cost
+of random lookups often exceeds a full table scan.  Including the
+needed columns in the index (via INCLUDE) eliminates lookups entirely.
+
+**Database version**: mssql 2005+ (INCLUDE columns)
+
+## Relational Algebra
+
+```latex
+-- Before: index seek + key lookup
+$$
+key-lookup(
+    index-seek(orders, ix_status, status = 'pending'),
+    clustered-index(orders))
+$$
+-- Random I/O per row for non-indexed columns
+
+-- After: covering index (no lookup)
+$$
+index-seek(orders, ix_status_covering, status = 'pending')
+$$
+-- All needed columns in the index
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mssql-eliminate-key-lookup";
+    "(key-lookup (index-seek ?table ?index ?pred) ?clustered)" =>
+    "(index-seek ?table (covering-index ?table ?index ?needed_cols)
+        ?pred)"
+    if is_database("mssql")
+    if covering_index_exists("?table", "?index", "?needed_cols")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    index: &Index,
+    needed_columns: &[Column],
+    estimated_rows: f64,
+) -> bool {
+    !index.covers(needed_columns)
+    && estimated_rows > 100.0 // key lookups expensive for many rows
+}
+```
+
+**Restrictions:**
+- INCLUDE columns add to index size and DML overhead
+- Maximum index row size is 1700 bytes (nonclustered)
+- Too many INCLUDE columns create a "fat" index
+- Some types (LOB columns) cannot be INCLUDE columns
+
+## Cost Model
+
+```rust
+fn key_lookup_cost(
+    rows: f64,
+    pages_per_lookup: f64,
+) -> f64 {
+    rows * pages_per_lookup * 0.01 // random I/O per lookup
+}
+```
+
+**Typical benefit**: For 10K rows with key lookups, eliminating
+lookups saves 10K random I/O operations (~100ms on spinning disk).
+
+## Test Cases
+
+```sql
+-- Positive: covering index eliminates key lookup
+CREATE INDEX ix_status ON orders(status) INCLUDE (customer_id, amount);
+SELECT customer_id, amount FROM orders WHERE status = 'pending';
+-- Index seek only; no key lookup needed
+```
+
+```sql
+-- Negative: no covering index available
+SELECT * FROM orders WHERE status = 'pending';
+-- SELECT * needs all columns; key lookup required unless covering
+```
+
+## References
+
+mssql: Key Lookup Operator (Showplan)
+mssql: CREATE INDEX ... INCLUDE
+mssql: Missing Index DMVs (sys.dm_db_missing_index_details)

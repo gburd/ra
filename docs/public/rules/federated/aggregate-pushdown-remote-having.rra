@@ -1,0 +1,64 @@
+---
+id: federated-aggregate-pushdown-having
+name: "Aggregate Pushdown: HAVING Clause"
+category: federated/pushdown
+databases: [postgresql, mysql, sqlite, snowflake, bigquery, duckdb]
+execution_models: [volcano, vectorized]
+version: "1.0.0"
+authors: ["ra-optimizer"]
+tags: [federated, pushdown, aggregate, having, filter]
+complexity: "O(1)"
+benefit_range: [5.0, 500.0]
+---
+
+# Aggregate Pushdown: HAVING Clause
+
+## Description
+
+Push GROUP BY with HAVING filter to the remote database. The HAVING
+clause filters groups after aggregation, reducing the number of
+groups transferred.
+
+## Relational Algebra
+
+```latex
+$$
+Filter[having_pred](Aggregate[GROUP BY keys, AGG](RemoteScan))
+=>
+RemoteScan[table, endpoint,
+  pushdown_agg=[GROUP BY keys, AGG, HAVING having_pred]]
+$$
+
+```
+
+## Before
+
+```
+(Filter :predicate (> (SUM amount) 1000)
+  :input (Aggregate :group_by [customer_id] :aggregates [(SUM amount)]
+    :input (RemoteScan "orders" "db.example.com")))
+```
+
+## After
+
+```
+(RemoteScan "orders" "db.example.com"
+  :pushdown_agg [GROUP BY customer_id, SUM(amount) HAVING SUM(amount) > 1000])
+```
+
+## Test Cases
+
+### Test 1: Having clause pushdown
+
+#### Input
+```
+(Filter :predicate (> total 1000)
+  :input (Aggregate :group_by [customer_id] :aggregates [(SUM amount AS total)]
+    :input (RemoteScan "orders" "pg.example.com")))
+```
+
+#### Expected
+```
+(RemoteScan "orders" "pg.example.com"
+  :pushdown_agg [GROUP BY customer_id, SUM(amount) HAVING SUM(amount) > 1000])
+```

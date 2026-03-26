@@ -1,0 +1,40 @@
+---
+id: common-rel-sub-expr-register
+name: "CommonRelSubExprRegister"
+category: logical/cte-optimization
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [academic, calcite]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# CommonRelSubExprRegister
+
+## Description
+
+Registers common subexpressions
+
+## Relational Algebra
+
+```latex
+$$
+CSE(R) => shared computation
+$$
+
+```
+
+## Implementation
+
+```
+Implement rule transformation for calcite optimization
+```
+
+## Tests
+
+Add test cases for this rule
+
+## References

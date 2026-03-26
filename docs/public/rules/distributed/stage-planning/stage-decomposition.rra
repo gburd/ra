@@ -1,0 +1,176 @@
+---
+id: stage-decomposition
+name: Query Stage Decomposition
+category: distributed/stage-planning
+databases: [presto, trino, spark]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, stage, fragment, pipeline, decomposition]
+complexity: O(n)
+benefit_range: [0.0, 1.0]
+---
+
+# Query Stage Decomposition
+
+## Description
+
+Decomposes a distributed query plan into stages (also called fragments
+or tasks) at exchange boundaries. Each stage runs as a self-contained
+parallel pipeline on a set of nodes. Stages communicate only through
+exchange operators.
+
+**When to apply**: After exchange operators have been placed, the plan
+is split into stages at each exchange boundary.
+
+**Why it works**: Each stage can execute independently and in parallel.
+Stages form a DAG where edges are exchanges. The scheduler can then
+pipeline execution, starting downstream stages as soon as upstream
+stages begin producing output.
+
+## Relational Algebra
+
+```latex
+-- Full plan:
+$$
+Aggregate(
+    Exchange[gather](
+        HashJoin(
+            Exchange[hash(k)](Scan(R)),
+            Exchange[hash(k)](Scan(S))
+        )
+    )
+)
+$$
+
+-- Decomposed into stages:
+$$
+Stage 0 (source): Scan(R)
+Stage 1 (source): Scan(S)
+Stage 2 (intermediate): HashJoin(input_0, input_1)
+Stage 3 (root): Aggregate(input_2)
+$$
+
+-- Edges:
+$$
+Stage 0 --[hash(k)]-\rightarrow Stage 2
+Stage 1 --[hash(k)]-\rightarrow Stage 2
+Stage 2 --[gather]-\rightarrow Stage 3
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Stage decomposition is typically a plan transformation pass,
+// not an egg rewrite rule. Represented here for documentation.
+
+fn decompose_stages(plan: &PlanNode) -> Vec<Stage> {
+    let mut stages = Vec::new();
+    let mut current_ops = Vec::new();
+
+    fn walk(
+        node: &PlanNode,
+        current: &mut Vec<PlanNode>,
+        stages: &mut Vec<Stage>,
+    ) {
+        match node {
+            PlanNode::Exchange { child, dist } => {
+                // Exchange boundary = stage boundary
+                walk(child, &mut Vec::new(), stages);
+                stages.push(Stage {
+                    operators: std::mem::take(current),
+                    output_dist: dist.clone(),
+                });
+            }
+            other => {
+                current.push(other.clone());
+                for child in other.children() {
+                    walk(child, current, stages);
+                }
+            }
+        }
+    }
+
+    walk(plan, &mut current_ops, &mut stages);
+    if !current_ops.is_empty() {
+        stages.push(Stage {
+            operators: current_ops,
+            output_dist: Distribution::Singleton,
+        });
+    }
+    stages
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(plan: &PlanNode) -> bool {
+    // Plan must contain at least one exchange operator
+    plan.contains_exchange()
+}
+```
+
+**Restrictions:**
+- Each stage must be self-contained: no references to operators in
+  other stages except through exchange inputs
+- The root stage typically runs on the coordinator (singleton)
+- Source stages run on nodes holding the table partitions
+- Intermediate stages run on the number of nodes determined by the
+  exchange's target distribution
+
+## Cost Model
+
+```rust
+fn stage_scheduling_overhead(
+    num_stages: u32,
+    avg_stage_setup_ms: f64,
+    parallelism: u32,
+) -> f64 {
+    // Sequential overhead for stage chain
+    // (stages can overlap via pipelining)
+    let critical_path_stages = num_stages; // worst case
+    critical_path_stages as f64 * avg_stage_setup_ms
+}
+```
+
+**Typical benefit**: Stage decomposition itself is not an optimization
+but an enabling transformation. Benefit comes from parallel execution
+of independent stages and pipelining of dependent stages.
+
+## Test Cases
+
+```sql
+-- TPC-H Q3: three stages
+SELECT l_orderkey, SUM(l_extendedprice * (1 - l_discount)) AS revenue,
+       o_orderdate, o_shippriority
+FROM customer, orders, lineitem
+WHERE c_mktsegment = 'BUILDING'
+  AND c_custkey = o_custkey
+  AND l_orderkey = o_orderkey
+  AND o_orderdate < DATE '1995-03-15'
+  AND l_shipdate > DATE '1995-03-15'
+GROUP BY l_orderkey, o_orderdate, o_shippriority
+ORDER BY revenue DESC LIMIT 10;
+
+-- Stage decomposition:
+-- Stage 0: Scan(customer) + Filter(segment='BUILDING')
+-- Stage 1: Scan(orders) + Filter(orderdate < ...)
+-- Stage 2: Scan(lineitem) + Filter(shipdate > ...)
+-- Stage 3: HashJoin(customer, orders) on custkey
+--          <- Exchange[hash(custkey)] from Stage 0, Stage 1
+-- Stage 4: HashJoin(result, lineitem) on orderkey
+--          + PartialAggregate + TopN(10)
+--          <- Exchange[hash(orderkey)] from Stage 2, Stage 3
+-- Stage 5: FinalAggregate + TopN(10)
+--          <- Exchange[gather] from Stage 4
+```
+
+## References
+
+Presto/Trino: presto-main/src/main/java/com/facebook/presto/sql/planner/PlanFragmenter.java
+Spark SQL: sql/core/src/main/scala/org/apache/spark/sql/execution/exchange/ShuffleExchangeExec.scala
+Graefe, "Volcano - An Extensible and Parallel Query Evaluation System" (IEEE TKDE 1994)

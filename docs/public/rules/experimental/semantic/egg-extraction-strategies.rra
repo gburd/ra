@@ -1,0 +1,238 @@
+---
+id: egg-extraction-strategies
+name: E-graph Extraction Strategies for Query Optimization
+category: experimental/semantic
+databases: [postgresql, duckdb]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["Willsey et al. 2021", "Wang et al. 2022", "RA Contributors"]
+tags: [e-graph, extraction, cost-model, multi-objective]
+complexity: "O(n * k) per extraction"
+benefit_range: [0.1, 0.6]
+---
+
+# E-graph Extraction Strategies for Query Optimization
+
+## Description
+
+After equality saturation populates an E-graph with equivalent query
+plans, the extraction phase selects the optimal plan. This rule covers
+advanced extraction strategies beyond simple bottom-up cost minimization:
+multi-objective extraction (cost + latency + memory), Pareto-optimal
+extraction, and ILP-based extraction for non-monotonic cost functions.
+
+**When to apply**: After E-graph saturation when the cost function is
+non-trivial (multiple objectives, non-additive costs like memory peaks,
+or when the standard greedy extraction misses the global optimum).
+
+**Why it works**: Standard E-graph extraction assumes cost functions
+are monotonic (subtree costs add up). Real query costs violate this:
+a hash join's memory depends on the build side size, pipeline breakers
+affect latency, and parallelism introduces non-additive overhead.
+Advanced extraction handles these correctly.
+
+## Relational Algebra
+
+```latex
+-- After saturation, E-graph contains all equivalent plans:
+$$
+E-class {
+  (hash_join (scan R) (scan S)),
+  (sort_merge_join (scan R) (scan S)),
+  (hash_join (scan S) (scan R)),  -- commuted
+  ...
+}
+$$
+
+-- Multi-objective extraction:
+$$
+extract_pareto(E-class, [cost, memory, latency])
+  \rightarrow Pareto frontier of non-dominated plans
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Multi-objective cost function
+struct MultiObjectiveCost {
+    cpu_cost: f64,
+    memory_peak: f64,
+    latency: f64,
+}
+
+impl CostFunction<QueryLang> for MultiObjectiveCost {
+    type Cost = (f64, f64, f64);
+
+    fn cost<C>(
+        &mut self,
+        enode: &QueryLang,
+        mut costs: C,
+    ) -> Self::Cost
+    where
+        C: FnMut(Id) -> Self::Cost,
+    {
+        match enode {
+            QueryLang::HashJoin([pred, left, right]) => {
+                let (lc, lm, ll) = costs(*left);
+                let (rc, rm, rl) = costs(*right);
+                let build_mem =
+                    estimate_build_side_memory(*left);
+                (
+                    lc + rc + 1000.0,       // CPU: additive
+                    (lm.max(rm)) + build_mem, // Memory: max + build
+                    ll.max(rl) + 100.0,     // Latency: max + probe
+                )
+            }
+            QueryLang::SortMergeJoin([pred, left, right]) => {
+                let (lc, lm, ll) = costs(*left);
+                let (rc, rm, rl) = costs(*right);
+                (
+                    lc + rc + 2000.0,   // CPU: sort overhead
+                    lm.max(rm),         // Memory: streaming
+                    ll + rl + 200.0,    // Latency: sequential
+                )
+            }
+            _ => (1.0, 0.0, 1.0),
+        }
+    }
+}
+
+// ILP-based extraction for global optimum
+fn ilp_extraction(
+    egraph: &EGraph<QueryLang, ()>,
+    root: Id,
+) -> RecExpr<QueryLang> {
+    // Variables: x_ij = 1 if enode j chosen from eclass i
+    // Objective: minimize sum of costs
+    // Constraints:
+    //   - Exactly one enode per used eclass
+    //   - If enode j chosen, its children eclasses must be active
+    //   - Memory constraint: total peak memory <= budget
+
+    let mut model = ILPModel::new();
+
+    // Add variables for each (eclass, enode) pair
+    for (eclass_id, eclass) in egraph.classes() {
+        let vars: Vec<_> = eclass.nodes.iter()
+            .enumerate()
+            .map(|(j, _)| model.add_binary_var(
+                format!("x_{}_{}", eclass_id, j),
+            ))
+            .collect();
+
+        // Exactly one enode per active eclass
+        model.add_constraint(sum(&vars) == 1);
+    }
+
+    // Memory budget constraint
+    model.add_constraint(total_memory <= MEMORY_BUDGET);
+
+    model.minimize(total_cost);
+    model.solve()
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    egraph: &EGraph<QueryLang, ()>,
+    objectives: &[Objective],
+) -> bool {
+    // Multi-objective extraction needed when:
+    // 1. Multiple objectives specified
+    if objectives.len() > 1 {
+        return true;
+    }
+
+    // 2. Non-monotonic cost function
+    if has_pipeline_breakers(egraph) {
+        return true;
+    }
+
+    // 3. Memory constraints active
+    if memory_budget_specified() {
+        return true;
+    }
+
+    false
+}
+```
+
+**Restrictions:**
+- ILP extraction is NP-hard (use timeout and fallback to greedy)
+- Pareto extraction returns multiple plans (need selection strategy)
+- Non-monotonic costs make greedy extraction suboptimal
+- Extraction time grows with E-graph size
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    greedy_plan_cost: f64,
+    optimal_plan_cost: f64,
+    extraction_time_ms: f64,
+) -> f64 {
+    // Benefit of better extraction vs greedy
+    if greedy_plan_cost > optimal_plan_cost + extraction_time_ms {
+        (greedy_plan_cost - optimal_plan_cost) / greedy_plan_cost
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 5-30% improvement over greedy extraction for
+queries with memory constraints or mixed workloads (OLTP + OLAP).
+
+## Test Cases
+
+### Positive: Memory-constrained extraction
+
+```sql
+SELECT * FROM large_table l
+JOIN medium_table m ON l.id = m.lid
+JOIN small_table s ON m.id = s.mid;
+
+-- Greedy (CPU-optimal): hash join on medium (build) + large (probe)
+-- Memory budget 1GB: medium table is 2GB, doesn't fit
+-- ILP extraction: sort-merge join (streaming, low memory)
+```
+
+### Positive: Latency-sensitive query
+
+```sql
+SELECT * FROM orders o
+JOIN customers c ON o.cid = c.id
+WHERE o.date > NOW() - INTERVAL '1 hour'
+LIMIT 10;
+
+-- Greedy (throughput-optimal): hash join
+-- Latency-optimal: nested loop with index (first tuple fast)
+-- Multi-objective selects NL join for low first-tuple latency
+```
+
+### Negative: Simple query with monotonic costs
+
+```sql
+SELECT * FROM users WHERE id = 42;
+-- Single operator, greedy extraction is optimal
+```
+
+## References
+
+**Academic papers:**
+- Willsey et al., "egg: Fast and Extensible Equality Saturation", POPL 2021
+- Wang et al., "Relational E-Matching", POPL 2022
+- Zhang et al., "Extracting Cost-Optimal Programs from E-Graphs", CGO 2023
+
+**Key insights:**
+- Greedy extraction is optimal only for monotonic cost functions
+- ILP extraction handles memory constraints and non-additive costs
+- Pareto extraction useful for mixed workloads (latency vs throughput)
+- Extraction time is typically < 1% of total optimization time

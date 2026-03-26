@@ -1,0 +1,130 @@
+---
+id: oracle-parallel-execution
+name: Oracle Parallel Execution Optimization
+category: database-specific/oracle
+databases: [oracle]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, oracle, parallel, dop, granule, distribution]
+complexity: O(n)
+benefit_range: [0.3, 0.9]
+---
+
+# Oracle Parallel Execution Optimization
+
+## Description
+
+Determines the degree of parallelism (DOP) and data distribution
+method for parallel query execution.  Oracle's optimizer selects
+between broadcast, hash, and range distribution methods for parallel
+joins and aggregations based on table sizes and available resources.
+
+**When to apply**: A query operates on large tables and parallel
+execution is enabled (DOP > 1).
+
+**Why it works**: Oracle's parallel execution framework divides work
+into granules and distributes them across parallel server processes.
+Choosing the right distribution method minimizes inter-process
+communication while maximizing CPU and I/O parallelism.
+
+**Database version**: Oracle 10g+ (auto DOP), Oracle 8i+ (manual)
+
+## Relational Algebra
+
+```latex
+-- Broadcast distribution (small build side)
+$$
+parallel-hash-\bowtie(
+    broadcast(S_small),
+    partition-scan(R_large))
+$$
+
+-- Hash distribution (both sides large)
+$$
+parallel-hash-\bowtie(
+    hash-distribute(R, key),
+    hash-distribute(S, key))
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("oracle-parallel-broadcast-join";
+    "(parallel-join ?type ?cond ?left ?right)" =>
+    "(parallel-hash-join ?type ?cond
+        (broadcast ?left)
+        (granule-scan ?right))"
+    if is_database("oracle")
+    if is_small_enough_to_broadcast("?left")
+),
+
+rw!("oracle-parallel-hash-distribution-join";
+    "(parallel-join ?type ?cond ?left ?right)" =>
+    "(parallel-hash-join ?type ?cond
+        (hash-distribute ?left ?join_key)
+        (hash-distribute ?right ?join_key))"
+    if is_database("oracle")
+    if both_sides_large("?left", "?right")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    table_size: f64,
+    dop: usize,
+    system_resources: &Resources,
+) -> bool {
+    dop > 1
+    && table_size > system_resources.parallel_min_table_size()
+}
+```
+
+**Restrictions:**
+- Auto DOP respects PARALLEL_DEGREE_POLICY parameter
+- PARALLEL_MAX_SERVERS limits total parallel processes
+- Small tables may be slower with parallelism due to coordination overhead
+- PARALLEL_DEGREE_LIMIT caps per-statement DOP
+
+## Cost Model
+
+```rust
+fn parallel_benefit(
+    serial_cost: f64,
+    dop: usize,
+    coordination_overhead: f64,
+) -> f64 {
+    let parallel_cost = serial_cost / dop as f64
+        + coordination_overhead * dop as f64;
+    serial_cost - parallel_cost
+}
+```
+
+**Typical benefit**: DOP 8 on an 8-core machine achieves ~6x speedup
+for I/O-bound full table scans.
+
+## Test Cases
+
+```sql
+-- Positive: parallel full table scan with broadcast join
+SELECT /*+ PARALLEL(8) */ s.*, p.name
+FROM sales s JOIN products p ON s.product_id = p.id;
+-- products broadcast to all parallel servers; sales partitioned
+```
+
+```sql
+-- Negative: small table, parallel adds overhead
+SELECT /*+ PARALLEL(8) */ * FROM config_params WHERE key = 'x';
+-- 10-row table; parallel coordination overhead exceeds benefit
+```
+
+## References
+
+Oracle: Oracle Database VLDB and Partitioning Guide, "Parallel Execution"
+Oracle: V$PQ_TQSTAT for monitoring parallel distribution
+Oracle: PARALLEL_DEGREE_POLICY init parameter

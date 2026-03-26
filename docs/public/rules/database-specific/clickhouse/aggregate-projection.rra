@@ -1,0 +1,182 @@
+---
+id: clickhouse-aggregate-projection
+name: Use Aggregate Projection for GROUP BY
+category: database-specific/clickhouse
+databases: [clickhouse]
+version: 1.0.0
+authors: ["RA Contributors"]
+tags: [database-specific, clickhouse, projection, aggregation, mergetree, materialized]
+complexity: O(m)
+benefit_range: [0.7, 0.99]
+---
+
+# Use Aggregate Projection for GROUP BY
+
+## Description
+
+Uses a pre-aggregated projection instead of scanning raw table data for GROUP BY queries. Aggregate projections are materialized views of aggregated data stored alongside the base table. When a query's GROUP BY matches a projection's grouping keys, the optimizer can read pre-aggregated data instead of aggregating from scratch.
+
+**When to apply**: GROUP BY query where grouping keys and aggregation functions match an existing aggregate projection.
+
+**Why it works**: Pre-aggregated data has far fewer rows (m << n) and aggregation is already complete or partially complete. Reading and merging projection data is much faster than scanning and aggregating raw rows.
+
+**Database version**: ClickHouse v21.12+
+
+## Relational Algebra
+
+```latex
+$$
+GroupBy[keys, aggs](Scan[MergeTree](T))
+  \rightarrow GroupBy[keys, merge_aggs](Scan[Projection[keys, agg_states]](T))
+  \text{where} has_matching_projection(T, keys, aggs)
+$$
+
+```
+
+Where:
+- Projection stores aggregate states (AggregateFunction types)
+- Final query merges aggregate states instead of computing from raw data
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("clickhouse-aggregate-projection";
+    "(group_by ?keys ?aggs (scan ?table ?props))" =>
+    "(group_by ?keys (merge_aggs ?aggs)
+        (scan (use_projection ?table (find_aggregate_projection ?keys ?aggs)) ?props))"
+    if is_database("clickhouse")
+    if is_mergetree_table("?table")
+    if has_matching_aggregate_projection("?table", "?keys", "?aggs")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    group_by_keys: &[Column],
+    agg_functions: &[AggFunc],
+    table: &TableRef,
+) -> bool {
+    // Find matching projection
+    let projections = table.aggregate_projections();
+
+    for proj in projections {
+        // Projection keys must match query keys
+        if proj.group_by_keys() != group_by_keys {
+            continue;
+        }
+
+        // All aggregation functions must be supported
+        let all_supported = agg_functions.iter().all(|agg| {
+            proj.supports_aggregate_function(agg)
+        });
+
+        if all_supported {
+            return true;
+        }
+    }
+
+    false
+}
+```
+
+**Restrictions:**
+- Only applies to ClickHouse MergeTree family
+- Requires existing aggregate projection with matching grouping keys
+- Aggregation functions must be supported by the projection
+- Projection must be up-to-date (automatically maintained)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    table_rows: f64,
+    projection_groups: f64,
+    agg_complexity: f64,
+) -> f64 {
+    // Normal: scan all rows + aggregate
+    let normal_cost = table_rows * 100.0 + table_rows * agg_complexity;
+
+    // Projection: scan projection groups + merge aggregates
+    let projection_cost = projection_groups * 100.0
+                        + projection_groups * (agg_complexity * 0.1);
+
+    (normal_cost - projection_cost) / normal_cost
+}
+```
+
+**Typical benefit**: 70-99% cost reduction for high-cardinality aggregations
+
+## Test Cases
+
+### Positive Case 1: Daily Aggregation with Projection
+
+```sql
+CREATE TABLE events (
+  timestamp DateTime,
+  user_id UInt64,
+  value Float64
+) ENGINE = MergeTree()
+ORDER BY timestamp;
+
+-- Create projection
+ALTER TABLE events ADD PROJECTION daily_stats (
+  SELECT toDate(timestamp) as date,
+         user_id,
+         sum(value),
+         count()
+  GROUP BY date, user_id
+);
+
+-- Query uses projection
+SELECT toDate(timestamp), user_id, sum(value), count()
+FROM events
+GROUP BY toDate(timestamp), user_id;
+
+-- Reads ~days*users rows from projection
+-- instead of billions of raw event rows
+```
+
+### Positive Case 2: Pre-Aggregated Metrics
+
+```sql
+-- Projection for hourly metrics
+ALTER TABLE metrics ADD PROJECTION hourly (
+  SELECT toStartOfHour(ts), metric_name, avg(value), max(value)
+  GROUP BY toStartOfHour(ts), metric_name
+);
+
+SELECT toStartOfHour(ts), metric_name, avg(value)
+FROM metrics
+WHERE ts > now() - INTERVAL 7 DAY
+GROUP BY toStartOfHour(ts), metric_name;
+
+-- Uses hourly projection (168 hours * N metrics)
+-- instead of scanning millions of raw metric rows
+```
+
+### Negative Case 1: Different Grouping Keys
+
+```sql
+-- Query groups by different columns than projection
+SELECT user_id, country, sum(value)
+FROM events
+GROUP BY user_id, country;
+
+-- Projection groups by (date, user_id) - no match
+-- Rule should NOT apply
+```
+
+## References
+
+**Source code:**
+- ClickHouse: `src/Processors/QueryPlan/Optimizations/optimizeUseAggregateProjection.cpp`
+  - Git: https://github.com/ClickHouse/ClickHouse
+  - Commit: 35f2d31186cca2f8c50f7ba4bd93817da490da85
+- ClickHouse: `src/Storages/Projections/ProjectionsCommon.cpp`
+
+**Documentation:**
+- ClickHouse Projections: https://clickhouse.com/docs/en/engines/table-engines/mergetree-family/mergetree#projections

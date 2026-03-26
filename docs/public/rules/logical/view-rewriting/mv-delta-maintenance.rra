@@ -1,0 +1,114 @@
+---
+id: mv-delta-maintenance
+name: Materialized View Incremental Maintenance
+category: logical/view-rewriting
+databases: [oracle, postgresql, mssql, snowflake]
+version: "1.0.0"
+authors: ["Gupta & Mumick"]
+tags: [logical, materialized-view, incremental, delta, maintenance]
+complexity: O(delta)
+benefit_range: [0.5, 0.99]
+---
+
+# Materialized View Incremental Maintenance
+
+## Description
+
+Instead of recomputing a materialized view from scratch after base table
+changes, derives delta expressions that compute only the changes to the
+view. For a view V = f(R), given delta_R, computes delta_V = f_delta(R, delta_R)
+and applies V_new = V + delta_V.
+
+**When to apply**: Base tables change incrementally and the view definition
+supports algebraic differencing.
+
+## Relational Algebra
+
+```latex
+-- View: V = sigma[p](R JOIN S)
+-- Insert delta_R into R:
+-- delta_V = sigma[p](delta_R JOIN S)
+-- V_new = V UNION delta_V
+
+-- For aggregates with SUM:
+-- V = gamma[g; SUM(x)](R)
+-- delta_V = gamma[g; SUM(x)](delta_R)
+-- V_new = V MERGE_SUM delta_V
+
+```
+
+## Implementation
+
+```rust
+fn derive_delta(view_def: &ViewDefinition, delta: &Delta) -> DeltaExpression {
+    match view_def {
+        ViewDefinition::Select(pred, input) => {
+            DeltaExpression::Select(pred.clone(), derive_delta(input, delta))
+        }
+        ViewDefinition::Join(left, right, cond) => {
+            if delta.affects(left) {
+                DeltaExpression::Join(
+                    delta.for_input(left),
+                    DeltaExpression::Full(right.clone()),
+                    cond.clone(),
+                )
+            } else {
+                DeltaExpression::Join(
+                    DeltaExpression::Full(left.clone()),
+                    delta.for_input(right),
+                    cond.clone(),
+                )
+            }
+        }
+        ViewDefinition::Aggregate(group, aggs, input) => {
+            DeltaExpression::MergeAggregate(
+                group.clone(),
+                aggs.to_delta_aggs(),
+                derive_delta(input, delta),
+            )
+        }
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(view: &MaterializedView, delta: &Delta) -> bool {
+    view.supports_incremental_maintenance()
+        && delta.size() < view.base_table_size() * 0.1
+}
+```
+
+## Cost Model
+
+```rust
+fn estimated_benefit(delta_size: f64, full_recompute_cost: f64) -> f64 {
+    let incremental_cost = delta_size * 10.0; // per-row delta cost
+    (full_recompute_cost - incremental_cost) / full_recompute_cost
+}
+```
+
+## Test Cases
+
+```sql
+-- MV: sales summary
+CREATE MATERIALIZED VIEW region_totals AS
+SELECT region, SUM(amount), COUNT(*)
+FROM sales GROUP BY region;
+
+-- Delta: 100 new rows inserted into sales
+-- Incremental: compute SUM/COUNT for new rows per region,
+-- merge with existing view rows
+
+-- Positive: small delta relative to base
+-- 100 new rows vs 10M existing = incremental is 100000x faster
+
+-- Negative: large delta (bulk reload)
+-- If delta is 50% of base table, full recompute may be cheaper
+```
+
+## References
+
+- Gupta, A. & Mumick, I.S., "Maintenance of Materialized Views: Problems, Techniques, and Applications", IEEE Data Engineering Bulletin, 1995
+- Gupta, A., Mumick, I.S. & Subrahmanian, V.S., "Maintaining Views Incrementally", ACM SIGMOD 1993, DOI: 10.1145/170035.170066

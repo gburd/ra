@@ -1,0 +1,48 @@
+---
+id: cockroachdb-join-reorder
+name: "Join Reorder via Graph"
+category: logical/join-reorder
+databases: [cockroachdb]
+version: "1.0.0"
+authors: ["Database Contributors", "RA Contributors"]
+tags: [database-mining, cockroachdb, optimization]
+complexity: "O(n)"
+benefit_range: [1.0, 10.0]
+---
+
+# Join Reorder via Graph
+
+## Description
+
+Reorders joins to minimize intermediate result sizes using join graph construction.
+
+**When to apply**: During query optimization phase.
+
+## Relational Algebra
+
+```latex
+-- Before
+$$
+(inner-\bowtie (inner-\bowtie a b) (inner-\bowtie c d))
+$$
+
+-- After
+$$
+(inner-\bowtie (inner-\bowtie a c) (inner-\bowtie b d))
+$$
+
+```
+
+## Preconditions
+
+- Multiple join operators present
+
+## Test Cases
+
+```sql
+SELECT * FROM table WHERE condition;
+```
+
+## References
+
+- Database documentation

@@ -1,0 +1,48 @@
+---
+id: join-union-transpose
+name: "Join Union Transpose"
+category: logical/join-reordering
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [academic, calcite]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+preconditions:
+  - type: "pattern"
+    must_match: "(join ?type ?cond (union ?r1 ?r2) ?s)"
+    description: "Join with a union as one input"
+  - type: "predicate"
+    condition: "is_inner_or_cross(?type)"
+    description: "Join must be inner or cross"
+---
+
+# Join Union Transpose
+
+## Description
+
+Transposes join and union
+
+## Relational Algebra
+
+```latex
+$$
+Join(Union(R1, R2), S) => Union(Join(R1, S), Join(R2, S))
+$$
+
+```
+
+## Implementation
+
+```
+Implement rule transformation for calcite optimization
+```
+
+## Tests
+
+Add test cases for this rule
+
+## References
+

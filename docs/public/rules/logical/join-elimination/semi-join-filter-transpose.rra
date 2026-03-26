@@ -1,0 +1,41 @@
+---
+id: semi-join-filter-transpose
+name: "Semi Join Filter Transpose"
+category: logical/join-elimination
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [academic, calcite]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# Semi Join Filter Transpose
+
+## Description
+
+Transposes filter with semi-join
+
+## Relational Algebra
+
+```latex
+$$
+σ(SemiJoin(R, S)) => SemiJoin(σ(R), S)
+$$
+
+```
+
+## Implementation
+
+```
+Implement rule transformation for calcite optimization
+```
+
+## Tests
+
+Add test cases for this rule
+
+## References
+

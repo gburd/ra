@@ -1,0 +1,130 @@
+---
+id: materialize-canonicalize-mfp
+name: Materialize Canonicalize MapFilterProject
+category: database-specific/materialize
+databases: [materialize]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, materialize, mfp, canonicalize, map, filter, project]
+complexity: O(n)
+benefit_range: [0.1, 0.3]
+---
+
+# Materialize Canonicalize MapFilterProject
+
+## Description
+
+Canonicalizes sequences of Map, Filter, and Project operators into a
+single MapFilterProject (MFP) block.  MFP is Materialize's fused
+operator that applies column expressions, row filters, and column
+selection in a single pass over each differential dataflow batch.
+
+**When to apply**: Adjacent Map, Filter, and Project operators can be
+combined into a single MFP.
+
+**Why it works**: Individual Map, Filter, and Project operators each
+require a separate pass over the data batch.  Fusing them into an MFP
+processes each row exactly once, applying all expressions, filters,
+and projections in a single function call per row.
+
+**Database version**: Materialize 0.20+
+
+## Relational Algebra
+
+```latex
+-- Before: separate operators
+$$
+\pi_{a, c}(\sigma_{b > 10}(map[c = a + 1](R)))
+$$
+
+-- After: single MFP
+$$
+MFP {
+    expressions: [c = a + 1],
+    predicates: [b > 10],
+    projection: [a, c],
+}(R)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("materialize-canonicalize-mfp";
+    "(project ?cols (filter ?pred (map ?exprs ?input)))" =>
+    "(mfp ?exprs ?pred ?cols ?input)"
+    if is_database("materialize")
+),
+
+rw!("materialize-mfp-absorb-filter";
+    "(filter ?pred (mfp ?exprs ?existing_pred ?cols ?input))" =>
+    "(mfp ?exprs (and ?existing_pred ?pred) ?cols ?input)"
+    if is_database("materialize")
+),
+
+rw!("materialize-mfp-absorb-project";
+    "(project ?cols (mfp ?exprs ?pred ?existing_cols ?input))" =>
+    "(mfp ?exprs ?pred (compose-projects ?cols ?existing_cols) ?input)"
+    if is_database("materialize")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(plan: &MirRelationExpr) -> bool {
+    matches!(
+        plan,
+        MirRelationExpr::Project {
+            input: box MirRelationExpr::Filter {
+                input: box MirRelationExpr::Map { .. }, ..
+            }, ..
+        }
+    ) || has_adjacent_mfp_operators(plan)
+}
+```
+
+**Restrictions:**
+- The MFP must preserve expression evaluation order when expressions
+  reference each other
+- Temporal filters (mz_now()) are kept separate from the MFP
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    rows: f64,
+    operators_fused: usize,
+) -> f64 {
+    // Eliminate per-operator batch processing overhead
+    (operators_fused - 1) as f64 * rows * 0.000005
+}
+```
+
+**Typical benefit**: Fusing 3 operators into one MFP reduces per-row
+overhead by ~2x due to fewer function calls and intermediate buffers.
+
+## Test Cases
+
+```sql
+-- Positive: map + filter + project fused
+SELECT id, name || ' (active)' AS display_name
+FROM users
+WHERE active = true;
+-- Single MFP: map(concat), filter(active), project(id, display_name)
+```
+
+```sql
+-- Negative: operators separated by a join
+SELECT u.name FROM users u JOIN orders o ON u.id = o.user_id
+WHERE o.total > 100;
+-- MFP cannot span across the join operator
+```
+
+## References
+
+Materialize: src/transform/src/canonicalize_mfp.rs
+Materialize: src/expr/src/relation/func.rs (MapFilterProject)

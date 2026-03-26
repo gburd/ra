@@ -9,7 +9,7 @@
   "scripts": {
     "predev": "node .vitepress/scripts/process-rfcs.js",
     "dev": "vitepress dev",
-    "prebuild": "node .vitepress/scripts/process-rfcs.js",
+    "prebuild": "node .vitepress/scripts/process-rfcs.js && node .vitepress/scripts/copy-rules.js",
     "build": "vitepress build",
     "build:full": "npm run build:wasm && vitepress build",
     "build:wasm": "./build-wasm.sh",

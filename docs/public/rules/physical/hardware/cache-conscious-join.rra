@@ -1,0 +1,114 @@
+---
+id: cache-conscious-join
+name: Cache-Conscious Hash Join (Radix Partitioning)
+category: physical/hardware
+databases: [monetdb, hyper, duckdb, umbra]
+version: "1.0.0"
+authors: ["Manegold, Boncz, Kersten"]
+tags: [physical, hardware, cache, radix, hash-join, partitioning]
+complexity: O(n)
+benefit_range: [0.2, 0.6]
+---
+
+# Cache-Conscious Hash Join (Radix Partitioning)
+
+## Description
+
+Improves hash join performance by radix-partitioning both inputs so
+that each partition fits in CPU cache (L1/L2). Traditional hash joins
+suffer from cache misses when the hash table exceeds cache size. Radix
+partitioning splits data into cache-sized chunks using multiple passes
+of bit-extraction, ensuring the build phase of each partition is fully
+cache-resident.
+
+**When to apply**: Hash joins where the build side exceeds L2/L3 cache
+size but benefits from cache-resident probing.
+
+## Relational Algebra
+
+```latex
+-- Before: monolithic hash join
+$$
+HashJoin(R, S, key)
+$$
+
+-- After: radix-partitioned hash join
+$$
+Merge(
+    for each partition p:
+        HashJoin(R_p, S_p, key)  -- each fits in cache
+)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("cache-conscious-radix-join";
+    "(hashjoin ?key ?build ?probe)" =>
+    "(merge-partitions
+        (partitioned-hashjoin ?key
+            (radix-partition ?key ?build)
+            (radix-partition ?key ?probe)))"
+    if build_exceeds_cache("?build")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(join: &HashJoin, system: &SystemInfo) -> bool {
+    let build_size = join.build_side().estimated_size_bytes();
+    let cache_size = system.l2_cache_size();
+    // Build side must exceed cache for partitioning to help
+    build_size > cache_size
+        // But not so large that partitioning overhead dominates
+        && build_size < system.total_memory() / 4
+}
+```
+
+**Restrictions:**
+- Radix bits must be chosen to create cache-fitting partitions
+- Multi-pass partitioning adds overhead for very large inputs
+- Skewed keys reduce effectiveness (uneven partition sizes)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    build_rows: f64,
+    probe_rows: f64,
+    cache_miss_rate_before: f64,
+    cache_miss_rate_after: f64,
+) -> f64 {
+    let cache_miss_penalty = 100.0; // cycles per miss
+    let total_accesses = build_rows + probe_rows;
+    let misses_saved = total_accesses
+        * (cache_miss_rate_before - cache_miss_rate_after);
+    misses_saved * cache_miss_penalty
+}
+```
+
+**Typical benefit**: 20-60% for large hash joins.
+
+## Test Cases
+
+```sql
+-- Positive: build side exceeds L2 cache
+SELECT * FROM lineitem l
+  JOIN orders o ON l.orderkey = o.orderkey;
+-- orders table: millions of rows, hash table >> 256KB L2
+
+-- Negative: build side fits in cache
+SELECT * FROM orders o
+  JOIN nation n ON o.nationkey = n.nationkey;
+-- nation: 25 rows, trivially cache-resident
+```
+
+## References
+
+- Manegold, S. et al. "Optimizing Main-Memory Join on Modern Hardware" (IEEE TKDE 2002)
+- Balkesen, C. et al. "Main-Memory Hash Joins on Multi-Core CPUs" (ICDE 2013)

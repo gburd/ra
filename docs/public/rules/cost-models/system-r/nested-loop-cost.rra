@@ -1,0 +1,253 @@
+---
+id: system-r-nested-loop-cost
+name: "System R Nested-Loop Join Cost Formulas"
+category: cost-models/system-r
+databases: [postgresql, mysql, duckdb, cockroachdb, mssql, oracle]
+execution_models: [volcano]
+version: "1.0.0"
+authors: ["Selinger et al. 1979 - IBM Research"]
+tags: [join-cost, nested-loop, index-nested-loop, system-r, classic]
+complexity: "O(n * m) or O(n * B_tree_height)"
+benefit_range: [0.1, 100.0]
+---
+
+# System R Nested-Loop Join Cost Formulas
+
+## Description
+
+System R defined two forms of nested-loop join: simple nested-loop
+(scanning the inner relation for each outer tuple) and index nested-loop
+(probing an index on the inner relation for each outer tuple). The cost
+formulas account for I/O pattern differences: simple NL rescans the
+inner relation for each outer tuple, while index NL performs one index
+lookup per outer tuple.
+
+**When to apply**: The optimizer evaluates nested-loop cost for every
+join and compares it against sort-merge cost. NL with index is preferred
+when the outer relation is small and the inner has a selective index.
+Simple NL is a fallback when no index exists.
+
+**Why it works**: Index NL converts the O(n*m) problem into O(n * B_height)
+index lookups plus O(n * F * m) tuple fetches. When the outer is small
+and the join is selective, this is much cheaper than scanning the entire
+inner relation.
+
+## Relational Algebra
+
+```latex
+-- Simple Nested-Loop (no inner index):
+$$
+NL_cost(outer, inner) =
+  PAGES(outer) + TUPLES(outer) * PAGES(inner)
+  + W * TUPLES(outer) * TUPLES(inner)
+$$
+
+-- Index Nested-Loop (inner has index on join key):
+$$
+NL_index_cost(outer, inner, index) =
+  PAGES(outer) + TUPLES(outer) * (
+    index_levels +
+    if index.clustered:
+      F * PAGES(inner) + W * F * TUPLES(inner)
+    else:
+      F * TUPLES(inner) + W * F * TUPLES(inner)
+  )
+  \text{where} F = 1/ICARD(inner.join_key)
+$$
+
+-- With outer sorted and inner clustered on join key:
+$$
+NL_sorted_cost(outer, inner) =
+  sort_cost(outer) + PAGES(inner)
+  + W * (TUPLES(outer) + TUPLES(inner))
+$$
+  -- Merge-like behavior: scan inner once
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+struct NestedLoopCostCalculator {
+    w: f64,
+    buffer_pages: usize,
+}
+
+impl NestedLoopCostCalculator {
+    fn simple_nl_cost(
+        &self,
+        outer: &RelStats,
+        inner: &RelStats,
+    ) -> f64 {
+        // Outer scan: read all outer pages once
+        let outer_pages = outer.num_pages as f64;
+
+        // Inner scan: read all inner pages for each outer tuple
+        // With buffer pool, inner may be partially cached
+        let outer_tuples = outer.num_tuples as f64;
+        let inner_pages = inner.num_pages as f64;
+
+        // Block nested-loop optimization: buffer B-2 outer pages
+        let block_size =
+            (self.buffer_pages - 2).max(1) as f64;
+        let outer_blocks = (outer_pages / block_size).ceil();
+        let inner_scans = outer_blocks;
+
+        let page_fetches =
+            outer_pages + inner_scans * inner_pages;
+        let rsi_calls = outer_tuples * inner.num_tuples as f64;
+
+        page_fetches + self.w * rsi_calls
+    }
+
+    fn index_nl_cost(
+        &self,
+        outer: &RelStats,
+        inner: &RelStats,
+        index: &IndexInfo,
+    ) -> f64 {
+        let outer_pages = outer.num_pages as f64;
+        let outer_tuples = outer.num_tuples as f64;
+
+        // Selectivity: each outer tuple matches 1/ICARD inner tuples
+        let inner_icard =
+            inner.distinct_count(&index.columns[0]) as f64;
+        let join_selectivity = 1.0 / inner_icard;
+        let matching_tuples =
+            join_selectivity * inner.num_tuples as f64;
+
+        // Index probe cost per outer tuple
+        let index_levels = 3.0; // B-tree depth
+
+        let pages_per_probe = if index.is_clustered {
+            join_selectivity * inner.num_pages as f64
+        } else {
+            // Unclustered: one random page per matching tuple
+            matching_tuples.min(inner.num_pages as f64)
+        };
+
+        let per_probe_cost = index_levels + pages_per_probe
+            + self.w * matching_tuples;
+
+        // Total: scan outer + per-tuple inner probe
+        outer_pages + outer_tuples * per_probe_cost
+    }
+
+    fn choose_nl_variant(
+        &self,
+        outer: &RelStats,
+        inner: &RelStats,
+        inner_indexes: &[IndexInfo],
+    ) -> (NLVariant, f64) {
+        let simple_cost = self.simple_nl_cost(outer, inner);
+        let mut best_cost = simple_cost;
+        let mut best_variant = NLVariant::Simple;
+
+        for index in inner_indexes {
+            if !index.matches_join_key() {
+                continue;
+            }
+            let index_cost =
+                self.index_nl_cost(outer, inner, index);
+            if index_cost < best_cost {
+                best_cost = index_cost;
+                best_variant = NLVariant::Index(index.clone());
+            }
+        }
+
+        (best_variant, best_cost)
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    outer: &RelStats,
+    inner: &RelStats,
+    join_pred: &JoinPredicate,
+) -> bool {
+    // NL join always applicable (universal fallback)
+    // Index NL requires index on inner join key
+    true
+}
+```
+
+**Restrictions:**
+- Simple NL is O(n*m) -- catastrophic for large relations
+- Index NL requires index on inner join key
+- System R always puts the smaller relation as outer for simple NL
+- Buffer pool effects significant: cached inner pages reduce cost
+- System R does not model hash join (added later in System R*)
+
+## Cost Model
+
+```rust
+fn nl_vs_sort_merge_crossover(
+    outer: &RelStats,
+    inner: &RelStats,
+) -> &'static str {
+    // NL (simple) preferred when:
+    // outer is tiny (< 100 tuples) and inner fits in buffer
+    // TUPLES(outer) * PAGES(inner) < sort(outer) + sort(inner)
+    // + PAGES(outer) + PAGES(inner)
+
+    // NL (index) preferred when:
+    // outer is small-to-medium and inner has selective index
+    // TUPLES(outer) * (3 + F * PAGES(inner))
+    //   < PAGES(outer) + PAGES(inner) + sort costs
+
+    "See formulas above"
+}
+```
+
+**System R heuristic:**
+- Small outer (< buffer_pages tuples) + index on inner -> Index NL
+- Small outer + no index -> Simple NL with buffering
+- Large outer + large inner -> Sort-Merge join preferred
+
+## Test Cases
+
+### Positive: Small outer with index on inner
+
+```sql
+-- departments: 50 rows, 5 pages
+-- employees: 1M rows, 100K pages, clustered index on dept_id
+SELECT d.name, e.name
+FROM departments d
+JOIN employees e ON d.id = e.dept_id;
+
+-- Index NL: 5 + 50 * (3 + 0.02 * 100K + 0.05 * 20K)
+--         = 5 + 50 * (3 + 2000 + 1000) = 150,155
+-- Simple NL: 5 + 50/buffer * 100K = ~100,005 (1 rescan if buffered)
+-- Sort-Merge: sort(50) + sort(1M) + 5 + 100K = ~300K
+-- Index NL (clustered) wins for small outer
+```
+
+### Negative: Large outer without index
+
+```sql
+-- orders: 10M rows, lineitem: 60M rows, no index on lineitem.orderkey
+SELECT * FROM orders o
+JOIN lineitem l ON o.orderkey = l.orderkey;
+
+-- Simple NL: 10M * 600K pages = 6 * 10^12 page fetches
+-- Catastrophically expensive
+-- Sort-Merge or Hash Join (not in System R) is orders of magnitude better
+```
+
+## References
+
+**Original paper:**
+- Selinger et al., "Access Path Selection", SIGMOD 1979
+  - Section 6.1: "Nested-loop join cost computation"
+  - Formulas for page-fetches and RSI-calls
+
+**Extensions:**
+- Shapiro, "Join Processing in Database Systems with Large Main Memories", TODS 1986
+  - Block nested-loop optimization (buffer multiple outer pages)
+- Graefe, "Query Evaluation Techniques", Computing Surveys 1993
+  - Comprehensive survey including all NL variants

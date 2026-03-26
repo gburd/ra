@@ -1,0 +1,193 @@
+---
+id: filter-sample-transpose
+name: Filter Sample Transpose
+category: database-specific/calcite
+databases: [calcite]
+execution_models: [volcano]
+version: "1.0.0"
+authors: ["Apache Calcite Contributors"]
+tags: [filter, sample, transpose, optimization]
+complexity: "O(1)"
+benefit_range: [0.2, 0.5]
+---
+
+# Filter Sample Transpose
+
+## Description
+
+Pushes filters through TABLESAMPLE operations when the filter does not
+depend on the sampling result. Evaluating filters before sampling reduces
+the working set size, improving both sampling efficiency and overall
+query performance.
+
+**When to apply**: A filter appears above a TABLESAMPLE operator, and the
+filter predicate can be evaluated independently of the sampling method
+(i.e., it doesn't reference ROW_NUMBER() or sampling metadata).
+
+**Why it works**: TABLESAMPLE selects a subset of rows randomly or
+systematically. If a filter eliminates rows that would never be selected
+anyway, applying it before sampling reduces the candidate set, making
+sampling faster and reducing memory pressure.
+
+## Relational Algebra
+
+```latex
+$$
+σ_p(SAMPLE_k(R)) \text{where} p is independent of sampling \rightarrow
+  SAMPLE_k(σ_p(R))
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("filter-sample-transpose";
+    "(filter ?pred (sample ?rate ?method ?input))" =>
+    "(sample ?rate ?method
+       (filter ?pred ?input))"
+    if filter-independent-of-sampling("?pred")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> bool {
+    // Filter must not depend on sampling metadata
+    !stats.filter_uses_sample_metadata
+        // Filter should be selective
+        && stats.filter_selectivity < 0.7
+        // Sampling rate should be < 100%
+        && stats.sample_rate < 1.0
+}
+```
+
+**Restrictions:**
+- Filter must not reference ROW_NUMBER() or sampling-specific functions
+- Applicable to both BERNOULLI and SYSTEM sampling methods
+- Filter predicate must be deterministic
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let total_rows = stats.row_count as f64;
+    let filter_selectivity = stats.filter_selectivity;
+    let sample_rate = stats.sample_rate;
+
+    // Cost without filter pushdown:
+    // 1. Scan all rows: n
+    // 2. Sample: n * sample_rate
+    // 3. Filter: n * sample_rate * filter_cost
+    let without_pushdown =
+        total_rows + (total_rows * sample_rate * 1.5);
+
+    // Cost with filter pushdown:
+    // 1. Scan all rows: n
+    // 2. Filter: n * filter_cost (reduces to n * selectivity)
+    // 3. Sample from filtered: n * selectivity * sample_rate
+    let with_pushdown =
+        total_rows * 1.5 + (total_rows * filter_selectivity * sample_rate);
+
+    // Benefit: reduce sampling working set
+    if without_pushdown > with_pushdown {
+        (without_pushdown - with_pushdown) / without_pushdown
+    } else {
+        0.0
+    }
+}
+```
+
+**Assumptions:**
+- Sampling cost is proportional to input cardinality
+- Filter evaluation: ~1.5x row cost (predicate evaluation)
+- Selective filters significantly reduce sampling working set
+
+**Typical benefit**: 20-50% when filter is selective and sample rate is moderate.
+
+## Test Cases
+
+### Positive: Filter before sampling
+
+```sql
+-- Sample from filtered results
+SELECT *
+FROM large_table TABLESAMPLE BERNOULLI(10)
+WHERE category = 'electronics' AND price > 100;
+
+-- Before:
+-- Filter(category = 'electronics' AND price > 100)
+--   Sample(10%, BERNOULLI)
+--     Scan(large_table)
+
+-- After filter-sample-transpose:
+-- Sample(10%, BERNOULLI)
+--   Filter(category = 'electronics' AND price > 100)
+--     Scan(large_table)
+
+-- If filter reduces 1B rows to 100M, sample works on 100M instead of 1B
+```
+
+### Positive: Selective date filter
+
+```sql
+-- Sample recent data only
+SELECT *
+FROM events TABLESAMPLE SYSTEM(5)
+WHERE event_date >= '2024-01-01';
+
+-- Push date filter before sampling for efficiency
+```
+
+### Negative: Filter depends on ROW_NUMBER
+
+```sql
+-- Filter uses ROW_NUMBER assigned during sampling
+SELECT *
+FROM (
+  SELECT *, ROW_NUMBER() OVER() as rn
+  FROM orders TABLESAMPLE BERNOULLI(20)
+) t
+WHERE rn <= 1000;
+
+-- Cannot push filter through sample - rn depends on sampling
+```
+
+### Positive: Multi-column filter
+
+```sql
+-- Complex filter before sampling
+SELECT *
+FROM user_events TABLESAMPLE BERNOULLI(1)
+WHERE user_age BETWEEN 18 AND 35
+  AND country IN ('US', 'UK', 'CA')
+  AND event_type = 'purchase';
+
+-- Push entire filter before sampling for maximum benefit
+```
+
+## References
+
+**Implementation in databases:**
+- Apache Calcite: `FilterSampleTransposeRule.java`
+- PostgreSQL: TABLESAMPLE with predicate pushdown
+- mssql: TABLESAMPLE optimization
+
+**Academic papers:**
+- Olken & Rotem, "Random Sampling from Database Files: A Survey", SSDBM 1990
+  - Sampling methods and optimization techniques
+- Chaudhuri et al., "On Random Sampling over Joins", ACM SIGMOD 1999
+  - DOI: 10.1145/304182.304209
+  - Sampling with predicates and joins
+- Babcock et al., "Dynamic Sample Selection for Approximate Query Processing", ACM SIGMOD 2003
+  - DOI: 10.1145/872757.872822
+  - Adaptive sampling with filtering

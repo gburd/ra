@@ -1,0 +1,112 @@
+---
+id: materialize-demand-projection
+name: Materialize Demand-Driven Projection
+category: database-specific/materialize
+databases: [materialize]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, materialize, demand, projection, column-pruning]
+complexity: O(n)
+benefit_range: [0.2, 0.7]
+---
+
+# Materialize Demand-Driven Projection
+
+## Description
+
+Propagates column demands top-down through the dataflow graph to
+eliminate unused columns as early as possible.  Materialize's `Demand`
+transform analyzes which columns each operator actually needs and
+inserts projections to drop unused columns from differential dataflow
+arrangements.
+
+**When to apply**: An operator's input provides more columns than
+downstream operators require.
+
+**Why it works**: Each column in a differential dataflow arrangement
+adds to memory footprint (the arrangement stores (key, value, time,
+diff) tuples).  Projecting away unused columns before they enter
+arrangements reduces memory proportionally.
+
+**Database version**: Materialize 0.20+
+
+## Relational Algebra
+
+```latex
+-- Before: full schema flows through
+$$
+\pi_{a}(\sigma_{b > 10}(R(a, b, c, d, e)))
+$$
+
+-- After: demand-driven projection
+$$
+\pi_{a}(\sigma_{b > 10}(\pi_{a, b}(R(a, b, c, d, e))))
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("materialize-demand-projection";
+    "(project ?cols (filter ?pred ?input))" =>
+    "(project ?cols (filter ?pred
+        (project (demand-columns ?cols ?pred) ?input)))"
+    if is_database("materialize")
+    if input_has_extra_columns("?input", "?cols", "?pred")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    demanded: &HashSet<Column>,
+    input_schema: &[Column],
+) -> bool {
+    demanded.len() < input_schema.len()
+}
+```
+
+**Restrictions:**
+- Must include columns needed by all downstream operators
+- Cannot project away columns used in arrangement keys
+- Letbindings (shared subexpressions) require demand from all uses
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    rows_in_arrangement: f64,
+    eliminated_columns: usize,
+    avg_col_bytes: f64,
+) -> f64 {
+    rows_in_arrangement * eliminated_columns as f64 * avg_col_bytes
+}
+```
+
+**Typical benefit**: For a 100-column source where the view uses 5,
+reduces arrangement memory by 95%.
+
+## Test Cases
+
+```sql
+-- Positive: only 2 of 20 columns needed
+CREATE MATERIALIZED VIEW v AS
+SELECT name, email FROM users WHERE active = true;
+-- Only name, email, active flow through the dataflow
+```
+
+```sql
+-- Negative: SELECT * uses all columns
+CREATE MATERIALIZED VIEW v AS
+SELECT * FROM users;
+-- No columns to eliminate
+```
+
+## References
+
+Materialize: src/transform/src/demand.rs
+Materialize: src/transform/src/projection_pushdown.rs

@@ -1,0 +1,136 @@
+---
+id: composite-index-column-order
+name: Composite Index Column Order Selection
+category: physical/index-selection
+databases: [postgresql, mysql, mssql, oracle]
+execution_models: [volcano, vectorized]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [index, composite, column-order, selectivity, prefix]
+complexity: "O(log n + k)"
+benefit_range: [0.1, 0.8]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter ?pred (scan ?table))"
+    description: "Multi-column filter with composite index"
+  - type: "predicate"
+    condition: "has_composite_index(?table, columns(?pred))"
+    description: "Composite index must exist covering predicate columns"
+  - type: "predicate"
+    condition: "matches_index_prefix(?pred, ?index)"
+    description: "Predicate columns must match index prefix order"
+---
+
+# Composite Index Column Order Selection
+
+## Description
+
+Selects the best column ordering for a composite (multi-column) index
+when multiple indexes cover the same columns in different orders.
+The leading column determines which predicates can use the index
+efficiently; equality predicates should lead, followed by range.
+
+**When to apply**: Multiple composite indexes exist on the same
+table and the query has both equality and range predicates.
+
+**Why it works**: B-tree indexes are ordered left-to-right. An
+index on (status, date) can efficiently handle `status = 'A' AND
+date > '2025-01-01'`, but an index on (date, status) can only use
+the range predicate on date, losing the equality filter.
+
+## Relational Algebra
+
+```latex
+$$
+filter[status = 'A' AND date > '2025-01-01'](scan[T])
+  \rightarrow index_scan[I_status_date](status = 'A' AND date > '2025-01-01')
+$$
+  -- prefer I(status, date) over I(date, status)
+$$
+  \text{where} equality columns lead the index key
+$$
+
+```
+
+## Implementation
+
+```rust
+rw!("composite-index-equality-leads";
+    "(filter (and (= ?eq_col ?val) (> ?range_col ?bound))
+        (scan ?table))" =>
+    "(index-scan ?best_index
+        (and (= ?eq_col ?val) (> ?range_col ?bound)))"
+    if best_composite_index("?table", "?eq_col", "?range_col")
+),
+```
+
+## Cost Model
+
+```rust
+fn score_column_order(
+    index_columns: &[String],
+    equality_cols: &[String],
+    range_cols: &[String],
+) -> f64 {
+    let mut score = 0.0;
+    let mut usable_prefix = true;
+    for (i, col) in index_columns.iter().enumerate() {
+        if !usable_prefix { break; }
+        if equality_cols.contains(col) {
+            score += 10.0 / (i + 1) as f64; // Equality is most selective
+        } else if range_cols.contains(col) {
+            score += 5.0 / (i + 1) as f64;
+            usable_prefix = false; // Range stops prefix matching
+        } else {
+            usable_prefix = false;
+        }
+    }
+    score
+}
+```
+
+**Typical benefit**: 10-80% from choosing optimal column order.
+
+## Test Cases
+
+### Positive: Equality-leading index preferred
+
+```sql
+CREATE INDEX idx_a ON orders(status, order_date);
+CREATE INDEX idx_b ON orders(order_date, status);
+
+SELECT * FROM orders
+WHERE status = 'SHIPPED' AND order_date > '2025-01-01';
+
+-- idx_a preferred: equality on status narrows first, then range on date
+```
+
+### Positive: Multiple equality columns
+
+```sql
+CREATE INDEX idx_c ON products(category, brand, price);
+
+SELECT * FROM products
+WHERE category = 'Electronics' AND brand = 'Apple'
+AND price < 1000;
+
+-- All equality columns lead; range column (price) last
+```
+
+### Negative: Only range predicates
+
+```sql
+CREATE INDEX idx_d ON sensors(timestamp, sensor_id);
+
+SELECT * FROM sensors
+WHERE timestamp > '2025-01-01' AND sensor_id > 100;
+
+-- Leading column is range; second range column cannot use index
+```
+
+## References
+
+- B-tree index prefix matching rules
+- IndexType::Composite in ra-stats/src/index_types.rs
+- Use The Index, Luke: https://use-the-index-luke.com

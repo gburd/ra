@@ -1,0 +1,125 @@
+---
+id: shortest-path-optimization
+name: Shortest Path Query Optimization
+category: logical/graph
+databases: [neo4j, agensgraph, memgraph, postgresql]
+version: "1.0.0"
+authors: ["Dijkstra, E.W.", "Neo4j Team"]
+tags: [logical, graph, shortest-path, bfs, reachability]
+complexity: O(V + E)
+benefit_range: [0.3, 0.95]
+---
+
+# Shortest Path Query Optimization
+
+## Description
+
+Optimizes shortest-path queries by selecting the appropriate algorithm
+based on graph properties and query constraints. For unweighted graphs,
+BFS provides optimal shortest paths. For weighted graphs with non-negative
+weights, Dijkstra's algorithm is selected. The optimizer also applies
+bidirectional search when source and target are both known, cutting
+exploration roughly in half.
+
+**When to apply**: MATCH path = shortestPath((a)-[*]-(b)) patterns
+or recursive CTE-based shortest path queries.
+
+## Relational Algebra
+
+```latex
+-- Before: naive recursive expansion
+$$
+mu[path](
+    base: \sigma_{id = source}(V),
+    step: path \bowtie E
+) WHERE reaches(target)
+$$
+
+-- After: bidirectional BFS
+$$
+BidirectionalBFS(source, target, E,
+    max_depth=unbounded,
+    weight_fn=uniform)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("shortest-path-bfs";
+    "(recursive-join ?base ?edge_table ?target ?depth_limit)" =>
+    "(bfs ?base ?edge_table ?target ?depth_limit)"
+    if is_unweighted("?edge_table")
+),
+
+rw!("shortest-path-bidirectional";
+    "(bfs ?source ?edges ?target ?limit)" =>
+    "(bidirectional-bfs ?source ?edges ?target ?limit)"
+    if target_is_known("?target")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(query: &PathQuery) -> bool {
+    query.is_shortest_path()
+        && query.source().is_bound()
+        // Bidirectional requires known target
+        // Unidirectional works for reachability queries too
+}
+```
+
+**Restrictions:**
+- Bidirectional search requires both endpoints bound
+- Negative edge weights require Bellman-Ford instead
+- ALL shortest paths (not just one) requires modified BFS
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    vertices: f64,
+    edges: f64,
+    avg_degree: f64,
+    bidirectional: bool,
+) -> f64 {
+    let unidirectional = vertices + edges;
+    let bi_cost = if bidirectional {
+        2.0 * (vertices.sqrt() * avg_degree)
+    } else {
+        unidirectional
+    };
+    unidirectional - bi_cost
+}
+```
+
+**Typical benefit**: 30-95% for point-to-point shortest path.
+
+## Test Cases
+
+```sql
+-- Positive: shortest path between two known nodes
+-- Cypher: MATCH p = shortestPath((a:Person {name:'Alice'})-[*]-(b:Person {name:'Bob'}))
+-- SQL/recursive CTE equivalent:
+WITH RECURSIVE path AS (
+    SELECT id, ARRAY[id] AS trail, 0 AS depth
+    FROM vertices WHERE id = 'alice'
+    UNION ALL
+    SELECT e.target, p.trail || e.target, p.depth + 1
+    FROM path p JOIN edges e ON p.id = e.source
+    WHERE e.target <> ALL(p.trail)
+)
+SELECT * FROM path WHERE id = 'bob' ORDER BY depth LIMIT 1;
+
+-- Negative: all paths (not just shortest)
+-- MATCH p = (a)-[*1..5]-(b) -- variable-length pattern
+```
+
+## References
+
+- Dijkstra, E.W. "A Note on Two Problems in Connexion with Graphs" (1959)
+- Neo4j: shortestPath planning documentation

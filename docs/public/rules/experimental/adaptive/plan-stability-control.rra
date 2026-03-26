@@ -1,0 +1,204 @@
+---
+id: plan-stability-control
+name: Plan Stability vs Adaptiveness Control
+category: experimental/adaptive
+databases: [oracle, postgresql, cockroachdb]
+version: "1.0.0"
+authors: ["Bruno & Chaudhuri 2005", "RA Contributors"]
+tags: [adaptive, stability, robustness, plan-regression, baseline]
+complexity: O(plan_cost)
+benefit_range: [0.1, 0.6]
+research_status: mature-research
+maturity: production
+---
+
+# Plan Stability vs Adaptiveness Control
+
+## Description
+
+Manages the tradeoff between plan stability (using the same plan
+consistently) and plan adaptiveness (switching to better plans when
+statistics change). Plan regressions -- where a statistics update or
+optimizer change causes a slower plan to be chosen -- are a major
+source of production incidents. This rule implements a framework for
+controlling when plan changes are allowed, requiring new plans to
+prove superiority before being adopted.
+
+**When to apply**: Production systems where plan stability is critical
+(OLTP workloads with SLAs), or during optimizer upgrades, statistics
+refreshes, or schema changes that could trigger plan regressions.
+
+**Why it works**: Not all plan changes are improvements. By capturing
+plan baselines (known-good plans) and requiring new plans to
+demonstrate measurable improvement before adoption, the system prevents
+regressions while still allowing genuine improvements. This is the
+"evolve rather than revolution" approach to plan management.
+
+## Relational Algebra
+
+```latex
+-- Plan baseline capture
+$$
+Execute(Q) \rightarrow Plan_baseline  (first execution, capture as baseline)
+$$
+
+-- Plan evolution check
+$$
+Optimize(Q) \rightarrow Plan_new
+if cost(Plan_new) < cost(Plan_baseline) * (1 - threshold):
+    Execute(Q) \rightarrow Plan_new, update baseline
+else:
+    Execute(Q) \rightarrow Plan_baseline  (keep stable plan)
+$$
+
+-- With A/B verification:
+$$
+Optimize(Q) \rightarrow Plan_new
+if Plan_new != Plan_baseline:
+    shadow_execute(Plan_new)  -- run in parallel
+    if actual_cost(Plan_new) < actual_cost(Plan_baseline):
+        evolve(baseline, Plan_new)
+$$
+
+```
+
+## Implementation
+
+```rust
+struct PlanBaseline {
+    query_hash: u64,
+    plan: PhysicalPlan,
+    captured_at: Timestamp,
+    avg_execution_time: Duration,
+    execution_count: u64,
+    status: BaselineStatus,
+}
+
+enum BaselineStatus {
+    Accepted,       // Actively used
+    Candidate,      // Under evaluation
+    Rejected,       // Proven inferior
+    Fixed,          // Manually pinned, never evolve
+}
+
+enum EvolutionPolicy {
+    // Never change plans (maximum stability)
+    Fixed,
+    // Only adopt plans with cost < threshold * baseline_cost
+    Conservative { threshold: f64 },
+    // Adopt if A/B test shows improvement
+    Verified { sample_executions: u32 },
+    // Always use optimizer's choice (maximum adaptiveness)
+    Adaptive,
+}
+
+fn should_evolve_plan(
+    baseline: &PlanBaseline,
+    candidate: &PhysicalPlan,
+    policy: &EvolutionPolicy,
+    candidate_stats: Option<&ExecutionStats>,
+) -> bool {
+    match policy {
+        Fixed => false,
+        Conservative { threshold } => {
+            let baseline_cost = estimate_cost(baseline.plan);
+            let candidate_cost = estimate_cost(candidate);
+            candidate_cost < baseline_cost * (1.0 - threshold)
+        }
+        Verified { sample_executions } => {
+            if let Some(stats) = candidate_stats {
+                stats.execution_count >= *sample_executions
+                    && stats.avg_time < baseline.avg_execution_time
+            } else {
+                false // Not enough data yet
+            }
+        }
+        Adaptive => true,
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    query: &Query,
+    system: &DatabaseSystem,
+) -> bool {
+    // Plan baselines must be enabled
+    system.plan_baselines_enabled()
+    // Query must be a candidate for plan management
+    // (not ad-hoc, not DDL, has execution history)
+    && query.is_managed()
+    && query.execution_count() > 0
+}
+```
+
+**Restrictions:**
+- Plan baselines consume memory/storage for each managed query
+- Fixed baselines can prevent the optimizer from adapting to
+  genuine data distribution changes
+- The A/B verification approach doubles resource usage during the
+  evaluation period
+- Baselines must be invalidated when schema changes make them
+  invalid (e.g., dropped index)
+- Cross-version plan format compatibility is required for baselines
+  to survive database upgrades
+
+## Cost Model
+
+```rust
+fn stability_value(
+    regression_probability: f64,
+    regression_impact_ms: f64,
+    improvement_probability: f64,
+    improvement_benefit_ms: f64,
+    query_frequency: f64,
+) -> f64 {
+    let risk = regression_probability * regression_impact_ms
+        * query_frequency;
+    let opportunity = improvement_probability
+        * improvement_benefit_ms * query_frequency;
+    // When risk > opportunity, stability is preferred
+    risk - opportunity
+}
+```
+
+## Test Cases
+
+```sql
+-- Positive: plan baseline prevents regression
+-- Day 1: optimizer picks IndexScan (good, 5ms avg)
+-- Day 2: statistics refresh, optimizer now picks SeqScan (bad, 500ms)
+-- With baselines: IndexScan baseline is kept, regression prevented
+
+EXPLAIN SELECT * FROM orders WHERE customer_id = 42;
+-- Baseline: Index Scan using idx_customer (5ms)
+-- After ANALYZE: optimizer suggests Seq Scan (cost estimate lower due to
+--   stale selectivity after data redistribution)
+-- Baseline policy: keep Index Scan until Seq Scan proves faster
+```
+
+```sql
+-- Positive: verified evolution adopts better plan
+-- Baseline: Hash Join (100ms avg)
+-- Candidate: Merge Join with new index (50ms avg)
+-- After 100 shadow executions confirming 50ms avg:
+-- Baseline evolves to Merge Join
+```
+
+```sql
+-- Negative: fixed baseline blocks necessary change
+-- Schema change drops an index
+-- Fixed baseline references the dropped index
+-- Must invalidate baseline and allow re-optimization
+```
+
+## References
+
+Bruno & Chaudhuri, "Plan Regression: Automatic Detection and Fixing" (SIGMOD 2005)
+Oracle: "SQL Plan Management" (SPM) - plan baselines and evolution
+PostgreSQL: contrib/pg_plan_guarantee (proposed)
+mssql: "Plan Forcing" and "Automatic Plan Correction"
+CockroachDB: "Statement Diagnostics" - plan capture and replay
+Agrawal et al., "Database Tuning Advisor for Microsoft mssql 2005" (VLDB 2004)

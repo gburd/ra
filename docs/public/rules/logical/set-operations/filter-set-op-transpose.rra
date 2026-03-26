@@ -1,0 +1,41 @@
+---
+id: filter-set-op-transpose
+name: "Filter Set Op Transpose"
+category: logical/set-operations
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [academic, calcite]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# Filter Set Op Transpose
+
+## Description
+
+Pushes filters through set operations
+
+## Relational Algebra
+
+```latex
+$$
+σ(Union(R, S)) => Union(σ(R), σ(S))
+$$
+
+```
+
+## Implementation
+
+```
+Implement rule transformation for calcite optimization
+```
+
+## Tests
+
+Add test cases for this rule
+
+## References
+

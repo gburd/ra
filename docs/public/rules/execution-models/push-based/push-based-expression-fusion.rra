@@ -1,0 +1,287 @@
+---
+id: push-based-expression-fusion
+name: Push-Based Expression Fusion
+category: execution-models
+version: 1.0.0
+databases: [HyPer, Umbra, noisepage]
+authors: [Thomas Neumann, Prashanth Menon]
+tags: [execution, push-based, compilation, expression, fusion, optimization]
+standard: HyPer model
+---
+
+# Push-Based Expression Fusion
+
+## Description
+
+Expression fusion merges multiple scalar expressions from different logical operators into a single compiled computation. In Volcano execution, each operator independently evaluates its expressions (filter predicate, projection formula, join condition). In push-based compilation, these expressions are fused into the same code path, enabling the compiler to perform common subexpression elimination (CSE), constant folding, and strength reduction across operator boundaries.
+
+**Key characteristics:**
+- **Cross-operator CSE**: Shared subexpressions computed once
+- **Constant propagation**: Known values propagated across operators
+- **Strength reduction**: Compiler simplifies arithmetic (e.g., `x * 2` -> `x << 1`)
+- **Dead code elimination**: Unused intermediate results removed
+- **Register allocation**: Fused expressions share register file
+
+**Trade-offs:**
+- Increased compilation time for complex expression graphs
+- Generated code harder to debug/profile
+- Expression changes require recompilation
+
+## Relational Algebra
+
+```
+Before fusion (logical plan):
+  Project(revenue = price * quantity,
+    Filter(price * quantity > 1000,
+      Scan(lineitem)))
+
+After fusion (compiled code):
+  for row in lineitem:
+    let price = row.price      // Load once
+    let quantity = row.quantity // Load once
+    let revenue = price * quantity  // CSE: compute once
+    if revenue > 1000:              // Reuse revenue
+      emit(revenue)                 // Reuse revenue
+
+Without fusion (Volcano):
+  FilterIterator:
+    t = child.next()
+    val = eval(price * quantity, t)  // Compute #1
+    if val > 1000: return t
+
+  ProjectIterator:
+    t = child.next()
+    t.revenue = eval(price * quantity, t)  // Compute #2 (duplicate!)
+    return t
+```
+
+## Implementation
+
+```rust
+use ra_core::algebra::RelExpr;
+use ra_core::expr::Expr;
+
+/// Expression fusion across operator boundaries
+pub struct ExpressionFusion {
+    expressions: Vec<(OperatorId, Expr)>,
+}
+
+impl ExpressionFusion {
+    /// Analyze and fuse expressions from multiple operators
+    pub fn fuse(plan: &RelExpr) -> FusedExprPlan {
+        let mut collector = ExprCollector::new();
+
+        // Collect all expressions from the pipeline
+        plan.walk(|op| {
+            match op {
+                RelExpr::Filter { predicate, .. } => {
+                    collector.add(op.id(), predicate.clone());
+                }
+                RelExpr::Project { exprs, .. } => {
+                    for expr in exprs {
+                        collector.add(op.id(), expr.clone());
+                    }
+                }
+                _ => {}
+            }
+        });
+
+        // Find common subexpressions
+        let cse_map = collector.find_common_subexpressions();
+
+        // Build fused expression graph
+        let mut fused = FusedExprPlan::new();
+        for (subexpr, uses) in &cse_map {
+            if uses.len() > 1 {
+                // Shared: compute once, assign to variable
+                let var = fused.add_shared(subexpr.clone());
+                for use_site in uses {
+                    fused.replace(use_site, var.clone());
+                }
+            }
+        }
+
+        // Apply constant folding
+        fused.constant_fold();
+
+        // Apply strength reduction
+        fused.strength_reduce();
+
+        fused
+    }
+
+    /// Generate fused code
+    pub fn compile(
+        fused: &FusedExprPlan,
+        codegen: &mut CodeGen,
+        tuple_vars: &TupleVars,
+    ) {
+        // Emit shared subexpressions first
+        for (var, expr) in &fused.shared_exprs {
+            let code = compile_expr(codegen, expr, tuple_vars);
+            codegen.emit(&format!("let {} = {};", var, code));
+        }
+
+        // Emit operator-specific code using shared variables
+        for (op_id, expr) in &fused.operator_exprs {
+            let code = compile_expr(codegen, expr, tuple_vars);
+            codegen.emit_for_operator(*op_id, &code);
+        }
+    }
+}
+
+/// Constant folding: evaluate expressions with known values
+fn constant_fold(expr: &Expr) -> Expr {
+    match expr {
+        Expr::BinOp { op, left, right }
+            if left.is_constant() && right.is_constant() =>
+        {
+            // Evaluate at compile time
+            let result = eval_constant(op, left, right);
+            Expr::Constant(result)
+        }
+        Expr::BinOp { op: Op::Mul, left, right }
+            if *right == Expr::Constant(Value::Int(1)) =>
+        {
+            // x * 1 = x
+            *left.clone()
+        }
+        Expr::BinOp { op: Op::Add, left, right }
+            if *right == Expr::Constant(Value::Int(0)) =>
+        {
+            // x + 0 = x
+            *left.clone()
+        }
+        _ => expr.clone(),
+    }
+}
+
+/// Strength reduction: replace expensive ops with cheaper ones
+fn strength_reduce(expr: &Expr) -> Expr {
+    match expr {
+        Expr::BinOp { op: Op::Mul, left, right }
+            if is_power_of_two(right) =>
+        {
+            // x * 2^n -> x << n
+            let shift = log2(right);
+            Expr::BinOp {
+                op: Op::Shl,
+                left: left.clone(),
+                right: Box::new(Expr::Constant(Value::Int(shift))),
+            }
+        }
+        Expr::BinOp { op: Op::Div, left, right }
+            if is_power_of_two(right) =>
+        {
+            // x / 2^n -> x >> n
+            let shift = log2(right);
+            Expr::BinOp {
+                op: Op::Shr,
+                left: left.clone(),
+                right: Box::new(Expr::Constant(Value::Int(shift))),
+            }
+        }
+        Expr::BinOp { op: Op::Mod, left, right }
+            if is_power_of_two(right) =>
+        {
+            // x % 2^n -> x & (2^n - 1)
+            let mask = power_of_two_value(right) - 1;
+            Expr::BinOp {
+                op: Op::BitAnd,
+                left: left.clone(),
+                right: Box::new(Expr::Constant(Value::Int(mask))),
+            }
+        }
+        _ => expr.clone(),
+    }
+}
+
+/// Cost model for expression fusion
+pub fn expression_fusion_cost(
+    input_rows: f64,
+    num_expressions: usize,
+    num_cse_eliminated: usize,
+) -> f64 {
+    // Base cost without fusion
+    let base_cost = input_rows * num_expressions as f64 * 0.00002;
+
+    // Savings from CSE
+    let cse_savings = input_rows * num_cse_eliminated as f64 * 0.00002;
+
+    // Additional compilation cost for fusion analysis
+    let fusion_compile_cost = 1.0; // ~1ms
+
+    fusion_compile_cost + base_cost - cse_savings
+}
+```
+
+## Cost Model
+
+**Without Fusion:**
+- Each operator evaluates expressions independently
+- Duplicate computations: `duplicates x rows x expr_cost`
+- Expression tree interpretation: ~50-100 ns per expression
+
+**With Fusion:**
+- Common subexpressions computed once: eliminates duplicates
+- Constant folding: zero runtime cost for constant parts
+- Strength reduction: cheaper instructions for arithmetic
+- Register sharing: fewer loads/stores
+
+**Savings Breakdown:**
+- CSE elimination: proportional to shared subexpression count
+- Constant folding: proportional to constant subexpressions
+- Strength reduction: ~2-5x for applicable operations
+- Overall: typically 20-50% reduction in expression evaluation cost
+
+## Test Cases
+
+```sql
+-- Test 1: Common subexpression in filter + projection
+SELECT price * quantity AS revenue
+FROM lineitem
+WHERE price * quantity > 1000;
+-- Expected: price * quantity computed once, used for both
+-- Savings: one multiplication per tuple eliminated
+
+-- Test 2: Constant folding
+SELECT amount * 1.08 AS with_tax
+FROM orders
+WHERE order_date > DATE '2024-01-01' - INTERVAL '30' DAY;
+-- Expected: DATE '2024-01-01' - 30 days computed at compile time
+-- Runtime: zero cost for date arithmetic
+
+-- Test 3: Strength reduction
+SELECT id * 8, id / 4, id % 16 FROM records;
+-- Expected: Compiled as id << 3, id >> 2, id & 15
+-- Savings: shift/mask instead of mul/div/mod
+
+-- Test 4: Multi-operator CSE
+SELECT a + b, a + b + c, (a + b) * 2
+FROM data WHERE a + b > 10;
+-- Expected: a + b computed once, reused four times
+-- Savings: three redundant additions eliminated
+```
+
+## Comparison with Other Models
+
+| Aspect | Push-Based Fusion | Volcano | Vectorized |
+|--------|------------------|---------|------------|
+| Cross-operator CSE | Full (compiled) | None (separate ops) | Partial (batch cache) |
+| Constant folding | Compile time | Runtime (per tuple) | Runtime (per batch) |
+| Strength reduction | LLVM optimizer | None | Manual vectorization |
+| Register sharing | Full | None (stack frames) | Partial |
+
+## References
+
+1. **Neumann, Thomas**. "Efficiently Compiling Efficient Query Plans for Modern Hardware." VLDB 2011.
+   - Cross-operator expression optimization in compiled pipelines
+
+2. **Menon, Prashanth et al**. "Relaxed Operator Fusion for In-Memory Databases." VLDB 2017.
+   - Analysis of operator and expression fusion boundaries
+
+3. **Klonatos, Yannis et al**. "Building Efficient Query Engines in a High-Level Language." VLDB 2014.
+   - Expression compilation and optimization in LegoBase
+
+4. **Aho, Alfred V. et al**. "Compilers: Principles, Techniques, and Tools." 2nd edition.
+   - CSE, constant folding, and strength reduction foundations

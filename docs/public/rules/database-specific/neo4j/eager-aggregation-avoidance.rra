@@ -1,0 +1,188 @@
+---
+id: neo4j-eager-aggregation-avoidance
+name: Neo4j Eager Aggregation Avoidance
+category: database-specific/neo4j
+databases: [neo4j]
+execution_models: [graph-traversal]
+version: "1.0.0"
+authors: ["Neo4j Inc."]
+tags: [eager, aggregation, lazy, pipelining, cypher, optimization]
+complexity: "O(n)"
+benefit_range: [0.2, 10.0]
+---
+
+# Neo4j Eager Aggregation Avoidance
+
+## Description
+
+Eliminates unnecessary Eager barriers in Cypher execution plans. Eager operators
+force full materialization of upstream results before downstream processing,
+breaking the pipelined execution model. The optimizer identifies cases where
+eagerness is not semantically required and removes the barrier to enable lazy,
+streaming execution.
+
+**When to apply**: Cypher plans containing Eager operators inserted to prevent
+read-write conflicts or guarantee correctness of aggregation. Many Eager barriers
+are conservatively inserted and can be removed when conflict analysis proves
+they are unnecessary.
+
+**Why it works**: Neo4j's Cypher planner inserts Eager operators to prevent the
+"Halloween problem" (reads affected by concurrent writes in the same query).
+However, many queries are read-only or their write patterns do not conflict with
+reads. Removing unnecessary Eager barriers allows streaming execution, reducing
+peak memory from O(N) to O(1) per row.
+
+## Relational Algebra
+
+```latex
+-- Before: Eager barrier forces full materialization
+$$
+Eager(
+  Expand(NodeByLabelScan(:Person), :KNOWS)
+) |> Create(...)
+$$
+
+-- After: analysis proves no read-write conflict; Eager removed
+$$
+Expand(NodeByLabelScan(:Person), :KNOWS)
+  |> Create(...)
+$$
+
+-- Read-only query: Eager never needed
+$$
+Eager(
+  Expand(NodeByLabelScan(:Person), :KNOWS)
+) |> Return
+=> Expand(NodeByLabelScan(:Person), :KNOWS) |> Return
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("neo4j-remove-eager-readonly";
+    "(eager ?upstream)" =>
+    "?upstream"
+    if query_is_read_only()
+),
+
+rw!("neo4j-remove-eager-no-conflict";
+    "(eager ?upstream)" =>
+    "?upstream"
+    if no_read_write_conflict("?upstream")
+),
+
+rw!("neo4j-eager-before-aggregation";
+    "(eager (aggregate ?group-by ?agg-expr ?source))" =>
+    "(aggregate ?group-by ?agg-expr ?source)"
+    if aggregation_does_not_conflict("?source")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> bool {
+    stats.has_eager_operator
+        && (stats.query_is_read_only
+            || stats.read_write_labels_disjoint)
+}
+```
+
+**Restrictions:**
+- Cannot remove Eager when write clause creates nodes/relationships
+  that the read clause might traverse (Halloween problem)
+- MERGE and CREATE on the same label as MATCH requires Eager
+- DELETE operations affecting upstream traversal require Eager
+- Transactional isolation guarantees may require Eager in certain configurations
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let cardinality = stats.eager_input_cardinality as f64;
+    let row_size = stats.avg_row_size_bytes as f64;
+
+    // Eager: buffer all rows in memory
+    let eager_memory = cardinality * row_size;
+    let eager_cost = cardinality * 0.001 // buffering
+        + eager_memory * 0.0000001; // memory management
+
+    // Streaming: process one row at a time
+    let streaming_cost = cardinality * 0.0005; // direct processing
+
+    if eager_cost > streaming_cost {
+        (eager_cost - streaming_cost) / eager_cost
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 20% to 10x; eliminates OOM risk on large result sets.
+
+## Test Cases
+
+### Positive: Read-only query with unnecessary Eager
+
+```cypher
+// Read-only: Eager never needed
+MATCH (p:Person)-[:KNOWS]->(f:Person)
+WHERE p.age > 21
+RETURN p.name, collect(f.name) AS friends
+
+// Before optimization: Eager inserted before aggregation
+// After: Eager removed, streaming collect
+// EXPLAIN shows no Eager operator
+```
+
+### Positive: Disjoint read-write labels
+
+```cypher
+// Write to :Log, read from :Person - no conflict
+MATCH (p:Person)
+WHERE p.lastLogin < date() - duration("P30D")
+CREATE (l:Log {event: "inactive", user: p.name})
+
+// Read: :Person, Write: :Log
+// Labels are disjoint; no Halloween problem possible
+// Eager barrier can be removed
+```
+
+### Negative: Same-label read-write conflict
+
+```cypher
+// MATCH and CREATE on same label: Eager required
+MATCH (p:Person)
+WHERE NOT EXISTS { (p)-[:KNOWS]->(:Person {name: "Bob"}) }
+CREATE (p)-[:KNOWS]->(:Person {name: "Bob"})
+
+// Creating :Person nodes while scanning :Person
+// Without Eager, new nodes could appear in the scan
+// Eager barrier must remain
+```
+
+## References
+
+**Implementation:**
+- Neo4j source: `org.neo4j.cypher.internal.compiler.planner.logical.EagerAnalyzer`
+- Conflict detection: `org.neo4j.cypher.internal.compiler.planner.logical.ConflictFinder`
+- Eager removal: `org.neo4j.cypher.internal.ir.EagernessReason`
+
+**Documentation:**
+- Neo4j Manual: "Query Tuning" - Eager operator section
+  - https://neo4j.com/docs/cypher-manual/current/planning-and-tuning/
+
+**Papers:**
+- Selinger, P.G., et al., "Access Path Selection in a Relational Database
+  Management System", SIGMOD 1979
+  - Halloween problem first described in System R context

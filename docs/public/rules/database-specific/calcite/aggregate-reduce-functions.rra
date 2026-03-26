@@ -1,0 +1,247 @@
+---
+id: aggregate-reduce-functions
+name: Aggregate Reduce Functions
+category: database-specific/calcite
+databases: [calcite, postgresql, mysql]
+execution_models: [volcano, vectorized]
+version: "1.0.0"
+authors: ["Apache Calcite Contributors"]
+tags: [aggregate, simplification, optimization]
+complexity: "O(1)"
+benefit_range: [0.15, 0.35]
+---
+
+# Aggregate Reduce Functions
+
+## Description
+
+Simplifies aggregate functions by reducing redundant aggregates or replacing
+complex aggregates with simpler equivalents. For example, AVG can be replaced
+with SUM/COUNT, redundant MIN/MAX can be eliminated, and constant aggregates
+can be pre-computed.
+
+**When to apply**: An aggregate operation contains redundant or unnecessarily
+complex aggregate functions that can be simplified or eliminated without
+changing query semantics.
+
+**Why it works**: Complex aggregate functions may be implemented as combinations
+of simpler primitives. Reducing to primitives enables better optimization,
+code generation, and can eliminate redundant computation when multiple
+aggregates share common subexpressions.
+
+## Relational Algebra
+
+```latex
+$$
+AGG[AVG(x)](R) \rightarrow AGG[SUM(x), COUNT(x)](R) followed by division
+$$
+
+$$
+AGG[MIN(x), MAX(x), MIN(x)](R) \rightarrow AGG[MIN(x), MAX(x)](R)
+$$
+
+$$
+AGG[SUM(1)](R) \rightarrow AGG[COUNT(*)](R)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("aggregate-avg-to-sum-count";
+    "(aggregate ?groups
+       (list (avg ?expr))
+       ?input)" =>
+    "(project
+       (div (sum ?expr) (count ?expr))
+       (aggregate ?groups
+         (list (sum ?expr) (count ?expr))
+         ?input))"
+),
+
+rw!("aggregate-remove-duplicate";
+    "(aggregate ?groups
+       (list ?aggs1 ?agg ?aggs2 ?agg ?aggs3)
+       ?input)" =>
+    "(aggregate ?groups
+       (list ?aggs1 ?agg ?aggs2 ?aggs3)
+       ?input)"
+),
+
+rw!("aggregate-sum-one-to-count";
+    "(aggregate ?groups
+       (list (sum (literal 1)))
+       ?input)" =>
+    "(aggregate ?groups
+       (list (count-star))
+       ?input)"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> bool {
+    // Must have reducible aggregates
+    stats.has_avg_aggregate
+        || stats.has_duplicate_aggregates
+        || stats.has_sum_constant
+        || stats.has_unnecessary_distinct
+}
+```
+
+**Restrictions:**
+- AVG reduction must handle NULL semantics correctly
+- Duplicate removal must preserve result column order
+- Simplifications must maintain exact semantics (no precision loss)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let rows = stats.row_count as f64;
+    let groups = stats.group_count as f64;
+
+    // AVG reduction benefit:
+    // - AVG typically maintains running sum and count internally anyway
+    // - Making it explicit enables sharing SUM/COUNT with other aggregates
+    let avg_benefit = if stats.has_avg_aggregate {
+        0.15 // 15% from potential sharing
+    } else {
+        0.0
+    };
+
+    // Duplicate removal benefit:
+    // - Eliminates redundant aggregate computation
+    let dup_benefit = if stats.has_duplicate_aggregates {
+        let dup_ratio = stats.duplicate_agg_count as f64 / stats.total_agg_count as f64;
+        0.25 * dup_ratio // Up to 25% for fully duplicate aggregates
+    } else {
+        0.0
+    };
+
+    // SUM(1) -> COUNT(*) benefit:
+    // - COUNT(*) is a special case that doesn't require value access
+    let count_benefit = if stats.has_sum_constant {
+        0.1 // 10% from optimized COUNT implementation
+    } else {
+        0.0
+    };
+
+    avg_benefit + dup_benefit + count_benefit
+}
+```
+
+**Assumptions:**
+- Simplified aggregates are as fast or faster than originals
+- Sharing common subexpressions (SUM/COUNT) provides benefit
+- COUNT(*) is optimized (doesn't access column values)
+
+**Typical benefit**: 15-35% from elimination and simplification.
+
+## Test Cases
+
+### Positive: Replace AVG with SUM/COUNT
+
+```sql
+-- AVG can be decomposed
+SELECT category, AVG(price) as avg_price
+FROM products
+GROUP BY category;
+
+-- After aggregate-reduce-functions:
+-- SELECT category, SUM(price) / COUNT(price) as avg_price
+-- FROM products
+-- GROUP BY category
+
+-- Enables sharing if other aggregates need SUM or COUNT
+```
+
+### Positive: Remove duplicate aggregate
+
+```sql
+-- Same aggregate appears twice
+SELECT
+  department,
+  MAX(salary) as max_sal1,
+  MIN(salary) as min_sal,
+  MAX(salary) as max_sal2
+FROM employees
+GROUP BY department;
+
+-- After aggregate-reduce-functions:
+-- SELECT
+--   department,
+--   MAX(salary) as max_sal1,
+--   MIN(salary) as min_sal,
+--   MAX(salary) as max_sal2  -- reuses first MAX result
+-- FROM employees
+-- GROUP BY department
+```
+
+### Positive: SUM(1) to COUNT(*)
+
+```sql
+-- Counting rows inefficiently
+SELECT category, SUM(1) as row_count
+FROM products
+GROUP BY category;
+
+-- After aggregate-reduce-functions:
+-- SELECT category, COUNT(*) as row_count
+-- FROM products
+-- GROUP BY category
+```
+
+### Positive: Share SUM and COUNT for AVG
+
+```sql
+-- Multiple aggregates can share computation
+SELECT
+  category,
+  AVG(price) as avg_price,
+  SUM(price) as total_price,
+  COUNT(price) as price_count
+FROM products
+GROUP BY category;
+
+-- AVG decomposed to SUM/COUNT, which are already computed!
+-- Only needs SUM and COUNT, division computed in projection
+```
+
+### Negative: AVG with DISTINCT
+
+```sql
+-- AVG(DISTINCT x) cannot be simply decomposed
+SELECT category, AVG(DISTINCT price)
+FROM products
+GROUP BY category;
+
+-- Cannot decompose to SUM(DISTINCT price) / COUNT(DISTINCT price)
+-- because they might count different rows (NULLs)
+```
+
+## References
+
+**Implementation in databases:**
+- Apache Calcite: `AggregateReduceFunctionsRule.java`
+- PostgreSQL: Aggregate simplification (clauses.c, parse_agg.c)
+- MySQL: Aggregate function optimization
+
+**Academic papers:**
+- Yan & Larson, "Eager Aggregation and Lazy Aggregation", VLDB 1995
+  - Aggregate function decomposition strategies
+- Chaudhuri & Shim, "Including Group-By in Query Optimization", VLDB 1994
+  - Aggregate function transformation and optimization
+- Galindo-Legaria & Joshi, "Orthogonal Optimization of Subqueries and Aggregation", ACM SIGMOD 2001
+  - DOI: 10.1145/375663.375746
+  - Advanced aggregate transformations

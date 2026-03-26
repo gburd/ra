@@ -1,0 +1,182 @@
+---
+id: calcite-sub-query-remove
+name: Calcite SubQueryRemoveRule
+category: database-specific/calcite
+databases: [calcite]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, calcite, subquery, decorrelation, join]
+complexity: O(n)
+benefit_range: [0.3, 0.95]
+---
+
+# Calcite SubQueryRemoveRule
+
+## Description
+
+Converts correlated sub-queries (EXISTS, IN, scalar) into
+equivalent join or semi-join forms. This decorrelation
+transformation eliminates the nested-loop evaluation pattern
+where the sub-query is re-executed for every row of the outer
+query.
+
+**When to apply**: A relational expression contains a
+`RexSubQuery` (EXISTS, IN, or scalar sub-query) in a filter
+or project.
+
+**Why it works**: Correlated sub-queries force nested-loop
+evaluation: O(N * cost_of_subquery). Converting to a join
+allows the optimizer to choose hash join, merge join, or
+other efficient strategies.
+
+**Calcite class**: `org.apache.calcite.rel.rules.SubQueryRemoveRule`
+
+## Relational Algebra
+
+```latex
+-- Before: EXISTS sub-query
+$$
+\sigma_{EXISTS(sigma[S.k = R.k}(S))](R)
+$$
+
+-- After: semi-join
+$$
+R semi-\bowtie_{R.k = S.k} S
+$$
+
+-- Before: IN sub-query
+$$
+\sigma_{R.x IN (\pi_{y}(S))}(R)
+$$
+
+-- After: semi-join
+$$
+R semi-\bowtie_{R.x = S.y} S
+$$
+
+-- Before: scalar sub-query
+$$
+\pi_{R.*, (SELECT MAX(S.v) FROM S WHERE S.k = R.k)}(R)
+$$
+
+-- After: left join with aggregate
+$$
+R left-\bowtie_{R.k = S.k} (\gamma_{k; MAX(v)}(S))
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-exists-to-semi-join";
+    "(filter (exists (filter (= ?sk ?rk) ?s)) ?r)" =>
+    "(semi-join (= ?rk ?sk) ?r ?s)"
+),
+
+rw!("calcite-in-to-semi-join";
+    "(filter (in ?rx (project ?sy ?s)) ?r)" =>
+    "(semi-join (= ?rx ?sy) ?r ?s)"
+),
+
+rw!("calcite-not-exists-to-anti-join";
+    "(filter (not (exists (filter (= ?sk ?rk) ?s))) ?r)" =>
+    "(anti-join (= ?rk ?sk) ?r ?s)"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    sub_query: &RexSubQuery,
+    outer_cols: &[Column],
+) -> bool {
+    match sub_query {
+        RexSubQuery::Exists { corr_vars, .. } => {
+            // Must have correlation variables that
+            // reference the outer query
+            !corr_vars.is_empty()
+        }
+        RexSubQuery::In { expr, .. } => {
+            // IN expression must be a simple column
+            // or expression from the outer query
+            expr.referenced_columns().iter()
+                .all(|c| outer_cols.contains(c))
+        }
+        RexSubQuery::Scalar { .. } => {
+            // Scalar sub-query must return exactly one row
+            // (ensured by aggregate in sub-query)
+            true
+        }
+    }
+}
+```
+
+**Restrictions:**
+- NOT IN with NULLs requires special anti-join handling
+  (three-valued logic)
+- Scalar sub-queries that may return multiple rows cause
+  runtime errors and cannot be simply converted
+- Deeply nested correlated sub-queries may require multiple
+  decorrelation passes
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    outer_rows: f64,
+    inner_rows: f64,
+    selectivity: f64,
+) -> f64 {
+    let nested_cost = outer_rows * inner_rows;
+    let join_cost = outer_rows + inner_rows
+        + (outer_rows * inner_rows * selectivity);
+    (nested_cost - join_cost) / nested_cost
+}
+```
+
+**Typical benefit**: 30-95% from eliminating repeated
+sub-query execution.
+
+## Test Cases
+
+```sql
+-- Positive: EXISTS to semi-join
+SELECT * FROM emp e
+WHERE EXISTS (
+    SELECT 1 FROM dept d WHERE d.deptno = e.deptno
+);
+-- Becomes: emp SEMI JOIN dept ON deptno
+```
+
+```sql
+-- Positive: IN to semi-join
+SELECT * FROM emp
+WHERE deptno IN (SELECT deptno FROM dept WHERE loc = 'NYC');
+-- Becomes: emp SEMI JOIN (filter dept) ON deptno
+```
+
+```sql
+-- Positive: NOT EXISTS to anti-join
+SELECT * FROM dept d
+WHERE NOT EXISTS (
+    SELECT 1 FROM emp e WHERE e.deptno = d.deptno
+);
+-- Becomes: dept ANTI JOIN emp ON deptno
+```
+
+```sql
+-- Positive: scalar sub-query to left join
+SELECT e.*, (SELECT MAX(sal) FROM emp e2
+             WHERE e2.deptno = e.deptno) AS max_sal
+FROM emp e;
+-- Becomes: emp LEFT JOIN (agg by deptno)
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/SubQueryRemoveRule.java
+Seshadri et al.: "Cost-Based Optimization for Magic: Algebra and Implementation" (SIGMOD 1996)

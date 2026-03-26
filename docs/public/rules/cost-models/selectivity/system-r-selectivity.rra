@@ -1,0 +1,40 @@
+---
+id: system-r-selectivity
+name: "System R Selectivity Estimation"
+category: cost-models/selectivity
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [academic, academic]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# System R Selectivity Estimation
+
+## Description
+
+Statistical selectivity estimation from System R
+
+## Relational Algebra
+
+```latex
+
+
+```
+
+## Implementation
+
+```
+Implement rule transformation for academic optimization
+```
+
+## Tests
+
+Add test cases for this rule
+
+## References
+- Paper: System R by Selinger et al.
+- DOI: 10.1145/582095.582099

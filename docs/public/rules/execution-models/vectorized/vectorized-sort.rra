@@ -1,0 +1,298 @@
+---
+id: vectorized-sort
+name: Vectorized Execution - Cache-Conscious Radix Sort
+category: execution-models
+version: 1.0.0
+databases: [DuckDB, ClickHouse, Velox]
+authors: [Satish et al., Kim et al.]
+tags: [execution, vectorized, sort, radix-sort, cache-conscious, simd]
+standard: MonetDB X100
+---
+
+# Vectorized Execution - Cache-Conscious Radix Sort
+
+## Description
+
+Vectorized sorting uses cache-conscious algorithms that exploit SIMD and memory hierarchy. Radix sort is preferred for integer/fixed-width keys because it avoids comparison overhead (O(N*k) vs O(N log N)). For general sorting, a vectorized merge sort partitions data into cache-sized runs, sorts each run with SIMD sorting networks, then merges. The key insight is to keep working data within L2 cache and use SIMD for both partitioning and merging.
+
+**Sorting strategies by key type:**
+- **Integer keys**: Radix sort (MSD or LSD, 8-bit radix)
+- **Fixed-width keys**: Normalized key radix sort
+- **Variable-width keys**: Comparison-based merge sort with SIMD
+- **Multi-key sort**: Cascade of single-key sorts (stable)
+
+**Key characteristics:**
+- **Cache-conscious**: Partitions fit in L2/L3 cache
+- **SIMD sorting networks**: 4-8 element sort in registers
+- **Streaming writes**: Sequential memory access patterns
+- **Key normalization**: Convert all types to binary-comparable format
+- **Prefix keys**: Sort on prefix, fall back to full comparison
+
+**Trade-offs:**
+- Radix sort only works for fixed-width keys
+- Memory overhead: 2x for out-of-place radix sort
+- Pipeline breaker: must consume all input before producing output
+- High-cardinality multi-key sorts degrade to comparison-based
+
+## Relational Algebra
+
+```
+VectorizedSort(input, keys) -> Iterator<Batch>
+
+Phase 1: Collect and partition
+  for each batch in input:
+    for each tuple in batch:
+      normalized_key = normalize(tuple.keys)
+      partition_buffer.append(normalized_key, row_id)
+
+Phase 2: Radix sort within partitions
+  for each partition (fits in L2 cache):
+    radix_sort(partition, radix=256, passes=key_bytes)
+
+Phase 3: Produce sorted batches
+  for each sorted_chunk of batch_size:
+    yield reconstruct_batch(sorted_chunk)
+```
+
+## Implementation
+
+```rust
+use ra_core::algebra::RelExpr;
+
+/// Vectorized sort operator
+pub struct VectorizedSort {
+    input: Box<dyn VectorizedIterator>,
+    sort_keys: Vec<SortKey>,
+    batch_size: usize,
+}
+
+impl VectorizedSort {
+    /// Execute vectorized sort
+    pub fn execute(&mut self) -> Result<Vec<Batch>> {
+        // Phase 1: Collect all input
+        let mut entries = Vec::new();
+        while let Some(batch) = self.input.next_batch()? {
+            for row_idx in 0..batch.size {
+                let key = self.normalize_key(&batch, row_idx)?;
+                entries.push(SortEntry { key, row_idx, batch_idx: entries.len() });
+            }
+        }
+
+        // Phase 2: Sort
+        if self.is_radix_sortable() {
+            self.radix_sort(&mut entries)?;
+        } else {
+            self.vectorized_merge_sort(&mut entries)?;
+        }
+
+        // Phase 3: Produce sorted batches
+        self.reconstruct_batches(&entries)
+    }
+
+    /// Radix sort for fixed-width keys
+    fn radix_sort(&self, entries: &mut Vec<SortEntry>) -> Result<()> {
+        let key_bytes = self.sort_keys.iter()
+            .map(|k| k.byte_width())
+            .sum::<usize>();
+
+        let mut buffer = vec![SortEntry::default(); entries.len()];
+
+        // LSD radix sort: process from least significant byte
+        for byte_pos in (0..key_bytes).rev() {
+            // Count occurrences per radix digit
+            let mut counts = [0usize; 256];
+            for entry in entries.iter() {
+                let digit = entry.key[byte_pos] as usize;
+                counts[digit] += 1;
+            }
+
+            // Prefix sum for output positions
+            let mut offsets = [0usize; 256];
+            for i in 1..256 {
+                offsets[i] = offsets[i - 1] + counts[i - 1];
+            }
+
+            // Scatter to buffer (sequential writes)
+            for entry in entries.iter() {
+                let digit = entry.key[byte_pos] as usize;
+                buffer[offsets[digit]] = entry.clone();
+                offsets[digit] += 1;
+            }
+
+            std::mem::swap(entries, &mut buffer);
+        }
+
+        Ok(())
+    }
+
+    /// SIMD sorting network for small arrays (4-8 elements)
+    fn simd_sort_network_8(data: &mut [i64; 8]) {
+        #[cfg(target_feature = "avx2")]
+        unsafe {
+            let mut v = _mm256_loadu_si256(
+                data.as_ptr() as *const __m256i,
+            );
+
+            // Bitonic sort network in AVX2 registers
+            // Stage 1: Compare-swap adjacent pairs
+            let perm1 = _mm256_shuffle_epi32(v, 0xB1);
+            let min1 = _mm256_min_epi32(v, perm1);
+            let max1 = _mm256_max_epi32(v, perm1);
+            v = _mm256_blend_epi32(min1, max1, 0xAA);
+
+            // Stage 2: Compare-swap distance-2 pairs
+            let perm2 = _mm256_shuffle_epi32(v, 0x4E);
+            let min2 = _mm256_min_epi32(v, perm2);
+            let max2 = _mm256_max_epi32(v, perm2);
+            v = _mm256_blend_epi32(min2, max2, 0xCC);
+
+            // Final merge stage
+            let perm3 = _mm256_shuffle_epi32(v, 0xB1);
+            let min3 = _mm256_min_epi32(v, perm3);
+            let max3 = _mm256_max_epi32(v, perm3);
+            v = _mm256_blend_epi32(min3, max3, 0xAA);
+
+            _mm256_storeu_si256(
+                data.as_mut_ptr() as *mut __m256i,
+                v,
+            );
+        }
+    }
+
+    /// Key normalization: convert to binary-comparable format
+    fn normalize_key(
+        &self,
+        batch: &Batch,
+        row_idx: usize,
+    ) -> Result<Vec<u8>> {
+        let mut key = Vec::new();
+        for sort_key in &self.sort_keys {
+            let col = batch.column(sort_key.column_idx);
+            let mut bytes = match col.data_type() {
+                DataType::Int64 => {
+                    // Flip sign bit for correct unsigned comparison
+                    let val = col.get_i64(row_idx);
+                    (val ^ i64::MIN).to_be_bytes().to_vec()
+                }
+                DataType::Float64 => {
+                    let val = col.get_f64(row_idx);
+                    normalize_float64(val)
+                }
+                DataType::String => {
+                    col.get_str(row_idx).as_bytes().to_vec()
+                }
+                _ => vec![],
+            };
+            if sort_key.descending {
+                // Invert bytes for descending order
+                for b in &mut bytes {
+                    *b = !*b;
+                }
+            }
+            key.extend(bytes);
+        }
+        Ok(key)
+    }
+}
+
+/// Cost model for vectorized sort
+pub fn vectorized_sort_cost(
+    input_rows: f64,
+    key_bytes: usize,
+    num_sort_keys: usize,
+) -> f64 {
+    // Radix sort: O(N * k) where k = key bytes
+    let radix_cost = input_rows * key_bytes as f64 * 0.00001;
+
+    // Comparison sort: O(N log N) with SIMD
+    let cmp_cost = input_rows * input_rows.log2() * 0.000005;
+
+    // Key normalization
+    let normalize_cost = input_rows * num_sort_keys as f64 * 0.00002;
+
+    // Materialization (collect all input)
+    let materialize_cost = input_rows * 0.00001;
+
+    // Choose cheaper sort method
+    let sort_cost = if key_bytes <= 16 {
+        radix_cost // Fixed-width: use radix sort
+    } else {
+        cmp_cost // Variable-width: merge sort
+    };
+
+    normalize_cost + materialize_cost + sort_cost
+}
+```
+
+## Cost Model
+
+**Radix Sort (fixed-width keys):**
+- Time: O(N x k) where k = key width in bytes
+- Memory: 2x input size (double-buffer)
+- Cache: L2-friendly for partitions < 256KB
+- SIMD: used for counting and scattering
+
+**Merge Sort (variable-width keys):**
+- Time: O(N log N) with SIMD sorting networks for runs
+- Memory: N + run_size for merge buffers
+- Cache: runs sized to fit in L2 cache
+- SIMD: 8-element sorting networks for base case
+
+**Key Normalization:**
+- Integer: 1 XOR + byte swap (~2 ns)
+- Float64: bit manipulation for sign (~5 ns)
+- String: copy bytes (~10 ns + length)
+- Descending: invert all bytes (~1 ns per byte)
+
+**vs. std::sort (comparison-based):**
+- Radix sort: 3-5x faster for integer keys
+- SIMD merge sort: 2-3x faster than std::sort
+- Key normalization overhead: amortized, negligible for N > 1000
+
+## Test Cases
+
+```sql
+-- Test 1: Integer sort (radix sort)
+SELECT * FROM events ORDER BY timestamp;
+-- Expected: 8-byte key, LSD radix sort
+-- Cost: O(N * 8) with sequential memory access
+
+-- Test 2: Multi-key sort
+SELECT * FROM orders ORDER BY region ASC, amount DESC;
+-- Expected: Composite key (region ASC | ~amount DESC)
+-- Key normalization handles ASC/DESC encoding
+
+-- Test 3: Top-K sort optimization
+SELECT * FROM events ORDER BY timestamp DESC LIMIT 100;
+-- Expected: Partial sort using min-heap of size 100
+-- Cost: O(N * log(100)) instead of O(N * log(N))
+
+-- Test 4: String sort (merge sort fallback)
+SELECT * FROM users ORDER BY last_name, first_name;
+-- Expected: Variable-length keys, use merge sort
+-- SIMD sorting networks for small runs
+```
+
+## Comparison with Other Models
+
+| Aspect | Vectorized Sort | Volcano Sort | Push-Based Sort |
+|--------|----------------|-------------|-----------------|
+| Algorithm | Radix / SIMD merge | std::sort | Compiled comparison |
+| Integer keys | O(N*k) radix | O(N log N) | O(N log N) |
+| Cache behavior | L2-conscious | Random access | Depends on compiler |
+| SIMD | Sorting networks | None | Auto-vectorize |
+| Memory | 2x (radix) | In-place | In-place |
+
+## References
+
+1. **Satish, Nadathur et al**. "Fast Sort on CPUs and GPUs: A Case for Bandwidth Oblivious SIMD Sort." SIGMOD 2010.
+   - SIMD sorting networks and radix sort
+
+2. **Kim, Changkyu et al**. "Sort vs. Hash Revisited: Fast Join Implementation on Modern Multi-Core CPUs." VLDB 2009.
+   - Cache-conscious sorting for database operations
+
+3. **Balkesen, Cagri et al**. "Multi-Core, Main-Memory Joins: Sort vs. Hash Revisited." VLDB 2014.
+   - Radix sort in the context of database joins
+
+4. **Inoue, Hiroshi et al**. "SIMD- and Cache-Friendly Algorithm for Sorting an Array of Structures." VLDB 2015.
+   - Structure-aware SIMD sorting techniques

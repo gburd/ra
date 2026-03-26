@@ -1,0 +1,32 @@
+---
+id: incremental-view-maintenance
+name: "Incremental View Maintenance"
+category: logical/semantic-rewriting
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [academic, optimization]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# Incremental View Maintenance
+
+## Description
+
+Maintains materialized views incrementally
+
+## Implementation
+
+Add implementation details for Incremental View Maintenance
+
+## Tests
+
+Add test cases for this optimization
+
+## References
+
+- Paper: Incremental View Maintenance
+- DOI: 10.1145/127894

@@ -1,0 +1,48 @@
+---
+id: mongodb-hint-selection
+name: "Query Hint for Index Selection"
+category: physical/hint
+databases: [mongodb]
+version: "1.0.0"
+authors: ["Database Contributors", "RA Contributors"]
+tags: [database-mining, mongodb, optimization]
+complexity: "O(n)"
+benefit_range: [1.0, 10.0]
+---
+
+# Query Hint for Index Selection
+
+## Description
+
+Guides optimizer to use specific index via hint.
+
+**When to apply**: During query optimization phase.
+
+## Relational Algebra
+
+```latex
+-- Before
+$$
+(filter (scan users) (eq email 'user@example.com'))
+$$
+
+-- After
+$$
+(filter (index-scan users idx_email (hint)) (eq email 'user@example.com'))
+$$
+
+```
+
+## Preconditions
+
+- Hint explicitly specified in query
+
+## Test Cases
+
+```sql
+SELECT * FROM table WHERE condition;
+```
+
+## References
+
+- Database documentation

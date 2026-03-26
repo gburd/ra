@@ -1,0 +1,45 @@
+---
+id: flink-deduplication-on-changelog
+name: Deduplication on Changelog Stream (Flink)
+category: database-specific/flink
+databases: [flink]
+execution_models: [volcano, vectorized, push-based]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# Deduplication on Changelog Stream (Flink)
+
+## Metadata
+- **Rule ID**: `flink-deduplication-changelog`
+- **Category**: Database-Specific / Flink
+- **Source**: flink Table API
+
+## Description
+
+Flink optimizes DISTINCT / FIRST_VALUE / LAST_VALUE on changelog streams (with retractions) using state-efficient deduplication operators.
+
+## Test Cases
+
+### Test 1: Deduplication with ROW_NUMBER
+```sql
+SELECT user_id, event_time, event_data
+FROM (
+  SELECT *,
+         ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY event_time DESC) as rn
+  FROM events
+) WHERE rn = 1;
+
+-- Optimized to DeduplicateOperator
+-- Keeps only latest event per user in state
+```
+
+## References
+1. **Flink Docs**: "Deduplication"
+
+## Tags
+`database-specific`, `flink`, `deduplication`, `changelog`, `streaming`

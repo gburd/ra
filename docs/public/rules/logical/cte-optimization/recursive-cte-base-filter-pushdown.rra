@@ -1,0 +1,65 @@
+---
+id: recursive-cte-base-filter-pushdown
+name: Recursive CTE Base Case Filter Pushdown
+category: logical/cte-optimization
+databases: [postgresql, mysql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [recursive, cte, filter, pushdown, base-case]
+complexity: "O(1)"
+benefit_range: [0.2, 0.6]
+---
+
+# Recursive CTE Base Case Filter Pushdown
+
+## Description
+
+Pushes a filter from the body of a recursive CTE into the base case when the filter predicate only references columns produced by the base case and does not depend on the recursive accumulation.
+
+**When to apply**: Filter on the body of a RecursiveCTE where the predicate references only columns available in the base case.
+
+**Why it works**: Reducing the base case cardinality reduces the number of iterations the recursive member performs, since fewer seed rows means fewer recursive expansions.
+
+## Relational Algebra
+
+```latex
+$$
+Filter[p](RecursiveCTE[name, base, rec](body))
+  \rightarrow RecursiveCTE[name, Filter[p](base), rec](body)
+  \text{where} columns(p) ⊆ columns(base)
+    and not references_cte(p, name)
+$$
+
+```
+
+## Implementation
+
+```rust
+rw!("recursive-cte-base-filter-pushdown";
+    "(filter ?pred (recursive-cte ?name ?base ?rec ?body))" =>
+    "(recursive-cte ?name (filter ?pred ?base) ?rec ?body)"
+    if predicate_references_only("?pred", "?base")
+),
+```
+
+## Test Cases
+
+```sql
+-- Before: filter after CTE
+WITH RECURSIVE r AS (
+  SELECT id FROM nodes WHERE type = 'root'
+  UNION ALL
+  SELECT edges.dst FROM edges JOIN r ON edges.src = r.id
+)
+SELECT * FROM r WHERE id < 100;
+
+-- After: filter pushed into base case (if applicable)
+-- This reduces initial seed rows
+```
+
+## References
+
+- PostgreSQL recursive CTE optimization (post-9.6)
+- SQL standard ISO/IEC 9075-2:2023 Section 7.18

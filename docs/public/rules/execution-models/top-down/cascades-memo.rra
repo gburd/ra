@@ -1,0 +1,40 @@
+---
+id: cascades-memo
+name: "Cascades Memo Structure"
+category: execution-models/top-down
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [academic, academic]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# Cascades Memo Structure
+
+## Description
+
+Top-down optimization with memoization
+
+## Relational Algebra
+
+```latex
+
+
+```
+
+## Implementation
+
+```
+Implement rule transformation for academic optimization
+```
+
+## Tests
+
+Add test cases for this rule
+
+## References
+- Paper: The Cascades Framework by Graefe
+- DOI: 10.1145/181905.181906

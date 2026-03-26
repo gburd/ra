@@ -1,0 +1,56 @@
+---
+id: pre-aggregation-limit-pushdown
+name: Pre-Aggregation Limit Pushdown
+category: distributed/aggregation
+databases: [presto, trino, spark]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, aggregation, pre-aggregation, limit, top-n]
+complexity: O(n log k)
+benefit_range: [0.1, 0.8]
+---
+
+# Pre-Aggregation Limit Pushdown
+
+## Description
+
+When a LIMIT follows aggregation with ORDER BY, push a local top-K
+filter into the partial aggregation phase. Each node keeps only the
+top K groups, reducing shuffle volume.
+
+**When to apply**: Query has ORDER BY + LIMIT after GROUP BY, and
+the ordering is on an aggregate result (e.g., ORDER BY SUM(x) DESC LIMIT 10).
+
+## Relational Algebra
+
+```latex
+-- Before
+$$
+limit[K](sort[agg DESC](\gamma_{g, agg(a)}(Exchange[hash(g)](R))))
+$$
+
+-- After
+$$
+limit[K](sort[agg DESC](
+    \gamma_{g, merge_agg(partial_a)}(
+        Exchange[hash(g)](
+            topk[K, partial_agg DESC](
+                \gamma_{g, partial_agg(a)}(R)
+            )
+        )
+    )
+))
+$$
+
+```
+
+## Test Cases
+
+```sql
+-- Positive: top-K aggregation
+SELECT region, SUM(sales) AS total
+FROM orders GROUP BY region ORDER BY total DESC LIMIT 10;
+
+-- Negative: no LIMIT clause
+SELECT region, SUM(sales) FROM orders GROUP BY region;
+```

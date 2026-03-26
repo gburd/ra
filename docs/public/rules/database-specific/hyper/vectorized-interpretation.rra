@@ -1,0 +1,27 @@
+---
+id: hyper-vectorized-interpretation
+name: Vectorized Interpretation (HyPer)
+category: database-specific/hyper
+databases: [hyper]
+execution_models: [volcano, vectorized, push-based]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# Vectorized Interpretation (HyPer)
+
+## Metadata
+- **Rule ID**: `hyper-vectorized-interpretation`
+- **Category**: Database-Specific / HyPer/Umbra
+- **Source**: HyPer/Umbra
+
+## Description
+
+For queries too small to benefit from compilation, HyPer uses vectorized interpretation - processing batches of tuples at a time with SIMD.
+
+## Tags
+`database-specific`, `hyper`, `umbra`, `vectorized`, `interpretation`, `simd`

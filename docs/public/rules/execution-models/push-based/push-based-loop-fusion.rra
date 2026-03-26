@@ -1,0 +1,300 @@
+---
+id: push-based-loop-fusion
+name: Push-Based Loop Fusion (Operator Fusion)
+category: execution-models
+version: 1.0.0
+databases: [HyPer, Umbra, noisepage]
+authors: [Thomas Neumann, Prashanth Menon]
+tags: [execution, push-based, compilation, loop-fusion, pipeline, optimization]
+standard: HyPer model
+---
+
+# Push-Based Loop Fusion (Operator Fusion)
+
+## Description
+
+Loop fusion merges multiple relational operators into a single compiled loop. In Volcano, each operator (scan, filter, project) has its own control flow. In push-based compilation, pipelineable operators are fused into one loop body, eliminating intermediate materialization and function call boundaries. Pipeline breakers (hash join build, sort, aggregation) define the boundaries where fusion must stop and a new pipeline begins.
+
+**Key characteristics:**
+- **Single loop**: Multiple operators collapsed into one iteration
+- **No intermediate tuples**: Data flows through registers, not buffers
+- **Pipeline identification**: Automatic detection of fusible operator chains
+- **Breaker awareness**: Fusion stops at materialization boundaries
+- **Optimal instruction cache**: One function per pipeline
+
+**Trade-offs:**
+- Pipeline breakers force materialization regardless of fusion
+- Very long pipelines may exceed instruction cache
+- Complex pipelines harder to parallelize
+
+## Relational Algebra
+
+```
+Logical plan (5 operators):
+  Project(revenue)
+    Filter(quantity > 10)
+      Filter(date > '2024-01-01')
+        Project(revenue = price * qty, quantity, date)
+          Scan(lineitem)
+
+After loop fusion (1 loop):
+  for row in lineitem:
+    let price = row.price
+    let qty = row.quantity
+    let date = row.date
+    if date > '2024-01-01':    // Fused filter 1
+      if qty > 10:              // Fused filter 2
+        let revenue = price * qty  // Fused project
+        emit(revenue)           // Output
+
+Pipeline boundaries (with aggregation):
+  Pipeline 1: Scan -> Filter -> Aggregate (fused loop)
+    for row in lineitem:
+      if row.date > '2024-01-01':
+        ht[row.region].sum += row.revenue
+
+  Pipeline 2: Scan HT -> Output (separate loop)
+    for entry in ht:
+      emit(entry.region, entry.sum)
+```
+
+## Implementation
+
+```rust
+use ra_core::algebra::RelExpr;
+
+/// Pipeline identification and loop fusion
+pub struct PipelineFuser {
+    pipelines: Vec<Pipeline>,
+}
+
+/// A pipeline is a maximal sequence of fusible operators
+pub struct Pipeline {
+    operators: Vec<RelExpr>,
+    source: PipelineSource,
+    sink: PipelineSink,
+}
+
+impl PipelineFuser {
+    /// Identify pipelines from a query plan
+    pub fn identify_pipelines(plan: &RelExpr) -> Vec<Pipeline> {
+        let mut pipelines = Vec::new();
+        let mut current = Pipeline::new();
+
+        plan.walk_bottom_up(|op| {
+            if op.is_pipeline_breaker() {
+                // Current operator is a breaker: end current pipeline
+                current.sink = PipelineSink::Materialize(op.id());
+                pipelines.push(current);
+
+                // Start new pipeline from breaker's output
+                current = Pipeline::new();
+                current.source = PipelineSource::Materialized(op.id());
+            } else {
+                // Fusible operator: add to current pipeline
+                current.operators.push(op.clone());
+            }
+        });
+
+        if !current.operators.is_empty() {
+            pipelines.push(current);
+        }
+        pipelines
+    }
+
+    /// Compile a fused pipeline to a single function
+    pub fn compile_pipeline(
+        pipeline: &Pipeline,
+        codegen: &mut CodeGen,
+    ) {
+        codegen.emit(&format!(
+            "fn pipeline_{}() {{", pipeline.id()
+        ));
+
+        // Emit source (scan or materialized read)
+        match &pipeline.source {
+            PipelineSource::TableScan(table) => {
+                codegen.emit(&format!(
+                    "  for page in {}.pages() {{", table
+                ));
+                codegen.emit("    for row_idx in 0..page.num_rows() {");
+            }
+            PipelineSource::Materialized(ht_id) => {
+                codegen.emit(&format!(
+                    "  for entry in {}.entries() {{", ht_id
+                ));
+            }
+        }
+
+        // Emit fused operators (all inline in same loop)
+        for op in &pipeline.operators {
+            match op {
+                RelExpr::Filter { predicate, .. } => {
+                    let pred = compile_predicate(predicate);
+                    codegen.emit(&format!("      if {} {{", pred));
+                }
+                RelExpr::Project { exprs, .. } => {
+                    for (i, expr) in exprs.iter().enumerate() {
+                        let code = compile_expr(expr);
+                        codegen.emit(&format!(
+                            "      let out_{} = {};", i, code
+                        ));
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // Emit sink
+        match &pipeline.sink {
+            PipelineSink::Output => {
+                codegen.emit("      emit_result();");
+            }
+            PipelineSink::Materialize(ht_id) => {
+                codegen.emit(&format!(
+                    "      {}.insert(key, payload);", ht_id
+                ));
+            }
+        }
+
+        // Close all open braces
+        for op in pipeline.operators.iter().rev() {
+            if matches!(op, RelExpr::Filter { .. }) {
+                codegen.emit("      }");
+            }
+        }
+
+        codegen.emit("    }"); // row/entry loop
+        if matches!(pipeline.source, PipelineSource::TableScan(_)) {
+            codegen.emit("  }"); // page loop
+        }
+        codegen.emit("}");
+    }
+}
+
+/// Classify operators as pipeline-breakers or pipelineable
+fn is_pipeline_breaker(op: &RelExpr) -> bool {
+    match op {
+        // Pipeline breakers: must materialize
+        RelExpr::Sort { .. } => true,
+        RelExpr::Aggregate { .. } => true,
+        RelExpr::HashJoinBuild { .. } => true,
+        RelExpr::WindowFunction { .. } => true,
+
+        // Pipelineable: can be fused
+        RelExpr::Scan { .. } => false,
+        RelExpr::Filter { .. } => false,
+        RelExpr::Project { .. } => false,
+        RelExpr::HashJoinProbe { .. } => false,
+        RelExpr::Limit { .. } => false,
+        _ => false,
+    }
+}
+
+/// Cost of fused pipeline vs unfused
+pub fn loop_fusion_cost_savings(
+    input_rows: f64,
+    num_operators: usize,
+) -> f64 {
+    // Per-operator overhead eliminated by fusion
+    let volcano_call_overhead = 0.0001; // ~100 ns per next() call
+    let fused_overhead = 0.000005;      // ~5 ns (branch only)
+
+    let unfused_cost = input_rows * num_operators as f64
+        * volcano_call_overhead;
+    let fused_cost = input_rows * num_operators as f64
+        * fused_overhead;
+
+    unfused_cost - fused_cost // Savings
+}
+```
+
+## Cost Model
+
+**Fused Pipeline:**
+- Per-tuple overhead: ~5 ns (just loop iteration + branches)
+- No function call boundaries between operators
+- No intermediate tuple materialization
+- Register-resident: column values loaded once, used by all operators
+- Total: `input_rows x (loop_overhead + sum(inline_op_costs))`
+
+**Unfused Pipeline (Volcano):**
+- Per-operator per-tuple overhead: ~100 ns (virtual dispatch)
+- Each operator copies tuple to its stack frame
+- Total: `input_rows x num_operators x (call_overhead + tuple_copy)`
+
+**Speedup:**
+- Proportional to operators fused: more operators = more savings
+- Typical: 5-20x for 3-5 operator pipelines
+- Diminishing returns beyond ~10 operators (instruction cache pressure)
+
+**Pipeline Breaker Cost:**
+- Each breaker adds: materialization cost + new pipeline startup
+- Sort: O(N log N) materialization
+- Hash aggregation: O(N) hash table build
+- Hash join build: O(N) hash table build
+
+## Test Cases
+
+```sql
+-- Test 1: Full pipeline fusion (no breakers)
+SELECT l_orderkey
+FROM lineitem
+WHERE l_shipdate > '1998-01-01'
+  AND l_quantity < 25
+  AND l_discount BETWEEN 0.05 AND 0.07;
+-- Expected: Single fused loop with three inline predicates
+-- One pipeline: scan -> filter -> filter -> filter -> emit
+
+-- Test 2: Pipeline with breaker
+SELECT l_returnflag, SUM(l_extendedprice)
+FROM lineitem
+WHERE l_shipdate > '1998-01-01'
+GROUP BY l_returnflag;
+-- Expected: Two pipelines:
+--   P1: scan -> filter -> aggregate (fused with inline HT update)
+--   P2: scan HT -> emit results
+
+-- Test 3: Multi-pipeline join query
+SELECT c.name, SUM(o.amount)
+FROM customers c JOIN orders o ON c.id = o.customer_id
+WHERE o.date > '2024-01-01'
+GROUP BY c.name;
+-- Expected: Three pipelines:
+--   P1: scan customers -> build join HT
+--   P2: scan orders -> filter -> probe join HT -> aggregate
+--   P3: scan aggregate HT -> emit
+
+-- Test 4: Long pipeline (stress instruction cache)
+SELECT col_a + col_b + col_c AS total
+FROM data
+WHERE col_a > 0 AND col_b > 0 AND col_c > 0
+  AND col_d IS NOT NULL
+  AND col_e BETWEEN 1 AND 100;
+-- Expected: All fused into single loop
+-- Monitor: instruction cache misses for very long pipelines
+```
+
+## Comparison with Other Models
+
+| Aspect | Loop Fusion | Volcano | Vectorized |
+|--------|------------|---------|------------|
+| Operator boundary | None (fused) | Virtual call | Batch boundary |
+| Intermediate data | Registers | Tuples | Batches |
+| Fusion granularity | Per-pipeline | None | Partial (operator pairs) |
+| Instruction cache | One function | Many functions | Medium |
+| Parallelization | Per-pipeline | Per-operator | Per-batch |
+
+## References
+
+1. **Neumann, Thomas**. "Efficiently Compiling Efficient Query Plans for Modern Hardware." VLDB 2011.
+   - Pipeline identification and loop fusion in HyPer
+
+2. **Menon, Prashanth et al**. "Relaxed Operator Fusion for In-Memory Databases: Making Compilation, Vectorization, and Prefetching Work Together At Last." VLDB 2017.
+   - Relaxed fusion: allowing partial materialization for better cache behavior
+
+3. **Palkar, Shoumik et al**. "Weld: A Common Runtime for High Performance Data Analytics." CIDR 2017.
+   - Cross-library loop fusion for data processing
+
+4. **Shaikhha, Amir et al**. "How to Architect a Query Compiler, Revisited." SIGMOD 2018.
+   - Systematic study of pipeline identification strategies

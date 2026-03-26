@@ -1,0 +1,118 @@
+---
+id: window-function-pushdown
+name: Window Function Pushdown for Time Series
+category: multi-model/timeseries
+databases: [timescaledb, clickhouse, questdb]
+standard: "sql:2003"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [timeseries, window, pushdown, moving-average, lag]
+---
+
+# Window Function Pushdown for Time Series
+
+## Description
+
+Pushes window functions (moving average, lag, lead, rate of change)
+into the time-ordered scan when the window frame is defined over the
+time column. Since time-series data is already stored in time order,
+the engine can compute the window function during the scan without
+a separate sort-and-partition step.
+
+**When to apply**: A window function partitions by a series identifier
+and orders by the time column, and the data is already stored sorted
+by (series, time).
+
+**Why it works**: Window functions normally require sorting the input
+by the partition and order keys. Time-series storage already maintains
+this order. Skipping the sort saves O(n log n) work and avoids
+materializing the sorted intermediate.
+
+## Relational Algebra
+
+```latex
+$$
+window[series, ts, avg(value) OVER (
+  PARTITION BY series ORDER BY ts
+  ROWS BETWEEN 5 PRECEDING AND CURRENT ROW
+)](scan(table))
+  \rightarrow ts_window_scan(table, series, ts, moving_avg, 5)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("window-function-pushdown-ts";
+    "(window ?partition ?order ?func ?frame \
+       (ts-scan ?table))" =>
+    "(ts-window-scan ?table ?partition ?order ?func ?frame)"
+    if order_matches_time("?table", "?order")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    table: &str,
+    order_col: &str,
+    partition_col: &str,
+    schema: &TimeSeriesSchema,
+) -> bool {
+    schema.time_column(table) == Some(order_col)
+    && schema.has_series_partition(table, partition_col)
+}
+```
+
+**Restrictions:**
+- Order column must be the time column
+- Data must be physically sorted by (partition, time)
+- Complex window frames (RANGE with offsets) may not be pushable
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    row_count: f64,
+    sort_cost_factor: f64,
+) -> f64 {
+    let with_sort = row_count * sort_cost_factor;
+    let without_sort = row_count;
+    (with_sort - without_sort) / with_sort
+}
+```
+
+**Typical benefit**: 0.3-0.7 by eliminating the sort step.
+
+## Test Cases
+
+```sql
+-- Positive: moving average over time-ordered data
+SELECT sensor_id, time,
+       avg(temperature) OVER (
+         PARTITION BY sensor_id
+         ORDER BY time
+         ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
+       ) AS moving_avg
+FROM sensor_data;
+-- Sort eliminated; computed during ordered scan
+
+-- Negative: window ordered by non-time column
+SELECT sensor_id,
+       avg(temperature) OVER (
+         PARTITION BY sensor_id
+         ORDER BY temperature
+       )
+FROM sensor_data;
+-- Cannot push; order is not the time column
+```
+
+## References
+
+TimescaleDB: src/nodes/vector_agg.c
+ClickHouse: src/Processors/Transforms/WindowTransform.cpp
+Leis et al. "Efficiently Compiling Efficient Query Plans" (VLDB 2014)

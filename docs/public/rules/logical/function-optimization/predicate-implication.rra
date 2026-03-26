@@ -1,0 +1,119 @@
+---
+id: predicate-implication
+name: Predicate Implication Detection
+category: logical/function-optimization
+databases: [postgresql, mysql, oracle, mssql, duckdb]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [function, predicate, implication, redundancy, elimination]
+complexity: "O(n^2)"
+benefit_range: [0.1, 0.4]
+---
+
+# Predicate Implication Detection
+
+## Description
+
+Detects when one predicate implies another, allowing the implied predicate
+to be eliminated as redundant. This reduces per-row evaluation cost and
+simplifies the predicate tree for downstream optimizations.
+
+**When to apply**: Conjunctions (AND) where one predicate logically implies
+another.
+
+## Relational Algebra
+
+```latex
+$$
+col > 10 AND col > 5     \rightarrow col > 10      (> 10 implies > 5)
+col = 5 AND col > 0      \rightarrow col = 5       (= 5 implies > 0)
+col IN (1,2) AND col > 0 \rightarrow col IN (1,2)  (IN implies > 0)
+col IS NOT NULL AND col > 0 \rightarrow col > 0    (> 0 implies IS NOT NULL)
+col = 'a' AND col LIKE 'a%' \rightarrow col = 'a'  (= implies LIKE prefix)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("implied-greater-than";
+    "(and (> ?col (literal ?a)) (> ?col (literal ?b)))" =>
+    "(> ?col (literal ?a))"
+    if literal_gte("?a", "?b")
+),
+
+rw!("equality-implies-range";
+    "(and (= ?col (literal ?val)) (> ?col (literal ?lower)))" =>
+    "(= ?col (literal ?val))"
+    if literal_gt("?val", "?lower")
+),
+
+rw!("comparison-implies-not-null";
+    "(and (> ?col ?val) (is-not-null ?col))" =>
+    "(> ?col ?val)"
+    // Any comparison implies NOT NULL
+),
+
+rw!("equality-implies-in";
+    "(and (= ?col (literal ?val)) (in ?col ?list))" =>
+    "(= ?col (literal ?val))"
+    if list_contains("?list", "?val")
+),
+```
+
+## Cost Model
+
+```rust
+fn estimated_benefit(predicates_removed: usize, num_rows: u64) -> f64 {
+    let eval_savings = predicates_removed as f64 * 0.01 * num_rows as f64;
+    eval_savings / (eval_savings + num_rows as f64)
+}
+```
+
+## Test Cases
+
+### Positive: Tighter range subsumes looser
+
+```sql
+SELECT * FROM t WHERE col > 100 AND col > 50;
+-- col > 100 implies col > 50
+-- Simplify to: WHERE col > 100
+```
+
+### Positive: Equality implies range
+
+```sql
+SELECT * FROM t WHERE col = 42 AND col >= 0;
+-- col = 42 implies col >= 0
+-- Simplify to: WHERE col = 42
+```
+
+### Positive: Comparison implies NOT NULL
+
+```sql
+SELECT * FROM t WHERE col > 0 AND col IS NOT NULL;
+-- col > 0 implies col IS NOT NULL (NULL > 0 is UNKNOWN)
+-- Simplify to: WHERE col > 0
+```
+
+### Negative: Non-overlapping predicates
+
+```sql
+SELECT * FROM t WHERE a > 10 AND b > 5;
+-- Different columns: no implication relationship
+```
+
+## References
+
+**Academic papers:**
+- Pirahesh et al., "Extensible/Rule Based Query Rewrite Optimization in Starburst", SIGMOD 1992
+
+**Implementation:**
+- PostgreSQL: `predicate_implied_by()` in `predtest.c`
+- Oracle: Predicate analysis in CBO
+- mssql: Contradiction detection in simplification phase

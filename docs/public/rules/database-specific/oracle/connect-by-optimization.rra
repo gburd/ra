@@ -1,0 +1,130 @@
+---
+id: oracle-connect-by-optimization
+name: Oracle CONNECT BY Optimization
+category: database-specific/oracle
+databases: [oracle]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, oracle, connect-by, hierarchical, recursive]
+complexity: O(n * d)
+benefit_range: [0.2, 0.6]
+---
+
+# Oracle CONNECT BY Optimization
+
+## Description
+
+Optimizes hierarchical queries (CONNECT BY) by using index access on
+the CONNECT BY condition and filtering with START WITH predicates to
+minimize the rows traversed.  Oracle's optimizer can use a CONNECT BY
+pump operator with index lookups instead of repeated full scans.
+
+**When to apply**: A hierarchical query uses CONNECT BY PRIOR with
+columns that have indexes, and START WITH narrows the root set.
+
+**Why it works**: Without optimization, each level of the hierarchy
+requires a full scan to find children.  With index access on the
+CONNECT BY column, each level does index lookups proportional to the
+number of parent rows, not the total table size.
+
+**Database version**: Oracle 8i+
+
+## Relational Algebra
+
+```latex
+-- Before: CONNECT BY with full scans per level
+$$
+connect-by[PRIOR id = parent_id](
+    start-with[parent_id IS NULL](
+        full-scan(employees)))
+$$
+
+-- After: index-based traversal
+$$
+connect-by-pump[PRIOR id = parent_id](
+    start-with[parent_id IS NULL](
+        index-scan(employees, idx_parent_id)))
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("oracle-connect-by-index";
+    "(connect-by (eq (prior ?id) ?parent_id)
+        (start-with ?start_pred (scan ?table)))" =>
+    "(connect-by-pump (eq (prior ?id) ?parent_id)
+        (start-with ?start_pred
+            (index-scan ?table ?parent_id)))"
+    if is_database("oracle")
+    if has_index_on("?table", "?parent_id")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    table: &Table,
+    connect_by_col: &Column,
+    start_with: &Expr,
+) -> bool {
+    table.has_index(connect_by_col)
+    && start_with.is_selective()
+}
+```
+
+**Restrictions:**
+- CONNECT BY NOCYCLE adds cycle detection overhead
+- Deep hierarchies (> 100 levels) may hit CONNECT_BY_ISCYCLE limits
+- CONNECT BY with complex expressions may prevent index usage
+- SYS_CONNECT_BY_PATH and LEVEL pseudo-columns add overhead
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    table_rows: f64,
+    avg_depth: f64,
+    avg_branching: f64,
+    start_rows: f64,
+) -> f64 {
+    // Full scan per level: depth * table_rows
+    let without_index = avg_depth * table_rows * 0.01;
+    // Index per level: depth * branching * start_rows
+    let with_index =
+        avg_depth * avg_branching * start_rows * 0.001;
+    without_index - with_index
+}
+```
+
+**Typical benefit**: For a 1M-row org chart with average depth 8 and
+branching factor 5, index-based traversal reads ~40 rows per level
+instead of scanning 1M.
+
+## Test Cases
+
+```sql
+-- Positive: hierarchical query with indexed parent column
+SELECT employee_id, manager_id, LEVEL
+FROM employees
+START WITH manager_id IS NULL
+CONNECT BY PRIOR employee_id = manager_id;
+-- Index on manager_id enables efficient traversal
+```
+
+```sql
+-- Negative: CONNECT BY on expression
+SELECT * FROM categories
+START WITH parent_id IS NULL
+CONNECT BY PRIOR UPPER(code) = parent_code;
+-- UPPER() prevents index usage on code column
+```
+
+## References
+
+Oracle: Oracle Database SQL Language Reference, "Hierarchical Queries"
+Oracle: CONNECT BY operation in EXPLAIN PLAN

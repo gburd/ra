@@ -1,0 +1,48 @@
+---
+id: mongodb-index-selection
+name: "Index Selection for Predicates"
+category: physical/index-selection
+databases: [mongodb]
+version: "1.0.0"
+authors: ["Database Contributors", "RA Contributors"]
+tags: [database-mining, mongodb, optimization]
+complexity: "O(n)"
+benefit_range: [1.0, 10.0]
+---
+
+# Index Selection for Predicates
+
+## Description
+
+Selects the most efficient index for query predicates.
+
+**When to apply**: During query optimization phase.
+
+## Relational Algebra
+
+```latex
+-- Before
+$$
+(filter (scan orders) (and (eq status 'shipped') (gt total 100)))
+$$
+
+-- After
+$$
+(filter (index-scan orders idx_status_total) (and (eq status 'shipped') (gt total 100)))
+$$
+
+```
+
+## Preconditions
+
+- Suitable index exists on status and total
+
+## Test Cases
+
+```sql
+SELECT * FROM table WHERE condition;
+```
+
+## References
+
+- Database documentation

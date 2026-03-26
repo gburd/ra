@@ -1,0 +1,103 @@
+---
+id: subgraph-isomorphism-pruning
+name: Subgraph Isomorphism Pruning
+category: multi-model/graph
+databases: [neo4j, janusgraph, tigergraph]
+standard: "cypher:9"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [graph, subgraph, isomorphism, pruning, uniqueness]
+---
+
+# Subgraph Isomorphism Pruning
+
+## Description
+
+Eliminates redundant vertex bindings in subgraph pattern matching by
+enforcing uniqueness constraints early. When a pattern requires distinct
+vertices (isomorphism semantics rather than homomorphism), adding
+inequality checks between bound variables at each step prunes invalid
+bindings before they propagate to later steps.
+
+**When to apply**: A graph pattern match uses isomorphism semantics
+(default in Cypher) and binds multiple pattern variables to the same
+label, creating potential for duplicate bindings.
+
+**Why it works**: Without early pruning, a pattern (a)--(b)--(c) may
+bind a=c (same physical node), producing a large intermediate result
+that is discarded later. Injecting a != c early prunes these at the
+source.
+
+## Relational Algebra
+
+```latex
+$$
+match(a-[e1]\rightarrowb-[e2]\rightarrowc) with isomorphism
+  \rightarrow match(a-[e1]\rightarrowb-[e2]\rightarrowc) AND a != b AND b != c AND a != c
+$$
+  -- Inject inequality constraints at earliest possible point
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("subgraph-iso-pruning";
+    "(match-iso ?a ?e1 ?b ?e2 ?c)" =>
+    "(filter (and (ne ?a ?b) (and (ne ?b ?c) (ne ?a ?c))) \
+       (match-path ?a ?e1 ?b ?e2 ?c))"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    pattern: &GraphPattern,
+    semantics: MatchSemantics,
+) -> bool {
+    semantics == MatchSemantics::Isomorphism
+    && pattern.has_repeated_labels()
+}
+```
+
+**Restrictions:**
+- Only applies under isomorphism semantics
+- Homomorphism patterns explicitly allow repeated bindings
+- Cost of inequality checks must be less than pruning benefit
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    pattern_card: f64,
+    duplicate_fraction: f64,
+) -> f64 {
+    let without_pruning = pattern_card;
+    let with_pruning = pattern_card * (1.0 - duplicate_fraction);
+    (without_pruning - with_pruning) / without_pruning
+}
+```
+
+**Typical benefit**: 0.1-0.5 depending on graph density and label overlap.
+
+## Test Cases
+
+```cypher
+-- Positive: triangle query with isomorphism semantics
+MATCH (a:Person)-[:KNOWS]->(b:Person)-[:KNOWS]->(c:Person)
+      -[:KNOWS]->(a)
+RETURN a, b, c;
+-- Adds a != b, b != c, a != c constraints early
+
+-- Negative: homomorphism semantics (explicit allowance)
+-- In some systems: MATCH (a)--(b)--(a) is valid
+```
+
+## References
+
+Neo4j: org.neo4j.cypher.internal.compiler.planner.logical.PlanSingleQuery
+Ullmann "An Algorithm for Subgraph Isomorphism" (JACM 1976)
+Cordella et al. "A (Sub)Graph Isomorphism Algorithm for Matching Large Graphs" (TPAMI 2004)

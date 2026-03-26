@@ -1,0 +1,120 @@
+---
+id: mysql-condition-fanout-filter
+name: MySQL Condition Fanout Filter
+category: database-specific/mysql
+databases: [mysql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, mysql, filter, selectivity, statistics, histogram]
+complexity: O(1)
+benefit_range: [0.1, 0.5]
+---
+
+# MySQL Condition Fanout Filter
+
+## Description
+
+MySQL 8.0 uses histogram statistics and index statistics to estimate
+the fanout (selectivity) of WHERE conditions and applies this during
+join optimization.  The condition fanout filter adjusts the estimated
+row count flowing through each table in the join sequence, allowing
+the optimizer to choose better join orders by placing highly selective
+tables earlier.
+
+**When to apply**: Histogram statistics exist on filtered columns, or
+index statistics provide selectivity estimates beyond uniform
+distribution assumptions.
+
+**Why it works**: Without fanout filtering, the optimizer assumes
+uniform distribution and may misjudge join order.  Histograms capture
+data skew, leading to better cardinality estimates and join ordering.
+
+**Database version**: MySQL 8.0+
+
+## Relational Algebra
+
+```latex
+-- Before: uniform selectivity assumption
+$$
+\sigma_{status = 'active'}(users)  -- estimated 50% (1/NDV)
+$$
+
+-- After: histogram-based selectivity
+$$
+\sigma_{status = 'active'}(users)  -- estimated 85% (from histogram)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mysql-condition-fanout-filter";
+    "(join ?pred
+        ?left
+        (filter ?filter_pred ?right))" =>
+    "(join ?pred
+        (filter ?filter_pred ?right)
+        ?left)"
+    if is_database("mysql")
+    if fanout_favors_reorder("?filter_pred", "?right", "?left")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    column: &Column,
+    predicate: &Predicate,
+) -> bool {
+    column.has_histogram()
+    || column.has_index_statistics()
+}
+```
+
+**Restrictions:**
+- Requires `ANALYZE TABLE ... UPDATE HISTOGRAM` to create histograms
+- Singleton histograms (bucket per value) for up to 1000 distinct values
+- Equi-height histograms for larger domains
+- `optimizer_switch='condition_fanout_filter=on'`
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    uniform_estimate: f64,
+    histogram_estimate: f64,
+    join_rows: f64,
+) -> f64 {
+    let misestimate = (uniform_estimate - histogram_estimate).abs();
+    misestimate * join_rows * 0.001
+}
+```
+
+**Typical benefit**: 2-10x when data is highly skewed and histograms
+correct cardinality estimates.
+
+## Test Cases
+
+```sql
+-- Positive: skewed column with histogram
+ANALYZE TABLE orders UPDATE HISTOGRAM ON status;
+SELECT * FROM orders o JOIN items i ON o.id = i.order_id
+WHERE o.status = 'cancelled';
+-- Histogram reveals status='cancelled' is 2%, not 20% (1/5 NDV)
+```
+
+```sql
+-- Negative: no histogram, no index stats
+SELECT * FROM t WHERE arbitrary_col = 'value';
+-- Falls back to uniform selectivity assumption
+```
+
+## References
+
+MySQL: "Optimizer Statistics" in MySQL 8.0 Reference Manual
+MySQL: `ANALYZE TABLE ... UPDATE HISTOGRAM`
+Source: sql/opt_costmodel.cc, `condition_fanout()`

@@ -1,0 +1,75 @@
+---
+id: clickhouse-runtime-filter-join
+name: Runtime Filter for Join Optimization
+category: database-specific/clickhouse
+databases: [clickhouse]
+version: 1.0.0
+authors: ["RA Contributors"]
+tags: [database-specific, clickhouse, join, runtime-filter, bloom-filter]
+complexity: O(n)
+benefit_range: [0.3, 0.7]
+---
+
+# Runtime Filter for Join Optimization
+
+## Description
+
+Builds a runtime filter (typically a bloom filter) from the build side of a hash join and applies it to the probe side to reduce rows early. This is similar to Spark's dynamic partition pruning.
+
+**When to apply**: Hash join where build side is much smaller than probe side.
+
+**Why it works**: Filters out non-matching probe rows before they reach the join, reducing join input and memory usage.
+
+**Database version**: ClickHouse v21.8+
+
+## Relational Algebra
+
+```latex
+$$
+HashJoin[k](Probe, Build)
+  \rightarrow HashJoin[k](Filter[k IN build_filter](Probe), Build)
+  \text{where} |Build| << |Probe|
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("clickhouse-runtime-filter-join";
+    "(hash_join ?probe ?build ?key)" =>
+    "(hash_join
+        (filter (build_runtime_filter ?key ?build) ?probe)
+        ?build
+        ?key)"
+    if is_database("clickhouse")
+    if build_much_smaller_than_probe("?build", "?probe")
+),
+```
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    probe_card: f64,
+    build_card: f64,
+    filter_selectivity: f64,
+) -> f64 {
+    let normal_join_cost = probe_card * 100.0 + probe_card.min(build_card) * 10.0;
+    let filtered_probe = probe_card * filter_selectivity;
+    let filtered_join_cost = probe_card * 100.0  // read probe
+                           + build_card * 10.0   // build filter
+                           + filtered_probe.min(build_card) * 10.0;  // join
+    (normal_join_cost - filtered_join_cost).max(0.0) / normal_join_cost
+}
+```
+
+**Typical benefit**: 30-70% when filter is selective
+
+## References
+
+**Source code:**
+- ClickHouse: `src/Processors/QueryPlan/Optimizations/joinRuntimeFilter.cpp`
+  - Commit: 35f2d31186cca2f8c50f7ba4bd93817da490da85

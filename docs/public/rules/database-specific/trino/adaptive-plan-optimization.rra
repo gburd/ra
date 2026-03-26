@@ -1,0 +1,27 @@
+---
+id: trino-adaptive-plan-optimization
+name: Adaptive Plan Optimization (Trino)
+category: database-specific/trino
+databases: [trino]
+execution_models: [volcano, vectorized, push-based]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# Adaptive Plan Optimization (Trino)
+
+## Metadata
+- **Rule ID**: `trino-adaptive-plan-optimization`
+- **Category**: Database-Specific / Trino
+- **Source**: Trino AdaptivePlanOptimizer.java
+
+## Description
+
+Trino re-optimizes query plans mid-execution based on actual runtime statistics, adjusting join strategies and partition counts dynamically.
+
+## Tags
+`database-specific`, `trino`, `adaptive`, `runtime-reoptimization`

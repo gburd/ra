@@ -1,0 +1,189 @@
+---
+id: mongodb-multikey-index-bounds
+name: MongoDB Multikey Index Bounds Tightening
+category: database-specific/mongodb
+databases: [mongodb]
+execution_models: [pipeline]
+version: "1.0.0"
+authors: ["MongoDB Inc."]
+tags: [index, multikey, array, bounds, optimization]
+complexity: "O(log n)"
+benefit_range: [0.3, 10.0]
+---
+
+# MongoDB Multikey Index Bounds Tightening
+
+## Description
+
+Tightens index bounds for queries on array fields using multikey indexes.
+MongoDB's multikey indexes index each element of an array separately, creating
+multiple index entries per document. The query planner computes the intersection
+of bounds from multiple predicates on the same array field to narrow the index
+scan range, avoiding full collection scans.
+
+**When to apply**: Queries with multiple predicates on indexed array fields,
+especially compound predicates involving `$elemMatch`, range queries on arrays,
+or combinations of `$in` and range predicates on multikey indexes.
+
+**Why it works**: Without bound tightening, MongoDB may use overly broad index
+bounds that include false positives. By intersecting bounds from multiple
+predicates, the planner reduces the number of index keys scanned and the number
+of documents that require FETCH + filter verification.
+
+## Relational Algebra
+
+```latex
+-- Before: broad index scan + post-filter
+$$
+\sigma_{a > 5 AND a < 10}(index-scan(multikey_idx, (-inf, +inf)))
+$$
+
+-- After: tightened bounds on multikey index
+$$
+\sigma_{a > 5 AND a < 10}(index-scan(multikey_idx, (5, 10)))
+$$
+
+-- With $elemMatch: single array element must satisfy all
+$$
+\sigma_{elemMatch(a, > 5 AND < 10)}(index-scan(multikey_idx, (5, 10)))
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mongodb-multikey-bounds-intersection";
+    "(filter (and (> ?field ?lo) (< ?field ?hi))
+       (index-scan ?idx ?bounds))" =>
+    "(filter (and (> ?field ?lo) (< ?field ?hi))
+       (index-scan ?idx (intersect-bounds ?bounds (range ?lo ?hi))))"
+    if is_multikey_index("?idx")
+    if bounds_can_tighten("?bounds", "?lo", "?hi")
+),
+
+rw!("mongodb-elemmatch-bounds";
+    "(filter (elem-match ?field (and ?pred1 ?pred2))
+       (index-scan ?idx ?bounds))" =>
+    "(filter (elem-match ?field (and ?pred1 ?pred2))
+       (index-scan ?idx (elemmatch-bounds ?pred1 ?pred2)))"
+    if is_multikey_index("?idx")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> bool {
+    stats.has_multikey_index
+        && stats.num_array_predicates >= 2
+        && stats.estimated_selectivity < 0.3
+}
+```
+
+**Restrictions:**
+- Without `$elemMatch`, predicates on the same array may match different elements
+- Compound multikey indexes can only use bounds from one array field
+- Cannot intersect bounds across different array fields in compound index
+- Multikey index bounds for `$or` queries use union, not intersection
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let total_keys = stats.index_key_count as f64;
+    let original_range = stats.original_bound_fraction;
+    let tightened_range = stats.tightened_bound_fraction;
+
+    let original_cost = total_keys * original_range * 0.00001; // key comparison
+    let tightened_cost = total_keys * tightened_range * 0.00001;
+
+    if original_cost > tightened_cost {
+        (original_cost - tightened_cost) / original_cost
+    } else {
+        0.0
+    }
+}
+```
+
+**Assumptions:**
+- Index key comparison: ~10ns per key
+- FETCH cost: ~1us per document (disk) or ~100ns (cached)
+- False positive rate without tightening: 2-10x actual matches
+
+**Typical benefit**: 30% to 10x reduction in index keys scanned.
+
+## Test Cases
+
+### Positive: Range query on array with $elemMatch
+
+```javascript
+// Index: {scores: 1}
+db.students.createIndex({scores: 1})
+
+// Query: find students with a single score between 80 and 90
+db.students.find({
+  scores: {$elemMatch: {$gte: 80, $lte: 90}}
+})
+
+// Planner uses tightened bounds [80, 90] on multikey index
+// Without $elemMatch, bounds would be [80, +inf) intersected (-inf, 90]
+// which still gives [80, 90] but matches different array elements
+```
+
+### Positive: Compound predicates on array field
+
+```javascript
+// Index: {tags: 1, priority: 1}
+db.tasks.createIndex({tags: 1, priority: 1})
+
+// Query with multiple array predicates
+db.tasks.find({
+  tags: {$in: ["urgent", "critical"]},
+  priority: {$gte: 5}
+})
+
+// Planner computes union of point bounds for tags
+// combined with range bound for priority
+```
+
+### Negative: Multiple array fields in compound index
+
+```javascript
+// Compound multikey index on two array fields
+db.matrix.createIndex({rows: 1, cols: 1})
+
+// Cannot tighten both array field bounds simultaneously
+db.matrix.find({
+  rows: {$gte: 0, $lte: 10},
+  cols: {$gte: 0, $lte: 10}
+})
+
+// MongoDB can only use bounds from ONE array field
+// The other field uses universal bounds [-inf, +inf]
+```
+
+## References
+
+**Implementation:**
+- MongoDB source: `src/mongo/db/query/index_bounds_builder.cpp`
+- Multikey bound computation: `IndexBoundsBuilder::translateAndIntersect()`
+- Multikey path tracking: `src/mongo/db/index/multikey_paths.h`
+
+**Documentation:**
+- MongoDB Manual: "Multikey Indexes"
+  - https://docs.mongodb.com/manual/core/index-multikey/
+- MongoDB Manual: "Multikey Index Bounds"
+  - https://docs.mongodb.com/manual/core/multikey-index-bounds/
+
+**Related papers:**
+- Graefe, G., "Query Evaluation Techniques for Large Databases", 1993
+  - Index bound computation techniques applicable to multikey

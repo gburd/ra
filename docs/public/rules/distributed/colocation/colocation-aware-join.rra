@@ -1,0 +1,116 @@
+---
+id: colocation-aware-join
+name: Colocation-Aware Join Elimination
+category: distributed/colocation
+databases: [cockroachdb, citus, yugabyte, spanner, tidb]
+version: "1.0.0"
+authors: ["CockroachDB Team", "Citus Team"]
+tags: [distributed, colocation, join, partition, shuffle-elimination]
+complexity: O(1)
+benefit_range: [0.3, 0.9]
+---
+
+# Colocation-Aware Join Elimination
+
+## Description
+
+Detects when both sides of a distributed join are co-located on the same
+nodes (partitioned/sharded by the join key) and eliminates the shuffle
+(data redistribution) phase. When tables are co-partitioned by the join
+key, each node can perform the join locally without network transfer.
+
+**When to apply**: Distributed joins where both tables are hash-partitioned
+or range-partitioned by the join key.
+
+## Relational Algebra
+
+```latex
+-- Before: shuffle-based distributed join
+$$
+ShuffleHashJoin(
+    Redistribute(R, hash(R.key)),
+    Redistribute(S, hash(S.key))
+)
+$$
+
+-- After: local join (tables already co-located)
+$$
+LocalHashJoin(R_local, S_local)
+$$
+-- No shuffle needed: R and S partitioned by same key
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("colocated-join";
+    "(shuffle-join ?key
+        (redistribute ?key ?left)
+        (redistribute ?key ?right))" =>
+    "(local-join ?key ?left ?right)"
+    if tables_colocated("?left", "?right", "?key")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(join: &DistJoin, catalog: &DistCatalog) -> bool {
+    let left_partition = catalog.partition_key(&join.left());
+    let right_partition = catalog.partition_key(&join.right());
+    let join_key = join.key();
+    // Both must be partitioned by the join key
+    left_partition == join_key && right_partition == join_key
+        // Same number of partitions (or compatible)
+        && catalog.partition_count(&join.left())
+            == catalog.partition_count(&join.right())
+}
+```
+
+**Restrictions:**
+- Only equi-joins on the exact partition key
+- Partition counts must be compatible (same or multiple)
+- Range-partitioned tables: ranges must align
+- Secondary indexes may not be co-located
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    data_size: f64,
+    network_bandwidth: f64,
+    nodes: usize,
+) -> f64 {
+    // Shuffle cost eliminated
+    let shuffle_data = data_size * 2.0; // both sides
+    let shuffle_time = shuffle_data / network_bandwidth;
+    shuffle_time * nodes as f64
+}
+```
+
+**Typical benefit**: 30-90% for large distributed joins.
+
+## Test Cases
+
+```sql
+-- Positive: tables co-partitioned by customer_id
+-- orders PARTITION BY HASH(customer_id)
+-- order_items PARTITION BY HASH(customer_id)
+SELECT o.*, oi.product_id
+FROM orders o JOIN order_items oi ON o.customer_id = oi.customer_id;
+-- Local join: no shuffle needed
+
+-- Negative: different partition keys
+-- orders PARTITION BY HASH(order_id)
+-- customers PARTITION BY HASH(customer_id)
+SELECT * FROM orders o JOIN customers c ON o.customer_id = c.id;
+-- Must shuffle: different partition keys
+```
+
+## References
+
+- CockroachDB: Interleaved Tables and Co-located Joins
+- Citus: Co-located Distributed Joins documentation

@@ -1,0 +1,86 @@
+---
+id: offset-zero-elimination
+name: OFFSET Zero Elimination
+category: logical/limit-pushdown
+databases: [postgresql, mysql, duckdb]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [offset, limit, simplification]
+complexity: "O(1)"
+benefit_range: [0.0, 0.1]
+---
+
+# OFFSET Zero Elimination
+
+## Description
+
+Removes OFFSET 0 clauses which have no effect but add operator overhead.
+
+**When to apply**: OFFSET with value 0.
+
+**Why it works**: OFFSET 0 is identity; removing it simplifies plan.
+
+## Relational Algebra
+
+```latex
+$$
+offset[0](R) \rightarrow R
+limit[K](offset[0](R)) \rightarrow limit[K](R)
+$$
+
+```
+
+## Implementation
+
+```rust
+rw!("offset-zero-elimination";
+    "(offset 0 ?input)" => "?input"
+),
+
+rw!("limit-offset-zero";
+    "(limit ?k (offset 0 ?input))" =>
+    "(limit ?k ?input)"
+),
+```
+
+## Cost Model
+
+```rust
+fn benefit() -> f64 {
+    0.05 // Minor: eliminates no-op operator
+}
+```
+
+**Typical benefit**: 0-10% (simplification only)
+
+## Test Cases
+
+### Positive: Explicit OFFSET 0
+
+```sql
+SELECT * FROM users LIMIT 10 OFFSET 0;
+
+-- Remove OFFSET 0
+```
+
+### Positive: Parameterized query with offset=0
+
+```sql
+SELECT * FROM products LIMIT ? OFFSET ?;
+-- When offset parameter is 0
+```
+
+### Negative: Non-zero offset
+
+```sql
+SELECT * FROM logs LIMIT 100 OFFSET 50;
+
+-- Keep OFFSET: has semantic effect
+```
+
+## References
+
+- All major databases: Constant folding eliminates OFFSET 0
+- PostgreSQL: preprocess_limit for constant optimization

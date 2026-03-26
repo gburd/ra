@@ -1,0 +1,40 @@
+---
+id: full-to-left-and-right-join
+name: "FullToLeftAndRightJoin"
+category: logical/join-elimination
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [academic, calcite]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# FullToLeftAndRightJoin
+
+## Description
+
+Simplifies FULL OUTER JOIN
+
+## Relational Algebra
+
+```latex
+$$
+FULL OUTER JOIN => LEFT + RIGHT
+$$
+
+```
+
+## Implementation
+
+```
+Implement rule transformation for calcite optimization
+```
+
+## Tests
+
+Add test cases for this rule
+
+## References

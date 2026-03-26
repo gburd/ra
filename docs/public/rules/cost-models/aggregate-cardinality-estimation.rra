@@ -1,0 +1,376 @@
+---
+id: aggregate-cardinality-estimation
+name: "Aggregate Cardinality Estimation"
+category: cost-models
+databases: [postgresql, mysql, oracle, duckdb, mssql, cockroachdb, clickhouse]
+execution_models: [all]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [cost, cardinality, aggregate, group-by, distinct, estimation]
+complexity: "O(|group-by columns|)"
+benefit_range: [0.2, 0.7]
+---
+
+# Aggregate Cardinality Estimation
+
+## Description
+
+Estimates the number of output groups for GROUP BY operations and the
+cardinality of DISTINCT. This determines whether hash aggregation fits
+in memory, whether partial aggregation is beneficial in distributed
+settings, and the cost of downstream operators.
+
+The naive estimate multiplies NDV values of all GROUP BY columns, but this
+massively overestimates when columns are correlated (e.g., city and state).
+Better approaches use functional dependencies, multi-column statistics,
+and capping at input cardinality.
+
+**When to apply**: Every GROUP BY, DISTINCT, and window function partition.
+Also affects UNION (deduplication) and EXISTS subquery estimation.
+
+**Why it works**: NDV (number of distinct values) per column provides the
+upper bound on groups. Functional dependencies and correlation statistics
+reduce this bound. Capping at input cardinality provides a safety bound.
+
+## Relational Algebra
+
+```latex
+$$
+\text{Card}(\gamma_{G, agg}(R)):
+  Naive: \text{product}(\text{NDV}(g) for g in G)
+  Capped: \text{min}(\text{product}(\text{NDV}(g)), \text{Card}(R))
+  FD-aware: if G includes key \rightarrow \text{Card}(R)
+            if G includes FD source \rightarrow \text{NDV}(FD source)
+$$
+
+$$
+\text{Card}(delta(R)):  -- DISTINCT
+  \text{min}(\text{Card}(R), \text{product}(\text{NDV}(c) for c in output_columns))
+$$
+
+$$
+Partial aggregation reduction:
+  reduction_ratio = \text{Card}(gamma(R)) / \text{Card}(R)
+$$
+
+```
+
+## Implementation
+
+```rust
+use ra_stats::{ColumnStats, FunctionalDependency};
+
+struct AggregateCardinalityEstimator {
+    stats: HashMap<String, TableStats>,
+    functional_deps: Vec<FunctionalDependency>,
+}
+
+impl AggregateCardinalityEstimator {
+    fn estimate_group_count(
+        &self,
+        input: &RelExpr,
+        group_by: &[String],
+    ) -> GroupEstimate {
+        let input_card = self.input_cardinality(input);
+
+        if group_by.is_empty() {
+            return GroupEstimate {
+                groups: 1.0,
+                method: EstimationMethod::ScalarAggregate,
+            };
+        }
+
+        // Check if GROUP BY includes a key
+        if self.contains_key(group_by, input) {
+            return GroupEstimate {
+                groups: input_card,
+                method: EstimationMethod::KeyGrouping,
+            };
+        }
+
+        // Check functional dependencies to reduce columns
+        let effective_columns =
+            self.reduce_by_fd(group_by, input);
+
+        // Multi-column statistics if available
+        if let Some(mc_ndv) =
+            self.multi_column_ndv(&effective_columns, input)
+        {
+            return GroupEstimate {
+                groups: mc_ndv.min(input_card),
+                method: EstimationMethod::MultiColumnStats,
+            };
+        }
+
+        // Product of individual NDVs with correlation damping
+        let ndv_product: f64 = effective_columns
+            .iter()
+            .map(|col| self.ndv(col, input) as f64)
+            .fold(1.0, |acc, ndv| acc * ndv);
+
+        // Apply damping for likely correlations
+        let damped = self.apply_damping(
+            ndv_product,
+            effective_columns.len(),
+        );
+
+        GroupEstimate {
+            groups: damped.min(input_card).max(1.0),
+            method: EstimationMethod::DampedProduct,
+        }
+    }
+
+    fn reduce_by_fd(
+        &self,
+        group_by: &[String],
+        input: &RelExpr,
+    ) -> Vec<String> {
+        let mut remaining: Vec<String> =
+            group_by.to_vec();
+
+        for fd in &self.functional_deps {
+            // If FD determinant is in GROUP BY, remove dependents
+            if fd.determinant.iter().all(|d| remaining.contains(d)) {
+                for dep in &fd.dependents {
+                    remaining.retain(|c| c != dep);
+                }
+            }
+        }
+
+        remaining
+    }
+
+    fn apply_damping(
+        &self,
+        ndv_product: f64,
+        num_columns: usize,
+    ) -> f64 {
+        // Empirical damping: columns are rarely independent
+        // PostgreSQL uses sqrt for 2 columns, cbrt for 3, etc.
+        // This assumes ~50% correlation between columns
+        match num_columns {
+            1 => ndv_product,
+            2 => ndv_product.powf(0.75),
+            3 => ndv_product.powf(0.6),
+            _ => ndv_product.powf(0.5),
+        }
+    }
+
+    fn estimate_distinct(
+        &self,
+        input: &RelExpr,
+        columns: &[String],
+    ) -> f64 {
+        let input_card = self.input_cardinality(input);
+        let group_est =
+            self.estimate_group_count(input, columns);
+        group_est.groups.min(input_card)
+    }
+
+    fn partial_aggregation_benefit(
+        &self,
+        input: &RelExpr,
+        group_by: &[String],
+    ) -> PartialAggBenefit {
+        let input_card = self.input_cardinality(input);
+        let group_est =
+            self.estimate_group_count(input, group_by);
+
+        let reduction_ratio = group_est.groups / input_card;
+
+        PartialAggBenefit {
+            reduction_ratio,
+            is_beneficial: reduction_ratio < 0.5,
+            estimated_output: group_est.groups,
+        }
+    }
+
+    fn estimate_window_partitions(
+        &self,
+        input: &RelExpr,
+        partition_by: &[String],
+    ) -> WindowEstimate {
+        if partition_by.is_empty() {
+            return WindowEstimate {
+                num_partitions: 1.0,
+                avg_partition_size: self.input_cardinality(input),
+            };
+        }
+
+        let group_est =
+            self.estimate_group_count(input, partition_by);
+        let input_card = self.input_cardinality(input);
+
+        WindowEstimate {
+            num_partitions: group_est.groups,
+            avg_partition_size: input_card / group_est.groups,
+        }
+    }
+
+    fn contains_key(
+        &self,
+        columns: &[String],
+        input: &RelExpr,
+    ) -> bool {
+        if let Some(table) = input.base_table() {
+            let stats = &self.stats[&table];
+            stats.keys.iter().any(|key| {
+                key.columns.iter().all(|c| columns.contains(c))
+            })
+        } else {
+            false
+        }
+    }
+}
+
+struct GroupEstimate {
+    groups: f64,
+    method: EstimationMethod,
+}
+
+enum EstimationMethod {
+    ScalarAggregate,
+    KeyGrouping,
+    MultiColumnStats,
+    DampedProduct,
+}
+
+struct PartialAggBenefit {
+    reduction_ratio: f64,
+    is_beneficial: bool,
+    estimated_output: f64,
+}
+
+struct WindowEstimate {
+    num_partitions: f64,
+    avg_partition_size: f64,
+}
+```
+
+**Restrictions:**
+- Product of NDVs massively overestimates for correlated columns
+- Functional dependencies may not be declared or detected
+- No standard for multi-column NDV statistics across databases
+- Window function partition estimation reuses GROUP BY logic
+- Does not model HAVING clause filtering on aggregates
+
+## Cost Model
+
+```rust
+fn aggregation_cost_impact(
+    estimated_groups: f64,
+    true_groups: f64,
+    memory_limit_bytes: u64,
+    group_size_bytes: u32,
+) -> f64 {
+    let est_memory = estimated_groups * group_size_bytes as f64;
+    let true_memory = true_groups * group_size_bytes as f64;
+    let limit = memory_limit_bytes as f64;
+
+    // Underestimate: plan allocates too little memory -> spill
+    // Overestimate: plan may avoid partial aggregation when beneficial
+    let est_spills = est_memory > limit;
+    let true_spills = true_memory > limit;
+
+    if est_spills != true_spills {
+        // Wrong decision about spilling
+        0.5 // Significant cost impact
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 20-70% improvement for queries with GROUP BY on
+correlated columns or when partial aggregation decisions depend on
+accurate group count estimates.
+
+## Test Cases
+
+### Test 1: Scalar aggregate
+
+```sql
+SELECT COUNT(*), AVG(amount) FROM orders;
+-- No GROUP BY: exactly 1 output row
+-- Card = 1
+```
+
+### Test 2: Key grouping
+
+```sql
+SELECT id, SUM(amount) FROM orders GROUP BY id;
+-- id is primary key
+-- Card = Card(orders) = 10M
+```
+
+### Test 3: Correlated columns (city, state)
+
+```sql
+SELECT state, city, COUNT(*) FROM customers GROUP BY state, city;
+-- NDV(state) = 50, NDV(city) = 30,000
+-- Naive: 50 * 30,000 = 1,500,000
+-- Damped (2 cols): 1,500,000^0.75 = 178,000
+-- FD-aware (city -> state): NDV(city) = 30,000
+-- True: ~32,000 (many cities share names across states)
+```
+
+### Test 4: Functional dependency reduction
+
+```sql
+SELECT dept_name, dept_location, COUNT(*)
+FROM employees
+GROUP BY dept_name, dept_location;
+-- FD: dept_name -> dept_location
+-- Effective GROUP BY: just dept_name
+-- Card = NDV(dept_name) = 50 (not 50 * 10 = 500)
+```
+
+### Test 5: Partial aggregation in distributed query
+
+```sql
+SELECT region, SUM(amount) FROM sales GROUP BY region;
+-- 100M input rows, 50 regions
+-- Reduction ratio: 50 / 100M = 0.0000005
+-- Partial aggregation very beneficial: 99.99% reduction per partition
+-- Network cost: 50 * num_nodes * row_size vs 100M * row_size
+```
+
+### Test 6: DISTINCT estimation
+
+```sql
+SELECT DISTINCT first_name, last_name FROM employees;
+-- NDV(first_name) = 5,000, NDV(last_name) = 80,000
+-- Naive: 5,000 * 80,000 = 400M (impossible, only 1M employees)
+-- Capped: min(400M, 1M) = 1M
+-- Damped: 400M^0.75 = 47.6M -> capped to 1M
+-- True: ~800K (some name pairs repeated)
+```
+
+### Test 7: Window function partitions
+
+```sql
+SELECT *, ROW_NUMBER() OVER (PARTITION BY dept_id ORDER BY salary DESC)
+FROM employees;
+-- NDV(dept_id) = 50
+-- 50 partitions, avg 20K rows per partition
+-- Memory: need to sort each partition (20K rows in memory)
+```
+
+## References
+
+**Aggregate estimation:**
+- Alon, Matias, Szegedy, "The Space Complexity of Approximating the Frequency Moments", STOC 1996
+- Haas et al., "Sampling-Based Estimation of the Number of Distinct Values of a Population", VLDB 1995
+
+**Multi-column statistics:**
+- PostgreSQL: `CREATE STATISTICS` for extended statistics (ndistinct, dependencies, MCV)
+- Oracle: column group statistics (`DBMS_STATS.CREATE_EXTENDED_STATS`)
+
+**Functional dependencies:**
+- PostgreSQL 10+: extended statistics with functional dependencies
+- Mannino, Chu, Sager, "Statistical Profile Estimation in Database Systems", ACM Computing Surveys 1988
+
+**Implementations:**
+- PostgreSQL: `src/backend/optimizer/util/plancat.c` (estimate_num_groups)
+- DuckDB: statistics propagation for aggregates
+- mssql: density vector for multi-column estimation

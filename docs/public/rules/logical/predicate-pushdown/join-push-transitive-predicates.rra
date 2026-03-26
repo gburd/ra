@@ -1,0 +1,133 @@
+---
+id: calcite-join-push-transitive-predicates
+name: Calcite JoinPushTransitivePredicatesRule
+category: logical/predicate-pushdown
+databases: [calcite, postgresql, mysql, oracle]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [logical, calcite, join, transitive, predicate, pushdown]
+complexity: O(n)
+benefit_range: [0.1, 0.6]
+preconditions:
+  - type: "pattern"
+    must_match: "(join inner ?cond ?left ?right)"
+    description: "Inner join with transitive predicate opportunity"
+  - type: "predicate"
+    condition: "has_equi_condition(?cond)"
+    description: "Join must have equality condition for transitivity"
+  - type: "predicate"
+    condition: "has_filter_on_one_side(?left, ?right)"
+    description: "Filter on one side can be transitively applied to the other"
+---
+
+# Calcite JoinPushTransitivePredicatesRule
+
+## Description
+
+Infers transitive predicates from join conditions and pushes them
+to join inputs as filters. If A.x = B.y AND A.x > 10, then B.y > 10
+can be inferred and pushed to filter B before the join.
+
+**When to apply**: A join has equi-join conditions and one side has
+predicates that can be transitively applied to the other side.
+
+**Why it works**: Equi-join conditions create equivalence classes.
+Any predicate on one member of an equivalence class applies to all
+members. Pushing these inferred predicates reduces join input sizes.
+
+**Calcite class**: `org.apache.calcite.rel.rules.JoinPushTransitivePredicatesRule`
+
+## Relational Algebra
+
+```latex
+-- Before: predicate on one side only
+$$
+\sigma_{A.x > 10}(A) JOIN[A.x = B.y] B
+$$
+
+-- After: inferred predicate pushed to both sides
+$$
+\sigma_{A.x > 10}(A) JOIN[A.x = B.y] \sigma_{B.y > 10}(B)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-join-push-transitive-predicates";
+    "(join ?type (and (= ?lkey ?rkey) ?pred)
+        (filter (> ?lkey ?val) ?left)
+        ?right)" =>
+    "(join ?type (and (= ?lkey ?rkey) ?pred)
+        (filter (> ?lkey ?val) ?left)
+        (filter (> ?rkey ?val) ?right))"
+    if is_equi_column("?lkey", "?rkey")
+),
+```
+
+## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
+
+```rust
+fn applicable(join: &Join) -> bool {
+    let mq = join.metadata_query();
+    let preds = mq.pulled_up_predicates(join);
+    !preds.left_inferred.is_empty()
+        || !preds.right_inferred.is_empty()
+}
+```
+
+**Restrictions:**
+- Only works with equi-join conditions (equality predicates)
+- Inferred predicates must be sargable (column op constant)
+- Does not apply to outer joins where NULL preservation matters
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    input_rows: f64,
+    inferred_selectivity: f64,
+) -> f64 {
+    input_rows * (1.0 - inferred_selectivity) * 0.01
+}
+```
+
+**Typical benefit**: 10-60% when inferred predicates are selective.
+
+## Test Cases
+
+```sql
+-- Positive: transitive predicate from equi-join
+SELECT * FROM emp e
+JOIN dept d ON e.deptno = d.deptno
+WHERE e.deptno > 10;
+-- Infers: d.deptno > 10 pushed to dept scan
+```
+
+```sql
+-- Positive: range predicate transitivity
+SELECT * FROM orders o
+JOIN customers c ON o.customer_id = c.id
+WHERE c.id BETWEEN 100 AND 200;
+-- Infers: o.customer_id BETWEEN 100 AND 200
+```
+
+```sql
+-- Expected: inequality join blocks transitivity
+-- Non-equi join conditions do not create equivalence classes,
+-- so transitive predicates cannot be inferred. The optimizer
+-- may still apply other transformations.
+SELECT * FROM emp e
+JOIN dept d ON e.deptno > d.deptno
+WHERE e.deptno = 10;
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/JoinPushTransitivePredicatesRule.java (commit af6367d)

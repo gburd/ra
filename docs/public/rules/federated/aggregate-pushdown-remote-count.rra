@@ -1,0 +1,64 @@
+---
+id: federated-aggregate-pushdown-count
+name: "Aggregate Pushdown: COUNT"
+category: federated/pushdown
+databases: [postgresql, mysql, sqlite, snowflake, bigquery, duckdb]
+execution_models: [volcano, vectorized]
+version: "1.0.0"
+authors: ["ra-optimizer"]
+tags: [federated, pushdown, aggregate, count]
+complexity: "O(1)"
+benefit_range: [10.0, 10000.0]
+---
+
+# Aggregate Pushdown: COUNT
+
+## Description
+
+Push COUNT aggregation to the remote database. Instead of transferring
+all rows and counting locally, let the remote compute the count and
+transfer a single value.
+
+## Relational Algebra
+
+```latex
+$$
+Aggregate[COUNT(*)](RemoteScan[table, endpoint])
+=>
+RemoteScan[table, endpoint, pushdown_agg=COUNT(*)]
+$$
+
+```
+
+## Before
+
+```
+(Aggregate :aggregates [(COUNT *)]
+  :input (RemoteScan "orders" "db.example.com"))
+```
+
+## After
+
+```
+(RemoteScan "orders" "db.example.com"
+  :pushdown_agg [(COUNT *)])
+```
+
+## Cost Benefit
+
+- Without pushdown: Transfer 10M rows, count locally
+- With pushdown: Transfer 1 row (the count) - 10,000,000x reduction
+
+## Test Cases
+
+### Test 1: Simple count
+
+#### Input
+```
+(Aggregate :aggregates [(COUNT *)] :input (RemoteScan "orders" "pg.example.com"))
+```
+
+#### Expected
+```
+(RemoteScan "orders" "pg.example.com" :pushdown_agg [(COUNT *)])
+```

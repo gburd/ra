@@ -1,0 +1,70 @@
+---
+id: federated-join-pushdown-colocated
+name: "Join Pushdown: Co-located Tables"
+category: federated/pushdown
+databases: [postgresql, mysql, snowflake, bigquery, duckdb]
+execution_models: [volcano, vectorized]
+version: "1.0.0"
+authors: ["ra-optimizer"]
+tags: [federated, pushdown, join, colocated]
+complexity: "O(1)"
+benefit_range: [10.0, 1000.0]
+---
+
+# Join Pushdown: Co-located Tables
+
+## Description
+
+When both sides of a join reside on the same remote database, push
+the entire join to that remote. This avoids all network transfer for
+the join operation.
+
+## Relational Algebra
+
+```latex
+$$
+Join[cond](RemoteScan[t1, endpoint], RemoteScan[t2, endpoint])
+=>
+RemoteScan[pushdown_join(t1, t2, cond), endpoint]
+$$
+
+$$
+Preconditions:
+  - Both tables on same endpoint
+  - Remote supports \bowtie pushdown
+$$
+
+```
+
+## Before
+
+```
+(Join :type INNER :condition (= orders.customer_id customers.id)
+  :left (RemoteScan "orders" "db.example.com")
+  :right (RemoteScan "customers" "db.example.com"))
+```
+
+## After
+
+```
+(RemoteScan "db.example.com"
+  :pushdown_join [orders INNER JOIN customers
+    ON orders.customer_id = customers.id])
+```
+
+## Test Cases
+
+### Test 1: Co-located inner join
+
+#### Input
+```
+(Join :type INNER :condition (= o.cid c.id)
+  :left (RemoteScan "orders" "pg.example.com")
+  :right (RemoteScan "customers" "pg.example.com"))
+```
+
+#### Expected
+```
+(RemoteScan "pg.example.com"
+  :pushdown_join [orders INNER JOIN customers ON o.cid = c.id])
+```

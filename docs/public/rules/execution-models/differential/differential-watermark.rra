@@ -1,0 +1,190 @@
+---
+id: differential-watermark
+name: Differential Watermark and Frontier Tracking
+category: execution-models
+version: 1.0.0
+databases: [Materialize, flink, differential-dataflow]
+authors: [Frank McSherry, Tyler Akidau]
+tags: [execution, differential, watermark, frontier, progress, streaming]
+standard: differential-dataflow
+---
+
+# Differential Watermark and Frontier Tracking
+
+## Description
+
+Watermarks (called "frontiers" in differential dataflow) track the progress of computation through time. A watermark at time T means "no more data will arrive with timestamp less than T." This allows operators to produce correct, complete results for times before the watermark and to compact state for completed times. In differential dataflow, frontiers are antichains in a partially ordered time domain, generalizing the linear watermarks of systems like flink.
+
+**Key concepts:**
+- **Frontier**: Antichain of times -- set of minimal incomplete timestamps
+- **Watermark**: Special case of frontier in linearly ordered time
+- **Capability**: An operator's promise to potentially emit at certain times
+- **Advancement**: Frontier moves forward as operators release capabilities
+- **Compaction**: State for times before frontier can be garbage collected
+
+**Key characteristics:**
+- **Partial order support**: Handles multi-dimensional time (e.g., epoch x iteration)
+- **Fine-grained**: Per-operator frontiers, not global
+- **Automatic propagation**: Progress protocol propagates frontiers through dataflow
+- **Enables compaction**: Operators compact state when frontier advances
+- **Low latency**: Frontier advances in microseconds for simple pipelines
+
+**Trade-offs:**
+- Frontier tracking has per-batch coordination overhead
+- Late data before the frontier cannot be processed (correctness boundary)
+- Complex partially-ordered time increases tracking cost
+- Stalled operators prevent frontier advancement globally
+
+## Implementation
+
+```rust
+/// Frontier: antichain of partially ordered timestamps
+pub struct Frontier<T: PartialOrd> {
+    elements: Vec<T>,
+}
+
+impl<T: PartialOrd + Clone> Frontier<T> {
+    pub fn new() -> Self {
+        Self { elements: Vec::new() }
+    }
+
+    /// Check if time is still "open" (could receive data)
+    pub fn less_equal(&self, time: &T) -> bool {
+        self.elements.iter().any(|t| t <= time)
+    }
+
+    /// Advance frontier: release old capability, acquire new
+    pub fn advance(&mut self, old: &T, new: &T) {
+        self.elements.retain(|t| t != old);
+        // Only add if not dominated by existing elements
+        if !self.elements.iter().any(|t| t <= new) {
+            // Remove elements dominated by new
+            self.elements.retain(|t| !(new <= t));
+            self.elements.push(new.clone());
+        }
+    }
+
+    /// Check if a time is "complete" (no more data possible)
+    pub fn is_complete(&self, time: &T) -> bool {
+        !self.less_equal(time)
+    }
+}
+
+/// Watermark-based window operator
+pub struct WatermarkWindow {
+    window_size: Duration,
+    current_watermark: Timestamp,
+    pending: HashMap<Timestamp, Vec<Change>>,
+}
+
+impl WatermarkWindow {
+    pub fn process_change(&mut self, change: Change) -> Vec<Change> {
+        let window_start = change.time - self.window_size;
+
+        // Buffer change
+        self.pending.entry(change.time)
+            .or_default()
+            .push(change);
+
+        Vec::new() // Output only when watermark advances
+    }
+
+    pub fn advance_watermark(&mut self, new_wm: Timestamp) -> Vec<Change> {
+        let old_wm = self.current_watermark;
+        self.current_watermark = new_wm;
+
+        // Emit results for completed windows
+        let mut output = Vec::new();
+        let completed: Vec<_> = self.pending.keys()
+            .filter(|&&t| t < new_wm)
+            .cloned()
+            .collect();
+
+        for time in completed {
+            if let Some(changes) = self.pending.remove(&time) {
+                output.extend(changes);
+            }
+        }
+
+        output
+    }
+}
+
+/// Progress protocol for frontier propagation
+pub struct ProgressProtocol {
+    operator_frontiers: Vec<Frontier<Timestamp>>,
+    graph: DataflowGraph,
+}
+
+impl ProgressProtocol {
+    pub fn propagate(&mut self) -> Vec<FrontierAdvancement> {
+        let mut advancements = Vec::new();
+
+        for op_id in self.graph.topological_order() {
+            let upstream_frontier = self.compute_input_frontier(op_id);
+
+            let current = &self.operator_frontiers[op_id];
+            if upstream_frontier != *current {
+                advancements.push(FrontierAdvancement {
+                    operator: op_id,
+                    old: current.clone(),
+                    new: upstream_frontier.clone(),
+                });
+                self.operator_frontiers[op_id] = upstream_frontier;
+            }
+        }
+
+        advancements
+    }
+
+    fn compute_input_frontier(&self, op_id: usize) -> Frontier<Timestamp> {
+        let mut input_frontier = Frontier::maximum();
+        for upstream in self.graph.inputs(op_id) {
+            input_frontier = input_frontier.meet(
+                &self.operator_frontiers[upstream]
+            );
+        }
+        input_frontier
+    }
+}
+```
+
+## Cost Model
+
+**Frontier Tracking:** ~100 ns per operator per batch (antichain comparison)
+**Watermark Propagation:** O(operators) per advancement cycle
+**Compaction Trigger:** Enables O(N) state reduction when frontier advances
+**Latency Impact:** Watermark lag = max(source latency) across all inputs
+
+## Test Cases
+
+```sql
+-- Test 1: Time-windowed aggregation
+CREATE MATERIALIZED VIEW hourly_counts AS
+SELECT date_trunc('hour', event_time) AS hour, COUNT(*)
+FROM events GROUP BY 1;
+-- Watermark tracks: results complete for hours before watermark
+-- Compaction: state for completed hours can be dropped
+
+-- Test 2: Frontier with multi-input join
+CREATE MATERIALIZED VIEW joined AS
+SELECT * FROM orders o JOIN shipments s ON o.id = s.order_id;
+-- Frontier = min(orders_frontier, shipments_frontier)
+-- Results complete only when both inputs advance past time T
+
+-- Test 3: Stalled source detection
+-- Source A: watermark at T=100
+-- Source B: watermark at T=50 (stalled)
+-- Join frontier stuck at T=50 until B advances
+
+-- Test 4: Compaction benefit
+-- 1M changes accumulated, frontier advances past T=1000
+-- After compaction: only live data remains (~100K entries)
+```
+
+## References
+
+1. **Murray, Derek G. et al**. "Naiad: A Timely Dataflow System." SOSP 2013.
+2. **Akidau, Tyler et al**. "The Dataflow Model." VLDB 2015. (Watermarks)
+3. **McSherry, Frank**. "Progress Tracking in Timely Dataflow." Blog post.
+4. **Materialize Documentation**. "Frontiers and Compaction."

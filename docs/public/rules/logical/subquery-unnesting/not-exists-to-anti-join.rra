@@ -1,0 +1,100 @@
+---
+id: not-exists-to-anti-join
+name: NOT EXISTS to Anti-Join
+category: logical/subquery-unnesting
+databases: [postgresql, mysql, duckdb, oracle]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [subquery, unnesting, anti-join, not-exists]
+complexity: "O(1)"
+benefit_range: [0.6, 0.9]
+---
+
+# NOT EXISTS to Anti-Join
+
+## Description
+
+Transforms NOT EXISTS subqueries into anti-joins, returning rows from the outer
+relation that have no matches in the inner relation.
+
+**When to apply**: NOT EXISTS subqueries with correlation on join keys.
+
+**Why it works**: Anti-joins use hash tables or bitmaps for efficient "no match"
+detection, avoiding repeated subquery execution.
+
+## Relational Algebra
+
+```latex
+$$
+filter[NOT EXISTS(subquery)](R)
+  \rightarrow anti_\bowtie_{join_condition}(R, subquery)
+$$
+
+$$
+NOT EXISTS(SELECT * FROM S WHERE S.id = R.id)
+  \rightarrow anti_\bowtie_{R.id = S.id}(R, S)
+$$
+
+```
+
+## Implementation
+
+```rust
+rw!("not-exists-to-anti-join";
+    "(filter (not (exists ?subquery)) ?outer)" =>
+    "(anti-join ?join_cond ?outer ?subquery)"
+),
+```
+
+## Cost Model
+
+```rust
+// Build hash table on inner, probe with outer marking misses
+fn benefit(outer: u64, inner: u64) -> f64 {
+    let nested = outer * inner; // Repeated execution
+    let anti_join = outer + inner; // Build + probe
+    (nested - anti_join) as f64 / nested as f64
+}
+```
+
+**Typical benefit**: 60-90% speedup
+
+## Test Cases
+
+### Positive: Find customers without orders
+
+```sql
+SELECT * FROM customers c
+WHERE NOT EXISTS (
+  SELECT 1 FROM orders o WHERE o.customer_id = c.id
+);
+```
+
+### Positive: Exclude deleted records
+
+```sql
+SELECT * FROM products p
+WHERE NOT EXISTS (
+  SELECT 1 FROM deleted_products d WHERE d.id = p.id
+);
+```
+
+### Negative: Complex NOT EXISTS with OR
+
+```sql
+SELECT * FROM emp e
+WHERE NOT EXISTS (
+  SELECT 1 FROM dept d
+  WHERE d.id = e.dept_id OR d.manager_id = e.id
+);
+
+-- Complex predicate complicates anti-join
+```
+
+## References
+
+- Galindo-Legaria & Rosenthal, "Outerjoin Simplification and Reordering", ACM TODS 1997
+- PostgreSQL: transform_null_equals for anti-join optimization
+- DuckDB: Anti-join with mark-based execution

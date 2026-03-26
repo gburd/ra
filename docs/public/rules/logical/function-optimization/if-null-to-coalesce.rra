@@ -1,0 +1,100 @@
+---
+id: if-null-to-coalesce
+name: IFNULL/NVL to COALESCE Normalization
+category: logical/function-optimization
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [function, ifnull, nvl, coalesce, normalization]
+complexity: "O(1)"
+benefit_range: [0.0, 0.1]
+---
+
+# IFNULL/NVL to COALESCE Normalization
+
+## Description
+
+Normalizes database-specific NULL-handling functions (IFNULL, NVL, NVL2,
+ISNULL) to the SQL-standard COALESCE function for consistent optimization.
+
+**When to apply**: Any dialect-specific NULL-handling function that has an
+equivalent COALESCE form.
+
+## Relational Algebra
+
+```latex
+$$
+IFNULL(a, b)     \rightarrow COALESCE(a, b)        -- MySQL/SQLite
+NVL(a, b)        \rightarrow COALESCE(a, b)        -- Oracle
+NVL2(a, b, c)    \rightarrow CASE WHEN a IS NOT NULL THEN b ELSE c END
+ISNULL(a, b)     \rightarrow COALESCE(a, b)        -- mssql
+IIF(cond, a, b)  \rightarrow CASE WHEN cond THEN a ELSE b END
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("ifnull-to-coalesce";
+    "(ifnull ?a ?b)" => "(coalesce ?a ?b)"
+),
+rw!("nvl-to-coalesce";
+    "(nvl ?a ?b)" => "(coalesce ?a ?b)"
+),
+rw!("isnull-to-coalesce";
+    "(isnull ?a ?b)" => "(coalesce ?a ?b)"
+),
+rw!("nvl2-to-case";
+    "(nvl2 ?a ?b ?c)" =>
+    "(case (is-not-null ?a) ?b ?c)"
+),
+```
+
+## Cost Model
+
+```rust
+fn estimated_benefit() -> f64 {
+    0.05 // Normalization only; enables downstream COALESCE rules
+}
+```
+
+## Test Cases
+
+### Positive: MySQL IFNULL
+
+```sql
+SELECT IFNULL(middle_name, '') FROM users;
+-- Normalize to: COALESCE(middle_name, '')
+```
+
+### Positive: Oracle NVL
+
+```sql
+SELECT NVL(commission, 0) FROM employees;
+-- Normalize to: COALESCE(commission, 0)
+```
+
+### Positive: mssql ISNULL
+
+```sql
+SELECT ISNULL(discount, 0) FROM products;
+-- Normalize to: COALESCE(discount, 0)
+```
+
+### Negative: Already standard COALESCE
+
+```sql
+SELECT COALESCE(a, b, c) FROM t;
+-- Already in canonical form
+```
+
+## References
+
+**Implementation:**
+- PostgreSQL: Parser converts NVL during compatibility mode
+- DuckDB: Function binding normalizes dialect-specific functions

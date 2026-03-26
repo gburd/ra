@@ -1,0 +1,41 @@
+---
+id: progressive-sampling
+name: "Progressive Sampling"
+category: execution-models/adaptive
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [academic, academic]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# Progressive Sampling
+
+## Description
+
+Progressive sampling for approximate results
+
+## Relational Algebra
+
+```latex
+
+
+```
+
+## Implementation
+
+```
+Implement rule transformation for academic optimization
+```
+
+## Tests
+
+Add test cases for this rule
+
+## References
+
+- Paper: Progressive Analytics by Hellerstein et al.
+- DOI: 10.14778/2735461.2735461

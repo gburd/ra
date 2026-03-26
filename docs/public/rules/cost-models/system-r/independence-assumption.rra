@@ -1,0 +1,256 @@
+---
+id: system-r-independence-assumption
+name: "System R Predicate Independence Assumption"
+category: cost-models/system-r
+databases: [postgresql, mysql, duckdb, cockroachdb, mssql, oracle]
+execution_models: [volcano, vectorized]
+version: "1.0.0"
+authors: ["Selinger et al. 1979 - IBM Research"]
+tags: [selectivity, independence, correlation, estimation-error, system-r, classic]
+complexity: "O(1)"
+benefit_range: [0.0, 0.0]
+---
+
+# System R Predicate Independence Assumption
+
+## Description
+
+System R assumes that predicates are statistically independent when
+estimating the combined selectivity of conjunctions (AND) and
+disjunctions (OR). Under this assumption, the selectivity of P1 AND P2
+is simply F(P1) * F(P2). This assumption enables tractable selectivity
+estimation but is the single largest source of cardinality estimation
+errors in modern databases.
+
+**When to apply**: This assumption is implicit in every selectivity
+estimate for compound predicates. Understanding it is essential for
+diagnosing estimation errors and knowing when advanced techniques
+(histograms, sampling, ML models) are needed.
+
+**Why it fails**: Real data has correlations. City and state are
+correlated (knowing city determines state). Price and category are
+correlated (electronics cost more than books). The independence
+assumption treats these as independent, multiplying selectivities
+that should not be multiplied, leading to severe underestimation
+of result sizes.
+
+## Relational Algebra
+
+```latex
+-- Independence assumption:
+$$
+F(P1 AND P2) = F(P1) * F(P2)
+F(P1 OR P2) = F(P1) + F(P2) - F(P1) * F(P2)
+$$
+
+-- Reality (correlated predicates):
+$$
+F(P1 AND P2) = F(P1 | P2) * F(P2)  -- conditional probability
+             != F(P1) * F(P2) when P1 and P2 are correlated
+$$
+
+-- Example: city='SF' AND state='CA'
+-- Independence: F(city) * F(state) = 1/1000 * 1/50 = 0.00002
+-- Reality: F(city AND state) = F(city) = 1/1000 = 0.001
+-- Error: 50x underestimate (because city implies state)
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+struct IndependenceEstimator;
+
+impl IndependenceEstimator {
+    fn estimate_conjunction(
+        &self,
+        selectivities: &[f64],
+    ) -> f64 {
+        // System R: multiply all selectivities
+        selectivities.iter().product()
+    }
+
+    fn estimate_disjunction(
+        &self,
+        selectivities: &[f64],
+    ) -> f64 {
+        // System R: inclusion-exclusion with independence
+        let mut result = 0.0;
+        for &s in selectivities {
+            result = result + s - result * s;
+        }
+        result
+    }
+}
+
+// Diagnosis tool: detect likely independence violations
+struct CorrelationDetector;
+
+impl CorrelationDetector {
+    fn detect_likely_correlation(
+        &self,
+        columns: &[Column],
+        table: &TableStats,
+    ) -> Vec<(Column, Column, CorrelationType)> {
+        let mut correlations = Vec::new();
+
+        for i in 0..columns.len() {
+            for j in (i + 1)..columns.len() {
+                let col_a = &columns[i];
+                let col_b = &columns[j];
+
+                // Heuristic: functional dependency implies correlation
+                if table.has_functional_dependency(col_a, col_b) {
+                    correlations.push((
+                        col_a.clone(),
+                        col_b.clone(),
+                        CorrelationType::FunctionalDependency,
+                    ));
+                    continue;
+                }
+
+                // Heuristic: same semantic domain suggests correlation
+                if same_semantic_domain(col_a, col_b) {
+                    correlations.push((
+                        col_a.clone(),
+                        col_b.clone(),
+                        CorrelationType::SemanticCorrelation,
+                    ));
+                }
+            }
+        }
+
+        correlations
+    }
+
+    fn estimation_error_bound(
+        &self,
+        num_predicates: usize,
+        per_predicate_error: f64,
+    ) -> f64 {
+        // Errors compound multiplicatively
+        per_predicate_error.powi(num_predicates as i32)
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable() -> bool {
+    // This assumption is always in effect as the default
+    // It cannot be "applied" -- it IS the default behavior
+    // Understanding it helps diagnose estimation errors
+    true
+}
+```
+
+**Known failure modes:**
+- City/state, zip/city correlations (geographic)
+- Price/category correlations (economic)
+- Age/income correlations (demographic)
+- Timestamp/dayofweek correlations (temporal)
+- Any column pair with functional dependency
+- Multi-column predicates on the same logical dimension
+
+## Cost Model
+
+```rust
+fn error_analysis(
+    predicates: &[Predicate],
+    actual_correlation: f64, // 0=independent, 1=fully correlated
+) -> ErrorAnalysis {
+    let independent_estimate: f64 = predicates.iter()
+        .map(|p| p.selectivity())
+        .product();
+
+    // With correlation, true selectivity is higher
+    // (fewer rows eliminated by correlated predicates)
+    let max_selectivity = predicates.iter()
+        .map(|p| p.selectivity())
+        .reduce(f64::min)
+        .unwrap_or(1.0);
+
+    let true_estimate = independent_estimate
+        + actual_correlation
+            * (max_selectivity - independent_estimate);
+
+    ErrorAnalysis {
+        independent_estimate,
+        true_estimate,
+        q_error: true_estimate / independent_estimate,
+        // q-error > 1 means underestimation of result size
+    }
+}
+```
+
+**Impact of error:**
+- 2 correlated predicates: 2-100x error
+- 3 correlated predicates: 4-10000x error
+- 5 correlated predicates: up to 10^10 error
+- Errors compound exponentially, causing catastrophic plan choices
+
+## Test Cases
+
+### Failure: Correlated columns (city + state)
+
+```sql
+-- addresses: 1M rows, 1000 cities, 50 states
+SELECT * FROM addresses
+WHERE city = 'San Francisco' AND state = 'California';
+
+-- Independence: 1/1000 * 1/50 = 1/50000 = 20 rows
+-- Reality: 1/1000 = 1000 rows (city implies state)
+-- Error: 50x underestimate -> wrong join order downstream
+```
+
+### Failure: Correlated range predicates
+
+```sql
+-- products: 100K rows
+SELECT * FROM products
+WHERE category = 'luxury' AND price > 1000;
+
+-- Independence: 1/20 * 1/10 = 0.005 = 500 rows
+-- Reality: 80% of luxury items are > $1000
+-- True: 1/20 * 0.8 = 0.04 = 4000 rows
+-- Error: 8x underestimate
+```
+
+### Success: Truly independent predicates
+
+```sql
+-- employees: 100K rows
+SELECT * FROM employees
+WHERE department = 'Engineering' AND hire_year = 2024;
+
+-- Independence: 1/50 * 1/20 = 0.001 = 100 rows
+-- Reality: ~100 rows (department and hire year are independent)
+-- Estimate is accurate when assumption holds
+```
+
+## References
+
+**Original paper:**
+- Selinger et al., "Access Path Selection", SIGMOD 1979
+  - Section 4: "P1 AND P2 ... selectivity = F(P1) * F(P2)"
+
+**Analysis of the problem:**
+- Ioannidis, Christodoulakis, "On the Propagation of Errors in the Size of Join Results", SIGMOD 1991
+  - Formal analysis of error propagation under independence
+- Leis et al., "How Good Are Query Optimizers, Really?", VLDB 2015
+  - Empirical: independence assumption causes 10^4 errors in real queries
+
+**Solutions (beyond System R):**
+- Multi-dimensional histograms (Poosala, Ioannidis, VLDB 1997)
+- Maximum entropy estimation (Markl et al., VLDB 2007)
+- Column group statistics (PostgreSQL: CREATE STATISTICS)
+- Learned cardinality estimation (Kipf et al., CIDR 2019)
+- Pessimistic estimation (Cai et al., SIGMOD 2019)
+
+**Key insight:**
+- The independence assumption is the Achilles' heel of cost-based optimization
+- Every modern advance in cardinality estimation is essentially an
+  attempt to fix this one assumption

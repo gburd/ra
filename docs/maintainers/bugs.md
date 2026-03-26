@@ -29,6 +29,16 @@ All bugs and issues are tracked on Codeberg:
 - **ra-pg-extension untested** - Integration tests not run yet
   - Status: Tests written, need to run: `cargo pgrx test pg17`
 
+### Medium Priority (P2)
+
+- **CLI documentation mismatches** - Documentation showed non-existent flags and commands
+  - Status: FIXED in docs commit
+  - Examples showed `--hardware`, `--simd`, `--cache-size` which don't exist
+  - Should be `--hardware-profile` with predefined profiles
+  - Non-existent commands: `calibrate`, `analyze-indexes`, `suggest-indexes`, etc.
+  - Fixed files: `docs/getting-started.md`, `docs/examples/cost-calibration.md`, `docs/examples/index-selection.md`
+  - See [CLI reference](./cli-reference.md) for actual interface
+
 ---
 
 ## Reporting Bugs

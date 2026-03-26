@@ -1,0 +1,125 @@
+---
+id: oracle-predicate-move-around
+name: Oracle Predicate Move-Around
+category: database-specific/oracle
+databases: [oracle]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, oracle, predicate, transitive-closure, inference]
+complexity: O(n)
+benefit_range: [0.1, 0.5]
+---
+
+# Oracle Predicate Move-Around
+
+## Description
+
+Infers additional predicates from existing ones using transitive
+closure and moves them to where they can enable index access or
+partition pruning.  Oracle's optimizer generates implied predicates
+from join conditions and equality constraints.
+
+**When to apply**: Join conditions and equality predicates imply
+additional filter conditions that can be applied to other tables
+in the query.
+
+**Why it works**: If WHERE t1.a = t2.b AND t1.a = 10, then t2.b = 10
+can be inferred and pushed to t2's scan, enabling index lookups or
+partition pruning on t2 that would not be possible from the original
+predicates alone.
+
+**Database version**: Oracle 10g+
+
+## Relational Algebra
+
+```latex
+-- Before: predicate only on t1
+$$
+\sigma_{t1.a = 10}(t1 \bowtie_{t1.a = t2.b} t2)
+$$
+
+-- After: transitive predicate added to t2
+$$
+\sigma_{t1.a = 10}(t1) \bowtie_{t1.a = t2.b} \sigma_{t2.b = 10}(t2)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("oracle-transitive-predicate";
+    "(filter (eq ?col1 (const ?val))
+        (join ?type (eq ?col1 ?col2) ?left ?right))" =>
+    "(filter (eq ?col1 (const ?val))
+        (join ?type (eq ?col1 ?col2)
+            ?left
+            (filter (eq ?col2 (const ?val)) ?right)))"
+    if is_database("oracle")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    predicates: &[Expr],
+    join_conditions: &[Expr],
+) -> bool {
+    predicates.iter().any(|p| {
+        p.is_equality_with_constant()
+        && join_conditions.iter().any(|j| {
+            j.is_equality()
+            && j.columns().contains(&p.column())
+        })
+    })
+}
+```
+
+**Restrictions:**
+- Only equality predicates generate transitive closures
+- Range predicates (>, <) produce weaker inferences
+- OR predicates do not participate in transitive closure
+- Generated predicates must not cause incorrect NULL handling
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    target_table_rows: f64,
+    selectivity: f64,
+    has_index: bool,
+) -> f64 {
+    if has_index {
+        target_table_rows * (1.0 - selectivity) * 0.01
+    } else {
+        0.0 // No benefit without index or partition to exploit
+    }
+}
+```
+
+**Typical benefit**: Enables index scan on join partner table,
+reducing from full scan to point lookup.
+
+## Test Cases
+
+```sql
+-- Positive: transitive closure enables index on t2
+SELECT * FROM orders o
+JOIN customers c ON o.customer_id = c.id
+WHERE c.id = 1000;
+-- Inferred: o.customer_id = 1000 (enables index on orders)
+```
+
+```sql
+-- Negative: no transitive inference possible
+SELECT * FROM t1 JOIN t2 ON t1.a = t2.b WHERE t1.x > 10;
+-- t1.x > 10 does not imply anything about t2
+```
+
+## References
+
+Oracle: Oracle Database SQL Tuning Guide, "Predicate Move-Around"
+Oracle: 10053 trace event for optimizer predicate generation

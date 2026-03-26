@@ -1,0 +1,139 @@
+---
+id: column-pruning
+name: Column Pruning (Dead Column Elimination)
+category: logical/projection-pushdown
+databases: [postgresql, mysql, duckdb, sqlite, oracle, mssql]
+standard: "sql:1992"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [projection, pruning, dead-column, core]
+---
+
+# Column Pruning (Dead Column Elimination)
+
+## Description
+
+Removes columns that are never referenced by any downstream operator.
+Starting from the root of the query plan (the final output), this rule
+propagates the set of required columns downward, inserting projections
+where columns can be dropped early.
+
+**When to apply**: A scan or intermediate operator produces columns that
+no ancestor operator references.
+
+**Why it works**: Columns that are never read are wasted work. Eliminating
+them at the earliest point reduces tuple width throughout the plan,
+improving cache utilization, memory consumption, and I/O.
+
+## Relational Algebra
+
+```latex
+$$
+\pi_{needed}(scan[all_cols](R)) \rightarrow scan[needed](R)
+  \text{where} needed \subseteq all_cols
+  \text{where} (all_cols minus needed) are never referenced above
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Column pruning is typically a top-down analysis pass:
+
+rw!("prune-scan-columns";
+    "(project ?needed (scan ?table ?all_cols))" =>
+    "(scan ?table ?needed)"
+    if is_subset("?needed", "?all_cols")
+),
+
+// For intermediate operators, insert projections:
+rw!("prune-join-output";
+    "(project ?needed (join ?kind ?cond ?left ?right))" =>
+    "(project ?needed
+        (join ?kind ?cond
+            (project ?left_needed ?left)
+            (project ?right_needed ?right)))"
+    if can_prune("?needed", "?cond", "?left", "?right")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    needed_cols: &HashSet<Column>,
+    available_cols: &HashSet<Column>,
+) -> bool {
+    // At least one column can be pruned
+    available_cols.difference(needed_cols).next().is_some()
+}
+```
+
+**Restrictions:**
+- Must preserve columns referenced by all ancestor operators
+- For grouping/aggregation, must preserve group-by keys and aggregation inputs
+- Columnar storage engines benefit most (row stores read full tuples anyway)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    input_card: f64,
+    cols_pruned: usize,
+    total_cols: usize,
+    avg_col_width_bytes: f64,
+) -> f64 {
+    let bytes_saved_per_row =
+        cols_pruned as f64 * avg_col_width_bytes;
+    let total_bytes_saved = input_card * bytes_saved_per_row;
+    let total_bytes_before =
+        input_card * total_cols as f64 * avg_col_width_bytes;
+    total_bytes_saved / total_bytes_before
+}
+```
+
+**Typical benefit**: 0.1-0.8 for wide tables. Columnar engines like DuckDB
+can skip entire column chunks, making this one of the highest-impact
+optimizations for analytical queries.
+
+## Test Cases
+
+```sql
+-- Positive: SELECT only a few columns from wide table
+-- Before
+SELECT name FROM employees;
+-- Full table has: id, name, email, age, dept_id, salary, ...
+-- Scan only reads "name" column (columnar) or adds early projection (row)
+```
+
+```sql
+-- Positive: join only needs subset of columns
+-- Before
+SELECT o.total
+FROM orders o JOIN items i ON o.id = i.order_id;
+-- items table has 12 columns but only order_id is needed
+-- Prune items to just [order_id] before join
+```
+
+```sql
+-- Positive: aggregation needs only group key and agg input
+-- Before
+SELECT dept, AVG(salary) FROM employees GROUP BY dept;
+-- employees has many columns, but only dept and salary are needed
+```
+
+```sql
+-- Negative: SELECT * needs all columns
+SELECT * FROM employees;
+-- No pruning possible
+```
+
+## References
+
+PostgreSQL: src/backend/optimizer/path/allpaths.c
+DuckDB: src/optimizer/remove_unused_columns.cpp - RemoveUnusedColumns()
+MySQL: sql/sql_resolver.cc
+Abadi et al. "Column-Stores vs. Row-Stores" (SIGMOD 2008)

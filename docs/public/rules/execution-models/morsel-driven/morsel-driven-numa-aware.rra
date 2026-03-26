@@ -1,0 +1,325 @@
+---
+id: morsel-driven-numa-aware
+name: Morsel-Driven NUMA-Aware Execution
+category: execution-models
+version: 1.0.0
+databases: [HyPer, DuckDB, Umbra, sap-hana]
+authors: [Viktor Leis, Thomas Neumann, Alfons Kemper]
+tags: [execution, parallel, morsel, numa, memory, locality, multi-socket]
+standard: HyPer morsel model
+---
+
+# Morsel-Driven NUMA-Aware Execution
+
+## Description
+
+On multi-socket systems with Non-Uniform Memory Access (NUMA), accessing memory on the local node is 2-4x faster than remote node access. NUMA-aware morsel execution ensures that workers process data stored in their local NUMA region. Table data is distributed across NUMA nodes at allocation time, and the morsel dispatcher preferentially assigns morsels to workers on the same node as the data. Cross-node accesses are minimized through NUMA-local hash table partitions and careful thread pinning.
+
+**NUMA hierarchy (typical 2-socket system):**
+- Node 0: 8 cores, 64GB local memory, local L3 cache
+- Node 1: 8 cores, 64GB local memory, local L3 cache
+- Cross-node access: +100-300 ns latency, 50% bandwidth
+
+**NUMA-aware strategies:**
+1. **Data placement**: Allocate table partitions on specific NUMA nodes
+2. **Morsel affinity**: Schedule morsels on the node where their data resides
+3. **Local hash tables**: Per-NUMA-node hash table partitions for builds
+4. **Work-stealing hierarchy**: Steal locally before stealing remotely
+5. **Thread pinning**: Pin worker threads to specific cores
+
+**Trade-offs:**
+- Requires OS-level NUMA allocation (mmap with NUMA policy)
+- Data migration across nodes is expensive
+- Single-socket systems get no benefit
+- Imbalanced node utilization possible with skewed data
+
+## Relational Algebra
+
+```
+NUMA-aware execution:
+
+data_placement(table, num_nodes):
+  // Round-robin pages across NUMA nodes
+  for page in table.pages:
+    node = page.id % num_nodes
+    allocate_on_node(page, node)
+
+morsel_dispatch(morsel, worker):
+  morsel_node = numa_node_of(morsel.data_ptr)
+  worker_node = numa_node_of(worker.thread)
+
+  // Prefer NUMA-local scheduling
+  if morsel_node == worker_node:
+    worker.process(morsel)  // Local: fast
+  else:
+    // Try to find a local worker
+    local_worker = find_idle_on_node(morsel_node)
+    if local_worker:
+      local_worker.process(morsel)
+    else:
+      worker.process(morsel)  // Remote: accept penalty
+```
+
+## Implementation
+
+```rust
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+/// NUMA topology information
+pub struct NumaTopology {
+    num_nodes: usize,
+    cores_per_node: usize,
+    /// Maps core_id -> numa_node_id
+    core_to_node: Vec<usize>,
+    /// Maps numa_node_id -> list of core_ids
+    node_to_cores: Vec<Vec<usize>>,
+    /// Memory latency matrix: latency[src][dst] in ns
+    latency_matrix: Vec<Vec<u32>>,
+}
+
+impl NumaTopology {
+    /// Detect NUMA topology from the OS
+    pub fn detect() -> Self {
+        // Read from /sys/devices/system/node/ on Linux
+        // or from sysctl on macOS/FreeBSD
+        let num_nodes = read_num_nodes();
+        let cores_per_node = read_cores_per_node();
+
+        let mut core_to_node = vec![0; num_nodes * cores_per_node];
+        let mut node_to_cores = vec![Vec::new(); num_nodes];
+
+        for node in 0..num_nodes {
+            let cores = read_node_cores(node);
+            for core in cores {
+                core_to_node[core] = node;
+                node_to_cores[node].push(core);
+            }
+        }
+
+        Self {
+            num_nodes,
+            cores_per_node,
+            core_to_node,
+            node_to_cores,
+            latency_matrix: read_latency_matrix(),
+        }
+    }
+
+    pub fn is_local(&self, core_a: usize, core_b: usize) -> bool {
+        self.core_to_node[core_a] == self.core_to_node[core_b]
+    }
+
+    pub fn node_of_core(&self, core: usize) -> usize {
+        self.core_to_node[core]
+    }
+}
+
+/// NUMA-aware data allocator
+pub struct NumaAllocator {
+    topology: NumaTopology,
+}
+
+impl NumaAllocator {
+    /// Allocate table data with round-robin NUMA distribution
+    pub fn allocate_table(
+        &self,
+        table: &mut Table,
+    ) {
+        let num_nodes = self.topology.num_nodes;
+
+        for (i, page) in table.pages_mut().enumerate() {
+            let target_node = i % num_nodes;
+            page.set_data(
+                self.allocate_on_node(page.size(), target_node),
+            );
+            page.set_numa_node(target_node);
+        }
+    }
+
+    /// Allocate memory on a specific NUMA node
+    fn allocate_on_node(
+        &self,
+        size: usize,
+        node: usize,
+    ) -> *mut u8 {
+        #[cfg(target_os = "linux")]
+        unsafe {
+            let ptr = libc::mmap(
+                std::ptr::null_mut(),
+                size,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+                -1, 0,
+            );
+            // Bind to specific NUMA node
+            let nodemask = 1u64 << node;
+            libc::mbind(
+                ptr, size,
+                libc::MPOL_BIND,
+                &nodemask as *const u64,
+                self.topology.num_nodes + 1,
+                0,
+            );
+            ptr as *mut u8
+        }
+    }
+}
+
+/// NUMA-aware morsel dispatcher
+pub struct NumaAwareMorselDispatcher {
+    /// Per-NUMA-node morsel queues
+    node_queues: Vec<MorselQueue>,
+    topology: NumaTopology,
+}
+
+impl NumaAwareMorselDispatcher {
+    /// Distribute morsels to NUMA-local queues
+    pub fn distribute(&mut self, morsels: Vec<Morsel>) {
+        for morsel in morsels {
+            let data_node = morsel.numa_node();
+            self.node_queues[data_node].push(morsel);
+        }
+    }
+
+    /// Get next morsel for a worker, preferring local
+    pub fn get_morsel(&self, worker_core: usize) -> Option<Morsel> {
+        let local_node = self.topology.node_of_core(worker_core);
+
+        // Try local queue first
+        if let Some(morsel) = self.node_queues[local_node].pop() {
+            return Some(morsel);
+        }
+
+        // Try stealing from nearest NUMA node
+        let mut nodes_by_distance: Vec<usize> = (0..self.topology.num_nodes)
+            .filter(|&n| n != local_node)
+            .collect();
+        nodes_by_distance.sort_by_key(|&n| {
+            self.topology.latency_matrix[local_node][n]
+        });
+
+        for remote_node in nodes_by_distance {
+            if let Some(morsel) = self.node_queues[remote_node].pop() {
+                return Some(morsel);
+            }
+        }
+
+        None // All queues empty
+    }
+}
+
+/// NUMA-partitioned hash table for parallel hash join build
+pub struct NumaPartitionedHashTable {
+    /// One hash table partition per NUMA node
+    partitions: Vec<HashTablePartition>,
+    topology: NumaTopology,
+}
+
+impl NumaPartitionedHashTable {
+    /// Each worker inserts into its local NUMA partition
+    pub fn insert(
+        &self,
+        hash: u64,
+        payload: Payload,
+        worker_core: usize,
+    ) {
+        let node = self.topology.node_of_core(worker_core);
+        self.partitions[node].insert(hash, payload);
+    }
+
+    /// Probe checks all NUMA partitions (read-only: OK for remote)
+    pub fn probe(&self, hash: u64) -> Vec<Payload> {
+        let mut results = Vec::new();
+        for partition in &self.partitions {
+            results.extend(partition.probe(hash));
+        }
+        results
+    }
+}
+
+/// Cost model for NUMA-aware execution
+pub fn numa_aware_cost(
+    total_rows: f64,
+    num_workers: usize,
+    num_nodes: usize,
+    local_fraction: f64,
+) -> f64 {
+    let local_access_ns = 50.0;
+    let remote_access_ns = 150.0;
+
+    let rows_per_worker = total_rows / num_workers as f64;
+
+    let local_cost = rows_per_worker * local_fraction
+        * local_access_ns * 1e-9;
+    let remote_cost = rows_per_worker * (1.0 - local_fraction)
+        * remote_access_ns * 1e-9;
+
+    (local_cost + remote_cost) * 1000.0 // Convert to ms
+}
+```
+
+## Cost Model
+
+**Memory Access Latency:**
+- Local node: 50-80 ns
+- Remote node (1 hop): 100-150 ns
+- Remote node (2 hops): 150-300 ns
+- Ratio: 2-4x penalty for remote access
+
+**Memory Bandwidth:**
+- Local: 40-60 GB/s per node
+- Remote: 20-30 GB/s per node
+- Aggregate: scales with nodes for local access
+
+**NUMA-Aware Scheduling Benefit:**
+- Scan: 1.5-2x speedup from local access
+- Hash join build: 1.3-1.5x (write-heavy, local allocation)
+- Hash join probe: 1.2-1.5x (read from possibly remote HT)
+- Aggregation: 1.3-2x (local HT access)
+
+**Overhead:**
+- NUMA detection: ~1ms (one-time)
+- Morsel routing: ~50 ns per morsel (node lookup)
+- Thread pinning: ~0 (OS call at startup)
+
+## Test Cases
+
+```sql
+-- Test 1: NUMA-local scan (2-socket system)
+SELECT * FROM lineitem WHERE l_quantity < 25;
+-- Data distributed: pages round-robin across 2 nodes
+-- Workers on node 0 get node-0 morsels first
+-- Expected: ~1.5x faster than NUMA-oblivious
+
+-- Test 2: NUMA-partitioned hash join build
+SELECT o.*, c.name
+FROM orders o JOIN customers c ON o.cust_id = c.id;
+-- Build: workers insert into local NUMA partition
+-- Probe: read all partitions (remote reads OK for read-only)
+-- Expected: ~1.3x faster build than shared HT
+
+-- Test 3: Cross-node steal (unbalanced data)
+-- Node 0: 70% of data, Node 1: 30%
+SELECT SUM(amount) FROM transactions;
+-- Node 1 workers finish first, steal from node 0
+-- Remote steal penalty: ~2x per-morsel latency
+
+-- Test 4: Single-socket system (no NUMA benefit)
+SELECT COUNT(*) FROM orders;
+-- NUMA-aware scheduling has no benefit
+-- Expected: Falls back to regular morsel scheduling
+```
+
+## References
+
+1. **Leis, Viktor et al**. "Morsel-Driven Parallelism: A NUMA-Aware Query Evaluation Framework for the Many-Core Age." SIGMOD 2014.
+   - NUMA-aware morsel scheduling in HyPer
+
+2. **Li, Yinan et al**. "NUMA-Aware Hash Joins on Multi-core CPUs." VLDB 2013.
+   - NUMA-partitioned hash table design
+
+3. **Psaroudakis, Iraklis et al**. "Scaling Up Concurrent Main-Memory Column-Store Scans: Towards Adaptive NUMA-Aware Data and Task Placement." VLDB 2015.
+   - Adaptive NUMA-aware data placement
+
+4. **Balkesen, Cagri et al**. "Multi-Core, Main-Memory Joins: Sort vs. Hash Revisited." VLDB 2014.
+   - NUMA effects on parallel join performance

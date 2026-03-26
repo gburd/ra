@@ -1,0 +1,27 @@
+---
+id: drill-schema-versioning
+name: Schema Versioning (Drill)
+category: database-specific/drill
+databases: [drill]
+execution_models: [volcano, vectorized, push-based]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# Schema Versioning (Drill)
+
+## Metadata
+- **Rule ID**: `drill-schema-versioning`
+- **Category**: Database-Specific / Drill
+- **Source**: Apache Drill
+
+## Description
+
+Drill handles evolving schemas by tracking schema versions per file and performing schema reconciliation at query time.
+
+## Tags
+`database-specific`, `drill`, `schema-evolution`, `versioning`, `schema-free`

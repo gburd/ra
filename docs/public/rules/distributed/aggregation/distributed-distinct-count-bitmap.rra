@@ -1,0 +1,55 @@
+---
+id: distributed-distinct-count-bitmap
+name: Distributed Distinct Count via Bitmap
+category: distributed/aggregation
+databases: [druid, clickhouse, greenplum]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, aggregation, distinct, bitmap, roaring, exact]
+complexity: O(n)
+benefit_range: [0.3, 0.9]
+---
+
+# Distributed Distinct Count via Bitmap
+
+## Description
+
+Use Roaring Bitmaps for exact distributed distinct counting of integer
+columns. Each node creates a local bitmap of distinct values, and the
+global phase computes the OR of all bitmaps. The bitmap cardinality
+gives the exact distinct count.
+
+**When to apply**: Distinct column is integer-typed with bounded range,
+and exact results are required. Bitmaps are more space-efficient than
+hash sets for dense integer ranges.
+
+## Relational Algebra
+
+```latex
+-- Local bitmap + global OR
+$$
+\gamma_{g, bitmap_count(bitmap_or(partial_bm))}(
+    Exchange[hash(g)](
+        \gamma_{g, bitmap_add(x) as partial_bm}(R)
+    )
+)
+$$
+
+```
+
+## Test Cases
+
+```sql
+-- Positive: integer column with bounded range
+SELECT region, BITMAP_COUNT_DISTINCT(user_id)
+FROM sessions GROUP BY region;
+-- user_id is integer, range 1..10M
+
+-- Negative: string column (bitmaps need integers)
+SELECT region, COUNT(DISTINCT email) FROM users GROUP BY region;
+-- Use HLL or exact three-phase instead
+```
+
+## References
+
+Chambi et al., "Better bitmap performance with Roaring bitmaps" (2016)

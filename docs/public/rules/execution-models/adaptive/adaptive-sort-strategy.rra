@@ -1,0 +1,333 @@
+---
+id: adaptive-sort-strategy
+name: Adaptive Sort Strategy Selection
+category: execution-models
+version: 1.0.0
+databases: [PostgreSQL, mssql, DuckDB, Oracle]
+authors: [Goetz Graefe]
+tags: [execution, adaptive, sort, quicksort, mergesort, radix, runtime]
+standard: Adaptive sorting
+complexity: O(n log n) sort + O(1) strategy decision
+benefit_range: [1.2, 4.0]
+---
+
+# Adaptive Sort Strategy Selection
+
+## Description
+
+Adaptive sort strategy selection chooses among sorting algorithms at runtime based on observed data characteristics that only become apparent during execution: pre-existing sortedness (partially sorted input), value distribution (uniform vs. skewed), key width (narrow integers vs. wide strings), and available memory. The executor samples the first portion of input to detect these properties and selects the most efficient algorithm.
+
+Key insight: real-world data is rarely random. Many datasets are partially sorted (append-only tables, time-series), have low cardinality keys (status fields, category codes), or arrive pre-sorted from an index. Detecting these patterns at runtime enables 2-10x speedups over a generic O(n log n) sort.
+
+**Algorithms in the adaptive repertoire:**
+- **Timsort/Natural merge sort**: Exploits existing runs in partially sorted data
+- **Radix sort**: O(n * k) for fixed-width integer keys, bypasses comparisons
+- **Quicksort**: Good general-purpose for random data
+- **Insertion sort**: Optimal for small inputs (<64 elements)
+- **Top-K partial sort**: Only materialize K smallest/largest
+- **Skip sort**: Input already sorted, verify and pass through
+
+**Key characteristics:**
+- **Run detection**: Scan for ascending/descending runs in first N elements
+- **Cardinality sampling**: Count distinct values to detect low-cardinality keys
+- **Memory awareness**: Fall back to external merge sort when input exceeds memory
+- **Key type dispatch**: Radix sort for integers, comparison-based for strings
+
+## Relational Algebra
+
+```
+AdaptiveSort(input, sort_keys, direction, limit) -> Sorted
+
+fn execute_adaptive_sort(input, keys, dir, limit):
+  sample = input.peek(SAMPLE_SIZE)
+
+  if limit is Some(k) and k << input.estimated_rows():
+    return partial_sort_topk(input, keys, dir, k)
+
+  sortedness = measure_sortedness(sample, keys)
+  if sortedness > 0.9:
+    return verify_sorted(input, keys, dir)
+
+  if sortedness > 0.3:
+    return timsort(input, keys, dir)  // exploit runs
+
+  if all_integer_keys(keys) and max_key_bytes(keys) <= 8:
+    return radix_sort(input, keys, dir)
+
+  if input.estimated_rows() < 64:
+    return insertion_sort(input, keys, dir)
+
+  return quicksort(input, keys, dir)
+```
+
+## Implementation
+
+```rust
+/// Sortedness measure from 0.0 (random) to 1.0 (fully sorted)
+pub fn measure_sortedness(
+    sample: &[Row],
+    keys: &[SortKey],
+) -> f64 {
+    if sample.len() < 2 {
+        return 1.0;
+    }
+
+    let mut sorted_pairs: usize = 0;
+    let mut reverse_pairs: usize = 0;
+
+    for window in sample.windows(2) {
+        let cmp = compare_keys(
+            &window[0], &window[1], keys,
+        );
+        match cmp {
+            std::cmp::Ordering::Less
+            | std::cmp::Ordering::Equal => {
+                sorted_pairs += 1;
+            }
+            std::cmp::Ordering::Greater => {
+                reverse_pairs += 1;
+            }
+        }
+    }
+
+    let total = sample.len() - 1;
+    // Max of forward/reverse sortedness
+    let forward = sorted_pairs as f64 / total as f64;
+    let reverse = reverse_pairs as f64 / total as f64;
+    forward.max(reverse)
+}
+
+/// Detect longest natural run length
+pub fn detect_runs(
+    sample: &[Row],
+    keys: &[SortKey],
+) -> RunStats {
+    let mut runs = Vec::new();
+    let mut current_run_len: usize = 1;
+    let mut current_ascending = true;
+
+    for window in sample.windows(2) {
+        let cmp = compare_keys(
+            &window[0], &window[1], keys,
+        );
+        let ascending = cmp \!= std::cmp::Ordering::Greater;
+
+        if ascending == current_ascending {
+            current_run_len += 1;
+        } else {
+            runs.push((current_run_len, current_ascending));
+            current_run_len = 1;
+            current_ascending = ascending;
+        }
+    }
+    runs.push((current_run_len, current_ascending));
+
+    let max_run = runs.iter().map(|(len, _)| *len)
+        .max().unwrap_or(1);
+    let avg_run = sample.len() / runs.len().max(1);
+
+    RunStats {
+        num_runs: runs.len(),
+        max_run_length: max_run,
+        avg_run_length: avg_run,
+    }
+}
+
+pub struct RunStats {
+    pub num_runs: usize,
+    pub max_run_length: usize,
+    pub avg_run_length: usize,
+}
+
+/// Sort strategy selection
+pub enum SortStrategy {
+    VerifySorted,
+    Timsort,
+    RadixSort,
+    Quicksort,
+    InsertionSort,
+    PartialSort { limit: usize },
+    ExternalMergeSort,
+}
+
+pub fn select_sort_strategy(
+    sample: &[Row],
+    keys: &[SortKey],
+    total_rows: usize,
+    limit: Option<usize>,
+    available_memory: usize,
+) -> SortStrategy {
+    // Check for Top-K
+    if let Some(k) = limit {
+        if k < total_rows / 10 {
+            return SortStrategy::PartialSort { limit: k };
+        }
+    }
+
+    // Estimate memory needed for in-memory sort
+    let row_size = sample.first()
+        .map(|r| r.size_bytes())
+        .unwrap_or(64);
+    let total_memory = total_rows * row_size;
+
+    if total_memory > available_memory {
+        return SortStrategy::ExternalMergeSort;
+    }
+
+    // Small input
+    if total_rows < 64 {
+        return SortStrategy::InsertionSort;
+    }
+
+    // Check sortedness
+    let sortedness = measure_sortedness(sample, keys);
+    if sortedness > 0.95 {
+        return SortStrategy::VerifySorted;
+    }
+    if sortedness > 0.3 {
+        return SortStrategy::Timsort;
+    }
+
+    // Check for radix-sortable keys
+    let all_fixed = keys.iter()
+        .all(|k| k.is_fixed_width() && k.width() <= 8);
+    if all_fixed {
+        return SortStrategy::RadixSort;
+    }
+
+    SortStrategy::Quicksort
+}
+
+/// Verify-sorted: scan input, assert order, zero-copy pass
+pub fn verify_sorted(
+    input: &mut dyn Iterator<Item = Row>,
+    keys: &[SortKey],
+) -> Result<Vec<Row>> {
+    let mut result = Vec::new();
+    let mut prev: Option<Row> = None;
+
+    for row in input {
+        if let Some(ref p) = prev {
+            let cmp = compare_keys(p, &row, keys);
+            if cmp == std::cmp::Ordering::Greater {
+                // Not actually sorted: fall back to Timsort
+                result.push(row);
+                let mut remaining: Vec<Row> =
+                    input.collect();
+                result.append(&mut remaining);
+                result.sort_by(|a, b| {
+                    compare_keys(a, b, keys)
+                });
+                return Ok(result);
+            }
+        }
+        prev = Some(row.clone());
+        result.push(row);
+    }
+
+    Ok(result)
+}
+
+/// Cost comparison across sort strategies
+pub fn sort_strategy_cost(
+    n: usize,
+    strategy: &SortStrategy,
+    key_width: usize,
+) -> f64 {
+    let cmp_cost = 0.00001; // 10 ns per comparison
+    let move_cost = 0.000005 * key_width as f64;
+
+    match strategy {
+        SortStrategy::VerifySorted => {
+            n as f64 * cmp_cost // single pass
+        }
+        SortStrategy::InsertionSort => {
+            // O(n^2) but with good constants for small n
+            (n * n) as f64 * cmp_cost * 0.25
+        }
+        SortStrategy::Timsort => {
+            // O(n log runs) where runs << n for sorted data
+            let estimated_runs = (n as f64 * 0.1) as usize;
+            n as f64
+                * (estimated_runs as f64).log2().max(1.0)
+                * cmp_cost
+        }
+        SortStrategy::RadixSort => {
+            // O(n * key_width), no comparisons
+            n as f64 * key_width as f64 * move_cost
+        }
+        SortStrategy::Quicksort => {
+            n as f64 * (n as f64).log2() * cmp_cost
+        }
+        SortStrategy::PartialSort { limit } => {
+            // Heap-based: O(n log k)
+            n as f64 * (*limit as f64).log2() * cmp_cost
+        }
+        SortStrategy::ExternalMergeSort => {
+            let passes = 2.0; // typical: sort + merge
+            n as f64 * passes
+                * ((n as f64).log2() * cmp_cost + move_cost)
+                * 10.0 // I/O penalty
+        }
+    }
+}
+```
+
+## Cost Model
+
+**Algorithm costs (n rows, k key width):**
+- Verify sorted: O(n) comparisons
+- Insertion sort: O(n^2) but cache-optimal for n < 64
+- Timsort: O(n log r) where r = number of natural runs
+- Radix sort: O(n * k) byte operations, no comparisons
+- Quicksort: O(n log n) comparisons, random access pattern
+- Partial sort (top-K): O(n log K) via heap
+- External merge sort: O(n * passes * IO_cost)
+
+**When each wins:**
+- Verify sorted: pre-sorted input (time-series, index scan output)
+- Timsort: partially sorted (sortedness > 0.3)
+- Radix sort: integer keys <= 8 bytes, random data
+- Quicksort: general-purpose, variable-width keys
+- Top-K: ORDER BY ... LIMIT K where K << n
+
+## Test Cases
+
+```sql
+-- Test 1: Time-series data (already sorted)
+SELECT * FROM events ORDER BY event_time;
+-- Append-only table: data nearly perfectly sorted
+-- Adaptive: detect sortedness=0.99, use verify_sorted
+-- Cost: single O(n) pass vs. O(n log n) sort
+
+-- Test 2: Integer key radix sort
+SELECT * FROM lineitem ORDER BY l_orderkey;
+-- 8-byte integer key, random order
+-- Adaptive: detect integer key, use radix sort
+-- 2-3x faster than comparison-based sort
+
+-- Test 3: Top-K partial sort
+SELECT * FROM orders ORDER BY amount DESC LIMIT 10;
+-- 6M rows, only need top 10
+-- Adaptive: use heap-based partial sort O(n log 10)
+
+-- Test 4: External sort for large data
+SELECT * FROM huge_table ORDER BY composite_key;
+-- 100GB table, 16GB memory
+-- Adaptive: detect memory pressure, use external merge sort
+-- 2-3 passes with run generation
+```
+
+## References
+
+1. **Peters, Tim**. "Timsort." Python sorting algorithm, 2002.
+   - Adaptive merge sort exploiting natural runs
+
+2. **Graefe, Goetz**. "Implementing Sorting in Database Systems." ACM Computing Surveys, 2006.
+   - Comprehensive survey of sorting in database systems
+
+3. **McIlroy, Peter**. "Optimistic Sorting and Information Theoretic Complexity." SODA 1993.
+   - Theoretical foundations for adaptive sorting
+
+4. **Wassenberg, Jan and Peter Sanders**. "Engineering a Multi-core Radix Sort." Euro-Par 2011.
+   - High-performance radix sort for database workloads

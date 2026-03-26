@@ -1,0 +1,145 @@
+---
+id: cockroachdb-scalar-min-max-to-limit
+name: Scalar MIN/MAX Aggregation to Limit
+category: database-specific/cockroachdb
+databases: [cockroachdb]
+version: 1.0.0
+authors: ["RA Contributors"]
+tags: [database-specific, cockroachdb, aggregation, min, max, limit, index]
+complexity: O(log n)
+benefit_range: [0.6, 0.95]
+---
+
+# Scalar MIN/MAX Aggregation to Limit
+
+## Description
+
+Replaces a scalar MIN or MAX aggregation with a LIMIT 1 on an ordered scan. This avoids the full table scan and aggregation computation by leveraging an index on the aggregated column to retrieve only the first (min) or last (max) value.
+
+**When to apply**: Scalar GROUP BY with a single MIN or MAX aggregation over a column that has an index.
+
+**Why it works**: MIN(x) is equivalent to selecting the first value when sorted ascending by x, and MAX(x) is the first value when sorted descending. An index on x allows O(log n) access to the min/max value instead of O(n) full scan.
+
+**Database version**: CockroachDB v19.2+
+
+## Relational Algebra
+
+```latex
+$$
+ScalarGroupBy[\text{min}(x)](R)
+  \rightarrow ScalarGroupBy[const_agg(x)](Limit[1](Sort[x ASC](Filter[x IS NOT NULL](R))))
+$$
+
+$$
+ScalarGroupBy[\text{max}(x)](R)
+  \rightarrow ScalarGroupBy[const_agg(x)](Limit[1](Sort[x DESC](Filter[x IS NOT NULL](R))))
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("cockroachdb-scalar-min-max-to-limit";
+    "(scalar_group_by
+        ?input
+        [(agg_item (min ?var) ?private)]
+        ?group_private)" =>
+    "(scalar_group_by
+        (limit
+            (select ?input [(is_not ?var (null))])
+            1
+            (ordering ?var asc))
+        [(agg_item (const_agg ?var) ?private)]
+        ?group_private)"
+    if is_database("cockroachdb")
+    if is_canonical_group_by("?group_private")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    input: &RelNode,
+    agg_col: &Column,
+    agg_fn: AggFunc,
+) -> bool {
+    // Must be MIN or MAX
+    matches!(agg_fn, AggFunc::Min | AggFunc::Max)
+        // Column should have an index for ordered access
+        && input.has_index_on(&[agg_col])
+        // Must be scalar (no grouping columns)
+        && is_scalar_group_by()
+}
+```
+
+**Restrictions:**
+- Only applies to CockroachDB
+- Requires scalar GROUP BY (no grouping columns)
+- Single MIN or MAX aggregation only
+- Most beneficial when aggregated column has an index
+- Null values are filtered out before limit
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    table_rows: f64,
+    has_index: bool,
+    null_fraction: f64,
+) -> f64 {
+    if !has_index {
+        return 0.1; // Still some benefit from early termination
+    }
+
+    // Index allows O(log n) access instead of O(n) scan
+    let index_access_cost = table_rows.log2() * 10.0;
+    let full_scan_cost = table_rows * 100.0;
+
+    (full_scan_cost - index_access_cost) / full_scan_cost
+}
+```
+
+**Typical benefit**: 60-95% cost reduction on indexed columns
+
+## Test Cases
+
+### Positive Case 1: MIN on Indexed Column
+
+```sql
+SELECT MIN(order_date) FROM orders;
+
+-- Transformed to:
+-- SELECT order_date FROM orders
+-- WHERE order_date IS NOT NULL
+-- ORDER BY order_date ASC
+-- LIMIT 1;
+
+-- Uses index on order_date for O(log n) access
+```
+
+### Positive Case 2: MAX on Primary Key
+
+```sql
+SELECT MAX(id) FROM users;
+
+-- Efficiently retrieves last id using primary key index
+```
+
+### Negative Case 1: Multiple Aggregations
+
+```sql
+-- Rule does NOT apply to multiple aggs (separate rule handles this)
+SELECT MIN(a), MAX(b) FROM table;
+```
+
+## References
+
+**Source code:**
+- CockroachDB: `pkg/sql/opt/xform/rules/groupby.opt`
+  - Rule: `ReplaceScalarMinMaxWithLimit` (lines 42-68)
+  - Git: https://github.com/cockroachdb/cockroach
+  - Commit: 6e210ba6aa33cea5e27b1a8fae212c27941781f4 (2026-03-17)

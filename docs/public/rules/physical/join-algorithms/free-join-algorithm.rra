@@ -1,0 +1,51 @@
+---
+id: free-join-algorithm
+name: "Free Join Algorithm"
+category: physical/join-algorithms
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [academic, academic]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+preconditions:
+  - type: "pattern"
+    must_match: "(multi-join ?inputs ?predicates)"
+    description: "Multi-way join for free join algorithm"
+  - type: "predicate"
+    condition: "count(?inputs) >= 3"
+    description: "At least 3 inputs for free join benefit"
+  - type: "predicate"
+    condition: "has_cyclic_join_graph(?inputs, ?predicates)"
+    description: "Cyclic join graphs benefit most from free join"
+    optional: true
+---
+
+# Free Join Algorithm
+
+## Description
+
+Worst-case optimal join algorithm for cyclic queries
+
+## Relational Algebra
+
+```latex
+
+
+```
+
+## Implementation
+
+```
+Implement rule transformation for academic optimization
+```
+
+## Tests
+
+Add test cases for this rule
+
+## References
+- Paper: Free Join by Ngo et al.
+- DOI: 10.1145/2463676.2465314

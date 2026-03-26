@@ -1,0 +1,48 @@
+---
+id: tidb-distinct-elimination
+name: "DISTINCT Elimination via Uniqueness"
+category: logical/distinct-elimination
+databases: [tidb]
+version: "1.0.0"
+authors: ["Database Contributors", "RA Contributors"]
+tags: [database-mining, tidb, optimization]
+complexity: "O(n)"
+benefit_range: [1.0, 10.0]
+---
+
+# DISTINCT Elimination via Uniqueness
+
+## Description
+
+Removes DISTINCT when output columns guarantee uniqueness.
+
+**When to apply**: During query optimization phase.
+
+## Relational Algebra
+
+```latex
+-- Before
+$$
+(distinct (project [id] (scan users)))
+$$
+
+-- After
+$$
+(project [id] (scan users))
+$$
+
+```
+
+## Preconditions
+
+- Projected columns are unique constraint or primary key
+
+## Test Cases
+
+```sql
+SELECT * FROM table WHERE condition;
+```
+
+## References
+
+- Database documentation

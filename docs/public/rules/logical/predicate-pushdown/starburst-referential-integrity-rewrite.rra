@@ -1,0 +1,356 @@
+---
+id: starburst-referential-integrity-rewrite
+name: "Starburst Referential Integrity Rewrite"
+category: logical/predicate-pushdown
+databases: [postgresql, mysql, mssql, oracle, db2]
+execution_models: [volcano, vectorized]
+version: "1.0.0"
+authors: ["Pirahesh, Hellerstein, Hasan - IBM Starburst"]
+tags: [referential-integrity, foreign-key, join-elimination, constraint-based, starburst, classic]
+complexity: "O(n)"
+benefit_range: [0.5, 10.0]
+preconditions:
+  - type: "pattern"
+    must_match: "(join inner ?cond ?left ?right)"
+    description: "Join that may be eliminable via FK constraint"
+  - type: "predicate"
+    condition: "has_foreign_key(?left, ?right) || has_foreign_key(?right, ?left)"
+    description: "Foreign key relationship must exist between tables"
+  - type: "predicate"
+    condition: "!references_columns_from(?projection, referenced_table(?fk))"
+    description: "Query must not need columns from the referenced table"
+---
+
+# Starburst Referential Integrity Rewrite
+
+## Description
+
+Uses referential integrity (foreign key) constraints to rewrite queries by
+eliminating unnecessary joins or replacing them with simpler predicates.
+When a foreign key constraint guarantees that every value in the referencing
+column exists in the referenced table, certain joins can be proven redundant.
+
+The Starburst optimizer's rule-based rewrite engine identifies three patterns:
+1. **Join elimination**: If a query joins R and S on R.fk = S.pk, and the
+   query only projects columns from R, and R.fk is NOT NULL, the join with S
+   can be eliminated entirely (the FK guarantees every R.fk has a match in S).
+2. **Predicate migration**: Constraints on S can be migrated to R through the
+   FK relationship. If S.col > 0 is a CHECK constraint and R.fk = S.pk, then
+   the optimizer can derive that R.fk references a row where col > 0.
+3. **Semi-join reduction**: An existence check (EXISTS subquery) on the
+   referenced table can be eliminated when the FK guarantees existence.
+
+**When to apply**: Queries involving foreign key relationships where the join
+exists only to verify referential integrity or to access the primary key of
+the referenced table (which is already stored in the referencing table's FK).
+
+**Why it works**: Foreign key constraints are a semantic guarantee that the
+database enforces. If orders.customer_id REFERENCES customers(id) NOT NULL,
+then every order has a valid customer. A join that only verifies this
+existence is redundant -- the constraint already guarantees it.
+
+## Relational Algebra
+
+```latex
+$$
+Pattern 1: Join Elimination
+  Given: FK(R.a \rightarrow S.pk) AND R.a IS NOT NULL
+  Query: pi_{cols_from_R}(R join_{R.a = S.pk} S)
+  Rewrite: pi_{cols_from_R}(R)
+$$
+
+$$
+Pattern 2: Semi-Join Elimination
+  Given: FK(R.a \rightarrow S.pk) AND R.a IS NOT NULL
+  Query: R semi-join_{R.a = S.pk} S
+  Rewrite: R (the semi-\bowtie is always true)
+$$
+
+$$
+Pattern 3: Anti-Join Elimination
+  Given: FK(R.a \rightarrow S.pk) AND R.a IS NOT NULL
+  Query: R anti-join_{R.a = S.pk} S
+  Rewrite: empty (FK guarantees no non-matches)
+$$
+
+$$
+Pattern 4: Predicate Migration
+  Given: FK(R.a \rightarrow S.pk) AND CHECK(S.col > 0)
+  Query: sigma_{S.col > 0}(R \bowtie S)
+  Rewrite: R \bowtie S (predicate always satisfied by constraint)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Starburst-style referential integrity rewrites
+
+rw!("ri-join-elimination";
+    "(project ?cols
+       (join inner (= ?fk_col ?pk_col)
+         ?left
+         (scan ?right_table)))" =>
+    "(project ?cols ?left)"
+    if foreign_key_exists("?fk_col", "?pk_col", "?right_table")
+       && column_is_not_null("?fk_col")
+       && projection_uses_only_left("?cols", "?left")
+),
+
+rw!("ri-semi-join-elimination";
+    "(semi-join (= ?fk_col ?pk_col)
+       ?left
+       (scan ?right_table))" =>
+    "?left"
+    if foreign_key_exists("?fk_col", "?pk_col", "?right_table")
+       && column_is_not_null("?fk_col")
+),
+
+rw!("ri-anti-join-elimination";
+    "(anti-join (= ?fk_col ?pk_col)
+       ?left
+       (scan ?right_table))" =>
+    "(empty)"
+    if foreign_key_exists("?fk_col", "?pk_col", "?right_table")
+       && column_is_not_null("?fk_col")
+),
+
+rw!("ri-exists-elimination";
+    "(filter (exists
+       (filter (= ?fk_col ?pk_col)
+         (scan ?right_table)))
+       ?left)" =>
+    "?left"
+    if foreign_key_exists("?fk_col", "?pk_col", "?right_table")
+       && column_is_not_null("?fk_col")
+),
+
+// Implementation with constraint catalog
+
+struct ReferentialIntegrityRewriter {
+    constraints: ConstraintCatalog,
+}
+
+impl ReferentialIntegrityRewriter {
+    fn try_eliminate_join(
+        &self,
+        join: &JoinNode,
+        projected_cols: &[Column],
+    ) -> Option<PlanNode> {
+        let (fk_col, pk_col) = self.extract_equijoin_columns(
+            &join.predicate,
+        )?;
+
+        // Check if FK constraint exists
+        let fk = self.constraints.find_foreign_key(
+            &fk_col, &pk_col,
+        )?;
+
+        // FK column must be NOT NULL
+        if !self.constraints.is_not_null(&fk_col) {
+            return None;
+        }
+
+        // All projected columns must come from the FK side
+        let fk_table = fk_col.table();
+        let all_from_fk = projected_cols.iter()
+            .all(|c| c.table() == fk_table);
+
+        if !all_from_fk {
+            return None;
+        }
+
+        // Safe to eliminate join
+        Some(PlanNode::Project {
+            columns: projected_cols.to_vec(),
+            input: Box::new(join.fk_side_input().clone()),
+        })
+    }
+
+    fn try_migrate_predicate(
+        &self,
+        predicate: &Predicate,
+        join: &JoinNode,
+    ) -> Option<Predicate> {
+        // If predicate is on the PK side, check if it's implied
+        // by a CHECK constraint
+        let (fk_col, pk_col) = self.extract_equijoin_columns(
+            &join.predicate,
+        )?;
+
+        let check_constraints = self.constraints
+            .check_constraints_for_table(pk_col.table());
+
+        for check in check_constraints {
+            if check.implies(predicate) {
+                // Predicate always holds due to CHECK constraint
+                // Can be removed from the query
+                return Some(Predicate::True);
+            }
+        }
+
+        None
+    }
+}
+```
+
+## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    hw: &HardwareProfile,
+) -> bool {
+    // Must have foreign key constraints declared
+    stats.has_foreign_key_constraints
+        // Constraints must be trusted (enforced)
+        && stats.constraints_are_enforced
+        // Join involves FK-PK relationship
+        && stats.join_matches_fk_pk
+}
+```
+
+**Restrictions:**
+- FK constraints must be enforced, not just declared
+- FK column must be NOT NULL for join elimination
+- Nullable FK column: join may filter out NULL rows, cannot eliminate
+- Deferred constraints: cannot use until committed
+- Partitioned tables: constraints may not span partitions
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    // Join elimination saves: scan of referenced table + join cost
+    let ref_table_cost = stats.referenced_table_scan_cost;
+    let join_cost = stats.estimated_join_cost;
+    let original_cost = stats.fk_table_scan_cost + ref_table_cost + join_cost;
+    let optimized_cost = stats.fk_table_scan_cost;
+
+    if original_cost > optimized_cost {
+        (original_cost - optimized_cost) / original_cost
+    } else {
+        0.0
+    }
+}
+```
+
+**Assumptions:**
+- FK constraint is enforced at all times
+- NOT NULL constraint prevents dangling references
+- Join elimination saves both I/O and CPU of the eliminated table
+
+**Typical benefit**: 50% to 10x when large referenced tables are eliminated.
+
+## Test Cases
+
+### Positive: Join elimination via FK
+
+```sql
+-- Schema: orders.customer_id REFERENCES customers(id) NOT NULL
+SELECT o.order_id, o.total, o.order_date
+FROM orders o
+JOIN customers c ON o.customer_id = c.id;
+
+-- Before: Join(orders, customers) + Project(order cols only)
+-- After: Scan(orders) -- join eliminated!
+-- Saves: scan of customers table + join computation
+```
+
+### Positive: Semi-join elimination (EXISTS)
+
+```sql
+-- Schema: orders.customer_id REFERENCES customers(id) NOT NULL
+SELECT *
+FROM orders o
+WHERE EXISTS (
+  SELECT 1 FROM customers c WHERE c.id = o.customer_id
+);
+
+-- Before: SemiJoin(orders, customers)
+-- After: Scan(orders) -- EXISTS always true due to FK
+```
+
+### Positive: Anti-join becomes empty (NOT EXISTS)
+
+```sql
+-- Schema: orders.customer_id REFERENCES customers(id) NOT NULL
+SELECT *
+FROM orders o
+WHERE NOT EXISTS (
+  SELECT 1 FROM customers c WHERE c.id = o.customer_id
+);
+
+-- Before: AntiJoin(orders, customers)
+-- After: Empty() -- FK guarantees every order has a customer
+```
+
+### Negative: Nullable FK prevents elimination
+
+```sql
+-- Schema: orders.customer_id REFERENCES customers(id) -- NULLABLE!
+SELECT o.order_id, o.total
+FROM orders o
+JOIN customers c ON o.customer_id = c.id;
+
+-- Cannot eliminate: join filters out orders with NULL customer_id
+-- Those rows would be excluded by the JOIN but not by a bare scan
+```
+
+### Negative: Query uses columns from referenced table
+
+```sql
+-- Schema: orders.customer_id REFERENCES customers(id) NOT NULL
+SELECT o.order_id, c.name, o.total  -- c.name from customers!
+FROM orders o
+JOIN customers c ON o.customer_id = c.id;
+
+-- Cannot eliminate: query needs c.name from customers table
+```
+
+### Positive: Cascading FK elimination
+
+```sql
+-- Schema:
+-- lineitem.order_id REFERENCES orders(id) NOT NULL
+-- orders.customer_id REFERENCES customers(id) NOT NULL
+SELECT l.quantity, l.price
+FROM lineitem l
+JOIN orders o ON l.order_id = o.id
+JOIN customers c ON o.customer_id = c.id;
+
+-- Both joins eliminated (cascading FK, only lineitem cols projected)
+-- After: Scan(lineitem)
+```
+
+## References
+
+**Original paper:**
+- Pirahesh, H., Hellerstein, J.M., Hasan, W., "Extensible/Rule Based Query Rewrite Optimization in Starburst", ACM SIGMOD 1992
+  - DOI: 10.1145/130283.130294
+  - Section 4.2: "Referential integrity based rewrites"
+  - Join elimination using FK constraints
+
+**Related work:**
+- Galindo-Legaria, C., Rosenthal, A., "Outerjoin Simplification and Reordering for Query Optimization", ACM TODS 1997
+  - DOI: 10.1145/261124.261126
+  - Extended FK-based simplification to outer joins
+
+- Larson, P.-A., Zhou, J., "View Matching for Outer-Join Views", VLDB 2005
+  - Join elimination in the context of materialized views
+
+**Implementation in databases:**
+- PostgreSQL: `src/backend/optimizer/plan/analyzejoins.c` - remove_useless_joins()
+  - Removes inner joins where FK guarantees 1:1 match and only FK side projected
+- mssql: Join elimination in Cascades optimizer
+- Oracle: "join elimination" / "table elimination" optimization
+- DB2: Starburst-derived join elimination

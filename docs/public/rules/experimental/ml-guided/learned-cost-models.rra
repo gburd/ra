@@ -1,0 +1,412 @@
+---
+id: learned-cost-models
+name: "Learned Cost Models"
+category: experimental/ml-guided
+databases: [postgresql, duckdb, mysql]
+execution_models: [all]
+hardware: [cpu, gpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [ml, cost-model, prediction, regression, plan-quality]
+complexity: "O(1) inference per plan"
+benefit_range: [0.2, 0.7]
+research_status: "active-research"
+maturity: "prototype"
+---
+
+# Learned Cost Models
+
+## Description
+
+Replaces hand-crafted cost models with ML models that predict actual query
+execution time from plan features. Traditional cost models (System R style)
+use simple formulas with manually tuned parameters. Learned cost models
+train on (plan, actual_runtime) pairs to capture complex interactions between
+operators, hardware characteristics, and data distributions that analytical
+formulas miss.
+
+Three approaches:
+1. **Plan-level prediction**: Features from the entire plan tree, predicts
+   total runtime. Simple but loses operator-level granularity.
+2. **Operator-level prediction**: Per-operator models predict execution time,
+   summed for total cost. Compositional but needs operator-level timing.
+3. **Steering models** (Bao): Don't predict costs; instead learn which
+   optimizer hints produce fast plans for a given query.
+
+**When to apply**: When the optimizer's cost model consistently picks
+suboptimal plans, especially for complex queries on heterogeneous hardware.
+
+**Why it works**: Analytical cost models have limited expressiveness.
+They assume operations have uniform cost and miss interactions (e.g.,
+hash join probe cost depends on build-side data distribution, not just
+cardinality). ML models learn these interactions from execution data.
+
+**Research status**: Bao is the most mature system (integrated with
+PostgreSQL). Plan-level regression is common in cloud database services
+for workload management. Operator-level prediction remains research.
+
+## Relational Algebra
+
+```latex
+$$
+Traditional cost model:
+  Cost(plan) = sum(analytical_cost(op) for op in plan)
+  \text{where} analytical_cost uses fixed formulas
+$$
+
+$$
+Learned cost model:
+  Cost(plan) = model.predict(featurize(plan))
+  \text{where} model trained on (plan, actual_time) pairs
+$$
+
+$$
+Bao-style steering:
+  hints = model.select_hints(query)
+  plan = optimizer.plan(query, hints)
+$$
+  -- Learns which hint sets work for which query shapes
+
+```
+
+## Implementation
+
+```rust
+// Plan-level cost prediction
+struct LearnedCostModel {
+    model: TreeModel, // Gradient boosted trees or neural network
+    feature_extractor: PlanFeatureExtractor,
+    fallback: Box<dyn CostModel>,
+}
+
+impl LearnedCostModel {
+    fn predict_cost(&self, plan: &PlanNode) -> CostPrediction {
+        let features = self.feature_extractor.extract(plan);
+
+        // Check if plan is in training distribution
+        if !self.in_distribution(&features) {
+            let fallback_cost = self.fallback.cost(plan);
+            return CostPrediction {
+                predicted_ms: fallback_cost,
+                confidence: 0.3,
+                source: PredictionSource::Fallback,
+            };
+        }
+
+        let predicted_log_ms = self.model.predict(&features);
+        let uncertainty = self.model.predict_variance(&features);
+
+        CostPrediction {
+            predicted_ms: predicted_log_ms.exp(),
+            confidence: (-uncertainty.sqrt()).exp(),
+            source: PredictionSource::Learned,
+        }
+    }
+}
+
+struct PlanFeatureExtractor {
+    max_depth: usize,
+}
+
+impl PlanFeatureExtractor {
+    fn extract(&self, plan: &PlanNode) -> Vec<f64> {
+        let mut features = Vec::new();
+
+        // Plan structure features
+        features.push(plan.depth() as f64);
+        features.push(plan.node_count() as f64);
+        features.push(plan.join_count() as f64);
+
+        // Operator type histogram
+        let op_counts = plan.operator_histogram();
+        features.extend(op_counts.values());
+
+        // Cardinality features (estimated, may be wrong)
+        features.push(plan.estimated_rows().ln());
+        features.push(plan.estimated_width() as f64);
+
+        // Per-operator features (tree encoding)
+        self.encode_tree(plan, &mut features, 0);
+
+        features
+    }
+
+    fn encode_tree(
+        &self,
+        node: &PlanNode,
+        features: &mut Vec<f64>,
+        depth: usize,
+    ) {
+        if depth >= self.max_depth {
+            return;
+        }
+
+        // Operator type one-hot
+        features.push(node.operator_type_id() as f64);
+        features.push(node.estimated_rows().ln());
+        features.push(node.estimated_cost());
+
+        // Operator-specific features
+        match node {
+            PlanNode::SeqScan { table, .. } => {
+                features.push(table.row_count as f64);
+                features.push(table.page_count as f64);
+            }
+            PlanNode::IndexScan { selectivity, .. } => {
+                features.push(*selectivity);
+            }
+            PlanNode::HashJoin { .. } => {
+                features.push(node.left().estimated_rows().ln());
+                features.push(node.right().estimated_rows().ln());
+            }
+            PlanNode::Sort { .. } => {
+                features.push(node.child().estimated_rows().ln());
+            }
+            _ => {}
+        }
+
+        // Recurse into children
+        for child in node.children() {
+            self.encode_tree(child, features, depth + 1);
+        }
+    }
+}
+
+// Bao-style optimizer steering
+struct BaoSteeringModel {
+    tree_convolution: TreeConvolutionNetwork,
+    hint_space: Vec<HintSet>,
+    thompson_bandit: ThompsonSampling,
+}
+
+impl BaoSteeringModel {
+    fn select_plan(
+        &mut self,
+        query: &Query,
+        optimizer: &Optimizer,
+    ) -> SelectedPlan {
+        // Generate candidate plans with different hint sets
+        let candidates: Vec<(HintSet, PlanNode)> = self.hint_space
+            .iter()
+            .map(|hints| {
+                let plan = optimizer.plan_with_hints(query, hints);
+                (hints.clone(), plan)
+            })
+            .collect();
+
+        // Score each plan using tree convolution model
+        let scores: Vec<f64> = candidates
+            .iter()
+            .map(|(_, plan)| {
+                let tree_features = self.encode_plan_tree(plan);
+                self.tree_convolution.predict(&tree_features)
+            })
+            .collect();
+
+        // Thompson sampling for exploration/exploitation
+        let selected_idx =
+            self.thompson_bandit.select(&scores);
+
+        SelectedPlan {
+            hints: candidates[selected_idx].0.clone(),
+            plan: candidates[selected_idx].1.clone(),
+            predicted_cost: scores[selected_idx],
+        }
+    }
+
+    fn update_from_execution(
+        &mut self,
+        query: &Query,
+        hints: &HintSet,
+        actual_time_ms: f64,
+    ) {
+        // Online learning: update model with execution feedback
+        let plan_features =
+            self.encode_plan_tree(&plan_for(query, hints));
+        self.tree_convolution.update(
+            &plan_features,
+            actual_time_ms.ln(),
+        );
+        self.thompson_bandit.update(
+            hints.index(),
+            actual_time_ms,
+        );
+    }
+
+    fn encode_plan_tree(&self, plan: &PlanNode) -> TreeTensor {
+        // Tree convolution: encode plan tree bottom-up
+        match plan.children().as_slice() {
+            [] => {
+                // Leaf: embed operator features
+                TreeTensor::leaf(plan.feature_vector())
+            }
+            [child] => {
+                let child_enc = self.encode_plan_tree(child);
+                TreeTensor::unary(plan.feature_vector(), child_enc)
+            }
+            [left, right] => {
+                let left_enc = self.encode_plan_tree(left);
+                let right_enc = self.encode_plan_tree(right);
+                TreeTensor::binary(
+                    plan.feature_vector(),
+                    left_enc,
+                    right_enc,
+                )
+            }
+            _ => TreeTensor::leaf(plan.feature_vector()),
+        }
+    }
+}
+
+struct HintSet {
+    disable_hashjoin: bool,
+    disable_mergejoin: bool,
+    disable_nestloop: bool,
+    disable_seqscan: bool,
+    enable_parallel: bool,
+}
+
+struct CostPrediction {
+    predicted_ms: f64,
+    confidence: f64,
+    source: PredictionSource,
+}
+
+enum PredictionSource {
+    Learned,
+    Fallback,
+}
+
+struct SelectedPlan {
+    hints: HintSet,
+    plan: PlanNode,
+    predicted_cost: f64,
+}
+```
+
+**Restrictions:**
+- Requires execution feedback for training (chicken-and-egg problem)
+- Model accuracy degrades with data distribution shift
+- Plan featurization loses information (many plans map to same features)
+- Inference latency adds to optimization time
+- Cannot predict cost of operations never seen in training
+- Bao's hint space is finite and may miss optimal configurations
+
+## Cost Model
+
+```rust
+fn learned_model_accuracy(
+    model: &LearnedCostModel,
+    test_set: &[(PlanNode, f64)],
+) -> AccuracyMetrics {
+    let mut cost_errors = Vec::new();
+    let mut ranking_correct = 0;
+    let total_pairs = test_set.len() * (test_set.len() - 1) / 2;
+
+    for (plan, actual_ms) in test_set {
+        let predicted = model.predict_cost(plan);
+        let ratio = if predicted.predicted_ms > *actual_ms {
+            predicted.predicted_ms / actual_ms
+        } else {
+            actual_ms / predicted.predicted_ms
+        };
+        cost_errors.push(ratio);
+    }
+
+    // Pairwise ranking accuracy
+    for i in 0..test_set.len() {
+        for j in (i + 1)..test_set.len() {
+            let pred_i = model.predict_cost(&test_set[i].0).predicted_ms;
+            let pred_j = model.predict_cost(&test_set[j].0).predicted_ms;
+            let actual_i = test_set[i].1;
+            let actual_j = test_set[j].1;
+
+            if (pred_i < pred_j) == (actual_i < actual_j) {
+                ranking_correct += 1;
+            }
+        }
+    }
+
+    cost_errors.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+    AccuracyMetrics {
+        median_ratio: cost_errors[cost_errors.len() / 2],
+        ranking_accuracy: ranking_correct as f64 / total_pairs as f64,
+    }
+}
+```
+
+**Typical benefit**: 20-70% improvement in plan selection for complex
+workloads. Bao demonstrates 50% median improvement on dynamic workloads.
+
+## Test Cases
+
+### Test 1: Learned model vs analytical (hash join sizing)
+
+```sql
+SELECT * FROM orders o JOIN lineitem l ON o.orderkey = l.orderkey;
+-- Analytical model: hash join cost = f(|build|, |probe|)
+-- Learned model: captures cache effects, hash collision rates
+-- Build side: 1.5M rows -> hash table ~300MB (exceeds L3)
+-- Analytical: underestimates by 3x (ignores cache miss penalty)
+-- Learned: predicts within 1.5x (trained on similar plans)
+```
+
+### Test 2: Bao hint selection
+
+```sql
+SELECT * FROM t1 JOIN t2 ON t1.a = t2.b
+JOIN t3 ON t2.c = t3.d WHERE t1.x > 100;
+
+-- Hint set A: {enable_hashjoin, disable_nestloop}
+--   Plan cost: 2.5s (hash joins for all)
+-- Hint set B: {enable_nestloop, disable_hashjoin}
+--   Plan cost: 0.3s (NL for selective inner join)
+-- Hint set C: {default}
+--   Plan cost: 1.2s (optimizer picks hash for both)
+
+-- Bao learns: for queries with this shape and selective predicate,
+-- hint set B produces fastest plans
+-- Thompson sampling explores initially, then exploits best hint
+```
+
+### Test 3: Plan regression detection
+
+```sql
+-- Query Q1 usually runs in 100ms
+-- After data load, learned model predicts 5000ms
+-- Analytical model still predicts 120ms (misses correlation)
+-- Learned model triggers alert: predicted 50x regression
+-- Root cause: new data skew changes join cardinality
+```
+
+### Test 4: Cold start with fallback
+
+```sql
+-- New query template not seen in training
+-- Learned model: confidence = 0.2 (low), falls back to analytical
+-- After 10 executions: model updates, confidence rises to 0.7
+-- After 50 executions: confidence = 0.9, predictions accurate
+```
+
+## References
+
+**Learned cost models:**
+- Sun & Li, "An End-to-End Learning-based Cost Estimator", VLDB 2020
+- Marcus et al., "Neo: A Learned Query Optimizer", VLDB 2019
+
+**Bao steering:**
+- Marcus et al., "Bao: Making Learned Query Optimization Practical", SIGMOD 2021
+- Paper demonstrates: median 50% improvement on dynamic PostgreSQL workloads
+
+**Tree convolution for plans:**
+- Mou et al., "Convolutional Neural Networks over Tree Structures", AAAI 2016
+
+**Feedback-driven optimization:**
+- Stillger et al., "LEO - DB2's LEarning Optimizer", VLDB 2001
+- Chaudhuri et al., "Self-Tuning Database Systems: A Decade of Progress", VLDB 2007
+
+**Production deployments:**
+- Microsoft: learned cost models in Azure SQL
+- Oracle: Autonomous Database uses ML for plan management
+- Alibaba: OceanBase ML-based optimizer

@@ -1,0 +1,199 @@
+---
+id: monetdb-window-function-optimization
+name: MonetDB Window Function Optimization
+category: database-specific/monetdb
+databases: [monetdb]
+version: "1.0.0"
+authors: ["Leis et al. 2015", "RA Contributors"]
+tags: [database-specific, monetdb, window-function, segment-tree, columnar]
+complexity: O(n log n)
+benefit_range: [0.2, 0.7]
+---
+
+# MonetDB Window Function Optimization
+
+## Description
+
+Optimizes window function evaluation in MonetDB's columnar engine by
+exploiting column-at-a-time processing. Instead of maintaining per-row
+window frames in a row-oriented manner, MonetDB computes window
+functions using columnar primitives: sort the partition/order columns,
+compute frame boundaries as index arrays, then evaluate aggregate
+functions using vectorized batch operations over contiguous segments.
+
+**When to apply**: Queries with window functions (ROW_NUMBER, RANK,
+SUM OVER, AVG OVER) on MonetDB's column-store where partition sizes
+are large enough to benefit from batch evaluation.
+
+**Why it works**: Row-oriented window evaluation maintains a sliding
+window per row, with O(frame_size) per row. MonetDB's columnar approach
+sorts once (O(n log n)), computes all frame boundaries as arrays (O(n)),
+then evaluates aggregates over contiguous column segments using vectorized
+primitives. Segment trees enable O(log n) per row for arbitrary frames.
+
+**Database version**: MonetDB with columnar window function support
+
+## Relational Algebra
+
+```latex
+-- Row-oriented window evaluation:
+$$
+window[SUM(x) OVER (PARTITION BY p ORDER BY o ROWS BETWEEN 5 PRECEDING AND CURRENT ROW)](R)
+  \rightarrow for each partition:
+       for each row:
+         sum = accumulate(frame[row-5..row])
+$$
+
+-- Columnar window evaluation (MonetDB):
+$$
+window[SUM(x) OVER (PARTITION BY p ORDER BY o ROWS BETWEEN 5 PRECEDING AND CURRENT ROW)](R)
+  \rightarrow sort_column(R, [p, o])
+  \rightarrow compute_partitions(sorted, p) \rightarrow partition_boundaries
+  \rightarrow compute_frames(partition_boundaries, ROWS BETWEEN -5 AND 0) \rightarrow frame_indices
+  \rightarrow vectorized_prefix_sum(x_column, frame_indices) \rightarrow result_column
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("monetdb-window-columnar";
+    "(window ?func ?partition ?order ?frame ?input)" =>
+    "(columnar-window
+       (sort (columns ?partition ?order) ?input)
+       (partition_boundaries ?partition)
+       (frame_indices ?frame)
+       (vectorized_agg ?func))"
+    if is_database("monetdb")
+    if is_decomposable_window_agg("?func")
+),
+
+rw!("monetdb-window-segment-tree";
+    "(window ?func ?partition ?order (range_frame ?lo ?hi) ?input)" =>
+    "(segment-tree-window
+       (sort (columns ?partition ?order) ?input)
+       (partition_boundaries ?partition)
+       (segment_tree ?func)
+       (range_frame ?lo ?hi))"
+    if is_database("monetdb")
+    if is_variable_range_frame("?lo", "?hi")
+    if is_decomposable_window_agg("?func")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(window: &WindowFunction) -> bool {
+    // Must be a decomposable aggregate
+    let is_decomposable = matches!(
+        window.function,
+        AggFunc::Sum | AggFunc::Count | AggFunc::Avg
+        | AggFunc::Min | AggFunc::Max
+        | AggFunc::RowNumber | AggFunc::Rank
+        | AggFunc::DenseRank
+    );
+
+    if !is_decomposable {
+        return false;
+    }
+
+    // Partition size should be large enough for vectorized benefit
+    let est_partition_size = estimate_partition_size(window);
+    est_partition_size > 100
+}
+```
+
+**Restrictions:**
+- NTILE, LEAD/LAG require special handling (not purely aggregate)
+- Very small partitions (< 100 rows) see no vectorized benefit
+- RANGE frames with non-trivial expressions need segment trees
+- Concurrent partitions cannot share sort (each needs own sort order)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    total_rows: f64,
+    num_partitions: f64,
+    frame_size: f64,
+    use_segment_tree: bool,
+) -> f64 {
+    let avg_partition = total_rows / num_partitions;
+
+    // Row-oriented: O(n * frame_size) per partition
+    let row_cost = total_rows * frame_size;
+
+    // Columnar: sort + prefix sum
+    let sort_cost = total_rows * total_rows.log2();
+    let prefix_cost = total_rows * 2.0; // scan + accumulate
+    let columnar_cost = sort_cost + prefix_cost;
+
+    // Segment tree: sort + build tree + query
+    let segment_tree_cost = if use_segment_tree {
+        sort_cost + total_rows * 4.0 // tree build
+            + total_rows * total_rows.log2() // tree query
+    } else {
+        columnar_cost
+    };
+
+    let optimized_cost = if use_segment_tree {
+        segment_tree_cost
+    } else {
+        columnar_cost
+    };
+
+    if row_cost > optimized_cost {
+        (row_cost - optimized_cost) / row_cost
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 3x-10x for large partitions with wide frames.
+Segment tree adds O(log n) overhead but handles arbitrary RANGE frames.
+
+## Test Cases
+
+```sql
+-- Positive: running sum over large partition
+SELECT customer_id,
+       order_date,
+       SUM(amount) OVER (
+         PARTITION BY customer_id
+         ORDER BY order_date
+         ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+       ) AS running_total
+FROM orders;
+-- Columnar: prefix sum on sorted column, fully vectorized
+
+-- Positive: variable range frame
+SELECT sensor_id,
+       timestamp,
+       AVG(value) OVER (
+         PARTITION BY sensor_id
+         ORDER BY timestamp
+         RANGE BETWEEN INTERVAL '1 HOUR' PRECEDING AND CURRENT ROW
+       ) AS hourly_avg
+FROM readings;
+-- Segment tree: O(log n) per row for variable-width frames
+```
+
+```sql
+-- Negative: tiny partitions
+SELECT id, ROW_NUMBER() OVER (PARTITION BY id ORDER BY ts) AS rn
+FROM events;
+-- Partition size = 1, no vectorization benefit
+```
+
+## References
+
+Leis et al., "Efficient Processing of Window Functions in Analytical
+SQL Queries", VLDB 2015
+Wesley, Xu, "Windowing Functions in MonetDB" (MonetDB documentation)
+Cao et al., "Window Functions in SQL Queries with Segment Trees",
+SIGMOD 2012

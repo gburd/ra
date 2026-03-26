@@ -1,0 +1,137 @@
+---
+id: mysql-index-merge
+name: MySQL Index Merge Optimization
+category: database-specific/mysql
+databases: [mysql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, mysql, index, merge, intersection, union]
+complexity: O(n)
+benefit_range: [0.2, 0.6]
+---
+
+# MySQL Index Merge Optimization
+
+## Description
+
+Index Merge uses multiple indexes on the same table and combines their
+results.  Three variants exist: intersection (AND conditions), union
+(OR conditions), and sort-union (OR with range conditions).  Each
+variant scans a separate index and merges the resulting rowid sets.
+
+**When to apply**: A WHERE clause has multiple conditions on different
+indexed columns connected by AND or OR, and no single composite index
+covers all conditions.
+
+**Why it works**: Instead of a full table scan, each index narrows the
+candidate set.  Intersecting two small sets is cheaper than scanning
+the entire table.
+
+**Database version**: MySQL 5.1+
+
+## Relational Algebra
+
+```latex
+-- Before: full table scan with compound filter
+$$
+\sigma_{a = 1 AND b = 2}(T)
+$$
+
+-- After: index merge intersection
+$$
+\cap(
+    index_scan[idx_a](T, a = 1),
+    index_scan[idx_b](T, b = 2)
+)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mysql-index-merge-intersection";
+    "(filter (and ?pred1 ?pred2) (scan ?table))" =>
+    "(index-merge-intersect
+        (index-scan ?table ?pred1)
+        (index-scan ?table ?pred2))"
+    if is_database("mysql")
+    if has_separate_indexes("?table", "?pred1", "?pred2")
+),
+
+rw!("mysql-index-merge-union";
+    "(filter (or ?pred1 ?pred2) (scan ?table))" =>
+    "(index-merge-union
+        (index-scan ?table ?pred1)
+        (index-scan ?table ?pred2))"
+    if is_database("mysql")
+    if has_separate_indexes("?table", "?pred1", "?pred2")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    table: &Table,
+    predicates: &[Predicate],
+) -> bool {
+    predicates.len() >= 2
+    && predicates.iter().all(|p| {
+        table.has_index_covering(p.columns())
+    })
+}
+```
+
+**Restrictions:**
+- Intersection requires each condition to independently use an index
+- Union variant requires OR conditions; each must use a different index
+- Sort-union requires range conditions (not point lookups)
+- Cannot merge more than `optimizer_switch` limit of indexes
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    table_rows: f64,
+    idx1_rows: f64,
+    idx2_rows: f64,
+    merge_type: MergeType,
+) -> f64 {
+    let scan_cost = table_rows * 0.01;
+    let merge_cost = match merge_type {
+        MergeType::Intersect => (idx1_rows + idx2_rows) * 0.005,
+        MergeType::Union => (idx1_rows + idx2_rows) * 0.005,
+        MergeType::SortUnion => (idx1_rows + idx2_rows) * 0.008,
+    };
+    scan_cost - merge_cost
+}
+```
+
+**Typical benefit**: 2-10x when individual indexes are selective.
+
+## Test Cases
+
+```sql
+-- Positive: two separate indexes, AND condition
+CREATE INDEX idx_a ON t(a);
+CREATE INDEX idx_b ON t(b);
+SELECT * FROM t WHERE a = 1 AND b = 2;
+-- Index merge intersection on idx_a and idx_b
+```
+
+```sql
+-- Negative: composite index covers both columns
+CREATE INDEX idx_ab ON t(a, b);
+SELECT * FROM t WHERE a = 1 AND b = 2;
+-- Single index scan; no merge needed
+```
+
+## References
+
+MySQL: "Index Merge Optimization" in MySQL Reference Manual
+MySQL: `optimizer_switch` flags `index_merge`, `index_merge_intersection`,
+  `index_merge_union`, `index_merge_sort_union`
+Source: sql/opt_range.cc

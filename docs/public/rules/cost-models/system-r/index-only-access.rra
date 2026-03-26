@@ -1,0 +1,234 @@
+---
+id: system-r-index-only-access
+name: "System R Index-Only Access (Covering Index)"
+category: cost-models/system-r
+databases: [postgresql, mysql, duckdb, cockroachdb, mssql, oracle]
+execution_models: [volcano, vectorized]
+version: "1.0.0"
+authors: ["Selinger et al. 1979 - IBM Research"]
+tags: [access-path, index-only, covering-index, system-r, classic]
+complexity: "O(F * index_pages)"
+benefit_range: [2.0, 100.0]
+---
+
+# System R Index-Only Access (Covering Index)
+
+## Description
+
+When all columns referenced by a query (SELECT, WHERE, JOIN, ORDER BY)
+are present in a single index, the query can be answered entirely from
+the index without accessing the base table (heap). This is an "index-only
+scan" or "covering index" access path. System R recognized this
+optimization: if the index contains all needed columns, the heap page
+fetch cost is eliminated entirely.
+
+**When to apply**: Queries that reference only columns contained within
+an available index. Common for narrow SELECT with WHERE on indexed columns,
+COUNT(*) queries, and MIN/MAX queries that can be satisfied from the
+index extremes.
+
+**Why it works**: Indexes are typically much smaller than the base table
+(they contain fewer columns). An index-only scan reads only index pages
+(smaller, more likely cached) and avoids all heap page fetches. For a
+query selecting 2 columns from a 50-column table, the index may be 25x
+smaller, making the scan 25x cheaper.
+
+## Relational Algebra
+
+```latex
+-- Regular index scan (must fetch heap):
+$$
+project[a, b](filter[a > 100](index_scan(R, I_on_a)))
+  cost: index_traversal + F*PAGES(R) + W*F*TUPLES(R)
+$$
+
+-- Index-only scan (no heap fetch):
+$$
+project[a, b](filter[a > 100](index_only_scan(R, I_on(a, b))))
+  cost: index_traversal + F*INDEX_PAGES(I) + W*F*TUPLES(R)
+$$
+  -- INDEX_PAGES << PAGES(R) since index is narrower
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("system-r-index-only-scan";
+    "(project ?cols (filter ?pred (scan ?table)))" =>
+    "(index_only_scan ?table
+       (find_covering_index ?table ?cols ?pred)
+       ?pred)"
+    if has_covering_index("?table", "?cols", "?pred")
+),
+
+struct IndexOnlyAccessDetector;
+
+impl IndexOnlyAccessDetector {
+    fn find_covering_index(
+        &self,
+        table: &TableStats,
+        required_columns: &[Column],
+        predicate: &Predicate,
+    ) -> Option<IndexInfo> {
+        // All referenced columns: SELECT + WHERE + JOIN
+        let all_columns: HashSet<Column> = required_columns
+            .iter()
+            .chain(predicate.referenced_columns().iter())
+            .cloned()
+            .collect();
+
+        // Find index that contains all required columns
+        table.indexes.iter()
+            .find(|idx| {
+                let index_cols: HashSet<Column> =
+                    idx.columns.iter().cloned().collect();
+                all_columns.is_subset(&index_cols)
+            })
+            .cloned()
+    }
+
+    fn index_only_cost(
+        &self,
+        table: &TableStats,
+        index: &IndexInfo,
+        selectivity: f64,
+        cost_model: &SystemRCostModel,
+    ) -> f64 {
+        // Index pages are proportional to index size
+        let index_pages = index.leaf_pages as f64;
+        let qualifying_tuples =
+            selectivity * table.num_tuples as f64;
+
+        if index.is_clustered {
+            // Clustered index-only: sequential read of index leaf pages
+            selectivity * index_pages
+                + cost_model.w * qualifying_tuples
+        } else {
+            // Unclustered index-only: still only reads index pages
+            // (no heap access needed!)
+            let index_pages_read = selectivity * index_pages;
+            index_pages_read.min(index_pages) + 3.0 // tree levels
+                + cost_model.w * qualifying_tuples
+        }
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    required_columns: &[Column],
+    predicate_columns: &[Column],
+    available_indexes: &[IndexInfo],
+) -> bool {
+    let all_needed: HashSet<&Column> = required_columns.iter()
+        .chain(predicate_columns.iter())
+        .collect();
+
+    available_indexes.iter().any(|idx| {
+        let idx_cols: HashSet<&Column> =
+            idx.columns.iter().collect();
+        all_needed.is_subset(&idx_cols)
+    })
+}
+```
+
+**Restrictions:**
+- Index must contain ALL referenced columns (including WHERE, JOIN, ORDER BY)
+- INCLUDE columns in modern indexes help (PostgreSQL INCLUDE clause)
+- Index-only scan requires visibility map (PostgreSQL) or equivalent
+- Wide indexes (many INCLUDE columns) increase index size
+- System R did not have INCLUDE columns; only indexed key columns
+
+## Cost Model
+
+```rust
+fn benefit_over_regular_index(
+    table: &TableStats,
+    index: &IndexInfo,
+    selectivity: f64,
+) -> f64 {
+    let qualifying = selectivity * table.num_tuples as f64;
+
+    // Regular index scan: must fetch heap pages
+    let heap_pages = if index.is_clustered {
+        selectivity * table.num_pages as f64
+    } else {
+        qualifying.min(table.num_pages as f64) // random I/O
+    };
+
+    // Index-only: no heap pages at all
+    // Benefit = heap pages saved
+    heap_pages
+}
+```
+
+**Typical benefit**: 5x-100x for narrow queries on wide tables.
+COUNT(*) with WHERE clause: 10-50x improvement.
+
+## Test Cases
+
+### Positive: Narrow SELECT with covering index
+
+```sql
+-- employees: 500K rows, 50 columns, 50K pages
+-- Index on (department, salary) -- composite index
+SELECT department, salary FROM employees WHERE department = 'Engineering';
+
+-- Index-only: reads ~50 index leaf pages (index is narrow: 2 columns)
+-- Regular index: reads 50 index pages + 5000 heap pages (fetch all cols)
+-- Index-only is 100x cheaper
+```
+
+### Positive: COUNT(*) with indexed predicate
+
+```sql
+-- orders: 10M rows
+-- Index on (status)
+SELECT COUNT(*) FROM orders WHERE status = 'open';
+
+-- Index-only: scan index leaves for status='open', count entries
+-- No heap access needed (only counting, not fetching row data)
+-- Reads ~100 index pages vs 1M heap pages for seq scan
+```
+
+### Positive: MIN/MAX on indexed column
+
+```sql
+-- Index on (created_at)
+SELECT MIN(created_at) FROM events;
+
+-- Index-only: read first leaf page of B-tree, return min value
+-- Cost: 3-4 pages (tree traversal to leftmost leaf)
+-- Seq scan: 500K pages
+```
+
+### Negative: SELECT * with index
+
+```sql
+SELECT * FROM employees WHERE department = 'Engineering';
+-- SELECT * needs all 50 columns
+-- No index contains all 50 columns
+-- Must use regular index scan + heap fetch
+```
+
+## References
+
+**Original paper:**
+- Selinger et al., "Access Path Selection", SIGMOD 1979
+  - Section 5: notes that "index only" access avoids data page fetches
+
+**Modern extensions:**
+- PostgreSQL: Index-Only Scans (since v9.2), INCLUDE clause (v11)
+- MySQL: Covering indexes documentation
+- mssql: INCLUDE columns in CREATE INDEX
+
+**Key insight:**
+- "If the index contains all columns needed by the query, the data
+  pages need not be fetched" -- Selinger et al.
+- This single optimization can make queries 10-100x faster for
+  analytics on wide tables.

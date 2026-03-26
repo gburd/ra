@@ -1,0 +1,311 @@
+---
+id: cloud-elastic-cost-model
+name: "Cloud Elastic Scaling and Pricing Cost Model"
+category: cost-models
+databases: [snowflake, bigquery, redshift, aurora, cockroachdb]
+execution_models: [distributed, serverless]
+hardware: [cloud, cpu, memory, network]
+version: "1.0.0"
+authors: ["Dageville et al. 2016 - Snowflake", "Melnik et al. 2010 - Dremel/BigQuery"]
+tags: [cost, cloud, elastic, pricing, serverless, warehouse, scaling, dollar-cost]
+complexity: "O(1) per resource allocation decision"
+benefit_range: [0.5, 10.0]
+---
+
+# Cloud Elastic Scaling and Pricing Cost Model
+
+## Description
+
+Models query cost in cloud databases where resources are elastic and
+priced per-use. Unlike on-premise systems where hardware is fixed,
+cloud systems can scale compute independently of storage. The optimizer
+must balance query latency against dollar cost: a query that takes 60s
+on a small warehouse costs $0.01, but 5s on a 4XL warehouse costs $0.16.
+
+**When to apply**: Any cloud-native database with elastic scaling
+(Snowflake, BigQuery, Redshift Serverless, Aurora Serverless). The
+optimizer or resource manager must choose warehouse size, concurrency
+level, and whether to cache or recompute.
+
+**Why it works**: Cloud pricing is proportional to compute-seconds.
+Scaling up 8x reduces latency ~8x but costs the same total (linear
+scaling). Scaling up more than linear (super-linear work) wastes
+money. The model identifies the sweet spot between latency SLA and
+dollar cost.
+
+## Relational Algebra
+
+```latex
+-- Cloud cost model:
+$$
+dollar_cost(query, warehouse_size) =
+  execution_time(query, warehouse_size) * price_per_second(warehouse_size)
+$$
+
+-- Execution time with scaling:
+$$
+execution_time(query, size) =
+  serial_fraction(query) * base_time
+  + parallel_fraction(query) * base_time / parallelism(size)
+$$
+
+-- Price per second (typical Snowflake):
+$$
+price_per_second(XS) = $0.0006  -- 1 credit/hour
+price_per_second(S)  = $0.0011  -- 2 credits/hour
+price_per_second(M)  = $0.0022  -- 4 credits/hour
+price_per_second(L)  = $0.0044  -- 8 credits/hour
+$$
+
+-- Optimal size minimizes dollar_cost subject to latency SLA:
+$$
+optimal_size(query, sla) =
+  min size \text{where} execution_time(query, size) <= sla
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+struct CloudCostModel {
+    warehouse_configs: Vec<WarehouseConfig>,
+    storage_cost_per_tb_month: f64,
+    network_egress_per_gb: f64,
+}
+
+struct WarehouseConfig {
+    name: String,
+    credits_per_hour: f64,
+    parallelism: usize,
+    memory_gb: f64,
+    local_ssd_gb: f64,
+    price_per_credit: f64,
+}
+
+impl CloudCostModel {
+    fn query_dollar_cost(
+        &self,
+        query: &QueryProfile,
+        warehouse: &WarehouseConfig,
+    ) -> f64 {
+        let exec_time_s = self.execution_time(query, warehouse);
+
+        let compute_cost = exec_time_s / 3600.0
+            * warehouse.credits_per_hour
+            * warehouse.price_per_credit;
+
+        let scan_cost =
+            query.bytes_scanned as f64 / 1e12
+                * self.storage_cost_per_tb_month / 30.0 / 24.0
+                * exec_time_s / 3600.0;
+
+        compute_cost + scan_cost
+    }
+
+    fn execution_time(
+        &self,
+        query: &QueryProfile,
+        warehouse: &WarehouseConfig,
+    ) -> f64 {
+        let serial = query.serial_fraction;
+        let parallel = 1.0 - serial;
+
+        let base_time = query.single_thread_estimate_s;
+
+        // Amdahl's law
+        let time = serial * base_time
+            + parallel * base_time
+                / warehouse.parallelism as f64;
+
+        // Memory pressure: spill to disk if insufficient
+        let memory_factor = if query.peak_memory_gb
+            > warehouse.memory_gb
+        {
+            let spill_ratio = query.peak_memory_gb
+                / warehouse.memory_gb;
+            1.0 + (spill_ratio - 1.0) * 5.0 // spill is ~5x slower
+        } else {
+            1.0
+        };
+
+        time * memory_factor
+    }
+
+    fn optimal_warehouse(
+        &self,
+        query: &QueryProfile,
+        latency_sla_s: Option<f64>,
+        budget_per_query: Option<f64>,
+    ) -> &WarehouseConfig {
+        self.warehouse_configs
+            .iter()
+            .filter(|w| {
+                let time = self.execution_time(query, w);
+                let cost = self.query_dollar_cost(query, w);
+
+                let meets_sla = latency_sla_s
+                    .map_or(true, |sla| time <= sla);
+                let meets_budget = budget_per_query
+                    .map_or(true, |budget| cost <= budget);
+
+                meets_sla && meets_budget
+            })
+            .min_by(|a, b| {
+                let cost_a = self.query_dollar_cost(query, a);
+                let cost_b = self.query_dollar_cost(query, b);
+                cost_a
+                    .partial_cmp(&cost_b)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .unwrap_or(&self.warehouse_configs[0])
+    }
+
+    fn cache_vs_recompute(
+        &self,
+        query: &QueryProfile,
+        cache_size_gb: f64,
+        result_size_gb: f64,
+        reuse_probability: f64,
+        cache_ttl_hours: f64,
+    ) -> CacheDecision {
+        let recompute_cost =
+            self.query_dollar_cost(
+                query,
+                &self.warehouse_configs[0],
+            ) * reuse_probability
+                * cache_ttl_hours;
+
+        let cache_cost = result_size_gb
+            * self.storage_cost_per_tb_month
+            / 1024.0
+            / 30.0 / 24.0
+            * cache_ttl_hours;
+
+        if cache_cost < recompute_cost {
+            CacheDecision::Cache {
+                savings: recompute_cost - cache_cost,
+            }
+        } else {
+            CacheDecision::Recompute {
+                savings: cache_cost - recompute_cost,
+            }
+        }
+    }
+
+    fn multi_cluster_scaling(
+        &self,
+        concurrent_queries: usize,
+        query_profile: &QueryProfile,
+        warehouse: &WarehouseConfig,
+    ) -> ScalingRecommendation {
+        let single_cluster_time =
+            self.execution_time(query_profile, warehouse);
+
+        // Queuing delay with N concurrent queries
+        let utilization = concurrent_queries as f64
+            * single_cluster_time
+            / single_cluster_time; // simplified
+        let queue_delay = if utilization > 0.8 {
+            single_cluster_time * utilization
+                / (1.0 - utilization)
+        } else {
+            0.0
+        };
+
+        if queue_delay > single_cluster_time {
+            ScalingRecommendation::AddCluster {
+                recommended_clusters: concurrent_queries / 4 + 1,
+            }
+        } else {
+            ScalingRecommendation::SingleCluster
+        }
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(system: &SystemConfig) -> bool {
+    system.is_cloud_native()
+        && system.supports_elastic_scaling()
+}
+```
+
+**Restrictions:**
+- Warehouse startup time (5-30s for Snowflake) not modeled
+- Auto-suspend saves cost but adds cold-start latency
+- Credit pricing varies by region and contract
+- Spot/preemptible pricing can reduce cost 60-90% for batch
+- Multi-cluster warehouses add complexity
+- BigQuery on-demand vs flat-rate pricing requires different models
+
+## Cost Model
+
+```rust
+fn scaling_efficiency(
+    serial_fraction: f64,
+    scale_factor: f64,
+) -> f64 {
+    // Amdahl's law: efficiency = 1 / (s + (1-s)/N) / N
+    let speedup = 1.0
+        / (serial_fraction
+            + (1.0 - serial_fraction) / scale_factor);
+    speedup / scale_factor
+}
+```
+
+**Cloud cost rules of thumb:**
+- Scan-heavy queries: scale linearly (near 100% parallel)
+- Join-heavy queries: ~70-90% parallel (shuffle is serial-ish)
+- Small queries (<1s): warehouse startup dominates, use smallest
+- Result caching: free on most platforms, eliminates recomputation
+
+## Test Cases
+
+### Positive: Right-sizing warehouse for SLA
+
+```sql
+-- 100 GB table scan, 10% selectivity
+-- XS warehouse (1 node): 60s, $0.01
+-- S warehouse (2 nodes): 32s, $0.011
+-- M warehouse (4 nodes): 17s, $0.012
+-- L warehouse (8 nodes): 10s, $0.014
+-- SLA: 30s -> S is cheapest option meeting SLA
+SELECT * FROM events
+WHERE event_type = 'purchase' AND event_date > '2025-01-01';
+```
+
+### Positive: Cache vs recompute for repeated dashboard
+
+```sql
+-- Dashboard query: 5 joins, 2s on M warehouse = $0.004
+-- Refreshed every 15 minutes, 96 times/day
+-- Recompute cost: 96 * $0.004 = $0.38/day
+-- Cache result (10 MB): $0.0000003/day
+-- Caching saves $0.38/day per dashboard query
+```
+
+### Negative: One-time ad-hoc query
+
+```sql
+-- Single execution, no reuse
+-- Smallest warehouse meeting timeout is optimal
+-- No benefit from caching or multi-cluster scaling
+SELECT COUNT(DISTINCT user_id) FROM events WHERE year = 2024;
+```
+
+## References
+
+**Cloud-native databases:**
+- Dageville et al., "The Snowflake Elastic Data Warehouse", SIGMOD 2016
+  - Separation of compute and storage, virtual warehouses
+- Melnik et al., "Dremel: Interactive Analysis of Web-Scale Datasets", VLDB 2010
+  - Serverless, per-query pricing model (BigQuery)
+
+**Cloud cost optimization:**
+- Saxena et al., "Towards Cost-Effective and Elastic Cloud Database Deployment via Memory Disaggregation", VLDB 2022
+- Tan et al., "Choosing A Cloud DBMS: Architectures and Tradeoffs", VLDB 2019

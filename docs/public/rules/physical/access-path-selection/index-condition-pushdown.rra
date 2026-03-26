@@ -1,0 +1,109 @@
+---
+id: index-condition-pushdown
+name: Index Condition Pushdown (ICP)
+category: physical/access-path-selection
+databases: [mysql, mariadb, tidb, cockroachdb]
+version: "1.0.0"
+authors: ["MySQL Development Team"]
+tags: [physical, index, condition-pushdown, icp, access-path]
+complexity: O(n)
+benefit_range: [0.1, 0.6]
+---
+
+# Index Condition Pushdown (ICP)
+
+## Description
+
+Pushes WHERE conditions that reference index columns down to the storage
+engine level, so they are evaluated during the index scan rather than
+after fetching full rows. Without ICP, the server reads full rows from
+storage for each index match, then applies the WHERE clause. With ICP,
+non-matching rows are rejected at the index level, avoiding heap reads.
+
+**When to apply**: Queries using a composite index where some conditions
+reference non-leading index columns that cannot be used for range access
+but can be evaluated from index entries alone.
+
+## Relational Algebra
+
+```latex
+-- Index on (a, b, c), range on a, filter on c
+-- Before (without ICP)
+$$
+\sigma_{c > 10}(IndexRangeScan(idx_abc, a = 5) \rightarrow HeapFetch)
+$$
+
+-- After (with ICP)
+$$
+IndexRangeScan(idx_abc, a = 5, icp: c > 10) \rightarrow HeapFetch
+$$
+-- Only rows passing c > 10 are heap-fetched
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("index-condition-pushdown";
+    "(filter ?extra_pred
+        (heap-fetch (index-range-scan ?idx ?range_pred ?table)))" =>
+    "(heap-fetch
+        (index-range-scan-icp ?idx ?range_pred ?extra_pred ?table))"
+    if pred_uses_index_cols("?extra_pred", "?idx")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    extra_pred: &Predicate,
+    index: &Index,
+) -> bool {
+    // Extra predicate must reference only index columns
+    let pred_cols = extra_pred.referenced_columns();
+    let index_cols: HashSet<_> = index.all_columns().collect();
+    pred_cols.is_subset(&index_cols)
+        // Predicate was not already used for range determination
+        && !index.range_predicates().contains(extra_pred)
+}
+```
+
+**Restrictions:**
+- Only for conditions evaluable from index entry data
+- Not applicable to covering index scans (already index-only)
+- Requires storage engine support (InnoDB, not Memory)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    index_matches: f64,
+    icp_selectivity: f64,
+) -> f64 {
+    let rows_avoided = index_matches * (1.0 - icp_selectivity);
+    rows_avoided * 4.0 // random heap I/O per row saved
+}
+```
+
+**Typical benefit**: 10-60% reduction in heap fetches.
+
+## Test Cases
+
+```sql
+-- Positive: composite index, ICP on non-range column
+CREATE INDEX idx_abc ON t(a, b, c);
+SELECT * FROM t WHERE a = 1 AND c > 100;
+-- Range scan on a=1, ICP evaluates c>100 at index level
+
+-- Negative: all conditions used for range access
+SELECT * FROM t WHERE a = 1 AND b = 2 AND c = 3;
+-- Full prefix used: no residual condition for ICP
+```
+
+## References
+
+- MySQL documentation: "Index Condition Pushdown Optimization"
+- MariaDB: "Index Condition Pushdown"

@@ -1,0 +1,50 @@
+---
+id: pre-aggregation-distinct-elimination
+name: Pre-Aggregation Distinct Elimination
+category: distributed/aggregation
+databases: [presto, trino, spark, greenplum]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, aggregation, pre-aggregation, distinct, dedup]
+complexity: O(n)
+benefit_range: [0.1, 0.6]
+---
+
+# Pre-Aggregation Distinct Elimination
+
+## Description
+
+When aggregation follows a DISTINCT on the same columns as GROUP BY,
+the DISTINCT is redundant. Remove it to avoid unnecessary deduplication
+before the aggregation phase.
+
+**When to apply**: DISTINCT columns are a subset of GROUP BY keys.
+
+## Relational Algebra
+
+```latex
+-- Before
+$$
+\gamma_{g, agg(a)}(delta(R))  -- delta = DISTINCT
+$$
+
+-- After (when DISTINCT cols subset of group keys)
+$$
+\gamma_{g, agg(a)}(R)
+$$
+
+```
+
+## Test Cases
+
+```sql
+-- Positive: redundant DISTINCT
+SELECT DISTINCT region, SUM(sales)
+FROM orders GROUP BY region;
+-- DISTINCT on (region, SUM(sales)) is redundant after GROUP BY region
+
+-- Negative: DISTINCT on different columns
+SELECT DISTINCT customer_id, region, SUM(sales)
+FROM orders GROUP BY region;
+-- customer_id not in GROUP BY
+```

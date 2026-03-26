@@ -1,0 +1,48 @@
+---
+id: mongodb-index-intersection
+name: "Index Intersection for AND Predicates"
+category: physical/index-intersection
+databases: [mongodb]
+version: "1.0.0"
+authors: ["Database Contributors", "RA Contributors"]
+tags: [database-mining, mongodb, optimization]
+complexity: "O(n)"
+benefit_range: [1.0, 10.0]
+---
+
+# Index Intersection for AND Predicates
+
+## Description
+
+Combines multiple index scans for AND predicates.
+
+**When to apply**: During query optimization phase.
+
+## Relational Algebra
+
+```latex
+-- Before
+$$
+(filter (scan orders) (and (eq status 'shipped') (eq region 'us-east')))
+$$
+
+-- After
+$$
+(filter (index-intersection (index-scan idx_status) (index-scan idx_region)))
+$$
+
+```
+
+## Preconditions
+
+- Indexes exist on both status and region
+
+## Test Cases
+
+```sql
+SELECT * FROM table WHERE condition;
+```
+
+## References
+
+- Database documentation

@@ -1,0 +1,120 @@
+---
+id: mysql-covering-index
+name: MySQL Covering Index Scan
+category: database-specific/mysql
+databases: [mysql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, mysql, covering-index, index-only, scan]
+complexity: O(n)
+benefit_range: [0.2, 0.7]
+---
+
+# MySQL Covering Index Scan
+
+## Description
+
+A covering index contains all columns referenced by a query (SELECT,
+WHERE, JOIN, ORDER BY, GROUP BY).  MySQL satisfies the entire query
+from the index without accessing the base table rows, shown as
+"Using index" in EXPLAIN.
+
+**When to apply**: All columns in the query are present in a single
+index.
+
+**Why it works**: Index pages are smaller than data pages (fewer
+columns, potentially compressed prefix).  Avoiding base table access
+reduces I/O, especially for wide tables where only a few columns are
+needed.
+
+**Database version**: MySQL 5.0+
+
+## Relational Algebra
+
+```latex
+-- Before: index lookup + row fetch
+$$
+\pi_{name}(\sigma_{dept_id = 5}(scan(employees)))
+$$
+
+-- After: covering index scan (no row fetch)
+$$
+\pi_{name}(\sigma_{dept_id = 5}(
+    index_only_scan[idx_dept_name](employees)))
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mysql-covering-index";
+    "(project ?cols (filter ?pred (scan ?table)))" =>
+    "(project ?cols (filter ?pred
+        (index-only-scan ?table ?cols ?pred)))"
+    if is_database("mysql")
+    if index_covers("?table", "?cols", "?pred")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    table: &Table,
+    columns: &[Column],
+    predicate: &Predicate,
+) -> bool {
+    let all_cols: Vec<_> = columns.iter()
+        .chain(predicate.columns().iter())
+        .collect();
+    table.indexes().iter().any(|idx| {
+        all_cols.iter().all(|c| idx.columns().contains(c))
+    })
+}
+```
+
+**Restrictions:**
+- InnoDB secondary indexes implicitly include PK columns
+- BLOB/TEXT columns cannot be fully stored in indexes (prefix only)
+- MySQL 8.0 functional indexes can cover expressions
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    total_rows: f64,
+    row_width: usize,
+    index_width: usize,
+) -> f64 {
+    let table_io = total_rows * row_width as f64 * 0.001;
+    let index_io = total_rows * index_width as f64 * 0.001;
+    table_io - index_io
+}
+```
+
+**Typical benefit**: 2-10x for wide tables where index covers a
+narrow query.
+
+## Test Cases
+
+```sql
+-- Positive: covering index
+CREATE INDEX idx_dept_name ON employees(dept_id, name);
+SELECT name FROM employees WHERE dept_id = 5;
+-- Index-only scan; EXPLAIN shows "Using index"
+```
+
+```sql
+-- Negative: query needs column not in index
+SELECT name, salary FROM employees WHERE dept_id = 5;
+-- salary not in index; must fetch rows
+```
+
+## References
+
+MySQL: "Covering Indexes" in MySQL Reference Manual
+MySQL: EXPLAIN Extra column "Using index"
+Source: sql/sql_optimizer.cc

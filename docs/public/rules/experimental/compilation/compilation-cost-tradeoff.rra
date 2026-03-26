@@ -1,0 +1,327 @@
+---
+id: compilation-cost-tradeoff
+name: "Query Compilation vs Interpretation Cost Tradeoff"
+category: experimental/compilation
+databases: [postgresql, duckdb, umbra, hyper, singlestore]
+execution_models: [compiled, vectorized, volcano]
+version: "1.0.0"
+authors: ["Neumann 2011 - HyPer compilation", "Kersten et al. 2018 - vectorized vs compiled"]
+tags: [compilation, interpretation, jit, llvm, adaptive, latency, throughput]
+complexity: "O(plan_size) for compilation decision"
+benefit_range: [0.5, 10.0]
+research_status: "production-ready"
+maturity: "production"
+---
+
+# Query Compilation vs Interpretation Cost Tradeoff
+
+## Description
+
+Query compilation (JIT) converts a query plan into native machine code,
+eliminating per-tuple interpretation overhead. But compilation itself
+takes 10-100ms (LLVM IR generation, optimization, code generation).
+For short-running queries (<10ms), compilation overhead exceeds the
+execution speedup. The optimizer must decide: compile for throughput
+or interpret for low latency.
+
+**When to apply**: Every query execution in a system that supports both
+modes (PostgreSQL JIT, DuckDB, Umbra). The decision depends on expected
+execution time, query complexity (compilation cost scales with plan
+size), and whether the query will be re-executed.
+
+**Why it works**: Compiled code runs 2-10x faster than interpreted
+Volcano-style execution by eliminating virtual function calls, enabling
+register allocation across operators, and allowing SIMD vectorization.
+But LLVM compilation takes 10-100ms. The breakeven point is typically
+50-200ms of expected execution time.
+
+## Relational Algebra
+
+```latex
+-- Total cost comparison:
+$$
+interpreted_total(query) = interpret_exec_time(query)
+compiled_total(query) = compile_time(query) + compiled_exec_time(query)
+$$
+
+-- Compile if:
+$$
+compiled_total(query) < interpreted_total(query)
+compile_time(query) + compiled_exec_time(query) < interpret_exec_time(query)
+$$
+
+-- With plan reuse (prepared statements):
+$$
+compiled_total_reuse(query, n) =
+  compile_time(query) + n * compiled_exec_time(query)
+$$
+-- Always wins for large n
+
+-- Compilation cost model:
+$$
+compile_time(plan) =
+  BASE_COMPILE_TIME
+  + num_operators(plan) * PER_OPERATOR_COMPILE
+  + num_expressions(plan) * PER_EXPRESSION_COMPILE
+$$
+
+-- Speedup model:
+$$
+speedup(plan) = interpret_time / compiled_time
+$$
+  -- Typically 2-10x depending on operator mix
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+struct CompilationDecider {
+    base_compile_ms: f64,
+    per_operator_compile_ms: f64,
+    per_expression_compile_ms: f64,
+    typical_speedup: f64,
+    optimization_level: OptLevel,
+}
+
+enum OptLevel {
+    O0, // Fast compile, no optimization
+    O1, // Basic optimization
+    O2, // Full optimization (default LLVM)
+}
+
+impl CompilationDecider {
+    fn estimated_compile_time(
+        &self,
+        plan: &PhysicalPlan,
+    ) -> f64 {
+        let base = match self.optimization_level {
+            OptLevel::O0 => self.base_compile_ms * 0.3,
+            OptLevel::O1 => self.base_compile_ms * 0.6,
+            OptLevel::O2 => self.base_compile_ms,
+        };
+
+        let operators = plan.num_operators() as f64;
+        let expressions = plan.num_expressions() as f64;
+
+        base + operators * self.per_operator_compile_ms
+            + expressions * self.per_expression_compile_ms
+    }
+
+    fn should_compile(
+        &self,
+        plan: &PhysicalPlan,
+        estimated_exec_ms: f64,
+        reuse_count: usize,
+    ) -> CompilationDecision {
+        let compile_time = self.estimated_compile_time(plan);
+        let compiled_exec =
+            estimated_exec_ms / self.typical_speedup;
+
+        let interpreted_total =
+            estimated_exec_ms * reuse_count as f64;
+        let compiled_total =
+            compile_time + compiled_exec * reuse_count as f64;
+
+        if compiled_total < interpreted_total {
+            CompilationDecision::Compile {
+                compile_time_ms: compile_time,
+                per_exec_savings_ms: estimated_exec_ms
+                    - compiled_exec,
+                breakeven_executions: (compile_time
+                    / (estimated_exec_ms - compiled_exec))
+                    .ceil() as usize,
+            }
+        } else {
+            CompilationDecision::Interpret {
+                overhead_if_compiled_ms: compiled_total
+                    - interpreted_total,
+            }
+        }
+    }
+
+    fn adaptive_strategy(
+        &self,
+        plan: &PhysicalPlan,
+        estimated_exec_ms: f64,
+    ) -> AdaptiveStrategy {
+        let compile_time = self.estimated_compile_time(plan);
+
+        if estimated_exec_ms < 1.0 {
+            // Very short query: always interpret
+            AdaptiveStrategy::AlwaysInterpret
+        } else if estimated_exec_ms > compile_time * 5.0 {
+            // Long query: always compile
+            AdaptiveStrategy::AlwaysCompile
+        } else {
+            // Borderline: start interpreted, compile in background
+            AdaptiveStrategy::InterpretThenCompile {
+                compile_trigger_ms: compile_time,
+            }
+        }
+    }
+
+    fn tiered_compilation(
+        &self,
+        plan: &PhysicalPlan,
+        estimated_exec_ms: f64,
+    ) -> TieredDecision {
+        let compile_o0 = self.estimated_compile_time(plan) * 0.3;
+        let compile_o2 = self.estimated_compile_time(plan);
+
+        let speedup_o0 = 1.5; // Minimal optimization
+        let speedup_o2 = self.typical_speedup; // Full optimization
+
+        if estimated_exec_ms < compile_o0 {
+            TieredDecision::Interpret
+        } else if estimated_exec_ms < compile_o2 {
+            TieredDecision::CompileO0 {
+                compile_ms: compile_o0,
+                speedup: speedup_o0,
+            }
+        } else {
+            TieredDecision::CompileO2 {
+                compile_ms: compile_o2,
+                speedup: speedup_o2,
+            }
+        }
+    }
+}
+
+struct PipelineFuser;
+
+impl PipelineFuser {
+    fn identify_pipelines(
+        plan: &PhysicalPlan,
+    ) -> Vec<Pipeline> {
+        // A pipeline ends at each pipeline breaker
+        let mut pipelines = Vec::new();
+        let mut current = Vec::new();
+
+        for op in plan.operators_dfs() {
+            current.push(op.clone());
+            if op.is_pipeline_breaker() {
+                pipelines.push(Pipeline {
+                    operators: current.clone(),
+                    estimated_tuples: op.output_cardinality(),
+                });
+                current.clear();
+            }
+        }
+
+        if !current.is_empty() {
+            pipelines.push(Pipeline {
+                operators: current,
+                estimated_tuples: 0,
+            });
+        }
+
+        pipelines
+    }
+
+    fn compilation_benefit_per_pipeline(
+        pipeline: &Pipeline,
+    ) -> f64 {
+        // Benefit proportional to tuples * operators in pipeline
+        // (each tuple saves virtual call overhead per operator)
+        let tuples = pipeline.estimated_tuples as f64;
+        let ops = pipeline.operators.len() as f64;
+        let overhead_per_tuple_ns = 10.0 * ops; // ~10ns per virtual call
+
+        tuples * overhead_per_tuple_ns / 1e6 // ms saved
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(system: &SystemConfig) -> bool {
+    system.supports_jit_compilation()
+}
+```
+
+**Restrictions:**
+- LLVM initialization adds ~50ms on first compilation per process
+- Compilation is single-threaded (parallelizable in Umbra)
+- Generated code consumes memory (code cache pressure)
+- Debug information lost in compiled code (harder to diagnose)
+- PostgreSQL JIT: only for expression evaluation, not full pipeline
+- DuckDB: uses vectorized execution, compilation less critical
+
+## Cost Model
+
+```rust
+fn compilation_breakeven(
+    compile_ms: f64,
+    speedup: f64,
+) -> f64 {
+    // Minimum execution time where compilation pays off
+    // Solve: compile + exec/speedup < exec
+    // exec * (1 - 1/speedup) > compile
+    // exec > compile / (1 - 1/speedup)
+    compile_ms / (1.0 - 1.0 / speedup)
+}
+```
+
+**Typical breakeven points:**
+- PostgreSQL JIT (expression only): >100ms execution
+- HyPer/Umbra (full pipeline): >10ms execution
+- DuckDB (vectorized baseline): >50ms execution
+- With O0 (fast compile): >5ms execution
+- Prepared statements (amortized): always compile after 3-5 executions
+
+## Test Cases
+
+### Positive: Long-running analytical query
+
+```sql
+-- 10 joins, 5 aggregates, expected 5s execution
+-- Compile time: 50ms (15 operators * 3ms + 5ms base)
+-- Interpreted: 5000ms
+-- Compiled (5x speedup): 50ms + 1000ms = 1050ms
+-- 4.8x total improvement, compilation overhead negligible
+SELECT region, SUM(revenue), AVG(quantity)
+FROM orders o JOIN lineitem l ON ...
+JOIN customer c ON ... JOIN nation n ON ...
+GROUP BY region ORDER BY SUM(revenue) DESC;
+```
+
+### Positive: Prepared statement executed 1000 times
+
+```sql
+PREPARE point_query AS SELECT * FROM users WHERE id = $1;
+-- Single execution: 0.1ms interpreted, 30ms compile + 0.05ms = 30.05ms
+-- BAD for single execution
+-- 1000 executions: 100ms interpreted, 30 + 50ms compiled = 80ms
+-- Compilation pays off after 600 executions
+```
+
+### Negative: Simple OLTP query
+
+```sql
+-- Primary key lookup, 0.2ms execution
+-- Compile time: 10ms
+-- Compiled: 10ms + 0.04ms = 10.04ms (50x worse!)
+-- Always interpret short queries
+SELECT name, email FROM users WHERE id = 42;
+```
+
+## References
+
+**Query compilation:**
+- Neumann, "Efficiently Compiling Efficient Query Plans for Modern Hardware", VLDB 2011
+  - Produce/consume model, pipeline fusion, LLVM backend
+- Kersten et al., "Everything You Always Wanted to Know About Compiled and Vectorized Query Engines", VLDB 2018
+  - Head-to-head comparison: compiled vs vectorized
+
+**Adaptive compilation:**
+- Kohn et al., "Adaptive Execution of Compiled Queries", ICDE 2018
+  - Start interpreted, compile hot pipelines in background
+- Menon et al., "Relaxed Operator Fusion for In-Memory Databases: Making Compilation, Vectorization, and Prefetching Work Together At Last", VLDB 2017
+
+**Tiered compilation:**
+- Funke et al., "Compiling Database Queries into Machine Code", IEEE DE Bulletin 2018
+  - Multi-tier: interpret -> bytecode -> native code

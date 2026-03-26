@@ -1,0 +1,88 @@
+---
+id: function-pushdown-past-join
+name: Function Pushdown Past Join
+category: logical/function-optimization
+databases: [postgresql, mysql, mssql, oracle, duckdb]
+execution_models: [volcano, vectorized]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [function, pushdown, join, filter, predicate]
+complexity: "O(1) plan transform"
+benefit_range: [0.2, 0.8]
+---
+
+# Function Pushdown Past Join
+
+## Description
+
+Pushes cheap, deterministic function predicates below a join so they
+filter rows before the join materializes the cross product. This is the
+inverse of the "expensive function above join" rule -- here the function
+is cheap and filtering early reduces the join input.
+
+**When to apply**: A cheap predicate involving a function references
+columns from only one side of the join.
+
+**Why it works**: Reducing the input to a join reduces the number of
+comparisons (and hash table entries, or sort runs). Cheap functions
+(ABS, UPPER, LENGTH) cost less than the join overhead they avoid.
+
+## Relational Algebra
+
+```latex
+$$
+\sigma_{f(a) = v}(R \bowtie S)
+  \rightarrow (\sigma_{f(a) = v}(R)) \bowtie S
+  \text{where} a ∈ columns(R) && is_cheap(f)
+$$
+
+```
+
+## Implementation
+
+```rust
+rw!("push-cheap-fn-predicate-below-join";
+    "(filter (= (apply-fn ?fn ?col) ?val) (join ?cond ?left ?right))" =>
+    "(join ?cond (filter (= (apply-fn ?fn ?col) ?val) ?left) ?right)"
+    if column_from_left("?col", "?left") &&
+       is_cheap_function("?fn")
+),
+```
+
+## Cost Model
+
+```rust
+fn benefit(
+    fn_cost: f64,
+    left_rows: u64,
+    selectivity: f64,
+    join_cost_per_row: f64,
+) -> f64 {
+    let fn_overhead = left_rows as f64 * fn_cost;
+    let join_savings = left_rows as f64 * (1.0 - selectivity) * join_cost_per_row;
+    (join_savings - fn_overhead) / join_savings
+}
+```
+
+## Test Cases
+
+### Positive: UPPER filter below join
+
+```sql
+SELECT * FROM users u JOIN orders o ON u.id = o.user_id
+WHERE UPPER(u.name) = 'ALICE';
+-- Push UPPER(name) = 'ALICE' below the join on users side
+```
+
+### Negative: Function references both sides
+
+```sql
+SELECT * FROM a JOIN b ON ABS(a.x - b.y) < 10;
+-- Cannot push: function references columns from both sides
+```
+
+## References
+
+- Hellerstein, "Predicate migration", SIGMOD 1993
+- Chaudhuri & Shim, "Optimization of Queries with User-Defined Predicates"

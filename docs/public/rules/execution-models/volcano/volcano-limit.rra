@@ -1,0 +1,102 @@
+---
+id: volcano-limit
+name: Volcano Iterator Model - Limit
+category: execution-models
+version: 1.0.0
+databases: [PostgreSQL, MySQL, Oracle]
+authors: [Goetz Graefe]
+tags: [execution, iterator, volcano, limit]
+---
+
+# Volcano Iterator Model - Limit
+
+## Description
+
+Limit operator restricts output to N tuples with optional offset. Enables early termination - key advantage of pull-based iterator model.
+
+## Relational Algebra
+
+```
+Limit(input, count, offset) → Iterator<Tuple>
+
+LimitIterator {
+  input: Iterator
+  count: usize
+  offset: usize
+  emitted: usize
+
+  fn next() → Tuple | None {
+    // Skip offset tuples
+    while offset > 0 {
+      input.next()
+      offset--
+    }
+
+    // Emit up to count tuples
+    if emitted < count {
+      tuple = input.next()
+      if tuple != None { emitted++ }
+      return tuple
+    }
+    None
+  }
+}
+```
+
+## Implementation
+
+```rust
+pub struct LimitIterator {
+    input: Box<dyn Iterator<Item = Tuple>>,
+    count: u64,
+    offset: u64,
+    skipped: u64,
+    emitted: u64,
+}
+
+impl Iterator for LimitIterator {
+    fn next(&mut self) -> Result<Option<Tuple>> {
+        // Skip offset tuples
+        while self.skipped < self.offset {
+            if self.input.next()?.is_none() {
+                return Ok(None);
+            }
+            self.skipped += 1;
+        }
+
+        // Return up to count tuples
+        if self.emitted < self.count {
+            if let Some(tuple) = self.input.next()? {
+                self.emitted += 1;
+                Ok(Some(tuple))
+            } else {
+                Ok(None)
+            }
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+pub fn limit_cost(input_cost: f64, limit: u64, total_rows: f64) -> f64 {
+    input_cost * (limit as f64 / total_rows) // Only process needed tuples
+}
+```
+
+## Cost Model
+
+- **CPU:** O(offset + count) instead of O(N)
+- **Early termination:** Stops child operators early
+- **Memory:** O(1)
+
+## Test Cases
+
+```sql
+SELECT * FROM users LIMIT 10;
+SELECT * FROM logs ORDER BY timestamp DESC LIMIT 100;
+SELECT * FROM items LIMIT 10 OFFSET 20;
+```
+
+## References
+
+1. Graefe, "Volcano", IEEE TKDE 1994

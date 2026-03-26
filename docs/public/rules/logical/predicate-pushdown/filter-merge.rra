@@ -1,0 +1,137 @@
+---
+id: filter-merge
+name: Filter Merge (Cascading Selections)
+category: logical/predicate-pushdown
+databases: [postgresql, mysql, duckdb, sqlite, oracle, mssql]
+standard: "sql:1992"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [filter, merge, simplification, core]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter ?pred1 (filter ?pred2 ?input))"
+    description: "Two consecutive filters"
+  - type: "predicate"
+    condition: "is_deterministic(?pred1) && is_deterministic(?pred2)"
+    description: "Both predicates must be deterministic"
+---
+
+# Filter Merge (Cascading Selections)
+
+## Description
+
+Combines two adjacent selection operators into a single selection whose
+predicate is the conjunction (AND) of both predicates. Conversely, a
+selection with a conjunctive predicate can be split into cascading
+selections, enabling each part to be pushed down independently.
+
+**When to apply**: Two filter operators are stacked directly on top of each
+other, or a single filter has a conjunctive (AND) predicate that should be
+split for independent pushdown.
+
+**Why it works**: `sigma[p1](sigma[p2](R))` is equivalent to
+`sigma[p1 AND p2](R)` by the definition of relational selection.
+
+## Relational Algebra
+
+```latex
+$$
+\sigma_{p1}(\sigma_{p2}(R)) \rightarrow \sigma_{p1 AND p2}(R)
+\sigma_{p1 AND p2}(R) \rightarrow \sigma_{p1}(\sigma_{p2}(R))
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Merge: combine adjacent filters
+rw!("filter-merge";
+    "(filter ?p1 (filter ?p2 ?input))" =>
+    "(filter (and ?p1 ?p2) ?input)"
+),
+
+// Split: break conjunctive filter for independent pushdown
+rw!("filter-split";
+    "(filter (and ?p1 ?p2) ?input)" =>
+    "(filter ?p1 (filter ?p2 ?input))"
+),
+```
+
+## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
+
+```rust
+fn applicable() -> bool {
+    // Always applicable: selection cascade is an algebraic identity.
+    true
+}
+```
+
+**Restrictions:**
+- None. This is a pure algebraic equivalence.
+
+## Cost Model
+
+```rust
+fn estimated_benefit_merge(
+    input_card: f64,
+    selectivity_p1: f64,
+    selectivity_p2: f64,
+) -> f64 {
+    // Merging saves one operator invocation per row.
+    // Two separate filters: cost = card + card * sel_p2
+    let cost_separate =
+        input_card + input_card * selectivity_p2;
+    // Merged filter: cost = card (single pass, AND short-circuits)
+    let cost_merged = input_card;
+    (cost_separate - cost_merged) / cost_separate
+}
+```
+
+**Typical benefit**: Merging reduces per-row overhead. Splitting enables
+further pushdown through joins, making the net effect dependent on context.
+
+## Test Cases
+
+```sql
+-- Positive: merge adjacent WHERE clauses (plan-level)
+-- Before (in plan form, two stacked filters)
+-- filter[status='active'](filter[age>30](scan(employees)))
+
+-- After (single combined filter)
+-- filter[status='active' AND age>30](scan(employees))
+
+-- SQL equivalent (optimizer sees subquery pattern):
+SELECT * FROM (
+    SELECT * FROM employees WHERE age > 30
+) t WHERE t.status = 'active';
+
+-- Optimized to:
+SELECT * FROM employees WHERE age > 30 AND status = 'active';
+```
+
+```sql
+-- Positive: split for independent pushdown through join
+-- Before
+SELECT * FROM orders o JOIN items i ON o.id = i.order_id
+WHERE o.status = 'shipped' AND i.qty > 10;
+
+-- After splitting and pushing each filter to its side:
+SELECT * FROM (
+    SELECT * FROM orders WHERE status = 'shipped'
+) o JOIN (
+    SELECT * FROM items WHERE qty > 10
+) i ON o.id = i.order_id;
+```
+
+## References
+
+PostgreSQL: src/backend/optimizer/plan/initsplan.c
+DuckDB: src/optimizer/filter_pushdown.cpp
+Codd, E. F. "A Relational Model of Data for Large Shared Data Banks" (1970)
+Ullman, J. D. "Principles of Database Systems" Chapter 10

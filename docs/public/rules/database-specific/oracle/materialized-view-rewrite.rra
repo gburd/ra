@@ -1,0 +1,141 @@
+---
+id: oracle-materialized-view-rewrite
+name: Oracle Materialized View Query Rewrite
+category: database-specific/oracle
+databases: [oracle]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, oracle, materialized-view, query-rewrite, summary]
+complexity: O(n)
+benefit_range: [0.5, 0.99]
+---
+
+# Oracle Materialized View Query Rewrite
+
+## Description
+
+Transparently rewrites queries to use pre-computed materialized views
+(MVs) instead of scanning base tables.  Oracle's query rewrite engine
+matches query patterns against MV definitions and substitutes the
+MV when it can satisfy the query, even for partial matches.
+
+**When to apply**: A materialized view exists that contains the data
+needed by the query, either exactly or as a superset that can be
+filtered/aggregated further.
+
+**Why it works**: Materialized views pre-compute and store query
+results.  Reading from a pre-aggregated MV avoids joining and
+aggregating potentially billions of base table rows.
+
+**Database version**: Oracle 9i+ (basic), 11g+ (advanced rewrite)
+
+## Relational Algebra
+
+```latex
+-- Query:
+$$
+\gamma_{region; total=SUM(amount)}(
+    \sigma_{year = 2025}(sales \bowtie regions))
+$$
+
+-- MV definition:
+$$
+CREATE MATERIALIZED VIEW mv_sales_summary AS
+SELECT region, year, SUM(amount) AS total
+FROM sales JOIN regions GROUP BY region, year;
+$$
+
+-- Rewritten:
+$$
+\sigma_{year = 2025}(scan(mv_sales_summary))
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("oracle-mv-exact-rewrite";
+    "?query" =>
+    "(scan-mv (matching-mv ?query))"
+    if is_database("oracle")
+    if has_matching_mv("?query")
+    if mv_is_fresh("?query")
+),
+
+rw!("oracle-mv-partial-rewrite";
+    "(aggregate ?aggs ?groups
+        (filter ?pred (join ?type ?cond ?left ?right)))" =>
+    "(aggregate (rollup-aggs ?aggs) (subset-groups ?groups)
+        (filter ?extra_pred (scan-mv ?mv)))"
+    if is_database("oracle")
+    if mv_partially_matches("?mv", "?aggs", "?groups")
+    if mv_is_fresh("?mv")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    query: &LogicalPlan,
+    mvs: &[MaterializedView],
+) -> bool {
+    mvs.iter().any(|mv| {
+        mv.is_fresh()
+        && (mv.exact_matches(query)
+            || mv.partial_matches(query))
+    })
+}
+```
+
+**Restrictions:**
+- MV must be fresh (STALE MVs require QUERY_REWRITE_INTEGRITY = STALE_TOLERATED)
+- QUERY_REWRITE_ENABLED must be TRUE
+- MV must have ENABLE QUERY REWRITE clause
+- Complex rewrites (rollup, additional joins) require cost-based evaluation
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    base_query_cost: f64,
+    mv_scan_cost: f64,
+) -> f64 {
+    base_query_cost - mv_scan_cost
+}
+```
+
+**Typical benefit**: Pre-aggregated MV on 1B-row fact table reduces
+query from scanning 1B rows to scanning 1000 summary rows.
+
+## Test Cases
+
+```sql
+-- Positive: exact match MV rewrite
+-- MV: CREATE MATERIALIZED VIEW mv AS
+--   SELECT dept, SUM(sal) FROM emp GROUP BY dept;
+SELECT dept, SUM(sal) FROM emp GROUP BY dept;
+-- Rewritten to: SELECT * FROM mv
+```
+
+```sql
+-- Positive: partial match (rollup)
+-- MV has GROUP BY dept, year; query has GROUP BY dept
+SELECT dept, SUM(sal) FROM emp GROUP BY dept;
+-- Rewritten to: SELECT dept, SUM(sum_sal) FROM mv GROUP BY dept
+```
+
+```sql
+-- Negative: MV is stale and integrity is ENFORCED
+SELECT dept, SUM(sal) FROM emp GROUP BY dept;
+-- MV is stale; cannot rewrite under ENFORCED integrity
+```
+
+## References
+
+Oracle: Oracle Database Data Warehousing Guide, "Query Rewrite"
+Oracle: DBMS_MVIEW.EXPLAIN_REWRITE procedure
+Oracle: QUERY_REWRITE_ENABLED, QUERY_REWRITE_INTEGRITY parameters

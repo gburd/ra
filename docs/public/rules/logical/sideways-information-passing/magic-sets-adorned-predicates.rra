@@ -1,0 +1,364 @@
+---
+id: magic-sets-adorned-predicates
+name: "Magic Sets Adorned Predicate Generation"
+category: logical/sideways-information-passing
+databases: [postgresql, oracle, monetdb, logicblox]
+execution_models: [volcano, differential]
+version: "1.0.0"
+authors: ["Bancilhon, Maier, Sagiv, Ullman"]
+tags: [magic-sets, adornment, datalog, binding-patterns, sideways-information-passing, classic]
+complexity: "O(r * 2^a)"
+benefit_range: [0.5, 100.0]
+---
+
+# Magic Sets Adorned Predicate Generation
+
+## Description
+
+Adorned predicate generation is the first phase of the magic sets transformation.
+An adornment describes which arguments of a predicate are "bound" (known from
+the query or a previous computation) versus "free" (to be computed). For example,
+`ancestor^bf(X, Y)` means X is bound and Y is free: we know who X is and want
+to find all ancestors Y.
+
+The adornment algorithm propagates binding information from the query through
+the rules, generating adorned versions of each predicate. Each unique adornment
+produces a specialized version of the predicate that only computes the tuples
+reachable from the bound arguments. This is the mechanism by which magic sets
+achieves its selectivity: instead of computing all ancestors, only compute
+ancestors reachable from the bound starting point.
+
+**When to apply**: Recursive or Datalog-style queries where the query provides
+binding information (constants or equalities) that can be propagated into
+recursive rules to limit computation.
+
+**Why it works**: Different binding patterns lead to different computation
+strategies. `ancestor^bf` (given a person, find their ancestors) can use
+the "bound" argument to start a focused traversal, while `ancestor^ff`
+(find all ancestor pairs) must compute the full transitive closure. By
+generating adorned predicates, the optimizer produces specialized rules
+that exploit the available bindings.
+
+## Relational Algebra
+
+```latex
+$$
+Adornment Algorithm:
+$$
+
+$$
+Input: Query Q and rules R
+Output: Adorned rules R_adorned
+$$
+
+$$
+1. Start with query predicate, adorn based on bound arguments
+   Example: ?- ancestor(john, X)
+   Adornment: ancestor^bf (first arg bound, second free)
+$$
+
+$$
+2. For each adorned predicate P^a, process each rule for P:
+   - Mark head arguments as bound/free per adornment
+   - Propagate bindings through rule body left-to-right
+   - Select a SIPS (Sideways Information Passing Strategy) to determine
+     which body predicates receive bindings
+$$
+
+$$
+   Example rule: ancestor(X, Z) :- parent(X, Y), ancestor(Y, Z)
+   With ancestor^bf: X is bound from head
+     parent(X, Y): X bound \rightarrow Y becomes bound after evaluation
+     ancestor(Y, Z): Y bound from parent \rightarrow adorn as ancestor^bf
+     Result: ancestor^bf(X, Z) :- parent^bf(X, Y), ancestor^bf(Y, Z)
+$$
+
+$$
+3. Repeat until no new adorned predicates are generated
+$$
+
+$$
+Adornment is a fixpoint computation over all rules.
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+use std::collections::{HashMap, HashSet, VecDeque};
+
+#[derive(Clone, Debug, Hash, Eq, PartialEq)]
+struct Adornment(Vec<BindingStatus>);
+
+#[derive(Clone, Debug, Hash, Eq, PartialEq)]
+enum BindingStatus {
+    Bound,  // 'b' - value known
+    Free,   // 'f' - value to be computed
+}
+
+#[derive(Clone, Debug)]
+struct AdornedPredicate {
+    name: String,
+    adornment: Adornment,
+}
+
+struct AdornmentGenerator {
+    adorned_rules: Vec<AdornedRule>,
+    worklist: VecDeque<AdornedPredicate>,
+    processed: HashSet<AdornedPredicate>,
+}
+
+impl AdornmentGenerator {
+    fn generate(
+        &mut self,
+        query: &Query,
+        rules: &[Rule],
+    ) -> Vec<AdornedRule> {
+        // Step 1: Adorn the query predicate
+        let query_adornment = self.adorn_query(query);
+        self.worklist.push_back(query_adornment);
+
+        // Step 2: Process worklist until fixpoint
+        while let Some(adorned_pred) = self.worklist.pop_front() {
+            if self.processed.contains(&adorned_pred) {
+                continue;
+            }
+            self.processed.insert(adorned_pred.clone());
+
+            // Find all rules defining this predicate
+            for rule in rules.iter()
+                .filter(|r| r.head.name == adorned_pred.name)
+            {
+                let adorned_rule = self.adorn_rule(
+                    rule, &adorned_pred.adornment,
+                );
+                self.adorned_rules.push(adorned_rule);
+            }
+        }
+
+        self.adorned_rules.clone()
+    }
+
+    fn adorn_query(&self, query: &Query) -> AdornedPredicate {
+        let adornment = query.arguments.iter()
+            .map(|arg| {
+                if arg.is_constant() || arg.is_bound_variable() {
+                    BindingStatus::Bound
+                } else {
+                    BindingStatus::Free
+                }
+            })
+            .collect();
+
+        AdornedPredicate {
+            name: query.predicate.clone(),
+            adornment: Adornment(adornment),
+        }
+    }
+
+    fn adorn_rule(
+        &mut self,
+        rule: &Rule,
+        head_adornment: &Adornment,
+    ) -> AdornedRule {
+        // Track which variables are bound
+        let mut bound_vars: HashSet<String> = HashSet::new();
+
+        // Bind variables from head based on adornment
+        for (arg, status) in rule.head.arguments.iter()
+            .zip(head_adornment.0.iter())
+        {
+            if *status == BindingStatus::Bound {
+                if let Argument::Variable(v) = arg {
+                    bound_vars.insert(v.clone());
+                }
+            }
+        }
+
+        // Process body predicates left-to-right (SIPS order)
+        let mut adorned_body = Vec::new();
+
+        for body_pred in &rule.body {
+            // Adorn this body predicate based on current bindings
+            let body_adornment: Vec<BindingStatus> =
+                body_pred.arguments.iter()
+                    .map(|arg| match arg {
+                        Argument::Variable(v)
+                            if bound_vars.contains(v) =>
+                        {
+                            BindingStatus::Bound
+                        }
+                        Argument::Constant(_) => BindingStatus::Bound,
+                        _ => BindingStatus::Free,
+                    })
+                    .collect();
+
+            let adorned_pred = AdornedPredicate {
+                name: body_pred.name.clone(),
+                adornment: Adornment(body_adornment),
+            };
+
+            // After evaluating this predicate, its free variables
+            // become bound
+            for (arg, status) in body_pred.arguments.iter()
+                .zip(adorned_pred.adornment.0.iter())
+            {
+                if *status == BindingStatus::Free {
+                    if let Argument::Variable(v) = arg {
+                        bound_vars.insert(v.clone());
+                    }
+                }
+            }
+
+            // Add new adorned predicate to worklist
+            if body_pred.is_recursive() {
+                self.worklist.push_back(adorned_pred.clone());
+            }
+
+            adorned_body.push(adorned_pred);
+        }
+
+        AdornedRule {
+            head: AdornedPredicate {
+                name: rule.head.name.clone(),
+                adornment: head_adornment.clone(),
+            },
+            body: adorned_body,
+        }
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    hw: &HardwareProfile,
+) -> bool {
+    // Must have recursive or Datalog-style rules
+    stats.has_recursion
+        // Must have bound arguments in the query
+        && stats.query_has_bound_arguments
+        // Adornment produces at most 2^arity variants per predicate
+        && stats.max_predicate_arity <= 10
+}
+```
+
+**Restrictions:**
+- Number of adorned predicates bounded by 2^arity per predicate
+- Left-to-right body evaluation order is a simple SIPS; more complex
+  strategies (cost-based SIPS) can produce better adornments
+- Only useful for recursive predicates; non-recursive predicates don't
+  benefit from adornment
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    // Without adornment: compute full relation (all tuples)
+    let full_relation_size = stats.estimated_full_closure_size as f64;
+
+    // With adornment: compute only reachable tuples
+    let query_selectivity = stats.query_bound_selectivity;
+    let reachable_size = full_relation_size * query_selectivity;
+
+    if full_relation_size > reachable_size && reachable_size > 0.0 {
+        (full_relation_size - reachable_size) / full_relation_size
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 5x-1000x for graph queries with specific starting points.
+
+## Test Cases
+
+### Positive: Ancestor query with bound start
+
+```
+# Rules:
+ancestor(X, Y) :- parent(X, Y).
+ancestor(X, Z) :- parent(X, Y), ancestor(Y, Z).
+
+# Query: ?- ancestor(john, X)
+# Adornment: ancestor^bf
+
+# Adorned rules:
+ancestor^bf(X, Y) :- parent^bf(X, Y).
+ancestor^bf(X, Z) :- parent^bf(X, Y), ancestor^bf(Y, Z).
+
+# Only computes ancestors reachable from 'john'
+# vs. computing ALL ancestor pairs in the graph
+```
+
+### Positive: Same-generation query
+
+```
+# Rules:
+sg(X, Y) :- flat(X, Y).
+sg(X, Y) :- up(X, X1), sg(X1, Y1), down(Y1, Y).
+
+# Query: ?- sg(a, X)
+# Adornment: sg^bf
+
+# Adorned rules:
+sg^bf(X, Y) :- flat^bf(X, Y).
+sg^bf(X, Y) :- up^bf(X, X1), sg^bf(X1, Y1), down^bf(Y1, Y).
+
+# Propagates binding: X->X1 via up, X1->Y1 via sg, Y1->Y via down
+```
+
+### Positive: SQL recursive CTE equivalent
+
+```sql
+-- Find all managers above employee 42
+WITH RECURSIVE chain(emp, mgr, level) AS (
+  SELECT employee_id, manager_id, 0
+  FROM employees WHERE employee_id = 42
+  UNION ALL
+  SELECT c.emp, e.manager_id, c.level + 1
+  FROM chain c JOIN employees e ON c.mgr = e.employee_id
+)
+SELECT * FROM chain;
+
+-- Adornment: chain^bff (employee_id bound from WHERE clause)
+-- Only traverses upward from employee 42
+-- Without adornment: would compute management chains for ALL employees
+```
+
+### Negative: No bound arguments
+
+```
+# Query: ?- ancestor(X, Y)  -- both free
+# Adornment: ancestor^ff
+# No benefit: must compute full transitive closure anyway
+```
+
+## References
+
+**Original paper:**
+- Bancilhon, F., Maier, D., Sagiv, Y., Ullman, J.D., "Magic Sets and Other Strange Ways to Implement Logic Programs", ACM PODS 1986
+  - DOI: 10.1145/6012.15399
+  - Section 3: "Adorned programs" -- the adornment algorithm
+  - Definition of SIPS (Sideways Information Passing Strategy)
+
+**Detailed treatment:**
+- Ullman, J.D., "Principles of Database and Knowledge-Base Systems, Vol. II", Computer Science Press 1989
+  - Chapter 13: Magic sets and related techniques
+  - Complete adornment algorithm with proofs
+
+- Beeri, C., Ramakrishnan, R., "On the Power of Magic", Journal of Logic Programming 1991
+  - DOI: 10.1016/0743-1066(91)90038-Q
+  - Formal analysis of adornment expressiveness
+
+**Implementation in databases:**
+- LogicBlox: Full adornment-based optimization for Datalog
+- PostgreSQL: Implicit adornment in recursive CTE optimization
+- flink: Datalog evaluation with binding propagation

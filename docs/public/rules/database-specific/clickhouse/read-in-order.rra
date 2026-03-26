@@ -1,0 +1,147 @@
+---
+id: clickhouse-read-in-order
+name: Read-in-Order Optimization for Sorting
+category: database-specific/clickhouse
+databases: [clickhouse]
+version: 1.0.0
+authors: ["RA Contributors"]
+tags: [database-specific, clickhouse, mergetree, sorting, order-by, sort-key]
+complexity: O(n)
+benefit_range: [0.5, 0.95]
+---
+
+# Read-in-Order Optimization for Sorting
+
+## Description
+
+Eliminates explicit sorting when data is read in an order that matches the query's ORDER BY clause. MergeTree tables store data sorted by the sort key; if the query's ORDER BY matches (or is a prefix of) the sort key, data can be streamed in order directly from storage without a separate sort step.
+
+**When to apply**: Query has ORDER BY on columns that match the table's sort key, and operations between scan and sort preserve order.
+
+**Why it works**: MergeTree maintains data sorted by the sort key within each part. Reading in primary key order naturally produces sorted output, eliminating O(n log n) sorting.
+
+**Database version**: ClickHouse v19.16+
+
+## Relational Algebra
+
+```latex
+$$
+Sort[k](Scan[MergeTree, sort_key=k](T))
+  \rightarrow Scan[MergeTree, read_in_order=k](T)
+  \text{where} k is_prefix_of sort_key
+  \text{where} no_operations_break_order
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("clickhouse-read-in-order";
+    "(sort ?ordering (scan ?table ?props))" =>
+    "(scan ?table (set_read_in_order ?props ?ordering))"
+    if is_database("clickhouse")
+    if is_mergetree_table("?table")
+    if ordering_matches_sort_key("?ordering", "?table")
+    if query_plan_read_in_order_enabled()
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    sort_ordering: &[SortColumn],
+    scan: &ReadFromMergeTree,
+) -> bool {
+    let sort_key = scan.storage_metadata().sort_key();
+
+    // ORDER BY must be a prefix of the sort key
+    if sort_ordering.is_empty() || sort_key.is_empty() {
+        return false;
+    }
+
+    // Check if ordering matches sort key prefix
+    if !is_prefix_match(sort_ordering, &sort_key) {
+        return false;
+    }
+
+    // No operations between scan and sort that break order
+    // (filters and projections are OK, aggregations are not)
+    true
+}
+```
+
+**Restrictions:**
+- Only applies to ClickHouse MergeTree family
+- ORDER BY must match a prefix of the table's sort key
+- Requires `query_plan_read_in_order` and `optimize_read_in_order` settings enabled
+- Operations between scan and sort must preserve order
+- Cannot be used with SAMPLE modifier
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    table_rows: f64,
+    sort_cost_factor: f64,
+) -> f64 {
+    // Normal: read unsorted + sort O(n log n)
+    let normal_cost = table_rows * 100.0
+                    + table_rows * table_rows.log2() * sort_cost_factor;
+
+    // Read-in-order: read sorted data O(n)
+    let optimized_cost = table_rows * 100.0;
+
+    (normal_cost - optimized_cost) / normal_cost
+}
+```
+
+**Typical benefit**: 50-95% cost reduction by eliminating sorting
+
+## Test Cases
+
+### Positive Case 1: Simple ORDER BY on Sort Key
+
+```sql
+CREATE TABLE events (
+  timestamp DateTime,
+  user_id UInt64,
+  event String
+) ENGINE = MergeTree()
+ORDER BY (timestamp, user_id);
+
+SELECT * FROM events
+ORDER BY timestamp;
+
+-- Optimized: Read data in timestamp order directly (sort key prefix)
+-- No explicit sort needed
+```
+
+### Positive Case 2: Multi-Column ORDER BY
+
+```sql
+SELECT * FROM events
+ORDER BY timestamp, user_id;
+
+-- ORDER BY matches full sort key - read in order
+```
+
+### Negative Case 1: ORDER BY Not Matching Sort Key
+
+```sql
+SELECT * FROM events
+ORDER BY event;  -- 'event' not in sort key
+
+-- Rule should NOT apply - explicit sort needed
+```
+
+## References
+
+**Source code:**
+- ClickHouse: `src/Processors/QueryPlan/Optimizations/optimizeReadInOrder.cpp`
+  - Git: https://github.com/ClickHouse/ClickHouse
+  - Commit: 35f2d31186cca2f8c50f7ba4bd93817da490da85 (2026-03-17)
+- ClickHouse: `src/Storages/ReadInOrderOptimizer.h`

@@ -1,0 +1,61 @@
+---
+id: tidb-coprocessor-topn-pushdown
+name: TiDB Coprocessor TOP-N Pushdown
+category: database-specific/tidb
+databases: [tidb]
+execution_models: [vectorized, distributed]
+hardware: [cpu, distributed]
+version: "1.0.0"
+authors: ["PingCAP TiDB Team", "RA Contributors"]
+tags: [coprocessor, pushdown, topn, order, limit, tikv]
+complexity: "O(n log k)"
+benefit_range: [0.7, 0.95]
+source_file: "pkg/planner/core/exhaust_physical_plans.go"
+source_repo: "github.com/pingcap/tidb"
+---
+
+# TiDB Coprocessor TOP-N Pushdown
+
+## Description
+
+Pushes ORDER BY + LIMIT (TOP-N) to TiKV coprocessor, maintaining only
+top N rows at each region using a min-heap, then merging results at TiDB.
+
+## Relational Algebra
+
+```latex
+$$
+Limit[n](Sort[cols](Scan[table]))
+  \rightarrow MergeSort[cols](CopTask(TopN[n, cols](Scan[table])))
+$$
+
+```
+
+## Implementation
+
+```rust
+fn push_topn_to_cop(limit: &Limit, sort: &Sort, scan: &Scan) -> CopTask {
+    CopTask {
+        table: scan.table,
+        topn: Some(TopN {
+            limit: limit.count,
+            order_by: sort.columns,
+        }),
+    }
+}
+```
+
+## Cost Model
+
+Each TiKV region maintains heap of size n, dramatically reducing transfer.
+
+## Test Cases
+
+```sql
+-- Top 1000 highest value orders
+SELECT * FROM orders ORDER BY total_amount DESC LIMIT 1000;
+-- Each TiKV region keeps top 1000, TiDB merges
+```
+
+## References
+- Source: `pkg/planner/core/exhaust_physical_plans.go` (getTaskPlan)

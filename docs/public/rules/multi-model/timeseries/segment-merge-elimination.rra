@@ -1,0 +1,106 @@
+---
+id: segment-merge-elimination
+name: Segment Merge Elimination
+category: multi-model/timeseries
+databases: [influxdb, questdb, clickhouse]
+standard: "flux:2"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [timeseries, segment, merge, elimination, compaction]
+---
+
+# Segment Merge Elimination
+
+## Description
+
+Eliminates redundant merge operations between time-ordered segments when
+the segments are already non-overlapping and ordered. Time-series
+storage engines split data into segments (TSM files, WAL segments,
+column chunks). A query that spans multiple segments normally merges
+them by time. When segment boundaries are non-overlapping, the merge
+degenerates to simple concatenation.
+
+**When to apply**: Multiple segments are scanned and their time ranges
+are strictly non-overlapping (each segment's max time is less than the
+next segment's min time).
+
+**Why it works**: A merge operation (k-way merge sort) costs
+O(n log k) where k is the number of segments. Concatenation costs O(n).
+For non-overlapping segments, the merge produces the same result as
+concatenation.
+
+## Relational Algebra
+
+```latex
+$$
+merge_ordered([seg1, seg2, ..., segk])
+  \rightarrow concat([seg1, seg2, ..., segk])
+  \text{where} forall i: seg_i.max_time < seg_{i+1}.min_time
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("segment-merge-elimination";
+    "(ts-merge ?segments)" =>
+    "(ts-concat ?segments)"
+    if segments_non_overlapping("?segments")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(segments: &[Segment]) -> bool {
+    segments.windows(2).all(|pair| {
+        pair[0].max_time < pair[1].min_time
+    })
+}
+```
+
+**Restrictions:**
+- Segments must be strictly non-overlapping
+- If any out-of-order inserts exist, segments may overlap
+- Compaction state must be checked at plan time
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    total_rows: f64,
+    num_segments: u32,
+) -> f64 {
+    let merge_cost = total_rows * (num_segments as f64).ln();
+    let concat_cost = total_rows;
+    (merge_cost - concat_cost) / merge_cost
+}
+```
+
+**Typical benefit**: 0.2-0.5 for queries spanning many segments.
+
+## Test Cases
+
+```sql
+-- Positive: 3 non-overlapping daily segments
+-- seg1: [2025-03-01, 2025-03-02)
+-- seg2: [2025-03-02, 2025-03-03)
+-- seg3: [2025-03-03, 2025-03-04)
+SELECT * FROM sensor_data
+WHERE time >= '2025-03-01' AND time < '2025-03-04';
+-- Uses concatenation instead of merge
+
+-- Negative: overlapping segments (before compaction)
+-- seg1: [2025-03-01, 2025-03-03)
+-- seg2: [2025-03-02, 2025-03-04)
+-- Must use merge to handle overlap
+```
+
+## References
+
+InfluxDB: tsdb/engine/tsm1/compact.go - Compactor
+QuestDB: core/src/main/java/io/questdb/cairo/TableWriter.java
+Dageville et al. "The Snowflake Elastic Data Warehouse" (SIGMOD 2016)

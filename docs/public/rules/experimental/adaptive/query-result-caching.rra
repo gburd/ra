@@ -1,0 +1,227 @@
+---
+id: query-result-caching
+name: Query Result Caching and Materialized Subexpression Reuse
+category: experimental/adaptive
+databases: [oracle, mysql, cockroachdb, duckdb]
+version: "1.0.0"
+authors: ["Larson & Zhou 2007", "RA Contributors"]
+tags: [adaptive, caching, materialization, reuse, subexpression, memoization]
+complexity: O(1) cache lookup
+benefit_range: [0.5, 0.99]
+research_status: mature-research
+maturity: production
+---
+
+# Query Result Caching and Materialized Subexpression Reuse
+
+## Description
+
+Caches the results of expensive query subexpressions or entire queries
+and reuses them for subsequent identical or overlapping requests. The
+system maintains a result cache keyed by normalized query text (or
+subexpression hash) and invalidated when underlying data changes. This
+avoids redundant computation for repeated queries and enables sharing
+intermediate results across concurrent queries.
+
+**When to apply**: Repeated execution of the same query or queries
+that share expensive subexpressions (common table expressions,
+subqueries, or materialized views). Especially effective for
+read-heavy workloads with infrequent updates.
+
+**Why it works**: Many workloads exhibit high query repetition (same
+dashboard query, same API endpoint). Computing the result once and
+serving subsequent requests from cache converts O(n) computation into
+O(1) lookup. For shared subexpressions, the cost of a single
+materialization is amortized across all queries that reference it.
+
+## Relational Algebra
+
+```latex
+-- Full query caching
+$$
+Q(T) \rightarrow cache_lookup(hash(Q))
+  if cache_hit: return cached_result
+  if cache_miss: result = execute(Q); cache_store(hash(Q), result)
+$$
+
+-- Subexpression reuse
+$$
+Q1 = \sigma_{a > 5}(Join(A, B))
+Q2 = \sigma_{a > 10}(Join(A, B))
+$$
+-- Shared subexpression: Join(A, B)
+-- Materialize Join(A, B) as M
+$$
+Q1 = \sigma_{a > 5}(M)
+Q2 = \sigma_{a > 10}(M)
+$$
+
+```
+
+## Implementation
+
+```rust
+struct ResultCache {
+    entries: HashMap<u64, CacheEntry>,
+    max_memory: usize,
+    eviction_policy: EvictionPolicy,
+}
+
+struct CacheEntry {
+    query_hash: u64,
+    result: MaterializedResult,
+    dependencies: Vec<TableId>,  // for invalidation
+    created_at: Timestamp,
+    last_accessed: Timestamp,
+    access_count: u64,
+    size_bytes: usize,
+}
+
+enum EvictionPolicy {
+    LRU,
+    LFU,
+    CostWeighted,  // Evict entries with lowest (access_count * compute_cost / size)
+}
+
+fn try_cache_result(
+    query: &LogicalPlan,
+    cache: &mut ResultCache,
+) -> Option<MaterializedResult> {
+    let hash = normalize_and_hash(query);
+
+    // Check for exact match
+    if let Some(entry) = cache.entries.get_mut(&hash) {
+        if !entry.is_invalidated() {
+            entry.last_accessed = now();
+            entry.access_count += 1;
+            return Some(entry.result.clone());
+        }
+    }
+
+    // Check for subexpression matches
+    for subexpr in query.subexpressions() {
+        let sub_hash = normalize_and_hash(subexpr);
+        if let Some(entry) = cache.entries.get(&sub_hash) {
+            if !entry.is_invalidated() {
+                // Rewrite query to use cached subexpression
+                return Some(rewrite_with_cached(query, subexpr, entry));
+            }
+        }
+    }
+
+    None
+}
+
+fn invalidate_on_write(
+    table: TableId,
+    cache: &mut ResultCache,
+) {
+    cache.entries.retain(|_, entry| {
+        !entry.dependencies.contains(&table)
+    });
+}
+```
+
+## Preconditions
+
+```rust
+fn cacheable(query: &LogicalPlan) -> bool {
+    // Must be a read-only query
+    query.is_read_only()
+    // Must not contain non-deterministic functions
+    && !query.has_non_deterministic()
+    // Must not contain volatile functions (NOW(), RANDOM())
+    && !query.has_volatile()
+    // Result must fit in cache budget
+    && estimated_result_size(query) < MAX_CACHE_ENTRY_SIZE
+    // Tables must support change tracking for invalidation
+    && query.tables().iter().all(|t| t.supports_change_tracking())
+}
+```
+
+**Restrictions:**
+- Non-deterministic queries (NOW(), RANDOM()) cannot be cached
+- Cache invalidation on writes is essential for correctness; stale
+  results would violate consistency guarantees
+- Memory pressure from large result sets limits cache effectiveness
+- In distributed systems, cache coherence across nodes adds complexity
+- Transaction isolation levels affect when cached results are valid
+  (snapshot reads may see different data than the cache)
+- MySQL's query cache was removed in 8.0 due to scalability issues
+  with write-heavy workloads (global mutex contention)
+
+## Cost Model
+
+```rust
+fn cache_benefit(
+    query_frequency: f64,
+    query_execution_cost: f64,
+    cache_lookup_cost: f64,
+    cache_hit_rate: f64,
+    invalidation_cost: f64,
+    write_frequency: f64,
+) -> f64 {
+    let without_cache = query_frequency * query_execution_cost;
+    let with_cache = query_frequency * (
+        cache_hit_rate * cache_lookup_cost
+        + (1.0 - cache_hit_rate) * query_execution_cost
+    ) + write_frequency * invalidation_cost;
+    without_cache - with_cache
+}
+```
+
+**Typical benefit**: For a dashboard query executed 1000 times/minute
+with a 95% cache hit rate, caching reduces computation by 95%.
+However, for a table updated 100 times/second, invalidation overhead
+may negate the benefit.
+
+## Test Cases
+
+```sql
+-- Positive: repeated dashboard query
+-- Executed every 5 seconds by 50 concurrent users
+SELECT region, SUM(revenue), COUNT(DISTINCT customer_id)
+FROM orders
+WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'
+GROUP BY region;
+
+-- First execution: 2.3 seconds (full computation)
+-- Subsequent 249 executions in 5 minutes: <1ms (cache hit)
+-- Invalidated when orders table is modified
+```
+
+```sql
+-- Positive: shared subexpression across queries
+-- Q1: SELECT * FROM expensive_join WHERE category = 'A'
+-- Q2: SELECT COUNT(*) FROM expensive_join WHERE category = 'B'
+-- expensive_join is materialized once, used by both
+
+WITH expensive_join AS (
+    SELECT o.*, p.name, p.category
+    FROM orders o JOIN products p ON o.product_id = p.id
+)
+SELECT * FROM expensive_join WHERE category = 'A';
+-- CTE result cached for concurrent queries
+```
+
+```sql
+-- Negative: query with NOW()
+SELECT * FROM events WHERE created_at > NOW() - INTERVAL '1 hour';
+-- Non-deterministic; result changes every second
+```
+
+```sql
+-- Negative: write-heavy table
+-- orders table receives 10K inserts/second
+SELECT COUNT(*) FROM orders;
+-- Cache invalidated every 0.1ms; hit rate approaches zero
+```
+
+## References
+
+Larson & Zhou, "Efficient Maintenance of Materialized Outer-Join Views" (ICDE 2007)
+Oracle: "Result Cache" feature (RESULT_CACHE hint)
+MySQL: Query Cache (removed in 8.0 due to scalability issues)
+DuckDB: result caching in connection-local execution
+Redis/Memcached: external query result caching pattern
+Goldstein & Larson, "Optimizing Queries Using Materialized Views" (SIGMOD 2001)

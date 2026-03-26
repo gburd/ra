@@ -1,0 +1,137 @@
+---
+id: hybrid-hash-join
+name: Hybrid Hash Join
+category: physical/join-algorithms
+databases: [postgresql, mysql, oracle]
+execution_models: [volcano, vectorized]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [join, hash, hybrid, adaptive]
+complexity: "O(n + m)"
+benefit_range: [0.4, 0.8]
+preconditions:
+  - type: "pattern"
+    must_match: "(join inner (= ?lcol ?rcol) ?left ?right)"
+    description: "Equi-join with hybrid hash strategy"
+  - type: "predicate"
+    condition: "is_equijoin(= ?lcol ?rcol)"
+    description: "Must be an equi-join"
+  - type: "fact"
+    fact_type: "statistics.size_bytes"
+    table: "smaller_input(?left, ?right)"
+    comparator: ">"
+    threshold: "available_memory() * 0.5"
+    optional: true
+    description: "Build input partially exceeds memory (hybrid keeps one partition in memory)"
+---
+
+# Hybrid Hash Join
+
+## Description
+
+Combines in-memory hash join with grace hash join; keeps hot partition in memory, spills cold ones.
+
+**When to apply**: Hash join where one partition fits in memory but total doesn't.
+
+**Why it works**: Processes largest partition in-memory without I/O; spills others to disk.
+
+## Relational Algebra
+
+```latex
+$$
+\bowtie_{R.key = S.key}(R, S)
+  \rightarrow build_phase:
+       partition R, keep R1 in memory, write R2...Rn to disk
+     probe_phase:
+       for each s in S:
+         if hash(s.key) maps to R1:
+           probe in-memory hash table
+         else:
+           write s to disk partition
+     recursive_phase:
+       grace_hash_join(R2...Rn, S2...Sn)
+$$
+
+```
+
+## Implementation
+
+```rust
+rw!("use-hybrid-hash-join";
+    "(join (= ?left_key ?right_key) ?left ?right)" =>
+    "(hybrid-hash-join ?left_key ?right_key ?left ?right)"
+    if exceeds_memory("?left", "?right") && has_hot_partition("?left")
+),
+```
+
+## Cost Model
+
+```rust
+fn cost(left_size: u64, right_size: u64, memory: u64, hot_fraction: f64) -> f64 {
+    let hot_left = (left_size as f64 * hot_fraction) as u64;
+    let cold_left = left_size - hot_left;
+    let hot_right = (right_size as f64 * hot_fraction) as u64;
+    let cold_right = right_size - hot_right;
+
+    // Hot partition: in-memory
+    let hot_cost = (hot_left + hot_right) as f64;
+
+    // Cold partitions: grace hash join
+    let cold_cost = 3.0 * (cold_left + cold_right) as f64; // R+W+R
+
+    hot_cost + cold_cost
+}
+```
+
+**Typical benefit**: 40-80% vs pure grace hash join
+
+## Test Cases
+
+### Positive: Skewed workload
+
+```sql
+SELECT * FROM orders o
+JOIN customers c ON o.customer_id = c.id;
+
+-- Top 20% customers = 80% orders (hot partition in memory)
+-- Remaining customers spilled to disk
+```
+
+### Positive: Recent data access pattern
+
+```sql
+SELECT * FROM transactions t
+JOIN accounts a ON t.account_id = a.id
+WHERE t.date >= '2025-01-01';
+
+-- Recent accounts hot, keep in memory
+-- Historical accounts cold, spill to disk
+```
+
+### Negative: Uniform distribution
+
+```sql
+SELECT * FROM products p
+JOIN reviews r ON p.id = r.product_id;
+
+-- Reviews uniformly distributed: no hot partition
+-- Use grace hash join instead
+```
+
+### Negative: Multiple hot partitions
+
+```sql
+SELECT * FROM events e
+JOIN users u ON e.user_id = u.id;
+
+-- Multiple hot user groups, all compete for memory
+-- Hybrid strategy ineffective
+```
+
+## References
+
+- PostgreSQL: Adaptive hash join with batching
+- Oracle: Hybrid hash join algorithm
+- "Hybrid Hash Join" paper (Shapiro, 1986)
+- DuckDB: Adaptive hash join strategies

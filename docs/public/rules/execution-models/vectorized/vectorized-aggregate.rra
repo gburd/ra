@@ -1,0 +1,319 @@
+---
+id: vectorized-aggregate
+name: Vectorized Execution - Batch Aggregation
+category: execution-models
+version: 1.0.0
+databases: [DuckDB, ClickHouse, Velox, DataFusion]
+authors: [Peter Boncz, Marcin Zukowski]
+tags: [execution, vectorized, aggregate, batch, simd, hash]
+standard: MonetDB X100
+---
+
+# Vectorized Execution - Batch Aggregation
+
+## Description
+
+Vectorized aggregation processes groups and aggregate updates in batches rather than one tuple at a time. It uses SIMD for hash computation on group keys and batch-updates aggregate accumulators. For low-cardinality grouping, a perfect hash table is used with direct array indexing. For high-cardinality grouping, an open-addressing hash table is probed with SIMD-computed hashes and prefetching to hide memory latency.
+
+**Aggregation strategies:**
+- **Simple aggregation (no GROUP BY)**: Single accumulator, SIMD reduction
+- **Low-cardinality**: Perfect hash array, direct index
+- **Medium-cardinality**: Hash table with SIMD batch probing
+- **High-cardinality**: Partitioned aggregation, per-partition hash tables
+- **Ordered aggregation**: Group boundaries detected during scan
+
+**Key characteristics:**
+- **SIMD hash computation**: Hash multiple group keys simultaneously
+- **Batch hash table probing**: Look up batch of keys with prefetching
+- **Vectorized accumulation**: Update aggregates in batch (SUM, COUNT)
+- **Overflow handling**: SIMD-detected overflow triggers re-aggregation
+- **Two-phase**: Consume all input, then produce results
+
+**Trade-offs:**
+- Hash table memory proportional to distinct groups
+- High-cardinality groups cause cache pressure
+- Pipeline breaker: must consume all input before producing output
+- SIMD benefit limited for string group keys
+
+## Relational Algebra
+
+```
+VectorizedAggregate(input, group_keys, agg_funcs) -> Batch
+
+Phase 1 (consume):
+  for each batch in input:
+    // SIMD hash computation on group keys
+    hashes = simd_hash_batch(batch, group_keys)
+
+    // Batch probe hash table (with prefetching)
+    entries = batch_probe(ht, hashes, batch.group_keys)
+
+    // Batch update aggregates
+    for (entry, row) in zip(entries, batch.rows):
+      entry.sum += row.agg_col        // Vectorized update
+      entry.count += 1
+
+Phase 2 (produce):
+  for each entry in ht:
+    yield (entry.group_keys, entry.aggregates)
+```
+
+## Implementation
+
+```rust
+use ra_core::algebra::RelExpr;
+
+/// Vectorized aggregation operator
+pub struct VectorizedAggregate {
+    input: Box<dyn VectorizedIterator>,
+    group_keys: Vec<ColumnId>,
+    agg_funcs: Vec<AggFunc>,
+    hash_table: AggHashTable,
+}
+
+impl VectorizedAggregate {
+    /// Consume all input and build aggregation hash table
+    pub fn execute(&mut self) -> Result<Vec<Batch>> {
+        // Phase 1: Consume input batches
+        while let Some(batch) = self.input.next_batch()? {
+            self.process_batch(&batch)?;
+        }
+
+        // Phase 2: Produce result batches
+        self.hash_table.to_batches()
+    }
+
+    fn process_batch(&mut self, batch: &Batch) -> Result<()> {
+        let size = batch.effective_size();
+
+        // Step 1: SIMD hash computation
+        let hashes = simd_hash_keys(batch, &self.group_keys)?;
+
+        // Step 2: Batch probe with prefetching
+        let entries = self.hash_table.batch_find_or_create(
+            &hashes, batch, &self.group_keys,
+        )?;
+
+        // Step 3: Vectorized aggregate update
+        for agg in &self.agg_funcs {
+            let col = batch.column(agg.column_idx);
+            match agg.func_type {
+                AggType::Sum => {
+                    vectorized_sum_update(&entries, col, &batch.selection)?;
+                }
+                AggType::Count => {
+                    vectorized_count_update(&entries, &batch.selection)?;
+                }
+                AggType::Min => {
+                    vectorized_min_update(&entries, col, &batch.selection)?;
+                }
+                AggType::Max => {
+                    vectorized_max_update(&entries, col, &batch.selection)?;
+                }
+                AggType::Avg => {
+                    vectorized_sum_update(&entries, col, &batch.selection)?;
+                    vectorized_count_update(&entries, &batch.selection)?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+/// SIMD batch hash computation for group keys
+fn simd_hash_keys(
+    batch: &Batch,
+    group_keys: &[ColumnId],
+) -> Result<Vec<u64>> {
+    let size = batch.effective_size();
+    let mut hashes = vec![0u64; size];
+
+    for key_id in group_keys {
+        let col = batch.column(*key_id);
+        match col.data_type() {
+            DataType::Int64 => {
+                let data = col.as_i64_slice();
+                #[cfg(target_feature = "avx2")]
+                unsafe {
+                    for i in (0..size).step_by(4) {
+                        let vals = _mm256_loadu_si256(
+                            data.as_ptr().add(i) as *const __m256i,
+                        );
+                        // Multiply-shift hash
+                        let factor = _mm256_set1_epi64x(
+                            0x9E3779B97F4A7C15u64 as i64,
+                        );
+                        let h = _mm256_mul_epu32(vals, factor);
+                        let existing = _mm256_loadu_si256(
+                            hashes.as_ptr().add(i) as *const __m256i,
+                        );
+                        let combined = _mm256_xor_si256(existing, h);
+                        _mm256_storeu_si256(
+                            hashes.as_mut_ptr().add(i) as *mut __m256i,
+                            combined,
+                        );
+                    }
+                }
+            }
+            _ => {
+                // Scalar hash for non-integer types
+                for i in 0..size {
+                    hashes[i] ^= col.hash_at(i);
+                }
+            }
+        }
+    }
+
+    Ok(hashes)
+}
+
+/// Batch probe with software prefetching
+fn batch_find_or_create(
+    ht: &mut AggHashTable,
+    hashes: &[u64],
+    batch: &Batch,
+    keys: &[ColumnId],
+) -> Result<Vec<*mut AggEntry>> {
+    let mut entries = vec![std::ptr::null_mut(); hashes.len()];
+
+    // Issue prefetches for first batch of slots
+    let prefetch_distance = 8;
+    for i in 0..prefetch_distance.min(hashes.len()) {
+        let slot = (hashes[i] as usize) & ht.mask;
+        unsafe {
+            std::arch::x86_64::_mm_prefetch(
+                ht.slots.as_ptr().add(slot) as *const i8,
+                std::arch::x86_64::_MM_HINT_T0,
+            );
+        }
+    }
+
+    for i in 0..hashes.len() {
+        // Prefetch ahead
+        if i + prefetch_distance < hashes.len() {
+            let future_slot = (hashes[i + prefetch_distance] as usize)
+                & ht.mask;
+            unsafe {
+                std::arch::x86_64::_mm_prefetch(
+                    ht.slots.as_ptr().add(future_slot) as *const i8,
+                    std::arch::x86_64::_MM_HINT_T0,
+                );
+            }
+        }
+
+        // Probe current slot
+        entries[i] = ht.find_or_create_entry(hashes[i], batch, i, keys)?;
+    }
+
+    Ok(entries)
+}
+
+/// Cost model for vectorized aggregation
+pub fn vectorized_aggregate_cost(
+    input_rows: f64,
+    batch_size: usize,
+    num_groups: f64,
+    num_agg_funcs: usize,
+) -> f64 {
+    let num_batches = (input_rows / batch_size as f64).ceil();
+
+    // SIMD hash cost
+    let hash_cost = input_rows * 0.00001;
+
+    // Hash table probe cost (depends on cache behavior)
+    let probe_cost = if num_groups < 256.0 {
+        input_rows * 0.000005  // L1 cache: fast
+    } else if num_groups < 50000.0 {
+        input_rows * 0.00002   // L2 cache
+    } else {
+        input_rows * 0.00005   // L3/memory: cache misses
+    };
+
+    // Aggregate update cost (SIMD for numeric)
+    let update_cost = input_rows * num_agg_funcs as f64 * 0.000003;
+
+    // Output cost
+    let output_cost = num_groups * 0.00001;
+
+    hash_cost + probe_cost + update_cost + output_cost
+}
+```
+
+## Cost Model
+
+**SIMD Hash Computation:**
+- Integer keys: ~5 ns per key (SIMD multiply-shift)
+- String keys: ~20-50 ns per key (scalar hash)
+- Multiple keys: XOR-combine individual hashes
+
+**Hash Table Probing (with prefetching):**
+- Low cardinality (<256 groups): ~5 ns (L1 cache hit)
+- Medium cardinality (<50K groups): ~20 ns (L2 cache)
+- High cardinality (>50K groups): ~50 ns (L3/cache miss)
+- Prefetching: hides ~50% of L3 latency
+
+**Aggregate Update:**
+- SUM (integer): ~1 ns (register ADD)
+- COUNT: ~1 ns (register INCREMENT)
+- MIN/MAX: ~2 ns (conditional move)
+- AVG: ~2 ns (SUM + COUNT)
+
+**vs. Volcano Aggregation:**
+- Hash computation: 4x faster (SIMD batch)
+- Hash table probe: 2x faster (prefetching)
+- Aggregate update: 5x faster (no expression eval)
+- Total: 3-5x speedup for numeric aggregations
+
+## Test Cases
+
+```sql
+-- Test 1: Simple aggregation (no grouping, SIMD reduction)
+SELECT COUNT(*), SUM(amount), AVG(amount) FROM transactions;
+-- Expected: Single accumulator, SIMD vector reduction
+-- No hash table needed: direct register accumulation
+
+-- Test 2: Low-cardinality grouping
+SELECT status, COUNT(*), SUM(amount)
+FROM orders GROUP BY status;
+-- ~5 distinct values: perfect hash table in L1
+-- Expected: Direct array indexing, no hash collisions
+
+-- Test 3: High-cardinality grouping with prefetching
+SELECT customer_id, SUM(order_total)
+FROM orders GROUP BY customer_id;
+-- ~1M customers: hash table in L3/memory
+-- Expected: Software prefetching hides cache miss latency
+
+-- Test 4: Multi-aggregate on same group
+SELECT region,
+  SUM(revenue), AVG(revenue),
+  MIN(revenue), MAX(revenue), COUNT(*)
+FROM sales GROUP BY region;
+-- Expected: All five aggregates updated in one HT probe
+-- Single hash lookup, five register updates per tuple
+```
+
+## Comparison with Other Models
+
+| Aspect | Vectorized Agg | Volcano Agg | Push-Based Agg |
+|--------|---------------|-------------|----------------|
+| Hash computation | SIMD batch | Per-tuple scalar | Inline hash fn |
+| HT probe | Prefetched batch | Sequential | Inline probe |
+| Update | Vectorized | Expression eval | Register ops |
+| Low cardinality | Perfect hash | Hash table | Register agg |
+| High cardinality | Prefetch hides misses | Cache misses | Cache misses |
+
+## References
+
+1. **Boncz, Peter A.; Zukowski, Marcin; Nes, Niels**. "MonetDB/X100: Hyper-Pipelining Query Execution." CIDR 2005.
+   - Vectorized aggregation model
+
+2. **Ye, Yinan et al**. "Scalable Aggregation on Multicore Processors." DaMoN 2011.
+   - Batch aggregation strategies and prefetching
+
+3. **Raasveldt, Mark; Muhleisen, Hannes**. "DuckDB: an Embeddable Analytical Database." SIGMOD 2019.
+   - Production vectorized aggregation implementation
+
+4. **Balkesen, Cagri et al**. "Main-Memory Hash Joins on Multi-Core CPUs: Tuning to the Underlying Hardware." ICDE 2013.
+   - Prefetching techniques applicable to aggregation hash tables

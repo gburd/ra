@@ -1,0 +1,119 @@
+---
+id: implicit-cast-index-match
+name: Resolve Implicit Casts to Enable Index Use
+category: logical/function-optimization
+databases: [postgresql, mysql, oracle, mssql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [logical, function, index, implicit-cast, type-mismatch]
+complexity: O(1)
+benefit_range: [0.2, 0.9]
+---
+
+# Resolve Implicit Casts to Enable Index Use
+
+## Description
+
+Detects implicit type casts added by the database engine during
+type resolution and moves them to enable index use. When comparing
+`varchar_col = 123`, the engine implicitly casts the varchar column
+to integer, preventing index use. This rule instead casts the literal
+`123` to `'123'`, keeping the column bare for index access.
+
+**When to apply**: An implicit cast has been applied to an indexed
+column due to type mismatch with the comparison value.
+
+**Why it works**: Implicit casts on columns prevent index use.
+Moving the cast to the literal/parameter side preserves the column
+reference for index matching. The optimizer must ensure the type
+conversion is semantics-preserving in both directions.
+
+## Implementation
+
+```rust
+// Move implicit cast from column to literal (string vs numeric)
+rw!("implicit-cast-string-to-numeric";
+    "(filter (= (implicit-cast ?col 'numeric') ?num_val)
+       (scan ?t))" =>
+    "(filter (= ?col (cast ?num_val 'varchar'))
+       (index-scan ?t ?idx))"
+    if has_index("?t", "?col", "?idx")
+    if column_is_string_type("?col")
+    if numeric_has_exact_string_repr("?num_val")
+),
+
+// Move implicit cast for date vs string comparison
+rw!("implicit-cast-date-to-string";
+    "(filter (= (implicit-cast ?col 'date') ?date_val)
+       (scan ?t))" =>
+    "(filter (= ?col (cast ?date_val 'varchar'))
+       (index-scan ?t ?idx))"
+    if has_index("?t", "?col", "?idx")
+    if column_is_string_type("?col")
+),
+
+// Move implicit cast for numeric precision widening
+rw!("implicit-cast-numeric-widening";
+    "(filter (= (implicit-cast ?col 'double') ?val)
+       (scan ?t))" =>
+    "(filter (= ?col (cast ?val ?col_type))
+       (index-scan ?t ?idx))"
+    if has_index("?t", "?col", "?idx")
+    if get_column_type("?col", "?col_type")
+    if value_representable_in("?val", "?col_type")
+),
+
+// Remove implicit identity cast
+rw!("remove-implicit-identity-cast";
+    "(implicit-cast ?col ?type)" => "?col"
+    if column_has_type("?col", "?type")
+),
+```
+
+## Preconditions
+
+- Implicit cast direction must be reversible without data loss
+- String-to-numeric: only safe if numeric value has exact string form
+  (e.g., 123 -> '123' is safe, but 1.1 -> '1.1' may differ by locale)
+- Must handle: leading zeros ('007' != 7), decimal formatting,
+  locale-dependent number formats
+- NULL handling: CAST(NULL AS type) is always NULL
+
+## Test Cases
+
+```sql
+-- Setup: CREATE INDEX idx_zipcode ON addresses (zipcode);
+--        zipcode is VARCHAR(10)
+
+-- Positive: numeric compared to varchar column
+SELECT * FROM addresses WHERE zipcode = 90210;
+-- Engine implicitly casts zipcode to numeric
+-- Rewritten: WHERE zipcode = '90210' (using index)
+
+-- Setup: CREATE INDEX idx_amount ON payments (amount);
+--        amount is DECIMAL(10,2)
+
+-- Positive: integer compared to decimal column
+SELECT * FROM payments WHERE amount = 100;
+-- Implicit widening cast on amount
+-- Rewritten: WHERE amount = CAST(100 AS DECIMAL(10,2))
+
+-- Positive: string date compared to date column
+-- (reverse direction: cast the string literal)
+SELECT * FROM events WHERE event_date = '2024-01-15';
+-- Rewritten: WHERE event_date = DATE '2024-01-15'
+
+-- Negative: lossy cast direction
+SELECT * FROM addresses WHERE zipcode = 007;
+-- '007' as integer is 7; cannot safely reverse (loses leading zeros)
+
+-- Negative: locale-dependent conversion
+SELECT * FROM prices WHERE price_text = 1.5;
+-- '1.5' vs '1,5' depends on locale: unsafe to reverse
+```
+
+## References
+
+- mssql: "Implicit Conversions that cause Index Scans"
+- PostgreSQL: Type Resolution and Implicit Casts
+- MySQL: Type Conversion in Expression Evaluation

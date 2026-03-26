@@ -1,0 +1,105 @@
+---
+id: calcite-project-over-sum-to-sum0
+name: Calcite ProjectOverSumToSum0Rule
+category: logical/expression-simplification
+databases: [calcite, postgresql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [logical, calcite, project, window, sum, sum0, null-safety]
+complexity: O(n)
+benefit_range: [0.0, 0.1]
+---
+
+# Calcite ProjectOverSumToSum0Rule
+
+## Description
+
+Converts SUM to SUM0 when used as a window (OVER) function inside
+a project list. Window SUM can return NULL for empty frames, but
+many use cases expect 0. SUM0 returns 0 instead of NULL for empty
+partitions/frames, matching the expected semantics.
+
+**When to apply**: A project contains an OVER clause with a SUM
+aggregate function.
+
+**Why it works**: The SQL standard specifies that SUM over an empty
+set returns NULL. However, in window function contexts (running
+totals, cumulative sums), NULL propagation breaks calculations.
+SUM0 provides the 0-instead-of-NULL behavior that most window
+calculations need.
+
+**Calcite class**: `org.apache.calcite.rel.rules.ProjectOverSumToSum0Rule`
+
+## Relational Algebra
+
+```latex
+-- Before: window SUM that may produce NULL
+$$
+\pi_{SUM(x) OVER (PARTITION BY g ORDER BY k)}(R)
+$$
+
+-- After: SUM0 that returns 0 for empty frames
+$$
+\pi_{SUM0(x) OVER (PARTITION BY g ORDER BY k)}(R)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-project-over-sum-to-sum0";
+    "(project (over-call sum ?args ?partition ?order ?frame)
+        ?input)" =>
+    "(project (over-call sum0 ?args ?partition ?order ?frame)
+        ?input)"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(project: &Project) -> bool {
+    project.contains_over()
+        && project.over_calls().iter().any(|call| {
+            call.function() == AggFunc::Sum
+        })
+}
+```
+
+**Restrictions:**
+- Only applies to SUM in OVER clauses (not regular aggregation)
+- SUM0 is a Calcite-specific function; backends may need adaptation
+- Does not apply to COUNT, MIN, MAX (they handle NULLs differently)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(_: f64) -> f64 {
+    0.0 // Semantic correction, not optimization
+}
+```
+
+**Typical benefit**: 0-10% (correctness fix, not performance).
+
+## Test Cases
+
+```sql
+-- Positive: window SUM to SUM0
+SELECT emp_id,
+    SUM(salary) OVER (PARTITION BY dept ORDER BY hire_date)
+FROM emp;
+-- SUM converted to SUM0 for NULL-safe running total
+```
+
+```sql
+-- Negative: regular SUM (not window)
+SELECT dept, SUM(salary) FROM emp GROUP BY dept;
+-- Not an OVER clause; rule does not apply
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/ProjectOverSumToSum0Rule.java (commit af6367d)

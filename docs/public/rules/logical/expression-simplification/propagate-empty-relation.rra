@@ -1,0 +1,180 @@
+---
+id: propagate-empty-relation
+name: "PropagateEmptyRelation"
+category: logical/expression-simplification
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite, datafusion, calcite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [empty, elimination, short-circuit, consensus]
+complexity: "O(1)"
+benefit_range: [0.9, 1.0]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter (const-bool false) ?input)"
+    description: "Any operator with a provably empty input"
+  - type: "predicate"
+    condition: "input_is_empty(?input)"
+    description: "Child operator produces zero rows"
+---
+
+# PropagateEmptyRelation
+
+## Description
+
+When an operator has a provably empty input (e.g., contradictory
+WHERE clause producing `filter(false, ...)`, LIMIT 0, empty VALUES),
+propagates the empty result upward through the query tree. This
+eliminates entire subtrees of computation.
+
+**When to apply**: Any operator whose input is provably empty:
+- `filter(false, R)` is empty
+- `limit(0, 0, R)` is empty
+- Inner join where either side is empty
+- Cross join where either side is empty
+- UNION ALL of two empty relations is empty
+
+**Why it works**: An empty relation produces no rows. Any operator
+that processes zero input rows produces zero output rows (with
+exceptions for aggregation without GROUP BY). This allows the
+optimizer to skip entire subtrees.
+
+**Impact**: Near 100% cost reduction when triggered (eliminates
+entire subtrees of computation).
+
+## Relational Algebra
+
+```latex
+-- Empty filter propagates through join
+$$
+R \Join \sigma_{\text{false}}(S) \Rightarrow \emptyset
+$$
+
+-- Empty filter propagates through project
+$$
+\pi_{\text{cols}}(\sigma_{\text{false}}(R)) \Rightarrow \emptyset
+$$
+
+-- LIMIT 0 is empty
+$$
+\text{LIMIT}_{0}(R) \Rightarrow \emptyset
+$$
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Filter(false) is the canonical empty relation
+// Propagate through join (either side empty => join empty)
+rw!("empty-inner-join-left";
+    "(join inner ?cond (filter (const-bool false) ?left) ?right)" =>
+    "(filter (const-bool false) ?left)"
+),
+rw!("empty-inner-join-right";
+    "(join inner ?cond ?left (filter (const-bool false) ?right))" =>
+    "(filter (const-bool false) ?right)"
+),
+
+// Propagate through cross join
+rw!("empty-cross-join-left";
+    "(join cross ?cond (filter (const-bool false) ?left) ?right)" =>
+    "(filter (const-bool false) ?left)"
+),
+rw!("empty-cross-join-right";
+    "(join cross ?cond ?left (filter (const-bool false) ?right))" =>
+    "(filter (const-bool false) ?right)"
+),
+
+// Propagate through project
+rw!("empty-project";
+    "(project ?cols (filter (const-bool false) ?input))" =>
+    "(filter (const-bool false) ?input)"
+),
+
+// Propagate through sort
+rw!("empty-sort";
+    "(sort ?keys (filter (const-bool false) ?input))" =>
+    "(filter (const-bool false) ?input)"
+),
+
+// Propagate through limit
+rw!("empty-limit";
+    "(limit ?n ?off (filter (const-bool false) ?input))" =>
+    "(filter (const-bool false) ?input)"
+),
+
+// LIMIT 0 produces empty relation
+rw!("limit-zero-is-empty";
+    "(limit 0 ?off ?input)" =>
+    "(filter (const-bool false) ?input)"
+),
+
+// Union ALL of empty left
+rw!("empty-union-left";
+    "(union ?all (filter (const-bool false) ?left) ?right)" =>
+    "?right"
+),
+
+// Union ALL of empty right
+rw!("empty-union-right";
+    "(union ?all ?left (filter (const-bool false) ?right))" =>
+    "?left"
+),
+```
+
+## Preconditions
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
+
+**Restrictions:**
+- Aggregate without GROUP BY on empty input still produces one row
+  (e.g., `SELECT COUNT(*) FROM empty_table` returns 0, not empty)
+- Left outer join with empty right side still produces left rows
+  (with NULL fill)
+- EXCEPT with empty right side returns left side unchanged
+
+## Cost Model
+
+```rust
+fn estimated_benefit(_: f64) -> f64 {
+    // Eliminates entire subtree computation
+    0.99
+}
+```
+
+**Typical benefit**: ~100% for affected subtrees.
+
+## Test Cases
+
+```sql
+-- Expected: entire query short-circuited to empty
+SELECT * FROM orders o
+JOIN customers c ON o.customer_id = c.id
+WHERE 1 = 0;
+```
+
+```sql
+-- Expected: LIMIT 0 propagates empty
+SELECT * FROM orders LIMIT 0;
+```
+
+```sql
+-- Expected: left join with empty right keeps left
+SELECT * FROM orders o
+LEFT JOIN (SELECT * FROM customers WHERE 1 = 0) c
+ON o.customer_id = c.id;
+```
+
+```sql
+-- Expected: aggregate without GROUP BY on empty still returns one row
+SELECT COUNT(*) FROM orders WHERE 1 = 0;
+```
+
+## References
+
+- DataFusion: `datafusion/optimizer/src/propagate_empty_relation.rs`
+- Calcite: `org.apache.calcite.rel.rules.PruneEmptyRules`
+- PostgreSQL: Handled in `eval_const_expressions` and `constraint_exclusion`

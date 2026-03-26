@@ -1,0 +1,146 @@
+# Parallel Hash Join
+#
+# Converts a hash join into a parallel hash join when both inputs
+# are large enough to benefit from parallelism.
+#
+# Example transformation:
+#   Join(type=Inner, left=Scan(orders), right=Scan(customers))
+#   =>
+#   Gather(
+#     ParallelHashJoin(
+#       type=Inner,
+#       left=ParallelScan(orders),
+#       right=Scan(customers),  # Build side stays sequential
+#       workers=4
+#     )
+#   )
+#
+# Uses parallel probe with shared hash table built from right side.
+
+name: parallel-hash-join
+description: Convert hash join to parallel hash join for large inputs
+version: 1.0.0
+tags: [parallel, physical, performance, join]
+
+pattern: |
+  Join(
+    join_type=$jt,
+    condition=$c,
+    left=$l,
+    right=$r
+  )
+
+condition: |
+  # Check if left (probe) side is large enough for parallelism
+  estimated_rows($l) > 100000 &&
+  # Check if we have available CPU cores
+  hardware.cpu_cores >= 2 &&
+  # Check if parallel execution is enabled
+  config.parallel.max_parallel_workers > 0 &&
+  # Only parallelize hash-joinable conditions
+  is_equi_join($c)
+
+transform: |
+  # Calculate optimal worker count
+  let workers = min(
+    hardware.cpu_cores - 1,
+    config.parallel.max_parallel_workers_per_gather,
+    max(1, estimated_rows($l) / 100000)  # 1 worker per 100k rows
+  );
+
+  # Wrap parallel hash join in gather node
+  # Note: We parallelize the probe (left) side, build side remains sequential
+  Gather(
+    input=ParallelHashJoin(
+      join_type=$jt,
+      condition=$c,
+      left=parallelize_input($l, workers),  # Parallelize left/probe side
+      right=$r,  # Build side stays sequential for shared hash table
+      workers=workers
+    ),
+    workers=workers
+  )
+
+cost_benefit: |
+  # Sequential hash join cost
+  let build_cost = estimated_rows($r) * config.cost.cpu_tuple_cost;
+  let probe_cost = estimated_rows($l) * config.cost.cpu_operator_cost;
+  let seq_cost = build_cost + probe_cost;
+
+  # Parallel hash join cost
+  # Build phase is sequential (shared hash table)
+  # Probe phase is parallelized
+  let parallel_probe_cost = probe_cost / (workers * 0.75);  # 75% efficiency
+  let coordination_overhead = workers * config.parallel.parallel_setup_cost;
+  let parallel_cost = build_cost + parallel_probe_cost + coordination_overhead;
+
+  # Benefit is the cost reduction
+  seq_cost - parallel_cost
+
+priority: 90  # High priority for large joins
+
+# Helper function to parallelize input if it's a scan
+helper_functions: |
+  fn parallelize_input(input, workers) {
+    match input {
+      Scan(table=$t) => ParallelScan(table=$t, workers=workers),
+      _ => input  # Keep complex inputs as-is
+    }
+  }
+
+  fn is_equi_join(condition) {
+    # Check if condition is an equality between columns
+    match condition {
+      Eq(Column(_), Column(_)) => true,
+      And(exprs) => all(exprs, |e| is_equi_join(e)),
+      _ => false
+    }
+  }
+
+# Test examples
+tests:
+  - name: large_join_parallel
+    input: |
+      Join(
+        join_type=Inner,
+        condition=Eq(Column("o.customer_id"), Column("c.id")),
+        left=Scan(table="orders"),
+        right=Scan(table="customers")
+      )
+    context:
+      estimated_rows.orders: 1000000
+      estimated_rows.customers: 10000
+      hardware.cpu_cores: 8
+      config.parallel.max_parallel_workers: 8
+      config.parallel.max_parallel_workers_per_gather: 4
+    expected: |
+      Gather(
+        input=ParallelHashJoin(
+          join_type=Inner,
+          condition=Eq(Column("o.customer_id"), Column("c.id")),
+          left=ParallelScan(table="orders", workers=4),
+          right=Scan(table="customers"),
+          workers=4
+        ),
+        workers=4
+      )
+
+  - name: small_join_no_parallel
+    input: |
+      Join(
+        join_type=Inner,
+        condition=Eq(Column("u.id"), Column("p.user_id")),
+        left=Scan(table="users"),
+        right=Scan(table="profiles")
+      )
+    context:
+      estimated_rows.users: 1000
+      estimated_rows.profiles: 1000
+      hardware.cpu_cores: 8
+    expected: |
+      Join(
+        join_type=Inner,
+        condition=Eq(Column("u.id"), Column("p.user_id")),
+        left=Scan(table="users"),
+        right=Scan(table="profiles")
+      )  # No transformation for small tables

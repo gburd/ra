@@ -1,0 +1,140 @@
+---
+id: crdb-join-reorder
+name: CockroachDB Join Reordering
+category: database-specific/cockroachdb
+databases: [cockroachdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, join, reorder, optimization, memo, cockroachdb]
+complexity: O(n!)
+benefit_range: [0.3, 0.99]
+---
+
+# CockroachDB Join Reordering
+
+## Description
+
+Adds all valid join orderings to the optimizer's memo structure for a
+group of joined tables. CockroachDB uses a cost-based optimizer with
+a memo structure (similar to Cascades/Columbia). The ReorderJoins rule
+matches the first expression in a join group and enumerates all valid
+orderings, adding them to the memo for cost comparison.
+
+**When to apply**: An inner, semi, anti, left, or full join is the
+first expression in its memo group, has no join hints forcing a
+specific order, and was not produced by a previous join reordering.
+
+**Why it works**: Different join orderings produce dramatically different
+intermediate result sizes and enable different join methods (lookup
+join, merge join, hash join). By adding all valid orderings to the memo,
+the cost-based optimizer can evaluate each and pick the cheapest.
+
+## Relational Algebra
+
+```latex
+-- Original: left-deep
+$$
+Join(Join(Join(A, B), C), D)
+$$
+
+-- Reordered alternatives added to memo:
+$$
+Join(A, Join(B, Join(C, D)))   -- right-deep
+Join(Join(A, C), Join(B, D))   -- bushy
+Join(Join(A, D), Join(B, C))   -- bushy
+$$
+-- ... all valid orderings
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("reorder-joins";
+    "(join ?type ?left ?right ?on ?private)" =>
+    "(reorder_joins)"
+    if should_reorder_joins()
+    if is_first_in_memo_group()
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(join: &JoinExpr) -> bool {
+    // Must be a supported join type
+    matches!(join.op(),
+        InnerJoin | SemiJoin | AntiJoin | LeftJoin | FullJoin)
+    // Must not have join hints
+    && !join.has_join_hints()
+    // Must not be result of previous reordering
+    && !join.skip_reorder_joins()
+    // Reorder join limit must be > 0
+    && session.reorder_joins_limit() > 0
+}
+```
+
+**Restrictions:**
+- The reorder_joins_limit session variable controls the maximum
+  number of tables (default 8 in CockroachDB)
+- Outer joins (LEFT, FULL) constrain valid orderings due to
+  NULL extension semantics
+- Join hints (USE_HASH, USE_MERGE, USE_LOOKUP) prevent reordering
+- The SkipReorderJoins flag prevents infinite reordering loops
+  when rules like CommuteSemiJoin produce new joins
+- Cross joins are avoided unless no other valid ordering exists
+
+## Cost Model
+
+```rust
+fn join_reorder_cost(
+    orderings: &[JoinOrdering],
+) -> JoinOrdering {
+    // Evaluate each ordering using the C_out cost model:
+    // C(A join B) = C(A) + C(B) + |A| + |B| + |A join B|
+    orderings.iter()
+        .min_by(|a, b| a.estimated_cost.total_cmp(&b.estimated_cost))
+        .unwrap()
+}
+```
+
+## Test Cases
+
+```sql
+-- Positive: 4-table join reordering
+SELECT * FROM a
+JOIN b ON a.x = b.x
+JOIN c ON b.y = c.y
+JOIN d ON c.z = d.z;
+
+-- Optimizer evaluates all valid orderings including:
+-- ((a join b) join c) join d
+-- a join ((b join c) join d)
+-- (a join c) join (b join d)
+-- Picks the one with lowest estimated cost
+```
+
+```sql
+-- Positive: semi join with reordering
+SELECT * FROM orders o WHERE EXISTS (
+    SELECT 1 FROM items i
+    JOIN warehouses w ON i.warehouse_id = w.id
+    WHERE i.order_id = o.id
+);
+-- Semi join + inner joins reordered together
+```
+
+```sql
+-- Negative: join hints prevent reordering
+SELECT /*+ HASH_JOIN(a, b) */ * FROM a JOIN b ON a.x = b.x;
+-- Hint forces hash join; reordering disabled
+```
+
+## References
+
+CockroachDB: pkg/sql/opt/xform/rules/join.opt:11 - ReorderJoins (commit 51e808c)
+CockroachDB: pkg/sql/opt/xform/join_order_builder.go - join order enumeration
+CockroachDB: pkg/sql/opt/memo/ - memo structure
+Moerkotte & Neumann, "Dynamic Programming Strikes Back" (SIGMOD 2008)

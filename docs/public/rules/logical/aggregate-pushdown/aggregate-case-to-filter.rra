@@ -1,0 +1,117 @@
+---
+id: calcite-aggregate-case-to-filter
+name: Calcite AggregateCaseToFilterRule
+category: logical/aggregate-pushdown
+databases: [calcite, postgresql, mysql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [logical, calcite, aggregate, filter, case, rewrite]
+complexity: O(n)
+benefit_range: [0.05, 0.3]
+---
+
+# Calcite AggregateCaseToFilterRule
+
+## Description
+
+Converts CASE-style filtered aggregates into true filtered aggregates
+using the FILTER (WHERE ...) syntax. This normalizes conditional
+aggregation patterns, enabling further optimization rules to match.
+
+**When to apply**: An aggregate function wraps a CASE expression that
+returns the aggregated column when a condition holds and NULL otherwise.
+
+**Why it works**: The FILTER syntax is semantically equivalent to the
+CASE pattern but produces a cleaner plan tree that other rules
+(e.g., aggregate pushdown) can reason about more easily.
+
+**Calcite class**: `org.apache.calcite.rel.rules.AggregateCaseToFilterRule`
+
+## Relational Algebra
+
+```latex
+-- Before: CASE inside aggregate
+$$
+\gamma_{g; SUM(CASE WHEN p THEN \times ELSE NULL END)}(R)
+$$
+
+-- After: FILTER on aggregate
+$$
+\gamma_{g; SUM(x) FILTER (WHERE p)}(R)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-aggregate-case-to-filter";
+    "(aggregate ?group (agg-call ?func (case ?pred ?val null))
+        ?input)" =>
+    "(aggregate ?group (agg-call-filtered ?func ?val ?pred)
+        ?input)"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(agg_call: &AggregateCall) -> bool {
+    // The argument must be a CASE WHEN pred THEN val ELSE NULL
+    matches!(
+        agg_call.operand(),
+        Expr::Case { when, then, else_: None | Some(Null) }
+    )
+}
+```
+
+**Restrictions:**
+- Only applies when the ELSE branch is NULL (or absent)
+- COUNT(CASE WHEN p THEN 1 END) becomes COUNT(*) FILTER (WHERE p)
+- Does not apply to CASE with multiple WHEN branches
+
+## Cost Model
+
+```rust
+fn estimated_benefit(input_rows: f64) -> f64 {
+    // Minimal direct benefit; enables downstream optimizations
+    0.01 * input_rows
+}
+```
+
+**Typical benefit**: 5-30% indirectly through enabling further rewrites.
+
+## Test Cases
+
+```sql
+-- Positive: SUM with CASE to FILTER
+SELECT dept,
+    SUM(CASE WHEN gender = 'F' THEN salary END) AS female_sal
+FROM emp
+GROUP BY dept;
+-- Becomes: SUM(salary) FILTER (WHERE gender = 'F')
+```
+
+```sql
+-- Positive: COUNT with CASE to FILTER
+SELECT dept,
+    COUNT(CASE WHEN status = 'A' THEN 1 END) AS active_count
+FROM emp
+GROUP BY dept;
+-- Becomes: COUNT(*) FILTER (WHERE status = 'A')
+```
+
+```sql
+-- Negative: CASE with non-null ELSE
+SELECT dept,
+    SUM(CASE WHEN gender = 'F' THEN salary ELSE 0 END)
+FROM emp
+GROUP BY dept;
+-- ELSE 0 prevents direct conversion (SUM treats 0 differently from NULL)
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/AggregateCaseToFilterRule.java (commit af6367d)

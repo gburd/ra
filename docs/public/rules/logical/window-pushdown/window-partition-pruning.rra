@@ -1,0 +1,60 @@
+---
+id: window-partition-pruning
+name: Window Partition Pruning
+category: logical/window-pushdown
+databases: [postgresql, mysql, duckdb, mssql]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [window, partition, pruning, filter]
+complexity: "O(n)"
+benefit_range: [0.1, 0.6]
+---
+
+# Window Partition Pruning
+
+## Description
+
+When a filter on the PARTITION BY column exists above or below the window, partition pruning eliminates entire partitions from processing. If only one partition survives, the PARTITION BY can be removed entirely.
+
+**When to apply**: An equality filter on a PARTITION BY column.
+
+## Relational Algebra
+
+```latex
+$$
+Filter[partition_col = V](Window[fns PARTITION BY partition_col](input))
+  \rightarrow Window[fns](Filter[partition_col = V](input))
+$$
+  -- Remove PARTITION BY since only one partition exists
+
+```
+
+## Implementation
+
+```rust
+rw!("window-partition-pruning";
+    "(filter (= ?col ?val) (window ?fns ?input))" =>
+    "(window (remove-partition ?col ?fns) (filter (= ?col ?val) ?input))"
+    if is_partition_column("?col", "?fns")
+    if is_constant("?val")
+),
+```
+
+## Test Cases
+
+### Positive: Single partition selected
+
+```sql
+SELECT *, RANK() OVER (PARTITION BY dept ORDER BY salary DESC) as rnk
+FROM employees
+WHERE dept = 'Engineering';
+
+-- Only one partition; remove PARTITION BY
+```
+
+## References
+
+- Partition pruning in analytical query processing
+- Window function optimization in DuckDB

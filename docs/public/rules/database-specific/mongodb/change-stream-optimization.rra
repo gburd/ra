@@ -1,0 +1,179 @@
+---
+id: mongodb-change-stream-optimization
+name: MongoDB Change Stream Resume Token Optimization
+category: database-specific/mongodb
+databases: [mongodb]
+execution_models: [pipeline, streaming]
+version: "1.0.0"
+authors: ["MongoDB Inc."]
+tags: [change-stream, oplog, resume-token, incremental, streaming]
+complexity: "O(1) per change"
+benefit_range: [0.5, 20.0]
+---
+
+# MongoDB Change Stream Resume Token Optimization
+
+## Description
+
+Optimizes change stream processing by using resume tokens and oplog timestamps
+to avoid re-scanning the entire oplog on reconnection or failover. The optimizer
+pushes change stream filters into the oplog cursor to reduce the volume of
+changes that must be deserialized and evaluated.
+
+**When to apply**: Change stream pipelines with `$match` stages that filter on
+`operationType`, `fullDocument` fields, or namespace patterns. The optimizer
+pushes these predicates into the oplog scan to skip irrelevant entries.
+
+**Why it works**: MongoDB change streams are backed by the oplog (operations
+log). Without filter pushdown, every oplog entry is deserialized and checked
+against the pipeline. By converting `$match` predicates into oplog cursor
+filters, the server skips entries at the storage layer, dramatically reducing
+CPU and I/O for selective change streams.
+
+## Relational Algebra
+
+```latex
+-- Before: full oplog scan with post-filter
+$$
+\sigma_{operationType = "insert"}(oplog-scan(resume_token))
+$$
+
+-- After: filtered oplog cursor
+$$
+oplog-scan(resume_token, filter=[op = "i"])
+$$
+
+-- With namespace filter:
+$$
+\sigma_{ns.coll = "orders"}(oplog-scan(token))
+  => oplog-scan(token, ns_filter="orders")
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mongodb-change-stream-filter-pushdown";
+    "(change-stream
+       (match (eq operationType ?op))
+       (pipeline ?stages)
+       (resume-token ?token))" =>
+    "(change-stream-filtered
+       (oplog-filter (op-type-to-oplog ?op))
+       (pipeline ?stages)
+       (resume-token ?token))"
+    if is_pushable_change_stream_filter("?op")
+),
+
+rw!("mongodb-change-stream-namespace-filter";
+    "(change-stream
+       (match (eq ns.coll ?collection))
+       (pipeline ?stages)
+       (resume-token ?token))" =>
+    "(change-stream-filtered
+       (namespace-filter ?collection)
+       (pipeline ?stages)
+       (resume-token ?token))"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> bool {
+    stats.is_change_stream_pipeline
+        && stats.has_pushable_filters
+        && stats.oplog_rate > 100 // operations per second
+}
+```
+
+**Restrictions:**
+- Only certain predicates can be pushed into the oplog cursor
+- `fullDocument` filters require "updateLookup" mode (extra round-trip)
+- Pre-image/post-image lookups add latency per change event
+- Resume tokens become invalid after oplog rollover
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let oplog_rate = stats.oplog_operations_per_sec as f64;
+    let filter_selectivity = stats.change_stream_selectivity;
+    let deser_cost_per_entry = 0.00005; // 50us per oplog entry
+
+    let without_pushdown = oplog_rate * deser_cost_per_entry;
+    let with_pushdown = oplog_rate * filter_selectivity * deser_cost_per_entry;
+
+    if without_pushdown > with_pushdown {
+        (without_pushdown - with_pushdown) / without_pushdown
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 50% to 20x for selective change streams on busy clusters.
+
+## Test Cases
+
+### Positive: Operation type filter pushdown
+
+```javascript
+// Watch only inserts on orders collection
+const stream = db.orders.watch([
+  {$match: {operationType: "insert"}}
+]);
+
+// Optimizer pushes operationType filter to oplog cursor
+// Skips update/delete/replace entries at storage layer
+// On a busy collection with 90% updates, this is ~10x faster
+```
+
+### Positive: Namespace-scoped change stream
+
+```javascript
+// Watch changes across database, filtered to specific collections
+const stream = db.watch([
+  {$match: {"ns.coll": {$in: ["orders", "payments"]}}}
+]);
+
+// Pushes namespace filter to oplog scan
+// Skips all entries for other collections
+```
+
+### Negative: Complex fullDocument filter
+
+```javascript
+// Cannot push fullDocument predicates to oplog cursor
+const stream = db.orders.watch(
+  [{$match: {"fullDocument.total": {$gt: 1000}}}],
+  {fullDocument: "updateLookup"}
+);
+
+// fullDocument requires post-lookup; cannot filter at oplog level
+// Every change event requires a separate read to fetch current doc
+```
+
+## References
+
+**Implementation:**
+- MongoDB source: `src/mongo/db/pipeline/document_source_change_stream.cpp`
+- Oplog filter optimization: `DocumentSourceChangeStreamOplogMatch`
+- Resume logic: `src/mongo/db/pipeline/resume_token.cpp`
+
+**Documentation:**
+- MongoDB Manual: "Change Streams"
+  - https://docs.mongodb.com/manual/changeStreams/
+- MongoDB Manual: "Change Stream Output"
+
+**Related papers:**
+- Leibert, B., et al., "Change Data Capture at Scale", 2019

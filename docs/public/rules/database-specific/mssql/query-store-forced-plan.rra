@@ -1,0 +1,117 @@
+---
+id: mssql-query-store-forced-plan
+name: mssql Query Store Plan Forcing
+category: database-specific/mssql
+databases: [mssql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, mssql, query-store, plan-forcing, regression]
+complexity: O(1)
+benefit_range: [0.2, 0.9]
+---
+
+# mssql Query Store Plan Forcing
+
+## Description
+
+Forces the optimizer to use a previously observed good plan from the
+Query Store when plan regression is detected.  mssql's Automatic
+Plan Correction (APC) monitors query performance and automatically
+forces the last known good plan when a regression is identified.
+
+**When to apply**: A query's execution plan regresses (becomes slower)
+after a recompilation, and the Query Store contains a faster
+historical plan.
+
+**Why it works**: Plan regressions are a major cause of production
+incidents.  By automatically reverting to the last known good plan,
+mssql prevents regressions while the optimizer may choose a
+different plan due to changed statistics, parameter sniffing, or CE
+model updates.
+
+**Database version**: mssql 2016+ (manual), 2017+ (automatic)
+
+## Relational Algebra
+
+```latex
+-- Before: regressed plan
+$$
+hash-\bowtie(full-scan(orders), full-scan(customers))
+$$
+  -- regressed after statistics update
+
+-- After: forced good plan from Query Store
+$$
+nested-loop-\bowtie(index-seek(orders), index-seek(customers))
+$$
+  -- previous faster plan forced
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mssql-force-plan-from-query-store";
+    "?regressed_plan" =>
+    "(forced-plan (query-store-best-plan ?regressed_plan))"
+    if is_database("mssql")
+    if plan_has_regressed("?regressed_plan")
+    if query_store_has_better_plan("?regressed_plan")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    current_plan_cost: f64,
+    historical_best_cost: f64,
+    regression_threshold: f64,
+) -> bool {
+    current_plan_cost > historical_best_cost * regression_threshold
+}
+```
+
+**Restrictions:**
+- Query Store must be enabled (READ_WRITE mode)
+- Forced plan must still be valid (indexes must still exist)
+- Automatic plan correction requires mssql 2017+
+- Plan forcing is per-query, not global
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    regressed_cost: f64,
+    forced_plan_cost: f64,
+) -> f64 {
+    regressed_cost - forced_plan_cost
+}
+```
+
+**Typical benefit**: Prevents 10x-1000x regressions by automatically
+reverting to the proven fast plan.
+
+## Test Cases
+
+```sql
+-- Positive: plan regression detected and corrected
+-- Query was fast (10ms) with plan A
+-- After stats update, plan B chosen (1000ms)
+-- Query Store forces plan A automatically
+EXEC sp_query_store_force_plan @query_id = 42, @plan_id = 1;
+```
+
+```sql
+-- Negative: new plan is actually better
+-- Query Store detects "regression" but new plan handles new data
+-- Manual verification needed before forcing
+```
+
+## References
+
+mssql: Query Store Overview
+mssql: Automatic Plan Correction
+mssql: sys.query_store_plan, sys.query_store_runtime_stats

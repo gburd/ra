@@ -1,0 +1,210 @@
+---
+id: vectorized-vs-compiled
+name: Vectorized vs Compiled Execution Selection
+category: experimental/compilation
+databases: [duckdb, umbra, hyper]
+version: "1.0.0"
+authors: ["Kersten et al. 2018", "Neumann 2011", "RA Contributors"]
+tags: [execution, vectorized, compilation, jit, adaptive, morsel]
+complexity: O(n)
+benefit_range: [0.2, 0.6]
+research_status: mature-research
+maturity: prototype
+---
+
+# Vectorized vs Compiled Execution Selection
+
+## Description
+
+Selects between vectorized interpretation (processing data in batches
+of ~1024 values through pre-compiled operators) and JIT-compiled
+execution (generating machine code for the specific query pipeline)
+based on query characteristics and execution context. The choice
+depends on compilation overhead, query complexity, expected execution
+time, and hardware characteristics.
+
+**When to apply**: Every query at the physical plan stage, where the
+execution engine must choose between vectorized batch processing and
+generating compiled code (or using pre-compiled variants).
+
+**Why it works**: JIT compilation produces optimal code by eliminating
+virtual function calls and materializing constants, but has
+compilation overhead (10-100ms). Vectorized execution has no
+compilation overhead and good cache behavior through batch processing,
+but pays per-batch dispatch costs. For short queries, compilation
+overhead dominates; for long-running scans, compiled code wins.
+
+## Relational Algebra
+
+```latex
+-- Vectorized execution:
+$$
+Plan(Q) \rightarrow VectorizedPipeline[batch_size=1024](
+    operators = [Scan, Filter, HashBuild, Probe, Project])
+$$
+
+-- Compiled execution:
+$$
+Plan(Q) \rightarrow CompiledPipeline(
+    generate_code(Scan \rightarrow Filter \rightarrow HashBuild \rightarrow Probe \rightarrow Project))
+$$
+
+-- Adaptive: choose based on estimated rows
+$$
+Plan(Q) \rightarrow if estimated_rows < COMPILATION_THRESHOLD:
+               VectorizedPipeline(Q)
+           else:
+               CompiledPipeline(Q)
+$$
+
+```
+
+## Implementation
+
+```rust
+enum ExecutionMode {
+    Vectorized { batch_size: usize },
+    Compiled { optimization_level: OptLevel },
+    Adaptive { threshold: f64 },
+}
+
+fn select_execution_mode(
+    plan: &PhysicalPlan,
+    context: &ExecutionContext,
+) -> ExecutionMode {
+    let estimated_rows = plan.estimated_output_rows();
+    let num_operators = plan.operator_count();
+    let compilation_cost_ms = estimate_compilation_time(plan);
+    let vectorized_per_row = estimate_vectorized_cost(plan);
+    let compiled_per_row = estimate_compiled_cost(plan);
+
+    // Break-even point: where compilation overhead is amortized
+    let break_even_rows = compilation_cost_ms
+        / (vectorized_per_row - compiled_per_row).max(0.001);
+
+    if estimated_rows > break_even_rows * 1.5 {
+        // Well above break-even: compile for speed
+        ExecutionMode::Compiled {
+            optimization_level: if estimated_rows > break_even_rows * 10.0 {
+                OptLevel::Aggressive
+            } else {
+                OptLevel::Default
+            },
+        }
+    } else if estimated_rows < break_even_rows * 0.5 {
+        // Well below break-even: interpret for lower latency
+        ExecutionMode::Vectorized { batch_size: 1024 }
+    } else {
+        // Near break-even: use adaptive mode
+        ExecutionMode::Adaptive {
+            threshold: break_even_rows,
+        }
+    }
+}
+
+fn estimate_compilation_time(plan: &PhysicalPlan) -> f64 {
+    // Base cost + per-operator cost + per-expression cost
+    let base_ms = 5.0;
+    let per_operator_ms = 2.0;
+    let per_expression_ms = 0.5;
+    base_ms
+        + plan.operator_count() as f64 * per_operator_ms
+        + plan.expression_count() as f64 * per_expression_ms
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    plan: &PhysicalPlan,
+    system: &ExecutionEngine,
+) -> bool {
+    // System must support both execution modes
+    system.supports_jit()
+    // Plan must be compilable (no unsupported operators)
+    && plan.operators().iter().all(|op| op.is_compilable())
+}
+```
+
+**Trade-off dimensions:**
+
+| Factor | Favors Vectorized | Favors Compiled |
+|--------|------------------|-----------------|
+| Query duration | Short (<100ms) | Long (>1s) |
+| Row count | Low (<100K) | High (>10M) |
+| Expression complexity | Simple | Complex (deep) |
+| Query frequency | One-off | Repeated (cache) |
+| Compilation available | No JIT | JIT available |
+| SIMD potential | High (regular ops) | High (custom code) |
+
+**Restrictions:**
+- JIT compilation requires runtime code generation support
+  (LLVM, Cranelift, or pre-compiled templates)
+- Some operators are difficult to compile (UDFs, complex window
+  functions, certain join types)
+- Compiled code must be invalidated when schema changes
+- Compiled code cache has finite capacity; eviction needed
+- Umbra's approach: compile with low optimization first, then
+  recompile with higher optimization in background if query
+  runs long enough ("tiered compilation")
+
+## Cost Model
+
+```rust
+fn execution_mode_cost(
+    rows: f64,
+    compilation_ms: f64,
+    vectorized_ns_per_row: f64,
+    compiled_ns_per_row: f64,
+) -> (f64, f64) {
+    let vectorized_total =
+        rows * vectorized_ns_per_row / 1_000_000.0;
+    let compiled_total =
+        compilation_ms + rows * compiled_ns_per_row / 1_000_000.0;
+    (vectorized_total, compiled_total)
+}
+```
+
+**Typical numbers**: Vectorized ~5ns/row, compiled ~2ns/row,
+compilation ~20ms. Break-even at ~6.7M rows.
+
+## Test Cases
+
+```sql
+-- Positive: long scan -> compile
+SELECT SUM(a * b + c) FROM large_table WHERE d > 100;
+-- 1B rows: compiled saves ~3ns/row = 3 seconds
+-- Compilation cost: ~20ms (negligible)
+-- Choose: Compiled
+```
+
+```sql
+-- Positive: short lookup -> vectorize
+SELECT * FROM users WHERE id = 42;
+-- 1 row: compilation would add 20ms for no benefit
+-- Choose: Vectorized
+```
+
+```sql
+-- Positive: repeated query -> compile + cache
+PREPARE q AS SELECT region, SUM(amount) FROM orders GROUP BY region;
+EXECUTE q;  -- compile on first execution (20ms)
+EXECUTE q;  -- use cached compiled code (0ms overhead)
+```
+
+```sql
+-- Positive: adaptive tiered compilation (Umbra style)
+SELECT complex_expression(a, b, c, d) FROM huge_table;
+-- Start vectorized, compile in background
+-- Switch to compiled after background compilation completes
+```
+
+## References
+
+Kersten, Leis, Kemper, Neumann, Pavlo, "Everything You Always Wanted to Know About Compiled and Vectorized Query Execution" (VLDB 2018)
+Neumann, "Efficiently Compiling Efficient Query Plans for Modern Hardware" (VLDB 2011)
+DuckDB: vectorized execution engine
+Umbra: tiered compilation with LLVM
+HyPer/Umbra: data-centric code generation
+Raasveldt & Muehleisen, "DuckDB" (SIGMOD 2019)

@@ -1,0 +1,219 @@
+---
+id: morsel-pipeline-breakers
+name: Morsel-Driven Pipeline Breaker Handling
+category: execution-models/morsel-driven
+version: "1.0.0"
+databases: [hyper, umbra, duckdb]
+authors: ["Viktor Leis", "Thomas Neumann"]
+tags: [execution, parallel, morsel, pipeline-breaker, materialization, hash-table]
+complexity: "O(n) per breaker"
+benefit_range: [0.3, 5.0]
+---
+
+# Morsel-Driven Pipeline Breaker Handling
+
+## Description
+
+Handles pipeline breakers (operators that must consume all input before producing
+any output) within the morsel-driven execution model. Pipeline breakers include
+hash-table build phases, sort operators, and full aggregation. The scheduler
+coordinates the transition from the build phase (all workers contribute) to the
+probe/output phase (all workers consume from the shared result).
+
+**Pipeline breakers in morsel model:**
+- **Hash join build**: All workers insert into shared hash table, then barrier,
+  then all workers probe
+- **Sort**: All workers sort local morsels, then merge into global sorted output
+- **GROUP BY (non-streaming)**: All workers insert into shared hash table,
+  then barrier, then output aggregates
+- **Window functions**: Require sorted input, breaking the pipeline
+
+**Barrier protocol:**
+1. All workers process build-side morsels in parallel
+2. Last worker to finish signals completion (atomic counter)
+3. All workers proceed to probe/output phase
+4. Morsels from probe side distributed as normal
+
+## Relational Algebra
+
+```
+Pipeline with breaker:
+  Pipeline 1 (parallel): Scan -> Filter -> Hash Build
+    [BARRIER: all workers finish build]
+  Pipeline 2 (parallel): Scan -> Hash Probe -> Project -> Output
+
+Worker coordination:
+  build_phase:
+    while morsel = get_morsel(build_source):
+      insert_into_shared_hash_table(morsel)
+    if atomic_decrement(remaining_builders) == 0:
+      signal_build_complete()
+
+  probe_phase:
+    wait_for_build_complete()
+    while morsel = get_morsel(probe_source):
+      probe_shared_hash_table(morsel)
+```
+
+## Implementation
+
+```rust
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Barrier;
+
+/// Pipeline breaker coordinator
+pub struct PipelineBreaker {
+    /// Number of workers still in build phase
+    builders_remaining: AtomicUsize,
+    /// Barrier for phase transition
+    phase_barrier: Barrier,
+    /// Shared build result (hash table, sorted data, etc.)
+    shared_state: SharedState,
+}
+
+impl PipelineBreaker {
+    pub fn new(num_workers: usize) -> Self {
+        Self {
+            builders_remaining: AtomicUsize::new(num_workers),
+            phase_barrier: Barrier::new(num_workers),
+            shared_state: SharedState::new(),
+        }
+    }
+
+    /// Worker completes build phase
+    pub fn finish_build(&self, worker_id: usize) {
+        let remaining = self.builders_remaining
+            .fetch_sub(1, Ordering::AcqRel);
+
+        if remaining == 1 {
+            // Last builder: finalize shared state
+            self.shared_state.finalize();
+        }
+
+        // All workers synchronize before probe phase
+        self.phase_barrier.wait();
+    }
+
+    /// Get shared state for probe phase
+    pub fn shared_state(&self) -> &SharedState {
+        &self.shared_state
+    }
+}
+
+/// Morsel-driven hash join with pipeline breaker
+pub struct MorselHashJoin {
+    breaker: PipelineBreaker,
+    hash_table: ConcurrentHashTable,
+}
+
+impl MorselHashJoin {
+    /// Build phase: process build-side morsels
+    pub fn build_morsel(
+        &self,
+        morsel: &Morsel,
+        worker_id: usize,
+    ) {
+        for row in morsel.rows() {
+            let key = row.extract_key(&self.join_key);
+            self.hash_table.insert(key, row.clone());
+        }
+    }
+
+    /// Probe phase: process probe-side morsels
+    pub fn probe_morsel(
+        &self,
+        morsel: &Morsel,
+    ) -> Vec<JoinedRow> {
+        let mut results = Vec::new();
+        for row in morsel.rows() {
+            let key = row.extract_key(&self.join_key);
+            for matched in self.hash_table.probe(&key) {
+                results.push(JoinedRow::new(&row, matched));
+            }
+        }
+        results
+    }
+}
+
+/// Query plan with pipeline boundaries
+pub fn plan_pipelines(operators: &[Operator]) -> Vec<Pipeline> {
+    let mut pipelines = Vec::new();
+    let mut current = Pipeline::new();
+
+    for op in operators {
+        if op.is_pipeline_breaker() {
+            // End current pipeline at breaker
+            current.add_sink(op.build_phase());
+            pipelines.push(current);
+
+            // Start new pipeline after breaker
+            current = Pipeline::new();
+            current.add_source(op.probe_phase());
+        } else {
+            current.add_operator(op.clone());
+        }
+    }
+
+    pipelines.push(current);
+    pipelines
+}
+```
+
+## Cost Model
+
+**Build phase:**
+- All workers contribute in parallel: O(build_size / num_workers)
+- Synchronization overhead: one atomic decrement + barrier wait
+- Memory: shared hash table = O(build_size) total, not per-worker
+
+**Barrier cost:**
+- Last worker signal: O(1) atomic operation
+- Barrier wait: O(num_workers) for wakeup propagation
+- Straggler effect: fastest worker waits for slowest
+
+**Probe phase:**
+- Morsels distributed as normal: O(probe_size / num_workers)
+- No synchronization during probe (read-only shared hash table)
+
+**Pipeline decomposition:**
+- k breakers create k+1 pipelines
+- Each pipeline runs with full parallelism
+- Inter-pipeline cost: barrier + memory allocation for shared state
+
+## Test Cases
+
+```sql
+-- Test 1: Hash join pipeline breaker
+SELECT * FROM orders o JOIN customers c ON o.cust_id = c.id
+WHERE o.amount > 100;
+-- Pipeline 1: Scan(customers) -> Build hash table
+-- [BARRIER]
+-- Pipeline 2: Scan(orders) -> Filter(amount>100) -> Probe -> Output
+
+-- Test 2: Sort as pipeline breaker
+SELECT * FROM events ORDER BY timestamp DESC LIMIT 100;
+-- Pipeline 1: Scan(events) -> Local sort per worker
+-- [BARRIER: merge sorted runs]
+-- Pipeline 2: Output top-100 from merged result
+
+-- Test 3: Multiple breakers
+SELECT dept, AVG(salary) FROM employees
+GROUP BY dept ORDER BY AVG(salary) DESC;
+-- Pipeline 1: Scan -> Group-by hash build
+-- [BARRIER]
+-- Pipeline 2: Output aggregates -> Sort build
+-- [BARRIER]
+-- Pipeline 3: Output sorted results
+```
+
+## References
+
+1. **Leis, Viktor et al**. "Morsel-Driven Parallelism." SIGMOD 2014.
+   - Pipeline breaker handling in HyPer
+
+2. **Neumann, Thomas**. "Efficiently Compiling Efficient Query Plans." PVLDB 2011.
+   - Pipeline decomposition and code generation
+
+3. **Raasveldt, Mark; Muehleisen, Hannes**. "DuckDB: An Embeddable Analytical
+   Database." SIGMOD 2019.
+   - Pipeline breakers in DuckDB's execution engine

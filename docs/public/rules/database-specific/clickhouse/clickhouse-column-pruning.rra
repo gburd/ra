@@ -1,0 +1,48 @@
+---
+id: clickhouse-column-pruning
+name: "Column Pruning for Columnar Storage"
+category: logical/column-pruning
+databases: [clickhouse]
+version: "1.0.0"
+authors: ["Database Contributors", "RA Contributors"]
+tags: [database-mining, clickhouse, optimization]
+complexity: "O(n)"
+benefit_range: [1.0, 10.0]
+---
+
+# Column Pruning for Columnar Storage
+
+## Description
+
+Eliminates unused columns from intermediate results in columnar storage.
+
+**When to apply**: During query optimization phase.
+
+## Relational Algebra
+
+```latex
+-- Before
+$$
+(project [a,b,c,d] (scan table))
+$$
+
+-- After
+$$
+(project [a,b] (scan table))
+$$
+
+```
+
+## Preconditions
+
+- Columns c,d not referenced in remaining operators
+
+## Test Cases
+
+```sql
+SELECT * FROM table WHERE condition;
+```
+
+## References
+
+- Database documentation

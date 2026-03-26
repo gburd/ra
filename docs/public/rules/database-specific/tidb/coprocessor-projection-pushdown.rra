@@ -1,0 +1,61 @@
+---
+id: tidb-coprocessor-projection-pushdown
+name: TiDB Coprocessor Projection Pushdown
+category: database-specific/tidb
+databases: [tidb]
+execution_models: [vectorized, distributed]
+hardware: [cpu, distributed]
+version: "1.0.0"
+authors: ["PingCAP TiDB Team", "RA Contributors"]
+tags: [coprocessor, pushdown, projection, tikv]
+complexity: "O(n)"
+benefit_range: [0.4, 0.8]
+source_file: "pkg/planner/core/find_best_task.go"
+source_repo: "github.com/pingcap/tidb"
+---
+
+# TiDB Coprocessor Projection Pushdown
+
+## Description
+
+Pushes column projections to TiKV coprocessor, transferring only needed
+columns over the network instead of full rows.
+
+## Relational Algebra
+
+```latex
+$$
+Project[cols](Scan[table])
+  \rightarrow CopTask(Project[cols](Scan[table]))
+  \text{where} all_columns_pushable(cols)
+$$
+
+```
+
+## Implementation
+
+```rust
+fn push_projection_to_cop(proj: &Projection, scan: &Scan) -> CopTask {
+    CopTask {
+        projections: proj.columns,
+        table: scan.table,
+        filters: vec![],
+    }
+}
+```
+
+## Cost Model
+
+Reduces network transfer by sending only required columns.
+
+## Test Cases
+
+```sql
+-- Select specific columns
+SELECT id, name FROM customers WHERE region = 'US';
+-- Projection pushdown: TiKV sends only id, name columns
+```
+
+## References
+- Source: `pkg/planner/core/find_best_task.go` (buildCopTask)
+- TiDB Docs: https://docs.pingcap.com/tidb/stable/tidb-operator-pushdown

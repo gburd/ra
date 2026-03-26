@@ -1,0 +1,117 @@
+---
+id: mysql-constant-folding
+name: MySQL Constant Folding and Propagation
+category: database-specific/mysql
+databases: [mysql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, mysql, constant, folding, propagation, simplification]
+complexity: O(1)
+benefit_range: [0.05, 0.3]
+---
+
+# MySQL Constant Folding and Propagation
+
+## Description
+
+MySQL evaluates constant expressions at optimization time and
+propagates constant values through equality chains.  If `a = 5 AND
+a = b`, MySQL infers `b = 5` and can use an index on `b`.  Constant
+conditions like `WHERE 1 = 1` are eliminated, and `WHERE 1 = 0`
+short-circuits the query.
+
+**When to apply**: WHERE clause contains constant expressions or
+equality chains involving constants.
+
+**Why it works**: Reduces predicate complexity and enables additional
+index lookups on columns that inherit constant values through
+transitive closure.
+
+**Database version**: MySQL 5.0+
+
+## Relational Algebra
+
+```latex
+-- Before: constant in equality chain
+$$
+\sigma_{a = 5 AND a = b}(A \bowtie B)
+$$
+
+-- After: constant propagated
+$$
+\sigma_{a = 5 AND b = 5}(A \bowtie B)
+$$
+-- Enables index lookup on both a and b
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mysql-constant-propagation";
+    "(filter (and (= ?col1 ?const) (= ?col1 ?col2))
+        ?rel)" =>
+    "(filter (and (= ?col1 ?const) (= ?col2 ?const))
+        ?rel)"
+    if is_database("mysql")
+    if is_constant("?const")
+),
+
+rw!("mysql-constant-folding";
+    "(filter (= ?const1 ?const2) ?rel)" =>
+    "(filter true ?rel)"
+    if is_database("mysql")
+    if constants_equal("?const1", "?const2")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(predicate: &Predicate) -> bool {
+    predicate.has_constant_equality()
+    || predicate.is_fully_constant()
+}
+```
+
+**Restrictions:**
+- Type conversions may prevent propagation (implicit casts)
+- Non-deterministic functions (RAND, NOW) are not folded
+- Prepared statement parameters are treated as constants for
+  this optimization
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    num_propagated: usize,
+    rows_affected: f64,
+) -> f64 {
+    num_propagated as f64 * rows_affected * 0.001
+}
+```
+
+**Typical benefit**: Enables index usage on columns that otherwise
+would require a post-join filter.
+
+## Test Cases
+
+```sql
+-- Positive: constant propagation through equi-join
+SELECT * FROM orders o JOIN customers c ON o.cust_id = c.id
+WHERE c.id = 42;
+-- MySQL infers o.cust_id = 42, uses index on orders(cust_id)
+```
+
+```sql
+-- Negative: non-constant expression
+SELECT * FROM t WHERE a = b AND b = RAND();
+-- RAND() is non-deterministic, cannot fold
+```
+
+## References
+
+MySQL: "Constant-Folding Optimization" in MySQL 8.0 Reference Manual
+Source: sql/sql_optimizer.cc, `propagate_cond_constants()`

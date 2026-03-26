@@ -1,0 +1,117 @@
+---
+id: derby-in-list-multi-probe
+name: Apache Derby IN List Multi-Probe Index Scan
+category: database-specific/derby
+databases: [derby]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, derby, in-list, multi-probe, index, scan]
+complexity: O(k * log n)
+benefit_range: [0.2, 0.7]
+---
+
+# Apache Derby IN List Multi-Probe Index Scan
+
+## Description
+
+Derby optimizes IN lists by performing multiple index probes, one per
+value in the list, instead of scanning the entire index range.  Each
+probe does a point lookup in the B-tree, producing a small set of
+matching rows.
+
+**When to apply**: A WHERE clause contains an IN list on an indexed
+column, and the number of values is small relative to the table size.
+
+**Why it works**: For k values in the IN list and an index of depth
+d, the cost is O(k * d) instead of O(n) for a full scan.  Each
+probe navigates the B-tree to a specific leaf page.
+
+**Database version**: Apache Derby 10.3+
+
+## Relational Algebra
+
+```latex
+-- Before: full scan + filter
+$$
+\sigma_{status IN ('A', 'B', 'C')}(scan(orders))
+$$
+
+-- After: multi-probe index scan
+$$
+\cup(
+    point_lookup(orders, idx_status, 'A'),
+    point_lookup(orders, idx_status, 'B'),
+    point_lookup(orders, idx_status, 'C')
+)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("derby-in-list-multi-probe";
+    "(filter (in ?col ?values) (scan ?table))" =>
+    "(multi-probe-scan ?table ?col ?values)"
+    if is_database("derby")
+    if has_index("?table", "?col")
+    if in_list_small("?values")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    table: &Table,
+    column: &Column,
+    values: &[Value],
+) -> bool {
+    table.has_index_on(column)
+    && values.len() < 100
+}
+```
+
+**Restrictions:**
+- IN list must contain constants (not subqueries or expressions)
+- Very large IN lists may be slower than a range scan
+- Works with both single-column and composite indexes (if IN is
+  on the first column)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    table_rows: f64,
+    in_list_size: f64,
+    index_depth: f64,
+) -> f64 {
+    let scan_cost = table_rows * 0.01;
+    let probe_cost = in_list_size * index_depth * 0.01;
+    scan_cost - probe_cost
+}
+```
+
+**Typical benefit**: 10-1000x for small IN lists on large tables.
+
+## Test Cases
+
+```sql
+-- Positive: IN list on indexed column
+CREATE INDEX idx_status ON orders(status);
+SELECT * FROM orders WHERE status IN ('pending', 'shipped');
+-- Two index probes instead of full scan
+```
+
+```sql
+-- Negative: IN list on non-indexed column
+SELECT * FROM orders WHERE category IN ('A', 'B', 'C');
+-- No index; full table scan
+```
+
+## References
+
+Apache Derby: "Optimizer Enhancements" in release notes
+Source: org.apache.derby.impl.sql.compile.InListOperatorNode

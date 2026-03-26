@@ -1,0 +1,209 @@
+---
+id: rpr-counting-pattern-to-window-aggregate
+name: Translate Counting Pattern to Window Aggregate
+category: logical/rpr
+databases: [postgresql, oracle, duckdb, mssql, generic]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [rpr, translation, window-function, aggregate, count, streak]
+complexity: "O(1)"
+benefit_range: [0.4, 0.7]
+preconditions:
+  - type: pattern
+    must_match: "(row-pattern ?input ?partition ?order ?defines ?measures ?pattern)"
+  - type: predicate
+    condition: "measures_only_count(?measures)"
+    description: "MEASURES use only COUNT aggregate on pattern variable"
+  - type: predicate
+    condition: "is_simple_monotonic_pattern(?pattern, ?defines)"
+    description: "Pattern is single variable with + quantifier"
+---
+
+# Translate Counting Pattern to Window Aggregate
+
+## Description
+
+When a MATCH_RECOGNIZE is used only to count consecutive matches
+(streak length), translate it to a conditional window aggregate.
+The MEASURES clause contains only `COUNT(A.*)` and the pattern is
+`A+` with a simple PREV()-based DEFINE.
+
+**When to apply**: Pattern is `A+`, DEFINE uses simple PREV()
+comparison, and MEASURES computes only `COUNT(A.*)`.
+
+**Why it works**: Counting consecutive rows matching a condition
+is equivalent to a running conditional count with group boundaries.
+Window functions with FILTER and frame clauses express this
+directly without DFA overhead.
+
+## Relational Algebra
+
+```latex
+-- Before: RPR counting streak length
+$$
+RowPattern(
+  input: R,
+  partition: [symbol],
+  order: [trade_date],
+  pattern: Quantified(A, OneOrMore),
+  defines: { A: Gt(price, Prev(price, 1)) },
+  measures: [(Count(A.*), "streak_length")]
+)
+$$
+
+-- After: window function with running group
+$$
+Project[*, streak_group_count AS streak_length](
+  WindowAggregate(
+    COUNT(*) OVER (
+      PARTITION BY symbol, streak_group
+      ORDER BY trade_date
+      ROWS UNBOUNDED PRECEDING
+    ),
+    input: Annotate(R, streak_group = SUM(CASE WHEN NOT condition THEN 1 ELSE 0 END)
+      OVER (PARTITION BY symbol ORDER BY trade_date))
+  )
+)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// COUNT(A.*) with simple A+ pattern -> window count over streak groups
+rw!("rpr-counting-to-window";
+    "(row-pattern ?input ?partition ?order
+       (defines ((define ?var (compare ?op ?col (prev ?col 1)))))
+       (measures ((count-star ?var) ?alias))
+       (pattern-quantified ?var one-or-more))" =>
+    "(project (?alias (window-count
+       (partition-by (append ?partition (streak-group ?op ?col ?order)))
+       ?order))
+      (annotate-streak-groups ?input ?partition ?order ?op ?col))"
+),
+
+// Streak group annotation: assign group IDs at condition boundaries
+rw!("rpr-annotate-streak-groups";
+    "(annotate-streak-groups ?input ?partition ?order ?op ?col)" =>
+    "(window ?input
+       (sum (case (not (compare ?op ?col (lag ?col 1 (window ?partition ?order))))
+                  1 0)
+            (window ?partition ?order rows-unbounded-preceding))
+       streak_group)"
+),
+```
+
+## Preconditions
+
+```rust
+fn measures_only_count(measures: &[(Expr, String)]) -> bool {
+    measures.iter().all(|(expr, _)| {
+        matches!(expr, Expr::CountStar(_) | Expr::Count(_, _))
+    })
+}
+```
+
+**Restrictions:**
+- MEASURES must contain only COUNT-based aggregates (COUNT(*), COUNT(A.*)).
+- Pattern must be single-variable with `+` quantifier.
+- DEFINE must use simple PREV() comparison.
+- SUM/AVG/MIN/MAX in MEASURES require different translation logic (not covered here).
+
+## Cost Model
+
+```rust
+fn estimated_benefit(input_card: f64) -> f64 {
+    // DFA cost: per-row state transitions + match buffering
+    let dfa_cost = input_card * 4.0 * 0.01;
+
+    // Window cost: two passes (streak group annotation + count)
+    let window_cost = input_card * 2.0 * 0.01;
+
+    (dfa_cost - window_cost) / dfa_cost
+}
+```
+
+**Typical benefit**: 40-70%. Two window function passes are faster
+than DFA evaluation because window functions use highly optimized
+ring buffer implementations.
+
+## Test Cases
+
+### Positive: count consecutive increases
+
+```sql
+-- Before
+SELECT symbol, trade_date, streak_length
+FROM stock_prices
+  MATCH_RECOGNIZE (
+    PARTITION BY symbol
+    ORDER BY trade_date
+    MEASURES COUNT(A.*) AS streak_length
+    PATTERN (A+)
+    DEFINE A AS price > PREV(price)
+  );
+
+-- After (conceptual SQL, actual transformation is in plan)
+SELECT symbol, trade_date,
+  COUNT(*) OVER (
+    PARTITION BY symbol, streak_group
+    ORDER BY trade_date
+    ROWS UNBOUNDED PRECEDING
+  ) AS streak_length
+FROM (
+  SELECT *,
+    SUM(CASE WHEN NOT (price > LAG(price) OVER (
+      PARTITION BY symbol ORDER BY trade_date
+    )) THEN 1 ELSE 0 END) OVER (
+      PARTITION BY symbol ORDER BY trade_date
+    ) AS streak_group
+  FROM stock_prices
+);
+```
+
+### Positive: count consecutive readings above threshold
+
+```sql
+-- Before
+MATCH_RECOGNIZE (
+  ORDER BY ts
+  MEASURES COUNT(A.*) AS consecutive_high
+  PATTERN (A+)
+  DEFINE A AS reading > PREV(reading)
+)
+
+-- After: translated to window aggregate with streak groups
+```
+
+### Negative: MEASURES with non-count aggregate
+
+```sql
+-- Cannot translate: uses AVG, not COUNT
+MATCH_RECOGNIZE (
+  MEASURES AVG(A.price) AS avg_streak_price
+  PATTERN (A+)
+  DEFINE A AS price > PREV(price)
+)
+```
+
+### Negative: multi-variable count
+
+```sql
+-- Cannot translate: counts across multiple variables
+MATCH_RECOGNIZE (
+  MEASURES COUNT(A.*) AS up_count, COUNT(B.*) AS down_count
+  PATTERN (A+ B+)
+  DEFINE A AS price > PREV(price), B AS price < PREV(price)
+)
+```
+
+## References
+
+- Leis et al. "How Good Are Query Optimizers, Really?" VLDB (2015)
+- Zemke, F. "Row Pattern Recognition in SQL" ISO/IEC 19075-5:2016
+- PostgreSQL: Window Function documentation (ROWS frame specification)

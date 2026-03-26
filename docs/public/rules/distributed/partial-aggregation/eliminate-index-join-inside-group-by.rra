@@ -1,0 +1,135 @@
+---
+id: eliminate-index-join-inside-group-by
+name: Eliminate Index Join Inside Group By
+category: distributed/partial-aggregation
+databases: [cockroachdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, aggregation, index-join, elimination, partial-index]
+complexity: O(n)
+benefit_range: [0.2, 0.7]
+---
+
+# Eliminate Index Join Inside Group By
+
+## Description
+
+Removes an IndexJoin or Project operator between a scan and a
+GroupBy/DistinctOn when the grouping operator only needs columns from
+the secondary index scan. The IndexJoin fetches columns from the
+primary index that the grouping operator does not actually use.
+
+**When to apply**: A GroupBy, DistinctOn, or ScalarGroupBy has an
+IndexJoin or Project child, and the grouping columns and aggregation
+inputs are all available from the index scan input (without the
+IndexJoin).
+
+**Why it works**: IndexJoin fetches additional columns from the
+primary index for every row. If a GroupBy only uses columns already
+available in the secondary index, those primary index lookups are
+unnecessary overhead. Eliminating them avoids O(n) KV lookups.
+
+## Relational Algebra
+
+```latex
+$$
+\gamma_{g, agg(a)}(IndexJoin(IndexScan(T, idx), T))
+  \rightarrow \gamma_{g, agg(a)}(IndexScan(T, idx))
+  \text{where} g and a are all in idx columns
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("eliminate-index-join-inside-group-by";
+    "(group_by (index_join ?index_input ?private) ?aggs ?gp)" =>
+    "(group_by ?index_input ?aggs
+        (prune_ordering ?gp (output_cols ?index_input)))"
+    if cols_subset(
+        "?aggs", "?gp",
+        "(output_cols ?index_input)")
+    if ordering_can_project(
+        "(grouping_ordering ?gp)",
+        "(output_cols ?index_input)")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    index_input: &RelExpr,
+    aggs: &AggregationsExpr,
+    group_private: &GroupingPrivate,
+) -> bool {
+    let index_cols = index_input.output_cols();
+    // All grouping columns must be in index scan output
+    group_private.grouping_cols().subset_of(&index_cols)
+    // All aggregation input columns must be in index scan output
+    && aggs.outer_cols().subset_of(&index_cols)
+    // Ordering can be expressed with index scan columns
+    && group_private.ordering()
+        .can_project_cols(&index_cols)
+}
+```
+
+**Restrictions:**
+- The ordering requirement of the GroupBy must be expressible with
+  only the index scan columns
+- Only applies when ALL needed columns are in the secondary index
+- Commonly triggered after partial index scan generation, where the
+  filter predicate is absorbed by the partial index
+
+## Cost Model
+
+```rust
+fn elimination_benefit(
+    input_rows: f64,
+    primary_lookup_cost: f64,
+) -> f64 {
+    // Each eliminated primary index lookup saves one KV request
+    input_rows * primary_lookup_cost
+}
+```
+
+**Typical benefit**: For DISTINCT queries on partial indexes, this
+eliminates O(n) primary index lookups entirely.
+
+## Test Cases
+
+```sql
+-- Positive: DISTINCT on partial index
+-- CREATE TABLE t (i INT, s STRING, INDEX (i) WHERE s IN ('foo','bar'))
+SELECT DISTINCT i FROM t WHERE s IN ('foo','bar');
+
+-- Before: DistinctOn(i)
+--           IndexJoin(t)  -- fetches s for filter
+--             IndexScan(t@partial_idx)
+-- After: DistinctOn(i)
+--           IndexScan(t@partial_idx)  -- i is in the index
+```
+
+```sql
+-- Positive: aggregation only uses indexed columns
+-- orders has INDEX(region, amount)
+SELECT region, SUM(amount) FROM orders GROUP BY region;
+
+-- If secondary index covers both region and amount:
+-- GroupBy(region, SUM(amount))
+--   IndexScan(orders, idx_region_amount)
+-- No IndexJoin needed
+```
+
+```sql
+-- Negative: aggregation needs non-indexed column
+SELECT region, SUM(quantity) FROM orders GROUP BY region;
+-- quantity is not in the secondary index, IndexJoin required
+```
+
+## References
+
+CockroachDB: pkg/sql/opt/xform/rules/groupby.opt:322 - EliminateIndexJoinOrProjectInsideGroupBy (commit 51e808c)

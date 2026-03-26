@@ -1,0 +1,48 @@
+---
+id: cockroachdb-eliminate-noop-project
+name: "Eliminate Identity Projections"
+category: logical/projection
+databases: [cockroachdb]
+version: "1.0.0"
+authors: ["Database Contributors", "RA Contributors"]
+tags: [database-mining, cockroachdb, optimization]
+complexity: "O(n)"
+benefit_range: [1.0, 10.0]
+---
+
+# Eliminate Identity Projections
+
+## Description
+
+Removes identity projections that don't transform data or reorder columns.
+
+**When to apply**: During query optimization phase.
+
+## Relational Algebra
+
+```latex
+-- Before
+$$
+(project [a,b,c] (scan table [a,b,c]))
+$$
+
+-- After
+$$
+(scan table [a,b,c])
+$$
+
+```
+
+## Preconditions
+
+- Projection preserves all columns in same order
+
+## Test Cases
+
+```sql
+SELECT * FROM table WHERE condition;
+```
+
+## References
+
+- Database documentation

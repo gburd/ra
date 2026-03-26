@@ -1,0 +1,55 @@
+---
+id: agg-pushdown-before-hash-shuffle
+name: Aggregation Pushdown Before Hash Shuffle
+category: distributed/aggregation
+databases: [presto, trino, spark, cockroachdb, greenplum]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, aggregation, pushdown, shuffle, hash-partition]
+complexity: O(n)
+benefit_range: [0.3, 0.95]
+---
+
+# Aggregation Pushdown Before Hash Shuffle
+
+## Description
+
+Push partial aggregation below a hash-partition exchange to reduce
+network transfer. This is the core optimization in two-phase
+aggregation: the partial aggregate runs before the shuffle so that
+only aggregated rows cross the network.
+
+**When to apply**: An aggregate sits above a hash-partitioned exchange,
+and the aggregate function is decomposable.
+
+## Relational Algebra
+
+```latex
+-- Before
+$$
+\gamma_{g, agg(a)}(Exchange[hash(g)](R))
+$$
+
+-- After
+$$
+\gamma_{g, merge_agg(partial)}(
+    Exchange[hash(g)](
+        \gamma_{g, partial_agg(a)}(R)
+    )
+)
+$$
+
+```
+
+## Test Cases
+
+```sql
+-- Positive: basic pushdown
+SELECT department, SUM(salary) FROM employees GROUP BY department;
+-- Push partial SUM below exchange
+
+-- Positive: multiple aggregates
+SELECT region, SUM(qty), MAX(price), COUNT(*)
+FROM sales GROUP BY region;
+-- Push all three partial aggregates below exchange
+```

@@ -1,0 +1,168 @@
+---
+id: dynamic-partition-pruning
+name: Dynamic Partition Pruning
+category: distributed/partition-pruning
+databases: [presto, trino, spark, cockroachdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, partition, pruning, dynamic, runtime, adaptive]
+complexity: O(n)
+benefit_range: [0.3, 0.95]
+---
+
+# Dynamic Partition Pruning
+
+## Description
+
+Uses runtime information from one side of a join to prune partitions of
+the other side. At execution time, the build side of a join produces a
+set of distinct join key values. These values are used to filter the
+probe side's partitions, eliminating partitions that contain no matching
+rows.
+
+**When to apply**: A join connects a large partitioned fact table with a
+filtered dimension table, and the fact table's partition key is the join
+key (or a function of it).
+
+**Why it works**: Static pruning only works with compile-time constants.
+Dynamic pruning extends this to runtime-derived values. If a dimension
+filter reduces the join key domain from 365 days to 30 days, dynamic
+pruning eliminates 335 partitions at runtime.
+
+## Relational Algebra
+
+```latex
+$$
+Join[f.pk = d.k](Scan(fact), \sigma_{p}(Scan(dim)))
+  \rightarrow Join[f.pk = d.k](
+       Scan(fact, partitions=runtime_filter(d.k)),
+       \sigma_{p}(Scan(dim))
+     )
+  \text{where} pk is partition key of fact
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("dynamic-partition-prune";
+    "(join inner ?cond
+        (scan ?fact_table)
+        (filter ?dim_pred (scan ?dim_table)))" =>
+    "(join inner ?cond
+        (scan ?fact_table
+            (dynamic_filter ?cond ?dim_table ?dim_pred))
+        (filter ?dim_pred (scan ?dim_table)))"
+    if join_key_is_partition_key("?cond", "?fact_table")
+    if dim_filter_is_selective("?dim_pred")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    fact_table: &TableRef,
+    dim_table: &TableRef,
+    join_cond: &Expr,
+    dim_filter: &Expr,
+) -> bool {
+    let join_key = join_cond.equi_key_for(fact_table);
+    // Fact table must be partitioned on the join key
+    fact_table.partition_columns().contains(&join_key)
+    // Dimension filter must be selective enough
+    && dim_filter.estimated_selectivity() < 0.3
+    // Dimension must be small enough to build filter quickly
+    && dim_table.estimated_cardinality() < 10_000_000
+}
+```
+
+**Restrictions:**
+- The join key must match (or functionally determine) the partition key
+- The dimension side must be built before the fact scan starts (creates
+  a dependency in the execution DAG)
+- Adds latency to the critical path (dimension must be fully materialized)
+- Not beneficial when the dimension filter is not selective
+- In Spark, requires `spark.sql.optimizer.dynamicPartitionPruning.enabled`
+
+## Cost Model
+
+```rust
+fn dynamic_prune_benefit(
+    total_partitions: u32,
+    matching_partitions: u32,
+    rows_per_partition: f64,
+    row_bytes: f64,
+    dim_build_cost: f64,
+) -> f64 {
+    let pruned = total_partitions - matching_partitions;
+    let saved_scan = pruned as f64 * rows_per_partition * row_bytes;
+    saved_scan - dim_build_cost
+}
+```
+
+**Typical benefit**: In star-schema queries where a dimension filter
+selects 5% of the key domain, 95% of fact table partitions are pruned.
+
+## Test Cases
+
+```sql
+-- Positive: classic star-schema dynamic pruning
+-- fact_sales partitioned by date_key
+SELECT SUM(f.amount)
+FROM fact_sales f
+JOIN dim_date d ON f.date_key = d.key
+WHERE d.year = 2024 AND d.quarter = 1;
+
+-- At runtime: dim_date filter produces ~90 date keys
+-- Dynamic filter prunes fact_sales to ~90 of 3650 partitions
+
+-- Plan:
+-- Aggregate(SUM(amount))
+--   HashJoin(f.date_key = d.key)
+--     DynamicFilterScan(fact_sales,
+--         runtime_filter from dim_date.key)
+--     Exchange[broadcast]
+--       Filter(year=2024 AND quarter=1)
+--         Scan(dim_date)
+```
+
+```sql
+-- Positive: Spark dynamic partition pruning
+-- spark.sql.optimizer.dynamicPartitionPruning.enabled = true
+SELECT f.*, s.store_name
+FROM fact_sales f
+JOIN dim_store s ON f.store_id = s.id
+WHERE s.country = 'Japan';
+-- Prunes fact_sales to partitions matching Japanese store IDs
+```
+
+```sql
+-- Negative: dimension filter not selective
+SELECT f.*, d.date_name
+FROM fact_sales f
+JOIN dim_date d ON f.date_key = d.key
+WHERE d.is_weekday = true;
+-- ~71% of dates are weekdays; pruning eliminates only 29%
+-- Overhead of building filter may exceed benefit
+```
+
+```sql
+-- Negative: join key is not partition key
+SELECT f.*, p.name
+FROM fact_sales f     -- partitioned by date_key
+JOIN dim_product p ON f.product_id = p.id
+WHERE p.category = 'electronics';
+-- product_id is not the partition key -> no partition pruning
+```
+
+## References
+
+Presto/Trino: presto-main/src/main/java/com/facebook/presto/sql/planner/optimizations/AddDynamicFilters.java
+Spark SQL: sql/catalyst/src/main/scala/org/apache/spark/sql/execution/dynamicpruning/PlanDynamicPruningFilters.scala
+Spark SPARK-11150: "Dynamic partition pruning"
+CockroachDB: pkg/sql/opt/norm/rules/select.opt - dynamic filter generation
+Kossmann & Stocker, "Iterative Dynamic Programming" (SIGMOD 2000)

@@ -1,0 +1,58 @@
+---
+id: federated-aggregate-pushdown-sum
+name: "Aggregate Pushdown: SUM"
+category: federated/pushdown
+databases: [postgresql, mysql, sqlite, snowflake, bigquery, duckdb]
+execution_models: [volcano, vectorized]
+version: "1.0.0"
+authors: ["ra-optimizer"]
+tags: [federated, pushdown, aggregate, sum]
+complexity: "O(1)"
+benefit_range: [10.0, 10000.0]
+---
+
+# Aggregate Pushdown: SUM
+
+## Description
+
+Push SUM aggregation to the remote database. SUM is decomposable:
+partial sums can be computed remotely and combined locally.
+
+## Relational Algebra
+
+```latex
+$$
+Aggregate[SUM(col)](RemoteScan[table, endpoint])
+=>
+RemoteScan[table, endpoint, pushdown_agg=SUM(col)]
+$$
+
+```
+
+## Before
+
+```
+(Aggregate :aggregates [(SUM amount)]
+  :input (RemoteScan "orders" "db.example.com"))
+```
+
+## After
+
+```
+(RemoteScan "orders" "db.example.com"
+  :pushdown_agg [(SUM amount)])
+```
+
+## Test Cases
+
+### Test 1: Simple sum
+
+#### Input
+```
+(Aggregate :aggregates [(SUM amount)] :input (RemoteScan "orders" "pg.example.com"))
+```
+
+#### Expected
+```
+(RemoteScan "orders" "pg.example.com" :pushdown_agg [(SUM amount)])
+```

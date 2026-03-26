@@ -1,0 +1,110 @@
+---
+id: calcite-aggregate-project-merge
+name: Calcite AggregateProjectMergeRule
+category: database-specific/calcite
+databases: [calcite]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, calcite, aggregate, project, merge]
+complexity: O(n)
+benefit_range: [0.05, 0.2]
+---
+
+# Calcite AggregateProjectMergeRule
+
+## Description
+
+Merges a `LogicalAggregate` with an immediately-below
+`LogicalProject` by adjusting the aggregate's group-by keys
+and aggregate function arguments to reference the project's
+input columns directly, then removing the intermediate project.
+
+**When to apply**: A `LogicalAggregate` sits directly above a
+`LogicalProject` that only renames or passes through columns
+(no complex expressions in aggregated positions).
+
+**Why it works**: Eliminates an unnecessary intermediate
+materialization and simplifies the plan for downstream rules.
+
+**Calcite class**: `org.apache.calcite.rel.rules.AggregateProjectMergeRule`
+
+## Relational Algebra
+
+```latex
+-- Before: aggregate above project
+$$
+\gamma_{g'; SUM(x)}(\pi_{a AS x, b AS g}(R))
+$$
+
+-- After: aggregate directly on input
+$$
+\gamma_{b; SUM(a)}(R)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-aggregate-project-merge";
+    "(aggregate ?group_by ?aggs
+        (project ?exprs ?input))" =>
+    "(aggregate
+        (remap-group ?group_by ?exprs)
+        (remap-aggs ?aggs ?exprs)
+        ?input)"
+    if project_is_simple_mapping("?exprs")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    project_exprs: &[ProjectionColumn],
+) -> bool {
+    project_exprs.iter().all(|pc| {
+        matches!(&pc.expr, Expr::Column(_))
+    })
+}
+```
+
+**Restrictions:**
+- The project must be a simple column mapping (renames/reorders)
+- If the project computes expressions (e.g., `a + b`), the
+  merge is only valid if those expressions appear in group-by
+  keys, not inside aggregate functions
+
+## Cost Model
+
+```rust
+fn estimated_benefit(rows: f64) -> f64 {
+    rows * 0.005
+}
+```
+
+**Typical benefit**: 5-20% reduction in plan overhead.
+
+## Test Cases
+
+```sql
+-- Positive: project just renames columns
+SELECT dept AS department, COUNT(*)
+FROM (SELECT deptno AS dept, sal FROM emp)
+GROUP BY dept;
+-- Merged to: SELECT deptno AS department, COUNT(*) FROM emp
+-- GROUP BY deptno
+```
+
+```sql
+-- Negative: project computes expression used in aggregate
+SELECT SUM(total)
+FROM (SELECT price * qty AS total FROM orders)
+-- Cannot merge: SUM(price * qty) changes evaluation
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/AggregateProjectMergeRule.java

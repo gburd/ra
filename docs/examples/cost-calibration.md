@@ -17,53 +17,24 @@ Your hardware might be very different:
 
 ## Calibration Process
 
-### Step 1: Run Calibration Benchmarks
+Cost model calibration involves manually tuning the cost model parameters to match your hardware characteristics. RA uses these parameters during query optimization to estimate execution costs.
 
-```bash
-# Run comprehensive calibration suite
-ra-cli calibrate \
-  --workload tpch \
-  --scale-factor 10 \
-  --iterations 5 \
-  --output my-hardware.json
+### Step 1: Understand Your Hardware
 
-# Output:
-# Running calibration benchmarks...
-# [x] Sequential scan: 0.8 units/page (baseline: 1.0)
-# [x] Random I/O: 1.2 units/page (baseline: 4.0)
-# [x] CPU tuple cost: 0.005 units (baseline: 0.01)
-# [x] Hash join: 0.02 units/tuple
-# [x] Sort: 0.03 units/tuple
-# [x] Network transfer: 2.0 units/MB
-# Calibration saved to my-hardware.json
-```
+Measure key characteristics:
+- Sequential I/O performance
+- Random I/O performance
+- CPU processing speed
+- Memory bandwidth
+- Network latency and throughput
 
-### Step 2: Workload-Specific Calibration
+### Step 2: Configure Cost Model
 
-```bash
-# Calibrate using your actual queries
-ra-cli calibrate \
-  --workload-file production_queries.sql \
-  --statistics current_stats.json \
-  --runtime-samples query_times.csv \
-  --output production-calibrated.json
-```
+Create a custom cost model JSON file with calibrated parameters (see examples below).
 
-### Step 3: Validate Calibration
+### Step 3: Use Custom Cost Model
 
-```bash
-# Compare predicted vs actual costs
-ra-cli validate-costs \
-  --model my-hardware.json \
-  --queries test_queries.sql \
-  --actual-times measured_times.csv
-
-# Output:
-# Cost Model Accuracy:
-# - Mean Absolute Error: 12%
-# - Correlation: 0.94
-# - Queries within 20% of actual: 87%
-```
+RA reads cost model configuration from your environment or project configuration files. See the Configuration section below for details.
 
 ## Calibration Results
 
@@ -126,14 +97,9 @@ SELECT category, SUM(amount) FROM sales GROUP BY category;
 
 ### GPU Calibration
 
-```bash
-ra-cli calibrate \
-  --hardware gpu \
-  --gpu-model "RTX 4090" \
-  --gpu-memory 24GB \
-  --operations "scan,filter,join,aggregate"
+GPU-specific cost parameters:
 
-# Produces GPU-specific costs:
+```json
 {
   "gpu_transfer_cost": 5.0,      // CPU->GPU transfer
   "gpu_scan_cost": 0.001,         // Parallel scan
@@ -145,13 +111,9 @@ ra-cli calibrate \
 
 ### SIMD Calibration
 
-```bash
-ra-cli calibrate \
-  --hardware cpu \
-  --simd avx512 \
-  --operations "scan,filter,arithmetic"
+SIMD-aware cost parameters:
 
-# Results in SIMD-aware costs:
+```json
 {
   "simd_scan_cost": 0.002,        // 8x parallel
   "simd_filter_cost": 0.001,      // Vectorized comparison
@@ -161,40 +123,42 @@ ra-cli calibrate \
 
 ## Using Calibrated Models
 
-### Apply to Single Query
+### Configure Hardware Profile
+
+Use hardware profiles that match your system characteristics:
 
 ```bash
+# Use server profile (optimized for high-end hardware)
 ra-cli optimize \
-  --cost-model my-hardware.json \
+  --hardware-profile server \
+  "SELECT * FROM orders WHERE status = 'pending'"
+
+# Use GPU server profile for GPU-accelerated workloads
+ra-cli optimize \
+  --hardware-profile gpu-server \
+  "SELECT * FROM large_dataset GROUP BY category"
+
+# Let RA auto-detect the best profile
+ra-cli optimize \
+  --hardware-profile auto \
   "SELECT * FROM orders WHERE status = 'pending'"
 ```
 
-### Set as Default
+Available profiles: `edge`, `mobile`, `laptop`, `desktop`, `server`, `gpu-server`, `auto`
+
+### Set Default Configuration
 
 ```toml
 # ~/.ra/config.toml
 [cost_model]
-default = "my-hardware.json"
+seq_page_cost = 0.1
+random_page_cost = 0.15
+cpu_tuple_cost = 0.01
 
-[cost_model.overrides]
-"analytical/*" = "nvme-analytical.json"
-"transactional/*" = "memory-oltp.json"
-```
-
-### A/B Testing
-
-```bash
-# Compare plans with different cost models
-ra-cli compare-models \
-  --model1 default \
-  --model2 my-hardware.json \
-  --queries workload.sql
-
-# Output:
-# Plan differences: 23/100 queries
-# Estimated improvement: 34% average
-# Biggest win: query_17 (10x faster)
-# Biggest risk: query_42 (1.5x slower)
+[hardware]
+cpu_cores = 16
+memory_gb = 64
+gpu_available = true
 ```
 
 ## Calibration Parameters
@@ -232,30 +196,20 @@ ra-cli compare-models \
 
 ## Continuous Calibration
 
-### Automatic Adjustment
+### Monitor Query Performance
+
+Use the monitoring tools to track query performance:
 
 ```bash
-# Enable learning mode
+# Monitor database with tuning advice
 ra-cli monitor \
-  --learn-costs \
-  --feedback-log query_performance.log \
-  --update-interval daily
+  --postgres 'host=localhost dbname=prod' \
+  --tui
 ```
 
-### Drift Detection
+### Detect Performance Drift
 
-```bash
-# Detect when calibration is outdated
-ra-cli detect-drift \
-  --model my-hardware.json \
-  --recent-queries last_7_days.log
-
-# Output:
-# Cost model drift detected:
-# - Random I/O 30% faster than model
-# - CPU costs 15% higher than model
-# Recommendation: Recalibrate
-```
+Monitor query execution times and compare with cost model predictions to detect when recalibration is needed. Manually update cost model parameters based on observed performance characteristics.
 
 ## Best Practices
 

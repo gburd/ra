@@ -1,0 +1,119 @@
+---
+id: mssql-memory-grant-feedback
+name: mssql Memory Grant Feedback
+category: database-specific/mssql
+databases: [mssql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, mssql, memory-grant, feedback, adaptive, spill]
+complexity: O(1)
+benefit_range: [0.1, 0.6]
+---
+
+# mssql Memory Grant Feedback
+
+## Description
+
+Adjusts memory grants for queries based on actual execution statistics.
+When a query spills to tempdb or wastes excessive memory, mssql
+adjusts the grant for subsequent executions to match actual needs.
+
+**When to apply**: A cached query plan has a memory grant that is
+significantly larger or smaller than the actual memory used during
+execution.
+
+**Why it works**: Memory grant overestimates waste buffer pool memory
+that other queries could use.  Underestimates cause expensive tempdb
+spills for sorts and hash joins.  Feedback adjusts grants to match
+reality, eliminating spills and reducing memory waste.
+
+**Database version**: mssql 2017+ (batch mode), 2019+ (row mode),
+2022+ (percentile and persistence)
+
+## Relational Algebra
+
+```latex
+-- Before: fixed memory grant (possibly wrong)
+$$
+hash-\bowtie_{memory_grant=500MB}(R, S)
+$$
+  -- actual use: 50MB, wastes 450MB
+
+-- After: adjusted memory grant
+$$
+hash-\bowtie_{memory_grant=60MB}(R, S)
+$$
+  -- grant adjusted based on feedback from previous execution
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mssql-memory-grant-feedback";
+    "(hash-join ?type ?cond ?left ?right)" =>
+    "(hash-join-with-feedback ?type ?cond ?left ?right
+        (memory-grant-from-feedback))"
+    if is_database("mssql")
+    if has_memory_grant_feedback_available()
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    granted_memory: f64,
+    used_memory: f64,
+    spilled: bool,
+) -> bool {
+    let ratio = granted_memory / used_memory;
+    spilled || ratio > 2.0 || ratio < 0.5
+}
+```
+
+**Restrictions:**
+- Requires query to be executed at least once for feedback
+- OPTION(RECOMPILE) bypasses feedback (no cached plan)
+- Memory grant feedback is per-plan, not per-parameter value
+- In 2022+, percentile-based feedback handles variable workloads
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    spill_pages: f64,
+    wasted_memory_mb: f64,
+) -> f64 {
+    let spill_cost = spill_pages * 0.01; // tempdb I/O
+    let waste_cost = wasted_memory_mb * 0.001; // memory pressure
+    spill_cost + waste_cost
+}
+```
+
+**Typical benefit**: Eliminating a 1GB tempdb spill saves seconds of
+I/O; right-sizing a 500MB grant to 50MB frees memory for 9 other
+concurrent queries.
+
+## Test Cases
+
+```sql
+-- Positive: sort spills to tempdb
+SELECT * FROM large_table ORDER BY complex_expression;
+-- First execution: spill to tempdb (grant too small)
+-- Second execution: grant increased, no spill
+```
+
+```sql
+-- Negative: stable memory usage
+SELECT TOP 10 * FROM small_table;
+-- Memory grant is already small and stable
+```
+
+## References
+
+mssql: Memory Grant Feedback
+mssql: sys.dm_exec_query_memory_grants
+mssql: Query Store (memory grant feedback persistence in 2022+)

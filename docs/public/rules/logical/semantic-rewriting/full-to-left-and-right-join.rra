@@ -1,0 +1,104 @@
+---
+id: calcite-full-to-left-and-right-join
+name: Calcite FullToLeftAndRightJoinRule
+category: logical/semantic-rewriting
+databases: [calcite, mysql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [logical, calcite, full-join, left-join, right-join, decomposition]
+complexity: O(n)
+benefit_range: [0.0, 0.3]
+---
+
+# Calcite FullToLeftAndRightJoinRule
+
+## Description
+
+Decomposes a FULL OUTER JOIN into a UNION ALL of a LEFT JOIN and a
+filtered RIGHT JOIN. This enables execution on databases that do
+not natively support FULL OUTER JOIN (e.g., MySQL < 8.0).
+
+**When to apply**: A FULL JOIN must be executed on a backend that
+lacks native FULL JOIN support.
+
+**Why it works**: FULL JOIN = LEFT JOIN UNION ALL (RIGHT JOIN WHERE
+left keys are not matched). The LEFT JOIN produces all left rows
+with matches and NULLs. The filtered RIGHT JOIN produces unmatched
+right rows.
+
+**Calcite class**: `org.apache.calcite.rel.rules.FullToLeftAndRightJoinRule`
+
+## Relational Algebra
+
+```latex
+-- Before: FULL OUTER JOIN
+$$
+R FULL JOIN S ON R.k = S.k
+$$
+
+-- After: UNION ALL of LEFT and filtered RIGHT
+$$
+(R LEFT JOIN S ON R.k = S.k)
+UNION ALL
+(R RIGHT JOIN S ON R.k = S.k WHERE R.k IS NULL)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-full-to-left-and-right-join";
+    "(full-join ?cond ?left ?right)" =>
+    "(union-all
+        (left-join ?cond ?left ?right)
+        (filter (is-not-true ?cond)
+            (right-join ?cond ?left ?right)))"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(join: &Join) -> bool {
+    join.join_type() == JoinType::Full
+}
+```
+
+**Restrictions:**
+- The filtered RIGHT JOIN uses IS NOT TRUE to handle NULLs correctly
+- Doubles the scan of both tables
+- Only useful when FULL JOIN is not natively supported
+
+## Cost Model
+
+```rust
+fn estimated_benefit(_: f64) -> f64 {
+    // Compatibility transformation; may be slower
+    0.0
+}
+```
+
+**Typical benefit**: 0-30% (enables execution, not optimization).
+
+## Test Cases
+
+```sql
+-- Positive: FULL JOIN decomposition
+SELECT * FROM emp e
+FULL JOIN dept d ON e.deptno = d.deptno;
+-- Becomes: LEFT JOIN UNION ALL filtered RIGHT JOIN
+```
+
+```sql
+-- Negative: LEFT JOIN (already supported)
+SELECT * FROM emp e
+LEFT JOIN dept d ON e.deptno = d.deptno;
+-- No decomposition needed
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/FullToLeftAndRightJoinRule.java (commit af6367d)

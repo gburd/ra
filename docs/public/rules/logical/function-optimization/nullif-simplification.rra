@@ -1,0 +1,100 @@
+---
+id: nullif-simplification
+name: NULLIF Simplification
+category: logical/function-optimization
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [function, nullif, null, simplification]
+complexity: "O(1)"
+benefit_range: [0.05, 0.2]
+---
+
+# NULLIF Simplification
+
+## Description
+
+Simplifies NULLIF expressions based on argument properties. NULLIF(a, b)
+returns NULL if a = b, otherwise returns a.
+
+**When to apply**: NULLIF where arguments have known relationships.
+
+## Relational Algebra
+
+```latex
+$$
+NULLIF(x, x)         \rightarrow NULL              -- always equal
+NULLIF(x, NULL)      \rightarrow \times -- \times = NULL is UNKNOWN, never TRUE
+NULLIF(NULL, x)      \rightarrow NULL              -- returns first arg when not equal
+NULLIF(literal_a, literal_b) \rightarrow folded    -- constant fold
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("nullif-same-args";
+    "(nullif ?x ?x)" => "(literal null)"
+),
+rw!("nullif-second-null";
+    "(nullif ?x (literal null))" => "?x"
+),
+rw!("nullif-first-null";
+    "(nullif (literal null) ?x)" => "(literal null)"
+),
+rw!("nullif-constant-fold";
+    "(nullif (literal ?a) (literal ?b))" =>
+    { FoldNullIf { a: "?a", b: "?b" } }
+),
+```
+
+## Cost Model
+
+```rust
+fn estimated_benefit() -> f64 {
+    0.1 // Eliminates per-row comparison
+}
+```
+
+## Test Cases
+
+### Positive: Same argument
+
+```sql
+SELECT NULLIF(col, col) FROM t;
+-- Always NULL (when col is NOT NULL; NULL when col IS NULL)
+-- Simplify to: SELECT NULL FROM t;
+```
+
+### Positive: Second argument is NULL
+
+```sql
+SELECT NULLIF(name, NULL) FROM users;
+-- name = NULL is UNKNOWN -> returns name always
+-- Simplify to: SELECT name FROM users;
+```
+
+### Positive: Constant fold
+
+```sql
+SELECT NULLIF(5, 5) FROM t;   -- NULL
+SELECT NULLIF(5, 3) FROM t;   -- 5
+```
+
+### Negative: Dynamic arguments
+
+```sql
+SELECT NULLIF(a, b) FROM t;
+-- Cannot simplify without knowing relationship between a and b
+```
+
+## References
+
+**Implementation:**
+- PostgreSQL: NULLIF implemented as CASE WHEN a = b THEN NULL ELSE a END
+- All databases: NULLIF is syntactic sugar for CASE expression

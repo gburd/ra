@@ -1,0 +1,182 @@
+---
+id: leapfrog-triejoin
+name: LeapFrog TrieJoin
+category: experimental/wcoj
+databases: [duckdb, postgresql]
+execution_models: [interpreted]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["Veldhuizen 2014", "RA Contributors"]
+tags: [wcoj, leapfrog, trie, cyclic-join]
+complexity: "O(N^(ρ*))"
+benefit_range: [0.4, 0.95]
+---
+
+# LeapFrog TrieJoin
+
+## Description
+
+Implements worst-case optimal joins using trie data structures and leapfrog intersection.
+Relations are organized as tries indexed by join attributes, and tuples are enumerated
+by intersecting sorted attribute values using a leapfrog algorithm that skips non-matching
+values efficiently.
+
+**When to apply**: Cyclic queries with indexed relations where intersecting sorted lists
+is more efficient than hash-based approaches.
+
+**Why it works**: Trie organization allows efficient prefix-based navigation. Leapfrog
+intersection scans multiple sorted lists simultaneously, "leaping" to common values
+without materializing Cartesian products.
+
+## Relational Algebra
+
+```latex
+$$
+R \bowtie_{R.a=S.a AND R.b=T.b} (S \bowtie_{S.c=T.c} T)
+  \rightarrow leapfrog_trie\bowtie_{{R.a=S.a, R.b=T.b, S.c=T.c}}(trie(R), trie(S), trie(T))
+  \text{where} has_indexes(R, S, T)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("leapfrog-triejoin";
+    "(join ?pred (join ?pred2 ?r1 ?r2) ?r3)" =>
+    "(leapfrog_triejoin
+       (index_order (compute_variable_order ?r1 ?r2 ?r3))
+       (build_tries ?r1 ?r2 ?r3))"
+    if all_relations_indexed("?r1", "?r2", "?r3")
+    if is_cyclic_or_complex()
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    relations: &[RelExpr],
+    predicates: &[JoinPredicate],
+) -> bool {
+    // All relations must have appropriate indexes
+    if !relations.iter().all(|r| has_suitable_index(r)) {
+        return false;
+    }
+
+    // Query must benefit from WCOJ
+    let join_graph = build_join_graph(relations, predicates);
+    join_graph.is_cyclic() || relations.len() >= 4
+}
+
+struct LeapfrogIterator {
+    tries: Vec<TrieIterator>,
+    current_attr: usize,
+    variable_order: Vec<usize>,
+}
+
+impl LeapfrogIterator {
+    fn intersect(&mut self) -> Option<Vec<Value>> {
+        // Leapfrog through sorted attribute values
+        loop {
+            let max_val = self.tries.iter().map(|t| t.peek()).max()?;
+            let mut all_match = true;
+
+            for trie in &mut self.tries {
+                trie.seek(max_val);
+                if trie.peek() != Some(max_val) {
+                    all_match = false;
+                    break;
+                }
+            }
+
+            if all_match {
+                return Some(self.collect_tuple());
+            }
+        }
+    }
+}
+```
+
+**Restrictions:**
+- Relations must have trie or B-tree indexes on join attributes
+- All predicates must be equi-joins
+- Variable ordering affects performance (use greedy heuristic)
+- Not efficient for very selective predicates (few matches)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    relations: &[Statistics],
+    predicates: &[JoinPredicate],
+) -> f64 {
+    let agm_bound = compute_agm_bound(relations, predicates);
+
+    // Leapfrog overhead: iterator management + seeking
+    let num_variables = count_distinct_attributes(predicates);
+    let leapfrog_overhead = num_variables as f64 * 1.1;
+
+    let leapfrog_cost = agm_bound * leapfrog_overhead;
+    let binary_join_cost =
+        estimate_binary_join_cost(relations, predicates);
+
+    if binary_join_cost > leapfrog_cost {
+        (binary_join_cost - leapfrog_cost) / binary_join_cost
+    } else {
+        0.0
+    }
+}
+```
+
+**Assumptions:**
+- Trie construction: O(N log N) per relation
+- Seek operation: O(log |domain|) using B-tree
+- Intersection per variable: O(k log(N/k)) where k = result size
+- Variable ordering computed greedily or via sampling
+
+**Typical benefit**: 3x-50x for triangle queries and complex cyclic patterns.
+
+## Test Cases
+
+### Positive: Triangle query with indexes
+
+```sql
+CREATE INDEX likes_user ON likes(user_id);
+CREATE INDEX likes_item ON likes(item_id);
+
+SELECT l1.user_id, l2.user_id, l1.item_id
+FROM likes l1, likes l2, likes l3
+WHERE l1.item_id = l2.item_id
+  AND l2.user_id = l3.user_id
+  AND l3.item_id = l1.item_id;
+
+-- Expected: LeapFrog TrieJoin with variable order: item_id, user_id
+```
+
+### Positive: 4-clique query
+
+```sql
+-- Find complete subgraphs (4-cliques)
+SELECT e1.v1, e1.v2, e2.v2, e3.v2
+FROM edges e1, edges e2, edges e3, edges e4, edges e5, edges e6
+WHERE e1.v2 = e2.v1 AND e2.v2 = e3.v1 AND e3.v2 = e4.v1
+  AND e4.v2 = e1.v1 AND e1.v1 = e5.v1 AND e5.v2 = e2.v2
+  AND e2.v1 = e6.v1 AND e6.v2 = e3.v2;
+
+-- Expected: LeapFrog TrieJoin (binary plan is exponential)
+```
+
+## References
+
+**Academic papers:**
+- Veldhuizen, "Triejoin: A Simple, Worst-Case Optimal Join Algorithm", ICDT 2014
+- Aberger et al., "EmptyHeaded: A Relational Engine for Graph Processing", SIGMOD 2016
+- Ammar et al., "Distributed Evaluation of Subgraph Queries", VLDB 2018
+
+**Implementation:**
+- LogicBlox: LeapFrog implementation in Datalog engine
+- EmptyHeaded: `src/trie/TrieIterator.hpp`
+- DuckDB: Inspired IEJoin implementation

@@ -1,0 +1,40 @@
+---
+id: hottsql-proof-based
+name: "HoTTSQL Proof-Based Rewrite"
+category: logical/semantic-rewriting
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [academic, academic]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# HoTTSQL Proof-Based Rewrite
+
+## Description
+
+Proof assistant based query rewriting
+
+## Relational Algebra
+
+```latex
+
+
+```
+
+## Implementation
+
+```
+Implement rule transformation for academic optimization
+```
+
+## Tests
+
+Add test cases for this rule
+
+## References
+- Paper: HoTTSQL by Chance et al.
+- DOI: 10.1145/3183713.3196907

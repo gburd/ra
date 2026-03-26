@@ -1,0 +1,40 @@
+---
+id: intersect-to-semi-join
+name: "IntersectToSemiJoin"
+category: logical/subquery-unnesting
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [academic, calcite]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# IntersectToSemiJoin
+
+## Description
+
+Converts INTERSECT to semi-join
+
+## Relational Algebra
+
+```latex
+$$
+R INTERSECT S => SemiJoin(R, S)
+$$
+
+```
+
+## Implementation
+
+```
+Implement rule transformation for calcite optimization
+```
+
+## Tests
+
+Add test cases for this rule
+
+## References

@@ -1,0 +1,47 @@
+---
+id: join-to-hyper-graph
+name: "JoinToHyperGraph"
+category: logical/join-reordering
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [academic, calcite]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+preconditions:
+  - type: "pattern"
+    must_match: "(multi-join ?inputs ?predicates)"
+    description: "Multi-way join to convert to hypergraph"
+  - type: "predicate"
+    condition: "count(?inputs) >= 3"
+    description: "At least 3 relations for hypergraph representation"
+---
+
+# JoinToHyperGraph
+
+## Description
+
+Converts join tree to hypergraph
+
+## Relational Algebra
+
+```latex
+$$
+Join tree => hypergraph for WCOJ
+$$
+
+```
+
+## Implementation
+
+```
+Implement rule transformation for calcite optimization
+```
+
+## Tests
+
+Add test cases for this rule
+
+## References

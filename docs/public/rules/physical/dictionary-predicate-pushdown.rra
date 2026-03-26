@@ -1,0 +1,183 @@
+---
+id: dictionary-predicate-pushdown
+name: "Dictionary Predicate Pushdown"
+category: physical
+databases: []
+execution_models: [column-at-a-time, vectorized]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [dictionary, encoding, predicate, pushdown, columnar, parquet]
+complexity: "O(D + N)"
+benefit_range: [2.0, 10.0]
+---
+
+# Dictionary Predicate Pushdown
+
+## Metadata
+- **Rule ID**: `dictionary-predicate-pushdown`
+- **Category**: Physical
+- **Source**: CMU 15-721 Lectures 2-3 (Data Formats and Encoding)
+- **Complexity**: O(D + N) where D = dictionary size, N = number of rows
+- **Prerequisites**: Column is dictionary-encoded; predicate is equality or IN
+- **Alternatives**: Full scan with decompression
+
+## Description
+
+When a column uses dictionary encoding, predicates can be evaluated
+against the dictionary codes (small integers) instead of the decoded
+values (potentially wide strings or complex types). This avoids
+decompressing the column and operates on a compact integer representation.
+
+The optimization proceeds in two phases:
+1. **Dictionary probe**: Look up the predicate value(s) in the dictionary
+   to find matching code(s). Cost: O(D) where D is the dictionary size.
+2. **Code scan**: Scan the codes array comparing against the matching
+   code(s). Cost: O(N) but on 1-2 byte integers instead of full values.
+
+For Parquet files, dictionary pages are stored separately and can be
+read without touching data pages. If the predicate value is not found
+in the dictionary, the entire column chunk can be skipped (zero rows
+match).
+
+**When to apply:**
+- Column is dictionary-encoded (Parquet column chunk encoding = PLAIN_DICTIONARY)
+- Predicate is equality (`col = 'value'`) or set membership (`col IN (...)`)
+- Dictionary cardinality is low (< 65536 distinct values for 16-bit codes)
+
+**Why it works:**
+- Dictionary codes are 1-4 bytes vs. 8-200+ bytes for string values
+- Integer comparison is 5-10x faster than string comparison
+- Cache-friendly: codes array fits in L2/L3 cache
+- Short-circuit: if value not in dictionary, skip entire chunk
+
+## Relational Algebra
+
+```
+filter[col = 'value'](scan[T])
+  -> filter[col_code = dict_lookup(T.col, 'value')](dict_scan[T, col])
+
+filter[col IN (v1, v2, ...)](scan[T])
+  -> filter[col_code IN dict_lookup_set(T.col, {v1, v2, ...})](dict_scan[T, col])
+```
+
+When the dictionary lookup returns empty (value not in dictionary):
+```
+filter[col = 'value'](scan[T])
+  -> empty_relation[]   (if 'value' not in dictionary)
+```
+
+## Implementation (egg rewrite rules)
+
+```lisp
+;; Equality predicate on dictionary-encoded column
+(rewrite (filter (eq (column ?col) (const ?val))
+           (scan ?table ?cols))
+  (filter (eq (dict-code ?col) (dict-lookup ?table ?col ?val))
+    (dict-scan ?table ?cols))
+  :if (is-dict-encoded ?table ?col)
+  :if (is-equality-safe-type ?val))
+
+;; IN predicate on dictionary-encoded column
+(rewrite (filter (in (column ?col) ?val-set)
+           (scan ?table ?cols))
+  (filter (in (dict-code ?col) (dict-lookup-set ?table ?col ?val-set))
+    (dict-scan ?table ?cols))
+  :if (is-dict-encoded ?table ?col))
+
+;; Dictionary elimination: value not in dictionary
+(rewrite (filter (eq (column ?col) (const ?val))
+           (scan ?table ?cols))
+  (empty-relation)
+  :if (is-dict-encoded ?table ?col)
+  :if (not-in-dictionary ?table ?col ?val))
+```
+
+## Cost Model
+
+```rust
+/// Cost of dictionary predicate pushdown vs. full scan.
+pub fn cost_dict_predicate(
+    rows: u64,
+    dict_size: u64,
+    code_width_bytes: u8,
+    value_avg_bytes: u64,
+) -> (Cost, Cost) {
+    // Full scan cost: decompress + compare full values
+    let full_scan_cpu = rows as f64 * value_avg_bytes as f64 * 0.5;
+    let full_scan_io = rows as f64 * value_avg_bytes as f64;
+
+    // Dictionary pushdown cost: probe dictionary + scan codes
+    let dict_probe_cpu = dict_size as f64 * value_avg_bytes as f64 * 0.5;
+    let code_scan_cpu = rows as f64 * code_width_bytes as f64 * 0.3;
+    let code_scan_io = rows as f64 * code_width_bytes as f64;
+
+    let full = Cost::new(full_scan_cpu, full_scan_io, 0.0, 0);
+    let pushdown = Cost::new(
+        dict_probe_cpu + code_scan_cpu,
+        code_scan_io,
+        0.0,
+        0,
+    );
+    (full, pushdown)
+}
+```
+
+**Typical speedup**: 2-10x depending on value width and dictionary size.
+For string columns with average 50-byte values and 2-byte codes: ~25x
+less I/O bandwidth.
+
+## Test Cases
+
+### Positive: String equality on dictionary-encoded column
+```sql
+SELECT * FROM orders WHERE status = 'shipped';
+
+-- Column 'status' has dictionary: ['pending', 'shipped', 'delivered', 'cancelled']
+-- Dictionary lookup: 'shipped' -> code 1
+-- Scan codes array (2 bytes each) instead of strings (8 bytes avg)
+-- 4x less memory bandwidth, faster integer comparison
+```
+
+### Positive: IN predicate on low-cardinality column
+```sql
+SELECT * FROM events WHERE country IN ('US', 'UK', 'DE');
+
+-- Column 'country' has 200 distinct values, dictionary-encoded
+-- Lookup 3 codes, scan 2-byte codes for membership
+-- Faster than comparing 2-char country strings due to cache efficiency
+```
+
+### Positive: Value not in dictionary (short-circuit)
+```sql
+SELECT * FROM products WHERE category = 'nonexistent';
+
+-- Dictionary does not contain 'nonexistent'
+-- Skip entire column chunk without reading data pages
+-- Cost: O(D) dictionary probe only
+```
+
+### Negative: High-cardinality column (no dictionary)
+```sql
+SELECT * FROM logs WHERE message = 'specific error';
+
+-- Column 'message' has too many distinct values for dictionary encoding
+-- Parquet falls back to PLAIN encoding, no dictionary available
+-- Rule does not apply
+```
+
+### Negative: Range predicate
+```sql
+SELECT * FROM events WHERE timestamp > '2024-01-01';
+
+-- Dictionary pushdown works for equality/IN, not range predicates
+-- Range predicates should use zone map pruning instead
+```
+
+## References
+
+1. **CMU 15-721 Lecture 2**: Data Formats and Encoding (2024)
+2. **Abadi et al.**: "Integrating Compression and Execution in
+   Column-Oriented Database Systems." SIGMOD 2006.
+3. **Apache Parquet Format**: Dictionary Encoding specification
+4. **Apache Impala**: Dictionary-based predicate evaluation

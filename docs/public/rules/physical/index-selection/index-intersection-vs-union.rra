@@ -1,0 +1,145 @@
+---
+id: index-intersection-vs-union
+name: Index Intersection vs Union Selection
+category: physical/index-selection
+databases: [postgresql, mysql, mssql]
+execution_models: [volcano]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [index, intersection, union, multi-index, cost-comparison]
+complexity: "O(n log n)"
+benefit_range: [0.1, 0.6]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter (and ?pred1 ?pred2) (scan ?table))"
+    description: "Conjunctive filter evaluating intersection vs union"
+  - type: "predicate"
+    condition: "has_index(?table, columns(?pred1)) && has_index(?table, columns(?pred2))"
+    description: "Separate indexes must exist on each predicate column"
+---
+
+# Index Intersection vs Union Selection
+
+## Description
+
+Chooses between index intersection (AND semantics) and index union
+(OR semantics) when multiple indexes are available for a multi-
+predicate query. Compares the cost of combining index results vs
+a single-index scan with recheck vs a full table scan.
+
+**When to apply**: A query has multiple predicates and multiple
+single-column indexes, requiring a decision between intersection,
+union, or sequential scan strategies.
+
+**Why it works**: Index intersection reads two sorted index result
+sets and computes their set intersection (AND). Index union merges
+them (OR). The choice depends on selectivity: highly selective
+predicates favor intersection; low selectivity may favor full scan.
+
+## Relational Algebra
+
+```latex
+-- Index intersection for AND
+$$
+filter[p1 AND p2](scan[T])
+  \rightarrow index_intersect(index_scan[I1](p1), index_scan[I2](p2))
+  when \text{selectivity}(p1) * \text{selectivity}(p2) < scan_threshold
+$$
+
+-- Index union for OR
+$$
+filter[p1 OR p2](scan[T])
+  \rightarrow index_union(index_scan[I1](p1), index_scan[I2](p2))
+  when \text{selectivity}(p1) + \text{selectivity}(p2) < scan_threshold
+$$
+
+```
+
+## Implementation
+
+```rust
+rw!("index-intersection-for-and";
+    "(filter (and ?p1 ?p2) (scan ?table))" =>
+    "(index-intersect
+        (index-scan ?i1 ?p1)
+        (index-scan ?i2 ?p2))"
+    if intersection_cheaper_than_scan("?table", "?p1", "?p2")
+),
+
+rw!("index-union-for-or";
+    "(filter (or ?p1 ?p2) (scan ?table))" =>
+    "(index-union
+        (index-scan ?i1 ?p1)
+        (index-scan ?i2 ?p2))"
+    if union_cheaper_than_scan("?table", "?p1", "?p2")
+),
+```
+
+## Cost Model
+
+```rust
+fn compare_strategies(
+    table_pages: u64,
+    idx1_selectivity: f64,
+    idx2_selectivity: f64,
+    idx1_pages: u64,
+    idx2_pages: u64,
+) -> Strategy {
+    let full_scan = table_pages as f64;
+    let intersection = idx1_pages as f64 + idx2_pages as f64
+        + (idx1_selectivity * idx2_selectivity)
+            * table_pages as f64;
+    let union_cost = idx1_pages as f64 + idx2_pages as f64
+        + (idx1_selectivity + idx2_selectivity).min(1.0)
+            * table_pages as f64;
+
+    if intersection < full_scan && intersection < union_cost {
+        Strategy::Intersection
+    } else if union_cost < full_scan {
+        Strategy::Union
+    } else {
+        Strategy::SequentialScan
+    }
+}
+```
+
+**Typical benefit**: 10-60% when combined selectivity warrants multi-index.
+
+## Test Cases
+
+### Positive: Index intersection beneficial
+
+```sql
+-- Both predicates are selective (1% each)
+SELECT * FROM orders
+WHERE customer_id = 42 AND product_id = 100;
+
+-- Intersection: 0.01 * 0.01 = 0.0001 of table; worth combining
+```
+
+### Positive: Index union beneficial
+
+```sql
+-- Low selectivity predicates
+SELECT * FROM users
+WHERE city = 'NYC' OR city = 'LA';
+
+-- Union of two index scans cheaper than full scan
+```
+
+### Negative: Combined selectivity too low
+
+```sql
+-- Both predicates match 50% of rows
+SELECT * FROM orders
+WHERE year >= 2024 AND status IN ('A', 'B', 'C');
+
+-- Intersection still reads ~25% of table; full scan may be cheaper
+```
+
+## References
+
+- PostgreSQL: Index intersection via BitmapAnd
+- MySQL: Index merge optimization
+- mssql: Index intersection

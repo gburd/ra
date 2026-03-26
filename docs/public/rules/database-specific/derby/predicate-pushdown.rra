@@ -1,0 +1,116 @@
+---
+id: derby-predicate-pushdown
+name: Apache Derby Predicate Pushdown
+category: database-specific/derby
+databases: [derby]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, derby, predicate, pushdown, filter, scan]
+complexity: O(1)
+benefit_range: [0.2, 0.7]
+---
+
+# Apache Derby Predicate Pushdown
+
+## Description
+
+Derby pushes WHERE predicates as close to the base table scan as
+possible.  Predicates that reference only one table are pushed down
+to that table's scan, enabling index usage.  Join predicates are
+pushed to the join operator.  This reduces the number of rows
+flowing through the query plan.
+
+**When to apply**: A WHERE predicate references columns from a single
+table and can be evaluated during or immediately after the table scan.
+
+**Why it works**: Filtering early reduces the data volume for
+subsequent joins and aggregations.  If the pushed predicate matches
+an index, Derby can use an index scan instead of a full table scan.
+
+**Database version**: Apache Derby 10.1+
+
+## Relational Algebra
+
+```latex
+-- Before: filter after join
+$$
+\sigma_{a.x = 5}(A \bowtie_{a.id = b.fk} B)
+$$
+
+-- After: filter pushed to table A
+$$
+\sigma_{a.x = 5}(A) \bowtie_{a.id = b.fk} B
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("derby-predicate-pushdown";
+    "(filter ?pred (join ?join_pred ?left ?right))" =>
+    "(join ?join_pred
+        (filter ?pred ?left)
+        ?right)"
+    if is_database("derby")
+    if pred_references_only("?pred", "?left")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    predicate: &Predicate,
+    target: &Relation,
+) -> bool {
+    predicate.columns().iter().all(|c| {
+        target.contains_column(c)
+    })
+}
+```
+
+**Restrictions:**
+- Cannot push predicates that reference multiple tables
+- Cannot push non-deterministic predicates (e.g., RAND())
+- Outer join restrictions: cannot push predicates from the
+  preserved side into the null-supplying side
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    rows_before_filter: f64,
+    selectivity: f64,
+    join_rows_saved: f64,
+) -> f64 {
+    let rows_filtered = rows_before_filter * (1.0 - selectivity);
+    rows_filtered * 0.001 + join_rows_saved * 0.005
+}
+```
+
+**Typical benefit**: 2-100x depending on selectivity of pushed
+predicate and join amplification.
+
+## Test Cases
+
+```sql
+-- Positive: single-table predicate
+SELECT * FROM orders o JOIN items i ON o.id = i.order_id
+WHERE o.status = 'shipped';
+-- o.status = 'shipped' pushed to orders scan
+```
+
+```sql
+-- Negative: predicate references both tables
+SELECT * FROM orders o JOIN items i ON o.id = i.order_id
+WHERE o.total > i.price;
+-- Cannot push; requires both tables
+```
+
+## References
+
+Apache Derby: Derby Tuning Guide, "Predicate Pushdown"
+Source: org.apache.derby.impl.sql.compile.PredicateList

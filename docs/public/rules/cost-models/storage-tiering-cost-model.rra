@@ -1,0 +1,332 @@
+---
+id: storage-tiering-cost-model
+name: "Storage Tiering and Hybrid Access Cost Model"
+category: cost-models
+databases: [postgresql, oracle, sap-hana, cockroachdb, tidb]
+execution_models: [volcano, vectorized]
+hardware: [nvme, ssd, hdd, memory, pmem]
+version: "1.0.0"
+authors: ["Graefe 2007 - 5-minute rule updated", "Appuswamy et al. 2017 - NVM cost models"]
+tags: [cost, storage, tiering, ssd, nvme, pmem, hot-cold, buffer-pool]
+complexity: "O(1) per access decision"
+benefit_range: [1.0, 20.0]
+---
+
+# Storage Tiering and Hybrid Access Cost Model
+
+## Description
+
+Models the cost of data access across heterogeneous storage tiers:
+DRAM, persistent memory (PMem/Optane), NVMe SSD, SATA SSD, and HDD.
+Each tier has distinct latency, bandwidth, cost-per-GB, and endurance
+characteristics. The optimizer uses tier-aware costs to decide data
+placement, buffer pool sizing, and whether to use indexes.
+
+**When to apply**: Any system with multiple storage tiers. The classic
+System R cost model assumed one page cost; modern systems must
+distinguish 100x differences between NVMe (10us) and HDD (10ms) page
+access.
+
+**Why it works**: The "5-minute rule" (Gray & Putzolu 1987, updated by
+Graefe 2007) determines whether to cache a page in memory based on
+access frequency and storage cost ratios. With NVMe SSDs, the
+breakeven changes: pages accessed every 5 minutes should stay in DRAM,
+but pages accessed every 5 seconds can remain on NVMe with acceptable
+performance.
+
+## Relational Algebra
+
+```latex
+-- Tier-aware page access cost:
+$$
+page_cost(tier) =
+  DRAM:  0.0001 ms  (100 ns)
+  PMem:  0.001 ms   (1 us)
+  NVMe:  0.01 ms    (10 us)
+  SSD:   0.05 ms    (50 us)
+  HDD:   10 ms      (10 ms)
+$$
+
+-- Effective page cost with buffer pool:
+$$
+effective_cost(page, bp_hit_rate) =
+  bp_hit_rate * page_cost(DRAM)
+  + (1 - bp_hit_rate) * page_cost(storage_tier)
+$$
+
+-- Buffer pool hit rate estimate (working set model):
+$$
+bp_hit_rate(table, bp_size) =
+  if PAGES(table) <= bp_size:
+    1.0  -- fully cached
+  else:
+    \text{min}(1.0, bp_size / active_pages(table))
+$$
+
+-- 5-minute rule threshold:
+$$
+cache_in_memory(page, access_freq, tier) =
+  access_freq > cost_per_gb(DRAM) / cost_per_gb(tier)
+                * page_cost(tier) / page_cost(DRAM)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+struct StorageTier {
+    name: &'static str,
+    read_latency_us: f64,
+    write_latency_us: f64,
+    seq_bw_gbps: f64,
+    rand_bw_gbps: f64,
+    cost_per_gb: f64, // $/GB/month
+    endurance_dwpd: f64, // drive writes per day
+}
+
+struct StorageTieringModel {
+    tiers: Vec<StorageTier>,
+    buffer_pool_gb: f64,
+    page_size_bytes: usize,
+}
+
+impl StorageTieringModel {
+    fn effective_page_cost(
+        &self,
+        table_pages: f64,
+        access_pattern: AccessPattern,
+        storage_tier: &StorageTier,
+    ) -> f64 {
+        let bp_pages = self.buffer_pool_gb * 1e9
+            / self.page_size_bytes as f64;
+
+        let hit_rate = if table_pages <= bp_pages {
+            1.0
+        } else {
+            match access_pattern {
+                AccessPattern::Uniform => {
+                    (bp_pages / table_pages).min(1.0)
+                }
+                AccessPattern::Skewed { hot_fraction } => {
+                    // Hot pages always cached
+                    let hot_pages =
+                        table_pages * hot_fraction;
+                    if hot_pages <= bp_pages {
+                        hot_fraction + (1.0 - hot_fraction)
+                            * ((bp_pages - hot_pages)
+                                / (table_pages - hot_pages))
+                    } else {
+                        bp_pages / table_pages
+                    }
+                }
+                AccessPattern::Sequential => {
+                    // Prefetching: effective higher bandwidth
+                    0.0 // Sequential reads bypass buffer pool
+                }
+            }
+        };
+
+        let mem_cost = 0.0001; // 100ns in ms
+        hit_rate * mem_cost
+            + (1.0 - hit_rate)
+                * match access_pattern {
+                    AccessPattern::Sequential => {
+                        self.page_size_bytes as f64
+                            / (storage_tier.seq_bw_gbps * 1e6)
+                    }
+                    _ => storage_tier.read_latency_us / 1000.0,
+                }
+    }
+
+    fn index_scan_tier_cost(
+        &self,
+        index_pages: f64,
+        data_pages: f64,
+        selectivity: f64,
+        tier: &StorageTier,
+    ) -> f64 {
+        // Index pages: random access (hopefully cached)
+        let index_cost = self.effective_page_cost(
+            index_pages,
+            AccessPattern::Skewed { hot_fraction: 0.2 },
+            tier,
+        );
+
+        // Data pages: random for unclustered, sequential for clustered
+        let data_fetches = selectivity * data_pages;
+        let data_cost = data_fetches
+            * tier.read_latency_us / 1000.0;
+
+        3.0 * index_cost + data_cost // 3 levels typical B-tree
+    }
+
+    fn seq_scan_tier_cost(
+        &self,
+        data_pages: f64,
+        tier: &StorageTier,
+    ) -> f64 {
+        let total_bytes =
+            data_pages * self.page_size_bytes as f64;
+        total_bytes / (tier.seq_bw_gbps * 1e6) // ms
+    }
+
+    fn five_minute_rule(
+        &self,
+        page_access_interval_s: f64,
+        storage_tier: &StorageTier,
+    ) -> bool {
+        // Cache in DRAM if cost-effective
+        let dram_cost_per_gb_s = 10.0 / (30.0 * 86400.0);
+        let tier_cost_per_gb_s =
+            storage_tier.cost_per_gb / (30.0 * 86400.0);
+
+        let page_gb = self.page_size_bytes as f64 / 1e9;
+        let dram_cost = page_gb * dram_cost_per_gb_s
+            * page_access_interval_s;
+        let io_cost = storage_tier.read_latency_us / 1e6
+            / page_access_interval_s;
+
+        dram_cost < io_cost
+    }
+
+    fn optimal_tier(
+        &self,
+        access_freq_per_s: f64,
+        data_gb: f64,
+    ) -> &StorageTier {
+        self.tiers
+            .iter()
+            .min_by(|a, b| {
+                let cost_a = self.total_cost(
+                    access_freq_per_s, data_gb, a,
+                );
+                let cost_b = self.total_cost(
+                    access_freq_per_s, data_gb, b,
+                );
+                cost_a
+                    .partial_cmp(&cost_b)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .unwrap_or(&self.tiers[0])
+    }
+
+    fn total_cost(
+        &self,
+        access_freq: f64,
+        data_gb: f64,
+        tier: &StorageTier,
+    ) -> f64 {
+        let storage_cost = data_gb * tier.cost_per_gb;
+        let access_cost = access_freq
+            * tier.read_latency_us / 1e6
+            * 3600.0; // cost per hour
+        storage_cost + access_cost
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(system: &SystemConfig) -> bool {
+    system.storage_tiers().len() >= 2
+}
+```
+
+**Restrictions:**
+- Write amplification on SSDs affects actual write cost
+- SSD performance degrades as drive fills (GC pressure)
+- PMem (Optane) discontinued by Intel in 2022 but still deployed
+- Cloud storage tiers have different cost structures (EBS vs local NVMe)
+- Compression changes effective bandwidth per tier
+
+## Cost Model
+
+```rust
+fn tier_comparison() -> Vec<TierProfile> {
+    vec![
+        TierProfile {
+            name: "DRAM",
+            read_us: 0.1,
+            seq_gbps: 50.0,
+            cost_gb_month: 10.0,
+        },
+        TierProfile {
+            name: "NVMe",
+            read_us: 10.0,
+            seq_gbps: 7.0,
+            cost_gb_month: 0.10,
+        },
+        TierProfile {
+            name: "SATA SSD",
+            read_us: 50.0,
+            seq_gbps: 0.5,
+            cost_gb_month: 0.05,
+        },
+        TierProfile {
+            name: "HDD",
+            read_us: 10000.0,
+            seq_gbps: 0.2,
+            cost_gb_month: 0.01,
+        },
+    ]
+}
+```
+
+**Key insight: storage tier changes optimizer decisions:**
+- HDD: index scan wins above ~1% selectivity (random I/O expensive)
+- NVMe: index scan wins above ~30% selectivity (random ~= sequential)
+- DRAM: index scan always wins (no I/O penalty)
+
+## Test Cases
+
+### Positive: NVMe changes index-vs-scan decision
+
+```sql
+-- orders: 10M rows, 1M pages
+-- Selectivity: 20%
+-- On HDD: seq scan (200K random pages too expensive at 10ms each)
+-- On NVMe: index scan (200K * 10us = 2s vs 1M * 1.5us = 1.5s)
+-- NVMe makes index scan viable at higher selectivity
+SELECT * FROM orders WHERE order_date > '2025-01-01';
+```
+
+### Positive: Hot-cold tiering
+
+```sql
+-- Current month: 1M rows on NVMe (hot, frequent access)
+-- Archive: 100M rows on HDD (cold, rare access)
+-- Query optimizer costs NVMe scan at 100x cheaper per page
+-- Partition pruning to hot tier: 0.01s vs 100s for full scan
+SELECT * FROM events
+WHERE event_date >= '2025-03-01';
+```
+
+### Negative: Sequential scan on any tier
+
+```sql
+-- Full table scan: sequential I/O on all tiers
+-- HDD sequential: 200 MB/s, NVMe sequential: 7 GB/s
+-- Tier matters but pattern is same: always sequential
+SELECT COUNT(*) FROM transactions;
+```
+
+## References
+
+**5-minute rule and storage economics:**
+- Gray & Putzolu, "The 5 Minute Rule for Trading Memory for Disc Accesses", SIGMOD 1987
+- Graefe, "The Five-Minute Rule 20 Years Later", DaMoN 2007
+  - Updated for flash/SSD economics
+
+**NVM and tiered storage:**
+- Appuswamy et al., "The Case for Heterogeneous HTAP", CIDR 2017
+  - Cost models for hybrid DRAM/NVM/SSD systems
+- van Renen et al., "Managing Non-Volatile Memory in Database Systems", SIGMOD 2018
+  - Persistent memory integration in buffer management
+
+**Cloud storage cost models:**
+- Athanassoulis et al., "Optimal Column Layout for Hybrid Workloads", VLDB 2019
+  - Storage-tier-aware data layout optimization

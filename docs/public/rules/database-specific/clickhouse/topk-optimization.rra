@@ -1,0 +1,91 @@
+---
+id: clickhouse-topk-optimization
+name: Top-K Optimization with Priority Queue
+category: database-specific/clickhouse
+databases: [clickhouse]
+version: 1.0.0
+authors: ["RA Contributors"]
+tags: [database-specific, clickhouse, top-k, limit, order-by, optimization]
+complexity: O(n log k)
+benefit_range: [0.4, 0.8]
+---
+
+# Top-K Optimization with Priority Queue
+
+## Description
+
+Optimizes queries with ORDER BY and LIMIT by using a priority queue of size K instead of sorting all rows. This reduces memory usage and can enable partial sort optimizations in the storage layer.
+
+**When to apply**: Query with ORDER BY followed by LIMIT where K << N.
+
+**Why it works**: Maintaining a heap of K elements has O(n log k) complexity vs O(n log n) for full sort. Memory usage is O(k) instead of O(n).
+
+**Database version**: ClickHouse v19.14+
+
+## Relational Algebra
+
+```latex
+$$
+Limit[k](Sort[cols](R))
+  \rightarrow TopK[k, cols](R)
+  \text{where} k << |R|
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("clickhouse-topk-optimization";
+    "(limit ?k (sort ?ordering ?input))" =>
+    "(topk ?k ?ordering ?input)"
+    if is_database("clickhouse")
+    if is_small_limit("?k", "?input")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    limit: u64,
+    input_card: f64,
+) -> bool {
+    // Benefit when K is much smaller than N
+    (limit as f64) < input_card * 0.01
+}
+```
+
+**Restrictions:**
+- Most beneficial when K << N
+- Requires stable sort if query specifies it
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    n: f64,
+    k: f64,
+) -> f64 {
+    let full_sort_cost = n * n.log2();
+    let topk_cost = n * k.log2();
+    (full_sort_cost - topk_cost) / full_sort_cost
+}
+```
+
+**Typical benefit**: 40-80% for small K
+
+## Test Cases
+
+```sql
+SELECT * FROM large_table ORDER BY score DESC LIMIT 10;
+-- Uses priority queue of size 10 instead of sorting all rows
+```
+
+## References
+
+**Source code:**
+- ClickHouse: `src/Processors/QueryPlan/Optimizations/optimizeTopK.cpp`
+  - Commit: 35f2d31186cca2f8c50f7ba4bd93817da490da85

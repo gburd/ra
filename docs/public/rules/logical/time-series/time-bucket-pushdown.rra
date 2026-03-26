@@ -1,0 +1,113 @@
+---
+id: time-bucket-pushdown
+name: Time Bucket Aggregation Pushdown
+category: logical/time-series
+databases: [timescaledb, influxdb, questdb, clickhouse]
+version: "1.0.0"
+authors: ["Timescale Inc.", "ClickHouse Team"]
+tags: [logical, time-series, time-bucket, aggregation, pushdown, chunk]
+complexity: O(n)
+benefit_range: [0.3, 0.9]
+---
+
+# Time Bucket Aggregation Pushdown
+
+## Description
+
+Pushes time-bucketed aggregations (GROUP BY time_bucket(interval, ts))
+down to individual hypertable chunks or time partitions. Each chunk
+covers a known time range, so the aggregation can be partially computed
+per-chunk and then merged. This enables parallel chunk-level aggregation
+and avoids shuffling raw data across partitions.
+
+**When to apply**: Aggregate queries with time_bucket or date_trunc
+grouping on partitioned time-series tables.
+
+## Relational Algebra
+
+```latex
+-- Before
+$$
+\gamma_{time_bucket('1h', ts); SUM(val)}(HyperTable)
+$$
+
+-- After: push to chunks, merge
+$$
+gamma_merge[bucket; SUM](
+    chunk1: \gamma_{time_bucket('1h', ts); SUM(val)}(Chunk_2024_01),
+    chunk2: \gamma_{time_bucket('1h', ts); SUM(val)}(Chunk_2024_02),
+    ...
+)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("time-bucket-pushdown";
+    "(aggregate (time-bucket ?interval ?ts_col) ?agg_fn
+        (append ?chunks))" =>
+    "(merge-aggregate ?agg_fn
+        (map-chunks (aggregate (time-bucket ?interval ?ts_col)
+            ?agg_fn) ?chunks))"
+    if is_decomposable_agg("?agg_fn")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(agg: &Aggregate, table: &TimeSeriesTable) -> bool {
+    // Must group by time bucket
+    agg.has_time_bucket_grouping()
+        // Aggregate must be decomposable (SUM, COUNT, MIN, MAX)
+        && agg.function().is_decomposable()
+        // Table must be partitioned by time
+        && table.is_time_partitioned()
+}
+```
+
+**Restrictions:**
+- AVG requires decomposition into SUM/COUNT
+- DISTINCT aggregates cannot be pushed without additional coordination
+- Bucket boundaries must align with chunk boundaries for full benefit
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    total_rows: f64,
+    num_chunks: usize,
+    bucket_count: usize,
+) -> f64 {
+    let parallel_factor = num_chunks.min(8) as f64;
+    let reduction = total_rows / bucket_count as f64;
+    reduction * parallel_factor * 8.0
+}
+```
+
+**Typical benefit**: 30-90% for wide time ranges with many chunks.
+
+## Test Cases
+
+```sql
+-- Positive: hourly aggregation on hypertable
+SELECT time_bucket('1 hour', ts) AS bucket,
+       device_id, AVG(temperature)
+FROM sensor_data
+WHERE ts >= '2024-01-01' AND ts < '2024-02-01'
+GROUP BY bucket, device_id;
+
+-- Negative: non-decomposable aggregate
+SELECT time_bucket('1h', ts), PERCENTILE_CONT(0.95)
+    WITHIN GROUP (ORDER BY latency)
+FROM requests GROUP BY 1;
+```
+
+## References
+
+- TimescaleDB: Continuous Aggregates documentation
+- ClickHouse: AggregatingMergeTree engine

@@ -1,0 +1,98 @@
+---
+id: volcano-pipeline-breakers
+name: Volcano Iterator Model - Pipeline Breakers
+category: execution-models
+version: 1.0.0
+databases: [PostgreSQL, MySQL]
+authors: [Goetz Graefe]
+tags: [execution, iterator, volcano, pipeline, materialization]
+---
+
+# Volcano Iterator Model - Pipeline Breakers
+
+## Description
+
+Pipeline breakers are operators that must materialize their input before producing output: Sort, Hash Join (build side), Aggregation. Critical for query optimization and resource management.
+
+## Relational Algebra
+
+```
+Pipeline breakers:
+- Sort: must see all tuples to produce first output
+- Hash Join: must build hash table before probing
+- Aggregate: must process all groups before output
+- Window Functions: require buffering within partitions
+
+Pipelined operators:
+- Scan, Filter, Project, Nested Loop Join, Limit, Union All
+```
+
+## Implementation
+
+```rust
+pub enum PipelineBehavior {
+    FullyPipelined,        // Can start producing immediately
+    MaterializeInput,      // Must consume all input first
+    MaterializePartial,    // Buffers within windows/partitions
+}
+
+pub fn identify_pipeline_breakers(plan: &RelExpr) -> Vec<String> {
+    let mut breakers = Vec::new();
+
+    match plan {
+        RelExpr::Sort { .. } => breakers.push("Sort".to_string()),
+        RelExpr::Aggregate { .. } => breakers.push("Aggregate".to_string()),
+        RelExpr::Join { join_type: JoinType::Inner, .. } => {
+            // Hash join build side is a breaker
+            breakers.push("HashJoin(build)".to_string());
+        }
+        _ => {}
+    }
+
+    // Recursively check children
+    for child in plan.children() {
+        breakers.extend(identify_pipeline_breakers(child));
+    }
+
+    breakers
+}
+
+pub fn estimate_memory_pressure(plan: &RelExpr) -> f64 {
+    // Sum memory requirements of all pipeline breakers
+    identify_pipeline_breakers(plan).len() as f64 * 100_000_000.0 // 100MB each
+}
+```
+
+## Cost Model
+
+**Impact on Execution:**
+- **Latency:** First tuple delayed until materialization complete
+- **Memory:** O(N) space for materialized data
+- **Parallelism:** Synchronization point between pipeline stages
+
+**Optimization Implications:**
+- Push filters before breakers to reduce materialization
+- Reorder joins to minimize intermediate results
+- Use streaming aggregation when possible
+
+## Test Cases
+
+```sql
+-- Multiple pipeline breakers
+SELECT region, COUNT(*)
+FROM orders
+WHERE amount > 100
+ORDER BY region;
+-- Breakers: Filter (pipelined), Aggregate (breaker), Sort (breaker)
+
+-- Nested breakers
+SELECT * FROM (
+  SELECT customer_id, SUM(amount) FROM orders GROUP BY customer_id
+) t ORDER BY SUM;
+-- Two consecutive breakers
+```
+
+## References
+
+1. Graefe, "Volcano", IEEE TKDE 1994
+2. Neumann, "Efficiently Compiling Efficient Query Plans for Modern Hardware", VLDB 2011

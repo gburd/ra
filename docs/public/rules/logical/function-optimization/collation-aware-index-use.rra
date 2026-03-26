@@ -1,0 +1,106 @@
+---
+id: collation-aware-index-use
+name: Match Collation in String Index Comparisons
+category: logical/function-optimization
+databases: [postgresql, mysql, mssql, oracle]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [logical, function, index, collation, string, locale]
+complexity: O(1)
+benefit_range: [0.1, 0.7]
+---
+
+# Match Collation in String Index Comparisons
+
+## Description
+
+Ensures string comparisons can use indexes by matching the query's
+collation with the index's collation. An index built with collation
+`en_US` cannot serve a query comparing with `de_DE` collation. When
+collations match, explicit COLLATE casts or LOWER/UPPER wrappers
+used for case-insensitive comparison can be eliminated if the index
+already uses a case-insensitive collation.
+
+**When to apply**: A string comparison in a filter references an
+indexed column, and the collation semantics of the comparison match
+(or can be made to match) the index's collation.
+
+**Why it works**: Index ordering depends on collation. If the query's
+collation matches the index's, the index can provide the correct
+sort order for lookups and range scans. Eliminating unnecessary
+collation conversions enables index use.
+
+## Implementation
+
+```rust
+// Remove redundant LOWER when index uses CI collation
+rw!("remove-lower-for-ci-index";
+    "(filter (= (lower ?col) (lower ?val)) (scan ?t))" =>
+    "(filter (= ?col ?val) (index-scan ?t ?idx))"
+    if has_ci_collation_index("?t", "?col", "?idx")
+),
+
+// Remove COLLATE when it matches index collation
+rw!("remove-matching-collate";
+    "(filter (= (collate ?col ?coll) ?val) (scan ?t))" =>
+    "(filter (= ?col ?val) (index-scan ?t ?idx))"
+    if index_has_collation("?t", "?col", "?coll", "?idx")
+),
+
+// Rewrite explicit collation to match existing index
+rw!("collation-aware-range-scan";
+    "(filter (between (collate ?col ?coll) ?lo ?hi) (scan ?t))" =>
+    "(filter (between ?col ?lo ?hi) (index-range-scan ?t ?idx))"
+    if index_has_collation("?t", "?col", "?coll", "?idx")
+),
+
+// Prevent index use when collation mismatches
+// (This is an anti-rule: blocks incorrect optimization)
+rw!("block-collation-mismatch-index";
+    "(index-scan ?t ?idx)" =>
+    "(scan ?t)"
+    if collation_mismatch("?t", "?idx", current_collation())
+),
+```
+
+## Preconditions
+
+- Index must store strings in the collation order matching the query
+- Case-insensitive (CI) collation index eliminates need for LOWER/UPPER
+- Accent-insensitive (AI) collation eliminates UNACCENT calls
+- Query's COLLATE clause must match or be compatible with index collation
+
+## Test Cases
+
+```sql
+-- Setup: CREATE INDEX idx_name_ci ON users (name COLLATE "en_US.utf8");
+
+-- Positive: LOWER removed with CI collation index
+SELECT * FROM users WHERE LOWER(name) = LOWER('Alice');
+-- With en_US CI collation: rewritten to WHERE name = 'Alice' using index
+
+-- Setup: CREATE INDEX idx_city ON users (city COLLATE "C");
+
+-- Positive: matching COLLATE clause
+SELECT * FROM users WHERE city COLLATE "C" = 'NYC';
+-- Collation matches index: use index scan
+
+-- Positive: range with matching collation
+SELECT * FROM users
+WHERE city COLLATE "C" BETWEEN 'A' AND 'M';
+-- Use index range scan with matching collation
+
+-- Negative: collation mismatch
+SELECT * FROM users WHERE city COLLATE "de_DE" = 'Munchen';
+-- Index uses "C" collation, query uses "de_DE": cannot use index
+
+-- Negative: LOWER on non-CI index
+SELECT * FROM users WHERE LOWER(city) = 'nyc';
+-- Index is not case-insensitive: LOWER prevents index use
+```
+
+## References
+
+- PostgreSQL: Collation Support and Index use
+- mssql: Collation and Index Selection
+- ICU Collation Algorithm

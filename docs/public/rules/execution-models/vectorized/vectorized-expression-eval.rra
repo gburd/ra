@@ -1,0 +1,301 @@
+---
+id: vectorized-expression-eval
+name: Vectorized SIMD Expression Evaluation
+category: execution-models
+version: 1.0.0
+databases: [DuckDB, ClickHouse, Velox, DataFusion]
+authors: [Peter Boncz, Jens Teubner]
+tags: [execution, vectorized, expressions, simd, avx2, neon]
+standard: MonetDB X100
+---
+
+# Vectorized SIMD Expression Evaluation
+
+## Description
+
+SIMD (Single Instruction, Multiple Data) expression evaluation processes multiple data elements in a single CPU instruction. Modern CPUs provide SIMD instruction sets (SSE4.2, AVX2, AVX-512, ARM NEON) that operate on 128-512 bit registers, enabling 2-16x throughput for arithmetic and comparison operations. Vectorized query engines build type-specialized kernels for each operation, dispatching at runtime based on data types and available hardware.
+
+**SIMD instruction sets:**
+- **SSE4.2** (128-bit): 2x f64, 4x i32 per instruction
+- **AVX2** (256-bit): 4x f64, 8x i32 per instruction
+- **AVX-512** (512-bit): 8x f64, 16x i32 per instruction
+- **ARM NEON** (128-bit): 2x f64, 4x i32 per instruction
+
+**Key characteristics:**
+- **Data parallelism**: Same operation on multiple values simultaneously
+- **Type-specialized kernels**: Separate implementation per type/SIMD width
+- **Runtime dispatch**: Select best kernel for available hardware
+- **Null handling**: Bitmask operations for NULL propagation
+- **Overflow detection**: SIMD saturation arithmetic where needed
+
+**Trade-offs:**
+- Requires contiguous memory layout (columnar storage)
+- Variable-length types (strings) need special handling
+- SIMD register pressure limits expression complexity
+- Alignment requirements for optimal performance
+
+## Relational Algebra
+
+```
+SIMD expression evaluation primitives:
+
+vector_add(a: Vec<i64>, b: Vec<i64>) -> Vec<i64>:
+  for i in 0..len step SIMD_WIDTH:
+    result[i..i+SIMD_WIDTH] = SIMD_ADD(a[i..], b[i..])
+
+vector_compare_gt(a: Vec<i64>, b: Vec<i64>) -> Bitmask:
+  for i in 0..len step SIMD_WIDTH:
+    mask[i..i+SIMD_WIDTH] = SIMD_CMP_GT(a[i..], b[i..])
+  return mask
+
+NULL propagation:
+  result_nulls = a_nulls | b_nulls  // Bitwise OR of null bitmaps
+```
+
+## Implementation
+
+```rust
+use std::arch::x86_64::*;
+
+/// SIMD kernel registry with runtime dispatch
+pub struct SIMDKernelRegistry {
+    kernels: HashMap<(DataType, Op, SIMDLevel), KernelFn>,
+}
+
+impl SIMDKernelRegistry {
+    pub fn dispatch(
+        &self,
+        dtype: DataType,
+        op: Op,
+    ) -> KernelFn {
+        // Detect best available SIMD level
+        let level = if is_x86_feature_detected!("avx512f") {
+            SIMDLevel::AVX512
+        } else if is_x86_feature_detected!("avx2") {
+            SIMDLevel::AVX2
+        } else if is_x86_feature_detected!("sse4.2") {
+            SIMDLevel::SSE42
+        } else {
+            SIMDLevel::Scalar
+        };
+
+        self.kernels.get(&(dtype, op, level))
+            .unwrap_or(&scalar_fallback)
+    }
+}
+
+/// AVX2 integer addition kernel
+#[cfg(target_feature = "avx2")]
+pub fn simd_add_i64_avx2(
+    a: &[i64],
+    b: &[i64],
+    result: &mut [i64],
+    nulls_a: &Bitset,
+    nulls_b: &Bitset,
+    result_nulls: &mut Bitset,
+) {
+    let len = a.len();
+    let mut i = 0;
+
+    // Process 4 elements at a time (256-bit / 64-bit = 4)
+    unsafe {
+        while i + 4 <= len {
+            let va = _mm256_loadu_si256(
+                a.as_ptr().add(i) as *const __m256i,
+            );
+            let vb = _mm256_loadu_si256(
+                b.as_ptr().add(i) as *const __m256i,
+            );
+            let vr = _mm256_add_epi64(va, vb);
+            _mm256_storeu_si256(
+                result.as_mut_ptr().add(i) as *mut __m256i,
+                vr,
+            );
+            i += 4;
+        }
+    }
+
+    // Scalar tail for remaining elements
+    while i < len {
+        result[i] = a[i] + b[i];
+        i += 1;
+    }
+
+    // NULL propagation: result is NULL if either input is NULL
+    *result_nulls = nulls_a.bitor(nulls_b);
+}
+
+/// AVX2 comparison kernel (greater-than)
+#[cfg(target_feature = "avx2")]
+pub fn simd_cmp_gt_i64_avx2(
+    a: &[i64],
+    b: &[i64],
+    result: &mut Bitset,
+) {
+    let len = a.len();
+    let mut i = 0;
+
+    unsafe {
+        while i + 4 <= len {
+            let va = _mm256_loadu_si256(
+                a.as_ptr().add(i) as *const __m256i,
+            );
+            let vb = _mm256_loadu_si256(
+                b.as_ptr().add(i) as *const __m256i,
+            );
+            let cmp = _mm256_cmpgt_epi64(va, vb);
+            let mask = _mm256_movemask_epi8(cmp) as u32;
+            // Extract per-element bits
+            result.set_bit(i, (mask & 0xFF) != 0);
+            result.set_bit(i + 1, (mask & 0xFF00) != 0);
+            result.set_bit(i + 2, (mask & 0xFF0000) != 0);
+            result.set_bit(i + 3, (mask & 0xFF000000) != 0);
+            i += 4;
+        }
+    }
+
+    while i < len {
+        result.set_bit(i, a[i] > b[i]);
+        i += 1;
+    }
+}
+
+/// SIMD string comparison using SSE4.2 PCMPESTRI
+#[cfg(target_feature = "sse4.2")]
+pub fn simd_strcmp_eq(
+    a: &[&str],
+    b: &str,
+    result: &mut Bitset,
+) {
+    let b_bytes = b.as_bytes();
+    let b_len = b_bytes.len().min(16);
+
+    unsafe {
+        let vb = _mm_loadu_si128(b_bytes.as_ptr() as *const __m128i);
+
+        for (i, s) in a.iter().enumerate() {
+            let s_bytes = s.as_bytes();
+            if s_bytes.len() != b_bytes.len() {
+                result.set_bit(i, false);
+                continue;
+            }
+            let va = _mm_loadu_si128(
+                s_bytes.as_ptr() as *const __m128i,
+            );
+            let cmp = _mm_cmpestrm(
+                va, s_bytes.len() as i32,
+                vb, b_len as i32,
+                _SIDD_CMP_EQUAL_EACH | _SIDD_BIT_MASK,
+            );
+            let mask = _mm_extract_epi32(cmp, 0) as u32;
+            result.set_bit(i, mask == (1u32 << b_len) - 1);
+        }
+    }
+}
+
+/// Cost model for vectorized expression evaluation
+pub fn simd_eval_cost(
+    input_rows: f64,
+    data_type: DataType,
+    operation: Op,
+) -> f64 {
+    let simd_width = match data_type {
+        DataType::Int32 => 8.0,   // AVX2
+        DataType::Int64 => 4.0,   // AVX2
+        DataType::Float64 => 4.0, // AVX2
+        DataType::String => 1.0,  // Scalar fallback (mostly)
+    };
+
+    let op_latency = match operation {
+        Op::Add | Op::Sub => 0.0000003,   // ~0.3 ns
+        Op::Mul => 0.0000005,             // ~0.5 ns
+        Op::Div => 0.000003,              // ~3 ns (no SIMD div)
+        Op::Cmp => 0.0000003,             // ~0.3 ns
+    };
+
+    // SIMD processing cost
+    let compute_cost = (input_rows / simd_width) * op_latency;
+
+    // Memory access (column read)
+    let mem_cost = input_rows * data_type.size() as f64
+        / (64.0 * 1e9); // Cache line bandwidth
+
+    compute_cost + mem_cost
+}
+```
+
+## Cost Model
+
+**SIMD Throughput (per core, AVX2):**
+- Integer add/sub: ~8 billion ops/sec (8x i32)
+- Integer multiply: ~4 billion ops/sec (4x i64)
+- Float64 multiply: ~4 billion ops/sec (4x f64)
+- Comparison: ~8 billion ops/sec (8x i32)
+- Division: ~500 million ops/sec (no SIMD, pipelined scalar)
+
+**Overhead:**
+- Function call per vector operation: ~5 ns
+- NULL bitmap propagation: ~1 ns per 64 values (bitwise OR)
+- Memory allocation for intermediates: ~100 ns per vector
+
+**Bottleneck Analysis:**
+- Compute-bound: complex arithmetic expressions
+- Memory-bound: simple expressions on wide rows
+- Cross-over: when expression cost < memory access cost
+
+**vs. Scalar (Volcano) Evaluation:**
+- Integer arithmetic: 4-8x speedup
+- Comparisons: 4-8x speedup
+- Floating point: 4x speedup
+- String operations: 1-2x speedup (limited SIMD benefit)
+
+## Test Cases
+
+```sql
+-- Test 1: Integer arithmetic (full SIMD benefit)
+SELECT a + b, a * c, a - b FROM integers;
+-- Expected: AVX2 i64 kernels, 4x throughput
+-- Verify: result correctness including overflow
+
+-- Test 2: Float64 with NULL handling
+SELECT price * (1.0 - discount) FROM sales WHERE price IS NOT NULL;
+-- Expected: SIMD float mul + null bitmap propagation
+-- Verify: NULL inputs produce NULL outputs
+
+-- Test 3: Comparison expression (returns bitmask)
+SELECT * FROM events WHERE timestamp > 1704067200;
+-- Expected: SIMD cmp_gt produces selection bitmask
+-- Used directly as selection vector (no materialization)
+
+-- Test 4: Mixed-type expression chain
+SELECT CAST(quantity AS DOUBLE) * unit_price AS total FROM orders;
+-- Expected: Vectorized cast (i32 -> f64) then SIMD multiply
+-- Two vector operations chained
+```
+
+## Comparison with Other Models
+
+| Aspect | SIMD Vectorized | Scalar (Volcano) | Push-Based (LLVM) |
+|--------|----------------|-----------------|-------------------|
+| i64 add throughput | ~4 Gops/s | ~1 Gops/s | ~2-4 Gops/s (auto-vec) |
+| Function calls | Per batch | Per tuple | None (inlined) |
+| NULL handling | Bitmap ops | Per-value check | Compiled check |
+| Hardware awareness | Explicit dispatch | None | LLVM target |
+| String operations | Limited SIMD | Same | Same |
+
+## References
+
+1. **Boncz, Peter A.; Zukowski, Marcin; Nes, Niels**. "MonetDB/X100: Hyper-Pipelining Query Execution." CIDR 2005.
+   - Foundation of vectorized expression evaluation
+
+2. **Polychroniou, Orestis; Raghavan, Arun; Ross, Kenneth A**. "Rethinking SIMD Vectorization for In-Memory Databases." SIGMOD 2015.
+   - Advanced SIMD techniques for database operations
+
+3. **Zhou, Jingren; Ross, Kenneth A**. "Implementing Database Operations Using SIMD Instructions." SIGMOD 2002.
+   - Early work on SIMD for database expression evaluation
+
+4. **Kersten, Timo et al**. "Everything You Always Wanted to Know About Compiled and Vectorized Queries But Were Afraid to Ask." VLDB 2018.
+   - SIMD vectorized vs compiled expression evaluation comparison
+
+5. **Lang, Harald et al**. "Data Blocks: Hybrid OLTP and OLAP on Compressed Storage using both Vectorization and Compilation." SIGMOD 2016.
+   - Combining SIMD evaluation with compression

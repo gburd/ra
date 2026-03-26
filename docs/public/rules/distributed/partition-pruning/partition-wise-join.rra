@@ -1,0 +1,154 @@
+---
+id: partition-wise-join
+name: Partition-Wise Join
+category: distributed/partition-pruning
+databases: [spark, greenplum, cockroachdb, citus]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, partition, join, local, elimination]
+complexity: O(n)
+benefit_range: [0.3, 0.9]
+---
+
+# Partition-Wise Join
+
+## Description
+
+When both sides of a join are partitioned on the join key with the same
+partitioning scheme, the join can be decomposed into independent joins
+per partition. Each partition pair is joined locally, and the results are
+concatenated. No data movement occurs.
+
+This generalizes co-located join to explicitly partition-aware execution.
+In Spark this is "bucket join" or "partition-wise join."
+
+**When to apply**: Both join inputs are hash-partitioned (bucketed) on
+the join key columns with the same number of partitions and the same
+hash function.
+
+**Why it works**: For a hash function H and N buckets, all rows with
+`H(key) mod N = i` are in partition i on both sides. Therefore partition
+i of the left side only needs to join with partition i of the right side.
+This is N independent local joins.
+
+## Relational Algebra
+
+```latex
+$$
+Join[c](R_partitioned_by(k, N), S_partitioned_by(k, N))
+  \rightarrow Union(
+       Join[c](R_partition_0, S_partition_0),
+       Join[c](R_partition_1, S_partition_1),
+       ...
+       Join[c](R_partition_N-1, S_partition_N-1)
+     )
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("partition-wise-join";
+    "(join ?type ?cond ?left ?right)" =>
+    "(partition_wise_join ?type ?cond ?left ?right)"
+    if same_bucketing("?left", "?right", "?cond")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    left: &RelNode,
+    right: &RelNode,
+    join_cond: &JoinCond,
+) -> bool {
+    let left_part = left.partitioning();
+    let right_part = right.partitioning();
+
+    // Both must be hash-partitioned on join keys
+    left_part.is_hash_on(&join_cond.left_keys)
+        && right_part.is_hash_on(&join_cond.right_keys)
+    // Same number of buckets
+    && left_part.num_buckets() == right_part.num_buckets()
+    // Same hash function
+    && left_part.hash_function() == right_part.hash_function()
+    // Compatible sort order (for sort-merge join optimization)
+    // is a bonus but not required
+}
+```
+
+**Restrictions:**
+- Bucket counts must match exactly (no integer-multiple compatibility)
+- Hash functions must be identical
+- In Spark, requires `spark.sql.sources.bucketing.enabled = true`
+- Composite partition keys must have the same column order
+- Not applicable when one side is dynamically repartitioned
+
+## Cost Model
+
+```rust
+fn partition_wise_join_cost(
+    left_rows: f64,
+    right_rows: f64,
+    num_partitions: u32,
+) -> f64 {
+    // N independent local joins, each with rows/N per side
+    let left_per_part = left_rows / num_partitions as f64;
+    let right_per_part = right_rows / num_partitions as f64;
+    // Hash join cost per partition
+    let build = right_per_part; // build hash table
+    let probe = left_per_part;  // probe
+    (build + probe) * num_partitions as f64
+    // Network cost: 0 (all local)
+}
+```
+
+**Typical benefit**: Eliminates all shuffle cost. For two 100GB tables,
+saves ~198GB of network transfer (on 100 nodes).
+
+## Test Cases
+
+```sql
+-- Positive: Spark bucketed tables
+-- CREATE TABLE orders (...) USING parquet
+--   CLUSTERED BY (customer_id) INTO 256 BUCKETS;
+-- CREATE TABLE returns (...) USING parquet
+--   CLUSTERED BY (customer_id) INTO 256 BUCKETS;
+
+SELECT o.*, r.return_date
+FROM orders o JOIN returns r ON o.customer_id = r.customer_id;
+
+-- Plan: partition-wise join (no exchange)
+-- PartitionWiseJoin(o.customer_id = r.customer_id)
+--   BucketedScan(orders, bucket=i)
+--   BucketedScan(returns, bucket=i)
+-- Repeated for each bucket independently
+```
+
+```sql
+-- Positive: partition-wise join + aggregation
+SELECT customer_id, SUM(amount)
+FROM orders o JOIN returns r ON o.customer_id = r.customer_id
+GROUP BY customer_id;
+
+-- Plan: partition-wise join, then local aggregation per partition
+-- No exchange needed for either join or aggregation
+```
+
+```sql
+-- Negative: different bucket counts
+-- orders: 256 buckets on customer_id
+-- returns: 128 buckets on customer_id
+-- Not compatible: must shuffle one side
+```
+
+## References
+
+Spark SQL: sql/catalyst/src/main/scala/org/apache/spark/sql/catalyst/plans/physical/partitioning.scala - BucketPartitioning
+Greenplum: src/backend/cdb/cdbllize.c - partition-wise join detection
+PostgreSQL 12+: partition-wise join for declarative partitioning
+Waas & Galindo-Legaria, "Counting, Enumerating, and Sampling of Execution Plans in a Cost-Based Query Optimizer" (SIGMOD 2000)

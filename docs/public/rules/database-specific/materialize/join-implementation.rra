@@ -1,0 +1,151 @@
+---
+id: materialize-join-implementation
+name: Materialize Join Implementation Selection
+category: database-specific/materialize
+databases: [materialize]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, materialize, join, differential, arrangement, delta]
+complexity: O(n)
+benefit_range: [0.2, 0.8]
+---
+
+# Materialize Join Implementation Selection
+
+## Description
+
+Selects between differential join, delta join, and lookup join
+implementations based on input characteristics and maintenance cost.
+Materialize's `JoinImplementation` transform chooses the join strategy
+that minimizes arrangement memory and update propagation cost.
+
+**When to apply**: A logical join must be mapped to a physical
+differential dataflow join operator.
+
+**Why it works**: Differential dataflow joins maintain arrangements
+(indexed collections) for incremental updates.  Delta joins avoid
+maintaining intermediate arrangements by using existing arrangements
+from both inputs.  The choice dramatically affects memory usage and
+update latency.
+
+**Database version**: Materialize 0.20+
+
+## Relational Algebra
+
+```latex
+-- Differential join: maintains one arrangement
+$$
+R diff-\bowtie_{R.k = S.k} S
+$$
+  -- Arranges smaller side, streams larger side
+
+-- Delta join: uses existing arrangements from both sides
+$$
+R delta-\bowtie_{R.k = S.k} S
+$$
+  -- No new arrangements; uses arrangements from R and S
+
+-- Lookup join: point lookups into arrangement
+$$
+R lookup-\bowtie_{R.k = S.k} S
+$$
+  -- When R is a stream and S has arrangement on k
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("materialize-prefer-delta-join";
+    "(join inner (eq ?lk ?rk) ?left ?right)" =>
+    "(delta-join inner (eq ?lk ?rk) ?left ?right)"
+    if is_database("materialize")
+    if both_have_arrangements("?left", "?lk", "?right", "?rk")
+),
+
+rw!("materialize-prefer-differential-join";
+    "(join inner (eq ?lk ?rk) ?left ?right)" =>
+    "(differential-join inner (eq ?lk ?rk) ?left ?right)"
+    if is_database("materialize")
+    if one_side_small("?left", "?right")
+),
+
+rw!("materialize-prefer-lookup-join";
+    "(join inner (eq ?lk ?rk) ?stream ?arranged)" =>
+    "(lookup-join inner (eq ?lk ?rk) ?stream ?arranged)"
+    if is_database("materialize")
+    if is_stream("?stream")
+    if has_arrangement_on("?arranged", "?rk")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    left: &DataflowNode,
+    right: &DataflowNode,
+    join_key: &[Column],
+) -> bool {
+    left.has_arrangement_on(join_key)
+    || right.has_arrangement_on(join_key)
+    || can_build_arrangement(left, join_key)
+    || can_build_arrangement(right, join_key)
+}
+```
+
+**Restrictions:**
+- Delta joins require arrangements on join keys for both inputs
+- Differential joins build arrangements that persist for updates
+- Lookup joins require one input to be a streaming (non-arranged) source
+- Multi-way joins use delta query plans to minimize arrangements
+
+## Cost Model
+
+```rust
+fn join_implementation_cost(
+    left_rows: f64,
+    right_rows: f64,
+    updates_per_sec: f64,
+    existing_arrangements: bool,
+) -> f64 {
+    if existing_arrangements {
+        // Delta join: no new arrangement cost
+        updates_per_sec * 0.001
+    } else {
+        // Differential join: arrangement build + maintenance
+        let build = right_rows.min(left_rows) * 16.0; // bytes
+        let maintain = updates_per_sec * 0.01;
+        build + maintain
+    }
+}
+```
+
+**Typical benefit**: Delta joins on pre-arranged inputs use zero
+additional memory, vs differential joins that maintain O(smaller_side)
+arrangement.
+
+## Test Cases
+
+```sql
+-- Positive: delta join when both sides have indexes
+CREATE INDEX idx_orders_cust ON orders (customer_id);
+CREATE INDEX idx_customers_id ON customers (id);
+SELECT * FROM orders o JOIN customers c ON o.customer_id = c.id;
+-- Uses delta join: both arrangements already exist
+```
+
+```sql
+-- Positive: lookup join for stream-to-table
+CREATE SOURCE events FROM KAFKA ...;
+SELECT * FROM events e JOIN products p ON e.product_id = p.id;
+-- Lookup join: events is streaming, products is arranged
+```
+
+## References
+
+Materialize: src/transform/src/join_implementation.rs
+Materialize: src/compute/src/render/join/delta_join.rs
+Materialize: src/compute/src/render/join/linear_join.rs

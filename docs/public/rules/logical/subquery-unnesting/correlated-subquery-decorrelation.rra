@@ -1,0 +1,265 @@
+---
+id: correlated-subquery-decorrelation
+name: Correlated Subquery Decorrelation
+category: logical/subquery-unnesting
+databases: [postgresql, oracle, mssql, duckdb, cockroachdb]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [subquery, decorrelation, apply, dependent-join, unnesting]
+complexity: "O(n)"
+benefit_range: [0.7, 0.99]
+---
+
+# Correlated Subquery Decorrelation
+
+## Description
+
+Removes correlation from correlated subqueries by introducing apply
+elimination. A correlated subquery references columns from the outer query,
+forcing nested-loop evaluation (once per outer row). Decorrelation rewrites
+the correlated reference into an explicit join, enabling set-based execution.
+
+**When to apply**: Any correlated subquery where the correlation predicate
+is an equality on a column (the most common case). Handles subqueries in
+WHERE, SELECT, and FROM (LATERAL) clauses.
+
+**Why it works**: The correlation `WHERE inner.col = outer.col` is
+equivalent to a join condition. By lifting the inner query out of the
+per-row context and adding a join on the correlation columns, the engine
+can use hash or merge joins instead of nested loops.
+
+## Relational Algebra
+
+```latex
+-- Apply operator (conceptual nested-loop correlated evaluation)
+$$
+apply[corr_col](R, S(corr_col))
+  \rightarrow \bowtie_{R.corr_col = S.corr_col}(R, S')
+  \text{where} S' = S with corr_col references replaced by S's own columns
+$$
+
+-- General decorrelation steps:
+$$
+1. Identify correlation predicates: S references R.col
+2. Extract equality predicates: R.col = S.col
+3. Move S outside of per-row context
+4. Add \bowtie on extracted equality
+5. Handle non-equality correlations via magic sets or lateral
+$$
+
+-- Scalar subquery decorrelation:
+$$
+project[R.*, (SELECT f(S) FROM S WHERE S.fk = R.pk)](R)
+  \rightarrow project[R.*, T.result](
+       left_\bowtie_{R.pk = T.fk}(R, T)
+     )
+  \text{where} T = derived query computing f(S) grouped by fk
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// General apply elimination: correlated filter -> join
+rw!("decorrelate-filter-apply";
+    "(apply ?outer (filter (= ?inner_col ?outer_col) ?inner))" =>
+    "(join (= ?outer_col ?inner_col) ?outer ?inner)"
+    if is_outer_reference("?outer_col", "?outer")
+    if is_inner_column("?inner_col", "?inner")
+),
+
+// Correlated scalar subquery -> left join
+rw!("decorrelate-scalar-subquery";
+    "(project ?cols
+       (scalar-subquery (filter (= ?corr ?outer_ref) ?inner))
+       ?outer)" =>
+    "(project ?cols
+       (left-join (= ?outer_ref ?corr) ?outer ?inner))"
+    if is_outer_reference("?outer_ref", "?outer")
+    if returns_at_most_one_row("?inner")
+),
+
+// Correlated EXISTS -> semi-join (specific decorrelation)
+rw!("decorrelate-exists";
+    "(filter (exists (filter (= ?corr ?outer_ref) ?inner)) ?outer)" =>
+    "(semi-join (= ?outer_ref ?corr) ?outer ?inner)"
+    if is_outer_reference("?outer_ref", "?outer")
+),
+
+// Multi-predicate decorrelation
+rw!("decorrelate-multi-predicate";
+    "(apply ?outer (filter (and (= ?c1 ?o1) (= ?c2 ?o2)) ?inner))" =>
+    "(join (and (= ?o1 ?c1) (= ?o2 ?c2)) ?outer ?inner)"
+    if is_outer_reference("?o1", "?outer")
+    if is_outer_reference("?o2", "?outer")
+),
+
+// Non-equality correlation via domain reduction (magic sets)
+rw!("decorrelate-range-via-domain";
+    "(apply ?outer (filter (> ?inner_col ?outer_col) ?inner))" =>
+    "(join (> ?inner_col ?outer_col) ?outer ?inner)"
+    if is_outer_reference("?outer_col", "?outer")
+    // May need domain reduction for efficiency
+),
+```
+
+**Restrictions:**
+- Non-equality correlations (>, <, LIKE) produce cross-join-like behavior
+  and may need domain reduction or magic sets for efficiency
+- Volatile functions in the subquery prevent decorrelation
+- Subqueries with ORDER BY + LIMIT cannot always be decorrelated
+- Double-nested correlations require iterative decorrelation
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    outer_size: u64,
+    inner_size: u64,
+    selectivity: f64,
+) -> f64 {
+    // Correlated nested loop: O(N * M * selectivity)
+    let nested_cost = outer_size as f64
+        * inner_size as f64
+        * selectivity;
+
+    // Decorrelated join: O(N + M) for hash join
+    let join_cost = (outer_size + inner_size) as f64;
+
+    if nested_cost > join_cost {
+        (nested_cost - join_cost) / nested_cost
+    } else {
+        0.0 // Rare: very small inputs where nested is fine
+    }
+}
+```
+
+**Typical benefit**: 70-99% for non-trivial table sizes; the single most
+impactful subquery optimization
+
+## Test Cases
+
+### Positive: Simple equality correlation in WHERE
+
+```sql
+SELECT e.name, e.salary
+FROM employees e
+WHERE e.salary > (
+  SELECT AVG(e2.salary)
+  FROM employees e2
+  WHERE e2.dept_id = e.dept_id  -- correlation on dept_id
+);
+
+-- Decorrelate: compute grouped avg, join back
+SELECT e.name, e.salary
+FROM employees e
+JOIN (
+  SELECT dept_id, AVG(salary) AS avg_sal
+  FROM employees GROUP BY dept_id
+) d ON e.dept_id = d.dept_id
+WHERE e.salary > d.avg_sal;
+```
+
+### Positive: Correlated scalar subquery in SELECT
+
+```sql
+SELECT c.name,
+  (SELECT MAX(o.total) FROM orders o WHERE o.customer_id = c.id)
+    AS max_order
+FROM customers c;
+
+-- Decorrelate via LEFT JOIN:
+SELECT c.name, om.max_total AS max_order
+FROM customers c
+LEFT JOIN (
+  SELECT customer_id, MAX(total) AS max_total
+  FROM orders GROUP BY customer_id
+) om ON c.id = om.customer_id;
+```
+
+### Positive: Multi-column correlation
+
+```sql
+SELECT *
+FROM sales s
+WHERE s.amount > (
+  SELECT AVG(s2.amount)
+  FROM sales s2
+  WHERE s2.region = s.region
+    AND s2.product_id = s.product_id
+);
+
+-- Two correlation columns: GROUP BY (region, product_id)
+SELECT s.*
+FROM sales s
+JOIN (
+  SELECT region, product_id, AVG(amount) AS avg_amt
+  FROM sales GROUP BY region, product_id
+) a ON s.region = a.region AND s.product_id = a.product_id
+WHERE s.amount > a.avg_amt;
+```
+
+### Positive: Double-nested decorrelation
+
+```sql
+SELECT d.name
+FROM departments d
+WHERE EXISTS (
+  SELECT 1 FROM employees e
+  WHERE e.dept_id = d.id
+  AND e.salary > (
+    SELECT AVG(e2.salary) FROM employees e2
+    WHERE e2.dept_id = e.dept_id
+  )
+);
+
+-- Step 1: Decorrelate inner-most subquery (avg per dept)
+-- Step 2: Decorrelate EXISTS (semi-join)
+```
+
+### Negative: Correlation with volatile function
+
+```sql
+SELECT * FROM t1
+WHERE t1.val > (
+  SELECT RANDOM() * t2.max_val
+  FROM t2
+  WHERE t2.id = t1.id
+);
+
+-- RANDOM() changes per evaluation
+-- Decorrelation would change semantics
+```
+
+### Negative: Correlated with LIMIT (non-trivial)
+
+```sql
+SELECT c.name,
+  (SELECT o.date FROM orders o
+   WHERE o.customer_id = c.id
+   ORDER BY o.date DESC LIMIT 1)
+FROM customers c;
+
+-- LIMIT 1 per correlated group requires LATERAL or window function
+-- Standard decorrelation produces wrong results without DISTINCT ON
+```
+
+## References
+
+**Academic papers:**
+- Neumann & Kemper, "Unnesting Arbitrary Queries", BTW 2015
+- Galindo-Legaria & Joshi, "Orthogonal Optimization of Subqueries and Aggregation", SIGMOD 2001
+- Seshadri et al., "Cost-Based Optimization for Magic: Algebra and Implementation", SIGMOD 1996
+- Kim, "On Optimizing an SQL-like Nested Query", ACM TODS 1982
+
+**Implementation:**
+- PostgreSQL: `pull_up_subqueries()` and `SS_process_ctes()` in rewriter
+- Oracle: Complex decorrelation in CBO with CBQT (Cost-Based Query Transformation)
+- mssql: `OpApply` -> `OpJoin` conversion in optimizer
+- DuckDB: `Binder::DecorrelateSubquery()` with apply elimination
+- CockroachDB: `opt/xform/decorrelate.go` for general apply removal

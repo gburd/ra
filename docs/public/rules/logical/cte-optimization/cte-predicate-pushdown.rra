@@ -1,0 +1,81 @@
+---
+id: cte-predicate-pushdown
+name: CTE Predicate Pushdown
+category: logical/cte-optimization
+databases: [postgresql, duckdb, clickhouse]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [cte, predicate-pushdown, filter, optimization]
+complexity: "O(1)"
+benefit_range: [0.2, 0.7]
+---
+
+# CTE Predicate Pushdown
+
+## Description
+
+Pushes predicates from the CTE body into the CTE definition when the CTE is inlined or when the predicate references only CTE output columns.
+
+**When to apply**: Filter on CTE output can be pushed into the CTE definition.
+
+**Why it works**: Reduces rows materialized or produced by the CTE, leading to less work downstream.
+
+## Relational Algebra
+
+```latex
+$$
+filter[P](CTE[name, def](scan(name)))
+  \rightarrow CTE[name, filter[P](def)](scan(name))
+  \text{where} columns(P) ⊆ output(def)
+$$
+
+```
+
+## Implementation
+
+```rust
+rw!("cte-predicate-pushdown";
+    "(filter ?pred (cte ?name ?def ?body))" =>
+    "(cte ?name (filter ?pred ?def) ?body)"
+    if pred_cols_subset_of_cte_output("?pred", "?def")
+),
+```
+
+## Cost Model
+
+```rust
+fn benefit(input_rows: u64, selectivity: f64) -> f64 {
+    let rows_eliminated = input_rows as f64 * (1.0 - selectivity);
+    rows_eliminated / input_rows as f64
+}
+```
+
+**Typical benefit**: 20-70% depending on filter selectivity
+
+## Test Cases
+
+### Positive: Simple predicate on CTE column
+
+```sql
+WITH orders AS (SELECT * FROM raw_orders)
+SELECT * FROM orders WHERE status = 'shipped';
+
+-- Push WHERE into CTE definition
+```
+
+### Negative: Predicate references non-CTE column
+
+```sql
+WITH o AS (SELECT id, amount FROM orders)
+SELECT * FROM o JOIN users u ON o.id = u.order_id
+WHERE u.active = true;
+
+-- Cannot push u.active into CTE
+```
+
+## References
+
+- PostgreSQL: CTE predicate pushdown (PG 12+)
+- DuckDB: Automatic filter pushdown through CTEs

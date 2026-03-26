@@ -1,0 +1,181 @@
+---
+id: project-to-window
+name: Project to Window
+category: database-specific/calcite
+databases: [calcite, postgresql, oracle]
+execution_models: [volcano, vectorized]
+version: "1.0.0"
+authors: ["Apache Calcite Contributors"]
+tags: [window, project, transformation, analytical]
+complexity: "O(n log n)"
+benefit_range: [0.2, 0.6]
+---
+
+# Project to Window
+
+## Description
+
+Transforms aggregate-like expressions in a projection into window functions
+when the aggregation doesn't require grouping. This enables analytical queries
+without explicit GROUP BY, computing running aggregates, rankings, and
+row numbering efficiently.
+
+**When to apply**: A projection contains aggregate functions (COUNT, SUM, etc.)
+combined with non-aggregate columns, but no GROUP BY is present. This pattern
+indicates the need for window functions with a full partition (OVER()).
+
+**Why it works**: Window functions can compute aggregates over partitions while
+retaining all input rows, unlike GROUP BY which collapses rows. For queries
+needing both detail rows and aggregates, window functions avoid expensive
+self-joins or subqueries.
+
+## Relational Algebra
+
+```latex
+$$
+π_[col1, AGG(col2)](R) \text{where} no GROUP BY \rightarrow
+  π_[col1, AGG(col2) OVER()](R)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("project-to-window";
+    "(project (list ?exprs) ?input)" =>
+    "(window (make-window-specs ?exprs) ?input)"
+    if has-aggregate-without-groupby("?exprs")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    hw: &HardwareProfile,
+) -> bool {
+    // Must have aggregate expressions in projection
+    stats.has_aggregate_exprs
+        // But no GROUP BY (aggregates over entire relation)
+        && !stats.has_group_by
+        // Window functions should be supported
+        && hw.supports_window_functions
+}
+```
+
+**Restrictions:**
+- Aggregate functions must be compatible with window semantics
+- No GROUP BY clause present
+- Database must support window functions (SQL:2003 feature)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let rows = stats.row_count as f64;
+
+    // Without this transformation, users often write self-joins:
+    // SELECT t1.*, (SELECT COUNT(*) FROM t2) FROM t1
+    // Cost: O(n^2) due to correlated subquery
+
+    // Window function cost: O(n) for full partition aggregates
+    let window_cost = rows * 0.00001; // 10μs per row
+    let subquery_cost = rows * rows * 0.000001; // 1μs per pair
+
+    if subquery_cost > window_cost {
+        (subquery_cost - window_cost) / subquery_cost
+    } else {
+        // Even without subquery, window is cleaner
+        0.2
+    }
+}
+```
+
+**Assumptions:**
+- Window functions over full partition are O(n)
+- Alternative (subquery) would be O(n^2) or require self-join
+- Modern databases optimize window functions well
+
+**Typical benefit**: 20-60% speedup by avoiding subqueries or self-joins.
+
+## Test Cases
+
+### Positive: Add row numbers
+
+```sql
+-- Add row number to each row
+SELECT *, COUNT(*) as total_rows
+FROM employees;
+
+-- Before:
+-- Project[*, (SELECT COUNT(*) FROM employees)]
+--   Scan(employees)
+
+-- After project-to-window:
+-- Window[COUNT(*) OVER() as total_rows]
+--   Scan(employees)
+```
+
+### Positive: Running aggregate with details
+
+```sql
+-- Show each sale with total sales
+SELECT sale_id, amount, SUM(amount) as total_sales
+FROM sales;
+
+-- Transformed to:
+-- Window[sale_id, amount, SUM(amount) OVER() as total_sales]
+--   Scan(sales)
+```
+
+### Negative: Has GROUP BY
+
+```sql
+-- Explicit grouping, not a window function candidate
+SELECT category, SUM(amount)
+FROM sales
+GROUP BY category;
+
+-- Stays as:
+-- Aggregate[category, SUM(amount)]
+--   Scan(sales)
+```
+
+### Positive: Multiple window functions
+
+```sql
+-- Ranking and aggregates together
+SELECT
+  employee_id,
+  salary,
+  AVG(salary) as avg_salary,
+  MAX(salary) as max_salary
+FROM employees;
+
+-- Transformed to window functions over full partition
+```
+
+## References
+
+**Implementation in databases:**
+- Apache Calcite: `ProjectToWindowRule.java`
+- PostgreSQL: Window function optimization (window.c)
+- Oracle: Analytical functions implementation
+- mssql: OVER clause optimization
+
+**Academic papers:**
+- Leis et al., "How Good Are Query Optimizers, Really?", VLDB 2015
+  - DOI: 10.14778/2850583.2850594
+  - Window function optimization challenges
+- Bellamkonda et al., "Enhanced Subquery Optimizations in Oracle", VLDB 2009
+  - Window function vs. subquery performance
+- Cao et al., "Optimization of Analytic Window Functions", VLDB 2012
+  - DOI: 10.14778/2367502.2367534
+  - Window function execution strategies

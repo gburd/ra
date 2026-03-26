@@ -1,0 +1,113 @@
+---
+id: RULE-ID-HERE
+name: Human-Readable Rule Name
+category: physical/SUBCATEGORY
+databases: [postgresql, mysql, duckdb, sqlite]
+execution_models: [volcano, vectorized]
+version: 1.0.0
+authors: ["Your Name"]
+tags: [physical, optimization]
+complexity: O(n)
+benefit_range: [0.1, 0.9]
+---
+
+# Rule Name
+
+## Description
+
+Describe the physical optimization. Explain the hardware or execution
+model considerations that motivate this transformation.
+
+**When to apply**: Under what data characteristics or hardware conditions.
+
+**Why it works**: How this exploits physical properties (cache locality,
+parallelism, I/O patterns, etc.)
+
+## Relational Algebra
+
+```latex
+$$
+PHYSICAL_LHS \rightarrow PHYSICAL_RHS
+  \text{where} CONDITION
+$$
+
+```
+
+Where:
+- Define physical operators and their properties
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("RULE-ID-HERE";
+    "(PHYSICAL_PATTERN)" =>
+    "(PHYSICAL_REPLACEMENT)"
+    if GUARD_CONDITION
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(stats: &Statistics, config: &Config) -> bool {
+    // Check data size thresholds, available resources, etc.
+    true
+}
+```
+
+**Restrictions:**
+- Data size thresholds (e.g., only when input exceeds N tuples)
+- Hardware requirements (e.g., sufficient memory for hash table)
+- Execution model constraints
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    input_stats: &Statistics,
+    hardware: &HardwareProfile,
+) -> f64 {
+    // Model I/O cost, CPU cost, memory pressure
+    0.5
+}
+```
+
+**Assumptions:**
+- List I/O model assumptions (sequential vs random access)
+- Memory hierarchy assumptions
+- Parallelism assumptions
+
+**Typical benefit**: X-Y% cost reduction under stated conditions
+
+## Test Cases
+
+### Positive Case 1: Threshold Exceeded
+
+```sql
+-- Input: large table where physical optimization applies
+SELECT ...;
+
+-- Expected: uses optimized physical operator
+-- Plan: PhysicalOperator(...)
+```
+
+### Negative Case 1: Below Threshold
+
+```sql
+-- Input: small table where optimization is not worthwhile
+SELECT ...;
+
+-- Output: unchanged, uses default operator
+-- Plan: DefaultOperator(...)
+```
+
+## References
+
+**Implementation in databases:**
+- PostgreSQL: `src/backend/executor/...`
+- DuckDB: `src/execution/...`
+
+**Academic papers:**
+- Author, "Title", Conference Year. URL

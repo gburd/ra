@@ -1,0 +1,109 @@
+---
+id: calcite-calc-split
+name: Calcite CalcSplitRule
+category: logical/semantic-rewriting
+databases: [calcite]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [logical, calcite, calc, split, project, filter, normalization]
+complexity: O(n)
+benefit_range: [0.0, 0.2]
+---
+
+# Calcite CalcSplitRule
+
+## Description
+
+Splits a Calc operator into a Project and a Filter. The Calc
+combines both projection and filtering in a single operator using
+a RexProgram. This rule decomposes it back into separate operators
+for optimization by rules that match Project or Filter.
+
+**When to apply**: A Calc needs to be decomposed for optimization
+by rules that operate on separate Project and Filter nodes.
+
+**Why it works**: Many optimization rules match specific patterns
+like Filter-on-Join or Project-on-Aggregate. Splitting the Calc
+exposes these patterns for matching.
+
+**Calcite class**: `org.apache.calcite.rel.rules.CalcSplitRule`
+
+## Relational Algebra
+
+```latex
+-- Before: combined Calc
+$$
+Calc[proj={a, b+1}, filter={c > 10}](R)
+$$
+
+-- After: separate Project and Filter
+$$
+\pi_{a, b+1}(\sigma_{c > 10}(R))
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-calc-split";
+    "(calc ?proj ?filter ?input)" =>
+    "(project ?proj (filter ?filter ?input))"
+    if has_both_proj_and_filter("?proj", "?filter")
+),
+
+rw!("calcite-calc-split-proj-only";
+    "(calc ?proj true ?input)" =>
+    "(project ?proj ?input)"
+),
+
+rw!("calcite-calc-split-filter-only";
+    "(calc identity ?filter ?input)" =>
+    "(filter ?filter ?input)"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(calc: &Calc) -> bool {
+    // Split is useful when the Calc has both projection and filter
+    let program = calc.program();
+    !program.is_trivial()
+}
+```
+
+**Restrictions:**
+- Inverse of FilterToCalcRule and ProjectToCalcRule
+- Not enabled by default (works against the usual Calc-merging flow)
+- Useful for specific optimization phases like interpreter preparation
+
+## Cost Model
+
+```rust
+fn estimated_benefit(_: f64) -> f64 {
+    0.0 // Normalization step
+}
+```
+
+**Typical benefit**: 0-20% indirectly through enabling other rules.
+
+## Test Cases
+
+```sql
+-- Positive: Calc with both project and filter
+-- Internal: Calc(projects=[a, b+1], filter=[c>10], input=R)
+-- Becomes: Project(a, b+1, Filter(c>10, R))
+```
+
+```sql
+-- Negative: trivial Calc (identity)
+-- Internal: Calc(projects=[a, b, c], filter=true, input=R)
+-- Handled by CalcRemoveRule instead
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/CalcSplitRule.java (commit af6367d)

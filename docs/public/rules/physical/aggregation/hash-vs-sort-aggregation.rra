@@ -1,0 +1,123 @@
+---
+id: hash-vs-sort-aggregation
+name: Hash vs Sort Aggregation Selection
+category: physical/aggregation
+databases: [postgresql, duckdb, oracle, mssql]
+version: "1.0.0"
+authors: ["Graefe, Goetz"]
+tags: [physical, aggregation, hash, sort, algorithm-selection]
+complexity: O(n)
+benefit_range: [0.1, 0.5]
+---
+
+# Hash vs Sort Aggregation Selection
+
+## Description
+
+Selects between hash-based and sort-based aggregation based on the
+number of groups, available memory, and whether the input is already
+sorted. Hash aggregation builds a hash table keyed on group columns;
+sort aggregation sorts the input then groups consecutive equal keys.
+Hash is better for few groups; sort is better when input is pre-sorted
+or when memory is constrained (sort can spill gracefully).
+
+**When to apply**: Any GROUP BY query where both hash and sort
+aggregation are feasible.
+
+## Relational Algebra
+
+```latex
+-- Option 1: Hash aggregation
+$$
+HashAggregate[dept; SUM(salary)](employees)
+$$
+
+-- Option 2: Sort aggregation (when input pre-sorted by dept)
+$$
+SortAggregate[dept; SUM(salary)](
+    IndexScan(idx_dept, employees))  -- already sorted by dept
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("prefer-sort-agg-presorted";
+    "(hash-aggregate ?groups ?fn ?input)" =>
+    "(sort-aggregate ?groups ?fn ?input)"
+    if input_is_sorted_by("?input", "?groups")
+),
+
+rw!("prefer-hash-agg-few-groups";
+    "(sort-aggregate ?groups ?fn ?input)" =>
+    "(hash-aggregate ?groups ?fn ?input)"
+    if group_count_is_small("?groups", "?input")
+    if not_sorted_by("?input", "?groups")
+),
+```
+
+## Preconditions
+
+```rust
+fn select_algorithm(
+    group_count: f64,
+    input_sorted: bool,
+    available_memory: f64,
+) -> AggAlgorithm {
+    if input_sorted {
+        AggAlgorithm::Sort // free ordering, streaming
+    } else if group_count * 100.0 < available_memory {
+        AggAlgorithm::Hash // hash table fits in memory
+    } else {
+        AggAlgorithm::Sort // graceful spill for many groups
+    }
+}
+```
+
+**Restrictions:**
+- Hash aggregation requires memory for hash table
+- Sort aggregation requires ordered input or explicit sort
+- Hybrid approaches (hash with spill) used in practice
+
+## Cost Model
+
+```rust
+fn hash_agg_cost(rows: f64, groups: f64) -> f64 {
+    rows * 1.0 + groups * 0.1 // hash + lookup
+}
+
+fn sort_agg_cost(rows: f64, input_sorted: bool) -> f64 {
+    if input_sorted {
+        rows * 0.5 // streaming comparison
+    } else {
+        rows * rows.log2() + rows * 0.5 // sort + stream
+    }
+}
+```
+
+**Typical benefit**: 10-50% from choosing the right algorithm.
+
+## Test Cases
+
+```sql
+-- Positive: pre-sorted input favors sort aggregation
+SELECT dept, AVG(salary) FROM employees
+WHERE dept > 'D'
+GROUP BY dept;  -- index on (dept) provides sort order
+
+-- Positive: few groups favor hash aggregation
+SELECT status, COUNT(*) FROM orders GROUP BY status;
+-- ~5 distinct statuses: hash table tiny
+
+-- Negative: huge number of groups, limited memory
+SELECT user_id, SUM(amount) FROM transactions GROUP BY user_id;
+-- Millions of users: may need sort-based spill
+```
+
+## References
+
+- Graefe, G. "Implementing Sorting in Database Systems" (ACM Computing Surveys 2006)
+- PostgreSQL: enable_hashagg / enable_sort GUC parameters

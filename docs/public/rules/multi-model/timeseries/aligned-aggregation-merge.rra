@@ -1,0 +1,124 @@
+---
+id: aligned-aggregation-merge
+name: Aligned Aggregation Merge
+category: multi-model/timeseries
+databases: [influxdb, timescaledb, clickhouse]
+standard: "flux:2"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [timeseries, aggregation, merge, aligned, parallel]
+---
+
+# Aligned Aggregation Merge
+
+## Description
+
+Merges partial aggregation results from multiple time chunks when the
+aggregation boundaries align with chunk boundaries. Instead of reading
+all raw data from each chunk and aggregating globally, each chunk
+computes a local aggregate, and results are merged with a final
+aggregation step. This enables chunk-parallel aggregation.
+
+**When to apply**: A time-bucketed aggregation's bucket boundaries align
+with chunk boundaries (e.g., hourly buckets on hourly chunks), and
+the aggregate functions are decomposable (sum, count, min, max but
+not median).
+
+**Why it works**: Decomposable aggregates allow partial results to be
+combined: sum(chunk1) + sum(chunk2) = sum(all). When buckets align
+with chunks, each chunk's aggregate is a complete partial result for
+one or more buckets, enabling embarrassingly parallel computation.
+
+## Relational Algebra
+
+```latex
+$$
+\gamma_{time_bucket(1h, ts), sum(val)}(
+  union_all(chunk1, chunk2, ..., chunkN))
+  \rightarrow merge_agg(
+       \gamma_{time_bucket(1h, ts), sum(val)}(chunk1),
+       \gamma_{time_bucket(1h, ts), sum(val)}(chunk2),
+       ...
+     )
+  \text{where} bucket size divides chunk interval
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("aligned-aggregation-merge";
+    "(aggregate ?groups ?aggs \
+       (ts-chunk-union ?chunks))" =>
+    "(ts-merge-agg ?groups ?aggs ?chunks)"
+    if aggs_are_decomposable("?aggs")
+    if buckets_align_with_chunks("?groups", "?chunks")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    agg_funcs: &[AggFunc],
+    bucket_interval: &Duration,
+    chunk_interval: &Duration,
+) -> bool {
+    agg_funcs.iter().all(|f| f.is_decomposable())
+    && chunk_interval.as_nanos() % bucket_interval.as_nanos() == 0
+}
+```
+
+**Restrictions:**
+- Only decomposable aggregates: SUM, COUNT, MIN, MAX, AVG (via sum+count)
+- Non-decomposable aggregates (MEDIAN, PERCENTILE) cannot use this
+- Bucket boundaries must align with chunk boundaries
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    total_rows: f64,
+    num_chunks: u32,
+    parallelism: u32,
+) -> f64 {
+    let serial_cost = total_rows;
+    let parallel_cost =
+        total_rows / parallelism as f64 + num_chunks as f64;
+    (serial_cost - parallel_cost) / serial_cost
+}
+```
+
+**Typical benefit**: 0.5-0.9 depending on available parallelism.
+
+## Test Cases
+
+```sql
+-- Positive: hourly aggregation on hourly chunks
+SELECT time_bucket('1 hour', time) AS hour,
+       sum(value), count(*)
+FROM metrics
+WHERE time >= '2025-03-01' AND time < '2025-03-08'
+GROUP BY hour;
+-- Each chunk computes local sum/count; results merged
+
+-- Negative: 15-minute aggregation on hourly chunks
+-- (not aligned, but still partially parallelizable via
+-- a different rule)
+
+-- Negative: median is not decomposable
+SELECT time_bucket('1 hour', time),
+       percentile_cont(0.5) WITHIN GROUP (ORDER BY value)
+FROM metrics
+GROUP BY 1;
+-- Cannot merge partial medians
+```
+
+## References
+
+TimescaleDB: src/nodes/chunk_append.c - ts_chunk_append_exec()
+ClickHouse: src/Processors/Merges/AggregatingSortedTransform.cpp
+Dean, Ghemawat "MapReduce: Simplified Data Processing on Large Clusters" (OSDI 2004)

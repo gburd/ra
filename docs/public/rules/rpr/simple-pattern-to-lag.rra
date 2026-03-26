@@ -1,0 +1,250 @@
+---
+id: rpr-simple-pattern-to-lag
+name: Translate Simple Monotonic Pattern to LAG()
+category: logical/rpr
+databases: [postgresql, oracle, duckdb, mssql, generic]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [rpr, translation, window-function, lag, simplification]
+complexity: "O(1)"
+benefit_range: [0.5, 0.8]
+preconditions:
+  - type: pattern
+    must_match: "(row-pattern ?input ?partition ?order ?defines ?measures ?pattern)"
+  - type: predicate
+    condition: "is_simple_monotonic_pattern(?pattern, ?defines)"
+    description: "Pattern is single variable with + quantifier and DEFINE uses only PREV()"
+  - type: fact
+    fact_type: database.supports_feature
+    feature: "lag_window_function"
+    comparator: "=="
+    threshold: true
+    description: "Database supports LAG() window function"
+---
+
+# Translate Simple Monotonic Pattern to LAG()
+
+## Description
+
+When a MATCH_RECOGNIZE pattern consists of a single variable with a
+`+` quantifier and the DEFINE condition uses only `PREV()` with a
+simple comparison, translate the entire construct to a LAG() window
+function. This avoids DFA compilation and evaluation entirely.
+
+**When to apply**: Pattern is `A+` where DEFINE A uses `col <op> PREV(col, 1)` with a simple comparison operator.
+
+**Why it works**: `PATTERN (A+) DEFINE A AS price > PREV(price)` matches consecutive rows where each row's price exceeds the previous row's price. This is exactly `price > LAG(price, 1) OVER (ORDER BY ...)`. The window function implementation is 2-5x faster than DFA evaluation for simple patterns because it avoids state machine overhead.
+
+## Relational Algebra
+
+```latex
+-- Before: RPR with simple monotonic pattern
+$$
+RowPattern(
+  input: R,
+  partition: [symbol],
+  order: [trade_date],
+  pattern: Quantified(A, OneOrMore),
+  defines: { A: Gt(price, Prev(price, 1)) },
+  measures: [...]
+)
+$$
+
+-- After: window function
+$$
+Filter(
+  col > LAG(col, 1) OVER (PARTITION BY symbol ORDER BY trade_date),
+  R
+)
+$$
+
+```
+
+### With MEASURES translation
+
+```latex
+-- MEASURES FIRST(A.price) -> first value in window frame
+-- MEASURES LAST(A.price) -> last value in window frame
+-- MEASURES COUNT(A.*) -> window count
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Single-var pattern with PREV comparison -> LAG
+rw!("rpr-simple-pattern-to-lag";
+    "(row-pattern ?input ?partition ?order
+       (defines ((define ?var (compare ?op ?col (prev ?col 1)))))
+       ?measures
+       (pattern-quantified ?var one-or-more))" =>
+    "(filter
+       (compare ?op ?col (lag ?col 1 (window ?partition ?order)))
+       ?input)"
+    if is_simple_comparison("?op")
+),
+
+// PREV with offset > 1 -> LAG with same offset
+rw!("rpr-pattern-prev-n-to-lag-n";
+    "(row-pattern ?input ?partition ?order
+       (defines ((define ?var (compare ?op ?col (prev ?col ?n)))))
+       ?measures
+       (pattern-quantified ?var one-or-more))" =>
+    "(filter
+       (compare ?op ?col (lag ?col ?n (window ?partition ?order)))
+       ?input)"
+    if is_simple_comparison("?op")
+    if is_constant_offset("?n")
+),
+
+// NEXT-based pattern -> LEAD
+rw!("rpr-simple-pattern-to-lead";
+    "(row-pattern ?input ?partition ?order
+       (defines ((define ?var (compare ?op ?col (next ?col 1)))))
+       ?measures
+       (pattern-quantified ?var one-or-more))" =>
+    "(filter
+       (compare ?op ?col (lead ?col 1 (window ?partition ?order)))
+       ?input)"
+    if is_simple_comparison("?op")
+),
+```
+
+## Preconditions
+
+```rust
+fn is_simple_monotonic_pattern(
+    pattern: &PatternExpr,
+    defines: &HashMap<Symbol, Expr>,
+) -> bool {
+    // Pattern must be a single variable with + quantifier.
+    let var = match pattern {
+        PatternExpr::Quantified(
+            box PatternExpr::Var(v),
+            Quantifier::OneOrMore
+        ) => v,
+        _ => return false,
+    };
+
+    // DEFINE must use only PREV() or NEXT() with constant offset
+    // and a simple comparison operator.
+    let define = match defines.get(var) {
+        Some(d) => d,
+        None => return false,
+    };
+
+    matches!(define, Expr::BinaryOp { op, left, right }
+        if is_simple_comparison(op)
+        && (is_prev_expr(left) || is_prev_expr(right)
+            || is_next_expr(left) || is_next_expr(right))
+    )
+}
+
+fn is_simple_comparison(op: &Op) -> bool {
+    matches!(op, Op::Gt | Op::Gte | Op::Lt | Op::Lte | Op::Eq | Op::Neq)
+}
+```
+
+**Restrictions:**
+- Pattern must have exactly one variable with `+` quantifier.
+- DEFINE must use exactly one `PREV()` or `NEXT()` call with constant offset.
+- Complex DEFINE conditions (AND, OR, multiple PREV calls) are not translated.
+- MEASURES that use `FIRST()`, `LAST()`, or `COUNT()` require additional window function translation logic.
+- Multi-variable patterns (`A+ B+`) cannot use this rule.
+
+## Cost Model
+
+```rust
+fn estimated_benefit(input_card: f64) -> f64 {
+    // DFA cost: state transitions per row (2-4 states for A+)
+    let dfa_cost = input_card * 3.0 * 0.01;
+
+    // Window function cost: single LAG evaluation per row
+    let window_cost = input_card * 1.0 * 0.01;
+
+    (dfa_cost - window_cost) / dfa_cost
+}
+```
+
+**Typical benefit**: 50-80%. Window functions are highly optimized
+in all major databases. The LAG operator uses a simple ring buffer
+vs the DFA's state machine with transition table lookups.
+
+## Test Cases
+
+### Positive: simple increasing pattern
+
+```sql
+-- Before: MATCH_RECOGNIZE
+SELECT * FROM stock_prices
+  MATCH_RECOGNIZE (
+    PARTITION BY symbol
+    ORDER BY trade_date
+    PATTERN (A+)
+    DEFINE A AS price > PREV(price)
+  );
+
+-- After: LAG window function
+SELECT * FROM stock_prices
+WHERE price > LAG(price, 1) OVER (
+  PARTITION BY symbol ORDER BY trade_date
+);
+```
+
+### Positive: decreasing pattern with offset 2
+
+```sql
+-- Before
+MATCH_RECOGNIZE (
+  ORDER BY ts
+  PATTERN (A+)
+  DEFINE A AS reading < PREV(reading, 2)
+)
+
+-- After
+WHERE reading < LAG(reading, 2) OVER (ORDER BY ts)
+```
+
+### Positive: NEXT-based pattern to LEAD
+
+```sql
+-- Before
+MATCH_RECOGNIZE (
+  ORDER BY ts
+  PATTERN (A+)
+  DEFINE A AS value > NEXT(value)
+)
+
+-- After
+WHERE value > LEAD(value, 1) OVER (ORDER BY ts)
+```
+
+### Negative: multi-variable pattern
+
+```sql
+-- Cannot translate: two variables A and B
+MATCH_RECOGNIZE (
+  PATTERN (A+ B+)
+  DEFINE A AS price > PREV(price), B AS price < PREV(price)
+)
+```
+
+### Negative: complex DEFINE with AND
+
+```sql
+-- Cannot translate: DEFINE has conjunction
+MATCH_RECOGNIZE (
+  PATTERN (A+)
+  DEFINE A AS price > PREV(price) AND volume > 1000000
+)
+```
+
+## References
+
+- Zemke, F. et al. "Row Pattern Recognition in SQL" (2012)
+- SQL:2016 ISO/IEC 19075-5 Section 8 (Window Functions)
+- Leis et al. "How Good Are Query Optimizers, Really?" VLDB (2015)

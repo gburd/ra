@@ -1,0 +1,154 @@
+---
+id: colocated-join
+name: Co-located Join Elimination
+category: distributed/distributed-joins
+databases: [cockroachdb, citus, greenplum, spark, trino]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, join, colocation, partition, local]
+complexity: O(n)
+benefit_range: [0.5, 0.95]
+---
+
+# Co-located Join Elimination
+
+## Description
+
+When both sides of a join are hash-partitioned on their respective join
+keys with the same number of partitions, the join can execute locally on
+each node with no data movement. This rule detects co-partitioned tables
+and eliminates exchange operators, converting a distributed join into
+parallel local joins.
+
+**When to apply**: Both inputs are hash-partitioned on the join key
+columns with the same partitioning scheme (same hash function, same
+number of buckets).
+
+**Why it works**: If both tables use the same hash function on the join
+key with the same bucket count, then for any value v,
+`hash(v) mod N` maps to the same node on both sides. All matching rows
+are guaranteed to be co-located.
+
+## Relational Algebra
+
+```latex
+$$
+Join[c](Exchange[hash(k1)](R), Exchange[hash(k2)](S))
+  \rightarrow Join[c](R, S)
+  \text{where} partition_scheme(R, k1) = partition_scheme(S, k2)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("colocated-join";
+    "(join ?type ?cond
+        (exchange hash_partition ?left ?lkeys)
+        (exchange hash_partition ?right ?rkeys))" =>
+    "(join ?type ?cond ?left ?right)"
+    if same_partition_scheme("?left", "?lkeys", "?right", "?rkeys")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    left: &RelNode,
+    left_keys: &[Column],
+    right: &RelNode,
+    right_keys: &[Column],
+) -> bool {
+    let left_dist = left.distribution();
+    let right_dist = right.distribution();
+
+    // Both must be hash-partitioned on the join keys
+    left_dist.is_hash_partitioned_on(left_keys)
+        && right_dist.is_hash_partitioned_on(right_keys)
+    // Same number of partitions
+    && left_dist.num_partitions() == right_dist.num_partitions()
+    // Same hash function
+    && left_dist.hash_function() == right_dist.hash_function()
+}
+```
+
+**Restrictions:**
+- Partition count must be identical (not just compatible modulo)
+- Hash function must be the same (e.g., both Murmur3)
+- Column types must hash identically (beware INT vs BIGINT differences)
+- In CockroachDB, co-location is range-based rather than hash-based;
+  the check is whether ranges are interleaved or co-located
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    left_bytes: f64,
+    right_bytes: f64,
+    num_nodes: u32,
+    network_bandwidth: f64,
+) -> f64 {
+    // Benefit = cost of the two shuffles we avoid
+    let shuffle_fraction = (num_nodes - 1) as f64 / num_nodes as f64;
+    let shuffle_cost =
+        (left_bytes + right_bytes) * shuffle_fraction;
+    shuffle_cost / network_bandwidth
+}
+```
+
+**Typical benefit**: Eliminates all network I/O for the join, which for
+two large tables can be the dominant query cost.
+
+## Test Cases
+
+```sql
+-- Positive: both tables hash-partitioned on join key
+-- orders: DISTRIBUTED BY HASH(customer_id) INTO 64 BUCKETS
+-- customers: DISTRIBUTED BY HASH(id) INTO 64 BUCKETS
+SELECT o.*, c.name
+FROM orders o JOIN customers c ON o.customer_id = c.id;
+
+-- Plan (no exchange operators):
+-- HashJoin(o.customer_id = c.id)
+--   Scan(orders)     -- local partition
+--   Scan(customers)  -- local partition
+```
+
+```sql
+-- Positive: CockroachDB interleaved tables
+-- CREATE TABLE orders (...) INTERLEAVE IN PARENT customers (customer_id)
+SELECT o.*, c.name
+FROM orders o JOIN customers c ON o.customer_id = c.id;
+
+-- Plan: co-located lookup join, no data movement
+```
+
+```sql
+-- Negative: different partition counts
+-- orders: 64 partitions on customer_id
+-- customers: 32 partitions on id
+SELECT o.*, c.name
+FROM orders o JOIN customers c ON o.customer_id = c.id;
+-- Not co-located despite same key; must repartition one side
+```
+
+```sql
+-- Negative: different partition keys
+-- orders: partitioned on order_date
+-- customers: partitioned on id
+SELECT o.*, c.name
+FROM orders o JOIN customers c ON o.customer_id = c.id;
+-- Join key (customer_id) does not match orders' partition key
+```
+
+## References
+
+CockroachDB: pkg/sql/opt/memo/logical_props_builder.go - buildJoinProps()
+Citus: src/backend/distributed/planner/multi_physical_planner.c - IsColocatedJoin()
+Greenplum: src/backend/cdb/cdbllize.c - is_collocated_join()
+Spark SQL: sql/catalyst/src/main/scala/org/apache/spark/sql/catalyst/plans/physical/partitioning.scala - satisfies()
+Zamanian et al., "The End of a Myth: Distributed Transactions Can Scale" (VLDB 2017)

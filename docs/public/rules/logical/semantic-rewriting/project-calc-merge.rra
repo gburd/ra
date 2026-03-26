@@ -1,0 +1,91 @@
+---
+id: calcite-project-calc-merge
+name: Calcite ProjectCalcMergeRule
+category: logical/semantic-rewriting
+databases: [calcite]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [logical, calcite, project, calc, merge, fusion]
+complexity: O(n)
+benefit_range: [0.05, 0.2]
+---
+
+# Calcite ProjectCalcMergeRule
+
+## Description
+
+Merges a Project into a Calc below it. The project's expressions
+are composed with the Calc's existing projection, producing a single
+Calc with the combined projection expressed in terms of the original
+Calc's inputs.
+
+**When to apply**: A Project sits directly above a Calc.
+
+**Why it works**: Composing the projections eliminates an operator
+from the plan. The single Calc evaluates both the original and new
+projections in one pass.
+
+**Calcite class**: `org.apache.calcite.rel.rules.ProjectCalcMergeRule`
+
+## Relational Algebra
+
+```latex
+-- Before: project above calc
+$$
+\pi_{a + 1}(Calc[proj={a=x*2, b}, filter=p](R))
+$$
+
+-- After: merged into single calc
+$$
+Calc[proj={x*2 + 1}, filter=p](R)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-project-calc-merge";
+    "(project ?exprs (calc ?calc_proj ?calc_filter ?input))" =>
+    "(calc (compose-proj ?exprs ?calc_proj) ?calc_filter ?input)"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    project: &Project,
+    calc: &Calc,
+) -> bool {
+    true // Always applicable when project is above calc
+}
+```
+
+**Restrictions:**
+- Project expressions are re-expressed in terms of Calc inputs
+- The Calc's filter is preserved unchanged
+
+## Cost Model
+
+```rust
+fn estimated_benefit(input_rows: f64) -> f64 {
+    input_rows * 0.0001
+}
+```
+
+**Typical benefit**: 5-20% by reducing operator count.
+
+## Test Cases
+
+```sql
+-- Positive: project merged into calc
+-- Internal: Project([a+1], Calc(proj=[a=x*2], filter=true, R))
+-- Becomes: Calc(proj=[x*2+1], filter=true, R)
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/ProjectCalcMergeRule.java (commit af6367d)

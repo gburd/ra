@@ -1,0 +1,40 @@
+---
+id: learned-cost-models
+name: "Learned Cost Models"
+category: cost-models/ml-based
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [academic, academic]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# Learned Cost Models
+
+## Description
+
+Neural network based cardinality and cost prediction
+
+## Relational Algebra
+
+```latex
+
+
+```
+
+## Implementation
+
+```
+Implement rule transformation for academic optimization
+```
+
+## Tests
+
+Add test cases for this rule
+
+## References
+- Paper: Learning to Reuse Joins by Ortiz et al.
+- DOI: 10.1145/3318464.3389752

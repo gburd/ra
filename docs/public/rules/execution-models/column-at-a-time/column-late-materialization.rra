@@ -1,0 +1,143 @@
+---
+id: column-late-materialization
+name: "Column-at-a-Time Late Materialization"
+category: execution-models/column-at-a-time
+databases: [clickhouse, monetdb, duckdb]
+execution_models: [column-at-a-time, vectorized]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [columnar, late-materialization, position-list, deferred-read]
+complexity: "O(n)"
+benefit_range: [0.3, 0.9]
+---
+
+# Column-at-a-Time Late Materialization
+
+## Metadata
+- **Rule ID**: `column-late-materialization`
+- **Category**: Execution Models / Column-at-a-Time
+- **Source**: ClickHouse `optimizeLazyMaterialization.cpp`; Abadi et al. 2007
+- **Complexity**: O(n) with I/O proportional to surviving rows
+- **Prerequisites**: Columnar storage; filter or limit present
+- **Alternatives**: Early materialization (reconstruct tuples before filter)
+
+## Description
+
+Late materialization is a fundamental columnar execution technique where
+row reconstruction is deferred until the last possible moment. Instead
+of assembling full tuples from column vectors, the execution engine
+operates on position lists (row IDs) and individual columns.
+
+The pipeline proceeds:
+1. Read filter columns and evaluate predicates -> position list
+2. Pass position list through joins and aggregations
+3. Only when final output is needed, fetch remaining columns
+   for positions in the result set
+
+This avoids constructing wide intermediate tuples that would be
+discarded by filters, and enables the CPU cache to work on narrow,
+dense column data.
+
+**When to apply:**
+- Selective filters (< 50% selectivity)
+- Wide tables (many columns per row)
+- Queries that project a subset of columns
+
+**Why it works for OLAP:**
+- OLAP tables: 50-500 columns, queries touch 5-20
+- Filters often eliminate > 90% of rows
+- Position lists are tiny compared to full tuples
+
+## Relational Algebra
+
+```
+project[C](filter[pred](scan[T]))
+  -> lookup[C](filter[pred](scan[T, pred_cols])) using positions
+
+Early materialization:
+  scan[T, all] -> filter -> project
+Late materialization:
+  scan[T, pred_cols] -> filter -> positions -> lookup[T, C]
+```
+
+## Implementation (egg rewrite rules)
+
+```lisp
+;; Late materialization: defer column reads after filter
+(rewrite (project ?out-cols (filter ?pred (scan ?table ?all-cols)))
+  (position-lookup ?table (diff ?out-cols (pred-cols ?pred))
+    (filter ?pred (scan ?table (pred-cols ?pred))))
+  :if (< (selectivity ?pred) 0.5)
+  :if (> (count ?out-cols) (count (pred-cols ?pred))))
+
+;; Late materialization through join
+(rewrite (project ?out-cols
+           (join ?type ?cond
+             (filter ?pred (scan ?t1 ?cols1))
+             ?right))
+  (position-lookup ?t1 (diff ?out-cols (pred-cols ?pred) (join-cols ?cond))
+    (join ?type ?cond
+      (filter ?pred (scan ?t1 (union (pred-cols ?pred) (join-cols ?cond))))
+      ?right))
+  :if (< (selectivity ?pred) 0.3))
+
+;; Position-based aggregation (no full tuple needed)
+(rewrite (aggregate ?groups ?aggs
+           (filter ?pred (scan ?table ?all-cols)))
+  (aggregate ?groups ?aggs
+    (position-project (union ?groups (agg-cols ?aggs))
+      (filter ?pred (scan ?table (pred-cols ?pred)))))
+  :if (< (selectivity ?pred) 0.5))
+```
+
+## Cost Model
+
+```rust
+pub fn cost_late_materialization(
+    rows: u64,
+    pred_col_bytes: u64,
+    output_col_bytes: u64,
+    selectivity: f64,
+    hardware: &HardwareModel,
+) -> Cost {
+    let filter_io = Cost::io(pred_col_bytes as f64 * hardware.seq_read_cost());
+    let filter_cpu = Cost::cpu(rows * 5);
+    let surviving = (rows as f64 * selectivity) as u64;
+    let lookup_io = if selectivity < 0.01 {
+        Cost::io(surviving as f64 * output_col_bytes as f64 * hardware.random_read_cost())
+    } else {
+        Cost::io(output_col_bytes as f64 * selectivity * hardware.seq_read_cost())
+    };
+    filter_io + filter_cpu + lookup_io
+}
+```
+
+**Typical benefit**: 30-90% I/O reduction
+
+## Test Cases
+
+### Positive: Selective filter on wide table
+```sql
+SELECT name, email, address, phone
+FROM customers
+WHERE loyalty_tier = 'platinum';
+
+-- 2% of customers are platinum
+-- Late: read loyalty_tier (1B/row), filter, lookup 4 cols for 2%
+-- Early: read all 5 columns for 100% of rows, then filter
+```
+
+### Negative: Low selectivity
+```sql
+SELECT * FROM events WHERE year = 2024;
+
+-- If 80% of data is from 2024, late materialization adds
+-- random I/O overhead for the lookup phase
+```
+
+## References
+
+- Abadi et al., "Materialization Strategies in a Column-Oriented DBMS", ICDE 2007
+- ClickHouse: `src/Processors/QueryPlan/Optimizations/optimizeLazyMaterialization.cpp`
+- Boncz et al., "MonetDB/X100: Hyper-Pipelining Query Execution", CIDR 2005

@@ -1,0 +1,61 @@
+---
+id: distinct-pushdown-through-join
+name: Distinct Pushdown Through Join
+category: logical/distinct-elimination
+databases: [postgresql, duckdb, mssql]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distinct, pushdown, join]
+complexity: "O(n)"
+benefit_range: [0.1, 0.4]
+---
+
+# Distinct Pushdown Through Join
+
+## Description
+
+Push DISTINCT through a join when only columns from one side are projected. The distinct can be applied to the contributing side before the join, reducing the join input size.
+
+**When to apply**: DISTINCT projects columns from only one join input, and the join preserves this uniqueness.
+
+## Relational Algebra
+
+```latex
+$$
+Distinct(Project[L.*](Join[cond](L, R)))
+  \rightarrow Project[L.*](Join[cond](Distinct(L), R))
+  \text{where} projected_cols subset_of output(L)
+    and join_type preserves uniqueness
+$$
+
+```
+
+## Implementation
+
+```rust
+rw!("distinct-pushdown-through-join";
+    "(distinct (project ?cols (join ?type ?cond ?left ?right)))" =>
+    "(project ?cols (join ?type ?cond (distinct ?left) ?right))"
+    if cols_from_left_only("?cols", "?left")
+    if join_preserves_left_uniqueness("?type")
+),
+```
+
+## Test Cases
+
+### Positive: Distinct on left side only
+
+```sql
+SELECT DISTINCT o.customer_id
+FROM orders o
+JOIN products p ON o.product_id = p.id;
+
+-- Push distinct to orders side
+```
+
+## References
+
+- Distinct pushdown in multi-table queries
+- Join-aware duplicate elimination

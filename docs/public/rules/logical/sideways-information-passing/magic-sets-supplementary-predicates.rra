@@ -1,0 +1,341 @@
+---
+id: magic-sets-supplementary-predicates
+name: "Magic Sets Supplementary Predicate Creation"
+category: logical/sideways-information-passing
+databases: [postgresql, oracle, monetdb, logicblox]
+execution_models: [volcano, differential]
+version: "1.0.0"
+authors: ["Bancilhon, Maier, Sagiv, Ullman"]
+tags: [magic-sets, supplementary-predicates, datalog, optimization, classic]
+complexity: "O(r)"
+benefit_range: [0.5, 50.0]
+---
+
+# Magic Sets Supplementary Predicate Creation
+
+## Description
+
+After adorned predicates are generated, the second phase of magic sets creates
+"supplementary" magic predicates. For each adorned rule, a magic predicate
+captures the set of bindings that "flow into" a recursive body predicate. The
+magic predicate acts as a filter: the recursive predicate only computes tuples
+that have corresponding magic tuples.
+
+For a rule `p^bf(X,Z) :- q(X,Y), p^bf(Y,Z)`, the magic predicate
+`magic_p^bf(Y)` captures all values of Y that will be used to probe p. This
+is computed from the query constants and the non-recursive body predicates.
+The recursive predicate is then rewritten to join with its magic predicate,
+restricting computation to relevant tuples only.
+
+**When to apply**: After adorned predicates have been generated for a recursive
+query. Supplementary predicates are created for each adorned recursive predicate
+that has bound arguments.
+
+**Why it works**: The magic predicate pre-computes the "demand" -- which bound
+values will be used to query the recursive relation. By joining the recursive
+relation with its demand set, the evaluation only materializes tuples that
+contribute to the answer. Without the magic predicate, the entire recursive
+relation is computed and then filtered.
+
+## Relational Algebra
+
+```latex
+$$
+Magic predicate creation algorithm:
+$$
+
+$$
+Input: Adorned rule: p^bf(X,Z) :- q(X,Y), r(Y,W), p^bf(W,Z)
+$$
+
+$$
+Step 1: Create supplementary predicates for each body position
+  sup_1(X)   = bound args at position 0 (from head)
+  sup_2(X,Y) = sup_1(X) \bowtie q(X,Y)  (after evaluating q)
+  sup_3(X,Y,W) = sup_2(X,Y) \bowtie r(Y,W)  (after evaluating r)
+$$
+
+$$
+Step 2: Create magic predicate from supplementary at recursive call
+  magic_p^bf(W) = pi_W(sup_3(X,Y,W))
+$$
+
+$$
+Step 3: Rewrite recursive rule to use magic predicate
+  p^bf(X,Z) :- magic_p^bf(X), q(X,Y), r(Y,W), p^bf(W,Z)
+$$
+
+$$
+Step 4: Create magic seed from query
+  magic_p^bf(john) :- true   (from query ?- p(john, X))
+$$
+
+$$
+Step 5: Create magic rule (propagates demand through recursion)
+  magic_p^bf(W) :- magic_p^bf(X), q(X,Y), r(Y,W)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+use std::collections::HashMap;
+
+#[derive(Clone, Debug)]
+struct MagicRule {
+    head: Predicate,
+    body: Vec<Predicate>,
+}
+
+struct SupplementaryPredicateGenerator;
+
+impl SupplementaryPredicateGenerator {
+    fn create_magic_rules(
+        &self,
+        adorned_rules: &[AdornedRule],
+        query: &Query,
+    ) -> Vec<MagicRule> {
+        let mut magic_rules = Vec::new();
+
+        // Step 1: Create magic seed from query
+        let seed_rule = self.create_seed(query);
+        magic_rules.push(seed_rule);
+
+        // Step 2: For each adorned rule, create magic rules
+        for rule in adorned_rules {
+            let supplementary_rules =
+                self.process_rule(rule);
+            magic_rules.extend(supplementary_rules);
+        }
+
+        magic_rules
+    }
+
+    fn create_seed(&self, query: &Query) -> MagicRule {
+        let bound_args: Vec<Argument> = query.arguments.iter()
+            .zip(query.adornment.0.iter())
+            .filter(|(_, status)| **status == BindingStatus::Bound)
+            .map(|(arg, _)| arg.clone())
+            .collect();
+
+        MagicRule {
+            head: Predicate {
+                name: format!("magic_{}", query.predicate),
+                arguments: bound_args,
+            },
+            body: vec![], // Seed is a fact
+        }
+    }
+
+    fn process_rule(
+        &self,
+        rule: &AdornedRule,
+    ) -> Vec<MagicRule> {
+        let mut result = Vec::new();
+
+        // Identify bound variables from the head
+        let bound_head_vars: Vec<String> = rule.head.arguments.iter()
+            .zip(rule.head.adornment.0.iter())
+            .filter(|(_, s)| **s == BindingStatus::Bound)
+            .filter_map(|(arg, _)| match arg {
+                Argument::Variable(v) => Some(v.clone()),
+                _ => None,
+            })
+            .collect();
+
+        // For each recursive body predicate, create magic rule
+        let mut accumulated_body = Vec::new();
+        // Add magic predicate for the head as first body literal
+        accumulated_body.push(Predicate {
+            name: format!("magic_{}", rule.head.name),
+            arguments: bound_head_vars.iter()
+                .map(|v| Argument::Variable(v.clone()))
+                .collect(),
+        });
+
+        for body_pred in &rule.body {
+            if body_pred.is_recursive() {
+                // Create magic rule for this recursive call
+                let magic_head_args: Vec<Argument> =
+                    body_pred.arguments.iter()
+                        .zip(body_pred.adornment.0.iter())
+                        .filter(|(_, s)| {
+                            **s == BindingStatus::Bound
+                        })
+                        .map(|(arg, _)| arg.clone())
+                        .collect();
+
+                result.push(MagicRule {
+                    head: Predicate {
+                        name: format!("magic_{}", body_pred.name),
+                        arguments: magic_head_args,
+                    },
+                    body: accumulated_body.clone(),
+                });
+            }
+
+            accumulated_body.push(body_pred.to_predicate());
+        }
+
+        // Rewrite the original rule to include magic guard
+        let mut guarded_body = vec![Predicate {
+            name: format!("magic_{}", rule.head.name),
+            arguments: bound_head_vars.iter()
+                .map(|v| Argument::Variable(v.clone()))
+                .collect(),
+        }];
+        guarded_body.extend(
+            rule.body.iter().map(|p| p.to_predicate())
+        );
+
+        result.push(MagicRule {
+            head: rule.head.to_predicate(),
+            body: guarded_body,
+        });
+
+        result
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    hw: &HardwareProfile,
+) -> bool {
+    // Must have adorned predicates from phase 1
+    stats.has_adorned_predicates
+        // Must have recursive rules
+        && stats.has_recursion
+        // Bound arguments must exist to create useful magic predicates
+        && stats.has_bound_arguments_in_recursion
+}
+```
+
+**Restrictions:**
+- Supplementary predicates increase the number of rules
+- Magic predicate computation adds overhead (worthwhile only if selective)
+- Negation in recursive rules requires stratification
+- Body predicate ordering affects magic predicate quality (SIPS-dependent)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    // Without magic: compute full recursive relation
+    let full_computation = stats.full_recursive_relation_size as f64;
+
+    // With magic: compute only demand-driven subset
+    let demand_size = stats.magic_demand_size as f64;
+    let magic_overhead = demand_size * 1.5; // Computing magic predicates
+
+    let magic_computation = demand_size + magic_overhead;
+
+    if full_computation > magic_computation {
+        (full_computation - magic_computation) / full_computation
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 5x-100x when query bindings restrict recursive computation.
+
+## Test Cases
+
+### Positive: Transitive closure with bound start
+
+```
+# Original rules:
+tc(X, Y) :- edge(X, Y).
+tc(X, Z) :- edge(X, Y), tc(Y, Z).
+
+# Query: ?- tc(a, X)
+# After adornment: tc^bf
+
+# Magic rules generated:
+magic_tc^bf(a).                                    # Seed
+magic_tc^bf(Y) :- magic_tc^bf(X), edge(X, Y).     # Propagate demand
+tc^bf(X, Y) :- magic_tc^bf(X), edge(X, Y).        # Guarded base
+tc^bf(X, Z) :- magic_tc^bf(X), edge(X, Y), tc^bf(Y, Z). # Guarded recursive
+
+# magic_tc^bf computes: {a, b, c, ...} (nodes reachable from a)
+# tc^bf only computes paths starting from these nodes
+```
+
+### Positive: Same-generation with supplementary
+
+```
+# Original:
+sg(X, Y) :- flat(X, Y).
+sg(X, Y) :- up(X, X1), sg(X1, Y1), down(Y1, Y).
+
+# Query: ?- sg(a, X)
+
+# Supplementary predicates:
+sup_1(X) = magic_sg^bf(X)           # Bound from head
+sup_2(X, X1) = sup_1(X), up(X, X1)  # After evaluating up
+
+# Magic rule:
+magic_sg^bf(X1) :- magic_sg^bf(X), up(X, X1)
+
+# The magic predicate propagates upward from 'a' through 'up'
+# Only same-generation nodes reachable from 'a' are computed
+```
+
+### Positive: SQL recursive CTE
+
+```sql
+-- Find shortest paths from node 1
+WITH RECURSIVE sp(node, dist) AS (
+  SELECT 1, 0
+  UNION ALL
+  SELECT e.dst, sp.dist + e.weight
+  FROM sp JOIN edges e ON sp.node = e.src
+  WHERE sp.dist + e.weight < 100
+)
+SELECT * FROM sp;
+
+-- Magic set equivalent:
+-- magic_sp = {1}  (seed)
+-- magic_sp += {e.dst : e.src IN magic_sp AND ...}  (propagation)
+-- Only explore nodes reachable from 1 within distance 100
+```
+
+### Negative: All-pairs computation
+
+```
+# Query: ?- tc(X, Y)  -- both free (tc^ff)
+# No bound arguments -> magic predicate is universal
+# magic_tc^ff() = true  (matches everything)
+# No benefit: full computation still required
+```
+
+## References
+
+**Original paper:**
+- Bancilhon, F., Maier, D., Sagiv, Y., Ullman, J.D., "Magic Sets and Other Strange Ways to Implement Logic Programs", ACM PODS 1986
+  - DOI: 10.1145/6012.15399
+  - Section 4: "Supplementary magic predicates"
+  - Complete algorithm for magic predicate generation
+
+**Extensions:**
+- Mumick, I.S., Pirahesh, H., Ramakrishnan, R., "The Magic of Duplicates and Aggregates", VLDB 1990
+  - DOI: 10.1145/93597.98738
+  - Extended magic sets for SQL with duplicates and aggregates
+
+- Seshadri, P., et al., "Cost-Based Optimization for Magic: Algebra and Implementation", ACM SIGMOD 1996
+  - DOI: 10.1145/233269.233360
+  - When magic sets help vs. hurt (cost-based decision)
+
+**Implementation in databases:**
+- LogicBlox: Full magic sets with supplementary predicates
+- Datomic: Datalog evaluation with demand-driven computation
+- Souffl: Datalog compiler with magic set transformation

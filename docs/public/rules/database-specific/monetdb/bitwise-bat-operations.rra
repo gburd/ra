@@ -1,0 +1,195 @@
+---
+id: monetdb-bitwise-bat-operations
+name: MonetDB Bitwise BAT Operations
+category: database-specific/monetdb
+databases: [monetdb]
+execution_models: [column-at-a-time]
+version: "1.0.0"
+authors: ["CWI Amsterdam"]
+tags: [bitwise, bat, candidate-list, bitmap, column-store]
+complexity: "O(n/64)"
+benefit_range: [0.3, 10.0]
+---
+
+# MonetDB Bitwise BAT Operations
+
+## Description
+
+Implements selection results as bitmaps (bit-packed candidate lists) and uses
+bitwise AND/OR/NOT operations to combine multiple selection results. Instead of
+materializing full candidate OID lists and performing set intersections, bitmap
+encoding represents selection results as bit vectors where each bit indicates
+whether a row qualifies, enabling O(n/64) combination using CPU word operations.
+
+**When to apply**: Queries with multiple filter predicates on the same table
+(conjunctions and disjunctions). After each predicate produces a candidate list,
+bitmap encoding enables combining them with hardware-efficient bitwise operations
+instead of sorted list merge.
+
+**Why it works**: A candidate list of OIDs (64-bit each) for a 1M-row table
+uses 8MB for full materialization. A bitmap uses only 125KB (1M bits / 8).
+Combining two selections via bitwise AND processes 64 rows per CPU word
+operation, achieving throughput close to memory bandwidth. This is 10-50x
+faster than sorted list intersection for moderate selectivities.
+
+## Relational Algebra
+
+```latex
+-- Before: materialized OID list intersection
+$$
+\cap(
+  \sigma_{age > 21}(scan(users)),     -- OID list: [1, 5, 7, 12, ...]
+  \sigma_{status = "active"}(scan(users))  -- OID list: [1, 3, 5, 9, ...]
+)
+$$
+
+-- After: bitmap AND
+$$
+bitmap-and(
+  bitmap-select[age > 21](scan(users)),     -- bitmap: 10001010001...
+  bitmap-select[status = "active"](scan(users))  -- bitmap: 10101000010...
+) -- result bitmap: 10001000000...
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("monetdb-candlist-to-bitmap";
+    "(intersect
+       (select ?pred1 ?scan1)
+       (select ?pred2 ?scan2))" =>
+    "(bitmap-and
+       (bitmap-select ?pred1 ?scan1)
+       (bitmap-select ?pred2 ?scan2))"
+    if same_base_table("?scan1", "?scan2")
+    if selectivity_moderate("?pred1", "?pred2")
+),
+
+rw!("monetdb-bitmap-or";
+    "(union
+       (select ?pred1 ?scan1)
+       (select ?pred2 ?scan2))" =>
+    "(bitmap-or
+       (bitmap-select ?pred1 ?scan1)
+       (bitmap-select ?pred2 ?scan2))"
+    if same_base_table("?scan1", "?scan2")
+),
+
+rw!("monetdb-bitmap-not";
+    "(except
+       (scan ?table)
+       (select ?pred ?scan))" =>
+    "(bitmap-not
+       (bitmap-select ?pred ?scan))"
+    if same_base_table("?table", "?scan")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> bool {
+    stats.num_predicates >= 2
+        && stats.same_base_table
+        && stats.avg_selectivity > 0.01  // not too selective (OID list cheaper)
+        && stats.avg_selectivity < 0.90  // not too unselective (full scan cheaper)
+}
+```
+
+**Restrictions:**
+- Bitmap encoding wastes memory for very selective predicates (few 1-bits)
+- Very large tables may need compressed bitmaps (roaring bitmaps)
+- Bitmap operations assume dense OID space (no gaps)
+- Converting between bitmap and OID list has overhead
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let n = stats.column_rows as f64;
+    let selectivity_1 = stats.predicate_1_selectivity;
+    let selectivity_2 = stats.predicate_2_selectivity;
+
+    // OID list intersection: merge two sorted lists
+    let list1_size = n * selectivity_1;
+    let list2_size = n * selectivity_2;
+    let merge_cost = (list1_size + list2_size) * 0.001; // per-OID comparison
+
+    // Bitmap AND: process 64 rows per word operation
+    let bitmap_cost = (n / 64.0) * 0.0001; // per-word AND
+    let encode_cost = 2.0 * (n / 64.0) * 0.0002; // encoding both bitmaps
+
+    let total_bitmap = bitmap_cost + encode_cost;
+
+    if merge_cost > total_bitmap {
+        (merge_cost - total_bitmap) / merge_cost
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 30% to 10x for multi-predicate filters at moderate selectivities.
+
+## Test Cases
+
+### Positive: Two-predicate conjunction
+
+```sql
+-- Two predicates on same table
+SELECT * FROM employees
+WHERE age > 30 AND department = 'Engineering';
+
+-- Bitmap approach:
+-- 1. bitmap-select(age > 30)     => 01101001... (50% selectivity)
+-- 2. bitmap-select(dept = 'Eng') => 00100001... (20% selectivity)
+-- 3. bitmap-and                  => 00100001... (10% selectivity)
+-- 4. Fetch matching rows from candidate bitmap
+```
+
+### Positive: Three-predicate disjunction
+
+```sql
+-- OR of three conditions
+SELECT * FROM events
+WHERE type = 'error' OR severity > 8 OR source = 'auth';
+
+-- Bitmap OR of three bitmaps; single pass combination
+-- More efficient than three separate scans with UNION
+```
+
+### Negative: Very selective single predicate
+
+```sql
+-- Only 10 rows match out of 10M
+SELECT * FROM logs WHERE trace_id = 'abc123';
+
+-- Bitmap: 10M bits = 1.25MB, but only 10 bits set
+-- OID list: 10 * 8 bytes = 80 bytes
+-- OID list is dramatically more space-efficient
+```
+
+## References
+
+**Implementation:**
+- MonetDB source: `gdk/gdk_bat.c` (BAT candidate list operations)
+- Bitmap selection: `gdk/gdk_select.c`
+- Candidate list intersection: `gdk/gdk_cand.c`
+
+**Papers:**
+- Boncz, P., et al., "MonetDB/X100: Hyper-Pipelining Query Execution",
+  CIDR 2005
+- Idreos, S., et al., "MonetDB: Two Decades of Research in Column-oriented
+  Database Architectures", IEEE Data Eng. Bull. 2012
+- Wu, K., et al., "Optimizing Bitmap Indices with Efficient Compression",
+  TODS 2006

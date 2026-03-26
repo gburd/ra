@@ -1,0 +1,520 @@
+---
+id: gpu-offloading
+name: GPU-Accelerated Query Processing
+category: execution-models/experimental
+version: "1.0.0"
+databases: [heavydb, blazingsql, postgresql, brytlyt]
+authors: [Sebastian Bress, Bingsheng He, Hannes Muehleisen]
+tags: [execution, experimental, research, gpu, cuda, opencl, heterogeneous, coprocessor]
+complexity: "O(n / GPU_cores)"
+benefit_range: [1.0, 100.0]
+---
+
+# GPU-Accelerated Query Processing
+
+## Description
+
+GPU offloading executes database operators on graphics processing units (GPUs)
+to exploit their massive parallelism for data-parallel operations like scans,
+filters, joins, and aggregations. Modern GPUs have thousands of cores
+(e.g., NVIDIA A100: 6912 CUDA cores) and high memory bandwidth
+(e.g., 2 TB/s HBM2e), making them well-suited for operations that process
+large arrays of data with the same operation applied to each element.
+
+**When to apply**: Large analytical queries (>1M rows) where the dominant
+operators are data-parallel (scan, filter, aggregate, hash join). The query
+must process enough data to amortize the PCIe transfer cost between CPU and
+GPU memory.
+
+**Why it works**: GPUs achieve throughput through massive parallelism rather
+than single-thread performance. A single GPU core runs at ~1-2 GHz (vs. ~4 GHz
+for a CPU core), but with 6912 cores executing in lockstep (warps of 32
+threads), the aggregate throughput for data-parallel operations vastly exceeds
+what a 64-core CPU can achieve. Key advantages:
+- **Memory bandwidth**: GPU HBM at 2 TB/s vs. CPU DDR5 at 100 GB/s (20x)
+- **Parallel reduction**: SUM of 1B values in ~0.5ms on GPU vs. ~100ms on CPU
+- **Bulk filtering**: SIMD-like execution across thousands of threads
+- **Hash table probing**: Massive parallelism for independent lookups
+
+**Architecture model:**
+1. **Host (CPU)**: Query compilation, plan orchestration, result assembly
+2. **Device (GPU)**: Data-parallel operator execution
+3. **PCIe bus**: Data transfer between host and device (16-64 GB/s)
+4. **GPU memory (HBM)**: 40-80 GB on modern GPUs, fast but limited
+5. **Unified memory**: OS-managed page migration (convenience vs. performance)
+
+**Execution patterns:**
+- **Full offload**: Entire query runs on GPU (data resident in GPU memory)
+- **Selective offload**: Only GPU-friendly operators offloaded, others on CPU
+- **Pipelined offload**: Overlap PCIe transfer with GPU computation
+- **Multi-GPU**: Partition data across GPUs for scale-out
+
+## Relational Algebra
+
+```latex
+-- CPU execution:
+$$
+result = Project(Filter(Scan(R), pred), cols)
+$$
+  -- Sequential scan: 100 GB/s bandwidth
+  -- Filter: SIMD on 64 cores
+  -- Project: column extraction
+
+-- GPU execution:
+$$
+gpu_data = PCIeTransfer(R, host_to_device)
+gpu_result = GPU_Kernel {
+  // Thousands of threads, each processes a chunk
+  for each thread t in 0..6912:
+    chunk = gpu_data[t * chunk_size..(t+1) * chunk_size]
+    filtered = filter(chunk, pred)
+    projected = project(filtered, cols)
+    output[t] = projected
+}
+result = PCIeTransfer(gpu_result, device_to_host)
+$$
+
+```
+
+## Implementation
+
+```rust
+/// GPU execution engine for database operators
+pub struct GpuExecutionEngine {
+    /// GPU device handle
+    device: GpuDevice,
+    /// Compiled GPU kernels
+    kernels: HashMap<OperatorType, GpuKernel>,
+    /// GPU memory allocator
+    allocator: GpuAllocator,
+    /// PCIe transfer streams
+    streams: Vec<GpuStream>,
+}
+
+/// Decision: should this operator run on GPU?
+pub fn should_offload_to_gpu(
+    operator: &PhysicalOperator,
+    input_rows: u64,
+    gpu: &GpuDevice,
+) -> OffloadDecision {
+    let data_size = input_rows
+        * operator.tuple_width() as u64;
+
+    // Check if data fits in GPU memory
+    let fits_gpu = data_size < gpu.memory_bytes();
+
+    // Estimate PCIe transfer time
+    let transfer_time_ms =
+        data_size as f64 / gpu.pcie_bandwidth() * 1000.0;
+
+    // Estimate GPU execution time
+    let gpu_exec_ms = match &operator.op_type {
+        OpType::Filter => {
+            input_rows as f64
+                / (gpu.cores as f64 * 1e6) * 1000.0
+        }
+        OpType::HashJoin { build_size, .. } => {
+            let build_ms = *build_size as f64
+                / (gpu.cores as f64 * 0.5e6) * 1000.0;
+            let probe_ms = input_rows as f64
+                / (gpu.cores as f64 * 0.3e6) * 1000.0;
+            build_ms + probe_ms
+        }
+        OpType::Aggregate => {
+            input_rows as f64
+                / (gpu.cores as f64 * 2e6) * 1000.0
+        }
+        _ => return OffloadDecision::CpuOnly,
+    };
+
+    // Estimate CPU execution time
+    let cpu_exec_ms = match &operator.op_type {
+        OpType::Filter => {
+            input_rows as f64 / 1e8 * 1000.0
+        }
+        OpType::HashJoin { build_size, .. } => {
+            (*build_size as f64 + input_rows as f64)
+                / 5e7 * 1000.0
+        }
+        OpType::Aggregate => {
+            input_rows as f64 / 5e7 * 1000.0
+        }
+        _ => return OffloadDecision::CpuOnly,
+    };
+
+    let gpu_total = transfer_time_ms + gpu_exec_ms;
+    let cpu_total = cpu_exec_ms;
+
+    if !fits_gpu {
+        OffloadDecision::CpuOnly
+    } else if gpu_total < cpu_total * 0.7 {
+        // GPU must be at least 30% faster to justify
+        OffloadDecision::GpuOffload {
+            estimated_speedup: cpu_total / gpu_total,
+        }
+    } else {
+        OffloadDecision::CpuOnly
+    }
+}
+
+/// GPU filter kernel (CUDA-style pseudocode)
+pub struct GpuFilterKernel {
+    predicate: GpuPredicate,
+}
+
+impl GpuFilterKernel {
+    /// Launch GPU filter on column data
+    pub fn execute(
+        &self,
+        input: &GpuBuffer,
+        num_rows: u64,
+        stream: &GpuStream,
+    ) -> GpuSelectionVector {
+        let threads_per_block = 256;
+        let num_blocks =
+            (num_rows as usize + threads_per_block - 1)
+            / threads_per_block;
+
+        // Phase 1: Each thread evaluates predicate,
+        // writes 1/0 to flags array
+        let flags = self.allocator.alloc(num_rows as usize);
+        stream.launch_kernel(
+            "filter_eval",
+            num_blocks,
+            threads_per_block,
+            &[input.ptr(), flags.ptr(),
+              self.predicate.ptr(), num_rows],
+        );
+
+        // Phase 2: Parallel prefix sum on flags
+        // to compute output positions
+        let positions =
+            self.allocator.alloc(num_rows as usize * 4);
+        let count =
+            self.allocator.alloc(std::mem::size_of::<u64>());
+        stream.launch_kernel(
+            "prefix_sum",
+            num_blocks,
+            threads_per_block,
+            &[flags.ptr(), positions.ptr(), count.ptr(),
+              num_rows],
+        );
+
+        // Phase 3: Compact qualifying rows
+        // using computed positions
+        let output =
+            self.allocator.alloc(num_rows as usize * 8);
+        stream.launch_kernel(
+            "compact",
+            num_blocks,
+            threads_per_block,
+            &[input.ptr(), flags.ptr(), positions.ptr(),
+              output.ptr(), num_rows],
+        );
+
+        GpuSelectionVector {
+            positions: output,
+            count,
+        }
+    }
+}
+
+/// GPU hash join kernel
+pub struct GpuHashJoinKernel;
+
+impl GpuHashJoinKernel {
+    /// Build hash table on GPU
+    pub fn build(
+        &self,
+        build_keys: &GpuBuffer,
+        build_payloads: &GpuBuffer,
+        num_build: u64,
+        stream: &GpuStream,
+    ) -> GpuHashTable {
+        let ht_size = (num_build * 2) as usize;
+        let ht = self.allocator.alloc(
+            ht_size * std::mem::size_of::<HashEntry>(),
+        );
+
+        let threads_per_block = 256;
+        let num_blocks =
+            (num_build as usize + threads_per_block - 1)
+            / threads_per_block;
+
+        // Each thread inserts one key into hash table
+        // Uses atomic CAS for concurrent insertion
+        stream.launch_kernel(
+            "hash_build",
+            num_blocks,
+            threads_per_block,
+            &[build_keys.ptr(), build_payloads.ptr(),
+              ht.ptr(), ht_size, num_build],
+        );
+
+        GpuHashTable { buffer: ht, size: ht_size }
+    }
+
+    /// Probe hash table on GPU
+    pub fn probe(
+        &self,
+        probe_keys: &GpuBuffer,
+        num_probe: u64,
+        ht: &GpuHashTable,
+        stream: &GpuStream,
+    ) -> GpuBuffer {
+        let threads_per_block = 256;
+        let num_blocks =
+            (num_probe as usize + threads_per_block - 1)
+            / threads_per_block;
+
+        let matches = self.allocator.alloc(
+            num_probe as usize * 8,
+        );
+
+        // Each thread probes one key
+        // Independent lookups: perfect GPU workload
+        stream.launch_kernel(
+            "hash_probe",
+            num_blocks,
+            threads_per_block,
+            &[probe_keys.ptr(), ht.buffer.ptr(),
+              ht.size, matches.ptr(), num_probe],
+        );
+
+        matches
+    }
+}
+
+/// Pipelined CPU-GPU execution with PCIe overlap
+pub struct PipelinedGpuExecutor {
+    cpu_stream: GpuStream,
+    gpu_stream: GpuStream,
+}
+
+impl PipelinedGpuExecutor {
+    /// Overlap transfer and computation
+    pub fn execute_pipelined(
+        &self,
+        input: &ColumnArray,
+        kernel: &GpuFilterKernel,
+        chunk_size: usize,
+    ) -> Vec<u64> {
+        let num_chunks =
+            (input.len + chunk_size - 1) / chunk_size;
+        let mut results = Vec::new();
+
+        // Double buffering: transfer chunk N+1 while
+        // computing on chunk N
+        let mut buf_a = self.allocator.alloc(
+            chunk_size * 8,
+        );
+        let mut buf_b = self.allocator.alloc(
+            chunk_size * 8,
+        );
+
+        for chunk in 0..num_chunks {
+            let offset = chunk * chunk_size;
+            let len = chunk_size.min(
+                input.len - offset,
+            );
+
+            // Transfer current chunk
+            let (current, next) = if chunk % 2 == 0 {
+                (&buf_a, &buf_b)
+            } else {
+                (&buf_b, &buf_a)
+            };
+
+            self.cpu_stream.memcpy_h2d(
+                &input.data[offset * 8..(offset + len) * 8],
+                current,
+            );
+
+            // Synchronize: ensure transfer complete
+            self.cpu_stream.synchronize();
+
+            // Launch kernel on transferred data
+            let sel = kernel.execute(
+                current, len as u64,
+                &self.gpu_stream,
+            );
+
+            // Transfer results back (overlapped with
+            // next chunk's H2D)
+            if chunk > 0 {
+                // Collect previous chunk's results
+                let prev_results = self.gpu_stream
+                    .memcpy_d2h(&sel.positions);
+                results.extend(prev_results);
+            }
+        }
+
+        results
+    }
+}
+```
+
+**Restrictions:**
+- PCIe transfer bottleneck: 16-64 GB/s limits data movement
+- GPU memory limited: 40-80 GB (must partition large tables)
+- Branch divergence: GPU threads in a warp must follow same path
+- String operations: variable-length data is hard to parallelize
+- Random access: hash table probing suffers from memory divergence
+- Kernel launch overhead: ~10us per kernel launch
+- Limited for UPDATE/DELETE (mainly for analytical queries)
+
+## Cost Model
+
+```rust
+fn gpu_offloading_cost(
+    num_rows: u64,
+    tuple_width: usize,
+    gpu_cores: usize,
+    pcie_bandwidth_gbps: f64,
+    gpu_mem_bandwidth_gbps: f64,
+    operation: OperationType,
+) -> GpuCostEstimate {
+    let data_size_gb =
+        num_rows as f64 * tuple_width as f64 / 1e9;
+
+    // Transfer cost
+    let transfer_ms =
+        data_size_gb / pcie_bandwidth_gbps * 1000.0;
+
+    // GPU execution cost (throughput model)
+    let gpu_exec_ms = match operation {
+        OperationType::Filter => {
+            // Memory bandwidth bound
+            data_size_gb / gpu_mem_bandwidth_gbps * 1000.0
+        }
+        OperationType::Aggregate => {
+            // Reduction: log2 depth
+            let reduction_depth =
+                (num_rows as f64).log2();
+            reduction_depth * 0.001 // ~1us per level
+        }
+        OperationType::HashJoin => {
+            // Build + probe, memory latency bound
+            data_size_gb / (gpu_mem_bandwidth_gbps * 0.3)
+                * 1000.0
+        }
+    };
+
+    // CPU baseline
+    let cpu_bandwidth_gbps = 50.0;
+    let cpu_exec_ms =
+        data_size_gb / cpu_bandwidth_gbps * 1000.0;
+
+    GpuCostEstimate {
+        transfer_ms,
+        gpu_exec_ms,
+        gpu_total_ms: transfer_ms + gpu_exec_ms,
+        cpu_exec_ms,
+        speedup: cpu_exec_ms
+            / (transfer_ms + gpu_exec_ms),
+        transfer_fraction: transfer_ms
+            / (transfer_ms + gpu_exec_ms),
+    }
+}
+```
+
+**Typical performance:**
+- Filter on 1B i64 values: GPU 3ms (2TB/s), CPU 80ms (100GB/s) = 27x
+- Hash join probe (100M): GPU 15ms, CPU 500ms = 33x
+- SUM reduction (1B values): GPU 0.5ms, CPU 100ms = 200x
+- PCIe transfer (8GB): ~130ms at 64 GB/s (often dominates)
+- Break-even: ~1M rows for transfer-dominated, ~100K for resident data
+
+## Test Cases
+
+### Positive: Large aggregate query (GPU-resident data)
+
+```sql
+SELECT region, SUM(amount), AVG(price)
+FROM transactions  -- 1 billion rows, resident in GPU memory
+GROUP BY region;   -- 50 groups
+-- GPU: parallel reduction across 6912 cores
+-- 1B reductions in ~0.5ms + group merge
+-- CPU: 1B iterations at 100M/s = 10 seconds
+-- Speedup: ~2000x (no transfer cost since data is GPU-resident)
+```
+
+### Positive: Bulk filter with PCIe pipelining
+
+```sql
+SELECT * FROM events
+WHERE event_type = 3 AND timestamp > '2024-01-01';
+-- 500M rows, 64 bytes each = 32 GB
+-- PCIe transfer: 32 GB / 64 GB/s = 500ms
+-- GPU filter: 32 GB / 2 TB/s = 16ms
+-- With double-buffering: transfer overlaps compute
+-- Effective time: ~530ms GPU vs. ~3200ms CPU (6x)
+```
+
+### Positive: Hash join with large probe side
+
+```sql
+SELECT d.name, SUM(f.amount)
+FROM fact f JOIN dim d ON f.dim_id = d.id
+GROUP BY d.name;
+-- dim: 100K rows (small, build on GPU)
+-- fact: 1B rows (large, probe on GPU)
+-- GPU hash build: 100K entries in <1ms
+-- GPU hash probe: 1B probes at 300M/s = 3.3s
+-- CPU hash probe: 1B probes at 50M/s = 20s
+-- Speedup: ~6x including transfer
+```
+
+### Negative: Small query (transfer dominates)
+
+```sql
+SELECT AVG(price) FROM products WHERE category = 'books';
+-- 10,000 rows, 32 bytes each = 320 KB
+-- PCIe transfer: 320 KB / 64 GB/s = 0.005ms
+-- GPU kernel launch overhead: 0.01ms
+-- GPU compute: 0.0001ms
+-- CPU compute: 0.05ms
+-- GPU overhead exceeds CPU time
+-- Not worth offloading for small data
+```
+
+### Negative: String-heavy operations
+
+```sql
+SELECT * FROM logs
+WHERE message LIKE '%connection refused%'
+ORDER BY timestamp;
+-- Variable-length strings break SIMD/GPU parallelism
+-- Branch divergence: different string lengths per warp
+-- GPU string comparison: 2-5x slower than integer
+-- Sorting variable-length data requires indirection
+-- CPU with SIMD string search may be faster
+```
+
+### Negative: Random access pattern
+
+```sql
+SELECT * FROM orders o
+JOIN customers c ON o.customer_id = c.id
+WHERE c.id IN (SELECT id FROM vip_customers);
+-- VIP customers: scattered random access into orders
+-- GPU random memory access: high latency divergence
+-- Memory coalescing fails for random patterns
+-- CPU with prefetching may handle random access better
+```
+
+## References
+
+**Academic papers:**
+- Bress et al., "GPU-Accelerated Database Systems: Survey and Open Challenges", VLDB 2014
+- He, Yang, Fang, Govindaraju, Luo, "Relational Joins on Graphics Processors", SIGMOD 2008
+- Rui, He, "Efficient Join Algorithms for Large Database Tables in a Multi-GPU Environment", VLDB 2022
+- Chrysogelos et al., "HetExchange: Encapsulating Heterogeneous CPU-GPU Parallelism in JIT Compiled Engines", VLDB 2019
+- Heimel, Saecker, Pirk, Manegold, Markl, "Hardware-Oblivious Parallelism for In-Memory Column-Stores", VLDB 2013
+
+**Implementation:**
+- HeavyDB (formerly MapD/OmniSci): Full GPU-native analytics database
+- BlazingSQL: GPU-accelerated SQL on Apache Arrow
+- PG-Strom: PostgreSQL extension for GPU offloading
+- RAPIDS cuDF: GPU DataFrame operations with SQL interface
+- Brytlyt: GPU-accelerated PostgreSQL

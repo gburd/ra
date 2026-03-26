@@ -1,0 +1,88 @@
+---
+id: expensive-function-caching
+name: Expensive Function Result Caching
+category: logical/function-optimization
+databases: [postgresql, oracle, mssql]
+execution_models: [volcano]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [function, expensive, caching, memoize, deterministic]
+complexity: "O(1) plan transform"
+benefit_range: [0.2, 0.95]
+---
+
+# Expensive Function Result Caching
+
+## Description
+
+Wraps expensive deterministic function calls in a memoization operator
+when the input column has low NDV (many repeated values). The cache maps
+input values to precomputed results, avoiding redundant evaluation.
+
+**When to apply**: A deterministic, expensive function is called on a
+column with NDV much smaller than the row count. The cache hit ratio
+must be high enough to offset the hash-lookup overhead.
+
+**Why it works**: If a column has 100 distinct values but 1M rows, a
+memoized function evaluates at most 100 times instead of 1M times.
+
+## Relational Algebra
+
+```latex
+$$
+\pi_{f(a), ...}(R)
+  \rightarrow \pi_{cache_lookup(f, a), ...}(R)
+  \text{where} is_deterministic(f) && is_expensive(f)
+    && ndv(a) / row_count(R) < 0.01
+$$
+
+```
+
+## Implementation
+
+```rust
+rw!("memoize-expensive-fn";
+    "(apply-fn ?fn ?col)" =>
+    "(memoized-fn ?fn ?col)"
+    if is_deterministic("?fn") && is_expensive("?fn") &&
+       low_ndv_ratio("?col", 0.01)
+),
+```
+
+## Cost Model
+
+```rust
+fn benefit(fn_cost: f64, ndv: u64, row_count: u64) -> f64 {
+    let uncached = row_count as f64 * fn_cost;
+    let cached = ndv as f64 * fn_cost + row_count as f64 * HASH_LOOKUP_COST;
+    (uncached - cached) / uncached
+}
+```
+
+**Typical benefit**: 20-95% when NDV << row_count and function is expensive.
+
+## Test Cases
+
+### Positive: Geocoding on low-cardinality city column
+
+```sql
+-- 50 distinct cities, 1M rows
+SELECT geocode(city) FROM orders;
+
+-- Memoize: 50 geocode calls instead of 1M
+```
+
+### Negative: High-cardinality column
+
+```sql
+-- email is unique per row
+SELECT md5(email) FROM users;
+
+-- NDV = row_count: caching adds overhead with zero hits
+```
+
+## References
+
+- Oracle: Result cache for deterministic functions
+- PostgreSQL: Memoize node (v14+)

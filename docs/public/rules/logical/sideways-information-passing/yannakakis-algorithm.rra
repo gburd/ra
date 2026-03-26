@@ -1,0 +1,130 @@
+---
+id: yannakakis-algorithm
+name: Yannakakis Algorithm for Acyclic Joins
+category: logical/sideways-information-passing
+databases: [postgresql, duckdb, hyper]
+version: "1.0.0"
+authors: ["Yannakakis, Mihalis"]
+tags: [logical, acyclic-join, semi-join, reduction, optimal]
+complexity: O(n + output)
+benefit_range: [0.3, 0.95]
+---
+
+# Yannakakis Algorithm for Acyclic Joins
+
+## Description
+
+For acyclic join queries, the Yannakakis algorithm achieves output-optimal
+evaluation by first performing a semi-join reduction pass (bottom-up then
+top-down through the join tree) to eliminate dangling tuples, then joining
+the reduced relations. The semi-join reduction removes tuples that cannot
+contribute to any result.
+
+**When to apply**: Acyclic natural join queries where dangling tuples are
+a significant fraction of the input.
+
+**Key insight**: Two-pass semi-join reduction (bottom-up then top-down)
+guarantees that every remaining tuple participates in at least one output.
+
+## Relational Algebra
+
+```latex
+-- Relations: R(A,B), S(B,C), T(C,D) with join tree R-S-T
+-- Step 1: Bottom-up semi-join reduction
+$$
+S_reduced = S semi-\bowtie T    -- remove S tuples with no T match
+R_reduced = R semi-\bowtie S_reduced
+$$
+
+-- Step 2: Top-down semi-join reduction
+$$
+S_final = S_reduced semi-\bowtie R_reduced
+T_final = T semi-\bowtie S_final
+$$
+
+-- Step 3: Join reduced relations (no dangling tuples)
+$$
+Result = R_reduced \bowtie S_final \bowtie T_final
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Bottom-up semi-join reduction for a chain join
+rw!("yannakakis-bottom-up-2";
+    "(join (join ?R ?S) ?T)" =>
+    "(join (semijoin ?R (semijoin ?S ?T)) (semijoin ?S ?T))"
+    if is_acyclic_join("?R", "?S", "?T")
+),
+
+// Top-down pass after bottom-up
+rw!("yannakakis-top-down";
+    "(join (semijoin ?R ?S) ?S)" =>
+    "(join (semijoin ?R ?S) (semijoin ?S (semijoin ?R ?S)))"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(join_tree: &JoinTree) -> bool {
+    // Only works for acyclic queries
+    join_tree.is_acyclic()
+        // Semi-join reducibility check (GYO reduction)
+        && join_tree.gyo_reducible()
+        // Benefit only when dangling tuples exist
+        && join_tree.estimated_dangling_ratio() > 0.1
+}
+```
+
+**Restrictions:**
+- Query hypergraph must be acyclic (passes GYO ear-removal test)
+- Does not help if all tuples participate in output
+- Outer joins require modified semi-join semantics
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    relations: &[Relation],
+    dangling_ratio: f64,
+) -> f64 {
+    let total_input: f64 = relations.iter()
+        .map(|r| r.cardinality())
+        .sum();
+    // Benefit proportional to dangling tuples eliminated
+    total_input * dangling_ratio * 0.8
+}
+```
+
+**Typical benefit**: 30-95% for star/snowflake schemas with referential gaps.
+
+## Test Cases
+
+```sql
+-- Positive: chain join with dangling tuples
+SELECT r.a, t.d
+FROM R JOIN S ON R.b = S.b
+       JOIN T ON S.c = T.c;
+-- With R having b values not in S: semi-join reduces R first
+
+-- Positive: star schema
+SELECT f.amount
+FROM facts f
+  JOIN dim_date d ON f.date_id = d.id
+  JOIN dim_product p ON f.prod_id = p.id
+WHERE d.year = 2024;
+
+-- Negative: cyclic join (triangle query)
+SELECT * FROM R, S, T
+WHERE R.a = S.a AND S.b = T.b AND T.c = R.c;
+```
+
+## References
+
+- Yannakakis, M. "Algorithms for Acyclic Database Schemes" (VLDB 1981)
+- Abiteboul, Hull, Vianu. "Foundations of Databases" Ch. 6

@@ -1,0 +1,128 @@
+---
+id: datafusion-filter-pushdown-through-join
+name: DataFusion Filter Pushdown Through Join
+category: database-specific/datafusion
+databases: [datafusion]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, datafusion, filter, pushdown, join, arrow]
+complexity: O(n)
+benefit_range: [0.3, 0.9]
+---
+
+# DataFusion Filter Pushdown Through Join
+
+## Description
+
+Pushes filter predicates below join operators in DataFusion's logical
+optimizer.  DataFusion applies this aggressively because Arrow's
+columnar format benefits from early filtering -- eliminating rows before
+they enter the join avoids materializing unnecessary record batches.
+
+**When to apply**: A filter sits above a join and the predicate
+references columns from only one side of the join.
+
+**Why it works**: DataFusion processes data in Arrow RecordBatches.
+Filtering before the join reduces the number of batches flowing through
+the pipeline and avoids hash table entries for irrelevant rows.
+
+**Database version**: DataFusion 20.0+
+
+## Relational Algebra
+
+```latex
+$$
+\sigma_{p(R)}(R \bowtie_{c} S) \rightarrow \sigma_{p(R)}(R) \bowtie_{c} S
+  \text{where} \text{attrs}(p) \subseteq \text{attrs}(R)
+$$
+
+$$
+\sigma_{p(S)}(R \bowtie_{c} S) \rightarrow R \bowtie_{c} \sigma_{p(S)}(S)
+  \text{where} \text{attrs}(p) \subseteq \text{attrs}(S)
+$$
+
+$$
+\sigma_{p(R) AND p(S)}(R \bowtie_{c} S)
+  \rightarrow \sigma_{p(R)}(R) \bowtie_{c} \sigma_{p(S)}(S)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("datafusion-filter-pushdown-through-join-left";
+    "(filter ?pred (join ?type ?cond ?left ?right))" =>
+    "(join ?type ?cond (filter ?pred ?left) ?right)"
+    if is_database("datafusion")
+    if predicate_references_only("?pred", "?left")
+),
+
+rw!("datafusion-filter-pushdown-through-join-right";
+    "(filter ?pred (join ?type ?cond ?left ?right))" =>
+    "(join ?type ?cond ?left (filter ?pred ?right))"
+    if is_database("datafusion")
+    if predicate_references_only("?pred", "?right")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(pred: &Expr, join_side: &LogicalPlan) -> bool {
+    let pred_cols = pred.column_refs();
+    let side_cols = join_side.schema().columns();
+    pred_cols.is_subset(&side_cols)
+    && pred.is_deterministic()
+}
+```
+
+**Restrictions:**
+- Predicate must reference only columns from one side
+- Non-deterministic predicates remain above the join
+- For outer joins, only the preserved side can receive pushdown
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    selectivity: f64,
+    join_build_rows: f64,
+    batch_size: usize,
+) -> f64 {
+    let batches_eliminated =
+        (1.0 - selectivity) * join_build_rows / batch_size as f64;
+    batches_eliminated * 0.001 // ms per batch avoided
+}
+```
+
+**Typical benefit**: With 10% selectivity, eliminates 90% of hash table
+build work and reduces memory pressure for large joins.
+
+## Test Cases
+
+```sql
+-- Positive: filter on left side pushed below join
+SELECT o.id, c.name
+FROM orders o JOIN customers c ON o.customer_id = c.id
+WHERE o.total > 1000;
+
+-- Plan before: Filter(total > 1000) -> HashJoin -> Scan(orders), Scan(customers)
+-- Plan after:  HashJoin -> Filter(total > 1000) -> Scan(orders), Scan(customers)
+```
+
+```sql
+-- Negative: filter references both sides
+SELECT o.id, c.name
+FROM orders o JOIN customers c ON o.customer_id = c.id
+WHERE o.total > c.credit_limit;
+-- Cannot push below join
+```
+
+## References
+
+DataFusion: datafusion/optimizer/src/push_down_filter.rs
+DataFusion: datafusion/optimizer/src/filter_push_down.rs (legacy)
+Arrow specification: https://arrow.apache.org/docs/format/Columnar.html

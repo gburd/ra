@@ -1,0 +1,116 @@
+---
+id: clustered-index-for-range
+name: Clustered Index for Range Predicates
+category: physical/index-selection
+databases: [postgresql, mysql, mssql, oracle]
+execution_models: [volcano, vectorized]
+hardware: [cpu, ssd, hdd]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [index, clustered, range-scan, sequential-io]
+complexity: "O(log n + k)"
+benefit_range: [0.6, 0.95]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter ?pred (scan ?table))"
+    description: "Range filter on clustered index column"
+  - type: "predicate"
+    condition: "has_clustered_index(?table, columns(?pred))"
+    description: "Clustered index must exist on predicate column"
+  - type: "predicate"
+    condition: "is_range_predicate(?pred)"
+    description: "Predicate must be a range comparison"
+---
+
+# Clustered Index for Range Predicates
+
+## Description
+
+Selects a clustered index when the query contains a range predicate on the
+clustering key columns. Because the table data is physically ordered by the
+clustering key, a range scan reads contiguous pages, converting random I/O
+into sequential I/O.
+
+**When to apply**: Range predicates (BETWEEN, <, >, <=, >=) on the leading
+column(s) of a clustered index, or ORDER BY on the clustering key.
+
+**Why it works**: Clustered indexes store rows in key order. A range scan
+reads a contiguous run of pages, which is far cheaper than random lookups
+through a secondary index followed by heap fetches.
+
+## Relational Algebra
+
+```latex
+$$
+\sigma_{a BETWEEN v1 AND v2}(R)
+  \rightarrow clustered_index_range_scan[I_clustered, a BETWEEN v1 AND v2](R)
+  \text{where} is_clustered(I) && leading_column(I) == a
+$$
+
+```
+
+## Implementation
+
+```rust
+rw!("clustered-range-scan";
+    "(filter (range ?col ?lo ?hi) (scan ?table))" =>
+    "(clustered-index-range-scan ?idx ?col ?lo ?hi)"
+    if has_clustered_index("?table", "?col")
+),
+```
+
+## Cost Model
+
+```rust
+fn cost(selectivity: f64, total_pages: u64) -> f64 {
+    let pages_read = (total_pages as f64 * selectivity).ceil();
+    pages_read * SEQUENTIAL_IO_COST
+}
+
+fn benefit_vs_secondary(selectivity: f64, total_pages: u64, total_rows: u64) -> f64 {
+    let clustered = (total_pages as f64 * selectivity) * SEQUENTIAL_IO_COST;
+    let secondary = (total_rows as f64 * selectivity) * RANDOM_IO_COST;
+    (secondary - clustered) / secondary
+}
+```
+
+**Typical benefit**: 60-95% for medium-to-wide range scans vs secondary index.
+Diminishes as selectivity approaches 100% (full table scan is equivalent).
+
+## Test Cases
+
+### Positive: Date range on clustered column
+
+```sql
+SELECT * FROM events
+WHERE event_date BETWEEN '2025-01-01' AND '2025-03-31'
+ORDER BY event_date;
+
+-- Table clustered on event_date: sequential scan of ~25% of pages
+```
+
+### Positive: Key range with ORDER BY
+
+```sql
+SELECT * FROM orders
+WHERE order_id >= 10000 AND order_id < 20000
+ORDER BY order_id;
+
+-- Clustered on order_id: range scan already sorted
+```
+
+### Negative: Range on non-leading column
+
+```sql
+SELECT * FROM orders
+WHERE amount BETWEEN 100 AND 500;
+
+-- amount is not the clustering key; secondary index may be better
+```
+
+## References
+
+- PostgreSQL: Index-only scans on clustered tables
+- MySQL InnoDB: Primary key clustering
+- mssql: Clustered index seek operator
+- Ramakrishnan & Gehrke, "Database Management Systems", Ch. 8

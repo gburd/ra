@@ -1,0 +1,417 @@
+---
+id: adaptive-indexing
+name: Adaptive Indexing (Database Cracking)
+category: execution-models/experimental
+version: "1.0.0"
+databases: [monetdb, postgresql, duckdb]
+authors: [Stratos Idreos, Martin Kersten, Stefan Manegold]
+tags: [execution, experimental, research, indexing, cracking, adaptive, self-organizing]
+complexity: "O(n) first query, O(log n) convergent"
+benefit_range: [1.0, 50.0]
+---
+
+# Adaptive Indexing (Database Cracking)
+
+## Description
+
+Adaptive indexing (database cracking) is a self-organizing index technique where
+the physical layout of a column is incrementally reorganized as a side effect of
+query processing. Instead of creating indexes upfront (which requires DBA
+intervention and imposes write overhead), cracking physically partitions a
+column array around query predicates. Each range query on a cracked column
+refines the partitioning, converging toward a fully sorted state after
+sufficient queries.
+
+**When to apply**: Column stores with unpredictable query workloads where
+traditional index creation is too expensive or the workload pattern is unknown
+at table load time. Particularly useful for exploratory analytics where users
+issue ad-hoc range queries on different columns.
+
+**Why it works**: The first query on a cracked column performs a full scan
+(O(n)) but also partitions the column into three pieces: values less than the
+predicate, values matching the predicate, and values greater. Subsequent queries
+on overlapping ranges only need to scan within the relevant partition, and they
+further refine it. After k distinct range queries, the column has at most 2k+1
+partitions, and lookups approach O(log n) binary search performance.
+
+**Key concepts:**
+- **Cracker column**: A copy of the original column that gets physically
+  rearranged by queries. The original column remains unchanged.
+- **Cracker index (AVL tree)**: Tracks partition boundaries in the cracker
+  column. Maps pivot values to positions in the physical array.
+- **Crack-in-two**: Given a predicate `col < X`, partition the relevant
+  segment around value X using a single-pass two-pointer swap.
+- **Crack-in-three**: Given `X <= col < Y`, partition the segment into three
+  pieces in a single pass.
+- **Stochastic cracking**: Add random pivots during each query to ensure
+  convergence even with adversarial query patterns.
+- **Sideways cracking**: Maintain correlated cracker columns for multi-column
+  queries (positions stay aligned).
+
+**Convergence properties:**
+- After k uniformly random range queries, expected partition size is O(n/k)
+- After O(n) queries, expected cost per query approaches O(log n)
+- Worst case (adversarial): O(n) per query without stochastic cracking
+- Stochastic cracking guarantees O(n/k) convergence regardless of pattern
+
+## Relational Algebra
+
+```latex
+-- Standard index creation (upfront cost):
+$$
+CreateIndex(R.col)  -- O(n log n) sort
+RangeScan(R.col, lo, hi)  -- O(log n + |result|)
+$$
+
+-- Adaptive indexing (incremental refinement):
+$$
+CrackedScan(R.col, lo, hi):
+  partition = cracker_index.find_covering(lo, hi)
+$$
+  -- Refine partition: physically rearrange
+$$
+  crack_in_three(partition, lo, hi)
+  cracker_index.insert(lo, partition_lo)
+  cracker_index.insert(hi, partition_hi)
+  return partition[lo..hi]
+$$
+
+-- Progressive convergence:
+$$
+Query 1: SELECT * FROM R WHERE col BETWEEN 100 AND 200
+$$
+  -- Full scan + partition around 100, 200
+  -- Cracker: [<100 | 100-200 | >200]
+
+$$
+Query 2: SELECT * FROM R WHERE col BETWEEN 50 AND 150
+$$
+  -- Scan [<100] partition around 50
+  -- Scan [100-200] partition around 150
+  -- Cracker: [<50 | 50-100 | 100-150 | 150-200 | >200]
+
+$$
+Query 3: SELECT * FROM R WHERE col > 180
+$$
+  -- Only scan [150-200] partition around 180
+  -- Cracker: [<50 | 50-100 | 100-150 | 150-180 | 180-200 | >200]
+
+```
+
+## Implementation
+
+```rust
+/// Cracker index: tracks partition boundaries
+pub struct CrackerIndex {
+    /// Physically rearrangeable copy of the column
+    cracker_column: Vec<i64>,
+    /// AVL tree mapping pivot values to positions
+    /// in the cracker column
+    pivots: BTreeMap<i64, usize>,
+    /// Number of crack operations performed
+    crack_count: usize,
+}
+
+impl CrackerIndex {
+    /// Initialize cracker column from base column
+    pub fn new(base_column: &[i64]) -> Self {
+        Self {
+            cracker_column: base_column.to_vec(),
+            pivots: BTreeMap::new(),
+            crack_count: 0,
+        }
+    }
+
+    /// Range query with adaptive cracking
+    pub fn range_query(
+        &mut self,
+        low: i64,
+        high: i64,
+    ) -> &[i64] {
+        // Find covering partition for low bound
+        let (lo_start, lo_end) =
+            self.find_partition(low);
+        // Crack-in-two at low within covering partition
+        let lo_pos = self.crack_in_two(
+            lo_start, lo_end, low,
+        );
+        self.pivots.insert(low, lo_pos);
+
+        // Find covering partition for high bound
+        let (hi_start, hi_end) =
+            self.find_partition(high);
+        // Crack-in-two at high
+        let hi_pos = self.crack_in_two(
+            hi_start, hi_end, high,
+        );
+        self.pivots.insert(high, hi_pos);
+
+        self.crack_count += 1;
+
+        // Return qualifying slice
+        &self.cracker_column[lo_pos..hi_pos]
+    }
+
+    /// Partition segment around pivot value
+    /// Returns position of pivot in the array
+    fn crack_in_two(
+        &mut self,
+        start: usize,
+        end: usize,
+        pivot: i64,
+    ) -> usize {
+        // Two-pointer partitioning (like quicksort)
+        let mut lo = start;
+        let mut hi = end;
+        while lo < hi {
+            while lo < hi
+                && self.cracker_column[lo] < pivot
+            {
+                lo += 1;
+            }
+            hi -= 1;
+            while lo < hi
+                && self.cracker_column[hi] >= pivot
+            {
+                hi -= 1;
+            }
+            if lo < hi {
+                self.cracker_column.swap(lo, hi);
+            }
+        }
+        lo
+    }
+
+    /// Crack-in-three: partition into [<low | low..high | >=high]
+    fn crack_in_three(
+        &mut self,
+        start: usize,
+        end: usize,
+        low: i64,
+        high: i64,
+    ) -> (usize, usize) {
+        let mid = self.crack_in_two(start, end, low);
+        let hi = self.crack_in_two(mid, end, high);
+        (mid, hi)
+    }
+
+    /// Find the partition that covers the given value
+    fn find_partition(
+        &self,
+        value: i64,
+    ) -> (usize, usize) {
+        let start = self.pivots
+            .range(..value)
+            .next_back()
+            .map(|(_, &pos)| pos)
+            .unwrap_or(0);
+        let end = self.pivots
+            .range(value..)
+            .next()
+            .map(|(_, &pos)| pos)
+            .unwrap_or(self.cracker_column.len());
+        (start, end)
+    }
+}
+
+/// Stochastic cracking: add random pivots for convergence
+pub struct StochasticCracker {
+    base: CrackerIndex,
+    rng: StdRng,
+    /// Number of random pivots to add per query
+    random_pivots_per_query: usize,
+}
+
+impl StochasticCracker {
+    pub fn range_query(
+        &mut self,
+        low: i64,
+        high: i64,
+    ) -> &[i64] {
+        // Add random pivots within covering partitions
+        for _ in 0..self.random_pivots_per_query {
+            let (start, end) =
+                self.base.find_partition(low);
+            if end - start > 1 {
+                let random_val = self.rng.gen_range(
+                    self.base.cracker_column[start]
+                    ..self.base.cracker_column[end - 1]
+                );
+                let pos = self.base.crack_in_two(
+                    start, end, random_val,
+                );
+                self.base.pivots.insert(random_val, pos);
+            }
+        }
+
+        self.base.range_query(low, high)
+    }
+}
+
+/// Sideways cracking: maintain correlated columns
+pub struct SidewaysCracker {
+    /// Primary cracked column (drives partitioning)
+    primary: CrackerIndex,
+    /// Secondary columns whose rows follow primary swaps
+    secondary: Vec<Vec<i64>>,
+}
+
+impl SidewaysCracker {
+    /// When primary column swaps positions i and j,
+    /// all secondary columns swap the same positions
+    fn swap_aligned(&mut self, i: usize, j: usize) {
+        self.primary.cracker_column.swap(i, j);
+        for col in &mut self.secondary {
+            col.swap(i, j);
+        }
+    }
+}
+```
+
+**Restrictions:**
+- Only works for range predicates (not arbitrary expressions)
+- First query on a partition is always O(partition_size)
+- Concurrent queries require careful synchronization
+- Updates (inserts/deletes) require pending delta structures
+- Memory overhead: cracker column is a full copy of the base column
+
+## Cost Model
+
+```rust
+fn adaptive_indexing_cost(
+    num_rows: u64,
+    num_queries: u64,
+    query_selectivity: f64,
+) -> CostComparison {
+    // Traditional index
+    let index_build = num_rows as f64
+        * (num_rows as f64).log2() * 5.0; // sort
+    let index_query = (num_rows as f64).log2() * 20.0
+        + num_rows as f64 * query_selectivity * 5.0;
+    let traditional_total = index_build
+        + num_queries as f64 * index_query;
+
+    // Adaptive indexing
+    let first_query = num_rows as f64 * 10.0; // full scan
+    // Subsequent queries: partition shrinks as O(n/k)
+    let mut adaptive_total = first_query;
+    for q in 1..num_queries {
+        let partition_size =
+            num_rows as f64 / (q as f64 + 1.0);
+        let query_cost = partition_size * 10.0
+            + num_rows as f64
+                * query_selectivity * 5.0;
+        adaptive_total += query_cost;
+    }
+
+    CostComparison {
+        traditional_total: traditional_total as u64,
+        adaptive_total: adaptive_total as u64,
+        break_even_queries: (num_rows as f64).sqrt()
+            as u64,
+    }
+}
+```
+
+**Typical performance:**
+- First query: O(n), same as full scan
+- After 10 queries: partitions ~n/10, ~10x faster
+- After sqrt(n) queries: approaches O(sqrt(n)) per query
+- Convergent: after O(n) queries, O(log n) per query
+- Break-even vs. pre-built index: 5-20 queries
+
+## Test Cases
+
+### Positive: Exploratory analytics with range queries
+
+```sql
+-- Analyst exploring sensor data, no indexes pre-built
+-- Query 1: What happened last hour?
+SELECT * FROM sensor_data
+WHERE timestamp BETWEEN '2024-01-01 12:00' AND '2024-01-01 13:00';
+-- First query: full scan of 100M rows
+-- Cracker partitions around 12:00 and 13:00
+
+-- Query 2: Narrow to specific period
+SELECT * FROM sensor_data
+WHERE timestamp BETWEEN '2024-01-01 12:30' AND '2024-01-01 12:45';
+-- Only scans the 12:00-13:00 partition (~1/24th of data)
+-- Further partitions around 12:30 and 12:45
+
+-- Query 3: Different time window
+SELECT * FROM sensor_data
+WHERE timestamp BETWEEN '2024-01-01 12:35' AND '2024-01-01 12:40';
+-- Only scans the 12:30-12:45 partition
+-- Sub-millisecond response on what was 100M rows
+```
+
+### Positive: Replacing DBA index management
+
+```sql
+-- Data warehouse with unpredictable query patterns
+-- No DBA to pre-build indexes; cracking adapts automatically
+SELECT AVG(price) FROM trades WHERE volume > 10000;
+-- Cracks the volume column
+
+SELECT * FROM trades WHERE price BETWEEN 50 AND 100;
+-- Cracks the price column
+
+-- Each column self-organizes based on actual query patterns
+-- No wasted indexes on unqueried columns
+```
+
+### Positive: Stochastic cracking prevents adversarial degradation
+
+```sql
+-- Without stochastic cracking, adversary can force O(n):
+-- Query 1: col < 1, Query 2: col < 2, ...
+-- Each query refines by only 1 element
+
+-- With stochastic cracking: random pivots added each query
+-- Convergence guaranteed: O(n/k) after k queries
+-- Adversarial pattern neutralized by random refinement
+```
+
+### Negative: Point queries (not range)
+
+```sql
+SELECT * FROM users WHERE id = 42;
+-- Cracking optimizes range predicates
+-- Point lookup: first query still O(n) full scan
+-- Subsequent: partitions narrow but never reach O(1) like hash
+-- B-tree or hash index is better for point lookups
+```
+
+### Negative: Write-heavy workloads
+
+```sql
+INSERT INTO sensor_data VALUES (now(), 42.5, 'temp');
+-- Every insert invalidates cracker column partitioning
+-- Must maintain pending inserts in delta structure
+-- Delta merges degrade crack performance
+-- Traditional index handles inserts more naturally
+```
+
+### Negative: Single large query (no repeat access)
+
+```sql
+-- ETL: load data, run one aggregation, discard
+SELECT region, SUM(sales) FROM staging GROUP BY region;
+-- Cracking overhead wasted: no future queries to amortize
+-- Full scan is optimal for one-shot queries
+```
+
+## References
+
+**Academic papers:**
+- Idreos, Kersten, Manegold, "Database Cracking", CIDR 2007
+- Idreos, Kersten, Manegold, "Updating a Cracked Database", SIGMOD 2007
+- Idreos, Kersten, Manegold, "Self-organizing Tuple Reconstruction in Column-stores", SIGMOD 2009
+- Halim, Idreos, et al., "Stochastic Database Cracking: Towards Robust Adaptive Indexing in Main-Memory Column-Stores", VLDB 2012
+- Schuhknecht, Dittrich, Sharma, "The Uncracked Pieces in Database Cracking", VLDB 2014
+- Idreos et al., "The Periodic Table of Data Structures", IEEE Data Eng. Bull. 2018
+
+**Implementation:**
+- MonetDB: Original cracking implementation
+- PostgreSQL: Partial sort-based approaches
+- DuckDB: Adaptive indexing concepts in ART indexes

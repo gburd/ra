@@ -1,0 +1,418 @@
+---
+id: join-cardinality-estimation
+name: "Join Cardinality Estimation"
+category: cost-models
+databases: [postgresql, mysql, oracle, duckdb, mssql, cockroachdb, spark]
+execution_models: [all]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [cost, cardinality, join, estimation, containment, correlation]
+complexity: "O(|join predicates|)"
+benefit_range: [0.3, 0.9]
+---
+
+# Join Cardinality Estimation
+
+## Description
+
+Estimates the output size of join operations using column statistics from
+both sides. Join cardinality estimation is the most error-prone component
+of query optimization: errors compound multiplicatively through a chain of
+joins, and a single bad estimate can cause catastrophic plan selection
+(e.g., choosing nested-loop join for a billion-row intermediate result).
+
+The standard formula for equi-join R.a = S.b is:
+|R join S| = |R| * |S| / max(NDV(R.a), NDV(S.b))
+
+This assumes the containment assumption (smaller domain is a subset of
+the larger) and uniform distribution. Real-world violations include:
+foreign keys with gaps, many-to-many relationships, and join key
+correlation with filter predicates.
+
+**When to apply**: Every join in the query plan tree. Join ordering depends
+entirely on accurate join cardinality estimates.
+
+**Why it works**: The containment and uniformity assumptions provide a
+reasonable baseline for most foreign-key joins. Enhanced techniques (join
+histograms, sketches, functional dependencies) improve accuracy for
+harder cases.
+
+## Relational Algebra
+
+```latex
+$$
+Equi-\bowtie:
+  \text{Card}(R \bowtie_{a=b} S) = \text{Card}(R) * \text{Card}(S) / \text{max}(\text{NDV}(R.a), \text{NDV}(S.b))
+$$
+
+$$
+Multi-column equi-\bowtie:
+  \text{Card}(R \bowtie_{a1=b1 AND a2=b2} S) =
+    \text{Card}(R) * \text{Card}(S) / (\text{max}(\text{NDV}(a1),\text{NDV}(b1)) * \text{max}(\text{NDV}(a2),\text{NDV}(b2)))
+$$
+
+$$
+Foreign key \bowtie (R.fk references S.pk):
+  \text{Card}(R \bowtie S) = \text{Card}(R)  (each R row matches exactly one S row)
+$$
+
+$$
+Self-\bowtie:
+  \text{Card}(R \bowtie_{a=b} R) = \text{Card}(R)^2 / \text{NDV}(R.a)  (if a and b same column)
+$$
+
+$$
+Semi-\bowtie:
+  \text{Card}(R semi\bowtie_{a=b} S) = \text{Card}(R) * (1 - (1 - 1/\text{NDV}(S.b))^\text{NDV}(R.a))
+  Approximation: \text{Card}(R) * \text{min}(\text{NDV}(R.a), \text{NDV}(S.b)) / \text{NDV}(R.a)
+$$
+
+$$
+Anti-\bowtie:
+  \text{Card}(R anti\bowtie_{a=b} S) = \text{Card}(R) - \text{Card}(R semijoin S)
+$$
+
+$$
+Theta-\bowtie:
+  \text{Card}(R \bowtie_{a < b} S) = \text{Card}(R) * \text{Card}(S) * theta_selectivity
+  Default theta_selectivity: 1/3 for inequality
+$$
+
+```
+
+## Implementation
+
+```rust
+use ra_stats::{ColumnStats, TableStats, JoinStats};
+
+struct JoinCardinalityEstimator {
+    stats: HashMap<String, TableStats>,
+}
+
+impl JoinCardinalityEstimator {
+    fn estimate(
+        &self,
+        left: &RelExpr,
+        right: &RelExpr,
+        predicate: &JoinPredicate,
+        join_type: JoinType,
+    ) -> JoinEstimate {
+        let left_card = self.input_cardinality(left);
+        let right_card = self.input_cardinality(right);
+
+        let inner_card = match predicate {
+            JoinPredicate::Equi(cols) => {
+                self.equi_join_card(left, right, cols, left_card, right_card)
+            }
+            JoinPredicate::MultiEqui(col_pairs) => {
+                self.multi_equi_join_card(
+                    left, right, col_pairs, left_card, right_card,
+                )
+            }
+            JoinPredicate::Theta { op, left_col, right_col } => {
+                self.theta_join_card(
+                    *op, left_card, right_card, left_col, right_col,
+                    left, right,
+                )
+            }
+            JoinPredicate::Cross => left_card * right_card,
+        };
+
+        let output_card = match join_type {
+            JoinType::Inner => inner_card,
+            JoinType::Left => inner_card.max(left_card),
+            JoinType::Right => inner_card.max(right_card),
+            JoinType::Full => {
+                left_card + right_card - inner_card.min(left_card).min(right_card)
+            }
+            JoinType::Semi => {
+                self.semi_join_card(left, right, predicate, left_card)
+            }
+            JoinType::Anti => {
+                left_card - self.semi_join_card(left, right, predicate, left_card)
+            }
+        };
+
+        JoinEstimate {
+            cardinality: output_card.max(1.0),
+            confidence: self.estimate_confidence(predicate, left, right),
+        }
+    }
+
+    fn equi_join_card(
+        &self,
+        left: &RelExpr,
+        right: &RelExpr,
+        cols: &(String, String),
+        left_card: f64,
+        right_card: f64,
+    ) -> f64 {
+        let left_ndv = self.ndv(&cols.0, left) as f64;
+        let right_ndv = self.ndv(&cols.1, right) as f64;
+
+        // Check for foreign key relationship
+        if self.is_foreign_key(&cols.0, &cols.1, left, right) {
+            return left_card; // FK join preserves referencing side
+        }
+        if self.is_foreign_key(&cols.1, &cols.0, right, left) {
+            return right_card;
+        }
+
+        // Standard containment formula
+        left_card * right_card / left_ndv.max(right_ndv).max(1.0)
+    }
+
+    fn multi_equi_join_card(
+        &self,
+        left: &RelExpr,
+        right: &RelExpr,
+        col_pairs: &[(String, String)],
+        left_card: f64,
+        right_card: f64,
+    ) -> f64 {
+        // Product of selectivities for each column pair
+        let mut selectivity_product = 1.0;
+        for (lcol, rcol) in col_pairs {
+            let left_ndv = self.ndv(lcol, left) as f64;
+            let right_ndv = self.ndv(rcol, right) as f64;
+            selectivity_product /= left_ndv.max(right_ndv).max(1.0);
+        }
+        left_card * right_card * selectivity_product
+    }
+
+    fn theta_join_card(
+        &self,
+        op: ComparisonOp,
+        left_card: f64,
+        right_card: f64,
+        left_col: &str,
+        right_col: &str,
+        left: &RelExpr,
+        right: &RelExpr,
+    ) -> f64 {
+        let selectivity = match op {
+            ComparisonOp::Lt | ComparisonOp::Gt => {
+                // Use histogram overlap if available
+                if let Some(sel) = self.histogram_theta_selectivity(
+                    left_col, right_col, op, left, right,
+                ) {
+                    sel
+                } else {
+                    1.0 / 3.0 // Default: 1/3 of cross product
+                }
+            }
+            ComparisonOp::Le | ComparisonOp::Ge => {
+                1.0 / 3.0 + 1.0 / self.ndv(left_col, left).max(1) as f64
+            }
+            ComparisonOp::Ne => {
+                1.0 - 1.0 / self.ndv(left_col, left)
+                    .max(self.ndv(right_col, right))
+                    .max(1) as f64
+            }
+        };
+
+        left_card * right_card * selectivity
+    }
+
+    fn semi_join_card(
+        &self,
+        left: &RelExpr,
+        right: &RelExpr,
+        predicate: &JoinPredicate,
+        left_card: f64,
+    ) -> f64 {
+        match predicate {
+            JoinPredicate::Equi(cols) => {
+                let left_ndv = self.ndv(&cols.0, left) as f64;
+                let right_ndv = self.ndv(&cols.1, right) as f64;
+
+                // Fraction of left values that appear in right
+                let match_fraction =
+                    right_ndv.min(left_ndv) / left_ndv;
+                left_card * match_fraction
+            }
+            _ => left_card * 0.5, // Default: half of left matches
+        }
+    }
+
+    fn histogram_theta_selectivity(
+        &self,
+        left_col: &str,
+        right_col: &str,
+        op: ComparisonOp,
+        left: &RelExpr,
+        right: &RelExpr,
+    ) -> Option<f64> {
+        let left_hist = self.histogram(left_col, left)?;
+        let right_hist = self.histogram(right_col, right)?;
+
+        // Compute fraction of (l, r) pairs where l < r
+        let mut qualifying = 0.0;
+        let total = left_hist.total_rows * right_hist.total_rows;
+
+        for l_bucket in &left_hist.buckets {
+            for r_bucket in &right_hist.buckets {
+                let overlap = match op {
+                    ComparisonOp::Lt => {
+                        if l_bucket.upper < r_bucket.lower {
+                            1.0 // Fully qualifying
+                        } else if l_bucket.lower >= r_bucket.upper {
+                            0.0
+                        } else {
+                            0.5 // Partial overlap
+                        }
+                    }
+                    _ => 0.33,
+                };
+                qualifying += l_bucket.count * r_bucket.count * overlap;
+            }
+        }
+
+        Some(qualifying / total)
+    }
+
+    fn estimate_confidence(
+        &self,
+        predicate: &JoinPredicate,
+        left: &RelExpr,
+        right: &RelExpr,
+    ) -> f64 {
+        match predicate {
+            JoinPredicate::Equi(cols) => {
+                if self.is_foreign_key(&cols.0, &cols.1, left, right) {
+                    0.95 // FK joins are highly predictable
+                } else if self.has_histogram(&cols.0, left)
+                    && self.has_histogram(&cols.1, right)
+                {
+                    0.7 // Histograms help
+                } else {
+                    0.4 // NDV-only estimate
+                }
+            }
+            JoinPredicate::Cross => 1.0,
+            _ => 0.3, // Low confidence for non-equi joins
+        }
+    }
+}
+
+struct JoinEstimate {
+    cardinality: f64,
+    confidence: f64,
+}
+```
+
+**Restrictions:**
+- Independence assumption for multi-column join predicates
+- Containment assumption may be wrong for disjoint domains
+- Uniformity assumption fails for skewed join keys
+- Does not handle correlated filters (filter on left affects join key distribution)
+- Functional dependencies not tracked
+
+## Cost Model
+
+```rust
+fn join_estimate_error_impact(
+    estimated_join_card: f64,
+    true_join_card: f64,
+    downstream_operators: usize,
+) -> f64 {
+    // Errors compound through downstream operators
+    let q_error = if estimated_join_card > true_join_card {
+        estimated_join_card / true_join_card
+    } else {
+        true_join_card / estimated_join_card
+    };
+
+    // Each downstream join amplifies the error
+    let compounded = q_error.powf(downstream_operators as f64);
+    compounded
+}
+```
+
+**Typical benefit**: Accurate join cardinality estimation improves plan
+quality by 30-90%. The biggest wins come from correctly estimating
+multi-way join order for 4+ table queries.
+
+## Test Cases
+
+### Test 1: Foreign key join
+
+```sql
+SELECT * FROM orders o JOIN customers c ON o.cust_id = c.id;
+-- orders: 10M rows, customers: 500K rows
+-- FK: orders.cust_id references customers.id
+-- Card = 10M (each order has exactly one customer)
+```
+
+### Test 2: Many-to-many join
+
+```sql
+SELECT * FROM students s JOIN enrollments e ON s.id = e.student_id
+JOIN courses c ON e.course_id = c.id;
+-- students: 50K, enrollments: 500K, courses: 2K
+-- Card(s join e) = 50K * 500K / max(50K, 50K) = 500K (correct: each enrollment matches)
+-- Card((s join e) join c) = 500K * 2K / max(2K, 2K) = 500K
+```
+
+### Test 3: Skewed join key
+
+```sql
+SELECT * FROM orders o JOIN customers c ON o.cust_id = c.id
+WHERE c.type = 'enterprise';
+-- Enterprise customers: 1% of 500K = 5K
+-- But enterprise customers have 50% of orders
+-- NDV-based estimate: 10M * 5K / 500K = 100K
+-- True: 5M (enterprise customers order 100x more)
+-- 50x underestimate due to skew
+```
+
+### Test 4: Semi-join estimation
+
+```sql
+SELECT * FROM products p WHERE EXISTS (
+    SELECT 1 FROM order_items oi WHERE oi.product_id = p.id
+);
+-- products: 100K, NDV(product_id in order_items) = 80K
+-- Semi-join card: 100K * min(80K, 100K) / 100K = 80K
+-- 80% of products have been ordered
+```
+
+### Test 5: Anti-join estimation
+
+```sql
+SELECT * FROM products p WHERE NOT EXISTS (
+    SELECT 1 FROM order_items oi WHERE oi.product_id = p.id
+);
+-- Anti-join card: 100K - 80K = 20K
+-- 20% of products never ordered
+```
+
+### Test 6: Multi-column join
+
+```sql
+SELECT * FROM flights f JOIN reservations r
+ON f.flight_id = r.flight_id AND f.date = r.date;
+-- flights: 1M, reservations: 10M
+-- NDV(flight_id): 100K, NDV(date): 365
+-- Card = 1M * 10M / (100K * 365) = 274K
+-- Assumes flight_id and date are independent in join
+```
+
+## References
+
+**Foundational:**
+- Selinger et al., "Access Path Selection in a RDBMS", SIGMOD 1979
+- Ioannidis & Christodoulakis, "On the Propagation of Errors in the Size of Join Results", SIGMOD 1991
+
+**Error analysis:**
+- Leis et al., "How Good Are Query Optimizers, Really?", VLDB 2015
+- Moerkotte et al., "Preventing Bad Plans by Bounding the Impact of Cardinality Estimation Errors", VLDB 2009
+
+**Advanced techniques:**
+- Alon, Matias, Szegedy, "The Space Complexity of Approximating the Frequency Moments", STOC 1996 (sketches)
+- Cai, Balazinska, Suciu, "Pessimistic Cardinality Estimation", SIGMOD 2019
+
+**Implementations:**
+- PostgreSQL: `src/backend/optimizer/util/clausesel.c` (clause_selectivity)
+- Oracle: `DBMS_STATS.GATHER_TABLE_STATS` (method_opt => 'FOR ALL COLUMNS')
+- DuckDB: statistics propagation framework

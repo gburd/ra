@@ -1,0 +1,165 @@
+---
+id: two-phase-aggregation
+name: Two-Phase Aggregation
+category: physical/aggregation-strategies
+databases: [postgresql, mysql, duckdb, sqlite, clickhouse, cockroachdb, mssql, oracle]
+execution_models: [volcano, vectorized]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [aggregation, parallel, distributed]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+preconditions:
+  - type: "pattern"
+    must_match: "(aggregate ?input ?groups ?aggs)"
+    description: "Two-phase (partial + final) aggregation"
+  - type: "predicate"
+    condition: "all_decomposable(?aggs)"
+    description: "All aggregate functions must be decomposable (SUM, COUNT, MIN, MAX)"
+  - type: "fact"
+    fact_type: "statistics.cardinality"
+    table: "?input"
+    comparator: ">"
+    threshold: 100000
+    optional: true
+    description: "Input large enough to benefit from two-phase approach"
+---
+
+# Two-Phase Aggregation
+
+## Metadata
+- **Rule ID**: `two-phase-aggregation`
+- **Category**: Physical / Aggregation Strategies
+- **Complexity**: O(n) with reduced memory pressure
+- **Introduced**: Distributed database systems (1990s)
+- **Prerequisites**: Decomposable aggregate functions
+- **Alternatives**: hash-aggregation, three-phase-aggregation
+
+## Description
+
+Two-phase aggregation splits aggregation into local partial aggregation followed by global final aggregation. Reduces data volume before expensive operations.
+
+**When to use:**
+- Distributed/parallel execution
+- High data volume with moderate groups
+- Memory pressure from large input
+- Network bandwidth limited
+
+**Advantages:**
+- Reduces data volume early
+- Better memory efficiency
+- Enables parallelization
+- Lower network traffic (distributed)
+
+**Disadvantages:**
+- Only works for decomposable aggregates (SUM, COUNT, MIN, MAX)
+- Two passes overhead
+- More complex than single-phase
+
+## Relational Algebra
+
+```
+γ_{g; AGG(v)}(R)
+→ γ_{g; FINAL_AGG(partial)}(γ_{g; PARTIAL_AGG(v)}(R))
+
+Examples:
+- SUM: PARTIAL_SUM → FINAL_SUM (sum of sums)
+- COUNT: PARTIAL_COUNT → FINAL_SUM (sum of counts)
+- AVG: (PARTIAL_SUM, PARTIAL_COUNT) → FINAL_SUM/FINAL_SUM
+```
+
+## Implementation
+
+```rust
+pub struct TwoPhaseAggregation {
+    input: Box<dyn Operator>,
+    group_cols: Vec<usize>,
+    agg_funcs: Vec<AggregateFunction>,
+    phase: Phase,
+}
+
+enum Phase {
+    Partial(HashMap<GroupKey, PartialState>),
+    Final(HashMap<GroupKey, FinalState>),
+}
+
+impl Operator for TwoPhaseAggregation {
+    fn next(&mut self) -> Option<Tuple> {
+        match &mut self.phase {
+            Phase::Partial(partial_map) => {
+                // Phase 1: Partial aggregation
+                while let Some(tuple) = self.input.next() {
+                    let key = self.extract_group_key(&tuple);
+                    let entry = partial_map.entry(key).or_insert_with(|| self.init_partial());
+                    self.update_partial(entry, &tuple);
+                }
+
+                // Switch to final phase
+                let final_map = self.finalize_partials(std::mem::take(partial_map));
+                self.phase = Phase::Final(final_map);
+                self.next()
+            }
+            Phase::Final(final_map) => {
+                // Phase 2: Emit final results
+                final_map.drain().next().map(|(key, state)| {
+                    self.emit_final(key, state)
+                })
+            }
+        }
+    }
+}
+```
+
+## Cost Model
+
+```rust
+pub fn cost_two_phase_aggregation(
+    input_card: u64,
+    group_card: u64,
+    reduction_factor: f64, // Typical: 0.1-0.5
+) -> Cost {
+    // Phase 1: Partial aggregation
+    let partial_cost = Cost::cpu(input_card * 10);
+    let partial_output = (group_card as f64 * reduction_factor) as u64;
+
+    // Phase 2: Final aggregation
+    let final_cost = Cost::cpu(partial_output * 10);
+
+    partial_cost + final_cost
+}
+```
+
+## Test Cases
+
+### Test 1: SUM decomposition
+```sql
+-- Logical: SUM(amount)
+-- Physical: SUM(PARTIAL_SUM(amount))
+
+SELECT product, SUM(amount)
+FROM sales
+GROUP BY product;
+
+-- Phase 1: Each partition computes PARTIAL_SUM
+-- Phase 2: Combine PARTIAL_SUMs into final SUM
+```
+
+### Test 2: AVG decomposition
+```sql
+SELECT product, AVG(amount)
+FROM sales
+GROUP BY product;
+
+-- Phase 1: Each partition computes (PARTIAL_SUM, PARTIAL_COUNT)
+-- Phase 2: FINAL_SUM(PARTIAL_SUM) / FINAL_SUM(PARTIAL_COUNT)
+```
+
+## References
+
+1. **Hellerstein & Stonebraker**: "Readings in Database Systems" (Red Book)
+2. **Spark**: Two-phase aggregation in distributed execution
+3. **Presto**: Partial/final aggregation stages
+
+## Tags
+`physical`, `aggregation`, `two-phase`, `distributed`, `decomposable`

@@ -1,0 +1,171 @@
+---
+id: choose-exchange-type
+name: Choose Optimal Exchange Type
+category: distributed/exchange-placement
+databases: [presto, trino, spark, greenplum]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, exchange, broadcast, shuffle, gather, cost]
+complexity: O(1)
+benefit_range: [0.2, 0.8]
+---
+
+# Choose Optimal Exchange Type
+
+## Description
+
+Selects between broadcast, hash-repartition, and gather exchanges based
+on cost estimation. For each location where an exchange is needed, the
+optimizer compares the cost of available strategies and picks the cheapest
+one.
+
+**When to apply**: An exchange operator has been determined necessary
+but the specific type (broadcast vs shuffle vs gather) has not been
+chosen, or a default choice can be improved.
+
+**Why it works**: Different exchange types have different cost profiles.
+Broadcasting is cheap for small tables but expensive for large ones.
+Shuffling is always proportional to data size but avoids the N-times
+replication cost. Choosing correctly avoids either OOM from broadcasting
+a large table or unnecessary shuffle of a small table.
+
+## Relational Algebra
+
+```latex
+$$
+Exchange[?](R) \rightarrow Exchange[broadcast](R)
+  \text{where} |R| < broadcast_threshold
+  \text{where} |R| * num_nodes < network_budget
+$$
+
+$$
+Exchange[?](R) \rightarrow Exchange[hash(k)](R)
+  \text{where} |R| >= broadcast_threshold
+$$
+
+$$
+Exchange[?](R) \rightarrow Exchange[gather](R)
+  \text{where} output must be singleton
+$$
+
+```
+
+## Implementation
+
+```rust
+fn choose_exchange(
+    required: &Distribution,
+    child: &RelNode,
+    config: &DistributedConfig,
+) -> ExchangeType {
+    match required {
+        Distribution::Singleton => ExchangeType::Gather,
+        Distribution::Replicated => ExchangeType::Broadcast,
+        Distribution::HashPartitioned(keys) => {
+            let child_bytes = child.estimated_size_bytes();
+            if child_bytes
+                < config.broadcast_threshold_bytes
+            {
+                ExchangeType::Broadcast
+            } else {
+                ExchangeType::HashPartition(keys.clone())
+            }
+        }
+        Distribution::Any => {
+            // No exchange needed
+            ExchangeType::None
+        }
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable() -> bool {
+    // Always applicable when an exchange is needed
+    true
+}
+```
+
+**Restrictions:**
+- Broadcast threshold is a configuration parameter (typical: 10MB-1GB)
+- Cardinality estimates must be accurate; wrong estimates lead to bad
+  exchange type choices (a broadcast of a 100GB table causes OOM)
+- Some operators have hard requirements (e.g., global sort requires
+  gather, hash join requires hash partition or broadcast)
+
+## Cost Model
+
+```rust
+fn exchange_cost(
+    exchange_type: &ExchangeType,
+    data_bytes: f64,
+    num_nodes: u32,
+    network_bandwidth: f64,
+) -> f64 {
+    match exchange_type {
+        ExchangeType::Broadcast => {
+            // Send full copy to every node
+            data_bytes * num_nodes as f64 / network_bandwidth
+        }
+        ExchangeType::HashPartition(_) => {
+            // Each row sent to one of N nodes
+            let fraction =
+                (num_nodes - 1) as f64 / num_nodes as f64;
+            data_bytes * fraction / network_bandwidth
+        }
+        ExchangeType::Gather => {
+            // All data to one node
+            data_bytes / network_bandwidth
+        }
+        ExchangeType::None => 0.0,
+    }
+}
+```
+
+**Crossover point**: Broadcast is cheaper than shuffle when:
+`|small| * N < |large| * (N-1)/N`
+Simplifies to: `|small| < |large| * (N-1)/N^2`
+
+## Test Cases
+
+```sql
+-- Positive: small table -> broadcast
+-- dim_countries: 200 rows, 10KB
+-- Broadcast: 10KB * 100 nodes = 1MB
+-- Shuffle: irrelevant, broadcast is cheaper
+
+-- Exchange chosen: broadcast
+```
+
+```sql
+-- Positive: large table -> hash partition
+-- orders: 100M rows, 50GB
+-- Broadcast: 50GB * 100 = 5TB (infeasible)
+-- Shuffle: 50GB * 99/100 = 49.5GB
+
+-- Exchange chosen: hash partition
+```
+
+```sql
+-- Positive: final aggregation -> gather
+-- partial_result: 1000 rows (one per group per node)
+-- Must merge on coordinator
+
+-- Exchange chosen: gather
+```
+
+```sql
+-- Edge case: table near broadcast threshold
+-- mid_table: 500MB (threshold is 512MB)
+-- Marginal: broadcast sends 50GB to 100 nodes
+-- Shuffle sends ~495MB
+-- Cost model comparison determines the choice
+```
+
+## References
+
+Presto/Trino: presto-main/src/main/java/com/facebook/presto/sql/planner/optimizations/DetermineJoinDistributionType.java
+Spark SQL: sql/core/src/main/scala/org/apache/spark/sql/execution/SparkStrategies.scala - JoinSelection
+Greenplum: src/backend/cdb/cdbllize.c - choose_motion_type()

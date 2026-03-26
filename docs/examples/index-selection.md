@@ -109,24 +109,30 @@ Limit(100)
 ## Running the Example
 
 ```bash
-# Analyze index usage
-ra-cli analyze-indexes \
+# Optimize with index awareness
+ra-cli optimize \
   "SELECT o.order_id, o.order_date, c.name, c.email \
    FROM orders o JOIN customers c ON o.customer_id = c.id \
    WHERE o.status = 'pending' AND o.order_date >= '2024-01-01' \
    AND c.country = 'USA' \
    ORDER BY o.order_date DESC LIMIT 100"
 
-# Suggest missing indexes
-ra-cli suggest-indexes \
-  --workload queries.sql \
-  --output suggested_indexes.sql
+# View which indexes would be used
+ra-cli explain \
+  "SELECT o.order_id, o.order_date, c.name, c.email \
+   FROM orders o JOIN customers c ON o.customer_id = c.id \
+   WHERE o.status = 'pending' AND o.order_date >= '2024-01-01' \
+   AND c.country = 'USA' \
+   ORDER BY o.order_date DESC LIMIT 100"
 
-# Compare plans with/without indexes
-ra-cli compare \
-  --with-indexes \
-  --without-indexes \
-  "YOUR_QUERY"
+# Compare original vs optimized plan
+ra-cli optimize \
+  --diff side-by-side \
+  "SELECT o.order_id, o.order_date, c.name, c.email \
+   FROM orders o JOIN customers c ON o.customer_id = c.id \
+   WHERE o.status = 'pending' AND o.order_date >= '2024-01-01' \
+   AND c.country = 'USA' \
+   ORDER BY o.order_date DESC LIMIT 100"
 ```
 
 ## Index Selection Strategies
@@ -190,23 +196,13 @@ Real-world improvements from proper index selection:
 
 ## Advanced Features
 
-### Index Advisor
+### Index Selection
 
-RA can suggest new indexes based on workload:
-
-```bash
-# Analyze query workload
-ra-cli advisor \
-  --workload production_queries.log \
-  --constraints "max_indexes=10,max_space=1GB"
-
-# Output:
-# Recommended indexes (ranked by benefit):
-# 1. CREATE INDEX idx_orders_opt1 ON orders(status, order_date)
-#    INCLUDE (order_id, customer_id);
-#    Benefit: 45% workload improvement
-#    Space: 120MB
-```
+RA automatically selects the most efficient indexes during optimization based on:
+- Predicate selectivity
+- Index coverage
+- Access patterns
+- Cost estimates
 
 ### Index Intersection
 

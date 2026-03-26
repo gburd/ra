@@ -1,0 +1,111 @@
+---
+id: retention-policy-pruning
+name: Retention Policy Pruning
+category: multi-model/timeseries
+databases: [influxdb, timescaledb, clickhouse]
+standard: "flux:2"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [timeseries, retention, pruning, lifecycle]
+---
+
+# Retention Policy Pruning
+
+## Description
+
+Eliminates query branches that would access data beyond the retention
+policy boundary. When a query's time range extends past the configured
+retention period, the optimizer truncates the range to the retention
+boundary, since older data has been (or will be) dropped by the
+retention policy.
+
+**When to apply**: A query's time range extends before the retention
+policy start, and the system guarantees that data beyond retention has
+been purged.
+
+**Why it works**: Retention policies automatically delete data older
+than a configured threshold. Querying for data that no longer exists
+wastes I/O on empty or non-existent chunks. Truncating the time range
+to the retention boundary avoids these wasted reads.
+
+## Relational Algebra
+
+```latex
+$$
+\sigma_{ts >= t1 AND ts < t2}(scan(table))
+  \rightarrow \sigma_{ts >= \text{max}(t1, retention_start) AND ts < t2}(scan(table))
+  \text{where} t1 < retention_start
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("retention-policy-pruning";
+    "(filter (and (ge ?ts ?t1) (lt ?ts ?t2)) \
+       (ts-scan ?table))" =>
+    "(filter (and (ge ?ts (retention-start ?table)) \
+                  (lt ?ts ?t2)) \
+       (ts-scan ?table))"
+    if before_retention("?table", "?t1")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    table: &str,
+    lower_bound: &Expr,
+    catalog: &RetentionCatalog,
+) -> bool {
+    let retention = catalog.retention_for(table);
+    retention.map_or(false, |r| {
+        lower_bound.as_timestamp() < Some(r.start_time())
+    })
+}
+```
+
+**Restrictions:**
+- Retention policy must be enforced (not just configured)
+- Data beyond retention must actually be deleted, not just marked
+- Does not apply when retention is disabled or set to infinity
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    original_chunks: f64,
+    pruned_chunks: f64,
+) -> f64 {
+    pruned_chunks / original_chunks
+}
+```
+
+**Typical benefit**: Depends on how far the query extends past retention.
+
+## Test Cases
+
+```sql
+-- Positive: query extends before retention (30 days)
+SELECT avg(temperature)
+FROM sensor_data
+WHERE time >= '2020-01-01' AND time < '2025-03-17';
+-- Retention is 30 days; truncates to:
+-- WHERE time >= '2025-02-15' AND time < '2025-03-17'
+
+-- Negative: query within retention window
+SELECT avg(temperature)
+FROM sensor_data
+WHERE time >= '2025-03-01' AND time < '2025-03-17';
+-- No pruning needed; fully within retention
+```
+
+## References
+
+InfluxDB: docs.influxdata.com/influxdb/v2.0/reference/internals/data-retention
+TimescaleDB: src/chunk.c - ts_chunk_do_drop_chunks()
+Jensen et al. "Time Series Management Systems" (IEEE TKDE 2017)

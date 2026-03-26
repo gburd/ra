@@ -1,0 +1,172 @@
+---
+id: semi-join-reduction
+name: Distributed Semi-Join Reduction
+category: distributed/distributed-joins
+databases: [presto, trino, spark, cockroachdb, greenplum]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, join, semi-join, bloom-filter, reduction]
+complexity: O(n)
+benefit_range: [0.2, 0.8]
+---
+
+# Distributed Semi-Join Reduction
+
+## Description
+
+Before performing a full distributed join, sends a compact summary
+(bloom filter or hash set) of the smaller side's join keys to the nodes
+holding the larger side. The larger side pre-filters rows that cannot
+possibly match, reducing the data that enters the shuffle.
+
+This is also known as "dynamic filtering" in Presto/Trino and "runtime
+filter" in Spark SQL.
+
+**When to apply**: One side of the join is significantly smaller than
+the other, and a significant fraction of the larger side will not match.
+
+**Why it works**: If 90% of the large side has no match in the small
+side, a bloom filter check eliminates 90% of rows before they enter the
+network shuffle. The cost of building and distributing the filter is
+small compared to the savings.
+
+## Relational Algebra
+
+```latex
+$$
+Join[c](R, S) \rightarrow
+  let bf = BloomFilter(\pi_{k_S}(S))
+  Join[c](\sigma_{k_R IN bf}(R), S)
+  \text{where} |S| << |R|
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("semi-join-reduction";
+    "(join inner ?cond ?large ?small)" =>
+    "(join inner ?cond
+        (bloom_filter_probe ?large ?join_key_large
+            (bloom_filter_build ?small ?join_key_small))
+        ?small)"
+    if is_selective_join("?large", "?small", "?cond")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    large: &RelNode,
+    small: &RelNode,
+    join_selectivity: f64,
+) -> bool {
+    let ratio = large.estimated_cardinality() as f64
+        / small.estimated_cardinality() as f64;
+    // Large side should be significantly bigger
+    ratio > 10.0
+    // Join should be selective (many large-side rows won't match)
+    && join_selectivity < 0.5
+    // Bloom filter size must be reasonable
+    && small.estimated_cardinality() < 10_000_000
+}
+```
+
+**Restrictions:**
+- Bloom filters have false positives, so this is a heuristic reduction,
+  not exact
+- Building the bloom filter from the small side adds latency to the
+  critical path
+- Only applicable to equi-joins
+- In Presto/Trino, dynamic filters are pushed into table scans for
+  maximum benefit (connector-level filtering)
+
+## Cost Model
+
+```rust
+fn semi_join_reduction_benefit(
+    large_rows: f64,
+    large_bytes: f64,
+    small_rows: f64,
+    join_selectivity: f64,
+    bf_fpp: f64,
+    num_nodes: u32,
+    network_bandwidth: f64,
+) -> f64 {
+    // Bloom filter size
+    let bf_bytes = small_rows * 10.0; // ~10 bits per element
+    let bf_distribute_cost =
+        bf_bytes * num_nodes as f64 / network_bandwidth;
+
+    // Rows passing the bloom filter
+    let matching = large_rows * join_selectivity;
+    let false_positives =
+        (large_rows - matching) * bf_fpp;
+    let rows_after_filter = matching + false_positives;
+
+    // Network savings
+    let shuffle_fraction =
+        (num_nodes - 1) as f64 / num_nodes as f64;
+    let original_cost =
+        large_bytes * shuffle_fraction / network_bandwidth;
+    let reduced_cost =
+        (rows_after_filter / large_rows) * large_bytes
+        * shuffle_fraction / network_bandwidth;
+
+    original_cost - reduced_cost - bf_distribute_cost
+}
+```
+
+**Typical benefit**: For a 10:1 size ratio and 10% selectivity, reduces
+large-side shuffle by ~89% minus bloom filter overhead.
+
+## Test Cases
+
+```sql
+-- Positive: Presto dynamic filter on partitioned table
+SELECT o.*, c.name
+FROM orders o                           -- 1B rows, partitioned by date
+JOIN (SELECT * FROM customers
+      WHERE region = 'APAC') c          -- 100K rows after filter
+  ON o.customer_id = c.id;
+
+-- Plan:
+-- HashJoin(o.customer_id = c.id)
+--   DynamicFilterScan(orders, bloom(customer_id))
+--     <- bloom filter from filtered customers
+--   Exchange[broadcast]
+--     Filter(region = 'APAC')
+--       Scan(customers)
+```
+
+```sql
+-- Positive: Spark runtime filter pushed to scan
+-- spark.sql.optimizer.dynamicPartitionPruning.enabled = true
+SELECT * FROM fact_sales f
+JOIN dim_date d ON f.date_key = d.key
+WHERE d.year = 2024;
+
+-- Plan:
+-- HashJoin
+--   Scan(fact_sales, runtime_filter(date_key))
+--   Exchange[broadcast]
+--     Filter(year = 2024)
+--       Scan(dim_date)
+```
+
+```sql
+-- Negative: both sides large, no selective filter
+SELECT * FROM orders o JOIN items i ON o.id = i.order_id;
+-- 1:N with no reduction opportunity -> normal shuffle
+```
+
+## References
+
+Presto/Trino: presto-main/src/main/java/com/facebook/presto/sql/planner/optimizations/AddDynamicFilters.java
+Spark SQL: sql/catalyst/src/main/scala/org/apache/spark/sql/execution/dynamicpruning/PlanDynamicPruningFilters.scala
+Bernstein & Goodman, "Power of Natural Semijoins" (SIAM J. Computing 1981)
+Mackert & Lohman, "R* Optimizer Validation and Performance Evaluation for Distributed Queries" (VLDB 1986)

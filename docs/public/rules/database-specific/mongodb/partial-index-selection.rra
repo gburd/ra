@@ -1,0 +1,179 @@
+---
+id: mongodb-partial-index-selection
+name: MongoDB Partial Index Selection
+category: database-specific/mongodb
+databases: [mongodb]
+execution_models: [pipeline]
+version: "1.0.0"
+authors: ["MongoDB Inc."]
+tags: [index, partial, filtered, sparse, query-planning]
+complexity: "O(log n)"
+benefit_range: [0.2, 5.0]
+---
+
+# MongoDB Partial Index Selection
+
+## Description
+
+Selects partial indexes when the query predicate is a superset of (or matches)
+the index's filter expression. Partial indexes only index documents that match
+a specified filter, making them smaller, faster to update, and more cache-friendly
+than full indexes.
+
+**When to apply**: Queries whose predicates logically imply the partial index
+filter. The planner checks if the query's `$match` conditions subsume the
+index's `partialFilterExpression`, and if so, uses the smaller partial index.
+
+**Why it works**: A partial index on `{status: "active"}` is typically 10-100x
+smaller than a full index when most documents are inactive. Using the partial
+index reduces I/O, fits more of the index in RAM, and reduces maintenance cost
+for writes to documents outside the filter.
+
+## Relational Algebra
+
+```latex
+-- Full index scan (indexes all documents)
+$$
+\sigma_{status = "active" AND age > 21}(
+  index-scan(idx_full, bounds(age > 21)))
+$$
+
+-- Partial index scan (indexes only active documents)
+$$
+\sigma_{status = "active" AND age > 21}(
+  index-scan(idx_partial_active, bounds(age > 21)))
+$$
+
+-- idx_partial_active has partialFilterExpression: {status: "active"}
+-- Smaller index, same results for this query
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mongodb-select-partial-index";
+    "(filter ?pred
+       (index-scan ?full-idx ?bounds))" =>
+    "(filter ?pred
+       (index-scan ?partial-idx (adjust-bounds ?bounds ?partial-filter)))"
+    if partial_index_covers_query("?partial-idx", "?pred")
+    if partial_index_smaller("?partial-idx", "?full-idx")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> bool {
+    stats.has_partial_index
+        && stats.query_implies_partial_filter
+        && stats.partial_index_selectivity < stats.full_index_selectivity
+}
+```
+
+**Restrictions:**
+- Query predicate must logically imply the partial filter expression
+- Partial indexes cannot be used for queries that may match documents
+  outside the filter
+- Compound partial indexes: all predicates in the filter must be implied
+- `$exists: true` in partial filter requires field presence in query
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let full_index_size = stats.full_index_size_bytes as f64;
+    let partial_index_size = stats.partial_index_size_bytes as f64;
+    let cache_size = stats.available_cache_bytes as f64;
+
+    // I/O benefit: smaller index, more fits in cache
+    let full_cache_ratio = (cache_size / full_index_size).min(1.0);
+    let partial_cache_ratio = (cache_size / partial_index_size).min(1.0);
+
+    // Scan benefit: fewer keys to traverse
+    let size_ratio = partial_index_size / full_index_size;
+
+    // Combined benefit
+    (1.0 - size_ratio) + (partial_cache_ratio - full_cache_ratio)
+}
+```
+
+**Typical benefit**: 20% to 5x when partial filter is highly selective.
+
+## Test Cases
+
+### Positive: Partial index on active records
+
+```javascript
+// Partial index: only indexes active orders
+db.orders.createIndex(
+  {customer_id: 1, order_date: -1},
+  {partialFilterExpression: {status: "active"}}
+)
+
+// Query matches partial filter
+db.orders.find({
+  status: "active",
+  customer_id: "C123",
+  order_date: {$gte: ISODate("2024-01-01")}
+})
+
+// Planner selects partial index (indexes 5% of collection)
+// explain: IXSCAN with partial index
+```
+
+### Positive: TTL-like partial index
+
+```javascript
+// Index only non-expired sessions
+db.sessions.createIndex(
+  {user_id: 1},
+  {partialFilterExpression: {expires_at: {$gt: ISODate("2024-01-01")}}}
+)
+
+// Only queries on non-expired sessions use this index
+db.sessions.find({
+  user_id: "user_456",
+  expires_at: {$gt: ISODate("2024-06-01")}
+})
+// ISODate("2024-06-01") > ISODate("2024-01-01"), so query implies filter
+```
+
+### Negative: Query does not imply partial filter
+
+```javascript
+// Partial index with filter: {status: "active"}
+db.orders.createIndex(
+  {customer_id: 1},
+  {partialFilterExpression: {status: "active"}}
+)
+
+// Query without status predicate: CANNOT use partial index
+db.orders.find({customer_id: "C123"})
+// May include inactive orders not in the partial index
+// Falls back to full index or collection scan
+```
+
+## References
+
+**Implementation:**
+- MongoDB source: `src/mongo/db/query/planner_access.cpp`
+- Partial filter matching: `QueryPlannerAccess::handleFilteredIndex()`
+- Index catalog: `src/mongo/db/catalog/index_catalog_impl.cpp`
+
+**Documentation:**
+- MongoDB Manual: "Partial Indexes"
+  - https://docs.mongodb.com/manual/core/index-partial/
+
+**Related papers:**
+- Stonebraker, M., "The Case for Partial Indexes", 1989
+  - Original proposal for filtered/partial indexes in POSTGRES

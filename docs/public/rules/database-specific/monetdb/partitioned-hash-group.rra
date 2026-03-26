@@ -1,0 +1,121 @@
+---
+id: monetdb-partitioned-hash-group
+name: MonetDB Partitioned Hash Group-By
+category: database-specific/monetdb
+databases: [monetdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, monetdb, group-by, hash, partition, aggregation]
+complexity: O(n)
+benefit_range: [0.2, 0.6]
+---
+
+# MonetDB Partitioned Hash Group-By
+
+## Description
+
+MonetDB implements GROUP BY using hash-based grouping on BAT columns.
+For large group-by operations, the hash table is partitioned to fit
+in CPU cache.  Each partition is processed independently, and partial
+aggregates are merged.  This avoids cache thrashing for high-
+cardinality grouping.
+
+**When to apply**: A GROUP BY operation on a high-cardinality column
+produces a hash table that exceeds L2/L3 cache.
+
+**Why it works**: Random access to a hash table larger than cache
+causes frequent cache misses.  Partitioning ensures each sub-table
+fits in cache, converting random access to sequential access within
+each partition.
+
+**Database version**: MonetDB 11+
+
+## Relational Algebra
+
+```latex
+-- Before: single hash group-by
+$$
+\gamma_{city; SUM(amount)}(scan(sales))
+$$
+
+-- After: partitioned hash group-by
+$$
+merge-aggregates(
+    \gamma_{city; SUM(amount)}(partition_1(sales)),
+    \gamma_{city; SUM(amount)}(partition_2(sales)),
+    ...
+)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("monetdb-partitioned-hash-group";
+    "(aggregate ?group_cols ?aggs (scan ?table))" =>
+    "(merge-partial-aggregates
+        (par-aggregate ?group_cols ?aggs
+            (partition ?table ?group_cols)))"
+    if is_database("monetdb")
+    if group_cardinality_exceeds_cache("?group_cols")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    group_cols: &[Column],
+    estimated_groups: f64,
+) -> bool {
+    let hash_table_bytes = estimated_groups * 64.0;
+    hash_table_bytes > l2_cache_size()
+}
+```
+
+**Restrictions:**
+- Partitioning adds overhead; only beneficial when hash table
+  exceeds cache
+- Requires algebraically decomposable aggregation functions
+  (SUM, COUNT, MIN, MAX, AVG via SUM+COUNT)
+- DISTINCT aggregates require additional deduplication per partition
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    rows: f64,
+    groups: f64,
+    cache_miss_cost: f64,
+) -> f64 {
+    let unpartitioned_misses = rows * cache_miss_cost;
+    let partitioned_misses = rows * cache_miss_cost * 0.1;
+    unpartitioned_misses - partitioned_misses
+}
+```
+
+**Typical benefit**: 2-5x for high-cardinality GROUP BY that
+exceeds cache.
+
+## Test Cases
+
+```sql
+-- Positive: high-cardinality group-by
+SELECT user_id, SUM(amount) FROM transactions GROUP BY user_id;
+-- Millions of users; partitioned hash group-by
+```
+
+```sql
+-- Negative: low-cardinality group-by
+SELECT status, COUNT(*) FROM orders GROUP BY status;
+-- Few statuses; hash table fits in cache; no partitioning needed
+```
+
+## References
+
+Manegold, S. et al. "Optimizing Main-Memory Join on Modern Hardware"
+(TKDE 2002)
+Source: monetdb5/modules/kernel/aggr.c

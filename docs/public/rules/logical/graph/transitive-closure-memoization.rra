@@ -1,0 +1,31 @@
+---
+id: transitive-closure-memoization
+name: "Transitive Closure Memoization"
+category: logical/graph
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [academic, optimization]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# Transitive Closure Memoization
+
+## Description
+
+Caches transitive closure results
+
+## Implementation
+
+Add implementation details for Transitive Closure Memoization
+
+## Tests
+
+Add test cases for this optimization
+
+## References
+
+- Paper: Transitive Closure Optimization

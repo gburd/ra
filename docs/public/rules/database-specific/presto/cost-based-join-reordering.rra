@@ -1,0 +1,38 @@
+---
+id: presto-cost-based-join-reordering
+name: Cost-Based Join Reordering (Presto)
+category: database-specific/presto
+databases: [presto]
+execution_models: [volcano, vectorized, push-based]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific]
+complexity: "O(n!) bounded by heuristics"
+benefit_range: [0.3, 0.7]
+---
+
+# Cost-Based Join Reordering (Presto)
+
+## Metadata
+- **Rule ID**: `presto-cost-based-join-reordering`
+- **Category**: Database-Specific / Presto
+- **Source**: Presto/Trino CostBasedOptimizer
+- **Complexity**: O(n\!) bounded by heuristics
+
+## Description
+
+Presto uses table statistics and cost estimates to reorder joins, choosing the optimal join tree using dynamic programming with pruning.
+
+## Relational Algebra
+
+```
+(R ⋈ S) ⋈ T
+→ (R ⋈ T) ⋈ S  if cost((R ⋈ T) ⋈ S) < cost((R ⋈ S) ⋈ T)
+```
+
+## References
+1. **Presto Source**: CostBasedOptimizer.java
+
+## Tags
+`database-specific`, `presto`, `join-reordering`, `cost-based`, `statistics`

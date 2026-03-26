@@ -1,0 +1,149 @@
+---
+id: datafusion-eliminate-unnecessary-sort
+name: DataFusion Eliminate Unnecessary Sort
+category: database-specific/datafusion
+databases: [datafusion]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, datafusion, sort, elimination, ordering, physical]
+complexity: O(n)
+benefit_range: [0.2, 0.7]
+---
+
+# DataFusion Eliminate Unnecessary Sort
+
+## Description
+
+Removes sort operators when the input is already sorted in the required
+order.  DataFusion's `EnforceSorting` physical optimizer pass tracks
+output orderings through the plan and removes redundant sort nodes.
+
+**When to apply**: A sort operator's required ordering is already
+satisfied by its input's output ordering.
+
+**Why it works**: Sorting Arrow RecordBatches is expensive: it requires
+computing sort indices, then scattering rows into a new batch.
+Eliminating unnecessary sorts avoids this O(n log n) operation and
+the associated memory allocation.
+
+**Database version**: DataFusion 25.0+
+
+## Relational Algebra
+
+```latex
+-- Before: redundant sort
+$$
+sort[k ASC](sort[k ASC](R))
+$$
+
+-- After: single sort
+$$
+sort[k ASC](R)
+$$
+
+-- Before: sort matches index order
+$$
+sort[k ASC](scan(T, ordered_by=[k ASC]))
+$$
+
+-- After: sort removed
+$$
+scan(T, ordered_by=[k ASC])
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("datafusion-eliminate-redundant-sort";
+    "(sort ?keys (sort ?keys ?input))" =>
+    "(sort ?keys ?input)"
+    if is_database("datafusion")
+),
+
+rw!("datafusion-eliminate-sort-on-ordered-input";
+    "(sort ?keys (scan-ordered ?table ?keys))" =>
+    "(scan-ordered ?table ?keys)"
+    if is_database("datafusion")
+),
+
+rw!("datafusion-sort-prefix-elimination";
+    "(sort ?keys ?input)" =>
+    "?input"
+    if is_database("datafusion")
+    if output_ordering_satisfies("?input", "?keys")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    required_ordering: &[SortExpr],
+    input_ordering: Option<&[SortExpr]>,
+) -> bool {
+    input_ordering.map_or(false, |existing| {
+        ordering_satisfies(existing, required_ordering)
+    })
+}
+
+fn ordering_satisfies(
+    existing: &[SortExpr],
+    required: &[SortExpr],
+) -> bool {
+    required.len() <= existing.len()
+    && required.iter().zip(existing).all(|(r, e)| {
+        r.expr == e.expr && r.options == e.options
+    })
+}
+```
+
+**Restrictions:**
+- Must compare exact ordering (column, direction, nulls-first/last)
+- A prefix match is sufficient (sorted by [a, b] satisfies [a])
+- Cannot eliminate sorts that establish a new ordering
+
+## Cost Model
+
+```rust
+fn sort_elimination_benefit(rows: f64, num_columns: usize) -> f64 {
+    // Avoided: sort key computation + permutation + batch scatter
+    rows * rows.log2() * num_columns as f64 * 0.01
+}
+```
+
+**Typical benefit**: Eliminating a sort on 1M rows saves ~100ms of CPU
+and avoids allocating a temporary copy of the data.
+
+## Test Cases
+
+```sql
+-- Positive: ORDER BY on already-sorted Parquet
+SELECT * FROM events ORDER BY event_time;
+-- Parquet files written in event_time order; sort eliminated
+```
+
+```sql
+-- Positive: double ORDER BY
+SELECT * FROM (
+    SELECT * FROM events ORDER BY event_time
+) ORDER BY event_time;
+-- Inner sort already satisfies outer
+```
+
+```sql
+-- Negative: different sort orders
+SELECT * FROM (
+    SELECT * FROM events ORDER BY event_time ASC
+) ORDER BY event_time DESC;
+-- Descending requires re-sort
+```
+
+## References
+
+DataFusion: datafusion/physical-optimizer/src/enforce_sorting/mod.rs
+DataFusion: datafusion/physical-optimizer/src/enforce_sorting/sort_pushdown.rs
+DataFusion: datafusion/physical-expr/src/equivalence/ordering.rs

@@ -1,0 +1,162 @@
+---
+id: lookup-join
+name: Distributed Lookup Join
+category: distributed/distributed-joins
+databases: [cockroachdb, citus, presto, trino]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, join, lookup, index, point-query]
+complexity: O(n)
+benefit_range: [0.3, 0.9]
+---
+
+# Distributed Lookup Join
+
+## Description
+
+Converts a distributed hash join into a series of point lookups from the
+probe side into the build side, using the build side's primary or
+secondary index. Instead of shuffling all data, the probe side streams
+rows and for each row fetches matching rows from the remote node that
+holds the relevant partition of the build side.
+
+**When to apply**: One side of the join has an index on the join key and
+the other side is relatively small or already filtered. The number of
+lookups should be small enough that point-query latency is acceptable.
+
+**Why it works**: A shuffle join moves O(|R| + |S|) data across the
+network. A lookup join moves O(|probe| * avg_matches) data, which is
+much less when the probe side is small and selectivity is high.
+
+## Relational Algebra
+
+```latex
+$$
+Join[c](R, Exchange[hash(k)](S))
+  \rightarrow LookupJoin[c, index(S, k)](R, S)
+  \text{where} |R| is small
+  \text{where} S has index on k
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("shuffle-to-lookup-join";
+    "(join inner ?cond
+        ?probe
+        (exchange hash_partition ?build ?bkeys))" =>
+    "(lookup_join inner ?cond ?probe ?build ?bkeys)"
+    if has_index("?build", "?bkeys")
+    if is_selective_probe("?probe")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    probe: &RelNode,
+    build: &RelNode,
+    build_keys: &[Column],
+    max_probe_rows: u64,
+) -> bool {
+    // Build side must have an index on the join key
+    build.has_index_on(build_keys)
+    // Probe side should be small enough for point lookups
+    && probe.estimated_cardinality() < max_probe_rows
+    // Benefit only if probe is much smaller than build
+    && probe.estimated_cardinality() * 10
+        < build.estimated_cardinality()
+}
+```
+
+**Restrictions:**
+- Build side must have a suitable index (primary key, secondary index)
+- Probe side must be small relative to the build side
+- Each lookup incurs network round-trip latency; high probe cardinality
+  makes lookup joins slower than shuffle joins
+- Not applicable for non-equi join conditions
+- In CockroachDB, lookup joins can be batched to amortize latency
+
+## Cost Model
+
+```rust
+fn lookup_vs_shuffle_cost(
+    probe_rows: f64,
+    build_rows: f64,
+    build_bytes: f64,
+    avg_matches: f64,
+    num_nodes: u32,
+    rtt_latency_ms: f64,
+    batch_size: u32,
+    network_bandwidth: f64,
+) -> (f64, f64) {
+    // Lookup join: batched RPCs
+    let num_batches = (probe_rows / batch_size as f64).ceil();
+    let lookup_latency = num_batches * rtt_latency_ms;
+    let lookup_transfer =
+        probe_rows * avg_matches * 100.0; // avg row bytes
+    let lookup_cost =
+        lookup_latency + lookup_transfer / network_bandwidth;
+
+    // Shuffle join: repartition build side
+    let shuffle_fraction =
+        (num_nodes - 1) as f64 / num_nodes as f64;
+    let shuffle_cost =
+        build_bytes * shuffle_fraction / network_bandwidth;
+
+    (lookup_cost, shuffle_cost)
+}
+```
+
+**Typical benefit**: For a filtered probe of 1K rows against a 100M-row
+indexed table, lookup join transfers ~100KB vs shuffling ~50GB.
+
+## Test Cases
+
+```sql
+-- Positive: small probe into large indexed table
+SELECT o.*, c.name
+FROM (SELECT * FROM orders WHERE id IN (1, 2, 3)) o
+JOIN customers c ON o.customer_id = c.id;
+-- 3 lookups into customers index on id
+
+-- Plan:
+-- LookupJoin(o.customer_id = c.id, index: customers_pkey)
+--   Filter(id IN (1,2,3))
+--     Scan(orders)
+--   -- customers accessed via index
+```
+
+```sql
+-- Positive: CockroachDB batched lookup
+SELECT * FROM orders o
+JOIN customers c ON o.customer_id = c.id
+WHERE o.created_at > '2024-01-01';
+-- If filter reduces orders to ~10K rows, lookup is cheaper
+
+-- Plan:
+-- LookupJoin(batch_size=100)
+--   Filter(created_at > '2024-01-01')
+--     Scan(orders)
+--   Scan(customers@primary)
+```
+
+```sql
+-- Negative: probe side too large
+SELECT o.*, c.name
+FROM orders o        -- 100M rows
+JOIN customers c ON o.customer_id = c.id;
+-- 100M lookups would be far slower than a shuffle join
+```
+
+## References
+
+CockroachDB: pkg/sql/opt/xform/join_funcs.go - GenerateLookupJoins()
+CockroachDB blog: "How CockroachDB Does Distributed, Atomic Transactions"
+Presto/Trino: Nested loop joins with dynamic filtering
+Citus: src/backend/distributed/planner/multi_router_planner.c

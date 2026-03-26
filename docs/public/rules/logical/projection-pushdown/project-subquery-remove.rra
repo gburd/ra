@@ -1,0 +1,94 @@
+---
+id: calcite-project-subquery-remove
+name: Project Subquery to Correlate
+category: logical/projection-pushdown
+databases: [calcite, postgresql, mysql, oracle]
+version: "1.0.0"
+authors: ["Apache Calcite"]
+tags: [logical, calcite, projection, subquery, decorrelation]
+complexity: O(n)
+benefit_range: [0.1, 0.8]
+---
+
+# Project Subquery to Correlate
+
+## Description
+
+Converts scalar subqueries in a projection list into correlated joins,
+enabling the optimizer to decorrelate them later. Direct scalar subquery
+execution is N+1 (one execution per outer row); converting to a join
+allows batch processing.
+
+**When to apply**: A Project contains a scalar subquery expression.
+
+## Relational Algebra
+
+```latex
+-- Before
+$$
+\pi_{a, (SELECT MAX(b) FROM T2 WHERE T2.fk = T1.id)}(T1)
+$$
+
+-- After
+$$
+\pi_{a, T2_max.b}(LeftJoin(T1, \gamma_{fk; MAX(b)}(T2), T1.id = T2_max.fk))
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw\!("project-subquery-to-correlate";
+    "(project ?exprs_with_subquery ?input)" =>
+    "(project ?exprs_cleaned
+        (left-join ?input
+            (aggregate ?group ?agg ?subquery_input)
+            ?join_cond))"
+    if has_scalar_subquery("?exprs_with_subquery")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(project: &Project) -> bool {
+    project.expressions().iter().any(|e| e.contains_scalar_subquery())
+}
+```
+
+**Restrictions:**
+- Subquery must be scalar (returns at most one row)
+- Correlated variables must reference outer columns
+
+## Cost Model
+
+```rust
+fn estimated_benefit(outer_rows: f64, inner_scan_cost: f64) -> f64 {
+    let n_plus_1_cost = outer_rows * inner_scan_cost;
+    let join_cost = outer_rows.max(inner_scan_cost) * 1.5;
+    (n_plus_1_cost - join_cost) / n_plus_1_cost
+}
+```
+
+**Typical benefit**: 10-80% by eliminating N+1 execution.
+
+## Test Cases
+
+```sql
+-- Positive: scalar subquery in SELECT
+SELECT e.name,
+       (SELECT d.name FROM departments d WHERE d.id = e.dept_id) AS dept_name
+FROM employees e;
+-- Converted to LEFT JOIN
+
+-- Negative: no subquery
+SELECT name, salary FROM employees;
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/SubQueryRemoveRule.java
+- Seshadri et al., "Cost-Based Optimization of Decision Support Queries using Transient Views", SIGMOD 1996

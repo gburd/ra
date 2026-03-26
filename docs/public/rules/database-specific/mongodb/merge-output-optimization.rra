@@ -1,0 +1,172 @@
+---
+id: mongodb-merge-output-optimization
+name: MongoDB $merge Incremental Output Optimization
+category: database-specific/mongodb
+databases: [mongodb]
+execution_models: [pipeline]
+version: "1.0.0"
+authors: ["MongoDB Inc."]
+tags: [merge, output, incremental, materialized-view, pipeline]
+complexity: "O(k) per batch"
+benefit_range: [0.3, 10.0]
+---
+
+# MongoDB $merge Incremental Output Optimization
+
+## Description
+
+Optimizes `$merge` output stages by converting full-replace materialization into
+incremental upserts. When a pipeline writes results to an output collection using
+`$merge`, the optimizer determines if results can be incrementally merged (upsert
+matching documents, insert new ones) rather than dropping and replacing the entire
+output collection.
+
+**When to apply**: Pipelines using `$merge` with `whenMatched: "merge"` or
+`whenMatched: "replace"` where the pipeline is re-run on updated source data.
+The optimizer rewrites the output stage to use bulk upsert operations keyed
+on the `on` field(s).
+
+**Why it works**: Full replacement (`$out`) requires writing the entire result
+set each time. `$merge` with upsert semantics only writes changed or new
+documents. For incremental refreshes where <10% of results change, this is
+10x+ faster than full replacement.
+
+## Relational Algebra
+
+```latex
+-- $out: full replacement (drop + insert)
+$$
+drop(output) ; insert(output, pipeline_result)
+$$
+
+-- $merge: incremental upsert
+$$
+for each doc in pipeline_result:
+  upsert(output, on=doc._id, doc)
+$$
+
+-- Optimized $merge: bulk batched upsert
+$$
+bulk-upsert(output, on=_id, pipeline_result, batch_size=1000)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mongodb-out-to-merge";
+    "(pipeline ?stages (out ?output-coll))" =>
+    "(pipeline ?stages (merge ?output-coll
+       (on _id)
+       (when-matched replace)
+       (when-not-matched insert)))"
+    if output_collection_exists("?output-coll")
+    if has_unique_key("?output-coll", "_id")
+),
+
+rw!("mongodb-merge-batch-optimization";
+    "(merge ?coll ?on ?when-matched ?when-not-matched)" =>
+    "(merge-batched ?coll ?on ?when-matched ?when-not-matched
+       (batch-size 1000))"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> bool {
+    stats.has_merge_stage
+        && stats.output_collection_exists
+        && stats.merge_on_fields_indexed
+        && stats.estimated_change_ratio < 0.5
+}
+```
+
+**Restrictions:**
+- `on` fields must have a unique index in the output collection
+- `whenMatched: "pipeline"` with `$merge` cannot always be batched
+- Sharded output collections require shard key in `on` fields
+- Transactions across source and output collections have limitations
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let total_results = stats.pipeline_result_count as f64;
+    let change_ratio = stats.estimated_change_ratio;
+    let changed_docs = total_results * change_ratio;
+
+    // Full replacement cost
+    let full_replace_cost = total_results * 0.01; // write each doc
+
+    // Incremental merge cost
+    let merge_cost = changed_docs * 0.015; // upsert slightly more expensive
+
+    if full_replace_cost > merge_cost {
+        (full_replace_cost - merge_cost) / full_replace_cost
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 30% to 10x for incremental refresh of materialized views.
+
+## Test Cases
+
+### Positive: Incremental materialized view refresh
+
+```javascript
+// Materialized view of daily sales summaries
+db.orders.aggregate([
+  {$match: {order_date: {$gte: ISODate("2024-01-01")}}},
+  {$group: {
+    _id: {date: "$order_date", region: "$region"},
+    total: {$sum: "$amount"},
+    count: {$sum: 1}
+  }},
+  {$merge: {
+    into: "daily_sales_summary",
+    on: "_id",
+    whenMatched: "replace",
+    whenNotMatched: "insert"
+  }}
+])
+
+// Only today's aggregates are new/changed
+// Yesterday's aggregates already exist and are skipped
+// ~99% of output documents unchanged on daily refresh
+```
+
+### Negative: Full replacement needed
+
+```javascript
+// Cannot use incremental merge: result set completely changes
+db.events.aggregate([
+  {$group: {_id: "$category", latest: {$last: "$timestamp"}}},
+  {$out: "category_latest"}
+])
+
+// $out always drops and replaces; no incremental path
+// Use $merge instead for incremental semantics
+```
+
+## References
+
+**Implementation:**
+- MongoDB source: `src/mongo/db/pipeline/document_source_merge.cpp`
+- Batch writer: `src/mongo/db/pipeline/mongo_process_interface.cpp`
+
+**Documentation:**
+- MongoDB Manual: "$merge"
+  - https://docs.mongodb.com/manual/reference/operator/aggregation/merge/
+- MongoDB Manual: "On-Demand Materialized Views"

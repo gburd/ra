@@ -1,0 +1,89 @@
+---
+id: temp-table-materialization
+name: Temp Table Materialization
+category: physical/materialization
+databases: [postgresql, mysql, oracle, mssql]
+execution_models: [volcano]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [materialization, temp-table, intermediate]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# Temp Table Materialization
+
+## Description
+
+Materializes intermediate results into temporary table for complex multi-step queries.
+
+**When to apply**: Complex query with expensive intermediate result used multiple times.
+
+**Why it works**: Persists intermediate data to disk; enables index creation; supports large results.
+
+## Relational Algebra
+
+```latex
+$$
+complex_query(expensive_subquery)
+  \rightarrow temp_table = materialize(expensive_subquery)
+     complex_query(temp_table)
+$$
+
+```
+
+## Implementation
+
+```rust
+rw!("materialize-to-temp-table";
+    "(complex-query ?expensive-subquery)" =>
+    "(let ?temp (create-temp-table (materialize ?expensive-subquery))
+      (complex-query ?temp))"
+    if is_expensive("?expensive-subquery") && enables_indexing()
+),
+```
+
+## Cost Model
+
+```rust
+fn cost(result_size: u64, num_scans: usize, can_index: bool) -> f64 {
+    let write_temp = result_size as f64 * 1.5;
+    let index_build = if can_index { result_size as f64 * 0.5 } else { 0.0 };
+    let scans = num_scans as f64 * result_size as f64 * 0.8;
+    write_temp + index_build + scans
+}
+```
+
+**Typical benefit**: 30-70% for multi-scan scenarios
+
+## Test Cases
+
+### Positive: Multi-step aggregation
+
+```sql
+CREATE TEMP TABLE daily_summary AS
+SELECT date, product_id, SUM(sales) as total
+FROM transactions
+GROUP BY date, product_id;
+
+CREATE INDEX ON daily_summary(product_id);
+
+SELECT product_id, AVG(total) FROM daily_summary GROUP BY product_id;
+
+-- Materialize + index enables efficient second aggregation
+```
+
+### Negative: Single-use simple query
+
+```sql
+SELECT * FROM orders WHERE status = 'pending';
+
+-- No benefit from temp table: direct query faster
+```
+
+## References
+
+- PostgreSQL: Temporary tables
+- MySQL: MEMORY and temporary tables
+- mssql: #temp tables

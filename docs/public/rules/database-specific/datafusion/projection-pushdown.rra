@@ -1,0 +1,115 @@
+---
+id: datafusion-projection-pushdown
+name: DataFusion Projection Pushdown
+category: database-specific/datafusion
+databases: [datafusion]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, datafusion, projection, pushdown, arrow, columnar]
+complexity: O(n)
+benefit_range: [0.2, 0.8]
+---
+
+# DataFusion Projection Pushdown
+
+## Description
+
+Pushes projections down through the plan tree to minimize the number of
+Arrow columns materialized at each stage.  In columnar formats like
+Parquet, only the projected columns are read from disk.
+
+**When to apply**: A projection references fewer columns than its input
+produces.
+
+**Why it works**: Arrow's columnar layout means unused columns are
+separate memory buffers.  By pushing projections to the scan, DataFusion
+avoids reading, decompressing, and allocating buffers for columns that
+will be discarded later.
+
+**Database version**: DataFusion 20.0+
+
+## Relational Algebra
+
+```latex
+$$
+\pi_{cols}(Op(R)) \rightarrow Op'(\pi_{cols + required_by_Op}(R))
+  \text{where} cols \subseteq schema(R)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("datafusion-projection-pushdown-through-filter";
+    "(project ?cols (filter ?pred ?input))" =>
+    "(filter ?pred (project ?extended_cols ?input))"
+    if is_database("datafusion")
+    if can_push_project_through_filter("?cols", "?pred")
+),
+
+rw!("datafusion-projection-pushdown-to-scan";
+    "(project ?cols (scan ?table))" =>
+    "(scan-with-projection ?table ?cols)"
+    if is_database("datafusion")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    projection_cols: &[Column],
+    input_schema: &Schema,
+) -> bool {
+    projection_cols.len() < input_schema.fields().len()
+}
+```
+
+**Restrictions:**
+- Extended projection must include columns needed by intervening
+  operators (filter predicates, join keys)
+- Cannot push past operators that require all columns (e.g., SELECT *)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    total_columns: usize,
+    projected_columns: usize,
+    rows: f64,
+    avg_col_bytes: f64,
+) -> f64 {
+    let eliminated = total_columns - projected_columns;
+    eliminated as f64 * rows * avg_col_bytes
+}
+```
+
+**Typical benefit**: For a 100-column Parquet table where the query
+uses 5 columns, avoids reading 95% of the data from disk.
+
+## Test Cases
+
+```sql
+-- Positive: select 2 columns from wide table
+SELECT name, email FROM users WHERE active = true;
+-- Only reads name, email, active columns from Parquet
+
+-- Plan: Scan(users, projection=[name, email, active])
+--        -> Filter(active = true)
+--        -> Project([name, email])
+```
+
+```sql
+-- Negative: SELECT * reads all columns
+SELECT * FROM users;
+-- No projection pushdown benefit
+```
+
+## References
+
+DataFusion: datafusion/optimizer/src/optimize_projections.rs
+DataFusion: datafusion/core/src/datasource/physical_plan/parquet/row_groups.rs
+Apache Parquet: https://parquet.apache.org/documentation/latest/

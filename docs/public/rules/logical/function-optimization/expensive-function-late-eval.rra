@@ -1,0 +1,103 @@
+---
+id: expensive-function-late-eval
+name: Delay Expensive Function Evaluation
+category: logical/function-optimization
+databases: [postgresql, mysql, oracle, mssql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [logical, function, pushdown, expensive, late-evaluation]
+complexity: O(n)
+benefit_range: [0.1, 0.8]
+---
+
+# Delay Expensive Function Evaluation
+
+## Description
+
+Moves expensive function evaluations (REGEXP, MD5, ENCRYPT, JSON
+parsing) after cheaper filters that reduce row count. If a SELECT
+computes MD5(col) but a WHERE clause on another column eliminates
+90% of rows, computing MD5 only on surviving rows saves significant
+CPU.
+
+**When to apply**: A projection contains an expensive function call
+and there is a filter below or alongside it that does not depend on
+the function's output.
+
+**Why it works**: Expensive functions have high per-row cost. By
+evaluating them after selective filters, fewer rows need the costly
+computation.
+
+## Implementation
+
+```rust
+// Push cheap filter below expensive projection
+rw!("expensive-func-late-eval";
+    "(project ?exprs (filter ?pred (scan ?t)))" =>
+    "(project ?exprs (filter ?pred (scan ?t)))"
+    // Reorder: if ?pred doesn't reference ?exprs's expensive funcs,
+    // ensure filter runs before projection
+),
+
+// More precisely: split projection into cheap and expensive parts
+rw!("split-expensive-project";
+    "(project [?cheap.. ?expensive..] ?input)" =>
+    "(project [?expensive..] (project [?cheap.. ?pass..] ?input))"
+    if has_expensive_function("?expensive")
+    if not_depends_on("?expensive", "?cheap")
+),
+
+// Delay expensive function past filter
+rw!("expensive-func-past-filter";
+    "(filter ?pred (project [?cols ?expensive_col] ?input))" =>
+    "(project [?cols ?expensive_col]
+       (filter ?pred ?input))"
+    if has_expensive_function("?expensive_col")
+    if not_references("?pred", "?expensive_col")
+),
+```
+
+## Cost Model
+
+```
+// Function cost tiers from functions.toml:
+//   cost_multiplier = 1.0   -- cheap (UPPER, ABS, +)
+//   cost_multiplier = 5.0   -- moderate (SUBSTRING, DATE_TRUNC)
+//   cost_multiplier = 50.0  -- expensive (REGEXP_MATCH, MD5)
+//   cost_multiplier = 100.0 -- very expensive (ENCRYPT, COMPRESS)
+//
+// Benefit = (1 - filter_selectivity) * cost_multiplier * row_count
+// Only reorder when cost_multiplier >= 10.0
+```
+
+## Test Cases
+
+```sql
+-- Positive: expensive function with selective filter
+SELECT id, MD5(document) FROM files WHERE size < 1024;
+-- Reordered: filter on size first, then compute MD5
+
+-- Positive: regexp with equality filter
+SELECT id, REGEXP_REPLACE(body, '\\s+', ' ')
+FROM articles WHERE status = 'published';
+-- Filter status first (cheap), then regexp (expensive)
+
+-- Positive: multiple expensive functions
+SELECT ENCRYPT(ssn), COMPRESS(document)
+FROM records WHERE department = 'HR';
+-- Filter department first, then compute both expensive funcs
+
+-- Negative: filter depends on expensive function
+SELECT id FROM files WHERE MD5(content) = ?;
+-- Cannot delay: filter references the expensive function
+
+-- Negative: cheap function, not worth reordering
+SELECT UPPER(name) FROM users WHERE active = true;
+-- UPPER is cheap (cost_multiplier=1), no benefit
+```
+
+## References
+
+- functions.toml: cost_multiplier property for function cost tiers
+- Calcite: ProjectFilterTransposeRule (generalized)
+- "Query Processing Techniques for Multiprocessor Systems" (DeWitt)

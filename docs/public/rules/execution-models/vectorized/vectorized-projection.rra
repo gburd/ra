@@ -1,0 +1,254 @@
+---
+id: vectorized-projection
+name: Vectorized Execution - Batch Projection
+category: execution-models
+version: 1.0.0
+databases: [DuckDB, ClickHouse, Velox, DataFusion]
+authors: [Peter Boncz, MonetDB/X100 Team]
+tags: [execution, vectorized, projection, simd, batch]
+standard: MonetDB X100
+---
+
+# Vectorized Execution - Batch Projection
+
+## Description
+
+Vectorized projection evaluates scalar expressions on entire column vectors at once, producing new result columns. Instead of interpreting an expression tree per-tuple (Volcano), a vectorized projection calls a type-specialized SIMD kernel for each expression node, processing the full batch in one pass. This amortizes function call overhead and enables SIMD instructions to operate on contiguous memory.
+
+**Key characteristics:**
+- **Column-at-a-time evaluation**: Each expression node processes full vectors
+- **SIMD kernels**: Type-specialized (i32, i64, f64, string) operations
+- **Selection-vector aware**: Only evaluates active rows when filtered
+- **Zero-copy column references**: Simple column projections are pointer aliases
+- **Expression template system**: Pre-compiled kernels for common patterns
+
+**Trade-offs:**
+- Intermediate result vectors consume memory (one per expression node)
+- Complex expression trees require multiple passes over data
+- String operations less amenable to SIMD
+
+## Relational Algebra
+
+```
+VectorizedProject(input, exprs) -> Iterator<Batch>
+
+fn next_batch() -> Batch:
+  batch = input.next_batch()
+  result = Batch::new(batch.size)
+
+  for expr in exprs:
+    if expr is ColumnRef(i):
+      // Zero-copy: alias existing column
+      result.add_column_ref(batch.column(i))
+    else:
+      // Evaluate expression on full vector
+      col = eval_vectorized(expr, batch)
+      result.add_column(col)
+
+  result.selection = batch.selection  // Preserve filter state
+  return result
+```
+
+## Implementation
+
+```rust
+use ra_core::algebra::RelExpr;
+use ra_core::expr::Expr;
+
+/// Vectorized projection operator
+pub struct VectorizedProjection {
+    input: Box<dyn VectorizedIterator>,
+    expressions: Vec<Expr>,
+}
+
+impl VectorizedIterator for VectorizedProjection {
+    fn next_batch(&mut self) -> Result<Option<Batch>> {
+        let batch = match self.input.next_batch()? {
+            None => return Ok(None),
+            Some(b) => b,
+        };
+
+        let mut result = Batch::new(batch.size);
+        result.selection = batch.selection.clone();
+
+        for expr in &self.expressions {
+            let column = eval_vectorized(expr, &batch)?;
+            result.add_column(column);
+        }
+
+        Ok(Some(result))
+    }
+}
+
+/// Evaluate an expression tree on a batch (vectorized)
+fn eval_vectorized(expr: &Expr, batch: &Batch) -> Result<Column> {
+    match expr {
+        Expr::ColumnRef(idx) => {
+            // Zero-copy reference to existing column
+            Ok(batch.column(*idx).clone_ref())
+        }
+        Expr::Constant(val) => {
+            // Broadcast constant to vector
+            Ok(Column::broadcast(val, batch.size))
+        }
+        Expr::BinOp { op, left, right } => {
+            let left_col = eval_vectorized(left, batch)?;
+            let right_col = eval_vectorized(right, batch)?;
+
+            // Dispatch to type-specialized SIMD kernel
+            match (left_col.data_type(), op) {
+                (DataType::Int64, Op::Add) => {
+                    simd_add_i64(&left_col, &right_col, &batch.selection)
+                }
+                (DataType::Int64, Op::Mul) => {
+                    simd_mul_i64(&left_col, &right_col, &batch.selection)
+                }
+                (DataType::Float64, Op::Mul) => {
+                    simd_mul_f64(&left_col, &right_col, &batch.selection)
+                }
+                (DataType::Float64, Op::Sub) => {
+                    simd_sub_f64(&left_col, &right_col, &batch.selection)
+                }
+                _ => scalar_binop(&left_col, &right_col, op),
+            }
+        }
+        Expr::Cast { expr, target_type } => {
+            let col = eval_vectorized(expr, batch)?;
+            vectorized_cast(&col, target_type)
+        }
+        _ => Err(Error::UnsupportedExpression),
+    }
+}
+
+/// SIMD multiplication for float64 vectors
+fn simd_mul_f64(
+    a: &Column,
+    b: &Column,
+    selection: &Option<Vec<usize>>,
+) -> Result<Column> {
+    let a_data = a.as_f64_slice();
+    let b_data = b.as_f64_slice();
+    let mut result = vec![0.0f64; a.len()];
+
+    if let Some(sel) = selection {
+        // Only process selected rows
+        for &idx in sel {
+            result[idx] = a_data[idx] * b_data[idx];
+        }
+    } else {
+        // Process full vector with SIMD
+        #[cfg(target_feature = "avx2")]
+        unsafe {
+            for i in (0..a.len()).step_by(4) {
+                let va = _mm256_loadu_pd(a_data.as_ptr().add(i));
+                let vb = _mm256_loadu_pd(b_data.as_ptr().add(i));
+                let vr = _mm256_mul_pd(va, vb);
+                _mm256_storeu_pd(result.as_mut_ptr().add(i), vr);
+            }
+        }
+    }
+
+    Ok(Column::from_f64(result))
+}
+
+/// Cost model for vectorized projection
+pub fn vectorized_projection_cost(
+    input_rows: f64,
+    batch_size: usize,
+    num_expressions: usize,
+    avg_expr_depth: usize,
+) -> f64 {
+    let num_batches = (input_rows / batch_size as f64).ceil();
+
+    // Per-batch overhead (function call per expression node)
+    let call_overhead = num_batches * num_expressions as f64
+        * avg_expr_depth as f64 * 0.001;
+
+    // Per-element SIMD computation
+    let simd_width = 4.0; // AVX2 for f64
+    let compute_cost = input_rows * num_expressions as f64
+        * 0.0000005 / simd_width;
+
+    // Intermediate vector allocation
+    let alloc_cost = num_batches * (avg_expr_depth - 1) as f64
+        * 0.005;
+
+    call_overhead + compute_cost + alloc_cost
+}
+```
+
+## Cost Model
+
+**CPU Cost:**
+- Function call overhead: O(batches x expression_nodes)
+- SIMD computation: O(rows / SIMD_width) per expression node
+- Total: `batches x nodes x call_cost + rows x nodes x simd_cost`
+
+**Memory:**
+- Intermediate vectors: one per non-leaf expression node
+- Size: `batch_size x sizeof(data_type)` per intermediate
+- Zero-copy for column references (no memory)
+- Typical: 1-4 intermediate vectors per expression
+
+**SIMD Speedup by Type:**
+- Int32: 8x (AVX2 256-bit / 32-bit)
+- Int64: 4x (AVX2 256-bit / 64-bit)
+- Float64: 4x (AVX2 256-bit / 64-bit)
+- String: 1x (no SIMD benefit for variable-length)
+
+**Selection Vector Optimization:**
+- With selection: only process selected indices
+- Without selection: full SIMD pass (faster per element)
+- Break-even: selection useful when selectivity < 0.5
+
+## Test Cases
+
+```sql
+-- Test 1: Simple column reference (zero-copy)
+SELECT name, email FROM users;
+-- Expected: No computation, just column pointer aliasing
+-- Cost: near-zero (O(1) per batch)
+
+-- Test 2: Arithmetic expression (SIMD)
+SELECT price * quantity AS revenue FROM lineitem;
+-- Expected: SIMD float64 multiplication kernel
+-- Speedup: ~4x over scalar per-tuple evaluation
+
+-- Test 3: Complex expression tree
+SELECT
+  l_extendedprice * (1 - l_discount) AS disc_price,
+  l_extendedprice * (1 - l_discount) * (1 + l_tax) AS charge
+FROM lineitem;
+-- Expected: Two intermediate vectors for subexpressions
+-- Note: CSE for (1 - l_discount) across expressions
+
+-- Test 4: With selection vector from upstream filter
+SELECT price * 1.08 AS with_tax
+FROM products
+WHERE category = 'electronics';
+-- Expected: Selection vector from filter applied
+-- Only evaluate multiplication on selected rows
+```
+
+## Comparison with Other Models
+
+| Aspect | Vectorized Project | Volcano Project | Push-Based Project |
+|--------|-------------------|----------------|-------------------|
+| Per-tuple cost | ~2 ns (SIMD) | ~100 ns (tree walk) | ~5 ns (inline) |
+| SIMD | Explicit kernels | None | Auto-vectorize |
+| Intermediates | Column vectors | None (in-place) | Registers |
+| Column ref cost | Zero-copy | Tuple copy | Register load |
+
+## References
+
+1. **Boncz, Peter A.; Zukowski, Marcin; Nes, Niels**. "MonetDB/X100: Hyper-Pipelining Query Execution." CIDR 2005.
+   - Vectorized expression evaluation model
+
+2. **Zukowski, Marcin**. "Balancing Vectorized Query Execution with Bandwidth-Optimized Storage." PhD Thesis, CWI 2009.
+   - Detailed analysis of vectorized projection costs
+
+3. **Raasveldt, Mark; Muhleisen, Hannes**. "DuckDB: an Embeddable Analytical Database." SIGMOD 2019.
+   - Modern vectorized projection implementation
+
+4. **Pedreira, Pedro et al**. "Velox: Meta's Unified Execution Engine." VLDB 2022.
+   - Expression evaluation in Velox vectorized engine

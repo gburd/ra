@@ -1,0 +1,106 @@
+---
+id: cockroachdb-generate-inverted-index-scans
+name: Generate Inverted Index Scans (JSON/Array)
+category: database-specific/cockroachdb
+databases: [cockroachdb]
+version: 1.0.0
+authors: ["RA Contributors"]
+tags: [database-specific, cockroachdb, inverted-index, json, array, gin]
+complexity: O(m)
+benefit_range: [0.7, 0.95]
+---
+
+# Generate Inverted Index Scans (JSON/Array)
+
+## Description
+
+Generates scan alternatives using inverted indexes for JSON containment (@>) and array overlap (&&) queries. Inverted indexes map each JSON key/value or array element to rows, enabling efficient searching within structured data.
+
+**When to apply**: Predicates on JSONB columns with @> or array columns with && that have inverted indexes.
+
+**Why it works**: Full table scan of JSON/array columns is expensive. Inverted indexes allow direct lookup of rows containing specific keys/values, similar to full-text search.
+
+**Database version**: CockroachDB v2.0+
+
+## Relational Algebra
+
+```latex
+$$
+Filter[json_col @> '{"key": "value"}'](Scan(T))
+  \rightarrow InvertedIndexScan[inverted_idx, json_col @> '{"key": "value"}'](T)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("cockroachdb-generate-inverted-index-scans";
+    "(filter ?pred (scan ?private))" =>
+    "(generate_inverted_index_scans ?private ?pred)"
+    if is_database("cockroachdb")
+    if has_inverted_index_predicate("?pred")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    predicate: &Expr,
+    table: &TableRef,
+) -> bool {
+    // Extract inverted index predicates
+    match predicate {
+        Expr::JsonContains(col, _) | Expr::ArrayOverlap(col, _) => {
+            table.has_inverted_index_on(col)
+        }
+        _ => false,
+    }
+}
+```
+
+**Restrictions:**
+- Only applies to CockroachDB
+- Requires inverted index on JSONB or ARRAY column
+- Supports @>, @, &&, and other containment operators
+- Inverted index returns candidate rows (may need recheck)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    table_rows: f64,
+    matching_rows: f64,
+) -> f64 {
+    let full_scan_cost = table_rows * 100.0;
+    let inverted_scan_cost = matching_rows * 10.0;
+    (full_scan_cost - inverted_scan_cost) / full_scan_cost
+}
+```
+
+**Typical benefit**: 70-95% for selective JSON/array queries
+
+## Test Cases
+
+```sql
+CREATE TABLE documents (
+  id UUID PRIMARY KEY,
+  data JSONB,
+  INVERTED INDEX data_idx (data)
+);
+
+SELECT * FROM documents
+WHERE data @> '{"user_id": 12345}';
+
+-- Uses inverted index to find rows with user_id key
+```
+
+## References
+
+**Source code:**
+- CockroachDB: `pkg/sql/opt/xform/`
+  - Inverted index join generation logic
+  - Commit: 6e210ba6aa33cea5e27b1a8fae212c27941781f4

@@ -1,0 +1,151 @@
+---
+id: datafusion-simplify-expressions
+name: DataFusion Simplify Expressions
+category: database-specific/datafusion
+databases: [datafusion]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, datafusion, expression, simplify, constant-folding]
+complexity: O(n)
+benefit_range: [0.05, 0.3]
+---
+
+# DataFusion Simplify Expressions
+
+## Description
+
+Simplifies expressions by applying algebraic identities, constant
+folding, and boolean logic reduction.  DataFusion's `SimplifyExpressions`
+pass rewrites expressions to simpler equivalents that are cheaper to
+evaluate with Arrow compute kernels.
+
+**When to apply**: Expressions contain redundant operations, constant
+subexpressions, or boolean tautologies/contradictions.
+
+**Why it works**: Each Arrow kernel invocation has overhead (null bitmap
+handling, buffer allocation, SIMD dispatch).  Simplifying expressions
+reduces the number of kernel calls and intermediate arrays.
+
+**Database version**: DataFusion 20.0+
+
+## Relational Algebra
+
+```latex
+-- Constant folding
+$$
+1 + 2 \rightarrow 3
+$$
+
+-- Boolean simplification
+$$
+x AND true \rightarrow x
+x OR false \rightarrow x
+x AND false \rightarrow false
+NOT NOT \times \rightarrow x
+$$
+
+-- Arithmetic identity
+$$
+x + 0 \rightarrow x
+x * 1 \rightarrow x
+x * 0 \rightarrow 0
+$$
+
+-- Null propagation
+$$
+x + NULL \rightarrow NULL (for most types)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("datafusion-simplify-and-true";
+    "(and ?x (const-bool true))" => "?x"
+    if is_database("datafusion")
+),
+
+rw!("datafusion-simplify-or-false";
+    "(or ?x (const-bool false))" => "?x"
+    if is_database("datafusion")
+),
+
+rw!("datafusion-simplify-and-false";
+    "(and ?x (const-bool false))" => "(const-bool false)"
+    if is_database("datafusion")
+),
+
+rw!("datafusion-simplify-add-zero";
+    "(add ?x (const-int 0))" => "?x"
+    if is_database("datafusion")
+),
+
+rw!("datafusion-simplify-mul-one";
+    "(mul ?x (const-int 1))" => "?x"
+    if is_database("datafusion")
+),
+
+rw!("datafusion-simplify-double-negation";
+    "(not (not ?x))" => "?x"
+    if is_database("datafusion")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(expr: &Expr) -> bool {
+    expr.contains_constant()
+    || expr.contains_boolean_tautology()
+    || expr.contains_arithmetic_identity()
+}
+```
+
+**Restrictions:**
+- Floating-point simplifications must respect IEEE 754 (NaN, Inf)
+- NULL propagation depends on expression semantics (IS NULL is special)
+- Division by zero produces error, not simplification
+
+## Cost Model
+
+```rust
+fn simplification_benefit(
+    eliminated_kernels: usize,
+    rows: f64,
+) -> f64 {
+    // Each eliminated kernel saves per-batch overhead
+    eliminated_kernels as f64 * rows * 0.0001
+}
+```
+
+**Typical benefit**: Removes 1-3 unnecessary kernel invocations per
+expression, saving microseconds per batch for simple operations.
+
+## Test Cases
+
+```sql
+-- Positive: boolean simplification
+SELECT * FROM events WHERE active = true AND 1 = 1;
+-- Simplified to: WHERE active = true
+```
+
+```sql
+-- Positive: constant folding
+SELECT price * 1.0 + 0 AS final_price FROM products;
+-- Simplified to: SELECT price AS final_price
+```
+
+```sql
+-- Negative: no simplification possible
+SELECT a + b FROM t WHERE c > d;
+-- Already in simplest form
+```
+
+## References
+
+DataFusion: datafusion/optimizer/src/simplify_expressions/mod.rs
+DataFusion: datafusion/optimizer/src/simplify_expressions/expr_simplifier.rs
+DataFusion: datafusion/optimizer/src/simplify_expressions/guarantees.rs

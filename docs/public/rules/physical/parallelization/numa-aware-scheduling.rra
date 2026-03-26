@@ -1,0 +1,290 @@
+---
+id: numa-aware-scheduling
+name: NUMA-Aware Scheduling
+category: physical/parallelization
+databases: [hyper, umbra, oracle, sap-hana]
+execution_models: [push-based, vectorized]
+hardware: [cpu, numa]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [parallelization, numa, scheduling, memory-locality, multi-socket]
+complexity: "O(n/p)"
+benefit_range: [0.3, 0.7]
+---
+
+# NUMA-Aware Scheduling
+
+## Metadata
+- **Rule ID**: `numa-aware-scheduling`
+- **Category**: Physical / Parallelization
+- **Complexity**: O(n/p) with reduced memory access latency
+- **Introduced**: HyPer/Umbra NUMA-aware query execution, Oracle NUMA optimization
+- **Prerequisites**: Multi-socket NUMA hardware, OS NUMA topology info
+- **Alternatives**: cpu-affinity-placement, morsel-driven-parallelism
+
+## Description
+
+NUMA-aware scheduling assigns query operator tasks to CPU cores based on
+the physical memory location of the data they process. On multi-socket
+servers, memory access latency depends on whether the CPU accesses local
+memory (fast, ~100ns) or remote memory on another socket (~300ns).
+
+The scheduler partitions data by NUMA node, pins worker threads to cores
+on the same node as their data partition, and minimizes cross-node memory
+traffic. This can provide 2-3x throughput improvement on multi-socket
+systems compared to NUMA-oblivious scheduling.
+
+**When to use:**
+- Multi-socket servers (2+ CPU sockets)
+- Large in-memory datasets spanning multiple NUMA nodes
+- Memory-bandwidth-bound operators (scans, hash joins)
+- Systems where remote memory access latency is significant
+
+**Advantages:**
+- Reduces memory access latency by 2-3x (local vs remote)
+- Improves memory bandwidth utilization per socket
+- Reduces interconnect contention between sockets
+- Composes well with morsel-driven execution
+
+**Disadvantages:**
+- Adds scheduling complexity and NUMA topology awareness
+- Data partitioning must align with NUMA boundaries
+- Skewed data may cause NUMA-node imbalance
+- No benefit on single-socket or UMA systems
+
+## Relational Algebra
+
+```
+ParallelOp(data, workers):
+  nodes = numa_topology()          // e.g., 4 NUMA nodes
+  partitions = partition_by_numa(data, nodes)
+
+  for each node N:
+    pin workers[N] to cores on node N
+    assign partitions[N] to workers[N]
+
+  Workers process local data with local memory access
+  Cross-node communication only at synchronization barriers
+```
+
+## Implementation (egg rewrite rules)
+
+```lisp
+;; NUMA-aware partitioning for large scans
+(rewrite (parallel-scan ?table ?workers)
+  (numa-parallel-scan ?table ?workers
+    :partition-by numa-node
+    :pin-threads true)
+  :if (is-numa-system)
+  :if (> (table-size-bytes ?table) (* 1024 1024 1024)))  ;; >1GB
+
+;; NUMA-aware hash join: build on local node, probe locally
+(rewrite (parallel-hash-join ?build ?probe ?key ?workers)
+  (numa-hash-join ?build ?probe ?key ?workers
+    :build-partitioning numa-local
+    :probe-affinity data-local)
+  :if (is-numa-system)
+  :if (> (estimated-size-bytes ?build) (* 256 1024 1024)))
+
+;; NUMA-aware aggregation: local pre-aggregation per node
+(rewrite (parallel-aggregation ?input ?groups ?aggs ?workers)
+  (numa-two-phase-aggregation ?input ?groups ?aggs ?workers
+    :phase1 local-aggregate-per-node
+    :phase2 merge-across-nodes)
+  :if (is-numa-system))
+```
+
+## Implementation Pattern
+
+```rust
+pub struct NumaAwareScheduler {
+    topology: NumaTopology,
+    node_workers: Vec<Vec<WorkerThread>>,
+}
+
+struct NumaTopology {
+    nodes: Vec<NumaNode>,
+    distance_matrix: Vec<Vec<u32>>, // Inter-node latency
+}
+
+struct NumaNode {
+    id: usize,
+    cores: Vec<usize>,
+    local_memory_mb: u64,
+}
+
+impl NumaAwareScheduler {
+    fn schedule_scan(
+        &self,
+        table: &Table,
+        predicate: &Predicate,
+    ) -> Vec<ScanTask> {
+        let mut tasks = Vec::new();
+
+        for node in &self.topology.nodes {
+            // Find data pages allocated on this NUMA node
+            let local_pages = table.pages_on_numa_node(node.id);
+
+            // Create scan task pinned to local cores
+            tasks.push(ScanTask {
+                pages: local_pages,
+                predicate: predicate.clone(),
+                affinity: CoreAffinity::NumaNode(node.id),
+            });
+        }
+
+        tasks
+    }
+
+    fn schedule_hash_join(
+        &self,
+        build: &Operator,
+        probe: &Operator,
+        key: &JoinKey,
+    ) -> NumaHashJoinPlan {
+        // Partition build side by NUMA node
+        let build_partitions: Vec<_> = self.topology.nodes.iter()
+            .map(|node| {
+                HashTablePartition {
+                    data: build.partition_for_numa(node.id),
+                    numa_node: node.id,
+                    // Allocate hash table memory on local node
+                    memory_policy: MemoryPolicy::Local(node.id),
+                }
+            })
+            .collect();
+
+        // Probe workers access local hash table partition
+        NumaHashJoinPlan {
+            build_partitions,
+            probe_affinity: ProbeAffinity::SameAsData,
+        }
+    }
+}
+```
+
+## Cost Model
+
+```rust
+pub fn cost_numa_aware(
+    total_work: u64,
+    num_workers: usize,
+    num_nodes: usize,
+    local_latency_ns: f64,
+    remote_latency_ns: f64,
+    locality_fraction: f64,
+    hardware: &HardwareModel,
+) -> Cost {
+    // Effective memory latency with NUMA awareness
+    let effective_latency = locality_fraction * local_latency_ns
+        + (1.0 - locality_fraction) * remote_latency_ns;
+
+    // Compare with NUMA-oblivious (uniform random access)
+    let oblivious_fraction = 1.0 / num_nodes as f64; // Only 1/N is local
+    let oblivious_latency = oblivious_fraction * local_latency_ns
+        + (1.0 - oblivious_fraction) * remote_latency_ns;
+
+    let speedup = oblivious_latency / effective_latency;
+
+    // Parallel cost with NUMA awareness
+    let parallel_time = (total_work as f64 / num_workers as f64)
+        / speedup;
+
+    Cost::cpu(parallel_time as u64)
+}
+
+pub fn numa_benefit(
+    num_nodes: usize,
+    local_latency_ns: f64,
+    remote_latency_ns: f64,
+) -> f64 {
+    // Maximum improvement from perfect NUMA locality
+    let ratio = remote_latency_ns / local_latency_ns;
+    let oblivious_avg = local_latency_ns / num_nodes as f64
+        + remote_latency_ns * (num_nodes - 1) as f64
+            / num_nodes as f64;
+    (oblivious_avg - local_latency_ns) / oblivious_avg
+}
+```
+
+## Test Cases
+
+### Test 1: Large table scan on 4-socket server
+```sql
+-- 4 NUMA nodes, 64 cores total, 256GB RAM (64GB per node)
+-- Table: 100GB, spread across all NUMA nodes
+
+SELECT COUNT(*) FROM large_table WHERE value > threshold;
+
+-- Expected: NumaAwareScan
+-- Each NUMA node scans its local 25GB partition
+-- Workers pinned to local cores
+-- No cross-node memory traffic during scan
+```
+
+### Test 2: NUMA-aware hash join
+```sql
+-- Build: dimension table (2GB), Probe: fact table (80GB)
+
+SELECT f.*, d.name
+FROM fact_table f JOIN dimension d ON f.dim_key = d.id;
+
+-- Expected: NumaHashJoin
+-- Replicate dimension hash table on each NUMA node's local memory
+-- Each node probes its local copy with local fact data
+-- Eliminates remote memory access during probe phase
+```
+
+### Test 3: NUMA-aware aggregation
+```sql
+SELECT region, SUM(sales), AVG(profit)
+FROM transactions  -- 50GB, 4 NUMA nodes
+GROUP BY region;
+
+-- Expected: NUMA two-phase aggregation
+-- Phase 1: Each node aggregates its local partition
+-- Phase 2: Merge partial aggregates across nodes
+-- Cross-node traffic only for partial results (small)
+```
+
+### Test 4: Negative -- single-socket system
+```sql
+SELECT * FROM table WHERE condition;
+
+-- Single socket, UMA memory: NUMA scheduling adds overhead
+-- All memory equally fast, no locality benefit
+-- Use standard parallel scan instead
+```
+
+### Test 5: Negative -- small dataset
+```sql
+SELECT * FROM small_lookup WHERE id = 42;
+
+-- 1MB table fits in L3 cache
+-- NUMA partitioning overhead exceeds any locality benefit
+```
+
+## Performance Characteristics
+
+| System | NUMA-Oblivious | NUMA-Aware | Improvement |
+|--------|---------------|------------|-------------|
+| 2-socket, scan | Baseline | 1.5-1.8x | 50-80% |
+| 4-socket, scan | Baseline | 2.0-2.5x | 100-150% |
+| 2-socket, hash join | Baseline | 1.3-1.6x | 30-60% |
+| 4-socket, hash join | Baseline | 1.8-2.2x | 80-120% |
+| 1-socket | Baseline | ~1.0x (overhead) | 0% |
+
+## References
+
+1. **Leis et al.**: "Morsel-Driven Parallelism: A NUMA-Aware Query Evaluation Framework"
+   - SIGMOD 2014, DOI: 10.1145/2588555.2610507
+   - Foundational work on NUMA-aware query processing
+
+2. **Psaroudakis et al.**: "Scaling Up Concurrent Main-Memory Column-Store Scans"
+   - VLDB 2015 -- NUMA effects on analytical workloads
+
+3. **sap-hana**: NUMA-aware memory allocation and thread scheduling
+   - Multi-socket in-memory database optimization
+
+4. **Li et al.**: "NUMA-Aware Algorithms: the Case of Data Shuffling"
+   - CIDR 2013 -- NUMA impact on data-intensive operations

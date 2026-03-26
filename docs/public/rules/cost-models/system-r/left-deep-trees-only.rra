@@ -1,0 +1,233 @@
+---
+id: system-r-left-deep-trees
+name: "System R Left-Deep Tree Restriction"
+category: cost-models/system-r
+databases: [postgresql, mysql, mssql, oracle]
+execution_models: [volcano]
+version: "1.0.0"
+authors: ["Selinger et al. 1979 - IBM Research"]
+tags: [join-ordering, left-deep, pipelining, system-r, classic]
+complexity: "O(n!) reduced from O(Catalan(n))"
+benefit_range: [0.0, 5.0]
+---
+
+# System R Left-Deep Tree Restriction
+
+## Description
+
+System R restricted its join enumeration to left-deep trees only: trees
+where the right input of every join is a base relation (not a join result).
+This reduces the search space from O(Catalan(n)) bushy trees to O(n!)
+left-deep trees. The restriction was motivated by the Volcano/iterator
+execution model: left-deep trees allow full pipelining (no materialization
+of intermediate results), while bushy trees require materializing at
+least one branch.
+
+**When to apply**: Optimizer implementations that use the Volcano
+execution model (tuple-at-a-time pipelining). Left-deep trees guarantee
+that the inner (right) input of every nested-loop or hash join is a base
+table scan (possibly with an index), enabling pipeline execution without
+materializing intermediates.
+
+**Why it works**: In a left-deep tree, the outer (left) input produces
+tuples that are immediately pipelined to the join. The inner (right)
+input is re-scanned for each outer tuple (nested-loop) or built into
+a hash table once (hash join). No intermediate join result needs to be
+materialized to disk or stored in memory. This reduces both memory usage
+and the chance of expensive temp file creation.
+
+## Relational Algebra
+
+```latex
+-- Left-deep tree (System R explores these):
+$$
+((R1 \bowtie R2) \bowtie R3) \bowtie R4
+$$
+-- Every right child is a base relation
+-- Fully pipelineable in Volcano model
+
+-- Right-deep tree (also considered sometimes):
+$$
+R1 \bowtie (R2 \bowtie (R3 \bowtie R4))
+$$
+-- Hash joins: build all inner tables, probe outer last
+
+-- Bushy tree (System R does NOT explore):
+$$
+(R1 \bowtie R2) \bowtie (R3 \bowtie R4)
+$$
+-- Requires materializing at least one intermediate result
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// System R DP restricted to left-deep trees
+struct LeftDeepEnumerator {
+    relations: Vec<RelationStats>,
+    predicates: Vec<JoinPredicate>,
+    cost_model: SystemRCostModel,
+}
+
+impl LeftDeepEnumerator {
+    fn find_optimal_left_deep(&self) -> JoinPlan {
+        let n = self.relations.len();
+
+        // dp[subset_mask] = best left-deep plan for this subset
+        let mut dp: HashMap<u32, (JoinPlan, f64)> = HashMap::new();
+
+        // Base: single relations
+        for i in 0..n {
+            let mask = 1u32 << i;
+            let plan = self.best_access_path(i);
+            let cost = self.cost_model.cost(&plan);
+            dp.insert(mask, (plan, cost));
+        }
+
+        // For each subset size, extend by adding one relation
+        // as the NEW RIGHT (inner) input
+        for size in 2..=n {
+            for subset in subsets_of_size(n, size) {
+                let mut best_cost = f64::MAX;
+                let mut best_plan = None;
+
+                // Try each relation in subset as the right input
+                for j in 0..n {
+                    if subset & (1 << j) == 0 {
+                        continue;
+                    }
+
+                    let left_mask = subset & !(1 << j);
+                    if left_mask == 0 {
+                        continue;
+                    }
+
+                    // Left must be the previous left-deep tree
+                    if let Some((left_plan, _)) = dp.get(&left_mask)
+                    {
+                        // Right is base relation Rj (not a subtree)
+                        let right = self.best_access_path(j);
+
+                        // Must have join predicate
+                        if !self.has_predicate(left_mask, j) {
+                            continue;
+                        }
+
+                        let candidate = JoinPlan::Join {
+                            left: Box::new(left_plan.clone()),
+                            right: Box::new(right),
+                            predicate: self.find_predicate(
+                                left_mask, j,
+                            ),
+                        };
+
+                        let cost =
+                            self.cost_model.cost(&candidate);
+                        if cost < best_cost {
+                            best_cost = cost;
+                            best_plan = Some(candidate);
+                        }
+                    }
+                }
+
+                if let Some(plan) = best_plan {
+                    dp.insert(subset, (plan, best_cost));
+                }
+            }
+        }
+
+        let full = (1u32 << n) - 1;
+        dp.remove(&full).unwrap().0
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(query: &RelExpr) -> bool {
+    let n = count_relations(query);
+    // Left-deep DP: O(n * 2^n) vs bushy O(3^n)
+    // Practical for larger n than bushy enumeration
+    n >= 2 && n <= 25
+}
+```
+
+**Restrictions:**
+- Misses potentially optimal bushy trees
+- For hash joins, right-deep trees can be better (build all, probe once)
+- For parallel execution, bushy trees enable independent evaluation
+- System R's restriction was due to nested-loop join focus
+- Modern optimizers (DuckDB, CockroachDB) explore bushy trees
+
+## Cost Model
+
+```rust
+fn search_space_comparison(n: usize) -> (u64, u64) {
+    // Left-deep: n! orderings
+    let left_deep = factorial(n);
+
+    // Bushy: Catalan(n-1) * n! / (n-1)! tree shapes * orderings
+    let bushy = catalan(n - 1) * factorial(n);
+
+    (left_deep, bushy)
+}
+// n=4: left-deep=24, bushy=120
+// n=6: left-deep=720, bushy=16800
+// n=10: left-deep=3.6M, bushy=~10^10
+```
+
+**Trade-off analysis:**
+- Left-deep pros: pipelining, smaller search space, simpler execution
+- Left-deep cons: may miss 2-10x better bushy plans
+- Bushy pros: can be significantly cheaper for certain join graphs
+- Bushy cons: requires materialization, larger search space
+
+## Test Cases
+
+### Positive: Chain join pattern (left-deep is optimal)
+
+```sql
+-- Linear chain: R1 -> R2 -> R3 -> R4
+SELECT * FROM R1
+JOIN R2 ON R1.k = R2.fk1
+JOIN R3 ON R2.k = R3.fk2
+JOIN R4 ON R3.k = R4.fk3;
+
+-- Left-deep: ((R1 join R2) join R3) join R4
+-- Pipeline: tuples flow R1 -> NL(R2) -> NL(R3) -> NL(R4)
+-- No materialization needed
+```
+
+### Negative: Clique pattern where bushy is better
+
+```sql
+-- All-pairs connected: every pair has a join predicate
+SELECT * FROM R, S, T, U
+WHERE R.a = S.a AND R.b = T.b AND S.c = U.c
+  AND T.d = U.d AND R.e = U.e AND S.f = T.f;
+
+-- Left-deep best: 1000 cost units (large intermediates)
+-- Bushy best: (R join S) join (T join U) = 200 cost units
+-- Left-deep restriction misses 5x better plan
+```
+
+## References
+
+**Original paper:**
+- Selinger et al., "Access Path Selection in a Relational Database Management System", SIGMOD 1979
+  - Section 6: restricts search to "sequences" (left-deep trees)
+  - Rationale: pipelined execution, avoidance of temp relations
+
+**Analysis of left-deep vs bushy:**
+- Ono, Lohman, "Measuring the Complexity of Join Enumeration in Query Optimization", VLDB 1990
+- Moerkotte, Neumann, "Analysis of Two Existing and One New DP Algorithm", VLDB 2006
+- Vance, Maier, "Rapid Bushy Join-Order Optimization with Cartesian Products", SIGMOD 1996
+
+**Modern approach:**
+- DuckDB, CockroachDB, Calcite: explore bushy trees for hash joins
+- PostgreSQL: uses GEQO (genetic optimizer) for n > geqo_threshold
+- Left-deep remains default for nested-loop heavy workloads (OLTP)

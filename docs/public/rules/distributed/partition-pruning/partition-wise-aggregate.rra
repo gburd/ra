@@ -1,0 +1,141 @@
+---
+id: partition-wise-aggregate
+name: Partition-Wise Aggregation
+category: distributed/partition-pruning
+databases: [cockroachdb, tidb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, partition, aggregation, pushdown, elimination]
+complexity: O(n)
+benefit_range: [0.3, 0.9]
+---
+
+# Partition-Wise Aggregation
+
+## Description
+
+Pushes aggregation below partition union operators to compute partial
+aggregates per-partition independently, then combines results. When a
+table is partitioned and the grouping key aligns with (or is a superset
+of) the partition key, each partition can be aggregated independently
+without cross-partition data movement.
+
+**When to apply**: A GroupBy operates on a partitioned table, and the
+grouping columns include the partition key. The partition-wise
+aggregation avoids the global shuffle that would otherwise be needed
+to group rows from different partitions.
+
+**Why it works**: If the grouping key includes the partition key, then
+all rows for a given group reside in the same partition. This means
+partial aggregation within each partition produces the final result
+for that partition's groups, with no need for a global merge phase
+(beyond simple union).
+
+## Relational Algebra
+
+```latex
+$$
+\gamma_{g, agg}(PartitionUnionAll(P1, P2, ..., Pn))
+  \rightarrow UnionAll(
+       \gamma_{g, agg}(P1),
+       \gamma_{g, agg}(P2),
+       ...,
+       \gamma_{g, agg}(Pn)
+     )
+  \text{where} partition_key is \subseteq of g
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("partition-wise-aggregate";
+    "(aggregate ?group_keys ?agg_fns
+        (partition_union_all ?partitions))" =>
+    "(union_all
+        (map_partitions
+            (aggregate ?group_keys ?agg_fns)
+            ?partitions))"
+    if partition_key_subset_of_group_keys("?partitions", "?group_keys")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    group_keys: &[ColumnId],
+    partitions: &PartitionUnionAll,
+) -> bool {
+    let partition_key = partitions.partition_key_columns();
+    // Partition key must be a subset of grouping columns
+    partition_key.iter().all(|pk| group_keys.contains(pk))
+}
+```
+
+**Restrictions:**
+- The partition key must be fully contained in the grouping columns
+- If the partition key is not in the grouping columns, a global
+  merge is still required
+- Not all aggregation functions benefit equally; some (like MEDIAN)
+  cannot be partition-wise even with aligned keys
+- The optimizer must know the partitioning scheme at plan time
+
+## Cost Model
+
+```rust
+fn partition_wise_benefit(
+    total_rows: f64,
+    num_partitions: u32,
+    distinct_groups: f64,
+    shuffle_cost_per_row: f64,
+) -> f64 {
+    // Without partition-wise: shuffle all rows
+    let without = total_rows * shuffle_cost_per_row;
+    // With partition-wise: no shuffle, local aggregation
+    let with = 0.0; // No cross-partition data movement
+    without - with
+}
+```
+
+## Test Cases
+
+```sql
+-- Positive: GROUP BY includes partition key
+-- orders PARTITION BY RANGE(region)
+SELECT region, status, COUNT(*)
+FROM orders
+GROUP BY region, status;
+
+-- Each partition aggregates independently:
+-- UnionAll
+--   GroupBy(region, status, COUNT(*)) on partition_us_east
+--   GroupBy(region, status, COUNT(*)) on partition_us_west
+--   GroupBy(region, status, COUNT(*)) on partition_eu
+```
+
+```sql
+-- Positive: partition key is a prefix of group key
+-- sales PARTITION BY HASH(store_id)
+SELECT store_id, product_id, SUM(quantity)
+FROM sales
+GROUP BY store_id, product_id;
+-- store_id is the partition key; each partition aggregates locally
+```
+
+```sql
+-- Negative: GROUP BY does not include partition key
+-- orders PARTITION BY RANGE(region)
+SELECT status, COUNT(*) FROM orders GROUP BY status;
+-- Same status can appear in any partition; global shuffle required
+```
+
+## References
+
+CockroachDB: pkg/sql/opt/xform/rules/groupby.opt - partition-aware grouping
+TiDB: pkg/planner/core/exhaust_physical_plans.go:89 - LogicalPartitionUnionAll
+Oracle: "Partition-Wise Operations" in performance tuning guide
+Graefe, "Encapsulation of Parallelism in the Volcano Query Processing System" (SIGMOD 1990)

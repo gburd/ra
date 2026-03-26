@@ -1,0 +1,102 @@
+---
+id: sort-distribution-aware
+name: Distribution-Aware Sort Selection
+category: physical/sort
+databases: [postgresql, duckdb, oracle]
+version: "1.0.0"
+authors: ["Graefe, Goetz"]
+tags: [physical, sort, distribution, radix, comparison]
+complexity: O(n)
+benefit_range: [0.1, 0.5]
+---
+
+# Distribution-Aware Sort Selection
+
+## Description
+
+Selects the sort algorithm based on data distribution characteristics.
+For uniformly distributed integer keys, radix sort achieves O(n) vs
+O(n log n) for comparison sorts. For nearly-sorted data, insertion sort
+or TimSort-like adaptive sorts are faster.
+
+**When to apply**: Statistics about key distribution are available.
+
+## Relational Algebra
+
+```latex
+-- Before: generic sort
+$$
+Sort[key](R)
+$$
+
+-- After: algorithm selected based on stats
+$$
+RadixSort[key](R)     -- if integer keys, uniform distribution
+AdaptiveSort[key](R)  -- if nearly sorted
+ExternalSort[key](R)  -- if data exceeds memory
+$$
+
+```
+
+## Implementation
+
+```rust
+fn select_sort_algorithm(
+    stats: &ColumnStats,
+    memory_budget: usize,
+    data_size: usize,
+) -> SortAlgorithm {
+    if data_size > memory_budget {
+        return SortAlgorithm::ExternalMergeSort;
+    }
+    if stats.is_integer_type() && stats.distinct_ratio() > 0.5 {
+        return SortAlgorithm::RadixSort;
+    }
+    if stats.sortedness_ratio() > 0.8 {
+        return SortAlgorithm::AdaptiveSort;
+    }
+    SortAlgorithm::QuickSort
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(sort: &Sort, stats: &ColumnStats) -> bool {
+    stats.has_distribution_info()
+}
+```
+
+## Cost Model
+
+```rust
+fn estimated_benefit(n: f64, algorithm: SortAlgorithm) -> f64 {
+    let comparison_sort_cost = n * n.log2();
+    let selected_cost = match algorithm {
+        SortAlgorithm::RadixSort => n * 4.0,
+        SortAlgorithm::AdaptiveSort => n * 1.5,
+        _ => comparison_sort_cost,
+    };
+    (comparison_sort_cost - selected_cost) / comparison_sort_cost
+}
+```
+
+## Test Cases
+
+```sql
+-- Positive: integer key, uniform distribution
+SELECT * FROM sensor_readings ORDER BY reading_id;
+-- reading_id is auto-increment integer -> radix sort
+
+-- Positive: nearly sorted (time-series append)
+SELECT * FROM events ORDER BY event_time;
+-- Events mostly appended in order -> adaptive sort
+
+-- Negative: no statistics available
+SELECT * FROM unknown_table ORDER BY col1;
+-- Fall back to comparison sort
+```
+
+## References
+
+- Graefe, G., "Implementing Sorting in Database Systems", ACM Computing Surveys, 2006, DOI: 10.1145/1132960.1132964

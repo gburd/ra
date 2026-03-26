@@ -1,0 +1,213 @@
+---
+id: rpr-push-order-filter-into-scan
+name: Push ORDER BY Range Filter into Scan
+category: logical/rpr
+databases: [postgresql, oracle, duckdb, generic]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [rpr, predicate-pushdown, order-by, scan, range]
+complexity: "O(1)"
+benefit_range: [0.2, 0.8]
+preconditions:
+  - type: pattern
+    must_match: "(filter ?pred (row-pattern ?input ?partition ?order ?defines ?measures ?pattern))"
+  - type: predicate
+    condition: "is_range_predicate_on_order_column(?pred, ?order)"
+    description: "Filter is a range predicate on the ORDER BY column"
+---
+
+# Push ORDER BY Range Filter into Scan
+
+## Description
+
+Pushes range predicates on ORDER BY columns through the RowPattern
+operator into the underlying scan. Since pattern matching processes
+rows in ORDER BY sequence, restricting the time/sequence range
+before sorting and matching eliminates irrelevant rows early.
+
+**When to apply**: A filter on a RowPattern result restricts the
+ORDER BY column to a range (e.g., `trade_date >= '2025-01-01'`).
+
+**Why it works**: If the ORDER BY column is `trade_date` and we
+filter `trade_date >= X`, rows before `X` cannot participate in
+any pattern match that produces output. Pushing the range filter
+into the scan avoids reading, sorting, and evaluating those rows.
+
+## Relational Algebra
+
+```latex
+-- Before: filter on order column after pattern matching
+$$
+\sigma_{trade_date >= '2025-01-01'}(
+  RowPattern[ORDER BY trade_date](Scan(T))
+)
+$$
+
+-- After: filter pushed into scan
+$$
+RowPattern[ORDER BY trade_date](
+  \sigma_{trade_date >= '2025-01-01'}(Scan(T))
+)
+$$
+
+```
+
+### With index availability
+
+```latex
+-- After further optimization by index selection rules
+$$
+RowPattern[ORDER BY trade_date](
+  IndexRangeScan(T, idx_trade_date, ['2025-01-01', +inf))
+)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Push range predicate on ORDER BY column below RowPattern
+rw!("rpr-push-order-filter";
+    "(filter ?pred
+       (row-pattern ?input ?partition ?order
+         ?defines ?measures ?pattern))" =>
+    "(row-pattern
+       (filter ?pred ?input)
+       ?partition ?order ?defines ?measures ?pattern)"
+    if is_range_predicate_on_order_column("?pred", "?order")
+),
+
+// Combined: push both partition and order predicates
+rw!("rpr-push-partition-and-order-filter";
+    "(filter (and ?part_pred ?order_pred)
+       (row-pattern ?input ?partition ?order
+         ?defines ?measures ?pattern))" =>
+    "(row-pattern
+       (filter (and ?part_pred ?order_pred) ?input)
+       ?partition ?order ?defines ?measures ?pattern)"
+    if references_only_partition_columns("?part_pred", "?partition")
+    if is_range_predicate_on_order_column("?order_pred", "?order")
+),
+```
+
+## Preconditions
+
+```rust
+fn is_range_predicate_on_order_column(
+    pred: &Expr,
+    order: &[OrderByExpr],
+) -> bool {
+    let order_cols: HashSet<_> = order.iter()
+        .map(|o| &o.column)
+        .collect();
+
+    match pred {
+        Expr::BinaryOp { left, op, right } => {
+            let is_range_op = matches!(op,
+                Op::Gt | Op::Gte | Op::Lt | Op::Lte
+            );
+            let refs_order = left.as_column_ref()
+                .map(|c| order_cols.contains(&c))
+                .unwrap_or(false);
+            let rhs_const = right.is_constant();
+            is_range_op && refs_order && rhs_const
+        }
+        Expr::Between { col, low, high } => {
+            col.as_column_ref()
+                .map(|c| order_cols.contains(&c))
+                .unwrap_or(false)
+                && low.is_constant()
+                && high.is_constant()
+        }
+        _ => false,
+    }
+}
+```
+
+**Restrictions:**
+- Only range predicates (>, >=, <, <=, BETWEEN) on ORDER BY columns. Equality predicates on ORDER BY columns are also valid but less common.
+- The predicate must compare the ORDER BY column to a constant or parameter, not another column.
+- Beware of boundary effects: a pattern spanning the filter boundary may be split. This is acceptable because the filter is on the output (post-match) anyway.
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    total_rows: f64,
+    range_selectivity: f64,
+) -> f64 {
+    // Rows eliminated from scan, sort, and DFA evaluation.
+    let eliminated = total_rows * (1.0 - range_selectivity);
+
+    // Sort cost savings: O(n log n) -> O(k log k) where k = n * sel
+    let sort_before = total_rows * total_rows.log2();
+    let sort_after = (total_rows * range_selectivity)
+        * (total_rows * range_selectivity).log2();
+
+    (sort_before - sort_after) / sort_before
+}
+```
+
+**Typical benefit**: 20-80%. For time-series data querying the
+last 30 days from a year of data, eliminates ~92% of rows.
+
+## Test Cases
+
+### Positive: date range on ORDER BY column
+
+```sql
+-- Before
+SELECT * FROM stock_prices
+  MATCH_RECOGNIZE (
+    PARTITION BY symbol
+    ORDER BY trade_date
+    PATTERN (A+ B+)
+    DEFINE A AS price > PREV(price), B AS price < PREV(price)
+  )
+WHERE trade_date >= '2025-01-01';
+
+-- After: trade_date filter pushed below RowPattern
+```
+
+### Positive: BETWEEN on ORDER BY column
+
+```sql
+-- Before
+SELECT * FROM sensor_data
+  MATCH_RECOGNIZE (
+    PARTITION BY sensor_id
+    ORDER BY ts
+    PATTERN (A B C)
+    DEFINE A AS reading > 100, B AS reading > 200, C AS reading < 50
+  )
+WHERE ts BETWEEN '2025-01-01' AND '2025-06-30';
+
+-- After: ts BETWEEN pushed into scan
+```
+
+### Negative: equality on ORDER BY (unusual but valid)
+
+```sql
+-- Equality on ORDER BY column is unusual for RPR
+-- but still valid to push down.
+WHERE trade_date = '2025-03-15'
+-- Would produce at most one row per partition.
+```
+
+### Negative: non-constant comparison
+
+```sql
+-- Cannot push: comparison with another column
+WHERE trade_date > start_date
+-- start_date may come from outer query; not a constant.
+```
+
+## References
+
+- Zemke, F. "SQL Row Pattern Recognition" ISO/IEC 19075-5:2016
+- Selinger et al. "Access Path Selection in a Relational Database Management System" (1979)

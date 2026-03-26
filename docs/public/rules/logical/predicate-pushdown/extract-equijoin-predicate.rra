@@ -1,0 +1,123 @@
+---
+id: extract-equijoin-predicate
+name: "ExtractEquijoinPredicate"
+category: logical/predicate-pushdown
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite, datafusion, calcite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [join, equijoin, predicate, hash-join, merge-join, consensus]
+complexity: "O(n)"
+benefit_range: [0.5, 0.95]
+preconditions:
+  - type: "pattern"
+    must_match: "(join inner (and (eq ?lk ?rk) ?rest) ?left ?right)"
+    description: "Inner join with compound condition containing equality"
+  - type: "predicate"
+    condition: "has_equality_predicate(?cond)"
+    description: "Join condition contains at least one equality predicate"
+---
+
+# ExtractEquijoinPredicate
+
+## Description
+
+Separates equality predicates from non-equality predicates in join
+conditions. Equality predicates (equijoin conditions) enable hash join
+and merge join algorithms, which are dramatically faster than nested
+loop joins with arbitrary conditions.
+
+When a join condition is a conjunction like `A.x = B.y AND A.z > B.w`,
+this rule restructures it so the equality portion becomes the join
+condition and the non-equality portion becomes a post-join filter.
+
+**When to apply**: Any inner join whose condition is a conjunction
+containing at least one equality predicate alongside non-equality
+predicates.
+
+**Why it works**: Hash join and merge join require equijoin keys.
+By extracting the equality predicates into the join condition and
+moving non-equality predicates to a post-join filter, the optimizer
+can select hash join or merge join for the equijoin portion instead
+of falling back to nested loop join for the entire condition.
+
+**Impact**: 10x-100x for joins that would otherwise use nested loop.
+
+## Relational Algebra
+
+```latex
+-- Before: inner join with mixed condition
+$$
+R \Join_{R.k = S.k \;\wedge\; R.x > S.y} S
+$$
+
+-- After: filter over equijoin
+$$
+\sigma_{R.x > S.y}\left(R \Join_{R.k = S.k} S\right)
+$$
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Extract equality predicate from conjunction to become join condition
+rw!("extract-equijoin-from-and-left";
+    "(join inner (and (eq ?lk ?rk) ?rest) ?left ?right)" =>
+    "(filter ?rest (join inner (eq ?lk ?rk) ?left ?right))"
+),
+
+// Extract equality predicate from right side of conjunction
+rw!("extract-equijoin-from-and-right";
+    "(join inner (and ?rest (eq ?lk ?rk)) ?left ?right)" =>
+    "(filter ?rest (join inner (eq ?lk ?rk) ?left ?right))"
+),
+```
+
+## Preconditions
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
+
+**Restrictions:**
+- Only applies to INNER joins (outer join semantics differ)
+- Condition must be a conjunction with at least one equality
+- The equality predicate must reference columns from both sides
+
+## Cost Model
+
+```rust
+fn estimated_benefit(input_rows: f64) -> f64 {
+    // Hash join is O(n+m) vs nested loop O(n*m)
+    // For large inputs, this is a massive improvement
+    (input_rows * input_rows * 0.001).min(0.95)
+}
+```
+
+**Typical benefit**: 50-95% cost reduction for joins with mixed conditions.
+
+## Test Cases
+
+```sql
+-- Expected: equality extracted, range becomes post-filter
+SELECT * FROM orders o
+JOIN customers c ON o.customer_id = c.id AND o.amount > c.credit_limit;
+```
+
+```sql
+-- Expected: both equalities stay as join condition (no extraction needed)
+SELECT * FROM orders o
+JOIN items i ON o.id = i.order_id AND o.store_id = i.store_id;
+```
+
+```sql
+-- Expected: no change (only non-equality condition, no equijoin)
+SELECT * FROM a JOIN b ON a.x > b.y;
+```
+
+## References
+
+- DataFusion: `datafusion/optimizer/src/extract_equijoin_predicate.rs`
+- Calcite: `org.apache.calcite.rel.rules.JoinExtractFilterRule`
+- PostgreSQL: `src/backend/optimizer/plan/createplan.c` (extract_actual_join_clauses)

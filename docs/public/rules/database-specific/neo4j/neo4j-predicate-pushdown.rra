@@ -1,0 +1,48 @@
+---
+id: neo4j-predicate-pushdown
+name: "Predicate Pushdown Before Expansion"
+category: logical/predicate-pushdown
+databases: [neo4j]
+version: "1.0.0"
+authors: ["Database Contributors", "RA Contributors"]
+tags: [database-mining, neo4j, optimization]
+complexity: "O(n)"
+benefit_range: [1.0, 10.0]
+---
+
+# Predicate Pushdown Before Expansion
+
+## Description
+
+Pushes WHERE clauses before graph pattern expansion.
+
+**When to apply**: During query optimization phase.
+
+## Relational Algebra
+
+```latex
+-- Before
+$$
+(expand (filter (scan users) (age > 18)) :FOLLOWS)
+$$
+
+-- After
+$$
+(filter (expand (scan users) :FOLLOWS) (age > 18))
+$$
+
+```
+
+## Preconditions
+
+- Predicate independent of expansion
+
+## Test Cases
+
+```sql
+SELECT * FROM table WHERE condition;
+```
+
+## References
+
+- Database documentation

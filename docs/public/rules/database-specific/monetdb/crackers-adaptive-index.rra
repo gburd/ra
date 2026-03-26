@@ -1,0 +1,128 @@
+---
+id: monetdb-crackers-adaptive-index
+name: MonetDB Database Cracking (Adaptive Indexing)
+category: database-specific/monetdb
+databases: [monetdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, monetdb, cracking, adaptive, index, self-organizing]
+complexity: O(n)
+benefit_range: [0.2, 0.8]
+---
+
+# MonetDB Database Cracking (Adaptive Indexing)
+
+## Description
+
+Database Cracking is MonetDB's adaptive indexing technique.  Instead
+of pre-building a full index, each query physically reorganizes the
+column by partitioning it around the query's selection bounds.
+Subsequent queries with similar predicates benefit from the
+increasingly refined physical order.
+
+**When to apply**: A column is queried repeatedly with range
+predicates, and no pre-built index exists.
+
+**Why it works**: The first query on a column scans it fully but also
+partitions it (like quicksort's partition step).  Each subsequent
+query only scans the relevant partition and further refines it.  After
+a few queries, the column converges toward sorted order in the
+frequently queried ranges.
+
+**Database version**: MonetDB 11.11+ (experimental), improved in later
+versions
+
+## Relational Algebra
+
+```latex
+-- Query 1: crack at value 100
+$$
+\sigma_{x > 100}(crack(column))
+$$
+-- Column partitioned into [<=100, >100]
+
+-- Query 2: crack at value 50
+$$
+\sigma_{x > 50}(crack(column))
+$$
+-- Column refined: [<=50, 51..100, >100]
+-- Only scans [51..100, >100] partition
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("monetdb-crack-select";
+    "(filter (> ?col ?val) (scan ?table))" =>
+    "(crack-select ?col ?val ?table)"
+    if is_database("monetdb")
+    if is_crackable("?col")
+    if not_fully_indexed("?col")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(column: &Column) -> bool {
+    !column.has_full_index()
+    && column.data_type().is_orderable()
+    && column.is_dense_bat()
+}
+```
+
+**Restrictions:**
+- Cracking physically reorders column data (in-place modification)
+- Concurrent queries on the same column require synchronization
+- Works best for range queries; point queries benefit less
+- Initial crack operations are as expensive as a full scan
+- Read-only columns only (updates invalidate crack structure)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    total_rows: f64,
+    num_prior_cracks: usize,
+    query_range_fraction: f64,
+) -> f64 {
+    let full_scan_cost = total_rows * 0.001;
+    // After k cracks, expected partition size shrinks
+    let partition_size =
+        total_rows * query_range_fraction
+        / (num_prior_cracks as f64 + 1.0);
+    let crack_cost = partition_size * 0.001;
+    full_scan_cost - crack_cost
+}
+```
+
+**Typical benefit**: Converges to index-like performance after
+5-10 queries on the same column range.
+
+## Test Cases
+
+```sql
+-- Positive: repeated range queries
+-- Query 1:
+SELECT * FROM sensor_data WHERE temperature > 30;
+-- Cracks column at 30; full scan + partition
+-- Query 2:
+SELECT * FROM sensor_data WHERE temperature > 25;
+-- Only scans partition <= 30, cracks at 25
+```
+
+```sql
+-- Negative: single query on column
+SELECT * FROM archive WHERE value > 1000;
+-- Single query sees no cracking benefit (first crack = full scan)
+```
+
+## References
+
+Idreos, S. et al. "Database Cracking" (CIDR 2007)
+Idreos, S. et al. "Merging What's Cracked, Cracking What's Merged"
+(PVLDB 2011)
+Source: monetdb5/modules/kernel/bat5.c (cracking integration)

@@ -1,0 +1,292 @@
+---
+id: system-r-dp-join-order
+name: "System R Dynamic Programming Join Ordering"
+category: cost-models/system-r
+databases: [postgresql, mysql, duckdb, cockroachdb, mssql, oracle]
+execution_models: [volcano, vectorized]
+version: "1.0.0"
+authors: ["Selinger et al. 1979 - IBM Research"]
+tags: [join-ordering, dynamic-programming, system-r, optimizer, classic]
+complexity: "O(2^n) for n relations"
+benefit_range: [0.5, 100.0]
+---
+
+# System R Dynamic Programming Join Ordering
+
+## Description
+
+The System R optimizer introduced the first practical algorithm for
+finding the optimal join order using bottom-up dynamic programming.
+The algorithm enumerates all subsets of the relations to be joined,
+computing the cheapest plan for each subset based on the cheapest plans
+for smaller subsets. For n relations, it considers O(2^n) subsets but
+prunes by considering only "connected" subsets (subsets where every
+relation shares a join predicate with at least one other relation in
+the subset).
+
+**When to apply**: Any multi-table query (2+ relations) where the
+join order significantly affects performance. This is the core of
+System R's optimizer and the ancestor of every modern cost-based
+optimizer.
+
+**Why it works**: The key insight is optimal substructure: the best
+plan for joining {R, S, T} consists of the best plan for some pair
+(e.g., {R, S}) joined with the remaining relation T. By computing
+and caching the best plan for every subset bottom-up, the algorithm
+avoids redundant recomputation. The exponential cost O(2^n) is
+acceptable for n <= 10-15 relations typical in SQL queries.
+
+## Relational Algebra
+
+```latex
+-- Input: relations {R1, R2, ..., Rn} with join predicates
+-- Output: optimal join tree minimizing COST formula
+
+$$
+Algorithm:
+1. For each single relation Ri:
+   opt_plan({Ri}) = best access path for Ri
+$$
+
+$$
+2. For subset_size = 2 to n:
+   For each \subseteq S of size subset_size:
+     For each relation Rj in S:
+       candidate = \bowtie(opt_plan(S \ {Rj}), access_path(Rj))
+       if cost(candidate) < cost(opt_plan(S)):
+         opt_plan(S) = candidate
+$$
+
+$$
+3. Return opt_plan({R1, ..., Rn})
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+struct SystemRJoinEnumerator {
+    relations: Vec<RelationStats>,
+    predicates: Vec<JoinPredicate>,
+    cost_model: SystemRCostModel,
+}
+
+impl SystemRJoinEnumerator {
+    fn find_optimal_join_order(&self) -> JoinPlan {
+        let n = self.relations.len();
+
+        // dp_table[subset_bitmask] = (best_plan, cost)
+        let mut dp_table: HashMap<u32, (JoinPlan, f64)> =
+            HashMap::new();
+
+        // Base case: single relations
+        for i in 0..n {
+            let mask = 1u32 << i;
+            let access_paths = self.enumerate_access_paths(i);
+            let best = access_paths.into_iter()
+                .min_by(|a, b| {
+                    self.cost_model.cost(a)
+                        .partial_cmp(&self.cost_model.cost(b))
+                        .unwrap()
+                })
+                .unwrap();
+            let cost = self.cost_model.cost(&best);
+            dp_table.insert(mask, (best, cost));
+        }
+
+        // Bottom-up: subsets of increasing size
+        for size in 2..=n {
+            for subset in subsets_of_size(n, size) {
+                // Only consider connected subsets
+                if !self.is_connected(subset) {
+                    continue;
+                }
+
+                let mut best_cost = f64::MAX;
+                let mut best_plan = None;
+
+                // Try all ways to split subset into
+                // (left_subset, single_relation)
+                for j in 0..n {
+                    if subset & (1 << j) == 0 {
+                        continue;
+                    }
+
+                    let left = subset & !(1 << j);
+                    if left == 0 {
+                        continue;
+                    }
+
+                    // Must have join predicate between left and Rj
+                    if !self.has_join_predicate(left, j) {
+                        continue;
+                    }
+
+                    if let Some((left_plan, _)) =
+                        dp_table.get(&left)
+                    {
+                        for access_path in
+                            self.enumerate_access_paths(j)
+                        {
+                            let candidate = JoinPlan::Join {
+                                left: Box::new(left_plan.clone()),
+                                right: Box::new(access_path),
+                                predicate: self.find_predicate(
+                                    left, j,
+                                ),
+                            };
+                            let cost =
+                                self.cost_model.cost(&candidate);
+
+                            if cost < best_cost {
+                                best_cost = cost;
+                                best_plan = Some(candidate);
+                            }
+                        }
+                    }
+                }
+
+                if let Some(plan) = best_plan {
+                    dp_table.insert(subset, (plan, best_cost));
+                }
+            }
+        }
+
+        let full_mask = (1u32 << n) - 1;
+        dp_table.remove(&full_mask).unwrap().0
+    }
+
+    fn is_connected(&self, subset: u32) -> bool {
+        // Check that every relation in subset shares a join
+        // predicate with at least one other relation in subset
+        let rels: Vec<usize> = (0..32)
+            .filter(|&i| subset & (1 << i) != 0)
+            .collect();
+
+        if rels.len() <= 1 {
+            return true;
+        }
+
+        // BFS from first relation
+        let mut visited = 0u32;
+        let mut queue = vec![rels[0]];
+        visited |= 1 << rels[0];
+
+        while let Some(r) = queue.pop() {
+            for &other in &rels {
+                if visited & (1 << other) != 0 {
+                    continue;
+                }
+                if self.has_join_predicate(
+                    1 << r, other,
+                ) {
+                    visited |= 1 << other;
+                    queue.push(other);
+                }
+            }
+        }
+
+        visited == subset
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(query: &RelExpr) -> bool {
+    let n = count_relations(query);
+    // DP is practical up to ~15-20 relations
+    // Beyond that, use heuristic or randomized search
+    n >= 2 && n <= 20
+}
+```
+
+**Restrictions:**
+- Exponential in number of relations: O(2^n) subsets
+- Practical limit: 10-15 relations (System R), 15-20 (modern)
+- System R restricted to left-deep trees, reducing search to O(n!)
+- Cartesian products avoided by requiring connected subsets
+- Does not consider bushy trees (see left-deep-trees-only.rra)
+
+## Cost Model
+
+```rust
+fn dp_overhead(n: usize) -> f64 {
+    // Number of subsets considered
+    let subsets = (2u64.pow(n as u32)) as f64;
+    // Cost per subset: enumerate splits + access paths
+    let per_subset_cost = n as f64 * 10.0; // microseconds
+    subsets * per_subset_cost
+}
+```
+
+**Planning time complexity:**
+- 2 relations: 4 subsets, ~microseconds
+- 5 relations: 32 subsets, ~milliseconds
+- 10 relations: 1024 subsets, ~10ms
+- 15 relations: 32768 subsets, ~seconds
+- 20 relations: 1M subsets, ~minutes (use heuristics beyond this)
+
+## Test Cases
+
+### Positive: 4-way join with varying cardinalities
+
+```sql
+-- orders: 1M rows, lineitem: 6M, customer: 150K, nation: 25
+SELECT n.name, COUNT(*)
+FROM nation n
+JOIN customer c ON n.nationkey = c.nationkey
+JOIN orders o ON c.custkey = o.custkey
+JOIN lineitem l ON o.orderkey = l.orderkey
+WHERE n.name = 'FRANCE'
+GROUP BY n.name;
+
+-- DP explores 2^4 - 1 = 15 subsets
+-- Optimal: nation (filter) -> customer -> orders -> lineitem
+-- Worst order (lineitem first): 1000x more expensive
+```
+
+### Positive: Star schema with selective dimension
+
+```sql
+SELECT SUM(f.amount)
+FROM fact f
+JOIN dim_time t ON f.time_id = t.id
+JOIN dim_product p ON f.product_id = p.id
+JOIN dim_region r ON f.region_id = r.id
+WHERE t.year = 2024 AND p.category = 'electronics';
+
+-- DP finds: join selective dimensions first
+-- dim_time (filter) -> fact -> dim_product (filter) -> dim_region
+```
+
+### Negative: 25-way join (impractical for pure DP)
+
+```sql
+-- Query joining 25 tables (ERP system)
+-- 2^25 = 33M subsets: DP too expensive
+-- Fall back to heuristic join ordering
+```
+
+## References
+
+**Original paper:**
+- Selinger et al., "Access Path Selection in a Relational Database Management System", SIGMOD 1979
+  - DOI: 10.1145/582095.582099
+  - Section 6: "Computation of costs: the optimizer"
+  - Algorithm described in Section 6.3
+
+**Extensions:**
+- Moerkotte, Neumann, "Analysis of Two Existing and One New DP Algorithm for the Generation of Optimal Bushy Join Trees", VLDB 2006
+  - DPccp: connected subgraph complement pairs algorithm
+- Fender, Moerkotte, "A New, Highly Efficient, and Easy to Implement Top-Down Join Enumeration Algorithm", ICDE 2011
+  - Top-down DP variant (DPHyp)
+
+**Key insight from Selinger:**
+- "The number of alternative join orders is large, but the dynamic
+  programming approach avoids redundant computation by building up
+  optimal subplans bottom-up."

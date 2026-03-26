@@ -1,0 +1,135 @@
+---
+id: push-filter-below-exchange
+name: Push Filter Below Exchange
+category: distributed/data-movement
+databases: [presto, trino, spark, cockroachdb, greenplum, citus]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, filter, pushdown, data-movement, network]
+complexity: O(n)
+benefit_range: [0.3, 0.95]
+---
+
+# Push Filter Below Exchange
+
+## Description
+
+Moves a filter (selection) below an exchange operator so that rows are
+eliminated before they are serialized and sent over the network. This is
+the distributed analogue of predicate pushdown and is one of the highest
+impact distributed optimizations.
+
+**When to apply**: A filter sits above an exchange and the filter
+predicate does not depend on columns introduced by the exchange itself
+(i.e., the predicate can be evaluated on the source node).
+
+**Why it works**: Every row eliminated before the exchange saves
+serialization, network transfer, and deserialization cost. With a
+selective predicate (e.g., 1% selectivity), this can reduce network
+traffic by two orders of magnitude.
+
+## Relational Algebra
+
+```latex
+$$
+\sigma_{p}(Exchange[d](R)) \rightarrow Exchange[d](\sigma_{p}(R))
+  \text{where} \text{attrs}(p) \subseteq \text{attrs}(R)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("push-filter-below-exchange";
+    "(filter ?pred (exchange ?type ?child))" =>
+    "(exchange ?type (filter ?pred ?child))"
+    if predicate_evaluable_on_child("?pred", "?child")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(pred: &Expr, child: &RelNode) -> bool {
+    // Predicate must only reference columns available in child
+    let pred_cols = pred.referenced_columns();
+    pred_cols.is_subset(&child.output_columns())
+    // Predicate must be deterministic
+    && pred.is_deterministic()
+}
+```
+
+**Restrictions:**
+- Predicate must only reference columns from the child relation
+- Non-deterministic predicates (e.g., `random() < 0.1`) must not be
+  pushed because they would produce different results on each node
+- If the exchange changes column identifiers, adjust predicate references
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    rows: f64,
+    row_bytes: f64,
+    selectivity: f64,
+    num_nodes: u32,
+    network_bandwidth: f64,
+) -> f64 {
+    let bytes_before = rows * row_bytes;
+    let bytes_after = rows * selectivity * row_bytes;
+    let saved = bytes_before - bytes_after;
+    // Network savings per node
+    (saved / network_bandwidth) * (num_nodes - 1) as f64
+}
+```
+
+**Typical benefit**: Proportional to selectivity. A 1% selective filter
+saves ~99% of network transfer for that subtree.
+
+## Test Cases
+
+```sql
+-- Positive: highly selective filter pushed below shuffle
+-- Before plan:
+-- Filter(region = 'US')
+--   Exchange[hash(customer_id)]
+--     Scan(orders)
+
+-- After plan:
+-- Exchange[hash(customer_id)]
+--   Filter(region = 'US')
+--     Scan(orders)
+-- 95% of rows eliminated before network transfer
+```
+
+```sql
+-- Positive: filter pushed below broadcast
+-- Before plan:
+-- Filter(active = true)
+--   Exchange[broadcast]
+--     Scan(customers)
+
+-- After plan:
+-- Exchange[broadcast]
+--   Filter(active = true)
+--     Scan(customers)
+-- Smaller table is broadcast to all nodes
+```
+
+```sql
+-- Negative: non-deterministic predicate cannot be pushed
+-- Filter(random() < 0.01)
+--   Exchange[hash(id)]
+--     Scan(events)
+-- Pushing would sample independently on each node
+```
+
+## References
+
+Presto/Trino: presto-main/src/main/java/com/facebook/presto/sql/planner/iterative/rule/PushFilterThroughExchange.java
+Spark SQL: sql/catalyst/src/main/scala/org/apache/spark/sql/catalyst/optimizer/Optimizer.scala - PushDownPredicates
+CockroachDB: pkg/sql/opt/norm/rules/select.opt
+Greenplum: src/backend/optimizer/plan/createplan.c

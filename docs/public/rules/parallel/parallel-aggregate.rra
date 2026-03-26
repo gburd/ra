@@ -1,0 +1,175 @@
+# Parallel Aggregation
+#
+# Converts aggregation into parallel two-phase aggregation:
+# 1. Partial aggregation in each worker
+# 2. Final aggregation to combine partial results
+#
+# Example transformation:
+#   Aggregate(group_by=[region], aggs=[Sum(sales)], input=Scan(orders))
+#   =>
+#   Aggregate(  # Final aggregation
+#     group_by=[region],
+#     aggs=[Sum(partial_sum)],
+#     input=Gather(
+#       ParallelAggregate(  # Partial aggregation
+#         group_by=[region],
+#         aggs=[Sum(sales)],
+#         input=ParallelScan(orders),
+#         workers=4
+#       )
+#     )
+#   )
+
+name: parallel-aggregate
+description: Convert aggregation to parallel two-phase aggregation
+version: 1.0.0
+tags: [parallel, physical, performance, aggregate]
+
+pattern: |
+  Aggregate(
+    group_by=$gb,
+    aggregates=$aggs,
+    input=$input
+  )
+
+condition: |
+  # Check if input is large enough for parallelism
+  estimated_rows($input) > 100000 &&
+  # Check if we have available CPU cores
+  hardware.cpu_cores >= 2 &&
+  # Check if parallel execution is enabled
+  config.parallel.max_parallel_workers > 0 &&
+  # Check if all aggregates support partial aggregation
+  all_aggregates_parallelizable($aggs)
+
+transform: |
+  # Calculate optimal worker count
+  let workers = min(
+    hardware.cpu_cores - 1,
+    config.parallel.max_parallel_workers_per_gather,
+    max(1, estimated_rows($input) / 100000)  # 1 worker per 100k rows
+  );
+
+  # Create two-phase aggregation:
+  # Phase 1: Partial aggregation in parallel
+  # Phase 2: Final aggregation to combine results
+  Aggregate(
+    group_by=$gb,
+    aggregates=convert_to_final_aggregates($aggs),
+    input=Gather(
+      input=ParallelAggregate(
+        group_by=$gb,
+        aggregates=$aggs,
+        input=parallelize_input($input, workers),
+        workers=workers
+      ),
+      workers=workers
+    )
+  )
+
+cost_benefit: |
+  # Sequential aggregation cost
+  let input_rows = estimated_rows($input);
+  let output_groups = estimated_distinct($gb, $input);
+  let seq_cost = input_rows * config.cost.cpu_operator_cost +
+                 output_groups * config.cost.cpu_tuple_cost;
+
+  # Parallel aggregation cost
+  # Each worker processes input_rows/workers rows
+  # Produces ~output_groups partial results
+  let partial_cost = (input_rows / workers) * config.cost.cpu_operator_cost;
+  let combine_cost = (output_groups * workers) * config.cost.cpu_tuple_cost;
+  let coordination_overhead = workers * config.parallel.parallel_setup_cost;
+  let parallel_cost = (partial_cost * 0.8) + combine_cost + coordination_overhead;
+
+  # Benefit is the cost reduction
+  seq_cost - parallel_cost
+
+priority: 85  # High priority for large aggregations
+
+# Helper functions
+helper_functions: |
+  fn parallelize_input(input, workers) {
+    match input {
+      Scan(table=$t) => ParallelScan(table=$t, workers=workers),
+      _ => input  # Keep complex inputs as-is
+    }
+  }
+
+  fn all_aggregates_parallelizable(aggs) {
+    # Check if all aggregates support partial aggregation
+    all(aggs, |agg| match agg {
+      Sum(_) | Count(_) | Min(_) | Max(_) => true,
+      Avg(_) => true,  # Can be split into Sum and Count
+      CountDistinct(_) => false,  # Requires special handling
+      _ => false
+    })
+  }
+
+  fn convert_to_final_aggregates(aggs) {
+    # Convert partial aggregate results to final aggregates
+    # For most aggregates, this is the same function
+    # For AVG, we need Sum(partial_sum)/Sum(partial_count)
+    map(aggs, |agg| match agg {
+      Avg(col) => Div(Sum(col + "_sum"), Sum(col + "_count")),
+      _ => agg  # Sum, Count, Min, Max stay the same
+    })
+  }
+
+  fn estimated_distinct(group_by, input) {
+    # Estimate number of distinct groups
+    if is_empty(group_by) {
+      1  # No grouping = single group
+    } else {
+      min(
+        estimated_rows(input),
+        product(map(group_by, |col| cardinality(col)))
+      )
+    }
+  }
+
+# Test examples
+tests:
+  - name: large_aggregate_parallel
+    input: |
+      Aggregate(
+        group_by=[Column("region")],
+        aggregates=[Sum(Column("sales")), Count(Column("*"))],
+        input=Scan(table="orders")
+      )
+    context:
+      estimated_rows.orders: 1000000
+      hardware.cpu_cores: 8
+      config.parallel.max_parallel_workers: 8
+      config.parallel.max_parallel_workers_per_gather: 4
+    expected: |
+      Aggregate(
+        group_by=[Column("region")],
+        aggregates=[Sum(Column("sales")), Count(Column("*"))],
+        input=Gather(
+          input=ParallelAggregate(
+            group_by=[Column("region")],
+            aggregates=[Sum(Column("sales")), Count(Column("*"))],
+            input=ParallelScan(table="orders", workers=4),
+            workers=4
+          ),
+          workers=4
+        )
+      )
+
+  - name: small_aggregate_no_parallel
+    input: |
+      Aggregate(
+        group_by=[Column("category")],
+        aggregates=[Count(Column("*"))],
+        input=Scan(table="products")
+      )
+    context:
+      estimated_rows.products: 1000
+      hardware.cpu_cores: 8
+    expected: |
+      Aggregate(
+        group_by=[Column("category")],
+        aggregates=[Count(Column("*"))],
+        input=Scan(table="products")
+      )  # No transformation for small tables

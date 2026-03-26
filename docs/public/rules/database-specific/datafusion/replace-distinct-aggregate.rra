@@ -1,0 +1,104 @@
+---
+id: datafusion-replace-distinct-aggregate
+name: DataFusion Replace DISTINCT with Aggregate
+category: database-specific/datafusion
+databases: [datafusion]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, datafusion, distinct, aggregate, dedup]
+complexity: O(n)
+benefit_range: [0.1, 0.4]
+---
+
+# DataFusion Replace DISTINCT with Aggregate
+
+## Description
+
+Replaces SELECT DISTINCT with a GROUP BY aggregate that produces the
+same deduplicated result.  DataFusion's optimizer converts DISTINCT
+into an aggregate node because the hash aggregate operator is highly
+optimized for Arrow's columnar format and can leverage partial
+aggregation.
+
+**When to apply**: A plan contains a DISTINCT (deduplication) node
+that can be expressed as GROUP BY on all output columns.
+
+**Why it works**: DataFusion's hash aggregate implementation is
+heavily optimized for Arrow arrays with specialized code paths for
+common types.  Using GROUP BY enables two-phase aggregation
+(partial + final) when repartitioning is in play, distributing
+the deduplication work across threads.
+
+**Database version**: DataFusion 20.0+
+
+## Relational Algebra
+
+```latex
+-- Before: explicit distinct
+$$
+delta(\pi_{a, b, c}(R))
+$$
+
+-- After: group by
+$$
+\gamma_{a, b, c}(R)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("datafusion-distinct-to-groupby";
+    "(distinct (project ?cols ?input))" =>
+    "(aggregate (list) ?cols ?input)"
+    if is_database("datafusion")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(plan: &LogicalPlan) -> bool {
+    matches!(plan, LogicalPlan::Distinct(Distinct::All))
+}
+```
+
+**Restrictions:**
+- DISTINCT ON (PostgreSQL extension) has different semantics
+- If input is already unique (e.g., primary key included), DISTINCT
+  can be eliminated entirely instead
+
+## Cost Model
+
+```rust
+fn estimated_benefit(rows: f64, columns: usize) -> f64 {
+    // Hash aggregate is faster than sort-based dedup
+    // and enables partial aggregation across partitions
+    rows * columns as f64 * 0.0001
+}
+```
+
+**Typical benefit**: Enables two-phase parallel deduplication, giving
+near-linear speedup with partition count on multi-core machines.
+
+## Test Cases
+
+```sql
+-- Positive: DISTINCT to GROUP BY
+SELECT DISTINCT department, title FROM employees;
+-- Converted to: GROUP BY department, title
+```
+
+```sql
+-- Negative: DISTINCT with primary key (can be eliminated)
+SELECT DISTINCT id, name FROM users;
+-- If id is PK, DISTINCT is unnecessary
+```
+
+## References
+
+DataFusion: datafusion/optimizer/src/replace_distinct_aggregate.rs
+DataFusion: datafusion/physical-plan/src/aggregates/mod.rs

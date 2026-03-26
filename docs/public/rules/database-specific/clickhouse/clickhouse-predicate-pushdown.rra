@@ -1,0 +1,48 @@
+---
+id: clickhouse-predicate-pushdown
+name: "Predicate Pushdown Below Aggregates"
+category: logical/predicate-pushdown
+databases: [clickhouse]
+version: "1.0.0"
+authors: ["Database Contributors", "RA Contributors"]
+tags: [database-mining, clickhouse, optimization]
+complexity: "O(n)"
+benefit_range: [1.0, 10.0]
+---
+
+# Predicate Pushdown Below Aggregates
+
+## Description
+
+Pushes WHERE predicates below GROUP BY and aggregates when semantically safe.
+
+**When to apply**: During query optimization phase.
+
+## Relational Algebra
+
+```latex
+-- Before
+$$
+(group-by [col1] (sum col2) (filter (scan t) (gt col3 10)))
+$$
+
+-- After
+$$
+(group-by [col1] (sum col2) (filter (scan t) (and (gt col3 10) (not-null col1))))
+$$
+
+```
+
+## Preconditions
+
+- Predicate on non-aggregated column only
+
+## Test Cases
+
+```sql
+SELECT * FROM table WHERE condition;
+```
+
+## References
+
+- Database documentation

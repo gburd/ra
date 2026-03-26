@@ -1,0 +1,116 @@
+---
+id: monetdb-mal-pipeline-optimization
+name: MonetDB MAL Pipeline Optimization
+category: database-specific/monetdb
+databases: [monetdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, monetdb, MAL, pipeline, operator-fusion]
+complexity: O(n)
+benefit_range: [0.2, 0.6]
+---
+
+# MonetDB MAL Pipeline Optimization
+
+## Description
+
+MonetDB's MAL (MonetDB Assembly Language) optimizer fuses consecutive
+column operations into a single pipeline pass.  Instead of
+materializing intermediate BATs between each operation (select, join,
+project), the pipeline optimizer generates code that processes
+multiple operations per tuple in a single scan.
+
+**When to apply**: Consecutive MAL instructions operate on the same
+column or OID chain and can be fused into a single loop.
+
+**Why it works**: Materializing intermediate BATs incurs memory
+allocation and cache pollution.  Pipelining processes each value
+through multiple operators before writing a result, improving cache
+locality and reducing memory traffic.
+
+**Database version**: MonetDB 11.19+ (mitosis/mergetable pipeline)
+
+## Relational Algebra
+
+```latex
+-- Before: materialized intermediates
+$$
+T1 = \sigma_{price > 100}(scan(products))
+T2 = \pi_{name}(T1)
+$$
+
+-- After: pipelined (no intermediate BAT for T1)
+$$
+\pi_{name}(\sigma_{price > 100}(scan(products)))
+$$
+-- executed as single pass
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("monetdb-mal-pipeline";
+    "(project ?cols (filter ?pred (scan ?table)))" =>
+    "(pipeline-scan ?table ?pred ?cols)"
+    if is_database("monetdb")
+    if ops_are_fuseable("?pred", "?cols")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(ops: &[MalOp]) -> bool {
+    ops.windows(2).all(|pair| {
+        pair[0].output_bat() == pair[1].input_bat()
+        && !pair[1].requires_random_access()
+    })
+}
+```
+
+**Restrictions:**
+- Cannot fuse operations that require random access to intermediate
+  results (e.g., hash joins need the full build side)
+- The `mitosis` optimizer splits pipelines across CPU cores
+- Pipeline depth is limited by register pressure
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    rows: f64,
+    num_fused_ops: usize,
+) -> f64 {
+    let materialized_cost =
+        rows * num_fused_ops as f64 * 0.01;
+    let pipelined_cost = rows * 0.01;
+    materialized_cost - pipelined_cost
+}
+```
+
+**Typical benefit**: 2-5x for chains of 3+ column operations.
+
+## Test Cases
+
+```sql
+-- Positive: select + project fuseable
+SELECT name FROM products WHERE price > 100;
+-- Single pipeline pass: scan price, filter, project name
+```
+
+```sql
+-- Negative: join breaks pipeline
+SELECT p.name FROM products p
+JOIN categories c ON p.cat_id = c.id
+WHERE p.price > 100;
+-- Hash join requires materializing both sides
+```
+
+## References
+
+MonetDB: "The Multi-Core Challenge" (CWI tech report)
+Source: monetdb5/optimizer/opt_pipeline.c
+MonetDB: MAL optimizer pipeline documentation

@@ -1,0 +1,27 @@
+---
+id: impala-hdfs-caching
+name: HDFS Caching (Impala)
+category: database-specific/impala
+databases: [impala]
+execution_models: [volcano, vectorized, push-based]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# HDFS Caching (Impala)
+
+## Metadata
+- **Rule ID**: `impala-hdfs-caching`
+- **Category**: Database-Specific / Impala
+- **Source**: Apache Impala
+
+## Description
+
+Impala integrates with HDFS centralized caching to cache hot data blocks in memory across the cluster, reducing disk I/O.
+
+## Tags
+`database-specific`, `impala`, `hdfs`, `caching`, `hot-data`

@@ -1,0 +1,44 @@
+---
+id: drill-late-materialization
+name: Late Materialization (Drill)
+category: database-specific/drill
+databases: [drill]
+execution_models: [volcano, vectorized, push-based]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# Late Materialization (Drill)
+
+## Metadata
+- **Rule ID**: `drill-late-materialization`
+- **Category**: Database-Specific / Drill
+- **Source**: Apache Drill
+
+## Description
+
+Drill delays reading full row values until after filtering and projection, reading only required columns from Parquet/ORC storage.
+
+## Test Cases
+
+### Test 1: Selective filter on wide table
+```sql
+-- Table: 100 columns, 1B rows
+-- Query: SELECT name, email FROM users WHERE age > 25;
+
+-- Late materialization:
+-- 1. Read only 'age' column, apply filter
+-- 2. Get row IDs of matching rows (10M)
+-- 3. Read 'name', 'email' only for matching rows
+-- Savings: Read 3 columns instead of 100
+```
+
+## References
+1. **Paper**: "Column-Oriented Database Systems" (Abadi et al., VLDB 2009)
+
+## Tags
+`database-specific`, `drill`, `late-materialization`, `columnar`, `parquet`

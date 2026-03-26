@@ -1,0 +1,48 @@
+---
+id: cockroachdb-partial-index-scan
+name: "Generate Partial Index Scans"
+category: physical/index-selection
+databases: [cockroachdb]
+version: "1.0.0"
+authors: ["Database Contributors", "RA Contributors"]
+tags: [database-mining, cockroachdb, optimization]
+complexity: "O(n)"
+benefit_range: [1.0, 10.0]
+---
+
+# Generate Partial Index Scans
+
+## Description
+
+Generates unconstrained index scans over partial indexes with predicates implied by filters.
+
+**When to apply**: During query optimization phase.
+
+## Relational Algebra
+
+```latex
+-- Before
+$$
+(scan orders WHERE status \!= 'cancelled')
+$$
+
+-- After
+$$
+(index-scan orders_active_idx)
+$$
+
+```
+
+## Preconditions
+
+- Partial index WHERE predicate is implied by query WHERE clause
+
+## Test Cases
+
+```sql
+SELECT * FROM table WHERE condition;
+```
+
+## References
+
+- Database documentation

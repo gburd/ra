@@ -1,0 +1,238 @@
+---
+id: morsel-driven-scan
+name: Morsel-Driven Parallel Table Scan
+category: execution-models
+version: 1.0.0
+databases: [HyPer, DuckDB, Umbra]
+authors: [Viktor Leis, Thomas Neumann]
+tags: [execution, parallel, scan, morsel, atomic, prefetch]
+standard: HyPer morsel model
+---
+
+# Morsel-Driven Parallel Table Scan
+
+## Description
+
+The morsel-driven table scan is the simplest parallelizable operator: it divides the table into morsels and distributes them across worker threads using a single atomic counter. Each worker reads its morsel's range of rows and processes them through the pipeline. The scan operator serves as the morsel source -- it decides how data is partitioned and distributed.
+
+**Key characteristics:**
+- **Atomic counter**: Workers claim morsels via `fetch_add` on a shared counter
+- **Lock-free**: No mutex contention between workers during scan
+- **Sequential I/O per worker**: Each morsel covers contiguous pages
+- **NUMA-local**: Morsels mapped to memory near the processing core
+- **Prefetching**: Workers prefetch next morsel's pages while processing current
+
+**Trade-offs:**
+- Very small tables may not benefit (overhead > parallelism gain)
+- Last few morsels cause tail latency (not all workers finish together)
+- Random access patterns (index scan) don't benefit as much
+
+## Relational Algebra
+
+```
+ParallelScan(table, morsel_size) -> parallel Iterator<Morsel>
+
+MorselSource:
+  counter: AtomicUsize = 0
+
+  fn next_morsel(worker_id) -> Option<Morsel>:
+    offset = counter.fetch_add(morsel_size)
+    if offset >= table.row_count:
+      return None
+    end = min(offset + morsel_size, table.row_count)
+    return Morsel { rows: table[offset..end] }
+
+Worker execution:
+  while morsel = source.next_morsel(my_id):
+    for row in morsel.rows:
+      pipeline.process(row)  // Apply filters, joins, etc.
+```
+
+## Implementation
+
+```rust
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+/// Parallel morsel-driven table scan
+pub struct MorselDrivenScan {
+    table: Arc<Table>,
+    morsel_size: usize,
+    current_offset: AtomicUsize,
+    columns_needed: Vec<ColumnId>,
+}
+
+impl MorselDrivenScan {
+    pub fn new(
+        table: Arc<Table>,
+        morsel_size: usize,
+        columns: Vec<ColumnId>,
+    ) -> Self {
+        Self {
+            table,
+            morsel_size,
+            current_offset: AtomicUsize::new(0),
+            columns_needed: columns,
+        }
+    }
+
+    /// Claim next morsel (lock-free, called by any worker)
+    pub fn next_morsel(&self) -> Option<Morsel> {
+        let offset = self.current_offset.fetch_add(
+            self.morsel_size,
+            Ordering::Relaxed,
+        );
+
+        if offset >= self.table.row_count() {
+            return None;
+        }
+
+        let end = (offset + self.morsel_size)
+            .min(self.table.row_count());
+
+        // Read only needed columns for this morsel range
+        let data = self.table.read_range(
+            offset,
+            end,
+            &self.columns_needed,
+        );
+
+        Some(Morsel {
+            start: offset,
+            end,
+            data,
+        })
+    }
+
+    /// NUMA-aware morsel claiming: prefer local morsels
+    pub fn next_morsel_numa(
+        &self,
+        worker_numa_node: usize,
+    ) -> Option<Morsel> {
+        // First try to get a morsel from local NUMA region
+        let local_start = self.table.numa_region_start(worker_numa_node);
+        let local_end = self.table.numa_region_end(worker_numa_node);
+
+        let offset = self.current_offset.fetch_add(
+            self.morsel_size,
+            Ordering::Relaxed,
+        );
+
+        if offset >= self.table.row_count() {
+            return None;
+        }
+
+        let end = (offset + self.morsel_size)
+            .min(self.table.row_count());
+
+        let is_local = offset >= local_start && end <= local_end;
+
+        Some(Morsel {
+            start: offset,
+            end,
+            data: self.table.read_range(
+                offset, end, &self.columns_needed,
+            ),
+            numa_local: is_local,
+        })
+    }
+}
+
+/// Worker function for parallel scan pipeline
+pub fn worker_scan_pipeline(
+    scan: &MorselDrivenScan,
+    pipeline: &CompiledPipeline,
+    local_state: &mut ThreadLocalState,
+) {
+    while let Some(morsel) = scan.next_morsel() {
+        // Process each row in the morsel through the pipeline
+        for row_idx in 0..morsel.size() {
+            pipeline.process_row(&morsel, row_idx, local_state);
+        }
+    }
+}
+
+/// Cost model for parallel scan
+pub fn parallel_scan_cost(
+    total_rows: f64,
+    morsel_size: usize,
+    num_workers: usize,
+    row_size: usize,
+) -> f64 {
+    let num_morsels = (total_rows / morsel_size as f64).ceil();
+
+    // Sequential scan cost
+    let page_size = 8192;
+    let pages = (total_rows * row_size as f64 / page_size as f64).ceil();
+    let io_cost = pages * 0.08; // Sequential read
+
+    // Parallel speedup (limited by memory bandwidth)
+    let bandwidth_limit = 0.4; // efficiency at bandwidth saturation
+    let effective_workers = if num_workers <= 4 {
+        num_workers as f64
+    } else {
+        4.0 + (num_workers as f64 - 4.0) * bandwidth_limit
+    };
+
+    // Scheduling overhead
+    let sched_cost = num_morsels * 0.0001;
+
+    io_cost / effective_workers + sched_cost
+}
+```
+
+## Cost Model
+
+**Parallel Speedup:**
+- CPU-bound pipeline: near-linear up to core count
+- Memory-bound scan: saturates at ~4-8 cores (memory bandwidth)
+- Effective speedup: `min(num_workers, bandwidth_limit)`
+
+**Scheduling:**
+- Morsel claim: ~20 ns (single atomic fetch-add)
+- No lock contention: atomic operation is hardware-supported
+- Total scheduling: `num_morsels x 20 ns`
+
+**I/O Efficiency:**
+- Sequential within morsel: optimal prefetching
+- Between morsels: may skip pages (but typically contiguous)
+- Column projection: read only needed columns
+
+**Tail Latency:**
+- Last morsel problem: some workers finish before others
+- Mitigation: small morsels (more of them, better balance)
+- Optimal: num_morsels >= 10 x num_workers
+
+## Test Cases
+
+```sql
+-- Test 1: Simple parallel scan
+SELECT COUNT(*) FROM lineitem;
+-- 6M rows, morsel_size=100K: 60 morsels
+-- 16 workers: 4 morsels each, ~15x speedup
+
+-- Test 2: Parallel scan with filter
+SELECT * FROM orders WHERE amount > 10000;
+-- Workers independently filter their morsels
+-- No synchronization needed for pipelined filter
+
+-- Test 3: Small table (overhead check)
+SELECT * FROM regions; -- 5 rows
+-- Expected: Single morsel, one worker only
+-- Parallelism overhead not justified
+
+-- Test 4: NUMA-local preference
+SELECT SUM(amount) FROM transactions;
+-- On 2-socket NUMA system: prefer local morsels
+-- Cross-socket access: ~2x higher latency
+```
+
+## References
+
+1. **Leis, Viktor et al**. "Morsel-Driven Parallelism: A NUMA-Aware Query Evaluation Framework." SIGMOD 2014.
+   - Morsel-driven scan as the parallel data source
+
+2. **Balkesen, Cagri et al**. "Main-Memory Hash Joins on Multi-Core CPUs." ICDE 2013.
+   - Parallel scan techniques for join inputs
+
+3. **DuckDB Documentation**. "Parallel Execution."
+   - Morsel-driven scan implementation in DuckDB

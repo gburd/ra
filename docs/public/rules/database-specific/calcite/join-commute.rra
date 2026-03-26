@@ -1,0 +1,113 @@
+---
+id: calcite-join-commute
+name: Calcite JoinCommuteRule
+category: database-specific/calcite
+databases: [calcite]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, calcite, join, commute, reorder]
+complexity: O(1)
+benefit_range: [0.0, 0.5]
+---
+
+# Calcite JoinCommuteRule
+
+## Description
+
+Swaps the left and right inputs of a join. This enables the
+optimizer to explore both `R JOIN S` and `S JOIN R`, which
+may have different costs depending on the physical join
+algorithm chosen (e.g., hash join builds on the smaller side).
+
+**When to apply**: Any inner join. For outer joins, the rule
+transforms LEFT to RIGHT and vice versa.
+
+**Why it works**: Hash join performance depends on which input
+is used for the build side. Nested loop join performance
+depends on which input is the outer loop.
+
+**Calcite class**: `org.apache.calcite.rel.rules.JoinCommuteRule`
+
+## Relational Algebra
+
+```latex
+$$
+R \bowtie_{p} S  \rightarrow  S \bowtie_{p'} R
+  \text{where} p' = swap_column_refs(p)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-join-commute";
+    "(join inner ?cond ?left ?right)" =>
+    "(join inner (swap-refs ?cond) ?right ?left)"
+),
+
+rw!("calcite-left-to-right-join";
+    "(join left-outer ?cond ?left ?right)" =>
+    "(join right-outer (swap-refs ?cond) ?right ?left)"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(join_type: JoinType) -> bool {
+    matches!(
+        join_type,
+        JoinType::Inner
+        | JoinType::LeftOuter
+        | JoinType::RightOuter
+    )
+}
+```
+
+**Restrictions:**
+- Full outer joins commute trivially (both sides are preserved)
+- Cross joins commute trivially
+- Semi and anti joins do not commute
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    left_card: f64,
+    right_card: f64,
+) -> f64 {
+    // Benefit comes from hash join build side selection:
+    // build on smaller input
+    if left_card > right_card {
+        (left_card - right_card) / left_card * 0.3
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 0-50% depending on cardinality asymmetry.
+
+## Test Cases
+
+```sql
+-- Positive: swap to build hash table on smaller input
+SELECT * FROM large_table l
+JOIN small_table s ON l.id = s.fk_id;
+-- Commuted: small_table JOIN large_table
+-- Hash join builds on small_table
+```
+
+```sql
+-- Positive: left-to-right swap
+SELECT * FROM emp e
+LEFT JOIN dept d ON e.deptno = d.deptno;
+-- Becomes: dept RIGHT JOIN emp
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/JoinCommuteRule.java

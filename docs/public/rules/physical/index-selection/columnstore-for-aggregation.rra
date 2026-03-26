@@ -1,0 +1,120 @@
+---
+id: columnstore-for-aggregation
+name: Columnstore Index for Aggregation Queries
+category: physical/index-selection
+databases: [mssql, oracle, clickhouse]
+execution_models: [vectorized, push-based]
+hardware: [cpu, simd]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [index, columnstore, aggregation, analytics, olap]
+complexity: "O(n/compression)"
+benefit_range: [0.5, 0.95]
+preconditions:
+  - type: "pattern"
+    must_match: "(aggregate (scan ?table) ?groups ?aggs)"
+    description: "Aggregation on column store table"
+  - type: "capability"
+    database: "current"
+    requires: "columnstore_index"
+    description: "Database supports columnstore indexes"
+  - type: "predicate"
+    condition: "has_columnstore_index(?table)"
+    description: "Table must have a columnstore index"
+---
+
+# Columnstore Index for Aggregation Queries
+
+## Description
+
+Selects a columnstore index for aggregation queries that scan many
+rows but touch few columns. Columnstore indexes store data column-by-
+column with compression, enabling vectorized batch processing and
+significant I/O reduction for analytical workloads.
+
+**When to apply**: An aggregation query (GROUP BY, SUM, COUNT, AVG)
+scans a large fraction of the table and a columnstore index exists.
+
+**Why it works**: Columnstore indexes read only the columns referenced
+by the query, apply compression (often 10x), and process data in
+vectorized batches of 1000+ rows. For wide tables, reading 3 of 100
+columns means 97% less I/O.
+
+## Relational Algebra
+
+```latex
+$$
+\gamma_{g; SUM(x)}(scan[T])
+  \rightarrow \gamma_{g; SUM(x)}(columnstore_scan[I](g, x))
+  \text{where} I is a columnstore index covering g and x
+$$
+
+```
+
+## Implementation
+
+```rust
+rw!("columnstore-for-aggregation";
+    "(aggregate ?group ?aggs (scan ?table))" =>
+    "(aggregate ?group ?aggs
+        (columnstore-scan ?index ?needed_cols))"
+    if has_columnstore_index("?table")
+    if is_analytical_query("?group", "?aggs")
+),
+```
+
+## Cost Model
+
+```rust
+fn cost(
+    total_rows: u64,
+    columns_needed: usize,
+    total_columns: usize,
+    compression_ratio: f64,
+) -> f64 {
+    let column_fraction = columns_needed as f64 / total_columns as f64;
+    let compressed_pages = (total_rows as f64 * column_fraction)
+        / compression_ratio;
+    compressed_pages * 0.05 // Batch processing cost
+}
+```
+
+**Typical benefit**: 50-95% for analytical queries on wide tables.
+
+## Test Cases
+
+### Positive: Wide table aggregation
+
+```sql
+CREATE COLUMNSTORE INDEX idx_cs_sales ON sales(region, product, amount, quantity);
+
+SELECT region, SUM(amount), COUNT(*)
+FROM sales
+GROUP BY region;
+
+-- Only region and amount columns read; 10x compression
+```
+
+### Positive: Full-table scan with few columns
+
+```sql
+SELECT AVG(temperature), MAX(temperature)
+FROM sensor_readings;
+
+-- Columnstore reads only temperature column
+```
+
+### Negative: Point lookup (row store better)
+
+```sql
+SELECT * FROM sales WHERE order_id = 12345;
+
+-- Single-row lookup: B-tree index is faster
+```
+
+## References
+
+- mssql: Columnstore indexes
+- Oracle: In-memory column store
+- IndexType::Columnstore in ra-stats/src/index_types.rs
+- IndexCostFactors::columnstore_default()

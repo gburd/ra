@@ -1,0 +1,66 @@
+---
+id: predicate-routing-to-single-node
+name: Route Query to Single Node via Predicate
+category: distributed/filter-pushdown-distributed
+databases: [cockroachdb, citus, vitess, tidb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, filter, routing, single-node, partition-key]
+complexity: O(1)
+benefit_range: [0.5, 0.99]
+---
+
+# Route Query to Single Node via Predicate
+
+## Description
+
+When a filter predicate fully specifies the partition key, the query
+can be routed to a single node, avoiding distributed execution entirely.
+This is the fastest path for point queries in distributed databases.
+
+## Relational Algebra
+
+```latex
+$$
+Filter[k = v](Scan(R[hash(k)]))
+  \rightarrow SingleNodeScan(R, partition_for(v))
+  \text{where} k is the full partition key
+  \text{where} predicate is equality on k
+$$
+
+```
+
+## Test Cases
+
+```sql
+-- Test 1: Point query on partition key
+SELECT *
+FROM orders
+WHERE customer_id = 42;
+-- hash(customer_id) routes to exactly one node
+-- Expected: Execute on single node, no coordination
+```
+
+```sql
+-- Test 2: Composite partition key, fully specified
+SELECT *
+FROM orders
+WHERE region = 'US' AND customer_id = 42;
+-- hash(region, customer_id) routes to one node
+-- Expected: Single-node execution
+```
+
+```sql
+-- Test 3: Partial partition key, cannot route
+SELECT *
+FROM orders
+WHERE region = 'US';
+-- Only part of composite key (region, customer_id) specified
+-- Expected: Must scan all partitions for region='US'
+```
+
+## References
+
+CockroachDB: routing to leaseholder
+Citus: single-shard query routing
+Vitess: vindex-based routing

@@ -1,0 +1,124 @@
+---
+id: mysql-cost-based-subquery
+name: MySQL Cost-Based Subquery Strategy Selection
+category: database-specific/mysql
+databases: [mysql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, mysql, subquery, cost-model, strategy, optimizer]
+complexity: O(1)
+benefit_range: [0.2, 0.7]
+---
+
+# MySQL Cost-Based Subquery Strategy Selection
+
+## Description
+
+MySQL 8.0 uses cost-based optimization to choose between subquery
+execution strategies: correlated execution, materialization,
+EXISTS-to-IN conversion, and semi-join transformations.  The optimizer
+estimates the cost of each strategy and selects the cheapest one.
+
+**When to apply**: A query contains an IN, EXISTS, or scalar subquery
+and multiple execution strategies are available.
+
+**Why it works**: Different strategies have different cost profiles
+depending on the subquery result size, correlation, and available
+indexes.  Cost-based selection avoids the heuristic-based approach
+of earlier MySQL versions that sometimes chose poorly.
+
+**Database version**: MySQL 8.0+
+
+## Relational Algebra
+
+```latex
+-- Strategy 1: correlated execution
+$$
+for each row in outer:
+    execute subquery
+$$
+
+-- Strategy 2: materialization
+$$
+mat = materialize(subquery)
+outer semi-\bowtie mat
+$$
+
+-- Optimizer picks based on estimated cost
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mysql-cost-based-subquery";
+    "(filter (in ?col (subquery ?sub)) ?outer)" =>
+    "(best-subquery-strategy ?col ?sub ?outer)"
+    if is_database("mysql")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(subquery: &Subquery) -> bool {
+    subquery.is_in() || subquery.is_exists()
+}
+```
+
+**Restrictions:**
+- Correlated subqueries with side effects cannot be rewritten
+- The optimizer_switch controls which strategies are available
+- Cost estimates depend on statistics accuracy
+
+## Cost Model
+
+```rust
+fn select_strategy(
+    outer_rows: f64,
+    sub_rows: f64,
+    sub_cost: f64,
+    has_index: bool,
+) -> Strategy {
+    let correlated = outer_rows * sub_cost;
+    let materialized = sub_cost + outer_rows * 0.001;
+    let firstmatch = if has_index {
+        outer_rows * 0.01
+    } else {
+        f64::MAX
+    };
+    [
+        (correlated, Strategy::Correlated),
+        (materialized, Strategy::Materialized),
+        (firstmatch, Strategy::FirstMatch),
+    ].iter()
+    .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap())
+    .unwrap().1
+}
+```
+
+**Typical benefit**: Avoids worst-case O(n*m) correlated execution
+when materialization or semi-join would be O(n+m).
+
+## Test Cases
+
+```sql
+-- Cost chooses materialization for large uncorrelated subquery
+SELECT * FROM orders
+WHERE cust_id IN (SELECT id FROM customers WHERE country = 'US');
+-- If customers table is small, materialize and hash probe
+```
+
+```sql
+-- Cost chooses correlated for tiny subquery
+SELECT * FROM parent
+WHERE id IN (SELECT parent_id FROM child WHERE child.x = parent.x);
+-- If inner is tiny per outer row, correlated may win
+```
+
+## References
+
+MySQL: "Subquery Optimization" in MySQL 8.0 Reference Manual
+Source: sql/sql_optimizer.cc, `JOIN::optimize_semijoin_nests()`

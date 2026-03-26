@@ -1,0 +1,143 @@
+---
+id: calcite-filter-into-join
+name: Calcite FilterJoinRule
+category: database-specific/calcite
+databases: [calcite]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, calcite, filter, join, pushdown]
+complexity: O(n)
+benefit_range: [0.3, 0.9]
+---
+
+# Calcite FilterJoinRule
+
+## Description
+
+Pushes filter conditions above a join into or below the join.
+This is Calcite's `FilterJoinRule`, one of its most important
+optimization rules. It decomposes a conjunction of predicates
+above a join and pushes each conjunct to the appropriate side:
+into the join condition, below the left input, or below the right
+input.
+
+**When to apply**: A `LogicalFilter` sits directly above a
+`LogicalJoin` and some conjuncts reference columns from only
+one side, or form equi-join conditions.
+
+**Why it works**: Filtering early reduces the cardinality of
+join inputs, decreasing the cost of the join operator.
+
+**Calcite class**: `org.apache.calcite.rel.rules.FilterJoinRule`
+
+## Relational Algebra
+
+```latex
+-- Before: filter above join
+$$
+\sigma_{p1 AND p2 AND p3}(R \bowtie_{c} S)
+$$
+
+-- After: push p1 to left, p2 to right, p3 into join condition
+$$
+(\sigma_{p1}(R)) \bowtie_{c AND p3} (\sigma_{p2}(S))
+  \text{where} \text{attrs}(p1) \subseteq \text{attrs}(R)
+  \text{where} \text{attrs}(p2) \subseteq \text{attrs}(S)
+  \text{where} \text{attrs}(p3) \subseteq \text{attrs}(R) \cup \text{attrs}(S)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-filter-into-join-left";
+    "(filter ?pred (join ?type ?cond ?left ?right))" =>
+    "(join ?type ?cond (filter ?pred ?left) ?right)"
+    if references_only("?pred", "?left")
+),
+
+rw!("calcite-filter-into-join-right";
+    "(filter ?pred (join ?type ?cond ?left ?right))" =>
+    "(join ?type (and ?cond ?pred) ?left ?right)"
+    if is_equi_join_predicate("?pred", "?left", "?right")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    join_type: JoinType,
+    predicate: &Expr,
+    left_cols: &[Column],
+    right_cols: &[Column],
+) -> bool {
+    let refs = predicate.referenced_columns();
+    let left_only = refs.is_subset(left_cols);
+    let right_only = refs.is_subset(right_cols);
+    let both = !left_only && !right_only;
+
+    match join_type {
+        JoinType::Inner => true,
+        JoinType::LeftOuter if right_only => false,
+        JoinType::LeftOuter => left_only || both,
+        JoinType::RightOuter if left_only => false,
+        JoinType::RightOuter => right_only || both,
+        _ => false,
+    }
+}
+```
+
+**Restrictions:**
+- Respects outer join semantics (cannot push below null-generating side)
+- Predicates referencing both sides become join conditions
+- Non-deterministic predicates are not pushed
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    input_card: f64,
+    selectivity: f64,
+) -> f64 {
+    let original_cost = input_card;
+    let new_cost = input_card * selectivity;
+    (original_cost - new_cost) / original_cost
+}
+```
+
+**Typical benefit**: 30-90% reduction in join input cardinality.
+
+## Test Cases
+
+```sql
+-- Positive: push filter to left side of inner join
+SELECT * FROM emp e
+JOIN dept d ON e.deptno = d.deptno
+WHERE e.sal > 5000;
+-- Filter on e.sal pushed below join to emp side
+```
+
+```sql
+-- Positive: equi-join predicate absorbed into condition
+SELECT * FROM emp e, dept d
+WHERE e.deptno = d.deptno AND e.sal > 5000;
+-- e.deptno = d.deptno becomes join condition
+-- e.sal > 5000 pushed to emp input
+```
+
+```sql
+-- Negative: left join, cannot push to right side
+SELECT * FROM emp e
+LEFT JOIN dept d ON e.deptno = d.deptno
+WHERE d.dname = 'SALES';
+-- Pushing filter changes LEFT JOIN semantics
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/FilterJoinRule.java
+Calcite: CALCITE-923, CALCITE-2343 (rule enhancements)

@@ -1,0 +1,158 @@
+---
+id: partition-key-colocation
+name: Partition Key Co-Location Join
+category: distributed/colocation
+databases: [cockroachdb, yugabytedb, citus, spark, greenplum]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, colocation, partition-key, join, exchange-elimination]
+complexity: O(1)
+benefit_range: [0.6, 0.98]
+---
+
+# Partition Key Co-Location Join
+
+## Description
+
+Eliminates exchange operators when both sides of a join are
+hash-partitioned on their respective join keys.  If both tables are
+partitioned by the same function on columns that match the join
+condition, corresponding rows are already on the same node and the join
+can execute locally.
+
+**When to apply**: An equi-join where the left table is
+`HashPartitioned(k1)` and the right table is `HashPartitioned(k2)`,
+and the join condition is `k1 = k2`, using compatible hash functions
+and the same number of partitions.
+
+**Why it works**: Hash partitioning guarantees that rows with the same
+key value land on the same node.  When both join inputs are partitioned
+on the join key, every partition on a node can be joined locally without
+data movement.
+
+## Relational Algebra
+
+```latex
+-- Both sides partitioned on join keys -> eliminate exchanges
+$$
+Join[k1 = k2](
+    Exchange[hash(k1)](R),
+    Exchange[hash(k2)](S)
+) \rightarrow Join[k1 = k2](R, S)
+  \text{where} distribution(R) = HashPartitioned(k1)
+  \text{where} distribution(S) = HashPartitioned(k2)
+  \text{where} compatible_hash(hash_func(R), hash_func(S))
+  \text{where} num_partitions(R) = num_partitions(S)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("eliminate-exchanges-colocated-join";
+    "(join ?type (eq ?k1 ?k2)
+        (exchange hash_partition ?left ?lkeys)
+        (exchange hash_partition ?right ?rkeys))" =>
+    "(join ?type (eq ?k1 ?k2) ?left ?right)"
+    if is_colocated("?left", "?right", "?k1", "?k2")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    left: &RelNode,
+    right: &RelNode,
+    left_key: &ColumnRef,
+    right_key: &ColumnRef,
+) -> bool {
+    let left_dist = left.distribution();
+    let right_dist = right.distribution();
+    match (left_dist, right_dist) {
+        (
+            Distribution::HashPartitioned(lk, lf, ln),
+            Distribution::HashPartitioned(rk, rf, rn),
+        ) => {
+            // Keys used for partitioning must match join keys
+            lk.contains(left_key)
+            && rk.contains(right_key)
+            // Hash functions must be compatible
+            && lf == rf
+            // Partition count must match
+            && ln == rn
+        }
+        _ => false,
+    }
+}
+```
+
+**Restrictions:**
+- Hash functions must be identical (same algorithm, same seed)
+- Partition counts must match (different counts means different
+  key-to-node mappings)
+- Multi-column keys must match in order
+- Not applicable for range partitioning unless ranges align exactly
+
+## Cost Model
+
+```rust
+fn colocated_join_savings(
+    left_rows: f64,
+    right_rows: f64,
+    row_bytes: f64,
+    num_nodes: u32,
+    network_bandwidth: f64,
+) -> f64 {
+    // Without colocation: shuffle both sides
+    let shuffle_fraction = (num_nodes - 1) as f64
+        / num_nodes as f64;
+    let shuffle_bytes =
+        (left_rows + right_rows) * row_bytes * shuffle_fraction;
+    shuffle_bytes / network_bandwidth
+}
+```
+
+**Typical benefit**: Eliminates all network transfer for the join.
+For two 100GB tables on 10 nodes, saves ~180GB of network transfer.
+
+## Test Cases
+
+```sql
+-- Positive: orders and order_items both partitioned on order_id
+SELECT o.total, i.product_id
+FROM orders o                        -- HashPartitioned(order_id)
+JOIN order_items i ON o.id = i.order_id;  -- HashPartitioned(order_id)
+-- No exchange needed: rows are co-located
+
+-- Plan:
+-- LocalHashJoin(o.id = i.order_id)
+--   Scan(orders)       -- local partition
+--   Scan(order_items)  -- local partition
+```
+
+```sql
+-- Negative: different partition keys
+SELECT o.total, c.name
+FROM orders o         -- HashPartitioned(order_id)
+JOIN customers c ON o.customer_id = c.id;  -- HashPartitioned(id)
+-- Exchange needed: partition keys don't align with join keys
+```
+
+```sql
+-- Negative: same key name but different partition counts
+-- orders has 64 partitions, items has 32 partitions
+SELECT * FROM orders o JOIN items i ON o.id = i.order_id;
+-- Exchange needed despite same key: partition counts differ
+```
+
+## References
+
+CockroachDB: pkg/sql/opt/xform/join_funcs.go - GenerateMergeJoins() co-located path
+Citus: src/backend/distributed/planner/multi_join_order.c - ColocatedJoinChecker()
+Spark SQL: sql/catalyst/src/main/scala/org/apache/spark/sql/catalyst/plans/physical/partitioning.scala - HashClusteredDistribution
+YugabyteDB: src/yb/docdb/docdb.cc - colocated tablet joins
+Greenplum: src/backend/optimizer/path/joinpath.c - segment-local join

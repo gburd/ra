@@ -1,0 +1,120 @@
+---
+id: mssql-predicate-pushdown-computed
+name: mssql Filter Pushdown to Computed Columns
+category: database-specific/mssql
+databases: [mssql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, mssql, predicate, pushdown, computed-column, index]
+complexity: O(n)
+benefit_range: [0.2, 0.7]
+---
+
+# mssql Filter Pushdown to Computed Columns
+
+## Description
+
+Matches filter expressions to persisted computed columns and their
+indexes.  mssql's optimizer detects when a WHERE clause expression
+matches a computed column definition, enabling index seeks on the
+computed column's index instead of a full table scan with expression
+evaluation.
+
+**When to apply**: A filter predicate matches the definition of a
+persisted computed column that has an index.
+
+**Why it works**: Without matching, the expression must be evaluated
+row-by-row during a scan.  When matched to a computed column with an
+index, the optimizer can use an index seek, reducing I/O from scanning
+millions of rows to reading a few pages.
+
+**Database version**: mssql 2005+
+
+## Relational Algebra
+
+```latex
+-- Before: expression evaluated during scan
+$$
+\sigma_{YEAR(order_date) = 2025}(scan(orders))
+$$
+
+-- After: matched to computed column with index
+$$
+\sigma_{order_year = 2025}(index-seek(orders, ix_order_year))
+  \text{where} order_year IS PERSISTED AS YEAR(order_date)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mssql-computed-column-matching";
+    "(filter (eq (func ?f ?col) (const ?val)) (scan ?table))" =>
+    "(filter (eq (computed-col ?f ?col) (const ?val))
+        (index-seek ?table (computed-index ?f ?col)))"
+    if is_database("mssql")
+    if has_matching_computed_column("?table", "?f", "?col")
+    if computed_column_is_indexed("?table", "?f", "?col")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    expr: &Expr,
+    computed_columns: &[ComputedColumn],
+) -> bool {
+    computed_columns.iter().any(|cc| {
+        cc.definition_matches(expr)
+        && cc.is_persisted()
+        && cc.has_index()
+    })
+}
+```
+
+**Restrictions:**
+- Computed column must be persisted (or the expression must be
+  deterministic and precise for non-persisted matching)
+- Expression must exactly match the computed column definition
+- Non-deterministic functions (GETDATE, NEWID) cannot be computed columns
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    table_rows: f64,
+    selectivity: f64,
+) -> f64 {
+    let full_scan_cost = table_rows * 0.01;
+    let index_seek_cost = table_rows * selectivity * 0.001;
+    full_scan_cost - index_seek_cost
+}
+```
+
+**Typical benefit**: For 1% selectivity on 10M rows, index seek reads
+100K rows instead of scanning 10M.
+
+## Test Cases
+
+```sql
+-- Positive: expression matches computed column
+ALTER TABLE orders ADD order_year AS YEAR(order_date) PERSISTED;
+CREATE INDEX ix_order_year ON orders(order_year);
+SELECT * FROM orders WHERE YEAR(order_date) = 2025;
+-- Matched to order_year computed column; index seek
+```
+
+```sql
+-- Negative: no matching computed column
+SELECT * FROM orders WHERE MONTH(order_date) = 3;
+-- No computed column for MONTH; full scan with filter
+```
+
+## References
+
+mssql: Indexes on Computed Columns
+mssql: CREATE TABLE computed_column_definition

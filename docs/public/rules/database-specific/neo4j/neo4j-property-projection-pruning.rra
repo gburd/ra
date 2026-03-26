@@ -1,0 +1,48 @@
+---
+id: neo4j-property-projection-pruning
+name: "Property Projection Pruning"
+category: logical/projection-pruning
+databases: [neo4j]
+version: "1.0.0"
+authors: ["Database Contributors", "RA Contributors"]
+tags: [database-mining, neo4j, optimization]
+complexity: "O(n)"
+benefit_range: [1.0, 10.0]
+---
+
+# Property Projection Pruning
+
+## Description
+
+Removes unused property accesses in projections.
+
+**When to apply**: During query optimization phase.
+
+## Relational Algebra
+
+```latex
+-- Before
+$$
+(return u.name, u.email, u.phone, u.address)
+$$
+
+-- After
+$$
+(return u.name, u.email)
+$$
+
+```
+
+## Preconditions
+
+- phone and address not used in result
+
+## Test Cases
+
+```sql
+SELECT * FROM table WHERE condition;
+```
+
+## References
+
+- Database documentation

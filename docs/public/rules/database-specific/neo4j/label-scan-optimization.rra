@@ -1,0 +1,43 @@
+---
+id: neo4j-label-scan
+name: Neo4j Label Scan Optimization
+category: database-specific/neo4j
+databases: [neo4j]
+execution_models: [graph-traversal]
+version: "1.0.0"
+authors: ["Neo4j Inc."]
+tags: [label-scan, index, node-lookup]
+complexity: "O(n)"
+benefit_range: [0.5, 20.0]
+---
+
+# Neo4j Label Scan Optimization
+
+## Description
+
+Uses label indexes to efficiently scan nodes by label instead of scanning all
+nodes in the database. Every label has an implicit index enabling fast retrieval
+of nodes with that label.
+
+**When to apply:** Queries starting with node label patterns like `MATCH (n:Person)`.
+Label scans are automatic but can be further optimized with property indexes.
+
+## Test Cases
+
+### Positive: Label scan with property filter
+
+```cypher
+// Index: CREATE INDEX FOR (p:Person) ON (p.age)
+MATCH (p:Person)
+WHERE p.age > 21 AND p.city = 'Seattle'
+RETURN p.name
+
+// Label scan on Person + index seek on age
+// Much faster than all-nodes scan
+```
+
+## References
+
+**Documentation:**
+- Neo4j Manual: "Label Scans"
+- https://neo4j.com/docs/cypher-manual/current/planning-and-tuning/execution-plans/

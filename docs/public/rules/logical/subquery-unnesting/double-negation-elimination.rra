@@ -1,0 +1,61 @@
+---
+id: double-negation-elimination
+name: Double Negation Elimination
+category: logical/subquery-unnesting
+databases: [postgresql, mysql, duckdb, sqlite, mssql, oracle]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [subquery, negation, elimination, simplification]
+complexity: "O(1)"
+benefit_range: [0.05, 0.2]
+---
+
+# Double Negation Elimination
+
+## Description
+
+Eliminates double negation patterns like `NOT NOT EXISTS` or `NOT IN (SELECT ... EXCEPT SELECT ...)`. These patterns arise from query rewrites and can be simplified.
+
+**When to apply**: NOT applied to a NOT EXISTS, or NOT IN applied to a complement set.
+
+## Relational Algebra
+
+```latex
+$$
+Filter[NOT NOT EXISTS(sub)](input)
+  \rightarrow Filter[EXISTS(sub)](input)
+$$
+
+$$
+Filter[NOT (col NOT IN sub)](input)
+  \rightarrow Filter[col IN sub](input)
+$$
+
+```
+
+## Implementation
+
+```rust
+rw!("double-negation-elimination";
+    "(filter (not (not ?pred)) ?input)" =>
+    "(filter ?pred ?input)"
+),
+```
+
+## Test Cases
+
+### Positive: NOT NOT EXISTS
+
+```sql
+SELECT * FROM users u
+WHERE NOT (NOT EXISTS (SELECT 1 FROM orders o WHERE o.user_id = u.id));
+
+-- Simplify to: WHERE EXISTS (...)
+```
+
+## References
+
+- Boolean algebra simplification in query optimization
+- De Morgan's laws in predicate pushdown

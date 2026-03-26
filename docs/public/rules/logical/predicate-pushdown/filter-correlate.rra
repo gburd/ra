@@ -1,0 +1,145 @@
+---
+id: calcite-filter-correlate
+name: Calcite FilterCorrelateRule
+category: logical/predicate-pushdown
+databases: [calcite, postgresql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [logical, calcite, filter, correlate, pushdown, lateral]
+complexity: O(n)
+benefit_range: [0.1, 0.5]
+preconditions:
+  - type: "pattern"
+    must_match: "(filter ?pred (correlate ?type ?left ?right))"
+    description: "Filter above a correlated subquery"
+  - type: "predicate"
+    condition: "references_only(?pred, ?left)"
+    description: "Filter predicate must reference only outer relation"
+---
+
+# Calcite FilterCorrelateRule
+
+## Description
+
+Pushes a filter above a correlated subquery (Correlate operator)
+into the inputs of the correlation. Predicates referencing only
+the left input are pushed to the left; predicates referencing only
+the right input are pushed to the right.
+
+**When to apply**: A filter sits above a Correlate (lateral join)
+and its predicates can be decomposed by which side they reference.
+
+**Why it works**: Filtering the left input before the correlation
+reduces the number of times the correlated subquery is evaluated.
+Filtering the right input narrows each evaluation.
+
+**Calcite class**: `org.apache.calcite.rel.rules.FilterCorrelateRule`
+
+## Relational Algebra
+
+```latex
+-- Before: filter above correlate
+$$
+\sigma_{L.a > 5 AND R.b < 10}(L CORRELATE R)
+$$
+
+-- After: push predicates to respective sides
+$$
+(\sigma_{L.a > 5}(L)) CORRELATE (\sigma_{R.b < 10}(R))
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-filter-correlate-left";
+    "(filter (and ?left_pred ?rest)
+        (correlate ?type ?left ?right))" =>
+    "(filter ?rest
+        (correlate ?type
+            (filter ?left_pred ?left) ?right))"
+    if pred_references_only_left("?left_pred", "?left")
+),
+
+rw!("calcite-filter-correlate-right";
+    "(filter (and ?right_pred ?rest)
+        (correlate ?type ?left ?right))" =>
+    "(filter ?rest
+        (correlate ?type ?left
+            (filter ?right_pred ?right)))"
+    if pred_references_only_right("?right_pred", "?left", "?right")
+),
+```
+
+## Preconditions
+
+
+> **Note:** Formal preconditions are defined in the YAML frontmatter above.
+
+```rust
+fn applicable(
+    filter: &Filter,
+    correlate: &Correlate,
+) -> bool {
+    let pred = filter.condition();
+    let left_count = correlate.left().row_type().field_count();
+    let conjuncts = pred.split_conjuncts();
+    conjuncts.iter().any(|c| {
+        c.references_within(0..left_count)
+            || c.references_within(left_count..)
+    })
+}
+```
+
+**Restrictions:**
+- Predicates that reference both sides cannot be pushed
+- Correlation variables in the right side must be handled carefully
+- Only conjunctive (AND) predicates are decomposed
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    left_rows: f64,
+    selectivity: f64,
+) -> f64 {
+    // Reducing left rows reduces correlated evaluations
+    left_rows * (1.0 - selectivity) * 0.1
+}
+```
+
+**Typical benefit**: 10-50% by reducing correlated subquery evaluations.
+
+## Test Cases
+
+```sql
+-- Positive: filter on left side of LATERAL
+SELECT * FROM dept d,
+    LATERAL (SELECT * FROM emp e WHERE e.deptno = d.deptno) sub
+WHERE d.deptno > 10;
+-- d.deptno > 10 pushed to dept scan
+```
+
+```sql
+-- Positive: filter on right side
+SELECT * FROM dept d,
+    LATERAL (SELECT * FROM emp e WHERE e.deptno = d.deptno) sub
+WHERE sub.salary > 50000;
+-- sub.salary > 50000 pushed into correlated subquery
+```
+
+```sql
+-- Expected: cross-reference predicate not decomposable
+-- d.budget > sub.salary references both sides so cannot be split,
+-- but other optimizer rules may still transform the query.
+SELECT * FROM dept d,
+    LATERAL (SELECT * FROM emp e WHERE e.deptno = d.deptno) sub
+WHERE d.budget > sub.salary;
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/FilterCorrelateRule.java (commit af6367d)

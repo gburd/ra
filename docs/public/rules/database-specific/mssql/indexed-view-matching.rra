@@ -1,0 +1,140 @@
+---
+id: mssql-indexed-view-matching
+name: mssql Indexed View Matching
+category: database-specific/mssql
+databases: [mssql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, mssql, indexed-view, materialized, rewrite]
+complexity: O(n)
+benefit_range: [0.5, 0.99]
+---
+
+# mssql Indexed View Matching
+
+## Description
+
+Automatically matches queries against indexed (materialized) views
+and substitutes the pre-computed view result.  mssql's optimizer
+scans available indexed views during optimization and substitutes them
+when they can satisfy the query more efficiently than base table access.
+
+**When to apply**: An indexed view exists that covers the query's
+required columns and predicates, and the clustered index on the view
+makes it cheaper than base table access.
+
+**Why it works**: Indexed views pre-compute joins, aggregations, and
+filters.  The clustered index on the view provides fast access to the
+materialized data.  mssql automatically maintains the view on
+DML to base tables.
+
+**Database version**: mssql 2000+ (Enterprise), 2016+ (all editions
+with NOEXPAND hint)
+
+## Relational Algebra
+
+```latex
+-- Query:
+$$
+\gamma_{dept; total=SUM(salary)}(
+    \sigma_{active = true}(employees \bowtie departments))
+$$
+
+-- Indexed View:
+$$
+CREATE VIEW v_dept_salary WITH SCHEMABINDING AS
+SELECT d.dept_name AS dept, SUM(e.salary) AS total, COUNT_BIG(*) AS cnt
+FROM employees e JOIN departments d ON e.dept_id = d.id
+WHERE e.active = 1
+GROUP BY d.dept_name;
+CREATE UNIQUE CLUSTERED INDEX ix ON v_dept_salary(dept);
+$$
+
+-- Rewritten:
+$$
+scan(v_dept_salary)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mssql-indexed-view-exact-match";
+    "?query" =>
+    "(scan-indexed-view (matching-indexed-view ?query))"
+    if is_database("mssql")
+    if has_matching_indexed_view("?query")
+),
+
+rw!("mssql-indexed-view-partial-match";
+    "(aggregate ?aggs ?groups (filter ?pred ?base_query))" =>
+    "(aggregate (rollup-aggs ?aggs) (subset-groups ?groups)
+        (filter ?extra_pred
+            (scan-indexed-view ?iv)))"
+    if is_database("mssql")
+    if indexed_view_partially_matches("?iv", "?base_query")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    query: &LogicalPlan,
+    indexed_views: &[IndexedView],
+) -> bool {
+    indexed_views.iter().any(|iv| {
+        iv.covers_query(query)
+        && iv.clustered_index_cost() < base_table_cost(query)
+    })
+}
+```
+
+**Restrictions:**
+- Enterprise Edition required for automatic matching (without hints)
+- View must be created WITH SCHEMABINDING
+- View must have a unique clustered index
+- Certain constructs prevent indexed view creation (subqueries,
+  UNION, outer joins in some versions)
+- COUNT_BIG(*) required for views with GROUP BY
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    base_query_cost: f64,
+    indexed_view_scan_cost: f64,
+) -> f64 {
+    base_query_cost - indexed_view_scan_cost
+}
+```
+
+**Typical benefit**: Pre-aggregated indexed view on 1B-row table
+reduces scan from 1B rows to 10K summary rows.
+
+## Test Cases
+
+```sql
+-- Positive: query matches indexed view
+SELECT dept_name, SUM(salary) FROM employees e
+JOIN departments d ON e.dept_id = d.id
+WHERE e.active = 1
+GROUP BY dept_name;
+-- Matched to v_dept_salary indexed view
+```
+
+```sql
+-- Negative: query needs column not in view
+SELECT dept_name, SUM(salary), AVG(bonus) FROM employees e
+JOIN departments d ON e.dept_id = d.id
+GROUP BY dept_name;
+-- bonus not in indexed view; cannot use
+```
+
+## References
+
+mssql: Designing Indexed Views
+mssql: sys.indexes WHERE type = 1 AND object_id IN (views)

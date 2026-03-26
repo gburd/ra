@@ -1,0 +1,48 @@
+---
+id: clickhouse-partition-pruning
+name: "MergeTree Partition Pruning"
+category: logical/partition-pruning
+databases: [clickhouse]
+version: "1.0.0"
+authors: ["Database Contributors", "RA Contributors"]
+tags: [database-mining, clickhouse, optimization]
+complexity: "O(n)"
+benefit_range: [1.0, 10.0]
+---
+
+# MergeTree Partition Pruning
+
+## Description
+
+Eliminates MergeTree partitions that cannot contain matching rows based on partition expressions.
+
+**When to apply**: During query optimization phase.
+
+## Relational Algebra
+
+```latex
+-- Before
+$$
+(filter (scan orders) (gt date '2024-01-01'))
+$$
+
+-- After
+$$
+(filter (scan orders_2024_01) (gt date '2024-01-01'))
+$$
+
+```
+
+## Preconditions
+
+- Table partitioned by date expression
+
+## Test Cases
+
+```sql
+SELECT * FROM table WHERE condition;
+```
+
+## References
+
+- Database documentation

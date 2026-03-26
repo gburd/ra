@@ -1,0 +1,120 @@
+---
+id: mysql-exists-to-in
+name: MySQL EXISTS-to-IN Transformation
+category: database-specific/mysql
+databases: [mysql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, mysql, subquery, exists, in, transformation]
+complexity: O(1)
+benefit_range: [0.1, 0.5]
+---
+
+# MySQL EXISTS-to-IN Transformation
+
+## Description
+
+MySQL can transform correlated EXISTS subqueries into IN subqueries
+(and vice versa) to enable semi-join optimizations.  The IN form is
+preferred because it unlocks materialization, FirstMatch, LooseScan,
+and DuplicateWeedout strategies.
+
+**When to apply**: A correlated EXISTS subquery has a simple equality
+correlation predicate that can be rewritten as an IN condition.
+
+**Why it works**: EXISTS is traditionally executed as a correlated
+subquery (once per outer row).  IN enables the semi-join transformer
+to choose among five execution strategies, including materialization
+which evaluates the subquery only once.
+
+**Database version**: MySQL 5.6+
+
+## Relational Algebra
+
+```latex
+-- Before: correlated EXISTS
+$$
+\sigma_{EXISTS(sigma[i.order_id = o.id}(items))](orders o)
+$$
+
+-- After: IN form (enables semi-join strategies)
+$$
+\sigma_{o.id IN (\pi_{order_id}(items))}(orders o)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mysql-exists-to-in";
+    "(filter (exists
+        (filter (= ?inner_col ?outer_col) ?inner))
+        ?outer)" =>
+    "(filter (in ?outer_col
+        (project ?inner_col ?inner))
+        ?outer)"
+    if is_database("mysql")
+    if is_simple_correlation("?inner_col", "?outer_col")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(subquery: &Subquery) -> bool {
+    subquery.is_exists()
+    && subquery.correlation_is_simple_equality()
+    && !subquery.has_aggregation()
+    && !subquery.has_having()
+}
+```
+
+**Restrictions:**
+- Cannot transform if subquery has GROUP BY with HAVING
+- Cannot transform NOT EXISTS to NOT IN when NULLs are present
+  (different NULL semantics)
+- Transformation is bidirectional; optimizer chooses the better form
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    outer_rows: f64,
+    inner_rows: f64,
+) -> f64 {
+    // Enables materialization: O(n+m) vs O(n*m)
+    let correlated_cost = outer_rows * inner_rows * 0.001;
+    let semijoin_cost = (outer_rows + inner_rows) * 0.001;
+    correlated_cost - semijoin_cost
+}
+```
+
+**Typical benefit**: Enables semi-join strategies that are 10-100x
+faster than correlated execution.
+
+## Test Cases
+
+```sql
+-- Positive: simple correlated EXISTS
+SELECT * FROM orders o
+WHERE EXISTS (SELECT 1 FROM items i WHERE i.order_id = o.id);
+-- Rewritten to: WHERE o.id IN (SELECT order_id FROM items)
+```
+
+```sql
+-- Negative: EXISTS with aggregation
+SELECT * FROM orders o
+WHERE EXISTS (
+    SELECT 1 FROM items i WHERE i.order_id = o.id
+    HAVING SUM(i.qty) > 10
+);
+-- Cannot transform due to HAVING with aggregate
+```
+
+## References
+
+MySQL: "Optimizing Subqueries with Semi-Join Transformations"
+Source: sql/sql_optimizer.cc, `convert_subquery_to_semijoin()`

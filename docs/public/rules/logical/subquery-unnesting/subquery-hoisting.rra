@@ -1,0 +1,272 @@
+---
+id: subquery-hoisting
+name: Subquery Hoisting
+category: logical/subquery-unnesting
+databases: [postgresql, oracle, mssql, duckdb]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [subquery, hoisting, loop-invariant, caching, common-subexpression]
+complexity: "O(n)"
+benefit_range: [0.4, 0.95]
+---
+
+# Subquery Hoisting
+
+## Description
+
+Hoists invariant subqueries out of loops, repeated evaluations, or
+nested contexts. When a subquery produces the same result regardless of
+the outer row being processed, computing it once and reusing the result
+eliminates redundant work. This is the relational equivalent of
+loop-invariant code motion in compiler optimization.
+
+**When to apply**: Subqueries that:
+- Appear inside a correlated context but are actually uncorrelated
+- Are duplicated across multiple expressions in the same query
+- Appear inside CASE/IF branches that may not always execute
+- Are nested inside other subqueries but do not depend on them
+
+**Why it works**: An invariant subquery produces a fixed result. Computing
+it N times (once per outer row) wastes N-1 evaluations. Hoisting it to
+the outermost scope where it is still valid converts O(N * cost) to
+O(cost + N * reference_cost).
+
+## Relational Algebra
+
+```latex
+-- Hoist uncorrelated subquery out of correlated context
+$$
+filter[R.val > (SELECT MAX(S.val) FROM S)](R)
+  \text{where} subquery is uncorrelated
+  \rightarrow cross_join(R, T)
+  \text{where} T = aggregate[MAX(val)](S)
+  then filter[R.val > T.max_val]
+$$
+
+-- Deduplicate identical subqueries
+$$
+project[
+  R.*,
+  (SELECT MAX(val) FROM S) AS max_val,
+  (SELECT MAX(val) FROM S) AS max_val2  -- duplicate
+](R)
+  \rightarrow project[R.*, T.max_val, T.max_val AS max_val2](
+       cross_join(R, T)
+     )
+  \text{where} T = aggregate[MAX(val)](S)
+$$
+
+-- Hoist from CASE expression
+$$
+project[
+  CASE WHEN R.type = 'A'
+       THEN (SELECT param FROM config WHERE key = 'threshold_a')
+       ELSE (SELECT param FROM config WHERE key = 'threshold_b')
+  END
+](R)
+  \rightarrow project[
+       CASE WHEN R.type = 'A' THEN ta.param ELSE tb.param END
+     ](cross_join(R, ta, tb))
+  \text{where} ta = filter[key='threshold_a'](config)
+  \text{where} tb = filter[key='threshold_b'](config)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Hoist uncorrelated subquery from filter
+rw!("hoist-uncorrelated-from-filter";
+    "(filter (?op ?col (scalar-subquery ?sub)) ?outer)" =>
+    "(filter (?op ?col ?sub_alias)
+       (cross-join ?outer (scalar-subquery ?sub)))"
+    if is_uncorrelated("?sub", "?outer")
+),
+
+// Deduplicate identical subqueries
+rw!("deduplicate-subqueries";
+    "(project (?cols1 (scalar-subquery ?sub) ?cols2 (scalar-subquery ?sub) ?cols3)
+       ?input)" =>
+    "(project (?cols1 ?alias ?cols2 ?alias ?cols3)
+       (cross-join ?input (scalar-subquery ?sub as ?alias)))"
+),
+
+// Hoist from CASE branches
+rw!("hoist-subquery-from-case";
+    "(case ?cond
+       (scalar-subquery ?then_sub)
+       (scalar-subquery ?else_sub))" =>
+    "(case ?cond ?then_alias ?else_alias)"
+    // Pre-compute both branches, reference results
+    if is_uncorrelated("?then_sub")
+    if is_uncorrelated("?else_sub")
+),
+
+// Hoist loop-invariant subquery from nested correlated context
+rw!("hoist-invariant-from-nested";
+    "(apply ?outer
+       (filter (?op ?inner_col (scalar-subquery ?invariant)) ?inner))" =>
+    "(apply (cross-join ?outer (scalar-subquery ?invariant as ?inv))
+       (filter (?op ?inner_col ?inv) ?inner))"
+    if is_uncorrelated("?invariant", "?outer")
+    if is_uncorrelated("?invariant", "?inner")
+),
+```
+
+**Restrictions:**
+- Volatile functions (RANDOM, NOW, NEXTVAL) prevent hoisting
+- Subqueries with side effects must remain in their original position
+- CASE short-circuit semantics: hoisting evaluates both branches
+  (acceptable unless the subquery has side effects or may error)
+- Must verify the subquery is truly invariant at the hoisting level
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    num_evaluations: u64,
+    subquery_cost: f64,
+    num_duplicates: u32,
+) -> f64 {
+    // Without hoisting: evaluate per row (or per duplicate)
+    let original_cost = num_evaluations as f64
+        * subquery_cost
+        * num_duplicates as f64;
+
+    // With hoisting: evaluate once, reference N times
+    let hoisted_cost = subquery_cost
+        + num_evaluations as f64 * 0.001; // reference cost
+
+    (original_cost - hoisted_cost) / original_cost
+}
+```
+
+**Typical benefit**: 40-95% depending on subquery cost and iteration count
+
+## Test Cases
+
+### Positive: Uncorrelated subquery in correlated context
+
+```sql
+-- Subquery appears correlated but inner part is not
+SELECT e.name, e.salary
+FROM employees e
+WHERE e.salary > (SELECT AVG(salary) FROM employees);
+
+-- AVG(salary) is uncorrelated, computed once
+-- Hoist: compute avg once, compare per row
+-- Some databases already do this, but not all
+```
+
+### Positive: Duplicate subqueries in SELECT list
+
+```sql
+SELECT
+  e.name,
+  e.salary - (SELECT AVG(salary) FROM employees) AS diff,
+  e.salary / (SELECT AVG(salary) FROM employees) AS ratio
+FROM employees e;
+
+-- Same subquery appears twice
+-- Hoist and deduplicate: compute once, reference twice
+SELECT e.name,
+  e.salary - t.avg_sal AS diff,
+  e.salary / t.avg_sal AS ratio
+FROM employees e
+CROSS JOIN (SELECT AVG(salary) AS avg_sal FROM employees) t;
+```
+
+### Positive: Invariant subquery inside nested loop
+
+```sql
+SELECT o.id
+FROM orders o
+WHERE o.total > (
+  SELECT e.discount_rate
+  FROM employees e
+  WHERE e.id = o.sales_rep_id
+) * (SELECT base_price FROM config WHERE key = 'base')  -- invariant
+;
+
+-- (SELECT base_price FROM config ...) is loop-invariant
+-- Hoist outside the per-order evaluation
+-- Compute once, multiply inside the loop
+```
+
+### Positive: Subqueries in CASE branches
+
+```sql
+SELECT p.name,
+  CASE p.category
+    WHEN 'electronics'
+      THEN p.price * (SELECT tax_rate FROM tax_config WHERE type = 'electronics')
+    WHEN 'food'
+      THEN p.price * (SELECT tax_rate FROM tax_config WHERE type = 'food')
+    ELSE p.price * (SELECT tax_rate FROM tax_config WHERE type = 'default')
+  END AS price_with_tax
+FROM products p;
+
+-- Three uncorrelated subqueries in CASE branches
+-- Hoist all three, execute once each
+-- Replace with pre-computed values in CASE
+```
+
+### Negative: Volatile function prevents hoisting
+
+```sql
+SELECT e.name,
+  (SELECT RANDOM()) AS random_val  -- per-row random
+FROM employees e;
+
+-- RANDOM() must be evaluated per row
+-- Hoisting would give every row the same value
+-- Cannot hoist volatile functions
+```
+
+### Negative: Short-circuit semantics with potential error
+
+```sql
+SELECT x.val,
+  CASE WHEN x.val > 0
+    THEN (SELECT 100.0 / y.val FROM y WHERE y.id = 1)
+    ELSE 0
+  END
+FROM x;
+
+-- If y.val = 0, the THEN branch would divide by zero
+-- CASE short-circuits: only evaluates when x.val > 0
+-- Hoisting evaluates unconditionally -> potential error
+-- Cannot hoist when subquery may raise errors
+```
+
+### Negative: Subquery with sequence/side effect
+
+```sql
+SELECT o.id,
+  (SELECT NEXTVAL('invoice_seq')) AS invoice_num
+FROM orders o
+WHERE o.status = 'pending';
+
+-- NEXTVAL has side effects (advances sequence)
+-- Must execute per qualifying row
+-- Hoisting changes the number of sequence advances
+```
+
+## References
+
+**Academic papers:**
+- Seshadri et al., "Cost-Based Optimization for Magic: Algebra and Implementation", SIGMOD 1996
+- Pirahesh et al., "Extensible/Rule Based Query Rewrite Optimization in Starburst", SIGMOD 1992
+- Galindo-Legaria & Joshi, "Orthogonal Optimization of Subqueries and Aggregation", SIGMOD 2001
+
+**Implementation:**
+- PostgreSQL: Subquery caching via `SubPlan` with `useHashTable` flag
+- Oracle: Scalar subquery caching (result cache per distinct input)
+- mssql: Lazy spool for repeated subquery evaluation
+- DuckDB: Common subexpression elimination in binder
+- CockroachDB: `HoistSubqueries` optimizer pass

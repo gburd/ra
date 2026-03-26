@@ -1,0 +1,282 @@
+---
+id: column-scan
+name: Column-at-a-Time Table Scan (MonetDB X100)
+category: execution-models
+version: 1.0.0
+databases: [MonetDB, ClickHouse, DuckDB, vectorwise, vertica]
+authors: [Peter Boncz, Marcin Zukowski, Niels Nes]
+tags: [execution, columnar, x100, scan, sequential-io, cache-conscious, bat]
+standard: MonetDB X100
+---
+
+# Column-at-a-Time Table Scan
+
+## Description
+
+The column-at-a-time scan reads entire columns from storage sequentially, producing full column vectors as output. In the original MonetDB model (BAT algebra), each relational operator consumes and produces Binary Association Tables -- pairs of (OID, value) columns. The X100 evolution introduced vector-at-a-time processing where columns are read in cache-resident chunks (typically 1024 values), but the underlying storage scan remains column-oriented. This design maximizes sequential I/O bandwidth, enables hardware prefetching, and allows SIMD processing of the resulting column arrays.
+
+**Column-at-a-time vs. other scan models:**
+1. **Tuple-at-a-time (Volcano)**: Read one row, materialize all columns -- random I/O across columns
+2. **Vector-at-a-time (X100)**: Read 1024 values per column chunk -- cache-resident processing
+3. **Column-at-a-time (MonetDB)**: Read entire column sequentially -- maximum I/O bandwidth
+4. **PAX (hybrid)**: Read cache-line-sized mini-pages mixing column groups -- balanced
+
+**Key characteristics:**
+- **Sequential I/O**: Each column stored contiguously; scan is pure sequential read
+- **Minimal I/O amplification**: Only requested columns are read (column pruning)
+- **Hardware prefetch friendly**: Predictable access pattern triggers HW prefetcher
+- **Compression-friendly**: Homogeneous data in columns compresses 5-10x better than rows
+- **SIMD-ready output**: Produced column arrays are directly processable by SIMD kernels
+
+**BAT (Binary Association Table) model:**
+- Each column is a BAT: array of (head: OID, tail: value)
+- Head is virtual (dense, implicit) -- not stored
+- Tail is the actual column data -- fixed-width array
+- Operations produce new BATs (functional, no mutation)
+
+**Trade-offs:**
+- Memory proportional to full column (or scan chunk) x number of requested columns
+- Late materialization required -- row reconstruction deferred until output
+- Column pruning essential -- scanning unreferenced columns wastes bandwidth
+- Write amplification for updates (entire column must be maintained)
+
+## Relational Algebra
+
+```
+ColumnScan(R, [c1, c2, ..., cn])
+  = { BAT(oid, R.ci) | for each ci in requested columns }
+
+-- Column pruning: only read columns referenced by query
+-- Predicate columns scanned first for late materialization
+```
+
+## Implementation
+
+```rust
+/// Column-at-a-time table scan operator
+pub struct ColumnScan {
+    /// Table metadata
+    table: TableMetadata,
+    /// Column IDs to scan (after column pruning)
+    columns: Vec<ColumnId>,
+    /// Per-column storage handles
+    column_files: Vec<ColumnFile>,
+    /// Optional: scan in chunks for X100-style processing
+    chunk_size: Option<usize>,
+}
+
+/// A single column array (BAT tail)
+pub struct ColumnArray {
+    col_id: ColumnId,
+    data_type: DataType,
+    /// Raw data buffer (fixed-width values)
+    data: AlignedBuffer,
+    /// Null bitmap (1 bit per value, 0 = null)
+    null_bitmap: Option<BitVec>,
+    /// Number of values
+    len: usize,
+}
+
+impl ColumnScan {
+    /// Full column-at-a-time scan: read entire columns
+    pub fn scan_full(&self) -> Vec<ColumnArray> {
+        self.columns.iter().map(|&col_id| {
+            let file = &self.column_files[col_id];
+            let metadata = &self.table.columns[col_id];
+
+            // Sequential read of entire column file
+            let data = file.read_sequential(
+                0,
+                self.table.row_count,
+                metadata.data_type.width(),
+            );
+
+            let null_bitmap = if metadata.nullable {
+                Some(file.read_null_bitmap(
+                    0, self.table.row_count,
+                ))
+            } else {
+                None
+            };
+
+            ColumnArray {
+                col_id,
+                data_type: metadata.data_type,
+                data,
+                null_bitmap,
+                len: self.table.row_count,
+            }
+        }).collect()
+    }
+
+    /// X100-style chunked scan: read column chunks
+    pub fn scan_chunked(&self) -> ColumnChunkIterator {
+        let chunk_size = self.chunk_size.unwrap_or(1024);
+        ColumnChunkIterator {
+            scan: self,
+            position: 0,
+            chunk_size,
+            total_rows: self.table.row_count,
+        }
+    }
+}
+
+pub struct ColumnChunkIterator<'a> {
+    scan: &'a ColumnScan,
+    position: usize,
+    chunk_size: usize,
+    total_rows: usize,
+}
+
+impl<'a> Iterator for ColumnChunkIterator<'a> {
+    type Item = Vec<ColumnArray>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.position >= self.total_rows {
+            return None;
+        }
+
+        let remaining = self.total_rows - self.position;
+        let chunk_len = remaining.min(self.chunk_size);
+
+        let columns = self.scan.columns.iter().map(|&col_id| {
+            let file = &self.scan.column_files[col_id];
+            let metadata = &self.scan.table.columns[col_id];
+
+            let data = file.read_sequential(
+                self.position,
+                chunk_len,
+                metadata.data_type.width(),
+            );
+
+            let null_bitmap = if metadata.nullable {
+                Some(file.read_null_bitmap(
+                    self.position, chunk_len,
+                ))
+            } else {
+                None
+            };
+
+            ColumnArray {
+                col_id,
+                data_type: metadata.data_type,
+                data,
+                null_bitmap,
+                len: chunk_len,
+            }
+        }).collect();
+
+        self.position += chunk_len;
+        Some(columns)
+    }
+}
+
+/// Cost model for column scan
+pub fn column_scan_cost(
+    row_count: usize,
+    num_columns: usize,
+    avg_column_width: usize,
+    disk_bandwidth_mbps: f64,
+    compression_ratio: f64,
+) -> ScanCost {
+    // Bytes to read from storage
+    let raw_bytes = row_count * num_columns * avg_column_width;
+    let compressed_bytes = raw_bytes as f64 / compression_ratio;
+
+    // Sequential I/O time
+    let io_seconds = compressed_bytes / (disk_bandwidth_mbps * 1e6);
+
+    // Decompression CPU cost
+    let decompress_ns_per_byte = 0.5; // ~2 GB/s decompression
+    let decompress_seconds =
+        compressed_bytes * decompress_ns_per_byte / 1e9;
+
+    // Memory bandwidth (writing decompressed data)
+    let mem_bw_gbps = 40.0; // typical DDR4
+    let mem_seconds = raw_bytes as f64 / (mem_bw_gbps * 1e9);
+
+    ScanCost {
+        io_seconds,
+        cpu_seconds: decompress_seconds + mem_seconds,
+        total_seconds: io_seconds.max(
+            decompress_seconds + mem_seconds
+        ),
+        bytes_read: compressed_bytes as usize,
+        rows_produced: row_count,
+    }
+}
+```
+
+## Cost Model
+
+**I/O Cost:**
+- Sequential read: `num_columns x column_size / disk_bandwidth`
+- Column pruning savings: `(total_columns - read_columns) / total_columns`
+- Compression savings: typically 3-10x reduction in bytes read
+- SSD: ~3 GB/s sequential, HDD: ~200 MB/s sequential
+
+**CPU Cost:**
+- Decompression: ~2 GB/s throughput (lightweight codecs)
+- Null bitmap processing: ~1 cycle per value
+- Memory copy: bounded by memory bandwidth (~40 GB/s DDR4)
+
+**Memory:**
+- Full column scan: `row_count x column_width x num_columns`
+- Chunked scan (X100): `chunk_size x column_width x num_columns`
+- Typical chunk: 1024 x 8 bytes x 5 columns = 40 KB (fits L1 cache)
+
+**Comparison (scanning 1M rows, 10 columns, 8 bytes each):**
+
+| Model | Bytes Read | Cache Misses | Time |
+|-------|-----------|--------------|------|
+| Row-at-a-time (all cols) | 80 MB | ~1.25M | ~25 ms |
+| Row-at-a-time (5 cols) | 80 MB | ~1.25M | ~25 ms |
+| Column-at-a-time (5 cols) | 40 MB | ~625K | ~10 ms |
+| Column chunked 1024 (5 cols) | 40 MB | ~40K | ~8 ms |
+
+## Test Cases
+
+```sql
+-- Test 1: Full column scan with column pruning
+SELECT name, salary FROM employees;
+-- Only read 2 of N columns
+-- I/O: 2 x column_size (not N x column_size)
+-- Memory: 2 full column arrays
+
+-- Test 2: Scan with predicate (late materialization)
+SELECT name, salary FROM employees WHERE dept = 'ENG';
+-- Phase 1: Scan dept column, produce selection vector
+-- Phase 2: Gather name, salary at selected positions
+-- Savings: only materialize matching rows for name, salary
+
+-- Test 3: Chunked scan for cache efficiency
+SELECT SUM(amount) FROM transactions;
+-- Read amount column in 1024-value chunks
+-- Each chunk fits L1 cache: 1024 x 8 = 8 KB
+-- Aggregate computed chunk-by-chunk
+
+-- Test 4: Compressed column scan
+SELECT id, timestamp FROM events WHERE timestamp > '2024-01-01';
+-- Columns stored with dictionary + bitpacking compression
+-- Read compressed, decompress in chunks
+-- 5x fewer bytes from disk, CPU-bound decompression
+```
+
+## Comparison
+
+| Property | Column-at-a-Time | Row-at-a-Time | PAX |
+|----------|-----------------|---------------|-----|
+| I/O pattern | Sequential per column | Sequential per row | Sequential per page |
+| Column pruning | Native | N/A (read all) | Per mini-page |
+| Cache behavior | Excellent (homogeneous) | Poor (heterogeneous) | Good (grouped) |
+| Compression | 5-10x (homogeneous) | 1.5-3x (mixed types) | 3-5x |
+| SIMD applicability | Direct | None | Per mini-column |
+| Write performance | Poor (column-split) | Good (append row) | Good (append page) |
+| Point lookup | Poor (reconstruct row) | Good (single fetch) | Good (single page) |
+
+## References
+
+1. **Boncz, Peter A.; Zukowski, Marcin; Nes, Niels**. "MonetDB/X100: Hyper-Pipelining Query Execution." CIDR 2005.
+2. **Idreos, Stratos; Groffen, Fabian; Nes, Niels; Manegold, Stefan; Mullender, Sjoerd; Boncz, Peter**. "MonetDB: Two Decades of Research in Column-oriented Database Architectures." IEEE Data Eng. Bull. 2012.
+3. **Abadi, Daniel J.; Madden, Samuel R.; Hachem, Nabil**. "Column-Stores vs. Row-Stores: How Different Are They Really?" SIGMOD 2008.
+4. **Zukowski, Marcin; Boncz, Peter A.; Nes, Niels; Heman, Sandor**. "MonetDB/X100 - A DBMS In The CPU Cache." IEEE Data Eng. Bull. 2005.

@@ -1,0 +1,133 @@
+---
+id: datafusion-aggregate-statistics
+name: DataFusion Aggregate Statistics Optimization
+category: database-specific/datafusion
+databases: [datafusion]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, datafusion, aggregate, statistics, metadata]
+complexity: O(1)
+benefit_range: [0.5, 1.0]
+---
+
+# DataFusion Aggregate Statistics Optimization
+
+## Description
+
+Replaces simple aggregate queries with values read directly from table
+statistics metadata.  When exact statistics are available (e.g., from
+Parquet footer metadata), DataFusion can answer COUNT(*), MIN, and MAX
+without scanning any data.
+
+**When to apply**: The query is a simple aggregate (COUNT, MIN, MAX)
+over an entire table with no filter, and exact statistics are available.
+
+**Why it works**: Parquet files store row counts and column min/max
+values in their footer metadata.  Reading a few bytes of metadata is
+orders of magnitude faster than scanning gigabytes of columnar data.
+
+**Database version**: DataFusion 20.0+
+
+## Relational Algebra
+
+```latex
+-- Before: full table scan with aggregate
+$$
+\gamma_{; count=COUNT(*)}(scan(T))
+$$
+
+-- After: values from statistics
+$$
+values(count = statistics.row_count(T))
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("datafusion-count-star-from-statistics";
+    "(aggregate (count-star) (scan ?table))" =>
+    "(values (statistics-row-count ?table))"
+    if is_database("datafusion")
+    if has_exact_statistics("?table")
+),
+
+rw!("datafusion-min-from-statistics";
+    "(aggregate (min ?col) (scan ?table))" =>
+    "(values (statistics-min ?table ?col))"
+    if is_database("datafusion")
+    if has_exact_column_statistics("?table", "?col")
+),
+
+rw!("datafusion-max-from-statistics";
+    "(aggregate (max ?col) (scan ?table))" =>
+    "(values (statistics-max ?table ?col))"
+    if is_database("datafusion")
+    if has_exact_column_statistics("?table", "?col")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    agg: &AggregateFunction,
+    input: &LogicalPlan,
+    statistics: &Statistics,
+) -> bool {
+    matches!(input, LogicalPlan::TableScan { filters: [], .. })
+    && match agg {
+        AggregateFunction::Count { .. } =>
+            statistics.num_rows.is_exact(),
+        AggregateFunction::Min(col) | AggregateFunction::Max(col) =>
+            statistics.column_statistics[col].has_exact_bounds(),
+    }
+}
+```
+
+**Restrictions:**
+- No WHERE clause allowed (filter invalidates statistics)
+- Statistics must be marked as exact, not estimated
+- GROUP BY queries cannot use this optimization
+- Only COUNT(*), MIN, MAX are supported (not SUM, AVG)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(rows: f64, num_columns: usize) -> f64 {
+    // Eliminates entire table scan
+    rows * num_columns as f64 * 8.0 // bytes avoided
+}
+```
+
+**Typical benefit**: For a 1GB Parquet table, answers COUNT(*) in
+microseconds instead of scanning the full file.
+
+## Test Cases
+
+```sql
+-- Positive: COUNT(*) with exact statistics
+SELECT COUNT(*) FROM large_parquet_table;
+-- Returns row count from Parquet metadata
+```
+
+```sql
+-- Positive: MIN/MAX from column statistics
+SELECT MIN(id), MAX(id) FROM events;
+-- Returns from Parquet column chunk statistics
+```
+
+```sql
+-- Negative: COUNT(*) with filter
+SELECT COUNT(*) FROM events WHERE status = 'active';
+-- Must scan to apply filter
+```
+
+## References
+
+DataFusion: datafusion/optimizer/src/aggregate_statistics.rs
+DataFusion: datafusion/core/src/datasource/physical_plan/parquet/statistics.rs
+Apache Parquet: https://parquet.apache.org/documentation/latest/#metadata

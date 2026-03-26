@@ -1,0 +1,182 @@
+---
+id: generic-join
+name: Generic Join (Ngo-Porat-Re-Rudra)
+category: experimental/wcoj
+databases: [duckdb, postgresql]
+execution_models: [interpreted, vectorized]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["Ngo et al. 2014", "RA Contributors"]
+tags: [wcoj, generic-join, multi-way-join, AGM-bound]
+complexity: "O(N^(ρ*))"
+benefit_range: [0.3, 0.95]
+---
+
+# Generic Join (Ngo-Porat-Re-Rudra)
+
+## Description
+
+Generic Join is the foundational worst-case optimal join algorithm. It
+processes multi-way joins by iterating over variables in a chosen order and
+intersecting domain values across all relations that share each variable.
+Unlike binary join plans, Generic Join never materializes intermediate
+results larger than the AGM (Atserias-Grohe-Marx) bound.
+
+**When to apply**: Multi-way joins (3+ relations) where intermediate results
+from binary join plans exceed the AGM bound, especially cyclic queries.
+
+**Why it works**: The algorithm decomposes the join into a variable-at-a-time
+evaluation. For each variable, it computes the intersection of all relations
+containing that variable. The AGM inequality guarantees that the output size
+is bounded by N^(rho*), and Generic Join matches this bound.
+
+## Relational Algebra
+
+```latex
+$$
+\bowtie_{R.a=S.a, S.b=T.b, R.c=T.c}(R, S, T)
+  \rightarrow generic_join(
+       variable_order: [a, b, c],
+       relations: {R(a,c), S(a,b), T(b,c)}
+     )
+  \text{where} agm_bound(R,S,T) < binary_plan_intermediate_size(R,S,T)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("generic-join";
+    "(join ?pred1 (join ?pred2 ?r1 ?r2) ?r3)" =>
+    "(generic_join
+       (variable_order (compute_gyo_order ?r1 ?r2 ?r3))
+       (relations ?r1 ?r2 ?r3)
+       (predicates (merge_preds ?pred1 ?pred2)))"
+    if relation_count_ge_3("?r1", "?r2", "?r3")
+    if agm_bound_lower_than_binary()
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    relations: &[RelExpr],
+    predicates: &[JoinPredicate],
+) -> bool {
+    // At least 3 relations
+    if relations.len() < 3 {
+        return false;
+    }
+
+    // All predicates must be equi-joins
+    if !predicates.iter().all(|p| p.is_equijoin()) {
+        return false;
+    }
+
+    // Compute AGM bound and compare to binary plan estimate
+    let agm = compute_agm_bound(relations, predicates);
+    let binary_est = best_binary_plan_intermediate(
+        relations, predicates,
+    );
+
+    agm < binary_est
+}
+```
+
+**Restrictions:**
+- All join predicates must be equi-joins
+- Relations must support sorted iteration or hash-based intersection
+- Variable ordering heuristic affects constant factor (not asymptotic bound)
+- Build phase constructs hash indexes on all join attributes
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    relations: &[Statistics],
+    predicates: &[JoinPredicate],
+) -> f64 {
+    let agm_bound = compute_agm_bound(relations, predicates);
+    let rho_star = compute_fractional_edge_cover(predicates);
+
+    // Index construction cost: O(N) per relation
+    let build_cost: f64 = relations.iter()
+        .map(|r| r.row_count * 1.5)
+        .sum();
+
+    // Enumeration cost: AGM bound * per-tuple intersection cost
+    let num_vars = count_distinct_variables(predicates);
+    let enum_cost = agm_bound * num_vars as f64 * 1.2;
+
+    let generic_join_cost = build_cost + enum_cost;
+    let binary_cost = estimate_binary_join_cost(
+        relations, predicates,
+    );
+
+    if binary_cost > generic_join_cost {
+        (binary_cost - generic_join_cost) / binary_cost
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 5x-1000x for cyclic queries with high intermediate
+result sizes. Triangle queries see O(N^1.5) vs O(N^2).
+
+## Test Cases
+
+### Positive: Triangle query (canonical WCOJ example)
+
+```sql
+SELECT r.x, s.y, t.z
+FROM R(x, y) r, S(y, z) s, T(z, x) t
+WHERE r.y = s.y AND s.z = t.z AND t.x = r.x;
+
+-- Binary plan: at least O(N^2) intermediate results
+-- Generic Join: O(N^1.5) via AGM bound (rho* = 3/2)
+```
+
+### Positive: 4-clique pattern
+
+```sql
+SELECT e1.u, e1.v, e2.v AS w, e3.v AS x
+FROM edges e1, edges e2, edges e3, edges e4, edges e5, edges e6
+WHERE e1.v = e2.u AND e2.v = e3.u
+  AND e3.v = e4.u AND e4.v = e1.u
+  AND e1.u = e5.u AND e5.v = e3.u
+  AND e2.u = e6.u AND e6.v = e4.u;
+
+-- Binary plan: O(N^3) intermediate results
+-- Generic Join: O(N^2) via AGM bound (rho* = 2)
+```
+
+### Negative: Star query (acyclic)
+
+```sql
+SELECT *
+FROM fact f
+JOIN dim1 d1 ON f.k1 = d1.id
+JOIN dim2 d2 ON f.k2 = d2.id
+JOIN dim3 d3 ON f.k3 = d3.id;
+
+-- Acyclic query: binary join plans are already optimal
+-- Generic Join adds overhead without benefit
+```
+
+## References
+
+**Academic papers:**
+- Ngo et al., "Skew Strikes Back: New Developments in the Theory of Join Algorithms", SIGMOD Record 2014
+- Ngo, Porat, Re, Rudra, "Worst-Case Optimal Join Algorithms", JACM 2018 (journal version)
+- Atserias, Grohe, Marx, "Size Bounds and Query Plans for Relational Joins", SICOMP 2013
+
+**Key insights:**
+- AGM bound is tight: there exist database instances where output = N^(rho*)
+- Generic Join matches AGM bound for all queries (worst-case optimal)
+- Variable ordering is a heuristic; all orderings achieve same asymptotic bound
+- Fractional edge cover rho* computable via linear programming in poly-time

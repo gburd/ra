@@ -1,0 +1,128 @@
+---
+id: sqlite-automatic-index
+name: SQLite Automatic Index (Transient Index)
+category: database-specific/sqlite
+databases: [sqlite]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, sqlite, automatic-index, transient]
+complexity: O(n log n)
+benefit_range: [0.1, 0.6]
+---
+
+# SQLite Automatic Index (Transient Index)
+
+## Description
+
+SQLite creates a transient index on the fly when it determines that
+a full table scan with O(n) lookups per row would be more expensive
+than building a temporary index and then probing it.  The query
+planner estimates the cost of a table scan vs. building a transient
+B-tree index, and chooses the index path when the number of lookups
+exceeds a threshold (roughly the table size divided by log(N)).
+
+**When to apply**: A join or subquery requires repeated lookups
+against a table that has no suitable index, and the number of
+lookups is large enough to amortize the cost of building the index.
+
+**Why it works**: Building a transient B-tree is O(N log N) but
+converts each subsequent lookup from O(N) scan to O(log N) probe.
+When the number of lookups L satisfies L > N/log(N), the index
+path wins.
+
+**Database version**: SQLite 3.9.0+ (automatic indexing enabled by
+default)
+
+## Relational Algebra
+
+```latex
+-- Before: nested-loop join with full scan on inner
+$$
+T1 nested-loop-\bowtie_{T1.fk = T2.id} (scan T2)
+$$
+
+-- After: build transient index, then probe
+$$
+T1 nested-loop-\bowtie_{T1.fk = T2.id}
+    (transient-index-scan[T2.id](T2))
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("sqlite-automatic-index";
+    "(nested-loop-join ?pred
+        ?outer
+        (scan ?inner))" =>
+    "(nested-loop-join ?pred
+        ?outer
+        (transient-index-scan ?inner ?pred))"
+    if is_database("sqlite")
+    if no_suitable_index("?inner", "?pred")
+    if lookups_exceed_threshold("?outer", "?inner")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    outer_rows: usize,
+    inner_rows: usize,
+) -> bool {
+    // Automatic index is worthwhile when lookups
+    // amortize the build cost
+    inner_rows > 0
+    && outer_rows > inner_rows / (inner_rows as f64).log2() as usize
+}
+```
+
+**Restrictions:**
+- Can be disabled with `PRAGMA automatic_index = OFF`
+- Not used if a suitable permanent index exists
+- Only for equi-join conditions (equality on join columns)
+- The transient index is discarded after the query
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    outer_rows: f64,
+    inner_rows: f64,
+) -> f64 {
+    let scan_cost = outer_rows * inner_rows;
+    let build_cost = inner_rows * inner_rows.log2();
+    let probe_cost = outer_rows * inner_rows.log2();
+    scan_cost - build_cost - probe_cost
+}
+```
+
+**Typical benefit**: 10-100x speedup for joins with missing indexes,
+especially when the outer table has many rows.
+
+## Test Cases
+
+```sql
+-- Positive: join without index on inner table
+SELECT * FROM orders o
+JOIN customers c ON o.customer_id = c.id;
+-- SQLite builds transient index on customers(id)
+```
+
+```sql
+-- Negative: inner table has permanent index
+CREATE INDEX idx_customers_id ON customers(id);
+SELECT * FROM orders o
+JOIN customers c ON o.customer_id = c.id;
+-- Uses existing index, no transient index needed
+```
+
+## References
+
+SQLite: "The Next-Generation Query Planner" (sqlite.org)
+SQLite: PRAGMA automatic_index documentation
+Source: src/where.c, `constructAutomaticIndex()`

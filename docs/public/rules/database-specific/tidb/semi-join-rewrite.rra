@@ -1,0 +1,61 @@
+---
+id: tidb-semi-join-rewrite
+name: TiDB Semi-Join Rewrite
+category: database-specific/tidb
+databases: [tidb]
+execution_models: [vectorized]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["PingCAP TiDB Team", "RA Contributors"]
+tags: [join, semi-join, rewrite, optimization]
+complexity: "O(n+m)"
+benefit_range: [0.4, 0.8]
+source_file: "pkg/planner/core/rule_semi_join_rewrite.go"
+source_repo: "github.com/pingcap/tidb"
+---
+
+# TiDB Semi-Join Rewrite
+
+## Description
+
+Transforms semi-join (IN/EXISTS) to inner join when the right side has
+unique keys, allowing more efficient join algorithms and better optimization.
+
+## Relational Algebra
+
+```latex
+$$
+R WHERE R.a IN (SELECT S.b FROM S)
+  \rightarrow R JOIN (SELECT DISTINCT S.b FROM S) ON R.a = S.b
+  \text{where} S.b is unique
+$$
+
+```
+
+## Implementation
+
+```rust
+fn rewrite_semi_join(semi: &SemiJoin) -> Option<InnerJoin> {
+    if semi.right_has_unique_key() {
+        Some(InnerJoin::new(semi.left, semi.right, semi.predicate))
+    } else {
+        None
+    }
+}
+```
+
+## Cost Model
+
+Inner join can use hash/merge join instead of nested loop semi-join.
+
+## Test Cases
+
+```sql
+-- Semi-join with unique key
+SELECT * FROM orders WHERE customer_id IN
+  (SELECT id FROM customers WHERE status = 'premium');
+-- Rewritten: INNER JOIN on customer_id = id
+```
+
+## References
+- Source: `pkg/planner/core/rule_semi_join_rewrite.go`

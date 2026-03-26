@@ -1,0 +1,168 @@
+---
+id: simd-vectorized-scan
+name: SIMD-Vectorized Scan and Filter
+category: hardware/accelerator
+databases: [duckdb, clickhouse, velox, datafusion]
+execution_models: [vectorized]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [simd, avx, sse, vectorized, scan, filter, cpu]
+complexity: "O(n/w)"
+benefit_range: [0.3, 0.85]
+---
+
+# SIMD-Vectorized Scan and Filter
+
+## Description
+
+Replaces scalar scan and filter operations with SIMD-vectorized
+implementations using AVX-512, AVX2, or NEON instructions. Processes
+multiple values per instruction (8-16 int32s or 4-8 doubles per
+vector register), improving throughput for sequential scans and
+predicate evaluation.
+
+**When to apply**: The data type is SIMD-friendly (integers, floats,
+dates stored as integers) and the access pattern is sequential. Column
+stores benefit most because the data is already in homogeneous arrays.
+
+**Why it works**: SIMD instructions process a vector of values with a
+single instruction. AVX-512 processes 16 int32 values simultaneously.
+For a simple comparison filter, this is a 16x throughput improvement
+per core compared to scalar code. Combined with prefetching and
+branch-free selection, SIMD scans saturate memory bandwidth.
+
+## Relational Algebra
+
+```latex
+$$
+\sigma_{col op const}(R) \rightarrow simd_filter[col op const](R)
+  \text{where} type(col) is simd_friendly
+    AND storage(R) is columnar
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("simd-vectorized-scan";
+    "(filter (cmp ?op ?col ?val) ?input)" =>
+    "(simd_filter (cmp ?op ?col ?val) ?input)"
+    if column_type_simd_friendly("?col")
+    if storage_is_columnar("?input")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    col_type: &DataType,
+    storage: StorageFormat,
+    hw: &HardwareProfile,
+) -> bool {
+    let simd_friendly = matches!(
+        col_type,
+        DataType::Int8
+            | DataType::Int16
+            | DataType::Int32
+            | DataType::Int64
+            | DataType::Float32
+            | DataType::Float64
+            | DataType::Date
+            | DataType::Timestamp
+    );
+
+    simd_friendly
+        && matches!(storage, StorageFormat::Columnar)
+        && hw.simd_width_bits >= 128
+}
+```
+
+**Restrictions:**
+- Variable-length types (strings, blobs) require dictionary encoding
+- Data must be aligned for optimal SIMD performance
+- Null handling adds complexity (null bitmask processing)
+- Compound predicates may cause SIMD pipeline stalls
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    hw: &HardwareProfile,
+) -> f64 {
+    let n = stats.row_count;
+    let elem_size = 4; // assume int32
+
+    let simd_lanes = hw.simd_width_bits / (elem_size * 8);
+
+    // Scalar: 1 comparison per cycle
+    let scalar_cycles = n;
+    // SIMD: simd_lanes comparisons per cycle
+    let simd_cycles = n / simd_lanes as f64;
+
+    // Account for setup and mask extraction overhead
+    let overhead_factor = 1.2;
+    let simd_effective = simd_cycles * overhead_factor;
+
+    if scalar_cycles > simd_effective {
+        (scalar_cycles - simd_effective) / scalar_cycles
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 4x-16x per core for SIMD-friendly data types,
+depending on vector width (SSE4: 4x, AVX2: 8x, AVX-512: 16x).
+
+## Test Cases
+
+### Positive: Integer column filter on columnar store
+
+```sql
+-- lineitem in columnar format, l_quantity is int32
+-- AVX-512: 16 comparisons per instruction
+SELECT * FROM lineitem WHERE l_quantity < 24;
+
+-- Expected: SIMD vectorized filter
+-- Plan: SimdFilter(cmp=lt, col=l_quantity, val=24, input=lineitem)
+```
+
+### Positive: Date range filter
+
+```sql
+-- orders: o_orderdate stored as int32 (days since epoch)
+SELECT * FROM orders
+WHERE o_orderdate BETWEEN 19950101 AND 19961231;
+
+-- Expected: SIMD range check (two comparisons per vector)
+-- Plan: SimdFilter(cmp=between, col=o_orderdate,
+--        lo=19950101, hi=19961231, input=orders)
+```
+
+### Negative: String column (not directly SIMD-friendly)
+
+```sql
+SELECT * FROM customer WHERE c_name = 'John Smith';
+
+-- Expected: Scalar or dictionary-based filter
+-- Plan: Filter(eq, col=c_name, val='John Smith', input=customer)
+```
+
+## References
+
+**Implementation in databases:**
+- DuckDB: `src/common/vector_operations/` - SIMD operations
+- ClickHouse: `src/Functions/FunctionsComparison.h` - SIMD comparisons
+- Apache Arrow: Compute kernels with SIMD
+- Velox: `velox/common/base/SimdUtil.h`
+
+**Academic papers:**
+- Polychroniou et al., "Rethinking SIMD Vectorization for In-Memory Databases", SIGMOD 2015
+- Kersten et al., "Everything You Always Wanted to Know About Compiled and Vectorized Queries But Were Afraid to Ask", VLDB 2018
+- Lang et al., "Data Blocks: Hybrid OLAP Storage for In-Memory Column Stores", SIGMOD 2016

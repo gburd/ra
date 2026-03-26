@@ -1,0 +1,215 @@
+---
+id: differential-collection-operators
+name: Differential Collection Operators
+category: execution-models/differential
+version: "1.0.0"
+databases: [materialize, differential-dataflow]
+authors: ["Frank McSherry"]
+tags: [execution, differential, collection, map, filter, distinct, operators]
+complexity: "O(changes)"
+benefit_range: [0.2, 5.0]
+---
+
+# Differential Collection Operators
+
+## Description
+
+Implements the core collection transformation operators in differential dataflow:
+Map, Filter, Distinct, Negate, Concat, and Threshold. Each operator processes
+input changes and produces output changes, preserving the (data, time, diff)
+triple structure. These operators compose to build complex incremental queries.
+
+**Operator catalog:**
+- **Map**: Transform data, preserve time and diff
+- **Filter**: Pass through matching changes, block non-matching
+- **Distinct**: Maintain exactly one copy of each value (multiplicity = 0 or 1)
+- **Negate**: Flip all diffs (turns collection into its complement)
+- **Concat**: Union of two collections (add changes from both)
+- **Threshold**: Keep entries where accumulated diff > 0
+
+## Relational Algebra
+
+```
+Map: (data, time, diff) -> (f(data), time, diff)
+Filter: (data, time, diff) -> (data, time, diff) if pred(data)
+Distinct: consolidate per key, emit diff to keep multiplicity in {0, 1}
+Negate: (data, time, diff) -> (data, time, -diff)
+Concat: output = changes_A ++ changes_B
+Threshold: for each key, emit corrections to bring diff to {0, positive}
+```
+
+## Implementation
+
+```rust
+/// Map: apply function to data, preserve time/diff
+pub fn differential_map<T: Timestamp, A, B>(
+    changes: Vec<(A, T, Diff)>,
+    f: impl Fn(A) -> B,
+) -> Vec<(B, T, Diff)> {
+    changes.into_iter()
+        .map(|(data, time, diff)| (f(data), time, diff))
+        .collect()
+}
+
+/// Filter: keep changes matching predicate
+pub fn differential_filter<T: Timestamp, D>(
+    changes: Vec<(D, T, Diff)>,
+    pred: impl Fn(&D) -> bool,
+) -> Vec<(D, T, Diff)> {
+    changes.into_iter()
+        .filter(|(data, _, _)| pred(data))
+        .collect()
+}
+
+/// Distinct: maintain multiplicity of exactly 0 or 1 per value
+pub struct Distinct<T: Timestamp> {
+    /// Tracks current multiplicity per value
+    state: HashMap<Value, i64>,
+}
+
+impl<T: Timestamp> Distinct<T> {
+    pub fn process(
+        &mut self,
+        changes: Vec<(Value, T, Diff)>,
+    ) -> Vec<(Value, T, Diff)> {
+        let mut output = Vec::new();
+
+        for (val, time, diff) in changes {
+            let old_mult = *self.state.get(&val).unwrap_or(&0);
+            let new_mult = old_mult + diff as i64;
+            self.state.insert(val.clone(), new_mult);
+
+            let old_present = old_mult > 0;
+            let new_present = new_mult > 0;
+
+            match (old_present, new_present) {
+                (false, true) => {
+                    // Value appeared: emit insertion
+                    output.push((val, time, 1));
+                }
+                (true, false) => {
+                    // Value disappeared: emit retraction
+                    output.push((val, time, -1));
+                }
+                _ => {
+                    // No change in distinct membership
+                }
+            }
+        }
+
+        output
+    }
+}
+
+/// Negate: flip all diffs
+pub fn differential_negate<T: Timestamp, D>(
+    changes: Vec<(D, T, Diff)>,
+) -> Vec<(D, T, Diff)> {
+    changes.into_iter()
+        .map(|(data, time, diff)| (data, time, -diff))
+        .collect()
+}
+
+/// Concat: merge changes from two collections
+pub fn differential_concat<T: Timestamp, D>(
+    left: Vec<(D, T, Diff)>,
+    right: Vec<(D, T, Diff)>,
+) -> Vec<(D, T, Diff)> {
+    left.into_iter().chain(right).collect()
+}
+
+/// Threshold: keep only positive multiplicities
+pub struct Threshold<T: Timestamp> {
+    state: HashMap<Value, i64>,
+}
+
+impl<T: Timestamp> Threshold<T> {
+    pub fn process(
+        &mut self,
+        changes: Vec<(Value, T, Diff)>,
+    ) -> Vec<(Value, T, Diff)> {
+        let mut output = Vec::new();
+
+        for (val, time, diff) in changes {
+            let old_mult = *self.state.get(&val).unwrap_or(&0);
+            let new_mult = old_mult + diff as i64;
+            self.state.insert(val.clone(), new_mult);
+
+            // Emit correction to maintain threshold invariant
+            let old_above = old_mult.max(0);
+            let new_above = new_mult.max(0);
+            let correction = new_above - old_above;
+
+            if correction != 0 {
+                output.push((val, time, correction as Diff));
+            }
+        }
+
+        output
+    }
+}
+
+/// Set operations built from primitives:
+/// INTERSECT = Threshold(Concat(A, Negate(Concat(A, B) - A)))
+/// EXCEPT = Threshold(Concat(A, Negate(B)))
+/// UNION = Distinct(Concat(A, B))
+```
+
+## Cost Model
+
+**Per-change costs:**
+- Map: O(1) -- function application
+- Filter: O(1) -- predicate evaluation
+- Negate: O(1) -- flip sign
+- Concat: O(1) -- append to output
+- Distinct: O(1) amortized with HashMap
+- Threshold: O(1) amortized with HashMap
+
+**Stateful operators memory:**
+- Distinct: O(distinct values) for multiplicity tracking
+- Threshold: O(distinct values) for multiplicity tracking
+- Map, Filter, Negate, Concat: O(1) stateless
+
+**Composition:**
+- N operators in sequence: O(N) per input change
+- Changes may be amplified (map producing multiple outputs)
+  or reduced (filter dropping changes)
+
+## Test Cases
+
+```sql
+-- Test 1: Map + Filter composition
+CREATE MATERIALIZED VIEW active_emails AS
+SELECT UPPER(email) FROM users WHERE status = 'active';
+-- Filter passes changes where status='active'
+-- Map applies UPPER() to email field
+-- Both preserve (time, diff) structure
+
+-- Test 2: Distinct on union
+CREATE MATERIALIZED VIEW all_contacts AS
+SELECT email FROM customers UNION SELECT email FROM suppliers;
+-- Concat + Distinct: tracks per-email multiplicity
+-- Duplicate emails across sources: distinct emits one copy
+
+-- Test 3: EXCEPT via negate + threshold
+CREATE MATERIALIZED VIEW exclusive_customers AS
+SELECT email FROM customers EXCEPT SELECT email FROM blacklist;
+-- Concat(customers, Negate(blacklist)) + Threshold
+-- Adding email to blacklist: threshold removes it from result
+
+-- Test 4: Threshold for semi-join
+-- WHERE EXISTS(SELECT 1 FROM orders WHERE orders.cid = customers.id)
+-- Threshold on join result: keeps customers with at least one order
+-- Removing last order: customer drops out of result
+```
+
+## References
+
+1. **McSherry, Frank et al**. "differential-dataflow." CIDR 2013.
+   - Collection operator semantics and composition
+
+2. **McSherry, Frank**. "differential-dataflow" documentation.
+   - API reference for Collection operators
+
+3. **Materialize Source**. `src/compute/src/render/mod.rs`
+   - Operator rendering in production

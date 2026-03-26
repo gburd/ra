@@ -1,0 +1,135 @@
+---
+id: calcite-project-window-transpose
+name: Calcite ProjectWindowTransposeRule
+category: database-specific/calcite
+databases: [calcite]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, calcite, project, window, transpose]
+complexity: O(n)
+benefit_range: [0.05, 0.3]
+---
+
+# Calcite ProjectWindowTransposeRule
+
+## Description
+
+Pushes a project below a window (OVER) operator to remove
+columns not needed by the window function or the final output.
+This narrows the data flowing through the window computation.
+
+**When to apply**: A `LogicalProject` sits above a `LogicalWindow`
+and the projection eliminates columns that are not referenced by
+any window function or the final output.
+
+**Why it works**: Window functions must sort or partition their
+input. Narrower rows reduce the cost of sorting and reduce memory
+usage in the window buffer.
+
+**Calcite class**: `org.apache.calcite.rel.rules.ProjectWindowTransposeRule`
+
+## Relational Algebra
+
+```latex
+-- Before: project drops columns after window
+$$
+\pi_{a, w}(Window[w = ROW_NUMBER() OVER (ORDER BY a)](
+    \pi_{a, b, c, d}(R)))
+$$
+
+-- After: push projection to narrow input
+$$
+\pi_{a, w}(Window[w = ROW_NUMBER() OVER (ORDER BY a)](
+    \pi_{a}(R)))
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-project-window-transpose";
+    "(project ?exprs (window ?win_exprs ?input))" =>
+    "(project ?exprs (window ?win_exprs
+        (project ?needed_cols ?input)))"
+    if can_narrow_window_input(
+        "?exprs", "?win_exprs", "?input"
+    )
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    final_project: &[Expr],
+    window_exprs: &[WindowExpr],
+    input_cols: &[Column],
+) -> bool {
+    // Compute the set of columns actually needed
+    let mut needed: HashSet<Column> = HashSet::new();
+
+    // Columns referenced in final projection
+    for e in final_project {
+        needed.extend(e.referenced_columns());
+    }
+
+    // Columns referenced in window functions
+    // (partition by, order by, arguments)
+    for w in window_exprs {
+        needed.extend(w.partition_by_columns());
+        needed.extend(w.order_by_columns());
+        needed.extend(w.argument_columns());
+    }
+
+    // Only beneficial if we can drop at least one column
+    needed.len() < input_cols.len()
+}
+```
+
+**Restrictions:**
+- Window functions that reference all input columns gain no
+  benefit
+- Correlated sub-expressions in window frames prevent pushdown
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    rows: f64,
+    original_width: usize,
+    reduced_width: usize,
+) -> f64 {
+    if original_width == 0 {
+        return 0.0;
+    }
+    let savings = (original_width - reduced_width) as f64
+        / original_width as f64;
+    rows * savings * 0.005
+}
+```
+
+**Typical benefit**: 5-30% for wide tables where the window
+uses few columns.
+
+## Test Cases
+
+```sql
+-- Positive: narrow input to window
+SELECT name, ROW_NUMBER() OVER (ORDER BY sal) AS rn
+FROM emp;
+-- Only name, sal needed; other columns dropped before window
+```
+
+```sql
+-- Negative: window uses all columns
+SELECT *, SUM(sal) OVER (PARTITION BY deptno ORDER BY name)
+FROM emp;
+-- All columns pass through, no narrowing possible
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/ProjectWindowTransposeRule.java

@@ -1,0 +1,145 @@
+---
+id: expression-index-matching
+name: Expression Index Matching
+category: logical/function-optimization
+databases: [postgresql, oracle, mssql, duckdb]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [function, index, expression, computed-column, matching]
+complexity: "O(n)"
+benefit_range: [0.5, 0.95]
+---
+
+# Expression Index Matching
+
+## Description
+
+Matches function expressions in predicates against available expression
+indexes (also called functional indexes or computed column indexes).
+When `f(col)` appears in a predicate and an index exists on `f(col)`,
+the predicate can use the index directly.
+
+**When to apply**: Predicates containing function expressions where a
+matching expression index exists in the catalog.
+
+## Relational Algebra
+
+```latex
+-- Expression index on LOWER(email)
+$$
+filter[LOWER(email) = 'user@example.com'](scan[users])
+  \rightarrow index_scan[idx_lower_email](LOWER(email) = 'user@example.com')
+$$
+
+-- Expression index on (price * quantity)
+$$
+filter[(price * quantity) > 1000](scan[orders])
+  \rightarrow index_scan[idx_total]((price * quantity) > 1000)
+$$
+
+-- Expression index on DATE_TRUNC('month', created_at)
+$$
+filter[DATE_TRUNC('month', created_at) = '2024-01-01'](scan[events])
+  \rightarrow index_scan[idx_monthly](DATE_TRUNC('month', created_at) = '2024-01-01')
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("match-expression-index";
+    "(filter ?pred (scan ?table))" =>
+    { MatchExpressionIndex { pred: "?pred", table: "?table" } }
+    if has_expression_index_for("?table", "?pred")
+),
+
+struct MatchExpressionIndex { pred: Var, table: Var }
+
+impl Applier for MatchExpressionIndex {
+    fn apply_one(&self, egraph: &mut EGraph, matched: &Subst) -> Vec<Id> {
+        let table = &egraph[matched[self.table]];
+        let pred = &egraph[matched[self.pred]];
+
+        for index in catalog::get_expression_indexes(table) {
+            if expression_matches(pred, &index.expression) {
+                return vec![egraph.add(
+                    Expr::IndexScan(index.name, pred.clone())
+                )];
+            }
+        }
+        vec![]
+    }
+}
+
+fn expression_matches(pred: &Expr, index_expr: &Expr) -> bool {
+    // Check if predicate contains the indexed expression
+    // Must match structurally, accounting for commutativity
+    pred.contains_subexpr(index_expr)
+}
+```
+
+**Restrictions:**
+- Expression must match exactly (no partial matches)
+- Collation must be compatible for string expressions
+- Expression index must cover all referenced columns
+- Partial expression indexes have additional filter conditions
+
+## Cost Model
+
+```rust
+fn estimated_benefit(table_size: u64, selectivity: f64) -> f64 {
+    let scan_cost = table_size as f64;
+    let index_cost = (table_size as f64 * selectivity)
+        + (table_size as f64).log2() * 4.0;
+    (scan_cost - index_cost) / scan_cost
+}
+```
+
+**Typical benefit**: 50-95% when expression index avoids full table scan
+
+## Test Cases
+
+### Positive: LOWER() with expression index
+
+```sql
+-- Index: CREATE INDEX idx_lower_email ON users (LOWER(email));
+SELECT * FROM users WHERE LOWER(email) = 'john@example.com';
+-- Uses idx_lower_email for direct lookup
+```
+
+### Positive: Computed column index
+
+```sql
+-- Index: CREATE INDEX idx_total ON line_items ((quantity * unit_price));
+SELECT * FROM line_items WHERE quantity * unit_price > 1000;
+-- Uses idx_total for range scan
+```
+
+### Positive: JSON expression index
+
+```sql
+-- Index: CREATE INDEX idx_json ON events ((data->>'type'));
+SELECT * FROM events WHERE data->>'type' = 'purchase';
+-- Uses idx_json instead of full table scan
+```
+
+### Negative: No matching expression index
+
+```sql
+SELECT * FROM users WHERE UPPER(name) = 'JOHN';
+-- No index on UPPER(name) -> full table scan
+-- Suggest: CREATE INDEX idx_upper_name ON users (UPPER(name));
+```
+
+## References
+
+**Implementation:**
+- PostgreSQL: Expression index support via `indexprs` in `pg_index`
+- Oracle: Function-based indexes
+- mssql: Computed columns with indexes
+- DuckDB: Expression index support

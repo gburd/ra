@@ -1,0 +1,43 @@
+---
+id: cache-conscious-join
+name: "Cache-Conscious Join"
+category: physical/join-algorithms
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [academic, optimization]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+preconditions:
+  - type: "pattern"
+    must_match: "(join inner (= ?lcol ?rcol) ?left ?right)"
+    description: "Equi-join with cache-aware partitioning"
+  - type: "predicate"
+    condition: "is_equijoin(= ?lcol ?rcol)"
+    description: "Must be an equi-join"
+  - type: "fact"
+    fact_type: "hardware.cache_size"
+    comparator: "exists"
+    description: "Cache size info needed for partition sizing"
+---
+
+# Cache-Conscious Join
+
+## Description
+
+Optimizes join for CPU cache locality
+
+## Implementation
+
+Add implementation details for Cache-Conscious Join
+
+## Tests
+
+Add test cases for this optimization
+
+## References
+
+- Paper: Cache-Conscious Join by Barber et al.
+- DOI: 10.1145/1007568

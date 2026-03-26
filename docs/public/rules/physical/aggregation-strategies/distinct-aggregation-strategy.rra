@@ -1,0 +1,198 @@
+---
+id: distinct-aggregation-strategy
+name: Distinct Aggregation Strategy
+category: physical/aggregation-strategies
+databases: [postgresql, mysql, duckdb, sqlite, clickhouse, cockroachdb, mssql, oracle]
+execution_models: [volcano, vectorized]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [aggregation, distinct, dedup]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+preconditions:
+  - type: "pattern"
+    must_match: "(aggregate ?input ?groups (distinct_agg ?func ?col))"
+    description: "Aggregation with DISTINCT aggregate function"
+  - type: "predicate"
+    condition: "has_distinct_aggregate(?aggs)"
+    description: "At least one aggregate must use DISTINCT modifier"
+---
+
+# Distinct Aggregation Strategy
+
+## Metadata
+- **Rule ID**: `distinct-aggregation-strategy`
+- **Category**: Physical / Aggregation Strategies
+- **Complexity**: O(n) with duplicate elimination
+- **Introduced**: SQL-86 (DISTINCT in aggregates)
+- **Prerequisites**: None
+- **Alternatives**: Sort-based deduplication, hash-based deduplication
+
+## Description
+
+Distinct aggregation eliminates duplicates before aggregation (COUNT(DISTINCT), SUM(DISTINCT), etc.). Requires tracking seen values per group, increasing memory and CPU costs.
+
+**Strategies:**
+1. **Hash-based**: Hash set per group to track distinct values
+2. **Sort-based**: Sort within each group, eliminate consecutive duplicates
+3. **Hybrid**: Hash for low cardinality, sort for high cardinality
+
+**When to use:**
+- COUNT(DISTINCT col) queries
+- SUM(DISTINCT col) for unique values
+- AVG(DISTINCT col) for distinct averages
+
+## Relational Algebra
+
+```
+γ_{g; COUNT(DISTINCT v)}(R)
+→ γ_{g; COUNT(*)}(δ(π_{g,v}(R)))
+  where δ = duplicate elimination
+
+Alternative:
+→ HashDistinctAgg(R, g, v)
+  // Hash set per group
+```
+
+## Implementation
+
+```rust
+pub struct DistinctAggregation {
+    input: Box<dyn Operator>,
+    group_cols: Vec<usize>,
+    distinct_col: usize,
+    agg_func: AggregateFunction,
+    // Hash table: GroupKey -> Set<Value>
+    distinct_sets: HashMap<GroupKey, HashSet<Value>>,
+}
+
+impl Operator for DistinctAggregation {
+    fn next(&mut self) -> Option<Tuple> {
+        // Build phase: collect distinct values per group
+        if \!self.built {
+            while let Some(tuple) = self.input.next() {
+                let group_key = self.extract_group_key(&tuple);
+                let value = tuple.get(self.distinct_col);
+
+                self.distinct_sets
+                    .entry(group_key)
+                    .or_insert_with(HashSet::new)
+                    .insert(value.clone());
+            }
+            self.built = true;
+        }
+
+        // Emit phase: aggregate distinct sets
+        self.distinct_sets.drain().next().map(|(key, distinct_values)| {
+            let aggregate_result = match self.agg_func {
+                AggFunc::CountDistinct => distinct_values.len() as i64,
+                AggFunc::SumDistinct => distinct_values.iter().sum(),
+                AggFunc::AvgDistinct => {
+                    let sum: f64 = distinct_values.iter().sum();
+                    sum / distinct_values.len() as f64
+                }
+                _ => panic\!("Unsupported distinct aggregate"),
+            };
+
+            let mut result = key.into_tuple();
+            result.push(Value::from(aggregate_result));
+            result
+        })
+    }
+}
+```
+
+## Cost Model
+
+```rust
+pub fn cost_distinct_aggregation(
+    input_card: u64,
+    group_card: u64,
+    distinct_per_group: u64,
+    hardware: &HardwareModel,
+) -> Cost {
+    // Scan cost
+    let scan_cost = Cost::io(
+        (input_card as f64 / hardware.tuples_per_page()) * hardware.sequential_page_read_cost()
+    );
+
+    // Hash set operations: insert + membership check
+    let hash_cost = Cost::cpu(input_card * 20); // More expensive than simple agg
+
+    // Memory cost: hash sets per group
+    let memory_cost = Cost::memory(group_card * distinct_per_group * 16);
+
+    // Aggregation cost
+    let agg_cost = Cost::cpu(group_card * distinct_per_group * 5);
+
+    scan_cost + hash_cost + memory_cost + agg_cost
+}
+```
+
+## Test Cases
+
+### Test 1: COUNT(DISTINCT)
+```sql
+CREATE TABLE orders (customer_id INT, product_id INT, quantity INT);
+INSERT INTO orders VALUES
+  (1, 10, 5), (1, 10, 3),  -- Same customer, same product
+  (1, 20, 2),               -- Same customer, different product
+  (2, 10, 1);               -- Different customer
+
+SELECT customer_id, COUNT(DISTINCT product_id)
+FROM orders
+GROUP BY customer_id;
+
+-- Result:
+-- customer_id=1: 2 distinct products (10, 20)
+-- customer_id=2: 1 distinct product (10)
+```
+
+### Test 2: SUM(DISTINCT)
+```sql
+SELECT customer_id, SUM(DISTINCT quantity)
+FROM orders
+GROUP BY customer_id;
+
+-- Result:
+-- customer_id=1: 5+3+2 = 10 (sum of distinct quantities: 5, 3, 2)
+-- customer_id=2: 1
+```
+
+### Test 3: Multiple distinct aggregates (expensive\!)
+```sql
+SELECT
+  customer_id,
+  COUNT(DISTINCT product_id) as distinct_products,
+  COUNT(DISTINCT order_date) as distinct_dates
+FROM orders
+GROUP BY customer_id;
+
+-- Requires TWO distinct hash sets per group
+-- Very expensive: O(n * k) where k = number of DISTINCT aggregates
+```
+
+### Test 4: Optimization: Convert to GROUP BY
+```sql
+-- Instead of:
+SELECT COUNT(DISTINCT product_id) FROM orders;
+
+-- Optimizer can rewrite as:
+SELECT COUNT(*) FROM (SELECT DISTINCT product_id FROM orders);
+
+-- Or:
+SELECT COUNT(*) FROM (SELECT product_id FROM orders GROUP BY product_id);
+```
+
+## References
+
+1. **PostgreSQL**: Distinct aggregates implementation
+   - https://www.postgresql.org/docs/current/sql-expressions.html#SYNTAX-AGGREGATES
+2. **Larson et al. (2002)**: "Grouping and Aggregation: Efficiency and Optimizations"
+3. **SQL:2003 Standard**: DISTINCT in aggregate functions
+4. **Chaudhuri & Shim (1994)**: "Including GROUP BY in Query Optimization"
+   - DOI: 10.1145/645920.672498
+
+## Tags
+`physical`, `aggregation`, `distinct`, `deduplication`, `expensive`

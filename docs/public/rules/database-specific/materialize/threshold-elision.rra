@@ -1,0 +1,121 @@
+---
+id: materialize-threshold-elision
+name: Materialize Threshold Elision
+category: database-specific/materialize
+databases: [materialize]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, materialize, threshold, elision, distinct, monotonic]
+complexity: O(n)
+benefit_range: [0.2, 0.5]
+---
+
+# Materialize Threshold Elision
+
+## Description
+
+Eliminates unnecessary Threshold operators when the input is guaranteed
+to have non-negative multiplicities.  In differential dataflow, a
+Threshold operator clamps negative multiplicities to zero; for monotonic
+or naturally non-negative inputs, this is unnecessary.
+
+**When to apply**: A Threshold operator sits on an input that is known
+to be monotonic (append-only) or whose multiplicities are guaranteed
+non-negative by construction.
+
+**Why it works**: Threshold operators maintain state to track
+multiplicities and detect when they go negative.  Eliminating
+unnecessary Thresholds reduces differential dataflow operator count,
+state memory, and per-update processing cost.
+
+**Database version**: Materialize 0.30+
+
+## Relational Algebra
+
+```latex
+-- Before: threshold on monotonic input
+$$
+threshold(source_monotonic)
+$$
+
+-- After: threshold elided
+$$
+source_monotonic
+$$
+
+-- DISTINCT on monotonic input
+$$
+threshold(\cup(R_monotonic, negate(R_monotonic)))
+$$
+  -- Can be simplified when R is monotonic
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("materialize-elide-threshold-monotonic";
+    "(threshold ?input)" =>
+    "?input"
+    if is_database("materialize")
+    if is_monotonic("?input")
+),
+
+rw!("materialize-elide-threshold-nonnegative";
+    "(threshold ?input)" =>
+    "?input"
+    if is_database("materialize")
+    if has_nonnegative_multiplicities("?input")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(input: &MirRelationExpr) -> bool {
+    input.is_monotonic()
+    || input.multiplicities_are_nonnegative()
+}
+```
+
+**Restrictions:**
+- Cannot elide when the input may produce negative multiplicities
+  (e.g., from EXCEPT or complex CTEs with negation)
+- Must propagate monotonicity information through the plan
+
+## Cost Model
+
+```rust
+fn estimated_benefit(rows: f64, updates_per_sec: f64) -> f64 {
+    // Eliminate threshold state and per-update check
+    let state = rows * 16.0;
+    let update_cost = updates_per_sec * 0.005;
+    state + update_cost
+}
+```
+
+**Typical benefit**: Removes one differential dataflow operator
+and its associated state, reducing memory by O(distinct_rows).
+
+## Test Cases
+
+```sql
+-- Positive: DISTINCT on append-only Kafka source
+CREATE SOURCE events FROM KAFKA ...;
+CREATE MATERIALIZED VIEW unique_events AS
+SELECT DISTINCT event_id FROM events;
+-- Threshold can be elided if events are append-only
+```
+
+```sql
+-- Negative: EXCEPT produces negative multiplicities
+SELECT * FROM t1 EXCEPT SELECT * FROM t2;
+-- Threshold required to clamp negatives
+```
+
+## References
+
+Materialize: src/transform/src/threshold_elision.rs
+Materialize: src/transform/src/monotonic.rs

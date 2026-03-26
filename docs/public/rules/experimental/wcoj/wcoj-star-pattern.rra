@@ -1,0 +1,182 @@
+---
+id: wcoj-star-pattern
+name: WCOJ for Star Join Patterns
+category: experimental/wcoj
+databases: [duckdb, postgresql]
+execution_models: [vectorized]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["Ngo et al. 2014", "RA Contributors"]
+tags: [wcoj, star-join, data-warehouse, multi-way-join]
+complexity: "O(N * sqrt(N))"
+benefit_range: [0.1, 0.6]
+---
+
+# WCOJ for Star Join Patterns
+
+## Description
+
+Applies worst-case optimal join techniques to star schema join patterns
+commonly found in data warehouse queries. While star joins are acyclic
+(and thus binary joins are asymptotically optimal), WCOJ techniques can
+still reduce intermediate result sizes when dimension tables have
+overlapping filter predicates that create implicit correlations.
+
+**When to apply**: Star schema queries where multiple dimension filters
+create correlated selectivity that binary join plans handle poorly due
+to independence assumptions in cardinality estimation.
+
+**Why it works**: In a star join, the fact table joins with multiple
+dimension tables. When filters on different dimensions are correlated
+(e.g., "electronics" category AND "US" region), binary plans may
+overestimate intermediates. A multi-way intersection on the fact table's
+foreign keys can prune early by checking all dimension constraints
+simultaneously.
+
+## Relational Algebra
+
+```latex
+$$
+fact \bowtie_{fk1=d1.id} dim1 \bowtie_{fk2=d2.id} dim2 \bowtie_{fk3=d3.id} dim3
+  WHERE dim1.attr = 'X' AND dim2.attr = 'Y' AND dim3.attr = 'Z'
+  \rightarrow wcoj_star_join(
+       fact_table: fact,
+       dimensions: [
+         (dim1, fk1, filter: attr='X'),
+         (dim2, fk2, filter: attr='Y'),
+         (dim3, fk3, filter: attr='Z')
+       ],
+       strategy: bitmap_intersection
+     )
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("wcoj-star-pattern";
+    "(join ?p3 (join ?p2 (join ?p1 ?fact ?dim1) ?dim2) ?dim3)" =>
+    "(wcoj_star_join
+       (fact_table ?fact)
+       (dimensions ?dim1 ?dim2 ?dim3)
+       (predicates (merge_preds ?p1 ?p2 ?p3))
+       (strategy bitmap_intersection))"
+    if is_star_schema("?fact", "?dim1", "?dim2", "?dim3")
+    if has_correlated_dimension_filters()
+    if dimension_count_ge_3()
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    fact: &RelExpr,
+    dimensions: &[DimensionJoin],
+) -> bool {
+    // Must be a star schema pattern
+    if dimensions.len() < 3 {
+        return false;
+    }
+
+    // All joins must be PK-FK equijoins
+    if !dimensions.iter().all(|d| d.is_pk_fk_equijoin()) {
+        return false;
+    }
+
+    // Dimension filters should exist (otherwise standard join is fine)
+    let filtered_dims = dimensions.iter()
+        .filter(|d| d.has_filter())
+        .count();
+
+    filtered_dims >= 2
+}
+```
+
+**Restrictions:**
+- Must be a star schema (single fact table, multiple dimension tables)
+- All joins must be PK-FK equi-joins
+- At least 2 dimensions must have filter predicates
+- Dimensions must be small enough to build bitmaps in memory
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    fact_stats: &Statistics,
+    dim_stats: &[DimensionStatistics],
+) -> f64 {
+    // Bitmap construction: one bitmap per filtered dimension
+    let bitmap_build_cost: f64 = dim_stats.iter()
+        .filter(|d| d.has_filter)
+        .map(|d| d.matching_rows as f64 * 0.1) // bitmap set
+        .sum();
+
+    // Intersection: AND bitmaps on fact table FK columns
+    let bitmap_intersect_cost =
+        fact_stats.row_count as f64 / 64.0; // word-level AND
+
+    // Traditional: sequential dimension lookups
+    let traditional_cost = estimate_sequential_star_join(
+        fact_stats, dim_stats,
+    );
+
+    let wcoj_cost = bitmap_build_cost + bitmap_intersect_cost;
+
+    if traditional_cost > wcoj_cost {
+        (traditional_cost - wcoj_cost) / traditional_cost
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 2x-10x for star queries with 3+ correlated
+dimension filters. Less dramatic than cyclic WCOJ but useful in
+OLAP workloads.
+
+## Test Cases
+
+### Positive: Star query with correlated filters
+
+```sql
+SELECT SUM(f.revenue)
+FROM fact_sales f
+JOIN dim_product p ON f.product_id = p.id
+JOIN dim_region r ON f.region_id = r.id
+JOIN dim_time t ON f.time_id = t.id
+WHERE p.category = 'electronics'
+  AND r.country = 'US'
+  AND t.year = 2024;
+
+-- Binary plan: join fact with each dimension sequentially
+-- WCOJ star: build bitmaps for each dimension filter,
+-- intersect on fact table to prune simultaneously
+```
+
+### Negative: Star query without dimension filters
+
+```sql
+SELECT SUM(f.revenue)
+FROM fact_sales f
+JOIN dim_product p ON f.product_id = p.id
+JOIN dim_region r ON f.region_id = r.id;
+
+-- No correlated filters: standard join is optimal
+```
+
+## References
+
+**Academic papers:**
+- Ngo et al., "Worst-Case Optimal Join Algorithms", JACM 2018
+- Olteanu, Zavodny, "Size Bounds for Factorised Representations of Query Results", TODS 2015
+- Abo Khamis et al., "In-Database Factorized Learning", SIGMOD 2018
+
+**Key insights:**
+- Star joins are acyclic so WCOJ does not improve asymptotic complexity
+- Benefit comes from simultaneous multi-dimension pruning
+- Bitmap intersection is the practical mechanism (not trie-based)
+- Complements bloom filter semi-join reductions

@@ -1,0 +1,246 @@
+---
+id: anti-join-simplification
+name: Anti-Join Simplification
+category: logical/join-elimination
+databases: [postgresql, mysql, oracle, mssql, duckdb]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [join, elimination, anti-join, not-exists, not-in, simplification]
+complexity: "O(1)"
+benefit_range: [0.3, 0.8]
+---
+
+# Anti-Join Simplification
+
+## Description
+
+Simplifies anti-join patterns (NOT EXISTS, NOT IN, LEFT JOIN + IS NULL)
+into more efficient forms by eliminating redundant work, pushing predicates,
+or converting between equivalent anti-join representations based on NULL
+handling semantics.
+
+**When to apply**: Anti-join patterns where:
+- The inner side has additional filters that can be simplified
+- NOT IN can be safely converted to NOT EXISTS (NULL-safe)
+- LEFT JOIN + IS NULL can be converted to a direct anti-join operator
+- Empty inner side makes the anti-join a no-op
+
+**Why it works**: Anti-joins have strict semantics that enable specific
+simplifications. An anti-join returns left rows with no match on the right.
+If the right side is provably empty, all left rows qualify. If the right
+side has contradictory predicates, the anti-join degenerates.
+
+## Relational Algebra
+
+```latex
+-- Empty right side: anti-join returns all left rows
+$$
+anti_\bowtie_{cond}(R, empty_set) \rightarrow R
+$$
+
+-- Contradictory filter on right: same as empty
+$$
+anti_\bowtie_{cond}(R, filter[false](S)) \rightarrow R
+$$
+
+-- LEFT JOIN + IS NULL -> anti-join (canonical form)
+$$
+filter[S.pk IS NULL](left_\bowtie_{R.fk = S.pk}(R, S))
+  \rightarrow anti_\bowtie_{R.fk = S.pk}(R, S)
+$$
+
+-- Anti-join with tautology: returns empty set
+$$
+anti_\bowtie_{true}(R, non_empty_S) \rightarrow empty_set
+  \text{where} |S| > 0
+$$
+
+-- NOT IN to anti-join with NULL guard
+$$
+filter[R.a NOT IN (SELECT S.b FROM S)](R)
+  \rightarrow anti_\bowtie_{R.a = S.b}(R, filter[S.b IS NOT NULL](S))
+  \text{where} S.b is nullable
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// LEFT JOIN + IS NULL -> anti-join
+rw!("left-join-is-null-to-anti-join";
+    "(filter (is-null ?s_col) (left-join (= ?r_col ?s_key) ?left ?right))" =>
+    "(anti-join (= ?r_col ?s_key) ?left ?right)"
+    if is_join_key_or_from("?s_col", "?right")
+),
+
+// Anti-join with empty right side
+rw!("anti-join-empty-right";
+    "(anti-join ?cond ?left (empty-set))" =>
+    "?left"
+),
+
+// Anti-join with contradictory filter
+rw!("anti-join-contradictory-filter";
+    "(anti-join ?cond ?left (filter (literal false) ?right))" =>
+    "?left"
+),
+
+// NOT IN with nullable column -> anti-join + NULL guard
+rw!("not-in-to-anti-join-null-safe";
+    "(filter (not-in ?col ?subquery) ?outer)" =>
+    "(anti-join (= ?col ?sub_col) ?outer (filter (is-not-null ?sub_col) ?subquery))"
+    if is_nullable("?sub_col")
+),
+
+// Simplify anti-join when inner has unique key on join column
+rw!("anti-join-unique-inner";
+    "(anti-join (= ?a ?b) ?left ?right)" =>
+    "(anti-join (= ?a ?b) ?left ?right)"
+    // Mark as "single-pass" when right side is unique on ?b
+    if is_unique_key("?right", "?b")
+),
+```
+
+**Restrictions:**
+- NOT IN with NULLs has different semantics than NOT EXISTS
+- LEFT JOIN + IS NULL conversion requires IS NULL on a join key or
+  non-nullable right column
+- Empty set detection requires static analysis or constraint propagation
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    left_size: u64,
+    right_size: u64,
+    pattern: AntiJoinPattern,
+) -> f64 {
+    match pattern {
+        // LEFT JOIN + IS NULL -> anti-join: avoids materialization
+        AntiJoinPattern::LeftJoinIsNull => {
+            let left_join_cost = (left_size + right_size) as f64;
+            let anti_join_cost = (left_size + right_size) as f64 * 0.6;
+            (left_join_cost - anti_join_cost) / left_join_cost
+        }
+        // Empty right side: complete elimination
+        AntiJoinPattern::EmptyRight => 1.0,
+        // NOT IN -> NOT EXISTS: avoids triple-value logic overhead
+        AntiJoinPattern::NotInToNotExists => 0.3,
+    }
+}
+```
+
+**Typical benefit**: 30-80% depending on simplification type
+
+## Test Cases
+
+### Positive: LEFT JOIN + IS NULL to anti-join
+
+```sql
+-- Common ORM-generated anti-join pattern
+SELECT o.id, o.amount
+FROM orders o
+LEFT JOIN returns r ON o.id = r.order_id
+WHERE r.order_id IS NULL;
+
+-- Convert to direct anti-join:
+SELECT o.id, o.amount
+FROM orders o
+WHERE NOT EXISTS (
+  SELECT 1 FROM returns r WHERE r.order_id = o.id
+);
+
+-- Anti-join operator avoids full left join materialization
+-- Hash anti-join: build returns, probe orders, emit non-matches
+```
+
+### Positive: Anti-join with provably empty right side
+
+```sql
+SELECT * FROM customers c
+WHERE NOT EXISTS (
+  SELECT 1 FROM orders o
+  WHERE o.customer_id = c.id
+  AND o.date > '2099-01-01'  -- constraint: date <= CURRENT_DATE
+  AND o.date < '2000-01-01'  -- contradictory
+);
+
+-- Right side filter is contradictory -> empty set
+-- Anti-join returns all customers
+-- Rewrite to: SELECT * FROM customers c;
+```
+
+### Positive: NOT IN with nullable column
+
+```sql
+-- Dangerous: NOT IN with NULLs returns empty set
+SELECT * FROM employees e
+WHERE e.dept_id NOT IN (SELECT d.id FROM departments d);
+
+-- If d.id is nullable, add NULL guard:
+SELECT * FROM employees e
+WHERE NOT EXISTS (
+  SELECT 1 FROM departments d
+  WHERE d.id IS NOT NULL AND d.id = e.dept_id
+);
+```
+
+### Positive: Redundant anti-join filter pushdown
+
+```sql
+SELECT c.name FROM customers c
+WHERE NOT EXISTS (
+  SELECT 1 FROM orders o
+  WHERE o.customer_id = c.id
+  AND o.status = 'completed'
+  AND o.total > 0
+);
+
+-- Push o.status and o.total filters into anti-join build side
+-- Smaller hash table for anti-join probe
+```
+
+### Negative: LEFT JOIN + IS NULL on non-key column
+
+```sql
+SELECT o.id
+FROM orders o
+LEFT JOIN customers c ON o.customer_id = c.id
+WHERE c.email IS NULL;
+
+-- c.email IS NULL does NOT imply no match
+-- Customer might exist with NULL email
+-- Cannot convert to anti-join
+```
+
+### Negative: NOT IN with correlated subquery containing aggregation
+
+```sql
+SELECT * FROM products p
+WHERE p.price NOT IN (
+  SELECT AVG(price) FROM products
+  GROUP BY category_id
+);
+
+-- Correlated aggregate subquery
+-- Cannot simplify to basic anti-join without decorrelation
+```
+
+## References
+
+**Academic papers:**
+- Pirahesh et al., "Extensible/Rule Based Query Rewrite Optimization in Starburst", SIGMOD 1992
+- Galindo-Legaria, "Parameterized Queries and Nesting Equivalences", Microsoft Technical Report 2000
+- Kim, "On Optimizing an SQL-like Nested Query", ACM TODS 1982
+
+**Implementation:**
+- PostgreSQL: `convert_ANY_sublink_to_join()` and anti-join in `subselect.c`
+- Oracle: Anti-join transformation rules in CBO
+- mssql: Anti-semi-join optimization in query processor
+- MySQL: `Item_subselect` to anti-join conversion in `sql_optimizer.cc`
+- DuckDB: `AntiJoin` operator with hash-based implementation

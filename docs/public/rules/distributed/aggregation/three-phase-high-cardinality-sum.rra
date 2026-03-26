@@ -1,0 +1,52 @@
+---
+id: three-phase-high-cardinality-sum
+name: Three-Phase High Cardinality SUM
+category: distributed/aggregation
+databases: [presto, trino, spark, greenplum]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, aggregation, three-phase, high-cardinality, sum]
+complexity: O(n)
+benefit_range: [0.1, 0.6]
+---
+
+# Three-Phase High Cardinality SUM
+
+## Description
+
+For SUM with very high group cardinality and skewed distribution, use
+three phases: (1) local partial SUM, (2) shuffle by a hash of group keys
+to redistribute partially aggregated data, (3) final SUM. The extra
+shuffle step helps when local pre-aggregation provides little reduction
+due to high cardinality.
+
+**When to apply**: Group cardinality > 50% of input rows and
+distribution is skewed. Two-phase provides minimal benefit because
+local reduction is small.
+
+## Relational Algebra
+
+```latex
+-- Three-phase SUM with repartition
+$$
+\gamma_{g, SUM(partial_sum)}(
+    Exchange[hash(g)](
+        \gamma_{g, SUM(a) as partial_sum}(
+            Exchange[hash(salt(g))](R)  -- salt to redistribute
+        )
+    )
+)
+$$
+
+```
+
+## Test Cases
+
+```sql
+-- Positive: high cardinality groups with skew
+SELECT user_id, SUM(event_value) FROM events GROUP BY user_id;
+-- Millions of users, Zipf distribution
+
+-- Negative: low cardinality (two-phase suffices)
+SELECT region, SUM(sales) FROM orders GROUP BY region;
+```

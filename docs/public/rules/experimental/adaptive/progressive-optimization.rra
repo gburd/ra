@@ -1,0 +1,218 @@
+---
+id: progressive-optimization
+name: Progressive Query Optimization (Rio)
+category: experimental/adaptive
+databases: [postgresql, cockroachdb]
+execution_models: [adaptive, volcano]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["Markl et al. 2004", "RA Contributors"]
+tags: [adaptive, progressive, robust, re-optimization, validity-ranges]
+complexity: "O(plan_cost + replan_cost)"
+benefit_range: [0.2, 0.7]
+---
+
+# Progressive Query Optimization (Rio)
+
+## Description
+
+Instead of a single plan, the optimizer generates a plan with embedded
+"validity ranges" for cardinality estimates. During execution, if actual
+cardinalities fall outside the validity range, the system triggers
+re-optimization with the observed values. Unlike simple mid-query
+replanning, Progressive Optimization pre-computes alternative plans
+for different cardinality ranges, enabling near-instant plan switching.
+
+**When to apply**: Queries with high estimation uncertainty where the
+optimal plan changes significantly across different cardinality ranges
+(plan "switch points"). Common for queries with parameters, UDFs, or
+joins on skewed data.
+
+**Why it works**: For many queries, there are discrete cardinality
+thresholds where the optimal plan changes (e.g., switch from NL join to
+hash join at 1000 rows). By pre-identifying these thresholds and
+pre-compiling alternative plans, the system can switch instantly at
+runtime without paying re-optimization cost.
+
+## Relational Algebra
+
+```latex
+-- Plan with validity ranges:
+$$
+plan_envelope(
+  range[0, 1000]: nested_loop_join(R, indexed_scan(S)),
+  range[1000, 100000]: hash_join(R, scan(S)),
+  range[100000, inf]: sort_merge_join(sorted_scan(R), sorted_scan(S)),
+  checkpoint: cardinality_of(filter[R.x > ?](R))
+)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("progressive-optimization";
+    "(join ?pred ?left ?right)" =>
+    "(plan_envelope
+       (checkpoint (cardinality ?left))
+       (plans
+         (range 0 ?threshold1
+           (nested_loop_join ?pred ?left (index_scan ?right)))
+         (range ?threshold1 ?threshold2
+           (hash_join ?pred ?left ?right))
+         (range ?threshold2 inf
+           (sort_merge_join ?pred ?left ?right))))"
+    if has_plan_switch_points("?left", "?right")
+    if query_is_parameterized()
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(query: &RelExpr) -> bool {
+    // Query must have cardinality uncertainty
+    let key_operators = find_uncertain_operators(query);
+    if key_operators.is_empty() {
+        return false;
+    }
+
+    // Must have plan switch points (different plans for different ranges)
+    for op in &key_operators {
+        let switch_points = find_switch_points(
+            query, op,
+        );
+        if switch_points.len() >= 1 {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn find_switch_points(
+    query: &RelExpr,
+    uncertain_op: &Operator,
+) -> Vec<(f64, Plan)> {
+    let mut switch_points = Vec::new();
+
+    // Sample cardinality space and optimize for each
+    let cardinalities = [1.0, 10.0, 100.0, 1000.0,
+                          10000.0, 100000.0, 1000000.0];
+
+    let mut prev_plan: Option<Plan> = None;
+    for &card in &cardinalities {
+        let plan = optimize_with_fixed_card(
+            query, uncertain_op, card,
+        );
+        if let Some(ref prev) = prev_plan {
+            if !plan.structurally_equal(prev) {
+                switch_points.push((card, plan.clone()));
+            }
+        }
+        prev_plan = Some(plan);
+    }
+
+    switch_points
+}
+```
+
+**Restrictions:**
+- Pre-computing multiple plans increases optimization time (2-5x)
+- Switch points assume cardinality is the dominant uncertainty factor
+- Multiple uncertain operators create combinatorial explosion
+- Storage for pre-compiled plans
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    query: &RelExpr,
+    cardinality_distribution: &Distribution,
+) -> f64 {
+    // Expected cost with single static plan
+    let static_plan = optimize_with_expected_card(query);
+    let static_expected_cost = cardinality_distribution
+        .expected_value(|card| {
+            execute_cost(static_plan, card)
+        });
+
+    // Expected cost with plan envelope
+    let envelope = build_plan_envelope(query);
+    let envelope_expected_cost = cardinality_distribution
+        .expected_value(|card| {
+            let plan = envelope.select_plan(card);
+            execute_cost(plan, card)
+        });
+
+    // Pre-computation overhead (one-time)
+    let precompute_overhead = envelope.plans.len() as f64 * 5.0;
+
+    if static_expected_cost > envelope_expected_cost + precompute_overhead {
+        (static_expected_cost - envelope_expected_cost)
+            / static_expected_cost
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 2x-10x for parameterized queries with varying
+selectivity. Eliminates the worst-case "wrong plan" scenario.
+
+## Test Cases
+
+### Positive: Parameterized date range query
+
+```sql
+PREPARE report AS
+SELECT c.name, SUM(o.amount)
+FROM customers c
+JOIN orders o ON c.id = o.customer_id
+WHERE o.date BETWEEN $1 AND $2
+GROUP BY c.name;
+
+-- $1='2024-01-01', $2='2024-01-02': 1000 orders -> NL join
+-- $1='2024-01-01', $2='2024-12-31': 10M orders -> hash join
+-- Plan envelope with switch at 5000 rows
+```
+
+### Positive: Query with varying predicate selectivity
+
+```sql
+SELECT * FROM products p
+JOIN reviews r ON p.id = r.product_id
+WHERE p.category = ?;
+
+-- 'electronics': 2M products -> hash join
+-- 'limited_edition': 50 products -> NL with index
+-- Switch point at ~1000 products
+```
+
+### Negative: Stable query with known cardinality
+
+```sql
+SELECT * FROM config WHERE key = 'max_connections';
+-- Single row, always NL join, no switch points
+```
+
+## References
+
+**Academic papers:**
+- Markl et al., "Robust Query Processing through Progressive Optimization", SIGMOD 2004
+- Dutt, Haritsa, "Plan Bouquets: Query Processing without Selectivity Estimation", SIGMOD 2014
+- Perron et al., "How I Learned to Stop Worrying and Love Re-optimization", VLDB 2019
+
+**Implementation:**
+- Oracle: Adaptive cursor sharing (partial implementation)
+- mssql: Parameter Sensitive Plan Optimization (since 2022)
+- Research: Plan bouquets (Dutt & Haritsa)
+
+**Key insights:**
+- "Plan bouquets" generalize to handle multiple uncertain operators
+- Switch points correspond to cost function crossover points
+- mssql's PSPO is a production implementation of this idea
+- Pre-compiled plans amortize compilation cost across executions

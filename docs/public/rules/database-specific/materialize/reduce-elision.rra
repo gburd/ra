@@ -1,0 +1,114 @@
+---
+id: materialize-reduce-elision
+name: Materialize Reduce Elision
+category: database-specific/materialize
+databases: [materialize]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, materialize, reduce, aggregate, elision, key]
+complexity: O(n)
+benefit_range: [0.2, 0.6]
+---
+
+# Materialize Reduce Elision
+
+## Description
+
+Eliminates unnecessary Reduce (aggregate) operators when the group
+key is already unique.  If the input is known to have unique keys
+(from primary keys or preceding operations), the Reduce is
+replaced with a Map that computes the aggregate expressions directly.
+
+**When to apply**: A Reduce groups by columns that form a unique key
+of the input relation.
+
+**Why it works**: A Reduce on a unique key produces exactly one output
+row per input row.  In differential dataflow, a Reduce operator
+maintains state to track groups and compute incremental updates.
+Eliminating it avoids this state maintenance and reduces memory and
+update latency.
+
+**Database version**: Materialize 0.30+
+
+## Relational Algebra
+
+```latex
+-- Before: aggregate on unique key
+$$
+\gamma_{pk; count=COUNT(*)}(R)  \text{where} pk is unique key of R
+$$
+
+-- After: elide reduce, use map
+$$
+\pi_{pk, 1 AS count}(R)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("materialize-reduce-elision-unique-key";
+    "(reduce ?groups ?aggs ?input)" =>
+    "(map (elide-aggs-to-defaults ?aggs) (project ?groups ?input))"
+    if is_database("materialize")
+    if groups_form_unique_key("?groups", "?input")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    group_key: &[usize],
+    input_keys: &[Vec<usize>],
+) -> bool {
+    input_keys.iter().any(|key| {
+        key.iter().all(|k| group_key.contains(k))
+    })
+}
+```
+
+**Restrictions:**
+- Group key must be a superset of at least one unique key
+- Aggregate functions must have well-defined single-row behavior
+  (COUNT = 1, SUM = value, MIN = MAX = value)
+- Does not apply if the input has no known unique keys
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    rows: f64,
+    updates_per_sec: f64,
+) -> f64 {
+    // Avoid Reduce operator state and incremental maintenance
+    let state_memory = rows * 32.0; // bytes per group
+    let update_cost = updates_per_sec * 0.01;
+    state_memory + update_cost
+}
+```
+
+**Typical benefit**: Eliminates arrangement state for the Reduce,
+saving O(rows) memory and removing per-update aggregation overhead.
+
+## Test Cases
+
+```sql
+-- Positive: GROUP BY on primary key
+SELECT id, COUNT(*) FROM users GROUP BY id;
+-- id is PK; COUNT(*) is always 1; Reduce eliminated
+```
+
+```sql
+-- Negative: GROUP BY on non-unique column
+SELECT department, COUNT(*) FROM users GROUP BY department;
+-- department is not unique; Reduce required
+```
+
+## References
+
+Materialize: src/transform/src/reduce_elision.rs
+Materialize: src/transform/src/analysis/unique_keys.rs

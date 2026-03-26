@@ -1,0 +1,168 @@
+---
+id: gpu-window-function
+name: GPU Parallel Window Function
+category: hardware/gpu
+databases: [heavydb, sqream]
+execution_models: [vectorized]
+hardware: [gpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [gpu, window, rank, running-sum, parallel-prefix]
+complexity: "O(n/p + w*log(p))"
+benefit_range: [0.2, 0.8]
+---
+
+# GPU Parallel Window Function
+
+## Description
+
+Offloads window function evaluation (ROW_NUMBER, RANK, DENSE_RANK,
+running SUM/AVG, LEAD/LAG) to the GPU using parallel prefix sums
+and segmented scans. Each partition is processed independently, and
+within each partition, the GPU computes running aggregates using
+parallel prefix operations.
+
+**When to apply**: The window function is over a large partition (many
+rows per partition group) and the aggregate is GPU-compatible. Best
+for cases with few partitions but many rows per partition.
+
+**Why it works**: Parallel prefix sum (scan) computes running totals
+in O(n/p + log p) time on p processors, compared to O(n) sequential.
+The GPU processes all partitions in parallel, and within each
+partition uses work-efficient parallel prefix operations. Ranking
+functions use GPU sort followed by position assignment.
+
+## Relational Algebra
+
+```latex
+$$
+window[partition_by; order_by; agg()](R)
+  \rightarrow gpu_window[partition_by; order_by; agg()](R)
+  \text{where} |R| > threshold
+    AND agg in {ROW_NUMBER, RANK, SUM, AVG, MIN, MAX, LEAD, LAG}
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("gpu-window-function";
+    "(window ?partition ?order ?func ?input)" =>
+    "(gpu_window ?partition ?order ?func ?input)"
+    if input_large_enough("?input")
+    if window_func_gpu_compatible("?func")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    func: &WindowFunction,
+    hw: &HardwareProfile,
+) -> bool {
+    let gpu_compatible = matches!(
+        func,
+        WindowFunction::RowNumber
+            | WindowFunction::Rank
+            | WindowFunction::DenseRank
+            | WindowFunction::Sum
+            | WindowFunction::Avg
+            | WindowFunction::Min
+            | WindowFunction::Max
+            | WindowFunction::Lead
+            | WindowFunction::Lag
+    );
+
+    let data_bytes =
+        stats.row_count as u64 * stats.avg_row_size;
+
+    gpu_compatible
+        && stats.row_count > 100_000.0
+        && data_bytes <= hw.gpu_memory_bytes
+}
+```
+
+**Restrictions:**
+- NTILE and custom window frames have limited GPU support
+- Very many small partitions (1-10 rows each) do not benefit
+- Data must fit in GPU memory for single-pass processing
+- Frame specifications (ROWS BETWEEN) add complexity
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    num_partitions: f64,
+    hw: &HardwareProfile,
+) -> f64 {
+    let n = stats.row_count;
+    let rows_per_partition = n / num_partitions;
+    let data_bytes = n as u64 * stats.avg_row_size;
+
+    // CPU: O(n) sequential per partition
+    let cpu_ns = n * 25.0; // ~25ns per row (hash + update)
+
+    // GPU: transfer + parallel prefix within partitions
+    let transfer_ns = data_bytes as f64
+        / (hw.pcie_bandwidth_gbps * 1e9) * 1e9;
+    let prefix_depth = rows_per_partition.log2();
+    let gpu_compute_ns =
+        n * prefix_depth * 5.0 / hw.gpu_sm_count as f64;
+    let gpu_ns = transfer_ns + gpu_compute_ns;
+
+    if cpu_ns > gpu_ns {
+        (cpu_ns - gpu_ns) / cpu_ns
+    } else {
+        0.0
+    }
+}
+```
+
+**Typical benefit**: 3x-10x for large partitions with running
+aggregates. Less benefit for ranking over small partitions.
+
+## Test Cases
+
+### Positive: Running sum over large partition
+
+```sql
+-- orders: 150M rows, running total per customer
+SELECT o_custkey, o_orderdate, o_totalprice,
+       SUM(o_totalprice) OVER (
+         PARTITION BY o_custkey ORDER BY o_orderdate
+       ) as running_total
+FROM orders;
+
+-- Expected: GPU parallel prefix sum per partition
+-- Plan: GpuWindow(partition=o_custkey, order=o_orderdate,
+--        func=SUM(o_totalprice), input=orders)
+```
+
+### Negative: Few rows per partition
+
+```sql
+-- Small partitions (avg 3 rows each), parallel prefix not helpful
+SELECT dept, employee, salary,
+       RANK() OVER (PARTITION BY dept ORDER BY salary DESC)
+FROM employees;  -- 1000 employees, 300 departments
+
+-- Expected: CPU window function
+-- Plan: Window(partition=dept, order=salary, func=RANK)
+```
+
+## References
+
+**Implementation in databases:**
+- HeavyDB: Window function GPU execution
+- SQream: GPU-native window functions
+- NVIDIA cuDF: `cudf::rolling_window`
+
+**Academic papers:**
+- Harris et al., "Parallel Prefix Sum (Scan) with CUDA", GPU Gems 3, Chapter 39
+- Sengupta et al., "Scan Primitives for GPU Computing", Graphics Hardware 2007

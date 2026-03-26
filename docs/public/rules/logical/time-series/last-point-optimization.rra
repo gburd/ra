@@ -1,0 +1,113 @@
+---
+id: last-point-optimization
+name: Last-Point Query Optimization
+category: logical/time-series
+databases: [timescaledb, influxdb, questdb, clickhouse]
+version: "1.0.0"
+authors: ["Timescale Inc.", "QuestDB Team"]
+tags: [logical, time-series, last-point, latest, skip-scan]
+complexity: O(d)
+benefit_range: [0.8, 0.99]
+---
+
+# Last-Point Query Optimization
+
+## Description
+
+Optimizes "last known value" queries (latest reading per device/sensor)
+by converting a GROUP BY + MAX(timestamp) pattern into an index skip-scan
+that reads only the last entry per group from a time-ordered index. This
+avoids scanning the entire table when only the most recent row per entity
+is needed.
+
+**When to apply**: Queries of the form `SELECT DISTINCT ON (device_id)
+... ORDER BY ts DESC` or equivalent MAX(ts) subquery patterns.
+
+## Relational Algebra
+
+```latex
+-- Before: full scan + group + max
+$$
+\gamma_{device_id; MAX(ts), LAST(value, ts)}(sensor_data)
+$$
+
+-- After: index skip-scan on (device_id, ts DESC)
+$$
+SkipScan(idx_device_ts_desc, first_per_group=true)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("last-point-skip-scan";
+    "(aggregate ?group_cols (max ?ts_col) ?input)" =>
+    "(skip-scan-last
+        (find-ordered-index ?input ?group_cols ?ts_col)
+        ?group_cols)"
+    if has_ordered_index("?input", "?group_cols", "?ts_col")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(agg: &Aggregate, table: &Table, catalog: &Catalog) -> bool {
+    // Pattern: GROUP BY entity, get latest timestamp
+    agg.has_max_on_time_column()
+        // Index on (entity_cols, ts DESC) must exist
+        && catalog.has_index(table,
+            &agg.group_columns().chain(agg.time_column()),
+            SortOrder::Descending)
+}
+```
+
+**Restrictions:**
+- Requires composite index with time column as last key (DESC)
+- Only for MAX(ts) or equivalent DISTINCT ON patterns
+- Additional columns retrieved via heap lookup after skip-scan
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    total_rows: f64,
+    distinct_entities: f64,
+    index_height: u32,
+) -> f64 {
+    let skip_scan_cost = distinct_entities
+        * index_height as f64;
+    let full_scan_cost = total_rows;
+    full_scan_cost - skip_scan_cost
+}
+```
+
+**Typical benefit**: 80-99% for IoT dashboards (millions of rows, thousands of devices).
+
+## Test Cases
+
+```sql
+-- Positive: latest reading per device
+SELECT DISTINCT ON (device_id) device_id, ts, temperature
+FROM sensor_data
+ORDER BY device_id, ts DESC;
+
+-- Positive: equivalent MAX subquery
+SELECT s.* FROM sensor_data s
+WHERE (device_id, ts) IN (
+    SELECT device_id, MAX(ts) FROM sensor_data GROUP BY device_id
+);
+
+-- Negative: no appropriate index
+SELECT DISTINCT ON (device_id) * FROM sensor_data
+ORDER BY device_id, ts DESC;
+-- Without index on (device_id, ts DESC): full sort required
+```
+
+## References
+
+- TimescaleDB: SkipScan optimization
+- QuestDB: LATEST BY clause

@@ -1,0 +1,217 @@
+---
+id: uncorrelated-subquery-to-join
+name: Uncorrelated Subquery to Join
+category: logical/subquery-unnesting
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [subquery, unnesting, uncorrelated, join, flatten]
+complexity: "O(1)"
+benefit_range: [0.5, 0.9]
+---
+
+# Uncorrelated Subquery to Join
+
+## Description
+
+Converts an uncorrelated subquery (one that does not reference the outer
+query) into a join. Since the subquery result is independent of the outer
+query, it can be computed once and joined, rather than evaluated repeatedly
+in a nested-loop fashion.
+
+**When to apply**: Any subquery in FROM, WHERE, or SELECT that does not
+reference columns from the outer query block.
+
+**Why it works**: An uncorrelated subquery produces a fixed result set
+regardless of which outer row is being processed. Materializing it once
+and joining is always at least as efficient as re-executing per outer row.
+The join form also opens the door to join reordering and hash/merge join
+algorithms.
+
+## Relational Algebra
+
+```latex
+-- IN subquery (uncorrelated)
+$$
+filter[R.a IN (SELECT S.b FROM S WHERE S.c > 10)](R)
+  \rightarrow semi_\bowtie_{R.a = S.b}(R, filter[S.c > 10](S))
+$$
+
+-- Scalar subquery in SELECT list
+$$
+project[R.*, (SELECT MAX(S.val) FROM S) AS max_val](R)
+  \rightarrow project[R.*, T.max_val](cross_join(R, T))
+  \text{where} T = aggregate[MAX(val)](S)
+$$
+
+-- Subquery in FROM clause
+$$
+SELECT * FROM R, (SELECT * FROM S WHERE S.active) AS sub
+  WHERE R.id = sub.r_id
+  \rightarrow \bowtie_{R.id = S.r_id}(R, filter[S.active](S))
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Uncorrelated IN subquery to semi-join
+rw!("uncorrelated-in-to-semi-join";
+    "(filter (in ?col (subquery ?inner)) ?outer)" =>
+    "(semi-join (= ?col ?inner_col) ?outer ?inner)"
+    if is_uncorrelated("?inner", "?outer")
+    if extract_single_column("?inner", "?inner_col")
+),
+
+// Uncorrelated scalar subquery to cross join
+rw!("uncorrelated-scalar-to-cross-join";
+    "(project ?cols (scalar-subquery ?inner) ?outer)" =>
+    "(project ?cols (cross-join ?outer ?inner))"
+    if is_uncorrelated("?inner", "?outer")
+    if is_scalar("?inner")
+),
+
+// Uncorrelated EXISTS to semi-join with TRUE condition
+rw!("uncorrelated-exists-to-conditional";
+    "(filter (exists (subquery ?inner)) ?outer)" =>
+    "(filter (not-empty ?inner) ?outer)"
+    if is_uncorrelated("?inner", "?outer")
+    // Uncorrelated EXISTS is a constant boolean
+),
+
+fn is_uncorrelated(inner: &Expr, outer: &Expr) -> bool {
+    let outer_cols = outer.output_columns();
+    let inner_refs = inner.referenced_columns();
+    inner_refs.iter().all(|c| !outer_cols.contains(c))
+}
+```
+
+**Restrictions:**
+- Must verify the subquery is truly uncorrelated (no outer references)
+- Scalar subqueries must return exactly one row (runtime check needed)
+- NOT IN with NULLs has different semantics (handled by not-in-to-anti-join)
+- Subqueries with LIMIT need careful handling
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    outer_size: u64,
+    inner_size: u64,
+    inner_cost: f64,
+) -> f64 {
+    // Nested execution: evaluate subquery per outer row
+    let nested_cost = outer_size as f64 * inner_cost;
+
+    // Join execution: evaluate inner once, then join
+    let join_cost = inner_cost + (outer_size + inner_size) as f64;
+
+    (nested_cost - join_cost) / nested_cost
+}
+```
+
+**Typical benefit**: 50-90% for large outer tables with non-trivial subqueries
+
+## Test Cases
+
+### Positive: Uncorrelated IN subquery
+
+```sql
+SELECT * FROM employees e
+WHERE e.dept_id IN (
+  SELECT d.id FROM departments d WHERE d.budget > 1000000
+);
+
+-- Subquery is independent of e
+-- Rewrite to semi-join:
+SELECT * FROM employees e
+SEMI JOIN departments d
+  ON e.dept_id = d.id AND d.budget > 1000000;
+
+-- Hash semi-join: build departments, probe employees
+```
+
+### Positive: Uncorrelated scalar subquery in SELECT
+
+```sql
+SELECT e.name, e.salary,
+  (SELECT AVG(salary) FROM employees) AS company_avg
+FROM employees e;
+
+-- AVG subquery is uncorrelated, computed once
+-- Rewrite to cross join with scalar aggregate:
+SELECT e.name, e.salary, t.company_avg
+FROM employees e
+CROSS JOIN (SELECT AVG(salary) AS company_avg FROM employees) t;
+```
+
+### Positive: Uncorrelated subquery in FROM
+
+```sql
+SELECT o.id, o.total, t.avg_total
+FROM orders o,
+  (SELECT AVG(total) AS avg_total FROM orders
+   WHERE date > '2024-01-01') t
+WHERE o.total > t.avg_total;
+
+-- Already in FROM clause but optimizer may not recognize
+-- Ensure single evaluation and join optimization
+```
+
+### Positive: Uncorrelated NOT EXISTS
+
+```sql
+-- Check if a table is empty (uncorrelated)
+SELECT * FROM orders o
+WHERE NOT EXISTS (SELECT 1 FROM maintenance_mode);
+
+-- Uncorrelated NOT EXISTS is a constant boolean
+-- If maintenance_mode is empty: return all orders
+-- If non-empty: return nothing
+-- Evaluate once, not per row
+```
+
+### Negative: Correlated subquery (outer reference)
+
+```sql
+SELECT * FROM employees e
+WHERE e.salary > (
+  SELECT AVG(salary) FROM employees e2
+  WHERE e2.dept_id = e.dept_id  -- references outer e
+);
+
+-- e.dept_id is an outer reference -> correlated
+-- Requires decorrelation, not simple unnesting
+```
+
+### Negative: Subquery with volatile function
+
+```sql
+SELECT * FROM employees e
+WHERE e.id IN (
+  SELECT id FROM employees ORDER BY RANDOM() LIMIT 10
+);
+
+-- RANDOM() makes each evaluation different
+-- Cannot materialize once and reuse
+-- Must execute per outer row (or use a CTE)
+```
+
+## References
+
+**Academic papers:**
+- Kim, "On Optimizing an SQL-like Nested Query", ACM TODS 1982
+- Ganski & Wong, "Optimization of Nested SQL Queries Revisited", SIGMOD 1987
+- Pirahesh et al., "Extensible/Rule Based Query Rewrite Optimization in Starburst", SIGMOD 1992
+
+**Implementation:**
+- PostgreSQL: `pull_up_subqueries()` in `prepjointree.c`
+- MySQL: Subquery materialization and semi-join in `sql_optimizer.cc`
+- Oracle: Subquery unnesting in CBO
+- mssql: `OpDecorrelate` in query optimizer
+- DuckDB: `FlattenSubquery` optimizer pass

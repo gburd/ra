@@ -1,0 +1,65 @@
+---
+id: federated-projection-pushdown-with-filter
+name: "Projection Pushdown: Combined with Filter"
+category: federated/pushdown
+databases: [postgresql, mysql, sqlite, snowflake, bigquery, duckdb]
+execution_models: [volcano, vectorized]
+version: "1.0.0"
+authors: ["ra-optimizer"]
+tags: [federated, pushdown, projection, filter, combined]
+complexity: "O(1)"
+benefit_range: [3.0, 50.0]
+---
+
+# Projection Pushdown: Combined with Filter
+
+## Description
+
+Push both projection and filter to the remote database simultaneously.
+This combines row-level and column-level reduction for maximum network
+savings.
+
+## Relational Algebra
+
+```latex
+$$
+Project[cols](Filter[pred](RemoteScan[table, endpoint]))
+=>
+RemoteScan[table, endpoint, pushdown_filter=pred, pushdown_project=cols]
+$$
+
+```
+
+## Before
+
+```
+(Project :columns [id, name]
+  :input (Filter :predicate (= active true)
+    :input (RemoteScan "users" "db.example.com")))
+```
+
+## After
+
+```
+(RemoteScan "users" "db.example.com"
+  :pushdown_filter (= active true)
+  :pushdown_project [id, name])
+```
+
+## Test Cases
+
+### Test 1: Filter and project combined
+
+#### Input
+```
+(Project :columns [id, name]
+  :input (Filter :predicate (= active true)
+    :input (RemoteScan "users" "pg.example.com")))
+```
+
+#### Expected
+```
+(RemoteScan "users" "pg.example.com"
+  :pushdown_filter (= active true)
+  :pushdown_project [id, name])
+```

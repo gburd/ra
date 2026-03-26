@@ -1,0 +1,203 @@
+---
+id: join-derive-is-not-null-filter
+name: Join Derive IsNotNull Filter
+category: database-specific/calcite
+databases: [calcite, postgresql, mysql]
+execution_models: [volcano, vectorized]
+version: "1.0.0"
+authors: ["Apache Calcite Contributors"]
+tags: [join, null-rejection, predicate-inference, optimization]
+complexity: "O(1)"
+benefit_range: [0.1, 0.5]
+---
+
+# Join Derive IsNotNull Filter
+
+## Description
+
+Derives and adds explicit IS NOT NULL filters for join keys participating
+in INNER JOIN or semi-join conditions. Since NULL values never match in
+join conditions (NULL = NULL is false in SQL), adding explicit null filters
+enables earlier row elimination and better use of indexes.
+
+**When to apply**: INNER JOIN or semi-join on columns that may contain NULL
+values, but no explicit IS NOT NULL filter exists. The derived filter can
+be pushed down to the scan level.
+
+**Why it works**: SQL join semantics automatically reject NULLs, but databases
+may not eliminate NULL rows until the join operator. By adding explicit
+IS NOT NULL predicates, the optimizer can push these filters down to scans,
+use NOT NULL indexes, and reduce join cardinality early.
+
+## Relational Algebra
+
+```latex
+$$
+R ⨝_{R.a = S.b} S \rightarrow
+  σ_{R.a IS NOT NULL}(R) ⨝_{R.a = S.b} σ_{S.b IS NOT NULL}(S)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("join-derive-is-not-null-left";
+    "(join inner ?pred ?left ?right)" =>
+    "(join inner ?pred
+       (filter (is-not-null (join-keys-left ?pred)) ?left)
+       ?right)"
+    if can-derive-not-null-filter("?pred", "?left")
+),
+
+rw!("join-derive-is-not-null-right";
+    "(join inner ?pred ?left ?right)" =>
+    "(join inner ?pred
+       ?left
+       (filter (is-not-null (join-keys-right ?pred)) ?right))"
+    if can-derive-not-null-filter("?pred", "?right")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> bool {
+    // Join keys may contain NULLs
+    stats.join_keys.iter().any(|k| k.nullable)
+        // No existing IS NOT NULL filter on join keys
+        && !stats.has_not_null_filter_on_join_keys
+        // Only applicable to null-rejecting joins
+        && matches!(stats.join_type, JoinType::Inner | JoinType::Semi)
+}
+```
+
+**Restrictions:**
+- Only applicable to INNER JOIN and semi-join (null-rejecting joins)
+- NOT applicable to OUTER JOIN (preserves NULLs)
+- Join condition must be equality-based (not inequality or complex expressions)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let null_percentage = stats.null_percentage_in_join_keys;
+    let rows = stats.row_count as f64;
+
+    if null_percentage < 0.01 {
+        // Very few NULLs, minimal benefit
+        return 0.05;
+    }
+
+    // Benefit from early NULL elimination:
+    // 1. Reduce rows flowing into join
+    let rows_eliminated = rows * null_percentage;
+
+    // 2. Join cost is typically O(n log m) for hash join
+    //    Reducing n by null_percentage saves:
+    let join_cost_per_row = 0.00001; // 10μs per row
+    let join_savings = rows_eliminated * join_cost_per_row;
+
+    // 3. Enable index usage if column has NOT NULL index
+    let index_benefit = if stats.has_not_null_index {
+        0.2 // 20% additional benefit from index usage
+    } else {
+        0.0
+    };
+
+    // Normalize
+    let total_query_cost = rows * join_cost_per_row;
+    (join_savings / total_query_cost) + index_benefit
+}
+```
+
+**Assumptions:**
+- NULL percentage in join keys is measurable (5-20% typical in real datasets)
+- Derived filters can be pushed down to scans
+- Index on NOT NULL values can be utilized
+
+**Typical benefit**: 10-50% for high-NULL columns with index support.
+
+## Test Cases
+
+### Positive: Inner join derives IS NOT NULL
+
+```sql
+-- Join on nullable columns
+SELECT *
+FROM orders o
+JOIN customers c ON o.customer_id = c.id;
+
+-- Before:
+-- Join(o.customer_id = c.id)
+--   Scan(orders) -- customer_id nullable, may contain NULLs
+--   Scan(customers)
+
+-- After join-derive-is-not-null:
+-- Join(o.customer_id = c.id)
+--   Filter(customer_id IS NOT NULL)
+--     Scan(orders)
+--   Filter(id IS NOT NULL)
+--     Scan(customers)
+```
+
+### Positive: Enable index usage
+
+```sql
+-- orders table has index on (customer_id) where customer_id IS NOT NULL
+SELECT *
+FROM orders o
+JOIN shipments s ON o.order_id = s.order_id;
+
+-- Derived IS NOT NULL filter enables index scan:
+-- IndexScan(orders, customer_id IS NOT NULL)
+```
+
+### Negative: Left outer join preserves NULLs
+
+```sql
+-- Cannot derive IS NOT NULL for outer join
+SELECT *
+FROM orders o
+LEFT JOIN customers c ON o.customer_id = c.id;
+
+-- Must preserve rows where o.customer_id IS NULL
+-- Rule does NOT apply
+```
+
+### Positive: High NULL percentage
+
+```sql
+-- optional_referral_id has 30% NULLs
+SELECT *
+FROM signups s
+JOIN referrals r ON s.referral_id = r.id;
+
+-- Eliminating 30% of rows before join significantly reduces cost
+```
+
+## References
+
+**Implementation in databases:**
+- Apache Calcite: `JoinDeriveIsNotNullFilterRule.java`
+- PostgreSQL: Implied predicate generation (predtest.c)
+- MySQL: Null-rejecting join optimization
+- mssql: Null filter inference
+
+**Academic papers:**
+- Galindo-Legaria & Rosenthal, "Outerjoin Simplification and Reordering for Query Optimization", ACM TODS 1997
+  - DOI: 10.1145/249903.249979
+  - Null-rejecting vs. null-preserving join semantics
+- Chaudhuri & Shim, "Including Group-By in Query Optimization", VLDB 1994
+  - Predicate inference and derivation
+- Pirahesh et al., "Extensible/Rule Based Query Rewrite Optimization in Starburst", ACM SIGMOD 1992
+  - DOI: 10.1145/130283.130294
+  - Derived predicate generation in Starburst optimizer

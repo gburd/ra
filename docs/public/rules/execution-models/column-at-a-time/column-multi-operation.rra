@@ -1,0 +1,385 @@
+---
+id: column-multi-operation
+name: Multi-Column Compound Operations
+category: execution-models
+version: 1.0.0
+databases: [DuckDB, vectorwise, ClickHouse, Velox, DataFusion]
+authors: [Thomas Neumann, Timo Kersten]
+tags: [execution, columnar, expression, fusion, compound, multi-column, simd]
+standard: Expression fusion / super-operators
+complexity: O(n * expressions) fused into O(n)
+benefit_range: [1.3, 5.0]
+---
+
+# Multi-Column Compound Operations
+
+## Description
+
+Multi-column compound operations fuse multiple columnar expressions into a single pass over the data, eliminating intermediate materialization of column arrays. In the standard vectorized model, each primitive operation (add, compare, cast) produces a temporary column vector that is consumed by the next operation. For complex expressions like `(a * b + c) > (d / e)`, this creates 4 intermediate vectors. Expression fusion evaluates the entire expression in a single tight loop, reading input columns once and writing only the final result.
+
+This technique bridges the gap between pure vectorized execution (one primitive per pass) and compiled execution (fused expressions via JIT). The key insight is that multi-column expressions are common in analytical queries (computed columns, complex predicates, CASE expressions) and the intermediate vector materialization is pure overhead.
+
+**Fusion strategies:**
+1. **Interpretation fusion**: Evaluate compound expression in a bytecode interpreter, one row at a time within the batch loop
+2. **Template specialization**: Generate specialized functions for common expression patterns at compile time
+3. **JIT compilation**: Generate machine code for the fused expression at runtime (Hyper, Umbra)
+4. **SIMD expression trees**: Vectorize entire sub-expressions using SIMD intrinsics
+
+**Key characteristics:**
+- **Reduced materialization**: No intermediate column vectors for sub-expressions
+- **Better register utilization**: Values stay in CPU registers across operations
+- **Reduced memory bandwidth**: Input columns read once, not once per operator
+- **Cache friendly**: Single pass over data keeps working set small
+- **SIMD composable**: Fused expressions can still use SIMD within the loop
+
+**Trade-offs:**
+- Fused loops are harder to auto-vectorize (compiler may not recognize patterns)
+- Expression-specific code generation adds compile-time or JIT latency
+- Debug/profile visibility reduced (no per-operator timing)
+- Simple expressions (single comparison) don't benefit from fusion
+- Code bloat if too many specialized variants generated
+
+## Relational Algebra
+
+```
+-- Standard vectorized (3 passes):
+t1 = multiply(col_a, col_b)      -- pass 1: write temp vector
+t2 = add(t1, col_c)              -- pass 2: read t1, write temp vector
+result = greater_than(t2, col_d) -- pass 3: read t2, write selection
+
+-- Fused (1 pass):
+for i in 0..n:
+  result[i] = (col_a[i] * col_b[i] + col_c[i]) > col_d[i]
+
+-- I/O comparison (batch_size = 2048, 8 bytes/value):
+-- Standard: read a,b write t1 (32KB) + read t1,c write t2 (32KB)
+--          + read t2,d write r (24KB) = 88 KB bandwidth
+-- Fused:   read a,b,c,d write r (72KB) = 72 KB bandwidth + register reuse
+```
+
+## Implementation
+
+```rust
+/// Expression tree for multi-column operations
+pub enum ColumnExpr {
+    /// Leaf: reference to input column
+    Column(ColumnId),
+    /// Leaf: constant value broadcast to vector
+    Constant(ScalarValue),
+    /// Binary operation on two sub-expressions
+    BinaryOp {
+        op: BinOp,
+        left: Box<ColumnExpr>,
+        right: Box<ColumnExpr>,
+    },
+    /// Unary operation
+    UnaryOp {
+        op: UnOp,
+        operand: Box<ColumnExpr>,
+    },
+    /// Conditional: CASE WHEN cond THEN then ELSE else
+    Conditional {
+        condition: Box<ColumnExpr>,
+        then_expr: Box<ColumnExpr>,
+        else_expr: Box<ColumnExpr>,
+    },
+}
+
+pub enum BinOp {
+    Add, Sub, Mul, Div, Mod,
+    Eq, Ne, Lt, Le, Gt, Ge,
+    And, Or,
+}
+
+pub enum UnOp {
+    Neg, Not, Abs, IsNull, IsNotNull,
+}
+
+/// Fused expression evaluator: single pass over all columns
+pub struct FusedEvaluator {
+    expr: ColumnExpr,
+}
+
+impl FusedEvaluator {
+    /// Evaluate fused expression over column arrays
+    pub fn evaluate(
+        &self,
+        columns: &[ColumnArray],
+        selection: Option<&SelectionVector>,
+        batch_size: usize,
+    ) -> ColumnArray {
+        let mut result = ColumnArray::allocate(
+            DataType::Float64, batch_size,
+        );
+
+        // Single tight loop: no intermediate vectors
+        let positions = match selection {
+            Some(sv) => sv.positions(),
+            None => (0..batch_size).collect::<Vec<_>>(),
+        };
+
+        for &pos in &positions {
+            let value = self.eval_row(columns, pos);
+            result.set(pos, value);
+        }
+
+        result
+    }
+
+    /// Evaluate expression for single row (inlined by compiler)
+    #[inline(always)]
+    fn eval_row(
+        &self,
+        columns: &[ColumnArray],
+        row: usize,
+    ) -> ScalarValue {
+        self.eval_node(&self.expr, columns, row)
+    }
+
+    #[inline(always)]
+    fn eval_node(
+        &self,
+        node: &ColumnExpr,
+        columns: &[ColumnArray],
+        row: usize,
+    ) -> ScalarValue {
+        match node {
+            ColumnExpr::Column(id) => {
+                columns[*id].get_value(row)
+            }
+            ColumnExpr::Constant(val) => val.clone(),
+            ColumnExpr::BinaryOp { op, left, right } => {
+                let l = self.eval_node(left, columns, row);
+                let r = self.eval_node(right, columns, row);
+                apply_binary(*op, &l, &r)
+            }
+            ColumnExpr::UnaryOp { op, operand } => {
+                let val = self.eval_node(
+                    operand, columns, row,
+                );
+                apply_unary(*op, &val)
+            }
+            ColumnExpr::Conditional {
+                condition, then_expr, else_expr,
+            } => {
+                let cond = self.eval_node(
+                    condition, columns, row,
+                );
+                if cond.as_bool() {
+                    self.eval_node(then_expr, columns, row)
+                } else {
+                    self.eval_node(else_expr, columns, row)
+                }
+            }
+        }
+    }
+}
+
+/// SIMD-friendly fused evaluation for numeric expressions
+pub fn simd_fused_multiply_add(
+    col_a: &[f64],
+    col_b: &[f64],
+    col_c: &[f64],
+    result: &mut [f64],
+    selection: &[u32],
+) {
+    // FMA: result = a * b + c in single instruction
+    for &pos in selection {
+        let i = pos as usize;
+        // Compiler generates FMA instruction
+        result[i] = col_a[i].mul_add(col_b[i], col_c[i]);
+    }
+}
+
+/// Compound predicate: fused multi-condition filter
+pub fn fused_compound_filter(
+    col_a: &[i64],
+    col_b: &[i64],
+    col_c: &[f64],
+    a_threshold: i64,
+    b_low: i64,
+    b_high: i64,
+    c_threshold: f64,
+    batch_size: usize,
+) -> SelectionVector {
+    let mut positions = Vec::with_capacity(batch_size);
+
+    // Single pass: evaluate a > threshold AND b BETWEEN low AND high
+    //              AND c < c_threshold
+    for i in 0..batch_size {
+        let pass = col_a[i] > a_threshold
+            && col_b[i] >= b_low
+            && col_b[i] <= b_high
+            && col_c[i] < c_threshold;
+        if pass {
+            positions.push(i as u32);
+        }
+    }
+
+    SelectionVector::from(positions)
+}
+
+/// Expression complexity analysis for fusion decision
+pub struct FusionAnalysis {
+    pub num_operations: usize,
+    pub num_input_columns: usize,
+    pub intermediate_vectors_saved: usize,
+    pub estimated_bandwidth_reduction: f64,
+}
+
+pub fn analyze_fusion_benefit(
+    expr: &ColumnExpr,
+) -> FusionAnalysis {
+    let ops = count_operations(expr);
+    let cols = count_distinct_columns(expr);
+    let intermediates = ops.saturating_sub(1);
+
+    // Each intermediate vector = batch_size * type_width bytes
+    // Saved: intermediates * 2 * batch_bytes (write + read)
+    let bandwidth_factor = if ops > 1 {
+        1.0 - (cols as f64 / (cols + intermediates) as f64)
+    } else {
+        0.0
+    };
+
+    FusionAnalysis {
+        num_operations: ops,
+        num_input_columns: cols,
+        intermediate_vectors_saved: intermediates,
+        estimated_bandwidth_reduction: bandwidth_factor,
+    }
+}
+
+fn count_operations(expr: &ColumnExpr) -> usize {
+    match expr {
+        ColumnExpr::Column(_) | ColumnExpr::Constant(_) => 0,
+        ColumnExpr::BinaryOp { left, right, .. } => {
+            1 + count_operations(left)
+                + count_operations(right)
+        }
+        ColumnExpr::UnaryOp { operand, .. } => {
+            1 + count_operations(operand)
+        }
+        ColumnExpr::Conditional {
+            condition, then_expr, else_expr,
+        } => {
+            1 + count_operations(condition)
+                + count_operations(then_expr)
+                + count_operations(else_expr)
+        }
+    }
+}
+
+fn count_distinct_columns(expr: &ColumnExpr) -> usize {
+    let mut cols = std::collections::HashSet::new();
+    collect_columns(expr, &mut cols);
+    cols.len()
+}
+
+fn collect_columns(
+    expr: &ColumnExpr,
+    cols: &mut std::collections::HashSet<ColumnId>,
+) {
+    match expr {
+        ColumnExpr::Column(id) => { cols.insert(*id); }
+        ColumnExpr::Constant(_) => {}
+        ColumnExpr::BinaryOp { left, right, .. } => {
+            collect_columns(left, cols);
+            collect_columns(right, cols);
+        }
+        ColumnExpr::UnaryOp { operand, .. } => {
+            collect_columns(operand, cols);
+        }
+        ColumnExpr::Conditional {
+            condition, then_expr, else_expr,
+        } => {
+            collect_columns(condition, cols);
+            collect_columns(then_expr, cols);
+            collect_columns(else_expr, cols);
+        }
+    }
+}
+```
+
+## Cost Model
+
+**Standard vectorized (unfused):**
+- Each primitive: read inputs (N * width bytes) + write output (N * width bytes)
+- For expression with K operations: `K * 2 * N * width` bytes of memory traffic
+- Plus K function calls (amortized per-batch, ~5ns each)
+
+**Fused:**
+- Read input columns once: `C * N * width` bytes (C = distinct columns)
+- Write final result: `N * width` bytes
+- Total: `(C + 1) * N * width` bytes
+- Zero intermediate allocations
+
+**Bandwidth reduction:**
+- Expression `(a * b) + c > d`: K=3, C=4
+  - Unfused: 3 * 2 * N * 8 = 48N bytes
+  - Fused: 5 * N * 8 = 40N bytes (17% reduction) + register reuse
+- Expression `CASE WHEN a > 0 THEN b * c ELSE d + e END`: K=4, C=5
+  - Unfused: 4 * 2 * N * 8 = 64N bytes
+  - Fused: 6 * N * 8 = 48N bytes (25% reduction)
+
+**When fusion helps most:**
+- Deep expression trees (K >> C): many operations, few input columns
+- Memory-bandwidth-limited queries: less data movement = faster
+- Complex predicates with multiple conditions: single-pass filter
+
+**When fusion doesn't help:**
+- Single-operation expressions: no intermediate to eliminate
+- Already CPU-bound (not bandwidth-bound): bandwidth savings don't matter
+- SIMD-unfriendly expressions (branches, function calls): fusion may prevent vectorization
+
+## Test Cases
+
+```sql
+-- Test 1: Compound arithmetic expression
+SELECT (price * quantity) - (price * quantity * tax_rate) AS net
+FROM lineitem;
+-- Unfused: 4 intermediate vectors (mul, mul, mul, sub)
+-- Fused: single pass reading price, quantity, tax_rate
+-- Savings: 3 intermediate vectors * 2048 * 8 = 48 KB per batch
+
+-- Test 2: Multi-condition filter (TPC-H Q6 predicate)
+SELECT SUM(l_extendedprice * l_discount)
+FROM lineitem
+WHERE l_shipdate >= DATE '1994-01-01'
+  AND l_shipdate < DATE '1995-01-01'
+  AND l_discount BETWEEN 0.05 AND 0.07
+  AND l_quantity < 24;
+-- 4 predicates on 3 columns: fuse into single filter pass
+-- Reads l_shipdate, l_discount, l_quantity once
+-- Produces selection vector without intermediate bitmaps
+
+-- Test 3: CASE expression fusion
+SELECT CASE
+  WHEN amount > 1000 THEN amount * 0.95
+  WHEN amount > 100  THEN amount * 0.98
+  ELSE amount
+END AS discounted
+FROM orders;
+-- Unfused: 2 comparisons + 2 multiplications + 2 conditionals
+-- Fused: single pass, branch per row, values stay in registers
+
+-- Test 4: Expression with common subexpressions
+SELECT a * b + c, a * b + d FROM wide_table;
+-- CSE: compute a*b once, reuse for both output columns
+-- Fused: single loop computing both outputs
+-- Read: a, b, c, d (4 columns). Write: 2 result columns.
+```
+
+## References
+
+1. **Neumann, Thomas**. "Efficiently Compiling Efficient Query Plans for Modern Hardware." VLDB 2011.
+   - JIT compilation for fused expression evaluation (Hyper)
+
+2. **Kersten, Timo et al**. "Everything You Always Wanted to Know About Compiled and Vectorized Query Engines." VLDB 2018.
+   - Comparison of vectorized primitives vs fused/compiled expressions
+
+3. **Boncz, Peter A. et al**. "MonetDB/X100: Hyper-Pipelining Query Execution." CIDR 2005.
+   - Vectorized primitives model that fusion improves upon
+
+4. **Pedreira, Pedro et al**. "Velox: Meta's Unified Execution Engine." VLDB 2022.
+   - Adaptive expression evaluation with fusion in production

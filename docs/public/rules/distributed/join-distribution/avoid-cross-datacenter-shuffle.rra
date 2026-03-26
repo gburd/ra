@@ -1,0 +1,76 @@
+---
+id: avoid-cross-datacenter-shuffle
+name: Avoid Cross-Datacenter Shuffle
+category: distributed/join-distribution
+databases: [cockroachdb, spanner, tidb, yugabyte]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, join, datacenter, shuffle, network-cost]
+complexity: O(1)
+benefit_range: [0.4, 0.9]
+---
+
+# Avoid Cross-Datacenter Shuffle
+
+## Description
+
+Cross-datacenter shuffles have 100-1000x higher latency and lower
+bandwidth than intra-datacenter shuffles. When both tables have data in
+the same datacenter, restrict the shuffle to intra-datacenter nodes even
+if the global partition count is suboptimal.
+
+## Relational Algebra
+
+```latex
+$$
+Exchange[hash(k)](R) to all_nodes
+  \rightarrow Exchange[hash(k)](R) to same_dc_nodes
+  \text{where} same_dc_nodes is not empty
+  \text{where} intra_dc_cost * skew_factor < cross_dc_cost
+$$
+
+```
+
+## Implementation
+
+```rust
+rw!("avoid-cross-dc-shuffle";
+    "(exchange hash_partition ?rel ?keys ?all_nodes)" =>
+    "(exchange hash_partition ?rel ?keys ?dc_local_nodes)"
+    if cross_dc_avoidable("?rel", "?all_nodes")
+),
+```
+
+## Test Cases
+
+```sql
+-- Test 1: Avoid cross-DC for co-located data
+SELECT o.*, l.*
+FROM orders o        -- US-East DC
+JOIN line_items l    -- US-East DC
+  ON o.id = l.oid;
+-- Expected: Shuffle within US-East only
+```
+
+```sql
+-- Test 2: Data in different DCs, must cross
+SELECT o.*, w.*
+FROM orders o        -- US-East DC only
+JOIN warehouses w    -- EU-West DC only
+  ON o.wid = w.id;
+-- Expected: Must cross DC, pick cheapest direction
+```
+
+```sql
+-- Test 3: Partial overlap, minimize cross-DC
+SELECT *
+FROM events e        -- 70% US-East, 30% US-West
+JOIN users u         -- 90% US-East, 10% US-West
+  ON e.uid = u.id;
+-- Expected: Shuffle within US-East for the 70%+90% overlap
+```
+
+## References
+
+CockroachDB: multi-region SQL
+Google Cloud Spanner: instance configuration docs

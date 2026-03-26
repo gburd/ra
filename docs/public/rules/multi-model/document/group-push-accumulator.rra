@@ -1,0 +1,112 @@
+---
+id: group-push-accumulator
+name: Group Push Accumulator Optimization
+category: multi-model/document
+databases: [mongodb, couchbase]
+standard: "mql:5"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [document, group, accumulator, push, optimization]
+---
+
+# Group Push Accumulator Optimization
+
+## Description
+
+Replaces a `$group` with `$push` accumulator followed by a `$project`
+that extracts a subset of the pushed array with a more targeted
+accumulator that only collects the needed fields. This avoids
+materializing entire documents into the grouped array when only a few
+fields are used downstream.
+
+**When to apply**: A `$group` stage pushes full documents (or large
+subdocuments) into an array, and a subsequent `$project` only accesses
+a subset of fields from that array.
+
+**Why it works**: `$push` with full documents copies all fields into
+memory for every group member. By projecting before pushing, each
+array element is smaller, reducing memory usage and serialization cost.
+
+## Relational Algebra
+
+```latex
+$$
+\pi_{g, arr.f1, arr.f2}(
+  \gamma_{g, push($$ROOT) as arr}(R))
+  \rightarrow \gamma_{g, push({f1: $.f1, f2: $.f2}) as arr}(R)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("group-push-project-pushdown";
+    "(doc-project ?fields \
+       (doc-group ?key (push ?root) ?input))" =>
+    "(doc-group ?key (push (sub-project ?root ?fields)) ?input)"
+    if fields_subset_of_push("?fields", "?root")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(fields: &[String], pushed: &Expr) -> bool {
+    let pushed_fields = pushed.all_field_refs();
+    fields.iter().all(|f| pushed_fields.contains(f))
+    && fields.len() < pushed_fields.len()
+}
+```
+
+**Restrictions:**
+- Only beneficial when the projected subset is smaller than the pushed data
+- Subsequent stages must not reference fields outside the subset
+- Does not apply when `$push` is used with `$each` or `$slice`
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    avg_group_size: f64,
+    full_doc_size: f64,
+    projected_size: f64,
+) -> f64 {
+    let full_push_cost = avg_group_size * full_doc_size;
+    let projected_push_cost = avg_group_size * projected_size;
+    (full_push_cost - projected_push_cost) / full_push_cost
+}
+```
+
+**Typical benefit**: 0.3-0.8 depending on document size vs. projected subset.
+
+## Test Cases
+
+```javascript
+// Positive: push full docs, project subset
+db.orders.aggregate([
+  { $group: { _id: "$customer_id", orders: { $push: "$$ROOT" } } },
+  { $project: { orders: { amount: 1, date: 1 } } }
+]);
+// Rewritten to:
+db.orders.aggregate([
+  { $group: {
+      _id: "$customer_id",
+      orders: { $push: { amount: "$amount", date: "$date" } }
+    }
+  }
+]);
+
+// Negative: all fields are needed downstream
+db.orders.aggregate([
+  { $group: { _id: "$cust", orders: { $push: "$$ROOT" } } },
+  // No subsequent project; full docs needed
+]);
+```
+
+## References
+
+MongoDB: src/mongo/db/pipeline/accumulator.h - AccumulatorPush
+MongoDB docs: "Aggregation Pipeline Optimization" - $group stage optimization

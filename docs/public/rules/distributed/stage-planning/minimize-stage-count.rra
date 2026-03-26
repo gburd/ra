@@ -1,0 +1,130 @@
+---
+id: minimize-stage-count
+name: Minimize Stage Count
+category: distributed/stage-planning
+databases: [presto, trino, spark]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, stage, optimization, latency, overhead]
+complexity: O(n)
+benefit_range: [0.1, 0.4]
+---
+
+# Minimize Stage Count
+
+## Description
+
+Reduces the number of stages in a distributed plan by eliminating
+unnecessary exchanges. Each stage boundary adds scheduling overhead,
+network materialization, and coordination cost. By merging stages that
+can execute together (because their distribution requirements are
+compatible), the plan runs with fewer synchronization points.
+
+**When to apply**: After initial exchange insertion produces more stages
+than necessary, this pass identifies adjacent stages that can be merged.
+
+**Why it works**: Each stage has fixed overhead (scheduling, memory
+allocation, network buffer setup). Reducing stages from 8 to 5 saves
+three rounds of this overhead. Additionally, merging stages enables
+operator fusion within the stage.
+
+## Relational Algebra
+
+```latex
+-- Before: unnecessary intermediate stage
+$$
+Stage_A \rightarrow Exchange[hash(k)] \rightarrow Stage_B \rightarrow Exchange[hash(k)] \rightarrow Stage_C
+  \text{where} Stage_B only does filter/project
+$$
+
+-- After: merged
+$$
+Stage_A \rightarrow Exchange[hash(k)] \rightarrow Stage_BC
+  \text{where} filter/project merged into Stage_BC
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Merge a filter/project into the downstream stage across exchange
+rw!("merge-filter-stage";
+    "(exchange ?type (filter ?pred (exchange ?type2 ?child)))" =>
+    "(exchange ?type (filter ?pred ?child))"
+    if same_distribution("?type", "?type2")
+),
+
+// Remove stage that only passes through data
+rw!("eliminate-passthrough-stage";
+    "(exchange ?type (exchange ?type ?child))" =>
+    "(exchange ?type ?child)"
+),
+```
+
+## Preconditions
+
+```rust
+fn can_merge_stages(
+    stage_a: &Stage,
+    stage_b: &Stage,
+) -> bool {
+    // Output distribution of A must satisfy input of B
+    stage_a.output_distribution()
+        .satisfies(&stage_b.required_distribution())
+    // No pipeline breaker between them
+    && !stage_b.has_pipeline_breaker_at_input()
+}
+```
+
+**Restrictions:**
+- Cannot merge across different distribution requirements
+- Cannot merge if the intermediate materialization is needed for
+  fault tolerance (Spark's shuffle files serve as checkpoints)
+- Must preserve the plan's parallelism properties
+
+## Cost Model
+
+```rust
+fn stage_reduction_benefit(
+    eliminated_stages: u32,
+    per_stage_overhead_ms: f64,
+    per_stage_network_ms: f64,
+) -> f64 {
+    eliminated_stages as f64
+        * (per_stage_overhead_ms + per_stage_network_ms)
+}
+```
+
+**Typical benefit**: 10-40% latency reduction for queries where extra
+stages add scheduling overhead without enabling new parallelism.
+
+## Test Cases
+
+```sql
+-- Positive: filter-only stage merged into join stage
+-- Before: 4 stages
+-- Stage 0: Scan(orders)
+-- Stage 1: Filter(amount > 100) -- unnecessary extra stage
+-- Stage 2: Exchange[hash] -> HashJoin
+-- Stage 3: Gather -> Aggregate
+
+-- After: 3 stages
+-- Stage 0: Scan(orders) + Filter(amount > 100)
+-- Stage 1: Exchange[hash] -> HashJoin
+-- Stage 2: Gather -> Aggregate
+```
+
+```sql
+-- Negative: cannot merge across different distributions
+-- Stage 0: Scan(R) -- hash(a)
+-- Stage 1: Exchange[hash(b)] -> Aggregate(b, SUM)
+-- Distributions differ; stages must remain separate
+```
+
+## References
+
+Presto/Trino: presto-main/src/main/java/com/facebook/presto/sql/planner/PlanFragmenter.java
+Spark SQL: sql/core/src/main/scala/org/apache/spark/sql/execution/adaptive/OptimizeLocalShuffleReader.scala

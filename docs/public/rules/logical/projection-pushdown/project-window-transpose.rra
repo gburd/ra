@@ -1,0 +1,103 @@
+---
+id: calcite-project-window-transpose
+name: Calcite ProjectWindowTransposeRule
+category: logical/projection-pushdown
+databases: [calcite, postgresql, duckdb]
+version: "1.0.0"
+authors: ["Apache Calcite"]
+tags: [logical, calcite, projection, window, pushdown]
+complexity: O(n)
+benefit_range: [0.05, 0.4]
+---
+
+# Project Window Transpose
+
+## Description
+
+Pushes a projection below a window function node, removing columns that
+are not used by any window specification (PARTITION BY, ORDER BY, or
+argument) and not needed by the parent. This reduces the data width
+flowing into the potentially expensive window computation.
+
+**When to apply**: A Project above a Window that does not reference all
+input columns.
+
+**Why it works**: Window functions operate per-row and only read their
+declared partition, order, and argument columns. Removing unneeded
+columns before the Window reduces memory for sorting and hashing.
+
+**Calcite class**: `org.apache.calcite.rel.rules.ProjectWindowTransposeRule`
+
+## Relational Algebra
+
+```latex
+-- Before
+$$
+\pi_{a, w}(Window[w = ROW_NUMBER() OVER (PARTITION BY a ORDER BY b)](R(a, b, c, d)))
+$$
+
+-- After
+$$
+\pi_{a, w}(Window[w = ROW_NUMBER() OVER (PARTITION BY a ORDER BY b)](\pi_{a, b}(R)))
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("project-window-transpose";
+    "(project ?cols (window ?spec ?input))" =>
+    "(project ?cols (window ?spec (project (window-required-cols ?spec ?cols) ?input)))"
+    if window_cols_subset("?spec", "?cols", "?input")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(project: &Project, window: &Window) -> bool {
+    let needed = project.referenced_columns();
+    let window_needs = window.required_input_columns();
+    let all_needed = needed.union(&window_needs);
+    all_needed.len() < window.input_schema().len()
+}
+```
+
+**Restrictions:**
+- Must keep all columns referenced by PARTITION BY and ORDER BY
+- Window argument columns must be preserved
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    input_rows: f64,
+    cols_removed: usize,
+    has_sort: bool,
+) -> f64 {
+    let base = input_rows * cols_removed as f64 * 8.0;
+    if has_sort { base * 1.5 } else { base }
+}
+```
+
+**Typical benefit**: 5-40% for wide tables with few window columns.
+
+## Test Cases
+
+```sql
+-- Positive: only need id and rank, not other columns
+SELECT id, ROW_NUMBER() OVER (ORDER BY score) AS rn
+FROM students;
+-- Pushes pi[id, score] below the window
+
+-- Negative: all columns used
+SELECT *, RANK() OVER (PARTITION BY dept ORDER BY salary)
+FROM employees;
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/ProjectWindowTransposeRule.java

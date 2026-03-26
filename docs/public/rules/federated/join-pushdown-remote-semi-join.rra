@@ -1,0 +1,78 @@
+---
+id: federated-join-pushdown-semi-join
+name: "Join Pushdown: Semi-Join Reduction"
+category: federated/pushdown
+databases: [postgresql, mysql, snowflake, bigquery, duckdb]
+execution_models: [volcano, vectorized]
+version: "1.0.0"
+authors: ["ra-optimizer"]
+tags: [federated, pushdown, join, semi-join, bloom-filter]
+complexity: "O(n)"
+benefit_range: [5.0, 100.0]
+---
+
+# Join Pushdown: Semi-Join Reduction
+
+## Description
+
+For cross-site joins, use a semi-join reduction strategy. First send
+the join keys from the smaller (local) side to the remote, then the
+remote filters its data to matching keys before transferring.
+
+This is the classic Bloom join / semi-join reduction technique for
+distributed databases.
+
+## Relational Algebra
+
+```latex
+$$
+Join[cond](LocalScan[t1], RemoteScan[t2, endpoint])
+=>
+Join[cond](LocalScan[t1],
+  RemoteScan[t2, endpoint,
+    pushdown_filter=(key IN (SELECT key FROM t1))])
+$$
+
+$$
+Preconditions:
+  - Remote supports subquery / IN filter
+  - Local table significantly smaller than remote
+$$
+
+```
+
+## Before
+
+```
+(Join :type INNER :condition (= local.id remote.id)
+  :left (Scan "local_small")
+  :right (RemoteScan "remote_large" "db.example.com"))
+```
+
+## After
+
+```
+(Join :type INNER :condition (= local.id remote.id)
+  :left (Scan "local_small")
+  :right (RemoteScan "remote_large" "db.example.com"
+    :pushdown_filter (IN id (SELECT id FROM local_small))))
+```
+
+## Test Cases
+
+### Test 1: Semi-join reduction
+
+#### Input
+```
+(Join :type INNER :condition (= l.id r.id)
+  :left (Scan "local_small")
+  :right (RemoteScan "remote_large" "pg.example.com"))
+```
+
+#### Expected
+```
+(Join :type INNER :condition (= l.id r.id)
+  :left (Scan "local_small")
+  :right (RemoteScan "remote_large" "pg.example.com"
+    :pushdown_filter (IN id (SELECT id FROM local_small))))
+```

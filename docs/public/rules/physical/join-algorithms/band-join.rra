@@ -1,0 +1,268 @@
+---
+id: band-join
+name: Band Join
+category: physical/join-algorithms
+databases: [oracle, duckdb, spark]
+execution_models: [volcano, vectorized]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [join, band, range, non-equijoin, inequality]
+complexity: "O(n log n + n * w)"
+benefit_range: [0.3, 0.8]
+preconditions:
+  - type: "pattern"
+    must_match: "(join inner (and (>= ?lcol (- ?rcol ?delta)) (<= ?lcol (+ ?rcol ?delta))) ?left ?right)"
+    description: "Range/band join condition (value within delta)"
+  - type: "predicate"
+    condition: "is_band_predicate(?cond)"
+    description: "Join condition must define a band/range relationship"
+---
+
+# Band Join
+
+## Metadata
+- **Rule ID**: `band-join`
+- **Category**: Physical / Join Algorithms
+- **Complexity**: O(n log n + n * w) where w = average band width
+- **Introduced**: Oracle, research literature on inequality joins
+- **Prerequisites**: Join condition is a range/inequality predicate
+- **Alternatives**: nested-loop-join, sort-merge-join with range
+
+## Description
+
+Band join handles inequality join conditions of the form
+`R.a BETWEEN S.b - delta AND S.b + delta` (or equivalently
+`|R.a - S.b| <= delta`). It sorts both inputs on the join attribute
+and sweeps through with a sliding window of width 2*delta, matching
+all tuples within the band.
+
+**When to use:**
+- Inequality or range-based join conditions
+- Temporal joins (events within a time window)
+- Spatial proximity joins (distance-based)
+- Band width is narrow relative to data range
+
+**Advantages:**
+- Much faster than nested-loop for range predicates
+- Exploits sortedness -- each tuple compared to limited window
+- Predictable memory usage (proportional to band width)
+- Works well with pre-sorted inputs
+
+**Disadvantages:**
+- Requires sorting if inputs not already sorted
+- Wide bands degenerate toward cross join
+- Only handles one-dimensional range predicates directly
+- Memory usage proportional to band width * tuple size
+
+## Relational Algebra
+
+```
+R JOIN S ON R.a BETWEEN S.b - delta AND S.b + delta
+-> BandJoin(sort(R, a), sort(S, b), delta):
+     for each r in sorted R:
+       advance S window to [r.a - delta, r.a + delta]
+       emit (r, s) for all s in window
+```
+
+## Implementation (egg rewrite rules)
+
+```lisp
+;; Convert range join to band join
+(rewrite (join ?left ?right
+           (and (>= ?left.a (- ?right.b ?delta))
+                (<= ?left.a (+ ?right.b ?delta))))
+  (band-join
+    (sort ?left ?left.a)
+    (sort ?right ?right.b)
+    ?delta)
+  :if (is-constant ?delta)
+  :if (< (band-selectivity ?left ?right ?delta) 0.1))
+
+;; Optimize band join with pre-sorted input
+(rewrite (band-join (sort ?left ?a) ?right ?delta)
+  (band-join ?left ?right ?delta)
+  :if (sorted-by ?left ?a))
+
+;; Convert BETWEEN join to band join
+(rewrite (join ?left ?right
+           (between ?left.a ?right.lo ?right.hi))
+  (band-join
+    (sort ?left ?left.a)
+    (sort ?right ?right.lo)
+    (- ?right.hi ?right.lo))
+  :if (is-constant (- ?right.hi ?right.lo)))
+```
+
+## Implementation Pattern
+
+```rust
+pub struct BandJoin {
+    left_sorted: Box<dyn Operator>,
+    right_sorted: Box<dyn Operator>,
+    delta: Value,
+    window: VecDeque<Tuple>,
+    current_left: Option<Tuple>,
+    window_pos: usize,
+}
+
+impl Operator for BandJoin {
+    fn next(&mut self) -> Option<Tuple> {
+        loop {
+            let left = self.current_left.as_ref()?;
+            let left_val = left.get_join_key();
+
+            // Advance window: remove tuples below band
+            while let Some(front) = self.window.front() {
+                if front.get_join_key() < left_val - self.delta {
+                    self.window.pop_front();
+                } else {
+                    break;
+                }
+            }
+
+            // Add new right tuples within band
+            while let Some(right) = self.right_sorted.peek() {
+                if right.get_join_key() <= left_val + self.delta {
+                    self.window.push_back(
+                        self.right_sorted.next().unwrap()
+                    );
+                } else {
+                    break;
+                }
+            }
+
+            // Emit matches from window
+            if self.window_pos < self.window.len() {
+                let right = &self.window[self.window_pos];
+                self.window_pos += 1;
+                return Some(combine(left, right));
+            }
+
+            // Advance left
+            self.current_left = self.left_sorted.next();
+            self.window_pos = 0;
+        }
+    }
+}
+```
+
+## Cost Model
+
+```rust
+pub fn cost_band_join(
+    left_card: u64,
+    right_card: u64,
+    data_range: f64,
+    band_width: f64,
+    already_sorted: (bool, bool),
+    hardware: &HardwareModel,
+) -> Cost {
+    // Sort costs (if needed)
+    let sort_left = if already_sorted.0 {
+        Cost::zero()
+    } else {
+        Cost::cpu(left_card * (left_card as f64).log2() as u64)
+    };
+    let sort_right = if already_sorted.1 {
+        Cost::zero()
+    } else {
+        Cost::cpu(right_card * (right_card as f64).log2() as u64)
+    };
+
+    // Band selectivity: fraction of cross product in band
+    let band_selectivity = band_width / data_range;
+    let expected_matches = left_card as f64
+        * right_card as f64
+        * band_selectivity;
+
+    // Sweep cost: linear scan with window maintenance
+    let sweep_cost = Cost::cpu(
+        left_card + right_card
+            + expected_matches as u64 * 2,
+    );
+
+    // Window memory
+    let avg_window = (right_card as f64 * band_selectivity) as u64;
+    let memory = Cost::memory(avg_window * 100); // bytes per tuple
+
+    sort_left + sort_right + sweep_cost + memory
+}
+```
+
+## Test Cases
+
+### Test 1: Temporal proximity join
+```sql
+CREATE TABLE events_a (id INT, ts TIMESTAMP, data TEXT);
+CREATE TABLE events_b (id INT, ts TIMESTAMP, data TEXT);
+
+SELECT a.*, b.*
+FROM events_a a JOIN events_b b
+  ON b.ts BETWEEN a.ts - INTERVAL '5 minutes'
+              AND a.ts + INTERVAL '5 minutes';
+
+-- Expected: BandJoin with delta = 5 minutes
+-- Sort both on timestamp, sweep with 10-minute window
+```
+
+### Test 2: Numeric range join
+```sql
+CREATE TABLE sensors (id INT, reading DECIMAL, location TEXT);
+CREATE TABLE thresholds (id INT, value DECIMAL, label TEXT);
+
+SELECT s.*, t.*
+FROM sensors s JOIN thresholds t
+  ON s.reading BETWEEN t.value - 0.5 AND t.value + 0.5;
+
+-- Expected: BandJoin with delta = 0.5
+-- Narrow band relative to data range
+```
+
+### Test 3: Negative -- wide band
+```sql
+SELECT a.*, b.*
+FROM table_a a JOIN table_b b
+  ON b.value BETWEEN a.value - 1000000 AND a.value + 1000000;
+
+-- Data range is 0 to 2000000, band = 2000000
+-- NOT suitable: band covers entire range, effectively a cross join
+-- Nested loop or cross join + filter is simpler
+```
+
+### Test 4: Pre-sorted inputs avoid sort overhead
+```sql
+-- Clustered index on timestamp
+SELECT a.*, b.*
+FROM time_series_a a JOIN time_series_b b
+  ON b.ts BETWEEN a.ts - INTERVAL '1 hour'
+              AND a.ts + INTERVAL '1 hour'
+ORDER BY a.ts;
+
+-- Expected: BandJoin skips sort phase (already sorted by index)
+-- Direct sweep with sliding window
+```
+
+## Performance Characteristics
+
+| Band width / Data range | Band Join | Nested Loop | Sort-Merge |
+|------------------------|-----------|-------------|------------|
+| 0.001% (narrow) | Optimal | Very slow | Comparable |
+| 1% (moderate) | Good | Very slow | Good |
+| 50% (wide) | Degraded | Slow | Similar |
+| 100% (full range) | Cross join | Cross join | Cross join |
+
+## References
+
+1. **DeWitt et al.**: "A Study of Three Alternative Workstation-Server Architectures for Object Oriented Database Systems"
+   - Band join concept in DBMS context
+
+2. **Oracle Band Join**: Range-based join optimization
+   - https://docs.oracle.com/en/database/
+
+3. **Khayyat et al.**: "Lightning Fast and Space Efficient Inequality Joins"
+   - VLDB 2015, DOI: 10.14778/2824032.2824055
+   - IEJoin algorithm for general inequality joins
+
+4. **Graefe**: "Query Evaluation Techniques for Large Databases"
+   - ACM Computing Surveys, 1993

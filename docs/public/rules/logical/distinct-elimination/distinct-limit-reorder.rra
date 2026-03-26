@@ -1,0 +1,65 @@
+---
+id: distinct-limit-reorder
+name: Distinct Limit Reorder
+category: logical/distinct-elimination
+databases: [postgresql, mysql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distinct, limit, reorder]
+complexity: "O(n)"
+benefit_range: [0.1, 0.5]
+---
+
+# Distinct Limit Reorder
+
+## Description
+
+When DISTINCT is followed by a small LIMIT, reorder to apply LIMIT first (as a hint to use streaming distinct with early termination). This avoids materializing the entire distinct result when only a few rows are needed.
+
+**When to apply**: Limit(N, Distinct(input)) where N is small.
+
+## Relational Algebra
+
+```latex
+$$
+Limit[N](Distinct(input))
+  \rightarrow Limit[N](Distinct_Streaming[N](input))
+  \text{where} N < streaming_threshold
+$$
+
+```
+
+## Implementation
+
+```rust
+rw!("distinct-limit-reorder";
+    "(limit ?n ?off (distinct ?input))" =>
+    "(limit ?n ?off (distinct-streaming ?n ?input))"
+    if small_limit("?n")
+),
+```
+
+## Test Cases
+
+### Positive: Small limit after distinct
+
+```sql
+SELECT DISTINCT name FROM users LIMIT 5;
+
+-- Use streaming distinct with early stop at 5
+```
+
+### Negative: Large limit
+
+```sql
+SELECT DISTINCT name FROM users LIMIT 1000000;
+
+-- Full distinct needed
+```
+
+## References
+
+- Streaming DISTINCT with early termination
+- Top-K distinct query processing

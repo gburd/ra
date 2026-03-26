@@ -1,0 +1,130 @@
+---
+id: raft-leader-colocation
+name: Raft Leader Colocation for Joins
+category: distributed/colocation
+databases: [cockroachdb, tidb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, colocation, raft, leader, join, latency]
+complexity: O(1)
+benefit_range: [0.2, 0.7]
+---
+
+# Raft Leader Colocation for Joins
+
+## Description
+
+Optimizes join execution by routing the computation to the node
+holding the Raft leader of the relevant data ranges. In Raft-based
+distributed databases, each range/region has a leader that handles
+all reads and writes. By colocating the join computation with the Raft
+leaders of both join inputs, the optimizer minimizes cross-node data
+transfer for the join.
+
+**When to apply**: Two tables being joined have Raft leaders on the
+same node (or nearby nodes), and routing the join to that location
+is cheaper than shuffling data to the gateway node.
+
+**Why it works**: In both CockroachDB and TiDB, data is split into
+ranges/regions managed by Raft groups. The Raft leader holds the
+authoritative copy. If both join inputs have leaders on the same node,
+executing the join there avoids all network transfer for the join
+operation.
+
+## Relational Algebra
+
+```latex
+$$
+Join[cond](Scan(A), Scan(B))
+  \rightarrow DistributedJoin[node=leader_node](
+       LocalScan(A, leader=node),
+       LocalScan(B, leader=node))
+  \text{where} leader(A_range) == leader(B_range)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("raft-leader-colocated-join";
+    "(join ?type (scan ?left) (scan ?right) ?on ?private)" =>
+    "(colocated_join ?type
+        (local_scan ?left ?leader_node)
+        (local_scan ?right ?leader_node)
+        ?on ?private)"
+    if leaders_on_same_node("?left", "?right", "?leader_node")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    left_table: &TableMeta,
+    right_table: &TableMeta,
+    join_key: &[ColumnId],
+) -> bool {
+    // Both tables must have Raft leaders on the same node
+    // for the ranges covering the join key
+    let left_leaders = left_table.raft_leaders_for_key(join_key);
+    let right_leaders = right_table.raft_leaders_for_key(join_key);
+    left_leaders.intersects(&right_leaders)
+}
+```
+
+**Restrictions:**
+- Leader locations are dynamic and can change due to rebalancing
+- The optimizer must use cached leader location info (may be stale)
+- Only beneficial for point lookups or small range scans where
+  the leader location is known
+- For large scans spanning many ranges, leader colocation provides
+  diminishing returns
+- CockroachDB uses lease holders (similar to Raft leaders but not
+  identical) for read optimization
+
+## Cost Model
+
+```rust
+fn colocation_benefit(
+    left_rows: f64,
+    right_rows: f64,
+    local_access_cost: f64,
+    remote_access_cost: f64,
+) -> f64 {
+    let colocated = (left_rows + right_rows) * local_access_cost;
+    let remote = (left_rows + right_rows) * remote_access_cost;
+    remote - colocated
+}
+```
+
+## Test Cases
+
+```sql
+-- Positive: FK join where child follows parent's leader
+-- parent and child co-partitioned on parent_id
+SELECT p.*, c.name
+FROM parent p JOIN child c ON p.id = c.parent_id
+WHERE p.id = 42;
+
+-- Raft leaders for parent(42) and child(parent_id=42) are
+-- likely on the same node due to range-based partitioning
+-- Join executes locally on that node
+```
+
+```sql
+-- Negative: tables on different ranges with different leaders
+SELECT * FROM table_a a JOIN table_b b ON a.key = b.key;
+-- If a.key range leader is on node 1 and b.key range leader
+-- is on node 3, data must be shuffled regardless
+```
+
+## References
+
+CockroachDB: pkg/sql/opt/distribution/distribution.go - leader/lease holder routing
+TiDB: Placement Driver (PD) - region leader tracking
+Ongaro & Ousterhout, "In Search of an Understandable Consensus Algorithm" (ATC 2014)
+CockroachDB docs: "Replication Layer" architecture documentation
+TiDB docs: "Storage" architecture - TiKV Raft groups

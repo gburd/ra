@@ -1,0 +1,48 @@
+---
+id: tidb-column-pruning
+name: "Column Pruning in Intermediate Steps"
+category: logical/column-pruning
+databases: [tidb]
+version: "1.0.0"
+authors: ["Database Contributors", "RA Contributors"]
+tags: [database-mining, tidb, optimization]
+complexity: "O(n)"
+benefit_range: [1.0, 10.0]
+---
+
+# Column Pruning in Intermediate Steps
+
+## Description
+
+Removes unused columns from intermediate query results.
+
+**When to apply**: During query optimization phase.
+
+## Relational Algebra
+
+```latex
+-- Before
+$$
+(project [a,b,c] (\bowtie (scan t1 [a,b,d]) (scan t2 [c])))
+$$
+
+-- After
+$$
+(project [a,b,c] (\bowtie (scan t1 [a,b]) (scan t2 [c])))
+$$
+
+```
+
+## Preconditions
+
+- Column d not referenced in output or remaining operators
+
+## Test Cases
+
+```sql
+SELECT * FROM table WHERE condition;
+```
+
+## References
+
+- Database documentation

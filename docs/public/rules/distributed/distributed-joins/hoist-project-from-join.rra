@@ -1,0 +1,140 @@
+---
+id: hoist-project-from-join
+name: Hoist Project from Join for Lookup Join Generation
+category: distributed/distributed-joins
+databases: [cockroachdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, join, project, lookup, hoist]
+complexity: O(n)
+benefit_range: [0.1, 0.5]
+---
+
+# Hoist Project from Join for Lookup Join Generation
+
+## Description
+
+Lifts a Project operator from under an InnerJoin or LeftJoin to above
+the join. This exposes the underlying Scan to lookup join generation
+rules. The projected expressions are re-applied after the join, which
+is semantically equivalent as long as the projections are non-volatile
+and the join condition does not reference the projected columns.
+
+**When to apply**: The right input of an InnerJoin or LeftJoin is a
+Project over a canonical Scan (or Select of a Scan), the projections
+are non-volatile, and the ON condition does not reference the projected
+columns.
+
+**Why it works**: Lookup join rules require a Scan or Select(Scan)
+as the right input. A Project wrapping the Scan prevents these rules
+from matching. By hoisting the Project above the join, lookup join
+generation can proceed, potentially producing a much faster plan.
+
+## Relational Algebra
+
+```latex
+$$
+InnerJoin[cond](L, Project[exprs](Scan(R)))
+  \rightarrow Project[exprs](InnerJoin[cond](L, Scan(R)))
+  \text{where} cond does not reference projected columns
+  \text{where} exprs are non-volatile
+$$
+
+$$
+LeftJoin[cond](L, Project[exprs](Scan(R)))
+  \rightarrow Project[case_exprs](LeftJoin[cond](L, Scan(R)))
+  \text{where} case_exprs null-extends projections for non-matching rows
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("hoist-project-from-inner-join";
+    "(join inner ?left
+        (project (scan ?right) ?projections ?passthrough)
+        ?on ?private)" =>
+    "(project
+        (join inner ?left (scan ?right) ?on ?private)
+        ?projections
+        (union_cols ?passthrough (output_cols ?left)))"
+    if can_hoist_project_input("?right")
+    if not_volatile("?projections")
+    if not_cols_intersect("?projections", "?on")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    join_type: JoinType,
+    projections: &ProjectionsExpr,
+    on: &FiltersExpr,
+    right_input: &RelExpr,
+) -> bool {
+    // Right input must be a canonical scan or select of canonical scan
+    can_hoist_project_input(right_input)
+    // Projections must not be volatile
+    && !projections.has_volatile()
+    // ON condition must not reference projected columns
+    && !on.outer_cols().intersects(&projections.output_cols())
+}
+```
+
+**Restrictions:**
+- For LeftJoin, the hoisted projections must be wrapped in CASE
+  expressions that produce NULL when the right side has no match
+  (null-extended rows)
+- For LeftJoin, a canary column from the right input must exist to
+  detect null-extended rows
+- If the ON condition references a projected column, the Project
+  cannot be hoisted (the expression must be inlined instead)
+- The rule inherits SkipReorderJoins from the original join to
+  prevent infinite reordering loops
+
+## Cost Model
+
+```rust
+fn hoist_project_cost(
+    join_output_rows: f64,
+    num_projections: u32,
+    projection_cost_per_row: f64,
+) -> f64 {
+    // Hoisting doesn't change the number of projections computed,
+    // but enables lookup join which may dramatically reduce join cost
+    join_output_rows * num_projections as f64 * projection_cost_per_row
+}
+```
+
+## Test Cases
+
+```sql
+-- Positive: project over scan prevents lookup join
+-- t has computed column: full_name = first || ' ' || last
+SELECT o.*, t.full_name
+FROM orders o
+JOIN (SELECT id, first || ' ' || last AS full_name FROM users) t
+  ON o.user_id = t.id;
+
+-- Before: HashJoin because Project blocks lookup join generation
+-- After hoisting: LookupJoin(o.user_id = t.id) becomes possible
+-- Project(full_name) applied after the lookup join
+```
+
+```sql
+-- Negative: ON condition references projected column
+SELECT * FROM t1
+JOIN (SELECT id, a + b AS computed FROM t2) t2
+  ON t1.x = t2.computed;
+-- Cannot hoist: computed is referenced in the join condition
+```
+
+## References
+
+CockroachDB: pkg/sql/opt/xform/rules/join.opt:466 - HoistProjectFromInnerJoin (commit 51e808c)
+CockroachDB: pkg/sql/opt/xform/rules/join.opt:508 - HoistProjectFromLeftJoin
+CockroachDB: pkg/sql/opt/xform/join_funcs.go - MakeProjectionsForOuterJoin

@@ -1,0 +1,48 @@
+---
+id: tidb-semi-anti-join-to-inner
+name: "Semi/Anti Join to Inner Join Conversion"
+category: logical/join-simplification
+databases: [tidb]
+version: "1.0.0"
+authors: ["Database Contributors", "RA Contributors"]
+tags: [database-mining, tidb, optimization]
+complexity: "O(n)"
+benefit_range: [1.0, 10.0]
+---
+
+# Semi/Anti Join to Inner Join Conversion
+
+## Description
+
+Optimizes semi/anti joins with proof of equivalence.
+
+**When to apply**: During query optimization phase.
+
+## Relational Algebra
+
+```latex
+-- Before
+$$
+(semi-\bowtie orders items (on o.id = i.order_id))
+$$
+
+-- After
+$$
+(distinct (inner-\bowtie orders items (on o.id = i.order_id)) [on o.id])
+$$
+
+```
+
+## Preconditions
+
+- SEMI join over function dependency satisfied
+
+## Test Cases
+
+```sql
+SELECT * FROM table WHERE condition;
+```
+
+## References
+
+- Database documentation

@@ -1,0 +1,425 @@
+---
+id: column-compression
+name: Column-at-a-Time Compression-Aware Execution
+category: execution-models
+version: 1.0.0
+databases: [MonetDB, ClickHouse, DuckDB, vertica, c-store]
+authors: [Daniel Abadi, Marcin Zukowski, Peter Boncz]
+tags: [execution, columnar, compression, dictionary, rle, bitpacking, simd, operate-on-compressed]
+standard: MonetDB X100
+---
+
+# Column-at-a-Time Compression-Aware Execution
+
+## Description
+
+Column-at-a-time compression-aware execution operates directly on compressed column data where possible, avoiding the decompression step entirely. Columnar storage naturally compresses well because values in a column share the same type and often have similar distributions. The key insight is that certain query operations can be pushed into the compressed domain: filtering on dictionary-encoded columns compares dictionary codes instead of strings, aggregation on RLE columns processes one entry per run instead of one per row, and bitpacked integers support SIMD parallel comparison on packed values.
+
+**Compression schemes for columnar storage:**
+1. **Dictionary encoding**: Map values to integer codes (0..N). Good for low-cardinality strings
+2. **Run-Length Encoding (RLE)**: Store (value, count) pairs. Good for sorted/clustered columns
+3. **Bit-packing**: Use minimum bits per value (e.g., 3 bits for values 0-7). Good for small integers
+4. **Frame of Reference (FOR)**: Store base + offsets. Good for narrow-range values
+5. **Delta encoding**: Store differences between consecutive values. Good for timestamps/sequences
+6. **Null compression**: Separate null bitmap + dense non-null values
+
+**Operate-on-compressed optimizations:**
+- **Dictionary filter**: Compare against dictionary, produce code bitmap, apply to data
+- **RLE aggregation**: SUM(col) = sum(value x count) for each run -- O(runs) not O(rows)
+- **RLE filter**: Check one value per run, emit/skip entire run
+- **Bitpacked comparison**: SIMD parallel compare packed values without unpacking
+- **FOR range check**: Transform `col > X` to `offset > X - base` on narrow values
+
+**Key characteristics:**
+- **Skip decompression**: Process compressed data directly where possible
+- **Compression ratios**: 3-10x for typical columnar data
+- **I/O reduction**: Read 3-10x fewer bytes from storage
+- **Cache amplification**: More logical data fits in cache when compressed
+- **Lightweight codecs**: Decompression at >2 GB/s (LZ4, Snappy-class)
+
+**Trade-offs:**
+- Not all operations can execute on compressed data
+- Mixed compression schemes within a column complicate execution
+- Update-heavy workloads degrade compression (insert into sorted RLE)
+- Decompression CPU cost may exceed memory bandwidth savings for fast storage
+
+## Relational Algebra
+
+```
+CompressedFilter(compressed_col, predicate)
+  -- Dictionary: filter dictionary, then apply code bitmap
+  -- RLE: evaluate per-run, skip non-matching runs
+  -- Bitpacked: SIMD compare on packed values
+
+CompressedAggregate(compressed_col, agg_func)
+  -- RLE: reduce(value * run_length) for each run
+  -- Dictionary: aggregate by code, remap at output
+```
+
+## Implementation
+
+```rust
+/// Compressed column representation
+pub enum CompressedColumn {
+    Dictionary {
+        /// Dictionary of distinct values
+        dictionary: Vec<Value>,
+        /// Codes array (one code per row)
+        codes: Vec<u32>,
+        /// Code width in bits
+        code_bits: u8,
+    },
+    RunLength {
+        /// (value, run_length) pairs
+        runs: Vec<(Value, u32)>,
+        /// Total logical row count
+        total_rows: usize,
+    },
+    BitPacked {
+        /// Packed data buffer
+        data: Vec<u8>,
+        /// Bits per value
+        bits_per_value: u8,
+        /// Number of values
+        num_values: usize,
+        /// Minimum value (for Frame of Reference)
+        base_value: i64,
+    },
+    Delta {
+        /// First value
+        base: i64,
+        /// Delta values (often further bitpacked)
+        deltas: Vec<i32>,
+    },
+    Uncompressed(ColumnArray),
+}
+
+/// Compression-aware filter operator
+pub struct CompressedFilter {
+    predicate: FilterPredicate,
+}
+
+impl CompressedFilter {
+    /// Filter on dictionary-encoded column
+    pub fn filter_dictionary(
+        dict: &[Value],
+        codes: &[u32],
+        op: CmpOp,
+        constant: &Value,
+    ) -> SelectionVector {
+        // Step 1: Evaluate predicate against dictionary
+        //   O(|dictionary|) instead of O(|data|)
+        let mut matching_codes = HashSet::new();
+        for (code, val) in dict.iter().enumerate() {
+            if compare_values(val, constant, op) {
+                matching_codes.insert(code as u32);
+            }
+        }
+
+        // Step 2: Scan codes array (integer comparison)
+        let mut positions = Vec::new();
+        for (pos, &code) in codes.iter().enumerate() {
+            if matching_codes.contains(&code) {
+                positions.push(pos as u32);
+            }
+        }
+
+        // Optimization: if matching_codes has 1 entry,
+        // use SIMD integer equality on codes
+        // If matching_codes is small, use bitmask lookup
+
+        SelectionVector {
+            source_len: codes.len(),
+            positions,
+        }
+    }
+
+    /// Filter on RLE-encoded column
+    pub fn filter_rle(
+        runs: &[(Value, u32)],
+        op: CmpOp,
+        constant: &Value,
+    ) -> SelectionVector {
+        let mut positions = Vec::new();
+        let mut row_offset: u32 = 0;
+
+        for (val, run_len) in runs {
+            if compare_values(val, constant, op) {
+                // Entire run matches: emit all positions
+                for i in 0..*run_len {
+                    positions.push(row_offset + i);
+                }
+            }
+            // Non-matching run: skip entirely (O(1))
+            row_offset += run_len;
+        }
+
+        SelectionVector {
+            source_len: row_offset as usize,
+            positions,
+        }
+    }
+
+    /// Filter on bitpacked column (SIMD)
+    pub fn filter_bitpacked(
+        data: &[u8],
+        bits_per_value: u8,
+        base_value: i64,
+        num_values: usize,
+        op: CmpOp,
+        constant: i64,
+    ) -> SelectionVector {
+        // Transform predicate to offset domain
+        let offset_threshold = constant - base_value;
+        let max_val = (1i64 << bits_per_value) - 1;
+
+        // Quick check: if threshold outside range, skip all
+        if offset_threshold > max_val {
+            return match op {
+                CmpOp::Lt | CmpOp::Le => {
+                    // All values < threshold: return all
+                    SelectionVector {
+                        source_len: num_values,
+                        positions: (0..num_values as u32)
+                            .collect(),
+                    }
+                }
+                _ => SelectionVector {
+                    source_len: num_values,
+                    positions: Vec::new(),
+                },
+            };
+        }
+
+        // SIMD: unpack and compare in 256-bit chunks
+        let mut positions = Vec::new();
+        let values_per_word = 64 / bits_per_value as usize;
+
+        for chunk_start in
+            (0..num_values).step_by(values_per_word)
+        {
+            let chunk_end = (chunk_start + values_per_word)
+                .min(num_values);
+            for i in chunk_start..chunk_end {
+                let val = unpack_value(
+                    data, i, bits_per_value,
+                ) as i64;
+                let actual = val + base_value;
+                let pass = match op {
+                    CmpOp::Eq => actual == constant,
+                    CmpOp::Lt => actual < constant,
+                    CmpOp::Le => actual <= constant,
+                    CmpOp::Gt => actual > constant,
+                    CmpOp::Ge => actual >= constant,
+                    CmpOp::Ne => actual != constant,
+                };
+                if pass {
+                    positions.push(i as u32);
+                }
+            }
+        }
+
+        SelectionVector {
+            source_len: num_values,
+            positions,
+        }
+    }
+}
+
+/// Compression-aware aggregation
+pub struct CompressedAggregate;
+
+impl CompressedAggregate {
+    /// SUM on RLE column: O(runs) instead of O(rows)
+    pub fn sum_rle(runs: &[(Value, u32)]) -> f64 {
+        let mut sum = 0.0;
+        for (val, run_len) in runs {
+            sum += val.as_f64() * *run_len as f64;
+        }
+        sum
+    }
+
+    /// COUNT on RLE column: O(runs)
+    pub fn count_rle(runs: &[(Value, u32)]) -> i64 {
+        runs.iter().map(|(_, len)| *len as i64).sum()
+    }
+
+    /// MIN/MAX on dictionary column: O(dictionary)
+    pub fn min_dictionary(dict: &[Value]) -> Value {
+        dict.iter().min().unwrap().clone()
+    }
+
+    /// COUNT(DISTINCT) on dictionary: O(1)
+    pub fn count_distinct_dictionary(
+        dict: &[Value],
+    ) -> i64 {
+        dict.len() as i64
+    }
+
+    /// GROUP BY on dictionary column: group by code
+    pub fn grouped_sum_dictionary(
+        codes: &[u32],
+        values: &ColumnArray,
+        dict_size: usize,
+    ) -> Vec<f64> {
+        // Accumulate by dictionary code (dense array)
+        let mut sums = vec![0.0; dict_size];
+        let val_data = values.data.as_f64_slice();
+
+        for (i, &code) in codes.iter().enumerate() {
+            sums[code as usize] += val_data[i];
+        }
+
+        sums
+    }
+}
+
+/// Decompression pipeline (when operate-on-compressed
+/// is not possible)
+pub fn decompress_column(
+    compressed: &CompressedColumn,
+) -> ColumnArray {
+    match compressed {
+        CompressedColumn::Dictionary {
+            dictionary, codes, ..
+        } => {
+            let mut data = AlignedBuffer::new(
+                codes.len() * 8,
+            );
+            for (i, &code) in codes.iter().enumerate() {
+                write_value(
+                    &mut data, i,
+                    &dictionary[code as usize],
+                );
+            }
+            ColumnArray {
+                col_id: 0,
+                data_type: DataType::Int64,
+                data,
+                null_bitmap: None,
+                len: codes.len(),
+            }
+        }
+        CompressedColumn::RunLength {
+            runs, total_rows,
+        } => {
+            let mut data = AlignedBuffer::new(
+                *total_rows * 8,
+            );
+            let mut pos = 0;
+            for (val, run_len) in runs {
+                for _ in 0..*run_len {
+                    write_value(&mut data, pos, val);
+                    pos += 1;
+                }
+            }
+            ColumnArray {
+                col_id: 0,
+                data_type: DataType::Int64,
+                data,
+                null_bitmap: None,
+                len: *total_rows,
+            }
+        }
+        CompressedColumn::BitPacked {
+            data, bits_per_value, num_values,
+            base_value,
+        } => {
+            let mut output = AlignedBuffer::new(
+                *num_values * 8,
+            );
+            let out_data = output.as_i64_slice_mut();
+            for i in 0..*num_values {
+                out_data[i] = unpack_value(
+                    data, i, *bits_per_value,
+                ) as i64 + base_value;
+            }
+            ColumnArray {
+                col_id: 0,
+                data_type: DataType::Int64,
+                data: output,
+                null_bitmap: None,
+                len: *num_values,
+            }
+        }
+        _ => todo!(),
+    }
+}
+```
+
+## Cost Model
+
+**Compression Ratios (typical):**
+
+| Scheme | Ratio | Best For |
+|--------|-------|----------|
+| Dictionary | 4-20x | Low-cardinality strings |
+| RLE | 5-100x | Sorted/clustered columns |
+| Bitpacking | 2-8x | Small integers |
+| FOR + bitpack | 3-10x | Narrow-range values |
+| Delta + bitpack | 5-20x | Timestamps, sequences |
+
+**Operate-on-Compressed Speedups:**
+- Dictionary filter: up to `|data| / |dictionary|` speedup for predicate
+- RLE SUM: `|rows| / |runs|` speedup (1000x for long runs)
+- RLE filter: skip non-matching runs in O(1)
+- Bitpacked comparison: narrower values = more per SIMD lane
+
+**Decompression Throughput:**
+- Dictionary: ~2 GB/s (random lookup per code)
+- RLE: ~4 GB/s (memset-like expansion)
+- Bitpacking: ~3 GB/s (SIMD unpack)
+- LZ4/Snappy: ~2-4 GB/s (general-purpose)
+
+**I/O Savings:**
+- 10x compression = 10x less data read from disk
+- SSD at 3 GB/s: 100 MB compressed = same wall time as 1 GB uncompressed
+- Net effect: compression is nearly free for I/O-bound queries
+
+## Test Cases
+
+```sql
+-- Test 1: Filter on dictionary-encoded string
+SELECT * FROM events WHERE type = 'ERROR';
+-- Dictionary: {'INFO': 0, 'WARN': 1, 'ERROR': 2, 'DEBUG': 3}
+-- Filter dictionary: code 2 matches
+-- Scan codes array: integer compare (code == 2)
+-- 4x faster than string comparison
+
+-- Test 2: SUM on RLE column (sorted data)
+SELECT region, SUM(population) FROM census
+GROUP BY region ORDER BY region;
+-- Region column sorted: ~50 runs for 10M rows
+-- SUM per run: O(50) instead of O(10M)
+-- 200,000x speedup for aggregation phase
+
+-- Test 3: Range filter on bitpacked column
+SELECT * FROM sensor_data WHERE reading > 100;
+-- Readings: 0-1023, stored in 10 bits (1.25 bytes/value)
+-- FOR base=0, compare offset > 100
+-- SIMD: 6 values per 64-bit word, parallel compare
+-- 2.5x less data read, 6x SIMD parallelism
+
+-- Test 4: COUNT(DISTINCT) on dictionary column
+SELECT COUNT(DISTINCT category) FROM products;
+-- Answer: dictionary.len() -- O(1)
+-- No scan needed at all
+```
+
+## Comparison
+
+| Property | Operate-on-Compressed | Decompress-then-Execute | Uncompressed |
+|----------|--------------------|------------------------|-------------|
+| I/O bytes | Compressed size | Compressed size | Full size |
+| CPU work | Minimal | Decompress + execute | Execute only |
+| Cache efficiency | Maximum (small data) | Good (decompress in cache) | Baseline |
+| Applicability | Limited operations | All operations | All operations |
+| Implementation | Complex per scheme | Simple pipeline | Simplest |
+| Best case | RLE SUM: O(runs) | Already fast | Baseline |
+
+## References
+
+1. **Abadi, Daniel J.; Madden, Samuel R.; Ferreira, Miguel C.**. "Integrating Compression and Execution in Column-Oriented Database Systems." SIGMOD 2006.
+2. **Zukowski, Marcin; Heman, Sandor; Nes, Niels; Boncz, Peter A.**. "Super-Scalar RAM-CPU Cache Compression." ICDE 2006.
+3. **Lemire, Daniel; Boytsov, Leonid**. "Decoding Billions of Integers in Milliseconds Through Vectorized Bit Unpacking." Software: Practice and Experience 2015.
+4. **Lang, Harald; Muhlbauer, Tobias; Funke, Florian; Boncz, Peter; Neumann, Thomas; Kemper, Alfons**. "Data Blocks: Hybrid OLTP and OLAP on Compressed Storage." SIGMOD 2016.

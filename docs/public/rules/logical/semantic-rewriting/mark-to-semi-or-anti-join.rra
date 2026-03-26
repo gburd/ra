@@ -1,0 +1,142 @@
+---
+id: calcite-mark-to-semi-or-anti-join
+name: Calcite MarkToSemiOrAntiJoinRule
+category: logical/semantic-rewriting
+databases: [calcite, postgresql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [logical, calcite, mark-join, semi-join, anti-join, decorrelation]
+complexity: O(n)
+benefit_range: [0.2, 0.7]
+---
+
+# Calcite MarkToSemiOrAntiJoinRule
+
+## Description
+
+Simplifies a mark join (which produces a boolean marker column
+indicating match) into a semi-join or anti-join when the marker
+is only used in a filter and not projected. This is applied after
+general decorrelation to clean up the plan.
+
+**When to apply**: A project-filter-mark-join pattern exists where
+the project does not reference the mark column and the filter
+tests the mark column for TRUE or FALSE.
+
+**Why it works**: If the mark column is only used to filter (keep
+matching or non-matching rows) and then discarded, a semi-join or
+anti-join produces the same result without the marker overhead.
+
+**Calcite class**: `org.apache.calcite.rel.rules.MarkToSemiOrAntiJoinRule`
+
+## Relational Algebra
+
+```latex
+-- Before: mark join with filter on mark
+$$
+\pi_{L.*}(\sigma_{mark = TRUE}(L MARK JOIN R))
+$$
+
+-- After: semi-join (keep only matching rows)
+$$
+L SEMI JOIN R
+$$
+
+-- Before: mark join with filter on NOT mark
+$$
+\pi_{L.*}(\sigma_{mark = FALSE}(L MARK JOIN R))
+$$
+
+-- After: anti-join (keep only non-matching rows)
+$$
+L ANTI JOIN R
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-mark-to-semi-join";
+    "(project ?cols
+        (filter (= ?mark true)
+            (mark-join ?cond ?left ?right)))" =>
+    "(project ?cols
+        (semi-join ?cond ?left ?right))"
+    if mark_not_in_project("?cols", "?mark")
+),
+
+rw!("calcite-mark-to-anti-join";
+    "(project ?cols
+        (filter (not ?mark)
+            (mark-join ?cond ?left ?right)))" =>
+    "(project ?cols
+        (anti-join ?cond ?left ?right))"
+    if mark_not_in_project("?cols", "?mark")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    project: &Project,
+    filter: &Filter,
+    join: &Join,
+) -> bool {
+    let mark_idx = join.row_type().field_count() - 1;
+    let proj_refs = project.referenced_columns();
+    let filter_refs = filter.condition().referenced_columns();
+
+    !proj_refs.contains(&mark_idx) && filter_refs.contains(&mark_idx)
+}
+```
+
+**Restrictions:**
+- Mark column must not appear in the output projection
+- Filter must test the mark for TRUE/FALSE (not complex expressions)
+- Applied after decorrelation as a cleanup step
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    left_rows: f64,
+    right_rows: f64,
+) -> f64 {
+    // Semi/anti-join avoids materializing mark column
+    let mark_overhead = left_rows * 0.001;
+    mark_overhead / (left_rows + right_rows)
+}
+```
+
+**Typical benefit**: 20-70% by using optimized semi/anti-join operators.
+
+## Test Cases
+
+```sql
+-- Positive: EXISTS becomes semi-join
+SELECT * FROM dept d
+WHERE EXISTS (SELECT 1 FROM emp e WHERE e.deptno = d.deptno);
+-- After decorrelation: mark join -> semi-join
+```
+
+```sql
+-- Positive: NOT EXISTS becomes anti-join
+SELECT * FROM dept d
+WHERE NOT EXISTS (SELECT 1 FROM emp e WHERE e.deptno = d.deptno);
+-- After decorrelation: mark join -> anti-join
+```
+
+```sql
+-- Negative: mark used in output
+SELECT d.*, (EXISTS (SELECT 1 FROM emp e WHERE e.deptno = d.deptno)) AS has_emp
+FROM dept d;
+-- Mark column is projected; cannot simplify to semi-join
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/MarkToSemiOrAntiJoinRule.java (commit af6367d)

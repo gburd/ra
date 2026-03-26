@@ -1,0 +1,57 @@
+---
+id: mongodb-document-validation
+name: MongoDB Document Validation Optimization
+category: database-specific/mongodb
+databases: [mongodb]
+execution_models: [pipeline]
+version: "1.0.0"
+authors: ["MongoDB Inc."]
+tags: [validation, schema, jsonschema, performance]
+complexity: "O(1)"
+benefit_range: [0.1, 0.4]
+---
+
+# MongoDB Document Validation Optimization
+
+## Description
+
+Optimizes document validation by compiling JSON Schema validators once and
+caching them, using minimal validation levels when appropriate, and pushing
+validation to application layer when validation overhead is too high for
+write-heavy workloads.
+
+**When to apply**: Collections with schema validation enabled. For write-heavy
+workloads, validation overhead can be reduced by using "moderate" validation
+level or optimizing schema complexity.
+
+**Why it works**: Document validation adds CPU overhead on every write. By
+caching compiled validators, using appropriate validation levels (strict vs
+moderate), and simplifying complex schemas, validation cost is minimized while
+maintaining data quality.
+
+## Test Cases
+
+### Positive: Cached validator compilation
+
+```javascript
+// Validator is compiled once and cached
+db.createCollection("users", {
+  validator: {
+    $jsonSchema: {
+      bsonType: "object",
+      required: ["email", "age"],
+      properties: {
+        email: {bsonType: "string", pattern: "^.+@.+$"},
+        age: {bsonType: "int", minimum: 0, maximum: 120}
+      }
+    }
+  },
+  validationLevel: "moderate"  // Only validates updates to validated docs
+})
+```
+
+## References
+
+**Documentation:**
+- MongoDB Manual: "Schema Validation"
+- https://docs.mongodb.com/manual/core/schema-validation/

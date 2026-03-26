@@ -1,0 +1,161 @@
+---
+id: function-inverse-transform
+name: Apply Function Inverse to Enable Index Use
+category: logical/function-optimization
+databases: [postgresql, mysql, oracle, mssql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [logical, function, index, inverse, sargable, transform]
+complexity: O(1)
+benefit_range: [0.3, 0.95]
+---
+
+# Apply Function Inverse to Enable Index Use
+
+## Description
+
+Transforms non-SARGable predicates into SARGable form by applying
+the mathematical inverse of a function. `WHERE col * 10 > 50` becomes
+`WHERE col > 5`, `WHERE col + 5 = 15` becomes `WHERE col = 10`,
+`WHERE YEAR(date_col) = 2024` becomes
+`WHERE date_col >= '2024-01-01' AND date_col < '2025-01-01'`.
+
+**When to apply**: A filter applies an invertible function or
+arithmetic operation to an indexed column, and the inverse can be
+applied to the comparison value to make the predicate SARGable.
+
+**Why it works**: Functions on indexed columns prevent index use.
+Applying the inverse transformation moves the computation to the
+constant side, leaving the bare column available for index lookup
+or range scan.
+
+## Implementation
+
+```rust
+// Arithmetic: col + c = v  =>  col = v - c
+rw!("inverse-add";
+    "(filter (= (+ ?col ?c) ?val) (scan ?t))" =>
+    "(filter (= ?col (- ?val ?c)) (index-scan ?t ?idx))"
+    if has_index("?t", "?col", "?idx")
+    if is_constant("?c")
+),
+
+// Arithmetic: col * c = v  =>  col = v / c  (c != 0)
+rw!("inverse-multiply";
+    "(filter (= (* ?col ?c) ?val) (scan ?t))" =>
+    "(filter (= ?col (/ ?val ?c)) (index-scan ?t ?idx))"
+    if has_index("?t", "?col", "?idx")
+    if is_constant("?c")
+    if is_nonzero("?c")
+),
+
+// Arithmetic: col / c > v  =>  col > v * c  (c > 0)
+// Note: inequality direction flips when c < 0
+rw!("inverse-divide-positive";
+    "(filter (> (/ ?col ?c) ?val) (scan ?t))" =>
+    "(filter (> ?col (* ?val ?c)) (index-scan ?t ?idx))"
+    if has_index("?t", "?col", "?idx")
+    if is_positive_constant("?c")
+),
+
+rw!("inverse-divide-negative";
+    "(filter (> (/ ?col ?c) ?val) (scan ?t))" =>
+    "(filter (< ?col (* ?val ?c)) (index-scan ?t ?idx))"
+    if has_index("?t", "?col", "?idx")
+    if is_negative_constant("?c")
+),
+
+// YEAR extraction to range
+rw!("inverse-year-extract";
+    "(filter (= (extract year ?col) ?year) (scan ?t))" =>
+    "(filter (and (>= ?col (date-from-year ?year))
+                  (<  ?col (date-from-year (+ ?year 1))))
+       (index-range-scan ?t ?idx))"
+    if has_index("?t", "?col", "?idx")
+    if is_constant("?year")
+),
+
+// MONTH extraction to range
+rw!("inverse-month-extract";
+    "(filter (= (extract month ?col) ?month) (scan ?t))" =>
+    // Cannot invert to simple range: month repeats across years
+    // Only works with additional year constraint
+    "(filter (= (extract month ?col) ?month) (scan ?t))"
+),
+
+// ABS inversion: ABS(col) = v  =>  col = v OR col = -v
+rw!("inverse-abs";
+    "(filter (= (abs ?col) ?val) (scan ?t))" =>
+    "(filter (or (= ?col ?val) (= ?col (- 0 ?val)))
+       (scan ?t))"
+    if is_constant("?val")
+    if is_non_negative("?val")
+),
+
+// LOG inversion: LOG(col) = v  =>  col = POWER(base, v)
+rw!("inverse-log";
+    "(filter (= (log ?base ?col) ?val) (scan ?t))" =>
+    "(filter (= ?col (power ?base ?val)) (index-scan ?t ?idx))"
+    if has_index("?t", "?col", "?idx")
+    if is_constant("?base")
+    if is_constant("?val")
+),
+```
+
+## Preconditions
+
+- Function must be invertible (bijective over the relevant domain)
+- Multiplication/division: divisor must be nonzero
+- Division/multiplication by negative numbers: flip inequality direction
+- Integer arithmetic: watch for truncation (7 / 2 = 3, not 3.5)
+- YEAR extraction: invertible to range; MONTH alone is not (repeats)
+- ABS: not strictly invertible (maps to two values), handle specially
+- Overflow: ensure inverse computation doesn't exceed type bounds
+
+## Test Cases
+
+```sql
+-- Setup: CREATE INDEX idx_salary ON emp (salary);
+
+-- Positive: addition inverse
+SELECT * FROM emp WHERE salary + 1000 = 60000;
+-- Rewritten: WHERE salary = 59000 (uses index)
+
+-- Positive: multiplication inverse
+SELECT * FROM emp WHERE salary * 12 > 600000;
+-- Rewritten: WHERE salary > 50000 (uses index)
+
+-- Positive: division with positive constant
+SELECT * FROM emp WHERE salary / 1000 > 50;
+-- Rewritten: WHERE salary > 50000 (uses index)
+
+-- Setup: CREATE INDEX idx_date ON events (event_date);
+
+-- Positive: YEAR extraction to range
+SELECT * FROM events WHERE YEAR(event_date) = 2024;
+-- Rewritten: WHERE event_date >= '2024-01-01'
+--              AND event_date < '2025-01-01' (range scan)
+
+-- Positive: ABS to disjunction
+SELECT * FROM accounts WHERE ABS(balance) = 100;
+-- Rewritten: WHERE balance = 100 OR balance = -100
+
+-- Negative: non-invertible function
+SELECT * FROM emp WHERE MOD(id, 7) = 0;
+-- MOD is not invertible: many values map to 0
+
+-- Negative: division by zero risk
+SELECT * FROM emp WHERE salary / 0 = 1;
+-- Division by zero: cannot invert
+
+-- Negative: integer truncation
+SELECT * FROM emp WHERE salary / 3 = 10;
+-- Integer division: salary=30,31,32 all give 10
+-- Cannot use simple equality inverse
+```
+
+## References
+
+- "SARGable Predicates and Query Optimization" (Selinger et al.)
+- PostgreSQL: Planner and Index-Optimizable Operators
+- mssql: Query Tuning and SARGability

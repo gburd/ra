@@ -1,0 +1,234 @@
+---
+id: differential-incremental-view
+name: Differential Incremental View Maintenance
+category: execution-models
+version: 1.0.0
+databases: [Materialize, differential-dataflow, Noria, Oracle]
+authors: [Frank McSherry, Christoph Koch]
+tags: [execution, differential, incremental, materialized-view, ivm, maintenance]
+standard: differential-dataflow
+---
+
+# Differential Incremental View Maintenance
+
+## Description
+
+Incremental View Maintenance (IVM) keeps materialized views up-to-date as base tables change, without recomputing the view from scratch. Differential dataflow provides a general framework for IVM: the view definition (SQL query) is compiled into a dataflow graph where each operator processes changes incrementally. The result is a continuously-updated materialized view with latency proportional to change size, not data size.
+
+**IVM approaches:**
+1. **Full recomputation**: Re-execute entire query -- O(data) per change
+2. **Counting algorithm**: Track multiplicity of each output row -- classic IVM
+3. **Delta-based (DBToaster)**: Higher-order deltas for nested queries -- optimal
+4. **Differential dataflow**: General incremental computation via (data,time,diff)
+
+**View types and incrementalizability:**
+- **SELECT-FROM-WHERE**: Fully incrementalizable via delta rules
+- **Aggregation (SUM, COUNT, AVG)**: Incrementalizable with accumulators
+- **Aggregation (MIN, MAX)**: Partially -- retractions may need rescan
+- **DISTINCT**: Incrementalizable with counting
+- **ORDER BY LIMIT**: Incrementalizable with sorted buffer
+- **Recursive/CTE**: Incrementalizable via fixed-point iteration
+- **EXISTS/NOT EXISTS**: Incrementalizable with counting semijoin
+
+**Key characteristics:**
+- **End-to-end incremental**: Entire query plan processes deltas
+- **Composable**: Views can be defined over other views
+- **Always fresh**: Updates propagate in milliseconds
+- **Correct**: Output matches full recomputation at all times
+
+**Trade-offs:**
+- Memory proportional to all intermediate state (arrangements)
+- Complex queries (many joins) require many arrangements
+- Some aggregates (median, mode) not efficiently incrementalizable
+- Initial hydration (catching up from empty) is full-computation cost
+
+## Implementation
+
+```rust
+/// Incremental view maintenance engine
+pub struct IncrementalViewMaintainer {
+    /// Compiled dataflow graph for the view definition
+    dataflow: DataflowGraph,
+    /// Current view state (the materialized result)
+    view_state: Arrangement<ViewKey, ViewRow>,
+}
+
+impl IncrementalViewMaintainer {
+    /// Compile a SQL view definition into an incremental dataflow
+    pub fn from_sql(sql: &str) -> Result<Self> {
+        let plan = parse_and_plan(sql)?;
+        let dataflow = compile_to_incremental_dataflow(&plan)?;
+        Ok(Self {
+            dataflow,
+            view_state: Arrangement::new(),
+        })
+    }
+
+    /// Process base table changes, update materialized view
+    pub fn process_base_changes(
+        &mut self,
+        table: &str,
+        changes: Vec<Change>,
+    ) -> Vec<Change> {
+        // Feed changes into the dataflow at the source operator
+        let source = self.dataflow.source_for_table(table);
+        let mut pending = vec![(source, changes)];
+
+        // Propagate through dataflow graph (topological order)
+        let mut view_changes = Vec::new();
+
+        while let Some((op_id, input_changes)) = pending.pop() {
+            let operator = &mut self.dataflow.operators[op_id];
+            let output_changes = operator.process_changes(input_changes);
+
+            if !output_changes.is_empty() {
+                // Route output to downstream operators
+                for downstream in self.dataflow.outputs(op_id) {
+                    pending.push((downstream, output_changes.clone()));
+                }
+
+                // If this is the view output, collect changes
+                if self.dataflow.is_output(op_id) {
+                    view_changes.extend(output_changes);
+                }
+            }
+        }
+
+        // Update view state
+        for change in &view_changes {
+            self.view_state.append(vec![(
+                extract_view_key(&change.data),
+                change.data.clone(),
+                change.time.clone(),
+                change.diff,
+            )]);
+        }
+
+        view_changes
+    }
+
+    /// Read current view state (for queries)
+    pub fn read_view(&self) -> Vec<ViewRow> {
+        self.view_state.current_entries()
+    }
+}
+
+/// Compile SQL plan to incremental dataflow operators
+fn compile_to_incremental_dataflow(
+    plan: &LogicalPlan,
+) -> Result<DataflowGraph> {
+    let mut graph = DataflowGraph::new();
+
+    match plan {
+        LogicalPlan::Scan { table } => {
+            graph.add_source(table);
+        }
+        LogicalPlan::Filter { predicate, input } => {
+            let child = compile_to_incremental_dataflow(input)?;
+            graph.extend(child);
+            graph.add_operator(IncrementalFilter::new(predicate));
+        }
+        LogicalPlan::Join { left, right, condition } => {
+            let left_graph = compile_to_incremental_dataflow(left)?;
+            let right_graph = compile_to_incremental_dataflow(right)?;
+            graph.extend(left_graph);
+            graph.extend(right_graph);
+            graph.add_operator(IncrementalJoin::new(condition));
+        }
+        LogicalPlan::Aggregate { group_by, aggs, input } => {
+            let child = compile_to_incremental_dataflow(input)?;
+            graph.extend(child);
+            graph.add_operator(IncrementalAggregate::new(group_by, aggs));
+        }
+        LogicalPlan::Project { exprs, input } => {
+            let child = compile_to_incremental_dataflow(input)?;
+            graph.extend(child);
+            graph.add_operator(IncrementalProject::new(exprs));
+        }
+        _ => {}
+    }
+
+    Ok(graph)
+}
+
+/// Cost model for incremental view maintenance
+pub fn ivm_cost(
+    changes_per_second: f64,
+    num_operators: usize,
+    num_arrangements: usize,
+    avg_arrangement_size: f64,
+) -> f64 {
+    // Per-change processing cost
+    let per_change = num_operators as f64 * 0.001; // ~1us per operator
+
+    // Arrangement lookup cost per change
+    let lookup_cost = num_arrangements as f64
+        * avg_arrangement_size.log2() * 0.00001;
+
+    // State maintenance
+    let state_cost = changes_per_second * num_arrangements as f64
+        * 0.0001;
+
+    changes_per_second * (per_change + lookup_cost) + state_cost
+}
+```
+
+## Cost Model
+
+**Per-Change Latency:**
+- Simple filter view: ~0.1 ms
+- Single join view: ~0.5-2 ms
+- Multi-join with aggregation: ~2-10 ms
+- Complex view (5+ joins): ~10-50 ms
+
+**Memory:**
+- Per arrangement: O(live_data) after compaction
+- Total: sum of all intermediate arrangements
+- Typical: 2-10x the size of base data for complex views
+
+**vs. Full Recomputation:**
+- IVM latency: O(change_size x operators)
+- Full recomputation: O(data_size x operators)
+- Speedup: data_size / change_size (typically 1000-1M x)
+
+**Initial Hydration:**
+- First computation: equivalent to full materialization
+- After hydration: only incremental updates
+
+## Test Cases
+
+```sql
+-- Test 1: Simple filter view
+CREATE MATERIALIZED VIEW active_users AS
+SELECT * FROM users WHERE active = true;
+-- INSERT INTO users: if active, add to view
+-- UPDATE active=false: retract from view
+-- Latency: <1ms per change
+
+-- Test 2: Join + aggregate view
+CREATE MATERIALIZED VIEW customer_totals AS
+SELECT c.name, SUM(o.amount) AS total
+FROM customers c JOIN orders o ON c.id = o.cust_id
+GROUP BY c.name;
+-- New order: probe customer arrangement, update SUM
+-- Customer name change: retract old, insert new aggregates
+-- Latency: ~2ms per change
+
+-- Test 3: Nested view (view over view)
+CREATE MATERIALIZED VIEW v1 AS SELECT * FROM orders WHERE status = 'active';
+CREATE MATERIALIZED VIEW v2 AS SELECT cust_id, COUNT(*) FROM v1 GROUP BY cust_id;
+-- Change to orders propagates through v1 then v2
+-- Composable: each view maintains independently
+
+-- Test 4: Hydration from empty
+CREATE MATERIALIZED VIEW v AS SELECT * FROM large_table WHERE col > 100;
+-- Initial: scan entire large_table, apply filter
+-- After: only process changes to large_table
+```
+
+## References
+
+1. **McSherry, Frank et al**. "differential-dataflow." CIDR 2013.
+2. **Koch, Christoph et al**. "DBToaster: Higher-Order Delta Processing for Dynamic, Frequently Fresh Views." VLDB 2014.
+3. **Materialize Documentation**. "Materialized Views."
+4. **Gupta, Ashish; Mumick, Inderpal Singh**. "Maintenance of Materialized Views: Problems, Techniques, and Applications." IEEE Data Eng. Bull. 1995.

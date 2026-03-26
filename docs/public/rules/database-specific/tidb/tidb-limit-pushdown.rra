@@ -1,0 +1,48 @@
+---
+id: tidb-limit-pushdown
+name: "LIMIT Pushdown Through Operators"
+category: logical/limit-pushdown
+databases: [tidb]
+version: "1.0.0"
+authors: ["Database Contributors", "RA Contributors"]
+tags: [database-mining, tidb, optimization]
+complexity: "O(n)"
+benefit_range: [1.0, 10.0]
+---
+
+# LIMIT Pushdown Through Operators
+
+## Description
+
+Pushes LIMIT operators closer to data source to reduce processing.
+
+**When to apply**: During query optimization phase.
+
+## Relational Algebra
+
+```latex
+-- Before
+$$
+(limit (sort (\bowtie a b)) 10)
+$$
+
+-- After
+$$
+(sort (\bowtie (limit a 10) (limit b 10)))
+$$
+
+```
+
+## Preconditions
+
+- LIMIT independent of aggregate results
+
+## Test Cases
+
+```sql
+SELECT * FROM table WHERE condition;
+```
+
+## References
+
+- Database documentation

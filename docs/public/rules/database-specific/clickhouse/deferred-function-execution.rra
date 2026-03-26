@@ -1,0 +1,113 @@
+---
+id: clickhouse-deferred-function-execution
+name: "ClickHouse Deferred Function Execution After Sort"
+category: database-specific/clickhouse
+databases: [clickhouse]
+execution_models: [column-at-a-time, vectorized]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [expression, sort, deferred, function, optimization]
+complexity: "O(n)"
+benefit_range: [0.1, 0.5]
+---
+
+# ClickHouse Deferred Function Execution After Sort
+
+## Metadata
+- **Rule ID**: `clickhouse-deferred-function-execution`
+- **Category**: Database-specific / ClickHouse
+- **Source**: `src/Processors/QueryPlan/Optimizations/liftUpFunctions.cpp`
+- **Complexity**: O(n) but applied to fewer rows after sort+limit
+- **Prerequisites**: Expression computed before sort that is not part of sort key
+- **Alternatives**: Compute all expressions before sort
+
+## Description
+
+When an expression is computed before a SortingStep but is not
+referenced by the sort key, ClickHouse lifts the expression above
+the sort. This means the expression is computed after sorting (and
+potentially after LIMIT), reducing the number of rows on which
+expensive functions are evaluated.
+
+The optimizer splits the ExpressionStep, keeping sort-key
+dependencies below the sort and moving independent computations
+above. This is especially beneficial when combined with LIMIT,
+as only the final N rows need the expression evaluated.
+
+**When to apply:**
+- Expression before sort that does not affect sort key
+- Expensive functions (string manipulation, JSON parsing, etc.)
+- Sort followed by LIMIT
+
+**Why it works for OLAP:**
+- Avoids computing expensive functions on discarded rows
+- Particularly effective with ORDER BY ... LIMIT N
+- Reduces CPU for output formatting functions
+
+## Relational Algebra
+
+```
+expr[f(col)](sort[key](R))
+  -> sort[key](expr[f(col)](R))  -- when f(col) not in key
+
+With LIMIT:
+  limit[N](expr[f(col)](sort[key](R)))
+  -> limit[N](expr[f(col)](sort[key](R)))  -- f computed on N rows only
+```
+
+## Implementation (egg rewrite rules)
+
+```lisp
+;; Lift expression above sort when not in sort key
+(rewrite (sort ?keys (expression ?expr ?input))
+  (expression (non-sort-exprs ?expr ?keys)
+    (sort ?keys
+      (expression (sort-key-exprs ?expr ?keys) ?input)))
+  :if (has-non-sort-exprs ?expr ?keys))
+
+;; After LIMIT, expression applied to fewer rows
+(rewrite (limit ?n (expression ?expr (sort ?keys ?input)))
+  (limit ?n (expression ?expr (sort ?keys ?input))))
+```
+
+## Cost Model
+
+```rust
+pub fn cost_deferred_execution(
+    total_rows: u64,
+    limit: u64,
+    expr_cost_per_row: u64,
+) -> Cost {
+    let before = Cost::cpu(total_rows * expr_cost_per_row);
+    let after = Cost::cpu(limit * expr_cost_per_row);
+    after - before
+}
+```
+
+**Typical benefit**: 10-50% CPU savings for expensive expressions with LIMIT
+
+## Test Cases
+
+### Positive: Expensive function with LIMIT
+```sql
+SELECT formatDateTime(timestamp, '%Y-%m-%d %H:%M'),
+       extractAll(message, '\\d+')
+FROM logs
+ORDER BY timestamp DESC
+LIMIT 100;
+
+-- formatDateTime and extractAll lifted above sort
+-- Computed for 100 rows instead of millions
+```
+
+### Negative: Expression in sort key
+```sql
+SELECT upper(name) as uname FROM users ORDER BY uname;
+-- upper(name) is the sort key; cannot be deferred
+```
+
+## References
+
+- ClickHouse: `src/Processors/QueryPlan/Optimizations/liftUpFunctions.cpp`
+- ClickHouse: `src/Processors/QueryPlan/Optimizations/Optimizations.h` (tryExecuteFunctionsAfterSorting)

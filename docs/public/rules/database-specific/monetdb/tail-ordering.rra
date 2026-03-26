@@ -1,0 +1,112 @@
+---
+id: monetdb-tail-ordering
+name: MonetDB Tail Column Ordering for Joins
+category: database-specific/monetdb
+databases: [monetdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, monetdb, tail, ordering, sort, join-preparation]
+complexity: O(n log n)
+benefit_range: [0.1, 0.5]
+---
+
+# MonetDB Tail Column Ordering for Joins
+
+## Description
+
+MonetDB pre-sorts BAT tail columns to enable merge joins on
+subsequent operations.  The sort is persisted so that future queries
+joining on the same column benefit from the sorted order without
+re-sorting.
+
+**When to apply**: A column is frequently used in join predicates and
+is not already sorted.
+
+**Why it works**: A one-time O(n log n) sort converts future hash
+joins (with hash table overhead) into merge joins (O(n+m), no hash
+table).  The amortized cost over many queries makes this profitable.
+
+**Database version**: MonetDB 5+
+
+## Relational Algebra
+
+```latex
+-- Before: unsorted column requires hash join
+$$
+hash-\bowtie_{a.fk = b.pk}(a, b)
+$$
+
+-- After: sorted column enables merge join
+$$
+sort(a.fk)  -- one-time
+merge-\bowtie_{a.fk = b.pk}(a, b)  -- subsequent queries
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("monetdb-sort-for-merge-join";
+    "(hash-join ?pred ?left ?right)" =>
+    "(merge-join ?pred (sort-bat ?left ?pred) ?right)"
+    if is_database("monetdb")
+    if right_is_sorted("?right", "?pred")
+    if sort_amortizes("?left", "?pred")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    column: &Column,
+    query_frequency: f64,
+) -> bool {
+    !column.is_sorted()
+    && query_frequency > 5.0 // amortization threshold
+}
+```
+
+**Restrictions:**
+- Sort is O(n log n) and must be amortized over multiple queries
+- Updates append to unsorted tail, requiring periodic re-sort
+- Only one sort order per BAT (multiple join columns need copies)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    rows: f64,
+    num_future_queries: f64,
+) -> f64 {
+    let sort_cost = rows * rows.log2() * 0.001;
+    let hash_overhead_per_query = rows * 0.005;
+    let savings = num_future_queries * hash_overhead_per_query;
+    savings - sort_cost
+}
+```
+
+**Typical benefit**: Profitable after 3-5 queries on the same
+join column.
+
+## Test Cases
+
+```sql
+-- Positive: frequent join on foreign key
+-- Multiple queries join on orders.cust_id
+-- MonetDB sorts cust_id BAT once, uses merge join thereafter
+```
+
+```sql
+-- Negative: one-time ad-hoc join
+SELECT * FROM t1 JOIN t2 ON t1.x = t2.y;
+-- Single query; hash join cheaper than sort + merge
+```
+
+## References
+
+MonetDB: BAT algebra sorting and persistence
+Source: gdk/gdk_bat.c, `BATsort()`

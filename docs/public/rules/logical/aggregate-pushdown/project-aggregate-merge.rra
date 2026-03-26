@@ -1,0 +1,121 @@
+---
+id: calcite-project-aggregate-merge
+name: Calcite ProjectAggregateMergeRule
+category: logical/aggregate-pushdown
+databases: [calcite, postgresql, mysql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [logical, calcite, project, aggregate, merge, dead-code]
+complexity: O(n)
+benefit_range: [0.05, 0.3]
+---
+
+# Calcite ProjectAggregateMergeRule
+
+## Description
+
+Matches a project on an aggregate and removes unused aggregate calls,
+and converts COALESCE(SUM(x), 0) patterns to SUM0(x). This prunes
+aggregate computations that the projection discards.
+
+**When to apply**: A project above an aggregate does not reference
+all aggregate calls, or wraps SUM in COALESCE(..., 0).
+
+**Why it works**: Computing fewer aggregate functions reduces CPU
+and memory. Converting SUM to SUM0 (which returns 0 instead of NULL
+for empty groups) enables subsequent AggregateMergeRule applications.
+
+**Calcite class**: `org.apache.calcite.rel.rules.ProjectAggregateMergeRule`
+
+## Relational Algebra
+
+```latex
+-- Before: project drops unused aggregate
+$$
+\pi_{g, sum_x}(\gamma_{g; SUM(x) AS sum_x, COUNT(y) AS cnt_y}(R))
+$$
+
+-- After: unused COUNT removed
+$$
+\pi_{g, sum_x}(\gamma_{g; SUM(x) AS sum_x}(R))
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-project-aggregate-merge";
+    "(project ?cols (aggregate ?group ?aggs ?input))" =>
+    "(project ?cols (aggregate ?group ?used_aggs ?input))"
+    if has_unused_agg_calls("?cols", "?aggs")
+),
+
+rw!("calcite-coalesce-sum-to-sum0";
+    "(project (coalesce (agg-ref ?sum_idx) 0) ?rest)" =>
+    "(project (agg-ref ?sum0_idx) ?rest)"
+    if agg_is_sum("?sum_idx")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    project: &Project,
+    aggregate: &Aggregate,
+) -> bool {
+    let referenced = project.referenced_agg_calls();
+    referenced.cardinality() < aggregate.agg_calls().len()
+        || project.has_coalesce_sum_pattern()
+}
+```
+
+**Restrictions:**
+- Must preserve all group-by columns
+- SUM0 returns 0 for empty groups; SUM returns NULL
+- Only COALESCE(SUM(x), 0) pattern is converted
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    input_rows: f64,
+    removed_aggs: usize,
+    total_aggs: usize,
+) -> f64 {
+    let reduction = removed_aggs as f64 / total_aggs as f64;
+    input_rows * reduction * 0.001
+}
+```
+
+**Typical benefit**: 5-30% by eliminating unnecessary aggregation.
+
+## Test Cases
+
+```sql
+-- Positive: unused aggregate removed
+SELECT dept, total_sal FROM (
+    SELECT dept, SUM(salary) AS total_sal, COUNT(*) AS cnt
+    FROM emp GROUP BY dept
+) t;
+-- COUNT(*) is unused; remove it
+```
+
+```sql
+-- Positive: COALESCE(SUM, 0) to SUM0
+SELECT dept, COALESCE(SUM(salary), 0) FROM emp GROUP BY dept;
+-- Converted to SUM0(salary)
+```
+
+```sql
+-- Negative: all aggregates referenced
+SELECT dept, SUM(salary), COUNT(*) FROM emp GROUP BY dept;
+-- All aggregates used; nothing to remove
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/ProjectAggregateMergeRule.java (commit af6367d)

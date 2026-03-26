@@ -1,0 +1,59 @@
+---
+id: tidb-coprocessor-limit-pushdown
+name: TiDB Coprocessor LIMIT Pushdown
+category: database-specific/tidb
+databases: [tidb]
+execution_models: [vectorized, distributed]
+hardware: [cpu, distributed]
+version: "1.0.0"
+authors: ["PingCAP TiDB Team", "RA Contributors"]
+tags: [coprocessor, pushdown, limit, tikv]
+complexity: "O(n)"
+benefit_range: [0.6, 0.95]
+source_file: "pkg/planner/core/rule_push_down_sequence.go"
+source_repo: "github.com/pingcap/tidb"
+---
+
+# TiDB Coprocessor LIMIT Pushdown
+
+## Description
+
+Pushes LIMIT operations to TiKV coprocessor, allowing early termination
+at the storage layer and dramatically reducing data transfer.
+
+## Relational Algebra
+
+```latex
+$$
+Limit[n](Scan[table])
+  \rightarrow CopTask(Limit[n](Scan[table]))
+$$
+
+```
+
+## Implementation
+
+```rust
+fn push_limit_to_cop(limit: &Limit, scan: &Scan) -> CopTask {
+    CopTask {
+        table: scan.table,
+        limit: Some(limit.count),
+        filters: vec![],
+    }
+}
+```
+
+## Cost Model
+
+Transfers only n rows instead of scanning entire table.
+
+## Test Cases
+
+```sql
+-- Top 100 orders
+SELECT * FROM orders ORDER BY created_at DESC LIMIT 100;
+-- Coprocessor returns only 100 rows per region
+```
+
+## References
+- Source: `pkg/planner/core/rule_push_down_sequence.go`

@@ -1,0 +1,119 @@
+---
+id: monetdb-band-join
+name: MonetDB Band Join (Theta Join Optimization)
+category: database-specific/monetdb
+databases: [monetdb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, monetdb, band-join, theta-join, range, inequality]
+complexity: O(n*m)
+benefit_range: [0.2, 0.6]
+---
+
+# MonetDB Band Join (Theta Join Optimization)
+
+## Description
+
+MonetDB optimizes inequality joins (theta joins) using the band-join
+operator.  Instead of computing the full Cartesian product and then
+filtering, the band join exploits sorted order to limit the search
+space.  For a condition like `a.x BETWEEN b.y - 10 AND b.y + 10`,
+the band join scans a "band" of width 20 for each value.
+
+**When to apply**: A join predicate is an inequality or range
+condition (not equality) and at least one side is sorted on the
+join column.
+
+**Why it works**: For a band of width W and sorted data, each probe
+visits at most W values instead of the entire column.  This reduces
+the O(n*m) cross product to O(n*W) where W << m.
+
+**Database version**: MonetDB 11+
+
+## Relational Algebra
+
+```latex
+-- Before: cross product + filter
+$$
+\sigma_{a.ts BETWEEN b.ts - 60 AND b.ts + 60}(a CROSS b)
+$$
+
+-- After: band join
+$$
+a band-\bowtie_{a.ts, b.ts, width=60} b
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("monetdb-band-join";
+    "(filter (between ?left_col
+                      (- ?right_col ?width)
+                      (+ ?right_col ?width))
+        (cross-join ?left ?right))" =>
+    "(band-join ?left_col ?right_col ?width ?left ?right)"
+    if is_database("monetdb")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    predicate: &Predicate,
+    left: &Bat,
+    right: &Bat,
+) -> bool {
+    predicate.is_range_join()
+    && (left.is_sorted_on(predicate.left_column())
+        || right.is_sorted_on(predicate.right_column()))
+}
+```
+
+**Restrictions:**
+- Band width must be statically determinable or estimable
+- Most effective when at least one side is sorted
+- Falls back to nested-loop for unsorted wide bands
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    left_rows: f64,
+    right_rows: f64,
+    band_fraction: f64,
+) -> f64 {
+    let cross_cost = left_rows * right_rows * 0.001;
+    let band_cost = left_rows * right_rows * band_fraction
+        * 0.001;
+    cross_cost - band_cost
+}
+```
+
+**Typical benefit**: 10-1000x when band is narrow relative to
+data range.
+
+## Test Cases
+
+```sql
+-- Positive: temporal range join
+SELECT * FROM events e1 JOIN events e2
+ON e2.timestamp BETWEEN e1.timestamp - INTERVAL 60 SECOND
+    AND e1.timestamp + INTERVAL 60 SECOND;
+-- Band join with 60-second window
+```
+
+```sql
+-- Negative: equality join
+SELECT * FROM a JOIN b ON a.key = b.key;
+-- Equality; use hash or merge join, not band join
+```
+
+## References
+
+MonetDB: BAT algebra theta join operations
+Source: gdk/gdk_join.c, `BATbandjoin()`

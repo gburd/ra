@@ -1,0 +1,88 @@
+---
+id: clickhouse-remove-redundant-sorting
+name: Remove Redundant Sorting
+category: database-specific/clickhouse
+databases: [clickhouse]
+version: 1.0.0
+authors: ["RA Contributors"]
+tags: [database-specific, clickhouse, sort, optimization, elimination]
+complexity: O(1)
+benefit_range: [0.6, 0.95]
+---
+
+# Remove Redundant Sorting
+
+## Description
+
+Removes sorting operations when input is already sorted in a compatible order or when subsequent operations don't require ordering.
+
+**When to apply**: Sort on already-sorted data or sort whose ordering is immediately discarded.
+
+**Why it works**: Sorting is expensive (O(n log n)). If data is already ordered or order isn't used, sorting is wasted work.
+
+**Database version**: ClickHouse v19.15+
+
+## Relational Algebra
+
+```latex
+$$
+Sort[cols](R) \rightarrow R
+  \text{where} R is_sorted_by cols
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("clickhouse-remove-redundant-sorting";
+    "(sort ?ordering ?input)" =>
+    "?input"
+    if is_database("clickhouse")
+    if is_already_sorted("?input", "?ordering")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    ordering: &Ordering,
+    input: &RelNode,
+) -> bool {
+    // Check if input already provides required ordering
+    input.output_ordering().satisfies(ordering)
+}
+```
+
+**Restrictions:**
+- Only applies to ClickHouse
+- Requires proof that input is already sorted
+
+## Cost Model
+
+```rust
+fn estimated_benefit(input_rows: f64) -> f64 {
+    let sort_cost = input_rows * input_rows.log2();
+    sort_cost / (sort_cost + input_rows * 100.0)
+}
+```
+
+**Typical benefit**: 60-95%
+
+## Test Cases
+
+```sql
+CREATE TABLE events (...) ENGINE = MergeTree() ORDER BY timestamp;
+
+SELECT * FROM events ORDER BY timestamp;
+-- Already sorted - remove sort
+```
+
+## References
+
+**Source code:**
+- ClickHouse: `src/Processors/QueryPlan/Optimizations/removeRedundantSorting.cpp`
+  - Commit: 35f2d31186cca2f8c50f7ba4bd93817da490da85

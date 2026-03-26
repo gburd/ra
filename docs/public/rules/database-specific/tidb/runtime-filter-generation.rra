@@ -1,0 +1,169 @@
+---
+id: tidb-runtime-filter-generation
+name: Runtime Filter Generation for Hash Joins
+category: database-specific/tidb
+databases: [tidb]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [distributed, runtime-filter, bloom-filter, hash-join, pushdown, tidb]
+complexity: O(n)
+benefit_range: [0.2, 0.9]
+---
+
+# Runtime Filter Generation for Hash Joins
+
+## Description
+
+Generates runtime filters (bloom filters or min-max intervals) from
+the build side of a hash join and pushes them down to the probe side's
+table scan. At execution time, the build side constructs the filter,
+which is then applied at the storage layer (TiKV/TiFlash coprocessor)
+to eliminate non-matching rows before they are sent over the network.
+
+**When to apply**: A hash join is planned between two tables, and the
+probe side is a table scan that can accept a runtime filter. The
+build side should be small enough to construct the filter efficiently.
+
+**Why it works**: Without a runtime filter, the probe side sends all
+rows to the hash join operator, where most are discarded. With a
+runtime filter, non-matching rows are eliminated at the storage layer,
+reducing network transfer and CPU usage at the join operator.
+
+## Relational Algebra
+
+```latex
+$$
+HashJoin[L.k = R.k](TableScan(L), Exchange(R))
+  \rightarrow HashJoin[L.k = R.k](
+       TableScan(L, runtime_filter=RF(R.k)),
+       Exchange(R)
+     )
+  \text{where} RF is constructed from R's build-side hash table
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("generate-runtime-filter";
+    "(hash_join ?type ?probe ?build ?cond)" =>
+    "(hash_join ?type
+        (apply_runtime_filter ?probe ?rf_id ?cond)
+        ?build ?cond)"
+    if build_side_is_small("?build")
+    if probe_supports_runtime_filter("?probe")
+    if join_key_matches_scan_column("?cond", "?probe")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    hash_join: &PhysicalHashJoin,
+    probe: &PhysicalPlan,
+    build: &PhysicalPlan,
+) -> bool {
+    // Must be an equi-join
+    hash_join.has_equality_conditions()
+    // Probe side must be a table scan (or reader)
+    && (probe.is_table_scan() || probe.is_table_reader())
+    // Join key column must exist in the probe scan
+    && probe.schema().contains(hash_join.probe_join_key())
+    // Column type must be supported for runtime filter
+    && is_supported_rf_type(hash_join.probe_join_key().ret_type())
+    // Build side should be reasonably small
+    && build.estimated_rows() < RUNTIME_FILTER_BUILD_THRESHOLD
+}
+
+fn is_supported_rf_type(tp: &FieldType) -> bool {
+    matches!(tp.tp(), Int | Float | Double | Decimal
+        | Date | Datetime | Timestamp | Varchar | Char)
+    && !tp.is_blob()
+    && !tp.is_json()
+}
+```
+
+**Restrictions:**
+- Only works with hash joins (not merge joins or nested loops)
+- The runtime filter must reach a table scan in the probe side's
+  subtree; intermediate operators (sort, aggregate) block pushdown
+- TiFlash table scans support runtime filters natively; TiKV has
+  limited support
+- BLOB and JSON columns are not supported as runtime filter keys
+- The runtime filter adds latency to the build side (constructing
+  the filter) and a dependency edge in the execution DAG
+
+## Cost Model
+
+```rust
+fn runtime_filter_benefit(
+    probe_rows: f64,
+    build_distinct_keys: f64,
+    probe_selectivity: f64,
+    network_cost_per_row: f64,
+    filter_build_cost: f64,
+) -> f64 {
+    let rows_filtered = probe_rows * (1.0 - probe_selectivity);
+    let saved_network = rows_filtered * network_cost_per_row;
+    saved_network - filter_build_cost
+}
+```
+
+**Typical benefit**: For a star-schema join where 95% of fact table
+rows don't match the filtered dimension, the runtime filter eliminates
+95% of network traffic from the storage layer.
+
+## Test Cases
+
+```sql
+-- Positive: hash join with selective build side
+SELECT f.*, d.name
+FROM fact_sales f
+JOIN dim_store d ON f.store_id = d.id
+WHERE d.country = 'Japan';
+
+-- Plan:
+-- HashJoin(f.store_id = d.id)
+--   TableScan(fact_sales,
+--     runtime_filter=RF1(store_id from dim_store))  -- 95% filtered
+--   Filter(country='Japan')
+--     TableScan(dim_store)  -- builds RF1
+```
+
+```sql
+-- Positive: runtime filter on TiFlash scan
+-- fact_sales stored in TiFlash (columnar)
+SELECT SUM(f.amount)
+FROM fact_sales f
+JOIN dim_date d ON f.date_key = d.key
+WHERE d.year = 2024;
+
+-- TiFlash coprocessor applies RF before sending rows
+```
+
+```sql
+-- Negative: build side too large
+SELECT * FROM large_a
+JOIN large_b ON large_a.key = large_b.key;
+-- Both sides large; runtime filter construction cost too high
+```
+
+```sql
+-- Negative: probe side is not a table scan
+SELECT * FROM (
+    SELECT key, SUM(val) FROM grouped GROUP BY key
+) g
+JOIN lookup l ON g.key = l.id;
+-- Probe side is an aggregation, cannot push RF to storage
+```
+
+## References
+
+TiDB: pkg/planner/core/runtime_filter_generator.go:32 - RuntimeFilterGenerator (commit e2184a2)
+TiDB: pkg/planner/core/runtime_filter_generator.go:61 - GenerateRuntimeFilter
+TiDB docs: "Runtime Filter" in TiFlash documentation
+BlinkDB / Spark: "Runtime Filtering for SQL Queries" concept

@@ -1,0 +1,118 @@
+---
+id: calcite-aggregate-expand-distinct
+name: Calcite AggregateExpandDistinctAggregatesRule
+category: database-specific/calcite
+databases: [calcite]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, calcite, aggregate, distinct, expand]
+complexity: O(n)
+benefit_range: [0.1, 0.5]
+---
+
+# Calcite AggregateExpandDistinctAggregatesRule
+
+## Description
+
+Rewrites aggregates containing DISTINCT aggregate functions
+(e.g., `COUNT(DISTINCT x)`) into a form using joins and
+non-distinct aggregates. Each DISTINCT aggregate is computed
+separately via a sub-aggregate with an additional group-by on
+the DISTINCT column, then joined back.
+
+**When to apply**: An aggregate contains one or more DISTINCT
+aggregate calls (e.g., `COUNT(DISTINCT col)`).
+
+**Why it works**: Many execution engines handle non-distinct
+aggregates more efficiently (hash aggregation). Expanding
+DISTINCT aggregates into joins of grouped sub-queries can
+leverage existing optimizations for joins and standard aggregates.
+
+**Calcite class**: `org.apache.calcite.rel.rules.AggregateExpandDistinctAggregatesRule`
+
+## Relational Algebra
+
+```latex
+-- Before: COUNT(DISTINCT x) with GROUP BY g
+$$
+\gamma_{g; COUNT(DISTINCT x)}(R)
+$$
+
+-- After: expanded into sub-aggregate + outer aggregate
+$$
+\gamma_{g; COUNT(x)}(\gamma_{g, x; }(R))
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-aggregate-expand-distinct";
+    "(aggregate ?group (count-distinct ?col) ?input)" =>
+    "(aggregate ?group (count ?col)
+        (aggregate (append ?group ?col) (list) ?input))"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    agg_calls: &[AggregateCall],
+) -> bool {
+    agg_calls.iter().any(|call| call.is_distinct)
+}
+```
+
+**Restrictions:**
+- Multiple DISTINCT aggregates on different columns require
+  multiple sub-aggregates joined together
+- If all DISTINCT aggregates use the same column, a single
+  expansion suffices
+- Non-distinct aggregates in the same query are computed
+  separately and joined
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    input_rows: f64,
+    distinct_values: f64,
+) -> f64 {
+    // Benefit depends on whether the expanded form enables
+    // better execution strategies
+    let reduction = distinct_values / input_rows;
+    if reduction < 0.5 {
+        0.3  // Significant dedup in sub-aggregate
+    } else {
+        0.05 // Minimal benefit, many distinct values
+    }
+}
+```
+
+**Typical benefit**: 10-50% when DISTINCT columns have
+high duplication.
+
+## Test Cases
+
+```sql
+-- Positive: expand COUNT(DISTINCT)
+SELECT dept, COUNT(DISTINCT job) FROM emp GROUP BY dept;
+-- Becomes: group by (dept, job), then count per dept
+```
+
+```sql
+-- Positive: multiple DISTINCT aggregates
+SELECT dept,
+       COUNT(DISTINCT job),
+       SUM(DISTINCT sal)
+FROM emp GROUP BY dept;
+-- Each DISTINCT expanded separately and joined
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/AggregateExpandDistinctAggregatesRule.java

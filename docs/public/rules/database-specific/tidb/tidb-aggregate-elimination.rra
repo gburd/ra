@@ -1,0 +1,48 @@
+---
+id: tidb-aggregate-elimination
+name: "Aggregate Function Elimination"
+category: logical/aggregate-elimination
+databases: [tidb]
+version: "1.0.0"
+authors: ["Database Contributors", "RA Contributors"]
+tags: [database-mining, tidb, optimization]
+complexity: "O(n)"
+benefit_range: [1.0, 10.0]
+---
+
+# Aggregate Function Elimination
+
+## Description
+
+Simplifies GROUP BY aggregates when grouping columns form a unique key.
+
+**When to apply**: During query optimization phase.
+
+## Relational Algebra
+
+```latex
+-- Before
+$$
+(group-by [id] (count *) (scan users))
+$$
+
+-- After
+$$
+(project [id] (scan users))
+$$
+
+```
+
+## Preconditions
+
+- GROUP BY columns form unique/primary key
+
+## Test Cases
+
+```sql
+SELECT * FROM table WHERE condition;
+```
+
+## References
+
+- Database documentation

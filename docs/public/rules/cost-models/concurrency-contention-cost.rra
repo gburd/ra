@@ -1,0 +1,290 @@
+---
+id: concurrency-contention-cost
+name: "Concurrency and Lock Contention Cost Model"
+category: cost-models
+databases: [postgresql, mysql, oracle, mssql, cockroachdb]
+execution_models: [volcano, vectorized]
+hardware: [cpu, memory]
+version: "1.0.0"
+authors: ["Graefe 2010 - survey of B-tree locking", "Yu et al. 2014 - staring into the abyss"]
+tags: [cost, concurrency, locking, contention, latching, throughput, OLTP]
+complexity: "O(1) per contention estimate"
+benefit_range: [1.0, 100.0]
+---
+
+# Concurrency and Lock Contention Cost Model
+
+## Description
+
+Models the cost overhead of lock and latch contention when multiple
+transactions execute concurrently. Traditional cost models estimate
+single-query cost in isolation, but in OLTP workloads, contention
+on hot rows, pages, and index structures can dominate execution time.
+A query that takes 1ms in isolation may take 100ms under contention.
+
+**When to apply**: Any workload with concurrent writes to shared data,
+especially OLTP systems with hot spots (popular products, counter
+tables, queue tables). Also relevant for choosing between optimistic
+and pessimistic concurrency control.
+
+**Why it works**: Contention follows queueing theory: as utilization
+approaches 100%, wait times grow hyperbolically. Under Amdahl's law,
+even 1% of serial execution limits scalability. Modeling contention
+helps the optimizer choose plans that minimize lock hold times and
+avoid hot-spot access patterns.
+
+## Relational Algebra
+
+```latex
+-- Contention-aware cost:
+$$
+contention_cost(op, concurrency) =
+  base_cost(op) + wait_time(op, concurrency)
+$$
+
+-- Wait time (M/M/1 queueing model):
+$$
+wait_time(op, concurrency) =
+  lock_hold_time(op) * utilization / (1 - utilization)
+  \text{where} utilization = concurrency * lock_hold_time(op) / num_resources
+$$
+
+-- Lock scope impact:
+$$
+lock_cost(row_lock) = LOCK_OVERHEAD + low_contention
+lock_cost(page_lock) = LOCK_OVERHEAD / rows_per_page + medium_contention
+lock_cost(table_lock) = minimal_overhead + high_contention
+$$
+
+-- Optimistic vs pessimistic:
+$$
+optimistic_cost(op) = base_cost(op) + validation_cost + retry_prob * base_cost(op)
+pessimistic_cost(op) = base_cost(op) + lock_acquire + wait_time
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+struct ContentionCostModel {
+    lock_acquire_us: f64,
+    lock_release_us: f64,
+    latch_acquire_us: f64,
+}
+
+impl ContentionCostModel {
+    fn lock_contention_overhead(
+        &self,
+        lock_hold_time_us: f64,
+        concurrent_txns: usize,
+        num_lockable_resources: usize,
+    ) -> f64 {
+        // M/M/1 approximation per resource
+        let arrival_rate =
+            concurrent_txns as f64 / num_lockable_resources as f64;
+        let service_rate = 1.0 / lock_hold_time_us;
+        let utilization =
+            (arrival_rate / service_rate).min(0.99);
+
+        if utilization < 0.01 {
+            return 0.0; // negligible contention
+        }
+
+        // Average wait time in queue
+        lock_hold_time_us * utilization / (1.0 - utilization)
+    }
+
+    fn index_latch_contention(
+        &self,
+        index_height: usize,
+        concurrent_writers: usize,
+        index_pages: usize,
+    ) -> f64 {
+        // B-tree latch contention on internal nodes
+        // Root is hottest: every operation latches root
+        let root_utilization = concurrent_writers as f64
+            * self.latch_acquire_us
+            / 1000.0; // fraction of time root is latched
+
+        let root_wait = if root_utilization > 0.5 {
+            self.latch_acquire_us * root_utilization
+                / (1.0 - root_utilization)
+        } else {
+            0.0
+        };
+
+        // Leaf contention: spread across pages
+        let leaf_util = concurrent_writers as f64
+            * self.latch_acquire_us
+            / (index_pages as f64 * 1000.0);
+        let leaf_wait = self.latch_acquire_us * leaf_util
+            / (1.0 - leaf_util).max(0.01);
+
+        root_wait + leaf_wait
+    }
+
+    fn plan_contention_comparison(
+        &self,
+        plans: &[PhysicalPlan],
+        workload: &WorkloadProfile,
+    ) -> Vec<(usize, f64)> {
+        plans
+            .iter()
+            .enumerate()
+            .map(|(i, plan)| {
+                let base = plan.estimated_cost();
+                let lock_time = plan.total_lock_hold_time();
+                let resources = plan.locked_resources();
+                let overhead = self.lock_contention_overhead(
+                    lock_time,
+                    workload.concurrent_txns,
+                    resources,
+                );
+                (i, base + overhead)
+            })
+            .collect()
+    }
+
+    fn optimistic_vs_pessimistic(
+        &self,
+        base_cost: f64,
+        conflict_rate: f64,
+        validation_cost: f64,
+    ) -> ConcurrencyChoice {
+        // Optimistic: pay validation + retry on conflict
+        let optimistic = base_cost
+            + validation_cost
+            + conflict_rate * base_cost; // retry cost
+
+        // Pessimistic: pay lock overhead + wait time
+        let pessimistic = base_cost
+            + self.lock_acquire_us * 10.0 // ~10 locks per txn
+            + base_cost * 0.1; // estimated contention
+
+        if optimistic < pessimistic {
+            ConcurrencyChoice::Optimistic {
+                cost: optimistic,
+            }
+        } else {
+            ConcurrencyChoice::Pessimistic {
+                cost: pessimistic,
+            }
+        }
+    }
+
+    fn hot_spot_detection(
+        &self,
+        access_pattern: &AccessPattern,
+        concurrent_txns: usize,
+    ) -> Option<HotSpotWarning> {
+        let max_freq = access_pattern.max_row_frequency();
+        let utilization = max_freq * concurrent_txns as f64
+            * self.lock_acquire_us
+            / 1e6;
+
+        if utilization > 0.5 {
+            Some(HotSpotWarning {
+                resource: access_pattern.hottest_resource(),
+                utilization,
+                estimated_wait_ms: self
+                    .lock_contention_overhead(
+                        self.lock_acquire_us,
+                        concurrent_txns,
+                        1, // single hot resource
+                    )
+                    / 1000.0,
+            })
+        } else {
+            None
+        }
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(workload: &WorkloadProfile) -> bool {
+    workload.concurrent_txns > 1
+        && workload.has_write_operations()
+}
+```
+
+**Restrictions:**
+- Queueing model assumes uniform access (real access is skewed)
+- Lock escalation changes contention profile dynamically
+- MVCC reduces read-write contention but not write-write
+- Deadlock detection adds overhead not modeled here
+- Distributed transactions have cross-node lock overhead
+
+## Cost Model
+
+```rust
+fn scalability_limit(
+    serial_fraction: f64,
+    num_cores: usize,
+) -> f64 {
+    // Amdahl's law: max speedup with N cores
+    1.0 / (serial_fraction
+        + (1.0 - serial_fraction) / num_cores as f64)
+}
+
+fn contention_cliff(
+    lock_hold_us: f64,
+    target_p99_ms: f64,
+) -> usize {
+    // Max concurrent txns before p99 exceeds target
+    // From M/M/1: p99 wait ~ -ln(0.01) * avg_wait
+    let max_avg_wait_us = target_p99_ms * 1000.0 / 4.6;
+    let max_util =
+        max_avg_wait_us / (max_avg_wait_us + lock_hold_us);
+    (max_util / lock_hold_us * 1e6) as usize
+}
+```
+
+## Test Cases
+
+### Positive: Hot row contention in counter table
+
+```sql
+-- Global counter: UPDATE counters SET val = val + 1 WHERE id = 1
+-- 1000 concurrent transactions, all updating same row
+-- Lock hold: 10us per update
+-- Utilization: 1000 * 10us / 1000us = 10 (saturated!)
+-- Result: each transaction waits ~10ms (1000x overhead)
+-- Solution: batch updates or partition the counter
+```
+
+### Positive: Index insert contention
+
+```sql
+-- Sequential inserts: all go to rightmost leaf page
+-- 100 concurrent inserters, B-tree right-edge hot spot
+-- Latch contention on leaf page: 100 * 1us / 10us = 10x
+-- Solution: use hash partitioned index or reverse key index
+INSERT INTO events (id, ts, data) VALUES (nextval('seq'), now(), $1);
+```
+
+### Negative: Read-only workload
+
+```sql
+-- MVCC: readers don't block readers
+-- 1000 concurrent SELECT queries: zero contention
+-- Lock contention model not relevant
+SELECT * FROM products WHERE category = 'electronics';
+```
+
+## References
+
+**Concurrency and contention:**
+- Yu et al., "Staring into the Abyss: An Evaluation of Concurrency Control with One Thousand Cores", VLDB 2014
+  - Scalability limits of various CC schemes
+- Graefe, "A Survey of B-Tree Locking Techniques", TODS 2010
+  - Comprehensive B-tree latch and lock protocols
+
+**Queueing theory for databases:**
+- Hellerstein et al., "Predicting the Cost of Concurrency Control", IEEE TKDE 1997
+- Thomasian, "Concurrency Control: Methods, Performance, and Analysis", ACM Computing Surveys 1998

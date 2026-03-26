@@ -1,0 +1,128 @@
+---
+id: calcite-sort-join-copy
+name: Calcite SortJoinCopyRule
+category: logical/limit-pushdown
+databases: [calcite, postgresql, mysql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [logical, calcite, sort, join, copy, order-preservation]
+complexity: O(n log n)
+benefit_range: [0.05, 0.4]
+---
+
+# Calcite SortJoinCopyRule
+
+## Description
+
+Copies a Sort past a Join without its LIMIT/OFFSET. The original
+Sort is preserved above but can be removed by SortRemoveRule if
+redundant. Placing the sort below the join can enable index-based
+execution and reduce the join's output before the final sort.
+
+**When to apply**: A Sort sits above a Join, and copying the sort
+order to a join input can enable merge join or index scan.
+
+**Why it works**: If one join input is pre-sorted on the join key,
+merge join becomes available. Pre-sorting a smaller result set
+below the join can be cheaper than sorting the full join output.
+
+**Calcite class**: `org.apache.calcite.rel.rules.SortJoinCopyRule`
+
+## Relational Algebra
+
+```latex
+-- Before: sort above join
+$$
+tau[k; LIMIT n](R JOIN S)
+$$
+
+-- After: sort copied to join input (without limit)
+$$
+tau[k; LIMIT n](tau[k](R) JOIN S)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-sort-join-copy-left";
+    "(sort-limit ?keys ?limit
+        (join ?type ?cond ?left ?right))" =>
+    "(sort-limit ?keys ?limit
+        (join ?type ?cond
+            (sort ?keys ?left) ?right))"
+    if sort_keys_from_left("?keys", "?left")
+),
+
+rw!("calcite-sort-join-copy-right";
+    "(sort-limit ?keys ?limit
+        (join ?type ?cond ?left ?right))" =>
+    "(sort-limit ?keys ?limit
+        (join ?type ?cond
+            ?left (sort ?keys ?right)))"
+    if sort_keys_from_right("?keys", "?left", "?right")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(sort: &Sort, join: &Join) -> bool {
+    sort.collation().field_collations().iter().any(|fc| {
+        let idx = fc.field_index();
+        let left_count = join.left().row_type().field_count();
+        idx < left_count || idx >= left_count
+    })
+}
+```
+
+**Restrictions:**
+- LIMIT/OFFSET are NOT copied (only the sort order)
+- The original Sort above the join is preserved
+- SortRemoveRule may remove the upper Sort if it becomes redundant
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    input_rows: f64,
+    enables_merge_join: bool,
+) -> f64 {
+    if enables_merge_join { 0.3 } else { 0.05 }
+}
+```
+
+**Typical benefit**: 5-40% when enabling merge join or index usage.
+
+## Test Cases
+
+```sql
+-- Positive: sort copied to enable merge join
+SELECT * FROM orders o
+JOIN customers c ON o.cust_id = c.id
+ORDER BY o.order_date LIMIT 100;
+-- Sort by order_date copied to orders input
+```
+
+```sql
+-- Positive: sort on join key enables merge join
+SELECT * FROM emp e
+JOIN dept d ON e.deptno = d.deptno
+ORDER BY e.deptno;
+-- Sort on deptno copied to both inputs
+```
+
+```sql
+-- Negative: sort references both sides
+SELECT * FROM emp e
+JOIN dept d ON e.deptno = d.deptno
+ORDER BY e.ename, d.dname;
+-- Cannot copy: references both inputs
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/SortJoinCopyRule.java (commit af6367d)

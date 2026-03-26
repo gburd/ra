@@ -1,0 +1,45 @@
+---
+id: drill-dynamic-udf-optimization
+name: Dynamic UDF Optimization (Drill)
+category: database-specific/drill
+databases: [drill]
+execution_models: [volcano, vectorized, push-based]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+---
+
+# Dynamic UDF Optimization (Drill)
+
+## Metadata
+- **Rule ID**: `drill-dynamic-udf`
+- **Category**: Database-Specific / Drill
+- **Source**: Apache Drill
+
+## Description
+
+Drill uses Janino (Java compiler) to generate optimized bytecode for UDFs at runtime, avoiding interpretation overhead.
+
+## Implementation Pattern
+
+```java
+// Drill code generation
+public class DrillUDFCompiler {
+    public CompiledFunction compile(UDF udf) {
+        // Generate Java source for UDF
+        String source = generateUDFSource(udf);
+
+        // Compile to bytecode at runtime
+        ClassLoader loader = new SimpleCompiler().compile(source);
+
+        // Return compiled function
+        return loader.loadClass("GeneratedUDF").newInstance();
+    }
+}
+```
+
+## Tags
+`database-specific`, `drill`, `udf`, `code-generation`, `jit`

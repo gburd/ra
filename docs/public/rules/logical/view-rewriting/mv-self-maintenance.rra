@@ -1,0 +1,104 @@
+---
+id: mv-self-maintenance
+name: Self-Maintainable Materialized View
+category: logical/view-rewriting
+databases: [oracle, postgresql, mssql]
+version: "1.0.0"
+authors: ["Tompa & Blakeley"]
+tags: [logical, materialized-view, self-maintenance, autonomy]
+complexity: O(delta)
+benefit_range: [0.3, 0.9]
+---
+
+# Self-Maintainable Materialized View
+
+## Description
+
+A materialized view is self-maintainable with respect to a base table if
+it can be incrementally maintained using only the view contents and the
+delta, without accessing other base tables. This is the ideal case for
+incremental maintenance: no extra I/O to fetch base tables.
+
+**When to apply**: The view definition allows delta propagation using
+only the view state and the change set.
+
+## Relational Algebra
+
+```latex
+-- Self-maintainable for INSERT on R:
+-- V = pi[R.a, S.b](R JOIN S ON R.id = S.rid)
+-- delta_R = {new rows}
+-- Need to join delta_R with S, but S not in V...
+-- NOT self-maintainable for R inserts (needs S)
+
+-- Self-maintainable for DELETE on R:
+-- V contains R.a, can identify rows to remove
+-- V = sigma[x > 10](R)
+-- DELETE rows from R where x > 10: just remove matching V rows
+
+```
+
+## Implementation
+
+```rust
+fn is_self_maintainable(
+    view: &ViewDefinition,
+    table: &TableRef,
+    op: DeltaOp,
+) -> bool {
+    match op {
+        DeltaOp::Insert => {
+            // For inserts, check if all joined tables are
+            // represented in view columns
+            view.all_join_keys_in_output(table)
+        }
+        DeltaOp::Delete => {
+            // For deletes, check if view contains the
+            // primary key of the affected table
+            view.contains_key_of(table)
+        }
+        DeltaOp::Update => {
+            // Updates = delete old + insert new
+            view.contains_key_of(table)
+                && view.all_join_keys_in_output(table)
+        }
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(view: &MaterializedView, delta: &Delta) -> bool {
+    is_self_maintainable(&view.definition(), &delta.table(), delta.op())
+}
+```
+
+## Cost Model
+
+```rust
+fn estimated_benefit(delta_size: f64, base_table_access_cost: f64) -> f64 {
+    // Saves the cost of accessing other base tables
+    base_table_access_cost
+}
+```
+
+## Test Cases
+
+```sql
+-- Self-maintainable: single-table view
+CREATE MATERIALIZED VIEW active_users AS
+SELECT * FROM users WHERE active = true;
+-- INSERT/DELETE on users: self-maintainable (no other tables needed)
+
+-- NOT self-maintainable: join view for inserts
+CREATE MATERIALIZED VIEW order_summary AS
+SELECT o.id, c.name FROM orders o JOIN customers c ON o.cust_id = c.id;
+-- INSERT into orders needs to look up customers (not self-maintainable)
+-- DELETE from orders: self-maintainable (have o.id in view)
+```
+
+## References
+
+- Tompa, F.W. & Blakeley, J.A., "Maintaining Materialized Views without Accessing Base Relations", Information Systems, 1988
+- Quass, D. et al., "Making Views Self-Maintainable for Data Warehousing", PDIS 1996

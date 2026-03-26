@@ -1,0 +1,146 @@
+---
+id: calcite-project-join-remove
+name: Calcite ProjectJoinRemoveRule
+category: logical/join-elimination
+databases: [calcite, postgresql, mysql, oracle]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [logical, calcite, project, join, elimination, unique-keys]
+complexity: O(n)
+benefit_range: [0.3, 0.9]
+---
+
+# Calcite ProjectJoinRemoveRule
+
+## Description
+
+Removes a join when a projection above it only references columns
+from the preserved side of a left/right join, and the join keys on
+the non-preserved side are unique. Since the unique keys guarantee
+at most one match, the join neither duplicates nor filters rows.
+
+**When to apply**: A project sits on a left/right join, uses only
+columns from the preserved side, and the join condition references
+unique keys on the non-preserved side.
+
+**Why it works**: With unique keys on the non-preserved side, each
+row from the preserved side matches at most one row. Since the
+project discards all non-preserved columns, the join has no effect
+on the output.
+
+**Calcite class**: `org.apache.calcite.rel.rules.ProjectJoinRemoveRule`
+
+## Relational Algebra
+
+```latex
+-- Before: project over left join
+$$
+\pi_{R.a, R.b}(R LEFT JOIN S ON R.k = S.k)
+  \text{where} S.k is unique
+$$
+
+-- After: project without join
+$$
+\pi_{R.a, R.b}(R)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-project-join-remove-left";
+    "(project ?cols
+        (left-join ?cond ?left ?right))" =>
+    "(project ?cols ?left)"
+    if project_uses_only_left("?cols", "?left")
+    if right_join_keys_unique("?cond", "?right")
+),
+
+rw!("calcite-project-join-remove-right";
+    "(project ?cols
+        (right-join ?cond ?left ?right))" =>
+    "(project ?cols ?right)"
+    if project_uses_only_right("?cols", "?left", "?right")
+    if left_join_keys_unique("?cond", "?left")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    project: &Project,
+    join: &Join,
+) -> bool {
+    let (preserved, non_preserved) = match join.join_type() {
+        JoinType::Left => (join.left(), join.right()),
+        JoinType::Right => (join.right(), join.left()),
+        _ => return false,
+    };
+
+    let preserved_count = preserved.row_type().field_count();
+    let only_preserved = project.projects().iter()
+        .all(|expr| expr.references_within(0..preserved_count));
+
+    let join_keys = join.condition().extract_equi_keys();
+    let non_preserved_keys = join_keys.non_preserved_side();
+    let keys_unique = non_preserved
+        .unique_keys()
+        .any(|uk| uk.is_subset_of(&non_preserved_keys));
+
+    only_preserved && keys_unique
+}
+```
+
+**Restrictions:**
+- Join must be LEFT or RIGHT (not INNER or FULL)
+- Non-preserved join keys must form a unique key
+- All projected columns must come from the preserved side
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    left_rows: f64,
+    right_rows: f64,
+) -> f64 {
+    // Eliminates the entire join cost
+    let join_cost = left_rows * right_rows.log2();
+    join_cost / (join_cost + left_rows)
+}
+```
+
+**Typical benefit**: 30-90% by eliminating the join entirely.
+
+## Test Cases
+
+```sql
+-- Positive: project only left columns, right key is unique
+SELECT s.product_id
+FROM sales AS s
+LEFT JOIN product AS p ON s.product_id = p.product_id;
+-- p.product_id is PK; join removed
+```
+
+```sql
+-- Negative: project references right side
+SELECT s.product_id, p.name
+FROM sales AS s
+LEFT JOIN product AS p ON s.product_id = p.product_id;
+-- p.name is used; cannot remove join
+```
+
+```sql
+-- Negative: non-unique join key
+SELECT s.product_id
+FROM sales AS s
+LEFT JOIN order_items AS oi ON s.order_id = oi.order_id;
+-- oi.order_id is not unique; join may duplicate rows
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/ProjectJoinRemoveRule.java (commit af6367d)

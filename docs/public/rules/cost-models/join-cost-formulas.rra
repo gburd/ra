@@ -1,0 +1,536 @@
+---
+id: join-cost-formulas
+name: "General Join Cost Modeling"
+category: cost-models
+databases: [postgresql, mysql, duckdb, cockroachdb, mssql, oracle, clickhouse]
+execution_models: [volcano, vectorized, compiled]
+hardware: [cpu, memory, hdd, ssd, nvme]
+version: "1.0.0"
+authors: ["Selinger et al. (System R)", "Shapiro (Hash Join)", "Graefe (Survey)"]
+tags: [cost, join, hash-join, merge-join, nested-loop, cost-formulas, classic]
+complexity: "O(1) per estimate"
+benefit_range: [0.3, 10.0]
+---
+
+# General Join Cost Modeling
+
+## Description
+
+Unified cost formulas for the three fundamental join algorithms: nested-loop
+join, sort-merge join, and hash join. Each algorithm has distinct I/O, CPU,
+and memory characteristics. The optimizer selects the cheapest join method
+by evaluating all three formulas given the input statistics, available memory,
+and hardware profile.
+
+These formulas synthesize results from System R (1979, nested-loop and
+sort-merge), Shapiro (1986, hash join variants), and Graefe (1993,
+comprehensive survey). The key factors are:
+
+- **Input cardinalities**: |R| and |S| (rows), P_R and P_S (pages)
+- **Join selectivity**: fraction of cross product that satisfies the predicate
+- **Available memory**: M pages of buffer space
+- **Index availability**: B-tree or hash index on join columns
+- **Sort order**: whether inputs are pre-sorted on the join key
+
+**When to apply**: Every join operation in a cost-based optimizer. The
+optimizer evaluates all applicable join methods and selects the cheapest.
+
+**Why it works**: Different join algorithms dominate in different regimes.
+Hash join is optimal for in-memory equijoins, sort-merge when inputs are
+pre-sorted or the output order is useful, and nested-loop with index when
+one input is small and the other has an appropriate index.
+
+## Relational Algebra
+
+```latex
+$$
+Join cost decomposition:
+  C_total = C_io + C_cpu + C_memory
+$$
+
+$$
+For each algorithm:
+$$
+
+$$
+1. Nested-Loop Join (NLJ):
+   C_io(NLJ) = P_R + |R| * P_S                     (no index)
+   C_io(NLJ) = P_R + |R| * (h + F*P_S/|S|)         (with index, h=tree height)
+   C_cpu(NLJ) = |R| * |S| * c_compare               (no index)
+   C_cpu(NLJ) = |R| * (c_hash + F*|S|/D * c_compare) (with index)
+$$
+
+$$
+2. Sort-Merge Join (SMJ):
+   C_io(SMJ) = sort_io(R) + sort_io(S) + P_R + P_S
+   sort_io(X) = 0 if X sorted, else 2*P_X*ceil(log_M(P_X/M))
+   C_cpu(SMJ) = sort_cpu(R) + sort_cpu(S) + (|R| + |S|) * c_compare
+$$
+
+$$
+3. Hash Join (HJ):
+   C_io(HJ) = P_R + P_S                             (in-memory)
+   C_io(HJ) = 3*(P_R + P_S)                         (one-pass Grace)
+   C_io(HJ) = 2*(P_R + P_S)*ceil(log_M(P_R/M)) + P_R + P_S  (recursive)
+   C_cpu(HJ) = (|R| + |S|) * c_hash + |S| * c_probe
+$$
+
+$$
+Where:
+  F = \bowtie selectivity
+  D = number of distinct \bowtie key values
+  M = available memory pages
+  h = B-tree index height
+  c_compare = cost of one key comparison
+  c_hash = cost of one hash computation
+  c_probe = cost of one hash table probe
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+struct JoinCostEstimator {
+    seq_page_cost: f64,
+    random_page_cost: f64,
+    cpu_tuple_cost: f64,
+    cpu_operator_cost: f64,
+    hash_cost: f64,
+    buffer_pages: usize,
+}
+
+impl JoinCostEstimator {
+    fn for_postgresql() -> Self {
+        Self {
+            seq_page_cost: 1.0,
+            random_page_cost: 4.0,
+            cpu_tuple_cost: 0.01,
+            cpu_operator_cost: 0.0025,
+            hash_cost: 0.03,
+            buffer_pages: 131072, // 1GB / 8KB pages
+        }
+    }
+
+    fn nested_loop_cost(
+        &self,
+        outer: &RelationStats,
+        inner: &RelationStats,
+        index: Option<&IndexStats>,
+        join_selectivity: f64,
+    ) -> JoinCost {
+        let io = match index {
+            Some(idx) => {
+                // Index nested-loop: outer scan + index probes
+                let outer_io =
+                    outer.pages as f64 * self.seq_page_cost;
+                let per_probe = idx.height as f64
+                    * self.random_page_cost;
+                let matches_per_probe = join_selectivity
+                    * inner.rows as f64;
+                let heap_io = if idx.is_clustered {
+                    matches_per_probe
+                        / inner.rows_per_page()
+                        * self.seq_page_cost
+                } else {
+                    matches_per_probe * self.random_page_cost
+                };
+                outer_io
+                    + outer.rows as f64 * (per_probe + heap_io)
+            }
+            None => {
+                // Simple NLJ: full scan of inner per outer tuple
+                // With block NLJ optimization
+                let outer_io =
+                    outer.pages as f64 * self.seq_page_cost;
+                let inner_scans = (outer.pages as f64
+                    / self.buffer_pages as f64)
+                    .ceil();
+                let inner_io = inner_scans
+                    * inner.pages as f64
+                    * self.seq_page_cost;
+                outer_io + inner_io
+            }
+        };
+
+        let cpu = outer.rows as f64
+            * join_selectivity
+            * inner.rows as f64
+            * self.cpu_operator_cost
+            + (outer.rows + inner.rows) as f64
+                * self.cpu_tuple_cost;
+
+        JoinCost {
+            io,
+            cpu,
+            memory: 0.0, // NLJ uses minimal memory
+            total: io + cpu,
+            output_sorted: false,
+            algorithm: JoinAlgorithm::NestedLoop,
+        }
+    }
+
+    fn sort_merge_cost(
+        &self,
+        left: &RelationStats,
+        right: &RelationStats,
+        left_sorted: bool,
+        right_sorted: bool,
+    ) -> JoinCost {
+        // Sort costs
+        let sort_left = if left_sorted {
+            0.0
+        } else {
+            self.sort_cost(left.pages, left.rows)
+        };
+        let sort_right = if right_sorted {
+            0.0
+        } else {
+            self.sort_cost(right.pages, right.rows)
+        };
+
+        // Merge cost: single sequential pass over both
+        let merge_io = (left.pages + right.pages) as f64
+            * self.seq_page_cost;
+        let merge_cpu = (left.rows + right.rows) as f64
+            * self.cpu_operator_cost;
+
+        let total_io = sort_left + sort_right + merge_io;
+        let total_cpu = merge_cpu
+            + if !left_sorted {
+                left.rows as f64
+                    * (left.rows as f64).log2()
+                    * self.cpu_operator_cost
+            } else {
+                0.0
+            }
+            + if !right_sorted {
+                right.rows as f64
+                    * (right.rows as f64).log2()
+                    * self.cpu_operator_cost
+            } else {
+                0.0
+            };
+
+        JoinCost {
+            io: total_io,
+            cpu: total_cpu,
+            memory: self.sort_memory(left.pages, right.pages),
+            total: total_io + total_cpu,
+            output_sorted: true,
+            algorithm: JoinAlgorithm::SortMerge,
+        }
+    }
+
+    fn hash_join_cost(
+        &self,
+        build: &RelationStats,
+        probe: &RelationStats,
+    ) -> JoinCost {
+        let build_pages = build.pages as f64;
+        let probe_pages = probe.pages as f64;
+        let m = self.buffer_pages as f64;
+
+        let (io, variant) = if build_pages <= m {
+            // In-memory hash join
+            let io = (build_pages + probe_pages)
+                * self.seq_page_cost;
+            (io, "in-memory")
+        } else if build_pages <= m * m {
+            // One-pass (Grace) hash join
+            // Partition: write build + probe to disk
+            // Probe: read build + probe from disk
+            let partition_io = 2.0
+                * (build_pages + probe_pages)
+                * self.seq_page_cost;
+            let probe_io = (build_pages + probe_pages)
+                * self.seq_page_cost;
+            (partition_io + probe_io, "grace")
+        } else {
+            // Recursive partitioning
+            let passes = ((build_pages / m).log2()
+                / (m - 1.0).log2())
+            .ceil()
+            .max(1.0);
+            let io = 2.0
+                * (build_pages + probe_pages)
+                * passes
+                * self.seq_page_cost
+                + (build_pages + probe_pages)
+                    * self.seq_page_cost;
+            (io, "recursive")
+        };
+
+        // CPU: hash build tuples + hash and probe all probe tuples
+        let cpu = build.rows as f64 * self.hash_cost
+            + probe.rows as f64
+                * (self.hash_cost + self.cpu_operator_cost);
+
+        // Memory: hash table for build side
+        let memory_bytes = build.rows as f64 * 100.0; // ~100 bytes per entry
+
+        JoinCost {
+            io,
+            cpu,
+            memory: memory_bytes,
+            total: io + cpu,
+            output_sorted: false,
+            algorithm: JoinAlgorithm::Hash,
+        }
+    }
+
+    fn select_best_join(
+        &self,
+        left: &RelationStats,
+        right: &RelationStats,
+        join_selectivity: f64,
+        left_sorted: bool,
+        right_sorted: bool,
+        inner_index: Option<&IndexStats>,
+        interesting_order: bool,
+    ) -> JoinCost {
+        let mut candidates = Vec::new();
+
+        // NLJ: try both orientations
+        candidates.push(self.nested_loop_cost(
+            left, right, inner_index, join_selectivity,
+        ));
+        candidates.push(self.nested_loop_cost(
+            right, left, None, join_selectivity,
+        ));
+
+        // Sort-merge join
+        let mut smj = self.sort_merge_cost(
+            left, right, left_sorted, right_sorted,
+        );
+        if interesting_order {
+            // Discount: sorted output avoids downstream sort
+            smj.total *= 0.8;
+        }
+        candidates.push(smj);
+
+        // Hash join: build on smaller side
+        let (build, probe) = if left.rows < right.rows {
+            (left, right)
+        } else {
+            (right, left)
+        };
+        candidates.push(self.hash_join_cost(build, probe));
+
+        candidates
+            .into_iter()
+            .min_by(|a, b| a.total.partial_cmp(&b.total).unwrap())
+            .unwrap()
+    }
+
+    fn sort_cost(&self, pages: usize, rows: usize) -> f64 {
+        let p = pages as f64;
+        let m = self.buffer_pages as f64;
+        if p <= m {
+            2.0 * p * self.seq_page_cost
+        } else {
+            let passes =
+                ((p / m).log2() / (m - 1.0).log2()).ceil() + 1.0;
+            2.0 * p * passes * self.seq_page_cost
+        }
+    }
+
+    fn sort_memory(&self, left_pages: usize, right_pages: usize) -> f64 {
+        // Sort needs buffer for merge
+        (left_pages.min(right_pages) as f64) * 8192.0
+    }
+}
+
+#[derive(Clone, Debug)]
+struct JoinCost {
+    io: f64,
+    cpu: f64,
+    memory: f64,
+    total: f64,
+    output_sorted: bool,
+    algorithm: JoinAlgorithm,
+}
+
+#[derive(Clone, Debug)]
+enum JoinAlgorithm {
+    NestedLoop,
+    SortMerge,
+    Hash,
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    hw: &HardwareProfile,
+) -> bool {
+    // Always applicable for join cost estimation
+    stats.has_join_operation
+        && stats.has_cardinality_estimates
+}
+```
+
+**Restrictions:**
+- Hash join requires equijoin predicate (non-equi uses NLJ)
+- Sort-merge join requires sortable join key (comparable type)
+- Memory estimates are approximate (hash table overhead varies)
+- Does not model parallel join variants (intra-operator parallelism)
+- Skew in join keys can invalidate uniform-distribution assumptions
+
+## Cost Model
+
+```rust
+fn join_method_crossover(
+    stats: &Statistics,
+    hw: &HardwareProfile,
+) -> JoinMethodRegions {
+    let m = hw.available_memory_pages as f64;
+
+    // NLJ with index wins when: outer is small AND good index exists
+    let nlj_index_threshold =
+        m / stats.index_probe_cost;
+
+    // Hash join wins when: build fits in memory
+    let hash_in_memory_threshold = m;
+
+    // Sort-merge wins when: inputs pre-sorted OR output order needed
+    // Otherwise hash join dominates for equijoins
+
+    JoinMethodRegions {
+        nlj_index_max_outer_rows: nlj_index_threshold,
+        hash_max_build_pages: hash_in_memory_threshold,
+        sort_merge_preferred_when_sorted: true,
+    }
+}
+```
+
+**Crossover points (typical HDD system):**
+- NLJ with index: outer < 1000 rows, good index on inner
+- Hash join: build side < available memory (dominant equijoin method)
+- Sort-merge: inputs pre-sorted, or output order needed downstream
+- NLJ without index: almost never optimal (fallback for non-equi)
+
+**Crossover points (SSD/NVMe):**
+- NLJ with index threshold increases (random I/O cheaper)
+- Hash join dominant for larger range
+- Sort-merge less often needed (sort is expensive, less I/O benefit)
+
+## Test Cases
+
+### Positive: Hash join dominates for in-memory equijoin
+
+```sql
+-- customers: 100K rows (10K pages), orders: 1M rows (100K pages)
+-- Memory: 20K pages (build fits)
+SELECT * FROM orders o JOIN customers c ON o.cust_id = c.id;
+
+-- NLJ (no index): 10K + 100K*(100K/20K) = 510K I/O
+-- NLJ (index, h=3): 10K + 100K*(3*4.0 + 1*4.0) = 10K + 1.6M = 1.61M
+-- Sort-merge: sort(100K) + sort(10K) + 100K + 10K ~ 510K
+-- Hash join (in-mem): 10K + 100K = 110K I/O  *** WINNER ***
+```
+
+### Positive: Sort-merge wins when inputs are pre-sorted
+
+```sql
+-- Clustered index on both tables' join columns
+-- orders sorted on cust_id, customers sorted on id
+SELECT * FROM orders o JOIN customers c ON o.cust_id = c.id
+ORDER BY o.cust_id;
+
+-- Sort-merge: 0 + 0 + 100K + 10K = 110K I/O (already sorted!)
+-- Hash join: 10K + 100K = 110K I/O (same I/O but no output order)
+-- Sort-merge wins: same cost but provides ORDER BY for free
+```
+
+### Positive: Index NLJ wins for small outer
+
+```sql
+-- Lookup pattern: 10 department IDs, index on employees.dept_id
+SELECT * FROM departments d
+JOIN employees e ON d.id = e.dept_id
+WHERE d.region = 'West';
+
+-- After filter: ~3 departments
+-- NLJ with index: 1 + 3*(3 + 100) = 310 I/O  *** WINNER ***
+-- Hash join: 1 + 10K = 10,001 I/O
+-- Sort-merge: sort(10K) + 1 + 10K ~ 30K I/O
+```
+
+### Positive: Grace hash join for large inputs
+
+```sql
+-- Both tables large, no useful indexes, memory = 20K pages
+-- lineitem: 600K pages, orders: 100K pages
+SELECT * FROM lineitem l JOIN orders o ON l.orderkey = o.orderkey;
+
+-- NLJ: 100K + 1.5M * 600K = way too much
+-- Sort-merge: sort(600K) + sort(100K) + 700K ~ 2.5M
+-- Grace hash: 3 * (100K + 600K) = 2.1M  *** WINNER ***
+```
+
+### Negative: Non-equijoin forces NLJ
+
+```sql
+-- Theta join: no hash join or sort-merge applicable
+SELECT * FROM events e1
+JOIN events e2 ON e1.end_time < e2.start_time
+WHERE e1.type = 'setup' AND e2.type = 'teardown';
+
+-- Only NLJ is applicable for inequality predicates
+-- Optimization: filter both sides first to minimize cross product
+```
+
+### Positive: Multi-way join cost propagation
+
+```sql
+-- Three-way join: A(10K) join B(1M) join C(100K)
+SELECT * FROM A JOIN B ON A.id = B.a_id
+              JOIN C ON B.c_id = C.id;
+
+-- Order 1: (A join B) join C
+--   A join B: hash, cost 110K. Output: ~1M rows
+--   Result join C: hash, cost 110K. Total: 220K
+
+-- Order 2: (B join C) join A
+--   B join C: hash, cost 110K. Output: ~1M rows
+--   Result join A: hash, cost 110K. Total: 220K
+
+-- Order 3: (A join C) via B (if applicable)
+--   Depends on join graph connectivity
+```
+
+## References
+
+**Original formulas:**
+- Selinger, P. Griffiths, et al., "Access Path Selection in a Relational Database Management System", ACM SIGMOD 1979
+  - DOI: 10.1145/582095.582099
+  - NLJ and sort-merge cost formulas
+
+- Shapiro, L.D., "Join Processing in Database Systems with Large Main Memories", ACM TODS 1986
+  - DOI: 10.1145/5274.5275
+  - Hash join variants (simple, Grace, hybrid, recursive)
+
+**Comprehensive survey:**
+- Graefe, G., "Query Evaluation Techniques for Large Databases", ACM Computing Surveys 1993
+  - DOI: 10.1145/152610.152611
+  - Section 7: Join algorithms and their cost formulas
+
+**Modern analysis:**
+- Leis, V., et al., "How Good Are Query Optimizers, Really?", VLDB 2015
+  - DOI: 10.14778/2850583.2850594
+  - Empirical evaluation of join cost estimation accuracy
+
+- Balkesen, C., et al., "Multi-Core, Main-Memory Joins: Sort vs. Hash Revisited", VLDB 2013
+  - DOI: 10.14778/2732219.2732227
+  - Modern hardware crossover points for sort vs. hash
+
+**Implementation in databases:**
+- PostgreSQL: `src/backend/optimizer/path/costsize.c`
+  - `cost_nestloop()`, `cost_mergejoin()`, `cost_hashjoin()`
+- DuckDB: `src/optimizer/join_order/join_node.cpp`
+- CockroachDB: `pkg/sql/opt/memo/cost.go`

@@ -1,0 +1,118 @@
+---
+id: derby-transitive-closure
+name: Apache Derby Transitive Closure of Join Predicates
+category: database-specific/derby
+databases: [derby]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, derby, transitive-closure, predicate, join]
+complexity: O(1)
+benefit_range: [0.1, 0.5]
+---
+
+# Apache Derby Transitive Closure of Join Predicates
+
+## Description
+
+Derby's optimizer derives new predicates via transitive closure of
+equi-join conditions and constant constraints.  If `A.x = B.y`
+and `B.y = 10`, Derby infers `A.x = 10` and pushes the derived
+predicate down to the scan of table A.  This reduces the number of
+rows read from A before the join.
+
+**When to apply**: An equi-join connects two columns, and one side
+has a constant equality or range constraint.
+
+**Why it works**: The derived predicate allows Derby to use an index
+on table A or at least reduce the scan output before the join.
+Without transitive closure, A would be scanned fully and filtered
+only after joining with B.
+
+**Database version**: Apache Derby 10.1+
+
+## Relational Algebra
+
+```latex
+-- Before: filter on B only
+$$
+\sigma_{B.y = 10}(A \bowtie_{A.x = B.y} B)
+$$
+
+-- After: transitive closure adds filter on A
+$$
+\sigma_{A.x = 10}(A) \bowtie_{A.x = B.y} \sigma_{B.y = 10}(B)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("derby-transitive-closure";
+    "(filter (= ?b_col ?const)
+        (join (= ?a_col ?b_col) ?rel_a ?rel_b))" =>
+    "(join (= ?a_col ?b_col)
+        (filter (= ?a_col ?const) ?rel_a)
+        (filter (= ?b_col ?const) ?rel_b))"
+    if is_database("derby")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    join_pred: &Predicate,
+    filter_pred: &Predicate,
+) -> bool {
+    join_pred.is_equi_join()
+    && filter_pred.is_constant_equality()
+    && join_pred.references_column(
+        filter_pred.constrained_column()
+    )
+}
+```
+
+**Restrictions:**
+- Only applies to equi-join conditions (equality)
+- The constant must be a literal or parameter, not a subquery
+- Derby applies this in the preprocess phase before join ordering
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    table_a_rows: f64,
+    selectivity: f64,
+) -> f64 {
+    // Rows eliminated from table A by the derived predicate
+    table_a_rows * (1.0 - selectivity)
+}
+```
+
+**Typical benefit**: 20-80% row reduction on the previously
+unfiltered side of the join.
+
+## Test Cases
+
+```sql
+-- Positive: constant propagates through equi-join
+SELECT * FROM orders o
+JOIN customers c ON o.cust_id = c.id
+WHERE c.id = 42;
+-- Derby infers o.cust_id = 42, uses index on orders(cust_id)
+```
+
+```sql
+-- Negative: non-equality join condition
+SELECT * FROM a JOIN b ON a.x > b.y WHERE b.y = 10;
+-- Transitive closure does not apply to inequality joins
+```
+
+## References
+
+Apache Derby: "Derby Optimizer" documentation
+Source: org.apache.derby.impl.sql.compile.PredicateList
+Source: `pushTransitivePredicates()` in optimizer

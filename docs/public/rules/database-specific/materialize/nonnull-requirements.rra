@@ -1,0 +1,113 @@
+---
+id: materialize-nonnull-requirements
+name: Materialize NonNull Requirements
+category: database-specific/materialize
+databases: [materialize]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, materialize, nonnull, filter, outer-join, simplification]
+complexity: O(n)
+benefit_range: [0.1, 0.5]
+---
+
+# Materialize NonNull Requirements
+
+## Description
+
+Propagates non-null requirements upward through the plan to simplify
+outer joins into inner joins.  When a filter above a LEFT JOIN requires
+that a column from the nullable side is NOT NULL, the outer join can be
+converted to an inner join because NULL-extended rows would be
+eliminated anyway.
+
+**When to apply**: A filter above an outer join tests a column from the
+nullable side for non-nullness (explicitly or implicitly through
+comparison operators).
+
+**Why it works**: In differential dataflow, outer joins are more
+expensive than inner joins because they must track which keys on the
+preserved side have no match and emit NULL-padded rows.  Converting to
+an inner join eliminates this bookkeeping.
+
+**Database version**: Materialize 0.20+
+
+## Relational Algebra
+
+```latex
+-- Before: left join with non-null filter on right
+$$
+\sigma_{S.x > 10}(R left-\bowtie_{R.k = S.k} S)
+$$
+
+-- After: inner join (S.x > 10 implies S.x IS NOT NULL)
+$$
+\sigma_{S.x > 10}(R inner-\bowtie_{R.k = S.k} S)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("materialize-outer-to-inner-nonnull";
+    "(filter ?pred (left-join ?cond ?left ?right))" =>
+    "(filter ?pred (join inner ?cond ?left ?right))"
+    if is_database("materialize")
+    if requires_nonnull_from("?pred", "?right")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(pred: &Expr, nullable_side: &RelExpr) -> bool {
+    let nonnull_cols = pred.nonnull_requirements();
+    let nullable_cols = nullable_side.schema().columns();
+    nonnull_cols.iter().any(|c| nullable_cols.contains(c))
+}
+```
+
+**Restrictions:**
+- IS NULL predicates do not create non-null requirements
+- OR predicates create non-null requirements only if all branches do
+- COALESCE masks nullability and prevents the optimization
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    rows: f64,
+    updates_per_sec: f64,
+) -> f64 {
+    // Avoid outer-join null-padding logic and state
+    rows * 0.001 + updates_per_sec * 0.005
+}
+```
+
+**Typical benefit**: Inner joins are 10-30% cheaper than outer joins
+in differential dataflow due to simpler state maintenance.
+
+## Test Cases
+
+```sql
+-- Positive: implicit NOT NULL from comparison
+SELECT o.id, p.name
+FROM orders o LEFT JOIN products p ON o.product_id = p.id
+WHERE p.price > 100;
+-- p.price > 100 implies p.price IS NOT NULL -> inner join
+```
+
+```sql
+-- Negative: IS NULL check preserves outer join semantics
+SELECT o.id, p.name
+FROM orders o LEFT JOIN products p ON o.product_id = p.id
+WHERE p.id IS NULL;
+-- Checking for unmatched rows; must remain LEFT JOIN
+```
+
+## References
+
+Materialize: src/transform/src/nonnull_requirements.rs
+Materialize: src/transform/src/join_implementation.rs

@@ -1,0 +1,118 @@
+---
+id: calcite-join-condition-push
+name: Calcite JoinConditionPushRule
+category: database-specific/calcite
+databases: [calcite]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, calcite, join, condition, pushdown]
+complexity: O(n)
+benefit_range: [0.1, 0.6]
+---
+
+# Calcite JoinConditionPushRule
+
+## Description
+
+Decomposes a join condition and pushes conjuncts that reference
+only one side of the join into filters below the join. This is
+the counterpart to `FilterJoinRule`: while FilterJoinRule pushes
+filters from above into the join, this rule pushes conditions
+already in the join clause down to the appropriate input.
+
+**When to apply**: A join condition contains conjuncts that
+reference columns from only one side.
+
+**Why it works**: Filtering before the join reduces the number
+of rows entering the join, decreasing both probe time and
+intermediate result size.
+
+**Calcite class**: `org.apache.calcite.rel.rules.JoinPushExpressionsRule`
+
+## Relational Algebra
+
+```latex
+-- Before: join with mixed conditions
+$$
+R \bowtie_{R.a = S.b AND R.x > 10} S
+$$
+
+-- After: single-side condition pushed to filter
+$$
+(\sigma_{x > 10}(R)) \bowtie_{R.a = S.b} S
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-join-condition-push-left";
+    "(join ?type (and ?equi ?left_pred) ?left ?right)" =>
+    "(join ?type ?equi (filter ?left_pred ?left) ?right)"
+    if references_only("?left_pred", "?left")
+),
+
+rw!("calcite-join-condition-push-right";
+    "(join ?type (and ?equi ?right_pred) ?left ?right)" =>
+    "(join ?type ?equi ?left (filter ?right_pred ?right))"
+    if references_only("?right_pred", "?right")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    conjunct: &Expr,
+    left_cols: &[Column],
+    right_cols: &[Column],
+) -> bool {
+    let refs = conjunct.referenced_columns();
+    let left_only = refs.iter().all(|c| left_cols.contains(c));
+    let right_only = refs.iter()
+        .all(|c| right_cols.contains(c));
+    left_only || right_only
+}
+```
+
+**Restrictions:**
+- Only single-side conjuncts can be pushed
+- Cross-side conditions remain as join conditions
+- Outer join semantics must be respected (cannot push below
+  null-generating side)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    input_rows: f64,
+    selectivity: f64,
+) -> f64 {
+    input_rows * (1.0 - selectivity) * 0.01
+}
+```
+
+**Typical benefit**: 10-60% depending on conjunct selectivity.
+
+## Test Cases
+
+```sql
+-- Positive: push single-side condition from join clause
+SELECT * FROM emp e
+JOIN dept d ON e.deptno = d.deptno AND e.sal > 5000;
+-- e.sal > 5000 pushed to filter on emp
+```
+
+```sql
+-- Negative: cross-side condition stays
+SELECT * FROM emp e
+JOIN dept d ON e.deptno = d.deptno AND e.sal > d.budget;
+-- e.sal > d.budget references both sides, stays in join
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/JoinPushExpressionsRule.java

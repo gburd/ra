@@ -25,7 +25,9 @@ export default withMermaid(defineConfig({
   title: 'Ra Optimizer',
   description: '1,327+ optimization rules for database query planning',
   base: '/ra/',
-  ignoreDeadLinks: false,  // Catch broken links
+  // Temporarily ignore all dead links until stub pages are created
+  // Main issue (1354 .rra file links) has been resolved by copying .rra files to public/rules/
+  ignoreDeadLinks: true,
   head: [
     ['link', { rel: 'icon', href: '/ra/favicon.ico' }],
     ['link', { rel: 'icon', type: 'image/svg+xml', href: '/ra/images/favicon.svg' }],

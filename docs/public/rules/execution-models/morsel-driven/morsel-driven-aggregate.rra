@@ -1,0 +1,264 @@
+---
+id: morsel-driven-aggregate
+name: Morsel-Driven Parallel Aggregation
+category: execution-models
+version: 1.0.0
+databases: [HyPer, DuckDB, Umbra]
+authors: [Viktor Leis, Thomas Neumann]
+tags: [execution, parallel, morsel, aggregation, thread-local, merge]
+standard: HyPer morsel model
+---
+
+# Morsel-Driven Parallel Aggregation
+
+## Description
+
+Morsel-driven aggregation uses thread-local hash tables to avoid synchronization during the accumulation phase. Each worker maintains its own private hash table and processes morsels independently. After all morsels are consumed, the thread-local hash tables are merged into a single result. This approach eliminates contention entirely during the main aggregation loop, at the cost of a final merge step.
+
+**Strategies by cardinality:**
+1. **Low cardinality (< 256 groups)**: Thread-local arrays, SIMD merge
+2. **Medium cardinality (< 100K groups)**: Thread-local hash tables, merge
+3. **High cardinality (> 100K groups)**: Pre-partitioned aggregation
+4. **No GROUP BY**: Thread-local accumulators, atomic merge
+
+**Key characteristics:**
+- **Zero contention**: Thread-local hash tables, no shared writes
+- **Two-phase**: Accumulate locally, then merge globally
+- **Cache-friendly**: Thread-local HTs fit in per-core cache
+- **Merge cost proportional to groups, not input rows**
+
+**Trade-offs:**
+- Memory: N workers x hash table size
+- Merge step is sequential (but typically fast for few groups)
+- High-cardinality groups increase merge cost
+
+## Relational Algebra
+
+```
+MorselAggregate(input, group_keys, agg_funcs):
+
+Phase 1: Parallel local aggregation (no synchronization)
+  thread_local ht[worker_id] = HashMap::new()
+
+  parallel_for morsel in input.morsels():
+    for row in morsel:
+      key = hash(row.group_keys)
+      entry = ht[my_worker_id].find_or_create(key)
+      entry.update(row)  // SUM += val, COUNT += 1, etc.
+
+Phase 2: Merge thread-local hash tables
+  result_ht = ht[0]
+  for i in 1..num_workers:
+    for (key, agg) in ht[i]:
+      result_ht[key].merge(agg)  // Combine aggregates
+
+  return result_ht.entries()
+```
+
+## Implementation
+
+```rust
+use std::sync::Arc;
+use std::collections::HashMap;
+
+/// Morsel-driven parallel aggregation
+pub struct MorselDrivenAggregate {
+    source: MorselSource,
+    group_keys: Vec<ColumnId>,
+    agg_funcs: Vec<AggFunc>,
+    num_workers: usize,
+}
+
+impl MorselDrivenAggregate {
+    pub fn execute(&self) -> Result<Vec<Batch>> {
+        // Phase 1: Parallel aggregation with thread-local state
+        let source = Arc::new(self.source.clone());
+
+        let local_results: Vec<_> = (0..self.num_workers)
+            .into_par_iter()
+            .map(|worker_id| {
+                let mut local_ht: HashMap<GroupKey, AggState> =
+                    HashMap::new();
+
+                while let Some(morsel) = source.next_morsel() {
+                    for row_idx in 0..morsel.size() {
+                        // Extract group key
+                        let key = GroupKey::from_row(
+                            &morsel, row_idx, &self.group_keys,
+                        );
+
+                        // Find or create entry (thread-local, no sync)
+                        let entry = local_ht.entry(key)
+                            .or_insert_with(|| {
+                                AggState::new(&self.agg_funcs)
+                            });
+
+                        // Update aggregates
+                        for (i, func) in self.agg_funcs.iter().enumerate() {
+                            let val = morsel.get(row_idx, func.column);
+                            entry.update(i, func.func_type, val);
+                        }
+                    }
+                }
+
+                local_ht
+            })
+            .collect();
+
+        // Phase 2: Merge thread-local hash tables
+        let mut merged = local_results.into_iter().next().unwrap();
+        for local_ht in local_results.into_iter().skip(1) {
+            for (key, agg_state) in local_ht {
+                merged.entry(key)
+                    .and_modify(|existing| existing.merge(&agg_state))
+                    .or_insert(agg_state);
+            }
+        }
+
+        // Phase 3: Produce result batches
+        let mut results = Vec::new();
+        let mut batch = Batch::new(DEFAULT_BATCH_SIZE);
+        for (key, state) in &merged {
+            batch.append_row(key, &state.finalize(&self.agg_funcs));
+            if batch.is_full() {
+                results.push(batch);
+                batch = Batch::new(DEFAULT_BATCH_SIZE);
+            }
+        }
+        if batch.size > 0 {
+            results.push(batch);
+        }
+
+        Ok(results)
+    }
+}
+
+/// Thread-local aggregate state
+pub struct AggState {
+    values: Vec<AggValue>,
+}
+
+impl AggState {
+    pub fn update(&mut self, idx: usize, func: AggType, val: Value) {
+        match func {
+            AggType::Sum => self.values[idx].sum += val.as_f64(),
+            AggType::Count => self.values[idx].count += 1,
+            AggType::Min => {
+                if val < self.values[idx].min {
+                    self.values[idx].min = val;
+                }
+            }
+            AggType::Max => {
+                if val > self.values[idx].max {
+                    self.values[idx].max = val;
+                }
+            }
+            AggType::Avg => {
+                self.values[idx].sum += val.as_f64();
+                self.values[idx].count += 1;
+            }
+        }
+    }
+
+    /// Merge another thread's aggregate state into this one
+    pub fn merge(&mut self, other: &AggState) {
+        for (i, other_val) in other.values.iter().enumerate() {
+            self.values[i].sum += other_val.sum;
+            self.values[i].count += other_val.count;
+            if other_val.min < self.values[i].min {
+                self.values[i].min = other_val.min.clone();
+            }
+            if other_val.max > self.values[i].max {
+                self.values[i].max = other_val.max.clone();
+            }
+        }
+    }
+}
+
+/// Cost model for parallel aggregation
+pub fn parallel_aggregate_cost(
+    input_rows: f64,
+    num_groups: f64,
+    num_workers: usize,
+    num_agg_funcs: usize,
+) -> f64 {
+    // Phase 1: Parallel local aggregation
+    let per_row_cost = 0.00008; // Hash + HT probe + update
+    let local_agg_cost = input_rows * per_row_cost
+        / num_workers as f64;
+
+    // Phase 2: Merge
+    let per_group_merge = 0.0001 * num_agg_funcs as f64;
+    let merge_cost = num_groups * per_group_merge
+        * (num_workers as f64 - 1.0);
+
+    // Memory overhead for thread-local HTs
+    let ht_overhead = num_workers as f64 * num_groups * 0.00001;
+
+    local_agg_cost + merge_cost + ht_overhead
+}
+```
+
+## Cost Model
+
+**Phase 1 (Parallel Local Aggregation):**
+- Per-row: hash + HT probe + aggregate update (~80 ns)
+- Perfect scaling: `input_rows x 80ns / num_workers`
+- No contention: each worker has private hash table
+- Cache: thread-local HT fits in L2 for low-cardinality groups
+
+**Phase 2 (Merge):**
+- Per-group per-worker: ~100 ns (hash lookup + aggregate merge)
+- Total: `num_groups x (num_workers - 1) x 100ns`
+- Usually fast: merge cost << accumulation cost (groups << rows)
+- Can be parallelized for very high cardinality
+
+**Memory:**
+- Thread-local HTs: `num_workers x num_groups x entry_size`
+- Typical entry: 48-128 bytes (key + agg state + HT overhead)
+- 16 workers x 10K groups x 64 bytes = ~10 MB total
+
+**Break-even:**
+- Merge overhead negligible when: `num_groups << input_rows / num_workers`
+- Pre-partitioned approach better when: `num_groups > 100K`
+
+## Test Cases
+
+```sql
+-- Test 1: Low-cardinality GROUP BY
+SELECT status, COUNT(*), SUM(amount)
+FROM orders GROUP BY status;
+-- ~5 groups: thread-local arrays, fast merge
+-- Expected: near-linear speedup, merge takes microseconds
+
+-- Test 2: Medium-cardinality GROUP BY
+SELECT customer_id, SUM(order_total)
+FROM orders GROUP BY customer_id;
+-- ~100K customers: thread-local hash tables
+-- Merge: ~100K entries x 16 workers x 100ns = ~160ms
+
+-- Test 3: No GROUP BY (simple aggregation)
+SELECT COUNT(*), SUM(revenue), AVG(revenue) FROM sales;
+-- Thread-local: 3 accumulators per worker
+-- Merge: combine 16 workers' accumulators (microseconds)
+
+-- Test 4: High-cardinality with HAVING
+SELECT product_id, COUNT(*) AS cnt
+FROM clicks GROUP BY product_id HAVING COUNT(*) > 100;
+-- ~1M groups: consider pre-partitioned aggregation
+-- HAVING filter applied after merge
+```
+
+## References
+
+1. **Leis, Viktor et al**. "Morsel-Driven Parallelism." SIGMOD 2014.
+   - Thread-local aggregation with merge
+
+2. **Ye, Yinan et al**. "Scalable Aggregation on Multicore Processors." DaMoN 2011.
+   - Parallel aggregation strategies comparison
+
+3. **Cieslewicz, John; Ross, Kenneth A**. "Adaptive Aggregation on Chip Multiprocessors." VLDB 2007.
+   - Adaptive parallel aggregation techniques
+
+4. **Mueller, Ingo et al**. "Adaptive and Scalable Aggregation for Multicore Main-Memory Systems." VLDB 2015.
+   - NUMA-aware parallel aggregation

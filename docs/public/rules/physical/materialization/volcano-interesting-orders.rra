@@ -1,0 +1,322 @@
+---
+id: volcano-interesting-orders
+name: Volcano Interesting Orders
+category: physical/materialization
+databases: [postgresql, mysql, duckdb, sqlite, clickhouse, cockroachdb, mssql, oracle]
+execution_models: [volcano]
+version: "1.0.0"
+authors: ["Goetz Graefe - Volcano/Cascades"]
+tags: [interesting-orders, physical-properties, volcano, cascades, classic]
+complexity: "O(n log n)"
+benefit_range: [0.2, 2.0]
+---
+
+# Volcano Interesting Orders
+
+## Description
+
+Maintains and exploits "interesting orders" during optimization - physical
+properties like sort order that may eliminate downstream sort operations.
+The Volcano/Cascades framework tracks which orderings are beneficial and
+retains plans with useful physical properties even if their cost is higher
+than unordered alternatives.
+
+**When to apply**: Queries with ORDER BY, GROUP BY, or joins that benefit
+from sorted inputs (merge join). A plan that produces data in a useful order
+may be retained even if slightly more expensive, because it eliminates a
+downstream sort.
+
+**Why it works**: The cost of sorting can dominate query execution (O(n log n)).
+If an operator naturally produces sorted output (index scan, merge join), or
+a sort for one purpose (GROUP BY) also satisfies another (ORDER BY), the
+overall plan cost may be lower despite the individual operator appearing
+more expensive.
+
+## Relational Algebra
+
+```latex
+$$
+Given query: σ_p(R) ORDER BY a
+$$
+
+$$
+Without interesting orders:
+1. Scan(R) → filter → sort by a [cost: scan + filter + sort]
+$$
+
+$$
+With interesting orders:
+1. IndexScan(R, sorted by a) → filter [cost: index scan + filter]
+   (no sort needed! Index scan provides useful order)
+$$
+
+$$
+The optimizer retains BOTH plans during search:
+- Plan A: cheap scan + expensive sort
+- Plan B: expensive index scan + free sort
+Winner depends on total cost including downstream operations
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Interesting orders are a physical property, not a logical rewrite
+// Volcano/Cascades tracks them during top-down optimization
+
+#[derive(Clone, Debug)]
+enum PhysicalProperty {
+    Any,
+    Sorted(Vec<(Column, SortOrder)>),
+    Partitioned(Vec<Column>),
+}
+
+struct VolcanoOptimizer {
+    // Memoization table: (logical expr, required properties) → best physical plan
+    memo: HashMap<(LogicalExpr, PhysicalProperty), PhysicalPlan>,
+}
+
+impl VolcanoOptimizer {
+    fn optimize(
+        &mut self,
+        expr: LogicalExpr,
+        required: PhysicalProperty
+    ) -> PhysicalPlan {
+        // Check memo table
+        if let Some(plan) = self.memo.get(&(expr.clone(), required.clone())) {
+            return plan.clone();
+        }
+
+        // Generate all physical implementations
+        let mut best_plan = None;
+        let mut best_cost = f64::INFINITY;
+
+        for phys_op in self.physical_implementations(&expr) {
+            // Determine what properties this operator provides
+            let provided = self.provided_properties(&phys_op);
+
+            // Recursively optimize children
+            let required_children = self.required_child_properties(
+                &phys_op, &required
+            );
+
+            let child_plans: Vec<PhysicalPlan> = phys_op.children()
+                .iter()
+                .zip(required_children.iter())
+                .map(|(child, req)| self.optimize(child.clone(), req.clone()))
+                .collect();
+
+            // Add enforcer if needed (e.g., sort)
+            let (plan, cost) = if provided.satisfies(&required) {
+                // Provided properties satisfy requirements, no enforcer
+                (PhysicalPlan::new(phys_op, child_plans), self.cost(&phys_op))
+            } else {
+                // Need enforcer (e.g., sort to satisfy ORDER BY)
+                let enforced = self.add_enforcer(
+                    PhysicalPlan::new(phys_op, child_plans),
+                    &required
+                );
+                (enforced.clone(), self.cost_with_enforcer(&enforced))
+            };
+
+            if cost < best_cost {
+                best_cost = cost;
+                best_plan = Some(plan);
+            }
+        }
+
+        let plan = best_plan.unwrap();
+        self.memo.insert((expr, required), plan.clone());
+        plan
+    }
+
+    fn interesting_orders(&self, expr: &LogicalExpr) -> Vec<PhysicalProperty> {
+        let mut orders = vec![PhysicalProperty::Any];
+
+        // Collect interesting orders from query
+        if let Some(order_by) = expr.order_by() {
+            orders.push(PhysicalProperty::Sorted(order_by.clone()));
+        }
+        if let Some(group_by) = expr.group_by() {
+            orders.push(PhysicalProperty::Sorted(group_by.clone()));
+        }
+        // Join keys, partition keys, etc.
+
+        orders
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    hw: &HardwareProfile,
+) -> bool {
+    // Query has operations that benefit from ordering
+    stats.has_order_by
+        || stats.has_group_by
+        || stats.has_merge_join_opportunity
+        // Sorting vs. index scan tradeoff exists
+        && stats.has_sorted_index
+        // Volcano/Cascades style optimizer
+        && hw.optimizer_style == OptimizerStyle::Volcano
+}
+```
+
+**Restrictions:**
+- Requires top-down optimization (Volcano/Cascades style)
+- Must track physical properties through the plan
+- Enforcers (sort, exchange) must be costed accurately
+- Only beneficial when interesting orders eliminate enforcers
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let rows = stats.row_count as f64;
+
+    // Cost of sort operation (if needed)
+    let sort_cost = rows * rows.log2() * 0.000001; // 1μs per comparison
+
+    // Cost difference between scan methods
+    let seq_scan_cost = rows * 0.000001; // 1μs per row
+    let index_scan_cost = rows * 0.000005; // 5μs per row (random access)
+    let scan_cost_diff = index_scan_cost - seq_scan_cost;
+
+    // Benefit: avoid sort by using index scan
+    // Only beneficial if sort_cost > scan_cost_diff
+    if sort_cost > scan_cost_diff {
+        let total_unordered_cost = seq_scan_cost + sort_cost;
+        let total_ordered_cost = index_scan_cost;
+        (total_unordered_cost - total_ordered_cost) / total_unordered_cost
+    } else {
+        0.0
+    }
+}
+```
+
+**Assumptions:**
+- Sort cost: O(n log n) with ~1μs per comparison
+- Sequential scan: ~1μs per row
+- Index scan: ~5μs per row (random I/O)
+- Interesting orders eliminate entire sort operations
+- Multiple uses of same order (GROUP BY + ORDER BY) amplify benefit
+
+**Typical benefit**: 20%-2x when interesting orders eliminate sorts.
+
+## Test Cases
+
+### Positive: Index scan provides ORDER BY order
+
+```sql
+-- Index on (customer_id, order_date)
+SELECT *
+FROM orders
+WHERE customer_id = 12345
+ORDER BY order_date;
+
+-- Without interesting orders:
+-- Sort(order_date)
+--   IndexScan(orders, customer_id = 12345)
+
+-- With interesting orders:
+-- IndexScan(orders, customer_id = 12345, order = order_date)
+-- Sort eliminated! Index naturally provides the order
+```
+
+### Positive: GROUP BY order satisfies ORDER BY
+
+```sql
+-- Query with GROUP BY and ORDER BY on same columns
+SELECT category, SUM(amount)
+FROM sales
+GROUP BY category
+ORDER BY category;
+
+-- Without interesting orders:
+-- Sort(category)
+--   Aggregate(GROUP BY category)
+--     Scan(sales)
+
+-- With interesting orders:
+-- Aggregate requests sorted input
+-- → Sort before aggregate: Sort(category) → Aggregate
+-- This sort also satisfies ORDER BY! One sort, two benefits
+```
+
+### Positive: Merge join requires sorted inputs
+
+```sql
+-- Both tables have indexes on join keys
+SELECT *
+FROM orders o
+JOIN customers c ON o.customer_id = c.id
+ORDER BY o.order_date;
+
+-- Interesting orders:
+-- 1. Merge join needs sorted inputs (o.customer_id, c.id)
+-- 2. Final ORDER BY needs o.order_date order
+-- Optimizer considers index scans that provide these orders
+```
+
+### Negative: Sort is cheaper than index scan
+
+```sql
+-- Table is small (1000 rows), index scan random I/O expensive
+SELECT *
+FROM small_table
+ORDER BY some_column;
+
+-- Sequential scan + sort is faster than index scan
+-- Interesting order (index scan) rejected by cost model
+```
+
+### Positive: Partition-wise operations
+
+```sql
+-- Distributed query
+SELECT customer_id, SUM(total)
+FROM orders
+GROUP BY customer_id;
+
+-- Interesting partitioning:
+-- If orders already partitioned by customer_id:
+--   Partition-wise aggregation (parallel, no shuffle)
+-- If not partitioned:
+--   Expensive repartition (exchange) needed
+-- Volcano tracks partitioning as interesting physical property
+```
+
+## References
+
+**Original papers:**
+- Graefe, G., McKenna, W.J., "The Volcano Optimizer Generator: Extensibility and Efficient Search", IEEE Data Engineering 1993
+  - DOI: 10.1109/69.273032
+  - Introduced interesting orders, physical properties, enforcers
+
+- Graefe, G., "The Cascades Framework for Query Optimization", IEEE Data Engineering 1995
+  - DOI: 10.1109/69.469815
+  - Extended Volcano with more flexible property handling
+
+- Simmen, D., Shekita, E., Malkemus, T., "Fundamental Techniques for Order Optimization", ACM SIGMOD 1996
+  - DOI: 10.1145/233269.233320
+  - Detailed analysis of interesting orders in SQL
+
+**Follow-up work:**
+- Soliman, M.A., et al., "Orca: A Modular Query Optimizer Architecture for Big Data", ACM SIGMOD 2014
+  - DOI: 10.1145/2588555.2595637
+  - Modern implementation in Greenplum/HAWQ
+
+**Implementation in databases:**
+- mssql: Volcano-style optimizer with interesting orders
+- Greenplum/PostgreSQL (Orca): Cascades framework with physical properties
+- CockroachDB: Cost-based optimizer with interesting orders
+- Most modern optimizers (Oracle, DB2) use Volcano/Cascades principles

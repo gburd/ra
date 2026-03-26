@@ -1,0 +1,114 @@
+---
+id: mid-query-reoptimization
+name: Mid-Query Re-Optimization
+category: experimental/adaptive
+databases: [postgresql, oracle, mssql, spark]
+version: "1.0.0"
+authors: ["Kabra, Narasimhan, DeWitt"]
+tags: [adaptive, reoptimization, runtime, cardinality, feedback]
+complexity: O(1)
+benefit_range: [0.1, 0.8]
+---
+
+# Mid-Query Re-Optimization
+
+## Description
+
+Monitors actual cardinalities during query execution and triggers plan
+re-optimization when actual values deviate significantly from estimates.
+At designated "check points" in the plan (typically after scans or joins),
+the executor compares actual row counts with estimates. If the ratio
+exceeds a threshold, the remaining unexecuted portion of the plan is
+re-optimized using actual statistics.
+
+**When to apply**: Long-running queries where cardinality misestimates
+lead to suboptimal join orders or algorithm choices.
+
+## Relational Algebra
+
+```latex
+-- Before: static plan based on estimates
+$$
+HashJoin(R, NestLoop(S, T))  -- estimated: R=1000, S=100, T=10
+$$
+
+-- At check point: actual S=100000 (100x misestimate)
+-- Re-optimize remaining plan with actual cardinality
+$$
+MergeJoin(R, HashJoin(S, T))  -- better for actual sizes
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+// Conceptual: insert check points at materializing operators
+rw!("insert-reopt-checkpoint";
+    "(join ?algo ?key ?left ?right)" =>
+    "(checkpoint-reopt
+        (join ?algo ?key ?left ?right)
+        (reopt-threshold 10.0))"
+    if is_long_running_candidate("?left", "?right")
+),
+```
+
+## Preconditions
+
+```rust
+fn should_reoptimize(
+    checkpoint: &CheckPoint,
+    actual: f64,
+    estimated: f64,
+) -> bool {
+    let ratio = (actual / estimated).max(estimated / actual);
+    // Re-optimize if actual differs by >10x from estimate
+    ratio > 10.0
+        // Only if remaining plan is expensive enough to justify
+        && checkpoint.remaining_cost() > 1000.0
+}
+```
+
+**Restrictions:**
+- Cannot undo already-materialized intermediate results
+- Re-optimization has overhead (planning cost)
+- May cause plan instability if triggered repeatedly
+- Pipeline-breaking operators provide natural check points
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    remaining_cost_bad_plan: f64,
+    remaining_cost_good_plan: f64,
+    reoptimization_overhead: f64,
+) -> f64 {
+    remaining_cost_bad_plan
+        - remaining_cost_good_plan
+        - reoptimization_overhead
+}
+```
+
+**Typical benefit**: 10-80% for severely misestimated queries.
+
+## Test Cases
+
+```sql
+-- Positive: join with misestimated filter
+SELECT * FROM orders o
+  JOIN customers c ON o.cust_id = c.id
+WHERE o.status = 'rare_status';
+-- Estimate: 1% selectivity; actual: 50%
+-- Re-optimize: switch from nested loop to hash join
+
+-- Negative: estimates are accurate
+SELECT * FROM small_table JOIN medium_table ON id;
+-- No deviation: no re-optimization needed
+```
+
+## References
+
+- Kabra, N., DeWitt, D.J. "Efficient Mid-Query Re-Optimization of Sub-Optimal Query Execution Plans" (SIGMOD 1998)
+- Oracle: Adaptive Query Optimization (12c+)

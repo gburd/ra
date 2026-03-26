@@ -1,0 +1,167 @@
+---
+id: function-inlining
+name: Function Inlining
+category: logical/function-optimization
+databases: [postgresql, oracle, mssql, duckdb]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [function, inlining, udf, sql-function, optimization]
+complexity: "O(n)"
+benefit_range: [0.3, 0.9]
+---
+
+# Function Inlining
+
+## Description
+
+Replaces a call to a simple SQL function with the function body, allowing
+the optimizer to see through the abstraction and apply standard
+optimizations (predicate pushdown, join elimination, etc.) to the expanded
+expression.
+
+**When to apply**: SQL-language functions (not C/external) that are:
+- IMMUTABLE or STABLE
+- Simple enough to inline (single expression or simple SELECT)
+- Not recursive
+- Not set-returning
+
+**Why it works**: SQL functions create an optimization barrier. The
+optimizer cannot push predicates into or through an opaque function call.
+Inlining removes the barrier, enabling the full optimizer to work on the
+expanded expression.
+
+## Relational Algebra
+
+```latex
+-- Before inlining (function is opaque):
+$$
+filter[my_func(R.col) > 10](R)
+$$
+
+-- Function definition: my_func(x) = x * 2 + 1
+-- After inlining:
+$$
+filter[(R.col * 2 + 1) > 10](R)
+$$
+
+-- Now standard simplification applies:
+$$
+filter[R.col > 4.5](R)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("inline-sql-function";
+    "(call ?func ?args)" =>
+    { InlineFunction { func: "?func", args: "?args" } }
+    if is_inlineable("?func")
+),
+
+struct InlineFunction { func: Var, args: Var }
+
+impl Applier for InlineFunction {
+    fn apply_one(&self, egraph: &mut EGraph, matched: &Subst) -> Vec<Id> {
+        let func_def = catalog::get_function_body(matched[self.func]);
+        let args = extract_args(&egraph[matched[self.args]]);
+        let inlined = substitute_params(func_def, &args);
+        vec![egraph.add_expr(&inlined)]
+    }
+}
+```
+
+**Restrictions:**
+- Cannot inline functions with side effects
+- Recursive functions cause infinite inlining
+- Set-returning functions change plan shape
+- PL/pgSQL and external language functions are not inlineable
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    func_overhead: f64,
+    num_calls: u64,
+    enables_pushdown: bool,
+) -> f64 {
+    let call_savings = func_overhead * num_calls as f64;
+    let pushdown_savings = if enables_pushdown { 0.5 } else { 0.0 };
+    (call_savings + pushdown_savings).min(1.0)
+}
+```
+
+**Typical benefit**: 30-90% when inlining enables predicate pushdown
+
+## Test Cases
+
+### Positive: Simple arithmetic function
+
+```sql
+CREATE FUNCTION double_plus_one(x INT) RETURNS INT
+  AS $$ SELECT x * 2 + 1 $$;
+
+SELECT * FROM t WHERE double_plus_one(col) > 10;
+-- Inline to: WHERE col * 2 + 1 > 10
+-- Simplify to: WHERE col > 4.5
+```
+
+### Positive: Function in JOIN condition
+
+```sql
+CREATE FUNCTION normalize_name(n TEXT) RETURNS TEXT
+  AS $$ SELECT LOWER(TRIM(n)) $$;
+
+SELECT * FROM a JOIN b ON normalize_name(a.name) = normalize_name(b.name);
+-- Inline: ON LOWER(TRIM(a.name)) = LOWER(TRIM(b.name))
+-- Enables expression index usage
+```
+
+### Positive: View-like function returning query
+
+```sql
+CREATE FUNCTION active_users() RETURNS SETOF users
+  AS $$ SELECT * FROM users WHERE active = true $$;
+
+SELECT * FROM active_users() WHERE dept_id = 5;
+-- Inline: SELECT * FROM users WHERE active = true AND dept_id = 5;
+-- Enables predicate pushdown and index usage
+```
+
+### Negative: PL/pgSQL function (not inlineable)
+
+```sql
+CREATE FUNCTION complex_calc(x INT) RETURNS INT
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF x > 100 THEN RETURN x * 2;
+  ELSE RETURN x + 10;
+  END IF;
+END $$;
+-- Procedural logic: cannot inline as expression
+```
+
+### Negative: Recursive function
+
+```sql
+CREATE FUNCTION factorial(n INT) RETURNS INT
+  AS $$ SELECT CASE WHEN n <= 1 THEN 1
+                    ELSE n * factorial(n - 1) END $$;
+-- Recursive: inlining would not terminate
+```
+
+## References
+
+**Academic papers:**
+- Simhadri et al., "Decorrelation of User-Defined Function Invocations", IEEE ICDE 2014
+
+**Implementation:**
+- PostgreSQL: `inline_function()` in `clauses.c`
+- Oracle: Deterministic function inlining
+- mssql: Scalar UDF inlining (mssql 2019+)
+- DuckDB: Macro expansion for SQL macros

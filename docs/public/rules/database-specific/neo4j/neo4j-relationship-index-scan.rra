@@ -1,0 +1,48 @@
+---
+id: neo4j-relationship-index-scan
+name: "Relationship Index Scan"
+category: physical/relationship-index
+databases: [neo4j]
+version: "1.0.0"
+authors: ["Database Contributors", "RA Contributors"]
+tags: [database-mining, neo4j, optimization]
+complexity: "O(n)"
+benefit_range: [1.0, 10.0]
+---
+
+# Relationship Index Scan
+
+## Description
+
+Uses relationship indexes for efficient traversal.
+
+**When to apply**: During query optimization phase.
+
+## Relational Algebra
+
+```latex
+-- Before
+$$
+(expand (scan users) :FOLLOWS)
+$$
+
+-- After
+$$
+(expand-index (scan users) idx_follows)
+$$
+
+```
+
+## Preconditions
+
+- Relationship index on FOLLOWS exists
+
+## Test Cases
+
+```sql
+SELECT * FROM table WHERE condition;
+```
+
+## References
+
+- Database documentation

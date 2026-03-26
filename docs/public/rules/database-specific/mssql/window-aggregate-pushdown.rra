@@ -1,0 +1,122 @@
+---
+id: mssql-window-aggregate-pushdown
+name: mssql Window Function Optimization
+category: database-specific/mssql
+databases: [mssql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, mssql, window, aggregate, segment, batch-mode]
+complexity: O(n log n)
+benefit_range: [0.1, 0.5]
+---
+
+# mssql Window Function Optimization
+
+## Description
+
+Optimizes window function execution using batch mode window aggregate
+operators and segment-based processing.  mssql 2016+ introduces
+batch mode window aggregates that process windows without explicit
+sorting when the input is already in batch mode.
+
+**When to apply**: A query uses window functions (ROW_NUMBER, SUM
+OVER, RANK, etc.) and batch mode execution is available.
+
+**Why it works**: Batch mode window aggregate processes ~900 rows at
+a time with SIMD operations.  The Segment operator detects partition
+boundaries without materializing full partitions.  Combined, they
+avoid explicit sorts and reduce per-row overhead.
+
+**Database version**: mssql 2016+ (batch mode window)
+
+## Relational Algebra
+
+```latex
+-- Before: row mode with explicit sort
+$$
+row-window[PARTITION BY p ORDER BY o; ROW_NUMBER()](
+    sort[p, o](scan(T)))
+$$
+
+-- After: batch mode window aggregate
+$$
+batch-window-aggregate[PARTITION BY p ORDER BY o; ROW_NUMBER()](
+    batch-sort[p, o](batch-scan(T)))
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mssql-batch-mode-window-aggregate";
+    "(window ?spec ?func (sort ?keys ?input))" =>
+    "(batch-window-aggregate ?spec ?func
+        (batch-sort ?keys ?input))"
+    if is_database("mssql")
+    if batch_mode_eligible("?input")
+),
+
+rw!("mssql-merge-compatible-windows";
+    "(window ?spec ?f1 (window ?spec ?f2 ?input))" =>
+    "(window ?spec (merge-funcs ?f1 ?f2) ?input)"
+    if is_database("mssql")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    window_spec: &WindowSpec,
+    input: &PhysicalPlan,
+) -> bool {
+    input.supports_batch_mode()
+    && window_spec.function().has_batch_implementation()
+}
+```
+
+**Restrictions:**
+- Not all window functions have batch mode implementations
+- NTILE, CUME_DIST, PERCENT_RANK may fall back to row mode
+- Multiple window specs with different PARTITION BY require separate sorts
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    rows: f64,
+    partitions: f64,
+) -> f64 {
+    // Batch mode: ~10x faster per-row processing
+    let row_mode_cost = rows * 0.01;
+    let batch_mode_cost = rows * 0.001;
+    row_mode_cost - batch_mode_cost
+}
+```
+
+**Typical benefit**: Batch mode window aggregate is 5-10x faster than
+row mode for large partitions with many rows.
+
+## Test Cases
+
+```sql
+-- Positive: ROW_NUMBER with batch mode
+SELECT *, ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC)
+FROM employees;
+-- Batch mode window aggregate with segment
+```
+
+```sql
+-- Negative: window on small result set
+SELECT *, ROW_NUMBER() OVER (ORDER BY id) AS rn
+FROM (SELECT TOP 10 * FROM employees) t;
+-- Batch mode overhead not worth it for 10 rows
+```
+
+## References
+
+mssql: Window Aggregate Operator (Showplan)
+mssql: Segment Operator (Showplan)

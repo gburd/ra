@@ -1,0 +1,150 @@
+---
+id: mysql-semi-join-strategies
+name: MySQL Semi-Join Execution Strategies
+category: database-specific/mysql
+databases: [mysql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [database-specific, mysql, semi-join, firstmatch, loosescan, dupsweedout]
+complexity: O(n*m)
+benefit_range: [0.2, 0.7]
+---
+
+# MySQL Semi-Join Execution Strategies
+
+## Description
+
+MySQL transforms IN/EXISTS subqueries into semi-joins and chooses
+among five execution strategies: FirstMatch, LooseScan,
+DuplicateWeedout, Materialization-Scan, and Materialization-Lookup.
+Each strategy has different performance characteristics depending on
+the data distribution and available indexes.
+
+**When to apply**: An IN or EXISTS subquery has been converted to a
+semi-join during optimization.
+
+**Why it works**: Different strategies exploit different access paths.
+FirstMatch short-circuits on the first match per outer row; LooseScan
+uses a group-prefix index to skip duplicates; DuplicateWeedout uses a
+temp table to eliminate duplicates after a regular join.
+
+**Database version**: MySQL 5.6+
+
+## Relational Algebra
+
+```latex
+-- Semi-join with FirstMatch strategy
+$$
+outer firstmatch[o.id = i.fk] inner
+$$
+-- Stops scanning inner after first match per outer row
+
+-- Semi-join with LooseScan strategy
+$$
+outer loosescan[o.id = i.fk, index=idx_fk] inner
+$$
+-- Scans only distinct values from inner's index
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("mysql-semi-join-firstmatch";
+    "(semi-join ?pred ?outer ?inner)" =>
+    "(firstmatch ?pred ?outer ?inner)"
+    if is_database("mysql")
+    if inner_has_index("?inner", "?pred")
+),
+
+rw!("mysql-semi-join-loosescan";
+    "(semi-join ?pred ?outer ?inner)" =>
+    "(loosescan ?pred ?outer ?inner)"
+    if is_database("mysql")
+    if has_group_prefix_index("?inner", "?pred")
+),
+
+rw!("mysql-semi-join-dupsweedout";
+    "(semi-join ?pred ?outer ?inner)" =>
+    "(dup-weedout ?pred ?outer ?inner)"
+    if is_database("mysql")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    semi_join: &SemiJoin,
+    strategy: Strategy,
+) -> bool {
+    match strategy {
+        Strategy::FirstMatch => {
+            semi_join.inner_has_index()
+        }
+        Strategy::LooseScan => {
+            semi_join.inner_has_prefix_index()
+            && semi_join.inner_columns_are_index_prefix()
+        }
+        Strategy::DuplicateWeedout => {
+            true // always applicable, fallback
+        }
+    }
+}
+```
+
+**Restrictions:**
+- FirstMatch cannot be used with outer joins
+- LooseScan requires the semi-join columns to be a prefix of an index
+- DuplicateWeedout has temp table overhead
+- Controlled by `optimizer_switch` flags for each strategy
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    outer_rows: f64,
+    inner_rows: f64,
+    inner_distinct: f64,
+    strategy: Strategy,
+) -> f64 {
+    match strategy {
+        Strategy::FirstMatch => {
+            outer_rows * (inner_rows / inner_distinct - 1.0) * 0.005
+        }
+        Strategy::LooseScan => {
+            (inner_rows - inner_distinct) * 0.005
+        }
+        Strategy::DuplicateWeedout => {
+            0.0 // baseline; temp table overhead
+        }
+    }
+}
+```
+
+**Typical benefit**: FirstMatch 2-5x over naive NLJ when inner has
+many duplicates per key.
+
+## Test Cases
+
+```sql
+-- Positive: FirstMatch with index
+SELECT * FROM departments d
+WHERE d.id IN (SELECT dept_id FROM employees);
+-- FirstMatch: for each dept, stop at first matching employee
+```
+
+```sql
+-- Positive: LooseScan with prefix index
+CREATE INDEX idx_dept ON employees(dept_id);
+SELECT * FROM departments d
+WHERE d.id IN (SELECT dept_id FROM employees);
+-- LooseScan: scan distinct dept_id values from index
+```
+
+## References
+
+MySQL: "Optimizing IN and EXISTS Subquery Predicates with Semijoin"
+Source: sql/sql_planner.cc, `Optimize_table_order::choose_semijoin_strategy()`

@@ -1,0 +1,95 @@
+---
+id: expand-into
+name: Expand Into Optimization
+category: multi-model/graph
+databases: [neo4j, janusgraph, neptune]
+standard: "cypher:9"
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [graph, traversal, expand-into, join]
+---
+
+# Expand Into Optimization
+
+## Description
+
+Replaces an expand followed by a filter checking the target node against
+a known set with an "expand into" operation that verifies edge existence
+between two already-bound nodes. Instead of expanding all neighbors and
+then filtering, the engine checks the adjacency list of one endpoint
+for the specific other endpoint.
+
+**When to apply**: Both endpoints of an edge are already bound (known)
+and the query only needs to verify that the edge exists.
+
+**Why it works**: Expand-all produces all neighbors then filters.
+Expand-into probes the adjacency list for a single target, which is
+O(log(degree)) with sorted adjacency or O(1) with a hash set.
+
+## Relational Algebra
+
+```latex
+$$
+\sigma_{dst = known_node}(expand(src, edge_type))
+  \rightarrow expand_into(src, known_node, edge_type)
+  \text{where} both src and known_node are bound
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("expand-into";
+    "(filter (eq ?target ?bound) (expand ?src ?etype))" =>
+    "(expand-into ?src ?bound ?etype)"
+    if is_bound("?bound")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(src: &Expr, target: &Expr) -> bool {
+    src.is_bound() && target.is_bound()
+}
+```
+
+**Restrictions:**
+- Both endpoints must be bound before the expansion
+- Only verifies existence; does not return intermediate nodes
+- Direction must match the edge direction
+
+## Cost Model
+
+```rust
+fn estimated_benefit(avg_degree: f64) -> f64 {
+    let expand_all_cost = avg_degree;
+    let expand_into_cost = avg_degree.ln().max(1.0);
+    (expand_all_cost - expand_into_cost) / expand_all_cost
+}
+```
+
+**Typical benefit**: 0.7-0.99 for high-degree vertices.
+
+## Test Cases
+
+```cypher
+-- Positive: both endpoints known, just checking edge
+MATCH (a:Person {name: 'Alice'}), (b:Person {name: 'Bob'})
+WHERE (a)-[:KNOWS]->(b)
+RETURN a, b;
+-- Uses expand-into instead of expand-all + filter
+
+-- Negative: target is not bound
+MATCH (a:Person {name: 'Alice'})-[:KNOWS]->(b)
+RETURN b;
+-- Must expand all; target is a free variable
+```
+
+## References
+
+Neo4j: org.neo4j.cypher.internal.runtime.interpreted.pipes.ExpandIntoPipe
+Aberger et al. "EmptyHeaded: A Relational Engine for Graph Processing" (SIGMOD 2017)

@@ -1,0 +1,113 @@
+---
+id: watermark-propagation
+name: Watermark Propagation Optimization
+category: execution-models/streaming
+databases: [flink, spark-streaming, dataflow, risingwave]
+version: "1.0.0"
+authors: ["Akidau, Tyler", "Google Dataflow Team"]
+tags: [streaming, watermark, event-time, lateness, completeness]
+complexity: O(1)
+benefit_range: [0.1, 0.5]
+---
+
+# Watermark Propagation Optimization
+
+## Description
+
+Optimizes watermark advancement through the streaming dataflow graph.
+Watermarks indicate "no more events with timestamp <= W will arrive"
+and trigger window closures. This rule determines the optimal watermark
+strategy: per-source tracking, cross-source alignment, and idle source
+detection. It also pushes watermark-dependent operations (window closing,
+state cleanup) to fire at the optimal frequency.
+
+**When to apply**: Streaming queries with multiple sources, varying
+event-time skew, or operators waiting for watermark advancement.
+
+## Relational Algebra
+
+```latex
+-- Before: conservative watermark (min across all sources)
+$$
+W = MIN(W_source1, W_source2, ..., W_sourceN)
+$$
+
+-- After: per-partition watermarks with idle detection
+$$
+W = MIN(W_active_sources)
+$$
+-- Idle sources excluded from min computation
+-- Per-partition watermarks enable parallel window closing
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("idle-source-watermark";
+    "(watermark-min ?sources)" =>
+    "(watermark-min (filter-idle ?sources (idle-threshold 30s)))"
+    if has_idle_sources("?sources")
+),
+
+rw!("per-partition-watermark";
+    "(watermark-global ?partitions)" =>
+    "(watermark-per-partition ?partitions)"
+    if partitions_have_independent_time("?partitions")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(dataflow: &StreamDataflow) -> bool {
+    dataflow.uses_event_time()
+        && (dataflow.source_count() > 1
+            || dataflow.has_partitioned_source())
+}
+```
+
+**Restrictions:**
+- Aggressive watermark advancement may declare events as late
+- Trade-off between latency (fast watermarks) and completeness
+- Clock skew between sources requires calibration
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    sources: usize,
+    idle_fraction: f64,
+    window_duration_seconds: f64,
+) -> f64 {
+    // Idle source detection: avoids watermark stalling
+    let stall_avoided = idle_fraction
+        * window_duration_seconds
+        * sources as f64;
+    stall_avoided
+}
+```
+
+**Typical benefit**: 10-50% latency improvement.
+
+## Test Cases
+
+```sql
+-- Positive: multi-source join with idle partitions
+SELECT * FROM orders_stream o
+  JOIN inventory_stream i ON o.product_id = i.product_id
+WHERE o.ts BETWEEN i.ts - INTERVAL '5' MINUTE
+  AND i.ts + INTERVAL '5' MINUTE;
+-- If inventory_stream goes idle, watermark should still advance
+
+-- Negative: single source, no idle detection needed
+SELECT TUMBLE_START(ts, INTERVAL '1' MINUTE), COUNT(*)
+FROM events GROUP BY TUMBLE(ts, INTERVAL '1' MINUTE);
+```
+
+## References
+
+- Akidau, T. et al. "The Dataflow Model" (VLDB 2015)
+- Apache Flink: Event Time and Watermarks documentation

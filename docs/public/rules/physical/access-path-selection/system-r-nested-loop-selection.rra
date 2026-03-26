@@ -1,0 +1,326 @@
+---
+id: system-r-nested-loop-selection
+name: "System R Nested-Loop Join Selection"
+category: physical/access-path-selection
+databases: [postgresql, mysql, duckdb, cockroachdb, mssql, oracle]
+execution_models: [volcano]
+version: "1.0.0"
+authors: ["Selinger, Astrahan, Chamberlin, Lorie, Price - IBM Research"]
+tags: [nested-loop, join-selection, system-r, cost-based, classic]
+complexity: "O(n * m)"
+benefit_range: [0.5, 50.0]
+---
+
+# System R Nested-Loop Join Selection
+
+## Description
+
+System R's algorithm for selecting between nested-loop join variants. The
+original System R optimizer considered two physical join methods: nested-loop
+join and sort-merge join. For nested-loop joins, it evaluated whether to use
+the outer relation's access path to drive an index lookup on the inner, or
+to use a sequential scan of the inner for each outer tuple.
+
+The key insight is that an index on the inner relation's join column transforms
+the O(n*m) nested-loop into effectively O(n * log m) or O(n) with a hash index,
+making it competitive with or superior to sort-merge join for many workloads.
+
+**When to apply**: Two-way joins where one input is small or has a highly
+selective predicate, and the inner relation has an index on the join column.
+
+**Why it works**: When the outer relation is small (after filtering), each
+outer tuple performs an efficient index lookup rather than scanning the entire
+inner relation. The total cost is proportional to the outer cardinality times
+the index lookup cost, rather than the product of both cardinalities.
+
+## Relational Algebra
+
+```latex
+$$
+Join methods considered by System R:
+$$
+
+$$
+1. Nested-loop with sequential inner scan:
+   For each tuple r in R (outer):
+     For each tuple s in S (inner):
+       If join_predicate(r, s): emit (r, s)
+   Cost = N_pages(R) + N_tuples(R) * N_pages(S)
+$$
+
+$$
+2. Nested-loop with index on inner:
+   For each tuple r in R (outer):
+     Lookup join_key(r) in Index(S.join_col)
+     For each matching s: emit (r, s)
+   Cost = N_pages(R) + N_tuples(R) * (index_lookup_cost + matching_tuples_cost)
+$$
+
+$$
+3. Sort-merge \bowtie:
+   Sort R by join_col (if not sorted)
+   Sort S by join_col (if not sorted)
+   Merge
+   Cost = sort_cost(R) + sort_cost(S) + N_pages(R) + N_pages(S)
+$$
+
+$$
+Choose the \bowtie method with minimum total cost.
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+struct SystemRJoinSelector;
+
+impl SystemRJoinSelector {
+    fn select_join_method(
+        &self,
+        outer: &PlanNode,
+        inner: &PlanNode,
+        join_pred: &JoinPredicate,
+        catalog: &Catalog,
+    ) -> JoinMethod {
+        let mut best_method = JoinMethod::NestedLoopSeqScan;
+        let mut best_cost = self.cost_nl_seq_scan(outer, inner);
+
+        // Try nested-loop with each index on inner
+        for index in catalog.indexes_for(inner.table()) {
+            if index.matches_join_column(&join_pred.inner_col) {
+                let cost = self.cost_nl_index_scan(
+                    outer, inner, &index, join_pred,
+                );
+                if cost < best_cost {
+                    best_cost = cost;
+                    best_method = JoinMethod::NestedLoopIndex {
+                        index: index.clone(),
+                    };
+                }
+            }
+        }
+
+        // Try sort-merge join
+        let sm_cost = self.cost_sort_merge(
+            outer, inner, join_pred,
+        );
+        if sm_cost < best_cost {
+            best_cost = sm_cost;
+            best_method = JoinMethod::SortMerge;
+        }
+
+        best_method
+    }
+
+    fn cost_nl_seq_scan(
+        &self,
+        outer: &PlanNode,
+        inner: &PlanNode,
+    ) -> f64 {
+        let w = 0.05;
+        let outer_pages = outer.est_pages() as f64;
+        let outer_tuples = outer.est_tuples() as f64;
+        let inner_pages = inner.est_pages() as f64;
+        // Each outer tuple requires full scan of inner
+        outer_pages + outer_tuples * inner_pages
+            + w * outer_tuples * inner.est_tuples() as f64
+    }
+
+    fn cost_nl_index_scan(
+        &self,
+        outer: &PlanNode,
+        inner: &PlanNode,
+        index: &Index,
+        join_pred: &JoinPredicate,
+    ) -> f64 {
+        let w = 0.05;
+        let outer_pages = outer.est_pages() as f64;
+        let outer_tuples = outer.est_tuples() as f64;
+
+        // Per-probe cost depends on index type and clustering
+        let matching_per_probe =
+            inner.est_tuples() as f64 / index.distinct_keys as f64;
+
+        let per_probe_cost = if index.is_clustered {
+            // B-tree depth + sequential pages for matches
+            index.depth as f64
+                + (matching_per_probe / inner.tuples_per_page())
+        } else {
+            // B-tree depth + random I/O per match
+            index.depth as f64 + matching_per_probe
+        };
+
+        outer_pages
+            + outer_tuples * per_probe_cost
+            + w * outer_tuples * matching_per_probe
+    }
+
+    fn cost_sort_merge(
+        &self,
+        outer: &PlanNode,
+        inner: &PlanNode,
+        join_pred: &JoinPredicate,
+    ) -> f64 {
+        let w = 0.05;
+
+        let sort_outer = if outer.is_sorted_on(&join_pred.outer_col) {
+            0.0
+        } else {
+            self.sort_cost(outer)
+        };
+
+        let sort_inner = if inner.is_sorted_on(&join_pred.inner_col) {
+            0.0
+        } else {
+            self.sort_cost(inner)
+        };
+
+        let merge_cost = outer.est_pages() as f64
+            + inner.est_pages() as f64
+            + w * (outer.est_tuples() + inner.est_tuples()) as f64;
+
+        sort_outer + sort_inner + merge_cost
+    }
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    stats: &Statistics,
+    hw: &HardwareProfile,
+) -> bool {
+    // Must be a two-way equijoin
+    stats.is_equijoin
+        // Must have cardinality estimates
+        && stats.has_cardinality_estimates
+        // Access path info needed for inner
+        && stats.has_index_info
+}
+```
+
+**Restrictions:**
+- System R only considered nested-loop and sort-merge (hash join added later)
+- Buffer pool size affects nested-loop cost (page reuse for inner)
+- Assumes uniform data distribution for cost estimation
+- Outer relation choice affects cost: smaller outer is usually better
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    stats: &Statistics,
+    _hw: &HardwareProfile,
+) -> f64 {
+    let outer_rows = stats.outer_cardinality as f64;
+    let inner_rows = stats.inner_cardinality as f64;
+    let inner_pages = stats.inner_pages as f64;
+
+    // Baseline: nested-loop with sequential scan of inner
+    let nl_seq_cost = outer_rows * inner_pages;
+
+    // With index on inner join column
+    let index_depth = 3.0; // Typical B-tree depth
+    let match_per_probe = inner_rows / stats.inner_distinct_join_keys as f64;
+    let nl_index_cost = outer_rows * (index_depth + match_per_probe);
+
+    if nl_seq_cost > nl_index_cost {
+        (nl_seq_cost - nl_index_cost) / nl_seq_cost
+    } else {
+        0.0
+    }
+}
+```
+
+**Assumptions:**
+- B-tree index depth ~3 for tables up to ~1B rows
+- Clustered index: sequential I/O for matching tuples
+- Unclustered index: random I/O per matching tuple
+- Buffer pool may cache frequently-accessed inner pages
+
+**Typical benefit**: 2x-50x when index nested-loop replaces sequential nested-loop.
+
+## Test Cases
+
+### Positive: Small outer driving index lookup on large inner
+
+```sql
+-- 100 departments, 10M employees
+-- Index on employees.department_id
+SELECT d.name, e.name
+FROM departments d
+JOIN employees e ON d.id = e.department_id
+WHERE d.region = 'WEST';
+
+-- After filtering departments: ~10 rows
+-- NL-SeqScan: 10 * 100,000 pages = 1,000,000 page reads
+-- NL-Index: 10 * (3 + 1000) = 10,030 page reads
+-- Index nested-loop wins by ~100x
+```
+
+### Positive: Sort-merge wins when both inputs are large and pre-sorted
+
+```sql
+-- Both tables sorted on join key (clustered indexes)
+-- 1M orders, 100K customers
+SELECT * FROM orders o
+JOIN customers c ON o.customer_id = c.customer_id;
+
+-- NL-Index: 1,000,000 * (3 + 10) = 13,000,000
+-- Sort-Merge: 0 (sorted) + 0 (sorted) + 10,000 + 1,000 = 11,000
+-- Sort-merge wins when both inputs already sorted
+```
+
+### Negative: No useful index on inner
+
+```sql
+-- No index on lineitem.comment (text column)
+SELECT *
+FROM orders o
+JOIN lineitem l ON o.comment_hash = l.comment_hash;
+
+-- Must use NL-SeqScan or Sort-Merge
+-- NL-Index not available: fall back to sort-merge
+```
+
+### Positive: Correlated subquery as nested-loop
+
+```sql
+-- System R treats correlated subqueries as nested-loop
+SELECT o.*
+FROM orders o
+WHERE EXISTS (
+  SELECT 1 FROM returns r
+  WHERE r.order_id = o.order_id
+);
+
+-- Optimized as: NL with index on returns.order_id
+-- Each order tuple probes the index once
+```
+
+## References
+
+**Original paper:**
+- Selinger, P. Griffiths, et al., "Access Path Selection in a Relational Database Management System", ACM SIGMOD 1979
+  - DOI: 10.1145/582095.582099
+  - Section 5: "Joins" - nested-loop and sort-merge join selection
+  - Section 5.3: "Computation of costs"
+  - Table 1: Cost formulas for join methods
+
+**Follow-up work:**
+- Shapiro, L.D., "Join Processing in Database Systems with Large Main Memories", ACM TODS 1986
+  - DOI: 10.1145/5274.5275
+  - Extended join selection to include hash join
+
+- Graefe, G., "Query Evaluation Techniques for Large Databases", ACM Computing Surveys 1993
+  - DOI: 10.1145/152610.152611
+  - Comprehensive survey of join algorithms and selection criteria
+
+**Implementation in databases:**
+- PostgreSQL: `src/backend/optimizer/path/costsize.c` - cost_nestloop
+- MySQL: `sql/sql_executor.cc` - nested loop join execution
+- Oracle: NESTED LOOPS hint, cost-based selection

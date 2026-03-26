@@ -1,0 +1,120 @@
+---
+id: calcite-aggregate-extract-project
+name: Calcite AggregateExtractProjectRule
+category: logical/aggregate-pushdown
+databases: [calcite, postgresql, mysql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [logical, calcite, aggregate, project, extract, column-pruning]
+complexity: O(n)
+benefit_range: [0.05, 0.3]
+---
+
+# Calcite AggregateExtractProjectRule
+
+## Description
+
+Extracts a project from an aggregate and pushes it toward the input.
+The project retains only the columns that the aggregate actually uses
+(group-by columns and aggregate function arguments), pruning unused
+columns from the aggregate's input.
+
+**When to apply**: An aggregate references only a subset of its
+input's columns, and the input is not already a project.
+
+**Why it works**: Reducing the width of data flowing into the
+aggregate reduces hash table entry sizes and memory consumption
+for the grouping operation.
+
+**Calcite class**: `org.apache.calcite.rel.rules.AggregateExtractProjectRule`
+
+## Relational Algebra
+
+```latex
+-- Before: aggregate over wide input
+$$
+\gamma_{g; SUM(x)}(R)
+  \text{where} R has columns {a, b, c, g, x, y, z}
+$$
+
+-- After: project narrows input first
+$$
+\gamma_{g; SUM(x)}(\pi_{g, x}(R))
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-aggregate-extract-project";
+    "(aggregate ?group ?aggs ?input)" =>
+    "(aggregate ?group ?aggs
+        (project ?needed_cols ?input))"
+    if input_is_not_project("?input")
+    if has_unused_columns("?group", "?aggs", "?input")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(agg: &Aggregate) -> bool {
+    let input = agg.input();
+    // Don't add project if input is already a project
+    if input.is_project() {
+        return false;
+    }
+    let used_cols = agg.group_set()
+        .union(&agg.agg_call_columns());
+    used_cols.cardinality() < input.row_type().field_count()
+}
+```
+
+**Restrictions:**
+- Does not fire if input is already a Project (prevents cycles)
+- Only beneficial when input has more columns than the aggregate uses
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    input_rows: f64,
+    used_cols: usize,
+    total_cols: usize,
+) -> f64 {
+    let reduction = 1.0 - (used_cols as f64 / total_cols as f64);
+    input_rows * reduction * 0.001
+}
+```
+
+**Typical benefit**: 5-30% through reduced memory for hash aggregation.
+
+## Test Cases
+
+```sql
+-- Positive: aggregate uses few columns from wide table
+SELECT dept, SUM(salary) FROM employee GROUP BY dept;
+-- Only dept and salary needed; prune all other columns
+```
+
+```sql
+-- Negative: input is already a project
+SELECT dept, SUM(salary) FROM (
+    SELECT dept, salary FROM employee
+) t GROUP BY dept;
+-- Already projected; rule does not fire
+```
+
+```sql
+-- Positive: multiple aggregates with column overlap
+SELECT dept, SUM(salary), COUNT(bonus), MAX(salary)
+FROM employee GROUP BY dept;
+-- Only dept, salary, bonus needed from input
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/AggregateExtractProjectRule.java (commit af6367d)

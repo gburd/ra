@@ -1,0 +1,47 @@
+---
+id: wcoj-generic-join
+name: "Generic WCOJ Algorithm"
+category: physical/join-algorithms
+databases: [postgresql, mysql, oracle, mssql, duckdb, sqlite]
+execution_models: [logical-rewrite]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [academic, academic]
+complexity: "O(n)"
+benefit_range: [0.3, 0.7]
+preconditions:
+  - type: "pattern"
+    must_match: "(multi-join ?inputs ?predicates)"
+    description: "Multi-way join for generic WCOJ"
+  - type: "predicate"
+    condition: "count(?inputs) >= 3"
+    description: "At least 3 relations for WCOJ"
+---
+
+# Generic WCOJ Algorithm
+
+## Description
+
+WCOJ with trie-based data structure
+
+## Relational Algebra
+
+```latex
+
+
+```
+
+## Implementation
+
+```
+Implement rule transformation for academic optimization
+```
+
+## Tests
+
+Add test cases for this rule
+
+## References
+- Paper: Generic Join Algorithm by Atserias et al.
+- DOI: 10.1137/100799820

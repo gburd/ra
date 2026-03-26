@@ -1,0 +1,199 @@
+---
+id: sample-based-join
+name: Sample-Based Join for Approximate Aggregation
+category: experimental/approximate
+databases: [postgresql, duckdb]
+version: "1.0.0"
+authors: ["Chaudhuri et al. 1999", "Agarwal et al. 2013", "RA Contributors"]
+tags: [approximate, sampling, join, aggregation, confidence-interval]
+complexity: O(s) where s = sample_size
+benefit_range: [0.5, 0.99]
+research_status: mature-research
+maturity: prototype
+---
+
+# Sample-Based Join for Approximate Aggregation
+
+## Description
+
+Replaces a full join-then-aggregate pipeline with a sample-based
+approach that computes approximate aggregates over a random sample of
+the join result. For aggregate queries (SUM, AVG, COUNT), a uniform
+random sample of one or both join inputs produces an unbiased estimate
+of the aggregate with quantifiable confidence intervals.
+
+**When to apply**: Aggregate queries over joins where approximate
+results are acceptable, the join produces a large intermediate result,
+and the aggregation reduces it to a small output. Especially useful
+for exploratory analytics, dashboards, and decision support where
+directional accuracy matters more than exact values.
+
+**Why it works**: For linear aggregates (SUM, COUNT, AVG), a uniform
+random sample of size s from a population of size N produces an
+estimate with relative error O(1/sqrt(s)), independent of N. A 1%
+sample of 1B rows (10M rows) provides ~1% relative error, while
+reducing computation by 99%.
+
+## Relational Algebra
+
+```latex
+-- Exact:
+$$
+\gamma_{g, SUM(x)}(Join[cond](R, S))
+$$
+
+-- Approximate with sampling:
+$$
+\gamma_{g, SUM(x) * scale_factor}(
+    Join[cond](
+        Sample[rate=p](R),
+        S
+    )
+)
+\text{where} scale_factor = 1/p
+$$
+
+```
+
+## Implementation
+
+```rust
+struct SampleBasedJoin {
+    sample_rate: f64,
+    sampling_method: SamplingMethod,
+    scale_factor: f64,
+    confidence_level: f64,
+}
+
+enum SamplingMethod {
+    // Simple random: each row independently with probability p
+    BernoulliSampling { rate: f64 },
+    // Block-level: sample blocks of rows (more I/O efficient)
+    SystemSampling { rate: f64 },
+    // Stratified: maintain representation across key groups
+    StratifiedSampling {
+        rate: f64,
+        strata_column: ColumnId,
+    },
+}
+
+fn choose_sample_rate(
+    target_error: f64,
+    confidence: f64,
+    estimated_join_rows: f64,
+) -> f64 {
+    // For normal approximation:
+    // relative_error = z * sigma / (sqrt(n) * mean)
+    // Solving for n: n = (z * sigma / (error * mean))^2
+    let z = z_score(confidence);  // 1.96 for 95% CI
+    let cv = estimated_coefficient_of_variation();
+    let required_samples = (z * cv / target_error).powi(2);
+    (required_samples / estimated_join_rows).min(1.0)
+}
+
+fn compute_confidence_interval(
+    estimate: f64,
+    sample_size: u64,
+    sample_variance: f64,
+    confidence: f64,
+) -> (f64, f64) {
+    let z = z_score(confidence);
+    let std_error = (sample_variance / sample_size as f64).sqrt();
+    let margin = z * std_error;
+    (estimate - margin, estimate + margin)
+}
+```
+
+## Preconditions
+
+```rust
+fn applicable(
+    query: &LogicalPlan,
+    session: &SessionConfig,
+) -> bool {
+    // Must be an aggregate query
+    query.has_aggregation()
+    // Aggregation must be sampleable (linear aggregate)
+    && query.aggregates().iter().all(|a|
+        matches!(a, Sum(_) | Count(_) | Avg(_)))
+    // Approximate results must be acceptable
+    && session.allow_approximate()
+    // Join must produce large intermediate result
+    && query.estimated_join_output() > SAMPLING_THRESHOLD
+}
+```
+
+**Restrictions:**
+- Only works for linear aggregates (SUM, COUNT, AVG). Non-linear
+  aggregates (MEDIAN, MODE, MIN, MAX) require different approaches
+- GROUP BY queries require stratified sampling to ensure all
+  groups are represented
+- Highly skewed distributions reduce sample quality; a few large
+  values can dominate the aggregate
+- JOIN sampling is more complex than single-table sampling due to
+  correlated sampling effects (some join keys produce more matches)
+- Confidence intervals assume approximately normal distribution
+  (valid for large samples by CLT)
+
+## Cost Model
+
+```rust
+fn sample_join_cost(
+    full_join_rows: f64,
+    sample_rate: f64,
+    per_row_cost: f64,
+    accuracy_vs_cost: f64,
+) -> (f64, f64) {
+    let exact_cost = full_join_rows * per_row_cost;
+    let sample_cost = full_join_rows * sample_rate * per_row_cost;
+    (exact_cost, sample_cost)
+}
+```
+
+**Typical benefit**: For a fact-dimension join producing 1B rows, a
+1% sample processes 10M rows (99% cost reduction) with ~1% error.
+
+## Test Cases
+
+```sql
+-- Positive: approximate sum over large join
+SELECT SUM(f.amount) * 100  -- scale factor for 1% sample
+FROM fact_sales f TABLESAMPLE BERNOULLI(1)
+JOIN dim_store d ON f.store_id = d.id
+WHERE d.country = 'Japan';
+
+-- Exact: processes 100M matching rows, 45 seconds
+-- Sample: processes 1M rows, 0.5 seconds, ~1% error
+-- Result: $1,234,567 +/- $12,345 (95% CI)
+```
+
+```sql
+-- Positive: approximate average with confidence interval
+SELECT region,
+       AVG(salary) AS est_avg,
+       APPROX_CONFIDENCE(AVG(salary), 0.95) AS ci
+FROM employees TABLESAMPLE BERNOULLI(5)
+GROUP BY region;
+-- 5% sample for per-group estimates
+```
+
+```sql
+-- Negative: MIN/MAX query
+SELECT MIN(price) FROM orders TABLESAMPLE BERNOULLI(1);
+-- Sampling may miss the actual minimum value
+-- MIN is not a linear aggregate; sampling gives biased result
+```
+
+```sql
+-- Negative: query needs exact count for billing
+SELECT COUNT(*) FROM transactions WHERE date = '2024-01-15';
+-- Business requirement for exact number
+```
+
+## References
+
+Chaudhuri, Motwani, Narasayya, "On Random Sampling over Joins" (SIGMOD 1999)
+Agarwal et al., "BlinkDB: Queries with Bounded Errors and Bounded Response Times" (EuroSys 2013)
+Haas & Hellerstein, "Ripple Joins for Online Aggregation" (SIGMOD 1999)
+PostgreSQL: TABLESAMPLE BERNOULLI and SYSTEM
+DuckDB: SAMPLE clause

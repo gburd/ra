@@ -1,0 +1,104 @@
+---
+id: covering-index-scan
+name: Covering Index Scan Selection
+category: physical/access-path-selection
+databases: [postgresql, mysql, mssql, oracle, cockroachdb]
+version: "1.0.0"
+authors: ["Selinger et al.", "Graefe, Goetz"]
+tags: [physical, index, covering, index-only-scan, access-path]
+complexity: O(1)
+benefit_range: [0.3, 0.9]
+---
+
+# Covering Index Scan Selection
+
+## Description
+
+Selects an index-only scan when a secondary index contains all columns
+needed by the query (covering index). This avoids the heap lookup that
+normally follows an index scan, eliminating random I/O to the base table.
+
+**When to apply**: A query references only columns present in an available
+index (as key columns or included columns).
+
+**Key insight**: Index-only scans read sequential, compact index pages
+instead of random heap pages, providing 2-10x speedup.
+
+## Relational Algebra
+
+```latex
+-- Before
+$$
+\pi_{a, b}(\sigma_{a > 10}(TableScan(R)))
+$$
+
+-- After (index on (a) INCLUDE (b) exists)
+$$
+IndexOnlyScan(idx_a_b, a > 10)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("covering-index-scan";
+    "(project ?cols (filter ?pred (tablescan ?table)))" =>
+    "(index-only-scan (find-covering-index ?table ?cols ?pred)
+        ?pred)"
+    if has_covering_index("?table", "?cols", "?pred")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(query: &Query, catalog: &Catalog) -> bool {
+    let needed_cols = query.referenced_columns();
+    catalog.indexes_for(query.table()).iter().any(|idx| {
+        let index_cols: HashSet<_> = idx.key_columns()
+            .chain(idx.included_columns())
+            .collect();
+        needed_cols.is_subset(&index_cols)
+    })
+}
+```
+
+**Restrictions:**
+- Index must cover ALL referenced columns (key + included)
+- Visibility map must be available for MVCC (PostgreSQL)
+- HOT updates may invalidate index-only scan eligibility
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    table_pages: f64,
+    index_pages: f64,
+    selectivity: f64,
+) -> f64 {
+    let heap_cost = table_pages * selectivity * 4.0; // random I/O
+    let index_cost = index_pages * selectivity * 1.0; // sequential
+    heap_cost - index_cost
+}
+```
+
+**Typical benefit**: 30-90% I/O reduction for narrow queries on wide tables.
+
+## Test Cases
+
+```sql
+-- Positive: index on (dept_id, salary) covers the query
+CREATE INDEX idx_dept_sal ON emp(dept_id, salary);
+SELECT dept_id, salary FROM emp WHERE dept_id = 5;
+
+-- Negative: query needs columns not in index
+SELECT dept_id, salary, name FROM emp WHERE dept_id = 5;
+```
+
+## References
+
+- Graefe, G. "Query Evaluation Techniques for Large Databases" (1993)
+- PostgreSQL documentation: Index-Only Scans

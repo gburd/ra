@@ -1,0 +1,346 @@
+---
+id: column-chunk-sizing
+name: Column Chunk Size Selection
+category: execution-models
+version: 1.0.0
+databases: [MonetDB, DuckDB, vectorwise, ClickHouse, Velox]
+authors: [Peter Boncz, Marcin Zukowski]
+tags: [execution, columnar, chunk, vector-size, cache, tuning, batch]
+standard: MonetDB X100 vector sizing
+complexity: O(1) sizing decision + O(n/chunk) overhead
+benefit_range: [1.2, 4.0]
+---
+
+# Column Chunk Size Selection
+
+## Description
+
+Column chunk sizing determines the number of rows processed together as a unit (vector, batch, morsel, or chunk) through the query pipeline. This is one of the most consequential tuning decisions in columnar execution engines because it directly affects CPU cache utilization, SIMD efficiency, function call amortization, and memory consumption.
+
+The original MonetDB/X100 paper established that processing entire columns (MonetDB's original model) wastes cache capacity for multi-operator pipelines, while row-at-a-time processing (Volcano) wastes function call overhead. The "vectorized" sweet spot processes chunks of 1000-4096 values that fit in L1/L2 cache while amortizing per-batch overhead to negligible levels.
+
+Different engines have converged on different defaults:
+- **DuckDB**: 2048 values per vector (hardcoded `STANDARD_VECTOR_SIZE`)
+- **vectorwise**: 1024 values per vector
+- **ClickHouse**: 65536 rows per block (larger, relies on different pipeline model)
+- **Velox**: 1024 values per batch (configurable)
+- **Arrow**: variable batch sizes, typically 1024-65536
+
+The optimal chunk size depends on row width, number of columns accessed simultaneously, operator complexity, and the target cache level (L1 vs L2).
+
+**Key characteristics:**
+- **Cache-fitting**: Chunk * active_columns * column_width should fit in L2 cache
+- **SIMD alignment**: Chunk size should be a multiple of SIMD lane width (4/8/16)
+- **Function call amortization**: At chunk >= 64, call overhead is < 1% of work
+- **Pipeline width**: More simultaneous columns need smaller chunks
+- **Operator-dependent**: Hash tables need cache space alongside the chunk
+
+**Trade-offs:**
+- Too small: per-batch overhead dominates (function calls, null bitmap setup, memory allocation)
+- Too large: working set spills from L2 cache, causing 5-20x slowdown per access
+- One-size-fits-all is suboptimal: different pipeline stages benefit from different sizes
+- Dynamic resizing adds complexity but can improve performance by 10-30%
+
+## Relational Algebra
+
+```
+ChunkSize(pipeline, hardware) -> optimal_size
+
+fn select_chunk_size(pipeline, hw):
+  active_cols = pipeline.columns_in_flight()
+  avg_col_width = pipeline.avg_column_width()
+  has_hash_op = pipeline.contains(HashJoin | HashAgg)
+
+  // Target: working set fits in L2 cache
+  available_cache = hw.l2_cache_bytes
+  if has_hash_op:
+    available_cache = available_cache / 2  // share with hash table
+
+  target_working_set = active_cols * avg_col_width
+  chunk_size = available_cache / target_working_set
+
+  // Round to SIMD-friendly boundary
+  chunk_size = round_down_to(chunk_size, hw.simd_width)
+
+  // Apply bounds
+  return clamp(chunk_size, 64, 65536)
+```
+
+## Implementation
+
+```rust
+/// Hardware cache parameters for chunk sizing
+pub struct CacheParams {
+    pub l1_data_bytes: usize,   // typically 32-48 KB
+    pub l2_bytes: usize,        // typically 256 KB - 1 MB
+    pub l3_bytes_per_core: usize,  // typically 1.5-3 MB
+    pub cache_line_bytes: usize,   // 64 bytes
+    pub simd_width_bytes: usize,   // 16 (SSE), 32 (AVX2), 64 (AVX-512)
+}
+
+impl Default for CacheParams {
+    fn default() -> Self {
+        Self {
+            l1_data_bytes: 48 * 1024,
+            l2_bytes: 512 * 1024,
+            l3_bytes_per_core: 2 * 1024 * 1024,
+            cache_line_bytes: 64,
+            simd_width_bytes: 32,
+        }
+    }
+}
+
+/// Pipeline characteristics affecting chunk size
+pub struct PipelineProfile {
+    /// Number of columns simultaneously live in the pipeline
+    pub columns_in_flight: usize,
+    /// Average bytes per column value
+    pub avg_value_width: usize,
+    /// Whether pipeline includes hash-based operator
+    pub has_hash_operator: bool,
+    /// Estimated hash table size if applicable
+    pub hash_table_bytes: usize,
+    /// Whether pipeline includes sort operator
+    pub has_sort: bool,
+}
+
+/// Compute optimal chunk size for a pipeline stage
+pub fn optimal_chunk_size(
+    profile: &PipelineProfile,
+    cache: &CacheParams,
+) -> usize {
+    // Step 1: Determine target cache level
+    // L1 for simple scan+filter, L2 for complex pipelines
+    let target_cache = if profile.columns_in_flight <= 3
+        && \!profile.has_hash_operator
+    {
+        cache.l1_data_bytes
+    } else {
+        cache.l2_bytes
+    };
+
+    // Step 2: Subtract hash table footprint from available cache
+    let available = if profile.has_hash_operator {
+        // Hash table in L3, chunk data in L2
+        // But probe keys also use L2, so reduce
+        target_cache / 2
+    } else {
+        // Most of target cache available for chunk data
+        (target_cache * 3) / 4 // leave 25% for metadata/overhead
+    };
+
+    // Step 3: Compute chunk size
+    let bytes_per_row = profile.columns_in_flight
+        * profile.avg_value_width;
+
+    if bytes_per_row == 0 {
+        return 2048; // default
+    }
+
+    let raw_chunk = available / bytes_per_row;
+
+    // Step 4: Round to SIMD-friendly boundary
+    let simd_elements = cache.simd_width_bytes
+        / profile.avg_value_width.max(1);
+    let simd_aligned = if simd_elements > 0 {
+        (raw_chunk / simd_elements) * simd_elements
+    } else {
+        raw_chunk
+    };
+
+    // Step 5: Apply bounds
+    simd_aligned.clamp(64, 65536)
+}
+
+/// Per-pipeline-stage chunk sizing
+pub struct PipelineChunkConfig {
+    pub scan_chunk: usize,
+    pub filter_chunk: usize,
+    pub join_probe_chunk: usize,
+    pub agg_chunk: usize,
+    pub output_chunk: usize,
+}
+
+impl PipelineChunkConfig {
+    pub fn compute(
+        scan_cols: usize,
+        filter_cols: usize,
+        join_cols: usize,
+        agg_cols: usize,
+        output_cols: usize,
+        value_width: usize,
+        cache: &CacheParams,
+    ) -> Self {
+        // Scan: few columns, large chunks
+        let scan_profile = PipelineProfile {
+            columns_in_flight: scan_cols,
+            avg_value_width: value_width,
+            has_hash_operator: false,
+            hash_table_bytes: 0,
+            has_sort: false,
+        };
+
+        // Join probe: needs cache for hash table
+        let join_profile = PipelineProfile {
+            columns_in_flight: join_cols,
+            avg_value_width: value_width,
+            has_hash_operator: true,
+            hash_table_bytes: 0,
+            has_sort: false,
+        };
+
+        // Aggregation: needs cache for hash table
+        let agg_profile = PipelineProfile {
+            columns_in_flight: agg_cols,
+            avg_value_width: value_width,
+            has_hash_operator: true,
+            hash_table_bytes: 0,
+            has_sort: false,
+        };
+
+        Self {
+            scan_chunk: optimal_chunk_size(
+                &scan_profile, cache,
+            ),
+            filter_chunk: optimal_chunk_size(
+                &PipelineProfile {
+                    columns_in_flight: filter_cols,
+                    avg_value_width: value_width,
+                    has_hash_operator: false,
+                    hash_table_bytes: 0,
+                    has_sort: false,
+                },
+                cache,
+            ),
+            join_probe_chunk: optimal_chunk_size(
+                &join_profile, cache,
+            ),
+            agg_chunk: optimal_chunk_size(
+                &agg_profile, cache,
+            ),
+            output_chunk: optimal_chunk_size(
+                &PipelineProfile {
+                    columns_in_flight: output_cols,
+                    avg_value_width: value_width,
+                    has_hash_operator: false,
+                    hash_table_bytes: 0,
+                    has_sort: false,
+                },
+                cache,
+            ),
+        }
+    }
+}
+
+/// Cost model: effect of chunk size on throughput
+pub fn chunk_throughput_model(
+    chunk_size: usize,
+    per_batch_overhead_ns: f64,
+    per_value_compute_ns: f64,
+    value_width: usize,
+    columns_in_flight: usize,
+    l2_cache_bytes: usize,
+) -> f64 {
+    let working_set = chunk_size * columns_in_flight
+        * value_width;
+
+    // Cache miss penalty
+    let cache_penalty = if working_set <= l2_cache_bytes {
+        1.0 // all in L2
+    } else {
+        // Fraction that spills to L3/RAM
+        let spill_fraction = 1.0
+            - (l2_cache_bytes as f64 / working_set as f64);
+        1.0 + spill_fraction * 4.0 // L3 is ~4x slower than L2
+    };
+
+    let compute_time = chunk_size as f64
+        * per_value_compute_ns * cache_penalty;
+    let total_time = per_batch_overhead_ns + compute_time;
+
+    // Throughput: values per nanosecond
+    chunk_size as f64 / total_time
+}
+```
+
+## Cost Model
+
+**Function call amortization:**
+
+| Chunk Size | Per-value overhead (5ns call) | Overhead % (1ns/value compute) |
+|------------|------------------------------|-------------------------------|
+| 1 (Volcano) | 5.0 ns | 83% |
+| 64 | 0.08 ns | 7% |
+| 256 | 0.02 ns | 2% |
+| 1024 | 0.005 ns | 0.5% |
+| 4096 | 0.001 ns | 0.1% |
+
+Beyond 1024, further amortization gains are negligible.
+
+**Cache fitting (256 KB L2, 8-byte values):**
+
+| Columns in Flight | Max Chunk (L2-resident) | Recommended |
+|-------------------|------------------------|-------------|
+| 1 | 32768 | 8192 |
+| 2 | 16384 | 4096 |
+| 4 | 8192 | 2048 |
+| 8 | 4096 | 1024 |
+| 16 | 2048 | 512 |
+| 32 | 1024 | 256 |
+
+**SIMD efficiency:**
+- AVX2 (256-bit): processes 4 doubles or 8 ints per instruction
+- Chunk must be >= SIMD width for full utilization
+- Non-aligned chunks waste last partial SIMD operation
+- Power-of-2 chunks ensure alignment: 128, 256, 512, 1024, 2048, 4096
+
+**Memory allocation:**
+- Per-chunk: null bitmap (chunk/8 bytes) + selection vector (chunk * 4 bytes)
+- Small chunks: allocation overhead significant
+- Large chunks: single allocation amortized well
+
+## Test Cases
+
+```sql
+-- Test 1: Narrow scan (1 column) -> large chunks
+SELECT SUM(quantity) FROM lineitem;
+-- 1 column, 8 bytes/value, L2=256KB
+-- Optimal chunk: ~8192 (fits in L2 with margin)
+-- Throughput limited by memory bandwidth, not cache
+
+-- Test 2: Wide pipeline (many columns) -> small chunks
+SELECT * FROM lineitem
+WHERE l_shipdate > '1995-01-01'
+  AND l_discount BETWEEN 0.05 AND 0.07
+  AND l_quantity < 24;
+-- 16 output columns in flight after filter
+-- Optimal chunk: ~512 (16 * 8 * 512 = 64KB fits in L2)
+
+-- Test 3: Hash join probe -> reduced chunk
+SELECT o.*, l.l_quantity
+FROM orders o JOIN lineitem l ON o.order_id = l.order_id;
+-- Hash table in L3, probe keys in L2
+-- Available L2 halved -> chunk halved
+-- Optimal chunk: ~1024 (vs 2048 without hash table)
+
+-- Test 4: ClickHouse-style large blocks
+SELECT uniqExact(user_id) FROM events
+WHERE event_date = today();
+-- ClickHouse: 65536-row blocks, column-at-a-time within block
+-- Different model: entire column read, not chunked
+-- Works because MergeTree reads contiguous granules (8192 rows)
+```
+
+## References
+
+1. **Boncz, Peter A.; Zukowski, Marcin; Nes, Niels**. "MonetDB/X100: Hyper-Pipelining Query Execution." CIDR 2005.
+   - Original analysis of vector size impact on performance
+
+2. **Zukowski, Marcin**. "Balancing Vectorized Query Execution with Bandwidth-Optimized Storage." PhD Thesis, Universiteit van Amsterdam, 2009.
+   - Comprehensive analysis of vector sizing, cache effects, and operator interaction
+
+3. **Kersten, Timo et al**. "Everything You Always Wanted to Know About Compiled and Vectorized Query Engines." VLDB 2018.
+   - Batch size analysis in vectorized vs compiled execution
+
+4. **Raasveldt, Mark and Hannes Muhleisen**. "DuckDB: an Embeddable Analytical Database." SIGMOD 2019.
+   - DuckDB's 2048-row vector size rationale and design

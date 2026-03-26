@@ -1,0 +1,117 @@
+---
+id: calcite-minus-to-anti-join
+name: Calcite MinusToAntiJoinRule
+category: logical/set-operations
+databases: [calcite, postgresql, mysql]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [logical, calcite, minus, except, anti-join, rewrite]
+complexity: O(n)
+benefit_range: [0.1, 0.6]
+---
+
+# Calcite MinusToAntiJoinRule
+
+## Description
+
+Translates an EXCEPT (MINUS) operation into a series of anti-joins.
+Anti-joins can leverage indexes and be executed more efficiently than
+the sort-based or hash-based set difference operation.
+
+**When to apply**: A MINUS (EXCEPT) operator exists in the plan and
+can be converted to anti-joins for potentially better execution.
+
+**Why it works**: EXCEPT returns rows from the first input that do
+not appear in the second. An anti-join produces the same result:
+return left rows where no match exists on the right.
+
+**Calcite class**: `org.apache.calcite.rel.rules.MinusToAntiJoinRule`
+
+## Relational Algebra
+
+```latex
+-- Before: set difference
+$$
+R EXCEPT S
+$$
+
+-- After: anti-join with distinct
+$$
+\gamma_{*}(R ANTI JOIN[IS NOT DISTINCT FROM] S)
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("calcite-minus-to-anti-join";
+    "(minus ?left ?right)" =>
+    "(aggregate (all-cols)
+        (anti-join (is-not-distinct-from-all) ?left ?right))"
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(minus: &Minus) -> bool {
+    !minus.all // Only EXCEPT DISTINCT, not EXCEPT ALL
+}
+```
+
+**Restrictions:**
+- Only for EXCEPT DISTINCT (not EXCEPT ALL)
+- N-way EXCEPT is converted by repeated application
+- Uses IS NOT DISTINCT FROM for NULL-safe comparison
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    left_rows: f64,
+    right_rows: f64,
+    has_index: bool,
+) -> f64 {
+    if has_index {
+        // Anti-join with index vs hash set difference
+        0.5
+    } else {
+        0.1
+    }
+}
+```
+
+**Typical benefit**: 10-60% depending on index availability.
+
+## Test Cases
+
+```sql
+-- Positive: simple EXCEPT
+SELECT ename FROM emp WHERE deptno = 10
+EXCEPT
+SELECT ename FROM emp WHERE deptno = 20;
+-- Becomes anti-join on ename
+```
+
+```sql
+-- Positive: multi-column EXCEPT
+SELECT deptno, job FROM emp
+EXCEPT
+SELECT deptno, job FROM archived_emp;
+-- Anti-join on (deptno, job)
+```
+
+```sql
+-- Negative: EXCEPT ALL
+SELECT deptno FROM emp
+EXCEPT ALL
+SELECT deptno FROM dept;
+-- EXCEPT ALL cannot use simple anti-join
+```
+
+## References
+
+Calcite: core/src/main/java/org/apache/calcite/rel/rules/MinusToAntiJoinRule.java (commit af6367d)

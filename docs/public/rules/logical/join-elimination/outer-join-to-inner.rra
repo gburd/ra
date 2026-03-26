@@ -1,0 +1,137 @@
+---
+id: outer-join-to-inner
+name: Outer Join to Inner Join Simplification
+category: logical/join-elimination
+databases: [postgresql, mysql, oracle, duckdb, mssql, cockroachdb]
+version: "1.0.0"
+authors: ["Galindo-Legaria, Cesar", "Rosenthal, Arnon"]
+tags: [logical, join, outer-join, inner-join, simplification, null-rejection]
+complexity: O(1)
+benefit_range: [0.05, 0.3]
+---
+
+# Outer Join to Inner Join Simplification
+
+## Description
+
+Converts a LEFT/RIGHT/FULL OUTER JOIN to an INNER JOIN when a downstream
+predicate rejects NULL values on the preserved side. If a WHERE clause
+filters out rows where the outer-joined columns are NULL, the outer join's
+NULL-extension behavior is negated, making it semantically equivalent to
+an inner join. Inner joins enable more optimization opportunities (join
+reordering, predicate pushdown).
+
+**When to apply**: Outer join followed by a predicate that rejects NULLs
+on the nullable side (null-rejecting predicate).
+
+## Relational Algebra
+
+```latex
+-- Before: LEFT JOIN with null-rejecting WHERE
+$$
+\sigma_{S.col IS NOT NULL}(R LEFT JOIN S ON R.id = S.fk)
+$$
+
+-- After: simplified to INNER JOIN
+$$
+R INNER JOIN S ON R.id = S.fk
+$$
+
+```
+
+## Implementation
+
+```rust
+use egg::{rewrite as rw, *};
+
+rw!("left-join-to-inner";
+    "(filter ?pred (left-join ?cond ?left ?right))" =>
+    "(filter ?pred (join ?cond ?left ?right))"
+    if is_null_rejecting("?pred", "?right")
+),
+
+rw!("right-join-to-inner";
+    "(filter ?pred (right-join ?cond ?left ?right))" =>
+    "(filter ?pred (join ?cond ?left ?right))"
+    if is_null_rejecting("?pred", "?left")
+),
+
+rw!("full-join-to-left";
+    "(filter ?pred (full-join ?cond ?left ?right))" =>
+    "(filter ?pred (left-join ?cond ?left ?right))"
+    if is_null_rejecting("?pred", "?right")
+    if not_null_rejecting("?pred", "?left")
+),
+```
+
+## Preconditions
+
+```rust
+fn applicable(filter: &Filter, join: &OuterJoin) -> bool {
+    let nullable_side = join.nullable_side();
+    let pred = filter.predicate();
+    // Predicate must reject NULLs from the nullable side
+    pred.is_null_rejecting_on(&nullable_side)
+}
+
+fn is_null_rejecting(pred: &Predicate, cols: &ColumnSet) -> bool {
+    // A predicate is null-rejecting if it evaluates to FALSE or UNKNOWN
+    // when all columns from the set are NULL
+    // Examples: col > 5, col IS NOT NULL, col = 'value'
+    // Counter-examples: col IS NULL, COALESCE(col, 0) > 5
+    pred.evaluates_to_false_or_unknown_when_null(cols)
+}
+```
+
+**Restrictions:**
+- COALESCE, IFNULL, IS NULL predicates are NOT null-rejecting
+- Predicate must be in a position that filters the outer join output
+- Predicates inside ON clause do not qualify (different semantics)
+
+## Cost Model
+
+```rust
+fn estimated_benefit(
+    rows: f64,
+    null_ratio: f64,
+) -> f64 {
+    // Inner join enables join reordering and commutation
+    let reorder_benefit = rows * 0.1;
+    // Fewer rows if NULLs were significant
+    let row_reduction = rows * null_ratio;
+    reorder_benefit + row_reduction
+}
+```
+
+**Typical benefit**: 5-30% from enabling join reordering.
+
+## Test Cases
+
+```sql
+-- Positive: WHERE clause rejects NULLs
+SELECT o.id, c.name
+FROM orders o LEFT JOIN customers c ON o.cust_id = c.id
+WHERE c.name = 'Smith';
+-- c.name = 'Smith' rejects NULL: simplify to INNER JOIN
+
+-- Positive: IS NOT NULL filter
+SELECT o.id, c.name
+FROM orders o LEFT JOIN customers c ON o.cust_id = c.id
+WHERE c.id IS NOT NULL;
+-- Explicit null rejection: simplify to INNER JOIN
+
+-- Negative: COALESCE preserves NULLs
+SELECT o.id, COALESCE(c.name, 'Unknown')
+FROM orders o LEFT JOIN customers c ON o.cust_id = c.id;
+-- No null-rejecting predicate: keep LEFT JOIN
+
+-- Negative: IS NULL is NOT null-rejecting
+SELECT o.id FROM orders o LEFT JOIN customers c ON o.cust_id = c.id
+WHERE c.id IS NULL;
+-- This specifically looks for unmatched rows: keep LEFT JOIN
+```
+
+## References
+
+- Galindo-Legaria, C., Rosenthal, A. "Outerjoin Simplification and Reordering" (TODS 1997)
+- PostgreSQL: reduce_outer_joins() in planner

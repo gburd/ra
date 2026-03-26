@@ -1,0 +1,48 @@
+---
+id: neo4j-pattern-reorder
+name: "Pattern Expansion Reordering"
+category: logical/pattern-reorder
+databases: [neo4j]
+version: "1.0.0"
+authors: ["Database Contributors", "RA Contributors"]
+tags: [database-mining, neo4j, optimization]
+complexity: "O(n)"
+benefit_range: [1.0, 10.0]
+---
+
+# Pattern Expansion Reordering
+
+## Description
+
+Reorders graph pattern matching to expand from most selective predicates first.
+
+**When to apply**: During query optimization phase.
+
+## Relational Algebra
+
+```latex
+-- Before
+$$
+(expand (expand (scan users) :FOLLOWS) :CREATED_POST)
+$$
+
+-- After
+$$
+(expand (expand (filter (scan users) (verified)) :FOLLOWS) :CREATED_POST)
+$$
+
+```
+
+## Preconditions
+
+- Selectivity estimated for predicates
+
+## Test Cases
+
+```sql
+SELECT * FROM table WHERE condition;
+```
+
+## References
+
+- Database documentation
