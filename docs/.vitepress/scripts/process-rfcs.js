@@ -108,7 +108,7 @@ function addCrossLinks(content, currentRFC) {
         const slug = metadata.filename;
         // Keep the original format (with or without leading zeros)
         const displayNum = match.match(/RFC\s+(0*\d+)/)[1];
-        return `[RFC ${displayNum}](/ra/maintainers/rfcs/${slug})`;
+        return `[RFC ${displayNum}](/maintainers/rfcs/${slug})`;
       }
       // If RFC doesn't exist in our collection, leave it as-is
       return match;
@@ -132,7 +132,7 @@ function generateReferencedBySection(rfcNumber) {
     .map(num => {
       const metadata = rfcMetadata.get(num);
       if (metadata) {
-        return `- [RFC ${parseInt(num)}: ${metadata.title}](/ra/maintainers/rfcs/${metadata.filename})`;
+        return `- [RFC ${parseInt(num)}: ${metadata.title}](/maintainers/rfcs/${metadata.filename})`;
       }
       return null;
     })
@@ -282,7 +282,7 @@ or architectural decision.
     categoryRFCs.forEach(rfc => {
       const badge = statusBadges[rfc.status] || '❓';
       const num = parseInt(rfc.number);
-      markdown += `### [RFC ${num}: ${rfc.title}](/ra/maintainers/rfcs/${rfc.filename}) ${badge}\n\n`;
+      markdown += `### [RFC ${num}: ${rfc.title}](/maintainers/rfcs/${rfc.filename}) ${badge}\n\n`;
       markdown += `- **Status:** ${rfc.status}\n`;
       markdown += `- **Author:** ${rfc.author}\n`;
       markdown += `- **Date:** ${rfc.startDate}\n`;
@@ -355,7 +355,7 @@ Each RFC goes through a review process before being accepted or implemented.
 
 ## Finding RFCs
 
-- [Comprehensive RFC Index](/ra/maintainers/rfcs/) - All RFCs organized by category
+- [Comprehensive RFC Index](/maintainers/rfcs/) - All RFCs organized by category
 - Browse this directory for individual RFC documents
 - Use the site search to find RFCs by keyword
 
