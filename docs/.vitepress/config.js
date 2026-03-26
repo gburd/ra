@@ -7,6 +7,19 @@ import algebraGrammar from './syntax/algebra.tmLanguage.json'
 import rraGrammar from './syntax/rra.tmLanguage.json'
 import sqlInteractiveGrammar from './syntax/sql-interactive.tmLanguage.json'
 import cronGrammar from './syntax/cron.tmLanguage.json'
+import fs from 'fs'
+import path from 'path'
+import { fileURLToPath } from 'url'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+
+// Load RFC navigation if it exists
+let rfcNavigation = null
+const rfcNavPath = path.join(__dirname, 'rfc-nav.json')
+if (fs.existsSync(rfcNavPath)) {
+  rfcNavigation = JSON.parse(fs.readFileSync(rfcNavPath, 'utf-8'))
+}
 
 export default withMermaid(defineConfig({
   title: 'Ra Optimizer',
@@ -211,7 +224,9 @@ export default withMermaid(defineConfig({
             { text: 'Bugs & Issues', link: '/maintainers/bugs' },
             { text: 'Release Process', link: '/maintainers/release' }
           ]
-        }
+        },
+        // Include RFC navigation if available
+        ...(rfcNavigation ? [rfcNavigation] : [])
       ]
     },
     socialLinks: [

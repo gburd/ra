@@ -1,0 +1,3 @@
+# Generated RFC files
+# These are auto-generated from rfcs/text/ during build
+*.md
