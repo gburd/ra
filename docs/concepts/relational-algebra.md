@@ -21,7 +21,7 @@ graph LR
 
 ### Selection ($\sigma$)
 
-Filters rows matching a predicate. {{sigma[p](R)}} selects rows
+Filters rows matching a predicate. \ra{sigma[p](R)} selects rows
 from $R$ where predicate $p$ holds.
 
 $$\sigma_{p}(R)$$
@@ -30,7 +30,7 @@ $$\sigma_{p}(R)$$
 
 ### Projection ($\pi$)
 
-Selects a subset of columns. {{pi[A1, A2](R)}} projects columns
+Selects a subset of columns. \ra{pi[A1, A2](R)} projects columns
 $A_1, A_2$ from $R$.
 
 $$\pi_{A_1, A_2, \ldots}(R)$$
@@ -43,25 +43,25 @@ Combines rows from two relations:
 
 | Operation | Notation | Symbol |
 |-----------|----------|--------|
-| Inner join | {{R join[c] S}} | $R \bowtie_{c} S$ |
-| Cross product | {{R cross S}} | $R \times S$ |
-| Natural join | {{R natural S}} | $R \bowtie S$ |
-| Left outer join | {{R leftjoin S}} | $R \mathbin{\ojoin\bowtie} S$ |
-| Right outer join | {{R rightjoin S}} | $R \mathbin{\bowtie\ojoin} S$ |
-| Semijoin | {{R semijoin S}} | $R \ltimes S$ |
-| Antijoin | {{R antijoin S}} | $R \rhd S$ |
+| Inner join | \ra{R join[c] S} | $R \bowtie_{c} S$ |
+| Cross product | \ra{R cross S} | $R \times S$ |
+| Natural join | \ra{R natural S} | $R \bowtie S$ |
+| Left outer join | \ra{R leftjoin S} | $R \mathbin{\ojoin\bowtie} S$ |
+| Right outer join | \ra{R rightjoin S} | $R \mathbin{\bowtie\ojoin} S$ |
+| Semijoin | \ra{R semijoin S} | $R \ltimes S$ |
+| Antijoin | \ra{R antijoin S} | $R \rhd S$ |
 
 ### Set Operations
 
 | Operation | Notation | Symbol |
 |-----------|----------|--------|
-| Union | {{R union S}} | $R \cup S$ |
-| Intersection | {{R intersect S}} | $R \cap S$ |
-| Difference | {{R except S}} | $R - S$ |
+| Union | \ra{R union S} | $R \cup S$ |
+| Intersection | \ra{R intersect S} | $R \cap S$ |
+| Difference | \ra{R except S} | $R - S$ |
 
 ### Aggregation ($\gamma$)
 
-Groups and summarizes data. {{gamma[G; agg(A)](R)}} groups $R$ by
+Groups and summarizes data. \ra{gamma[G; agg(A)](R)} groups $R$ by
 $G$ and computes aggregate $\text{agg}(A)$.
 
 $$\gamma_{G;\; \text{agg}(A)}(R)$$
@@ -74,17 +74,17 @@ The optimizer uses equivalence rules to transform one relational
 algebra expression into another that produces the same result but
 may have lower cost. Examples:
 
-- **Predicate pushdown**: {{sigma[p](R join[c] S)}} becomes
-  {{sigma[p](R) join[c] S}} when $p$ references only $R$
+- **Predicate pushdown**: \ra{sigma[p](R join[c] S)} becomes
+  \ra{sigma[p](R) join[c] S} when $p$ references only $R$
 
   $$\sigma_{p}(R \bowtie_{c} S) \Rightarrow \sigma_{p}(R) \bowtie_{c} S$$
 
-- **Join commutativity**: {{R join S}} is equivalent to {{S join R}}
+- **Join commutativity**: \ra{R join S} is equivalent to \ra{S join R}
 
   $$R \bowtie S \equiv S \bowtie R$$
 
-- **Join associativity**: {{(R join S) join T}} is equivalent to
-  {{R join (S join T)}}
+- **Join associativity**: \ra{(R join S) join T} is equivalent to
+  \ra{R join (S join T)}
 
   $$\left(R \bowtie S\right) \bowtie T \equiv R \bowtie \left(S \bowtie T\right)$$
 
@@ -96,7 +96,7 @@ full syntax. In this documentation, relational algebra expressions
 can be written as:
 
 - **KaTeX math**: `$\sigma_{p}(R)$` renders as $\sigma_{p}(R)$
-- **Inline plugin**: `{{sigma[p](R)}}` renders as {{sigma[p](R)}}
+- **Inline plugin**: `\ra{sigma[p](R)}` renders as \ra{sigma[p](R)}
 - **Vue component**: `<RelAlgebra expr="sigma[p](R)" />` renders
   with hover tooltips
 

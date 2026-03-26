@@ -30,33 +30,33 @@ $$\pi_{a,b}\left(\sigma_{x > 10}(R) \bowtie S\right)$$
 
 ## Inline Algebra Plugin
 
-The `{{...}}` syntax auto-converts text notation to Unicode symbols:
+The `{{...}}` or `\ra{...}` syntax auto-converts text notation to Unicode symbols:
 
 | Text Notation | Rendered |
 |---------------|----------|
-| `sigma[p](R)` | {{sigma[p](R)}} |
-| `pi[a,b](R)` | {{pi[a,b](R)}} |
-| `rho[S](R)` | {{rho[S](R)}} |
-| `R join S` | {{R join S}} |
-| `R join[c] S` | {{R join[c] S}} |
-| `R semijoin S` | {{R semijoin S}} |
-| `R antijoin S` | {{R antijoin S}} |
-| `R leftjoin S` | {{R leftjoin S}} |
-| `R rightjoin S` | {{R rightjoin S}} |
-| `R fulljoin S` | {{R fulljoin S}} |
-| `R union S` | {{R union S}} |
-| `R intersect S` | {{R intersect S}} |
-| `R except S` | {{R except S}} |
-| `R cross S` | {{R cross S}} |
-| `gamma[G; sum(A)](R)` | {{gamma[G; sum(A)](R)}} |
+| `sigma[p](R)` | \ra{sigma[p](R)} |
+| `pi[a,b](R)` | \ra{pi[a,b](R)} |
+| `rho[S](R)` | \ra{rho[S](R)} |
+| `R join S` | \ra{R join S} |
+| `R join[c] S` | \ra{R join[c] S} |
+| `R semijoin S` | \ra{R semijoin S} |
+| `R antijoin S` | \ra{R antijoin S} |
+| `R leftjoin S` | \ra{R leftjoin S} |
+| `R rightjoin S` | \ra{R rightjoin S} |
+| `R fulljoin S` | \ra{R fulljoin S} |
+| `R union S` | \ra{R union S} |
+| `R intersect S` | \ra{R intersect S} |
+| `R except S` | \ra{R except S} |
+| `R cross S` | \ra{R cross S} |
+| `gamma[G; sum(A)](R)` | \ra{gamma[G; sum(A)](R)} |
 
 ### Complex Expressions
 
 Predicate pushdown:
-{{sigma[p](R join[c] S)}} becomes {{sigma[p](R) join[c] S}}
+\ra{sigma[p](R join[c] S)} becomes \ra{sigma[p](R) join[c] S}
 
 Nested operations:
-{{pi[a,b](sigma[x > 10](R) join S)}}
+\ra{pi[a,b](sigma[x > 10](R) join S)}
 
 ## Vue Component
 
@@ -84,7 +84,7 @@ All three methods side by side for the same expression:
 | Method | Output |
 |--------|--------|
 | KaTeX | $\sigma_{p}(R \bowtie_{c} S)$ |
-| Plugin `{{...}}` | {{sigma[p](R join[c] S)}} |
+| Plugin <code>\ra{...}</code> | \ra{sigma[p](R join[c] S)} |
 | Component | <RelAlgebra expr="sigma[p](R join[c] S)" /> |
 
 ## Operator Reference

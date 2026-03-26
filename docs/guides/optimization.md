@@ -18,7 +18,7 @@ flowchart TD
 ```
 
 A SQL query like `SELECT * FROM t1 WHERE x > 10` is first parsed into
-a relational algebra expression: {{sigma[x > 10](t1)}}
+a relational algebra expression: \ra{sigma[x > 10](t1)}
 (i.e., $\sigma_{x > 10}(\text{t1})$). The optimizer then explores
 equivalent expressions using rewrite rules.
 
@@ -37,7 +37,7 @@ ra-cli explain \
   "SELECT c.name FROM customers c JOIN orders o ON c.id = o.cid"
 ```
 
-This query becomes {{pi[c.name](customers join[c.id = o.cid] orders)}}
+This query becomes \ra{pi[c.name](customers join[c.id = o.cid] orders)}
 and the optimizer applies rules like predicate pushdown and join
 reordering to find the lowest-cost plan.
 
@@ -59,9 +59,9 @@ frequently triggered ones:
 
 | Transformation | Before | After |
 |----------------|--------|-------|
-| Predicate pushdown | {{sigma[p](R join S)}} | {{sigma[p](R) join S}} |
-| Join commutativity | {{R join S}} | {{S join R}} |
-| Projection pushdown | {{pi[a](R join S)}} | {{pi[a](pi[a,k](R) join pi[a,k](S))}} |
+| Predicate pushdown | \ra{sigma[p](R join S)} | \ra{sigma[p](R) join S} |
+| Join commutativity | \ra{R join S} | \ra{S join R} |
+| Projection pushdown | \ra{pi[a](R join S)} | \ra{pi[a](pi[a,k](R) join pi[a,k](S))} |
 
 See [Relational Algebra](../concepts/relational-algebra.md) for the
 full operator reference.

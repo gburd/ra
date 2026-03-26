@@ -208,7 +208,7 @@ Can be computed incrementally:
 | `SUM(x)` | $\text{sum} + x$ | O(1) |
 | `MIN(x)` | $\min(\text{current}, x)$ | O(1) |
 | `MAX(x)` | $\max(\text{current}, x)$ | O(1) |
-| `AVG(x)` | $\frac{\text{sum}}{{\text{count}}}$ | O(1) - store sum+count |
+| `AVG(x)` | $\frac{\text{sum}}{ {\text{count}} }$ | O(1) - store sum+count |
 
 ### Holistic (Non-Decomposable)
 
