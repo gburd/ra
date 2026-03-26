@@ -719,6 +719,7 @@ impl DatabaseAdapter for StoolapAdapter {
         }
     }
 
+    #[allow(invalid_reference_casting)]
     fn gather_statistics(
         &self,
     ) -> Result<HashMap<String, TableStats>, AdapterError>
@@ -746,6 +747,7 @@ impl DatabaseAdapter for StoolapAdapter {
         }
     }
 
+    #[allow(invalid_reference_casting)]
     fn gather_column_stats(
         &self,
         table: &str,
@@ -771,6 +773,7 @@ impl DatabaseAdapter for StoolapAdapter {
         }
     }
 
+    #[allow(invalid_reference_casting)]
     fn get_schema_info(
         &self,
     ) -> Result<SchemaInfo, AdapterError> {
