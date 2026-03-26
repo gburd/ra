@@ -130,15 +130,11 @@
               set -e
               cd docs
 
-              # Clean and reinstall to avoid rollup native module issues
-              if [ -d node_modules ]; then
-                echo "🧹 Cleaning old node_modules..."
-                rm -rf node_modules package-lock.json
+              # Install dependencies if needed
+              if [ ! -d node_modules ]; then
+                echo "📦 Installing dependencies with npm..."
+                ${pkgs.nodejs_20}/bin/npm install
               fi
-
-              echo "📦 Installing dependencies with pnpm..."
-              ${pkgs.nodePackages.pnpm}/bin/pnpm install --frozen-lockfile || \
-                ${pkgs.nodePackages.pnpm}/bin/pnpm install
 
               echo "📚 Starting documentation server..."
               echo ""
@@ -148,7 +144,7 @@
               echo "Press Ctrl+C to stop the server"
               echo ""
 
-              exec ${pkgs.nodePackages.pnpm}/bin/pnpm run dev
+              exec ${pkgs.nodejs_20}/bin/npm run dev
             '');
           };
 
@@ -160,14 +156,14 @@
               set -e
               cd docs
 
-              # Install pnpm dependencies if needed
+              # Install npm dependencies if needed
               if [ ! -d node_modules ]; then
-                echo "📦 Installing pnpm dependencies..."
-                ${pkgs.nodePackages.pnpm}/bin/pnpm install
+                echo "📦 Installing npm dependencies..."
+                ${pkgs.nodejs_20}/bin/npm install
               fi
 
               echo "📚 Building documentation..."
-              ${pkgs.nodePackages.pnpm}/bin/pnpm run build:docs
+              ${pkgs.nodejs_20}/bin/npm run build:docs
 
               echo "✅ Documentation built successfully!"
               echo "   Output: docs/.vitepress/dist/"

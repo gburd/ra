@@ -37,6 +37,22 @@ export default withMermaid(defineConfig({
       { ...sqlInteractiveGrammar, name: 'sql-interactive' },
       { ...cronGrammar, name: 'cron' },
     ],
+    languageAlias: {
+      // Fallback languages that use base syntax highlighting
+      'statistics-editor': 'json',
+      'cost-model': 'json',
+      'statistics-viewer': 'json',
+      'statistics-lab': 'json',
+      'optimization-trace': 'json',
+      'facts-editor': 'yaml',
+      'hardware-simulator': 'yaml',
+      'query-tuner': 'sql',
+      'schema-explorer': 'sql',
+      'aggregation-analyzer': 'sql',
+      'dialect-translator': 'sql',
+      'window-explorer': 'sql',
+      'feature-matrix': 'markdown'
+    },
     config: (md) => {
       md.use(katex)
       md.use(algebraPlugin)
