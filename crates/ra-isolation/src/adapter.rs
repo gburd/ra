@@ -194,6 +194,7 @@ impl DatabaseAdapter for MockAdapter {
 }
 
 #[cfg(test)]
+#[allow(clippy::panic)] // Tests may panic for early failure reporting
 mod tests {
     use super::*;
 
@@ -287,18 +288,18 @@ mod tests {
         let r2 = dml_result();
         let mut adapter = MockAdapter::new("test", vec![r1.clone(), r2.clone()]);
 
-        let got1 = adapter.execute("SELECT 1").unwrap();
+        let got1 = adapter.execute("SELECT 1").expect("query should execute successfully");
         assert_eq!(got1, r1);
 
-        let got2 = adapter.execute("INSERT INTO t VALUES (1)").unwrap();
+        let got2 = adapter.execute("INSERT INTO t VALUES (1)").expect("query should execute successfully");
         assert_eq!(got2, r2);
     }
 
     #[test]
     fn mock_adapter_returns_empty_after_exhausting_results() {
         let mut adapter = MockAdapter::new("test", vec![result_with_data()]);
-        let _ = adapter.execute("SELECT 1").unwrap();
-        let got = adapter.execute("SELECT 2").unwrap();
+        let _ = adapter.execute("SELECT 1").expect("query should execute successfully");
+        let got = adapter.execute("SELECT 2").expect("query should execute successfully");
         assert!(got.columns.is_empty());
         assert!(got.rows.is_empty());
     }
@@ -306,7 +307,7 @@ mod tests {
     #[test]
     fn mock_adapter_lock_state() {
         let adapter = MockAdapter::new("test", vec![]);
-        let lock = adapter.lock_state().unwrap();
+        let lock = adapter.lock_state().expect("lock_state should succeed");
         assert!(lock.held.is_empty());
         assert!(lock.waiting.is_empty());
     }

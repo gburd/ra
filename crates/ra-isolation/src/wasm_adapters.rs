@@ -116,7 +116,7 @@ fn wasm_adapter_to_executor(
 }
 
 #[cfg(test)]
-#[allow(clippy::panic, clippy::unwrap_used)]
+#[allow(clippy::panic)] // Tests may panic for early failure reporting
 mod tests {
     use super::*;
 
@@ -213,7 +213,7 @@ mod tests {
         });
 
         let mut adapter = wrap_wasm_adapter(Box::new(mock), Backend::Sqlite);
-        let result = adapter.execute("SELECT 42").unwrap();
+        let result = adapter.execute("SELECT 42").expect("query should execute successfully");
         assert_eq!(result.columns, vec!["id", "val"]);
         assert_eq!(result.rows[0], vec!["42", "hello"]);
     }
@@ -230,7 +230,7 @@ mod tests {
         });
 
         let mut adapter = wrap_wasm_adapter(Box::new(mock), Backend::Sqlite);
-        let result = adapter.execute("SELECT NULL").unwrap();
+        let result = adapter.execute("SELECT NULL").expect("query should execute successfully");
         assert_eq!(result.rows[0], vec!["NULL"]);
     }
 
@@ -249,7 +249,7 @@ mod tests {
         }));
 
         let mut adapter = factory("s1");
-        let result = adapter.execute("SELECT 1").unwrap();
+        let result = adapter.execute("SELECT 1").expect("query should execute successfully");
         assert_eq!(result.columns, vec!["ok"]);
         assert_eq!(adapter.backend_name(), "sqlite");
     }
@@ -261,7 +261,7 @@ mod tests {
         }));
 
         let mut adapter = factory("s1");
-        let result = adapter.execute("SELECT 1").unwrap();
+        let result = adapter.execute("SELECT 1").expect("query should execute successfully");
         assert_eq!(result.columns, vec!["ok"]);
         assert_eq!(adapter.backend_name(), "duckdb");
     }

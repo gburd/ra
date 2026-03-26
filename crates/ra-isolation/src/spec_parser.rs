@@ -515,7 +515,7 @@ fn strip_directive(line: &str, keyword: &str) -> Option<String> {
 }
 
 #[cfg(test)]
-#[allow(clippy::panic, clippy::unwrap_used)]
+#[allow(clippy::panic)] // Tests may panic for early failure reporting
 mod tests {
     use super::*;
 

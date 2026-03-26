@@ -260,7 +260,7 @@ pub fn query_lock_state(
 }
 
 #[cfg(test)]
-#[allow(clippy::panic, clippy::unwrap_used)]
+#[allow(clippy::panic)] // Tests may panic for early failure reporting
 mod tests {
     use super::*;
 
@@ -288,7 +288,7 @@ mod tests {
         let mut adapter =
             WasmBridgeAdapter::new(Backend::Sqlite, make_executor(raw));
 
-        let result = adapter.execute("SELECT * FROM t").unwrap();
+        let result = adapter.execute("SELECT * FROM t").expect("query should execute successfully");
         assert_eq!(result.columns, vec!["id", "val"]);
         assert_eq!(result.rows.len(), 1);
         assert_eq!(result.rows[0], vec!["1", "100"]);
@@ -424,7 +424,7 @@ mod tests {
         };
 
         let state =
-            query_lock_state(Backend::Sqlite, &mut executor).unwrap();
+            query_lock_state(Backend::Sqlite, &mut executor).expect("lock state query should succeed");
         assert_eq!(state.held.len(), 1);
         assert_eq!(state.held[0].resource, "main");
         assert!(state.waiting.is_empty());

@@ -13,7 +13,7 @@ fn test_postgres_to_bigquery() {
     );
 
     let sql = "SELECT * FROM users WHERE age > 18";
-    let result = translator.translate(sql).unwrap();
+    let result = translator.translate(sql).expect("translation should succeed");
 
     assert!(!result.sql.is_empty());
     // BigQuery should preserve the basic structure
@@ -30,7 +30,7 @@ fn test_mysql_to_postgres_ifnull() {
     );
 
     let sql = "SELECT IFNULL(name, 'Unknown') FROM users";
-    let result = translator.translate(sql).unwrap();
+    let result = translator.translate(sql).expect("translation should succeed");
 
     assert!(!result.sql.is_empty());
     // MySQL's IFNULL should be translated to PostgreSQL's COALESCE
@@ -50,7 +50,7 @@ fn test_postgres_to_snowflake() {
     );
 
     let sql = "SELECT COUNT(*) FROM orders WHERE created_at > NOW() - INTERVAL '1 day'";
-    let result = translator.translate(sql).unwrap();
+    let result = translator.translate(sql).expect("translation should succeed");
 
     assert!(!result.sql.is_empty());
     assert!(result.sql.contains("COUNT") || result.sql.contains("count"));
@@ -65,7 +65,7 @@ fn test_sqlite_to_clickhouse() {
     );
 
     let sql = "SELECT datetime('now')";
-    let result = translator.translate(sql).unwrap();
+    let result = translator.translate(sql).expect("translation should succeed");
 
     assert!(!result.sql.is_empty());
 }
@@ -79,7 +79,7 @@ fn test_duckdb_to_databricks() {
     );
 
     let sql = "SELECT * FROM users LIMIT 10";
-    let result = translator.translate(sql).unwrap();
+    let result = translator.translate(sql).expect("translation should succeed");
 
     assert!(!result.sql.is_empty());
     assert!(result.sql.contains("LIMIT") || result.sql.contains("limit"));
@@ -94,7 +94,7 @@ fn test_oracle_to_redshift() {
     );
 
     let sql = "SELECT ROWNUM, name FROM users WHERE ROWNUM <= 10";
-    let result = translator.translate(sql).unwrap();
+    let result = translator.translate(sql).expect("translation should succeed");
 
     assert!(!result.sql.is_empty());
 }
@@ -108,7 +108,7 @@ fn test_trino_to_presto() {
     );
 
     let sql = "SELECT * FROM catalog.schema.table";
-    let result = translator.translate(sql).unwrap();
+    let result = translator.translate(sql).expect("translation should succeed");
 
     assert!(!result.sql.is_empty());
     // Catalog.schema.table notation should be preserved
@@ -169,6 +169,6 @@ fn test_extended_dialects_available() {
             TranslationBackend::Polyglot,
         );
         let result = translator.translate("SELECT 1");
-        assert!(result.is_ok(), "Failed for dialect: {}", dialect);
+        assert!(result.is_ok(), "Failed for dialect: {dialect}");
     }
 }

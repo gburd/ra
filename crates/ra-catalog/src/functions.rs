@@ -373,7 +373,6 @@ pub fn load_catalog_from_toml(
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
 

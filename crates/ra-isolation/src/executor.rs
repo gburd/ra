@@ -379,7 +379,7 @@ pub enum ExecutorError {
 }
 
 #[cfg(test)]
-#[allow(clippy::panic, clippy::unwrap_used)]
+#[allow(clippy::panic)] // Tests may panic for early failure reporting
 mod tests {
     use super::*;
     use crate::adapter::{MockAdapter, QueryResult};
@@ -629,7 +629,7 @@ session "s1"
 "#;
         let spec = must_parse(input);
         let mut executor = TestExecutor::new(spec);
-        executor.run(&mock_factory()).unwrap();
+        executor.run(&mock_factory()).expect("executor should run successfully");
         assert!(!executor.event_log().is_empty());
     }
 
@@ -664,7 +664,7 @@ permutation
 "#;
         let spec = must_parse(input);
         let mut executor = TestExecutor::new(spec);
-        let result = executor.run(&mock_factory()).unwrap();
+        let result = executor.run(&mock_factory()).expect("executor should run successfully");
         assert!(result.passed);
 
         let events = executor.event_log().events();
@@ -710,7 +710,7 @@ permutation
 "#;
         let spec = must_parse(input);
         let mut executor = TestExecutor::new(spec);
-        let result = executor.run(&mock_factory()).unwrap();
+        let result = executor.run(&mock_factory()).expect("executor should run successfully");
         // The permutation should complete (mock adapter returns ok)
         assert_eq!(result.permutation_results.len(), 1);
         let perm = &result.permutation_results[0];
@@ -742,7 +742,7 @@ permutation
 "#;
         let spec = must_parse(input);
         let mut executor = TestExecutor::new(spec);
-        let result = executor.run(&mock_factory()).unwrap();
+        let result = executor.run(&mock_factory()).expect("executor should run successfully");
         assert!(result.passed);
         let perm = &result.permutation_results[0];
         assert_eq!(perm.step_results.len(), 2);

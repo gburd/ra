@@ -25,7 +25,6 @@ pub fn config_path() -> Option<PathBuf> {
 ///
 /// Loads and merges config from multiple files plus environment
 /// variables.
-#[allow(clippy::struct_field_names)]
 pub struct ConfigLoader {
     /// System-wide config path.
     system_path: PathBuf,

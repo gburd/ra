@@ -3,7 +3,7 @@
 //! These tests parse real `.spec` files and run them through
 //! the executor with mock adapters to verify the full pipeline.
 
-#![allow(clippy::panic, clippy::unwrap_used)]
+#![allow(clippy::panic)] // Tests may panic for early failure reporting
 
 use ra_isolation::adapter::{
     AdapterError, DatabaseAdapter, LockDetail, LockState,
@@ -18,7 +18,7 @@ fn read_spec(name: &str) -> String {
         env!("CARGO_MANIFEST_DIR")
     );
     std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("failed to read {path}: {e}"))
+        .unwrap_or_else(|e| panic!("failed to read spec file {path}: {e}"))
 }
 
 fn mock_factory() -> AdapterFactory {
@@ -31,7 +31,7 @@ fn mock_factory() -> AdapterFactory {
 fn parse_dirty_read_spec() {
     let content = read_spec("dirty-read.spec");
     let spec = spec_parser::parse(&content)
-        .unwrap_or_else(|e| panic!("parse failed: {e}"));
+        .unwrap_or_else(|e| panic!("spec parsing failed: {e}"));
 
     assert_eq!(spec.sessions.len(), 2);
     assert_eq!(spec.sessions[0].name, "s1");
@@ -47,7 +47,7 @@ fn parse_dirty_read_spec() {
 fn parse_phantom_read_spec() {
     let content = read_spec("phantom-read.spec");
     let spec = spec_parser::parse(&content)
-        .unwrap_or_else(|e| panic!("parse failed: {e}"));
+        .unwrap_or_else(|e| panic!("spec parsing failed: {e}"));
 
     assert_eq!(spec.sessions.len(), 2);
     assert_eq!(spec.sessions[0].name, "s1");
@@ -61,7 +61,7 @@ fn parse_phantom_read_spec() {
 fn parse_deadlock_spec() {
     let content = read_spec("deadlock.spec");
     let spec = spec_parser::parse(&content)
-        .unwrap_or_else(|e| panic!("parse failed: {e}"));
+        .unwrap_or_else(|e| panic!("spec parsing failed: {e}"));
 
     assert_eq!(spec.sessions.len(), 2);
     assert_eq!(spec.sessions[0].steps.len(), 2);
@@ -74,11 +74,11 @@ fn parse_deadlock_spec() {
 fn execute_dirty_read_with_mock() {
     let content = read_spec("dirty-read.spec");
     let spec = spec_parser::parse(&content)
-        .unwrap_or_else(|e| panic!("parse failed: {e}"));
+        .unwrap_or_else(|e| panic!("spec parsing failed: {e}"));
     let mut executor = TestExecutor::new(spec);
     let result = executor
         .run(&mock_factory())
-        .unwrap_or_else(|e| panic!("execution failed: {e}"));
+        .unwrap_or_else(|e| panic!("test execution failed: {e}"));
 
     assert_eq!(result.permutation_results.len(), 1);
     assert!(result.passed);
@@ -88,11 +88,11 @@ fn execute_dirty_read_with_mock() {
 fn execute_phantom_read_with_mock() {
     let content = read_spec("phantom-read.spec");
     let spec = spec_parser::parse(&content)
-        .unwrap_or_else(|e| panic!("parse failed: {e}"));
+        .unwrap_or_else(|e| panic!("spec parsing failed: {e}"));
     let mut executor = TestExecutor::new(spec);
     let result = executor
         .run(&mock_factory())
-        .unwrap_or_else(|e| panic!("execution failed: {e}"));
+        .unwrap_or_else(|e| panic!("test execution failed: {e}"));
 
     assert_eq!(result.permutation_results.len(), 1);
     assert!(result.passed);
@@ -102,11 +102,11 @@ fn execute_phantom_read_with_mock() {
 fn execute_deadlock_with_mock() {
     let content = read_spec("deadlock.spec");
     let spec = spec_parser::parse(&content)
-        .unwrap_or_else(|e| panic!("parse failed: {e}"));
+        .unwrap_or_else(|e| panic!("spec parsing failed: {e}"));
     let mut executor = TestExecutor::new(spec);
     let result = executor
         .run(&mock_factory())
-        .unwrap_or_else(|e| panic!("execution failed: {e}"));
+        .unwrap_or_else(|e| panic!("test execution failed: {e}"));
 
     assert_eq!(result.permutation_results.len(), 1);
     assert!(result.passed);
@@ -203,7 +203,7 @@ permutation
 "#;
 
     let spec = spec_parser::parse(input)
-        .unwrap_or_else(|e| panic!("parse failed: {e}"));
+        .unwrap_or_else(|e| panic!("spec parsing failed: {e}"));
 
     // s2's second call (step d) will trigger a deadlock.
     // Calls are: setup=none, s1:a=1, s2:c=1, s1:b=2, s2:d=2
@@ -220,7 +220,7 @@ permutation
     let mut executor = TestExecutor::new(spec);
     let result = executor
         .run(&factory)
-        .unwrap_or_else(|e| panic!("execution failed: {e}"));
+        .unwrap_or_else(|e| panic!("test execution failed: {e}"));
 
     // The executor should have detected the deadlock error
     assert!(!result.passed);
@@ -328,7 +328,7 @@ fn lock_monitoring_integration() {
     let mut monitor = LockMonitor::new();
     monitor
         .refresh(&sessions)
-        .unwrap_or_else(|e| panic!("refresh failed: {e}"));
+        .unwrap_or_else(|e| panic!("lock monitor refresh failed: {e}"));
 
     let blocked = monitor.blocked_sessions();
     assert_eq!(blocked.len(), 1);
@@ -360,11 +360,11 @@ permutation
 }
 "#;
     let spec = spec_parser::parse(input)
-        .unwrap_or_else(|e| panic!("parse failed: {e}"));
+        .unwrap_or_else(|e| panic!("spec parsing failed: {e}"));
     let mut executor = TestExecutor::new(spec);
     let result = executor
         .run(&mock_factory())
-        .unwrap_or_else(|e| panic!("execution failed: {e}"));
+        .unwrap_or_else(|e| panic!("test execution failed: {e}"));
 
     // Should have: PermutationStarted, SetupExecuted,
     // StepStarted, StepCompleted, PermutationCompleted
@@ -398,7 +398,7 @@ session "s2"
 }
 "#;
     let spec = spec_parser::parse(input)
-        .unwrap_or_else(|e| panic!("parse failed: {e}"));
+        .unwrap_or_else(|e| panic!("spec parsing failed: {e}"));
     let scheduler = Scheduler::from_spec(&spec);
 
     // 2 steps from s1, 1 from s2 -> C(3,1) = 3 interleavings
