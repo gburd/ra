@@ -51,7 +51,7 @@ impl Backend for PolyglotBackend {
 
 /// Map our Dialect enum to Polyglot's `DialectType`.
 fn map_to_polyglot_dialect(dialect: Dialect) -> DialectType {
-    let polyglot_dialect = match dialect {
+    match dialect {
         Dialect::PostgreSql => DialectType::PostgreSQL,
         Dialect::MySql => DialectType::MySQL,
         Dialect::Sqlite => DialectType::SQLite,
@@ -111,9 +111,7 @@ fn map_to_polyglot_dialect(dialect: Dialect) -> DialectType {
         Dialect::Solr => DialectType::Solr,
         #[cfg(feature = "polyglot-backend")]
         Dialect::Dune => DialectType::Dune,
-    };
-
-    polyglot_dialect
+    }
 }
 
 #[cfg(test)]

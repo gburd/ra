@@ -52,4 +52,4 @@ pub use storage::{
     CloudStorageTier, LtoGeneration, NasProtocol, PcieGen, SpindleSpeed, StorageDevice,
     StorageTechnology,
 };
-pub use system_metrics::SystemMetrics;
+pub use system_metrics::{DiskStats, NetworkStats, SystemMetrics};

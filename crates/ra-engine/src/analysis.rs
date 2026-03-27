@@ -5,9 +5,10 @@
 //! the expression is a relational or scalar node. This information
 //! drives cost estimation and condition checking in rewrite rules.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use egg::{Analysis, DidMerge, EGraph, Id};
+use ra_core::facts::TableInfo;
 
 use crate::egraph::RelLang;
 
@@ -24,7 +25,11 @@ pub struct RelData {
 
 /// E-graph analysis that tracks relational metadata.
 #[derive(Debug, Clone, Default)]
-pub struct RelAnalysis;
+pub struct RelAnalysis {
+    /// Table schema information, including storage format.
+    /// Used by storage-specific optimization rules to check preconditions.
+    pub table_info: HashMap<String, TableInfo>,
+}
 
 impl Analysis<RelLang> for RelAnalysis {
     type Data = RelData;

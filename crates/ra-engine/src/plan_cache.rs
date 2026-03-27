@@ -18,8 +18,20 @@ use std::collections::HashMap;
 
 use ra_core::algebra::RelExpr;
 
+#[cfg(feature = "streaming")]
 use crate::differential::PlanDependencies;
+#[cfg(not(feature = "streaming"))]
+use std::collections::HashSet;
 use crate::genetic_fingerprint::QueryFingerprint;
+
+#[cfg(not(feature = "streaming"))]
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlanDependencies {
+    pub table_cardinalities: HashMap<String, f64>,
+    pub indexes: HashSet<(String, String)>,
+    pub distinct_counts: HashMap<(String, String), f64>,
+    pub rules: HashSet<String>,
+}
 
 /// Configuration for the plan cache.
 #[derive(Debug, Clone)]

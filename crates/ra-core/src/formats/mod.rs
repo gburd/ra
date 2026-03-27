@@ -736,6 +736,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::approx_constant, reason = "3.14 is test data, not mathematical constant")]
     fn scalar_value_display() {
         assert_eq!(ScalarValue::Null.to_string(), "NULL");
         assert_eq!(ScalarValue::Bool(true).to_string(), "true");

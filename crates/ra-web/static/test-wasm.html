@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WASM Module Test</title>
+</head>
+<body>
+    <h1>RA-WASM Module Test</h1>
+    <pre id="output">Loading WASM module...</pre>
+
+    <script type="module">
+        import init from './pkg/ra_wasm.js';
+
+        async function testWasm() {
+            try {
+                const output = document.getElementById('output');
+                output.textContent = 'Initializing WASM module...\n';
+
+                await init();
+
+                output.textContent += 'WASM module loaded successfully!\n';
+                output.textContent += `Module exports: ${Object.keys(init).join(', ')}\n`;
+
+            } catch (error) {
+                document.getElementById('output').textContent = `Error: ${error.message}\n${error.stack}`;
+            }
+        }
+
+        testWasm();
+    </script>
+</body>
+</html>

@@ -8,19 +8,14 @@ pub mod polyglot_backend;
 use crate::{Dialect, TranslationError, TranslationResult};
 
 /// Translation backend implementation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TranslationBackend {
     /// Native translation implementation.
+    #[default]
     Native,
     /// Polyglot SQL transpiler backend.
     #[cfg(feature = "polyglot-backend")]
     Polyglot,
-}
-
-impl Default for TranslationBackend {
-    fn default() -> Self {
-        Self::Native
-    }
 }
 
 impl TranslationBackend {
@@ -70,6 +65,10 @@ impl TranslationBackend {
 /// Trait for backend-specific translation.
 pub trait Backend {
     /// Translate SQL from source to target dialect.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if translation fails due to parsing or unsupported constructs
     fn translate(
         &self,
         sql: &str,

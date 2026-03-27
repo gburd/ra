@@ -205,6 +205,7 @@ pub fn parse_rra_file(path: &Path) -> Result<ParsedRule> {
 }
 
 /// Load all .rra files from a directory recursively.
+#[cfg(feature = "file-discovery")]
 pub fn load_rules_from_directory(dir: &Path) -> Result<Vec<ParsedRule>> {
     let mut rules = Vec::new();
 
@@ -237,6 +238,11 @@ pub fn load_rules_from_directory(dir: &Path) -> Result<Vec<ParsedRule>> {
 
     debug!("Loaded {} rules from {}", rules.len(), dir.display());
     Ok(rules)
+}
+
+#[cfg(not(feature = "file-discovery"))]
+pub fn load_rules_from_directory(_dir: &Path) -> Result<Vec<ParsedRule>> {
+    Ok(Vec::new())
 }
 
 /// Filter rules based on runtime facts and preconditions.

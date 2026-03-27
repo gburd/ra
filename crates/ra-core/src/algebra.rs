@@ -646,7 +646,14 @@ impl RelExpr {
     #[must_use]
     pub fn children(&self) -> Vec<&RelExpr> {
         match self {
-            Self::Scan { .. } | Self::Values { .. } => vec![],
+            Self::Scan { .. }
+            | Self::Values { .. }
+            | Self::MultiUnnest { .. }
+            | Self::IndexScan { .. }
+            | Self::BitmapIndexScan { .. }
+            | Self::ParallelScan { .. }
+            | Self::IndexOnlyScan { .. }
+            | Self::MvScan { .. } => vec![],
             Self::Filter { input, .. }
             | Self::Project { input, .. }
             | Self::Aggregate { input, .. }
@@ -654,11 +661,15 @@ impl RelExpr {
             | Self::IncrementalSort { input, .. }
             | Self::Limit { input, .. }
             | Self::Window { input, .. }
-            | Self::Distinct { input, .. } => vec![input],
+            | Self::Distinct { input, .. }
+            | Self::RowPattern { input, .. }
+            | Self::ParallelAggregate { input, .. }
+            | Self::Gather { input, .. } => vec![input],
             Self::Join { left, right, .. }
             | Self::Union { left, right, .. }
             | Self::Intersect { left, right, .. }
-            | Self::Except { left, right, .. } => vec![left, right],
+            | Self::Except { left, right, .. }
+            | Self::ParallelHashJoin { left, right, .. } => vec![left, right],
             Self::CTE {
                 definition, body, ..
             } => vec![definition, body],
@@ -668,27 +679,14 @@ impl RelExpr {
                 body,
                 ..
             } => vec![base_case, recursive_case, body],
-            Self::Unnest { input, .. } => match input {
+            Self::Unnest { input, .. } | Self::TableFunction { input, .. } => match input {
                 Some(inp) => vec![inp],
                 None => vec![],
             },
-            Self::MultiUnnest { .. } => vec![],
-            Self::TableFunction { input, .. } => match input {
-                Some(inp) => vec![inp],
-                None => vec![],
-            },
-            Self::RowPattern { input, .. } => vec![input],
-            Self::IndexScan { .. } => vec![],
-            Self::BitmapIndexScan { .. } => vec![],
             Self::BitmapAnd { inputs } | Self::BitmapOr { inputs } => {
                 inputs.iter().map(|b| b.as_ref()).collect()
             }
             Self::BitmapHeapScan { bitmap, .. } => vec![bitmap],
-            Self::ParallelScan { .. } => vec![],
-            Self::ParallelHashJoin { left, right, .. } => vec![left, right],
-            Self::ParallelAggregate { input, .. } | Self::Gather { input, .. } => vec![input],
-            Self::IndexOnlyScan { .. } => vec![],
-            Self::MvScan { .. } => vec![],
         }
     }
 

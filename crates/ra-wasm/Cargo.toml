@@ -8,12 +8,15 @@ license.workspace = true
 repository.workspace = true
 description = "WASM database adapters for browser-based SQL execution"
 
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-O", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]
+
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 ra-core = { workspace = true }
-ra-engine = { workspace = true }
+ra-engine = { path = "../ra-engine", default-features = false }
 ra-hardware = { workspace = true }
 ra-parser = { workspace = true }
 serde = { workspace = true }

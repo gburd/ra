@@ -29,7 +29,7 @@ use sqlparser::ast::{
     WindowFrameUnits as SqlWindowFrameUnits,
     WindowSpec as SqlWindowSpec, WindowType as SqlWindowType,
 };
-use sqlparser::dialect::GenericDialect;
+use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::parser::Parser;
 use thiserror::Error;
 
@@ -64,7 +64,8 @@ pub enum SqlConversionError {
 pub fn sql_to_relexprs(
     sql: &str,
 ) -> Result<Vec<RelExpr>, SqlConversionError> {
-    let dialect = GenericDialect {};
+    // Use PostgreSQL dialect to support JSONB operators (@>, @=, @?, etc.) and other PostgreSQL-specific features
+    let dialect = PostgreSqlDialect {};
     let statements = Parser::parse_sql(&dialect, sql)
         .map_err(|e| SqlConversionError::ParseError(e.to_string()))?;
 
@@ -91,7 +92,8 @@ pub fn sql_to_relexprs(
 ///
 /// Returns error if SQL is invalid or contains unsupported features.
 pub fn sql_to_relexpr(sql: &str) -> Result<RelExpr, SqlConversionError> {
-    let dialect = GenericDialect {};
+    // Use PostgreSQL dialect to support JSONB operators (@>, @=, @?, etc.) and other PostgreSQL-specific features
+    let dialect = PostgreSqlDialect {};
     let statements = Parser::parse_sql(&dialect, sql)
         .map_err(|e| SqlConversionError::ParseError(e.to_string()))?;
 
@@ -2496,5 +2498,49 @@ mod tests {
                    FROM orders";
         let result = sql_to_relexpr(sql);
         assert!(result.is_ok(), "EXTRACT: {result:?}");
+    }
+
+    // ---- PostgreSQL-specific operators ----
+
+    #[test]
+    fn test_jsonb_contains() {
+        let sql = "SELECT * FROM users \
+                   WHERE data @> '{\"age\": 25}'";
+        let result = sql_to_relexpr(sql);
+        assert!(result.is_ok(), "JSONB @> operator: {result:?}");
+    }
+
+    #[test]
+    fn test_jsonb_contained_by() {
+        let sql = "SELECT * FROM users \
+                   WHERE '{\"age\": 25}' <@ data";
+        let result = sql_to_relexpr(sql);
+        assert!(result.is_ok(), "JSONB <@ operator: {result:?}");
+    }
+
+    #[test]
+    fn test_jsonb_path_exists() {
+        let sql = "SELECT * FROM users \
+                   WHERE data @? '$.age ? (@ > 25)'";
+        let result = sql_to_relexpr(sql);
+        assert!(result.is_ok(), "JSONB @? operator: {result:?}");
+    }
+
+    #[test]
+    fn test_jsonb_path_match() {
+        let sql = "SELECT * FROM users \
+                   WHERE data @@ '$.status == \"active\"'";
+        let result = sql_to_relexpr(sql);
+        assert!(result.is_ok(), "JSONB @@ operator: {result:?}");
+    }
+
+    #[test]
+    fn test_documentdb_query() {
+        // DocumentDB query with standard PostgreSQL JSONB operators
+        let sql = "SELECT document FROM documentdb_api.collection('mydb', 'users') \
+                   WHERE document @> '{\"age\": {\"$gt\": 25}}' \
+                   AND document @? '$.status ? (@ == \"active\")'";
+        let result = sql_to_relexpr(sql);
+        assert!(result.is_ok(), "DocumentDB query with JSONB operators: {result:?}");
     }
 }

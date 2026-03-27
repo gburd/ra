@@ -211,6 +211,7 @@ impl Pattern {
         }
     }
 
+    #[expect(clippy::too_many_lines, reason = "comprehensive pattern matching logic; refactoring would obscure the match structure")]
     fn do_match(
         &self,
         expr: &RelExpr,
@@ -225,7 +226,7 @@ impl Pattern {
                 Self::Scan { table: pat_table },
                 RelExpr::Scan { table, .. },
             ) => {
-                pat_table.as_ref().map_or(true, |pt| pt == table)
+                pat_table.as_ref().is_none_or(|pt| pt == table)
             }
             (
                 Self::Filter {

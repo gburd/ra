@@ -38,11 +38,11 @@ pub enum DataType {
     Json,
     /// Typed array (e.g. INTEGER[]).
     Array(Box<DataType>),
-    /// Geometry / geography (PostGIS).
+    /// Geometry / geography (`PostGIS`).
     Geometry,
-    /// Full-text search vector (PostgreSQL tsvector).
+    /// Full-text search vector (`PostgreSQL` tsvector).
     TsVector,
-    /// Full-text search query (PostgreSQL tsquery).
+    /// Full-text search query (`PostgreSQL` tsquery).
     TsQuery,
     /// Accepts any type (polymorphic argument).
     Any,
@@ -55,7 +55,7 @@ pub enum FunctionCategory {
     Scalar,
     /// Aggregate function consuming a group (e.g. SUM, COUNT).
     Aggregate,
-    /// Window function evaluated over a frame (e.g. ROW_NUMBER).
+    /// Window function evaluated over a frame (e.g. `ROW_NUMBER`).
     Window,
     /// Table-valued function returning a set of rows.
     TableValued,
@@ -74,6 +74,7 @@ pub struct FunctionSignature {
 
 /// Behavioral and cost properties attached to a function.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[expect(clippy::struct_excessive_bools, reason = "five independent boolean properties needed to represent function characteristics")]
 pub struct FunctionProperties {
     /// Same inputs always produce the same output (no hidden state).
     pub deterministic: bool,
@@ -104,7 +105,7 @@ impl FunctionProperties {
         }
     }
 
-    /// Properties for a non-deterministic function like RANDOM().
+    /// Properties for a non-deterministic function like `RANDOM()`.
     pub fn non_deterministic() -> Self {
         Self {
             deterministic: false,
@@ -156,7 +157,7 @@ impl FunctionProperties {
 /// Complete definition of a catalog function.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FunctionDefinition {
-    /// Canonical upper-case name (e.g. "ABS", "ST_DISTANCE").
+    /// Canonical upper-case name (e.g. "ABS", `ST_DISTANCE`).
     pub name: String,
     /// Category (scalar / aggregate / window / table-valued).
     pub category: FunctionCategory,
@@ -248,10 +249,11 @@ pub struct FunctionToml {
 
 /// One entry in the TOML function catalog file.
 #[derive(Debug, Deserialize)]
+#[expect(clippy::struct_excessive_bools, reason = "five independent boolean properties needed to deserialize function catalog entries")]
 pub struct FunctionEntry {
     /// Function name.
     pub name: String,
-    /// Category string (Scalar, Aggregate, Window, TableValued).
+    /// Category string (Scalar, Aggregate, Window, `TableValued`).
     pub category: String,
     /// Whether the function is deterministic.
     #[serde(default = "default_true")]

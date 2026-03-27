@@ -501,6 +501,7 @@ pub fn is_two_phase_worthwhile(
 }
 
 #[cfg(test)]
+#[expect(clippy::float_cmp, reason = "exact float equality needed for deterministic cost model tests")]
 mod tests {
     use super::*;
 
@@ -904,6 +905,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::approx_constant, reason = "3.14 is test data, not mathematical constant")]
     fn agg_value_display_float() {
         assert_eq!(AggValue::Float(3.14).to_string(), "3.14");
     }

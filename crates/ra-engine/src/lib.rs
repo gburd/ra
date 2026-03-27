@@ -33,11 +33,13 @@ pub mod cardinality_cost;
 pub mod citus_optimizer;
 pub mod column_pruning;
 pub mod consensus_rules;
+#[cfg(feature = "metadata")]
 pub mod constraint_optimizer;
 pub mod cost;
 pub mod count_metadata;
 pub mod covering_index;
 pub mod documentdb_optimizer;
+#[cfg(feature = "streaming")]
 pub mod differential;
 pub mod distributed_optimizer;
 pub mod egraph;
@@ -82,8 +84,10 @@ pub mod rule_registry;
 pub mod rum_index;
 pub mod runtime_filters;
 pub mod semi_join;
+#[cfg(feature = "streaming")]
 pub mod timely;
 pub mod oracle_json_duality;
+#[cfg(feature = "metadata")]
 pub mod trigger_optimizer;
 pub mod xml_optimizer;
 
@@ -102,6 +106,7 @@ pub use federated_cost::FederatedCostModel;
 pub use federated_optimizer::{
     FederatedAnalysis, FederatedError, FederatedOptimizer,
 };
+#[cfg(feature = "streaming")]
 pub use differential::{
     ChangeSource, FactChange, HistogramDigest, IncrementalError,
     IncrementalOptimizer, IndexChange, PlanDependencies, ResourceId,
@@ -131,6 +136,7 @@ pub use resource_budget::{
     ExceededResource, OverflowStrategy, ResourceBudget, ResourceCheckResult,
     ResourceTracker, ResourceUsageReport,
 };
+#[cfg(feature = "metadata")]
 pub use constraint_optimizer::{
     optimize_with_constraints, ConstraintOptResult,
 };
@@ -160,7 +166,9 @@ pub use rule_priority::{
     compute_priority, sort_rules_by_priority, RulePriority,
 };
 pub use precondition_eval::{EvaluationError, PreConditionEvaluator};
+#[cfg(feature = "streaming")]
 pub use timely::{ComputationStats, TimelyConfig};
+#[cfg(feature = "metadata")]
 pub use trigger_optimizer::{
     analyze_dml_cost, detect_cascade, CascadeWarning,
     DmlCostEstimate, TriggerAnalysis,

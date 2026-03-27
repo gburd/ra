@@ -3315,6 +3315,51 @@ fn extract_error_position(error_msg: &str) -> (Option<usize>, Option<usize>) {
     (line, col)
 }
 
+/// Provide contextual help based on the specific error type.
+fn format_contextual_help(error_msg: &str, error_line: &str, _col_idx: usize) -> String {
+    use colored::Colorize;
+
+    let mut help = String::new();
+
+    // Check for unquoted JSON braces
+    if error_msg.contains("expected: an expression") && error_msg.contains("found: {") {
+        help.push_str(&format!("{}: ", "help".green().bold()));
+        help.push_str("JSON literals must be quoted strings\n");
+        help.push_str(&format!("      {} Use '{{\"key\": \"value\"}}' instead of {{key: value}}\n", "|".blue()));
+        help.push_str(&format!("      {} In bash, escape quotes: '\\'{{...}}\\'' or use $'...' syntax\n", "|".blue()));
+    }
+    // Check for @= operator
+    else if error_line.contains("@=") {
+        help.push_str(&format!("{}: ", "help".green().bold()));
+        help.push_str("@= is not a standard PostgreSQL operator\n");
+        help.push_str(&format!("      {} Use @> (contains) or @? (path exists) instead\n", "|".blue()));
+        help.push_str(&format!("      {} Example: WHERE data @> '{{\"status\": \"active\"}}'\n", "|".blue()));
+    }
+    // Check for unrecognized @ operators
+    else if error_msg.contains("found: @") && !error_line.contains("@@") {
+        help.push_str(&format!("{}: ", "help".green().bold()));
+        help.push_str("Check PostgreSQL operator syntax\n");
+        help.push_str(&format!("      {} Supported JSONB operators: @> <@ @? @@\n", "|".blue()));
+        help.push_str(&format!("      {} Supported text operators: @@ (tsvector match)\n", "|".blue()));
+    }
+    // Check for quote mismatch
+    else if error_msg.contains("unterminated") || error_line.chars().filter(|&c| c == '\'').count() % 2 != 0 {
+        help.push_str(&format!("{}: ", "help".green().bold()));
+        help.push_str("Check string quote matching\n");
+        help.push_str(&format!("      {} SQL strings use single quotes: 'text'\n", "|".blue()));
+        help.push_str(&format!("      {} Escape quotes in bash: '\\''text'\\'' or \"'text'\"\n", "|".blue()));
+    }
+    // Generic help
+    else if !error_msg.contains("unsupported") {
+        help.push_str(&format!("{}: ", "help".green().bold()));
+        help.push_str("Check SQL syntax\n");
+        help.push_str(&format!("      {} Ensure proper quoting and operator usage\n", "|".blue()));
+        help.push_str(&format!("      {} Set DEBUG_RA=2 for full error details\n", "|".blue()));
+    }
+
+    help
+}
+
 /// Format error with precise line and column location.
 fn format_error_with_location(
     sql: &str,
@@ -3390,6 +3435,10 @@ fn format_error_with_location(
         ));
     }
 
+    // Provide contextual help based on error type
+    output.push_str("\n");
+    output.push_str(&format_contextual_help(error_msg, error_line, col_idx));
+
     // Only include backtrace if DEBUG_RA > 1
     if debug_level > 1 {
         anyhow::anyhow!("{}", output)
@@ -3416,10 +3465,15 @@ fn format_error_with_context(sql: &str, error_msg: &str) -> anyhow::Error {
     }
 
     output.push_str(&format!("\n{}: {}\n", "error".red().bold(), error_msg));
-    output.push_str(&format!(
-        "\n{}: Check SQL syntax and supported features\n",
-        "help".green().bold()
-    ));
+
+    // Provide contextual help by checking all lines
+    output.push('\n');
+    for line in sql.lines() {
+        if !line.trim().is_empty() {
+            output.push_str(&format_contextual_help(error_msg, line, 0));
+            break;
+        }
+    }
 
     // Only include backtrace if DEBUG_RA > 1
     let debug_level = std::env::var("DEBUG_RA")

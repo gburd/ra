@@ -177,6 +177,7 @@ impl IndexStats {
 }
 
 #[cfg(test)]
+#[expect(clippy::float_cmp, reason = "exact float equality needed for deterministic statistics tests")]
 mod tests {
     use super::*;
 

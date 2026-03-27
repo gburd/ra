@@ -105,7 +105,7 @@ fn docs_serve() {
     println!();
 
     let status = Command::new("npm")
-        .args(&["run", "dev"])
+        .args(["run", "dev"])
         .current_dir(&docs_dir)
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())

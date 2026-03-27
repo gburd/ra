@@ -303,6 +303,35 @@ impl ParquetMetadataRegistry {
     }
 }
 
+/// Check if a table uses Parquet storage format.
+///
+/// This function is used as a precondition check for Parquet-specific rules.
+/// It queries the `FactsProvider` to get the table's schema information and
+/// checks the storage format.
+///
+/// # Returns
+///
+/// - `true` if the table uses `StorageFormat::Parquet`
+/// - `true` if the storage format is `StorageFormat::Unknown` (conservative)
+/// - `false` for all other formats (RowBased, Columnar, Orc, ArrowIpc, etc.)
+///
+/// If the table cannot be found in the schema, returns `true` (conservative).
+pub fn is_parquet_storage(
+    table_name: &str,
+    facts: &dyn ra_core::facts::FactsProvider,
+) -> bool {
+    if let Some(table_info) = facts.get_schema(table_name) {
+        use ra_core::facts::StorageFormat;
+        matches!(
+            table_info.storage_format,
+            StorageFormat::Parquet | StorageFormat::Unknown
+        )
+    } else {
+        // Conservative: if we don't have schema info, allow the rule
+        true
+    }
+}
+
 /// Rewrite rules for parquet predicate pushdown.
 ///
 /// These rules operate within the egg equality saturation framework.
@@ -315,6 +344,18 @@ impl ParquetMetadataRegistry {
 /// symbolic patterns. The cost function uses the
 /// [`ParquetMetadataRegistry`] to estimate how many row groups
 /// would be pruned.
+///
+/// # Storage Format Preconditions
+///
+/// These rules should only apply to tables using Parquet storage.
+/// The filtering is done via the rule metadata system (see
+/// `rule_metadata.rs`) which evaluates preconditions before applying
+/// rules. This prevents Parquet-specific optimizations from being
+/// applied to non-Parquet tables.
+///
+/// For runtime filtering, the optimizer should call
+/// [`is_parquet_storage`] to check each table before applying these
+/// rules.
 #[must_use]
 pub fn parquet_pushdown_rules()
 -> Vec<egg::Rewrite<crate::egraph::RelLang, crate::analysis::RelAnalysis>>
@@ -336,6 +377,9 @@ pub fn parquet_pushdown_rules()
         // Split conjunctive predicates so each can be evaluated
         // individually against row group stats. This enables
         // partial pushdown where only some conjuncts use stats.
+        //
+        // NOTE: This rule should be filtered by storage format at
+        // rule selection time. See docs above.
         rewrite!("parquet-filter-split-for-pushdown";
             "(filter (and ?p1 ?p2) (scan ?table))" =>
             "(filter ?p1 (filter ?p2 (scan ?table)))"

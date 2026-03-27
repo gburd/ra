@@ -600,6 +600,7 @@ pub fn format_bytes(bytes: u64) -> String {
 }
 
 #[cfg(test)]
+#[expect(clippy::float_cmp, reason = "exact float equality needed for deterministic network transfer tests")]
 mod tests {
     use super::*;
 

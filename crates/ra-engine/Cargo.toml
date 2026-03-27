@@ -7,11 +7,17 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+default = ["metadata", "streaming", "file-discovery"]
+metadata = ["ra-metadata"]
+streaming = ["timely", "differential-dataflow"]
+file-discovery = ["walkdir"]
+
 [dependencies]
 anyhow = { workspace = true }
 ra-core = { workspace = true }
 ra-hardware = { workspace = true }
-ra-metadata = { workspace = true }
+ra-metadata = { workspace = true, optional = true }
 ra-ml = { workspace = true }
 sparsemap = { path = "../sparsemap" }
 ra-stats = { workspace = true }
@@ -20,12 +26,13 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-timely = { workspace = true }
-differential-dataflow = { workspace = true }
+timely = { workspace = true, optional = true }
+differential-dataflow = { workspace = true, optional = true }
 toml = { workspace = true }
 rand = { workspace = true }
+getrandom = { workspace = true }
 serde_yaml = { workspace = true }
-walkdir = "2"
+walkdir = { version = "2", optional = true }
 
 [dev-dependencies]
 criterion = { workspace = true }

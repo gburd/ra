@@ -50,7 +50,7 @@ pub enum PreCondition {
 
     /// Structural predicate evaluation
     Predicate {
-        /// Predicate function call (e.g., "pred_columns_subset_of(?pred, ?cols)")
+        /// Predicate function call (e.g., `pred_columns_subset_of(?pred, ?cols)`)
         condition: String,
         /// Human-readable description
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -89,7 +89,7 @@ pub enum PreCondition {
     Capability {
         /// Database name ("current" means the target database)
         database: String,
-        /// Feature name (e.g., "lateral_join", "cte_recursive", "bitmap_index")
+        /// Feature name (e.g., `lateral_join`, `cte_recursive`, `bitmap_index`)
         requires: String,
         /// Human-readable description
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -138,12 +138,17 @@ pub enum FactValue {
     String(String),
     /// Boolean value
     Bool(bool),
-    /// Expression (e.g., "hash_table_size(?left)")
+    /// Expression (e.g., `hash_table_size(?left)`)
     Expression(String),
 }
 
 impl FactValue {
     /// Compare this value against another using the given operator
+    ///
+    /// # Errors
+    ///
+    /// Returns error if types are incompatible or operator is unknown
+    #[expect(clippy::cast_precision_loss, reason = "i64 to f64 conversion needed for numeric comparisons; precision loss acceptable for threshold comparisons")]
     pub fn compare(&self, operator: &str, other: &Self) -> Result<bool, String> {
         match (self, other) {
             (Self::Int(a), Self::Int(b)) => Self::compare_numeric(*a as f64, operator, *b as f64),
@@ -248,6 +253,10 @@ pub enum FactType {
 
 impl FactType {
     /// Parse a fact type from its string representation
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the fact type string is not recognized
     pub fn parse(s: &str) -> Result<Self, String> {
         match s {
             "statistics.cardinality" => Ok(Self::StatisticsCardinality),
@@ -282,6 +291,7 @@ impl FactType {
     }
 
     /// Return the string representation of this fact type
+    #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::StatisticsCardinality => "statistics.cardinality",
@@ -337,11 +347,13 @@ pub enum EvaluationResult {
 
 impl EvaluationResult {
     /// Check if the result is satisfied
+    #[must_use]
     pub fn is_satisfied(&self) -> bool {
         matches!(self, Self::Satisfied)
     }
 
     /// Check if the result is an error
+    #[must_use]
     pub fn is_error(&self) -> bool {
         matches!(self, Self::Error { .. })
     }
@@ -354,6 +366,7 @@ pub struct PreConditionBuilder {
 
 impl PreConditionBuilder {
     /// Create a new builder
+    #[must_use]
     pub fn new() -> Self {
         Self {
             conditions: Vec::new(),
