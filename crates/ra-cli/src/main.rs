@@ -1416,7 +1416,7 @@ fn cmd_show(rule_id: &str, dir: &str) -> Result<()> {
 // ── explain ─────────────────────────────────────────────────
 
 fn cmd_explain(query: &str, hardware_profile_name: &str, verbose: bool, quiet: bool) -> Result<()> {
-    let plan = sql_to_relexpr(query).with_context(|| format!("failed to parse SQL: {query}"))?;
+    let plan = sql_to_relexpr(query).map_err(|e| format_sql_error(&e, query))?;
 
     let hardware = load_hardware_profile(hardware_profile_name)?;
 
@@ -1466,7 +1466,7 @@ fn cmd_optimize(
     };
     plan_diff::apply_color_mode(color_mode);
 
-    let plan = sql_to_relexpr(query).with_context(|| format!("failed to parse SQL: {query}"))?;
+    let plan = sql_to_relexpr(query).map_err(|e| format_sql_error(&e, query))?;
     let hardware = load_hardware_profile(hardware_profile_name)?;
 
     let mut optimizer = Optimizer::new();
@@ -1844,7 +1844,7 @@ fn cmd_compare(
     verbose: bool,
     quiet: bool,
 ) -> Result<()> {
-    let ra_plan = sql_to_relexpr(sql).with_context(|| format!("failed to parse SQL: {sql}"))?;
+    let ra_plan = sql_to_relexpr(sql).map_err(|e| format_sql_error(&e, sql))?;
 
     let db_explain = if let Some(url) = db_url {
         if !quiet {
@@ -2551,20 +2551,34 @@ fn print_intermediate_steps(
                 .green()
         );
 
+        // Show Rule on separate line
+        eprintln!("  {}: {}", "Rule".bold().blue(), step.rule_name);
+
         // Enhanced "Why" section with rule-specific reasoning
         let why_text = enhance_reasoning(&step.rule_name, &step.reason, &step.plan_before, &step.plan_after);
-        eprintln!("  {}: {}", "Why".bold(), why_text);
+        eprintln!("  {}: {}", "Why".bold().yellow(), why_text);
 
         // Enhanced "Impact" section
         if let Some(improvement) = step.cost_improvement {
             eprintln!("  {}: {}", "Impact".bold().cyan(), format_impact(improvement, &step.plan_before, &step.plan_after));
+        } else {
+            eprintln!("  {}: No cost change measured", "Impact".bold().cyan());
         }
 
         eprintln!();
-        eprintln!("  {}:", "Changes".bold());
 
-        // Display plan tree with changes highlighted
-        print_plan_with_changes(&step.plan_after, &step.plan_before);
+        // Check if plan visually changed
+        let before_tree = format_plan_tree(&step.plan_before);
+        let after_tree = format_plan_tree(&step.plan_after);
+
+        if before_tree != after_tree {
+            eprintln!("  {}:", "Changes".bold());
+            // Display plan tree with changes highlighted inline
+            print_plan_with_changes_inline(&step.plan_after, &step.plan_before);
+        } else {
+            // Plan didn't visually change - explain why rule was still applied
+            eprintln!("  {}: Plan structure unchanged (optimization affected internal metadata, statistics, or execution strategy)", "Note".bold().dimmed());
+        }
 
         eprintln!();
     }
@@ -2679,7 +2693,8 @@ fn extract_operator(line: &str) -> String {
 }
 
 /// Print plan as a tree with highlighted changes.
-fn print_plan_with_changes(
+/// Print plan with changes shown inline (removed lines appear where they were).
+fn print_plan_with_changes_inline(
     plan: &ra_core::algebra::RelExpr,
     before: &ra_core::algebra::RelExpr,
 ) {
@@ -2697,29 +2712,53 @@ fn print_plan_with_changes(
     let before_ops: Vec<String> = before_lines.iter().map(|l| extract_operator(l)).collect();
     let after_ops: Vec<String> = after_lines.iter().map(|l| extract_operator(l)).collect();
 
+    // Build a set of removed operators for quick lookup
+    let mut removed_ops: Vec<(usize, &str)> = Vec::new();
+    for (i, op) in before_ops.iter().enumerate() {
+        if !after_ops.contains(op) && !op.is_empty() {
+            removed_ops.push((i, before_lines[i]));
+        }
+    }
+
+    // Track which before lines we've shown as removed
+    let mut shown_removed_indices = std::collections::HashSet::new();
+
     // Print the after tree with changes highlighted
     for (i, line) in after_lines.iter().enumerate() {
         let op = &after_ops[i];
+
+        // Check if we should show any removed lines before this one
+        // (heuristic: show removed lines with similar tree depth)
+        let line_depth = line.chars().take_while(|c| c.is_whitespace() || *c == '│' || *c == '├' || *c == '└' || *c == '─').count();
+
+        for (removed_idx, removed_line) in &removed_ops {
+            if shown_removed_indices.contains(removed_idx) {
+                continue;
+            }
+
+            let removed_depth = removed_line.chars().take_while(|c| c.is_whitespace() || *c == '│' || *c == '├' || *c == '└' || *c == '─').count();
+
+            // Show removed line if it's at similar depth and hasn't been shown yet
+            if removed_depth <= line_depth && removed_depth + 4 >= line_depth {
+                eprintln!("    {} {}", "−".red().bold(), removed_line.trim().red().strikethrough());
+                shown_removed_indices.insert(*removed_idx);
+            }
+        }
 
         // Check if this operator existed in the before plan
         if before_ops.contains(op) {
             // Unchanged - show dimmed
             eprintln!("    {}", line.dimmed());
         } else {
-            // New or changed - show bold and green
-            eprintln!("    {}", line.green().bold());
+            // New or changed - show with green + prefix
+            eprintln!("    {} {}", "+".green().bold(), line.green());
         }
     }
 
-    // Show removed operators (that were in before but not in after)
-    let mut shown_removed = false;
-    for (i, op) in before_ops.iter().enumerate() {
-        if !after_ops.contains(op) && !op.is_empty() {
-            if !shown_removed {
-                eprintln!("    {}", "Removed:".red().bold());
-                shown_removed = true;
-            }
-            eprintln!("      {} {}", "−".red().bold(), before_lines[i].trim().red().strikethrough());
+    // Show any remaining removed lines at the end
+    for (removed_idx, removed_line) in &removed_ops {
+        if !shown_removed_indices.contains(removed_idx) {
+            eprintln!("    {} {}", "−".red().bold(), removed_line.trim().red().strikethrough());
         }
     }
 }
@@ -2880,6 +2919,150 @@ fn print_available_rules(tracking: &ra_engine::RuleTrackingResult) {
 }
 
 // ── Output formatting ───────────────────────────────────────
+
+/// Format SQL parsing errors in Rust compiler style with helpful pointers.
+fn format_sql_error(err: &ra_parser::SqlConversionError, sql: &str) -> anyhow::Error {
+    use colored::Colorize;
+
+    let error_msg = err.to_string();
+
+    // Try to extract position information from sqlparser error messages
+    // Format: "sql parser error: Expected ... at Line: X, Column: Y"
+    let (line_num, col_num) = extract_error_position(&error_msg);
+
+    if let (Some(line), Some(col)) = (line_num, col_num) {
+        format_error_with_location(sql, line, col, &error_msg)
+    } else {
+        // Fallback: try to find problematic keyword or pattern in error message
+        format_error_with_context(sql, &error_msg)
+    }
+}
+
+/// Extract line and column from sqlparser error message.
+fn extract_error_position(error_msg: &str) -> (Option<usize>, Option<usize>) {
+    let mut line = None;
+    let mut col = None;
+
+    // Parse "Line: X, Column: Y" pattern
+    if let Some(line_start) = error_msg.find("Line:") {
+        if let Some(line_end) = error_msg[line_start..].find(',') {
+            if let Ok(num) = error_msg[line_start + 5..line_start + line_end]
+                .trim()
+                .parse::<usize>()
+            {
+                line = Some(num);
+            }
+        }
+    }
+
+    if let Some(col_start) = error_msg.find("Column:") {
+        let rest = &error_msg[col_start + 7..];
+        if let Some(end) = rest.find(|c: char| !c.is_numeric()) {
+            if let Ok(num) = rest[..end].trim().parse::<usize>() {
+                col = Some(num);
+            }
+        } else if let Ok(num) = rest.trim().parse::<usize>() {
+            col = Some(num);
+        }
+    }
+
+    (line, col)
+}
+
+/// Format error with precise line and column location.
+fn format_error_with_location(
+    sql: &str,
+    line_num: usize,
+    col_num: usize,
+    error_msg: &str,
+) -> anyhow::Error {
+    use colored::Colorize;
+
+    let lines: Vec<&str> = sql.lines().collect();
+    let line_idx = line_num.saturating_sub(1);
+
+    if line_idx >= lines.len() {
+        return anyhow::anyhow!("SQL parse error: {}", error_msg);
+    }
+
+    let error_line = lines[line_idx];
+    let col_idx = col_num.saturating_sub(1).min(error_line.len());
+
+    let mut output = String::new();
+    output.push_str(&format!("{}: SQL parse error\n", "error".red().bold()));
+    output.push_str(&format!("  {} {}\n", "-->".blue().bold(), "query:".dimmed()));
+    output.push('\n');
+
+    // Show context: one line before (if exists)
+    if line_idx > 0 {
+        output.push_str(&format!(
+            "{} {} {}\n",
+            format!("{:4}", line_num - 1).blue().bold(),
+            "|".blue().bold(),
+            lines[line_idx - 1].dimmed()
+        ));
+    }
+
+    // Show error line
+    output.push_str(&format!(
+        "{} {} {}\n",
+        format!("{:4}", line_num).blue().bold(),
+        "|".blue().bold(),
+        error_line
+    ));
+
+    // Show pointer
+    let pointer_padding = col_idx;
+    output.push_str(&format!(
+        "     {} {}{} {}\n",
+        "|".blue().bold(),
+        " ".repeat(pointer_padding),
+        "^".repeat((error_line.len() - col_idx).min(10).max(1))
+            .red()
+            .bold(),
+        error_msg.red()
+    ));
+
+    // Show context: one line after (if exists)
+    if line_idx + 1 < lines.len() {
+        output.push_str(&format!(
+            "{} {} {}\n",
+            format!("{:4}", line_num + 1).blue().bold(),
+            "|".blue().bold(),
+            lines[line_idx + 1].dimmed()
+        ));
+    }
+
+    anyhow::anyhow!("{}", output)
+}
+
+/// Format error with general context highlighting.
+fn format_error_with_context(sql: &str, error_msg: &str) -> anyhow::Error {
+    use colored::Colorize;
+
+    let mut output = String::new();
+    output.push_str(&format!("{}: SQL parse error\n", "error".red().bold()));
+    output.push_str(&format!("  {} {}\n", "-->".blue().bold(), "query:".dimmed()));
+    output.push('\n');
+
+    // Show the full query with line numbers
+    for (i, line) in sql.lines().enumerate() {
+        output.push_str(&format!(
+            "{} {} {}\n",
+            format!("{:4}", i + 1).blue().bold(),
+            "|".blue().bold(),
+            line
+        ));
+    }
+
+    output.push_str(&format!("\n{}: {}\n", "error".red().bold(), error_msg));
+    output.push_str(&format!(
+        "\n{}: Check SQL syntax and supported features\n",
+        "help".green().bold()
+    ));
+
+    anyhow::anyhow!("{}", output)
+}
 
 fn print_header(msg: &str) {
     eprintln!();
