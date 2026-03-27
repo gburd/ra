@@ -12,12 +12,9 @@ use odbc_api::{Connection, ConnectionOptions, Cursor, Environment, IntoParameter
 
 use crate::connector::{DatabaseConnector, MetadataResult};
 use crate::error::MetadataError;
-use crate::explain::{
-    ExplainNode, ExplainPlan, NodeType,
-};
+use crate::explain::{ExplainNode, ExplainPlan, NodeType};
 use crate::schema::{
-    ColumnInfo, ConstraintInfo, ConstraintKind,
-    DatabaseKind, SchemaInfo, TableInfo, TableStats,
+    ColumnInfo, ConstraintInfo, ConstraintKind, DatabaseKind, SchemaInfo, TableInfo, TableStats,
 };
 
 /// `MonetDB` connector using the `odbc-api` crate.
@@ -38,41 +35,26 @@ impl MonetDBConnector {
     ///
     /// Returns `MetadataError::Connection` on failure.
     pub fn connect(dsn: &str) -> MetadataResult<Self> {
-        let env =
-            Environment::new().map_err(|e| {
-                MetadataError::Connection {
-                    message: format!(
-                        "ODBC environment init failed: {e}"
-                    ),
-                }
-            })?;
+        let env = Environment::new().map_err(|e| MetadataError::Connection {
+            message: format!("ODBC environment init failed: {e}"),
+        })?;
 
-        let connection_string = if dsn.starts_with("monetdb://")
-        {
+        let connection_string = if dsn.starts_with("monetdb://") {
             let parts = parse_monetdb_url(dsn)?;
             format!(
                 "DRIVER={{MonetDB}};HOST={};PORT={};\
                  DATABASE={};UID={};PWD={}",
-                parts.host,
-                parts.port,
-                parts.database,
-                parts.user,
-                parts.password,
+                parts.host, parts.port, parts.database, parts.user, parts.password,
             )
         } else {
             dsn.to_owned()
         };
 
         // Validate by opening a connection.
-        env.connect_with_connection_string(
-            &connection_string,
-            ConnectionOptions::default(),
-        )
-        .map_err(|e| MetadataError::Connection {
-            message: format!(
-                "MonetDB ODBC connect failed: {e}"
-            ),
-        })?;
+        env.connect_with_connection_string(&connection_string, ConnectionOptions::default())
+            .map_err(|e| MetadataError::Connection {
+                message: format!("MonetDB ODBC connect failed: {e}"),
+            })?;
 
         Ok(Self {
             env,
@@ -86,28 +68,18 @@ impl MonetDBConnector {
         schema.clone_into(&mut self.schema);
     }
 
-    fn open_conn(
-        &self,
-    ) -> MetadataResult<Connection<'_>> {
+    fn open_conn(&self) -> MetadataResult<Connection<'_>> {
         self.env
-            .connect_with_connection_string(
-                &self.connection_string,
-                ConnectionOptions::default(),
-            )
+            .connect_with_connection_string(&self.connection_string, ConnectionOptions::default())
             .map_err(|e| MetadataError::Connection {
-                message: format!(
-                    "MonetDB connection failed: {e}"
-                ),
+                message: format!("MonetDB connection failed: {e}"),
             })
     }
 
-    fn query_tables(
-        &self,
-    ) -> MetadataResult<Vec<String>> {
+    fn query_tables(&self) -> MetadataResult<Vec<String>> {
         let conn = self.open_conn()?;
 
-        let sql =
-            "SELECT name FROM sys.tables \
+        let sql = "SELECT name FROM sys.tables \
              WHERE schema_id = (SELECT id FROM sys.schemas \
                WHERE name = ?) \
              AND type = 0 \
@@ -116,44 +88,30 @@ impl MonetDBConnector {
         let mut cursor = conn
             .execute(sql, &self.schema.as_str().into_parameter())
             .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to list tables: {e}"
-                ),
+                message: format!("failed to list tables: {e}"),
             })?
             .ok_or_else(|| MetadataError::Query {
-                message: "no result set from table query"
-                    .to_owned(),
+                message: "no result set from table query".to_owned(),
             })?;
 
         let mut tables = Vec::new();
         let mut buf = Vec::new();
-        while let Some(mut row) = cursor
-            .next_row()
-            .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to read tables: {e}"
-                ),
-            })?
-        {
+        while let Some(mut row) = cursor.next_row().map_err(|e| MetadataError::Query {
+            message: format!("failed to read tables: {e}"),
+        })? {
             buf.clear();
             if row.get_text(1, &mut buf).ok() == Some(true) {
-                tables.push(
-                    String::from_utf8_lossy(&buf).to_string(),
-                );
+                tables.push(String::from_utf8_lossy(&buf).to_string());
             }
             buf.clear();
         }
         Ok(tables)
     }
 
-    fn query_columns(
-        &self,
-        table: &str,
-    ) -> MetadataResult<Vec<ColumnInfo>> {
+    fn query_columns(&self, table: &str) -> MetadataResult<Vec<ColumnInfo>> {
         let conn = self.open_conn()?;
 
-        let sql =
-            "SELECT c.name, c.type, c.\"null\", c.number, \
+        let sql = "SELECT c.name, c.type, c.\"null\", c.number, \
              c.\"default\" \
              FROM sys.columns c \
              JOIN sys.tables t ON c.table_id = t.id \
@@ -162,83 +120,75 @@ impl MonetDBConnector {
              ORDER BY c.number";
 
         let mut cursor = conn
-            .execute(sql, (
+            .execute(
+                sql,
+                (
                     &self.schema.as_str().into_parameter(),
                     &table.into_parameter(),
-                ))
-            .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to query columns for {table}: {e}"
                 ),
+            )
+            .map_err(|e| MetadataError::Query {
+                message: format!("failed to query columns for {table}: {e}"),
             })?
             .ok_or_else(|| MetadataError::Query {
-                message: format!(
-                    "no result set for columns of {table}"
-                ),
+                message: format!("no result set for columns of {table}"),
             })?;
 
         let mut columns = Vec::new();
         let mut buf = Vec::new();
-        while let Some(mut row) = cursor
-            .next_row()
-            .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to read columns: {e}"
-                ),
-            })?
-        {
+        while let Some(mut row) = cursor.next_row().map_err(|e| MetadataError::Query {
+            message: format!("failed to read columns: {e}"),
+        })? {
             buf.clear();
             buf.clear();
-                let name = if row.get_text(1, &mut buf).ok() == Some(true) {
-                    Some(String::from_utf8_lossy(&buf).to_string())
-                } else {
-                    None
-                }
-                .unwrap_or_default();
+            let name = if row.get_text(1, &mut buf).ok() == Some(true) {
+                Some(String::from_utf8_lossy(&buf).to_string())
+            } else {
+                None
+            }
+            .unwrap_or_default();
 
             buf.clear();
             buf.clear();
-                let data_type = if row.get_text(2, &mut buf).ok() == Some(true) {
-                    Some(String::from_utf8_lossy(&buf).to_string())
-                } else {
-                    None
-                }
-                .unwrap_or_default();
+            let data_type = if row.get_text(2, &mut buf).ok() == Some(true) {
+                Some(String::from_utf8_lossy(&buf).to_string())
+            } else {
+                None
+            }
+            .unwrap_or_default();
 
             buf.clear();
             buf.clear();
-                let nullable_str = if row.get_text(3, &mut buf).ok() == Some(true) {
-                    Some(String::from_utf8_lossy(&buf).to_string())
-                } else {
-                    None
-                }
-                .unwrap_or_default();
+            let nullable_str = if row.get_text(3, &mut buf).ok() == Some(true) {
+                Some(String::from_utf8_lossy(&buf).to_string())
+            } else {
+                None
+            }
+            .unwrap_or_default();
 
             buf.clear();
             buf.clear();
-                let number_str = if row.get_text(4, &mut buf).ok() == Some(true) {
-                    Some(String::from_utf8_lossy(&buf).to_string())
-                } else {
-                    None
-                }
-                .unwrap_or_default();
+            let number_str = if row.get_text(4, &mut buf).ok() == Some(true) {
+                Some(String::from_utf8_lossy(&buf).to_string())
+            } else {
+                None
+            }
+            .unwrap_or_default();
 
             buf.clear();
             buf.clear();
-                let default_value = if row.get_text(5, &mut buf).ok() == Some(true) {
-                    Some(String::from_utf8_lossy(&buf).to_string())
-                } else {
-                    None
-                };
+            let default_value = if row.get_text(5, &mut buf).ok() == Some(true) {
+                Some(String::from_utf8_lossy(&buf).to_string())
+            } else {
+                None
+            };
 
-            let ordinal: u32 =
-                number_str.parse().unwrap_or(0);
+            let ordinal: u32 = number_str.parse().unwrap_or(0);
 
             columns.push(ColumnInfo {
                 name,
                 data_type,
-                nullable: nullable_str == "true"
-                    || nullable_str == "1",
+                nullable: nullable_str == "true" || nullable_str == "1",
                 ordinal,
                 default_value,
             });
@@ -246,14 +196,10 @@ impl MonetDBConnector {
         Ok(columns)
     }
 
-    fn query_constraints(
-        &self,
-        table: &str,
-    ) -> MetadataResult<Vec<ConstraintInfo>> {
+    fn query_constraints(&self, table: &str) -> MetadataResult<Vec<ConstraintInfo>> {
         let conn = self.open_conn()?;
 
-        let sql =
-            "SELECT k.name, k.type, \
+        let sql = "SELECT k.name, k.type, \
              GROUP_CONCAT(kc.name) \
              FROM sys.keys k \
              JOIN sys.objects kc ON k.id = kc.id \
@@ -262,16 +208,16 @@ impl MonetDBConnector {
              WHERE s.name = ? AND t.name = ? \
              GROUP BY k.name, k.type";
 
-
         let result = conn
-            .execute(sql, (
+            .execute(
+                sql,
+                (
                     &self.schema.as_str().into_parameter(),
                     &table.into_parameter(),
-                ))
-            .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to query keys for {table}: {e}"
                 ),
+            )
+            .map_err(|e| MetadataError::Query {
+                message: format!("failed to query keys for {table}: {e}"),
             })?;
 
         let Some(mut cursor) = result else {
@@ -280,40 +226,35 @@ impl MonetDBConnector {
 
         let mut constraints = Vec::new();
         let mut buf = Vec::new();
-        while let Some(mut row) = cursor
-            .next_row()
-            .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to read keys: {e}"
-                ),
-            })?
-        {
+        while let Some(mut row) = cursor.next_row().map_err(|e| MetadataError::Query {
+            message: format!("failed to read keys: {e}"),
+        })? {
             buf.clear();
             buf.clear();
-                let name = if row.get_text(1, &mut buf).ok() == Some(true) {
-                    Some(String::from_utf8_lossy(&buf).to_string())
-                } else {
-                    None
-                }
-                .unwrap_or_default();
+            let name = if row.get_text(1, &mut buf).ok() == Some(true) {
+                Some(String::from_utf8_lossy(&buf).to_string())
+            } else {
+                None
+            }
+            .unwrap_or_default();
 
             buf.clear();
             buf.clear();
-                let key_type = if row.get_text(2, &mut buf).ok() == Some(true) {
-                    Some(String::from_utf8_lossy(&buf).to_string())
-                } else {
-                    None
-                }
-                .unwrap_or_default();
+            let key_type = if row.get_text(2, &mut buf).ok() == Some(true) {
+                Some(String::from_utf8_lossy(&buf).to_string())
+            } else {
+                None
+            }
+            .unwrap_or_default();
 
             buf.clear();
             buf.clear();
-                let cols_str = if row.get_text(3, &mut buf).ok() == Some(true) {
-                    Some(String::from_utf8_lossy(&buf).to_string())
-                } else {
-                    None
-                }
-                .unwrap_or_default();
+            let cols_str = if row.get_text(3, &mut buf).ok() == Some(true) {
+                Some(String::from_utf8_lossy(&buf).to_string())
+            } else {
+                None
+            }
+            .unwrap_or_default();
 
             // MonetDB key types: 0=pkey, 1=unique, 2=fkey
             let kind = match key_type.as_str() {
@@ -341,29 +282,25 @@ impl MonetDBConnector {
         Ok(constraints)
     }
 
-    fn query_row_count(
-        &self,
-        table: &str,
-    ) -> MetadataResult<(f64, u64)> {
+    fn query_row_count(&self, table: &str) -> MetadataResult<(f64, u64)> {
         let conn = self.open_conn()?;
 
         // MonetDB stores row count in sys.storage.
-        let sql =
-            "SELECT SUM(count), SUM(columnsize) \
+        let sql = "SELECT SUM(count), SUM(columnsize) \
              FROM sys.storage() \
              WHERE schema = ? AND table = ? \
              GROUP BY schema, \"table\"";
 
-
         let result = conn
-            .execute(sql, (
+            .execute(
+                sql,
+                (
                     &self.schema.as_str().into_parameter(),
                     &table.into_parameter(),
-                ))
-            .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to query stats for {table}: {e}"
                 ),
+            )
+            .map_err(|e| MetadataError::Query {
+                message: format!("failed to query stats for {table}: {e}"),
             })?;
 
         let Some(mut cursor) = result else {
@@ -371,36 +308,29 @@ impl MonetDBConnector {
         };
 
         let mut buf = Vec::new();
-        if let Some(mut row) = cursor
-            .next_row()
-            .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to read stats: {e}"
-                ),
-            })?
-        {
+        if let Some(mut row) = cursor.next_row().map_err(|e| MetadataError::Query {
+            message: format!("failed to read stats: {e}"),
+        })? {
             buf.clear();
             buf.clear();
-                let count_str = if row.get_text(1, &mut buf).ok() == Some(true) {
-                    Some(String::from_utf8_lossy(&buf).to_string())
-                } else {
-                    None
-                }
-                .unwrap_or_default();
+            let count_str = if row.get_text(1, &mut buf).ok() == Some(true) {
+                Some(String::from_utf8_lossy(&buf).to_string())
+            } else {
+                None
+            }
+            .unwrap_or_default();
 
             buf.clear();
             buf.clear();
-                let size_str = if row.get_text(2, &mut buf).ok() == Some(true) {
-                    Some(String::from_utf8_lossy(&buf).to_string())
-                } else {
-                    None
-                }
-                .unwrap_or_default();
+            let size_str = if row.get_text(2, &mut buf).ok() == Some(true) {
+                Some(String::from_utf8_lossy(&buf).to_string())
+            } else {
+                None
+            }
+            .unwrap_or_default();
 
-            let rows: f64 =
-                count_str.parse().unwrap_or(0.0);
-            let bytes: u64 =
-                size_str.parse().unwrap_or(0);
+            let rows: f64 = count_str.parse().unwrap_or(0.0);
+            let bytes: u64 = size_str.parse().unwrap_or(0);
 
             Ok((rows, bytes))
         } else {
@@ -413,17 +343,14 @@ impl MonetDBConnector {
     /// # Errors
     ///
     /// Returns errors if catalog queries fail.
-    pub fn gather_schema_mut(
-        &self,
-    ) -> MetadataResult<SchemaInfo> {
+    pub fn gather_schema_mut(&self) -> MetadataResult<SchemaInfo> {
         let table_names = self.query_tables()?;
         let mut tables = HashMap::new();
 
         for name in &table_names {
             let columns = self.query_columns(name)?;
             let constraints = self.query_constraints(name)?;
-            let (row_count, _) =
-                self.query_row_count(name)?;
+            let (row_count, _) = self.query_row_count(name)?;
 
             tables.insert(
                 name.clone(),
@@ -450,12 +377,8 @@ impl MonetDBConnector {
     /// # Errors
     ///
     /// Returns errors if catalog queries fail.
-    pub fn gather_statistics_mut(
-        &self,
-        table: &str,
-    ) -> MetadataResult<TableStats> {
-        let (row_count, total_bytes) =
-            self.query_row_count(table)?;
+    pub fn gather_statistics_mut(&self, table: &str) -> MetadataResult<TableStats> {
+        let (row_count, total_bytes) = self.query_row_count(table)?;
 
         Ok(TableStats {
             table_name: table.to_owned(),
@@ -470,10 +393,7 @@ impl MonetDBConnector {
     /// # Errors
     ///
     /// Returns errors if the EXPLAIN query fails.
-    pub fn explain_query_mut(
-        &self,
-        sql: &str,
-    ) -> MetadataResult<ExplainPlan> {
+    pub fn explain_query_mut(&self, sql: &str) -> MetadataResult<ExplainPlan> {
         let conn = self.open_conn()?;
 
         let explain_sql = format!("EXPLAIN {sql}");
@@ -491,20 +411,13 @@ impl MonetDBConnector {
 
         let mut lines = Vec::new();
         let mut buf = Vec::new();
-        while let Some(mut row) = cursor
-            .next_row()
-            .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to read EXPLAIN: {e}"
-                ),
-            })?
-        {
+        while let Some(mut row) = cursor.next_row().map_err(|e| MetadataError::Query {
+            message: format!("failed to read EXPLAIN: {e}"),
+        })? {
             buf.clear();
             buf.clear();
             if row.get_text(1, &mut buf).ok() == Some(true) {
-                lines.push(
-                    String::from_utf8_lossy(&buf).to_string(),
-                );
+                lines.push(String::from_utf8_lossy(&buf).to_string());
             }
         }
 
@@ -522,17 +435,11 @@ impl DatabaseConnector for MonetDBConnector {
         self.gather_schema_mut()
     }
 
-    fn gather_statistics(
-        &self,
-        table: &str,
-    ) -> MetadataResult<TableStats> {
+    fn gather_statistics(&self, table: &str) -> MetadataResult<TableStats> {
         self.gather_statistics_mut(table)
     }
 
-    fn explain_query(
-        &self,
-        sql: &str,
-    ) -> MetadataResult<ExplainPlan> {
+    fn explain_query(&self, sql: &str) -> MetadataResult<ExplainPlan> {
         self.explain_query_mut(sql)
     }
 }
@@ -547,29 +454,19 @@ struct MonetDBUrlParts {
 }
 
 /// Parse `monetdb://user:pass@host:port/database`.
-fn parse_monetdb_url(
-    url: &str,
-) -> MetadataResult<MonetDBUrlParts> {
+fn parse_monetdb_url(url: &str) -> MetadataResult<MonetDBUrlParts> {
     let stripped = url
         .strip_prefix("monetdb://")
         .ok_or_else(|| MetadataError::Connection {
-            message: format!(
-                "invalid MonetDB URL scheme: {url}"
-            ),
+            message: format!("invalid MonetDB URL scheme: {url}"),
         })?;
 
     let (userinfo, rest) = stripped
         .split_once('@')
         .unwrap_or(("monetdb:monetdb", stripped));
-    let (user, password) = userinfo
-        .split_once(':')
-        .unwrap_or((userinfo, "monetdb"));
-    let (hostport, database) = rest
-        .split_once('/')
-        .unwrap_or((rest, "demo"));
-    let (host, port_str) = hostport
-        .split_once(':')
-        .unwrap_or((hostport, "50000"));
+    let (user, password) = userinfo.split_once(':').unwrap_or((userinfo, "monetdb"));
+    let (hostport, database) = rest.split_once('/').unwrap_or((rest, "demo"));
+    let (host, port_str) = hostport.split_once(':').unwrap_or((hostport, "50000"));
 
     let port: u16 = port_str.parse().unwrap_or(50000);
 
@@ -583,9 +480,7 @@ fn parse_monetdb_url(
 }
 
 /// Parse MonetDB MAL-based EXPLAIN output into an `ExplainPlan`.
-fn parse_monetdb_explain(
-    text: &str,
-) -> MetadataResult<ExplainPlan> {
+fn parse_monetdb_explain(text: &str) -> MetadataResult<ExplainPlan> {
     let lines: Vec<&str> = text
         .lines()
         .map(str::trim)
@@ -626,13 +521,9 @@ fn classify_monetdb_node(line: &str) -> NodeType {
         NodeType::HashJoin
     } else if lower.contains("group") {
         NodeType::HashAggregate
-    } else if lower.contains("sort")
-        || lower.contains("order")
-    {
+    } else if lower.contains("sort") || lower.contains("order") {
         NodeType::Sort
-    } else if lower.contains("select")
-        || lower.contains("filter")
-    {
+    } else if lower.contains("select") || lower.contains("filter") {
         NodeType::Other
     } else {
         NodeType::Other
@@ -645,10 +536,8 @@ mod tests {
 
     #[test]
     fn parse_url_basic() {
-        let parts = parse_monetdb_url(
-            "monetdb://monetdb:monetdb@localhost:50000/demo",
-        )
-        .expect("should parse");
+        let parts = parse_monetdb_url("monetdb://monetdb:monetdb@localhost:50000/demo")
+            .expect("should parse");
         assert_eq!(parts.host, "localhost");
         assert_eq!(parts.port, 50000);
         assert_eq!(parts.user, "monetdb");
@@ -658,66 +547,35 @@ mod tests {
 
     #[test]
     fn parse_url_defaults() {
-        let parts = parse_monetdb_url(
-            "monetdb://user:pass@host",
-        )
-        .expect("should parse");
+        let parts = parse_monetdb_url("monetdb://user:pass@host").expect("should parse");
         assert_eq!(parts.port, 50000);
         assert_eq!(parts.database, "demo");
     }
 
     #[test]
     fn parse_url_invalid() {
-        assert!(
-            parse_monetdb_url("postgresql://localhost")
-                .is_err()
-        );
+        assert!(parse_monetdb_url("postgresql://localhost").is_err());
     }
 
     #[test]
     fn classify_nodes() {
-        assert_eq!(
-            classify_monetdb_node("table.scan"),
-            NodeType::SeqScan
-        );
-        assert_eq!(
-            classify_monetdb_node("index.lookup"),
-            NodeType::IndexScan
-        );
-        assert_eq!(
-            classify_monetdb_node("join operation"),
-            NodeType::HashJoin
-        );
-        assert_eq!(
-            classify_monetdb_node("group by"),
-            NodeType::HashAggregate
-        );
-        assert_eq!(
-            classify_monetdb_node("sort"),
-            NodeType::Sort
-        );
-        assert_eq!(
-            classify_monetdb_node("something"),
-            NodeType::Other
-        );
+        assert_eq!(classify_monetdb_node("table.scan"), NodeType::SeqScan);
+        assert_eq!(classify_monetdb_node("index.lookup"), NodeType::IndexScan);
+        assert_eq!(classify_monetdb_node("join operation"), NodeType::HashJoin);
+        assert_eq!(classify_monetdb_node("group by"), NodeType::HashAggregate);
+        assert_eq!(classify_monetdb_node("sort"), NodeType::Sort);
+        assert_eq!(classify_monetdb_node("something"), NodeType::Other);
     }
 
     #[test]
     fn parse_explain_basic() {
         let text = "table.scan on orders\nfilter";
-        let plan = parse_monetdb_explain(text)
-            .expect("should parse");
-        assert_eq!(
-            plan.root.node_type,
-            NodeType::SeqScan
-        );
+        let plan = parse_monetdb_explain(text).expect("should parse");
+        assert_eq!(plan.root.node_type, NodeType::SeqScan);
     }
 
     #[test]
     fn connector_kind() {
-        assert_eq!(
-            DatabaseKind::MonetDB.to_string(),
-            "MonetDB"
-        );
+        assert_eq!(DatabaseKind::MonetDB.to_string(), "MonetDB");
     }
 }

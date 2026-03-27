@@ -10,16 +10,14 @@ use mysql::{Conn, Opts};
 
 use crate::connector::{DatabaseConnector, MetadataResult};
 use crate::error::MetadataError;
-use crate::explain::{ExplainPlan, parse_mysql_explain};
+use crate::explain::{parse_mysql_explain, ExplainPlan};
 use crate::schema::{
-    ColumnInfo, ColumnStatistics, ConstraintInfo, ConstraintKind,
-    DatabaseKind, IndexInfo, SchemaInfo, TableInfo, TableStats,
-    TriggerEvent, TriggerInfo, TriggerScope, TriggerTiming,
+    ColumnInfo, ColumnStatistics, ConstraintInfo, ConstraintKind, DatabaseKind, IndexInfo,
+    SchemaInfo, TableInfo, TableStats, TriggerEvent, TriggerInfo, TriggerScope, TriggerTiming,
 };
 
 /// Row type for constraint queries.
-type ConstraintRow =
-    (String, String, String, Option<String>, Option<String>);
+type ConstraintRow = (String, String, String, Option<String>, Option<String>);
 
 /// `MySQL` connector using the `mysql` crate.
 pub struct MySqlConnector {
@@ -33,35 +31,24 @@ impl MySqlConnector {
     /// # Errors
     ///
     /// Returns `MetadataError::Connection` if the connection fails.
-    pub fn connect(
-        connection_string: &str,
-    ) -> MetadataResult<Self> {
-        let opts = Opts::from_url(connection_string)
-            .map_err(|e| MetadataError::Connection {
-                message: format!(
-                    "invalid MySQL connection string: {e}"
-                ),
-            })?;
+    pub fn connect(connection_string: &str) -> MetadataResult<Self> {
+        let opts = Opts::from_url(connection_string).map_err(|e| MetadataError::Connection {
+            message: format!("invalid MySQL connection string: {e}"),
+        })?;
 
         let database = opts
             .get_db_name()
             .unwrap_or("information_schema")
             .to_owned();
 
-        let conn = Conn::new(opts).map_err(|e| {
-            MetadataError::Connection {
-                message: format!(
-                    "MySQL connection failed: {e}"
-                ),
-            }
+        let conn = Conn::new(opts).map_err(|e| MetadataError::Connection {
+            message: format!("MySQL connection failed: {e}"),
         })?;
 
         Ok(Self { conn, database })
     }
 
-    fn query_tables(
-        &mut self,
-    ) -> MetadataResult<Vec<String>> {
+    fn query_tables(&mut self) -> MetadataResult<Vec<String>> {
         let tables: Vec<String> = self
             .conn
             .exec(
@@ -79,30 +66,23 @@ impl MySqlConnector {
         Ok(tables)
     }
 
-    fn query_columns(
-        &mut self,
-        table: &str,
-    ) -> MetadataResult<Vec<ColumnInfo>> {
-        let rows: Vec<(String, String, String, u32, Option<String>)> =
-            self.conn
-                .exec(
-                    "SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, \
+    fn query_columns(&mut self, table: &str) -> MetadataResult<Vec<ColumnInfo>> {
+        let rows: Vec<(String, String, String, u32, Option<String>)> = self
+            .conn
+            .exec(
+                "SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, \
                      ORDINAL_POSITION, COLUMN_DEFAULT \
                      FROM information_schema.COLUMNS \
                      WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? \
                      ORDER BY ORDINAL_POSITION",
-                    (&self.database, table),
-                )
-                .map_err(|e| MetadataError::Query {
-                    message: format!(
-                        "failed to query columns for {table}: {e}"
-                    ),
-                })?;
+                (&self.database, table),
+            )
+            .map_err(|e| MetadataError::Query {
+                message: format!("failed to query columns for {table}: {e}"),
+            })?;
 
         let mut columns = Vec::new();
-        for (name, data_type, nullable_str, ordinal, default_value) in
-            rows
-        {
+        for (name, data_type, nullable_str, ordinal, default_value) in rows {
             columns.push(ColumnInfo {
                 name,
                 data_type,
@@ -114,10 +94,7 @@ impl MySqlConnector {
         Ok(columns)
     }
 
-    fn query_constraints(
-        &mut self,
-        table: &str,
-    ) -> MetadataResult<Vec<ConstraintInfo>> {
+    fn query_constraints(&mut self, table: &str) -> MetadataResult<Vec<ConstraintInfo>> {
         let rows: Vec<ConstraintRow> = self
             .conn
             .exec(
@@ -138,14 +115,11 @@ impl MySqlConnector {
                 (&self.database, table),
             )
             .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to query constraints for {table}: {e}"
-                ),
+                message: format!("failed to query constraints for {table}: {e}"),
             })?;
 
         let mut constraints = Vec::new();
-        for (name, ctype, cols_str, ref_table, ref_cols_str) in rows
-        {
+        for (name, ctype, cols_str, ref_table, ref_cols_str) in rows {
             let kind = match ctype.as_str() {
                 "PRIMARY KEY" => ConstraintKind::PrimaryKey,
                 "FOREIGN KEY" => ConstraintKind::ForeignKey,
@@ -154,16 +128,9 @@ impl MySqlConnector {
                 _ => continue,
             };
 
-            let columns: Vec<String> = cols_str
-                .split(',')
-                .map(|s| s.trim().to_owned())
-                .collect();
+            let columns: Vec<String> = cols_str.split(',').map(|s| s.trim().to_owned()).collect();
             let referenced_columns: Vec<String> = ref_cols_str
-                .map(|s| {
-                    s.split(',')
-                        .map(|s| s.trim().to_owned())
-                        .collect()
-                })
+                .map(|s| s.split(',').map(|s| s.trim().to_owned()).collect())
                 .unwrap_or_default();
 
             constraints.push(ConstraintInfo {
@@ -179,10 +146,7 @@ impl MySqlConnector {
         Ok(constraints)
     }
 
-    fn query_indexes(
-        &mut self,
-        table: &str,
-    ) -> MetadataResult<Vec<IndexInfo>> {
+    fn query_indexes(&mut self, table: &str) -> MetadataResult<Vec<IndexInfo>> {
         let rows: Vec<(String, u32, String, String)> = self
             .conn
             .exec(
@@ -194,37 +158,29 @@ impl MySqlConnector {
                 (&self.database, table),
             )
             .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to query indexes for {table}: {e}"
-                ),
+                message: format!("failed to query indexes for {table}: {e}"),
             })?;
 
-        let mut index_map: HashMap<String, IndexInfo> =
-            HashMap::new();
+        let mut index_map: HashMap<String, IndexInfo> = HashMap::new();
 
         for (idx_name, non_unique, col_name, idx_type) in rows {
-            let entry =
-                index_map.entry(idx_name.clone()).or_insert_with(
-                    || IndexInfo {
-                        name: idx_name,
-                        columns: Vec::new(),
-                        unique: non_unique == 0,
-                        index_type: idx_type,
-                    },
-                );
+            let entry = index_map
+                .entry(idx_name.clone())
+                .or_insert_with(|| IndexInfo {
+                    name: idx_name,
+                    columns: Vec::new(),
+                    unique: non_unique == 0,
+                    index_type: idx_type,
+                });
             entry.columns.push(col_name);
         }
 
-        let mut indexes: Vec<IndexInfo> =
-            index_map.into_values().collect();
+        let mut indexes: Vec<IndexInfo> = index_map.into_values().collect();
         indexes.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(indexes)
     }
 
-    fn query_table_row_count(
-        &mut self,
-        table: &str,
-    ) -> MetadataResult<(f64, u64)> {
+    fn query_table_row_count(&mut self, table: &str) -> MetadataResult<(f64, u64)> {
         let rows: Vec<(f64, u64)> = self
             .conn
             .exec(
@@ -234,23 +190,17 @@ impl MySqlConnector {
                 (&self.database, table),
             )
             .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to query table stats for {table}: {e}"
-                ),
+                message: format!("failed to query table stats for {table}: {e}"),
             })?;
 
-        let (row_count, total_bytes) =
-            rows.first().ok_or_else(|| MetadataError::Query {
-                message: format!("table not found: {table}"),
-            })?;
+        let (row_count, total_bytes) = rows.first().ok_or_else(|| MetadataError::Query {
+            message: format!("table not found: {table}"),
+        })?;
 
         Ok((*row_count, *total_bytes))
     }
 
-    fn query_triggers(
-        &mut self,
-        table: &str,
-    ) -> MetadataResult<Vec<TriggerInfo>> {
+    fn query_triggers(&mut self, table: &str) -> MetadataResult<Vec<TriggerInfo>> {
         let rows: Vec<(String, String, String, String)> = self
             .conn
             .exec(
@@ -262,9 +212,7 @@ impl MySqlConnector {
                 (&self.database, table),
             )
             .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to query triggers for {table}: {e}"
-                ),
+                message: format!("failed to query triggers for {table}: {e}"),
             })?;
 
         let mut triggers = Vec::new();
@@ -299,9 +247,7 @@ impl MySqlConnector {
     /// # Errors
     ///
     /// Returns errors if catalog queries fail.
-    pub fn gather_schema_mut(
-        &mut self,
-    ) -> MetadataResult<SchemaInfo> {
+    pub fn gather_schema_mut(&mut self) -> MetadataResult<SchemaInfo> {
         let table_names = self.query_tables()?;
         let mut tables = HashMap::new();
 
@@ -310,8 +256,7 @@ impl MySqlConnector {
             let constraints = self.query_constraints(name)?;
             let indexes = self.query_indexes(name)?;
             let triggers = self.query_triggers(name)?;
-            let (row_count, _) =
-                self.query_table_row_count(name)?;
+            let (row_count, _) = self.query_table_row_count(name)?;
 
             tables.insert(
                 name.clone(),
@@ -338,12 +283,8 @@ impl MySqlConnector {
     /// # Errors
     ///
     /// Returns errors if catalog queries fail.
-    pub fn gather_statistics_mut(
-        &mut self,
-        table: &str,
-    ) -> MetadataResult<TableStats> {
-        let (row_count, total_bytes) =
-            self.query_table_row_count(table)?;
+    pub fn gather_statistics_mut(&mut self, table: &str) -> MetadataResult<TableStats> {
+        let (row_count, total_bytes) = self.query_table_row_count(table)?;
 
         let rows: Vec<(String, Option<f64>)> = self
             .conn
@@ -355,9 +296,7 @@ impl MySqlConnector {
                 (&self.database, table),
             )
             .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to query column stats for {table}: {e}"
-                ),
+                message: format!("failed to query column stats for {table}: {e}"),
             })?;
 
         let mut columns = HashMap::new();
@@ -389,25 +328,17 @@ impl MySqlConnector {
     ///
     /// Returns errors if the EXPLAIN query fails or output cannot
     /// be parsed.
-    pub fn explain_query_mut(
-        &mut self,
-        sql: &str,
-    ) -> MetadataResult<ExplainPlan> {
-        let explain_sql =
-            format!("EXPLAIN FORMAT=JSON {sql}");
-        let rows: Vec<String> = self
-            .conn
-            .query(&explain_sql)
-            .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "EXPLAIN failed for query: {e}"
-                ),
-            })?;
+    pub fn explain_query_mut(&mut self, sql: &str) -> MetadataResult<ExplainPlan> {
+        let explain_sql = format!("EXPLAIN FORMAT=JSON {sql}");
+        let rows: Vec<String> =
+            self.conn
+                .query(&explain_sql)
+                .map_err(|e| MetadataError::Query {
+                    message: format!("EXPLAIN failed for query: {e}"),
+                })?;
 
-        let json_text = rows.first().ok_or_else(|| {
-            MetadataError::ExplainParse {
-                message: "no EXPLAIN output".to_owned(),
-            }
+        let json_text = rows.first().ok_or_else(|| MetadataError::ExplainParse {
+            message: "no EXPLAIN output".to_owned(),
         })?;
 
         parse_mysql_explain(json_text)
@@ -425,20 +356,13 @@ impl DatabaseConnector for MySqlConnector {
         })
     }
 
-    fn gather_statistics(
-        &self,
-        _table: &str,
-    ) -> MetadataResult<TableStats> {
+    fn gather_statistics(&self, _table: &str) -> MetadataResult<TableStats> {
         Err(MetadataError::Unsupported {
-            message: "use gather_statistics_mut() instead"
-                .to_owned(),
+            message: "use gather_statistics_mut() instead".to_owned(),
         })
     }
 
-    fn explain_query(
-        &self,
-        _sql: &str,
-    ) -> MetadataResult<ExplainPlan> {
+    fn explain_query(&self, _sql: &str) -> MetadataResult<ExplainPlan> {
         Err(MetadataError::Unsupported {
             message: "use explain_query_mut() instead".to_owned(),
         })

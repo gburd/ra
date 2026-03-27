@@ -13,9 +13,8 @@ use crate::connector::{DatabaseConnector, MetadataResult};
 use crate::error::MetadataError;
 use crate::explain::ExplainPlan;
 use crate::schema::{
-    ColumnInfo, ColumnStatistics, ConstraintInfo, ConstraintKind,
-    DatabaseKind, IndexInfo, SchemaInfo, TableInfo, TableStats,
-    TriggerEvent, TriggerInfo, TriggerScope, TriggerTiming,
+    ColumnInfo, ColumnStatistics, ConstraintInfo, ConstraintKind, DatabaseKind, IndexInfo,
+    SchemaInfo, TableInfo, TableStats, TriggerEvent, TriggerInfo, TriggerScope, TriggerTiming,
 };
 
 /// `SQLite` connector using the `rusqlite` crate.
@@ -32,12 +31,8 @@ impl SqliteConnector {
     /// Returns `MetadataError::Connection` if the file cannot be
     /// opened.
     pub fn connect(path: &str) -> MetadataResult<Self> {
-        let conn = Connection::open(path).map_err(|e| {
-            MetadataError::Connection {
-                message: format!(
-                    "SQLite open failed for {path}: {e}"
-                ),
-            }
+        let conn = Connection::open(path).map_err(|e| MetadataError::Connection {
+            message: format!("SQLite open failed for {path}: {e}"),
         })?;
 
         Ok(Self {
@@ -52,12 +47,8 @@ impl SqliteConnector {
     ///
     /// Returns `MetadataError::Connection` if initialization fails.
     pub fn open_in_memory() -> MetadataResult<Self> {
-        let conn = Connection::open_in_memory().map_err(|e| {
-            MetadataError::Connection {
-                message: format!(
-                    "SQLite in-memory open failed: {e}"
-                ),
-            }
+        let conn = Connection::open_in_memory().map_err(|e| MetadataError::Connection {
+            message: format!("SQLite in-memory open failed: {e}"),
         })?;
 
         Ok(Self {
@@ -96,10 +87,7 @@ impl SqliteConnector {
         Ok(tables)
     }
 
-    fn query_columns(
-        &self,
-        table: &str,
-    ) -> MetadataResult<Vec<ColumnInfo>> {
+    fn query_columns(&self, table: &str) -> MetadataResult<Vec<ColumnInfo>> {
         let mut stmt = self
             .conn
             .prepare(&format!(
@@ -107,9 +95,7 @@ impl SqliteConnector {
                 table.replace('\'', "''")
             ))
             .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "PRAGMA table_info failed for {table}: {e}"
-                ),
+                message: format!("PRAGMA table_info failed for {table}: {e}"),
             })?;
 
         let columns: Vec<ColumnInfo> = stmt
@@ -128,9 +114,7 @@ impl SqliteConnector {
                 })
             })
             .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to read columns for {table}: {e}"
-                ),
+                message: format!("failed to read columns for {table}: {e}"),
             })?
             .filter_map(Result::ok)
             .collect();
@@ -138,10 +122,7 @@ impl SqliteConnector {
         Ok(columns)
     }
 
-    fn query_indexes(
-        &self,
-        table: &str,
-    ) -> MetadataResult<Vec<IndexInfo>> {
+    fn query_indexes(&self, table: &str) -> MetadataResult<Vec<IndexInfo>> {
         let mut idx_stmt = self
             .conn
             .prepare(&format!(
@@ -149,9 +130,7 @@ impl SqliteConnector {
                 table.replace('\'', "''")
             ))
             .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "PRAGMA index_list failed for {table}: {e}"
-                ),
+                message: format!("PRAGMA index_list failed for {table}: {e}"),
             })?;
 
         let index_list: Vec<(String, bool)> = idx_stmt
@@ -161,9 +140,7 @@ impl SqliteConnector {
                 Ok((name, unique))
             })
             .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to read index list for {table}: {e}"
-                ),
+                message: format!("failed to read index list for {table}: {e}"),
             })?
             .filter_map(Result::ok)
             .collect();
@@ -208,10 +185,7 @@ impl SqliteConnector {
         Ok(indexes)
     }
 
-    fn query_pk_constraint(
-        &self,
-        table: &str,
-    ) -> Vec<ConstraintInfo> {
+    fn query_pk_constraint(&self, table: &str) -> Vec<ConstraintInfo> {
         let Ok(mut stmt) = self.conn.prepare(&format!(
             "PRAGMA table_info('{}')",
             table.replace('\'', "''")
@@ -247,10 +221,7 @@ impl SqliteConnector {
         }]
     }
 
-    fn query_fk_constraints(
-        &self,
-        table: &str,
-    ) -> Vec<ConstraintInfo> {
+    fn query_fk_constraints(&self, table: &str) -> Vec<ConstraintInfo> {
         let Ok(mut stmt) = self.conn.prepare(&format!(
             "PRAGMA foreign_key_list('{}')",
             table.replace('\'', "''")
@@ -267,16 +238,13 @@ impl SqliteConnector {
             return vec![];
         };
 
-        let fks: Vec<(String, String, String)> = fk_rows
-            .filter_map(Result::ok)
-            .collect();
+        let fks: Vec<(String, String, String)> = fk_rows.filter_map(Result::ok).collect();
 
         if fks.is_empty() {
             return vec![];
         }
 
-        let mut fk_map: HashMap<String, (Vec<String>, Vec<String>)> =
-            HashMap::new();
+        let mut fk_map: HashMap<String, (Vec<String>, Vec<String>)> = HashMap::new();
         for (ref_table, from, to) in fks {
             let entry = fk_map
                 .entry(ref_table)
@@ -300,10 +268,7 @@ impl SqliteConnector {
         constraints
     }
 
-    fn query_row_count(
-        &self,
-        table: &str,
-    ) -> MetadataResult<f64> {
+    fn query_row_count(&self, table: &str) -> MetadataResult<f64> {
         let stat1_result: Result<f64, _> = self.conn.query_row(
             "SELECT stat FROM sqlite_stat1 \
              WHERE tbl = ?1 AND idx IS NULL \
@@ -327,26 +292,18 @@ impl SqliteConnector {
         let count: f64 = self
             .conn
             .query_row(
-                &format!(
-                    "SELECT COUNT(*) FROM \"{}\"",
-                    table.replace('"', "\"\"")
-                ),
+                &format!("SELECT COUNT(*) FROM \"{}\"", table.replace('"', "\"\"")),
                 [],
                 |row| row.get(0),
             )
             .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to count rows for {table}: {e}"
-                ),
+                message: format!("failed to count rows for {table}: {e}"),
             })?;
 
         Ok(count)
     }
 
-    fn query_triggers(
-        &self,
-        table: &str,
-    ) -> MetadataResult<Vec<TriggerInfo>> {
+    fn query_triggers(&self, table: &str) -> MetadataResult<Vec<TriggerInfo>> {
         let mut stmt = self
             .conn
             .prepare(
@@ -355,9 +312,7 @@ impl SqliteConnector {
                  AND tbl_name = ?1",
             )
             .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to query triggers for {table}: {e}"
-                ),
+                message: format!("failed to query triggers for {table}: {e}"),
             })?;
 
         let triggers: Vec<(String, String)> = stmt
@@ -367,9 +322,7 @@ impl SqliteConnector {
                 Ok((name, sql))
             })
             .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to read triggers for {table}: {e}"
-                ),
+                message: format!("failed to read triggers for {table}: {e}"),
             })?
             .filter_map(Result::ok)
             .collect();
@@ -412,34 +365,21 @@ impl SqliteConnector {
         Ok(result)
     }
 
-    fn build_explain_text(
-        &self,
-        sql: &str,
-    ) -> MetadataResult<String> {
-        let explain_sql =
-            format!("EXPLAIN QUERY PLAN {sql}");
+    fn build_explain_text(&self, sql: &str) -> MetadataResult<String> {
+        let explain_sql = format!("EXPLAIN QUERY PLAN {sql}");
         let mut stmt = self
             .conn
             .prepare(&explain_sql)
             .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "EXPLAIN QUERY PLAN failed: {e}"
-                ),
+                message: format!("EXPLAIN QUERY PLAN failed: {e}"),
             })?;
 
         let rows: Vec<(i64, i64, i64, String)> = stmt
             .query_map([], |row| {
-                Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                ))
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
             })
             .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to read EXPLAIN output: {e}"
-                ),
+                message: format!("failed to read EXPLAIN output: {e}"),
             })?
             .filter_map(Result::ok)
             .collect();
@@ -447,9 +387,7 @@ impl SqliteConnector {
         // Build pipe-delimited format for the parser
         let mut text = String::new();
         for (id, parent, notused, detail) in &rows {
-            let _ = writeln!(
-                text, "{id}|{parent}|{notused}|{detail}"
-            );
+            let _ = writeln!(text, "{id}|{parent}|{notused}|{detail}");
         }
 
         Ok(text)
@@ -468,10 +406,8 @@ impl DatabaseConnector for SqliteConnector {
         for name in &table_names {
             let columns = self.query_columns(name)?;
             let indexes = self.query_indexes(name)?;
-            let mut constraints =
-                self.query_pk_constraint(name);
-            constraints
-                .extend(self.query_fk_constraints(name));
+            let mut constraints = self.query_pk_constraint(name);
+            constraints.extend(self.query_fk_constraints(name));
             let triggers = self.query_triggers(name)?;
             let row_count = self.query_row_count(name)?;
 
@@ -495,10 +431,7 @@ impl DatabaseConnector for SqliteConnector {
         })
     }
 
-    fn gather_statistics(
-        &self,
-        table: &str,
-    ) -> MetadataResult<TableStats> {
+    fn gather_statistics(&self, table: &str) -> MetadataResult<TableStats> {
         let row_count = self.query_row_count(table)?;
 
         let columns_info = self.query_columns(table)?;
@@ -536,10 +469,7 @@ impl DatabaseConnector for SqliteConnector {
         })
     }
 
-    fn explain_query(
-        &self,
-        sql: &str,
-    ) -> MetadataResult<ExplainPlan> {
+    fn explain_query(&self, sql: &str) -> MetadataResult<ExplainPlan> {
         let text = self.build_explain_text(sql)?;
         crate::explain::parse_sqlite_explain(&text)
     }
@@ -551,8 +481,7 @@ mod tests {
     use super::*;
 
     fn setup_test_db() -> SqliteConnector {
-        let connector = SqliteConnector::open_in_memory()
-            .expect("should open in-memory db");
+        let connector = SqliteConnector::open_in_memory().expect("should open in-memory db");
 
         connector
             .conn
@@ -587,17 +516,12 @@ mod tests {
     #[test]
     fn gather_schema_sqlite() {
         let connector = setup_test_db();
-        let schema = connector
-            .gather_schema()
-            .expect("should gather schema");
+        let schema = connector.gather_schema().expect("should gather schema");
 
         assert_eq!(schema.kind, DatabaseKind::SQLite);
         assert_eq!(schema.tables.len(), 2);
 
-        let users = schema
-            .tables
-            .get("users")
-            .expect("should have users table");
+        let users = schema.tables.get("users").expect("should have users table");
         assert_eq!(users.columns.len(), 4);
         assert_eq!(users.columns[0].name, "id");
         // SQLite INTEGER PRIMARY KEY reports notnull=0 because
@@ -613,9 +537,7 @@ mod tests {
     #[test]
     fn gather_schema_indexes() {
         let connector = setup_test_db();
-        let schema = connector
-            .gather_schema()
-            .expect("should gather schema");
+        let schema = connector.gather_schema().expect("should gather schema");
 
         let orders = schema
             .tables
@@ -635,14 +557,9 @@ mod tests {
     #[test]
     fn gather_schema_constraints() {
         let connector = setup_test_db();
-        let schema = connector
-            .gather_schema()
-            .expect("should gather schema");
+        let schema = connector.gather_schema().expect("should gather schema");
 
-        let users = schema
-            .tables
-            .get("users")
-            .expect("should have users table");
+        let users = schema.tables.get("users").expect("should have users table");
         let pk = users
             .constraints
             .iter()
@@ -659,10 +576,7 @@ mod tests {
             .find(|c| c.kind == ConstraintKind::ForeignKey);
         assert!(fk.is_some());
         let fk = fk.expect("fk should exist");
-        assert_eq!(
-            fk.referenced_table.as_deref(),
-            Some("users")
-        );
+        assert_eq!(fk.referenced_table.as_deref(), Some("users"));
     }
 
     #[test]

@@ -57,10 +57,7 @@ impl Default for ChartConfig {
 }
 
 /// Render a single series as an ASCII bar chart.
-pub fn render_ascii_bar_chart(
-    series: &Series,
-    config: &ChartConfig,
-) -> String {
+pub fn render_ascii_bar_chart(series: &Series, config: &ChartConfig) -> String {
     if series.points.is_empty() {
         return "(no data)\n".to_owned();
     }
@@ -121,18 +118,16 @@ pub fn render_ascii_bar_chart(
 }
 
 /// Render multiple series as an ASCII sparkline chart.
-pub fn render_ascii_sparkline(
-    series: &[Series],
-    config: &ChartConfig,
-) -> String {
+pub fn render_ascii_sparkline(series: &[Series], config: &ChartConfig) -> String {
     if series.is_empty() {
         return "(no data)\n".to_owned();
     }
 
     let height = config.height.min(30);
-    let blocks = [' ', '\u{2581}', '\u{2582}', '\u{2583}',
-                  '\u{2584}', '\u{2585}', '\u{2586}', '\u{2587}',
-                  '\u{2588}'];
+    let blocks = [
+        ' ', '\u{2581}', '\u{2582}', '\u{2583}', '\u{2584}', '\u{2585}', '\u{2586}', '\u{2587}',
+        '\u{2588}',
+    ];
 
     let mut out = String::new();
     if !config.title.is_empty() {
@@ -164,25 +159,18 @@ pub fn render_ascii_sparkline(
         let _ = write!(out, "  {}: ", s.name);
         for point in &s.points {
             let normalized = (point.value - min_val) / range;
-            let idx = (normalized * (blocks.len() - 1) as f64)
-                .round() as usize;
+            let idx = (normalized * (blocks.len() - 1) as f64).round() as usize;
             let idx = idx.min(blocks.len() - 1);
             out.push(blocks[idx]);
         }
         let _ = writeln!(out);
-        let _ = writeln!(
-            out,
-            "    range: [{:.1}, {:.1}]",
-            min_val, max_val,
-        );
+        let _ = writeln!(out, "    range: [{:.1}, {:.1}]", min_val, max_val,);
     }
 
     // X-axis labels (first and last)
     if let Some(first_series) = series.first() {
-        if let (Some(first), Some(last)) = (
-            first_series.points.first(),
-            first_series.points.last(),
-        ) {
+        if let (Some(first), Some(last)) = (first_series.points.first(), first_series.points.last())
+        {
             let _ = writeln!(
                 out,
                 "  {}: {} .. {}",
@@ -197,18 +185,12 @@ pub fn render_ascii_sparkline(
 }
 
 /// Render an ASCII table for timeline data.
-pub fn render_ascii_table(
-    headers: &[&str],
-    rows: &[Vec<String>],
-) -> String {
+pub fn render_ascii_table(headers: &[&str], rows: &[Vec<String>]) -> String {
     if headers.is_empty() {
         return String::new();
     }
 
-    let mut col_widths: Vec<usize> = headers
-        .iter()
-        .map(|h| h.len())
-        .collect();
+    let mut col_widths: Vec<usize> = headers.iter().map(|h| h.len()).collect();
 
     for row in rows {
         for (i, cell) in row.iter().enumerate() {
@@ -257,10 +239,7 @@ pub fn render_ascii_table(
 }
 
 /// Render an HTML page with SVG line chart.
-pub fn render_html_chart(
-    series: &[Series],
-    config: &ChartConfig,
-) -> String {
+pub fn render_html_chart(series: &[Series], config: &ChartConfig) -> String {
     let svg_width = config.width.max(400);
     let svg_height = config.height.max(200);
     let margin = 60;
@@ -282,8 +261,7 @@ pub fn render_html_chart(
     };
 
     let colors = [
-        "#2196F3", "#4CAF50", "#FF9800", "#E91E63",
-        "#9C27B0", "#00BCD4",
+        "#2196F3", "#4CAF50", "#FF9800", "#E91E63", "#9C27B0", "#00BCD4",
     ];
 
     let mut svg = String::new();
@@ -354,8 +332,7 @@ pub fn render_html_chart(
                 margin + plot_w / 2
             };
             let y_norm = (point.value - global_min) / range;
-            let y = margin + plot_h
-                - (y_norm * plot_h as f64).round() as usize;
+            let y = margin + plot_h - (y_norm * plot_h as f64).round() as usize;
 
             if i == 0 {
                 let _ = write!(path, "M{x},{y}");
@@ -364,10 +341,7 @@ pub fn render_html_chart(
             }
 
             // Data point dot
-            let _ = write!(
-                svg,
-                r#"<circle cx="{x}" cy="{y}" r="3" fill="{color}"/>"#,
-            );
+            let _ = write!(svg, r#"<circle cx="{x}" cy="{y}" r="3" fill="{color}"/>"#,);
         }
 
         let _ = write!(
@@ -484,10 +458,7 @@ pub fn operators_differ(a: &str, b: &str) -> bool {
 
 /// Format a cost delta as a percentage string with arrow.
 #[must_use]
-pub fn format_cost_delta(
-    previous: f64,
-    current: f64,
-) -> String {
+pub fn format_cost_delta(previous: f64, current: f64) -> String {
     if previous <= 0.0 {
         return format!("{current:.0}");
     }
@@ -495,14 +466,9 @@ pub fn format_cost_delta(
     if pct.abs() < 0.5 {
         "unchanged".to_owned()
     } else if pct > 0.0 {
-        format!(
-            "{current:.0} (\u{2191}{pct:.0}%)",
-        )
+        format!("{current:.0} (\u{2191}{pct:.0}%)",)
     } else {
-        format!(
-            "{current:.0} (\u{2193}{:.0}%)",
-            pct.abs(),
-        )
+        format!("{current:.0} (\u{2193}{:.0}%)", pct.abs(),)
     }
 }
 
@@ -554,36 +520,23 @@ pub fn infer_change_reason(
 
 /// Render a plan evolution trace as ASCII output.
 #[must_use]
-pub fn render_plan_evolution_ascii(
-    trace: &PlanEvolutionTrace,
-) -> String {
+pub fn render_plan_evolution_ascii(trace: &PlanEvolutionTrace) -> String {
     if trace.snapshots.is_empty() {
         return String::new();
     }
 
     let mut out = String::new();
-    let title = format!(
-        "Plan Evolution: {}",
-        trace.query_label
-    );
+    let title = format!("Plan Evolution: {}", trace.query_label);
     let _ = writeln!(out, "{title}");
     let _ = writeln!(out, "{}", "-".repeat(title.len()));
     let _ = writeln!(out);
 
     for (i, snap) in trace.snapshots.iter().enumerate() {
         if i == 0 {
-            let _ = write!(
-                out,
-                "{:<12}Initial: {}",
-                snap.time_label, snap.operator,
-            );
+            let _ = write!(out, "{:<12}Initial: {}", snap.time_label, snap.operator,);
             if let Some(cost) = snap.cost {
                 let _ = writeln!(out);
-                let _ = write!(
-                    out,
-                    "{:>12}Cost: {cost:.0}",
-                    "",
-                );
+                let _ = write!(out, "{:>12}Cost: {cost:.0}", "",);
             }
             let _ = writeln!(out);
         } else if snap.changed {
@@ -595,50 +548,26 @@ pub fn render_plan_evolution_ascii(
             );
             let _ = writeln!(out);
             if let Some(ref reason) = snap.reason {
-                let _ = writeln!(
-                    out,
-                    "{:>12}Reason: {reason}",
-                    "",
-                );
+                let _ = writeln!(out, "{:>12}Reason: {reason}", "",);
             }
             if let Some(cost) = snap.cost {
-                let prev_cost = trace.snapshots[..i]
-                    .iter()
-                    .rev()
-                    .find_map(|s| s.cost);
+                let prev_cost = trace.snapshots[..i].iter().rev().find_map(|s| s.cost);
                 if let Some(prev) = prev_cost {
-                    let _ = writeln!(
-                        out,
-                        "{:>12}Cost: {}",
-                        "",
-                        format_cost_delta(prev, cost),
-                    );
+                    let _ = writeln!(out, "{:>12}Cost: {}", "", format_cost_delta(prev, cost),);
                 } else {
-                    let _ = writeln!(
-                        out,
-                        "{:>12}Cost: {cost:.0}",
-                        "",
-                    );
+                    let _ = writeln!(out, "{:>12}Cost: {cost:.0}", "",);
                 }
             }
         } else {
             let _ = writeln!(out);
-            let _ = write!(
-                out,
-                "{:<12}Plan unchanged",
-                snap.time_label,
-            );
+            let _ = write!(out, "{:<12}Plan unchanged", snap.time_label,);
             if let Some(cost) = snap.cost {
-                let prev_cost = trace.snapshots[..i]
-                    .iter()
-                    .rev()
-                    .find_map(|s| s.cost);
+                let prev_cost = trace.snapshots[..i].iter().rev().find_map(|s| s.cost);
                 if let Some(prev) = prev_cost {
                     let delta = format_cost_delta(prev, cost);
                     let _ = write!(out, " (cost: {delta})");
                 } else {
-                    let _ =
-                        write!(out, " (cost: {cost:.0})");
+                    let _ = write!(out, " (cost: {cost:.0})");
                 }
             }
             let _ = writeln!(out);
@@ -656,10 +585,22 @@ mod tests {
         Series {
             name: "row_count".to_owned(),
             points: vec![
-                DataPoint { label: "t=0".to_owned(), value: 1000.0 },
-                DataPoint { label: "t=60".to_owned(), value: 1500.0 },
-                DataPoint { label: "t=120".to_owned(), value: 2000.0 },
-                DataPoint { label: "t=180".to_owned(), value: 1800.0 },
+                DataPoint {
+                    label: "t=0".to_owned(),
+                    value: 1000.0,
+                },
+                DataPoint {
+                    label: "t=60".to_owned(),
+                    value: 1500.0,
+                },
+                DataPoint {
+                    label: "t=120".to_owned(),
+                    value: 2000.0,
+                },
+                DataPoint {
+                    label: "t=180".to_owned(),
+                    value: 1800.0,
+                },
             ],
         }
     }
@@ -669,17 +610,35 @@ mod tests {
             Series {
                 name: "estimated".to_owned(),
                 points: vec![
-                    DataPoint { label: "t=0".to_owned(), value: 1000.0 },
-                    DataPoint { label: "t=60".to_owned(), value: 1200.0 },
-                    DataPoint { label: "t=120".to_owned(), value: 1100.0 },
+                    DataPoint {
+                        label: "t=0".to_owned(),
+                        value: 1000.0,
+                    },
+                    DataPoint {
+                        label: "t=60".to_owned(),
+                        value: 1200.0,
+                    },
+                    DataPoint {
+                        label: "t=120".to_owned(),
+                        value: 1100.0,
+                    },
                 ],
             },
             Series {
                 name: "actual".to_owned(),
                 points: vec![
-                    DataPoint { label: "t=0".to_owned(), value: 1000.0 },
-                    DataPoint { label: "t=60".to_owned(), value: 1500.0 },
-                    DataPoint { label: "t=120".to_owned(), value: 1400.0 },
+                    DataPoint {
+                        label: "t=0".to_owned(),
+                        value: 1000.0,
+                    },
+                    DataPoint {
+                        label: "t=60".to_owned(),
+                        value: 1500.0,
+                    },
+                    DataPoint {
+                        label: "t=120".to_owned(),
+                        value: 1400.0,
+                    },
                 ],
             },
         ]
@@ -714,9 +673,10 @@ mod tests {
     fn ascii_bar_chart_single_point() {
         let s = Series {
             name: "single".to_owned(),
-            points: vec![
-                DataPoint { label: "t=0".to_owned(), value: 500.0 },
-            ],
+            points: vec![DataPoint {
+                label: "t=0".to_owned(),
+                value: 500.0,
+            }],
         };
         let config = ChartConfig::default();
         let out = render_ascii_bar_chart(&s, &config);
@@ -728,8 +688,14 @@ mod tests {
         let s = Series {
             name: "flat".to_owned(),
             points: vec![
-                DataPoint { label: "a".to_owned(), value: 100.0 },
-                DataPoint { label: "b".to_owned(), value: 100.0 },
+                DataPoint {
+                    label: "a".to_owned(),
+                    value: 100.0,
+                },
+                DataPoint {
+                    label: "b".to_owned(),
+                    value: 100.0,
+                },
             ],
         };
         let config = ChartConfig::default();
@@ -829,12 +795,10 @@ mod tests {
     fn html_chart_escapes_special_chars() {
         let series = vec![Series {
             name: "a<b&c".to_owned(),
-            points: vec![
-                DataPoint {
-                    label: "x<1".to_owned(),
-                    value: 1.0,
-                },
-            ],
+            points: vec![DataPoint {
+                label: "x<1".to_owned(),
+                value: 1.0,
+            }],
         }];
         let config = ChartConfig {
             title: "Test <&>".to_owned(),
@@ -891,10 +855,7 @@ mod tests {
         };
         let out = render_ascii_bar_chart(&s, &config);
         for line in out.lines() {
-            assert!(
-                line.len() <= 100,
-                "line too long: {line}"
-            );
+            assert!(line.len() <= 100, "line too long: {line}");
         }
     }
 
@@ -995,8 +956,14 @@ mod tests {
         let s = Series {
             name: "neg".to_owned(),
             points: vec![
-                DataPoint { label: "a".to_owned(), value: -10.0 },
-                DataPoint { label: "b".to_owned(), value: 10.0 },
+                DataPoint {
+                    label: "a".to_owned(),
+                    value: -10.0,
+                },
+                DataPoint {
+                    label: "b".to_owned(),
+                    value: 10.0,
+                },
             ],
         };
         let config = ChartConfig::default();
@@ -1108,9 +1075,7 @@ mod tests {
     fn plan_evolution_shows_plan_changed() {
         let trace = sample_trace();
         let out = render_plan_evolution_ascii(&trace);
-        assert!(
-            out.contains("PLAN CHANGED: NestedLoop(orders, lineitem)")
-        );
+        assert!(out.contains("PLAN CHANGED: NestedLoop(orders, lineitem)"));
     }
 
     #[test]
@@ -1182,11 +1147,7 @@ mod tests {
 
     #[test]
     fn infer_reason_analyze() {
-        let reason = infer_change_reason(
-            "SeqScan",
-            "IndexScan",
-            &["ANALYZE"],
-        );
+        let reason = infer_change_reason("SeqScan", "IndexScan", &["ANALYZE"]);
         assert!(reason.contains("ANALYZE"));
         assert!(reason.contains("SeqScan"));
         assert!(reason.contains("IndexScan"));
@@ -1194,42 +1155,26 @@ mod tests {
 
     #[test]
     fn infer_reason_reoptimize() {
-        let reason = infer_change_reason(
-            "HashJoin",
-            "NestedLoop",
-            &["REOPTIMIZE"],
-        );
+        let reason = infer_change_reason("HashJoin", "NestedLoop", &["REOPTIMIZE"]);
         assert!(reason.contains("Reoptimization"));
     }
 
     #[test]
     fn infer_reason_insert() {
-        let reason = infer_change_reason(
-            "HashJoin",
-            "NestedLoop",
-            &["INSERT"],
-        );
+        let reason = infer_change_reason("HashJoin", "NestedLoop", &["INSERT"]);
         assert!(reason.contains("INSERT"));
         assert!(reason.contains("Cardinality"));
     }
 
     #[test]
     fn infer_reason_delete() {
-        let reason = infer_change_reason(
-            "SeqScan",
-            "IndexScan",
-            &["DELETE"],
-        );
+        let reason = infer_change_reason("SeqScan", "IndexScan", &["DELETE"]);
         assert!(reason.contains("DELETE"));
     }
 
     #[test]
     fn infer_reason_no_events() {
-        let reason = infer_change_reason(
-            "SeqScan",
-            "IndexScan",
-            &[],
-        );
+        let reason = infer_change_reason("SeqScan", "IndexScan", &[]);
         assert!(reason.contains("\u{2192}"));
         assert!(reason.contains("SeqScan"));
         assert!(reason.contains("IndexScan"));

@@ -11,8 +11,7 @@ use tempfile::NamedTempFile;
 // ── Helpers ─────────────────────────────────────────────────
 
 fn ra_cli() -> Command {
-    Command::cargo_bin("ra-cli")
-        .expect("ra-cli binary should be built")
+    Command::cargo_bin("ra-cli").expect("ra-cli binary should be built")
 }
 
 fn workspace_root() -> std::path::PathBuf {
@@ -44,8 +43,7 @@ fn write_temp_rra(content: &str) -> NamedTempFile {
         .suffix(".rra")
         .tempfile()
         .expect("create temp file");
-    f.write_all(content.as_bytes())
-        .expect("write temp file");
+    f.write_all(content.as_bytes()).expect("write temp file");
     f.flush().expect("flush temp file");
     f
 }
@@ -67,34 +65,24 @@ A minimal rule for testing.
 
 #[test]
 fn validate_valid_simple_rule_reports_pass() {
-    let fixture = format!(
-        "{}/valid-simple-rule.rra",
-        fixtures_dir()
-    );
+    let fixture = format!("{}/valid-simple-rule.rra", fixtures_dir());
 
     ra_cli()
         .args(["validate", &fixture])
         .assert()
         .success()
-        .stderr(predicate::str::contains(
-            "1 file(s) passed validation",
-        ));
+        .stderr(predicate::str::contains("1 file(s) passed validation"));
 }
 
 #[test]
 fn validate_valid_complex_rule_reports_pass() {
-    let fixture = format!(
-        "{}/valid-complex-rule.rra",
-        fixtures_dir()
-    );
+    let fixture = format!("{}/valid-complex-rule.rra", fixtures_dir());
 
     ra_cli()
         .args(["validate", &fixture])
         .assert()
         .success()
-        .stderr(predicate::str::contains(
-            "1 file(s) passed validation",
-        ));
+        .stderr(predicate::str::contains("1 file(s) passed validation"));
 }
 
 #[test]
@@ -112,10 +100,7 @@ fn validate_temp_rule_with_good_content_passes() {
 
 #[test]
 fn validate_invalid_bad_yaml_fails_with_detail() {
-    let fixture = format!(
-        "{}/invalid-bad-yaml.rra",
-        fixtures_dir()
-    );
+    let fixture = format!("{}/invalid-bad-yaml.rra", fixtures_dir());
 
     ra_cli()
         .args(["validate", &fixture])
@@ -126,10 +111,7 @@ fn validate_invalid_bad_yaml_fails_with_detail() {
 
 #[test]
 fn validate_invalid_missing_fields_fails() {
-    let fixture = format!(
-        "{}/invalid-missing-fields.rra",
-        fixtures_dir()
-    );
+    let fixture = format!("{}/invalid-missing-fields.rra", fixtures_dir());
 
     ra_cli()
         .args(["validate", &fixture])
@@ -140,10 +122,7 @@ fn validate_invalid_missing_fields_fails() {
 
 #[test]
 fn validate_invalid_bad_category_shows_category_error() {
-    let fixture = format!(
-        "{}/invalid-bad-category.rra",
-        fixtures_dir()
-    );
+    let fixture = format!("{}/invalid-bad-category.rra", fixtures_dir());
 
     ra_cli()
         .args(["validate", &fixture])
@@ -193,10 +172,7 @@ fn validate_fixtures_directory_reports_multiple_files() {
         .args(["validate", &fixtures_dir()])
         .assert()
         .failure() // some fixtures are intentionally invalid
-        .stderr(
-            predicate::str::contains("Validating")
-                .and(predicate::str::contains("file(s)")),
-        );
+        .stderr(predicate::str::contains("Validating").and(predicate::str::contains("file(s)")));
 }
 
 #[test]
@@ -205,10 +181,7 @@ fn validate_directory_counts_passes_and_failures() {
         .args(["validate", &fixtures_dir()])
         .assert()
         .failure()
-        .stderr(
-            predicate::str::contains("passed")
-                .and(predicate::str::contains("failed")),
-        );
+        .stderr(predicate::str::contains("passed").and(predicate::str::contains("failed")));
 }
 
 // ── validate: verbose flag ──────────────────────────────────
@@ -218,11 +191,7 @@ fn validate_verbose_shows_pass_for_each_file() {
     let tmp = write_temp_rra(VALID_MINIMAL);
 
     ra_cli()
-        .args([
-            "--verbose",
-            "validate",
-            tmp.path().to_str().unwrap(),
-        ])
+        .args(["--verbose", "validate", tmp.path().to_str().unwrap()])
         .assert()
         .success()
         .stderr(predicate::str::contains("[PASS]"));
@@ -246,11 +215,7 @@ fn validate_quiet_suppresses_all_output_on_success() {
     let tmp = write_temp_rra(VALID_MINIMAL);
 
     let output = ra_cli()
-        .args([
-            "--quiet",
-            "validate",
-            tmp.path().to_str().unwrap(),
-        ])
+        .args(["--quiet", "validate", tmp.path().to_str().unwrap()])
         .output()
         .expect("run ra-cli");
 
@@ -264,10 +229,7 @@ fn validate_quiet_suppresses_all_output_on_success() {
 
 #[test]
 fn validate_quiet_still_fails_on_invalid_input() {
-    let fixture = format!(
-        "{}/invalid-bad-yaml.rra",
-        fixtures_dir()
-    );
+    let fixture = format!("{}/invalid-bad-yaml.rra", fixtures_dir());
 
     ra_cli()
         .args(["--quiet", "validate", &fixture])
@@ -331,44 +293,28 @@ fn list_nonexistent_dir_fails() {
 #[test]
 fn show_existing_rule_displays_metadata() {
     ra_cli()
-        .args([
-            "show",
-            "filter-pushdown-basic",
-            "--dir",
-            &fixtures_dir(),
-        ])
+        .args(["show", "filter-pushdown-basic", "--dir", &fixtures_dir()])
         .assert()
         .success()
         .stderr(
             predicate::str::contains("filter-pushdown-basic")
                 .and(predicate::str::contains("Name"))
-                .and(predicate::str::contains(
-                    "Basic Filter Pushdown",
-                ))
+                .and(predicate::str::contains("Basic Filter Pushdown"))
                 .and(predicate::str::contains("Category"))
-                .and(predicate::str::contains(
-                    "logical/predicate-pushdown",
-                )),
+                .and(predicate::str::contains("logical/predicate-pushdown")),
         );
 }
 
 #[test]
 fn show_complex_rule_displays_all_sections() {
     ra_cli()
-        .args([
-            "show",
-            "join-commutativity",
-            "--dir",
-            &fixtures_dir(),
-        ])
+        .args(["show", "join-commutativity", "--dir", &fixtures_dir()])
         .assert()
         .success()
         .stderr(
             predicate::str::contains("Join Commutativity")
                 .and(predicate::str::contains("Description"))
-                .and(predicate::str::contains(
-                    "Relational Algebra",
-                ))
+                .and(predicate::str::contains("Relational Algebra"))
                 .and(predicate::str::contains("Implementation"))
                 .and(predicate::str::contains("Test Cases")),
         );
@@ -377,35 +323,19 @@ fn show_complex_rule_displays_all_sections() {
 #[test]
 fn show_nonexistent_rule_fails_with_hint() {
     ra_cli()
-        .args([
-            "show",
-            "no-such-rule",
-            "--dir",
-            &fixtures_dir(),
-        ])
+        .args(["show", "no-such-rule", "--dir", &fixtures_dir()])
         .assert()
         .failure()
-        .stderr(
-            predicate::str::contains("not found").and(
-                predicate::str::contains("ra-cli list"),
-            ),
-        );
+        .stderr(predicate::str::contains("not found").and(predicate::str::contains("ra-cli list")));
 }
 
 #[test]
 fn show_rule_from_real_rules_dir() {
     ra_cli()
-        .args([
-            "show",
-            "filter-through-join",
-            "--dir",
-            &rules_dir(),
-        ])
+        .args(["show", "filter-through-join", "--dir", &rules_dir()])
         .assert()
         .success()
-        .stderr(predicate::str::contains(
-            "Filter Pushdown Through Join",
-        ));
+        .stderr(predicate::str::contains("Filter Pushdown Through Join"));
 }
 
 // ── test command ────────────────────────────────────────────
@@ -445,19 +375,13 @@ fn test_command_shows_duration() {
 
 #[test]
 fn test_single_valid_file() {
-    let fixture = format!(
-        "{}/valid-simple-rule.rra",
-        fixtures_dir()
-    );
+    let fixture = format!("{}/valid-simple-rule.rra", fixtures_dir());
 
     ra_cli()
         .args(["test", &fixture])
         .assert()
         .success()
-        .stderr(
-            predicate::str::contains("Summary:")
-                .and(predicate::str::contains("passed")),
-        );
+        .stderr(predicate::str::contains("Summary:").and(predicate::str::contains("passed")));
 }
 
 #[test]
@@ -540,11 +464,7 @@ fn optimize_stub_succeeds_and_shows_input() {
 #[test]
 fn optimize_quiet_produces_no_output() {
     let output = ra_cli()
-        .args([
-            "--quiet",
-            "optimize",
-            "SELECT * FROM users",
-        ])
+        .args(["--quiet", "optimize", "SELECT * FROM users"])
         .output()
         .expect("run ra-cli");
 
@@ -554,7 +474,8 @@ fn optimize_quiet_produces_no_output() {
     let stderr_str = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr_str.is_empty() || !stderr_str.contains("Query Optimization"),
-        "quiet optimize should suppress verbose output, got: {}", stderr_str
+        "quiet optimize should suppress verbose output, got: {}",
+        stderr_str
     );
 }
 
@@ -570,17 +491,13 @@ fn no_subcommand_shows_usage() {
 
 #[test]
 fn help_flag_shows_all_commands() {
-    ra_cli()
-        .args(["--help"])
-        .assert()
-        .success()
-        .stdout(
-            predicate::str::contains("validate")
-                .and(predicate::str::contains("test"))
-                .and(predicate::str::contains("list"))
-                .and(predicate::str::contains("show"))
-                .and(predicate::str::contains("optimize")),
-        );
+    ra_cli().args(["--help"]).assert().success().stdout(
+        predicate::str::contains("validate")
+            .and(predicate::str::contains("test"))
+            .and(predicate::str::contains("list"))
+            .and(predicate::str::contains("show"))
+            .and(predicate::str::contains("optimize")),
+    );
 }
 
 #[test]
@@ -594,8 +511,5 @@ fn validate_subcommand_help() {
 
 #[test]
 fn unknown_subcommand_fails() {
-    ra_cli()
-        .args(["nonexistent-command"])
-        .assert()
-        .failure();
+    ra_cli().args(["nonexistent-command"]).assert().failure();
 }

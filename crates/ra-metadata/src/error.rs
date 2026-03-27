@@ -69,10 +69,7 @@ mod tests {
         let err = MetadataError::Query {
             message: "syntax error at position 42".into(),
         };
-        assert_eq!(
-            err.to_string(),
-            "query failed: syntax error at position 42"
-        );
+        assert_eq!(err.to_string(), "query failed: syntax error at position 42");
     }
 
     #[test]

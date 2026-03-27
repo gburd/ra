@@ -105,11 +105,13 @@ mod tests {
         }
 
         fn gather_statistics(&self, table: &str) -> MetadataResult<TableStats> {
-            let table_info = self.schema.tables.get(table).ok_or_else(|| {
-                MetadataError::Query {
+            let table_info = self
+                .schema
+                .tables
+                .get(table)
+                .ok_or_else(|| MetadataError::Query {
                     message: format!("table {table} not found"),
-                }
-            })?;
+                })?;
 
             Ok(TableStats {
                 table_name: table.to_owned(),
@@ -174,11 +176,10 @@ mod tests {
     #[test]
     fn mock_connector_explain() {
         let conn = MockConnector::new_sqlite();
-        let plan = conn.explain_query("SELECT * FROM users").expect("should succeed");
-        assert_eq!(
-            plan.root.node_type,
-            crate::explain::NodeType::SeqScan
-        );
+        let plan = conn
+            .explain_query("SELECT * FROM users")
+            .expect("should succeed");
+        assert_eq!(plan.root.node_type, crate::explain::NodeType::SeqScan);
     }
 
     #[test]

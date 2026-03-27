@@ -7,8 +7,8 @@ use anyhow::{Context, Result};
 use colored::Colorize;
 
 use ra_core::federated::{
-    DataSource, DatabaseType, FederatedCostBreakdown, FederatedPlan,
-    FederatedQuery, RemoteConnection, format_bytes,
+    format_bytes, DataSource, DatabaseType, FederatedCostBreakdown, FederatedPlan, FederatedQuery,
+    RemoteConnection,
 };
 use ra_core::statistics::Statistics;
 use ra_engine::federated_optimizer::FederatedOptimizer;
@@ -26,16 +26,11 @@ pub fn cmd_federated_analyze(
     verbose: bool,
     quiet: bool,
 ) -> Result<()> {
-    let plan = sql_to_relexpr(query_sql)
-        .with_context(|| format!("failed to parse SQL: {query_sql}"))?;
+    let plan =
+        sql_to_relexpr(query_sql).with_context(|| format!("failed to parse SQL: {query_sql}"))?;
 
     let db_type = parse_database_type(remote_db)?;
-    let connection = RemoteConnection::new(
-        db_type,
-        remote_db,
-        latency_ms,
-        bandwidth_mbps,
-    );
+    let connection = RemoteConnection::new(db_type, remote_db, latency_ms, bandwidth_mbps);
     let capabilities = db_type.default_capabilities();
 
     let mut remote_stats = Statistics::new(remote_rows);
@@ -43,19 +38,13 @@ pub fn cmd_federated_analyze(
     #[allow(clippy::cast_possible_truncation)]
     #[allow(clippy::cast_sign_loss)]
     {
-        remote_stats.total_size =
-            (remote_rows * avg_row_size as f64) as u64;
+        remote_stats.total_size = (remote_rows * avg_row_size as f64) as u64;
     }
 
     let mut sources = HashMap::new();
     sources.insert(
         remote_table.to_owned(),
-        DataSource::remote(
-            connection,
-            remote_table,
-            Some(remote_stats),
-            capabilities,
-        ),
+        DataSource::remote(connection, remote_table, Some(remote_stats), capabilities),
     );
 
     // Detect local tables from the query plan
@@ -64,10 +53,7 @@ pub fn cmd_federated_analyze(
         if !sources.contains_key(table_name.as_str()) {
             sources.insert(
                 table_name.clone(),
-                DataSource::local(
-                    table_name.as_str(),
-                    Statistics::new(10_000.0),
-                ),
+                DataSource::local(table_name.as_str(), Statistics::new(10_000.0)),
             );
         }
     }
@@ -80,24 +66,14 @@ pub fn cmd_federated_analyze(
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     if !quiet {
-        print_analysis(
-            &analysis.plan,
-            query_sql,
-            remote_db,
-            verbose,
-        );
+        print_analysis(&analysis.plan, query_sql, remote_db, verbose);
     }
 
     Ok(())
 }
 
 /// Print a federated analysis result.
-fn print_analysis(
-    plan: &FederatedPlan,
-    query_sql: &str,
-    remote_db: &str,
-    verbose: bool,
-) {
+fn print_analysis(plan: &FederatedPlan, query_sql: &str, remote_db: &str, verbose: bool) {
     eprintln!();
     eprintln!("{}", "Federated Query Analysis".bold());
     eprintln!();
@@ -116,11 +92,7 @@ fn print_analysis(
         other => other,
     };
 
-    eprintln!(
-        "{}: {}",
-        "Strategy".bold(),
-        strategy_display.cyan().bold()
-    );
+    eprintln!("{}: {}", "Strategy".bold(), strategy_display.cyan().bold());
 
     // Execution steps
     for (i, step) in plan.steps.iter().enumerate() {
@@ -136,8 +108,7 @@ fn print_analysis(
         eprintln!();
         eprintln!("{}", "Alternatives:".bold());
         for alt in &plan.alternatives {
-            let savings =
-                plan.cost.savings_percent(alt.total_ms);
+            let savings = plan.cost.savings_percent(alt.total_ms);
             eprintln!(
                 "  {} {}: {:.0}ms (chosen is {:.1}% cheaper)",
                 "-".dimmed(),
@@ -196,11 +167,7 @@ fn print_cost_breakdown(cost: &FederatedCostBreakdown) {
             cost.local_exec_ms,
         );
     }
-    eprintln!(
-        "  {}: {:.0}ms",
-        "Total".bold().underline(),
-        cost.total_ms,
-    );
+    eprintln!("  {}: {:.0}ms", "Total".bold().underline(), cost.total_ms,);
 }
 
 /// Parse a database type from a connection string or type name.
@@ -208,8 +175,7 @@ fn parse_database_type(s: &str) -> Result<DatabaseType> {
     let lower = s.to_lowercase();
     if lower.starts_with("postgres") || lower.contains("5432") {
         Ok(DatabaseType::PostgreSQL)
-    } else if lower.starts_with("mysql") || lower.contains("3306")
-    {
+    } else if lower.starts_with("mysql") || lower.contains("3306") {
         Ok(DatabaseType::MySQL)
     } else if lower.contains("sqlite") {
         Ok(DatabaseType::SQLite)
@@ -227,9 +193,7 @@ fn parse_database_type(s: &str) -> Result<DatabaseType> {
 }
 
 /// Collect table names from a relational expression.
-fn collect_table_names(
-    expr: &ra_core::algebra::RelExpr,
-) -> Vec<String> {
+fn collect_table_names(expr: &ra_core::algebra::RelExpr) -> Vec<String> {
     let mut names = Vec::new();
     collect_tables_recursive(expr, &mut names);
     names.sort();
@@ -237,10 +201,7 @@ fn collect_table_names(
     names
 }
 
-fn collect_tables_recursive(
-    expr: &ra_core::algebra::RelExpr,
-    out: &mut Vec<String>,
-) {
+fn collect_tables_recursive(expr: &ra_core::algebra::RelExpr, out: &mut Vec<String>) {
     match expr {
         ra_core::algebra::RelExpr::Scan { table, .. }
         | ra_core::algebra::RelExpr::IndexScan { table, .. }
@@ -260,21 +221,11 @@ fn collect_tables_recursive(
         | ra_core::algebra::RelExpr::Distinct { input, .. } => {
             collect_tables_recursive(input, out);
         }
-        ra_core::algebra::RelExpr::Join {
-            left, right, ..
-        }
-        | ra_core::algebra::RelExpr::Union {
-            left, right, ..
-        }
-        | ra_core::algebra::RelExpr::Intersect {
-            left, right, ..
-        }
-        | ra_core::algebra::RelExpr::Except {
-            left, right, ..
-        }
-        | ra_core::algebra::RelExpr::ParallelHashJoin {
-            left, right, ..
-        } => {
+        ra_core::algebra::RelExpr::Join { left, right, .. }
+        | ra_core::algebra::RelExpr::Union { left, right, .. }
+        | ra_core::algebra::RelExpr::Intersect { left, right, .. }
+        | ra_core::algebra::RelExpr::Except { left, right, .. }
+        | ra_core::algebra::RelExpr::ParallelHashJoin { left, right, .. } => {
             collect_tables_recursive(left, out);
             collect_tables_recursive(right, out);
         }

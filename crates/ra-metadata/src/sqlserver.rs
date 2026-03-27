@@ -18,12 +18,9 @@ use tokio_util::compat::{Compat, TokioAsyncWriteCompatExt};
 
 use crate::connector::{DatabaseConnector, MetadataResult};
 use crate::error::MetadataError;
-use crate::explain::{
-    ExplainNode, ExplainPlan, NodeType,
-};
+use crate::explain::{ExplainNode, ExplainPlan, NodeType};
 use crate::schema::{
-    ColumnInfo, ConstraintInfo, ConstraintKind,
-    DatabaseKind, IndexInfo, SchemaInfo, TableInfo,
+    ColumnInfo, ConstraintInfo, ConstraintKind, DatabaseKind, IndexInfo, SchemaInfo, TableInfo,
     TableStats,
 };
 
@@ -43,20 +40,12 @@ impl SqlServerConnector {
     /// # Errors
     ///
     /// Returns `MetadataError::Connection` on failure.
-    pub fn connect(
-        connection_string: &str,
-    ) -> MetadataResult<Self> {
-        let rt = Runtime::new().map_err(|e| {
-            MetadataError::Connection {
-                message: format!(
-                    "failed to create async runtime: {e}"
-                ),
-            }
+    pub fn connect(connection_string: &str) -> MetadataResult<Self> {
+        let rt = Runtime::new().map_err(|e| MetadataError::Connection {
+            message: format!("failed to create async runtime: {e}"),
         })?;
 
-        let (client, database) = rt.block_on(
-            Self::async_connect(connection_string),
-        )?;
+        let (client, database) = rt.block_on(Self::async_connect(connection_string))?;
 
         Ok(Self {
             client,
@@ -67,46 +56,35 @@ impl SqlServerConnector {
 
     async fn async_connect(
         connection_string: &str,
-    ) -> MetadataResult<(Client<Compat<TcpStream>>, String)>
-    {
-        let parts =
-            parse_sqlserver_url(connection_string)?;
+    ) -> MetadataResult<(Client<Compat<TcpStream>>, String)> {
+        let parts = parse_sqlserver_url(connection_string)?;
 
         let mut config = Config::new();
         config.host(&parts.host);
         config.port(parts.port);
-        config.authentication(AuthMethod::sql_server(
-            &parts.user,
-            &parts.password,
-        ));
+        config.authentication(AuthMethod::sql_server(&parts.user, &parts.password));
         config.database(&parts.database);
         config.trust_cert();
 
-        let tcp = TcpStream::connect(config.get_addr())
-            .await
-            .map_err(|e| MetadataError::Connection {
-                message: format!(
-                    "SQL Server TCP connect failed: {e}"
-                ),
-            })?;
+        let tcp =
+            TcpStream::connect(config.get_addr())
+                .await
+                .map_err(|e| MetadataError::Connection {
+                    message: format!("SQL Server TCP connect failed: {e}"),
+                })?;
 
         tcp.set_nodelay(true).ok();
 
-        let client =
-            Client::connect(config, tcp.compat_write())
-                .await
-                .map_err(|e| MetadataError::Connection {
-                    message: format!(
-                        "SQL Server TDS connect failed: {e}"
-                    ),
-                })?;
+        let client = Client::connect(config, tcp.compat_write())
+            .await
+            .map_err(|e| MetadataError::Connection {
+                message: format!("SQL Server TDS connect failed: {e}"),
+            })?;
 
         Ok((client, parts.database))
     }
 
-    fn query_tables(
-        &mut self,
-    ) -> MetadataResult<Vec<String>> {
+    fn query_tables(&mut self) -> MetadataResult<Vec<String>> {
         self.rt.block_on(async {
             let stream = Query::new(
                 "SELECT t.name \
@@ -117,28 +95,21 @@ impl SqlServerConnector {
             .query(&mut self.client)
             .await
             .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to list tables: {e}"
-                ),
+                message: format!("failed to list tables: {e}"),
             })?;
 
-            let rows: Vec<Row> = stream
-                .into_row_stream()
-                .try_collect()
-                .await
-                .map_err(|e| MetadataError::Query {
-                    message: format!(
-                        "failed to read tables: {e}"
-                    ),
-                })?;
+            let rows: Vec<Row> =
+                stream
+                    .into_row_stream()
+                    .try_collect()
+                    .await
+                    .map_err(|e| MetadataError::Query {
+                        message: format!("failed to read tables: {e}"),
+                    })?;
 
             let mut tables = Vec::new();
             for row in &rows {
-                if let Some(name) =
-                    row.try_get::<&str, _>(0)
-                        .ok()
-                        .flatten()
-                {
+                if let Some(name) = row.try_get::<&str, _>(0).ok().flatten() {
                     tables.push(name.to_owned());
                 }
             }
@@ -146,10 +117,7 @@ impl SqlServerConnector {
         })
     }
 
-    fn query_columns(
-        &mut self,
-        table: &str,
-    ) -> MetadataResult<Vec<ColumnInfo>> {
+    fn query_columns(&mut self, table: &str) -> MetadataResult<Vec<ColumnInfo>> {
         self.rt.block_on(async {
             let sql = format!(
                 "SELECT c.name, t.name AS type_name, \
@@ -174,58 +142,36 @@ impl SqlServerConnector {
                     ),
                 })?;
 
-            let rows: Vec<Row> = stream
-                .into_row_stream()
-                .try_collect()
-                .await
-                .map_err(|e| MetadataError::Query {
-                    message: format!(
-                        "failed to read columns: {e}"
-                    ),
-                })?;
+            let rows: Vec<Row> =
+                stream
+                    .into_row_stream()
+                    .try_collect()
+                    .await
+                    .map_err(|e| MetadataError::Query {
+                        message: format!("failed to read columns: {e}"),
+                    })?;
 
             let mut columns = Vec::new();
             for row in &rows {
-                let name: &str = row
-                    .try_get(0)
-                    .ok()
-                    .flatten()
-                    .unwrap_or("");
-                let data_type: &str = row
-                    .try_get(1)
-                    .ok()
-                    .flatten()
-                    .unwrap_or("");
-                let nullable: bool = row
-                    .try_get(2)
-                    .ok()
-                    .flatten()
-                    .unwrap_or(true);
-                let ordinal: i32 = row
-                    .try_get(3)
-                    .ok()
-                    .flatten()
-                    .unwrap_or(0);
-                let default_value: Option<&str> =
-                    row.try_get(4).ok().flatten();
+                let name: &str = row.try_get(0).ok().flatten().unwrap_or("");
+                let data_type: &str = row.try_get(1).ok().flatten().unwrap_or("");
+                let nullable: bool = row.try_get(2).ok().flatten().unwrap_or(true);
+                let ordinal: i32 = row.try_get(3).ok().flatten().unwrap_or(0);
+                let default_value: Option<&str> = row.try_get(4).ok().flatten();
 
                 columns.push(ColumnInfo {
                     name: name.to_owned(),
                     data_type: data_type.to_owned(),
                     nullable,
                     ordinal: ordinal as u32,
-                    default_value: default_value
-                        .map(str::to_owned),
+                    default_value: default_value.map(str::to_owned),
                 });
             }
             Ok(columns)
         })
     }
 
-    fn query_constraints(
-        &mut self,
-        table: &str,
-    ) -> MetadataResult<Vec<ConstraintInfo>> {
+    fn query_constraints(&mut self, table: &str) -> MetadataResult<Vec<ConstraintInfo>> {
         self.rt.block_on(async {
             let sql = format!(
                 "SELECT kc.name, kc.type_desc, \
@@ -255,49 +201,30 @@ impl SqlServerConnector {
                     ),
                 })?;
 
-            let rows: Vec<Row> = stream
-                .into_row_stream()
-                .try_collect()
-                .await
-                .map_err(|e| MetadataError::Query {
-                    message: format!(
-                        "failed to read constraints: {e}"
-                    ),
-                })?;
+            let rows: Vec<Row> =
+                stream
+                    .into_row_stream()
+                    .try_collect()
+                    .await
+                    .map_err(|e| MetadataError::Query {
+                        message: format!("failed to read constraints: {e}"),
+                    })?;
 
             let mut constraints = Vec::new();
             for row in &rows {
-                let name: &str = row
-                    .try_get(0)
-                    .ok()
-                    .flatten()
-                    .unwrap_or("");
-                let type_desc: &str = row
-                    .try_get(1)
-                    .ok()
-                    .flatten()
-                    .unwrap_or("");
-                let cols_str: &str = row
-                    .try_get(2)
-                    .ok()
-                    .flatten()
-                    .unwrap_or("");
+                let name: &str = row.try_get(0).ok().flatten().unwrap_or("");
+                let type_desc: &str = row.try_get(1).ok().flatten().unwrap_or("");
+                let cols_str: &str = row.try_get(2).ok().flatten().unwrap_or("");
 
                 let kind = match type_desc {
-                    "PRIMARY_KEY_CONSTRAINT" => {
-                        ConstraintKind::PrimaryKey
-                    }
-                    "UNIQUE_CONSTRAINT" => {
-                        ConstraintKind::Unique
-                    }
+                    "PRIMARY_KEY_CONSTRAINT" => ConstraintKind::PrimaryKey,
+                    "UNIQUE_CONSTRAINT" => ConstraintKind::Unique,
                     _ => continue,
                 };
 
                 let columns: Vec<String> = cols_str
                     .split(',')
-                    .map(|s: &str| {
-                        s.trim().to_owned()
-                    })
+                    .map(|s: &str| s.trim().to_owned())
                     .filter(|s: &String| !s.is_empty())
                     .collect();
 
@@ -346,61 +273,34 @@ impl SqlServerConnector {
                     ),
                 })?;
 
-            let fk_rows: Vec<Row> = fk_stream
-                .into_row_stream()
-                .try_collect()
-                .await
-                .map_err(|e| MetadataError::Query {
-                    message: format!(
-                        "failed to read FKs: {e}"
-                    ),
-                })?;
+            let fk_rows: Vec<Row> =
+                fk_stream
+                    .into_row_stream()
+                    .try_collect()
+                    .await
+                    .map_err(|e| MetadataError::Query {
+                        message: format!("failed to read FKs: {e}"),
+                    })?;
 
             for row in &fk_rows {
-                let name: &str = row
-                    .try_get(0)
-                    .ok()
-                    .flatten()
-                    .unwrap_or("");
-                let cols_str: &str = row
-                    .try_get(1)
-                    .ok()
-                    .flatten()
-                    .unwrap_or("");
-                let ref_tbl: &str = row
-                    .try_get(2)
-                    .ok()
-                    .flatten()
-                    .unwrap_or("");
-                let ref_cols_str: &str = row
-                    .try_get(3)
-                    .ok()
-                    .flatten()
-                    .unwrap_or("");
+                let name: &str = row.try_get(0).ok().flatten().unwrap_or("");
+                let cols_str: &str = row.try_get(1).ok().flatten().unwrap_or("");
+                let ref_tbl: &str = row.try_get(2).ok().flatten().unwrap_or("");
+                let ref_cols_str: &str = row.try_get(3).ok().flatten().unwrap_or("");
 
                 constraints.push(ConstraintInfo {
                     name: name.to_owned(),
                     kind: ConstraintKind::ForeignKey,
                     columns: cols_str
                         .split(',')
-                        .map(|s: &str| {
-                            s.trim().to_owned()
-                        })
-                        .filter(|s: &String| {
-                            !s.is_empty()
-                        })
+                        .map(|s: &str| s.trim().to_owned())
+                        .filter(|s: &String| !s.is_empty())
                         .collect(),
-                    referenced_table: Some(
-                        ref_tbl.to_owned(),
-                    ),
+                    referenced_table: Some(ref_tbl.to_owned()),
                     referenced_columns: ref_cols_str
                         .split(',')
-                        .map(|s: &str| {
-                            s.trim().to_owned()
-                        })
-                        .filter(|s: &String| {
-                            !s.is_empty()
-                        })
+                        .map(|s: &str| s.trim().to_owned())
+                        .filter(|s: &String| !s.is_empty())
                         .collect(),
                     check_expression: None,
                 });
@@ -410,10 +310,7 @@ impl SqlServerConnector {
         })
     }
 
-    fn query_indexes(
-        &mut self,
-        table: &str,
-    ) -> MetadataResult<Vec<IndexInfo>> {
+    fn query_indexes(&mut self, table: &str) -> MetadataResult<Vec<IndexInfo>> {
         self.rt.block_on(async {
             let sql = format!(
                 "SELECT i.name, i.is_unique, \
@@ -446,48 +343,27 @@ impl SqlServerConnector {
                     ),
                 })?;
 
-            let rows: Vec<Row> = stream
-                .into_row_stream()
-                .try_collect()
-                .await
-                .map_err(|e| MetadataError::Query {
-                    message: format!(
-                        "failed to read indexes: {e}"
-                    ),
-                })?;
+            let rows: Vec<Row> =
+                stream
+                    .into_row_stream()
+                    .try_collect()
+                    .await
+                    .map_err(|e| MetadataError::Query {
+                        message: format!("failed to read indexes: {e}"),
+                    })?;
 
             let mut indexes = Vec::new();
             for row in &rows {
-                let name: &str = row
-                    .try_get(0)
-                    .ok()
-                    .flatten()
-                    .unwrap_or("");
-                let unique: bool = row
-                    .try_get(1)
-                    .ok()
-                    .flatten()
-                    .unwrap_or(false);
-                let type_desc: &str = row
-                    .try_get(2)
-                    .ok()
-                    .flatten()
-                    .unwrap_or("NONCLUSTERED");
-                let cols_str: &str = row
-                    .try_get(3)
-                    .ok()
-                    .flatten()
-                    .unwrap_or("");
+                let name: &str = row.try_get(0).ok().flatten().unwrap_or("");
+                let unique: bool = row.try_get(1).ok().flatten().unwrap_or(false);
+                let type_desc: &str = row.try_get(2).ok().flatten().unwrap_or("NONCLUSTERED");
+                let cols_str: &str = row.try_get(3).ok().flatten().unwrap_or("");
 
                 let index_type = match type_desc {
                     "CLUSTERED" => "clustered",
                     "NONCLUSTERED" => "nonclustered",
-                    "CLUSTERED COLUMNSTORE" => {
-                        "columnstore_clustered"
-                    }
-                    "NONCLUSTERED COLUMNSTORE" => {
-                        "columnstore_nonclustered"
-                    }
+                    "CLUSTERED COLUMNSTORE" => "columnstore_clustered",
+                    "NONCLUSTERED COLUMNSTORE" => "columnstore_nonclustered",
                     other => other,
                 };
 
@@ -495,12 +371,8 @@ impl SqlServerConnector {
                     name: name.to_owned(),
                     columns: cols_str
                         .split(',')
-                        .map(|s: &str| {
-                            s.trim().to_owned()
-                        })
-                        .filter(|s: &String| {
-                            !s.is_empty()
-                        })
+                        .map(|s: &str| s.trim().to_owned())
+                        .filter(|s: &String| !s.is_empty())
                         .collect(),
                     unique,
                     index_type: index_type.to_owned(),
@@ -511,10 +383,7 @@ impl SqlServerConnector {
         })
     }
 
-    fn query_table_stats(
-        &mut self,
-        table: &str,
-    ) -> MetadataResult<(f64, u64)> {
+    fn query_table_stats(&mut self, table: &str) -> MetadataResult<(f64, u64)> {
         self.rt.block_on(async {
             let sql = format!(
                 "SELECT \
@@ -541,36 +410,22 @@ impl SqlServerConnector {
                     ),
                 })?;
 
-            let rows: Vec<Row> = stream
-                .into_row_stream()
-                .try_collect()
-                .await
-                .map_err(|e| MetadataError::Query {
-                    message: format!(
-                        "failed to read stats: {e}"
-                    ),
-                })?;
+            let rows: Vec<Row> =
+                stream
+                    .into_row_stream()
+                    .try_collect()
+                    .await
+                    .map_err(|e| MetadataError::Query {
+                        message: format!("failed to read stats: {e}"),
+                    })?;
 
             if let Some(row) = rows.first() {
-                let row_count: i64 = row
-                    .try_get(0)
-                    .ok()
-                    .flatten()
-                    .unwrap_or(0);
-                let bytes: i64 = row
-                    .try_get(1)
-                    .ok()
-                    .flatten()
-                    .unwrap_or(0);
-                Ok((
-                    row_count.max(0) as f64,
-                    bytes.max(0) as u64,
-                ))
+                let row_count: i64 = row.try_get(0).ok().flatten().unwrap_or(0);
+                let bytes: i64 = row.try_get(1).ok().flatten().unwrap_or(0);
+                Ok((row_count.max(0) as f64, bytes.max(0) as u64))
             } else {
                 Err(MetadataError::Query {
-                    message: format!(
-                        "table not found: {table}"
-                    ),
+                    message: format!("table not found: {table}"),
                 })
             }
         })
@@ -581,19 +436,15 @@ impl SqlServerConnector {
     /// # Errors
     ///
     /// Returns errors if catalog queries fail.
-    pub fn gather_schema_mut(
-        &mut self,
-    ) -> MetadataResult<SchemaInfo> {
+    pub fn gather_schema_mut(&mut self) -> MetadataResult<SchemaInfo> {
         let table_names = self.query_tables()?;
         let mut tables = HashMap::new();
 
         for name in &table_names {
             let columns = self.query_columns(name)?;
-            let constraints =
-                self.query_constraints(name)?;
+            let constraints = self.query_constraints(name)?;
             let indexes = self.query_indexes(name)?;
-            let (row_count, _) =
-                self.query_table_stats(name)?;
+            let (row_count, _) = self.query_table_stats(name)?;
 
             tables.insert(
                 name.clone(),
@@ -620,12 +471,8 @@ impl SqlServerConnector {
     /// # Errors
     ///
     /// Returns errors if catalog queries fail.
-    pub fn gather_statistics_mut(
-        &mut self,
-        table: &str,
-    ) -> MetadataResult<TableStats> {
-        let (row_count, total_bytes) =
-            self.query_table_stats(table)?;
+    pub fn gather_statistics_mut(&mut self, table: &str) -> MetadataResult<TableStats> {
+        let (row_count, total_bytes) = self.query_table_stats(table)?;
 
         Ok(TableStats {
             table_name: table.to_owned(),
@@ -641,47 +488,34 @@ impl SqlServerConnector {
     /// # Errors
     ///
     /// Returns errors if the EXPLAIN query fails.
-    pub fn explain_query_mut(
-        &mut self,
-        sql: &str,
-    ) -> MetadataResult<ExplainPlan> {
+    pub fn explain_query_mut(&mut self, sql: &str) -> MetadataResult<ExplainPlan> {
         self.rt.block_on(async {
             // Enable showplan
             Query::new("SET SHOWPLAN_TEXT ON")
                 .execute(&mut self.client)
                 .await
                 .map_err(|e| MetadataError::Query {
-                    message: format!(
-                        "SET SHOWPLAN_TEXT ON failed: {e}"
-                    ),
+                    message: format!("SET SHOWPLAN_TEXT ON failed: {e}"),
                 })?;
 
-            let stream = Query::new(sql)
-                .query(&mut self.client)
-                .await
-                .map_err(|e| MetadataError::Query {
-                    message: format!(
-                        "SHOWPLAN query failed: {e}"
-                    ),
-                })?;
+            let stream = Query::new(sql).query(&mut self.client).await.map_err(|e| {
+                MetadataError::Query {
+                    message: format!("SHOWPLAN query failed: {e}"),
+                }
+            })?;
 
-            let rows: Vec<Row> = stream
-                .into_row_stream()
-                .try_collect()
-                .await
-                .map_err(|e| MetadataError::Query {
-                    message: format!(
-                        "failed to read showplan: {e}"
-                    ),
-                })?;
+            let rows: Vec<Row> =
+                stream
+                    .into_row_stream()
+                    .try_collect()
+                    .await
+                    .map_err(|e| MetadataError::Query {
+                        message: format!("failed to read showplan: {e}"),
+                    })?;
 
             let mut lines = Vec::new();
             for row in &rows {
-                if let Some(text) =
-                    row.try_get::<&str, _>(0)
-                        .ok()
-                        .flatten()
-                {
+                if let Some(text) = row.try_get::<&str, _>(0).ok().flatten() {
                     lines.push(text.to_owned());
                 }
             }
@@ -703,34 +537,21 @@ impl DatabaseConnector for SqlServerConnector {
         DatabaseKind::SqlServer
     }
 
-    fn gather_schema(
-        &self,
-    ) -> MetadataResult<SchemaInfo> {
+    fn gather_schema(&self) -> MetadataResult<SchemaInfo> {
         Err(MetadataError::Unsupported {
-            message: "use gather_schema_mut() instead"
-                .to_owned(),
+            message: "use gather_schema_mut() instead".to_owned(),
         })
     }
 
-    fn gather_statistics(
-        &self,
-        _table: &str,
-    ) -> MetadataResult<TableStats> {
+    fn gather_statistics(&self, _table: &str) -> MetadataResult<TableStats> {
         Err(MetadataError::Unsupported {
-            message:
-                "use gather_statistics_mut() instead"
-                    .to_owned(),
+            message: "use gather_statistics_mut() instead".to_owned(),
         })
     }
 
-    fn explain_query(
-        &self,
-        _sql: &str,
-    ) -> MetadataResult<ExplainPlan> {
+    fn explain_query(&self, _sql: &str) -> MetadataResult<ExplainPlan> {
         Err(MetadataError::Unsupported {
-            message:
-                "use explain_query_mut() instead"
-                    .to_owned(),
+            message: "use explain_query_mut() instead".to_owned(),
         })
     }
 }
@@ -745,30 +566,18 @@ struct UrlParts {
 }
 
 /// Parse `sqlserver://user:pass@host:port/database`.
-fn parse_sqlserver_url(
-    url: &str,
-) -> MetadataResult<UrlParts> {
+fn parse_sqlserver_url(url: &str) -> MetadataResult<UrlParts> {
     let stripped = url
         .strip_prefix("sqlserver://")
         .or_else(|| url.strip_prefix("mssql://"))
         .ok_or_else(|| MetadataError::Connection {
-            message: format!(
-                "invalid SQL Server URL scheme: {url}"
-            ),
+            message: format!("invalid SQL Server URL scheme: {url}"),
         })?;
 
-    let (userinfo, rest) = stripped
-        .split_once('@')
-        .unwrap_or(("sa:", stripped));
-    let (user, password) = userinfo
-        .split_once(':')
-        .unwrap_or((userinfo, ""));
-    let (hostport, database) = rest
-        .split_once('/')
-        .unwrap_or((rest, "master"));
-    let (host, port_str) = hostport
-        .split_once(':')
-        .unwrap_or((hostport, "1433"));
+    let (userinfo, rest) = stripped.split_once('@').unwrap_or(("sa:", stripped));
+    let (user, password) = userinfo.split_once(':').unwrap_or((userinfo, ""));
+    let (hostport, database) = rest.split_once('/').unwrap_or((rest, "master"));
+    let (host, port_str) = hostport.split_once(':').unwrap_or((hostport, "1433"));
 
     let port: u16 = port_str.parse().unwrap_or(1433);
 
@@ -783,9 +592,7 @@ fn parse_sqlserver_url(
 
 /// Parse SQL Server SHOWPLAN_TEXT output into an
 /// `ExplainPlan`.
-fn parse_sqlserver_explain(
-    text: &str,
-) -> MetadataResult<ExplainPlan> {
+fn parse_sqlserver_explain(text: &str) -> MetadataResult<ExplainPlan> {
     let lines: Vec<&str> = text
         .lines()
         .map(str::trim)
@@ -822,9 +629,7 @@ fn classify_sqlserver_node(line: &str) -> NodeType {
         NodeType::SeqScan
     } else if upper.contains("CLUSTERED INDEX SCAN") {
         NodeType::SeqScan
-    } else if upper.contains("INDEX SEEK")
-        || upper.contains("INDEX SCAN")
-    {
+    } else if upper.contains("INDEX SEEK") || upper.contains("INDEX SCAN") {
         NodeType::IndexScan
     } else if upper.contains("HASH MATCH") {
         NodeType::HashJoin
@@ -832,9 +637,7 @@ fn classify_sqlserver_node(line: &str) -> NodeType {
         NodeType::MergeJoin
     } else if upper.contains("NESTED LOOPS") {
         NodeType::NestedLoop
-    } else if upper.contains("STREAM AGGREGATE")
-        || upper.contains("HASH AGGREGATE")
-    {
+    } else if upper.contains("STREAM AGGREGATE") || upper.contains("HASH AGGREGATE") {
         NodeType::HashAggregate
     } else if upper.contains("SORT") {
         NodeType::Sort
@@ -849,10 +652,8 @@ mod tests {
 
     #[test]
     fn parse_url_basic() {
-        let parts = parse_sqlserver_url(
-            "sqlserver://sa:pass@localhost:1433/mydb",
-        )
-        .expect("should parse");
+        let parts =
+            parse_sqlserver_url("sqlserver://sa:pass@localhost:1433/mydb").expect("should parse");
         assert_eq!(parts.host, "localhost");
         assert_eq!(parts.port, 1433);
         assert_eq!(parts.user, "sa");
@@ -862,76 +663,45 @@ mod tests {
 
     #[test]
     fn parse_url_defaults() {
-        let parts = parse_sqlserver_url(
-            "sqlserver://sa:@localhost",
-        )
-        .expect("should parse");
+        let parts = parse_sqlserver_url("sqlserver://sa:@localhost").expect("should parse");
         assert_eq!(parts.port, 1433);
         assert_eq!(parts.database, "master");
     }
 
     #[test]
     fn parse_url_mssql_scheme() {
-        let parts = parse_sqlserver_url(
-            "mssql://user:pass@host/db",
-        )
-        .expect("should parse");
+        let parts = parse_sqlserver_url("mssql://user:pass@host/db").expect("should parse");
         assert_eq!(parts.host, "host");
         assert_eq!(parts.database, "db");
     }
 
     #[test]
     fn parse_url_invalid() {
-        assert!(
-            parse_sqlserver_url("postgresql://localhost")
-                .is_err()
-        );
+        assert!(parse_sqlserver_url("postgresql://localhost").is_err());
     }
 
     #[test]
     fn classify_nodes() {
-        assert_eq!(
-            classify_sqlserver_node("Table Scan"),
-            NodeType::SeqScan
-        );
-        assert_eq!(
-            classify_sqlserver_node("Index Seek"),
-            NodeType::IndexScan
-        );
-        assert_eq!(
-            classify_sqlserver_node("Hash Match"),
-            NodeType::HashJoin
-        );
+        assert_eq!(classify_sqlserver_node("Table Scan"), NodeType::SeqScan);
+        assert_eq!(classify_sqlserver_node("Index Seek"), NodeType::IndexScan);
+        assert_eq!(classify_sqlserver_node("Hash Match"), NodeType::HashJoin);
         assert_eq!(
             classify_sqlserver_node("Nested Loops"),
             NodeType::NestedLoop
         );
-        assert_eq!(
-            classify_sqlserver_node("Sort"),
-            NodeType::Sort
-        );
-        assert_eq!(
-            classify_sqlserver_node("Something"),
-            NodeType::Other
-        );
+        assert_eq!(classify_sqlserver_node("Sort"), NodeType::Sort);
+        assert_eq!(classify_sqlserver_node("Something"), NodeType::Other);
     }
 
     #[test]
     fn parse_explain_basic() {
         let text = "  |--Table Scan [orders]";
-        let plan = parse_sqlserver_explain(text)
-            .expect("should parse");
-        assert_eq!(
-            plan.root.node_type,
-            NodeType::SeqScan
-        );
+        let plan = parse_sqlserver_explain(text).expect("should parse");
+        assert_eq!(plan.root.node_type, NodeType::SeqScan);
     }
 
     #[test]
     fn connector_kind() {
-        assert_eq!(
-            DatabaseKind::SqlServer.to_string(),
-            "SQL Server"
-        );
+        assert_eq!(DatabaseKind::SqlServer.to_string(), "SQL Server");
     }
 }

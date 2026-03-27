@@ -10,11 +10,10 @@ use postgres::{Client, NoTls};
 
 use crate::connector::{DatabaseConnector, MetadataResult};
 use crate::error::MetadataError;
-use crate::explain::{ExplainPlan, parse_postgres_explain};
+use crate::explain::{parse_postgres_explain, ExplainPlan};
 use crate::schema::{
-    ColumnInfo, ColumnStatistics, ConstraintInfo, ConstraintKind,
-    DatabaseKind, IndexInfo, SchemaInfo, TableInfo, TableStats,
-    TriggerEvent, TriggerInfo, TriggerScope, TriggerTiming,
+    ColumnInfo, ColumnStatistics, ConstraintInfo, ConstraintKind, DatabaseKind, IndexInfo,
+    SchemaInfo, TableInfo, TableStats, TriggerEvent, TriggerInfo, TriggerScope, TriggerTiming,
 };
 
 /// `PostgreSQL` connector using the `postgres` crate.
@@ -29,14 +28,10 @@ impl PostgresConnector {
     /// # Errors
     ///
     /// Returns `MetadataError::Connection` if the connection fails.
-    pub fn connect(
-        connection_string: &str,
-    ) -> MetadataResult<Self> {
-        let client = Client::connect(connection_string, NoTls)
-            .map_err(|e| MetadataError::Connection {
-                message: format!(
-                    "PostgreSQL connection failed: {e}"
-                ),
+    pub fn connect(connection_string: &str) -> MetadataResult<Self> {
+        let client =
+            Client::connect(connection_string, NoTls).map_err(|e| MetadataError::Connection {
+                message: format!("PostgreSQL connection failed: {e}"),
             })?;
 
         Ok(Self {
@@ -50,9 +45,7 @@ impl PostgresConnector {
         schema.clone_into(&mut self.schema);
     }
 
-    fn query_tables(
-        &mut self,
-    ) -> MetadataResult<Vec<String>> {
+    fn query_tables(&mut self) -> MetadataResult<Vec<String>> {
         let rows = self
             .client
             .query(
@@ -73,10 +66,7 @@ impl PostgresConnector {
         Ok(tables)
     }
 
-    fn query_columns(
-        &mut self,
-        table: &str,
-    ) -> MetadataResult<Vec<ColumnInfo>> {
+    fn query_columns(&mut self, table: &str) -> MetadataResult<Vec<ColumnInfo>> {
         let rows = self
             .client
             .query(
@@ -88,9 +78,7 @@ impl PostgresConnector {
                 &[&self.schema, &table],
             )
             .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to query columns for {table}: {e}"
-                ),
+                message: format!("failed to query columns for {table}: {e}"),
             })?;
 
         let mut columns = Vec::new();
@@ -112,10 +100,7 @@ impl PostgresConnector {
         Ok(columns)
     }
 
-    fn query_constraints(
-        &mut self,
-        table: &str,
-    ) -> MetadataResult<Vec<ConstraintInfo>> {
+    fn query_constraints(&mut self, table: &str) -> MetadataResult<Vec<ConstraintInfo>> {
         let rows = self
             .client
             .query(
@@ -142,9 +127,7 @@ impl PostgresConnector {
                 &[&self.schema, &table],
             )
             .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to query constraints for {table}: {e}"
-                ),
+                message: format!("failed to query constraints for {table}: {e}"),
             })?;
 
         let mut constraints = Vec::new();
@@ -153,8 +136,7 @@ impl PostgresConnector {
             let contype: String = row.get(1);
             let columns: Vec<String> = row.get(2);
             let referenced_table: Option<String> = row.get(3);
-            let referenced_columns: Option<Vec<String>> =
-                row.get(4);
+            let referenced_columns: Option<Vec<String>> = row.get(4);
 
             let kind = match contype.as_str() {
                 "p" => ConstraintKind::PrimaryKey,
@@ -169,18 +151,14 @@ impl PostgresConnector {
                 kind,
                 columns,
                 referenced_table,
-                referenced_columns: referenced_columns
-                    .unwrap_or_default(),
+                referenced_columns: referenced_columns.unwrap_or_default(),
                 check_expression: None,
             });
         }
         Ok(constraints)
     }
 
-    fn query_indexes(
-        &mut self,
-        table: &str,
-    ) -> MetadataResult<Vec<IndexInfo>> {
+    fn query_indexes(&mut self, table: &str) -> MetadataResult<Vec<IndexInfo>> {
         let rows = self
             .client
             .query(
@@ -201,9 +179,7 @@ impl PostgresConnector {
                 &[&self.schema, &table],
             )
             .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to query indexes for {table}: {e}"
-                ),
+                message: format!("failed to query indexes for {table}: {e}"),
             })?;
 
         let mut indexes = Vec::new();
@@ -223,10 +199,7 @@ impl PostgresConnector {
         Ok(indexes)
     }
 
-    fn query_table_stats(
-        &mut self,
-        table: &str,
-    ) -> MetadataResult<(f64, u64)> {
+    fn query_table_stats(&mut self, table: &str) -> MetadataResult<(f64, u64)> {
         let rows = self
             .client
             .query(
@@ -238,15 +211,11 @@ impl PostgresConnector {
                 &[&self.schema, &table],
             )
             .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to query table stats for {table}: {e}"
-                ),
+                message: format!("failed to query table stats for {table}: {e}"),
             })?;
 
-        let row = rows.first().ok_or_else(|| {
-            MetadataError::Query {
-                message: format!("table not found: {table}"),
-            }
+        let row = rows.first().ok_or_else(|| MetadataError::Query {
+            message: format!("table not found: {table}"),
         })?;
 
         let row_count: f64 = row.get(0);
@@ -271,9 +240,7 @@ impl PostgresConnector {
                 &[&self.schema, &table],
             )
             .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to query pg_stats for {table}: {e}"
-                ),
+                message: format!("failed to query pg_stats for {table}: {e}"),
             })?;
 
         let mut columns = HashMap::new();
@@ -293,13 +260,8 @@ impl PostgresConnector {
                 0.0
             };
 
-            let most_common_values =
-                parse_pg_mcv(
-                    mcv_text.as_ref(),
-                    mcv_freqs.as_ref(),
-                );
-            let histogram_bounds =
-                parse_pg_histogram(hist_text.as_ref());
+            let most_common_values = parse_pg_mcv(mcv_text.as_ref(), mcv_freqs.as_ref());
+            let histogram_bounds = parse_pg_histogram(hist_text.as_ref());
 
             columns.insert(
                 col_name.clone(),
@@ -317,10 +279,7 @@ impl PostgresConnector {
         Ok(columns)
     }
 
-    fn query_triggers(
-        &mut self,
-        table: &str,
-    ) -> MetadataResult<Vec<TriggerInfo>> {
+    fn query_triggers(&mut self, table: &str) -> MetadataResult<Vec<TriggerInfo>> {
         let rows = self
             .client
             .query(
@@ -346,9 +305,7 @@ impl PostgresConnector {
                 &[&self.schema, &table],
             )
             .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to query triggers for {table}: {e}"
-                ),
+                message: format!("failed to query triggers for {table}: {e}"),
             })?;
 
         let mut triggers = Vec::new();
@@ -384,9 +341,7 @@ impl PostgresConnector {
                 event,
                 timing,
                 scope,
-                action_sql: format!(
-                    "EXECUTE FUNCTION {function_name}()"
-                ),
+                action_sql: format!("EXECUTE FUNCTION {function_name}()"),
                 table_name: table.to_owned(),
                 enabled: enabled_char != "D",
             });
@@ -394,10 +349,7 @@ impl PostgresConnector {
         Ok(triggers)
     }
 
-    fn query_check_expressions(
-        &mut self,
-        table: &str,
-    ) -> MetadataResult<HashMap<String, String>> {
+    fn query_check_expressions(&mut self, table: &str) -> MetadataResult<HashMap<String, String>> {
         let rows = self
             .client
             .query(
@@ -431,9 +383,7 @@ impl PostgresConnector {
     /// # Errors
     ///
     /// Returns errors if catalog queries fail.
-    pub fn gather_schema_mut(
-        &mut self,
-    ) -> MetadataResult<SchemaInfo> {
+    pub fn gather_schema_mut(&mut self) -> MetadataResult<SchemaInfo> {
         let table_names = self.query_tables()?;
         let mut tables = HashMap::new();
 
@@ -443,13 +393,11 @@ impl PostgresConnector {
             let indexes = self.query_indexes(name)?;
             let triggers = self.query_triggers(name)?;
             let (row_count, _) = self.query_table_stats(name)?;
-            let check_exprs =
-                self.query_check_expressions(name)?;
+            let check_exprs = self.query_check_expressions(name)?;
 
             for constraint in &mut constraints {
                 if constraint.kind == ConstraintKind::Check {
-                    constraint.check_expression =
-                        check_exprs.get(&constraint.name).cloned();
+                    constraint.check_expression = check_exprs.get(&constraint.name).cloned();
                 }
             }
 
@@ -478,12 +426,8 @@ impl PostgresConnector {
     /// # Errors
     ///
     /// Returns errors if catalog queries fail.
-    pub fn gather_statistics_mut(
-        &mut self,
-        table: &str,
-    ) -> MetadataResult<TableStats> {
-        let (row_count, total_bytes) =
-            self.query_table_stats(table)?;
+    pub fn gather_statistics_mut(&mut self, table: &str) -> MetadataResult<TableStats> {
+        let (row_count, total_bytes) = self.query_table_stats(table)?;
         let columns = self.query_column_stats(table)?;
 
         Ok(TableStats {
@@ -500,19 +444,13 @@ impl PostgresConnector {
     ///
     /// Returns errors if the EXPLAIN query fails or output cannot
     /// be parsed.
-    pub fn explain_query_mut(
-        &mut self,
-        sql: &str,
-    ) -> MetadataResult<ExplainPlan> {
-        let explain_sql =
-            format!("EXPLAIN (FORMAT JSON) {sql}");
+    pub fn explain_query_mut(&mut self, sql: &str) -> MetadataResult<ExplainPlan> {
+        let explain_sql = format!("EXPLAIN (FORMAT JSON) {sql}");
         let rows = self
             .client
             .query(&explain_sql, &[])
             .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "EXPLAIN failed for query: {e}"
-                ),
+                message: format!("EXPLAIN failed for query: {e}"),
             })?;
 
         let json_text: String = rows
@@ -537,20 +475,13 @@ impl DatabaseConnector for PostgresConnector {
         })
     }
 
-    fn gather_statistics(
-        &self,
-        _table: &str,
-    ) -> MetadataResult<TableStats> {
+    fn gather_statistics(&self, _table: &str) -> MetadataResult<TableStats> {
         Err(MetadataError::Unsupported {
-            message: "use gather_statistics_mut() instead"
-                .to_owned(),
+            message: "use gather_statistics_mut() instead".to_owned(),
         })
     }
 
-    fn explain_query(
-        &self,
-        _sql: &str,
-    ) -> MetadataResult<ExplainPlan> {
+    fn explain_query(&self, _sql: &str) -> MetadataResult<ExplainPlan> {
         Err(MetadataError::Unsupported {
             message: "use explain_query_mut() instead".to_owned(),
         })
@@ -558,10 +489,7 @@ impl DatabaseConnector for PostgresConnector {
 }
 
 /// Parse `PostgreSQL` `most_common_vals` and `most_common_freqs` arrays.
-fn parse_pg_mcv(
-    vals_text: Option<&String>,
-    freqs: Option<&Vec<f32>>,
-) -> Vec<(String, f64)> {
+fn parse_pg_mcv(vals_text: Option<&String>, freqs: Option<&Vec<f32>>) -> Vec<(String, f64)> {
     let Some(vals_text) = vals_text else {
         return Vec::new();
     };
@@ -576,10 +504,7 @@ fn parse_pg_mcv(
 
     let mut result = Vec::new();
     for (val, freq) in vals.iter().zip(freqs.iter()) {
-        result.push((
-            val.trim().to_owned(),
-            f64::from(*freq),
-        ));
+        result.push((val.trim().to_owned(), f64::from(*freq)));
     }
     result
 }
@@ -610,8 +535,7 @@ mod tests {
     fn parse_mcv_values() {
         let vals = Some("{apple,banana,cherry}".to_owned());
         let freqs = Some(vec![0.3, 0.2, 0.1]);
-        let result =
-            parse_pg_mcv(vals.as_ref(), freqs.as_ref());
+        let result = parse_pg_mcv(vals.as_ref(), freqs.as_ref());
         assert_eq!(result.len(), 3);
         assert_eq!(result[0].0, "apple");
         assert!((result[0].1 - 0.3).abs() < 0.001);
@@ -634,9 +558,6 @@ mod tests {
 
     #[test]
     fn connector_kind() {
-        assert_eq!(
-            DatabaseKind::PostgreSQL.to_string(),
-            "PostgreSQL"
-        );
+        assert_eq!(DatabaseKind::PostgreSQL.to_string(), "PostgreSQL");
     }
 }

@@ -10,12 +10,10 @@ use duckdb::Connection;
 
 use crate::connector::{DatabaseConnector, MetadataResult};
 use crate::error::MetadataError;
-use crate::explain::{
-    ExplainNode, ExplainPlan, NodeType,
-};
+use crate::explain::{ExplainNode, ExplainPlan, NodeType};
 use crate::schema::{
-    ColumnInfo, ColumnStatistics, ConstraintInfo, ConstraintKind,
-    DatabaseKind, IndexInfo, SchemaInfo, TableInfo, TableStats,
+    ColumnInfo, ColumnStatistics, ConstraintInfo, ConstraintKind, DatabaseKind, IndexInfo,
+    SchemaInfo, TableInfo, TableStats,
 };
 
 /// `DuckDB` connector using the `duckdb` crate.
@@ -32,14 +30,9 @@ impl DuckDBConnector {
     /// Returns `MetadataError::Connection` if the file cannot be
     /// opened.
     pub fn connect(path: &str) -> MetadataResult<Self> {
-        let conn =
-            Connection::open(path).map_err(|e| {
-                MetadataError::Connection {
-                    message: format!(
-                        "DuckDB open failed for {path}: {e}"
-                    ),
-                }
-            })?;
+        let conn = Connection::open(path).map_err(|e| MetadataError::Connection {
+            message: format!("DuckDB open failed for {path}: {e}"),
+        })?;
 
         Ok(Self {
             conn,
@@ -53,14 +46,9 @@ impl DuckDBConnector {
     ///
     /// Returns `MetadataError::Connection` if initialization fails.
     pub fn open_in_memory() -> MetadataResult<Self> {
-        let conn =
-            Connection::open_in_memory().map_err(|e| {
-                MetadataError::Connection {
-                    message: format!(
-                        "DuckDB in-memory open failed: {e}"
-                    ),
-                }
-            })?;
+        let conn = Connection::open_in_memory().map_err(|e| MetadataError::Connection {
+            message: format!("DuckDB in-memory open failed: {e}"),
+        })?;
 
         Ok(Self {
             conn,
@@ -99,10 +87,7 @@ impl DuckDBConnector {
         Ok(tables)
     }
 
-    fn query_columns(
-        &self,
-        table: &str,
-    ) -> MetadataResult<Vec<ColumnInfo>> {
+    fn query_columns(&self, table: &str) -> MetadataResult<Vec<ColumnInfo>> {
         let mut stmt = self
             .conn
             .prepare(
@@ -114,9 +99,7 @@ impl DuckDBConnector {
                  ORDER BY ordinal_position",
             )
             .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to query columns for {table}: {e}"
-                ),
+                message: format!("failed to query columns for {table}: {e}"),
             })?;
 
         let columns: Vec<ColumnInfo> = stmt
@@ -135,9 +118,7 @@ impl DuckDBConnector {
                 })
             })
             .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to read columns for {table}: {e}"
-                ),
+                message: format!("failed to read columns for {table}: {e}"),
             })?
             .filter_map(Result::ok)
             .collect();
@@ -145,10 +126,7 @@ impl DuckDBConnector {
         Ok(columns)
     }
 
-    fn query_constraints(
-        &self,
-        table: &str,
-    ) -> MetadataResult<Vec<ConstraintInfo>> {
+    fn query_constraints(&self, table: &str) -> MetadataResult<Vec<ConstraintInfo>> {
         let mut stmt = self
             .conn
             .prepare(
@@ -158,9 +136,7 @@ impl DuckDBConnector {
                  AND table_name = ?",
             )
             .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to query constraints for {table}: {e}"
-                ),
+                message: format!("failed to query constraints for {table}: {e}"),
             })?;
 
         let raw: Vec<(String, String)> = stmt
@@ -170,9 +146,7 @@ impl DuckDBConnector {
                 Ok((name, ctype))
             })
             .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to read constraints for {table}: {e}"
-                ),
+                message: format!("failed to read constraints for {table}: {e}"),
             })?
             .filter_map(Result::ok)
             .collect();
@@ -189,8 +163,7 @@ impl DuckDBConnector {
             };
 
             // Query the columns for this constraint.
-            let columns =
-                self.query_constraint_columns(table, &name);
+            let columns = self.query_constraint_columns(table, &name);
 
             constraints.push(ConstraintInfo {
                 name,
@@ -205,11 +178,7 @@ impl DuckDBConnector {
         Ok(constraints)
     }
 
-    fn query_constraint_columns(
-        &self,
-        table: &str,
-        constraint: &str,
-    ) -> Vec<String> {
+    fn query_constraint_columns(&self, table: &str, constraint: &str) -> Vec<String> {
         let result = self.conn.prepare(
             "SELECT column_name \
              FROM information_schema.key_column_usage \
@@ -223,21 +192,15 @@ impl DuckDBConnector {
             return vec![];
         };
 
-        stmt.query_map(
-            duckdb::params![table, constraint],
-            |row| row.get::<_, String>(0),
-        )
-        .ok()
-        .map(|rows| {
-            rows.filter_map(Result::ok).collect()
+        stmt.query_map(duckdb::params![table, constraint], |row| {
+            row.get::<_, String>(0)
         })
+        .ok()
+        .map(|rows| rows.filter_map(Result::ok).collect())
         .unwrap_or_default()
     }
 
-    fn query_indexes(
-        &self,
-        table: &str,
-    ) -> MetadataResult<Vec<IndexInfo>> {
+    fn query_indexes(&self, table: &str) -> MetadataResult<Vec<IndexInfo>> {
         let mut stmt = self
             .conn
             .prepare(
@@ -247,9 +210,7 @@ impl DuckDBConnector {
                  AND table_name = ?",
             )
             .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to query indexes for {table}: {e}"
-                ),
+                message: format!("failed to query indexes for {table}: {e}"),
             })?;
 
         let indexes: Vec<IndexInfo> = stmt
@@ -257,8 +218,7 @@ impl DuckDBConnector {
                 let name: String = row.get(0)?;
                 let unique: bool = row.get(1)?;
                 let sql: Option<String> = row.get(2)?;
-                let columns =
-                    parse_index_columns(sql.as_deref());
+                let columns = parse_index_columns(sql.as_deref());
                 Ok(IndexInfo {
                     name,
                     columns,
@@ -267,9 +227,7 @@ impl DuckDBConnector {
                 })
             })
             .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to read indexes for {table}: {e}"
-                ),
+                message: format!("failed to read indexes for {table}: {e}"),
             })?
             .filter_map(Result::ok)
             .collect();
@@ -277,10 +235,7 @@ impl DuckDBConnector {
         Ok(indexes)
     }
 
-    fn query_row_count(
-        &self,
-        table: &str,
-    ) -> MetadataResult<(f64, u64)> {
+    fn query_row_count(&self, table: &str) -> MetadataResult<(f64, u64)> {
         // Try duckdb_tables() for estimated row count first.
         let result: Result<(f64, u64), _> = self.conn.query_row(
             "SELECT estimated_size, \
@@ -304,26 +259,18 @@ impl DuckDBConnector {
         let count: f64 = self
             .conn
             .query_row(
-                &format!(
-                    "SELECT COUNT(*) FROM \"{}\"",
-                    table.replace('"', "\"\"")
-                ),
+                &format!("SELECT COUNT(*) FROM \"{}\"", table.replace('"', "\"\"")),
                 [],
                 |row| row.get(0),
             )
             .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to count rows for {table}: {e}"
-                ),
+                message: format!("failed to count rows for {table}: {e}"),
             })?;
 
         Ok((count, 0))
     }
 
-    fn query_column_stats(
-        &self,
-        table: &str,
-    ) -> MetadataResult<HashMap<String, ColumnStatistics>> {
+    fn query_column_stats(&self, table: &str) -> MetadataResult<HashMap<String, ColumnStatistics>> {
         let columns = self.query_columns(table)?;
         let mut result = HashMap::new();
 
@@ -337,9 +284,7 @@ impl DuckDBConnector {
 
             let distinct_count: f64 = self
                 .conn
-                .query_row(&ndv_sql, [], |row| {
-                    row.get::<_, i64>(0)
-                })
+                .query_row(&ndv_sql, [], |row| row.get::<_, i64>(0))
                 .unwrap_or(0) as f64;
 
             let null_sql = format!(
@@ -373,10 +318,7 @@ impl DuckDBConnector {
         Ok(result)
     }
 
-    fn build_explain_text(
-        &self,
-        sql: &str,
-    ) -> MetadataResult<String> {
+    fn build_explain_text(&self, sql: &str) -> MetadataResult<String> {
         let explain_sql = format!("EXPLAIN {sql}");
         let mut stmt = self
             .conn
@@ -388,9 +330,7 @@ impl DuckDBConnector {
         let rows: Vec<String> = stmt
             .query_map([], |row| row.get::<_, String>(1))
             .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to read EXPLAIN output: {e}"
-                ),
+                message: format!("failed to read EXPLAIN output: {e}"),
             })?
             .filter_map(Result::ok)
             .collect();
@@ -403,9 +343,7 @@ impl DuckDBConnector {
     /// # Errors
     ///
     /// Returns errors if catalog queries fail.
-    pub fn gather_schema_mut(
-        &self,
-    ) -> MetadataResult<SchemaInfo> {
+    pub fn gather_schema_mut(&self) -> MetadataResult<SchemaInfo> {
         let table_names = self.query_tables()?;
         let mut tables = HashMap::new();
 
@@ -440,12 +378,8 @@ impl DuckDBConnector {
     /// # Errors
     ///
     /// Returns errors if catalog queries fail.
-    pub fn gather_statistics_mut(
-        &self,
-        table: &str,
-    ) -> MetadataResult<TableStats> {
-        let (row_count, total_bytes) =
-            self.query_row_count(table)?;
+    pub fn gather_statistics_mut(&self, table: &str) -> MetadataResult<TableStats> {
+        let (row_count, total_bytes) = self.query_row_count(table)?;
         let columns = self.query_column_stats(table)?;
 
         Ok(TableStats {
@@ -462,10 +396,7 @@ impl DuckDBConnector {
     ///
     /// Returns errors if the EXPLAIN query fails or output cannot
     /// be parsed.
-    pub fn explain_query_mut(
-        &self,
-        sql: &str,
-    ) -> MetadataResult<ExplainPlan> {
+    pub fn explain_query_mut(&self, sql: &str) -> MetadataResult<ExplainPlan> {
         let text = self.build_explain_text(sql)?;
         Ok(parse_duckdb_explain(&text))
     }
@@ -480,17 +411,11 @@ impl DatabaseConnector for DuckDBConnector {
         self.gather_schema_mut()
     }
 
-    fn gather_statistics(
-        &self,
-        table: &str,
-    ) -> MetadataResult<TableStats> {
+    fn gather_statistics(&self, table: &str) -> MetadataResult<TableStats> {
         self.gather_statistics_mut(table)
     }
 
-    fn explain_query(
-        &self,
-        sql: &str,
-    ) -> MetadataResult<ExplainPlan> {
+    fn explain_query(&self, sql: &str) -> MetadataResult<ExplainPlan> {
         self.explain_query_mut(sql)
     }
 }
@@ -514,11 +439,7 @@ fn parse_index_columns(sql: Option<&str>) -> Vec<String> {
 
     sql[start + 1..end]
         .split(',')
-        .map(|s| {
-            s.trim()
-                .trim_matches('"')
-                .to_owned()
-        })
+        .map(|s| s.trim().trim_matches('"').to_owned())
         .filter(|s| !s.is_empty())
         .collect()
 }
@@ -527,9 +448,7 @@ fn parse_index_columns(sql: Option<&str>) -> Vec<String> {
 ///
 /// `DuckDB` EXPLAIN produces a text-based plan. We extract a
 /// basic tree structure from the indented output.
-fn parse_duckdb_explain(
-    text: &str,
-) -> ExplainPlan {
+fn parse_duckdb_explain(text: &str) -> ExplainPlan {
     let lines: Vec<&str> = text
         .lines()
         .map(str::trim)
@@ -585,23 +504,19 @@ fn parse_duckdb_explain(
 
 fn classify_duckdb_node(line: &str) -> NodeType {
     let upper = line.to_uppercase();
-    if upper.contains("SEQ_SCAN") || upper.contains("TABLE_SCAN")
-    {
+    if upper.contains("SEQ_SCAN") || upper.contains("TABLE_SCAN") {
         NodeType::SeqScan
     } else if upper.contains("INDEX_SCAN") {
         NodeType::IndexScan
     } else if upper.contains("HASH_JOIN") {
         NodeType::HashJoin
-    } else if upper.contains("MERGE_JOIN")
-        || upper.contains("PIECEWISE_MERGE_JOIN")
-    {
+    } else if upper.contains("MERGE_JOIN") || upper.contains("PIECEWISE_MERGE_JOIN") {
         NodeType::MergeJoin
     } else if upper.contains("NESTED_LOOP") {
         NodeType::NestedLoop
     } else if upper.contains("HASH_GROUP") {
         NodeType::HashAggregate
-    } else if upper.contains("ORDER") || upper.contains("SORT")
-    {
+    } else if upper.contains("ORDER") || upper.contains("SORT") {
         NodeType::Sort
     } else {
         NodeType::Other
@@ -613,12 +528,13 @@ fn extract_table_name(line: &str) -> Option<String> {
     // e.g., "SEQ_SCAN users" or "TABLE_SCAN orders"
     let parts: Vec<&str> = line.split_whitespace().collect();
     if parts.len() >= 2 {
-        let candidate = parts[parts.len() - 1]
-            .trim_matches(|c: char| !c.is_alphanumeric() && c != '_');
+        let candidate =
+            parts[parts.len() - 1].trim_matches(|c: char| !c.is_alphanumeric() && c != '_');
         if !candidate.is_empty()
-            && candidate.chars().next().is_some_and(|c| {
-                c.is_ascii_alphabetic() || c == '_'
-            })
+            && candidate
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
         {
             return Some(candidate.to_owned());
         }
@@ -633,26 +549,21 @@ mod tests {
 
     #[test]
     fn open_in_memory() {
-        let connector = DuckDBConnector::open_in_memory()
-            .expect("should open in-memory db");
+        let connector = DuckDBConnector::open_in_memory().expect("should open in-memory db");
         assert_eq!(connector.kind(), DatabaseKind::DuckDB);
     }
 
     #[test]
     fn gather_schema_empty() {
-        let connector = DuckDBConnector::open_in_memory()
-            .expect("should open in-memory db");
-        let schema = connector
-            .gather_schema()
-            .expect("should gather schema");
+        let connector = DuckDBConnector::open_in_memory().expect("should open in-memory db");
+        let schema = connector.gather_schema().expect("should gather schema");
         assert_eq!(schema.kind, DatabaseKind::DuckDB);
         assert!(schema.tables.is_empty());
     }
 
     #[test]
     fn gather_schema_with_table() {
-        let connector = DuckDBConnector::open_in_memory()
-            .expect("should open");
+        let connector = DuckDBConnector::open_in_memory().expect("should open");
         connector
             .conn
             .execute_batch(
@@ -666,23 +577,17 @@ mod tests {
             )
             .expect("setup");
 
-        let schema = connector
-            .gather_schema()
-            .expect("should gather schema");
+        let schema = connector.gather_schema().expect("should gather schema");
         assert_eq!(schema.tables.len(), 1);
 
-        let users = schema
-            .tables
-            .get("users")
-            .expect("should have users table");
+        let users = schema.tables.get("users").expect("should have users table");
         assert_eq!(users.columns.len(), 3);
         assert_eq!(users.columns[0].name, "id");
     }
 
     #[test]
     fn gather_statistics_duckdb() {
-        let connector = DuckDBConnector::open_in_memory()
-            .expect("should open");
+        let connector = DuckDBConnector::open_in_memory().expect("should open");
         connector
             .conn
             .execute_batch(
@@ -702,8 +607,7 @@ mod tests {
 
     #[test]
     fn explain_query_duckdb() {
-        let connector = DuckDBConnector::open_in_memory()
-            .expect("should open");
+        let connector = DuckDBConnector::open_in_memory().expect("should open");
         connector
             .conn
             .execute_batch(
@@ -733,17 +637,8 @@ mod tests {
 
     #[test]
     fn classify_node_types() {
-        assert_eq!(
-            classify_duckdb_node("SEQ_SCAN users"),
-            NodeType::SeqScan
-        );
-        assert_eq!(
-            classify_duckdb_node("HASH_JOIN"),
-            NodeType::HashJoin
-        );
-        assert_eq!(
-            classify_duckdb_node("SOMETHING_ELSE"),
-            NodeType::Other
-        );
+        assert_eq!(classify_duckdb_node("SEQ_SCAN users"), NodeType::SeqScan);
+        assert_eq!(classify_duckdb_node("HASH_JOIN"), NodeType::HashJoin);
+        assert_eq!(classify_duckdb_node("SOMETHING_ELSE"), NodeType::Other);
     }
 }

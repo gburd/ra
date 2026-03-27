@@ -1,9 +1,9 @@
 //! Commands for migrating rule pre-conditions from prose to formal YAML.
 
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use colored::Colorize;
 use ra_core::{FactValue, PreCondition};
-use ra_parser::{RuleFile, parse_rule_file};
+use ra_parser::{parse_rule_file, RuleFile};
 use serde_yaml;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -29,20 +29,13 @@ pub fn migrate_preconditions(
 
     for file_path in files {
         match migrate_single_file(&file_path, output, dry_run, validate) {
-            Ok(status) => {
-                match status {
-                    FileStatus::AlreadyMigrated => report.already_migrated += 1,
-                    FileStatus::Migrated => report.migrated += 1,
-                    FileStatus::NeedsManualReview => report.needs_review += 1,
-                }
-            }
+            Ok(status) => match status {
+                FileStatus::AlreadyMigrated => report.already_migrated += 1,
+                FileStatus::Migrated => report.migrated += 1,
+                FileStatus::NeedsManualReview => report.needs_review += 1,
+            },
             Err(e) => {
-                eprintln!(
-                    "{} {}: {}",
-                    "Error".red().bold(),
-                    file_path.display(),
-                    e
-                );
+                eprintln!("{} {}: {}", "Error".red().bold(), file_path.display(), e);
                 report.errors += 1;
             }
         }
@@ -139,8 +132,8 @@ fn migrate_single_file(
     dry_run: bool,
     _validate: bool,
 ) -> Result<FileStatus> {
-    let content = fs::read_to_string(input)
-        .with_context(|| format!("Failed to read {}", input.display()))?;
+    let content =
+        fs::read_to_string(input).with_context(|| format!("Failed to read {}", input.display()))?;
 
     let rule_file = parse_rule_file(&content)
         .with_context(|| format!("Failed to parse {}", input.display()))?;
@@ -203,10 +196,7 @@ fn validate_single_file(
     let migrated_rule = parse_rule_file(&migrated_content)
         .with_context(|| format!("Failed to parse {}", migrated.display()))?;
 
-    let errors = validate_migration(
-        &baseline_rule,
-        &migrated_rule,
-    );
+    let errors = validate_migration(&baseline_rule, &migrated_rule);
 
     for error in &errors {
         eprintln!("  {}", error);
@@ -252,17 +242,10 @@ impl std::fmt::Display for ValidationError {
 ///
 /// Returns an empty vec when the migration is valid, or a list
 /// of validation errors describing each problem found.
-fn validate_migration(
-    baseline: &RuleFile,
-    migrated: &RuleFile,
-) -> Vec<ValidationError> {
+fn validate_migration(baseline: &RuleFile, migrated: &RuleFile) -> Vec<ValidationError> {
     let mut errors = Vec::new();
 
-    validate_metadata_identity(
-        &baseline.metadata,
-        &migrated.metadata,
-        &mut errors,
-    );
+    validate_metadata_identity(&baseline.metadata, &migrated.metadata, &mut errors);
     validate_precondition_safety(
         &baseline.metadata.preconditions,
         &migrated.metadata.preconditions,
@@ -335,9 +318,8 @@ fn validate_precondition_safety(
                         "Required precondition removed: {}",
                         describe_precondition(base_pc)
                     ),
-                    suggestion:
-                        "Add a matching precondition or mark the original as optional"
-                            .into(),
+                    suggestion: "Add a matching precondition or mark the original as optional"
+                        .into(),
                 });
             }
         }
@@ -401,9 +383,10 @@ fn describe_precondition(pc: &PreCondition) -> String {
             requires,
             description,
             ..
-        } => description
-            .as_deref()
-            .map_or_else(|| format!("capability: {database}.{requires}"), String::from),
+        } => description.as_deref().map_or_else(
+            || format!("capability: {database}.{requires}"),
+            String::from,
+        ),
         PreCondition::Composite { description, .. } => description
             .as_deref()
             .map_or_else(|| "composite condition".into(), String::from),
@@ -417,7 +400,9 @@ fn find_compatible_precondition<'a>(
     target: &PreCondition,
     candidates: &'a [PreCondition],
 ) -> Option<&'a PreCondition> {
-    candidates.iter().find(|c| preconditions_compatible(target, c))
+    candidates
+        .iter()
+        .find(|c| preconditions_compatible(target, c))
 }
 
 /// Find a precondition in `candidates` that matches the same logical slot.
@@ -425,7 +410,9 @@ fn find_matching_precondition<'a>(
     target: &PreCondition,
     candidates: &'a [PreCondition],
 ) -> Option<&'a PreCondition> {
-    candidates.iter().find(|c| preconditions_same_slot(target, c))
+    candidates
+        .iter()
+        .find(|c| preconditions_same_slot(target, c))
 }
 
 /// Two preconditions are compatible if the migrated one covers at least
@@ -433,20 +420,12 @@ fn find_matching_precondition<'a>(
 fn preconditions_compatible(baseline: &PreCondition, migrated: &PreCondition) -> bool {
     match (baseline, migrated) {
         (
-            PreCondition::Pattern {
-                must_match: bm, ..
-            },
-            PreCondition::Pattern {
-                must_match: mm, ..
-            },
+            PreCondition::Pattern { must_match: bm, .. },
+            PreCondition::Pattern { must_match: mm, .. },
         ) => bm == mm,
         (
-            PreCondition::Predicate {
-                condition: bc, ..
-            },
-            PreCondition::Predicate {
-                condition: mc, ..
-            },
+            PreCondition::Predicate { condition: bc, .. },
+            PreCondition::Predicate { condition: mc, .. },
         ) => bc == mc,
         (
             PreCondition::Fact {
@@ -483,29 +462,16 @@ fn preconditions_compatible(baseline: &PreCondition, migrated: &PreCondition) ->
 fn preconditions_same_slot(a: &PreCondition, b: &PreCondition) -> bool {
     match (a, b) {
         (
-            PreCondition::Pattern {
-                must_match: am, ..
-            },
-            PreCondition::Pattern {
-                must_match: bm, ..
-            },
+            PreCondition::Pattern { must_match: am, .. },
+            PreCondition::Pattern { must_match: bm, .. },
         ) => am == bm,
         (
-            PreCondition::Predicate {
-                condition: ac, ..
-            },
-            PreCondition::Predicate {
-                condition: bc, ..
-            },
+            PreCondition::Predicate { condition: ac, .. },
+            PreCondition::Predicate { condition: bc, .. },
         ) => ac == bc,
-        (
-            PreCondition::Fact {
-                fact_type: af, ..
-            },
-            PreCondition::Fact {
-                fact_type: bf, ..
-            },
-        ) => af == bf,
+        (PreCondition::Fact { fact_type: af, .. }, PreCondition::Fact { fact_type: bf, .. }) => {
+            af == bf
+        }
         (
             PreCondition::Capability {
                 database: ad,
@@ -583,9 +549,8 @@ fn check_constraint_narrowing(
                     "Fact '{}' constraint narrowed from '{} {:?}' to '{} {:?}'",
                     bf, bc, bt, mc, mt
                 ),
-                suggestion:
-                    "Use a wider (more permissive) threshold to preserve baseline behavior"
-                        .into(),
+                suggestion: "Use a wider (more permissive) threshold to preserve baseline behavior"
+                    .into(),
             });
         }
     }
@@ -596,8 +561,7 @@ fn check_constraint_narrowing(
             kind: ValidationErrorKind::DataLossRisk,
             field: label.into(),
             reason: "Optional precondition became required after migration".into(),
-            suggestion: "Keep the precondition optional or verify all callers satisfy it"
-                .into(),
+            suggestion: "Keep the precondition optional or verify all callers satisfy it".into(),
         });
     }
 }
@@ -686,8 +650,7 @@ fn build_migrated_content(
     let mut metadata = rule_file.metadata.clone();
     metadata.preconditions = preconditions.to_vec();
 
-    let yaml = serde_yaml::to_string(&metadata)
-        .context("Failed to serialize metadata to YAML")?;
+    let yaml = serde_yaml::to_string(&metadata).context("Failed to serialize metadata to YAML")?;
 
     // Reconstruct file
     let mut result = String::new();
@@ -855,9 +818,12 @@ mod tests {
     #[test]
     fn removed_required_precondition_is_breaking() {
         let mut baseline = base_rule();
-        baseline.metadata.preconditions = vec![
-            fact_pc("statistics.cardinality", ">", FactValue::Int(1000), false),
-        ];
+        baseline.metadata.preconditions = vec![fact_pc(
+            "statistics.cardinality",
+            ">",
+            FactValue::Int(1000),
+            false,
+        )];
 
         let migrated = base_rule(); // no preconditions
 
@@ -869,9 +835,12 @@ mod tests {
     #[test]
     fn removed_optional_precondition_is_not_breaking() {
         let mut baseline = base_rule();
-        baseline.metadata.preconditions = vec![
-            fact_pc("statistics.cardinality", ">", FactValue::Int(1000), true),
-        ];
+        baseline.metadata.preconditions = vec![fact_pc(
+            "statistics.cardinality",
+            ">",
+            FactValue::Int(1000),
+            true,
+        )];
 
         let migrated = base_rule(); // no preconditions
 
@@ -894,14 +863,20 @@ mod tests {
     #[test]
     fn widened_threshold_passes() {
         let mut baseline = base_rule();
-        baseline.metadata.preconditions = vec![
-            fact_pc("statistics.cardinality", ">", FactValue::Int(1000), false),
-        ];
+        baseline.metadata.preconditions = vec![fact_pc(
+            "statistics.cardinality",
+            ">",
+            FactValue::Int(1000),
+            false,
+        )];
 
         let mut migrated = base_rule();
-        migrated.metadata.preconditions = vec![
-            fact_pc("statistics.cardinality", ">", FactValue::Int(500), false),
-        ];
+        migrated.metadata.preconditions = vec![fact_pc(
+            "statistics.cardinality",
+            ">",
+            FactValue::Int(500),
+            false,
+        )];
 
         let errors = validate_migration(&baseline, &migrated);
         assert!(errors.is_empty());
@@ -910,14 +885,20 @@ mod tests {
     #[test]
     fn narrowed_threshold_detected() {
         let mut baseline = base_rule();
-        baseline.metadata.preconditions = vec![
-            fact_pc("statistics.cardinality", ">", FactValue::Int(500), false),
-        ];
+        baseline.metadata.preconditions = vec![fact_pc(
+            "statistics.cardinality",
+            ">",
+            FactValue::Int(500),
+            false,
+        )];
 
         let mut migrated = base_rule();
-        migrated.metadata.preconditions = vec![
-            fact_pc("statistics.cardinality", ">", FactValue::Int(1000), false),
-        ];
+        migrated.metadata.preconditions = vec![fact_pc(
+            "statistics.cardinality",
+            ">",
+            FactValue::Int(1000),
+            false,
+        )];
 
         let errors = validate_migration(&baseline, &migrated);
         assert_eq!(errors.len(), 1);
@@ -927,17 +908,17 @@ mod tests {
     #[test]
     fn optional_to_required_is_data_loss_risk() {
         let mut baseline = base_rule();
-        baseline.metadata.preconditions = vec![
-            fact_pc("hardware.cpu_cores", ">", FactValue::Int(2), true),
-        ];
+        baseline.metadata.preconditions =
+            vec![fact_pc("hardware.cpu_cores", ">", FactValue::Int(2), true)];
 
         let mut migrated = base_rule();
-        migrated.metadata.preconditions = vec![
-            fact_pc("hardware.cpu_cores", ">", FactValue::Int(2), false),
-        ];
+        migrated.metadata.preconditions =
+            vec![fact_pc("hardware.cpu_cores", ">", FactValue::Int(2), false)];
 
         let errors = validate_migration(&baseline, &migrated);
-        assert!(errors.iter().any(|e| e.kind == ValidationErrorKind::DataLossRisk));
+        assert!(errors
+            .iter()
+            .any(|e| e.kind == ValidationErrorKind::DataLossRisk));
     }
 
     #[test]
@@ -1033,14 +1014,20 @@ mod tests {
     #[test]
     fn float_threshold_widening() {
         let mut baseline = base_rule();
-        baseline.metadata.preconditions = vec![
-            fact_pc("statistics.selectivity", "<", FactValue::Float(0.5), false),
-        ];
+        baseline.metadata.preconditions = vec![fact_pc(
+            "statistics.selectivity",
+            "<",
+            FactValue::Float(0.5),
+            false,
+        )];
 
         let mut migrated = base_rule();
-        migrated.metadata.preconditions = vec![
-            fact_pc("statistics.selectivity", "<", FactValue::Float(0.8), false),
-        ];
+        migrated.metadata.preconditions = vec![fact_pc(
+            "statistics.selectivity",
+            "<",
+            FactValue::Float(0.8),
+            false,
+        )];
 
         let errors = validate_migration(&baseline, &migrated);
         assert!(errors.is_empty());
@@ -1049,14 +1036,20 @@ mod tests {
     #[test]
     fn float_threshold_narrowing() {
         let mut baseline = base_rule();
-        baseline.metadata.preconditions = vec![
-            fact_pc("statistics.selectivity", "<", FactValue::Float(0.8), false),
-        ];
+        baseline.metadata.preconditions = vec![fact_pc(
+            "statistics.selectivity",
+            "<",
+            FactValue::Float(0.8),
+            false,
+        )];
 
         let mut migrated = base_rule();
-        migrated.metadata.preconditions = vec![
-            fact_pc("statistics.selectivity", "<", FactValue::Float(0.3), false),
-        ];
+        migrated.metadata.preconditions = vec![fact_pc(
+            "statistics.selectivity",
+            "<",
+            FactValue::Float(0.3),
+            false,
+        )];
 
         let errors = validate_migration(&baseline, &migrated);
         assert_eq!(errors.len(), 1);

@@ -7,7 +7,7 @@
 //! 3. Implement expr_to_sql or use alternate serialization
 //! 4. Make functions async or remove .await calls
 
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 use std::path::Path;
 
 /// Establish a baseline for a query.

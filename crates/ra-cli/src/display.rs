@@ -222,10 +222,7 @@ fn format_plan_tree_impl(expr: &RelExpr, buf: &mut String, prefix: &str, is_last
         RelExpr::Window { functions, input } => {
             buf.push_str(prefix);
             buf.push_str(connector);
-            buf.push_str(&format!(
-                "Window({} function(s))\n",
-                functions.len()
-            ));
+            buf.push_str(&format!("Window({} function(s))\n", functions.len()));
 
             let child_prefix = format!("{prefix}{child_prefix_ext}");
             format_plan_tree_impl(input, buf, &child_prefix, true);
@@ -258,20 +255,10 @@ fn format_plan_tree_impl(expr: &RelExpr, buf: &mut String, prefix: &str, is_last
             let child_prefix = format!("{prefix}{child_prefix_ext}");
             buf.push_str(&child_prefix);
             buf.push_str("├─ base:\n");
-            format_plan_tree_impl(
-                base_case,
-                buf,
-                &format!("{child_prefix}│  "),
-                true,
-            );
+            format_plan_tree_impl(base_case, buf, &format!("{child_prefix}│  "), true);
             buf.push_str(&child_prefix);
             buf.push_str("├─ recursive:\n");
-            format_plan_tree_impl(
-                recursive_case,
-                buf,
-                &format!("{child_prefix}│  "),
-                true,
-            );
+            format_plan_tree_impl(recursive_case, buf, &format!("{child_prefix}│  "), true);
             format_plan_tree_impl(body, buf, &child_prefix, true);
         }
         RelExpr::Values { rows } => {
@@ -435,7 +422,12 @@ fn format_expr(expr: &Expr) -> String {
         }
         Expr::Const(c) => format_const(c),
         Expr::BinOp { op, left, right } => {
-            format!("({} {} {})", format_expr(left), format_binop(*op), format_expr(right))
+            format!(
+                "({} {} {})",
+                format_expr(left),
+                format_binop(*op),
+                format_expr(right)
+            )
         }
         Expr::UnaryOp { op, operand } => {
             format!("{}({})", format_unaryop(*op), format_expr(operand))

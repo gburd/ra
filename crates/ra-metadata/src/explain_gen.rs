@@ -9,9 +9,7 @@ use std::fmt::Write;
 
 use ra_core::algebra::{JoinType as CoreJoinType, RelExpr};
 
-use crate::explain::{
-    ExplainNode, ExplainPlan, JoinType, NodeType,
-};
+use crate::explain::{ExplainNode, ExplainPlan, JoinType, NodeType};
 
 /// Target database for EXPLAIN output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -109,19 +107,13 @@ impl DatabaseCostParams {
 
     /// Estimate total cost for scanning `row_count` rows.
     fn scan_total_cost(&self, row_count: f64, width: u32) -> f64 {
-        let rows_per_page =
-            (self.page_size as f64 / f64::from(width.max(1))).max(1.0);
+        let rows_per_page = (self.page_size as f64 / f64::from(width.max(1))).max(1.0);
         let pages = (row_count / rows_per_page).ceil().max(1.0);
-        pages * self.seq_page_cost
-            + row_count * self.cpu_tuple_cost
+        pages * self.seq_page_cost + row_count * self.cpu_tuple_cost
     }
 
     /// Estimate cost for an index scan on `row_count` rows.
-    pub fn index_scan_cost(
-        &self,
-        row_count: f64,
-        selectivity: f64,
-    ) -> f64 {
+    pub fn index_scan_cost(&self, row_count: f64, selectivity: f64) -> f64 {
         let selected = (row_count * selectivity).max(1.0);
         selected * self.random_page_cost
             + selected * self.cpu_tuple_cost
@@ -129,17 +121,11 @@ impl DatabaseCostParams {
     }
 
     /// Estimate cost for a hash join.
-    fn hash_join_cost(
-        &self,
-        left_rows: f64,
-        right_rows: f64,
-    ) -> (f64, f64) {
+    fn hash_join_cost(&self, left_rows: f64, right_rows: f64) -> (f64, f64) {
         let build_cost = left_rows * self.cpu_tuple_cost;
         let probe_cost = right_rows * self.cpu_tuple_cost;
         let startup = build_cost;
-        let total = startup
-            + probe_cost
-            + (left_rows + right_rows) * self.cpu_operator_cost;
+        let total = startup + probe_cost + (left_rows + right_rows) * self.cpu_operator_cost;
         (startup, total)
     }
 
@@ -155,13 +141,8 @@ impl DatabaseCostParams {
     }
 
     /// Estimate cost for a hash aggregate.
-    fn aggregate_cost(
-        &self,
-        row_count: f64,
-        group_count: f64,
-    ) -> (f64, f64) {
-        let startup = row_count * self.cpu_tuple_cost
-            + group_count * self.cpu_operator_cost;
+    fn aggregate_cost(&self, row_count: f64, group_count: f64) -> (f64, f64) {
+        let startup = row_count * self.cpu_tuple_cost + group_count * self.cpu_operator_cost;
         (startup, startup)
     }
 }
@@ -173,10 +154,7 @@ impl DatabaseCostParams {
 /// Uses `cost_params` to generate plausible cost estimates in the
 /// target database's cost units.
 #[must_use]
-pub fn from_relexpr(
-    plan: &RelExpr,
-    cost_params: &DatabaseCostParams,
-) -> ExplainPlan {
+pub fn from_relexpr(plan: &RelExpr, cost_params: &DatabaseCostParams) -> ExplainPlan {
     let root = relexpr_to_node(plan, cost_params);
     let total_cost = root.total_cost;
     let total_rows = root.estimated_rows;
@@ -189,53 +167,35 @@ pub fn from_relexpr(
     }
 }
 
-fn relexpr_to_node(
-    expr: &RelExpr,
-    params: &DatabaseCostParams,
-) -> ExplainNode {
+fn relexpr_to_node(expr: &RelExpr, params: &DatabaseCostParams) -> ExplainNode {
     match expr {
         RelExpr::Scan { table, .. } => convert_scan(table, params),
         RelExpr::Filter {
             predicate, input, ..
         } => convert_filter(predicate, input, params),
-        RelExpr::Project { input, columns, .. } => {
-            convert_project(input, columns, params)
-        }
+        RelExpr::Project { input, columns, .. } => convert_project(input, columns, params),
         RelExpr::Join {
             join_type,
             condition,
             left,
             right,
             ..
-        } => convert_join(
-            *join_type, condition, left, right, params,
-        ),
-        RelExpr::Sort { input, .. } => {
-            convert_sort(input, params)
-        }
-        RelExpr::Limit {
-            count, input, ..
-        } => convert_limit(*count, input, params),
+        } => convert_join(*join_type, condition, left, right, params),
+        RelExpr::Sort { input, .. } => convert_sort(input, params),
+        RelExpr::Limit { count, input, .. } => convert_limit(*count, input, params),
         RelExpr::Aggregate {
             input, group_by, ..
         } => convert_aggregate(input, group_by, params),
         RelExpr::Union {
             left, right, all, ..
         } => convert_union(left, right, *all, params),
-        RelExpr::Distinct { input, .. } => {
-            convert_distinct(input, params)
-        }
-        RelExpr::Window { input, .. } => {
-            convert_window(input, params)
-        }
+        RelExpr::Distinct { input, .. } => convert_distinct(input, params),
+        RelExpr::Window { input, .. } => convert_window(input, params),
         _ => convert_fallback(expr, params),
     }
 }
 
-fn convert_scan(
-    table: &str,
-    params: &DatabaseCostParams,
-) -> ExplainNode {
+fn convert_scan(table: &str, params: &DatabaseCostParams) -> ExplainNode {
     let rows = params.default_rows;
     let width = params.default_width;
     let total = params.scan_total_cost(rows, width);
@@ -261,13 +221,11 @@ fn convert_filter(
     params: &DatabaseCostParams,
 ) -> ExplainNode {
     let child = relexpr_to_node(input, params);
-    let child_rows =
-        child.estimated_rows.unwrap_or(params.default_rows);
+    let child_rows = child.estimated_rows.unwrap_or(params.default_rows);
     let selectivity = 0.33;
     let filtered_rows = (child_rows * selectivity).max(1.0);
     let startup = child.startup_cost.unwrap_or(0.0);
-    let total = child.total_cost.unwrap_or(0.0)
-        + child_rows * params.cpu_operator_cost;
+    let total = child.total_cost.unwrap_or(0.0) + child_rows * params.cpu_operator_cost;
 
     ExplainNode {
         node_type: child.node_type,
@@ -291,12 +249,9 @@ fn convert_project(
     params: &DatabaseCostParams,
 ) -> ExplainNode {
     let child = relexpr_to_node(input, params);
-    let child_rows =
-        child.estimated_rows.unwrap_or(params.default_rows);
-    let width =
-        (columns.len() as u32 * 8).max(params.default_width);
-    let total = child.total_cost.unwrap_or(0.0)
-        + child_rows * params.cpu_tuple_cost;
+    let child_rows = child.estimated_rows.unwrap_or(params.default_rows);
+    let width = (columns.len() as u32 * 8).max(params.default_width);
+    let total = child.total_cost.unwrap_or(0.0) + child_rows * params.cpu_tuple_cost;
 
     ExplainNode {
         node_type: NodeType::Result,
@@ -323,15 +278,10 @@ fn convert_join(
 ) -> ExplainNode {
     let left_child = relexpr_to_node(left, params);
     let right_child = relexpr_to_node(right, params);
-    let left_rows = left_child
-        .estimated_rows
-        .unwrap_or(params.default_rows);
-    let right_rows = right_child
-        .estimated_rows
-        .unwrap_or(params.default_rows);
+    let left_rows = left_child.estimated_rows.unwrap_or(params.default_rows);
+    let right_rows = right_child.estimated_rows.unwrap_or(params.default_rows);
 
-    let (startup, total) =
-        params.hash_join_cost(left_rows, right_rows);
+    let (startup, total) = params.hash_join_cost(left_rows, right_rows);
     let output_rows = (left_rows * right_rows * 0.01).max(1.0);
 
     let explain_join = convert_join_type(join_type);
@@ -367,13 +317,9 @@ fn convert_join(
     }
 }
 
-fn convert_sort(
-    input: &RelExpr,
-    params: &DatabaseCostParams,
-) -> ExplainNode {
+fn convert_sort(input: &RelExpr, params: &DatabaseCostParams) -> ExplainNode {
     let child = relexpr_to_node(input, params);
-    let child_rows =
-        child.estimated_rows.unwrap_or(params.default_rows);
+    let child_rows = child.estimated_rows.unwrap_or(params.default_rows);
     let (startup, total) = params.sort_cost(child_rows);
     let child_total = child.total_cost.unwrap_or(0.0);
 
@@ -393,14 +339,9 @@ fn convert_sort(
     }
 }
 
-fn convert_limit(
-    count: u64,
-    input: &RelExpr,
-    params: &DatabaseCostParams,
-) -> ExplainNode {
+fn convert_limit(count: u64, input: &RelExpr, params: &DatabaseCostParams) -> ExplainNode {
     let child = relexpr_to_node(input, params);
-    let child_rows =
-        child.estimated_rows.unwrap_or(params.default_rows);
+    let child_rows = child.estimated_rows.unwrap_or(params.default_rows);
     let limited = (count as f64).min(child_rows);
 
     ExplainNode {
@@ -425,15 +366,13 @@ fn convert_aggregate(
     params: &DatabaseCostParams,
 ) -> ExplainNode {
     let child = relexpr_to_node(input, params);
-    let child_rows =
-        child.estimated_rows.unwrap_or(params.default_rows);
+    let child_rows = child.estimated_rows.unwrap_or(params.default_rows);
     let group_count = if group_by.is_empty() {
         1.0
     } else {
         (child_rows * 0.1).max(1.0)
     };
-    let (startup, total) =
-        params.aggregate_cost(child_rows, group_count);
+    let (startup, total) = params.aggregate_cost(child_rows, group_count);
     let child_total = child.total_cost.unwrap_or(0.0);
 
     ExplainNode {
@@ -460,12 +399,8 @@ fn convert_union(
 ) -> ExplainNode {
     let left_child = relexpr_to_node(left, params);
     let right_child = relexpr_to_node(right, params);
-    let left_rows = left_child
-        .estimated_rows
-        .unwrap_or(params.default_rows);
-    let right_rows = right_child
-        .estimated_rows
-        .unwrap_or(params.default_rows);
+    let left_rows = left_child.estimated_rows.unwrap_or(params.default_rows);
+    let right_rows = right_child.estimated_rows.unwrap_or(params.default_rows);
     let rows = if all {
         left_rows + right_rows
     } else {
@@ -479,8 +414,7 @@ fn convert_union(
         index_name: None,
         startup_cost: left_child.startup_cost,
         total_cost: Some(
-            left_child.total_cost.unwrap_or(0.0)
-                + right_child.total_cost.unwrap_or(0.0),
+            left_child.total_cost.unwrap_or(0.0) + right_child.total_cost.unwrap_or(0.0),
         ),
         estimated_rows: Some(rows),
         estimated_width: left_child.estimated_width,
@@ -491,13 +425,9 @@ fn convert_union(
     }
 }
 
-fn convert_distinct(
-    input: &RelExpr,
-    params: &DatabaseCostParams,
-) -> ExplainNode {
+fn convert_distinct(input: &RelExpr, params: &DatabaseCostParams) -> ExplainNode {
     let child = relexpr_to_node(input, params);
-    let child_rows =
-        child.estimated_rows.unwrap_or(params.default_rows);
+    let child_rows = child.estimated_rows.unwrap_or(params.default_rows);
     let unique_rows = (child_rows * 0.8).max(1.0);
 
     ExplainNode {
@@ -516,15 +446,10 @@ fn convert_distinct(
     }
 }
 
-fn convert_window(
-    input: &RelExpr,
-    params: &DatabaseCostParams,
-) -> ExplainNode {
+fn convert_window(input: &RelExpr, params: &DatabaseCostParams) -> ExplainNode {
     let child = relexpr_to_node(input, params);
-    let child_rows =
-        child.estimated_rows.unwrap_or(params.default_rows);
-    let total = child.total_cost.unwrap_or(0.0)
-        + child_rows * params.cpu_operator_cost;
+    let child_rows = child.estimated_rows.unwrap_or(params.default_rows);
+    let total = child.total_cost.unwrap_or(0.0) + child_rows * params.cpu_operator_cost;
 
     ExplainNode {
         node_type: NodeType::WindowAgg,
@@ -542,19 +467,13 @@ fn convert_window(
     }
 }
 
-fn convert_fallback(
-    expr: &RelExpr,
-    params: &DatabaseCostParams,
-) -> ExplainNode {
+fn convert_fallback(expr: &RelExpr, params: &DatabaseCostParams) -> ExplainNode {
     let children: Vec<ExplainNode> = expr
         .children()
         .iter()
         .map(|c| relexpr_to_node(c, params))
         .collect();
-    let total_cost = children
-        .iter()
-        .filter_map(|c| c.total_cost)
-        .sum::<f64>();
+    let total_cost = children.iter().filter_map(|c| c.total_cost).sum::<f64>();
     let rows = children
         .first()
         .and_then(|c| c.estimated_rows)
@@ -673,9 +592,7 @@ impl ExplainPlan {
     #[must_use]
     pub fn to_sqlserver_xml(&self) -> String {
         let mut buf = String::with_capacity(512);
-        buf.push_str(
-            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n",
-        );
+        buf.push_str("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n");
         buf.push_str(
             "<ShowPlanXML xmlns=\"http://schemas.microsoft.com/sqlserver/2004/07/showplan\">\n",
         );
@@ -709,71 +626,39 @@ impl ExplainPlan {
 
 // ---- PostgreSQL JSON helpers ----
 
-fn node_to_pg_json(
-    node: &ExplainNode,
-    buf: &mut String,
-    indent: usize,
-) {
+fn node_to_pg_json(node: &ExplainNode, buf: &mut String, indent: usize) {
     let pad = " ".repeat(indent);
     buf.push_str("{\n");
 
-    let _ = write!(
-        buf,
-        "{pad}  \"Node Type\": \"{}\"",
-        node.node_type
-    );
+    let _ = write!(buf, "{pad}  \"Node Type\": \"{}\"", node.node_type);
 
     if let Some(jt) = &node.join_type {
         let _ = write!(buf, ",\n{pad}  \"Join Type\": \"{jt}\"");
     }
     if let Some(rel) = &node.relation {
-        let _ = write!(
-            buf,
-            ",\n{pad}  \"Relation Name\": \"{rel}\""
-        );
+        let _ = write!(buf, ",\n{pad}  \"Relation Name\": \"{rel}\"");
     }
     if let Some(idx) = &node.index_name {
-        let _ = write!(
-            buf,
-            ",\n{pad}  \"Index Name\": \"{idx}\""
-        );
+        let _ = write!(buf, ",\n{pad}  \"Index Name\": \"{idx}\"");
     }
     if let Some(dir) = &node.scan_direction {
-        let _ = write!(
-            buf,
-            ",\n{pad}  \"Scan Direction\": \"{dir}\""
-        );
+        let _ = write!(buf, ",\n{pad}  \"Scan Direction\": \"{dir}\"");
     }
     if let Some(startup) = node.startup_cost {
-        let _ = write!(
-            buf,
-            ",\n{pad}  \"Startup Cost\": {startup:.2}"
-        );
+        let _ = write!(buf, ",\n{pad}  \"Startup Cost\": {startup:.2}");
     }
     if let Some(total) = node.total_cost {
-        let _ = write!(
-            buf,
-            ",\n{pad}  \"Total Cost\": {total:.2}"
-        );
+        let _ = write!(buf, ",\n{pad}  \"Total Cost\": {total:.2}");
     }
     if let Some(rows) = node.estimated_rows {
-        let _ = write!(
-            buf,
-            ",\n{pad}  \"Plan Rows\": {rows:.0}"
-        );
+        let _ = write!(buf, ",\n{pad}  \"Plan Rows\": {rows:.0}");
     }
     if let Some(width) = node.estimated_width {
-        let _ = write!(
-            buf,
-            ",\n{pad}  \"Plan Width\": {width}"
-        );
+        let _ = write!(buf, ",\n{pad}  \"Plan Width\": {width}");
     }
     if let Some(filter) = &node.filter {
         let escaped = escape_json_str(filter);
-        let _ = write!(
-            buf,
-            ",\n{pad}  \"Filter\": \"{escaped}\""
-        );
+        let _ = write!(buf, ",\n{pad}  \"Filter\": \"{escaped}\"");
     }
 
     if !node.children.is_empty() {
@@ -801,11 +686,7 @@ fn escape_json_str(s: &str) -> String {
 
 // ---- PostgreSQL text helpers ----
 
-fn node_to_pg_text(
-    node: &ExplainNode,
-    buf: &mut String,
-    depth: usize,
-) {
+fn node_to_pg_text(node: &ExplainNode, buf: &mut String, depth: usize) {
     let indent = if depth == 0 {
         String::new()
     } else {
@@ -837,8 +718,7 @@ fn node_to_pg_text(
     buf.push('\n');
 
     if let Some(filter) = &node.filter {
-        let filter_indent =
-            " ".repeat(depth * 6 + if depth > 0 { 4 } else { 2 });
+        let filter_indent = " ".repeat(depth * 6 + if depth > 0 { 4 } else { 2 });
         let _ = writeln!(buf, "{filter_indent}Filter: {filter}");
     }
 
@@ -849,17 +729,11 @@ fn node_to_pg_text(
 
 // ---- MySQL JSON helpers ----
 
-fn node_to_mysql_json(
-    node: &ExplainNode,
-    buf: &mut String,
-    indent: usize,
-) {
+fn node_to_mysql_json(node: &ExplainNode, buf: &mut String, indent: usize) {
     let pad = " ".repeat(indent);
 
     match node.node_type {
-        NodeType::NestedLoop
-        | NodeType::HashJoin
-        | NodeType::MergeJoin => {
+        NodeType::NestedLoop | NodeType::HashJoin | NodeType::MergeJoin => {
             let _ = write!(buf, ",\n{pad}\"nested_loop\": [");
             for (i, child) in node.children.iter().enumerate() {
                 if i > 0 {
@@ -872,20 +746,14 @@ fn node_to_mysql_json(
             let _ = write!(buf, "\n{pad}]");
         }
         NodeType::Sort => {
-            let _ = write!(
-                buf,
-                ",\n{pad}\"ordering_operation\": {{"
-            );
+            let _ = write!(buf, ",\n{pad}\"ordering_operation\": {{");
             for child in &node.children {
                 node_to_mysql_json(child, buf, indent + 2);
             }
             let _ = write!(buf, "\n{pad}}}");
         }
         NodeType::HashAggregate | NodeType::GroupAggregate => {
-            let _ = write!(
-                buf,
-                ",\n{pad}\"grouping_operation\": {{"
-            );
+            let _ = write!(buf, ",\n{pad}\"grouping_operation\": {{");
             for child in &node.children {
                 node_to_mysql_json(child, buf, indent + 2);
             }
@@ -897,11 +765,7 @@ fn node_to_mysql_json(
     }
 }
 
-fn write_mysql_table_node(
-    node: &ExplainNode,
-    buf: &mut String,
-    indent: usize,
-) {
+fn write_mysql_table_node(node: &ExplainNode, buf: &mut String, indent: usize) {
     let pad = " ".repeat(indent);
 
     let access_type = match node.node_type {
@@ -913,23 +777,14 @@ fn write_mysql_table_node(
 
     let _ = write!(buf, ",\n{pad}\"table\": {{");
     if let Some(rel) = &node.relation {
-        let _ = write!(
-            buf,
-            "\n{pad}  \"table_name\": \"{rel}\","
-        );
+        let _ = write!(buf, "\n{pad}  \"table_name\": \"{rel}\",");
     }
-    let _ = write!(
-        buf,
-        "\n{pad}  \"access_type\": \"{access_type}\""
-    );
+    let _ = write!(buf, "\n{pad}  \"access_type\": \"{access_type}\"");
     if let Some(key) = &node.index_name {
         let _ = write!(buf, ",\n{pad}  \"key\": \"{key}\"");
     }
     if let Some(rows) = node.estimated_rows {
-        let _ = write!(
-            buf,
-            ",\n{pad}  \"rows_examined_per_scan\": {rows:.0}"
-        );
+        let _ = write!(buf, ",\n{pad}  \"rows_examined_per_scan\": {rows:.0}");
     }
     if let Some(cost) = node.total_cost {
         let _ = write!(
@@ -939,10 +794,7 @@ fn write_mysql_table_node(
     }
     if let Some(filter) = &node.filter {
         let escaped = escape_json_str(filter);
-        let _ = write!(
-            buf,
-            ",\n{pad}  \"attached_condition\": \"{escaped}\""
-        );
+        let _ = write!(buf, ",\n{pad}  \"attached_condition\": \"{escaped}\"");
     }
     let _ = write!(buf, "\n{pad}}}");
 
@@ -973,12 +825,7 @@ fn collect_oracle_rows(
 
     let mut next_id = id + 1;
     for child in &node.children {
-        next_id = collect_oracle_rows(
-            child,
-            rows,
-            next_id,
-            depth + 1,
-        );
+        next_id = collect_oracle_rows(child, rows, next_id, depth + 1);
     }
     next_id
 }
@@ -1012,12 +859,7 @@ fn oracle_op_name(node: &ExplainNode) -> String {
 
 // ---- SQL Server XML helpers ----
 
-fn node_to_sqlserver_xml(
-    node: &ExplainNode,
-    buf: &mut String,
-    indent: usize,
-    node_id: usize,
-) {
+fn node_to_sqlserver_xml(node: &ExplainNode, buf: &mut String, indent: usize, node_id: usize) {
     let pad = " ".repeat(indent);
     let physical_op = sqlserver_physical_op(node);
     let logical_op = sqlserver_logical_op(node);
@@ -1061,11 +903,7 @@ fn node_to_sqlserver_xml(
 }
 
 fn child_node_count(node: &ExplainNode) -> usize {
-    1 + node
-        .children
-        .iter()
-        .map(child_node_count)
-        .sum::<usize>()
+    1 + node.children.iter().map(child_node_count).sum::<usize>()
 }
 
 fn sqlserver_physical_op(node: &ExplainNode) -> &'static str {
@@ -1073,9 +911,7 @@ fn sqlserver_physical_op(node: &ExplainNode) -> &'static str {
         NodeType::SeqScan => "Clustered Index Scan",
         NodeType::IndexScan => "Index Seek",
         NodeType::IndexOnlyScan => "Index Scan",
-        NodeType::HashJoin | NodeType::HashAggregate | NodeType::Hash => {
-            "Hash Match"
-        }
+        NodeType::HashJoin | NodeType::HashAggregate | NodeType::Hash => "Hash Match",
         NodeType::MergeJoin => "Merge Join",
         NodeType::NestedLoop => "Nested Loops",
         NodeType::Sort | NodeType::Unique => "Sort",
@@ -1092,13 +928,9 @@ fn sqlserver_logical_op(node: &ExplainNode) -> &'static str {
         NodeType::SeqScan => "Clustered Index Scan",
         NodeType::IndexScan => "Index Seek",
         NodeType::IndexOnlyScan => "Index Scan",
-        NodeType::HashJoin | NodeType::MergeJoin | NodeType::NestedLoop => {
-            "Inner Join"
-        }
+        NodeType::HashJoin | NodeType::MergeJoin | NodeType::NestedLoop => "Inner Join",
         NodeType::Sort => "Sort",
-        NodeType::HashAggregate | NodeType::GroupAggregate | NodeType::Hash => {
-            "Aggregate"
-        }
+        NodeType::HashAggregate | NodeType::GroupAggregate | NodeType::Hash => "Aggregate",
         NodeType::Limit => "Top",
         NodeType::Append => "Concatenation",
         NodeType::Unique => "Distinct Sort",
@@ -1118,10 +950,7 @@ fn escape_xml(s: &str) -> String {
 #[allow(clippy::expect_used)]
 mod tests {
     use super::*;
-    use crate::explain::{
-        parse_postgres_explain, ExplainNode, ExplainPlan,
-        JoinType, NodeType,
-    };
+    use crate::explain::{parse_postgres_explain, ExplainNode, ExplainPlan, JoinType, NodeType};
 
     fn sample_plan() -> ExplainPlan {
         ExplainPlan {
@@ -1334,13 +1163,9 @@ mod tests {
     #[test]
     fn from_relexpr_scan() {
         let expr = RelExpr::scan("users");
-        let plan =
-            from_relexpr(&expr, &DatabaseCostParams::postgres_default());
+        let plan = from_relexpr(&expr, &DatabaseCostParams::postgres_default());
         assert_eq!(plan.root.node_type, NodeType::SeqScan);
-        assert_eq!(
-            plan.root.relation.as_deref(),
-            Some("users")
-        );
+        assert_eq!(plan.root.relation.as_deref(), Some("users"));
         assert!(plan.root.total_cost.is_some());
         assert!(plan.root.estimated_rows.is_some());
     }
@@ -1353,8 +1178,7 @@ mod tests {
             left: Box::new(Expr::Column(ColumnRef::new("amount"))),
             right: Box::new(Expr::Const(Const::Int(100))),
         });
-        let plan =
-            from_relexpr(&expr, &DatabaseCostParams::postgres_default());
+        let plan = from_relexpr(&expr, &DatabaseCostParams::postgres_default());
         assert!(plan.root.filter.is_some());
         assert!(plan.root.estimated_rows.unwrap_or(0.0) < 1000.0);
     }
@@ -1372,8 +1196,7 @@ mod tests {
             left: Box::new(RelExpr::scan("a")),
             right: Box::new(RelExpr::scan("b")),
         };
-        let plan =
-            from_relexpr(&join, &DatabaseCostParams::postgres_default());
+        let plan = from_relexpr(&join, &DatabaseCostParams::postgres_default());
         assert_eq!(plan.root.node_type, NodeType::HashJoin);
         assert_eq!(plan.root.join_type, Some(JoinType::Inner));
         assert_eq!(plan.root.children.len(), 2);
@@ -1382,15 +1205,11 @@ mod tests {
     #[test]
     fn from_relexpr_to_postgres_json_roundtrip() {
         let expr = RelExpr::scan("users");
-        let plan =
-            from_relexpr(&expr, &DatabaseCostParams::postgres_default());
+        let plan = from_relexpr(&expr, &DatabaseCostParams::postgres_default());
         let json = plan.to_postgres_json();
         let parsed = parse_postgres_explain(&json).expect("parse");
         assert_eq!(parsed.root.node_type, NodeType::SeqScan);
-        assert_eq!(
-            parsed.root.relation.as_deref(),
-            Some("users")
-        );
+        assert_eq!(parsed.root.relation.as_deref(), Some("users"));
     }
 
     #[test]
@@ -1482,34 +1301,13 @@ mod tests {
 
     #[test]
     fn convert_all_join_types() {
-        assert_eq!(
-            convert_join_type(CoreJoinType::Inner),
-            JoinType::Inner
-        );
-        assert_eq!(
-            convert_join_type(CoreJoinType::LeftOuter),
-            JoinType::Left
-        );
-        assert_eq!(
-            convert_join_type(CoreJoinType::RightOuter),
-            JoinType::Right
-        );
-        assert_eq!(
-            convert_join_type(CoreJoinType::FullOuter),
-            JoinType::Full
-        );
-        assert_eq!(
-            convert_join_type(CoreJoinType::Cross),
-            JoinType::Cross
-        );
-        assert_eq!(
-            convert_join_type(CoreJoinType::Semi),
-            JoinType::Semi
-        );
-        assert_eq!(
-            convert_join_type(CoreJoinType::Anti),
-            JoinType::Anti
-        );
+        assert_eq!(convert_join_type(CoreJoinType::Inner), JoinType::Inner);
+        assert_eq!(convert_join_type(CoreJoinType::LeftOuter), JoinType::Left);
+        assert_eq!(convert_join_type(CoreJoinType::RightOuter), JoinType::Right);
+        assert_eq!(convert_join_type(CoreJoinType::FullOuter), JoinType::Full);
+        assert_eq!(convert_join_type(CoreJoinType::Cross), JoinType::Cross);
+        assert_eq!(convert_join_type(CoreJoinType::Semi), JoinType::Semi);
+        assert_eq!(convert_join_type(CoreJoinType::Anti), JoinType::Anti);
     }
 
     #[test]

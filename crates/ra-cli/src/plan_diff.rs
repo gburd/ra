@@ -21,27 +21,15 @@ use crate::display::format_plan_tree;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Change {
     /// The operator type changed (e.g., Join -> Semi Join).
-    OperatorType {
-        from: String,
-        to: String,
-    },
+    OperatorType { from: String, to: String },
     /// The join algorithm or strategy changed.
-    Algorithm {
-        from: String,
-        to: String,
-    },
+    Algorithm { from: String, to: String },
     /// A node was removed from the plan.
-    Removed {
-        description: String,
-    },
+    Removed { description: String },
     /// A node was added to the plan.
-    Added {
-        description: String,
-    },
+    Added { description: String },
     /// A structural modification occurred.
-    Structure {
-        description: String,
-    },
+    Structure { description: String },
 }
 
 /// Classification of a diff node.
@@ -175,16 +163,11 @@ fn operator_label(expr: &RelExpr) -> String {
         RelExpr::Limit { count, offset, .. } => {
             format!("Limit(count={count}, offset={offset})")
         }
-        RelExpr::Union { all, .. } => {
-            if *all { "Union ALL" } else { "Union" }.to_owned()
-        }
+        RelExpr::Union { all, .. } => if *all { "Union ALL" } else { "Union" }.to_owned(),
         RelExpr::Intersect { all, .. } => {
-            if *all { "Intersect ALL" } else { "Intersect" }
-                .to_owned()
+            if *all { "Intersect ALL" } else { "Intersect" }.to_owned()
         }
-        RelExpr::Except { all, .. } => {
-            if *all { "Except ALL" } else { "Except" }.to_owned()
-        }
+        RelExpr::Except { all, .. } => if *all { "Except ALL" } else { "Except" }.to_owned(),
         RelExpr::CTE { name, .. } => format!("CTE({name})"),
         RelExpr::Window { functions, .. } => {
             format!("Window({} fn)", functions.len())
@@ -203,9 +186,7 @@ fn operator_label(expr: &RelExpr) -> String {
         RelExpr::TableFunction { name, .. } => {
             format!("TableFunction({name})")
         }
-        RelExpr::RowPattern { .. } => {
-            "MatchRecognize".to_owned()
-        }
+        RelExpr::RowPattern { .. } => "MatchRecognize".to_owned(),
         RelExpr::IndexScan { table, column, .. } => {
             format!("IndexScan({table}.{column})")
         }
@@ -230,12 +211,8 @@ fn operator_label(expr: &RelExpr) -> String {
         RelExpr::ParallelHashJoin { join_type, .. } => {
             format!("Parallel{join_type}Join")
         }
-        RelExpr::ParallelAggregate { .. } => {
-            "ParallelAggregate".to_owned()
-        }
-        RelExpr::Gather { .. } => {
-            "Gather".to_owned()
-        }
+        RelExpr::ParallelAggregate { .. } => "ParallelAggregate".to_owned(),
+        RelExpr::Gather { .. } => "Gather".to_owned(),
         RelExpr::MvScan { view_name, .. } => {
             format!("MvScan({view_name})")
         }
@@ -259,10 +236,7 @@ fn flatten_plan_impl(expr: &RelExpr, out: &mut Vec<String>) {
 
 /// Compute the diff between two plans.
 #[must_use]
-pub fn compute_diff(
-    original: &RelExpr,
-    optimized: &RelExpr,
-) -> PlanDiff {
+pub fn compute_diff(original: &RelExpr, optimized: &RelExpr) -> PlanDiff {
     let orig_labels = flatten_plan(original);
     let opt_labels = flatten_plan(optimized);
 
@@ -296,26 +270,19 @@ pub fn compute_diff(
             && opt_labels[ni] != lcs[li]
         {
             // Both differ from LCS -- classify the change
-            let changes = classify_changes(
-                &orig_labels[oi],
-                &opt_labels[ni],
-            );
+            let changes = classify_changes(&orig_labels[oi], &opt_labels[ni]);
             nodes.push(DiffNode::Modified {
                 label: opt_labels[ni].clone(),
                 changes,
             });
             oi += 1;
             ni += 1;
-        } else if oi < orig_labels.len()
-            && (li >= lcs.len() || orig_labels[oi] != lcs[li])
-        {
+        } else if oi < orig_labels.len() && (li >= lcs.len() || orig_labels[oi] != lcs[li]) {
             nodes.push(DiffNode::Removed {
                 label: orig_labels[oi].clone(),
             });
             oi += 1;
-        } else if ni < opt_labels.len()
-            && (li >= lcs.len() || opt_labels[ni] != lcs[li])
-        {
+        } else if ni < opt_labels.len() && (li >= lcs.len() || opt_labels[ni] != lcs[li]) {
             nodes.push(DiffNode::Added {
                 label: opt_labels[ni].clone(),
             });
@@ -353,9 +320,7 @@ fn classify_changes(from: &str, to: &str) -> Vec<Change> {
                 description: to.to_owned(),
             },
             Change::Structure {
-                description: format!(
-                    "replaced {from_base} with {to_base}"
-                ),
+                description: format!("replaced {from_base} with {to_base}"),
             },
         ];
     }
@@ -408,10 +373,7 @@ fn compute_summary(nodes: &[DiffNode]) -> DiffSummary {
 }
 
 /// Compute the longest common subsequence of two string slices.
-fn longest_common_subsequence(
-    left: &[String],
-    right: &[String],
-) -> Vec<String> {
+fn longest_common_subsequence(left: &[String], right: &[String]) -> Vec<String> {
     let rows = left.len();
     let cols = right.len();
     let mut dp = vec![vec![0u32; cols + 1]; rows + 1];
@@ -421,8 +383,7 @@ fn longest_common_subsequence(
             if left[row - 1] == right[col - 1] {
                 dp[row][col] = dp[row - 1][col - 1] + 1;
             } else {
-                dp[row][col] =
-                    dp[row - 1][col].max(dp[row][col - 1]);
+                dp[row][col] = dp[row - 1][col].max(dp[row][col - 1]);
             }
         }
     }
@@ -461,45 +422,22 @@ pub fn render_colored(diff: &PlanDiff) -> String {
                 let _ = writeln!(out, "  {label}");
             }
             DiffNode::Removed { label } => {
-                let _ = writeln!(
-                    out,
-                    "  {} {}",
-                    "-".red().bold(),
-                    label.red()
-                );
+                let _ = writeln!(out, "  {} {}", "-".red().bold(), label.red());
             }
             DiffNode::Added { label } => {
-                let _ = writeln!(
-                    out,
-                    "  {} {}",
-                    "+".green().bold(),
-                    label.green()
-                );
+                let _ = writeln!(out, "  {} {}", "+".green().bold(), label.green());
             }
             DiffNode::Modified { label, changes } => {
-                let _ = writeln!(
-                    out,
-                    "  {} {}",
-                    "~".yellow().bold(),
-                    label.yellow()
-                );
+                let _ = writeln!(out, "  {} {}", "~".yellow().bold(), label.yellow());
                 for change in changes {
-                    let _ = writeln!(
-                        out,
-                        "    {}",
-                        format_change_colored(change)
-                    );
+                    let _ = writeln!(out, "    {}", format_change_colored(change));
                 }
             }
         }
     }
 
     let _ = writeln!(out);
-    let _ = writeln!(
-        out,
-        "{}",
-        format_summary_colored(&diff.summary)
-    );
+    let _ = writeln!(out, "{}", format_summary_colored(&diff.summary));
 
     out
 }
@@ -525,11 +463,7 @@ pub fn render_plain(diff: &PlanDiff) -> String {
             DiffNode::Modified { label, changes } => {
                 let _ = writeln!(out, "  ~ {label}");
                 for change in changes {
-                    let _ = writeln!(
-                        out,
-                        "    {}",
-                        format_change_plain(change)
-                    );
+                    let _ = writeln!(out, "    {}", format_change_plain(change));
                 }
             }
         }
@@ -539,10 +473,7 @@ pub fn render_plain(diff: &PlanDiff) -> String {
     let _ = writeln!(
         out,
         "Summary: {} unchanged, {} removed, {} added, {} modified",
-        diff.summary.unchanged,
-        diff.summary.removed,
-        diff.summary.added,
-        diff.summary.modified,
+        diff.summary.unchanged, diff.summary.removed, diff.summary.added, diff.summary.modified,
     );
 
     out
@@ -557,8 +488,7 @@ pub fn render_compact(diff: &PlanDiff) -> String {
     if total_changes == 0 {
         return format!(
             "{}",
-            "No changes between original and optimized plan."
-                .dimmed()
+            "No changes between original and optimized plan.".dimmed()
         );
     }
 
@@ -570,10 +500,7 @@ pub fn render_compact(diff: &PlanDiff) -> String {
         parts.push(format!("{}", format!("+{}", s.added).green()));
     }
     if s.modified > 0 {
-        parts.push(format!(
-            "{}",
-            format!("~{}", s.modified).yellow()
-        ));
+        parts.push(format!("{}", format!("~{}", s.modified).yellow()));
     }
 
     format!(
@@ -586,11 +513,7 @@ pub fn render_compact(diff: &PlanDiff) -> String {
 
 /// Render the full diff output according to the specified format.
 #[must_use]
-pub fn render_diff(
-    original: &RelExpr,
-    optimized: &RelExpr,
-    format: DiffFormat,
-) -> String {
+pub fn render_diff(original: &RelExpr, optimized: &RelExpr, format: DiffFormat) -> String {
     let diff = compute_diff(original, optimized);
 
     match format {
@@ -600,9 +523,7 @@ pub fn render_diff(
         DiffFormat::SideBySide => {
             let orig_text = format_plan_tree(original);
             let opt_text = format_plan_tree(optimized);
-            crate::side_by_side::render_side_by_side(
-                &orig_text, &opt_text,
-            )
+            crate::side_by_side::render_side_by_side(&orig_text, &opt_text)
         }
     }
 }
@@ -611,21 +532,11 @@ pub fn render_diff(
 
 fn format_change_colored(change: &Change) -> ColoredString {
     match change {
-        Change::OperatorType { from, to } => {
-            format!("{from} -> {to}").yellow()
-        }
-        Change::Algorithm { from, to } => {
-            format!("algorithm: {from} -> {to}").cyan()
-        }
-        Change::Removed { description } => {
-            format!("removed: {description}").red()
-        }
-        Change::Added { description } => {
-            format!("added: {description}").green()
-        }
-        Change::Structure { description } => {
-            description.clone().yellow()
-        }
+        Change::OperatorType { from, to } => format!("{from} -> {to}").yellow(),
+        Change::Algorithm { from, to } => format!("algorithm: {from} -> {to}").cyan(),
+        Change::Removed { description } => format!("removed: {description}").red(),
+        Change::Added { description } => format!("added: {description}").green(),
+        Change::Structure { description } => description.clone().yellow(),
     }
 }
 
@@ -648,24 +559,17 @@ fn format_change_plain(change: &Change) -> String {
 }
 
 fn format_summary_colored(summary: &DiffSummary) -> String {
-    let total =
-        summary.unchanged + summary.removed + summary.added + summary.modified;
+    let total = summary.unchanged + summary.removed + summary.added + summary.modified;
     let mut parts = Vec::new();
 
     if summary.unchanged > 0 {
         parts.push(format!("{} unchanged", summary.unchanged));
     }
     if summary.removed > 0 {
-        parts.push(format!(
-            "{}",
-            format!("{} removed", summary.removed).red()
-        ));
+        parts.push(format!("{}", format!("{} removed", summary.removed).red()));
     }
     if summary.added > 0 {
-        parts.push(format!(
-            "{}",
-            format!("{} added", summary.added).green()
-        ));
+        parts.push(format!("{}", format!("{} added", summary.added).green()));
     }
     if summary.modified > 0 {
         parts.push(format!(
@@ -706,12 +610,8 @@ mod tests {
             join_type: JoinType::Inner,
             condition: Expr::BinOp {
                 op: BinOp::Eq,
-                left: Box::new(Expr::Column(
-                    ColumnRef::qualified("u", "id"),
-                )),
-                right: Box::new(Expr::Column(
-                    ColumnRef::qualified("o", "user_id"),
-                )),
+                left: Box::new(Expr::Column(ColumnRef::qualified("u", "id"))),
+                right: Box::new(Expr::Column(ColumnRef::qualified("o", "user_id"))),
             },
             left: Box::new(RelExpr::scan("users")),
             right: Box::new(RelExpr::scan("orders")),
@@ -723,12 +623,8 @@ mod tests {
             join_type: JoinType::Semi,
             condition: Expr::BinOp {
                 op: BinOp::Eq,
-                left: Box::new(Expr::Column(
-                    ColumnRef::qualified("u", "id"),
-                )),
-                right: Box::new(Expr::Column(
-                    ColumnRef::qualified("o", "user_id"),
-                )),
+                left: Box::new(Expr::Column(ColumnRef::qualified("u", "id"))),
+                right: Box::new(Expr::Column(ColumnRef::qualified("o", "user_id"))),
             },
             left: Box::new(RelExpr::scan("users")),
             right: Box::new(RelExpr::scan("orders")),
@@ -753,19 +649,15 @@ mod tests {
 
     #[test]
     fn label_filter() {
-        assert_eq!(
-            operator_label(&scan_with_filter()),
-            "Filter"
-        );
+        assert_eq!(operator_label(&scan_with_filter()), "Filter");
     }
 
     #[test]
     fn label_project() {
-        let plan =
-            simple_scan().project(vec![ProjectionColumn {
-                expr: Expr::Column(ColumnRef::new("name")),
-                alias: None,
-            }]);
+        let plan = simple_scan().project(vec![ProjectionColumn {
+            expr: Expr::Column(ColumnRef::new("name")),
+            alias: None,
+        }]);
         assert_eq!(operator_label(&plan), "Project");
     }
 
@@ -776,10 +668,7 @@ mod tests {
 
     #[test]
     fn label_semi_join() {
-        assert_eq!(
-            operator_label(&semi_join_plan()),
-            "SEMI Join"
-        );
+        assert_eq!(operator_label(&semi_join_plan()), "SEMI Join");
     }
 
     #[test]
@@ -804,10 +693,7 @@ mod tests {
     #[test]
     fn label_limit() {
         let plan = simple_scan().limit(10, 5);
-        assert_eq!(
-            operator_label(&plan),
-            "Limit(count=10, offset=5)"
-        );
+        assert_eq!(operator_label(&plan), "Limit(count=10, offset=5)");
     }
 
     #[test]
@@ -886,14 +772,7 @@ mod tests {
     #[test]
     fn flatten_join() {
         let labels = flatten_plan(&join_plan());
-        assert_eq!(
-            labels,
-            vec![
-                "INNER Join",
-                "Scan(users)",
-                "Scan(orders)"
-            ]
-        );
+        assert_eq!(labels, vec!["INNER Join", "Scan(users)", "Scan(orders)"]);
     }
 
     // ── LCS tests ───────────────────────────────────────────
@@ -932,10 +811,7 @@ mod tests {
 
     #[test]
     fn lcs_partial_match() {
-        let a = vec![
-            "Filter".to_owned(),
-            "Scan(users)".to_owned(),
-        ];
+        let a = vec!["Filter".to_owned(), "Scan(users)".to_owned()];
         let b = vec![
             "Project".to_owned(),
             "Filter".to_owned(),
@@ -996,9 +872,7 @@ mod tests {
         let original = RelExpr::Values { rows: vec![] };
         let optimized = simple_scan();
         let diff = compute_diff(&original, &optimized);
-        let total = diff.summary.removed
-            + diff.summary.added
-            + diff.summary.modified;
+        let total = diff.summary.removed + diff.summary.added + diff.summary.modified;
         assert!(total > 0);
     }
 
@@ -1067,42 +941,26 @@ mod tests {
 
     #[test]
     fn render_diff_colored_format() {
-        let output = render_diff(
-            &simple_scan(),
-            &scan_with_filter(),
-            DiffFormat::Colored,
-        );
+        let output = render_diff(&simple_scan(), &scan_with_filter(), DiffFormat::Colored);
         assert!(output.contains("Plan Diff"));
     }
 
     #[test]
     fn render_diff_plain_format() {
-        let output = render_diff(
-            &simple_scan(),
-            &scan_with_filter(),
-            DiffFormat::Plain,
-        );
+        let output = render_diff(&simple_scan(), &scan_with_filter(), DiffFormat::Plain);
         assert!(output.contains("Plan Diff"));
         assert!(!output.contains("\x1b["));
     }
 
     #[test]
     fn render_diff_compact_format() {
-        let output = render_diff(
-            &simple_scan(),
-            &scan_with_filter(),
-            DiffFormat::Compact,
-        );
+        let output = render_diff(&simple_scan(), &scan_with_filter(), DiffFormat::Compact);
         assert!(output.contains("Diff") || output.contains("No changes"));
     }
 
     #[test]
     fn render_diff_side_by_side_format() {
-        let output = render_diff(
-            &simple_scan(),
-            &scan_with_filter(),
-            DiffFormat::SideBySide,
-        );
+        let output = render_diff(&simple_scan(), &scan_with_filter(), DiffFormat::SideBySide);
         assert!(output.contains("Original"));
         assert!(output.contains("Optimized"));
     }
@@ -1126,10 +984,7 @@ mod tests {
             to: "HashJoin".to_owned(),
         };
         let output = format_change_plain(&change);
-        assert_eq!(
-            output,
-            "algorithm: NestedLoop -> HashJoin"
-        );
+        assert_eq!(output, "algorithm: NestedLoop -> HashJoin");
     }
 
     #[test]
@@ -1219,9 +1074,7 @@ mod tests {
         let original = RelExpr::scan("users")
             .filter(Expr::BinOp {
                 op: BinOp::Gt,
-                left: Box::new(Expr::Column(ColumnRef::new(
-                    "age",
-                ))),
+                left: Box::new(Expr::Column(ColumnRef::new("age"))),
                 right: Box::new(Expr::Const(Const::Int(18))),
             })
             .project(vec![ProjectionColumn {
@@ -1236,9 +1089,7 @@ mod tests {
             }])
             .filter(Expr::BinOp {
                 op: BinOp::Gt,
-                left: Box::new(Expr::Column(ColumnRef::new(
-                    "age",
-                ))),
+                left: Box::new(Expr::Column(ColumnRef::new("age"))),
                 right: Box::new(Expr::Const(Const::Int(18))),
             });
 

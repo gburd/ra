@@ -8,8 +8,8 @@ mod display;
 mod federated_commands;
 mod migrate_commands;
 pub(crate) mod plan_diff;
-pub(crate) mod side_by_side;
 mod regression_commands;
+pub(crate) mod side_by_side;
 mod stats_commands;
 mod test_executor;
 mod visualize;
@@ -17,21 +17,18 @@ mod visualize;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use clap::{CommandFactory, Parser, Subcommand};
-use clap_complete::{Shell, generate};
+use clap_complete::{generate, Shell};
 use colored::Colorize;
 
 use ra_engine::Optimizer;
 use ra_parser::{
-    ParseError, RuleFile, parse_metadata, parse_rule_file,
-    sql_to_relexpr, validate_metadata_all,
+    parse_metadata, parse_rule_file, sql_to_relexpr, validate_metadata_all, ParseError, RuleFile,
 };
 
 use display::format_plan_tree;
-use test_executor::{
-    FileResult, TestOutcome, TestResult, run_tests,
-};
+use test_executor::{run_tests, FileResult, TestOutcome, TestResult};
 
 // ── CLI definition ──────────────────────────────────────────
 
@@ -68,15 +65,13 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Validate .rra rule files for correct syntax and metadata.
-    #[command(
-        long_about = "Validate one or more .rra rule files.\n\n\
+    #[command(long_about = "Validate one or more .rra rule files.\n\n\
             Checks YAML frontmatter syntax, required fields (id, name, category, version), \
             and category format. Exits with code 1 if any file fails.\n\n\
             Examples:\n  \
             ra-cli validate rules/filter-pushdown.rra\n  \
             ra-cli validate rules/              # scan entire directory\n  \
-            ra-cli --verbose validate rules/    # show per-file PASS/FAIL"
-    )]
+            ra-cli --verbose validate rules/    # show per-file PASS/FAIL")]
     Validate {
         /// Path to a .rra file or directory to scan recursively.
         path: String,
@@ -167,7 +162,7 @@ enum Commands {
             Examples:\n  \
             ra-cli optimize 'SELECT * FROM users WHERE active = true'\n  \
             ra-cli optimize 'SELECT ...' --diff side-by-side\n  \
-            ra-cli optimize 'SELECT ...' --explain-format postgresql\n  \
+            ra-cli optimize 'SELECT ...' --explain-format postgres\n  \
             echo 'SELECT ...' | ra-cli optimize --stdin --trace"
     )]
     Optimize {
@@ -203,7 +198,7 @@ enum Commands {
         /// Overflow strategy: best-so-far, original, fail.
         #[arg(long)]
         overflow_strategy: Option<String>,
-        /// Output EXPLAIN in a database-specific format: postgresql, mysql, oracle, sqlserver.
+        /// Output EXPLAIN in a database-specific format: postgres, mysql, sqlite, ascii (default).
         #[arg(long)]
         explain_format: Option<String>,
         /// Show optimizer trace information (iteration details, search/apply times).
@@ -345,15 +340,13 @@ enum Commands {
     #[command(subcommand)]
     Regression(RegressionCommands),
     /// Generate shell completion scripts.
-    #[command(
-        long_about = "Generate tab-completion scripts for your shell.\n\n\
+    #[command(long_about = "Generate tab-completion scripts for your shell.\n\n\
             Source the output in your shell profile to enable completions.\n\n\
             Examples:\n  \
             ra-cli completions bash  > ~/.local/share/bash-completion/completions/ra-cli\n  \
             ra-cli completions zsh   > ~/.zfunc/_ra-cli\n  \
             ra-cli completions fish  > ~/.config/fish/completions/ra-cli.fish\n  \
-            ra-cli completions elvish"
-    )]
+            ra-cli completions elvish")]
     Completions {
         /// Target shell: bash, zsh, fish, elvish, powershell.
         shell: Shell,
@@ -636,16 +629,9 @@ fn main() -> Result<()> {
         .init();
 
     match cli.command {
-        Commands::Validate { path } => {
-            cmd_validate(&path, cli.verbose, cli.quiet)
-        }
+        Commands::Validate { path } => cmd_validate(&path, cli.verbose, cli.quiet),
         Commands::Test { path, filter } => {
-            cmd_test(
-                &path,
-                filter.as_deref(),
-                cli.verbose,
-                cli.quiet,
-            )
+            cmd_test(&path, filter.as_deref(), cli.verbose, cli.quiet)
         }
         Commands::List { dir, category, tag } => {
             let dir = dir.as_deref().unwrap_or("rules");
@@ -664,15 +650,8 @@ fn main() -> Result<()> {
             hardware_profile,
             stdin: use_stdin,
         } => {
-            let resolved = resolve_query(
-                &query, use_stdin,
-            )?;
-            cmd_explain(
-                &resolved,
-                &hardware_profile,
-                cli.verbose,
-                cli.quiet,
-            )
+            let resolved = resolve_query(&query, use_stdin)?;
+            cmd_explain(&resolved, &hardware_profile, cli.verbose, cli.quiet)
         }
         Commands::Optimize {
             query,
@@ -694,9 +673,7 @@ fn main() -> Result<()> {
             rules_all,
             rules,
         } => {
-            let resolved = resolve_query(
-                &query, use_stdin,
-            )?;
+            let resolved = resolve_query(&query, use_stdin)?;
 
             // Determine which rule tracking mode to use
             let show_rules = RuleDisplayMode::from_flags(
@@ -729,83 +706,54 @@ fn main() -> Result<()> {
                 cli.quiet,
             )
         }
-        Commands::GatherMetadata { db, schema, output } => {
-            cmd_gather_metadata(
-                db.as_deref(),
-                schema.as_deref(),
-                &output,
-                cli.verbose,
-                cli.quiet,
-            )
-        }
+        Commands::GatherMetadata { db, schema, output } => cmd_gather_metadata(
+            db.as_deref(),
+            schema.as_deref(),
+            &output,
+            cli.verbose,
+            cli.quiet,
+        ),
         Commands::Compare {
             sql,
             db,
             explain_json,
             schema,
             hardware_profile,
-        } => {
-            cmd_compare(
-                &sql,
-                db.as_deref(),
-                explain_json.as_deref(),
-                schema.as_deref(),
-                &hardware_profile,
-                cli.verbose,
-                cli.quiet,
-            )
-        }
+        } => cmd_compare(
+            &sql,
+            db.as_deref(),
+            explain_json.as_deref(),
+            schema.as_deref(),
+            &hardware_profile,
+            cli.verbose,
+            cli.quiet,
+        ),
         Commands::Tui {
             timeline,
             demo,
             headless,
             record,
-        } => cmd_tui(
-            timeline.as_deref(),
-            demo,
-            headless,
-            record.as_deref(),
-        ),
+        } => cmd_tui(timeline.as_deref(), demo, headless, record.as_deref()),
         Commands::StatsTimeline(sub) => match sub {
             StatsTimelineCommands::Play {
                 timeline,
                 format,
                 speed,
             } => {
-                let fmt =
-                    stats_commands::OutputFormat::from_str_arg(&format)?;
-                stats_commands::cmd_stats_play(
-                    &timeline,
-                    fmt,
-                    speed,
-                    cli.verbose,
-                )
+                let fmt = stats_commands::OutputFormat::from_str_arg(&format)?;
+                stats_commands::cmd_stats_play(&timeline, fmt, speed, cli.verbose)
             }
             StatsTimelineCommands::Feedback {
                 timeline,
                 format,
                 batch_size,
             } => {
-                let fmt =
-                    stats_commands::OutputFormat::from_str_arg(&format)?;
-                stats_commands::cmd_stats_feedback(
-                    &timeline,
-                    fmt,
-                    batch_size,
-                    cli.verbose,
-                )
+                let fmt = stats_commands::OutputFormat::from_str_arg(&format)?;
+                stats_commands::cmd_stats_feedback(&timeline, fmt, batch_size, cli.verbose)
             }
-            StatsTimelineCommands::Visualize {
-                timeline,
-                format,
-            } => {
-                let fmt =
-                    stats_commands::OutputFormat::from_str_arg(&format)?;
-                stats_commands::cmd_stats_visualize(
-                    &timeline,
-                    fmt,
-                    cli.verbose,
-                )
+            StatsTimelineCommands::Visualize { timeline, format } => {
+                let fmt = stats_commands::OutputFormat::from_str_arg(&format)?;
+                stats_commands::cmd_stats_visualize(&timeline, fmt, cli.verbose)
             }
         },
         Commands::Format {
@@ -813,16 +761,8 @@ fn main() -> Result<()> {
             stdin,
             capitalize,
             indent,
-        } => cmd_format(
-            query.as_deref(),
-            stdin,
-            &capitalize,
-            &indent,
-            cli.quiet,
-        ),
-        Commands::Translate { query, from, to } => {
-            cmd_translate(&query, &from, &to, cli.quiet)
-        }
+        } => cmd_format(query.as_deref(), stdin, &capitalize, &indent, cli.quiet),
+        Commands::Translate { query, from, to } => cmd_translate(&query, &from, &to, cli.quiet),
         Commands::AnalyzeTriggers {
             table,
             database_url,
@@ -856,57 +796,25 @@ fn main() -> Result<()> {
             ),
         },
         Commands::Config(sub) => match sub {
-            ConfigCommands::List => {
-                config_commands::cmd_config_list(cli.quiet)
-            }
-            ConfigCommands::Get { key } => {
-                config_commands::cmd_config_get(&key)
-            }
+            ConfigCommands::List => config_commands::cmd_config_list(cli.quiet),
+            ConfigCommands::Get { key } => config_commands::cmd_config_get(&key),
             ConfigCommands::Set { key, value } => {
-                config_commands::cmd_config_set(
-                    &key,
-                    &value,
-                    cli.quiet,
-                )
+                config_commands::cmd_config_set(&key, &value, cli.quiet)
             }
-            ConfigCommands::Edit => {
-                config_commands::cmd_config_edit()
-            }
-            ConfigCommands::Reset => {
-                config_commands::cmd_config_reset(cli.quiet)
-            }
-            ConfigCommands::Path => {
-                config_commands::cmd_config_path()
-            }
+            ConfigCommands::Edit => config_commands::cmd_config_edit(),
+            ConfigCommands::Reset => config_commands::cmd_config_reset(cli.quiet),
+            ConfigCommands::Path => config_commands::cmd_config_path(),
         },
         Commands::Cache(sub) => match sub {
-            CacheCommands::List => {
-                cache_commands::cmd_cache_list(
-                    cli.verbose,
-                    cli.quiet,
-                )
-            }
-            CacheCommands::Stats => {
-                cache_commands::cmd_cache_stats(cli.quiet)
-            }
+            CacheCommands::List => cache_commands::cmd_cache_list(cli.verbose, cli.quiet),
+            CacheCommands::Stats => cache_commands::cmd_cache_stats(cli.quiet),
             CacheCommands::Clear { table } => {
-                cache_commands::cmd_cache_clear(
-                    table.as_deref(),
-                    cli.quiet,
-                )
+                cache_commands::cmd_cache_clear(table.as_deref(), cli.quiet)
             }
             CacheCommands::Reoptimize { threshold_pct } => {
-                cache_commands::cmd_cache_reoptimize(
-                    threshold_pct,
-                    cli.quiet,
-                )
+                cache_commands::cmd_cache_reoptimize(threshold_pct, cli.quiet)
             }
-            CacheCommands::Drift => {
-                cache_commands::cmd_cache_drift(
-                    cli.verbose,
-                    cli.quiet,
-                )
-            }
+            CacheCommands::Drift => cache_commands::cmd_cache_drift(cli.verbose, cli.quiet),
         },
         Commands::Monitor {
             postgres: _,
@@ -1022,11 +930,7 @@ fn main() -> Result<()> {
 
 // ── validate ────────────────────────────────────────────────
 
-fn cmd_validate(
-    path: &str,
-    verbose: bool,
-    quiet: bool,
-) -> Result<()> {
+fn cmd_validate(path: &str, verbose: bool, quiet: bool) -> Result<()> {
     let files = collect_rra_files(path)?;
 
     if files.is_empty() {
@@ -1034,41 +938,27 @@ fn cmd_validate(
     }
 
     if !quiet {
-        print_header(&format!(
-            "Validating {} file(s)",
-            files.len()
-        ));
+        print_header(&format!("Validating {} file(s)", files.len()));
     }
 
     let mut pass = 0u32;
     let mut fail = 0u32;
 
     for file in &files {
-        let source = std::fs::read_to_string(file)
-            .with_context(|| {
-                format!("reading {}", file.display())
-            })?;
+        let source =
+            std::fs::read_to_string(file).with_context(|| format!("reading {}", file.display()))?;
 
         match parse_rule_file(&source) {
             Ok(rule) => {
-                let extra_errors =
-                    validate_metadata_all(&rule.metadata);
+                let extra_errors = validate_metadata_all(&rule.metadata);
                 if extra_errors.is_empty() {
                     pass += 1;
                     if verbose {
-                        print_status(
-                            "PASS",
-                            &file.display().to_string(),
-                            true,
-                        );
+                        print_status("PASS", &file.display().to_string(), true);
                     }
                 } else {
                     fail += 1;
-                    print_status(
-                        "FAIL",
-                        &file.display().to_string(),
-                        false,
-                    );
+                    print_status("FAIL", &file.display().to_string(), false);
                     for err in &extra_errors {
                         print_detail(&format!("  {err}"));
                     }
@@ -1076,11 +966,7 @@ fn cmd_validate(
             }
             Err(e) => {
                 fail += 1;
-                print_status(
-                    "FAIL",
-                    &file.display().to_string(),
-                    false,
-                );
+                print_status("FAIL", &file.display().to_string(), false);
                 print_parse_error(&e, file);
             }
         }
@@ -1099,12 +985,7 @@ fn cmd_validate(
 
 // ── test ────────────────────────────────────────────────────
 
-fn cmd_test(
-    path: &str,
-    filter: Option<&str>,
-    verbose: bool,
-    quiet: bool,
-) -> Result<()> {
+fn cmd_test(path: &str, filter: Option<&str>, verbose: bool, quiet: bool) -> Result<()> {
     let files = collect_rra_files(path)?;
 
     if files.is_empty() {
@@ -1112,20 +993,13 @@ fn cmd_test(
     }
 
     if !quiet {
-        print_header(&format!(
-            "Running tests from {} file(s)...",
-            files.len()
-        ));
+        print_header(&format!("Running tests from {} file(s)...", files.len()));
     }
 
-    let (results, summary) =
-        run_tests(&files, filter, verbose)?;
+    let (results, summary) = run_tests(&files, filter, verbose)?;
 
     if !quiet {
-        print_file_results(
-            &summary.file_results,
-            verbose,
-        );
+        print_file_results(&summary.file_results, verbose);
 
         if verbose {
             print_individual_results(&results);
@@ -1138,11 +1012,7 @@ fn cmd_test(
             eprintln!();
             eprintln!("{}", "Slowest tests:".bold());
             for (name, dur) in &summary.slowest {
-                eprintln!(
-                    "  {:>6.0}ms  {}",
-                    dur.as_secs_f64() * 1000.0,
-                    name.dimmed(),
-                );
+                eprintln!("  {:>6.0}ms  {}", dur.as_secs_f64() * 1000.0, name.dimmed(),);
             }
         }
     }
@@ -1154,10 +1024,7 @@ fn cmd_test(
     Ok(())
 }
 
-fn print_file_results(
-    file_results: &[FileResult],
-    verbose: bool,
-) {
+fn print_file_results(file_results: &[FileResult], verbose: bool) {
     for fr in file_results {
         if fr.passed == fr.total {
             if verbose {
@@ -1178,11 +1045,7 @@ fn print_file_results(
                 fr.total,
             );
             for (name, reason) in &fr.failures {
-                eprintln!(
-                    "        - {} {}",
-                    name,
-                    format!("({reason})").yellow(),
-                );
+                eprintln!("        - {} {}", name, format!("({reason})").yellow(),);
             }
         }
     }
@@ -1202,15 +1065,8 @@ fn print_individual_results(results: &[TestResult]) {
                 );
             }
             TestOutcome::Fail { reason } => {
-                eprintln!(
-                    "  {} {}",
-                    "[FAIL]".red().bold(),
-                    result.name,
-                );
-                eprintln!(
-                    "        {}",
-                    reason.yellow()
-                );
+                eprintln!("  {} {}", "[FAIL]".red().bold(), result.name,);
+                eprintln!("        {}", reason.yellow());
             }
             TestOutcome::Skip { reason } => {
                 eprintln!(
@@ -1232,14 +1088,10 @@ fn print_individual_results(results: &[TestResult]) {
     }
 }
 
-fn print_test_summary(
-    summary: &test_executor::TestSummary,
-) {
+fn print_test_summary(summary: &test_executor::TestSummary) {
     let pass_rate = if summary.total > 0 {
         #[allow(clippy::cast_precision_loss)]
-        let rate = summary.passed as f64
-            / summary.total as f64
-            * 100.0;
+        let rate = summary.passed as f64 / summary.total as f64 * 100.0;
         format!("{rate:.1}%")
     } else {
         "N/A".to_owned()
@@ -1257,25 +1109,13 @@ fn print_test_summary(
     }
 
     if summary.failed > 0 {
-        eprintln!(
-            "  {}: {} tests",
-            "Failed".red().bold(),
-            summary.failed,
-        );
+        eprintln!("  {}: {} tests", "Failed".red().bold(), summary.failed,);
     }
     if summary.skipped > 0 {
-        eprintln!(
-            "  {}: {} tests",
-            "Skipped".dimmed(),
-            summary.skipped,
-        );
+        eprintln!("  {}: {} tests", "Skipped".dimmed(), summary.skipped,);
     }
     if summary.errored > 0 {
-        eprintln!(
-            "  {}: {} tests",
-            "Errors".red(),
-            summary.errored,
-        );
+        eprintln!("  {}: {} tests", "Errors".red(), summary.errored,);
     }
     eprintln!(
         "  {}: {:.1}s",
@@ -1309,8 +1149,7 @@ fn cmd_list(
         return Ok(());
     }
 
-    let mut entries: Vec<(String, String, String, PathBuf)> =
-        Vec::new();
+    let mut entries: Vec<(String, String, String, PathBuf)> = Vec::new();
 
     for file in &files {
         let Ok(source) = std::fs::read_to_string(file) else {
@@ -1329,26 +1168,18 @@ fn cmd_list(
 
         // Apply tag filter
         if let Some(tag) = tag_filter {
-            if !meta.tags.iter().any(|t| {
-                t.eq_ignore_ascii_case(tag)
-            }) {
+            if !meta.tags.iter().any(|t| t.eq_ignore_ascii_case(tag)) {
                 continue;
             }
         }
 
-        entries.push((
-            meta.id,
-            meta.name,
-            meta.category,
-            file.clone(),
-        ));
+        entries.push((meta.id, meta.name, meta.category, file.clone()));
     }
 
     entries.sort_by(|a, b| a.2.cmp(&b.2).then(a.0.cmp(&b.0)));
 
     if !quiet {
-        let mut header =
-            format!("{} rule(s) found", entries.len());
+        let mut header = format!("{} rule(s) found", entries.len());
         if let Some(cat) = category_filter {
             header.push_str(&format!(" in category '{cat}'"));
         }
@@ -1358,24 +1189,9 @@ fn cmd_list(
         print_header(&header);
     }
 
-    let id_w = entries
-        .iter()
-        .map(|e| e.0.len())
-        .max()
-        .unwrap_or(2)
-        .max(2);
-    let name_w = entries
-        .iter()
-        .map(|e| e.1.len())
-        .max()
-        .unwrap_or(4)
-        .max(4);
-    let cat_w = entries
-        .iter()
-        .map(|e| e.2.len())
-        .max()
-        .unwrap_or(8)
-        .max(8);
+    let id_w = entries.iter().map(|e| e.0.len()).max().unwrap_or(2).max(2);
+    let name_w = entries.iter().map(|e| e.1.len()).max().unwrap_or(4).max(4);
+    let cat_w = entries.iter().map(|e| e.2.len()).max().unwrap_or(8).max(8);
 
     eprintln!(
         "  {:<id_w$}  {:<name_w$}  {:<cat_w$}",
@@ -1404,11 +1220,7 @@ fn cmd_list(
 
 // ── stats ──────────────────────────────────────────────────
 
-fn cmd_stats(
-    dir: &str,
-    verbose: bool,
-    quiet: bool,
-) -> Result<()> {
+fn cmd_stats(dir: &str, verbose: bool, quiet: bool) -> Result<()> {
     let rules_dir = Path::new(dir);
     if !rules_dir.is_dir() {
         bail!(
@@ -1426,14 +1238,10 @@ fn cmd_stats(
         return Ok(());
     }
 
-    let mut by_category: std::collections::BTreeMap<
-        String,
-        Vec<String>,
-    > = std::collections::BTreeMap::new();
-    let mut by_id: std::collections::HashMap<
-        String,
-        Vec<PathBuf>,
-    > = std::collections::HashMap::new();
+    let mut by_category: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+    let mut by_id: std::collections::HashMap<String, Vec<PathBuf>> =
+        std::collections::HashMap::new();
     let mut parse_ok = 0u32;
     let mut parse_fail = 0u32;
     let mut valid_ok = 0u32;
@@ -1447,8 +1255,7 @@ fn cmd_stats(
         match parse_rule_file(&source) {
             Ok(rule) => {
                 parse_ok += 1;
-                let errs =
-                    validate_metadata_all(&rule.metadata);
+                let errs = validate_metadata_all(&rule.metadata);
                 if errs.is_empty() {
                     valid_ok += 1;
                 } else {
@@ -1479,21 +1286,12 @@ fn cmd_stats(
     }
 
     let total = files.len();
-    let duplicates: Vec<_> = by_id
-        .iter()
-        .filter(|(_, v)| v.len() > 1)
-        .collect();
+    let duplicates: Vec<_> = by_id.iter().filter(|(_, v)| v.len() > 1).collect();
 
     if !quiet {
-        print_header(&format!(
-            "Rule Collection Statistics ({total} files)"
-        ));
+        print_header(&format!("Rule Collection Statistics ({total} files)"));
 
-        eprintln!(
-            "  {}: {}",
-            "Total .rra files".bold(),
-            total
-        );
+        eprintln!("  {}: {}", "Total .rra files".bold(), total);
         eprintln!(
             "  {}: {} ({} failed)",
             "Parsed successfully".bold(),
@@ -1506,47 +1304,24 @@ fn cmd_stats(
             valid_ok,
             valid_fail,
         );
-        eprintln!(
-            "  {}: {}",
-            "Unique rule IDs".bold(),
-            by_id.len()
-        );
-        eprintln!(
-            "  {}: {}",
-            "Duplicate IDs".bold(),
-            duplicates.len()
-        );
-        eprintln!(
-            "  {}: {}",
-            "Categories".bold(),
-            by_category.len()
-        );
+        eprintln!("  {}: {}", "Unique rule IDs".bold(), by_id.len());
+        eprintln!("  {}: {}", "Duplicate IDs".bold(), duplicates.len());
+        eprintln!("  {}: {}", "Categories".bold(), by_category.len());
 
         eprintln!();
         eprintln!("{}", "Rules by Category:".bold());
         for (cat, rules) in &by_category {
-            eprintln!(
-                "  {:>4}  {}",
-                rules.len().to_string().cyan(),
-                cat,
-            );
+            eprintln!("  {:>4}  {}", rules.len().to_string().cyan(), cat,);
         }
 
         if !duplicates.is_empty() {
             eprintln!();
             eprintln!("{}", "Duplicate Rule IDs:".bold());
             for (id, paths) in &duplicates {
-                eprintln!(
-                    "  {} ({}x):",
-                    id.yellow(),
-                    paths.len()
-                );
+                eprintln!("  {} ({}x):", id.yellow(), paths.len());
                 if verbose {
                     for p in *paths {
-                        eprintln!(
-                            "    - {}",
-                            p.display()
-                        );
+                        eprintln!("    - {}", p.display());
                     }
                 }
             }
@@ -1561,29 +1336,17 @@ fn cmd_stats(
 fn cmd_show(rule_id: &str, dir: &str) -> Result<()> {
     let files = collect_rra_files(dir)?;
 
-    let Some((rule, path)) = find_rule_by_id(rule_id, &files)
-    else {
+    let Some((rule, path)) = find_rule_by_id(rule_id, &files) else {
         bail!(
             "rule '{rule_id}' not found in {dir}\n\
              hint: run 'ra-cli list' to see available rules"
         );
     };
 
-    eprintln!(
-        "{}",
-        format!("Rule: {}", rule.metadata.id).bold()
-    );
+    eprintln!("{}", format!("Rule: {}", rule.metadata.id).bold());
     eprintln!("  {}: {}", "Name".bold(), rule.metadata.name);
-    eprintln!(
-        "  {}: {}",
-        "Category".bold(),
-        rule.metadata.category
-    );
-    eprintln!(
-        "  {}: {}",
-        "Version".bold(),
-        rule.metadata.version
-    );
+    eprintln!("  {}: {}", "Category".bold(), rule.metadata.category);
+    eprintln!("  {}: {}", "Version".bold(), rule.metadata.version);
     eprintln!("  {}: {}", "File".bold(), path.display());
 
     if !rule.metadata.databases.is_empty() {
@@ -1601,11 +1364,7 @@ fn cmd_show(rule_id: &str, dir: &str) -> Result<()> {
         );
     }
     if !rule.metadata.tags.is_empty() {
-        eprintln!(
-            "  {}: {}",
-            "Tags".bold(),
-            rule.metadata.tags.join(", ")
-        );
+        eprintln!("  {}: {}", "Tags".bold(), rule.metadata.tags.join(", "));
     }
     if let Some(ref std) = rule.metadata.standard {
         eprintln!("  {}: {std}", "Standard".bold());
@@ -1639,11 +1398,7 @@ fn cmd_show(rule_id: &str, dir: &str) -> Result<()> {
         eprintln!();
         eprintln!(
             "{}",
-            format!(
-                "Test Cases: {} block(s)",
-                rule.test_cases.len()
-            )
-            .bold()
+            format!("Test Cases: {} block(s)", rule.test_cases.len()).bold()
         );
     }
 
@@ -1661,8 +1416,7 @@ fn cmd_show(rule_id: &str, dir: &str) -> Result<()> {
 // ── explain ─────────────────────────────────────────────────
 
 fn cmd_explain(query: &str, hardware_profile_name: &str, verbose: bool, quiet: bool) -> Result<()> {
-    let plan = sql_to_relexpr(query)
-        .with_context(|| format!("failed to parse SQL: {query}"))?;
+    let plan = sql_to_relexpr(query).with_context(|| format!("failed to parse SQL: {query}"))?;
 
     let hardware = load_hardware_profile(hardware_profile_name)?;
 
@@ -1671,7 +1425,8 @@ fn cmd_explain(query: &str, hardware_profile_name: &str, verbose: bool, quiet: b
         eprintln!("  {}: {query}", "SQL".bold());
 
         if verbose {
-            eprintln!("  {}: {} ({} cores, {} MB L3 cache, {}-bit SIMD)",
+            eprintln!(
+                "  {}: {} ({} cores, {} MB L3 cache, {}-bit SIMD)",
                 "Hardware".bold(),
                 hardware.name,
                 hardware.cpu_cores,
@@ -1711,8 +1466,7 @@ fn cmd_optimize(
     };
     plan_diff::apply_color_mode(color_mode);
 
-    let plan = sql_to_relexpr(query)
-        .with_context(|| format!("failed to parse SQL: {query}"))?;
+    let plan = sql_to_relexpr(query).with_context(|| format!("failed to parse SQL: {query}"))?;
     let hardware = load_hardware_profile(hardware_profile_name)?;
 
     let mut optimizer = Optimizer::new();
@@ -1724,13 +1478,29 @@ fn cmd_optimize(
 
     if budget.is_some() {
         optimize_bounded(
-            &optimizer, &plan, &hardware, diff_format,
-            explain_format, show_stats, show_rules, verbose, quiet, query,
+            &optimizer,
+            &plan,
+            &hardware,
+            diff_format,
+            explain_format,
+            show_stats,
+            show_rules,
+            verbose,
+            quiet,
+            query,
         )
     } else {
         optimize_unbounded(
-            &optimizer, &plan, &hardware, diff_format,
-            explain_format, show_stats, show_rules, verbose, quiet, query,
+            &optimizer,
+            &plan,
+            &hardware,
+            diff_format,
+            explain_format,
+            show_stats,
+            show_rules,
+            verbose,
+            quiet,
+            query,
         )
     }
 }
@@ -1748,13 +1518,13 @@ fn optimize_bounded(
     query: &str,
 ) -> Result<()> {
     let result = if show_rules.should_track() {
-        optimizer.optimize_with_tracking_verbose(plan, verbose).with_context(|| {
-            format!("failed to optimize query: {query}")
-        })?
+        optimizer
+            .optimize_with_tracking_verbose(plan, verbose)
+            .with_context(|| format!("failed to optimize query: {query}"))?
     } else {
-        optimizer.optimize_bounded(plan).with_context(|| {
-            format!("failed to optimize query: {query}")
-        })?
+        optimizer
+            .optimize_bounded(plan)
+            .with_context(|| format!("failed to optimize query: {query}"))?
     };
 
     if let Some(fmt) = explain_format {
@@ -1809,9 +1579,9 @@ fn optimize_unbounded(
     use std::time::Instant;
 
     let start = Instant::now();
-    let optimized = optimizer.optimize(plan).with_context(|| {
-        format!("failed to optimize query: {query}")
-    })?;
+    let optimized = optimizer
+        .optimize(plan)
+        .with_context(|| format!("failed to optimize query: {query}"))?;
     let elapsed = start.elapsed();
 
     if let Some(fmt) = explain_format {
@@ -1819,12 +1589,7 @@ fn optimize_unbounded(
     }
 
     if !quiet {
-        print_optimization_header(
-            "Query Optimization",
-            query,
-            hardware,
-            verbose,
-        );
+        print_optimization_header("Query Optimization", query, hardware, verbose);
 
         if show_stats {
             print_unbounded_stats(elapsed);
@@ -1832,7 +1597,10 @@ fn optimize_unbounded(
         }
 
         if show_rules != RuleDisplayMode::None {
-            eprintln!("{}", "Rule tracking not available for unbounded optimization".yellow());
+            eprintln!(
+                "{}",
+                "Rule tracking not available for unbounded optimization".yellow()
+            );
             eprintln!("Use resource budgets to enable tracking (e.g., --resource-budget standard)");
             eprintln!();
         }
@@ -1870,8 +1638,7 @@ fn print_plan_output(
 ) -> Result<()> {
     if let Some(fmt_str) = diff_format {
         let fmt = parse_diff_format(fmt_str)?;
-        let diff_output =
-            plan_diff::render_diff(original, optimized, fmt);
+        let diff_output = plan_diff::render_diff(original, optimized, fmt);
         eprintln!("{diff_output}");
     } else if original == optimized {
         // Plans are identical - show only once
@@ -1893,12 +1660,8 @@ fn parse_diff_format(s: &str) -> Result<plan_diff::DiffFormat> {
     match s.to_lowercase().as_str() {
         "colored" | "color" => Ok(plan_diff::DiffFormat::Colored),
         "plain" | "text" => Ok(plan_diff::DiffFormat::Plain),
-        "side-by-side" | "sbs" => {
-            Ok(plan_diff::DiffFormat::SideBySide)
-        }
-        "compact" | "summary" => {
-            Ok(plan_diff::DiffFormat::Compact)
-        }
+        "side-by-side" | "sbs" => Ok(plan_diff::DiffFormat::SideBySide),
+        "compact" | "summary" => Ok(plan_diff::DiffFormat::Compact),
         _ => bail!(
             "unknown diff format: '{s}'. \
              Valid options: colored, plain, side-by-side, compact"
@@ -1906,51 +1669,70 @@ fn parse_diff_format(s: &str) -> Result<plan_diff::DiffFormat> {
     }
 }
 
-/// Parse an EXPLAIN format string into format + cost params.
-fn parse_explain_format(
-    s: &str,
-) -> Result<(
-    ra_metadata::ExplainFormat,
-    ra_metadata::DatabaseCostParams,
-)> {
+/// EXPLAIN output format options.
+enum ExplainOutputFormat {
+    /// Use ASCII tree format (ra-cli's default).
+    Ascii,
+    /// Use database-specific text formatter from explain.rs.
+    DatabaseText {
+        database: DatabaseTextFormat,
+        cost_params: ra_metadata::DatabaseCostParams,
+    },
+}
+
+/// Database-specific text format options.
+enum DatabaseTextFormat {
+    Postgres,
+    Mysql,
+    Sqlite,
+}
+
+/// Parse an EXPLAIN format string.
+fn parse_explain_format(s: &str) -> Result<ExplainOutputFormat> {
     match s.to_lowercase().as_str() {
-        "postgresql" | "postgres" | "pg" => Ok((
-            ra_metadata::ExplainFormat::PostgresJson,
-            ra_metadata::DatabaseCostParams::postgres_default(),
-        )),
-        "postgresql-text" | "postgres-text" | "pg-text" => Ok((
-            ra_metadata::ExplainFormat::PostgresText,
-            ra_metadata::DatabaseCostParams::postgres_default(),
-        )),
-        "mysql" => Ok((
-            ra_metadata::ExplainFormat::MysqlJson,
-            ra_metadata::DatabaseCostParams::mysql_default(),
-        )),
-        "oracle" => Ok((
-            ra_metadata::ExplainFormat::OracleText,
-            ra_metadata::DatabaseCostParams::oracle_default(),
-        )),
-        "sqlserver" | "mssql" => Ok((
-            ra_metadata::ExplainFormat::SqlServerXml,
-            ra_metadata::DatabaseCostParams::sqlserver_default(),
-        )),
+        "ascii" => Ok(ExplainOutputFormat::Ascii),
+        "postgres" | "postgresql" | "pg" => Ok(ExplainOutputFormat::DatabaseText {
+            database: DatabaseTextFormat::Postgres,
+            cost_params: ra_metadata::DatabaseCostParams::postgres_default(),
+        }),
+        "mysql" => Ok(ExplainOutputFormat::DatabaseText {
+            database: DatabaseTextFormat::Mysql,
+            cost_params: ra_metadata::DatabaseCostParams::mysql_default(),
+        }),
+        "sqlite" => Ok(ExplainOutputFormat::DatabaseText {
+            database: DatabaseTextFormat::Sqlite,
+            cost_params: ra_metadata::DatabaseCostParams::postgres_default(),
+        }),
         _ => bail!(
             "unknown explain format: '{s}'. \
-             Valid options: postgresql, postgresql-text, mysql, \
-             oracle, sqlserver"
+             Valid options: postgres, mysql, sqlite, ascii"
         ),
     }
 }
 
 /// Generate and print EXPLAIN output for an optimized plan.
-fn print_explain_output(
-    plan: &ra_core::algebra::RelExpr,
-    format_str: &str,
-) -> Result<()> {
-    let (format, cost_params) = parse_explain_format(format_str)?;
-    let explain_plan =
-        ra_metadata::from_relexpr(plan, &cost_params);
-    let output = explain_plan.to_format(format);
+fn print_explain_output(plan: &ra_core::algebra::RelExpr, format_str: &str) -> Result<()> {
+    let format = parse_explain_format(format_str)?;
+
+    let output = match format {
+        ExplainOutputFormat::Ascii => format_plan_tree(plan),
+        ExplainOutputFormat::DatabaseText {
+            database,
+            cost_params,
+        } => {
+            let explain_plan = ra_metadata::from_relexpr(plan, &cost_params);
+            match database {
+                DatabaseTextFormat::Postgres => {
+                    ra_metadata::format_postgres_explain(&explain_plan.root)
+                }
+                DatabaseTextFormat::Mysql => ra_metadata::format_mysql_explain(&explain_plan.root),
+                DatabaseTextFormat::Sqlite => {
+                    ra_metadata::format_sqlite_explain(&explain_plan.root)
+                }
+            }
+        }
+    };
+
     eprintln!("{output}");
     Ok(())
 }
@@ -1967,53 +1749,28 @@ fn cmd_gather_metadata(
     let schema = if let Some(url) = db_url {
         if !quiet {
             let kind = ra_metadata::detect_kind(url)
-                .map_or_else(
-                    |_| "unknown".to_owned(),
-                    |k| k.to_string(),
-                );
-            eprintln!(
-                "Connecting to {} database...",
-                kind.cyan()
-            );
+                .map_or_else(|_| "unknown".to_owned(), |k| k.to_string());
+            eprintln!("Connecting to {} database...", kind.cyan());
         }
-        let mut connector = ra_metadata::connect(url)
-            .with_context(|| {
-                format!("connecting to database: {url}")
-            })?;
-        connector.gather_schema().with_context(|| {
-            format!("gathering schema from: {url}")
-        })?
+        let mut connector =
+            ra_metadata::connect(url).with_context(|| format!("connecting to database: {url}"))?;
+        connector
+            .gather_schema()
+            .with_context(|| format!("gathering schema from: {url}"))?
     } else if let Some(path) = schema_path {
         let source = std::fs::read_to_string(path)
-            .with_context(|| {
-                format!("reading schema file: {path}")
-            })?;
-        serde_json::from_str(&source).with_context(|| {
-            format!("parsing schema JSON from: {path}")
-        })?
+            .with_context(|| format!("reading schema file: {path}"))?;
+        serde_json::from_str(&source)
+            .with_context(|| format!("parsing schema JSON from: {path}"))?
     } else {
-        bail!(
-            "either --db <url> or --schema <path> is required"
-        );
+        bail!("either --db <url> or --schema <path> is required");
     };
 
     if !quiet {
         print_header("Database Metadata");
-        eprintln!(
-            "  {}: {}",
-            "Database".bold(),
-            schema.kind
-        );
-        eprintln!(
-            "  {}: {}",
-            "Schema".bold(),
-            schema.schema_name
-        );
-        eprintln!(
-            "  {}: {}",
-            "Tables".bold(),
-            schema.table_count()
-        );
+        eprintln!("  {}: {}", "Database".bold(), schema.kind);
+        eprintln!("  {}: {}", "Schema".bold(), schema.schema_name);
+        eprintln!("  {}: {}", "Tables".bold(), schema.table_count());
     }
 
     if verbose {
@@ -2027,19 +1784,15 @@ fn cmd_gather_metadata(
         }
     }
 
-    let json = serde_json::to_string_pretty(&schema)
-        .context("serializing schema to JSON")?;
-    std::fs::write(output_path, json).with_context(|| {
-        format!("writing output to: {output_path}")
-    })?;
+    let json = serde_json::to_string_pretty(&schema).context("serializing schema to JSON")?;
+    std::fs::write(output_path, json)
+        .with_context(|| format!("writing output to: {output_path}"))?;
 
     if !quiet {
         eprintln!();
         eprintln!(
             "{}",
-            format!("Wrote metadata to {output_path}")
-                .green()
-                .bold()
+            format!("Wrote metadata to {output_path}").green().bold()
         );
     }
 
@@ -2057,40 +1810,24 @@ fn cmd_compare(
     verbose: bool,
     quiet: bool,
 ) -> Result<()> {
-    let ra_plan = sql_to_relexpr(sql)
-        .with_context(|| format!("failed to parse SQL: {sql}"))?;
+    let ra_plan = sql_to_relexpr(sql).with_context(|| format!("failed to parse SQL: {sql}"))?;
 
     let db_explain = if let Some(url) = db_url {
         if !quiet {
             let kind = ra_metadata::detect_kind(url)
-                .map_or_else(
-                    |_| "unknown".to_owned(),
-                    |k| k.to_string(),
-                );
-            eprintln!(
-                "Running EXPLAIN on {} database...",
-                kind.cyan()
-            );
+                .map_or_else(|_| "unknown".to_owned(), |k| k.to_string());
+            eprintln!("Running EXPLAIN on {} database...", kind.cyan());
         }
-        let mut connector = ra_metadata::connect(url)
-            .with_context(|| {
-                format!("connecting to database: {url}")
-            })?;
-        connector.explain_query(sql).with_context(|| {
-            format!("running EXPLAIN on: {url}")
-        })?
+        let mut connector =
+            ra_metadata::connect(url).with_context(|| format!("connecting to database: {url}"))?;
+        connector
+            .explain_query(sql)
+            .with_context(|| format!("running EXPLAIN on: {url}"))?
     } else if let Some(path) = explain_json_path {
-        let explain_source =
-            std::fs::read_to_string(path)
-                .with_context(|| {
-                    format!("reading EXPLAIN JSON: {path}")
-                })?;
+        let explain_source = std::fs::read_to_string(path)
+            .with_context(|| format!("reading EXPLAIN JSON: {path}"))?;
         serde_json::from_str(&explain_source)
-            .with_context(|| {
-                format!(
-                    "parsing EXPLAIN JSON from: {path}"
-                )
-            })?
+            .with_context(|| format!("parsing EXPLAIN JSON from: {path}"))?
     } else {
         bail!(
             "either --db <url> or --explain-json <path> \
@@ -2098,13 +1835,9 @@ fn cmd_compare(
         );
     };
 
-    let hardware =
-        load_hardware_profile(hardware_profile_name)?;
+    let hardware = load_hardware_profile(hardware_profile_name)?;
 
-    let comparison = ra_metadata::diff_validator::compare_plans(
-        &ra_plan,
-        &db_explain,
-    );
+    let comparison = ra_metadata::diff_validator::compare_plans(&ra_plan, &db_explain);
 
     if !quiet {
         print_header("Plan Comparison");
@@ -2129,10 +1862,7 @@ fn cmd_compare(
         eprintln!();
 
         eprintln!("{}", "Database EXPLAIN Plan:".bold());
-        eprintln!(
-            "{}",
-            diff_validator::format_explain_tree(&db_explain)
-        );
+        eprintln!("{}", diff_validator::format_explain_tree(&db_explain));
         eprintln!();
 
         eprintln!(
@@ -2160,26 +1890,10 @@ fn cmd_compare(
         if !comparison.disagreements.is_empty() {
             eprintln!("{}", "Disagreements:".bold());
             for d in &comparison.disagreements {
-                eprintln!(
-                    "  {} {}:",
-                    "[DIFF]".yellow().bold(),
-                    d.aspect,
-                );
-                eprintln!(
-                    "    {}: {}",
-                    "RA optimizer".bold(),
-                    d.ra_choice,
-                );
-                eprintln!(
-                    "    {}:     {}",
-                    "Database".bold(),
-                    d.db_choice,
-                );
-                eprintln!(
-                    "    {}: {}",
-                    "Severity".dimmed(),
-                    d.severity,
-                );
+                eprintln!("  {} {}:", "[DIFF]".yellow().bold(), d.aspect,);
+                eprintln!("    {}: {}", "RA optimizer".bold(), d.ra_choice,);
+                eprintln!("    {}:     {}", "Database".bold(), d.db_choice,);
+                eprintln!("    {}: {}", "Severity".dimmed(), d.severity,);
             }
         }
     }
@@ -2199,26 +1913,18 @@ fn cmd_tui(
         ra_tui::Timeline::demo()
     } else if let Some(path) = timeline_path {
         let source = std::fs::read_to_string(path)
-            .with_context(|| {
-                format!("reading timeline file: {path}")
-            })?;
+            .with_context(|| format!("reading timeline file: {path}"))?;
 
         if path.ends_with(".json") {
-            serde_json::from_str(&source).with_context(|| {
-                format!("parsing timeline JSON from: {path}")
-            })?
+            serde_json::from_str(&source)
+                .with_context(|| format!("parsing timeline JSON from: {path}"))?
         } else if path.ends_with(".toml") {
             ra_tui::Timeline::from_toml(&source)
                 .map_err(|e| anyhow::anyhow!("{e}"))
-                .with_context(|| {
-                    format!(
-                        "converting TOML timeline: {path}"
-                    )
-                })?
+                .with_context(|| format!("converting TOML timeline: {path}"))?
         } else {
-            serde_json::from_str(&source).with_context(|| {
-                format!("parsing timeline from: {path}")
-            })?
+            serde_json::from_str(&source)
+                .with_context(|| format!("parsing timeline from: {path}"))?
         }
     } else {
         bail!(
@@ -2227,28 +1933,19 @@ fn cmd_tui(
         );
     };
 
-    let mut app =
-        ra_tui::App::new(timeline).context("initializing TUI")?;
+    let mut app = ra_tui::App::new(timeline).context("initializing TUI")?;
 
     if let Some(output) = record_path {
         let path = std::path::Path::new(output);
-        let frame_count = ra_tui::record_session(
-            &mut app, path, 120, 40, 1.0,
-        )
-        .context("recording TUI session")?;
-        eprintln!(
-            "Recorded {frame_count} frames to {output}"
-        );
+        let frame_count = ra_tui::record_session(&mut app, path, 120, 40, 1.0)
+            .context("recording TUI session")?;
+        eprintln!("Recorded {frame_count} frames to {output}");
         return Ok(());
     }
 
     if headless {
-        let final_cost = app
-            .run_headless()
-            .context("running headless TUI")?;
-        eprintln!(
-            "Headless run complete. Final cost: {final_cost:.0}"
-        );
+        let final_cost = app.run_headless().context("running headless TUI")?;
+        eprintln!("Headless run complete. Final cost: {final_cost:.0}");
         return Ok(());
     }
 
@@ -2317,25 +2014,15 @@ fn cmd_format(
 
 // ── translate ────────────────────────────────────────────────
 
-fn cmd_translate(
-    query: &str,
-    from: &str,
-    to: &str,
-    quiet: bool,
-) -> Result<()> {
+fn cmd_translate(query: &str, from: &str, to: &str, quiet: bool) -> Result<()> {
     let source_dialect = parse_dialect(from)?;
     let target_dialect = parse_dialect(to)?;
 
-    let translator = ra_dialect::DialectTranslator::new(
-        source_dialect,
-        target_dialect,
-    );
+    let translator = ra_dialect::DialectTranslator::new(source_dialect, target_dialect);
 
-    let result = translator.translate(query).with_context(|| {
-        format!(
-            "translating SQL from {from} to {to}: {query}"
-        )
-    })?;
+    let result = translator
+        .translate(query)
+        .with_context(|| format!("translating SQL from {from} to {to}: {query}"))?;
 
     if !quiet {
         print_header(&format!(
@@ -2351,11 +2038,7 @@ fn cmd_translate(
             eprintln!();
             eprintln!("{}", "Warnings:".bold());
             for w in &result.warnings {
-                eprintln!(
-                    "  {} {}",
-                    format!("[{}]", w.severity).yellow(),
-                    w.message
-                );
+                eprintln!("  {} {}", format!("[{}]", w.severity).yellow(), w.message);
                 if let Some(ref hint) = w.hint {
                     eprintln!("    {}: {hint}", "hint".dimmed());
                 }
@@ -2375,19 +2058,15 @@ fn cmd_analyze_triggers(
     verbose: bool,
     quiet: bool,
 ) -> Result<()> {
-    let schema = load_schema_for_analysis(
-        database_url,
-        schema_path,
-    )?;
+    let schema = load_schema_for_analysis(database_url, schema_path)?;
 
     let estimated_rows = schema
         .get_table(table)
         .and_then(|t| t.estimated_rows)
         .unwrap_or(1000.0);
 
-    let analysis = ra_engine::trigger_optimizer::analyze_table_triggers(
-        table, &schema, estimated_rows,
-    );
+    let analysis =
+        ra_engine::trigger_optimizer::analyze_table_triggers(table, &schema, estimated_rows);
 
     if !quiet {
         print_header(&format!("Trigger Analysis: {table}"));
@@ -2414,18 +2093,12 @@ fn cmd_analyze_triggers(
             };
             eprintln!("  {severity_str} {}", warning.message);
             if verbose && !warning.trigger_chain.is_empty() {
-                eprintln!(
-                    "    chain: {}",
-                    warning.trigger_chain.join(" -> ")
-                );
+                eprintln!("    chain: {}", warning.trigger_chain.join(" -> "));
             }
         }
     } else if !quiet {
         eprintln!();
-        eprintln!(
-            "  {}",
-            "No cascade warnings detected.".dimmed()
-        );
+        eprintln!("  {}", "No cascade warnings detected.".dimmed());
     }
 
     Ok(())
@@ -2436,26 +2109,19 @@ fn load_schema_for_analysis(
     schema_path: Option<&str>,
 ) -> Result<ra_metadata::SchemaInfo> {
     if let Some(url) = database_url {
-        let mut connector = ra_metadata::connect(url)
-            .with_context(|| {
-                format!("connecting to database: {url}")
-            })?;
-        let schema =
-            connector.gather_schema().with_context(|| {
-                "gathering schema metadata from database"
-            })?;
+        let mut connector =
+            ra_metadata::connect(url).with_context(|| format!("connecting to database: {url}"))?;
+        let schema = connector
+            .gather_schema()
+            .with_context(|| "gathering schema metadata from database")?;
         return Ok(schema);
     }
 
     if let Some(path) = schema_path {
-        let contents =
-            std::fs::read_to_string(path).with_context(|| {
-                format!("reading schema file: {path}")
-            })?;
-        let schema: ra_metadata::SchemaInfo =
-            serde_json::from_str(&contents).with_context(|| {
-                format!("parsing schema JSON: {path}")
-            })?;
+        let contents = std::fs::read_to_string(path)
+            .with_context(|| format!("reading schema file: {path}"))?;
+        let schema: ra_metadata::SchemaInfo = serde_json::from_str(&contents)
+            .with_context(|| format!("parsing schema JSON: {path}"))?;
         return Ok(schema);
     }
 
@@ -2479,29 +2145,21 @@ fn print_dml_cost(
     eprintln!(
         "    triggers: {} ({} firing)",
         cost.trigger_count,
-        if cost.trigger_count > 0 { "active" } else { "none" }
+        if cost.trigger_count > 0 {
+            "active"
+        } else {
+            "none"
+        }
     );
-    eprintln!(
-        "    base cost:    {:.2}",
-        cost.base_cost
-    );
-    eprintln!(
-        "    trigger cost: {:.2}",
-        cost.trigger_cost
-    );
-    eprintln!(
-        "    total cost:   {:.2}",
-        cost.total_cost
-    );
+    eprintln!("    base cost:    {:.2}", cost.base_cost);
+    eprintln!("    trigger cost: {:.2}", cost.trigger_cost);
+    eprintln!("    total cost:   {:.2}", cost.total_cost);
 
     if verbose {
         for item in &cost.trigger_breakdown {
             eprintln!(
                 "      {} ({} {}) cost: {:.2}",
-                item.trigger_name,
-                item.timing,
-                item.scope,
-                item.estimated_cost,
+                item.trigger_name, item.timing, item.scope, item.estimated_cost,
             );
         }
     }
@@ -2510,15 +2168,11 @@ fn print_dml_cost(
 /// Parse a dialect name string into a `Dialect` enum.
 fn parse_dialect(name: &str) -> Result<ra_dialect::Dialect> {
     match name.to_lowercase().as_str() {
-        "postgresql" | "postgres" | "pg" => {
-            Ok(ra_dialect::Dialect::PostgreSql)
-        }
+        "postgresql" | "postgres" | "pg" => Ok(ra_dialect::Dialect::PostgreSql),
         "mysql" => Ok(ra_dialect::Dialect::MySql),
         "sqlite" => Ok(ra_dialect::Dialect::Sqlite),
         "duckdb" => Ok(ra_dialect::Dialect::DuckDb),
-        "mssql" | "mssqlserver" | "sqlserver" => {
-            Ok(ra_dialect::Dialect::MsSql)
-        }
+        "mssql" | "mssqlserver" | "sqlserver" => Ok(ra_dialect::Dialect::MsSql),
         "oracle" => Ok(ra_dialect::Dialect::Oracle),
         other => bail!(
             "unknown dialect: '{other}'. Valid: postgresql, \
@@ -2530,10 +2184,7 @@ fn parse_dialect(name: &str) -> Result<ra_dialect::Dialect> {
 // ── Helpers ─────────────────────────────────────────────────
 
 /// Resolve the SQL query from either the positional argument or stdin.
-fn resolve_query(
-    positional: &str,
-    use_stdin: bool,
-) -> Result<String> {
+fn resolve_query(positional: &str, use_stdin: bool) -> Result<String> {
     if use_stdin {
         let mut buf = String::new();
         std::io::stdin()
@@ -2566,7 +2217,9 @@ fn load_hardware_profile(name: &str) -> Result<ra_hardware::HardwareProfile> {
         "cpu-only" => ra_hardware::HardwareProfile::cpu_only(),
         "gpu-server" => ra_hardware::HardwareProfile::gpu_server(),
         "fpga" => ra_hardware::HardwareProfile::fpga_appliance(),
-        _ => bail!("unknown hardware profile: {name}. Valid options: auto, cpu-only, gpu-server, fpga"),
+        _ => bail!(
+            "unknown hardware profile: {name}. Valid options: auto, cpu-only, gpu-server, fpga"
+        ),
     };
 
     Ok(profile)
@@ -2588,22 +2241,15 @@ fn collect_rra_files(path: &str) -> Result<Vec<PathBuf>> {
 }
 
 /// Recursively walk a directory for `.rra` files.
-fn walk_dir(
-    dir: &Path,
-    out: &mut Vec<PathBuf>,
-) -> Result<()> {
-    let entries = std::fs::read_dir(dir)
-        .with_context(|| format!("reading {}", dir.display()))?;
+fn walk_dir(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
+    let entries = std::fs::read_dir(dir).with_context(|| format!("reading {}", dir.display()))?;
 
     for entry in entries {
         let entry = entry?;
         let path = entry.path();
         if path.is_dir() {
             walk_dir(&path, out)?;
-        } else if path
-            .extension()
-            .is_some_and(|ext| ext == "rra")
-        {
+        } else if path.extension().is_some_and(|ext| ext == "rra") {
             out.push(path);
         }
     }
@@ -2611,10 +2257,7 @@ fn walk_dir(
 }
 
 /// Search for a rule by ID across a set of files.
-fn find_rule_by_id(
-    rule_id: &str,
-    files: &[PathBuf],
-) -> Option<(RuleFile, PathBuf)> {
+fn find_rule_by_id(rule_id: &str, files: &[PathBuf]) -> Option<(RuleFile, PathBuf)> {
     for file in files {
         let Ok(source) = std::fs::read_to_string(file) else {
             continue;
@@ -2660,9 +2303,7 @@ fn build_resource_budget(
         Some("interactive") => ra_engine::ResourceBudget::interactive(),
         Some("standard") => ra_engine::ResourceBudget::standard(),
         Some("batch") => ra_engine::ResourceBudget::batch(),
-        Some("memory-constrained") => {
-            ra_engine::ResourceBudget::memory_constrained()
-        }
+        Some("memory-constrained") => ra_engine::ResourceBudget::memory_constrained(),
         Some("unlimited") => ra_engine::ResourceBudget::unlimited(),
         Some(other) => bail!(
             "unknown resource budget profile: '{other}'. \
@@ -2699,21 +2340,17 @@ fn build_resource_budget(
 fn parse_duration(s: &str) -> Result<std::time::Duration> {
     let s = s.trim();
     if let Some(ms) = s.strip_suffix("ms") {
-        let n: u64 = ms
-            .trim()
-            .parse()
-            .context("invalid millisecond value")?;
+        let n: u64 = ms.trim().parse().context("invalid millisecond value")?;
         return Ok(std::time::Duration::from_millis(n));
     }
     if let Some(secs) = s.strip_suffix('s') {
-        let n: u64 =
-            secs.trim().parse().context("invalid seconds value")?;
+        let n: u64 = secs.trim().parse().context("invalid seconds value")?;
         return Ok(std::time::Duration::from_secs(n));
     }
     // Default to seconds
-    let n: u64 = s.parse().context(
-        "invalid duration; use e.g. '100ms' or '1s'",
-    )?;
+    let n: u64 = s
+        .parse()
+        .context("invalid duration; use e.g. '100ms' or '1s'")?;
     Ok(std::time::Duration::from_secs(n))
 }
 
@@ -2722,36 +2359,26 @@ fn parse_byte_size(s: &str) -> Result<u64> {
     let s = s.trim();
     let upper = s.to_uppercase();
     if let Some(gb) = upper.strip_suffix("GB") {
-        let n: u64 =
-            gb.trim().parse().context("invalid GB value")?;
+        let n: u64 = gb.trim().parse().context("invalid GB value")?;
         return Ok(n.saturating_mul(1024 * 1024 * 1024));
     }
     if let Some(mb) = upper.strip_suffix("MB") {
-        let n: u64 =
-            mb.trim().parse().context("invalid MB value")?;
+        let n: u64 = mb.trim().parse().context("invalid MB value")?;
         return Ok(n.saturating_mul(1024 * 1024));
     }
     if let Some(kb) = upper.strip_suffix("KB") {
-        let n: u64 =
-            kb.trim().parse().context("invalid KB value")?;
+        let n: u64 = kb.trim().parse().context("invalid KB value")?;
         return Ok(n.saturating_mul(1024));
     }
-    s.parse::<u64>().context(
-        "invalid byte size; use e.g. '10MB', '2GB', or raw bytes",
-    )
+    s.parse::<u64>()
+        .context("invalid byte size; use e.g. '10MB', '2GB', or raw bytes")
 }
 
 /// Parse an overflow strategy string.
-fn parse_overflow(
-    s: &str,
-) -> Result<ra_engine::OverflowStrategy> {
+fn parse_overflow(s: &str) -> Result<ra_engine::OverflowStrategy> {
     match s.to_lowercase().as_str() {
-        "best-so-far" | "best" => {
-            Ok(ra_engine::OverflowStrategy::ReturnBestSoFar)
-        }
-        "original" => {
-            Ok(ra_engine::OverflowStrategy::ReturnOriginal)
-        }
+        "best-so-far" | "best" => Ok(ra_engine::OverflowStrategy::ReturnBestSoFar),
+        "original" => Ok(ra_engine::OverflowStrategy::ReturnOriginal),
         "fail" => Ok(ra_engine::OverflowStrategy::Fail),
         _ => bail!(
             "unknown overflow strategy: '{s}'. \
@@ -2761,10 +2388,7 @@ fn parse_overflow(
 }
 
 /// Display resource usage from a bounded optimization result.
-fn print_resource_usage(
-    result: &ra_engine::OptimizationResult,
-    verbose: bool,
-) {
+fn print_resource_usage(result: &ra_engine::OptimizationResult, verbose: bool) {
     let usage = &result.resource_usage;
     let status = match result.status {
         ra_engine::OptimizationStatus::Complete => {
@@ -2789,11 +2413,7 @@ fn print_resource_usage(
         "Time".bold(),
         usage.elapsed_time.as_secs_f64() * 1000.0,
     );
-    eprintln!(
-        "  {}: {}",
-        "Iterations".bold(),
-        usage.iterations_used,
-    );
+    eprintln!("  {}: {}", "Iterations".bold(), usage.iterations_used,);
     eprintln!(
         "  {}: {}",
         "Peak e-graph nodes".bold(),
@@ -2802,34 +2422,20 @@ fn print_resource_usage(
 
     if verbose {
         #[allow(clippy::cast_precision_loss)]
-        let mem_mb =
-            usage.peak_memory_estimate as f64 / (1024.0 * 1024.0);
-        eprintln!(
-            "  {}: {mem_mb:.2} MB",
-            "Peak memory (est.)".bold(),
-        );
-        eprintln!(
-            "  {}: {:.2}",
-            "Plan cost".bold(),
-            result.cost,
-        );
+        let mem_mb = usage.peak_memory_estimate as f64 / (1024.0 * 1024.0);
+        eprintln!("  {}: {mem_mb:.2} MB", "Peak memory (est.)".bold(),);
+        eprintln!("  {}: {:.2}", "Plan cost".bold(), result.cost,);
     }
 }
 
-fn print_optimization_stats(
-    usage: &ra_engine::ResourceUsageReport,
-) {
+fn print_optimization_stats(usage: &ra_engine::ResourceUsageReport) {
     eprintln!("{}", "Optimization Statistics:".bold());
     eprintln!(
         "  {}: {:.1}ms",
         "Planning time".bold(),
         usage.elapsed_time.as_secs_f64() * 1000.0,
     );
-    eprintln!(
-        "  {}: {}",
-        "Iterations used".bold(),
-        usage.iterations_used,
-    );
+    eprintln!("  {}: {}", "Iterations used".bold(), usage.iterations_used,);
     eprintln!(
         "  {}: {}",
         "Peak e-graph nodes".bold(),
@@ -2837,15 +2443,9 @@ fn print_optimization_stats(
     );
     #[allow(clippy::cast_precision_loss)]
     let mem_mb = usage.peak_memory_estimate as f64 / (1024.0 * 1024.0);
-    eprintln!(
-        "  {}: {mem_mb:.2} MB",
-        "Peak memory".bold(),
-    );
+    eprintln!("  {}: {mem_mb:.2} MB", "Peak memory".bold(),);
     if let Some(ref exceeded) = usage.budget_exceeded {
-        eprintln!(
-            "  {}: {exceeded}",
-            "Budget exceeded".bold().yellow(),
-        );
+        eprintln!("  {}: {exceeded}", "Budget exceeded".bold().yellow(),);
     }
 }
 
@@ -2858,10 +2458,7 @@ fn print_unbounded_stats(elapsed: std::time::Duration) {
     );
 }
 
-fn print_rule_tracking(
-    result: &ra_engine::OptimizationResult,
-    mode: RuleDisplayMode,
-) {
+fn print_rule_tracking(result: &ra_engine::OptimizationResult, mode: RuleDisplayMode) {
     use colored::Colorize;
 
     let Some(tracking) = &result.rule_tracking else {
@@ -2913,7 +2510,12 @@ fn print_intermediate_steps(
     eprintln!();
 
     for step in steps {
-        eprintln!("{}", format!("Step {}: Applied {} rule", step.step_number, step.rule_name).bold().green());
+        eprintln!(
+            "{}",
+            format!("Step {}: Applied {} rule", step.step_number, step.rule_name)
+                .bold()
+                .green()
+        );
         eprintln!("  {}: {}", "Why".bold(), step.reason);
 
         if let Some(improvement) = step.cost_improvement {
@@ -3018,15 +2620,9 @@ fn print_header(msg: &str) {
 
 fn print_status(label: &str, detail: &str, ok: bool) {
     if ok {
-        eprintln!(
-            "  {} {detail}",
-            format!("[{label}]").green().bold(),
-        );
+        eprintln!("  {} {detail}", format!("[{label}]").green().bold(),);
     } else {
-        eprintln!(
-            "  {} {detail}",
-            format!("[{label}]").red().bold(),
-        );
+        eprintln!("  {} {detail}", format!("[{label}]").red().bold(),);
     }
 }
 
@@ -3043,22 +2639,13 @@ fn print_parse_error(err: &ParseError, path: &Path) {
             ));
         }
         ParseError::InvalidYaml { line, source } => {
-            print_detail(&format!(
-                "{}:{line}: {source}",
-                path.display()
-            ));
+            print_detail(&format!("{}:{line}: {source}", path.display()));
         }
         ParseError::Validation(v) => {
-            print_detail(&format!(
-                "{}: {v}",
-                path.display()
-            ));
+            print_detail(&format!("{}: {v}", path.display()));
         }
         ParseError::Other(msg) => {
-            print_detail(&format!(
-                "{}: {msg}",
-                path.display()
-            ));
+            print_detail(&format!("{}: {msg}", path.display()));
         }
     }
 }
@@ -3083,15 +2670,9 @@ fn print_summary(pass: u32, fail: u32) {
 
 // ── monitor ────────────────────────────────────────────────
 
-fn cmd_monitor(
-    tui: bool,
-    demo: bool,
-    format: &str,
-    quiet: bool,
-) -> Result<()> {
+fn cmd_monitor(tui: bool, demo: bool, format: &str, quiet: bool) -> Result<()> {
     use ra_pg_monitor::{
-        Advisor, BloatDetector, ConfigChecker,
-        MonitorApp, QueryMonitor, SchemaAnalyzer,
+        Advisor, BloatDetector, ConfigChecker, MonitorApp, QueryMonitor, SchemaAnalyzer,
         StalenessChecker,
     };
 
@@ -3128,10 +2709,7 @@ fn cmd_monitor(
     let recs = advisor.all_recommendations();
     if recs.is_empty() {
         if !quiet {
-            eprintln!(
-                "{}",
-                "No issues found.".green().bold()
-            );
+            eprintln!("{}", "No issues found.".green().bold());
         }
         return Ok(());
     }
@@ -3145,18 +2723,10 @@ fn cmd_monitor(
         _ => {
             for rec in &recs {
                 let severity_colored = match rec.severity {
-                    ra_pg_monitor::Severity::Info => {
-                        "INFO".cyan()
-                    }
-                    ra_pg_monitor::Severity::Warning => {
-                        "WARN".yellow()
-                    }
-                    ra_pg_monitor::Severity::Error => {
-                        "ERROR".red()
-                    }
-                    ra_pg_monitor::Severity::Critical => {
-                        "CRIT".red().bold()
-                    }
+                    ra_pg_monitor::Severity::Info => "INFO".cyan(),
+                    ra_pg_monitor::Severity::Warning => "WARN".yellow(),
+                    ra_pg_monitor::Severity::Error => "ERROR".red(),
+                    ra_pg_monitor::Severity::Critical => "CRIT".red().bold(),
                 };
                 eprintln!(
                     "[{}] {} {}: {}",
@@ -3165,18 +2735,10 @@ fn cmd_monitor(
                     rec.target.bold(),
                     rec.message,
                 );
-                eprintln!(
-                    "      {} {}",
-                    "Fix:".dimmed(),
-                    rec.suggestion,
-                );
+                eprintln!("      {} {}", "Fix:".dimmed(), rec.suggestion,);
             }
             eprintln!();
-            eprintln!(
-                "{}: {} recommendation(s)",
-                "Total".bold(),
-                recs.len(),
-            );
+            eprintln!("{}: {} recommendation(s)", "Total".bold(), recs.len(),);
         }
     }
 
@@ -3191,21 +2753,17 @@ fn load_demo_data(
     bloat_detector: &mut ra_pg_monitor::BloatDetector,
     staleness_checker: &mut ra_pg_monitor::StalenessChecker,
 ) {
-    use ra_pg_monitor::query_monitor::{
-        PlanNode, PlanNodeType, QueryRecord, QuerySeverity,
-    };
-    use ra_pg_monitor::schema_analyzer::{
-        ColumnTypeInfo, ForeignKeyInfo, IndexUsage,
-        TableSchemaInfo,
-    };
-    use ra_pg_monitor::config_checker::PgConfig;
     use ra_pg_monitor::bloat_detector::TableBloatInput;
+    use ra_pg_monitor::config_checker::PgConfig;
+    use ra_pg_monitor::query_monitor::{PlanNode, PlanNodeType, QueryRecord, QuerySeverity};
+    use ra_pg_monitor::schema_analyzer::{
+        ColumnTypeInfo, ForeignKeyInfo, IndexUsage, TableSchemaInfo,
+    };
     use ra_pg_monitor::stats_staleness::TableStatsInput;
 
     // Demo queries
     query_monitor.record(QueryRecord {
-        query: "SELECT * FROM orders WHERE status = 'pending'"
-            .to_string(),
+        query: "SELECT * FROM orders WHERE status = 'pending'".to_string(),
         duration_ms: 2300.0,
         total_cost: 45000.0,
         root_plan: PlanNodeType::SeqScan,
@@ -3324,10 +2882,7 @@ fn load_demo_data(
             referenced_columns: vec!["id".to_string()],
         }],
         seq_scan_count: 5000,
-        filtered_columns: vec![
-            "status".to_string(),
-            "user_id".to_string(),
-        ],
+        filtered_columns: vec!["status".to_string(), "user_id".to_string()],
         dead_tuples: 200_000,
         live_tuples: 1_000_000,
     };
@@ -3382,11 +2937,7 @@ fn load_demo_data(
         live_tuples: 1_000_000,
         dead_tuples: 200_000,
         last_autovacuum: None,
-        index_bloat: vec![(
-            "idx_orders_old".to_string(),
-            500_000,
-            300_000,
-        )],
+        index_bloat: vec![("idx_orders_old".to_string(), 500_000, 300_000)],
     });
 
     // Demo staleness

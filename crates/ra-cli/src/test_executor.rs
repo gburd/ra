@@ -8,11 +8,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 
-use ra_engine::{Optimizer, OptimizerConfig, egraph::ParallelConfig};
-use ra_parser::{
-    TestCase, TestExpectation, parse_rule_file, parse_test_block,
-    sql_to_relexpr,
-};
+use ra_engine::{egraph::ParallelConfig, Optimizer, OptimizerConfig};
+use ra_parser::{parse_rule_file, parse_test_block, sql_to_relexpr, TestCase, TestExpectation};
 
 /// Result of executing a single test case.
 #[derive(Debug)]
@@ -88,11 +85,11 @@ pub fn run_tests(
         large_join_strategy: ra_engine::large_join::LargeJoinStrategy::Greedy,
         max_optimization_time_ms: 1000,
         parallel: ParallelConfig::default(),
-        use_adaptive_limits: false,  // Disable for deterministic testing
-        use_cost_pruning: false,  // Disable for deterministic testing
+        use_adaptive_limits: false, // Disable for deterministic testing
+        use_cost_pruning: false,    // Disable for deterministic testing
         cost_pruning_threshold: 1.5,
-        use_join_graph_filtering: false,  // Disable for deterministic testing
-        beam_search_config: None,  // Disable for deterministic testing
+        use_join_graph_filtering: false, // Disable for deterministic testing
+        beam_search_config: None,        // Disable for deterministic testing
         transaction_context: None,
         enable_plan_cache: false,
         plan_cache_config: ra_engine::plan_cache::PlanCacheConfig::default(),
@@ -127,10 +124,8 @@ fn run_file(
     results: &mut Vec<TestResult>,
     summary: &mut TestSummary,
 ) -> Result<()> {
-    let source = std::fs::read_to_string(file)
-        .with_context(|| {
-            format!("reading {}", file.display())
-        })?;
+    let source =
+        std::fs::read_to_string(file).with_context(|| format!("reading {}", file.display()))?;
 
     let rule = match parse_rule_file(&source) {
         Ok(r) => r,
@@ -139,9 +134,7 @@ fn run_file(
                 results.push(TestResult {
                     name: file.display().to_string(),
                     outcome: TestOutcome::Skip {
-                        reason: format!(
-                            "parse error: {e}"
-                        ),
+                        reason: format!("parse error: {e}"),
                     },
                     duration: Duration::ZERO,
                 });
@@ -157,11 +150,8 @@ fn run_file(
     let mut file_total = 0usize;
     let mut file_failures: Vec<(String, String)> = Vec::new();
 
-    for (block_idx, block) in
-        rule.test_cases.iter().enumerate()
-    {
-        let cases =
-            parse_test_block(block, rule_id, block_idx);
+    for (block_idx, block) in rule.test_cases.iter().enumerate() {
+        let cases = parse_test_block(block, rule_id, block_idx);
 
         for case in &cases {
             run_case(
@@ -209,20 +199,12 @@ fn run_case(
     let test_name = case
         .description
         .clone()
-        .unwrap_or_else(|| {
-            format!("{rule_id}::block_{block_idx}")
-        });
+        .unwrap_or_else(|| format!("{rule_id}::block_{block_idx}"));
 
-    let full_name = format!(
-        "{}::{}",
-        short_path(file),
-        test_name
-    );
+    let full_name = format!("{}::{}", short_path(file), test_name);
 
     if let Some(f) = filter {
-        if !full_name.contains(f)
-            && !rule_id.contains(f)
-        {
+        if !full_name.contains(f) && !rule_id.contains(f) {
             return;
         }
     }
@@ -241,10 +223,7 @@ fn run_case(
         }
         TestOutcome::Fail { reason } => {
             summary.failed += 1;
-            file_failures.push((
-                test_name.clone(),
-                reason.clone(),
-            ));
+            file_failures.push((test_name.clone(), reason.clone()));
         }
         TestOutcome::Skip { .. } => {
             summary.skipped += 1;
@@ -252,10 +231,7 @@ fn run_case(
         }
         TestOutcome::Error { message } => {
             summary.errored += 1;
-            file_failures.push((
-                test_name.clone(),
-                format!("error: {message}"),
-            ));
+            file_failures.push((test_name.clone(), format!("error: {message}")));
         }
     }
 
@@ -266,10 +242,7 @@ fn run_case(
     });
 }
 
-fn collect_slowest(
-    results: &[TestResult],
-    limit: usize,
-) -> Vec<(String, Duration)> {
+fn collect_slowest(results: &[TestResult], limit: usize) -> Vec<(String, Duration)> {
     let mut timed: Vec<(String, Duration)> = results
         .iter()
         .filter(|r| matches!(r.outcome, TestOutcome::Pass))
@@ -281,23 +254,16 @@ fn collect_slowest(
 }
 
 /// Execute a single test case against the optimizer.
-fn execute_test(
-    test: &TestCase,
-    optimizer: &Optimizer,
-) -> TestOutcome {
+fn execute_test(test: &TestCase, optimizer: &Optimizer) -> TestOutcome {
     let input_plan = match sql_to_relexpr(&test.input_sql) {
         Ok(plan) => plan,
         Err(e) => {
             return match &test.expected {
                 TestExpectation::Parses => TestOutcome::Fail {
-                    reason: format!(
-                        "expected SQL to parse, but got: {e}"
-                    ),
+                    reason: format!("expected SQL to parse, but got: {e}"),
                 },
                 _ => TestOutcome::Skip {
-                    reason: format!(
-                        "SQL parse not supported: {e}"
-                    ),
+                    reason: format!("SQL parse not supported: {e}"),
                 },
             };
         }
@@ -324,20 +290,18 @@ fn execute_test(
                 TestOutcome::Pass
             } else {
                 TestOutcome::Fail {
-                    reason:
-                        "expected plan to change, \
+                    reason: "expected plan to change, \
                          but it stayed the same"
-                            .to_owned(),
+                        .to_owned(),
                 }
             }
         }
         TestExpectation::PlanUnchanged => {
             if plan_changed {
                 TestOutcome::Fail {
-                    reason:
-                        "expected plan unchanged, \
+                    reason: "expected plan unchanged, \
                          but optimizer modified it"
-                            .to_owned(),
+                        .to_owned(),
                 }
             } else {
                 TestOutcome::Pass
@@ -348,10 +312,9 @@ fn execute_test(
                 TestOutcome::Pass
             } else {
                 TestOutcome::Fail {
-                    reason:
-                        "expected rule to apply, \
+                    reason: "expected rule to apply, \
                          but plan unchanged"
-                            .to_owned(),
+                        .to_owned(),
                 }
             }
         }
@@ -359,10 +322,9 @@ fn execute_test(
             if test.negative {
                 if plan_changed {
                     TestOutcome::Fail {
-                        reason:
-                            "negative test: plan should \
+                        reason: "negative test: plan should \
                              not have changed"
-                                .to_owned(),
+                            .to_owned(),
                     }
                 } else {
                     TestOutcome::Pass
@@ -384,9 +346,7 @@ fn short_path(path: &Path) -> String {
         .collect::<Vec<_>>()
         .into_iter()
         .rev()
-        .map(|c| {
-            c.as_os_str().to_string_lossy().to_string()
-        })
+        .map(|c| c.as_os_str().to_string_lossy().to_string())
         .collect();
     components.join("/")
 }
@@ -419,8 +379,7 @@ mod tests {
     #[test]
     fn execute_parseable_sql() {
         let test = TestCase {
-            input_sql: "SELECT * FROM users WHERE age > 18"
-                .to_owned(),
+            input_sql: "SELECT * FROM users WHERE age > 18".to_owned(),
             expected: TestExpectation::Parses,
             description: Some("basic parse".to_owned()),
             negative: false,
@@ -484,9 +443,7 @@ mod tests {
     fn execute_described_positive_passes() {
         let test = TestCase {
             input_sql: "SELECT * FROM users".to_owned(),
-            expected: TestExpectation::Described(
-                "some description".to_owned(),
-            ),
+            expected: TestExpectation::Described("some description".to_owned()),
             description: Some("described test".to_owned()),
             negative: false,
         };
@@ -498,9 +455,7 @@ mod tests {
     fn execute_described_negative_passes_when_unchanged() {
         let test = TestCase {
             input_sql: "SELECT * FROM users".to_owned(),
-            expected: TestExpectation::Described(
-                "should not change".to_owned(),
-            ),
+            expected: TestExpectation::Described("should not change".to_owned()),
             description: Some("neg described".to_owned()),
             negative: true,
         };
@@ -524,9 +479,7 @@ mod tests {
 
     #[test]
     fn short_path_formatting() {
-        let path = PathBuf::from(
-            "/home/user/project/rules/logical/filter.rra",
-        );
+        let path = PathBuf::from("/home/user/project/rules/logical/filter.rra");
         let short = short_path(&path);
         assert!(short.contains("filter.rra"));
         assert_eq!(short, "rules/logical/filter.rra");
@@ -542,11 +495,10 @@ mod tests {
     #[test]
     fn execute_plan_changed_doesnt_error() {
         let test = TestCase {
-            input_sql:
-                "SELECT * FROM orders o \
+            input_sql: "SELECT * FROM orders o \
                  JOIN customers c ON o.cid = c.id \
                  WHERE o.amount > 100"
-                    .to_owned(),
+                .to_owned(),
             expected: TestExpectation::PlanChanged,
             description: Some("filter pushdown".to_owned()),
             negative: false,

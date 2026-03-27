@@ -53,17 +53,13 @@ pub mod monetdb;
 pub use connector::{DatabaseConnector, MetadataResult};
 pub use error::MetadataError;
 pub use explain::{
-    parse_mysql_explain, parse_postgres_explain,
-    parse_sqlite_explain, ExplainNode, ExplainPlan,
-    JoinType, NodeType,
+    format_mysql_explain, format_postgres_explain, format_sqlite_explain, parse_mysql_explain,
+    parse_postgres_explain, parse_sqlite_explain, relexpr_to_explain_node, ExplainNode,
+    ExplainPlan, JoinType, NodeType,
 };
-pub use explain_gen::{
-    from_relexpr, DatabaseCostParams, ExplainFormat,
-};
+pub use explain_gen::{from_relexpr, DatabaseCostParams, ExplainFormat};
 pub use factory::{connect, detect_kind, AnyConnector};
 pub use schema::{
-    ColumnInfo, ColumnStatistics, ConstraintInfo,
-    ConstraintKind, DatabaseKind, IndexInfo, SchemaInfo,
-    TableInfo, TableStats, TriggerEvent, TriggerInfo,
-    TriggerScope, TriggerTiming,
+    ColumnInfo, ColumnStatistics, ConstraintInfo, ConstraintKind, DatabaseKind, IndexInfo,
+    SchemaInfo, TableInfo, TableStats, TriggerEvent, TriggerInfo, TriggerScope, TriggerTiming,
 };

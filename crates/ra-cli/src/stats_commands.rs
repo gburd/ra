@@ -18,19 +18,15 @@ use std::path::Path;
 use std::thread;
 use std::time::Duration;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use colored::Colorize;
 
-use ra_stats::timeline::{
-    EventKind, ExecutionFeedback, Snapshot,
-    Timeline, TimelinePlayer,
-};
+use ra_stats::timeline::{EventKind, ExecutionFeedback, Snapshot, Timeline, TimelinePlayer};
 
 use crate::visualize::{
-    ChartConfig, DataPoint, PlanEvolutionTrace, PlanSnapshot, Series,
-    infer_change_reason, operators_differ, render_ascii_bar_chart,
-    render_ascii_sparkline, render_ascii_table, render_html_chart,
-    render_plan_evolution_ascii,
+    infer_change_reason, operators_differ, render_ascii_bar_chart, render_ascii_sparkline,
+    render_ascii_table, render_html_chart, render_plan_evolution_ascii, ChartConfig, DataPoint,
+    PlanEvolutionTrace, PlanSnapshot, Series,
 };
 
 /// Output format for stats commands.
@@ -71,10 +67,9 @@ pub fn load_timeline(path: &str) -> Result<Timeline> {
              hint: check the path or use one from timelines/"
         );
     }
-    let content = std::fs::read_to_string(p)
-        .with_context(|| format!("reading timeline: {path}"))?;
-    Timeline::from_toml(&content)
-        .map_err(|e| anyhow::anyhow!("parsing timeline: {e}"))
+    let content =
+        std::fs::read_to_string(p).with_context(|| format!("reading timeline: {path}"))?;
+    Timeline::from_toml(&content).map_err(|e| anyhow::anyhow!("parsing timeline: {e}"))
 }
 
 // -- stats play --
@@ -87,8 +82,7 @@ pub fn cmd_stats_play(
     verbose: bool,
 ) -> Result<()> {
     let timeline = load_timeline(timeline_path)?;
-    let mut player = TimelinePlayer::new(timeline)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let mut player = TimelinePlayer::new(timeline).map_err(|e| anyhow::anyhow!("{e}"))?;
 
     match format {
         OutputFormat::Json => play_json(&mut player, speed),
@@ -98,11 +92,7 @@ pub fn cmd_stats_play(
     }
 }
 
-fn play_table(
-    player: &mut TimelinePlayer,
-    speed: f64,
-    verbose: bool,
-) -> Result<()> {
+fn play_table(player: &mut TimelinePlayer, speed: f64, verbose: bool) -> Result<()> {
     let tl = player.timeline();
     eprintln!();
     eprintln!(
@@ -115,22 +105,14 @@ fn play_table(
         )
         .bold()
     );
-    eprintln!(
-        "  {}: {}",
-        "Description".bold(),
-        tl.metadata.description,
-    );
+    eprintln!("  {}: {}", "Description".bold(), tl.metadata.description,);
     if let Some(db) = &tl.metadata.database {
         eprintln!("  {}: {db}", "Database".bold());
     }
     if let Some(schema) = &tl.metadata.schema {
         eprintln!("  {}: {schema}", "Schema".bold());
     }
-    eprintln!(
-        "  {}: {:.1}x",
-        "Playback speed".bold(),
-        speed,
-    );
+    eprintln!("  {}: {:.1}x", "Playback speed".bold(), speed,);
     eprintln!();
 
     let delay_base = if speed > 0.0 {
@@ -215,13 +197,9 @@ fn play_table(
     Ok(())
 }
 
-fn play_json(
-    player: &mut TimelinePlayer,
-    _speed: f64,
-) -> Result<()> {
+fn play_json(player: &mut TimelinePlayer, _speed: f64) -> Result<()> {
     let tl = player.timeline();
-    let json = serde_json::to_string_pretty(tl)
-        .context("serializing timeline to JSON")?;
+    let json = serde_json::to_string_pretty(tl).context("serializing timeline to JSON")?;
     eprintln!("{json}");
     Ok(())
 }
@@ -266,10 +244,7 @@ fn play_html(player: &TimelinePlayer) -> Result<()> {
     }
 
     let config = ChartConfig {
-        title: format!(
-            "{} - Statistics Evolution",
-            tl.metadata.name,
-        ),
+        title: format!("{} - Statistics Evolution", tl.metadata.name,),
         y_label: "Row Count".to_owned(),
         x_label: "Time (s)".to_owned(),
         width: 800,
@@ -290,16 +265,13 @@ pub fn cmd_stats_feedback(
     verbose: bool,
 ) -> Result<()> {
     let timeline = load_timeline(timeline_path)?;
-    let mut player = TimelinePlayer::new(timeline)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let mut player = TimelinePlayer::new(timeline).map_err(|e| anyhow::anyhow!("{e}"))?;
 
     let tl = player.timeline().clone();
 
     match format {
         OutputFormat::Json => feedback_json(&tl),
-        OutputFormat::Table => {
-            feedback_table(&mut player, &tl, batch_size, verbose)
-        }
+        OutputFormat::Table => feedback_table(&mut player, &tl, batch_size, verbose),
         OutputFormat::Ascii => feedback_ascii(&tl),
         OutputFormat::Html => feedback_html(&tl),
     }
@@ -312,10 +284,7 @@ fn feedback_table(
     verbose: bool,
 ) -> Result<()> {
     if tl.feedback.is_empty() {
-        eprintln!(
-            "{}",
-            "No execution feedback in this timeline.".dimmed()
-        );
+        eprintln!("{}", "No execution feedback in this timeline.".dimmed());
         return Ok(());
     }
 
@@ -336,8 +305,7 @@ fn feedback_table(
     player.seek_start();
 
     // Process feedback in batches
-    let chunks: Vec<&[ExecutionFeedback]> =
-        tl.feedback.chunks(batch_size).collect();
+    let chunks: Vec<&[ExecutionFeedback]> = tl.feedback.chunks(batch_size).collect();
 
     for (batch_idx, chunk) in chunks.iter().enumerate() {
         eprintln!(
@@ -349,7 +317,12 @@ fn feedback_table(
         );
 
         let mut headers = vec![
-            "Time", "Query", "Estimated", "Actual", "Q-Error", "Direction",
+            "Time",
+            "Query",
+            "Estimated",
+            "Actual",
+            "Q-Error",
+            "Direction",
         ];
         if verbose {
             headers.push("Operator");
@@ -374,12 +347,7 @@ fn feedback_table(
                 direction.to_owned(),
             ];
             if verbose {
-                row.push(
-                    fb.operator
-                        .as_deref()
-                        .unwrap_or("-")
-                        .to_owned(),
-                );
+                row.push(fb.operator.as_deref().unwrap_or("-").to_owned());
             }
             rows.push(row);
         }
@@ -388,19 +356,14 @@ fn feedback_table(
         eprintln!("{}", render_ascii_table(&header_refs, &rows));
 
         // Show batch statistics
-        let batch_q_errors: Vec<f64> =
-            chunk.iter().map(ExecutionFeedback::q_error).collect();
-        let avg_q: f64 =
-            batch_q_errors.iter().sum::<f64>()
-                / batch_q_errors.len() as f64;
+        let batch_q_errors: Vec<f64> = chunk.iter().map(ExecutionFeedback::q_error).collect();
+        let avg_q: f64 = batch_q_errors.iter().sum::<f64>() / batch_q_errors.len() as f64;
         let max_q = batch_q_errors
             .iter()
             .copied()
             .fold(f64::NEG_INFINITY, f64::max);
-        let overestimates =
-            chunk.iter().filter(|f| f.is_overestimate()).count();
-        let underestimates =
-            chunk.iter().filter(|f| f.is_underestimate()).count();
+        let overestimates = chunk.iter().filter(|f| f.is_overestimate()).count();
+        let underestimates = chunk.iter().filter(|f| f.is_underestimate()).count();
 
         eprintln!(
             "  Avg Q-error: {:.2}, Max: {:.2}, Over: {}, Under: {}",
@@ -427,16 +390,9 @@ fn feedback_table(
     }
 
     // Overall summary
-    let all_q: Vec<f64> = tl
-        .feedback
-        .iter()
-        .map(ExecutionFeedback::q_error)
-        .collect();
+    let all_q: Vec<f64> = tl.feedback.iter().map(ExecutionFeedback::q_error).collect();
     let total_avg = all_q.iter().sum::<f64>() / all_q.len() as f64;
-    let total_max = all_q
-        .iter()
-        .copied()
-        .fold(f64::NEG_INFINITY, f64::max);
+    let total_max = all_q.iter().copied().fold(f64::NEG_INFINITY, f64::max);
 
     eprintln!(
         "{} Overall: Avg Q-error: {:.2}, Max: {:.2}, Entries: {}",
@@ -451,24 +407,21 @@ fn feedback_table(
         eprintln!();
         eprintln!("{}", "Snapshot Progression:".bold());
         for table_name in &tl.table_names() {
-            let first_rows = tl.snapshots.first()
-                .and_then(|s| {
-                    s.tables.iter().find(|t| t.name == *table_name)
-                })
+            let first_rows = tl
+                .snapshots
+                .first()
+                .and_then(|s| s.tables.iter().find(|t| t.name == *table_name))
                 .map(|t| t.row_count);
-            let last_rows = tl.snapshots.last()
-                .and_then(|s| {
-                    s.tables.iter().find(|t| t.name == *table_name)
-                })
+            let last_rows = tl
+                .snapshots
+                .last()
+                .and_then(|s| s.tables.iter().find(|t| t.name == *table_name))
                 .map(|t| t.row_count);
 
             if let (Some(first), Some(last)) = (first_rows, last_rows) {
                 let delta = last as i64 - first as i64;
                 let sign = if delta >= 0 { "+" } else { "" };
-                eprintln!(
-                    "  {}: {} -> {} ({sign}{delta})",
-                    table_name, first, last,
-                );
+                eprintln!("  {}: {} -> {} ({sign}{delta})", table_name, first, last,);
             }
         }
     }
@@ -501,18 +454,14 @@ fn feedback_json(tl: &Timeline) -> Result<()> {
         })
         .collect();
 
-    let json = serde_json::to_string_pretty(&entries)
-        .context("serializing feedback to JSON")?;
+    let json = serde_json::to_string_pretty(&entries).context("serializing feedback to JSON")?;
     eprintln!("{json}");
     Ok(())
 }
 
 fn feedback_ascii(tl: &Timeline) -> Result<()> {
     if tl.feedback.is_empty() {
-        eprintln!(
-            "{}",
-            "No execution feedback in this timeline.".dimmed()
-        );
+        eprintln!("{}", "No execution feedback in this timeline.".dimmed());
         return Ok(());
     }
 
@@ -545,10 +494,7 @@ fn feedback_ascii(tl: &Timeline) -> Result<()> {
 
 fn feedback_html(tl: &Timeline) -> Result<()> {
     if tl.feedback.is_empty() {
-        eprintln!(
-            "{}",
-            "No execution feedback in this timeline.".dimmed()
-        );
+        eprintln!("{}", "No execution feedback in this timeline.".dimmed());
         return Ok(());
     }
 
@@ -557,10 +503,7 @@ fn feedback_html(tl: &Timeline) -> Result<()> {
     let q_series = build_q_error_series(tl);
 
     let config = ChartConfig {
-        title: format!(
-            "{} - Estimation Accuracy",
-            tl.metadata.name,
-        ),
+        title: format!("{} - Estimation Accuracy", tl.metadata.name,),
         y_label: "Rows".to_owned(),
         x_label: "Time (s)".to_owned(),
         width: 800,
@@ -577,14 +520,9 @@ fn feedback_html(tl: &Timeline) -> Result<()> {
 // -- stats visualize --
 
 /// Execute the `stats visualize` command.
-pub fn cmd_stats_visualize(
-    timeline_path: &str,
-    format: OutputFormat,
-    verbose: bool,
-) -> Result<()> {
+pub fn cmd_stats_visualize(timeline_path: &str, format: OutputFormat, verbose: bool) -> Result<()> {
     let timeline = load_timeline(timeline_path)?;
-    let player = TimelinePlayer::new(timeline)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let player = TimelinePlayer::new(timeline).map_err(|e| anyhow::anyhow!("{e}"))?;
 
     let tl = player.timeline();
 
@@ -596,19 +534,11 @@ pub fn cmd_stats_visualize(
     }
 }
 
-fn visualize_table(
-    tl: &Timeline,
-    player: &TimelinePlayer,
-    verbose: bool,
-) -> Result<()> {
+fn visualize_table(tl: &Timeline, player: &TimelinePlayer, verbose: bool) -> Result<()> {
     eprintln!();
     eprintln!(
         "{}",
-        format!(
-            "Timeline Visualization: {}",
-            tl.metadata.name,
-        )
-        .bold()
+        format!("Timeline Visualization: {}", tl.metadata.name,).bold()
     );
     eprintln!();
 
@@ -651,8 +581,7 @@ fn visualize_table(
                     format!("t={}s", e.time_offset),
                     format_event_kind(&e.kind),
                     e.table.clone(),
-                    e.row_count
-                        .map_or("-".to_owned(), format_number),
+                    e.row_count.map_or("-".to_owned(), format_number),
                     e.description.clone().unwrap_or_default(),
                 ]
             })
@@ -673,9 +602,7 @@ fn visualize_table(
 
         if verbose {
             eprintln!();
-            let fb_headers = vec![
-                "Time", "Est.", "Actual", "Q-Error", "Dir.",
-            ];
+            let fb_headers = vec!["Time", "Est.", "Actual", "Q-Error", "Dir."];
             let fb_rows: Vec<Vec<String>> = tl
                 .feedback
                 .iter()
@@ -695,10 +622,7 @@ fn visualize_table(
                     ]
                 })
                 .collect();
-            eprintln!(
-                "{}",
-                render_ascii_table(&fb_headers, &fb_rows)
-            );
+            eprintln!("{}", render_ascii_table(&fb_headers, &fb_rows));
         }
 
         // Plan evolution
@@ -707,10 +631,7 @@ fn visualize_table(
             eprintln!();
             eprintln!("{}", "Plan Evolution:".bold());
             for trace in &traces {
-                eprintln!(
-                    "{}",
-                    render_plan_evolution_ascii(trace)
-                );
+                eprintln!("{}", render_plan_evolution_ascii(trace));
             }
         }
     }
@@ -718,11 +639,7 @@ fn visualize_table(
     Ok(())
 }
 
-fn visualize_ascii(
-    tl: &Timeline,
-    player: &TimelinePlayer,
-    verbose: bool,
-) -> Result<()> {
+fn visualize_ascii(tl: &Timeline, player: &TimelinePlayer, verbose: bool) -> Result<()> {
     // Row count charts per table
     for table_name in &tl.table_names() {
         let series = build_row_count_series(tl, table_name);
@@ -746,10 +663,7 @@ fn visualize_ascii(
                 x_label: "Time (s)".to_owned(),
                 ..ChartConfig::default()
             };
-            eprintln!(
-                "{}",
-                render_ascii_sparkline(&ndv_series, &config)
-            );
+            eprintln!("{}", render_ascii_sparkline(&ndv_series, &config));
         }
     }
 
@@ -772,19 +686,13 @@ fn visualize_ascii(
             title: "Estimated vs Actual Rows".to_owned(),
             ..ChartConfig::default()
         };
-        eprintln!(
-            "{}",
-            render_ascii_sparkline(&[est, act], &config2)
-        );
+        eprintln!("{}", render_ascii_sparkline(&[est, act], &config2));
     }
 
     // Plan evolution section
     let traces = build_plan_evolution_traces(tl);
     for trace in &traces {
-        eprintln!(
-            "{}",
-            render_plan_evolution_ascii(trace)
-        );
+        eprintln!("{}", render_plan_evolution_ascii(trace));
     }
 
     // Summary line
@@ -799,10 +707,7 @@ fn visualize_ascii(
     Ok(())
 }
 
-fn visualize_html(
-    tl: &Timeline,
-    _player: &TimelinePlayer,
-) -> Result<()> {
+fn visualize_html(tl: &Timeline, _player: &TimelinePlayer) -> Result<()> {
     let mut all_series = Vec::new();
 
     for table_name in &tl.table_names() {
@@ -815,10 +720,7 @@ fn visualize_html(
     }
 
     let config = ChartConfig {
-        title: format!(
-            "{} - Statistics Visualization",
-            tl.metadata.name,
-        ),
+        title: format!("{} - Statistics Visualization", tl.metadata.name,),
         y_label: "Value".to_owned(),
         x_label: "Time (s)".to_owned(),
         width: 900,
@@ -829,10 +731,7 @@ fn visualize_html(
     Ok(())
 }
 
-fn visualize_json(
-    tl: &Timeline,
-    player: &TimelinePlayer,
-) -> Result<()> {
+fn visualize_json(tl: &Timeline, player: &TimelinePlayer) -> Result<()> {
     let mut tables_json = serde_json::Map::new();
 
     for table_name in &tl.table_names() {
@@ -850,10 +749,7 @@ fn visualize_json(
                 })
             })
             .collect();
-        tables_json.insert(
-            table_name.clone(),
-            serde_json::Value::Array(snapshots),
-        );
+        tables_json.insert(table_name.clone(), serde_json::Value::Array(snapshots));
     }
 
     let result = serde_json::json!({
@@ -868,8 +764,8 @@ fn visualize_json(
         "tables": tables_json,
     });
 
-    let json = serde_json::to_string_pretty(&result)
-        .context("serializing visualization to JSON")?;
+    let json =
+        serde_json::to_string_pretty(&result).context("serializing visualization to JSON")?;
     println!("{json}");
     Ok(())
 }
@@ -881,19 +777,15 @@ fn visualize_json(
 /// Groups feedback entries by query, then detects operator changes
 /// between consecutive entries and annotates with reasons derived
 /// from timeline events.
-fn build_plan_evolution_traces(
-    tl: &Timeline,
-) -> Vec<PlanEvolutionTrace> {
+fn build_plan_evolution_traces(tl: &Timeline) -> Vec<PlanEvolutionTrace> {
     if tl.feedback.is_empty() {
         return Vec::new();
     }
 
     // Group feedback by query, preserving insertion order.
     let mut keys: Vec<String> = Vec::new();
-    let mut groups: std::collections::HashMap<
-        String,
-        Vec<&ExecutionFeedback>,
-    > = std::collections::HashMap::new();
+    let mut groups: std::collections::HashMap<String, Vec<&ExecutionFeedback>> =
+        std::collections::HashMap::new();
 
     for fb in &tl.feedback {
         let key = truncate_query(&fb.query, 60);
@@ -910,11 +802,7 @@ fn build_plan_evolution_traces(
         let mut snapshots = Vec::new();
 
         for (i, fb) in entries.iter().enumerate() {
-            let operator = fb
-                .operator
-                .as_deref()
-                .unwrap_or("unknown")
-                .to_owned();
+            let operator = fb.operator.as_deref().unwrap_or("unknown").to_owned();
             let cost = fb.estimated_cost;
             let time_label = format!("t={}s", fb.time_offset);
 
@@ -922,29 +810,16 @@ fn build_plan_evolution_traces(
                 (false, None)
             } else {
                 let prev = entries[i - 1];
-                let prev_op = prev
-                    .operator
-                    .as_deref()
-                    .unwrap_or("unknown");
+                let prev_op = prev.operator.as_deref().unwrap_or("unknown");
 
                 if operators_differ(prev_op, &operator) {
                     let event_strs: Vec<String> = tl
-                        .events_in_range(
-                            prev.time_offset,
-                            fb.time_offset,
-                        )
+                        .events_in_range(prev.time_offset, fb.time_offset)
                         .iter()
                         .map(|e| format_event_kind(&e.kind))
                         .collect();
-                    let event_refs: Vec<&str> = event_strs
-                        .iter()
-                        .map(String::as_str)
-                        .collect();
-                    let reason = infer_change_reason(
-                        prev_op,
-                        &operator,
-                        &event_refs,
-                    );
+                    let event_refs: Vec<&str> = event_strs.iter().map(String::as_str).collect();
+                    let reason = infer_change_reason(prev_op, &operator, &event_refs);
                     (true, Some(reason))
                 } else {
                     (false, None)
@@ -980,8 +855,7 @@ fn print_snapshot_table(snap: &Snapshot) {
             vec![
                 t.name.clone(),
                 format_number(t.row_count),
-                t.page_count
-                    .map_or("-".to_owned(), format_number),
+                t.page_count.map_or("-".to_owned(), format_number),
                 t.avg_row_size
                     .map_or("-".to_owned(), |s| format!("{s:.1}B")),
             ]
@@ -1043,12 +917,13 @@ fn build_row_count_series(tl: &Timeline, table: &str) -> Series {
         .snapshots
         .iter()
         .filter_map(|s| {
-            s.tables.iter().find(|t| t.name == table).map(|t| {
-                DataPoint {
+            s.tables
+                .iter()
+                .find(|t| t.name == table)
+                .map(|t| DataPoint {
                     label: format!("t={}s", s.time_offset),
                     value: t.row_count as f64,
-                }
-            })
+                })
         })
         .collect();
 
@@ -1114,13 +989,10 @@ fn build_ndv_series(tl: &Timeline) -> Vec<Series> {
         for table in &snap.tables {
             for col in &table.columns {
                 let key = format!("{}.{}", table.name, col.name);
-                series_map
-                    .entry(key)
-                    .or_default()
-                    .push(DataPoint {
-                        label: format!("t={}s", snap.time_offset),
-                        value: col.ndv as f64,
-                    });
+                series_map.entry(key).or_default().push(DataPoint {
+                    label: format!("t={}s", snap.time_offset),
+                    value: col.ndv as f64,
+                });
             }
         }
     }
@@ -1139,49 +1011,37 @@ mod tests {
 
     fn test_timeline_path() -> String {
         let base = env!("CARGO_MANIFEST_DIR");
-        let project_root = base
-            .strip_suffix("/crates/ra-cli")
-            .unwrap_or(base);
+        let project_root = base.strip_suffix("/crates/ra-cli").unwrap_or(base);
         format!("{project_root}/timelines/tpch-q1-evolution.toml")
     }
 
     fn streaming_timeline_path() -> String {
         let base = env!("CARGO_MANIFEST_DIR");
-        let project_root = base
-            .strip_suffix("/crates/ra-cli")
-            .unwrap_or(base);
+        let project_root = base.strip_suffix("/crates/ra-cli").unwrap_or(base);
         format!("{project_root}/timelines/streaming-inserts.toml")
     }
 
     fn bulk_update_path() -> String {
         let base = env!("CARGO_MANIFEST_DIR");
-        let project_root = base
-            .strip_suffix("/crates/ra-cli")
-            .unwrap_or(base);
+        let project_root = base.strip_suffix("/crates/ra-cli").unwrap_or(base);
         format!("{project_root}/timelines/bulk-update-skew.toml")
     }
 
     fn multi_table_path() -> String {
         let base = env!("CARGO_MANIFEST_DIR");
-        let project_root = base
-            .strip_suffix("/crates/ra-cli")
-            .unwrap_or(base);
+        let project_root = base.strip_suffix("/crates/ra-cli").unwrap_or(base);
         format!("{project_root}/timelines/multi-table-join.toml")
     }
 
     fn analyze_loop_path() -> String {
         let base = env!("CARGO_MANIFEST_DIR");
-        let project_root = base
-            .strip_suffix("/crates/ra-cli")
-            .unwrap_or(base);
+        let project_root = base.strip_suffix("/crates/ra-cli").unwrap_or(base);
         format!("{project_root}/timelines/analyze-feedback-loop.toml")
     }
 
     fn delete_heavy_path() -> String {
         let base = env!("CARGO_MANIFEST_DIR");
-        let project_root = base
-            .strip_suffix("/crates/ra-cli")
-            .unwrap_or(base);
+        let project_root = base.strip_suffix("/crates/ra-cli").unwrap_or(base);
         format!("{project_root}/timelines/delete-heavy-workload.toml")
     }
 
@@ -1260,14 +1120,8 @@ mod tests {
         assert_eq!(format_event_kind(&EventKind::Update), "UPDATE");
         assert_eq!(format_event_kind(&EventKind::Delete), "DELETE");
         assert_eq!(format_event_kind(&EventKind::Analyze), "ANALYZE");
-        assert_eq!(
-            format_event_kind(&EventKind::Reoptimize),
-            "REOPTIMIZE",
-        );
-        assert_eq!(
-            format_event_kind(&EventKind::SchemaChange),
-            "SCHEMA_CHANGE",
-        );
+        assert_eq!(format_event_kind(&EventKind::Reoptimize), "REOPTIMIZE",);
+        assert_eq!(format_event_kind(&EventKind::SchemaChange), "SCHEMA_CHANGE",);
         assert_eq!(format_event_kind(&EventKind::Vacuum), "VACUUM");
     }
 
@@ -1312,8 +1166,7 @@ mod tests {
 
     #[test]
     fn build_row_count_series_tpch() {
-        let tl = load_timeline(&test_timeline_path())
-            .expect("load");
+        let tl = load_timeline(&test_timeline_path()).expect("load");
         let series = build_row_count_series(&tl, "lineitem");
         assert!(!series.points.is_empty());
         assert_eq!(series.name, "lineitem rows");
@@ -1321,16 +1174,14 @@ mod tests {
 
     #[test]
     fn build_row_count_series_nonexistent_table() {
-        let tl = load_timeline(&test_timeline_path())
-            .expect("load");
+        let tl = load_timeline(&test_timeline_path()).expect("load");
         let series = build_row_count_series(&tl, "nonexistent");
         assert!(series.points.is_empty());
     }
 
     #[test]
     fn build_q_error_series_with_feedback() {
-        let tl = load_timeline(&test_timeline_path())
-            .expect("load");
+        let tl = load_timeline(&test_timeline_path()).expect("load");
         let series = build_q_error_series(&tl);
         assert!(!series.points.is_empty());
         for point in &series.points {
@@ -1340,8 +1191,7 @@ mod tests {
 
     #[test]
     fn build_estimated_series_with_feedback() {
-        let tl = load_timeline(&test_timeline_path())
-            .expect("load");
+        let tl = load_timeline(&test_timeline_path()).expect("load");
         let series = build_estimated_series(&tl);
         assert!(!series.points.is_empty());
         assert_eq!(series.name, "Estimated");
@@ -1349,8 +1199,7 @@ mod tests {
 
     #[test]
     fn build_actual_series_with_feedback() {
-        let tl = load_timeline(&test_timeline_path())
-            .expect("load");
+        let tl = load_timeline(&test_timeline_path()).expect("load");
         let series = build_actual_series(&tl);
         assert!(!series.points.is_empty());
         assert_eq!(series.name, "Actual");
@@ -1358,8 +1207,7 @@ mod tests {
 
     #[test]
     fn build_ndv_series_tpch() {
-        let tl = load_timeline(&test_timeline_path())
-            .expect("load");
+        let tl = load_timeline(&test_timeline_path()).expect("load");
         let series = build_ndv_series(&tl);
         assert!(!series.is_empty());
     }
@@ -1368,78 +1216,43 @@ mod tests {
 
     #[test]
     fn play_table_tpch() {
-        let result = cmd_stats_play(
-            &test_timeline_path(),
-            OutputFormat::Table,
-            0.0,
-            false,
-        );
+        let result = cmd_stats_play(&test_timeline_path(), OutputFormat::Table, 0.0, false);
         assert!(result.is_ok());
     }
 
     #[test]
     fn play_json_tpch() {
-        let result = cmd_stats_play(
-            &test_timeline_path(),
-            OutputFormat::Json,
-            0.0,
-            false,
-        );
+        let result = cmd_stats_play(&test_timeline_path(), OutputFormat::Json, 0.0, false);
         assert!(result.is_ok());
     }
 
     #[test]
     fn play_ascii_tpch() {
-        let result = cmd_stats_play(
-            &test_timeline_path(),
-            OutputFormat::Ascii,
-            0.0,
-            false,
-        );
+        let result = cmd_stats_play(&test_timeline_path(), OutputFormat::Ascii, 0.0, false);
         assert!(result.is_ok());
     }
 
     #[test]
     fn play_html_tpch() {
-        let result = cmd_stats_play(
-            &test_timeline_path(),
-            OutputFormat::Html,
-            0.0,
-            false,
-        );
+        let result = cmd_stats_play(&test_timeline_path(), OutputFormat::Html, 0.0, false);
         assert!(result.is_ok());
     }
 
     #[test]
     fn play_table_streaming() {
-        let result = cmd_stats_play(
-            &streaming_timeline_path(),
-            OutputFormat::Table,
-            0.0,
-            true,
-        );
+        let result = cmd_stats_play(&streaming_timeline_path(), OutputFormat::Table, 0.0, true);
         assert!(result.is_ok());
     }
 
     #[test]
     fn play_table_bulk_update() {
-        let result = cmd_stats_play(
-            &bulk_update_path(),
-            OutputFormat::Table,
-            0.0,
-            false,
-        );
+        let result = cmd_stats_play(&bulk_update_path(), OutputFormat::Table, 0.0, false);
         assert!(result.is_ok());
     }
 
     #[test]
     fn play_nonexistent_file() {
-        let result = cmd_stats_play(
-            "/nonexistent.toml",
-            OutputFormat::Table,
-            1.0,
-            false,
-        );
+        let result = cmd_stats_play("/nonexistent.toml", OutputFormat::Table, 1.0, false);
         assert!(result.is_err());
     }
 
@@ -1447,100 +1260,55 @@ mod tests {
 
     #[test]
     fn feedback_table_tpch() {
-        let result = cmd_stats_feedback(
-            &test_timeline_path(),
-            OutputFormat::Table,
-            2,
-            false,
-        );
+        let result = cmd_stats_feedback(&test_timeline_path(), OutputFormat::Table, 2, false);
         assert!(result.is_ok());
     }
 
     #[test]
     fn feedback_json_tpch() {
-        let result = cmd_stats_feedback(
-            &test_timeline_path(),
-            OutputFormat::Json,
-            5,
-            false,
-        );
+        let result = cmd_stats_feedback(&test_timeline_path(), OutputFormat::Json, 5, false);
         assert!(result.is_ok());
     }
 
     #[test]
     fn feedback_ascii_tpch() {
-        let result = cmd_stats_feedback(
-            &test_timeline_path(),
-            OutputFormat::Ascii,
-            3,
-            false,
-        );
+        let result = cmd_stats_feedback(&test_timeline_path(), OutputFormat::Ascii, 3, false);
         assert!(result.is_ok());
     }
 
     #[test]
     fn feedback_html_tpch() {
-        let result = cmd_stats_feedback(
-            &test_timeline_path(),
-            OutputFormat::Html,
-            3,
-            false,
-        );
+        let result = cmd_stats_feedback(&test_timeline_path(), OutputFormat::Html, 3, false);
         assert!(result.is_ok());
     }
 
     #[test]
     fn feedback_verbose_tpch() {
-        let result = cmd_stats_feedback(
-            &test_timeline_path(),
-            OutputFormat::Table,
-            2,
-            true,
-        );
+        let result = cmd_stats_feedback(&test_timeline_path(), OutputFormat::Table, 2, true);
         assert!(result.is_ok());
     }
 
     #[test]
     fn feedback_batch_size_one() {
-        let result = cmd_stats_feedback(
-            &test_timeline_path(),
-            OutputFormat::Table,
-            1,
-            false,
-        );
+        let result = cmd_stats_feedback(&test_timeline_path(), OutputFormat::Table, 1, false);
         assert!(result.is_ok());
     }
 
     #[test]
     fn feedback_large_batch() {
-        let result = cmd_stats_feedback(
-            &test_timeline_path(),
-            OutputFormat::Table,
-            100,
-            false,
-        );
+        let result = cmd_stats_feedback(&test_timeline_path(), OutputFormat::Table, 100, false);
         assert!(result.is_ok());
     }
 
     #[test]
     fn feedback_streaming_inserts() {
-        let result = cmd_stats_feedback(
-            &streaming_timeline_path(),
-            OutputFormat::Table,
-            3,
-            false,
-        );
+        let result = cmd_stats_feedback(&streaming_timeline_path(), OutputFormat::Table, 3, false);
         assert!(result.is_ok());
     }
 
     #[test]
     fn feedback_analyze_loop() {
-        let result = cmd_stats_feedback(
-            &analyze_loop_path(),
-            OutputFormat::Table,
-            2,
-            true,
-        );
+        let result = cmd_stats_feedback(&analyze_loop_path(), OutputFormat::Table, 2, true);
         assert!(result.is_ok());
     }
 
@@ -1548,61 +1316,37 @@ mod tests {
 
     #[test]
     fn visualize_table_tpch() {
-        let result = cmd_stats_visualize(
-            &test_timeline_path(),
-            OutputFormat::Table,
-            false,
-        );
+        let result = cmd_stats_visualize(&test_timeline_path(), OutputFormat::Table, false);
         assert!(result.is_ok());
     }
 
     #[test]
     fn visualize_ascii_tpch() {
-        let result = cmd_stats_visualize(
-            &test_timeline_path(),
-            OutputFormat::Ascii,
-            false,
-        );
+        let result = cmd_stats_visualize(&test_timeline_path(), OutputFormat::Ascii, false);
         assert!(result.is_ok());
     }
 
     #[test]
     fn visualize_html_tpch() {
-        let result = cmd_stats_visualize(
-            &test_timeline_path(),
-            OutputFormat::Html,
-            false,
-        );
+        let result = cmd_stats_visualize(&test_timeline_path(), OutputFormat::Html, false);
         assert!(result.is_ok());
     }
 
     #[test]
     fn visualize_json_tpch() {
-        let result = cmd_stats_visualize(
-            &test_timeline_path(),
-            OutputFormat::Json,
-            false,
-        );
+        let result = cmd_stats_visualize(&test_timeline_path(), OutputFormat::Json, false);
         assert!(result.is_ok());
     }
 
     #[test]
     fn visualize_verbose_tpch() {
-        let result = cmd_stats_visualize(
-            &test_timeline_path(),
-            OutputFormat::Table,
-            true,
-        );
+        let result = cmd_stats_visualize(&test_timeline_path(), OutputFormat::Table, true);
         assert!(result.is_ok());
     }
 
     #[test]
     fn visualize_ascii_verbose_tpch() {
-        let result = cmd_stats_visualize(
-            &test_timeline_path(),
-            OutputFormat::Ascii,
-            true,
-        );
+        let result = cmd_stats_visualize(&test_timeline_path(), OutputFormat::Ascii, true);
         assert!(result.is_ok());
     }
 
@@ -1619,12 +1363,7 @@ mod tests {
             delete_heavy_path(),
         ];
         for path in &paths {
-            let result = cmd_stats_play(
-                path,
-                OutputFormat::Table,
-                0.0,
-                false,
-            );
+            let result = cmd_stats_play(path, OutputFormat::Table, 0.0, false);
             assert!(
                 result.is_ok(),
                 "play table failed for {path}: {}",
@@ -1644,11 +1383,7 @@ mod tests {
             delete_heavy_path(),
         ];
         for path in &paths {
-            let result = cmd_stats_visualize(
-                path,
-                OutputFormat::Ascii,
-                false,
-            );
+            let result = cmd_stats_visualize(path, OutputFormat::Ascii, false);
             assert!(
                 result.is_ok(),
                 "visualize ascii failed for {path}: {}",
@@ -1668,12 +1403,7 @@ mod tests {
             delete_heavy_path(),
         ];
         for path in &paths {
-            let result = cmd_stats_feedback(
-                path,
-                OutputFormat::Table,
-                3,
-                false,
-            );
+            let result = cmd_stats_feedback(path, OutputFormat::Table, 3, false);
             assert!(
                 result.is_ok(),
                 "feedback table failed for {path}: {}",
@@ -1693,11 +1423,7 @@ mod tests {
             delete_heavy_path(),
         ];
         for path in &paths {
-            let result = cmd_stats_visualize(
-                path,
-                OutputFormat::Json,
-                false,
-            );
+            let result = cmd_stats_visualize(path, OutputFormat::Json, false);
             assert!(
                 result.is_ok(),
                 "visualize json failed for {path}: {}",
@@ -1710,8 +1436,7 @@ mod tests {
 
     #[test]
     fn build_traces_tpch_q1() {
-        let tl = load_timeline(&test_timeline_path())
-            .expect("load");
+        let tl = load_timeline(&test_timeline_path()).expect("load");
         let traces = build_plan_evolution_traces(&tl);
         assert!(
             !traces.is_empty(),
@@ -1725,8 +1450,7 @@ mod tests {
 
     #[test]
     fn build_traces_renders_without_panic() {
-        let tl = load_timeline(&test_timeline_path())
-            .expect("load");
+        let tl = load_timeline(&test_timeline_path()).expect("load");
         let traces = build_plan_evolution_traces(&tl);
         for trace in &traces {
             let out = render_plan_evolution_ascii(trace);
@@ -1736,8 +1460,7 @@ mod tests {
 
     #[test]
     fn build_traces_streaming_inserts() {
-        let tl = load_timeline(&streaming_timeline_path())
-            .expect("load");
+        let tl = load_timeline(&streaming_timeline_path()).expect("load");
         let traces = build_plan_evolution_traces(&tl);
         // Streaming inserts has feedback entries
         if !tl.feedback.is_empty() {
@@ -1747,8 +1470,7 @@ mod tests {
 
     #[test]
     fn build_traces_analyze_loop() {
-        let tl = load_timeline(&analyze_loop_path())
-            .expect("load");
+        let tl = load_timeline(&analyze_loop_path()).expect("load");
         let traces = build_plan_evolution_traces(&tl);
         if !tl.feedback.is_empty() {
             assert!(!traces.is_empty());
@@ -1825,8 +1547,7 @@ actual_rows = 200.0
         assert_eq!(trace.snapshots.len(), 2);
         assert!(!trace.snapshots[0].changed);
         assert!(trace.snapshots[1].changed);
-        let reason =
-            trace.snapshots[1].reason.as_deref().unwrap_or("");
+        let reason = trace.snapshots[1].reason.as_deref().unwrap_or("");
         assert!(
             reason.contains("ANALYZE"),
             "should detect ANALYZE event: {reason}"
@@ -1869,14 +1590,8 @@ estimated_cost = 1600.0
         let traces = build_plan_evolution_traces(&tl);
         assert_eq!(traces.len(), 1);
         let snaps = &traces[0].snapshots;
-        assert!(
-            (snaps[0].cost.unwrap_or(0.0) - 1500.0).abs()
-                < f64::EPSILON
-        );
-        assert!(
-            (snaps[1].cost.unwrap_or(0.0) - 1600.0).abs()
-                < f64::EPSILON
-        );
+        assert!((snaps[0].cost.unwrap_or(0.0) - 1500.0).abs() < f64::EPSILON);
+        assert!((snaps[1].cost.unwrap_or(0.0) - 1600.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -1918,11 +1633,7 @@ actual_rows = 1.0
         )
         .expect("parse");
         let traces = build_plan_evolution_traces(&tl);
-        assert_eq!(
-            traces.len(),
-            2,
-            "should group by distinct query"
-        );
+        assert_eq!(traces.len(), 2, "should group by distinct query");
     }
 
     #[test]
@@ -1938,11 +1649,7 @@ actual_rows = 1.0
             delete_heavy_path(),
         ];
         for path in &paths {
-            let result = cmd_stats_visualize(
-                path,
-                OutputFormat::Ascii,
-                false,
-            );
+            let result = cmd_stats_visualize(path, OutputFormat::Ascii, false);
             assert!(
                 result.is_ok(),
                 "visualize ascii with evolution failed for {path}"
@@ -1952,11 +1659,7 @@ actual_rows = 1.0
 
     #[test]
     fn visualize_table_with_plan_evolution() {
-        let result = cmd_stats_visualize(
-            &test_timeline_path(),
-            OutputFormat::Table,
-            true,
-        );
+        let result = cmd_stats_visualize(&test_timeline_path(), OutputFormat::Table, true);
         assert!(result.is_ok());
     }
 }

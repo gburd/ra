@@ -16,12 +16,12 @@ use crate::sqlite::SqliteConnector;
 
 #[cfg(feature = "duckdb-support")]
 use crate::duckdb::DuckDBConnector;
-#[cfg(feature = "sqlserver-support")]
-use crate::sqlserver::SqlServerConnector;
-#[cfg(feature = "oracle-support")]
-use crate::oracle::OracleConnector;
 #[cfg(feature = "monetdb-support")]
 use crate::monetdb::MonetDBConnector;
+#[cfg(feature = "oracle-support")]
+use crate::oracle::OracleConnector;
+#[cfg(feature = "sqlserver-support")]
+use crate::sqlserver::SqlServerConnector;
 
 /// A backend-agnostic connector that delegates to the detected backend.
 ///
@@ -72,15 +72,11 @@ impl AnyConnector {
     /// # Errors
     ///
     /// Returns `MetadataError` if catalog queries fail.
-    pub fn gather_schema(
-        &mut self,
-    ) -> MetadataResult<SchemaInfo> {
+    pub fn gather_schema(&mut self) -> MetadataResult<SchemaInfo> {
         match self {
             Self::Postgres(c) => c.gather_schema_mut(),
             Self::MySql(c) => c.gather_schema_mut(),
-            Self::SQLite(c) => {
-                crate::connector::DatabaseConnector::gather_schema(c)
-            }
+            Self::SQLite(c) => crate::connector::DatabaseConnector::gather_schema(c),
             #[cfg(feature = "duckdb-support")]
             Self::DuckDB(c) => c.gather_schema_mut(),
             #[cfg(feature = "sqlserver-support")]
@@ -97,38 +93,19 @@ impl AnyConnector {
     /// # Errors
     ///
     /// Returns `MetadataError` if statistics queries fail.
-    pub fn gather_statistics(
-        &mut self,
-        table: &str,
-    ) -> MetadataResult<TableStats> {
+    pub fn gather_statistics(&mut self, table: &str) -> MetadataResult<TableStats> {
         match self {
-            Self::Postgres(c) => {
-                c.gather_statistics_mut(table)
-            }
-            Self::MySql(c) => {
-                c.gather_statistics_mut(table)
-            }
-            Self::SQLite(c) => {
-                crate::connector::DatabaseConnector::gather_statistics(
-                    c, table,
-                )
-            }
+            Self::Postgres(c) => c.gather_statistics_mut(table),
+            Self::MySql(c) => c.gather_statistics_mut(table),
+            Self::SQLite(c) => crate::connector::DatabaseConnector::gather_statistics(c, table),
             #[cfg(feature = "duckdb-support")]
-            Self::DuckDB(c) => {
-                c.gather_statistics_mut(table)
-            }
+            Self::DuckDB(c) => c.gather_statistics_mut(table),
             #[cfg(feature = "sqlserver-support")]
-            Self::SqlServer(c) => {
-                c.gather_statistics_mut(table)
-            }
+            Self::SqlServer(c) => c.gather_statistics_mut(table),
             #[cfg(feature = "oracle-support")]
-            Self::Oracle(c) => {
-                c.gather_statistics_mut(table)
-            }
+            Self::Oracle(c) => c.gather_statistics_mut(table),
             #[cfg(feature = "monetdb-support")]
-            Self::MonetDB(c) => {
-                c.gather_statistics_mut(table)
-            }
+            Self::MonetDB(c) => c.gather_statistics_mut(table),
         }
     }
 
@@ -138,24 +115,15 @@ impl AnyConnector {
     ///
     /// Returns `MetadataError` if the EXPLAIN query or
     /// parsing fails.
-    pub fn explain_query(
-        &mut self,
-        sql: &str,
-    ) -> MetadataResult<ExplainPlan> {
+    pub fn explain_query(&mut self, sql: &str) -> MetadataResult<ExplainPlan> {
         match self {
             Self::Postgres(c) => c.explain_query_mut(sql),
             Self::MySql(c) => c.explain_query_mut(sql),
-            Self::SQLite(c) => {
-                crate::connector::DatabaseConnector::explain_query(
-                    c, sql,
-                )
-            }
+            Self::SQLite(c) => crate::connector::DatabaseConnector::explain_query(c, sql),
             #[cfg(feature = "duckdb-support")]
             Self::DuckDB(c) => c.explain_query_mut(sql),
             #[cfg(feature = "sqlserver-support")]
-            Self::SqlServer(c) => {
-                c.explain_query_mut(sql)
-            }
+            Self::SqlServer(c) => c.explain_query_mut(sql),
             #[cfg(feature = "oracle-support")]
             Self::Oracle(c) => c.explain_query_mut(sql),
             #[cfg(feature = "monetdb-support")]
@@ -185,9 +153,7 @@ impl AnyConnector {
 /// Returns `MetadataError::Connection` if the scheme is
 /// unrecognized or the connection fails.
 pub fn connect(url: &str) -> MetadataResult<AnyConnector> {
-    if url.starts_with("postgresql://")
-        || url.starts_with("postgres://")
-    {
+    if url.starts_with("postgresql://") || url.starts_with("postgres://") {
         let connector = PostgresConnector::connect(url)?;
         return Ok(AnyConnector::Postgres(connector));
     }
@@ -198,8 +164,7 @@ pub fn connect(url: &str) -> MetadataResult<AnyConnector> {
     }
 
     if url.starts_with("sqlite://") {
-        let path =
-            url.strip_prefix("sqlite://").unwrap_or(url);
+        let path = url.strip_prefix("sqlite://").unwrap_or(url);
         let connector = if path == ":memory:" {
             SqliteConnector::open_in_memory()?
         } else {
@@ -215,8 +180,7 @@ pub fn connect(url: &str) -> MetadataResult<AnyConnector> {
 
     #[cfg(feature = "duckdb-support")]
     if url.starts_with("duckdb://") {
-        let path =
-            url.strip_prefix("duckdb://").unwrap_or(url);
+        let path = url.strip_prefix("duckdb://").unwrap_or(url);
         let connector = if path == ":memory:" {
             DuckDBConnector::open_in_memory()?
         } else {
@@ -232,11 +196,8 @@ pub fn connect(url: &str) -> MetadataResult<AnyConnector> {
     }
 
     #[cfg(feature = "sqlserver-support")]
-    if url.starts_with("sqlserver://")
-        || url.starts_with("mssql://")
-    {
-        let connector =
-            SqlServerConnector::connect(url)?;
+    if url.starts_with("sqlserver://") || url.starts_with("mssql://") {
+        let connector = SqlServerConnector::connect(url)?;
         return Ok(AnyConnector::SqlServer(connector));
     }
 
@@ -248,8 +209,7 @@ pub fn connect(url: &str) -> MetadataResult<AnyConnector> {
 
     #[cfg(feature = "monetdb-support")]
     if url.starts_with("monetdb://") {
-        let connector =
-            MonetDBConnector::connect(url)?;
+        let connector = MonetDBConnector::connect(url)?;
         return Ok(AnyConnector::MonetDB(connector));
     }
 
@@ -275,21 +235,14 @@ pub fn connect(url: &str) -> MetadataResult<AnyConnector> {
 ///
 /// Returns `MetadataError::Connection` if the scheme is
 /// unrecognized.
-pub fn detect_kind(
-    url: &str,
-) -> MetadataResult<DatabaseKind> {
-    if url.starts_with("postgresql://")
-        || url.starts_with("postgres://")
-    {
+pub fn detect_kind(url: &str) -> MetadataResult<DatabaseKind> {
+    if url.starts_with("postgresql://") || url.starts_with("postgres://") {
         return Ok(DatabaseKind::PostgreSQL);
     }
     if url.starts_with("mysql://") {
         return Ok(DatabaseKind::MySQL);
     }
-    if url.starts_with("sqlite://")
-        || url == ":memory:"
-        || has_sqlite_extension(url)
-    {
+    if url.starts_with("sqlite://") || url == ":memory:" || has_sqlite_extension(url) {
         return Ok(DatabaseKind::SQLite);
     }
     if url.starts_with("duckdb://") {
@@ -299,9 +252,7 @@ pub fn detect_kind(
     if has_duckdb_extension(url) {
         return Ok(DatabaseKind::DuckDB);
     }
-    if url.starts_with("sqlserver://")
-        || url.starts_with("mssql://")
-    {
+    if url.starts_with("sqlserver://") || url.starts_with("mssql://") {
         return Ok(DatabaseKind::SqlServer);
     }
     if url.starts_with("oracle://") {
@@ -311,9 +262,7 @@ pub fn detect_kind(
         return Ok(DatabaseKind::MonetDB);
     }
     Err(MetadataError::Connection {
-        message: format!(
-            "unrecognized database URL scheme: {url}"
-        ),
+        message: format!("unrecognized database URL scheme: {url}"),
     })
 }
 
@@ -327,9 +276,9 @@ fn has_sqlite_extension(url: &str) -> bool {
 
 #[cfg(feature = "duckdb-support")]
 fn has_duckdb_extension(url: &str) -> bool {
-    Path::new(url).extension().is_some_and(|ext| {
-        ext.eq_ignore_ascii_case("duckdb")
-    })
+    Path::new(url)
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("duckdb"))
 }
 
 #[cfg(test)]
@@ -339,10 +288,7 @@ mod tests {
     #[test]
     fn detect_postgres_url() {
         assert_eq!(
-            detect_kind(
-                "postgresql://user:pass@localhost/db"
-            )
-            .ok(),
+            detect_kind("postgresql://user:pass@localhost/db").ok(),
             Some(DatabaseKind::PostgreSQL)
         );
         assert_eq!(
@@ -354,8 +300,7 @@ mod tests {
     #[test]
     fn detect_mysql_url() {
         assert_eq!(
-            detect_kind("mysql://user:pass@localhost/db")
-                .ok(),
+            detect_kind("mysql://user:pass@localhost/db").ok(),
             Some(DatabaseKind::MySQL)
         );
     }
@@ -366,14 +311,8 @@ mod tests {
             detect_kind("sqlite:///tmp/test.db").ok(),
             Some(DatabaseKind::SQLite)
         );
-        assert_eq!(
-            detect_kind(":memory:").ok(),
-            Some(DatabaseKind::SQLite)
-        );
-        assert_eq!(
-            detect_kind("/tmp/test.db").ok(),
-            Some(DatabaseKind::SQLite)
-        );
+        assert_eq!(detect_kind(":memory:").ok(), Some(DatabaseKind::SQLite));
+        assert_eq!(detect_kind("/tmp/test.db").ok(), Some(DatabaseKind::SQLite));
         assert_eq!(
             detect_kind("/tmp/test.sqlite").ok(),
             Some(DatabaseKind::SQLite)
@@ -399,15 +338,11 @@ mod tests {
     #[test]
     fn detect_sqlserver_url() {
         assert_eq!(
-            detect_kind(
-                "sqlserver://sa:pass@localhost/mydb"
-            )
-            .ok(),
+            detect_kind("sqlserver://sa:pass@localhost/mydb").ok(),
             Some(DatabaseKind::SqlServer)
         );
         assert_eq!(
-            detect_kind("mssql://sa:pass@localhost/mydb")
-                .ok(),
+            detect_kind("mssql://sa:pass@localhost/mydb").ok(),
             Some(DatabaseKind::SqlServer)
         );
     }
@@ -415,10 +350,7 @@ mod tests {
     #[test]
     fn detect_oracle_url() {
         assert_eq!(
-            detect_kind(
-                "oracle://scott:tiger@host:1521/ORCL"
-            )
-            .ok(),
+            detect_kind("oracle://scott:tiger@host:1521/ORCL").ok(),
             Some(DatabaseKind::Oracle)
         );
     }
@@ -426,10 +358,7 @@ mod tests {
     #[test]
     fn detect_monetdb_url() {
         assert_eq!(
-            detect_kind(
-                "monetdb://monetdb:monetdb@localhost/demo"
-            )
-            .ok(),
+            detect_kind("monetdb://monetdb:monetdb@localhost/demo").ok(),
             Some(DatabaseKind::MonetDB)
         );
     }
@@ -441,23 +370,17 @@ mod tests {
 
     #[test]
     fn connect_sqlite_memory() {
-        let mut conn =
-            connect(":memory:").expect("in-memory connect");
+        let mut conn = connect(":memory:").expect("in-memory connect");
         assert_eq!(conn.kind(), DatabaseKind::SQLite);
-        let schema = conn
-            .gather_schema()
-            .expect("gather empty schema");
+        let schema = conn.gather_schema().expect("gather empty schema");
         assert!(schema.tables.is_empty());
     }
 
     #[test]
     fn connect_sqlite_url_memory() {
-        let mut conn =
-            connect("sqlite://:memory:").expect("sqlite url connect");
+        let mut conn = connect("sqlite://:memory:").expect("sqlite url connect");
         assert_eq!(conn.kind(), DatabaseKind::SQLite);
-        let schema = conn
-            .gather_schema()
-            .expect("gather empty schema");
+        let schema = conn.gather_schema().expect("gather empty schema");
         assert!(schema.tables.is_empty());
     }
 
@@ -469,8 +392,7 @@ mod tests {
 
     #[test]
     fn any_connector_explain_sqlite() {
-        let mut conn =
-            connect(":memory:").expect("in-memory connect");
+        let mut conn = connect(":memory:").expect("in-memory connect");
 
         if let AnyConnector::SQLite(ref c) = conn {
             c.connection()
@@ -490,8 +412,7 @@ mod tests {
 
     #[test]
     fn any_connector_gather_statistics_sqlite() {
-        let mut conn =
-            connect(":memory:").expect("in-memory connect");
+        let mut conn = connect(":memory:").expect("in-memory connect");
 
         if let AnyConnector::SQLite(ref c) = conn {
             c.connection()
@@ -504,9 +425,7 @@ mod tests {
                 .expect("setup");
         }
 
-        let stats = conn
-            .gather_statistics("users")
-            .expect("stats");
+        let stats = conn.gather_statistics("users").expect("stats");
         assert_eq!(stats.table_name, "users");
         assert!(stats.row_count >= 2.0);
     }
@@ -514,12 +433,9 @@ mod tests {
     #[cfg(feature = "duckdb-support")]
     #[test]
     fn connect_duckdb_memory() {
-        let mut conn = connect("duckdb://:memory:")
-            .expect("duckdb in-memory connect");
+        let mut conn = connect("duckdb://:memory:").expect("duckdb in-memory connect");
         assert_eq!(conn.kind(), DatabaseKind::DuckDB);
-        let schema = conn
-            .gather_schema()
-            .expect("gather empty schema");
+        let schema = conn.gather_schema().expect("gather empty schema");
         assert!(schema.tables.is_empty());
     }
 

@@ -10,9 +10,7 @@
 use std::fmt::Write;
 
 use ra_core::algebra::{JoinType as RaJoinType, RelExpr};
-use ra_metadata::explain::{
-    ExplainNode, ExplainPlan, JoinType as DbJoinType, NodeType,
-};
+use ra_metadata::explain::{ExplainNode, ExplainPlan, JoinType as DbJoinType, NodeType};
 
 /// Result of comparing an RA plan against a database EXPLAIN plan.
 #[derive(Debug, Clone)]
@@ -82,7 +80,12 @@ pub fn compare_plans(ra_plan: &RelExpr, db_explain: &ExplainPlan) -> PlanCompari
     let mut agreements = Vec::new();
     let mut disagreements = Vec::new();
 
-    compare_node(ra_plan, &db_explain.root, &mut agreements, &mut disagreements);
+    compare_node(
+        ra_plan,
+        &db_explain.root,
+        &mut agreements,
+        &mut disagreements,
+    );
 
     let total = agreements.len() + disagreements.len();
     #[allow(clippy::cast_precision_loss)]
@@ -115,12 +118,9 @@ fn compare_node(
             right,
             ..
         } => {
-            compare_join(
-                *join_type, left, right, db, agreements, disagreements,
-            );
+            compare_join(*join_type, left, right, db, agreements, disagreements);
         }
-        RelExpr::Sort { input, .. }
-        | RelExpr::IncrementalSort { input, .. } => {
+        RelExpr::Sort { input, .. } | RelExpr::IncrementalSort { input, .. } => {
             compare_sort(db, agreements, disagreements);
             compare_node(input, db, agreements, disagreements);
         }
@@ -148,8 +148,7 @@ fn compare_node(
                 compare_node(right, child, agreements, disagreements);
             }
         }
-        RelExpr::CTE { body, .. }
-        | RelExpr::RecursiveCTE { body, .. } => {
+        RelExpr::CTE { body, .. } | RelExpr::RecursiveCTE { body, .. } => {
             compare_node(body, db, agreements, disagreements);
         }
         RelExpr::Values { .. }
@@ -194,17 +193,12 @@ fn compare_scan(
     if ra_method == db_method {
         agreements.push(Agreement {
             aspect: ComparisonAspect::AccessMethod,
-            description: format!(
-                "Table '{table}': both use {db_method}"
-            ),
+            description: format!("Table '{table}': both use {db_method}"),
         });
     } else {
         let explanation = match scan_node.node_type {
             NodeType::IndexScan | NodeType::IndexOnlyScan => {
-                let idx = scan_node
-                    .index_name
-                    .as_deref()
-                    .unwrap_or("unknown");
+                let idx = scan_node.index_name.as_deref().unwrap_or("unknown");
                 format!(
                     "DB uses index '{idx}' on '{table}'. \
                      RA optimizer lacks index metadata -- \
@@ -257,16 +251,12 @@ fn compare_join(
         });
     } else {
         let explanation = match join_node.node_type {
-            NodeType::NestedLoop => {
-                "DB chose nested loop -- often optimal for small \
+            NodeType::NestedLoop => "DB chose nested loop -- often optimal for small \
                  outer table or indexed inner table."
-                    .to_owned()
-            }
-            NodeType::MergeJoin => {
-                "DB chose merge join -- data may already be sorted \
+                .to_owned(),
+            NodeType::MergeJoin => "DB chose merge join -- data may already be sorted \
                  or an index provides order."
-                    .to_owned()
-            }
+                .to_owned(),
             _ => "Different join algorithm selected.".to_owned(),
         };
 
@@ -286,8 +276,7 @@ fn compare_join(
                 aspect: ComparisonAspect::JoinOrder,
                 ra_choice: ra_jt_name,
                 db_choice: db_jt_name,
-                explanation: "Join types differ between RA plan and DB."
-                    .to_owned(),
+                explanation: "Join types differ between RA plan and DB.".to_owned(),
             });
         }
     }
@@ -335,8 +324,7 @@ fn compare_aggregation(
     if db_hash_agg {
         agreements.push(Agreement {
             aspect: ComparisonAspect::AggregationStrategy,
-            description: "Both plans use hash-based aggregation"
-                .to_owned(),
+            description: "Both plans use hash-based aggregation".to_owned(),
         });
     } else if db_group_agg {
         disagreements.push(Disagreement {
@@ -355,11 +343,7 @@ fn compare_filter(
     agreements: &mut Vec<Agreement>,
     disagreements: &mut Vec<Disagreement>,
 ) {
-    let has_filter = db.filter.is_some()
-        || db
-            .children
-            .iter()
-            .any(|c| c.filter.is_some());
+    let has_filter = db.filter.is_some() || db.children.iter().any(|c| c.filter.is_some());
 
     if has_filter {
         agreements.push(Agreement {
@@ -370,8 +354,7 @@ fn compare_filter(
         disagreements.push(Disagreement {
             aspect: ComparisonAspect::FilterPlacement,
             ra_choice: "Explicit Filter operator".to_owned(),
-            db_choice: "Filter pushed into scan/index condition"
-                .to_owned(),
+            db_choice: "Filter pushed into scan/index condition".to_owned(),
             explanation: "DB pushed the filter into the scan operator \
                          as an index condition, eliminating the need \
                          for a separate Filter node."
@@ -382,10 +365,7 @@ fn compare_filter(
 
 // ---- Tree search helpers ----
 
-fn find_scan_for_table<'a>(
-    node: &'a ExplainNode,
-    table: &str,
-) -> Option<&'a ExplainNode> {
+fn find_scan_for_table<'a>(node: &'a ExplainNode, table: &str) -> Option<&'a ExplainNode> {
     if node.relation.as_deref() == Some(table) {
         return Some(node);
     }
@@ -399,9 +379,7 @@ fn find_scan_for_table<'a>(
 
 fn find_join_node(node: &ExplainNode) -> Option<&ExplainNode> {
     match node.node_type {
-        NodeType::HashJoin | NodeType::MergeJoin | NodeType::NestedLoop => {
-            Some(node)
-        }
+        NodeType::HashJoin | NodeType::MergeJoin | NodeType::NestedLoop => Some(node),
         _ => {
             for child in &node.children {
                 if let Some(found) = find_join_node(child) {
@@ -451,12 +429,7 @@ pub fn format_explain_tree(plan: &ExplainPlan) -> String {
     buf
 }
 
-fn format_explain_node(
-    node: &ExplainNode,
-    buf: &mut String,
-    prefix: &str,
-    is_last: bool,
-) {
+fn format_explain_node(node: &ExplainNode, buf: &mut String, prefix: &str, is_last: bool) {
     let connector = if is_last { "└─ " } else { "├─ " };
     let child_ext = if is_last { "   " } else { "│  " };
 
@@ -688,9 +661,7 @@ mod tests {
             .filter(|d| d.aspect == ComparisonAspect::SortStrategy)
             .collect();
         assert_eq!(sort_disagreements.len(), 1);
-        assert!(sort_disagreements[0]
-            .explanation
-            .contains("index"));
+        assert!(sort_disagreements[0].explanation.contains("index"));
     }
 
     #[test]
@@ -774,9 +745,7 @@ mod tests {
 
     #[test]
     fn empty_comparison_full_confidence() {
-        let ra = RelExpr::Values {
-            rows: vec![],
-        };
+        let ra = RelExpr::Values { rows: vec![] };
         let db = wrap_plan(leaf_node(NodeType::Result, None));
 
         let result = compare_plans(&ra, &db);
@@ -853,10 +822,7 @@ mod tests {
 
     #[test]
     fn comparison_aspect_display() {
-        assert_eq!(
-            ComparisonAspect::AccessMethod.to_string(),
-            "Access Method"
-        );
+        assert_eq!(ComparisonAspect::AccessMethod.to_string(), "Access Method");
         assert_eq!(
             ComparisonAspect::JoinAlgorithm.to_string(),
             "Join Algorithm"
@@ -866,15 +832,10 @@ mod tests {
     #[test]
     fn bitmap_scan_disagreement() {
         let ra = RelExpr::scan("orders");
-        let db = wrap_plan(leaf_node(
-            NodeType::BitmapHeapScan,
-            Some("orders"),
-        ));
+        let db = wrap_plan(leaf_node(NodeType::BitmapHeapScan, Some("orders")));
 
         let result = compare_plans(&ra, &db);
         assert_eq!(result.disagreements.len(), 1);
-        assert!(result.disagreements[0]
-            .db_choice
-            .contains("Bitmap"));
+        assert!(result.disagreements[0].db_choice.contains("Bitmap"));
     }
 }

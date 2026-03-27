@@ -5,9 +5,7 @@ use std::collections::HashMap;
 use anyhow::{Context, Result};
 use colored::Colorize;
 
-use ra_adaptive::cache_adapter::{
-    AdaptiveCacheConfig, AdaptivePlanCache,
-};
+use ra_adaptive::cache_adapter::{AdaptiveCacheConfig, AdaptivePlanCache};
 use ra_cache::EvictionPolicy;
 use ra_core::cost::StatisticsProvider;
 use ra_core::statistics::Statistics;
@@ -35,10 +33,7 @@ impl CliStatsProvider {
 }
 
 /// Show all cached plans.
-pub fn cmd_cache_list(
-    verbose: bool,
-    quiet: bool,
-) -> Result<()> {
+pub fn cmd_cache_list(verbose: bool, quiet: bool) -> Result<()> {
     let cache = build_demo_cache()?;
     let entries = cache.list().context("listing cache")?;
 
@@ -87,10 +82,7 @@ pub fn cmd_cache_list(
         }
 
         eprintln!();
-        eprintln!(
-            "  {} entries cached",
-            entries.len().to_string().bold(),
-        );
+        eprintln!("  {} entries cached", entries.len().to_string().bold(),);
     }
 
     Ok(())
@@ -116,41 +108,22 @@ pub fn cmd_cache_stats(quiet: bool) -> Result<()> {
             "Utilization".bold(),
             metrics.utilization() * 100.0,
         );
-        eprintln!(
-            "  {}: {}",
-            "Hits".bold(),
-            metrics.hits,
-        );
-        eprintln!(
-            "  {}: {}",
-            "Misses".bold(),
-            metrics.misses,
-        );
+        eprintln!("  {}: {}", "Hits".bold(), metrics.hits,);
+        eprintln!("  {}: {}", "Misses".bold(), metrics.misses,);
         eprintln!(
             "  {}: {:.1}%",
             "Hit Rate".bold(),
             metrics.hit_rate() * 100.0,
         );
-        eprintln!(
-            "  {}: {}",
-            "Evictions".bold(),
-            metrics.evictions,
-        );
-        eprintln!(
-            "  {}: {}",
-            "Clears".bold(),
-            metrics.clears,
-        );
+        eprintln!("  {}: {}", "Evictions".bold(), metrics.evictions,);
+        eprintln!("  {}: {}", "Clears".bold(), metrics.clears,);
     }
 
     Ok(())
 }
 
 /// Clear the cache, optionally scoped to a table.
-pub fn cmd_cache_clear(
-    table: Option<&str>,
-    quiet: bool,
-) -> Result<()> {
+pub fn cmd_cache_clear(table: Option<&str>, quiet: bool) -> Result<()> {
     let cache = build_demo_cache()?;
 
     if let Some(table_name) = table {
@@ -175,28 +148,19 @@ pub fn cmd_cache_clear(
 }
 
 /// Reoptimize stale cached plans.
-pub fn cmd_cache_reoptimize(
-    threshold_pct: f64,
-    quiet: bool,
-) -> Result<()> {
+pub fn cmd_cache_reoptimize(threshold_pct: f64, quiet: bool) -> Result<()> {
     let cache = build_demo_cache()?;
     let optimizer = Optimizer::new();
     let stats = CliStatsProvider::empty();
 
     let threshold = threshold_pct / 100.0;
     let count = cache
-        .reoptimize_with_threshold(
-            &stats, &optimizer, threshold,
-        )
+        .reoptimize_with_threshold(&stats, &optimizer, threshold)
         .context("reoptimizing cache")?;
 
     if !quiet {
         if count == 0 {
-            eprintln!(
-                "{}",
-                "No stale plans found (all within threshold)."
-                    .green()
-            );
+            eprintln!("{}", "No stale plans found (all within threshold).".green());
         } else {
             eprintln!(
                 "Reoptimized {} plan(s) with drift > {:.0}%",
@@ -210,15 +174,10 @@ pub fn cmd_cache_reoptimize(
 }
 
 /// Show statistics drift for cached plans.
-pub fn cmd_cache_drift(
-    verbose: bool,
-    quiet: bool,
-) -> Result<()> {
+pub fn cmd_cache_drift(verbose: bool, quiet: bool) -> Result<()> {
     let cache = build_demo_cache()?;
     let stats = CliStatsProvider::empty();
-    let report = cache
-        .check_drift(&stats)
-        .context("checking drift")?;
+    let report = cache.check_drift(&stats).context("checking drift")?;
 
     if !quiet {
         eprintln!();
@@ -226,34 +185,20 @@ pub fn cmd_cache_drift(
         eprintln!();
 
         if report.stale_plans.is_empty() {
-            eprintln!(
-                "  {}",
-                "All cached plans are fresh.".green()
-            );
+            eprintln!("  {}", "All cached plans are fresh.".green());
         } else {
             eprintln!(
                 "  {} stale plan(s) detected:",
-                report
-                    .stale_plans
-                    .len()
-                    .to_string()
-                    .yellow()
-                    .bold(),
+                report.stale_plans.len().to_string().yellow().bold(),
             );
             eprintln!();
 
             for (key, drift) in &report.stale_plans {
                 let sql_display = truncate(&key.sql, 50);
                 let status = match drift.status {
-                    ra_cache::DriftStatus::Fresh => {
-                        "fresh".green().to_string()
-                    }
-                    ra_cache::DriftStatus::Stale => {
-                        "STALE".red().bold().to_string()
-                    }
-                    ra_cache::DriftStatus::Unknown => {
-                        "unknown".yellow().to_string()
-                    }
+                    ra_cache::DriftStatus::Fresh => "fresh".green().to_string(),
+                    ra_cache::DriftStatus::Stale => "STALE".red().bold().to_string(),
+                    ra_cache::DriftStatus::Unknown => "unknown".yellow().to_string(),
                 };
 
                 eprintln!(
@@ -266,25 +211,14 @@ pub fn cmd_cache_drift(
                     for td in &drift.table_drifts {
                         let current_str = td
                             .current_row_count
-                            .map_or_else(
-                                || "N/A".to_owned(),
-                                |c| format!("{c:.0}"),
-                            );
+                            .map_or_else(|| "N/A".to_owned(), |c| format!("{c:.0}"));
                         let drift_str = td
                             .drift_fraction
-                            .map_or_else(
-                                || "N/A".to_owned(),
-                                |d| {
-                                    format!("{:.1}%", d * 100.0)
-                                },
-                            );
+                            .map_or_else(|| "N/A".to_owned(), |d| format!("{:.1}%", d * 100.0));
                         eprintln!(
                             "    {}: cached={:.0}, \
                              current={}, drift={}",
-                            td.table,
-                            td.cached_row_count,
-                            current_str,
-                            drift_str,
+                            td.table, td.cached_row_count, current_str, drift_str,
                         );
                     }
                 }
@@ -309,18 +243,9 @@ fn build_demo_cache() -> Result<AdaptivePlanCache> {
     let optimizer = Optimizer::new();
 
     let mut tables = HashMap::new();
-    tables.insert(
-        "users".to_owned(),
-        Statistics::new(10_000.0),
-    );
-    tables.insert(
-        "orders".to_owned(),
-        Statistics::new(50_000.0),
-    );
-    tables.insert(
-        "products".to_owned(),
-        Statistics::new(5_000.0),
-    );
+    tables.insert("users".to_owned(), Statistics::new(10_000.0));
+    tables.insert("orders".to_owned(), Statistics::new(50_000.0));
+    tables.insert("products".to_owned(), Statistics::new(5_000.0));
     let provider = CliStatsProvider { tables };
 
     let demo_queries = [
@@ -330,16 +255,12 @@ fn build_demo_cache() -> Result<AdaptivePlanCache> {
     ];
 
     for sql in &demo_queries {
-        let _ = cache.get_or_optimize(
-            sql, "auto", &provider, &optimizer,
-        );
+        let _ = cache.get_or_optimize(sql, "auto", &provider, &optimizer);
     }
 
     // Simulate some cache hits
     for sql in &demo_queries[..2] {
-        let _ = cache.get_or_optimize(
-            sql, "auto", &provider, &optimizer,
-        );
+        let _ = cache.get_or_optimize(sql, "auto", &provider, &optimizer);
     }
 
     Ok(cache)

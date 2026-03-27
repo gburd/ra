@@ -11,12 +11,10 @@ use oracle::Connection;
 
 use crate::connector::{DatabaseConnector, MetadataResult};
 use crate::error::MetadataError;
-use crate::explain::{
-    ExplainNode, ExplainPlan, NodeType,
-};
+use crate::explain::{ExplainNode, ExplainPlan, NodeType};
 use crate::schema::{
-    ColumnInfo, ColumnStatistics, ConstraintInfo, ConstraintKind,
-    DatabaseKind, IndexInfo, SchemaInfo, TableInfo, TableStats,
+    ColumnInfo, ColumnStatistics, ConstraintInfo, ConstraintKind, DatabaseKind, IndexInfo,
+    SchemaInfo, TableInfo, TableStats,
 };
 
 /// Oracle connector using the `oracle` crate.
@@ -34,27 +32,17 @@ impl OracleConnector {
     /// # Errors
     ///
     /// Returns `MetadataError::Connection` on failure.
-    pub fn connect(
-        connection_string: &str,
-    ) -> MetadataResult<Self> {
-        let parts =
-            parse_oracle_url(connection_string)?;
+    pub fn connect(connection_string: &str) -> MetadataResult<Self> {
+        let parts = parse_oracle_url(connection_string)?;
 
-        let connect_str = format!(
-            "//{}:{}/{}",
-            parts.host, parts.port, parts.service
-        );
+        let connect_str = format!("//{}:{}/{}", parts.host, parts.port, parts.service);
 
-        let conn = Connection::connect(
-            &parts.user,
-            &parts.password,
-            &connect_str,
-        )
-        .map_err(|e| MetadataError::Connection {
-            message: format!(
-                "Oracle connection failed: {e}"
-            ),
-        })?;
+        let conn =
+            Connection::connect(&parts.user, &parts.password, &connect_str).map_err(|e| {
+                MetadataError::Connection {
+                    message: format!("Oracle connection failed: {e}"),
+                }
+            })?;
 
         let schema = parts.user.to_uppercase();
 
@@ -66,11 +54,8 @@ impl OracleConnector {
         self.schema = schema.to_uppercase();
     }
 
-    fn query_tables(
-        &self,
-    ) -> MetadataResult<Vec<String>> {
-        let sql =
-            "SELECT table_name \
+    fn query_tables(&self) -> MetadataResult<Vec<String>> {
+        let sql = "SELECT table_name \
              FROM all_tables \
              WHERE owner = :1 \
              ORDER BY table_name";
@@ -79,31 +64,21 @@ impl OracleConnector {
             .conn
             .query_as::<(String,)>(sql, &[&self.schema])
             .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to list tables: {e}"
-                ),
+                message: format!("failed to list tables: {e}"),
             })?;
 
         let mut tables = Vec::new();
         for row in rows {
-            let (name,) = row.map_err(|e| {
-                MetadataError::Query {
-                    message: format!(
-                        "failed to read table: {e}"
-                    ),
-                }
+            let (name,) = row.map_err(|e| MetadataError::Query {
+                message: format!("failed to read table: {e}"),
             })?;
             tables.push(name);
         }
         Ok(tables)
     }
 
-    fn query_columns(
-        &self,
-        table: &str,
-    ) -> MetadataResult<Vec<ColumnInfo>> {
-        let sql =
-            "SELECT column_name, data_type, nullable, \
+    fn query_columns(&self, table: &str) -> MetadataResult<Vec<ColumnInfo>> {
+        let sql = "SELECT column_name, data_type, nullable, \
              column_id, data_default \
              FROM all_tab_columns \
              WHERE owner = :1 AND table_name = :2 \
@@ -111,26 +86,19 @@ impl OracleConnector {
 
         let rows = self
             .conn
-            .query_as::<(
-                String,
-                String,
-                String,
-                u32,
-                Option<String>,
-            )>(sql, &[&self.schema, &table.to_uppercase()])
+            .query_as::<(String, String, String, u32, Option<String>)>(
+                sql,
+                &[&self.schema, &table.to_uppercase()],
+            )
             .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to query columns for {table}: {e}"
-                ),
+                message: format!("failed to query columns for {table}: {e}"),
             })?;
 
         let mut columns = Vec::new();
         for row in rows {
             let (name, data_type, nullable_str, ordinal, default_value) =
                 row.map_err(|e| MetadataError::Query {
-                    message: format!(
-                        "failed to read column: {e}"
-                    ),
+                    message: format!("failed to read column: {e}"),
                 })?;
 
             columns.push(ColumnInfo {
@@ -144,12 +112,8 @@ impl OracleConnector {
         Ok(columns)
     }
 
-    fn query_constraints(
-        &self,
-        table: &str,
-    ) -> MetadataResult<Vec<ConstraintInfo>> {
-        let sql =
-            "SELECT c.constraint_name, c.constraint_type, \
+    fn query_constraints(&self, table: &str) -> MetadataResult<Vec<ConstraintInfo>> {
+        let sql = "SELECT c.constraint_name, c.constraint_type, \
              LISTAGG(cc.column_name, ',') \
                WITHIN GROUP (ORDER BY cc.position), \
              c.r_constraint_name \
@@ -163,12 +127,10 @@ impl OracleConnector {
 
         let rows = self
             .conn
-            .query_as::<(
-                String,
-                String,
-                String,
-                Option<String>,
-            )>(sql, &[&self.schema, &table.to_uppercase()])
+            .query_as::<(String, String, String, Option<String>)>(
+                sql,
+                &[&self.schema, &table.to_uppercase()],
+            )
             .map_err(|e| MetadataError::Query {
                 message: format!(
                     "failed to query constraints for \
@@ -180,9 +142,7 @@ impl OracleConnector {
         for row in rows {
             let (name, ctype, cols_str, ref_constraint) =
                 row.map_err(|e| MetadataError::Query {
-                    message: format!(
-                        "failed to read constraint: {e}"
-                    ),
+                    message: format!("failed to read constraint: {e}"),
                 })?;
 
             let kind = match ctype.as_str() {
@@ -200,14 +160,10 @@ impl OracleConnector {
                 .collect();
 
             // For FKs, resolve referenced table.
-            let referenced_table = if kind
-                == ConstraintKind::ForeignKey
-            {
+            let referenced_table = if kind == ConstraintKind::ForeignKey {
                 ref_constraint
                     .as_ref()
-                    .and_then(|rc| {
-                        self.resolve_ref_table(rc).ok()
-                    })
+                    .and_then(|rc| self.resolve_ref_table(rc).ok())
             } else {
                 None
             };
@@ -224,35 +180,22 @@ impl OracleConnector {
         Ok(constraints)
     }
 
-    fn resolve_ref_table(
-        &self,
-        constraint_name: &str,
-    ) -> MetadataResult<String> {
-        let sql =
-            "SELECT table_name FROM all_constraints \
+    fn resolve_ref_table(&self, constraint_name: &str) -> MetadataResult<String> {
+        let sql = "SELECT table_name FROM all_constraints \
              WHERE owner = :1 AND constraint_name = :2";
 
         let row = self
             .conn
-            .query_row_as::<(String,)>(
-                sql,
-                &[&self.schema, &constraint_name],
-            )
+            .query_row_as::<(String,)>(sql, &[&self.schema, &constraint_name])
             .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to resolve FK ref: {e}"
-                ),
+                message: format!("failed to resolve FK ref: {e}"),
             })?;
 
         Ok(row.0)
     }
 
-    fn query_indexes(
-        &self,
-        table: &str,
-    ) -> MetadataResult<Vec<IndexInfo>> {
-        let sql =
-            "SELECT i.index_name, i.uniqueness, \
+    fn query_indexes(&self, table: &str) -> MetadataResult<Vec<IndexInfo>> {
+        let sql = "SELECT i.index_name, i.uniqueness, \
              i.index_type, \
              LISTAGG(ic.column_name, ',') \
                WITHIN GROUP (ORDER BY ic.column_position) \
@@ -271,18 +214,14 @@ impl OracleConnector {
                 &[&self.schema, &table.to_uppercase()],
             )
             .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to query indexes for {table}: {e}"
-                ),
+                message: format!("failed to query indexes for {table}: {e}"),
             })?;
 
         let mut indexes = Vec::new();
         for row in rows {
             let (name, uniqueness, index_type, cols_str) =
                 row.map_err(|e| MetadataError::Query {
-                    message: format!(
-                        "failed to read index: {e}"
-                    ),
+                    message: format!("failed to read index: {e}"),
                 })?;
 
             indexes.push(IndexInfo {
@@ -299,51 +238,35 @@ impl OracleConnector {
         Ok(indexes)
     }
 
-    fn query_table_stats(
-        &self,
-        table: &str,
-    ) -> MetadataResult<(f64, u64)> {
-        let sql =
-            "SELECT NVL(num_rows, 0), \
+    fn query_table_stats(&self, table: &str) -> MetadataResult<(f64, u64)> {
+        let sql = "SELECT NVL(num_rows, 0), \
              NVL(blocks, 0) * \
                (SELECT value FROM v$parameter \
                 WHERE name = 'db_block_size') \
              FROM all_tables \
              WHERE owner = :1 AND table_name = :2";
 
-        let result = self.conn.query_row_as::<(f64, f64)>(
-            sql,
-            &[&self.schema, &table.to_uppercase()],
-        );
+        let result = self
+            .conn
+            .query_row_as::<(f64, f64)>(sql, &[&self.schema, &table.to_uppercase()]);
 
         match result {
-            Ok((rows, bytes)) => {
-                Ok((rows.max(0.0), bytes.max(0.0) as u64))
-            }
+            Ok((rows, bytes)) => Ok((rows.max(0.0), bytes.max(0.0) as u64)),
             Err(_) => {
                 // Fallback: just get num_rows without size.
-                let sql2 =
-                    "SELECT NVL(num_rows, 0) \
+                let sql2 = "SELECT NVL(num_rows, 0) \
                      FROM all_tables \
                      WHERE owner = :1 \
                      AND table_name = :2";
 
                 let (rows,) = self
                     .conn
-                    .query_row_as::<(f64,)>(
-                        sql2,
-                        &[
-                            &self.schema,
-                            &table.to_uppercase(),
-                        ],
-                    )
-                    .map_err(|e| {
-                        MetadataError::Query {
-                            message: format!(
-                                "failed to query stats for \
+                    .query_row_as::<(f64,)>(sql2, &[&self.schema, &table.to_uppercase()])
+                    .map_err(|e| MetadataError::Query {
+                        message: format!(
+                            "failed to query stats for \
                                  {table}: {e}"
-                            ),
-                        }
+                        ),
                     })?;
 
                 Ok((rows.max(0.0), 0))
@@ -351,12 +274,8 @@ impl OracleConnector {
         }
     }
 
-    fn query_column_stats(
-        &self,
-        table: &str,
-    ) -> MetadataResult<HashMap<String, ColumnStatistics>> {
-        let sql =
-            "SELECT column_name, num_distinct, \
+    fn query_column_stats(&self, table: &str) -> MetadataResult<HashMap<String, ColumnStatistics>> {
+        let sql = "SELECT column_name, num_distinct, \
              NVL(num_nulls, 0), avg_col_len \
              FROM all_tab_col_statistics \
              WHERE owner = :1 AND table_name = :2";
@@ -379,12 +298,9 @@ impl OracleConnector {
 
         let mut result = HashMap::new();
         for row in rows {
-            let (col_name, ndv, num_nulls, avg_len) =
-                row.map_err(|e| MetadataError::Query {
-                    message: format!(
-                        "failed to read column stats: {e}"
-                    ),
-                })?;
+            let (col_name, ndv, num_nulls, avg_len) = row.map_err(|e| MetadataError::Query {
+                message: format!("failed to read column stats: {e}"),
+            })?;
 
             let null_fraction = if total_rows > 0.0 {
                 num_nulls / total_rows
@@ -406,26 +322,20 @@ impl OracleConnector {
         }
 
         // Query histogram bounds if available.
-        let hist_sql =
-            "SELECT column_name, endpoint_value \
+        let hist_sql = "SELECT column_name, endpoint_value \
              FROM all_tab_histograms \
              WHERE owner = :1 AND table_name = :2 \
              AND endpoint_value IS NOT NULL \
              ORDER BY column_name, endpoint_number";
 
-        if let Ok(hist_rows) = self.conn.query_as::<(
-            String,
-            String,
-        )>(
-            hist_sql,
-            &[&self.schema, &table.to_uppercase()],
-        ) {
+        if let Ok(hist_rows) = self
+            .conn
+            .query_as::<(String, String)>(hist_sql, &[&self.schema, &table.to_uppercase()])
+        {
             for row in hist_rows.flatten() {
                 let (col_name, endpoint) = row;
                 if let Some(stats) = result.get_mut(&col_name) {
-                    stats
-                        .histogram_bounds
-                        .push(endpoint);
+                    stats.histogram_bounds.push(endpoint);
                 }
             }
         }
@@ -438,9 +348,7 @@ impl OracleConnector {
     /// # Errors
     ///
     /// Returns errors if catalog queries fail.
-    pub fn gather_schema_mut(
-        &self,
-    ) -> MetadataResult<SchemaInfo> {
+    pub fn gather_schema_mut(&self) -> MetadataResult<SchemaInfo> {
         let table_names = self.query_tables()?;
         let mut tables = HashMap::new();
 
@@ -448,8 +356,7 @@ impl OracleConnector {
             let columns = self.query_columns(name)?;
             let constraints = self.query_constraints(name)?;
             let indexes = self.query_indexes(name)?;
-            let (row_count, _) =
-                self.query_table_stats(name)?;
+            let (row_count, _) = self.query_table_stats(name)?;
 
             tables.insert(
                 name.clone(),
@@ -476,12 +383,8 @@ impl OracleConnector {
     /// # Errors
     ///
     /// Returns errors if catalog queries fail.
-    pub fn gather_statistics_mut(
-        &self,
-        table: &str,
-    ) -> MetadataResult<TableStats> {
-        let (row_count, total_bytes) =
-            self.query_table_stats(table)?;
+    pub fn gather_statistics_mut(&self, table: &str) -> MetadataResult<TableStats> {
+        let (row_count, total_bytes) = self.query_table_stats(table)?;
         let columns = self.query_column_stats(table)?;
 
         Ok(TableStats {
@@ -497,10 +400,7 @@ impl OracleConnector {
     /// # Errors
     ///
     /// Returns errors if the EXPLAIN query fails.
-    pub fn explain_query_mut(
-        &self,
-        sql: &str,
-    ) -> MetadataResult<ExplainPlan> {
+    pub fn explain_query_mut(&self, sql: &str) -> MetadataResult<ExplainPlan> {
         // Delete previous plan.
         self.conn
             .execute(
@@ -518,14 +418,11 @@ impl OracleConnector {
         self.conn
             .execute(&explain_sql, &[])
             .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "EXPLAIN PLAN failed: {e}"
-                ),
+                message: format!("EXPLAIN PLAN failed: {e}"),
             })?;
 
         // Read the plan from PLAN_TABLE.
-        let plan_sql =
-            "SELECT LPAD(' ', 2 * level) || operation \
+        let plan_sql = "SELECT LPAD(' ', 2 * level) || operation \
                || CASE WHEN options IS NOT NULL \
                   THEN ' (' || options || ')' END \
                || CASE WHEN object_name IS NOT NULL \
@@ -548,9 +445,7 @@ impl OracleConnector {
                 Option<String>,
             )>(plan_sql, &[])
             .map_err(|e| MetadataError::Query {
-                message: format!(
-                    "failed to read plan table: {e}"
-                ),
+                message: format!("failed to read plan table: {e}"),
             })?;
 
         let mut lines = Vec::new();
@@ -558,12 +453,9 @@ impl OracleConnector {
         let mut total_rows = None;
 
         for row in rows {
-            let (line, cost, card, _bytes, _obj) =
-                row.map_err(|e| MetadataError::Query {
-                    message: format!(
-                        "failed to read plan row: {e}"
-                    ),
-                })?;
+            let (line, cost, card, _bytes, _obj) = row.map_err(|e| MetadataError::Query {
+                message: format!("failed to read plan row: {e}"),
+            })?;
 
             if total_cost.is_none() {
                 total_cost = cost;
@@ -607,17 +499,11 @@ impl DatabaseConnector for OracleConnector {
         self.gather_schema_mut()
     }
 
-    fn gather_statistics(
-        &self,
-        table: &str,
-    ) -> MetadataResult<TableStats> {
+    fn gather_statistics(&self, table: &str) -> MetadataResult<TableStats> {
         self.gather_statistics_mut(table)
     }
 
-    fn explain_query(
-        &self,
-        sql: &str,
-    ) -> MetadataResult<ExplainPlan> {
+    fn explain_query(&self, sql: &str) -> MetadataResult<ExplainPlan> {
         self.explain_query_mut(sql)
     }
 }
@@ -632,29 +518,17 @@ struct OracleUrlParts {
 }
 
 /// Parse `oracle://user:pass@host:port/service_name`.
-fn parse_oracle_url(
-    url: &str,
-) -> MetadataResult<OracleUrlParts> {
+fn parse_oracle_url(url: &str) -> MetadataResult<OracleUrlParts> {
     let stripped = url
         .strip_prefix("oracle://")
         .ok_or_else(|| MetadataError::Connection {
-            message: format!(
-                "invalid Oracle URL scheme: {url}"
-            ),
+            message: format!("invalid Oracle URL scheme: {url}"),
         })?;
 
-    let (userinfo, rest) = stripped
-        .split_once('@')
-        .unwrap_or(("system:", stripped));
-    let (user, password) = userinfo
-        .split_once(':')
-        .unwrap_or((userinfo, ""));
-    let (hostport, service) = rest
-        .split_once('/')
-        .unwrap_or((rest, "ORCL"));
-    let (host, port_str) = hostport
-        .split_once(':')
-        .unwrap_or((hostport, "1521"));
+    let (userinfo, rest) = stripped.split_once('@').unwrap_or(("system:", stripped));
+    let (user, password) = userinfo.split_once(':').unwrap_or((userinfo, ""));
+    let (hostport, service) = rest.split_once('/').unwrap_or((rest, "ORCL"));
+    let (host, port_str) = hostport.split_once(':').unwrap_or((hostport, "1521"));
 
     let port: u16 = port_str.parse().unwrap_or(1521);
 
@@ -682,13 +556,9 @@ fn classify_oracle_node(line: &str) -> NodeType {
         NodeType::MergeJoin
     } else if upper.contains("NESTED LOOPS") {
         NodeType::NestedLoop
-    } else if upper.contains("SORT")
-        || upper.contains("ORDER BY")
-    {
+    } else if upper.contains("SORT") || upper.contains("ORDER BY") {
         NodeType::Sort
-    } else if upper.contains("GROUP BY")
-        || upper.contains("HASH GROUP")
-    {
+    } else if upper.contains("GROUP BY") || upper.contains("HASH GROUP") {
         NodeType::HashAggregate
     } else if upper.contains("FILTER") {
         NodeType::Other
@@ -703,10 +573,8 @@ mod tests {
 
     #[test]
     fn parse_url_basic() {
-        let parts = parse_oracle_url(
-            "oracle://scott:tiger@dbhost:1521/ORCL",
-        )
-        .expect("should parse");
+        let parts =
+            parse_oracle_url("oracle://scott:tiger@dbhost:1521/ORCL").expect("should parse");
         assert_eq!(parts.host, "dbhost");
         assert_eq!(parts.port, 1521);
         assert_eq!(parts.user, "scott");
@@ -716,63 +584,36 @@ mod tests {
 
     #[test]
     fn parse_url_defaults() {
-        let parts = parse_oracle_url(
-            "oracle://system:@localhost",
-        )
-        .expect("should parse");
+        let parts = parse_oracle_url("oracle://system:@localhost").expect("should parse");
         assert_eq!(parts.port, 1521);
         assert_eq!(parts.service, "ORCL");
     }
 
     #[test]
     fn parse_url_invalid() {
-        assert!(
-            parse_oracle_url("postgresql://localhost")
-                .is_err()
-        );
+        assert!(parse_oracle_url("postgresql://localhost").is_err());
     }
 
     #[test]
     fn classify_nodes() {
-        assert_eq!(
-            classify_oracle_node("TABLE ACCESS FULL"),
-            NodeType::SeqScan
-        );
+        assert_eq!(classify_oracle_node("TABLE ACCESS FULL"), NodeType::SeqScan);
         assert_eq!(
             classify_oracle_node("INDEX RANGE SCAN"),
             NodeType::IndexScan
         );
-        assert_eq!(
-            classify_oracle_node("HASH JOIN"),
-            NodeType::HashJoin
-        );
-        assert_eq!(
-            classify_oracle_node("MERGE JOIN"),
-            NodeType::MergeJoin
-        );
-        assert_eq!(
-            classify_oracle_node("NESTED LOOPS"),
-            NodeType::NestedLoop
-        );
-        assert_eq!(
-            classify_oracle_node("SORT ORDER BY"),
-            NodeType::Sort
-        );
+        assert_eq!(classify_oracle_node("HASH JOIN"), NodeType::HashJoin);
+        assert_eq!(classify_oracle_node("MERGE JOIN"), NodeType::MergeJoin);
+        assert_eq!(classify_oracle_node("NESTED LOOPS"), NodeType::NestedLoop);
+        assert_eq!(classify_oracle_node("SORT ORDER BY"), NodeType::Sort);
         assert_eq!(
             classify_oracle_node("HASH GROUP BY"),
             NodeType::HashAggregate
         );
-        assert_eq!(
-            classify_oracle_node("SELECT STATEMENT"),
-            NodeType::Other
-        );
+        assert_eq!(classify_oracle_node("SELECT STATEMENT"), NodeType::Other);
     }
 
     #[test]
     fn connector_kind() {
-        assert_eq!(
-            DatabaseKind::Oracle.to_string(),
-            "Oracle"
-        );
+        assert_eq!(DatabaseKind::Oracle.to_string(), "Oracle");
     }
 }

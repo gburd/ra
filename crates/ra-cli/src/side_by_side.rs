@@ -16,10 +16,7 @@ use colored::Colorize;
 /// Uses a two-column layout when the content fits, with column
 /// headers "Original" and "Optimized".
 #[must_use]
-pub fn render_side_by_side(
-    original: &str,
-    optimized: &str,
-) -> String {
+pub fn render_side_by_side(original: &str, optimized: &str) -> String {
     let term_width = terminal_width();
     render_side_by_side_width(original, optimized, term_width)
 }
@@ -29,11 +26,7 @@ pub fn render_side_by_side(
 /// If the terminal is too narrow (< 80 columns), falls back to
 /// a stacked vertical layout.
 #[must_use]
-pub fn render_side_by_side_width(
-    original: &str,
-    optimized: &str,
-    width: usize,
-) -> String {
+pub fn render_side_by_side_width(original: &str, optimized: &str, width: usize) -> String {
     if width < 80 {
         return render_stacked(original, optimized);
     }
@@ -54,12 +47,7 @@ pub fn render_side_by_side_width(
         format!("{}", "Original".bold()),
         format!("{}", "Optimized".bold()),
     );
-    let _ = writeln!(
-        out,
-        "{:<cw$}{sep}{:<cw$}",
-        "-".repeat(cw),
-        "-".repeat(cw),
-    );
+    let _ = writeln!(out, "{:<cw$}{sep}{:<cw$}", "-".repeat(cw), "-".repeat(cw),);
 
     for idx in 0..max_lines {
         let left = orig_lines.get(idx).copied().unwrap_or("");
@@ -125,18 +113,9 @@ fn term_size() -> Option<(usize, usize)> {
         };
         // SAFETY: TIOCGWINSZ is a well-known ioctl for getting terminal
         // size. The winsize struct layout matches the kernel's expectation.
-        let ret = unsafe {
-            libc::ioctl(
-                libc::STDERR_FILENO,
-                libc::TIOCGWINSZ,
-                &mut size,
-            )
-        };
+        let ret = unsafe { libc::ioctl(libc::STDERR_FILENO, libc::TIOCGWINSZ, &mut size) };
         if ret == 0 && size.ws_col > 0 && size.ws_row > 0 {
-            return Some((
-                size.ws_col as usize,
-                size.ws_row as usize,
-            ));
+            return Some((size.ws_col as usize, size.ws_row as usize));
         }
     }
 
@@ -151,8 +130,7 @@ fn truncate_str(s: &str, max_width: usize) -> String {
     if max_width < 4 {
         return s.chars().take(max_width).collect();
     }
-    let mut result: String =
-        s.chars().take(max_width - 3).collect();
+    let mut result: String = s.chars().take(max_width - 3).collect();
     result.push_str("...");
     result
 }
@@ -167,8 +145,7 @@ mod tests {
     fn side_by_side_basic() {
         let left = "Line 1\nLine 2\nLine 3";
         let right = "Line A\nLine B";
-        let output =
-            render_side_by_side_width(left, right, 120);
+        let output = render_side_by_side_width(left, right, 120);
         assert!(output.contains("Original"));
         assert!(output.contains("Optimized"));
         assert!(output.contains("Line 1"));
@@ -178,8 +155,7 @@ mod tests {
     #[test]
     fn side_by_side_equal_lines() {
         let text = "Scan(users)\nFilter\nProject";
-        let output =
-            render_side_by_side_width(text, text, 120);
+        let output = render_side_by_side_width(text, text, 120);
         assert!(output.contains("Scan(users)"));
         assert!(output.contains("Filter"));
         assert!(output.contains("Project"));
@@ -189,8 +165,7 @@ mod tests {
     fn side_by_side_narrow_falls_back() {
         let left = "Left plan";
         let right = "Right plan";
-        let output =
-            render_side_by_side_width(left, right, 60);
+        let output = render_side_by_side_width(left, right, 60);
         // Narrow terminal falls back to stacked
         assert!(output.contains("Original:"));
         assert!(output.contains("Optimized:"));
@@ -200,32 +175,28 @@ mod tests {
     fn side_by_side_very_narrow() {
         let left = "A";
         let right = "B";
-        let output =
-            render_side_by_side_width(left, right, 40);
+        let output = render_side_by_side_width(left, right, 40);
         assert!(output.contains("Original:"));
         assert!(output.contains("Optimized:"));
     }
 
     #[test]
     fn side_by_side_empty_left() {
-        let output =
-            render_side_by_side_width("", "Right", 120);
+        let output = render_side_by_side_width("", "Right", 120);
         assert!(output.contains("Original"));
         assert!(output.contains("Right"));
     }
 
     #[test]
     fn side_by_side_empty_right() {
-        let output =
-            render_side_by_side_width("Left", "", 120);
+        let output = render_side_by_side_width("Left", "", 120);
         assert!(output.contains("Left"));
         assert!(output.contains("Optimized"));
     }
 
     #[test]
     fn side_by_side_both_empty() {
-        let output =
-            render_side_by_side_width("", "", 120);
+        let output = render_side_by_side_width("", "", 120);
         assert!(output.contains("Original"));
         assert!(output.contains("Optimized"));
     }
@@ -233,11 +204,7 @@ mod tests {
     #[test]
     fn side_by_side_long_lines_truncated() {
         let long_line = "x".repeat(200);
-        let output = render_side_by_side_width(
-            &long_line,
-            "short",
-            120,
-        );
+        let output = render_side_by_side_width(&long_line, "short", 120);
         // Should contain truncation indicator
         assert!(output.contains("..."));
     }
@@ -277,8 +244,7 @@ mod tests {
     fn side_by_side_width_120() {
         let left = "Filter\n  Scan(users)";
         let right = "Project\n  Filter\n    Scan(users)";
-        let output =
-            render_side_by_side_width(left, right, 120);
+        let output = render_side_by_side_width(left, right, 120);
         // Check that the separator is present
         assert!(output.contains(" | "));
     }
@@ -287,8 +253,7 @@ mod tests {
     fn side_by_side_width_80() {
         let left = "Scan(a)";
         let right = "Scan(b)";
-        let output =
-            render_side_by_side_width(left, right, 80);
+        let output = render_side_by_side_width(left, right, 80);
         assert!(output.contains(" | "));
         assert!(output.contains("Original"));
     }
@@ -297,8 +262,7 @@ mod tests {
     fn side_by_side_unequal_line_counts() {
         let left = "A\nB\nC\nD\nE";
         let right = "X";
-        let output =
-            render_side_by_side_width(left, right, 120);
+        let output = render_side_by_side_width(left, right, 120);
         // All left lines should be present
         assert!(output.contains("A"));
         assert!(output.contains("E"));
@@ -309,8 +273,7 @@ mod tests {
     fn side_by_side_preserves_tree_chars() {
         let left = "└─ Scan(users)";
         let right = "└─ Scan(orders)";
-        let output =
-            render_side_by_side_width(left, right, 120);
+        let output = render_side_by_side_width(left, right, 120);
         assert!(output.contains("Scan(users)"));
         assert!(output.contains("Scan(orders)"));
     }
