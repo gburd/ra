@@ -20,8 +20,12 @@ pub struct ProxyConfig {
     /// Enable pg_plan_advice integration (Postgres 19+).
     pub enable_plan_takeover: bool,
     /// Log format (postgres, json, or plain).
+    /// TODO: Implement in full wire protocol handler (Issue #80)
+    #[allow(dead_code)]
     pub log_format: LogFormat,
     /// Minimum improvement percentage to log (e.g., 10.0 for 10%).
+    /// TODO: Implement in query comparison logic (Issue #80)
+    #[allow(dead_code)]
     pub min_improvement_percent: f64,
 }
 
