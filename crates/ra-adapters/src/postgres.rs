@@ -863,6 +863,7 @@ impl PostgresAdapter {
                     primary_key: info.primary_key.clone(),
                     foreign_keys: core_fks,
                     indexes: core_indexes,
+                    storage_format: ra_core::facts::StorageFormat::RowBased,
                 },
             );
         }

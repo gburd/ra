@@ -525,6 +525,7 @@ impl StoolapAdapter {
                     primary_key: Vec::new(),
                     foreign_keys: Vec::new(),
                     indexes: core_indexes,
+                    storage_format: ra_core::facts::StorageFormat::Columnar,
                 },
             );
 

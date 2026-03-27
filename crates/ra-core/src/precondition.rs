@@ -361,6 +361,7 @@ impl PreConditionBuilder {
     }
 
     /// Add a pattern constraint
+    #[must_use]
     pub fn pattern(mut self, pattern: impl Into<String>) -> Self {
         self.conditions.push(PreCondition::Pattern {
             must_match: Some(pattern.into()),
@@ -372,6 +373,7 @@ impl PreConditionBuilder {
     }
 
     /// Add a predicate constraint
+    #[must_use]
     pub fn predicate(mut self, condition: impl Into<String>) -> Self {
         self.conditions.push(PreCondition::Predicate {
             condition: condition.into(),
@@ -382,6 +384,7 @@ impl PreConditionBuilder {
     }
 
     /// Add a fact constraint
+    #[must_use]
     pub fn fact(
         mut self,
         fact_type: impl Into<String>,
@@ -402,6 +405,7 @@ impl PreConditionBuilder {
     }
 
     /// Add a capability constraint
+    #[must_use]
     pub fn capability(mut self, database: impl Into<String>, feature: impl Into<String>) -> Self {
         self.conditions.push(PreCondition::Capability {
             database: database.into(),
@@ -413,6 +417,7 @@ impl PreConditionBuilder {
     }
 
     /// Build the preconditions list
+    #[must_use]
     pub fn build(self) -> Vec<PreCondition> {
         self.conditions
     }

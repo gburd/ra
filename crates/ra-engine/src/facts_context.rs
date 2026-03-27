@@ -409,7 +409,7 @@ mod tests {
             primary_key: vec!["id".to_string()],
             foreign_keys: vec![],
             indexes: vec![],
-            storage_format: ra_core::StorageFormat::RowBased,
+            storage_format: ra_core::facts::StorageFormat::RowBased,
         };
         ctx.add_schema(info);
         let guard = ctx.schema.read().unwrap();

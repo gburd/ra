@@ -19,8 +19,8 @@ impl Backend for PolyglotBackend {
         source: Dialect,
         target: Dialect,
     ) -> Result<TranslationResult, TranslationError> {
-        let source_dialect = map_to_polyglot_dialect(source)?;
-        let target_dialect = map_to_polyglot_dialect(target)?;
+        let source_dialect = map_to_polyglot_dialect(source);
+        let target_dialect = map_to_polyglot_dialect(target);
 
         match transpile(sql, source_dialect, target_dialect) {
             Ok(translated_sql) => {
@@ -31,8 +31,7 @@ impl Backend for PolyglotBackend {
                     warnings.push(TranslationWarning {
                         severity: WarningSeverity::Info,
                         message: format!(
-                            "Translated from {} to {} using Polyglot backend",
-                            source, target
+                            "Translated from {source} to {target} using Polyglot backend"
                         ),
                         hint: Some("This translation uses the Polyglot SQL transpiler".to_string()),
                     });
@@ -44,15 +43,14 @@ impl Backend for PolyglotBackend {
                 })
             }
             Err(e) => Err(TranslationError::TranspilationFailed(format!(
-                "Polyglot transpilation failed: {}",
-                e
+                "Polyglot transpilation failed: {e}"
             ))),
         }
     }
 }
 
-/// Map our Dialect enum to Polyglot's DialectType.
-fn map_to_polyglot_dialect(dialect: Dialect) -> Result<DialectType, TranslationError> {
+/// Map our Dialect enum to Polyglot's `DialectType`.
+fn map_to_polyglot_dialect(dialect: Dialect) -> DialectType {
     let polyglot_dialect = match dialect {
         Dialect::PostgreSql => DialectType::PostgreSQL,
         Dialect::MySql => DialectType::MySQL,
@@ -115,7 +113,7 @@ fn map_to_polyglot_dialect(dialect: Dialect) -> Result<DialectType, TranslationE
         Dialect::Dune => DialectType::Dune,
     };
 
-    Ok(polyglot_dialect)
+    polyglot_dialect
 }
 
 #[cfg(test)]

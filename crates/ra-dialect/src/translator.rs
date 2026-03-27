@@ -242,7 +242,6 @@ impl DialectTranslator {
 // AST-level translation methods on DialectTranslator.
 // Currently translate() delegates to NativeBackend; these will
 // replace it once the backend abstraction is unified.
-#[allow(dead_code)]
 impl DialectTranslator {
     fn translate_statement(
         &self,
@@ -902,7 +901,6 @@ impl DialectTranslator {
 }
 
 /// Build a CONCAT(left, right) function call expression.
-#[allow(dead_code)]
 fn make_concat_call(left: Expr, right: Expr) -> Expr {
     Expr::Function(ast::Function {
         name: ObjectName(vec![Ident::new("CONCAT")]),
@@ -923,7 +921,6 @@ fn make_concat_call(left: Expr, right: Expr) -> Expr {
 }
 
 /// Wrap an expression in `LOWER()` function call.
-#[allow(dead_code)]
 fn wrap_in_lower(expr: Expr) -> Expr {
     Expr::Function(ast::Function {
         name: ObjectName(vec![Ident::new("LOWER")]),
