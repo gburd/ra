@@ -1,5 +1,106 @@
 # Changelog
 
+## [0.2.1] - 2026-03-27
+
+Phase 21: CLI Enhancements and Web UI Demonstrations
+
+Recent commits focusing on developer experience improvements, enhanced CLI output,
+and interactive web demonstrations.
+
+### Added
+
+**CLI Output Enhancements** (`ra-cli`)
+- Smart header text that detects unlimited vs bounded resource budgets
+- Real-time system metrics display (CPU utilization, load average, memory usage)
+- Reorganized output order for better readability: hardware first, then formatted SQL
+- SQL pretty-printing with proper formatting
+- Enhanced optimization step visualization
+- Rust-compiler-style error messages with context
+
+**System Metrics Module** (`ra-hardware`)
+- `SystemMetrics` struct collecting CPU, memory, and load average data
+- CPU utilization sampled from `/proc/stat` on Linux
+- Memory usage from `/proc/meminfo`
+- Formatted output: `CPU: 15.3% | Load: 1.42 | Memory: 68.5% (4096 / 12288 MB)`
+- Integration with CLI verbose mode
+
+**Proxy Command Foundation** (`ra-cli`)
+- Command structure for database proxy functionality
+- Argument handling for connection strings, ports, and backends
+- Foundation for transparent query interception and optimization
+
+**EXPLAIN Formatters** (`ra-dialect`)
+- Database-specific EXPLAIN output formatters for PostgreSQL, MySQL, SQLite
+- Integration with CLI for formatted query plan output
+- Support for multiple EXPLAIN formats (text, JSON, XML)
+
+**Interactive Web Demonstrations** (`ra-web`)
+- 10 fully functional demos with backend API endpoints
+- Statistics staleness impact visualization
+- Hardware-specific plan comparison across 12 profiles
+- Join algorithm selection with cost breakdown
+- Aggregation strategy selection
+- Index selection based on selectivity
+- Subquery unnesting demonstration
+- Parallel query execution scaling
+- GPU offloading decision analysis
+- Distributed query planning (broadcast vs shuffle)
+- Cost model calibration interface
+
+**Documentation** (`docs/`)
+- Comprehensive Ra Web UI quickstart guide with demo walkthroughs
+- Detailed descriptions of all 10 interactive demonstrations
+- API endpoint documentation for programmatic access
+- Troubleshooting and architecture sections
+
+### Changed
+
+**CLI Output Order** (`ra-cli`)
+- Moved hardware information to always display (not just verbose mode)
+- System metrics now shown in verbose mode after hardware info
+- SQL query formatted and displayed before plans
+- Optimization steps better separated visually
+
+**Improved Verbose Mode** (`ra-cli`)
+- Better diff visualization with `--diff` flag
+- Enhanced rule application tracking
+- Clearer cost delta reporting
+
+### Fixed
+
+**Build Issues**
+- Added unixODBC to flake.nix for ODBC database support
+- Fixed proxy command argument type conversions
+- Removed unused imports across multiple crates
+- Added missing OptimizerConfig fields to differential_timeline benchmark
+- Completed exhaustive pattern matching for FieldAccess and SubQuery expressions
+- Cleaned up clippy warnings with thread safety bounds
+
+**Documentation**
+- Fixed VitePress dead links
+- Corrected CLI documentation mismatches
+- Removed duplicate /ra prefix from RFC cross-links
+- Added language aliases for VitePress syntax highlighting
+
+**Expression Handling** (`ra-core`)
+- Added FieldAccess and SubQuery variants to Expression enum
+- Updated all pattern matches to handle new expression types
+- Fixed type errors in budget passing
+
+### Metrics
+
+| Metric                    | Value                              |
+|---------------------------|------------------------------------|
+| Commits                   | 32                                 |
+| CLI improvements          | 8 commits                          |
+| Web demos implemented     | 10 (fully functional)              |
+| API endpoints added       | 14 (4 core + 10 demo)              |
+| Documentation pages       | 1 major guide (quickstart)         |
+| Build fixes               | 7 commits                          |
+| Breaking changes          | None                               |
+
+---
+
 ## [0.2.0] - 2026-03-21
 
 Phase 20: Documentation, SQL Coverage, and Engine Hardening

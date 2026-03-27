@@ -118,7 +118,8 @@ export default withMermaid(defineConfig({
             { text: 'Cost Models', link: '/guides/cost-models' },
             { text: 'Testing', link: '/guides/testing' },
             { text: 'Test Format', link: '/guides/test-format' },
-            { text: 'Production Workloads', link: '/guides/modeling-production-workloads' }
+            { text: 'Production Workloads', link: '/guides/modeling-production-workloads' },
+            { text: 'Ra Web UI Quickstart', link: '/guides/ra-web-quickstart' }
           ]
         },
         {
@@ -156,7 +157,8 @@ export default withMermaid(defineConfig({
             { text: 'Resource Budgets', link: '/features/resource-budgets' },
             { text: 'SQL Coverage', link: '/features/sql-coverage' },
             { text: 'Statistics Timeline', link: '/features/statistics-timeline-format' },
-            { text: 'WASM Databases', link: '/features/wasm-databases' }
+            { text: 'WASM Databases', link: '/features/wasm-databases' },
+            { text: 'Interactive Demonstrations', link: '/features/demonstrations' }
           ]
         },
         {
