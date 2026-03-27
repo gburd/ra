@@ -369,6 +369,14 @@ impl FederatedOptimizer {
                         )
                     })
             }
+            Expr::FieldAccess { expr, .. } => {
+                self.filter_references_table(expr, table_name)
+            }
+            Expr::SubQuery { test_expr, .. } => {
+                test_expr.as_ref().map_or(false, |t| {
+                    self.filter_references_table(t, table_name)
+                })
+            }
         }
     }
 

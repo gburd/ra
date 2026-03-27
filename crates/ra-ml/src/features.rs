@@ -318,6 +318,14 @@ impl FeatureSchema {
                 encode_unaryop(*op, features);
                 self.encode_predicate(operand, features);
             }
+            Expr::FieldAccess { expr, .. } => {
+                self.encode_predicate(expr, features);
+            }
+            Expr::SubQuery { test_expr, .. } => {
+                if let Some(test) = test_expr {
+                    self.encode_predicate(test, features);
+                }
+            }
             Expr::Const(_)
             | Expr::Function { .. }
             | Expr::Case { .. }

@@ -5,7 +5,8 @@
 
 use ra_core::{
     AggregateExpr, ColumnRef, Const, Expr, JoinType, NullOrdering,
-    ProjectionColumn, RelExpr, SortDirection, SortKey, UnaryOp,
+    ProjectionColumn, RelExpr, SortDirection, SortKey, SubQueryType,
+    UnaryOp,
 };
 
 /// Renders [`RelExpr`] trees to SQL strings.
@@ -467,6 +468,45 @@ fn render_scalar(expr: &Expr) -> String {
                 .as_ref()
                 .map_or(String::new(), |e| render_scalar(e));
             format!("{}[{s}:{e}]", render_scalar(array))
+        }
+        Expr::FieldAccess { expr, field_name } => {
+            format!("({}).{field_name}", render_scalar(expr))
+        }
+        Expr::SubQuery {
+            subquery_type,
+            query,
+            test_expr,
+        } => {
+            let subquery_sql = SqlRenderer::render(query);
+            match subquery_type {
+                SubQueryType::Scalar => {
+                    format!("({})", subquery_sql)
+                }
+                SubQueryType::Exists => {
+                    format!("EXISTS ({})", subquery_sql)
+                }
+                SubQueryType::In => {
+                    if let Some(test) = test_expr {
+                        format!("{} IN ({})", render_scalar(test), subquery_sql)
+                    } else {
+                        format!("IN ({})", subquery_sql)
+                    }
+                }
+                SubQueryType::Any => {
+                    if let Some(test) = test_expr {
+                        format!("{} = ANY ({})", render_scalar(test), subquery_sql)
+                    } else {
+                        format!("= ANY ({})", subquery_sql)
+                    }
+                }
+                SubQueryType::All => {
+                    if let Some(test) = test_expr {
+                        format!("{} > ALL ({})", render_scalar(test), subquery_sql)
+                    } else {
+                        format!("> ALL ({})", subquery_sql)
+                    }
+                }
+            }
         }
     }
 }

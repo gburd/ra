@@ -403,6 +403,20 @@ impl FingerprintCollector {
                     self.visit_expr(e);
                 }
             }
+            Expr::FieldAccess { expr, field_name } => {
+                self.predicate_ops.push(0x0C);
+                for b in field_name.as_bytes() {
+                    self.predicate_ops.push(*b);
+                }
+                self.predicate_ops.push(0x00);
+                self.visit_expr(expr);
+            }
+            Expr::SubQuery { test_expr, .. } => {
+                self.predicate_ops.push(0x0D);
+                if let Some(test) = test_expr {
+                    self.visit_expr(test);
+                }
+            }
             // Pattern-related expressions: record tag only
             Expr::PatternPrev(..)
             | Expr::PatternNext(..)
