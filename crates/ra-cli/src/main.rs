@@ -3038,7 +3038,6 @@ fn format_error_with_location(
 
 /// Format error with general context highlighting.
 fn format_error_with_context(sql: &str, error_msg: &str) -> anyhow::Error {
-    use colored::Colorize;
 
     let mut output = String::new();
     output.push_str(&format!("{}: SQL parse error\n", "error".red().bold()));
