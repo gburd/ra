@@ -1,6 +1,6 @@
 [package]
-name = "ra-pg-extension"
-description = "PostgreSQL pgrx extension: augments the planner with RA optimizer advice"
+name = "pg-ra-planner"
+description = "PostgreSQL extension: RA optimizer planner integration"
 version = "0.2.0"
 edition = "2021"
 rust-version = "1.85.0"
@@ -12,7 +12,7 @@ repository = "https://github.com/gregburd/ra"
 crate-type = ["cdylib", "lib"]
 
 [[bin]]
-name = "pgrx_embed_ra_pg_extension"
+name = "pgrx_embed_pg_ra_planner"
 path = "./src/bin/pgrx_embed.rs"
 
 [features]

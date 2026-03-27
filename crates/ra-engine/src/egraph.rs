@@ -2145,6 +2145,18 @@ fn add_scalar_expr(rec: &mut RecExpr<RelLang>, expr: &Expr) -> Result<Id, EGraph
                 vec![tag_id, arr_id, start_id, end_id];
             Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
         }
+        Expr::FieldAccess { expr, field_name } => {
+            let expr_id = add_scalar_expr(rec, expr)?;
+            let field_id = add_symbol(rec, field_name);
+            let tag_id = add_symbol(rec, "FIELD_ACCESS");
+            let ids = vec![tag_id, expr_id, field_id];
+            Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
+        }
+        Expr::SubQuery { .. } => Err(EGraphError::ConversionError(
+            "Subquery expressions are not yet supported in the \
+                 e-graph representation"
+                .into(),
+        )),
     }
 }
 

@@ -1359,9 +1359,19 @@ unsafe fn convert_expr_inner(node: *mut pg_sys::Node, depth: u32) -> Result<Expr
         if arg.is_null() {
             return Ok(Expr::Const(Const::Null));
         }
-        // Represent as the base expression; field access
-        // info is lost but we don't crash.
-        return convert_expr_inner(arg as *mut pg_sys::Node, depth);
+
+        // Extract field number and resolve to name
+        let fieldnum = (*fs).fieldnum;
+        let result_type = (*fs).resulttype;
+        let field_name = resolve_field_name(result_type, fieldnum)
+            .unwrap_or_else(|| format!("field_{fieldnum}"));
+
+        let base_expr = convert_expr_inner(arg as *mut pg_sys::Node, depth)?;
+
+        return Ok(Expr::FieldAccess {
+            expr: Box::new(base_expr),
+            field_name,
+        });
     }
     if tag == pg_sys::NodeTag::T_MinMaxExpr {
         return convert_minmax_expr(node as *mut pg_sys::MinMaxExpr, depth);
@@ -1437,8 +1447,16 @@ unsafe fn convert_pg_const(con: *mut pg_sys::Const) -> Result<Expr, String> {
                 Const::String(s)
             }
         }
-        // NUMERICOID: cannot decode inline; represent as 0.0
-        1700 => Const::Float(0.0),
+        // NUMERICOID: decode using PostgreSQL's numeric_to_double
+        1700 => {
+            if datum_val == 0 {
+                Const::Null
+            } else {
+                let numeric_ptr = datum_val as *mut pg_sys::NumericData;
+                let float_val = numeric_to_double(numeric_ptr);
+                Const::Float(float_val)
+            }
+        }
         // DATEOID, TIMESTAMPOID, TIMESTAMPTZOID:
         // store as int (internal representation)
         1082 | 1114 | 1184 => Const::Int(datum_val as i64),
@@ -1446,6 +1464,31 @@ unsafe fn convert_pg_const(con: *mut pg_sys::Const) -> Result<Expr, String> {
     };
 
     Ok(Expr::Const(val))
+}
+
+/// Convert PostgreSQL NUMERIC to f64.
+///
+/// Uses PostgreSQL's DirectFunctionCall to safely convert NUMERIC
+/// to double precision without manual parsing.
+///
+/// # Safety
+///
+/// Must be called with a valid Numeric datum pointer.
+unsafe fn numeric_to_double(numeric: *mut pg_sys::NumericData) -> f64 {
+    if numeric.is_null() {
+        return 0.0;
+    }
+
+    // Use PostgreSQL's built-in numeric_float8 function
+    let datum = pg_sys::Datum::from(numeric as usize);
+    let result = pg_sys::DirectFunctionCall1Coll(
+        Some(pg_sys::numeric_float8),
+        pg_sys::InvalidOid,
+        datum,
+    );
+
+    // Extract f64 from result datum
+    f64::from_bits(result.value() as u64)
 }
 
 unsafe fn convert_opexpr(opexpr: *mut pg_sys::OpExpr, depth: u32) -> Result<Expr, String> {
@@ -1752,27 +1795,51 @@ unsafe fn convert_scalar_array_op(
 }
 
 /// Convert a SubLink (subquery in an expression).
-/// We represent these as function placeholders since we cannot
-/// inline-expand correlated subqueries into RelExpr.
-unsafe fn convert_sublink(sl: *mut pg_sys::SubLink, _depth: u32) -> Result<Expr, String> {
+///
+/// Recursively parses the subquery and represents it as a proper
+/// SubQuery expression node instead of a placeholder.
+unsafe fn convert_sublink(sl: *mut pg_sys::SubLink, depth: u32) -> Result<Expr, String> {
+    use ra_core::expr::SubQueryType;
+
     if sl.is_null() {
         return Ok(Expr::Const(Const::Null));
     }
-    let sublink_type = (*sl).subLinkType;
 
-    // Map sublink types to descriptive names.
-    #[allow(non_upper_case_globals)]
-    let name = match sublink_type {
-        pg_sys::SubLinkType::EXISTS_SUBLINK => "__sublink_exists",
-        pg_sys::SubLinkType::ANY_SUBLINK => "__sublink_any",
-        pg_sys::SubLinkType::ALL_SUBLINK => "__sublink_all",
-        pg_sys::SubLinkType::EXPR_SUBLINK => "__sublink_expr",
-        _ => "__sublink_unknown",
+    let sublink_type = (*sl).subLinkType;
+    let subselect = (*sl).subselect;
+
+    // Parse the subquery
+    let subquery = if subselect.is_null() {
+        return Ok(Expr::Const(Const::Null));
+    } else {
+        let query = subselect as *mut pg_sys::Query;
+        match parse_with_depth(query, depth + 1)? {
+            Some(rel_expr) => rel_expr,
+            None => return Ok(Expr::Const(Const::Null)),
+        }
     };
 
-    Ok(Expr::Function {
-        name: name.into(),
-        args: vec![],
+    // Extract test expression for IN/ANY/ALL
+    let test_expr = if !(*sl).testexpr.is_null() {
+        Some(Box::new(convert_expr_depth((*sl).testexpr, depth)?))
+    } else {
+        None
+    };
+
+    // Map sublink type
+    #[allow(non_upper_case_globals)]
+    let sq_type = match sublink_type {
+        pg_sys::SubLinkType::EXISTS_SUBLINK => SubQueryType::Exists,
+        pg_sys::SubLinkType::ANY_SUBLINK => SubQueryType::Any,
+        pg_sys::SubLinkType::ALL_SUBLINK => SubQueryType::All,
+        pg_sys::SubLinkType::EXPR_SUBLINK => SubQueryType::Scalar,
+        _ => SubQueryType::Scalar,
+    };
+
+    Ok(Expr::SubQuery {
+        subquery_type: sq_type,
+        query: Box::new(subquery),
+        test_expr,
     })
 }
 
@@ -1935,6 +2002,56 @@ unsafe fn resolve_tle_alias(tle: *mut pg_sys::TargetEntry) -> Option<String> {
         return None;
     }
     Some(CStr::from_ptr(name).to_string_lossy().into_owned())
+}
+
+/// Resolve a field name from a composite type OID and field number.
+///
+/// Looks up the attribute name from pg_attribute for the given
+/// type and field position.
+///
+/// # Safety
+///
+/// Must be called within a PostgreSQL backend process.
+unsafe fn resolve_field_name(type_oid: pg_sys::Oid, fieldnum: i16) -> Option<String> {
+    use std::ffi::CStr;
+
+    // Look up the type's typrelid (for composite types)
+    let type_tuple = pg_sys::SearchSysCache1(
+        pg_sys::SysCacheIdentifier::TYPEOID as i32,
+        pg_sys::Datum::from(type_oid),
+    );
+
+    if type_tuple.is_null() {
+        return None;
+    }
+
+    let type_form = pg_sys::GETSTRUCT(type_tuple) as *mut pg_sys::FormData_pg_type;
+    let typrelid = (*type_form).typrelid;
+    pg_sys::ReleaseSysCache(type_tuple);
+
+    if typrelid == pg_sys::InvalidOid {
+        return None;
+    }
+
+    // Look up the attribute
+    let attr_tuple = pg_sys::SearchSysCache2(
+        pg_sys::SysCacheIdentifier::ATTNUM as i32,
+        pg_sys::Datum::from(typrelid),
+        pg_sys::Datum::from(fieldnum as i32),
+    );
+
+    if attr_tuple.is_null() {
+        return None;
+    }
+
+    let attr_form = pg_sys::GETSTRUCT(attr_tuple) as *mut pg_sys::FormData_pg_attribute;
+    let name = CStr::from_ptr((*attr_form).attname.data.as_ptr())
+        .to_string_lossy()
+        .into_owned();
+
+    pg_sys::ReleaseSysCache(attr_tuple);
+
+    Some(name)
 }
 
 unsafe fn find_target_entry_by_ref(

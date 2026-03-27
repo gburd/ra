@@ -1,6 +1,6 @@
--- RA Planner Extension: PostgreSQL integration for the RA optimizer
+-- pg_ra_planner Extension: PostgreSQL integration for the RA optimizer
 --
--- Loaded via: CREATE EXTENSION ra_pg_extension;
+-- Loaded via: CREATE EXTENSION pg_ra_planner;
 --
 -- GUC variables (configured via SET):
 --   ra_planner.enabled         = on/off   (default: on)
@@ -16,7 +16,7 @@
 DO $$
 BEGIN
     IF current_setting('ra_planner.enabled', true) IS NULL THEN
-        RAISE WARNING 'ra_pg_extension: GUC variables not registered. '
+        RAISE WARNING 'pg_ra_planner: GUC variables not registered. '
             'Ensure the library is in shared_preload_libraries.';
     END IF;
 END;

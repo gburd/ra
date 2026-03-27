@@ -604,9 +604,10 @@ pub unsafe fn convert_to_planned_stmt(
 /// Returns a multiplier indicating how much better RA's plan is expected
 /// to be (e.g., 0.5 = 2x faster, 0.2 = 5x faster).
 ///
-/// Uses statistics coverage to scale the improvement estimate:
-/// - High coverage (>80%): trust the RA plan more, allow larger improvements
-/// - Low coverage (<50%): conservative, assume minimal improvement
+/// Enhanced algorithm using:
+/// 1. Statistics coverage and quality
+/// 2. Query complexity (join count, aggregates)
+/// 3. Detected optimization opportunities (index usage, join reordering)
 fn estimate_improvement_factor(
     expr: &ra_core::algebra::RelExpr,
     stats: &[(String, ra_core::Statistics)],
@@ -617,41 +618,173 @@ fn estimate_improvement_factor(
         return 1.0;
     }
 
-    // Calculate statistics coverage
+    // 1. Calculate statistics coverage (40% weight)
     let covered = table_names
         .iter()
         .filter(|t| stats.iter().any(|(name, _)| name == *t))
         .count();
     let coverage = covered as f64 / table_names.len() as f64;
 
-    // Calculate column-level stats quality
-    let col_quality: f64 = stats
-        .iter()
-        .map(|(_, s)| {
-            if s.columns.is_empty() {
-                0.0
-            } else {
-                let has_hist = s
-                    .columns
-                    .values()
-                    .filter(|c| c.histogram.is_some())
-                    .count();
-                has_hist as f64 / s.columns.len() as f64
+    // 2. Calculate column-level stats quality (30% weight)
+    let col_quality: f64 = if stats.is_empty() {
+        0.0
+    } else {
+        stats
+            .iter()
+            .map(|(_, s)| {
+                if s.columns.is_empty() {
+                    0.0
+                } else {
+                    let has_hist = s
+                        .columns
+                        .values()
+                        .filter(|c| c.histogram.is_some())
+                        .count();
+                    let has_mcv = s
+                        .columns
+                        .values()
+                        .filter(|c| c.most_common_values.is_some())
+                        .count();
+                    let total = s.columns.len() as f64;
+                    (has_hist as f64 * 0.6 + has_mcv as f64 * 0.4) / total
+                }
+            })
+            .sum::<f64>()
+            / stats.len() as f64
+    };
+
+    // 3. Detect optimization opportunities (30% weight)
+    let opt_opportunities = detect_optimization_opportunities(expr, stats);
+
+    // Combine factors
+    let stats_quality = coverage * 0.4 + col_quality * 0.3 + opt_opportunities * 0.3;
+
+    // Base improvement: conservative 15%
+    // Good stats -> aggressive (down to 0.3 = 3.3x improvement)
+    // Poor stats -> conservative (stay near 0.9 = 11% improvement)
+    let base_improvement = 0.85;
+    let improvement = base_improvement - (0.55 * stats_quality);
+
+    improvement.clamp(0.3, 0.95)
+}
+
+/// Detect optimization opportunities in the query plan.
+///
+/// Returns a score [0.0, 1.0] indicating how many optimization
+/// opportunities RA can exploit:
+/// - Join reordering potential
+/// - Index usage opportunities
+/// - Parallel scan candidates
+/// - Aggregate pushdown
+fn detect_optimization_opportunities(
+    expr: &ra_core::algebra::RelExpr,
+    stats: &[(String, ra_core::Statistics)],
+) -> f64 {
+    let mut score = 0.0;
+    let mut opportunities = 0;
+    let mut max_opportunities = 0;
+
+    // Count joins (reordering opportunity)
+    let join_count = count_joins(expr);
+    max_opportunities += join_count;
+    if join_count >= 3 {
+        opportunities += join_count.min(5); // Cap at 5
+    }
+
+    // Check for index usage opportunities
+    let tables = extract_table_names(expr);
+    max_opportunities += tables.len();
+    for table in &tables {
+        if let Some((_, s)) = stats.iter().find(|(name, _)| name == table) {
+            if !s.indexes.is_empty() {
+                opportunities += 1;
             }
-        })
-        .sum::<f64>()
-        / stats.len().max(1) as f64;
+        }
+    }
 
-    // Base improvement: conservative 20%
-    let base_improvement = 0.8;
+    // Check for parallelizable scans (large tables)
+    max_opportunities += tables.len();
+    for table in &tables {
+        if let Some((_, s)) = stats.iter().find(|(name, _)| name == table) {
+            if s.row_count > 100_000.0 {
+                opportunities += 1;
+            }
+        }
+    }
 
-    // Scale improvement by stats quality:
-    // Good stats -> more aggressive (down to 0.5 = 2x improvement)
-    // Poor stats -> conservative (stay near 1.0)
-    let stats_factor = coverage * 0.5 + col_quality * 0.5;
-    let improvement = base_improvement - (0.3 * stats_factor);
+    // Check for aggregate pushdown opportunities
+    if has_aggregates(expr) && join_count > 0 {
+        max_opportunities += 1;
+        opportunities += 1;
+    }
 
-    improvement.clamp(0.5, 1.0)
+    if max_opportunities == 0 {
+        return 0.0;
+    }
+
+    score = opportunities as f64 / max_opportunities as f64;
+    score.clamp(0.0, 1.0)
+}
+
+/// Count the number of joins in a RelExpr tree.
+fn count_joins(expr: &ra_core::algebra::RelExpr) -> usize {
+    use ra_core::algebra::RelExpr;
+    match expr {
+        RelExpr::Join { left, right, .. }
+        | RelExpr::ParallelHashJoin { left, right, .. } => {
+            1 + count_joins(left) + count_joins(right)
+        }
+        RelExpr::Filter { input, .. }
+        | RelExpr::Project { input, .. }
+        | RelExpr::Sort { input, .. }
+        | RelExpr::Aggregate { input, .. }
+        | RelExpr::Gather { input, .. }
+        | RelExpr::Limit { input, .. }
+        | RelExpr::Distinct { input, .. } => count_joins(input),
+        RelExpr::Union { left, right, .. }
+        | RelExpr::Intersect { left, right, .. }
+        | RelExpr::Except { left, right, .. } => {
+            count_joins(left) + count_joins(right)
+        }
+        RelExpr::CTE { body, definition, .. } => {
+            count_joins(body) + count_joins(definition)
+        }
+        RelExpr::RecursiveCTE { body, base_case, recursive_case, .. } => {
+            count_joins(body) + count_joins(base_case) + count_joins(recursive_case)
+        }
+        RelExpr::Window { input, .. }
+        | RelExpr::ParallelAggregate { input, .. } => count_joins(input),
+        _ => 0,
+    }
+}
+
+/// Check if expression tree contains aggregates.
+fn has_aggregates(expr: &ra_core::algebra::RelExpr) -> bool {
+    use ra_core::algebra::RelExpr;
+    match expr {
+        RelExpr::Aggregate { .. } | RelExpr::ParallelAggregate { .. } => true,
+        RelExpr::Filter { input, .. }
+        | RelExpr::Project { input, .. }
+        | RelExpr::Sort { input, .. }
+        | RelExpr::Gather { input, .. }
+        | RelExpr::Limit { input, .. }
+        | RelExpr::Distinct { input, .. }
+        | RelExpr::Window { input, .. } => has_aggregates(input),
+        RelExpr::Join { left, right, .. }
+        | RelExpr::ParallelHashJoin { left, right, .. }
+        | RelExpr::Union { left, right, .. }
+        | RelExpr::Intersect { left, right, .. }
+        | RelExpr::Except { left, right, .. } => {
+            has_aggregates(left) || has_aggregates(right)
+        }
+        RelExpr::CTE { body, definition, .. } => {
+            has_aggregates(body) || has_aggregates(definition)
+        }
+        RelExpr::RecursiveCTE { body, base_case, recursive_case, .. } => {
+            has_aggregates(body) || has_aggregates(base_case) || has_aggregates(recursive_case)
+        }
+        _ => false,
+    }
 }
 
 /// Apply plan advice by manipulating PostgreSQL's cost model.
@@ -1083,5 +1216,101 @@ mod tests {
             workers: 4,
         };
         assert_eq!(count_relations(&expr), 1);
+    }
+
+    // Tests for Issue #2: Dynamic improvement factor
+    #[test]
+    fn high_quality_stats_gives_aggressive_improvement() {
+        use ra_core::{ColumnStats, Histogram, EquiDepthHistogram};
+
+        let mut stats = ra_core::Statistics::new(10000.0);
+        let mut cs = ColumnStats::new(100.0);
+        cs.histogram = Some(Histogram::EquiDepth(EquiDepthHistogram {
+            buckets: vec![],
+            rows_per_bucket: 0.0,
+        }));
+        cs.most_common_values = Some(vec!["a".into()]);
+        stats.columns.insert("id".into(), cs);
+
+        let expr = scan("t1");
+        let stats_vec = vec![("t1".into(), stats)];
+        let calib = crate::cost_mapper::CostCalibration::default_calibration();
+
+        let factor = estimate_improvement_factor(&expr, &stats_vec, &calib);
+        assert!(
+            factor < 0.7,
+            "Expected aggressive improvement with high quality stats, got {}",
+            factor
+        );
+    }
+
+    #[test]
+    fn complex_join_increases_improvement() {
+        use ra_core::{JoinType, Statistics};
+
+        let t1 = scan("t1");
+        let t2 = scan("t2");
+        let t3 = scan("t3");
+        let join = RelExpr::Join {
+            join_type: JoinType::Inner,
+            condition: Expr::Const(Const::Bool(true)),
+            left: Box::new(RelExpr::Join {
+                join_type: JoinType::Inner,
+                condition: Expr::Const(Const::Bool(true)),
+                left: Box::new(t1),
+                right: Box::new(t2),
+            }),
+            right: Box::new(t3),
+        };
+
+        let stats = vec![
+            ("t1".into(), Statistics::new(1000.0)),
+            ("t2".into(), Statistics::new(2000.0)),
+            ("t3".into(), Statistics::new(3000.0)),
+        ];
+        let calib = crate::cost_mapper::CostCalibration::default_calibration();
+
+        let factor = estimate_improvement_factor(&join, &stats, &calib);
+        assert!(
+            factor < 0.8,
+            "Expected improvement from join reordering, got {}",
+            factor
+        );
+    }
+
+    #[test]
+    fn count_joins_simple() {
+        let expr = join(scan("t1"), scan("t2"));
+        assert_eq!(count_joins(&expr), 1);
+    }
+
+    #[test]
+    fn count_joins_nested() {
+        let left = join(scan("t1"), scan("t2"));
+        let expr = join(left, scan("t3"));
+        assert_eq!(count_joins(&expr), 2);
+    }
+
+    #[test]
+    fn has_aggregates_true() {
+        use ra_core::algebra::{AggregateExpr, AggregateFunction};
+
+        let expr = RelExpr::Aggregate {
+            group_by: vec![],
+            aggregates: vec![AggregateExpr {
+                function: AggregateFunction::Count,
+                arg: None,
+                distinct: false,
+                alias: None,
+            }],
+            input: Box::new(scan("orders")),
+        };
+        assert!(has_aggregates(&expr));
+    }
+
+    #[test]
+    fn has_aggregates_false() {
+        let expr = join(scan("t1"), scan("t2"));
+        assert!(!has_aggregates(&expr));
     }
 }

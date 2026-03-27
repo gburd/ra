@@ -132,6 +132,6 @@ pub mod pg_test {
 
     /// Required by pgrx test harness.
     pub fn postgresql_conf_options() -> Vec<&'static str> {
-        vec!["shared_preload_libraries = 'ra_pg_extension'"]
+        vec!["shared_preload_libraries = 'pg_ra_planner'"]
     }
 }

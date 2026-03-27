@@ -6,6 +6,21 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Type of subquery expression.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum SubQueryType {
+    /// Scalar subquery: (SELECT x FROM t LIMIT 1)
+    Scalar,
+    /// EXISTS subquery: EXISTS (SELECT ...)
+    Exists,
+    /// IN subquery: x IN (SELECT ...)
+    In,
+    /// ANY subquery: x = ANY (SELECT ...)
+    Any,
+    /// ALL subquery: x > ALL (SELECT ...)
+    All,
+}
+
 /// A scalar expression that can be evaluated over a row.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Expr {
@@ -91,6 +106,29 @@ pub enum Expr {
         start: Option<Box<Expr>>,
         /// End index (None means to end).
         end: Option<Box<Expr>>,
+    },
+
+    /// Field access on a composite type.
+    ///
+    /// Represents: (row_expr).field_name
+    FieldAccess {
+        /// Base expression (must be a composite type).
+        expr: Box<Expr>,
+        /// Field name to access.
+        field_name: String,
+    },
+
+    /// Subquery expression.
+    ///
+    /// Represents a scalar subquery (returns single value),
+    /// EXISTS subquery, or IN/ANY/ALL subquery.
+    SubQuery {
+        /// Type of subquery
+        subquery_type: SubQueryType,
+        /// The subquery RelExpr
+        query: Box<crate::algebra::RelExpr>,
+        /// Optional test expression for IN/ANY/ALL
+        test_expr: Option<Box<Expr>>,
     },
 }
 

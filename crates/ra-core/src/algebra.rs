@@ -1044,6 +1044,16 @@ fn collect_expr_columns(expr: &Expr, out: &mut Vec<ColumnRef>) {
                 collect_expr_columns(e, out);
             }
         }
+        Expr::FieldAccess { expr, .. } => {
+            collect_expr_columns(expr, out);
+        }
+        Expr::SubQuery { test_expr, .. } => {
+            // Subquery columns are not considered part of outer expression
+            // Only collect from the test expression if present
+            if let Some(test) = test_expr {
+                collect_expr_columns(test, out);
+            }
+        }
     }
 }
 

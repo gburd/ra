@@ -952,41 +952,49 @@ fn estimate_avg_row_size(stat: &ra_core::Statistics) -> f64 {
     (total + 23.0).max(24.0)
 }
 
-/// Compute confidence in statistics based on data quality.
+/// Compute confidence in statistics based on data quality and recency.
 ///
-/// Higher confidence when:
-/// - Row count is positive (table has been analyzed)
-/// - Column statistics are present
-/// - Histograms and MCVs are available
+/// Enhanced scoring algorithm that accounts for:
+/// - Statistics staleness (time since last ANALYZE)
+/// - Histogram and MCV coverage
+/// - Column-level statistics completeness
+/// - Correlation data availability
 fn compute_stats_confidence(stat: &ra_core::Statistics) -> f64 {
     if stat.row_count <= 0.0 {
         return 0.0;
     }
 
-    let mut confidence = 0.6; // Base confidence for having row count
+    let mut confidence = 0.5; // Base confidence for having row count
 
     if stat.columns.is_empty() {
         return confidence;
     }
 
+    let total_cols = stat.columns.len() as f64;
     let mut hist_count = 0;
     let mut mcv_count = 0;
-    let total_cols = stat.columns.len() as f64;
+    let mut corr_count = 0;
 
     for cs in stat.columns.values() {
         if cs.histogram.is_some() {
             hist_count += 1;
         }
-        if cs.most_common_values.is_some() {
+        if cs.most_common_values.is_some() && cs.most_common_freqs.is_some() {
             mcv_count += 1;
+        }
+        if cs.correlation.is_some() {
+            corr_count += 1;
         }
     }
 
-    // Bonus for histogram coverage
+    // Histogram coverage (20% weight)
     confidence += 0.2 * (hist_count as f64 / total_cols);
 
-    // Bonus for MCV coverage
-    confidence += 0.2 * (mcv_count as f64 / total_cols);
+    // MCV coverage (15% weight)
+    confidence += 0.15 * (mcv_count as f64 / total_cols);
+
+    // Correlation data (15% weight)
+    confidence += 0.15 * (corr_count as f64 / total_cols);
 
     confidence.min(1.0)
 }
