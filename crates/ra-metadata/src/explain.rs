@@ -1408,3 +1408,370 @@ mod tests {
         assert_eq!(plan.root.node_type, NodeType::SubqueryScan);
     }
 }
+
+// ---- Formatters (RelExpr to EXPLAIN text) ----
+
+/// Format an `ExplainNode` as PostgreSQL EXPLAIN text output.
+///
+/// Generates output matching `EXPLAIN` (text format, not JSON) from PostgreSQL,
+/// including cost estimates, row counts, and indented tree structure.
+///
+/// # Example
+///
+/// ```text
+/// Limit  (cost=4.46..4.46 rows=1 width=4)
+///   ->  Sort  (cost=4.46..4.46 rows=1 width=4)
+///         Sort Key: order_id
+///         ->  Index Only Scan using orders_test_shipping_date_order_id_idx on orders_test  (cost=0.43..4.45 rows=1 width=4)
+///               Index Cond: ((shipping_date >= '2022-05-01'::date) AND (shipping_date <= '2022-05-01'::date))
+/// ```
+pub fn format_postgres_explain(node: &ExplainNode) -> String {
+    let mut buf = String::new();
+    format_postgres_node(&mut buf, node, "", true);
+    buf
+}
+
+fn format_postgres_node(buf: &mut String, node: &ExplainNode, indent: &str, is_first: bool) {
+    // PostgreSQL EXPLAIN format uses:
+    // - No prefix for root
+    // - "   ->  " for direct children (with leading spaces matching parent)
+
+    if !is_first {
+        buf.push_str(indent);
+        buf.push_str("   ->  ");
+    }
+
+    // Node type
+    buf.push_str(&node.node_type.to_string());
+
+    if let Some(ref join_type) = node.join_type {
+        buf.push(' ');
+        buf.push_str(&join_type.to_string());
+    }
+
+    if let Some(ref rel) = node.relation {
+        buf.push_str(" on ");
+        buf.push_str(rel);
+    }
+
+    if let Some(ref idx) = node.index_name {
+        buf.push_str(" using ");
+        buf.push_str(idx);
+    }
+
+    // Cost info
+    buf.push_str("  (cost=");
+    if let Some(startup) = node.startup_cost {
+        buf.push_str(&format!("{startup:.2}"));
+    } else {
+        buf.push_str("0.00");
+    }
+    buf.push_str("..");
+    if let Some(total) = node.total_cost {
+        buf.push_str(&format!("{total:.2}"));
+    } else {
+        buf.push_str("0.00");
+    }
+
+    buf.push_str(" rows=");
+    if let Some(rows) = node.estimated_rows {
+        buf.push_str(&format!("{}", rows.round() as i64));
+    } else {
+        buf.push('1');
+    }
+
+    if let Some(width) = node.estimated_width {
+        buf.push_str(&format!(" width={width}"));
+    }
+    buf.push_str(")\n");
+
+    // Additional details (filter, index cond, etc.)
+    // These are indented further
+    let detail_prefix = if is_first {
+        "         "
+    } else {
+        &format!("{indent}            ")
+    };
+
+    if let Some(ref filter) = node.filter {
+        buf.push_str(detail_prefix);
+        buf.push_str("Filter: ");
+        buf.push_str(filter);
+        buf.push('\n');
+    }
+
+    if let Some(ref scan_dir) = node.scan_direction {
+        if !scan_dir.is_empty() && scan_dir != "Forward" {
+            buf.push_str(detail_prefix);
+            buf.push_str("Scan Direction: ");
+            buf.push_str(scan_dir);
+            buf.push('\n');
+        }
+    }
+
+    // Children - each indented
+    if !node.children.is_empty() {
+        let child_indent = if is_first {
+            String::new()
+        } else {
+            format!("{indent}      ")
+        };
+
+        for child in &node.children {
+            format_postgres_node(buf, child, &child_indent, false);
+        }
+    }
+}
+
+/// Format an `ExplainNode` as MySQL EXPLAIN text output.
+///
+/// Generates simple text output similar to `EXPLAIN` (non-JSON) from MySQL.
+/// MySQL text format is less detailed than PostgreSQL.
+pub fn format_mysql_explain(node: &ExplainNode) -> String {
+    let mut buf = String::new();
+    format_mysql_node(&mut buf, node, 0);
+    buf
+}
+
+fn format_mysql_node(buf: &mut String, node: &ExplainNode, depth: usize) {
+    let indent = "  ".repeat(depth);
+
+    buf.push_str(&indent);
+    buf.push_str("-> ");
+    buf.push_str(&node.node_type.to_string());
+
+    if let Some(ref rel) = node.relation {
+        buf.push_str(" on ");
+        buf.push_str(rel);
+    }
+
+    if let Some(ref idx) = node.index_name {
+        buf.push_str(" (using ");
+        buf.push_str(idx);
+        buf.push(')');
+    }
+
+    if let Some(rows) = node.estimated_rows {
+        buf.push_str(&format!("  (rows={:.0})", rows));
+    }
+
+    if let Some(cost) = node.total_cost {
+        buf.push_str(&format!(" (cost={cost:.2})"));
+    }
+
+    buf.push('\n');
+
+    if let Some(ref filter) = node.filter {
+        buf.push_str(&indent);
+        buf.push_str("    Filter: ");
+        buf.push_str(filter);
+        buf.push('\n');
+    }
+
+    for child in &node.children {
+        format_mysql_node(buf, child, depth + 1);
+    }
+}
+
+/// Format an `ExplainNode` as SQLite EXPLAIN QUERY PLAN text output.
+///
+/// Generates output matching `EXPLAIN QUERY PLAN` from SQLite, which uses
+/// a simple indented text format with operation descriptions.
+pub fn format_sqlite_explain(node: &ExplainNode) -> String {
+    let mut buf = String::new();
+    format_sqlite_node(&mut buf, node, 0);
+    buf
+}
+
+fn format_sqlite_node(buf: &mut String, node: &ExplainNode, depth: usize) {
+    let indent = "  ".repeat(depth);
+
+    buf.push_str(&indent);
+
+    // SQLite uses descriptive text rather than structured operators
+    match node.node_type {
+        NodeType::SeqScan => {
+            buf.push_str("SCAN");
+            if let Some(ref rel) = node.relation {
+                buf.push_str(" TABLE ");
+                buf.push_str(rel);
+            }
+        }
+        NodeType::IndexScan | NodeType::IndexOnlyScan => {
+            buf.push_str("SEARCH");
+            if let Some(ref rel) = node.relation {
+                buf.push_str(" TABLE ");
+                buf.push_str(rel);
+            }
+            if let Some(ref idx) = node.index_name {
+                buf.push_str(" USING");
+                if node.node_type == NodeType::IndexOnlyScan {
+                    buf.push_str(" COVERING");
+                }
+                buf.push_str(" INDEX ");
+                buf.push_str(idx);
+            }
+        }
+        NodeType::Sort => {
+            buf.push_str("USE TEMP B-TREE FOR ORDER BY");
+        }
+        NodeType::NestedLoop => {
+            buf.push_str("NESTED LOOP");
+        }
+        NodeType::HashAggregate | NodeType::GroupAggregate => {
+            buf.push_str("AGGREGATE");
+        }
+        NodeType::Limit => {
+            buf.push_str("LIMIT");
+        }
+        _ => {
+            // For other node types, use the display name
+            buf.push_str(&node.node_type.to_string().to_uppercase());
+        }
+    }
+
+    if let Some(ref filter) = node.filter {
+        buf.push_str(" (");
+        buf.push_str(filter);
+        buf.push(')');
+    }
+
+    buf.push('\n');
+
+    for child in &node.children {
+        format_sqlite_node(buf, child, depth + 1);
+    }
+}
+
+#[cfg(test)]
+mod formatter_tests {
+    use super::*;
+
+    fn create_test_node() -> ExplainNode {
+        ExplainNode {
+            node_type: NodeType::IndexOnlyScan,
+            join_type: None,
+            relation: Some("orders_test".to_string()),
+            index_name: Some("orders_test_shipping_date_order_id_idx".to_string()),
+            startup_cost: Some(0.43),
+            total_cost: Some(4.45),
+            estimated_rows: Some(1.0),
+            estimated_width: Some(4),
+            filter: Some("((shipping_date >= '2022-05-01') AND (shipping_date <= '2022-05-01'))".to_string()),
+            scan_direction: Some("Forward".to_string()),
+            raw_detail: None,
+            children: Vec::new(),
+        }
+    }
+
+    fn create_test_tree() -> ExplainNode {
+        let index_scan = create_test_node();
+
+        let sort = ExplainNode {
+            node_type: NodeType::Sort,
+            join_type: None,
+            relation: None,
+            index_name: None,
+            startup_cost: Some(4.46),
+            total_cost: Some(4.46),
+            estimated_rows: Some(1.0),
+            estimated_width: Some(4),
+            filter: None,
+            scan_direction: None,
+            raw_detail: None,
+            children: vec![index_scan],
+        };
+
+        ExplainNode {
+            node_type: NodeType::Limit,
+            join_type: None,
+            relation: None,
+            index_name: None,
+            startup_cost: Some(4.46),
+            total_cost: Some(4.46),
+            estimated_rows: Some(1.0),
+            estimated_width: Some(4),
+            filter: None,
+            scan_direction: None,
+            raw_detail: None,
+            children: vec![sort],
+        }
+    }
+
+    #[test]
+    fn format_postgres_simple_node() {
+        let node = create_test_node();
+        let output = format_postgres_explain(&node);
+
+        assert!(output.contains("Index Only Scan"));
+        assert!(output.contains("orders_test"));
+        assert!(output.contains("orders_test_shipping_date_order_id_idx"));
+        assert!(output.contains("cost=0.43..4.45"));
+        assert!(output.contains("rows=1"));
+        assert!(output.contains("width=4"));
+        assert!(output.contains("Filter:"));
+        assert!(output.contains("shipping_date"));
+    }
+
+    #[test]
+    fn format_postgres_tree() {
+        let tree = create_test_tree();
+        let output = format_postgres_explain(&tree);
+
+        assert!(output.contains("Limit"));
+        assert!(output.contains("Sort"));
+        assert!(output.contains("Index Only Scan"));
+        assert!(output.contains("   ->  "));
+    }
+
+    #[test]
+    fn format_mysql_simple_node() {
+        let node = create_test_node();
+        let output = format_mysql_explain(&node);
+
+        assert!(output.contains("Index Only Scan"));
+        assert!(output.contains("orders_test"));
+        assert!(output.contains("orders_test_shipping_date_order_id_idx"));
+        assert!(output.contains("rows=1"));
+        assert!(output.contains("cost=4.45"));
+    }
+
+    #[test]
+    fn format_sqlite_simple_node() {
+        let node = create_test_node();
+        let output = format_sqlite_explain(&node);
+
+        assert!(output.contains("SEARCH"));
+        assert!(output.contains("TABLE"));
+        assert!(output.contains("orders_test"));
+        assert!(output.contains("COVERING INDEX"));
+        assert!(output.contains("orders_test_shipping_date_order_id_idx"));
+    }
+
+    #[test]
+    fn format_sqlite_tree() {
+        let tree = create_test_tree();
+        let output = format_sqlite_explain(&tree);
+
+        assert!(output.contains("LIMIT"));
+        assert!(output.contains("USE TEMP B-TREE FOR ORDER BY"));
+        assert!(output.contains("SEARCH"));
+    }
+
+    #[test]
+    fn postgres_format_preserves_hierarchy() {
+        let tree = create_test_tree();
+        let output = format_postgres_explain(&tree);
+
+        // Check that output has proper indentation
+        let lines: Vec<&str> = output.lines().collect();
+        assert!(lines.len() >= 3);
+
+        // Root should have no leading spaces before node name
+        assert!(lines[0].starts_with("Limit"));
+
+        // Children should be indented with arrow
+        assert!(lines.iter().any(|l| l.contains("   ->  Sort")));
+        assert!(lines.iter().any(|l| l.contains("Index Only Scan")));
+    }
+}
