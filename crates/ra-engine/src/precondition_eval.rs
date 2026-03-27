@@ -320,6 +320,32 @@ impl PreConditionEvaluator {
                 Ok(FactValue::String(self.facts.sql_dialect().to_string()))
             }
 
+            // Storage format facts
+            "schema.storage_format" => {
+                let table = table.ok_or_else(|| EvaluationError::FactLookupFailed {
+                    fact_type: fact_type.to_string(),
+                    reason: "Table name required for storage format".to_string(),
+                })?;
+
+                self.facts
+                    .get_schema(table)
+                    .map(|info| {
+                        let format_str = match info.storage_format {
+                            ra_core::facts::StorageFormat::RowBased => "row_based",
+                            ra_core::facts::StorageFormat::Columnar => "columnar",
+                            ra_core::facts::StorageFormat::Parquet => "parquet",
+                            ra_core::facts::StorageFormat::Orc => "orc",
+                            ra_core::facts::StorageFormat::ArrowIpc => "arrow_ipc",
+                            ra_core::facts::StorageFormat::Unknown => "unknown",
+                        };
+                        FactValue::String(format_str.to_string())
+                    })
+                    .ok_or_else(|| EvaluationError::FactLookupFailed {
+                        fact_type: fact_type.to_string(),
+                        reason: format!("No schema information for table {}", table),
+                    })
+            }
+
             _ => Err(EvaluationError::UnknownFactType(fact_type.to_string())),
         }
     }
@@ -473,5 +499,380 @@ mod tests {
 
         let result = evaluator.evaluate(&preconditions);
         assert!(result.is_satisfied());
+    }
+
+    #[test]
+    fn composite_or_condition() {
+        let facts = Arc::new(EmptyFactsProvider::new());
+        let evaluator = PreConditionEvaluator::new(facts);
+
+        let preconditions = vec![PreCondition::Composite {
+            operator: LogicalOperator::Or,
+            conditions: vec![
+                PreCondition::Fact {
+                    fact_type: "hardware.cpu_cores".to_string(),
+                    table: None,
+                    column: None,
+                    comparator: ">".to_string(),
+                    threshold: FactValue::Int(100),
+                    confidence: None,
+                    description: None,
+                    optional: false,
+                },
+                PreCondition::Fact {
+                    fact_type: "hardware.simd_width".to_string(),
+                    table: None,
+                    column: None,
+                    comparator: ">=".to_string(),
+                    threshold: FactValue::Int(128),
+                    confidence: None,
+                    description: None,
+                    optional: false,
+                },
+            ],
+            description: None,
+            optional: false,
+        }];
+
+        let result = evaluator.evaluate(&preconditions);
+        assert!(result.is_satisfied());
+    }
+
+    #[test]
+    fn composite_not_condition() {
+        let facts = Arc::new(EmptyFactsProvider::new());
+        let evaluator = PreConditionEvaluator::new(facts);
+
+        let preconditions = vec![PreCondition::Composite {
+            operator: LogicalOperator::Not,
+            conditions: vec![PreCondition::Fact {
+                fact_type: "hardware.has_gpu".to_string(),
+                table: None,
+                column: None,
+                comparator: "==".to_string(),
+                threshold: FactValue::Bool(true),
+                confidence: None,
+                description: None,
+                optional: false,
+            }],
+            description: None,
+            optional: false,
+        }];
+
+        let result = evaluator.evaluate(&preconditions);
+        assert!(result.is_satisfied());
+    }
+
+    #[test]
+    fn composite_not_with_multiple_conditions_fails() {
+        let facts = Arc::new(EmptyFactsProvider::new());
+        let evaluator = PreConditionEvaluator::new(facts);
+
+        let preconditions = vec![PreCondition::Composite {
+            operator: LogicalOperator::Not,
+            conditions: vec![
+                PreCondition::Pattern {
+                    must_match: Some("test".to_string()),
+                    must_not_match: None,
+                    description: None,
+                    optional: false,
+                },
+                PreCondition::Pattern {
+                    must_match: Some("test2".to_string()),
+                    must_not_match: None,
+                    description: None,
+                    optional: false,
+                },
+            ],
+            description: None,
+            optional: false,
+        }];
+
+        let result = evaluator.evaluate(&preconditions);
+        assert!(!result.is_satisfied());
+    }
+
+    #[test]
+    fn predicate_condition_is_deterministic() {
+        let facts = Arc::new(EmptyFactsProvider::new());
+        let evaluator = PreConditionEvaluator::new(facts);
+
+        let preconditions = vec![PreCondition::Predicate {
+            condition: "is_deterministic(col)".to_string(),
+            description: None,
+            optional: false,
+        }];
+
+        let result = evaluator.evaluate(&preconditions);
+        assert!(result.is_satisfied());
+    }
+
+    #[test]
+    fn predicate_condition_references_only() {
+        let facts = Arc::new(EmptyFactsProvider::new());
+        let evaluator = PreConditionEvaluator::new(facts);
+
+        let preconditions = vec![PreCondition::Predicate {
+            condition: "references_only(left)".to_string(),
+            description: None,
+            optional: false,
+        }];
+
+        let result = evaluator.evaluate(&preconditions);
+        assert!(result.is_satisfied());
+    }
+
+    #[test]
+    fn predicate_condition_references_both_sides() {
+        let facts = Arc::new(EmptyFactsProvider::new());
+        let evaluator = PreConditionEvaluator::new(facts);
+
+        let preconditions = vec![PreCondition::Predicate {
+            condition: "references_both_sides(col1, col2)".to_string(),
+            description: None,
+            optional: false,
+        }];
+
+        let result = evaluator.evaluate(&preconditions);
+        assert!(result.is_satisfied());
+    }
+
+    #[test]
+    fn unknown_predicate_passes_with_warning() {
+        let facts = Arc::new(EmptyFactsProvider::new());
+        let evaluator = PreConditionEvaluator::new(facts);
+
+        let preconditions = vec![PreCondition::Predicate {
+            condition: "unknown_predicate(x)".to_string(),
+            description: None,
+            optional: false,
+        }];
+
+        let result = evaluator.evaluate(&preconditions);
+        assert!(result.is_satisfied());
+    }
+
+    #[test]
+    fn hardware_memory_fact() {
+        let facts = Arc::new(EmptyFactsProvider::new());
+        let evaluator = PreConditionEvaluator::new(facts);
+
+        let preconditions = vec![PreCondition::Fact {
+            fact_type: "hardware.memory".to_string(),
+            table: None,
+            column: None,
+            comparator: ">".to_string(),
+            threshold: FactValue::Int(1024),
+            confidence: None,
+            description: None,
+            optional: false,
+        }];
+
+        let result = evaluator.evaluate(&preconditions);
+        assert!(result.is_satisfied());
+    }
+
+    #[test]
+    fn hardware_cache_size_fact() {
+        let facts = Arc::new(EmptyFactsProvider::new());
+        let evaluator = PreConditionEvaluator::new(facts);
+
+        let preconditions = vec![PreCondition::Fact {
+            fact_type: "hardware.cache_size".to_string(),
+            table: None,
+            column: None,
+            comparator: ">".to_string(),
+            threshold: FactValue::Int(0),
+            confidence: None,
+            description: None,
+            optional: false,
+        }];
+
+        let result = evaluator.evaluate(&preconditions);
+        assert!(result.is_satisfied());
+    }
+
+    #[test]
+    fn database_dialect_fact() {
+        let facts = Arc::new(EmptyFactsProvider::new());
+        let evaluator = PreConditionEvaluator::new(facts);
+
+        let preconditions = vec![PreCondition::Fact {
+            fact_type: "database.dialect".to_string(),
+            table: None,
+            column: None,
+            comparator: "==".to_string(),
+            threshold: FactValue::String("generic".to_string()),
+            confidence: None,
+            description: None,
+            optional: false,
+        }];
+
+        let result = evaluator.evaluate(&preconditions);
+        assert!(result.is_satisfied());
+    }
+
+    #[test]
+    fn capability_check_current_database() {
+        let facts = Arc::new(EmptyFactsProvider::new());
+        let evaluator = PreConditionEvaluator::new(facts);
+
+        let preconditions = vec![PreCondition::Capability {
+            database: "current".to_string(),
+            requires: "materialized_views".to_string(),
+            description: None,
+            optional: false,
+        }];
+
+        let result = evaluator.evaluate(&preconditions);
+        // EmptyFactsProvider returns false for all features
+        assert!(!result.is_satisfied());
+    }
+
+    #[test]
+    fn capability_check_matching_database_name() {
+        let facts = Arc::new(EmptyFactsProvider::new());
+        let evaluator = PreConditionEvaluator::new(facts);
+
+        let preconditions = vec![PreCondition::Capability {
+            database: "generic".to_string(),
+            requires: "materialized_views".to_string(),
+            description: None,
+            optional: false,
+        }];
+
+        let result = evaluator.evaluate(&preconditions);
+        // EmptyFactsProvider returns false for all features
+        assert!(!result.is_satisfied());
+    }
+
+    #[test]
+    fn capability_check_different_database() {
+        let facts = Arc::new(EmptyFactsProvider::new());
+        let evaluator = PreConditionEvaluator::new(facts);
+
+        let preconditions = vec![PreCondition::Capability {
+            database: "mysql".to_string(),
+            requires: "materialized_views".to_string(),
+            description: None,
+            optional: false,
+        }];
+
+        let result = evaluator.evaluate(&preconditions);
+        assert!(!result.is_satisfied());
+    }
+
+    #[test]
+    fn unknown_fact_type_returns_error() {
+        let facts = Arc::new(EmptyFactsProvider::new());
+        let evaluator = PreConditionEvaluator::new(facts);
+
+        let preconditions = vec![PreCondition::Fact {
+            fact_type: "unknown.fact".to_string(),
+            table: None,
+            column: None,
+            comparator: ">".to_string(),
+            threshold: FactValue::Int(0),
+            confidence: None,
+            description: None,
+            optional: false,
+        }];
+
+        let result = evaluator.evaluate(&preconditions);
+        assert!(!result.is_satisfied());
+    }
+
+    #[test]
+    fn required_fact_fails_when_missing() {
+        let facts = Arc::new(EmptyFactsProvider::new());
+        let evaluator = PreConditionEvaluator::new(facts);
+
+        let preconditions = vec![PreCondition::Fact {
+            fact_type: "statistics.cardinality".to_string(),
+            table: Some("nonexistent".to_string()),
+            column: None,
+            comparator: ">".to_string(),
+            threshold: FactValue::Int(1000),
+            confidence: None,
+            description: None,
+            optional: false,
+        }];
+
+        let result = evaluator.evaluate(&preconditions);
+        assert!(!result.is_satisfied());
+    }
+
+    #[test]
+    fn failed_condition_in_and_fails_entire_check() {
+        let facts = Arc::new(EmptyFactsProvider::new());
+        let evaluator = PreConditionEvaluator::new(facts);
+
+        let preconditions = vec![PreCondition::Composite {
+            operator: LogicalOperator::And,
+            conditions: vec![
+                PreCondition::Fact {
+                    fact_type: "hardware.cpu_cores".to_string(),
+                    table: None,
+                    column: None,
+                    comparator: ">".to_string(),
+                    threshold: FactValue::Int(4),
+                    confidence: None,
+                    description: None,
+                    optional: false,
+                },
+                PreCondition::Fact {
+                    fact_type: "hardware.simd_width".to_string(),
+                    table: None,
+                    column: None,
+                    comparator: ">".to_string(),
+                    threshold: FactValue::Int(1000),
+                    confidence: None,
+                    description: None,
+                    optional: false,
+                },
+            ],
+            description: None,
+            optional: false,
+        }];
+
+        let result = evaluator.evaluate(&preconditions);
+        assert!(!result.is_satisfied());
+    }
+
+    #[test]
+    fn all_failed_conditions_in_or_fails_check() {
+        let facts = Arc::new(EmptyFactsProvider::new());
+        let evaluator = PreConditionEvaluator::new(facts);
+
+        let preconditions = vec![PreCondition::Composite {
+            operator: LogicalOperator::Or,
+            conditions: vec![
+                PreCondition::Fact {
+                    fact_type: "hardware.cpu_cores".to_string(),
+                    table: None,
+                    column: None,
+                    comparator: ">".to_string(),
+                    threshold: FactValue::Int(1000),
+                    confidence: None,
+                    description: None,
+                    optional: false,
+                },
+                PreCondition::Fact {
+                    fact_type: "hardware.simd_width".to_string(),
+                    table: None,
+                    column: None,
+                    comparator: ">".to_string(),
+                    threshold: FactValue::Int(1000),
+                    confidence: None,
+                    description: None,
+                    optional: false,
+                },
+            ],
+            description: None,
+            optional: false,
+        }];
+
+        let result = evaluator.evaluate(&preconditions);
+        assert!(!result.is_satisfied());
     }
 }
