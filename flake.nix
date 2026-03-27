@@ -49,7 +49,7 @@
             postgresql
             duckdb
             sqlite
-            unixodbc
+            unixODBC
 
             # TLA+ tools
             tlaplus
@@ -116,7 +116,7 @@
 
           buildInputs = with pkgs; [
             openssl
-            unixodbc
+            unixODBC
           ] ++ lib.optionals stdenv.isDarwin [
             darwin.apple_sdk.frameworks.Security
             darwin.apple_sdk.frameworks.SystemConfiguration
