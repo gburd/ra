@@ -10,7 +10,7 @@ use criterion::{
 };
 use ra_core::algebra::{JoinType, RelExpr};
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr};
-use ra_engine::{Optimizer, OptimizerConfig, egraph::ParallelConfig};
+use ra_engine::{Optimizer, OptimizerConfig, PlanCacheConfig, egraph::ParallelConfig};
 use ra_stats::delta::DeltaSet;
 use ra_stats::timeline::{ColumnSnapshot, Snapshot, TableSnapshot};
 
@@ -106,6 +106,14 @@ fn bench_full_vs_incremental(c: &mut Criterion) {
         large_join_strategy: ra_engine::large_join::LargeJoinStrategy::Greedy,
         max_optimization_time_ms: 5000,
         parallel: ParallelConfig::default(),
+        use_adaptive_limits: false,
+        use_cost_pruning: true,
+        cost_pruning_threshold: 1.5,
+        use_join_graph_filtering: true,
+        beam_search_config: None,
+        transaction_context: None,
+        enable_plan_cache: false,
+        plan_cache_config: PlanCacheConfig::default(),
     };
 
     // Small change: 1% row count increase
