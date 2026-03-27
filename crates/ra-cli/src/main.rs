@@ -8,6 +8,7 @@ mod display;
 mod federated_commands;
 mod migrate_commands;
 pub(crate) mod plan_diff;
+mod proxy;
 mod regression_commands;
 pub(crate) mod side_by_side;
 mod stats_commands;
@@ -15,6 +16,7 @@ mod test_executor;
 mod visualize;
 
 use std::io::Read;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
@@ -286,6 +288,32 @@ enum Commands {
         /// Indentation: spaces2, spaces4, tab.
         #[arg(long, default_value = "spaces2")]
         indent: String,
+    },
+    /// Run as a database proxy to intercept and optimize queries.
+    #[command(
+        long_about = "Start Ra as a proxy server that intercepts database queries.\n\n\
+            The proxy sits between clients and the database, comparing Ra's optimized\n\
+            plans with the database's EXPLAIN output and logging improvements.\n\n\
+            Examples:\n  \
+            ra-cli proxy postgres://localhost:5432/mydb\n  \
+            ra-cli proxy postgres://localhost/db --listen 127.0.0.1:5433\n  \
+            ra-cli proxy postgres://localhost/db --takeover  # Use pg_plan_advice"
+    )]
+    Proxy {
+        /// Backend database connection string.
+        backend: String,
+        /// Address to listen on (default: 127.0.0.1:5433).
+        #[arg(long, default_value = "127.0.0.1:5433")]
+        listen: String,
+        /// Enable plan takeover using pg_plan_advice (Postgres 19+).
+        #[arg(long)]
+        takeover: bool,
+        /// Log format: postgres, json, or plain (default: postgres).
+        #[arg(long, default_value = "postgres")]
+        log_format: String,
+        /// Minimum cost improvement % to log (default: 10.0).
+        #[arg(long, default_value = "10.0")]
+        min_improvement: f64,
     },
     /// Translate SQL between database dialects.
     Translate {
@@ -762,6 +790,13 @@ fn main() -> Result<()> {
             capitalize,
             indent,
         } => cmd_format(query.as_deref(), stdin, &capitalize, &indent, cli.quiet),
+        Commands::Proxy {
+            backend,
+            listen,
+            takeover,
+            log_format,
+            min_improvement,
+        } => cmd_proxy(backend, listen, takeover, log_format, min_improvement),
         Commands::Translate { query, from, to } => cmd_translate(&query, &from, &to, cli.quiet),
         Commands::AnalyzeTriggers {
             table,
@@ -2046,6 +2081,55 @@ fn cmd_format(
     Ok(())
 }
 
+// ── proxy ────────────────────────────────────────────────────
+
+fn cmd_proxy(
+    backend: &str,
+    listen: &str,
+    takeover: &bool,
+    log_format: &str,
+    min_improvement: &f64,
+) -> Result<()> {
+    use colored::Colorize;
+
+    let listen_addr: SocketAddr = listen
+        .parse()
+        .with_context(|| format!("invalid listen address: {listen}"))?;
+
+    let log_fmt = log_format
+        .parse::<proxy::LogFormat>()
+        .with_context(|| format!("invalid log format: {log_format}"))?;
+
+    let config = proxy::ProxyConfig {
+        listen_addr,
+        backend: backend.to_string(),
+        enable_plan_takeover: *takeover,
+        log_format: log_fmt,
+        min_improvement_percent: *min_improvement,
+    };
+
+    eprintln!("{}", "Ra Database Proxy".bold().green());
+    eprintln!();
+    eprintln!("  {}: {}", "Backend".bold(), proxy::mask_connection_string(backend));
+    eprintln!("  {}: {}", "Listening".bold(), listen);
+    eprintln!("  {}: {:.1}%", "Min Improvement".bold(), min_improvement);
+
+    if *takeover {
+        eprintln!("  {}: {}", "Plan Takeover".bold(), "enabled (requires pg_plan_advice)".yellow());
+    }
+
+    eprintln!();
+    eprintln!("{}", "Note: Full wire protocol implementation is a work in progress.".dimmed());
+    eprintln!("{}", "      This command currently provides basic passthrough functionality.".dimmed());
+    eprintln!();
+
+    // Run the proxy server (requires tokio runtime)
+    let runtime = tokio::runtime::Runtime::new()
+        .context("failed to create tokio runtime")?;
+
+    runtime.block_on(proxy::run_proxy(config))
+}
+
 // ── translate ────────────────────────────────────────────────
 
 fn cmd_translate(query: &str, from: &str, to: &str, quiet: bool) -> Result<()> {
@@ -3038,6 +3122,7 @@ fn format_error_with_location(
 
 /// Format error with general context highlighting.
 fn format_error_with_context(sql: &str, error_msg: &str) -> anyhow::Error {
+    use colored::Colorize;
 
     let mut output = String::new();
     output.push_str(&format!("{}: SQL parse error\n", "error".red().bold()));
