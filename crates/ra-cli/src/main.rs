@@ -1488,7 +1488,7 @@ fn cmd_optimize(
             verbose,
             quiet,
             query,
-            budget.as_ref(),
+            budget.as_deref(),
         )
     } else {
         optimize_unbounded(

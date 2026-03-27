@@ -4,7 +4,7 @@
 //! that can influence query optimization decisions.
 
 use std::fs;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// Current system metrics snapshot.
 #[derive(Debug, Clone)]
