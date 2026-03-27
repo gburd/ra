@@ -1532,8 +1532,15 @@ fn optimize_bounded(
     }
 
     if !quiet {
+        // Check if the budget is unlimited - if so, use simpler title
+        let budget = optimizer.config().resource_budget.as_ref();
+        let title = if budget.map_or(false, |b| b.is_unlimited()) {
+            "Query Optimization"
+        } else {
+            "Query Optimization (Resource-Bounded)"
+        };
         print_optimization_header(
-            "Query Optimization (Resource-Bounded)",
+            title,
             query,
             hardware,
             verbose,
@@ -1617,7 +1624,26 @@ fn print_optimization_header(
     verbose: bool,
 ) {
     print_header(title);
-    eprintln!("  {}: {query}", "SQL".bold());
+
+    // Format SQL query nicely
+    let formatted_query = match ra_parser::formatter::SqlFormatter::default_style().format(query) {
+        Ok(formatted) => {
+            // Indent each line of the formatted query
+            formatted
+                .lines()
+                .map(|line| format!("    {line}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+        Err(_) => {
+            // If formatting fails, fall back to the original query
+            format!("    {query}")
+        }
+    };
+
+    eprintln!("  {}:", "SQL".bold());
+    eprintln!("{formatted_query}");
+
     if verbose {
         eprintln!(
             "  {}: {} ({} cores, {} MB L3, {}-bit SIMD)",
