@@ -143,6 +143,7 @@ fn benchmark_simple_optimization(iterations: usize) -> anyhow::Result<f64> {
 }
 
 /// Proxy benchmark for simple optimization (used when ra-engine not available).
+#[cfg(not(test))]
 fn benchmark_simple_optimization_proxy(iterations: usize) -> f64 {
     // Create test data simulating table rows
     let mut left_data = Vec::with_capacity(1000);
@@ -168,6 +169,7 @@ fn benchmark_simple_optimization_proxy(iterations: usize) -> f64 {
 }
 
 /// Simulate join optimization workload.
+#[cfg(not(test))]
 fn simulate_join_optimization(left: &[(usize, usize, usize)], right: &[(usize, usize, usize)]) -> usize {
     // Simulate nested loop join with hash build
     let mut hash_map = std::collections::HashMap::new();
@@ -251,6 +253,7 @@ fn benchmark_complex_optimization(iterations: usize) -> anyhow::Result<f64> {
 }
 
 /// Proxy benchmark for complex optimization.
+#[cfg(not(test))]
 fn benchmark_complex_optimization_proxy(iterations: usize) -> f64 {
     // Create test data for 4 tables
     let tables: Vec<Vec<(usize, usize, usize)>> = (0..4)
@@ -277,6 +280,7 @@ fn benchmark_complex_optimization_proxy(iterations: usize) -> f64 {
 }
 
 /// Simulate complex 4-table join workload.
+#[cfg(not(test))]
 fn simulate_complex_join(tables: &[Vec<(usize, usize, usize)>]) -> usize {
     // Simulate joining 4 tables in pairs then joining results
     let j1 = simulate_join_optimization(&tables[0], &tables[1]);
@@ -337,6 +341,7 @@ fn benchmark_egraph_saturation(iterations: usize) -> anyhow::Result<u64> {
 }
 
 /// Proxy benchmark for e-graph saturation.
+#[cfg(not(test))]
 fn benchmark_egraph_saturation_proxy(iterations: usize) -> u64 {
     let mut total_iters = 0u64;
 
@@ -349,6 +354,7 @@ fn benchmark_egraph_saturation_proxy(iterations: usize) -> u64 {
 }
 
 /// Simulate e-graph saturation workload.
+#[cfg(not(test))]
 fn simulate_saturation() -> u64 {
     // Simulate pattern matching and rewriting iterations
     let mut nodes = Vec::with_capacity(1000);
