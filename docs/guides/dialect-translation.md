@@ -7,7 +7,7 @@ statements between different database dialects.
 
 ```mermaid
 flowchart LR
-    PG[PostgreSQL SQL] --> Parse[Parse]
+    PG[SQL] --> Parse[Parse]
     Parse --> AST[Abstract Syntax Tree]
     AST --> Transform[Apply Dialect Rules]
     Transform --> Render[Render Target SQL]

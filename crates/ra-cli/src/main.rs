@@ -175,8 +175,8 @@ enum Commands {
         /// Read SQL from stdin instead of the positional argument.
         #[arg(long)]
         stdin: bool,
-        /// Diff output format: colored, plain, side-by-side, compact.
-        #[arg(long)]
+        /// Diff output format: colored, plain, side-by-side, compact. Defaults to colored if no format specified.
+        #[arg(long, value_name = "FORMAT", default_missing_value = "colored", num_args = 0..=1)]
         diff: Option<String>,
         /// Disable color output.
         #[arg(long)]
@@ -2512,33 +2512,268 @@ fn print_intermediate_steps(
     for step in steps {
         eprintln!(
             "{}",
-            format!("Step {}: Applied {} rule", step.step_number, step.rule_name)
+            format!("Step {}: Applied {}", step.step_number, step.rule_name)
                 .bold()
                 .green()
         );
-        eprintln!("  {}: {}", "Why".bold(), step.reason);
 
+        // Enhanced "Why" section with rule-specific reasoning
+        let why_text = enhance_reasoning(&step.rule_name, &step.reason, &step.plan_before, &step.plan_after);
+        eprintln!("  {}: {}", "Why".bold(), why_text);
+
+        // Enhanced "Impact" section
         if let Some(improvement) = step.cost_improvement {
-            eprintln!("  {}: {:.4}", "Cost improvement".bold(), improvement);
+            eprintln!("  {}: {}", "Impact".bold().cyan(), format_impact(improvement, &step.plan_before, &step.plan_after));
         }
 
         eprintln!();
-        eprintln!("  {}:", "Plan before".bold());
-        for line in format_plan_tree(&step.plan_before).lines() {
-            eprintln!("    {}", line);
-        }
+        eprintln!("  {}:", "Changes".bold());
 
-        eprintln!();
-        eprintln!("  {}:", "Plan after".bold());
-        for line in format_plan_tree(&step.plan_after).lines() {
-            eprintln!("    {}", line);
-        }
+        // Display plan tree with changes highlighted
+        print_plan_with_changes(&step.plan_after, &step.plan_before);
+
         eprintln!();
     }
 
     eprintln!("{}", "Final Optimized Plan:".bold());
     if let Some(last_step) = steps.last() {
         eprintln!("{}", format_plan_tree(&last_step.plan_after));
+    }
+}
+
+/// Enhance the reasoning explanation based on rule name and context.
+fn enhance_reasoning(
+    rule_name: &str,
+    original_reason: &str,
+    plan_before: &ra_core::algebra::RelExpr,
+    plan_after: &ra_core::algebra::RelExpr,
+) -> String {
+    use colored::Colorize;
+
+    // If original reason already has good detail, use it
+    if !original_reason.contains("Pattern matched") && original_reason.len() > 30 {
+        return original_reason.to_string();
+    }
+
+    // Generate rule-specific explanations
+    let explanation = match rule_name {
+        name if name.contains("filter-pushdown") || name.contains("push-filter") => {
+            "Filter condition can be evaluated earlier to reduce data processed by downstream operators"
+        }
+        name if name.contains("join-order") || name.contains("reorder") => {
+            "Join order optimized to process smaller result sets first, reducing intermediate data"
+        }
+        name if name.contains("index") => {
+            "Index scan available for predicate, eliminating full table scan"
+        }
+        name if name.contains("semi-join") || name.contains("semijoin") => {
+            "Converted to semi-join since only existence check is needed, not full join results"
+        }
+        name if name.contains("projection") || name.contains("project-pushdown") => {
+            "Project columns earlier to reduce data width and memory usage"
+        }
+        name if name.contains("aggregate") && name.contains("push") => {
+            "Aggregate pushed down to reduce data volume before subsequent operations"
+        }
+        name if name.contains("eliminate") => {
+            "Removed redundant operator that doesn't affect query results"
+        }
+        name if name.contains("merge") => {
+            "Combined adjacent operators to reduce overhead"
+        }
+        name if name.contains("parallel") => {
+            "Parallelized operation to utilize multiple CPU cores"
+        }
+        name if name.contains("bitmap") => {
+            "Using bitmap index to efficiently combine multiple index scans"
+        }
+        _ => {
+            // Analyze plan structure for generic explanation
+            if has_filter_pushdown(plan_before, plan_after) {
+                "Moved filter closer to data source to reduce processing"
+            } else if has_join_reorder(plan_before, plan_after) {
+                "Reordered operations for better performance"
+            } else {
+                "Applied rewrite rule to improve query execution"
+            }
+        }
+    };
+
+    format!("{} [{}]", explanation, rule_name.dimmed())
+}
+
+/// Format the impact of an optimization with context.
+fn format_impact(
+    cost_improvement: f64,
+    plan_before: &ra_core::algebra::RelExpr,
+    plan_after: &ra_core::algebra::RelExpr,
+) -> String {
+    use colored::Colorize;
+
+    let mut impacts = Vec::new();
+
+    // Show cost reduction percentage if significant
+    impacts.push(format!(
+        "Reduced estimated cost by {:.2}",
+        cost_improvement.to_string().green()
+    ));
+
+    // Detect specific optimizations
+    if has_scan_upgrade(plan_before, plan_after) {
+        impacts.push("Eliminated full table scan, using index instead".to_string());
+    }
+
+    if has_operator_elimination(plan_before, plan_after) {
+        let diff = count_operators(plan_before) - count_operators(plan_after);
+        if diff > 0 {
+            impacts.push(format!("Removed {} redundant operator(s)", diff));
+        }
+    }
+
+    if has_parallelization(plan_after) {
+        impacts.push("Enabled parallel execution".to_string());
+    }
+
+    impacts.join("; ")
+}
+
+/// Extract just the operator part from a plan tree line (removing tree characters).
+fn extract_operator(line: &str) -> String {
+    line.trim_start_matches(|c: char| c.is_whitespace() || "└├─│".contains(c))
+        .trim()
+        .to_string()
+}
+
+/// Print plan as a tree with highlighted changes.
+fn print_plan_with_changes(
+    plan: &ra_core::algebra::RelExpr,
+    before: &ra_core::algebra::RelExpr,
+) {
+    use colored::Colorize;
+
+    // Get tree representations
+    let before_tree = format_plan_tree(before);
+    let after_tree = format_plan_tree(plan);
+
+    // Split into lines preserving tree structure
+    let before_lines: Vec<&str> = before_tree.lines().collect();
+    let after_lines: Vec<&str> = after_tree.lines().collect();
+
+    // Extract just the operator parts (without tree characters) for comparison
+    let before_ops: Vec<String> = before_lines.iter().map(|l| extract_operator(l)).collect();
+    let after_ops: Vec<String> = after_lines.iter().map(|l| extract_operator(l)).collect();
+
+    // Print the after tree with changes highlighted
+    for (i, line) in after_lines.iter().enumerate() {
+        let op = &after_ops[i];
+
+        // Check if this operator existed in the before plan
+        if before_ops.contains(op) {
+            // Unchanged - show dimmed
+            eprintln!("    {}", line.dimmed());
+        } else {
+            // New or changed - show bold and green
+            eprintln!("    {}", line.green().bold());
+        }
+    }
+
+    // Show removed operators (that were in before but not in after)
+    let mut shown_removed = false;
+    for (i, op) in before_ops.iter().enumerate() {
+        if !after_ops.contains(op) && !op.is_empty() {
+            if !shown_removed {
+                eprintln!("    {}", "Removed:".red().bold());
+                shown_removed = true;
+            }
+            eprintln!("      {} {}", "−".red().bold(), before_lines[i].trim().red().strikethrough());
+        }
+    }
+}
+
+/// Detect if a filter was pushed down in the plan.
+fn has_filter_pushdown(before: &ra_core::algebra::RelExpr, after: &ra_core::algebra::RelExpr) -> bool {
+    // Simple heuristic: if before has filter higher in tree and after has it lower
+    let before_depth = filter_depth(before, 0);
+    let after_depth = filter_depth(after, 0);
+    after_depth > before_depth
+}
+
+/// Get the depth of the first filter in the plan tree.
+fn filter_depth(expr: &ra_core::algebra::RelExpr, depth: usize) -> usize {
+    match expr {
+        ra_core::algebra::RelExpr::Filter { .. } => depth,
+        _ => {
+            expr.children()
+                .iter()
+                .map(|child| filter_depth(child, depth + 1))
+                .min()
+                .unwrap_or(usize::MAX)
+        }
+    }
+}
+
+/// Detect if joins were reordered.
+fn has_join_reorder(before: &ra_core::algebra::RelExpr, after: &ra_core::algebra::RelExpr) -> bool {
+    let before_joins = count_joins(before);
+    let after_joins = count_joins(after);
+    // Same number of joins but structure changed
+    before_joins == after_joins && before_joins > 0 && before != after
+}
+
+/// Count join operators in a plan.
+fn count_joins(expr: &ra_core::algebra::RelExpr) -> usize {
+    match expr {
+        ra_core::algebra::RelExpr::Join { .. } => {
+            1 + expr.children().iter().map(|c| count_joins(c)).sum::<usize>()
+        }
+        ra_core::algebra::RelExpr::ParallelHashJoin { .. } => {
+            1 + expr.children().iter().map(|c| count_joins(c)).sum::<usize>()
+        }
+        _ => expr.children().iter().map(|c| count_joins(c)).sum(),
+    }
+}
+
+/// Detect if scan was upgraded (e.g., table scan to index scan).
+fn has_scan_upgrade(before: &ra_core::algebra::RelExpr, after: &ra_core::algebra::RelExpr) -> bool {
+    has_table_scan(before) && has_index_scan(after)
+}
+
+/// Check if plan has a table scan.
+fn has_table_scan(expr: &ra_core::algebra::RelExpr) -> bool {
+    match expr {
+        ra_core::algebra::RelExpr::Scan { .. } => true,
+        _ => expr.children().iter().any(|&child| has_table_scan(child)),
+    }
+}
+
+/// Check if plan has an index scan.
+fn has_index_scan(expr: &ra_core::algebra::RelExpr) -> bool {
+    match expr {
+        ra_core::algebra::RelExpr::IndexScan { .. }
+        | ra_core::algebra::RelExpr::IndexOnlyScan { .. }
+        | ra_core::algebra::RelExpr::BitmapIndexScan { .. } => true,
+        _ => expr.children().iter().any(|&child| has_index_scan(child)),
+    }
+}
+
+/// Count total operators in a plan.
+fn count_operators(expr: &ra_core::algebra::RelExpr) -> usize {
+    1 + expr.children().iter().map(|c| count_operators(c)).sum::<usize>()
+}
+
+/// Detect if an operator was eliminated.
+fn has_operator_elimination(before: &ra_core::algebra::RelExpr, after: &ra_core::algebra::RelExpr) -> bool {
+    count_operators(before) > count_operators(after)
+}
+
+/// Check if plan uses parallelization.
+fn has_parallelization(expr: &ra_core::algebra::RelExpr) -> bool {
+    match expr {
+        ra_core::algebra::RelExpr::ParallelScan { .. }
+        | ra_core::algebra::RelExpr::ParallelHashJoin { .. }
+        | ra_core::algebra::RelExpr::ParallelAggregate { .. }
+        | ra_core::algebra::RelExpr::Gather { .. } => true,
+        _ => expr.children().iter().any(|&child| has_parallelization(child)),
     }
 }
 
