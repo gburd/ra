@@ -796,7 +796,7 @@ fn main() -> Result<()> {
             takeover,
             log_format,
             min_improvement,
-        } => cmd_proxy(backend, listen, *takeover, log_format, *min_improvement),
+        } => cmd_proxy(&backend, &listen, takeover, &log_format, min_improvement),
         Commands::Translate { query, from, to } => cmd_translate(&query, &from, &to, cli.quiet),
         Commands::AnalyzeTriggers {
             table,
@@ -3006,8 +3006,6 @@ fn print_available_rules(tracking: &ra_engine::RuleTrackingResult) {
 
 /// Format SQL parsing errors in Rust compiler style with helpful pointers.
 fn format_sql_error(err: &ra_parser::SqlConversionError, sql: &str) -> anyhow::Error {
-    use colored::Colorize;
-
     let error_msg = err.to_string();
 
     // Try to extract position information from sqlparser error messages
@@ -3122,8 +3120,6 @@ fn format_error_with_location(
 
 /// Format error with general context highlighting.
 fn format_error_with_context(sql: &str, error_msg: &str) -> anyhow::Error {
-    use colored::Colorize;
-
     let mut output = String::new();
     output.push_str(&format!("{}: SQL parse error\n", "error".red().bold()));
     output.push_str(&format!("  {} {}\n", "-->".blue().bold(), "query:".dimmed()));
