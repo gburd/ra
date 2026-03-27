@@ -796,7 +796,7 @@ fn main() -> Result<()> {
             takeover,
             log_format,
             min_improvement,
-        } => cmd_proxy(&backend, &listen, *takeover, &log_format, *min_improvement),
+        } => cmd_proxy(backend, listen, *takeover, log_format, *min_improvement),
         Commands::Translate { query, from, to } => cmd_translate(&query, &from, &to, cli.quiet),
         Commands::AnalyzeTriggers {
             table,
