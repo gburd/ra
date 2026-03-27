@@ -129,6 +129,47 @@ pub enum IndexType {
     Unknown,
 }
 
+/// Storage format for a table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StorageFormat {
+    /// Row-based storage (heap tables, MyISAM)
+    RowBased,
+    /// Column-based storage (columnar)
+    Columnar,
+    /// Parquet files
+    Parquet,
+    /// ORC files
+    Orc,
+    /// Arrow IPC
+    ArrowIpc,
+    /// Unknown or mixed format
+    #[default]
+    Unknown,
+}
+
+impl StorageFormat {
+    /// Check if this format is Parquet.
+    #[must_use]
+    pub fn is_parquet(&self) -> bool {
+        matches!(self, Self::Parquet)
+    }
+
+    /// Check if this format is columnar (Parquet, ORC, Arrow, or generic columnar).
+    #[must_use]
+    pub fn is_columnar(&self) -> bool {
+        matches!(
+            self,
+            Self::Columnar | Self::Parquet | Self::Orc | Self::ArrowIpc
+        )
+    }
+
+    /// Check if this format supports predicate pushdown via metadata.
+    #[must_use]
+    pub fn supports_metadata_pushdown(&self) -> bool {
+        matches!(self, Self::Parquet | Self::Orc)
+    }
+}
+
 /// Table schema information
 #[derive(Debug, Clone)]
 pub struct TableInfo {
@@ -142,6 +183,8 @@ pub struct TableInfo {
     pub foreign_keys: Vec<ForeignKey>,
     /// Available indexes
     pub indexes: Vec<IndexInfo>,
+    /// Storage format for this table
+    pub storage_format: StorageFormat,
 }
 
 /// Foreign key constraint
@@ -540,6 +583,7 @@ mod tests {
                 is_unique: false,
                 included_columns: vec![],
             }],
+            storage_format: StorageFormat::RowBased,
         });
         assert!(facts.has_covering_index("orders", &["customer_id", "amount"]));
         assert!(!facts.has_covering_index("orders", &["customer_id", "id"]));
@@ -559,6 +603,7 @@ mod tests {
                 is_unique: false,
                 included_columns: vec!["order_date".into()],
             }],
+            storage_format: StorageFormat::RowBased,
         });
         assert!(facts.has_covering_index("orders", &["customer_id", "order_date"]));
         assert!(!facts.has_covering_index("orders", &["customer_id", "id"]));
