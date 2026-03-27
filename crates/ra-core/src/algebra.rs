@@ -1,5 +1,4 @@
 #![allow(clippy::doc_markdown)]
-#![allow(clippy::doc_markdown)]
 //! Relational algebra AST types.
 //!
 //! This module defines the core relational expression tree that

@@ -279,6 +279,142 @@ fn format_plan_tree_impl(expr: &RelExpr, buf: &mut String, prefix: &str, is_last
             buf.push_str(connector);
             buf.push_str(&format!("Values({} row(s))\n", rows.len()));
         }
+        RelExpr::IncrementalSort {
+            prefix_keys,
+            suffix_keys,
+            input,
+        } => {
+            buf.push_str(prefix);
+            buf.push_str(connector);
+            buf.push_str("IncrementalSort\n");
+
+            buf.push_str(prefix);
+            buf.push_str(&child_prefix_ext);
+            buf.push_str("prefix_keys: ");
+            for (i, key) in prefix_keys.iter().enumerate() {
+                if i > 0 {
+                    buf.push_str(", ");
+                }
+                buf.push_str(&format_expr(&key.expr));
+                buf.push(' ');
+                buf.push_str(&format_sort_direction(key.direction));
+            }
+            buf.push('\n');
+
+            buf.push_str(prefix);
+            buf.push_str(&child_prefix_ext);
+            buf.push_str("suffix_keys: ");
+            for (i, key) in suffix_keys.iter().enumerate() {
+                if i > 0 {
+                    buf.push_str(", ");
+                }
+                buf.push_str(&format_expr(&key.expr));
+                buf.push(' ');
+                buf.push_str(&format_sort_direction(key.direction));
+            }
+            buf.push('\n');
+
+            let child_prefix = format!("{prefix}{child_prefix_ext}");
+            format_plan_tree_impl(input, buf, &child_prefix, true);
+        }
+        RelExpr::IndexScan { table, column } => {
+            buf.push_str(prefix);
+            buf.push_str(connector);
+            buf.push_str(&format!("IndexScan({table}.{column})\n"));
+        }
+        RelExpr::IndexOnlyScan {
+            table,
+            index,
+            columns,
+            predicate,
+        } => {
+            buf.push_str(prefix);
+            buf.push_str(connector);
+            buf.push_str(&format!("IndexOnlyScan({table}, index={index})\n"));
+
+            buf.push_str(prefix);
+            buf.push_str(&child_prefix_ext);
+            buf.push_str("columns: ");
+            for (i, col) in columns.iter().enumerate() {
+                if i > 0 {
+                    buf.push_str(", ");
+                }
+                buf.push_str(&format_expr(&col.expr));
+            }
+            buf.push('\n');
+
+            buf.push_str(prefix);
+            buf.push_str(&child_prefix_ext);
+            buf.push_str("predicate: ");
+            buf.push_str(&format_expr(predicate));
+            buf.push('\n');
+        }
+        RelExpr::MvScan { view_name, alias } => {
+            buf.push_str(prefix);
+            buf.push_str(connector);
+            buf.push_str("MvScan(");
+            buf.push_str(view_name);
+            if let Some(a) = alias {
+                buf.push_str(" AS ");
+                buf.push_str(a);
+            }
+            buf.push_str(")\n");
+        }
+        RelExpr::BitmapIndexScan {
+            table,
+            index,
+            predicate,
+        } => {
+            buf.push_str(prefix);
+            buf.push_str(connector);
+            buf.push_str(&format!("BitmapIndexScan({table}, index={index})\n"));
+
+            buf.push_str(prefix);
+            buf.push_str(&child_prefix_ext);
+            buf.push_str("predicate: ");
+            buf.push_str(&format_expr(predicate));
+            buf.push('\n');
+        }
+        RelExpr::BitmapAnd { inputs } => {
+            buf.push_str(prefix);
+            buf.push_str(connector);
+            buf.push_str("BitmapAnd\n");
+
+            let child_prefix = format!("{prefix}{child_prefix_ext}");
+            for (i, input) in inputs.iter().enumerate() {
+                format_plan_tree_impl(input, buf, &child_prefix, i == inputs.len() - 1);
+            }
+        }
+        RelExpr::BitmapOr { inputs } => {
+            buf.push_str(prefix);
+            buf.push_str(connector);
+            buf.push_str("BitmapOr\n");
+
+            let child_prefix = format!("{prefix}{child_prefix_ext}");
+            for (i, input) in inputs.iter().enumerate() {
+                format_plan_tree_impl(input, buf, &child_prefix, i == inputs.len() - 1);
+            }
+        }
+        RelExpr::BitmapHeapScan {
+            table,
+            bitmap,
+            recheck_cond,
+        } => {
+            buf.push_str(prefix);
+            buf.push_str(connector);
+            buf.push_str(&format!("BitmapHeapScan({table})\n"));
+
+            if let Some(cond) = recheck_cond {
+                buf.push_str(prefix);
+                buf.push_str(&child_prefix_ext);
+                buf.push_str("recheck_cond: ");
+                buf.push_str(&format_expr(cond));
+                buf.push('\n');
+            }
+
+            let child_prefix = format!("{prefix}{child_prefix_ext}");
+            format_plan_tree_impl(bitmap, buf, &child_prefix, true);
+        }
         other => {
             buf.push_str(prefix);
             buf.push_str(connector);

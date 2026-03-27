@@ -274,6 +274,11 @@ fn convert_node(nodes: &[RelLang], idx: usize) -> Result<RelExpr, EGraphError> {
             keys: convert_sort_key_list(nodes, id(*keys_id))?,
             input: Box::new(convert_node(nodes, id(*input_id))?),
         }),
+        RelLang::IncrementalSort([prefix_keys_id, suffix_keys_id, input_id]) => Ok(RelExpr::IncrementalSort {
+            prefix_keys: convert_sort_key_list(nodes, id(*prefix_keys_id))?,
+            suffix_keys: convert_sort_key_list(nodes, id(*suffix_keys_id))?,
+            input: Box::new(convert_node(nodes, id(*input_id))?),
+        }),
         RelLang::Limit(ids) => convert_limit(nodes, ids),
         RelLang::Union([all_id, left_id, right_id]) => {
             convert_set_op(nodes, *all_id, *left_id, *right_id, "union")
@@ -359,6 +364,11 @@ fn convert_node(nodes: &[RelLang], idx: usize) -> Result<RelExpr, EGraphError> {
                 }],
                 input: Box::new(RelExpr::Scan { table, alias: None }),
             })
+        }
+        RelLang::IndexScan([table_id, column_id]) => {
+            let table = get_symbol(nodes, id(*table_id))?;
+            let column = get_symbol(nodes, id(*column_id))?;
+            Ok(RelExpr::IndexScan { table, column })
         }
         RelLang::IndexOnlyScan([
             table_id,

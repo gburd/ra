@@ -187,7 +187,8 @@ enum Commands {
         #[arg(long)]
         no_color: bool,
         /// Resource budget profile: interactive, standard, batch,
-        /// memory-constrained, unlimited.
+        /// memory-constrained, unlimited. Default: unbounded
+        /// (unless --rules-* flags are used, then defaults to standard).
         #[arg(long)]
         resource_budget: Option<String>,
         /// Maximum wall-clock time for optimization (e.g. "100ms", "1s", "10s").
@@ -696,13 +697,6 @@ fn main() -> Result<()> {
             let resolved = resolve_query(
                 &query, use_stdin,
             )?;
-            let budget = build_resource_budget(
-                resource_budget.as_deref(),
-                max_time.as_deref(),
-                max_memory.as_deref(),
-                max_iterations,
-                overflow_strategy.as_deref(),
-            )?;
 
             // Determine which rule tracking mode to use
             let show_rules = RuleDisplayMode::from_flags(
@@ -712,6 +706,15 @@ fn main() -> Result<()> {
                 rules_all,
                 rules,
             );
+
+            let budget = build_resource_budget(
+                resource_budget.as_deref(),
+                max_time.as_deref(),
+                max_memory.as_deref(),
+                max_iterations,
+                overflow_strategy.as_deref(),
+                show_rules.should_track(),
+            )?;
 
             cmd_optimize(
                 &resolved,
@@ -1745,7 +1748,7 @@ fn optimize_bounded(
     query: &str,
 ) -> Result<()> {
     let result = if show_rules.should_track() {
-        optimizer.optimize_with_tracking(plan).with_context(|| {
+        optimizer.optimize_with_tracking_verbose(plan, verbose).with_context(|| {
             format!("failed to optimize query: {query}")
         })?
     } else {
@@ -1774,11 +1777,19 @@ fn optimize_bounded(
 
         if show_rules != RuleDisplayMode::None {
             eprintln!();
-            print_rule_tracking(&result, show_rules);
+            if verbose {
+                if let Some(tracking) = &result.rule_tracking {
+                    print_intermediate_steps(tracking, plan);
+                }
+            } else {
+                print_rule_tracking(&result, show_rules);
+            }
         }
 
-        eprintln!();
-        print_plan_output(plan, &result.plan, diff_format)?;
+        if !verbose {
+            eprintln!();
+            print_plan_output(plan, &result.plan, diff_format)?;
+        }
     }
     Ok(())
 }
@@ -2626,16 +2637,25 @@ fn build_resource_budget(
     max_memory: Option<&str>,
     max_iterations: Option<usize>,
     overflow_strategy: Option<&str>,
+    rule_tracking_requested: bool,
 ) -> Result<Option<ra_engine::ResourceBudget>> {
     let has_custom = max_time.is_some()
         || max_memory.is_some()
         || max_iterations.is_some()
         || overflow_strategy.is_some();
 
+    // Default behavior: unbounded unless rule tracking is requested
     if profile.is_none() && !has_custom {
+        if rule_tracking_requested {
+            // Rule tracking requires a budget to be set, default to standard
+            return Ok(Some(ra_engine::ResourceBudget::standard()));
+        }
+        // No profile, no custom settings, no rule tracking = unbounded
         return Ok(None);
     }
 
+    // If profile is explicitly set, use it; otherwise default to standard
+    // when custom settings are provided or rule tracking is requested
     let mut budget = match profile {
         Some("interactive") => ra_engine::ResourceBudget::interactive(),
         Some("standard") => ra_engine::ResourceBudget::standard(),
@@ -2649,7 +2669,14 @@ fn build_resource_budget(
              Valid: interactive, standard, batch, \
              memory-constrained, unlimited"
         ),
-        None => ra_engine::ResourceBudget::standard(),
+        None if rule_tracking_requested => {
+            // Rule tracking with custom settings still needs a base budget
+            ra_engine::ResourceBudget::standard()
+        }
+        None => {
+            // Custom settings without rule tracking = start unbounded
+            ra_engine::ResourceBudget::unlimited()
+        }
     };
 
     if let Some(t) = max_time {
@@ -2861,6 +2888,55 @@ fn print_rule_tracking(
             eprintln!();
             print_available_rules(tracking);
         }
+    }
+}
+
+fn print_intermediate_steps(
+    tracking: &ra_engine::RuleTrackingResult,
+    original_plan: &ra_core::algebra::RelExpr,
+) {
+    use colored::Colorize;
+
+    let Some(steps) = &tracking.intermediate_steps else {
+        return;
+    };
+
+    if steps.is_empty() {
+        return;
+    }
+
+    eprintln!();
+    eprintln!("{}", "Intermediate Optimization Steps:".bold().underline());
+    eprintln!();
+    eprintln!("{}", "Original Plan:".bold());
+    eprintln!("{}", format_plan_tree(original_plan));
+    eprintln!();
+
+    for step in steps {
+        eprintln!("{}", format!("Step {}: Applied {} rule", step.step_number, step.rule_name).bold().green());
+        eprintln!("  {}: {}", "Why".bold(), step.reason);
+
+        if let Some(improvement) = step.cost_improvement {
+            eprintln!("  {}: {:.4}", "Cost improvement".bold(), improvement);
+        }
+
+        eprintln!();
+        eprintln!("  {}:", "Plan before".bold());
+        for line in format_plan_tree(&step.plan_before).lines() {
+            eprintln!("    {}", line);
+        }
+
+        eprintln!();
+        eprintln!("  {}:", "Plan after".bold());
+        for line in format_plan_tree(&step.plan_after).lines() {
+            eprintln!("    {}", line);
+        }
+        eprintln!();
+    }
+
+    eprintln!("{}", "Final Optimized Plan:".bold());
+    if let Some(last_step) = steps.last() {
+        eprintln!("{}", format_plan_tree(&last_step.plan_after));
     }
 }
 

@@ -1006,9 +1006,10 @@ impl Optimizer {
 
     /// Optimize with detailed rule tracking enabled.
     ///
-    /// This method is similar to `optimize_bounded` but tracks which rules
-    /// were applied, evaluated, and available. The tracking information is
-    /// returned in `OptimizationResult.rule_tracking`.
+    /// This method runs each rule individually to track which specific rules
+    /// were applied, how many times they fired, and the cost improvement from
+    /// each rule. The detailed tracking information is returned in
+    /// `OptimizationResult.rule_tracking`.
     ///
     /// # Errors
     ///
@@ -1018,6 +1019,24 @@ impl Optimizer {
     pub fn optimize_with_tracking(
         &self,
         expr: &RelExpr,
+    ) -> Result<OptimizationResult, EGraphError> {
+        self.optimize_with_tracking_verbose(expr, false)
+    }
+
+    /// Optimizes a relational algebra expression with detailed tracking.
+    ///
+    /// When verbose is true, captures intermediate plan transformations
+    /// after each rule application for detailed debugging output.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if expression conversion fails, or if the
+    /// overflow strategy is `OverflowStrategy::Fail` and the budget
+    /// is exceeded before any plan is extracted.
+    pub fn optimize_with_tracking_verbose(
+        &self,
+        expr: &RelExpr,
+        verbose: bool,
     ) -> Result<OptimizationResult, EGraphError> {
         let budget = self
             .resource_budget
@@ -1031,7 +1050,6 @@ impl Optimizer {
 
         let iter_limit = self.config.iter_limit;
         let node_limit = self.config.node_limit;
-        let time_limit_secs = self.config.time_limit_secs;
 
         let mut egraph: EGraph<RelLang, RelAnalysis> =
             EGraph::default();
@@ -1049,98 +1067,141 @@ impl Optimizer {
             best_cost = initial_cost;
         }
 
-        // Track rule applications at a high level
-        // Note: egg doesn't expose per-rule application counts, so we track
-        // whether ANY rules fired and the overall cost improvement
+        // Track per-rule applications
         let available_rules: Vec<String> = rules
             .iter()
             .map(|r| r.name.to_string())
             .collect();
 
-        let mut previous_node_count = egraph.total_number_of_nodes();
-        let mut total_nodes_added = 0;
-        let mut iterations_with_changes = 0;
+        let mut rule_applications: Vec<RuleApplication> = Vec::new();
+        let mut intermediate_steps: Vec<IntermediateStep> = Vec::new();
+        let mut step_number = 0;
+        let mut iteration_number = 0;
+        let mut saturated = false;
 
         for _iteration in 0..iter_limit {
             // Check budget before running an iteration
             let check = tracker.check();
             if !check.is_within_budget() {
-                let tracking = build_simple_tracking(
+                let tracking = build_detailed_tracking(
                     available_rules,
-                    total_nodes_added,
-                    iterations_with_changes,
-                    initial_cost,
-                    best_cost,
+                    rule_applications,
                 );
                 return handle_overflow_with_tracking(
                     &tracker, expr, best_plan, best_cost, Some(tracking),
                 );
             }
 
-            // Run one iteration of equality saturation
-            let runner: Runner<RelLang, RelAnalysis> =
-                Runner::default()
-                    .with_egraph(egraph)
-                    .with_node_limit(node_limit)
-                    .with_iter_limit(1)
-                    .with_time_limit(
-                        std::time::Duration::from_secs(time_limit_secs),
-                    )
-                    .run(&rules);
+            iteration_number += 1;
+            let mut any_rule_applied_this_iteration = false;
 
-            egraph = runner.egraph;
-            let current_node_count = egraph.total_number_of_nodes();
-            let nodes_added = current_node_count.saturating_sub(previous_node_count);
+            // Run each rule individually to track its contribution
+            for rule in &rules {
+                let nodes_before = egraph.total_number_of_nodes();
+                let cost_before = estimate_plan_cost(&egraph, root, &hardware);
 
-            if nodes_added > 0 {
-                total_nodes_added += nodes_added;
-                iterations_with_changes += 1;
-            }
+                // Extract plan before if verbose mode
+                let plan_before = if verbose {
+                    extract_best(&egraph, root, &self.table_stats, &hardware).ok()
+                } else {
+                    None
+                };
 
-            previous_node_count = current_node_count;
-            tracker.record_iteration();
-            tracker.record_egraph_nodes(current_node_count);
+                // Run this single rule once
+                let runner: Runner<RelLang, RelAnalysis> =
+                    Runner::default()
+                        .with_egraph(egraph)
+                        .with_node_limit(node_limit)
+                        .with_iter_limit(1)
+                        .run(&[rule.clone()]);
 
-            // Estimate memory: ~64 bytes per e-graph node is rough
-            #[allow(clippy::cast_possible_truncation)]
-            let mem_estimate =
-                (current_node_count as u64).saturating_mul(64);
-            tracker.record_memory_estimate(mem_estimate);
+                egraph = runner.egraph;
+                let nodes_after = egraph.total_number_of_nodes();
+                let nodes_added = nodes_after.saturating_sub(nodes_before);
 
-            // Try to extract the best plan from the current e-graph
-            if let Ok(plan) = extract_best(
-                &egraph, root, &self.table_stats, &hardware,
-            ) {
-                let cost = estimate_plan_cost(
-                    &egraph, root, &hardware,
-                );
-                if cost < best_cost {
-                    best_cost = cost;
-                    best_plan = Some(plan);
+                // If this rule added nodes, track it
+                if nodes_added > 0 {
+                    any_rule_applied_this_iteration = true;
+
+                    // Measure cost improvement
+                    let cost_after = estimate_plan_cost(&egraph, root, &hardware);
+                    let cost_improvement = if cost_after < cost_before {
+                        Some(cost_before - cost_after)
+                    } else {
+                        None
+                    };
+
+                    // Try to extract better plan
+                    if let Ok(plan) = extract_best(
+                        &egraph, root, &self.table_stats, &hardware,
+                    ) {
+                        if cost_after < best_cost {
+                            best_cost = cost_after;
+                            best_plan = Some(plan.clone());
+                        }
+
+                        // Capture intermediate step if verbose
+                        if verbose {
+                            if let Some(before) = plan_before {
+                                step_number += 1;
+                                let reason = if let Some(improvement) = cost_improvement {
+                                    format!("Cost improvement: {:.4}", improvement)
+                                } else {
+                                    "Pattern matched, exploring alternatives".to_string()
+                                };
+
+                                intermediate_steps.push(IntermediateStep {
+                                    step_number,
+                                    rule_name: rule.name.to_string(),
+                                    reason,
+                                    plan_before: before,
+                                    plan_after: plan,
+                                    cost_improvement,
+                                });
+                            }
+                        }
+                    }
+
+                    rule_applications.push(RuleApplication {
+                        name: format!("{} (iteration {})", rule.name, iteration_number),
+                        fired_count: 1,
+                        nodes_added,
+                        cost_improvement,
+                    });
                 }
             }
 
-            // Check for egg saturation (no new nodes)
-            if runner.stop_reason.as_ref().is_some_and(|r| {
-                matches!(r, egg::StopReason::Saturated)
-            }) {
+            tracker.record_iteration();
+            tracker.record_egraph_nodes(egraph.total_number_of_nodes());
+
+            // Estimate memory
+            #[allow(clippy::cast_possible_truncation)]
+            let mem_estimate =
+                (egraph.total_number_of_nodes() as u64).saturating_mul(64);
+            tracker.record_memory_estimate(mem_estimate);
+
+            // If no rules applied anything this iteration, we're saturated
+            if !any_rule_applied_this_iteration {
+                saturated = true;
                 break;
             }
         }
 
         let report = tracker.report();
         let status = if report.completed_within_budget() {
-            OptimizationStatus::Complete
+            if saturated {
+                OptimizationStatus::Complete
+            } else {
+                OptimizationStatus::Incomplete
+            }
         } else {
             OptimizationStatus::Incomplete
         };
 
-        let tracking = build_simple_tracking(
+        let tracking = build_detailed_tracking_with_steps(
             available_rules,
-            total_nodes_added,
-            iterations_with_changes,
-            initial_cost,
-            best_cost,
+            rule_applications,
+            if verbose { Some(intermediate_steps) } else { None },
         );
 
         match best_plan {
@@ -1337,6 +1398,7 @@ impl Optimizer {
 /// Since egg doesn't expose per-rule application statistics, we track
 /// optimization at a high level: whether rules made changes, total nodes
 /// added, and cost improvement.
+#[allow(dead_code)]
 fn build_simple_tracking(
     available_rules: Vec<String>,
     total_nodes_added: usize,
@@ -1352,8 +1414,8 @@ fn build_simple_tracking(
 
     let applied = if total_nodes_added > 0 {
         vec![RuleApplication {
-            name: format!("{} rule(s) across {} iteration(s)",
-                available_rules.len(), iterations_with_changes),
+            name: format!("Aggregate: {} iteration(s) with rule applications",
+                iterations_with_changes),
             fired_count: iterations_with_changes,
             nodes_added: total_nodes_added,
             cost_improvement: if cost_improvement > 0.0 {
@@ -1368,7 +1430,7 @@ fn build_simple_tracking(
 
     let evaluated = if total_nodes_added == 0 && !available_rules.is_empty() {
         vec![RuleEvaluation {
-            name: format!("{} rule(s) evaluated", available_rules.len()),
+            name: format!("Aggregate: {} rule(s) available but none applied", available_rules.len()),
             tried_count: available_rules.len(),
             rejection_reason: "no pattern matched or no improvement".to_string(),
         }]
@@ -1380,6 +1442,41 @@ fn build_simple_tracking(
         applied,
         evaluated,
         available: available_rules,
+        intermediate_steps: None,
+    }
+}
+
+/// Build a detailed tracking result from per-rule applications.
+///
+/// This function takes the collected rule applications and creates
+/// a tracking result with per-rule information.
+fn build_detailed_tracking(
+    available_rules: Vec<String>,
+    rule_applications: Vec<RuleApplication>,
+) -> RuleTrackingResult {
+    build_detailed_tracking_with_steps(available_rules, rule_applications, None)
+}
+
+fn build_detailed_tracking_with_steps(
+    available_rules: Vec<String>,
+    rule_applications: Vec<RuleApplication>,
+    intermediate_steps: Option<Vec<IntermediateStep>>,
+) -> RuleTrackingResult {
+    let evaluated = if rule_applications.is_empty() && !available_rules.is_empty() {
+        vec![RuleEvaluation {
+            name: format!("{} rule(s) available but none applied", available_rules.len()),
+            tried_count: available_rules.len(),
+            rejection_reason: "no pattern matched or no improvement".to_string(),
+        }]
+    } else {
+        Vec::new()
+    };
+
+    RuleTrackingResult {
+        applied: rule_applications,
+        evaluated,
+        available: available_rules,
+        intermediate_steps,
     }
 }
 
@@ -1474,6 +1571,25 @@ pub struct RuleTrackingResult {
     pub evaluated: Vec<RuleEvaluation>,
     /// All rules available in the system.
     pub available: Vec<String>,
+    /// Intermediate optimization steps (only populated in verbose mode).
+    pub intermediate_steps: Option<Vec<IntermediateStep>>,
+}
+
+/// A single step in the optimization process showing plan transformation.
+#[derive(Debug, Clone)]
+pub struct IntermediateStep {
+    /// Step number in the optimization sequence.
+    pub step_number: usize,
+    /// Name of the rule that was applied.
+    pub rule_name: String,
+    /// Explanation of why this rule was chosen.
+    pub reason: String,
+    /// The plan before applying the rule.
+    pub plan_before: RelExpr,
+    /// The plan after applying the rule.
+    pub plan_after: RelExpr,
+    /// Cost improvement from this step.
+    pub cost_improvement: Option<f64>,
 }
 
 /// A rule that successfully applied and modified the e-graph.
@@ -4102,6 +4218,66 @@ mod tests {
         // Applied and evaluated depend on whether rules fired
         assert!(tracking.applied.len() <= tracking.available.len());
         assert!(tracking.evaluated.len() <= tracking.available.len());
+    }
+
+    #[test]
+    fn test_verbose_mode_captures_intermediate_steps() {
+        let optimizer = Optimizer::new();
+        let expr = RelExpr::scan("users").filter(Expr::BinOp {
+            op: BinOp::And,
+            left: Box::new(Expr::BinOp {
+                op: BinOp::Gt,
+                left: Box::new(Expr::Column(ColumnRef::new("age"))),
+                right: Box::new(Expr::Const(Const::Int(18))),
+            }),
+            right: Box::new(Expr::Const(Const::Bool(true))),
+        });
+
+        let result = optimizer
+            .optimize_with_tracking_verbose(&expr, true)
+            .expect("verbose tracking should succeed");
+
+        let tracking = result.rule_tracking.expect("tracking should be present");
+
+        // Verbose mode should populate intermediate_steps
+        assert!(tracking.intermediate_steps.is_some());
+
+        if !tracking.applied.is_empty() {
+            let steps = tracking.intermediate_steps.unwrap();
+            // If rules were applied, we should have steps
+            if !steps.is_empty() {
+                // Each step should have complete information
+                for step in &steps {
+                    assert!(step.step_number > 0);
+                    assert!(!step.rule_name.is_empty());
+                    assert!(!step.reason.is_empty());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_non_verbose_mode_skips_intermediate_steps() {
+        let optimizer = Optimizer::new();
+        let expr = RelExpr::scan("users").filter(Expr::BinOp {
+            op: BinOp::And,
+            left: Box::new(Expr::BinOp {
+                op: BinOp::Gt,
+                left: Box::new(Expr::Column(ColumnRef::new("age"))),
+                right: Box::new(Expr::Const(Const::Int(18))),
+            }),
+            right: Box::new(Expr::Const(Const::Bool(true))),
+        });
+
+        let result = optimizer
+            .optimize_with_tracking_verbose(&expr, false)
+            .expect("non-verbose tracking should succeed");
+
+        let tracking = result.rule_tracking.expect("tracking should be present");
+
+        // Non-verbose mode should not populate intermediate_steps
+        assert!(tracking.intermediate_steps.is_none() ||
+                tracking.intermediate_steps.as_ref().unwrap().is_empty());
     }
 }
 

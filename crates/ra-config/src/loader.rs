@@ -27,11 +27,11 @@ pub fn config_path() -> Option<PathBuf> {
 /// variables.
 pub struct ConfigLoader {
     /// System-wide config path.
-    system_path: PathBuf,
+    system: PathBuf,
     /// User config path.
-    user_path: Option<PathBuf>,
+    user: Option<PathBuf>,
     /// Local (project) config path.
-    local_path: PathBuf,
+    local: PathBuf,
 }
 
 impl ConfigLoader {
@@ -39,30 +39,30 @@ impl ConfigLoader {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            system_path: PathBuf::from("/etc/ra/config.toml"),
-            user_path: config_path(),
-            local_path: PathBuf::from(".ra/config.toml"),
+            system: PathBuf::from("/etc/ra/config.toml"),
+            user: config_path(),
+            local: PathBuf::from(".ra/config.toml"),
         }
     }
 
     /// Override the local config path (for testing).
     #[must_use]
-    pub fn with_local_path(mut self, path: PathBuf) -> Self {
-        self.local_path = path;
+    pub fn with_local(mut self, path: PathBuf) -> Self {
+        self.local = path;
         self
     }
 
     /// Override the user config path (for testing).
     #[must_use]
-    pub fn with_user_path(mut self, path: PathBuf) -> Self {
-        self.user_path = Some(path);
+    pub fn with_user(mut self, path: PathBuf) -> Self {
+        self.user = Some(path);
         self
     }
 
     /// Override the system config path (for testing).
     #[must_use]
-    pub fn with_system_path(mut self, path: PathBuf) -> Self {
-        self.system_path = path;
+    pub fn with_system(mut self, path: PathBuf) -> Self {
+        self.system = path;
         self
     }
 
@@ -79,21 +79,21 @@ impl ConfigLoader {
         let mut config = RaConfig::default();
 
         if let Some(layer) =
-            load_optional_file(&self.system_path)?
+            load_optional_file(&self.system)?
         {
             config.merge(&layer);
         }
 
-        if let Some(ref user_path) = self.user_path {
+        if let Some(ref user) = self.user {
             if let Some(layer) =
-                load_optional_file(user_path)?
+                load_optional_file(user)?
             {
                 config.merge(&layer);
             }
         }
 
         if let Some(layer) =
-            load_optional_file(&self.local_path)?
+            load_optional_file(&self.local)?
         {
             config.merge(&layer);
         }
@@ -117,7 +117,7 @@ impl ConfigLoader {
         config: &RaConfig,
     ) -> Result<(), ConfigError> {
         let path = self
-            .user_path
+            .user
             .as_deref()
             .ok_or_else(|| ConfigError::WriteFile {
                 path: "~/.config/ra/config.toml".to_owned(),
@@ -143,7 +143,7 @@ impl ConfigLoader {
         &self,
         config: &RaConfig,
     ) -> Result<(), ConfigError> {
-        save_config(config, &self.local_path)
+        save_config(config, &self.local)
     }
 }
 
@@ -216,13 +216,13 @@ mod tests {
     #[test]
     fn loader_with_no_files_returns_defaults() {
         let loader = ConfigLoader::new()
-            .with_system_path(PathBuf::from(
+            .with_system(PathBuf::from(
                 "/nonexistent/system",
             ))
-            .with_user_path(PathBuf::from(
+            .with_user(PathBuf::from(
                 "/nonexistent/user",
             ))
-            .with_local_path(PathBuf::from(
+            .with_local(PathBuf::from(
                 "/nonexistent/local",
             ));
 
@@ -241,9 +241,9 @@ mod tests {
         .expect("write");
 
         let loader = ConfigLoader::new()
-            .with_system_path(PathBuf::from("/nonexistent"))
-            .with_user_path(path)
-            .with_local_path(PathBuf::from("/nonexistent"));
+            .with_system(PathBuf::from("/nonexistent"))
+            .with_user(path)
+            .with_local(PathBuf::from("/nonexistent"));
 
         let config = loader.load().expect("load");
         assert_eq!(config.editor.mode, EditorMode::Vi);
@@ -253,24 +253,24 @@ mod tests {
     fn local_overrides_user() {
         let dir = tempfile::tempdir().expect("tempdir");
 
-        let user_path = dir.path().join("user.toml");
+        let user = dir.path().join("user.toml");
         std::fs::write(
-            &user_path,
+            &user,
             "[editor]\nmode = \"vi\"\n",
         )
         .expect("write user");
 
-        let local_path = dir.path().join("local.toml");
+        let local = dir.path().join("local.toml");
         std::fs::write(
-            &local_path,
+            &local,
             "[editor]\nmode = \"nano\"\n",
         )
         .expect("write local");
 
         let loader = ConfigLoader::new()
-            .with_system_path(PathBuf::from("/nonexistent"))
-            .with_user_path(user_path)
-            .with_local_path(local_path);
+            .with_system(PathBuf::from("/nonexistent"))
+            .with_user(user)
+            .with_local(local);
 
         let config = loader.load().expect("load");
         assert_eq!(config.editor.mode, EditorMode::Nano);
@@ -318,9 +318,9 @@ mod tests {
             .expect("write");
 
         let loader = ConfigLoader::new()
-            .with_system_path(PathBuf::from("/nonexistent"))
-            .with_user_path(path)
-            .with_local_path(PathBuf::from("/nonexistent"));
+            .with_system(PathBuf::from("/nonexistent"))
+            .with_user(path)
+            .with_local(PathBuf::from("/nonexistent"));
 
         let result = loader.load();
         assert!(result.is_err());

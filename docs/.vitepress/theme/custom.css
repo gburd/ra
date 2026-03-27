@@ -49,3 +49,25 @@ div[class*="language-"]:hover .try-it-link {
   color: var(--vp-c-white);
   background-color: var(--vp-c-brand-1);
 }
+
+/* Ensure ASCII art diagrams render properly in code blocks */
+div[class*="language-"] pre,
+div[class*="language-"] pre code,
+.vp-code-group .tabs,
+.vp-doc code,
+.vp-doc pre code {
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', 'Fira Mono',
+               'Roboto Mono', 'Source Code Pro', 'Consolas', 'Courier New', monospace !important;
+  font-feature-settings: normal !important;
+  font-variant-ligatures: none !important;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.5;
+  letter-spacing: 0;
+}
+
+/* Ensure proper spacing for ASCII art tree characters */
+div[class*="language-"] pre code .line {
+  display: block;
+  white-space: pre;
+}

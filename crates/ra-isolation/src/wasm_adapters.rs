@@ -12,7 +12,7 @@ use crate::executor::AdapterFactory;
 use crate::wasm_bridge::{Backend, RawResult, WasmBridgeAdapter};
 
 /// Factory function that opens a `ra_wasm` adapter for a session.
-pub type WasmAdapterOpener = Box<dyn Fn(&str) -> Result<Box<dyn ra_wasm::DatabaseAdapter>, String>>;
+pub type WasmAdapterOpener = Box<dyn Fn(&str) -> Result<Box<dyn ra_wasm::DatabaseAdapter>, String> + Send + Sync>;
 
 /// Wrap a `ra_wasm::DatabaseAdapter` as an isolation
 /// `DatabaseAdapter` using the callback bridge.
