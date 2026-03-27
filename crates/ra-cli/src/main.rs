@@ -796,7 +796,7 @@ fn main() -> Result<()> {
             takeover,
             log_format,
             min_improvement,
-        } => cmd_proxy(backend, listen, takeover, log_format, min_improvement),
+        } => cmd_proxy(&backend, &listen, *takeover, &log_format, *min_improvement),
         Commands::Translate { query, from, to } => cmd_translate(&query, &from, &to, cli.quiet),
         Commands::AnalyzeTriggers {
             table,
@@ -2086,9 +2086,9 @@ fn cmd_format(
 fn cmd_proxy(
     backend: &str,
     listen: &str,
-    takeover: &bool,
+    takeover: bool,
     log_format: &str,
-    min_improvement: &f64,
+    min_improvement: f64,
 ) -> Result<()> {
     use colored::Colorize;
 
@@ -2103,9 +2103,9 @@ fn cmd_proxy(
     let config = proxy::ProxyConfig {
         listen_addr,
         backend: backend.to_string(),
-        enable_plan_takeover: *takeover,
+        enable_plan_takeover: takeover,
         log_format: log_fmt,
-        min_improvement_percent: *min_improvement,
+        min_improvement_percent: min_improvement,
     };
 
     eprintln!("{}", "Ra Database Proxy".bold().green());
@@ -2114,7 +2114,7 @@ fn cmd_proxy(
     eprintln!("  {}: {}", "Listening".bold(), listen);
     eprintln!("  {}: {:.1}%", "Min Improvement".bold(), min_improvement);
 
-    if *takeover {
+    if takeover {
         eprintln!("  {}: {}", "Plan Takeover".bold(), "enabled (requires pg_plan_advice)".yellow());
     }
 
