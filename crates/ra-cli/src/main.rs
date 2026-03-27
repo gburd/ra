@@ -2882,7 +2882,7 @@ fn estimate_cardinality(plan: &ra_core::algebra::RelExpr) -> f64 {
             let children_card: f64 = plan
                 .children()
                 .iter()
-                .map(estimate_cardinality)
+                .map(|c| estimate_cardinality(c))
                 .sum();
             if children_card > 0.0 {
                 children_card
@@ -2988,8 +2988,6 @@ fn detect_scan_optimization(
     plan_before: &ra_core::algebra::RelExpr,
     plan_after: &ra_core::algebra::RelExpr,
 ) -> Option<String> {
-    use ra_core::algebra::RelExpr;
-
     let before_scan_type = find_scan_type(plan_before);
     let after_scan_type = find_scan_type(plan_after);
 
