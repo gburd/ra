@@ -2660,8 +2660,8 @@ fn print_intermediate_steps(
             // Display plan tree with changes highlighted inline
             print_plan_with_changes_inline(&step.plan_after, &step.plan_before);
         } else {
-            // Plan didn't visually change - explain why rule was still applied
-            eprintln!("  {}: Plan structure unchanged (optimization affected internal metadata, statistics, or execution strategy)", "Note".bold().dimmed());
+            // Plan didn't visually change - show what metadata/cost changes occurred
+            print_metadata_changes(&step.plan_before, &step.plan_after, step.cost_improvement);
         }
 
         eprintln!();
@@ -2767,6 +2767,272 @@ fn format_impact(
     }
 
     impacts.join("; ")
+}
+
+/// Print metadata and cost changes when plan structure is unchanged.
+fn print_metadata_changes(
+    plan_before: &ra_core::algebra::RelExpr,
+    plan_after: &ra_core::algebra::RelExpr,
+    cost_improvement: Option<f64>,
+) {
+    use colored::Colorize;
+
+    eprintln!("  {}: Plan structure unchanged", "Note".bold().dimmed());
+    eprintln!();
+
+    let mut changes = Vec::new();
+
+    // Extract cardinality estimates
+    let card_before = estimate_cardinality(plan_before);
+    let card_after = estimate_cardinality(plan_after);
+    if (card_before - card_after).abs() > 0.1 {
+        changes.push(format!(
+            "    {} Cardinality estimate: {} rows → {} rows",
+            "•".cyan(),
+            format_number(card_before).dimmed(),
+            format_number(card_after).green()
+        ));
+    }
+
+    // Show cost breakdown if we have cost improvement
+    if let Some(improvement) = cost_improvement {
+        if improvement > 0.1 {
+            changes.push(format!(
+                "    {} Total cost: reduced by {}",
+                "•".cyan(),
+                format!("{:.1}", improvement).green()
+            ));
+
+            // Try to identify what kind of cost changed
+            let cost_type = identify_cost_change_type(plan_before, plan_after);
+            if !cost_type.is_empty() {
+                changes.push(format!(
+                    "      {}",
+                    cost_type.dimmed()
+                ));
+            }
+        }
+    }
+
+    // Detect strategy changes (same operator type, different execution strategy)
+    if let Some(strategy_change) = detect_strategy_change(plan_before, plan_after) {
+        changes.push(format!(
+            "    {} Execution strategy: {}",
+            "•".cyan(),
+            strategy_change.yellow()
+        ));
+    }
+
+    // Detect index hints or scan method changes
+    if let Some(scan_change) = detect_scan_optimization(plan_before, plan_after) {
+        changes.push(format!(
+            "    {} {}",
+            "•".cyan(),
+            scan_change.green()
+        ));
+    }
+
+    // Show changes or explain that only internal metadata changed
+    if changes.is_empty() {
+        eprintln!("  {}", "  Updated internal metadata, statistics, or execution hints".dimmed());
+    } else {
+        eprintln!("  {}:", "Metadata changes".bold().cyan());
+        for change in changes {
+            eprintln!("{}", change);
+        }
+    }
+}
+
+/// Estimate cardinality (row count) for a plan.
+fn estimate_cardinality(plan: &ra_core::algebra::RelExpr) -> f64 {
+    use ra_core::algebra::RelExpr;
+
+    match plan {
+        RelExpr::Scan { .. } => 10000.0, // Default estimate
+        RelExpr::Filter { input, .. } => {
+            // Assume 10% selectivity for filters
+            estimate_cardinality(input) * 0.1
+        }
+        RelExpr::Project { input, .. } => estimate_cardinality(input),
+        RelExpr::Join { left, right, .. } => {
+            // Cross product with 10% join selectivity
+            estimate_cardinality(left) * estimate_cardinality(right) * 0.1
+        }
+        RelExpr::ParallelHashJoin { left, right, .. } => {
+            estimate_cardinality(left) * estimate_cardinality(right) * 0.1
+        }
+        RelExpr::Aggregate { input, .. } => {
+            // Aggregation typically reduces rows by 90%
+            estimate_cardinality(input) * 0.1
+        }
+        RelExpr::Sort { input, .. } => estimate_cardinality(input),
+        RelExpr::Limit { input, .. } => {
+            // For LIMIT without knowing N, assume 100 rows
+            estimate_cardinality(input).min(100.0)
+        }
+        RelExpr::Union { left, right, .. } => {
+            estimate_cardinality(left) + estimate_cardinality(right)
+        }
+        RelExpr::Intersect { left, right, .. } => {
+            estimate_cardinality(left).min(estimate_cardinality(right))
+        }
+        RelExpr::Except { left, .. } => estimate_cardinality(left) * 0.5,
+        _ => {
+            // For other operators, sum children or default to 1000
+            let children_card: f64 = plan
+                .children()
+                .iter()
+                .map(estimate_cardinality)
+                .sum();
+            if children_card > 0.0 {
+                children_card
+            } else {
+                1000.0
+            }
+        }
+    }
+}
+
+/// Format a number with thousands separators.
+fn format_number(n: f64) -> String {
+    let n_int = n as u64;
+    let s = n_int.to_string();
+    let mut result = String::new();
+    for (i, c) in s.chars().rev().enumerate() {
+        if i > 0 && i % 3 == 0 {
+            result.push(',');
+        }
+        result.push(c);
+    }
+    result.chars().rev().collect()
+}
+
+/// Identify what type of cost changed (CPU, I/O, Memory).
+fn identify_cost_change_type(
+    plan_before: &ra_core::algebra::RelExpr,
+    plan_after: &ra_core::algebra::RelExpr,
+) -> String {
+    use ra_core::algebra::RelExpr;
+
+    // Look at operator types to infer cost type
+    match (plan_before, plan_after) {
+        (RelExpr::Scan { .. }, RelExpr::IndexOnlyScan { .. }) |
+        (RelExpr::Scan { .. }, RelExpr::BitmapIndexScan { .. }) => {
+            "I/O cost reduced (index access instead of sequential scan)".to_string()
+        }
+        (RelExpr::Join { .. }, RelExpr::ParallelHashJoin { .. }) => {
+            "CPU cost optimized (parallel execution)".to_string()
+        }
+        (RelExpr::Sort { .. }, RelExpr::IncrementalSort { .. }) => {
+            "CPU and Memory cost reduced (incremental sort)".to_string()
+        }
+        _ => {
+            // Check for filter/scan patterns
+            if has_filter_near_scan(plan_after) && !has_filter_near_scan(plan_before) {
+                "CPU cost reduced (filter pushdown reduces processing)".to_string()
+            } else {
+                "Cost model refinement based on updated statistics".to_string()
+            }
+        }
+    }
+}
+
+/// Check if plan has filter close to scan (within 2 levels).
+fn has_filter_near_scan(plan: &ra_core::algebra::RelExpr) -> bool {
+    has_filter_near_scan_depth(plan, 0)
+}
+
+fn has_filter_near_scan_depth(plan: &ra_core::algebra::RelExpr, depth: usize) -> bool {
+    use ra_core::algebra::RelExpr;
+
+    if depth > 2 {
+        return false;
+    }
+
+    match plan {
+        RelExpr::Filter { input, .. } => {
+            matches!(**input, RelExpr::Scan { .. })
+                || plan.children().iter().any(|c| has_filter_near_scan_depth(c, depth + 1))
+        }
+        _ => plan.children().iter().any(|c| has_filter_near_scan_depth(c, depth + 1))
+    }
+}
+
+/// Detect if execution strategy changed within same operator class.
+fn detect_strategy_change(
+    plan_before: &ra_core::algebra::RelExpr,
+    plan_after: &ra_core::algebra::RelExpr,
+) -> Option<String> {
+    use ra_core::algebra::RelExpr;
+
+    // Check for join strategy changes (both are joins but different types)
+    match (plan_before, plan_after) {
+        (RelExpr::Join { .. }, RelExpr::ParallelHashJoin { .. }) => {
+            Some("Hash join → Parallel hash join".to_string())
+        }
+        (RelExpr::ParallelHashJoin { .. }, RelExpr::Join { .. }) => {
+            Some("Parallel hash join → Hash join".to_string())
+        }
+        (RelExpr::Sort { .. }, RelExpr::IncrementalSort { .. }) => {
+            Some("Full sort → Incremental sort".to_string())
+        }
+        (RelExpr::IncrementalSort { .. }, RelExpr::Sort { .. }) => {
+            Some("Incremental sort → Full sort".to_string())
+        }
+        _ => None
+    }
+}
+
+/// Detect scan optimization changes (sequential to index, etc.).
+fn detect_scan_optimization(
+    plan_before: &ra_core::algebra::RelExpr,
+    plan_after: &ra_core::algebra::RelExpr,
+) -> Option<String> {
+    use ra_core::algebra::RelExpr;
+
+    let before_scan_type = find_scan_type(plan_before);
+    let after_scan_type = find_scan_type(plan_after);
+
+    if before_scan_type != after_scan_type {
+        match (before_scan_type.as_deref(), after_scan_type.as_deref()) {
+            (Some("Scan"), Some("IndexOnlyScan")) => {
+                Some("Index-only scan enabled (covering index)".to_string())
+            }
+            (Some("Scan"), Some("BitmapIndexScan")) => {
+                Some("Bitmap index scan enabled".to_string())
+            }
+            (Some("BitmapIndexScan"), Some("IndexOnlyScan")) => {
+                Some("Upgraded to index-only scan".to_string())
+            }
+            _ => Some(format!("Scan method: {} → {}",
+                before_scan_type.unwrap_or_else(|| "Unknown".to_string()),
+                after_scan_type.unwrap_or_else(|| "Unknown".to_string())
+            ))
+        }
+    } else {
+        None
+    }
+}
+
+/// Find the type of scan operator in a plan.
+fn find_scan_type(plan: &ra_core::algebra::RelExpr) -> Option<String> {
+    use ra_core::algebra::RelExpr;
+
+    match plan {
+        RelExpr::Scan { .. } => Some("Scan".to_string()),
+        RelExpr::IndexOnlyScan { .. } => Some("IndexOnlyScan".to_string()),
+        RelExpr::BitmapIndexScan { .. } => Some("BitmapIndexScan".to_string()),
+        RelExpr::BitmapHeapScan { .. } => Some("BitmapHeapScan".to_string()),
+        _ => {
+            // Recursively check children
+            for child in plan.children() {
+                if let Some(scan_type) = find_scan_type(child) {
+                    return Some(scan_type);
+                }
+            }
+            None
+        }
+    }
 }
 
 /// Extract just the operator part from a plan tree line (removing tree characters).
@@ -3063,8 +3329,19 @@ fn format_error_with_location(
     let lines: Vec<&str> = sql.lines().collect();
     let line_idx = line_num.saturating_sub(1);
 
+    // Check debug level for backtrace control
+    let debug_level = std::env::var("DEBUG_RA")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(0);
+
     if line_idx >= lines.len() {
-        return anyhow::anyhow!("SQL parse error: {}", error_msg);
+        let msg = format!("SQL parse error: {}", error_msg);
+        return if debug_level > 1 {
+            anyhow::anyhow!("{}", msg)
+        } else {
+            anyhow::Error::msg(msg)
+        };
     }
 
     let error_line = lines[line_idx];
@@ -3115,7 +3392,12 @@ fn format_error_with_location(
         ));
     }
 
-    anyhow::anyhow!("{}", output)
+    // Only include backtrace if DEBUG_RA > 1
+    if debug_level > 1 {
+        anyhow::anyhow!("{}", output)
+    } else {
+        anyhow::Error::msg(output)
+    }
 }
 
 /// Format error with general context highlighting.
@@ -3141,7 +3423,18 @@ fn format_error_with_context(sql: &str, error_msg: &str) -> anyhow::Error {
         "help".green().bold()
     ));
 
-    anyhow::anyhow!("{}", output)
+    // Only include backtrace if DEBUG_RA > 1
+    let debug_level = std::env::var("DEBUG_RA")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(0);
+
+    if debug_level > 1 {
+        anyhow::anyhow!("{}", output)
+    } else {
+        // Use Error::msg to avoid capturing backtrace
+        anyhow::Error::msg(output)
+    }
 }
 
 fn print_header(msg: &str) {
