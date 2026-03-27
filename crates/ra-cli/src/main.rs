@@ -1488,6 +1488,7 @@ fn cmd_optimize(
             verbose,
             quiet,
             query,
+            budget.as_ref(),
         )
     } else {
         optimize_unbounded(
@@ -1516,6 +1517,7 @@ fn optimize_bounded(
     verbose: bool,
     quiet: bool,
     query: &str,
+    budget: Option<&ra_engine::ResourceBudget>,
 ) -> Result<()> {
     let result = if show_rules.should_track() {
         optimizer
@@ -1533,7 +1535,6 @@ fn optimize_bounded(
 
     if !quiet {
         // Check if the budget is unlimited - if so, use simpler title
-        let budget = optimizer.config().resource_budget.as_ref();
         let title = if budget.map_or(false, |b| b.is_unlimited()) {
             "Query Optimization"
         } else {
@@ -1625,6 +1626,24 @@ fn print_optimization_header(
 ) {
     print_header(title);
 
+    // Show hardware info first
+    eprintln!(
+        "  {}: {} ({} cores, {} MB L3, {}-bit SIMD)",
+        "Hardware".bold(),
+        hardware.name,
+        hardware.cpu_cores,
+        hardware.l3_cache_bytes / (1024 * 1024),
+        hardware.simd_width_bits
+    );
+
+    // Show current system metrics
+    if verbose {
+        let metrics = ra_hardware::SystemMetrics::collect();
+        eprintln!("  {}: {}", "System".bold(), metrics.format());
+    }
+
+    eprintln!();
+
     // Format SQL query nicely
     let formatted_query = match ra_parser::formatter::SqlFormatter::default_style().format(query) {
         Ok(formatted) => {
@@ -1643,17 +1662,6 @@ fn print_optimization_header(
 
     eprintln!("  {}:", "SQL".bold());
     eprintln!("{formatted_query}");
-
-    if verbose {
-        eprintln!(
-            "  {}: {} ({} cores, {} MB L3, {}-bit SIMD)",
-            "Hardware".bold(),
-            hardware.name,
-            hardware.cpu_cores,
-            hardware.l3_cache_bytes / (1024 * 1024),
-            hardware.simd_width_bits
-        );
-    }
     eprintln!();
 }
 

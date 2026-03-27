@@ -33,6 +33,7 @@ pub mod network_profiles;
 pub mod profile;
 pub mod profiles;
 pub mod storage;
+pub mod system_metrics;
 
 pub use benchmark::{BenchmarkConfig, HardwareMeasurements};
 pub use calibration::CalibratedCostModel;
@@ -51,3 +52,4 @@ pub use storage::{
     CloudStorageTier, LtoGeneration, NasProtocol, PcieGen, SpindleSpeed, StorageDevice,
     StorageTechnology,
 };
+pub use system_metrics::SystemMetrics;
