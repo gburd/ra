@@ -629,7 +629,29 @@ enum CacheCommands {
 
 // ── Main ────────────────────────────────────────────────────
 
-fn main() -> Result<()> {
+fn main() {
+    // Run the actual main logic and handle errors with controlled backtrace display
+    if let Err(e) = run_main() {
+        // Check DEBUG_RA level to control backtrace display
+        let debug_level = std::env::var("DEBUG_RA")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(0);
+
+        // Print the error message
+        eprintln!("Error: {e}");
+
+        // Only show backtrace if DEBUG_RA > 1
+        if debug_level > 1 {
+            eprintln!("\nStack backtrace:");
+            eprintln!("{:?}", e.backtrace());
+        }
+
+        std::process::exit(1);
+    }
+}
+
+fn run_main() -> Result<()> {
     let cli = Cli::parse();
 
     let is_test_cmd = matches!(cli.command, Commands::Test { .. });
