@@ -121,7 +121,7 @@ mod tests {
     #[test]
     fn backend_debug_format() {
         let backend = TranslationBackend::Native;
-        let debug_str = format!("{:?}", backend);
+        let debug_str = format!("{backend:?}");
         assert!(debug_str.contains("Native"));
     }
 

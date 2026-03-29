@@ -137,7 +137,7 @@ impl std::fmt::Debug for RingBuffer {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used, clippy::cast_lossless)]
+
 mod tests {
     use super::*;
 

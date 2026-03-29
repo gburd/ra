@@ -110,7 +110,7 @@ pub enum Expr {
 
     /// Field access on a composite type.
     ///
-    /// Represents: (row_expr).field_name
+    /// Represents: `(row_expr).field_name`
     FieldAccess {
         /// Base expression (must be a composite type).
         expr: Box<Expr>,
@@ -125,7 +125,7 @@ pub enum Expr {
     SubQuery {
         /// Type of subquery
         subquery_type: SubQueryType,
-        /// The subquery RelExpr
+        /// The subquery `RelExpr`
         query: Box<crate::algebra::RelExpr>,
         /// Optional test expression for IN/ANY/ALL
         test_expr: Option<Box<Expr>>,

@@ -684,7 +684,7 @@ impl RelExpr {
                 None => vec![],
             },
             Self::BitmapAnd { inputs } | Self::BitmapOr { inputs } => {
-                inputs.iter().map(|b| b.as_ref()).collect()
+                inputs.iter().map(std::convert::AsRef::as_ref).collect()
             }
             Self::BitmapHeapScan { bitmap, .. } => vec![bitmap],
         }
@@ -698,10 +698,11 @@ impl RelExpr {
         cols
     }
 
+    #[allow(clippy::too_many_lines)]
     fn collect_columns(&self, out: &mut Vec<ColumnRef>) {
         match self {
-            Self::Scan { .. } | Self::IndexScan { .. } => {}
-            Self::IndexOnlyScan { predicate, .. } => {
+            Self::Scan { .. } | Self::IndexScan { .. } | Self::ParallelScan { .. } | Self::MvScan { .. } => {}
+            Self::IndexOnlyScan { predicate, .. } | Self::BitmapIndexScan { predicate, .. } => {
                 collect_expr_columns(predicate, out);
             }
             Self::Values { rows } => {
@@ -730,12 +731,24 @@ impl RelExpr {
                 left,
                 right,
                 ..
+            }
+            | Self::ParallelHashJoin {
+                condition,
+                left,
+                right,
+                ..
             } => {
                 collect_expr_columns(condition, out);
                 left.collect_columns(out);
                 right.collect_columns(out);
             }
             Self::Aggregate {
+                group_by,
+                aggregates,
+                input,
+                ..
+            }
+            | Self::ParallelAggregate {
                 group_by,
                 aggregates,
                 input,
@@ -771,7 +784,8 @@ impl RelExpr {
                 input.collect_columns(out);
             }
             Self::Limit { input, .. }
-            | Self::Distinct { input, .. } => {
+            | Self::Distinct { input, .. }
+            | Self::Gather { input, .. } => {
                 input.collect_columns(out);
             }
             Self::Window {
@@ -855,9 +869,6 @@ impl RelExpr {
                 }
                 input.collect_columns(out);
             }
-            Self::BitmapIndexScan { predicate, .. } => {
-                collect_expr_columns(predicate, out);
-            }
             Self::BitmapAnd { inputs } | Self::BitmapOr { inputs } => {
                 for bitmap in inputs {
                     bitmap.collect_columns(out);
@@ -873,39 +884,6 @@ impl RelExpr {
                     collect_expr_columns(cond, out);
                 }
             }
-            Self::ParallelScan { .. } => {
-                // No columns to collect from parallel scan metadata
-            }
-            Self::ParallelHashJoin {
-                condition,
-                left,
-                right,
-                ..
-            } => {
-                collect_expr_columns(condition, out);
-                left.collect_columns(out);
-                right.collect_columns(out);
-            }
-            Self::ParallelAggregate {
-                group_by,
-                aggregates,
-                input,
-                ..
-            } => {
-                for expr in group_by {
-                    collect_expr_columns(expr, out);
-                }
-                for agg in aggregates {
-                    if let Some(arg) = &agg.arg {
-                        collect_expr_columns(arg, out);
-                    }
-                }
-                input.collect_columns(out);
-            }
-            Self::Gather { input, .. } => {
-                input.collect_columns(out);
-            }
-            Self::MvScan { .. } => {}
         }
     }
 }
@@ -917,7 +895,10 @@ impl RelExpr {
         match self {
             Self::Scan { table, .. }
             | Self::IndexScan { table, .. }
-            | Self::IndexOnlyScan { table, .. } => table == cte_name,
+            | Self::IndexOnlyScan { table, .. }
+            | Self::BitmapIndexScan { table, .. }
+            | Self::ParallelScan { table, .. }
+            | Self::MvScan { view_name: table, .. } => table == cte_name,
             Self::Filter { input, .. }
             | Self::Project { input, .. }
             | Self::Aggregate { input, .. }
@@ -926,13 +907,16 @@ impl RelExpr {
             | Self::Window { input, .. }
             | Self::Distinct { input, .. }
             | Self::IncrementalSort { input, .. }
-            | Self::RowPattern { input, .. } => {
+            | Self::RowPattern { input, .. }
+            | Self::ParallelAggregate { input, .. }
+            | Self::Gather { input, .. } => {
                 input.references_cte(cte_name)
             }
             Self::Join { left, right, .. }
             | Self::Union { left, right, .. }
             | Self::Intersect { left, right, .. }
-            | Self::Except { left, right, .. } => {
+            | Self::Except { left, right, .. }
+            | Self::ParallelHashJoin { left, right, .. } => {
                 left.references_cte(cte_name)
                     || right.references_cte(cte_name)
             }
@@ -960,21 +944,12 @@ impl RelExpr {
                     .as_ref()
                     .is_some_and(|i| i.references_cte(cte_name))
             }
-            Self::BitmapIndexScan { table, .. } => table == cte_name,
             Self::BitmapAnd { inputs } | Self::BitmapOr { inputs} => {
                 inputs.iter().any(|b| b.references_cte(cte_name))
             }
             Self::BitmapHeapScan { bitmap, table, .. } => {
                 table == cte_name || bitmap.references_cte(cte_name)
             }
-            Self::ParallelScan { table, .. } => table == cte_name,
-            Self::ParallelHashJoin { left, right, .. } => {
-                left.references_cte(cte_name) || right.references_cte(cte_name)
-            }
-            Self::ParallelAggregate { input, .. } | Self::Gather { input, .. } => {
-                input.references_cte(cte_name)
-            }
-            Self::MvScan { view_name, .. } => view_name == cte_name,
         }
     }
 }
@@ -983,7 +958,7 @@ impl RelExpr {
 fn collect_expr_columns(expr: &Expr, out: &mut Vec<ColumnRef>) {
     match expr {
         Expr::Column(col) => out.push(col.clone()),
-        Expr::Const(_) => {}
+        Expr::Const(_) | Expr::PatternClassifier | Expr::PatternMatchNumber => {}
         Expr::BinOp { left, right, .. } => {
             collect_expr_columns(left, out);
             collect_expr_columns(right, out);
@@ -1012,7 +987,7 @@ fn collect_expr_columns(expr: &Expr, out: &mut Vec<ColumnRef>) {
                 collect_expr_columns(el, out);
             }
         }
-        Expr::Cast { expr, .. } => {
+        Expr::Cast { expr, .. } | Expr::FieldAccess { expr, .. } => {
             collect_expr_columns(expr, out);
         }
         Expr::Array(elements) => {
@@ -1030,7 +1005,6 @@ fn collect_expr_columns(expr: &Expr, out: &mut Vec<ColumnRef>) {
         | Expr::PatternLast(inner, _) => {
             collect_expr_columns(inner, out);
         }
-        Expr::PatternClassifier | Expr::PatternMatchNumber => {}
         Expr::ArraySlice {
             array, start, end,
         } => {
@@ -1041,9 +1015,6 @@ fn collect_expr_columns(expr: &Expr, out: &mut Vec<ColumnRef>) {
             if let Some(e) = end {
                 collect_expr_columns(e, out);
             }
-        }
-        Expr::FieldAccess { expr, .. } => {
-            collect_expr_columns(expr, out);
         }
         Expr::SubQuery { test_expr, .. } => {
             // Subquery columns are not considered part of outer expression

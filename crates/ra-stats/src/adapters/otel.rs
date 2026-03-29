@@ -234,7 +234,6 @@ impl std::fmt::Debug for OtelIngester {
 }
 
 #[cfg(test)]
-#[expect(clippy::float_cmp, clippy::expect_used)]
 mod tests {
     use super::*;
 

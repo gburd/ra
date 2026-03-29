@@ -279,7 +279,7 @@ fn extract_column_encoding(
     // in statistics if available.
     let dictionary_size = if is_dict {
         col.statistics()
-            .and_then(|s| s.distinct_count_opt())
+            .and_then(parquet::file::statistics::Statistics::distinct_count_opt)
     } else {
         None
     };

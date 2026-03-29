@@ -1,3 +1,4 @@
+#![cfg_attr(test, allow(clippy::expect_used, clippy::float_cmp, clippy::unwrap_used, clippy::cast_lossless))]
 //! Statistics abstraction system for query optimization.
 //!
 //! This crate provides a comprehensive statistics framework modeling

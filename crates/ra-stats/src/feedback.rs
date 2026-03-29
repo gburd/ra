@@ -553,7 +553,7 @@ impl Default for RecommendationEngine {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
+
 mod tests {
     use super::*;
 

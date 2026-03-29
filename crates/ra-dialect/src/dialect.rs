@@ -20,7 +20,7 @@ pub enum Dialect {
     Oracle,
 
     // Extended dialects (polyglot-backend only)
-    /// Google BigQuery.
+    /// Google `BigQuery`.
     #[cfg(feature = "polyglot-backend")]
     BigQuery,
     /// Snowflake.
@@ -32,10 +32,10 @@ pub enum Dialect {
     /// Amazon Redshift.
     #[cfg(feature = "polyglot-backend")]
     Redshift,
-    /// ClickHouse.
+    /// `ClickHouse`.
     #[cfg(feature = "polyglot-backend")]
     ClickHouse,
-    /// Trino (formerly PrestoSQL).
+    /// Trino (formerly `PrestoSQL`).
     #[cfg(feature = "polyglot-backend")]
     Trino,
     /// Presto.
@@ -68,25 +68,25 @@ pub enum Dialect {
     /// Apache Druid.
     #[cfg(feature = "polyglot-backend")]
     Druid,
-    /// CockroachDB.
+    /// `CockroachDB`.
     #[cfg(feature = "polyglot-backend")]
     CockroachDb,
     /// Materialize.
     #[cfg(feature = "polyglot-backend")]
     Materialize,
-    /// RisingWave.
+    /// `RisingWave`.
     #[cfg(feature = "polyglot-backend")]
     RisingWave,
-    /// SingleStore (formerly MemSQL).
+    /// `SingleStore` (formerly `MemSQL`).
     #[cfg(feature = "polyglot-backend")]
     SingleStore,
-    /// StarRocks.
+    /// `StarRocks`.
     #[cfg(feature = "polyglot-backend")]
     StarRocks,
     /// Apache Doris.
     #[cfg(feature = "polyglot-backend")]
     Doris,
-    /// TiDB.
+    /// `TiDB`.
     #[cfg(feature = "polyglot-backend")]
     TiDb,
     /// Tableau.
@@ -302,10 +302,7 @@ impl Dialect {
     /// Whether this dialect uses `+` for string concatenation.
     #[must_use]
     pub fn uses_plus_concat(self) -> bool {
-        match self {
-            Self::MsSql => true,
-            _ => false,
-        }
+        matches!(self, Self::MsSql)
     }
 
     /// Whether this dialect supports ILIKE for case-insensitive

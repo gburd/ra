@@ -20,12 +20,12 @@ pub struct TranslationResult {
 /// Database dialect with version information.
 ///
 /// Used to enable version-specific translation rules
-/// (e.g. PostgreSQL 15 features vs 12 features).
+/// (e.g. `PostgreSQL` 15 features vs 12 features).
 #[derive(Debug, Clone)]
 pub struct DialectVersion {
     /// The database dialect.
     pub dialect: Dialect,
-    /// Major version number (e.g. 15 for PostgreSQL 15).
+    /// Major version number (e.g. 15 for `PostgreSQL` 15).
     pub major: u16,
     /// Minor version number.
     pub minor: u16,

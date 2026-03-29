@@ -454,7 +454,7 @@ impl std::hash::Hash for OrderedFloat {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
+
 mod tests {
     use super::*;
 

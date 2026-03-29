@@ -1,6 +1,7 @@
 //! Tests for the polyglot SQL transpiler backend.
 
 #![cfg(feature = "polyglot-backend")]
+#![allow(clippy::expect_used)]
 
 use ra_dialect::{Dialect, DialectTranslator, TranslationBackend};
 
