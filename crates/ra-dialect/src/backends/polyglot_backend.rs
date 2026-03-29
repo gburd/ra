@@ -116,6 +116,7 @@ fn map_to_polyglot_dialect(dialect: Dialect) -> DialectType {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
     use super::*;
 
     #[test]

@@ -367,7 +367,6 @@ fn diff_column(
         });
     }
 
-    #[allow(clippy::float_cmp)]
     if prev.null_fraction != next.null_fraction {
         deltas.push(StatisticsDelta::ColumnNullFraction {
             table: table.to_string(),
@@ -388,7 +387,7 @@ fn diff_column(
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
+
 mod tests {
     use super::*;
 

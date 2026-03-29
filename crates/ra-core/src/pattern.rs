@@ -109,7 +109,7 @@ pub enum Pattern {
         input: Box<Pattern>,
     },
 
-    /// Match a RecursiveCTE node.
+    /// Match a `RecursiveCTE` node.
     RecursiveCTE {
         /// Pattern for the base case.
         base_case: Box<Pattern>,

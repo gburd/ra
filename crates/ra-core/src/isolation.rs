@@ -12,12 +12,13 @@ use serde::{Deserialize, Serialize};
 
 /// SQL standard transaction isolation levels.
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize,
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default,
 )]
 pub enum IsolationLevel {
     /// May see uncommitted changes from other transactions.
     ReadUncommitted,
     /// Sees only committed data; each statement gets a fresh snapshot.
+    #[default]
     ReadCommitted,
     /// Snapshot taken at transaction start; no non-repeatable reads.
     RepeatableRead,
@@ -26,7 +27,7 @@ pub enum IsolationLevel {
 }
 
 impl IsolationLevel {
-    /// Whether this level uses predicate locks (SIRead) on PostgreSQL.
+    /// Whether this level uses predicate locks (`SIRead`) on `PostgreSQL`.
     #[must_use]
     pub fn uses_predicate_locks_pg(&self) -> bool {
         matches!(self, Self::Serializable)
@@ -42,12 +43,6 @@ impl IsolationLevel {
     #[must_use]
     pub fn uses_gap_locks_mysql(&self) -> bool {
         matches!(self, Self::RepeatableRead | Self::Serializable)
-    }
-}
-
-impl Default for IsolationLevel {
-    fn default() -> Self {
-        Self::ReadCommitted
     }
 }
 
@@ -75,7 +70,7 @@ impl std::fmt::Display for IsolationLevel {
     Default,
 )]
 pub enum BackendKind {
-    /// PostgreSQL: SSI for SERIALIZABLE, MVCC snapshots otherwise.
+    /// `PostgreSQL`: SSI for SERIALIZABLE, MVCC snapshots otherwise.
     #[default]
     PostgreSQL,
     /// MySQL/InnoDB: gap locks for REPEATABLE READ, next-key locks
@@ -83,9 +78,9 @@ pub enum BackendKind {
     MySQLInnoDB,
     /// Oracle: no READ UNCOMMITTED, undo-based read consistency.
     Oracle,
-    /// SQLite: single-writer, journal or WAL mode.
+    /// `SQLite`: single-writer, journal or WAL mode.
     SQLite,
-    /// DuckDB: MVCC with optimistic concurrency; no lock concerns.
+    /// `DuckDB`: MVCC with optimistic concurrency; no lock concerns.
     DuckDB,
 }
 
@@ -101,10 +96,10 @@ impl std::fmt::Display for BackendKind {
     }
 }
 
-/// MultiXact pressure indicator for PostgreSQL.
+/// `MultiXact` pressure indicator for `PostgreSQL`.
 ///
 /// When multiple transactions hold shared locks on the same tuple,
-/// PostgreSQL stores the lock set in a `MultiXactId`. High pressure
+/// `PostgreSQL` stores the lock set in a `MultiXactId`. High pressure
 /// can stall vacuuming and degrade performance.
 #[derive(
     Debug,
@@ -130,7 +125,7 @@ pub enum MultiXactPressure {
 /// Transaction-level metadata that influences plan selection.
 ///
 /// The optimizer uses this context to apply cost penalties for lock
-/// footprint, snapshot bloat, subtransaction overhead, and MultiXact
+/// footprint, snapshot bloat, subtransaction overhead, and `MultiXact`
 /// pressure. When absent (`None` in `OptimizerConfig`), all penalties
 /// are zero and the optimizer behaves as before.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -140,24 +135,24 @@ pub struct TransactionContext {
     /// Milliseconds since the transaction's snapshot was acquired.
     pub snapshot_age_ms: u64,
     /// Current subtransaction nesting depth.
-    /// PostgreSQL SubXID cache holds 64 entries; beyond that,
+    /// `PostgreSQL` `SubXID` cache holds 64 entries; beyond that,
     /// `XidInMVCCSnapshot` degrades to O(n).
     pub subtransaction_depth: u32,
     /// Target database backend.
     pub backend: BackendKind,
     /// Whether SSI (Serializable Snapshot Isolation) is active.
-    /// True for PostgreSQL SERIALIZABLE since 9.1.
+    /// True for `PostgreSQL` SERIALIZABLE since 9.1.
     pub uses_ssi: bool,
-    /// Current MultiXact pressure level.
+    /// Current `MultiXact` pressure level.
     pub multi_xact_pressure: MultiXactPressure,
 }
 
 impl TransactionContext {
-    /// PostgreSQL SubXID cache size. Beyond this depth, MVCC
+    /// `PostgreSQL` `SubXID` cache size. Beyond this depth, MVCC
     /// visibility checks degrade from O(1) to O(n).
     pub const PG_SUBXID_CACHE_LIMIT: u32 = 64;
 
-    /// Create a default READ COMMITTED context for PostgreSQL.
+    /// Create a default READ COMMITTED context for `PostgreSQL`.
     #[must_use]
     pub fn pg_read_committed() -> Self {
         Self {
@@ -170,7 +165,7 @@ impl TransactionContext {
         }
     }
 
-    /// Create a SERIALIZABLE context for PostgreSQL with SSI.
+    /// Create a SERIALIZABLE context for `PostgreSQL` with SSI.
     #[must_use]
     pub fn pg_serializable() -> Self {
         Self {
@@ -196,8 +191,8 @@ impl TransactionContext {
         }
     }
 
-    /// Whether the subtransaction depth exceeds the PostgreSQL
-    /// SubXID cache, triggering degraded MVCC visibility checks.
+    /// Whether the subtransaction depth exceeds the `PostgreSQL`
+    /// `SubXID` cache, triggering degraded MVCC visibility checks.
     #[must_use]
     pub fn has_subxid_overflow(&self) -> bool {
         self.subtransaction_depth > Self::PG_SUBXID_CACHE_LIMIT

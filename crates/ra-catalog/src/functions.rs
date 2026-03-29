@@ -376,6 +376,7 @@ pub fn load_catalog_from_toml(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used)]
     use super::*;
 
     // -- DataType --
@@ -520,6 +521,7 @@ mod tests {
     // -- TOML loading --
 
     #[test]
+
     fn load_simple_toml() {
         let toml = r#"
 [[function]]
@@ -562,6 +564,7 @@ cost_multiplier = 1.0
     }
 
     #[test]
+
     fn load_aggregate_from_toml() {
         let toml = r#"
 [[function]]
@@ -582,6 +585,7 @@ return_type = "Integer"
     }
 
     #[test]
+
     fn load_variadic_from_toml() {
         let toml = r#"
 [[function]]
@@ -599,6 +603,7 @@ variadic = true
     }
 
     #[test]
+
     fn load_with_defaults() {
         let toml = r#"
 [[function]]
@@ -683,6 +688,7 @@ return_type = "Text"
     }
 
     #[test]
+
     fn builtin_random_not_foldable() {
         let toml_text = include_str!("../data/functions.toml");
         let cat = load_catalog_from_toml(toml_text)
@@ -693,6 +699,7 @@ return_type = "Text"
     }
 
     #[test]
+
     fn builtin_st_distance_is_expensive() {
         let toml_text = include_str!("../data/functions.toml");
         let cat = load_catalog_from_toml(toml_text)

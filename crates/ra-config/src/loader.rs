@@ -210,10 +210,12 @@ fn home_dir() -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used)]
     use super::*;
     use crate::model::EditorMode;
 
     #[test]
+
     fn loader_with_no_files_returns_defaults() {
         let loader = ConfigLoader::new()
             .with_system(PathBuf::from(
@@ -231,6 +233,7 @@ mod tests {
     }
 
     #[test]
+
     fn loader_reads_toml_file() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("config.toml");
@@ -250,6 +253,7 @@ mod tests {
     }
 
     #[test]
+
     fn local_overrides_user() {
         let dir = tempfile::tempdir().expect("tempdir");
 
@@ -277,6 +281,7 @@ mod tests {
     }
 
     #[test]
+
     fn save_and_reload() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("saved.toml");
@@ -293,6 +298,7 @@ mod tests {
     }
 
     #[test]
+
     fn save_creates_parent_dirs() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path =
@@ -311,6 +317,7 @@ mod tests {
     }
 
     #[test]
+
     fn load_invalid_toml() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("bad.toml");

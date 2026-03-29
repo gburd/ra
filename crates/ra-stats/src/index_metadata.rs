@@ -746,7 +746,7 @@ pub fn find_indexes_supporting(
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
+
 mod tests {
     use super::*;
 

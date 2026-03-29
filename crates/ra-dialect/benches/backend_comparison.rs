@@ -1,5 +1,7 @@
 //! Benchmarks comparing native and polyglot backends.
 
+#![allow(clippy::unwrap_used)]
+
 use criterion::{criterion_group, criterion_main, Criterion};
 use ra_dialect::{Dialect, DialectTranslator, TranslationBackend};
 

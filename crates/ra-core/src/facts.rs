@@ -75,16 +75,19 @@ pub enum DataType {
 
 impl DataType {
     /// Check if this is a numeric type
+    #[must_use]
     pub fn is_numeric(&self) -> bool {
         matches!(self, Self::Integer | Self::Float)
     }
 
     /// Check if this is a string type
+    #[must_use]
     pub fn is_string(&self) -> bool {
         matches!(self, Self::String)
     }
 
     /// Check if this is a temporal type
+    #[must_use]
     pub fn is_temporal(&self) -> bool {
         matches!(self, Self::Timestamp)
     }
@@ -113,11 +116,11 @@ pub enum IndexType {
     BTree,
     /// Hash index
     Hash,
-    /// GiST (Generalized Search Tree)
+    /// `GiST` (Generalized Search Tree)
     Gist,
     /// GIN (Generalized Inverted Index)
     Gin,
-    /// SP-GiST (Space-Partitioned GiST)
+    /// SP-GiST (Space-Partitioned `GiST`)
     SpGist,
     /// BRIN (Block Range Index)
     Brin,
@@ -132,7 +135,7 @@ pub enum IndexType {
 /// Storage format for a table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum StorageFormat {
-    /// Row-based storage (heap tables, MyISAM)
+    /// Row-based storage (heap tables, `MyISAM`)
     RowBased,
     /// Column-based storage (columnar)
     Columnar,
@@ -256,17 +259,17 @@ pub struct OperatorStats {
 /// SQL dialect
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SqlDialect {
-    /// PostgreSQL
+    /// `PostgreSQL`
     Postgres,
-    /// MySQL
+    /// `MySQL`
     Mysql,
     /// Oracle
     Oracle,
     /// Microsoft SQL Server
     SqlServer,
-    /// SQLite
+    /// `SQLite`
     Sqlite,
-    /// DuckDB
+    /// `DuckDB`
     DuckDb,
     /// Generic SQL
     Generic,
@@ -342,7 +345,7 @@ pub trait FactsProvider: Send + Sync {
                         .zip(columns.iter())
                         .all(|(a, b)| a == b);
 
-                let type_match = index_type.map_or(true, |t| idx.index_type == t);
+                let type_match = index_type.is_none_or(|t| idx.index_type == t);
 
                 cols_match && type_match
             })
@@ -354,7 +357,7 @@ pub trait FactsProvider: Send + Sync {
     /// Check if a table has a primary key
     fn has_primary_key(&self, table: &str) -> bool {
         self.get_schema(table)
-            .map_or(false, |schema| !schema.primary_key.is_empty())
+            .is_some_and(|schema| !schema.primary_key.is_empty())
     }
 
     /// Get foreign keys for a table
@@ -435,6 +438,7 @@ pub struct EmptyFactsProvider {
 
 impl EmptyFactsProvider {
     /// Create a new empty facts provider with default hardware profile
+    #[must_use]
     pub fn new() -> Self {
         Self {
             hardware: HardwareProfile {
@@ -479,7 +483,7 @@ impl FactsProvider for EmptyFactsProvider {
         None
     }
 
-    fn database_name(&self) -> &str {
+    fn database_name(&self) -> &'static str {
         "generic"
     }
 
@@ -555,7 +559,7 @@ mod tests {
         fn hardware_profile(&self) -> &HardwareProfile { self.inner.hardware_profile() }
         fn get_schema(&self, table: &str) -> Option<&TableInfo> { self.schemas.iter().find(|s| s.name == table) }
         fn runtime_stats(&self, id: &str) -> Option<&OperatorStats> { self.inner.runtime_stats(id) }
-        fn database_name(&self) -> &str { self.inner.database_name() }
+        fn database_name(&self) -> &'static str { self.inner.database_name() }
         fn supports_feature(&self, f: &str) -> bool { self.inner.supports_feature(f) }
         fn sql_dialect(&self) -> SqlDialect { self.inner.sql_dialect() }
         fn memory_limit(&self) -> Option<u64> { self.inner.memory_limit() }

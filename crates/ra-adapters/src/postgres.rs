@@ -1033,7 +1033,7 @@ impl DatabaseAdapter for PostgresAdapter {
         SqlDialect::Postgres
     }
 
-    fn database_name(&self) -> &str {
+    fn database_name(&self) -> &'static str {
         "postgresql"
     }
 
@@ -1081,7 +1081,7 @@ impl FactsProvider for PostgresFacts {
         None
     }
 
-    fn database_name(&self) -> &str {
+    fn database_name(&self) -> &'static str {
         "postgresql"
     }
 

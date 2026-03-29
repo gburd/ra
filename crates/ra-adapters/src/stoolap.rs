@@ -106,7 +106,7 @@ impl FactsProvider for StoolapFacts {
         None
     }
 
-    fn database_name(&self) -> &str {
+    fn database_name(&self) -> &'static str {
         "stoolap"
     }
 
@@ -829,7 +829,7 @@ impl DatabaseAdapter for StoolapAdapter {
         SqlDialect::Generic
     }
 
-    fn database_name(&self) -> &str {
+    fn database_name(&self) -> &'static str {
         "stoolap"
     }
 

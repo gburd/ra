@@ -157,7 +157,7 @@ impl SmootherSet {
 }
 
 #[cfg(test)]
-#[allow(clippy::float_cmp, clippy::expect_used)]
+
 mod tests {
     use super::*;
 
