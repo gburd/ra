@@ -130,6 +130,39 @@ pub struct MultiColumnNdv {
     pub ndv: u64,
 }
 
+/// Multi-dimensional histogram for correlated column groups.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MultiDimHistogram {
+    /// Column identifiers tracked by this histogram.
+    pub columns: Vec<ColumnId>,
+    /// Number of dimensions (should match columns.len()).
+    pub dimensions: usize,
+    /// Bucket boundaries for each dimension.
+    /// Each inner vec contains sorted boundary values for that dimension.
+    pub boundaries: Vec<Vec<f64>>,
+    /// Counts for each cell in the multi-dimensional grid.
+    /// Flattened array: row-major order for 2D, generalized for N-D.
+    pub counts: Vec<u64>,
+    /// Total number of rows represented.
+    pub total_rows: u64,
+}
+
+/// Multi-column statistics tracking correlation between column groups.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MultiColumnStats {
+    /// Columns tracked by this statistic (sorted for canonicalization).
+    pub columns: Vec<ColumnId>,
+    /// Actual distinct count of (col1, col2, ...) combinations.
+    pub distinct_count: u64,
+    /// Total rows in the table.
+    pub total_rows: u64,
+    /// Pairwise correlation coefficients (Pearson) between numeric columns.
+    /// Matrix stored as flattened upper triangle: [r01, r02, r12, ...].
+    pub correlation_matrix: Vec<f64>,
+    /// Optional N-dimensional histogram for detailed distribution.
+    pub histogram: Option<MultiDimHistogram>,
+}
+
 /// Correlation statistics between columns.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CorrelationStats {
@@ -450,6 +483,86 @@ impl OrderedFloat {
 impl std::hash::Hash for OrderedFloat {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.0.hash(state);
+    }
+}
+
+impl MultiColumnStats {
+    /// Correlation ratio: distinct_count / product(individual NDVs).
+    /// Values closer to 0 indicate stronger correlation.
+    /// Value of 1.0 means complete independence.
+    pub fn correlation_ratio(&self, individual_ndvs: &[u64]) -> f64 {
+        if individual_ndvs.is_empty() || self.columns.len() != individual_ndvs.len() {
+            return 1.0;
+        }
+        let product: u64 = individual_ndvs.iter().product();
+        if product == 0 {
+            return 1.0;
+        }
+        self.distinct_count as f64 / product as f64
+    }
+
+    /// Selectivity improvement over independence assumption.
+    /// Returns factor by which estimates improve (>1 means better).
+    pub fn improvement_factor(&self, individual_ndvs: &[u64]) -> f64 {
+        let ratio = self.correlation_ratio(individual_ndvs);
+        if ratio >= 1.0 {
+            return 1.0;
+        }
+        1.0 / ratio
+    }
+
+    /// Whether columns show strong correlation (ratio < 0.5).
+    pub fn is_strongly_correlated(&self, individual_ndvs: &[u64]) -> bool {
+        self.correlation_ratio(individual_ndvs) < 0.5
+    }
+}
+
+impl MultiDimHistogram {
+    /// Create a new multi-dimensional histogram.
+    pub fn new(columns: Vec<ColumnId>, boundaries: Vec<Vec<f64>>, counts: Vec<u64>) -> Self {
+        let dimensions = columns.len();
+        let total_rows = counts.iter().sum();
+        Self {
+            columns,
+            dimensions,
+            boundaries,
+            counts,
+            total_rows,
+        }
+    }
+
+    /// Number of buckets per dimension.
+    pub fn buckets_per_dimension(&self) -> Vec<usize> {
+        self.boundaries
+            .iter()
+            .map(|b| b.len().saturating_sub(1))
+            .collect()
+    }
+
+    /// Total number of cells in the histogram grid.
+    pub fn total_cells(&self) -> usize {
+        self.buckets_per_dimension().iter().product()
+    }
+
+    /// Get count for a specific cell (returns 0 if out of bounds).
+    pub fn get_count(&self, indices: &[usize]) -> u64 {
+        if indices.len() != self.dimensions {
+            return 0;
+        }
+        let flat_index = self.flatten_indices(indices);
+        self.counts.get(flat_index).copied().unwrap_or(0)
+    }
+
+    /// Convert multi-dimensional indices to flat array index.
+    fn flatten_indices(&self, indices: &[usize]) -> usize {
+        let buckets = self.buckets_per_dimension();
+        let mut flat = 0;
+        let mut multiplier = 1;
+        for i in (0..self.dimensions).rev() {
+            flat += indices[i] * multiplier;
+            multiplier *= buckets[i];
+        }
+        flat
     }
 }
 
@@ -1146,5 +1259,153 @@ mod tests {
     fn ordered_float_zero() {
         let z = OrderedFloat::new(0.0);
         assert_eq!(z.to_f64(), 0.0);
+    }
+
+    // ---- MultiColumnStats ----
+
+    #[test]
+    fn multi_column_stats_independent() {
+        let stats = MultiColumnStats {
+            columns: vec!["city".to_string(), "state".to_string()],
+            distinct_count: 10000,
+            total_rows: 100_000,
+            correlation_matrix: vec![0.1],
+            histogram: None,
+        };
+        let individual_ndvs = vec![100, 100];
+        assert!((stats.correlation_ratio(&individual_ndvs) - 1.0).abs() < 0.001);
+        assert!(!stats.is_strongly_correlated(&individual_ndvs));
+    }
+
+    #[test]
+    fn multi_column_stats_correlated() {
+        let stats = MultiColumnStats {
+            columns: vec!["city".to_string(), "state".to_string()],
+            distinct_count: 100,
+            total_rows: 100_000,
+            correlation_matrix: vec![0.95],
+            histogram: None,
+        };
+        let individual_ndvs = vec![100, 50];
+        let ratio = stats.correlation_ratio(&individual_ndvs);
+        assert!(ratio < 0.5);
+        assert!(stats.is_strongly_correlated(&individual_ndvs));
+    }
+
+    #[test]
+    fn multi_column_stats_improvement_factor() {
+        let stats = MultiColumnStats {
+            columns: vec!["a".to_string(), "b".to_string()],
+            distinct_count: 50,
+            total_rows: 10_000,
+            correlation_matrix: vec![0.9],
+            histogram: None,
+        };
+        let individual_ndvs = vec![100, 100];
+        let factor = stats.improvement_factor(&individual_ndvs);
+        assert!(factor > 1.0);
+        assert!(factor < 1000.0);
+    }
+
+    #[test]
+    fn multi_column_stats_empty_ndvs() {
+        let stats = MultiColumnStats {
+            columns: vec!["a".to_string()],
+            distinct_count: 100,
+            total_rows: 1000,
+            correlation_matrix: vec![],
+            histogram: None,
+        };
+        assert_eq!(stats.correlation_ratio(&[]), 1.0);
+        assert_eq!(stats.improvement_factor(&[]), 1.0);
+    }
+
+    // ---- MultiDimHistogram ----
+
+    #[test]
+    fn multi_dim_histogram_2d_creation() {
+        let hist = MultiDimHistogram::new(
+            vec!["x".to_string(), "y".to_string()],
+            vec![
+                vec![0.0, 10.0, 20.0],
+                vec![0.0, 5.0, 10.0],
+            ],
+            vec![100, 200, 150, 250],
+        );
+        assert_eq!(hist.dimensions, 2);
+        assert_eq!(hist.total_rows, 700);
+    }
+
+    #[test]
+    fn multi_dim_histogram_buckets_per_dimension() {
+        let hist = MultiDimHistogram::new(
+            vec!["x".to_string(), "y".to_string()],
+            vec![
+                vec![0.0, 10.0, 20.0],
+                vec![0.0, 5.0, 10.0, 15.0],
+            ],
+            vec![100, 200, 150, 250, 80, 90],
+        );
+        let buckets = hist.buckets_per_dimension();
+        assert_eq!(buckets, vec![2, 3]);
+    }
+
+    #[test]
+    fn multi_dim_histogram_total_cells() {
+        let hist = MultiDimHistogram::new(
+            vec!["x".to_string(), "y".to_string()],
+            vec![
+                vec![0.0, 10.0, 20.0],
+                vec![0.0, 5.0, 10.0],
+            ],
+            vec![100, 200, 150, 250],
+        );
+        assert_eq!(hist.total_cells(), 4);
+    }
+
+    #[test]
+    fn multi_dim_histogram_get_count() {
+        let hist = MultiDimHistogram::new(
+            vec!["x".to_string(), "y".to_string()],
+            vec![
+                vec![0.0, 10.0, 20.0],
+                vec![0.0, 5.0, 10.0],
+            ],
+            vec![100, 200, 150, 250],
+        );
+        assert_eq!(hist.get_count(&[0, 0]), 100);
+        assert_eq!(hist.get_count(&[0, 1]), 200);
+        assert_eq!(hist.get_count(&[1, 0]), 150);
+        assert_eq!(hist.get_count(&[1, 1]), 250);
+    }
+
+    #[test]
+    fn multi_dim_histogram_get_count_out_of_bounds() {
+        let hist = MultiDimHistogram::new(
+            vec!["x".to_string(), "y".to_string()],
+            vec![
+                vec![0.0, 10.0, 20.0],
+                vec![0.0, 5.0, 10.0],
+            ],
+            vec![100, 200, 150, 250],
+        );
+        assert_eq!(hist.get_count(&[2, 2]), 0);
+        assert_eq!(hist.get_count(&[0]), 0);
+    }
+
+    #[test]
+    fn multi_dim_histogram_3d() {
+        let hist = MultiDimHistogram::new(
+            vec!["x".to_string(), "y".to_string(), "z".to_string()],
+            vec![
+                vec![0.0, 10.0, 20.0],
+                vec![0.0, 5.0, 10.0],
+                vec![0.0, 2.0, 4.0],
+            ],
+            vec![10, 20, 30, 40, 50, 60, 70, 80],
+        );
+        assert_eq!(hist.dimensions, 3);
+        assert_eq!(hist.total_cells(), 8);
+        assert_eq!(hist.total_rows, 360);
     }
 }

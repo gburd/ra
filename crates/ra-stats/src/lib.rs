@@ -97,6 +97,7 @@ pub mod gathering_cost;
 pub mod index_metadata;
 pub mod index_types;
 pub mod integration;
+pub mod multi_column;
 pub mod percentiles;
 pub mod profiles;
 pub mod ring_buffer;
@@ -134,8 +135,9 @@ pub use skew::{
     FrequencyBucket, FrequencyHistogram, HotKey, SkewAnalysis, SkewDetector, SkewSeverity,
     SkewStrategy,
 };
+pub use multi_column::{MatchQuality, MultiColumnConfig, MultiColumnEstimator};
 pub use types::{
     AccessPattern, ColumnId, ColumnStats, CorrelationStats, FunctionalDependency, Histogram,
-    HotColumn, IndexStats, JoinStats, MostCommonValues, MultiColumnNdv, PredicateStats, Sketch,
-    TableStats, TimeSeriesStats, WorkloadStats,
+    HotColumn, IndexStats, JoinStats, MostCommonValues, MultiColumnNdv, MultiColumnStats,
+    MultiDimHistogram, PredicateStats, Sketch, TableStats, TimeSeriesStats, WorkloadStats,
 };
