@@ -112,7 +112,7 @@ pub fn all_rules_unsorted() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 // Predicate pushdown rules
 // ---------------------------------------------------------------
 
-fn predicate_pushdown_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
+pub(crate) fn predicate_pushdown_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // Push filter through inner join (left side)
         rewrite!("filter-through-join-left";
@@ -166,7 +166,7 @@ fn predicate_pushdown_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 // Join reordering rules
 // ---------------------------------------------------------------
 
-fn join_reordering_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
+pub(crate) fn join_reordering_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // Inner join commutativity
         rewrite!("join-commutativity";
@@ -209,7 +209,7 @@ fn join_reordering_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 // Projection pushdown rules
 // ---------------------------------------------------------------
 
-fn projection_pushdown_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
+pub(crate) fn projection_pushdown_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // Eliminate redundant project over project
         rewrite!("project-merge";
@@ -223,7 +223,7 @@ fn projection_pushdown_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 // Expression simplification rules
 // ---------------------------------------------------------------
 
-fn expression_simplification_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
+pub(crate) fn expression_simplification_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     let mut rules = boolean_simplification_rules();
     rules.extend(arithmetic_simplification_rules());
     rules.extend(commutativity_rules());
@@ -325,7 +325,7 @@ fn commutativity_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 // Join elimination rules
 // ---------------------------------------------------------------
 
-fn join_elimination_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
+pub(crate) fn join_elimination_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // Self-join with true condition on same table is identity
         // (this is a simplified version; a real implementation
@@ -361,7 +361,7 @@ pub fn aggregate_optimization_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 // Limit and sort optimization rules
 // ---------------------------------------------------------------
 
-fn limit_sort_optimization_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
+pub(crate) fn limit_sort_optimization_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // Push limit through project
         rewrite!("limit-through-project";
@@ -385,7 +385,7 @@ fn limit_sort_optimization_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 // Set operation rules
 // ---------------------------------------------------------------
 
-fn set_operation_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
+pub(crate) fn set_operation_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // Union commutativity
         rewrite!("union-commutativity";
@@ -418,7 +418,7 @@ fn set_operation_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
 // Subquery / decorrelation optimization rules
 // ---------------------------------------------------------------
 
-fn subquery_optimization_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
+pub(crate) fn subquery_optimization_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     vec![
         // Convert semi join + filter to semi join with combined condition
         rewrite!("filter-semi-join-merge";

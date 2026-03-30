@@ -209,6 +209,9 @@ pub struct OptimizerConfig {
     /// Maximum staleness penalty factor (default: 10.0).
     /// Caps how much stale statistics can increase cost estimates.
     pub max_staleness_penalty: f64,
+    /// Enable lazy rule compilation (on-demand rule loading).
+    /// Default: false (loads all rules upfront).
+    pub use_lazy_rules: bool,
 }
 
 /// Configuration for parallel query execution.
@@ -257,6 +260,7 @@ impl Default for OptimizerConfig {
             enable_plan_cache: false,
             plan_cache_config: PlanCacheConfig::default(),
             max_staleness_penalty: 10.0, // Cap at 10x cost penalty
+            use_lazy_rules: false,  // Disabled by default (opt-in for better compatibility)
         }
     }
 }
@@ -522,7 +526,15 @@ impl Optimizer {
 
         let runner_start = Instant::now();
         let timeout = std::time::Duration::from_millis(timeout_ms);
-        let rules = all_rules();
+
+        // Load rules: lazy or all
+        let rules = if self.config.use_lazy_rules {
+            let pattern = crate::lazy_rules::LazyQueryPattern::analyze(expr);
+            let compiler = crate::lazy_rules::LazyRuleCompiler::new();
+            compiler.compile(&pattern)
+        } else {
+            all_rules()
+        };
 
         // Create convergence detector (window size: 3, min growth rate: 5%)
         let mut convergence_detector = crate::convergence::ConvergenceDetector::default_settings();

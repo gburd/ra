@@ -51,6 +51,7 @@ pub mod incremental_sort;
 pub mod isolation_cost;
 pub mod join_transformations;
 pub mod large_join;
+pub mod lazy_rules;
 pub mod left_deep;
 pub mod federated_cost;
 pub mod federated_optimizer;
@@ -146,6 +147,9 @@ pub use incremental_sort::{
     IncrementalSortCost, PrefixMatch, detect_prefix_match,
     estimate_costs as estimate_incremental_sort_costs,
     try_incremental_sort,
+};
+pub use lazy_rules::{
+    LazyQueryComplexity, LazyQueryPattern, LazyRuleCompiler, RuleCategory,
 };
 pub use join_transformations::{
     SchemaInfo, SelfJoinMatch, UniqueConstraint,
