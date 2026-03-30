@@ -33,11 +33,12 @@ rand = { workspace = true }
 getrandom = { workspace = true }
 serde_yaml = { workspace = true }
 walkdir = { version = "2", optional = true }
+chrono = { workspace = true }
+ra-parser = { path = "../ra-parser" }
 
 [dev-dependencies]
 criterion = { workspace = true }
 proptest = { workspace = true }
-ra-parser = { path = "../ra-parser" }
 ra-test-utils = { workspace = true }
 tracing-subscriber = { workspace = true }
 
@@ -80,6 +81,10 @@ harness = false
 [[bench]]
 name = "cache_invalidation_bench"
 harness = false
+
+[[bin]]
+name = "planner_comparison_runner"
+path = "../../benchmarks/planner_comparison/runner.rs"
 
 [lints]
 workspace = true
