@@ -83,6 +83,7 @@ pub mod rule_priority;
 pub mod rule_registry;
 pub mod rum_index;
 pub mod runtime_filters;
+pub mod selectivity;
 pub mod semi_join;
 #[cfg(feature = "streaming")]
 pub mod timely;
@@ -273,3 +274,4 @@ pub use plan_cache::{
     CacheLookupResult, CacheMatchType, PlanCache, PlanCacheConfig,
     PlanCacheStats,
 };
+pub use selectivity::estimate_selectivity as estimate_predicate_selectivity;
