@@ -206,6 +206,9 @@ pub struct OptimizerConfig {
     pub enable_plan_cache: bool,
     /// Configuration for the plan cache (used when `enable_plan_cache` is true).
     pub plan_cache_config: PlanCacheConfig,
+    /// Maximum staleness penalty factor (default: 10.0).
+    /// Caps how much stale statistics can increase cost estimates.
+    pub max_staleness_penalty: f64,
 }
 
 /// Configuration for parallel query execution.
@@ -253,6 +256,7 @@ impl Default for OptimizerConfig {
             transaction_context: None,  // No isolation awareness by default
             enable_plan_cache: false,
             plan_cache_config: PlanCacheConfig::default(),
+            max_staleness_penalty: 10.0, // Cap at 10x cost penalty
         }
     }
 }

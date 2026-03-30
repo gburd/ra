@@ -166,7 +166,24 @@ impl IntegratedCostModel {
         let cost = base * self.calibration.seq_page_cost();
 
         let disc = self.confidence_for_table(table);
-        cost * disc
+        let base_adjusted = cost * disc;
+
+        let (final_cost, penalty, should_warn) = self.apply_staleness_penalty(
+            base_adjusted,
+            table,
+            OperationType::SeqScan,
+            10.0,  // max penalty
+        );
+
+        if should_warn {
+            tracing::warn!(
+                "Statistics for table '{}' are stale (penalty: {:.2}x). Consider running ANALYZE.",
+                table,
+                penalty
+            );
+        }
+
+        final_cost
     }
 
     /// Estimate cost for an index scan operator (RFC 0068).
@@ -182,7 +199,24 @@ impl IntegratedCostModel {
         let random_io = selected * self.calibration.rand_page_cost();
         let cpu = selected * self.calibration.tuple_cost() * 0.01;
         let disc = self.confidence_for_table(table);
-        (random_io + cpu) * disc
+        let base_cost = (random_io + cpu) * disc;
+
+        let (final_cost, penalty, should_warn) = self.apply_staleness_penalty(
+            base_cost,
+            table,
+            OperationType::IndexScan,
+            10.0,
+        );
+
+        if should_warn {
+            tracing::warn!(
+                "Statistics for table '{}' are stale (penalty: {:.2}x). Index scan may be suboptimal. Consider running ANALYZE.",
+                table,
+                penalty
+            );
+        }
+
+        final_cost
     }
 
     /// Estimate cost for a filter operator.
@@ -229,7 +263,33 @@ impl IntegratedCostModel {
 
         let disc_left = self.confidence_for_table(left_table);
         let disc_right = self.confidence_for_table(right_table);
-        cost * disc_left.max(disc_right)
+        let base_cost = cost * disc_left.max(disc_right);
+
+        // Use max staleness from both tables
+        let left_staleness = self.staleness(left_table);
+        let right_staleness = self.staleness(right_table);
+        let max_staleness_table = if staleness_factor(left_staleness) > staleness_factor(right_staleness) {
+            left_table
+        } else {
+            right_table
+        };
+
+        let (final_cost, penalty, should_warn) = self.apply_staleness_penalty(
+            base_cost,
+            max_staleness_table,
+            OperationType::HashJoin,
+            10.0,
+        );
+
+        if should_warn {
+            tracing::warn!(
+                "Statistics for join involving table '{}' are stale (penalty: {:.2}x). Hash join sizing may be suboptimal.",
+                max_staleness_table,
+                penalty
+            );
+        }
+
+        final_cost
     }
 
     /// Estimate cost for a hash join with a runtime filter applied.
@@ -296,7 +356,24 @@ impl IntegratedCostModel {
             * self.calibration.tuple_cost();
 
         let disc = self.confidence_for_table(table);
-        cost * disc
+        let base_cost = cost * disc;
+
+        let (final_cost, penalty, should_warn) = self.apply_staleness_penalty(
+            base_cost,
+            table,
+            OperationType::Sort,
+            10.0,
+        );
+
+        if should_warn {
+            tracing::warn!(
+                "Statistics for table '{}' are stale (penalty: {:.2}x). Sort memory allocation may be suboptimal.",
+                table,
+                penalty
+            );
+        }
+
+        final_cost
     }
 
     /// Estimate cost for an incremental sort operator.
@@ -357,7 +434,24 @@ impl IntegratedCostModel {
             * self.calibration.tuple_cost();
 
         let disc = self.confidence_for_table(table);
-        cost * disc
+        let base_cost = cost * disc;
+
+        let (final_cost, penalty, should_warn) = self.apply_staleness_penalty(
+            base_cost,
+            table,
+            OperationType::Aggregate,
+            10.0,
+        );
+
+        if should_warn {
+            tracing::warn!(
+                "Statistics for table '{}' are stale (penalty: {:.2}x). Aggregate group count estimation may be inaccurate.",
+                table,
+                penalty
+            );
+        }
+
+        final_cost
     }
 
     /// Estimate cost for a covering index (index-only) scan.
@@ -537,6 +631,36 @@ impl IntegratedCostModel {
         self.adapter
             .get_table_stats(table)
             .map_or(Staleness::Unknown, |m| m.state.staleness())
+    }
+
+    /// Apply staleness penalty to base cost estimate.
+    ///
+    /// Returns (adjusted_cost, staleness_factor, should_warn)
+    #[must_use]
+    fn apply_staleness_penalty(
+        &self,
+        base_cost: f64,
+        table: &str,
+        operation_type: OperationType,
+        max_penalty: f64,
+    ) -> (f64, f64, bool) {
+        let staleness = self.staleness(table);
+        let base_factor = staleness_factor(staleness);
+
+        let operation_multiplier = match operation_type {
+            OperationType::IndexScan => 2.0,    // Most sensitive to bad selectivity
+            OperationType::NestedLoop => 2.0,   // Cardinality errors compound
+            OperationType::HashJoin => 1.5,     // Hash table sizing matters
+            OperationType::SeqScan => 1.0,      // Most robust
+            OperationType::Aggregate => 1.3,    // Group count estimation
+            OperationType::Sort => 1.2,         // Memory allocation
+        };
+
+        let staleness_penalty = (base_factor * operation_multiplier).min(max_penalty);
+        let adjusted_cost = base_cost * staleness_penalty;
+        let should_warn = staleness_penalty >= 3.0;
+
+        (adjusted_cost, staleness_penalty, should_warn)
     }
 
     /// Build a `HashMap` of core Statistics for all registered tables,
@@ -783,6 +907,17 @@ impl IntegratedCostModel {
         // Don't exceed hardware limits or configured maximum
         size_based.min(cpu_cores).min(max_workers).max(1)
     }
+}
+
+/// Operation types for staleness penalty calculation.
+#[derive(Debug, Clone, Copy)]
+enum OperationType {
+    SeqScan,
+    IndexScan,
+    NestedLoop,
+    HashJoin,
+    Aggregate,
+    Sort,
 }
 
 /// Extract a table name from an operator description like

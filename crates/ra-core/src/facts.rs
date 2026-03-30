@@ -22,7 +22,7 @@
 //! }
 //! ```
 
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
@@ -45,6 +45,78 @@ pub struct TableStats {
     pub last_analyzed: Option<i64>,
     /// Confidence in these statistics (0.0 to 1.0)
     pub confidence: f64,
+    /// Estimated number of rows inserted/updated/deleted since analysis
+    pub estimated_modifications: u64,
+}
+
+impl TableStats {
+    /// Calculate staleness factor based on modifications and age.
+    ///
+    /// Returns a multiplier from 1.0 (fresh) to 10.0 (very stale) based on:
+    /// - Modification rate: modifications / row_count
+    /// - Time since analysis
+    ///
+    /// This factor should be applied as a penalty to cost estimates,
+    /// making stale statistics more expensive to use.
+    #[must_use]
+    pub fn staleness_factor(&self) -> f64 {
+        let modification_factor = if self.row_count > 0.0 {
+            let mod_rate = self.estimated_modifications as f64 / self.row_count;
+            // Map modification rate to penalty factor
+            if mod_rate < 0.01 {
+                1.0  // < 1% change: fresh
+            } else if mod_rate < 0.05 {
+                1.5  // 1-5% change: slightly stale
+            } else if mod_rate < 0.20 {
+                3.0  // 5-20% change: moderately stale
+            } else if mod_rate < 0.50 {
+                5.0  // 20-50% change: very stale
+            } else {
+                10.0 // > 50% change: extremely stale
+            }
+        } else {
+            1.0
+        };
+
+        let age_factor = if let Some(last_analyzed) = self.last_analyzed {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or(Duration::ZERO)
+                .as_secs() as i64;
+            let age_days = ((now - last_analyzed) / 86400).max(0);
+
+            // Age penalty: increases logarithmically
+            if age_days < 1 {
+                1.0
+            } else if age_days < 7 {
+                1.2
+            } else if age_days < 30 {
+                2.0
+            } else if age_days < 90 {
+                3.0
+            } else {
+                5.0
+            }
+        } else {
+            // No analysis time: assume very stale
+            5.0
+        };
+
+        // Use the maximum of both factors
+        modification_factor.max(age_factor).min(10.0)
+    }
+
+    /// Check if statistics are fresh (staleness factor < 2.0)
+    #[must_use]
+    pub fn is_fresh(&self) -> bool {
+        self.staleness_factor() < 2.0
+    }
+
+    /// Check if statistics should trigger a warning (staleness factor >= 3.0)
+    #[must_use]
+    pub fn is_stale(&self) -> bool {
+        self.staleness_factor() >= 3.0
+    }
 }
 
 // Re-export ColumnStats from statistics module
@@ -613,3 +685,7 @@ mod tests {
         assert!(!facts.has_covering_index("orders", &["customer_id", "id"]));
     }
 }
+
+#[cfg(test)]
+#[path = "facts_staleness_tests.rs"]
+mod facts_staleness_tests;
