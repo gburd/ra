@@ -40,7 +40,6 @@ impl Value {
         }
     }
 
-    #[allow(clippy::cast_precision_loss)]
     fn as_f64(&self) -> Option<f64> {
         match self {
             Self::Float64(f) => Some(*f),
@@ -235,11 +234,9 @@ fn numeric_op(
         (Value::Float64(a), Value::Float64(b)) => {
             Ok(Value::Float64(float_op(*a, *b)))
         }
-        #[allow(clippy::cast_precision_loss)]
         (Value::Int64(a), Value::Float64(b)) => {
             Ok(Value::Float64(float_op(*a as f64, *b)))
         }
-        #[allow(clippy::cast_precision_loss)]
         (Value::Float64(a), Value::Int64(b)) => {
             Ok(Value::Float64(float_op(*a, *b as f64)))
         }
@@ -261,13 +258,11 @@ fn compare_op(
         (Value::Float64(a), Value::Float64(b)) => {
             a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
         }
-        #[allow(clippy::cast_precision_loss)]
         (Value::Int64(a), Value::Float64(b)) => {
             (*a as f64)
                 .partial_cmp(b)
                 .unwrap_or(std::cmp::Ordering::Equal)
         }
-        #[allow(clippy::cast_precision_loss)]
         (Value::Float64(a), Value::Int64(b)) => {
             a.partial_cmp(&(*b as f64))
                 .unwrap_or(std::cmp::Ordering::Equal)
@@ -312,11 +307,9 @@ fn eval_cast(
     use crate::ir::DataType;
     match (&val, target) {
         (Value::Null, _) => Ok(Value::Null),
-        #[allow(clippy::cast_precision_loss)]
         (Value::Int64(i), DataType::Float64) => {
             Ok(Value::Float64(*i as f64))
         }
-        #[allow(clippy::cast_possible_truncation)]
         (Value::Float64(f), DataType::Int64) => {
             Ok(Value::Int64(*f as i64))
         }
@@ -918,7 +911,6 @@ fn finalize_agg(state: AggState) -> Value {
         AggState::Min(v) | AggState::Max(v) => {
             v.unwrap_or(Value::Null)
         }
-        #[allow(clippy::cast_precision_loss)]
         AggState::Avg { sum, count } => {
             if count == 0 {
                 Value::Null
@@ -929,7 +921,6 @@ fn finalize_agg(state: AggState) -> Value {
     }
 }
 
-#[allow(clippy::cast_precision_loss)]
 fn compare_values(a: &Value, b: &Value) -> std::cmp::Ordering {
     match (a, b) {
         (Value::Int64(x), Value::Int64(y)) => x.cmp(y),

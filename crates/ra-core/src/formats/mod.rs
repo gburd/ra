@@ -165,7 +165,6 @@ impl RowGroupMeta {
     /// Compression ratio for this row group (uncompressed / compressed).
     /// Returns 1.0 if compressed size is zero.
     #[must_use]
-    #[allow(clippy::cast_precision_loss)]
     pub fn compression_ratio(&self) -> f64 {
         if self.compressed_size == 0 {
             return 1.0;
@@ -231,7 +230,6 @@ impl ColumnEncodingInfo {
     /// Compression ratio for this column chunk.
     /// Returns 1.0 if compressed size is zero.
     #[must_use]
-    #[allow(clippy::cast_precision_loss)]
     pub fn compression_ratio(&self) -> f64 {
         if self.compressed_bytes == 0 {
             return 1.0;
@@ -377,7 +375,6 @@ impl ScalarValue {
     /// Compare two scalar values, returning `None` for incompatible
     /// types or null values.
     #[must_use]
-    #[allow(clippy::cast_precision_loss)]
     pub fn partial_cmp_value(
         &self,
         other: &Self,
@@ -575,7 +572,6 @@ impl FileMetadata {
     /// Average compression ratio across all row groups.
     /// Returns 1.0 if there are no row groups.
     #[must_use]
-    #[allow(clippy::cast_precision_loss)]
     pub fn avg_compression_ratio(&self) -> f64 {
         if self.row_groups.is_empty() {
             return 1.0;

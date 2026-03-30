@@ -259,7 +259,6 @@ fn oltp_workload_high_cache_hit_rate() {
 
     // Seed cache with one instance of each template
     for (i, template) in templates.iter().enumerate() {
-        #[allow(clippy::cast_possible_wrap)]
         let plan = template(i as i64);
         let fp = QueryFingerprint::from_rel_expr(&plan);
         cache.insert(fp, plan);
@@ -270,7 +269,6 @@ fn oltp_workload_high_cache_hit_rate() {
     for i in 0..200 {
         let template_idx = i % 5;
         let param = (i * 7 + 13) % 10000;
-        #[allow(clippy::cast_possible_wrap)]
         let query = templates[template_idx](param as i64);
         let fp = QueryFingerprint::from_rel_expr(&query);
         if cache.lookup(&fp).is_some() {
@@ -278,7 +276,6 @@ fn oltp_workload_high_cache_hit_rate() {
         }
     }
 
-    #[allow(clippy::cast_precision_loss)]
     let hit_rate = f64::from(hits) / 200.0;
     assert!(
         hit_rate > 0.9,

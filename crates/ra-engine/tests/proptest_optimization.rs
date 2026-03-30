@@ -298,6 +298,8 @@ proptest! {
             beam_search_config: None,
             enable_plan_cache: false,
             plan_cache_config: ra_engine::PlanCacheConfig::default(),
+            max_staleness_penalty: 10.0,
+            use_lazy_rules: false,
             transaction_context: None,
         };
         let optimizer = Optimizer::with_config(config);
@@ -328,6 +330,8 @@ proptest! {
             beam_search_config: None,
             enable_plan_cache: false,
             plan_cache_config: ra_engine::PlanCacheConfig::default(),
+            max_staleness_penalty: 10.0,
+            use_lazy_rules: false,
             transaction_context: None,
         };
         let optimizer = Optimizer::with_config(config);
@@ -370,6 +374,8 @@ proptest! {
             beam_search_config: None,
             enable_plan_cache: false,
             plan_cache_config: ra_engine::PlanCacheConfig::default(),
+            max_staleness_penalty: 10.0,
+            use_lazy_rules: false,
             transaction_context: None,
         };
         let optimizer = Optimizer::with_config(config);
@@ -501,6 +507,8 @@ proptest! {
             beam_search_config: None,
             enable_plan_cache: false,
             plan_cache_config: ra_engine::PlanCacheConfig::default(),
+            max_staleness_penalty: 10.0,
+            use_lazy_rules: false,
             transaction_context: None,
         };
         let optimizer = Optimizer::with_config(config);

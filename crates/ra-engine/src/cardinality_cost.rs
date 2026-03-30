@@ -92,7 +92,6 @@ impl CardinalityAwareCostFn {
 impl CostFunction<RelLang> for CardinalityAwareCostFn {
     type Cost = f64;
 
-    #[allow(clippy::cast_precision_loss)]
     fn cost<C>(&mut self, enode: &RelLang, mut costs: C) -> Self::Cost
     where
         C: FnMut(Id) -> Self::Cost,

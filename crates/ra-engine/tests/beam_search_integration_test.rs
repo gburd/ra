@@ -52,6 +52,8 @@ fn make_optimizer_with_beam_search(beam_config: BeamSearchConfig) -> Optimizer {
         beam_search_config: Some(beam_config),
         enable_plan_cache: false,
         plan_cache_config: ra_engine::PlanCacheConfig::default(),
+        max_staleness_penalty: 10.0,
+        use_lazy_rules: false,
         transaction_context: None,
     });
 

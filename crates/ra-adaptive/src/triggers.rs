@@ -190,7 +190,6 @@ impl TriggerSet {
                         if sketch.total_count == 0 {
                             0.0
                         } else {
-                            #[allow(clippy::cast_precision_loss)]
                             let d = *count as f64
                                 / sketch.total_count as f64;
                             d
@@ -218,12 +217,11 @@ impl TriggerSet {
         }
         // Estimate budgeted memory as proportional to estimated rows
         // (8 bytes per row as a baseline).
-        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let budgeted = (stats.estimated_rows * 8.0) as u64;
         if budgeted == 0 {
             return;
         }
-        #[allow(clippy::cast_precision_loss)]
         let ratio =
             stats.peak_memory_bytes as f64 / budgeted as f64;
         if ratio > self.config.memory_ratio {

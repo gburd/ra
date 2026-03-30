@@ -184,7 +184,6 @@ fn activate(x: f64, activation: Activation) -> f64 {
 /// Useful for testing and as a baseline before loading trained
 /// weights.
 #[must_use]
-#[allow(clippy::cast_precision_loss)]
 pub fn build_default_mlp(layer_sizes: &[usize]) -> FeedForwardNet {
     let mut layers = Vec::with_capacity(layer_sizes.len() - 1);
     for (i, pair) in layer_sizes.windows(2).enumerate() {

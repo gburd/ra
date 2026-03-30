@@ -54,7 +54,6 @@ impl TransferPath {
     pub fn transfer_time_s(self, bytes: u64) -> f64 {
         let bandwidth_bytes = self.bandwidth_gbps * 1e9;
         let latency_s = self.latency_us * 1e-6;
-        #[allow(clippy::cast_precision_loss)]
         let byte_time = bytes as f64 / bandwidth_bytes;
         latency_s + byte_time
     }

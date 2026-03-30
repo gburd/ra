@@ -50,7 +50,6 @@ impl OperatorStats {
         if self.estimated_rows.abs() < f64::EPSILON {
             return None;
         }
-        #[allow(clippy::cast_precision_loss)]
         let ratio = self.actual_rows as f64 / self.estimated_rows;
         Some(ratio)
     }
@@ -105,7 +104,6 @@ impl ColumnSketch {
         if self.total_count == 0 {
             return 0.0;
         }
-        #[allow(clippy::cast_precision_loss)]
         let frac =
             self.null_count as f64 / self.total_count as f64;
         frac
@@ -118,7 +116,6 @@ impl ColumnSketch {
     #[must_use]
     pub fn equality_selectivity(&self) -> f64 {
         if self.approx_distinct > 0 {
-            #[allow(clippy::cast_precision_loss)]
             let sel = 1.0 / self.approx_distinct as f64;
             sel
         } else {
@@ -136,7 +133,6 @@ impl ColumnSketch {
             if self.total_count == 0 {
                 return false;
             }
-            #[allow(clippy::cast_precision_loss)]
             let fraction =
                 *freq_count as f64 / self.total_count as f64;
             fraction > threshold

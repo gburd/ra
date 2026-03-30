@@ -335,7 +335,6 @@ fn cached_optimization_under_1ms_per_query() {
     }
     let elapsed = start.elapsed();
 
-    #[allow(clippy::cast_precision_loss)]
     let avg_us = elapsed.as_micros() as f64 / 100.0;
     // Each cached lookup should be well under 1ms (1000us).
     // Allow generous headroom for CI.
@@ -518,7 +517,6 @@ fn plan_cache_direct_oltp_simulation() {
 
     // Seed cache with one instance of each template
     for (i, template) in templates.iter().enumerate() {
-        #[allow(clippy::cast_possible_wrap)]
         let plan = template(i as i64 * 1000);
         let fp = QueryFingerprint::from_rel_expr(&plan);
         cache.insert(fp, plan);
@@ -528,7 +526,6 @@ fn plan_cache_direct_oltp_simulation() {
     let mut hits = 0_u32;
     for i in 0..200_u32 {
         let template_idx = (i % 5) as usize;
-        #[allow(clippy::cast_possible_wrap)]
         let param = (i * 7 + 13) as i64;
         let query = templates[template_idx](param);
         let fp = QueryFingerprint::from_rel_expr(&query);
@@ -537,7 +534,6 @@ fn plan_cache_direct_oltp_simulation() {
         }
     }
 
-    #[allow(clippy::cast_precision_loss)]
     let hit_rate = f64::from(hits) / 200.0;
     assert!(
         hit_rate > 0.9,

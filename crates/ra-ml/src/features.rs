@@ -82,7 +82,6 @@ impl FeatureSchema {
         features
     }
 
-    #[allow(clippy::cast_precision_loss)]
     fn encode_expr(
         &self,
         expr: &RelExpr,
@@ -268,7 +267,6 @@ impl FeatureSchema {
         }
     }
 
-    #[allow(clippy::cast_precision_loss)]
     fn encode_table(
         &self,
         table: &str,

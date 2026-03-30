@@ -240,7 +240,6 @@ impl CitusMetadata {
     /// Return the number of active worker nodes.
     #[must_use]
     pub fn active_worker_count(&self) -> u32 {
-        #[allow(clippy::cast_possible_truncation)]
         let count =
             self.worker_nodes.iter().filter(|n| n.is_active).count()
                 as u32;
@@ -425,7 +424,6 @@ impl Default for ColumnarCostParams {
 /// Values < 1.0 mean columnar is cheaper; > 1.0 means more
 /// expensive.
 #[must_use]
-#[allow(clippy::cast_precision_loss)]
 pub fn columnar_scan_cost_factor(
     projected_columns: u32,
     columnar_info: &ColumnarTableInfo,
@@ -916,7 +914,6 @@ impl CitusOptimizer {
     ) -> Option<f64> {
         let table = extract_table_name(input)?;
         let info = self.metadata.columnar_tables.get(&table)?;
-        #[allow(clippy::cast_possible_truncation)]
         let projected = columns.len() as u32;
         Some(columnar_scan_cost_factor(
             projected,
@@ -927,7 +924,6 @@ impl CitusOptimizer {
 
     /// Estimate the cost of a Citus-optimized plan.
     #[must_use]
-    #[allow(clippy::cast_precision_loss)]
     pub fn estimate_cost(
         &self,
         plan: &CitusOptimizedPlan,

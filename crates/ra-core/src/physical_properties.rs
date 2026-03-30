@@ -330,9 +330,7 @@ fn f64_to_u64_saturating(value: f64) -> u64 {
         // u64::MAX rounded to nearest f64 representable value
         u64::MAX
     } else {
-        #[allow(clippy::cast_possible_truncation)]
-        #[allow(clippy::cast_sign_loss)]
-        { value as u64 }
+        value as u64
     }
 }
 
@@ -403,12 +401,10 @@ pub fn repartition_cost(
 
     match required {
         Partitioning::Broadcast => {
-            #[allow(clippy::cast_precision_loss)]
             let network = total_bytes as f64 * 10.0;
             Cost::new(0.0, 0.0, network, 0)
         }
         Partitioning::Hash(_) | Partitioning::Range(_) => {
-            #[allow(clippy::cast_precision_loss)]
             let network = total_bytes as f64;
             Cost::new(0.0, 0.0, network, 0)
         }

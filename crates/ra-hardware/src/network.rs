@@ -171,7 +171,6 @@ impl NetworkLink {
 
     /// Estimate transfer time for the given number of bytes.
     #[must_use]
-    #[allow(clippy::cast_precision_loss)]
     pub fn transfer_time(&self, bytes: u64) -> Duration {
         let latency = Duration::from_micros(self.latency_us);
         let transfer = Duration::from_secs_f64(
@@ -182,7 +181,6 @@ impl NetworkLink {
 
     /// Estimate cloud billing cost for the given number of bytes.
     #[must_use]
-    #[allow(clippy::cast_precision_loss)]
     pub fn transfer_cost(&self, bytes: u64) -> f64 {
         const BYTES_PER_GB: f64 = 1_073_741_824.0;
         (bytes as f64 / BYTES_PER_GB) * self.cost_per_gb
@@ -193,7 +191,6 @@ impl NetworkLink {
     /// For small transfers, latency dominates; for large transfers,
     /// bandwidth dominates.
     #[must_use]
-    #[allow(clippy::cast_precision_loss)]
     pub fn effective_throughput(&self, bytes: u64) -> f64 {
         let total_secs = self.transfer_time(bytes).as_secs_f64();
         if total_secs <= 0.0 {

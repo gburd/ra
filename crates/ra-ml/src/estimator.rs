@@ -56,7 +56,6 @@ impl CardinalityEstimator for HeuristicEstimator {
     }
 }
 
-#[allow(clippy::cast_precision_loss)]
 fn estimate_heuristic(
     expr: &RelExpr,
     stats: &dyn StatisticsProvider,
@@ -441,11 +440,7 @@ impl<E: CardinalityEstimator> MlCostModel<E> {
 }
 
 impl<E: CardinalityEstimator> CostModel for MlCostModel<E> {
-    #[allow(
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-        clippy::cast_precision_loss
-    )]
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_precision_loss)]
     fn estimate(
         &self,
         expr: &RelExpr,
@@ -493,7 +488,6 @@ pub fn q_error_summary(errors: &[f64]) -> QErrorSummary {
     });
 
     let n = sorted.len();
-    #[allow(clippy::cast_precision_loss)]
     let mean = sorted.iter().sum::<f64>() / n as f64;
 
     QErrorSummary {
@@ -523,7 +517,7 @@ pub struct QErrorSummary {
     pub mean: f64,
 }
 
-#[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_precision_loss)]
 fn percentile(sorted: &[f64], p: f64) -> f64 {
     let idx =
         (p / 100.0 * (sorted.len() - 1) as f64).round() as usize;

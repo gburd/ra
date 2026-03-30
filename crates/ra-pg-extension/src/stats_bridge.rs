@@ -417,7 +417,6 @@ unsafe fn read_stanumbers(
 ) -> Option<Vec<f64>> {
     // stanumbers1..stanumbers5 are at attribute numbers
     // Anum_pg_statistic_stanumbers1 + slot_idx
-    #[allow(clippy::cast_possible_truncation)]
     let attnum = (pg_sys::Anum_pg_statistic_stanumbers1 as i32
         + slot_idx as i32) as i16;
 
@@ -495,7 +494,6 @@ unsafe fn read_stavalues_as_strings(
 ) -> Option<Vec<String>> {
     // stavalues1..stavalues5 are at attribute numbers
     // Anum_pg_statistic_stavalues1 + slot_idx
-    #[allow(clippy::cast_possible_truncation)]
     let attnum = (pg_sys::Anum_pg_statistic_stavalues1 as i32
         + slot_idx as i32) as i16;
 

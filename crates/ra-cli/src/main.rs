@@ -1147,7 +1147,6 @@ fn print_individual_results(results: &[TestResult]) {
 
 fn print_test_summary(summary: &test_executor::TestSummary) {
     let pass_rate = if summary.total > 0 {
-        #[allow(clippy::cast_precision_loss)]
         let rate = summary.passed as f64 / summary.total as f64 * 100.0;
         format!("{rate:.1}%")
     } else {
@@ -2561,7 +2560,6 @@ fn print_resource_usage(result: &ra_engine::OptimizationResult, verbose: bool) {
     );
 
     if verbose {
-        #[allow(clippy::cast_precision_loss)]
         let mem_mb = usage.peak_memory_estimate as f64 / (1024.0 * 1024.0);
         eprintln!("  {}: {mem_mb:.2} MB", "Peak memory (est.)".bold(),);
         eprintln!("  {}: {:.2}", "Plan cost".bold(), result.cost,);
@@ -2581,7 +2579,6 @@ fn print_optimization_stats(usage: &ra_engine::ResourceUsageReport) {
         "Peak e-graph nodes".bold(),
         usage.peak_egraph_nodes,
     );
-    #[allow(clippy::cast_precision_loss)]
     let mem_mb = usage.peak_memory_estimate as f64 / (1024.0 * 1024.0);
     eprintln!("  {}: {mem_mb:.2} MB", "Peak memory".bold(),);
     if let Some(ref exceeded) = usage.budget_exceeded {

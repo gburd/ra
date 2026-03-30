@@ -67,7 +67,7 @@ impl BloomFilterState {
         let expected = expected_elements.max(1);
         let fpr = fpr.clamp(1e-10, 0.5);
         // m = -n * ln(p) / (ln(2))^2
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let num_bits = (-(expected as f64) * fpr.ln()
             / (2.0_f64.ln().powi(2)))
         .ceil() as usize;
@@ -279,11 +279,9 @@ impl RuntimeFilter {
         match self {
             RuntimeFilter::BloomFilter(bf) => bf.might_contain(hash),
             RuntimeFilter::MinMaxFilter(mm) => {
-                #[allow(clippy::cast_possible_wrap)]
                 mm.might_contain(hash as i64)
             }
             RuntimeFilter::InListFilter(il) => {
-                #[allow(clippy::cast_possible_wrap)]
                 il.contains(hash as i64)
             }
         }

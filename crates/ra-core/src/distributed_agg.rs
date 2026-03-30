@@ -252,7 +252,6 @@ impl AggregationStrategy {
     ///
     /// Considers input size, number of groups, skew, and cluster config.
     #[must_use]
-    #[allow(clippy::cast_precision_loss)]
     pub fn choose_strategy(
         func: AggregateFunction,
         input_rows: u64,
@@ -284,7 +283,6 @@ impl AggregationStrategy {
     ///
     /// Returns a fraction from 0.0 (no benefit) to 1.0 (maximum benefit).
     #[must_use]
-    #[allow(clippy::cast_precision_loss)]
     pub fn estimated_benefit(
         input_rows: u64,
         distinct_groups: u64,
@@ -315,7 +313,6 @@ impl AggregationStrategy {
 
     /// Estimate the cost of three-phase aggregation for distinct counts.
     #[must_use]
-    #[allow(clippy::cast_precision_loss)]
     pub fn three_phase_cost(
         input_rows: u64,
         distinct_values: u64,
@@ -476,7 +473,6 @@ pub fn decompose_all(
 /// Returns the fraction of data that does NOT need to be shuffled
 /// (0.0 = no reduction, 1.0 = maximum reduction).
 #[must_use]
-#[allow(clippy::cast_precision_loss)]
 pub fn reduction_ratio(input_rows: u64, distinct_groups: u64) -> f64 {
     if input_rows == 0 {
         return 0.0;

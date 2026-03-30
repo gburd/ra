@@ -69,14 +69,12 @@ impl egg::CostFunction<RelLang> for RelCostFn {
             RelLang::Join(_) => {
                 // Join cost depends on cache size and memory bandwidth
                 // Larger cache = better hash table performance
-                #[allow(clippy::cast_precision_loss)]
                 let cache_mb = self.hardware.l3_cache_bytes as f64 / (1024.0 * 1024.0);
                 let cache_factor = 16.0 / cache_mb; // Normalize to 16 MB baseline
                 500.0 * cache_factor
             }
             RelLang::Aggregate(_) => {
                 // Aggregate cost depends on cache and parallelism
-                #[allow(clippy::cast_precision_loss)]
                 let cache_mb = self.hardware.l3_cache_bytes as f64 / (1024.0 * 1024.0);
                 let cache_factor = 16.0 / cache_mb;
                 200.0 * cache_factor
@@ -106,7 +104,6 @@ impl egg::CostFunction<RelLang> for RelCostFn {
                 200.0 * parallelism_factor.max(0.5)
             }
             RelLang::DistinctRel(_) => {
-                #[allow(clippy::cast_precision_loss)]
                 let cache_mb = self.hardware.l3_cache_bytes
                     as f64
                     / (1024.0 * 1024.0);

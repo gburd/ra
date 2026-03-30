@@ -78,7 +78,6 @@ impl NetworkTopology {
         ];
 
         // 2 nodes per DC, 6 total (3 DCs, so index fits in u32)
-        #[allow(clippy::cast_possible_truncation)]
         for (dc_idx, &(region, dc)) in dcs.iter().enumerate() {
             let base = (dc_idx * 2) as u32;
             let n0 = NodeId(base);
@@ -142,7 +141,6 @@ impl NetworkTopology {
         ];
 
         // 2 nodes per cloud, 6 total (3 clouds, so index fits in u32)
-        #[allow(clippy::cast_possible_truncation)]
         for (cloud_idx, &(region, dc)) in clouds.iter().enumerate()
         {
             let base = (cloud_idx * 2) as u32;

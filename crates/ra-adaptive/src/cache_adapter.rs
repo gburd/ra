@@ -367,7 +367,6 @@ impl StatisticsPoller {
             .cache
             .reoptimize_stale(stats_provider, optimizer)?;
 
-        #[allow(clippy::cast_possible_truncation)]
         let count = reoptimized as u64;
         self.stats.total_reoptimized =
             self.stats.total_reoptimized.saturating_add(count);
@@ -431,7 +430,6 @@ fn collect_tables(
 /// Simple cost estimate based on plan node count.
 fn estimate_cost(plan: &RelExpr) -> Cost {
     let n = count_nodes(plan);
-    #[allow(clippy::cast_precision_loss)]
     Cost::new(n as f64, n as f64 * 0.5, 0.0, 0)
 }
 

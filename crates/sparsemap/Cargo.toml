@@ -6,6 +6,9 @@ license = "MIT"
 description = "Sparse bitmap implementation for efficient set operations"
 authors = ["Gregory Burd <greg@burd.me>"]
 
+[lints]
+workspace = true
+
 [dependencies]
 
 [dev-dependencies]

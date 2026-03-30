@@ -1028,7 +1028,6 @@ pub fn estimate_hot_update_savings(
 
 /// Estimate the cost of a document pipeline stage.
 #[must_use]
-#[allow(clippy::cast_precision_loss)]
 pub fn estimate_stage_cost(
     stage: &DocOperator,
     input_count: f64,
@@ -1116,7 +1115,6 @@ pub fn estimate_pipeline_cost(
 
 /// Estimate the output document count for a stage.
 #[must_use]
-#[allow(clippy::cast_precision_loss)]
 fn estimate_output_count(stage: &DocOperator, input: f64) -> f64 {
     match stage {
         DocOperator::Match { .. } => input * 0.3,
@@ -1137,17 +1135,12 @@ fn estimate_output_count(stage: &DocOperator, input: f64) -> f64 {
 }
 
 /// Lossless conversion of u64 to f64 for cost arithmetic.
-#[allow(clippy::cast_precision_loss)]
 fn u64_to_f64(val: u64) -> f64 {
     val as f64
 }
 
 /// Convert f64 to u64 for memory estimates.
-#[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    clippy::cast_precision_loss
-)]
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn f64_to_mem(val: f64) -> u64 {
     if val <= 0.0 {
         0

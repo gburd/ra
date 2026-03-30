@@ -25,11 +25,7 @@ pub struct HardwareCostModel {
 
 /// Convert a non-negative `f64` to `u64`, clamping to zero and
 /// saturating at `u64::MAX`.
-#[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    clippy::cast_precision_loss
-)]
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn f64_to_u64(v: f64) -> u64 {
     if v <= 0.0 {
         0
@@ -51,7 +47,6 @@ impl HardwareCostModel {
     ///
     /// Scans are pipelined operators: startup cost is zero (first
     /// row available immediately).
-    #[allow(clippy::cast_precision_loss)]
     #[must_use]
     pub fn scan_cost(&self, row_count: f64, avg_row_size: u64, device: Device) -> Cost {
         let data_bytes = row_count * avg_row_size as f64;
@@ -82,7 +77,6 @@ impl HardwareCostModel {
     /// Hash join is a blocking operator on the build side: all
     /// build rows must be consumed before the first probe row is
     /// processed. Startup cost = build cost.
-    #[allow(clippy::cast_precision_loss)]
     #[must_use]
     pub fn hash_join_cost(
         &self,
@@ -140,7 +134,6 @@ impl HardwareCostModel {
     /// Sort is a fully blocking operator: startup cost equals total
     /// cost because all input must be consumed before producing the
     /// first sorted row.
-    #[allow(clippy::cast_precision_loss)]
     #[must_use]
     pub fn sort_cost(
         &self,
@@ -188,7 +181,6 @@ impl HardwareCostModel {
     ///
     /// Hash aggregation is blocking: all input rows must be consumed
     /// before groups can be emitted. Startup cost = total cost.
-    #[allow(clippy::cast_precision_loss)]
     #[must_use]
     pub fn aggregation_cost(
         &self,

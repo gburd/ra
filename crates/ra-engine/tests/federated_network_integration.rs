@@ -73,8 +73,6 @@ fn remote_conn(
 fn large_stats(rows: f64, avg_row_size: u64) -> Statistics {
     let mut s = Statistics::new(rows);
     s.avg_row_size = avg_row_size;
-    #[allow(clippy::cast_possible_truncation)]
-    #[allow(clippy::cast_sign_loss)]
     {
         s.total_size = (rows * avg_row_size as f64) as u64;
     }

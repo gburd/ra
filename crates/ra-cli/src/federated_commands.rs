@@ -35,8 +35,6 @@ pub fn cmd_federated_analyze(
 
     let mut remote_stats = Statistics::new(remote_rows);
     remote_stats.avg_row_size = avg_row_size;
-    #[allow(clippy::cast_possible_truncation)]
-    #[allow(clippy::cast_sign_loss)]
     {
         remote_stats.total_size = (remote_rows * avg_row_size as f64) as u64;
     }

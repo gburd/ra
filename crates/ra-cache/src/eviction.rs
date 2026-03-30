@@ -89,7 +89,6 @@ fn adaptive_score(plan: &CachedPlan) -> f64 {
         1.0 / recency_secs
     };
 
-    #[allow(clippy::cast_precision_loss)]
     let frequency = (plan.use_count as f64).max(1.0);
 
     frequency * recency_factor

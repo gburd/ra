@@ -286,7 +286,6 @@ impl MemoryConfig {
     }
 
     /// Estimate memory access time for sequential scan.
-    #[allow(clippy::cast_precision_loss)]
     #[must_use]
     pub fn sequential_access_time_s(&self, bytes: u64) -> f64 {
         let bandwidth_bytes = self.local_bandwidth_gbps * 1e9;
@@ -294,7 +293,6 @@ impl MemoryConfig {
     }
 
     /// Estimate memory access time for random access pattern.
-    #[allow(clippy::cast_precision_loss)]
     #[must_use]
     pub fn random_access_time_s(&self, accesses: u64) -> f64 {
         let latency_s = self.latency_ns * 1e-9;

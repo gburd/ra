@@ -133,7 +133,6 @@ impl EvaluationResult {
 
     /// Compute the mean q-error.
     #[must_use]
-    #[allow(clippy::cast_precision_loss)]
     pub fn mean_q_error(&self) -> f64 {
         if self.q_errors.is_empty() {
             return 0.0;

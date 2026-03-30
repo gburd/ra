@@ -88,7 +88,6 @@ pub fn compare_plans(ra_plan: &RelExpr, db_explain: &ExplainPlan) -> PlanCompari
     );
 
     let total = agreements.len() + disagreements.len();
-    #[allow(clippy::cast_precision_loss)]
     let confidence = if total == 0 {
         1.0
     } else {

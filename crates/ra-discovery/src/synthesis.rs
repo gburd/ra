@@ -238,7 +238,6 @@ pub fn synthesize_rules(pairs: &[PatternPair], config: &SynthesisConfig) -> Vec<
 }
 
 fn compute_confidence(pair: &PatternPair) -> f64 {
-    #[allow(clippy::cast_precision_loss)]
     let support_factor = (pair.co_occurrence as f64 / 10.0).min(1.0);
     let speedup_factor = if pair.avg_speedup > 1.0 {
         1.0 - (1.0 / pair.avg_speedup)

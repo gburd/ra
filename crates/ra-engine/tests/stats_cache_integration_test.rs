@@ -52,6 +52,8 @@ fn make_optimizer_with_stats(table_names: &[&str]) -> Optimizer {
         beam_search_config: None,
         enable_plan_cache: false,
         plan_cache_config: ra_engine::PlanCacheConfig::default(),
+        max_staleness_penalty: 10.0,
+        use_lazy_rules: false,
         transaction_context: None,
     });
 
@@ -181,6 +183,8 @@ fn test_stats_cache_no_stats() {
         beam_search_config: None,
         enable_plan_cache: false,
         plan_cache_config: ra_engine::PlanCacheConfig::default(),
+        max_staleness_penalty: 10.0,
+        use_lazy_rules: false,
         transaction_context: None,
     });
 

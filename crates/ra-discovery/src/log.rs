@@ -49,7 +49,6 @@ impl ExecutionLog {
         if *actual == 0 {
             return None;
         }
-        #[allow(clippy::cast_precision_loss)]
         Some(estimated / *actual as f64)
     }
 }
@@ -126,9 +125,6 @@ impl LogStore {
     #[must_use]
     pub fn split(&self, fraction: f64) -> (&[ExecutionLog], &[ExecutionLog]) {
         let fraction = fraction.clamp(0.0, 1.0);
-        #[allow(clippy::cast_possible_truncation)]
-        #[allow(clippy::cast_sign_loss)]
-        #[allow(clippy::cast_precision_loss)]
         let split_idx = (self.logs.len() as f64 * fraction) as usize;
         self.logs.split_at(split_idx)
     }

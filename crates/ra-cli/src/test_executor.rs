@@ -90,9 +90,11 @@ pub fn run_tests(
         cost_pruning_threshold: 1.5,
         use_join_graph_filtering: false, // Disable for deterministic testing
         beam_search_config: None,        // Disable for deterministic testing
-        transaction_context: None,
         enable_plan_cache: false,
         plan_cache_config: ra_engine::plan_cache::PlanCacheConfig::default(),
+        max_staleness_penalty: 10.0,
+        use_lazy_rules: false,
+        transaction_context: None,
     };
     let optimizer = Optimizer::with_config(test_config);
     let start = Instant::now();
@@ -370,9 +372,11 @@ mod tests {
             cost_pruning_threshold: 1.5,
             use_join_graph_filtering: false,
             beam_search_config: None,
-            transaction_context: None,
             enable_plan_cache: false,
             plan_cache_config: ra_engine::plan_cache::PlanCacheConfig::default(),
+            max_staleness_penalty: 10.0,
+            use_lazy_rules: false,
+            transaction_context: None,
         })
     }
 

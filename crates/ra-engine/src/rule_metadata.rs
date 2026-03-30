@@ -497,8 +497,8 @@ mod tests {
         ) -> Option<&ra_core::facts::OperatorStats> {
             None
         }
-        fn database_name(&self) -> &str {
-            &self.db_name
+        fn database_name(&self) -> &'static str {
+            "test"
         }
         fn supports_feature(&self, _feature: &str) -> bool {
             true

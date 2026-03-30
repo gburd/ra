@@ -33,7 +33,7 @@ fn benchmark_simple_select(c: &mut Criterion) {
 }
 
 fn benchmark_complex_query(c: &mut Criterion) {
-    let sql = r#"
+    let sql = r"
         WITH recent_orders AS (
             SELECT
                 o.id,
@@ -52,7 +52,7 @@ fn benchmark_complex_query(c: &mut Criterion) {
         WHERE u.status = 'active'
         ORDER BY recent_total DESC
         LIMIT 100
-    "#;
+    ";
 
     c.bench_function("native_postgres_to_mysql_complex", |b| {
         let translator = DialectTranslator::with_backend(

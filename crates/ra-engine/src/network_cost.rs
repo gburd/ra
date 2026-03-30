@@ -124,7 +124,6 @@ impl NetworkCostModel {
     /// Returns a zero cost if the table is already on the target node
     /// or if the table has no known node assignment.
     #[must_use]
-    #[allow(clippy::cast_precision_loss)]
     pub fn transfer_cost(
         &self,
         from_table: &str,
@@ -165,7 +164,6 @@ impl NetworkCostModel {
     /// Estimate the cost of transferring data between two specific
     /// nodes.
     #[must_use]
-    #[allow(clippy::cast_precision_loss)]
     pub fn node_transfer_cost(
         &self,
         from: NodeId,
@@ -201,7 +199,6 @@ impl NetworkCostModel {
     ///   N targets.
     /// - `CoLocated`: zero cost.
     #[must_use]
-    #[allow(clippy::cast_precision_loss)]
     pub fn distribution_cost(
         &self,
         strategy: &DistributionStrategy,
@@ -222,7 +219,6 @@ impl NetworkCostModel {
     }
 
     /// Cost of broadcasting all rows from source to each target.
-    #[allow(clippy::cast_precision_loss)]
     fn broadcast_cost(
         &self,
         source: NodeId,
@@ -271,7 +267,6 @@ impl NetworkCostModel {
     }
 
     /// Cost of hash-partitioning and shuffling rows across targets.
-    #[allow(clippy::cast_precision_loss)]
     fn shuffle_cost(
         &self,
         source: NodeId,
@@ -347,7 +342,6 @@ impl NetworkCostModel {
     /// Broadcasts the smaller side when it is below the threshold
     /// (in bytes); otherwise shuffles both sides.
     #[must_use]
-    #[allow(clippy::cast_precision_loss)]
     pub fn recommend_join_strategy(
         &self,
         sides: &JoinSides,

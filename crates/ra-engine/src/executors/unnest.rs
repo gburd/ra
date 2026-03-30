@@ -84,7 +84,6 @@ impl UnnestExecutor {
             let value = eval_const_expr(elem)?;
             let mut values = vec![value];
             if self.with_ordinality {
-                #[allow(clippy::cast_possible_wrap)]
                 values.push(Const::Int((idx as i64) + 1));
             }
             rows.push(Row::new(values));
@@ -112,7 +111,6 @@ impl UnnestExecutor {
                 let mut values = input_row.values.clone();
                 values.push(elem.clone());
                 if self.with_ordinality {
-                    #[allow(clippy::cast_possible_wrap)]
                     values.push(Const::Int((ord as i64) + 1));
                 }
                 output.push(Row::new(values));
@@ -212,7 +210,6 @@ impl MultiUnnestExecutor {
                 values.push(val);
             }
             if self.with_ordinality {
-                #[allow(clippy::cast_possible_wrap)]
                 values.push(Const::Int((idx as i64) + 1));
             }
             rows.push(Row::new(values));

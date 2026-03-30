@@ -1250,7 +1250,6 @@ unsafe fn extract_const_u64(node: *mut pg_sys::Node) -> Option<u64> {
     if (*con).constisnull {
         return None;
     }
-    #[allow(clippy::cast_sign_loss)]
     let val = (*con).constvalue.value() as i64;
     if val < 0 {
         None
@@ -1427,7 +1426,6 @@ unsafe fn convert_pg_const(con: *mut pg_sys::Const) -> Result<Expr, String> {
         26 => Const::Int(i64::from(datum_val as u32)),
         // FLOAT4OID
         700 => {
-            #[allow(clippy::cast_possible_truncation)]
             let bits = datum_val as u32;
             Const::Float(f64::from(f32::from_bits(bits)))
         }

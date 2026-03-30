@@ -391,7 +391,6 @@ impl CpuModel {
     }
 
     /// Estimate CPU execution time for scanning n rows.
-    #[allow(clippy::cast_precision_loss)]
     #[must_use]
     pub fn scan_time_s(&self, rows: u64, bytes_per_row: u64) -> f64 {
         let total_bytes = rows as f64 * bytes_per_row as f64;
@@ -400,7 +399,6 @@ impl CpuModel {
     }
 
     /// Estimate CPU execution time for a hash join.
-    #[allow(clippy::cast_precision_loss)]
     #[must_use]
     pub fn hash_join_time_s(&self, build_rows: u64, probe_rows: u64) -> f64 {
         let build_ns = build_rows as f64 * 100.0;

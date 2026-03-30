@@ -11,6 +11,9 @@ repository.workspace = true
 default = []
 parquet = ["dep:parquet"]
 
+[lints]
+workspace = true
+
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }

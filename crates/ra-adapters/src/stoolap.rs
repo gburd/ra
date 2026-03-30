@@ -217,6 +217,7 @@ impl StoolapAdapter {
                 .dead_tuples
                 .map(|v| v as f64),
             last_analyzed: stats.last_analyzed,
+            estimated_modifications: 0,
             confidence: 0.8,
         }
     }

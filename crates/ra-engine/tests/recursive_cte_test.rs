@@ -430,7 +430,6 @@ impl ExprEvaluator for TreeEvaluator {
                         row.values.first()
                     {
                         for i in 0..self.branching_factor {
-                            #[allow(clippy::cast_possible_wrap)]
                             let child =
                                 n * 10 + (i as i64) + 1;
                             if child <= self.max_value {

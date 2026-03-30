@@ -719,7 +719,6 @@ impl DistributedOptimizer {
             partition_keys: group_by.to_vec(),
         };
 
-        #[allow(clippy::cast_possible_truncation)]
         let partition_count = self.topology.nodes.len() as u32;
 
         Ok(DistributedRelExpr {
@@ -768,7 +767,6 @@ impl DistributedOptimizer {
             .copied()
             .unwrap_or(NodeId(0));
 
-        #[allow(clippy::cast_possible_truncation)]
         let partition_count = self.topology.nodes.len() as u32;
 
         Ok(DistributedRelExpr {
@@ -801,7 +799,6 @@ impl DistributedOptimizer {
                 .copied()
                 .unwrap_or(NodeId(0));
 
-            #[allow(clippy::cast_possible_truncation)]
             let partition_count = self.topology.nodes.len() as u32;
 
             return Ok(DistributedRelExpr {
@@ -925,10 +922,7 @@ impl DistributedOptimizer {
 
     /// Build a `DistributedAggConfig` from the optimizer's
     /// settings and cluster topology.
-    #[allow(
-        clippy::cast_possible_truncation,
-        clippy::cast_precision_loss,
-    )]
+    #[allow(clippy::cast_possible_truncation)]
     fn make_agg_config(&self) -> DistributedAggConfig {
         DistributedAggConfig {
             num_nodes: self.topology.nodes.len() as u32,
@@ -939,11 +933,7 @@ impl DistributedOptimizer {
     }
 
     /// Estimate the row count for a plan.
-    #[allow(
-        clippy::cast_precision_loss,
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-    )]
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     fn estimate_row_count(&self, plan: &RelExpr) -> u64 {
         match plan {
             RelExpr::Scan { table, .. } => {
@@ -972,7 +962,6 @@ impl DistributedOptimizer {
     }
 
     /// Estimate distinct group count for group-by keys.
-    #[allow(clippy::cast_precision_loss)]
     fn estimate_distinct_groups(
         &self,
         input: &RelExpr,
@@ -994,7 +983,6 @@ impl DistributedOptimizer {
     /// is included as an additional candidate (converted to
     /// `ra_core`'s `DistributionStrategy`).
     #[must_use]
-    #[allow(clippy::cast_precision_loss)]
     #[allow(clippy::too_many_arguments)]
     #[allow(clippy::too_many_lines)]
     pub fn enumerate_strategies(
@@ -1154,7 +1142,6 @@ impl DistributedOptimizer {
     /// billing costs. Otherwise, falls back to heuristic estimates
     /// using the `ClusterTopology` bandwidth/latency tables.
     #[must_use]
-    #[allow(clippy::cast_precision_loss)]
     pub fn cost_strategy(
         &self,
         strategy: &DistributionStrategy,
@@ -1179,7 +1166,6 @@ impl DistributedOptimizer {
 
     /// Cost using the [`NetworkCostModel`] for topology-aware
     /// transfer time and billing.
-    #[allow(clippy::cast_precision_loss)]
     fn cost_via_network_model(
         &self,
         ncm: &NetworkCostModel,
@@ -1228,7 +1214,6 @@ impl DistributedOptimizer {
     }
 
     /// Heuristic cost when no `NetworkCostModel` is available.
-    #[allow(clippy::cast_precision_loss)]
     fn cost_heuristic(
         &self,
         strategy: &DistributionStrategy,

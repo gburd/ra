@@ -156,7 +156,6 @@ impl IntegratedCostModel {
     /// Estimate cost for a scan operator, incorporating both
     /// statistics staleness and hardware characteristics.
     #[must_use]
-    #[allow(clippy::cast_precision_loss)]
     pub fn scan_cost(&self, table: &str) -> f64 {
         let stats = self.effective_statistics(table);
         let row_count = stats.row_count;
@@ -188,7 +187,6 @@ impl IntegratedCostModel {
 
     /// Estimate cost for an index scan operator (RFC 0068).
     #[must_use]
-    #[allow(clippy::cast_precision_loss)]
     pub fn index_scan_cost(
         &self,
         table: &str,
@@ -235,7 +233,6 @@ impl IntegratedCostModel {
 
     /// Estimate cost for a join operator (calibrated, RFC 0068).
     #[must_use]
-    #[allow(clippy::cast_precision_loss)]
     pub fn join_cost(
         &self,
         left_table: &str,
@@ -300,7 +297,6 @@ impl IntegratedCostModel {
     /// fraction of probe rows that pass the filter (0.0 = all
     /// filtered, 1.0 = nothing filtered).
     #[must_use]
-    #[allow(clippy::cast_precision_loss)]
     pub fn join_cost_with_runtime_filter(
         &self,
         build_table: &str,
@@ -409,7 +405,6 @@ impl IntegratedCostModel {
     /// Compared to full scan cost, index-only scan is roughly 0.2-0.3x
     /// when the index is well-cached, and 0.5x in cold-cache scenarios.
     #[must_use]
-    #[allow(clippy::cast_precision_loss)]
     pub fn index_only_scan_cost(
         &self,
         table: &str,
@@ -494,7 +489,6 @@ impl IntegratedCostModel {
 
     /// Estimate cost for an aggregate operator.
     #[must_use]
-    #[allow(clippy::cast_precision_loss)]
     pub fn aggregate_cost(
         &self,
         table: &str,
@@ -553,7 +547,6 @@ impl IntegratedCostModel {
     /// 1. Index scan to build bitmap (random I/O)
     /// 2. Bitmap construction overhead
     #[must_use]
-    #[allow(clippy::cast_precision_loss)]
     pub fn bitmap_index_scan_cost(
         &self,
         table: &str,
@@ -576,7 +569,6 @@ impl IntegratedCostModel {
     ///
     /// Bitwise operations run at memory bandwidth speed.
     #[must_use]
-    #[allow(clippy::cast_precision_loss)]
     pub fn bitmap_combine_cost(
         &self,
         table: &str,
@@ -595,7 +587,6 @@ impl IntegratedCostModel {
     /// After combining bitmaps, heap pages are accessed in physical
     /// order, which is much cheaper than random access.
     #[must_use]
-    #[allow(clippy::cast_precision_loss)]
     pub fn bitmap_heap_scan_cost(
         &self,
         table: &str,
@@ -621,7 +612,6 @@ impl IntegratedCostModel {
     /// scan cost. Returns the total cost and whether bitmap scan is
     /// cheaper than alternatives.
     #[must_use]
-    #[allow(clippy::cast_precision_loss)]
     pub fn full_bitmap_scan_cost(
         &self,
         table: &str,
@@ -841,7 +831,6 @@ impl IntegratedCostModel {
     /// - Coordination overhead between workers
     /// - Resource contention (memory bandwidth, cache)
     #[must_use]
-    #[allow(clippy::cast_precision_loss)]
     pub fn parallel_efficiency(&self, workers: usize) -> f64 {
         if workers <= 1 {
             return 1.0;
@@ -872,7 +861,6 @@ impl IntegratedCostModel {
     /// - Synchronization barriers
     /// - Result gathering
     #[must_use]
-    #[allow(clippy::cast_precision_loss)]
     pub fn parallel_coordination_cost(&self, workers: usize) -> f64 {
         if workers <= 1 {
             return 0.0;
@@ -933,7 +921,6 @@ impl IntegratedCostModel {
     /// 1. Partial aggregation in each worker
     /// 2. Final aggregation to combine partial results
     #[must_use]
-    #[allow(clippy::cast_precision_loss)]
     pub fn parallel_aggregate_cost(
         &self,
         table: &str,
@@ -971,7 +958,6 @@ impl IntegratedCostModel {
     ///
     /// Balances speedup against coordination overhead.
     #[must_use]
-    #[allow(clippy::cast_precision_loss)]
     pub fn optimal_worker_count(
         &self,
         estimated_rows: f64,
@@ -1043,7 +1029,6 @@ fn extract_table_from_query(query: &str) -> Option<String> {
 /// a hardware profile. Wraps each entry in a fresh
 /// `ManagedTableStats` with `ExactCount` source.
 #[must_use]
-#[allow(clippy::cast_precision_loss)]
 pub fn from_core_statistics<S: BuildHasher>(
     table_stats: &HashMap<String, Statistics, S>,
     hardware: &HardwareProfile,
@@ -1113,7 +1098,6 @@ impl CostCalibration {
     /// Reference machine: 8 cores, 16 MB L3 cache, 256-bit SIMD,
     /// 3.5 GB/s storage bandwidth.
     #[must_use]
-    #[allow(clippy::cast_precision_loss)]
     pub fn from_hardware(hw: &HardwareProfile) -> Self {
         let ref_storage_bw = 3.5;
         let ref_simd_bits = 256.0;

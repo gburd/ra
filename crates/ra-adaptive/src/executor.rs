@@ -498,7 +498,6 @@ mod tests {
         // Second interval: max already reached
         let a2 = exec.report_rows(1, 1000);
 
-        #[allow(clippy::cast_possible_truncation)]
         let expected_count = a1.len() as u32;
         assert_eq!(exec.adaptation_count(), expected_count);
         assert!(a2.is_empty());

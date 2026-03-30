@@ -111,6 +111,8 @@ fn bench_full_vs_incremental(c: &mut Criterion) {
         cost_pruning_threshold: 1.5,
         use_join_graph_filtering: true,
         beam_search_config: None,
+        max_staleness_penalty: 10.0,
+        use_lazy_rules: false,
         transaction_context: None,
         enable_plan_cache: false,
         plan_cache_config: PlanCacheConfig::default(),
@@ -166,7 +168,6 @@ fn bench_delta_computation(c: &mut Criterion) {
     let base = make_snapshot(0, 100_000, 100_000);
 
     for pct in [1, 5, 10, 25, 50] {
-        #[allow(clippy::cast_sign_loss)]
         let new_rows = 100_000 + (100_000 * pct / 100);
         let next = make_snapshot(60, new_rows, new_rows);
 

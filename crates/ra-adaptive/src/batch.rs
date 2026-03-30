@@ -632,7 +632,6 @@ impl BatchExecutor {
 
             // Apply correction to matching tables
             for (name, stats) in managed_stats {
-                #[allow(clippy::cast_precision_loss)]
                 let table_rows = stats.table.row_count as f64;
                 if (table_rows - fb.estimated_rows).abs()
                     / table_rows.max(1.0)
@@ -647,10 +646,7 @@ impl BatchExecutor {
                             table_rows * correction;
                         let blended =
                             table_rows * 0.7 + corrected * 0.3;
-                        #[allow(
-                            clippy::cast_sign_loss,
-                            clippy::cast_possible_truncation
-                        )]
+                        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
                         let new_rows = blended.max(1.0) as u64;
                         updated.table.row_count = new_rows;
                         // Record the modification for staleness
@@ -773,7 +769,6 @@ impl BatchExecutor {
         estimates: &HashMap<NodeId, f64>,
     ) -> f64 {
         // Map node IDs back to table order
-        #[allow(clippy::cast_possible_truncation)]
         let idx = (node_id as usize).saturating_sub(1);
         if idx < snapshot.tables.len() {
             snapshot.tables[idx].row_count as f64

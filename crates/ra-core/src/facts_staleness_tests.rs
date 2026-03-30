@@ -33,7 +33,7 @@ mod tests {
         // < 1% modification rate
         let stats = mock_table_stats(100_000.0, 500, 0);
         let factor = stats.staleness_factor();
-        assert!(factor >= 1.0 && factor < 1.5, "Expected fresh stats, got {}", factor);
+        assert!((1.0..1.5).contains(&factor), "Expected fresh stats, got {factor}");
         assert!(stats.is_fresh());
         assert!(!stats.is_stale());
     }
@@ -43,7 +43,7 @@ mod tests {
         // 2% modification rate
         let stats = mock_table_stats(100_000.0, 2_000, 1);
         let factor = stats.staleness_factor();
-        assert!(factor >= 1.2 && factor < 2.0, "Expected slightly stale, got {}", factor);
+        assert!((1.2..2.0).contains(&factor), "Expected slightly stale, got {factor}");
     }
 
     #[test]
@@ -51,7 +51,7 @@ mod tests {
         // 15% modification rate
         let stats = mock_table_stats(100_000.0, 15_000, 2);
         let factor = stats.staleness_factor();
-        assert!(factor >= 2.0 && factor < 5.0, "Expected moderately stale, got {}", factor);
+        assert!((2.0..5.0).contains(&factor), "Expected moderately stale, got {factor}");
         assert!(stats.is_stale());
     }
 
@@ -60,7 +60,7 @@ mod tests {
         // 40% modification rate
         let stats = mock_table_stats(100_000.0, 40_000, 3);
         let factor = stats.staleness_factor();
-        assert!(factor >= 5.0 && factor <= 10.0, "Expected very stale, got {}", factor);
+        assert!((5.0..=10.0).contains(&factor), "Expected very stale, got {factor}");
         assert!(stats.is_stale());
     }
 
@@ -69,7 +69,7 @@ mod tests {
         // 100% modification rate (table doubled in size)
         let stats = mock_table_stats(100_000.0, 100_000, 5);
         let factor = stats.staleness_factor();
-        assert_eq!(factor, 10.0, "Expected max penalty");
+        assert!((factor - 10.0).abs() < 0.01, "Expected max penalty");
         assert!(stats.is_stale());
     }
 
@@ -78,7 +78,7 @@ mod tests {
         // Very old stats, even with no modifications
         let stats = mock_table_stats(100_000.0, 0, 100);
         let factor = stats.staleness_factor();
-        assert!(factor >= 3.0, "Expected age-based staleness, got {}", factor);
+        assert!(factor >= 3.0, "Expected age-based staleness, got {factor}");
         assert!(stats.is_stale());
     }
 
@@ -88,8 +88,8 @@ mod tests {
         let stats = mock_table_stats(100_000.0, 30_000, 45);
         let factor = stats.staleness_factor();
         // Should use the maximum of both factors
-        assert!(factor >= 5.0, "Expected combined staleness, got {}", factor);
-        assert_eq!(factor, 10.0, "Should be capped at max penalty");
+        assert!(factor >= 5.0, "Expected combined staleness, got {factor}");
+        assert!((factor - 10.0).abs() < 0.01, "Should be capped at max penalty");
     }
 
     #[test]
@@ -106,7 +106,7 @@ mod tests {
         let stats = mock_table_stats(0.0, 100, 1);
         let factor = stats.staleness_factor();
         // Should handle division by zero gracefully
-        assert!(factor >= 1.0 && factor <= 10.0);
+        assert!((1.0..=10.0).contains(&factor));
     }
 
     #[test]
@@ -114,7 +114,7 @@ mod tests {
         // Extreme case: should still cap at 10.0
         let stats = mock_table_stats(1000.0, 10_000, 365);
         let factor = stats.staleness_factor();
-        assert_eq!(factor, 10.0, "Staleness should be capped at 10.0");
+        assert!((factor - 10.0).abs() < 0.01, "Staleness should be capped at 10.0");
     }
 
     #[test]
@@ -122,7 +122,7 @@ mod tests {
         // Fresh stats: analyzed today, no modifications
         let stats = mock_table_stats(100_000.0, 0, 0);
         let factor = stats.staleness_factor();
-        assert_eq!(factor, 1.0, "Expected no penalty for fresh stats");
+        assert!((factor - 1.0).abs() < 0.01, "Expected no penalty for fresh stats");
         assert!(stats.is_fresh());
         assert!(!stats.is_stale());
     }
@@ -132,7 +132,7 @@ mod tests {
         // One week old but no modifications
         let stats = mock_table_stats(100_000.0, 0, 7);
         let factor = stats.staleness_factor();
-        assert!(factor >= 1.0 && factor < 3.0, "Expected minor age penalty, got {}", factor);
+        assert!((1.0..3.0).contains(&factor), "Expected minor age penalty, got {factor}");
         assert!(stats.is_fresh());
     }
 

@@ -360,7 +360,6 @@ fn eval_arg_as_int(
     match expr {
         Expr::Const(Const::Int(i)) => Ok(*i),
         Expr::Const(Const::Float(f)) => {
-            #[allow(clippy::cast_possible_truncation)]
             Ok(*f as i64)
         }
         other => Err(ExecutionError::EvalError(format!(
@@ -422,7 +421,6 @@ fn coerce_json_value(
                     if let Some(i) = n.as_i64() {
                         Const::Int(i)
                     } else {
-                        #[allow(clippy::cast_possible_truncation)]
                         Const::Int(
                             n.as_f64().unwrap_or(0.0) as i64
                         )

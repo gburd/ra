@@ -203,8 +203,7 @@ fn percentile(sorted: &[Duration], pct: f64) -> Duration {
     if sorted.is_empty() {
         return Duration::ZERO;
     }
-    #[allow(clippy::cast_precision_loss, clippy::cast_sign_loss)]
-    #[allow(clippy::cast_possible_truncation)]
+    #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let idx = ((sorted.len() as f64 * pct / 100.0).ceil() as usize)
         .saturating_sub(1)
         .min(sorted.len() - 1);
@@ -642,7 +641,6 @@ fn latency_cached_vs_uncached_percentiles() {
             cached_p50, cached_p95, cached_p99,
         );
         if !uncached_p50.is_zero() {
-            #[allow(clippy::cast_precision_loss)]
             let speedup = uncached_p50.as_nanos() as f64
                 / cached_p50.as_nanos().max(1) as f64;
             println!("p50 speedup: {speedup:.1}x");
@@ -685,10 +683,8 @@ fn throughput_cached_exceeds_uncached() {
     }
     let cached_elapsed = start.elapsed();
 
-    #[allow(clippy::cast_precision_loss)]
     let uncached_qps =
         500.0 / uncached_elapsed.as_secs_f64();
-    #[allow(clippy::cast_precision_loss)]
     let cached_qps =
         500.0 / cached_elapsed.as_secs_f64();
 
@@ -852,7 +848,6 @@ fn per_template_hit_rate_report() {
     }
 
     for t in 0..5 {
-        #[allow(clippy::cast_precision_loss)]
         let rate = f64::from(template_hits[t])
             / f64::from(template_hits[t] + template_misses[t]);
 
@@ -980,7 +975,6 @@ fn comprehensive_oltp_report() {
         let c_p95 = percentile(&cached_latencies[t], 95.0);
         let c_p99 = percentile(&cached_latencies[t], 99.0);
 
-        #[allow(clippy::cast_precision_loss)]
         let speedup = uc_p50.as_nanos() as f64
             / c_p50.as_nanos().max(1) as f64;
 

@@ -53,14 +53,14 @@ impl TableStats {
     /// Calculate staleness factor based on modifications and age.
     ///
     /// Returns a multiplier from 1.0 (fresh) to 10.0 (very stale) based on:
-    /// - Modification rate: modifications / row_count
+    /// - Modification rate: modifications / `row_count`
     /// - Time since analysis
     ///
     /// This factor should be applied as a penalty to cost estimates,
     /// making stale statistics more expensive to use.
     #[must_use]
     pub fn staleness_factor(&self) -> f64 {
-        let modification_factor = if self.row_count > 0.0 {
+        let modification_factor: f64 = if self.row_count > 0.0 {
             let mod_rate = self.estimated_modifications as f64 / self.row_count;
             // Map modification rate to penalty factor
             if mod_rate < 0.01 {
@@ -78,7 +78,7 @@ impl TableStats {
             1.0
         };
 
-        let age_factor = if let Some(last_analyzed) = self.last_analyzed {
+        let age_factor: f64 = if let Some(last_analyzed) = self.last_analyzed {
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or(Duration::ZERO)
@@ -487,7 +487,7 @@ pub trait FactsProvider: Send + Sync {
     }
 
     /// Get database name
-    fn database_name(&self) -> &str;
+    fn database_name(&self) -> &'static str;
 
     /// Check if a feature is supported
     fn supports_feature(&self, feature: &str) -> bool;

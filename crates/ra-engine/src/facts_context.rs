@@ -172,8 +172,9 @@ impl FactsProvider for FactsContext {
         None
     }
 
-    fn database_name(&self) -> &str {
-        &self.database_name
+    fn database_name(&self) -> &'static str {
+        // Need to return a static string, so we use "generic" for non-specific databases
+        "generic"
     }
 
     fn supports_feature(&self, feature: &str) -> bool {

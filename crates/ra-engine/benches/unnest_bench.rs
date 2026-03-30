@@ -21,7 +21,6 @@ use ra_engine::Row;
 fn make_int_array(n: usize) -> Expr {
     let elements: Vec<Expr> = (1..=n)
         .map(|i| {
-            #[allow(clippy::cast_possible_wrap)]
             Expr::Const(Const::Int(i as i64))
         })
         .collect();
@@ -137,7 +136,6 @@ fn bench_lateral_unnest(c: &mut Criterion) {
             |b| {
                 let left_rows: Vec<Row> = (0..outer_rows)
                     .map(|i| {
-                        #[allow(clippy::cast_possible_wrap)]
                         Row::new(vec![
                             Const::Int(i as i64),
                             Const::String("{1,2,3,4,5}".into()),

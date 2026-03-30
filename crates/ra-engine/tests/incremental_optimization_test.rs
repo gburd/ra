@@ -1054,9 +1054,7 @@ fn high_frequency_changes_stable() {
     // 1000 rapid changes cycling through tables
     for i in 0..1000_u64 {
         let table = format!("table_{}", i % 10);
-        #[allow(clippy::cast_precision_loss)]
         let old_rows = 1000.0 + (i as f64 * 100.0);
-        #[allow(clippy::cast_precision_loss)]
         let new_rows = old_rows * 3.0;
 
         let changes = vec![ChangeSource::Statistics(StatisticsChange::RowCount {

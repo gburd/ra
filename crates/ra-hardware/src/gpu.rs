@@ -187,7 +187,6 @@ impl TransferCharacteristics {
     }
 
     /// Estimate transfer time for bytes from host to device (seconds).
-    #[allow(clippy::cast_precision_loss)]
     #[must_use]
     pub fn transfer_time_s(&self, bytes: u64) -> f64 {
         if self.unified_memory {
@@ -440,7 +439,6 @@ impl GpuModel {
     }
 
     /// Estimate GPU scan time for n rows (seconds).
-    #[allow(clippy::cast_precision_loss)]
     #[must_use]
     pub fn scan_time_s(&self, rows: u64, bytes_per_row: u64) -> f64 {
         let total_bytes = rows as f64 * bytes_per_row as f64;
@@ -449,7 +447,6 @@ impl GpuModel {
     }
 
     /// Estimate GPU hash join time (seconds).
-    #[allow(clippy::cast_precision_loss)]
     #[must_use]
     pub fn hash_join_time_s(&self, build_rows: u64, probe_rows: u64) -> f64 {
         let parallelism = f64::from(self.compute_units);

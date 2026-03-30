@@ -465,10 +465,7 @@ fn scalar_lt(a: &ScalarValue, b: &ScalarValue) -> bool {
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::cast_possible_wrap,
-    clippy::cast_precision_loss,
-    clippy::expect_used
+#[allow(clippy::expect_used
 )]
 mod tests {
     use std::sync::Arc;

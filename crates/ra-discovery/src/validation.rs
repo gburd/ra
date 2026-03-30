@@ -126,7 +126,6 @@ pub fn validate_rule(
         }
     }
 
-    #[allow(clippy::cast_precision_loss)]
     let matched_f64 = queries_matched as f64;
 
     let avg_cost_ratio = if queries_matched > 0 {
@@ -135,14 +134,12 @@ pub fn validate_rule(
         1.0
     };
 
-    #[allow(clippy::cast_precision_loss)]
     let regression_rate = if queries_matched > 0 {
         queries_regressed as f64 / matched_f64
     } else {
         0.0
     };
 
-    #[allow(clippy::cast_precision_loss)]
     let improvement_rate = if queries_matched > 0 {
         queries_improved as f64 / matched_f64
     } else {

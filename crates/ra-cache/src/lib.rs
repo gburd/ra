@@ -493,7 +493,6 @@ fn collect_tables(
 /// Simple cost estimate (sum of CPU + IO components).
 fn estimate_simple_cost(plan: &RelExpr) -> Cost {
     let node_count = count_nodes(plan);
-    #[allow(clippy::cast_precision_loss)]
     Cost::new(node_count as f64, node_count as f64 * 0.5, 0.0, 0)
 }
 

@@ -113,7 +113,6 @@ impl QueryFingerprint {
         if self.has_sort == other.has_sort {
             flag_matches += 1;
         }
-        #[allow(clippy::cast_precision_loss)]
         let flag_score = f64::from(flag_matches)
             / f64::from(flag_total);
 
@@ -181,7 +180,6 @@ impl FingerprintCollector {
                 aggregates,
                 input,
             } => {
-                #[allow(clippy::cast_possible_truncation)]
                 {
                     self.group_by_count = group_by.len() as u16;
                 }
@@ -291,7 +289,6 @@ impl FingerprintCollector {
                 input,
                 ..
             } => {
-                #[allow(clippy::cast_possible_truncation)]
                 {
                     self.group_by_count = group_by.len() as u16;
                 }
@@ -429,7 +426,6 @@ impl FingerprintCollector {
         }
     }
 
-    #[allow(clippy::cast_possible_truncation)]
     fn finish(self) -> QueryFingerprint {
         let table_count = self.tables.len() as u16;
         let join_count = self.join_types.len() as u16;

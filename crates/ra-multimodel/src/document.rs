@@ -124,11 +124,7 @@ pub enum FieldType {
 
 /// Convert a non-negative f64 to u64 for memory estimates, clamping
 /// negative and overflow values.
-#[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    clippy::cast_precision_loss
-)]
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn f64_to_mem(val: f64) -> u64 {
     if val <= 0.0 {
         0
@@ -142,7 +138,6 @@ fn f64_to_mem(val: f64) -> u64 {
 /// Lossless conversion of u64 to f64 for cost arithmetic.
 /// Byte sizes in practice never exceed 2^53 so precision loss
 /// is not a concern.
-#[allow(clippy::cast_precision_loss)]
 fn u64_to_f64(val: u64) -> f64 {
     val as f64
 }

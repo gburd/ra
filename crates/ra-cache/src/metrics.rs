@@ -61,7 +61,6 @@ impl CacheMetrics {
         if total == 0 {
             return 0.0;
         }
-        #[allow(clippy::cast_precision_loss)]
         let rate = self.hits as f64 / total as f64;
         rate
     }
@@ -74,7 +73,6 @@ impl CacheMetrics {
         if self.max_entries == 0 {
             return 0.0;
         }
-        #[allow(clippy::cast_precision_loss)]
         let util =
             self.current_entries as f64 / self.max_entries as f64;
         util

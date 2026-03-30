@@ -121,11 +121,7 @@ pub struct EdgeTypeStats {
 
 /// Convert a non-negative f64 to u64 for memory estimates, clamping
 /// negative and overflow values.
-#[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    clippy::cast_precision_loss
-)]
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn f64_to_mem(val: f64) -> u64 {
     if val <= 0.0 {
         0

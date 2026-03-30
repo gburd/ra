@@ -197,11 +197,8 @@ impl RemoteConnection {
         }
         // Convert bandwidth from Mbps to bytes per millisecond
         // 1 Mbps = 125_000 bytes/sec = 125 bytes/ms
-        #[allow(clippy::cast_precision_loss)]
         let bytes_per_ms = self.bandwidth_mbps as f64 * 125.0;
-        #[allow(clippy::cast_precision_loss)]
         let transfer_ms = bytes as f64 / bytes_per_ms;
-        #[allow(clippy::cast_precision_loss)]
         let latency = self.latency_ms as f64;
         latency + transfer_ms
     }
@@ -586,7 +583,6 @@ impl FederatedPlan {
 /// Format a byte count in human-readable form.
 #[must_use]
 pub fn format_bytes(bytes: u64) -> String {
-    #[allow(clippy::cast_precision_loss)]
     let bytes_f = bytes as f64;
     if bytes >= 1_073_741_824 {
         format!("{:.1}GB", bytes_f / 1_073_741_824.0)

@@ -129,10 +129,8 @@ impl PlanCacheStats {
         if self.lookups == 0 {
             return 0.0;
         }
-        #[allow(clippy::cast_precision_loss)]
         let hits =
             (self.exact_hits + self.fuzzy_hits) as f64;
-        #[allow(clippy::cast_precision_loss)]
         let total = self.lookups as f64;
         hits / total
     }

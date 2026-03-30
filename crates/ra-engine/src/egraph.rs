@@ -972,7 +972,6 @@ impl Optimizer {
             tracker.record_egraph_nodes(egraph.total_number_of_nodes());
 
             // Estimate memory: ~64 bytes per e-graph node is rough
-            #[allow(clippy::cast_possible_truncation)]
             let mem_estimate =
                 (egraph.total_number_of_nodes() as u64).saturating_mul(64);
             tracker.record_memory_estimate(mem_estimate);
@@ -1191,7 +1190,6 @@ impl Optimizer {
             tracker.record_egraph_nodes(egraph.total_number_of_nodes());
 
             // Estimate memory
-            #[allow(clippy::cast_possible_truncation)]
             let mem_estimate =
                 (egraph.total_number_of_nodes() as u64).saturating_mul(64);
             tracker.record_memory_estimate(mem_estimate);
@@ -1269,11 +1267,7 @@ impl Optimizer {
             // Scale iterations by change magnitude.
             let pct = stats_delta.row_count_change_pct();
             let fraction = (pct / 100.0).clamp(0.05, 1.0);
-            #[allow(
-                clippy::cast_possible_truncation,
-                clippy::cast_sign_loss,
-                clippy::cast_precision_loss
-            )]
+            #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
             let iters = ((self.config.iter_limit as f64) * fraction)
                 .ceil() as usize;
             (iters.max(1), false)
@@ -1321,7 +1315,6 @@ impl Optimizer {
     /// Apply statistics deltas to the internal table stats map.
     ///
     /// Returns the number of tables whose stats were updated.
-    #[allow(clippy::cast_precision_loss)]
     fn apply_stats_delta(&mut self, delta_set: &DeltaSet) -> usize {
         let mut updated_tables =
             std::collections::HashSet::<String>::new();
@@ -1676,7 +1669,6 @@ impl IncrementalStats {
     /// Based on the ratio of iterations used vs max configured.
     /// Returns 1.0 when full reoptimization was used.
     #[must_use]
-    #[allow(clippy::cast_precision_loss)]
     pub fn speedup_factor(&self) -> f64 {
         if self.used_full_reoptimization || self.iterations_used == 0 {
             return 1.0;
@@ -4172,7 +4164,6 @@ mod tests {
         }
 
         let stats = opt.cache_stats().expect("cache enabled");
-        #[allow(clippy::cast_possible_truncation)]
         let hit_count =
             (stats.exact_hits + stats.fuzzy_hits) as u32;
 

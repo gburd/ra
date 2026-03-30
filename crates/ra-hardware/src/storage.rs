@@ -495,7 +495,6 @@ impl StorageDevice {
     }
 
     /// Estimate sequential read time (seconds).
-    #[allow(clippy::cast_precision_loss)]
     #[must_use]
     pub fn sequential_read_time_s(&self, bytes: u64) -> f64 {
         let bandwidth_bytes = f64::from(self.sequential_read_mbps) * 1e6;
@@ -504,7 +503,6 @@ impl StorageDevice {
     }
 
     /// Estimate random read time for multiple operations (seconds).
-    #[allow(clippy::cast_precision_loss)]
     #[must_use]
     pub fn random_read_time_s(&self, operations: u64) -> f64 {
         let latency_s = self.latency_us * 1e-6;

@@ -161,7 +161,6 @@ impl FederatedCostModel {
             .map_or(self.default_avg_row_size, |s| s.avg_row_size);
 
         // Remote execution: scan + process
-        #[allow(clippy::cast_precision_loss)]
         let pages = (row_count * avg_row_size as f64)
             / self.page_size as f64;
         let remote_exec_ms = (pages * self.io_cost_per_page
@@ -169,9 +168,6 @@ impl FederatedCostModel {
             * self.remote_execution_overhead;
 
         // Result transfer
-        #[allow(clippy::cast_precision_loss)]
-        #[allow(clippy::cast_possible_truncation)]
-        #[allow(clippy::cast_sign_loss)]
         let result_bytes =
             (result_rows * result_row_size as f64) as u64;
 
@@ -183,8 +179,6 @@ impl FederatedCostModel {
 
         let total_ms = remote_exec_ms + transfer.transfer_ms;
 
-        #[allow(clippy::cast_possible_truncation)]
-        #[allow(clippy::cast_sign_loss)]
         let rows_transferred = result_rows as u64;
 
         FederatedCostBreakdown {
@@ -237,16 +231,12 @@ impl FederatedCostModel {
         };
 
         // Remote scan cost (even for ship-data, remote scans)
-        #[allow(clippy::cast_precision_loss)]
         let pages = (row_count * avg_row_size as f64)
             / self.page_size as f64;
         let remote_exec_ms = pages * self.io_cost_per_page
             * self.remote_execution_overhead;
 
         // Transfer cost
-        #[allow(clippy::cast_precision_loss)]
-        #[allow(clippy::cast_possible_truncation)]
-        #[allow(clippy::cast_sign_loss)]
         let transfer_bytes =
             (transfer_rows * avg_row_size as f64) as u64;
 
@@ -263,8 +253,6 @@ impl FederatedCostModel {
         let total_ms =
             remote_exec_ms + transfer.transfer_ms + local_exec_ms;
 
-        #[allow(clippy::cast_possible_truncation)]
-        #[allow(clippy::cast_sign_loss)]
         let rows_transferred = transfer_rows as u64;
 
         FederatedCostBreakdown {
@@ -321,7 +309,6 @@ impl FederatedCostModel {
             .map_or(self.default_avg_row_size, |s| s.avg_row_size);
 
         // Remote pushdown execution
-        #[allow(clippy::cast_precision_loss)]
         let pages = (row_count * avg_row_size as f64)
             / self.page_size as f64;
         let remote_exec_ms = (pages * self.io_cost_per_page
@@ -332,9 +319,6 @@ impl FederatedCostModel {
 
         // Intermediate result transfer
         let intermediate_rows = row_count * pushdown_selectivity;
-        #[allow(clippy::cast_precision_loss)]
-        #[allow(clippy::cast_possible_truncation)]
-        #[allow(clippy::cast_sign_loss)]
         let transfer_bytes =
             (intermediate_rows * avg_row_size as f64) as u64;
 
@@ -352,8 +336,6 @@ impl FederatedCostModel {
         let total_ms =
             remote_exec_ms + transfer.transfer_ms + local_exec_ms;
 
-        #[allow(clippy::cast_possible_truncation)]
-        #[allow(clippy::cast_sign_loss)]
         let rows_transferred = intermediate_rows as u64;
 
         FederatedCostBreakdown {
@@ -379,7 +361,6 @@ impl FederatedCostModel {
         let avg_row_size = stats
             .map_or(self.default_avg_row_size, |s| s.avg_row_size);
 
-        #[allow(clippy::cast_precision_loss)]
         let pages = (row_count * avg_row_size as f64)
             / self.page_size as f64;
         let local_exec_ms = pages * self.io_cost_per_page
@@ -529,7 +510,6 @@ impl FederatedCostModel {
                 (base_rows * 0.01).max(1.0)
             }
             RelExpr::Limit { count, .. } => {
-                #[allow(clippy::cast_precision_loss)]
                 let limit = *count as f64;
                 base_rows.min(limit)
             }
@@ -558,9 +538,6 @@ impl FederatedCostModel {
             .map_or(self.default_row_count, |s| s.row_count);
         let avg_row_size = stats
             .map_or(self.default_avg_row_size, |s| s.avg_row_size);
-        #[allow(clippy::cast_precision_loss)]
-        #[allow(clippy::cast_possible_truncation)]
-        #[allow(clippy::cast_sign_loss)]
         let size = (row_count * avg_row_size as f64) as u64;
         size
     }
