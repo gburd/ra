@@ -1,0 +1,114 @@
+# PostGIS Extension Profile
+#
+# Adds spatial/geographic types and functions to PostgreSQL.
+# Compatible with PostgreSQL 12+.
+
+[profile]
+name = "postgis"
+vendor = "postgresql"
+version = "3.5"
+description = "PostGIS spatial extension for PostgreSQL"
+
+[features]
+# PostGIS-specific features
+spatial_types = true
+geography_types = true
+raster_types = true
+topology = true
+3d_support = true
+
+[syntax]
+# Spatial type syntax
+geometry_syntax = "geometry(TYPE, SRID)"
+geography_syntax = "geography(TYPE, SRID)"
+
+[operators]
+# PostGIS spatial operators
+geometry_operators = [
+    "&&",   # Overlaps (bounding box)
+    "@>",   # Contains (bounding box)
+    "<@",   # Contained by (bounding box)
+    "~",    # Contains (geometry)
+    "@",    # Contained by (geometry)
+    "&<",   # Overlaps or is left of
+    "&>",   # Overlaps or is right of
+    "<<",   # Strictly left of
+    ">>",   # Strictly right of
+    "&<|",  # Overlaps or is below
+    "|&>",  # Overlaps or is above
+    "<<|",  # Strictly below
+    "|>>",  # Strictly above
+    "~=",   # Same as
+    "<->",  # Distance operator
+]
+
+[functions]
+# PostGIS functions (subset of 1000+)
+# Geometry constructors
+constructors = [
+    "ST_GeomFromText",
+    "ST_GeomFromWKB",
+    "ST_Point",
+    "ST_LineString",
+    "ST_Polygon",
+    "ST_MakePoint",
+    "ST_MakeLine",
+    "ST_MakePolygon",
+]
+
+# Spatial relationships
+relationships = [
+    "ST_Contains",
+    "ST_Crosses",
+    "ST_Disjoint",
+    "ST_Equals",
+    "ST_Intersects",
+    "ST_Overlaps",
+    "ST_Touches",
+    "ST_Within",
+    "ST_Covers",
+    "ST_CoveredBy",
+]
+
+# Spatial measurements
+measurements = [
+    "ST_Area",
+    "ST_Distance",
+    "ST_Length",
+    "ST_Perimeter",
+    "ST_3DDistance",
+]
+
+# Spatial operations
+operations = [
+    "ST_Buffer",
+    "ST_Intersection",
+    "ST_Union",
+    "ST_Difference",
+    "ST_SymDifference",
+    "ST_Centroid",
+    "ST_ConvexHull",
+]
+
+# Spatial indexing
+indexing = [
+    "ST_DWithin",
+    "ST_DFullyWithin",
+]
+
+# Accessors
+accessors = [
+    "ST_X",
+    "ST_Y",
+    "ST_Z",
+    "ST_M",
+    "ST_SRID",
+    "ST_GeometryType",
+    "ST_NumGeometries",
+    "ST_NumPoints",
+]
+
+[validation]
+strict_type_checking = true
+strict_function_arity = true
+warn_on_ambiguous_syntax = false

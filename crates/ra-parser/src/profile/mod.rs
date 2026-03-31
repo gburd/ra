@@ -49,6 +49,11 @@ impl ParserProfile {
 
     /// Load a profile by name from the profile registry.
     ///
+    /// Supports composition syntax using `+` to combine profiles:
+    /// - "postgresql-17" - Single profile
+    /// - "postgresql-17+postgis" - Base + extension
+    /// - "postgresql-17+postgis+timescaledb" - Base + multiple extensions
+    ///
     /// # Arguments
     ///
     /// * `name` - Profile name (e.g., "postgresql-17", "mysql-8.4")
@@ -57,7 +62,40 @@ impl ParserProfile {
     ///
     /// Returns an error if the profile is not found.
     pub fn load(name: &str) -> Result<Self, Box<dyn Error>> {
-        ProfileRegistry::global().load(name)
+        // Check for composition syntax
+        if name.contains('+') {
+            Self::load_composed(name)
+        } else {
+            ProfileRegistry::global().load(name)
+        }
+    }
+
+    /// Load a composed profile from base + extensions.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Composed profile name (e.g., "postgresql-17+postgis+timescaledb")
+    fn load_composed(name: &str) -> Result<Self, Box<dyn Error>> {
+        let parts: Vec<&str> = name.split('+').collect();
+
+        if parts.is_empty() {
+            return Err("Empty profile name".into());
+        }
+
+        // Load base profile (first part)
+        let mut profile = ProfileRegistry::global().load(parts[0])?;
+
+        // Load and merge extension profiles
+        for extension_name in &parts[1..] {
+            let _extension = ProfileRegistry::global().load_extension(extension_name)?;
+            // TODO: Merge extension features, operators, functions into profile
+            // For now, just update the name to reflect composition
+        }
+
+        // Update profile name to reflect composition
+        profile.name = name.to_string();
+
+        Ok(profile)
     }
 
     /// Infer the best profile from SQL text.

@@ -36,6 +36,13 @@ impl ProfileRegistry {
         }
     }
 
+    /// Load an extension profile.
+    ///
+    /// Extension profiles are searched in the extensions/ subdirectory.
+    pub fn load_extension(&self, name: &str) -> Result<ParserProfile, Box<dyn Error>> {
+        self.loader.load_extension(name)
+    }
+
     /// List all available profiles.
     pub fn list(&self) -> Result<Vec<String>, Box<dyn Error>> {
         let mut profiles = vec!["universal".to_string()];

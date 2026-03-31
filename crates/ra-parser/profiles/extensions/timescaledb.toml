@@ -1,0 +1,86 @@
+# TimescaleDB Extension Profile
+#
+# Adds time-series database capabilities to PostgreSQL.
+# Compatible with PostgreSQL 13+.
+
+[profile]
+name = "timescaledb"
+vendor = "postgresql"
+version = "2.17"
+description = "TimescaleDB time-series extension for PostgreSQL"
+
+[features]
+# TimescaleDB-specific features
+hypertables = true
+continuous_aggregates = true
+compression = true
+data_retention = true
+multi_node = true
+
+[syntax]
+# Hypertable creation syntax
+create_hypertable = "SELECT create_hypertable('table', 'time_column')"
+add_retention_policy = "SELECT add_retention_policy('table', INTERVAL '7 days')"
+add_compression_policy = "SELECT add_compression_policy('table', INTERVAL '7 days')"
+
+[functions]
+# TimescaleDB-specific functions
+
+# Hypertable management
+hypertable_ops = [
+    "create_hypertable",
+    "drop_hypertable",
+    "add_dimension",
+    "set_chunk_time_interval",
+    "set_integer_now_func",
+]
+
+# Time bucketing
+time_bucketing = [
+    "time_bucket",
+    "time_bucket_gapfill",
+]
+
+# Continuous aggregates
+continuous_agg = [
+    "create_materialized_view",
+    "refresh_continuous_aggregate",
+]
+
+# Compression
+compression = [
+    "compress_chunk",
+    "decompress_chunk",
+    "add_compression_policy",
+    "remove_compression_policy",
+]
+
+# Data retention
+retention = [
+    "add_retention_policy",
+    "remove_retention_policy",
+]
+
+# Utilities
+utilities = [
+    "show_chunks",
+    "drop_chunks",
+    "reorder_chunk",
+    "move_chunk",
+]
+
+# Hyperfunctions (analytics)
+hyperfunctions = [
+    "first",
+    "last",
+    "histogram",
+    "approximate_row_count",
+    "timescaledb_information.hypertables",
+    "timescaledb_information.chunks",
+    "timescaledb_information.dimensions",
+]
+
+[validation]
+strict_type_checking = true
+strict_function_arity = true
+warn_on_ambiguous_syntax = false

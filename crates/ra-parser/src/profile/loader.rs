@@ -94,6 +94,23 @@ impl ProfileLoader {
         self.load_from_path(&path)
     }
 
+    /// Load an extension profile from the extensions/ subdirectory.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Extension name (e.g., "postgis", "timescaledb")
+    pub fn load_extension(&self, name: &str) -> Result<ParserProfile, Box<dyn Error>> {
+        let extension_path = Path::new(&self.profile_dir)
+            .join("extensions")
+            .join(format!("{}.toml", name));
+
+        if !extension_path.exists() {
+            return Err(format!("Extension profile '{}' not found", name).into());
+        }
+
+        self.load_from_path(&extension_path)
+    }
+
     /// Load a profile from a specific file path.
     fn load_from_path(&self, path: &Path) -> Result<ParserProfile, Box<dyn Error>> {
         let contents = fs::read_to_string(path)?;
