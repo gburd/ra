@@ -984,6 +984,7 @@ impl IntegratedCostModel {
 enum OperationType {
     SeqScan,
     IndexScan,
+    #[allow(dead_code)]  // Reserved for future nested loop join cost model
     NestedLoop,
     HashJoin,
     Aggregate,
