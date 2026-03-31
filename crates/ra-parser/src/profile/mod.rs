@@ -134,4 +134,66 @@ mod tests {
         let profile = ParserProfile::universal();
         assert_eq!(profile.name(), "universal");
     }
+
+    #[test]
+    fn test_load_vendor_profile() {
+        let result = ParserProfile::load("postgresql-17");
+        assert!(result.is_ok(), "Failed to load postgresql-17 profile");
+
+        let profile = result.unwrap();
+        assert_eq!(profile.name(), "postgresql-17");
+    }
+
+    #[test]
+    fn test_load_oracle_profile() {
+        let result = ParserProfile::load("oracle-21c");
+        assert!(result.is_ok(), "Failed to load oracle-21c profile");
+
+        let profile = result.unwrap();
+        assert_eq!(profile.name(), "oracle-21c");
+    }
+
+    #[test]
+    fn test_profile_composition() {
+        let result = ParserProfile::load("postgresql-17+postgis");
+        assert!(result.is_ok(), "Failed to load composed profile");
+
+        let profile = result.unwrap();
+        assert_eq!(profile.name(), "postgresql-17+postgis");
+    }
+
+    #[test]
+    fn test_multi_extension_composition() {
+        let result = ParserProfile::load("postgresql-17+postgis+timescaledb");
+        assert!(result.is_ok(), "Failed to load multi-extension profile");
+
+        let profile = result.unwrap();
+        assert_eq!(profile.name(), "postgresql-17+postgis+timescaledb");
+    }
+
+    #[test]
+    fn test_dialect_inference_postgresql() {
+        let sql = "SELECT ARRAY[1,2,3]::int[] FROM users WHERE data @> '{\"key\": \"value\"}'";
+        let result = ParserProfile::infer(sql);
+
+        assert!(result.is_ok(), "Dialect inference failed");
+        let (profile, confidence) = result.unwrap();
+
+        // Should detect PostgreSQL
+        assert!(profile.name().contains("postgresql"));
+        assert!(confidence > 0.5, "Confidence too low: {}", confidence);
+    }
+
+    #[test]
+    fn test_dialect_inference_mysql() {
+        let sql = "SELECT * FROM `users` WHERE id = 1 LIMIT 10, 5";
+        let result = ParserProfile::infer(sql);
+
+        assert!(result.is_ok(), "Dialect inference failed");
+        let (profile, confidence) = result.unwrap();
+
+        // Should detect MySQL
+        assert!(profile.name().contains("mysql"));
+        assert!(confidence > 0.5, "Confidence too low: {}", confidence);
+    }
 }
