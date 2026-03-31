@@ -768,4 +768,892 @@ mod tests {
         };
         assert_eq!(render_scalar(&cast), "CAST(age AS TEXT)");
     }
+
+    // === Additional comprehensive tests for missing coverage ===
+
+    #[test]
+    fn render_index_scan() {
+        let expr = RelExpr::IndexScan {
+            table: "users".into(),
+            column: "id".into(),
+        };
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("Index Scan on users"));
+        assert!(sql.contains("id"));
+    }
+
+    #[test]
+    fn render_index_only_scan() {
+        let expr = RelExpr::IndexOnlyScan {
+            table: "users".into(),
+            index: "idx_email".into(),
+            predicate: Expr::BinOp {
+                op: BinOp::Eq,
+                left: Box::new(Expr::Column(ColumnRef::new("email"))),
+                right: Box::new(Expr::Const(Const::String("test@example.com".into()))),
+            },
+            columns: vec![],
+        };
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("Index-Only Scan"));
+        assert!(sql.contains("idx_email"));
+        assert!(sql.contains("WHERE"));
+    }
+
+    #[test]
+    fn render_left_join() {
+        let expr = RelExpr::Join {
+            join_type: JoinType::Left,
+            condition: Expr::BinOp {
+                op: BinOp::Eq,
+                left: Box::new(Expr::Column(ColumnRef::qualified("users", "id"))),
+                right: Box::new(Expr::Column(ColumnRef::qualified("orders", "user_id"))),
+            },
+            left: Box::new(RelExpr::scan("users")),
+            right: Box::new(RelExpr::scan("orders")),
+        };
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("LEFT JOIN"));
+    }
+
+    #[test]
+    fn render_right_join() {
+        let expr = RelExpr::Join {
+            join_type: JoinType::Right,
+            condition: Expr::Const(Const::Bool(true)),
+            left: Box::new(RelExpr::scan("users")),
+            right: Box::new(RelExpr::scan("orders")),
+        };
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("RIGHT JOIN"));
+    }
+
+    #[test]
+    fn render_full_join() {
+        let expr = RelExpr::Join {
+            join_type: JoinType::Full,
+            condition: Expr::Const(Const::Bool(true)),
+            left: Box::new(RelExpr::scan("users")),
+            right: Box::new(RelExpr::scan("orders")),
+        };
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("FULL JOIN"));
+    }
+
+    #[test]
+    fn render_cross_join() {
+        let expr = RelExpr::Join {
+            join_type: JoinType::Cross,
+            condition: Expr::Const(Const::Bool(true)),
+            left: Box::new(RelExpr::scan("users")),
+            right: Box::new(RelExpr::scan("products")),
+        };
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("CROSS JOIN"));
+    }
+
+    #[test]
+    fn render_incremental_sort() {
+        let expr = RelExpr::IncrementalSort {
+            prefix_keys: vec![SortKey {
+                expr: Expr::Column(ColumnRef::new("category")),
+                direction: SortDirection::Asc,
+                nulls: NullOrdering::First,
+            }],
+            suffix_keys: vec![SortKey {
+                expr: Expr::Column(ColumnRef::new("price")),
+                direction: SortDirection::Desc,
+                nulls: NullOrdering::Last,
+            }],
+            input: Box::new(RelExpr::scan("products")),
+        };
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("ORDER BY"));
+        assert!(sql.contains("category"));
+        assert!(sql.contains("price"));
+    }
+
+    #[test]
+    fn render_union() {
+        let expr = RelExpr::Union {
+            all: false,
+            left: Box::new(RelExpr::scan("users")),
+            right: Box::new(RelExpr::scan("admins")),
+        };
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("UNION"));
+        assert!(!sql.contains("UNION ALL"));
+    }
+
+    #[test]
+    fn render_union_all() {
+        let expr = RelExpr::Union {
+            all: true,
+            left: Box::new(RelExpr::scan("users")),
+            right: Box::new(RelExpr::scan("admins")),
+        };
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("UNION ALL"));
+    }
+
+    #[test]
+    fn render_intersect() {
+        let expr = RelExpr::Intersect {
+            all: false,
+            left: Box::new(RelExpr::scan("customers")),
+            right: Box::new(RelExpr::scan("subscribers")),
+        };
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("INTERSECT"));
+        assert!(!sql.contains("INTERSECT ALL"));
+    }
+
+    #[test]
+    fn render_intersect_all() {
+        let expr = RelExpr::Intersect {
+            all: true,
+            left: Box::new(RelExpr::scan("customers")),
+            right: Box::new(RelExpr::scan("subscribers")),
+        };
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("INTERSECT ALL"));
+    }
+
+    #[test]
+    fn render_except() {
+        let expr = RelExpr::Except {
+            all: false,
+            left: Box::new(RelExpr::scan("all_users")),
+            right: Box::new(RelExpr::scan("banned_users")),
+        };
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("EXCEPT"));
+        assert!(!sql.contains("EXCEPT ALL"));
+    }
+
+    #[test]
+    fn render_except_all() {
+        let expr = RelExpr::Except {
+            all: true,
+            left: Box::new(RelExpr::scan("all_users")),
+            right: Box::new(RelExpr::scan("banned_users")),
+        };
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("EXCEPT ALL"));
+    }
+
+    #[test]
+    fn render_cte() {
+        let expr = RelExpr::CTE {
+            name: "temp_data".into(),
+            definition: Box::new(RelExpr::scan("users")),
+            body: Box::new(RelExpr::scan("temp_data")),
+        };
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("CTE"));
+        assert!(sql.contains("WITH"));
+        assert!(sql.contains("temp_data"));
+    }
+
+    #[test]
+    fn render_window_function() {
+        use ra_core::WindowFunction;
+        let expr = RelExpr::Window {
+            functions: vec![WindowFunction {
+                function: AggregateFunction::RowNumber,
+                arg: None,
+                partition_by: vec![Expr::Column(ColumnRef::new("category"))],
+                order_by: vec![SortKey {
+                    expr: Expr::Column(ColumnRef::new("price")),
+                    direction: SortDirection::Desc,
+                    nulls: NullOrdering::Last,
+                }],
+                alias: Some("rn".into()),
+            }],
+            input: Box::new(RelExpr::scan("products")),
+        };
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("OVER"));
+        assert!(sql.contains("PARTITION BY"));
+        assert!(sql.contains("ORDER BY"));
+    }
+
+    #[test]
+    fn render_window_function_no_partition() {
+        use ra_core::WindowFunction;
+        let expr = RelExpr::Window {
+            functions: vec![WindowFunction {
+                function: AggregateFunction::Sum,
+                arg: Some(Expr::Column(ColumnRef::new("amount"))),
+                partition_by: vec![],
+                order_by: vec![],
+                alias: None,
+            }],
+            input: Box::new(RelExpr::scan("orders")),
+        };
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("SUM"));
+        assert!(sql.contains("OVER"));
+    }
+
+    #[test]
+    fn render_distinct() {
+        let expr = RelExpr::Distinct {
+            input: Box::new(RelExpr::scan("users")),
+        };
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("DISTINCT"));
+    }
+
+    #[test]
+    fn render_distinct_with_projection() {
+        let expr = RelExpr::Distinct {
+            input: Box::new(
+                RelExpr::scan("users").project(vec![ProjectionColumn {
+                    expr: Expr::Column(ColumnRef::new("city")),
+                    alias: None,
+                }]),
+            ),
+        };
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("DISTINCT"));
+        assert!(sql.contains("city"));
+    }
+
+    #[test]
+    fn render_recursive_cte() {
+        let expr = RelExpr::RecursiveCTE {
+            name: "tree".into(),
+            base_case: Box::new(RelExpr::scan("root")),
+            recursive_case: Box::new(RelExpr::scan("children")),
+            body: Box::new(RelExpr::scan("tree")),
+            columns: vec![],
+        };
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("RECURSIVE"));
+        assert!(sql.contains("tree"));
+    }
+
+    #[test]
+    fn render_values() {
+        let expr = RelExpr::Values {
+            rows: vec![
+                vec![Expr::Const(Const::Int(1)), Expr::Const(Const::String("a".into()))],
+                vec![Expr::Const(Const::Int(2)), Expr::Const(Const::String("b".into()))],
+            ],
+        };
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("VALUES"));
+        assert!(sql.contains("(1, 'a')"));
+        assert!(sql.contains("(2, 'b')"));
+    }
+
+    #[test]
+    fn render_unnest() {
+        let expr = RelExpr::Unnest {
+            expr: Expr::Array(vec![Expr::Const(Const::Int(1)), Expr::Const(Const::Int(2))]),
+            alias: Some("arr".into()),
+            input: None,
+            ordinality: false,
+        };
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("unnest"));
+        assert!(sql.contains("AS arr"));
+    }
+
+    #[test]
+    fn render_unnest_without_alias() {
+        let expr = RelExpr::Unnest {
+            expr: Expr::Column(ColumnRef::new("items")),
+            alias: None,
+            input: None,
+            ordinality: false,
+        };
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("unnest"));
+        assert!(!sql.contains(" AS "));
+    }
+
+    #[test]
+    fn render_multi_unnest() {
+        let expr = RelExpr::MultiUnnest {
+            exprs: vec![
+                Expr::Column(ColumnRef::new("arr1")),
+                Expr::Column(ColumnRef::new("arr2")),
+            ],
+            aliases: vec![Some("a".into()), Some("b".into())],
+            ordinality: false,
+        };
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("unnest"));
+        assert!(sql.contains("arr1"));
+        assert!(sql.contains("arr2"));
+    }
+
+    #[test]
+    fn render_multi_unnest_no_aliases() {
+        let expr = RelExpr::MultiUnnest {
+            exprs: vec![Expr::Column(ColumnRef::new("arr1"))],
+            aliases: vec![None],
+            ordinality: false,
+        };
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("unnest"));
+    }
+
+    #[test]
+    fn render_table_function() {
+        let expr = RelExpr::TableFunction {
+            name: "generate_series".into(),
+            args: vec![Expr::Const(Const::Int(1)), Expr::Const(Const::Int(10))],
+            input: None,
+            ordinality: false,
+        };
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("generate_series(1, 10)"));
+    }
+
+    #[test]
+    fn render_row_pattern() {
+        let expr = RelExpr::RowPattern {
+            input: Box::new(RelExpr::scan("events")),
+            pattern: "A+ B C*".into(),
+            defines: vec![],
+            measures: vec![],
+        };
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("MATCH_RECOGNIZE"));
+        assert!(sql.contains("PATTERN"));
+    }
+
+    #[test]
+    fn render_bitmap_index_scan() {
+        let expr = RelExpr::BitmapIndexScan {
+            table: "users".into(),
+            index: "idx_age".into(),
+            predicate: Expr::BinOp {
+                op: BinOp::Gt,
+                left: Box::new(Expr::Column(ColumnRef::new("age"))),
+                right: Box::new(Expr::Const(Const::Int(30))),
+            },
+            columns: vec![],
+        };
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("Bitmap Index Scan"));
+        assert!(sql.contains("idx_age"));
+    }
+
+    #[test]
+    fn render_bitmap_and() {
+        let expr = RelExpr::BitmapAnd {
+            inputs: vec![
+                Box::new(RelExpr::scan("t1")),
+                Box::new(RelExpr::scan("t2")),
+            ],
+        };
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("BitmapAnd"));
+    }
+
+    #[test]
+    fn render_bitmap_or() {
+        let expr = RelExpr::BitmapOr {
+            inputs: vec![
+                Box::new(RelExpr::scan("t1")),
+                Box::new(RelExpr::scan("t2")),
+                Box::new(RelExpr::scan("t3")),
+            ],
+        };
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("BitmapOr"));
+        assert!(sql.contains("3 inputs"));
+    }
+
+    #[test]
+    fn render_bitmap_heap_scan() {
+        let expr = RelExpr::BitmapHeapScan {
+            bitmap: Box::new(RelExpr::scan("idx")),
+            table: "users".into(),
+            recheck_cond: Some(Expr::Const(Const::Bool(true))),
+            columns: vec![],
+        };
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("Bitmap Heap Scan"));
+    }
+
+    #[test]
+    fn render_bitmap_heap_scan_no_recheck() {
+        let expr = RelExpr::BitmapHeapScan {
+            bitmap: Box::new(RelExpr::scan("idx")),
+            table: "users".into(),
+            recheck_cond: None,
+            columns: vec![],
+        };
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("Bitmap Heap Scan"));
+        assert!(sql.contains("users"));
+    }
+
+    #[test]
+    fn render_parallel_scan() {
+        let expr = RelExpr::ParallelScan {
+            table: "large_table".into(),
+            workers: 4,
+            alias: None,
+        };
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("Parallel Seq Scan"));
+        assert!(sql.contains("workers=4"));
+    }
+
+    #[test]
+    fn render_parallel_hash_join() {
+        let expr = RelExpr::ParallelHashJoin {
+            left: Box::new(RelExpr::scan("orders")),
+            right: Box::new(RelExpr::scan("customers")),
+            condition: Expr::Const(Const::Bool(true)),
+            workers: 8,
+        };
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("Parallel Hash Join"));
+        assert!(sql.contains("workers=8"));
+    }
+
+    #[test]
+    fn render_parallel_aggregate() {
+        let expr = RelExpr::ParallelAggregate {
+            group_by: vec![],
+            aggregates: vec![AggregateExpr {
+                function: AggregateFunction::Count,
+                arg: None,
+                distinct: false,
+                alias: None,
+            }],
+            input: Box::new(RelExpr::scan("events")),
+            workers: 4,
+        };
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("Parallel Aggregate"));
+        assert!(sql.contains("workers=4"));
+    }
+
+    #[test]
+    fn render_gather() {
+        let expr = RelExpr::Gather {
+            input: Box::new(RelExpr::scan("data")),
+            workers: 2,
+        };
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("Gather"));
+        assert!(sql.contains("workers=2"));
+    }
+
+    #[test]
+    fn render_mv_scan() {
+        let expr = RelExpr::MvScan {
+            view_name: "mat_view".into(),
+            alias: None,
+        };
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("mat_view"));
+        assert!(sql.contains("MV Scan"));
+    }
+
+    #[test]
+    fn render_mv_scan_with_alias() {
+        let expr = RelExpr::MvScan {
+            view_name: "mat_view".into(),
+            alias: Some("mv".into()),
+        };
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("AS mv"));
+    }
+
+    // === Expression rendering tests ===
+
+    #[test]
+    fn render_is_not_null() {
+        let expr = Expr::UnaryOp {
+            op: UnaryOp::IsNotNull,
+            operand: Box::new(Expr::Column(ColumnRef::new("email"))),
+        };
+        assert_eq!(render_scalar(&expr), "email IS NOT NULL");
+    }
+
+    #[test]
+    fn render_negation() {
+        let expr = Expr::UnaryOp {
+            op: UnaryOp::Neg,
+            operand: Box::new(Expr::Const(Const::Int(42))),
+        };
+        assert_eq!(render_scalar(&expr), "-42");
+    }
+
+    #[test]
+    fn render_function() {
+        let expr = Expr::Function {
+            name: "UPPER".into(),
+            args: vec![Expr::Column(ColumnRef::new("name"))],
+        };
+        assert_eq!(render_scalar(&expr), "UPPER(name)");
+    }
+
+    #[test]
+    fn render_function_multiple_args() {
+        let expr = Expr::Function {
+            name: "SUBSTRING".into(),
+            args: vec![
+                Expr::Column(ColumnRef::new("text")),
+                Expr::Const(Const::Int(1)),
+                Expr::Const(Const::Int(5)),
+            ],
+        };
+        assert_eq!(render_scalar(&expr), "SUBSTRING(text, 1, 5)");
+    }
+
+    #[test]
+    fn render_case_simple() {
+        let expr = Expr::Case {
+            operand: None,
+            when_clauses: vec![(
+                Expr::BinOp {
+                    op: BinOp::Gt,
+                    left: Box::new(Expr::Column(ColumnRef::new("age"))),
+                    right: Box::new(Expr::Const(Const::Int(18))),
+                },
+                Expr::Const(Const::String("adult".into())),
+            )],
+            else_result: Some(Box::new(Expr::Const(Const::String("minor".into())))),
+        };
+        let sql = render_scalar(&expr);
+        assert!(sql.contains("CASE"));
+        assert!(sql.contains("WHEN"));
+        assert!(sql.contains("ELSE"));
+        assert!(sql.contains("END"));
+    }
+
+    #[test]
+    fn render_case_no_else() {
+        let expr = Expr::Case {
+            operand: None,
+            when_clauses: vec![(
+                Expr::Const(Const::Bool(true)),
+                Expr::Const(Const::Int(1)),
+            )],
+            else_result: None,
+        };
+        let sql = render_scalar(&expr);
+        assert!(sql.contains("CASE"));
+        assert!(!sql.contains("ELSE"));
+    }
+
+    #[test]
+    fn render_case_with_operand() {
+        let expr = Expr::Case {
+            operand: Some(Box::new(Expr::Column(ColumnRef::new("status")))),
+            when_clauses: vec![
+                (Expr::Const(Const::String("active".into())), Expr::Const(Const::Int(1))),
+                (Expr::Const(Const::String("inactive".into())), Expr::Const(Const::Int(0))),
+            ],
+            else_result: Some(Box::new(Expr::Const(Const::Int(-1)))),
+        };
+        let sql = render_scalar(&expr);
+        assert!(sql.contains("CASE status"));
+    }
+
+    #[test]
+    fn render_array() {
+        let expr = Expr::Array(vec![
+            Expr::Const(Const::Int(1)),
+            Expr::Const(Const::Int(2)),
+            Expr::Const(Const::Int(3)),
+        ]);
+        assert_eq!(render_scalar(&expr), "ARRAY[1, 2, 3]");
+    }
+
+    #[test]
+    fn render_array_index() {
+        let expr = Expr::ArrayIndex(
+            Box::new(Expr::Column(ColumnRef::new("arr"))),
+            Box::new(Expr::Const(Const::Int(0))),
+        );
+        assert_eq!(render_scalar(&expr), "arr[0]");
+    }
+
+    #[test]
+    fn render_array_slice() {
+        let expr = Expr::ArraySlice {
+            array: Box::new(Expr::Column(ColumnRef::new("arr"))),
+            start: Some(Box::new(Expr::Const(Const::Int(1)))),
+            end: Some(Box::new(Expr::Const(Const::Int(5)))),
+        };
+        assert_eq!(render_scalar(&expr), "arr[1:5]");
+    }
+
+    #[test]
+    fn render_array_slice_no_start() {
+        let expr = Expr::ArraySlice {
+            array: Box::new(Expr::Column(ColumnRef::new("arr"))),
+            start: None,
+            end: Some(Box::new(Expr::Const(Const::Int(5)))),
+        };
+        assert_eq!(render_scalar(&expr), "arr[:5]");
+    }
+
+    #[test]
+    fn render_array_slice_no_end() {
+        let expr = Expr::ArraySlice {
+            array: Box::new(Expr::Column(ColumnRef::new("arr"))),
+            start: Some(Box::new(Expr::Const(Const::Int(3)))),
+            end: None,
+        };
+        assert_eq!(render_scalar(&expr), "arr[3:]");
+    }
+
+    #[test]
+    fn render_field_access() {
+        let expr = Expr::FieldAccess {
+            expr: Box::new(Expr::Column(ColumnRef::new("user"))),
+            field_name: "email".into(),
+        };
+        assert_eq!(render_scalar(&expr), "(user).email");
+    }
+
+    #[test]
+    fn render_subquery_scalar() {
+        let expr = Expr::SubQuery {
+            subquery_type: SubQueryType::Scalar,
+            query: Box::new(RelExpr::scan("users")),
+            test_expr: None,
+        };
+        let sql = render_scalar(&expr);
+        assert!(sql.starts_with('('));
+        assert!(sql.ends_with(')'));
+    }
+
+    #[test]
+    fn render_subquery_exists() {
+        let expr = Expr::SubQuery {
+            subquery_type: SubQueryType::Exists,
+            query: Box::new(RelExpr::scan("orders")),
+            test_expr: None,
+        };
+        let sql = render_scalar(&expr);
+        assert!(sql.contains("EXISTS"));
+    }
+
+    #[test]
+    fn render_subquery_in() {
+        let expr = Expr::SubQuery {
+            subquery_type: SubQueryType::In,
+            query: Box::new(RelExpr::scan("valid_ids")),
+            test_expr: Some(Box::new(Expr::Column(ColumnRef::new("id")))),
+        };
+        let sql = render_scalar(&expr);
+        assert!(sql.contains("IN"));
+        assert!(sql.contains("id"));
+    }
+
+    #[test]
+    fn render_subquery_in_no_test() {
+        let expr = Expr::SubQuery {
+            subquery_type: SubQueryType::In,
+            query: Box::new(RelExpr::scan("valid_ids")),
+            test_expr: None,
+        };
+        let sql = render_scalar(&expr);
+        assert!(sql.contains("IN"));
+    }
+
+    #[test]
+    fn render_subquery_any() {
+        let expr = Expr::SubQuery {
+            subquery_type: SubQueryType::Any,
+            query: Box::new(RelExpr::scan("values")),
+            test_expr: Some(Box::new(Expr::Column(ColumnRef::new("x")))),
+        };
+        let sql = render_scalar(&expr);
+        assert!(sql.contains("ANY"));
+    }
+
+    #[test]
+    fn render_subquery_all() {
+        let expr = Expr::SubQuery {
+            subquery_type: SubQueryType::All,
+            query: Box::new(RelExpr::scan("values")),
+            test_expr: Some(Box::new(Expr::Column(ColumnRef::new("x")))),
+        };
+        let sql = render_scalar(&expr);
+        assert!(sql.contains("ALL"));
+    }
+
+    #[test]
+    fn render_pattern_prev() {
+        let expr = Expr::PatternPrev(
+            Box::new(Expr::Column(ColumnRef::new("price"))),
+            2,
+        );
+        assert_eq!(render_scalar(&expr), "PREV(price, 2)");
+    }
+
+    #[test]
+    fn render_pattern_next() {
+        let expr = Expr::PatternNext(
+            Box::new(Expr::Column(ColumnRef::new("price"))),
+            1,
+        );
+        assert_eq!(render_scalar(&expr), "NEXT(price, 1)");
+    }
+
+    #[test]
+    fn render_pattern_first() {
+        let expr = Expr::PatternFirst(
+            Box::new(Expr::Column(ColumnRef::new("price"))),
+            "A".into(),
+        );
+        assert_eq!(render_scalar(&expr), "FIRST(A.price)");
+    }
+
+    #[test]
+    fn render_pattern_last() {
+        let expr = Expr::PatternLast(
+            Box::new(Expr::Column(ColumnRef::new("price"))),
+            "B".into(),
+        );
+        assert_eq!(render_scalar(&expr), "LAST(B.price)");
+    }
+
+    #[test]
+    fn render_pattern_classifier() {
+        let expr = Expr::PatternClassifier;
+        assert_eq!(render_scalar(&expr), "CLASSIFIER()");
+    }
+
+    #[test]
+    fn render_pattern_match_number() {
+        let expr = Expr::PatternMatchNumber;
+        assert_eq!(render_scalar(&expr), "MATCH_NUMBER()");
+    }
+
+    #[test]
+    fn render_const_float() {
+        assert_eq!(render_const(&Const::Float(3.14)), "3.14");
+    }
+
+    #[test]
+    fn render_const_string_with_quotes() {
+        assert_eq!(render_const(&Const::String("it's".into())), "'it''s'");
+    }
+
+    #[test]
+    fn render_column_ref_qualified() {
+        let col = ColumnRef::qualified("users", "id");
+        assert_eq!(render_column_ref(&col), "users.id");
+    }
+
+    #[test]
+    fn render_column_ref_simple() {
+        let col = ColumnRef::new("name");
+        assert_eq!(render_column_ref(&col), "name");
+    }
+
+    #[test]
+    fn render_projection_with_aliases() {
+        let cols = vec![
+            ProjectionColumn {
+                expr: Expr::Column(ColumnRef::new("id")),
+                alias: Some("user_id".into()),
+            },
+            ProjectionColumn {
+                expr: Expr::Column(ColumnRef::new("name")),
+                alias: None,
+            },
+        ];
+        let sql = render_projection(&cols);
+        assert!(sql.contains("id AS user_id"));
+        assert!(sql.contains("name"));
+    }
+
+    #[test]
+    fn render_aggregate_with_distinct() {
+        let aggs = vec![AggregateExpr {
+            function: AggregateFunction::Count,
+            arg: Some(Expr::Column(ColumnRef::new("city"))),
+            distinct: true,
+            alias: Some("unique_cities".into()),
+        }];
+        let group_by = vec![];
+        let sql = render_aggregate_select(&aggs, &group_by);
+        assert!(sql.contains("COUNT(DISTINCT city)"));
+        assert!(sql.contains("AS unique_cities"));
+    }
+
+    #[test]
+    fn render_aggregate_with_group_by() {
+        let aggs = vec![AggregateExpr {
+            function: AggregateFunction::Sum,
+            arg: Some(Expr::Column(ColumnRef::new("amount"))),
+            distinct: false,
+            alias: Some("total".into()),
+        }];
+        let group_by = vec![Expr::Column(ColumnRef::new("category"))];
+        let sql = render_aggregate_select(&aggs, &group_by);
+        assert!(sql.contains("SUM(amount)"));
+        assert!(sql.contains("category"));
+    }
+
+    #[test]
+    fn render_sort_key_nulls_first() {
+        let key = SortKey {
+            expr: Expr::Column(ColumnRef::new("score")),
+            direction: SortDirection::Asc,
+            nulls: NullOrdering::First,
+        };
+        assert_eq!(render_sort_key(&key), "score ASC NULLS FIRST");
+    }
+
+    #[test]
+    fn render_scan_with_alias() {
+        let expr = RelExpr::Scan {
+            table: "users".into(),
+            alias: Some("u".into()),
+        };
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("users AS u"));
+    }
+
+    #[test]
+    fn render_multiple_filters() {
+        let expr = RelExpr::scan("users")
+            .filter(Expr::BinOp {
+                op: BinOp::Gt,
+                left: Box::new(Expr::Column(ColumnRef::new("age"))),
+                right: Box::new(Expr::Const(Const::Int(18))),
+            })
+            .filter(Expr::BinOp {
+                op: BinOp::Eq,
+                left: Box::new(Expr::Column(ColumnRef::new("active"))),
+                right: Box::new(Expr::Const(Const::Bool(true))),
+            });
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("age > 18"));
+        assert!(sql.contains("active = TRUE"));
+        assert!(sql.contains("AND"));
+    }
+
+    #[test]
+    fn render_zero_offset() {
+        let expr = RelExpr::scan("users").limit(10, 0);
+        let sql = SqlRenderer::render(&expr);
+        assert!(sql.contains("LIMIT 10"));
+        assert!(!sql.contains("OFFSET"));
+    }
+
+    #[test]
+    fn render_empty_select() {
+        let mut ctx = RenderContext::default();
+        ctx.from = "users".into();
+        let sql = ctx.finish();
+        assert!(sql.contains("SELECT *"));
+    }
 }
