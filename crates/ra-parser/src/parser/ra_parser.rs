@@ -4,7 +4,7 @@
 //! automatic dialect detection and profile-based grammar extensions.
 
 use crate::profile::ParserProfile;
-use crate::RelExpr;
+use ra_core::RelExpr;
 use sqlparser::ast::Statement;
 use std::error::Error;
 use std::fmt;
@@ -51,6 +51,7 @@ impl fmt::Display for ParserError {
 
 impl Error for ParserError {}
 
+/// Result type for parser operations.
 pub type Result<T> = std::result::Result<T, ParserError>;
 
 impl RaParser {

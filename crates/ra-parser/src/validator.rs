@@ -5,7 +5,7 @@
 
 use thiserror::Error;
 
-use crate::parser::RuleMetadata;
+use crate::RuleMetadata;
 
 /// An error produced when metadata validation fails.
 #[derive(Debug, Error)]

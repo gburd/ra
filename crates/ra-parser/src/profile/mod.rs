@@ -19,8 +19,14 @@ use std::fmt;
 #[derive(Debug, Clone)]
 pub struct ParserProfile {
     name: String,
+    /// Database vendor (e.g., "postgresql", "mysql"). Used for profile inheritance.
+    #[allow(dead_code)]
     vendor: Option<String>,
+    /// Vendor version (e.g., "17", "8.4"). Used for version-specific features.
+    #[allow(dead_code)]
     version: Option<String>,
+    /// Parent profile name for inheritance. Used when loading TOML profiles.
+    #[allow(dead_code)]
     inherits_from: Option<String>,
     // TODO: Add grammar extensions, keywords, operators, functions
 }

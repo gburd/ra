@@ -12,7 +12,7 @@ use ra_core::{RuleMetadata as CoreRuleMetadata, RuleCategory};
 use thiserror::Error;
 use tracing::{debug, info, warn};
 
-use crate::parser::{parse_rule_file, ParseError, RuleMetadata};
+use crate::{parse_rule_file, ParseError, RuleMetadata};
 
 /// Errors that can occur during rule registry operations
 #[derive(Debug, Error)]
