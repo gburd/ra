@@ -1,0 +1,752 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Query Plan Visualization - RA Optimizer</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        header h1 {
+            font-size: 2em;
+            margin-bottom: 10px;
+        }
+
+        header p {
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .query-input {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .query-input label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #333;
+        }
+
+        .query-input textarea {
+            width: 100%;
+            min-height: 100px;
+            padding: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 1em;
+            font-family: 'Courier New', monospace;
+            resize: vertical;
+        }
+
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 1.1em;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: transform 0.2s;
+            margin-top: 10px;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+        }
+
+        .comparison-mode {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .comparison-mode button {
+            flex: 1;
+        }
+
+        .comparison-mode button.active {
+            background: linear-gradient(135deg, #27ae60 0%, #229954 100%);
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .stat-card .label {
+            color: #666;
+            font-size: 0.9em;
+            margin-bottom: 5px;
+        }
+
+        .stat-card .value {
+            font-size: 1.8em;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        #visualization {
+            background: white;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            min-height: 600px;
+            overflow: auto;
+            position: relative;
+        }
+
+        .node-box {
+            cursor: pointer;
+        }
+
+        .node-rect {
+            fill: #667eea;
+            stroke: #4a5fc8;
+            stroke-width: 2px;
+            rx: 8;
+        }
+
+        .node-rect.collapsed {
+            fill: #95a5f6;
+        }
+
+        .node-text {
+            fill: white;
+            font-weight: 600;
+            font-size: 14px;
+            text-anchor: middle;
+            pointer-events: none;
+        }
+
+        .node-cost {
+            fill: white;
+            font-size: 11px;
+            text-anchor: middle;
+            pointer-events: none;
+        }
+
+        .node-rows {
+            fill: white;
+            font-size: 11px;
+            text-anchor: middle;
+            pointer-events: none;
+        }
+
+        .link {
+            fill: none;
+            stroke: #999;
+            stroke-width: 2px;
+        }
+
+        .tooltip {
+            position: absolute;
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s;
+            z-index: 1000;
+            max-width: 300px;
+        }
+
+        .tooltip.visible {
+            opacity: 1;
+        }
+
+        .tooltip .detail-row {
+            margin: 4px 0;
+        }
+
+        .tooltip .detail-key {
+            font-weight: bold;
+            color: #ffd700;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 40px;
+        }
+
+        .loading.visible {
+            display: block;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error {
+            display: none;
+            background: #fee;
+            color: #c33;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .error.visible {
+            display: block;
+        }
+
+        .comparison-grid {
+            display: none;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+            margin-top: 30px;
+        }
+
+        .comparison-grid.visible {
+            display: grid;
+        }
+
+        .optimizer-panel {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+        }
+
+        .optimizer-panel h3 {
+            color: #333;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 3px solid #667eea;
+        }
+
+        .optimizer-panel .cost-badge {
+            background: #667eea;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            display: inline-block;
+            font-weight: bold;
+            margin-bottom: 15px;
+        }
+
+        .optimizer-panel.cheapest {
+            border: 3px solid #27ae60;
+        }
+
+        .optimizer-panel.cheapest h3 {
+            border-bottom-color: #27ae60;
+        }
+
+        .optimizer-panel.cheapest .cost-badge {
+            background: #27ae60;
+        }
+
+        .controls-row {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .controls-row button {
+            flex: 1;
+            padding: 10px;
+            font-size: 0.9em;
+        }
+
+        .zoom-controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            display: flex;
+            gap: 5px;
+            z-index: 100;
+        }
+
+        .zoom-controls button {
+            width: 40px;
+            height: 40px;
+            padding: 0;
+            font-size: 1.2em;
+            border-radius: 50%;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Query Plan Visualization</h1>
+            <p>Interactive visualization of query execution plans with cost analysis</p>
+        </header>
+
+        <div class="content">
+            <div class="query-input">
+                <label for="sql">SQL Query</label>
+                <textarea id="sql" placeholder="Enter your SQL query here...">SELECT u.name, COUNT(o.id) as order_count
+FROM users u
+JOIN orders o ON u.id = o.user_id
+WHERE u.age > 25 AND o.total > 100
+GROUP BY u.name
+ORDER BY order_count DESC</textarea>
+            </div>
+
+            <div class="comparison-mode">
+                <button id="single-mode" class="active" onclick="setMode('single')">Single Plan (Ra)</button>
+                <button id="compare-mode" onclick="setMode('compare')">Compare Optimizers</button>
+            </div>
+
+            <button onclick="visualize()">Visualize Plan</button>
+
+            <div id="error" class="error"></div>
+            <div id="loading" class="loading">
+                <div class="spinner"></div>
+                <p>Building query plan...</p>
+            </div>
+
+            <div id="stats" class="stats" style="display: none;"></div>
+
+            <div id="visualization-container" style="display: none;">
+                <div id="visualization">
+                    <div class="zoom-controls">
+                        <button onclick="zoomIn()" title="Zoom In">+</button>
+                        <button onclick="zoomOut()" title="Zoom Out">-</button>
+                        <button onclick="resetZoom()" title="Reset">⟲</button>
+                    </div>
+                    <svg id="plan-svg"></svg>
+                </div>
+                <div class="controls-row">
+                    <button onclick="expandAll()">Expand All</button>
+                    <button onclick="collapseAll()">Collapse All</button>
+                    <button onclick="exportSVG()">Export SVG</button>
+                    <button onclick="exportJSON()">Export JSON</button>
+                </div>
+            </div>
+
+            <div id="comparison-grid" class="comparison-grid"></div>
+
+            <div class="tooltip" id="tooltip"></div>
+        </div>
+    </div>
+
+    <script>
+        let currentPlan = null;
+        let currentMode = 'single';
+        let currentZoom = 1;
+        let planData = null;
+
+        function setMode(mode) {
+            currentMode = mode;
+            document.getElementById('single-mode').classList.toggle('active', mode === 'single');
+            document.getElementById('compare-mode').classList.toggle('active', mode === 'compare');
+        }
+
+        async function visualize() {
+            const sql = document.getElementById('sql').value.trim();
+            if (!sql) {
+                showError('Please enter a SQL query');
+                return;
+            }
+
+            hideError();
+            showLoading();
+            document.getElementById('visualization-container').style.display = 'none';
+            document.getElementById('comparison-grid').style.display = 'none';
+            document.getElementById('stats').style.display = 'none';
+
+            try {
+                if (currentMode === 'single') {
+                    await visualizeSingle(sql);
+                } else {
+                    await visualizeComparison(sql);
+                }
+            } catch (error) {
+                showError('Failed to visualize plan: ' + error.message);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        async function visualizeSingle(sql) {
+            const response = await fetch('/api/visualize', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sql })
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to fetch plan: ' + response.statusText);
+            }
+
+            const data = await response.json();
+            planData = data;
+            currentPlan = data.plan;
+
+            showStats({
+                'Total Cost': data.total_cost.toFixed(2),
+                'Rules Applied': data.rules_applied.length,
+                'Optimizer': 'Ra'
+            });
+
+            renderPlan(currentPlan);
+            document.getElementById('visualization-container').style.display = 'block';
+        }
+
+        async function visualizeComparison(sql) {
+            const response = await fetch('/api/compare-plans', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sql })
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to compare plans: ' + response.statusText);
+            }
+
+            const data = await response.json();
+            renderComparison(data);
+            document.getElementById('comparison-grid').style.display = 'grid';
+        }
+
+        function renderComparison(data) {
+            const grid = document.getElementById('comparison-grid');
+            grid.innerHTML = '';
+
+            data.plans.forEach(plan => {
+                const isCheapest = plan.optimizer === data.summary.cheapest;
+                const panel = document.createElement('div');
+                panel.className = 'optimizer-panel' + (isCheapest ? ' cheapest' : '');
+                panel.innerHTML = `
+                    <h3>${plan.optimizer}${isCheapest ? ' (Best)' : ''}</h3>
+                    <div class="cost-badge">Cost: ${plan.total_cost.toFixed(2)}</div>
+                    <div id="plan-${plan.optimizer.toLowerCase().replace(/\s+/g, '-')}" style="width: 100%; height: 400px; overflow: auto;"></div>
+                `;
+                grid.appendChild(panel);
+
+                renderMiniPlan(plan.plan, panel.querySelector('div[id^="plan-"]'));
+            });
+        }
+
+        function renderMiniPlan(plan, container) {
+            const width = container.clientWidth || 600;
+            const height = 400;
+
+            const svg = d3.select(container)
+                .append('svg')
+                .attr('width', width)
+                .attr('height', height);
+
+            const g = svg.append('g')
+                .attr('transform', 'translate(40,40)');
+
+            const tree = d3.tree().size([width - 100, height - 100]);
+            const root = d3.hierarchy(plan, d => d.children);
+            const treeData = tree(root);
+
+            const link = g.selectAll('.link')
+                .data(treeData.links())
+                .enter().append('path')
+                .attr('class', 'link')
+                .attr('d', d3.linkVertical()
+                    .x(d => d.x)
+                    .y(d => d.y)
+                );
+
+            const node = g.selectAll('.node')
+                .data(treeData.descendants())
+                .enter().append('g')
+                .attr('transform', d => `translate(${d.x},${d.y})`);
+
+            node.append('rect')
+                .attr('class', 'node-rect')
+                .attr('x', -60)
+                .attr('y', -20)
+                .attr('width', 120)
+                .attr('height', 40);
+
+            node.append('text')
+                .attr('class', 'node-text')
+                .attr('dy', '0.35em')
+                .text(d => d.data.operator_type.substring(0, 12));
+        }
+
+        function renderPlan(plan) {
+            const svg = d3.select('#plan-svg');
+            svg.selectAll('*').remove();
+
+            const width = document.getElementById('visualization').clientWidth;
+            const height = 800;
+
+            svg.attr('width', width)
+               .attr('height', height);
+
+            const g = svg.append('g')
+                .attr('id', 'plan-group')
+                .attr('transform', 'translate(40,40)');
+
+            const tree = d3.tree().size([width - 100, height - 100]);
+            const root = d3.hierarchy(plan, d => d.children);
+            const treeData = tree(root);
+
+            // Add links
+            g.selectAll('.link')
+                .data(treeData.links())
+                .enter().append('path')
+                .attr('class', 'link')
+                .attr('d', d3.linkVertical()
+                    .x(d => d.x)
+                    .y(d => d.y)
+                );
+
+            // Add nodes
+            const node = g.selectAll('.node-box')
+                .data(treeData.descendants())
+                .enter().append('g')
+                .attr('class', 'node-box')
+                .attr('transform', d => `translate(${d.x},${d.y})`)
+                .on('click', (event, d) => {
+                    event.stopPropagation();
+                    toggleNode(d);
+                })
+                .on('mouseover', (event, d) => {
+                    showTooltip(event, d.data);
+                })
+                .on('mouseout', hideTooltip);
+
+            node.append('rect')
+                .attr('class', 'node-rect')
+                .attr('x', -80)
+                .attr('y', -30)
+                .attr('width', 160)
+                .attr('height', 60);
+
+            node.append('text')
+                .attr('class', 'node-text')
+                .attr('dy', '-0.5em')
+                .text(d => d.data.operator_type);
+
+            node.append('text')
+                .attr('class', 'node-cost')
+                .attr('dy', '1em')
+                .text(d => `Cost: ${d.data.cost.toFixed(1)}`);
+
+            node.append('text')
+                .attr('class', 'node-rows')
+                .attr('dy', '2em')
+                .text(d => `Rows: ${d.data.rows.toLocaleString()}`);
+
+            // Add expand/collapse indicator
+            node.filter(d => d.data.children && d.data.children.length > 0)
+                .append('circle')
+                .attr('r', 8)
+                .attr('cy', 35)
+                .attr('fill', '#4a5fc8')
+                .attr('stroke', 'white')
+                .attr('stroke-width', 2);
+
+            node.filter(d => d.data.children && d.data.children.length > 0)
+                .append('text')
+                .attr('dy', '40')
+                .attr('class', 'node-text')
+                .attr('font-size', '10px')
+                .text('-');
+        }
+
+        function toggleNode(d) {
+            if (d.data.children && d.data.children.length > 0) {
+                if (!d.data._collapsed) {
+                    d.data._children = d.data.children;
+                    d.data.children = null;
+                    d.data._collapsed = true;
+                } else {
+                    d.data.children = d.data._children;
+                    d.data._children = null;
+                    d.data._collapsed = false;
+                }
+                renderPlan(currentPlan);
+            }
+        }
+
+        function expandAll() {
+            expandRecursive(currentPlan);
+            renderPlan(currentPlan);
+        }
+
+        function collapseAll() {
+            collapseRecursive(currentPlan);
+            renderPlan(currentPlan);
+        }
+
+        function expandRecursive(node) {
+            if (node._children) {
+                node.children = node._children;
+                node._children = null;
+                node._collapsed = false;
+            }
+            if (node.children) {
+                node.children.forEach(expandRecursive);
+            }
+        }
+
+        function collapseRecursive(node) {
+            if (node.children && node.children.length > 0) {
+                node._children = node.children;
+                node.children = null;
+                node._collapsed = true;
+            }
+            if (node._children) {
+                node._children.forEach(collapseRecursive);
+            }
+        }
+
+        function showTooltip(event, data) {
+            const tooltip = document.getElementById('tooltip');
+            let html = '<div class="detail-row"><span class="detail-key">Operator:</span> ' + data.operator_type + '</div>';
+            html += '<div class="detail-row"><span class="detail-key">Cost:</span> ' + data.cost.toFixed(2) + '</div>';
+            html += '<div class="detail-row"><span class="detail-key">Rows:</span> ' + data.rows.toLocaleString() + '</div>';
+
+            if (data.details && data.details.length > 0) {
+                data.details.forEach(detail => {
+                    html += '<div class="detail-row"><span class="detail-key">' + detail.key + ':</span> ' + detail.value + '</div>';
+                });
+            }
+
+            tooltip.innerHTML = html;
+            tooltip.style.left = (event.pageX + 15) + 'px';
+            tooltip.style.top = (event.pageY + 15) + 'px';
+            tooltip.classList.add('visible');
+        }
+
+        function hideTooltip() {
+            document.getElementById('tooltip').classList.remove('visible');
+        }
+
+        function showStats(stats) {
+            const statsDiv = document.getElementById('stats');
+            statsDiv.innerHTML = '';
+            for (const [label, value] of Object.entries(stats)) {
+                const card = document.createElement('div');
+                card.className = 'stat-card';
+                card.innerHTML = `<div class="label">${label}</div><div class="value">${value}</div>`;
+                statsDiv.appendChild(card);
+            }
+            statsDiv.style.display = 'grid';
+        }
+
+        function showLoading() {
+            document.getElementById('loading').classList.add('visible');
+        }
+
+        function hideLoading() {
+            document.getElementById('loading').classList.remove('visible');
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('error');
+            errorDiv.textContent = message;
+            errorDiv.classList.add('visible');
+        }
+
+        function hideError() {
+            document.getElementById('error').classList.remove('visible');
+        }
+
+        function zoomIn() {
+            currentZoom *= 1.2;
+            applyZoom();
+        }
+
+        function zoomOut() {
+            currentZoom /= 1.2;
+            applyZoom();
+        }
+
+        function resetZoom() {
+            currentZoom = 1;
+            applyZoom();
+        }
+
+        function applyZoom() {
+            const g = d3.select('#plan-group');
+            g.transition().duration(300)
+                .attr('transform', `translate(40,40) scale(${currentZoom})`);
+        }
+
+        function exportSVG() {
+            const svg = document.getElementById('plan-svg');
+            const serializer = new XMLSerializer();
+            const svgStr = serializer.serializeToString(svg);
+            const blob = new Blob([svgStr], { type: 'image/svg+xml' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'query-plan.svg';
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        function exportJSON() {
+            if (!planData) return;
+            const json = JSON.stringify(planData, null, 2);
+            const blob = new Blob([json], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'query-plan.json';
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+    </script>
+</body>
+</html>
