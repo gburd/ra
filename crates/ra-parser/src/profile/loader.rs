@@ -1,9 +1,52 @@
 //! Profile loader for TOML-based profile definitions.
 
 use super::ParserProfile;
+use serde::Deserialize;
+use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
 use std::path::Path;
+
+/// TOML structure for profile files.
+#[derive(Debug, Deserialize)]
+struct ProfileToml {
+    profile: ProfileMetadata,
+    #[serde(default)]
+    features: HashMap<String, bool>,
+    #[serde(default)]
+    syntax: HashMap<String, toml::Value>,
+    #[serde(default)]
+    operators: HashMap<String, Vec<String>>,
+    #[serde(default)]
+    functions: HashMap<String, Vec<String>>,
+    #[serde(default)]
+    validation: ValidationConfig,
+}
+
+/// Profile metadata from [profile] section.
+#[derive(Debug, Deserialize)]
+struct ProfileMetadata {
+    name: String,
+    #[serde(default)]
+    vendor: Option<String>,
+    #[serde(default)]
+    version: Option<String>,
+    #[serde(default)]
+    inherits_from: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+}
+
+/// Validation configuration from [validation] section.
+#[derive(Debug, Default, Deserialize)]
+struct ValidationConfig {
+    #[serde(default)]
+    strict_type_checking: bool,
+    #[serde(default)]
+    strict_function_arity: bool,
+    #[serde(default)]
+    warn_on_ambiguous_syntax: bool,
+}
 
 /// Loads parser profiles from TOML files.
 pub struct ProfileLoader {
@@ -36,26 +79,52 @@ impl ProfileLoader {
         let path = Path::new(&self.profile_dir).join(format!("{}.toml", name));
 
         if !path.exists() {
-            // Return a basic profile for now
-            // TODO: Actually load and parse TOML
-            return Ok(ParserProfile {
-                name: name.to_string(),
-                vendor: None,
-                version: None,
-                inherits_from: None,
-            });
+            // Try vendor subdirectories
+            let vendor_path = Path::new(&self.profile_dir)
+                .join("vendors")
+                .join(format!("{}.toml", name));
+
+            if vendor_path.exists() {
+                return self.load_from_path(&vendor_path);
+            }
+
+            return Err(format!("Profile '{}' not found", name).into());
         }
 
-        let _contents = fs::read_to_string(&path)?;
+        self.load_from_path(&path)
+    }
 
-        // TODO: Parse TOML using serde
-        // For now, return a placeholder
+    /// Load a profile from a specific file path.
+    fn load_from_path(&self, path: &Path) -> Result<ParserProfile, Box<dyn Error>> {
+        let contents = fs::read_to_string(path)?;
+        let toml: ProfileToml = toml::from_str(&contents)?;
+
         Ok(ParserProfile {
-            name: name.to_string(),
-            vendor: None,
-            version: None,
-            inherits_from: None,
+            name: toml.profile.name,
+            vendor: toml.profile.vendor,
+            version: toml.profile.version,
+            inherits_from: toml.profile.inherits_from,
         })
+    }
+
+    /// Load a profile with inheritance resolution.
+    ///
+    /// If the profile specifies `inherits_from`, recursively load and merge
+    /// parent profiles.
+    pub fn load_with_inheritance(&self, name: &str) -> Result<ParserProfile, Box<dyn Error>> {
+        let mut profile = self.load(name)?;
+
+        // If this profile inherits from another, load the parent
+        if let Some(parent_name) = profile.inherits_from.clone() {
+            let parent = self.load_with_inheritance(&parent_name)?;
+
+            // Merge parent into current profile
+            // For now, just use the current profile's values
+            // TODO: Implement actual feature merging
+            profile.inherits_from = Some(parent.name);
+        }
+
+        Ok(profile)
     }
 
     /// List all available profiles in the profile directory.
@@ -67,7 +136,27 @@ impl ProfileLoader {
             return Ok(profiles);
         }
 
-        for entry in fs::read_dir(path)? {
+        // List profiles in root directory
+        self.collect_profiles(path, &mut profiles)?;
+
+        // List profiles in vendors subdirectory
+        let vendors_path = path.join("vendors");
+        if vendors_path.exists() {
+            self.collect_profiles(&vendors_path, &mut profiles)?;
+        }
+
+        profiles.sort();
+        profiles.dedup();
+        Ok(profiles)
+    }
+
+    /// Collect profile names from a directory.
+    fn collect_profiles(
+        &self,
+        dir: &Path,
+        profiles: &mut Vec<String>,
+    ) -> Result<(), Box<dyn Error>> {
+        for entry in fs::read_dir(dir)? {
             let entry = entry?;
             let path = entry.path();
 
@@ -79,9 +168,7 @@ impl ProfileLoader {
                 }
             }
         }
-
-        profiles.sort();
-        Ok(profiles)
+        Ok(())
     }
 }
 
@@ -93,5 +180,29 @@ mod tests {
     fn test_loader_creation() {
         let loader = ProfileLoader::new("profiles");
         assert!(!loader.profile_dir.is_empty());
+    }
+
+    #[test]
+    fn test_parse_universal_profile() {
+        let toml_str = r#"
+[profile]
+name = "universal"
+description = "Universal SQL parser"
+
+[features]
+sql_92 = true
+sql_1999 = true
+
+[syntax]
+double_quotes = true
+backticks = true
+
+[validation]
+strict_type_checking = false
+"#;
+
+        let parsed: ProfileToml = toml::from_str(toml_str).expect("should parse");
+        assert_eq!(parsed.profile.name, "universal");
+        assert!(parsed.features.get("sql_92").copied().unwrap_or(false));
     }
 }

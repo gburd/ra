@@ -1,0 +1,65 @@
+# SQL Server 2022 Profile
+#
+# Supports Microsoft SQL Server 2022 (T-SQL) syntax and features.
+
+[profile]
+name = "sqlserver-2022"
+vendor = "sqlserver"
+version = "16.0"
+inherits_from = "sqlserver-2019"
+description = "SQL Server 2022 with full T-SQL support"
+
+[features]
+# SQL standards support (partial)
+sql_92 = true
+sql_1999 = true  # CTEs, window functions
+sql_2003 = false
+sql_2008 = false
+sql_2011 = false
+sql_2016 = true  # JSON support
+
+# SQL Server-specific features
+temporal_tables = true
+graph_tables = true  # MATCH syntax
+columnstore_indexes = true
+in_memory_oltp = true
+always_encrypted = true
+json_support = true
+xml_support = true
+spatial_types = true
+
+[syntax]
+# SQL Server identifier quoting
+double_quotes = false  # Only with QUOTED_IDENTIFIER ON
+backticks = false
+square_brackets = true  # [Table Name]
+
+# T-SQL-specific syntax
+top_clause = true  # SELECT TOP N
+output_clause = true  # OUTPUT inserted.*, deleted.*
+go_batch_separator = true
+
+[operators]
+# SQL Server-specific operators
+json_operators = []  # No special operators, uses functions
+xml_operators = []
+
+[functions]
+# Common SQL Server functions (subset)
+aggregates = ["STRING_AGG", "CHECKSUM_AGG"]
+string = ["CONCAT_WS", "STRING_SPLIT", "FORMAT", "CHARINDEX", "PATINDEX"]
+date = ["DATEADD", "DATEDIFF", "EOMONTH", "DATEFROMPARTS", "SYSDATETIME", "GETDATE", "GETUTCDATE"]
+conversion = ["CAST", "CONVERT", "TRY_CAST", "TRY_CONVERT", "PARSE", "TRY_PARSE"]
+json = ["OPENJSON", "JSON_VALUE", "JSON_QUERY", "JSON_MODIFY", "ISJSON", "FOR JSON"]
+xml = ["FOR XML", "OPENXML", "NODES"]
+window = ["ROW_NUMBER", "RANK", "DENSE_RANK", "LAG", "LEAD"]
+
+[validation]
+strict_type_checking = false  # SQL Server has implicit conversions
+strict_function_arity = true
+warn_on_ambiguous_syntax = true
+
+[compatibility]
+# SQL Server compatibility notes
+requires_from_clause = false  # SELECT 1 is valid
+case_insensitive = true  # Default collation

@@ -1,0 +1,68 @@
+# Oracle 21c Profile
+#
+# Supports Oracle Database 21c syntax and features.
+
+[profile]
+name = "oracle-21c"
+vendor = "oracle"
+version = "21.0"
+inherits_from = "oracle-19c"
+description = "Oracle 21c with full feature support"
+
+[features]
+# SQL standards support (partial)
+sql_92 = true
+sql_1999 = true  # Partial: CTEs, window functions
+sql_2003 = true  # XML support
+sql_2008 = false
+sql_2011 = false
+sql_2016 = false
+
+# Oracle-specific features
+connect_by = true
+hierarchical_queries = true
+model_clause = true
+pivot_unpivot = true
+materialized_views = true
+autonomous_transactions = true
+partitioning = true
+flashback_queries = true
+xmltype = true
+json_support = true  # JSON_TABLE, JSON_QUERY since 12c
+
+[syntax]
+# Oracle identifier quoting
+double_quotes = true  # For identifiers
+backticks = false
+square_brackets = false
+
+# Oracle-specific syntax
+dual_table = true
+plus_hint = true  # (+) for outer joins
+rownum = true
+rowid = true
+sequence_nextval = true  # sequence.nextval
+
+[operators]
+# Oracle-specific operators
+string_operators = ["||"]  # Concatenation
+outer_join_operator = ["(+)"]  # Old-style outer join
+
+[functions]
+# Common Oracle functions (subset)
+aggregates = ["LISTAGG", "COLLECT", "XMLAGG"]
+string = ["INSTR", "SUBSTR", "REPLACE", "TRANSLATE", "NVL", "NVL2", "DECODE"]
+date = ["TO_DATE", "TO_CHAR", "TRUNC", "ADD_MONTHS", "MONTHS_BETWEEN", "SYSDATE"]
+conversion = ["CAST", "TO_NUMBER", "TO_CHAR", "TO_DATE", "TO_TIMESTAMP"]
+analytic = ["ROW_NUMBER", "RANK", "DENSE_RANK", "LAG", "LEAD", "FIRST_VALUE", "LAST_VALUE"]
+json = ["JSON_TABLE", "JSON_QUERY", "JSON_VALUE", "JSON_OBJECT", "JSON_ARRAY"]
+
+[validation]
+strict_type_checking = true
+strict_function_arity = true
+warn_on_ambiguous_syntax = true
+
+[compatibility]
+# Oracle compatibility notes
+requires_from_clause = true  # SELECT 1 requires FROM DUAL
+implicit_conversion = true   # Aggressive type coercion
