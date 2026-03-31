@@ -111,11 +111,11 @@ fn bench_full_vs_incremental(c: &mut Criterion) {
         cost_pruning_threshold: 1.5,
         use_join_graph_filtering: true,
         beam_search_config: None,
-        max_staleness_penalty: 10.0,
-        use_lazy_rules: false,
         transaction_context: None,
         enable_plan_cache: false,
         plan_cache_config: PlanCacheConfig::default(),
+        max_staleness_penalty: 10.0,
+        use_lazy_rules: false,
     };
 
     // Small change: 1% row count increase

@@ -1,0 +1,1000 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Query Plan Visualization - RA Optimizer</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        header h1 {
+            font-size: 2em;
+            margin-bottom: 10px;
+        }
+
+        header p {
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .control-panel {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+        }
+
+        .control-row {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .control-group {
+            flex: 1;
+            min-width: 200px;
+        }
+
+        .control-group label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #333;
+        }
+
+        .control-group textarea {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.95em;
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        .control-group select {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 1em;
+            background: white;
+        }
+
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 1.1em;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: transform 0.2s;
+            margin-right: 10px;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button.secondary {
+            background: linear-gradient(135deg, #6c757d 0%, #495057 100%);
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .loading.visible {
+            display: block;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .visualization-container {
+            display: none;
+            margin-top: 30px;
+        }
+
+        .visualization-container.visible {
+            display: block;
+        }
+
+        .comparison-mode {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .plan-viewer {
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 20px;
+            background: #fafafa;
+        }
+
+        .plan-viewer h3 {
+            margin-bottom: 15px;
+            color: #333;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .cost-badge {
+            background: #667eea;
+            color: white;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: 600;
+        }
+
+        .cost-badge.optimized {
+            background: #27ae60;
+        }
+
+        #planSvg, #originalPlanSvg, #optimizedPlanSvg {
+            width: 100%;
+            height: 600px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            background: white;
+            overflow: visible;
+        }
+
+        .node {
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .node rect {
+            stroke: #333;
+            stroke-width: 2px;
+            fill: white;
+            rx: 6;
+        }
+
+        .node.scan rect {
+            fill: #e3f2fd;
+        }
+
+        .node.filter rect {
+            fill: #fff3cd;
+        }
+
+        .node.join rect {
+            fill: #f8d7da;
+        }
+
+        .node.aggregate rect {
+            fill: #d4edda;
+        }
+
+        .node.sort rect {
+            fill: #e7e3ff;
+        }
+
+        .node.collapsed rect {
+            stroke-dasharray: 5,5;
+        }
+
+        .node text {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-size: 14px;
+            pointer-events: none;
+        }
+
+        .node .operator-type {
+            font-weight: 600;
+            font-size: 15px;
+        }
+
+        .node .cost-text {
+            font-size: 11px;
+            fill: #666;
+        }
+
+        .node .rows-text {
+            font-size: 11px;
+            fill: #666;
+        }
+
+        .node:hover rect {
+            filter: brightness(0.95);
+            stroke-width: 3px;
+        }
+
+        .link {
+            fill: none;
+            stroke: #999;
+            stroke-width: 2px;
+        }
+
+        .tooltip {
+            position: absolute;
+            padding: 12px;
+            background: rgba(0, 0, 0, 0.85);
+            color: white;
+            border-radius: 6px;
+            pointer-events: none;
+            font-size: 13px;
+            line-height: 1.5;
+            max-width: 350px;
+            z-index: 1000;
+            display: none;
+        }
+
+        .tooltip.visible {
+            display: block;
+        }
+
+        .tooltip .tooltip-title {
+            font-weight: 600;
+            font-size: 15px;
+            margin-bottom: 8px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.3);
+            padding-bottom: 6px;
+        }
+
+        .tooltip .tooltip-detail {
+            margin: 4px 0;
+        }
+
+        .tooltip .tooltip-label {
+            font-weight: 600;
+            color: #a0d0ff;
+        }
+
+        .cost-breakdown {
+            margin-top: 20px;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+        }
+
+        .cost-breakdown h4 {
+            margin-bottom: 10px;
+            color: #333;
+        }
+
+        .cost-bar-container {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .cost-bar {
+            flex: 1;
+            text-align: center;
+        }
+
+        .cost-bar-label {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+
+        .cost-bar-visual {
+            height: 80px;
+            background: #f0f0f0;
+            border-radius: 4px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .cost-bar-fill {
+            position: absolute;
+            bottom: 0;
+            width: 100%;
+            transition: height 0.5s ease;
+        }
+
+        .cost-bar-fill.cpu {
+            background: linear-gradient(to top, #667eea, #8a9bff);
+        }
+
+        .cost-bar-fill.io {
+            background: linear-gradient(to top, #f39c12, #ffc048);
+        }
+
+        .cost-bar-fill.memory {
+            background: linear-gradient(to top, #27ae60, #2ecc71);
+        }
+
+        .cost-bar-fill.network {
+            background: linear-gradient(to top, #e74c3c, #ff6b6b);
+        }
+
+        .cost-bar-value {
+            font-weight: 600;
+            font-size: 14px;
+            color: #333;
+            margin-top: 5px;
+        }
+
+        .legend {
+            display: flex;
+            gap: 20px;
+            margin-top: 20px;
+            flex-wrap: wrap;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .legend-color {
+            width: 30px;
+            height: 20px;
+            border-radius: 4px;
+            border: 1px solid #333;
+        }
+
+        .legend-color.scan {
+            background: #e3f2fd;
+        }
+
+        .legend-color.filter {
+            background: #fff3cd;
+        }
+
+        .legend-color.join {
+            background: #f8d7da;
+        }
+
+        .legend-color.aggregate {
+            background: #d4edda;
+        }
+
+        .legend-color.sort {
+            background: #e7e3ff;
+        }
+
+        .legend-label {
+            font-size: 13px;
+            color: #333;
+        }
+
+        .stats-summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+            text-align: center;
+        }
+
+        .stat-card .label {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+
+        .stat-card .value {
+            font-size: 20px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .stat-card .value.success {
+            color: #27ae60;
+        }
+
+        .controls-bottom {
+            margin-top: 20px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .error-message {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            display: none;
+        }
+
+        .error-message.visible {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Interactive Query Plan Visualization</h1>
+            <p>Visualize and compare query plans with interactive cost analysis</p>
+        </header>
+
+        <div class="content">
+            <div class="control-panel">
+                <div class="control-row">
+                    <div class="control-group" style="flex: 2;">
+                        <label for="sqlInput">SQL Query:</label>
+                        <textarea id="sqlInput" placeholder="Enter SQL query...">SELECT u.name, COUNT(o.id) as order_count
+FROM users u
+JOIN orders o ON u.id = o.user_id
+WHERE u.age > 25 AND o.total > 100
+GROUP BY u.id, u.name
+ORDER BY order_count DESC
+LIMIT 10</textarea>
+                    </div>
+                    <div class="control-group">
+                        <label for="hardwareProfile">Hardware Profile:</label>
+                        <select id="hardwareProfile">
+                            <option value="">Auto Detect</option>
+                            <option value="gpu_server">GPU Server</option>
+                            <option value="fpga_appliance">FPGA Appliance</option>
+                            <option value="laptop">Standard Laptop</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="control-row">
+                    <button id="visualizeBtn">Visualize Plan</button>
+                    <button id="compareBtn" class="secondary">Compare Plans</button>
+                </div>
+            </div>
+
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <p>Generating visualization...</p>
+            </div>
+
+            <div class="error-message" id="errorMessage"></div>
+
+            <div class="visualization-container" id="visualizationContainer">
+                <div id="singleView" style="display: none;">
+                    <div class="stats-summary" id="statsSummary"></div>
+
+                    <div class="plan-viewer">
+                        <h3>
+                            Query Plan
+                            <span class="cost-badge" id="totalCostBadge">Total Cost: 0</span>
+                        </h3>
+                        <svg id="planSvg"></svg>
+                    </div>
+
+                    <div class="cost-breakdown" id="costBreakdown">
+                        <h4>Cost Breakdown by Component</h4>
+                        <div class="cost-bar-container" id="costBars"></div>
+                    </div>
+
+                    <div class="legend">
+                        <div class="legend-item">
+                            <div class="legend-color scan"></div>
+                            <span class="legend-label">Scan</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color filter"></div>
+                            <span class="legend-label">Filter</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color join"></div>
+                            <span class="legend-label">Join</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color aggregate"></div>
+                            <span class="legend-label">Aggregate</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color sort"></div>
+                            <span class="legend-label">Sort</span>
+                        </div>
+                    </div>
+
+                    <div class="controls-bottom">
+                        <button id="expandAllBtn">Expand All</button>
+                        <button id="collapseAllBtn">Collapse All</button>
+                        <button id="resetZoomBtn">Reset Zoom</button>
+                    </div>
+                </div>
+
+                <div id="comparisonView" style="display: none;">
+                    <div class="stats-summary" id="comparisonStats"></div>
+
+                    <div class="comparison-mode">
+                        <div class="plan-viewer">
+                            <h3>
+                                Original Plan
+                                <span class="cost-badge" id="originalCostBadge">Cost: 0</span>
+                            </h3>
+                            <svg id="originalPlanSvg"></svg>
+                        </div>
+                        <div class="plan-viewer">
+                            <h3>
+                                Optimized Plan
+                                <span class="cost-badge optimized" id="optimizedCostBadge">Cost: 0</span>
+                            </h3>
+                            <svg id="optimizedPlanSvg"></svg>
+                        </div>
+                    </div>
+
+                    <div class="controls-bottom">
+                        <button id="expandAllCompareBtn">Expand All</button>
+                        <button id="collapseAllCompareBtn">Collapse All</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="tooltip" id="tooltip"></div>
+
+    <script>
+        const state = {
+            currentPlan: null,
+            originalPlan: null,
+            optimizedPlan: null,
+            comparisonMode: false,
+            collapsedNodes: new Set()
+        };
+
+        const visualizeBtn = document.getElementById('visualizeBtn');
+        const compareBtn = document.getElementById('compareBtn');
+        const sqlInput = document.getElementById('sqlInput');
+        const hardwareProfile = document.getElementById('hardwareProfile');
+        const loading = document.getElementById('loading');
+        const errorMessage = document.getElementById('errorMessage');
+        const visualizationContainer = document.getElementById('visualizationContainer');
+        const tooltip = document.getElementById('tooltip');
+
+        visualizeBtn.addEventListener('click', () => visualizePlan(false));
+        compareBtn.addEventListener('click', () => visualizePlan(true));
+
+        document.getElementById('expandAllBtn')?.addEventListener('click', () => expandCollapseAll(false));
+        document.getElementById('collapseAllBtn')?.addEventListener('click', () => expandCollapseAll(true));
+        document.getElementById('resetZoomBtn')?.addEventListener('click', resetZoom);
+        document.getElementById('expandAllCompareBtn')?.addEventListener('click', () => expandCollapseAll(false));
+        document.getElementById('collapseAllCompareBtn')?.addEventListener('click', () => expandCollapseAll(true));
+
+        async function visualizePlan(compare) {
+            const sql = sqlInput.value.trim();
+            if (!sql) {
+                showError('Please enter a SQL query');
+                return;
+            }
+
+            state.comparisonMode = compare;
+            state.collapsedNodes.clear();
+            hideError();
+            loading.classList.add('visible');
+            visualizationContainer.classList.remove('visible');
+
+            try {
+                if (compare) {
+                    const response = await fetch('/api/compare-plans', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            sql,
+                            hardware_profile: hardwareProfile.value || null
+                        })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+                    }
+
+                    const data = await response.json();
+                    state.originalPlan = data.plans[0].plan;
+                    state.optimizedPlan = data.plans[0].plan;
+
+                    renderComparison(data);
+                } else {
+                    const response = await fetch('/api/visualize', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            sql,
+                            hardware_profile: hardwareProfile.value || null
+                        })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+                    }
+
+                    const data = await response.json();
+                    state.currentPlan = data.plan;
+
+                    renderSinglePlan(data);
+                }
+
+                loading.classList.remove('visible');
+                visualizationContainer.classList.add('visible');
+            } catch (error) {
+                loading.classList.remove('visible');
+                showError(`Error: ${error.message}`);
+            }
+        }
+
+        function renderSinglePlan(data) {
+            document.getElementById('singleView').style.display = 'block';
+            document.getElementById('comparisonView').style.display = 'none';
+
+            document.getElementById('totalCostBadge').textContent = `Total Cost: ${data.total_cost.toFixed(2)}`;
+
+            const stats = [
+                { label: 'Total Cost', value: data.total_cost.toFixed(2) },
+                { label: 'Rules Applied', value: data.rules_applied.length },
+                { label: 'Plan Nodes', value: countNodes(data.plan) }
+            ];
+
+            renderStats('statsSummary', stats);
+            renderPlanTree('planSvg', data.plan);
+            renderCostBreakdown(data.plan);
+        }
+
+        function renderComparison(data) {
+            document.getElementById('singleView').style.display = 'none';
+            document.getElementById('comparisonView').style.display = 'block';
+
+            const raOptimizer = data.plans.find(p => p.optimizer === 'Ra');
+            const cheapest = data.summary.cheapest;
+
+            const originalCost = raOptimizer ? raOptimizer.total_cost : 0;
+            const improvement = data.plans.length > 1 ?
+                ((originalCost - data.summary.costs[0].total_cost) / originalCost * 100).toFixed(1) : 0;
+
+            document.getElementById('originalCostBadge').textContent = `Cost: ${originalCost.toFixed(2)}`;
+            document.getElementById('optimizedCostBadge').textContent = `Cost: ${originalCost.toFixed(2)}`;
+
+            const stats = [
+                { label: 'Original Cost', value: originalCost.toFixed(2) },
+                { label: 'Optimized Cost', value: originalCost.toFixed(2) },
+                { label: 'Improvement', value: `${improvement}%`, success: true },
+                { label: 'Best Optimizer', value: cheapest }
+            ];
+
+            renderStats('comparisonStats', stats);
+
+            renderPlanTree('originalPlanSvg', state.originalPlan);
+            renderPlanTree('optimizedPlanSvg', state.optimizedPlan);
+        }
+
+        function renderStats(containerId, stats) {
+            const container = document.getElementById(containerId);
+            container.innerHTML = stats.map(stat => `
+                <div class="stat-card">
+                    <div class="label">${stat.label}</div>
+                    <div class="value ${stat.success ? 'success' : ''}">${stat.value}</div>
+                </div>
+            `).join('');
+        }
+
+        function renderPlanTree(svgId, rootNode) {
+            const svg = d3.select(`#${svgId}`);
+            svg.selectAll('*').remove();
+
+            const width = svg.node().getBoundingClientRect().width;
+            const height = 600;
+
+            const g = svg.append('g');
+
+            const zoom = d3.zoom()
+                .scaleExtent([0.1, 3])
+                .on('zoom', (event) => {
+                    g.attr('transform', event.transform);
+                });
+
+            svg.call(zoom);
+            svg.property('__zoom', zoom);
+
+            const treeLayout = d3.tree()
+                .size([width - 100, height - 100])
+                .separation((a, b) => (a.parent === b.parent ? 1 : 1.5));
+
+            const root = d3.hierarchy(rootNode, d => {
+                return state.collapsedNodes.has(d.id) ? [] : d.children;
+            });
+
+            treeLayout(root);
+
+            root.each(d => {
+                d.y = d.depth * 120 + 50;
+            });
+
+            const link = g.selectAll('.link')
+                .data(root.links())
+                .join('path')
+                .attr('class', 'link')
+                .attr('d', d3.linkVertical()
+                    .x(d => d.x)
+                    .y(d => d.y)
+                );
+
+            const node = g.selectAll('.node')
+                .data(root.descendants())
+                .join('g')
+                .attr('class', d => {
+                    const nodeClass = getNodeClass(d.data.operator_type);
+                    const collapsed = state.collapsedNodes.has(d.data.id) ? ' collapsed' : '';
+                    return `node ${nodeClass}${collapsed}`;
+                })
+                .attr('transform', d => `translate(${d.x},${d.y})`)
+                .on('click', (event, d) => {
+                    event.stopPropagation();
+                    toggleNode(d.data.id, svgId);
+                })
+                .on('mouseover', (event, d) => showTooltip(event, d.data))
+                .on('mouseout', hideTooltip);
+
+            node.append('rect')
+                .attr('x', -75)
+                .attr('y', -25)
+                .attr('width', 150)
+                .attr('height', 50);
+
+            node.append('text')
+                .attr('class', 'operator-type')
+                .attr('text-anchor', 'middle')
+                .attr('dy', '-5')
+                .text(d => d.data.operator_type);
+
+            node.append('text')
+                .attr('class', 'cost-text')
+                .attr('text-anchor', 'middle')
+                .attr('dy', '10')
+                .text(d => `Cost: ${d.data.cost.toFixed(1)}`);
+
+            node.append('text')
+                .attr('class', 'rows-text')
+                .attr('text-anchor', 'middle')
+                .attr('dy', '22')
+                .text(d => `Rows: ${formatNumber(d.data.rows)}`);
+
+            node.filter(d => d.data.children && d.data.children.length > 0)
+                .append('text')
+                .attr('text-anchor', 'middle')
+                .attr('dy', '-35')
+                .style('font-size', '18px')
+                .text(d => state.collapsedNodes.has(d.data.id) ? '+' : '−');
+        }
+
+        function renderCostBreakdown(plan) {
+            const breakdown = calculateCostBreakdown(plan);
+            const maxCost = Math.max(breakdown.cpu, breakdown.io, breakdown.memory, breakdown.network);
+
+            const container = document.getElementById('costBars');
+            container.innerHTML = ['cpu', 'io', 'memory', 'network'].map(type => {
+                const cost = breakdown[type];
+                const percentage = maxCost > 0 ? (cost / maxCost * 100) : 0;
+                return `
+                    <div class="cost-bar">
+                        <div class="cost-bar-label">${type.toUpperCase()}</div>
+                        <div class="cost-bar-visual">
+                            <div class="cost-bar-fill ${type}" style="height: ${percentage}%"></div>
+                        </div>
+                        <div class="cost-bar-value">${cost.toFixed(1)}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function calculateCostBreakdown(node) {
+            const breakdown = { cpu: 0, io: 0, memory: 0, network: 0 };
+
+            function traverse(n) {
+                const opType = n.operator_type.toLowerCase();
+                const cost = n.cost;
+
+                if (opType.includes('scan') || opType.includes('index')) {
+                    breakdown.io += cost * 0.7;
+                    breakdown.cpu += cost * 0.2;
+                    breakdown.memory += cost * 0.1;
+                } else if (opType.includes('filter')) {
+                    breakdown.cpu += cost * 0.7;
+                    breakdown.memory += cost * 0.2;
+                    breakdown.io += cost * 0.1;
+                } else if (opType.includes('join')) {
+                    breakdown.cpu += cost * 0.4;
+                    breakdown.memory += cost * 0.4;
+                    breakdown.io += cost * 0.2;
+                } else if (opType.includes('aggregate') || opType.includes('group')) {
+                    breakdown.cpu += cost * 0.5;
+                    breakdown.memory += cost * 0.4;
+                    breakdown.io += cost * 0.1;
+                } else if (opType.includes('sort')) {
+                    breakdown.cpu += cost * 0.5;
+                    breakdown.memory += cost * 0.4;
+                    breakdown.io += cost * 0.1;
+                } else {
+                    breakdown.cpu += cost * 0.5;
+                    breakdown.memory += cost * 0.3;
+                    breakdown.io += cost * 0.2;
+                }
+
+                if (n.children) {
+                    n.children.forEach(traverse);
+                }
+            }
+
+            traverse(node);
+            return breakdown;
+        }
+
+        function toggleNode(nodeId, svgId) {
+            if (state.collapsedNodes.has(nodeId)) {
+                state.collapsedNodes.delete(nodeId);
+            } else {
+                state.collapsedNodes.add(nodeId);
+            }
+
+            if (state.comparisonMode) {
+                renderPlanTree('originalPlanSvg', state.originalPlan);
+                renderPlanTree('optimizedPlanSvg', state.optimizedPlan);
+            } else {
+                renderPlanTree('planSvg', state.currentPlan);
+            }
+        }
+
+        function expandCollapseAll(collapse) {
+            state.collapsedNodes.clear();
+
+            if (collapse) {
+                function collectNodes(node, depth = 0) {
+                    if (depth > 0 && node.children && node.children.length > 0) {
+                        state.collapsedNodes.add(node.id);
+                    }
+                    if (node.children) {
+                        node.children.forEach(child => collectNodes(child, depth + 1));
+                    }
+                }
+
+                if (state.comparisonMode) {
+                    collectNodes(state.originalPlan);
+                    collectNodes(state.optimizedPlan);
+                } else {
+                    collectNodes(state.currentPlan);
+                }
+            }
+
+            if (state.comparisonMode) {
+                renderPlanTree('originalPlanSvg', state.originalPlan);
+                renderPlanTree('optimizedPlanSvg', state.optimizedPlan);
+            } else {
+                renderPlanTree('planSvg', state.currentPlan);
+            }
+        }
+
+        function resetZoom() {
+            const svg = d3.select('#planSvg');
+            const zoom = svg.property('__zoom');
+            if (zoom) {
+                svg.transition()
+                    .duration(750)
+                    .call(zoom.transform, d3.zoomIdentity);
+            }
+        }
+
+        function showTooltip(event, data) {
+            const tooltip = document.getElementById('tooltip');
+            tooltip.classList.add('visible');
+
+            let detailsHtml = data.details.map(d =>
+                `<div class="tooltip-detail"><span class="tooltip-label">${d.key}:</span> ${d.value}</div>`
+            ).join('');
+
+            tooltip.innerHTML = `
+                <div class="tooltip-title">${data.operator_type}</div>
+                <div class="tooltip-detail"><span class="tooltip-label">Cost:</span> ${data.cost.toFixed(2)}</div>
+                <div class="tooltip-detail"><span class="tooltip-label">Rows:</span> ${formatNumber(data.rows)}</div>
+                ${detailsHtml}
+            `;
+
+            tooltip.style.left = `${event.pageX + 10}px`;
+            tooltip.style.top = `${event.pageY + 10}px`;
+        }
+
+        function hideTooltip() {
+            document.getElementById('tooltip').classList.remove('visible');
+        }
+
+        function getNodeClass(operatorType) {
+            const type = operatorType.toLowerCase();
+            if (type.includes('scan')) return 'scan';
+            if (type.includes('filter')) return 'filter';
+            if (type.includes('join')) return 'join';
+            if (type.includes('aggregate') || type.includes('group')) return 'aggregate';
+            if (type.includes('sort')) return 'sort';
+            return '';
+        }
+
+        function countNodes(node) {
+            let count = 1;
+            if (node.children) {
+                count += node.children.reduce((sum, child) => sum + countNodes(child), 0);
+            }
+            return count;
+        }
+
+        function formatNumber(num) {
+            if (num >= 1000000) {
+                return (num / 1000000).toFixed(1) + 'M';
+            }
+            if (num >= 1000) {
+                return (num / 1000).toFixed(1) + 'K';
+            }
+            return num.toString();
+        }
+
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorMessage.classList.add('visible');
+        }
+
+        function hideError() {
+            errorMessage.classList.remove('visible');
+        }
+    </script>
+</body>
+</html>

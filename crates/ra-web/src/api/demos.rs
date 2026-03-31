@@ -525,6 +525,13 @@ pub fn list_demos() -> Json<DemoListResponse> {
             endpoint: "/api/demos/cost-calibration".to_string(),
             category: "Statistics".to_string(),
         },
+        DemoMetadata {
+            id: "plan-visualization".to_string(),
+            title: "Interactive Plan Visualization".to_string(),
+            description: "Visualize and compare query plans with interactive cost analysis and node expansion".to_string(),
+            endpoint: "/api/visualize".to_string(),
+            category: "Visualization".to_string(),
+        },
     ];
 
     Json(DemoListResponse {

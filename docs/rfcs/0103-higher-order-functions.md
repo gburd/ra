@@ -22,7 +22,7 @@ LATERAL VIEW explode(prices) AS price
 GROUP BY user_id;
 
 -- With higher-order functions: single-pass transformation
-SELECT user_id, transform(prices, p -> p * 1.1) AS adjusted_prices
+SELECT user_id, transform(prices, p -&gt; p * 1.1) AS adjusted_prices
 FROM orders;
 ```
 
@@ -51,10 +51,10 @@ Apply function to each element, returning new array.
 
 **Syntax:**
 ```sql
-SELECT transform(array(1, 2, 3), x -> x * 2)
+SELECT transform(array(1, 2, 3), x -&gt; x * 2)
 -- Result: [2, 4, 6]
 
-SELECT user_id, transform(purchase_amounts, amt -> amt * 1.1) AS inflated
+SELECT user_id, transform(purchase_amounts, amt -&gt; amt * 1.1) AS inflated
 FROM orders;
 ```
 
@@ -69,18 +69,18 @@ Select elements where lambda returns true.
 **Syntax:**
 ```sql
 -- Single parameter
-SELECT filter(array(1, 2, 3, 4), x -> x % 2 == 1)
+SELECT filter(array(1, 2, 3, 4), x -&gt; x % 2 == 1)
 -- Result: [1, 3]
 
 -- With index parameter
-SELECT filter(array(0, 2, 3), (x, i) -> x > i)
+SELECT filter(array(0, 2, 3), (x, i) -&gt; x &gt; i)
 -- Result: [2, 3]
 ```
 
 **Semantics:**
 - Lambda must return boolean
 - NULL lambda result treated as false
-- Result array length <= input length
+- Result array length &lt;= input length
 
 #### aggregate(array, init, merge_lambda, [finish_lambda])
 Fold/reduce array to single value.
@@ -88,15 +88,15 @@ Fold/reduce array to single value.
 **Syntax:**
 ```sql
 -- Sum with explicit accumulator
-SELECT aggregate(array(1, 2, 3), 0, (acc, x) -> acc + x)
+SELECT aggregate(array(1, 2, 3), 0, (acc, x) -&gt; acc + x)
 -- Result: 6
 
 -- With finish step (multiply result by 10)
-SELECT aggregate(array(1, 2, 3), 0, (acc, x) -> acc + x, acc -> acc * 10)
+SELECT aggregate(array(1, 2, 3), 0, (acc, x) -&gt; acc + x, acc -&gt; acc * 10)
 -- Result: 60
 
 -- String concatenation
-SELECT aggregate(array('a', 'b', 'c'), '', (acc, x) -> acc || x)
+SELECT aggregate(array('a', 'b', 'c'), '', (acc, x) -&gt; acc || x)
 -- Result: 'abc'
 ```
 
@@ -111,11 +111,11 @@ Check if any element matches predicate.
 
 **Syntax:**
 ```sql
-SELECT exists(array(1, 2, 3), x -> x % 2 == 0)
+SELECT exists(array(1, 2, 3), x -&gt; x % 2 == 0)
 -- Result: true
 
 SELECT user_id FROM orders
-WHERE exists(tags, tag -> tag = 'premium');
+WHERE exists(tags, tag -&gt; tag = 'premium');
 ```
 
 **Semantics:**
@@ -128,11 +128,11 @@ Check if all elements match predicate.
 
 **Syntax:**
 ```sql
-SELECT forall(array(2, 4, 8), x -> x % 2 == 0)
+SELECT forall(array(2, 4, 8), x -&gt; x % 2 == 0)
 -- Result: true
 
 SELECT product_id FROM inventory
-WHERE forall(stock_levels, qty -> qty > 0);
+WHERE forall(stock_levels, qty -&gt; qty &gt; 0);
 ```
 
 **Semantics:**
@@ -145,7 +145,7 @@ Alias for `aggregate` without finish step (Spark compatibility).
 
 **Syntax:**
 ```sql
-SELECT reduce(array(1, 2, 3), 0, (acc, x) -> acc + x)
+SELECT reduce(array(1, 2, 3), 0, (acc, x) -&gt; acc + x)
 -- Result: 6
 ```
 
@@ -154,11 +154,11 @@ Combine two arrays element-wise.
 
 **Syntax:**
 ```sql
-SELECT zip_with(array(1, 2, 3), array(4, 5, 6), (x, y) -> x + y)
+SELECT zip_with(array(1, 2, 3), array(4, 5, 6), (x, y) -&gt; x + y)
 -- Result: [5, 7, 9]
 
 -- Mismatched lengths: pad shorter with NULL
-SELECT zip_with(array(1, 2), array(3, 4, 5), (x, y) -> coalesce(x, 0) + coalesce(y, 0))
+SELECT zip_with(array(1, 2), array(3, 4, 5), (x, y) -&gt; coalesce(x, 0) + coalesce(y, 0))
 -- Result: [4, 6, 5]
 ```
 
@@ -173,7 +173,7 @@ Filter map entries by predicate on key-value pairs.
 
 **Syntax:**
 ```sql
-SELECT map_filter(map('a', 1, 'b', 2, 'c', 3), (k, v) -> v > 1)
+SELECT map_filter(map('a', 1, 'b', 2, 'c', 3), (k, v) -&gt; v &gt; 1)
 -- Result: {'b': 2, 'c': 3}
 ```
 
@@ -182,7 +182,7 @@ Transform map keys while preserving values.
 
 **Syntax:**
 ```sql
-SELECT transform_keys(map('a', 1, 'b', 2), (k, v) -> upper(k))
+SELECT transform_keys(map('a', 1, 'b', 2), (k, v) -&gt; upper(k))
 -- Result: {'A': 1, 'B': 2}
 ```
 
@@ -195,7 +195,7 @@ Transform map values while preserving keys.
 
 **Syntax:**
 ```sql
-SELECT transform_values(map('a', 1, 'b', 2), (k, v) -> v * 2)
+SELECT transform_values(map('a', 1, 'b', 2), (k, v) -&gt; v * 2)
 -- Result: {'a': 2, 'b': 4}
 ```
 
@@ -207,7 +207,7 @@ Merge two maps using lambda for matching keys.
 SELECT map_zip_with(
     map('a', 1, 'b', 2),
     map('a', 10, 'c', 30),
-    (k, v1, v2) -> coalesce(v1, 0) + coalesce(v2, 0)
+    (k, v1, v2) -&gt; coalesce(v1, 0) + coalesce(v2, 0)
 )
 -- Result: {'a': 11, 'b': 2, 'c': 30}
 ```
@@ -220,43 +220,43 @@ SELECT map_zip_with(
 
 #### 4.1 Single Parameter
 ```sql
-x -> expression
+x -&gt; expression
 ```
 
 Examples:
 ```sql
-x -> x * 2
-price -> price * 1.1
-name -> upper(name)
+x -&gt; x * 2
+price -&gt; price * 1.1
+name -&gt; upper(name)
 ```
 
 #### 4.2 Multiple Parameters
 ```sql
-(x, y) -> expression
-(acc, x) -> expression
-(k, v) -> expression
+(x, y) -&gt; expression
+(acc, x) -&gt; expression
+(k, v) -&gt; expression
 ```
 
 Examples:
 ```sql
-(x, y) -> x + y
-(acc, x) -> acc + x * x
-(k, v) -> k || ':' || cast(v as varchar)
+(x, y) -&gt; x + y
+(acc, x) -&gt; acc + x * x
+(k, v) -&gt; k || ':' || cast(v as varchar)
 ```
 
 #### 4.3 Lambda Body
 Lambdas contain SQL expressions (no statements, no control flow).
 
 **Allowed:**
-- Arithmetic: `x -> x + 1`
-- Function calls: `s -> upper(s)`
-- Conditionals: `x -> case when x > 0 then x else 0 end`
-- Nested expressions: `x -> sqrt(x * x + 1)`
+- Arithmetic: `x -&gt; x + 1`
+- Function calls: `s -&gt; upper(s)`
+- Conditionals: `x -&gt; case when x &gt; 0 then x else 0 end`
+- Nested expressions: `x -&gt; sqrt(x * x + 1)`
 
 **Not allowed:**
-- Statements: `x -> BEGIN ... END`
-- Variable assignment: `x -> SET y = x`
-- Control flow: `x -> IF x > 0 THEN ... ELSE ... END`
+- Statements: `x -&gt; BEGIN ... END`
+- Variable assignment: `x -&gt; SET y = x`
+- Control flow: `x -&gt; IF x &gt; 0 THEN ... ELSE ... END`
 
 ### 5. Type System Extensions
 
@@ -267,8 +267,8 @@ Internal representation for lambda type checking:
 pub enum DataType {
     // ... existing types ...
     Lambda {
-        params: Vec<DataType>,
-        return_type: Box<DataType>,
+        params: Vec&lt;DataType&gt;,
+        return_type: Box&lt;DataType&gt;,
     },
 }
 ```
@@ -278,12 +278,12 @@ Lambda parameter types inferred from context:
 
 ```sql
 -- Parameter type inferred from array element type
-SELECT transform(prices, p -> p * 1.1)
+SELECT transform(prices, p -&gt; p * 1.1)
 --                       ↑
 --                    p: DECIMAL (inferred from prices type)
 
 -- Multiple parameters inferred from function signature
-SELECT zip_with(int_array, str_array, (i, s) -> ...)
+SELECT zip_with(int_array, str_array, (i, s) -&gt; ...)
 --                                      ↑  ↑
 --                                     INT, VARCHAR
 ```
@@ -294,13 +294,13 @@ Lambdas can reference outer scope variables (read-only):
 ```sql
 -- Capture column reference
 SELECT user_id,
-       transform(prices, p -> p * discount_rate) AS adjusted
+       transform(prices, p -&gt; p * discount_rate) AS adjusted
 FROM orders;
 --                            ↑
 --                         Captured: orders.discount_rate
 
 -- Capture literal
-SELECT transform(values, x -> x + 10)
+SELECT transform(values, x -&gt; x + 10)
 --                             ↑
 --                         Captured: literal 10
 ```
@@ -314,30 +314,30 @@ SELECT transform(values, x -> x + 10)
 
 **Rule 1: Parameter count must match function signature**
 ```sql
--- VALID: filter expects (element) -> bool or (element, index) -> bool
-SELECT filter(arr, x -> x > 0)
-SELECT filter(arr, (x, i) -> x > i)
+-- VALID: filter expects (element) -&gt; bool or (element, index) -&gt; bool
+SELECT filter(arr, x -&gt; x &gt; 0)
+SELECT filter(arr, (x, i) -&gt; x &gt; i)
 
 -- INVALID: wrong parameter count
-SELECT filter(arr, (x, y, z) -> x > 0)  -- ERROR
+SELECT filter(arr, (x, y, z) -&gt; x &gt; 0)  -- ERROR
 ```
 
 **Rule 2: Return type must match expected type**
 ```sql
 -- VALID: filter expects boolean return
-SELECT filter(arr, x -> x > 0)  -- Returns boolean
+SELECT filter(arr, x -&gt; x &gt; 0)  -- Returns boolean
 
 -- INVALID: wrong return type
-SELECT filter(arr, x -> x * 2)  -- ERROR: returns numeric, expected boolean
+SELECT filter(arr, x -&gt; x * 2)  -- ERROR: returns numeric, expected boolean
 ```
 
 **Rule 3: Array element type propagates to lambda parameter**
 ```sql
 -- Array of INT, lambda parameter inferred as INT
-SELECT transform(int_array, x -> x + 1)
+SELECT transform(int_array, x -&gt; x + 1)
 
 -- Type mismatch error
-SELECT transform(int_array, x -> upper(x))  -- ERROR: upper() requires string
+SELECT transform(int_array, x -&gt; upper(x))  -- ERROR: upper() requires string
 ```
 
 ### 6. Optimization Opportunities
@@ -347,7 +347,7 @@ Expand lambda to inline operations, enabling further optimization.
 
 **Before:**
 ```sql
-SELECT transform(prices, p -> p * 1.1)
+SELECT transform(prices, p -&gt; p * 1.1)
 ```
 
 **After inlining:**
@@ -361,7 +361,7 @@ SELECT array_construct(
 ```
 
 **Benefits:**
-- Enables constant folding: `p -> 5 * 1.1` becomes `5.5`
+- Enables constant folding: `p -&gt; 5 * 1.1` becomes `5.5`
 - Enables predicate pushdown through transform
 - Removes function call overhead
 
@@ -370,7 +370,7 @@ Execute lambda over entire array using SIMD operations.
 
 **Example:**
 ```sql
-SELECT transform(prices, p -> p * 1.1)
+SELECT transform(prices, p -&gt; p * 1.1)
 ```
 
 **Vectorized execution:**
@@ -386,9 +386,9 @@ result = simd_multiply(prices, scalar);  // All elements at once
 ```
 
 **Applicable to:**
-- Arithmetic operations (`x -> x * 2`)
-- Comparison predicates (`x -> x > 10`)
-- Simple math functions (`x -> sqrt(x)`)
+- Arithmetic operations (`x -&gt; x * 2`)
+- Comparison predicates (`x -&gt; x &gt; 10`)
+- Simple math functions (`x -&gt; sqrt(x)`)
 
 **Expected speedup:** 4-8x for vectorizable operations
 
@@ -396,13 +396,13 @@ result = simd_multiply(prices, scalar);  // All elements at once
 Process array chunks in parallel when array is large.
 
 **Conditions:**
-- Array length > threshold (e.g., 1000 elements)
+- Array length &gt; threshold (e.g., 1000 elements)
 - Lambda has no side effects (pure function)
 - Array not already nested in parallel context
 
 **Example:**
 ```sql
-SELECT transform(large_array, x -> expensive_function(x))
+SELECT transform(large_array, x -&gt; expensive_function(x))
 ```
 
 **Parallel execution:**
@@ -423,14 +423,14 @@ Combine multiple consecutive transforms into single pass.
 
 **Before:**
 ```sql
-SELECT filter(transform(array, x -> x * 2), y -> y > 5)
+SELECT filter(transform(array, x -&gt; x * 2), y -&gt; y &gt; 5)
 ```
 
 **After fusion:**
 ```sql
 -- Single pass: multiply and filter in one iteration
 SELECT array_construct(
-    FOR x IN array WHERE x * 2 > 5: x * 2
+    FOR x IN array WHERE x * 2 &gt; 5: x * 2
 )
 ```
 
@@ -438,7 +438,7 @@ SELECT array_construct(
 ```
 filter(transform(A, f), g)
   ↓
-transform(filter(A, x -> g(f(x))), f)
+transform(filter(A, x -&gt; g(f(x))), f)
 ```
 
 **Benefits:**
@@ -453,7 +453,7 @@ For `exists` and `forall`, stop early when result is known.
 
 **Example:**
 ```sql
-SELECT exists(large_array, x -> expensive_predicate(x))
+SELECT exists(large_array, x -&gt; expensive_predicate(x))
 ```
 
 **Optimization:**
@@ -473,32 +473,32 @@ return false;
 
 #### Phase 1: Parser and AST (Weeks 1-3)
 1. **Lambda Syntax Parsing**
-   - Recognize `->` operator
-   - Parse single parameter: `x -> expr`
-   - Parse multiple parameters: `(x, y) -> expr`
-   - Parse nested lambdas: `x -> (y -> x + y)`
+   - Recognize `-&gt;` operator
+   - Parse single parameter: `x -&gt; expr`
+   - Parse multiple parameters: `(x, y) -&gt; expr`
+   - Parse nested lambdas: `x -&gt; (y -&gt; x + y)`
 
 2. **AST Extensions**
    ```rust
    pub enum Expr {
        // ... existing variants ...
        Lambda {
-           params: Vec<String>,
-           body: Box<Expr>,
+           params: Vec&lt;String&gt;,
+           body: Box&lt;Expr&gt;,
        },
        ArrayTransform {
-           array: Box<Expr>,
-           lambda: Box<Expr>,
+           array: Box&lt;Expr&gt;,
+           lambda: Box&lt;Expr&gt;,
        },
        ArrayFilter {
-           array: Box<Expr>,
-           lambda: Box<Expr>,
+           array: Box&lt;Expr&gt;,
+           lambda: Box&lt;Expr&gt;,
        },
        ArrayAggregate {
-           array: Box<Expr>,
-           init: Box<Expr>,
-           merge_lambda: Box<Expr>,
-           finish_lambda: Option<Box<Expr>>,
+           array: Box&lt;Expr&gt;,
+           init: Box&lt;Expr&gt;,
+           merge_lambda: Box&lt;Expr&gt;,
+           finish_lambda: Option&lt;Box&lt;Expr&gt;&gt;,
        },
        // ... map variants ...
    }
@@ -513,7 +513,7 @@ return false;
 #### Phase 2: Type System (Weeks 4-6)
 1. **Lambda Type Representation**
    - Add `DataType::Lambda` variant
-   - Represent function signatures: `(T1, T2) -> T3`
+   - Represent function signatures: `(T1, T2) -&gt; T3`
 
 2. **Type Inference**
    - Infer lambda parameter types from array element types
@@ -637,7 +637,7 @@ return false;
 - Map: `map_filter`, `transform_keys`, `transform_values`, `map_zip_with`
 
 **Syntax Compatibility:**
-- Lambda syntax: `x -> expr`, `(x, y) -> expr`
+- Lambda syntax: `x -&gt; expr`, `(x, y) -&gt; expr`
 - Multi-parameter lambdas
 - Closure capture
 
@@ -674,7 +674,7 @@ Transform higher-order functions to unnest + aggregate:
 
 ```sql
 -- Higher-order function
-SELECT transform(prices, p -> p * 1.1) FROM orders;
+SELECT transform(prices, p -&gt; p * 1.1) FROM orders;
 
 -- PostgreSQL emulation
 SELECT array_agg(price * 1.1 ORDER BY ordinality)
@@ -716,7 +716,7 @@ GROUP BY user_id;
 **With higher-order functions:**
 
 ```sql
-SELECT user_id, transform(prices, p -> p * 1.1) AS adjusted
+SELECT user_id, transform(prices, p -&gt; p * 1.1) AS adjusted
 FROM orders;
 ```
 
@@ -766,9 +766,9 @@ FROM orders;
 ```sql
 -- Transform nested prices with discount
 SELECT order_id,
-       transform(prices, p -> p * (1 - discount))
+       transform(prices, p -&gt; p * (1 - discount))
 FROM orders
-WHERE date >= '2024-01-01';
+WHERE date &gt;= '2024-01-01';
 ```
 - Dataset: 10M orders, avg 5 items per order
 - Expected speedup: 8-12x
@@ -777,7 +777,7 @@ WHERE date >= '2024-01-01';
 ```sql
 -- Filter high-value items in orders
 SELECT user_id,
-       filter(purchases, p -> p.amount > 100)
+       filter(purchases, p -&gt; p.amount &gt; 100)
 FROM users;
 ```
 - Dataset: 5M users, avg 20 purchases per user
@@ -787,7 +787,7 @@ FROM users;
 ```sql
 -- Calculate total from nested array
 SELECT order_id,
-       aggregate(prices, 0, (acc, p) -> acc + p) AS total
+       aggregate(prices, 0, (acc, p) -&gt; acc + p) AS total
 FROM orders;
 ```
 - Dataset: 50M orders, avg 3 items per order
@@ -798,7 +798,7 @@ FROM orders;
 -- Find orders with premium items
 SELECT COUNT(*)
 FROM orders
-WHERE exists(items, i -> i.category = 'premium');
+WHERE exists(items, i -&gt; i.category = 'premium');
 ```
 - Dataset: 100M orders, avg 10 items per order
 - Expected speedup: 30-50x (short-circuit)
@@ -818,7 +818,7 @@ WHERE exists(items, i -> i.category = 'premium');
 ```rust
 #[test]
 fn transform_preserves_length() {
-    proptest!(|(array: Vec<i32>, scalar: i32)| {
+    proptest!(|(array: Vec&lt;i32&gt;, scalar: i32)| {
         let result = transform(array.clone(), |x| x + scalar);
         assert_eq!(array.len(), result.len());
     });
@@ -826,15 +826,15 @@ fn transform_preserves_length() {
 
 #[test]
 fn filter_reduces_or_preserves_length() {
-    proptest!(|(array: Vec<i32>)| {
-        let result = filter(array.clone(), |x| x > 0);
-        assert!(result.len() <= array.len());
+    proptest!(|(array: Vec&lt;i32&gt;)| {
+        let result = filter(array.clone(), |x| x &gt; 0);
+        assert!(result.len() &lt;= array.len());
     });
 }
 
 #[test]
 fn aggregate_commutative_associative() {
-    proptest!(|(array: Vec<i32>)| {
+    proptest!(|(array: Vec&lt;i32&gt;)| {
         let sum1 = aggregate(array.clone(), 0, |acc, x| acc + x);
         let sum2 = array.iter().sum();
         assert_eq!(sum1, sum2);
@@ -858,14 +858,14 @@ fn aggregate_commutative_associative() {
 ```rust
 #[test]
 fn lambda_inlining_preserves_semantics() {
-    let query = "SELECT transform(arr, x -> x * 2) FROM t";
+    let query = "SELECT transform(arr, x -&gt; x * 2) FROM t";
     let optimized = optimize(query);
     assert_results_equal(query, optimized);
 }
 
 #[test]
 fn fusion_preserves_semantics() {
-    let query = "SELECT filter(transform(arr, x -> x * 2), y -> y > 5) FROM t";
+    let query = "SELECT filter(transform(arr, x -&gt; x * 2), y -&gt; y &gt; 5) FROM t";
     let optimized = optimize(query);
     assert_results_equal(query, optimized);
 }
@@ -897,17 +897,17 @@ fn fusion_preserves_semantics() {
 ```sql
 -- Nested transformations
 SELECT transform(
-    filter(prices, p -> p > 10),
-    p -> p * 1.1
+    filter(prices, p -&gt; p &gt; 10),
+    p -&gt; p * 1.1
 ) AS adjusted_high_prices
 FROM orders;
 
 -- Chained operations
 SELECT user_id,
        aggregate(
-           transform(purchases, p -> p.amount),
+           transform(purchases, p -&gt; p.amount),
            0,
-           (acc, x) -> acc + x
+           (acc, x) -&gt; acc + x
        ) AS total_spent
 FROM users;
 ```
@@ -1048,3 +1048,52 @@ FROM users;
 - [ ] Phase 4: Optimizer (Weeks 13-18)
 - [ ] Phase 5: Cost Model (Weeks 19-22)
 - [ ] Phase 6: Integration and Testing (Weeks 23-25)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 103: Higher-Order Functions](/maintainers/rfcs/0103-higher-order-functions)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 103: Higher-Order Functions](/maintainers/rfcs/0103-higher-order-functions)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 103: Higher-Order Functions](/maintainers/rfcs/0103-higher-order-functions)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 103: Higher-Order Functions](/maintainers/rfcs/0103-higher-order-functions)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 103: Higher-Order Functions](/maintainers/rfcs/0103-higher-order-functions)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 103: Higher-Order Functions](/maintainers/rfcs/0103-higher-order-functions)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 103: Higher-Order Functions](/maintainers/rfcs/0103-higher-order-functions)

@@ -85,15 +85,15 @@ SELECT timestamp, user_id, url
 FROM web_logs
 WHERE year = 2026
   AND month = 3
-  AND status_code >= 500;
+  AND status_code &gt;= 500;
 ```
 
 **Optimization steps:**
 
 1. **Partition pruning**: Only scan `s3://my-bucket/logs/year=2026/month=03/` (eliminates 99% of files)
-2. **File-level pruning**: Use Parquet row group statistics on `status_code` to skip files where `max(status_code) < 500` (eliminates 95% of remaining files)
+2. **File-level pruning**: Use Parquet row group statistics on `status_code` to skip files where `max(status_code) &lt; 500` (eliminates 95% of remaining files)
 3. **Column pruning**: Only read `timestamp`, `user_id`, `url`, `status_code` columns from Parquet (25% of columns)
-4. **Predicate pushdown**: Push `status_code >= 500` to Parquet reader (scans only matching row groups)
+4. **Predicate pushdown**: Push `status_code &gt;= 500` to Parquet reader (scans only matching row groups)
 5. **Parallel reading**: Distribute remaining ~50 files across 10 workers
 
 **Result**: Scan 500MB instead of 10TB, complete in 30 seconds instead of 2 hours.
@@ -120,16 +120,16 @@ pub enum RelExpr {
         file_format: FileFormat,
 
         /// Partition columns and expressions
-        partitions: Vec<PartitionColumn>,
+        partitions: Vec&lt;PartitionColumn&gt;,
 
         /// File pattern (with {variable} placeholders)
         file_pattern: String,
 
         /// Predicate to push to file readers
-        filter: Option<Box<Expr>>,
+        filter: Option&lt;Box&lt;Expr&gt;&gt;,
 
         /// Columns to project (for columnar formats)
-        projection: Vec<ColumnRef>,
+        projection: Vec&lt;ColumnRef&gt;,
     },
 }
 ```
@@ -141,7 +141,7 @@ pub struct ExternalStage {
     pub name: String,
     pub url: CloudStorageUrl,
     pub credentials: CloudCredentials,
-    pub encryption: Option<EncryptionConfig>,
+    pub encryption: Option&lt;EncryptionConfig&gt;,
 }
 
 pub enum CloudStorageUrl {
@@ -180,7 +180,7 @@ pub enum FileFormat {
     Csv {
         delimiter: char,
         header: bool,
-        compression: Option<CompressionType>,
+        compression: Option&lt;CompressionType&gt;,
     },
     Json {
         /// Parse mode (strict, permissive)
@@ -219,7 +219,7 @@ fn prune_partitions(
     file_pattern: &str,
     partitions: &[PartitionColumn],
     filter: &Expr,
-) -> Vec<String> {
+) -&gt; Vec&lt;String&gt; {
     // 1. Extract partition predicates from filter
     let partition_predicates = extract_partition_predicates(filter, partitions);
 
@@ -256,15 +256,15 @@ pub struct FileMetadata {
     pub path: String,
     pub size_bytes: u64,
     pub row_count: u64,
-    pub last_modified: DateTime<Utc>,
-    pub column_statistics: HashMap<ColumnRef, ColumnStats>,
+    pub last_modified: DateTime&lt;Utc&gt;,
+    pub column_statistics: HashMap&lt;ColumnRef, ColumnStats&gt;,
 }
 
 pub struct ColumnStats {
-    pub min_value: Option<Scalar>,
-    pub max_value: Option<Scalar>,
+    pub min_value: Option&lt;Scalar&gt;,
+    pub max_value: Option&lt;Scalar&gt;,
     pub null_count: u64,
-    pub distinct_count: Option<u64>,
+    pub distinct_count: Option&lt;u64&gt;,
 }
 ```
 
@@ -274,7 +274,7 @@ File pruning uses these statistics:
 fn prune_files(
     files: &[FileMetadata],
     filter: &Expr,
-) -> Vec<&FileMetadata> {
+) -&gt; Vec&lt;&FileMetadata&gt; {
     files.iter()
         .filter(|file| {
             // Check if filter could possibly match any row in this file
@@ -284,7 +284,7 @@ fn prune_files(
 }
 ```
 
-For `WHERE status_code >= 500`, skip files where `max(status_code) < 500`.
+For `WHERE status_code &gt;= 500`, skip files where `max(status_code) &lt; 500`.
 
 ### Predicate pushdown to file formats
 
@@ -292,7 +292,7 @@ For `WHERE status_code >= 500`, skip files where `max(status_code) < 500`.
 
 ```rust
 impl ParquetReader {
-    fn scan_with_predicate(&self, filter: &Expr) -> impl Iterator<Item = Row> {
+    fn scan_with_predicate(&self, filter: &Expr) -&gt; impl Iterator&lt;Item = Row&gt; {
         self.row_groups()
             .filter(|rg| {
                 // Skip row group if predicate cannot match
@@ -318,9 +318,9 @@ Distribute files across workers based on:
 
 ```rust
 fn distribute_files(
-    files: Vec<FileMetadata>,
+    files: Vec&lt;FileMetadata&gt;,
     worker_count: usize,
-) -> Vec<Vec<FileMetadata>> {
+) -&gt; Vec&lt;Vec&lt;FileMetadata&gt;&gt; {
     // Sort by size (descending) for better load balancing
     let mut files = files;
     files.sort_by_key(|f| std::cmp::Reverse(f.size_bytes));
@@ -360,7 +360,7 @@ impl CostModel {
         files: &[FileMetadata],
         file_format: &FileFormat,
         selectivity: f64,
-    ) -> Cost {
+    ) -&gt; Cost {
         let total_bytes: u64 = files.iter().map(|f| f.size_bytes).sum();
         let file_count = files.len();
 
@@ -370,24 +370,24 @@ impl CostModel {
 
         // Network transfer (only bytes actually read after pushdown)
         let bytes_transferred = match file_format {
-            FileFormat::Parquet { column_projection: true, .. } => {
+            FileFormat::Parquet { column_projection: true, .. } =&gt; {
                 // Column pruning reduces transfer
                 total_bytes as f64 * selectivity * 0.3 // ~30% of columns
             }
-            FileFormat::Csv { .. } => {
+            FileFormat::Csv { .. } =&gt; {
                 // Must read entire file
                 total_bytes as f64
             }
-            _ => total_bytes as f64 * selectivity,
+            _ =&gt; total_bytes as f64 * selectivity,
         };
         let network_cost = (bytes_transferred / 1e9) * self.external.network_egress_cost;
 
         // Compute cost (warehouse runtime)
         let parse_cost = match file_format {
-            FileFormat::Parquet { .. } => bytes_transferred * 0.001, // Fast binary format
-            FileFormat::Csv { .. } => bytes_transferred * 0.01,      // Slow text parsing
-            FileFormat::Json { .. } => bytes_transferred * 0.02,     // Very slow JSON parsing
-            _ => bytes_transferred * 0.005,
+            FileFormat::Parquet { .. } =&gt; bytes_transferred * 0.001, // Fast binary format
+            FileFormat::Csv { .. } =&gt; bytes_transferred * 0.01,      // Slow text parsing
+            FileFormat::Json { .. } =&gt; bytes_transferred * 0.02,     // Very slow JSON parsing
+            _ =&gt; bytes_transferred * 0.005,
         };
 
         Cost {
@@ -443,18 +443,18 @@ pub enum RefreshStrategy {
 fn should_refresh_metadata(
     external_table: &ExternalTableInfo,
     cache_entry: &MetadataCache,
-) -> bool {
+) -&gt; bool {
     match &external_table.refresh_strategy {
-        RefreshStrategy::Manual => false,
-        RefreshStrategy::EventDriven { .. } => {
+        RefreshStrategy::Manual =&gt; false,
+        RefreshStrategy::EventDriven { .. } =&gt; {
             // Check if notification received since last cache
             has_notification(external_table, cache_entry.last_refresh)
         }
-        RefreshStrategy::Scheduled { interval } => {
-            cache_entry.last_refresh + *interval < Utc::now()
+        RefreshStrategy::Scheduled { interval } =&gt; {
+            cache_entry.last_refresh + *interval &lt; Utc::now()
         }
-        RefreshStrategy::OnQuery { cache_ttl } => {
-            cache_entry.last_refresh + *cache_ttl < Utc::now()
+        RefreshStrategy::OnQuery { cache_ttl } =&gt; {
+            cache_entry.last_refresh + *cache_ttl &lt; Utc::now()
         }
     }
 }
@@ -469,7 +469,7 @@ fn should_refresh_metadata(
 fn partition_pruning_rule(
     scan: &ExternalTableScan,
     filter: &Expr,
-) -> ExternalTableScan {
+) -&gt; ExternalTableScan {
     let partition_filter = extract_partition_predicates(filter, &scan.partitions);
     let pruned_paths = prune_partitions(&scan.file_pattern, &scan.partitions, &partition_filter);
 
@@ -488,7 +488,7 @@ fn partition_pruning_rule(
 fn file_pruning_rule(
     scan: &ExternalTableScan,
     metadata: &[FileMetadata],
-) -> Vec<FileMetadata> {
+) -&gt; Vec&lt;FileMetadata&gt; {
     metadata.iter()
         .filter(|file| {
             scan.filter.as_ref()
@@ -507,15 +507,15 @@ fn file_pruning_rule(
 fn column_pruning_rule(
     scan: &ExternalTableScan,
     required_columns: &[ColumnRef],
-) -> ExternalTableScan {
+) -&gt; ExternalTableScan {
     match &scan.file_format {
-        FileFormat::Parquet { .. } | FileFormat::Orc { .. } => {
+        FileFormat::Parquet { .. } | FileFormat::Orc { .. } =&gt; {
             ExternalTableScan {
                 projection: required_columns.to_vec(),
                 ..scan.clone()
             }
         }
-        _ => scan.clone(), // No column pruning for row-based formats
+        _ =&gt; scan.clone(), // No column pruning for row-based formats
     }
 }
 ```
@@ -527,9 +527,9 @@ fn column_pruning_rule(
 fn predicate_pushdown_rule(
     scan: &ExternalTableScan,
     filter: &Expr,
-) -> ExternalTableScan {
+) -&gt; ExternalTableScan {
     match &scan.file_format {
-        FileFormat::Parquet { predicate_pushdown: true, .. } => {
+        FileFormat::Parquet { predicate_pushdown: true, .. } =&gt; {
             // Push simple predicates to Parquet reader
             let pushable = extract_pushable_predicates(filter);
             ExternalTableScan {
@@ -537,7 +537,7 @@ fn predicate_pushdown_rule(
                 ..scan.clone()
             }
         }
-        _ => scan.clone(),
+        _ =&gt; scan.clone(),
     }
 }
 ```
@@ -549,12 +549,12 @@ fn predicate_pushdown_rule(
 fn external_table_mv_recommendation(
     query_log: &[Query],
     external_table: &str,
-) -> Option<MaterializedViewRecommendation> {
+) -&gt; Option&lt;MaterializedViewRecommendation&gt; {
     let queries = query_log.iter()
         .filter(|q| q.references_external_table(external_table))
         .count();
 
-    if queries > 10 {
+    if queries &gt; 10 {
         Some(MaterializedViewRecommendation {
             reason: format!(
                 "External table '{}' accessed {} times. \
@@ -578,15 +578,15 @@ pub struct ExternalTableInfo {
     pub name: String,
     pub stage: ExternalStage,
     pub file_format: FileFormat,
-    pub partitions: Vec<PartitionColumn>,
+    pub partitions: Vec&lt;PartitionColumn&gt;,
     pub file_pattern: String,
     pub refresh_strategy: RefreshStrategy,
     pub metadata_cache: MetadataCache,
 }
 
 pub struct MetadataCache {
-    pub last_refresh: DateTime<Utc>,
-    pub files: Vec<FileMetadata>,
+    pub last_refresh: DateTime&lt;Utc&gt;,
+    pub files: Vec&lt;FileMetadata&gt;,
     pub total_bytes: u64,
     pub total_rows: u64,
 }
@@ -598,9 +598,9 @@ Add to `ra-catalog`:
 pub trait Catalog {
     // ... existing methods ...
 
-    fn get_external_table(&self, name: &str) -> Result<ExternalTableInfo>;
-    fn refresh_external_table_metadata(&mut self, name: &str) -> Result<()>;
-    fn list_external_tables(&self) -> Vec<String>;
+    fn get_external_table(&self, name: &str) -&gt; Result&lt;ExternalTableInfo&gt;;
+    fn refresh_external_table_metadata(&mut self, name: &str) -&gt; Result&lt;()&gt;;
+    fn list_external_tables(&self) -&gt; Vec&lt;String&gt;;
 }
 ```
 
@@ -611,7 +611,7 @@ impl StatisticsCollector {
     fn collect_external_table_stats(
         &mut self,
         external_table: &ExternalTableInfo,
-    ) -> Result<TableStatistics> {
+    ) -&gt; Result&lt;TableStatistics&gt; {
         // Aggregate file-level statistics
         let mut stats = TableStatistics::default();
         stats.row_count = external_table.metadata_cache.total_rows;
@@ -667,7 +667,7 @@ pub struct ExternalTableCostParams {
 ```sql
 SELECT COUNT(*)
 FROM s3_web_logs
-WHERE status_code >= 500;
+WHERE status_code &gt;= 500;
 ```
 
 - Files in S3: 10,000 Parquet files (100GB total)
@@ -679,7 +679,7 @@ WHERE status_code >= 500;
 **With optimization:**
 
 1. **Partition pruning** (year=2026, month=3): 100 files remain
-2. **File-level statistics**: 10 files have `max(status_code) >= 500`
+2. **File-level statistics**: 10 files have `max(status_code) &gt;= 500`
 3. **Column pruning**: Only read `status_code` column (10% of data)
 4. **Predicate pushdown**: Parquet row groups skip 90% of rows
 
@@ -692,9 +692,9 @@ Result:
 **Break-even analysis:**
 
 External tables are cost-effective when:
-- Query selectivity < 10% (partition pruning eliminates most files)
-- Query frequency < 10x per day (avoid materialization overhead)
-- Data size > 100GB (loading costs exceed query-in-place costs)
+- Query selectivity &lt; 10% (partition pruning eliminates most files)
+- Query frequency &lt; 10x per day (avoid materialization overhead)
+- Data size &gt; 100GB (loading costs exceed query-in-place costs)
 
 ## Implementation plan
 
@@ -924,3 +924,52 @@ External tables are cost-effective when:
 3. **Caching strategy**: Should external table results be cached differently than warehouse table results?
 4. **Metadata consistency**: How to handle external table metadata being modified during query execution?
 5. **Cost attribution**: How to track and report external table costs per user/query?
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 105: External Tables and Cloud Storage Optimization](/maintainers/rfcs/0105-external-tables-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 105: External Tables and Cloud Storage Optimization](/maintainers/rfcs/0105-external-tables-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 105: External Tables and Cloud Storage Optimization](/maintainers/rfcs/0105-external-tables-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 105: External Tables and Cloud Storage Optimization](/maintainers/rfcs/0105-external-tables-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 105: External Tables and Cloud Storage Optimization](/maintainers/rfcs/0105-external-tables-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 105: External Tables and Cloud Storage Optimization](/maintainers/rfcs/0105-external-tables-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 105: External Tables and Cloud Storage Optimization](/maintainers/rfcs/0105-external-tables-optimization)

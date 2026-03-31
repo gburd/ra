@@ -82,6 +82,39 @@ function findRFCReferences(content) {
 }
 
 /**
+ * Escape HTML-like characters in specific contexts to prevent VitePress parsing issues
+ * This escapes < and > in inline code and table cells
+ */
+function escapeHTMLInMarkdown(content) {
+  // Escape < and > in inline code (backticks)
+  // Need to handle both single backticks and already-escaped content
+  content = content.replace(/`([^`]*<[^`]*)`/g, (match, code) => {
+    const escaped = code.replace(/</g, '&lt;');
+    return `\`${escaped}\``;
+  });
+
+  content = content.replace(/`([^`]*>[^`]*)`/g, (match, code) => {
+    const escaped = code.replace(/>/g, '&gt;');
+    return `\`${escaped}\``;
+  });
+
+  // Escape < and > in table cells (between | characters)
+  // Split by lines and process tables
+  const lines = content.split('\n');
+  const processedLines = lines.map(line => {
+    // Check if this is a table row
+    if (line.trim().startsWith('|') && line.trim().endsWith('|')) {
+      // Escape < and > in table cells
+      return line.replace(/<([a-zA-Z0-9])/g, '&lt;$1')
+                 .replace(/([a-zA-Z0-9])>/g, '$1&gt;');
+    }
+    return line;
+  });
+
+  return processedLines.join('\n');
+}
+
+/**
  * Add cross-linking to RFC content
  */
 function addCrossLinks(content, currentRFC) {
@@ -180,6 +213,9 @@ function writeProcessedRFC(filename) {
   if (!metadata) {
     return;
   }
+
+  // Escape HTML-like characters to prevent VitePress parsing issues
+  content = escapeHTMLInMarkdown(content);
 
   // Add cross-links
   content = addCrossLinks(content, metadata.number);
@@ -400,6 +436,58 @@ function generateNavigation() {
 }
 
 /**
+ * Process RFC file that's already in the destination directory
+ */
+function processDestRFCFile(filename) {
+  const sourcePath = path.join(RFC_DEST_DIR, filename);
+  const content = fs.readFileSync(sourcePath, 'utf-8');
+
+  const metadata = parseFrontmatter(content, filename);
+  if (!metadata) {
+    return;
+  }
+
+  rfcMetadata.set(metadata.number, metadata);
+
+  // Find references in this RFC
+  const references = findRFCReferences(content);
+  references.forEach(ref => {
+    if (!rfcReferences.has(ref)) {
+      rfcReferences.set(ref, []);
+    }
+    rfcReferences.get(ref).push(metadata.number);
+  });
+}
+
+/**
+ * Write processed RFC file that's already in destination (in-place processing)
+ */
+function writeProcessedDestRFC(filename) {
+  const destPath = path.join(RFC_DEST_DIR, filename);
+  let content = fs.readFileSync(destPath, 'utf-8');
+
+  const metadata = parseFrontmatter(content, filename);
+  if (!metadata) {
+    return;
+  }
+
+  // Escape HTML-like characters to prevent VitePress parsing issues
+  content = escapeHTMLInMarkdown(content);
+
+  // Add cross-links
+  content = addCrossLinks(content, metadata.number);
+
+  // Add "Referenced By" section at the end
+  const referencedBy = generateReferencedBySection(metadata.number);
+  if (referencedBy) {
+    content += '\n' + referencedBy;
+  }
+
+  fs.writeFileSync(destPath, content, 'utf-8');
+  console.log(`Processed (in-place): ${filename}`);
+}
+
+/**
  * Main processing function
  */
 function main() {
@@ -410,20 +498,29 @@ function main() {
     fs.mkdirSync(RFC_DEST_DIR, { recursive: true });
   }
 
-  // Get all RFC files
-  const rfcFiles = fs.readdirSync(RFC_SOURCE_DIR)
-    .filter(f => f.endsWith('.md'))
+  // Get all RFC files from source
+  const rfcFiles = fs.existsSync(RFC_SOURCE_DIR)
+    ? fs.readdirSync(RFC_SOURCE_DIR).filter(f => f.endsWith('.md')).sort()
+    : [];
+
+  // Get all RFC files already in destination
+  const destRfcFiles = fs.readdirSync(RFC_DEST_DIR)
+    .filter(f => f.endsWith('.md') && f !== 'README.md')
+    .filter(f => !rfcFiles.includes(f)) // Exclude files that will be copied from source
     .sort();
 
-  console.log(`Found ${rfcFiles.length} RFC files`);
+  console.log(`Found ${rfcFiles.length} RFC files in source`);
+  console.log(`Found ${destRfcFiles.length} RFC files in destination`);
 
-  // First pass: collect metadata and references
+  // First pass: collect metadata and references from both locations
   console.log('\nPass 1: Collecting metadata...');
   rfcFiles.forEach(processRFCFile);
+  destRfcFiles.forEach(processDestRFCFile);
 
   // Second pass: write processed files with cross-links
   console.log('\nPass 2: Processing and writing RFCs...');
   rfcFiles.forEach(writeProcessedRFC);
+  destRfcFiles.forEach(writeProcessedDestRFC);
 
   // Generate index and navigation
   console.log('\nGenerating RFC index...');

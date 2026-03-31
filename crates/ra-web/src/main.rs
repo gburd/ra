@@ -713,4 +713,117 @@ mod tests {
             assert_eq!(response.status(), Status::Ok);
         }
     }
+
+    #[test]
+    fn test_plan_visualization_demo_in_list() {
+        let client = client();
+        let response = client.get("/api/demos").dispatch();
+        assert_eq!(response.status(), Status::Ok);
+        let body: serde_json::Value =
+            serde_json::from_str(
+                &response.into_string().unwrap(),
+            )
+            .unwrap();
+        let demos = body["demos"].as_array().unwrap();
+        let has_viz_demo = demos.iter().any(|d| {
+            d["id"].as_str() == Some("plan-visualization")
+        });
+        assert!(
+            has_viz_demo,
+            "plan-visualization demo should be in the demos list"
+        );
+    }
+
+    #[test]
+    fn test_plan_visualization_page_exists() {
+        let client = client();
+        let response =
+            client.get("/plan-visualization.html").dispatch();
+        assert_eq!(response.status(), Status::Ok);
+        let body = response.into_string().unwrap();
+        assert!(
+            body.contains("Interactive Query Plan Visualization"),
+            "plan-visualization.html should contain the title"
+        );
+        assert!(
+            body.contains("d3.v7.min.js"),
+            "plan-visualization.html should include D3.js"
+        );
+    }
+
+    #[test]
+    fn test_visualize_with_complex_query() {
+        let client = client();
+        let sql = "SELECT u.name, COUNT(o.id) \
+                   FROM users u \
+                   JOIN orders o ON u.id = o.user_id \
+                   WHERE u.age > 25 \
+                   GROUP BY u.name \
+                   ORDER BY COUNT(o.id) DESC \
+                   LIMIT 10";
+        let response = client
+            .post("/api/visualize")
+            .header(ContentType::JSON)
+            .body(format!(r#"{{"sql":"{sql}"}}"#))
+            .dispatch();
+        assert_eq!(response.status(), Status::Ok);
+        let body: serde_json::Value =
+            serde_json::from_str(
+                &response.into_string().unwrap(),
+            )
+            .unwrap();
+        assert!(body["plan"]["operator_type"].is_string());
+        assert!(body["total_cost"].as_f64().unwrap() > 0.0);
+        assert!(body["plan"]["children"].is_array());
+    }
+
+    #[test]
+    fn test_compare_plans_structure() {
+        let client = client();
+        let response = client
+            .post("/api/compare-plans")
+            .header(ContentType::JSON)
+            .body(
+                r#"{"sql":"SELECT COUNT(*) FROM users WHERE age > 30"}"#,
+            )
+            .dispatch();
+        assert_eq!(response.status(), Status::Ok);
+        let body: serde_json::Value =
+            serde_json::from_str(
+                &response.into_string().unwrap(),
+            )
+            .unwrap();
+        assert!(body["plans"].is_array());
+        assert!(body["summary"].is_object());
+        assert!(body["summary"]["cheapest"].is_string());
+        let plans = body["plans"].as_array().unwrap();
+        for plan in plans {
+            assert!(plan["optimizer"].is_string());
+            assert!(plan["plan"]["operator_type"].is_string());
+            assert!(plan["total_cost"].is_f64());
+            assert!(plan["available"].is_boolean());
+        }
+    }
+
+    #[test]
+    fn test_visualize_cost_breakdown() {
+        let client = client();
+        let response = client
+            .post("/api/visualize")
+            .header(ContentType::JSON)
+            .body(
+                r#"{"sql":"SELECT * FROM large_table WHERE id > 1000"}"#,
+            )
+            .dispatch();
+        assert_eq!(response.status(), Status::Ok);
+        let body: serde_json::Value =
+            serde_json::from_str(
+                &response.into_string().unwrap(),
+            )
+            .unwrap();
+        let plan = &body["plan"];
+        assert!(plan["cost"].as_f64().unwrap() > 0.0);
+        assert!(plan["rows"].as_u64().unwrap() > 0);
+        assert!(plan["details"].is_array());
+    }
 }

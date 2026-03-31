@@ -20,7 +20,7 @@ SELECT sum(price * quantity)
 FROM orders
 WHERE status = 'completed'
   AND region = 'US'
-  AND amount > 1000;
+  AND amount &gt; 1000;
 ```
 
 **Current approach (without selection vectors)**:
@@ -48,7 +48,7 @@ WHERE status = 'completed'
 
 **DuckDB** (Raasveldt & Mühleisen 2019):
 - Built-in selection vector support in execution engine
-- 2-5x memory bandwidth reduction for selectivity < 30%
+- 2-5x memory bandwidth reduction for selectivity &lt; 30%
 - Standard practice for vectorized query processing
 
 **ClickHouse**:
@@ -89,25 +89,25 @@ Selection vector: [1, 0, 1, 0, 1, 0, 1, 0]  (1 = valid, 0 = invalid)
 
 ### When to Use Selection Vectors
 
-**GOOD: Selective filters (< 30% pass rate)**
+**GOOD: Selective filters (&lt; 30% pass rate)**
 ```sql
 WHERE rare_event = true  -- Selectivity: 2%
 ```
-**Cost**: Tracking 98% filtered rows via bitmap << copying 2% passing rows
+**Cost**: Tracking 98% filtered rows via bitmap &lt;&lt; copying 2% passing rows
 
 **GOOD: Filter chains**
 ```sql
 WHERE status = 'active'   -- Selectivity: 40%
   AND premium = true      -- Selectivity: 20% of 40% = 8%
-  AND last_login > '2024-01-01'  -- Selectivity: 5% of 8% = 0.4%
+  AND last_login &gt; '2024-01-01'  -- Selectivity: 5% of 8% = 0.4%
 ```
-**Cost**: Three bitmap operations << three data copies
+**Cost**: Three bitmap operations &lt;&lt; three data copies
 
-**BAD: High selectivity (> 80%)**
+**BAD: High selectivity (&gt; 80%)**
 ```sql
 WHERE created_at IS NOT NULL  -- Selectivity: 99.9%
 ```
-**Cost**: Tracking 0.1% invalid rows > copying 99.9% valid rows
+**Cost**: Tracking 0.1% invalid rows &gt; copying 99.9% valid rows
 
 **BAD: Immediately followed by hash join**
 ```sql
@@ -145,9 +145,9 @@ pub enum SelectionVector {
     /// All rows valid (identity selection)
     All { count: usize },
 
-    /// Sparse indices (< 50% selectivity)
+    /// Sparse indices (&lt; 50% selectivity)
     Indices {
-        indices: Vec<u32>,  // Valid row positions
+        indices: Vec&lt;u32&gt;,  // Valid row positions
         capacity: usize,    // Original batch size
     },
 
@@ -162,16 +162,16 @@ impl SelectionVector {
     pub fn from_filter(
         predicate: &BooleanArray,
         capacity: usize,
-    ) -> Self {
+    ) -&gt; Self {
         let valid_count = predicate.true_count();
         let selectivity = valid_count as f64 / capacity as f64;
 
-        if selectivity >= 0.99 {
+        if selectivity &gt;= 0.99 {
             // Nearly all valid, use identity
             SelectionVector::All { count: capacity }
-        } else if selectivity < 0.5 {
+        } else if selectivity &lt; 0.5 {
             // Sparse, use index array
-            let indices: Vec<u32> = predicate
+            let indices: Vec&lt;u32&gt; = predicate
                 .iter()
                 .enumerate()
                 .filter_map(|(i, v)| v.then_some(i as u32))
@@ -185,20 +185,20 @@ impl SelectionVector {
     }
 
     /// Intersect with another selection vector (AND operation)
-    pub fn intersect(&self, other: &SelectionVector) -> Self {
+    pub fn intersect(&self, other: &SelectionVector) -&gt; Self {
         match (self, other) {
-            (SelectionVector::All { count }, s) => s.clone(),
-            (s, SelectionVector::All { count }) => s.clone(),
+            (SelectionVector::All { count }, s) =&gt; s.clone(),
+            (s, SelectionVector::All { count }) =&gt; s.clone(),
 
-            (SelectionVector::Bitmap { bits: a }, SelectionVector::Bitmap { bits: b }) => {
+            (SelectionVector::Bitmap { bits: a }, SelectionVector::Bitmap { bits: b }) =&gt; {
                 // Bitwise AND
                 let bits = a & b;
                 SelectionVector::Bitmap { bits }
             }
 
-            (SelectionVector::Indices { indices, capacity }, other) => {
+            (SelectionVector::Indices { indices, capacity }, other) =&gt; {
                 // Filter indices through second selection
-                let new_indices: Vec<u32> = indices
+                let new_indices: Vec&lt;u32&gt; = indices
                     .iter()
                     .filter(|&&i| other.is_valid(i as usize))
                     .copied()
@@ -206,7 +206,7 @@ impl SelectionVector {
                 SelectionVector::Indices { indices: new_indices, capacity: *capacity }
             }
 
-            _ => {
+            _ =&gt; {
                 // Convert both to common representation and retry
                 self.to_bitmap().intersect(&other.to_bitmap())
             }
@@ -215,35 +215,35 @@ impl SelectionVector {
 
     /// Check if row at index is valid
     #[inline]
-    pub fn is_valid(&self, index: usize) -> bool {
+    pub fn is_valid(&self, index: usize) -&gt; bool {
         match self {
-            SelectionVector::All { .. } => true,
-            SelectionVector::Indices { indices, .. } => {
+            SelectionVector::All { .. } =&gt; true,
+            SelectionVector::Indices { indices, .. } =&gt; {
                 indices.binary_search(&(index as u32)).is_ok()
             }
-            SelectionVector::Bitmap { bits } => {
+            SelectionVector::Bitmap { bits } =&gt; {
                 bits.get(index).unwrap_or(false)
             }
         }
     }
 
     /// Number of valid rows
-    pub fn len(&self) -> usize {
+    pub fn len(&self) -&gt; usize {
         match self {
-            SelectionVector::All { count } => *count,
-            SelectionVector::Indices { indices, .. } => indices.len(),
-            SelectionVector::Bitmap { bits } => bits.count_ones(),
+            SelectionVector::All { count } =&gt; *count,
+            SelectionVector::Indices { indices, .. } =&gt; indices.len(),
+            SelectionVector::Bitmap { bits } =&gt; bits.count_ones(),
         }
     }
 
     /// Selectivity (fraction of valid rows)
-    pub fn selectivity(&self) -> f64 {
+    pub fn selectivity(&self) -&gt; f64 {
         match self {
-            SelectionVector::All { .. } => 1.0,
-            SelectionVector::Indices { indices, capacity } => {
+            SelectionVector::All { .. } =&gt; 1.0,
+            SelectionVector::Indices { indices, capacity } =&gt; {
                 indices.len() as f64 / *capacity as f64
             }
-            SelectionVector::Bitmap { bits } => {
+            SelectionVector::Bitmap { bits } =&gt; {
                 bits.count_ones() as f64 / bits.len() as f64
             }
         }
@@ -291,17 +291,17 @@ impl CostModel {
         &self,
         selection: &SelectionVectorState,
         next_operator: &PhysicalOperator,
-    ) -> bool {
+    ) -&gt; bool {
         match selection {
-            SelectionVectorState::None => false,
-            SelectionVectorState::Present { selectivity, materialize_cost, tracking_cost } => {
+            SelectionVectorState::None =&gt; false,
+            SelectionVectorState::Present { selectivity, materialize_cost, tracking_cost } =&gt; {
                 // Always materialize for operators needing dense data
                 if requires_dense_data(next_operator) {
                     return true;
                 }
 
                 // High selectivity: compaction is cheap
-                if *selectivity > 0.7 {
+                if *selectivity &gt; 0.7 {
                     return true;
                 }
 
@@ -309,13 +309,13 @@ impl CostModel {
                 let propagate_cost = tracking_cost * next_operator.row_count as f64;
                 let compact_cost = materialize_cost;
 
-                compact_cost < propagate_cost
+                compact_cost &lt; propagate_cost
             }
         }
     }
 }
 
-fn requires_dense_data(op: &PhysicalOperator) -> bool {
+fn requires_dense_data(op: &PhysicalOperator) -&gt; bool {
     matches!(
         op,
         PhysicalOperator::HashJoin { .. }
@@ -329,7 +329,7 @@ fn estimate_materialize_cost(
     row_count: usize,
     selectivity: f64,
     row_width: usize,
-) -> f64 {
+) -&gt; f64 {
     // Cost = read sparse + write dense
     let read_cost = row_count as f64 * MEMORY_READ_COST;
     let write_cost = (row_count as f64 * selectivity) * row_width as f64 * MEMORY_WRITE_COST;
@@ -339,12 +339,12 @@ fn estimate_materialize_cost(
 fn estimate_tracking_cost(
     selectivity: f64,
     operation_cost: f64,
-) -> f64 {
+) -&gt; f64 {
     // Overhead of checking selection vector per row
     let check_cost = SELECTION_CHECK_COST;
 
-    // If very sparse (< 10%), benefit from skipping work
-    if selectivity < 0.1 {
+    // If very sparse (&lt; 10%), benefit from skipping work
+    if selectivity &lt; 0.1 {
         operation_cost * selectivity  // Only process valid rows
     } else {
         operation_cost + check_cost  // Process all + check overhead
@@ -357,7 +357,7 @@ fn estimate_tracking_cost(
 **Filter operator (producer)**:
 ```rust
 impl FilterExec {
-    pub fn execute(&self, batch: RecordBatch) -> Result<RecordBatch> {
+    pub fn execute(&self, batch: RecordBatch) -&gt; Result&lt;RecordBatch&gt; {
         // Evaluate predicate
         let mask = self.predicate.evaluate(&batch)?;
 
@@ -374,9 +374,9 @@ impl FilterExec {
         }
     }
 
-    fn should_compact(&self, selection: &SelectionVector) -> bool {
-        // Materialize if selectivity > 70% (compaction is cheap)
-        selection.selectivity() > 0.7
+    fn should_compact(&self, selection: &SelectionVector) -&gt; bool {
+        // Materialize if selectivity &gt; 70% (compaction is cheap)
+        selection.selectivity() &gt; 0.7
     }
 }
 ```
@@ -384,13 +384,13 @@ impl FilterExec {
 **Project operator (consumer)**:
 ```rust
 impl ProjectExec {
-    pub fn execute(&self, batch: RecordBatch) -> Result<RecordBatch> {
+    pub fn execute(&self, batch: RecordBatch) -&gt; Result&lt;RecordBatch&gt; {
         match batch.selection_vector() {
-            None => {
+            None =&gt; {
                 // Dense data, normal projection
                 self.project_dense(&batch)
             }
-            Some(selection) => {
+            Some(selection) =&gt; {
                 // Evaluate expressions only on valid rows
                 self.project_with_selection(&batch, selection)
             }
@@ -401,8 +401,8 @@ impl ProjectExec {
         &self,
         batch: &RecordBatch,
         selection: &SelectionVector,
-    ) -> Result<RecordBatch> {
-        let output_arrays: Vec<ArrayRef> = self.exprs
+    ) -&gt; Result&lt;RecordBatch&gt; {
+        let output_arrays: Vec&lt;ArrayRef&gt; = self.exprs
             .iter()
             .map(|expr| {
                 // Evaluate expression using selection vector
@@ -411,7 +411,7 @@ impl ProjectExec {
                 // Result inherits selection vector
                 Ok(arr)
             })
-            .collect::<Result<_>>()?;
+            .collect::&lt;Result&lt;_&gt;&gt;()?;
 
         RecordBatch::try_new(self.schema.clone(), output_arrays)
             .map(|b| b.with_selection(selection.clone()))
@@ -422,10 +422,10 @@ impl ProjectExec {
 **Materialize operator (consumer)**:
 ```rust
 impl MaterializeExec {
-    pub fn execute(&self, batch: RecordBatch) -> Result<RecordBatch> {
+    pub fn execute(&self, batch: RecordBatch) -&gt; Result&lt;RecordBatch&gt; {
         match batch.selection_vector() {
-            None => Ok(batch),  // Already dense
-            Some(selection) => compact_batch(&batch, selection),
+            None =&gt; Ok(batch),  // Already dense
+            Some(selection) =&gt; compact_batch(&batch, selection),
         }
     }
 }
@@ -433,12 +433,12 @@ impl MaterializeExec {
 fn compact_batch(
     batch: &RecordBatch,
     selection: &SelectionVector,
-) -> Result<RecordBatch> {
-    let compacted_arrays: Vec<ArrayRef> = batch
+) -&gt; Result&lt;RecordBatch&gt; {
+    let compacted_arrays: Vec&lt;ArrayRef&gt; = batch
         .columns()
         .iter()
         .map(|arr| compact_array(arr, selection))
-        .collect::<Result<_>>()?;
+        .collect::&lt;Result&lt;_&gt;&gt;()?;
 
     RecordBatch::try_new(batch.schema(), compacted_arrays)
 }
@@ -446,19 +446,19 @@ fn compact_batch(
 fn compact_array(
     array: &ArrayRef,
     selection: &SelectionVector,
-) -> Result<ArrayRef> {
+) -&gt; Result&lt;ArrayRef&gt; {
     match selection {
-        SelectionVector::All { .. } => Ok(array.clone()),
+        SelectionVector::All { .. } =&gt; Ok(array.clone()),
 
-        SelectionVector::Indices { indices, .. } => {
+        SelectionVector::Indices { indices, .. } =&gt; {
             // Use Arrow take kernel (optimized for sparse selection)
             let indices_array = UInt32Array::from(indices.clone());
             compute::take(array.as_ref(), &indices_array, None)
         }
 
-        SelectionVector::Bitmap { bits } => {
+        SelectionVector::Bitmap { bits } =&gt; {
             // Use Arrow filter kernel (optimized for dense bitmap)
-            let mask = BooleanArray::from(bits.iter().collect::<Vec<_>>());
+            let mask = BooleanArray::from(bits.iter().collect::&lt;Vec&lt;_&gt;&gt;());
             compute::filter(array.as_ref(), &mask)
         }
     }
@@ -470,7 +470,7 @@ fn compact_array(
 **Rule 1: Selection Vector Creation**
 ```
 Filter(predicate, input)
-  WHERE selectivity(predicate) < 0.7
+  WHERE selectivity(predicate) &lt; 0.7
   ↓
 FilterWithSelection(predicate, input)
   produces SelectionVector
@@ -504,7 +504,7 @@ HashJoin(Materialize(FilterWithSelection(...)), ...)
 **Rule 5: Selection Vector Elimination**
 ```
 FilterWithSelection(pred, input)
-  WHERE selectivity(pred) > 0.7
+  WHERE selectivity(pred) &gt; 0.7
   ↓
 Filter(pred, input)
   compact immediately, no selection vector
@@ -528,7 +528,7 @@ Filter(pred, input)
 ### Phase 2: Filter Operator (Weeks 3-4)
 
 **Deliverables**:
-1. `FilterExec` produces selection vectors for selectivity < 70%
+1. `FilterExec` produces selection vectors for selectivity &lt; 70%
 2. Cost model to decide materialize vs propagate
 3. Integration tests: filter chains with selection vectors
 
@@ -572,10 +572,10 @@ Filter(pred, input)
 ```sql
 SELECT sum(l_extendedprice * l_discount) AS revenue
 FROM lineitem
-WHERE l_shipdate >= '1994-01-01'
-  AND l_shipdate < '1995-01-01'
+WHERE l_shipdate &gt;= '1994-01-01'
+  AND l_shipdate &lt; '1995-01-01'
   AND l_discount BETWEEN 0.05 AND 0.07
-  AND l_quantity < 24;
+  AND l_quantity &lt; 24;
 ```
 
 **Selectivity**: ~2% (3 filters each ~25% selective)
@@ -620,7 +620,7 @@ WHERE rare_flag = true;  -- 5% selectivity
 | Multi-filter chains | 10% | **2-3x** | Intersection instead of copy |
 | Filter + projection | 15% | **2-3x** | Skip unused rows in expressions |
 | Filter + hash join | 20% | **1.5-2x** | Materialize once before join |
-| High selectivity (> 70%) | 80% | **1.0x** | Compaction overhead = benefit |
+| High selectivity (&gt; 70%) | 80% | **1.0x** | Compaction overhead = benefit |
 
 ## Cross-Database Applicability
 
@@ -777,3 +777,52 @@ WHERE rare_flag = true;  -- 5% selectivity
 2. Raasveldt, M., & Mühleisen, H. (2019). DuckDB: an Embeddable Analytical Database. *SIGMOD*.
 3. Idreos, S., et al. (2011). Database Cracking. *CIDR*.
 4. Leis, V., et al. (2014). Morsel-Driven Parallelism: A NUMA-Aware Query Evaluation Framework. *SIGMOD*.
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 101: Selection Vector Propagation](/maintainers/rfcs/0101-selection-vector-propagation)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 101: Selection Vector Propagation](/maintainers/rfcs/0101-selection-vector-propagation)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 101: Selection Vector Propagation](/maintainers/rfcs/0101-selection-vector-propagation)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 101: Selection Vector Propagation](/maintainers/rfcs/0101-selection-vector-propagation)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 101: Selection Vector Propagation](/maintainers/rfcs/0101-selection-vector-propagation)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 101: Selection Vector Propagation](/maintainers/rfcs/0101-selection-vector-propagation)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 101: Selection Vector Propagation](/maintainers/rfcs/0101-selection-vector-propagation)

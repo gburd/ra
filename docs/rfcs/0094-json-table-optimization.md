@@ -20,8 +20,8 @@ Without JSON_TABLE support, developers must use verbose nested subqueries or lat
 
 ```sql
 -- PostgreSQL: Verbose lateral join with jsonb_array_elements
-SELECT o.order_id, item.value->>'id' AS item_id,
-       (item.value->>'qty')::int AS quantity
+SELECT o.order_id, item.value-&gt;&gt;'id' AS item_id,
+       (item.value-&gt;&gt;'qty')::int AS quantity
 FROM orders o,
      LATERAL jsonb_array_elements(o.order_items) AS item;
 
@@ -55,7 +55,7 @@ FROM orders o,
          price DECIMAL(10,2) PATH '$.price'
        )
      ) AS jt
-WHERE jt.price > 100;
+WHERE jt.price &gt; 100;
 ```
 
 **Advantages:**
@@ -250,7 +250,7 @@ json_path_expr ::=
 - `[*]` - Array wildcard (all elements)
 - `[n]` - Array index (zero-based)
 - `[start:end]` - Array slice
-- `?(@.field > value)` - Filter expressions
+- `?(@.field &gt; value)` - Filter expressions
 
 ### Relational Algebra Representation
 
@@ -263,23 +263,23 @@ pub enum RelExpr {
     /// JSON_TABLE: Convert JSON to relational table
     JsonTable {
         /// JSON expression (column reference or literal)
-        json_expr: Box<Expr>,
+        json_expr: Box&lt;Expr&gt;,
 
         /// JSONPath to array/object to unnest
         path_expr: String,
 
         /// Column definitions (name, type, path, error handling)
-        columns: Vec<JsonTableColumn>,
+        columns: Vec&lt;JsonTableColumn&gt;,
 
         /// Statistics for cost estimation
-        stats: Option<JsonTableStats>,
+        stats: Option&lt;JsonTableStats&gt;,
     },
 }
 
 pub struct JsonTableColumn {
     pub name: String,
     pub column_type: JsonTableColumnType,
-    pub json_path: Option<String>,
+    pub json_path: Option&lt;String&gt;,
     pub on_error: ErrorHandling,
     pub on_empty: ErrorHandling,
 }
@@ -289,7 +289,7 @@ pub enum JsonTableColumnType {
     Regular { data_type: DataType },
     Nested {
         path: String,
-        columns: Vec<JsonTableColumn>,
+        columns: Vec&lt;JsonTableColumn&gt;,
     },
 }
 
@@ -319,12 +319,12 @@ Push WHERE clause predicates into the JSONPath expression:
 
 ```
 Before:
-  σ[jt.price > 100](
+  σ[jt.price &gt; 100](
     JsonTable(doc, '$[*]' COLUMNS(price PATH '$.price'))
   )
 
 After:
-  JsonTable(doc, '$[?(@.price > 100)]' COLUMNS(price PATH '$.price'))
+  JsonTable(doc, '$[?(@.price &gt; 100)]' COLUMNS(price PATH '$.price'))
 ```
 
 **Benefit:** JSON parser can filter array elements during traversal, avoiding materialization of filtered-out rows.
@@ -334,7 +334,7 @@ After:
 fn json_table_predicate_pushdown(
     filter: RelExpr,
     json_table: RelExpr,
-) -> Option<RelExpr> {
+) -&gt; Option&lt;RelExpr&gt; {
     // Extract predicates on JSON_TABLE columns
     let predicates = extract_json_table_predicates(&filter);
 
@@ -368,7 +368,7 @@ After (PostgreSQL JSONB + GIN index):
   IndexScan(
     table,
     index: GIN(doc),
-    condition: doc @> '{"items": [{"status": "active"}]}'
+    condition: doc @&gt; '{"items": [{"status": "active"}]}'
   )
 ```
 
@@ -401,7 +401,7 @@ After:
 **Benefit:** Near-linear speedup for large arrays (8-15x with 16 workers).
 
 **Heuristic:** Apply when:
-- JSON array has >1000 elements (estimated from statistics)
+- JSON array has &gt;1000 elements (estimated from statistics)
 - JSON_TABLE has no NESTED PATH (no dependencies between rows)
 - Parallel workers available
 
@@ -490,7 +490,7 @@ filter_cost = avg_rows_per_input * num_predicates * PREDICATE_EVAL_COST
 -- JSONPath filter selectivity (heuristic)
 path_selectivity = CASE
   WHEN filter = equality ($.field = value) THEN 0.01
-  WHEN filter = range ($.field > value) THEN 0.3
+  WHEN filter = range ($.field &gt; value) THEN 0.3
   WHEN filter = pattern ($.field LIKE '%value%') THEN 0.1
   ELSE 0.5  -- Unknown
 END
@@ -505,7 +505,7 @@ json_index_scan_cost = BASE_INDEX_COST +
   (estimated_matches * INDEX_TUPLE_COST)
 
 -- Much cheaper than full document parse
-json_index_scan_cost << json_table_cost (when applicable)
+json_index_scan_cost &lt;&lt; json_table_cost (when applicable)
 ```
 
 ### Cross-Database Translation
@@ -548,7 +548,7 @@ FROM table_name t,
 ```sql
 SELECT f.value:id::INT AS id
 FROM table_name t,
-     LATERAL FLATTEN(input => t.data:items) f;
+     LATERAL FLATTEN(input =&gt; t.data:items) f;
 ```
 
 Ra's dialect layer will translate the canonical JSON_TABLE representation to database-specific syntax.
@@ -739,7 +739,7 @@ FROM orders o,
        quantity INT PATH '$.qty',
        price DECIMAL(10,2) PATH '$.price'
      )) AS jt
-WHERE jt.price > 100;
+WHERE jt.price &gt; 100;
 ```
 
 **B3: Nested JSON Structures**
@@ -961,7 +961,7 @@ Snowflake uses FLATTEN for JSON array unnesting:
 ```sql
 SELECT f.value:id::INT AS item_id
 FROM orders o,
-     LATERAL FLATTEN(input => o.items) f;
+     LATERAL FLATTEN(input =&gt; o.items) f;
 ```
 
 **Differences:**
@@ -1004,7 +1004,7 @@ JSON_TABLE(
   doc, '$.items[*]' PASSING @min_price AS min_price
   COLUMNS(
     item_id INT PATH '$.id',
-    price DECIMAL PATH '$.price' WHERE @.price > min_price
+    price DECIMAL PATH '$.price' WHERE @.price &gt; min_price
   )
 )
 ```
@@ -1077,9 +1077,9 @@ CROSS JOIN JSON_TABLE(orders.items, '$[*]' COLUMNS(...));
 - **"The Ubiquity of Large Graphs and Surprising Challenges of Graph Processing"** - Applicable to JSON graph structures
 
 ### Related RFCs
-- **RFC 0083:** XPath and XQuery Optimization (similar structural query optimization)
-- **RFC 0084:** Oracle JSON Relational Duality View Optimization
-- **RFC 0093:** SQL Property Graph Queries (graph pattern matching)
+- **[RFC 0083](/maintainers/rfcs/0083-xpath-xquery-optimization):** XPath and XQuery Optimization (similar structural query optimization)
+- **[RFC 0084](/maintainers/rfcs/0084-oracle-json-relational-duality-optimization):** Oracle JSON Relational Duality View Optimization
+- **[RFC 0093](/maintainers/rfcs/0093-sql-property-graph-queries):** SQL Property Graph Queries (graph pattern matching)
 
 ---
 
@@ -1096,3 +1096,52 @@ JSON_TABLE is a critical feature for modern SQL workloads, with support across a
 **Expected impact:** High - JSON is ubiquitous in modern applications
 **Risk:** Medium - Parser complexity and cost model uncertainty
 **Priority:** High - #1 missing standard SQL feature by impact
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 94: JSON_TABLE Optimization](/maintainers/rfcs/0094-json-table-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 94: JSON_TABLE Optimization](/maintainers/rfcs/0094-json-table-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 94: JSON_TABLE Optimization](/maintainers/rfcs/0094-json-table-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 94: JSON_TABLE Optimization](/maintainers/rfcs/0094-json-table-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 94: JSON_TABLE Optimization](/maintainers/rfcs/0094-json-table-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 94: JSON_TABLE Optimization](/maintainers/rfcs/0094-json-table-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 94: JSON_TABLE Optimization](/maintainers/rfcs/0094-json-table-optimization)

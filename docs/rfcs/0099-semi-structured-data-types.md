@@ -62,7 +62,7 @@ SELECT
     data:metadata.timestamp::timestamp AS event_time
 FROM orders
 WHERE data:status = 'pending'
-  AND data:total > 100;
+  AND data:total &gt; 100;
 ```
 
 **Ra Optimization:**
@@ -87,8 +87,8 @@ Filter {
 -- Transform list elements
 SELECT
     user_id,
-    list_transform(purchases, p -> p.price * 1.1) AS adjusted_prices,
-    list_filter(purchases, p -> p.category = 'electronics') AS electronics
+    list_transform(purchases, p -&gt; p.price * 1.1) AS adjusted_prices,
+    list_filter(purchases, p -&gt; p.category = 'electronics') AS electronics
 FROM user_purchases
 WHERE list_contains(purchases, {'category': 'laptop'});
 ```
@@ -195,20 +195,20 @@ pub enum DataType {
     Array,
 
     /// DuckDB LIST: variable-length array with uniform element type
-    List(Box<DataType>),
+    List(Box&lt;DataType&gt;),
 
     /// DuckDB STRUCT: named fields with static schema (like row type)
-    Struct(Vec<StructField>),
+    Struct(Vec&lt;StructField&gt;),
 
     /// DuckDB MAP: dynamic key-value pairs with consistent types
     Map {
-        key_type: Box<DataType>,
-        value_type: Box<DataType>,
+        key_type: Box&lt;DataType&gt;,
+        value_type: Box&lt;DataType&gt;,
     },
 
     /// Fixed-size ARRAY (DuckDB): array with compile-time size
     FixedArray {
-        element_type: Box<DataType>,
+        element_type: Box&lt;DataType&gt;,
         size: usize,
     },
 }
@@ -233,79 +233,79 @@ pub enum Expr {
     /// VARIANT path access: data:customer.name or data['key']
     /// Snowflake-style colon notation
     VariantPath {
-        base: Box<Expr>,
+        base: Box&lt;Expr&gt;,
         path: PathSegment,
     },
 
     /// STRUCT field access: struct_col.field_name
     /// DuckDB dot notation
     StructFieldAccess {
-        struct_expr: Box<Expr>,
+        struct_expr: Box&lt;Expr&gt;,
         field_name: String,
     },
 
     /// LIST/ARRAY index access: list[idx]
     ListIndex {
-        list: Box<Expr>,
-        index: Box<Expr>,  // 0-based
+        list: Box&lt;Expr&gt;,
+        index: Box&lt;Expr&gt;,  // 0-based
     },
 
     /// LIST slice: list[start:end:step]
     ListSlice {
-        list: Box<Expr>,
-        start: Option<Box<Expr>>,
-        end: Option<Box<Expr>>,
-        step: Option<Box<Expr>>,
+        list: Box&lt;Expr&gt;,
+        start: Option&lt;Box&lt;Expr&gt;&gt;,
+        end: Option&lt;Box&lt;Expr&gt;&gt;,
+        step: Option&lt;Box&lt;Expr&gt;&gt;,
     },
 
     /// MAP key access: map['key']
     MapIndex {
-        map: Box<Expr>,
-        key: Box<Expr>,
+        map: Box&lt;Expr&gt;,
+        key: Box&lt;Expr&gt;,
     },
 
     /// List literal: [1, 2, 3] or ARRAY[1, 2, 3]
-    ListConstructor(Vec<Expr>),
+    ListConstructor(Vec&lt;Expr&gt;),
 
     /// Struct literal: {'name': 'Alice', 'age': 30}
-    StructConstructor(Vec<(String, Expr)>),
+    StructConstructor(Vec&lt;(String, Expr)&gt;),
 
     /// Map literal: MAP {'k1': 10, 'k2': 20}
-    MapConstructor(Vec<(Expr, Expr)>),
+    MapConstructor(Vec&lt;(Expr, Expr)&gt;),
 
-    /// Lambda expression: x -> x * 2
+    /// Lambda expression: x -&gt; x * 2
     Lambda {
-        params: Vec<String>,
-        body: Box<Expr>,
+        params: Vec&lt;String&gt;,
+        body: Box&lt;Expr&gt;,
     },
 
     /// LIST transform: list_transform(list, lambda)
     ListTransform {
-        list: Box<Expr>,
-        lambda: Box<Expr>,  // Must be Lambda variant
+        list: Box&lt;Expr&gt;,
+        lambda: Box&lt;Expr&gt;,  // Must be Lambda variant
     },
 
     /// LIST filter: list_filter(list, lambda)
     ListFilter {
-        list: Box<Expr>,
-        lambda: Box<Expr>,
+        list: Box&lt;Expr&gt;,
+        lambda: Box&lt;Expr&gt;,
     },
 
     /// LIST aggregate: list_sum(list), list_avg(list)
     ListAggregate {
-        list: Box<Expr>,
+        list: Box&lt;Expr&gt;,
         func: ListAggFunc,
     },
 
     /// STRUCT update: struct_insert(s, field := value, ...)
     StructInsert {
-        struct_expr: Box<Expr>,
-        updates: Vec<(String, Expr)>,
+        struct_expr: Box&lt;Expr&gt;,
+        updates: Vec&lt;(String, Expr)&gt;,
     },
 
     /// STRUCT/LIST expansion: struct.* or unnest(list)
     Unnest {
-        expr: Box<Expr>,
+        expr: Box&lt;Expr&gt;,
         expand_mode: UnnestMode,
     },
 }
@@ -313,11 +313,11 @@ pub enum Expr {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum PathSegment {
     /// JSON path: $.customer.name
-    DotPath(Vec<String>),
+    DotPath(Vec&lt;String&gt;),
     /// Bracket notation: ['key1']['key2']
-    BracketPath(Vec<String>),
+    BracketPath(Vec&lt;String&gt;),
     /// Array index: [0][1]
-    IndexPath(Vec<usize>),
+    IndexPath(Vec&lt;usize&gt;),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -353,9 +353,9 @@ pub enum RelExpr {
     /// FLATTEN operation (Snowflake): explode semi-structured data
     /// Produces 6 columns: SEQ, KEY, PATH, INDEX, VALUE, THIS
     Flatten {
-        input: Box<RelExpr>,
+        input: Box&lt;RelExpr&gt;,
         input_expr: Expr,      // VARIANT/OBJECT/ARRAY expression
-        path: Option<String>,  // Extract nested element first
+        path: Option&lt;String&gt;,  // Extract nested element first
         outer: bool,           // TRUE = LEFT JOIN semantics (keep nulls)
         recursive: bool,       // Recursively flatten nested structures
         mode: FlattenMode,     // Filter by element type
@@ -396,21 +396,21 @@ enum VariantData {
 
 /// Optimized STRUCT storage: separate column buffers per field
 pub struct StructColumn {
-    fields: Vec<StructFieldColumn>,
+    fields: Vec&lt;StructFieldColumn&gt;,
 }
 
 struct StructFieldColumn {
     name: String,
     data_type: DataType,
-    values: Box<dyn Array>,  // Arrow-compatible array
-    nulls: Option<BitVec>,
+    values: Box&lt;dyn Array&gt;,  // Arrow-compatible array
+    nulls: Option&lt;BitVec&gt;,
 }
 
 /// LIST storage: offset array + value array
 pub struct ListColumn {
-    offsets: Vec<usize>,   // Start offset per list
-    values: Box<dyn Array>, // Flattened element values
-    nulls: Option<BitVec>,
+    offsets: Vec&lt;usize&gt;,   // Start offset per list
+    values: Box&lt;dyn Array&gt;, // Flattened element values
+    nulls: Option&lt;BitVec&gt;,
 }
 ```
 
@@ -421,21 +421,21 @@ pub struct ListColumn {
 
 /// Track frequently-accessed paths and their values
 pub struct VariantPathDictionary {
-    /// Path -> dictionary ID mapping
-    path_ids: HashMap<String, u32>,
+    /// Path -&gt; dictionary ID mapping
+    path_ids: HashMap&lt;String, u32&gt;,
 
-    /// Dictionary per path: value -> code
-    dictionaries: Vec<HashMap<VariantValue, u16>>,
+    /// Dictionary per path: value -&gt; code
+    dictionaries: Vec&lt;HashMap&lt;VariantValue, u16&gt;&gt;,
 
-    /// Reverse lookup: code -> value
-    reverse_dicts: Vec<Vec<VariantValue>>,
+    /// Reverse lookup: code -&gt; value
+    reverse_dicts: Vec&lt;Vec&lt;VariantValue&gt;&gt;,
 }
 
 impl VariantPathDictionary {
     /// Convert path predicate to dictionary code predicate
     /// WHERE data:status = 'pending'
-    ///   -> WHERE status_code = 42  (if 'pending' has code 42)
-    pub fn encode_predicate(&self, path: &str, value: &VariantValue) -> Option<u16> {
+    ///   -&gt; WHERE status_code = 42  (if 'pending' has code 42)
+    pub fn encode_predicate(&self, path: &str, value: &VariantValue) -&gt; Option&lt;u16&gt; {
         let path_id = self.path_ids.get(path)?;
         let dict = &self.dictionaries[*path_id as usize];
         dict.get(value).copied()
@@ -454,16 +454,16 @@ pub struct NestedColumnStats {
     base: ColumnStats,
 
     /// Per-path statistics for VARIANT
-    variant_paths: HashMap<String, PathStats>,
+    variant_paths: HashMap&lt;String, PathStats&gt;,
 
     /// Per-field statistics for STRUCT
-    struct_fields: HashMap<String, Box<ColumnStats>>,
+    struct_fields: HashMap&lt;String, Box&lt;ColumnStats&gt;&gt;,
 
     /// List length distribution
     list_lengths: Histogram,
 
     /// Map key cardinality
-    map_key_cardinality: Option<u64>,
+    map_key_cardinality: Option&lt;u64&gt;,
 }
 
 #[derive(Debug, Clone)]
@@ -472,41 +472,41 @@ pub struct PathStats {
     access_frequency: u64,
 
     /// Type distribution: % INT, % STRING, % NULL, etc.
-    type_histogram: HashMap<u8, f64>,
+    type_histogram: HashMap&lt;u8, f64&gt;,
 
     /// Min/max values for each type
-    min_values: HashMap<u8, VariantValue>,
-    max_values: HashMap<u8, VariantValue>,
+    min_values: HashMap&lt;u8, VariantValue&gt;,
+    max_values: HashMap&lt;u8, VariantValue&gt;,
 
     /// Distinct value count (approximate via HyperLogLog)
     distinct_count: HyperLogLog,
 
     /// Most common values (for frequent path values)
-    mcv: Vec<(VariantValue, f64)>,
+    mcv: Vec&lt;(VariantValue, f64)&gt;,
 }
 
 impl PathStats {
     /// Estimate selectivity for path predicate
-    /// WHERE data:status = 'active' -> estimate % of rows matching
-    pub fn estimate_selectivity(&self, op: ComparisonOp, value: &VariantValue) -> f64 {
+    /// WHERE data:status = 'active' -&gt; estimate % of rows matching
+    pub fn estimate_selectivity(&self, op: ComparisonOp, value: &VariantValue) -&gt; f64 {
         // Use MCV if value is present
         if let Some(&freq) = self.mcv.iter()
             .find(|(v, _)| v == value)
             .map(|(_, f)| f)
         {
             return match op {
-                ComparisonOp::Eq => freq,
-                ComparisonOp::Ne => 1.0 - freq,
-                _ => self.estimate_range_selectivity(op, value),
+                ComparisonOp::Eq =&gt; freq,
+                ComparisonOp::Ne =&gt; 1.0 - freq,
+                _ =&gt; self.estimate_range_selectivity(op, value),
             };
         }
 
         // Fall back to uniform distribution over distinct values
         let uniform_prob = 1.0 / self.distinct_count.count() as f64;
         match op {
-            ComparisonOp::Eq => uniform_prob,
-            ComparisonOp::Ne => 1.0 - uniform_prob,
-            _ => self.estimate_range_selectivity(op, value),
+            ComparisonOp::Eq =&gt; uniform_prob,
+            ComparisonOp::Ne =&gt; 1.0 - uniform_prob,
+            _ =&gt; self.estimate_range_selectivity(op, value),
         }
     }
 }
@@ -521,18 +521,18 @@ impl PathStats {
 pub struct NestedPredicatePushdown;
 
 impl RewriteRule for NestedPredicatePushdown {
-    fn apply(&self, expr: &RelExpr) -> Option<RelExpr> {
+    fn apply(&self, expr: &RelExpr) -&gt; Option&lt;RelExpr&gt; {
         match expr {
-            RelExpr::Filter { predicate, input } => {
+            RelExpr::Filter { predicate, input } =&gt; {
                 self.try_pushdown_nested(predicate, input)
             }
-            _ => None,
+            _ =&gt; None,
         }
     }
 }
 
 impl NestedPredicatePushdown {
-    fn try_pushdown_nested(&self, predicate: &Expr, input: &RelExpr) -> Option<RelExpr> {
+    fn try_pushdown_nested(&self, predicate: &Expr, input: &RelExpr) -&gt; Option&lt;RelExpr&gt; {
         // Extract path-based predicates
         let (nested_preds, other_preds) = self.partition_predicates(predicate);
 
@@ -542,7 +542,7 @@ impl NestedPredicatePushdown {
 
         // Push nested predicates to scan operator
         match input.as_ref() {
-            RelExpr::Scan { table, filter, .. } => {
+            RelExpr::Scan { table, filter, .. } =&gt; {
                 let combined_filter = self.combine_filters(filter, &nested_preds);
                 Some(RelExpr::Filter {
                     predicate: other_preds,
@@ -553,12 +553,12 @@ impl NestedPredicatePushdown {
                     }),
                 })
             }
-            _ => None,
+            _ =&gt; None,
         }
     }
 
     /// Separate nested (pushable) from non-nested predicates
-    fn partition_predicates(&self, pred: &Expr) -> (Vec<Expr>, Expr) {
+    fn partition_predicates(&self, pred: &Expr) -&gt; (Vec&lt;Expr&gt;, Expr) {
         let mut nested = Vec::new();
         let mut others = Vec::new();
 
@@ -574,11 +574,11 @@ impl NestedPredicatePushdown {
     }
 
     /// Check if predicate can be pushed to storage
-    /// Pushable: data:status = 'active', list[0] > 10
-    /// Not pushable: list_sum(data:values) > 100 (requires computation)
-    fn is_pushable_nested(&self, expr: &Expr) -> bool {
+    /// Pushable: data:status = 'active', list[0] &gt; 10
+    /// Not pushable: list_sum(data:values) &gt; 100 (requires computation)
+    fn is_pushable_nested(&self, expr: &Expr) -&gt; bool {
         match expr {
-            Expr::BinaryOp { left, op, right } if op.is_comparison() => {
+            Expr::BinaryOp { left, op, right } if op.is_comparison() =&gt; {
                 matches!(
                     (left.as_ref(), right.as_ref()),
                     (Expr::VariantPath { .. }, Expr::Const(_)) |
@@ -588,7 +588,7 @@ impl NestedPredicatePushdown {
                     (Expr::Const(_), Expr::StructFieldAccess { .. })
                 )
             }
-            _ => false,
+            _ =&gt; false,
         }
     }
 }
@@ -602,7 +602,7 @@ impl NestedPredicatePushdown {
 /// Cost adjustments for nested data operations
 pub struct NestedCostModel {
     /// Base cost model
-    base: Box<dyn CostModel>,
+    base: Box&lt;dyn CostModel&gt;,
 
     /// Cost per byte of VARIANT parsing
     variant_parse_cost_per_byte: f64,
@@ -616,14 +616,14 @@ pub struct NestedCostModel {
 
 impl NestedCostModel {
     /// Estimate cost of VARIANT path access
-    pub fn cost_variant_path(&self, stats: &NestedColumnStats, path: &str) -> f64 {
+    pub fn cost_variant_path(&self, stats: &NestedColumnStats, path: &str) -&gt; f64 {
         let path_stats = match stats.variant_paths.get(path) {
-            Some(s) => s,
-            None => return self.variant_parse_cost_per_byte * 128.0, // Worst case: parse full value
+            Some(s) =&gt; s,
+            None =&gt; return self.variant_parse_cost_per_byte * 128.0, // Worst case: parse full value
         };
 
         // Check if path is dictionary-encoded
-        let is_dict_encoded = path_stats.access_frequency > 1000;
+        let is_dict_encoded = path_stats.access_frequency &gt; 1000;
 
         if is_dict_encoded {
             // Dictionary lookup: O(1)
@@ -636,14 +636,14 @@ impl NestedCostModel {
     }
 
     /// Estimate cost of LIST transformation
-    pub fn cost_list_transform(&self, list_stats: &ListStats, lambda_cost: f64) -> f64 {
+    pub fn cost_list_transform(&self, list_stats: &ListStats, lambda_cost: f64) -&gt; f64 {
         let avg_list_length = list_stats.avg_length();
         let per_element_cost = lambda_cost + self.list_transform_cost_per_element;
         avg_list_length * per_element_cost
     }
 
     /// Estimate cost of FLATTEN operation
-    pub fn cost_flatten(&self, input_rows: u64, expansion_factor: f64) -> f64 {
+    pub fn cost_flatten(&self, input_rows: u64, expansion_factor: f64) -&gt; f64 {
         let output_rows = (input_rows as f64 * expansion_factor) as u64;
 
         // Cost = input scan + output materialization + memory allocation
@@ -664,9 +664,9 @@ pub struct FlattenOptimizationRules;
 
 impl FlattenOptimizationRules {
     /// Rewrite FLATTEN + Filter to push predicate into FLATTEN
-    /// SELECT * FROM t, LATERAL FLATTEN(data) f WHERE f.value:price > 100
-    ///   -> SELECT * FROM t, LATERAL FLATTEN(data, filter => value:price > 100) f
-    pub fn pushdown_filter_into_flatten(&self, expr: &RelExpr) -> Option<RelExpr> {
+    /// SELECT * FROM t, LATERAL FLATTEN(data) f WHERE f.value:price &gt; 100
+    ///   -&gt; SELECT * FROM t, LATERAL FLATTEN(data, filter =&gt; value:price &gt; 100) f
+    pub fn pushdown_filter_into_flatten(&self, expr: &RelExpr) -&gt; Option&lt;RelExpr&gt; {
         match expr {
             RelExpr::Filter {
                 predicate,
@@ -675,7 +675,7 @@ impl FlattenOptimizationRules {
                     right: box RelExpr::Flatten { input_expr, .. },
                     ..
                 },
-            } => {
+            } =&gt; {
                 // Extract predicates on FLATTEN output columns
                 let flatten_preds = self.extract_flatten_predicates(predicate);
                 if flatten_preds.is_empty() {
@@ -685,14 +685,14 @@ impl FlattenOptimizationRules {
                 // Push predicates into FLATTEN's input_expr
                 Some(self.rewrite_flatten_with_filter(expr, flatten_preds))
             }
-            _ => None,
+            _ =&gt; None,
         }
     }
 
     /// Avoid FLATTEN when direct path access suffices
     /// SELECT f.value:name FROM t, LATERAL FLATTEN(data:items) f
-    ///   -> SELECT data:items[*]:name FROM t  (if database supports array path notation)
-    pub fn eliminate_unnecessary_flatten(&self, expr: &RelExpr) -> Option<RelExpr> {
+    ///   -&gt; SELECT data:items[*]:name FROM t  (if database supports array path notation)
+    pub fn eliminate_unnecessary_flatten(&self, expr: &RelExpr) -&gt; Option&lt;RelExpr&gt; {
         // Pattern match: FLATTEN followed by simple path access
         // Replace with array path notation if supported
         unimplemented!("Requires dialect-specific support")
@@ -704,8 +704,8 @@ pub struct ListOptimizationRules;
 
 impl ListOptimizationRules {
     /// Fuse multiple LIST transformations
-    /// list_transform(list_transform(l, f), g) -> list_transform(l, x -> g(f(x)))
-    pub fn fuse_list_transforms(&self, expr: &Expr) -> Option<Expr> {
+    /// list_transform(list_transform(l, f), g) -&gt; list_transform(l, x -&gt; g(f(x)))
+    pub fn fuse_list_transforms(&self, expr: &Expr) -&gt; Option&lt;Expr&gt; {
         match expr {
             Expr::ListTransform {
                 list: box Expr::ListTransform {
@@ -713,7 +713,7 @@ impl ListOptimizationRules {
                     lambda: inner_lambda,
                 },
                 lambda: outer_lambda,
-            } => {
+            } =&gt; {
                 // Compose lambdas: outer(inner(x))
                 let fused_lambda = self.compose_lambdas(inner_lambda, outer_lambda)?;
                 Some(Expr::ListTransform {
@@ -721,14 +721,14 @@ impl ListOptimizationRules {
                     lambda: Box::new(fused_lambda),
                 })
             }
-            _ => None,
+            _ =&gt; None,
         }
     }
 
     /// Push predicates into LIST filter
     /// WHERE list_contains(items, x) AND other_cond
-    ///   -> list_filter(items, lambda) + WHERE other_cond
-    pub fn extract_list_predicates(&self, expr: &Expr) -> Option<Expr> {
+    ///   -&gt; list_filter(items, lambda) + WHERE other_cond
+    pub fn extract_list_predicates(&self, expr: &Expr) -&gt; Option&lt;Expr&gt; {
         unimplemented!("Complex predicate analysis required")
     }
 }
@@ -743,7 +743,7 @@ impl ListOptimizationRules {
 
 impl Parser {
     /// Parse VARIANT path access: data:customer.name
-    fn parse_variant_path(&mut self) -> Result<Expr> {
+    fn parse_variant_path(&mut self) -&gt; Result&lt;Expr&gt; {
         let base = self.parse_primary_expr()?;
 
         if self.consume_token(TokenType::Colon) {
@@ -758,7 +758,7 @@ impl Parser {
     }
 
     /// Parse LIST literal: [1, 2, 3]
-    fn parse_list_literal(&mut self) -> Result<Expr> {
+    fn parse_list_literal(&mut self) -&gt; Result&lt;Expr&gt; {
         self.expect_token(TokenType::LeftBracket)?;
         let mut elements = Vec::new();
 
@@ -773,10 +773,10 @@ impl Parser {
         Ok(Expr::ListConstructor(elements))
     }
 
-    /// Parse lambda expression: x -> x * 2
-    fn parse_lambda(&mut self) -> Result<Expr> {
+    /// Parse lambda expression: x -&gt; x * 2
+    fn parse_lambda(&mut self) -&gt; Result&lt;Expr&gt; {
         let params = self.parse_lambda_params()?;
-        self.expect_token(TokenType::Arrow)?;  // ->
+        self.expect_token(TokenType::Arrow)?;  // -&gt;
         let body = self.parse_expr()?;
 
         Ok(Expr::Lambda {
@@ -798,16 +798,16 @@ pub struct NestedColumnInfo {
     pub base: ColumnInfo,
 
     /// For VARIANT: tracked paths with statistics
-    pub variant_tracked_paths: Vec<String>,
+    pub variant_tracked_paths: Vec&lt;String&gt;,
 
     /// For STRUCT: field definitions
-    pub struct_fields: Vec<StructField>,
+    pub struct_fields: Vec&lt;StructField&gt;,
 
     /// For LIST: element type
-    pub list_element_type: Option<DataType>,
+    pub list_element_type: Option&lt;DataType&gt;,
 
     /// For MAP: key and value types
-    pub map_types: Option<(DataType, DataType)>,
+    pub map_types: Option&lt;(DataType, DataType)&gt;,
 }
 
 impl Catalog {
@@ -817,15 +817,15 @@ impl Catalog {
         column: &str,
         path: &str,
         access_count: u64
-    ) -> Result<()> {
+    ) -&gt; Result&lt;()&gt; {
         let col_info = self.get_nested_column_mut(table, column)?;
 
         // Track frequently-accessed paths
-        if access_count > 100 && !col_info.variant_tracked_paths.contains(&path.to_string()) {
+        if access_count &gt; 100 && !col_info.variant_tracked_paths.contains(&path.to_string()) {
             col_info.variant_tracked_paths.push(path.to_string());
 
             // Suggest materialized column for hot paths
-            if access_count > 10000 {
+            if access_count &gt; 10000 {
                 self.add_optimization_hint(OptimizationHint::MaterializePath {
                     table: table.to_string(),
                     column: column.to_string(),
@@ -879,22 +879,22 @@ pub enum NestedTypeError {
 }
 
 impl fmt::Display for NestedTypeError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter) -&gt; fmt::Result {
         match self {
-            Self::NotAList { expr, actual_type } => {
+            Self::NotAList { expr, actual_type } =&gt; {
                 write!(f, "Cannot apply list operation to {}: type is {:?}, expected LIST",
                     expr, actual_type)
             }
-            Self::FieldNotFound { struct_type, field_name } => {
+            Self::FieldNotFound { struct_type, field_name } =&gt; {
                 write!(f, "Field '{}' not found in struct type {:?}", field_name, struct_type)
             }
-            Self::LambdaArityMismatch { expected, actual } => {
+            Self::LambdaArityMismatch { expected, actual } =&gt; {
                 write!(f, "Lambda expects {} parameters, got {}", expected, actual)
             }
-            Self::PathNotFound { variant_value, path } => {
+            Self::PathNotFound { variant_value, path } =&gt; {
                 write!(f, "Path '{}' not found in VARIANT value: {:?}", path, variant_value)
             }
-            Self::MapKeyTypeMismatch { expected, actual } => {
+            Self::MapKeyTypeMismatch { expected, actual } =&gt; {
                 write!(f, "MAP key type mismatch: expected {:?}, got {:?}", expected, actual)
             }
         }
@@ -924,7 +924,7 @@ impl fmt::Display for NestedTypeError {
    - Critical for Parquet nested column reading
 
 3. **Predicate Pushdown (10-100x I/O reduction):**
-   - Push `data:timestamp > '2024-01-01'` to Parquet row group pruning
+   - Push `data:timestamp &gt; '2024-01-01'` to Parquet row group pruning
    - Use zone maps on nested fields
    - Skip entire files based on nested predicates
 
@@ -1130,7 +1130,7 @@ impl fmt::Display for NestedTypeError {
 
 **JSONB Type:**
 - Binary JSON with indexing (GIN indexes)
-- Path operators: `data->'key'`, `data->>'key'`
+- Path operators: `data-&gt;'key'`, `data-&gt;&gt;'key'`
 - No nested relational types (LIST/STRUCT)
 
 **What We Learn:**
@@ -1164,7 +1164,7 @@ impl fmt::Display for NestedTypeError {
 
 **Native Nested Types:**
 - LIST, STRUCT, MAP, ARRAY as first-class types
-- Lambda expressions: `list_transform(l, x -> x * 2)`
+- Lambda expressions: `list_transform(l, x -&gt; x * 2)`
 - Deep Parquet integration (column pruning, pushdown)
 
 **What We Learn:**
@@ -1329,7 +1329,7 @@ ALTER TABLE orders
 
 -- Rewrite queries to use materialized column
 SELECT * FROM orders WHERE data:customer.id = 123
-  -> SELECT * FROM orders WHERE customer_id = 123
+  -&gt; SELECT * FROM orders WHERE customer_id = 123
 ```
 
 Eliminates JSON parsing overhead for common paths.
@@ -1366,7 +1366,7 @@ Enables fast analytics on large nested datasets.
 
 #### 6. Vector Similarity Search on LIST (9-12 months)
 
-Integrate with vector operations (RFC 0064):
+Integrate with vector operations ([RFC 0064](/maintainers/rfcs/0064-vector-similarity-search-optimization)):
 
 ```sql
 -- Cosine similarity on embedding lists
@@ -1494,3 +1494,52 @@ Critical for ML/AI applications.
 **Total Estimated Effort:** 30-40 weeks (7-10 months) with 1-2 full-time engineers.
 
 **Expected Impact:** Very High — Enables Ra to optimize 20+ dependent features and unlock cloud data warehouse optimization market.
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 99: Semi-Structured Data Types](/maintainers/rfcs/0099-semi-structured-data-types)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 99: Semi-Structured Data Types](/maintainers/rfcs/0099-semi-structured-data-types)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 99: Semi-Structured Data Types](/maintainers/rfcs/0099-semi-structured-data-types)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 99: Semi-Structured Data Types](/maintainers/rfcs/0099-semi-structured-data-types)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 99: Semi-Structured Data Types](/maintainers/rfcs/0099-semi-structured-data-types)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 99: Semi-Structured Data Types](/maintainers/rfcs/0099-semi-structured-data-types)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 99: Semi-Structured Data Types](/maintainers/rfcs/0099-semi-structured-data-types)

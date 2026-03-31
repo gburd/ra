@@ -26,7 +26,7 @@ SELECT t.trade_id, t.symbol, t.trade_time, t.quantity,
        (SELECT p.price
         FROM prices p
         WHERE p.symbol = t.symbol
-          AND p.price_time <= t.trade_time
+          AND p.price_time &lt;= t.trade_time
         ORDER BY p.price_time DESC
         LIMIT 1) AS price
 FROM trades t;
@@ -69,7 +69,7 @@ SELECT t.trade_id, t.symbol, t.trade_time,
 FROM trades t
 ASOF JOIN prices p
   ON t.symbol = p.symbol
-  AND t.trade_time >= p.price_time;
+  AND t.trade_time &gt;= p.price_time;
 ```
 
 **USING shorthand for common cases:**
@@ -78,29 +78,29 @@ SELECT *
 FROM trades t
 ASOF JOIN prices p
   USING (symbol)
-  ON t.trade_time >= p.price_time;
+  ON t.trade_time &gt;= p.price_time;
 ```
 
 ### Match Semantics
 
 ASOF joins provide three matching modes based on the inequality operator:
 
-**Forward matching (>=, >):** Match with the nearest earlier record
+**Forward matching (&gt;=, &gt;):** Match with the nearest earlier record
 ```sql
 -- Find the most recent price before or at trade time
 SELECT * FROM trades t
 ASOF JOIN prices p
   ON t.symbol = p.symbol
-  AND t.trade_time >= p.price_time;
+  AND t.trade_time &gt;= p.price_time;
 ```
 
-**Backward matching (<=, <):** Match with the nearest later record
+**Backward matching (&lt;=, &lt;):** Match with the nearest later record
 ```sql
 -- Find the next scheduled maintenance after each sensor reading
 SELECT * FROM sensor_readings s
 ASOF JOIN maintenance_schedule m
   ON s.device_id = m.device_id
-  AND s.reading_time <= m.scheduled_time;
+  AND s.reading_time &lt;= m.scheduled_time;
 ```
 
 **Nearest match:** Find the closest record (requires extension)
@@ -122,7 +122,7 @@ SELECT t.*, p.price
 FROM trades t
 LEFT ASOF JOIN prices p
   ON t.symbol = p.symbol
-  AND t.trade_time >= p.price_time;
+  AND t.trade_time &gt;= p.price_time;
 -- All trades included, price=NULL if no prior price exists
 ```
 
@@ -132,7 +132,7 @@ SELECT t.*, p.price
 FROM trades t
 INNER ASOF JOIN prices p
   ON t.symbol = p.symbol
-  AND t.trade_time >= p.price_time;
+  AND t.trade_time &gt;= p.price_time;
 -- Only trades with prior prices
 ```
 
@@ -173,10 +173,10 @@ pub enum JoinType {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AsOfDirection {
-    /// Forward matching: left.time >= right.time
+    /// Forward matching: left.time &gt;= right.time
     /// Match with the nearest earlier right record
     Forward,
-    /// Backward matching: left.time <= right.time
+    /// Backward matching: left.time &lt;= right.time
     /// Match with the nearest later right record
     Backward,
 }
@@ -184,7 +184,7 @@ pub enum AsOfDirection {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AsOfCondition {
     /// Equality predicates (e.g., symbol = symbol)
-    pub equality_keys: Vec<(Expr, Expr)>,
+    pub equality_keys: Vec&lt;(Expr, Expr)&gt;,
     /// Inequality predicate on ordering column
     pub ordering_left: Expr,
     pub ordering_right: Expr,
@@ -200,14 +200,14 @@ Implement three ASOF join algorithms:
 
 ```rust
 pub struct SortMergeAsOfJoin {
-    left: Box<dyn PhysicalOperator>,
-    right: Box<dyn PhysicalOperator>,
+    left: Box&lt;dyn PhysicalOperator&gt;,
+    right: Box&lt;dyn PhysicalOperator&gt;,
     condition: AsOfCondition,
     join_type: JoinType,
 }
 
 impl PhysicalOperator for SortMergeAsOfJoin {
-    fn execute(&self) -> Result<RecordBatch> {
+    fn execute(&self) -&gt; Result&lt;RecordBatch&gt; {
         // Requirements:
         // - Left sorted by (equality_keys, ordering_column)
         // - Right sorted by (equality_keys, ordering_column)
@@ -245,16 +245,16 @@ impl PhysicalOperator for SortMergeAsOfJoin {
     fn find_nearest_match(
         &self,
         left_row: &Row,
-        right_iter: &mut Peekable<Iter<Row>>,
+        right_iter: &mut Peekable&lt;Iter&lt;Row&gt;&gt;,
         direction: AsOfDirection,
-    ) -> Option<&Row> {
+    ) -&gt; Option&lt;&Row&gt; {
         let mut best_match = None;
 
         match direction {
-            AsOfDirection::Forward => {
-                // Find largest right.time where right.time <= left.time
+            AsOfDirection::Forward =&gt; {
+                // Find largest right.time where right.time &lt;= left.time
                 while let Some(right_row) = right_iter.peek() {
-                    if right_row.ordering <= left_row.ordering {
+                    if right_row.ordering &lt;= left_row.ordering {
                         best_match = Some(*right_row);
                         right_iter.next();
                     } else {
@@ -262,10 +262,10 @@ impl PhysicalOperator for SortMergeAsOfJoin {
                     }
                 }
             }
-            AsOfDirection::Backward => {
-                // Find smallest right.time where right.time >= left.time
+            AsOfDirection::Backward =&gt; {
+                // Find smallest right.time where right.time &gt;= left.time
                 if let Some(right_row) = right_iter.peek() {
-                    if right_row.ordering >= left_row.ordering {
+                    if right_row.ordering &gt;= left_row.ordering {
                         best_match = Some(*right_row);
                     }
                 }
@@ -284,14 +284,14 @@ impl PhysicalOperator for SortMergeAsOfJoin {
 
 ```rust
 pub struct IndexAsOfJoin {
-    left: Box<dyn PhysicalOperator>,
+    left: Box&lt;dyn PhysicalOperator&gt;,
     right_table: TableHandle,
     right_index: BTreeIndex,  // Index on (equality_keys, ordering_column)
     condition: AsOfCondition,
 }
 
 impl PhysicalOperator for IndexAsOfJoin {
-    fn execute(&self) -> Result<RecordBatch> {
+    fn execute(&self) -&gt; Result&lt;RecordBatch&gt; {
         let left_batches = self.left.execute()?;
         let mut output = Vec::new();
 
@@ -302,15 +302,15 @@ impl PhysicalOperator for IndexAsOfJoin {
 
             // Use index to find nearest match
             let matched = match self.condition.direction {
-                AsOfDirection::Forward => {
-                    // Range scan: find max(right.time) where right.time <= left.time
+                AsOfDirection::Forward =&gt; {
+                    // Range scan: find max(right.time) where right.time &lt;= left.time
                     self.right_index.range_lookup(
                         partition_key.clone(),
                         ..=ordering_value,
                     ).last()
                 }
-                AsOfDirection::Backward => {
-                    // Range scan: find min(right.time) where right.time >= left.time
+                AsOfDirection::Backward =&gt; {
+                    // Range scan: find min(right.time) where right.time &gt;= left.time
                     self.right_index.range_lookup(
                         partition_key.clone(),
                         ordering_value..,
@@ -333,14 +333,14 @@ impl PhysicalOperator for IndexAsOfJoin {
 
 ```rust
 pub struct HashAsOfJoin {
-    left: Box<dyn PhysicalOperator>,
-    right: Box<dyn PhysicalOperator>,
+    left: Box&lt;dyn PhysicalOperator&gt;,
+    right: Box&lt;dyn PhysicalOperator&gt;,
     condition: AsOfCondition,
     bucket_size: Duration,  // Time bucket size for approximation
 }
 
 impl PhysicalOperator for HashAsOfJoin {
-    fn execute(&self) -> Result<RecordBatch> {
+    fn execute(&self) -&gt; Result&lt;RecordBatch&gt; {
         // Phase 1: Bucket right side by time ranges
         let right_buckets = self.build_time_buckets(
             self.right.execute()?,
@@ -389,7 +389,7 @@ impl CostModel {
         left_sorted: bool,
         right_sorted: bool,
         index_available: bool,
-    ) -> f64 {
+    ) -&gt; f64 {
         // Sort cost if inputs not pre-sorted
         let left_sort_cost = if !left_sorted {
             left_cardinality * left_cardinality.log2() * CPU_OPERATOR_COST
@@ -419,7 +419,7 @@ impl CostModel {
         &self,
         left_cardinality: f64,
         right_cardinality: f64,
-    ) -> f64 {
+    ) -&gt; f64 {
         // Self-join with inequality: O(n * m) nested loop
         left_cardinality * right_cardinality * CPU_OPERATOR_COST * 10.0
     }
@@ -434,7 +434,7 @@ impl CostModel {
 pub struct DetectAsOfJoinRule;
 
 impl OptimizationRule for DetectAsOfJoinRule {
-    fn apply(&self, plan: RelExpr) -> Result<RelExpr> {
+    fn apply(&self, plan: RelExpr) -&gt; Result&lt;RelExpr&gt; {
         // Detect pattern:
         // Join(Inner)
         //   Filter(equality_keys AND inequality_on_time)
@@ -456,9 +456,9 @@ impl OptimizationRule for DetectAsOfJoinRule {
         Ok(plan)
     }
 
-    fn extract_asof_pattern(&self, condition: &Expr) -> Option<AsOfCondition> {
+    fn extract_asof_pattern(&self, condition: &Expr) -&gt; Option&lt;AsOfCondition&gt; {
         // Parse condition like:
-        // symbol = symbol AND trade_time >= price_time
+        // symbol = symbol AND trade_time &gt;= price_time
 
         let predicates = split_conjunction(condition);
         let mut equality_keys = Vec::new();
@@ -466,18 +466,18 @@ impl OptimizationRule for DetectAsOfJoinRule {
 
         for pred in predicates {
             match pred {
-                Expr::BinaryOp { op: Op::Eq, left, right } => {
+                Expr::BinaryOp { op: Op::Eq, left, right } =&gt; {
                     equality_keys.push((left, right));
                 }
                 Expr::BinaryOp { op: Op::GtEq, left, right }
-                | Expr::BinaryOp { op: Op::Gt, left, right } => {
+                | Expr::BinaryOp { op: Op::Gt, left, right } =&gt; {
                     inequality_pred = Some((left, right, AsOfDirection::Forward));
                 }
                 Expr::BinaryOp { op: Op::LtEq, left, right }
-                | Expr::BinaryOp { op: Op::Lt, left, right } => {
+                | Expr::BinaryOp { op: Op::Lt, left, right } =&gt; {
                     inequality_pred = Some((left, right, AsOfDirection::Backward));
                 }
-                _ => return None,
+                _ =&gt; return None,
             }
         }
 
@@ -497,7 +497,7 @@ impl OptimizationRule for DetectAsOfJoinRule {
 pub struct InjectAsOfSortRule;
 
 impl OptimizationRule for InjectAsOfSortRule {
-    fn apply(&self, plan: RelExpr) -> Result<RelExpr> {
+    fn apply(&self, plan: RelExpr) -&gt; Result&lt;RelExpr&gt; {
         if let RelExpr::AsOfJoin { left, right, condition, .. } = plan {
             // Check if inputs are already sorted
             let left_sorted = self.is_sorted(&left, &condition.equality_keys, &condition.ordering_left);
@@ -534,13 +534,13 @@ impl OptimizationRule for InjectAsOfSortRule {
 pub struct AsOfIndexSelectionRule;
 
 impl OptimizationRule for AsOfIndexSelectionRule {
-    fn apply(&self, plan: RelExpr) -> Result<RelExpr> {
+    fn apply(&self, plan: RelExpr) -&gt; Result&lt;RelExpr&gt; {
         if let RelExpr::AsOfJoin { right, condition, .. } = &plan {
             // Check for index on (equality_keys, ordering_column)
             let required_columns = condition.equality_keys.iter()
                 .map(|(_, right_col)| right_col)
                 .chain(std::iter::once(&condition.ordering_right))
-                .collect::<Vec<_>>();
+                .collect::&lt;Vec&lt;_&gt;&gt;();
 
             if let Some(index) = self.find_matching_index(&right, &required_columns) {
                 // Use index-based ASOF join
@@ -564,7 +564,7 @@ impl OptimizationRule for AsOfIndexSelectionRule {
 pub struct PartitionWiseAsOfRule;
 
 impl OptimizationRule for PartitionWiseAsOfRule {
-    fn apply(&self, plan: RelExpr) -> Result<RelExpr> {
+    fn apply(&self, plan: RelExpr) -&gt; Result&lt;RelExpr&gt; {
         if let RelExpr::AsOfJoin { left, right, condition, .. } = plan {
             // If both sides are partitioned by equality keys,
             // perform partition-wise ASOF join
@@ -591,7 +591,7 @@ impl OptimizationRule for PartitionWiseAsOfRule {
 pub struct AsOfPredicatePushdownRule;
 
 impl OptimizationRule for AsOfPredicatePushdownRule {
-    fn apply(&self, plan: RelExpr) -> Result<RelExpr> {
+    fn apply(&self, plan: RelExpr) -&gt; Result&lt;RelExpr&gt; {
         // Pattern: Filter(AsOfJoin(...))
         // Push predicates that reference only left or only right side
 
@@ -647,34 +647,34 @@ Track sort order as a physical property:
 ```rust
 #[derive(Debug, Clone, PartialEq)]
 pub struct SortOrder {
-    pub columns: Vec<Expr>,
-    pub ascending: Vec<bool>,
+    pub columns: Vec&lt;Expr&gt;,
+    pub ascending: Vec&lt;bool&gt;,
 }
 
 impl PhysicalProperty for SortOrder {
-    fn satisfied_by(&self, operator: &PhysicalOperator) -> bool {
+    fn satisfied_by(&self, operator: &PhysicalOperator) -&gt; bool {
         match operator {
-            PhysicalOperator::Scan { ordering, .. } => {
+            PhysicalOperator::Scan { ordering, .. } =&gt; {
                 ordering.as_ref() == Some(self)
             }
-            PhysicalOperator::Sort { order, .. } => order == self,
-            PhysicalOperator::IndexScan { index, .. } => {
+            PhysicalOperator::Sort { order, .. } =&gt; order == self,
+            PhysicalOperator::IndexScan { index, .. } =&gt; {
                 self.matches_index_order(index)
             }
-            _ => false,
+            _ =&gt; false,
         }
     }
 }
 
 pub trait PhysicalOperator {
-    fn output_properties(&self) -> PhysicalProperties {
+    fn output_properties(&self) -&gt; PhysicalProperties {
         // Default: no properties guaranteed
         PhysicalProperties::default()
     }
 }
 
 impl SortMergeAsOfJoin {
-    fn required_properties(&self) -> Vec<PhysicalProperties> {
+    fn required_properties(&self) -&gt; Vec&lt;PhysicalProperties&gt; {
         vec![
             PhysicalProperties {
                 sort_order: Some(SortOrder {
@@ -726,7 +726,7 @@ pub enum AsOfJoinError {
     #[error(
         "ASOF join input not sorted by required columns: {required:?}"
     )]
-    UnsortedInput { required: Vec<String> },
+    UnsortedInput { required: Vec&lt;String&gt; },
 }
 ```
 
@@ -737,7 +737,7 @@ pub enum AsOfJoinError {
 | Algorithm | Time Complexity | Space Complexity | Best Use Case |
 |-----------|----------------|------------------|---------------|
 | Self-Join (Current) | O(n * m) | O(m) | Never (always worse) |
-| Sort-Merge ASOF | O(n log n + m log m) unsorted<br>O(n + m) sorted | O(1) | Pre-sorted data, sequential scans |
+| Sort-Merge ASOF | O(n log n + m log m) unsorted&lt;br&gt;O(n + m) sorted | O(1) | Pre-sorted data, sequential scans |
 | Index-Based ASOF | O(n * log m) | O(m) | Small left, large indexed right |
 | Hash-Based ASOF | O(n + m) | O(m) | Approximate matches acceptable |
 
@@ -773,10 +773,10 @@ Based on DuckDB benchmarks and analytical modeling:
 
 Based on DuckDB ASOF join benchmarks:
 
-- **Small datasets (< 100K rows):** 2-5x speedup
+- **Small datasets (&lt; 100K rows):** 2-5x speedup
 - **Medium datasets (100K - 10M rows):** 10-50x speedup
-- **Large datasets (> 10M rows, sorted):** 50-100x speedup
-- **Large datasets (> 10M rows, unsorted):** 5-20x speedup
+- **Large datasets (&gt; 10M rows, sorted):** 50-100x speedup
+- **Large datasets (&gt; 10M rows, unsorted):** 5-20x speedup
 
 ### Optimization Opportunities
 
@@ -992,14 +992,14 @@ mod proptests {
 
             for row in result {
                 if let Some(matched_time) = row.right_time {
-                    // Forward match: matched_time <= left_time
-                    assert!(matched_time <= row.left_time);
+                    // Forward match: matched_time &lt;= left_time
+                    assert!(matched_time &lt;= row.left_time);
 
                     // Nearest match: no closer match exists
                     for candidate in &right {
                         if candidate.symbol == row.symbol &&
-                           candidate.time <= row.left_time &&
-                           candidate.time > matched_time {
+                           candidate.time &lt;= row.left_time &&
+                           candidate.time &gt; matched_time {
                             panic!("Found closer match");
                         }
                     }
@@ -1021,18 +1021,18 @@ fn test_asof_join_with_tpch_lineitem() {
         FROM orders o
         ASOF JOIN partsupp p
           ON o.o_custkey = p.ps_partkey
-          AND o.o_orderdate >= p.ps_availqty_updated
+          AND o.o_orderdate &gt;= p.ps_availqty_updated
         WHERE o.o_orderdate BETWEEN '1995-01-01' AND '1995-12-31'
     ";
 
     let result = execute_query(query);
 
     // Validate: every order has at most one matching price
-    assert!(result.len() <= orders_count);
+    assert!(result.len() &lt;= orders_count);
 
     // Validate: matched prices are before order dates
     for row in result {
-        assert!(row.ps_availqty_updated <= row.o_orderdate);
+        assert!(row.ps_availqty_updated &lt;= row.o_orderdate);
     }
 }
 ```
@@ -1052,7 +1052,7 @@ fn bench_asof_join_vs_self_join(b: &mut Bencher) {
                    (SELECT p.price
                     FROM prices p
                     WHERE p.symbol = t.symbol
-                      AND p.time <= t.time
+                      AND p.time &lt;= t.time
                     ORDER BY p.time DESC
                     LIMIT 1) AS price
             FROM trades t
@@ -1066,7 +1066,7 @@ fn bench_asof_join_vs_self_join(b: &mut Bencher) {
             FROM trades t
             ASOF JOIN prices p
               ON t.symbol = p.symbol
-              AND t.time >= p.time
+              AND t.time &gt;= p.time
         ")
     });
 }
@@ -1105,7 +1105,7 @@ FROM trades t
 JOIN LATERAL (
     SELECT price
     FROM prices p
-    WHERE p.symbol = t.symbol AND p.time <= t.time
+    WHERE p.symbol = t.symbol AND p.time &lt;= t.time
     ORDER BY p.time DESC
     LIMIT 1
 ) p ON true
@@ -1134,7 +1134,7 @@ SELECT DISTINCT ON (trade_id)
         ORDER BY p.time DESC
     ) AS price
 FROM trades t
-JOIN prices p ON t.symbol = p.symbol AND p.time <= t.time
+JOIN prices p ON t.symbol = p.symbol AND p.time &lt;= t.time
 ```
 
 **Drawbacks:**
@@ -1218,8 +1218,8 @@ Support ASOF joins across more than two tables:
 ```sql
 SELECT *
 FROM trades t
-ASOF JOIN prices p ON t.symbol = p.symbol AND t.time >= p.time
-ASOF JOIN volumes v ON t.symbol = v.symbol AND t.time >= v.time;
+ASOF JOIN prices p ON t.symbol = p.symbol AND t.time &gt;= p.time
+ASOF JOIN volumes v ON t.symbol = v.symbol AND t.time &gt;= v.time;
 ```
 
 ### 3. Incremental ASOF Maintenance
@@ -1230,7 +1230,7 @@ For materialized views with ASOF joins, maintain incrementally as new data arriv
 CREATE MATERIALIZED VIEW enriched_trades AS
 SELECT t.*, p.price
 FROM trades t
-ASOF JOIN prices p ON t.symbol = p.symbol AND t.time >= p.time;
+ASOF JOIN prices p ON t.symbol = p.symbol AND t.time &gt;= p.time;
 ```
 
 ### 4. ASOF Aggregation
@@ -1241,7 +1241,7 @@ Combine ASOF matching with aggregation:
 SELECT t.symbol,
        AVG(p.price) AS avg_matched_price
 FROM trades t
-ASOF JOIN prices p ON t.symbol = p.symbol AND t.time >= p.time
+ASOF JOIN prices p ON t.symbol = p.symbol AND t.time &gt;= p.time
 GROUP BY t.symbol;
 ```
 
@@ -1262,7 +1262,7 @@ Implement ASOF join on GPU for massive parallelism:
 ## Referenced By
 
 This RFC is referenced by:
-- RFC 0065: Time-Series Query Optimization (ASOF joins complement chunk-aware optimization)
+- [RFC 0065](/maintainers/rfcs/0065-time-series-query-optimization): Time-Series Query Optimization (ASOF joins complement chunk-aware optimization)
 
 ## References
 
@@ -1270,3 +1270,52 @@ This RFC is referenced by:
 - [DuckDB ASOF Join Implementation](https://github.com/duckdb/duckdb/pull/7182)
 - [Time-Series Joins in Databases (Research Paper)](https://cs.brown.edu/~ugur/tsjoins.pdf)
 - DUCKDB_FEATURES_ANALYSIS.md (Section 1: ASOF Joins)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 95: ASOF (As-Of) Join Optimization](/maintainers/rfcs/0095-asof-join-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 95: ASOF (As-Of) Join Optimization](/maintainers/rfcs/0095-asof-join-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 95: ASOF (As-Of) Join Optimization](/maintainers/rfcs/0095-asof-join-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 95: ASOF (As-Of) Join Optimization](/maintainers/rfcs/0095-asof-join-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 95: ASOF (As-Of) Join Optimization](/maintainers/rfcs/0095-asof-join-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 95: ASOF (As-Of) Join Optimization](/maintainers/rfcs/0095-asof-join-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 95: ASOF (As-Of) Join Optimization](/maintainers/rfcs/0095-asof-join-optimization)

@@ -49,21 +49,21 @@ Snowflake provides three temporal clause variants:
 **AT TIMESTAMP** - Query as of specific timestamp:
 ```sql
 SELECT * FROM orders
-AT(TIMESTAMP => '2024-01-01 12:00:00'::TIMESTAMP_TZ)
+AT(TIMESTAMP =&gt; '2024-01-01 12:00:00'::TIMESTAMP_TZ)
 WHERE region = 'WEST';
 ```
 
 **AT OFFSET** - Query N seconds in the past:
 ```sql
 SELECT * FROM inventory
-AT(OFFSET => -300)  -- 5 minutes ago
-WHERE stock < 10;
+AT(OFFSET =&gt; -300)  -- 5 minutes ago
+WHERE stock &lt; 10;
 ```
 
 **BEFORE STATEMENT** - Query before specific statement executed:
 ```sql
 SELECT * FROM products
-BEFORE(STATEMENT => '01a2b3c4-5678-90ab-cdef-1234567890ab')
+BEFORE(STATEMENT =&gt; '01a2b3c4-5678-90ab-cdef-1234567890ab')
 WHERE category = 'electronics';
 ```
 
@@ -76,7 +76,7 @@ Delta Lake provides version-based and timestamp-based access:
 **VERSION AS OF** - Query specific transaction version:
 ```sql
 SELECT * FROM sales VERSION AS OF 42
-WHERE amount > 1000;
+WHERE amount &gt; 1000;
 ```
 
 **TIMESTAMP AS OF** - Query as of timestamp:
@@ -116,7 +116,7 @@ WHERE customer_id = 123;
 ```sql
 -- Original query
 SELECT * FROM events
-AT(TIMESTAMP => '2024-01-15 10:00:00')
+AT(TIMESTAMP =&gt; '2024-01-15 10:00:00')
 WHERE event_date BETWEEN '2024-01-10' AND '2024-01-20';
 
 -- Ra recognizes temporal + partition filters overlap
@@ -127,9 +127,9 @@ WHERE event_date BETWEEN '2024-01-10' AND '2024-01-20';
 **Delta query optimization** - Efficient diff computation:
 ```sql
 -- Original: Compute differences between two versions
-SELECT * FROM orders AT(TIMESTAMP => '2024-01-02')
+SELECT * FROM orders AT(TIMESTAMP =&gt; '2024-01-02')
 EXCEPT
-SELECT * FROM orders AT(TIMESTAMP => '2024-01-01');
+SELECT * FROM orders AT(TIMESTAMP =&gt; '2024-01-01');
 
 -- Ra optimizes to incremental delta scan:
 -- 1. Identify changed micro-partitions between timestamps
@@ -145,7 +145,7 @@ SELECT
     curr.product_id,
     curr.stock - hist.stock AS stock_change
 FROM inventory curr
-JOIN inventory AT(OFFSET => -604800) hist
+JOIN inventory AT(OFFSET =&gt; -604800) hist
   ON curr.product_id = hist.product_id;
 
 -- Ra applies standard join optimization but accounts for
@@ -161,26 +161,26 @@ Extend `RelExpr::Scan` with temporal clause:
 ```rust
 pub struct Scan {
     pub table: TableId,
-    pub columns: Vec<ColumnId>,
-    pub filter: Option<Expr>,
-    pub time_travel: Option<TimeTravelClause>,  // NEW
+    pub columns: Vec&lt;ColumnId&gt;,
+    pub filter: Option&lt;Expr&gt;,
+    pub time_travel: Option&lt;TimeTravelClause&gt;,  // NEW
 }
 
 pub enum TimeTravelClause {
-    /// Snowflake: AT(TIMESTAMP => '...')
-    AtTimestamp(DateTime<Utc>),
+    /// Snowflake: AT(TIMESTAMP =&gt; '...')
+    AtTimestamp(DateTime&lt;Utc&gt;),
 
-    /// Snowflake: AT(OFFSET => -N)
+    /// Snowflake: AT(OFFSET =&gt; -N)
     AtOffset(i64),
 
-    /// Snowflake: BEFORE(STATEMENT => '...')
+    /// Snowflake: BEFORE(STATEMENT =&gt; '...')
     BeforeStatement(String),
 
     /// Delta Lake: VERSION AS OF N
     AtVersion(u64),
 
     /// MariaDB/SQL Server: FOR SYSTEM_TIME AS OF '...'
-    SystemTimeAsOf(DateTime<Utc>),
+    SystemTimeAsOf(DateTime&lt;Utc&gt;),
 }
 ```
 
@@ -263,36 +263,36 @@ Temporal scan cost depends on version distance and storage format:
 pub fn temporal_scan_cost(
     base_cost: f64,
     time_travel: &TimeTravelClause,
-    current_time: DateTime<Utc>,
+    current_time: DateTime&lt;Utc&gt;,
     retention_policy: &RetentionPolicy,
-) -> f64 {
+) -&gt; f64 {
     let version_distance = match time_travel {
-        TimeTravelClause::AtTimestamp(ts) => {
+        TimeTravelClause::AtTimestamp(ts) =&gt; {
             (current_time - ts).num_seconds() as f64
         }
-        TimeTravelClause::AtOffset(offset) => offset.abs() as f64,
-        TimeTravelClause::AtVersion(v) => {
+        TimeTravelClause::AtOffset(offset) =&gt; offset.abs() as f64,
+        TimeTravelClause::AtVersion(v) =&gt; {
             // Requires metadata lookup to current version
             (current_version - v) as f64
         }
-        _ => 0.0,
+        _ =&gt; 0.0,
     };
 
     // Cost multiplier based on version distance
     let temporal_overhead = match retention_policy.storage_format {
-        StorageFormat::MVCC => {
+        StorageFormat::MVCC =&gt; {
             // Version chain traversal: O(versions_back)
             1.0 + version_distance / 86400.0 * 0.5  // 0.5x per day
         }
-        StorageFormat::CopyOnWrite => {
+        StorageFormat::CopyOnWrite =&gt; {
             // Metadata lookup + file access
-            if version_distance < 86400.0 {  // < 1 day
+            if version_distance &lt; 86400.0 {  // &lt; 1 day
                 2.0  // Recent: Metadata cached
             } else {
                 5.0  // Old: Cold metadata + cold files
             }
         }
-        StorageFormat::DeltaFiles => {
+        StorageFormat::DeltaFiles =&gt; {
             // Delta chain traversal: O(deltas_to_traverse)
             let deltas_per_day = 24.0;  // Assume hourly compaction
             let days_back = version_distance / 86400.0;
@@ -323,15 +323,15 @@ pub fn prune_partitions_temporal(
     partitions: &[PartitionInfo],
     time_travel: &TimeTravelClause,
     filter: &Expr,
-) -> Vec<PartitionId> {
+) -&gt; Vec&lt;PartitionId&gt; {
     let query_timestamp = time_travel.resolve_timestamp();
 
     partitions
         .iter()
         .filter(|p| {
             // Partition was active at query timestamp
-            p.created_at <= query_timestamp &&
-            query_timestamp < p.deleted_at.unwrap_or(DateTime::MAX)
+            p.created_at &lt;= query_timestamp &&
+            query_timestamp &lt; p.deleted_at.unwrap_or(DateTime::MAX)
         })
         .filter(|p| {
             // Partition matches query filter
@@ -350,16 +350,16 @@ Cache version-to-metadata mappings to avoid repeated lookups:
 
 ```rust
 pub struct VersionMetadataCache {
-    cache: LruCache<(TableId, TimeTravelClause), VersionMetadata>,
+    cache: LruCache&lt;(TableId, TimeTravelClause), VersionMetadata&gt;,
     ttl: Duration,
 }
 
 pub struct VersionMetadata {
     pub version_id: u64,
-    pub timestamp: DateTime<Utc>,
-    pub active_partitions: Vec<PartitionId>,
+    pub timestamp: DateTime&lt;Utc&gt;,
+    pub active_partitions: Vec&lt;PartitionId&gt;,
     pub statistics: TableStatistics,
-    pub cached_at: DateTime<Utc>,
+    pub cached_at: DateTime&lt;Utc&gt;,
 }
 ```
 
@@ -370,7 +370,7 @@ pub struct VersionMetadata {
 
 **Cache hit rate impact**:
 - Cold cache: 5-10ms metadata lookup per temporal query
-- Warm cache: <0.1ms cache lookup
+- Warm cache: &lt;0.1ms cache lookup
 - Expected hit rate: 80%+ for dashboards querying same historical points
 
 ### Versioned statistics
@@ -380,7 +380,7 @@ Maintain statistics per version for accurate cardinality estimation:
 ```rust
 pub struct VersionedStatistics {
     pub table_id: TableId,
-    pub version_stats: BTreeMap<u64, TableStatistics>,
+    pub version_stats: BTreeMap&lt;u64, TableStatistics&gt;,
     pub granularity: VersionGranularity,
 }
 
@@ -405,7 +405,7 @@ pub fn interpolate_statistics(
     target_version: u64,
     before_version: u64,
     after_version: u64,
-) -> TableStatistics {
+) -&gt; TableStatistics {
     let ratio = (target_version - before_version) as f64 /
                 (after_version - before_version) as f64;
 
@@ -433,12 +433,12 @@ Push predicates into temporal scans to reduce rows before version lookup:
 
 ```
 Before:
-  Filter(amount > 1000)
-    Scan(sales AT(TIMESTAMP => '2024-01-01'))
+  Filter(amount &gt; 1000)
+    Scan(sales AT(TIMESTAMP =&gt; '2024-01-01'))
 
 After:
-  Scan(sales AT(TIMESTAMP => '2024-01-01'))
-    .with_filter(amount > 1000)
+  Scan(sales AT(TIMESTAMP =&gt; '2024-01-01'))
+    .with_filter(amount &gt; 1000)
 ```
 
 **Rule 2: Temporal partition pruning**
@@ -447,11 +447,11 @@ Convert temporal + partition filters into partition elimination:
 
 ```
 Before:
-  Scan(events AT(TIMESTAMP => '2024-01-15'))
+  Scan(events AT(TIMESTAMP =&gt; '2024-01-15'))
     .filter(date BETWEEN '2024-01-10' AND '2024-01-20')
 
 After:
-  Scan(events AT(TIMESTAMP => '2024-01-15'))
+  Scan(events AT(TIMESTAMP =&gt; '2024-01-15'))
     .partitions(pruned to 10-day window + active on 2024-01-15)
 ```
 
@@ -462,8 +462,8 @@ Optimize EXCEPT queries between temporal versions:
 ```
 Before:
   Except(
-    Scan(orders AT(TIMESTAMP => '2024-01-02')),
-    Scan(orders AT(TIMESTAMP => '2024-01-01'))
+    Scan(orders AT(TIMESTAMP =&gt; '2024-01-02')),
+    Scan(orders AT(TIMESTAMP =&gt; '2024-01-01'))
   )
 
 After:
@@ -481,14 +481,14 @@ Reuse cached version metadata for repeated temporal queries:
 
 ```
 Before: Query temporal table
-  -> Lookup version metadata (5-10ms)
-  -> Resolve partitions
-  -> Execute scan
+  -&gt; Lookup version metadata (5-10ms)
+  -&gt; Resolve partitions
+  -&gt; Execute scan
 
 After: Query temporal table
-  -> Check cache (0.1ms)
-  -> Use cached partition list
-  -> Execute scan
+  -&gt; Check cache (0.1ms)
+  -&gt; Use cached partition list
+  -&gt; Execute scan
 ```
 
 ## Drawbacks
@@ -720,7 +720,7 @@ Speedup: 8x
 ```
 Table: 100M rows, 100 partitions
 Query: SELECT * FROM events
-       AT(TIMESTAMP => '2024-01-15')
+       AT(TIMESTAMP =&gt; '2024-01-15')
        WHERE date BETWEEN '2024-01-10' AND '2024-01-20'
 
 Without temporal pruning:
@@ -757,11 +757,11 @@ Speedup: 10x
 7. Cross-database dialect translation
 
 **Performance tests**:
-1. Compare temporal scan overhead vs baseline (target: <5x for recent history)
-2. Measure version metadata cache hit rate (target: >80%)
-3. Measure delta query speedup (target: >5x for <1% change rate)
-4. Measure temporal partition pruning speedup (target: >10x)
-5. Benchmark statistics interpolation accuracy (target: <20% error)
+1. Compare temporal scan overhead vs baseline (target: &lt;5x for recent history)
+2. Measure version metadata cache hit rate (target: &gt;80%)
+3. Measure delta query speedup (target: &gt;5x for &lt;1% change rate)
+4. Measure temporal partition pruning speedup (target: &gt;10x)
+5. Benchmark statistics interpolation accuracy (target: &lt;20% error)
 
 **Correctness tests**:
 1. Verify temporal scan returns exact historical state
@@ -773,17 +773,66 @@ Speedup: 10x
 ## Success criteria
 
 1. **Correctness**: 100% of temporal queries return identical results to database-native execution
-2. **Performance**: <5x overhead for recent history (<1 day), 5-20x for distant past
-3. **Optimization impact**: >5x speedup for delta queries with <1% change rate
-4. **Cache efficiency**: >80% version metadata cache hit rate
+2. **Performance**: &lt;5x overhead for recent history (&lt;1 day), 5-20x for distant past
+3. **Optimization impact**: &gt;5x speedup for delta queries with &lt;1% change rate
+4. **Cache efficiency**: &gt;80% version metadata cache hit rate
 5. **Coverage**: Support 80%+ of Snowflake and Delta Lake Time Travel patterns
 
 ## References
 
 - Snowflake Features Gap Analysis: `/home/gburd/ws/ra/SNOWFLAKE_FEATURES_GAP_ANALYSIS.md`
 - Databricks Features Analysis: `/home/gburd/ws/ra/DATABRICKS_SPARK_FEATURES_ANALYSIS.md`
-- RFC 0061: PostgreSQL Extension-Aware Optimization
+- [RFC 0061](/maintainers/rfcs/0061-postgresql-extension-aware-optimization): PostgreSQL Extension-Aware Optimization
 - RFC 0026: Adaptive Cost Calibration
 - Snowflake Time Travel Documentation
 - Delta Lake Time Travel Documentation
 - SQL:2011 Temporal Data Standard
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 100: Time Travel Queries](/maintainers/rfcs/0100-time-travel-queries)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 100: Time Travel Queries](/maintainers/rfcs/0100-time-travel-queries)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 100: Time Travel Queries](/maintainers/rfcs/0100-time-travel-queries)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 100: Time Travel Queries](/maintainers/rfcs/0100-time-travel-queries)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 100: Time Travel Queries](/maintainers/rfcs/0100-time-travel-queries)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 100: Time Travel Queries](/maintainers/rfcs/0100-time-travel-queries)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 100: Time Travel Queries](/maintainers/rfcs/0100-time-travel-queries)

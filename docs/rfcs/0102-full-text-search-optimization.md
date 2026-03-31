@@ -4,7 +4,7 @@
 - Author: Ra Research Team
 - Status: Proposed
 - Tracking Issue: TBD
-- Supersedes: Extends RFC 0067 with cross-database FTS support
+- Supersedes: Extends [RFC 0067](/maintainers/rfcs/0067-full-text-search-optimization) with cross-database FTS support
 
 ## Summary
 
@@ -15,7 +15,7 @@ Ra should provide comprehensive full-text search (FTS) optimization across multi
 Full-text search is a critical feature in 10-15% of applications, spanning content management, e-commerce product search, log analysis, and knowledge bases. However, FTS optimization is highly database-specific due to divergent syntax, index types, and ranking algorithms.
 
 **Current State:**
-- **PostgreSQL** (RFC 0067): tsvector/tsquery with GIN/GiST indexes
+- **PostgreSQL** ([RFC 0067](/maintainers/rfcs/0067-full-text-search-optimization)): tsvector/tsquery with GIN/GiST indexes
 - **MySQL/MariaDB**: MATCH...AGAINST with FULLTEXT indexes (InnoDB/MyISAM)
 - **SQL Server**: CONTAINS/FREETEXT/CONTAINSTABLE with full-text catalogs
 - **MonetDB**: String imprints (strimps) for LIKE optimization
@@ -26,7 +26,7 @@ Full-text search is a critical feature in 10-15% of applications, spanning conte
 |----------|----------------|----------------|---------|------------|
 | MySQL 8.0 | 10-50s | 0.1-1s | 50-99x | ❌ Missing |
 | SQL Server | 5-30s | 0.05-0.5s | 50-100x | ❌ Missing |
-| PostgreSQL | 8-40s | 0.08-0.8s | 50-100x | ✅ RFC 0067 |
+| PostgreSQL | 8-40s | 0.08-0.8s | 50-100x | ✅ [RFC 0067](/maintainers/rfcs/0067-full-text-search-optimization) |
 | MonetDB | 2-10s | 0.2-2s | 10x (strimps) | ✅ Partial |
 
 **Real-World Impact:**
@@ -72,8 +72,8 @@ ELSE recommend:
 **Boolean mode operators:**
 - `+word`: Must contain
 - `-word`: Must not contain
-- `>word`: Increase relevance
-- `<word`: Decrease relevance
+- `&gt;word`: Increase relevance
+- `&lt;word`: Decrease relevance
 - `"phrase"`: Exact phrase
 - `*`: Wildcard suffix (word*)
 - `()`: Grouping
@@ -124,9 +124,9 @@ All database full-text indexes use inverted index structures:
 
 **Term Dictionary:**
 ```
-term -> posting list
-"database" -> [doc3, doc7, doc12, doc45, ...]
-"optimization" -> [doc3, doc45, doc89, ...]
+term -&gt; posting list
+"database" -&gt; [doc3, doc7, doc12, doc45, ...]
+"optimization" -&gt; [doc3, doc45, doc89, ...]
 ```
 
 **Posting List (with positions):**
@@ -146,8 +146,8 @@ fn inverted_index_cost(
     terms: &[String],
     operator: BooleanOp,
     total_docs: u64,
-) -> f64 {
-    let posting_costs: Vec<f64> = terms.iter()
+) -&gt; f64 {
+    let posting_costs: Vec&lt;f64&gt; = terms.iter()
         .map(|term| {
             let posting_size = estimate_posting_list_size(term, total_docs);
             // Binary search in sorted posting list
@@ -156,22 +156,22 @@ fn inverted_index_cost(
         .collect();
 
     match operator {
-        BooleanOp::And => {
+        BooleanOp::And =&gt; {
             // Intersect posting lists (use skip lists)
-            posting_costs.iter().sum::<f64>() * 0.8
+            posting_costs.iter().sum::&lt;f64&gt;() * 0.8
         }
-        BooleanOp::Or => {
+        BooleanOp::Or =&gt; {
             // Merge posting lists
-            posting_costs.iter().sum::<f64>() * 1.2
+            posting_costs.iter().sum::&lt;f64&gt;() * 1.2
         }
-        BooleanOp::Not => {
+        BooleanOp::Not =&gt; {
             // Subtract from all docs
             posting_costs[0] + total_docs as f64 * 0.01
         }
     }
 }
 
-fn estimate_posting_list_size(term: &str, total_docs: u64) -> u64 {
+fn estimate_posting_list_size(term: &str, total_docs: u64) -&gt; u64 {
     // Common words: 10-50% of docs
     // Rare words: 0.1-1% of docs
     // Default: 1% for unknown terms
@@ -195,7 +195,7 @@ Databases use different ranking algorithms:
 - Considers document length normalization
 - Tunable parameters: k1 (term saturation), b (length normalization)
 
-**PostgreSQL (RFC 0067):**
+**PostgreSQL ([RFC 0067](/maintainers/rfcs/0067-full-text-search-optimization)):**
 - ts_rank: Document length + term weights
 - ts_rank_cd: Cover density (term proximity bonus)
 
@@ -204,20 +204,20 @@ Databases use different ranking algorithms:
 fn ranking_cost(
     matching_docs: u64,
     algorithm: RankingAlgorithm,
-    limit: Option<u64>,
-) -> f64 {
+    limit: Option&lt;u64&gt;,
+) -&gt; f64 {
     let docs_to_rank = limit.unwrap_or(matching_docs);
 
     match algorithm {
-        RankingAlgorithm::TFIDF => {
+        RankingAlgorithm::TFIDF =&gt; {
             // MySQL: TF-IDF calculation per doc
             docs_to_rank as f64 * 0.1
         }
-        RankingAlgorithm::BM25 => {
+        RankingAlgorithm::BM25 =&gt; {
             // SQL Server: BM25 with length norm
             docs_to_rank as f64 * 0.15
         }
-        RankingAlgorithm::CoverDensity => {
+        RankingAlgorithm::CoverDensity =&gt; {
             // PostgreSQL: Cover density (position-aware)
             docs_to_rank as f64 * 0.2
         }
@@ -258,7 +258,7 @@ THEN apply rank-aware top-K optimization:
      2. Compute rank only for these N documents
      3. Return without sorting full result set
 
-Expected speedup: 10-100x when N << M (M = total matches)
+Expected speedup: 10-100x when N &lt;&lt; M (M = total matches)
 ```
 
 ## Reference-level explanation
@@ -271,21 +271,21 @@ Expected speedup: 10-100x when N << M (M = total matches)
 struct TextProcessor {
     language: Language,
     stemmer: Stemmer,
-    stopwords: HashSet<String>,
+    stopwords: HashSet&lt;String&gt;,
 }
 
 impl TextProcessor {
-    fn tokenize(&self, text: &str) -> Vec<String> {
+    fn tokenize(&self, text: &str) -&gt; Vec&lt;String&gt; {
         // Word breaking (language-specific)
         // MySQL: ft_min_word_length = 4 (default)
         // SQL Server: 50+ languages supported
         text.split_whitespace()
-            .filter(|w| w.len() >= self.min_word_length())
+            .filter(|w| w.len() &gt;= self.min_word_length())
             .map(|w| w.to_lowercase())
             .collect()
     }
 
-    fn remove_stopwords(&self, tokens: Vec<String>) -> Vec<String> {
+    fn remove_stopwords(&self, tokens: Vec&lt;String&gt;) -&gt; Vec&lt;String&gt; {
         // MySQL: Default stopwords (a, an, the, ...)
         // SQL Server: Language-specific stopword lists
         tokens.into_iter()
@@ -293,9 +293,9 @@ impl TextProcessor {
             .collect()
     }
 
-    fn stem(&self, tokens: Vec<String>) -> Vec<String> {
+    fn stem(&self, tokens: Vec&lt;String&gt;) -&gt; Vec&lt;String&gt; {
         // MySQL: No stemming by default
-        // SQL Server: Automatic stemming (run -> running, runs)
+        // SQL Server: Automatic stemming (run -&gt; running, runs)
         tokens.into_iter()
             .map(|t| self.stemmer.stem(&t))
             .collect()
@@ -308,18 +308,18 @@ impl TextProcessor {
 ```rust
 enum QueryTree {
     Term(String),
-    And(Vec<QueryTree>),
-    Or(Vec<QueryTree>),
-    Not(Box<QueryTree>),
-    Phrase(Vec<String>),
-    Proximity { terms: Vec<String>, distance: u32 },
+    And(Vec&lt;QueryTree&gt;),
+    Or(Vec&lt;QueryTree&gt;),
+    Not(Box&lt;QueryTree&gt;),
+    Phrase(Vec&lt;String&gt;),
+    Proximity { terms: Vec&lt;String&gt;, distance: u32 },
 }
 
 impl QueryTree {
-    fn evaluate(&self, index: &InvertedIndex) -> Vec<DocId> {
+    fn evaluate(&self, index: &InvertedIndex) -&gt; Vec&lt;DocId&gt; {
         match self {
-            QueryTree::Term(t) => index.get_posting_list(t),
-            QueryTree::And(children) => {
+            QueryTree::Term(t) =&gt; index.get_posting_list(t),
+            QueryTree::And(children) =&gt; {
                 // Intersect posting lists with skip lists
                 let mut result = children[0].evaluate(index);
                 for child in &children[1..] {
@@ -330,13 +330,13 @@ impl QueryTree {
                 }
                 result
             }
-            QueryTree::Or(children) => {
+            QueryTree::Or(children) =&gt; {
                 // Merge posting lists
                 children.iter()
                     .flat_map(|c| c.evaluate(index))
                     .collect()
             }
-            QueryTree::Not(child) => {
+            QueryTree::Not(child) =&gt; {
                 // All docs minus child matches
                 let exclude = child.evaluate(index);
                 index.all_docs()
@@ -344,11 +344,11 @@ impl QueryTree {
                     .filter(|d| !exclude.contains(d))
                     .collect()
             }
-            QueryTree::Phrase(terms) => {
+            QueryTree::Phrase(terms) =&gt; {
                 // Position-based matching
                 index.phrase_query(terms)
             }
-            QueryTree::Proximity { terms, distance } => {
+            QueryTree::Proximity { terms, distance } =&gt; {
                 // Terms within N positions
                 index.proximity_query(terms, *distance)
             }
@@ -357,9 +357,9 @@ impl QueryTree {
 }
 
 fn intersect_with_skip_lists(
-    list_a: Vec<DocId>,
-    list_b: Vec<DocId>,
-) -> Vec<DocId> {
+    list_a: Vec&lt;DocId&gt;,
+    list_b: Vec&lt;DocId&gt;,
+) -&gt; Vec&lt;DocId&gt; {
     // Skip list: Every sqrt(N) elements has pointer ahead
     // Complexity: O(sqrt(n) + sqrt(m)) vs O(n + m) for linear merge
     let skip_distance = (list_a.len() as f64).sqrt() as usize;
@@ -368,22 +368,22 @@ fn intersect_with_skip_lists(
     let mut i = 0;
     let mut j = 0;
 
-    while i < list_a.len() && j < list_b.len() {
+    while i &lt; list_a.len() && j &lt; list_b.len() {
         if list_a[i] == list_b[j] {
             result.push(list_a[i]);
             i += 1;
             j += 1;
-        } else if list_a[i] < list_b[j] {
+        } else if list_a[i] &lt; list_b[j] {
             // Use skip list to jump ahead
-            if i + skip_distance < list_a.len()
-               && list_a[i + skip_distance] < list_b[j] {
+            if i + skip_distance &lt; list_a.len()
+               && list_a[i + skip_distance] &lt; list_b[j] {
                 i += skip_distance;
             } else {
                 i += 1;
             }
         } else {
-            if j + skip_distance < list_b.len()
-               && list_b[j + skip_distance] < list_a[i] {
+            if j + skip_distance &lt; list_b.len()
+               && list_b[j + skip_distance] &lt; list_a[i] {
                 j += skip_distance;
             } else {
                 j += 1;
@@ -400,16 +400,16 @@ fn intersect_with_skip_lists(
 ```rust
 struct PositionalPosting {
     doc_id: DocId,
-    positions: Vec<u32>,
+    positions: Vec&lt;u32&gt;,
     frequency: u32,
 }
 
 fn phrase_query(
     index: &InvertedIndex,
     phrase_terms: &[String],
-) -> Vec<DocId> {
+) -&gt; Vec&lt;DocId&gt; {
     // Get posting lists with positions
-    let postings: Vec<Vec<PositionalPosting>> = phrase_terms
+    let postings: Vec&lt;Vec&lt;PositionalPosting&gt;&gt; = phrase_terms
         .iter()
         .map(|t| index.get_positional_postings(t))
         .collect();
@@ -434,8 +434,8 @@ fn phrase_query(
 fn verify_phrase_in_doc(
     doc_id: DocId,
     phrase_terms: &[String],
-    all_postings: &[Vec<PositionalPosting>],
-) -> bool {
+    all_postings: &[Vec&lt;PositionalPosting&gt;],
+) -&gt; bool {
     // Find positions of first term
     let first_positions = all_postings[0]
         .iter()
@@ -518,7 +518,7 @@ Pattern: π[*, rank_function(...)],
 Transform: fulltext_ranked_scan(T.ft_idx, query, limit=N)
            -- Fetch only top N by rank, avoid full sort
 
-Benefit: For N << M (M = total matches):
+Benefit: For N &lt;&lt; M (M = total matches):
          Before: O(M * rank_cost + M*log(M))
          After:  O(N * rank_cost)
          Speedup: 10-100x when N=10, M=100K
@@ -569,9 +569,9 @@ Choose: min(A, B, C) based on selectivities
 |---------|--------------|-----------|------------|---------|
 | **Search** | MATCH...AGAINST | CONTAINS/FREETEXT | @@ | LIKE + strimps |
 | **Boolean** | +word -word | AND/OR/NOT | & \| ! | N/A |
-| **Phrase** | "phrase" | "phrase" | <-> | N/A |
+| **Phrase** | "phrase" | "phrase" | &lt;-&gt; | N/A |
 | **Wildcard** | word* | word* | word:* | % |
-| **Proximity** | N/A | NEAR((a,b),N) | <N> | N/A |
+| **Proximity** | N/A | NEAR((a,b),N) | &lt;N&gt; | N/A |
 | **Ranking** | Natural mode | CONTAINSTABLE | ts_rank | N/A |
 | **Stemming** | No (default) | Yes | Dictionary | N/A |
 
@@ -726,7 +726,7 @@ fn test_mysql_fulltext_vs_like_performance() {
     let fts_time = time_query("SELECT * FROM articles WHERE MATCH(body) AGAINST('database')");
 
     let speedup = like_time / fts_time;
-    assert!(speedup >= 50.0, "Expected 50x speedup, got {}x", speedup);
+    assert!(speedup &gt;= 50.0, "Expected 50x speedup, got {}x", speedup);
 }
 
 #[test]
@@ -757,7 +757,7 @@ fn bench_boolean_and_query(b: &mut Bencher) {
         let query = parse_query("+database +optimization +performance");
         index.search(query)
     });
-    // Target: <1ms for 1M docs
+    // Target: &lt;1ms for 1M docs
 }
 
 #[bench]
@@ -768,7 +768,7 @@ fn bench_top_k_ranking(b: &mut Bencher) {
         let query = parse_query("database");
         index.search_ranked(query, limit=10)
     });
-    // Target: <10ms vs >500ms for ranking all
+    // Target: &lt;10ms vs &gt;500ms for ranking all
 }
 ```
 
@@ -796,7 +796,7 @@ fn bench_top_k_ranking(b: &mut Bencher) {
 
 ## Rationale and alternatives
 
-### Why extend RFC 0067 instead of database-specific RFCs?
+### Why extend [RFC 0067](/maintainers/rfcs/0067-full-text-search-optimization) instead of database-specific RFCs?
 
 Full-text search has common primitives (inverted indexes, boolean queries, ranking) that benefit from unified modeling. Database-specific differences (syntax, ranking algorithms) are handled as variants within a common framework.
 
@@ -834,7 +834,7 @@ Full-text search has common primitives (inverted indexes, boolean queries, ranki
 
 ### Database Systems
 
-- **PostgreSQL (RFC 0067):** tsvector/tsquery with GIN/GiST, pioneered pg_trgm for fuzzy matching
+- **PostgreSQL ([RFC 0067](/maintainers/rfcs/0067-full-text-search-optimization)):** tsvector/tsquery with GIN/GiST, pioneered pg_trgm for fuzzy matching
 - **MySQL 8.0:** InnoDB FULLTEXT with NGRAM parser for CJK languages
 - **SQL Server:** Enterprise-grade FTS with 50+ language support, semantic search
 - **Oracle Text:** Advanced text mining, CONTEXT/CTXCAT indexes
@@ -889,14 +889,14 @@ Full-text search has common primitives (inverted indexes, boolean queries, ranki
 Combine full-text search with semantic vector search for best-of-both-worlds:
 
 ```sql
--- PostgreSQL hybrid search (RFC 0064 integration)
+-- PostgreSQL hybrid search ([RFC 0064](/maintainers/rfcs/0064-vector-similarity-search-optimization) integration)
 SELECT *,
        ts_rank(body_tsv, query) AS bm25_score,
-       1 - (embedding <=> query_embedding) AS vector_score,
+       1 - (embedding &lt;=&gt; query_embedding) AS vector_score,
        (0.7 * bm25_score + 0.3 * vector_score) AS hybrid_score
 FROM articles
 WHERE body_tsv @@ to_tsquery('database optimization')
-  AND embedding <=> query_embedding < 0.5
+  AND embedding &lt;=&gt; query_embedding &lt; 0.5
 ORDER BY hybrid_score DESC
 LIMIT 10;
 ```
@@ -985,8 +985,8 @@ WHERE MATCH(title) AGAINST('optim*' IN BOOLEAN MODE)
 -- Phrase: "..."
 WHERE MATCH(title) AGAINST('"query optimization"' IN BOOLEAN MODE)
 
--- Relevance modifier: > (increase), < (decrease)
-WHERE MATCH(title) AGAINST('>mysql <postgres' IN BOOLEAN MODE)
+-- Relevance modifier: &gt; (increase), &lt; (decrease)
+WHERE MATCH(title) AGAINST('&gt;mysql &lt;postgres' IN BOOLEAN MODE)
 
 -- Grouping: ()
 WHERE MATCH(title) AGAINST('+(mysql postgres) +(optimization performance)' IN BOOLEAN MODE)
@@ -1052,7 +1052,7 @@ SELECT d.title, KEY_TBL.RANK
 FROM documents d
 INNER JOIN CONTAINSTABLE(documents, body, 'database AND optimization') AS KEY_TBL
   ON d.doc_id = KEY_TBL.[KEY]
-WHERE KEY_TBL.RANK > 50
+WHERE KEY_TBL.RANK &gt; 50
 ORDER BY KEY_TBL.RANK DESC;
 ```
 
@@ -1094,3 +1094,52 @@ For advanced text search, MonetDB users typically:
 **Document Version:** 1.0
 **Last Updated:** 2026-03-28
 **Status:** Proposed for review
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 102: Cross-Database Full-Text Search Optimization](/maintainers/rfcs/0102-full-text-search-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 102: Cross-Database Full-Text Search Optimization](/maintainers/rfcs/0102-full-text-search-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 102: Cross-Database Full-Text Search Optimization](/maintainers/rfcs/0102-full-text-search-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 102: Cross-Database Full-Text Search Optimization](/maintainers/rfcs/0102-full-text-search-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 102: Cross-Database Full-Text Search Optimization](/maintainers/rfcs/0102-full-text-search-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 102: Cross-Database Full-Text Search Optimization](/maintainers/rfcs/0102-full-text-search-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 102: Cross-Database Full-Text Search Optimization](/maintainers/rfcs/0102-full-text-search-optimization)

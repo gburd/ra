@@ -75,9 +75,9 @@ MERGE INTO target_table AS t
 USING source_table AS s
 ON t.id = s.id
 WHEN MATCHED AND s.status = 'deleted' THEN DELETE
-WHEN MATCHED AND s.updated_at > t.updated_at THEN UPDATE SET *
+WHEN MATCHED AND s.updated_at &gt; t.updated_at THEN UPDATE SET *
 WHEN NOT MATCHED THEN INSERT *
-WHEN NOT MATCHED BY SOURCE AND t.last_active < current_date() - INTERVAL 90 DAYS THEN DELETE
+WHEN NOT MATCHED BY SOURCE AND t.last_active &lt; current_date() - INTERVAL 90 DAYS THEN DELETE
 ```
 
 **Clause Semantics:**
@@ -146,9 +146,9 @@ total_cost = build_cost + probe_cost
 ```
 1. Sort source and target on join key
 2. Merge-join with three-way scan:
-   - source < target: WHEN NOT MATCHED (INSERT)
+   - source &lt; target: WHEN NOT MATCHED (INSERT)
    - source = target: WHEN MATCHED (UPDATE/DELETE)
-   - target < source: WHEN NOT MATCHED BY SOURCE (DELETE/UPDATE)
+   - target &lt; source: WHEN NOT MATCHED BY SOURCE (DELETE/UPDATE)
 ```
 
 **Best For**:
@@ -187,7 +187,7 @@ total_cost = merge_cost
 ```
 
 **Best For**:
-- Very small source table (< 1% of target)
+- Very small source table (&lt; 1% of target)
 - Target has efficient index on join key (B-tree, hash index)
 - No WHEN NOT MATCHED BY SOURCE clause (avoids full scan)
 
@@ -236,7 +236,7 @@ per_partition_cost = (source_rows_in_partition + pruned_target_rows_in_partition
 
 total_cost = sum(per_partition_cost) / parallelism_factor
 
-Benefit: pruned_target_rows << target_rows (skip irrelevant partitions)
+Benefit: pruned_target_rows &lt;&lt; target_rows (skip irrelevant partitions)
 ```
 
 **Optimization Opportunities**:
@@ -339,8 +339,8 @@ WHEN MATCHED THEN UPDATE SET *
 ```
 1. Compute source key range: min(source.id) = 10000, max(source.id) = 12000
 2. For each target file:
-   - Skip if file.minValues.id > 12000 (no overlap)
-   - Skip if file.maxValues.id < 10000 (no overlap)
+   - Skip if file.minValues.id &gt; 12000 (no overlap)
+   - Skip if file.maxValues.id &lt; 10000 (no overlap)
    - Process if [file.min, file.max] intersects [10000, 12000]
 3. Result: Only process files with potential matches
 ```
@@ -399,14 +399,14 @@ MERGE statements often include predicates beyond the join condition:
 
 ```sql
 MERGE INTO target USING source ON target.id = source.id
-WHEN MATCHED AND source.updated_at > target.updated_at THEN UPDATE SET *
+WHEN MATCHED AND source.updated_at &gt; target.updated_at THEN UPDATE SET *
 WHEN MATCHED AND source.status = 'deleted' THEN DELETE
-WHEN NOT MATCHED AND source.date >= '2024-01-01' THEN INSERT *
+WHEN NOT MATCHED AND source.date &gt;= '2024-01-01' THEN INSERT *
 ```
 
 **Pushdown Opportunities:**
 
-1. **Source-side pushdown**: `source.date >= '2024-01-01'`
+1. **Source-side pushdown**: `source.date &gt;= '2024-01-01'`
    - Apply filter before MERGE execution
    - Reduces source rows participating in join
    - Standard optimization, always beneficial
@@ -427,7 +427,7 @@ Rule 1: Push source predicates into source scan
 
 Rule 2: Push target predicates into target scan
   Condition: No WHEN NOT MATCHED BY SOURCE clause
-  Example: target.date >= '2024-01-01' (skip old data)
+  Example: target.date &gt;= '2024-01-01' (skip old data)
 
 Rule 3: Build Bloom filter from source join keys
   Condition: Hash-based MERGE strategy
@@ -435,7 +435,7 @@ Rule 3: Build Bloom filter from source join keys
 
 Rule 4: Use partition key predicates for dynamic partition pruning
   Condition: Target partitioned on column referenced in predicate
-  Example: source.date = target.date -> prune to matching date partitions
+  Example: source.date = target.date -&gt; prune to matching date partitions
 ```
 
 ### Cost Model
@@ -456,7 +456,7 @@ struct MergeCostParams {
     avg_file_size_bytes: u64,
     partition_count: u64,
     affected_partitions: u64,
-    z_order_columns: Vec<String>,  // Empty if not Z-ORDERed
+    z_order_columns: Vec&lt;String&gt;,  // Empty if not Z-ORDERed
 
     // MERGE clause flags
     has_when_not_matched_by_source: bool,
@@ -480,7 +480,7 @@ struct MergeCostParams {
     bloom_filter_probe_per_row: f64, // 0.05 microseconds
 }
 
-fn estimate_hash_merge_cost(params: &MergeCostParams) -> f64 {
+fn estimate_hash_merge_cost(params: &MergeCostParams) -&gt; f64 {
     let build_cost = params.source_rows as f64 * params.hash_build_per_row;
     let probe_cost = params.target_rows as f64 * params.hash_probe_per_row;
 
@@ -491,7 +491,7 @@ fn estimate_hash_merge_cost(params: &MergeCostParams) -> f64 {
     build_cost + probe_cost + rewrite_cost
 }
 
-fn estimate_sort_merge_cost(params: &MergeCostParams) -> f64 {
+fn estimate_sort_merge_cost(params: &MergeCostParams) -&gt; f64 {
     let sort_source = params.source_rows as f64 * params.source_rows.ilog2() as f64 * params.sort_cost_per_row;
     let sort_target = params.target_rows as f64 * params.target_rows.ilog2() as f64 * params.sort_cost_per_row;
     let merge_cost = (params.source_rows + params.target_rows) as f64 * params.merge_scan_per_row;
@@ -503,7 +503,7 @@ fn estimate_sort_merge_cost(params: &MergeCostParams) -> f64 {
     sort_source + sort_target + merge_cost + rewrite_cost
 }
 
-fn estimate_index_merge_cost(params: &MergeCostParams) -> f64 {
+fn estimate_index_merge_cost(params: &MergeCostParams) -&gt; f64 {
     let lookup_cost = params.source_rows as f64 * params.index_lookup_per_row;
 
     let matched_rows = (params.source_rows as f64 * params.join_key_selectivity).min(params.target_rows as f64);
@@ -520,7 +520,7 @@ fn estimate_index_merge_cost(params: &MergeCostParams) -> f64 {
     cost
 }
 
-fn estimate_partition_merge_cost(params: &MergeCostParams) -> f64 {
+fn estimate_partition_merge_cost(params: &MergeCostParams) -&gt; f64 {
     let pruned_target_rows = params.target_rows * params.affected_partitions / params.partition_count;
 
     // Choose best strategy per partition (hash or sort)
@@ -537,7 +537,7 @@ fn estimate_partition_merge_cost(params: &MergeCostParams) -> f64 {
     (per_partition_cost * params.affected_partitions as f64) / parallelism_factor
 }
 
-fn estimate_files_affected(params: &MergeCostParams, matched_rows: f64) -> f64 {
+fn estimate_files_affected(params: &MergeCostParams, matched_rows: f64) -&gt; f64 {
     let base_files = (matched_rows / (params.target_rows as f64 / params.target_files as f64)).ceil();
 
     // Z-ORDER clustering reduces files affected
@@ -550,7 +550,7 @@ fn estimate_files_affected(params: &MergeCostParams, matched_rows: f64) -> f64 {
     base_files * z_order_factor
 }
 
-fn choose_merge_strategy(params: &MergeCostParams) -> MergeStrategy {
+fn choose_merge_strategy(params: &MergeCostParams) -&gt; MergeStrategy {
     let strategies = vec![
         (MergeStrategy::Hash, estimate_hash_merge_cost(params)),
         (MergeStrategy::Sort, estimate_sort_merge_cost(params)),
@@ -929,7 +929,7 @@ Where:
 | 50% of data | 0.50 | 2T + 2S | S + 0.50T | 2-4x |
 | 100% of data | 1.00 | 2T + 2S | S + T | 1.5-2x |
 
-(T = target_rows, S = source_rows, assuming S << T)
+(T = target_rows, S = source_rows, assuming S &lt;&lt; T)
 
 ### Real-World Performance Example
 
@@ -1056,7 +1056,56 @@ Capture MERGE changes as CDC stream:
 
 ## Related RFCs
 
-- RFC 0059: Statistics-Based Plan Cache Invalidation (statistics tracking)
-- RFC 0069: Execution Feedback Loop (adaptive cost model tuning)
-- RFC 0072: Adaptive Parallelism (parallel partition processing)
-- RFC 0085: Platform-Specific Rule Architecture (Delta Lake rule organization)
+- [RFC 0059](/maintainers/rfcs/0059-statistics-based-plan-cache-invalidation): Statistics-Based Plan Cache Invalidation (statistics tracking)
+- [RFC 0069](/maintainers/rfcs/0069-execution-feedback-loop): Execution Feedback Loop (adaptive cost model tuning)
+- [RFC 0072](/maintainers/rfcs/0072-adaptive-parallelism): Adaptive Parallelism (parallel partition processing)
+- [RFC 0085](/maintainers/rfcs/0085-platform-specific-rule-architecture): Platform-Specific Rule Architecture (Delta Lake rule organization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 104: Delta Lake MERGE Optimization](/maintainers/rfcs/0104-delta-lake-merge-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 104: Delta Lake MERGE Optimization](/maintainers/rfcs/0104-delta-lake-merge-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 104: Delta Lake MERGE Optimization](/maintainers/rfcs/0104-delta-lake-merge-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 104: Delta Lake MERGE Optimization](/maintainers/rfcs/0104-delta-lake-merge-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 104: Delta Lake MERGE Optimization](/maintainers/rfcs/0104-delta-lake-merge-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 104: Delta Lake MERGE Optimization](/maintainers/rfcs/0104-delta-lake-merge-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 104: Delta Lake MERGE Optimization](/maintainers/rfcs/0104-delta-lake-merge-optimization)

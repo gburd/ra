@@ -99,12 +99,12 @@ UNPIVOT (
 
 ```sql
 -- Basic PIVOT
-SELECT <non_pivoted_columns>, <pivoted_columns>
-FROM <table_expression>
+SELECT &lt;non_pivoted_columns&gt;, &lt;pivoted_columns&gt;
+FROM &lt;table_expression&gt;
 PIVOT (
-  <aggregate_function>(<value_column>)
-  FOR <pivot_column> IN (<value1>, <value2>, ..., <valueN>)
-) AS <alias>;
+  &lt;aggregate_function&gt;(&lt;value_column&gt;)
+  FOR &lt;pivot_column&gt; IN (&lt;value1&gt;, &lt;value2&gt;, ..., &lt;valueN&gt;)
+) AS &lt;alias&gt;;
 
 -- Multiple aggregations (Oracle/SQL Server)
 PIVOT (
@@ -131,11 +131,11 @@ PIVOT XML (
 
 ```sql
 -- Basic UNPIVOT
-SELECT <columns>
-FROM <table_expression>
+SELECT &lt;columns&gt;
+FROM &lt;table_expression&gt;
 UNPIVOT (
-  <value_column> FOR <name_column> IN (<col1>, <col2>, ..., <colN>)
-) AS <alias>;
+  &lt;value_column&gt; FOR &lt;name_column&gt; IN (&lt;col1&gt;, &lt;col2&gt;, ..., &lt;colN&gt;)
+) AS &lt;alias&gt;;
 
 -- With NULL handling
 UNPIVOT INCLUDE NULLS (
@@ -164,33 +164,33 @@ pub enum RelExpr {
 
     Pivot {
         /// Input relation
-        input: Box<RelExpr>,
+        input: Box&lt;RelExpr&gt;,
 
         /// Column whose distinct values become new columns
         pivot_column: String,
 
         /// Columns to aggregate (multiple for multi-aggregate PIVOT)
-        value_columns: Vec<String>,
+        value_columns: Vec&lt;String&gt;,
 
         /// Aggregation functions (one per value_column)
-        aggregates: Vec<AggregateExpr>,
+        aggregates: Vec&lt;AggregateExpr&gt;,
 
         /// Explicit list of pivot values, or None for dynamic
-        pivot_values: Option<Vec<Literal>>,
+        pivot_values: Option&lt;Vec&lt;Literal&gt;&gt;,
 
         /// Columns to group by (implicit: all non-pivoted, non-value columns)
-        group_by: Vec<Expr>,
+        group_by: Vec&lt;Expr&gt;,
 
         /// Alias suffixes for multi-aggregate (e.g., "_total", "_count")
-        aliases: Vec<String>,
+        aliases: Vec&lt;String&gt;,
     },
 }
 
 pub struct AggregateExpr {
     pub function: AggregateFunction,
-    pub args: Vec<Expr>,
+    pub args: Vec&lt;Expr&gt;,
     pub distinct: bool,
-    pub filter: Option<Expr>,  // FILTER clause for aggregate
+    pub filter: Option&lt;Expr&gt;,  // FILTER clause for aggregate
 }
 ```
 
@@ -202,10 +202,10 @@ pub enum RelExpr {
 
     Unpivot {
         /// Input relation
-        input: Box<RelExpr>,
+        input: Box&lt;RelExpr&gt;,
 
         /// Columns to unpivot
-        value_columns: Vec<String>,
+        value_columns: Vec&lt;String&gt;,
 
         /// New column name for values
         value_name: String,
@@ -217,7 +217,7 @@ pub enum RelExpr {
         include_nulls: bool,
 
         /// Columns to preserve (not unpivot)
-        preserve_columns: Vec<String>,
+        preserve_columns: Vec&lt;String&gt;,
     },
 }
 ```
@@ -301,7 +301,7 @@ SELECT product, 'q4' AS quarter, q4 AS sales FROM t;
 ```
 
 **NULL Handling:**
-- `EXCLUDE NULLS` (default): Add `WHERE <value_column> IS NOT NULL` to each branch
+- `EXCLUDE NULLS` (default): Add `WHERE &lt;value_column&gt; IS NOT NULL` to each branch
 - `INCLUDE NULLS`: No additional filter
 
 ### 4. Optimization Opportunities
@@ -351,7 +351,7 @@ Pivot ← Filter(pred)
 
 **Cost Model Adjustment:**
 ```rust
-fn pivot_cost(input_cardinality: usize, num_pivot_values: usize, num_groups: usize) -> Cost {
+fn pivot_cost(input_cardinality: usize, num_pivot_values: usize, num_groups: usize) -&gt; Cost {
     let base_cost = aggregate_cost(input_cardinality, num_groups);
     let case_overhead = num_pivot_values * case_expression_cost();
     base_cost + case_overhead
@@ -829,8 +829,8 @@ PIVOT (
 ### Related RFCs
 - RFC 0001: Row Pattern Recognition (MATCH_RECOGNIZE)
 - RFC 0052: Progressive Re-Optimization
-- RFC 0063: Spatial Query Optimization
-- RFC 0072: Adaptive Parallelism
+- [RFC 0063](/maintainers/rfcs/0063-spatial-query-optimization): Spatial Query Optimization
+- [RFC 0072](/maintainers/rfcs/0072-adaptive-parallelism): Adaptive Parallelism
 
 ### Analysis Documents
 - `/home/gburd/ws/ra/SQL_STANDARDS_GAP_ANALYSIS.md` (Lines 815-880)
@@ -887,3 +887,52 @@ PIVOT and UNPIVOT operations are essential for modern analytical workloads, redu
 The proposed implementation leverages existing aggregate and union operators, adding optimization rules for column pruning, predicate pushdown, and parallel execution. The 15-20 week implementation timeline delivers high-value functionality with manageable complexity.
 
 **Recommendation:** Approve for implementation in Q2 2026.
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 96: PIVOT/UNPIVOT Operations and Optimization](/maintainers/rfcs/0096-pivot-unpivot-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 96: PIVOT/UNPIVOT Operations and Optimization](/maintainers/rfcs/0096-pivot-unpivot-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 96: PIVOT/UNPIVOT Operations and Optimization](/maintainers/rfcs/0096-pivot-unpivot-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 96: PIVOT/UNPIVOT Operations and Optimization](/maintainers/rfcs/0096-pivot-unpivot-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 96: PIVOT/UNPIVOT Operations and Optimization](/maintainers/rfcs/0096-pivot-unpivot-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 96: PIVOT/UNPIVOT Operations and Optimization](/maintainers/rfcs/0096-pivot-unpivot-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 96: PIVOT/UNPIVOT Operations and Optimization](/maintainers/rfcs/0096-pivot-unpivot-optimization)

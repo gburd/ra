@@ -1,7 +1,7 @@
 //! Sparse bitmap implementation for efficient set operations.
 //!
 //! This is a Rust port of sparsemap.c by Gregory Burd.
-//! Original: https://codeberg.org/gregburd/sparsemap
+//! Original: <https://codeberg.org/gregburd/sparsemap>
 //!
 //! A sparse bitmap compresses runs of zeros and ones, storing only
 //! "mixed" bitvectors explicitly. This provides:
@@ -128,10 +128,9 @@ impl Chunk {
     /// Get the bitvector at `idx`, handling compression.
     fn get_vector(&self, idx: usize) -> BitVec {
         match self.get_flag(idx) {
-            Flag::Zeros => 0,
             Flag::Ones => !0,
             Flag::Mixed => self.vectors[self.vector_position(idx)],
-            Flag::Unused => 0,
+            Flag::Zeros | Flag::Unused => 0,
         }
     }
 
@@ -218,7 +217,7 @@ impl Chunk {
 
 /// A sparse bitmap supporting up to 4 billion bits.
 pub struct SparseMap {
-    /// Chunks indexed by (bit_index / BITS_PER_CHUNK).
+    /// Chunks indexed by (`bit_index` / `BITS_PER_CHUNK`).
     /// Only allocated chunks are stored.
     chunks: Vec<Option<Box<Chunk>>>,
 }
@@ -233,6 +232,10 @@ impl SparseMap {
     }
 
     /// Set bit `idx`.
+    ///
+    /// # Panics
+    /// This function should not panic under normal circumstances, as it allocates
+    /// the chunk if needed before accessing it.
     pub fn set(&mut self, idx: Idx) {
         let chunk_idx = (idx as usize) / BITS_PER_CHUNK;
         let bit_idx = (idx as usize) % BITS_PER_CHUNK;
@@ -247,7 +250,9 @@ impl SparseMap {
             self.chunks[chunk_idx] = Some(Box::new(Chunk::new()));
         }
 
-        self.chunks[chunk_idx].as_mut().unwrap().set_bit(bit_idx);
+        if let Some(chunk) = self.chunks[chunk_idx].as_mut() {
+            chunk.set_bit(bit_idx);
+        }
     }
 
     /// Clear bit `idx`.
@@ -284,6 +289,10 @@ impl SparseMap {
     }
 
     /// Union this map with `other` (self |= other).
+    ///
+    /// # Panics
+    /// This function should not panic under normal circumstances, as it allocates
+    /// chunks as needed before accessing them.
     pub fn union(&mut self, other: &Self) {
         for (idx, other_chunk) in other.chunks.iter().enumerate() {
             if let Some(other_chunk) = other_chunk {
@@ -297,13 +306,13 @@ impl SparseMap {
                     self.chunks[idx] = Some(Box::new(Chunk::new()));
                 }
 
-                let self_chunk = self.chunks[idx].as_mut().unwrap();
-
-                // Union each bitvector
-                for vec_idx in 0..VECS_PER_CHUNK {
-                    let self_vec = self_chunk.get_vector(vec_idx);
-                    let other_vec = other_chunk.get_vector(vec_idx);
-                    self_chunk.set_vector(vec_idx, self_vec | other_vec);
+                if let Some(self_chunk) = self.chunks[idx].as_mut() {
+                    // Union each bitvector
+                    for vec_idx in 0..VECS_PER_CHUNK {
+                        let self_vec = self_chunk.get_vector(vec_idx);
+                        let other_vec = other_chunk.get_vector(vec_idx);
+                        self_chunk.set_vector(vec_idx, self_vec | other_vec);
+                    }
                 }
             }
         }

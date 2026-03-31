@@ -21,12 +21,12 @@ Without LATERAL (requires window functions or self-joins):
 SELECT * FROM (
   SELECT *, ROW_NUMBER() OVER (PARTITION BY dept_id ORDER BY salary DESC) as rn
   FROM employees
-) WHERE rn <= 3;
+) WHERE rn &lt;= 3;
 
 -- Self-join approach (very expensive)
 SELECT e1.* FROM employees e1
 WHERE (SELECT COUNT(*) FROM employees e2
-       WHERE e2.dept_id = e1.dept_id AND e2.salary >= e1.salary) <= 3;
+       WHERE e2.dept_id = e1.dept_id AND e2.salary &gt;= e1.salary) &lt;= 3;
 ```
 
 With LATERAL (cleaner, often faster):
@@ -53,13 +53,13 @@ Snowflake's primary method for unnesting JSON/VARIANT arrays:
 SELECT f.value:name::STRING as item_name,
        f.value:price::NUMBER as item_price
 FROM orders,
-     LATERAL FLATTEN(input => orders.items) f
-WHERE f.value:stock > 0;
+     LATERAL FLATTEN(input =&gt; orders.items) f
+WHERE f.value:stock &gt; 0;
 
 -- Recursive flatten for deeply nested structures
 SELECT f.value
 FROM documents,
-     LATERAL FLATTEN(input => documents.data, recursive => true) f
+     LATERAL FLATTEN(input =&gt; documents.data, recursive =&gt; true) f
 WHERE f.path LIKE '%.errors[%]';
 ```
 
@@ -96,7 +96,7 @@ LATERAL VIEW OUTER explode(people.tags) AS tag;
 SELECT c.customer_name, o.order_id, o.total
 FROM customers c,
      LATERAL get_customer_orders(c.customer_id) o
-WHERE o.total > 1000;
+WHERE o.total &gt; 1000;
 ```
 
 ### Use Cases Summary
@@ -167,7 +167,7 @@ SELECT f.SEQ,      -- Sequential counter
        f.VALUE,    -- Element value
        f.THIS      -- Current array/object being flattened
 FROM table_with_json,
-     LATERAL FLATTEN(input => json_column, recursive => false) f;
+     LATERAL FLATTEN(input =&gt; json_column, recursive =&gt; false) f;
 ```
 
 **Parameters**:
@@ -183,9 +183,9 @@ LATERAL VIEW is syntactic sugar for array/map unnesting:
 
 ```sql
 -- Basic syntax
-SELECT <columns>
+SELECT &lt;columns&gt;
 FROM table
-LATERAL VIEW <generator_function>(<input>) <table_alias> AS <column_aliases>;
+LATERAL VIEW &lt;generator_function&gt;(&lt;input&gt;) &lt;table_alias&gt; AS &lt;column_aliases&gt;;
 
 -- Generator functions
 LATERAL VIEW explode(array_col) t AS element
@@ -212,7 +212,7 @@ The optimizer will apply these strategies:
 
 3. **Memoization**
    - Cache LATERAL subquery results for repeated parameter values
-   - Effective when cardinality of left side < right side
+   - Effective when cardinality of left side &lt; right side
    - Speedup: 5-50x for high duplication
 
 4. **Lateral Join Reordering**
@@ -236,13 +236,13 @@ pub const LATERAL: &str = "LATERAL";
 pub enum FromItem {
     // ... existing variants
     Lateral {
-        subquery: Box<Query>,
-        alias: Option<TableAlias>,
+        subquery: Box&lt;Query&gt;,
+        alias: Option&lt;TableAlias&gt;,
         outer: bool,  // OUTER APPLY semantics
     },
     LateralFlatten {
         input: Expr,
-        path: Option<String>,
+        path: Option&lt;String&gt;,
         outer: bool,
         recursive: bool,
         mode: FlattenMode,
@@ -250,9 +250,9 @@ pub enum FromItem {
     },
     LateralView {
         generator: GeneratorFunction,
-        generator_args: Vec<Expr>,
+        generator_args: Vec&lt;Expr&gt;,
         table_alias: String,
-        column_aliases: Vec<String>,
+        column_aliases: Vec&lt;String&gt;,
         outer: bool,
     },
 }
@@ -282,17 +282,17 @@ pub enum RelExpr {
 
     /// LATERAL subquery with correlation
     LateralJoin {
-        left: Box<RelExpr>,
-        right: Box<RelExpr>,  // Contains correlated column references
+        left: Box&lt;RelExpr&gt;,
+        right: Box&lt;RelExpr&gt;,  // Contains correlated column references
         join_type: LateralJoinType,
-        correlation: Vec<CorrelationRef>,
+        correlation: Vec&lt;CorrelationRef&gt;,
     },
 
     /// Snowflake LATERAL FLATTEN
     Flatten {
-        input: Box<RelExpr>,
-        flatten_expr: Box<Expr>,  // VARIANT/ARRAY/OBJECT expression
-        path: Option<String>,
+        input: Box&lt;RelExpr&gt;,
+        flatten_expr: Box&lt;Expr&gt;,  // VARIANT/ARRAY/OBJECT expression
+        path: Option&lt;String&gt;,
         outer: bool,
         recursive: bool,
         mode: FlattenMode,
@@ -301,9 +301,9 @@ pub enum RelExpr {
 
     /// Databricks LATERAL VIEW
     LateralView {
-        input: Box<RelExpr>,
+        input: Box&lt;RelExpr&gt;,
         generator: GeneratorFunction,
-        generator_args: Vec<Expr>,
+        generator_args: Vec&lt;Expr&gt;,
         outer: bool,
         // Output columns depend on generator type
     },
@@ -318,7 +318,7 @@ pub struct CorrelationRef {
     /// Column from left side referenced in right side
     pub left_column: ColumnRef,
     /// References in right side that use this column
-    pub right_references: Vec<ExprPath>,
+    pub right_references: Vec&lt;ExprPath&gt;,
 }
 ```
 
@@ -330,19 +330,19 @@ Track correlation dependencies:
 // In ra-engine/src/lateral_decorrelation.rs
 pub struct CorrelationAnalysis {
     /// Columns from outer scope referenced in subquery
-    pub correlated_columns: Vec<ColumnRef>,
+    pub correlated_columns: Vec&lt;ColumnRef&gt;,
 
     /// Predicates that can be pushed to join condition
-    pub join_predicates: Vec<Expr>,
+    pub join_predicates: Vec&lt;Expr&gt;,
 
     /// Predicates that must remain in subquery
-    pub residual_predicates: Vec<Expr>,
+    pub residual_predicates: Vec&lt;Expr&gt;,
 
     /// Whether decorrelation to join is possible
     pub decorrelatable: bool,
 
     /// Reason if not decorrelatable
-    pub blocking_reason: Option<DecorrelationBlocker>,
+    pub blocking_reason: Option&lt;DecorrelationBlocker&gt;,
 }
 
 pub enum DecorrelationBlocker {
@@ -373,9 +373,9 @@ JOIN employees e ON e.dept_id = d.id;
 
 **Transformation Rule**:
 ```
-LateralJoin(left: D, right: R, correlation: [D.id -> R.dept_id])
+LateralJoin(left: D, right: R, correlation: [D.id -&gt; R.dept_id])
   WHERE R has simple equality predicate on correlated column
-=>
+=&gt;
 Join(left: D, right: R, on: D.id = R.dept_id, type: Inner)
 ```
 
@@ -407,7 +407,7 @@ LEFT JOIN (
 ```
 LateralJoin(left: D, right: Aggregate(input: R, aggs: A, group_by: []))
   WHERE R has correlation predicate: R.col = D.col
-=>
+=&gt;
 Join(left: D,
      right: Aggregate(input: R, aggs: A, group_by: [R.col]),
      on: D.col = R.col,
@@ -437,7 +437,7 @@ JOIN (
   SELECT dept_id, name AS emp_name, salary,
          ROW_NUMBER() OVER (PARTITION BY dept_id ORDER BY salary DESC) as rn
   FROM employees
-) e ON e.dept_id = d.id AND e.rn <= 3;
+) e ON e.dept_id = d.id AND e.rn &lt;= 3;
 ```
 
 **Transformation Rule**:
@@ -449,7 +449,7 @@ LateralJoin(
     limit: N
   )
 )
-=>
+=&gt;
 Join(
   left: D,
   right: Filter(
@@ -459,7 +459,7 @@ Join(
       partition_by: [R.col],
       order_by: O
     ),
-    pred: rn <= N AND R.col = D.col
+    pred: rn &lt;= N AND R.col = D.col
   ),
   type: Inner
 )
@@ -475,8 +475,8 @@ Snowflake FLATTEN has unique optimization opportunities:
 ```sql
 SELECT f.value:id
 FROM orders,
-     LATERAL FLATTEN(input => orders.items) f
-WHERE f.value:price > 100;
+     LATERAL FLATTEN(input =&gt; orders.items) f
+WHERE f.value:price &gt; 100;
 ```
 
 **Optimized**:
@@ -485,7 +485,7 @@ Push filter into FLATTEN to reduce rows before materialization:
 Flatten(
   input: orders,
   flatten_expr: orders.items,
-  filter: value:price > 100  -- Applied during flattening
+  filter: value:price &gt; 100  -- Applied during flattening
 )
 ```
 
@@ -527,7 +527,7 @@ FROM orders,
 -- Single recursive FLATTEN
 SELECT f.value:id, f.value:categories[*]:category
 FROM orders,
-     LATERAL FLATTEN(input => orders.items, recursive => true) f;
+     LATERAL FLATTEN(input =&gt; orders.items, recursive =&gt; true) f;
 ```
 
 ### LATERAL VIEW Optimization
@@ -562,8 +562,8 @@ FROM people,
 ```
 
 Reorder based on cardinality:
-- If `avg(|skills|) < avg(|years|)`, explode skills first (smaller intermediate result)
-- If `avg(|years|) < avg(|skills|)`, explode years first
+- If `avg(|skills|) &lt; avg(|years|)`, explode skills first (smaller intermediate result)
+- If `avg(|years|) &lt; avg(|skills|)`, explode years first
 
 ### Cost Model
 
@@ -628,10 +628,10 @@ LATERAL operations interact with predicate pushdown:
 
 Rule examples:
 ```
-Filter(LateralJoin(L, R), pred: R.x > 10)
+Filter(LateralJoin(L, R), pred: R.x &gt; 10)
   WHERE pred references only R
-=>
-LateralJoin(L, Filter(R, pred: R.x > 10))
+=&gt;
+LateralJoin(L, Filter(R, pred: R.x &gt; 10))
 ```
 
 #### 3. Column Pruning
@@ -641,7 +641,7 @@ FLATTEN produces 6 columns (SEQ, KEY, PATH, INDEX, VALUE, THIS). Prune unused co
 ```
 Project(columns: [VALUE],
   Flatten(input, expr, ...))
-=>
+=&gt;
 Flatten(input, expr, ..., output_columns: [VALUE])
 ```
 
@@ -655,18 +655,18 @@ LATERAL joins have ordering constraints:
 pub struct LateralDependencyGraph {
     /// Nodes = FROM items
     /// Edges = correlation dependencies
-    pub nodes: Vec<RelExpr>,
-    pub edges: Vec<(usize, usize)>,  // (from_idx, to_idx)
+    pub nodes: Vec&lt;RelExpr&gt;,
+    pub edges: Vec&lt;(usize, usize)&gt;,  // (from_idx, to_idx)
 }
 
 impl LateralDependencyGraph {
     /// Find valid execution orders respecting dependencies
-    pub fn topological_orders(&self) -> Vec<Vec<usize>> {
+    pub fn topological_orders(&self) -&gt; Vec&lt;Vec&lt;usize&gt;&gt; {
         // Returns all valid orderings
     }
 
     /// Cost-based ordering selection
-    pub fn optimal_order(&self, cost_model: &CostModel) -> Vec<usize> {
+    pub fn optimal_order(&self, cost_model: &CostModel) -&gt; Vec&lt;usize&gt; {
         // Choose order minimizing total cost
     }
 }
@@ -679,7 +679,7 @@ For LATERAL operations with repeated parameters:
 ```rust
 pub struct LateralCache {
     /// Cache subquery results keyed by correlated column values
-    cache: HashMap<Vec<Value>, Vec<Row>>,
+    cache: HashMap&lt;Vec&lt;Value&gt;, Vec&lt;Row&gt;&gt;,
 
     /// Cache hit statistics
     hits: usize,
@@ -691,13 +691,13 @@ pub struct LateralCache {
 }
 
 impl LateralCache {
-    pub fn lookup(&mut self, key: &[Value]) -> Option<&Vec<Row>> {
+    pub fn lookup(&mut self, key: &[Value]) -&gt; Option&lt;&Vec&lt;Row&gt;&gt; {
         self.cache.get(key)
     }
 
-    pub fn insert(&mut self, key: Vec<Value>, rows: Vec<Row>) {
+    pub fn insert(&mut self, key: Vec&lt;Value&gt;, rows: Vec&lt;Row&gt;) {
         // Evict if over memory budget
-        if self.current_memory > self.max_memory {
+        if self.current_memory &gt; self.max_memory {
             self.evict_lru();
         }
         self.cache.insert(key, rows);
@@ -715,7 +715,7 @@ impl LateralCache {
 benefit = (|left_rows| - |distinct_correlated_values|) * subquery_cost
 overhead = cache_lookup_cost * |left_rows| + cache_insert_cost * |distinct_correlated_values|
 
-Enable memoization if: benefit > overhead * threshold (e.g., 2.0)
+Enable memoization if: benefit &gt; overhead * threshold (e.g., 2.0)
 ```
 
 ## Drawbacks
@@ -974,7 +974,7 @@ LATERAL VIEW is syntactic sugar for generator functions:
 
 ### 1. FLATTEN Recursive Depth Limits
 
-Should we impose maximum recursion depth for FLATTEN(recursive => true)?
+Should we impose maximum recursion depth for FLATTEN(recursive =&gt; true)?
 
 **Options**:
 - A. No limit (match Snowflake behavior)
@@ -1022,7 +1022,7 @@ When decorrelation fails (e.g., recursive correlation), should we:
 
 How should we handle syntax differences?
 
-**Example**: SQL Server `OUTER APPLY` vs Snowflake `LATERAL FLATTEN(outer => true)`
+**Example**: SQL Server `OUTER APPLY` vs Snowflake `LATERAL FLATTEN(outer =&gt; true)`
 
 **Options**:
 - A. Translate all to LateralJoin(outer: bool) during parsing
@@ -1120,7 +1120,7 @@ Extend LATERAL to streaming queries:
 ```sql
 SELECT sensor_id, event.value
 FROM sensor_stream,
-     LATERAL FLATTEN(input => sensor_stream.events) event;
+     LATERAL FLATTEN(input =&gt; sensor_stream.events) event;
 ```
 
 **Challenge**: Maintaining correlation state in streaming execution.
@@ -1358,3 +1358,52 @@ This RFC proposes comprehensive LATERAL support across three critical variants:
 **Expected impact**: High - enables advanced SQL patterns, major performance wins
 
 **Recommendation**: Approve and proceed with implementation.
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 98: LATERAL Subquery and LATERAL VIEW Optimization](/maintainers/rfcs/0098-lateral-subquery-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 98: LATERAL Subquery and LATERAL VIEW Optimization](/maintainers/rfcs/0098-lateral-subquery-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 98: LATERAL Subquery and LATERAL VIEW Optimization](/maintainers/rfcs/0098-lateral-subquery-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 98: LATERAL Subquery and LATERAL VIEW Optimization](/maintainers/rfcs/0098-lateral-subquery-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 98: LATERAL Subquery and LATERAL VIEW Optimization](/maintainers/rfcs/0098-lateral-subquery-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 98: LATERAL Subquery and LATERAL VIEW Optimization](/maintainers/rfcs/0098-lateral-subquery-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 98: LATERAL Subquery and LATERAL VIEW Optimization](/maintainers/rfcs/0098-lateral-subquery-optimization)

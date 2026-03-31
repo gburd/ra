@@ -43,7 +43,7 @@ SQL/PGQ introduces the `MATCH` clause for graph patterns:
 SELECT p.name, f.name, fof.name
 FROM GRAPH_TABLE (
   social_graph
-  MATCH (p:Person)-[:KNOWS]->(f:Person)-[:KNOWS]->(fof:Person)
+  MATCH (p:Person)-[:KNOWS]-&gt;(f:Person)-[:KNOWS]-&gt;(fof:Person)
   COLUMNS (p.name AS person, f.name AS friend, fof.name AS friend_of_friend)
 ) AS t;
 ```
@@ -73,7 +73,7 @@ CREATE PROPERTY GRAPH social_graph
 **Fixed-length paths:**
 ```sql
 -- Exactly 2 hops
-MATCH (a)-[]-()-[]->(b)
+MATCH (a)-[]-()-[]-&gt;(b)
 ```
 
 **Variable-length paths:**
@@ -82,13 +82,13 @@ MATCH (a)-[]-()-[]->(b)
 MATCH (a)-[]-{1,3}(b)
 
 -- Any length (shortest path)
-MATCH SHORTEST (a)-[]-*->(b)
+MATCH SHORTEST (a)-[]-*-&gt;(b)
 ```
 
 **Named paths:**
 ```sql
 -- Capture entire path
-MATCH p = (a)-[]-*->(b)
+MATCH p = (a)-[]-*-&gt;(b)
 RETURN nodes(p), edges(p), length(p)
 ```
 
@@ -96,8 +96,8 @@ RETURN nodes(p), edges(p), length(p)
 
 ```sql
 -- Filter on vertex and edge properties
-MATCH (p:Person {city: 'NYC'})-[k:KNOWS WHERE k.strength > 0.8]->(f:Person)
-WHERE f.age > 25
+MATCH (p:Person {city: 'NYC'})-[k:KNOWS WHERE k.strength &gt; 0.8]-&gt;(f:Person)
+WHERE f.age &gt; 25
 RETURN p.name, f.name, k.since
 ```
 
@@ -108,7 +108,7 @@ RETURN p.name, f.name, k.since
 SELECT city, COUNT(*) as connections
 FROM GRAPH_TABLE (
   social_graph
-  MATCH (p:Person)-[:KNOWS]->(f:Person)
+  MATCH (p:Person)-[:KNOWS]-&gt;(f:Person)
   WHERE p.city = f.city
   COLUMNS (p.city AS city)
 )
@@ -119,16 +119,16 @@ GROUP BY city;
 
 ```sql
 -- All paths (multiple results per source)
-MATCH ALL (a)-[]-*->(b)
+MATCH ALL (a)-[]-*-&gt;(b)
 
 -- Any path (one arbitrary path)
-MATCH ANY (a)-[]-*->(b)
+MATCH ANY (a)-[]-*-&gt;(b)
 
 -- Shortest path (minimum hops)
-MATCH SHORTEST (a)-[]-*->(b)
+MATCH SHORTEST (a)-[]-*-&gt;(b)
 
 -- All shortest paths (all paths with minimum hops)
-MATCH ALL SHORTEST (a)-[]-*->(b)
+MATCH ALL SHORTEST (a)-[]-*-&gt;(b)
 ```
 
 ## Reference-level explanation
@@ -162,7 +162,7 @@ vertex_pattern ::=
   '(' [vertex_variable] [':' label] [WHERE predicate] [property_spec] ')'
 
 edge_pattern ::=
-  [-|->|<-] '[' [edge_variable] [':' label] [WHERE predicate] ']' [quantifier]
+  [-|-&gt;|&lt;-] '[' [edge_variable] [':' label] [WHERE predicate] ']' [quantifier]
 
 quantifier ::=
   '*' | '+' | '{' m ',' n '}' | '{' m ',' '}' | '{' ',' n '}'
@@ -193,19 +193,19 @@ SQL/PGQ constructs map to relational operators:
 
 **2. Edge pattern → Join:**
 ```
-(a)-[k:KNOWS]->(b)
+(a)-[k:KNOWS]-&gt;(b)
 → a ⋈[a.id = k.src ∧ k.label='KNOWS'] k ⋈[k.dst = b.id] b
 ```
 
 **3. Path quantifiers → Recursive operators:**
 ```
-(a)-[]-*->(b)
+(a)-[]-*-&gt;(b)
 → Fix(λX. a ∪ (X ⋈ edge_table ⋈ vertex_table))
 ```
 
 **4. Shortest path → Dijkstra/BFS:**
 ```
-MATCH SHORTEST (a)-[e]-*->(b)
+MATCH SHORTEST (a)-[e]-*-&gt;(b)
 → ShortestPath(a, b, cost=length(e))
 ```
 
@@ -216,7 +216,7 @@ MATCH SHORTEST (a)-[e]-*->(b)
 Graph patterns are joins - use Ra's join ordering:
 
 ```sql
--- Pattern: (a)-[]->(b)-[]->(c)<-[]-(d)
+-- Pattern: (a)-[]-&gt;(b)-[]-&gt;(c)&lt;-[]-(d)
 -- Join order depends on selectivity:
 -- If b is highly selective: b → a, b → c, c → d
 -- If d is highly selective: d → c, c → b, b → a
@@ -239,7 +239,7 @@ Property graphs benefit from specialized indexes:
 
 **Index recommendation:**
 ```sql
--- For pattern (a)-[:KNOWS]->(b)
+-- For pattern (a)-[:KNOWS]-&gt;(b)
 CREATE INDEX ON friendships(user_id1, user_id2)
   WHERE label = 'KNOWS';
 ```
@@ -249,7 +249,7 @@ CREATE INDEX ON friendships(user_id1, user_id2)
 **Fixed quantifier `{2,2}` (exactly 2 hops):**
 ```sql
 -- Expand to explicit joins (faster)
-(a)-[]-()-[]->(b)
+(a)-[]-()-[]-&gt;(b)
 → a ⋈ e1 ⋈ mid ⋈ e2 ⋈ b
 ```
 
@@ -257,9 +257,9 @@ CREATE INDEX ON friendships(user_id1, user_id2)
 ```sql
 -- Bounded recursion → UNION of explicit joins
 UNION(
-  (a)-[]->(b),           -- 1 hop
-  (a)-[]-()-[]->(b),      -- 2 hops
-  (a)-[]-()-[]-()-[]->(b) -- 3 hops
+  (a)-[]-&gt;(b),           -- 1 hop
+  (a)-[]-()-[]-&gt;(b),      -- 2 hops
+  (a)-[]-()-[]-()-[]-&gt;(b) -- 3 hops
 )
 ```
 
@@ -291,9 +291,9 @@ SELECT * FROM paths WHERE dst = b_id;
 
 **Optimization heuristics:**
 ```
-IF graph_size < 1000 AND pattern = SHORTEST THEN
+IF graph_size &lt; 1000 AND pattern = SHORTEST THEN
   use_dijkstra()
-ELSE IF quantifier.bounded AND quantifier.max <= 5 THEN
+ELSE IF quantifier.bounded AND quantifier.max &lt;= 5 THEN
   expand_to_unions()
 ELSE
   use_recursive_cte()
@@ -319,20 +319,20 @@ JOIN users fof ON f2.user_id2 = fof.user_id;
 **Rule 1: Push filters into vertex patterns**
 ```
 Before:
-MATCH (a)-[]->(b) WHERE a.city = 'NYC'
+MATCH (a)-[]-&gt;(b) WHERE a.city = 'NYC'
 
 After:
-MATCH (a:Person {city: 'NYC'})-[]->(b)
+MATCH (a:Person {city: 'NYC'})-[]-&gt;(b)
 ```
 
 **Rule 2: Merge adjacent vertex scans**
 ```
 Before:
-MATCH (a) WHERE a.age > 25
-MATCH (a)-[]->(b)
+MATCH (a) WHERE a.age &gt; 25
+MATCH (a)-[]-&gt;(b)
 
 After:
-MATCH (a {age > 25})-[]->(b)
+MATCH (a {age &gt; 25})-[]-&gt;(b)
 ```
 
 **Rule 3: Convert bounded quantifiers to joins**
@@ -341,13 +341,13 @@ Before:
 MATCH (a)-[]-{2}(b)
 
 After:
-MATCH (a)-[]-()-[]->(b)
+MATCH (a)-[]-()-[]-&gt;(b)
 ```
 
 **Rule 4: Bidirectional search for SHORTEST**
 ```
 Before:
-MATCH SHORTEST (a)-[]-*->(b)
+MATCH SHORTEST (a)-[]-*-&gt;(b)
 
 After:
 -- Search from both ends, meet in middle
@@ -359,7 +359,7 @@ SELECT * WHERE forward.node = backward.node
 **Rule 5: Index-based path filtering**
 ```
 Before:
-MATCH (a)-[:KNOWS]->(b) WHERE a.user_id = 123
+MATCH (a)-[:KNOWS]-&gt;(b) WHERE a.user_id = 123
 
 After:
 -- Use index scan on (src, label)
@@ -414,7 +414,7 @@ WITH RECURSIVE paths(src, dst, depth) AS (
   UNION ALL
   SELECT p.src, f.user_id2, p.depth + 1
   FROM paths p JOIN friendships f ON p.dst = f.user_id1
-  WHERE p.depth < 3
+  WHERE p.depth &lt; 3
 )
 SELECT * FROM paths;
 ```
@@ -450,7 +450,7 @@ SELECT * FROM GRAPH_TABLE(
 
 **Neo4j Cypher:**
 ```cypher
-MATCH (a:Person)-[:KNOWS*1..3]->(b:Person)
+MATCH (a:Person)-[:KNOWS*1..3]-&gt;(b:Person)
 WHERE a.user_id = 123
 RETURN a, b
 ```
@@ -459,7 +459,7 @@ RETURN a, b
 ```sql
 SELECT *
 FROM GRAPH_TABLE (my_graph
-  MATCH (a)-[]->{1,3}(b)
+  MATCH (a)-[]-&gt;{1,3}(b)
   WHERE a.id = 123
   COLUMNS (a.name, b.name)
 );
@@ -503,7 +503,7 @@ FROM GRAPH_TABLE (my_graph
 ```sql
 -- PageRank
 SELECT node_id, pagerank
-FROM GRAPH_ALGORITHM(social_graph, 'pagerank', iterations => 20);
+FROM GRAPH_ALGORITHM(social_graph, 'pagerank', iterations =&gt; 20);
 
 -- Community detection
 SELECT node_id, community_id
@@ -513,13 +513,13 @@ FROM GRAPH_ALGORITHM(social_graph, 'louvain');
 **2. Temporal graphs:**
 ```sql
 -- Time-varying graphs
-MATCH (a)-[k:KNOWS WHERE k.valid_from <= now() AND k.valid_to > now()]->(b)
+MATCH (a)-[k:KNOWS WHERE k.valid_from &lt;= now() AND k.valid_to &gt; now()]-&gt;(b)
 ```
 
 **3. Multi-graphs:**
 ```sql
 -- Query across multiple graphs
-MATCH (a)-[]-> IN graph1, graph2 (b)
+MATCH (a)-[]-&gt; IN graph1, graph2 (b)
 ```
 
 **4. Graph mutations:**
@@ -527,7 +527,7 @@ MATCH (a)-[]-> IN graph1, graph2 (b)
 -- Insert edges via graph syntax
 INSERT INTO GRAPH social_graph
   MATCH (a:Person {id: 1}), (b:Person {id: 2})
-  CREATE (a)-[:KNOWS]->(b)
+  CREATE (a)-[:KNOWS]-&gt;(b)
 ```
 
 **5. Streaming graph queries:**
@@ -537,8 +537,8 @@ CREATE STREAM friend_alerts AS
   SELECT a.name, b.name
   FROM GRAPH_TABLE (
     social_graph
-    MATCH (a)-[:KNOWS]->(b)
-    WHERE b.created_at > now() - interval '1 hour'
+    MATCH (a)-[:KNOWS]-&gt;(b)
+    WHERE b.created_at &gt; now() - interval '1 hour'
   );
 ```
 
@@ -601,3 +601,52 @@ This RFC will require:
 - Documentation and examples
 
 Expected impact: **10-100x speedup** for graph queries vs. recursive CTEs.
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 93: SQL Property Graph Queries (SQL/PGQ)](/maintainers/rfcs/0093-sql-property-graph-queries)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 93: SQL Property Graph Queries (SQL/PGQ)](/maintainers/rfcs/0093-sql-property-graph-queries)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 93: SQL Property Graph Queries (SQL/PGQ)](/maintainers/rfcs/0093-sql-property-graph-queries)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 93: SQL Property Graph Queries (SQL/PGQ)](/maintainers/rfcs/0093-sql-property-graph-queries)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 93: SQL Property Graph Queries (SQL/PGQ)](/maintainers/rfcs/0093-sql-property-graph-queries)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 93: SQL Property Graph Queries (SQL/PGQ)](/maintainers/rfcs/0093-sql-property-graph-queries)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 93: SQL Property Graph Queries (SQL/PGQ)](/maintainers/rfcs/0093-sql-property-graph-queries)

@@ -457,7 +457,8 @@ fn optimize_stub_succeeds_and_shows_input() {
         .success()
         .stderr(
             predicate::str::contains("Query Optimization")
-                .and(predicate::str::contains("SELECT * FROM users")),
+                .and(predicate::str::contains("SELECT *"))
+                .and(predicate::str::contains("FROM users")),
         );
 }
 
