@@ -838,4 +838,498 @@ mod tests {
         assert!(map.contains_key("users"));
         assert!(map.contains_key("orders"));
     }
+
+    // === Additional comprehensive tests for missing coverage ===
+
+    #[test]
+    fn heuristic_join_left() {
+        let est = HeuristicEstimator;
+        let provider = setup_provider();
+        let expr = RelExpr::Join {
+            join_type: JoinType::Left,
+            condition: Expr::Const(Const::Bool(true)),
+            left: Box::new(RelExpr::scan("users")),
+            right: Box::new(RelExpr::scan("orders")),
+        };
+        let card = est.estimate(&expr, &provider);
+        assert!(card.rows >= 1000.0); // At least left table size
+    }
+
+    #[test]
+    fn heuristic_join_right() {
+        let est = HeuristicEstimator;
+        let provider = setup_provider();
+        let expr = RelExpr::Join {
+            join_type: JoinType::Right,
+            condition: Expr::Const(Const::Bool(true)),
+            left: Box::new(RelExpr::scan("users")),
+            right: Box::new(RelExpr::scan("orders")),
+        };
+        let card = est.estimate(&expr, &provider);
+        assert!(card.rows >= 5000.0); // At least right table size
+    }
+
+    #[test]
+    fn heuristic_join_full() {
+        let est = HeuristicEstimator;
+        let provider = setup_provider();
+        let expr = RelExpr::Join {
+            join_type: JoinType::Full,
+            condition: Expr::Const(Const::Bool(true)),
+            left: Box::new(RelExpr::scan("users")),
+            right: Box::new(RelExpr::scan("orders")),
+        };
+        let card = est.estimate(&expr, &provider);
+        assert!(card.rows > 0.0);
+    }
+
+    #[test]
+    fn heuristic_join_cross() {
+        let est = HeuristicEstimator;
+        let provider = setup_provider();
+        let expr = RelExpr::Join {
+            join_type: JoinType::Cross,
+            condition: Expr::Const(Const::Bool(true)),
+            left: Box::new(RelExpr::scan("users")),
+            right: Box::new(RelExpr::scan("orders")),
+        };
+        let card = est.estimate(&expr, &provider);
+        assert!((card.rows - 5_000_000.0).abs() < 1.0); // 1000 * 5000
+    }
+
+    #[test]
+    fn heuristic_aggregate_with_group() {
+        let est = HeuristicEstimator;
+        let provider = setup_provider();
+        let expr = RelExpr::Aggregate {
+            group_by: vec![Expr::Column(ColumnRef::new("status"))],
+            aggregates: vec![],
+            input: Box::new(RelExpr::scan("orders")),
+        };
+        let card = est.estimate(&expr, &provider);
+        assert!(card.rows > 1.0);
+        assert!(card.rows < 5000.0);
+    }
+
+    #[test]
+    fn heuristic_project() {
+        let est = HeuristicEstimator;
+        let provider = setup_provider();
+        let expr = RelExpr::Project {
+            columns: vec![],
+            input: Box::new(RelExpr::scan("users")),
+        };
+        let card = est.estimate(&expr, &provider);
+        assert!((card.rows - 1000.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn heuristic_sort() {
+        let est = HeuristicEstimator;
+        let provider = setup_provider();
+        let expr = RelExpr::Sort {
+            keys: vec![],
+            input: Box::new(RelExpr::scan("users")),
+        };
+        let card = est.estimate(&expr, &provider);
+        assert!((card.rows - 1000.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn heuristic_incremental_sort() {
+        let est = HeuristicEstimator;
+        let provider = setup_provider();
+        let expr = RelExpr::IncrementalSort {
+            prefix_keys: vec![],
+            suffix_keys: vec![],
+            input: Box::new(RelExpr::scan("users")),
+        };
+        let card = est.estimate(&expr, &provider);
+        assert!((card.rows - 1000.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn heuristic_union() {
+        let est = HeuristicEstimator;
+        let provider = setup_provider();
+        let expr = RelExpr::Union {
+            all: true,
+            left: Box::new(RelExpr::scan("users")),
+            right: Box::new(RelExpr::scan("orders")),
+        };
+        let card = est.estimate(&expr, &provider);
+        assert!((card.rows - 6000.0).abs() < f64::EPSILON); // 1000 + 5000
+    }
+
+    #[test]
+    fn heuristic_intersect() {
+        let est = HeuristicEstimator;
+        let provider = setup_provider();
+        let expr = RelExpr::Intersect {
+            all: false,
+            left: Box::new(RelExpr::scan("users")),
+            right: Box::new(RelExpr::scan("orders")),
+        };
+        let card = est.estimate(&expr, &provider);
+        assert!((card.rows - 1000.0).abs() < f64::EPSILON); // min of the two
+    }
+
+    #[test]
+    fn heuristic_except() {
+        let est = HeuristicEstimator;
+        let provider = setup_provider();
+        let expr = RelExpr::Except {
+            all: false,
+            left: Box::new(RelExpr::scan("orders")),
+            right: Box::new(RelExpr::scan("users")),
+        };
+        let card = est.estimate(&expr, &provider);
+        assert!(card.rows > 0.0);
+        assert!(card.rows <= 5000.0);
+    }
+
+    #[test]
+    fn heuristic_cte() {
+        let est = HeuristicEstimator;
+        let provider = setup_provider();
+        let expr = RelExpr::CTE {
+            name: "temp".into(),
+            definition: Box::new(RelExpr::scan("users")),
+            body: Box::new(RelExpr::scan("temp")),
+        };
+        let card = est.estimate(&expr, &provider);
+        assert!(card.rows > 0.0);
+    }
+
+    #[test]
+    fn heuristic_window() {
+        let est = HeuristicEstimator;
+        let provider = setup_provider();
+        let expr = RelExpr::Window {
+            functions: vec![],
+            input: Box::new(RelExpr::scan("users")),
+        };
+        let card = est.estimate(&expr, &provider);
+        assert!((card.rows - 1000.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn heuristic_distinct() {
+        let est = HeuristicEstimator;
+        let provider = setup_provider();
+        let expr = RelExpr::Distinct {
+            input: Box::new(RelExpr::scan("users")),
+        };
+        let card = est.estimate(&expr, &provider);
+        assert!(card.rows > 0.0);
+        assert!(card.rows <= 1000.0);
+    }
+
+    #[test]
+    fn heuristic_recursive_cte() {
+        let est = HeuristicEstimator;
+        let provider = setup_provider();
+        let expr = RelExpr::RecursiveCTE {
+            name: "tree".into(),
+            base_case: Box::new(RelExpr::scan("users")),
+            recursive_case: Box::new(RelExpr::scan("users")),
+            body: Box::new(RelExpr::scan("tree")),
+            columns: vec![],
+        };
+        let card = est.estimate(&expr, &provider);
+        assert!(card.rows >= 1000.0);
+    }
+
+    #[test]
+    fn heuristic_values() {
+        let est = HeuristicEstimator;
+        let provider = setup_provider();
+        let expr = RelExpr::Values {
+            rows: vec![
+                vec![Expr::Const(Const::Int(1))],
+                vec![Expr::Const(Const::Int(2))],
+                vec![Expr::Const(Const::Int(3))],
+            ],
+        };
+        let card = est.estimate(&expr, &provider);
+        assert!((card.rows - 3.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn heuristic_unnest_with_input() {
+        let est = HeuristicEstimator;
+        let provider = setup_provider();
+        let expr = RelExpr::Unnest {
+            expr: Expr::Column(ColumnRef::new("items")),
+            alias: None,
+            input: Some(Box::new(RelExpr::scan("users"))),
+            ordinality: false,
+        };
+        let card = est.estimate(&expr, &provider);
+        assert!(card.rows >= 1000.0);
+    }
+
+    #[test]
+    fn heuristic_unnest_no_input() {
+        let est = HeuristicEstimator;
+        let provider = setup_provider();
+        let expr = RelExpr::Unnest {
+            expr: Expr::Column(ColumnRef::new("items")),
+            alias: None,
+            input: None,
+            ordinality: false,
+        };
+        let card = est.estimate(&expr, &provider);
+        assert!((card.rows - 10.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn heuristic_multi_unnest() {
+        let est = HeuristicEstimator;
+        let provider = setup_provider();
+        let expr = RelExpr::MultiUnnest {
+            exprs: vec![
+                Expr::Column(ColumnRef::new("arr1")),
+                Expr::Column(ColumnRef::new("arr2")),
+            ],
+            aliases: vec![None, None],
+            ordinality: false,
+        };
+        let card = est.estimate(&expr, &provider);
+        assert!(card.rows > 0.0);
+    }
+
+    #[test]
+    fn heuristic_table_function_with_input() {
+        let est = HeuristicEstimator;
+        let provider = setup_provider();
+        let expr = RelExpr::TableFunction {
+            name: "generate_series".into(),
+            args: vec![],
+            input: Some(Box::new(RelExpr::scan("users"))),
+            ordinality: false,
+        };
+        let card = est.estimate(&expr, &provider);
+        assert!((card.rows - 1000.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn heuristic_table_function_no_input() {
+        let est = HeuristicEstimator;
+        let provider = setup_provider();
+        let expr = RelExpr::TableFunction {
+            name: "generate_series".into(),
+            args: vec![],
+            input: None,
+            ordinality: false,
+        };
+        let card = est.estimate(&expr, &provider);
+        assert!((card.rows - 100.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn heuristic_row_pattern() {
+        let est = HeuristicEstimator;
+        let provider = setup_provider();
+        let expr = RelExpr::RowPattern {
+            input: Box::new(RelExpr::scan("users")),
+            pattern: "A+".into(),
+            defines: vec![],
+            measures: vec![],
+        };
+        let card = est.estimate(&expr, &provider);
+        assert!(card.rows > 0.0);
+        assert!(card.rows < 1000.0);
+    }
+
+    #[test]
+    fn heuristic_bitmap_index_scan() {
+        let est = HeuristicEstimator;
+        let provider = setup_provider();
+        let expr = RelExpr::BitmapIndexScan {
+            table: "users".into(),
+            index: "idx".into(),
+            predicate: Expr::Const(Const::Bool(true)),
+            columns: vec![],
+        };
+        let card = est.estimate(&expr, &provider);
+        assert!(card.rows > 0.0);
+        assert!(card.rows <= 1000.0);
+    }
+
+    #[test]
+    fn heuristic_bitmap_and() {
+        let est = HeuristicEstimator;
+        let provider = setup_provider();
+        let expr = RelExpr::BitmapAnd {
+            inputs: vec![
+                Box::new(RelExpr::scan("users")),
+                Box::new(RelExpr::scan("orders")),
+            ],
+        };
+        let card = est.estimate(&expr, &provider);
+        assert!(card.rows > 0.0);
+    }
+
+    #[test]
+    fn heuristic_bitmap_or() {
+        let est = HeuristicEstimator;
+        let provider = setup_provider();
+        let expr = RelExpr::BitmapOr {
+            inputs: vec![
+                Box::new(RelExpr::scan("users")),
+                Box::new(RelExpr::scan("orders")),
+            ],
+        };
+        let card = est.estimate(&expr, &provider);
+        assert!(card.rows > 0.0);
+    }
+
+    #[test]
+    fn heuristic_bitmap_heap_scan() {
+        let est = HeuristicEstimator;
+        let provider = setup_provider();
+        let expr = RelExpr::BitmapHeapScan {
+            bitmap: Box::new(RelExpr::scan("users")),
+            table: "users".into(),
+            recheck_cond: None,
+            columns: vec![],
+        };
+        let card = est.estimate(&expr, &provider);
+        assert!(card.rows > 0.0);
+    }
+
+    #[test]
+    fn heuristic_parallel_scan() {
+        let est = HeuristicEstimator;
+        let provider = setup_provider();
+        let expr = RelExpr::ParallelScan {
+            table: "users".into(),
+            workers: 4,
+            alias: None,
+        };
+        let card = est.estimate(&expr, &provider);
+        assert!((card.rows - 1000.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn heuristic_parallel_hash_join() {
+        let est = HeuristicEstimator;
+        let provider = setup_provider();
+        let expr = RelExpr::ParallelHashJoin {
+            left: Box::new(RelExpr::scan("users")),
+            right: Box::new(RelExpr::scan("orders")),
+            condition: Expr::Const(Const::Bool(true)),
+            workers: 4,
+        };
+        let card = est.estimate(&expr, &provider);
+        assert!(card.rows > 0.0);
+    }
+
+    #[test]
+    fn heuristic_parallel_aggregate() {
+        let est = HeuristicEstimator;
+        let provider = setup_provider();
+        let expr = RelExpr::ParallelAggregate {
+            group_by: vec![],
+            aggregates: vec![],
+            input: Box::new(RelExpr::scan("users")),
+            workers: 4,
+        };
+        let card = est.estimate(&expr, &provider);
+        assert!((card.rows - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn heuristic_gather() {
+        let est = HeuristicEstimator;
+        let provider = setup_provider();
+        let expr = RelExpr::Gather {
+            input: Box::new(RelExpr::scan("users")),
+            workers: 4,
+        };
+        let card = est.estimate(&expr, &provider);
+        assert!((card.rows - 1000.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn heuristic_mv_scan() {
+        let est = HeuristicEstimator;
+        let provider = setup_provider();
+        let expr = RelExpr::MvScan {
+            view_name: "mv_users".into(),
+            alias: None,
+        };
+        let card = est.estimate(&expr, &provider);
+        assert!(card.rows > 0.0);
+    }
+
+    #[test]
+    fn heuristic_index_only_scan() {
+        let est = HeuristicEstimator;
+        let provider = setup_provider();
+        let expr = RelExpr::IndexOnlyScan {
+            table: "users".into(),
+            index: "idx_email".into(),
+            predicate: Expr::Const(Const::Bool(true)),
+            columns: vec![],
+        };
+        let card = est.estimate(&expr, &provider);
+        assert!((card.rows - 1000.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn heuristic_limit_with_offset() {
+        let est = HeuristicEstimator;
+        let provider = setup_provider();
+        let expr = RelExpr::Limit {
+            count: 50,
+            offset: 100,
+            input: Box::new(RelExpr::scan("users")),
+        };
+        let card = est.estimate(&expr, &provider);
+        assert!((card.rows - 50.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn heuristic_limit_exceeds_available() {
+        let est = HeuristicEstimator;
+        let provider = setup_provider();
+        let expr = RelExpr::Limit {
+            count: 2000,
+            offset: 0,
+            input: Box::new(RelExpr::scan("users")),
+        };
+        let card = est.estimate(&expr, &provider);
+        assert!((card.rows - 1000.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn heuristic_offset_exceeds_input() {
+        let est = HeuristicEstimator;
+        let provider = setup_provider();
+        let expr = RelExpr::Limit {
+            count: 10,
+            offset: 2000,
+            input: Box::new(RelExpr::scan("users")),
+        };
+        let card = est.estimate(&expr, &provider);
+        assert!((card.rows - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn q_error_handles_zeros() {
+        let err = q_error(0.0, 100.0);
+        assert!(err > 0.0);
+    }
+
+    #[test]
+    fn q_error_summary_multiple() {
+        let errors = vec![1.5, 2.0, 3.0, 4.0, 10.0];
+        let summary = q_error_summary(&errors);
+        assert!(summary.median > 0.0);
+        assert!(summary.mean > 0.0);
+        assert!(summary.p90 >= summary.median);
+        assert!(summary.max >= summary.p90);
+    }
 }
