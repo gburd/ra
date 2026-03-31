@@ -1,0 +1,42 @@
+# Query Corpus Metadata
+#
+# Maps queries to their expected outputs and characteristics
+
+[metadata]
+version = "0.2.0"
+last_updated = "2026-03-31"
+total_queries = 2
+
+[[queries]]
+id = "postgresql-simple-array-literal"
+path = "by-dialect/postgresql/simple/array_literal.sql"
+dialect = "postgresql"
+complexity = "simple"
+features = ["arrays", "casting", "type-colon"]
+expected_plan = "plans/postgresql/array_literal.plan.json"
+expected_rules = ["const-fold", "type-inference"]
+tags = ["arrays", "literals"]
+
+[[queries]]
+id = "mysql-simple-backtick-identifiers"
+path = "by-dialect/mysql/simple/backtick_identifiers.sql"
+dialect = "mysql"
+complexity = "simple"
+features = ["backticks", "reserved-words"]
+expected_plan = "plans/mysql/backtick_identifiers.plan.json"
+expected_rules = ["scan", "filter", "project"]
+tags = ["identifiers", "quoting"]
+
+# Template for adding new queries:
+#
+# [[queries]]
+# id = "unique-query-id"
+# path = "relative/path/to/query.sql"
+# dialect = "postgresql" | "mysql" | "oracle" | "sqlserver" | "universal"
+# complexity = "simple" | "intermediate" | "advanced"
+# features = ["feature1", "feature2"]
+# expected_plan = "plans/dialect/query.plan.json"
+# expected_cardinality = 1000
+# expected_cost = 50.0
+# expected_rules = ["rule1", "rule2"]
+# tags = ["tag1", "tag2"]
