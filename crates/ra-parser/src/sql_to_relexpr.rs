@@ -29,9 +29,11 @@ use sqlparser::ast::{
     WindowFrameUnits as SqlWindowFrameUnits,
     WindowSpec as SqlWindowSpec, WindowType as SqlWindowType,
 };
-use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::parser::Parser;
 use thiserror::Error;
+
+use crate::parser::ProfileDialect;
+use crate::profile::ParserProfile;
 
 /// Errors that can occur during SQL parsing and conversion.
 #[derive(Debug, Error)]
@@ -64,8 +66,9 @@ pub enum SqlConversionError {
 pub fn sql_to_relexprs(
     sql: &str,
 ) -> Result<Vec<RelExpr>, SqlConversionError> {
-    // Use PostgreSQL dialect to support JSONB operators (@>, @=, @?, etc.) and other PostgreSQL-specific features
-    let dialect = PostgreSqlDialect {};
+    // Use profile-aware dialect to support all vendor operators (@>, @=, @?, etc.)
+    let profile = ParserProfile::universal();
+    let dialect = ProfileDialect::new(profile);
     let statements = Parser::parse_sql(&dialect, sql)
         .map_err(|e| SqlConversionError::ParseError(e.to_string()))?;
 
@@ -92,8 +95,9 @@ pub fn sql_to_relexprs(
 ///
 /// Returns error if SQL is invalid or contains unsupported features.
 pub fn sql_to_relexpr(sql: &str) -> Result<RelExpr, SqlConversionError> {
-    // Use PostgreSQL dialect to support JSONB operators (@>, @=, @?, etc.) and other PostgreSQL-specific features
-    let dialect = PostgreSqlDialect {};
+    // Use profile-aware dialect to support all vendor operators (@>, @=, @?, etc.)
+    let profile = ParserProfile::universal();
+    let dialect = ProfileDialect::new(profile);
     let statements = Parser::parse_sql(&dialect, sql)
         .map_err(|e| SqlConversionError::ParseError(e.to_string()))?;
 

@@ -34,6 +34,7 @@ struct ProfileMetadata {
     #[serde(default)]
     inherits_from: Option<String>,
     #[serde(default)]
+    #[allow(dead_code)]  // Metadata field for documentation purposes
     description: Option<String>,
 }
 
@@ -116,11 +117,34 @@ impl ProfileLoader {
         let contents = fs::read_to_string(path)?;
         let toml: ProfileToml = toml::from_str(&contents)?;
 
+        // Extract operators and functions from TOML
+        let operators = toml.operators.values()
+            .flat_map(|ops| ops.iter().cloned())
+            .collect();
+
+        let functions = toml.functions.values()
+            .flat_map(|funcs| funcs.iter().cloned())
+            .collect();
+
+        // Convert syntax HashMap<String, toml::Value> to HashMap<String, String>
+        let syntax = toml.syntax.into_iter()
+            .map(|(k, v)| (k, v.to_string()))
+            .collect();
+
         Ok(ParserProfile {
             name: toml.profile.name,
             vendor: toml.profile.vendor,
             version: toml.profile.version,
             inherits_from: toml.profile.inherits_from,
+            features: toml.features,
+            syntax,
+            operators,
+            functions,
+            validation: super::ValidationConfig {
+                strict_type_checking: toml.validation.strict_type_checking,
+                strict_function_arity: toml.validation.strict_function_arity,
+                warn_on_ambiguous_syntax: toml.validation.warn_on_ambiguous_syntax,
+            },
         })
     }
 

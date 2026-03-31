@@ -47,7 +47,7 @@ positional_parameters = "$1, $2, ..."
 
 [operators]
 # PostgreSQL-specific operators
-jsonb_operators = ["@>", "@?", "@@", "#>", "#>>", "-", "#-"]
+jsonb_operators = ["@>", "@<", "@?", "@@", "@=", "@>=", "@<=", "#>", "#>>", "->", "->>", "#-"]
 array_operators = ["@>", "<@", "&&", "||"]
 range_operators = ["@>", "<@", "&&", "-|-", "<<", ">>"]
 geometric_operators = ["@>", "<@", "&&", "<<", ">>", "&<", "&>", "<^", ">^"]

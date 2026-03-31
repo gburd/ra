@@ -124,11 +124,11 @@ impl RaParser {
     /// useful for tooling that needs to inspect or transform SQL before
     /// converting to relational algebra.
     pub fn parse_to_ast(&self, sql: &str) -> Result<Vec<Statement>> {
-        // TODO: Implement profile-aware AST parsing
-        use sqlparser::dialect::PostgreSqlDialect;
+        use crate::parser::ProfileDialect;
         use sqlparser::parser::Parser;
 
-        let dialect = PostgreSqlDialect {};
+        // Use profile-aware dialect that supports custom operators
+        let dialect = ProfileDialect::new(self.profile.clone());
         Parser::parse_sql(&dialect, sql)
             .map_err(|e| ParserError::ParseError(e.to_string()))
     }

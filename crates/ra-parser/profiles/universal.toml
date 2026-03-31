@@ -38,9 +38,33 @@ dash_dash_comments = true
 c_style_comments = true
 hash_comments = true
 
-[precedence]
-# Use standard operator precedence
-# Extensions can override for specific operators
+# Common operators across all dialects
+[operators.comparison]
+operators = ["=", "!=", "<>", "<", ">", "<=", ">="]
+
+[operators.jsonb]
+# JSONB/BSON operators (PostgreSQL, DocumentDB)
+operators = ["@>", "<@", "@?", "@@", "?", "?|", "?&", "@=", "@<", "@>=", "@<="]
+
+[operators.json_navigation]
+# JSON navigation operators
+operators = ["->", "->>", "#>", "#>>", "#-"]
+
+[operators.vector]
+# Vector similarity operators (pgvector)
+operators = ["<->", "<#>", "<=>"]
+
+[operators.text]
+# Text similarity operators (pg_trgm)
+operators = ["%", "<%", "<->>", "<<->", "<<<->>"]
+
+[functions.aggregates]
+# Standard aggregate functions
+functions = ["count", "sum", "avg", "min", "max"]
+
+[functions.string]
+# Common string functions
+functions = ["concat", "substring", "length", "upper", "lower"]
 
 [validation]
 # Minimal validation in universal mode

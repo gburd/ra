@@ -9,8 +9,19 @@ pub mod registry;
 pub use loader::ProfileLoader;
 pub use registry::ProfileRegistry;
 
+use std::collections::HashMap;
 use std::error::Error;
-use std::fmt;
+
+/// Validation configuration for parser strictness.
+#[derive(Debug, Clone, Default)]
+pub struct ValidationConfig {
+    /// Enable strict type checking during parsing
+    pub strict_type_checking: bool,
+    /// Enforce strict function arity checking
+    pub strict_function_arity: bool,
+    /// Warn on ambiguous SQL syntax
+    pub warn_on_ambiguous_syntax: bool,
+}
 
 /// A parser profile defining supported SQL features.
 ///
@@ -19,16 +30,22 @@ use std::fmt;
 #[derive(Debug, Clone)]
 pub struct ParserProfile {
     name: String,
-    /// Database vendor (e.g., "postgresql", "mysql"). Used for profile inheritance.
-    #[allow(dead_code)]
-    vendor: Option<String>,
-    /// Vendor version (e.g., "17", "8.4"). Used for version-specific features.
-    #[allow(dead_code)]
-    version: Option<String>,
-    /// Parent profile name for inheritance. Used when loading TOML profiles.
-    #[allow(dead_code)]
-    inherits_from: Option<String>,
-    // TODO: Add grammar extensions, keywords, operators, functions
+    /// Database vendor (e.g., "postgresql", "mysql")
+    pub vendor: Option<String>,
+    /// Vendor version (e.g., "17", "8.4")
+    pub version: Option<String>,
+    /// Parent profile name for inheritance
+    pub inherits_from: Option<String>,
+    /// Feature flags from TOML (e.g., `sql_92 = true`, `sql_2023 = true`)
+    pub features: HashMap<String, bool>,
+    /// Custom syntax options (e.g., `backticks = "true"` for MySQL)
+    pub syntax: HashMap<String, String>,
+    /// Supported operators (e.g., "@>", "@=", "<->" from vendor/extension profiles)
+    pub operators: Vec<String>,
+    /// Supported function names (e.g., "string_agg", "GROUP_CONCAT")
+    pub functions: Vec<String>,
+    /// Validation rules for parsing strictness
+    pub validation: ValidationConfig,
 }
 
 impl ParserProfile {
@@ -44,6 +61,11 @@ impl ParserProfile {
             vendor: None,
             version: None,
             inherits_from: None,
+            features: HashMap::new(),
+            syntax: HashMap::new(),
+            operators: Vec::new(),
+            functions: Vec::new(),
+            validation: ValidationConfig::default(),
         }
     }
 
@@ -87,9 +109,25 @@ impl ParserProfile {
 
         // Load and merge extension profiles
         for extension_name in &parts[1..] {
-            let _extension = ProfileRegistry::global().load_extension(extension_name)?;
-            // TODO: Merge extension features, operators, functions into profile
-            // For now, just update the name to reflect composition
+            let extension = ProfileRegistry::global().load_extension(extension_name)?;
+
+            // Merge extension features, operators, functions into base profile
+            profile.features.extend(extension.features);
+            profile.syntax.extend(extension.syntax);
+
+            // Add operators from extension (avoiding duplicates)
+            for op in extension.operators {
+                if !profile.operators.contains(&op) {
+                    profile.operators.push(op);
+                }
+            }
+
+            // Add functions from extension (avoiding duplicates)
+            for func in extension.functions {
+                if !profile.functions.contains(&func) {
+                    profile.functions.push(func);
+                }
+            }
         }
 
         // Update profile name to reflect composition
