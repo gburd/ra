@@ -1,0 +1,33 @@
+# Ra Query Optimizer - Benchmarking Configuration
+#
+# Optimized for consistent, repeatable benchmark results.
+
+[calibration]
+# Disable adaptive calibration for consistent benchmarks
+min_samples = 1000  # Very high to effectively disable
+ewma_alpha = 0.01
+bias_threshold = 10.0
+max_correction_factor = 1.0  # No corrections
+
+[query_complexity.timeouts_ms]
+# Very generous timeouts for benchmarking
+trivial = 1000
+simple = 5000
+medium = 10000
+complex = 30000
+very_complex = 60000
+
+[resource_profiles.standard]
+# Fixed resources for benchmarking
+time_ms = 10000
+memory_mb = 1024
+egraph_nodes = 500000
+iterations = 50
+
+[features]
+# Disable adaptive features for consistent results
+enable_lazy_rules = false
+enable_plan_cache = false
+enable_parallel_optimization = false  # Single-threaded for consistency
+enable_adaptive_calibration = false
+enable_debug_logging = false

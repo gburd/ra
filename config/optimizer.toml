@@ -1,0 +1,121 @@
+# Ra Query Optimizer - Default Configuration
+#
+# This is the default configuration for the Ra optimizer.
+# Override settings with environment-specific files:
+# - optimizer.dev.toml (development)
+# - optimizer.prod.toml (production)
+# - optimizer.bench.toml (benchmarking)
+
+[selectivity]
+# Default selectivity when no statistics available
+default = 0.1
+range = 0.33
+like = 0.15
+in_list = 0.5
+between = 0.33
+
+[staleness_factors]
+# Cost multipliers based on statistics staleness
+fresh = 1.0
+slightly_stale = 1.05
+moderately_stale = 1.2
+very_stale = 1.5
+unknown = 2.0
+
+[cost.operators]
+# Base costs for relational operators (arbitrary units)
+scan = 50.0
+filter = 10.0
+project = 5.0
+join = 100.0
+hash_join = 120.0
+merge_join = 110.0
+nested_loop = 200.0
+sort = 150.0
+aggregate = 80.0
+group_by = 90.0
+union = 60.0
+intersect = 70.0
+except = 70.0
+
+[cost.weights]
+# Cost component weights
+cpu = 1.0
+io = 4.0
+network = 2.0
+memory = 1.5
+
+[calibration]
+# Adaptive calibration parameters
+min_samples = 5
+ewma_alpha = 0.2
+bias_threshold = 1.2
+max_correction_factor = 5.0
+
+[query_complexity]
+# Query complexity thresholds
+table_thresholds = { simple = 4, medium = 7, complex = 9 }
+
+[query_complexity.iteration_limits]
+trivial = 3
+simple = 5
+medium = 10
+complex = 15
+very_complex = 20
+
+[query_complexity.timeouts_ms]
+trivial = 50
+simple = 200
+medium = 500
+complex = 2000
+very_complex = 5000
+
+[resource_profiles.interactive]
+time_ms = 100
+memory_mb = 50
+egraph_nodes = 10000
+iterations = 10
+
+[resource_profiles.standard]
+time_ms = 1000
+memory_mb = 500
+egraph_nodes = 100000
+iterations = 30
+
+[resource_profiles.batch]
+time_ms = 10000
+memory_mb = 2048
+egraph_nodes = 1000000
+iterations = 100
+
+[resource_profiles.exhaustive]
+time_ms = 60000
+memory_mb = 4096
+egraph_nodes = 10000000
+iterations = 500
+
+# Rule priority configuration
+# Each rule has a complexity estimate and benefit range
+
+[rule_priorities]
+"and-null-left" = { complexity = "O(1)", benefit_min = 0.3, benefit_max = 0.7 }
+"and-null-right" = { complexity = "O(1)", benefit_min = 0.3, benefit_max = 0.7 }
+"or-null-left" = { complexity = "O(1)", benefit_min = 0.3, benefit_max = 0.7 }
+"or-null-right" = { complexity = "O(1)", benefit_min = 0.3, benefit_max = 0.7 }
+"filter-through-join-left" = { complexity = "O(n)", benefit_min = 0.5, benefit_max = 0.9 }
+"filter-through-join-right" = { complexity = "O(n)", benefit_min = 0.5, benefit_max = 0.9 }
+"join-commute" = { complexity = "O(1)", benefit_min = 0.4, benefit_max = 0.8 }
+"join-associate" = { complexity = "O(n)", benefit_min = 0.6, benefit_max = 0.9 }
+"const-fold" = { complexity = "O(1)", benefit_min = 0.7, benefit_max = 1.0 }
+"redundant-join-elimination" = { complexity = "O(n)", benefit_min = 0.8, benefit_max = 1.0 }
+
+[features]
+# Feature flags for experimental optimizations
+enable_lazy_rules = true
+enable_plan_cache = true
+enable_parallel_optimization = true
+enable_adaptive_calibration = true
+enable_index_only_scans = true
+enable_predicate_pushdown = true
+enable_join_reordering = true
+enable_subquery_unnesting = true

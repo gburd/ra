@@ -1,0 +1,50 @@
+# Ra Query Optimizer - Production Configuration
+#
+# Optimized for maximum performance and stability in production.
+
+[calibration]
+# More conservative calibration in production
+min_samples = 10
+ewma_alpha = 0.1  # Slower adaptation
+bias_threshold = 1.5
+max_correction_factor = 3.0  # Less aggressive corrections
+
+[query_complexity.timeouts_ms]
+# Generous timeouts for complex queries
+trivial = 50
+simple = 200
+medium = 500
+complex = 2000
+very_complex = 5000
+
+[resource_profiles.interactive]
+# Production settings for interactive queries
+time_ms = 100
+memory_mb = 50
+egraph_nodes = 10000
+iterations = 10
+
+[resource_profiles.standard]
+time_ms = 1000
+memory_mb = 500
+egraph_nodes = 100000
+iterations = 30
+
+[resource_profiles.batch]
+# Higher limits for batch processing
+time_ms = 30000
+memory_mb = 4096
+egraph_nodes = 2000000
+iterations = 200
+
+[features]
+# Conservative feature flags for production
+enable_lazy_rules = true
+enable_plan_cache = true
+enable_parallel_optimization = true
+enable_adaptive_calibration = true
+enable_index_only_scans = true
+enable_predicate_pushdown = true
+enable_join_reordering = true
+enable_subquery_unnesting = true
+enable_debug_logging = false

@@ -1,0 +1,32 @@
+# Ra Query Optimizer - Development Configuration
+#
+# Optimized for fast iteration and debugging during development.
+
+[query_complexity.timeouts_ms]
+# Shorter timeouts for faster feedback
+trivial = 25
+simple = 100
+medium = 250
+complex = 1000
+very_complex = 2500
+
+[resource_profiles.interactive]
+# Lower resource limits for development
+time_ms = 50
+memory_mb = 25
+egraph_nodes = 5000
+iterations = 5
+
+[resource_profiles.standard]
+time_ms = 500
+memory_mb = 250
+egraph_nodes = 50000
+iterations = 15
+
+[features]
+# Enable experimental features in development
+enable_lazy_rules = true
+enable_plan_cache = false  # Disable caching to see fresh results
+enable_parallel_optimization = false  # Easier debugging with single thread
+enable_adaptive_calibration = true
+enable_debug_logging = true
