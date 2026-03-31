@@ -1,0 +1,63 @@
+# MySQL 8.4 Profile
+#
+# Supports MySQL 8.4 syntax with all modern features.
+
+[profile]
+name = "mysql-8.4"
+vendor = "mysql"
+version = "8.4.0"
+inherits_from = "mysql-8.0"
+description = "MySQL 8.4 with full feature support"
+
+[features]
+# SQL standards support (partial)
+sql_92 = true
+sql_1999 = true  # Partial: CTEs, window functions
+sql_2003 = false
+sql_2008 = false
+sql_2011 = false  # No temporal support
+sql_2016 = true   # JSON support
+
+# MySQL-specific features
+json = true
+json_table = true
+window_functions = true
+ctes = true
+generated_columns = true
+invisible_columns = true
+functional_indexes = true
+
+[syntax]
+# MySQL identifier quoting
+double_quotes = false  # Only in ANSI mode
+backticks = true
+square_brackets = false
+
+# MySQL-specific syntax
+limit_offset_syntax = "LIMIT offset, count"  # In addition to standard LIMIT ... OFFSET
+insert_ignore = true
+replace_into = true
+on_duplicate_key_update = true
+
+[operators]
+# MySQL-specific operators
+json_operators = ["->", "->>"]
+regexp_operators = ["REGEXP", "RLIKE", "NOT REGEXP", "NOT RLIKE"]
+
+[functions]
+# Common MySQL functions (subset)
+aggregates = ["GROUP_CONCAT"]
+json = ["JSON_EXTRACT", "JSON_SET", "JSON_INSERT", "JSON_REPLACE", "JSON_REMOVE"]
+string = ["CONCAT_WS", "FORMAT", "SUBSTRING_INDEX"]
+date = ["DATE_ADD", "DATE_SUB", "DATE_FORMAT", "STR_TO_DATE", "UNIX_TIMESTAMP"]
+conversion = ["CAST", "CONVERT"]
+
+[validation]
+strict_type_checking = false
+strict_function_arity = true
+warn_on_ambiguous_syntax = true
+
+[compatibility]
+# MySQL compatibility notes
+requires_from_clause = false  # SELECT 1 is valid
+zero_date_allowed = true  # '0000-00-00' is valid in non-strict mode

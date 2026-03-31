@@ -1,0 +1,49 @@
+# Universal SQL Profile
+#
+# This profile attempts to parse SQL from any vendor or standard.
+# It is the most permissive and serves as the default when no specific
+# dialect is known.
+
+[profile]
+name = "universal"
+description = "Universal SQL parser supporting all dialects"
+
+[features]
+# Enable all standard SQL features
+sql_92 = true
+sql_1999 = true
+sql_2003 = true
+sql_2008 = true
+sql_2011 = true
+sql_2016 = true
+sql_2023 = true
+
+# Enable common vendor extensions
+vendor_extensions = true
+allow_vendor_functions = true
+allow_vendor_operators = true
+
+[syntax]
+# Allow various identifier quoting styles
+double_quotes = true
+backticks = true
+square_brackets = true
+
+# Allow various casting syntaxes
+double_colon_cast = true  # PostgreSQL ::
+as_cast = true  # CAST(x AS type)
+
+# Allow various comment styles
+dash_dash_comments = true
+c_style_comments = true
+hash_comments = true
+
+[precedence]
+# Use standard operator precedence
+# Extensions can override for specific operators
+
+[validation]
+# Minimal validation in universal mode
+strict_type_checking = false
+strict_function_arity = false
+warn_on_ambiguous_syntax = true

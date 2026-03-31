@@ -1,0 +1,68 @@
+# PostgreSQL 17 Profile
+#
+# Supports PostgreSQL 17 syntax including all features from earlier versions.
+
+[profile]
+name = "postgresql-17"
+vendor = "postgresql"
+version = "17.0"
+inherits_from = "postgresql-16"
+description = "PostgreSQL 17 with full feature support"
+
+[features]
+# SQL standards support
+sql_92 = true
+sql_1999 = true
+sql_2003 = true
+sql_2008 = true
+sql_2011 = true
+sql_2016 = true
+
+# PostgreSQL-specific features
+arrays = true
+jsonb = true
+ltree = true
+hstore = true
+xml = true
+dollar_quoting = true
+double_colon_cast = true
+returning_clause = true
+on_conflict = true
+window_functions = true
+recursive_ctes = true
+lateral_subqueries = true
+generated_columns = true
+
+[syntax]
+# PostgreSQL identifier quoting
+double_quotes = true
+backticks = false
+square_brackets = false
+
+# PostgreSQL-specific syntax
+dollar_quoting = true
+double_colon_cast = true
+array_syntax = "ARRAY[...]"
+positional_parameters = "$1, $2, ..."
+
+[operators]
+# PostgreSQL-specific operators
+jsonb_operators = ["@>", "@?", "@@", "#>", "#>>", "-", "#-"]
+array_operators = ["@>", "<@", "&&", "||"]
+range_operators = ["@>", "<@", "&&", "-|-", "<<", ">>"]
+geometric_operators = ["@>", "<@", "&&", "<<", ">>", "&<", "&>", "<^", ">^"]
+network_operators = ["<<", "<<=", ">>", ">>=", "&&"]
+text_search_operators = ["@@", "@@@"]
+
+[functions]
+# Common PostgreSQL functions (subset)
+aggregates = ["string_agg", "array_agg", "jsonb_agg", "jsonb_object_agg"]
+json = ["jsonb_build_object", "jsonb_build_array", "jsonb_set", "jsonb_insert"]
+array = ["array_length", "array_position", "array_positions", "unnest"]
+string = ["concat_ws", "format", "regexp_replace", "regexp_split_to_array"]
+date = ["date_trunc", "generate_series", "age", "justify_days"]
+
+[validation]
+strict_type_checking = true
+strict_function_arity = true
+warn_on_ambiguous_syntax = false
