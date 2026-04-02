@@ -104,7 +104,8 @@ pub mod ring_buffer;
 pub mod skew;
 pub mod smoother;
 pub mod streaming;
-pub mod timeline;
+// Phase 6: Timeline system (deferred)
+// pub mod timeline;
 pub mod types;
 
 pub use accuracy::{QualityMetrics, RefreshThreshold, Staleness, StatisticsSource, StatisticsState};

@@ -26,7 +26,8 @@ pub mod panels;
 pub mod playback;
 pub mod recorder;
 pub mod setup;
-pub mod timeline;
+// Phase 6: Timeline system (deferred)
+// pub mod timeline;
 pub mod ui;
 
 pub use app::{App, AppError};

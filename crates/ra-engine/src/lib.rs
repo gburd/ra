@@ -83,10 +83,11 @@ pub mod shortcuts;
 pub mod rule_metadata;
 pub mod rule_priority;
 pub mod rule_registry;
-pub mod timeline_config;
-pub mod timeline_facts;
-#[cfg(feature = "streaming")]
-pub mod timeline_optimizer;
+// Phase 6: Timeline system (deferred)
+// pub mod timeline_config;
+// pub mod timeline_facts;
+// #[cfg(feature = "streaming")]
+// pub mod timeline_optimizer;
 pub mod rum_index;
 pub mod runtime_filters;
 pub mod selectivity;
