@@ -7,6 +7,7 @@
 
 pub mod calibrate;
 pub mod profile;
+pub mod timeline_helpers;
 
 pub use calibrate::calibrate;
 pub use profile::{CalibrationResults, PlatformInfo, ScaleFactors, TestProfile};

@@ -82,6 +82,9 @@ pub fn all_rules_unsorted() -> Vec<Rewrite<RelLang, RelAnalysis>> {
     // Metadata shortcut rules
     rules.extend(crate::count_metadata::count_metadata_rules());
 
+    // Basic index scan selection rules
+    rules.extend(crate::index_selection::index_selection_rules());
+
     // Covering index (index-only scan) rules
     rules.extend(crate::covering_index::covering_index_rules());
 

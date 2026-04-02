@@ -1319,3 +1319,24 @@ This RFC is referenced by:
 This RFC is referenced by:
 
 - [RFC 95: ASOF (As-Of) Join Optimization](/maintainers/rfcs/0095-asof-join-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 95: ASOF (As-Of) Join Optimization](/maintainers/rfcs/0095-asof-join-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 95: ASOF (As-Of) Join Optimization](/maintainers/rfcs/0095-asof-join-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 95: ASOF (As-Of) Join Optimization](/maintainers/rfcs/0095-asof-join-optimization)

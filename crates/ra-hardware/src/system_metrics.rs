@@ -3,8 +3,11 @@
 //! Provides real-time system metrics (CPU usage, memory, I/O, network)
 //! that can influence query optimization decisions.
 
+#[cfg(target_os = "linux")]
 use std::collections::HashMap;
+#[cfg(target_os = "linux")]
 use std::fs;
+#[cfg(target_os = "linux")]
 use std::time::Duration;
 
 /// Disk I/O statistics for a single device.

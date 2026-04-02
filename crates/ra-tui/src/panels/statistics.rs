@@ -4,22 +4,37 @@
 //! staleness indicators with color coding, and confidence levels.
 
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Rect};
+use ratatui::layout::{Constraint, Layout, Rect, Direction};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::Span;
-use ratatui::widgets::{Block, Borders, Cell, Row, Table};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, Cell, Row, Table, Paragraph};
 
-use crate::timeline::TableStatEntry;
+use crate::timeline::{Change, ChangeSeverity, ChangeKind, TableStatEntry};
 
 /// Render the statistics panel into the given area.
 pub fn render(
     frame: &mut Frame,
     stats: &[TableStatEntry],
+    changes: &[Change],
     area: Rect,
     focused: bool,
     _scroll: u16,
 ) {
     let border_color = border_style(focused);
+
+    // Split area into statistics table and changes section
+    let chunks = if changes.is_empty() {
+        vec![area]
+    } else {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(5),
+                Constraint::Length(changes.len() as u16 + 3),
+            ])
+            .split(area)
+            .to_vec()
+    };
 
     let header = Row::new(vec![
         Cell::from("Table")
@@ -72,7 +87,12 @@ pub fn render(
             Style::default().bg(Color::DarkGray),
         );
 
-    frame.render_widget(table, area);
+    frame.render_widget(table, chunks[0]);
+
+    // Render changes section if present
+    if changes.len() > 0 {
+        render_changes(frame, changes, chunks[1], focused);
+    }
 }
 
 /// Map staleness label to a display color.
@@ -119,6 +139,89 @@ fn border_style(focused: bool) -> Style {
             .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Color::DarkGray)
+    }
+}
+
+/// Render the changes section showing differences from previous snapshot.
+fn render_changes(
+    frame: &mut Frame,
+    changes: &[Change],
+    area: Rect,
+    focused: bool,
+) {
+    let border_color = border_style(focused);
+    let mut lines = Vec::new();
+
+    for change in changes {
+        let (icon, color) = change_icon_and_color(change);
+        let severity_indicator = severity_indicator(change.severity);
+
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{} ", icon),
+                Style::default().fg(color),
+            ),
+            Span::styled(
+                severity_indicator,
+                Style::default().fg(severity_color(change.severity)),
+            ),
+            Span::raw(" "),
+            Span::styled(
+                change.description.clone(),
+                Style::default().fg(color),
+            ),
+        ]));
+    }
+
+    if lines.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  No changes from previous snapshot",
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+
+    let paragraph = Paragraph::new(lines).block(
+        Block::default()
+            .title(" Changes Since Previous ")
+            .borders(Borders::ALL)
+            .border_style(border_color),
+    );
+
+    frame.render_widget(paragraph, area);
+}
+
+/// Get icon and color for a change kind.
+#[must_use]
+pub fn change_icon_and_color(change: &Change) -> (&'static str, Color) {
+    match change.kind {
+        ChangeKind::RowCount => ("📊", Color::Cyan),
+        ChangeKind::Ndv => ("🔢", Color::Blue),
+        ChangeKind::IndexAdded => ("➕", Color::Green),
+        ChangeKind::IndexDropped => ("➖", Color::Red),
+        ChangeKind::Hardware => ("🖥️", Color::Magenta),
+        ChangeKind::Configuration => ("⚙️", Color::Yellow),
+        ChangeKind::Schema => ("📋", Color::White),
+        ChangeKind::StatsRefresh => ("🔄", Color::Cyan),
+    }
+}
+
+/// Get severity indicator character.
+#[must_use]
+pub fn severity_indicator(severity: ChangeSeverity) -> &'static str {
+    match severity {
+        ChangeSeverity::Minor => "·",
+        ChangeSeverity::Major => "•",
+        ChangeSeverity::Critical => "◆",
+    }
+}
+
+/// Get color for severity level.
+#[must_use]
+pub fn severity_color(severity: ChangeSeverity) -> Color {
+    match severity {
+        ChangeSeverity::Minor => Color::Green,
+        ChangeSeverity::Major => Color::Yellow,
+        ChangeSeverity::Critical => Color::Red,
     }
 }
 
@@ -210,5 +313,71 @@ mod tests {
     #[test]
     fn confidence_boundary_70() {
         assert_eq!(confidence_color(0.7), Color::Yellow);
+    }
+
+    #[test]
+    fn change_icon_row_count() {
+        let change = Change {
+            kind: ChangeKind::RowCount,
+            description: "test".into(),
+            severity: ChangeSeverity::Minor,
+        };
+        let (icon, color) = change_icon_and_color(&change);
+        assert_eq!(icon, "📊");
+        assert_eq!(color, Color::Cyan);
+    }
+
+    #[test]
+    fn change_icon_index_added() {
+        let change = Change {
+            kind: ChangeKind::IndexAdded,
+            description: "test".into(),
+            severity: ChangeSeverity::Major,
+        };
+        let (icon, color) = change_icon_and_color(&change);
+        assert_eq!(icon, "➕");
+        assert_eq!(color, Color::Green);
+    }
+
+    #[test]
+    fn change_icon_hardware() {
+        let change = Change {
+            kind: ChangeKind::Hardware,
+            description: "test".into(),
+            severity: ChangeSeverity::Critical,
+        };
+        let (icon, color) = change_icon_and_color(&change);
+        assert_eq!(icon, "🖥️");
+        assert_eq!(color, Color::Magenta);
+    }
+
+    #[test]
+    fn severity_minor_is_dot() {
+        assert_eq!(severity_indicator(ChangeSeverity::Minor), "·");
+    }
+
+    #[test]
+    fn severity_major_is_bullet() {
+        assert_eq!(severity_indicator(ChangeSeverity::Major), "•");
+    }
+
+    #[test]
+    fn severity_critical_is_diamond() {
+        assert_eq!(severity_indicator(ChangeSeverity::Critical), "◆");
+    }
+
+    #[test]
+    fn severity_color_minor_is_green() {
+        assert_eq!(severity_color(ChangeSeverity::Minor), Color::Green);
+    }
+
+    #[test]
+    fn severity_color_major_is_yellow() {
+        assert_eq!(severity_color(ChangeSeverity::Major), Color::Yellow);
+    }
+
+    #[test]
+    fn severity_color_critical_is_red() {
+        assert_eq!(severity_color(ChangeSeverity::Critical), Color::Red);
     }
 }

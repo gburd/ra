@@ -37,6 +37,10 @@ fn minimal_timeline() -> Timeline {
             confidence: 0.95,
         }],
         diagnostics: vec!["Initial parse".into()],
+        changes: vec![],
+        invalidations: vec![],
+        hardware_profile: None,
+        facts: std::collections::HashMap::new(),
     });
     tl.push(Snapshot {
         label: "step 1".into(),
@@ -51,6 +55,10 @@ fn minimal_timeline() -> Timeline {
             confidence: 0.95,
         }],
         diagnostics: vec!["Used index".into()],
+        changes: vec![],
+        invalidations: vec![],
+        hardware_profile: None,
+        facts: std::collections::HashMap::new(),
     });
     tl
 }
@@ -461,6 +469,10 @@ fn timeline_push_increments_len() {
         rules_applied: vec![],
         table_stats: vec![],
         diagnostics: vec![],
+        changes: vec![],
+        invalidations: vec![],
+        hardware_profile: None,
+        facts: std::collections::HashMap::new(),
     });
     assert_eq!(tl.len(), 1);
     assert!(!tl.is_empty());
@@ -526,6 +538,10 @@ fn single_snapshot_app() {
         rules_applied: vec![],
         table_stats: vec![],
         diagnostics: vec![],
+        changes: vec![],
+        invalidations: vec![],
+        hardware_profile: None,
+        facts: std::collections::HashMap::new(),
     });
     let mut app = App::new(tl).expect("app creation");
     // Forward should not advance past the only step
@@ -547,6 +563,10 @@ fn single_snapshot_headless() {
         rules_applied: vec![],
         table_stats: vec![],
         diagnostics: vec![],
+        changes: vec![],
+        invalidations: vec![],
+        hardware_profile: None,
+        facts: std::collections::HashMap::new(),
     });
     let mut app = App::new(tl).expect("app creation");
     let cost =

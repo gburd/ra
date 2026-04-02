@@ -126,6 +126,10 @@ mod tests {
                 confidence: 0.95,
             }],
             diagnostics: vec![],
+            changes: vec![],
+            invalidations: vec![],
+            hardware_profile: None,
+            facts: std::collections::HashMap::new(),
         });
         tl
     }

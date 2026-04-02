@@ -126,6 +126,7 @@ fn render_classic_panels(
     statistics::render(
         frame,
         &snapshot.table_stats,
+        &snapshot.changes,
         pl.stats,
         app.focused == Panel::Stats,
         panel_scroll(app, Panel::Stats),
@@ -191,6 +192,7 @@ fn render_editor_panels(
     statistics::render(
         frame,
         &snapshot.table_stats,
+        &snapshot.changes,
         el.stats,
         app.focused == Panel::Stats,
         panel_scroll(app, Panel::Stats),
@@ -481,6 +483,7 @@ mod tests {
     #[test]
     fn cost_color_equal_costs_is_white() {
         use crate::timeline::Snapshot;
+        use std::collections::HashMap;
         let mut tl = Timeline::new("SELECT 1", "auto");
         tl.push(Snapshot {
             label: "s1".into(),
@@ -490,6 +493,10 @@ mod tests {
             rules_applied: vec![],
             table_stats: vec![],
             diagnostics: vec![],
+            changes: vec![],
+            invalidations: vec![],
+            hardware_profile: None,
+            facts: HashMap::new(),
         });
         tl.push(Snapshot {
             label: "s2".into(),
@@ -499,6 +506,10 @@ mod tests {
             rules_applied: vec![],
             table_stats: vec![],
             diagnostics: vec![],
+            changes: vec![],
+            invalidations: vec![],
+            hardware_profile: None,
+            facts: HashMap::new(),
         });
         let app = App::new(tl).unwrap_or_else(|e| {
             panic!("app creation failed: {e}");

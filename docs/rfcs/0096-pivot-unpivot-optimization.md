@@ -936,3 +936,24 @@ This RFC is referenced by:
 This RFC is referenced by:
 
 - [RFC 96: PIVOT/UNPIVOT Operations and Optimization](/maintainers/rfcs/0096-pivot-unpivot-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 96: PIVOT/UNPIVOT Operations and Optimization](/maintainers/rfcs/0096-pivot-unpivot-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 96: PIVOT/UNPIVOT Operations and Optimization](/maintainers/rfcs/0096-pivot-unpivot-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 96: PIVOT/UNPIVOT Operations and Optimization](/maintainers/rfcs/0096-pivot-unpivot-optimization)

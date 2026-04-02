@@ -1407,3 +1407,24 @@ This RFC is referenced by:
 This RFC is referenced by:
 
 - [RFC 98: LATERAL Subquery and LATERAL VIEW Optimization](/maintainers/rfcs/0098-lateral-subquery-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 98: LATERAL Subquery and LATERAL VIEW Optimization](/maintainers/rfcs/0098-lateral-subquery-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 98: LATERAL Subquery and LATERAL VIEW Optimization](/maintainers/rfcs/0098-lateral-subquery-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 98: LATERAL Subquery and LATERAL VIEW Optimization](/maintainers/rfcs/0098-lateral-subquery-optimization)

@@ -9,7 +9,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
-use crate::timeline::Snapshot;
+use crate::timeline::{InvalidationTrigger, Snapshot};
 
 /// Render the execution feedback panel.
 pub fn render(
@@ -64,6 +64,36 @@ pub fn build_feedback_lines(
         lines.push(Line::raw(""));
     }
 
+    if !snapshot.invalidations.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "Cache Invalidations:".to_owned(),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        )));
+        for inv in &snapshot.invalidations {
+            let (icon, color) =
+                invalidation_icon_and_color(inv.trigger);
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("  {} ", icon),
+                    Style::default().fg(color),
+                ),
+                Span::styled(
+                    format!("{}: ", inv.affected),
+                    Style::default()
+                        .fg(color)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    inv.description.clone(),
+                    Style::default().fg(color),
+                ),
+            ]));
+        }
+        lines.push(Line::raw(""));
+    }
+
     if !snapshot.diagnostics.is_empty() {
         lines.push(Line::from(Span::styled(
             "Diagnostics:".to_owned(),
@@ -111,6 +141,20 @@ pub fn diagnostic_style(diag: &str) -> (Color, &'static str) {
     }
 }
 
+/// Get icon and color for invalidation trigger.
+#[must_use]
+pub fn invalidation_icon_and_color(
+    trigger: InvalidationTrigger,
+) -> (&'static str, Color) {
+    match trigger {
+        InvalidationTrigger::Schema => ("📋", Color::White),
+        InvalidationTrigger::Statistics => ("📊", Color::Cyan),
+        InvalidationTrigger::Index => ("🔑", Color::Yellow),
+        InvalidationTrigger::Hardware => ("🖥️", Color::Magenta),
+        InvalidationTrigger::Configuration => ("⚙️", Color::Blue),
+    }
+}
+
 fn border_style(focused: bool) -> Style {
     if focused {
         Style::default()
@@ -144,6 +188,10 @@ mod tests {
                 .into_iter()
                 .map(String::from)
                 .collect(),
+            changes: vec![],
+            invalidations: vec![],
+            hardware_profile: None,
+            facts: std::collections::HashMap::new(),
         }
     }
 
@@ -231,5 +279,55 @@ mod tests {
     fn diagnostic_style_case_insensitive() {
         let (color, _) = diagnostic_style("WARNING: high latency");
         assert_eq!(color, Color::Yellow);
+    }
+
+    #[test]
+    fn invalidation_icon_schema() {
+        let (icon, color) =
+            invalidation_icon_and_color(InvalidationTrigger::Schema);
+        assert_eq!(icon, "📋");
+        assert_eq!(color, Color::White);
+    }
+
+    #[test]
+    fn invalidation_icon_index() {
+        let (icon, color) =
+            invalidation_icon_and_color(InvalidationTrigger::Index);
+        assert_eq!(icon, "🔑");
+        assert_eq!(color, Color::Yellow);
+    }
+
+    #[test]
+    fn invalidation_icon_hardware() {
+        let (icon, color) =
+            invalidation_icon_and_color(InvalidationTrigger::Hardware);
+        assert_eq!(icon, "🖥️");
+        assert_eq!(color, Color::Magenta);
+    }
+
+    #[test]
+    fn feedback_with_invalidations() {
+        use crate::timeline::{Invalidation, InvalidationTrigger};
+        use std::collections::HashMap;
+        let snap = Snapshot {
+            label: "test".into(),
+            step: 0,
+            plan_text: "Scan(t)".into(),
+            cost: 100.0,
+            rules_applied: vec![],
+            table_stats: vec![],
+            diagnostics: vec![],
+            changes: vec![],
+            invalidations: vec![Invalidation {
+                trigger: InvalidationTrigger::Index,
+                affected: "orders".into(),
+                description: "Index added".into(),
+            }],
+            hardware_profile: None,
+            facts: HashMap::new(),
+        };
+        let lines = build_feedback_lines(&snap);
+        // Header + 1 invalidation + blank
+        assert!(lines.len() >= 2);
     }
 }

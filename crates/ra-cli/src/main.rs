@@ -7,12 +7,15 @@ mod diff_validator;
 mod display;
 mod federated_commands;
 mod migrate_commands;
+mod pg_snapshot_commands;
 pub(crate) mod plan_diff;
 mod proxy;
 mod regression_commands;
+mod rule_explanations;
 pub(crate) mod side_by_side;
 mod stats_commands;
 mod test_executor;
+mod timeline_commands;
 mod visualize;
 
 use std::io::Read;
@@ -155,6 +158,12 @@ enum Commands {
         /// Read SQL from stdin instead of the positional argument.
         #[arg(long)]
         stdin: bool,
+        /// Timeline TOML file to use for schema/statistics/hardware context.
+        #[arg(long)]
+        timeline: Option<PathBuf>,
+        /// Snapshot index from timeline to use (default: 0 = first snapshot).
+        #[arg(long, default_value = "0")]
+        snapshot: usize,
     },
     /// Optimize a SQL query using relational algebra rewrite rules.
     #[command(
@@ -224,6 +233,12 @@ enum Commands {
         /// Deprecated: use --rules-applied, --rules-evaluated, --rules-available, or --rules-all.
         #[arg(long, hide = true)]
         rules: bool,
+        /// Timeline TOML file to use for schema/statistics/hardware context.
+        #[arg(long)]
+        timeline: Option<PathBuf>,
+        /// Snapshot index from timeline to use (default: 0 = first snapshot).
+        #[arg(long, default_value = "0")]
+        snapshot: usize,
     },
     /// Gather database metadata and write to a JSON file.
     GatherMetadata {
@@ -275,6 +290,9 @@ enum Commands {
     /// Statistics timeline commands (play, feedback, visualize).
     #[command(subcommand)]
     StatsTimeline(StatsTimelineCommands),
+    /// PostgreSQL snapshot capture commands.
+    #[command(subcommand)]
+    PgSnapshot(PgSnapshotCommands),
     /// Format a SQL query with configurable style.
     Format {
         /// SQL query to format (omit to read from stdin).
@@ -367,6 +385,19 @@ enum Commands {
     /// Query regression detection commands.
     #[command(subcommand)]
     Regression(RegressionCommands),
+    /// Optimize query through timeline of evolving fingerprints.
+    #[command(
+        long_about = "Optimize a query through a timeline of evolving database fingerprints.\n\n\
+            Timelines capture schema changes, statistics updates, and hardware changes \
+            over time to test plan adaptation and fingerprint invalidation.\n\n\
+            Examples:\n  \
+            ra-cli timeline --timeline timelines/index-addition.toml\n  \
+            ra-cli timeline --timeline timelines/growth-replan.toml --output json\n  \
+            ra-cli timeline --timeline timelines/test.toml --test\n  \
+            ra-cli timeline --timeline timelines/demo.toml --tui\n  \
+            ra-cli timeline --timeline timelines/test.toml --snapshots 0,2,4"
+    )]
+    Timeline(timeline_commands::TimelineCommand),
     /// Generate shell completion scripts.
     #[command(long_about = "Generate tab-completion scripts for your shell.\n\n\
             Source the output in your shell profile to enable completions.\n\n\
@@ -468,6 +499,55 @@ enum MigrateCommands {
         /// Path to facts TOML file for testing.
         #[arg(short = 'f', long)]
         facts: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum PgSnapshotCommands {
+    /// Capture a snapshot from a live PostgreSQL database.
+    Capture {
+        /// PostgreSQL connection URL (e.g. postgresql://localhost/mydb).
+        #[arg(long)]
+        database: String,
+        /// Tables to capture (format: schema.table).
+        #[arg(long, value_delimiter = ',')]
+        tables: Vec<String>,
+        /// Output file path for the snapshot TOML.
+        #[arg(short, long)]
+        output: PathBuf,
+        /// Optional snapshot label.
+        #[arg(short, long)]
+        label: Option<String>,
+    },
+    /// Generate a SQL script for capturing snapshots.
+    GenerateScript {
+        /// Tables to capture (format: schema.table).
+        #[arg(long, value_delimiter = ',')]
+        tables: Vec<String>,
+        /// Output directory for captured snapshots.
+        #[arg(short, long)]
+        output_dir: PathBuf,
+        /// Time interval between snapshots (seconds).
+        #[arg(long)]
+        interval: Option<u64>,
+        /// Output file path for the SQL script.
+        #[arg(short, long, default_value = "capture.sql")]
+        script: PathBuf,
+    },
+    /// Merge multiple snapshots into a timeline configuration.
+    MergeTimeline {
+        /// Directory containing snapshot TOML files.
+        #[arg(long)]
+        snapshot_dir: PathBuf,
+        /// Output file path for the timeline TOML.
+        #[arg(short, long)]
+        output: PathBuf,
+        /// Timeline name.
+        #[arg(short, long)]
+        name: String,
+        /// Timeline description.
+        #[arg(short, long)]
+        description: String,
     },
 }
 
@@ -699,9 +779,11 @@ fn run_main() -> Result<()> {
             query,
             hardware_profile,
             stdin: use_stdin,
+            timeline,
+            snapshot,
         } => {
             let resolved = resolve_query(&query, use_stdin)?;
-            cmd_explain(&resolved, &hardware_profile, cli.verbose, cli.quiet)
+            cmd_explain(&resolved, &hardware_profile, timeline.as_deref(), snapshot, cli.verbose, cli.quiet)
         }
         Commands::Optimize {
             query,
@@ -722,6 +804,8 @@ fn run_main() -> Result<()> {
             rules_available,
             rules_all,
             rules,
+            timeline,
+            snapshot,
         } => {
             let resolved = resolve_query(&query, use_stdin)?;
 
@@ -752,6 +836,8 @@ fn run_main() -> Result<()> {
                 explain_format.as_deref(),
                 stats,
                 show_rules,
+                timeline.as_deref(),
+                snapshot,
                 cli.verbose,
                 cli.quiet,
             )
@@ -784,6 +870,42 @@ fn run_main() -> Result<()> {
             headless,
             record,
         } => cmd_tui(timeline.as_deref(), demo, headless, record.as_deref()),
+        Commands::PgSnapshot(sub) => match sub {
+            PgSnapshotCommands::Capture {
+                database,
+                tables,
+                output,
+                label,
+            } => pg_snapshot_commands::capture_pg_snapshot(
+                &database,
+                &tables,
+                &output,
+                label.clone(),
+            ),
+            PgSnapshotCommands::GenerateScript {
+                tables,
+                output_dir,
+                interval,
+                script,
+            } => {
+                let sql_script =
+                    pg_snapshot_commands::generate_capture_script(&tables, &output_dir, interval)?;
+                std::fs::write(&script, sql_script)?;
+                eprintln!("{}", format!("SQL script written to {}", script.display()).green());
+                Ok(())
+            }
+            PgSnapshotCommands::MergeTimeline {
+                snapshot_dir,
+                output,
+                name,
+                description,
+            } => pg_snapshot_commands::merge_snapshots_to_timeline(
+                &snapshot_dir,
+                &output,
+                &name,
+                &description,
+            ),
+        },
         Commands::StatsTimeline(sub) => match sub {
             StatsTimelineCommands::Play {
                 timeline,
@@ -977,6 +1099,7 @@ fn run_main() -> Result<()> {
                 }
             }
         },
+        Commands::Timeline(cmd) => timeline_commands::cmd_timeline(&cmd, cli.quiet),
         Commands::Completions { shell } => {
             let mut cmd = Cli::command();
             generate(shell, &mut cmd, "ra-cli", &mut std::io::stdout());
@@ -1471,14 +1594,50 @@ fn cmd_show(rule_id: &str, dir: &str) -> Result<()> {
 
 // ── explain ─────────────────────────────────────────────────
 
-fn cmd_explain(query: &str, hardware_profile_name: &str, verbose: bool, quiet: bool) -> Result<()> {
+fn cmd_explain(
+    query: &str,
+    hardware_profile_name: &str,
+    timeline_path: Option<&Path>,
+    snapshot_index: usize,
+    verbose: bool,
+    quiet: bool,
+) -> Result<()> {
+    use ra_engine::TimelineConfig;
+
     let plan = sql_to_relexpr(query).map_err(|e| format_sql_error(&e, query))?;
 
-    let hardware = load_hardware_profile(hardware_profile_name)?;
+    // If timeline is provided, use snapshot context
+    let (hardware, timeline_context) = if let Some(path) = timeline_path {
+        let timeline = TimelineConfig::from_file(path)
+            .with_context(|| format!("Failed to load timeline from {}", path.display()))?;
+
+        let snapshot = timeline.snapshots.get(snapshot_index)
+            .ok_or_else(|| anyhow::anyhow!("Snapshot index {} not found in timeline (has {} snapshots)",
+                                           snapshot_index, timeline.snapshots.len()))?;
+
+        // Get hardware profile from timeline's definitions
+        let hardware_def = timeline.get_hardware_profile(&snapshot.hardware_profile)
+            .ok_or_else(|| anyhow::anyhow!("Hardware profile '{}' not found in timeline", snapshot.hardware_profile))?;
+
+        let hardware = hardware_profile_from_def(hardware_def);
+
+        (hardware, Some((timeline, snapshot_index)))
+    } else {
+        (load_hardware_profile(hardware_profile_name)?, None)
+    };
 
     if !quiet {
         print_header("Query Plan Explanation");
         eprintln!("  {}: {query}", "SQL".bold());
+
+        if let Some((timeline, idx)) = &timeline_context {
+            let snapshot = &timeline.snapshots[*idx];
+            eprintln!("  {}: {} (snapshot {})", "Timeline".bold(),
+                     timeline.metadata.name, idx);
+            if let Some(label) = &snapshot.label {
+                eprintln!("  {}: {label}", "Snapshot".bold());
+            }
+        }
 
         if verbose {
             eprintln!(
@@ -1510,9 +1669,13 @@ fn cmd_optimize(
     explain_format: Option<&str>,
     show_stats: bool,
     show_rules: RuleDisplayMode,
+    timeline_path: Option<&Path>,
+    snapshot_index: usize,
     verbose: bool,
     quiet: bool,
 ) -> Result<()> {
+    use ra_engine::{SnapshotFactsProvider, TimelineConfig};
+
     let color_mode = if no_color {
         plan_diff::ColorMode::Never
     } else if std::env::var("FORCE_COLOR").is_ok() {
@@ -1523,13 +1686,74 @@ fn cmd_optimize(
     plan_diff::apply_color_mode(color_mode);
 
     let plan = sql_to_relexpr(query).map_err(|e| format_sql_error(&e, query))?;
-    let hardware = load_hardware_profile(hardware_profile_name)?;
+
+    // If timeline is provided, use snapshot context for optimization
+    let (hardware, timeline_opt) = if let Some(path) = timeline_path {
+        let timeline = TimelineConfig::from_file(path)
+            .with_context(|| format!("Failed to load timeline from {}", path.display()))?;
+
+        let snapshot = timeline.snapshots.get(snapshot_index)
+            .ok_or_else(|| anyhow::anyhow!("Snapshot index {} not found in timeline (has {} snapshots)",
+                                           snapshot_index, timeline.snapshots.len()))?;
+
+        // Get hardware profile from timeline's definitions
+        let hardware_def = timeline.get_hardware_profile(&snapshot.hardware_profile)
+            .ok_or_else(|| anyhow::anyhow!("Hardware profile '{}' not found in timeline", snapshot.hardware_profile))?;
+
+        let hardware = hardware_profile_from_def(hardware_def);
+
+        (hardware, Some(timeline))
+    } else {
+        (load_hardware_profile(hardware_profile_name)?, None)
+    };
 
     let mut optimizer = Optimizer::new();
     optimizer.set_hardware_profile(hardware.clone());
 
     if let Some(b) = budget {
         optimizer.set_resource_budget(b.clone());
+    }
+
+    // If we have a timeline context, optimize with snapshot facts
+    // NOTE: Currently optimize_with_facts doesn't support tracking/verbose output.
+    // When --rules-* or --verbose is requested, we fall through to the normal path
+    // which won't use timeline facts but will show tracking output.
+    if let Some(timeline) = &timeline_opt {
+        if !show_rules.should_track() && !verbose {
+            // Simple path: just optimize with facts and show result
+            let snapshot = &timeline.snapshots[snapshot_index];
+            let hardware_def = timeline.get_hardware_profile(&snapshot.hardware_profile).unwrap();
+            let facts = SnapshotFactsProvider::new(snapshot, hardware_def);
+
+            let optimized = optimizer.optimize_with_facts(&plan, &facts)
+                .with_context(|| format!("failed to optimize query with timeline snapshot {snapshot_index}: {query}"))?;
+
+            if let Some(fmt) = explain_format {
+                return print_explain_output(&optimized, fmt);
+            }
+
+            if !quiet {
+                print_header("Query Optimization (Timeline Snapshot)");
+                eprintln!("  {}: {query}", "SQL".bold());
+                eprintln!("  {}: {} (snapshot {})", "Timeline".bold(), timeline.metadata.name, snapshot_index);
+                if let Some(label) = &snapshot.label {
+                    eprintln!("  {}: {label}", "Snapshot".bold());
+                }
+                eprintln!();
+
+                print_plan_output(&plan, &optimized, diff_format)?;
+            }
+
+            return Ok(());
+        } else {
+            // Verbose/tracking requested - note that timeline facts won't be used
+            if !quiet {
+                eprintln!("{}", "Note: Timeline facts not used with --verbose or --rules-* flags (limitation of optimize_with_facts).".yellow());
+                eprintln!("{}",  "      Using standard optimization with verbose tracking instead.".yellow());
+                eprintln!();
+            }
+            // Fall through to normal optimization path below
+        }
     }
 
     if budget.is_some() {
@@ -2364,6 +2588,47 @@ fn load_hardware_profile(name: &str) -> Result<ra_hardware::HardwareProfile> {
     Ok(profile)
 }
 
+/// Convert a timeline HardwareProfileDef to a HardwareProfile.
+fn hardware_profile_from_def(def: &ra_engine::HardwareProfileDef) -> ra_hardware::HardwareProfile {
+    ra_hardware::HardwareProfile {
+        name: def.name.clone(),
+        // CPU
+        cpu_available: true,
+        cpu_cores: def.cpu_cores,
+        cpu_memory_bandwidth_gbps: 100.0, // Reasonable default
+        l2_cache_bytes: def.l2_cache_size,
+        l3_cache_bytes: def.l3_cache_size,
+        l3_latency_ns: 12.0, // Typical L3 latency
+        dram_latency_ns: 80.0, // Typical DRAM latency
+        simd_width_bits: def.simd_width,
+        numa_nodes: 1,
+        memory_level_parallelism: 10,
+        // GPU
+        gpu_available: def.has_gpu,
+        gpu_memory_bytes: def.gpu_memory.unwrap_or(0),
+        gpu_memory_bandwidth_gbps: if def.has_gpu { 900.0 } else { 0.0 },
+        gpu_sm_count: if def.has_gpu { 80 } else { 0 },
+        unified_memory_supported: def.has_gpu,
+        page_migration_engine_available: def.has_gpu,
+        um_page_size_bytes: if def.has_gpu { 65536 } else { 0 },
+        um_fault_latency_us: if def.has_gpu { 20.0 } else { 0.0 },
+        um_migration_bandwidth_gbps: if def.has_gpu { 12.0 } else { 0.0 },
+        chunked_transfer_enabled: def.has_gpu,
+        // FPGA
+        fpga_available: false,
+        fpga_clock_mhz: 0,
+        fpga_bram_bytes: 0,
+        fpga_max_pipeline_depth: 0,
+        fpga_reconfig_ms: 0,
+        fpga_near_storage: false,
+        fpga_available_luts: 0,
+        fpga_regex_engines: 0,
+        // Interconnect
+        pcie_bandwidth_gbps: if def.has_gpu { 32.0 } else { 0.0 },
+        storage_bandwidth_gbps: 3.5,
+    }
+}
+
 /// Collect all `.rra` files under a path (file or directory).
 fn collect_rra_files(path: &str) -> Result<Vec<PathBuf>> {
     let p = Path::new(path);
@@ -2646,44 +2911,97 @@ fn print_intermediate_steps(
     eprintln!("{}", format_plan_tree(original_plan));
     eprintln!();
 
-    for step in steps {
-        eprintln!(
-            "{}",
-            format!("Step {}: Applied {}", step.step_number, step.rule_name)
-                .bold()
-                .green()
-        );
+    let mut i = 0;
+    while i < steps.len() {
+        let step = &steps[i];
 
-        // Show Rule on separate line
-        eprintln!("  {}: {}", "Rule".bold().blue(), step.rule_name);
+        // Check if we should group with next steps
+        let mut grouped_steps = vec![step];
+        let mut j = i + 1;
+        while j < steps.len() && rule_explanations::should_group_with_previous(&steps[j].rule_name, &step.rule_name) {
+            grouped_steps.push(&steps[j]);
+            j += 1;
+        }
 
-        // Enhanced "Why" section with rule-specific reasoning
-        let why_text = enhance_reasoning(&step.rule_name, &step.reason, &step.plan_before, &step.plan_after);
-        eprintln!("  {}: {}", "Why".bold().yellow(), why_text);
+        if grouped_steps.len() > 1 {
+            // Print grouped steps
+            let step_numbers: Vec<_> = grouped_steps.iter().map(|s| s.step_number).collect();
+            let step_range = if step_numbers.len() == 2 {
+                format!("{} and {}", step_numbers[0], step_numbers[1])
+            } else {
+                format!("{}-{}", step_numbers[0], step_numbers[step_numbers.len() - 1])
+            };
 
-        // Enhanced "Impact" section
-        if let Some(improvement) = step.cost_improvement {
-            eprintln!("  {}: {}", "Impact".bold().cyan(), format_impact(improvement, &step.plan_before, &step.plan_after));
+            eprintln!(
+                "{}",
+                format!("Steps {}: Applied {} related rules", step_range, grouped_steps.len())
+                    .bold()
+                    .green()
+            );
+
+            for s in &grouped_steps {
+                eprintln!("  • {}", s.rule_name.dimmed());
+            }
         } else {
-            eprintln!("  {}: No cost change measured", "Impact".bold().cyan());
+            // Print single step
+            eprintln!(
+                "{}",
+                format!("Step {}: {}", step.step_number, step.rule_name)
+                    .bold()
+                    .green()
+            );
         }
 
         eprintln!();
 
-        // Check if plan visually changed
-        let before_tree = format_plan_tree(&step.plan_before);
-        let after_tree = format_plan_tree(&step.plan_after);
+        // Get detailed explanation
+        let explanation = rule_explanations::explain_rule(&step.rule_name);
+
+        // Show what the rule does
+        eprintln!("  {}", explanation.summary);
+        eprintln!();
+
+        // Show impact
+        eprintln!("  {}", "Impact:".bold().cyan());
+        for line in explanation.impact.lines() {
+            eprintln!("    {}", line);
+        }
+
+        // Show examples if available
+        if let (Some(before), Some(after)) = (explanation.before_example, explanation.after_example) {
+            eprintln!();
+            eprintln!("  {}", "Example transformation:".bold());
+            eprintln!("    {}: {}", "Before".dimmed(), before);
+            eprintln!("    {}: {}", "After".dimmed(), after);
+        }
+
+        // Show cost impact
+        eprintln!();
+        if let Some(improvement) = step.cost_improvement {
+            eprintln!("  {}: {}", "Cost Impact".bold().yellow(), format_impact(improvement, &step.plan_before, &step.plan_after));
+        } else if let Some(reason) = explanation.why_no_cost_change {
+            eprintln!("  {}: {}", "Cost Impact".bold().yellow(), format!("No measurable change ({})", reason));
+        } else {
+            eprintln!("  {}: No cost change measured", "Cost Impact".bold().yellow());
+        }
+
+        eprintln!();
+
+        // Check if plan visually changed (only for last in group)
+        let last_step = grouped_steps.last().unwrap();
+        let before_tree = format_plan_tree(&last_step.plan_before);
+        let after_tree = format_plan_tree(&last_step.plan_after);
 
         if before_tree != after_tree {
-            eprintln!("  {}:", "Changes".bold());
-            // Display plan tree with changes highlighted inline
-            print_plan_with_changes_inline(&step.plan_after, &step.plan_before);
+            eprintln!("  {}:", "Plan Changes".bold());
+            print_plan_with_changes_inline(&last_step.plan_after, &last_step.plan_before);
         } else {
-            // Plan didn't visually change - show what metadata/cost changes occurred
-            print_metadata_changes(&step.plan_before, &step.plan_after, step.cost_improvement);
+            eprintln!("  {}: Plan structure unchanged (added to search space)", "Plan Changes".bold().dimmed());
         }
 
         eprintln!();
+
+        i = j;
     }
 
     eprintln!("{}", "Final Optimized Plan:".bold());
@@ -2693,66 +3011,6 @@ fn print_intermediate_steps(
 }
 
 /// Enhance the reasoning explanation based on rule name and context.
-fn enhance_reasoning(
-    rule_name: &str,
-    original_reason: &str,
-    plan_before: &ra_core::algebra::RelExpr,
-    plan_after: &ra_core::algebra::RelExpr,
-) -> String {
-    use colored::Colorize;
-
-    // If original reason already has good detail, use it
-    if !original_reason.contains("Pattern matched") && original_reason.len() > 30 {
-        return original_reason.to_string();
-    }
-
-    // Generate rule-specific explanations
-    let explanation = match rule_name {
-        name if name.contains("filter-pushdown") || name.contains("push-filter") => {
-            "Filter condition can be evaluated earlier to reduce data processed by downstream operators"
-        }
-        name if name.contains("join-order") || name.contains("reorder") => {
-            "Join order optimized to process smaller result sets first, reducing intermediate data"
-        }
-        name if name.contains("index") => {
-            "Index scan available for predicate, eliminating full table scan"
-        }
-        name if name.contains("semi-join") || name.contains("semijoin") => {
-            "Converted to semi-join since only existence check is needed, not full join results"
-        }
-        name if name.contains("projection") || name.contains("project-pushdown") => {
-            "Project columns earlier to reduce data width and memory usage"
-        }
-        name if name.contains("aggregate") && name.contains("push") => {
-            "Aggregate pushed down to reduce data volume before subsequent operations"
-        }
-        name if name.contains("eliminate") => {
-            "Removed redundant operator that doesn't affect query results"
-        }
-        name if name.contains("merge") => {
-            "Combined adjacent operators to reduce overhead"
-        }
-        name if name.contains("parallel") => {
-            "Parallelized operation to utilize multiple CPU cores"
-        }
-        name if name.contains("bitmap") => {
-            "Using bitmap index to efficiently combine multiple index scans"
-        }
-        _ => {
-            // Analyze plan structure for generic explanation
-            if has_filter_pushdown(plan_before, plan_after) {
-                "Moved filter closer to data source to reduce processing"
-            } else if has_join_reorder(plan_before, plan_after) {
-                "Reordered operations for better performance"
-            } else {
-                "Applied rewrite rule to improve query execution"
-            }
-        }
-    };
-
-    format!("{} [{}]", explanation, rule_name.dimmed())
-}
-
 /// Format the impact of an optimization with context.
 fn format_impact(
     cost_improvement: f64,
@@ -2769,9 +3027,23 @@ fn format_impact(
         cost_improvement.to_string().green()
     ));
 
+    // Categorize what type of cost changed
+    let cost_type = identify_cost_change_type(plan_before, plan_after);
+    if !cost_type.is_empty() && cost_type != "Cost model refinement based on updated statistics" {
+        impacts.push(cost_type);
+    }
+
     // Detect specific optimizations
     if has_scan_upgrade(plan_before, plan_after) {
         impacts.push("Eliminated full table scan, using index instead".to_string());
+    }
+
+    if let Some(scan_change) = detect_scan_optimization(plan_before, plan_after) {
+        impacts.push(scan_change);
+    }
+
+    if let Some(strategy_change) = detect_strategy_change(plan_before, plan_after) {
+        impacts.push(strategy_change);
     }
 
     if has_operator_elimination(plan_before, plan_after) {
@@ -2786,144 +3058,6 @@ fn format_impact(
     }
 
     impacts.join("; ")
-}
-
-/// Print metadata and cost changes when plan structure is unchanged.
-fn print_metadata_changes(
-    plan_before: &ra_core::algebra::RelExpr,
-    plan_after: &ra_core::algebra::RelExpr,
-    cost_improvement: Option<f64>,
-) {
-    use colored::Colorize;
-
-    eprintln!("  {}: Plan structure unchanged", "Note".bold().dimmed());
-    eprintln!();
-
-    let mut changes = Vec::new();
-
-    // Extract cardinality estimates
-    let card_before = estimate_cardinality(plan_before);
-    let card_after = estimate_cardinality(plan_after);
-    if (card_before - card_after).abs() > 0.1 {
-        changes.push(format!(
-            "    {} Cardinality estimate: {} rows → {} rows",
-            "•".cyan(),
-            format_number(card_before).dimmed(),
-            format_number(card_after).green()
-        ));
-    }
-
-    // Show cost breakdown if we have cost improvement
-    if let Some(improvement) = cost_improvement {
-        if improvement > 0.1 {
-            changes.push(format!(
-                "    {} Total cost: reduced by {}",
-                "•".cyan(),
-                format!("{:.1}", improvement).green()
-            ));
-
-            // Try to identify what kind of cost changed
-            let cost_type = identify_cost_change_type(plan_before, plan_after);
-            if !cost_type.is_empty() {
-                changes.push(format!(
-                    "      {}",
-                    cost_type.dimmed()
-                ));
-            }
-        }
-    }
-
-    // Detect strategy changes (same operator type, different execution strategy)
-    if let Some(strategy_change) = detect_strategy_change(plan_before, plan_after) {
-        changes.push(format!(
-            "    {} Execution strategy: {}",
-            "•".cyan(),
-            strategy_change.yellow()
-        ));
-    }
-
-    // Detect index hints or scan method changes
-    if let Some(scan_change) = detect_scan_optimization(plan_before, plan_after) {
-        changes.push(format!(
-            "    {} {}",
-            "•".cyan(),
-            scan_change.green()
-        ));
-    }
-
-    // Show changes or explain that only internal metadata changed
-    if changes.is_empty() {
-        eprintln!("  {}", "  Updated internal metadata, statistics, or execution hints".dimmed());
-    } else {
-        eprintln!("  {}:", "Metadata changes".bold().cyan());
-        for change in changes {
-            eprintln!("{}", change);
-        }
-    }
-}
-
-/// Estimate cardinality (row count) for a plan.
-fn estimate_cardinality(plan: &ra_core::algebra::RelExpr) -> f64 {
-    use ra_core::algebra::RelExpr;
-
-    match plan {
-        RelExpr::Scan { .. } => 10000.0, // Default estimate
-        RelExpr::Filter { input, .. } => {
-            // Assume 10% selectivity for filters
-            estimate_cardinality(input) * 0.1
-        }
-        RelExpr::Project { input, .. } => estimate_cardinality(input),
-        RelExpr::Join { left, right, .. } => {
-            // Cross product with 10% join selectivity
-            estimate_cardinality(left) * estimate_cardinality(right) * 0.1
-        }
-        RelExpr::ParallelHashJoin { left, right, .. } => {
-            estimate_cardinality(left) * estimate_cardinality(right) * 0.1
-        }
-        RelExpr::Aggregate { input, .. } => {
-            // Aggregation typically reduces rows by 90%
-            estimate_cardinality(input) * 0.1
-        }
-        RelExpr::Sort { input, .. } => estimate_cardinality(input),
-        RelExpr::Limit { input, .. } => {
-            // For LIMIT without knowing N, assume 100 rows
-            estimate_cardinality(input).min(100.0)
-        }
-        RelExpr::Union { left, right, .. } => {
-            estimate_cardinality(left) + estimate_cardinality(right)
-        }
-        RelExpr::Intersect { left, right, .. } => {
-            estimate_cardinality(left).min(estimate_cardinality(right))
-        }
-        RelExpr::Except { left, .. } => estimate_cardinality(left) * 0.5,
-        _ => {
-            // For other operators, sum children or default to 1000
-            let children_card: f64 = plan
-                .children()
-                .iter()
-                .map(|c| estimate_cardinality(c))
-                .sum();
-            if children_card > 0.0 {
-                children_card
-            } else {
-                1000.0
-            }
-        }
-    }
-}
-
-/// Format a number with thousands separators.
-fn format_number(n: f64) -> String {
-    let n_int = n as u64;
-    let s = n_int.to_string();
-    let mut result = String::new();
-    for (i, c) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            result.push(',');
-        }
-        result.push(c);
-    }
-    result.chars().rev().collect()
 }
 
 /// Identify what type of cost changed (CPU, I/O, Memory).
@@ -3127,49 +3261,6 @@ fn print_plan_with_changes_inline(
         if !shown_removed_indices.contains(removed_idx) {
             eprintln!("    {} {}", "−".red().bold(), removed_line.trim().red().strikethrough());
         }
-    }
-}
-
-/// Detect if a filter was pushed down in the plan.
-fn has_filter_pushdown(before: &ra_core::algebra::RelExpr, after: &ra_core::algebra::RelExpr) -> bool {
-    // Simple heuristic: if before has filter higher in tree and after has it lower
-    let before_depth = filter_depth(before, 0);
-    let after_depth = filter_depth(after, 0);
-    after_depth > before_depth
-}
-
-/// Get the depth of the first filter in the plan tree.
-fn filter_depth(expr: &ra_core::algebra::RelExpr, depth: usize) -> usize {
-    match expr {
-        ra_core::algebra::RelExpr::Filter { .. } => depth,
-        _ => {
-            expr.children()
-                .iter()
-                .map(|child| filter_depth(child, depth + 1))
-                .min()
-                .unwrap_or(usize::MAX)
-        }
-    }
-}
-
-/// Detect if joins were reordered.
-fn has_join_reorder(before: &ra_core::algebra::RelExpr, after: &ra_core::algebra::RelExpr) -> bool {
-    let before_joins = count_joins(before);
-    let after_joins = count_joins(after);
-    // Same number of joins but structure changed
-    before_joins == after_joins && before_joins > 0 && before != after
-}
-
-/// Count join operators in a plan.
-fn count_joins(expr: &ra_core::algebra::RelExpr) -> usize {
-    match expr {
-        ra_core::algebra::RelExpr::Join { .. } => {
-            1 + expr.children().iter().map(|c| count_joins(c)).sum::<usize>()
-        }
-        ra_core::algebra::RelExpr::ParallelHashJoin { .. } => {
-            1 + expr.children().iter().map(|c| count_joins(c)).sum::<usize>()
-        }
-        _ => expr.children().iter().map(|c| count_joins(c)).sum(),
     }
 }
 

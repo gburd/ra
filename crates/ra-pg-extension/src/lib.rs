@@ -18,6 +18,7 @@ mod plan_converter;
 mod planner_hook;
 mod query_parser;
 mod stats_bridge;
+mod timeline_capture;
 
 #[cfg(any(test, feature = "pg_test"))]
 mod integration_tests;
@@ -121,6 +122,123 @@ fn metadata_cache_stats() -> TableIterator<
         ),
         None => (0, 0, 0, 0, 0, 0.0),
     })
+}
+
+// ---------------------------------------------------------------
+// Timeline snapshot capture functions
+// ---------------------------------------------------------------
+
+/// Capture a fingerprint snapshot from PostgreSQL catalogs.
+///
+/// SQL: `SELECT ra.capture_snapshot(ARRAY['schema.table1', 'schema.table2']);`
+///
+/// Returns JSON representation of the captured snapshot.
+#[pg_extern]
+fn capture_snapshot(
+    table_names: Vec<String>,
+) -> Result<pgrx::JsonB, String> {
+    // Parse "schema.table" strings
+    let parsed_names: Vec<(&str, &str)> = table_names
+        .iter()
+        .filter_map(|name| {
+            let parts: Vec<&str> = name.splitn(2, '.').collect();
+            if parts.len() == 2 {
+                Some((parts[0], parts[1]))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if parsed_names.is_empty() {
+        return Err("No valid table names provided (use schema.table format)".to_string());
+    }
+
+    let config = timeline_capture::CaptureConfig::default();
+
+    let snapshot = timeline_capture::capture_snapshot_from_catalog(&parsed_names, &config)
+        .map_err(|e| e.to_string())?;
+
+    // Convert to JSON
+    let json_str = serde_json::to_string(&snapshot)
+        .map_err(|e| format!("Failed to serialize snapshot: {e}"))?;
+
+    let json_value: serde_json::Value = serde_json::from_str(&json_str)
+        .map_err(|e| format!("Failed to parse JSON: {e}"))?;
+
+    Ok(pgrx::JsonB(json_value))
+}
+
+/// Capture a snapshot and save to TOML file.
+///
+/// SQL: `SELECT ra.capture_snapshot_to_file(
+///          ARRAY['public.orders', 'public.customers'],
+///          '/tmp/snapshot.toml',
+///          'Initial snapshot'
+///      );`
+#[pg_extern]
+fn capture_snapshot_to_file(
+    table_names: Vec<String>,
+    output_path: String,
+    label: Option<String>,
+) -> Result<String, String> {
+    // Parse "schema.table" strings
+    let parsed_names: Vec<(&str, &str)> = table_names
+        .iter()
+        .filter_map(|name| {
+            let parts: Vec<&str> = name.splitn(2, '.').collect();
+            if parts.len() == 2 {
+                Some((parts[0], parts[1]))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if parsed_names.is_empty() {
+        return Err("No valid table names provided (use schema.table format)".to_string());
+    }
+
+    let mut config = timeline_capture::CaptureConfig::default();
+    config.label = label;
+
+    let snapshot = timeline_capture::capture_snapshot_from_catalog(&parsed_names, &config)
+        .map_err(|e| e.to_string())?;
+
+    // Serialize to TOML
+    let toml_str = timeline_capture::snapshot_to_toml(&snapshot)
+        .map_err(|e| e.to_string())?;
+
+    // Write to file
+    std::fs::write(&output_path, toml_str)
+        .map_err(|e| format!("Failed to write file: {e}"))?;
+
+    Ok(format!("Snapshot written to {output_path}"))
+}
+
+/// Get hardware profile detected by the extension.
+///
+/// SQL: `SELECT * FROM ra.hardware_profile();`
+#[pg_extern]
+fn hardware_profile() -> TableIterator<
+    'static,
+    (
+        name!(cpu_cores, i32),
+        name!(total_memory_gb, f64),
+        name!(available_memory_gb, f64),
+        name!(simd_width, i32),
+        name!(has_gpu, bool),
+    ),
+> {
+    let hw = extension_state::hardware_profile();
+
+    TableIterator::once((
+        hw.cpu_cores as i32,
+        hw.total_memory as f64 / 1_000_000_000.0,
+        hw.available_memory as f64 / 1_000_000_000.0,
+        hw.simd_width as i32,
+        hw.has_gpu,
+    ))
 }
 
 // Integration tests are in integration_tests.rs

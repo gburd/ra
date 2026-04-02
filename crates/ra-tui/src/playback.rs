@@ -16,6 +16,39 @@ const SPEEDS: &[(&str, u64)] = &[
     ("8x", 125),
 ];
 
+/// Playback mode determines which snapshots to visit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlaybackMode {
+    /// Play all snapshots in order.
+    Sequential,
+    /// Jump only to snapshots where plan changed.
+    ChangesOnly,
+    /// Jump only to snapshots with test expectations.
+    TestPoints,
+}
+
+impl PlaybackMode {
+    /// Get next playback mode in cycle.
+    #[must_use]
+    pub fn next(self) -> Self {
+        match self {
+            Self::Sequential => Self::ChangesOnly,
+            Self::ChangesOnly => Self::TestPoints,
+            Self::TestPoints => Self::Sequential,
+        }
+    }
+
+    /// Get display label.
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Sequential => "Sequential",
+            Self::ChangesOnly => "Changes Only",
+            Self::TestPoints => "Test Points",
+        }
+    }
+}
+
 /// Playback controller for timeline stepping.
 #[derive(Debug)]
 pub struct PlaybackController {
@@ -29,6 +62,12 @@ pub struct PlaybackController {
     current_step: usize,
     /// Total number of steps.
     total_steps: usize,
+    /// Playback mode.
+    mode: PlaybackMode,
+    /// Indices of snapshots with changes (cached).
+    change_indices: Vec<usize>,
+    /// Indices of snapshots with test expectations (cached).
+    test_indices: Vec<usize>,
 }
 
 impl PlaybackController {
@@ -42,6 +81,71 @@ impl PlaybackController {
             last_advance: Instant::now(),
             current_step: 0,
             total_steps,
+            mode: PlaybackMode::Sequential,
+            change_indices: Vec::new(),
+            test_indices: Vec::new(),
+        }
+    }
+
+    /// Set indices of snapshots with changes.
+    pub fn set_change_indices(&mut self, indices: Vec<usize>) {
+        self.change_indices = indices;
+    }
+
+    /// Set indices of snapshots with test expectations.
+    pub fn set_test_indices(&mut self, indices: Vec<usize>) {
+        self.test_indices = indices;
+    }
+
+    /// Get current playback mode.
+    #[must_use]
+    pub fn mode(&self) -> PlaybackMode {
+        self.mode
+    }
+
+    /// Cycle to next playback mode.
+    pub fn cycle_mode(&mut self) {
+        self.mode = self.mode.next();
+        // When switching modes, snap to nearest valid step
+        self.snap_to_valid_step();
+    }
+
+    /// Snap current step to nearest valid step in current mode.
+    fn snap_to_valid_step(&mut self) {
+        match self.mode {
+            PlaybackMode::Sequential => {
+                // All steps valid
+            }
+            PlaybackMode::ChangesOnly => {
+                if self.change_indices.is_empty() {
+                    return;
+                }
+                // Find nearest change index
+                if let Some(&nearest) = self
+                    .change_indices
+                    .iter()
+                    .min_by_key(|&&idx| {
+                        idx.abs_diff(self.current_step)
+                    })
+                {
+                    self.current_step = nearest;
+                }
+            }
+            PlaybackMode::TestPoints => {
+                if self.test_indices.is_empty() {
+                    return;
+                }
+                // Find nearest test index
+                if let Some(&nearest) = self
+                    .test_indices
+                    .iter()
+                    .min_by_key(|&&idx| {
+                        idx.abs_diff(self.current_step)
+                    })
+                {
+                    self.current_step = nearest;
+                }
+            }
         }
     }
 
@@ -116,9 +220,9 @@ impl PlaybackController {
 
     /// Step forward by one. Returns true if step changed.
     pub fn step_forward(&mut self) -> bool {
-        let max = self.total_steps.saturating_sub(1);
-        if self.current_step < max {
-            self.current_step += 1;
+        let next_step = self.next_valid_step();
+        if let Some(step) = next_step {
+            self.current_step = step;
             true
         } else {
             self.playing = false;
@@ -128,11 +232,65 @@ impl PlaybackController {
 
     /// Step backward by one. Returns true if step changed.
     pub fn step_backward(&mut self) -> bool {
-        if self.current_step > 0 {
-            self.current_step -= 1;
+        let prev_step = self.prev_valid_step();
+        if let Some(step) = prev_step {
+            self.current_step = step;
             true
         } else {
             false
+        }
+    }
+
+    /// Get next valid step according to current mode.
+    fn next_valid_step(&self) -> Option<usize> {
+        let max = self.total_steps.saturating_sub(1);
+        match self.mode {
+            PlaybackMode::Sequential => {
+                if self.current_step < max {
+                    Some(self.current_step + 1)
+                } else {
+                    None
+                }
+            }
+            PlaybackMode::ChangesOnly => {
+                self.change_indices
+                    .iter()
+                    .find(|&&idx| idx > self.current_step)
+                    .copied()
+            }
+            PlaybackMode::TestPoints => {
+                self.test_indices
+                    .iter()
+                    .find(|&&idx| idx > self.current_step)
+                    .copied()
+            }
+        }
+    }
+
+    /// Get previous valid step according to current mode.
+    fn prev_valid_step(&self) -> Option<usize> {
+        match self.mode {
+            PlaybackMode::Sequential => {
+                if self.current_step > 0 {
+                    Some(self.current_step - 1)
+                } else {
+                    None
+                }
+            }
+            PlaybackMode::ChangesOnly => {
+                self.change_indices
+                    .iter()
+                    .rev()
+                    .find(|&&idx| idx < self.current_step)
+                    .copied()
+            }
+            PlaybackMode::TestPoints => {
+                self.test_indices
+                    .iter()
+                    .rev()
+                    .find(|&&idx| idx < self.current_step)
+                    .copied()
+            }
         }
     }
 
@@ -448,5 +606,78 @@ mod tests {
         ctrl.step_forward();
         ctrl.step_backward();
         assert_eq!(ctrl.current_step(), 1);
+    }
+
+    #[test]
+    fn playback_mode_cycle() {
+        let mut ctrl = PlaybackController::new(5);
+        assert_eq!(ctrl.mode(), PlaybackMode::Sequential);
+        ctrl.cycle_mode();
+        assert_eq!(ctrl.mode(), PlaybackMode::ChangesOnly);
+        ctrl.cycle_mode();
+        assert_eq!(ctrl.mode(), PlaybackMode::TestPoints);
+        ctrl.cycle_mode();
+        assert_eq!(ctrl.mode(), PlaybackMode::Sequential);
+    }
+
+    #[test]
+    fn changes_only_mode_skips_unchanged() {
+        let mut ctrl = PlaybackController::new(10);
+        ctrl.set_change_indices(vec![2, 5, 8]);
+        ctrl.cycle_mode(); // Switch to ChangesOnly
+        assert_eq!(ctrl.current_step(), 2); // Snapped to nearest
+        ctrl.step_forward();
+        assert_eq!(ctrl.current_step(), 5);
+        ctrl.step_forward();
+        assert_eq!(ctrl.current_step(), 8);
+        assert!(!ctrl.step_forward()); // No more changes
+    }
+
+    #[test]
+    fn test_points_mode_skips_non_test() {
+        let mut ctrl = PlaybackController::new(10);
+        ctrl.set_test_indices(vec![1, 3, 7]);
+        ctrl.cycle_mode(); // ChangesOnly
+        ctrl.cycle_mode(); // TestPoints
+        assert_eq!(ctrl.current_step(), 1); // Snapped to nearest
+        ctrl.step_forward();
+        assert_eq!(ctrl.current_step(), 3);
+        ctrl.step_forward();
+        assert_eq!(ctrl.current_step(), 7);
+    }
+
+    #[test]
+    fn changes_only_backward() {
+        let mut ctrl = PlaybackController::new(10);
+        ctrl.set_change_indices(vec![2, 5, 8]);
+        ctrl.seek(8);
+        ctrl.cycle_mode(); // ChangesOnly
+        assert!(ctrl.step_backward());
+        assert_eq!(ctrl.current_step(), 5);
+        assert!(ctrl.step_backward());
+        assert_eq!(ctrl.current_step(), 2);
+        assert!(!ctrl.step_backward());
+    }
+
+    #[test]
+    fn mode_label() {
+        assert_eq!(PlaybackMode::Sequential.label(), "Sequential");
+        assert_eq!(
+            PlaybackMode::ChangesOnly.label(),
+            "Changes Only"
+        );
+        assert_eq!(
+            PlaybackMode::TestPoints.label(),
+            "Test Points"
+        );
+    }
+
+    #[test]
+    fn snap_to_valid_when_no_indices() {
+        let mut ctrl = PlaybackController::new(10);
+        ctrl.seek(5);
+        ctrl.cycle_mode(); // ChangesOnly with no indices
+        // Should stay at current position
+        assert_eq!(ctrl.current_step(), 5);
     }
 }

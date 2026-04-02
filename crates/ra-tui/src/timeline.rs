@@ -8,6 +8,7 @@
 //! and TOML statistics timelines via [`Timeline::from_stats_timeline`].
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// A single point-in-time snapshot of optimizer state.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,6 +27,87 @@ pub struct Snapshot {
     pub table_stats: Vec<TableStatEntry>,
     /// Diagnostic messages.
     pub diagnostics: Vec<String>,
+    /// Changes from the previous snapshot.
+    #[serde(default)]
+    pub changes: Vec<Change>,
+    /// Cache invalidation triggers at this snapshot.
+    #[serde(default)]
+    pub invalidations: Vec<Invalidation>,
+    /// Hardware profile name at this snapshot.
+    #[serde(default)]
+    pub hardware_profile: Option<String>,
+    /// Facts/configuration at this snapshot.
+    #[serde(default)]
+    pub facts: HashMap<String, String>,
+}
+
+/// Change between consecutive snapshots.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Change {
+    /// Change category.
+    pub kind: ChangeKind,
+    /// Description of the change.
+    pub description: String,
+    /// Severity level.
+    pub severity: ChangeSeverity,
+}
+
+/// Type of change between snapshots.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ChangeKind {
+    /// Row count changed.
+    RowCount,
+    /// NDV (number of distinct values) changed.
+    Ndv,
+    /// Index added.
+    IndexAdded,
+    /// Index dropped.
+    IndexDropped,
+    /// Hardware profile changed.
+    Hardware,
+    /// Configuration changed.
+    Configuration,
+    /// Schema changed.
+    Schema,
+    /// Statistics refreshed.
+    StatsRefresh,
+}
+
+/// Change severity level.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ChangeSeverity {
+    /// Minor change (< 10% impact).
+    Minor,
+    /// Major change (10-50% impact).
+    Major,
+    /// Critical change (> 50% impact).
+    Critical,
+}
+
+/// Cache invalidation trigger.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Invalidation {
+    /// What triggered invalidation.
+    pub trigger: InvalidationTrigger,
+    /// What was affected.
+    pub affected: String,
+    /// Description.
+    pub description: String,
+}
+
+/// What triggered cache invalidation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum InvalidationTrigger {
+    /// Schema change.
+    Schema,
+    /// Statistics update.
+    Statistics,
+    /// Index added/dropped.
+    Index,
+    /// Hardware change.
+    Hardware,
+    /// Configuration change.
+    Configuration,
 }
 
 /// Summary statistics for a single table at a snapshot.
@@ -95,6 +177,103 @@ impl Timeline {
         Ok(Self::from_stats_timeline(&stats_tl))
     }
 
+    /// Load a timeline from a TimelineConfig (timeline-based fingerprints).
+    ///
+    /// Converts a timeline configuration document into a TUI timeline,
+    /// computing changes and invalidation triggers between consecutive snapshots.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the timeline config cannot be converted.
+    pub fn from_timeline_config(
+        config: &ra_engine::timeline_config::TimelineConfig,
+    ) -> Result<Self, String> {
+        let query = config
+            .metadata
+            .query
+            .clone()
+            .unwrap_or_else(|| config.metadata.name.clone());
+
+        let mut tl = Self::new(&query, "auto");
+
+        for (idx, snap) in config.snapshots.iter().enumerate() {
+            let label = snap
+                .label
+                .clone()
+                .unwrap_or_else(|| format!("t={}s", snap.time_offset));
+
+            let plan_text = build_timeline_config_plan_text(snap);
+
+            let cost: f64 = snap
+                .statistics
+                .tables
+                .iter()
+                .map(|t| t.row_count as f64)
+                .sum();
+
+            let table_stats: Vec<TableStatEntry> = snap
+                .statistics
+                .tables
+                .iter()
+                .map(|t| TableStatEntry {
+                    table: t.name.clone(),
+                    row_count: t.row_count,
+                    staleness: "Fresh".into(),
+                    confidence: 0.95,
+                })
+                .collect();
+
+            let diagnostics = collect_timeline_diagnostics(snap, config);
+
+            let changes = if idx > 0 {
+                compute_changes(
+                    &config.snapshots[idx - 1],
+                    snap,
+                )
+            } else {
+                Vec::new()
+            };
+
+            let invalidations =
+                compute_invalidations(&changes);
+
+            let hardware_profile = Some(snap.hardware_profile.clone());
+
+            let mut facts = HashMap::new();
+            if let Some(v) = snap.facts.supports_hash_join {
+                facts.insert("supports_hash_join".into(), v.to_string());
+            }
+            if let Some(v) = snap.facts.supports_parallel_scan {
+                facts.insert("supports_parallel_scan".into(), v.to_string());
+            }
+            if let Some(v) = snap.facts.parallel_workers {
+                facts.insert("parallel_workers".into(), v.to_string());
+            }
+            if let Some(v) = snap.facts.work_mem_bytes {
+                facts.insert("work_mem_bytes".into(), v.to_string());
+            }
+            for (k, v) in &snap.facts.custom {
+                facts.insert(k.clone(), format!("{v:?}"));
+            }
+
+            tl.push(Snapshot {
+                label,
+                step: idx,
+                plan_text,
+                cost,
+                rules_applied: Vec::new(),
+                table_stats,
+                diagnostics,
+                changes,
+                invalidations,
+                hardware_profile,
+                facts,
+            });
+        }
+
+        Ok(tl)
+    }
+
     /// Convert a ra-stats TOML timeline to a TUI timeline.
     ///
     /// Maps each statistics snapshot to a TUI snapshot with:
@@ -159,6 +338,10 @@ impl Timeline {
                 rules_applied: Vec::new(),
                 table_stats,
                 diagnostics,
+                changes: vec![],
+                invalidations: vec![],
+                hardware_profile: Some("auto".into()),
+                facts: HashMap::new(),
             });
         }
 
@@ -211,6 +394,10 @@ impl Timeline {
             rules_applied: vec![],
             table_stats: stats.clone(),
             diagnostics: vec!["Parsed SQL to relational algebra".into()],
+            changes: vec![],
+            invalidations: vec![],
+            hardware_profile: Some("auto".into()),
+            facts: HashMap::new(),
         });
 
         tl.push(Snapshot {
@@ -233,6 +420,10 @@ impl Timeline {
                 "Pushed filter below join".into(),
                 "Estimated selectivity: 0.15".into(),
             ],
+            changes: vec![],
+            invalidations: vec![],
+            hardware_profile: Some("auto".into()),
+            facts: HashMap::new(),
         });
 
         tl.push(Snapshot {
@@ -254,6 +445,10 @@ impl Timeline {
             diagnostics: vec![
                 "Reordered join: smaller table on build side".into(),
             ],
+            changes: vec![],
+            invalidations: vec![],
+            hardware_profile: Some("auto".into()),
+            facts: HashMap::new(),
         });
 
         tl.push(Snapshot {
@@ -279,6 +474,18 @@ impl Timeline {
                 "Selected hash join for equality predicate".into(),
                 "Using index idx_status for filter".into(),
             ],
+            changes: vec![Change {
+                kind: ChangeKind::IndexAdded,
+                description: "Index idx_status added on orders.status".into(),
+                severity: ChangeSeverity::Major,
+            }],
+            invalidations: vec![Invalidation {
+                trigger: InvalidationTrigger::Index,
+                affected: "orders".into(),
+                description: "Index idx_status added on orders.status".into(),
+            }],
+            hardware_profile: Some("auto".into()),
+            facts: HashMap::new(),
         });
 
         let stale_stats = vec![
@@ -316,6 +523,14 @@ impl Timeline {
                 "Merged Sort + Limit into TopN operator".into(),
                 "Statistics slightly stale for orders table".into(),
             ],
+            changes: vec![Change {
+                kind: ChangeKind::StatsRefresh,
+                description: "orders: Statistics staleness increased".into(),
+                severity: ChangeSeverity::Minor,
+            }],
+            invalidations: vec![],
+            hardware_profile: Some("auto".into()),
+            facts: HashMap::new(),
         });
 
         tl
@@ -461,6 +676,256 @@ fn collect_diagnostics(
     diags
 }
 
+/// Build a synthetic plan text from a timeline config snapshot.
+fn build_timeline_config_plan_text(
+    snap: &ra_engine::timeline_config::FingerPrintSnapshot,
+) -> String {
+    use std::fmt::Write;
+    let mut plan = String::new();
+
+    let schema = &snap.schema;
+    if schema.tables.len() > 1 {
+        plan.push_str("Join\n");
+        for table in &schema.tables {
+            let idx_info = if table.indexes.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    " (indexes: {})",
+                    table
+                        .indexes
+                        .iter()
+                        .map(|i| i.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            };
+            let _ = writeln!(
+                plan,
+                "  Scan({}{})",
+                table.name, idx_info
+            );
+        }
+    } else if let Some(table) = schema.tables.first() {
+        let idx_info = if table.indexes.is_empty() {
+            String::new()
+        } else {
+            format!(
+                " (indexes: {})",
+                table
+                    .indexes
+                    .iter()
+                    .map(|i| i.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        };
+        let _ =
+            writeln!(plan, "Scan({}{})", table.name, idx_info);
+    } else {
+        plan.push_str("(empty)\n");
+    }
+
+    plan
+}
+
+/// Collect diagnostics from a timeline config snapshot.
+fn collect_timeline_diagnostics(
+    snap: &ra_engine::timeline_config::FingerPrintSnapshot,
+    config: &ra_engine::timeline_config::TimelineConfig,
+) -> Vec<String> {
+    let mut diags = Vec::new();
+
+    for event in &config.events {
+        if event.time_offset == snap.time_offset {
+            if let Some(desc) = &event.description {
+                diags.push(desc.clone());
+            } else {
+                diags.push(format!("{:?} event", event.kind));
+            }
+        }
+    }
+
+    let stats = &snap.statistics;
+    if !stats.tables.is_empty() {
+        let total_rows: u64 =
+            stats.tables.iter().map(|t| t.row_count).sum();
+        diags.push(format!(
+            "Total rows across {} tables: {}",
+            stats.tables.len(),
+            total_rows
+        ));
+    }
+
+    diags
+}
+
+/// Compute changes between two consecutive snapshots.
+fn compute_changes(
+    prev: &ra_engine::timeline_config::FingerPrintSnapshot,
+    curr: &ra_engine::timeline_config::FingerPrintSnapshot,
+) -> Vec<Change> {
+    let mut changes = Vec::new();
+
+    if prev.hardware_profile != curr.hardware_profile {
+        changes.push(Change {
+            kind: ChangeKind::Hardware,
+            description: format!(
+                "Hardware profile changed: {} → {}",
+                prev.hardware_profile,
+                curr.hardware_profile
+            ),
+            severity: ChangeSeverity::Critical,
+        });
+    }
+
+    let prev_stats = &prev.statistics;
+    let curr_stats = &curr.statistics;
+    for curr_table in &curr_stats.tables {
+        if let Some(prev_table) = prev_stats
+            .tables
+            .iter()
+            .find(|t| t.name == curr_table.name)
+        {
+            let row_diff = curr_table
+                .row_count
+                .abs_diff(prev_table.row_count)
+                as f64;
+            let row_pct = if prev_table.row_count > 0 {
+                (row_diff / prev_table.row_count as f64)
+                    * 100.0
+            } else {
+                100.0
+            };
+
+            if row_pct > 1.0 {
+                let severity = if row_pct > 50.0 {
+                    ChangeSeverity::Critical
+                } else if row_pct > 10.0 {
+                    ChangeSeverity::Major
+                } else {
+                    ChangeSeverity::Minor
+                };
+
+                changes.push(Change {
+                    kind: ChangeKind::RowCount,
+                    description: format!(
+                        "{}: {} → {} rows ({:+.1}%)",
+                        curr_table.name,
+                        prev_table.row_count,
+                        curr_table.row_count,
+                        if curr_table.row_count
+                            >= prev_table.row_count
+                        {
+                            row_pct
+                        } else {
+                            -row_pct
+                        }
+                    ),
+                    severity,
+                });
+            }
+        }
+    }
+
+    let prev_schema = &prev.schema;
+    let curr_schema = &curr.schema;
+    for curr_table in &curr_schema.tables {
+        if let Some(prev_table) = prev_schema
+            .tables
+            .iter()
+            .find(|t| t.name == curr_table.name)
+        {
+            for curr_idx in &curr_table.indexes {
+                if !prev_table
+                    .indexes
+                    .iter()
+                    .any(|i| i.name == curr_idx.name)
+                {
+                    changes.push(Change {
+                        kind: ChangeKind::IndexAdded,
+                        description: format!(
+                            "Index {} added on {}.{}",
+                            curr_idx.name,
+                            curr_table.name,
+                            curr_idx
+                                .columns
+                                .join(", ")
+                        ),
+                        severity: ChangeSeverity::Major,
+                    });
+                }
+            }
+
+            for prev_idx in &prev_table.indexes {
+                if !curr_table
+                    .indexes
+                    .iter()
+                    .any(|i| i.name == prev_idx.name)
+                {
+                    changes.push(Change {
+                        kind: ChangeKind::IndexDropped,
+                        description: format!(
+                            "Index {} dropped from {}",
+                            prev_idx.name, curr_table.name
+                        ),
+                        severity: ChangeSeverity::Major,
+                    });
+                }
+            }
+        }
+    }
+
+    changes
+}
+
+/// Compute cache invalidation triggers from changes.
+fn compute_invalidations(
+    changes: &[Change],
+) -> Vec<Invalidation> {
+    let mut invalidations = Vec::new();
+
+    for change in changes {
+        let trigger = match change.kind {
+            ChangeKind::RowCount | ChangeKind::Ndv => {
+                InvalidationTrigger::Statistics
+            }
+            ChangeKind::IndexAdded | ChangeKind::IndexDropped => {
+                InvalidationTrigger::Index
+            }
+            ChangeKind::Hardware => {
+                InvalidationTrigger::Hardware
+            }
+            ChangeKind::Configuration => {
+                InvalidationTrigger::Configuration
+            }
+            ChangeKind::Schema => InvalidationTrigger::Schema,
+            ChangeKind::StatsRefresh => {
+                InvalidationTrigger::Statistics
+            }
+        };
+
+        invalidations.push(Invalidation {
+            trigger,
+            affected: extract_affected_item(&change.description),
+            description: change.description.clone(),
+        });
+    }
+
+    invalidations
+}
+
+/// Extract the affected item name from a change description.
+fn extract_affected_item(description: &str) -> String {
+    if let Some(colon_pos) = description.find(':') {
+        description[..colon_pos].trim().to_string()
+    } else if let Some(space_pos) = description.find(' ') {
+        description[..space_pos].trim().to_string()
+    } else {
+        "system".to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -490,6 +955,10 @@ mod tests {
             rules_applied: vec![],
             table_stats: vec![],
             diagnostics: vec![],
+            changes: vec![],
+            invalidations: vec![],
+            hardware_profile: None,
+            facts: HashMap::new(),
         });
         assert_eq!(tl.len(), 1);
     }

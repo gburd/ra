@@ -35,6 +35,7 @@ serde_yaml = { workspace = true }
 walkdir = { version = "2", optional = true }
 chrono = { workspace = true }
 ra-parser = { path = "../ra-parser" }
+regex = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }

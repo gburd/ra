@@ -48,6 +48,7 @@ pub mod extract;
 pub mod facts_context;
 pub mod functional_deps;
 pub mod incremental_sort;
+pub mod index_selection;
 pub mod isolation_cost;
 pub mod join_transformations;
 pub mod large_join;
@@ -82,6 +83,10 @@ pub mod shortcuts;
 pub mod rule_metadata;
 pub mod rule_priority;
 pub mod rule_registry;
+pub mod timeline_config;
+pub mod timeline_facts;
+#[cfg(feature = "streaming")]
+pub mod timeline_optimizer;
 pub mod rum_index;
 pub mod runtime_filters;
 pub mod selectivity;
@@ -147,6 +152,19 @@ pub use incremental_sort::{
     IncrementalSortCost, PrefixMatch, detect_prefix_match,
     estimate_costs as estimate_incremental_sort_costs,
     try_incremental_sort,
+};
+pub use timeline_config::{
+    ColumnStatsDef, DataTypeDef, EventKind, FactsSnapshot, FingerPrintSnapshot,
+    HardwareProfileDef, IndexDef, IndexTypeDef, SchemaSnapshot, StatisticsSnapshot,
+    StorageFormatDef, TableStatsDef, TestExpectation, TimelineConfig,
+    TimelineConfigError, TimelineEvent, TimelineMetadata,
+};
+pub use timeline_facts::SnapshotFactsProvider;
+#[cfg(feature = "streaming")]
+pub use timeline_optimizer::{
+    ChangeDescription, ChangeSeverity, ChangeType, SnapshotResult,
+    TimelineOptimizationResult, TimelineOptimizer, detect_fact_changes,
+    detect_hardware_changes, detect_schema_changes, detect_stats_changes,
 };
 pub use lazy_rules::{
     LazyQueryComplexity, LazyQueryPattern, LazyRuleCompiler, RuleCategory,

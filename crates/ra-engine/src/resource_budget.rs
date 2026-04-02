@@ -29,7 +29,11 @@ pub struct ResourceBudget {
 }
 
 impl ResourceBudget {
-    /// Create a budget with no constraints.
+    /// Create a budget with no constraints except a safety limit on iterations.
+    ///
+    /// Even "unlimited" budgets need an iteration cap to prevent infinite loops
+    /// in pathological cases (e.g., complex join orderings, recursive rules).
+    /// Set to 1000 iterations - enough for complex queries, but prevents hangs.
     #[must_use]
     pub fn unlimited() -> Self {
         Self {
@@ -37,19 +41,22 @@ impl ResourceBudget {
             max_cpu_time: None,
             max_memory: None,
             max_egraph_nodes: None,
-            max_iterations: None,
+            max_iterations: Some(1000),
             overflow_strategy: OverflowStrategy::ReturnBestSoFar,
         }
     }
 
-    /// Whether all fields are unconstrained.
+    /// Whether practical resource fields are unconstrained.
+    ///
+    /// Returns true if time, memory, and e-graph size are unlimited.
+    /// The iteration limit is a safety mechanism and doesn't count as a
+    /// practical constraint for normal queries.
     #[must_use]
     pub fn is_unlimited(&self) -> bool {
         self.max_time.is_none()
             && self.max_cpu_time.is_none()
             && self.max_memory.is_none()
             && self.max_egraph_nodes.is_none()
-            && self.max_iterations.is_none()
     }
 
     /// Set the wall-clock time limit.
@@ -326,14 +333,14 @@ mod tests {
     // ---- ResourceBudget construction ----
 
     #[test]
-    fn unlimited_budget_has_no_constraints() {
+    fn unlimited_budget_has_safety_iteration_limit() {
         let budget = ResourceBudget::unlimited();
-        assert!(budget.is_unlimited());
+        // "Unlimited" has a safety cap on iterations to prevent infinite loops
         assert!(budget.max_time.is_none());
         assert!(budget.max_cpu_time.is_none());
         assert!(budget.max_memory.is_none());
         assert!(budget.max_egraph_nodes.is_none());
-        assert!(budget.max_iterations.is_none());
+        assert_eq!(budget.max_iterations, Some(1000));
     }
 
     #[test]
