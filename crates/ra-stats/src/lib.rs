@@ -91,7 +91,8 @@
 pub mod accuracy;
 pub mod adaptive;
 pub mod adapters;
-pub mod delta;
+// Phase 6: Timeline system (deferred) - delta uses timeline types
+// pub mod delta;
 pub mod feedback;
 pub mod gathering_cost;
 pub mod index_metadata;

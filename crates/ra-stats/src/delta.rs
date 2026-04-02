@@ -6,7 +6,8 @@
 //! incremental reoptimization suffices or a full re-plan is required.
 
 use crate::accuracy::Staleness;
-use crate::timeline::{ColumnSnapshot, Snapshot, TableSnapshot};
+// Phase 6: Timeline system (deferred)
+// use crate::timeline::{ColumnSnapshot, Snapshot, TableSnapshot};
 use serde::{Deserialize, Serialize};
 
 /// A single statistics change between two snapshots.
