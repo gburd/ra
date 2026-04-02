@@ -7,6 +7,7 @@ mod diff_validator;
 mod display;
 mod federated_commands;
 mod migrate_commands;
+mod ml_commands;
 mod pg_snapshot_commands;
 pub(crate) mod plan_diff;
 mod proxy;
@@ -398,6 +399,9 @@ enum Commands {
             ra-cli timeline --timeline timelines/test.toml --snapshots 0,2,4"
     )]
     Timeline(timeline_commands::TimelineCommand),
+    /// ML model management commands (train, load, save, stats, export).
+    #[command(subcommand)]
+    Ml(ml_commands::MlCommands),
     /// Generate shell completion scripts.
     #[command(long_about = "Generate tab-completion scripts for your shell.\n\n\
             Source the output in your shell profile to enable completions.\n\n\
@@ -1100,6 +1104,11 @@ fn run_main() -> Result<()> {
             }
         },
         Commands::Timeline(cmd) => timeline_commands::cmd_timeline(&cmd, cli.quiet),
+        Commands::Ml(cmd) => {
+            tokio::runtime::Runtime::new()
+                .context("failed to create tokio runtime")?
+                .block_on(ml_commands::handle_ml_command(cmd))
+        }
         Commands::Completions { shell } => {
             let mut cmd = Cli::command();
             generate(shell, &mut cmd, "ra-cli", &mut std::io::stdout());

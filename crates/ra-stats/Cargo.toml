@@ -8,6 +8,10 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+default = []
+timeline = []
+
 [dependencies]
 ra-core = { workspace = true }
 serde = { workspace = true }

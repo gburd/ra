@@ -12,6 +12,7 @@ default = ["metadata", "streaming", "file-discovery"]
 metadata = ["ra-metadata"]
 streaming = ["timely", "differential-dataflow"]
 file-discovery = ["walkdir"]
+timeline = ["ra-stats/timeline"]
 
 [dependencies]
 anyhow = { workspace = true }

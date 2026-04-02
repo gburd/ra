@@ -27,7 +27,8 @@ pub mod playback;
 pub mod recorder;
 pub mod setup;
 // Phase 6: Timeline system (deferred)
-// pub mod timeline;
+#[cfg(feature = "timeline")]
+pub mod timeline;
 pub mod ui;
 
 pub use app::{App, AppError};
@@ -37,4 +38,5 @@ pub use panels::sql_editor::{EditorMode, SqlEditor, ViMode};
 pub use playback::PlaybackController;
 pub use recorder::{AsciiRecorder, RecordError, record_session};
 pub use setup::{SetupError, TuiConfig};
+#[cfg(feature = "timeline")]
 pub use timeline::{Snapshot, Timeline};

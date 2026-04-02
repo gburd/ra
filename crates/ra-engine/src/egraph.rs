@@ -15,6 +15,7 @@ use ra_core::algebra::{
     WindowFunction,
 };
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr, UnaryOp};
+#[cfg(feature = "timeline")]
 use ra_stats::delta::DeltaSet;
 use tracing::warn;
 
@@ -1249,6 +1250,7 @@ impl Optimizer {
     ///
     /// Returns an error if the expression cannot be converted or
     /// extraction fails.
+    #[cfg(feature = "timeline")]
     pub fn optimize_incremental(
         &mut self,
         expr: &RelExpr,
@@ -1315,6 +1317,7 @@ impl Optimizer {
     /// Apply statistics deltas to the internal table stats map.
     ///
     /// Returns the number of tables whose stats were updated.
+    #[cfg(feature = "timeline")]
     fn apply_stats_delta(&mut self, delta_set: &DeltaSet) -> usize {
         let mut updated_tables =
             std::collections::HashSet::<String>::new();
@@ -3636,6 +3639,7 @@ mod tests {
 
     // ---- optimize_incremental tests ----
 
+    #[cfg(feature = "timeline")]
     fn make_snap(
         time: u64,
         rows: u64,
@@ -3662,18 +3666,21 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "timeline")]
     fn small_delta() -> DeltaSet {
         let a = make_snap(0, 10_000);
         let b = make_snap(60, 10_100); // 1% change
         DeltaSet::compute(&a, &b)
     }
 
+    #[cfg(feature = "timeline")]
     fn medium_delta() -> DeltaSet {
         let a = make_snap(0, 10_000);
         let b = make_snap(60, 11_000); // 10% change
         DeltaSet::compute(&a, &b)
     }
 
+    #[cfg(feature = "timeline")]
     fn large_delta() -> DeltaSet {
         let a = make_snap(0, 10_000);
         let b = make_snap(60, 20_000); // 100% change
@@ -3681,6 +3688,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn incremental_simple_scan() {
         let mut optimizer = Optimizer::new();
         let expr = RelExpr::scan("users");
@@ -3693,6 +3701,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn incremental_returns_valid_plan() {
         let mut optimizer = Optimizer::new();
         let expr = RelExpr::scan("users").filter(Expr::BinOp {
@@ -3711,6 +3720,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn incremental_small_delta_fewer_iterations() {
         let mut optimizer = Optimizer::new();
         let expr = RelExpr::scan("users");
@@ -3723,6 +3733,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn incremental_medium_delta_more_iterations() {
         let mut optimizer = Optimizer::new();
         let expr = RelExpr::scan("users");
@@ -3735,6 +3746,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn incremental_large_delta_falls_back_to_full() {
         let mut optimizer = Optimizer::new();
         let expr = RelExpr::scan("users");
@@ -3747,6 +3759,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn incremental_updates_table_stats() {
         let mut optimizer = Optimizer::new();
         let expr = RelExpr::scan("users");
@@ -3758,6 +3771,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn incremental_empty_delta_uses_minimal_iterations() {
         let mut optimizer = Optimizer::new();
         let expr = RelExpr::scan("users");
@@ -3770,6 +3784,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn incremental_produces_same_as_full_for_scan() {
         let expr = RelExpr::scan("users");
         let delta = small_delta();
@@ -3787,6 +3802,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn incremental_stats_speedup_factor() {
         let mut optimizer = Optimizer::new();
         let expr = RelExpr::scan("users");
@@ -3798,6 +3814,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn incremental_stats_full_reopt_speedup_is_one() {
         let mut optimizer = Optimizer::new();
         let expr = RelExpr::scan("users");
@@ -3809,6 +3826,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn incremental_reports_delta_count() {
         let mut optimizer = Optimizer::new();
         let expr = RelExpr::scan("users");
@@ -3820,6 +3838,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn incremental_reports_row_change_pct() {
         let mut optimizer = Optimizer::new();
         let expr = RelExpr::scan("users");
@@ -3832,6 +3851,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn incremental_elapsed_time_recorded() {
         let mut optimizer = Optimizer::new();
         let expr = RelExpr::scan("users");
@@ -3844,6 +3864,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn incremental_join_query() {
         let mut optimizer = Optimizer::new();
         let expr = RelExpr::Join {
@@ -3871,6 +3892,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn incremental_table_added_delta() {
         let a = ra_stats::timeline::Snapshot {
             time_offset: 0,
@@ -3917,6 +3939,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn incremental_nodes_in_egraph_reported() {
         let mut optimizer = Optimizer::new();
         let expr = RelExpr::scan("users");
@@ -3928,6 +3951,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn incremental_rules_evaluated_reported() {
         let mut optimizer = Optimizer::new();
         let expr = RelExpr::scan("users");

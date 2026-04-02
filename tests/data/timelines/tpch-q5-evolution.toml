@@ -1,0 +1,594 @@
+# Timeline Configuration: TPC-H Q5 Evolution with Join Optimization
+# TPC-H Q5: Local Supplier Volume Query (5-way join)
+
+[metadata]
+name = "TPC-H Q5 Evolution"
+description = "TPC-H Q5 (Local Supplier Volume) - 5-way join optimization over time"
+query = """
+SELECT
+    n_name,
+    SUM(l_extendedprice * (1 - l_discount)) AS revenue
+FROM
+    customer,
+    orders,
+    lineitem,
+    supplier,
+    nation,
+    region
+WHERE
+    c_custkey = o_custkey
+    AND l_orderkey = o_orderkey
+    AND l_suppkey = s_suppkey
+    AND c_nationkey = s_nationkey
+    AND s_nationkey = n_nationkey
+    AND n_regionkey = r_regionkey
+    AND r_name = 'ASIA'
+    AND o_orderdate >= DATE '1994-01-01'
+    AND o_orderdate < DATE '1994-01-01' + INTERVAL '1' YEAR
+GROUP BY
+    n_name
+ORDER BY
+    revenue DESC
+"""
+dialect = "postgresql"
+duration_seconds = 18000
+schema = "TPC-H"
+
+# Hardware Profiles
+[[hardware_profiles]]
+name = "standard"
+cpu_cores = 8
+total_memory = 32_000_000_000
+available_memory = 24_000_000_000
+simd_width = 256
+has_gpu = false
+
+[[hardware_profiles]]
+name = "production"
+cpu_cores = 64
+total_memory = 256_000_000_000
+available_memory = 200_000_000_000
+simd_width = 512
+has_gpu = false
+
+# Snapshot 1: SF=1, no indexes, nested loop joins
+[[snapshots]]
+time_offset = 0
+label = "SF=1 - no foreign key indexes, nested loops"
+hardware_profile = "standard"
+
+  [snapshots.schema]
+
+    [[snapshots.schema.tables]]
+    name = "customer"
+    storage_format = "row_based"
+    primary_key = ["c_custkey"]
+
+      [[snapshots.schema.tables.columns]]
+      name = "c_custkey"
+      data_type = "integer"
+
+      [[snapshots.schema.tables.columns]]
+      name = "c_nationkey"
+      data_type = "integer"
+
+    [[snapshots.schema.tables]]
+    name = "orders"
+    storage_format = "row_based"
+    primary_key = ["o_orderkey"]
+
+      [[snapshots.schema.tables.columns]]
+      name = "o_orderkey"
+      data_type = "integer"
+
+      [[snapshots.schema.tables.columns]]
+      name = "o_custkey"
+      data_type = "integer"
+
+      [[snapshots.schema.tables.columns]]
+      name = "o_orderdate"
+      data_type = "date"
+
+    [[snapshots.schema.tables]]
+    name = "lineitem"
+    storage_format = "row_based"
+    primary_key = ["l_orderkey", "l_linenumber"]
+
+      [[snapshots.schema.tables.columns]]
+      name = "l_orderkey"
+      data_type = "integer"
+
+      [[snapshots.schema.tables.columns]]
+      name = "l_suppkey"
+      data_type = "integer"
+
+      [[snapshots.schema.tables.columns]]
+      name = "l_extendedprice"
+      data_type = "decimal"
+
+      [[snapshots.schema.tables.columns]]
+      name = "l_discount"
+      data_type = "decimal"
+
+    [[snapshots.schema.tables]]
+    name = "supplier"
+    storage_format = "row_based"
+    primary_key = ["s_suppkey"]
+
+      [[snapshots.schema.tables.columns]]
+      name = "s_suppkey"
+      data_type = "integer"
+
+      [[snapshots.schema.tables.columns]]
+      name = "s_nationkey"
+      data_type = "integer"
+
+    [[snapshots.schema.tables]]
+    name = "nation"
+    storage_format = "row_based"
+    primary_key = ["n_nationkey"]
+
+      [[snapshots.schema.tables.columns]]
+      name = "n_nationkey"
+      data_type = "integer"
+
+      [[snapshots.schema.tables.columns]]
+      name = "n_name"
+      data_type = "string"
+
+      [[snapshots.schema.tables.columns]]
+      name = "n_regionkey"
+      data_type = "integer"
+
+    [[snapshots.schema.tables]]
+    name = "region"
+    storage_format = "row_based"
+    primary_key = ["r_regionkey"]
+
+      [[snapshots.schema.tables.columns]]
+      name = "r_regionkey"
+      data_type = "integer"
+
+      [[snapshots.schema.tables.columns]]
+      name = "r_name"
+      data_type = "string"
+
+  [[snapshots.statistics.tables]]
+  name = "customer"
+  row_count = 150_000
+  page_count = 1_500
+
+  [[snapshots.statistics.tables]]
+  name = "orders"
+  row_count = 1_500_000
+  page_count = 15_000
+
+    [[snapshots.statistics.tables.columns]]
+    name = "o_orderdate"
+    ndv = 2406
+    correlation = 0.95
+
+  [[snapshots.statistics.tables]]
+  name = "lineitem"
+  row_count = 6_001_215
+  page_count = 60_012
+
+  [[snapshots.statistics.tables]]
+  name = "supplier"
+  row_count = 10_000
+  page_count = 100
+
+  [[snapshots.statistics.tables]]
+  name = "nation"
+  row_count = 25
+  page_count = 1
+
+  [[snapshots.statistics.tables]]
+  name = "region"
+  row_count = 5
+  page_count = 1
+
+  [snapshots.facts]
+  supports_hash_join = true
+  supports_nested_loop = true
+  supports_parallel_scan = false
+  parallel_workers = 0
+  work_mem_bytes = 67108864
+
+# Snapshot 2: Added foreign key indexes
+[[snapshots]]
+time_offset = 6000
+label = "SF=1 - added FK indexes, hash joins enabled"
+hardware_profile = "standard"
+
+  [snapshots.schema]
+
+    [[snapshots.schema.tables]]
+    name = "customer"
+    storage_format = "row_based"
+    primary_key = ["c_custkey"]
+
+      [[snapshots.schema.tables.columns]]
+      name = "c_custkey"
+      data_type = "integer"
+
+      [[snapshots.schema.tables.columns]]
+      name = "c_nationkey"
+      data_type = "integer"
+
+    [[snapshots.schema.tables.indexes]]
+    name = "idx_customer_nationkey"
+    index_type = "btree"
+    columns = ["c_nationkey"]
+
+    [[snapshots.schema.tables]]
+    name = "orders"
+    storage_format = "row_based"
+    primary_key = ["o_orderkey"]
+
+      [[snapshots.schema.tables.columns]]
+      name = "o_orderkey"
+      data_type = "integer"
+
+      [[snapshots.schema.tables.columns]]
+      name = "o_custkey"
+      data_type = "integer"
+
+      [[snapshots.schema.tables.columns]]
+      name = "o_orderdate"
+      data_type = "date"
+
+    [[snapshots.schema.tables.indexes]]
+    name = "idx_orders_custkey"
+    index_type = "btree"
+    columns = ["o_custkey"]
+
+    [[snapshots.schema.tables.indexes]]
+    name = "idx_orders_orderdate"
+    index_type = "btree"
+    columns = ["o_orderdate"]
+
+    [[snapshots.schema.tables]]
+    name = "lineitem"
+    storage_format = "row_based"
+    primary_key = ["l_orderkey", "l_linenumber"]
+
+      [[snapshots.schema.tables.columns]]
+      name = "l_orderkey"
+      data_type = "integer"
+
+      [[snapshots.schema.tables.columns]]
+      name = "l_suppkey"
+      data_type = "integer"
+
+      [[snapshots.schema.tables.columns]]
+      name = "l_extendedprice"
+      data_type = "decimal"
+
+      [[snapshots.schema.tables.columns]]
+      name = "l_discount"
+      data_type = "decimal"
+
+    [[snapshots.schema.tables.indexes]]
+    name = "idx_lineitem_orderkey"
+    index_type = "btree"
+    columns = ["l_orderkey"]
+
+    [[snapshots.schema.tables.indexes]]
+    name = "idx_lineitem_suppkey"
+    index_type = "btree"
+    columns = ["l_suppkey"]
+
+    [[snapshots.schema.tables]]
+    name = "supplier"
+    storage_format = "row_based"
+    primary_key = ["s_suppkey"]
+
+      [[snapshots.schema.tables.columns]]
+      name = "s_suppkey"
+      data_type = "integer"
+
+      [[snapshots.schema.tables.columns]]
+      name = "s_nationkey"
+      data_type = "integer"
+
+    [[snapshots.schema.tables.indexes]]
+    name = "idx_supplier_nationkey"
+    index_type = "btree"
+    columns = ["s_nationkey"]
+
+    [[snapshots.schema.tables]]
+    name = "nation"
+    storage_format = "row_based"
+    primary_key = ["n_nationkey"]
+
+      [[snapshots.schema.tables.columns]]
+      name = "n_nationkey"
+      data_type = "integer"
+
+      [[snapshots.schema.tables.columns]]
+      name = "n_name"
+      data_type = "string"
+
+      [[snapshots.schema.tables.columns]]
+      name = "n_regionkey"
+      data_type = "integer"
+
+    [[snapshots.schema.tables.indexes]]
+    name = "idx_nation_regionkey"
+    index_type = "btree"
+    columns = ["n_regionkey"]
+
+    [[snapshots.schema.tables]]
+    name = "region"
+    storage_format = "row_based"
+    primary_key = ["r_regionkey"]
+
+      [[snapshots.schema.tables.columns]]
+      name = "r_regionkey"
+      data_type = "integer"
+
+      [[snapshots.schema.tables.columns]]
+      name = "r_name"
+      data_type = "string"
+
+  [[snapshots.statistics.tables]]
+  name = "customer"
+  row_count = 150_000
+  page_count = 1_500
+
+  [[snapshots.statistics.tables]]
+  name = "orders"
+  row_count = 1_500_000
+  page_count = 15_000
+
+    [[snapshots.statistics.tables.columns]]
+    name = "o_orderdate"
+    ndv = 2406
+    correlation = 0.95
+
+  [[snapshots.statistics.tables]]
+  name = "lineitem"
+  row_count = 6_001_215
+  page_count = 60_012
+
+  [[snapshots.statistics.tables]]
+  name = "supplier"
+  row_count = 10_000
+  page_count = 100
+
+  [[snapshots.statistics.tables]]
+  name = "nation"
+  row_count = 25
+  page_count = 1
+
+  [[snapshots.statistics.tables]]
+  name = "region"
+  row_count = 5
+  page_count = 1
+
+  [snapshots.facts]
+  supports_hash_join = true
+  supports_nested_loop = true
+  supports_parallel_scan = false
+  parallel_workers = 0
+  work_mem_bytes = 67108864
+
+# Snapshot 3: Production hardware with parallelism
+[[snapshots]]
+time_offset = 12000
+label = "SF=1 - production hardware, parallel hash joins"
+hardware_profile = "production"
+
+  [snapshots.schema]
+
+    [[snapshots.schema.tables]]
+    name = "customer"
+    storage_format = "row_based"
+    primary_key = ["c_custkey"]
+
+      [[snapshots.schema.tables.columns]]
+      name = "c_custkey"
+      data_type = "integer"
+
+      [[snapshots.schema.tables.columns]]
+      name = "c_nationkey"
+      data_type = "integer"
+
+    [[snapshots.schema.tables.indexes]]
+    name = "idx_customer_nationkey"
+    index_type = "btree"
+    columns = ["c_nationkey"]
+
+    [[snapshots.schema.tables]]
+    name = "orders"
+    storage_format = "row_based"
+    primary_key = ["o_orderkey"]
+
+      [[snapshots.schema.tables.columns]]
+      name = "o_orderkey"
+      data_type = "integer"
+
+      [[snapshots.schema.tables.columns]]
+      name = "o_custkey"
+      data_type = "integer"
+
+      [[snapshots.schema.tables.columns]]
+      name = "o_orderdate"
+      data_type = "date"
+
+    [[snapshots.schema.tables.indexes]]
+    name = "idx_orders_custkey"
+    index_type = "btree"
+    columns = ["o_custkey"]
+
+    [[snapshots.schema.tables.indexes]]
+    name = "idx_orders_orderdate"
+    index_type = "btree"
+    columns = ["o_orderdate"]
+
+    [[snapshots.schema.tables]]
+    name = "lineitem"
+    storage_format = "row_based"
+    primary_key = ["l_orderkey", "l_linenumber"]
+
+      [[snapshots.schema.tables.columns]]
+      name = "l_orderkey"
+      data_type = "integer"
+
+      [[snapshots.schema.tables.columns]]
+      name = "l_suppkey"
+      data_type = "integer"
+
+      [[snapshots.schema.tables.columns]]
+      name = "l_extendedprice"
+      data_type = "decimal"
+
+      [[snapshots.schema.tables.columns]]
+      name = "l_discount"
+      data_type = "decimal"
+
+    [[snapshots.schema.tables.indexes]]
+    name = "idx_lineitem_orderkey"
+    index_type = "btree"
+    columns = ["l_orderkey"]
+
+    [[snapshots.schema.tables.indexes]]
+    name = "idx_lineitem_suppkey"
+    index_type = "btree"
+    columns = ["l_suppkey"]
+
+    [[snapshots.schema.tables]]
+    name = "supplier"
+    storage_format = "row_based"
+    primary_key = ["s_suppkey"]
+
+      [[snapshots.schema.tables.columns]]
+      name = "s_suppkey"
+      data_type = "integer"
+
+      [[snapshots.schema.tables.columns]]
+      name = "s_nationkey"
+      data_type = "integer"
+
+    [[snapshots.schema.tables.indexes]]
+    name = "idx_supplier_nationkey"
+    index_type = "btree"
+    columns = ["s_nationkey"]
+
+    [[snapshots.schema.tables]]
+    name = "nation"
+    storage_format = "row_based"
+    primary_key = ["n_nationkey"]
+
+      [[snapshots.schema.tables.columns]]
+      name = "n_nationkey"
+      data_type = "integer"
+
+      [[snapshots.schema.tables.columns]]
+      name = "n_name"
+      data_type = "string"
+
+      [[snapshots.schema.tables.columns]]
+      name = "n_regionkey"
+      data_type = "integer"
+
+    [[snapshots.schema.tables.indexes]]
+    name = "idx_nation_regionkey"
+    index_type = "btree"
+    columns = ["n_regionkey"]
+
+    [[snapshots.schema.tables]]
+    name = "region"
+    storage_format = "row_based"
+    primary_key = ["r_regionkey"]
+
+      [[snapshots.schema.tables.columns]]
+      name = "r_regionkey"
+      data_type = "integer"
+
+      [[snapshots.schema.tables.columns]]
+      name = "r_name"
+      data_type = "string"
+
+  [[snapshots.statistics.tables]]
+  name = "customer"
+  row_count = 150_000
+  page_count = 1_500
+
+  [[snapshots.statistics.tables]]
+  name = "orders"
+  row_count = 1_500_000
+  page_count = 15_000
+
+    [[snapshots.statistics.tables.columns]]
+    name = "o_orderdate"
+    ndv = 2406
+    correlation = 0.95
+
+  [[snapshots.statistics.tables]]
+  name = "lineitem"
+  row_count = 6_001_215
+  page_count = 60_012
+
+  [[snapshots.statistics.tables]]
+  name = "supplier"
+  row_count = 10_000
+  page_count = 100
+
+  [[snapshots.statistics.tables]]
+  name = "nation"
+  row_count = 25
+  page_count = 1
+
+  [[snapshots.statistics.tables]]
+  name = "region"
+  row_count = 5
+  page_count = 1
+
+  [snapshots.facts]
+  supports_hash_join = true
+  supports_nested_loop = true
+  supports_parallel_scan = true
+  parallel_workers = 32
+  work_mem_bytes = 536870912
+
+# Events
+[[events]]
+time_offset = 0
+kind = "baseline"
+description = "Initial TPC-H SF=1 dataset, no FK indexes"
+
+[[events]]
+time_offset = 3000
+kind = "schema_change"
+description = "Adding foreign key indexes for all join columns"
+
+[[events]]
+time_offset = 6000
+kind = "schema_change"
+description = "FK indexes creation completed"
+
+[[events]]
+time_offset = 9000
+kind = "hardware_change"
+description = "Migrated to production hardware (64 cores, 256GB RAM)"
+
+# Test Expectations
+[[expectations]]
+snapshot_index = 0
+expected_plan_pattern = ".*(NestedLoop|SeqScan).*"
+rules_applied_must_not_include = ["hash-join-introduction"]
+invalidation_trigger = "None"
+
+[[expectations]]
+snapshot_index = 1
+expected_plan_pattern = ".*HashJoin.*"
+rules_applied_must_include = ["hash-join-introduction", "index-scan-selection"]
+invalidation_trigger = "Index"
+
+[[expectations]]
+snapshot_index = 2
+expected_plan_pattern = ".*(ParallelHash|Gather).*"
+rules_applied_must_include = ["parallel-hash-join"]
+invalidation_trigger = "Hardware"

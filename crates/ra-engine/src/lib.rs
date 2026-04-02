@@ -56,6 +56,7 @@ pub mod lazy_rules;
 pub mod left_deep;
 pub mod federated_cost;
 pub mod federated_optimizer;
+pub mod ml_integration;
 pub mod genetic_fingerprint;
 pub mod memo;
 pub mod mv_matching;
@@ -84,10 +85,12 @@ pub mod rule_metadata;
 pub mod rule_priority;
 pub mod rule_registry;
 // Phase 6: Timeline system (deferred)
-// pub mod timeline_config;
-// pub mod timeline_facts;
-// #[cfg(feature = "streaming")]
-// pub mod timeline_optimizer;
+#[cfg(feature = "timeline")]
+pub mod timeline_config;
+#[cfg(feature = "timeline")]
+pub mod timeline_facts;
+#[cfg(all(feature = "timeline", feature = "streaming"))]
+pub mod timeline_optimizer;
 pub mod rum_index;
 pub mod runtime_filters;
 pub mod selectivity;
@@ -154,14 +157,16 @@ pub use incremental_sort::{
     estimate_costs as estimate_incremental_sort_costs,
     try_incremental_sort,
 };
+#[cfg(feature = "timeline")]
 pub use timeline_config::{
     ColumnStatsDef, DataTypeDef, EventKind, FactsSnapshot, FingerPrintSnapshot,
     HardwareProfileDef, IndexDef, IndexTypeDef, SchemaSnapshot, StatisticsSnapshot,
     StorageFormatDef, TableStatsDef, TestExpectation, TimelineConfig,
     TimelineConfigError, TimelineEvent, TimelineMetadata,
 };
+#[cfg(feature = "timeline")]
 pub use timeline_facts::SnapshotFactsProvider;
-#[cfg(feature = "streaming")]
+#[cfg(all(feature = "timeline", feature = "streaming"))]
 pub use timeline_optimizer::{
     ChangeDescription, ChangeSeverity, ChangeType, SnapshotResult,
     TimelineOptimizationResult, TimelineOptimizer, detect_fact_changes,

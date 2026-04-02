@@ -17,7 +17,7 @@ import {
 } from '@mui/material';
 import { useState } from 'react';
 import { SCHEMAS } from '../constants';
-import type { Schema, SampleQuery } from '../types';
+import type { SampleQuery } from '../types';
 
 interface SchemaViewerProps {
   open: boolean;

@@ -54,7 +54,10 @@
 
 #![warn(missing_docs)]
 
+pub mod belief_network;
 pub mod estimator;
 pub mod features;
 pub mod nn;
+pub mod storage;
+pub mod streaming;
 pub mod training;

@@ -761,6 +761,7 @@ impl IntegratedCostModel {
     /// - Q-error > 10.0: reduce confidence by 50%
     ///
     /// Returns the number of tables whose confidence was adjusted.
+    #[cfg(feature = "timeline")]
     pub fn apply_execution_feedback(
         &mut self,
         feedback: &[ra_stats::timeline::ExecutionFeedback],
@@ -2958,6 +2959,7 @@ mod tests {
 
     // ---- apply_execution_feedback ----
 
+    #[cfg(feature = "timeline")]
     fn make_feedback(
         estimated: f64,
         actual: f64,
@@ -2975,6 +2977,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn feedback_good_estimate_no_adjustment() {
         let mut model = IntegratedCostModel::new(
             StatisticsProfile::standard(),
@@ -3003,6 +3006,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn feedback_moderate_error_reduces_confidence() {
         let mut model = IntegratedCostModel::new(
             StatisticsProfile::standard(),
@@ -3027,6 +3031,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn feedback_large_error_reduces_confidence_more() {
         let mut model = IntegratedCostModel::new(
             StatisticsProfile::standard(),
@@ -3051,6 +3056,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn feedback_extreme_error_halves_confidence() {
         let mut model = IntegratedCostModel::new(
             StatisticsProfile::standard(),
@@ -3075,6 +3081,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn feedback_multiple_entries_accumulate() {
         let mut model = IntegratedCostModel::new(
             StatisticsProfile::standard(),
@@ -3101,6 +3108,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn feedback_confidence_never_negative() {
         let mut model = IntegratedCostModel::new(
             StatisticsProfile::standard(),
@@ -3124,6 +3132,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn feedback_unknown_table_ignored() {
         let mut model = IntegratedCostModel::new(
             StatisticsProfile::standard(),
@@ -3142,6 +3151,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn feedback_empty_input() {
         let mut model = IntegratedCostModel::new(
             StatisticsProfile::standard(),
@@ -3152,6 +3162,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn feedback_extracts_table_from_query_when_no_operator() {
         let mut model = IntegratedCostModel::new(
             StatisticsProfile::standard(),
@@ -3177,6 +3188,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn feedback_multiple_tables() {
         let mut model = IntegratedCostModel::new(
             StatisticsProfile::standard(),
@@ -3201,6 +3213,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn feedback_increases_costs() {
         let mut model = IntegratedCostModel::new(
             StatisticsProfile::standard(),
@@ -3221,6 +3234,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn feedback_at_threshold_boundary_1_5() {
         let mut model = IntegratedCostModel::new(
             StatisticsProfile::standard(),
@@ -3239,6 +3253,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn feedback_just_above_threshold_1_5() {
         let mut model = IntegratedCostModel::new(
             StatisticsProfile::standard(),
@@ -3257,6 +3272,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn feedback_at_threshold_boundary_3_0() {
         let mut model = IntegratedCostModel::new(
             StatisticsProfile::standard(),
@@ -3280,6 +3296,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn feedback_just_above_threshold_3_0() {
         let mut model = IntegratedCostModel::new(
             StatisticsProfile::standard(),
@@ -3303,6 +3320,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn feedback_at_threshold_boundary_10_0() {
         let mut model = IntegratedCostModel::new(
             StatisticsProfile::standard(),
@@ -3326,6 +3344,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn feedback_just_above_threshold_10_0() {
         let mut model = IntegratedCostModel::new(
             StatisticsProfile::standard(),

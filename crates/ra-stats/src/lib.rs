@@ -92,7 +92,8 @@ pub mod accuracy;
 pub mod adaptive;
 pub mod adapters;
 // Phase 6: Timeline system (deferred) - delta uses timeline types
-// pub mod delta;
+#[cfg(feature = "timeline")]
+pub mod delta;
 pub mod feedback;
 pub mod gathering_cost;
 pub mod index_metadata;
@@ -106,14 +107,16 @@ pub mod skew;
 pub mod smoother;
 pub mod streaming;
 // Phase 6: Timeline system (deferred)
-// pub mod timeline;
+#[cfg(feature = "timeline")]
+pub mod timeline;
 pub mod types;
 
 pub use accuracy::{QualityMetrics, RefreshThreshold, Staleness, StatisticsSource, StatisticsState};
 pub use adaptive::{AdaptiveConfig, AdaptiveCostDriver, ResourceSnapshot, UpdateTrigger};
 pub use adapters::MonitoringAdapter;
 // Phase 6: Timeline system (deferred)
-// pub use delta::{DeltaSet, StatisticsDelta};
+#[cfg(feature = "timeline")]
+pub use delta::{DeltaSet, StatisticsDelta};
 pub use feedback::{
     CardinalityError, CardinalityErrorTracker, ErrorRecommendation, ErrorSeverity, OperatorKind,
     RecommendationEngine, RecommendationKind,
@@ -132,9 +135,10 @@ pub use streaming::{
     ChangeThresholds, CostModelUpdate, MetricKind, StreamingPipeline,
 };
 // Phase 6: Timeline system (deferred)
-// pub use timeline::{
-//     PlaybackState, Timeline, TimelineError, TimelineEvent, TimelinePlayer,
-// };
+#[cfg(feature = "timeline")]
+pub use timeline::{
+    PlaybackState, Timeline, TimelineError, TimelineEvent, TimelinePlayer,
+};
 pub use skew::{
     FrequencyBucket, FrequencyHistogram, HotKey, SkewAnalysis, SkewDetector, SkewSeverity,
     SkewStrategy,

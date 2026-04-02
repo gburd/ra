@@ -1,0 +1,244 @@
+---
+id: exa-002-late-materialization
+name: "Late Materialization (Exasol)"
+category: exasol-in-memory
+databases: [exasol]
+execution_models: [column-at-a-time, vectorized]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [exasol, late-materialization, deferred-read, position-list, columnar]
+complexity: "O(n)"
+benefit_range: [2.0, 20.0]
+---
+
+# EXA-002: Late Materialization (Exasol Variant)
+
+## Metadata
+- **Rule ID**: `exa-002-late-materialization`
+- **Category**: In-Memory Storage
+- **Source**: Exasol Architecture; Abadi et al. ICDE 2007
+- **Complexity**: O(n) with memory access proportional to selectivity
+- **Prerequisites**: In-memory columnar storage; filter present; output columns differ from filter columns
+- **Alternatives**: Early materialization (reconstruct tuples before filtering)
+
+## Description
+
+Exasol's late materialization variant defers tuple reconstruction until after
+all filtering and predicate evaluation. Unlike disk-based systems that optimize
+for I/O, Exasol optimizes for memory bandwidth and CPU cache efficiency.
+
+The key difference from standard late materialization is that Exasol operates
+entirely in memory with:
+1. **Position lists** - Compact bitmap or position arrays of qualifying rows
+2. **Batch materialization** - Fetch output columns in cache-friendly batches
+3. **SIMD gather operations** - Vectorized random access to qualifying positions
+4. **Zero-copy when possible** - Return pointers to compressed data
+
+**Pipeline:**
+1. Scan filter columns into CPU cache
+2. Evaluate predicates using SIMD operations → position list
+3. For qualifying positions only, gather output columns using SIMD
+4. Assemble output batches (or return zero-copy views)
+
+**When to apply:**
+- Selectivity < 80% (filters eliminate some rows)
+- Output columns are wider or more numerous than filter columns
+- In-memory data (no disk I/O considerations)
+
+**Why it works:**
+- Memory bandwidth is the bottleneck in OLAP, not compute
+- Reading fewer columns reduces cache pollution
+- SIMD gather operations are fast for scattered reads in memory
+- Typical analytical query: filter on 1-3 columns, output 5-20 columns
+
+## Relational Algebra
+
+```
+Early materialization:
+  project[C_out](filter[pred](columnar-scan[T, all_cols, in-memory=true]))
+
+Late materialization:
+  position-gather[T, C_out - C_pred](
+    filter[pred](columnar-scan[T, C_pred, in-memory=true]))
+
+Where:
+  C_pred = columns referenced by pred
+  C_out  = columns in the output projection
+  position-gather = SIMD gather from position list
+```
+
+## Implementation (egg rewrite rules)
+
+```lisp
+;; Basic late materialization for in-memory columnar data
+(rewrite (project ?out-cols
+           (filter ?pred
+             (columnar-scan ?table ?all-cols (in-memory true))))
+  (position-gather ?table (diff ?out-cols (pred-cols ?pred))
+    (filter ?pred
+      (columnar-scan ?table (pred-cols ?pred) (in-memory true))))
+  :if (< (selectivity ?pred) 0.8)
+  :if (> (length (diff ?out-cols (pred-cols ?pred))) 0))
+
+;; Late materialization with SIMD gather
+(rewrite (position-gather ?table ?cols ?positions)
+  (simd-gather ?table ?cols ?positions
+    (gather-width (detect-simd-width)))
+  :if (in-memory-data ?table)
+  :if (supports-simd-gather ?table ?cols))
+
+;; Late materialization through join
+(rewrite (project ?out-cols
+           (join ?pred
+             (filter ?f1 (columnar-scan ?t1 ?c1 (in-memory true)))
+             (filter ?f2 (columnar-scan ?t2 ?c2 (in-memory true)))))
+  (position-gather (union ?t1 ?t2) (diff ?out-cols (join-cols ?pred))
+    (join ?pred
+      (filter ?f1 (columnar-scan ?t1 (pred-cols ?f1) (in-memory true)))
+      (filter ?f2 (columnar-scan ?t2 (pred-cols ?f2) (in-memory true)))))
+  :if (< (* (selectivity ?f1) (selectivity ?f2)) 0.5))
+
+;; Cascade late materialization
+(rewrite (project ?final-cols
+           (filter ?pred2
+             (project ?mid-cols
+               (filter ?pred1 (columnar-scan ?table ?all-cols (in-memory true))))))
+  (position-gather ?table (diff ?final-cols (union (pred-cols ?pred1) (pred-cols ?pred2)))
+    (filter ?pred2
+      (filter ?pred1
+        (columnar-scan ?table
+          (union (pred-cols ?pred1) (pred-cols ?pred2))
+          (in-memory true)))))
+  :if (< (* (selectivity ?pred1) (selectivity ?pred2)) 0.5))
+```
+
+## Cost Model
+
+```rust
+/// Compare early vs. late materialization for in-memory columnar data.
+pub fn cost_late_materialization_inmem(
+    rows: u64,
+    pred_col_count: usize,
+    output_col_count: usize,
+    bytes_per_col: u64,
+    selectivity: f64,
+    cache_line_bytes: u64,
+    simd_width: usize,
+) -> (Cost, Cost) {
+    // Early materialization: read all columns, then filter
+    let total_cols = pred_col_count + output_col_count;
+    let all_bytes = total_cols as u64 * bytes_per_col * rows;
+    let early_cache_misses = all_bytes / cache_line_bytes;
+    let early_cpu = rows as f64 * total_cols as f64 * 1.0;
+    let early_mem = early_cache_misses as f64 * 100.0;
+    let early = Cost::new(early_cpu + early_mem, 0.0, 0.0, 0);
+
+    // Late materialization: read filter cols, then gather output cols
+    // Phase 1: Sequential scan of predicate columns
+    let pred_bytes = pred_col_count as u64 * bytes_per_col * rows;
+    let phase1_cache_misses = pred_bytes / cache_line_bytes;
+    let phase1_cpu = rows as f64 * pred_col_count as f64 * 0.5; // SIMD filtering
+    let phase1_mem = phase1_cache_misses as f64 * 100.0;
+
+    // Phase 2: SIMD gather of output columns (only qualifying rows)
+    let surviving = (rows as f64 * selectivity) as u64;
+    let output_bytes = output_col_count as u64 * bytes_per_col * surviving;
+
+    // Gather operations have slightly worse cache behavior than sequential
+    let gather_efficiency = 1.5; // 50% overhead for scattered access
+    let phase2_cache_misses = (output_bytes as f64 * gather_efficiency / cache_line_bytes as f64) as u64;
+    let phase2_cpu = surviving as f64 * output_col_count as f64 * 0.75; // SIMD gather
+    let phase2_mem = phase2_cache_misses as f64 * 100.0;
+
+    let late = Cost::new(
+        phase1_cpu + phase2_cpu + phase1_mem + phase2_mem,
+        0.0,
+        0.0,
+        0,
+    );
+
+    (early, late)
+}
+```
+
+**Break-even point**: Late materialization is cheaper when
+`selectivity < pred_col_count / (pred_col_count + output_col_count * 1.5)`.
+The 1.5 factor accounts for gather overhead. For typical queries (2 filter
+columns, 10 output columns), this is `selectivity < 0.13` -- often beneficial.
+
+## Test Cases
+
+### Positive: Highly selective filter on wide table
+```sql
+SELECT name, email, address, phone, bio, preferences, history
+FROM customers
+WHERE loyalty_tier = 'platinum' AND registration_date > '2023-01-01';
+
+-- Selectivity: 1% (10K out of 1M customers)
+-- Filter columns: loyalty_tier, registration_date (12 bytes)
+-- Output columns: 7 columns * 200 bytes avg = 1400 bytes
+-- Early: read 1412 bytes * 1M rows = 1.4 GB
+-- Late: read 12 bytes * 1M rows + 1400 bytes * 10K rows = 26 MB
+-- 54x memory bandwidth reduction
+```
+
+### Positive: Join with selective filter
+```sql
+SELECT o.order_id, o.total_amount, c.customer_name, c.email
+FROM orders o
+JOIN customers c ON o.customer_id = c.customer_id
+WHERE o.order_date = '2024-01-15' AND o.status = 'completed';
+
+-- 0.3% of orders match (1000 out of 300K daily orders)
+-- Filter on orders before join, materialize output columns after join
+-- Reduces join input size by 300x
+```
+
+### Positive: Aggregation with filter
+```sql
+SELECT region, product_category, SUM(revenue), AVG(quantity)
+FROM sales
+WHERE sale_date BETWEEN '2024-01-01' AND '2024-01-31'
+GROUP BY region, product_category;
+
+-- Monthly filter selects 8% of data (1 month out of 12)
+-- Only need: sale_date (filter), region, product_category, revenue, quantity
+-- Don't materialize: customer_id, order_id, salesperson_id, notes, etc.
+```
+
+### Negative: Non-selective filter
+```sql
+SELECT * FROM events WHERE year >= 2020;
+
+-- 90% of data matches (current + recent years)
+-- Late materialization overhead (position list + gather) > sequential scan
+-- Early materialization is faster
+```
+
+### Negative: Filter columns are the output
+```sql
+SELECT order_date, status FROM orders WHERE order_date >= '2024-01-01';
+
+-- Output columns are the filter columns
+-- No deferred columns to read, late materialization has zero benefit
+-- Only adds overhead of building position list
+```
+
+### Negative: Single column output
+```sql
+SELECT COUNT(*) FROM orders WHERE status = 'completed';
+
+-- No columns to materialize (just count)
+-- Late materialization not applicable
+```
+
+## References
+
+1. **Exasol Architecture Whitepaper**: In-Memory Execution Engine
+2. **Abadi, Daniel et al.** "Materialization Strategies in a Column-Oriented
+   DBMS." ICDE 2007.
+3. **Boncz, Peter et al.** "MonetDB/X100: Hyper-Pipelining Query Execution."
+   CIDR 2005.
+4. **Intel Intrinsics Guide**: AVX2/AVX-512 Gather Instructions
+5. **Exasol Performance Guide**: Columnar Storage Best Practices

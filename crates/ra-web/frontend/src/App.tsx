@@ -56,7 +56,7 @@ function App() {
     []
   );
 
-  const { executeSinglePanel, executeAllPanels } = useQueryExecution(updatePanel);
+  const { executeAllPanels } = useQueryExecution(updatePanel);
 
   const handleSqlChange = (sql: string) => {
     setState(prevState => ({ ...prevState, sql }));

@@ -1,0 +1,361 @@
+# Timeline Configuration: Statistics Staleness and Confidence Degradation
+# Demonstrates how statistics going stale degrades estimate confidence and plan quality
+
+[metadata]
+name = "Statistics Staleness Scenario"
+description = "Fresh stats (confidence=1.0) → 50% data change (confidence=0.4) → Re-analyzed (confidence=1.0)"
+query = "SELECT COUNT(*) FROM orders WHERE customer_id > 50000 AND status = 'pending'"
+dialect = "postgresql"
+duration_seconds = 10800
+schema = "E-Commerce"
+
+# Hardware Profile (constant)
+[[hardware_profiles]]
+name = "standard"
+cpu_cores = 8
+total_memory = 32_000_000_000
+available_memory = 24_000_000_000
+simd_width = 256
+has_gpu = false
+
+# Snapshot 1: Fresh statistics - high confidence
+[[snapshots]]
+time_offset = 0
+label = "Fresh statistics (confidence=1.0) - recently analyzed"
+hardware_profile = "standard"
+
+  [snapshots.schema]
+
+    [[snapshots.schema.tables]]
+    name = "orders"
+    storage_format = "row_based"
+    primary_key = ["order_id"]
+
+      [[snapshots.schema.tables.columns]]
+      name = "order_id"
+      data_type = "integer"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "customer_id"
+      data_type = "integer"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "status"
+      data_type = "string"
+      nullable = false
+
+    [[snapshots.schema.tables.indexes]]
+    name = "idx_orders_customer"
+    index_type = "btree"
+    columns = ["customer_id"]
+    is_unique = false
+
+  [[snapshots.statistics.tables]]
+  name = "orders"
+  row_count = 1_000_000
+  page_count = 10_000
+  avg_row_size = 100.0
+  table_size_bytes = 100_000_000
+  last_analyze_time = "2024-04-01T00:00:00Z"
+  rows_modified_since_analyze = 0
+  confidence = 1.0  # Fresh stats
+
+    [[snapshots.statistics.tables.columns]]
+    name = "customer_id"
+    ndv = 100_000
+    null_fraction = 0.0
+    avg_width = 8.0
+    correlation = 0.1
+    min_value = "1"
+    max_value = "100000"
+    confidence = 1.0
+
+    [[snapshots.statistics.tables.columns]]
+    name = "status"
+    ndv = 5
+    null_fraction = 0.0
+    avg_width = 8.0
+    min_value = "cancelled"
+    max_value = "shipped"
+    confidence = 1.0
+
+  [snapshots.facts]
+  supports_hash_join = true
+  supports_parallel_scan = true
+  parallel_workers = 4
+  work_mem_bytes = 134217728
+  statistics_confidence_threshold = 0.5
+
+# Snapshot 2: 20% data change - degraded confidence
+[[snapshots]]
+time_offset = 3600
+label = "20% data change (confidence=0.7) - statistics getting stale"
+hardware_profile = "standard"
+
+  [snapshots.schema]
+
+    [[snapshots.schema.tables]]
+    name = "orders"
+    storage_format = "row_based"
+    primary_key = ["order_id"]
+
+      [[snapshots.schema.tables.columns]]
+      name = "order_id"
+      data_type = "integer"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "customer_id"
+      data_type = "integer"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "status"
+      data_type = "string"
+      nullable = false
+
+    [[snapshots.schema.tables.indexes]]
+    name = "idx_orders_customer"
+    index_type = "btree"
+    columns = ["customer_id"]
+    is_unique = false
+
+  [[snapshots.statistics.tables]]
+  name = "orders"
+  row_count = 1_200_000  # 20% growth
+  page_count = 12_000
+  avg_row_size = 100.0
+  table_size_bytes = 120_000_000
+  last_analyze_time = "2024-04-01T00:00:00Z"  # Same as before
+  rows_modified_since_analyze = 200_000
+  confidence = 0.7  # Degraded confidence
+
+    [[snapshots.statistics.tables.columns]]
+    name = "customer_id"
+    ndv = 110_000  # Actual NDV changed
+    null_fraction = 0.0
+    avg_width = 8.0
+    correlation = 0.15  # Distribution shifted
+    min_value = "1"
+    max_value = "110000"
+    confidence = 0.7  # But stats don't know this yet
+
+    [[snapshots.statistics.tables.columns]]
+    name = "status"
+    ndv = 6  # New status added
+    null_fraction = 0.0
+    avg_width = 8.0
+    min_value = "cancelled"
+    max_value = "shipped"
+    confidence = 0.7
+
+  [snapshots.facts]
+  supports_hash_join = true
+  supports_parallel_scan = true
+  parallel_workers = 4
+  work_mem_bytes = 134217728
+  statistics_confidence_threshold = 0.5
+
+# Snapshot 3: 50% data change - low confidence
+[[snapshots]]
+time_offset = 7200
+label = "50% data change (confidence=0.4) - statistics very stale"
+hardware_profile = "standard"
+
+  [snapshots.schema]
+
+    [[snapshots.schema.tables]]
+    name = "orders"
+    storage_format = "row_based"
+    primary_key = ["order_id"]
+
+      [[snapshots.schema.tables.columns]]
+      name = "order_id"
+      data_type = "integer"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "customer_id"
+      data_type = "integer"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "status"
+      data_type = "string"
+      nullable = false
+
+    [[snapshots.schema.tables.indexes]]
+    name = "idx_orders_customer"
+    index_type = "btree"
+    columns = ["customer_id"]
+    is_unique = false
+
+  [[snapshots.statistics.tables]]
+  name = "orders"
+  row_count = 1_500_000  # 50% growth
+  page_count = 15_000
+  avg_row_size = 100.0
+  table_size_bytes = 150_000_000
+  last_analyze_time = "2024-04-01T00:00:00Z"  # Still same
+  rows_modified_since_analyze = 500_000
+  confidence = 0.4  # Very low confidence
+
+    [[snapshots.statistics.tables.columns]]
+    name = "customer_id"
+    ndv = 125_000  # Significantly different
+    null_fraction = 0.0
+    avg_width = 8.0
+    correlation = 0.25  # Much different distribution
+    min_value = "1"
+    max_value = "125000"
+    confidence = 0.4
+
+    [[snapshots.statistics.tables.columns]]
+    name = "status"
+    ndv = 7
+    null_fraction = 0.0
+    avg_width = 8.0
+    min_value = "cancelled"
+    max_value = "shipped"
+    confidence = 0.4
+
+  [snapshots.facts]
+  supports_hash_join = true
+  supports_parallel_scan = true
+  parallel_workers = 4
+  work_mem_bytes = 134217728
+  statistics_confidence_threshold = 0.5
+
+# Snapshot 4: Re-analyzed - confidence restored
+[[snapshots]]
+time_offset = 10800
+label = "Re-analyzed (confidence=1.0) - fresh statistics restored"
+hardware_profile = "standard"
+
+  [snapshots.schema]
+
+    [[snapshots.schema.tables]]
+    name = "orders"
+    storage_format = "row_based"
+    primary_key = ["order_id"]
+
+      [[snapshots.schema.tables.columns]]
+      name = "order_id"
+      data_type = "integer"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "customer_id"
+      data_type = "integer"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "status"
+      data_type = "string"
+      nullable = false
+
+    [[snapshots.schema.tables.indexes]]
+    name = "idx_orders_customer"
+    index_type = "btree"
+    columns = ["customer_id"]
+    is_unique = false
+
+  [[snapshots.statistics.tables]]
+  name = "orders"
+  row_count = 1_500_000
+  page_count = 15_000
+  avg_row_size = 100.0
+  table_size_bytes = 150_000_000
+  last_analyze_time = "2024-04-01T03:00:00Z"  # Re-analyzed
+  rows_modified_since_analyze = 0
+  confidence = 1.0  # Confidence restored
+
+    [[snapshots.statistics.tables.columns]]
+    name = "customer_id"
+    ndv = 125_000  # Accurate now
+    null_fraction = 0.0
+    avg_width = 8.0
+    correlation = 0.25  # Accurate distribution
+    min_value = "1"
+    max_value = "125000"
+    confidence = 1.0
+
+    [[snapshots.statistics.tables.columns]]
+    name = "status"
+    ndv = 7
+    null_fraction = 0.0
+    avg_width = 8.0
+    min_value = "cancelled"
+    max_value = "shipped"
+    confidence = 1.0
+
+  [snapshots.facts]
+  supports_hash_join = true
+  supports_parallel_scan = true
+  parallel_workers = 4
+  work_mem_bytes = 134217728
+  statistics_confidence_threshold = 0.5
+
+# Events
+[[events]]
+time_offset = 0
+kind = "statistics_update"
+table = "orders"
+description = "ANALYZE orders - fresh statistics baseline"
+
+[[events]]
+time_offset = 1800
+kind = "data_modification"
+table = "orders"
+description = "Bulk insert: 100K new orders"
+
+[[events]]
+time_offset = 3600
+kind = "data_modification"
+table = "orders"
+description = "Bulk insert: 100K more orders (200K total changes)"
+
+[[events]]
+time_offset = 5400
+kind = "data_modification"
+table = "orders"
+description = "Bulk insert: 150K orders"
+
+[[events]]
+time_offset = 7200
+kind = "data_modification"
+table = "orders"
+description = "Bulk insert: 150K orders (500K total changes, 50% of original)"
+
+[[events]]
+time_offset = 9000
+kind = "statistics_update"
+table = "orders"
+description = "ANALYZE orders - statistics refreshed"
+
+# Test Expectations
+[[expectations]]
+snapshot_index = 0
+expected_cardinality = 500.0
+cardinality_tolerance = 0.1  # Should be very accurate
+invalidation_trigger = "None"
+
+[[expectations]]
+snapshot_index = 1
+expected_cardinality = 600.0  # Estimate may be slightly off
+cardinality_tolerance = 0.2  # 20% tolerance
+invalidation_trigger = "Statistics"
+
+[[expectations]]
+snapshot_index = 2
+expected_cardinality = 750.0  # Estimate likely off
+cardinality_tolerance = 0.4  # 40% tolerance - low confidence
+invalidation_trigger = "Statistics"
+
+[[expectations]]
+snapshot_index = 3
+expected_cardinality = 750.0
+cardinality_tolerance = 0.1  # Back to accurate estimates
+invalidation_trigger = "Statistics"

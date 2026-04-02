@@ -1,0 +1,291 @@
+# Timeline Configuration: Index Addition Scenario
+# Demonstrates how query plan changes when an index is added mid-execution
+
+[metadata]
+name = "Index Addition Scenario"
+description = "Demonstrates plan change when index is added - SeqScan → IndexScan"
+query = "SELECT * FROM orders WHERE customer_id = 42 AND status = 'active'"
+dialect = "postgresql"
+duration_seconds = 3600
+schema = "E-Commerce"
+
+# Hardware Profiles (reusable across snapshots)
+[[hardware_profiles]]
+name = "laptop"
+cpu_cores = 4
+total_memory = 16_000_000_000
+available_memory = 12_000_000_000
+simd_width = 256
+has_gpu = false
+l1_cache_size = 32768
+l2_cache_size = 262144
+l3_cache_size = 8388608
+
+[[hardware_profiles]]
+name = "server"
+cpu_cores = 64
+total_memory = 512_000_000_000
+available_memory = 400_000_000_000
+simd_width = 512
+has_gpu = true
+gpu_memory = 80_000_000_000
+l1_cache_size = 32768
+l2_cache_size = 262144
+l3_cache_size = 16777216
+
+# Snapshot 1: Initial state - no index
+[[snapshots]]
+time_offset = 0
+label = "Initial state - no index"
+hardware_profile = "laptop"
+
+  [snapshots.schema]
+
+    [[snapshots.schema.tables]]
+    name = "orders"
+    storage_format = "row_based"
+    primary_key = ["order_id"]
+
+      [[snapshots.schema.tables.columns]]
+      name = "order_id"
+      data_type = "integer"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "customer_id"
+      data_type = "integer"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "status"
+      data_type = "string"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "order_date"
+      data_type = "timestamp"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "total_amount"
+      data_type = "float"
+      nullable = false
+
+    # No indexes initially (only primary key)
+
+  [[snapshots.statistics.tables]]
+  name = "orders"
+  row_count = 1_000_000
+  page_count = 10_000
+  avg_row_size = 100.0
+  table_size_bytes = 100_000_000
+
+    [[snapshots.statistics.tables.columns]]
+    name = "customer_id"
+    ndv = 50_000
+    null_fraction = 0.0
+    avg_width = 8.0
+    correlation = 0.1
+    min_value = "1"
+    max_value = "100000"
+
+    [[snapshots.statistics.tables.columns]]
+    name = "status"
+    ndv = 5
+    null_fraction = 0.0
+    avg_width = 8.0
+    min_value = "active"
+    max_value = "shipped"
+
+  [snapshots.facts]
+  supports_hash_join = true
+  supports_parallel_scan = true
+  parallel_workers = 4
+  work_mem_bytes = 67108864
+
+# Snapshot 2: After index creation (30 minutes later)
+[[snapshots]]
+time_offset = 1800
+label = "After index creation on customer_id"
+hardware_profile = "laptop"
+
+  [snapshots.schema]
+
+    [[snapshots.schema.tables]]
+    name = "orders"
+    storage_format = "row_based"
+    primary_key = ["order_id"]
+
+      [[snapshots.schema.tables.columns]]
+      name = "order_id"
+      data_type = "integer"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "customer_id"
+      data_type = "integer"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "status"
+      data_type = "string"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "order_date"
+      data_type = "timestamp"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "total_amount"
+      data_type = "float"
+      nullable = false
+
+    # Index added!
+    [[snapshots.schema.tables.indexes]]
+    name = "idx_orders_customer"
+    index_type = "btree"
+    columns = ["customer_id"]
+    is_unique = false
+
+  [[snapshots.statistics.tables]]
+  name = "orders"
+  row_count = 1_050_000  # Slight growth
+  page_count = 10_500
+  avg_row_size = 100.0
+  table_size_bytes = 105_000_000
+
+    [[snapshots.statistics.tables.columns]]
+    name = "customer_id"
+    ndv = 52_000  # More distinct customers
+    null_fraction = 0.0
+    avg_width = 8.0
+    correlation = 0.1
+
+    [[snapshots.statistics.tables.columns]]
+    name = "status"
+    ndv = 5
+    null_fraction = 0.0
+    avg_width = 8.0
+
+  [snapshots.facts]
+  supports_hash_join = true
+  supports_parallel_scan = true
+  parallel_workers = 4
+  work_mem_bytes = 67108864
+
+# Snapshot 3: After migrating to server (1 hour later)
+[[snapshots]]
+time_offset = 5400
+label = "After hardware upgrade to server"
+hardware_profile = "server"  # Note: using server profile now
+
+  [snapshots.schema]
+
+    [[snapshots.schema.tables]]
+    name = "orders"
+    storage_format = "row_based"
+    primary_key = ["order_id"]
+
+      [[snapshots.schema.tables.columns]]
+      name = "order_id"
+      data_type = "integer"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "customer_id"
+      data_type = "integer"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "status"
+      data_type = "string"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "order_date"
+      data_type = "timestamp"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "total_amount"
+      data_type = "float"
+      nullable = false
+
+    [[snapshots.schema.tables.indexes]]
+    name = "idx_orders_customer"
+    index_type = "btree"
+    columns = ["customer_id"]
+    is_unique = false
+
+  [[snapshots.statistics.tables]]
+  name = "orders"
+  row_count = 1_100_000  # Continued growth
+  page_count = 11_000
+  avg_row_size = 100.0
+  table_size_bytes = 110_000_000
+
+    [[snapshots.statistics.tables.columns]]
+    name = "customer_id"
+    ndv = 54_000
+    null_fraction = 0.0
+    avg_width = 8.0
+    correlation = 0.1
+
+    [[snapshots.statistics.tables.columns]]
+    name = "status"
+    ndv = 5
+    null_fraction = 0.0
+    avg_width = 8.0
+
+  [snapshots.facts]
+  supports_hash_join = true
+  supports_parallel_scan = true
+  parallel_workers = 64  # Many more workers on server!
+  work_mem_bytes = 536870912  # 512MB work_mem
+
+# Events track what changed between snapshots
+[[events]]
+time_offset = 1200
+kind = "schema_change"
+table = "orders"
+description = "BEGIN: CREATE INDEX idx_orders_customer ON orders(customer_id)"
+
+[[events]]
+time_offset = 1800
+kind = "schema_change"
+table = "orders"
+description = "COMMIT: Index creation completed"
+
+[[events]]
+time_offset = 5000
+kind = "hardware_change"
+description = "Migration to production server started"
+
+[[events]]
+time_offset = 5400
+kind = "hardware_change"
+description = "Migration to production server completed - 64 cores, 512GB RAM"
+
+# Test Expectations
+[[expectations]]
+snapshot_index = 0
+expected_plan_pattern = ".*SeqScan.*"
+expected_cost_range = [20000.0, 30000.0]
+rules_applied_must_include = ["filter-pushdown"]
+rules_applied_must_not_include = ["index-scan-selection"]
+
+[[expectations]]
+snapshot_index = 1
+expected_plan_pattern = ".*IndexScan.*idx_orders_customer.*"
+expected_cost_range = [30.0, 100.0]
+rules_applied_must_include = ["index-scan-selection"]
+invalidation_trigger = "Index"
+expected_cardinality = 20.0
+cardinality_tolerance = 0.3
+
+[[expectations]]
+snapshot_index = 2
+expected_plan_pattern = ".*ParallelIndexScan.*"
+rules_applied_must_include = ["parallel-scan-introduction"]
+invalidation_trigger = "Hardware"

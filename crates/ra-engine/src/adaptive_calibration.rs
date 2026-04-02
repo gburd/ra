@@ -418,6 +418,7 @@ pub fn classify_operator(description: &str) -> Option<OperatorKind> {
 /// Entries without an operator description or without cost/time data
 /// are skipped.
 #[must_use]
+#[cfg(feature = "timeline")]
 pub fn feedback_from_timeline(
     entries: &[ra_stats::timeline::ExecutionFeedback],
 ) -> Vec<CostFeedback> {
@@ -893,6 +894,7 @@ mod tests {
     // -- feedback_from_timeline --
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn timeline_feedback_skips_missing_operator() {
         let entries = [ra_stats::timeline::ExecutionFeedback {
             time_offset: 0,
@@ -908,6 +910,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn timeline_feedback_skips_zero_cost() {
         let entries = [ra_stats::timeline::ExecutionFeedback {
             time_offset: 0,
@@ -923,6 +926,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn timeline_feedback_converts_valid_entry() {
         let entries = [ra_stats::timeline::ExecutionFeedback {
             time_offset: 0,

@@ -8,7 +8,8 @@
 pub mod calibrate;
 pub mod profile;
 // Phase 6: Timeline system (deferred)
-// pub mod timeline_helpers;
+#[cfg(feature = "timeline")]
+pub mod timeline_helpers;
 
 pub use calibrate::calibrate;
 pub use profile::{CalibrationResults, PlatformInfo, ScaleFactors, TestProfile};
