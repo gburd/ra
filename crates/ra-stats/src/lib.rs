@@ -112,7 +112,8 @@ pub mod types;
 pub use accuracy::{QualityMetrics, RefreshThreshold, Staleness, StatisticsSource, StatisticsState};
 pub use adaptive::{AdaptiveConfig, AdaptiveCostDriver, ResourceSnapshot, UpdateTrigger};
 pub use adapters::MonitoringAdapter;
-pub use delta::{DeltaSet, StatisticsDelta};
+// Phase 6: Timeline system (deferred)
+// pub use delta::{DeltaSet, StatisticsDelta};
 pub use feedback::{
     CardinalityError, CardinalityErrorTracker, ErrorRecommendation, ErrorSeverity, OperatorKind,
     RecommendationEngine, RecommendationKind,
@@ -130,9 +131,10 @@ pub use smoother::{Ewma, SmootherSet};
 pub use streaming::{
     ChangeThresholds, CostModelUpdate, MetricKind, StreamingPipeline,
 };
-pub use timeline::{
-    PlaybackState, Timeline, TimelineError, TimelineEvent, TimelinePlayer,
-};
+// Phase 6: Timeline system (deferred)
+// pub use timeline::{
+//     PlaybackState, Timeline, TimelineError, TimelineEvent, TimelinePlayer,
+// };
 pub use skew::{
     FrequencyBucket, FrequencyHistogram, HotKey, SkewAnalysis, SkewDetector, SkewSeverity,
     SkewStrategy,
