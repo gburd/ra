@@ -434,7 +434,7 @@ pub enum JsonPathElem {
     /// e.g. `obj['foo']`.
     ///
     /// See <https://docs.snowflake.com/en/user-guide/querying-semistructured#bracket-notation>.
-    Bracket { key: Expr },
+    Bracket { key: Box<Expr> },
 }
 
 /// A JSON path.
@@ -940,7 +940,7 @@ pub enum Expr {
 #[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum Subscript {
     /// Accesses the element of the array at the given index.
-    Index { index: Expr },
+    Index { index: Box<Expr> },
 
     /// Accesses a slice of an array on PostgreSQL, e.g.
     ///
@@ -964,9 +964,9 @@ pub enum Subscript {
     /// {1,3,5}
     /// ```
     Slice {
-        lower_bound: Option<Expr>,
-        upper_bound: Option<Expr>,
-        stride: Option<Expr>,
+        lower_bound: Option<Box<Expr>>,
+        upper_bound: Option<Box<Expr>>,
+        stride: Option<Box<Expr>>,
     },
 }
 

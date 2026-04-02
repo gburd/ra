@@ -96,6 +96,9 @@ tempfile = "3.27"
 pretty_assertions = "1.4"
 chrono = "0.4"
 
+# Utilities
+regex = "1.10"
+
 # File formats
 parquet = "53.4"
 

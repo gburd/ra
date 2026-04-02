@@ -74,7 +74,7 @@ impl<'a> Parser<'a> {
                 self.expect_token(&Token::LParen)?;
                 let expr = self.parse_expr()?;
                 self.expect_token(&Token::RParen)?;
-                Some(expr)
+                Some(Box::new(expr))
             } else {
                 None
             };
@@ -83,7 +83,7 @@ impl<'a> Parser<'a> {
                 self.expect_token(&Token::LParen)?;
                 let expr = self.parse_expr()?;
                 self.expect_token(&Token::RParen)?;
-                Some(expr)
+                Some(Box::new(expr))
             } else {
                 None
             };
@@ -163,7 +163,7 @@ impl<'a> Parser<'a> {
                 } else if let Ok(expr) = self.parse_expr() {
                     AlterRoleOperation::Set {
                         config_name,
-                        config_value: SetConfigValue::Value(expr),
+                        config_value: SetConfigValue::Value(Box::new(expr)),
                         in_database,
                     }
                 } else {

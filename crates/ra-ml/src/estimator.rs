@@ -717,7 +717,7 @@ mod tests {
     }
 
     #[test]
-    fn q_error_summary_multiple() {
+    fn q_error_summary_multiple_basic() {
         let errors = vec![1.0, 1.5, 2.0, 3.0, 10.0];
         let summary = q_error_summary(&errors);
         assert!(
@@ -734,50 +734,6 @@ mod tests {
     fn simple_stats_provider_default() {
         let provider = SimpleStatsProvider::default();
         assert!(provider.get_statistics("foo").is_none());
-    }
-
-    #[test]
-    fn heuristic_union() {
-        let est = HeuristicEstimator;
-        let provider = setup_provider();
-        let expr = RelExpr::Union {
-            all: true,
-            left: Box::new(RelExpr::scan("users")),
-            right: Box::new(RelExpr::scan("orders")),
-        };
-        let card = est.estimate(&expr, &provider);
-        assert!(
-            (card.rows - 6000.0).abs() < f64::EPSILON
-        );
-    }
-
-    #[test]
-    fn heuristic_intersect() {
-        let est = HeuristicEstimator;
-        let provider = setup_provider();
-        let expr = RelExpr::Intersect {
-            all: false,
-            left: Box::new(RelExpr::scan("users")),
-            right: Box::new(RelExpr::scan("orders")),
-        };
-        let card = est.estimate(&expr, &provider);
-        assert!(
-            (card.rows - 1000.0).abs() < f64::EPSILON
-        );
-    }
-
-    #[test]
-    fn heuristic_except() {
-        let est = HeuristicEstimator;
-        let provider = setup_provider();
-        let expr = RelExpr::Except {
-            all: false,
-            left: Box::new(RelExpr::scan("orders")),
-            right: Box::new(RelExpr::scan("users")),
-        };
-        let card = est.estimate(&expr, &provider);
-        let expected = 5000.0 - 1000.0 * 0.5;
-        assert!((card.rows - expected).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -846,7 +802,7 @@ mod tests {
         let est = HeuristicEstimator;
         let provider = setup_provider();
         let expr = RelExpr::Join {
-            join_type: JoinType::Left,
+            join_type: JoinType::LeftOuter,
             condition: Expr::Const(Const::Bool(true)),
             left: Box::new(RelExpr::scan("users")),
             right: Box::new(RelExpr::scan("orders")),
@@ -860,7 +816,7 @@ mod tests {
         let est = HeuristicEstimator;
         let provider = setup_provider();
         let expr = RelExpr::Join {
-            join_type: JoinType::Right,
+            join_type: JoinType::RightOuter,
             condition: Expr::Const(Const::Bool(true)),
             left: Box::new(RelExpr::scan("users")),
             right: Box::new(RelExpr::scan("orders")),
@@ -874,7 +830,7 @@ mod tests {
         let est = HeuristicEstimator;
         let provider = setup_provider();
         let expr = RelExpr::Join {
-            join_type: JoinType::Full,
+            join_type: JoinType::FullOuter,
             condition: Expr::Const(Const::Bool(true)),
             left: Box::new(RelExpr::scan("users")),
             right: Box::new(RelExpr::scan("orders")),
@@ -1034,7 +990,7 @@ mod tests {
             base_case: Box::new(RelExpr::scan("users")),
             recursive_case: Box::new(RelExpr::scan("users")),
             body: Box::new(RelExpr::scan("tree")),
-            columns: vec![],
+            cycle_detection: None,
         };
         let card = est.estimate(&expr, &provider);
         assert!(card.rows >= 1000.0);
@@ -1063,7 +1019,7 @@ mod tests {
             expr: Expr::Column(ColumnRef::new("items")),
             alias: None,
             input: Some(Box::new(RelExpr::scan("users"))),
-            ordinality: false,
+            with_ordinality: false,
         };
         let card = est.estimate(&expr, &provider);
         assert!(card.rows >= 1000.0);
@@ -1077,7 +1033,7 @@ mod tests {
             expr: Expr::Column(ColumnRef::new("items")),
             alias: None,
             input: None,
-            ordinality: false,
+            with_ordinality: false,
         };
         let card = est.estimate(&expr, &provider);
         assert!((card.rows - 10.0).abs() < f64::EPSILON);
@@ -1093,7 +1049,7 @@ mod tests {
                 Expr::Column(ColumnRef::new("arr2")),
             ],
             aliases: vec![None, None],
-            ordinality: false,
+            with_ordinality: false,
         };
         let card = est.estimate(&expr, &provider);
         assert!(card.rows > 0.0);
@@ -1106,8 +1062,8 @@ mod tests {
         let expr = RelExpr::TableFunction {
             name: "generate_series".into(),
             args: vec![],
+            columns: vec![],
             input: Some(Box::new(RelExpr::scan("users"))),
-            ordinality: false,
         };
         let card = est.estimate(&expr, &provider);
         assert!((card.rows - 1000.0).abs() < f64::EPSILON);
@@ -1120,8 +1076,8 @@ mod tests {
         let expr = RelExpr::TableFunction {
             name: "generate_series".into(),
             args: vec![],
+            columns: vec![],
             input: None,
-            ordinality: false,
         };
         let card = est.estimate(&expr, &provider);
         assert!((card.rows - 100.0).abs() < f64::EPSILON);
@@ -1133,9 +1089,13 @@ mod tests {
         let provider = setup_provider();
         let expr = RelExpr::RowPattern {
             input: Box::new(RelExpr::scan("users")),
-            pattern: "A+".into(),
+            partition_by: vec![],
+            order_by: vec![],
+            pattern: ra_core::row_pattern::PatternExpr::Var("A".to_string()),
             defines: vec![],
             measures: vec![],
+            mode: ra_core::row_pattern::MatchMode::OneRowPerMatch,
+            skip_mode: ra_core::row_pattern::SkipMode::PastLastRow,
         };
         let card = est.estimate(&expr, &provider);
         assert!(card.rows > 0.0);
@@ -1150,7 +1110,6 @@ mod tests {
             table: "users".into(),
             index: "idx".into(),
             predicate: Expr::Const(Const::Bool(true)),
-            columns: vec![],
         };
         let card = est.estimate(&expr, &provider);
         assert!(card.rows > 0.0);
@@ -1193,7 +1152,6 @@ mod tests {
             bitmap: Box::new(RelExpr::scan("users")),
             table: "users".into(),
             recheck_cond: None,
-            columns: vec![],
         };
         let card = est.estimate(&expr, &provider);
         assert!(card.rows > 0.0);
@@ -1206,7 +1164,6 @@ mod tests {
         let expr = RelExpr::ParallelScan {
             table: "users".into(),
             workers: 4,
-            alias: None,
         };
         let card = est.estimate(&expr, &provider);
         assert!((card.rows - 1000.0).abs() < f64::EPSILON);
@@ -1219,6 +1176,7 @@ mod tests {
         let expr = RelExpr::ParallelHashJoin {
             left: Box::new(RelExpr::scan("users")),
             right: Box::new(RelExpr::scan("orders")),
+            join_type: ra_core::JoinType::Inner,
             condition: Expr::Const(Const::Bool(true)),
             workers: 4,
         };

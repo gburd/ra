@@ -247,8 +247,8 @@ pub enum AlterPolicyOperation {
     },
     Apply {
         to: Option<Vec<Owner>>,
-        using: Option<Expr>,
-        with_check: Option<Expr>,
+        using: Option<Box<Expr>>,
+        with_check: Option<Box<Expr>>,
     },
 }
 
@@ -1325,18 +1325,18 @@ pub enum ColumnOption {
     /// `NOT NULL`
     NotNull,
     /// `DEFAULT <restricted-expr>`
-    Default(Expr),
+    Default(Box<Expr>),
 
     /// ClickHouse supports `MATERIALIZE`, `EPHEMERAL` and `ALIAS` expr to generate default values.
     /// Syntax: `b INT MATERIALIZE (a + 1)`
     /// [ClickHouse](https://clickhouse.com/docs/en/sql-reference/statements/create/table#default_values)
 
     /// `MATERIALIZE <expr>`
-    Materialized(Expr),
+    Materialized(Box<Expr>),
     /// `EPHEMERAL [<expr>]`
-    Ephemeral(Option<Expr>),
+    Ephemeral(Option<Box<Expr>>),
     /// `ALIAS <expr>`
-    Alias(Expr),
+    Alias(Box<Expr>),
 
     /// `{ PRIMARY KEY | UNIQUE } [<constraint_characteristics>]`
     Unique {
@@ -1358,20 +1358,20 @@ pub enum ColumnOption {
         characteristics: Option<ConstraintCharacteristics>,
     },
     /// `CHECK (<expr>)`
-    Check(Expr),
+    Check(Box<Expr>),
     /// Dialect-specific options, such as:
     /// - MySQL's `AUTO_INCREMENT` or SQLite's `AUTOINCREMENT`
     /// - ...
     DialectSpecific(Vec<Token>),
     CharacterSet(ObjectName),
     Comment(String),
-    OnUpdate(Expr),
+    OnUpdate(Box<Expr>),
     /// `Generated`s are modifiers that follow a column definition in a `CREATE
     /// TABLE` statement.
     Generated {
         generated_as: GeneratedAs,
         sequence_options: Option<Vec<SequenceOptions>>,
-        generation_expr: Option<Expr>,
+        generation_expr: Option<Box<Expr>>,
         generation_expr_mode: Option<GeneratedExpressionMode>,
         /// false if 'GENERATED ALWAYS' is skipped (option starts with AS)
         generated_keyword: bool,
@@ -1778,7 +1778,7 @@ impl fmt::Display for Partition {
 #[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum Deduplicate {
     All,
-    ByExpression(Expr),
+    ByExpression(Box<Expr>),
 }
 
 impl fmt::Display for Deduplicate {

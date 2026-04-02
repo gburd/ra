@@ -18,6 +18,7 @@ pub mod profile;
 pub mod rule_file_parser;
 pub mod rule_registry;
 pub mod sql_to_relexpr;
+pub mod ddl_parser;
 pub mod test_case;
 pub mod validator;
 
@@ -29,5 +30,6 @@ pub use profile::*;
 pub use rule_file_parser::*;
 pub use rule_registry::*;
 pub use sql_to_relexpr::*;
+pub use ddl_parser::*;
 pub use test_case::*;
 pub use validator::*;

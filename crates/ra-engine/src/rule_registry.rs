@@ -225,13 +225,35 @@ pub fn registry() -> &'static RuleRegistry {
     })
 }
 
-/// Convenience macro to get a rule ID by name at compile time.
-/// Falls back to runtime lookup if name is not a literal.
+/// Get a rule ID by name, returning Result instead of panicking.
+///
+/// # Example
+/// ```
+/// use ra_engine::rule_id;
+/// let id = rule_id!("and-true-left")?;
+/// ```
 #[macro_export]
 macro_rules! rule_id {
     ($name:literal) => {{
-        // TODO: In the future, this could be a const lookup
-        // For now, runtime lookup
+        $crate::rule_registry::registry()
+            .name_to_id($name)
+            .ok_or_else(|| anyhow::anyhow!("rule not found: {}", $name))
+    }};
+}
+
+/// Get a rule ID by name, panicking if not found.
+///
+/// This is for test code where panicking is acceptable.
+/// Production code should use `rule_id!` and handle the Result.
+///
+/// # Example
+/// ```
+/// use ra_engine::rule_id_unchecked;
+/// let id = rule_id_unchecked!("and-true-left");
+/// ```
+#[macro_export]
+macro_rules! rule_id_unchecked {
+    ($name:literal) => {{
         $crate::rule_registry::registry()
             .name_to_id($name)
             .expect(concat!("rule not found: ", $name))
@@ -306,5 +328,31 @@ mod tests {
             let id = reg.name_to_id(name);
             assert_eq!(id, Some(0));
         }
+    }
+
+    #[test]
+    fn test_rule_id_macro() {
+        // Test successful lookup
+        let id = rule_id!("and-true-left");
+        assert!(id.is_ok());
+        assert_eq!(id.unwrap(), registry().name_to_id("and-true-left").unwrap());
+
+        // Test failed lookup
+        let id = rule_id!("nonexistent-rule");
+        assert!(id.is_err());
+        assert!(id.unwrap_err().to_string().contains("rule not found"));
+    }
+
+    #[test]
+    fn test_rule_id_unchecked_macro() {
+        // Test successful lookup
+        let id = rule_id_unchecked!("and-true-left");
+        assert_eq!(id, registry().name_to_id("and-true-left").unwrap());
+    }
+
+    #[test]
+    #[should_panic(expected = "rule not found: nonexistent-rule")]
+    fn test_rule_id_unchecked_panic() {
+        let _id = rule_id_unchecked!("nonexistent-rule");
     }
 }

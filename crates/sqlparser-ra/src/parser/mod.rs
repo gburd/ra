@@ -154,7 +154,7 @@ pub enum IsLateral {
 }
 
 pub enum WildcardExpr {
-    Expr(Expr),
+    Expr(Box<Expr>),
     QualifiedWildcard(ObjectName),
     Wildcard,
 }
@@ -2877,10 +2877,10 @@ impl<'a> Parser<'a> {
         // check for end
         if self.consume_token(&Token::RBracket) {
             if let Some(lower_bound) = lower_bound {
-                return Ok(Subscript::Index { index: lower_bound });
+                return Ok(Subscript::Index { index: Box::new(lower_bound) });
             };
             return Ok(Subscript::Slice {
-                lower_bound,
+                lower_bound: lower_bound.map(Box::new),
                 upper_bound: None,
                 stride: None,
             });
@@ -2894,7 +2894,7 @@ impl<'a> Parser<'a> {
         // we are now at either `]`, `<upper>(rest)]`
         let upper_bound = if self.consume_token(&Token::RBracket) {
             return Ok(Subscript::Slice {
-                lower_bound,
+                lower_bound: lower_bound.map(Box::new),
                 upper_bound: None,
                 stride: None,
             });
@@ -2905,8 +2905,8 @@ impl<'a> Parser<'a> {
         // check for end
         if self.consume_token(&Token::RBracket) {
             return Ok(Subscript::Slice {
-                lower_bound,
-                upper_bound,
+                lower_bound: lower_bound.map(Box::new),
+                upper_bound: upper_bound.map(Box::new),
                 stride: None,
             });
         }
@@ -2924,9 +2924,9 @@ impl<'a> Parser<'a> {
         }
 
         Ok(Subscript::Slice {
-            lower_bound,
-            upper_bound,
-            stride,
+            lower_bound: lower_bound.map(Box::new),
+            upper_bound: upper_bound.map(Box::new),
+            stride: stride.map(Box::new),
         })
     }
 
@@ -2979,7 +2979,7 @@ impl<'a> Parser<'a> {
                     let key = self.parse_expr()?;
                     self.expect_token(&Token::RBracket)?;
 
-                    path.push(JsonPathElem::Bracket { key });
+                    path.push(JsonPathElem::Bracket { key: Box::new(key) });
                 }
                 _ => {
                     self.prev_token();
@@ -6152,15 +6152,15 @@ impl<'a> Parser<'a> {
         } else if self.parse_keyword(Keyword::NULL) {
             Ok(Some(ColumnOption::Null))
         } else if self.parse_keyword(Keyword::DEFAULT) {
-            Ok(Some(ColumnOption::Default(self.parse_expr()?)))
+            Ok(Some(ColumnOption::Default(Box::new(self.parse_expr()?))))
         } else if dialect_of!(self is ClickHouseDialect| GenericDialect)
             && self.parse_keyword(Keyword::MATERIALIZED)
         {
-            Ok(Some(ColumnOption::Materialized(self.parse_expr()?)))
+            Ok(Some(ColumnOption::Materialized(Box::new(self.parse_expr()?))))
         } else if dialect_of!(self is ClickHouseDialect| GenericDialect)
             && self.parse_keyword(Keyword::ALIAS)
         {
-            Ok(Some(ColumnOption::Alias(self.parse_expr()?)))
+            Ok(Some(ColumnOption::Alias(Box::new(self.parse_expr()?))))
         } else if dialect_of!(self is ClickHouseDialect| GenericDialect)
             && self.parse_keyword(Keyword::EPHEMERAL)
         {
@@ -6169,7 +6169,7 @@ impl<'a> Parser<'a> {
             if matches!(self.peek_token().token, Token::Comma | Token::RParen) {
                 Ok(Some(ColumnOption::Ephemeral(None)))
             } else {
-                Ok(Some(ColumnOption::Ephemeral(Some(self.parse_expr()?))))
+                Ok(Some(ColumnOption::Ephemeral(Some(Box::new(self.parse_expr()?)))))
             }
         } else if self.parse_keywords(&[Keyword::PRIMARY, Keyword::KEY]) {
             let characteristics = self.parse_constraint_characteristics()?;
@@ -6214,7 +6214,7 @@ impl<'a> Parser<'a> {
             self.expect_token(&Token::LParen)?;
             let expr = self.parse_expr()?;
             self.expect_token(&Token::RParen)?;
-            Ok(Some(ColumnOption::Check(expr)))
+            Ok(Some(ColumnOption::Check(Box::new(expr))))
         } else if self.parse_keyword(Keyword::AUTO_INCREMENT)
             && dialect_of!(self is MySqlDialect | GenericDialect)
         {
@@ -6247,7 +6247,7 @@ impl<'a> Parser<'a> {
             && dialect_of!(self is MySqlDialect | GenericDialect)
         {
             let expr = self.parse_expr()?;
-            Ok(Some(ColumnOption::OnUpdate(expr)))
+            Ok(Some(ColumnOption::OnUpdate(Box::new(expr))))
         } else if self.parse_keyword(Keyword::GENERATED) {
             self.parse_optional_column_option_generated()
         } else if dialect_of!(self is BigQueryDialect | GenericDialect)
@@ -6363,7 +6363,7 @@ impl<'a> Parser<'a> {
                 Ok(Some(ColumnOption::Generated {
                     generated_as: gen_as,
                     sequence_options: None,
-                    generation_expr: Some(expr),
+                    generation_expr: Some(Box::new(expr)),
                     generation_expr_mode: expr_mode,
                     generated_keyword: true,
                 }))
@@ -6395,7 +6395,7 @@ impl<'a> Parser<'a> {
         Ok(Some(ColumnOption::Generated {
             generated_as: gen_as,
             sequence_options: None,
-            generation_expr: Some(expr),
+            generation_expr: Some(Box::new(expr)),
             generation_expr_mode: expr_mode,
             generated_keyword: false,
         }))
@@ -9843,7 +9843,7 @@ impl<'a> Parser<'a> {
                     relation,
                     global,
                     join_operator: JoinOperator::AsOf {
-                        match_condition,
+                        match_condition: Box::new(match_condition),
                         constraint: self.parse_join_constraint(false)?,
                     },
                 }
@@ -10665,7 +10665,7 @@ impl<'a> Parser<'a> {
             Ok(JoinConstraint::Natural)
         } else if self.parse_keyword(Keyword::ON) {
             let constraint = self.parse_expr()?;
-            Ok(JoinConstraint::On(constraint))
+            Ok(JoinConstraint::On(Box::new(constraint)))
         } else if self.parse_keyword(Keyword::USING) {
             let columns = self.parse_parenthesized_column_list(Mandatory, false)?;
             Ok(JoinConstraint::Using(columns))
@@ -11579,7 +11579,7 @@ impl<'a> Parser<'a> {
         let quantity = if self.consume_token(&Token::LParen) {
             let quantity = self.parse_expr()?;
             self.expect_token(&Token::RParen)?;
-            Some(TopQuantity::Expr(quantity))
+            Some(TopQuantity::Expr(Box::new(quantity)))
         } else {
             let next_token = self.next_token();
             let quantity = match next_token.token {
@@ -12073,7 +12073,7 @@ impl<'a> Parser<'a> {
         let include_final = self.parse_keyword(Keyword::FINAL);
         let deduplicate = if self.parse_keyword(Keyword::DEDUPLICATE) {
             if self.parse_keyword(Keyword::BY) {
-                Some(Deduplicate::ByExpression(self.parse_expr()?))
+                Some(Deduplicate::ByExpression(Box::new(self.parse_expr()?)))
             } else {
                 Some(Deduplicate::All)
             }

@@ -1723,7 +1723,7 @@ pub enum JoinOperator {
     ///
     /// See <https://docs.snowflake.com/en/sql-reference/constructs/asof-join>.
     AsOf {
-        match_condition: Expr,
+        match_condition: Box<Expr>,
         constraint: JoinConstraint,
     },
 }
@@ -1732,7 +1732,7 @@ pub enum JoinOperator {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum JoinConstraint {
-    On(Expr),
+    On(Box<Expr>),
     Using(Vec<Ident>),
     Natural,
     None,
@@ -2013,7 +2013,7 @@ pub struct Top {
 #[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum TopQuantity {
     // A parenthesized expression. MSSQL only.
-    Expr(Expr),
+    Expr(Box<Expr>),
     // An unparenthesized integer constant.
     Constant(u64),
 }

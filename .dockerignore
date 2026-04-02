@@ -1,0 +1,72 @@
+# Git and version control
+.git
+.gitignore
+.gitattributes
+.github
+.forgejo
+
+# Build artifacts
+target/
+**/target/
+node_modules/
+**/node_modules/
+dist/
+**/.vitepress/dist/
+**/.vitepress/cache/
+
+# Development
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.claude/
+
+# Documentation
+*.md
+!README.md
+docs/
+!docker/README.md
+
+# Test files
+tests/
+**/tests/
+benchmarks/
+examples/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.log
+
+# Database files
+*.db
+*.sqlite
+*.sql
+
+# Rust
+**/*.rs.bk
+**/.cargo/
+# Cargo.lock should be included in Docker builds for reproducibility
+
+# Cache
+.cache/
+**/.cache/
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# OS
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Docker
+docker-compose*.yml
+Dockerfile*
+.dockerignore

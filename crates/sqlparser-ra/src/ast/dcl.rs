@@ -105,7 +105,7 @@ impl fmt::Display for RoleOption {
 pub enum SetConfigValue {
     Default,
     FromCurrent,
-    Value(Expr),
+    Value(Box<Expr>),
 }
 
 /// RESET config option:

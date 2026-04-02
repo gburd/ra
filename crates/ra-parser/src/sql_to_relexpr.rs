@@ -1479,14 +1479,32 @@ fn convert_expr(expr: &SqlExpr) -> Result<Expr, SqlConversionError> {
 
 fn convert_value(val: &Value) -> Result<Expr, SqlConversionError> {
     match val {
+        #[cfg(not(feature = "bigdecimal"))]
         Value::Number(n, _) => {
-            if let Ok(i) = n.parse::<i64>() {
+            // n is &String - parse directly
+            use std::str::FromStr;
+            if let Ok(i) = i64::from_str(n) {
                 Ok(Expr::Const(Const::Int(i)))
-            } else if let Ok(f) = n.parse::<f64>() {
+            } else if let Ok(f) = f64::from_str(n) {
                 Ok(Expr::Const(Const::Float(f)))
             } else {
                 Err(SqlConversionError::InvalidSql(format!(
                     "invalid number: {n}"
+                )))
+            }
+        }
+        #[cfg(feature = "bigdecimal")]
+        Value::Number(n, _) => {
+            // n is &BigDecimal - convert to string then parse
+            use std::str::FromStr;
+            let n_str = n.to_string();
+            if let Ok(i) = i64::from_str(&n_str) {
+                Ok(Expr::Const(Const::Int(i)))
+            } else if let Ok(f) = f64::from_str(&n_str) {
+                Ok(Expr::Const(Const::Float(f)))
+            } else {
+                Err(SqlConversionError::InvalidSql(format!(
+                    "invalid number: {n_str}"
                 )))
             }
         }
@@ -1544,10 +1562,24 @@ fn extract_u64_from_expr(
     expr: &SqlExpr,
 ) -> Result<u64, SqlConversionError> {
     match expr {
+        #[cfg(not(feature = "bigdecimal"))]
         SqlExpr::Value(Value::Number(n, _)) => {
-            n.parse::<u64>().map_err(|_| {
+            // n is &String - parse directly
+            use std::str::FromStr;
+            u64::from_str(n).map_err(|_| {
                 SqlConversionError::InvalidSql(format!(
                     "expected unsigned integer, got: {n}"
+                ))
+            })
+        }
+        #[cfg(feature = "bigdecimal")]
+        SqlExpr::Value(Value::Number(n, _)) => {
+            // n is &BigDecimal - convert to string then parse
+            use std::str::FromStr;
+            let n_str = n.to_string();
+            u64::from_str(&n_str).map_err(|_| {
+                SqlConversionError::InvalidSql(format!(
+                    "expected unsigned integer, got: {n_str}"
                 ))
             })
         }
