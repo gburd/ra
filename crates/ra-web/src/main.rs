@@ -75,18 +75,33 @@ fn synthesize(
 
 /// SPA fallback: serve `index.html` for any path not matched by
 /// API routes or static files.  This allows client-side routing
-/// (preact-router) to handle navigation paths like `/editor`,
-/// `/compare`, `/visualize`, etc.
+/// to handle navigation paths.
 #[get("/<_path..>", rank = 100)]
 async fn spa_fallback(
     _path: std::path::PathBuf,
 ) -> Option<NamedFile> {
-    NamedFile::open(static_dir().join("index.html"))
+    NamedFile::open(frontend_dir().join("index.html"))
         .await
         .ok()
 }
 
-/// Resolve the directory for serving static files.
+/// Resolve the directory for serving the React frontend.
+///
+/// Uses the `FRONTEND_DIR` environment variable when set (Docker),
+/// falling back to `crates/ra-web/frontend/dist` relative to the cargo
+/// manifest directory (local development).
+fn frontend_dir() -> PathBuf {
+    if let Ok(dir) = std::env::var("FRONTEND_DIR") {
+        return PathBuf::from(dir);
+    }
+    PathBuf::from(
+        std::env::var("CARGO_MANIFEST_DIR")
+            .unwrap_or_else(|_| ".".to_string()),
+    )
+    .join("frontend/dist")
+}
+
+/// Resolve the directory for serving static files (demos).
 ///
 /// Uses the `STATIC_DIR` environment variable when set (Docker),
 /// falling back to `crates/ra-web/static` relative to the cargo
@@ -95,7 +110,6 @@ fn static_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("STATIC_DIR") {
         return PathBuf::from(dir);
     }
-    // Fallback for local `cargo run` from the workspace root.
     PathBuf::from(
         std::env::var("CARGO_MANIFEST_DIR")
             .unwrap_or_else(|_| ".".to_string()),
@@ -105,6 +119,7 @@ fn static_dir() -> PathBuf {
 
 /// Build the Rocket instance with all routes and fairings attached.
 fn build_rocket() -> rocket::Rocket<rocket::Build> {
+    let frontend_path = frontend_dir();
     let static_path = static_dir();
     rocket::build()
         .attach(Cors)
@@ -148,7 +163,8 @@ fn build_rocket() -> rocket::Rocket<rocket::Build> {
                 api::visualize::compare_plans,
             ],
         )
-        .mount("/", FileServer::from(static_path))
+        .mount("/demos", FileServer::from(static_path))
+        .mount("/", FileServer::from(frontend_path))
         .mount("/", routes![spa_fallback])
 }
 

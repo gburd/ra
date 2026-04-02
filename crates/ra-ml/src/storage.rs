@@ -7,7 +7,7 @@
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
-use sqlx::{postgres::PgPoolOptions, sqlite::SqlitePoolOptions, Pool, Postgres, Sqlite};
+use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
 use thiserror::Error;
 use tracing::{debug, info};
 
@@ -47,8 +47,6 @@ pub enum StorageError {
 pub enum DatabaseBackend {
     /// PostgreSQL backend.
     Postgres,
-    /// SQLite backend.
-    Sqlite,
 }
 
 impl FromStr for DatabaseBackend {
@@ -57,7 +55,6 @@ impl FromStr for DatabaseBackend {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "postgres" | "postgresql" => Ok(Self::Postgres),
-            "sqlite" => Ok(Self::Sqlite),
             _ => Err(StorageError::InvalidConfig(format!(
                 "unknown backend: {s}"
             ))),
@@ -79,8 +76,8 @@ pub struct StorageConfig {
 impl Default for StorageConfig {
     fn default() -> Self {
         Self {
-            backend: DatabaseBackend::Sqlite,
-            connection_string: "sqlite::memory:".to_string(),
+            backend: DatabaseBackend::Postgres,
+            connection_string: "postgresql://localhost/ra_ml".to_string(),
             max_connections: 10,
         }
     }
@@ -90,8 +87,6 @@ impl Default for StorageConfig {
 pub enum ModelStorage {
     /// PostgreSQL storage.
     Postgres(Pool<Postgres>),
-    /// SQLite storage.
-    Sqlite(Pool<Sqlite>),
 }
 
 impl ModelStorage {
@@ -113,18 +108,6 @@ impl ModelStorage {
 
                 info!("Connected to PostgreSQL storage");
                 Ok(Self::Postgres(pool))
-            }
-            DatabaseBackend::Sqlite => {
-                let pool = SqlitePoolOptions::new()
-                    .max_connections(config.max_connections)
-                    .connect(&config.connection_string)
-                    .await
-                    .map_err(|e| StorageError::ConnectionFailed(e.to_string()))?;
-
-                Self::init_sqlite(&pool).await?;
-
-                info!("Connected to SQLite storage");
-                Ok(Self::Sqlite(pool))
             }
         }
     }

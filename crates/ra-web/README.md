@@ -16,30 +16,56 @@ REST API server for SQL query optimization, visualization, and analysis.
 
 ### Development
 
+Two options for frontend development:
+
+**Option 1: With React Frontend (Hot Reload)**
+
+```bash
+# Terminal 1: Backend API
+cargo run --bin ra-web
+# API server starts on http://localhost:8000
+
+# Terminal 2: React Frontend (Vite dev server)
+cd crates/ra-web/frontend
+npm install
+npm run dev
+# UI available at http://localhost:5173 with hot reload
+```
+
+Vite proxy configuration forwards `/api/*` requests to the backend on port 8000.
+
+**Option 2: Static Demo Pages**
+
 ```bash
 cargo run --bin ra-web
 # Server starts on http://localhost:8000
-```
-
-### With Frontend
-
-```bash
-# Terminal 1: Backend
-cargo run --bin ra-web
-
-# Terminal 2: Frontend
-cd crates/ra-web-ui && pnpm dev
-# UI available at http://localhost:5173
+# React app at http://localhost:8000/
+# Demo pages at http://localhost:8000/demos/*.html
 ```
 
 ### Production
 
 ```bash
-# Build frontend
-cd crates/ra-web-ui && pnpm build
+# Build React frontend
+cd crates/ra-web/frontend
+npm install
+npm run build
+# Output: crates/ra-web/frontend/dist/
 
-# Run backend serving the SvelteKit build
-STATIC_DIR=crates/ra-web-ui/build cargo run --bin ra-web --release
+# Run backend serving React app and demo pages
+cargo run --bin ra-web --release
+# React app at http://localhost:8000/
+# Demo pages at http://localhost:8000/demos/*.html
+```
+
+### Docker
+
+```bash
+# Build image (includes frontend build)
+docker build -t ra-web .
+
+# Run container
+docker run -p 8000:8000 ra-web
 # Full app at http://localhost:8000
 ```
 
@@ -132,11 +158,12 @@ STATIC_DIR=crates/ra-web-ui/build cargo run --bin ra-web --release
 
 Environment variables:
 
-| Variable         | Default     | Description                      |
-|------------------|-------------|----------------------------------|
-| `ROCKET_PORT`    | 8000        | Server port                      |
-| `ROCKET_ADDRESS` | 0.0.0.0     | Bind address                     |
-| `STATIC_DIR`     | `static/`   | Static files directory for SPA   |
+| Variable         | Default                | Description                           |
+|------------------|------------------------|---------------------------------------|
+| `ROCKET_PORT`    | 8000                   | Server port                           |
+| `ROCKET_ADDRESS` | 0.0.0.0                | Bind address                          |
+| `FRONTEND_DIR`   | `frontend/dist/`       | React frontend build directory        |
+| `STATIC_DIR`     | `static/`              | Static demo pages directory           |
 
 Rate limiting: 100 requests per 60 seconds per IP address. Health
 endpoint is exempt.
@@ -181,14 +208,34 @@ The `visualize.rs` module converts `RelExpr` variants into
 and detail key-value pairs. Comparison endpoints build separate plan
 trees for each optimizer (Ra, PostgreSQL, MySQL, DuckDB).
 
-## Static Files
+## Static Files and Frontend
 
-The server serves static files from:
-1. `STATIC_DIR` environment variable (production)
-2. `crates/ra-web/static/` relative to `CARGO_MANIFEST_DIR` (dev)
+The server serves files from two locations:
 
-An SPA fallback route (rank 100) serves `index.html` for any path
+1. **React Frontend** (`/` root mount):
+   - Production: `FRONTEND_DIR` environment variable
+   - Development: `crates/ra-web/frontend/dist/` relative to `CARGO_MANIFEST_DIR`
+   - Main application interface
+
+2. **Demo Pages** (`/demos` mount):
+   - Production: `STATIC_DIR` environment variable
+   - Development: `crates/ra-web/static/` relative to `CARGO_MANIFEST_DIR`
+   - Standalone HTML demo pages (staleness-impact, hardware-plan, etc.)
+
+An SPA fallback route (rank 100) serves React's `index.html` for any path
 not matched by API routes or static files, enabling client-side routing.
+
+### Frontend Stack
+
+The React frontend uses:
+- React 18 with TypeScript
+- Monaco Editor for SQL editing
+- Material-UI for components
+- Allotment for resizable panes
+- Vite for build tooling
+
+Build output is configured to go to `frontend/dist/` with proper asset
+paths for Rocket's static file serving.
 
 ## Dependencies
 
