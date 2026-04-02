@@ -1,0 +1,16 @@
+# Build artifacts
+node_modules/
+.vitepress/dist/
+.vitepress/cache/
+
+# Development
+.vscode/
+.idea/
+
+# Temporary files
+*.log
+*.tmp
+
+# Git
+.git
+.gitignore

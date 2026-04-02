@@ -2,6 +2,7 @@
 //! POST /api/compare-plans - Compare plan trees across optimizers.
 
 use ra_core::algebra::RelExpr;
+use ra_engine::Optimizer;
 use ra_parser::sql_to_relexpr;
 use rocket::serde::json::Json;
 use serde::{Deserialize, Serialize};
@@ -264,6 +265,20 @@ fn build_plan_from_sql(
             vec![],
         ),
     };
+
+    // Try to optimize and use real costs
+    // Try real optimization, fall back to simplified visualization on error
+    if let Ok(result) = std::panic::catch_unwind(|| {
+        let opt = Optimizer::new();
+        opt.optimize(&rel_expr)
+    }) {
+        if let Ok(optimized) = result {
+            let mut counter = 0_u32;
+            return relexpr_to_visual(&optimized, &mut counter);
+        }
+    }
+
+    // Fallback: use unoptimized plan with estimated costs
     let mut counter = 0_u32;
     relexpr_to_visual(&rel_expr, &mut counter)
 }

@@ -15,6 +15,15 @@ const __dirname = dirname(__filename)
 console.log('Copying .rra rule files to public directory...')
 
 const publicRulesDir = `${__dirname}/../../public/rules`
+const projectRoot = `${__dirname}/../../..`
+const rulesDir = `${projectRoot}/rules`
+
+// Check if rules directory exists
+if (!existsSync(rulesDir)) {
+  console.log('ℹ Rules directory not found (Docker build context limitation). Skipping rule file copying.')
+  console.log('✓ Documentation will build without rule files in public directory.')
+  process.exit(0)
+}
 
 // Create public/rules directory if it doesn't exist
 if (!existsSync(publicRulesDir)) {
@@ -24,7 +33,6 @@ if (!existsSync(publicRulesDir)) {
 try {
   // Copy all .rra files from rules/ to public/rules/
   // This preserves the directory structure
-  const projectRoot = `${__dirname}/../../..`
   execSync(`find rules -name "*.rra" -type f -exec bash -c 'mkdir -p "docs/public/$(dirname "{}")" && cp "{}" "docs/public/{}"' \\;`, {
     cwd: projectRoot,
     stdio: 'inherit'

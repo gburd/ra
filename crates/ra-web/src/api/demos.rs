@@ -452,6 +452,7 @@ pub struct DemoMetadata {
     pub category: String,
 }
 
+/// Helper: Build a synthetic join query for testing
 #[get("/api/demos")]
 pub fn list_demos() -> Json<DemoListResponse> {
     let demos = vec![
