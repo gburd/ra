@@ -77,6 +77,7 @@ WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 COPY rules ./rules
+COPY xtask ./xtask
 
 # Create ra-proxy binary (intercepts queries and compares plans)
 # This is a placeholder - in production, implement actual proxy

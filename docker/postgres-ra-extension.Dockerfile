@@ -38,6 +38,7 @@ WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 COPY rules ./rules
+COPY xtask ./xtask
 
 # Build ra-pg-extension
 WORKDIR /build/crates/ra-pg-extension
