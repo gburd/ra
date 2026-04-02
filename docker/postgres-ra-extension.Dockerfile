@@ -1,7 +1,7 @@
 # Multi-stage Dockerfile for PostgreSQL 16 with Ra planner extension
 
 # Stage 1: Build Ra extension
-FROM rust:1.88-bookworm AS builder
+FROM rust:bookworm AS builder
 
 # Install prerequisites for adding PostgreSQL repository
 RUN apt-get update && apt-get install -y \

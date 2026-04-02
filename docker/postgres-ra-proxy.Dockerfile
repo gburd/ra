@@ -69,7 +69,7 @@ RUN if [ -f Makefile ]; then \
     fi
 
 # Stage 3: Build Ra proxy
-FROM rust:1.88-bookworm AS ra-proxy-builder
+FROM rust:bookworm AS ra-proxy-builder
 
 WORKDIR /build
 

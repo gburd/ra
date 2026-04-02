@@ -1,7 +1,7 @@
 # Multi-stage Dockerfile for ra-web
 
 # Stage 1: Prepare cargo chef for dependency caching
-FROM rust:1.88-alpine AS chef
+FROM rust:alpine AS chef
 RUN apk add --no-cache musl-dev pkgconfig openssl-dev
 RUN cargo install cargo-chef
 WORKDIR /app
@@ -17,7 +17,7 @@ COPY --from=planner /app/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
 
 # Stage 4: Build application
-FROM rust:1.88-alpine AS builder
+FROM rust:alpine AS builder
 RUN apk add --no-cache musl-dev pkgconfig openssl-dev
 WORKDIR /app
 
