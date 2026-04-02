@@ -443,6 +443,7 @@ impl Default for PreConditionBuilder {
 }
 
 #[cfg(test)]
+#[expect(clippy::unwrap_used, reason = "test code uses unwrap for assertions")]
 mod tests {
     use super::*;
 

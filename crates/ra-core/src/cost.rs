@@ -292,7 +292,7 @@ impl CostFunction for LimitCostFunction {
 }
 
 #[cfg(test)]
-#[allow(clippy::float_cmp)]
+#[expect(clippy::float_cmp)]
 mod tests {
     use super::*;
 
@@ -371,7 +371,7 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::expect_used)]
+    #[expect(clippy::expect_used)]
     fn serialize_roundtrip() {
         let cost = Cost::new(1.5, 2.5, 0.0, 4096);
         let json = serde_json::to_string(&cost)
@@ -532,7 +532,7 @@ mod tests {
     // ---- serialize with startup fields ----
 
     #[test]
-    #[allow(clippy::expect_used)]
+    #[expect(clippy::expect_used)]
     fn serialize_roundtrip_with_startup() {
         let cost = Cost::with_startup(
             100.0, 50.0, 10.0, 4096, 80.0, 40.0, 5.0,
@@ -547,7 +547,7 @@ mod tests {
     // ---- backward compat: old JSON without startup fields ----
 
     #[test]
-    #[allow(clippy::expect_used)]
+    #[expect(clippy::expect_used)]
     fn deserialize_legacy_json_without_startup() {
         let json = r#"{"cpu":10.0,"io":5.0,"network":2.0,"memory":1024}"#;
         let cost: Cost = serde_json::from_str(json)

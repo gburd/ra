@@ -450,6 +450,7 @@ fn non_decomposable_agg_relexpr() {
 // --- AggValue integration tests ---
 
 #[test]
+#[expect(clippy::approx_constant, reason = "3.14 is test data, not mathematical constant")]
 fn agg_value_types() {
     let null = AggValue::Null;
     let int = AggValue::Int(42);

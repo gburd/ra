@@ -323,6 +323,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::panic, reason = "test code uses panic for assertions")]
     fn build_binary_expression() {
         let expr = Expr::BinOp {
             op: BinOp::Eq,
@@ -343,6 +344,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::panic, reason = "test code uses panic for assertions")]
     fn build_case_expression() {
         let case = Expr::Case {
             operand: None,

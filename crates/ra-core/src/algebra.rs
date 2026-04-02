@@ -698,7 +698,7 @@ impl RelExpr {
         cols
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     fn collect_columns(&self, out: &mut Vec<ColumnRef>) {
         match self {
             Self::Scan { .. } | Self::IndexScan { .. } | Self::ParallelScan { .. } | Self::MvScan { .. } => {}
@@ -1096,6 +1096,7 @@ mod tests {
     use crate::expr::{BinOp as ExprBinOp, Const};
 
     #[test]
+    #[expect(clippy::panic, reason = "test code uses panic for assertions")]
     fn scan_builder() {
         let scan = RelExpr::scan("users");
         if let RelExpr::Scan { table, alias } = &scan {
@@ -1107,6 +1108,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::panic, reason = "test code uses panic for assertions")]
     fn filter_chain() {
         let plan = RelExpr::scan("orders").filter(Expr::BinOp {
             op: ExprBinOp::Gt,
@@ -1182,6 +1184,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::panic, reason = "test code uses panic for assertions")]
     fn distinct_builder() {
         let plan = RelExpr::scan("users").distinct();
         if let RelExpr::Distinct { input } = &plan {
@@ -1473,6 +1476,7 @@ mod tests {
     // -- Additional builder tests --
 
     #[test]
+    #[expect(clippy::panic, reason = "test code uses panic for assertions")]
     fn scan_creates_scan_node() {
         let plan = RelExpr::scan("users");
         if let RelExpr::Scan { table, alias } = &plan {
@@ -1484,6 +1488,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::panic, reason = "test code uses panic for assertions")]
     fn filter_chains_correctly() {
         let plan = RelExpr::scan("t")
             .filter(Expr::Const(Const::Bool(true)))
@@ -1496,6 +1501,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::panic, reason = "test code uses panic for assertions")]
     fn limit_builder_values() {
         let plan = RelExpr::scan("t").limit(5, 10);
         if let RelExpr::Limit { count, offset, .. } = &plan {

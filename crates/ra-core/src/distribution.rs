@@ -486,6 +486,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::panic, reason = "test code uses panic for assertions")]
     fn data_distribution_hash_partitioned() {
         let d = DataDistribution::HashPartitioned {
             keys: vec![col("id")],
@@ -504,6 +505,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::panic, reason = "test code uses panic for assertions")]
     fn data_distribution_range_partitioned() {
         let d = DataDistribution::RangePartitioned {
             key: col("ts"),
@@ -529,6 +531,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::panic, reason = "test code uses panic for assertions")]
     fn data_distribution_single_partition() {
         let d = DataDistribution::SinglePartition { node: NodeId(3) };
         if let DataDistribution::SinglePartition { node } = &d {

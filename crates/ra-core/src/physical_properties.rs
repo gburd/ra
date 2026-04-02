@@ -740,6 +740,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::panic, reason = "test code uses panic for assertions")]
     fn aggregate_produces_partitioning() {
         let expr = RelExpr::Aggregate {
             group_by: vec![

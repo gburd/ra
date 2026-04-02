@@ -9,6 +9,7 @@ use ra_core::expr::{ColumnRef, Const, Expr};
 // ── Unnest operator construction ──────────────────────────
 
 #[test]
+#[expect(clippy::panic, reason = "test code uses panic for assertions")]
 fn unnest_standalone_has_no_children() {
     let expr = RelExpr::unnest(
         Expr::Array(vec![
@@ -35,6 +36,7 @@ fn unnest_standalone_has_no_children() {
 }
 
 #[test]
+#[expect(clippy::panic, reason = "test code uses panic for assertions")]
 fn unnest_lateral_has_input_child() {
     let scan = RelExpr::Scan {
         table: "t".to_owned(),
@@ -55,6 +57,7 @@ fn unnest_lateral_has_input_child() {
 }
 
 #[test]
+#[expect(clippy::panic, reason = "test code uses panic for assertions")]
 fn unnest_with_ordinality() {
     let expr = RelExpr::Unnest {
         expr: Expr::Array(vec![
@@ -78,6 +81,7 @@ fn unnest_with_ordinality() {
 // ── TableFunction operator construction ───────────────────
 
 #[test]
+#[expect(clippy::panic, reason = "test code uses panic for assertions")]
 fn table_function_standalone() {
     let expr = RelExpr::table_function(
         "generate_series",
@@ -127,6 +131,7 @@ fn table_function_with_lateral_input() {
 // ── Array expression types ────────────────────────────────
 
 #[test]
+#[expect(clippy::panic, reason = "test code uses panic for assertions")]
 fn array_expr_creation() {
     let arr = Expr::Array(vec![
         Expr::Const(Const::Int(10)),
@@ -142,6 +147,7 @@ fn array_expr_creation() {
 }
 
 #[test]
+#[expect(clippy::panic, reason = "test code uses panic for assertions")]
 fn array_index_expr_creation() {
     let arr = Expr::Column(ColumnRef::new("my_array"));
     let idx = Expr::Const(Const::Int(2));

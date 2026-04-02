@@ -292,6 +292,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::unwrap_used, reason = "test code intentionally checks error cases")]
     fn missing_table_errors() {
         let fmt = IcebergFormat::new();
 

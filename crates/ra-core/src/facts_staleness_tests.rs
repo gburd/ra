@@ -1,6 +1,7 @@
 //! Tests for statistics staleness detection.
 
 #[cfg(test)]
+#[expect(clippy::unwrap_used, reason = "test helper functions use unwrap")]
 mod tests {
     use super::super::*;
     use std::time::{SystemTime, UNIX_EPOCH};

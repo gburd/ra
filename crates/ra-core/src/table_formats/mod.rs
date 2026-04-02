@@ -442,6 +442,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::unwrap_used, reason = "test code intentionally checks error case")]
     fn iceberg_stub_list_files_not_found() {
         let iceberg = IcebergFormat::new();
         let result = iceberg.list_files("nonexistent_table");
