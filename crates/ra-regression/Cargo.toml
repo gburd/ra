@@ -8,7 +8,7 @@ ra-core = { path = "../ra-core" }
 ra-parser = { path = "../ra-parser" }
 sqlparser = { version = "0.52", features = ["visitor"] }
 datafusion = { version = "43.0", features = ["crypto_expressions"] }
-rusqlite = { version = "0.39", features = ["bundled"] }
+rusqlite = { version = "0.31", features = ["bundled"] }
 toml = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
