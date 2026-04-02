@@ -1,0 +1,150 @@
+.PHONY: help build up down logs test clean
+
+help:
+	@echo "Docker deployment commands for Ra project"
+	@echo ""
+	@echo "Usage: make -f Makefile.docker <target>"
+	@echo ""
+	@echo "Targets:"
+	@echo "  build              Build all Docker images"
+	@echo "  build-docs         Build documentation image"
+	@echo "  build-web          Build ra-web image"
+	@echo "  build-pg-ext       Build PostgreSQL 16 + Ra extension"
+	@echo "  build-pg-proxy     Build PostgreSQL 19 + Ra proxy"
+	@echo "  up                 Start all services"
+	@echo "  up-core            Start core services (docs, ra-web, redis, pg)"
+	@echo "  up-databases       Start test databases"
+	@echo "  down               Stop all services"
+	@echo "  down-volumes       Stop all services and remove volumes"
+	@echo "  logs               Show logs for all services"
+	@echo "  logs-web           Show ra-web logs"
+	@echo "  logs-proxy         Show PostgreSQL proxy logs"
+	@echo "  test               Run all tests"
+	@echo "  status             Show service status"
+	@echo "  clean              Remove all containers, volumes, and images"
+	@echo "  rebuild            Rebuild all images without cache"
+	@echo "  restart            Restart all services"
+	@echo "  restart-web        Restart ra-web only"
+
+build:
+	docker compose build
+
+build-docs:
+	docker compose build docs
+
+build-web:
+	docker compose build ra-web
+
+build-pg-ext:
+	docker compose build postgres-ra-extension
+
+build-pg-proxy:
+	docker compose build postgres-ra-proxy
+
+rebuild:
+	docker compose build --no-cache
+
+up:
+	docker compose up -d
+	@echo ""
+	@echo "Services started! Access URLs:"
+	@echo "  Documentation: http://localhost:3000"
+	@echo "  Ra Web API:    http://localhost:8000"
+	@echo "  PG Extension:  postgresql://ra_test:ra_test_pass@localhost:5432/ra_testdb"
+	@echo "  PG Proxy:      postgresql://ra_proxy:ra_proxy_pass@localhost:5433/ra_proxydb"
+	@echo "  Proxy API:     http://localhost:8001"
+
+up-core:
+	docker compose up -d docs ra-web redis postgres-ra-extension
+
+up-databases:
+	docker compose up -d postgres-15 postgres-16 mysql-8 mariadb duckdb
+
+down:
+	docker compose down
+
+down-volumes:
+	docker compose down -v
+
+logs:
+	docker compose logs -f
+
+logs-web:
+	docker compose logs -f ra-web
+
+logs-proxy:
+	docker compose logs -f postgres-ra-proxy
+
+logs-docs:
+	docker compose logs -f docs
+
+test:
+	@echo "Running Docker service tests..."
+	@./scripts/docker-test.sh
+
+status:
+	docker compose ps
+
+restart:
+	docker compose restart
+
+restart-web:
+	docker compose restart ra-web
+
+restart-proxy:
+	docker compose restart postgres-ra-proxy
+
+clean:
+	docker compose down -v
+	docker system prune -a -f
+	@echo "Cleaned up all Docker resources"
+
+ps:
+	docker compose ps
+
+exec-web:
+	docker compose exec ra-web sh
+
+exec-pg-ext:
+	docker compose exec postgres-ra-extension bash
+
+exec-pg-proxy:
+	docker compose exec postgres-ra-proxy bash
+
+exec-redis:
+	docker compose exec redis redis-cli
+
+psql-ext:
+	PGPASSWORD=ra_test_pass psql -h localhost -p 5432 -U ra_test -d ra_testdb
+
+psql-proxy:
+	PGPASSWORD=ra_proxy_pass psql -h localhost -p 5433 -U ra_proxy -d ra_proxydb
+
+health:
+	@echo "Checking service health..."
+	@echo -n "docs:       " && curl -f -s http://localhost:3000/health && echo "✓" || echo "✗"
+	@echo -n "ra-web:     " && curl -f -s http://localhost:8000/health && echo "✓" || echo "✗"
+	@echo -n "proxy API:  " && curl -f -s http://localhost:8001/health && echo "✓" || echo "✗"
+	@echo -n "PostgreSQL: " && docker compose exec -T postgres-ra-extension pg_isready -U ra_test && echo "✓" || echo "✗"
+	@echo -n "Redis:      " && docker compose exec -T redis redis-cli ping | grep -q PONG && echo "✓" || echo "✗"
+
+backup-pg:
+	@echo "Backing up PostgreSQL databases..."
+	docker compose exec -T postgres-ra-extension pg_dumpall -U ra_test > backup-pg-ext-$$(date +%Y%m%d-%H%M%S).sql
+	docker compose exec -T postgres-ra-proxy pg_dumpall -U ra_proxy > backup-pg-proxy-$$(date +%Y%m%d-%H%M%S).sql
+	@echo "Backups created"
+
+backup-redis:
+	@echo "Backing up Redis..."
+	docker compose exec -T redis redis-cli SAVE
+	docker cp $$(docker compose ps -q redis):/data/dump.rdb backup-redis-$$(date +%Y%m%d-%H%M%S).rdb
+	@echo "Redis backup created"
+
+stats:
+	docker stats --no-stream
+
+disk-usage:
+	docker system df
+
+volumes:
+	docker volume ls | grep ra

@@ -1,8 +1,24 @@
 services:
+  docs:
+    build:
+      context: ./docs
+      dockerfile: Dockerfile
+    ports:
+      - "3000:80"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks:
+      - ra-network
+
   ra-web:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: crates/ra-web/Dockerfile
     ports:
       - "8000:8000"
     environment:
@@ -10,24 +26,29 @@ services:
       - ROCKET_PORT=8000
       - ROCKET_ADDRESS=0.0.0.0
       - STATIC_DIR=/app/static
-      - DATABASE_URL=postgresql://ra_test:ra_test_pass@postgres:5432/ra_testdb
+      - DATABASE_URL=postgresql://ra_test:ra_test_pass@postgres-ra-extension:5432/ra_testdb
+      - REDIS_URL=redis://redis:6379
     volumes:
       - ./rules:/app/rules:ro
     restart: unless-stopped
     depends_on:
-      postgres:
+      postgres-ra-extension:
         condition: service_healthy
-      mysql:
+      redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8000/health"]
       interval: 30s
       timeout: 3s
       retries: 3
       start_period: 10s
+    networks:
+      - ra-network
 
-  postgres:
-    image: postgres:16-alpine
+  postgres-ra-extension:
+    build:
+      context: .
+      dockerfile: docker/postgres-ra-extension.Dockerfile
     ports:
       - "5432:5432"
     environment:
@@ -36,52 +57,172 @@ services:
       POSTGRES_DB: ra_testdb
     volumes:
       - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
-      - postgres-data:/var/lib/postgresql/data
+      - pg-ra-extension-data:/var/lib/postgresql/data
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ra_test -d ra_testdb"]
-      interval: 5s
-      timeout: 3s
+      interval: 10s
+      timeout: 5s
       retries: 10
-      start_period: 10s
+      start_period: 20s
+    networks:
+      - ra-network
 
-  mysql:
+  postgres-ra-proxy:
+    build:
+      context: .
+      dockerfile: docker/postgres-ra-proxy.Dockerfile
+    ports:
+      - "5433:5432"
+      - "8001:8001"
+    environment:
+      POSTGRES_USER: ra_proxy
+      POSTGRES_PASSWORD: ra_proxy_pass
+      POSTGRES_DB: ra_proxydb
+      RA_PROXY_PORT: 8001
+      RA_PROXY_LOG_LEVEL: info
+      RA_PROXY_COMPARE_PLANS: "true"
+      RA_PROXY_INJECT_PLANS: "false"
+    volumes:
+      - ./docker/start-ra-proxy.sh:/usr/local/bin/start-ra-proxy.sh:ro
+      - pg-ra-proxy-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ra_proxy -d ra_proxydb && wget --quiet --tries=1 --spider http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - ra-network
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    networks:
+      - ra-network
+
+  postgres-15:
+    image: postgres:15-alpine
+    ports:
+      - "5415:5432"
+    environment:
+      POSTGRES_USER: test_user
+      POSTGRES_PASSWORD: test_pass
+      POSTGRES_DB: test_db
+    volumes:
+      - pg15-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test_user -d test_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - ra-network
+
+  postgres-16:
+    image: postgres:16-alpine
+    ports:
+      - "5416:5432"
+    environment:
+      POSTGRES_USER: test_user
+      POSTGRES_PASSWORD: test_pass
+      POSTGRES_DB: test_db
+    volumes:
+      - pg16-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test_user -d test_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - ra-network
+
+  mysql-8:
     image: mysql:8.0
     ports:
       - "3306:3306"
     environment:
-      MYSQL_ROOT_PASSWORD: ra_root_pass
-      MYSQL_USER: ra_test
-      MYSQL_PASSWORD: ra_test_pass
-      MYSQL_DATABASE: ra_testdb
+      MYSQL_ROOT_PASSWORD: root_pass
+      MYSQL_USER: test_user
+      MYSQL_PASSWORD: test_pass
+      MYSQL_DATABASE: test_db
     volumes:
       - ./docker/mysql-init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
-      - mysql-data:/var/lib/mysql
+      - mysql8-data:/var/lib/mysql
     command: >
       --default-authentication-plugin=mysql_native_password
       --character-set-server=utf8mb4
       --collation-server=utf8mb4_unicode_ci
+    restart: unless-stopped
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "ra_test", "-pra_test_pass"]
-      interval: 5s
-      timeout: 3s
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "test_user", "-ptest_pass"]
+      interval: 10s
+      timeout: 5s
       retries: 10
       start_period: 30s
+    networks:
+      - ra-network
+
+  mariadb:
+    image: mariadb:11-jammy
+    ports:
+      - "3307:3306"
+    environment:
+      MARIADB_ROOT_PASSWORD: root_pass
+      MARIADB_USER: test_user
+      MARIADB_PASSWORD: test_pass
+      MARIADB_DATABASE: test_db
+    volumes:
+      - mariadb-data:/var/lib/mysql
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - ra-network
 
   duckdb:
     image: datacatering/duckdb:latest
     ports:
       - "8080:8080"
+    restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/"]
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/"]
       interval: 10s
       timeout: 3s
       retries: 5
       start_period: 5s
+    networks:
+      - ra-network
 
 volumes:
-  postgres-data:
-  mysql-data:
+  pg-ra-extension-data:
+  pg-ra-proxy-data:
+  redis-data:
+  pg15-data:
+  pg16-data:
+  mysql8-data:
+  mariadb-data:
 
 networks:
-  default:
-    name: ra-network
+  ra-network:
+    driver: bridge
