@@ -7,10 +7,8 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use differential_dataflow::collection::AsCollection;
 use differential_dataflow::input::Input;
-use differential_dataflow::operators::{Consolidate, Reduce};
-use timely::dataflow::operators::Inspect;
+use differential_dataflow::operators::Reduce;
 use timely::dataflow::ProbeHandle;
 
 use serde::{Deserialize, Serialize};
@@ -18,7 +16,6 @@ use thiserror::Error;
 use tracing::{debug, info};
 
 use crate::belief_network::{BeliefNetwork, ExecutionObservation};
-use crate::estimator::CardinalityEstimate;
 use crate::features::FeatureSchema;
 use crate::nn::FeedForwardNet;
 
@@ -66,7 +63,7 @@ impl Default for StreamingConfig {
 }
 
 /// Scope for model sharing and learning.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum ModelScope {
     /// Account-specific models.
     Account,
@@ -77,7 +74,7 @@ pub enum ModelScope {
 }
 
 /// A streaming update to the ML system.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct StreamingUpdate {
     /// Execution observation.
     pub observation: ExecutionObservation,
@@ -94,8 +91,6 @@ pub struct StreamingUpdate {
 pub struct StreamingMlEstimator {
     /// Current neural network model.
     model: Arc<Mutex<FeedForwardNet>>,
-    /// Feature schema.
-    schema: FeatureSchema,
     /// Belief network for rule ordering.
     belief_network: Arc<BeliefNetwork>,
     /// Configuration.
@@ -109,12 +104,11 @@ impl StreamingMlEstimator {
     #[must_use]
     pub fn new(
         model: FeedForwardNet,
-        schema: FeatureSchema,
+        _schema: FeatureSchema,
         config: StreamingConfig,
     ) -> Self {
         Self {
             model: Arc::new(Mutex::new(model)),
-            schema,
             belief_network: Arc::new(BeliefNetwork::new()),
             config,
             observation_buffer: Arc::new(Mutex::new(Vec::new())),
@@ -209,23 +203,24 @@ impl StreamingProcessor {
     pub fn run(&self) -> Result<StreamingHandle, StreamingError> {
         info!(workers = %self.config.workers, "Starting streaming processor");
 
-        let belief_network = Arc::clone(&self.belief_network);
+        let belief_network_for_thread = Arc::clone(&self.belief_network);
         let batch_size = self.config.batch_size;
 
         timely::execute::execute(
             timely::Config::process(self.config.workers),
             move |worker| {
                 let mut probe = ProbeHandle::new();
+                let belief_network = Arc::clone(&belief_network_for_thread);
 
-                let (mut input, observations) = worker.dataflow::<u64, _, _>(|scope| {
-                    let (input, observations) = scope.new_collection::<StreamingUpdate, isize>();
+                worker.dataflow::<u64, _, _>(|scope| {
+                    let (mut _input, observations) = scope.new_collection::<StreamingUpdate, isize>();
 
                     observations
                         .map(|update| (update.observation.rule_id.clone(), update.observation))
                         .reduce(move |_rule_id, observations, output| {
                             let obs_vec: Vec<ExecutionObservation> = observations
                                 .iter()
-                                .map(|(obs, _weight)| obs.clone())
+                                .map(|(obs, _weight)| (*obs).clone())
                                 .collect();
 
                             if obs_vec.len() >= batch_size {
@@ -234,16 +229,14 @@ impl StreamingProcessor {
                                 }
                             }
                         })
-                        .inspect(move |x| {
-                            debug!(rule = %x.0, "Processing observation");
-                            belief_network.observe(x.1.clone());
+                        .inspect(move |((rule_id, obs), _time, _diff)| {
+                            debug!(rule_id = %rule_id, "Processing observation");
+                            belief_network.observe(obs.clone());
                         })
                         .probe_with(&mut probe);
-
-                    (input, observations)
                 });
 
-                Ok(())
+                Ok::<(), ()>(())
             },
         )
         .map_err(|e| StreamingError::WorkerInit(format!("{e:?}")))?;

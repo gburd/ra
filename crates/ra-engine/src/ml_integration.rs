@@ -9,11 +9,10 @@ use std::time::Instant;
 
 use ra_core::algebra::RelExpr;
 use ra_core::cost::StatisticsProvider;
+use ra_core::CostModel;
 use ra_ml::belief_network::{BeliefNetwork, ExecutionObservation};
-use ra_ml::streaming::{StreamingMlEstimator, StreamingConfig, ModelScope};
-use ra_ml::features::FeatureSchema;
+use ra_ml::streaming::{StreamingMlEstimator, ModelScope};
 
-use crate::cost::CostModel;
 use crate::rule_priority::RulePriority;
 
 /// ML-enhanced optimizer configuration.
@@ -222,7 +221,7 @@ fn extract_plan_context(
 
 /// Integrate ML-based rule ordering with existing rule priority system.
 pub fn integrate_with_rule_priority(
-    rule_priority: &mut RulePriority,
+    _rule_priority: &mut RulePriority,
     ml_optimizer: &MlOptimizer,
     rule_ids: &[String],
     plan: &RelExpr,

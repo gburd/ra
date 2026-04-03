@@ -15,9 +15,11 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
-sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio-rustls", "postgres", "macros"] }
+sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio-rustls", "postgres"] }
 differential-dataflow = "0.12"
 timely = "0.12"
+abomonation = "0.7"
+abomonation_derive = "0.5"
 
 [dev-dependencies]
 proptest = { workspace = true }

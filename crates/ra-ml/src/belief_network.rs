@@ -11,16 +11,20 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use abomonation_derive::Abomonation;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 /// Errors from belief network operations.
 #[derive(Debug, Error)]
 pub enum BeliefNetworkError {
     /// No observations available for the given rule.
     #[error("no observations for rule {rule_id}")]
-    NoObservations { rule_id: String },
+    NoObservations {
+        /// Rule identifier
+        rule_id: String
+    },
 
     /// Invalid probability value.
     #[error("invalid probability: {0}")]
@@ -32,7 +36,7 @@ pub enum BeliefNetworkError {
 }
 
 /// An execution observation recording rule effectiveness.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize, Abomonation)]
 pub struct ExecutionObservation {
     /// Rule that was applied.
     pub rule_id: String,
@@ -48,6 +52,16 @@ pub struct ExecutionObservation {
     pub context: Vec<f64>,
     /// Timestamp of observation.
     pub timestamp: i64,
+}
+
+impl Eq for ExecutionObservation {}
+
+impl Ord for ExecutionObservation {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.rule_id.cmp(&other.rule_id)
+            .then_with(|| self.timestamp.cmp(&other.timestamp))
+            .then_with(|| self.estimated_time_before.partial_cmp(&other.estimated_time_before).unwrap_or(std::cmp::Ordering::Equal))
+    }
 }
 
 impl ExecutionObservation {
