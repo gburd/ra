@@ -7,7 +7,7 @@
 //! - EXA-004: bloom-filter-join
 //! - EXA-005: simd-vectorization
 
-use ra_core::algebra::{AggFunc, JoinType, RelExpr};
+use ra_core::algebra::{JoinType, RelExpr};
 use ra_core::expr::{BinOp, ColumnRef, Expr};
 use ra_engine::Optimizer;
 use ra_hardware::HardwareProfile;
@@ -27,14 +27,17 @@ fn scan(table: &str) -> RelExpr {
 
 fn filter(input: RelExpr, condition: Expr) -> RelExpr {
     RelExpr::Filter {
-        condition,
+        predicate: condition,
         input: Box::new(input),
     }
 }
 
 fn project(input: RelExpr, columns: Vec<String>) -> RelExpr {
     RelExpr::Project {
-        columns: columns.into_iter().map(ColumnRef::new).collect(),
+        columns: columns.into_iter().map(|c| ra_core::algebra::ProjectionColumn {
+            expr: Expr::Column(ColumnRef::new(c)),
+            alias: None,
+        }).collect(),
         input: Box::new(input),
     }
 }
@@ -48,12 +51,28 @@ fn join(left: RelExpr, right: RelExpr, condition: Expr) -> RelExpr {
     }
 }
 
-fn aggregate(input: RelExpr, group_by: Vec<String>, aggs: Vec<(String, AggFunc)>) -> RelExpr {
+fn aggregate(input: RelExpr, group_by: Vec<String>, aggs: Vec<(String, String)>) -> RelExpr {
+    use ra_core::algebra::{AggregateExpr, AggregateFunction};
     RelExpr::Aggregate {
-        group_by: group_by.into_iter().map(ColumnRef::new).collect(),
-        aggs: aggs
+        group_by: group_by.into_iter().map(|c| Expr::Column(ColumnRef::new(c))).collect(),
+        aggregates: aggs
             .into_iter()
-            .map(|(col, func)| (ColumnRef::new(col), func))
+            .map(|(col, func)| {
+                let function = match func.as_str() {
+                    "Count" => AggregateFunction::Count,
+                    "Sum" => AggregateFunction::Sum,
+                    "Avg" => AggregateFunction::Avg,
+                    "Min" => AggregateFunction::Min,
+                    "Max" => AggregateFunction::Max,
+                    _ => AggregateFunction::Count,
+                };
+                AggregateExpr {
+                    function,
+                    arg: Some(Expr::Column(ColumnRef::new(col))),
+                    distinct: false,
+                    alias: None,
+                }
+            })
             .collect(),
         input: Box::new(input),
     }
@@ -68,10 +87,11 @@ fn eq_pred(left: &str, right: &str) -> Expr {
 }
 
 fn gt_pred(left: &str, value: i64) -> Expr {
+    use ra_core::expr::Const;
     Expr::BinOp {
         op: BinOp::Gt,
         left: Box::new(Expr::Column(ColumnRef::new(left.to_string()))),
-        right: Box::new(Expr::Literal(value.into())),
+        right: Box::new(Expr::Const(Const::Int(value))),
     }
 }
 
@@ -187,7 +207,7 @@ fn test_exa002_late_materialization_with_aggregation() {
             ),
         ),
         vec!["region".to_string()],
-        vec![("sales_amount".to_string(), AggFunc::Sum)],
+        vec![("sales_amount".to_string(), "Sum".to_string())],
     );
 
     let result = optimizer.optimize(&plan);
@@ -336,7 +356,7 @@ fn test_exa004_bloom_filter_join_star_schema() {
             eq_pred("s_suppkey", "l_suppkey"),
         ),
         vec!["n.n_name".to_string()],
-        vec![("l.l_extendedprice".to_string(), AggFunc::Sum)],
+        vec![("l.l_extendedprice".to_string(), "Sum".to_string())],
     );
 
     let result = optimizer.optimize(&plan);
@@ -371,7 +391,7 @@ fn test_exa004_bloom_filter_join_highly_selective() {
             eq_pred("o_orderkey", "l_orderkey"),
         ),
         vec!["l.l_orderkey".to_string()],
-        vec![("l.l_quantity".to_string(), AggFunc::Sum)],
+        vec![("l.l_quantity".to_string(), "Sum".to_string())],
     );
 
     let result = optimizer.optimize(&plan);
@@ -429,7 +449,7 @@ fn test_exa005_simd_aggregation_sum() {
     let plan = aggregate(
         filter(scan("sales"), eq_pred("region", "US")),
         vec![],
-        vec![("revenue".to_string(), AggFunc::Sum)],
+        vec![("revenue".to_string(), "Sum".to_string())],
     );
 
     let result = optimizer.optimize(&plan);
@@ -446,7 +466,7 @@ fn test_exa005_simd_aggregation_count() {
     let plan = aggregate(
         filter(scan("orders"), eq_pred("status", "completed")),
         vec![],
-        vec![("*".to_string(), AggFunc::Count)],
+        vec![("*".to_string(), "Count".to_string())],
     );
 
     let result = optimizer.optimize(&plan);
@@ -490,8 +510,8 @@ fn test_integration_tpch_q1() {
         filter(scan("lineitem"), gt_pred("l_shipdate", 19980901)),
         vec!["l_returnflag".to_string(), "l_linestatus".to_string()],
         vec![
-            ("l_quantity".to_string(), AggFunc::Sum),
-            ("l_extendedprice".to_string(), AggFunc::Sum),
+            ("l_quantity".to_string(), "Sum".to_string()),
+            ("l_extendedprice".to_string(), "Sum".to_string()),
         ],
     );
 
@@ -527,7 +547,7 @@ fn test_integration_tpch_q3() {
             eq_pred("o_orderkey", "l_orderkey"),
         ),
         vec!["l_orderkey".to_string()],
-        vec![("l_extendedprice".to_string(), AggFunc::Sum)],
+        vec![("l_extendedprice".to_string(), "Sum".to_string())],
     );
 
     let result = optimizer.optimize(&plan);
@@ -565,7 +585,7 @@ fn test_integration_tpch_q6() {
             ),
         ),
         vec![],
-        vec![("l_extendedprice".to_string(), AggFunc::Sum)],
+        vec![("l_extendedprice".to_string(), "Sum".to_string())],
     );
 
     let result = optimizer.optimize(&plan);

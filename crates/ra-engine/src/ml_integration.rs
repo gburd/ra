@@ -9,7 +9,6 @@ use std::time::Instant;
 
 use ra_core::algebra::RelExpr;
 use ra_core::cost::StatisticsProvider;
-use ra_core::CostModel;
 use ra_ml::belief_network::{BeliefNetwork, ExecutionObservation};
 use ra_ml::streaming::{StreamingMlEstimator, ModelScope};
 
@@ -56,6 +55,7 @@ pub struct MlOptimizer {
 #[derive(Debug, Clone)]
 struct OptimizationContext {
     /// Input plan.
+    #[allow(dead_code)]
     input_plan: RelExpr,
     /// Output plan.
     output_plan: RelExpr,

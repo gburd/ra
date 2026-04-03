@@ -652,7 +652,7 @@ mod tests {
     }
 
     #[test]
-    fn render_projection() {
+    fn render_project() {
         let expr = RelExpr::scan("users").project(vec![
             ProjectionColumn {
                 expr: Expr::Column(ColumnRef::new("name")),
@@ -803,7 +803,7 @@ mod tests {
     #[test]
     fn render_left_join() {
         let expr = RelExpr::Join {
-            join_type: JoinType::Left,
+            join_type: JoinType::LeftOuter,
             condition: Expr::BinOp {
                 op: BinOp::Eq,
                 left: Box::new(Expr::Column(ColumnRef::qualified("users", "id"))),
@@ -813,31 +813,31 @@ mod tests {
             right: Box::new(RelExpr::scan("orders")),
         };
         let sql = SqlRenderer::render(&expr);
-        assert!(sql.contains("LEFT JOIN"));
+        assert!(sql.contains("LEFT OUTER JOIN"));
     }
 
     #[test]
     fn render_right_join() {
         let expr = RelExpr::Join {
-            join_type: JoinType::Right,
+            join_type: JoinType::RightOuter,
             condition: Expr::Const(Const::Bool(true)),
             left: Box::new(RelExpr::scan("users")),
             right: Box::new(RelExpr::scan("orders")),
         };
         let sql = SqlRenderer::render(&expr);
-        assert!(sql.contains("RIGHT JOIN"));
+        assert!(sql.contains("RIGHT OUTER JOIN"));
     }
 
     #[test]
     fn render_full_join() {
         let expr = RelExpr::Join {
-            join_type: JoinType::Full,
+            join_type: JoinType::FullOuter,
             condition: Expr::Const(Const::Bool(true)),
             left: Box::new(RelExpr::scan("users")),
             right: Box::new(RelExpr::scan("orders")),
         };
         let sql = SqlRenderer::render(&expr);
-        assert!(sql.contains("FULL JOIN"));
+        assert!(sql.contains("FULL OUTER JOIN"));
     }
 
     #[test]
@@ -957,10 +957,10 @@ mod tests {
 
     #[test]
     fn render_window_function() {
-        use ra_core::WindowFunction;
+        use ra_core::{WindowExpr, WindowFunction};
         let expr = RelExpr::Window {
-            functions: vec![WindowFunction {
-                function: AggregateFunction::RowNumber,
+            functions: vec![WindowExpr {
+                function: WindowFunction::RowNumber,
                 arg: None,
                 partition_by: vec![Expr::Column(ColumnRef::new("category"))],
                 order_by: vec![SortKey {
@@ -968,6 +968,7 @@ mod tests {
                     direction: SortDirection::Desc,
                     nulls: NullOrdering::Last,
                 }],
+                frame: None,
                 alias: Some("rn".into()),
             }],
             input: Box::new(RelExpr::scan("products")),
@@ -980,13 +981,14 @@ mod tests {
 
     #[test]
     fn render_window_function_no_partition() {
-        use ra_core::WindowFunction;
+        use ra_core::{WindowExpr, WindowFunction};
         let expr = RelExpr::Window {
-            functions: vec![WindowFunction {
-                function: AggregateFunction::Sum,
+            functions: vec![WindowExpr {
+                function: WindowFunction::Sum,
                 arg: Some(Expr::Column(ColumnRef::new("amount"))),
                 partition_by: vec![],
                 order_by: vec![],
+                frame: None,
                 alias: None,
             }],
             input: Box::new(RelExpr::scan("orders")),
@@ -1027,7 +1029,7 @@ mod tests {
             base_case: Box::new(RelExpr::scan("root")),
             recursive_case: Box::new(RelExpr::scan("children")),
             body: Box::new(RelExpr::scan("tree")),
-            columns: vec![],
+            cycle_detection: None,
         };
         let sql = SqlRenderer::render(&expr);
         assert!(sql.contains("RECURSIVE"));
@@ -1054,7 +1056,7 @@ mod tests {
             expr: Expr::Array(vec![Expr::Const(Const::Int(1)), Expr::Const(Const::Int(2))]),
             alias: Some("arr".into()),
             input: None,
-            ordinality: false,
+            with_ordinality: false,
         };
         let sql = SqlRenderer::render(&expr);
         assert!(sql.contains("unnest"));
@@ -1067,7 +1069,7 @@ mod tests {
             expr: Expr::Column(ColumnRef::new("items")),
             alias: None,
             input: None,
-            ordinality: false,
+            with_ordinality: false,
         };
         let sql = SqlRenderer::render(&expr);
         assert!(sql.contains("unnest"));
@@ -1082,7 +1084,7 @@ mod tests {
                 Expr::Column(ColumnRef::new("arr2")),
             ],
             aliases: vec![Some("a".into()), Some("b".into())],
-            ordinality: false,
+            with_ordinality: false,
         };
         let sql = SqlRenderer::render(&expr);
         assert!(sql.contains("unnest"));
@@ -1095,7 +1097,7 @@ mod tests {
         let expr = RelExpr::MultiUnnest {
             exprs: vec![Expr::Column(ColumnRef::new("arr1"))],
             aliases: vec![None],
-            ordinality: false,
+            with_ordinality: false,
         };
         let sql = SqlRenderer::render(&expr);
         assert!(sql.contains("unnest"));
@@ -1106,8 +1108,8 @@ mod tests {
         let expr = RelExpr::TableFunction {
             name: "generate_series".into(),
             args: vec![Expr::Const(Const::Int(1)), Expr::Const(Const::Int(10))],
+            columns: vec![],
             input: None,
-            ordinality: false,
         };
         let sql = SqlRenderer::render(&expr);
         assert!(sql.contains("generate_series(1, 10)"));
@@ -1115,11 +1117,17 @@ mod tests {
 
     #[test]
     fn render_row_pattern() {
+        use ra_core::row_pattern::{MatchMode, PatternExpr, SkipMode};
+
         let expr = RelExpr::RowPattern {
             input: Box::new(RelExpr::scan("events")),
-            pattern: "A+ B C*".into(),
+            partition_by: vec![],
+            order_by: vec![],
+            pattern: PatternExpr::Var("A".into()),
             defines: vec![],
             measures: vec![],
+            mode: MatchMode::OneRowPerMatch,
+            skip_mode: SkipMode::PastLastRow,
         };
         let sql = SqlRenderer::render(&expr);
         assert!(sql.contains("MATCH_RECOGNIZE"));
@@ -1136,7 +1144,6 @@ mod tests {
                 left: Box::new(Expr::Column(ColumnRef::new("age"))),
                 right: Box::new(Expr::Const(Const::Int(30))),
             },
-            columns: vec![],
         };
         let sql = SqlRenderer::render(&expr);
         assert!(sql.contains("Bitmap Index Scan"));
@@ -1175,7 +1182,6 @@ mod tests {
             bitmap: Box::new(RelExpr::scan("idx")),
             table: "users".into(),
             recheck_cond: Some(Expr::Const(Const::Bool(true))),
-            columns: vec![],
         };
         let sql = SqlRenderer::render(&expr);
         assert!(sql.contains("Bitmap Heap Scan"));
@@ -1187,7 +1193,6 @@ mod tests {
             bitmap: Box::new(RelExpr::scan("idx")),
             table: "users".into(),
             recheck_cond: None,
-            columns: vec![],
         };
         let sql = SqlRenderer::render(&expr);
         assert!(sql.contains("Bitmap Heap Scan"));
@@ -1199,7 +1204,6 @@ mod tests {
         let expr = RelExpr::ParallelScan {
             table: "large_table".into(),
             workers: 4,
-            alias: None,
         };
         let sql = SqlRenderer::render(&expr);
         assert!(sql.contains("Parallel Seq Scan"));
@@ -1209,9 +1213,10 @@ mod tests {
     #[test]
     fn render_parallel_hash_join() {
         let expr = RelExpr::ParallelHashJoin {
+            join_type: JoinType::Inner,
+            condition: Expr::Const(Const::Bool(true)),
             left: Box::new(RelExpr::scan("orders")),
             right: Box::new(RelExpr::scan("customers")),
-            condition: Expr::Const(Const::Bool(true)),
             workers: 8,
         };
         let sql = SqlRenderer::render(&expr);
@@ -1542,7 +1547,7 @@ mod tests {
 
     #[test]
     fn render_const_string_with_quotes() {
-        assert_eq!(render_const(&Const::String("it's".into())), "'it''s'");
+        assert_eq!(render_const(&Const::String("it's".into())), "'it's'");
     }
 
     #[test]

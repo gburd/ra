@@ -7,12 +7,9 @@ use clap::Subcommand;
 use colored::Colorize;
 
 use ra_ml::belief_network::BeliefNetwork;
-use ra_ml::estimator::MlEstimator;
 use ra_ml::features::FeatureSchema;
 use ra_ml::nn::{build_default_mlp, FeedForwardNet};
 use ra_ml::storage::{DatabaseBackend, ModelStorage, StorageConfig};
-use ra_ml::streaming::{ModelScope, StreamingConfig, StreamingMlEstimator};
-use ra_ml::training::TrainingDataset;
 
 #[derive(Subcommand)]
 pub enum MlCommands {
@@ -328,7 +325,7 @@ async fn load_model(
     println!("{}", format!("Loading model '{name}' from database...").bold());
 
     let config = StorageConfig {
-        backend: DatabaseBackend::Sqlite,
+        backend: DatabaseBackend::Postgres,
         connection_string: database.to_string(),
         max_connections: 10,
     };
