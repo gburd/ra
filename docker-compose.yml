@@ -122,6 +122,7 @@ services:
       POSTGRES_PASSWORD: test_pass
       POSTGRES_DB: test_db
     volumes:
+      - ./test-schemas:/docker-entrypoint-initdb.d:ro
       - pg15-data:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
@@ -142,6 +143,7 @@ services:
       POSTGRES_PASSWORD: test_pass
       POSTGRES_DB: test_db
     volumes:
+      - ./test-schemas:/docker-entrypoint-initdb.d:ro
       - pg16-data:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
@@ -163,7 +165,7 @@ services:
       MYSQL_PASSWORD: test_pass
       MYSQL_DATABASE: test_db
     volumes:
-      - ./docker/mysql-init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./test-schemas/mysql:/docker-entrypoint-initdb.d:ro
       - mysql8-data:/var/lib/mysql
     command: >
       --default-authentication-plugin=mysql_native_password
