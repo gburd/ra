@@ -26,6 +26,7 @@ use crate::layout::LayoutMode;
 use crate::panels::sql_editor::{
     EditorMode, SqlEditor, ViMode,
 };
+#[cfg(feature = "timeline")]
 use crate::timeline::Timeline;
 use crate::ui;
 
@@ -109,6 +110,7 @@ const SPEEDS: &[(&str, u64)] = &[
 ];
 
 /// The TUI application state.
+#[cfg(feature = "timeline")]
 pub struct App {
     /// The timeline being played back.
     pub timeline: Timeline,
@@ -134,6 +136,7 @@ pub struct App {
     last_advance: Instant,
 }
 
+#[cfg(feature = "timeline")]
 impl App {
     /// Create a new app from a timeline, loading the editor
     /// keybinding mode from ra-config.

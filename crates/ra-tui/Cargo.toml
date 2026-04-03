@@ -8,8 +8,8 @@ license.workspace = true
 repository.workspace = true
 
 [features]
-default = []
-timeline = ["ra-stats/timeline"]
+default = ["timeline"]
+timeline = ["ra-stats/timeline", "ra-engine/timeline"]
 
 [dependencies]
 ra-core = { workspace = true }

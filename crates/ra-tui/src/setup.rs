@@ -5,9 +5,11 @@
 
 use std::path::{Path, PathBuf};
 
+#[cfg(feature = "timeline")]
 use crate::timeline::Timeline;
 
 /// Configuration produced by the setup process.
+#[cfg(feature = "timeline")]
 #[derive(Debug, Clone)]
 pub struct TuiConfig {
     /// The timeline to play back.
@@ -20,6 +22,7 @@ pub struct TuiConfig {
     pub auto_play: bool,
 }
 
+#[cfg(feature = "timeline")]
 impl TuiConfig {
     /// Create a config from a timeline with default settings.
     #[must_use]
@@ -72,6 +75,7 @@ pub fn discover_timelines(dir: &Path) -> Vec<PathBuf> {
 /// # Errors
 ///
 /// Returns an error if the file cannot be read or parsed.
+#[cfg(feature = "timeline")]
 pub fn load_timeline_json(
     path: &Path,
 ) -> Result<Timeline, SetupError> {
@@ -103,7 +107,7 @@ pub enum SetupError {
     NoTimeline(String),
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "timeline"))]
 mod tests {
     use super::*;
     use crate::timeline::{Snapshot, TableStatEntry};

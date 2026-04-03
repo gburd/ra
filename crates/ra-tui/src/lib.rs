@@ -31,12 +31,15 @@ pub mod setup;
 pub mod timeline;
 pub mod ui;
 
+#[cfg(feature = "timeline")]
 pub use app::{App, AppError};
 pub use event::{EventHandler, TuiEvent};
 pub use layout::{EditorLayout, FrameLayout, LayoutMode, PanelLayout};
 pub use panels::sql_editor::{EditorMode, SqlEditor, ViMode};
 pub use playback::PlaybackController;
 pub use recorder::{AsciiRecorder, RecordError, record_session};
-pub use setup::{SetupError, TuiConfig};
+pub use setup::SetupError;
+#[cfg(feature = "timeline")]
+pub use setup::TuiConfig;
 #[cfg(feature = "timeline")]
 pub use timeline::{Snapshot, Timeline};
