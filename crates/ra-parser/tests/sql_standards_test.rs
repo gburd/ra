@@ -197,6 +197,7 @@ fn test_sql_compliance_matrix() {
     // This test documents which SQL standards are supported by major databases
     // Not a runtime test, but serves as documentation
 
+    #[allow(dead_code)]
     struct DatabaseCompliance {
         name: &'static str,
         sql_92: bool,

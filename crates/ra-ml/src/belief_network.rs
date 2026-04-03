@@ -36,6 +36,7 @@ pub enum BeliefNetworkError {
 }
 
 /// An execution observation recording rule effectiveness.
+#[allow(non_local_definitions)]
 #[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize, Abomonation)]
 pub struct ExecutionObservation {
     /// Rule that was applied.

@@ -451,14 +451,14 @@ mod tests {
 
     /// Configurable facts provider for testing rule_metadata.
     struct TestFacts {
-        db_name: String,
+        _db_name: String,
         hw: CoreHardwareProfile,
     }
 
     impl TestFacts {
         fn new(db_name: &str, cpu: u32, memory: u64, gpu: bool) -> Self {
             Self {
-                db_name: db_name.to_string(),
+                _db_name: db_name.to_string(),
                 hw: CoreHardwareProfile {
                     cpu_cores: cpu,
                     available_memory: memory,

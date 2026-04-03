@@ -5,8 +5,6 @@
 
 #![cfg(feature = "timeline")]
 
-use proptest::prelude::*;
-
 /// Property: Cost should decrease when an index is added (all else equal).
 ///
 /// Given two snapshots with identical data but different indexes, the snapshot

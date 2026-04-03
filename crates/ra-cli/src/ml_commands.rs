@@ -334,7 +334,7 @@ async fn load_model(
         .await
         .context("Failed to connect to database")?;
 
-    let (model, schema_data) = storage
+    let (model, _schema_data) = storage
         .load_model(name)
         .await
         .context("Failed to load model")?;
