@@ -3,6 +3,7 @@
 //! Measures the speedup from differential statistics updates
 //! for various delta sizes (small, medium, large).
 
+#![cfg(feature = "timeline")]
 #![allow(clippy::expect_used)]
 
 use criterion::{

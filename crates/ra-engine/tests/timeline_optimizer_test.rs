@@ -1,5 +1,7 @@
 //! Integration tests for timeline optimizer.
 
+#![cfg(feature = "timeline")]
+
 use ra_core::algebra::RelExpr;
 use ra_engine::{
     ChangeType, ChangeSeverity, Optimizer, TimelineConfig, TimelineOptimizer,

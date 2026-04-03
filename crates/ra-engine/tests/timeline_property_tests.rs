@@ -3,6 +3,8 @@
 //! Uses proptest to verify invariants that should hold across all timeline
 //! configurations and optimization scenarios.
 
+#![cfg(feature = "timeline")]
+
 use proptest::prelude::*;
 
 /// Property: Cost should decrease when an index is added (all else equal).
