@@ -238,7 +238,6 @@ pub fn integrate_with_rule_priority(
 mod tests {
     use super::*;
     use ra_core::statistics::Statistics;
-    use ra_ml::nn::build_default_mlp;
 
     #[test]
     fn ml_optimizer_basic() {
@@ -248,6 +247,7 @@ mod tests {
         let plan = RelExpr::scan("users");
         let rules = vec!["rule1".to_string(), "rule2".to_string()];
 
+        #[derive(Debug)]
         struct DummyStats;
         impl StatisticsProvider for DummyStats {
             fn get_statistics(&self, _table: &str) -> Option<&Statistics> {
@@ -288,6 +288,7 @@ mod tests {
         let plan = RelExpr::scan("users");
         let rules = vec!["rule1".to_string(), "rule2".to_string()];
 
+        #[derive(Debug)]
         struct DummyStats;
         impl StatisticsProvider for DummyStats {
             fn get_statistics(&self, _table: &str) -> Option<&Statistics> {
