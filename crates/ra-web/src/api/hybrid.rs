@@ -14,8 +14,8 @@ pub struct HybridSearchRequest {
     pub query: String,
     /// Query embedding vector for similarity search.
     pub embedding: Vec<f64>,
-    /// Database configuration.
-    #[allow(dead_code)] // TODO: Use this field when hybrid search is fully implemented (Phase 6 of RFC 0064)
+    /// Database configuration (deserialized for future use with real database connections).
+    #[allow(dead_code)]
     pub database: DatabaseConfig,
     /// Weight for BM25 vs vector (0.0 = pure vector, 1.0 = pure BM25).
     #[serde(default = "default_alpha")]
@@ -330,7 +330,7 @@ fn execute_vector_search(_table: &str, _embedding: &[f64], limit: usize) -> Moda
     }
 }
 
-/// Fuse BM25 and vector results using weighted average.
+/// Fuse BM25 and vector results using the engine's weighted average fusion.
 fn fuse_results(
     bm25_results: &[SearchResult],
     vector_results: &[SearchResult],
@@ -347,13 +347,38 @@ fn fuse_results(
             .entry(result.id.clone())
             .and_modify(|e| {
                 e.vector_score = result.vector_score;
-                e.hybrid_score = alpha * e.bm25_score / 15.0 + (1.0 - alpha) * e.vector_score;
+                e.hybrid_score = ra_engine::fuse_scores(
+                    e.bm25_score,
+                    result.vector_score,
+                    ra_engine::ScoreFusion::WeightedAverage,
+                    alpha,
+                    60,
+                );
             })
             .or_insert_with(|| {
                 let mut r = result.clone();
-                r.hybrid_score = (1.0 - alpha) * r.vector_score;
+                r.hybrid_score = ra_engine::fuse_scores(
+                    0.0,
+                    r.vector_score,
+                    ra_engine::ScoreFusion::WeightedAverage,
+                    alpha,
+                    60,
+                );
                 r
             });
+    }
+
+    // Also compute hybrid scores for BM25-only results (no vector match)
+    for result in combined.values_mut() {
+        if result.bm25_score > 0.0 && result.vector_score == 0.0 {
+            result.hybrid_score = ra_engine::fuse_scores(
+                result.bm25_score,
+                0.0,
+                ra_engine::ScoreFusion::WeightedAverage,
+                alpha,
+                60,
+            );
+        }
     }
 
     let mut results: Vec<SearchResult> = combined.into_values().collect();

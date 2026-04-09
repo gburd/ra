@@ -11,13 +11,13 @@
 //! ```
 
 use crate::{AdapterError, DatabaseAdapter, DatabaseCapabilities, SchemaInfo};
-#[cfg(feature = "Stoolap")]
+#[cfg(feature = "stoolap")]
 use crate::{ColumnInfo, IndexInfo, TableInfo};
 use ra_core::{FactsProvider, SqlDialect};
 use ra_stats::types::{ColumnStats, TableStats};
 use std::collections::HashMap;
 
-#[cfg(feature = "Stoolap")]
+#[cfg(feature = "stoolap")]
 use stoolap::Database;
 
 /// Internal storage for gathered facts, enabling
@@ -143,14 +143,14 @@ impl FactsProvider for StoolapFacts {
 ///   gather live statistics
 pub struct StoolapAdapter {
     connection_string: Option<String>,
-    #[cfg(feature = "Stoolap")]
+    #[cfg(feature = "stoolap")]
     db: Option<Database>,
     facts: StoolapFacts,
 }
 
 impl std::fmt::Debug for StoolapAdapter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        #[cfg(feature = "Stoolap")]
+        #[cfg(feature = "stoolap")]
         {
             f.debug_struct("StoolapAdapter")
                 .field("connection_string", &self.connection_string)
@@ -158,7 +158,7 @@ impl std::fmt::Debug for StoolapAdapter {
                 .field("facts", &self.facts)
                 .finish()
         }
-        #[cfg(not(feature = "Stoolap"))]
+        #[cfg(not(feature = "stoolap"))]
         {
             f.debug_struct("StoolapAdapter")
                 .field("connection_string", &self.connection_string)
@@ -174,7 +174,7 @@ impl StoolapAdapter {
     pub fn new() -> Self {
         Self {
             connection_string: None,
-            #[cfg(feature = "Stoolap")]
+            #[cfg(feature = "stoolap")]
             db: None,
             facts: StoolapFacts::new(),
         }
@@ -293,7 +293,7 @@ impl StoolapAdapter {
 
 // -- Feature-gated real connection implementation --
 
-#[cfg(feature = "Stoolap")]
+#[cfg(feature = "stoolap")]
 impl StoolapAdapter {
     fn connect_real(
         &mut self,
@@ -686,7 +686,7 @@ impl StoolapAdapter {
 
 // -- Stub when stoolap feature is disabled --
 
-#[cfg(not(feature = "Stoolap"))]
+#[cfg(not(feature = "stoolap"))]
 impl StoolapAdapter {
     #[allow(clippy::unnecessary_wraps)]
     fn connect_stub(
@@ -711,11 +711,11 @@ impl DatabaseAdapter for StoolapAdapter {
         &mut self,
         connection_string: &str,
     ) -> Result<(), AdapterError> {
-        #[cfg(feature = "Stoolap")]
+        #[cfg(feature = "stoolap")]
         {
             self.connect_real(connection_string)
         }
-        #[cfg(not(feature = "Stoolap"))]
+        #[cfg(not(feature = "stoolap"))]
         {
             self.connect_stub(connection_string)
         }
@@ -726,7 +726,7 @@ impl DatabaseAdapter for StoolapAdapter {
         &self,
     ) -> Result<HashMap<String, TableStats>, AdapterError>
     {
-        #[cfg(feature = "Stoolap")]
+        #[cfg(feature = "stoolap")]
         {
             // The trait requires &self but we need &mut self
             // for updating the facts cache. This is safe: we
@@ -740,7 +740,7 @@ impl DatabaseAdapter for StoolapAdapter {
             };
             this.gather_statistics_real()
         }
-        #[cfg(not(feature = "Stoolap"))]
+        #[cfg(not(feature = "stoolap"))]
         {
             Err(AdapterError::ConnectionError(
                 "Stoolap feature not enabled. \
@@ -756,7 +756,7 @@ impl DatabaseAdapter for StoolapAdapter {
         table: &str,
     ) -> Result<HashMap<String, ColumnStats>, AdapterError>
     {
-        #[cfg(feature = "Stoolap")]
+        #[cfg(feature = "stoolap")]
         {
             #[allow(clippy::cast_ref_to_mut)]
             #[allow(invalid_reference_casting)]
@@ -766,7 +766,7 @@ impl DatabaseAdapter for StoolapAdapter {
             };
             this.gather_column_stats_real(table)
         }
-        #[cfg(not(feature = "Stoolap"))]
+        #[cfg(not(feature = "stoolap"))]
         {
             let _ = table;
             Err(AdapterError::ConnectionError(
@@ -781,7 +781,7 @@ impl DatabaseAdapter for StoolapAdapter {
     fn get_schema_info(
         &self,
     ) -> Result<SchemaInfo, AdapterError> {
-        #[cfg(feature = "Stoolap")]
+        #[cfg(feature = "stoolap")]
         {
             #[allow(clippy::cast_ref_to_mut)]
             #[allow(invalid_reference_casting)]
@@ -791,7 +791,7 @@ impl DatabaseAdapter for StoolapAdapter {
             };
             this.get_schema_info_real()
         }
-        #[cfg(not(feature = "Stoolap"))]
+        #[cfg(not(feature = "stoolap"))]
         {
             Err(AdapterError::ConnectionError(
                 "Stoolap feature not enabled. \
@@ -1122,7 +1122,7 @@ mod tests {
 /// Run with: `cargo test -p ra-adapters \
 ///   --features stoolap -- --ignored`
 #[cfg(test)]
-#[cfg(feature = "Stoolap")]
+#[cfg(feature = "stoolap")]
 mod integration_tests {
     use super::*;
 

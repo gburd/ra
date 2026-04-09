@@ -163,6 +163,7 @@ fn build_rocket(redis_conn: ConnectionManager) -> rocket::Rocket<rocket::Build> 
                 websocket::isolation_ws,
                 api::visualize::visualize,
                 api::visualize::compare_plans,
+                api::hybrid::hybrid_search,
             ],
         )
         .mount("/demos", FileServer::from(static_path))
@@ -256,6 +257,7 @@ mod tests {
                     websocket::isolation_ws,
                     api::visualize::visualize,
                     api::visualize::compare_plans,
+                    api::hybrid::hybrid_search,
                 ],
             )
             .mount("/", FileServer::from(test_frontend.clone()))

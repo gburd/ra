@@ -3,14 +3,12 @@
 //! This module contains the original hand-written translation
 //! logic for the core 6 dialects.
 
-use bigdecimal::BigDecimal;
 use sqlparser::ast::{
     self, Expr, FunctionArg, FunctionArgExpr,
     FunctionArguments, Ident, ObjectName, Query, SelectItem,
     SetExpr, Statement, Value,
 };
 use sqlparser::parser::Parser;
-use std::str::FromStr;
 
 use crate::dialect::Dialect;
 use crate::error::{
@@ -529,7 +527,7 @@ fn translate_boolean(
     };
     (
         Expr::Value(Value::Number(
-            BigDecimal::from_str(&int_val.to_string()).expect("valid integer"),
+            int_val.to_string().parse().expect("valid integer"),
             false,
         )),
         vec![warning],
