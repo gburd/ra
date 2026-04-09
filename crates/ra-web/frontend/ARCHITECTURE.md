@@ -27,7 +27,7 @@ App (Root Component)
 ├── ShareDialog (Modal)
 │   └── URL TextField + Copy Button
 └── SchemaViewer (Modal)
-    ├── Schema Tabs (HR / E-Commerce)
+    ├── Schema Tabs (HR / E-Commerce / TPC-H / Sakila / Blog)
     ├── Content Tabs (Tables / Sample Queries)
     ├── Tables Tab
     │   └── DDL Viewer (syntax highlighted)

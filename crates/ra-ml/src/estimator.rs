@@ -201,6 +201,13 @@ fn estimate_heuristic(
         RelExpr::MvScan { view_name, .. } => stats
             .get_statistics(view_name)
             .map_or(1.0, |s| s.row_count),
+        RelExpr::TopK { k, input, .. } => {
+            (*k as f64).min(estimate_heuristic(input, stats))
+        }
+        RelExpr::VectorFilter { input, .. } => {
+            // Assume vector distance filter is selective (10% by default)
+            estimate_heuristic(input, stats) * 0.1
+        }
     }
 }
 
@@ -400,6 +407,9 @@ fn collect_tables_recursive(
             if let Some(s) = provider.get_statistics(view_name) {
                 map.insert(view_name.clone(), s.clone());
             }
+        }
+        RelExpr::TopK { input, .. } | RelExpr::VectorFilter { input, .. } => {
+            collect_tables_recursive(input, provider, map);
         }
     }
 }

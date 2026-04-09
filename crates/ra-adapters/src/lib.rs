@@ -15,11 +15,24 @@ use ra_stats::types::{ColumnStats, TableStats};
 use std::collections::HashMap;
 use thiserror::Error;
 
+pub mod comparison;
+pub mod duckdb;
+pub mod mysql;
 pub mod postgres;
+pub mod sqlite;
 pub mod stoolap;
 
 // Re-exports
-pub use postgres::PostgresAdapter;
+pub use comparison::{ComparisonReport, ComparisonResult, ExecutionMetrics};
+#[cfg(feature = "mysql")]
+pub use comparison::{compare_mysql_queries, compare_single_mysql_query};
+#[cfg(feature = "postgres")]
+pub use comparison::{compare_queries, compare_single_query};
+pub use duckdb::DuckDBAdapter;
+pub use mysql::MySQLAdapter;
+pub use postgres::{ExecutionResult, PostgresAdapter};
+#[cfg(feature = "sqlite")]
+pub use sqlite::SQLiteAdapter;
 pub use stoolap::StoolapAdapter;
 
 /// Errors that can occur during database adapter operations.

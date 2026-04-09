@@ -10,6 +10,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::types::IndexStats;
+use ra_core::search_types::{DistanceMetric, FullTextParser};
 
 /// Discriminated union of index access methods.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -115,6 +116,56 @@ pub enum IndexType {
         /// Underlying index structure.
         backing_type: Box<IndexType>,
     },
+    /// IVFFlat vector index (inverted file with flat compression).
+    IVFFlat {
+        /// Indexed vector column.
+        column: String,
+        /// Number of inverted lists (clusters).
+        lists: u32,
+        /// Distance metric for similarity search.
+        distance_metric: DistanceMetric,
+    },
+    /// HNSW vector index (Hierarchical Navigable Small World).
+    HNSW {
+        /// Indexed vector column.
+        column: String,
+        /// Number of bi-directional links per node.
+        m: u32,
+        /// Size of dynamic candidate list during construction.
+        ef_construction: u32,
+        /// Distance metric for similarity search.
+        distance_metric: DistanceMetric,
+    },
+    /// MySQL full-text index.
+    MySQLFullText {
+        /// Columns covered by the full-text index.
+        columns: Vec<String>,
+        /// Parser/tokenizer configuration.
+        parser: FullTextParser,
+    },
+    /// SQL Server full-text index.
+    SqlServerFullText {
+        /// Columns covered by the full-text index.
+        columns: Vec<String>,
+        /// Full-text catalog name.
+        catalog: String,
+        /// Language for word breakers and stemmers.
+        language: String,
+    },
+    /// SQLite FTS5 full-text index.
+    SQLiteFTS5 {
+        /// Columns covered by the full-text index.
+        columns: Vec<String>,
+        /// Tokenizer configuration.
+        tokenizer: FullTextParser,
+    },
+    /// SQLite vector extension index.
+    SQLiteVec {
+        /// Indexed vector column.
+        column: String,
+        /// Distance metric for similarity search.
+        distance_metric: DistanceMetric,
+    },
 }
 
 impl IndexType {
@@ -129,12 +180,18 @@ impl IndexType {
             | Self::Filtered { columns, .. }
             | Self::Columnstore { columns }
             | Self::Hash { columns }
-            | Self::Bitmap { columns } => columns,
+            | Self::Bitmap { columns }
+            | Self::MySQLFullText { columns, .. }
+            | Self::SqlServerFullText { columns, .. }
+            | Self::SQLiteFTS5 { columns, .. } => columns,
             Self::Spatial { column, .. }
             | Self::GIN { column, .. }
             | Self::GiST { column, .. }
             | Self::BRIN { column, .. }
-            | Self::RUM { column, .. } => {
+            | Self::RUM { column, .. }
+            | Self::IVFFlat { column, .. }
+            | Self::HNSW { column, .. }
+            | Self::SQLiteVec { column, .. } => {
                 std::slice::from_ref(column)
             }
             Self::Expression { backing_type, .. } => {
@@ -158,7 +215,17 @@ impl IndexType {
 
     /// Whether this index supports equality lookups.
     pub fn supports_equality(&self) -> bool {
-        !matches!(self, Self::FullText { .. } | Self::Columnstore { .. })
+        !matches!(
+            self,
+            Self::FullText { .. }
+                | Self::Columnstore { .. }
+                | Self::MySQLFullText { .. }
+                | Self::SqlServerFullText { .. }
+                | Self::SQLiteFTS5 { .. }
+                | Self::IVFFlat { .. }
+                | Self::HNSW { .. }
+                | Self::SQLiteVec { .. }
+        )
     }
 
     /// Whether the index is a covering index for the given columns.
@@ -176,6 +243,41 @@ impl IndexType {
                 required.iter().all(|c| keys.contains(c))
             }
         }
+    }
+
+    /// Whether this index supports k-nearest neighbors (exact) search.
+    pub fn supports_knn(&self) -> bool {
+        matches!(self, Self::SQLiteVec { .. })
+    }
+
+    /// Whether this index supports approximate nearest neighbors search.
+    pub fn supports_ann(&self) -> bool {
+        matches!(self, Self::IVFFlat { .. } | Self::HNSW { .. })
+    }
+
+    /// Whether this index supports phrase search.
+    pub fn supports_phrase_search(&self) -> bool {
+        matches!(
+            self,
+            Self::FullText { .. }
+                | Self::MySQLFullText { .. }
+                | Self::SqlServerFullText { .. }
+                | Self::SQLiteFTS5 { .. }
+                | Self::RUM { .. }
+        )
+    }
+
+    /// Whether this index supports proximity search.
+    pub fn supports_proximity(&self) -> bool {
+        matches!(
+            self,
+            Self::FullText { .. }
+                | Self::MySQLFullText { .. }
+                | Self::SqlServerFullText { .. }
+                | Self::SQLiteFTS5 { .. }
+                | Self::RUM { .. }
+                | Self::GIN { .. }
+        )
     }
 }
 
@@ -269,6 +371,61 @@ impl IndexCostFactors {
             range_scan_cost: 0.05,
             tuple_fetch_cost: 0.0,
             covering: true,
+        }
+    }
+
+    /// Default cost factors for an IVFFlat vector index.
+    ///
+    /// IVFFlat uses inverted file structure with flat compression.
+    /// Lookup cost is moderate (cluster selection + scan), range scan
+    /// is relatively expensive as it requires visiting multiple clusters.
+    pub fn ivfflat_default() -> Self {
+        Self {
+            lookup_cost: 5.0,
+            range_scan_cost: 2.0,
+            tuple_fetch_cost: 1.5,
+            covering: false,
+        }
+    }
+
+    /// Default cost factors for an HNSW vector index.
+    ///
+    /// HNSW provides faster approximate nearest neighbor search
+    /// via hierarchical graph structure. Lookup cost is higher
+    /// due to graph traversal, but range scan is more efficient.
+    pub fn hnsw_default() -> Self {
+        Self {
+            lookup_cost: 6.0,
+            range_scan_cost: 1.0,
+            tuple_fetch_cost: 1.5,
+            covering: false,
+        }
+    }
+
+    /// Default cost factors for a full-text search index.
+    ///
+    /// Full-text indexes use inverted index structure similar to GIN
+    /// but optimized for text search. Lookup cost includes term
+    /// dictionary access and posting list retrieval.
+    pub fn fulltext_default() -> Self {
+        Self {
+            lookup_cost: 3.5,
+            range_scan_cost: 0.4,
+            tuple_fetch_cost: 2.0,
+            covering: false,
+        }
+    }
+
+    /// Default cost factors for SQLite vector extension.
+    ///
+    /// SQLite-vec provides exact k-NN search with brute force scan.
+    /// Lookup cost is low but range scan is expensive (linear scan).
+    pub fn sqlite_vec_default() -> Self {
+        Self {
+            lookup_cost: 2.0,
+            range_scan_cost: 5.0,
+            tuple_fetch_cost: 1.0,
+            covering: false,
         }
     }
 
@@ -575,6 +732,383 @@ mod tests {
             table: "events".into(),
             statistics: sample_stats(),
             cost_factors: IndexCostFactors::gin_default(),
+        };
+        let json = serde_json::to_string(&meta).expect("serialize");
+        let back: IndexMetadata =
+            serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(meta, back);
+    }
+
+    // -- Vector Index Types --
+
+    #[test]
+    fn ivfflat_single_column_key() {
+        let idx = IndexType::IVFFlat {
+            column: "embedding".into(),
+            lists: 100,
+            distance_metric: DistanceMetric::L2,
+        };
+        assert_eq!(idx.key_columns(), &["embedding".to_string()]);
+    }
+
+    #[test]
+    fn ivfflat_supports_ann() {
+        let idx = IndexType::IVFFlat {
+            column: "embedding".into(),
+            lists: 100,
+            distance_metric: DistanceMetric::Cosine,
+        };
+        assert!(idx.supports_ann());
+        assert!(!idx.supports_knn());
+        assert!(!idx.supports_equality());
+        assert!(!idx.supports_range_scan());
+    }
+
+    #[test]
+    fn hnsw_single_column_key() {
+        let idx = IndexType::HNSW {
+            column: "vector".into(),
+            m: 16,
+            ef_construction: 64,
+            distance_metric: DistanceMetric::InnerProduct,
+        };
+        assert_eq!(idx.key_columns(), &["vector".to_string()]);
+    }
+
+    #[test]
+    fn hnsw_supports_ann() {
+        let idx = IndexType::HNSW {
+            column: "vector".into(),
+            m: 16,
+            ef_construction: 64,
+            distance_metric: DistanceMetric::L2,
+        };
+        assert!(idx.supports_ann());
+        assert!(!idx.supports_knn());
+        assert!(!idx.supports_equality());
+        assert!(!idx.supports_range_scan());
+    }
+
+    #[test]
+    fn sqlite_vec_single_column_key() {
+        let idx = IndexType::SQLiteVec {
+            column: "vec".into(),
+            distance_metric: DistanceMetric::Cosine,
+        };
+        assert_eq!(idx.key_columns(), &["vec".to_string()]);
+    }
+
+    #[test]
+    fn sqlite_vec_supports_knn() {
+        let idx = IndexType::SQLiteVec {
+            column: "vec".into(),
+            distance_metric: DistanceMetric::L2,
+        };
+        assert!(idx.supports_knn());
+        assert!(!idx.supports_ann());
+        assert!(!idx.supports_equality());
+        assert!(!idx.supports_range_scan());
+    }
+
+    // -- Full-Text Index Types --
+
+    #[test]
+    fn mysql_fulltext_key_columns() {
+        let idx = IndexType::MySQLFullText {
+            columns: vec!["title".into(), "body".into()],
+            parser: FullTextParser::Standard,
+        };
+        assert_eq!(idx.key_columns().len(), 2);
+        assert!(idx.key_columns().contains(&"title".to_string()));
+        assert!(idx.key_columns().contains(&"body".to_string()));
+    }
+
+    #[test]
+    fn mysql_fulltext_supports_phrase_search() {
+        let idx = IndexType::MySQLFullText {
+            columns: vec!["content".into()],
+            parser: FullTextParser::NGram { size: 2 },
+        };
+        assert!(idx.supports_phrase_search());
+        assert!(idx.supports_proximity());
+        assert!(!idx.supports_equality());
+        assert!(!idx.supports_range_scan());
+    }
+
+    #[test]
+    fn sqlserver_fulltext_key_columns() {
+        let idx = IndexType::SqlServerFullText {
+            columns: vec!["description".into()],
+            catalog: "ft_catalog".into(),
+            language: "English".into(),
+        };
+        assert_eq!(idx.key_columns(), &["description".to_string()]);
+    }
+
+    #[test]
+    fn sqlserver_fulltext_supports_phrase_search() {
+        let idx = IndexType::SqlServerFullText {
+            columns: vec!["text".into()],
+            catalog: "ft_catalog".into(),
+            language: "English".into(),
+        };
+        assert!(idx.supports_phrase_search());
+        assert!(idx.supports_proximity());
+        assert!(!idx.supports_equality());
+        assert!(!idx.supports_range_scan());
+    }
+
+    #[test]
+    fn sqlite_fts5_key_columns() {
+        let idx = IndexType::SQLiteFTS5 {
+            columns: vec!["name".into(), "description".into()],
+            tokenizer: FullTextParser::Porter,
+        };
+        assert_eq!(idx.key_columns().len(), 2);
+    }
+
+    #[test]
+    fn sqlite_fts5_supports_phrase_search() {
+        let idx = IndexType::SQLiteFTS5 {
+            columns: vec!["content".into()],
+            tokenizer: FullTextParser::Unicode,
+        };
+        assert!(idx.supports_phrase_search());
+        assert!(idx.supports_proximity());
+        assert!(!idx.supports_equality());
+        assert!(!idx.supports_range_scan());
+    }
+
+    // -- Cost Factors --
+
+    #[test]
+    fn ivfflat_default_factors() {
+        let f = IndexCostFactors::ivfflat_default();
+        assert_eq!(f.lookup_cost, 5.0);
+        assert_eq!(f.range_scan_cost, 2.0);
+        assert!(!f.covering);
+    }
+
+    #[test]
+    fn hnsw_default_factors() {
+        let f = IndexCostFactors::hnsw_default();
+        assert_eq!(f.lookup_cost, 6.0);
+        assert_eq!(f.range_scan_cost, 1.0);
+        assert!(!f.covering);
+    }
+
+    #[test]
+    fn fulltext_default_factors() {
+        let f = IndexCostFactors::fulltext_default();
+        assert_eq!(f.lookup_cost, 3.5);
+        assert_eq!(f.range_scan_cost, 0.4);
+        assert!(!f.covering);
+    }
+
+    #[test]
+    fn sqlite_vec_default_factors() {
+        let f = IndexCostFactors::sqlite_vec_default();
+        assert_eq!(f.lookup_cost, 2.0);
+        assert_eq!(f.range_scan_cost, 5.0);
+        assert!(!f.covering);
+    }
+
+    #[test]
+    fn hnsw_faster_than_ivfflat_for_range() {
+        let hnsw = IndexCostFactors::hnsw_default();
+        let ivfflat = IndexCostFactors::ivfflat_default();
+        assert!(hnsw.range_scan_cost < ivfflat.range_scan_cost);
+    }
+
+    // -- Serialization Tests --
+
+    #[test]
+    fn serialize_ivfflat() {
+        let idx = IndexType::IVFFlat {
+            column: "emb".into(),
+            lists: 50,
+            distance_metric: DistanceMetric::Cosine,
+        };
+        let json = serde_json::to_string(&idx).expect("serialize");
+        let back: IndexType = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(idx, back);
+    }
+
+    #[test]
+    fn serialize_hnsw() {
+        let idx = IndexType::HNSW {
+            column: "vec".into(),
+            m: 32,
+            ef_construction: 128,
+            distance_metric: DistanceMetric::L2,
+        };
+        let json = serde_json::to_string(&idx).expect("serialize");
+        let back: IndexType = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(idx, back);
+    }
+
+    #[test]
+    fn serialize_mysql_fulltext() {
+        let idx = IndexType::MySQLFullText {
+            columns: vec!["a".into(), "b".into()],
+            parser: FullTextParser::NGram { size: 3 },
+        };
+        let json = serde_json::to_string(&idx).expect("serialize");
+        let back: IndexType = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(idx, back);
+    }
+
+    #[test]
+    fn serialize_sqlserver_fulltext() {
+        let idx = IndexType::SqlServerFullText {
+            columns: vec!["text".into()],
+            catalog: "cat".into(),
+            language: "en".into(),
+        };
+        let json = serde_json::to_string(&idx).expect("serialize");
+        let back: IndexType = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(idx, back);
+    }
+
+    #[test]
+    fn serialize_sqlite_fts5() {
+        let idx = IndexType::SQLiteFTS5 {
+            columns: vec!["c1".into()],
+            tokenizer: FullTextParser::Porter,
+        };
+        let json = serde_json::to_string(&idx).expect("serialize");
+        let back: IndexType = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(idx, back);
+    }
+
+    #[test]
+    fn serialize_sqlite_vec() {
+        let idx = IndexType::SQLiteVec {
+            column: "v".into(),
+            distance_metric: DistanceMetric::L1,
+        };
+        let json = serde_json::to_string(&idx).expect("serialize");
+        let back: IndexType = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(idx, back);
+    }
+
+    #[test]
+    fn serialize_toml_vector_index() {
+        let idx = IndexType::HNSW {
+            column: "embedding".into(),
+            m: 16,
+            ef_construction: 64,
+            distance_metric: DistanceMetric::Cosine,
+        };
+        let toml = toml::to_string(&idx).expect("serialize");
+        let back: IndexType = toml::from_str(&toml).expect("deserialize");
+        assert_eq!(idx, back);
+    }
+
+    #[test]
+    fn serialize_toml_fulltext_index() {
+        let idx = IndexType::MySQLFullText {
+            columns: vec!["title".into(), "body".into()],
+            parser: FullTextParser::Standard,
+        };
+        let toml = toml::to_string(&idx).expect("serialize");
+        let back: IndexType = toml::from_str(&toml).expect("deserialize");
+        assert_eq!(idx, back);
+    }
+
+    // -- Capability Tests --
+
+    #[test]
+    fn vector_indexes_dont_support_traditional_ops() {
+        let ivfflat = IndexType::IVFFlat {
+            column: "v".into(),
+            lists: 100,
+            distance_metric: DistanceMetric::L2,
+        };
+        let hnsw = IndexType::HNSW {
+            column: "v".into(),
+            m: 16,
+            ef_construction: 64,
+            distance_metric: DistanceMetric::L2,
+        };
+        let sqlite_vec = IndexType::SQLiteVec {
+            column: "v".into(),
+            distance_metric: DistanceMetric::Cosine,
+        };
+
+        for idx in &[ivfflat, hnsw, sqlite_vec] {
+            assert!(!idx.supports_equality());
+            assert!(!idx.supports_range_scan());
+            assert!(!idx.supports_phrase_search());
+            assert!(!idx.supports_proximity());
+        }
+    }
+
+    #[test]
+    fn fulltext_indexes_dont_support_vector_ops() {
+        let mysql = IndexType::MySQLFullText {
+            columns: vec!["text".into()],
+            parser: FullTextParser::Standard,
+        };
+        let sqlserver = IndexType::SqlServerFullText {
+            columns: vec!["text".into()],
+            catalog: "c".into(),
+            language: "en".into(),
+        };
+        let sqlite = IndexType::SQLiteFTS5 {
+            columns: vec!["text".into()],
+            tokenizer: FullTextParser::Unicode,
+        };
+
+        for idx in &[mysql, sqlserver, sqlite] {
+            assert!(!idx.supports_knn());
+            assert!(!idx.supports_ann());
+        }
+    }
+
+    #[test]
+    fn btree_supports_neither_vector_nor_fulltext() {
+        let idx = IndexType::Clustered {
+            columns: vec!["id".into()],
+        };
+        assert!(!idx.supports_knn());
+        assert!(!idx.supports_ann());
+        assert!(!idx.supports_phrase_search());
+    }
+
+    // -- Integration Tests --
+
+    #[test]
+    fn vector_index_metadata_roundtrip() {
+        let meta = IndexMetadata {
+            name: "idx_embeddings".into(),
+            index_type: IndexType::HNSW {
+                column: "embedding".into(),
+                m: 16,
+                ef_construction: 64,
+                distance_metric: DistanceMetric::Cosine,
+            },
+            table: "documents".into(),
+            statistics: sample_stats(),
+            cost_factors: IndexCostFactors::hnsw_default(),
+        };
+        let json = serde_json::to_string(&meta).expect("serialize");
+        let back: IndexMetadata =
+            serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(meta, back);
+    }
+
+    #[test]
+    fn fulltext_index_metadata_roundtrip() {
+        let meta = IndexMetadata {
+            name: "idx_content_ft".into(),
+            index_type: IndexType::MySQLFullText {
+                columns: vec!["title".into(), "body".into()],
+                parser: FullTextParser::NGram { size: 2 },
+            },
+            table: "articles".into(),
+            statistics: sample_stats(),
+            cost_factors: IndexCostFactors::fulltext_default(),
         };
         let json = serde_json::to_string(&meta).expect("serialize");
         let back: IndexMetadata =

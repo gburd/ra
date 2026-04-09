@@ -386,6 +386,30 @@ fn render_expr(expr: &RelExpr, ctx: &mut RenderContext) {
                 None => format!("{view_name} -- MV Scan"),
             };
         }
+        RelExpr::TopK { vector_expr, query_vector, metric, k, input } => {
+            render_expr(input, ctx);
+            ctx.from = format!(
+                "{} -- TopK vector search (metric={:?}, k={})",
+                ctx.from, metric, k
+            );
+            ctx.order_by = vec![format!(
+                "vector_distance({}, {}, {:?})",
+                render_scalar(vector_expr),
+                render_scalar(query_vector),
+                metric
+            )];
+            ctx.limit = Some(*k);
+        }
+        RelExpr::VectorFilter { vector_expr, query_vector, metric, threshold, input } => {
+            render_expr(input, ctx);
+            ctx.where_clauses.push(format!(
+                "vector_distance({}, {}, {:?}) < {}",
+                render_scalar(vector_expr),
+                render_scalar(query_vector),
+                metric,
+                threshold
+            ));
+        }
     }
 }
 
@@ -507,6 +531,21 @@ fn render_scalar(expr: &Expr) -> String {
                     }
                 }
             }
+        }
+        Expr::FullTextMatch { vendor, columns, query, mode } => {
+            let cols = columns.join(", ");
+            match mode {
+                Some(m) => format!("{}:MATCH({}, '{}', {})", vendor, cols, query, m),
+                None => format!("{}:MATCH({}, '{}')", vendor, cols, query),
+            }
+        }
+        Expr::VectorDistance { metric, column, target } => {
+            format!(
+                "vector_distance({}, {}, {})",
+                render_scalar(column),
+                render_scalar(target),
+                metric
+            )
         }
     }
 }

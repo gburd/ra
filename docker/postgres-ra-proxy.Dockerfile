@@ -85,8 +85,12 @@ RUN cargo new --bin crates/ra-proxy
 
 WORKDIR /build/crates/ra-proxy
 
-# Add dependencies for proxy
-RUN cat >> Cargo.toml <<'EOF'
+# Replace Cargo.toml with dependencies for proxy
+RUN cat > Cargo.toml <<'EOF'
+[package]
+name = "ra-proxy"
+version = "0.1.0"
+edition = "2021"
 
 [dependencies]
 ra-core = { path = "../ra-core" }

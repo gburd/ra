@@ -689,6 +689,109 @@ impl IntegratedCostModel {
         total_cost * effective_fraction
     }
 
+    /// Estimate cost for a vector similarity search using HNSW index.
+    ///
+    /// HNSW provides logarithmic search complexity with high recall.
+    /// Target: 10-100x speedup vs sequential scan.
+    #[must_use]
+    pub fn vector_hnsw_cost(
+        &self,
+        table: &str,
+        dimensions: usize,
+        m: usize,
+        ef_search: usize,
+        k: usize,
+        metric: crate::vector_cost::VectorMetric,
+    ) -> f64 {
+        let stats = self.effective_statistics(table);
+        let total_vectors = stats.row_count as usize;
+
+        let cost = crate::vector_cost::hnsw_search_cost(
+            dimensions,
+            m,
+            ef_search,
+            total_vectors,
+            k,
+            metric,
+        );
+
+        let disc = self.confidence_for_table(table);
+        cost.total() * disc
+    }
+
+    /// Estimate cost for a vector similarity search using IVFFlat index.
+    ///
+    /// IVFFlat provides constant-factor speedup with tunable recall.
+    /// Target: 5-50x speedup vs sequential scan.
+    #[must_use]
+    pub fn vector_ivfflat_cost(
+        &self,
+        table: &str,
+        dimensions: usize,
+        lists: usize,
+        probes: usize,
+        k: usize,
+        metric: crate::vector_cost::VectorMetric,
+    ) -> f64 {
+        let stats = self.effective_statistics(table);
+        let total_vectors = stats.row_count as usize;
+
+        let cost = crate::vector_cost::ivfflat_search_cost(
+            dimensions,
+            lists,
+            probes,
+            total_vectors,
+            k,
+            metric,
+        );
+
+        let disc = self.confidence_for_table(table);
+        cost.total() * disc
+    }
+
+    /// Estimate cost for a sequential vector scan (no index).
+    #[must_use]
+    pub fn vector_sequential_cost(
+        &self,
+        table: &str,
+        dimensions: usize,
+        metric: crate::vector_cost::VectorMetric,
+    ) -> f64 {
+        let stats = self.effective_statistics(table);
+        let total_vectors = stats.row_count as usize;
+
+        let cost = crate::vector_cost::vector_sequential_scan_cost(
+            dimensions,
+            total_vectors,
+            metric,
+        );
+
+        let disc = self.confidence_for_table(table);
+        cost.total() * disc
+    }
+
+    /// Select the best vector index type for a workload.
+    ///
+    /// Returns recommendation with expected speedup and recall.
+    #[must_use]
+    pub fn recommend_vector_index(
+        &self,
+        table: &str,
+        dimensions: usize,
+        query_frequency: crate::vector_cost::QueryFrequency,
+        recall_requirement: f64,
+    ) -> crate::vector_cost::VectorIndexRecommendation {
+        let stats = self.effective_statistics(table);
+        let total_vectors = stats.row_count as usize;
+
+        crate::vector_cost::select_vector_index_type(
+            total_vectors,
+            dimensions,
+            query_frequency,
+            recall_requirement,
+        )
+    }
+
     /// Compute the confidence discount for a table.
     fn confidence_for_table(&self, table: &str) -> f64 {
         self.adapter
@@ -994,6 +1097,7 @@ enum OperationType {
 
 /// Extract a table name from an operator description like
 /// `SeqScan on lineitem` or `Index Scan on orders`.
+#[allow(dead_code)]
 fn extract_table_from_operator(operator: &str) -> Option<String> {
     let lower = operator.to_lowercase();
     if let Some(pos) = lower.find(" on ") {
@@ -1012,6 +1116,7 @@ fn extract_table_from_operator(operator: &str) -> Option<String> {
 }
 
 /// Extract the first table name from a SQL query's FROM clause.
+#[allow(dead_code)]
 fn extract_table_from_query(query: &str) -> Option<String> {
     let lower = query.to_lowercase();
     let from_pos = lower.find(" from ")?;

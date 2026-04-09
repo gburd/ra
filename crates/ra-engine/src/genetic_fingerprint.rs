@@ -304,6 +304,12 @@ impl FingerprintCollector {
             | RelExpr::MultiUnnest { .. }
             | RelExpr::RowPattern { .. }
             | RelExpr::MvScan { .. } => {}
+            RelExpr::TopK { input, .. } => {
+                self.visit(input);
+            }
+            RelExpr::VectorFilter { input, .. } => {
+                self.visit(input);
+            }
         }
     }
 
@@ -422,6 +428,13 @@ impl FingerprintCollector {
             | Expr::PatternClassifier
             | Expr::PatternMatchNumber => {
                 self.predicate_ops.push(0x0A);
+            }
+            // Vector and FTS expressions: record tag only
+            Expr::FullTextMatch { .. } => {
+                self.predicate_ops.push(0x0B);
+            }
+            Expr::VectorDistance { .. } => {
+                self.predicate_ops.push(0x0C);
             }
         }
     }

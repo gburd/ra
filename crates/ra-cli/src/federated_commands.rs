@@ -259,5 +259,9 @@ fn collect_tables_recursive(expr: &ra_core::algebra::RelExpr, out: &mut Vec<Stri
         | ra_core::algebra::RelExpr::TableFunction { .. }
         | ra_core::algebra::RelExpr::RowPattern { .. }
         | ra_core::algebra::RelExpr::MvScan { .. } => {}
+        ra_core::algebra::RelExpr::TopK { input, .. }
+        | ra_core::algebra::RelExpr::VectorFilter { input, .. } => {
+            collect_tables_recursive(input, out);
+        }
     }
 }

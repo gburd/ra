@@ -1,0 +1,93 @@
+# pg_textsearch Extension Profile
+#
+# TimescaleDB/PostgreSQL full-text search extension
+# Enhanced text search with better ranking and performance
+# https://github.com/timescale/pg_textsearch
+
+[profile]
+name = "pg_textsearch"
+vendor = "postgresql"
+description = "TimescaleDB pg_textsearch extension for enhanced full-text search"
+inherits_from = "postgresql-17"
+
+[features]
+text_search = true
+tsvector_ops = true
+tsquery_ops = true
+ts_ranking = true
+gin_index = true
+rum_index = true
+
+[syntax]
+tsvector_type = "tsvector"
+tsquery_type = "tsquery"
+regconfig_type = "regconfig"
+
+[operators]
+# Text search match operator
+ts_match = "@@"           # tsvector @@ tsquery
+ts_match_reverse = "@@"   # tsquery @@ tsvector
+
+# Concatenation operators
+ts_concat = "||"          # Concatenate tsvectors or tsqueries
+
+# Containment operators (for GIN indexes)
+contains = "@>"           # tsvector @> tsquery (contains)
+contained_by = "<@"       # tsvector <@ tsquery (contained by)
+
+[functions]
+# Text search configuration
+config_funcs = ["get_current_ts_config", "set_default_text_search_config"]
+
+# Converting text to tsvector
+to_tsvector_funcs = [
+    "to_tsvector",        # to_tsvector([config,] text)
+    "to_tsvector_multilang",  # Multiple language support
+]
+
+# Converting text to tsquery
+to_tsquery_funcs = [
+    "to_tsquery",         # to_tsquery([config,] text)
+    "plainto_tsquery",    # plainto_tsquery([config,] text)
+    "phraseto_tsquery",   # phraseto_tsquery([config,] text)
+    "websearch_to_tsquery",  # websearch_to_tsquery([config,] text)
+]
+
+# Ranking functions
+ranking_funcs = [
+    "ts_rank",            # ts_rank([weights,] tsvector, tsquery [,normalization])
+    "ts_rank_cd",         # ts_rank_cd([weights,] tsvector, tsquery [,normalization])
+    "ts_score",           # Enhanced scoring function from pg_textsearch
+]
+
+# Headline generation
+headline_funcs = [
+    "ts_headline",        # ts_headline([config,] text, tsquery [,options])
+]
+
+# Statistics and debugging
+stats_funcs = [
+    "ts_stat",            # Get statistics about tsvector column
+    "ts_debug",           # Debug text search configuration
+    "ts_lexize",          # Test dictionary
+]
+
+# Query manipulation
+query_funcs = [
+    "tsquery_phrase",     # Combine tsqueries with phrase operator
+    "querytree",          # Show tsquery tree
+]
+
+# Vector manipulation
+vector_funcs = [
+    "strip",              # Remove positions/weights from tsvector
+    "setweight",          # Set weight for tsvector
+    "length",             # Number of lexemes in tsvector
+    "numnode",            # Number of nodes in tsquery
+]
+
+[validation]
+check_tsvector_format = true
+check_tsquery_syntax = true
+warn_on_missing_index = true
+recommend_gin_over_gist = true

@@ -1,0 +1,36 @@
+# pg_trgm Extension Profile
+#
+# PostgreSQL trigram similarity matching extension.
+# Provides operators for fuzzy string matching and full-text search.
+
+[profile]
+name = "pg_trgm"
+vendor = "postgresql"
+description = "PostgreSQL trigram similarity matching extension"
+inherits_from = "postgresql-17"
+
+[features]
+trigram_matching = true
+similarity_operators = true
+gin_trgm_ops = true
+gist_trgm_ops = true
+
+[operators]
+# Similarity operators
+similarity = "%"           # Returns similarity between strings
+distance = "<->"          # Distance operator (lower = more similar)
+word_similarity = "<%"     # Word similarity
+word_distance = "<->>"     # Word distance
+strict_word_similarity = "<<%"
+strict_word_distance = "<<<->>"
+
+[functions]
+# Similarity functions
+similarity_funcs = ["similarity", "word_similarity", "strict_word_similarity"]
+# Trigram operations
+trigram_ops = ["show_trgm", "show_limit", "set_limit"]
+
+[validation]
+check_similarity_threshold = true
+min_similarity = 0.0
+max_similarity = 1.0

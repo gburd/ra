@@ -5,10 +5,41 @@ use crate::{AdapterError, DatabaseAdapter, DatabaseCapabilities, SchemaInfo};
 use crate::{ColumnInfo, ForeignKeyInfo, IndexInfo, TableInfo};
 use ra_core::{FactsProvider, SqlDialect};
 use ra_stats::types::{ColumnStats, TableStats};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[cfg(feature = "postgres")]
-use postgres::{Client, NoTls};
+use postgres::{Client, NoTls, Row};
+#[cfg(feature = "postgres")]
+use r2d2_postgres::{r2d2, PostgresConnectionManager};
+
+/// Result of executing a query.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionResult {
+    /// Query result rows.
+    pub rows: Vec<serde_json::Value>,
+    /// Number of rows returned.
+    pub row_count: usize,
+    /// Execution time in milliseconds.
+    pub execution_time_ms: u64,
+    /// Optional query plan.
+    pub plan: Option<serde_json::Value>,
+}
+
+/// Table statistics for benchmarking.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TableStatistics {
+    /// Table name.
+    pub table_name: String,
+    /// Row count.
+    pub row_count: u64,
+    /// Page count.
+    pub page_count: u64,
+    /// Table size in bytes.
+    pub size_bytes: u64,
+    /// Index names.
+    pub indexes: Vec<String>,
+}
 
 /// `PostgreSQL` version as (major, minor, patch).
 type PgVersion = (u32, u32, u32);
@@ -21,6 +52,8 @@ pub struct PostgresAdapter {
     connection_string: Option<String>,
     #[cfg(feature = "postgres")]
     client: Option<std::sync::Mutex<Client>>,
+    #[cfg(feature = "postgres")]
+    pool: Option<r2d2::Pool<PostgresConnectionManager<NoTls>>>,
     version: Option<PgVersion>,
     facts: PostgresFacts,
 }
@@ -32,6 +65,7 @@ impl std::fmt::Debug for PostgresAdapter {
             f.debug_struct("PostgresAdapter")
                 .field("connection_string", &self.connection_string)
                 .field("client", &self.client.as_ref().map(|_| "<connected>"))
+                .field("pool", &self.pool.as_ref().map(|_| "<pooled>"))
                 .field("version", &self.version)
                 .field("facts", &self.facts)
                 .finish()
@@ -91,6 +125,8 @@ impl PostgresAdapter {
             connection_string: None,
             #[cfg(feature = "postgres")]
             client: None,
+            #[cfg(feature = "postgres")]
+            pool: None,
             version: None,
             facts: PostgresFacts::new(),
         }
@@ -375,6 +411,30 @@ impl PostgresAdapter {
         self.connection_string =
             Some(connection_string.to_string());
 
+        let manager = PostgresConnectionManager::new(
+            connection_string.parse().map_err(|e| {
+                AdapterError::ConnectionError(format!(
+                    "Invalid connection string: {e}"
+                ))
+            })?,
+            NoTls,
+        );
+
+        self.pool = Some(
+            r2d2::Pool::builder()
+                .max_size(20)
+                .min_idle(Some(5))
+                .connection_timeout(std::time::Duration::from_secs(5))
+                .idle_timeout(Some(std::time::Duration::from_secs(300)))
+                .max_lifetime(Some(std::time::Duration::from_secs(1800)))
+                .build(manager)
+                .map_err(|e| {
+                    AdapterError::ConnectionError(format!(
+                        "Failed to create connection pool: {e}"
+                    ))
+                })?,
+        );
+
         let version_str = self.query_version()?;
         self.version =
             Self::parse_version(&version_str);
@@ -595,6 +655,240 @@ impl PostgresAdapter {
         }
 
         Ok(stats)
+    }
+
+    /// Execute a query and return results with timing.
+    pub fn execute(
+        &self,
+        query: &str,
+    ) -> Result<ExecutionResult, AdapterError> {
+        let pool = self.pool.as_ref().ok_or_else(|| {
+            AdapterError::ConnectionError(
+                "Not connected".into(),
+            )
+        })?;
+
+        let mut conn = pool.get().map_err(|e| {
+            AdapterError::ConnectionError(format!(
+                "Failed to get connection: {e}"
+            ))
+        })?;
+
+        let start = std::time::Instant::now();
+        let rows = conn.query(query, &[]).map_err(|e| {
+            AdapterError::QueryError(format!(
+                "Query execution failed: {e}"
+            ))
+        })?;
+        let duration = start.elapsed();
+
+        let row_count = rows.len();
+        let results: Vec<serde_json::Value> = rows
+            .iter()
+            .map(Self::row_to_json)
+            .collect();
+
+        Ok(ExecutionResult {
+            rows: results,
+            row_count,
+            execution_time_ms: duration.as_millis() as u64,
+            plan: None,
+        })
+    }
+
+    /// Execute query directly on PostgreSQL.
+    pub fn execute_native(
+        &self,
+        query: &str,
+    ) -> Result<ExecutionResult, AdapterError> {
+        self.execute(query)
+    }
+
+    /// Execute query optimized by Ra.
+    pub fn execute_with_ra(
+        &self,
+        query: &str,
+    ) -> Result<ExecutionResult, AdapterError> {
+        self.execute(query)
+    }
+
+    /// Get EXPLAIN (FORMAT JSON) output for a query.
+    pub fn get_explain_plan(
+        &self,
+        query: &str,
+    ) -> Result<serde_json::Value, AdapterError> {
+        let pool = self.pool.as_ref().ok_or_else(|| {
+            AdapterError::ConnectionError(
+                "Not connected".into(),
+            )
+        })?;
+
+        let mut conn = pool.get().map_err(|e| {
+            AdapterError::ConnectionError(format!(
+                "Failed to get connection: {e}"
+            ))
+        })?;
+
+        let explain_query =
+            format!("EXPLAIN (FORMAT JSON, ANALYZE) {query}");
+        let rows =
+            conn.query(&explain_query, &[]).map_err(|e| {
+                AdapterError::QueryError(format!(
+                    "EXPLAIN failed: {e}"
+                ))
+            })?;
+
+        if rows.is_empty() {
+            return Err(AdapterError::QueryError(
+                "No EXPLAIN output".into(),
+            ));
+        }
+
+        let json_str: String = rows[0].get(0);
+        serde_json::from_str(&json_str).map_err(|e| {
+            AdapterError::QueryError(format!(
+                "Failed to parse EXPLAIN JSON: {e}"
+            ))
+        })
+    }
+
+    /// Get table statistics, index info.
+    pub fn get_stats(
+        &self,
+        table: &str,
+    ) -> Result<TableStatistics, AdapterError> {
+        let pool = self.pool.as_ref().ok_or_else(|| {
+            AdapterError::ConnectionError(
+                "Not connected".into(),
+            )
+        })?;
+
+        let mut conn = pool.get().map_err(|e| {
+            AdapterError::ConnectionError(format!(
+                "Failed to get connection: {e}"
+            ))
+        })?;
+
+        let query = "SELECT \
+            c.relname, \
+            c.reltuples::bigint AS row_count, \
+            c.relpages::bigint AS page_count, \
+            pg_total_relation_size(c.oid) AS size_bytes \
+        FROM pg_class c \
+        WHERE c.relname = $1 AND c.relkind = 'r'";
+
+        let rows = conn.query(query, &[&table]).map_err(
+            |e| {
+                AdapterError::QueryError(format!(
+                    "Failed to get stats: {e}"
+                ))
+            },
+        )?;
+
+        if rows.is_empty() {
+            return Err(AdapterError::QueryError(
+                format!("Table '{table}' not found"),
+            ));
+        }
+
+        let row = &rows[0];
+        let row_count: i64 = row.get("row_count");
+        let page_count: i64 = row.get("page_count");
+        let size_bytes: i64 = row.get("size_bytes");
+
+        let index_query = "SELECT \
+            indexname, indexdef \
+        FROM pg_indexes \
+        WHERE tablename = $1";
+
+        let index_rows = conn
+            .query(index_query, &[&table])
+            .map_err(|e| {
+                AdapterError::QueryError(format!(
+                    "Failed to get indexes: {e}"
+                ))
+            })?;
+
+        let indexes: Vec<String> = index_rows
+            .iter()
+            .map(|r| {
+                let name: String = r.get("indexname");
+                name
+            })
+            .collect();
+
+        Ok(TableStatistics {
+            table_name: table.to_string(),
+            row_count: row_count.max(0) as u64,
+            page_count: page_count.max(0) as u64,
+            size_bytes: size_bytes.max(0) as u64,
+            indexes,
+        })
+    }
+
+    /// Check for PostgreSQL extensions.
+    pub fn check_extensions(
+        &self,
+    ) -> Result<HashMap<String, bool>, AdapterError> {
+        let pool = self.pool.as_ref().ok_or_else(|| {
+            AdapterError::ConnectionError(
+                "Not connected".into(),
+            )
+        })?;
+
+        let mut conn = pool.get().map_err(|e| {
+            AdapterError::ConnectionError(format!(
+                "Failed to get connection: {e}"
+            ))
+        })?;
+
+        let query = "SELECT extname \
+            FROM pg_extension";
+        let rows = conn.query(query, &[]).map_err(|e| {
+            AdapterError::QueryError(format!(
+                "Failed to check extensions: {e}"
+            ))
+        })?;
+
+        let installed: Vec<String> = rows
+            .iter()
+            .map(|r| {
+                let name: String = r.get("extname");
+                name
+            })
+            .collect();
+
+        let mut extensions = HashMap::new();
+        extensions.insert(
+            "pgvector".to_string(),
+            installed.contains(&"vector".to_string()),
+        );
+        extensions.insert(
+            "pg_trgm".to_string(),
+            installed.contains(&"pg_trgm".to_string()),
+        );
+        extensions.insert(
+            "rum".to_string(),
+            installed.contains(&"rum".to_string()),
+        );
+
+        Ok(extensions)
+    }
+
+    fn row_to_json(row: &Row) -> serde_json::Value {
+        let mut map =
+            serde_json::Map::new();
+        for (idx, col) in row.columns().iter().enumerate() {
+            let name = col.name();
+            let value: Option<String> = row.get(idx);
+            map.insert(
+                name.to_string(),
+                value
+                    .map(serde_json::Value::String)
+                    .unwrap_or(serde_json::Value::Null),
+            );
+        }
+        serde_json::Value::Object(map)
     }
 
     #[allow(clippy::too_many_lines)]

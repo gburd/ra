@@ -56,6 +56,8 @@ pub mod lazy_rules;
 pub mod left_deep;
 pub mod federated_cost;
 pub mod federated_optimizer;
+pub mod fts_cost;
+pub mod fts_rules;
 pub mod ml_integration;
 pub mod genetic_fingerprint;
 pub mod memo;
@@ -94,6 +96,7 @@ pub mod timeline_optimizer;
 pub mod rum_index;
 pub mod runtime_filters;
 pub mod selectivity;
+pub mod hybrid_search;
 pub mod semi_join;
 #[cfg(feature = "streaming")]
 pub mod timely;
@@ -101,6 +104,8 @@ pub mod oracle_json_duality;
 #[cfg(feature = "metadata")]
 pub mod trigger_optimizer;
 pub mod xml_optimizer;
+pub mod vector_cost;
+pub mod vector_rules;
 
 pub use adaptive_calibration::{
     AdaptiveCalibrator, CalibrationConfig, CalibrationState,
@@ -303,3 +308,32 @@ pub use plan_cache::{
     PlanCacheStats,
 };
 pub use selectivity::estimate_selectivity as estimate_predicate_selectivity;
+pub use vector_cost::{
+    QueryFrequency, VectorIndexRecommendation, VectorIndexType, VectorMetric,
+    hnsw_search_cost, ivfflat_search_cost, select_vector_index_type,
+    vector_distance_cost, vector_sequential_scan_cost,
+};
+pub use vector_rules::{
+    VectorIndexParams, VectorQueryCost,
+    estimate_vector_query_cost, optimize_vector_filter_order,
+    vector_rewrite_rules,
+};
+pub use hybrid_search::{
+    HybridStrategy, ScoreFusion, choose_hybrid_strategy, fuse_scores,
+    hybrid_fts_first_cost_factor, hybrid_parallel_cost_factor,
+    hybrid_scan_cost_factor, hybrid_search_rules,
+    hybrid_vector_first_cost_factor,
+};
+pub use fts_cost::{
+    BooleanOperator as FtsBooleanOperator, FtsIndexType, RankingAlgorithm,
+    boolean_query_cost, fulltext_scan_cost,
+    index_vs_seqscan_speedup, inverted_index_lookup_cost,
+    rum_scan_cost as fts_rum_scan_cost, select_fts_index_type,
+    skip_list_intersection_cost, top_k_ranking_cost,
+};
+pub use fts_rules::{
+    OptimizationDecision, boolean_query_to_skip_list,
+    fts_filter_pushdown, fts_index_scan_introduction,
+    fts_multi_column_index, fts_optimization_rules,
+    optimize_top_k_fts, rank_aware_top_k,
+};

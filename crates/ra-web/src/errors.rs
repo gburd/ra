@@ -52,6 +52,15 @@ impl AppError {
         }
     }
 
+    pub fn timeout(message: impl Into<String>) -> Self {
+        Self {
+            status: Status::RequestTimeout,
+            body: ApiError {
+                code: "query_timeout".to_owned(),
+                message: message.into(),
+            },
+        }
+    }
 }
 
 impl<'r> Responder<'r, 'static> for AppError {

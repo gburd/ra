@@ -84,6 +84,18 @@ harness = false
 name = "cache_invalidation_bench"
 harness = false
 
+[[bench]]
+name = "vector_search_bench"
+harness = false
+
+[[bench]]
+name = "lazy_rules_bench"
+harness = false
+
+[[bench]]
+name = "hybrid_bench"
+harness = false
+
 [[bin]]
 name = "planner_comparison_runner"
 path = "../../benchmarks/planner_comparison/runner.rs"

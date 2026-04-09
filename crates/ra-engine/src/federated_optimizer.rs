@@ -260,7 +260,9 @@ impl FederatedOptimizer {
             | RelExpr::ParallelHashJoin { .. }
             | RelExpr::ParallelAggregate { .. }
             | RelExpr::Gather { .. }
-            | RelExpr::MvScan { .. } => false,
+            | RelExpr::MvScan { .. }
+            | RelExpr::TopK { .. }
+            | RelExpr::VectorFilter { .. } => false,
         }
     }
 
@@ -376,6 +378,11 @@ impl FederatedOptimizer {
                 test_expr.as_ref().map_or(false, |t| {
                     self.filter_references_table(t, table_name)
                 })
+            }
+            Expr::FullTextMatch { .. } => false,
+            Expr::VectorDistance { column, target, .. } => {
+                self.filter_references_table(column, table_name)
+                    || self.filter_references_table(target, table_name)
             }
         }
     }

@@ -62,7 +62,9 @@ fn collect_tables_rec(expr: &RelExpr, out: &mut Vec<String>) {
         | RelExpr::Limit { input, .. }
         | RelExpr::Distinct { input, .. }
         | RelExpr::Window { input, .. }
-        | RelExpr::IncrementalSort { input, .. } => collect_tables_rec(input, out),
+        | RelExpr::IncrementalSort { input, .. }
+        | RelExpr::TopK { input, .. }
+        | RelExpr::VectorFilter { input, .. } => collect_tables_rec(input, out),
         RelExpr::Join { left, right, .. }
         | RelExpr::Union { left, right, .. }
         | RelExpr::Intersect { left, right, .. }
@@ -135,7 +137,9 @@ fn depth(expr: &RelExpr) -> usize {
         | RelExpr::Limit { input, .. }
         | RelExpr::Distinct { input, .. }
         | RelExpr::Window { input, .. }
-        | RelExpr::IncrementalSort { input, .. } => 1 + depth(input),
+        | RelExpr::IncrementalSort { input, .. }
+        | RelExpr::TopK { input, .. }
+        | RelExpr::VectorFilter { input, .. } => 1 + depth(input),
         RelExpr::Join { left, right, .. }
         | RelExpr::Union { left, right, .. }
         | RelExpr::Intersect { left, right, .. }

@@ -1,0 +1,1512 @@
+================================================================================
+PROJECT SPECIFICATION: ra-web / "SQL Planner Explorer"
+================================================================================
+
+PROJECT OVERVIEW
+================================================================================
+
+Project Name: ra-web
+Presentation Name: SQL Planner Explorer
+Purpose: An interactive web-based tool for comparing SQL query execution plans
+         across multiple RDBMS engines simultaneously
+Inspiration: godbolt.org (Compiler Explorer) - but for database query planners
+             instead of programming language compilers
+
+================================================================================
+REFERENCE SITE ANALYSIS: GODBOLT.ORG
+================================================================================
+
+COMPILER EXPLORER (godbolt.org) is an interactive online tool that shows the
+assembly output of compiled code from multiple programming languages. The site
+handles approximately 92 million compilations per year.
+
+CORE ARCHITECTURAL ELEMENTS TO REPLICATE:
+
+1. LAYOUT STRUCTURE
+-------------------
+- Split-pane interface with resizable panels
+- Left panel: Source code input editor
+- Right panel(s): Output display area(s)
+- Multiple output panes can be shown simultaneously for comparison
+- Horizontal and vertical split options
+- Pane headers show metadata (compiler name, version, options)
+
+2. CODE EDITOR COMPONENT
+------------------------
+- Monaco Editor or CodeMirror as the text editor engine
+- Syntax highlighting for the input language
+- Line numbers displayed
+- Automatic indentation
+- Automatic bracket/parenthesis matching
+- Automatic surrounding of selected text with brackets/quotes
+- CodeLens features integration
+- Undo/redo functionality
+- Search and replace within editor
+
+3. COMPILER/ENGINE SELECTION
+----------------------------
+- Dropdown menus for selecting engines
+- Each engine shows: name, version, architecture/target
+- Engines grouped by vendor/type
+- Support for multiple versions of the same engine
+- Ability to add multiple engines/outputs for comparison
+- Each output pane has independent engine selection
+
+4. COMPILATION/EXECUTION TRIGGER
+-------------------------------
+- "Run" or "Compile" button prominently displayed
+- Keyboard shortcut for execution (commonly Ctrl+Enter or similar)
+- Auto-compile option that triggers on code changes
+- Loading indicator during processing
+- Error handling and display for failed compilations
+
+5. OUTPUT DISPLAY
+-----------------
+- Read-only output panels
+- Syntax highlighting for output (assembly in Godbolt's case)
+- Colorization of different output sections
+- Ability to link output lines to source lines
+- Tooltips on hover for additional information
+- Expandable/collapsible sections
+- Copy to clipboard functionality
+
+6. URL SHARING AND PERSISTENCE
+------------------------------
+- Unique short URLs for shared sessions (e.g., godbolt.org/z/abc123)
+- URL encodes current state: code, engine selections, options
+- Ability to load shared sessions from URL
+- "Share" button to generate and copy URL
+- Permalinks for reproducible comparisons
+
+7. USER PREFERENCES
+--------------------
+- Settings panel for customization
+- Theme selection (light/dark modes)
+- Font size adjustment
+- Editor behavior preferences
+- Persistent preferences via browser storage
+
+8. LIBRARIES/DEPENDENCIES SUPPORT
+---------------------------------
+- Ability to include external libraries/dependencies
+- Library selection interface
+- Build information links
+
+================================================================================
+SQL PLANNER EXPLORER: DETAILED SPECIFICATION
+================================================================================
+
+SECTION 1: HIGH-LEVEL ARCHITECTURE
+----------------------------------
+
+1.1 FRONTEND ARCHITECTURE
+-------------------------
+Technology Stack:
+- Frontend Framework: React.js (version 18.x or later) with TypeScript
+- State Management: Redux Toolkit or Zustand for application state
+- Code Editor: Monaco Editor (same as VS Code) for SQL input
+- UI Component Library: Material-UI (MUI) or Ant Design
+- Visualization Library: D3.js for execution plan tree visualization
+- Additional Visualization: React Flow for flowchart-style plan display
+- HTTP Client: Axios for API communication
+- Routing: React Router for URL-based session management
+
+Build Tools:
+- Build System: Vite or Next.js
+- Package Manager: npm or yarn
+- CSS Processing: Tailwind CSS or CSS Modules
+
+1.2 BACKEND ARCHITECTURE
+------------------------
+Technology Stack:
+- Backend Framework: Node.js with Express or Fastify (Python with FastAPI
+  is an acceptable alternative)
+- Job Queue: Bull or Bee-Queue for managing query execution jobs
+- Database: Redis for caching and job queue; PostgreSQL for persistent storage
+- Containerization: Docker for database engine isolation
+
+Database Engine Connections:
+- Each supported RDBMS runs in its own Docker container
+- Connection pooling for efficient database connections
+- Sandbox/isolation for security (read-only permissions where applicable)
+- Timeout enforcement for long-running queries
+
+1.3 DEPLOYMENT ARCHITECTURE
+---------------------------
+- Container Orchestration: Kubernetes or Docker Compose
+- Load Balancer: Nginx or HAProxy
+- SSL/TLS: Let's Encrypt certificates
+- CDN: For static assets (optional but recommended)
+
+================================================================================
+SECTION 2: USER INTERFACE LAYOUT
+================================================================================
+
+2.1 MAIN PAGE STRUCTURE
+-----------------------
+
+The main page consists of the following regions:
+
+REGION A: HEADER BAR
+- Site logo and name: "SQL Planner Explorer"
+- Navigation links: Home, Documentation, About, GitHub link
+- User preferences button (theme, settings)
+- Share button (generates shareable URL)
+
+REGION B: SQL INPUT PANEL (LEFT SIDE)
+- Monaco Editor instance for SQL query input
+- Line numbers enabled
+- SQL syntax highlighting
+- Sample queries dropdown for quick loading
+- Schema selector dropdown (to choose a pre-defined schema for testing)
+- "Clear" button to reset editor
+
+REGION C: OUTPUT PANE CONTAINER (RIGHT SIDE)
+- Initially shows one output pane
+- "Add Engine" button to add comparison panes
+- Each pane is independently configurable
+- Panes arranged in a grid (responsive: 1 column on mobile,
+  2-4 columns on desktop)
+- Each pane can be maximized/minimized/removed
+
+REGION D: OUTPUT PANE STRUCTURE (REPEATED FOR EACH ENGINE)
+Each output pane contains:
+
+D1 - ENGINE SELECTION HEADER
+- Dropdown for RDBMS vendor (PostgreSQL, MySQL, SQL Server, Oracle, etc.)
+- Dropdown for version (e.g., PostgreSQL 15, PostgreSQL 14, etc.)
+- Options button for query execution options
+- Status indicator (ready/loading/error)
+- Execution time display (after query runs)
+
+D2 - TAB BED OUTPUT AREA
+Tabs:
+- Tab 1: "Raw Plan" - Shows the raw EXPLAIN output text
+- Tab 2: "Tree View" - Visual tree representation of the plan
+- Tab 3: "Flow View" - Flowchart representation (left-to-right data flow)
+- Tab 4: "Cost Analysis" - Numerical breakdown of plan costs
+- Tab 5: "Warnings/Tips" - Optimization suggestions
+
+D3 - OUTPUT CONTENT
+- Scrollable content area
+- Syntax highlighting for raw output
+- Interactive nodes in tree/flow views (clickable for details)
+- Color coding for operation types (scan, join, aggregate, sort, etc.)
+
+REGION E: FOOTER
+- Version information
+- Link to documentation
+- Link to report issues
+- Database connection status indicators
+
+================================================================================
+SECTION 3: SUPPORTED RDBMS ENGINES
+================================================================================
+
+3.1 OPEN SOURCE ENGINES
+-----------------------
+
+ENGINE: PostgreSQL
+Versions to Support: 12, 13, 14, 15, 16, 17 (latest stable)
+EXPLAIN Syntax:
+- EXPLAIN (FORMAT TEXT) query
+- EXPLAIN (FORMAT JSON) query
+- EXPLAIN (FORMAT XML) query
+- EXPLAIN ANALYZE query (for actual execution with timing)
+Special Features:
+- BUFFERS option for I/O statistics
+- VERBOSE option for additional details
+- SETTINGS option to show configuration parameters
+
+ENGINE: MySQL
+Versions to Support: 5.7, 8.0, 8.1, 8.2, 8.3, 8.4
+EXPLAIN Syntax:
+- EXPLAIN query
+- EXPLAIN FORMAT=JSON query
+- EXPLAIN ANALYZE query (MySQL 8.0.18+)
+Special Features:
+- EXPLAIN ANALYZE provides actual timing data
+- FORMAT=TREE available in newer versions
+
+ENGINE: MariaDB
+Versions to Support: 10.5, 10.6, 10.11, 11.0, 11.1, 11.2
+EXPLAIN Syntax:
+- EXPLAIN query
+- EXPLAIN FORMAT=JSON query
+- EXPLAIN ANALYZE query
+Special Features:
+- Shows query block information
+- Extended information available
+
+ENGINE: SQLite
+Versions to Support: 3.35, 3.36, 3.37, 3.38, 3.39, 3.40, 3.41, 3.42, 3.43, 3.44,
+                     3.45, 3.46
+EXPLAIN Syntax:
+- EXPLAIN QUERY PLAN query
+- EXPLAIN query (for virtual machine opcodes)
+Special Features:
+- Simple text output format
+- Shows index usage clearly
+
+ENGINE: DuckDB
+Versions to Support: 0.8, 0.9, 0.10, 1.0, 1.1
+EXPLAIN Syntax:
+- EXPLAIN query
+- EXPLAIN ANALYZE query
+Special Features:
+- Columnar execution details
+- Shows streaming vs materialized operations
+
+3.2 COMMERCIAL ENGINES
+----------------------
+
+ENGINE: Microsoft SQL Server
+Versions to Support: 2019, 2022, Azure SQL (latest)
+EXPLAIN Syntax:
+- SET SHOWPLAN_TEXT ON
+- SET SHOWPLAN_XML ON
+- SET SHOWPLAN_ALL ON
+- SET STATISTICS PROFILE ON
+- SET STATISTICS XML ON
+Special Features:
+- Graphical plan available as XML
+- Actual execution plan shows runtime statistics
+- Missing index recommendations embedded in plan
+
+ENGINE: Oracle Database
+Versions to Support: 19c, 21c, 23c
+EXPLAIN Syntax:
+- EXPLAIN PLAN FOR query
+- SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY)
+- SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY_CURSOR(FORMAT=>'ALL'))
+Special Features:
+- DBMS_XPLAN provides multiple format options
+- Shows predicate information
+- Shows outline data for hints
+
+ENGINE: IBM Db2
+Versions to Support: 11.5, 12.1
+EXPLAIN Syntax:
+- EXPLAIN ALL FOR query
+- db2exfmt tool output simulation
+Special Features:
+- Extensive optimization information
+- Access plan details
+
+3.3 CLOUD-NATIVE ENGINES (OPTIONAL FOR INITIAL RELEASE)
+-------------------------------------------------------
+
+ENGINE: Google BigQuery
+EXPLAIN Syntax:
+- EXPLAIN query
+Special Features:
+- Shows slot consumption estimates
+- Shows stages and steps
+
+ENGINE: Amazon Redshift
+EXPLAIN Syntax:
+- EXPLAIN query
+- EXPLAIN ANALYZE query
+Special Features:
+- Shows slice distribution
+- Shows data skew warnings
+
+================================================================================
+SECTION 4: EXECUTION PLAN VISUALIZATION DESIGNS
+================================================================================
+
+4.1 RAW PLAN VIEW
+-----------------
+
+Purpose: Display the unprocessed EXPLAIN output from the database engine
+
+Features:
+- Syntax highlighting for keywords (SCAN, JOIN, FILTER, etc.)
+- Color coding by operation type:
+  * Scan operations: Blue (#3B82F6)
+  * Join operations: Green (#10B981)
+  * Aggregate operations: Orange (#F59E0B)
+  * Sort operations: Purple (#8B5CF6)
+  * Filter operations: Red (#EF4444)
+  * Limit operations: Gray (#6B7280)
+- Monospace font (JetBrains Mono or Fira Code)
+- Line numbers for reference
+- Copy button for entire output
+- Search/highlight within output
+- Collapsible sections for nested operations
+
+4.2 TREE VIEW
+-------------
+
+Purpose: Display execution plan as an expandable tree structure
+
+Design Specifications:
+- Each node represents an operation in the plan
+- Root node at top, child nodes expand downward
+- Expand/collapse icons for nodes with children
+- Indentation levels for hierarchy (4 spaces or 1em per level)
+
+Node Display:
+- Icon indicating operation type
+- Operation name (e.g., "Seq Scan", "Hash Join", "Aggregate")
+- Primary metrics displayed inline:
+  * Cost (first row: startup, total)
+  * Rows (estimated cardinality)
+  * Width (estimated row size in bytes)
+- Expandable details section showing:
+  * Filter conditions
+  * Index used
+  * Join conditions
+  * Output columns
+  * Actual time (if ANALYZE was used)
+  * Actual rows (if ANALYZE was used)
+
+Interaction:
+- Click node to expand/collapse
+- Hover shows tooltip with full details
+- Right-click context menu:
+  * Copy node details
+  * Highlight in other views
+  * Show documentation for operation type
+
+Color Scheme for Operation Types:
+- Table Scan: #60A5FA (blue-400)
+- Index Scan: #34D399 (emerald-400)
+- Bitmap Scan: #A78BFA (violet-400)
+- Nested Loop Join: #FBBF24 (amber-400)
+- Hash Join: #F87171 (red-400)
+- Merge Join: #38BDF8 (sky-400)
+- Aggregate: #C084FC (purple-400)
+- Sort: #FB923C (orange-400)
+- Limit: #94A3B8 (slate-400)
+- Subquery Scan: #E879F9 (fuchsia-400)
+
+4.3 FLOW VIEW
+-------------
+
+Purpose: Display execution plan as a left-to-right data flow diagram
+
+Design Specifications:
+- Flowchart-style visualization
+- Left side: Data sources (tables, indexes)
+- Right side: Final result
+- Arrows indicate data flow direction and volume
+- Nodes sized proportionally to estimated cost or actual time
+
+Node Shapes:
+- Parallelogram: Data source (table, index)
+- Rectangle: Operation (join, filter, aggregate)
+- Diamond: Decision point (filter condition)
+- Rounded rectangle: Result/output
+
+Edge Properties:
+- Thickness proportional to estimated rows
+- Color intensity proportional to cost
+- Animated particles showing data flow (optional toggle)
+- Labels showing cardinality on edges
+
+Interactive Features:
+- Pan and zoom (mouse drag and scroll wheel)
+- Minimap for navigation in large plans
+- Click node for detailed properties panel
+- Highlight bottleneck nodes (highest cost operations)
+- Export as SVG or PNG image
+
+4.4 COST ANALYSIS VIEW
+----------------------
+
+Purpose: Provide numerical breakdown and comparison of plan costs
+
+Content Sections:
+
+SECTION 1: SUMMARY METRICS
+- Total Cost (estimated)
+- Total Execution Time (if ANALYZE used)
+- Total Rows Returned
+- Number of Operations
+- Plan Depth
+
+SECTION 2: OPERATION COST BREAKDOWN
+Table columns:
+- Operation Type
+- Estimated Cost
+- % of Total Cost
+- Estimated Rows
+- Actual Time (if available)
+- Actual Rows (if available)
+
+Sorting:
+- Sortable by any column
+- Default sort by cost descending
+
+SECTION 3: COST DISTRIBUTION CHART
+- Horizontal bar chart showing cost per operation
+- Operations ordered by cost
+- Color coded by operation type
+- Clickable bars to highlight in other views
+
+SECTION 4: TIMELINE VIEW (FOR ANALYZE PLANS)
+- Gantt-chart style timeline of operations
+- Shows actual execution order and overlap
+- Duration proportional to time spent
+- Critical path highlighted
+
+4.5 WARNINGS/TIPS VIEW
+----------------------
+
+Purpose: Provide optimization suggestions and highlight potential issues
+
+Content Types:
+
+WARNING TYPES:
+- Full Table Scan: Alert when query performs table scan without index
+- Cartesian Product: Warn about missing join conditions
+- Inefficient Join: Flag suboptimal join algorithms
+- Large Result Set: Warn about high cardinality estimates
+- Expensive Sort: Alert when sorting large datasets
+- Missing Statistics: Warn when column statistics are outdated
+- Buffer Overflow: Alert about memory usage issues
+
+TIP TYPES:
+- Index Suggestion: Recommend index creation
+- Join Order: Suggest join reordering
+- Query Rewrite: Suggest alternative query structure
+- Configuration: Suggest parameter changes
+
+Display Format:
+- Icon indicating severity (info/warning/error)
+- Brief description of issue
+- Affected operation highlighted
+- Recommended action
+- Link to documentation or best practices
+
+Severity Levels:
+- Critical: Red (#EF4444) - Performance severely impacted
+- Warning: Orange (#F59E0B) - Performance may be impacted
+- Info: Blue (#3B82F6) - Suggestion for improvement
+
+Integration with Other Views:
+- Click warning to highlight related operation in Tree/Flow views
+- Warning count badge on tab header
+
+================================================================================
+SECTION 5: SAMPLE SCHEMAS FOR TESTING
+================================================================================
+
+5.1 PURPOSE
+-----------
+Provide pre-defined database schemas for users to test queries against
+without needing to create their own data structures.
+
+5.2 INCLUDED SCHEMAS
+--------------------
+
+SCHEMA: Employee-Department (Simple HR Schema)
+Tables:
+- employees (emp_id, name, department_id, salary, hire_date)
+- departments (dept_id, dept_name, location, budget)
+- projects (project_id, project_name, start_date, end_date)
+- employee_projects (emp_id, project_id, role, hours_allocated)
+Indexes:
+- Primary keys on all ID columns
+- Foreign key indexes on department_id, emp_id, project_id
+- Index on employees.salary
+- Index on employees.hire_date
+Row Counts:
+- employees: 10,000 rows
+- departments: 100 rows
+- projects: 1,000 rows
+- employee_projects: 50,000 rows
+
+SCHEMA: E-Commerce (Order Processing)
+Tables:
+- customers (customer_id, email, name, created_at, tier)
+- products (product_id, name, category_id, price, stock_quantity)
+- categories (category_id, name, parent_category_id)
+- orders (order_id, customer_id, order_date, status, total_amount)
+- order_items (order_item_id, order_id, product_id, quantity, unit_price)
+- reviews (review_id, product_id, customer_id, rating, review_text)
+Indexes:
+- Primary keys
+- Foreign key indexes
+- Index on customers.email (unique)
+- Index on orders.customer_id
+- Index on orders.order_date
+- Index on order_items.order_id
+- Index on reviews.product_id
+Row Counts:
+- customers: 100,000 rows
+- products: 10,000 rows
+- categories: 500 rows
+- orders: 1,000,000 rows
+- order_items: 5,000,000 rows
+- reviews: 500,000 rows
+
+SCHEMA: Time Series (IoT/Metrics)
+Tables:
+- devices (device_id, name, location, device_type)
+- metrics (metric_id, device_id, timestamp, metric_type, value)
+- alerts (alert_id, device_id, alert_type, severity, triggered_at)
+Indexes:
+- Primary keys
+- Index on metrics(device_id, timestamp)
+- Index on metrics(timestamp)
+- Index on alerts(triggered_at)
+Row Counts:
+- devices: 10,000 rows
+- metrics: 100,000,000 rows (time-series partitioned where supported)
+- alerts: 100,000 rows
+
+SCHEMA: Social Network (Graph-like)
+Tables:
+- users (user_id, username, email, created_at, follower_count)
+- posts (post_id, user_id, content, created_at, like_count)
+- comments (comment_id, post_id, user_id, content, created_at)
+- likes (like_id, post_id, user_id, created_at)
+- follows (follower_id, following_id, created_at)
+Indexes:
+- Primary keys
+- Index on posts.user_id
+- Index on posts.created_at
+- Index on comments.post_id
+- Index on likes.post_id
+- Unique index on follows(follower_id, following_id)
+Row Counts:
+- users: 1,000,000 rows
+- posts: 10,000,000 rows
+- comments: 50,000,000 rows
+- likes: 100,000,000 rows
+- follows: 5,000,000 rows
+
+5.3 SCHEMA MANAGEMENT
+---------------------
+- Schema selector in input panel
+- "Create Custom Schema" option (advanced feature)
+- DDL shown on hover or in modal
+- Schema statistics available on click
+
+================================================================================
+SECTION 6: QUERY EXECUTION OPTIONS
+================================================================================
+
+6.1 PER-ENGINE OPTIONS
+----------------------
+
+OPTION: Execution Type
+Values:
+- EXPLAIN ONLY (show plan without executing)
+- EXPLAIN ANALYZE (execute and show actual statistics)
+Default: EXPLAIN ONLY
+
+OPTION: Output Format
+Values (engine-dependent):
+- TEXT (default)
+- JSON
+- XML (where supported)
+Default: TEXT for display, JSON for parsing internally
+
+OPTION: Verbose Mode
+Values: ON/OFF
+Default: OFF
+Effect: Shows additional details in plan output
+
+OPTION: Buffers/Costs (PostgreSQL-specific)
+Values: ON/OFF
+Default: ON for costs, OFF for buffers
+Effect: Shows I/O statistics and cost estimates
+
+OPTION: Timing (PostgreSQL-specific)
+Values: ON/OFF
+Default: ON (when ANALYZE used)
+Effect: Shows per-operation timing
+
+OPTION: Statistics (SQL Server-specific)
+Values: IO/TIME/PROFILE
+Default: PROFILE
+Effect: Shows different levels of execution statistics
+
+6.2 GLOBAL OPTIONS
+------------------
+
+OPTION: Query Timeout
+Values: 1-300 seconds
+Default: 30 seconds
+Effect: Cancels query if exceeds timeout
+
+OPTION: Parallel Execution
+Values: ON/OFF
+Default: ON
+Effect: Allows parallel query plans where supported
+
+OPTION: Schema Selection
+Values: List of available schemas
+Default: Employee-Department
+Effect: Sets the database context for the query
+
+================================================================================
+SECTION 7: URL STRUCTURE AND SHARING
+================================================================================
+
+7.1 URL FORMAT
+--------------
+
+Base URL: https://ra-web.example.com
+
+Short URL Format: https://ra-web.example.com/p/{shortcode}
+- Shortcode is a 6-8 character alphanumeric string
+- Case-sensitive for additional entropy
+
+Full State URL Format: https://ra-web.example.com/?state={base64_encoded_state}
+
+State Object Structure (JSON):
+{
+  "version": "1.0",
+  "query": "SELECT * FROM employees WHERE salary > 50000",
+  "schema": "hr_schema",
+  "engines": [
+    {
+      "vendor": "postgresql",
+      "version": "16",
+      "options": {
+        "analyze": false,
+        "format": "text",
+        "verbose": false,
+        "buffers": false
+      }
+    },
+    {
+      "vendor": "mysql",
+      "version": "8.0",
+      "options": {
+        "analyze": false,
+        "format": "json"
+      }
+    }
+  ],
+  "ui": {
+    "theme": "dark",
+    "activeTab": "tree",
+    "paneLayout": "horizontal"
+  }
+}
+
+7.2 SHARING FEATURES
+--------------------
+
+SHARE BUTTON:
+- Located in header bar
+- Click generates short URL
+- Copies URL to clipboard automatically
+- Shows confirmation toast notification
+
+SHARE MODAL:
+- Short URL field with copy button
+- Full URL field with copy button
+- Embed code for iframe (optional)
+- Social sharing buttons (Twitter, LinkedIn, etc.)
+- QR code for mobile sharing
+
+EXPIRATION:
+- Short URLs do not expire
+- Maximum stored sessions: configurable (recommend 1 million)
+- Cleanup of orphaned sessions after 1 year of inactivity
+
+================================================================================
+SECTION 8: COMPARISON FEATURES
+================================================================================
+
+8.1 SIDE-BY-SIDE COMPARISON
+---------------------------
+
+Layout:
+- Horizontal split: engines shown side by side
+- Vertical split: engines stacked vertically
+- Grid layout: engines arranged in rows and columns
+- Single pane: one engine at a time with dropdown to switch
+
+Synchronization:
+- Scroll sync option (scrolling one pane scrolls others)
+- Highlight sync (clicking operation highlights corresponding in other panes)
+- Zoom sync (zooming one pane zooms others)
+
+8.2 DIFF VIEW
+-------------
+
+Purpose: Highlight differences between execution plans from different engines
+
+DIFF TYPES:
+- Structural Diff: Different operation order or types
+- Cost Diff: Different cost estimates for similar operations
+- Cardinality Diff: Different row estimates
+
+DIFF DISPLAY:
+- Side-by-side comparison with highlighted differences
+- Green: Operation exists in left plan only
+- Red: Operation exists in right plan only
+- Yellow: Operation exists in both but with different properties
+
+8.3 STATISTICAL COMPARISON
+--------------------------
+
+Comparison Table:
+Shows side-by-side metrics for each engine:
+| Metric              | PostgreSQL 16 | MySQL 8.0 | SQL Server 2022 |
+|---------------------|---------------|-----------|-----------------|
+| Estimated Total Cost| 1234.56       | N/A       | 0.892           |
+| Estimated Rows      | 1000          | 1000      | 1000            |
+| Plan Depth          | 5             | 4         | 6               |
+| Scan Operations     | 2             | 2         | 1               |
+| Join Operations     | 1             | 1         | 1               |
+| Sort Operations     | 0             | 1         | 0               |
+
+Notes:
+- Cost values are engine-specific and not directly comparable
+- Show cost as percentage of highest cost for comparison
+- Highlight significant differences in cardinality estimates
+
+================================================================================
+SECTION 9: USER PREFERENCES AND SETTINGS
+================================================================================
+
+9.1 SETTINGS STORAGE
+--------------------
+
+Storage Method: Browser localStorage for anonymous users
+Storage Method: User account database for registered users (optional feature)
+
+Settings Persistence: Settings persist across sessions
+Settings Export: JSON export of all preferences
+
+9.2 AVAILABLE SETTINGS
+-----------------------
+
+EDITOR SETTINGS:
+- Font Size: 10-24px (default: 14px)
+- Font Family: JetBrains Mono, Fira Code, Source Code Pro, Consolas
+- Tab Size: 2-8 spaces (default: 4 spaces)
+- Line Numbers: ON/OFF (default: ON)
+- Word Wrap: ON/OFF (default: OFF)
+- Auto Indent: ON/OFF (default: ON)
+- Bracket Matching: ON/OFF (default: ON)
+- Minimap: ON/OFF (default: OFF)
+
+VISUALIZATION SETTINGS:
+- Default View: Raw/Tree/Flow/Cost/Tips (default: Tree)
+- Node Size: Small/Medium/Large (default: Medium)
+- Show Cost Labels: ON/OFF (default: ON)
+- Show Cardinality Labels: ON/OFF (default: ON)
+- Animation Speed: Slow/Medium/Fast/Off (default: Medium)
+- Color Scheme: Default/Colorblind-friendly/High-contrast
+
+DISPLAY SETTINGS:
+- Theme: Light/Dark/System (default: Dark)
+- Pane Layout: Horizontal/Vertical/Grid (default: Horizontal)
+- Pane Count: 1-4 (default: 2)
+- Compact Mode: ON/OFF (default: OFF)
+
+EXECUTION SETTINGS:
+- Default Timeout: 5-300 seconds (default: 30 seconds)
+- Auto-Execute: ON/OFF (default: OFF)
+- Default Schema: List of schemas (default: Employee-Department)
+- Default Engines: List of engine presets
+
+================================================================================
+SECTION 10: API ENDPOINTS
+================================================================================
+
+10.1 REST API STRUCTURE
+-----------------------
+
+BASE URL: https://api.ra-web.example.com/v1
+
+ENDPOINT: POST /execute
+Purpose: Execute a query and return execution plans
+Request Body:
+{
+  "query": "SELECT * FROM employees WHERE salary > 50000",
+  "schema": "hr_schema",
+  "engines": [
+    {
+      "vendor": "postgresql",
+      "version": "16",
+      "options": {}
+    }
+  ]
+}
+Response:
+{
+  "requestId": "req_abc123",
+  "results": [
+    {
+      "engine": "postgresql",
+      "version": "16",
+      "status": "success",
+      "executionTime": 45,
+      "plan": {
+        "raw": "Seq Scan on employees...",
+        "parsed": { ... },
+        "tree": { ... }
+      },
+      "warnings": []
+    }
+  ]
+}
+
+ENDPOINT: GET /engines
+Purpose: List available engines and versions
+Response:
+{
+  "engines": [
+    {
+      "vendor": "postgresql",
+      "displayName": "PostgreSQL",
+      "versions": ["12", "13", "14", "15", "16", "17"],
+      "options": ["analyze", "verbose", "buffers", "timing"]
+    },
+    ...
+  ]
+}
+
+ENDPOINT: GET /schemas
+Purpose: List available test schemas
+Response:
+{
+  "schemas": [
+    {
+      "id": "hr_schema",
+      "displayName": "Employee-Department",
+      "tables": ["employees", "departments", "projects", "employee_projects"],
+      "description": "Simple HR schema with employees and departments"
+    },
+    ...
+  ]
+}
+
+ENDPOINT: GET /schemas/{schemaId}/ddl
+Purpose: Get DDL for a specific schema
+Response:
+{
+  "schemaId": "hr_schema",
+  "ddl": {
+    "postgresql": "CREATE TABLE employees (...)",
+    "mysql": "CREATE TABLE employees (...)",
+    ...
+  }
+}
+
+ENDPOINT: POST /share
+Purpose: Create a short URL for the current state
+Request Body: State object (see Section 7)
+Response:
+{
+  "shortCode": "abc123",
+  "shortUrl": "https://ra-web.example.com/p/abc123",
+  "expiresAt": null
+}
+
+ENDPOINT: GET /share/{shortCode}
+Purpose: Retrieve state for a short URL
+Response:
+{
+  "state": { ... },
+  "createdAt": "2024-01-15T10:30:00Z",
+  "viewCount": 42
+}
+
+================================================================================
+SECTION 11: ERROR HANDLING
+================================================================================
+
+11.1 ERROR TYPES
+----------------
+
+ERROR: Syntax Error
+Source: Database engine rejects query syntax
+Display: Red underline in editor, error panel in output
+Message: "Syntax error at line 5: unexpected token 'SELCT'"
+Action: User must fix query
+
+ERROR: Timeout Error
+Source: Query exceeds configured timeout
+Display: Timeout banner in output pane
+Message: "Query execution exceeded 30 second timeout"
+Action: Increase timeout or optimize query
+
+ERROR: Connection Error
+Source: Cannot connect to database engine
+Display: Error panel with retry button
+Message: "Unable to connect to PostgreSQL 16 engine. Retrying..."
+Action: Auto-retry 3 times, then show manual retry button
+
+ERROR: Permission Error
+Source: Query attempts forbidden operation (DDL, DML on system tables)
+Display: Warning panel
+Message: "Query contains forbidden operation: DROP TABLE"
+Action: User must modify query
+
+ERROR: Resource Limit
+Source: Query exceeds resource limits (memory, temp space)
+Display: Error panel
+Message: "Query exceeded resource limits: temp space exceeded 100MB"
+Action: User must optimize query
+
+11.2 ERROR DISPLAY
+------------------
+
+Location: Inline in the affected output pane
+Style: Red border, red icon, expandable details
+Actions:
+- Copy error details
+- Report issue (link to GitHub issues)
+- Retry (for transient errors)
+- View documentation link
+
+================================================================================
+SECTION 12: ACCESSIBILITY
+================================================================================
+
+12.1 KEYBOARD NAVIGATION
+------------------------
+
+- Tab: Move focus between interactive elements
+- Enter/Space: Activate buttons and select options
+- Arrow keys: Navigate within dropdowns and lists
+- Escape: Close modals and dropdowns
+- Ctrl+Enter: Execute query
+- Ctrl+S: Save/share current state
+- Ctrl+/: Focus query editor
+- F11: Toggle fullscreen mode
+
+12.2 SCREEN READER SUPPORT
+--------------------------
+
+- ARIA labels on all interactive elements
+- ARIA live regions for dynamic content updates
+- Descriptive alt text for visualizations
+- Announce execution status changes
+- Announce error messages
+
+12.3 VISUAL ACCESSIBILITY
+-------------------------
+
+- Minimum contrast ratio: 4.5:1 for text
+- Colorblind-friendly palette option
+- High contrast mode option
+- Focus indicators on all interactive elements
+- No reliance on color alone to convey information
+
+================================================================================
+SECTION 13: SECURITY CONSIDERATIONS
+================================================================================
+
+13.1 QUERY SANDBOXING
+---------------------
+
+READ-ONLY ACCESS:
+- All database connections use read-only mode where supported
+- DDL statements (CREATE, ALTER, DROP) are rejected
+- DML statements (INSERT, UPDATE, DELETE) are rejected or wrapped in rollback
+
+RESOURCE LIMITS:
+- Query timeout enforced at database level
+- Connection pool limits per user/IP
+- Maximum rows returned limited
+- Memory limits on container execution
+
+13.2 INPUT SANITIZATION
+-----------------------
+
+SQL INJECTION PREVENTION:
+- Parameterized queries not applicable (user enters full SQL)
+- Blacklist dangerous patterns (e.g., multiple statements, stored procedure calls)
+- Log all queries for abuse detection
+- Rate limiting per IP/user
+
+XSS PREVENTION:
+- Sanitize all user input before display
+- Escape HTML entities in query text
+- Content Security Policy headers
+
+13.3 NETWORK SECURITY
+---------------------
+
+- HTTPS only (redirect HTTP to HTTPS)
+- CORS headers restricted to known origins
+- API rate limiting (100 requests per minute per IP)
+- Authentication for advanced features (optional)
+- Session tokens for state management
+
+================================================================================
+SECTION 14: PERFORMANCE REQUIREMENTS
+================================================================================
+
+14.1 RESPONSE TIME TARGETS
+--------------------------
+
+- Page load: < 2 seconds (first paint)
+- Time to interactive: < 3 seconds
+- Query execution initiation: < 100ms
+- Plan parsing and visualization: < 500ms for typical plans
+- Large plan handling: < 2 seconds for plans with 100+ nodes
+
+14.2 SCALABILITY TARGETS
+------------------------
+
+- Concurrent users: 1,000
+- Queries per minute: 10,000
+- Stored sessions: 1,000,000
+- Plan cache: 100,000 recent plans (LRU eviction)
+
+14.3 CACHING STRATEGY
+---------------------
+
+CACHE LAYERS:
+- Browser cache: Static assets (1 year), preferences (local)
+- CDN cache: Static assets, common schemas
+- Redis cache: Session state, recent query results (1 hour TTL)
+- Database: User accounts, saved sessions, analytics
+
+CACHE KEYS:
+- Query results keyed by: query hash + schema + engine + version + options
+- Session state keyed by: short code
+
+================================================================================
+SECTION 15: DEVELOPMENT PHASES
+================================================================================
+
+PHASE 1: MINIMUM VIABLE PRODUCT (4-6 WEEKS)
+-------------------------------------------
+Deliverables:
+- Frontend with SQL editor and single output pane
+- Backend API with query execution
+- Support for PostgreSQL (latest 2 versions) and MySQL (latest 2 versions)
+- Raw plan view only
+- Basic URL sharing
+- Employee-Department schema only
+- Light and dark themes
+
+PHASE 2: VISUALIZATION AND COMPARISON (4-6 WEEKS)
+-------------------------------------------------
+Deliverables:
+- Tree view implementation
+- Side-by-side engine comparison (2 panes)
+- Add MariaDB and SQLite support
+- Add E-Commerce schema
+- Cost analysis view
+- Warnings/tips view
+- Settings panel
+
+PHASE 3: ADVANCED FEATURES (4-6 WEEKS)
+--------------------------------------
+Deliverables:
+- Flow view implementation
+- Add SQL Server support
+- Add Oracle support (optional, requires license)
+- Diff view for plan comparison
+- Add Time Series and Social Network schemas
+- Embed functionality
+- Performance optimizations
+
+PHASE 4: COMMERCIAL AND CLOUD ENGINES (OPTIONAL, 4-6 WEEKS)
+-----------------------------------------------------------
+Deliverables:
+- Add DuckDB support
+- Add BigQuery support (requires GCP project)
+- Add Redshift support (requires AWS account)
+- Custom schema builder
+- User accounts and saved queries
+- API documentation and public API
+
+================================================================================
+SECTION 16: INSPIRATION FROM EXISTING SQL PLAN VISUALIZERS
+================================================================================
+
+16.1 pgMustard (postgres query plan visualization)
+---------------------------------------------------
+Features to incorporate:
+- Tree visualization that mimics TEXT format structure
+- Per-operation timing breakdown chart above tree
+- Performance tips scored by time-saving potential
+- Visual indication of bottleneck operations
+
+16.2 SolarWinds Plan Explorer (SQL Server)
+------------------------------------------
+Features to incorporate:
+- Scoring algorithms for optimization suggestions
+- Index recommendations embedded in plan view
+- Real-time score updates as query is modified
+- Visual highlighting of problematic operations
+
+16.3 PawSQL Plan Visualizer
+---------------------------
+Features to incorporate:
+- Flowchart representation of execution plan
+- Visual highlighting of plan structure
+- Intuitive operation icons
+- Color-coded operation types
+
+16.4 DbVisualizer
+-----------------
+Features to incorporate:
+- Multi-database support from single interface
+- Consistent visualization across different engines
+- Integrated query execution and plan viewing
+
+16.5 pgAdmin Query Plan Visualization
+--------------------------------------
+Features to incorporate:
+- Diagram showing plan nodes in tree structure
+- Illustrations for each node type
+- Click-through for detailed information
+- Integration with query editor
+
+16.6 EXPLAIN ANALYZE best practices
+-----------------------------------
+From various PostgreSQL and SQL Server documentation:
+- Show actual vs estimated cardinality comparison
+- Highlight cardinality feedback opportunities
+- Show buffer/cache hit rates
+- Display I/O timing separately from CPU timing
+
+================================================================================
+SECTION 17: SAMPLE QUERIES FOR TESTING
+================================================================================
+
+17.1 SIMPLE QUERIES
+-------------------
+
+QUERY: Single Table Scan with Filter
+SELECT * FROM employees WHERE salary > 75000;
+Purpose: Test basic scan operation, index usage detection
+
+QUERY: Aggregate Function
+SELECT department_id, AVG(salary) as avg_salary
+FROM employees
+GROUP BY department_id;
+Purpose: Test aggregation, grouping operations
+
+QUERY: Simple Join
+SELECT e.name, d.dept_name
+FROM employees e
+JOIN departments d ON e.department_id = d.dept_id;
+Purpose: Test join operation, join algorithm selection
+
+17.2 INTERMEDIATE QUERIES
+-------------------------
+
+QUERY: Multi-table Join with Filter
+SELECT e.name, d.dept_name, p.project_name
+FROM employees e
+JOIN departments d ON e.department_id = d.dept_id
+JOIN employee_projects ep ON e.emp_id = ep.emp_id
+JOIN projects p ON ep.project_id = p.project_id
+WHERE d.dept_name = 'Engineering';
+Purpose: Test join order optimization, multi-table join strategies
+
+QUERY: Subquery
+SELECT * FROM employees
+WHERE salary > (SELECT AVG(salary) FROM employees);
+Purpose: Test subquery execution, materialization vs hash
+
+QUERY: Window Function
+SELECT 
+  name,
+  salary,
+  RANK() OVER (ORDER BY salary DESC) as salary_rank
+FROM employees;
+Purpose: Test window function execution, sort operation
+
+17.3 COMPLEX QUERIES
+--------------------
+
+QUERY: Large Join with Aggregates
+SELECT 
+  c.name as customer_name,
+  COUNT(o.order_id) as order_count,
+  SUM(oi.quantity * oi.unit_price) as total_spent
+FROM customers c
+LEFT JOIN orders o ON c.customer_id = o.customer_id
+LEFT JOIN order_items oi ON o.order_id = oi.order_id
+WHERE c.tier = 'Gold'
+GROUP BY c.customer_id, c.name
+HAVING COUNT(o.order_id) > 10
+ORDER BY total_spent DESC
+LIMIT 100;
+Purpose: Test complex query optimization, join strategies,
+         aggregation with having clause, sorting
+
+QUERY: Union with Subqueries
+SELECT product_name, 'high_stock' as status
+FROM products
+WHERE stock_quantity > 1000
+UNION ALL
+SELECT product_name, 'low_stock' as status
+FROM products
+WHERE stock_quantity < 10;
+Purpose: Test union operation, multiple scan strategies
+
+QUERY: CTE (Common Table Expression)
+WITH top_customers AS (
+  SELECT customer_id, SUM(total_amount) as total
+  FROM orders
+  GROUP BY customer_id
+  ORDER BY total DESC
+  LIMIT 100
+)
+SELECT c.name, tc.total
+FROM top_customers tc
+JOIN customers c ON tc.customer_id = c.customer_id;
+Purpose: Test CTE materialization vs inlining
+
+17.4 ENGINE-SPECIFIC TESTS
+--------------------------
+
+QUERY: Different Join Algorithm Triggers
+-- Force different join algorithms by controlling result set sizes
+SELECT * FROM employees e
+CROSS JOIN departments d
+WHERE e.department_id = d.dept_id;
+Purpose: Compare how different engines choose join algorithms
+
+QUERY: Same Query, Different Plans
+-- Query that may produce different plans across engines
+SELECT * FROM employees
+WHERE salary BETWEEN 50000 AND 100000
+ORDER BY hire_date DESC
+LIMIT 10;
+Purpose: Compare plan differences for same logical query
+
+================================================================================
+SECTION 18: TECHNOLOGY STACK SUMMARY
+================================================================================
+
+FRONTEND:
+- React 18+ with TypeScript
+- Monaco Editor
+- Material-UI or Ant Design
+- D3.js for visualizations
+- React Flow for flow diagrams
+- Tailwind CSS for styling
+- Vite or Next.js for build
+
+BACKEND:
+- Node.js with Express/Fastify OR Python with FastAPI
+- Redis for caching and job queue
+- PostgreSQL for persistent storage
+- Docker for database containerization
+
+INFRASTRUCTURE:
+- Kubernetes or Docker Compose
+- Nginx for reverse proxy and load balancing
+- Let's Encrypt for SSL/TLS
+- CDN for static assets (CloudFlare, CloudFront, etc.)
+
+DATABASE CONTAINERS:
+- PostgreSQL: Official Docker images
+- MySQL: Official Docker images
+- MariaDB: Official Docker images
+- SQLite: No container needed (embedded)
+- SQL Server: Microsoft official images (requires license acceptance)
+- Oracle: Oracle official images (requires license)
+
+MONITORING (OPTIONAL):
+- Prometheus for metrics
+- Grafana for dashboards
+- Logging: ELK stack or Loki
+
+================================================================================
+SECTION 19: CONFIGURATION FILES
+================================================================================
+
+19.1 FRONTEND CONFIGURATION
+---------------------------
+
+File: /frontend/.env
+Contents:
+VITE_API_BASE_URL=https://api.ra-web.example.com/v1
+VITE_ENABLE_ANALYTICS=false
+VITE_DEFAULT_THEME=dark
+VITE_MAX_ENGINES=4
+VITE_DEFAULT_TIMEOUT=30
+
+File: /frontend/src/config.ts
+Purpose: Centralize all configuration constants
+Export:
+- API endpoints
+- Default values
+- Feature flags
+- Supported engine list (from API)
+
+19.2 BACKEND CONFIGURATION
+--------------------------
+
+File: /backend/.env
+Contents:
+DATABASE_URL=postgresql://user:pass@db:5432/ra_web
+REDIS_URL=redis://redis:6379
+JWT_SECRET=random-secret-key
+CORS_ORIGINS=https://ra-web.example.com
+RATE_LIMIT_PER_MINUTE=100
+QUERY_TIMEOUT_DEFAULT=30
+QUERY_TIMEOUT_MAX=300
+
+File: /backend/src/config.ts
+Purpose: Load and validate environment variables
+Export:
+- Typed configuration object
+- Database connection strings
+- Feature flags
+
+19.3 DOCKER CONFIGURATION
+-------------------------
+
+File: /docker-compose.yml
+Services:
+- frontend: Node.js container
+- backend: Node.js/Python container
+- postgres: PostgreSQL for app data
+- redis: Redis for caching
+- postgres_test_16: PostgreSQL 16 for query testing
+- postgres_test_15: PostgreSQL 15 for query testing
+- mysql_test_8: MySQL 8.0 for query testing
+- mysql_test_57: MySQL 5.7 for query testing
+- mariadb_test_11: MariaDB 11 for query testing
+- sqlite_test: Not needed as service (embedded in backend)
+
+File: /docker-compose.prod.yml
+Purpose: Production overrides for compose
+Additional:
+- Resource limits
+- Health checks
+- Restart policies
+- Logging configuration
+
+================================================================================
+SECTION 20: TESTING REQUIREMENTS
+================================================================================
+
+20.1 UNIT TESTS
+---------------
+
+Frontend Tests (Jest + React Testing Library):
+- Component rendering tests
+- State management tests
+- API mock tests
+- Utility function tests
+- Accessibility tests
+
+Backend Tests (Jest or PyTest):
+- API endpoint tests
+- Query parsing tests
+- Plan normalization tests
+- Cache tests
+- Error handling tests
+
+20.2 INTEGRATION TESTS
+----------------------
+
+- Full query execution flow tests
+- Multi-engine comparison tests
+- URL sharing tests
+- Settings persistence tests
+- Rate limiting tests
+
+20.3 END-TO-END TESTS
+---------------------
+
+Framework: Playwright or Cypress
+Scenarios:
+- User executes query and views plan
+- User compares two engines
+- User shares URL and recipient views same state
+- User changes settings and preferences persist
+- Error handling scenarios
+
+20.4 PERFORMANCE TESTS
+----------------------
+
+- Load testing with k6 or Locust
+- Concurrent user simulation (100, 500, 1000 users)
+- Query execution under load
+- Response time percentiles (p50, p90, p99)
+
+================================================================================
+SECTION 21: DOCUMENTATION REQUIREMENTS
+================================================================================
+
+21.1 USER DOCUMENTATION
+-----------------------
+
+Page: Getting Started
+- Overview of the tool
+- How to enter a query
+- How to select engines
+- How to interpret results
+- Video walkthrough (optional)
+
+Page: Supported Engines
+- List of supported RDBMS engines
+- Version information
+- EXPLAIN syntax for each engine
+- Engine-specific options
+
+Page: Understanding Execution Plans
+- Overview of execution plans
+- Common operation types explained
+- How to read tree view
+- How to read flow view
+- Cost interpretation guide
+
+Page: Performance Tips
+- Common optimization patterns
+- Index recommendations guide
+- Join optimization tips
+- Schema design considerations
+
+Page: FAQ
+- Common questions and answers
+- Troubleshooting guide
+
+21.2 DEVELOPER DOCUMENTATION
+----------------------------
+
+Page: Architecture Overview
+- System architecture diagram
+- Component descriptions
+- Data flow diagrams
+
+Page: API Reference
+- All endpoints documented
+- Request/response schemas
+- Authentication (if implemented)
+- Rate limiting details
+
+Page: Contributing Guide
+- How to set up development environment
+- Code style guidelines
+- Pull request process
+- Testing requirements
+
+Page: Deployment Guide
+- Prerequisites
+- Configuration
+- Scaling considerations
+- Monitoring setup
+
+================================================================================
+END OF SPECIFICATION
+================================================================================
+
+This document provides complete instructions for building the ra-web / SQL
+Planner Explorer application. The LLM executing these instructions should:
+
+1. Follow the technology stack specified in Section 18
+2. Implement features in the order specified in Section 15
+3. Ensure all features match the specifications in Sections 2-14
+4. Create documentation as specified in Section 21
+5. Include all tests as specified in Section 20
+6. Refer to Section 16 for visualization best practices from existing tools
+7. Use sample queries from Section 17 for development testing
+
+The resulting application should be functionally equivalent to godbolt.org in
+concept but adapted for SQL query plan comparison across multiple RDBMS engines.

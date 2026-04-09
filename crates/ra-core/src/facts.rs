@@ -200,6 +200,10 @@ pub enum IndexType {
     Rum,
     /// Bitmap index
     Bitmap,
+    /// IVFFlat vector index (inverted file with flat compression)
+    IVFFlat,
+    /// HNSW vector index (Hierarchical Navigable Small World)
+    HNSW,
     /// Unknown or unsupported index type
     Unknown,
 }

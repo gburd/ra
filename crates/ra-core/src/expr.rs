@@ -130,6 +130,38 @@ pub enum Expr {
         /// Optional test expression for IN/ANY/ALL
         test_expr: Option<Box<Expr>>,
     },
+
+    /// Full-text search match expression.
+    ///
+    /// Represents vendor-specific full-text search operations:
+    /// - MySQL: MATCH(columns) AGAINST('query' [mode])
+    /// - SQL Server: CONTAINS(column, 'query')
+    /// - PostgreSQL: to_tsvector(column) @@ to_tsquery('query')
+    FullTextMatch {
+        /// Vendor/dialect identifier (mysql, sqlserver, postgres).
+        vendor: String,
+        /// Column(s) to search in.
+        columns: Vec<String>,
+        /// Search query string.
+        query: String,
+        /// Optional search mode or options (vendor-specific).
+        mode: Option<String>,
+    },
+
+    /// Vector distance/similarity expression.
+    ///
+    /// Represents vector similarity operations:
+    /// - pgvector: embedding <-> '[1,2,3]' (L2 distance)
+    /// - pgvector: embedding <#> '[1,2,3]' (inner product)
+    /// - pgvector: embedding <=> '[1,2,3]' (cosine distance)
+    VectorDistance {
+        /// Distance metric (l2, inner_product, cosine).
+        metric: String,
+        /// Vector column.
+        column: Box<Expr>,
+        /// Target vector (as expression).
+        target: Box<Expr>,
+    },
 }
 
 /// A reference to a column, optionally qualified by a table name.
