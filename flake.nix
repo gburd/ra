@@ -44,6 +44,10 @@
             # Build tools
             pkg-config
             openssl
+            cmake
+            gnumake
+            gcc
+            stdenv.cc
 
             # Database tools for testing
             postgresql
@@ -81,6 +85,15 @@
             export RUST_LOG=info
             export DATABASE_URL="postgres://localhost/ra_dev"
             export TMPDIR="''${TMPDIR:-/tmp}"
+
+            # DuckDB build support
+            # Use system DuckDB library to avoid bundled compilation issues
+            export DUCKDB_LIB_DIR="${pkgs.duckdb}/lib"
+            export DUCKDB_INCLUDE_DIR="${pkgs.duckdb}/include"
+            # Fallback to bundled build with proper toolchain
+            export CC="${pkgs.gcc}/bin/gcc"
+            export CXX="${pkgs.gcc}/bin/g++"
+            export CMAKE="${pkgs.cmake}/bin/cmake"
 
             echo "🚀 Relational Algebra dev environment loaded"
             echo "Rust version: $(rustc --version)"
