@@ -1293,7 +1293,7 @@ impl DatabaseAdapter for PostgresAdapter {
         };
 
         Ok(DatabaseCapabilities {
-            database_name: "postgresql".to_string(),
+            database_name: "PostgreSQL".to_string(),
             dialect: SqlDialect::Postgres,
             features,
             index_types: vec![
@@ -1329,7 +1329,7 @@ impl DatabaseAdapter for PostgresAdapter {
     }
 
     fn database_name(&self) -> &'static str {
-        "postgresql"
+        "PostgreSQL"
     }
 
     fn as_facts_provider(&self) -> &dyn FactsProvider {
@@ -1377,7 +1377,7 @@ impl FactsProvider for PostgresFacts {
     }
 
     fn database_name(&self) -> &'static str {
-        "postgresql"
+        "PostgreSQL"
     }
 
     fn supports_feature(&self, feature: &str) -> bool {
@@ -1409,7 +1409,7 @@ mod tests {
     #[test]
     fn create_adapter() {
         let adapter = PostgresAdapter::new();
-        assert_eq!(adapter.database_name(), "postgresql");
+        assert_eq!(adapter.database_name(), "PostgreSQL");
         assert_eq!(
             adapter.sql_dialect(),
             SqlDialect::Postgres
@@ -1531,7 +1531,7 @@ mod tests {
         assert!(caps.is_some());
         assert_eq!(
             caps.map(|c| c.database_name.as_str()),
-            Some("postgresql")
+            Some("PostgreSQL")
         );
         assert_eq!(
             caps.map(|c| c.max_identifier_length),
@@ -1560,7 +1560,7 @@ mod tests {
         assert!(facts.get_schema("users").is_none());
         assert_eq!(
             facts.database_name(),
-            "postgresql"
+            "PostgreSQL"
         );
         assert_eq!(
             facts.sql_dialect(),
@@ -1826,7 +1826,7 @@ mod integration_tests {
         let facts = adapter.as_facts_provider();
         assert_eq!(
             facts.database_name(),
-            "postgresql"
+            "PostgreSQL"
         );
         assert_eq!(
             facts.sql_dialect(),

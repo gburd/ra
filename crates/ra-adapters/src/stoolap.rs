@@ -7,17 +7,17 @@
 //!
 //! Enable the `stoolap` feature to use real connections:
 //! ```toml
-//! ra-adapters = { workspace = true, features = ["stoolap"] }
+//! ra-adapters = { workspace = true, features = ["Stoolap"] }
 //! ```
 
 use crate::{AdapterError, DatabaseAdapter, DatabaseCapabilities, SchemaInfo};
-#[cfg(feature = "stoolap")]
+#[cfg(feature = "Stoolap")]
 use crate::{ColumnInfo, IndexInfo, TableInfo};
 use ra_core::{FactsProvider, SqlDialect};
 use ra_stats::types::{ColumnStats, TableStats};
 use std::collections::HashMap;
 
-#[cfg(feature = "stoolap")]
+#[cfg(feature = "Stoolap")]
 use stoolap::Database;
 
 /// Internal storage for gathered facts, enabling
@@ -107,7 +107,7 @@ impl FactsProvider for StoolapFacts {
     }
 
     fn database_name(&self) -> &'static str {
-        "stoolap"
+        "Stoolap"
     }
 
     fn supports_feature(&self, feature: &str) -> bool {
@@ -143,14 +143,14 @@ impl FactsProvider for StoolapFacts {
 ///   gather live statistics
 pub struct StoolapAdapter {
     connection_string: Option<String>,
-    #[cfg(feature = "stoolap")]
+    #[cfg(feature = "Stoolap")]
     db: Option<Database>,
     facts: StoolapFacts,
 }
 
 impl std::fmt::Debug for StoolapAdapter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        #[cfg(feature = "stoolap")]
+        #[cfg(feature = "Stoolap")]
         {
             f.debug_struct("StoolapAdapter")
                 .field("connection_string", &self.connection_string)
@@ -158,7 +158,7 @@ impl std::fmt::Debug for StoolapAdapter {
                 .field("facts", &self.facts)
                 .finish()
         }
-        #[cfg(not(feature = "stoolap"))]
+        #[cfg(not(feature = "Stoolap"))]
         {
             f.debug_struct("StoolapAdapter")
                 .field("connection_string", &self.connection_string)
@@ -174,7 +174,7 @@ impl StoolapAdapter {
     pub fn new() -> Self {
         Self {
             connection_string: None,
-            #[cfg(feature = "stoolap")]
+            #[cfg(feature = "Stoolap")]
             db: None,
             facts: StoolapFacts::new(),
         }
@@ -293,7 +293,7 @@ impl StoolapAdapter {
 
 // -- Feature-gated real connection implementation --
 
-#[cfg(feature = "stoolap")]
+#[cfg(feature = "Stoolap")]
 impl StoolapAdapter {
     fn connect_real(
         &mut self,
@@ -686,7 +686,7 @@ impl StoolapAdapter {
 
 // -- Stub when stoolap feature is disabled --
 
-#[cfg(not(feature = "stoolap"))]
+#[cfg(not(feature = "Stoolap"))]
 impl StoolapAdapter {
     #[allow(clippy::unnecessary_wraps)]
     fn connect_stub(
@@ -711,11 +711,11 @@ impl DatabaseAdapter for StoolapAdapter {
         &mut self,
         connection_string: &str,
     ) -> Result<(), AdapterError> {
-        #[cfg(feature = "stoolap")]
+        #[cfg(feature = "Stoolap")]
         {
             self.connect_real(connection_string)
         }
-        #[cfg(not(feature = "stoolap"))]
+        #[cfg(not(feature = "Stoolap"))]
         {
             self.connect_stub(connection_string)
         }
@@ -726,7 +726,7 @@ impl DatabaseAdapter for StoolapAdapter {
         &self,
     ) -> Result<HashMap<String, TableStats>, AdapterError>
     {
-        #[cfg(feature = "stoolap")]
+        #[cfg(feature = "Stoolap")]
         {
             // The trait requires &self but we need &mut self
             // for updating the facts cache. This is safe: we
@@ -740,7 +740,7 @@ impl DatabaseAdapter for StoolapAdapter {
             };
             this.gather_statistics_real()
         }
-        #[cfg(not(feature = "stoolap"))]
+        #[cfg(not(feature = "Stoolap"))]
         {
             Err(AdapterError::ConnectionError(
                 "Stoolap feature not enabled. \
@@ -756,7 +756,7 @@ impl DatabaseAdapter for StoolapAdapter {
         table: &str,
     ) -> Result<HashMap<String, ColumnStats>, AdapterError>
     {
-        #[cfg(feature = "stoolap")]
+        #[cfg(feature = "Stoolap")]
         {
             #[allow(clippy::cast_ref_to_mut)]
             #[allow(invalid_reference_casting)]
@@ -766,7 +766,7 @@ impl DatabaseAdapter for StoolapAdapter {
             };
             this.gather_column_stats_real(table)
         }
-        #[cfg(not(feature = "stoolap"))]
+        #[cfg(not(feature = "Stoolap"))]
         {
             let _ = table;
             Err(AdapterError::ConnectionError(
@@ -781,7 +781,7 @@ impl DatabaseAdapter for StoolapAdapter {
     fn get_schema_info(
         &self,
     ) -> Result<SchemaInfo, AdapterError> {
-        #[cfg(feature = "stoolap")]
+        #[cfg(feature = "Stoolap")]
         {
             #[allow(clippy::cast_ref_to_mut)]
             #[allow(invalid_reference_casting)]
@@ -791,7 +791,7 @@ impl DatabaseAdapter for StoolapAdapter {
             };
             this.get_schema_info_real()
         }
-        #[cfg(not(feature = "stoolap"))]
+        #[cfg(not(feature = "Stoolap"))]
         {
             Err(AdapterError::ConnectionError(
                 "Stoolap feature not enabled. \
@@ -805,7 +805,7 @@ impl DatabaseAdapter for StoolapAdapter {
         &self,
     ) -> Result<DatabaseCapabilities, AdapterError> {
         Ok(DatabaseCapabilities {
-            database_name: "stoolap".to_string(),
+            database_name: "Stoolap".to_string(),
             dialect: SqlDialect::Generic,
             features: Self::build_features(),
             index_types: vec![
@@ -831,7 +831,7 @@ impl DatabaseAdapter for StoolapAdapter {
     }
 
     fn database_name(&self) -> &'static str {
-        "stoolap"
+        "Stoolap"
     }
 
     fn as_facts_provider(&self) -> &dyn FactsProvider {
@@ -848,7 +848,7 @@ mod tests {
     #[test]
     fn create_adapter() {
         let adapter = StoolapAdapter::new();
-        assert_eq!(adapter.database_name(), "stoolap");
+        assert_eq!(adapter.database_name(), "Stoolap");
         assert_eq!(
             adapter.sql_dialect(),
             SqlDialect::Generic
@@ -870,7 +870,7 @@ mod tests {
         assert!(caps.is_some());
         assert_eq!(
             caps.map(|c| c.database_name.as_str()),
-            Some("stoolap")
+            Some("Stoolap")
         );
         assert_eq!(
             caps.map(|c| c.max_identifier_length),
@@ -927,7 +927,7 @@ mod tests {
                 .is_none()
         );
         assert!(facts.get_schema("users").is_none());
-        assert_eq!(facts.database_name(), "stoolap");
+        assert_eq!(facts.database_name(), "Stoolap");
         assert_eq!(
             facts.sql_dialect(),
             SqlDialect::Generic
@@ -1122,7 +1122,7 @@ mod tests {
 /// Run with: `cargo test -p ra-adapters \
 ///   --features stoolap -- --ignored`
 #[cfg(test)]
-#[cfg(feature = "stoolap")]
+#[cfg(feature = "Stoolap")]
 mod integration_tests {
     use super::*;
 
@@ -1295,7 +1295,7 @@ mod integration_tests {
         let _ = adapter.get_schema_info();
 
         let facts = adapter.as_facts_provider();
-        assert_eq!(facts.database_name(), "stoolap");
+        assert_eq!(facts.database_name(), "Stoolap");
         assert!(
             facts.get_table_stats("items").is_some()
         );
