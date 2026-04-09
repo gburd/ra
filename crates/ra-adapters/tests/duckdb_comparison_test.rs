@@ -5,7 +5,6 @@
 
 #[cfg(feature = "duckdb")]
 use ra_adapters::{DatabaseAdapter, DuckDBAdapter};
-use std::path::PathBuf;
 use tempfile::NamedTempFile;
 
 #[test]

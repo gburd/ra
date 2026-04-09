@@ -33,5 +33,9 @@ r2d2_sqlite = { version = "0.33", optional = true }
 rusqlite = { version = "0.39", optional = true, features = ["bundled"] }
 stoolap = { workspace = true, optional = true }
 
+[dev-dependencies]
+ra-engine = { workspace = true }
+tempfile = "3.10"
+
 [lints]
 workspace = true

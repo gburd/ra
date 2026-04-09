@@ -55,7 +55,7 @@ fn test_connection_error_handling() {
 /// Test adapter feature detection.
 #[test]
 fn test_postgres_hybrid_search_features() {
-    let adapter = PostgresAdapter::new();
+    let _adapter = PostgresAdapter::new();
 
     // PostgreSQL should support these features (when connected)
     let expected_features = vec![
@@ -77,8 +77,6 @@ fn test_postgres_hybrid_search_features() {
 
 /// Test cross-database query translation.
 mod query_translation {
-    use super::*;
-
     #[test]
     fn test_postgres_hybrid_query_structure() {
         // PostgreSQL hybrid query structure
@@ -188,7 +186,7 @@ mod result_consistency {
 mod performance_comparison {
     #[test]
     fn test_strategy_selection_performance() {
-        use ra_engine::{choose_hybrid_strategy, HybridStrategy};
+        use ra_engine::choose_hybrid_strategy;
 
         // Measure strategy selection time
         let start = std::time::Instant::now();
@@ -280,7 +278,7 @@ mod connection_pooling {
             .map(|_| {
                 let adapter_clone = Arc::clone(&adapter);
                 thread::spawn(move || {
-                    adapter_clone.database_name()
+                    adapter_clone.database_name().to_string()
                 })
             })
             .collect();
