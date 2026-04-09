@@ -35,6 +35,12 @@ tests/
 benchmarks/
 examples/
 
+# Timeline system files (Phase 6 - deferred)
+**/timeline*.rs
+**/timeline*.sql
+**/timeline*.md
+timeline_*.rs
+
 # Temporary files
 tmp/
 temp/

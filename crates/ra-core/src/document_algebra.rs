@@ -1140,7 +1140,7 @@ fn u64_to_f64(val: u64) -> f64 {
 }
 
 /// Convert f64 to u64 for memory estimates.
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+#[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn f64_to_mem(val: f64) -> u64 {
     if val <= 0.0 {
         0
@@ -1152,7 +1152,7 @@ fn f64_to_mem(val: f64) -> u64 {
 }
 
 #[cfg(test)]
-#[allow(clippy::float_cmp)]
+#[expect(clippy::float_cmp)]
 mod tests {
     use super::*;
 
@@ -1228,6 +1228,7 @@ mod tests {
     // ---- Rewrite rule tests ----
 
     #[test]
+    #[expect(clippy::panic, reason = "test code uses panic for assertions")]
     fn rule_coalesce_adjacent_matches() {
         let p = DocPipeline::new("c")
             .then(DocOperator::Match {

@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ra Benchmark Comparison Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            line-height: 1.6;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 30px;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding-bottom: 20px;
+            border-bottom: 3px solid #667eea;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+
+        .timestamp {
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 40px;
+        }
+
+        .summary-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        .summary-card h3 {
+            font-size: 0.9rem;
+            opacity: 0.9;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .summary-card .value {
+            font-size: 2rem;
+            font-weight: bold;
+        }
+
+        .filters {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .filter-group label {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #666;
+        }
+
+        select, button {
+            padding: 10px 15px;
+            border: 2px solid #667eea;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            background: white;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        select:hover, button:hover {
+            background: #667eea;
+            color: white;
+        }
+
+        button {
+            background: #667eea;
+            color: white;
+            font-weight: 600;
+        }
+
+        button:hover {
+            background: #5568d3;
+        }
+
+        .charts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+            gap: 30px;
+            margin-bottom: 40px;
+        }
+
+        .chart-container {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .chart-container h2 {
+            font-size: 1.3rem;
+            margin-bottom: 15px;
+            color: #667eea;
+        }
+
+        .results-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .results-table thead {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .results-table th {
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 0.85rem;
+            letter-spacing: 1px;
+        }
+
+        .results-table td {
+            padding: 12px 15px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .results-table tbody tr:hover {
+            background: #f8f9fa;
+        }
+
+        .speedup-good {
+            color: #28a745;
+            font-weight: bold;
+        }
+
+        .speedup-bad {
+            color: #dc3545;
+            font-weight: bold;
+        }
+
+        .speedup-neutral {
+            color: #ffc107;
+            font-weight: bold;
+        }
+
+        .plan-viewer {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+
+        .plan-comparison {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .plan-box {
+            background: white;
+            padding: 15px;
+            border-radius: 6px;
+            border: 2px solid #e0e0e0;
+        }
+
+        .plan-box h3 {
+            margin-bottom: 10px;
+            color: #667eea;
+        }
+
+        .plan-box pre {
+            font-family: 'Courier New', monospace;
+            font-size: 0.85rem;
+            overflow-x: auto;
+            white-space: pre-wrap;
+        }
+
+        @media (max-width: 768px) {
+            .charts-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .plan-comparison {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Ra Benchmark Comparison Dashboard</h1>
+            <p class="timestamp">Generated: <span id="timestamp">{{TIMESTAMP}}</span></p>
+        </header>
+
+        <div class="summary-grid">
+            <div class="summary-card">
+                <h3>Average Speedup</h3>
+                <div class="value" id="avg-speedup">-</div>
+            </div>
+            <div class="summary-card">
+                <h3>Median Speedup</h3>
+                <div class="value" id="median-speedup">-</div>
+            </div>
+            <div class="summary-card">
+                <h3>Max Speedup</h3>
+                <div class="value" id="max-speedup">-</div>
+            </div>
+            <div class="summary-card">
+                <h3>Queries Faster</h3>
+                <div class="value" id="queries-faster">-</div>
+            </div>
+            <div class="summary-card">
+                <h3>Queries Slower</h3>
+                <div class="value" id="queries-slower">-</div>
+            </div>
+            <div class="summary-card">
+                <h3>Total Queries</h3>
+                <div class="value" id="total-queries">-</div>
+            </div>
+        </div>
+
+        <div class="filters">
+            <div class="filter-group">
+                <label for="db-filter">Database</label>
+                <select id="db-filter">
+                    <option value="all">All Databases</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label for="workload-filter">Workload</label>
+                <select id="workload-filter">
+                    <option value="all">All Workloads</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>&nbsp;</label>
+                <button onclick="applyFilters()">Apply Filters</button>
+            </div>
+            <div class="filter-group">
+                <label>&nbsp;</label>
+                <button onclick="exportResults()">Export Results</button>
+            </div>
+        </div>
+
+        <div class="charts-grid">
+            <div class="chart-container">
+                <h2>Execution Time Comparison</h2>
+                <canvas id="time-chart"></canvas>
+            </div>
+            <div class="chart-container">
+                <h2>Speedup Distribution</h2>
+                <canvas id="speedup-chart"></canvas>
+            </div>
+            <div class="chart-container">
+                <h2>Rows Scanned Comparison</h2>
+                <canvas id="rows-chart"></canvas>
+            </div>
+            <div class="chart-container">
+                <h2>Complexity vs Speedup</h2>
+                <canvas id="scatter-chart"></canvas>
+            </div>
+        </div>
+
+        <div class="plan-viewer">
+            <h2>Query Plan Comparison</h2>
+            <div class="filter-group">
+                <label for="query-selector">Select Query</label>
+                <select id="query-selector" onchange="showPlanComparison()">
+                    <option value="">Select a query...</option>
+                </select>
+            </div>
+            <div id="plan-comparison-container"></div>
+        </div>
+
+        <h2 style="margin-top: 40px; margin-bottom: 20px; color: #667eea;">Detailed Results</h2>
+        <table class="results-table" id="results-table">
+            <thead>
+                <tr>
+                    <th>Query</th>
+                    <th>Database</th>
+                    <th>Workload</th>
+                    <th>Native (ms)</th>
+                    <th>Ra (ms)</th>
+                    <th>Speedup</th>
+                    <th>Native Rows</th>
+                    <th>Ra Rows</th>
+                    <th>Complexity</th>
+                </tr>
+            </thead>
+            <tbody id="results-body">
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        // Data from Rust
+        const results = {{RESULTS_DATA}};
+        const summary = {{SUMMARY_DATA}};
+
+        let filteredResults = results;
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            populateSummary();
+            populateFilters();
+            populateQuerySelector();
+            createCharts();
+            populateTable();
+        });
+
+        function populateSummary() {
+            document.getElementById('avg-speedup').textContent = summary.average_speedup.toFixed(2) + 'x';
+            document.getElementById('median-speedup').textContent = summary.median_speedup.toFixed(2) + 'x';
+            document.getElementById('max-speedup').textContent = summary.max_speedup.toFixed(2) + 'x';
+            document.getElementById('queries-faster').textContent = summary.queries_faster;
+            document.getElementById('queries-slower').textContent = summary.queries_slower;
+            document.getElementById('total-queries').textContent = results.length;
+        }
+
+        function populateFilters() {
+            const dbFilter = document.getElementById('db-filter');
+            const workloadFilter = document.getElementById('workload-filter');
+
+            const databases = [...new Set(results.map(r => r.database))];
+            const workloads = [...new Set(results.map(r => r.workload))];
+
+            databases.forEach(db => {
+                const option = document.createElement('option');
+                option.value = db;
+                option.textContent = db;
+                dbFilter.appendChild(option);
+            });
+
+            workloads.forEach(wl => {
+                const option = document.createElement('option');
+                option.value = wl;
+                option.textContent = wl;
+                workloadFilter.appendChild(option);
+            });
+        }
+
+        function populateQuerySelector() {
+            const selector = document.getElementById('query-selector');
+            results.forEach((result, idx) => {
+                const option = document.createElement('option');
+                option.value = idx;
+                option.textContent = `${result.query_name} (${result.database})`;
+                selector.appendChild(option);
+            });
+        }
+
+        function applyFilters() {
+            const dbFilter = document.getElementById('db-filter').value;
+            const workloadFilter = document.getElementById('workload-filter').value;
+
+            filteredResults = results.filter(r => {
+                return (dbFilter === 'all' || r.database === dbFilter) &&
+                       (workloadFilter === 'all' || r.workload === workloadFilter);
+            });
+
+            createCharts();
+            populateTable();
+        }
+
+        function createCharts() {
+            createTimeChart();
+            createSpeedupChart();
+            createRowsChart();
+            createScatterChart();
+        }
+
+        function createTimeChart() {
+            const ctx = document.getElementById('time-chart');
+            const labels = filteredResults.map(r => r.query_name);
+
+            if (window.timeChart) {
+                window.timeChart.destroy();
+            }
+
+            window.timeChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Native',
+                        data: filteredResults.map(r => r.native_time_ms),
+                        backgroundColor: 'rgba(220, 53, 69, 0.7)',
+                    }, {
+                        label: 'Ra',
+                        data: filteredResults.map(r => r.ra_time_ms),
+                        backgroundColor: 'rgba(40, 167, 69, 0.7)',
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Time (ms)'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function createSpeedupChart() {
+            const ctx = document.getElementById('speedup-chart');
+            const labels = filteredResults.map(r => r.query_name);
+
+            if (window.speedupChart) {
+                window.speedupChart.destroy();
+            }
+
+            window.speedupChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Speedup',
+                        data: filteredResults.map(r => r.speedup),
+                        backgroundColor: filteredResults.map(r =>
+                            r.speedup > 1.1 ? 'rgba(40, 167, 69, 0.7)' :
+                            r.speedup < 0.9 ? 'rgba(220, 53, 69, 0.7)' :
+                            'rgba(255, 193, 7, 0.7)'
+                        ),
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Speedup (x)'
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    }
+                }
+            });
+        }
+
+        function createRowsChart() {
+            const ctx = document.getElementById('rows-chart');
+            const labels = filteredResults.map(r => r.query_name);
+
+            if (window.rowsChart) {
+                window.rowsChart.destroy();
+            }
+
+            window.rowsChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Native',
+                        data: filteredResults.map(r => r.native_rows_scanned),
+                        backgroundColor: 'rgba(220, 53, 69, 0.7)',
+                    }, {
+                        label: 'Ra',
+                        data: filteredResults.map(r => r.ra_rows_scanned),
+                        backgroundColor: 'rgba(40, 167, 69, 0.7)',
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Rows Scanned'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function createScatterChart() {
+            const ctx = document.getElementById('scatter-chart');
+
+            if (window.scatterChart) {
+                window.scatterChart.destroy();
+            }
+
+            window.scatterChart = new Chart(ctx, {
+                type: 'scatter',
+                data: {
+                    datasets: [{
+                        label: 'Queries',
+                        data: filteredResults.map(r => ({
+                            x: r.complexity,
+                            y: r.speedup
+                        })),
+                        backgroundColor: 'rgba(102, 126, 234, 0.7)',
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Query Complexity'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Speedup (x)'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function populateTable() {
+            const tbody = document.getElementById('results-body');
+            tbody.innerHTML = '';
+
+            filteredResults.forEach(result => {
+                const row = tbody.insertRow();
+
+                const speedupClass = result.speedup > 1.1 ? 'speedup-good' :
+                                   result.speedup < 0.9 ? 'speedup-bad' :
+                                   'speedup-neutral';
+
+                row.innerHTML = `
+                    <td>${result.query_name}</td>
+                    <td>${result.database}</td>
+                    <td>${result.workload}</td>
+                    <td>${result.native_time_ms.toFixed(2)}</td>
+                    <td>${result.ra_time_ms.toFixed(2)}</td>
+                    <td class="${speedupClass}">${result.speedup.toFixed(2)}x</td>
+                    <td>${result.native_rows_scanned.toLocaleString()}</td>
+                    <td>${result.ra_rows_scanned.toLocaleString()}</td>
+                    <td>${result.complexity}</td>
+                `;
+            });
+        }
+
+        function showPlanComparison() {
+            const selector = document.getElementById('query-selector');
+            const idx = parseInt(selector.value);
+
+            if (isNaN(idx)) {
+                document.getElementById('plan-comparison-container').innerHTML = '';
+                return;
+            }
+
+            const result = results[idx];
+
+            document.getElementById('plan-comparison-container').innerHTML = `
+                <div class="plan-comparison">
+                    <div class="plan-box">
+                        <h3>Native Plan (${result.database})</h3>
+                        <pre>${result.native_plan}</pre>
+                    </div>
+                    <div class="plan-box">
+                        <h3>Ra Optimized Plan</h3>
+                        <pre>${result.ra_plan}</pre>
+                    </div>
+                </div>
+            `;
+        }
+
+        function exportResults() {
+            const dataStr = JSON.stringify({results: filteredResults, summary: summary}, null, 2);
+            const blob = new Blob([dataStr], {type: 'application/json'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'benchmark-results.json';
+            a.click();
+        }
+    </script>
+</body>
+</html>

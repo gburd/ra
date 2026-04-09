@@ -1,0 +1,369 @@
+# Timeline Configuration: Hardware Upgrade Enables Parallelism
+# Demonstrates how migrating from laptop to server enables parallel execution strategies
+
+[metadata]
+name = "Hardware Upgrade Scenario"
+description = "Migration from laptop (4 cores) to server (64 cores) enables parallel query execution"
+query = "SELECT l_returnflag, l_linestatus, SUM(l_quantity) FROM lineitem WHERE l_shipdate <= '1998-12-01' GROUP BY l_returnflag, l_linestatus"
+dialect = "postgresql"
+duration_seconds = 7200
+schema = "TPC-H"
+
+# Hardware Profiles
+[[hardware_profiles]]
+name = "laptop"
+cpu_cores = 4
+total_memory = 16_000_000_000
+available_memory = 12_000_000_000
+simd_width = 256
+has_gpu = false
+l1_cache_size = 32768
+l2_cache_size = 262144
+l3_cache_size = 8388608
+
+[[hardware_profiles]]
+name = "workstation"
+cpu_cores = 16
+total_memory = 64_000_000_000
+available_memory = 48_000_000_000
+simd_width = 512
+has_gpu = false
+l1_cache_size = 32768
+l2_cache_size = 262144
+l3_cache_size = 33554432
+
+[[hardware_profiles]]
+name = "server"
+cpu_cores = 64
+total_memory = 512_000_000_000
+available_memory = 400_000_000_000
+simd_width = 512
+has_gpu = true
+gpu_memory = 80_000_000_000
+l1_cache_size = 32768
+l2_cache_size = 262144
+l3_cache_size = 67108864
+
+# Snapshot 1: Development laptop - serial execution
+[[snapshots]]
+time_offset = 0
+label = "Development laptop - serial scan and aggregate"
+hardware_profile = "laptop"
+
+  [snapshots.schema]
+
+    [[snapshots.schema.tables]]
+    name = "lineitem"
+    storage_format = "row_based"
+    primary_key = ["l_orderkey", "l_linenumber"]
+
+      [[snapshots.schema.tables.columns]]
+      name = "l_orderkey"
+      data_type = "integer"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "l_linenumber"
+      data_type = "integer"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "l_shipdate"
+      data_type = "date"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "l_returnflag"
+      data_type = "string"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "l_linestatus"
+      data_type = "string"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "l_quantity"
+      data_type = "decimal"
+      nullable = false
+
+    [[snapshots.schema.tables.indexes]]
+    name = "idx_lineitem_shipdate"
+    index_type = "btree"
+    columns = ["l_shipdate"]
+    is_unique = false
+
+  [[snapshots.statistics.tables]]
+  name = "lineitem"
+  row_count = 6_001_215
+  page_count = 60_012
+  avg_row_size = 100.0
+  table_size_bytes = 600_121_500
+
+    [[snapshots.statistics.tables.columns]]
+    name = "l_shipdate"
+    ndv = 2526
+    null_fraction = 0.0
+    avg_width = 4.0
+    correlation = 0.95
+    min_value = "1992-01-02"
+    max_value = "1998-12-01"
+
+    [[snapshots.statistics.tables.columns]]
+    name = "l_returnflag"
+    ndv = 3
+    null_fraction = 0.0
+    avg_width = 1.0
+    min_value = "A"
+    max_value = "R"
+
+    [[snapshots.statistics.tables.columns]]
+    name = "l_linestatus"
+    ndv = 2
+    null_fraction = 0.0
+    avg_width = 1.0
+    min_value = "F"
+    max_value = "O"
+
+    [[snapshots.statistics.tables.columns]]
+    name = "l_quantity"
+    ndv = 50
+    null_fraction = 0.0
+    avg_width = 8.0
+    min_value = "1.0"
+    max_value = "50.0"
+
+  [snapshots.facts]
+  supports_hash_join = true
+  supports_parallel_scan = false  # Too few cores for effective parallelism
+  parallel_workers = 0  # No parallel workers on laptop
+  work_mem_bytes = 67108864  # 64MB
+  effective_cache_size_bytes = 4_000_000_000  # 4GB
+
+# Snapshot 2: Workstation - moderate parallelism
+[[snapshots]]
+time_offset = 3600
+label = "Workstation upgrade - moderate parallelism (16 cores)"
+hardware_profile = "workstation"
+
+  [snapshots.schema]
+
+    [[snapshots.schema.tables]]
+    name = "lineitem"
+    storage_format = "row_based"
+    primary_key = ["l_orderkey", "l_linenumber"]
+
+      [[snapshots.schema.tables.columns]]
+      name = "l_orderkey"
+      data_type = "integer"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "l_linenumber"
+      data_type = "integer"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "l_shipdate"
+      data_type = "date"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "l_returnflag"
+      data_type = "string"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "l_linestatus"
+      data_type = "string"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "l_quantity"
+      data_type = "decimal"
+      nullable = false
+
+    [[snapshots.schema.tables.indexes]]
+    name = "idx_lineitem_shipdate"
+    index_type = "btree"
+    columns = ["l_shipdate"]
+    is_unique = false
+
+  [[snapshots.statistics.tables]]
+  name = "lineitem"
+  row_count = 6_001_215
+  page_count = 60_012
+  avg_row_size = 100.0
+  table_size_bytes = 600_121_500
+
+    [[snapshots.statistics.tables.columns]]
+    name = "l_shipdate"
+    ndv = 2526
+    null_fraction = 0.0
+    avg_width = 4.0
+    correlation = 0.95
+    min_value = "1992-01-02"
+    max_value = "1998-12-01"
+
+    [[snapshots.statistics.tables.columns]]
+    name = "l_returnflag"
+    ndv = 3
+    null_fraction = 0.0
+    avg_width = 1.0
+    min_value = "A"
+    max_value = "R"
+
+    [[snapshots.statistics.tables.columns]]
+    name = "l_linestatus"
+    ndv = 2
+    null_fraction = 0.0
+    avg_width = 1.0
+    min_value = "F"
+    max_value = "O"
+
+    [[snapshots.statistics.tables.columns]]
+    name = "l_quantity"
+    ndv = 50
+    null_fraction = 0.0
+    avg_width = 8.0
+    min_value = "1.0"
+    max_value = "50.0"
+
+  [snapshots.facts]
+  supports_hash_join = true
+  supports_parallel_scan = true
+  parallel_workers = 8  # Use half the cores for parallel workers
+  work_mem_bytes = 268435456  # 256MB
+  effective_cache_size_bytes = 32_000_000_000  # 32GB
+
+# Snapshot 3: Production server - high parallelism
+[[snapshots]]
+time_offset = 7200
+label = "Production server - high parallelism (64 cores)"
+hardware_profile = "server"
+
+  [snapshots.schema]
+
+    [[snapshots.schema.tables]]
+    name = "lineitem"
+    storage_format = "row_based"
+    primary_key = ["l_orderkey", "l_linenumber"]
+
+      [[snapshots.schema.tables.columns]]
+      name = "l_orderkey"
+      data_type = "integer"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "l_linenumber"
+      data_type = "integer"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "l_shipdate"
+      data_type = "date"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "l_returnflag"
+      data_type = "string"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "l_linestatus"
+      data_type = "string"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "l_quantity"
+      data_type = "decimal"
+      nullable = false
+
+    [[snapshots.schema.tables.indexes]]
+    name = "idx_lineitem_shipdate"
+    index_type = "btree"
+    columns = ["l_shipdate"]
+    is_unique = false
+
+  [[snapshots.statistics.tables]]
+  name = "lineitem"
+  row_count = 6_001_215
+  page_count = 60_012
+  avg_row_size = 100.0
+  table_size_bytes = 600_121_500
+
+    [[snapshots.statistics.tables.columns]]
+    name = "l_shipdate"
+    ndv = 2526
+    null_fraction = 0.0
+    avg_width = 4.0
+    correlation = 0.95
+    min_value = "1992-01-02"
+    max_value = "1998-12-01"
+
+    [[snapshots.statistics.tables.columns]]
+    name = "l_returnflag"
+    ndv = 3
+    null_fraction = 0.0
+    avg_width = 1.0
+    min_value = "A"
+    max_value = "R"
+
+    [[snapshots.statistics.tables.columns]]
+    name = "l_linestatus"
+    ndv = 2
+    null_fraction = 0.0
+    avg_width = 1.0
+    min_value = "F"
+    max_value = "O"
+
+    [[snapshots.statistics.tables.columns]]
+    name = "l_quantity"
+    ndv = 50
+    null_fraction = 0.0
+    avg_width = 8.0
+    min_value = "1.0"
+    max_value = "50.0"
+
+  [snapshots.facts]
+  supports_hash_join = true
+  supports_parallel_scan = true
+  parallel_workers = 32  # Use half the cores for parallel workers
+  work_mem_bytes = 1073741824  # 1GB per worker
+  effective_cache_size_bytes = 256_000_000_000  # 256GB
+
+# Events
+[[events]]
+time_offset = 0
+kind = "hardware_baseline"
+description = "Initial development on laptop (4 cores, 16GB RAM)"
+
+[[events]]
+time_offset = 3600
+kind = "hardware_change"
+description = "Upgraded to workstation (16 cores, 64GB RAM)"
+
+[[events]]
+time_offset = 7200
+kind = "hardware_change"
+description = "Migrated to production server (64 cores, 512GB RAM)"
+
+# Test Expectations
+[[expectations]]
+snapshot_index = 0
+expected_plan_pattern = ".*SeqScan.*Aggregate.*"
+expected_cost_range = [600000.0, 800000.0]
+rules_applied_must_not_include = ["parallel-scan-introduction", "parallel-aggregate"]
+invalidation_trigger = "None"
+
+[[expectations]]
+snapshot_index = 1
+expected_plan_pattern = ".*(Parallel|Gather).*"
+rules_applied_must_include = ["parallel-scan-introduction"]
+invalidation_trigger = "Hardware"
+
+[[expectations]]
+snapshot_index = 2
+expected_plan_pattern = ".*(Parallel|Gather).*"
+rules_applied_must_include = ["parallel-scan-introduction", "parallel-aggregate"]
+invalidation_trigger = "Hardware"

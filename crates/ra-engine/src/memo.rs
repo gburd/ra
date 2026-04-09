@@ -280,6 +280,33 @@ fn hash_rel_expr(expr: &RelExpr, hasher: &mut impl std::hash::Hasher) {
             view_name.hash(hasher);
             alias.hash(hasher);
         }
+        RelExpr::TopK {
+            vector_expr,
+            query_vector,
+            metric,
+            k,
+            input,
+        } => {
+            hash_scalar_expr(vector_expr, hasher);
+            hash_scalar_expr(query_vector, hasher);
+            std::mem::discriminant(metric).hash(hasher);
+            k.hash(hasher);
+            hash_rel_expr(input, hasher);
+        }
+        RelExpr::VectorFilter {
+            vector_expr,
+            query_vector,
+            metric,
+            threshold,
+            input,
+        } => {
+            hash_scalar_expr(vector_expr, hasher);
+            hash_scalar_expr(query_vector, hasher);
+            std::mem::discriminant(metric).hash(hasher);
+            // Float hashing is tricky, use bits
+            threshold.to_bits().hash(hasher);
+            hash_rel_expr(input, hasher);
+        }
     }
 }
 

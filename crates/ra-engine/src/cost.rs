@@ -689,6 +689,109 @@ impl IntegratedCostModel {
         total_cost * effective_fraction
     }
 
+    /// Estimate cost for a vector similarity search using HNSW index.
+    ///
+    /// HNSW provides logarithmic search complexity with high recall.
+    /// Target: 10-100x speedup vs sequential scan.
+    #[must_use]
+    pub fn vector_hnsw_cost(
+        &self,
+        table: &str,
+        dimensions: usize,
+        m: usize,
+        ef_search: usize,
+        k: usize,
+        metric: crate::vector_cost::VectorMetric,
+    ) -> f64 {
+        let stats = self.effective_statistics(table);
+        let total_vectors = stats.row_count as usize;
+
+        let cost = crate::vector_cost::hnsw_search_cost(
+            dimensions,
+            m,
+            ef_search,
+            total_vectors,
+            k,
+            metric,
+        );
+
+        let disc = self.confidence_for_table(table);
+        cost.total() * disc
+    }
+
+    /// Estimate cost for a vector similarity search using IVFFlat index.
+    ///
+    /// IVFFlat provides constant-factor speedup with tunable recall.
+    /// Target: 5-50x speedup vs sequential scan.
+    #[must_use]
+    pub fn vector_ivfflat_cost(
+        &self,
+        table: &str,
+        dimensions: usize,
+        lists: usize,
+        probes: usize,
+        k: usize,
+        metric: crate::vector_cost::VectorMetric,
+    ) -> f64 {
+        let stats = self.effective_statistics(table);
+        let total_vectors = stats.row_count as usize;
+
+        let cost = crate::vector_cost::ivfflat_search_cost(
+            dimensions,
+            lists,
+            probes,
+            total_vectors,
+            k,
+            metric,
+        );
+
+        let disc = self.confidence_for_table(table);
+        cost.total() * disc
+    }
+
+    /// Estimate cost for a sequential vector scan (no index).
+    #[must_use]
+    pub fn vector_sequential_cost(
+        &self,
+        table: &str,
+        dimensions: usize,
+        metric: crate::vector_cost::VectorMetric,
+    ) -> f64 {
+        let stats = self.effective_statistics(table);
+        let total_vectors = stats.row_count as usize;
+
+        let cost = crate::vector_cost::vector_sequential_scan_cost(
+            dimensions,
+            total_vectors,
+            metric,
+        );
+
+        let disc = self.confidence_for_table(table);
+        cost.total() * disc
+    }
+
+    /// Select the best vector index type for a workload.
+    ///
+    /// Returns recommendation with expected speedup and recall.
+    #[must_use]
+    pub fn recommend_vector_index(
+        &self,
+        table: &str,
+        dimensions: usize,
+        query_frequency: crate::vector_cost::QueryFrequency,
+        recall_requirement: f64,
+    ) -> crate::vector_cost::VectorIndexRecommendation {
+        let stats = self.effective_statistics(table);
+        let total_vectors = stats.row_count as usize;
+
+        crate::vector_cost::select_vector_index_type(
+            total_vectors,
+            dimensions,
+            query_frequency,
+            recall_requirement,
+        )
+    }
+
     /// Compute the confidence discount for a table.
     fn confidence_for_table(&self, table: &str) -> f64 {
         self.adapter
@@ -761,6 +864,7 @@ impl IntegratedCostModel {
     /// - Q-error > 10.0: reduce confidence by 50%
     ///
     /// Returns the number of tables whose confidence was adjusted.
+    #[cfg(feature = "timeline")]
     pub fn apply_execution_feedback(
         &mut self,
         feedback: &[ra_stats::timeline::ExecutionFeedback],
@@ -993,6 +1097,7 @@ enum OperationType {
 
 /// Extract a table name from an operator description like
 /// `SeqScan on lineitem` or `Index Scan on orders`.
+#[allow(dead_code)]
 fn extract_table_from_operator(operator: &str) -> Option<String> {
     let lower = operator.to_lowercase();
     if let Some(pos) = lower.find(" on ") {
@@ -1011,6 +1116,7 @@ fn extract_table_from_operator(operator: &str) -> Option<String> {
 }
 
 /// Extract the first table name from a SQL query's FROM clause.
+#[allow(dead_code)]
 fn extract_table_from_query(query: &str) -> Option<String> {
     let lower = query.to_lowercase();
     let from_pos = lower.find(" from ")?;
@@ -2958,6 +3064,7 @@ mod tests {
 
     // ---- apply_execution_feedback ----
 
+    #[cfg(feature = "timeline")]
     fn make_feedback(
         estimated: f64,
         actual: f64,
@@ -2975,6 +3082,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn feedback_good_estimate_no_adjustment() {
         let mut model = IntegratedCostModel::new(
             StatisticsProfile::standard(),
@@ -3003,6 +3111,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn feedback_moderate_error_reduces_confidence() {
         let mut model = IntegratedCostModel::new(
             StatisticsProfile::standard(),
@@ -3027,6 +3136,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn feedback_large_error_reduces_confidence_more() {
         let mut model = IntegratedCostModel::new(
             StatisticsProfile::standard(),
@@ -3051,6 +3161,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn feedback_extreme_error_halves_confidence() {
         let mut model = IntegratedCostModel::new(
             StatisticsProfile::standard(),
@@ -3075,6 +3186,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn feedback_multiple_entries_accumulate() {
         let mut model = IntegratedCostModel::new(
             StatisticsProfile::standard(),
@@ -3101,6 +3213,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn feedback_confidence_never_negative() {
         let mut model = IntegratedCostModel::new(
             StatisticsProfile::standard(),
@@ -3124,6 +3237,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn feedback_unknown_table_ignored() {
         let mut model = IntegratedCostModel::new(
             StatisticsProfile::standard(),
@@ -3142,6 +3256,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn feedback_empty_input() {
         let mut model = IntegratedCostModel::new(
             StatisticsProfile::standard(),
@@ -3152,6 +3267,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn feedback_extracts_table_from_query_when_no_operator() {
         let mut model = IntegratedCostModel::new(
             StatisticsProfile::standard(),
@@ -3177,6 +3293,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn feedback_multiple_tables() {
         let mut model = IntegratedCostModel::new(
             StatisticsProfile::standard(),
@@ -3201,6 +3318,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn feedback_increases_costs() {
         let mut model = IntegratedCostModel::new(
             StatisticsProfile::standard(),
@@ -3221,6 +3339,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn feedback_at_threshold_boundary_1_5() {
         let mut model = IntegratedCostModel::new(
             StatisticsProfile::standard(),
@@ -3239,6 +3358,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn feedback_just_above_threshold_1_5() {
         let mut model = IntegratedCostModel::new(
             StatisticsProfile::standard(),
@@ -3257,6 +3377,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn feedback_at_threshold_boundary_3_0() {
         let mut model = IntegratedCostModel::new(
             StatisticsProfile::standard(),
@@ -3280,6 +3401,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn feedback_just_above_threshold_3_0() {
         let mut model = IntegratedCostModel::new(
             StatisticsProfile::standard(),
@@ -3303,6 +3425,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn feedback_at_threshold_boundary_10_0() {
         let mut model = IntegratedCostModel::new(
             StatisticsProfile::standard(),
@@ -3326,6 +3449,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn feedback_just_above_threshold_10_0() {
         let mut model = IntegratedCostModel::new(
             StatisticsProfile::standard(),

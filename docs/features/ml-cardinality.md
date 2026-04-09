@@ -653,6 +653,79 @@ ra-cli ml analyze-errors \
 - **Transfer learning**: Pre-trained models for common database schemas
 - **Automated feature engineering**: Learn optimal features from data
 
+## Continuous Learning and Database Storage
+
+Ra now supports continuous model updates and database-backed persistence:
+
+### Streaming Updates
+
+The `StreamingMlEstimator` provides continuous learning via differential dataflow:
+
+```rust
+use ra_ml::streaming::{StreamingMlEstimator, StreamingConfig, ModelScope};
+
+let config = StreamingConfig {
+    workers: 4,
+    batch_size: 100,
+    update_interval_secs: 60,
+    shared_state: true,
+    scope: ModelScope::Overall,
+};
+
+let estimator = StreamingMlEstimator::new(model, schema, config);
+
+// Observations flow through differential dataflow
+estimator.observe(ExecutionObservation {
+    rule_id: "filter-pushdown",
+    estimated_time_before: 100.0,
+    estimated_time_after: 50.0,
+    actual_time: Some(45.0),
+    improved: true,
+    context: vec![...],
+    timestamp: timestamp(),
+});
+```
+
+### Database Storage
+
+Models and observations are stored in PostgreSQL:
+
+```rust
+use ra_ml::storage::{ModelStorage, StorageConfig, DatabaseBackend};
+
+let config = StorageConfig {
+    backend: DatabaseBackend::Postgres,
+    connection_string: "postgresql://localhost/ra_ml",
+    max_connections: 10,
+};
+
+let storage = ModelStorage::new(config).await?;
+
+// Save model
+storage.save_model("production", &model, &schema_json, "overall", None, None).await?;
+
+// Load model
+let (model, schema_data) = storage.load_model("production").await?;
+```
+
+### Model Scopes
+
+Models can be scoped to different levels:
+- **Account**: Per-customer models
+- **Project**: Per-database models
+- **Overall**: Global shared model
+
+This enables workload-specific learning while sharing knowledge across deployments.
+
+## Rule Ordering with Belief Networks
+
+In addition to cardinality estimation, Ra uses ML for dynamic rule ordering. See [ml-rule-ordering.md](ml-rule-ordering.md) for details on:
+
+- Bayesian belief networks for rule effectiveness prediction
+- Context-aware rule prioritization
+- Continuous learning from execution observations
+- Rule filtering to reduce search space
+
 ## Further Reading
 
 - [Cost Models](../guides/cost-models.md) -- Traditional cost estimation
@@ -660,3 +733,4 @@ ra-cli ml analyze-errors \
 - [PostgreSQL Extension](../integrations/postgresql.md) -- Ra as PostgreSQL planner
 - [Proxy Architecture](../guides/proxy-architecture.md) -- Ra proxy with pg_plan_advice
 - [Research Papers](../research.md) -- Academic foundations of learned cost models
+- [ML Rule Ordering](ml-rule-ordering.md) -- Bayesian belief networks for optimization

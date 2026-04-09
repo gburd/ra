@@ -1,0 +1,426 @@
+---
+id: exa-005-simd-vectorization
+name: "SIMD Vectorization"
+category: exasol-in-memory
+databases: [exasol]
+execution_models: [vectorized]
+hardware: [cpu, x86_64, arm64]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [exasol, simd, vectorization, avx2, avx-512, neon]
+complexity: "O(n)"
+benefit_range: [2.0, 16.0]
+---
+
+# EXA-005: SIMD Vectorization
+
+## Metadata
+- **Rule ID**: `exa-005-simd-vectorization`
+- **Category**: In-Memory Storage
+- **Source**: Exasol Execution Engine; Boncz et al. "MonetDB/X100" CIDR 2005
+- **Complexity**: O(n) with 2-16x throughput improvement
+- **Prerequisites**: In-memory columnar data; SIMD-compatible operations
+- **Alternatives**: Scalar execution (one value at a time)
+
+## Description
+
+SIMD (Single Instruction, Multiple Data) vectorization processes 4-16 values
+simultaneously using CPU vector instructions (AVX2, AVX-512, ARM NEON). Exasol's
+in-memory columnar architecture is designed from the ground up for SIMD:
+
+1. **Homogeneous data types** - Columnar storage ensures contiguous arrays
+   of same-type values (perfect for SIMD)
+2. **Cache-friendly layout** - Sequential access to packed data
+3. **Compile-time specialization** - Generate SIMD code paths for common types
+4. **Runtime dispatch** - Select best SIMD width based on CPU features
+
+**SIMD Operations:**
+- **Arithmetic**: ADD, SUB, MUL, DIV on 4-16 values simultaneously
+- **Comparison**: EQ, LT, GT returning bitmask of matches
+- **Gather/Scatter**: Random access to multiple memory locations
+- **Bitwise**: AND, OR, XOR for bitmap operations
+- **Reductions**: SUM, MIN, MAX, COUNT across vector lanes
+
+**When to apply:**
+- In-memory columnar data with primitive types
+- Operations that map to SIMD instructions (arithmetic, comparison)
+- Batch size > SIMD width (typically 256-512 values)
+- CPU supports AVX2 (x86) or NEON (ARM)
+
+**Why it works:**
+- Modern CPUs: 256-bit (AVX2) or 512-bit (AVX-512) vector registers
+- Process 4-16 values per instruction vs 1 value (scalar)
+- Same latency as scalar operations (2-4 cycles)
+- 4-16x throughput for memory-bound operations
+- Critical for Exasol's TPC-H performance leadership
+
+## Relational Algebra
+
+```
+Scalar operations:
+  filter[a > 10](columnar-scan[T, [a], in-memory=true])
+  project[(a + b)](columnar-scan[T, [a, b], in-memory=true])
+
+SIMD vectorized operations:
+  simd-filter[a > 10, width=8](
+    columnar-scan[T, [a], in-memory=true])
+
+  simd-project[(a + b), width=8](
+    columnar-scan[T, [a, b], in-memory=true])
+
+  simd-aggregate[SUM(a), width=8](
+    columnar-scan[T, [a], in-memory=true])
+```
+
+## Implementation (egg rewrite rules)
+
+```lisp
+;; Basic SIMD filter
+(rewrite (filter ?pred
+           (columnar-scan ?table ?cols (in-memory true)))
+  (simd-filter ?pred
+    (columnar-scan ?table ?cols (in-memory true))
+    (simd-width (detect-simd-width ?pred)))
+  :if (is-simd-compatible ?pred)
+  :if (has-avx2))
+
+;; SIMD arithmetic projection
+(rewrite (project ?exprs
+           (columnar-scan ?table ?cols (in-memory true)))
+  (simd-project ?exprs
+    (columnar-scan ?table ?cols (in-memory true))
+    (simd-width (detect-simd-width ?exprs)))
+  :if (all-simd-compatible ?exprs))
+
+;; SIMD aggregation
+(rewrite (aggregate ?groups ?aggs
+           (columnar-scan ?table ?cols (in-memory true)))
+  (simd-aggregate ?groups ?aggs
+    (columnar-scan ?table ?cols (in-memory true))
+    (simd-width (detect-simd-width ?aggs)))
+  :if (all-simd-reducible ?aggs))
+
+;; SIMD gather (late materialization)
+(rewrite (position-gather ?table ?cols ?positions)
+  (simd-gather ?table ?cols ?positions
+    (simd-width (detect-simd-width-gather)))
+  :if (has-avx2-gather))
+
+;; SIMD hash computation
+(rewrite (hash-join ?key ?build ?probe)
+  (simd-hash-join ?key ?build ?probe
+    (hash-width (detect-simd-width)))
+  :if (is-integer ?key)
+  :if (has-avx2))
+
+;; Cascade SIMD operations
+(rewrite (project ?exprs
+           (filter ?pred
+             (columnar-scan ?table ?cols (in-memory true))))
+  (simd-project ?exprs
+    (simd-filter ?pred
+      (columnar-scan ?table ?cols (in-memory true))
+      (simd-width 8))
+    (simd-width 8))
+  :if (is-simd-compatible ?pred)
+  :if (all-simd-compatible ?exprs))
+```
+
+## Cost Model
+
+```rust
+/// Cost comparison: scalar vs SIMD execution.
+pub fn cost_simd_vectorization(
+    rows: u64,
+    operation: SIMDOperation,
+    cpu_vector_width: usize, // 4 for AVX, 8 for AVX-512
+) -> (Cost, Cost) {
+    // Scalar execution: one value at a time
+    let scalar_ops = rows;
+    let scalar_cycles = scalar_ops as f64 * operation.cycles_per_op();
+    let scalar = Cost::new(scalar_cycles, 0.0, 0.0, 0);
+
+    // SIMD execution: vector_width values at a time
+    let vector_ops = (rows + cpu_vector_width as u64 - 1) / cpu_vector_width as u64;
+    let vector_cycles = vector_ops as f64 * operation.cycles_per_op();
+
+    // Account for setup overhead (horizontal reduction, masking)
+    let overhead = vector_ops as f64 * 2.0;
+
+    let simd = Cost::new(vector_cycles + overhead, 0.0, 0.0, 0);
+
+    (scalar, simd)
+}
+
+pub enum SIMDOperation {
+    Compare,     // 1 cycle (CMP)
+    Add,         // 1 cycle (VPADD)
+    Multiply,    // 3 cycles (VPMUL)
+    Gather,      // 10 cycles (VPGATHER)
+    Hash,        // 5 cycles (CRC32 + shuffle)
+}
+
+impl SIMDOperation {
+    fn cycles_per_op(&self) -> f64 {
+        match self {
+            Self::Compare => 1.0,
+            Self::Add => 1.0,
+            Self::Multiply => 3.0,
+            Self::Gather => 10.0,
+            Self::Hash => 5.0,
+        }
+    }
+}
+```
+
+**Break-even point**: SIMD is always faster when:
+- Batch size > vector_width (amortize setup overhead)
+- Data is contiguous in memory (not scattered)
+- Operation maps to SIMD instruction (not complex branching)
+
+Typical speedup: 4-8x for AVX2, 8-16x for AVX-512.
+
+## Test Cases
+
+### Positive: Filter on integer column
+```sql
+SELECT customer_id, order_date, total_amount
+FROM orders
+WHERE customer_id > 1000000;
+
+-- SIMD comparison (AVX2: 8 integers at a time)
+-- _mm256_cmpgt_epi32: compare 8x i32 in 1 cycle
+-- Scalar: 1M comparisons = 1M cycles
+-- SIMD: 1M / 8 = 125K comparisons = 125K cycles
+-- 8x speedup
+```
+
+### Positive: Arithmetic projection
+```sql
+SELECT product_id, quantity, price, (quantity * price * 1.08) as total_with_tax
+FROM line_items;
+
+-- SIMD multiply (AVX2: 8 doubles at a time)
+-- _mm256_mul_pd: multiply 8x f64 in 3 cycles
+-- Scalar: 10M multiplies = 30M cycles
+-- SIMD: 10M / 8 = 1.25M multiplies = 3.75M cycles
+-- 8x speedup
+```
+
+### Positive: SUM aggregation
+```sql
+SELECT SUM(revenue) FROM sales WHERE region = 'US';
+
+-- Horizontal SIMD sum (AVX2)
+-- 1. Load 8 values: _mm256_load_pd
+-- 2. Add to accumulator: _mm256_add_pd
+-- 3. Horizontal reduce at end: _mm256_hadd_pd
+-- 100M values / 8 = 12.5M vector adds
+-- 8x speedup over scalar
+```
+
+### Positive: Hash join key hashing
+```sql
+SELECT o.order_id, c.customer_name
+FROM orders o
+JOIN customers c ON o.customer_id = c.customer_id;
+
+-- SIMD hash computation (AVX2)
+-- _mm256_crc32_u32: hash 8x u32 simultaneously
+-- 10M keys / 8 = 1.25M hash operations
+-- 6-8x speedup over scalar hashing
+```
+
+### Positive: Bitmap filtering
+```sql
+SELECT product_id, product_name, price
+FROM products
+WHERE category_id IN (1, 5, 9, 15, 22);
+
+-- SIMD bitmap operations
+-- 1. Build bitmap of matching categories (VPBROADCAST + VPCMPEQ)
+-- 2. Filter rows using bitmask (VPMASKMOV)
+-- 4-8x speedup over scalar IN check
+```
+
+### Negative: Complex string operations
+```sql
+SELECT customer_id, UPPER(REGEXP_REPLACE(email, '@.*', ''))
+FROM customers;
+
+-- String operations don't map to SIMD
+-- Variable-length strings, complex branching
+-- Scalar execution required
+```
+
+### Negative: Scattered memory access
+```sql
+SELECT values[random_indices[i]]
+FROM lookup_table;
+
+-- Random memory access (cache misses)
+-- SIMD gather helps but limited by memory latency
+-- Better to avoid random access pattern
+```
+
+### Negative: Very small batches
+```sql
+SELECT * FROM orders WHERE order_id = 12345;
+
+-- Single row point query
+-- SIMD setup overhead > benefit
+-- Scalar execution faster
+```
+
+## Implementation Details
+
+### AVX2 Integer Comparison (x86_64)
+```rust
+#[cfg(target_arch = "x86_64")]
+use std::arch::x86_64::*;
+
+/// SIMD filter: a > threshold
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+pub unsafe fn filter_gt_i32_avx2(
+    input: &[i32],
+    threshold: i32,
+    output: &mut Vec<u32>,
+) {
+    let threshold_vec = _mm256_set1_epi32(threshold);
+
+    for (chunk_idx, chunk) in input.chunks_exact(8).enumerate() {
+        let data = _mm256_loadu_si256(chunk.as_ptr() as *const __m256i);
+        let mask = _mm256_cmpgt_epi32(data, threshold_vec);
+        let bitmask = _mm256_movemask_epi8(mask);
+
+        // Extract matching indices
+        for i in 0..8 {
+            if (bitmask & (0xF << (i * 4))) != 0 {
+                output.push((chunk_idx * 8 + i) as u32);
+            }
+        }
+    }
+
+    // Handle remainder (scalar)
+    for (i, &val) in input.chunks_exact(8).remainder().iter().enumerate() {
+        if val > threshold {
+            output.push((input.len() / 8 * 8 + i) as u32);
+        }
+    }
+}
+```
+
+### AVX2 Sum Reduction
+```rust
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+pub unsafe fn sum_f64_avx2(input: &[f64]) -> f64 {
+    let mut sum_vec = _mm256_setzero_pd();
+
+    for chunk in input.chunks_exact(4) {
+        let data = _mm256_loadu_pd(chunk.as_ptr());
+        sum_vec = _mm256_add_pd(sum_vec, data);
+    }
+
+    // Horizontal reduction
+    let sum_high = _mm256_extractf128_pd(sum_vec, 1);
+    let sum_low = _mm256_castpd256_pd128(sum_vec);
+    let sum_128 = _mm_add_pd(sum_low, sum_high);
+    let sum_high_64 = _mm_unpackhi_pd(sum_128, sum_128);
+    let sum_final = _mm_add_sd(sum_128, sum_high_64);
+
+    let mut result = 0.0;
+    _mm_store_sd(&mut result, sum_final);
+
+    // Handle remainder
+    result + input.chunks_exact(4).remainder().iter().sum::<f64>()
+}
+```
+
+### ARM NEON Integer Comparison
+```rust
+#[cfg(target_arch = "aarch64")]
+use std::arch::aarch64::*;
+
+/// SIMD filter: a > threshold (ARM NEON)
+#[cfg(target_arch = "aarch64")]
+pub unsafe fn filter_gt_i32_neon(
+    input: &[i32],
+    threshold: i32,
+    output: &mut Vec<u32>,
+) {
+    let threshold_vec = vdupq_n_s32(threshold);
+
+    for (chunk_idx, chunk) in input.chunks_exact(4).enumerate() {
+        let data = vld1q_s32(chunk.as_ptr());
+        let mask = vcgtq_s32(data, threshold_vec);
+
+        // Extract lanes
+        for i in 0..4 {
+            if vgetq_lane_u32(vreinterpretq_u32_u32(mask), i) != 0 {
+                output.push((chunk_idx * 4 + i) as u32);
+            }
+        }
+    }
+
+    // Handle remainder
+    for (i, &val) in input.chunks_exact(4).remainder().iter().enumerate() {
+        if val > threshold {
+            output.push((input.len() / 4 * 4 + i) as u32);
+        }
+    }
+}
+```
+
+### Runtime SIMD Width Detection
+```rust
+pub fn detect_simd_width() -> usize {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("avx512f") {
+            return 16; // AVX-512: 512-bit / 32-bit = 16 i32
+        }
+        if is_x86_feature_detected!("avx2") {
+            return 8; // AVX2: 256-bit / 32-bit = 8 i32
+        }
+        if is_x86_feature_detected!("sse4.2") {
+            return 4; // SSE: 128-bit / 32-bit = 4 i32
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    {
+        if std::arch::is_aarch64_feature_detected!("neon") {
+            return 4; // NEON: 128-bit / 32-bit = 4 i32
+        }
+    }
+
+    1 // Fallback to scalar
+}
+```
+
+## Performance Characteristics
+
+| Operation | Scalar | AVX2 (8x) | AVX-512 (16x) |
+|-----------|--------|-----------|---------------|
+| i32 comparison | 1 cycle | 0.125 cycles | 0.0625 cycles |
+| f64 add | 3 cycles | 0.375 cycles | 0.1875 cycles |
+| f64 multiply | 5 cycles | 0.625 cycles | 0.3125 cycles |
+| Hash (CRC32) | 3 cycles | 0.375 cycles | 0.1875 cycles |
+| Gather (random) | 10 cycles | 1.25 cycles | 0.625 cycles |
+
+**Note**: Actual speedup depends on memory bandwidth, not just compute.
+For memory-bound operations, speedup is limited by DRAM throughput.
+
+## References
+
+1. **Intel Intrinsics Guide**: https://www.intel.com/content/www/us/en/docs/intrinsics-guide/
+2. **ARM NEON Programmer's Guide**: https://developer.arm.com/architectures/instruction-sets/simd-isas/neon
+3. **Boncz, Peter et al.** "MonetDB/X100: Hyper-Pipelining Query Execution."
+   CIDR 2005. (Original vectorized execution paper)
+4. **Polychroniou, Orestis et al.** "Rethinking SIMD Vectorization for
+   In-Memory Databases." SIGMOD 2015.
+5. **Exasol Performance Tuning**: In-Memory Columnar Execution Engine
+6. **Lemire, Daniel.** "SIMD optimization manuals"
+   https://github.com/lemire/Code-used-on-Daniel-Lemire-s-blog

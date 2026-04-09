@@ -79,6 +79,9 @@ impl GrammarExtension for MySQLExtension {
             "SET", "GLOBAL", "SESSION", "LOCAL",
             // HANDLER
             "HANDLER", "OPEN", "READ", "CLOSE",
+            // Full-Text Search
+            "MATCH", "AGAINST", "NATURAL", "LANGUAGE", "BOOLEAN", "EXPANSION",
+            "MODE", "WITH QUERY EXPANSION",
         ]
     }
 

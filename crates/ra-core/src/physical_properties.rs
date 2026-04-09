@@ -120,6 +120,17 @@ pub fn derive_properties(
         | RelExpr::ParallelAggregate { .. }
         | RelExpr::Gather { .. }
         | RelExpr::MvScan { .. } => PropertySet::new(),
+        // TopK produces ordering by distance
+        RelExpr::TopK { .. } => {
+            // TopK naturally orders by distance, but we don't track that yet
+            PropertySet::new()
+        }
+        RelExpr::VectorFilter { .. } => {
+            // VectorFilter preserves input properties (like Filter)
+            input_props
+                .first()
+                .map_or_else(PropertySet::new, |p| (*p).clone())
+        }
     }
 }
 
@@ -740,6 +751,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::panic, reason = "test code uses panic for assertions")]
     fn aggregate_produces_partitioning() {
         let expr = RelExpr::Aggregate {
             group_by: vec![

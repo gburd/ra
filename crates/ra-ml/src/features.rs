@@ -264,6 +264,14 @@ impl FeatureSchema {
                 features[OP_TYPE_OFFSET] = 1.0;
                 self.encode_table(view_name, stats, features);
             }
+            RelExpr::TopK { input, .. } => {
+                features[OP_TYPE_OFFSET + 2] = 1.0;
+                self.encode_expr(input, stats, features);
+            }
+            RelExpr::VectorFilter { input, .. } => {
+                features[OP_TYPE_OFFSET + 1] = 1.0;
+                self.encode_expr(input, stats, features);
+            }
         }
     }
 
@@ -336,7 +344,9 @@ impl FeatureSchema {
             | Expr::PatternLast(_, _)
             | Expr::PatternClassifier
             | Expr::PatternMatchNumber
-            | Expr::ArraySlice { .. } => {}
+            | Expr::ArraySlice { .. }
+            | Expr::FullTextMatch { .. }
+            | Expr::VectorDistance { .. } => {}
         }
     }
 }

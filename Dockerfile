@@ -1,8 +1,8 @@
-FROM node:22-slim AS web-build
-WORKDIR /app/web
-COPY web/package.json web/package-lock.json ./
+FROM node:22-alpine AS frontend-build
+WORKDIR /app
+COPY crates/ra-web/frontend/package.json crates/ra-web/frontend/package-lock.json ./
 RUN npm ci
-COPY web/ ./
+COPY crates/ra-web/frontend/ ./
 RUN npm run build
 
 FROM rust:1.88-slim AS server-build
@@ -18,11 +18,13 @@ FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y ca-certificates curl && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=server-build /app/target/release/ra-web /app/ra-web
-COPY --from=web-build /app/web/dist /app/static
+COPY --from=frontend-build /app/dist /app/frontend
+COPY crates/ra-web/static /app/static
 COPY rules/ /app/rules/
 
 ENV ROCKET_PORT=8000
 ENV ROCKET_ADDRESS=0.0.0.0
+ENV FRONTEND_DIR=/app/frontend
 ENV STATIC_DIR=/app/static
 
 EXPOSE 8000

@@ -32,8 +32,13 @@ export function decodeState(encoded: string): Partial<AppState> | null {
         id: `panel-${index}`,
         engine,
         output: null,
+        rawPlan: null,
+        parsedPlan: null,
+        costMetrics: null,
+        warnings: null,
         loading: false,
         error: null,
+        activeTab: 'raw' as const,
       })),
     };
   } catch {

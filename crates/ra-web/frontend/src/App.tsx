@@ -9,7 +9,7 @@ import { SchemaViewer } from './components/SchemaViewer';
 import { useQueryExecution } from './hooks/useQueryExecution';
 import { generateShareUrl, getStateFromUrl } from './utils/urlEncoding';
 import { DEFAULT_ENGINE, DEFAULT_SQL } from './constants';
-import type { AppState, Engine, ExplainMode, OutputPanelState } from './types';
+import type { AppState, Engine, ExplainMode, OutputPanelState, VisualizationTab } from './types';
 
 const theme = createTheme({
   palette: {
@@ -33,8 +33,13 @@ function App() {
           id: 'panel-0',
           engine: DEFAULT_ENGINE,
           output: null,
+          rawPlan: null,
+          parsedPlan: null,
+          costMetrics: null,
+          warnings: null,
           loading: false,
           error: null,
+          activeTab: 'raw' as VisualizationTab,
         },
       ],
     };
@@ -43,6 +48,7 @@ function App() {
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
   const [shareUrl, setShareUrl] = useState('');
   const [schemaViewerOpen, setSchemaViewerOpen] = useState(false);
+  const [highlightedNodeId, setHighlightedNodeId] = useState<string | undefined>(undefined);
 
   const updatePanel = useCallback(
     (panelId: string, updates: Partial<OutputPanelState>) => {
@@ -56,7 +62,7 @@ function App() {
     []
   );
 
-  const { executeSinglePanel, executeAllPanels } = useQueryExecution(updatePanel);
+  const { executeAllPanels } = useQueryExecution(updatePanel);
 
   const handleSqlChange = (sql: string) => {
     setState(prevState => ({ ...prevState, sql }));
@@ -76,8 +82,13 @@ function App() {
         id: `panel-${state.panels.length}`,
         engine: DEFAULT_ENGINE,
         output: null,
+        rawPlan: null,
+        parsedPlan: null,
+        costMetrics: null,
+        warnings: null,
         loading: false,
         error: null,
+        activeTab: 'raw' as VisualizationTab,
       };
 
       setState(prevState => ({
@@ -99,6 +110,14 @@ function App() {
 
   const handleLoadQuery = (sql: string) => {
     setState(prevState => ({ ...prevState, sql }));
+  };
+
+  const handleNodeHighlight = (nodeId: string) => {
+    setHighlightedNodeId(nodeId);
+  };
+
+  const handleTabChange = (panelId: string, tab: VisualizationTab) => {
+    updatePanel(panelId, { activeTab: tab });
   };
 
   const isExecuting = state.panels.some(panel => panel.loading);
@@ -158,6 +177,9 @@ function App() {
                   <OutputPanel
                     panel={state.panels[0]!}
                     onEngineChange={handleEngineChange}
+                    highlightedNodeId={highlightedNodeId}
+                    onNodeHighlight={handleNodeHighlight}
+                    onTabChange={handleTabChange}
                   />
                 </Box>
               ) : (
@@ -168,6 +190,9 @@ function App() {
                         <OutputPanel
                           panel={panel}
                           onEngineChange={handleEngineChange}
+                          highlightedNodeId={highlightedNodeId}
+                          onNodeHighlight={handleNodeHighlight}
+                          onTabChange={handleTabChange}
                         />
                       </Box>
                     </Allotment.Pane>

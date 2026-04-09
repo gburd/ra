@@ -51,7 +51,7 @@ impl Default for ParquetFormat {
 }
 
 impl FileFormat for ParquetFormat {
-    #[allow(clippy::unnecessary_literal_bound)]
+    #[expect(clippy::unnecessary_literal_bound)]
     fn name(&self) -> &str {
         "parquet"
     }
@@ -465,8 +465,7 @@ fn scalar_lt(a: &ScalarValue, b: &ScalarValue) -> bool {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used
-)]
+#[expect(clippy::expect_used)]
 mod tests {
     use std::sync::Arc;
 

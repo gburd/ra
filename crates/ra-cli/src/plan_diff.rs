@@ -216,6 +216,12 @@ fn operator_label(expr: &RelExpr) -> String {
         RelExpr::MvScan { view_name, .. } => {
             format!("MvScan({view_name})")
         }
+        RelExpr::TopK { k, .. } => {
+            format!("TopK(k={k})")
+        }
+        RelExpr::VectorFilter { threshold, .. } => {
+            format!("VectorFilter(threshold={threshold})")
+        }
     }
 }
 

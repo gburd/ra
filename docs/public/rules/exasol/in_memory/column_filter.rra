@@ -1,0 +1,331 @@
+---
+id: exa-003-column-filter-pushdown
+name: "Column Filter Pushdown with Bloom"
+category: exasol-in-memory
+databases: [exasol]
+execution_models: [column-at-a-time, vectorized]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [exasol, filter-pushdown, bloom-filter, columnar, zone-maps]
+complexity: "O(n)"
+benefit_range: [1.5, 10.0]
+---
+
+# EXA-003: Column Filter Pushdown with Bloom
+
+## Metadata
+- **Rule ID**: `exa-003-column-filter-pushdown`
+- **Category**: In-Memory Storage
+- **Source**: Exasol Query Optimization Guide
+- **Complexity**: O(n) with early termination
+- **Prerequisites**: In-memory columnar data; filter predicates
+- **Alternatives**: Late filter application after scan
+
+## Description
+
+Pushes filter predicates down to the column scan level, enabling:
+1. **Bloom filter generation** - Build compact bloom filter during scan
+2. **Zone map pruning** - Skip entire column chunks that don't match
+3. **SIMD evaluation** - Vectorized predicate evaluation on compressed data
+4. **Early termination** - Stop scanning when enough rows found (LIMIT queries)
+
+Unlike disk-based systems that optimize for I/O reduction, Exasol's column
+filter pushdown optimizes for:
+- Reduced memory bandwidth (skip non-matching column chunks)
+- Faster predicate evaluation (operate on compressed data)
+- Bloom filter generation for downstream joins
+
+The key insight is that in-memory columnar data enables extremely fast
+filtering at the storage layer, before data even enters the execution
+pipeline.
+
+**When to apply:**
+- Selective filters (< 50% of data matches)
+- Columnar in-memory storage
+- Downstream joins that benefit from bloom filters
+
+**Why it works:**
+- Bloom filters are cache-friendly (few bytes per thousand rows)
+- Zone maps enable coarse-grained pruning (skip 64K row chunks)
+- Dictionary-encoded columns: filter on codes instead of values
+- SIMD: evaluate 4-16 predicates simultaneously
+
+## Relational Algebra
+
+```
+Standard filter:
+  filter[pred](columnar-scan[T, cols, in-memory=true])
+
+Column filter pushdown:
+  columnar-scan[T, cols, in-memory=true, filter=pred, bloom=true]
+
+With zone maps:
+  columnar-scan[T, cols, in-memory=true,
+    filter=pred,
+    zone-maps=enabled,
+    bloom=true]
+```
+
+## Implementation (egg rewrite rules)
+
+```lisp
+;; Basic column filter pushdown
+(rewrite (filter ?pred
+           (columnar-scan ?table ?cols (in-memory true)))
+  (columnar-scan ?table ?cols
+    (in-memory true)
+    (filter ?pred)
+    (bloom true))
+  :if (is-selective ?pred))
+
+;; Column filter with zone maps
+(rewrite (filter ?pred
+           (columnar-scan ?table ?cols (in-memory true)))
+  (columnar-scan ?table ?cols
+    (in-memory true)
+    (filter ?pred)
+    (zone-maps enabled)
+    (bloom true))
+  :if (has-zone-maps ?table ?cols)
+  :if (is-selective ?pred))
+
+;; Dictionary-encoded column filter
+(rewrite (filter (= ?col ?const)
+           (columnar-scan ?table ?cols (in-memory true)))
+  (columnar-scan ?table ?cols
+    (in-memory true)
+    (filter (dict-filter ?col (dict-lookup ?table ?col ?const)))
+    (bloom true))
+  :if (is-dictionary-encoded ?table ?col))
+
+;; Conjunctive filter pushdown (AND predicates)
+(rewrite (filter (and ?pred1 ?pred2)
+           (columnar-scan ?table ?cols (in-memory true)))
+  (columnar-scan ?table ?cols
+    (in-memory true)
+    (filter (and ?pred1 ?pred2))
+    (eval-order (by-selectivity ?pred1 ?pred2))
+    (bloom true)))
+
+;; Range filter with zone map pruning
+(rewrite (filter (and (>= ?col ?min) (<= ?col ?max))
+           (columnar-scan ?table ?cols (in-memory true)))
+  (columnar-scan ?table ?cols
+    (in-memory true)
+    (filter (range ?col ?min ?max))
+    (zone-maps enabled)
+    (prune-chunks (zone-map-prune ?table ?col ?min ?max))
+    (bloom true)))
+```
+
+## Cost Model
+
+```rust
+/// Cost of filter pushdown with bloom filter generation.
+pub fn cost_column_filter_pushdown(
+    rows: u64,
+    col_bytes: u64,
+    selectivity: f64,
+    has_zone_maps: bool,
+    is_dict_encoded: bool,
+    chunk_size: u64,
+) -> (Cost, Cost) {
+    // Standard filter: scan all rows, then filter
+    let scan_cost = rows as f64 * col_bytes as f64 * 0.1; // memory read
+    let filter_cost = rows as f64 * 5.0; // predicate evaluation
+    let standard = Cost::new(scan_cost + filter_cost, 0.0, 0.0, 0);
+
+    // Pushed-down filter with optimizations
+    let mut pushed_cost = 0.0;
+
+    // Zone map pruning (skip entire chunks)
+    let chunks = rows / chunk_size;
+    let chunks_scanned = if has_zone_maps {
+        (chunks as f64 * selectivity * 1.2) as u64 // 20% overshoot
+    } else {
+        chunks
+    };
+
+    // Scan only matching chunks
+    let rows_scanned = chunks_scanned * chunk_size;
+    pushed_cost += rows_scanned as f64 * col_bytes as f64 * 0.1;
+
+    // Predicate evaluation (cheaper on compressed data)
+    let eval_cost_per_row = if is_dict_encoded { 2.0 } else { 5.0 };
+    pushed_cost += rows_scanned as f64 * eval_cost_per_row;
+
+    // Bloom filter construction (negligible cost)
+    pushed_cost += (rows as f64 * selectivity) * 0.1;
+
+    let pushed = Cost::new(pushed_cost, 0.0, 0.0, 0);
+    (standard, pushed)
+}
+```
+
+**Break-even point**: Pushed-down filter is cheaper when:
+- `selectivity < 0.5` (filters eliminate half the data), OR
+- Zone maps available and eliminate > 30% of chunks, OR
+- Dictionary-encoded column (always cheaper)
+
+## Test Cases
+
+### Positive: Selective equality filter on dictionary column
+```sql
+SELECT customer_id, order_date, total_amount
+FROM orders
+WHERE status = 'completed';
+
+-- status is dictionary-encoded (10 distinct values)
+-- Filter on dictionary code (integer) instead of string
+-- 40% of orders are completed
+-- Build bloom filter for downstream joins
+```
+
+### Positive: Range filter with zone maps
+```sql
+SELECT product_id, sale_date, revenue
+FROM sales
+WHERE sale_date BETWEEN '2024-01-15' AND '2024-01-20';
+
+-- Zone maps per 64K rows: min/max date
+-- Eliminates 358 out of 365 daily chunks (98% pruning)
+-- Only scan 2% of data instead of 100%
+```
+
+### Positive: Conjunctive filter with different selectivities
+```sql
+SELECT user_id, action, timestamp
+FROM events
+WHERE event_type = 'purchase'  -- 1% selectivity
+  AND region = 'US'             -- 40% selectivity
+  AND user_id > 1000000;        -- 90% selectivity
+
+-- Evaluate in order of selectivity: event_type first (most selective)
+-- Early exit: only 1% of rows pass first filter
+-- Remaining filters evaluate on tiny subset
+```
+
+### Positive: Bloom filter for join
+```sql
+SELECT o.order_id, o.total_amount, c.customer_name
+FROM orders o
+JOIN customers c ON o.customer_id = c.customer_id
+WHERE o.order_date = '2024-01-15';
+
+-- Build bloom filter on customer_id during orders scan (5K unique IDs)
+-- Probe bloom filter on customers scan (1M rows)
+-- Eliminates 99.5% of customers before join
+```
+
+### Negative: Non-selective filter
+```sql
+SELECT * FROM orders WHERE year >= 2020;
+
+-- 95% of data matches (mostly recent orders)
+-- Filter pushdown overhead > benefit
+-- Standard scan + filter is faster
+```
+
+### Negative: Complex predicate
+```sql
+SELECT * FROM products
+WHERE LOWER(product_name) LIKE '%widget%';
+
+-- Complex string operation not supported by column scan
+-- Must materialize column and evaluate in executor
+-- Cannot generate bloom filter
+```
+
+### Negative: No downstream join
+```sql
+SELECT COUNT(*) FROM orders WHERE status = 'completed';
+
+-- Filter is pushed down (good)
+-- But bloom filter generation is wasted (no join)
+-- Disable bloom filter generation for non-join queries
+```
+
+## Implementation Details
+
+### Bloom Filter Sizing
+```rust
+/// Optimal bloom filter size for in-memory join.
+pub fn bloom_filter_size(
+    distinct_keys: u64,
+    false_positive_rate: f64,
+) -> usize {
+    let bits = (-1.0 * distinct_keys as f64 * false_positive_rate.ln()
+        / (2.0_f64.ln().powi(2))) as usize;
+    // Round up to cache line boundary
+    (bits + 63) / 64 * 8
+}
+```
+
+### Zone Map Structure
+```rust
+pub struct ZoneMap {
+    chunk_id: u32,
+    row_start: u64,
+    row_end: u64,
+    min_value: Value,
+    max_value: Value,
+    null_count: u32,
+}
+
+impl ZoneMap {
+    /// Check if zone overlaps with predicate range.
+    pub fn overlaps_range(&self, min: &Value, max: &Value) -> bool {
+        // Zone [zone_min, zone_max] overlaps [min, max] if:
+        // zone_max >= min AND zone_min <= max
+        self.max_value >= *min && self.min_value <= *max
+    }
+}
+```
+
+### Dictionary-Encoded Filtering
+```rust
+pub fn filter_dictionary_column(
+    column: &DictionaryColumn,
+    predicate: &str,
+) -> Vec<u32> {
+    // Phase 1: Find matching dictionary codes
+    let matching_codes: Vec<u16> = column
+        .dictionary
+        .iter()
+        .enumerate()
+        .filter_map(|(code, value)| {
+            if value == predicate {
+                Some(code as u16)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Phase 2: SIMD scan of codes array
+    column
+        .codes
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, code)| {
+            if matching_codes.contains(code) {
+                Some(idx as u32)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+```
+
+## References
+
+1. **Exasol Performance Guide**: Filter Optimization Strategies
+2. **Bloom, Burton H.** "Space/time trade-offs in hash coding with allowable
+   errors." CACM 1970.
+3. **Abadi, Daniel et al.** "Integrating Compression and Execution in
+   Column-Oriented Database Systems." SIGMOD 2006.
+4. **Zone Maps**: Oracle Exadata Smart Scan documentation
+5. **Graefe, Goetz and Larson, Per-Åke** "B-tree indexes and CPU caches."
+   ICDE 2001.

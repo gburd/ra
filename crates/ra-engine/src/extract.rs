@@ -122,6 +122,10 @@ impl egg::CostFunction<RelLang> for RelCostFn {
                 return costs(enode.children()[0])
                     + (15.0 * storage_factor);
             }
+            RelLang::Cast(_) => {
+                // Type casts are typically very cheap (often free at runtime)
+                0.01
+            }
             _ => 0.1,
         };
 
@@ -456,6 +460,48 @@ fn convert_node(nodes: &[RelLang], idx: usize) -> Result<RelExpr, EGraphError> {
         RelLang::Func(ids) if !ids.is_empty() => {
             convert_func_as_relational(nodes, ids)
         }
+        RelLang::VectorKNN([table_id, _col_id, _target_id, _k_id]) => {
+            // Extract as annotated scan for now
+            let table = get_symbol(nodes, id(*table_id))?;
+            Ok(RelExpr::Scan {
+                table,
+                alias: Some("vector_knn_scan".to_string()),
+            })
+        }
+        RelLang::VectorRangeScan([table_id, _col_id, _target_id, _threshold_id, _metric_id]) => {
+            let table = get_symbol(nodes, id(*table_id))?;
+            Ok(RelExpr::Scan {
+                table,
+                alias: Some("vector_range_scan".to_string()),
+            })
+        }
+        RelLang::FtsIndexScan([table_id, _idx_id, _match_id]) => {
+            let table = get_symbol(nodes, id(*table_id))?;
+            Ok(RelExpr::Scan {
+                table,
+                alias: Some("fts_index_scan".to_string()),
+            })
+        }
+        RelLang::FtsRankedScan([table_id, _idx_id, _query_id, _k_id, _algo_id]) => {
+            let table = get_symbol(nodes, id(*table_id))?;
+            Ok(RelExpr::Scan {
+                table,
+                alias: Some("fts_ranked_scan".to_string()),
+            })
+        }
+        RelLang::FtsSkipListAnd([table_id, _match1_id, _match2_id]) => {
+            let table = get_symbol(nodes, id(*table_id))?;
+            Ok(RelExpr::Scan {
+                table,
+                alias: Some("fts_skip_list_and".to_string()),
+            })
+        }
+        RelLang::HybridScan(_ids) => {
+            Ok(RelExpr::Scan {
+                table: "hybrid_scan".to_string(),
+                alias: Some("hybrid_scan".to_string()),
+            })
+        }
         other => Err(EGraphError::ExtractionError(format!(
             "unexpected relational node: {other:?}"
         ))),
@@ -707,6 +753,56 @@ fn convert_scalar_operator(
             operand: Box::new(inner),
         });
     }
+    // Handle Cast operator
+    if let RelLang::Cast([expr_id, type_id]) = node {
+        let expr = convert_scalar(nodes, id(*expr_id))?;
+        let target_type = get_symbol(nodes, id(*type_id))?;
+        return Ok(Expr::Cast {
+            expr: Box::new(expr),
+            target_type,
+        });
+    }
+
+    // Handle Vector/FTS operators
+    if let RelLang::VectorDistance([metric_id, col_id, target_id]) = node {
+        let metric = get_symbol(nodes, id(*metric_id))?;
+        let column = convert_scalar(nodes, id(*col_id))?;
+        let target = convert_scalar(nodes, id(*target_id))?;
+        return Ok(Expr::VectorDistance {
+            metric,
+            column: Box::new(column),
+            target: Box::new(target),
+        });
+    }
+    if let RelLang::FtsMatch([vendor_id, cols_id, query_id, mode_id]) = node {
+        let vendor = get_symbol(nodes, id(*vendor_id))?;
+        let cols_str = get_symbol(nodes, id(*cols_id))?;
+        let columns = cols_str.split(',').map(|s| s.to_string()).collect();
+        let query = get_symbol(nodes, id(*query_id))?;
+        let mode_str = get_symbol(nodes, id(*mode_id))?;
+        let mode = if mode_str.is_empty() {
+            None
+        } else {
+            Some(mode_str)
+        };
+        return Ok(Expr::FullTextMatch {
+            vendor,
+            columns,
+            query,
+            mode,
+        });
+    }
+    if let RelLang::FtsRank([col_id, query_id, algo_id]) = node {
+        let col = convert_scalar(nodes, id(*col_id))?;
+        let query = convert_scalar(nodes, id(*query_id))?;
+        let algo = get_symbol(nodes, id(*algo_id))?;
+        // FTS rank is represented as a function call in Expr
+        return Ok(Expr::Function {
+            name: format!("ts_rank_{}", algo),
+            args: vec![col, query],
+        });
+    }
+
     if let RelLang::Func(ids) = node {
         if ids.is_empty() {
             return Err(EGraphError::ExtractionError("empty function call".into()));

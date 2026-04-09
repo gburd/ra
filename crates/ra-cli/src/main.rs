@@ -2,11 +2,13 @@
 #![allow(clippy::print_stderr)]
 
 mod cache_commands;
+mod commands;
 mod config_commands;
 mod diff_validator;
 mod display;
 mod federated_commands;
 mod migrate_commands;
+mod ml_commands;
 mod pg_snapshot_commands;
 pub(crate) mod plan_diff;
 mod proxy;
@@ -18,6 +20,7 @@ mod test_executor;
 mod timeline_commands;
 mod visualize;
 
+use std::collections::HashMap;
 use std::io::Read;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -186,6 +189,16 @@ enum Commands {
         /// Read SQL from stdin instead of the positional argument.
         #[arg(long)]
         stdin: bool,
+        /// Path to JSON file containing schema metadata and statistics.
+        #[arg(long)]
+        schema_json: Option<PathBuf>,
+        /// Path to SQL file containing DDL (CREATE TABLE, CREATE INDEX statements).
+        #[arg(long)]
+        schema_sql: Option<PathBuf>,
+        /// Database connection URL to extract live schema and statistics
+        /// (postgresql://, mysql://, sqlite://, duckdb:// or file path).
+        #[arg(long)]
+        db: Option<String>,
         /// Diff output format: colored, plain, side-by-side, compact. Defaults to colored if no format specified.
         #[arg(long, value_name = "FORMAT", default_missing_value = "colored", num_args = 0..=1)]
         diff: Option<String>,
@@ -398,6 +411,37 @@ enum Commands {
             ra-cli timeline --timeline timelines/test.toml --snapshots 0,2,4"
     )]
     Timeline(timeline_commands::TimelineCommand),
+    /// ML model management commands (train, load, save, stats, export).
+    #[command(subcommand)]
+    Ml(ml_commands::MlCommands),
+    /// Run comparison benchmarks against native RDBMS implementations.
+    #[command(
+        long_about = "Run performance comparison benchmarks between Ra and native database implementations.\n\n\
+            Compare Ra's optimized query execution against PostgreSQL, MySQL, SQLite, and DuckDB \
+            across different workload types including hybrid search, vector search, joins, and analytics.\n\n\
+            Examples:\n  \
+            ra-cli benchmark --all\n  \
+            ra-cli benchmark --database postgresql --workload hybrid-search\n  \
+            ra-cli benchmark --database mysql --workload joins --output results.json\n  \
+            ra-cli benchmark --all --format html --output comparison.html"
+    )]
+    Benchmark {
+        /// Run benchmarks for all databases and workloads.
+        #[arg(long)]
+        all: bool,
+        /// Database system to benchmark: postgresql, mysql, sqlite, duckdb.
+        #[arg(long)]
+        database: Option<String>,
+        /// Workload type: hybrid-search, vector-search, fts, joins, aggregates, analytics.
+        #[arg(long)]
+        workload: Option<String>,
+        /// Output file path.
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        /// Output format: json, markdown, html.
+        #[arg(long, default_value = "markdown")]
+        format: String,
+    },
     /// Generate shell completion scripts.
     #[command(long_about = "Generate tab-completion scripts for your shell.\n\n\
             Source the output in your shell profile to enable completions.\n\n\
@@ -806,6 +850,9 @@ fn run_main() -> Result<()> {
             rules,
             timeline,
             snapshot,
+            schema_json,
+            schema_sql,
+            db,
         } => {
             let resolved = resolve_query(&query, use_stdin)?;
 
@@ -840,6 +887,9 @@ fn run_main() -> Result<()> {
                 snapshot,
                 cli.verbose,
                 cli.quiet,
+                schema_json.as_deref(),
+                schema_sql.as_deref(),
+                db.as_deref(),
             )
         }
         Commands::GatherMetadata { db, schema, output } => cmd_gather_metadata(
@@ -1100,6 +1150,20 @@ fn run_main() -> Result<()> {
             }
         },
         Commands::Timeline(cmd) => timeline_commands::cmd_timeline(&cmd, cli.quiet),
+        Commands::Ml(cmd) => {
+            tokio::runtime::Runtime::new()
+                .context("failed to create tokio runtime")?
+                .block_on(ml_commands::handle_ml_command(cmd))
+        }
+        Commands::Benchmark {
+            all: _,
+            database: _,
+            workload: _,
+            output: _,
+            format: _,
+        } => {
+            anyhow::bail!("Benchmark command is temporarily disabled due to incomplete implementation")
+        },
         Commands::Completions { shell } => {
             let mut cmd = Cli::command();
             generate(shell, &mut cmd, "ra-cli", &mut std::io::stdout());
@@ -1660,6 +1724,90 @@ fn cmd_explain(
 
 // ── optimize ────────────────────────────────────────────────
 
+/// Convert SchemaInfo from ra-metadata to HashMap of Statistics for optimizer.
+///
+/// Note: SchemaInfo contains schema structure (tables, columns, indexes) but not
+/// detailed statistics. This function generates heuristic statistics based on the
+/// schema structure. For real statistics, use --db to connect to a live database
+/// or --schema-json with a file generated by gather-metadata.
+fn schema_info_to_table_stats(
+    schema: &ra_metadata::SchemaInfo,
+) -> HashMap<String, ra_core::statistics::Statistics> {
+    use ra_core::statistics::{ColumnStats, IndexStats, Statistics};
+
+    let mut result = HashMap::new();
+
+    for (table_name, table_info) in &schema.tables {
+        // Use estimated_rows if available, otherwise use heuristic
+        let row_count = table_info.estimated_rows.unwrap_or(1000.0);
+
+        // Generate heuristic column statistics
+        let mut columns = HashMap::new();
+        for col in &table_info.columns {
+            // Heuristic: assume 10% of rows are distinct if no info available
+            let distinct_count = row_count * 0.1;
+            let null_fraction = if col.nullable { 0.05 } else { 0.0 };
+
+            let col_stats = ColumnStats {
+                distinct_count,
+                null_fraction,
+                min_value: None,
+                max_value: None,
+                avg_length: None,
+                histogram: None,
+                correlation: None,
+                most_common_values: None,
+                most_common_freqs: None,
+            };
+            columns.insert(col.name.clone(), col_stats);
+        }
+
+        // Generate heuristic index statistics
+        let mut indexes = HashMap::new();
+        for idx in &table_info.indexes {
+            // Check if this is a primary key index
+            let is_primary = table_info.primary_key_columns().iter()
+                .all(|&pk_col| idx.columns.contains(&pk_col.to_string()));
+
+            let idx_stats = IndexStats {
+                columns: idx.columns.clone(),
+                is_unique: idx.unique,
+                is_primary,
+                index_type: match idx.index_type.to_lowercase().as_str() {
+                    "btree" => ra_core::facts::IndexType::BTree,
+                    "hash" => ra_core::facts::IndexType::Hash,
+                    "gin" => ra_core::facts::IndexType::Gin,
+                    "gist" => ra_core::facts::IndexType::Gist,
+                    "brin" => ra_core::facts::IndexType::Brin,
+                    "rum" => ra_core::facts::IndexType::Rum,
+                    "hnsw" => ra_core::facts::IndexType::HNSW,
+                    "ivfflat" => ra_core::facts::IndexType::IVFFlat,
+                    _ => ra_core::facts::IndexType::BTree, // Default
+                },
+                tuple_count: row_count,
+                index_size: 0, // Not available from schema info
+            };
+            indexes.insert(idx.name.clone(), idx_stats);
+        }
+
+        // Estimate avg_row_size and total_size
+        let estimated_avg_row_size = table_info.columns.len() as u64 * 30; // 30 bytes per column average
+        let estimated_total_size = (row_count as u64) * estimated_avg_row_size;
+
+        let stats = Statistics {
+            row_count,
+            avg_row_size: estimated_avg_row_size,
+            total_size: estimated_total_size,
+            columns,
+            indexes,
+        };
+
+        result.insert(table_name.clone(), stats);
+    }
+
+    result
+}
+
 fn cmd_optimize(
     query: &str,
     hardware_profile_name: &str,
@@ -1673,6 +1821,9 @@ fn cmd_optimize(
     snapshot_index: usize,
     verbose: bool,
     quiet: bool,
+    schema_json: Option<&Path>,
+    schema_sql: Option<&Path>,
+    db: Option<&str>,
 ) -> Result<()> {
     use ra_engine::{SnapshotFactsProvider, TimelineConfig};
 
@@ -1684,6 +1835,34 @@ fn cmd_optimize(
         plan_diff::ColorMode::Auto
     };
     plan_diff::apply_color_mode(color_mode);
+
+    // Load schema from one of three sources (priority: db > schema_json > schema_sql)
+    let table_stats_opt = if let Some(db_url) = db {
+        if !quiet {
+            let kind = ra_metadata::detect_kind(db_url)
+                .map_or_else(|_| "unknown".to_owned(), |k| k.to_string());
+            eprintln!("Loading schema from {} database...", kind.cyan());
+        }
+        let mut connector = ra_metadata::connect(db_url)
+            .with_context(|| format!("connecting to database: {db_url}"))?;
+        let schema = connector.gather_schema()
+            .with_context(|| format!("gathering schema from: {db_url}"))?;
+        Some(schema_info_to_table_stats(&schema))
+    } else if let Some(json_path) = schema_json {
+        if !quiet {
+            eprintln!("Loading schema from JSON: {}", json_path.display().to_string().cyan());
+        }
+        let json_content = std::fs::read_to_string(json_path)
+            .with_context(|| format!("reading schema JSON: {}", json_path.display()))?;
+        let schema: ra_metadata::SchemaInfo = serde_json::from_str(&json_content)
+            .with_context(|| format!("parsing schema JSON: {}", json_path.display()))?;
+        Some(schema_info_to_table_stats(&schema))
+    } else if let Some(_sql_path) = schema_sql {
+        // TODO: Implement DDL parser (Task #3)
+        bail!("--schema-sql is not yet implemented. Use --schema-json or --db instead.");
+    } else {
+        None
+    };
 
     let plan = sql_to_relexpr(query).map_err(|e| format_sql_error(&e, query))?;
 
@@ -1712,6 +1891,19 @@ fn cmd_optimize(
 
     if let Some(b) = budget {
         optimizer.set_resource_budget(b.clone());
+    }
+
+    // Set table statistics if schema was loaded
+    if let Some(table_stats) = table_stats_opt {
+        if !quiet && verbose {
+            eprintln!(
+                "Loaded statistics for {} tables",
+                table_stats.len().to_string().cyan()
+            );
+        }
+        for (table_name, stats) in table_stats {
+            optimizer.add_table_stats(table_name, stats);
+        }
     }
 
     // If we have a timeline context, optimize with snapshot facts
@@ -3947,3 +4139,173 @@ fn load_demo_data(
         analyze_scale_factor: 0.1,
     });
 }
+
+// Temporarily disabled due to incomplete implementation
+/*
+fn cmd_benchmark(
+    all: bool,
+    database: Option<&str>,
+    workload: Option<&str>,
+    output: Option<&Path>,
+    format: &str,
+    verbose: bool,
+    quiet: bool,
+) -> Result<()> {
+    use commands::benchmark::{BenchmarkRunner, DatabaseSystem, WorkloadType};
+
+    if !all && (database.is_none() || workload.is_none()) {
+        anyhow::bail!(
+            "Either --all or both --database and --workload must be specified"
+        );
+    }
+
+    let mut runner = BenchmarkRunner::new()?;
+
+    if all {
+        if !quiet {
+            eprintln!("{}", "Running all benchmarks...".bold());
+        }
+
+        let all_results = commands::benchmark::run_all_benchmarks()?;
+
+        let mut combined_results = Vec::new();
+        for ((_db, _workload), report) in all_results {
+            combined_results.extend(report.results);
+        }
+
+        let combined_report = runner.generate_report(combined_results)?;
+
+        if let Some(output_path) = output {
+            match format {
+                "json" => runner.export_json(&combined_report, output_path)?,
+                "markdown" => runner.export_markdown(&combined_report, output_path)?,
+                "html" => runner.export_html(&combined_report, output_path)?,
+                _ => anyhow::bail!("Unknown format: {}", format),
+            }
+            if !quiet {
+                eprintln!("{} {}", "Results exported to:".green().bold(), output_path.display());
+            }
+        } else {
+            print_benchmark_report(&combined_report, verbose, quiet)?;
+        }
+    } else {
+        let db: DatabaseSystem = database
+            .unwrap()
+            .parse()
+            .context("Invalid database system")?;
+        let wl: WorkloadType = workload
+            .unwrap()
+            .parse()
+            .context("Invalid workload type")?;
+
+        if !quiet {
+            eprintln!(
+                "{} {} / {}",
+                "Running benchmark:".bold(),
+                db.to_string().cyan(),
+                wl.to_string().cyan()
+            );
+        }
+
+        let results = runner.run_benchmark(db, wl)?;
+        let report = runner.generate_report(results)?;
+
+        if let Some(output_path) = output {
+            match format {
+                "json" => runner.export_json(&report, output_path)?,
+                "markdown" => runner.export_markdown(&report, output_path)?,
+                "html" => runner.export_html(&report, output_path)?,
+                _ => anyhow::bail!("Unknown format: {}", format),
+            }
+            if !quiet {
+                eprintln!("{} {}", "Results exported to:".green().bold(), output_path.display());
+            }
+        } else {
+            print_benchmark_report(&report, verbose, quiet)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn print_benchmark_report(
+    report: &commands::benchmark::ComparisonReport,
+    verbose: bool,
+    quiet: bool,
+) -> Result<()> {
+    if quiet {
+        return Ok(());
+    }
+
+    eprintln!();
+    eprintln!("{}", "Benchmark Results".bold().underline());
+    eprintln!("{} {}", "Generated:".bold(), report.timestamp);
+    eprintln!("{} {}", "Total Queries:".bold(), report.total_queries);
+    eprintln!();
+
+    eprintln!("{}", "Summary:".bold());
+    eprintln!("  Average Speedup: {:.2}x", report.summary.average_speedup);
+    eprintln!("  Median Speedup:  {:.2}x", report.summary.median_speedup);
+    eprintln!("  Max Speedup:     {:.2}x", report.summary.max_speedup);
+    eprintln!("  Min Speedup:     {:.2}x", report.summary.min_speedup);
+    eprintln!();
+    eprintln!(
+        "  Faster: {} ({:.1}%)",
+        report.summary.queries_faster,
+        100.0 * report.summary.queries_faster as f64 / report.total_queries as f64
+    );
+    eprintln!(
+        "  Slower: {} ({:.1}%)",
+        report.summary.queries_slower,
+        100.0 * report.summary.queries_slower as f64 / report.total_queries as f64
+    );
+    eprintln!(
+        "  Similar: {} ({:.1}%)",
+        report.summary.queries_equal,
+        100.0 * report.summary.queries_equal as f64 / report.total_queries as f64
+    );
+    eprintln!();
+
+    if verbose {
+        eprintln!("{}", "Detailed Results:".bold());
+        eprintln!();
+        for result in &report.results {
+            let speedup_color = if result.speedup > 1.1 {
+                result.speedup.to_string().green()
+            } else if result.speedup < 0.9 {
+                result.speedup.to_string().red()
+            } else {
+                result.speedup.to_string().yellow()
+            };
+
+            eprintln!("{}", result.query_name.cyan().bold());
+            eprintln!("  Database:  {}", result.database);
+            eprintln!("  Workload:  {}", result.workload);
+            eprintln!("  Native:    {:.2} ms", result.native_time_ms);
+            eprintln!("  Ra:        {:.2} ms", result.ra_time_ms);
+            eprintln!("  Speedup:   {}x", speedup_color);
+            eprintln!("  Rows (Native): {}", result.native_rows_scanned);
+            eprintln!("  Rows (Ra):     {}", result.ra_rows_scanned);
+            eprintln!("  Complexity:    {}", result.complexity);
+            eprintln!();
+        }
+    } else {
+        eprintln!("{}", "Top Results:".bold());
+        eprintln!();
+        let mut sorted = report.results.clone();
+        sorted.sort_by(|a, b| b.speedup.partial_cmp(&a.speedup).unwrap_or(std::cmp::Ordering::Equal));
+
+        for result in sorted.iter().take(5) {
+            eprintln!(
+                "  {}: {:.2}x speedup ({} ms -> {} ms)",
+                result.query_name.cyan(),
+                result.speedup,
+                result.native_time_ms as u64,
+                result.ra_time_ms as u64
+            );
+        }
+    }
+
+    Ok(())
+}
+*/

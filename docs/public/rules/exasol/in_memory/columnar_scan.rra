@@ -1,0 +1,182 @@
+---
+id: exa-001-columnar-scan-inmem
+name: "Columnar Scan In-Memory"
+category: exasol-in-memory
+databases: [exasol]
+execution_models: [column-at-a-time, vectorized]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [exasol, columnar, in-memory, simd]
+complexity: "O(n)"
+benefit_range: [2.0, 10.0]
+---
+
+# EXA-001: Columnar Scan In-Memory
+
+## Metadata
+- **Rule ID**: `exa-001-columnar-scan-inmem`
+- **Category**: In-Memory Storage
+- **Source**: Exasol Architecture Documentation
+- **Complexity**: O(n) with cache-friendly access patterns
+- **Prerequisites**: Data resident in memory; columnar storage format
+- **Alternatives**: Row-oriented scan (standard execution)
+
+## Description
+
+Converts standard table scans to columnar scans when data is confirmed
+to be in memory. Exasol stores all data in RAM using a compressed columnar
+format optimized for cache-friendly sequential access and SIMD operations.
+
+The key optimization is that columnar scans in memory provide:
+1. **Better cache utilization** - Sequential access to a single column fits
+   in CPU cache lines, minimizing cache misses
+2. **SIMD vectorization** - Homogeneous data types enable vectorized operations
+   on 4-16 values simultaneously
+3. **Compression-aware execution** - Operate directly on compressed data where
+   possible (dictionary codes, bit-packed integers)
+4. **Reduced memory bandwidth** - Only touch columns needed for the operation
+
+**When to apply:**
+- Data is confirmed to be in memory (not spilled to disk)
+- Query accesses subset of columns (not SELECT *)
+- Data format supports columnar access (not row-based)
+
+**Why it works:**
+- In-memory columnar data enables 10x+ throughput vs row scans
+- Modern CPUs are memory-bound, not compute-bound
+- Columnar layout reduces memory bandwidth by 5-50x for analytical queries
+
+## Relational Algebra
+
+```
+Standard scan:
+  scan[T, all_cols]
+
+Columnar in-memory scan:
+  columnar-scan[T, required_cols, in-memory=true]
+
+Where:
+  required_cols = columns actually referenced in query
+  in-memory = true when data resident in RAM
+```
+
+## Implementation (egg rewrite rules)
+
+```lisp
+;; Basic columnar scan conversion
+(rewrite (scan ?table ?cols)
+  (columnar-scan ?table ?cols (in-memory true))
+  :if (in-memory-data ?table))
+
+;; Columnar scan with compression awareness
+(rewrite (scan ?table ?cols)
+  (columnar-scan ?table ?cols
+    (in-memory true)
+    (compression (detect-compression ?table ?cols)))
+  :if (in-memory-data ?table)
+  :if (supports-compressed-scan ?table ?cols))
+
+;; Columnar scan with SIMD tagging
+(rewrite (columnar-scan ?table ?cols (in-memory true))
+  (simd-columnar-scan ?table ?cols
+    (in-memory true)
+    (vector-width (detect-simd-width)))
+  :if (all-cols-simd-compatible ?cols))
+```
+
+## Cost Model
+
+```rust
+/// Compare row-oriented vs columnar in-memory scan.
+pub fn cost_columnar_scan_inmem(
+    rows: u64,
+    col_count: usize,
+    cols_accessed: usize,
+    bytes_per_col: u64,
+    cache_line_bytes: u64,
+    simd_width: usize,
+) -> (Cost, Cost) {
+    // Row-oriented scan: access all columns, poor cache locality
+    let row_bytes = col_count as u64 * bytes_per_col;
+    let cache_misses_row = rows * row_bytes / cache_line_bytes;
+    let row_cpu = rows as f64 * col_count as f64 * 1.0;
+    let row_mem = cache_misses_row as f64 * 100.0; // 100 cycles per cache miss
+    let row_cost = Cost::new(row_cpu + row_mem, 0.0, 0.0, 0);
+
+    // Columnar scan: access only needed columns, excellent cache locality
+    let col_bytes = cols_accessed as u64 * bytes_per_col * rows;
+    let cache_misses_col = col_bytes / cache_line_bytes;
+    let col_cpu = rows as f64 * cols_accessed as f64 * 0.25; // SIMD 4x speedup
+    let col_mem = cache_misses_col as f64 * 100.0;
+    let col_cost = Cost::new(col_cpu + col_mem, 0.0, 0.0, 0);
+
+    (row_cost, col_cost)
+}
+```
+
+**Break-even point**: Columnar scan is always cheaper for in-memory data
+when accessing fewer than all columns. Typical speedup: 4-10x for queries
+accessing 1-5 columns out of 20-100 total columns.
+
+## Test Cases
+
+### Positive: Selective column access
+```sql
+SELECT customer_id, total_amount
+FROM orders
+WHERE order_date >= '2024-01-01';
+
+-- Table has 50 columns, query accesses 3 (customer_id, total_amount, order_date)
+-- Row scan: read 50 columns * 1M rows = 50M values
+-- Columnar scan: read 3 columns * 1M rows = 3M values
+-- 16x reduction in memory bandwidth
+```
+
+### Positive: Aggregation on few columns
+```sql
+SELECT region, SUM(sales_amount), COUNT(*)
+FROM sales
+GROUP BY region;
+
+-- Table has 100 columns, query needs 2 (region, sales_amount)
+-- Columnar scan + SIMD vectorized SUM provides 20-50x speedup
+```
+
+### Positive: Filter on indexed column
+```sql
+SELECT product_name, price
+FROM products
+WHERE category_id = 42;
+
+-- Dictionary-encoded category_id enables compressed filtering
+-- Columnar scan reads category codes, filters, then materializes 2 columns
+```
+
+### Negative: Full row access
+```sql
+SELECT * FROM customers;
+
+-- Query needs all columns anyway
+-- Columnar scan has overhead reconstructing rows
+-- Row-oriented scan may be faster (but still uses columnar internally)
+```
+
+### Negative: Single row lookup
+```sql
+SELECT * FROM orders WHERE order_id = 12345;
+
+-- Point lookup of single row
+-- Index seek to row-id, then fetch is more efficient
+-- Columnar scan scans entire column
+```
+
+## References
+
+1. **Exasol Architecture Whitepaper**: In-Memory Columnar Storage Design
+2. **Abadi, Daniel et al.** "Column-Stores vs. Row-Stores: How Different Are
+   They Really?" SIGMOD 2008.
+3. **CMU 15-721 Lecture 2**: Modern Analytical Database Systems (2024)
+4. **Boncz, Peter et al.** "MonetDB/X100: Hyper-Pipelining Query Execution."
+   CIDR 2005.
+5. **Exasol TPC-H Results**: 100GB-100TB performance leadership

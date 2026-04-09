@@ -12,6 +12,7 @@ default = ["metadata", "streaming", "file-discovery"]
 metadata = ["ra-metadata"]
 streaming = ["timely", "differential-dataflow"]
 file-discovery = ["walkdir"]
+timeline = ["ra-stats/timeline"]
 
 [dependencies]
 anyhow = { workspace = true }
@@ -81,6 +82,18 @@ harness = false
 
 [[bench]]
 name = "cache_invalidation_bench"
+harness = false
+
+[[bench]]
+name = "vector_search_bench"
+harness = false
+
+[[bench]]
+name = "lazy_rules_bench"
+harness = false
+
+[[bench]]
+name = "hybrid_bench"
 harness = false
 
 [[bin]]

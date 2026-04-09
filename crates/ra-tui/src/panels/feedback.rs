@@ -9,9 +9,11 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
+#[cfg(feature = "timeline")]
 use crate::timeline::{InvalidationTrigger, Snapshot};
 
 /// Render the execution feedback panel.
+#[cfg(feature = "timeline")]
 pub fn render(
     frame: &mut Frame,
     snapshot: &Snapshot,
@@ -36,6 +38,7 @@ pub fn render(
 }
 
 /// Build the feedback text lines from a snapshot.
+#[cfg(feature = "timeline")]
 #[must_use]
 pub fn build_feedback_lines(
     snapshot: &Snapshot,
@@ -56,7 +59,7 @@ pub fn build_feedback_lines(
                     Style::default().fg(Color::Green),
                 ),
                 Span::styled(
-                    rule.clone(),
+                    rule.clone().to_string(),
                     Style::default().fg(Color::Cyan),
                 ),
             ]));
@@ -142,6 +145,7 @@ pub fn diagnostic_style(diag: &str) -> (Color, &'static str) {
 }
 
 /// Get icon and color for invalidation trigger.
+#[cfg(feature = "timeline")]
 #[must_use]
 pub fn invalidation_icon_and_color(
     trigger: InvalidationTrigger,
@@ -165,7 +169,7 @@ fn border_style(focused: bool) -> Style {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "timeline"))]
 mod tests {
     use super::*;
     use crate::timeline::Snapshot;

@@ -5,6 +5,8 @@
 //! query sharing.
 
 mod api;
+mod cache;
+mod config;
 mod cors;
 mod errors;
 mod rate_limit;
@@ -13,12 +15,12 @@ mod websocket;
 use std::path::PathBuf;
 
 use ra_synthesis::synthesizer::{SynthesisRequest, Synthesizer};
+use redis::aio::ConnectionManager;
 use rocket::fs::{FileServer, NamedFile};
 use rocket::serde::json::Json;
 use rocket::{get, launch, options, post, routes};
 use serde::Serialize;
 
-use api::share::ShareStore;
 use cors::Cors;
 use rate_limit::RateLimiter;
 
@@ -75,18 +77,33 @@ fn synthesize(
 
 /// SPA fallback: serve `index.html` for any path not matched by
 /// API routes or static files.  This allows client-side routing
-/// (preact-router) to handle navigation paths like `/editor`,
-/// `/compare`, `/visualize`, etc.
+/// to handle navigation paths.
 #[get("/<_path..>", rank = 100)]
 async fn spa_fallback(
     _path: std::path::PathBuf,
 ) -> Option<NamedFile> {
-    NamedFile::open(static_dir().join("index.html"))
+    NamedFile::open(frontend_dir().join("index.html"))
         .await
         .ok()
 }
 
-/// Resolve the directory for serving static files.
+/// Resolve the directory for serving the React frontend.
+///
+/// Uses the `FRONTEND_DIR` environment variable when set (Docker),
+/// falling back to `crates/ra-web/frontend/dist` relative to the cargo
+/// manifest directory (local development).
+fn frontend_dir() -> PathBuf {
+    if let Ok(dir) = std::env::var("FRONTEND_DIR") {
+        return PathBuf::from(dir);
+    }
+    PathBuf::from(
+        std::env::var("CARGO_MANIFEST_DIR")
+            .unwrap_or_else(|_| ".".to_string()),
+    )
+    .join("frontend/dist")
+}
+
+/// Resolve the directory for serving static files (demos).
 ///
 /// Uses the `STATIC_DIR` environment variable when set (Docker),
 /// falling back to `crates/ra-web/static` relative to the cargo
@@ -95,7 +112,6 @@ fn static_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("STATIC_DIR") {
         return PathBuf::from(dir);
     }
-    // Fallback for local `cargo run` from the workspace root.
     PathBuf::from(
         std::env::var("CARGO_MANIFEST_DIR")
             .unwrap_or_else(|_| ".".to_string()),
@@ -104,7 +120,8 @@ fn static_dir() -> PathBuf {
 }
 
 /// Build the Rocket instance with all routes and fairings attached.
-fn build_rocket() -> rocket::Rocket<rocket::Build> {
+fn build_rocket(redis_conn: ConnectionManager) -> rocket::Rocket<rocket::Build> {
+    let frontend_path = frontend_dir();
     let static_path = static_dir();
     rocket::build()
         .attach(Cors)
@@ -112,7 +129,7 @@ fn build_rocket() -> rocket::Rocket<rocket::Build> {
             100,
             std::time::Duration::from_secs(60),
         ))
-        .manage(ShareStore::new())
+        .manage(redis_conn)
         .manage(api::demos::DemoState::new(std::sync::Mutex::new(
             api::demos::DemoStore::new(),
         )))
@@ -148,19 +165,33 @@ fn build_rocket() -> rocket::Rocket<rocket::Build> {
                 api::visualize::compare_plans,
             ],
         )
-        .mount("/", FileServer::from(static_path))
+        .mount("/demos", FileServer::from(static_path))
+        .mount("/", FileServer::from(frontend_path))
         .mount("/", routes![spa_fallback])
 }
 
 #[launch]
-fn rocket() -> _ {
+async fn rocket() -> _ {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env(),
         )
         .init();
 
-    build_rocket()
+    // Initialize Redis connection
+    let redis_url = std::env::var("REDIS_URL")
+        .unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
+
+    let client = redis::Client::open(redis_url)
+        .expect("Failed to create Redis client");
+
+    let conn_manager = ConnectionManager::new(client)
+        .await
+        .expect("Failed to connect to Redis");
+
+    tracing::info!("Connected to Redis");
+
+    build_rocket(conn_manager)
 }
 
 #[cfg(test)]
@@ -171,8 +202,73 @@ mod tests {
 
     use super::*;
 
+    /// Build a Rocket instance for testing (API routes only, no FileServers).
+    fn build_test_rocket(redis_conn: ConnectionManager) -> rocket::Rocket<rocket::Build> {
+        // Create minimal HTML files for testing
+        let test_frontend = std::env::temp_dir().join("ra-web-test-frontend");
+        std::fs::create_dir_all(&test_frontend).ok();
+        std::fs::write(
+            test_frontend.join("index.html"),
+            "<!DOCTYPE html><html><head><title>RA Web</title></head><body><h1>RA SQL Planner Explorer</h1></body></html>"
+        ).ok();
+        std::fs::write(
+            test_frontend.join("plan-visualization.html"),
+            r#"<!DOCTYPE html><html><head><title>Interactive Query Plan Visualization</title><script src="d3.v7.min.js"></script></head><body><h1>Interactive Query Plan Visualization</h1></body></html>"#
+        ).ok();
+
+        rocket::build()
+            .attach(Cors)
+            .attach(RateLimiter::new(
+                100,
+                std::time::Duration::from_secs(60),
+            ))
+            .manage(redis_conn)
+            .manage(api::demos::DemoState::new(std::sync::Mutex::new(
+                api::demos::DemoStore::new(),
+            )))
+            .mount(
+                "/",
+                routes![
+                    health,
+                    options_preflight,
+                    synthesize,
+                    api::execute::execute,
+                    api::translate::translate,
+                    api::optimize::optimize,
+                    api::explain::explain,
+                    api::isolation::parse_spec,
+                    api::isolation::run_isolation,
+                    api::compare::compare,
+                    api::rules::list_rules,
+                    api::share::create_share,
+                    api::share::get_share,
+                    api::demos::list_demos,
+                    api::demos::demo_staleness_impact,
+                    api::demos::demo_hardware_plan,
+                    api::demos::demo_join_algorithm,
+                    api::demos::demo_aggregation_strategy,
+                    api::demos2::demo_index_selection,
+                    api::demos2::demo_subquery_unnesting,
+                    api::demos2::demo_parallel_query,
+                    api::demos2::demo_gpu_offloading,
+                    api::demos2::demo_distributed_query,
+                    api::demos2::demo_cost_calibration,
+                    websocket::isolation_ws,
+                    api::visualize::visualize,
+                    api::visualize::compare_plans,
+                ],
+            )
+            .mount("/", FileServer::from(test_frontend.clone()))
+            .mount("/", routes![spa_fallback])
+    }
+
     fn client() -> Client {
-        Client::tracked(build_rocket()).unwrap()
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let redis_url = std::env::var("REDIS_URL")
+            .unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
+        let redis_client = redis::Client::open(redis_url).unwrap();
+        let conn_manager = runtime.block_on(ConnectionManager::new(redis_client)).unwrap();
+        Client::tracked(build_test_rocket(conn_manager)).unwrap()
     }
 
     #[test]
@@ -485,6 +581,7 @@ mod tests {
     /// Build a Rocket instance with a very low rate limit for
     /// testing (2 requests per 60 seconds).
     fn build_rate_limited_rocket(
+        redis_conn: ConnectionManager,
     ) -> rocket::Rocket<rocket::Build> {
         rocket::build()
             .attach(Cors)
@@ -492,7 +589,7 @@ mod tests {
                 2,
                 std::time::Duration::from_secs(60),
             ))
-            .manage(ShareStore::new())
+            .manage(redis_conn)
             .manage(api::demos::DemoState::new(std::sync::Mutex::new(
                 api::demos::DemoStore::new(),
             )))
@@ -506,38 +603,22 @@ mod tests {
                     api::translate::translate,
                     api::optimize::optimize,
                     api::explain::explain,
-                    api::isolation::parse_spec,
-                    api::isolation::run_isolation,
-                    api::compare::compare,
-                    api::rules::list_rules,
-                    api::share::create_share,
-                    api::share::get_share,
-                    api::demos::list_demos,
-                    api::demos::demo_staleness_impact,
-                    api::demos::demo_hardware_plan,
-                    api::demos::demo_join_algorithm,
-                    api::demos::demo_aggregation_strategy,
-                    api::demos2::demo_index_selection,
-                    api::demos2::demo_subquery_unnesting,
-                    api::demos2::demo_parallel_query,
-                    api::demos2::demo_gpu_offloading,
-                    api::demos2::demo_distributed_query,
-                    api::demos2::demo_cost_calibration,
-                    websocket::isolation_ws,
-                    api::visualize::visualize,
-                    api::visualize::compare_plans,
                 ],
             )
-            .mount("/", FileServer::from(static_dir()))
-            .mount("/", routes![spa_fallback])
     }
 
     #[test]
     fn test_rate_limiting() {
         use std::net::SocketAddr;
 
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let redis_url = std::env::var("REDIS_URL")
+            .unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
+        let redis_client = redis::Client::open(redis_url).unwrap();
+        let conn_manager = runtime.block_on(ConnectionManager::new(redis_client)).unwrap();
+
         let client = Client::tracked(
-            build_rate_limited_rocket(),
+            build_rate_limited_rocket(conn_manager),
         )
         .unwrap();
 
@@ -701,8 +782,14 @@ mod tests {
 
     #[test]
     fn test_rate_limit_skips_health() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let redis_url = std::env::var("REDIS_URL")
+            .unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
+        let redis_client = redis::Client::open(redis_url).unwrap();
+        let conn_manager = runtime.block_on(ConnectionManager::new(redis_client)).unwrap();
+
         let client = Client::tracked(
-            build_rate_limited_rocket(),
+            build_rate_limited_rocket(conn_manager),
         )
         .unwrap();
 

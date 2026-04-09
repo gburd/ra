@@ -15,6 +15,7 @@ use ra_core::algebra::{
     WindowFunction,
 };
 use ra_core::expr::{BinOp, ColumnRef, Const, Expr, UnaryOp};
+#[cfg(feature = "timeline")]
 use ra_stats::delta::DeltaSet;
 use tracing::warn;
 
@@ -162,6 +163,36 @@ define_language! {
         "agg-expr" = AggExpr([Id; 3]),
         "distinct" = Distinct,
         "all" = All,
+
+        // -- Vector search operators (RFC 0064) --
+        // Children: [metric, column, target_vector]
+        "vector-distance" = VectorDistance([Id; 3]),
+        // Children: [table, column, target_vector, k]
+        "vector-knn" = VectorKNN([Id; 4]),
+        // Children: [table, column, target_vector, threshold, metric]
+        "vector-range-scan" = VectorRangeScan([Id; 5]),
+
+        // -- Full-text search operators (RFC 0073) --
+        // Children: [vendor, columns, query, mode]
+        "fts-match" = FtsMatch([Id; 4]),
+        // Children: [column, query, algorithm]
+        "fts-rank" = FtsRank([Id; 3]),
+        // Children: [table, index_type, predicate]
+        "fts-index-scan" = FtsIndexScan([Id; 3]),
+        // Children: [table, index_type, query, k, algorithm]
+        "fts-ranked-scan" = FtsRankedScan([Id; 5]),
+        // Children: [table, pred1, pred2]
+        "fts-skip-list-and" = FtsSkipListAnd([Id; 3]),
+
+        // -- Hybrid search operators (RFC 0073) --
+        // Children: [fts_score, vector_score, alpha, beta, method]
+        "hybrid-score" = HybridScore([Id; 5]),
+        // Children: [table, fts_args, vector_args, strategy, k, limit]
+        "hybrid-scan" = HybridScan([Id; 6]),
+
+        // -- Type casting operator --
+        // Children: [expr, target_type]
+        "cast" = Cast([Id; 2]),
 
         // -- Leaf symbols (table names, column names, strings) --
         Symbol(egg::Symbol),
@@ -1249,6 +1280,7 @@ impl Optimizer {
     ///
     /// Returns an error if the expression cannot be converted or
     /// extraction fails.
+    #[cfg(feature = "timeline")]
     pub fn optimize_incremental(
         &mut self,
         expr: &RelExpr,
@@ -1315,6 +1347,7 @@ impl Optimizer {
     /// Apply statistics deltas to the internal table stats map.
     ///
     /// Returns the number of tables whose stats were updated.
+    #[cfg(feature = "timeline")]
     fn apply_stats_delta(&mut self, delta_set: &DeltaSet) -> usize {
         let mut updated_tables =
             std::collections::HashSet::<String>::new();
@@ -2018,6 +2051,26 @@ fn add_rel_expr(rec: &mut RecExpr<RelLang>, expr: &RelExpr) -> Result<Id, EGraph
                 view_id, alias_id, nil_g, nil_a,
             ])))
         }
+        RelExpr::TopK { vector_expr, query_vector, metric, k, input } => {
+            let tag_id = add_symbol(rec, "topk");
+            let vec_expr_id = add_scalar_expr(rec, vector_expr)?;
+            let query_id = add_scalar_expr(rec, query_vector)?;
+            let metric_id = add_symbol(rec, &format!("{:?}", metric));
+            let k_id = add_symbol(rec, &k.to_string());
+            let input_id = add_rel_expr(rec, input)?;
+            let ids = vec![tag_id, vec_expr_id, query_id, metric_id, k_id, input_id];
+            Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
+        }
+        RelExpr::VectorFilter { vector_expr, query_vector, metric, threshold, input } => {
+            let tag_id = add_symbol(rec, "vector_filter");
+            let vec_expr_id = add_scalar_expr(rec, vector_expr)?;
+            let query_id = add_scalar_expr(rec, query_vector)?;
+            let metric_id = add_symbol(rec, &format!("{:?}", metric));
+            let threshold_id = add_symbol(rec, &threshold.to_string());
+            let input_id = add_rel_expr(rec, input)?;
+            let ids = vec![tag_id, vec_expr_id, query_id, metric_id, threshold_id, input_id];
+            Ok(rec.add(RelLang::Func(ids.into_boxed_slice())))
+        }
     }
 }
 
@@ -2078,11 +2131,11 @@ fn add_scalar_expr(rec: &mut RecExpr<RelLang>, expr: &Expr) -> Result<Id, EGraph
                  e-graph representation"
                 .into(),
         )),
-        Expr::Cast { .. } => Err(EGraphError::ConversionError(
-            "CAST expressions are not yet supported in the \
-                 e-graph representation"
-                .into(),
-        )),
+        Expr::Cast { expr, target_type } => {
+            let expr_id = add_scalar_expr(rec, expr)?;
+            let type_id = add_symbol(rec, target_type);
+            Ok(rec.add(RelLang::Cast([expr_id, type_id])))
+        }
         Expr::Array(elements) => {
             let tag_id = add_symbol(rec, "ARRAY");
             let mut ids = vec![tag_id];
@@ -2165,6 +2218,19 @@ fn add_scalar_expr(rec: &mut RecExpr<RelLang>, expr: &Expr) -> Result<Id, EGraph
                  e-graph representation"
                 .into(),
         )),
+        Expr::FullTextMatch { vendor, columns, query, mode } => {
+            let vendor_id = add_symbol(rec, vendor);
+            let cols_id = add_symbol(rec, &columns.join(","));
+            let query_id = add_symbol(rec, query);
+            let mode_id = add_symbol(rec, mode.as_deref().unwrap_or(""));
+            Ok(rec.add(RelLang::FtsMatch([vendor_id, cols_id, query_id, mode_id])))
+        }
+        Expr::VectorDistance { metric, column, target } => {
+            let metric_id = add_symbol(rec, metric);
+            let col_id = add_scalar_expr(rec, column)?;
+            let target_id = add_scalar_expr(rec, target)?;
+            Ok(rec.add(RelLang::VectorDistance([metric_id, col_id, target_id])))
+        }
     }
 }
 
@@ -2638,6 +2704,59 @@ fn from_node(
                 input: Box::new(RelExpr::Scan { table, alias: None }),
             })
         }
+        RelLang::VectorKNN([table_id, col_id, target_id, k_id]) => {
+            // Extract as a scan with a filter annotation for now
+            // TODO: Add proper VectorKNN to RelExpr enum
+            let table = extract_symbol(egraph, *table_id)?;
+            let _col = extract_scalar_expr(egraph, *col_id)?;
+            let _target = extract_scalar_expr(egraph, *target_id)?;
+            let _k = extract_symbol(egraph, *k_id)?;
+            Ok(RelExpr::Scan {
+                table,
+                alias: Some("vector_knn_scan".to_string()),
+            })
+        }
+        RelLang::VectorRangeScan([table_id, _col_id, _target_id, _threshold_id, _metric_id]) => {
+            let table = extract_symbol(egraph, *table_id)?;
+            Ok(RelExpr::Scan {
+                table,
+                alias: Some("vector_range_scan".to_string()),
+            })
+        }
+        RelLang::FtsIndexScan([table_id, _idx_id, _match_id]) => {
+            let table = extract_symbol(egraph, *table_id)?;
+            Ok(RelExpr::Scan {
+                table,
+                alias: Some("fts_index_scan".to_string()),
+            })
+        }
+        RelLang::FtsRankedScan([table_id, _idx_id, _query_id, _k_id, _algo_id]) => {
+            let table = extract_symbol(egraph, *table_id)?;
+            Ok(RelExpr::Scan {
+                table,
+                alias: Some("fts_ranked_scan".to_string()),
+            })
+        }
+        RelLang::FtsSkipListAnd([table_id, _match1_id, _match2_id]) => {
+            let table = extract_symbol(egraph, *table_id)?;
+            Ok(RelExpr::Scan {
+                table,
+                alias: Some("fts_skip_list_and".to_string()),
+            })
+        }
+        RelLang::HybridScan(_ids) => {
+            // Placeholder for hybrid scan extraction
+            Ok(RelExpr::Scan {
+                table: "hybrid_scan".to_string(),
+                alias: Some("hybrid_scan".to_string()),
+            })
+        }
+        RelLang::HybridScore(_ids) => {
+            // This shouldn't appear in relational context, but handle it gracefully
+            Err(EGraphError::ExtractionError(
+                "hybrid-score is a scalar operator, not a relational operator".into(),
+            ))
+        }
         other => Err(EGraphError::ExtractionError(format!(
             "unexpected relational node: {other:?}"
         ))),
@@ -2789,6 +2908,52 @@ fn scalar_from_node(
                 args.push(extract_scalar_expr(egraph, arg_id)?);
             }
             Ok(Expr::Function { name, args })
+        }
+        RelLang::Cast([expr_id, type_id]) => {
+            let expr = extract_scalar_expr(egraph, *expr_id)?;
+            let target_type = extract_symbol(egraph, *type_id)?;
+            Ok(Expr::Cast {
+                expr: Box::new(expr),
+                target_type,
+            })
+        }
+        RelLang::VectorDistance([metric_id, col_id, target_id]) => {
+            let metric = extract_symbol(egraph, *metric_id)?;
+            let column = extract_scalar_expr(egraph, *col_id)?;
+            let target = extract_scalar_expr(egraph, *target_id)?;
+            Ok(Expr::VectorDistance {
+                metric,
+                column: Box::new(column),
+                target: Box::new(target),
+            })
+        }
+        RelLang::FtsMatch([vendor_id, cols_id, query_id, mode_id]) => {
+            let vendor = extract_symbol(egraph, *vendor_id)?;
+            let cols_str = extract_symbol(egraph, *cols_id)?;
+            let columns = cols_str.split(',').map(|s| s.to_string()).collect();
+            let query = extract_symbol(egraph, *query_id)?;
+            let mode_str = extract_symbol(egraph, *mode_id)?;
+            let mode = if mode_str.is_empty() {
+                None
+            } else {
+                Some(mode_str)
+            };
+            Ok(Expr::FullTextMatch {
+                vendor,
+                columns,
+                query,
+                mode,
+            })
+        }
+        RelLang::FtsRank([col_id, query_id, algo_id]) => {
+            let col = extract_scalar_expr(egraph, *col_id)?;
+            let query = extract_scalar_expr(egraph, *query_id)?;
+            let algo = extract_symbol(egraph, *algo_id)?;
+            // FTS rank is represented as a function call in Expr
+            Ok(Expr::Function {
+                name: format!("ts_rank_{}", algo),
+                args: vec![col, query],
+            })
         }
         other => Err(EGraphError::ExtractionError(format!(
             "unexpected scalar node: {other:?}"
@@ -3636,6 +3801,7 @@ mod tests {
 
     // ---- optimize_incremental tests ----
 
+    #[cfg(feature = "timeline")]
     fn make_snap(
         time: u64,
         rows: u64,
@@ -3662,18 +3828,21 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "timeline")]
     fn small_delta() -> DeltaSet {
         let a = make_snap(0, 10_000);
         let b = make_snap(60, 10_100); // 1% change
         DeltaSet::compute(&a, &b)
     }
 
+    #[cfg(feature = "timeline")]
     fn medium_delta() -> DeltaSet {
         let a = make_snap(0, 10_000);
         let b = make_snap(60, 11_000); // 10% change
         DeltaSet::compute(&a, &b)
     }
 
+    #[cfg(feature = "timeline")]
     fn large_delta() -> DeltaSet {
         let a = make_snap(0, 10_000);
         let b = make_snap(60, 20_000); // 100% change
@@ -3681,6 +3850,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn incremental_simple_scan() {
         let mut optimizer = Optimizer::new();
         let expr = RelExpr::scan("users");
@@ -3693,6 +3863,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn incremental_returns_valid_plan() {
         let mut optimizer = Optimizer::new();
         let expr = RelExpr::scan("users").filter(Expr::BinOp {
@@ -3711,6 +3882,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn incremental_small_delta_fewer_iterations() {
         let mut optimizer = Optimizer::new();
         let expr = RelExpr::scan("users");
@@ -3723,6 +3895,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn incremental_medium_delta_more_iterations() {
         let mut optimizer = Optimizer::new();
         let expr = RelExpr::scan("users");
@@ -3735,6 +3908,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn incremental_large_delta_falls_back_to_full() {
         let mut optimizer = Optimizer::new();
         let expr = RelExpr::scan("users");
@@ -3747,6 +3921,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn incremental_updates_table_stats() {
         let mut optimizer = Optimizer::new();
         let expr = RelExpr::scan("users");
@@ -3758,6 +3933,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn incremental_empty_delta_uses_minimal_iterations() {
         let mut optimizer = Optimizer::new();
         let expr = RelExpr::scan("users");
@@ -3770,6 +3946,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn incremental_produces_same_as_full_for_scan() {
         let expr = RelExpr::scan("users");
         let delta = small_delta();
@@ -3787,6 +3964,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn incremental_stats_speedup_factor() {
         let mut optimizer = Optimizer::new();
         let expr = RelExpr::scan("users");
@@ -3798,6 +3976,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn incremental_stats_full_reopt_speedup_is_one() {
         let mut optimizer = Optimizer::new();
         let expr = RelExpr::scan("users");
@@ -3809,6 +3988,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn incremental_reports_delta_count() {
         let mut optimizer = Optimizer::new();
         let expr = RelExpr::scan("users");
@@ -3820,6 +4000,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn incremental_reports_row_change_pct() {
         let mut optimizer = Optimizer::new();
         let expr = RelExpr::scan("users");
@@ -3832,6 +4013,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn incremental_elapsed_time_recorded() {
         let mut optimizer = Optimizer::new();
         let expr = RelExpr::scan("users");
@@ -3844,6 +4026,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn incremental_join_query() {
         let mut optimizer = Optimizer::new();
         let expr = RelExpr::Join {
@@ -3871,6 +4054,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn incremental_table_added_delta() {
         let a = ra_stats::timeline::Snapshot {
             time_offset: 0,
@@ -3917,6 +4101,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn incremental_nodes_in_egraph_reported() {
         let mut optimizer = Optimizer::new();
         let expr = RelExpr::scan("users");
@@ -3928,6 +4113,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "timeline")]
     fn incremental_rules_evaluated_reported() {
         let mut optimizer = Optimizer::new();
         let expr = RelExpr::scan("users");

@@ -30,6 +30,7 @@ pub mod row_pattern;
 pub mod physical_properties;
 pub mod properties;
 pub mod rule;
+pub mod search_types;
 pub mod statistics;
 pub mod table_formats;
 
@@ -55,4 +56,5 @@ pub use row_pattern::*;
 pub use physical_properties::*;
 pub use properties::*;
 pub use rule::*;
+pub use search_types::{DistanceMetric, FullTextParser, RankingAlgorithm};
 pub use statistics::*;

@@ -1,0 +1,375 @@
+---
+id: exa-004-bloom-filter-join
+name: "Bloom Filter Join"
+category: exasol-in-memory
+databases: [exasol]
+execution_models: [vectorized]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [exasol, bloom-filter, join, semi-join, runtime-filter]
+complexity: "O(n + m)"
+benefit_range: [2.0, 100.0]
+---
+
+# EXA-004: Bloom Filter Join
+
+## Metadata
+- **Rule ID**: `exa-004-bloom-filter-join`
+- **Category**: In-Memory Storage
+- **Source**: Exasol Join Optimization; Graefe "Query Evaluation Techniques" 1993
+- **Complexity**: O(n + m) with bloom filter probe overhead
+- **Prerequisites**: Join between small and large table; selective join condition
+- **Alternatives**: Hash join without bloom filter; nested loop join
+
+## Description
+
+Bloom filter join is a semi-join reduction technique that uses a compact
+bloom filter built from the small table's join keys to pre-filter the large
+table before the actual join. This is particularly effective in Exasol's
+in-memory architecture where:
+
+1. **Build Phase**: Scan small table, build bloom filter on join key
+   - Bloom filter is cache-friendly (typically 1-10 MB for millions of keys)
+   - Hash join table built simultaneously
+
+2. **Probe Phase**: Scan large table, probe bloom filter before hash table
+   - Bloom filter eliminates 90-99.9% of non-matching rows
+   - Reduced hash table probes (expensive random access)
+   - Fewer cache misses in hash table
+
+3. **Join Phase**: Hash join only on bloom-filtered rows
+   - Much smaller working set
+   - Better cache utilization
+
+**Key Insight**: Bloom filter probe is cheaper than hash table probe because:
+- Bloom filter fits in L2/L3 cache
+- Hash table may not fit in cache (random access to DRAM)
+- False positive rate (1-5%) is acceptable overhead
+
+**When to apply:**
+- Large table is 10x+ larger than small table
+- Join selectivity < 10% (most large table rows don't match)
+- Small table distinct keys fit in reasonable bloom filter (< 10 MB)
+
+**Why it works:**
+- TPC-H queries: dimension table (1M rows) JOIN fact table (100M rows)
+- Only 5-10% of fact rows match dimension after WHERE clause
+- Bloom filter eliminates 90%+ before expensive hash table probe
+
+## Relational Algebra
+
+```
+Standard hash join:
+  hash-join[key](scan[small], scan[large])
+
+Bloom filter join:
+  hash-join[key](
+    bloom-build[key](scan[small]),
+    bloom-probe[key](scan[large], bloom-filter))
+
+Runtime filter variant:
+  hash-join[key](
+    scan[small],
+    filter[key IN bloom](scan[large]))
+```
+
+## Implementation (egg rewrite rules)
+
+```lisp
+;; Basic bloom filter join
+(rewrite (hash-join ?key
+           (columnar-scan ?small ?s-cols (in-memory true))
+           (columnar-scan ?large ?l-cols (in-memory true)))
+  (bloom-filter-join ?key
+    (bloom-build ?key
+      (columnar-scan ?small ?s-cols (in-memory true)))
+    (bloom-probe ?key
+      (columnar-scan ?large ?l-cols (in-memory true))
+      (bloom-from ?small ?key)))
+  :if (> (/ (row-count ?large) (row-count ?small)) 10.0)
+  :if (< (join-selectivity ?key) 0.1))
+
+;; Bloom filter with pre-filter on small table
+(rewrite (hash-join ?key
+           (filter ?pred (columnar-scan ?small ?s-cols (in-memory true)))
+           (columnar-scan ?large ?l-cols (in-memory true)))
+  (bloom-filter-join ?key
+    (bloom-build ?key
+      (filter ?pred (columnar-scan ?small ?s-cols (in-memory true))))
+    (bloom-probe ?key
+      (columnar-scan ?large ?l-cols (in-memory true))
+      (bloom-from (filter ?pred ?small) ?key)))
+  :if (< (selectivity ?pred) 0.1)
+  :if (> (/ (row-count ?large) (* (row-count ?small) (selectivity ?pred))) 50.0))
+
+;; Multi-column bloom filter (composite key)
+(rewrite (hash-join (and (= ?k1 ?k2) (= ?k3 ?k4))
+           (columnar-scan ?small ?s-cols (in-memory true))
+           (columnar-scan ?large ?l-cols (in-memory true)))
+  (bloom-filter-join (list ?k1 ?k3)
+    (bloom-build (list ?k1 ?k3)
+      (columnar-scan ?small ?s-cols (in-memory true)))
+    (bloom-probe (list ?k2 ?k4)
+      (columnar-scan ?large ?l-cols (in-memory true))
+      (bloom-from ?small (list ?k1 ?k3))))
+  :if (> (/ (row-count ?large) (row-count ?small)) 10.0))
+
+;; Cascade bloom filters (multi-way join)
+(rewrite (hash-join ?k2
+           (bloom-filter-join ?k1 ?build1 ?probe1)
+           (columnar-scan ?t3 ?c3 (in-memory true)))
+  (cascade-bloom-join
+    (list ?k1 ?k2)
+    (list ?build1 (bloom-build ?k2 (hash-join ?k1 ?build1 ?probe1)))
+    (bloom-probe (list ?k1 ?k2)
+      (columnar-scan ?t3 ?c3 (in-memory true))
+      (list (bloom-from ?build1 ?k1) (bloom-from ?build2 ?k2))))
+  :if (> (row-count ?t3) (* (row-count ?build1) 10.0)))
+```
+
+## Cost Model
+
+```rust
+/// Cost comparison: hash join vs bloom filter join.
+pub fn cost_bloom_filter_join(
+    small_rows: u64,
+    large_rows: u64,
+    key_bytes: u64,
+    distinct_keys: u64,
+    join_selectivity: f64,
+    false_positive_rate: f64,
+) -> (Cost, Cost) {
+    // Standard hash join
+    // Build hash table on small side
+    let build_cost = small_rows as f64 * 10.0; // hash + insert
+    // Probe large table (every row)
+    let probe_cost = large_rows as f64 * 20.0; // hash + lookup + compare
+    let hash_join = Cost::new(build_cost + probe_cost, 0.0, 0.0, 0);
+
+    // Bloom filter join
+    // Build bloom filter + hash table
+    let bloom_bits = (-1.0 * distinct_keys as f64 * false_positive_rate.ln()
+        / (2.0_f64.ln().powi(2))) as u64;
+    let bloom_build = small_rows as f64 * 12.0; // hash + insert bloom + hash table
+
+    // Probe bloom filter (cache-friendly)
+    let bloom_probe = large_rows as f64 * 5.0; // cheap bloom check
+
+    // Hash table probe (only for bloom positives)
+    let matching_rows = large_rows as f64 * join_selectivity;
+    let false_positives = large_rows as f64 * (1.0 - join_selectivity) * false_positive_rate;
+    let hash_probes = (matching_rows + false_positives) * 20.0;
+
+    let bloom_join = Cost::new(
+        bloom_build + bloom_probe + hash_probes,
+        0.0,
+        0.0,
+        0,
+    );
+
+    (hash_join, bloom_join)
+}
+```
+
+**Break-even point**: Bloom filter join is cheaper when:
+```
+large_rows * 20.0 > large_rows * 5.0 + (large_rows * (selectivity + (1 - selectivity) * fpr)) * 20.0
+
+Simplifying:
+15.0 > (selectivity + (1 - selectivity) * fpr) * 20.0
+0.75 > selectivity + (1 - selectivity) * fpr
+
+With fpr = 0.01:
+0.75 > selectivity + 0.99 * (1 - selectivity)
+0.75 > selectivity + 0.99 - 0.99 * selectivity
+selectivity < 0.24 / 0.01 = 24%
+```
+
+Bloom filter is beneficial when join selectivity < 20-30%.
+
+## Test Cases
+
+### Positive: Star schema dimension-fact join (TPC-H Q5)
+```sql
+SELECT n.n_name, SUM(l.l_extendedprice * (1 - l.l_discount)) as revenue
+FROM customer c, orders o, lineitem l, supplier s, nation n, region r
+WHERE c.c_custkey = o.o_custkey
+  AND l.l_orderkey = o.o_orderkey
+  AND l.l_suppkey = s.s_suppkey
+  AND c.c_nationkey = s.s_nationkey
+  AND s.s_nationkey = n.n_nationkey
+  AND n.n_regionkey = r.r_regionkey
+  AND r.r_name = 'ASIA'
+  AND o.o_orderdate BETWEEN '1994-01-01' AND '1994-12-31'
+GROUP BY n.n_name;
+
+-- Build bloom on nation (25 rows) → filter lineitem (600M rows)
+-- Eliminates 80% of lineitem before join (non-ASIA suppliers)
+-- 5x speedup on join phase
+```
+
+### Positive: Highly selective join
+```sql
+SELECT o.order_id, o.total_amount, c.customer_name
+FROM orders o
+JOIN customers c ON o.customer_id = c.customer_id
+WHERE o.order_date = '2024-01-15' AND o.status = 'completed';
+
+-- orders: 100M rows, filter to 5K rows (0.005% selectivity)
+-- customers: 10M rows
+-- Build bloom on 5K customer IDs → filter 10M customers
+-- Eliminates 99.95% of customers before join
+```
+
+### Positive: Multi-table join pipeline
+```sql
+SELECT l.l_orderkey, SUM(l.l_quantity)
+FROM lineitem l
+WHERE l.l_orderkey IN (
+  SELECT o.o_orderkey FROM orders o
+  WHERE o.o_custkey IN (
+    SELECT c.c_custkey FROM customer c
+    WHERE c.c_mktsegment = 'BUILDING'
+  )
+)
+GROUP BY l.l_orderkey;
+
+-- Bloom filter cascade:
+--   customer (150K rows) → bloom1 → orders (15M rows)
+--   orders filtered (500K rows) → bloom2 → lineitem (600M rows)
+-- Each bloom filter eliminates 90%+ of downstream table
+```
+
+### Negative: Small table larger than large table
+```sql
+SELECT * FROM orders o JOIN customers c ON o.customer_id = c.customer_id;
+
+-- orders: 1M rows, customers: 500K rows
+-- Should build hash table on customers (smaller), not orders
+-- Bloom filter on smaller table has no benefit (all customers match)
+```
+
+### Negative: High join selectivity
+```sql
+SELECT * FROM sales s JOIN products p ON s.product_id = p.product_id;
+
+-- All products have sales (100% join selectivity)
+-- Bloom filter eliminates nothing
+-- Only adds overhead (bloom build + probe)
+```
+
+### Negative: Very small tables
+```sql
+SELECT * FROM status_codes s JOIN events e ON s.code = e.status;
+
+-- status_codes: 10 rows, events: 1000 rows
+-- Hash join is fast enough without bloom filter
+-- Bloom filter overhead > benefit
+```
+
+## Implementation Details
+
+### Bloom Filter Construction
+```rust
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+
+pub struct BloomFilter {
+    bits: Vec<u64>,
+    num_hashes: usize,
+    num_bits: usize,
+}
+
+impl BloomFilter {
+    pub fn new(capacity: usize, fpr: f64) -> Self {
+        let num_bits = (-(capacity as f64 * fpr.ln()) / (2.0_f64.ln().powi(2))) as usize;
+        let num_hashes = ((num_bits as f64 / capacity as f64) * 2.0_f64.ln()).ceil() as usize;
+        let words = (num_bits + 63) / 64;
+
+        Self {
+            bits: vec![0u64; words],
+            num_hashes,
+            num_bits,
+        }
+    }
+
+    pub fn insert<T: Hash>(&mut self, key: &T) {
+        for i in 0..self.num_hashes {
+            let mut hasher = DefaultHasher::new();
+            key.hash(&mut hasher);
+            i.hash(&mut hasher);
+            let hash = hasher.finish();
+            let bit = (hash as usize) % self.num_bits;
+            self.bits[bit / 64] |= 1 << (bit % 64);
+        }
+    }
+
+    pub fn contains<T: Hash>(&self, key: &T) -> bool {
+        for i in 0..self.num_hashes {
+            let mut hasher = DefaultHasher::new();
+            key.hash(&mut hasher);
+            i.hash(&mut hasher);
+            let hash = hasher.finish();
+            let bit = (hash as usize) % self.num_bits;
+            if (self.bits[bit / 64] & (1 << (bit % 64))) == 0 {
+                return false;
+            }
+        }
+        true
+    }
+}
+```
+
+### SIMD Bloom Probe (AVX2)
+```rust
+#[cfg(target_arch = "x86_64")]
+use std::arch::x86_64::*;
+
+/// SIMD bloom filter probe for batch of keys.
+#[cfg(target_arch = "x86_64")]
+pub unsafe fn bloom_probe_simd(
+    bloom: &BloomFilter,
+    keys: &[u64],
+    output: &mut Vec<u32>,
+) {
+    for chunk in keys.chunks(4) {
+        let hash0 = chunk[0];
+        let hash1 = chunk.get(1).copied().unwrap_or(0);
+        let hash2 = chunk.get(2).copied().unwrap_or(0);
+        let hash3 = chunk.get(3).copied().unwrap_or(0);
+
+        let bit0 = (hash0 as usize) % bloom.num_bits;
+        let bit1 = (hash1 as usize) % bloom.num_bits;
+        let bit2 = (hash2 as usize) % bloom.num_bits;
+        let bit3 = (hash3 as usize) % bloom.num_bits;
+
+        let word0 = bloom.bits[bit0 / 64];
+        let word1 = bloom.bits[bit1 / 64];
+        let word2 = bloom.bits[bit2 / 64];
+        let word3 = bloom.bits[bit3 / 64];
+
+        let mask0 = 1u64 << (bit0 % 64);
+        let mask1 = 1u64 << (bit1 % 64);
+        let mask2 = 1u64 << (bit2 % 64);
+        let mask3 = 1u64 << (bit3 % 64);
+
+        if (word0 & mask0) != 0 { output.push(0); }
+        if (word1 & mask1) != 0 && chunk.len() > 1 { output.push(1); }
+        if (word2 & mask2) != 0 && chunk.len() > 2 { output.push(2); }
+        if (word3 & mask3) != 0 && chunk.len() > 3 { output.push(3); }
+    }
+}
+```
+
+## References
+
+1. **Bloom, Burton H.** "Space/time trade-offs in hash coding with allowable
+   errors." CACM 1970.
+2. **Graefe, Goetz.** "Query Evaluation Techniques for Large Databases."
+   ACM Computing Surveys 1993.
+3. **Exasol Join Optimization**: Internal documentation on runtime filters
+4. **TPC-H Benchmark**: Star schema join patterns
+5. **Apache Spark**: Runtime filter implementation (Databricks blog)
+6. **Putze, Felix et al.** "Cache-, Hash- and Space-Efficient Bloom Filters."
+   WEA 2007.

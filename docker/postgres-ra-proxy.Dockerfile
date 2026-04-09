@@ -69,7 +69,7 @@ RUN if [ -f Makefile ]; then \
     fi
 
 # Stage 3: Build Ra proxy
-FROM rust:1.88-bookworm AS ra-proxy-builder
+FROM rust:bookworm AS ra-proxy-builder
 
 WORKDIR /build
 
@@ -77,6 +77,7 @@ WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 COPY rules ./rules
+COPY xtask ./xtask
 
 # Create ra-proxy binary (intercepts queries and compares plans)
 # This is a placeholder - in production, implement actual proxy
@@ -84,8 +85,12 @@ RUN cargo new --bin crates/ra-proxy
 
 WORKDIR /build/crates/ra-proxy
 
-# Add dependencies for proxy
-RUN cat >> Cargo.toml <<'EOF'
+# Replace Cargo.toml with dependencies for proxy
+RUN cat > Cargo.toml <<'EOF'
+[package]
+name = "ra-proxy"
+version = "0.1.0"
+edition = "2021"
 
 [dependencies]
 ra-core = { path = "../ra-core" }

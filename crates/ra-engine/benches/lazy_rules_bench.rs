@@ -176,7 +176,8 @@ fn pattern_analysis_benchmark(c: &mut Criterion) {
 }
 
 /// Benchmark rule count reduction
-fn rule_count_benchmark(c: &mut Criterion) {
+#[allow(dead_code)]
+fn rule_count_benchmark(_c: &mut Criterion) {
     let compiler = LazyRuleCompiler::new();
     let all = all_rules();
 

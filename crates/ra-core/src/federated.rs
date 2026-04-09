@@ -293,7 +293,7 @@ impl DatabaseType {
 }
 
 /// Describes which query operations a remote database can handle.
-#[allow(clippy::struct_excessive_bools)]
+#[expect(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct QueryCapabilities {
     /// Can push down filter (WHERE) clauses.

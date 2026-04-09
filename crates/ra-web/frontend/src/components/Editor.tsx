@@ -2,6 +2,12 @@ import { useRef, useEffect } from 'react';
 import MonacoEditor, { type OnMount } from '@monaco-editor/react';
 import type { editor } from 'monaco-editor';
 
+declare global {
+  interface Window {
+    monaco: typeof import('monaco-editor');
+  }
+}
+
 interface EditorProps {
   value: string;
   onChange: (value: string) => void;

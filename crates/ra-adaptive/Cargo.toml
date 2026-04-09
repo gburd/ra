@@ -8,6 +8,10 @@ license.workspace = true
 repository.workspace = true
 description = "Adaptive query execution with runtime reoptimization for ra"
 
+[features]
+default = ["timeline"]
+timeline = ["ra-stats/timeline"]
+
 [dependencies]
 ra-core = { workspace = true }
 ra-cache = { workspace = true }

@@ -9,9 +9,11 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Row, Table, Paragraph};
 
+#[cfg(feature = "timeline")]
 use crate::timeline::{Change, ChangeSeverity, ChangeKind, TableStatEntry};
 
 /// Render the statistics panel into the given area.
+#[cfg(feature = "timeline")]
 pub fn render(
     frame: &mut Frame,
     stats: &[TableStatEntry],
@@ -143,6 +145,7 @@ fn border_style(focused: bool) -> Style {
 }
 
 /// Render the changes section showing differences from previous snapshot.
+#[cfg(feature = "timeline")]
 fn render_changes(
     frame: &mut Frame,
     changes: &[Change],
@@ -191,6 +194,7 @@ fn render_changes(
 }
 
 /// Get icon and color for a change kind.
+#[cfg(feature = "timeline")]
 #[must_use]
 pub fn change_icon_and_color(change: &Change) -> (&'static str, Color) {
     match change.kind {
@@ -206,6 +210,7 @@ pub fn change_icon_and_color(change: &Change) -> (&'static str, Color) {
 }
 
 /// Get severity indicator character.
+#[cfg(feature = "timeline")]
 #[must_use]
 pub fn severity_indicator(severity: ChangeSeverity) -> &'static str {
     match severity {
@@ -216,6 +221,7 @@ pub fn severity_indicator(severity: ChangeSeverity) -> &'static str {
 }
 
 /// Get color for severity level.
+#[cfg(feature = "timeline")]
 #[must_use]
 pub fn severity_color(severity: ChangeSeverity) -> Color {
     match severity {
@@ -225,7 +231,7 @@ pub fn severity_color(severity: ChangeSeverity) -> Color {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "timeline"))]
 mod tests {
     use super::*;
 

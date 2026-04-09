@@ -307,6 +307,9 @@ impl LargeJoinOptimizer {
                 Self::count_tables(input)
             }
             RelExpr::MvScan { .. } => 1,
+            RelExpr::TopK { input, .. } | RelExpr::VectorFilter { input, .. } => {
+                Self::count_tables(input)
+            }
         }
     }
 
@@ -388,6 +391,9 @@ impl LargeJoinOptimizer {
             RelExpr::ParallelHashJoin { left, right, .. } => {
                 Self::extract_joins_recursive(left, joins);
                 Self::extract_joins_recursive(right, joins);
+            }
+            RelExpr::TopK { input, .. } | RelExpr::VectorFilter { input, .. } => {
+                Self::extract_joins_recursive(input, joins);
             }
         }
     }

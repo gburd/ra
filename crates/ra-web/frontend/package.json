@@ -9,7 +9,14 @@
     "preview": "vite preview",
     "lint": "oxlint src",
     "format": "oxfmt src",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ui": "vitest --ui",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:debug": "playwright test --debug",
+    "test:e2e:report": "playwright show-report"
   },
   "dependencies": {
     "react": "^18.3.1",
@@ -20,13 +27,26 @@
     "@mui/icons-material": "^6.3.0",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.0",
-    "allotment": "^1.20.3"
+    "allotment": "^1.20.3",
+    "d3": "^7.9.0",
+    "@xyflow/react": "^12.3.6",
+    "dagre": "^0.8.5",
+    "recharts": "^2.15.0"
   },
   "devDependencies": {
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",
     "typescript": "^5.8.2",
-    "vite": "^6.0.7"
+    "vite": "^6.0.7",
+    "@types/d3": "^7.4.3",
+    "@types/dagre": "^0.7.52",
+    "vitest": "^2.1.8",
+    "@vitest/ui": "^2.1.8",
+    "@testing-library/react": "^16.0.1",
+    "@testing-library/user-event": "^14.5.2",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@playwright/test": "^1.49.0",
+    "jsdom": "^25.0.1"
   }
 }

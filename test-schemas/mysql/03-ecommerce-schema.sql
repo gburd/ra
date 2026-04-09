@@ -1,0 +1,37 @@
+-- E-Commerce Schema for MySQL
+
+CREATE TABLE IF NOT EXISTS customers (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(100) NOT NULL,
+  email VARCHAR(100) UNIQUE,
+  city VARCHAR(50),
+  country VARCHAR(50),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS products (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(200) NOT NULL,
+  category VARCHAR(50),
+  price DECIMAL(10, 2) NOT NULL,
+  stock_quantity INT DEFAULT 0
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS orders (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  customer_id INT NOT NULL,
+  order_date DATE NOT NULL,
+  status VARCHAR(20) DEFAULT 'pending',
+  total DECIMAL(10, 2),
+  FOREIGN KEY (customer_id) REFERENCES customers(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS order_items (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  order_id INT NOT NULL,
+  product_id INT NOT NULL,
+  quantity INT NOT NULL,
+  price DECIMAL(10, 2) NOT NULL,
+  FOREIGN KEY (order_id) REFERENCES orders(id),
+  FOREIGN KEY (product_id) REFERENCES products(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

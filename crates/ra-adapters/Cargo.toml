@@ -9,7 +9,10 @@ repository.workspace = true
 
 [features]
 default = []
-postgres = ["dep:postgres"]
+duckdb = ["dep:duckdb"]
+mysql = ["dep:mysql"]
+postgres = ["dep:postgres", "dep:r2d2", "dep:r2d2_postgres"]
+sqlite = ["dep:rusqlite", "dep:r2d2", "dep:r2d2_sqlite"]
 stoolap = ["dep:stoolap"]
 
 [dependencies]
@@ -20,7 +23,14 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+chrono = { workspace = true }
+duckdb = { version = "1.10501", optional = true, features = ["bundled"] }
+mysql = { version = "25", optional = true }
 postgres = { workspace = true, optional = true }
+r2d2 = { version = "0.8", optional = true }
+r2d2_postgres = { version = "0.18", optional = true }
+r2d2_sqlite = { version = "0.33", optional = true }
+rusqlite = { version = "0.39", optional = true, features = ["bundled"] }
 stoolap = { workspace = true, optional = true }
 
 [lints]

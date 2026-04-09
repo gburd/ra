@@ -1,0 +1,45 @@
+# pgvector Extension Profile
+#
+# PostgreSQL extension for vector similarity search with embeddings.
+# Supports nearest neighbor search using various distance metrics.
+
+[profile]
+name = "pgvector"
+vendor = "postgresql"
+description = "PostgreSQL pgvector extension for vector similarity search"
+inherits_from = "postgresql-17"
+
+[features]
+vector_type = true
+vector_operators = true
+vector_functions = true
+ivfflat_index = true
+hnsw_index = true
+
+[syntax]
+vector_literal = "ARRAY[...]::vector"
+vector_cast = "::vector"
+vector_dimensions = "vector(N)"
+
+[operators]
+# Vector distance operators
+# L2 distance (Euclidean) - most common for general embeddings
+l2_distance = "<->"
+# Inner product - useful for normalized vectors
+inner_product = "<#>"
+# Cosine distance - measures angle between vectors
+cosine_distance = "<=>"
+
+[functions]
+# Vector construction
+constructors = ["vector", "array_to_vector"]
+# Vector operations
+operations = ["vector_dims", "vector_norm", "l2_distance", "inner_product", "cosine_distance"]
+# Index operations
+index_ops = ["ivfflat_build", "hnsw_build"]
+
+[validation]
+require_vector_type = true
+check_dimension_consistency = true
+warn_on_high_dimensions = true
+max_dimensions = 2000

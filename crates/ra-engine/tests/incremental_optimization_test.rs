@@ -12,6 +12,7 @@
 //! - Performance: end-to-end latency validation
 //! - Integration with streaming stats pipeline
 
+#![cfg(feature = "timeline")]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::collections::{HashMap, HashSet};

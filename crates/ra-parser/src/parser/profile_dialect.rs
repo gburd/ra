@@ -44,6 +44,17 @@ impl Dialect for ProfileDialect {
         self.base_dialect.is_identifier_part(ch)
     }
 
+    fn is_custom_operator_part(&self, ch: char) -> bool {
+        // Check if any operator in the profile contains this character
+        // This allows the lexer to recognize multi-character operators like <->, <#>, <=>
+        for op in &self.profile.operators {
+            if op.contains(ch) {
+                return true;
+            }
+        }
+        self.base_dialect.is_custom_operator_part(ch)
+    }
+
     fn supports_filter_during_aggregation(&self) -> bool {
         self.base_dialect.supports_filter_during_aggregation()
     }
@@ -89,8 +100,16 @@ impl Dialect for ProfileDialect {
 
         // For operators in our profile, assign appropriate precedence
         if self.profile.operators.iter().any(|op| *op == token_str) {
-            // Use same precedence as comparison operators for @ operators
-            if token_str.starts_with('@') {
+            // Vector distance operators (<->, <#>, <=>) - same precedence as comparison
+            if token_str == "<->" || token_str == "<#>" || token_str == "<=>" {
+                return Some(Ok(20));  // Comparison precedence
+            }
+            // JSONB/Array operators (@>, <@, etc.)
+            if token_str.starts_with('@') || token_str.starts_with('<') {
+                return Some(Ok(20));  // Comparison precedence
+            }
+            // Text search operator (@@)
+            if token_str == "@@" {
                 return Some(Ok(20));  // Comparison precedence
             }
         }

@@ -11,6 +11,7 @@ use crate::expr::{ColumnRef, Expr};
 use crate::row_pattern::{
     MatchMode, PatternDefine, PatternExpr, PatternMeasure, SkipMode,
 };
+use crate::search_types::DistanceMetric;
 
 /// A relational expression (query plan node).
 ///
@@ -344,6 +345,38 @@ pub enum RelExpr {
         view_name: String,
         /// Optional alias for the MV scan.
         alias: Option<String>,
+    },
+
+    // ===== Vector Search Operators =====
+
+    /// Top-K vector similarity search: returns K nearest neighbors.
+    /// Used for ORDER BY vector_distance(...) LIMIT k queries.
+    TopK {
+        /// The vector column or expression to compare.
+        vector_expr: Expr,
+        /// The query vector to compare against.
+        query_vector: Expr,
+        /// Distance metric (L2, Cosine, InnerProduct).
+        metric: DistanceMetric,
+        /// Number of nearest neighbors to return.
+        k: u64,
+        /// The input relation.
+        input: Box<RelExpr>,
+    },
+
+    /// Vector filter: filters rows by distance threshold.
+    /// Used for WHERE vector_distance(...) < threshold queries.
+    VectorFilter {
+        /// The vector column or expression to compare.
+        vector_expr: Expr,
+        /// The query vector to compare against.
+        query_vector: Expr,
+        /// Distance metric (L2, Cosine, InnerProduct).
+        metric: DistanceMetric,
+        /// Distance threshold for filtering.
+        threshold: f64,
+        /// The input relation.
+        input: Box<RelExpr>,
     },
 }
 
@@ -687,6 +720,7 @@ impl RelExpr {
                 inputs.iter().map(std::convert::AsRef::as_ref).collect()
             }
             Self::BitmapHeapScan { bitmap, .. } => vec![bitmap],
+            Self::TopK { input, .. } | Self::VectorFilter { input, .. } => vec![input],
         }
     }
 
@@ -698,7 +732,7 @@ impl RelExpr {
         cols
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     fn collect_columns(&self, out: &mut Vec<ColumnRef>) {
         match self {
             Self::Scan { .. } | Self::IndexScan { .. } | Self::ParallelScan { .. } | Self::MvScan { .. } => {}
@@ -884,6 +918,26 @@ impl RelExpr {
                     collect_expr_columns(cond, out);
                 }
             }
+            Self::TopK {
+                input,
+                vector_expr,
+                query_vector,
+                ..
+            } => {
+                collect_expr_columns(vector_expr, out);
+                collect_expr_columns(query_vector, out);
+                input.collect_columns(out);
+            }
+            Self::VectorFilter {
+                input,
+                vector_expr,
+                query_vector,
+                ..
+            } => {
+                collect_expr_columns(vector_expr, out);
+                collect_expr_columns(query_vector, out);
+                input.collect_columns(out);
+            }
         }
     }
 }
@@ -949,6 +1003,9 @@ impl RelExpr {
             }
             Self::BitmapHeapScan { bitmap, table, .. } => {
                 table == cte_name || bitmap.references_cte(cte_name)
+            }
+            Self::TopK { input, .. } | Self::VectorFilter { input, .. } => {
+                input.references_cte(cte_name)
             }
         }
     }
@@ -1023,6 +1080,18 @@ fn collect_expr_columns(expr: &Expr, out: &mut Vec<ColumnRef>) {
                 collect_expr_columns(test, out);
             }
         }
+        Expr::FullTextMatch { columns, .. } => {
+            for col in columns {
+                out.push(ColumnRef {
+                    table: None,
+                    column: col.clone(),
+                });
+            }
+        }
+        Expr::VectorDistance { column, target, .. } => {
+            collect_expr_columns(column, out);
+            collect_expr_columns(target, out);
+        }
     }
 }
 
@@ -1096,6 +1165,7 @@ mod tests {
     use crate::expr::{BinOp as ExprBinOp, Const};
 
     #[test]
+    #[expect(clippy::panic, reason = "test code uses panic for assertions")]
     fn scan_builder() {
         let scan = RelExpr::scan("users");
         if let RelExpr::Scan { table, alias } = &scan {
@@ -1107,6 +1177,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::panic, reason = "test code uses panic for assertions")]
     fn filter_chain() {
         let plan = RelExpr::scan("orders").filter(Expr::BinOp {
             op: ExprBinOp::Gt,
@@ -1182,6 +1253,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::panic, reason = "test code uses panic for assertions")]
     fn distinct_builder() {
         let plan = RelExpr::scan("users").distinct();
         if let RelExpr::Distinct { input } = &plan {
@@ -1473,6 +1545,7 @@ mod tests {
     // -- Additional builder tests --
 
     #[test]
+    #[expect(clippy::panic, reason = "test code uses panic for assertions")]
     fn scan_creates_scan_node() {
         let plan = RelExpr::scan("users");
         if let RelExpr::Scan { table, alias } = &plan {
@@ -1484,6 +1557,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::panic, reason = "test code uses panic for assertions")]
     fn filter_chains_correctly() {
         let plan = RelExpr::scan("t")
             .filter(Expr::Const(Const::Bool(true)))
@@ -1496,6 +1570,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::panic, reason = "test code uses panic for assertions")]
     fn limit_builder_values() {
         let plan = RelExpr::scan("t").limit(5, 10);
         if let RelExpr::Limit { count, offset, .. } = &plan {

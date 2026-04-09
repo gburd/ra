@@ -1,0 +1,5 @@
+# Ignore generated benchmark results
+results/*.html
+results/*.json
+results/*.md
+!results/.gitignore

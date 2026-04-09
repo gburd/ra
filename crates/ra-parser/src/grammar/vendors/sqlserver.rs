@@ -88,6 +88,9 @@ impl GrammarExtension for SQLServerExtension {
             "WITH", "INDEX", "NOLOCK", "READPAST", "UPDLOCK", "XLOCK",
             "ROWLOCK", "PAGLOCK", "TABLOCK", "TABLOCKX",
             "NOEXPAND", "FORCESEEK",
+            // Full-Text Search
+            "CONTAINS", "FREETEXT", "CONTAINSTABLE", "FREETEXTTABLE",
+            "NEAR", "ISABOUT", "WEIGHT", "FORMSOF", "INFLECTIONAL", "THESAURUS",
         ]
     }
 

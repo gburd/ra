@@ -259,7 +259,9 @@ fn collect_join_order(expr: &RelExpr, out: &mut Vec<String>) {
         | RelExpr::Distinct { input, .. }
         | RelExpr::Window { input, .. }
         | RelExpr::Aggregate { input, .. }
-        | RelExpr::RowPattern { input, .. } => {
+        | RelExpr::RowPattern { input, .. }
+        | RelExpr::TopK { input, .. }
+        | RelExpr::VectorFilter { input, .. } => {
             collect_join_order(input, out);
         }
         RelExpr::CTE { body, .. }
@@ -331,7 +333,9 @@ fn collect_join_hints(expr: &RelExpr, out: &mut Vec<JoinHint>) {
         | RelExpr::Distinct { input, .. }
         | RelExpr::Window { input, .. }
         | RelExpr::Aggregate { input, .. }
-        | RelExpr::RowPattern { input, .. } => {
+        | RelExpr::RowPattern { input, .. }
+        | RelExpr::TopK { input, .. }
+        | RelExpr::VectorFilter { input, .. } => {
             collect_join_hints(input, out);
         }
         RelExpr::Union { left, right, .. }
@@ -427,7 +431,9 @@ fn collect_scan_hints(expr: &RelExpr, out: &mut Vec<ScanHint>) {
         | RelExpr::Distinct { input, .. }
         | RelExpr::Window { input, .. }
         | RelExpr::Aggregate { input, .. }
-        | RelExpr::RowPattern { input, .. } => {
+        | RelExpr::RowPattern { input, .. }
+        | RelExpr::TopK { input, .. }
+        | RelExpr::VectorFilter { input, .. } => {
             collect_scan_hints(input, out);
         }
         RelExpr::CTE { body, .. }

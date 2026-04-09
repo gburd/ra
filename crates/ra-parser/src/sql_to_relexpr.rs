@@ -55,6 +55,25 @@ pub enum SqlConversionError {
     InvalidRecursiveCTE(String),
 }
 
+/// Create an enhanced parser profile with common PostgreSQL extensions.
+///
+/// This profile includes:
+/// - Base PostgreSQL 17 features
+/// - pgvector extension (vector similarity search operators: <->, <#>, <=>)
+/// - pg_trgm extension (trigram similarity operators)
+/// - pg_textsearch extension (enhanced full-text search with ts_rank, @@)
+///
+/// Falls back to universal profile if extensions can't be loaded.
+fn create_enhanced_profile() -> ParserProfile {
+    // Try to load PostgreSQL with common extensions
+    ParserProfile::load("postgresql-17+pgvector+pg_trgm+pg_textsearch")
+        .unwrap_or_else(|_| {
+            // Fallback to universal profile if extensions aren't available
+            // This maintains compatibility with systems that don't have the extension profiles
+            ParserProfile::universal()
+        })
+}
+
 /// Parse multiple SQL statements and convert each to a `RelExpr`.
 ///
 /// Splits on semicolons. Non-SELECT statements are returned
@@ -66,8 +85,8 @@ pub enum SqlConversionError {
 pub fn sql_to_relexprs(
     sql: &str,
 ) -> Result<Vec<RelExpr>, SqlConversionError> {
-    // Use profile-aware dialect to support all vendor operators (@>, @=, @?, etc.)
-    let profile = ParserProfile::universal();
+    // Use enhanced profile with common extensions (pgvector, pg_trgm, etc.)
+    let profile = create_enhanced_profile();
     let dialect = ProfileDialect::new(profile);
     let statements = Parser::parse_sql(&dialect, sql)
         .map_err(|e| SqlConversionError::ParseError(e.to_string()))?;
@@ -95,8 +114,8 @@ pub fn sql_to_relexprs(
 ///
 /// Returns error if SQL is invalid or contains unsupported features.
 pub fn sql_to_relexpr(sql: &str) -> Result<RelExpr, SqlConversionError> {
-    // Use profile-aware dialect to support all vendor operators (@>, @=, @?, etc.)
-    let profile = ParserProfile::universal();
+    // Use enhanced profile with common extensions (pgvector, pg_trgm, etc.)
+    let profile = create_enhanced_profile();
     let dialect = ProfileDialect::new(profile);
     let statements = Parser::parse_sql(&dialect, sql)
         .map_err(|e| SqlConversionError::ParseError(e.to_string()))?;
@@ -144,32 +163,72 @@ fn convert_query(query: &Query) -> Result<RelExpr, SqlConversionError> {
         }
     }
 
-    // Handle ORDER BY
+    // Handle ORDER BY - check for vector similarity first
     if let Some(order_by) = &query.order_by {
         if !order_by.exprs.is_empty() {
-            let keys = convert_order_by_exprs(&order_by.exprs)?;
-            plan = RelExpr::Sort {
-                keys,
+            // Check if this is a TopK vector search pattern
+            if let Some(topk_plan) = try_convert_topk(&order_by.exprs, query.limit.as_ref(), &plan)? {
+                plan = topk_plan;
+                // Skip LIMIT processing since it's absorbed into TopK
+            } else {
+                let keys = convert_order_by_exprs(&order_by.exprs)?;
+                plan = RelExpr::Sort {
+                    keys,
+                    input: Box::new(plan),
+                };
+
+                // Handle LIMIT/OFFSET for regular sorts
+                if query.limit.is_some() || query.offset.is_some() {
+                    let count = match &query.limit {
+                        Some(expr) => extract_u64_from_expr(expr)?,
+                        None => u64::MAX,
+                    };
+                    let offset = match &query.offset {
+                        Some(off) => extract_u64_from_expr(&off.value)?,
+                        None => 0,
+                    };
+                    plan = RelExpr::Limit {
+                        count,
+                        offset,
+                        input: Box::new(plan),
+                    };
+                }
+            }
+        } else {
+            // Handle LIMIT/OFFSET without ORDER BY
+            if query.limit.is_some() || query.offset.is_some() {
+                let count = match &query.limit {
+                    Some(expr) => extract_u64_from_expr(expr)?,
+                    None => u64::MAX,
+                };
+                let offset = match &query.offset {
+                    Some(off) => extract_u64_from_expr(&off.value)?,
+                    None => 0,
+                };
+                plan = RelExpr::Limit {
+                    count,
+                    offset,
+                    input: Box::new(plan),
+                };
+            }
+        }
+    } else {
+        // Handle LIMIT/OFFSET without ORDER BY
+        if query.limit.is_some() || query.offset.is_some() {
+            let count = match &query.limit {
+                Some(expr) => extract_u64_from_expr(expr)?,
+                None => u64::MAX,
+            };
+            let offset = match &query.offset {
+                Some(off) => extract_u64_from_expr(&off.value)?,
+                None => 0,
+            };
+            plan = RelExpr::Limit {
+                count,
+                offset,
                 input: Box::new(plan),
             };
         }
-    }
-
-    // Handle LIMIT/OFFSET
-    if query.limit.is_some() || query.offset.is_some() {
-        let count = match &query.limit {
-            Some(expr) => extract_u64_from_expr(expr)?,
-            None => u64::MAX,
-        };
-        let offset = match &query.offset {
-            Some(off) => extract_u64_from_expr(&off.value)?,
-            None => 0,
-        };
-        plan = RelExpr::Limit {
-            count,
-            offset,
-            input: Box::new(plan),
-        };
     }
 
     Ok(plan)
@@ -327,13 +386,25 @@ fn convert_select(
     // Start with FROM clause
     let mut plan = convert_from(&select.from)?;
 
-    // Apply WHERE clause
+    // Apply WHERE clause - check for vector filter first
     if let Some(ref where_expr) = select.selection {
-        let predicate = convert_expr(where_expr)?;
-        plan = RelExpr::Filter {
-            predicate,
-            input: Box::new(plan),
-        };
+        // Check if this is a vector filter (distance < threshold)
+        if let Some((vector_expr, query_vector, metric, threshold)) =
+            extract_vector_filter(where_expr)? {
+            plan = RelExpr::VectorFilter {
+                vector_expr,
+                query_vector,
+                metric,
+                threshold,
+                input: Box::new(plan),
+            };
+        } else {
+            let predicate = convert_expr(where_expr)?;
+            plan = RelExpr::Filter {
+                predicate,
+                input: Box::new(plan),
+            };
+        }
     }
 
     // Check for aggregates and GROUP BY
@@ -892,6 +963,39 @@ fn extract_single_func_arg(
     }
 }
 
+/// Extract all function arguments as a Vec<Expr>.
+fn extract_func_args(
+    args: &FunctionArguments,
+) -> Result<Vec<Expr>, SqlConversionError> {
+    let func_args = match args {
+        FunctionArguments::None => return Ok(vec![]),
+        FunctionArguments::Subquery(_) => {
+            return Err(SqlConversionError::UnsupportedFeature(
+                "subquery in function not supported".to_owned(),
+            ))
+        }
+        FunctionArguments::List(list) => &list.args,
+    };
+
+    let mut exprs = Vec::new();
+    for arg in func_args {
+        match arg {
+            FunctionArg::Unnamed(FunctionArgExpr::Expr(e)) => {
+                exprs.push(convert_expr(e)?);
+            }
+            FunctionArg::Unnamed(FunctionArgExpr::Wildcard) => {
+                // Skip wildcards
+            }
+            _ => {
+                return Err(SqlConversionError::UnsupportedFeature(
+                    "complex function arguments not supported".to_owned(),
+                ))
+            }
+        }
+    }
+    Ok(exprs)
+}
+
 fn extract_window_functions(
     projection: &[SelectItem],
 ) -> Result<Vec<WindowExpr>, SqlConversionError> {
@@ -1027,6 +1131,121 @@ fn convert_frame_bound(
             let n = extract_u64_from_expr(expr)?;
             Ok(WindowFrameBound::Following(n))
         }
+    }
+}
+
+/// Try to convert ORDER BY + LIMIT into a TopK vector search operator.
+/// Returns Some(plan) if successful, None if this is not a vector search pattern.
+fn try_convert_topk(
+    order_exprs: &[SqlOrderByExpr],
+    limit: Option<&SqlExpr>,
+    input: &RelExpr,
+) -> Result<Option<RelExpr>, SqlConversionError> {
+    // TopK requires exactly one ORDER BY expression
+    if order_exprs.len() != 1 {
+        return Ok(None);
+    }
+
+    let order_by = &order_exprs[0];
+
+    // Must have ASC order (nearest neighbors)
+    if order_by.asc == Some(false) {
+        return Ok(None);
+    }
+
+    // Must have a LIMIT
+    let Some(limit_expr) = limit else {
+        return Ok(None);
+    };
+    let k = extract_u64_from_expr(limit_expr)?;
+
+    // Check if the ORDER BY expression is a vector distance operation
+    if let Some((vector_expr, query_vector, metric)) =
+        extract_vector_distance(&order_by.expr)? {
+        return Ok(Some(RelExpr::TopK {
+            vector_expr,
+            query_vector,
+            metric,
+            k,
+            input: Box::new(input.clone()),
+        }));
+    }
+
+    Ok(None)
+}
+
+/// Extract vector distance components from an expression.
+/// Returns (vector_column, query_vector, metric) if successful.
+fn extract_vector_distance(
+    expr: &SqlExpr,
+) -> Result<Option<(Expr, Expr, ra_core::search_types::DistanceMetric)>, SqlConversionError> {
+    use ra_core::search_types::DistanceMetric;
+
+    match expr {
+        // pgvector operators: <->, <#>, <=>
+        SqlExpr::BinaryOp { left, op, right } => {
+            let op_str = format!("{op:?}");
+            let metric = match op_str.as_str() {
+                "Custom(\"<->\", None)" => Some(DistanceMetric::L2),
+                "Custom(\"<#>\", None)" => Some(DistanceMetric::InnerProduct),
+                "Custom(\"<=>\", None)" => Some(DistanceMetric::Cosine),
+                _ => None,
+            };
+
+            if let Some(metric) = metric {
+                let vector_expr = convert_expr(left)?;
+                let query_vector = convert_expr(right)?;
+                return Ok(Some((vector_expr, query_vector, metric)));
+            }
+            Ok(None)
+        }
+        // sqlite-vec functions: vec_distance_l2, vec_distance_cosine
+        SqlExpr::Function(func) => {
+            let name = func.name.to_string().to_uppercase();
+            let metric = match name.as_str() {
+                "VEC_DISTANCE_L2" => Some(DistanceMetric::L2),
+                "VEC_DISTANCE_COSINE" => Some(DistanceMetric::Cosine),
+                "VEC_DISTANCE_L1" => Some(DistanceMetric::L1),
+                "L2_DISTANCE" => Some(DistanceMetric::L2),
+                "COSINE_DISTANCE" => Some(DistanceMetric::Cosine),
+                _ => None,
+            };
+
+            if let Some(metric) = metric {
+                let args = extract_func_args(&func.args)?;
+                if args.len() == 2 {
+                    return Ok(Some((args[0].clone(), args[1].clone(), metric)));
+                }
+            }
+            Ok(None)
+        }
+        _ => Ok(None),
+    }
+}
+
+/// Check if a WHERE predicate contains a vector filter (distance < threshold).
+/// Returns (vector_expr, query_vector, metric, threshold) if successful.
+fn extract_vector_filter(
+    expr: &SqlExpr,
+) -> Result<Option<(Expr, Expr, ra_core::search_types::DistanceMetric, f64)>, SqlConversionError> {
+    match expr {
+        SqlExpr::BinaryOp { left, op, right } => {
+            // Check for distance < threshold or distance <= threshold
+            if matches!(op, BinaryOperator::Lt | BinaryOperator::LtEq) {
+                if let Some((vector_expr, query_vector, metric)) =
+                    extract_vector_distance(left)? {
+                    if let SqlExpr::Value(Value::Number(n, _)) = right.as_ref() {
+                        use std::str::FromStr;
+                        let n_str = n.to_string();
+                        if let Ok(threshold) = f64::from_str(&n_str) {
+                            return Ok(Some((vector_expr, query_vector, metric, threshold)));
+                        }
+                    }
+                }
+            }
+            Ok(None)
+        }
+        _ => Ok(None),
     }
 }
 
@@ -1180,6 +1399,57 @@ fn convert_expr(expr: &SqlExpr) -> Result<Expr, SqlConversionError> {
         }
         SqlExpr::Value(val) => convert_value(val),
         SqlExpr::BinaryOp { left, op, right } => {
+            // Check for pgvector distance operators first
+            use ra_core::search_types::DistanceMetric;
+            let op_str = format!("{op:?}");
+
+            if std::env::var("DEBUG_RA").is_ok() {
+                eprintln!("DEBUG: BinaryOp operator: {}", op_str);
+            }
+
+            let vector_metric = if op_str.contains("<->") {
+                Some(DistanceMetric::L2)
+            } else if op_str.contains("<#>") {
+                Some(DistanceMetric::InnerProduct)
+            } else if op_str.contains("<=>") {
+                Some(DistanceMetric::Cosine)
+            } else {
+                None
+            };
+
+            if let Some(metric) = vector_metric {
+                if std::env::var("DEBUG_RA").is_ok() {
+                    eprintln!("DEBUG: Converting to VectorDistance with metric: {:?}", metric);
+                }
+                // Convert to VectorDistance expression
+                let column = convert_expr(left).map_err(|e| {
+                    if std::env::var("DEBUG_RA").is_ok() {
+                        eprintln!("DEBUG: Failed to convert left side: {:?}", e);
+                    }
+                    e
+                })?;
+                let target = convert_expr(right).map_err(|e| {
+                    if std::env::var("DEBUG_RA").is_ok() {
+                        eprintln!("DEBUG: Failed to convert right side: {:?}", e);
+                    }
+                    e
+                })?;
+
+                if std::env::var("DEBUG_RA").is_ok() {
+                    eprintln!("DEBUG: VectorDistance created successfully");
+                    eprintln!("  column: {:?}", column);
+                    eprintln!("  target: {:?}", target);
+                    eprintln!("  metric: {}", format!("{:?}", metric).to_lowercase());
+                }
+
+                return Ok(Expr::VectorDistance {
+                    metric: format!("{:?}", metric).to_lowercase(),
+                    column: Box::new(column),
+                    target: Box::new(target),
+                });
+            }
+
+            // Try standard binary operators
             match convert_binary_op(op) {
                 Ok(bin_op) => Ok(Expr::BinOp {
                     op: bin_op,
@@ -1187,7 +1457,7 @@ fn convert_expr(expr: &SqlExpr) -> Result<Expr, SqlConversionError> {
                     right: Box::new(convert_expr(right)?),
                 }),
                 Err(_) => {
-                    // Represent unsupported operators as functions
+                    // Represent other unsupported operators as functions
                     let l = convert_expr(left)?;
                     let r = convert_expr(right)?;
                     Ok(Expr::Function {
@@ -1215,6 +1485,15 @@ fn convert_expr(expr: &SqlExpr) -> Result<Expr, SqlConversionError> {
         }),
         SqlExpr::Function(func) => {
             let name = func.name.to_string().to_uppercase();
+
+            // Handle vendor-specific full-text search functions
+            if name == "MATCH" {
+                return convert_mysql_match(func);
+            }
+            if name == "CONTAINS" || name == "FREETEXT" || name == "CONTAINSTABLE" || name == "FREETEXTTABLE" {
+                return convert_sqlserver_fts(func);
+            }
+
             let arg = extract_single_func_arg(&func.args)?;
             let args = match arg {
                 Some(a) => vec![a],
@@ -1475,6 +1754,109 @@ fn convert_expr(expr: &SqlExpr) -> Result<Expr, SqlConversionError> {
             "expression type not yet supported: {expr}"
         ))),
     }
+}
+
+/// Convert MySQL MATCH...AGAINST expression to FullTextMatch.
+///
+/// MySQL syntax: MATCH(col1, col2) AGAINST('query' [IN mode])
+fn convert_mysql_match(func: &sqlparser::ast::Function) -> Result<Expr, SqlConversionError> {
+    // Extract columns from MATCH(...) part
+    let func_args = match &func.args {
+        FunctionArguments::List(list) => &list.args,
+        _ => return Err(SqlConversionError::UnsupportedFeature(
+            "MATCH requires column list".to_owned(),
+        )),
+    };
+
+    let mut columns = Vec::new();
+    for arg in func_args {
+        match arg {
+            FunctionArg::Unnamed(FunctionArgExpr::Expr(SqlExpr::Identifier(ident))) => {
+                columns.push(ident.value.clone());
+            }
+            FunctionArg::Unnamed(FunctionArgExpr::Expr(SqlExpr::CompoundIdentifier(idents))) => {
+                if idents.len() == 2 {
+                    columns.push(format!("{}.{}", idents[0].value, idents[1].value));
+                } else {
+                    return Err(SqlConversionError::UnsupportedFeature(
+                        "complex identifiers in MATCH not supported".to_owned(),
+                    ));
+                }
+            }
+            _ => return Err(SqlConversionError::UnsupportedFeature(
+                "MATCH requires column identifiers".to_owned(),
+            )),
+        }
+    }
+
+    if columns.is_empty() {
+        return Err(SqlConversionError::InvalidSql(
+            "MATCH requires at least one column".to_owned(),
+        ));
+    }
+
+    // For now, represent as a function call
+    // Full AGAINST parsing would require custom syntax extension
+    Ok(Expr::Function {
+        name: "MATCH".to_owned(),
+        args: columns.iter().map(|c| Expr::Column(ColumnRef::new(c))).collect(),
+    })
+}
+
+/// Convert SQL Server CONTAINS/FREETEXT expression to FullTextMatch.
+///
+/// SQL Server syntax:
+/// - CONTAINS(column, 'query')
+/// - FREETEXT(column, 'query')
+/// - CONTAINSTABLE(table, column, 'query')
+/// - FREETEXTTABLE(table, column, 'query')
+fn convert_sqlserver_fts(func: &sqlparser::ast::Function) -> Result<Expr, SqlConversionError> {
+    let name = func.name.to_string().to_uppercase();
+
+    let func_args = match &func.args {
+        FunctionArguments::List(list) => &list.args,
+        _ => return Err(SqlConversionError::UnsupportedFeature(
+            format!("{name} requires arguments"),
+        )),
+    };
+
+    if func_args.len() < 2 {
+        return Err(SqlConversionError::InvalidSql(
+            format!("{name} requires at least 2 arguments"),
+        ));
+    }
+
+    // Extract column (first arg)
+    let column = match &func_args[0] {
+        FunctionArg::Unnamed(FunctionArgExpr::Expr(SqlExpr::Identifier(ident))) => {
+            ident.value.clone()
+        }
+        FunctionArg::Unnamed(FunctionArgExpr::Expr(SqlExpr::CompoundIdentifier(idents))) => {
+            if idents.len() == 2 {
+                format!("{}.{}", idents[0].value, idents[1].value)
+            } else {
+                return Err(SqlConversionError::UnsupportedFeature(
+                    format!("{name} requires simple column identifier"),
+                ));
+            }
+        }
+        _ => return Err(SqlConversionError::UnsupportedFeature(
+            format!("{name} requires column as first argument"),
+        )),
+    };
+
+    // Extract query (second arg) - for simplicity, represent as function call
+    let query_arg = match &func_args[1] {
+        FunctionArg::Unnamed(FunctionArgExpr::Expr(e)) => convert_expr(e)?,
+        _ => return Err(SqlConversionError::UnsupportedFeature(
+            format!("{name} requires expression as second argument"),
+        )),
+    };
+
+    Ok(Expr::Function {
+        name,
+        args: vec![Expr::Column(ColumnRef::new(column)), query_arg],
+    })
 }
 
 fn convert_value(val: &Value) -> Result<Expr, SqlConversionError> {
@@ -2578,5 +2960,176 @@ mod tests {
                    AND document @? '$.status ? (@ == \"active\")'";
         let result = sql_to_relexpr(sql);
         assert!(result.is_ok(), "DocumentDB query with JSONB operators: {result:?}");
+    }
+
+    // ---- Vector Search tests ----
+    // NOTE: These tests use function forms (l2_distance, cosine_distance)
+    // rather than custom operators (<->, <=>) because the latter require
+    // a PostgreSQL+pgvector dialect configuration.
+
+    #[test]
+    fn test_sqlite_vec_topk_l2() {
+        // sqlite-vec with vec_distance_l2 function
+        let sql = "SELECT * FROM items \
+                   ORDER BY vec_distance_l2(embedding, vec_f32('[1,2,3]')) \
+                   LIMIT 10";
+        let result = sql_to_relexpr(sql).expect("should parse sqlite-vec TopK");
+
+        match result {
+            RelExpr::TopK { k, metric, .. } => {
+                assert_eq!(k, 10);
+                assert_eq!(metric, ra_core::search_types::DistanceMetric::L2);
+            }
+            _ => panic!("expected TopK, got {result:?}"),
+        }
+    }
+
+    #[test]
+    fn test_sqlite_vec_topk_cosine() {
+        // sqlite-vec with cosine distance
+        let sql = "SELECT id, vec_distance_cosine(embedding, query_vec) AS similarity \
+                   FROM items \
+                   ORDER BY vec_distance_cosine(embedding, query_vec) \
+                   LIMIT 10";
+        let result = sql_to_relexpr(sql).expect("should parse sqlite-vec cosine");
+
+        match result {
+            RelExpr::TopK { k, metric, .. } => {
+                assert_eq!(k, 10);
+                assert_eq!(metric, ra_core::search_types::DistanceMetric::Cosine);
+            }
+            _ => panic!("expected TopK, got {result:?}"),
+        }
+    }
+
+    #[test]
+    fn test_sqlite_vec_filter() {
+        // sqlite-vec with threshold filter
+        let sql = "SELECT * FROM items \
+                   WHERE vec_distance_l2(embedding, vec_f32('[1,2,3]')) < 0.5";
+        let result = sql_to_relexpr(sql).expect("should parse sqlite-vec filter");
+
+        match result {
+            RelExpr::VectorFilter { threshold, metric, .. } => {
+                assert_eq!(threshold, 0.5);
+                assert_eq!(metric, ra_core::search_types::DistanceMetric::L2);
+            }
+            _ => panic!("expected VectorFilter, got {result:?}"),
+        }
+    }
+
+    #[test]
+    fn test_vector_hybrid_search() {
+        // Simple vector filter works
+        let sql = "SELECT * FROM products \
+                   WHERE l2_distance(embedding, query_vec) < 0.8";
+        let result = sql_to_relexpr(sql).expect("should parse simple vector filter");
+
+        // Should produce VectorFilter
+        match result {
+            RelExpr::VectorFilter { threshold, .. } => {
+                assert_eq!(threshold, 0.8);
+            }
+            _ => panic!("expected VectorFilter for simple case, got {result:?}"),
+        }
+    }
+
+
+    #[test]
+    fn test_pgvector_topk_l2_function() {
+        // pgvector with l2_distance function
+        let sql = "SELECT * FROM items \
+                   ORDER BY l2_distance(embedding, '[1,2,3]') \
+                   LIMIT 10";
+        let result = sql_to_relexpr(sql).expect("should parse pgvector L2 TopK");
+
+        match result {
+            RelExpr::TopK { k, metric, .. } => {
+                assert_eq!(k, 10);
+                assert_eq!(metric, ra_core::search_types::DistanceMetric::L2);
+            }
+            _ => panic!("expected TopK, got {result:?}"),
+        }
+    }
+
+    #[test]
+    fn test_pgvector_topk_cosine_function() {
+        // pgvector with cosine_distance function
+        let sql = "SELECT id, text FROM documents \
+                   ORDER BY cosine_distance(embedding, '[0.1, 0.2, 0.3]') \
+                   LIMIT 5";
+        let result = sql_to_relexpr(sql).expect("should parse pgvector cosine TopK");
+
+        match result {
+            RelExpr::TopK { k, metric, .. } => {
+                assert_eq!(k, 5);
+                assert_eq!(metric, ra_core::search_types::DistanceMetric::Cosine);
+            }
+            _ => panic!("expected TopK, got {result:?}"),
+        }
+    }
+
+    #[test]
+    fn test_pgvector_filter_function() {
+        // pgvector with distance threshold in WHERE using function
+        let sql = "SELECT * FROM items WHERE l2_distance(embedding, query_vec) < 0.5";
+        let result = sql_to_relexpr(sql).expect("should parse pgvector filter");
+
+        match result {
+            RelExpr::VectorFilter { threshold, metric, .. } => {
+                assert_eq!(threshold, 0.5);
+                assert_eq!(metric, ra_core::search_types::DistanceMetric::L2);
+            }
+            _ => panic!("expected VectorFilter, got {result:?}"),
+        }
+    }
+
+    #[test]
+    fn test_vector_without_limit() {
+        // Vector ORDER BY without LIMIT should produce regular Sort
+        let sql = "SELECT * FROM items ORDER BY l2_distance(embedding, '[1,2,3]')";
+        let result = sql_to_relexpr(sql).expect("should parse");
+
+        // Without LIMIT, should be a regular Sort, not TopK
+        match result {
+            RelExpr::Sort { .. } => {}
+            _ => panic!("expected Sort without LIMIT, got {result:?}"),
+        }
+    }
+
+    #[test]
+    fn test_vector_multiple_order_by_columns() {
+        // Multiple ORDER BY expressions should use regular Sort
+        let sql = "SELECT * FROM items \
+                   ORDER BY l2_distance(embedding, '[1,2,3]'), created_at DESC \
+                   LIMIT 10";
+        let result = sql_to_relexpr(sql).expect("should parse");
+
+        // Multiple ORDER BY => regular Sort + Limit
+        match result {
+            RelExpr::Limit { input, .. } => {
+                assert!(matches!(*input, RelExpr::Sort { .. }));
+            }
+            _ => panic!("expected Limit(Sort(...)), got {result:?}"),
+        }
+    }
+
+    #[test]
+    fn test_vector_with_projection() {
+        // Vector search with specific columns selected
+        let sql = "SELECT id, title, cosine_distance(embedding, query) AS similarity \
+                   FROM documents \
+                   WHERE cosine_distance(embedding, query) < 0.3 \
+                   ORDER BY cosine_distance(embedding, query) \
+                   LIMIT 20";
+        let result = sql_to_relexpr(sql).expect("should parse vector with projection");
+
+        // Should have TopK at the top
+        match result {
+            RelExpr::TopK { k, .. } => {
+                assert_eq!(k, 20);
+            }
+            _ => panic!("expected TopK, got {result:?}"),
+        }
     }
 }

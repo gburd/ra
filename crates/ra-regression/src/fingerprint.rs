@@ -53,7 +53,6 @@ impl PlanFingerprint {
             LogicalPlan::Explain(_) => "Explain",
             LogicalPlan::Analyze(_) => "Analyze",
             LogicalPlan::Extension(_) => "Extension",
-            LogicalPlan::Prepare(_) => "Prepare",
             LogicalPlan::Dml(_) => "Dml",
             LogicalPlan::Ddl(_) => "Ddl",
             LogicalPlan::Copy(_) => "Copy",

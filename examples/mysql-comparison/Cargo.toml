@@ -1,0 +1,11 @@
+[[example]]
+name = "benchmark_fulltext"
+path = "benchmark_fulltext.rs"
+
+[[example]]
+name = "benchmark_joins"
+path = "benchmark_joins.rs"
+
+[[example]]
+name = "benchmark_aggregates"
+path = "benchmark_aggregates.rs"

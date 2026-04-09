@@ -166,6 +166,9 @@ fn compare_node(
         | RelExpr::ParallelAggregate { .. }
         | RelExpr::Gather { .. }
         | RelExpr::MvScan { .. } => {}
+        RelExpr::TopK { input, .. } | RelExpr::VectorFilter { input, .. } => {
+            compare_node(input, db, agreements, disagreements);
+        }
     }
 }
 

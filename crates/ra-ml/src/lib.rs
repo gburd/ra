@@ -53,8 +53,12 @@
 //! 5. Load in Rust with [`nn::FeedForwardNet::from_json`]
 
 #![warn(missing_docs)]
+#![allow(non_local_definitions)] // Abomonation derive macro generates this warning
 
+pub mod belief_network;
 pub mod estimator;
 pub mod features;
 pub mod nn;
+pub mod storage;
+pub mod streaming;
 pub mod training;

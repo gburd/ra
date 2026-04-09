@@ -1,0 +1,403 @@
+# Timeline Configuration: Join Order Flip Due to Table Growth
+# Demonstrates how relative table sizes impact optimal join order selection
+
+[metadata]
+name = "Join Order Flip Scenario"
+description = "Small orders JOIN large customers → Large orders JOIN small customers (join order flips)"
+query = "SELECT o.order_id, c.customer_name, o.total_amount FROM orders o JOIN customers c ON o.customer_id = c.customer_id WHERE o.order_date >= '2024-01-01'"
+dialect = "postgresql"
+duration_seconds = 7200
+schema = "E-Commerce"
+
+# Hardware Profile (constant)
+[[hardware_profiles]]
+name = "standard"
+cpu_cores = 8
+total_memory = 32_000_000_000
+available_memory = 24_000_000_000
+simd_width = 256
+has_gpu = false
+
+# Snapshot 1: Orders small, Customers large → Orders is inner (probe) table
+[[snapshots]]
+time_offset = 0
+label = "Orders small (50K), Customers large (500K) → Orders first"
+hardware_profile = "standard"
+
+  [snapshots.schema]
+
+    [[snapshots.schema.tables]]
+    name = "orders"
+    storage_format = "row_based"
+    primary_key = ["order_id"]
+
+      [[snapshots.schema.tables.columns]]
+      name = "order_id"
+      data_type = "integer"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "customer_id"
+      data_type = "integer"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "order_date"
+      data_type = "date"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "total_amount"
+      data_type = "decimal"
+      nullable = false
+
+    [[snapshots.schema.tables.indexes]]
+    name = "idx_orders_customer"
+    index_type = "btree"
+    columns = ["customer_id"]
+
+    [[snapshots.schema.tables.indexes]]
+    name = "idx_orders_date"
+    index_type = "btree"
+    columns = ["order_date"]
+
+    [[snapshots.schema.tables]]
+    name = "customers"
+    storage_format = "row_based"
+    primary_key = ["customer_id"]
+
+      [[snapshots.schema.tables.columns]]
+      name = "customer_id"
+      data_type = "integer"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "customer_name"
+      data_type = "string"
+      nullable = false
+
+  [[snapshots.statistics.tables]]
+  name = "orders"
+  row_count = 50_000  # Small table
+  page_count = 500
+  avg_row_size = 80.0
+  table_size_bytes = 4_000_000
+
+    [[snapshots.statistics.tables.columns]]
+    name = "customer_id"
+    ndv = 25_000
+    null_fraction = 0.0
+    avg_width = 8.0
+    correlation = 0.2
+    min_value = "1"
+    max_value = "500000"
+
+    [[snapshots.statistics.tables.columns]]
+    name = "order_date"
+    ndv = 365
+    null_fraction = 0.0
+    avg_width = 4.0
+    correlation = 0.95
+    min_value = "2023-01-01"
+    max_value = "2024-01-01"
+
+  [[snapshots.statistics.tables]]
+  name = "customers"
+  row_count = 500_000  # Large table
+  page_count = 5_000
+  avg_row_size = 100.0
+  table_size_bytes = 50_000_000
+
+    [[snapshots.statistics.tables.columns]]
+    name = "customer_id"
+    ndv = 500_000
+    null_fraction = 0.0
+    avg_width = 8.0
+    correlation = 1.0
+    min_value = "1"
+    max_value = "500000"
+
+    [[snapshots.statistics.tables.columns]]
+    name = "customer_name"
+    ndv = 500_000
+    null_fraction = 0.0
+    avg_width = 50.0
+
+  [snapshots.facts]
+  supports_hash_join = true
+  supports_nested_loop = true
+  supports_parallel_scan = true
+  parallel_workers = 4
+  work_mem_bytes = 134217728
+
+# Snapshot 2: Orders grown 5x → Still orders first but closer
+[[snapshots]]
+time_offset = 3600
+label = "Orders grown 5x (250K), Customers (500K) → Still orders first"
+hardware_profile = "standard"
+
+  [snapshots.schema]
+
+    [[snapshots.schema.tables]]
+    name = "orders"
+    storage_format = "row_based"
+    primary_key = ["order_id"]
+
+      [[snapshots.schema.tables.columns]]
+      name = "order_id"
+      data_type = "integer"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "customer_id"
+      data_type = "integer"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "order_date"
+      data_type = "date"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "total_amount"
+      data_type = "decimal"
+      nullable = false
+
+    [[snapshots.schema.tables.indexes]]
+    name = "idx_orders_customer"
+    index_type = "btree"
+    columns = ["customer_id"]
+
+    [[snapshots.schema.tables.indexes]]
+    name = "idx_orders_date"
+    index_type = "btree"
+    columns = ["order_date"]
+
+    [[snapshots.schema.tables]]
+    name = "customers"
+    storage_format = "row_based"
+    primary_key = ["customer_id"]
+
+      [[snapshots.schema.tables.columns]]
+      name = "customer_id"
+      data_type = "integer"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "customer_name"
+      data_type = "string"
+      nullable = false
+
+  [[snapshots.statistics.tables]]
+  name = "orders"
+  row_count = 250_000  # 5x growth
+  page_count = 2_500
+  avg_row_size = 80.0
+  table_size_bytes = 20_000_000
+
+    [[snapshots.statistics.tables.columns]]
+    name = "customer_id"
+    ndv = 75_000
+    null_fraction = 0.0
+    avg_width = 8.0
+    correlation = 0.2
+    min_value = "1"
+    max_value = "500000"
+
+    [[snapshots.statistics.tables.columns]]
+    name = "order_date"
+    ndv = 730
+    null_fraction = 0.0
+    avg_width = 4.0
+    correlation = 0.95
+    min_value = "2022-01-01"
+    max_value = "2024-01-01"
+
+  [[snapshots.statistics.tables]]
+  name = "customers"
+  row_count = 500_000  # Stayed same
+  page_count = 5_000
+  avg_row_size = 100.0
+  table_size_bytes = 50_000_000
+
+    [[snapshots.statistics.tables.columns]]
+    name = "customer_id"
+    ndv = 500_000
+    null_fraction = 0.0
+    avg_width = 8.0
+    correlation = 1.0
+    min_value = "1"
+    max_value = "500000"
+
+    [[snapshots.statistics.tables.columns]]
+    name = "customer_name"
+    ndv = 500_000
+    null_fraction = 0.0
+    avg_width = 50.0
+
+  [snapshots.facts]
+  supports_hash_join = true
+  supports_nested_loop = true
+  supports_parallel_scan = true
+  parallel_workers = 4
+  work_mem_bytes = 134217728
+
+# Snapshot 3: Orders grown 20x → Join order FLIPS
+[[snapshots]]
+time_offset = 7200
+label = "Orders grown 20x (1M), Customers (500K) → JOIN ORDER FLIPS - customers first"
+hardware_profile = "standard"
+
+  [snapshots.schema]
+
+    [[snapshots.schema.tables]]
+    name = "orders"
+    storage_format = "row_based"
+    primary_key = ["order_id"]
+
+      [[snapshots.schema.tables.columns]]
+      name = "order_id"
+      data_type = "integer"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "customer_id"
+      data_type = "integer"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "order_date"
+      data_type = "date"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "total_amount"
+      data_type = "decimal"
+      nullable = false
+
+    [[snapshots.schema.tables.indexes]]
+    name = "idx_orders_customer"
+    index_type = "btree"
+    columns = ["customer_id"]
+
+    [[snapshots.schema.tables.indexes]]
+    name = "idx_orders_date"
+    index_type = "btree"
+    columns = ["order_date"]
+
+    [[snapshots.schema.tables]]
+    name = "customers"
+    storage_format = "row_based"
+    primary_key = ["customer_id"]
+
+      [[snapshots.schema.tables.columns]]
+      name = "customer_id"
+      data_type = "integer"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "customer_name"
+      data_type = "string"
+      nullable = false
+
+  [[snapshots.statistics.tables]]
+  name = "orders"
+  row_count = 1_000_000  # 20x growth - now LARGER than customers
+  page_count = 10_000
+  avg_row_size = 80.0
+  table_size_bytes = 80_000_000
+
+    [[snapshots.statistics.tables.columns]]
+    name = "customer_id"
+    ndv = 150_000
+    null_fraction = 0.0
+    avg_width = 8.0
+    correlation = 0.2
+    min_value = "1"
+    max_value = "500000"
+
+    [[snapshots.statistics.tables.columns]]
+    name = "order_date"
+    ndv = 1095
+    null_fraction = 0.0
+    avg_width = 4.0
+    correlation = 0.95
+    min_value = "2021-01-01"
+    max_value = "2024-01-01"
+
+  [[snapshots.statistics.tables]]
+  name = "customers"
+  row_count = 500_000  # Stayed same - now SMALLER
+  page_count = 5_000
+  avg_row_size = 100.0
+  table_size_bytes = 50_000_000
+
+    [[snapshots.statistics.tables.columns]]
+    name = "customer_id"
+    ndv = 500_000
+    null_fraction = 0.0
+    avg_width = 8.0
+    correlation = 1.0
+    min_value = "1"
+    max_value = "500000"
+
+    [[snapshots.statistics.tables.columns]]
+    name = "customer_name"
+    ndv = 500_000
+    null_fraction = 0.0
+    avg_width = 50.0
+
+  [snapshots.facts]
+  supports_hash_join = true
+  supports_nested_loop = true
+  supports_parallel_scan = true
+  parallel_workers = 4
+  work_mem_bytes = 134217728
+
+# Events
+[[events]]
+time_offset = 0
+kind = "baseline"
+description = "Initial state: orders (50K rows) << customers (500K rows)"
+
+[[events]]
+time_offset = 1800
+kind = "data_modification"
+table = "orders"
+description = "Business growth: 200K new orders"
+
+[[events]]
+time_offset = 3600
+kind = "statistics_update"
+table = "orders"
+description = "ANALYZE orders"
+
+[[events]]
+time_offset = 5400
+kind = "data_modification"
+table = "orders"
+description = "Continued growth: 750K more orders"
+
+[[events]]
+time_offset = 7200
+kind = "statistics_update"
+description = "ANALYZE all tables"
+
+# Test Expectations
+[[expectations]]
+snapshot_index = 0
+expected_plan_pattern = ".*HashJoin.*orders.*customers.*"
+rules_applied_must_include = ["hash-join-introduction"]
+invalidation_trigger = "None"
+
+[[expectations]]
+snapshot_index = 1
+expected_plan_pattern = ".*HashJoin.*orders.*customers.*"
+rules_applied_must_include = ["hash-join-introduction"]
+invalidation_trigger = "Statistics"
+
+[[expectations]]
+snapshot_index = 2
+expected_plan_pattern = ".*HashJoin.*customers.*orders.*"
+rules_applied_must_include = ["hash-join-introduction", "join-order-reoptimization"]
+invalidation_trigger = "Statistics"

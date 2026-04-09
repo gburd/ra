@@ -108,6 +108,24 @@ pub fn all_rules_unsorted() -> Vec<Rewrite<RelLang, RelAnalysis>> {
         crate::xml_optimizer::xml_optimization_rules(),
     );
 
+    // Vector similarity search optimization rules (RFC 0064)
+    rules.extend(
+        crate::vector_rules::vector_rewrite_rules(),
+    );
+
+    // Full-text search optimization rules (RFC 0066)
+    rules.extend(
+        crate::fts_rules::fts_optimization_rules(),
+    );
+
+    // Hybrid search optimization rules (RFC 0073)
+    rules.extend(
+        crate::hybrid_search::hybrid_search_rules(),
+    );
+
+    // Type cast optimization rules
+    rules.extend(cast_optimization_rules());
+
     rules
 }
 
@@ -581,6 +599,54 @@ fn runtime_filter_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
             "(join semi ?cond (filter ?pred ?input) ?build)" =>
             "(filter ?pred (join semi ?cond ?input ?build))"
         ),
+    ]
+}
+
+// ---------------------------------------------------------------
+// Cast optimization rules
+// ---------------------------------------------------------------
+
+/// Type cast optimization rules.
+///
+/// Optimizations:
+/// - Eliminate double casts: cast(cast(x, t1), t2) → cast(x, t2)
+/// - Remove identity casts: cast(const-int(x), int) → const-int(x)
+/// - Push casts through operations when safe
+fn cast_optimization_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
+    vec![
+        // Eliminate consecutive casts (cast(cast(x, t1), t2) → cast(x, t2))
+        rewrite!("eliminate-double-cast";
+            "(cast (cast ?expr ?type1) ?type2)" =>
+            "(cast ?expr ?type2)"
+        ),
+
+        // Remove identity cast on integer constants
+        rewrite!("remove-cast-int-to-int";
+            "(cast (const-int ?val) int)" =>
+            "(const-int ?val)"
+        ),
+        rewrite!("remove-cast-int-to-integer";
+            "(cast (const-int ?val) integer)" =>
+            "(const-int ?val)"
+        ),
+        rewrite!("remove-cast-int-to-bigint";
+            "(cast (const-int ?val) bigint)" =>
+            "(const-int ?val)"
+        ),
+
+        // Remove identity cast on string constants
+        rewrite!("remove-cast-str-to-text";
+            "(cast (const-str ?val) text)" =>
+            "(const-str ?val)"
+        ),
+        rewrite!("remove-cast-str-to-varchar";
+            "(cast (const-str ?val) varchar)" =>
+            "(const-str ?val)"
+        ),
+
+        // TODO: Cast pushdown through arithmetic operations
+        // These rules need more careful handling of operator arities
+        // Disabled for now to avoid BadOp errors
     ]
 }
 

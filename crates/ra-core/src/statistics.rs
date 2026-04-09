@@ -221,6 +221,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::panic, reason = "test code uses panic for assertions")]
     fn equi_width_histogram() {
         let hist = Histogram::EquiWidth(EquiWidthHistogram {
             buckets: vec![

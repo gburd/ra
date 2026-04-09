@@ -662,7 +662,9 @@ fn contains_joins(expr: &RelExpr) -> bool {
         | RelExpr::Limit { input, .. }
         | RelExpr::Distinct { input, .. }
         | RelExpr::Window { input, .. }
-        | RelExpr::IncrementalSort { input, .. } => contains_joins(input),
+        | RelExpr::IncrementalSort { input, .. }
+        | RelExpr::TopK { input, .. }
+        | RelExpr::VectorFilter { input, .. } => contains_joins(input),
         RelExpr::Union { left, right, .. }
         | RelExpr::Intersect { left, right, .. }
         | RelExpr::Except { left, right, .. } => {
@@ -846,7 +848,9 @@ fn collect_tables_rec(expr: &RelExpr, out: &mut std::collections::HashSet<String
         | RelExpr::Aggregate { input, .. }
         | RelExpr::Sort { input, .. }
         | RelExpr::IncrementalSort { input, .. }
-        | RelExpr::Limit { input, .. } => {
+        | RelExpr::Limit { input, .. }
+        | RelExpr::TopK { input, .. }
+        | RelExpr::VectorFilter { input, .. } => {
             collect_tables_rec(input, out);
         }
         RelExpr::Join { left, right, .. }

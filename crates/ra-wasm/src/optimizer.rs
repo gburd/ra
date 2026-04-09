@@ -416,6 +416,8 @@ fn estimate_cost(plan: &RelExpr) -> f64 {
             estimate_cost(input) + 10.0
         }
         RelExpr::MvScan { .. } => 15.0,
+        RelExpr::TopK { input, .. } => estimate_cost(input) * 3.0 + 50.0,
+        RelExpr::VectorFilter { input, .. } => estimate_cost(input) + 30.0,
     }
 }
 

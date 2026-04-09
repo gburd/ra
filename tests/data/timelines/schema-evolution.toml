@@ -1,0 +1,431 @@
+# Timeline Configuration: Schema Evolution with Progressive Index Optimization
+# Demonstrates how adding indexes over time progressively improves query performance
+
+[metadata]
+name = "Schema Evolution Scenario"
+description = "Progressive index optimization: Basic schema → Single index → Composite index → Covering index"
+query = "SELECT customer_id, status, order_date, total_amount FROM orders WHERE customer_id = 12345 AND status = 'pending' ORDER BY order_date DESC"
+dialect = "postgresql"
+duration_seconds = 14400
+schema = "E-Commerce"
+
+# Hardware Profile (constant across all snapshots)
+[[hardware_profiles]]
+name = "standard"
+cpu_cores = 8
+total_memory = 32_000_000_000
+available_memory = 24_000_000_000
+simd_width = 256
+has_gpu = false
+
+# Snapshot 1: Initial schema - no indexes
+[[snapshots]]
+time_offset = 0
+label = "Initial schema - no indexes (sequential scan)"
+hardware_profile = "standard"
+
+  [snapshots.schema]
+
+    [[snapshots.schema.tables]]
+    name = "orders"
+    storage_format = "row_based"
+    primary_key = ["order_id"]
+
+      [[snapshots.schema.tables.columns]]
+      name = "order_id"
+      data_type = "integer"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "customer_id"
+      data_type = "integer"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "status"
+      data_type = "string"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "order_date"
+      data_type = "timestamp"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "total_amount"
+      data_type = "decimal"
+      nullable = false
+
+    # Only primary key index exists
+
+  [[snapshots.statistics.tables]]
+  name = "orders"
+  row_count = 5_000_000
+  page_count = 50_000
+  avg_row_size = 120.0
+  table_size_bytes = 600_000_000
+
+    [[snapshots.statistics.tables.columns]]
+    name = "customer_id"
+    ndv = 100_000
+    null_fraction = 0.0
+    avg_width = 8.0
+    correlation = 0.05  # Low correlation - random customer order
+    min_value = "1"
+    max_value = "100000"
+
+    [[snapshots.statistics.tables.columns]]
+    name = "status"
+    ndv = 10
+    null_fraction = 0.0
+    avg_width = 8.0
+    min_value = "cancelled"
+    max_value = "shipped"
+
+    [[snapshots.statistics.tables.columns]]
+    name = "order_date"
+    ndv = 1095
+    null_fraction = 0.0
+    avg_width = 8.0
+    correlation = 0.90  # High correlation with insertion order
+    min_value = "2021-01-01"
+    max_value = "2024-01-01"
+
+  [snapshots.facts]
+  supports_hash_join = true
+  supports_parallel_scan = true
+  parallel_workers = 4
+  work_mem_bytes = 134217728
+
+# Snapshot 2: Single column index added
+[[snapshots]]
+time_offset = 3600
+label = "Single index on customer_id (index scan on one column)"
+hardware_profile = "standard"
+
+  [snapshots.schema]
+
+    [[snapshots.schema.tables]]
+    name = "orders"
+    storage_format = "row_based"
+    primary_key = ["order_id"]
+
+      [[snapshots.schema.tables.columns]]
+      name = "order_id"
+      data_type = "integer"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "customer_id"
+      data_type = "integer"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "status"
+      data_type = "string"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "order_date"
+      data_type = "timestamp"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "total_amount"
+      data_type = "decimal"
+      nullable = false
+
+    [[snapshots.schema.tables.indexes]]
+    name = "idx_orders_customer"
+    index_type = "btree"
+    columns = ["customer_id"]
+    is_unique = false
+
+  [[snapshots.statistics.tables]]
+  name = "orders"
+  row_count = 5_000_000
+  page_count = 50_000
+  avg_row_size = 120.0
+  table_size_bytes = 600_000_000
+
+    [[snapshots.statistics.tables.columns]]
+    name = "customer_id"
+    ndv = 100_000
+    null_fraction = 0.0
+    avg_width = 8.0
+    correlation = 0.05
+    min_value = "1"
+    max_value = "100000"
+
+    [[snapshots.statistics.tables.columns]]
+    name = "status"
+    ndv = 10
+    null_fraction = 0.0
+    avg_width = 8.0
+    min_value = "cancelled"
+    max_value = "shipped"
+
+    [[snapshots.statistics.tables.columns]]
+    name = "order_date"
+    ndv = 1095
+    null_fraction = 0.0
+    avg_width = 8.0
+    correlation = 0.90
+    min_value = "2021-01-01"
+    max_value = "2024-01-01"
+
+  [snapshots.facts]
+  supports_hash_join = true
+  supports_parallel_scan = true
+  parallel_workers = 4
+  work_mem_bytes = 134217728
+
+# Snapshot 3: Composite index added
+[[snapshots]]
+time_offset = 7200
+label = "Composite index on (customer_id, status) - tighter selectivity"
+hardware_profile = "standard"
+
+  [snapshots.schema]
+
+    [[snapshots.schema.tables]]
+    name = "orders"
+    storage_format = "row_based"
+    primary_key = ["order_id"]
+
+      [[snapshots.schema.tables.columns]]
+      name = "order_id"
+      data_type = "integer"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "customer_id"
+      data_type = "integer"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "status"
+      data_type = "string"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "order_date"
+      data_type = "timestamp"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "total_amount"
+      data_type = "decimal"
+      nullable = false
+
+    [[snapshots.schema.tables.indexes]]
+    name = "idx_orders_customer"
+    index_type = "btree"
+    columns = ["customer_id"]
+    is_unique = false
+
+    [[snapshots.schema.tables.indexes]]
+    name = "idx_orders_customer_status"
+    index_type = "btree"
+    columns = ["customer_id", "status"]
+    is_unique = false
+
+  [[snapshots.statistics.tables]]
+  name = "orders"
+  row_count = 5_000_000
+  page_count = 50_000
+  avg_row_size = 120.0
+  table_size_bytes = 600_000_000
+
+    [[snapshots.statistics.tables.columns]]
+    name = "customer_id"
+    ndv = 100_000
+    null_fraction = 0.0
+    avg_width = 8.0
+    correlation = 0.05
+    min_value = "1"
+    max_value = "100000"
+
+    [[snapshots.statistics.tables.columns]]
+    name = "status"
+    ndv = 10
+    null_fraction = 0.0
+    avg_width = 8.0
+    min_value = "cancelled"
+    max_value = "shipped"
+
+    [[snapshots.statistics.tables.columns]]
+    name = "order_date"
+    ndv = 1095
+    null_fraction = 0.0
+    avg_width = 8.0
+    correlation = 0.90
+    min_value = "2021-01-01"
+    max_value = "2024-01-01"
+
+  [snapshots.facts]
+  supports_hash_join = true
+  supports_parallel_scan = true
+  parallel_workers = 4
+  work_mem_bytes = 134217728
+
+# Snapshot 4: Covering index with INCLUDE columns
+[[snapshots]]
+time_offset = 10800
+label = "Covering index (customer_id, status) INCLUDE (order_date, total_amount)"
+hardware_profile = "standard"
+
+  [snapshots.schema]
+
+    [[snapshots.schema.tables]]
+    name = "orders"
+    storage_format = "row_based"
+    primary_key = ["order_id"]
+
+      [[snapshots.schema.tables.columns]]
+      name = "order_id"
+      data_type = "integer"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "customer_id"
+      data_type = "integer"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "status"
+      data_type = "string"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "order_date"
+      data_type = "timestamp"
+      nullable = false
+
+      [[snapshots.schema.tables.columns]]
+      name = "total_amount"
+      data_type = "decimal"
+      nullable = false
+
+    [[snapshots.schema.tables.indexes]]
+    name = "idx_orders_customer"
+    index_type = "btree"
+    columns = ["customer_id"]
+    is_unique = false
+
+    [[snapshots.schema.tables.indexes]]
+    name = "idx_orders_customer_status"
+    index_type = "btree"
+    columns = ["customer_id", "status"]
+    is_unique = false
+
+    [[snapshots.schema.tables.indexes]]
+    name = "idx_orders_customer_status_covering"
+    index_type = "btree"
+    columns = ["customer_id", "status", "order_date", "total_amount"]
+    is_unique = false
+
+  [[snapshots.statistics.tables]]
+  name = "orders"
+  row_count = 5_000_000
+  page_count = 50_000
+  avg_row_size = 120.0
+  table_size_bytes = 600_000_000
+
+    [[snapshots.statistics.tables.columns]]
+    name = "customer_id"
+    ndv = 100_000
+    null_fraction = 0.0
+    avg_width = 8.0
+    correlation = 0.05
+    min_value = "1"
+    max_value = "100000"
+
+    [[snapshots.statistics.tables.columns]]
+    name = "status"
+    ndv = 10
+    null_fraction = 0.0
+    avg_width = 8.0
+    min_value = "cancelled"
+    max_value = "shipped"
+
+    [[snapshots.statistics.tables.columns]]
+    name = "order_date"
+    ndv = 1095
+    null_fraction = 0.0
+    avg_width = 8.0
+    correlation = 0.90
+    min_value = "2021-01-01"
+    max_value = "2024-01-01"
+
+  [snapshots.facts]
+  supports_hash_join = true
+  supports_parallel_scan = true
+  parallel_workers = 4
+  work_mem_bytes = 134217728
+
+# Events
+[[events]]
+time_offset = 1800
+kind = "schema_change"
+table = "orders"
+description = "BEGIN: CREATE INDEX idx_orders_customer ON orders(customer_id)"
+
+[[events]]
+time_offset = 3600
+kind = "schema_change"
+table = "orders"
+description = "COMMIT: Index idx_orders_customer created"
+
+[[events]]
+time_offset = 5400
+kind = "schema_change"
+table = "orders"
+description = "BEGIN: CREATE INDEX idx_orders_customer_status ON orders(customer_id, status)"
+
+[[events]]
+time_offset = 7200
+kind = "schema_change"
+table = "orders"
+description = "COMMIT: Index idx_orders_customer_status created"
+
+[[events]]
+time_offset = 9000
+kind = "schema_change"
+table = "orders"
+description = "BEGIN: CREATE INDEX idx_orders_customer_status_covering ON orders(customer_id, status) INCLUDE (order_date, total_amount)"
+
+[[events]]
+time_offset = 10800
+kind = "schema_change"
+table = "orders"
+description = "COMMIT: Covering index created"
+
+# Test Expectations
+[[expectations]]
+snapshot_index = 0
+expected_plan_pattern = ".*SeqScan.*orders.*"
+expected_cost_range = [500000.0, 700000.0]
+rules_applied_must_not_include = ["index-scan-selection"]
+invalidation_trigger = "None"
+
+[[expectations]]
+snapshot_index = 1
+expected_plan_pattern = ".*IndexScan.*idx_orders_customer.*"
+expected_cost_range = [1000.0, 3000.0]
+rules_applied_must_include = ["index-scan-selection"]
+invalidation_trigger = "Index"
+
+[[expectations]]
+snapshot_index = 2
+expected_plan_pattern = ".*IndexScan.*idx_orders_customer_status.*"
+expected_cost_range = [100.0, 500.0]
+rules_applied_must_include = ["index-scan-selection"]
+invalidation_trigger = "Index"
+
+[[expectations]]
+snapshot_index = 3
+expected_plan_pattern = ".*IndexOnlyScan.*idx_orders_customer_status_covering.*"
+expected_cost_range = [20.0, 200.0]
+rules_applied_must_include = ["index-only-scan"]
+invalidation_trigger = "Index"
