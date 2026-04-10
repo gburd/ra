@@ -195,7 +195,7 @@ async fn rocket() -> _ {
     build_rocket(conn_manager)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "integration-tests"))]
 #[allow(clippy::panic, clippy::unwrap_used)]
 mod tests {
     use rocket::http::{ContentType, Status};
