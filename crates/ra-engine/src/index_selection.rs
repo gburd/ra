@@ -38,10 +38,34 @@
 //! IndexScan(orders, idx_orders_customer, customer_id = 123)
 //! ```
 
-use egg::{rewrite, Rewrite};
+use egg::{rewrite, EGraph, Id, Rewrite, Subst, Var};
 
 use crate::analysis::RelAnalysis;
 use crate::egraph::RelLang;
+
+/// Condition that rejects constant-boolean predicates.
+///
+/// Prevents index selection rules from creating bitmap-index-scans
+/// for trivial predicates like `true` or `false`, which should be
+/// handled by expression simplification rules instead.
+struct IsNotConstBool {
+    var: Var,
+}
+
+impl egg::Condition<RelLang, RelAnalysis> for IsNotConstBool {
+    fn check(
+        &self,
+        egraph: &mut EGraph<RelLang, RelAnalysis>,
+        _eclass: Id,
+        subst: &Subst,
+    ) -> bool {
+        let pred_id = subst[self.var];
+        !egraph[pred_id]
+            .nodes
+            .iter()
+            .any(|n| matches!(n, RelLang::ConstBool(_)))
+    }
+}
 
 /// Rewrite rules for basic index scan selection.
 ///
@@ -73,6 +97,7 @@ pub fn index_selection_rules() -> Vec<Rewrite<RelLang, RelAnalysis>> {
         rewrite!("filter-scan-to-bitmap-index";
             "(filter ?pred (scan ?table))" =>
             "(bitmap-index-scan ?table auto ?pred)"
+            if IsNotConstBool { var: "?pred".parse().expect("valid var") }
         ),
 
         // Reverse direction for e-graph exploration

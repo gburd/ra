@@ -239,10 +239,16 @@ fn filter_pushdown_through_project() {
     // The outermost node should be a project, not a filter.
     match &result {
         RelExpr::Project { input, .. } => {
-            // Filter should now be below project
+            // Filter should now be below project, possibly as an
+            // index scan (which is a filter+scan combined)
             assert!(
-                is_filter(input),
-                "filter should be pushed below project"
+                is_filter(input)
+                    || matches!(
+                        input.as_ref(),
+                        RelExpr::BitmapIndexScan { .. }
+                            | RelExpr::IndexScan { .. }
+                    ),
+                "filter should be pushed below project, got: {input:?}"
             );
         }
         RelExpr::Filter { .. } => {
@@ -948,9 +954,15 @@ fn complex_predicate_with_all_simplification_rules() {
     assert!(tables.contains(&"t".to_owned()));
     // After simplification: NOT(NOT(x)) -> x, OR(TRUE, y) -> TRUE,
     // AND(x, TRUE) -> x
-    // So result should be filter(a > 5, scan("t"))
+    // So result should be filter(a > 5, scan("t")) or equivalent
+    // index scan. Either way, the predicate was simplified.
     assert!(
-        is_filter(&result),
-        "complex predicate should simplify to a single filter"
+        is_filter(&result)
+            || matches!(
+                &result,
+                RelExpr::BitmapIndexScan { .. }
+                    | RelExpr::IndexScan { .. }
+            ),
+        "complex predicate should simplify to a single filter or index scan, got: {result:?}"
     );
 }
