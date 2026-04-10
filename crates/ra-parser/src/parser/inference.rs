@@ -57,8 +57,12 @@ impl DialectInference {
             *self.scores.entry("oracle".to_string()).or_insert(0.0) += 0.9;
         }
 
-        // SQL Server indicators
-        if sql.contains('[') && sql.contains(']') {
+        // SQL Server indicators: bracketed identifiers like [column_name]
+        // Exclude ARRAY[...] syntax which is PostgreSQL
+        let has_bracket_identifiers = sql.contains('[')
+            && sql.contains(']')
+            && !sql.to_uppercase().contains("ARRAY[");
+        if has_bracket_identifiers {
             *self.scores.entry("sqlserver".to_string()).or_insert(0.0) += 0.8;
         }
         if sql.to_uppercase().contains("TOP ") {

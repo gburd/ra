@@ -258,19 +258,45 @@ impl DdlParser {
     /// Convert sqlparser DataType to simple string representation.
     fn convert_data_type(&self, data_type: &SqlDataType) -> String {
         match data_type {
-            SqlDataType::SmallInt(_) | SqlDataType::Int(_) | SqlDataType::BigInt(_) => {
-                "integer".to_string()
-            }
-            SqlDataType::Real | SqlDataType::Float(_) | SqlDataType::Double => "float".to_string(),
-            SqlDataType::Varchar(_) | SqlDataType::Char(_) | SqlDataType::Text => {
-                "string".to_string()
-            }
-            SqlDataType::Boolean => "boolean".to_string(),
-            SqlDataType::Timestamp(_, _) | SqlDataType::Date => "timestamp".to_string(),
-            SqlDataType::Bytea => "binary".to_string(),
+            SqlDataType::TinyInt(_)
+            | SqlDataType::SmallInt(_)
+            | SqlDataType::MediumInt(_)
+            | SqlDataType::Int(_)
+            | SqlDataType::Int2(_)
+            | SqlDataType::Int4(_)
+            | SqlDataType::Int8(_)
+            | SqlDataType::Integer(_)
+            | SqlDataType::BigInt(_) => "integer".to_string(),
+            SqlDataType::Real
+            | SqlDataType::Float(_)
+            | SqlDataType::Float4
+            | SqlDataType::Float8
+            | SqlDataType::Double
+            | SqlDataType::DoublePrecision
+            | SqlDataType::Dec(_)
+            | SqlDataType::Decimal(_)
+            | SqlDataType::Numeric(_) => "float".to_string(),
+            SqlDataType::Varchar(_)
+            | SqlDataType::Char(_)
+            | SqlDataType::Character(_)
+            | SqlDataType::CharVarying(_)
+            | SqlDataType::CharacterVarying(_)
+            | SqlDataType::Nvarchar(_)
+            | SqlDataType::Text
+            | SqlDataType::String(_)
+            | SqlDataType::Clob(_) => "string".to_string(),
+            SqlDataType::Bool | SqlDataType::Boolean => "boolean".to_string(),
+            SqlDataType::Timestamp(_, _)
+            | SqlDataType::Date
+            | SqlDataType::Datetime(_)
+            | SqlDataType::Time(_, _) => "timestamp".to_string(),
+            SqlDataType::Bytea
+            | SqlDataType::Binary(_)
+            | SqlDataType::Varbinary(_)
+            | SqlDataType::Blob(_) => "binary".to_string(),
             SqlDataType::JSON | SqlDataType::JSONB => "json".to_string(),
+            SqlDataType::Uuid => "uuid".to_string(),
             SqlDataType::Array(array_def) => {
-                // ArrayElemTypeDef is an enum with different bracket styles
                 match array_def {
                     ArrayElemTypeDef::None => "array".to_string(),
                     ArrayElemTypeDef::SquareBracket(inner, _)
@@ -280,7 +306,14 @@ impl DdlParser {
                     }
                 }
             }
-            SqlDataType::Custom(name, _) => name.to_string(),
+            SqlDataType::Custom(name, _) => {
+                let upper = name.to_string().to_uppercase();
+                if upper == "SERIAL" || upper == "BIGSERIAL" || upper == "SMALLSERIAL" {
+                    "integer".to_string()
+                } else {
+                    name.to_string()
+                }
+            }
             _ => "other".to_string(),
         }
     }
