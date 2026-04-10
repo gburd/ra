@@ -451,14 +451,14 @@ mod tests {
 
     /// Configurable facts provider for testing rule_metadata.
     struct TestFacts {
-        _db_name: String,
+        db_name: &'static str,
         hw: CoreHardwareProfile,
     }
 
     impl TestFacts {
-        fn new(db_name: &str, cpu: u32, memory: u64, gpu: bool) -> Self {
+        fn new(db_name: &'static str, cpu: u32, memory: u64, gpu: bool) -> Self {
             Self {
-                _db_name: db_name.to_string(),
+                db_name,
                 hw: CoreHardwareProfile {
                     cpu_cores: cpu,
                     available_memory: memory,
@@ -498,7 +498,7 @@ mod tests {
             None
         }
         fn database_name(&self) -> &'static str {
-            "test"
+            self.db_name
         }
         fn supports_feature(&self, _feature: &str) -> bool {
             true

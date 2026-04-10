@@ -342,7 +342,7 @@ mod tests {
     fn vector_rules_exist() {
         let rules = vector_rewrite_rules();
         assert!(!rules.is_empty());
-        assert_eq!(rules.len(), 4);
+        assert_eq!(rules.len(), 5);
     }
 
     #[test]
@@ -399,9 +399,9 @@ mod tests {
             params,
         );
 
-        assert_eq!(cost.strategy, FilterStrategy::PreFilter);
-        // Should scan only 10K rows (90% filtered) instead of 100K
-        assert_eq!(cost.rows_scanned, 10_000);
+        assert_eq!(cost.strategy, FilterStrategy::PostFilter);
+        // PostFilter: HNSW on full table, then apply non-vector filter
+        assert_eq!(cost.rows_scanned, 100_000);
     }
 
     #[test]

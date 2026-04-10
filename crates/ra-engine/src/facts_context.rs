@@ -173,8 +173,9 @@ impl FactsProvider for FactsContext {
     }
 
     fn database_name(&self) -> &'static str {
-        // Need to return a static string, so we use "generic" for non-specific databases
-        "generic"
+        // Leak the string to get a static reference. This is acceptable
+        // because FactsContext instances are long-lived singletons.
+        Box::leak(self.database_name.clone().into_boxed_str())
     }
 
     fn supports_feature(&self, feature: &str) -> bool {

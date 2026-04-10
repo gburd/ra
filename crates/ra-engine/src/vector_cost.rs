@@ -320,7 +320,7 @@ mod tests {
         let l2_cost = vector_distance_cost(100, VectorMetric::L2);
         let cosine_cost = vector_distance_cost(100, VectorMetric::Cosine);
         assert!(cosine_cost > l2_cost);
-        assert!((cosine_cost / l2_cost - 1.5).abs() < f64::EPSILON);
+        assert!((cosine_cost / l2_cost - 1.5).abs() < 1e-10);
     }
 
     #[test]

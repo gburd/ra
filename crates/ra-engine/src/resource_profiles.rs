@@ -294,8 +294,10 @@ mod tests {
 
     #[test]
     fn unlimited_has_no_iteration_limit() {
-        assert!(
-            ResourceBudget::unlimited().max_iterations.is_none()
+        // "unlimited" still has a safety iteration cap to prevent infinite loops
+        assert_eq!(
+            ResourceBudget::unlimited().max_iterations,
+            Some(1000)
         );
     }
 

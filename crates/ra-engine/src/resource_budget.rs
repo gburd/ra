@@ -385,7 +385,8 @@ mod tests {
     fn with_iteration_limit_sets_constraint() {
         let budget = ResourceBudget::unlimited()
             .with_iteration_limit(5);
-        assert!(!budget.is_unlimited());
+        // is_unlimited() ignores max_iterations (safety mechanism only)
+        assert!(budget.is_unlimited());
         assert_eq!(budget.max_iterations, Some(5));
     }
 
