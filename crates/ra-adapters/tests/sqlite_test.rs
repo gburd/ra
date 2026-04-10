@@ -2,6 +2,9 @@
 //!
 //! Tests FTS5 detection, sqlite-vec detection, schema introspection,
 //! and query execution.
+//!
+//! Requires the `sqlite` feature to be enabled.
+#![cfg(feature = "sqlite")]
 
 use ra_adapters::{DatabaseAdapter, SQLiteAdapter};
 use std::path::PathBuf;
