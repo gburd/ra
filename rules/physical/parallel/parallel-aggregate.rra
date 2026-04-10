@@ -1,3 +1,14 @@
+---
+id: parallel-aggregate
+name: Parallel Aggregation
+category: physical
+databases: [postgresql, mysql, duckdb]
+execution_models: [volcano]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [parallel, physical, performance, aggregate]
+---
 # Parallel Aggregation
 #
 # Converts aggregation into parallel two-phase aggregation:

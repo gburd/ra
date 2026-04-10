@@ -1,3 +1,14 @@
+---
+id: parallel-seq-scan
+name: Parallel Sequential Scan
+category: physical
+databases: [postgresql, mysql, duckdb]
+execution_models: [volcano]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [parallel, physical, performance, scan, sequential]
+---
 # Parallel Sequential Scan
 #
 # Converts a sequential scan into a parallel scan with gather node

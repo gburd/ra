@@ -1,3 +1,14 @@
+---
+id: parallel-hash-join
+name: Parallel Hash Join
+category: physical
+databases: [postgresql, mysql, duckdb]
+execution_models: [volcano]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [parallel, physical, performance, join, hash]
+---
 # Parallel Hash Join
 #
 # Converts a hash join into a parallel hash join when both inputs

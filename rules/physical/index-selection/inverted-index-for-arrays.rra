@@ -2,7 +2,7 @@
 id: inverted-index-for-arrays
 name: Inverted Index for Array Operations
 category: physical/index-selection
-databases: [postgresql, documentdb]
+databases: [postgresql, mongodb]
 execution_models: [volcano]
 hardware: [cpu]
 version: "2.0.0"
