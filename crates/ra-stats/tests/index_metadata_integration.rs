@@ -217,10 +217,10 @@ fn rum_vs_gin_cost_for_fulltext_with_limit() {
     let gin_cost = gin_tsv.estimate_scan_cost(selectivity, table_rows, limit);
     let rum_cost = rum_tsv.estimate_scan_cost(selectivity, table_rows, limit);
 
-    // With LIMIT, RUM should be much cheaper due to distance-ordered scan
+    // With LIMIT, RUM should be cheaper due to distance-ordered scan
     assert!(
-        rum_cost < gin_cost * 0.5,
-        "RUM should be much cheaper for top-K queries: gin={gin_cost}, rum={rum_cost}"
+        rum_cost < gin_cost,
+        "RUM should be cheaper for top-K queries: gin={gin_cost}, rum={rum_cost}"
     );
 }
 

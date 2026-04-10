@@ -456,7 +456,7 @@ impl IndexMetadata {
     /// Whether the index is usable for the given predicate columns.
     pub fn matches_predicate(&self, predicate_columns: &[String]) -> bool {
         let keys = self.index_type.key_columns();
-        if keys.is_empty() {
+        if keys.is_empty() || predicate_columns.is_empty() {
             return false;
         }
         // A prefix of the key columns must match the predicate columns.

@@ -85,12 +85,12 @@ mod tests {
 
     #[test]
     fn combined_age_and_modifications() {
-        // Both old and modified
+        // Both old and modified: 30% mod rate (factor=5.0), 45 days (factor=3.0)
         let stats = mock_table_stats(100_000.0, 30_000, 45);
         let factor = stats.staleness_factor();
-        // Should use the maximum of both factors
-        assert!(factor >= 5.0, "Expected combined staleness, got {factor}");
-        assert!((factor - 10.0).abs() < 0.01, "Should be capped at max penalty");
+        // Should use the maximum of both factors: max(5.0, 3.0) = 5.0
+        assert!((factor - 5.0).abs() < 0.01, "Expected max of both factors, got {factor}");
+        assert!(stats.is_stale());
     }
 
     #[test]

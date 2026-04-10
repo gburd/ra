@@ -88,7 +88,7 @@ impl TableStats {
             // Age penalty: increases logarithmically
             if age_days < 1 {
                 1.0
-            } else if age_days < 7 {
+            } else if age_days <= 7 {
                 1.2
             } else if age_days < 30 {
                 2.0

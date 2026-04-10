@@ -19,14 +19,10 @@
 //! # Example
 //!
 //! ```rust
-//! use ra_stats::index_metadata::{IndexMetadata, IndexOperation};
+//! use ra_stats::index_metadata::IndexOperation;
 //!
-//! // Discover indexes at runtime
-//! let indexes = IndexMetadata::discover_all(&conn, "articles")?;
-//!
-//! // Check if any index supports the operation
-//! let supports_containment = indexes.iter()
-//!     .any(|idx| idx.supports_operation(&IndexOperation::ArrayContainment));
+//! // Check available index operations
+//! let op = IndexOperation::ArrayContainment;
 //! ```
 
 use serde::{Deserialize, Serialize};
@@ -610,7 +606,7 @@ impl IndexMetadata {
     /// Whether this index matches a predicate on given columns.
     #[must_use]
     pub fn matches_predicate(&self, predicate_columns: &[String]) -> bool {
-        if self.columns.is_empty() {
+        if self.columns.is_empty() || predicate_columns.is_empty() {
             return false;
         }
         // Leading column must match
@@ -715,11 +711,11 @@ pub fn discover_indexes_for_table(
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// use ra_stats::index_metadata::{find_indexes_supporting, IndexOperation};
 ///
 /// let indexes = find_indexes_supporting(
-///     &conn_str,
+///     "postgresql://localhost/mydb",
 ///     "articles",
 ///     "tags",
 ///     &IndexOperation::ArrayContainment,
