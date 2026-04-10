@@ -156,8 +156,8 @@
               set -e
               cd docs
 
-              # Install dependencies if needed
-              if [ ! -d node_modules ]; then
+              # Install dependencies if needed (check for vitepress specifically)
+              if [ ! -x node_modules/.bin/vitepress ]; then
                 echo "📦 Installing dependencies with npm..."
                 ${pkgs.nodejs_20}/bin/npm install
               fi
@@ -170,7 +170,7 @@
               echo "Press Ctrl+C to stop the server"
               echo ""
 
-              exec ${pkgs.nodejs_20}/bin/npm run dev
+              exec ${pkgs.nodejs_20}/bin/npx vitepress dev
             '');
           };
 
@@ -182,14 +182,14 @@
               set -e
               cd docs
 
-              # Install npm dependencies if needed
-              if [ ! -d node_modules ]; then
+              # Install npm dependencies if needed (check for vitepress specifically)
+              if [ ! -x node_modules/.bin/vitepress ]; then
                 echo "📦 Installing npm dependencies..."
                 ${pkgs.nodejs_20}/bin/npm install
               fi
 
               echo "📚 Building documentation..."
-              ${pkgs.nodejs_20}/bin/npm run build:docs
+              ${pkgs.nodejs_20}/bin/npx vitepress build
 
               echo "✅ Documentation built successfully!"
               echo "   Output: docs/.vitepress/dist/"
