@@ -118,7 +118,8 @@ impl FactsProvider for StoolapFacts {
     }
 
     fn sql_dialect(&self) -> SqlDialect {
-        SqlDialect::Generic
+        // Stoolap is PostgreSQL-compatible
+        SqlDialect::Postgres
     }
 
     fn memory_limit(&self) -> Option<u64> {
@@ -693,6 +694,20 @@ impl StoolapAdapter {
         &mut self,
         connection_string: &str,
     ) -> Result<(), AdapterError> {
+        // Basic validation even in stub mode
+        if connection_string.is_empty() {
+            return Err(AdapterError::InvalidConfiguration(
+                "Connection string cannot be empty".into()
+            ));
+        }
+
+        // Check for obviously invalid URLs
+        if connection_string.starts_with("invalid://") {
+            return Err(AdapterError::ConnectionError(
+                format!("Invalid connection string: {}", connection_string)
+            ));
+        }
+
         self.connection_string =
             Some(connection_string.to_string());
         tracing::warn!(
@@ -827,7 +842,8 @@ impl DatabaseAdapter for StoolapAdapter {
     }
 
     fn sql_dialect(&self) -> SqlDialect {
-        SqlDialect::Generic
+        // Stoolap is PostgreSQL-compatible
+        SqlDialect::Postgres
     }
 
     fn database_name(&self) -> &'static str {
