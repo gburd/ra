@@ -189,7 +189,7 @@
               fi
 
               echo "📚 Building documentation..."
-              ${pkgs.nodejs_20}/bin/npx vitepress build
+              NODE_OPTIONS='--max-old-space-size=16384' ${pkgs.nodejs_20}/bin/npx vitepress build
 
               echo "✅ Documentation built successfully!"
               echo "   Output: docs/.vitepress/dist/"

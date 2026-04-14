@@ -104,7 +104,7 @@ impl PostgresConnector {
         let rows = self
             .client
             .query(
-                "SELECT c.conname, c.contype, \
+                "SELECT c.conname, c.contype::text, \
                  array_agg(a.attname ORDER BY x.n) AS columns, \
                  ft.relname AS fk_table, \
                  array_agg(fa.attname ORDER BY fx.n) \
@@ -453,12 +453,13 @@ impl PostgresConnector {
                 message: format!("EXPLAIN failed for query: {e}"),
             })?;
 
-        let json_text: String = rows
+        let json_value: serde_json::Value = rows
             .first()
             .ok_or_else(|| MetadataError::ExplainParse {
                 message: "no EXPLAIN output".to_owned(),
             })?
             .get(0);
+        let json_text = json_value.to_string();
 
         parse_postgres_explain(&json_text)
     }
