@@ -1,0 +1,5458 @@
+{
+  "text": "Rules Reference",
+  "collapsed": true,
+  "items": [
+    {
+      "text": "Overview",
+      "link": "/rules/"
+    },
+    {
+      "text": "Rule Index",
+      "link": "/rules/rule-index"
+    },
+    {
+      "text": "By Category",
+      "link": "/rules/by-category"
+    },
+    {
+      "text": "By Database",
+      "link": "/rules/by-database"
+    },
+    {
+      "text": "By Category",
+      "link": "/rules/by-category"
+    },
+    {
+      "text": "By Database",
+      "link": "/rules/by-database"
+    },
+    {
+      "text": "Dependency Graph",
+      "link": "/rules/dependency-graph"
+    },
+    {
+      "text": "Index",
+      "link": "/rules/index"
+    },
+    {
+      "text": "References",
+      "link": "/rules/references"
+    },
+    {
+      "text": "Rule Index",
+      "link": "/rules/rule-index"
+    },
+    {
+      "text": "Cost Models",
+      "collapsed": true,
+      "items": [
+        {
+          "text": "Access Path Enumeration",
+          "link": "/rules/cost-models/access-path-enumeration"
+        },
+        {
+          "text": "Adaptive Index Selection",
+          "link": "/rules/cost-models/adaptive-index-selection"
+        },
+        {
+          "text": "Aggregate Cardinality Estimation",
+          "link": "/rules/cost-models/aggregate-cardinality-estimation"
+        },
+        {
+          "text": "Aggregation Cost Formulas",
+          "link": "/rules/cost-models/aggregation-cost-formulas"
+        },
+        {
+          "text": "Bandit Algorithm Selection",
+          "link": "/rules/cost-models/bandit-algorithm-selection"
+        },
+        {
+          "text": "Cache Conscious Cost Model",
+          "link": "/rules/cost-models/cache-conscious-cost-model"
+        },
+        {
+          "text": "Cardinality Error Feedback",
+          "link": "/rules/cost-models/cardinality-error-feedback"
+        },
+        {
+          "text": "Cardinality Estimation",
+          "link": "/rules/cost-models/cardinality-estimation"
+        },
+        {
+          "text": "Cloud Elastic Cost Model",
+          "link": "/rules/cost-models/cloud-elastic-cost-model"
+        },
+        {
+          "text": "Composite Cost Model",
+          "link": "/rules/cost-models/composite-cost-model"
+        },
+        {
+          "text": "Concurrency Contention Cost",
+          "link": "/rules/cost-models/concurrency-contention-cost"
+        },
+        {
+          "text": "Correlation Aware Estimation",
+          "link": "/rules/cost-models/correlation-aware-estimation"
+        },
+        {
+          "text": "Cost Calibration Duckdb",
+          "link": "/rules/cost-models/cost-calibration-duckdb"
+        },
+        {
+          "text": "Cost Calibration Postgresql",
+          "link": "/rules/cost-models/cost-calibration-postgresql"
+        },
+        {
+          "text": "Cost Calibration",
+          "link": "/rules/cost-models/cost-calibration"
+        },
+        {
+          "text": "Cpu Cost Model",
+          "link": "/rules/cost-models/cpu-cost-model"
+        },
+        {
+          "text": "Dbest Histogram",
+          "link": "/rules/cost-models/dbest-histogram"
+        },
+        {
+          "text": "Distributed Query Routing Cost",
+          "link": "/rules/cost-models/distributed-query-routing-cost"
+        },
+        {
+          "text": "Dynamic Programming Join Order",
+          "link": "/rules/cost-models/dynamic-programming-join-order"
+        },
+        {
+          "text": "Geospatial Cost Model",
+          "link": "/rules/cost-models/geospatial-cost-model"
+        },
+        {
+          "text": "Gpu Cost Model",
+          "link": "/rules/cost-models/gpu-cost-model"
+        },
+        {
+          "text": "Histogram Based Estimation",
+          "link": "/rules/cost-models/histogram-based-estimation"
+        },
+        {
+          "text": "Independence Assumption",
+          "link": "/rules/cost-models/independence-assumption"
+        },
+        {
+          "text": "Index Only Access",
+          "link": "/rules/cost-models/index-only-access"
+        },
+        {
+          "text": "Index Vs Scan Selection",
+          "link": "/rules/cost-models/index-vs-scan-selection"
+        },
+        {
+          "text": "Interesting Orders",
+          "link": "/rules/cost-models/interesting-orders"
+        },
+        {
+          "text": "Io Cost Model",
+          "link": "/rules/cost-models/io-cost-model"
+        },
+        {
+          "text": "Join Cardinality Estimation",
+          "link": "/rules/cost-models/join-cardinality-estimation"
+        },
+        {
+          "text": "Join Cost Formulas",
+          "link": "/rules/cost-models/join-cost-formulas"
+        },
+        {
+          "text": "Learned Cost Models",
+          "link": "/rules/cost-models/learned-cost-models"
+        },
+        {
+          "text": "Left Deep Trees Only",
+          "link": "/rules/cost-models/left-deep-trees-only"
+        },
+        {
+          "text": "Memory Cost Model",
+          "link": "/rules/cost-models/memory-cost-model"
+        },
+        {
+          "text": "Merge Scan Cost",
+          "link": "/rules/cost-models/merge-scan-cost"
+        },
+        {
+          "text": "Multi Column Correlation",
+          "link": "/rules/cost-models/multi-column-correlation"
+        },
+        {
+          "text": "Multi Index Access",
+          "link": "/rules/cost-models/multi-index-access"
+        },
+        {
+          "text": "Nested Loop Cost",
+          "link": "/rules/cost-models/nested-loop-cost"
+        },
+        {
+          "text": "Network Cost Model",
+          "link": "/rules/cost-models/network-cost-model"
+        },
+        {
+          "text": "Numa Aware Cost Model",
+          "link": "/rules/cost-models/numa-aware-cost-model"
+        },
+        {
+          "text": "Outlier Aware Estimation",
+          "link": "/rules/cost-models/outlier-aware-estimation"
+        },
+        {
+          "text": "Sampling Based Estimation",
+          "link": "/rules/cost-models/sampling-based-estimation"
+        },
+        {
+          "text": "Selectivity Estimation",
+          "link": "/rules/cost-models/selectivity-estimation"
+        },
+        {
+          "text": "Statistics Refinement",
+          "link": "/rules/cost-models/statistics-refinement"
+        },
+        {
+          "text": "Storage Tiering Cost Model",
+          "link": "/rules/cost-models/storage-tiering-cost-model"
+        },
+        {
+          "text": "System R Cost Formula",
+          "link": "/rules/cost-models/system-r-cost-formula"
+        },
+        {
+          "text": "System R Join Cardinality",
+          "link": "/rules/cost-models/system-r-join-cardinality"
+        },
+        {
+          "text": "System R Selectivity Formulas",
+          "link": "/rules/cost-models/system-r-selectivity-formulas"
+        },
+        {
+          "text": "System R Selectivity",
+          "link": "/rules/cost-models/system-r-selectivity"
+        },
+        {
+          "text": "Temp Materialization Cost",
+          "link": "/rules/cost-models/temp-materialization-cost"
+        },
+        {
+          "text": "Time Series Cost Model",
+          "link": "/rules/cost-models/time-series-cost-model"
+        }
+      ]
+    },
+    {
+      "text": "Database Specific",
+      "collapsed": true,
+      "items": [
+        {
+          "text": "Adaptive Code Generation",
+          "link": "/rules/database-specific/adaptive-code-generation"
+        },
+        {
+          "text": "Adaptive Join",
+          "link": "/rules/database-specific/adaptive-join"
+        },
+        {
+          "text": "Adaptive Partitioning",
+          "link": "/rules/database-specific/adaptive-partitioning"
+        },
+        {
+          "text": "Adaptive Perfect Hash Group",
+          "link": "/rules/database-specific/adaptive-perfect-hash-group"
+        },
+        {
+          "text": "Adaptive Plan Optimization",
+          "link": "/rules/database-specific/adaptive-plan-optimization"
+        },
+        {
+          "text": "Adaptive Plans",
+          "link": "/rules/database-specific/adaptive-plans"
+        },
+        {
+          "text": "Aggregate Expand Distinct",
+          "link": "/rules/database-specific/aggregate-expand-distinct"
+        },
+        {
+          "text": "Aggregate Join Transpose",
+          "link": "/rules/database-specific/aggregate-join-transpose"
+        },
+        {
+          "text": "Aggregate Merge",
+          "link": "/rules/database-specific/aggregate-merge"
+        },
+        {
+          "text": "Aggregate Project Merge",
+          "link": "/rules/database-specific/aggregate-project-merge"
+        },
+        {
+          "text": "Aggregate Projection Rewrite",
+          "link": "/rules/database-specific/aggregate-projection-rewrite"
+        },
+        {
+          "text": "Aggregate Projection",
+          "link": "/rules/database-specific/aggregate-projection"
+        },
+        {
+          "text": "Aggregate Reduce Functions",
+          "link": "/rules/database-specific/aggregate-reduce-functions"
+        },
+        {
+          "text": "Aggregate Remove",
+          "link": "/rules/database-specific/aggregate-remove"
+        },
+        {
+          "text": "Aggregate Statistics",
+          "link": "/rules/database-specific/aggregate-statistics"
+        },
+        {
+          "text": "Aggregate Union Transpose",
+          "link": "/rules/database-specific/aggregate-union-transpose"
+        },
+        {
+          "text": "Aggregate Values",
+          "link": "/rules/database-specific/aggregate-values"
+        },
+        {
+          "text": "Aggregation Elimination",
+          "link": "/rules/database-specific/aggregation-elimination"
+        },
+        {
+          "text": "Aggregation Merge",
+          "link": "/rules/database-specific/aggregation-merge"
+        },
+        {
+          "text": "Aggregation Push Down Join",
+          "link": "/rules/database-specific/aggregation-push-down-join"
+        },
+        {
+          "text": "Aggregation Pushdown Decomposable",
+          "link": "/rules/database-specific/aggregation-pushdown-decomposable"
+        },
+        {
+          "text": "Anti Join Disjunction To Union",
+          "link": "/rules/database-specific/anti-join-disjunction-to-union"
+        },
+        {
+          "text": "Arrangement Sharing",
+          "link": "/rules/database-specific/arrangement-sharing"
+        },
+        {
+          "text": "Automatic Index",
+          "link": "/rules/database-specific/automatic-index"
+        },
+        {
+          "text": "Band Join",
+          "link": "/rules/database-specific/band-join"
+        },
+        {
+          "text": "Bat Join Ordering",
+          "link": "/rules/database-specific/bat-join-ordering"
+        },
+        {
+          "text": "Batch Mode Execution",
+          "link": "/rules/database-specific/batch-mode-execution"
+        },
+        {
+          "text": "Batch Mode On Rowstore",
+          "link": "/rules/database-specific/batch-mode-on-rowstore"
+        },
+        {
+          "text": "Batch Table Access",
+          "link": "/rules/database-specific/batch-table-access"
+        },
+        {
+          "text": "Batched Key Access",
+          "link": "/rules/database-specific/batched-key-access"
+        },
+        {
+          "text": "Bidirectional Bfs",
+          "link": "/rules/database-specific/bidirectional-bfs"
+        },
+        {
+          "text": "Bitwise Bat Operations",
+          "link": "/rules/database-specific/bitwise-bat-operations"
+        },
+        {
+          "text": "Bitwise Operations",
+          "link": "/rules/database-specific/bitwise-operations"
+        },
+        {
+          "text": "Bloom Filter Join",
+          "link": "/rules/database-specific/bloom-filter-join"
+        },
+        {
+          "text": "Bloom Filter State Pruning",
+          "link": "/rules/database-specific/bloom-filter-state-pruning"
+        },
+        {
+          "text": "Bucket Auto Optimization",
+          "link": "/rules/database-specific/bucket-auto-optimization"
+        },
+        {
+          "text": "Bulk Fetch",
+          "link": "/rules/database-specific/bulk-fetch"
+        },
+        {
+          "text": "Calc Merge",
+          "link": "/rules/database-specific/calc-merge"
+        },
+        {
+          "text": "Cand List Intersection",
+          "link": "/rules/database-specific/cand-list-intersection"
+        },
+        {
+          "text": "Canonicalize Mfp",
+          "link": "/rules/database-specific/canonicalize-mfp"
+        },
+        {
+          "text": "Change Stream Optimization",
+          "link": "/rules/database-specific/change-stream-optimization"
+        },
+        {
+          "text": "Chunk Pruning",
+          "link": "/rules/database-specific/chunk-pruning"
+        },
+        {
+          "text": "Clickhouse Array Join Optimization",
+          "link": "/rules/database-specific/clickhouse-array-join-optimization"
+        },
+        {
+          "text": "Clickhouse Column Pruning",
+          "link": "/rules/database-specific/clickhouse-column-pruning"
+        },
+        {
+          "text": "Clickhouse Common Expression Elimination",
+          "link": "/rules/database-specific/clickhouse-common-expression-elimination"
+        },
+        {
+          "text": "Clickhouse Distributed Query Optimization",
+          "link": "/rules/database-specific/clickhouse-distributed-query-optimization"
+        },
+        {
+          "text": "Clickhouse Final Modifier Optimization",
+          "link": "/rules/database-specific/clickhouse-final-modifier-optimization"
+        },
+        {
+          "text": "Clickhouse Partition Pruning",
+          "link": "/rules/database-specific/clickhouse-partition-pruning"
+        },
+        {
+          "text": "Clickhouse Predicate Pushdown",
+          "link": "/rules/database-specific/clickhouse-predicate-pushdown"
+        },
+        {
+          "text": "Clickhouse Primary Key Selection",
+          "link": "/rules/database-specific/clickhouse-primary-key-selection"
+        },
+        {
+          "text": "Clickhouse Projection Rewrite",
+          "link": "/rules/database-specific/clickhouse-projection-rewrite"
+        },
+        {
+          "text": "Clickhouse Segment Index Pruning",
+          "link": "/rules/database-specific/clickhouse-segment-index-pruning"
+        },
+        {
+          "text": "Cockroachdb Constraint Index Selection",
+          "link": "/rules/database-specific/cockroachdb-constraint-index-selection"
+        },
+        {
+          "text": "Cockroachdb Elide Projection",
+          "link": "/rules/database-specific/cockroachdb-elide-projection"
+        },
+        {
+          "text": "Cockroachdb Eliminate Noop Project",
+          "link": "/rules/database-specific/cockroachdb-eliminate-noop-project"
+        },
+        {
+          "text": "Cockroachdb Generate Merge Joins",
+          "link": "/rules/database-specific/cockroachdb-generate-merge-joins"
+        },
+        {
+          "text": "Cockroachdb Inline Projections",
+          "link": "/rules/database-specific/cockroachdb-inline-projections"
+        },
+        {
+          "text": "Cockroachdb Inverted Join",
+          "link": "/rules/database-specific/cockroachdb-inverted-join"
+        },
+        {
+          "text": "Cockroachdb Join Merge Generation",
+          "link": "/rules/database-specific/cockroachdb-join-merge-generation"
+        },
+        {
+          "text": "Cockroachdb Join Reorder",
+          "link": "/rules/database-specific/cockroachdb-join-reorder"
+        },
+        {
+          "text": "Cockroachdb Locality Optimized Lookup",
+          "link": "/rules/database-specific/cockroachdb-locality-optimized-lookup"
+        },
+        {
+          "text": "Cockroachdb Lookup Join Generation",
+          "link": "/rules/database-specific/cockroachdb-lookup-join-generation"
+        },
+        {
+          "text": "Cockroachdb Partial Index Scan",
+          "link": "/rules/database-specific/cockroachdb-partial-index-scan"
+        },
+        {
+          "text": "Cockroachdb Split Disjunctive Joins",
+          "link": "/rules/database-specific/cockroachdb-split-disjunctive-joins"
+        },
+        {
+          "text": "Codegen Disabled Fallback",
+          "link": "/rules/database-specific/codegen-disabled-fallback"
+        },
+        {
+          "text": "Column Knowledge",
+          "link": "/rules/database-specific/column-knowledge"
+        },
+        {
+          "text": "Column Pruning Unused Removal",
+          "link": "/rules/database-specific/column-pruning-unused-removal"
+        },
+        {
+          "text": "Column Recycling",
+          "link": "/rules/database-specific/column-recycling"
+        },
+        {
+          "text": "Columnar Hash Join",
+          "link": "/rules/database-specific/columnar-hash-join"
+        },
+        {
+          "text": "Columnstore Scan",
+          "link": "/rules/database-specific/columnstore-scan"
+        },
+        {
+          "text": "Common Subexpr Elimination",
+          "link": "/rules/database-specific/common-subexpr-elimination"
+        },
+        {
+          "text": "Commute Left To Right Join",
+          "link": "/rules/database-specific/commute-left-to-right-join"
+        },
+        {
+          "text": "Compound Index Selection",
+          "link": "/rules/database-specific/compound-index-selection"
+        },
+        {
+          "text": "Condition Fanout Filter",
+          "link": "/rules/database-specific/condition-fanout-filter"
+        },
+        {
+          "text": "Connect By Optimization",
+          "link": "/rules/database-specific/connect-by-optimization"
+        },
+        {
+          "text": "Connector Pushdown Framework",
+          "link": "/rules/database-specific/connector-pushdown-framework"
+        },
+        {
+          "text": "Constant Expression Evaluation",
+          "link": "/rules/database-specific/constant-expression-evaluation"
+        },
+        {
+          "text": "Constant Folding",
+          "link": "/rules/database-specific/constant-folding"
+        },
+        {
+          "text": "Constraint Based Optimization",
+          "link": "/rules/database-specific/constraint-based-optimization"
+        },
+        {
+          "text": "Continuous Aggregates",
+          "link": "/rules/database-specific/continuous-aggregates"
+        },
+        {
+          "text": "Convert Semi To Inner Non Equality",
+          "link": "/rules/database-specific/convert-semi-to-inner-non-equality"
+        },
+        {
+          "text": "Coprocessor Limit Pushdown",
+          "link": "/rules/database-specific/coprocessor-limit-pushdown"
+        },
+        {
+          "text": "Coprocessor Predicate Pushdown",
+          "link": "/rules/database-specific/coprocessor-predicate-pushdown"
+        },
+        {
+          "text": "Coprocessor Projection Pushdown",
+          "link": "/rules/database-specific/coprocessor-projection-pushdown"
+        },
+        {
+          "text": "Coprocessor Topn Pushdown",
+          "link": "/rules/database-specific/coprocessor-topn-pushdown"
+        },
+        {
+          "text": "Cost Based Join Reordering",
+          "link": "/rules/database-specific/cost-based-join-reordering"
+        },
+        {
+          "text": "Cost Based Subquery",
+          "link": "/rules/database-specific/cost-based-subquery"
+        },
+        {
+          "text": "Covered Query Optimization",
+          "link": "/rules/database-specific/covered-query-optimization"
+        },
+        {
+          "text": "Covering Index Scan",
+          "link": "/rules/database-specific/covering-index-scan"
+        },
+        {
+          "text": "Covering Index",
+          "link": "/rules/database-specific/covering-index"
+        },
+        {
+          "text": "Crackers Adaptive Index",
+          "link": "/rules/database-specific/crackers-adaptive-index"
+        },
+        {
+          "text": "Cypher Query Plan Cache",
+          "link": "/rules/database-specific/cypher-query-plan-cache"
+        },
+        {
+          "text": "Decorrelate Subquery",
+          "link": "/rules/database-specific/decorrelate-subquery"
+        },
+        {
+          "text": "Deduplication On Changelog",
+          "link": "/rules/database-specific/deduplication-on-changelog"
+        },
+        {
+          "text": "Deferred Function Execution",
+          "link": "/rules/database-specific/deferred-function-execution"
+        },
+        {
+          "text": "Degree Pruning",
+          "link": "/rules/database-specific/degree-pruning"
+        },
+        {
+          "text": "Delta Join Planning",
+          "link": "/rules/database-specific/delta-join-planning"
+        },
+        {
+          "text": "Demand Projection",
+          "link": "/rules/database-specific/demand-projection"
+        },
+        {
+          "text": "Derive Topn From Window",
+          "link": "/rules/database-specific/derive-topn-from-window"
+        },
+        {
+          "text": "Derived Table Merge",
+          "link": "/rules/database-specific/derived-table-merge"
+        },
+        {
+          "text": "Deterministic Order Optimization",
+          "link": "/rules/database-specific/deterministic-order-optimization"
+        },
+        {
+          "text": "Dictionary Compression",
+          "link": "/rules/database-specific/dictionary-compression"
+        },
+        {
+          "text": "Direct Text Index Read",
+          "link": "/rules/database-specific/direct-text-index-read"
+        },
+        {
+          "text": "Distinct Elimination",
+          "link": "/rules/database-specific/distinct-elimination"
+        },
+        {
+          "text": "Distinct Optimization",
+          "link": "/rules/database-specific/distinct-optimization"
+        },
+        {
+          "text": "Document Projection Pushdown",
+          "link": "/rules/database-specific/document-projection-pushdown"
+        },
+        {
+          "text": "Document Validation Optimization",
+          "link": "/rules/database-specific/document-validation-optimization"
+        },
+        {
+          "text": "Dynamic Partition Pruning",
+          "link": "/rules/database-specific/dynamic-partition-pruning"
+        },
+        {
+          "text": "Dynamic Udf Optimization",
+          "link": "/rules/database-specific/dynamic-udf-optimization"
+        },
+        {
+          "text": "Eager Aggregation Avoidance",
+          "link": "/rules/database-specific/eager-aggregation-avoidance"
+        },
+        {
+          "text": "Eliminate Unnecessary Sort",
+          "link": "/rules/database-specific/eliminate-unnecessary-sort"
+        },
+        {
+          "text": "Eq Range Index",
+          "link": "/rules/database-specific/eq-range-index"
+        },
+        {
+          "text": "Exchange Remove Constant Keys",
+          "link": "/rules/database-specific/exchange-remove-constant-keys"
+        },
+        {
+          "text": "Exists To In",
+          "link": "/rules/database-specific/exists-to-in"
+        },
+        {
+          "text": "Exists To Join",
+          "link": "/rules/database-specific/exists-to-join"
+        },
+        {
+          "text": "Expand Into Optimization",
+          "link": "/rules/database-specific/expand-into-optimization"
+        },
+        {
+          "text": "External Table Pushdown",
+          "link": "/rules/database-specific/external-table-pushdown"
+        },
+        {
+          "text": "Filter Aggregate Transpose",
+          "link": "/rules/database-specific/filter-aggregate-transpose"
+        },
+        {
+          "text": "Filter Consolidation",
+          "link": "/rules/database-specific/filter-consolidation"
+        },
+        {
+          "text": "Filter Into Join",
+          "link": "/rules/database-specific/filter-into-join"
+        },
+        {
+          "text": "Filter Merge",
+          "link": "/rules/database-specific/filter-merge"
+        },
+        {
+          "text": "Filter Project Transpose",
+          "link": "/rules/database-specific/filter-project-transpose"
+        },
+        {
+          "text": "Filter Pushdown Through Join",
+          "link": "/rules/database-specific/filter-pushdown-through-join"
+        },
+        {
+          "text": "Filter Pushdown To Storage",
+          "link": "/rules/database-specific/filter-pushdown-to-storage"
+        },
+        {
+          "text": "Filter Sample Transpose",
+          "link": "/rules/database-specific/filter-sample-transpose"
+        },
+        {
+          "text": "Filter Set Op Transpose",
+          "link": "/rules/database-specific/filter-set-op-transpose"
+        },
+        {
+          "text": "Filter To Calc",
+          "link": "/rules/database-specific/filter-to-calc"
+        },
+        {
+          "text": "Filter Window Transpose",
+          "link": "/rules/database-specific/filter-window-transpose"
+        },
+        {
+          "text": "Fragment Result Caching",
+          "link": "/rules/database-specific/fragment-result-caching"
+        },
+        {
+          "text": "Fulltext Index Query",
+          "link": "/rules/database-specific/fulltext-index-query"
+        },
+        {
+          "text": "Fusion",
+          "link": "/rules/database-specific/fusion"
+        },
+        {
+          "text": "Generate Index Scans",
+          "link": "/rules/database-specific/generate-index-scans"
+        },
+        {
+          "text": "Generate Inverted Index Scans",
+          "link": "/rules/database-specific/generate-inverted-index-scans"
+        },
+        {
+          "text": "Generate Limited Index Scans",
+          "link": "/rules/database-specific/generate-limited-index-scans"
+        },
+        {
+          "text": "Geospatial Index Optimization",
+          "link": "/rules/database-specific/geospatial-index-optimization"
+        },
+        {
+          "text": "Graphlookup Optimization",
+          "link": "/rules/database-specific/graphlookup-optimization"
+        },
+        {
+          "text": "Group By Optimization",
+          "link": "/rules/database-specific/group-by-optimization"
+        },
+        {
+          "text": "Group By Placement",
+          "link": "/rules/database-specific/group-by-placement"
+        },
+        {
+          "text": "Hash Aggregate To Sort Aggregate",
+          "link": "/rules/database-specific/hash-aggregate-to-sort-aggregate"
+        },
+        {
+          "text": "Hash Group By",
+          "link": "/rules/database-specific/hash-group-by"
+        },
+        {
+          "text": "Hash Join Selection",
+          "link": "/rules/database-specific/hash-join-selection"
+        },
+        {
+          "text": "Hash Join",
+          "link": "/rules/database-specific/hash-join"
+        },
+        {
+          "text": "Hash Match Aggregate",
+          "link": "/rules/database-specific/hash-match-aggregate"
+        },
+        {
+          "text": "Hashed Sharding Targeted Query",
+          "link": "/rules/database-specific/hashed-sharding-targeted-query"
+        },
+        {
+          "text": "Hdfs Caching",
+          "link": "/rules/database-specific/hdfs-caching"
+        },
+        {
+          "text": "Imprints Scan",
+          "link": "/rules/database-specific/imprints-scan"
+        },
+        {
+          "text": "In List Multi Probe",
+          "link": "/rules/database-specific/in-list-multi-probe"
+        },
+        {
+          "text": "In Memory Oltp",
+          "link": "/rules/database-specific/in-memory-oltp"
+        },
+        {
+          "text": "In Memory Scan",
+          "link": "/rules/database-specific/in-memory-scan"
+        },
+        {
+          "text": "Index Backed Order By",
+          "link": "/rules/database-specific/index-backed-order-by"
+        },
+        {
+          "text": "Index Condition Pushdown",
+          "link": "/rules/database-specific/index-condition-pushdown"
+        },
+        {
+          "text": "Index Fast Full Scan",
+          "link": "/rules/database-specific/index-fast-full-scan"
+        },
+        {
+          "text": "Index Intersection",
+          "link": "/rules/database-specific/index-intersection"
+        },
+        {
+          "text": "Index Join Optimizer",
+          "link": "/rules/database-specific/index-join-optimizer"
+        },
+        {
+          "text": "Index Merge Scan",
+          "link": "/rules/database-specific/index-merge-scan"
+        },
+        {
+          "text": "Index Merge",
+          "link": "/rules/database-specific/index-merge"
+        },
+        {
+          "text": "Index Only Scan",
+          "link": "/rules/database-specific/index-only-scan"
+        },
+        {
+          "text": "Index Selection",
+          "link": "/rules/database-specific/index-selection"
+        },
+        {
+          "text": "Indexed View Matching",
+          "link": "/rules/database-specific/indexed-view-matching"
+        },
+        {
+          "text": "Intelligent Query Processing",
+          "link": "/rules/database-specific/intelligent-query-processing"
+        },
+        {
+          "text": "Interleaved Execution",
+          "link": "/rules/database-specific/interleaved-execution"
+        },
+        {
+          "text": "Intersect To Distinct",
+          "link": "/rules/database-specific/intersect-to-distinct"
+        },
+        {
+          "text": "Intersect To Semi Join",
+          "link": "/rules/database-specific/intersect-to-semi-join"
+        },
+        {
+          "text": "Invisible Index",
+          "link": "/rules/database-specific/invisible-index"
+        },
+        {
+          "text": "Join Associate",
+          "link": "/rules/database-specific/join-associate"
+        },
+        {
+          "text": "Join Buffer Bnl",
+          "link": "/rules/database-specific/join-buffer-bnl"
+        },
+        {
+          "text": "Join Commute",
+          "link": "/rules/database-specific/join-commute"
+        },
+        {
+          "text": "Join Condition Push",
+          "link": "/rules/database-specific/join-condition-push"
+        },
+        {
+          "text": "Join Derive Is Not Null Filter",
+          "link": "/rules/database-specific/join-derive-is-not-null-filter"
+        },
+        {
+          "text": "Join Elimination",
+          "link": "/rules/database-specific/join-elimination"
+        },
+        {
+          "text": "Join Expand Or To Union",
+          "link": "/rules/database-specific/join-expand-or-to-union"
+        },
+        {
+          "text": "Join Hint Directed Planning",
+          "link": "/rules/database-specific/join-hint-directed-planning"
+        },
+        {
+          "text": "Join Implementation",
+          "link": "/rules/database-specific/join-implementation"
+        },
+        {
+          "text": "Join Ordering",
+          "link": "/rules/database-specific/join-ordering"
+        },
+        {
+          "text": "Join Predicate Pushdown",
+          "link": "/rules/database-specific/join-predicate-pushdown"
+        },
+        {
+          "text": "Join Push Through Join",
+          "link": "/rules/database-specific/join-push-through-join"
+        },
+        {
+          "text": "Join Reorder Dp",
+          "link": "/rules/database-specific/join-reorder-dp"
+        },
+        {
+          "text": "Join Reorder Rule",
+          "link": "/rules/database-specific/join-reorder-rule"
+        },
+        {
+          "text": "Join Reordering",
+          "link": "/rules/database-specific/join-reordering"
+        },
+        {
+          "text": "Join To In Conversion",
+          "link": "/rules/database-specific/join-to-in-conversion"
+        },
+        {
+          "text": "Join To Multi Join",
+          "link": "/rules/database-specific/join-to-multi-join"
+        },
+        {
+          "text": "Join To Semi Join",
+          "link": "/rules/database-specific/join-to-semi-join"
+        },
+        {
+          "text": "Join Union Transpose",
+          "link": "/rules/database-specific/join-union-transpose"
+        },
+        {
+          "text": "Label Scan Optimization",
+          "link": "/rules/database-specific/label-scan-optimization"
+        },
+        {
+          "text": "Late Materialization",
+          "link": "/rules/database-specific/late-materialization"
+        },
+        {
+          "text": "Lazy Materialization",
+          "link": "/rules/database-specific/lazy-materialization"
+        },
+        {
+          "text": "Let Motion",
+          "link": "/rules/database-specific/let-motion"
+        },
+        {
+          "text": "Lift Up Array Join",
+          "link": "/rules/database-specific/lift-up-array-join"
+        },
+        {
+          "text": "Lift Up Functions",
+          "link": "/rules/database-specific/lift-up-functions"
+        },
+        {
+          "text": "Limit Optimization",
+          "link": "/rules/database-specific/limit-optimization"
+        },
+        {
+          "text": "Limit Pushdown Distributed",
+          "link": "/rules/database-specific/limit-pushdown-distributed"
+        },
+        {
+          "text": "Limit Pushdown",
+          "link": "/rules/database-specific/limit-pushdown"
+        },
+        {
+          "text": "Literal Lifting",
+          "link": "/rules/database-specific/literal-lifting"
+        },
+        {
+          "text": "Locality Optimized Lookup Join",
+          "link": "/rules/database-specific/locality-optimized-lookup-join"
+        },
+        {
+          "text": "Locality Optimized Scan",
+          "link": "/rules/database-specific/locality-optimized-scan"
+        },
+        {
+          "text": "Lookup Join Caching",
+          "link": "/rules/database-specific/lookup-join-caching"
+        },
+        {
+          "text": "Lookup Join With Virtual Cols",
+          "link": "/rules/database-specific/lookup-join-with-virtual-cols"
+        },
+        {
+          "text": "Lookup Pipeline Optimization",
+          "link": "/rules/database-specific/lookup-pipeline-optimization"
+        },
+        {
+          "text": "Mal Pipeline Optimization",
+          "link": "/rules/database-specific/mal-pipeline-optimization"
+        },
+        {
+          "text": "Materialized Subquery",
+          "link": "/rules/database-specific/materialized-subquery"
+        },
+        {
+          "text": "Materialized View Rewrite",
+          "link": "/rules/database-specific/materialized-view-rewrite"
+        },
+        {
+          "text": "Merge Expressions",
+          "link": "/rules/database-specific/merge-expressions"
+        },
+        {
+          "text": "Merge Join",
+          "link": "/rules/database-specific/merge-join"
+        },
+        {
+          "text": "Merge Output Optimization",
+          "link": "/rules/database-specific/merge-output-optimization"
+        },
+        {
+          "text": "Minibatch Aggregation",
+          "link": "/rules/database-specific/minibatch-aggregation"
+        },
+        {
+          "text": "Mitosis Parallelism",
+          "link": "/rules/database-specific/mitosis-parallelism"
+        },
+        {
+          "text": "Mongodb Covering Index",
+          "link": "/rules/database-specific/mongodb-covering-index"
+        },
+        {
+          "text": "Mongodb Grouping Pushdown",
+          "link": "/rules/database-specific/mongodb-grouping-pushdown"
+        },
+        {
+          "text": "Mongodb Hint Selection",
+          "link": "/rules/database-specific/mongodb-hint-selection"
+        },
+        {
+          "text": "Mongodb Index Intersection",
+          "link": "/rules/database-specific/mongodb-index-intersection"
+        },
+        {
+          "text": "Mongodb Index Selection",
+          "link": "/rules/database-specific/mongodb-index-selection"
+        },
+        {
+          "text": "Mongodb Pipeline Optimization",
+          "link": "/rules/database-specific/mongodb-pipeline-optimization"
+        },
+        {
+          "text": "Mongodb Sort Elimination",
+          "link": "/rules/database-specific/mongodb-sort-elimination"
+        },
+        {
+          "text": "Mongodb Sort Pushdown",
+          "link": "/rules/database-specific/mongodb-sort-pushdown"
+        },
+        {
+          "text": "Monotonic Join Optimization",
+          "link": "/rules/database-specific/monotonic-join-optimization"
+        },
+        {
+          "text": "Morsel Driven Parallelism",
+          "link": "/rules/database-specific/morsel-driven-parallelism"
+        },
+        {
+          "text": "Motion Node Optimization",
+          "link": "/rules/database-specific/motion-node-optimization"
+        },
+        {
+          "text": "Multi Column Sort Sharing",
+          "link": "/rules/database-specific/multi-column-sort-sharing"
+        },
+        {
+          "text": "Multi Range Read",
+          "link": "/rules/database-specific/multi-range-read"
+        },
+        {
+          "text": "Multikey Index Bounds",
+          "link": "/rules/database-specific/multikey-index-bounds"
+        },
+        {
+          "text": "Neo4j Apply Strategy Selection",
+          "link": "/rules/database-specific/neo4j-apply-strategy-selection"
+        },
+        {
+          "text": "Neo4j Label Scan Optimization",
+          "link": "/rules/database-specific/neo4j-label-scan-optimization"
+        },
+        {
+          "text": "Neo4j Merge Cardinality",
+          "link": "/rules/database-specific/neo4j-merge-cardinality"
+        },
+        {
+          "text": "Neo4j Pattern Reorder",
+          "link": "/rules/database-specific/neo4j-pattern-reorder"
+        },
+        {
+          "text": "Neo4j Predicate Pushdown",
+          "link": "/rules/database-specific/neo4j-predicate-pushdown"
+        },
+        {
+          "text": "Neo4j Property Projection Pruning",
+          "link": "/rules/database-specific/neo4j-property-projection-pruning"
+        },
+        {
+          "text": "Neo4j Relationship Index Scan",
+          "link": "/rules/database-specific/neo4j-relationship-index-scan"
+        },
+        {
+          "text": "Nested Loop Join",
+          "link": "/rules/database-specific/nested-loop-join"
+        },
+        {
+          "text": "Node Count From Store",
+          "link": "/rules/database-specific/node-count-from-store"
+        },
+        {
+          "text": "Nonnull Requirements",
+          "link": "/rules/database-specific/nonnull-requirements"
+        },
+        {
+          "text": "Normal Projection Rewrite",
+          "link": "/rules/database-specific/normal-projection-rewrite"
+        },
+        {
+          "text": "Normal Projection Usage",
+          "link": "/rules/database-specific/normal-projection-usage"
+        },
+        {
+          "text": "Not Exists To Antijoin",
+          "link": "/rules/database-specific/not-exists-to-antijoin"
+        },
+        {
+          "text": "Optimistic Cursor",
+          "link": "/rules/database-specific/optimistic-cursor"
+        },
+        {
+          "text": "Optimize Join To Semi",
+          "link": "/rules/database-specific/optimize-join-to-semi"
+        },
+        {
+          "text": "Optional Match To Anti Semi Apply",
+          "link": "/rules/database-specific/optional-match-to-anti-semi-apply"
+        },
+        {
+          "text": "Or Expansion",
+          "link": "/rules/database-specific/or-expansion"
+        },
+        {
+          "text": "Order By Optimization",
+          "link": "/rules/database-specific/order-by-optimization"
+        },
+        {
+          "text": "Ordered Index Scan",
+          "link": "/rules/database-specific/ordered-index-scan"
+        },
+        {
+          "text": "Outer Join Elimination",
+          "link": "/rules/database-specific/outer-join-elimination"
+        },
+        {
+          "text": "Outer Join To Inner",
+          "link": "/rules/database-specific/outer-join-to-inner"
+        },
+        {
+          "text": "Outer To Inner Join Conversion",
+          "link": "/rules/database-specific/outer-to-inner-join-conversion"
+        },
+        {
+          "text": "Outer To Inner Join",
+          "link": "/rules/database-specific/outer-to-inner-join"
+        },
+        {
+          "text": "Parallel Execution",
+          "link": "/rules/database-specific/parallel-execution"
+        },
+        {
+          "text": "Parameter Sniffing",
+          "link": "/rules/database-specific/parameter-sniffing"
+        },
+        {
+          "text": "Parquet Predicate Pushdown",
+          "link": "/rules/database-specific/parquet-predicate-pushdown"
+        },
+        {
+          "text": "Partial Index Selection",
+          "link": "/rules/database-specific/partial-index-selection"
+        },
+        {
+          "text": "Partition Elimination",
+          "link": "/rules/database-specific/partition-elimination"
+        },
+        {
+          "text": "Partition Independent Aggregation",
+          "link": "/rules/database-specific/partition-independent-aggregation"
+        },
+        {
+          "text": "Partition Pruning",
+          "link": "/rules/database-specific/partition-pruning"
+        },
+        {
+          "text": "Partitioned Hash Group",
+          "link": "/rules/database-specific/partitioned-hash-group"
+        },
+        {
+          "text": "Pattern Comprehension Optimization",
+          "link": "/rules/database-specific/pattern-comprehension-optimization"
+        },
+        {
+          "text": "Pipeline Breaking Optimization",
+          "link": "/rules/database-specific/pipeline-breaking-optimization"
+        },
+        {
+          "text": "Pipeline Stage Reordering",
+          "link": "/rules/database-specific/pipeline-stage-reordering"
+        },
+        {
+          "text": "Predicate Move Around",
+          "link": "/rules/database-specific/predicate-move-around"
+        },
+        {
+          "text": "Predicate Push Down Shard Index",
+          "link": "/rules/database-specific/predicate-push-down-shard-index"
+        },
+        {
+          "text": "Predicate Pushdown Computed",
+          "link": "/rules/database-specific/predicate-pushdown-computed"
+        },
+        {
+          "text": "Predicate Pushdown Through Join",
+          "link": "/rules/database-specific/predicate-pushdown-through-join"
+        },
+        {
+          "text": "Predicate Pushdown With Dynamic Filtering",
+          "link": "/rules/database-specific/predicate-pushdown-with-dynamic-filtering"
+        },
+        {
+          "text": "Predicate Pushdown",
+          "link": "/rules/database-specific/predicate-pushdown"
+        },
+        {
+          "text": "Prewhere Filter Pushdown",
+          "link": "/rules/database-specific/prewhere-filter-pushdown"
+        },
+        {
+          "text": "Prewhere Pushdown",
+          "link": "/rules/database-specific/prewhere-pushdown"
+        },
+        {
+          "text": "Primary Key Condition Limit",
+          "link": "/rules/database-specific/primary-key-condition-limit"
+        },
+        {
+          "text": "Project Correlate Transpose",
+          "link": "/rules/database-specific/project-correlate-transpose"
+        },
+        {
+          "text": "Project Merge",
+          "link": "/rules/database-specific/project-merge"
+        },
+        {
+          "text": "Project Remove",
+          "link": "/rules/database-specific/project-remove"
+        },
+        {
+          "text": "Project Set Op Transpose",
+          "link": "/rules/database-specific/project-set-op-transpose"
+        },
+        {
+          "text": "Project To Calc",
+          "link": "/rules/database-specific/project-to-calc"
+        },
+        {
+          "text": "Project To Window",
+          "link": "/rules/database-specific/project-to-window"
+        },
+        {
+          "text": "Project Window Transpose",
+          "link": "/rules/database-specific/project-window-transpose"
+        },
+        {
+          "text": "Projection Pushdown",
+          "link": "/rules/database-specific/projection-pushdown"
+        },
+        {
+          "text": "Propagate Empty Relation",
+          "link": "/rules/database-specific/propagate-empty-relation"
+        },
+        {
+          "text": "Property Index Seek",
+          "link": "/rules/database-specific/property-index-seek"
+        },
+        {
+          "text": "Push Limit Into Project Scan",
+          "link": "/rules/database-specific/push-limit-into-project-scan"
+        },
+        {
+          "text": "Push Limit Into Scan",
+          "link": "/rules/database-specific/push-limit-into-scan"
+        },
+        {
+          "text": "Query Store Forced Plan",
+          "link": "/rules/database-specific/query-store-forced-plan"
+        },
+        {
+          "text": "Range Select",
+          "link": "/rules/database-specific/range-select"
+        },
+        {
+          "text": "Read In Order Sort Elimination",
+          "link": "/rules/database-specific/read-in-order-sort-elimination"
+        },
+        {
+          "text": "Read In Order",
+          "link": "/rules/database-specific/read-in-order"
+        },
+        {
+          "text": "Reduce Elision",
+          "link": "/rules/database-specific/reduce-elision"
+        },
+        {
+          "text": "Reduce Expressions",
+          "link": "/rules/database-specific/reduce-expressions"
+        },
+        {
+          "text": "Reduce Reduction",
+          "link": "/rules/database-specific/reduce-reduction"
+        },
+        {
+          "text": "Redundant Sort Removal",
+          "link": "/rules/database-specific/redundant-sort-removal"
+        },
+        {
+          "text": "Relationship Index Usage",
+          "link": "/rules/database-specific/relationship-index-usage"
+        },
+        {
+          "text": "Relationship Type Filtering",
+          "link": "/rules/database-specific/relationship-type-filtering"
+        },
+        {
+          "text": "Remove Redundant Distinct",
+          "link": "/rules/database-specific/remove-redundant-distinct"
+        },
+        {
+          "text": "Remove Redundant Sorting",
+          "link": "/rules/database-specific/remove-redundant-sorting"
+        },
+        {
+          "text": "Reorder Joins",
+          "link": "/rules/database-specific/reorder-joins"
+        },
+        {
+          "text": "Repartition Insertion",
+          "link": "/rules/database-specific/repartition-insertion"
+        },
+        {
+          "text": "Replace Distinct Aggregate",
+          "link": "/rules/database-specific/replace-distinct-aggregate"
+        },
+        {
+          "text": "Replace Min With Limit",
+          "link": "/rules/database-specific/replace-min-with-limit"
+        },
+        {
+          "text": "Replicated Table Optimization",
+          "link": "/rules/database-specific/replicated-table-optimization"
+        },
+        {
+          "text": "Result Cache",
+          "link": "/rules/database-specific/result-cache"
+        },
+        {
+          "text": "Retract Optimization",
+          "link": "/rules/database-specific/retract-optimization"
+        },
+        {
+          "text": "Run Length Encoding",
+          "link": "/rules/database-specific/run-length-encoding"
+        },
+        {
+          "text": "Runtime Filter Generation",
+          "link": "/rules/database-specific/runtime-filter-generation"
+        },
+        {
+          "text": "Runtime Filter Join",
+          "link": "/rules/database-specific/runtime-filter-join"
+        },
+        {
+          "text": "Runtime Filter Propagation",
+          "link": "/rules/database-specific/runtime-filter-propagation"
+        },
+        {
+          "text": "Runtime Join Filter",
+          "link": "/rules/database-specific/runtime-join-filter"
+        },
+        {
+          "text": "Sbe Slot Based Execution",
+          "link": "/rules/database-specific/sbe-slot-based-execution"
+        },
+        {
+          "text": "Scalar Min Max To Limit",
+          "link": "/rules/database-specific/scalar-min-max-to-limit"
+        },
+        {
+          "text": "Scalar Min Max To Subqueries",
+          "link": "/rules/database-specific/scalar-min-max-to-subqueries"
+        },
+        {
+          "text": "Scalar Subquery To Join",
+          "link": "/rules/database-specific/scalar-subquery-to-join"
+        },
+        {
+          "text": "Schema Discovery Pushdown",
+          "link": "/rules/database-specific/schema-discovery-pushdown"
+        },
+        {
+          "text": "Schema Versioning",
+          "link": "/rules/database-specific/schema-versioning"
+        },
+        {
+          "text": "Scroll Insensitive Optimization",
+          "link": "/rules/database-specific/scroll-insensitive-optimization"
+        },
+        {
+          "text": "Seek Predicate Optimization",
+          "link": "/rules/database-specific/seek-predicate-optimization"
+        },
+        {
+          "text": "Semi Join Filter Transpose",
+          "link": "/rules/database-specific/semi-join-filter-transpose"
+        },
+        {
+          "text": "Semi Join Rewrite",
+          "link": "/rules/database-specific/semi-join-rewrite"
+        },
+        {
+          "text": "Semi Join Strategies",
+          "link": "/rules/database-specific/semi-join-strategies"
+        },
+        {
+          "text": "Semi Join To Inner With Distinct",
+          "link": "/rules/database-specific/semi-join-to-inner-with-distinct"
+        },
+        {
+          "text": "Sharded Aggregation Optimization",
+          "link": "/rules/database-specific/sharded-aggregation-optimization"
+        },
+        {
+          "text": "Shortest Path Dijkstra",
+          "link": "/rules/database-specific/shortest-path-dijkstra"
+        },
+        {
+          "text": "Simd Vectorized Selection",
+          "link": "/rules/database-specific/simd-vectorized-selection"
+        },
+        {
+          "text": "Simplify Expressions",
+          "link": "/rules/database-specific/simplify-expressions"
+        },
+        {
+          "text": "Single Distinct To Groupby",
+          "link": "/rules/database-specific/single-distinct-to-groupby"
+        },
+        {
+          "text": "Single Partition Optimization",
+          "link": "/rules/database-specific/single-partition-optimization"
+        },
+        {
+          "text": "Sink Projection Pushdown",
+          "link": "/rules/database-specific/sink-projection-pushdown"
+        },
+        {
+          "text": "Skew Distinct Agg Rewrite",
+          "link": "/rules/database-specific/skew-distinct-agg-rewrite"
+        },
+        {
+          "text": "Skip Scan",
+          "link": "/rules/database-specific/skip-scan"
+        },
+        {
+          "text": "Sort Avoidance",
+          "link": "/rules/database-specific/sort-avoidance"
+        },
+        {
+          "text": "Sort Join Transpose",
+          "link": "/rules/database-specific/sort-join-transpose"
+        },
+        {
+          "text": "Sort Project Transpose",
+          "link": "/rules/database-specific/sort-project-transpose"
+        },
+        {
+          "text": "Sort Remove Duplicate Keys",
+          "link": "/rules/database-specific/sort-remove-duplicate-keys"
+        },
+        {
+          "text": "Sort Remove",
+          "link": "/rules/database-specific/sort-remove"
+        },
+        {
+          "text": "Sort Union Transpose",
+          "link": "/rules/database-specific/sort-union-transpose"
+        },
+        {
+          "text": "Sparse Index Granule Pruning",
+          "link": "/rules/database-specific/sparse-index-granule-pruning"
+        },
+        {
+          "text": "Sparse Index Skip",
+          "link": "/rules/database-specific/sparse-index-skip"
+        },
+        {
+          "text": "Split Disjunction Join To Union",
+          "link": "/rules/database-specific/split-disjunction-join-to-union"
+        },
+        {
+          "text": "Split Filter",
+          "link": "/rules/database-specific/split-filter"
+        },
+        {
+          "text": "Spool Optimization",
+          "link": "/rules/database-specific/spool-optimization"
+        },
+        {
+          "text": "Star Join Optimization",
+          "link": "/rules/database-specific/star-join-optimization"
+        },
+        {
+          "text": "Star Transformation",
+          "link": "/rules/database-specific/star-transformation"
+        },
+        {
+          "text": "Stochastic Cracking",
+          "link": "/rules/database-specific/stochastic-cracking"
+        },
+        {
+          "text": "Stream Table Join Temporal",
+          "link": "/rules/database-specific/stream-table-join-temporal"
+        },
+        {
+          "text": "Strimps String Filter",
+          "link": "/rules/database-specific/strimps-string-filter"
+        },
+        {
+          "text": "String Heap Optimization",
+          "link": "/rules/database-specific/string-heap-optimization"
+        },
+        {
+          "text": "Sub Query Remove",
+          "link": "/rules/database-specific/sub-query-remove"
+        },
+        {
+          "text": "Subquery Materialization",
+          "link": "/rules/database-specific/subquery-materialization"
+        },
+        {
+          "text": "Subquery To Apply",
+          "link": "/rules/database-specific/subquery-to-apply"
+        },
+        {
+          "text": "Table Expansion",
+          "link": "/rules/database-specific/table-expansion"
+        },
+        {
+          "text": "Table Lock Escalation",
+          "link": "/rules/database-specific/table-lock-escalation"
+        },
+        {
+          "text": "Tail Ordering",
+          "link": "/rules/database-specific/tail-ordering"
+        },
+        {
+          "text": "Temporal Filter Pushdown",
+          "link": "/rules/database-specific/temporal-filter-pushdown"
+        },
+        {
+          "text": "Text Search Index",
+          "link": "/rules/database-specific/text-search-index"
+        },
+        {
+          "text": "Threshold Elision",
+          "link": "/rules/database-specific/threshold-elision"
+        },
+        {
+          "text": "Tidb Aggregate Elimination",
+          "link": "/rules/database-specific/tidb-aggregate-elimination"
+        },
+        {
+          "text": "Tidb Column Pruning",
+          "link": "/rules/database-specific/tidb-column-pruning"
+        },
+        {
+          "text": "Tidb Distinct Elimination",
+          "link": "/rules/database-specific/tidb-distinct-elimination"
+        },
+        {
+          "text": "Tidb Join Reorder",
+          "link": "/rules/database-specific/tidb-join-reorder"
+        },
+        {
+          "text": "Tidb Limit Pushdown",
+          "link": "/rules/database-specific/tidb-limit-pushdown"
+        },
+        {
+          "text": "Tidb Max Min To Index Seek",
+          "link": "/rules/database-specific/tidb-max-min-to-index-seek"
+        },
+        {
+          "text": "Tidb Outer Join Elimination",
+          "link": "/rules/database-specific/tidb-outer-join-elimination"
+        },
+        {
+          "text": "Tidb Predicate Pushdown",
+          "link": "/rules/database-specific/tidb-predicate-pushdown"
+        },
+        {
+          "text": "Tidb Semi Anti Join To Inner",
+          "link": "/rules/database-specific/tidb-semi-anti-join-to-inner"
+        },
+        {
+          "text": "Tidb Top N Pushdown",
+          "link": "/rules/database-specific/tidb-top-n-pushdown"
+        },
+        {
+          "text": "Time Bucket Aggregation",
+          "link": "/rules/database-specific/time-bucket-aggregation"
+        },
+        {
+          "text": "Time Window Aggregation",
+          "link": "/rules/database-specific/time-window-aggregation"
+        },
+        {
+          "text": "Topk Monotonic",
+          "link": "/rules/database-specific/topk-monotonic"
+        },
+        {
+          "text": "Topk Optimization",
+          "link": "/rules/database-specific/topk-optimization"
+        },
+        {
+          "text": "Topk Sort Optimization",
+          "link": "/rules/database-specific/topk-sort-optimization"
+        },
+        {
+          "text": "Topn Push Down",
+          "link": "/rules/database-specific/topn-push-down"
+        },
+        {
+          "text": "Transitive Closure",
+          "link": "/rules/database-specific/transitive-closure"
+        },
+        {
+          "text": "Trivial Plan",
+          "link": "/rules/database-specific/trivial-plan"
+        },
+        {
+          "text": "Type Coercion",
+          "link": "/rules/database-specific/type-coercion"
+        },
+        {
+          "text": "Union All Optimization",
+          "link": "/rules/database-specific/union-all-optimization"
+        },
+        {
+          "text": "Union Eliminator",
+          "link": "/rules/database-specific/union-eliminator"
+        },
+        {
+          "text": "Union Merge",
+          "link": "/rules/database-specific/union-merge"
+        },
+        {
+          "text": "Union Pull Up Constants",
+          "link": "/rules/database-specific/union-pull-up-constants"
+        },
+        {
+          "text": "Use Data Parallel Aggregation",
+          "link": "/rules/database-specific/use-data-parallel-aggregation"
+        },
+        {
+          "text": "Values Reduce",
+          "link": "/rules/database-specific/values-reduce"
+        },
+        {
+          "text": "Variable Length Path Expansion",
+          "link": "/rules/database-specific/variable-length-path-expansion"
+        },
+        {
+          "text": "Vectorized Interpretation",
+          "link": "/rules/database-specific/vectorized-interpretation"
+        },
+        {
+          "text": "View Flattening",
+          "link": "/rules/database-specific/view-flattening"
+        },
+        {
+          "text": "View Merging",
+          "link": "/rules/database-specific/view-merging"
+        },
+        {
+          "text": "Watermark Propagation",
+          "link": "/rules/database-specific/watermark-propagation"
+        },
+        {
+          "text": "Watermark Pushdown",
+          "link": "/rules/database-specific/watermark-pushdown"
+        },
+        {
+          "text": "Wildcard Index Planning",
+          "link": "/rules/database-specific/wildcard-index-planning"
+        },
+        {
+          "text": "Window Aggregate Pushdown",
+          "link": "/rules/database-specific/window-aggregate-pushdown"
+        },
+        {
+          "text": "Window Aggregation Optimization",
+          "link": "/rules/database-specific/window-aggregation-optimization"
+        },
+        {
+          "text": "Window Function Optimization",
+          "link": "/rules/database-specific/window-function-optimization"
+        },
+        {
+          "text": "Zone Map Scan Skipping",
+          "link": "/rules/database-specific/zone-map-scan-skipping"
+        },
+        {
+          "text": "Zonemap Pruning",
+          "link": "/rules/database-specific/zonemap-pruning"
+        },
+        {
+          "text": "Zonemap Skipping",
+          "link": "/rules/database-specific/zonemap-skipping"
+        }
+      ]
+    },
+    {
+      "text": "Distributed",
+      "collapsed": true,
+      "items": [
+        {
+          "text": "Adaptive Two To Three Phase",
+          "link": "/rules/distributed/adaptive-two-to-three-phase"
+        },
+        {
+          "text": "Agg Pushdown Before Broadcast",
+          "link": "/rules/distributed/agg-pushdown-before-broadcast"
+        },
+        {
+          "text": "Agg Pushdown Before Hash Shuffle",
+          "link": "/rules/distributed/agg-pushdown-before-hash-shuffle"
+        },
+        {
+          "text": "Agg Pushdown Before Range Shuffle",
+          "link": "/rules/distributed/agg-pushdown-before-range-shuffle"
+        },
+        {
+          "text": "Asymmetric Repartition Join",
+          "link": "/rules/distributed/asymmetric-repartition-join"
+        },
+        {
+          "text": "Avoid Cross Datacenter Broadcast",
+          "link": "/rules/distributed/avoid-cross-datacenter-broadcast"
+        },
+        {
+          "text": "Avoid Cross Datacenter Shuffle",
+          "link": "/rules/distributed/avoid-cross-datacenter-shuffle"
+        },
+        {
+          "text": "Bloom Filter Pushdown",
+          "link": "/rules/distributed/bloom-filter-pushdown"
+        },
+        {
+          "text": "Broadcast Join",
+          "link": "/rules/distributed/broadcast-join"
+        },
+        {
+          "text": "Broadcast Small Table Join",
+          "link": "/rules/distributed/broadcast-small-table-join"
+        },
+        {
+          "text": "Choose Exchange Type",
+          "link": "/rules/distributed/choose-exchange-type"
+        },
+        {
+          "text": "Co Located Join",
+          "link": "/rules/distributed/co-located-join"
+        },
+        {
+          "text": "Colocated Agg Elimination",
+          "link": "/rules/distributed/colocated-agg-elimination"
+        },
+        {
+          "text": "Colocated Join",
+          "link": "/rules/distributed/colocated-join"
+        },
+        {
+          "text": "Colocation Aware Join",
+          "link": "/rules/distributed/colocation-aware-join"
+        },
+        {
+          "text": "Colocation Aware Placement",
+          "link": "/rules/distributed/colocation-aware-placement"
+        },
+        {
+          "text": "Coprocessor Filter Agg Pushdown",
+          "link": "/rules/distributed/coprocessor-filter-agg-pushdown"
+        },
+        {
+          "text": "Distribute Operator",
+          "link": "/rules/distributed/distribute-operator"
+        },
+        {
+          "text": "Distributed Distinct Count Bitmap",
+          "link": "/rules/distributed/distributed-distinct-count-bitmap"
+        },
+        {
+          "text": "Distributed Distinct Count Cms",
+          "link": "/rules/distributed/distributed-distinct-count-cms"
+        },
+        {
+          "text": "Distributed Distinct Count Exact",
+          "link": "/rules/distributed/distributed-distinct-count-exact"
+        },
+        {
+          "text": "Distributed Distinct Count Hll",
+          "link": "/rules/distributed/distributed-distinct-count-hll"
+        },
+        {
+          "text": "Distributed Subquery Decorrelation",
+          "link": "/rules/distributed/distributed-subquery-decorrelation"
+        },
+        {
+          "text": "Distributed Topn Push To Scan",
+          "link": "/rules/distributed/distributed-topn-push-to-scan"
+        },
+        {
+          "text": "Distributed Topn",
+          "link": "/rules/distributed/distributed-topn"
+        },
+        {
+          "text": "Distributed Window Function",
+          "link": "/rules/distributed/distributed-window-function"
+        },
+        {
+          "text": "Dynamic Filter From Join",
+          "link": "/rules/distributed/dynamic-filter-from-join"
+        },
+        {
+          "text": "Dynamic Partition Count Match",
+          "link": "/rules/distributed/dynamic-partition-count-match"
+        },
+        {
+          "text": "Dynamic Partition Count Scale Down",
+          "link": "/rules/distributed/dynamic-partition-count-scale-down"
+        },
+        {
+          "text": "Dynamic Partition Count Scale Up",
+          "link": "/rules/distributed/dynamic-partition-count-scale-up"
+        },
+        {
+          "text": "Dynamic Partition Pruning",
+          "link": "/rules/distributed/dynamic-partition-pruning"
+        },
+        {
+          "text": "Eliminate Index Join Inside Group By",
+          "link": "/rules/distributed/eliminate-index-join-inside-group-by"
+        },
+        {
+          "text": "Filter Before Exchange",
+          "link": "/rules/distributed/filter-before-exchange"
+        },
+        {
+          "text": "Filter Through Broadcast",
+          "link": "/rules/distributed/filter-through-broadcast"
+        },
+        {
+          "text": "Filter To Remote Scan",
+          "link": "/rules/distributed/filter-to-remote-scan"
+        },
+        {
+          "text": "Follower Read Optimization",
+          "link": "/rules/distributed/follower-read-optimization"
+        },
+        {
+          "text": "Global Agg Single Node",
+          "link": "/rules/distributed/global-agg-single-node"
+        },
+        {
+          "text": "Hoist Project From Join",
+          "link": "/rules/distributed/hoist-project-from-join"
+        },
+        {
+          "text": "Insert Exchange",
+          "link": "/rules/distributed/insert-exchange"
+        },
+        {
+          "text": "Inverted Index Join",
+          "link": "/rules/distributed/inverted-index-join"
+        },
+        {
+          "text": "Limit Before Exchange",
+          "link": "/rules/distributed/limit-before-exchange"
+        },
+        {
+          "text": "Locality Aware Region Affinity",
+          "link": "/rules/distributed/locality-aware-region-affinity"
+        },
+        {
+          "text": "Locality Aware Same Datacenter",
+          "link": "/rules/distributed/locality-aware-same-datacenter"
+        },
+        {
+          "text": "Locality Aware Same Rack",
+          "link": "/rules/distributed/locality-aware-same-rack"
+        },
+        {
+          "text": "Locality Optimized Anti Join",
+          "link": "/rules/distributed/locality-optimized-anti-join"
+        },
+        {
+          "text": "Locality Optimized Lookup Join",
+          "link": "/rules/distributed/locality-optimized-lookup-join"
+        },
+        {
+          "text": "Locality Optimized Scan",
+          "link": "/rules/distributed/locality-optimized-scan"
+        },
+        {
+          "text": "Locality Optimized Search Of Join",
+          "link": "/rules/distributed/locality-optimized-search-of-join"
+        },
+        {
+          "text": "Lookup Join",
+          "link": "/rules/distributed/lookup-join"
+        },
+        {
+          "text": "Merge Adjacent Exchanges",
+          "link": "/rules/distributed/merge-adjacent-exchanges"
+        },
+        {
+          "text": "Merge Join Generation",
+          "link": "/rules/distributed/merge-join-generation"
+        },
+        {
+          "text": "Merge Sort Gather",
+          "link": "/rules/distributed/merge-sort-gather"
+        },
+        {
+          "text": "Min Max To Limit",
+          "link": "/rules/distributed/min-max-to-limit"
+        },
+        {
+          "text": "Minimize Network Transfer",
+          "link": "/rules/distributed/minimize-network-transfer"
+        },
+        {
+          "text": "Minimize Stage Count",
+          "link": "/rules/distributed/minimize-stage-count"
+        },
+        {
+          "text": "Multi Join Colocation",
+          "link": "/rules/distributed/multi-join-colocation"
+        },
+        {
+          "text": "Partition Key Colocation",
+          "link": "/rules/distributed/partition-key-colocation"
+        },
+        {
+          "text": "Partition Pruning Filter",
+          "link": "/rules/distributed/partition-pruning-filter"
+        },
+        {
+          "text": "Partition Wise Aggregate Then Join",
+          "link": "/rules/distributed/partition-wise-aggregate-then-join"
+        },
+        {
+          "text": "Partition Wise Aggregate",
+          "link": "/rules/distributed/partition-wise-aggregate"
+        },
+        {
+          "text": "Partition Wise Hash Join",
+          "link": "/rules/distributed/partition-wise-hash-join"
+        },
+        {
+          "text": "Partition Wise Join",
+          "link": "/rules/distributed/partition-wise-join"
+        },
+        {
+          "text": "Partition Wise Multi Join",
+          "link": "/rules/distributed/partition-wise-multi-join"
+        },
+        {
+          "text": "Partition Wise Repartition One",
+          "link": "/rules/distributed/partition-wise-repartition-one"
+        },
+        {
+          "text": "Partition Wise Union Join",
+          "link": "/rules/distributed/partition-wise-union-join"
+        },
+        {
+          "text": "Pipeline Stages",
+          "link": "/rules/distributed/pipeline-stages"
+        },
+        {
+          "text": "Pre Aggregation Distinct Elimination",
+          "link": "/rules/distributed/pre-aggregation-distinct-elimination"
+        },
+        {
+          "text": "Pre Aggregation Filter Pushdown",
+          "link": "/rules/distributed/pre-aggregation-filter-pushdown"
+        },
+        {
+          "text": "Pre Aggregation Join Reorder",
+          "link": "/rules/distributed/pre-aggregation-join-reorder"
+        },
+        {
+          "text": "Pre Aggregation Limit Pushdown",
+          "link": "/rules/distributed/pre-aggregation-limit-pushdown"
+        },
+        {
+          "text": "Pre Aggregation Projection Pushdown",
+          "link": "/rules/distributed/pre-aggregation-projection-pushdown"
+        },
+        {
+          "text": "Predicate Routing To Single Node",
+          "link": "/rules/distributed/predicate-routing-to-single-node"
+        },
+        {
+          "text": "Predicate Through Shuffle",
+          "link": "/rules/distributed/predicate-through-shuffle"
+        },
+        {
+          "text": "Prefer Broadcast After Filter",
+          "link": "/rules/distributed/prefer-broadcast-after-filter"
+        },
+        {
+          "text": "Prefer Broadcast Nested Loop",
+          "link": "/rules/distributed/prefer-broadcast-nested-loop"
+        },
+        {
+          "text": "Prefer Broadcast Replicated Table",
+          "link": "/rules/distributed/prefer-broadcast-replicated-table"
+        },
+        {
+          "text": "Prefer Broadcast Size Ratio",
+          "link": "/rules/distributed/prefer-broadcast-size-ratio"
+        },
+        {
+          "text": "Project Before Exchange",
+          "link": "/rules/distributed/project-before-exchange"
+        },
+        {
+          "text": "Push Filter Below Exchange",
+          "link": "/rules/distributed/push-filter-below-exchange"
+        },
+        {
+          "text": "Push Join Into Index Join",
+          "link": "/rules/distributed/push-join-into-index-join"
+        },
+        {
+          "text": "Push Limit Below Exchange",
+          "link": "/rules/distributed/push-limit-below-exchange"
+        },
+        {
+          "text": "Push Partial Agg Below Exchange",
+          "link": "/rules/distributed/push-partial-agg-below-exchange"
+        },
+        {
+          "text": "Push Predicate Through Join",
+          "link": "/rules/distributed/push-predicate-through-join"
+        },
+        {
+          "text": "Push Project Below Exchange",
+          "link": "/rules/distributed/push-project-below-exchange"
+        },
+        {
+          "text": "Raft Leader Colocation",
+          "link": "/rules/distributed/raft-leader-colocation"
+        },
+        {
+          "text": "Range Partition Pruning",
+          "link": "/rules/distributed/range-partition-pruning"
+        },
+        {
+          "text": "Read Committed Pushdown",
+          "link": "/rules/distributed/read-committed-pushdown"
+        },
+        {
+          "text": "Reference Table Colocation",
+          "link": "/rules/distributed/reference-table-colocation"
+        },
+        {
+          "text": "Reference Table Join",
+          "link": "/rules/distributed/reference-table-join"
+        },
+        {
+          "text": "Remove Redundant Exchange",
+          "link": "/rules/distributed/remove-redundant-exchange"
+        },
+        {
+          "text": "Semi Join Reduction",
+          "link": "/rules/distributed/semi-join-reduction"
+        },
+        {
+          "text": "Semi Join To Inner Join",
+          "link": "/rules/distributed/semi-join-to-inner-join"
+        },
+        {
+          "text": "Shuffle Both Sides Join",
+          "link": "/rules/distributed/shuffle-both-sides-join"
+        },
+        {
+          "text": "Shuffle Join",
+          "link": "/rules/distributed/shuffle-join"
+        },
+        {
+          "text": "Skew Aware Aggregation",
+          "link": "/rules/distributed/skew-aware-aggregation"
+        },
+        {
+          "text": "Skew Aware Histogram Guided",
+          "link": "/rules/distributed/skew-aware-histogram-guided"
+        },
+        {
+          "text": "Skew Aware Join",
+          "link": "/rules/distributed/skew-aware-join"
+        },
+        {
+          "text": "Skew Aware Runtime Detection",
+          "link": "/rules/distributed/skew-aware-runtime-detection"
+        },
+        {
+          "text": "Skew Aware Salted Partition",
+          "link": "/rules/distributed/skew-aware-salted-partition"
+        },
+        {
+          "text": "Skew Aware Split Hot Keys",
+          "link": "/rules/distributed/skew-aware-split-hot-keys"
+        },
+        {
+          "text": "Skew Salt Redistribute",
+          "link": "/rules/distributed/skew-salt-redistribute"
+        },
+        {
+          "text": "Split Disjunction Join",
+          "link": "/rules/distributed/split-disjunction-join"
+        },
+        {
+          "text": "Stage Decomposition",
+          "link": "/rules/distributed/stage-decomposition"
+        },
+        {
+          "text": "Static Partition Pruning",
+          "link": "/rules/distributed/static-partition-pruning"
+        },
+        {
+          "text": "Streaming Group By",
+          "link": "/rules/distributed/streaming-group-by"
+        },
+        {
+          "text": "Three Phase Distinct Agg",
+          "link": "/rules/distributed/three-phase-distinct-agg"
+        },
+        {
+          "text": "Three Phase High Cardinality Count",
+          "link": "/rules/distributed/three-phase-high-cardinality-count"
+        },
+        {
+          "text": "Three Phase High Cardinality Mixed",
+          "link": "/rules/distributed/three-phase-high-cardinality-mixed"
+        },
+        {
+          "text": "Three Phase High Cardinality Sum",
+          "link": "/rules/distributed/three-phase-high-cardinality-sum"
+        },
+        {
+          "text": "Tiflash Mpp Pushdown",
+          "link": "/rules/distributed/tiflash-mpp-pushdown"
+        },
+        {
+          "text": "Two Phase Aggregation",
+          "link": "/rules/distributed/two-phase-aggregation"
+        },
+        {
+          "text": "Two Phase Avg Desugaring",
+          "link": "/rules/distributed/two-phase-avg-desugaring"
+        },
+        {
+          "text": "Two Phase Count Star",
+          "link": "/rules/distributed/two-phase-count-star"
+        },
+        {
+          "text": "Two Phase Decomposable Agg",
+          "link": "/rules/distributed/two-phase-decomposable-agg"
+        },
+        {
+          "text": "Two Phase Min Max",
+          "link": "/rules/distributed/two-phase-min-max"
+        },
+        {
+          "text": "Two Phase Sum Overflow Safe",
+          "link": "/rules/distributed/two-phase-sum-overflow-safe"
+        },
+        {
+          "text": "Union All Pushdown",
+          "link": "/rules/distributed/union-all-pushdown"
+        },
+        {
+          "text": "Zigzag Join",
+          "link": "/rules/distributed/zigzag-join"
+        }
+      ]
+    },
+    {
+      "text": "Execution Models",
+      "collapsed": true,
+      "items": [
+        {
+          "text": "Adaptive Aggregation Switching",
+          "link": "/rules/execution-models/adaptive-aggregation-switching"
+        },
+        {
+          "text": "Adaptive Batch Sizing",
+          "link": "/rules/execution-models/adaptive-batch-sizing"
+        },
+        {
+          "text": "Adaptive Bloom Filter",
+          "link": "/rules/execution-models/adaptive-bloom-filter"
+        },
+        {
+          "text": "Adaptive Index Routing",
+          "link": "/rules/execution-models/adaptive-index-routing"
+        },
+        {
+          "text": "Adaptive Indexing",
+          "link": "/rules/execution-models/adaptive-indexing"
+        },
+        {
+          "text": "Adaptive Join Selection",
+          "link": "/rules/execution-models/adaptive-join-selection"
+        },
+        {
+          "text": "Adaptive Memory Grant",
+          "link": "/rules/execution-models/adaptive-memory-grant"
+        },
+        {
+          "text": "Adaptive Parallelism Scaling",
+          "link": "/rules/execution-models/adaptive-parallelism-scaling"
+        },
+        {
+          "text": "Adaptive Query Reoptimization",
+          "link": "/rules/execution-models/adaptive-query-reoptimization"
+        },
+        {
+          "text": "Adaptive Skew Handling",
+          "link": "/rules/execution-models/adaptive-skew-handling"
+        },
+        {
+          "text": "Adaptive Sort Strategy",
+          "link": "/rules/execution-models/adaptive-sort-strategy"
+        },
+        {
+          "text": "Adaptive Spill Strategy",
+          "link": "/rules/execution-models/adaptive-spill-strategy"
+        },
+        {
+          "text": "Approximate Query Processing",
+          "link": "/rules/execution-models/approximate-query-processing"
+        },
+        {
+          "text": "Cascades Memo",
+          "link": "/rules/execution-models/cascades-memo"
+        },
+        {
+          "text": "Column Adaptive Execution",
+          "link": "/rules/execution-models/column-adaptive-execution"
+        },
+        {
+          "text": "Column Aggregate",
+          "link": "/rules/execution-models/column-aggregate"
+        },
+        {
+          "text": "Column Batch Processing",
+          "link": "/rules/execution-models/column-batch-processing"
+        },
+        {
+          "text": "Column Cache Conscious",
+          "link": "/rules/execution-models/column-cache-conscious"
+        },
+        {
+          "text": "Column Chunk Sizing",
+          "link": "/rules/execution-models/column-chunk-sizing"
+        },
+        {
+          "text": "Column Compression Aware",
+          "link": "/rules/execution-models/column-compression-aware"
+        },
+        {
+          "text": "Column Compression",
+          "link": "/rules/execution-models/column-compression"
+        },
+        {
+          "text": "Column Decomposed Storage",
+          "link": "/rules/execution-models/column-decomposed-storage"
+        },
+        {
+          "text": "Column Filter",
+          "link": "/rules/execution-models/column-filter"
+        },
+        {
+          "text": "Column Hash Join",
+          "link": "/rules/execution-models/column-hash-join"
+        },
+        {
+          "text": "Column Late Materialization",
+          "link": "/rules/execution-models/column-late-materialization"
+        },
+        {
+          "text": "Column Late Tuple Reconstruction",
+          "link": "/rules/execution-models/column-late-tuple-reconstruction"
+        },
+        {
+          "text": "Column Materialization",
+          "link": "/rules/execution-models/column-materialization"
+        },
+        {
+          "text": "Column Multi Operation",
+          "link": "/rules/execution-models/column-multi-operation"
+        },
+        {
+          "text": "Column Projection",
+          "link": "/rules/execution-models/column-projection"
+        },
+        {
+          "text": "Column Scan",
+          "link": "/rules/execution-models/column-scan"
+        },
+        {
+          "text": "Column Selection Pushdown",
+          "link": "/rules/execution-models/column-selection-pushdown"
+        },
+        {
+          "text": "Column String Swar",
+          "link": "/rules/execution-models/column-string-swar"
+        },
+        {
+          "text": "Column Vectorized Expression",
+          "link": "/rules/execution-models/column-vectorized-expression"
+        },
+        {
+          "text": "Column Vectorized Ops",
+          "link": "/rules/execution-models/column-vectorized-ops"
+        },
+        {
+          "text": "Compilation To Native",
+          "link": "/rules/execution-models/compilation-to-native"
+        },
+        {
+          "text": "Differential Arrangement",
+          "link": "/rules/execution-models/differential-arrangement"
+        },
+        {
+          "text": "Differential Changelog",
+          "link": "/rules/execution-models/differential-changelog"
+        },
+        {
+          "text": "Differential Collection Operators",
+          "link": "/rules/execution-models/differential-collection-operators"
+        },
+        {
+          "text": "Differential Consolidation",
+          "link": "/rules/execution-models/differential-consolidation"
+        },
+        {
+          "text": "Differential Delta Query",
+          "link": "/rules/execution-models/differential-delta-query"
+        },
+        {
+          "text": "Differential Frontier Advancement",
+          "link": "/rules/execution-models/differential-frontier-advancement"
+        },
+        {
+          "text": "Differential Incremental Aggregation",
+          "link": "/rules/execution-models/differential-incremental-aggregation"
+        },
+        {
+          "text": "Differential Incremental Join",
+          "link": "/rules/execution-models/differential-incremental-join"
+        },
+        {
+          "text": "Differential Incremental View",
+          "link": "/rules/execution-models/differential-incremental-view"
+        },
+        {
+          "text": "Differential Late Data",
+          "link": "/rules/execution-models/differential-late-data"
+        },
+        {
+          "text": "Differential Monotonic Topk",
+          "link": "/rules/execution-models/differential-monotonic-topk"
+        },
+        {
+          "text": "Differential Retraction Handling",
+          "link": "/rules/execution-models/differential-retraction-handling"
+        },
+        {
+          "text": "Differential State Management",
+          "link": "/rules/execution-models/differential-state-management"
+        },
+        {
+          "text": "Differential Stream Aggregate",
+          "link": "/rules/execution-models/differential-stream-aggregate"
+        },
+        {
+          "text": "Differential Stream Join",
+          "link": "/rules/execution-models/differential-stream-join"
+        },
+        {
+          "text": "Differential Time Aware Operators",
+          "link": "/rules/execution-models/differential-time-aware-operators"
+        },
+        {
+          "text": "Differential Timely Dataflow",
+          "link": "/rules/execution-models/differential-timely-dataflow"
+        },
+        {
+          "text": "Differential Watermark",
+          "link": "/rules/execution-models/differential-watermark"
+        },
+        {
+          "text": "Dynamic Pipeline Optimization",
+          "link": "/rules/execution-models/dynamic-pipeline-optimization"
+        },
+        {
+          "text": "Eddy Adaptive Execution",
+          "link": "/rules/execution-models/eddy-adaptive-execution"
+        },
+        {
+          "text": "Gpu Offloading",
+          "link": "/rules/execution-models/gpu-offloading"
+        },
+        {
+          "text": "Learned Cost Models",
+          "link": "/rules/execution-models/learned-cost-models"
+        },
+        {
+          "text": "Ml Cardinality Estimation",
+          "link": "/rules/execution-models/ml-cardinality-estimation"
+        },
+        {
+          "text": "Morsel Cache Locality",
+          "link": "/rules/execution-models/morsel-cache-locality"
+        },
+        {
+          "text": "Morsel Driven Adaptive Sizing",
+          "link": "/rules/execution-models/morsel-driven-adaptive-sizing"
+        },
+        {
+          "text": "Morsel Driven Aggregate",
+          "link": "/rules/execution-models/morsel-driven-aggregate"
+        },
+        {
+          "text": "Morsel Driven Hash Join",
+          "link": "/rules/execution-models/morsel-driven-hash-join"
+        },
+        {
+          "text": "Morsel Driven Lock Free",
+          "link": "/rules/execution-models/morsel-driven-lock-free"
+        },
+        {
+          "text": "Morsel Driven Numa Aware",
+          "link": "/rules/execution-models/morsel-driven-numa-aware"
+        },
+        {
+          "text": "Morsel Driven Parallelism",
+          "link": "/rules/execution-models/morsel-driven-parallelism"
+        },
+        {
+          "text": "Morsel Driven Pipeline",
+          "link": "/rules/execution-models/morsel-driven-pipeline"
+        },
+        {
+          "text": "Morsel Driven Scan",
+          "link": "/rules/execution-models/morsel-driven-scan"
+        },
+        {
+          "text": "Morsel Driven Sort",
+          "link": "/rules/execution-models/morsel-driven-sort"
+        },
+        {
+          "text": "Morsel Driven Work Stealing",
+          "link": "/rules/execution-models/morsel-driven-work-stealing"
+        },
+        {
+          "text": "Morsel Memory Management",
+          "link": "/rules/execution-models/morsel-memory-management"
+        },
+        {
+          "text": "Morsel Pipeline Breakers",
+          "link": "/rules/execution-models/morsel-pipeline-breakers"
+        },
+        {
+          "text": "Operator Fusion",
+          "link": "/rules/execution-models/operator-fusion"
+        },
+        {
+          "text": "Progressive Sampling",
+          "link": "/rules/execution-models/progressive-sampling"
+        },
+        {
+          "text": "Push Based Adaptive Compilation",
+          "link": "/rules/execution-models/push-based-adaptive-compilation"
+        },
+        {
+          "text": "Push Based Aggregate",
+          "link": "/rules/execution-models/push-based-aggregate"
+        },
+        {
+          "text": "Push Based Code Generation",
+          "link": "/rules/execution-models/push-based-code-generation"
+        },
+        {
+          "text": "Push Based Expression Fusion",
+          "link": "/rules/execution-models/push-based-expression-fusion"
+        },
+        {
+          "text": "Push Based Filter",
+          "link": "/rules/execution-models/push-based-filter"
+        },
+        {
+          "text": "Push Based Hash Join",
+          "link": "/rules/execution-models/push-based-hash-join"
+        },
+        {
+          "text": "Push Based Llvm Codegen",
+          "link": "/rules/execution-models/push-based-llvm-codegen"
+        },
+        {
+          "text": "Push Based Loop Fusion",
+          "link": "/rules/execution-models/push-based-loop-fusion"
+        },
+        {
+          "text": "Push Based Pipeline",
+          "link": "/rules/execution-models/push-based-pipeline"
+        },
+        {
+          "text": "Push Based Scan",
+          "link": "/rules/execution-models/push-based-scan"
+        },
+        {
+          "text": "Quantum Inspired Optimization",
+          "link": "/rules/execution-models/quantum-inspired-optimization"
+        },
+        {
+          "text": "Query Compilation Jit",
+          "link": "/rules/execution-models/query-compilation-jit"
+        },
+        {
+          "text": "Query Feedback Loop",
+          "link": "/rules/execution-models/query-feedback-loop"
+        },
+        {
+          "text": "Retraction Optimization",
+          "link": "/rules/execution-models/retraction-optimization"
+        },
+        {
+          "text": "Rl Join Ordering",
+          "link": "/rules/execution-models/rl-join-ordering"
+        },
+        {
+          "text": "Stream Join Optimization",
+          "link": "/rules/execution-models/stream-join-optimization"
+        },
+        {
+          "text": "Stream Table Join",
+          "link": "/rules/execution-models/stream-table-join"
+        },
+        {
+          "text": "Vectorized Adaptive Batching",
+          "link": "/rules/execution-models/vectorized-adaptive-batching"
+        },
+        {
+          "text": "Vectorized Aggregate",
+          "link": "/rules/execution-models/vectorized-aggregate"
+        },
+        {
+          "text": "Vectorized Compression",
+          "link": "/rules/execution-models/vectorized-compression"
+        },
+        {
+          "text": "Vectorized Execution",
+          "link": "/rules/execution-models/vectorized-execution"
+        },
+        {
+          "text": "Vectorized Expression Eval",
+          "link": "/rules/execution-models/vectorized-expression-eval"
+        },
+        {
+          "text": "Vectorized Filter",
+          "link": "/rules/execution-models/vectorized-filter"
+        },
+        {
+          "text": "Vectorized Hash Join",
+          "link": "/rules/execution-models/vectorized-hash-join"
+        },
+        {
+          "text": "Vectorized Predicate Pushdown",
+          "link": "/rules/execution-models/vectorized-predicate-pushdown"
+        },
+        {
+          "text": "Vectorized Prewhere Chain",
+          "link": "/rules/execution-models/vectorized-prewhere-chain"
+        },
+        {
+          "text": "Vectorized Projection",
+          "link": "/rules/execution-models/vectorized-projection"
+        },
+        {
+          "text": "Vectorized Scan",
+          "link": "/rules/execution-models/vectorized-scan"
+        },
+        {
+          "text": "Vectorized Sort",
+          "link": "/rules/execution-models/vectorized-sort"
+        },
+        {
+          "text": "Vectorized Topk Filter",
+          "link": "/rules/execution-models/vectorized-topk-filter"
+        },
+        {
+          "text": "Volcano Aggregate",
+          "link": "/rules/execution-models/volcano-aggregate"
+        },
+        {
+          "text": "Volcano Exchange Operator",
+          "link": "/rules/execution-models/volcano-exchange-operator"
+        },
+        {
+          "text": "Volcano Filter",
+          "link": "/rules/execution-models/volcano-filter"
+        },
+        {
+          "text": "Volcano Hash Join",
+          "link": "/rules/execution-models/volcano-hash-join"
+        },
+        {
+          "text": "Volcano Iterator Fusion",
+          "link": "/rules/execution-models/volcano-iterator-fusion"
+        },
+        {
+          "text": "Volcano Iterator Protocol",
+          "link": "/rules/execution-models/volcano-iterator-protocol"
+        },
+        {
+          "text": "Volcano Iterator",
+          "link": "/rules/execution-models/volcano-iterator"
+        },
+        {
+          "text": "Volcano Limit",
+          "link": "/rules/execution-models/volcano-limit"
+        },
+        {
+          "text": "Volcano Memory Management",
+          "link": "/rules/execution-models/volcano-memory-management"
+        },
+        {
+          "text": "Volcano Nested Loop Join",
+          "link": "/rules/execution-models/volcano-nested-loop-join"
+        },
+        {
+          "text": "Volcano Pipeline Breakers",
+          "link": "/rules/execution-models/volcano-pipeline-breakers"
+        },
+        {
+          "text": "Volcano Projection",
+          "link": "/rules/execution-models/volcano-projection"
+        },
+        {
+          "text": "Volcano Scan",
+          "link": "/rules/execution-models/volcano-scan"
+        },
+        {
+          "text": "Volcano Sort",
+          "link": "/rules/execution-models/volcano-sort"
+        },
+        {
+          "text": "Volcano Subquery Execution",
+          "link": "/rules/execution-models/volcano-subquery-execution"
+        },
+        {
+          "text": "Volcano Tuple Materialization",
+          "link": "/rules/execution-models/volcano-tuple-materialization"
+        },
+        {
+          "text": "Volcano Union",
+          "link": "/rules/execution-models/volcano-union"
+        },
+        {
+          "text": "Watermark Propagation",
+          "link": "/rules/execution-models/watermark-propagation"
+        },
+        {
+          "text": "Window Aggregate Optimization",
+          "link": "/rules/execution-models/window-aggregate-optimization"
+        },
+        {
+          "text": "Window Over Stream",
+          "link": "/rules/execution-models/window-over-stream"
+        }
+      ]
+    },
+    {
+      "text": "Experimental",
+      "collapsed": true,
+      "items": [
+        {
+          "text": "Adaptive Aggregation",
+          "link": "/rules/experimental/adaptive-aggregation"
+        },
+        {
+          "text": "Adaptive Indexing",
+          "link": "/rules/experimental/adaptive-indexing"
+        },
+        {
+          "text": "Adaptive Join Selection",
+          "link": "/rules/experimental/adaptive-join-selection"
+        },
+        {
+          "text": "Approximate Count Distinct",
+          "link": "/rules/experimental/approximate-count-distinct"
+        },
+        {
+          "text": "Approximate Percentile",
+          "link": "/rules/experimental/approximate-percentile"
+        },
+        {
+          "text": "Approximate Query Processing",
+          "link": "/rules/experimental/approximate-query-processing"
+        },
+        {
+          "text": "Commutativity Aware Rewriting",
+          "link": "/rules/experimental/commutativity-aware-rewriting"
+        },
+        {
+          "text": "Compilation Cost Tradeoff",
+          "link": "/rules/experimental/compilation-cost-tradeoff"
+        },
+        {
+          "text": "Constraint Based Rewriting",
+          "link": "/rules/experimental/constraint-based-rewriting"
+        },
+        {
+          "text": "Delta Wcoj",
+          "link": "/rules/experimental/delta-wcoj"
+        },
+        {
+          "text": "Eddies Routing",
+          "link": "/rules/experimental/eddies-routing"
+        },
+        {
+          "text": "Eddy Operator",
+          "link": "/rules/experimental/eddy-operator"
+        },
+        {
+          "text": "Egg Extraction Strategies",
+          "link": "/rules/experimental/egg-extraction-strategies"
+        },
+        {
+          "text": "Equality Saturation",
+          "link": "/rules/experimental/equality-saturation"
+        },
+        {
+          "text": "Factorized Join",
+          "link": "/rules/experimental/factorized-join"
+        },
+        {
+          "text": "Fpga Query Acceleration",
+          "link": "/rules/experimental/fpga-query-acceleration"
+        },
+        {
+          "text": "Free Join",
+          "link": "/rules/experimental/free-join"
+        },
+        {
+          "text": "Functional Dependency Rewrite",
+          "link": "/rules/experimental/functional-dependency-rewrite"
+        },
+        {
+          "text": "Generic Join",
+          "link": "/rules/experimental/generic-join"
+        },
+        {
+          "text": "Gpu Offloading",
+          "link": "/rules/experimental/gpu-offloading"
+        },
+        {
+          "text": "Honeycomb Join",
+          "link": "/rules/experimental/honeycomb-join"
+        },
+        {
+          "text": "Hottsql Proof Rewrite",
+          "link": "/rules/experimental/hottsql-proof-rewrite"
+        },
+        {
+          "text": "Leapfrog Triejoin",
+          "link": "/rules/experimental/leapfrog-triejoin"
+        },
+        {
+          "text": "Learned Cardinality",
+          "link": "/rules/experimental/learned-cardinality"
+        },
+        {
+          "text": "Learned Cost Calibration",
+          "link": "/rules/experimental/learned-cost-calibration"
+        },
+        {
+          "text": "Learned Cost Models",
+          "link": "/rules/experimental/learned-cost-models"
+        },
+        {
+          "text": "Learned Index Structures",
+          "link": "/rules/experimental/learned-index-structures"
+        },
+        {
+          "text": "Learned Join Ordering",
+          "link": "/rules/experimental/learned-join-ordering"
+        },
+        {
+          "text": "Learned Query Scheduling",
+          "link": "/rules/experimental/learned-query-scheduling"
+        },
+        {
+          "text": "Leo Statistics Feedback",
+          "link": "/rules/experimental/leo-statistics-feedback"
+        },
+        {
+          "text": "Level Headed Join",
+          "link": "/rules/experimental/level-headed-join"
+        },
+        {
+          "text": "Mid Query Reoptimization",
+          "link": "/rules/experimental/mid-query-reoptimization"
+        },
+        {
+          "text": "Mid Query Replanning",
+          "link": "/rules/experimental/mid-query-replanning"
+        },
+        {
+          "text": "Ml Cardinality Estimation",
+          "link": "/rules/experimental/ml-cardinality-estimation"
+        },
+        {
+          "text": "Parametric Query Optimization",
+          "link": "/rules/experimental/parametric-query-optimization"
+        },
+        {
+          "text": "Plan Hint Generation",
+          "link": "/rules/experimental/plan-hint-generation"
+        },
+        {
+          "text": "Plan Stability Control",
+          "link": "/rules/experimental/plan-stability-control"
+        },
+        {
+          "text": "Progressive Optimization",
+          "link": "/rules/experimental/progressive-optimization"
+        },
+        {
+          "text": "Quantum Inspired Optimization",
+          "link": "/rules/experimental/quantum-inspired-optimization"
+        },
+        {
+          "text": "Query Compilation Jit",
+          "link": "/rules/experimental/query-compilation-jit"
+        },
+        {
+          "text": "Query Embedding Similarity",
+          "link": "/rules/experimental/query-embedding-similarity"
+        },
+        {
+          "text": "Query Result Caching",
+          "link": "/rules/experimental/query-result-caching"
+        },
+        {
+          "text": "Ripple Join",
+          "link": "/rules/experimental/ripple-join"
+        },
+        {
+          "text": "Rl Join Ordering",
+          "link": "/rules/experimental/rl-join-ordering"
+        },
+        {
+          "text": "Robust Query Optimization",
+          "link": "/rules/experimental/robust-query-optimization"
+        },
+        {
+          "text": "Runtime Cardinality Feedback",
+          "link": "/rules/experimental/runtime-cardinality-feedback"
+        },
+        {
+          "text": "Runtime Plan Switching",
+          "link": "/rules/experimental/runtime-plan-switching"
+        },
+        {
+          "text": "Sample Based Aggregation",
+          "link": "/rules/experimental/sample-based-aggregation"
+        },
+        {
+          "text": "Sample Based Join",
+          "link": "/rules/experimental/sample-based-join"
+        },
+        {
+          "text": "Semijoin Reduction",
+          "link": "/rules/experimental/semijoin-reduction"
+        },
+        {
+          "text": "Sketches For Aggregation",
+          "link": "/rules/experimental/sketches-for-aggregation"
+        },
+        {
+          "text": "Vectorized Vs Compiled",
+          "link": "/rules/experimental/vectorized-vs-compiled"
+        },
+        {
+          "text": "Wcoj Clique Detection",
+          "link": "/rules/experimental/wcoj-clique-detection"
+        },
+        {
+          "text": "Wcoj Star Pattern",
+          "link": "/rules/experimental/wcoj-star-pattern"
+        },
+        {
+          "text": "Wcoj To Binary Fallback",
+          "link": "/rules/experimental/wcoj-to-binary-fallback"
+        },
+        {
+          "text": "Workload Aware Indexing",
+          "link": "/rules/experimental/workload-aware-indexing"
+        }
+      ]
+    },
+    {
+      "text": "Federated",
+      "collapsed": true,
+      "items": [
+        {
+          "text": "Aggregate Pushdown Remote Avg",
+          "link": "/rules/federated/aggregate-pushdown-remote-avg"
+        },
+        {
+          "text": "Aggregate Pushdown Remote Count",
+          "link": "/rules/federated/aggregate-pushdown-remote-count"
+        },
+        {
+          "text": "Aggregate Pushdown Remote Distinct Count",
+          "link": "/rules/federated/aggregate-pushdown-remote-distinct-count"
+        },
+        {
+          "text": "Aggregate Pushdown Remote Group By",
+          "link": "/rules/federated/aggregate-pushdown-remote-group-by"
+        },
+        {
+          "text": "Aggregate Pushdown Remote Having",
+          "link": "/rules/federated/aggregate-pushdown-remote-having"
+        },
+        {
+          "text": "Aggregate Pushdown Remote Min Max",
+          "link": "/rules/federated/aggregate-pushdown-remote-min-max"
+        },
+        {
+          "text": "Aggregate Pushdown Remote Multi Stage",
+          "link": "/rules/federated/aggregate-pushdown-remote-multi-stage"
+        },
+        {
+          "text": "Aggregate Pushdown Remote Sum",
+          "link": "/rules/federated/aggregate-pushdown-remote-sum"
+        },
+        {
+          "text": "Filter Pushdown Remote",
+          "link": "/rules/federated/filter-pushdown-remote"
+        },
+        {
+          "text": "Join Pushdown Remote Bind Join",
+          "link": "/rules/federated/join-pushdown-remote-bind-join"
+        },
+        {
+          "text": "Join Pushdown Remote Colocated",
+          "link": "/rules/federated/join-pushdown-remote-colocated"
+        },
+        {
+          "text": "Join Pushdown Remote Hash Partition",
+          "link": "/rules/federated/join-pushdown-remote-hash-partition"
+        },
+        {
+          "text": "Join Pushdown Remote Semi Join",
+          "link": "/rules/federated/join-pushdown-remote-semi-join"
+        },
+        {
+          "text": "Prefer Data Shipping Complex Query",
+          "link": "/rules/federated/prefer-data-shipping-complex-query"
+        },
+        {
+          "text": "Prefer Data Shipping Cross Site Join",
+          "link": "/rules/federated/prefer-data-shipping-cross-site-join"
+        },
+        {
+          "text": "Prefer Data Shipping Small Table",
+          "link": "/rules/federated/prefer-data-shipping-small-table"
+        },
+        {
+          "text": "Prefer Query Shipping High Selectivity",
+          "link": "/rules/federated/prefer-query-shipping-high-selectivity"
+        },
+        {
+          "text": "Prefer Query Shipping Limit",
+          "link": "/rules/federated/prefer-query-shipping-limit"
+        },
+        {
+          "text": "Prefer Query Shipping Small Result",
+          "link": "/rules/federated/prefer-query-shipping-small-result"
+        },
+        {
+          "text": "Projection Pushdown Remote Computed Columns",
+          "link": "/rules/federated/projection-pushdown-remote-computed-columns"
+        },
+        {
+          "text": "Projection Pushdown Remote Join Columns",
+          "link": "/rules/federated/projection-pushdown-remote-join-columns"
+        },
+        {
+          "text": "Projection Pushdown Remote Select Columns",
+          "link": "/rules/federated/projection-pushdown-remote-select-columns"
+        },
+        {
+          "text": "Projection Pushdown Remote Star Elimination",
+          "link": "/rules/federated/projection-pushdown-remote-star-elimination"
+        },
+        {
+          "text": "Projection Pushdown Remote With Filter",
+          "link": "/rules/federated/projection-pushdown-remote-with-filter"
+        }
+      ]
+    },
+    {
+      "text": "Hardware",
+      "collapsed": true,
+      "items": [
+        {
+          "text": "Cache Conscious Partitioning",
+          "link": "/rules/hardware/cache-conscious-partitioning"
+        },
+        {
+          "text": "Columnar Conversion",
+          "link": "/rules/hardware/columnar-conversion"
+        },
+        {
+          "text": "Device Memory Caching",
+          "link": "/rules/hardware/device-memory-caching"
+        },
+        {
+          "text": "Fpga Compression Scan",
+          "link": "/rules/hardware/fpga-compression-scan"
+        },
+        {
+          "text": "Fpga Hash Join",
+          "link": "/rules/hardware/fpga-hash-join"
+        },
+        {
+          "text": "Fpga Regex Filter",
+          "link": "/rules/hardware/fpga-regex-filter"
+        },
+        {
+          "text": "Fpga Stream Filter",
+          "link": "/rules/hardware/fpga-stream-filter"
+        },
+        {
+          "text": "Gpu Aggregation",
+          "link": "/rules/hardware/gpu-aggregation"
+        },
+        {
+          "text": "Gpu Distinct Aggregation",
+          "link": "/rules/hardware/gpu-distinct-aggregation"
+        },
+        {
+          "text": "Gpu Hash Join",
+          "link": "/rules/hardware/gpu-hash-join"
+        },
+        {
+          "text": "Gpu Parallel Scan",
+          "link": "/rules/hardware/gpu-parallel-scan"
+        },
+        {
+          "text": "Gpu Predicate Evaluation",
+          "link": "/rules/hardware/gpu-predicate-evaluation"
+        },
+        {
+          "text": "Gpu Sort",
+          "link": "/rules/hardware/gpu-sort"
+        },
+        {
+          "text": "Gpu String Operations",
+          "link": "/rules/hardware/gpu-string-operations"
+        },
+        {
+          "text": "Gpu Window Function",
+          "link": "/rules/hardware/gpu-window-function"
+        },
+        {
+          "text": "Heterogeneous Operator Placement",
+          "link": "/rules/hardware/heterogeneous-operator-placement"
+        },
+        {
+          "text": "Host To Device Transfer",
+          "link": "/rules/hardware/host-to-device-transfer"
+        },
+        {
+          "text": "Numa Aware Partitioning",
+          "link": "/rules/hardware/numa-aware-partitioning"
+        },
+        {
+          "text": "Prefetch Aware Join",
+          "link": "/rules/hardware/prefetch-aware-join"
+        },
+        {
+          "text": "Simd Vectorized Scan",
+          "link": "/rules/hardware/simd-vectorized-scan"
+        },
+        {
+          "text": "Unified Memory Management",
+          "link": "/rules/hardware/unified-memory-management"
+        }
+      ]
+    },
+    {
+      "text": "Logical",
+      "collapsed": true,
+      "items": [
+        {
+          "text": "Aggregate Case To Filter",
+          "link": "/rules/logical/aggregate-case-to-filter"
+        },
+        {
+          "text": "Aggregate Distinct Optimization",
+          "link": "/rules/logical/aggregate-distinct-optimization"
+        },
+        {
+          "text": "Aggregate Expand Distinct Aggregates",
+          "link": "/rules/logical/aggregate-expand-distinct-aggregates"
+        },
+        {
+          "text": "Aggregate Extract Project",
+          "link": "/rules/logical/aggregate-extract-project"
+        },
+        {
+          "text": "Aggregate Filter To Case",
+          "link": "/rules/logical/aggregate-filter-to-case"
+        },
+        {
+          "text": "Aggregate Filter To Filtered Agg",
+          "link": "/rules/logical/aggregate-filter-to-filtered-agg"
+        },
+        {
+          "text": "Aggregate Filter To Filtered Aggregate",
+          "link": "/rules/logical/aggregate-filter-to-filtered-aggregate"
+        },
+        {
+          "text": "Aggregate Filter Transpose",
+          "link": "/rules/logical/aggregate-filter-transpose"
+        },
+        {
+          "text": "Aggregate Function Decomposition",
+          "link": "/rules/logical/aggregate-function-decomposition"
+        },
+        {
+          "text": "Aggregate Function Simplification",
+          "link": "/rules/logical/aggregate-function-simplification"
+        },
+        {
+          "text": "Aggregate Grouping Sets To Union",
+          "link": "/rules/logical/aggregate-grouping-sets-to-union"
+        },
+        {
+          "text": "Aggregate Join Join Remove",
+          "link": "/rules/logical/aggregate-join-join-remove"
+        },
+        {
+          "text": "Aggregate Join Remove",
+          "link": "/rules/logical/aggregate-join-remove"
+        },
+        {
+          "text": "Aggregate Merge",
+          "link": "/rules/logical/aggregate-merge"
+        },
+        {
+          "text": "Aggregate Min Max To Limit",
+          "link": "/rules/logical/aggregate-min-max-to-limit"
+        },
+        {
+          "text": "Aggregate Over Aggregate Fusion",
+          "link": "/rules/logical/aggregate-over-aggregate-fusion"
+        },
+        {
+          "text": "Aggregate Project Merge",
+          "link": "/rules/logical/aggregate-project-merge"
+        },
+        {
+          "text": "Aggregate Project Pull Up Constants",
+          "link": "/rules/logical/aggregate-project-pull-up-constants"
+        },
+        {
+          "text": "Aggregate Reduce Functions",
+          "link": "/rules/logical/aggregate-reduce-functions"
+        },
+        {
+          "text": "Aggregate Selectivity Estimation",
+          "link": "/rules/logical/aggregate-selectivity-estimation"
+        },
+        {
+          "text": "Aggregate Through Union",
+          "link": "/rules/logical/aggregate-through-union"
+        },
+        {
+          "text": "Aggregate Union Aggregate",
+          "link": "/rules/logical/aggregate-union-aggregate"
+        },
+        {
+          "text": "Aggregate Union Transpose",
+          "link": "/rules/logical/aggregate-union-transpose"
+        },
+        {
+          "text": "Aggregate Values",
+          "link": "/rules/logical/aggregate-values"
+        },
+        {
+          "text": "Aggregate With Constant Elimination",
+          "link": "/rules/logical/aggregate-with-constant-elimination"
+        },
+        {
+          "text": "All To Aggregation",
+          "link": "/rules/logical/all-to-aggregation"
+        },
+        {
+          "text": "Anti Join Simplification",
+          "link": "/rules/logical/anti-join-simplification"
+        },
+        {
+          "text": "Anti Join To Not Exists",
+          "link": "/rules/logical/anti-join-to-not-exists"
+        },
+        {
+          "text": "Any To Semi Join",
+          "link": "/rules/logical/any-to-semi-join"
+        },
+        {
+          "text": "Apply To Join",
+          "link": "/rules/logical/apply-to-join"
+        },
+        {
+          "text": "Arithmetic Identity",
+          "link": "/rules/logical/arithmetic-identity"
+        },
+        {
+          "text": "Arithmetic Simplification",
+          "link": "/rules/logical/arithmetic-simplification"
+        },
+        {
+          "text": "Array Function Optimization",
+          "link": "/rules/logical/array-function-optimization"
+        },
+        {
+          "text": "Audit Predicate Injection",
+          "link": "/rules/logical/audit-predicate-injection"
+        },
+        {
+          "text": "Between To Range",
+          "link": "/rules/logical/between-to-range"
+        },
+        {
+          "text": "Bloom Filter Pushdown",
+          "link": "/rules/logical/bloom-filter-pushdown"
+        },
+        {
+          "text": "Boolean Simplification",
+          "link": "/rules/logical/boolean-simplification"
+        },
+        {
+          "text": "Calc Merge",
+          "link": "/rules/logical/calc-merge"
+        },
+        {
+          "text": "Calc Remove",
+          "link": "/rules/logical/calc-remove"
+        },
+        {
+          "text": "Calc Split",
+          "link": "/rules/logical/calc-split"
+        },
+        {
+          "text": "Cartesian To Join",
+          "link": "/rules/logical/cartesian-to-join"
+        },
+        {
+          "text": "Case Simplification",
+          "link": "/rules/logical/case-simplification"
+        },
+        {
+          "text": "Cast Elimination For Index",
+          "link": "/rules/logical/cast-elimination-for-index"
+        },
+        {
+          "text": "Cast Elimination",
+          "link": "/rules/logical/cast-elimination"
+        },
+        {
+          "text": "Chunk Exclusion",
+          "link": "/rules/logical/chunk-exclusion"
+        },
+        {
+          "text": "Coalesce Simplification",
+          "link": "/rules/logical/coalesce-simplification"
+        },
+        {
+          "text": "Codd Relational Completeness",
+          "link": "/rules/logical/codd-relational-completeness"
+        },
+        {
+          "text": "Collation Aware Index Use",
+          "link": "/rules/logical/collation-aware-index-use"
+        },
+        {
+          "text": "Column Level Security",
+          "link": "/rules/logical/column-level-security"
+        },
+        {
+          "text": "Column Masking Pushdown",
+          "link": "/rules/logical/column-masking-pushdown"
+        },
+        {
+          "text": "Column Pruning",
+          "link": "/rules/logical/column-pruning"
+        },
+        {
+          "text": "Common Rel Sub Expr Register",
+          "link": "/rules/logical/common-rel-sub-expr-register"
+        },
+        {
+          "text": "Common Subexpression Elimination",
+          "link": "/rules/logical/common-subexpression-elimination"
+        },
+        {
+          "text": "Community Detection Pushdown",
+          "link": "/rules/logical/community-detection-pushdown"
+        },
+        {
+          "text": "Comparison Normalization",
+          "link": "/rules/logical/comparison-normalization"
+        },
+        {
+          "text": "Constant Fold Aggregate",
+          "link": "/rules/logical/constant-fold-aggregate"
+        },
+        {
+          "text": "Constant Fold Cast",
+          "link": "/rules/logical/constant-fold-cast"
+        },
+        {
+          "text": "Constant Fold Comparison",
+          "link": "/rules/logical/constant-fold-comparison"
+        },
+        {
+          "text": "Constant Fold Conditional",
+          "link": "/rules/logical/constant-fold-conditional"
+        },
+        {
+          "text": "Constant Fold Datetime",
+          "link": "/rules/logical/constant-fold-datetime"
+        },
+        {
+          "text": "Constant Fold Logical",
+          "link": "/rules/logical/constant-fold-logical"
+        },
+        {
+          "text": "Constant Fold Math",
+          "link": "/rules/logical/constant-fold-math"
+        },
+        {
+          "text": "Constant Fold Nested",
+          "link": "/rules/logical/constant-fold-nested"
+        },
+        {
+          "text": "Constant Fold Null",
+          "link": "/rules/logical/constant-fold-null"
+        },
+        {
+          "text": "Constant Fold String",
+          "link": "/rules/logical/constant-fold-string"
+        },
+        {
+          "text": "Constant Folding",
+          "link": "/rules/logical/constant-folding"
+        },
+        {
+          "text": "Constant Function Folding",
+          "link": "/rules/logical/constant-function-folding"
+        },
+        {
+          "text": "Constraint Propagation",
+          "link": "/rules/logical/constraint-propagation"
+        },
+        {
+          "text": "Continuous Aggregate Rewriting",
+          "link": "/rules/logical/continuous-aggregate-rewriting"
+        },
+        {
+          "text": "Correlated Any To Semi Join",
+          "link": "/rules/logical/correlated-any-to-semi-join"
+        },
+        {
+          "text": "Correlated Subquery Decorrelation",
+          "link": "/rules/logical/correlated-subquery-decorrelation"
+        },
+        {
+          "text": "Count Star Optimization",
+          "link": "/rules/logical/count-star-optimization"
+        },
+        {
+          "text": "Cross Join Elimination",
+          "link": "/rules/logical/cross-join-elimination"
+        },
+        {
+          "text": "Cte Column Pruning",
+          "link": "/rules/logical/cte-column-pruning"
+        },
+        {
+          "text": "Cte Constant Folding",
+          "link": "/rules/logical/cte-constant-folding"
+        },
+        {
+          "text": "Cte Filter Pushdown Through Union",
+          "link": "/rules/logical/cte-filter-pushdown-through-union"
+        },
+        {
+          "text": "Cte Inline Vs Materialize",
+          "link": "/rules/logical/cte-inline-vs-materialize"
+        },
+        {
+          "text": "Cte Inlining",
+          "link": "/rules/logical/cte-inlining"
+        },
+        {
+          "text": "Cte Join Elimination",
+          "link": "/rules/logical/cte-join-elimination"
+        },
+        {
+          "text": "Cte Materialization",
+          "link": "/rules/logical/cte-materialization"
+        },
+        {
+          "text": "Cte Merge Duplicate",
+          "link": "/rules/logical/cte-merge-duplicate"
+        },
+        {
+          "text": "Cte Predicate Pushdown",
+          "link": "/rules/logical/cte-predicate-pushdown"
+        },
+        {
+          "text": "Cte Projection Pushdown",
+          "link": "/rules/logical/cte-projection-pushdown"
+        },
+        {
+          "text": "Cte To Temp Table",
+          "link": "/rules/logical/cte-to-temp-table"
+        },
+        {
+          "text": "Date Function Optimization",
+          "link": "/rules/logical/date-function-optimization"
+        },
+        {
+          "text": "Degenerate Join To Filter",
+          "link": "/rules/logical/degenerate-join-to-filter"
+        },
+        {
+          "text": "Delta Query Optimization",
+          "link": "/rules/logical/delta-query-optimization"
+        },
+        {
+          "text": "Demand Transformation",
+          "link": "/rules/logical/demand-transformation"
+        },
+        {
+          "text": "Deterministic Function Caching",
+          "link": "/rules/logical/deterministic-function-caching"
+        },
+        {
+          "text": "Deterministic Function Dedup",
+          "link": "/rules/logical/deterministic-function-dedup"
+        },
+        {
+          "text": "Distinct After Group By",
+          "link": "/rules/logical/distinct-after-group-by"
+        },
+        {
+          "text": "Distinct Filter Reorder",
+          "link": "/rules/logical/distinct-filter-reorder"
+        },
+        {
+          "text": "Distinct Limit Reorder",
+          "link": "/rules/logical/distinct-limit-reorder"
+        },
+        {
+          "text": "Distinct On Unique Key",
+          "link": "/rules/logical/distinct-on-unique-key"
+        },
+        {
+          "text": "Distinct Over Aggregation",
+          "link": "/rules/logical/distinct-over-aggregation"
+        },
+        {
+          "text": "Distinct Over Pk",
+          "link": "/rules/logical/distinct-over-pk"
+        },
+        {
+          "text": "Distinct Over Primary Key",
+          "link": "/rules/logical/distinct-over-primary-key"
+        },
+        {
+          "text": "Distinct Pushdown Through Join",
+          "link": "/rules/logical/distinct-pushdown-through-join"
+        },
+        {
+          "text": "Distinct Pushdown Through Union",
+          "link": "/rules/logical/distinct-pushdown-through-union"
+        },
+        {
+          "text": "Distinct Sort Merge",
+          "link": "/rules/logical/distinct-sort-merge"
+        },
+        {
+          "text": "Distinct To Group By",
+          "link": "/rules/logical/distinct-to-group-by"
+        },
+        {
+          "text": "Distinct To Limit One",
+          "link": "/rules/logical/distinct-to-limit-one"
+        },
+        {
+          "text": "Double Negation Elimination",
+          "link": "/rules/logical/double-negation-elimination"
+        },
+        {
+          "text": "Dphyp Join Reorder",
+          "link": "/rules/logical/dphyp-join-reorder"
+        },
+        {
+          "text": "Eager Aggregation",
+          "link": "/rules/logical/eager-aggregation"
+        },
+        {
+          "text": "Except To Anti Join",
+          "link": "/rules/logical/except-to-anti-join"
+        },
+        {
+          "text": "Exists To Semi Join",
+          "link": "/rules/logical/exists-to-semi-join"
+        },
+        {
+          "text": "Expand Disjunction For Join",
+          "link": "/rules/logical/expand-disjunction-for-join"
+        },
+        {
+          "text": "Expensive Function Above Join",
+          "link": "/rules/logical/expensive-function-above-join"
+        },
+        {
+          "text": "Expensive Function Caching",
+          "link": "/rules/logical/expensive-function-caching"
+        },
+        {
+          "text": "Expensive Function Late Eval",
+          "link": "/rules/logical/expensive-function-late-eval"
+        },
+        {
+          "text": "Expensive Predicate Ordering",
+          "link": "/rules/logical/expensive-predicate-ordering"
+        },
+        {
+          "text": "Expression Index Matching",
+          "link": "/rules/logical/expression-index-matching"
+        },
+        {
+          "text": "Expression Index Rewrite",
+          "link": "/rules/logical/expression-index-rewrite"
+        },
+        {
+          "text": "Filter Aggregate Transpose",
+          "link": "/rules/logical/filter-aggregate-transpose"
+        },
+        {
+          "text": "Filter Calc Merge",
+          "link": "/rules/logical/filter-calc-merge"
+        },
+        {
+          "text": "Filter Correlate",
+          "link": "/rules/logical/filter-correlate"
+        },
+        {
+          "text": "Filter Into Aggregate",
+          "link": "/rules/logical/filter-into-aggregate"
+        },
+        {
+          "text": "Filter Into Join Condition",
+          "link": "/rules/logical/filter-into-join-condition"
+        },
+        {
+          "text": "Filter Into Join",
+          "link": "/rules/logical/filter-into-join"
+        },
+        {
+          "text": "Filter Join Push",
+          "link": "/rules/logical/filter-join-push"
+        },
+        {
+          "text": "Filter Join",
+          "link": "/rules/logical/filter-join"
+        },
+        {
+          "text": "Filter Merge",
+          "link": "/rules/logical/filter-merge"
+        },
+        {
+          "text": "Filter Project Transpose",
+          "link": "/rules/logical/filter-project-transpose"
+        },
+        {
+          "text": "Filter Remove Is Not Distinct From",
+          "link": "/rules/logical/filter-remove-is-not-distinct-from"
+        },
+        {
+          "text": "Filter Set Op Transpose",
+          "link": "/rules/logical/filter-set-op-transpose"
+        },
+        {
+          "text": "Filter Sort Transpose",
+          "link": "/rules/logical/filter-sort-transpose"
+        },
+        {
+          "text": "Filter Table Function Transpose",
+          "link": "/rules/logical/filter-table-function-transpose"
+        },
+        {
+          "text": "Filter Table Scan",
+          "link": "/rules/logical/filter-table-scan"
+        },
+        {
+          "text": "Filter Through Join",
+          "link": "/rules/logical/filter-through-join"
+        },
+        {
+          "text": "Filter Through Project",
+          "link": "/rules/logical/filter-through-project"
+        },
+        {
+          "text": "Filter Through Union",
+          "link": "/rules/logical/filter-through-union"
+        },
+        {
+          "text": "Filter Window Transpose",
+          "link": "/rules/logical/filter-window-transpose"
+        },
+        {
+          "text": "Foreign Key Join Elimination",
+          "link": "/rules/logical/foreign-key-join-elimination"
+        },
+        {
+          "text": "Full To Left And Right Join",
+          "link": "/rules/logical/full-to-left-and-right-join"
+        },
+        {
+          "text": "Function Based Index Scan",
+          "link": "/rules/logical/function-based-index-scan"
+        },
+        {
+          "text": "Function Cost Reordering",
+          "link": "/rules/logical/function-cost-reordering"
+        },
+        {
+          "text": "Function Dependency Elimination",
+          "link": "/rules/logical/function-dependency-elimination"
+        },
+        {
+          "text": "Function Filter Pushdown",
+          "link": "/rules/logical/function-filter-pushdown"
+        },
+        {
+          "text": "Function Index Matching Composite",
+          "link": "/rules/logical/function-index-matching-composite"
+        },
+        {
+          "text": "Function Inlining",
+          "link": "/rules/logical/function-inlining"
+        },
+        {
+          "text": "Function Inverse Transform",
+          "link": "/rules/logical/function-inverse-transform"
+        },
+        {
+          "text": "Function Projection Pruning",
+          "link": "/rules/logical/function-projection-pruning"
+        },
+        {
+          "text": "Function Push Down",
+          "link": "/rules/logical/function-push-down"
+        },
+        {
+          "text": "Function Pushdown Past Aggregate",
+          "link": "/rules/logical/function-pushdown-past-aggregate"
+        },
+        {
+          "text": "Function Pushdown Past Join",
+          "link": "/rules/logical/function-pushdown-past-join"
+        },
+        {
+          "text": "Gap Fill Optimization",
+          "link": "/rules/logical/gap-fill-optimization"
+        },
+        {
+          "text": "Geospatial Function Optimization",
+          "link": "/rules/logical/geospatial-function-optimization"
+        },
+        {
+          "text": "Graph Index Exploitation",
+          "link": "/rules/logical/graph-index-exploitation"
+        },
+        {
+          "text": "Graph Pattern Matching",
+          "link": "/rules/logical/graph-pattern-matching"
+        },
+        {
+          "text": "Greatest Least Optimization",
+          "link": "/rules/logical/greatest-least-optimization"
+        },
+        {
+          "text": "Group By Pushdown Through Join",
+          "link": "/rules/logical/group-by-pushdown-through-join"
+        },
+        {
+          "text": "Having To Filter Separation",
+          "link": "/rules/logical/having-to-filter-separation"
+        },
+        {
+          "text": "Hint Guided Optimization",
+          "link": "/rules/logical/hint-guided-optimization"
+        },
+        {
+          "text": "Hottsql Proof Based",
+          "link": "/rules/logical/hottsql-proof-based"
+        },
+        {
+          "text": "If Null To Coalesce",
+          "link": "/rules/logical/if-null-to-coalesce"
+        },
+        {
+          "text": "Implicit Cast Index Match",
+          "link": "/rules/logical/implicit-cast-index-match"
+        },
+        {
+          "text": "In List Optimization",
+          "link": "/rules/logical/in-list-optimization"
+        },
+        {
+          "text": "In List To Values Join",
+          "link": "/rules/logical/in-list-to-values-join"
+        },
+        {
+          "text": "In Subquery To Semi Join",
+          "link": "/rules/logical/in-subquery-to-semi-join"
+        },
+        {
+          "text": "Incremental View Maintenance",
+          "link": "/rules/logical/incremental-view-maintenance"
+        },
+        {
+          "text": "Inner Join Identity Elimination",
+          "link": "/rules/logical/inner-join-identity-elimination"
+        },
+        {
+          "text": "Intersect Reorder",
+          "link": "/rules/logical/intersect-reorder"
+        },
+        {
+          "text": "Intersect To Distinct",
+          "link": "/rules/logical/intersect-to-distinct"
+        },
+        {
+          "text": "Intersect To Exists",
+          "link": "/rules/logical/intersect-to-exists"
+        },
+        {
+          "text": "Intersect To Join",
+          "link": "/rules/logical/intersect-to-join"
+        },
+        {
+          "text": "Intersect To Semi Join",
+          "link": "/rules/logical/intersect-to-semi-join"
+        },
+        {
+          "text": "Is Null Optimization",
+          "link": "/rules/logical/is-null-optimization"
+        },
+        {
+          "text": "Join Add Redundant Semi Join",
+          "link": "/rules/logical/join-add-redundant-semi-join"
+        },
+        {
+          "text": "Join Associate",
+          "link": "/rules/logical/join-associate"
+        },
+        {
+          "text": "Join Associativity",
+          "link": "/rules/logical/join-associativity"
+        },
+        {
+          "text": "Join Commutativity",
+          "link": "/rules/logical/join-commutativity"
+        },
+        {
+          "text": "Join Commute",
+          "link": "/rules/logical/join-commute"
+        },
+        {
+          "text": "Join Derive Is Not Null Filter",
+          "link": "/rules/logical/join-derive-is-not-null-filter"
+        },
+        {
+          "text": "Join Extract Filter",
+          "link": "/rules/logical/join-extract-filter"
+        },
+        {
+          "text": "Join Project Transpose",
+          "link": "/rules/logical/join-project-transpose"
+        },
+        {
+          "text": "Join Push Expressions",
+          "link": "/rules/logical/join-push-expressions"
+        },
+        {
+          "text": "Join Push Through Join",
+          "link": "/rules/logical/join-push-through-join"
+        },
+        {
+          "text": "Join Push Transitive Predicates",
+          "link": "/rules/logical/join-push-transitive-predicates"
+        },
+        {
+          "text": "Join To Correlate",
+          "link": "/rules/logical/join-to-correlate"
+        },
+        {
+          "text": "Join To Hyper Graph",
+          "link": "/rules/logical/join-to-hyper-graph"
+        },
+        {
+          "text": "Join Union Transpose",
+          "link": "/rules/logical/join-union-transpose"
+        },
+        {
+          "text": "Json Function Optimization",
+          "link": "/rules/logical/json-function-optimization"
+        },
+        {
+          "text": "Json Path Optimization",
+          "link": "/rules/logical/json-path-optimization"
+        },
+        {
+          "text": "Json Path Pushdown",
+          "link": "/rules/logical/json-path-pushdown"
+        },
+        {
+          "text": "Key Propagation For Join Elimination",
+          "link": "/rules/logical/key-propagation-for-join-elimination"
+        },
+        {
+          "text": "Label Based Access Control",
+          "link": "/rules/logical/label-based-access-control"
+        },
+        {
+          "text": "Last Point Optimization",
+          "link": "/rules/logical/last-point-optimization"
+        },
+        {
+          "text": "Lateral Join Decorrelation",
+          "link": "/rules/logical/lateral-join-decorrelation"
+        },
+        {
+          "text": "Learned Join Order",
+          "link": "/rules/logical/learned-join-order"
+        },
+        {
+          "text": "Left Deep To Bushy",
+          "link": "/rules/logical/left-deep-to-bushy"
+        },
+        {
+          "text": "Left Join Elimination",
+          "link": "/rules/logical/left-join-elimination"
+        },
+        {
+          "text": "Left Join Null Rejection",
+          "link": "/rules/logical/left-join-null-rejection"
+        },
+        {
+          "text": "Like To Range",
+          "link": "/rules/logical/like-to-range"
+        },
+        {
+          "text": "Limit Before Order By",
+          "link": "/rules/logical/limit-before-order-by"
+        },
+        {
+          "text": "Limit Join Pushdown",
+          "link": "/rules/logical/limit-join-pushdown"
+        },
+        {
+          "text": "Limit One To Exists",
+          "link": "/rules/logical/limit-one-to-exists"
+        },
+        {
+          "text": "Limit Through Aggregate",
+          "link": "/rules/logical/limit-through-aggregate"
+        },
+        {
+          "text": "Limit Through Projection",
+          "link": "/rules/logical/limit-through-projection"
+        },
+        {
+          "text": "Limit Through Union All",
+          "link": "/rules/logical/limit-through-union-all"
+        },
+        {
+          "text": "Limit With Top K Join",
+          "link": "/rules/logical/limit-with-top-k-join"
+        },
+        {
+          "text": "Magic Sets Adorned Predicates",
+          "link": "/rules/logical/magic-sets-adorned-predicates"
+        },
+        {
+          "text": "Magic Sets Adorned Program",
+          "link": "/rules/logical/magic-sets-adorned-program"
+        },
+        {
+          "text": "Magic Sets Rewriting",
+          "link": "/rules/logical/magic-sets-rewriting"
+        },
+        {
+          "text": "Magic Sets Sideways Passing",
+          "link": "/rules/logical/magic-sets-sideways-passing"
+        },
+        {
+          "text": "Magic Sets Supplementary Predicates",
+          "link": "/rules/logical/magic-sets-supplementary-predicates"
+        },
+        {
+          "text": "Mark To Semi Or Anti Join",
+          "link": "/rules/logical/mark-to-semi-or-anti-join"
+        },
+        {
+          "text": "Materialized View Join Rewriting",
+          "link": "/rules/logical/materialized-view-join-rewriting"
+        },
+        {
+          "text": "Materialized View Scan",
+          "link": "/rules/logical/materialized-view-scan"
+        },
+        {
+          "text": "Max 1 Row Subquery Check",
+          "link": "/rules/logical/max-1-row-subquery-check"
+        },
+        {
+          "text": "Min Max Index Scan",
+          "link": "/rules/logical/min-max-index-scan"
+        },
+        {
+          "text": "Minus To Anti Join",
+          "link": "/rules/logical/minus-to-anti-join"
+        },
+        {
+          "text": "Minus To Distinct",
+          "link": "/rules/logical/minus-to-distinct"
+        },
+        {
+          "text": "Multi Join Optimize Bushy",
+          "link": "/rules/logical/multi-join-optimize-bushy"
+        },
+        {
+          "text": "Mv Aggregate Rollup",
+          "link": "/rules/logical/mv-aggregate-rollup"
+        },
+        {
+          "text": "Mv Delta Maintenance",
+          "link": "/rules/logical/mv-delta-maintenance"
+        },
+        {
+          "text": "Mv Filter Compensation",
+          "link": "/rules/logical/mv-filter-compensation"
+        },
+        {
+          "text": "Mv Lattice Optimization",
+          "link": "/rules/logical/mv-lattice-optimization"
+        },
+        {
+          "text": "Mv Outer Join Rewriting",
+          "link": "/rules/logical/mv-outer-join-rewriting"
+        },
+        {
+          "text": "Mv Self Maintenance",
+          "link": "/rules/logical/mv-self-maintenance"
+        },
+        {
+          "text": "Mv Union Rewriting",
+          "link": "/rules/logical/mv-union-rewriting"
+        },
+        {
+          "text": "Not Exists To Anti Join",
+          "link": "/rules/logical/not-exists-to-anti-join"
+        },
+        {
+          "text": "Not In To Anti Join",
+          "link": "/rules/logical/not-in-to-anti-join"
+        },
+        {
+          "text": "Not Pushdown",
+          "link": "/rules/logical/not-pushdown"
+        },
+        {
+          "text": "Null Propagation",
+          "link": "/rules/logical/null-propagation"
+        },
+        {
+          "text": "Nullif Simplification",
+          "link": "/rules/logical/nullif-simplification"
+        },
+        {
+          "text": "Offset Zero Elimination",
+          "link": "/rules/logical/offset-zero-elimination"
+        },
+        {
+          "text": "Outer Join To Filter",
+          "link": "/rules/logical/outer-join-to-filter"
+        },
+        {
+          "text": "Outer Join To Inner",
+          "link": "/rules/logical/outer-join-to-inner"
+        },
+        {
+          "text": "Partial Aggregation Insertion",
+          "link": "/rules/logical/partial-aggregation-insertion"
+        },
+        {
+          "text": "Partial Index Predicate Match",
+          "link": "/rules/logical/partial-index-predicate-match"
+        },
+        {
+          "text": "Partition Pushdown",
+          "link": "/rules/logical/partition-pushdown"
+        },
+        {
+          "text": "Pattern Match Optimization",
+          "link": "/rules/logical/pattern-match-optimization"
+        },
+        {
+          "text": "Predicate Implication",
+          "link": "/rules/logical/predicate-implication"
+        },
+        {
+          "text": "Predicate Transfer",
+          "link": "/rules/logical/predicate-transfer"
+        },
+        {
+          "text": "Predicate Transitive Closure",
+          "link": "/rules/logical/predicate-transitive-closure"
+        },
+        {
+          "text": "Project Aggregate Merge",
+          "link": "/rules/logical/project-aggregate-merge"
+        },
+        {
+          "text": "Project Calc Merge",
+          "link": "/rules/logical/project-calc-merge"
+        },
+        {
+          "text": "Project Correlate Transpose",
+          "link": "/rules/logical/project-correlate-transpose"
+        },
+        {
+          "text": "Project Exchange Transpose",
+          "link": "/rules/logical/project-exchange-transpose"
+        },
+        {
+          "text": "Project Filter Transpose",
+          "link": "/rules/logical/project-filter-transpose"
+        },
+        {
+          "text": "Project Join Join Remove",
+          "link": "/rules/logical/project-join-join-remove"
+        },
+        {
+          "text": "Project Join Remove",
+          "link": "/rules/logical/project-join-remove"
+        },
+        {
+          "text": "Project Join Transpose",
+          "link": "/rules/logical/project-join-transpose"
+        },
+        {
+          "text": "Project Merge",
+          "link": "/rules/logical/project-merge"
+        },
+        {
+          "text": "Project Multi Join Merge",
+          "link": "/rules/logical/project-multi-join-merge"
+        },
+        {
+          "text": "Project Over Sum To Sum0",
+          "link": "/rules/logical/project-over-sum-to-sum0"
+        },
+        {
+          "text": "Project Remove Trivial",
+          "link": "/rules/logical/project-remove-trivial"
+        },
+        {
+          "text": "Project Set Op Transpose",
+          "link": "/rules/logical/project-set-op-transpose"
+        },
+        {
+          "text": "Project Sort Transpose",
+          "link": "/rules/logical/project-sort-transpose"
+        },
+        {
+          "text": "Project Subquery Remove",
+          "link": "/rules/logical/project-subquery-remove"
+        },
+        {
+          "text": "Project Table Scan",
+          "link": "/rules/logical/project-table-scan"
+        },
+        {
+          "text": "Project Through Join",
+          "link": "/rules/logical/project-through-join"
+        },
+        {
+          "text": "Project To Window",
+          "link": "/rules/logical/project-to-window"
+        },
+        {
+          "text": "Project Values Reduction",
+          "link": "/rules/logical/project-values-reduction"
+        },
+        {
+          "text": "Project Window Transpose",
+          "link": "/rules/logical/project-window-transpose"
+        },
+        {
+          "text": "Pure Function Cse",
+          "link": "/rules/logical/pure-function-cse"
+        },
+        {
+          "text": "Query Anonymization",
+          "link": "/rules/logical/query-anonymization"
+        },
+        {
+          "text": "Reachability Transitive Closure",
+          "link": "/rules/logical/reachability-transitive-closure"
+        },
+        {
+          "text": "Recursive Cte Base Filter Pushdown",
+          "link": "/rules/logical/recursive-cte-base-filter-pushdown"
+        },
+        {
+          "text": "Recursive Cte Cycle Detection",
+          "link": "/rules/logical/recursive-cte-cycle-detection"
+        },
+        {
+          "text": "Recursive Cte Depth Limit Pushdown",
+          "link": "/rules/logical/recursive-cte-depth-limit-pushdown"
+        },
+        {
+          "text": "Recursive Cte Join Reorder",
+          "link": "/rules/logical/recursive-cte-join-reorder"
+        },
+        {
+          "text": "Recursive Cte Memoization",
+          "link": "/rules/logical/recursive-cte-memoization"
+        },
+        {
+          "text": "Recursive Cte Projection Pushdown",
+          "link": "/rules/logical/recursive-cte-projection-pushdown"
+        },
+        {
+          "text": "Recursive Cte Semi Naive Eval",
+          "link": "/rules/logical/recursive-cte-semi-naive-eval"
+        },
+        {
+          "text": "Recursive Cte To Iterative",
+          "link": "/rules/logical/recursive-cte-to-iterative"
+        },
+        {
+          "text": "Recursive Cte To Tail Recursive",
+          "link": "/rules/logical/recursive-cte-to-tail-recursive"
+        },
+        {
+          "text": "Reduce Decimals",
+          "link": "/rules/logical/reduce-decimals"
+        },
+        {
+          "text": "Reduce Expressions",
+          "link": "/rules/logical/reduce-expressions"
+        },
+        {
+          "text": "Redundant Join Elimination",
+          "link": "/rules/logical/redundant-join-elimination"
+        },
+        {
+          "text": "Row Level Security Pushdown",
+          "link": "/rules/logical/row-level-security-pushdown"
+        },
+        {
+          "text": "Sample To Filter",
+          "link": "/rules/logical/sample-to-filter"
+        },
+        {
+          "text": "Sargable Function Rewrite",
+          "link": "/rules/logical/sargable-function-rewrite"
+        },
+        {
+          "text": "Scalar Subquery To Join",
+          "link": "/rules/logical/scalar-subquery-to-join"
+        },
+        {
+          "text": "Self Join Elimination",
+          "link": "/rules/logical/self-join-elimination"
+        },
+        {
+          "text": "Semi Join Filter Transpose",
+          "link": "/rules/logical/semi-join-filter-transpose"
+        },
+        {
+          "text": "Semi Join Project Transpose",
+          "link": "/rules/logical/semi-join-project-transpose"
+        },
+        {
+          "text": "Semi Join Reduction",
+          "link": "/rules/logical/semi-join-reduction"
+        },
+        {
+          "text": "Semi Join Remove",
+          "link": "/rules/logical/semi-join-remove"
+        },
+        {
+          "text": "Semi Join To Existence Check",
+          "link": "/rules/logical/semi-join-to-existence-check"
+        },
+        {
+          "text": "Set Op To Filter",
+          "link": "/rules/logical/set-op-to-filter"
+        },
+        {
+          "text": "Shortest Path Optimization",
+          "link": "/rules/logical/shortest-path-optimization"
+        },
+        {
+          "text": "Sideways Information Passing",
+          "link": "/rules/logical/sideways-information-passing"
+        },
+        {
+          "text": "Sort Join Copy",
+          "link": "/rules/logical/sort-join-copy"
+        },
+        {
+          "text": "Sort Join Transpose",
+          "link": "/rules/logical/sort-join-transpose"
+        },
+        {
+          "text": "Sort Limit Fusion",
+          "link": "/rules/logical/sort-limit-fusion"
+        },
+        {
+          "text": "Sort Merge",
+          "link": "/rules/logical/sort-merge"
+        },
+        {
+          "text": "Sort Project Merge",
+          "link": "/rules/logical/sort-project-merge"
+        },
+        {
+          "text": "Sort Remove Constant Keys",
+          "link": "/rules/logical/sort-remove-constant-keys"
+        },
+        {
+          "text": "Sort Remove Redundant",
+          "link": "/rules/logical/sort-remove-redundant"
+        },
+        {
+          "text": "Sort Remove",
+          "link": "/rules/logical/sort-remove"
+        },
+        {
+          "text": "Starburst Constraint Propagation",
+          "link": "/rules/logical/starburst-constraint-propagation"
+        },
+        {
+          "text": "Starburst Contradiction Detection",
+          "link": "/rules/logical/starburst-contradiction-detection"
+        },
+        {
+          "text": "Starburst Query Graph Model",
+          "link": "/rules/logical/starburst-query-graph-model"
+        },
+        {
+          "text": "Starburst Referential Integrity Rewrite",
+          "link": "/rules/logical/starburst-referential-integrity-rewrite"
+        },
+        {
+          "text": "Starburst Semantic Optimization",
+          "link": "/rules/logical/starburst-semantic-optimization"
+        },
+        {
+          "text": "Starburst Semantic",
+          "link": "/rules/logical/starburst-semantic"
+        },
+        {
+          "text": "Starburst Unique Key Join Elimination",
+          "link": "/rules/logical/starburst-unique-key-join-elimination"
+        },
+        {
+          "text": "Starburst View Merging",
+          "link": "/rules/logical/starburst-view-merging"
+        },
+        {
+          "text": "Storage Push Down Aware",
+          "link": "/rules/logical/storage-push-down-aware"
+        },
+        {
+          "text": "String Function Optimization",
+          "link": "/rules/logical/string-function-optimization"
+        },
+        {
+          "text": "Subquery Deduplication",
+          "link": "/rules/logical/subquery-deduplication"
+        },
+        {
+          "text": "Subquery Hoisting",
+          "link": "/rules/logical/subquery-hoisting"
+        },
+        {
+          "text": "Subquery Predicate Pullup",
+          "link": "/rules/logical/subquery-predicate-pullup"
+        },
+        {
+          "text": "Subquery To Window",
+          "link": "/rules/logical/subquery-to-window"
+        },
+        {
+          "text": "System R Dynamic Programming",
+          "link": "/rules/logical/system-r-dynamic-programming"
+        },
+        {
+          "text": "System R Left Deep Enumeration",
+          "link": "/rules/logical/system-r-left-deep-enumeration"
+        },
+        {
+          "text": "Time Bucket Pushdown",
+          "link": "/rules/logical/time-bucket-pushdown"
+        },
+        {
+          "text": "Time Series Aggregation Pushdown",
+          "link": "/rules/logical/time-series-aggregation-pushdown"
+        },
+        {
+          "text": "Time Series Range Optimization",
+          "link": "/rules/logical/time-series-range-optimization"
+        },
+        {
+          "text": "Timezone Aware Index Use",
+          "link": "/rules/logical/timezone-aware-index-use"
+        },
+        {
+          "text": "Transitive Closure Memoization",
+          "link": "/rules/logical/transitive-closure-memoization"
+        },
+        {
+          "text": "Type Inference Optimization",
+          "link": "/rules/logical/type-inference-optimization"
+        },
+        {
+          "text": "Uncorrelated Subquery To Join",
+          "link": "/rules/logical/uncorrelated-subquery-to-join"
+        },
+        {
+          "text": "Union Eliminator",
+          "link": "/rules/logical/union-eliminator"
+        },
+        {
+          "text": "Union Merge",
+          "link": "/rules/logical/union-merge"
+        },
+        {
+          "text": "Union Pull Up Constants",
+          "link": "/rules/logical/union-pull-up-constants"
+        },
+        {
+          "text": "Union To Distinct",
+          "link": "/rules/logical/union-to-distinct"
+        },
+        {
+          "text": "Union To Values",
+          "link": "/rules/logical/union-to-values"
+        },
+        {
+          "text": "Unique Key Join Elimination",
+          "link": "/rules/logical/unique-key-join-elimination"
+        },
+        {
+          "text": "Volatile Function Barrier",
+          "link": "/rules/logical/volatile-function-barrier"
+        },
+        {
+          "text": "Window Filter Pushdown",
+          "link": "/rules/logical/window-filter-pushdown"
+        },
+        {
+          "text": "Window Frame Optimization",
+          "link": "/rules/logical/window-frame-optimization"
+        },
+        {
+          "text": "Window Function Optimization",
+          "link": "/rules/logical/window-function-optimization"
+        },
+        {
+          "text": "Window Function Pushdown",
+          "link": "/rules/logical/window-function-pushdown"
+        },
+        {
+          "text": "Window Limit Pushdown",
+          "link": "/rules/logical/window-limit-pushdown"
+        },
+        {
+          "text": "Window Merge",
+          "link": "/rules/logical/window-merge"
+        },
+        {
+          "text": "Window Partition Elimination",
+          "link": "/rules/logical/window-partition-elimination"
+        },
+        {
+          "text": "Window Partition Pruning",
+          "link": "/rules/logical/window-partition-pruning"
+        },
+        {
+          "text": "Window Projection Pushdown",
+          "link": "/rules/logical/window-projection-pushdown"
+        },
+        {
+          "text": "Window Sort Elimination",
+          "link": "/rules/logical/window-sort-elimination"
+        },
+        {
+          "text": "Window To Aggregate",
+          "link": "/rules/logical/window-to-aggregate"
+        },
+        {
+          "text": "Xml Query Rewrite",
+          "link": "/rules/logical/xml-query-rewrite"
+        },
+        {
+          "text": "Yannakakis Algorithm",
+          "link": "/rules/logical/yannakakis-algorithm"
+        },
+        {
+          "text": "Predicate Pushdown",
+          "collapsed": true,
+          "items": [
+            {
+              "text": "Expand Disjunction For Join",
+              "link": "/rules/logical/predicate-pushdown/expand-disjunction-for-join"
+            },
+            {
+              "text": "Filter Aggregate Transpose",
+              "link": "/rules/logical/predicate-pushdown/filter-aggregate-transpose"
+            },
+            {
+              "text": "Filter Correlate",
+              "link": "/rules/logical/predicate-pushdown/filter-correlate"
+            },
+            {
+              "text": "Filter Into Aggregate",
+              "link": "/rules/logical/predicate-pushdown/filter-into-aggregate"
+            },
+            {
+              "text": "Filter Into Join Condition",
+              "link": "/rules/logical/predicate-pushdown/filter-into-join-condition"
+            },
+            {
+              "text": "Filter Into Join",
+              "link": "/rules/logical/predicate-pushdown/filter-into-join"
+            },
+            {
+              "text": "Filter Join Push",
+              "link": "/rules/logical/predicate-pushdown/filter-join-push"
+            },
+            {
+              "text": "Filter Join",
+              "link": "/rules/logical/predicate-pushdown/filter-join"
+            },
+            {
+              "text": "Filter Merge",
+              "link": "/rules/logical/predicate-pushdown/filter-merge"
+            },
+            {
+              "text": "Filter Project Transpose",
+              "link": "/rules/logical/predicate-pushdown/filter-project-transpose"
+            },
+            {
+              "text": "Filter Sort Transpose",
+              "link": "/rules/logical/predicate-pushdown/filter-sort-transpose"
+            },
+            {
+              "text": "Filter Table Function Transpose",
+              "link": "/rules/logical/predicate-pushdown/filter-table-function-transpose"
+            },
+            {
+              "text": "Filter Table Scan",
+              "link": "/rules/logical/predicate-pushdown/filter-table-scan"
+            },
+            {
+              "text": "Filter Through Join",
+              "link": "/rules/logical/predicate-pushdown/filter-through-join"
+            },
+            {
+              "text": "Filter Through Project",
+              "link": "/rules/logical/predicate-pushdown/filter-through-project"
+            },
+            {
+              "text": "Filter Through Union",
+              "link": "/rules/logical/predicate-pushdown/filter-through-union"
+            },
+            {
+              "text": "Function Push Down",
+              "link": "/rules/logical/predicate-pushdown/function-push-down"
+            },
+            {
+              "text": "Join Derive Is Not Null Filter",
+              "link": "/rules/logical/predicate-pushdown/join-derive-is-not-null-filter"
+            },
+            {
+              "text": "Join Extract Filter",
+              "link": "/rules/logical/predicate-pushdown/join-extract-filter"
+            },
+            {
+              "text": "Join Push Expressions",
+              "link": "/rules/logical/predicate-pushdown/join-push-expressions"
+            },
+            {
+              "text": "Join Push Transitive Predicates",
+              "link": "/rules/logical/predicate-pushdown/join-push-transitive-predicates"
+            },
+            {
+              "text": "Partition Pushdown",
+              "link": "/rules/logical/predicate-pushdown/partition-pushdown"
+            },
+            {
+              "text": "Predicate Transitive Closure",
+              "link": "/rules/logical/predicate-pushdown/predicate-transitive-closure"
+            },
+            {
+              "text": "Starburst Constraint Propagation",
+              "link": "/rules/logical/predicate-pushdown/starburst-constraint-propagation"
+            },
+            {
+              "text": "Starburst Referential Integrity Rewrite",
+              "link": "/rules/logical/predicate-pushdown/starburst-referential-integrity-rewrite"
+            },
+            {
+              "text": "Starburst Semantic Optimization",
+              "link": "/rules/logical/predicate-pushdown/starburst-semantic-optimization"
+            },
+            {
+              "text": "Storage Push Down Aware",
+              "link": "/rules/logical/predicate-pushdown/storage-push-down-aware"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "text": "Multi Model",
+      "collapsed": true,
+      "items": [
+        {
+          "text": "Aligned Aggregation Merge",
+          "link": "/rules/multi-model/aligned-aggregation-merge"
+        },
+        {
+          "text": "Array Unwind Pushdown",
+          "link": "/rules/multi-model/array-unwind-pushdown"
+        },
+        {
+          "text": "Bidirectional Search",
+          "link": "/rules/multi-model/bidirectional-search"
+        },
+        {
+          "text": "Change Stream Filter Pushdown",
+          "link": "/rules/multi-model/change-stream-filter-pushdown"
+        },
+        {
+          "text": "Compound Index Selection",
+          "link": "/rules/multi-model/compound-index-selection"
+        },
+        {
+          "text": "Degree Aware Join Ordering",
+          "link": "/rules/multi-model/degree-aware-join-ordering"
+        },
+        {
+          "text": "Delta Encoding Scan",
+          "link": "/rules/multi-model/delta-encoding-scan"
+        },
+        {
+          "text": "Downsampling Pushdown",
+          "link": "/rules/multi-model/downsampling-pushdown"
+        },
+        {
+          "text": "Expand Into",
+          "link": "/rules/multi-model/expand-into"
+        },
+        {
+          "text": "Gap Fill Pushdown",
+          "link": "/rules/multi-model/gap-fill-pushdown"
+        },
+        {
+          "text": "Group Push Accumulator",
+          "link": "/rules/multi-model/group-push-accumulator"
+        },
+        {
+          "text": "Join To Traversal",
+          "link": "/rules/multi-model/join-to-traversal"
+        },
+        {
+          "text": "Label Scan Pushdown",
+          "link": "/rules/multi-model/label-scan-pushdown"
+        },
+        {
+          "text": "Last Point Optimization",
+          "link": "/rules/multi-model/last-point-optimization"
+        },
+        {
+          "text": "Lookup To Embedded",
+          "link": "/rules/multi-model/lookup-to-embedded"
+        },
+        {
+          "text": "Nested Predicate Pushdown",
+          "link": "/rules/multi-model/nested-predicate-pushdown"
+        },
+        {
+          "text": "Path Materialization",
+          "link": "/rules/multi-model/path-materialization"
+        },
+        {
+          "text": "Pattern Decomposition",
+          "link": "/rules/multi-model/pattern-decomposition"
+        },
+        {
+          "text": "Pipeline Coalescence",
+          "link": "/rules/multi-model/pipeline-coalescence"
+        },
+        {
+          "text": "Predicate Pushdown Through Traversal",
+          "link": "/rules/multi-model/predicate-pushdown-through-traversal"
+        },
+        {
+          "text": "Projection To Covered Query",
+          "link": "/rules/multi-model/projection-to-covered-query"
+        },
+        {
+          "text": "Retention Policy Pruning",
+          "link": "/rules/multi-model/retention-policy-pruning"
+        },
+        {
+          "text": "Schema Inference Pushdown",
+          "link": "/rules/multi-model/schema-inference-pushdown"
+        },
+        {
+          "text": "Segment Merge Elimination",
+          "link": "/rules/multi-model/segment-merge-elimination"
+        },
+        {
+          "text": "Shard Key Targeted Query",
+          "link": "/rules/multi-model/shard-key-targeted-query"
+        },
+        {
+          "text": "Subgraph Isomorphism Pruning",
+          "link": "/rules/multi-model/subgraph-isomorphism-pruning"
+        },
+        {
+          "text": "Tag Index Scan",
+          "link": "/rules/multi-model/tag-index-scan"
+        },
+        {
+          "text": "Time Range Pruning",
+          "link": "/rules/multi-model/time-range-pruning"
+        },
+        {
+          "text": "Vertex Centric Index",
+          "link": "/rules/multi-model/vertex-centric-index"
+        },
+        {
+          "text": "Window Function Pushdown",
+          "link": "/rules/multi-model/window-function-pushdown"
+        }
+      ]
+    },
+    {
+      "text": "Physical",
+      "collapsed": true,
+      "items": [
+        {
+          "text": "Adaptive Aggregation",
+          "link": "/rules/physical/adaptive-aggregation"
+        },
+        {
+          "text": "Adaptive Hash Join",
+          "link": "/rules/physical/adaptive-hash-join"
+        },
+        {
+          "text": "Adaptive Index Selection",
+          "link": "/rules/physical/adaptive-index-selection"
+        },
+        {
+          "text": "Adaptive Join Algorithm",
+          "link": "/rules/physical/adaptive-join-algorithm"
+        },
+        {
+          "text": "Aggregate Pushdown Through Join",
+          "link": "/rules/physical/aggregate-pushdown-through-join"
+        },
+        {
+          "text": "Aggregation Pushdown",
+          "link": "/rules/physical/aggregation-pushdown"
+        },
+        {
+          "text": "Band Join",
+          "link": "/rules/physical/band-join"
+        },
+        {
+          "text": "Bit Vector Filtering",
+          "link": "/rules/physical/bit-vector-filtering"
+        },
+        {
+          "text": "Bitmap Index Combination",
+          "link": "/rules/physical/bitmap-index-combination"
+        },
+        {
+          "text": "Bitmap Index Combining",
+          "link": "/rules/physical/bitmap-index-combining"
+        },
+        {
+          "text": "Bitmap Index Selection",
+          "link": "/rules/physical/bitmap-index-selection"
+        },
+        {
+          "text": "Block Nested Loop Join",
+          "link": "/rules/physical/block-nested-loop-join"
+        },
+        {
+          "text": "Branch Free Selection",
+          "link": "/rules/physical/branch-free-selection"
+        },
+        {
+          "text": "Brin Index For Sequential",
+          "link": "/rules/physical/brin-index-for-sequential"
+        },
+        {
+          "text": "Broadcast Hash Join",
+          "link": "/rules/physical/broadcast-hash-join"
+        },
+        {
+          "text": "Broadcast Join Selection",
+          "link": "/rules/physical/broadcast-join-selection"
+        },
+        {
+          "text": "Bushy Parallelism",
+          "link": "/rules/physical/bushy-parallelism"
+        },
+        {
+          "text": "Cache Aware Aggregation",
+          "link": "/rules/physical/cache-aware-aggregation"
+        },
+        {
+          "text": "Cache Conscious Join",
+          "link": "/rules/physical/cache-conscious-join"
+        },
+        {
+          "text": "Cascades Memo Structure",
+          "link": "/rules/physical/cascades-memo-structure"
+        },
+        {
+          "text": "Clustered Index For Range",
+          "link": "/rules/physical/clustered-index-for-range"
+        },
+        {
+          "text": "Clustered Index Selection",
+          "link": "/rules/physical/clustered-index-selection"
+        },
+        {
+          "text": "Columnar Aggregation",
+          "link": "/rules/physical/columnar-aggregation"
+        },
+        {
+          "text": "Columnstore For Aggregation",
+          "link": "/rules/physical/columnstore-for-aggregation"
+        },
+        {
+          "text": "Common Subexpression Materialization",
+          "link": "/rules/physical/common-subexpression-materialization"
+        },
+        {
+          "text": "Composite Index Column Order",
+          "link": "/rules/physical/composite-index-column-order"
+        },
+        {
+          "text": "Covering Index Optimization",
+          "link": "/rules/physical/covering-index-optimization"
+        },
+        {
+          "text": "Covering Index Scan",
+          "link": "/rules/physical/covering-index-scan"
+        },
+        {
+          "text": "Covering Index Selection",
+          "link": "/rules/physical/covering-index-selection"
+        },
+        {
+          "text": "Cpu Affinity Placement",
+          "link": "/rules/physical/cpu-affinity-placement"
+        },
+        {
+          "text": "Cte Materialization Strategy",
+          "link": "/rules/physical/cte-materialization-strategy"
+        },
+        {
+          "text": "Dbmin Index Selection",
+          "link": "/rules/physical/dbmin-index-selection"
+        },
+        {
+          "text": "Degree Of Parallelism Selection",
+          "link": "/rules/physical/degree-of-parallelism-selection"
+        },
+        {
+          "text": "Distinct Aggregation Optimization",
+          "link": "/rules/physical/distinct-aggregation-optimization"
+        },
+        {
+          "text": "Distinct Aggregation Strategy",
+          "link": "/rules/physical/distinct-aggregation-strategy"
+        },
+        {
+          "text": "Eager Materialization",
+          "link": "/rules/physical/eager-materialization"
+        },
+        {
+          "text": "Expression Index Selection",
+          "link": "/rules/physical/expression-index-selection"
+        },
+        {
+          "text": "Filtered Index Matching",
+          "link": "/rules/physical/filtered-index-matching"
+        },
+        {
+          "text": "Free Join Algorithm",
+          "link": "/rules/physical/free-join-algorithm"
+        },
+        {
+          "text": "Full Text Index For Like",
+          "link": "/rules/physical/full-text-index-for-like"
+        },
+        {
+          "text": "Gin Index For Arrays",
+          "link": "/rules/physical/gin-index-for-arrays"
+        },
+        {
+          "text": "Gist Index For Spatial",
+          "link": "/rules/physical/gist-index-for-spatial"
+        },
+        {
+          "text": "Gpu Acceleration Selection",
+          "link": "/rules/physical/gpu-acceleration-selection"
+        },
+        {
+          "text": "Grace Hash Join",
+          "link": "/rules/physical/grace-hash-join"
+        },
+        {
+          "text": "Grouping Sets Expansion",
+          "link": "/rules/physical/grouping-sets-expansion"
+        },
+        {
+          "text": "Hash Aggregation",
+          "link": "/rules/physical/hash-aggregation"
+        },
+        {
+          "text": "Hash Index For Equality",
+          "link": "/rules/physical/hash-index-for-equality"
+        },
+        {
+          "text": "Hash Index Selection",
+          "link": "/rules/physical/hash-index-selection"
+        },
+        {
+          "text": "Hash Join With Bloom Filter",
+          "link": "/rules/physical/hash-join-with-bloom-filter"
+        },
+        {
+          "text": "Hash Join",
+          "link": "/rules/physical/hash-join"
+        },
+        {
+          "text": "Hash Vs Sort Aggregation",
+          "link": "/rules/physical/hash-vs-sort-aggregation"
+        },
+        {
+          "text": "Honeycomb Wcoj",
+          "link": "/rules/physical/honeycomb-wcoj"
+        },
+        {
+          "text": "Hybrid Aggregation",
+          "link": "/rules/physical/hybrid-aggregation"
+        },
+        {
+          "text": "Hybrid Hash Join",
+          "link": "/rules/physical/hybrid-hash-join"
+        },
+        {
+          "text": "In Memory Materialization",
+          "link": "/rules/physical/in-memory-materialization"
+        },
+        {
+          "text": "Incremental View Maintenance",
+          "link": "/rules/physical/incremental-view-maintenance"
+        },
+        {
+          "text": "Index Condition Pushdown",
+          "link": "/rules/physical/index-condition-pushdown"
+        },
+        {
+          "text": "Index Cost Comparison",
+          "link": "/rules/physical/index-cost-comparison"
+        },
+        {
+          "text": "Index Intersection Vs Union",
+          "link": "/rules/physical/index-intersection-vs-union"
+        },
+        {
+          "text": "Index Intersection",
+          "link": "/rules/physical/index-intersection"
+        },
+        {
+          "text": "Index Join",
+          "link": "/rules/physical/index-join"
+        },
+        {
+          "text": "Index Merge Intersection",
+          "link": "/rules/physical/index-merge-intersection"
+        },
+        {
+          "text": "Index Nested Loop Join",
+          "link": "/rules/physical/index-nested-loop-join"
+        },
+        {
+          "text": "Index Only Scan Preference",
+          "link": "/rules/physical/index-only-scan-preference"
+        },
+        {
+          "text": "Index Only Scan",
+          "link": "/rules/physical/index-only-scan"
+        },
+        {
+          "text": "Index Scan",
+          "link": "/rules/physical/index-scan"
+        },
+        {
+          "text": "Index Skip Scan",
+          "link": "/rules/physical/index-skip-scan"
+        },
+        {
+          "text": "Index Union",
+          "link": "/rules/physical/index-union"
+        },
+        {
+          "text": "Inter Operator Parallelism",
+          "link": "/rules/physical/inter-operator-parallelism"
+        },
+        {
+          "text": "Intra Operator Parallelism",
+          "link": "/rules/physical/intra-operator-parallelism"
+        },
+        {
+          "text": "Lazy Materialization",
+          "link": "/rules/physical/lazy-materialization"
+        },
+        {
+          "text": "Levelheaded Wcoj",
+          "link": "/rules/physical/levelheaded-wcoj"
+        },
+        {
+          "text": "Loose Index Scan",
+          "link": "/rules/physical/loose-index-scan"
+        },
+        {
+          "text": "Materialized View Filter Scan",
+          "link": "/rules/physical/materialized-view-filter-scan"
+        },
+        {
+          "text": "Materialized View Rewrite",
+          "link": "/rules/physical/materialized-view-rewrite"
+        },
+        {
+          "text": "Memory Aware Hash Aggregate",
+          "link": "/rules/physical/memory-aware-hash-aggregate"
+        },
+        {
+          "text": "Memory Aware Sort",
+          "link": "/rules/physical/memory-aware-sort"
+        },
+        {
+          "text": "Morsel Driven Parallelism",
+          "link": "/rules/physical/morsel-driven-parallelism"
+        },
+        {
+          "text": "Multi Column Index Selection",
+          "link": "/rules/physical/multi-column-index-selection"
+        },
+        {
+          "text": "Nested Loop Join",
+          "link": "/rules/physical/nested-loop-join"
+        },
+        {
+          "text": "Numa Aware Partitioning",
+          "link": "/rules/physical/numa-aware-partitioning"
+        },
+        {
+          "text": "Numa Aware Scheduling",
+          "link": "/rules/physical/numa-aware-scheduling"
+        },
+        {
+          "text": "Ordered Aggregation",
+          "link": "/rules/physical/ordered-aggregation"
+        },
+        {
+          "text": "Parallel Aggregation",
+          "link": "/rules/physical/parallel-aggregation"
+        },
+        {
+          "text": "Parallel Append",
+          "link": "/rules/physical/parallel-append"
+        },
+        {
+          "text": "Parallel Hash Join",
+          "link": "/rules/physical/parallel-hash-join"
+        },
+        {
+          "text": "Parallel Index Scan",
+          "link": "/rules/physical/parallel-index-scan"
+        },
+        {
+          "text": "Parallel Partition Wise Join",
+          "link": "/rules/physical/parallel-partition-wise-join"
+        },
+        {
+          "text": "Parallel Scan",
+          "link": "/rules/physical/parallel-scan"
+        },
+        {
+          "text": "Parallel Sort",
+          "link": "/rules/physical/parallel-sort"
+        },
+        {
+          "text": "Parallel Union",
+          "link": "/rules/physical/parallel-union"
+        },
+        {
+          "text": "Partial Aggregation Cost Model",
+          "link": "/rules/physical/partial-aggregation-cost-model"
+        },
+        {
+          "text": "Partial Index Selection",
+          "link": "/rules/physical/partial-index-selection"
+        },
+        {
+          "text": "Pipeline Breaker Analysis",
+          "link": "/rules/physical/pipeline-breaker-analysis"
+        },
+        {
+          "text": "Preaggregation",
+          "link": "/rules/physical/preaggregation"
+        },
+        {
+          "text": "Prefetch Optimization",
+          "link": "/rules/physical/prefetch-optimization"
+        },
+        {
+          "text": "Radix Hash Join",
+          "link": "/rules/physical/radix-hash-join"
+        },
+        {
+          "text": "Range Index Selection",
+          "link": "/rules/physical/range-index-selection"
+        },
+        {
+          "text": "Repartition Pushdown",
+          "link": "/rules/physical/repartition-pushdown"
+        },
+        {
+          "text": "Result Caching",
+          "link": "/rules/physical/result-caching"
+        },
+        {
+          "text": "Reverse Index Scan",
+          "link": "/rules/physical/reverse-index-scan"
+        },
+        {
+          "text": "Semi Join Join Transpose",
+          "link": "/rules/physical/semi-join-join-transpose"
+        },
+        {
+          "text": "Semi Join Project Transpose",
+          "link": "/rules/physical/semi-join-project-transpose"
+        },
+        {
+          "text": "Shapiro Symmetric Hash Join",
+          "link": "/rules/physical/shapiro-symmetric-hash-join"
+        },
+        {
+          "text": "Shuffle Aware Join",
+          "link": "/rules/physical/shuffle-aware-join"
+        },
+        {
+          "text": "Shuffle Hash Join",
+          "link": "/rules/physical/shuffle-hash-join"
+        },
+        {
+          "text": "Simd Operation Selection",
+          "link": "/rules/physical/simd-operation-selection"
+        },
+        {
+          "text": "Simd Scan Filter",
+          "link": "/rules/physical/simd-scan-filter"
+        },
+        {
+          "text": "Skew Aware Join",
+          "link": "/rules/physical/skew-aware-join"
+        },
+        {
+          "text": "Sort Aggregation",
+          "link": "/rules/physical/sort-aggregation"
+        },
+        {
+          "text": "Sort Avoidance By Grouping",
+          "link": "/rules/physical/sort-avoidance-by-grouping"
+        },
+        {
+          "text": "Sort Based Aggregation",
+          "link": "/rules/physical/sort-based-aggregation"
+        },
+        {
+          "text": "Sort Distribution Aware",
+          "link": "/rules/physical/sort-distribution-aware"
+        },
+        {
+          "text": "Sort Elimination By Index",
+          "link": "/rules/physical/sort-elimination-by-index"
+        },
+        {
+          "text": "Sort Limit Heap",
+          "link": "/rules/physical/sort-limit-heap"
+        },
+        {
+          "text": "Sort Merge Adjacent",
+          "link": "/rules/physical/sort-merge-adjacent"
+        },
+        {
+          "text": "Sort Merge Join",
+          "link": "/rules/physical/sort-merge-join"
+        },
+        {
+          "text": "Sort Merge",
+          "link": "/rules/physical/sort-merge"
+        },
+        {
+          "text": "Sort Partial Order Exploitation",
+          "link": "/rules/physical/sort-partial-order-exploitation"
+        },
+        {
+          "text": "Sort Spill Partitioning",
+          "link": "/rules/physical/sort-spill-partitioning"
+        },
+        {
+          "text": "Sparse Index Scan",
+          "link": "/rules/physical/sparse-index-scan"
+        },
+        {
+          "text": "Spatial Index For Geometry",
+          "link": "/rules/physical/spatial-index-for-geometry"
+        },
+        {
+          "text": "Streaming Aggregation",
+          "link": "/rules/physical/streaming-aggregation"
+        },
+        {
+          "text": "System R Access Path Selection",
+          "link": "/rules/physical/system-r-access-path-selection"
+        },
+        {
+          "text": "System R Interesting Sort Orders",
+          "link": "/rules/physical/system-r-interesting-sort-orders"
+        },
+        {
+          "text": "System R Nested Loop Selection",
+          "link": "/rules/physical/system-r-nested-loop-selection"
+        },
+        {
+          "text": "System R Sort Merge Selection",
+          "link": "/rules/physical/system-r-sort-merge-selection"
+        },
+        {
+          "text": "Temp Table Materialization",
+          "link": "/rules/physical/temp-table-materialization"
+        },
+        {
+          "text": "Three Phase Aggregation",
+          "link": "/rules/physical/three-phase-aggregation"
+        },
+        {
+          "text": "Two Phase Aggregation",
+          "link": "/rules/physical/two-phase-aggregation"
+        },
+        {
+          "text": "Unique Index For Equality",
+          "link": "/rules/physical/unique-index-for-equality"
+        },
+        {
+          "text": "Vectorized Aggregation",
+          "link": "/rules/physical/vectorized-aggregation"
+        },
+        {
+          "text": "Volcano Branch And Bound",
+          "link": "/rules/physical/volcano-branch-and-bound"
+        },
+        {
+          "text": "Volcano Enforcer Placement",
+          "link": "/rules/physical/volcano-enforcer-placement"
+        },
+        {
+          "text": "Volcano Interesting Orders",
+          "link": "/rules/physical/volcano-interesting-orders"
+        },
+        {
+          "text": "Volcano Logical To Physical",
+          "link": "/rules/physical/volcano-logical-to-physical"
+        },
+        {
+          "text": "Volcano Transformation Rules",
+          "link": "/rules/physical/volcano-transformation-rules"
+        },
+        {
+          "text": "Wcoj Generic Join",
+          "link": "/rules/physical/wcoj-generic-join"
+        },
+        {
+          "text": "Work Stealing Parallelism",
+          "link": "/rules/physical/work-stealing-parallelism"
+        },
+        {
+          "text": "Work Table Spooling",
+          "link": "/rules/physical/work-table-spooling"
+        },
+        {
+          "text": "Zigzag Join",
+          "link": "/rules/physical/zigzag-join"
+        }
+      ]
+    },
+    {
+      "text": "Rpr",
+      "collapsed": true,
+      "items": [
+        {
+          "text": "Constant Fold Define",
+          "link": "/rules/rpr/constant-fold-define"
+        },
+        {
+          "text": "Counting Pattern To Window",
+          "link": "/rules/rpr/counting-pattern-to-window"
+        },
+        {
+          "text": "Dead Variable Elimination",
+          "link": "/rules/rpr/dead-variable-elimination"
+        },
+        {
+          "text": "Eliminate Redundant Quantifier",
+          "link": "/rules/rpr/eliminate-redundant-quantifier"
+        },
+        {
+          "text": "Empty Pattern Elimination",
+          "link": "/rules/rpr/empty-pattern-elimination"
+        },
+        {
+          "text": "Factor Common Prefix",
+          "link": "/rules/rpr/factor-common-prefix"
+        },
+        {
+          "text": "Flatten Nested Sequence",
+          "link": "/rules/rpr/flatten-nested-sequence"
+        },
+        {
+          "text": "Index For Order By",
+          "link": "/rules/rpr/index-for-order-by"
+        },
+        {
+          "text": "Merge Dfa States",
+          "link": "/rules/rpr/merge-dfa-states"
+        },
+        {
+          "text": "Merge Equivalent Alternations",
+          "link": "/rules/rpr/merge-equivalent-alternations"
+        },
+        {
+          "text": "Next Pattern To Lead",
+          "link": "/rules/rpr/next-pattern-to-lead"
+        },
+        {
+          "text": "Normalize Quantifier Ranges",
+          "link": "/rules/rpr/normalize-quantifier-ranges"
+        },
+        {
+          "text": "One Row Early Termination",
+          "link": "/rules/rpr/one-row-early-termination"
+        },
+        {
+          "text": "Partition Index Scan",
+          "link": "/rules/rpr/partition-index-scan"
+        },
+        {
+          "text": "Push Filter Into Define",
+          "link": "/rules/rpr/push-filter-into-define"
+        },
+        {
+          "text": "Push Order Filter Into Scan",
+          "link": "/rules/rpr/push-order-filter-into-scan"
+        },
+        {
+          "text": "Push Partition Filter",
+          "link": "/rules/rpr/push-partition-filter"
+        },
+        {
+          "text": "Simple Pattern To Lag",
+          "link": "/rules/rpr/simple-pattern-to-lag"
+        },
+        {
+          "text": "Specialize Dfa For Partition",
+          "link": "/rules/rpr/specialize-dfa-for-partition"
+        }
+      ]
+    },
+    {
+      "text": "Templates",
+      "collapsed": true,
+      "items": [
+        {
+          "text": "Template Database Specific",
+          "link": "/rules/templates/template-database-specific"
+        },
+        {
+          "text": "Template Hardware",
+          "link": "/rules/templates/template-hardware"
+        },
+        {
+          "text": "Template Logical",
+          "link": "/rules/templates/template-logical"
+        },
+        {
+          "text": "Template Physical",
+          "link": "/rules/templates/template-physical"
+        }
+      ]
+    },
+    {
+      "text": "Unnest",
+      "collapsed": true,
+      "items": [
+        {
+          "text": "Lateral To Semi Join",
+          "link": "/rules/unnest/lateral-to-semi-join"
+        }
+      ]
+    }
+  ]
+}
