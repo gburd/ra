@@ -1,0 +1,99 @@
+---
+id: parallel-seq-scan
+name: Parallel Sequential Scan
+category: physical
+databases: [postgresql, mysql, duckdb]
+execution_models: [volcano]
+hardware: [cpu]
+version: "1.0.0"
+authors: ["RA Contributors"]
+tags: [parallel, physical, performance, scan, sequential]
+---
+# Parallel Sequential Scan
+#
+# Converts a sequential scan into a parallel scan with gather node
+# when the table is large enough to benefit from parallelism.
+#
+# Example transformation:
+#   Scan(orders)
+#   =>
+#   Gather(ParallelScan(orders, workers=4))
+#
+# Cost benefit: scan_time / workers - gather_overhead
+
+name: parallel-seq-scan
+description: Convert sequential scan to parallel scan for large tables
+version: 1.0.0
+tags: [parallel, physical, performance]
+
+pattern: |
+  Scan(table=$t)
+
+condition: |
+  # Check if table is large enough for parallelism
+  table_size($t) > config.parallel.min_parallel_table_scan_size &&
+  # Check if we have available CPU cores
+  hardware.cpu_cores >= 2 &&
+  # Check if parallel execution is enabled
+  config.parallel.max_parallel_workers > 0
+
+transform: |
+  # Calculate optimal worker count based on table size and CPU cores
+  let workers = min(
+    # Don't use more workers than CPU cores minus 1 (leave one for coordinator)
+    hardware.cpu_cores - 1,
+    # Respect configured maximum
+    config.parallel.max_parallel_workers_per_gather,
+    # Scale workers based on table size (1 worker per 64MB)
+    max(1, table_size($t) / (64 * 1024 * 1024))
+  );
+
+  # Wrap parallel scan in gather node
+  Gather(
+    input=ParallelScan(
+      table=$t,
+      workers=workers
+    ),
+    workers=workers
+  )
+
+cost_benefit: |
+  # Sequential scan cost
+  let seq_cost = table_size($t) * config.cost.seq_page_cost;
+
+  # Parallel scan cost with efficiency factor
+  let parallel_speedup = workers * 0.8;  # 80% efficiency
+  let coordination_overhead = workers * config.parallel.parallel_setup_cost;
+  let parallel_cost = (seq_cost / parallel_speedup) + coordination_overhead;
+
+  # Benefit is the cost reduction
+  seq_cost - parallel_cost
+
+priority: 100  # High priority for large table scans
+
+# Test examples
+tests:
+  - name: large_table_parallel_scan
+    input: |
+      Scan(table="orders")
+    context:
+      table_size.orders: 1073741824  # 1GB
+      hardware.cpu_cores: 8
+      config.parallel.min_parallel_table_scan_size: 8388608  # 8MB
+      config.parallel.max_parallel_workers: 8
+      config.parallel.max_parallel_workers_per_gather: 4
+    expected: |
+      Gather(
+        input=ParallelScan(table="orders", workers=4),
+        workers=4
+      )
+
+  - name: small_table_no_parallel
+    input: |
+      Scan(table="users")
+    context:
+      table_size.users: 1048576  # 1MB
+      hardware.cpu_cores: 8
+      config.parallel.min_parallel_table_scan_size: 8388608  # 8MB
+    expected: |
+      Scan(table="users")  # No transformation

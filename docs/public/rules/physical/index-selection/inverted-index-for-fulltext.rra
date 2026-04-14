@@ -2,7 +2,7 @@
 id: inverted-index-for-fulltext
 name: Inverted Index for Full-Text Search
 category: physical/index-selection
-databases: [postgresql, documentdb]
+databases: [postgresql, mongodb]
 execution_models: [volcano]
 hardware: [cpu]
 version: "2.0.0"

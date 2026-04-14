@@ -1,0 +1,459 @@
+{
+  "kind": "PostgreSQL",
+  "schema_name": "public",
+  "tables": {
+    "customers": {
+      "name": "customers",
+      "columns": [
+        {
+          "name": "customer_id",
+          "data_type": "integer",
+          "nullable": false,
+          "ordinal": 1,
+          "default_value": "nextval('customers_customer_id_seq'::regclass)"
+        },
+        {
+          "name": "name",
+          "data_type": "character varying",
+          "nullable": false,
+          "ordinal": 2,
+          "default_value": null
+        },
+        {
+          "name": "email",
+          "data_type": "character varying",
+          "nullable": false,
+          "ordinal": 3,
+          "default_value": null
+        },
+        {
+          "name": "country",
+          "data_type": "character varying",
+          "nullable": false,
+          "ordinal": 4,
+          "default_value": null
+        },
+        {
+          "name": "city",
+          "data_type": "character varying",
+          "nullable": false,
+          "ordinal": 5,
+          "default_value": null
+        },
+        {
+          "name": "signup_date",
+          "data_type": "date",
+          "nullable": false,
+          "ordinal": 6,
+          "default_value": null
+        },
+        {
+          "name": "customer_tier",
+          "data_type": "character varying",
+          "nullable": true,
+          "ordinal": 7,
+          "default_value": "'standard'::character varying"
+        },
+        {
+          "name": "created_at",
+          "data_type": "timestamp without time zone",
+          "nullable": true,
+          "ordinal": 8,
+          "default_value": "CURRENT_TIMESTAMP"
+        }
+      ],
+      "constraints": [
+        {
+          "name": "customers_email_key",
+          "kind": "Unique",
+          "columns": [
+            "email"
+          ],
+          "referenced_table": null,
+          "referenced_columns": [],
+          "check_expression": null
+        },
+        {
+          "name": "customers_pkey",
+          "kind": "PrimaryKey",
+          "columns": [
+            "customer_id"
+          ],
+          "referenced_table": null,
+          "referenced_columns": [],
+          "check_expression": null
+        }
+      ],
+      "indexes": [
+        {
+          "name": "customers_email_key",
+          "columns": [
+            "email"
+          ],
+          "unique": true,
+          "index_type": "btree"
+        },
+        {
+          "name": "customers_pkey",
+          "columns": [
+            "customer_id"
+          ],
+          "unique": true,
+          "index_type": "btree"
+        },
+        {
+          "name": "idx_customers_country",
+          "columns": [
+            "country"
+          ],
+          "unique": false,
+          "index_type": "btree"
+        },
+        {
+          "name": "idx_customers_signup",
+          "columns": [
+            "signup_date"
+          ],
+          "unique": false,
+          "index_type": "btree"
+        },
+        {
+          "name": "idx_customers_tier",
+          "columns": [
+            "customer_tier"
+          ],
+          "unique": false,
+          "index_type": "btree"
+        }
+      ],
+      "triggers": [],
+      "estimated_rows": 50.0
+    },
+    "order_items": {
+      "name": "order_items",
+      "columns": [
+        {
+          "name": "order_item_id",
+          "data_type": "integer",
+          "nullable": false,
+          "ordinal": 1,
+          "default_value": "nextval('order_items_order_item_id_seq'::regclass)"
+        },
+        {
+          "name": "order_id",
+          "data_type": "integer",
+          "nullable": true,
+          "ordinal": 2,
+          "default_value": null
+        },
+        {
+          "name": "product_id",
+          "data_type": "integer",
+          "nullable": true,
+          "ordinal": 3,
+          "default_value": null
+        },
+        {
+          "name": "quantity",
+          "data_type": "integer",
+          "nullable": false,
+          "ordinal": 4,
+          "default_value": null
+        },
+        {
+          "name": "unit_price",
+          "data_type": "numeric",
+          "nullable": false,
+          "ordinal": 5,
+          "default_value": null
+        },
+        {
+          "name": "discount_percent",
+          "data_type": "numeric",
+          "nullable": true,
+          "ordinal": 6,
+          "default_value": "0.00"
+        },
+        {
+          "name": "created_at",
+          "data_type": "timestamp without time zone",
+          "nullable": true,
+          "ordinal": 7,
+          "default_value": "CURRENT_TIMESTAMP"
+        }
+      ],
+      "constraints": [
+        {
+          "name": "order_items_order_id_fkey",
+          "kind": "ForeignKey",
+          "columns": [
+            "order_id"
+          ],
+          "referenced_table": "orders",
+          "referenced_columns": [
+            "order_id"
+          ],
+          "check_expression": null
+        },
+        {
+          "name": "order_items_pkey",
+          "kind": "PrimaryKey",
+          "columns": [
+            "order_item_id"
+          ],
+          "referenced_table": null,
+          "referenced_columns": [],
+          "check_expression": null
+        },
+        {
+          "name": "order_items_product_id_fkey",
+          "kind": "ForeignKey",
+          "columns": [
+            "product_id"
+          ],
+          "referenced_table": "products",
+          "referenced_columns": [
+            "product_id"
+          ],
+          "check_expression": null
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_order_items_order",
+          "columns": [
+            "order_id"
+          ],
+          "unique": false,
+          "index_type": "btree"
+        },
+        {
+          "name": "idx_order_items_product",
+          "columns": [
+            "product_id"
+          ],
+          "unique": false,
+          "index_type": "btree"
+        },
+        {
+          "name": "order_items_pkey",
+          "columns": [
+            "order_item_id"
+          ],
+          "unique": true,
+          "index_type": "btree"
+        }
+      ],
+      "triggers": [],
+      "estimated_rows": 112.0
+    },
+    "products": {
+      "name": "products",
+      "columns": [
+        {
+          "name": "product_id",
+          "data_type": "integer",
+          "nullable": false,
+          "ordinal": 1,
+          "default_value": "nextval('products_product_id_seq'::regclass)"
+        },
+        {
+          "name": "name",
+          "data_type": "character varying",
+          "nullable": false,
+          "ordinal": 2,
+          "default_value": null
+        },
+        {
+          "name": "category",
+          "data_type": "character varying",
+          "nullable": false,
+          "ordinal": 3,
+          "default_value": null
+        },
+        {
+          "name": "price",
+          "data_type": "numeric",
+          "nullable": false,
+          "ordinal": 4,
+          "default_value": null
+        },
+        {
+          "name": "stock_quantity",
+          "data_type": "integer",
+          "nullable": false,
+          "ordinal": 5,
+          "default_value": null
+        },
+        {
+          "name": "supplier",
+          "data_type": "character varying",
+          "nullable": true,
+          "ordinal": 6,
+          "default_value": null
+        },
+        {
+          "name": "created_at",
+          "data_type": "timestamp without time zone",
+          "nullable": true,
+          "ordinal": 7,
+          "default_value": "CURRENT_TIMESTAMP"
+        }
+      ],
+      "constraints": [
+        {
+          "name": "products_pkey",
+          "kind": "PrimaryKey",
+          "columns": [
+            "product_id"
+          ],
+          "referenced_table": null,
+          "referenced_columns": [],
+          "check_expression": null
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_products_category",
+          "columns": [
+            "category"
+          ],
+          "unique": false,
+          "index_type": "btree"
+        },
+        {
+          "name": "idx_products_price",
+          "columns": [
+            "price"
+          ],
+          "unique": false,
+          "index_type": "btree"
+        },
+        {
+          "name": "products_pkey",
+          "columns": [
+            "product_id"
+          ],
+          "unique": true,
+          "index_type": "btree"
+        }
+      ],
+      "triggers": [],
+      "estimated_rows": 60.0
+    },
+    "orders": {
+      "name": "orders",
+      "columns": [
+        {
+          "name": "order_id",
+          "data_type": "integer",
+          "nullable": false,
+          "ordinal": 1,
+          "default_value": "nextval('orders_order_id_seq'::regclass)"
+        },
+        {
+          "name": "customer_id",
+          "data_type": "integer",
+          "nullable": true,
+          "ordinal": 2,
+          "default_value": null
+        },
+        {
+          "name": "order_date",
+          "data_type": "date",
+          "nullable": false,
+          "ordinal": 3,
+          "default_value": null
+        },
+        {
+          "name": "total_amount",
+          "data_type": "numeric",
+          "nullable": false,
+          "ordinal": 4,
+          "default_value": null
+        },
+        {
+          "name": "status",
+          "data_type": "character varying",
+          "nullable": false,
+          "ordinal": 5,
+          "default_value": null
+        },
+        {
+          "name": "shipping_country",
+          "data_type": "character varying",
+          "nullable": false,
+          "ordinal": 6,
+          "default_value": null
+        },
+        {
+          "name": "created_at",
+          "data_type": "timestamp without time zone",
+          "nullable": true,
+          "ordinal": 7,
+          "default_value": "CURRENT_TIMESTAMP"
+        }
+      ],
+      "constraints": [
+        {
+          "name": "orders_customer_id_fkey",
+          "kind": "ForeignKey",
+          "columns": [
+            "customer_id"
+          ],
+          "referenced_table": "customers",
+          "referenced_columns": [
+            "customer_id"
+          ],
+          "check_expression": null
+        },
+        {
+          "name": "orders_pkey",
+          "kind": "PrimaryKey",
+          "columns": [
+            "order_id"
+          ],
+          "referenced_table": null,
+          "referenced_columns": [],
+          "check_expression": null
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_orders_customer",
+          "columns": [
+            "customer_id"
+          ],
+          "unique": false,
+          "index_type": "btree"
+        },
+        {
+          "name": "idx_orders_date",
+          "columns": [
+            "order_date"
+          ],
+          "unique": false,
+          "index_type": "btree"
+        },
+        {
+          "name": "idx_orders_status",
+          "columns": [
+            "status"
+          ],
+          "unique": false,
+          "index_type": "btree"
+        },
+        {
+          "name": "orders_pkey",
+          "columns": [
+            "order_id"
+          ],
+          "unique": true,
+          "index_type": "btree"
+        }
+      ],
+      "triggers": [],
+      "estimated_rows": 112.0
+    }
+  }
+}

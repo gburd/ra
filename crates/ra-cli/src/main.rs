@@ -2226,14 +2226,15 @@ fn print_explain_output(plan: &ra_core::algebra::RelExpr, format_str: &str) -> R
             database,
             cost_params,
         } => {
-            let explain_plan = ra_metadata::from_relexpr(plan, &cost_params);
+            let _ = cost_params; // TODO: integrate cost params into node conversion
+            let explain_node = ra_metadata::relexpr_to_explain_node(plan);
             match database {
                 DatabaseTextFormat::Postgres => {
-                    ra_metadata::format_postgres_explain(&explain_plan.root)
+                    ra_metadata::format_postgres_explain(&explain_node)
                 }
-                DatabaseTextFormat::Mysql => ra_metadata::format_mysql_explain(&explain_plan.root),
+                DatabaseTextFormat::Mysql => ra_metadata::format_mysql_explain(&explain_node),
                 DatabaseTextFormat::Sqlite => {
-                    ra_metadata::format_sqlite_explain(&explain_plan.root)
+                    ra_metadata::format_sqlite_explain(&explain_node)
                 }
             }
         }

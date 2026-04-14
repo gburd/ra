@@ -10,10 +10,10 @@
     "predev": "node .vitepress/scripts/process-rfcs.js",
     "dev": "vitepress dev",
     "prebuild": "node .vitepress/scripts/process-rfcs.js && node .vitepress/scripts/copy-rules.js",
-    "build": "NODE_OPTIONS='--max-old-space-size=8192' vitepress build",
-    "build:full": "npm run build:wasm && NODE_OPTIONS='--max-old-space-size=8192' vitepress build",
+    "build": "NODE_OPTIONS='--max-old-space-size=16384' vitepress build",
+    "build:full": "npm run build:wasm && NODE_OPTIONS='--max-old-space-size=16384' vitepress build",
     "build:wasm": "./build-wasm.sh",
-    "build:docs": "NODE_OPTIONS='--max-old-space-size=8192' vitepress build",
+    "build:docs": "NODE_OPTIONS='--max-old-space-size=16384' vitepress build",
     "validate": "./scripts/validate-docs.sh",
     "preview": "vitepress preview",
     "ci": "npm run validate && npm run build:docs"
