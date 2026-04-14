@@ -1151,3 +1151,10 @@ This RFC is referenced by:
 This RFC is referenced by:
 
 - [RFC 104: Delta Lake MERGE Optimization](/maintainers/rfcs/0104-delta-lake-merge-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 104: Delta Lake MERGE Optimization](/maintainers/rfcs/0104-delta-lake-merge-optimization)

@@ -21,6 +21,13 @@ if (fs.existsSync(rfcNavPath)) {
   rfcNavigation = JSON.parse(fs.readFileSync(rfcNavPath, 'utf-8'))
 }
 
+// Load rule navigation if it exists
+let ruleNavigation = null
+const ruleNavPath = path.join(__dirname, 'rule-nav.json')
+if (fs.existsSync(ruleNavPath)) {
+  ruleNavigation = JSON.parse(fs.readFileSync(ruleNavPath, 'utf-8'))
+}
+
 export default withMermaid(defineConfig({
   title: 'Ra Optimizer',
   description: '1,327+ optimization rules for database query planning',
@@ -161,7 +168,8 @@ export default withMermaid(defineConfig({
             { text: 'Interactive Demonstrations', link: '/features/demonstrations' }
           ]
         },
-        {
+        // Use generated rule navigation if available, otherwise fallback to static
+        ...(ruleNavigation ? [ruleNavigation] : [{
           text: 'Rules',
           collapsed: true,
           items: [
@@ -172,7 +180,7 @@ export default withMermaid(defineConfig({
             { text: 'Dependency Graph', link: '/rules/dependency-graph' },
             { text: 'References', link: '/rules/references' }
           ]
-        },
+        }]),
         {
           text: 'Examples',
           collapsed: true,

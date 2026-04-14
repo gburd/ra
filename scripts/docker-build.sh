@@ -1,12 +1,16 @@
 #!/bin/bash
 set -euo pipefail
 
-# Build Docker images for Ra project
+# Build container images for Ra project
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 cd "$PROJECT_ROOT"
+
+# Detect container runtime
+# shellcheck source=detect-container-runtime.sh
+source "$SCRIPT_DIR/detect-container-runtime.sh"
 
 # Colors for output
 RED='\033[0;31m'
@@ -39,7 +43,7 @@ build_service() {
     fi
 
     log_info "Building $service..."
-    if docker compose build "${args[@]}" "$service"; then
+    if $COMPOSE_COMMAND build ${args[@]+"${args[@]}"} "$service"; then
         log_info "Successfully built $service"
     else
         log_error "Failed to build $service"
@@ -49,8 +53,13 @@ build_service() {
 
 case "$BUILD_TARGET" in
     all)
-        log_info "Building all Docker images..."
-        docker compose build $NO_CACHE
+        log_info "Building all container images..."
+        # Use --parallel for Docker Compose, but not for podman-compose (not supported)
+        if [[ "$COMPOSE_COMMAND" == *"docker"* ]] && [ "$NO_CACHE" != "--no-cache" ]; then
+            $COMPOSE_COMMAND build --parallel $NO_CACHE
+        else
+            $COMPOSE_COMMAND build $NO_CACHE
+        fi
         ;;
     docs)
         build_service docs

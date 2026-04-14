@@ -43,6 +43,23 @@ detect_compose_command() {
         podman)
             if command -v podman-compose &> /dev/null; then
                 COMPOSE_COMMAND="podman-compose"
+                # Test that podman-compose actually works
+                if ! podman-compose --version &> /dev/null; then
+                    echo "Warning: podman-compose found but not working properly." >&2
+                    echo "Try: pip install --upgrade podman-compose" >&2
+                fi
+
+                # Check if Podman machine is running (macOS/Windows requirement)
+                if ! podman info &> /dev/null; then
+                    echo "Error: Podman is installed but not running." >&2
+                    echo "On macOS, you need to start the Podman machine:" >&2
+                    echo "  podman machine start" >&2
+                    echo "" >&2
+                    echo "If no machine exists, initialize one first:" >&2
+                    echo "  podman machine init" >&2
+                    echo "  podman machine start" >&2
+                    exit 1
+                fi
             else
                 echo "Error: podman-compose not found." >&2
                 echo "Install with:" >&2

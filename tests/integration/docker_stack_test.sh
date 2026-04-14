@@ -5,15 +5,15 @@ set -euo pipefail
 #
 # Runs end-to-end tests verifying that the RA CLI, EXPLAIN
 # format generators, TUI, config system, and (optionally)
-# Docker database services all work together.
+# container database services all work together.
 #
 # Usage:
-#   ./tests/integration/docker_stack_test.sh          # all non-Docker tests
-#   ./tests/integration/docker_stack_test.sh --docker  # include Docker DB tests
+#   ./tests/integration/docker_stack_test.sh          # all non-container tests
+#   ./tests/integration/docker_stack_test.sh --docker  # include container DB tests
 #
 # Prerequisites:
 #   - cargo build must succeed
-#   - For --docker: docker compose, ports 5432/3306 free
+#   - For --docker: docker/podman with compose, ports 5432/3306 free
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -318,15 +318,14 @@ else
     skip "validate rules/: no .rra files found"
 fi
 
-# ── 9. Docker Database Tests (optional) ───────────────
+# ── 9. Container Database Tests (optional) ────────────
 
 if [ "$DOCKER" = true ]; then
-    section "Docker Database Stack"
+    section "Container Database Stack"
 
-    DOCKER_COMPOSE="docker compose"
-    if ! docker compose version &>/dev/null; then
-        DOCKER_COMPOSE="docker-compose"
-    fi
+    # Detect container runtime
+    # shellcheck source=../../scripts/detect-container-runtime.sh
+    source "$PROJECT_ROOT/scripts/detect-container-runtime.sh"
 
     COMPOSE_FILE="$PROJECT_ROOT/.worktrees/phase-7-docker-improvements/docker-compose.yml"
     if [ ! -f "$COMPOSE_FILE" ]; then
@@ -336,21 +335,21 @@ if [ "$DOCKER" = true ]; then
     # Check if services are already running
     PG_RUNNING=false
     MY_RUNNING=false
-    if docker ps --format '{{.Names}}' 2>/dev/null | grep -q postgres; then
+    if $CONTAINER_RUNTIME ps --format '{{.Names}}' 2>/dev/null | grep -q postgres; then
         PG_RUNNING=true
     fi
-    if docker ps --format '{{.Names}}' 2>/dev/null | grep -q mysql; then
+    if $CONTAINER_RUNTIME ps --format '{{.Names}}' 2>/dev/null | grep -q mysql; then
         MY_RUNNING=true
     fi
 
     if [ "$PG_RUNNING" = false ] || [ "$MY_RUNNING" = false ]; then
-        printf "  Starting Docker services...\n"
-        $DOCKER_COMPOSE -f "$COMPOSE_FILE" up -d postgres mysql 2>/dev/null || true
+        printf "  Starting container services...\n"
+        $COMPOSE_COMMAND -f "$COMPOSE_FILE" up -d postgres mysql 2>/dev/null || true
         sleep 15  # wait for healthchecks
     fi
 
     # PostgreSQL connectivity
-    if docker exec -i "$(docker ps -q --filter name=postgres)" \
+    if $CONTAINER_RUNTIME exec -i "$($CONTAINER_RUNTIME ps -q --filter name=postgres)" \
         psql -U ra_test -d ra_testdb -c "SELECT 1" 2>/dev/null | grep -q "1"; then
         pass "docker: PostgreSQL connectivity"
     else
@@ -358,7 +357,7 @@ if [ "$DOCKER" = true ]; then
     fi
 
     # PostgreSQL schema
-    PG_TABLES=$(docker exec -i "$(docker ps -q --filter name=postgres)" \
+    PG_TABLES=$($CONTAINER_RUNTIME exec -i "$($CONTAINER_RUNTIME ps -q --filter name=postgres)" \
         psql -U ra_test -d ra_testdb -t -c \
         "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'" 2>/dev/null | tr -d ' ')
     if [ "${PG_TABLES:-0}" -ge 4 ]; then
@@ -368,7 +367,7 @@ if [ "$DOCKER" = true ]; then
     fi
 
     # PostgreSQL trigger
-    PG_TRIGGERS=$(docker exec -i "$(docker ps -q --filter name=postgres)" \
+    PG_TRIGGERS=$($CONTAINER_RUNTIME exec -i "$($CONTAINER_RUNTIME ps -q --filter name=postgres)" \
         psql -U ra_test -d ra_testdb -t -c \
         "SELECT count(*) FROM information_schema.triggers WHERE trigger_schema='public'" 2>/dev/null | tr -d ' ')
     if [ "${PG_TRIGGERS:-0}" -ge 1 ]; then
@@ -378,7 +377,7 @@ if [ "$DOCKER" = true ]; then
     fi
 
     # MySQL connectivity
-    if docker exec -i "$(docker ps -q --filter name=mysql)" \
+    if $CONTAINER_RUNTIME exec -i "$($CONTAINER_RUNTIME ps -q --filter name=mysql)" \
         mysql -u ra_test -pra_test_pass ra_testdb -e "SELECT 1" 2>/dev/null | grep -q "1"; then
         pass "docker: MySQL connectivity"
     else
@@ -386,7 +385,7 @@ if [ "$DOCKER" = true ]; then
     fi
 
     # MySQL schema
-    MY_TABLES=$(docker exec -i "$(docker ps -q --filter name=mysql)" \
+    MY_TABLES=$($CONTAINER_RUNTIME exec -i "$($CONTAINER_RUNTIME ps -q --filter name=mysql)" \
         mysql -u ra_test -pra_test_pass ra_testdb -N -e \
         "SELECT count(*) FROM information_schema.tables WHERE table_schema='ra_testdb' AND table_type='BASE TABLE'" 2>/dev/null | tr -d ' ')
     if [ "${MY_TABLES:-0}" -ge 4 ]; then
@@ -396,7 +395,7 @@ if [ "$DOCKER" = true ]; then
     fi
 
     # MySQL triggers
-    MY_TRIGGERS=$(docker exec -i "$(docker ps -q --filter name=mysql)" \
+    MY_TRIGGERS=$($CONTAINER_RUNTIME exec -i "$($CONTAINER_RUNTIME ps -q --filter name=mysql)" \
         mysql -u ra_test -pra_test_pass ra_testdb -N -e \
         "SELECT count(*) FROM information_schema.triggers WHERE trigger_schema='ra_testdb'" 2>/dev/null | tr -d ' ')
     if [ "${MY_TRIGGERS:-0}" -ge 1 ]; then
@@ -406,7 +405,7 @@ if [ "$DOCKER" = true ]; then
     fi
 
     # PostgreSQL EXPLAIN comparison
-    PG_EXPLAIN=$(docker exec -i "$(docker ps -q --filter name=postgres)" \
+    PG_EXPLAIN=$($CONTAINER_RUNTIME exec -i "$($CONTAINER_RUNTIME ps -q --filter name=postgres)" \
         psql -U ra_test -d ra_testdb -t -c \
         "EXPLAIN (FORMAT JSON) SELECT c.name, COUNT(o.order_id) FROM customers c JOIN orders o ON c.customer_id = o.customer_id GROUP BY c.name" 2>/dev/null)
     if echo "$PG_EXPLAIN" | grep -q "Node Type"; then
@@ -416,7 +415,7 @@ if [ "$DOCKER" = true ]; then
     fi
 
     # MySQL EXPLAIN comparison
-    MY_EXPLAIN=$(docker exec -i "$(docker ps -q --filter name=mysql)" \
+    MY_EXPLAIN=$($CONTAINER_RUNTIME exec -i "$($CONTAINER_RUNTIME ps -q --filter name=mysql)" \
         mysql -u ra_test -pra_test_pass ra_testdb -N -e \
         "EXPLAIN FORMAT=JSON SELECT c.name, COUNT(o.order_id) FROM customers c JOIN orders o ON c.customer_id = o.customer_id GROUP BY c.name" 2>/dev/null)
     if echo "$MY_EXPLAIN" | grep -q "query_block\|table"; then
@@ -426,8 +425,8 @@ if [ "$DOCKER" = true ]; then
     fi
 
 else
-    section "Docker Database Stack (skipped)"
-    skip "Docker tests: use --docker flag to enable"
+    section "Container Database Stack (skipped)"
+    skip "Container tests: use --docker flag to enable"
 fi
 
 # ── Summary ────────────────────────────────────────────

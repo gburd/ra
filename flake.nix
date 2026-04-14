@@ -47,7 +47,9 @@
             cmake
             gnumake
             gcc
+            clang
             stdenv.cc
+            zlib
 
             # Database tools for testing
             postgresql
@@ -91,8 +93,8 @@
             export DUCKDB_LIB_DIR="${pkgs.duckdb}/lib"
             export DUCKDB_INCLUDE_DIR="${pkgs.duckdb}/include"
             # Fallback to bundled build with proper toolchain
-            export CC="${pkgs.gcc}/bin/gcc"
-            export CXX="${pkgs.gcc}/bin/g++"
+            export CC="${pkgs.clang}/bin/clang"
+            export CXX="${pkgs.clang}/bin/clang++"
             export CMAKE="${pkgs.cmake}/bin/cmake"
 
             echo "🚀 Relational Algebra dev environment loaded"
@@ -114,13 +116,13 @@
             echo "  nix run .#docs               - Serve docs (http://localhost:5173/ra/)"
             echo "  nix run .#docs-build         - Build docs for deployment"
             echo ""
-            echo "Docker:"
-            echo "  nix run .#docker-build                   - Build all images"
-            echo "  nix run .#docker-build-docs              - Build docs image"
-            echo "  nix run .#docker-build-web               - Build ra-web image"
-            echo "  nix run .#docker-build-postgres-extension - Build PG + Ra extension"
-            echo "  nix run .#docker-build-postgres-proxy    - Build PG19 + Ra proxy (slow)"
-            echo "  nix run .#docker-up                      - Start all services"
+            echo "Container Services (Docker/Podman):"
+            echo "  nix run .#docker-build                   - Build all images (legacy)"
+            echo "  nix run .#docker-targets-core            - Build core services (docs, web, proxy)"
+            echo "  nix run .#docker-targets-postgres        - Build PostgreSQL with Ra extension"
+            echo "  nix run .#docker-targets-all             - Build all target services"
+            echo "  nix run .#docker-up                      - Start services"
+            echo "  nix run .#docker-up-targets              - Start target services"
             echo "  nix run .#docker-down                    - Stop all services"
             echo ""
           '';
@@ -162,6 +164,9 @@
                 ${pkgs.nodejs_20}/bin/npm install
               fi
 
+              echo "🔧 Generating navigation..."
+              ${pkgs.nodejs_20}/bin/node .vitepress/generate-rule-nav.js
+
               echo "📚 Starting documentation server..."
               echo ""
               echo "Documentation will be available at:"
@@ -170,6 +175,7 @@
               echo "Press Ctrl+C to stop the server"
               echo ""
 
+              export NODE_OPTIONS='--max-old-space-size=8192'
               exec ${pkgs.nodejs_20}/bin/npx vitepress dev
             '');
           };
@@ -189,7 +195,12 @@
               fi
 
               echo "📚 Building documentation..."
-              NODE_OPTIONS='--max-old-space-size=16384' ${pkgs.nodejs_20}/bin/npx vitepress build
+              echo "🔧 Generating navigation..."
+              ${pkgs.nodejs_20}/bin/node .vitepress/generate-rule-nav.js
+
+              echo "🏗️  Building VitePress site..."
+              export NODE_OPTIONS='--max-old-space-size=8192'
+              ${pkgs.nodejs_20}/bin/npx vitepress build
 
               echo "✅ Documentation built successfully!"
               echo "   Output: docs/.vitepress/dist/"
@@ -294,106 +305,183 @@
             '');
           };
 
-          # Build all Docker images
+          # Build all container images
           # Usage: nix run .#docker-build
           docker-build = {
             type = "app";
             program = toString (pkgs.writeShellScript "docker-build-all" ''
               set -e
 
-              echo "🐳 Building all Docker images..."
+              # Detect container runtime
+              source scripts/detect-container-runtime.sh
+
+              echo "🐳 Building all container images with $CONTAINER_RUNTIME..."
               echo ""
 
-              ${pkgs.docker}/bin/docker compose build --parallel
+              # Use --parallel for Docker Compose, but not for podman-compose (not supported)
+              if [[ "$COMPOSE_COMMAND" == *"docker"* ]]; then
+                $COMPOSE_COMMAND build --parallel
+              else
+                $COMPOSE_COMMAND build
+              fi
 
               echo ""
-              echo "✅ All Docker images built successfully!"
+              echo "✅ All container images built successfully!"
               echo ""
               echo "To start services:"
-              echo "   docker compose up -d"
+              echo "   $COMPOSE_COMMAND up -d"
               echo ""
               echo "To test:"
               echo "   ./scripts/docker-test.sh"
             '');
           };
 
-          # Build docs Docker image
+          # Build docs container image
           # Usage: nix run .#docker-build-docs
           docker-build-docs = {
             type = "app";
             program = toString (pkgs.writeShellScript "docker-build-docs" ''
               set -e
-              echo "🐳 Building docs Docker image..."
-              ${pkgs.docker}/bin/docker compose build docs
+              # Detect container runtime
+              source scripts/detect-container-runtime.sh
+              echo "🐳 Building docs container image with $CONTAINER_RUNTIME..."
+              $COMPOSE_COMMAND build docs
               echo "✅ Docs image built!"
             '');
           };
 
-          # Build ra-web Docker image
+          # Build ra-web container image
           # Usage: nix run .#docker-build-web
           docker-build-web = {
             type = "app";
             program = toString (pkgs.writeShellScript "docker-build-web" ''
               set -e
-              echo "🐳 Building ra-web Docker image..."
-              ${pkgs.docker}/bin/docker compose build ra-web
+              # Detect container runtime
+              source scripts/detect-container-runtime.sh
+              echo "🐳 Building ra-web container image with $CONTAINER_RUNTIME..."
+              $COMPOSE_COMMAND build ra-web
               echo "✅ Ra-web image built!"
             '');
           };
 
-          # Build PostgreSQL + Ra extension Docker image
+          # Build PostgreSQL + Ra extension container image
           # Usage: nix run .#docker-build-postgres-extension
           docker-build-postgres-extension = {
             type = "app";
             program = toString (pkgs.writeShellScript "docker-build-postgres-extension" ''
               set -e
-              echo "🐳 Building PostgreSQL + Ra extension image..."
-              ${pkgs.docker}/bin/docker compose build postgres-ra-extension
+              # Detect container runtime
+              source scripts/detect-container-runtime.sh
+              echo "🐳 Building PostgreSQL + Ra extension image with $CONTAINER_RUNTIME..."
+              $COMPOSE_COMMAND build postgres-ra-extension
               echo "✅ PostgreSQL + Ra extension image built!"
             '');
           };
 
-          # Build PostgreSQL 19 + Ra proxy Docker image
+          # Build PostgreSQL 19 + Ra proxy container image
           # Usage: nix run .#docker-build-postgres-proxy
           docker-build-postgres-proxy = {
             type = "app";
             program = toString (pkgs.writeShellScript "docker-build-postgres-proxy" ''
               set -e
-              echo "🐳 Building PostgreSQL 19 + Ra proxy image..."
+              # Detect container runtime
+              source scripts/detect-container-runtime.sh
+              echo "🐳 Building PostgreSQL 19 + Ra proxy image with $CONTAINER_RUNTIME..."
               echo "⚠️  This build takes 30-45 minutes (PostgreSQL from source)"
-              ${pkgs.docker}/bin/docker compose build postgres-ra-proxy
+              $COMPOSE_COMMAND build postgres-ra-proxy
               echo "✅ PostgreSQL + Ra proxy image built!"
             '');
           };
 
-          # Start all Docker services
+          # Start all container services
           # Usage: nix run .#docker-up
           docker-up = {
             type = "app";
             program = toString (pkgs.writeShellScript "docker-up" ''
               set -e
-              echo "🐳 Starting all Docker services..."
-              ${pkgs.docker}/bin/docker compose up -d
+              # Detect container runtime
+              source scripts/detect-container-runtime.sh
+              echo "🐳 Starting all container services with $CONTAINER_RUNTIME..."
+              $COMPOSE_COMMAND up -d
               echo ""
               echo "✅ Services started!"
               echo ""
               echo "Check status:"
-              echo "   docker compose ps"
+              echo "   $COMPOSE_COMMAND ps"
               echo ""
               echo "View logs:"
-              echo "   docker compose logs -f"
+              echo "   $COMPOSE_COMMAND logs -f"
             '');
           };
 
-          # Stop all Docker services
+          # Stop all container services
           # Usage: nix run .#docker-down
           docker-down = {
             type = "app";
             program = toString (pkgs.writeShellScript "docker-down" ''
               set -e
-              echo "🐳 Stopping all Docker services..."
-              ${pkgs.docker}/bin/docker compose down
+              # Detect container runtime
+              source scripts/detect-container-runtime.sh
+              echo "🐳 Stopping all container services with $CONTAINER_RUNTIME..."
+              $COMPOSE_COMMAND down
               echo "✅ Services stopped!"
+            '');
+          };
+
+          # Target-based builds (new approach)
+          # Usage: nix run .#docker-targets-core
+          docker-targets-core = {
+            type = "app";
+            program = toString (pkgs.writeShellScript "docker-targets-core" ''
+              set -e
+              echo "🎯 Building core Ra services..."
+              exec ./scripts/build-targets.sh core
+            '');
+          };
+
+          # Build PostgreSQL with Ra extension
+          # Usage: nix run .#docker-targets-postgres
+          docker-targets-postgres = {
+            type = "app";
+            program = toString (pkgs.writeShellScript "docker-targets-postgres" ''
+              set -e
+              echo "🐘 Building PostgreSQL with Ra extension..."
+              exec ./scripts/build-targets.sh pg-ra-planner
+            '');
+          };
+
+          # Build all target services
+          # Usage: nix run .#docker-targets-all
+          docker-targets-all = {
+            type = "app";
+            program = toString (pkgs.writeShellScript "docker-targets-all" ''
+              set -e
+              echo "🚀 Building all Ra services with target approach..."
+              exec ./scripts/build-targets.sh all
+            '');
+          };
+
+          # Start target-based services
+          # Usage: nix run .#docker-up-targets
+          docker-up-targets = {
+            type = "app";
+            program = toString (pkgs.writeShellScript "docker-up-targets" ''
+              set -e
+              # Detect container runtime
+              source scripts/detect-container-runtime.sh
+              echo "🐳 Starting Ra target services with $CONTAINER_RUNTIME..."
+              $COMPOSE_COMMAND -f docker-compose.targets.yml up -d
+              echo ""
+              echo "✅ Target services started!"
+              echo ""
+              echo "Access URLs:"
+              echo "  Documentation: http://localhost:3000"
+              echo "  Ra Web API:    http://localhost:8000"
+              echo "  Ra Proxy API:  http://localhost:8001"
+              echo "  PostgreSQL:    postgresql://ra_test:ra_test_pass@localhost:5432/ra_testdb"
+              echo ""
+              echo "Check status:"
+              echo "  $COMPOSE_COMMAND -f docker-compose.targets.yml ps"
             '');
           };
         };

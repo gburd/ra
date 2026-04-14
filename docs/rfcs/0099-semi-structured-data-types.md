@@ -1585,3 +1585,10 @@ This RFC is referenced by:
 This RFC is referenced by:
 
 - [RFC 99: Semi-Structured Data Types](/maintainers/rfcs/0099-semi-structured-data-types)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 99: Semi-Structured Data Types](/maintainers/rfcs/0099-semi-structured-data-types)

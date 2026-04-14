@@ -1139,3 +1139,10 @@ This RFC is referenced by:
 This RFC is referenced by:
 
 - [RFC 103: Higher-Order Functions](/maintainers/rfcs/0103-higher-order-functions)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 103: Higher-Order Functions](/maintainers/rfcs/0103-higher-order-functions)

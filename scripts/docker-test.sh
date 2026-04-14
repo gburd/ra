@@ -1,12 +1,16 @@
 #!/bin/bash
 set -euo pipefail
 
-# Test Docker services for Ra project
+# Test container services for Ra project
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 cd "$PROJECT_ROOT"
+
+# Detect container runtime
+# shellcheck source=detect-container-runtime.sh
+source "$SCRIPT_DIR/detect-container-runtime.sh"
 
 # Colors for output
 RED='\033[0;31m'
@@ -80,7 +84,7 @@ run_test "Ra proxy API" \
 
 # Test Redis
 run_test "Redis" \
-    "docker compose exec -T redis redis-cli ping | grep -q 'PONG'"
+    "$COMPOSE_COMMAND exec -T redis redis-cli ping | grep -q 'PONG'"
 
 # Test databases
 run_test "PostgreSQL 15" \

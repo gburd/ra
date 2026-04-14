@@ -16,7 +16,7 @@ name = "pgrx_embed_pg_ra_planner"
 path = "./src/bin/pgrx_embed.rs"
 
 [features]
-default = ["pg17"]
+default = ["pg16"]
 pg13 = ["pgrx/pg13", "pgrx-tests/pg13"]
 pg14 = ["pgrx/pg14", "pgrx-tests/pg14"]
 pg15 = ["pgrx/pg15", "pgrx-tests/pg15"]

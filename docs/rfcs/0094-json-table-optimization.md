@@ -1187,3 +1187,10 @@ This RFC is referenced by:
 This RFC is referenced by:
 
 - [RFC 94: JSON_TABLE Optimization](/maintainers/rfcs/0094-json-table-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 94: JSON_TABLE Optimization](/maintainers/rfcs/0094-json-table-optimization)

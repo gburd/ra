@@ -1,12 +1,16 @@
 #!/bin/bash
 set -euo pipefail
 
-# Start Docker services for Ra project
+# Start container services for Ra project
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 cd "$PROJECT_ROOT"
+
+# Detect container runtime
+# shellcheck source=detect-container-runtime.sh
+source "$SCRIPT_DIR/detect-container-runtime.sh"
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -27,27 +31,27 @@ TARGET="${1:-all}"
 case "$TARGET" in
     all)
         log_info "Starting all services..."
-        docker compose up -d
+        $COMPOSE_COMMAND up -d
         ;;
     core)
         log_info "Starting core services (docs, ra-web, redis, postgres-ra-extension)..."
-        docker compose up -d docs ra-web redis postgres-ra-extension
+        $COMPOSE_COMMAND up -d docs ra-web redis postgres-ra-extension
         ;;
     databases)
         log_info "Starting test databases..."
-        docker compose up -d postgres-15 postgres-16 mysql-8 mariadb duckdb
+        $COMPOSE_COMMAND up -d postgres-15 postgres-16 mysql-8 mariadb duckdb
         ;;
     docs)
         log_info "Starting documentation site..."
-        docker compose up -d docs
+        $COMPOSE_COMMAND up -d docs
         ;;
     web)
         log_info "Starting ra-web..."
-        docker compose up -d ra-web redis postgres-ra-extension
+        $COMPOSE_COMMAND up -d ra-web redis postgres-ra-extension
         ;;
     postgres)
         log_info "Starting PostgreSQL services..."
-        docker compose up -d postgres-ra-extension postgres-ra-proxy
+        $COMPOSE_COMMAND up -d postgres-ra-extension postgres-ra-proxy
         ;;
     *)
         log_warn "Unknown target: $TARGET"
@@ -58,7 +62,7 @@ esac
 
 log_info "Services started! Checking health..."
 sleep 5
-docker compose ps
+$COMPOSE_COMMAND ps
 
 log_info ""
 log_info "Access URLs:"
@@ -69,4 +73,4 @@ log_info "  PG Extension:  postgresql://ra_test:ra_test_pass@localhost:5432/ra_t
 log_info "  PG Proxy:      postgresql://ra_proxy:ra_proxy_pass@localhost:5433/ra_proxydb"
 log_info "  Proxy API:     http://localhost:8001"
 log_info ""
-log_info "View logs: docker compose logs -f"
+log_info "View logs: $COMPOSE_COMMAND logs -f"

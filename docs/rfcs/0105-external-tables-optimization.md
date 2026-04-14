@@ -1015,3 +1015,10 @@ This RFC is referenced by:
 This RFC is referenced by:
 
 - [RFC 105: External Tables and Cloud Storage Optimization](/maintainers/rfcs/0105-external-tables-optimization)
+
+
+## Referenced By
+
+This RFC is referenced by:
+
+- [RFC 105: External Tables and Cloud Storage Optimization](/maintainers/rfcs/0105-external-tables-optimization)
